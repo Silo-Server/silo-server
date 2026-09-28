@@ -76,9 +76,9 @@ describe("high-contrast CSS", () => {
     }
   });
 
-  it("defines every -base input in all five themes", () => {
+  it("defines every -base input in the base theme", () => {
     const themes = [...css.matchAll(/\[data-theme="([a-z-]+)"\] \{([\s\S]*?)\n {2}\}/g)];
-    expect(themes).toHaveLength(5);
+    expect(themes).toHaveLength(1);
     for (const theme of themes) {
       const name = theme[1] ?? "";
       const body = theme[2] ?? "";

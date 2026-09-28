@@ -48,7 +48,9 @@ string `access_group_id`, optional string-ID array `library_ids`, optional
 `create_profile` and `show_tour` (both default true), and optional `note`.
 Omitted library IDs inherit access; `[]` is an explicit empty override. Omit
 optional members instead of sending null. Explicit false must remain false.
-Default-profile requests are refused before effects when unsupported.
+Default-profile requests are refused before effects when unsupported. Only the
+server Owner may create or resend an invitation with role `admin`; another
+administrator receives `403 permission_denied`.
 
 Create and resend both return **201**, with `Location` pointing to the new
 administrator metadata resource. The body contains `invitation`, `claim_url`,

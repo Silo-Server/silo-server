@@ -4,9 +4,14 @@ title and body before posting. -->
 
 ## Problem
 
+Closes #NNN
+<!-- One "Closes #NNN" line per issue this change fully resolves, so GitHub closes it
+when the PR merges into main. Use "Closes Silo-Server/<repo>#NNN" for an issue in
+another repository. Delete the line when the PR only partly addresses an issue. -->
 Related issue: #NNN
-<!-- Link an issue when one covers this work; otherwise write "Related issue: N/A".
-An open issue is not required — the Problem section below must stand on its own. -->
+<!-- An epic, sub-issue, or partly addressed issue this work serves and that should
+stay open, or "N/A". An open issue is not required — the Problem section below must
+stand on its own. -->
 Validation tasks: #NNN C1
 <!-- Until 1.0 ships: v1.0 board tasks and cases this change unblocks or changes
 (see "1.0 validation" in AGENTS.md), e.g. "unblocks #1144 C3; changes #1200 C1".
@@ -27,7 +32,9 @@ checks that were not run or did not pass. Include a short output excerpt only wh
 explains a failure.
 <!-- Do not include private domains, hostnames, IPs, Tailscale or Report Shelf URLs,
 local paths, credentials, personal data, or private media details. Attach screenshots
-or recordings only when the user explicitly requests them. -->
+or recordings only when the user explicitly requests them. A maintainer may end this
+section with `Evidence: https://evidence.siloserver.org/r/<repo>/<topic>/`; that page
+requires Silo-Server organization sign-in. -->
 
 ## Risks
 

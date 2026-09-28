@@ -65,6 +65,7 @@ POST /api/v2/admin/collections	non-media
 GET /api/v2/admin/collections/capabilities	non-media
 POST /api/v2/admin/collections/import/mdblist	non-media
 POST /api/v2/admin/collections/import/tmdb	non-media
+POST /api/v2/admin/collections/import/tmdb-list	non-media
 POST /api/v2/admin/collections/import/trakt	non-media
 GET /api/v2/admin/collections/order	non-media
 PUT /api/v2/admin/collections/order	non-media
@@ -144,6 +145,7 @@ POST /api/v2/admin/items/{id}/metadata-translation	non-media
 GET /api/v2/admin/items/{id}/metadata-translation/jobs	non-media
 POST /api/v2/admin/items/{id}/metadata-translation/jobs/{job_id}/cancel	non-media
 POST /api/v2/admin/items/{id}/redetect-intro	non-media
+POST /api/v2/admin/items/{id}/redetect-markers	non-media
 POST /api/v2/admin/items/{id}/refresh-markers	non-media
 POST /api/v2/admin/items/{id}/refresh-metadata	non-media
 POST /api/v2/admin/items/{id}/split	non-media
@@ -170,6 +172,7 @@ GET /api/v2/admin/logs/audit	non-media
 GET /api/v2/admin/logs/ws	non-media
 POST /api/v2/admin/logs/ws-ticket	non-media
 GET /api/v2/admin/logs/ws/capabilities	non-media
+GET /api/v2/admin/markers/capabilities	non-media
 GET /api/v2/admin/markers/files/{fileId}/history	non-media
 GET /api/v2/admin/markers/history	non-media
 GET /api/v2/admin/markers/items/{id}/history	non-media
@@ -341,6 +344,7 @@ GET /api/v2/admin/users/{id}/profiles	non-media
 GET /api/v2/admin/users/{id}/settings/values	non-media
 DELETE /api/v2/admin/users/{id}/settings/values/{key}	non-media
 PUT /api/v2/admin/users/{id}/settings/values/{key}	non-media
+POST /api/v2/admin/users/{id}/transfer-ownership	non-media
 GET /api/v2/api-keys	non-media
 POST /api/v2/api-keys	non-media
 GET /api/v2/api-keys/scopes	non-media
@@ -418,6 +422,7 @@ POST /api/v2/collections/import/mdblist	non-media
 GET /api/v2/collections/import/mdblist/search	non-media
 GET /api/v2/collections/import/mdblist/top	non-media
 POST /api/v2/collections/import/tmdb	non-media
+POST /api/v2/collections/import/tmdb-list	non-media
 POST /api/v2/collections/import/trakt	non-media
 GET /api/v2/collections/order	non-media
 PUT /api/v2/collections/order	non-media
@@ -518,8 +523,10 @@ GET /api/v2/invitations/{token}	non-media
 POST /api/v2/invitations/{token}/accept	non-media
 GET /api/v2/libraries	non-media
 POST /api/v2/libraries	non-media
+GET /api/v2/libraries/capabilities	non-media
 GET /api/v2/libraries/metadata-match-queue	non-media
 GET /api/v2/libraries/provider-defaults	non-media
+GET /api/v2/libraries/realtime-monitoring	non-media
 POST /api/v2/libraries/reorder	non-media
 GET /api/v2/libraries/roots	non-media
 DELETE /api/v2/libraries/roots/override	non-media
@@ -735,10 +742,6 @@ GET /api/v2/system/setup	non-media
 GET /api/v2/theme/admin-css	non-media
 GET /api/v2/theme/branding	non-media
 GET /api/v2/theme/capabilities	non-media
-GET /api/v2/theme/catalog	non-media
-GET /api/v2/theme/catalog/capabilities	non-media
-POST /api/v2/theme/catalog/refresh	non-media
-GET /api/v2/theme/download	non-media
 GET /api/v2/user/libraries	non-media
 GET /api/v2/user/libraries/capabilities	non-media
 GET /api/v2/watch-providers	non-media
@@ -1228,6 +1231,7 @@ POST /api/v2/admin/collections	non-media
 GET /api/v2/admin/collections/capabilities	non-media
 POST /api/v2/admin/collections/import/mdblist	non-media
 POST /api/v2/admin/collections/import/tmdb	non-media
+POST /api/v2/admin/collections/import/tmdb-list	non-media
 POST /api/v2/admin/collections/import/trakt	non-media
 GET /api/v2/admin/collections/order	non-media
 PUT /api/v2/admin/collections/order	non-media
@@ -1307,6 +1311,7 @@ POST /api/v2/admin/items/{id}/metadata-translation	non-media
 GET /api/v2/admin/items/{id}/metadata-translation/jobs	non-media
 POST /api/v2/admin/items/{id}/metadata-translation/jobs/{job_id}/cancel	non-media
 POST /api/v2/admin/items/{id}/redetect-intro	non-media
+POST /api/v2/admin/items/{id}/redetect-markers	non-media
 POST /api/v2/admin/items/{id}/refresh-markers	non-media
 POST /api/v2/admin/items/{id}/refresh-metadata	non-media
 POST /api/v2/admin/items/{id}/split	non-media
@@ -1333,6 +1338,7 @@ GET /api/v2/admin/logs/audit	non-media
 GET /api/v2/admin/logs/ws	non-media
 POST /api/v2/admin/logs/ws-ticket	non-media
 GET /api/v2/admin/logs/ws/capabilities	non-media
+GET /api/v2/admin/markers/capabilities	non-media
 GET /api/v2/admin/markers/files/{fileId}/history	non-media
 GET /api/v2/admin/markers/history	non-media
 GET /api/v2/admin/markers/items/{id}/history	non-media
@@ -1504,6 +1510,7 @@ GET /api/v2/admin/users/{id}/profiles	non-media
 GET /api/v2/admin/users/{id}/settings/values	non-media
 DELETE /api/v2/admin/users/{id}/settings/values/{key}	non-media
 PUT /api/v2/admin/users/{id}/settings/values/{key}	non-media
+POST /api/v2/admin/users/{id}/transfer-ownership	non-media
 GET /api/v2/api-keys	non-media
 POST /api/v2/api-keys	non-media
 GET /api/v2/api-keys/scopes	non-media
@@ -1581,6 +1588,7 @@ POST /api/v2/collections/import/mdblist	non-media
 GET /api/v2/collections/import/mdblist/search	non-media
 GET /api/v2/collections/import/mdblist/top	non-media
 POST /api/v2/collections/import/tmdb	non-media
+POST /api/v2/collections/import/tmdb-list	non-media
 POST /api/v2/collections/import/trakt	non-media
 GET /api/v2/collections/order	non-media
 PUT /api/v2/collections/order	non-media
@@ -1681,8 +1689,10 @@ GET /api/v2/invitations/{token}	non-media
 POST /api/v2/invitations/{token}/accept	non-media
 GET /api/v2/libraries	non-media
 POST /api/v2/libraries	non-media
+GET /api/v2/libraries/capabilities	non-media
 GET /api/v2/libraries/metadata-match-queue	non-media
 GET /api/v2/libraries/provider-defaults	non-media
+GET /api/v2/libraries/realtime-monitoring	non-media
 POST /api/v2/libraries/reorder	non-media
 GET /api/v2/libraries/roots	non-media
 DELETE /api/v2/libraries/roots/override	non-media
@@ -1898,10 +1908,6 @@ GET /api/v2/system/setup	non-media
 GET /api/v2/theme/admin-css	non-media
 GET /api/v2/theme/branding	non-media
 GET /api/v2/theme/capabilities	non-media
-GET /api/v2/theme/catalog	non-media
-GET /api/v2/theme/catalog/capabilities	non-media
-POST /api/v2/theme/catalog/refresh	non-media
-GET /api/v2/theme/download	non-media
 GET /api/v2/user/libraries	non-media
 GET /api/v2/user/libraries/capabilities	non-media
 GET /api/v2/watch-providers	non-media

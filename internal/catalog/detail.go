@@ -559,6 +559,7 @@ type VersionSubtitleTrack struct {
 	Language        string `json:"language,omitempty"`
 	Codec           string `json:"codec,omitempty"`
 	Title           string `json:"title,omitempty"`
+	TitleIsFallback bool   `json:"-"` // An external title filled from its file name.
 	EmbeddedTitle   string `json:"embedded_title,omitempty"`
 	Resolution      string `json:"resolution,omitempty"`
 	Forced          bool   `json:"forced"`
@@ -1591,6 +1592,11 @@ type seriesDetailContext struct {
 	crewCredits []CrewCredit
 	versionPref versionDefaults
 	backdropURL string
+	// The viewer's audio and subtitle preferences depend only on the series
+	// and the library a file lives in, so a batch resolves them once per
+	// series (and library) instead of once per episode.
+	audio            *audioPrefResolver
+	subtitleDefaults map[int]subtitleDefaults
 }
 
 // buildSeriesDetailContext loads the parent series row, localizes it, fetches
@@ -1609,12 +1615,39 @@ func (s *DetailService) buildSeriesDetailContext(ctx context.Context, seriesID s
 	}
 	castCredits, crewCredits := s.fetchCredits(ctx, seriesID, filter)
 	return &seriesDetailContext{
-		series:      series,
-		castCredits: castCredits,
-		crewCredits: crewCredits,
-		versionPref: s.effectiveVersionDefaults(ctx, filter, seriesID),
-		backdropURL: s.PresignImageURL(ctx, series.BackdropPath, "backdrop", string(filter.ImageSize)),
+		series:           series,
+		castCredits:      castCredits,
+		crewCredits:      crewCredits,
+		versionPref:      s.effectiveVersionDefaults(ctx, filter, seriesID),
+		backdropURL:      s.PresignImageURL(ctx, series.BackdropPath, "backdrop", string(filter.ImageSize)),
+		audio:            s.newAudioPrefResolver(ctx, filter, seriesID),
+		subtitleDefaults: map[int]subtitleDefaults{},
 	}, nil
+}
+
+// episodeAudioResolver returns the series' shared audio resolver, or a fresh
+// one for an episode of another series.
+func (s *DetailService) episodeAudioResolver(ctx context.Context, seriesCtx *seriesDetailContext, filter AccessFilter, seriesID string) *audioPrefResolver {
+	if seriesID != seriesCtx.series.ContentID {
+		return s.newAudioPrefResolver(ctx, filter, seriesID)
+	}
+	return seriesCtx.audio
+}
+
+// episodeSubtitleDefaults memoizes effectiveSubtitleDefaults for the series by
+// the library that decides the settings scope. An episode of another series
+// resolves its own.
+func (s *DetailService) episodeSubtitleDefaults(ctx context.Context, seriesCtx *seriesDetailContext, filter AccessFilter, seriesID string, files []*models.MediaFile) subtitleDefaults {
+	if seriesID != seriesCtx.series.ContentID {
+		return s.effectiveSubtitleDefaults(ctx, filter, seriesID, files)
+	}
+	libraryID := preferredPlayableLibraryID(files, filter.SelectedFileID)
+	if defaults, ok := seriesCtx.subtitleDefaults[libraryID]; ok {
+		return defaults
+	}
+	defaults := s.effectiveSubtitleDefaults(ctx, filter, seriesID, files)
+	seriesCtx.subtitleDefaults[libraryID] = defaults
+	return defaults
 }
 
 // GetEpisodeDetailsForSeries returns ItemDetails for the requested episodes,
@@ -2980,21 +3013,25 @@ func (s *DetailService) buildEpisodeDetail(ctx context.Context, episode *models.
 	}
 	files = FilterMediaFilesByAccess(files, filter)
 	files = s.prepareBrowseFiles(ctx, files)
-	detail.Versions, detail.PlaybackVariants, detail.Subtitles, detail.Intro, detail.Credits, detail.Recap, detail.Preview = s.buildPlaybackInfo(
+	detail.Versions, detail.PlaybackVariants, detail.Subtitles, detail.Intro, detail.Credits, detail.Recap, detail.Preview = s.buildPlaybackInfoWith(
 		ctx,
 		files,
 		filter,
-		episode.SeriesID,
+		s.episodeAudioResolver(ctx, seriesCtx, filter, episode.SeriesID),
 	)
 	detail.OverlaySummary = overlays.BuildSummary(files)
-	s.effectiveSubtitleDefaults(ctx, filter, episode.SeriesID, files).applyToItemDetail(detail)
-	if seriesCtx.versionPref.HasAny {
-		if seriesCtx.versionPref.Resolution != "" {
-			detail.EffectiveVersionResolution = stringPtr(seriesCtx.versionPref.Resolution)
+	s.episodeSubtitleDefaults(ctx, seriesCtx, filter, episode.SeriesID, files).applyToItemDetail(detail)
+	versionPref := seriesCtx.versionPref
+	if episode.SeriesID != seriesCtx.series.ContentID {
+		versionPref = s.effectiveVersionDefaults(ctx, filter, episode.SeriesID)
+	}
+	if versionPref.HasAny {
+		if versionPref.Resolution != "" {
+			detail.EffectiveVersionResolution = stringPtr(versionPref.Resolution)
 		}
-		detail.EffectiveVersionHDR = boolPtr(seriesCtx.versionPref.HDR)
-		if seriesCtx.versionPref.CodecVideo != "" {
-			detail.EffectiveVersionCodecVideo = stringPtr(seriesCtx.versionPref.CodecVideo)
+		detail.EffectiveVersionHDR = boolPtr(versionPref.HDR)
+		if versionPref.CodecVideo != "" {
+			detail.EffectiveVersionCodecVideo = stringPtr(versionPref.CodecVideo)
 		}
 	}
 
@@ -3672,13 +3709,22 @@ func (s *DetailService) buildPlaybackInfo(
 	filter AccessFilter,
 	audioPreferenceContentID string,
 ) ([]FileVersion, []PlaybackVariant, []SubtitleInfo, *Marker, *Marker, *Marker, *Marker) {
+	// Resolve the request-invariant audio preferences once; a multi-track item
+	// would otherwise re-query the profile/preference rows for every file.
+	return s.buildPlaybackInfoWith(ctx, files, filter, s.newAudioPrefResolver(ctx, filter, audioPreferenceContentID))
+}
+
+// buildPlaybackInfoWith is buildPlaybackInfo with a caller-owned audio
+// resolver, so a batch over one series can share it across episodes.
+func (s *DetailService) buildPlaybackInfoWith(
+	ctx context.Context,
+	files []*models.MediaFile,
+	filter AccessFilter,
+	audioResolver *audioPrefResolver,
+) ([]FileVersion, []PlaybackVariant, []SubtitleInfo, *Marker, *Marker, *Marker, *Marker) {
 	versions := make([]FileVersion, 0, len(files))
 	subtitleSet := make(map[string]SubtitleInfo)
 	var firstIntro, firstCredits, firstRecap, firstPreview *Marker
-
-	// Resolve the request-invariant audio preferences once; a multi-track item
-	// would otherwise re-query the profile/preference rows for every file.
-	audioResolver := s.newAudioPrefResolver(ctx, filter, audioPreferenceContentID)
 
 	for _, f := range files {
 		if f == nil {
@@ -4124,6 +4170,7 @@ func buildVersionSubtitleTracks(file *models.MediaFile) []VersionSubtitleTrack {
 			Language:        sub.Language,
 			Codec:           sub.Format,
 			Title:           firstNonEmpty(sub.Title, filepath.Base(sub.Path)),
+			TitleIsFallback: strings.TrimSpace(sub.Title) == "",
 			EmbeddedTitle:   sub.EmbeddedTitle,
 			Resolution:      sub.Resolution,
 			Forced:          sub.Forced,

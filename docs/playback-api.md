@@ -56,6 +56,21 @@ See [Marker API](markers-api.md) for reads, manual edits, and provenance.
 
 ## Start
 
+When `playback.allow_hevc_encoding` is enabled, video adaptation may encode
+HEVC for clients that explicitly support HEVC on their HLS delivery route.
+The server advertises `video_to_hevc` through the existing transformation
+capability inventory. The effective recipe and frozen transcode target identify
+HEVC; existing H.264-only clients continue to receive H.264. Disabling the
+setting affects new planning decisions without changing active frozen recipes.
+HEVC direct play and remux remain independent of the encoding setting.
+
+HEVC execution validates the selected hardware encoder on its assigned device.
+When that encoder is unavailable, a validated software encoder can retain the
+negotiated HEVC output. Hardware tone mapping can still perform the HDR-to-SDR
+conversion before its frames feed the software encoder. An optional HEVC probe
+failure removes HEVC availability without invalidating successful AAC or H.264
+capability checks.
+
 The body is the v3 start request plus `installation_id`. `file_id` and
 `profile_id` are strings; `profile_id` must be the authenticated profile. Start
 is idempotent on `playback_attempt_id` plus a digest of the request: replaying

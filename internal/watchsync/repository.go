@@ -54,6 +54,11 @@ type Repository interface {
 	ClearRatingSyncStates(ctx context.Context, connectionID, keepAccountID string) error
 	UpdateRatingCursors(ctx context.Context, connectionID, providerAccountID string, remove []string, set map[string]string) error
 	WithRatingSyncLock(ctx context.Context, connectionID string, wait bool, fn func(context.Context) error) (bool, error)
+	ListDroppedEventConnections(ctx context.Context, userID int, profileID string) ([]Connection, error)
+	ListDroppedSyncStates(ctx context.Context, connectionID, providerAccountID string, seriesIDs []string) ([]DroppedSyncState, error)
+	UpsertDroppedSyncStates(ctx context.Context, states []DroppedSyncState) error
+	DeleteDroppedSyncStates(ctx context.Context, connectionID, providerAccountID string, seriesIDs []string) error
+	ClearDroppedSyncStates(ctx context.Context, connectionID, keepAccountID string) error
 	ListScrobbleConnections(ctx context.Context, userID int, profileID string) ([]Connection, error)
 	UpsertScrobbleSession(ctx context.Context, event ScrobbleEvent, connectionID string, action string) error
 	PrepareConfirmedScrobbleStop(ctx context.Context, event ScrobbleEvent, connectionID string, staleBefore time.Time) (confirmedStopPreparation, time.Time, error)
@@ -85,7 +90,7 @@ const connectionColumns = `
 	import_favorites_enabled, export_favorites_enabled, sync_favorite_removals_enabled,
 	import_watchlist_enabled, export_watchlist_enabled, sync_watchlist_removals_enabled,
 	sync_watchlist_order_enabled, scrobble_enabled, import_ratings_enabled,
-	export_ratings_enabled, last_inbound_sync_at,
+	export_ratings_enabled, sync_dropped_enabled, last_inbound_sync_at,
 	last_progress_sync_at, last_outbound_sync_at, last_favorites_sync_at,
 	last_watchlist_sync_at, last_scrobble_error_at, last_error,
 	rate_limited_until, sync_cursors, created_at, updated_at`
@@ -263,13 +268,14 @@ func (r *PostgresRepository) UpsertConnection(ctx context.Context, conn Connecti
 			import_watchlist_enabled, export_watchlist_enabled, sync_watchlist_removals_enabled,
 			sync_watchlist_order_enabled, scrobble_enabled, last_inbound_sync_at, last_progress_sync_at,
 			last_outbound_sync_at, last_favorites_sync_at, last_watchlist_sync_at, last_scrobble_error_at,
-			last_error, rate_limited_until, sync_cursors, import_ratings_enabled, export_ratings_enabled
+			last_error, rate_limited_until, sync_cursors, import_ratings_enabled, export_ratings_enabled,
+			sync_dropped_enabled
 		)
 		VALUES (
 			COALESCE(NULLIF($1, '')::uuid, gen_random_uuid()),
 			$2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
 			$15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31::jsonb,
-			$32, $33
+			$32, $33, $34
 		)
 		ON CONFLICT (provider, user_id, profile_id) DO UPDATE SET
 			provider_account_id = EXCLUDED.provider_account_id,
@@ -323,6 +329,7 @@ func (r *PostgresRepository) UpsertConnection(ctx context.Context, conn Connecti
 		encodeSyncCursors(conn.SyncCursors),
 		conn.ImportRatingsEnabled,
 		conn.ExportRatingsEnabled,
+		conn.SyncDroppedEnabled,
 	)
 	saved, err := r.scanConnection(row)
 	if err != nil {
@@ -407,6 +414,7 @@ func (r *PostgresRepository) ListConnectionsDueForSync(
 				OR scrobble_enabled
 				OR import_ratings_enabled
 				OR export_ratings_enabled
+				OR sync_dropped_enabled
 			)
 		ORDER BY provider, user_id, profile_id
 	`, now)
@@ -764,7 +772,11 @@ func (r *PostgresRepository) UpsertRatingSyncStates(ctx context.Context, states 
 		return nil
 	}
 	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
-		bound, err := lockBoundRatingAccounts(ctx, tx, states)
+		pairs := make([]ratingBinding, len(states))
+		for i, state := range states {
+			pairs[i] = ratingBinding{state.ConnectionID, state.ProviderAccountID}
+		}
+		bound, err := lockBoundRatingAccounts(ctx, tx, pairs)
 		if err != nil {
 			return err
 		}
@@ -780,12 +792,13 @@ func (r *PostgresRepository) UpsertRatingSyncStates(ctx context.Context, states 
 
 type ratingBinding struct{ connectionID, providerAccountID string }
 
-// lockBoundRatingAccounts share-locks the connections the states belong to and
-// reports which (connection, account) pairs are still bound.
-func lockBoundRatingAccounts(ctx context.Context, tx pgx.Tx, states []RatingSyncState) (map[ratingBinding]bool, error) {
+// lockBoundRatingAccounts share-locks the connections of the given
+// (connection, account) pairs and reports which pairs are still bound. Rating
+// and dropped-show sync states share it.
+func lockBoundRatingAccounts(ctx context.Context, tx pgx.Tx, bindings []ratingBinding) (map[ratingBinding]bool, error) {
 	pairs := make(map[ratingBinding]bool)
-	for _, state := range states {
-		pairs[ratingBinding{state.ConnectionID, state.ProviderAccountID}] = false
+	for _, binding := range bindings {
+		pairs[binding] = false
 	}
 	for pair := range pairs {
 		var found bool
@@ -977,6 +990,151 @@ func (r *PostgresRepository) UpdateRatingCursors(ctx context.Context, connection
 	`, connectionID, providerAccountID, remove, encodeSyncCursors(set))
 	if err != nil {
 		return fmt.Errorf("update rating cursors: %w", err)
+	}
+	return nil
+}
+
+// ListDroppedEventConnections returns the profile's connections that sync
+// dropped shows, i.e. should mirror a local drop or undrop to the provider.
+func (r *PostgresRepository) ListDroppedEventConnections(ctx context.Context, userID int, profileID string) ([]Connection, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT `+connectionColumns+`
+		FROM watch_provider_connections
+		WHERE user_id = $1 AND profile_id = $2 AND sync_dropped_enabled = true
+			AND (rate_limited_until IS NULL OR rate_limited_until <= now())
+		ORDER BY provider
+	`, userID, profileID)
+	if err != nil {
+		return nil, fmt.Errorf("list dropped event connections: %w", err)
+	}
+	defer rows.Close()
+
+	var conns []Connection
+	for rows.Next() {
+		conn, scanErr := r.scanConnection(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("scan dropped event connection: %w", scanErr)
+		}
+		conns = append(conns, conn)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate dropped event connections: %w", err)
+	}
+	return conns, nil
+}
+
+// ListDroppedSyncStates returns a connection's agreed drops with the given
+// provider account, like ListRatingSyncStates. A nil seriesIDs returns every
+// state; otherwise only the listed series.
+func (r *PostgresRepository) ListDroppedSyncStates(ctx context.Context, connectionID, providerAccountID string, seriesIDs []string) ([]DroppedSyncState, error) {
+	query := `
+		SELECT connection_id::text, provider_account_id, series_id, provider_item_key, remote_seen, updated_at
+		FROM watch_provider_dropped_items
+		WHERE connection_id = $1::uuid AND provider_account_id = $2`
+	args := []any{connectionID, providerAccountID}
+	if seriesIDs != nil {
+		query += ` AND series_id = ANY($3)`
+		args = append(args, seriesIDs)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list dropped sync states: %w", err)
+	}
+	defer rows.Close()
+	var states []DroppedSyncState
+	for rows.Next() {
+		var state DroppedSyncState
+		if err := rows.Scan(&state.ConnectionID, &state.ProviderAccountID, &state.SeriesID, &state.ProviderItemKey, &state.RemoteSeen, &state.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan dropped sync state: %w", err)
+		}
+		states = append(states, state)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate dropped sync states: %w", err)
+	}
+	return states, nil
+}
+
+// UpsertDroppedSyncStates records agreed drops, only while each row's
+// connection is still bound to the row's provider account (see
+// UpsertRatingSyncStates).
+func (r *PostgresRepository) UpsertDroppedSyncStates(ctx context.Context, states []DroppedSyncState) error {
+	if len(states) == 0 {
+		return nil
+	}
+	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		pairs := make([]ratingBinding, len(states))
+		for i, state := range states {
+			pairs[i] = ratingBinding{state.ConnectionID, state.ProviderAccountID}
+		}
+		bound, err := lockBoundRatingAccounts(ctx, tx, pairs)
+		if err != nil {
+			return err
+		}
+		var connectionIDs, accountIDs, seriesIDs, keys []string
+		var seen []bool
+		for _, state := range states {
+			if !bound[ratingBinding{state.ConnectionID, state.ProviderAccountID}] {
+				continue
+			}
+			connectionIDs = append(connectionIDs, state.ConnectionID)
+			accountIDs = append(accountIDs, state.ProviderAccountID)
+			seriesIDs = append(seriesIDs, state.SeriesID)
+			keys = append(keys, state.ProviderItemKey)
+			seen = append(seen, state.RemoteSeen)
+		}
+		if len(seriesIDs) == 0 {
+			return nil
+		}
+		_, err = tx.Exec(ctx, `
+			INSERT INTO watch_provider_dropped_items (
+				connection_id, provider_account_id, series_id, provider_item_key, remote_seen
+			)
+			SELECT input.connection_id::uuid, input.provider_account_id, input.series_id,
+				input.provider_item_key, input.remote_seen
+			FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::boolean[])
+				AS input(connection_id, provider_account_id, series_id, provider_item_key, remote_seen)
+			ON CONFLICT (connection_id, series_id) DO UPDATE SET
+				provider_account_id = EXCLUDED.provider_account_id,
+				provider_item_key = CASE
+					WHEN EXCLUDED.provider_item_key <> '' THEN EXCLUDED.provider_item_key
+					ELSE watch_provider_dropped_items.provider_item_key
+				END,
+				remote_seen = EXCLUDED.remote_seen,
+				updated_at = now()
+		`, connectionIDs, accountIDs, seriesIDs, keys, seen)
+		if err != nil {
+			return fmt.Errorf("upsert dropped sync states: %w", err)
+		}
+		return nil
+	})
+}
+
+// DeleteDroppedSyncStates forgets agreed drops recorded for one provider
+// account, leaving rows another account has since agreed on.
+func (r *PostgresRepository) DeleteDroppedSyncStates(ctx context.Context, connectionID, providerAccountID string, seriesIDs []string) error {
+	if len(seriesIDs) == 0 {
+		return nil
+	}
+	_, err := r.pool.Exec(ctx, `
+		DELETE FROM watch_provider_dropped_items
+		WHERE connection_id = $1::uuid AND provider_account_id = $2 AND series_id = ANY($3)
+	`, connectionID, providerAccountID, seriesIDs)
+	if err != nil {
+		return fmt.Errorf("delete dropped sync states: %w", err)
+	}
+	return nil
+}
+
+// ClearDroppedSyncStates forgets a connection's agreed drops with every
+// provider account other than keepAccountID, used after a rebind.
+func (r *PostgresRepository) ClearDroppedSyncStates(ctx context.Context, connectionID, keepAccountID string) error {
+	_, err := r.pool.Exec(ctx, `
+		DELETE FROM watch_provider_dropped_items
+		WHERE connection_id = $1::uuid AND provider_account_id <> $2
+	`, connectionID, keepAccountID)
+	if err != nil {
+		return fmt.Errorf("clear dropped sync states: %w", err)
 	}
 	return nil
 }
@@ -1724,6 +1882,7 @@ func (r *PostgresRepository) scanConnection(row pgx.Row) (Connection, error) {
 		&conn.ScrobbleEnabled,
 		&conn.ImportRatingsEnabled,
 		&conn.ExportRatingsEnabled,
+		&conn.SyncDroppedEnabled,
 		&conn.LastInboundSyncAt,
 		&conn.LastProgressSyncAt,
 		&conn.LastOutboundSyncAt,

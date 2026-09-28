@@ -1,5 +1,6 @@
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import InvitationsTab from "./InvitationsTab";
 const mocks = vi.hoisted(() => ({
@@ -12,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   profile: true,
   listError: false,
   rows: true,
+  publicURL: "https://media.example.test" as string | undefined,
 }));
 const row = {
   id: "7",
@@ -38,8 +40,15 @@ vi.mock("@/hooks/queries/admin/invitations", () => ({
   useResendInvitation: () => ({ mutateAsync: mocks.resend, reset: mocks.reset }),
   useRevokeInvitation: () => ({ mutateAsync: mocks.revoke, reset: mocks.reset }),
 }));
+vi.mock("@/hooks/queries/admin/settings", () => ({
+  useAdminServerSettings: () => ({
+    data: mocks.publicURL === undefined ? undefined : { "server.public_url": mocks.publicURL },
+  }),
+}));
 vi.mock("@/hooks/queries/admin/accessGroups", () => ({ useAccessGroups: () => ({ data: [] }) }));
 vi.mock("@/hooks/queries/admin/libraries", () => ({ useAdminLibraries: () => ({ data: [] }) }));
+// The viewer is the server Owner, who may invite an admin.
+vi.mock("@/hooks/queries/admin/users", () => ({ useViewerIsOwner: () => true }));
 beforeEach(() => {
   vi.stubGlobal(
     "ResizeObserver",
@@ -53,6 +62,7 @@ beforeEach(() => {
   mocks.profile = true;
   mocks.listError = false;
   mocks.rows = true;
+  mocks.publicURL = "https://media.example.test";
   mocks.restart.mockResolvedValue(undefined);
   localStorage.clear();
   sessionStorage.clear();
@@ -66,7 +76,7 @@ afterEach(() => {
 });
 it("renders pending and partial history failures with explicit restart", () => {
   mocks.listError = true;
-  render(<InvitationsTab />);
+  render(<InvitationsTab />, { wrapper: MemoryRouter });
   expect(screen.getByText("Pending")).toBeInTheDocument();
   expect(screen.getByText(row.email)).toBeInTheDocument();
   expect(screen.queryByText(/No invitations yet/)).not.toBeInTheDocument();
@@ -75,7 +85,7 @@ it("renders pending and partial history failures with explicit restart", () => {
 });
 it("retains revoke confirmation and row on failure", async () => {
   mocks.revoke.mockRejectedValue(new Error("Could not revoke"));
-  render(<InvitationsTab />);
+  render(<InvitationsTab />, { wrapper: MemoryRouter });
   fireEvent.click(screen.getByTitle("Revoke this link"));
   fireEvent.click(screen.getByRole("button", { name: "Revoke" }));
   expect(await screen.findByText("Could not revoke")).toBeInTheDocument();
@@ -98,7 +108,7 @@ it("keeps a one-time link after clipboard failure, resets mutation state, and di
     configurable: true,
     value: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
   });
-  const view = render(<InvitationsTab />);
+  const view = render(<InvitationsTab />, { wrapper: MemoryRouter });
   fireEvent.click(screen.getByTitle("Resend with a fresh link"));
   expect(await screen.findByText(/email delivery failed or is uncertain/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
@@ -117,7 +127,7 @@ it("blocks synchronous double submit and dismissal until delivery resolves", asy
         resolve = r;
       }),
   );
-  render(<InvitationsTab />);
+  render(<InvitationsTab />, { wrapper: MemoryRouter });
   fireEvent.click(screen.getByRole("button", { name: "Invite someone" }));
   fireEvent.change(screen.getByLabelText("Email address"), { target: { value: row.email } });
   const submit = screen.getByRole("button", { name: "Send invite" });
@@ -142,7 +152,7 @@ it("guides unsupported profile creation and preserves false booleans", async () 
     claim_url: "https://example.invalid/invite/profileless",
     delivery_status: "sent",
   });
-  render(<InvitationsTab />);
+  render(<InvitationsTab />, { wrapper: MemoryRouter });
   fireEvent.click(screen.getByRole("button", { name: "Invite someone" }));
   expect(screen.getByRole("status")).toHaveTextContent("cannot create a default profile");
   fireEvent.change(screen.getByLabelText("Email address"), { target: { value: row.email } });
@@ -156,4 +166,24 @@ it("guides unsupported profile creation and preserves false booleans", async () 
     ),
   );
   expect(mocks.create.mock.calls[0]![0].body).not.toHaveProperty("library_ids", null);
+});
+it("asks for the public URL before anyone fills in an invitation", () => {
+  mocks.publicURL = "";
+  render(<InvitationsTab />, { wrapper: MemoryRouter });
+  expect(screen.getByRole("button", { name: "Invite someone" })).toBeDisabled();
+  expect(screen.getByTitle("Resend with a fresh link")).toBeDisabled();
+  expect(screen.getByTitle("Revoke this link")).not.toBeDisabled();
+  expect(
+    screen.getByText(/Set the Silo public URL to create invitation links/),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /General settings/ })).toHaveAttribute(
+    "href",
+    "/admin/settings/general",
+  );
+});
+it("does not block invitations while the settings are unknown", () => {
+  mocks.publicURL = undefined;
+  render(<InvitationsTab />, { wrapper: MemoryRouter });
+  expect(screen.getByRole("button", { name: "Invite someone" })).not.toBeDisabled();
+  expect(screen.queryByText(/Set the Silo public URL/)).toBeNull();
 });

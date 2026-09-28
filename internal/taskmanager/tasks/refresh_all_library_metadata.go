@@ -39,6 +39,8 @@ const fullMetadataRefreshAdvisoryLock int64 = 0x53494C4F46554C52
 type advisoryClusterLock struct {
 	pool *pgxpool.Pool
 	key  int64
+	// name labels the guarded work in the release-failure log.
+	name string
 }
 
 func (l advisoryClusterLock) TryAcquire(ctx context.Context) (func(), bool, error) {
@@ -48,7 +50,7 @@ func (l advisoryClusterLock) TryAcquire(ctx context.Context) (func(), bool, erro
 	}
 	return func() {
 		if err := lock.Release(ctx); err != nil {
-			slog.WarnContext(ctx, "full metadata refresh: releasing advisory lock failed", "component", "taskmanager", "error", err)
+			slog.WarnContext(ctx, "releasing cluster task advisory lock failed", "component", "taskmanager", "work", l.name, "error", err)
 		}
 	}, true, nil
 }
@@ -71,7 +73,7 @@ func NewRefreshAllLibraryMetadataTask(pool *pgxpool.Pool, folderRepo ScanFolderR
 		folderRepo: folderRepo,
 		activeJobs: activeJobs,
 		runner:     runner,
-		lock:       advisoryClusterLock{pool: pool, key: fullMetadataRefreshAdvisoryLock},
+		lock:       advisoryClusterLock{pool: pool, key: fullMetadataRefreshAdvisoryLock, name: "full metadata refresh"},
 	}
 }
 

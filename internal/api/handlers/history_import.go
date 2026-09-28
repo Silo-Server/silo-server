@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 )
@@ -53,12 +54,6 @@ func (h *HistoryImportHandler) CreateImportRun(ctx context.Context, userID int, 
 	return run, nil
 }
 
-// ListImportRuns is the seam behind v1 GET /history-imports/runs: the newest
-// limit runs of the account.
-func (h *HistoryImportHandler) ListImportRuns(ctx context.Context, userID, limit int) ([]historyimport.Run, error) {
-	return h.service.ListRuns(ctx, userID, limit)
-}
-
 // ListImportRunsPage is the keyset page v2 listHistoryImportRuns reads:
 // runs strictly older than after in (created_at, id) order, and whether
 // more follow.
@@ -71,6 +66,115 @@ func (h *HistoryImportHandler) GetImportRun(ctx context.Context, userID int, run
 	run, err := h.service.GetRun(ctx, userID, runID)
 	if err != nil {
 		return nil, historyImportAPIError(err)
+	}
+	return run, nil
+}
+
+// historyImportPermissionCheckFailed reports that the profile rule couldn't be
+// evaluated, as other profile-permission checks word it.
+const historyImportPermissionCheckFailed = "Failed to check profile permissions"
+
+// HistoryImportActor is who is acting on the account's history imports: the
+// account, the profile the request acts as, and the check a PIN-locked
+// primary profile must pass before it may manage other profiles.
+type HistoryImportActor struct {
+	UserID        int
+	ProfileID     string
+	VerifyProfile func(profileID string) error
+}
+
+// historyImportRequestActor uses the profile and PIN proof resolved by viewer
+// middleware. An API key's PIN exemption cannot authorize household access.
+func historyImportRequestActor(r *http.Request) HistoryImportActor {
+	ctx := r.Context()
+	return HistoryImportActor{
+		UserID:    apimw.GetUserID(ctx),
+		ProfileID: apimw.GetProfileID(ctx),
+		VerifyProfile: func(profileID string) error {
+			if scope, ok := access.GetScope(ctx); ok && scope.ProfileID == profileID && scope.ProfileVerified && !scope.PINVerificationSkipped {
+				return nil
+			}
+			return access.ErrProfileUnverified
+		},
+	}
+}
+
+// historyImportsForAnyProfile reports whether actor may import into, and see
+// the runs of, every profile on the account: a server admin, or the primary
+// profile (PIN-verified when it has one), as for other household management.
+// Every other profile acts only for itself.
+func (h *HistoryImportHandler) historyImportsForAnyProfile(ctx context.Context, actor HistoryImportActor) (bool, error) {
+	if apimw.IsAdmin(ctx) {
+		return true, nil
+	}
+	if actor.ProfileID == "" {
+		return false, nil
+	}
+	store, err := h.service.UserStore(ctx, actor.UserID)
+	if err != nil {
+		return false, err
+	}
+	verify := actor.VerifyProfile
+	if verify == nil {
+		verify = func(string) error { return access.ErrProfileUnverified }
+	}
+	allowed, err := canManageHouseholdAs(ctx, store, actor.ProfileID, verify)
+	if errors.Is(err, access.ErrProfileUnverified) {
+		return false, nil
+	}
+	return allowed, err
+}
+
+// CreateImportRunAs enforces the profile rule on both APIs: a profile imports
+// only into itself unless it may manage the household.
+func (h *HistoryImportHandler) CreateImportRunAs(ctx context.Context, actor HistoryImportActor, input historyimport.CreateRunInput) (*historyimport.Run, error) {
+	if input.ProfileID != actor.ProfileID || actor.ProfileID == "" {
+		anyProfile, err := h.historyImportsForAnyProfile(ctx, actor)
+		if err != nil {
+			return nil, &APIError{Status: http.StatusInternalServerError, Code: policyErrorInternal,
+				Message: historyImportPermissionCheckFailed, cause: err}
+		}
+		if !anyProfile {
+			return nil, apiError(http.StatusForbidden, "forbidden",
+				"Only the primary profile can import watch history into another profile")
+		}
+	}
+	return h.CreateImportRun(ctx, actor.UserID, input)
+}
+
+// ListImportRunsPageAs is the profile-aware listing shared by both APIs: a
+// profile that may not manage the household sees only runs that write into itself.
+func (h *HistoryImportHandler) ListImportRunsPageAs(ctx context.Context, actor HistoryImportActor, after *historyimport.RunKey, limit int) ([]historyimport.Run, bool, error) {
+	anyProfile, err := h.historyImportsForAnyProfile(ctx, actor)
+	if err != nil {
+		return nil, false, err
+	}
+	if anyProfile {
+		return h.service.ListRunsPage(ctx, actor.UserID, after, limit)
+	}
+	if actor.ProfileID == "" {
+		return nil, false, nil
+	}
+	return h.service.ListRunsPageForProfile(ctx, actor.UserID, actor.ProfileID, after, limit)
+}
+
+// GetImportRunAs enforces profile access on both APIs: another profile's run
+// is reported as not found, as another account's run is.
+func (h *HistoryImportHandler) GetImportRunAs(ctx context.Context, actor HistoryImportActor, runID string) (*historyimport.Run, error) {
+	run, err := h.GetImportRun(ctx, actor.UserID, runID)
+	if err != nil {
+		return nil, err
+	}
+	if run.ProfileID == actor.ProfileID && actor.ProfileID != "" {
+		return run, nil
+	}
+	anyProfile, err := h.historyImportsForAnyProfile(ctx, actor)
+	if err != nil {
+		return nil, &APIError{Status: http.StatusInternalServerError, Code: policyErrorInternal,
+			Message: historyImportPermissionCheckFailed, cause: err}
+	}
+	if !anyProfile {
+		return nil, historyImportAPIError(historyimport.ErrRunNotFound)
 	}
 	return run, nil
 }
@@ -141,7 +245,7 @@ func (h *HistoryImportHandler) HandleCreateRun(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	run, err := h.CreateImportRun(r.Context(), userID, req)
+	run, err := h.CreateImportRunAs(r.Context(), historyImportRequestActor(r), req)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -156,7 +260,8 @@ func (h *HistoryImportHandler) HandleListRuns(w http.ResponseWriter, r *http.Req
 		return
 	}
 	limit, _ := parsePagination(r)
-	runs, err := h.ListImportRuns(r.Context(), userID, limit)
+	// Keep the v1 limit and array response while sharing v2's profile filter.
+	runs, _, err := h.ListImportRunsPageAs(r.Context(), historyImportRequestActor(r), nil, min(limit, 50))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list history import runs")
 		return
@@ -178,7 +283,7 @@ func (h *HistoryImportHandler) HandleGetRun(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "bad_request", "Run ID is required")
 		return
 	}
-	run, err := h.GetImportRun(r.Context(), userID, runID)
+	run, err := h.GetImportRunAs(r.Context(), historyImportRequestActor(r), runID)
 	if err != nil {
 		writeAPIError(w, err)
 		return

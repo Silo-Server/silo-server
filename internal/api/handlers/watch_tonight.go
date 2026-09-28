@@ -13,12 +13,14 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/sections"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // watchTonightSectionFetcher provides access to live Continue Watching
 // and Next Up data for the Watch Tonight handler.
 type watchTonightSectionFetcher interface {
 	FetchNextUpItems(ctx context.Context, userID int, profileID string, libraryID *int, libraryIDs []int, filter catalog.AccessFilter, limit int) ([]*models.MediaItem, map[string]sections.SectionItemMeta, error)
+	FilterDroppedProgress(ctx context.Context, userID int, profileID string, entries []userstore.WatchProgress) ([]userstore.WatchProgress, error)
 }
 
 type watchTonightItemResponse struct {
@@ -268,6 +270,60 @@ type scoredCWItem struct {
 	meta      sections.SectionItemMeta
 }
 
+// watchTonightProgressMaxPages bounds how many in-progress pages Watch Tonight
+// reads to fill its Continue Watching half after dropped series are removed.
+const watchTonightProgressMaxPages = 5
+
+// progressPageLister pages a profile's watch progress. userstore.UserStore
+// satisfies it.
+type progressPageLister interface {
+	ListProgress(ctx context.Context, profileID, status string, limit, offset int) ([]userstore.WatchProgress, error)
+}
+
+// liveContinueWatchingProgress returns up to limit in-progress entries that do
+// not belong to a dropped series. Dropped entries are removed after the page
+// is read, so it reads further pages until limit entries remain, the source
+// runs out, or watchTonightProgressMaxPages pages were read. A failed
+// dropped-series lookup leaves the entries unfiltered.
+func (h *RecommendationsHandler) liveContinueWatchingProgress(ctx context.Context, store progressPageLister, userID int, profileID string, limit int) ([]userstore.WatchProgress, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	var kept []userstore.WatchProgress
+	// Offset pages over a live, updated_at-ordered source can repeat a row
+	// that a concurrent write or a timestamp tie moved across a boundary.
+	seen := make(map[string]struct{}, limit)
+	for page := 0; page < watchTonightProgressMaxPages && len(kept) < limit; page++ {
+		entries, err := store.ListProgress(ctx, profileID, "in_progress", limit, page*limit)
+		if err != nil {
+			return nil, err
+		}
+		raw := len(entries)
+		if h.WatchTonightFetcher != nil && raw > 0 {
+			filtered, dropErr := h.WatchTonightFetcher.FilterDroppedProgress(ctx, userID, profileID, entries)
+			if dropErr != nil {
+				slog.WarnContext(ctx, "WatchTonight: dropped-series filter failed", "component", "api", "user_id", userID, "error", dropErr)
+			} else {
+				entries = filtered
+			}
+		}
+		for _, entry := range entries {
+			if _, dup := seen[entry.MediaItemID]; dup {
+				continue
+			}
+			seen[entry.MediaItemID] = struct{}{}
+			kept = append(kept, entry)
+		}
+		if raw < limit {
+			break
+		}
+	}
+	if len(kept) > limit {
+		kept = kept[:limit]
+	}
+	return kept, nil
+}
+
 // fetchLiveCWAndNextUp fetches live Continue Watching and Next Up items from the user store.
 func (h *RecommendationsHandler) fetchLiveCWAndNextUp(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, limit int) (cwItems, nextUpItems []scoredCWItem, err error) {
 	if h.storeProvider == nil || userID <= 0 || profileID == "" {
@@ -280,7 +336,7 @@ func (h *RecommendationsHandler) fetchLiveCWAndNextUp(ctx context.Context, userI
 		return nil, nil, err
 	}
 
-	progressEntries, err := store.ListProgress(ctx, profileID, "in_progress", limit, 0)
+	progressEntries, err := h.liveContinueWatchingProgress(ctx, store, userID, profileID, limit)
 	if err != nil {
 		return nil, nil, err
 	}

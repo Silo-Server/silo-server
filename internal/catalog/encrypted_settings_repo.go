@@ -161,6 +161,10 @@ type settingsBatchWriter interface {
 	SetMany(ctx context.Context, values map[string]string) error
 }
 
+type settingsBatchReader interface {
+	GetMany(ctx context.Context, keys ...string) (map[string]string, error)
+}
+
 type settingsAtomicUpdater interface {
 	UpdateAtomic(
 		ctx context.Context,
@@ -258,6 +262,27 @@ func (r *EncryptedSettingsRepo) Get(ctx context.Context, key string) (string, er
 		return "", fmt.Errorf("decrypt setting %q: %w", key, err)
 	}
 	return out, nil
+}
+
+// GetMany reads keys from the raw store in one snapshot and decrypts each
+// value as Get does. Keys without a value are absent from the map.
+func (r *EncryptedSettingsRepo) GetMany(ctx context.Context, keys ...string) (map[string]string, error) {
+	inner, ok := r.inner.(settingsBatchReader)
+	if !ok {
+		return nil, fmt.Errorf("settings store does not support batch reads")
+	}
+	values, err := inner.GetMany(ctx, keys...)
+	if err != nil {
+		return nil, err
+	}
+	for key, value := range values {
+		out, err := r.cipher.DecryptIfEncrypted(value, secret.SettingsAAD(key))
+		if err != nil {
+			return nil, fmt.Errorf("decrypt setting %q: %w", key, err)
+		}
+		values[key] = out
+	}
+	return values, nil
 }
 
 // GetAll reads every setting and decrypts any enc:v1: value in place. An

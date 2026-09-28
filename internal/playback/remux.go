@@ -234,8 +234,8 @@ func buildRemuxArgsWithAudioV3(filePath, outputFormat string, seekSeconds float6
 		// dvh1 — the sample entry Apple's HLS authoring spec calls for — so tag
 		// dvh1. FFmpeg refuses to write the dvvC configuration record box under
 		// either tag without -strict unofficial; dvh1 plus -strict unofficial is
-		// verified (7.1.4) to retain the full record. Media3 accepts both sample
-		// entries, so Android preserve consumers are unaffected. Only the
+		// verified (7.1.4, 8.1.3) to retain the full record. Media3 accepts both
+		// sample entries, so Android preserve consumers are unaffected. Only the
 		// explicit v3 preserve recipe opts in: legacy web/jellycompat consumers
 		// keep the pre-v3 hev1 labeling their demuxers accept.
 		args = append(args, "-tag:v", "dvh1", "-strict", "unofficial")

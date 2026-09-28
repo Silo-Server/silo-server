@@ -192,6 +192,19 @@ export async function impersonateAdminUser(
   requireAdminUserAuthority(profileContext);
   return { session: sessionFromTokenPair(pair), profileContext };
 }
+/** Makes another enabled admin the server Owner; the caller stays an admin. */
+export async function transferAdminUserOwnership(
+  id: number,
+  profileContext = captureAdminUserAuthority(),
+) {
+  requireAdminUserAuthority(profileContext);
+  await v2("POST /api/v2/admin/users/{id}/transfer-ownership", {
+    path: { id: String(id) },
+    profileContext,
+    retryAuthentication: false,
+  });
+  requireAdminUserAuthority(profileContext);
+}
 export type AdminPasswordReset = V2Result<"POST /api/v2/admin/users/{id}/password-reset">;
 
 /** Issues a password reset link for an account, replacing any earlier link.

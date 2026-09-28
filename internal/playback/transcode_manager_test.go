@@ -91,15 +91,26 @@ func (f *fakeSessionRegistry) RollbackReconstructedToneMap(expected *Session) bo
 	return true
 }
 
-func (f *fakeSessionRegistry) ConfirmReconstructedToneMap(expected *Session, mode tonemap.Mode) *Session {
+func (f *fakeSessionRegistry) CaptureReconstructedExecution(sessionID string) (*Session, uint64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	current := f.sessions[sessionID]
+	if current == nil {
+		return nil, 0
+	}
+	return current, current.streamRevision
+}
+
+func (f *fakeSessionRegistry) ConfirmReconstructedExecution(expected *Session, revision uint64, mode tonemap.Mode, encoderHWAccel string) *Session {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if expected == nil {
 		return nil
 	}
 	current := f.sessions[expected.ID]
-	if current == expected {
+	if current == expected && current.streamRevision == revision {
 		current.ToneMapMode = mode
+		current.TranscodeHWAccel = encoderHWAccel
 	}
 	return current
 }

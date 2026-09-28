@@ -25,7 +25,16 @@ import FilterEasyMode from "@/components/FilterEasyMode/FilterEasyMode";
 import LibraryMultiSelect from "@/components/LibraryMultiSelect";
 import { CollectionSearchableSelect } from "@/components/CollectionSearchableSelect";
 import RecipeParamFields from "@/components/RecipeGallery/RecipeParamFields";
-import { SECTION_TYPES, FILTER_SECTION_TYPES, sectionTypeLabel } from "@/lib/sectionTypes";
+import {
+  FILTER_SECTION_TYPES,
+  fallbackSectionTypes,
+  filterRecipeCatalog,
+  sectionTypeLabel,
+} from "@/lib/sectionTypes";
+import {
+  finalizeSectionLibraryFilter,
+  LIBRARY_FILTER_SECTION_TYPES,
+} from "@/lib/sectionLibraryFilter";
 import {
   matchRecipePreset,
   type Category,
@@ -78,6 +87,16 @@ function lookupRecipe(
     if (found) return found;
   }
   return undefined;
+}
+
+/** The preset labelling a type the pickable list no longer offers, e.g. an admin-only section a profile already owns. */
+function matchRecipePresetFor(
+  catalog: RecipeCatalogResponse | undefined,
+  type: string,
+  params: Record<string, unknown>,
+) {
+  const definition = lookupRecipe(catalog, type);
+  return definition ? matchRecipePreset(definition, params) : undefined;
 }
 
 function parseRecipeParams(config: unknown): Record<string, unknown> {
@@ -143,6 +162,10 @@ export function buildProfileSectionSaveEntry({
       section?.config,
       queryDefinitionToSectionConfig(queryDefinition),
     );
+  } else if (recipeParams && LIBRARY_FILTER_SECTION_TYPES.has(sectionType)) {
+    // The params start from the section config and the library picker owns the
+    // filter keys, so restoring the old filter_library_id would widen the selection.
+    config = finalizeSectionLibraryFilter(recipeParams);
   } else {
     config = preserveGeneratedSectionMetadata(section?.config, recipeParams ?? {});
   }
@@ -201,6 +224,13 @@ export function buildAdminSectionPayload({
     delete base.filter_library_ids;
     delete base.order;
     config = { ...base, ...queryDefinitionToSectionConfig(queryDefinition) };
+  } else if (recipeParams && LIBRARY_FILTER_SECTION_TYPES.has(sectionType)) {
+    // The library picker owns the filter keys; keeping the old ones from base
+    // would re-add a replaced filter_library_id.
+    delete base.filter_library_id;
+    delete base.filter_library_ids;
+    delete base.library_ids;
+    config = finalizeSectionLibraryFilter({ ...base, ...recipeParams });
   } else {
     config = { ...base, ...recipeParams };
   }
@@ -227,6 +257,10 @@ type ProfileDrawerProps = {
   section: SettingsSectionEntry | null;
   libraries: Array<{ id: number; name: string }>;
   recipeCatalog?: RecipeCatalogResponse;
+  /** The profile is editing a library page's sections; see RecipeParamFieldsProps. */
+  libraryScoped?: boolean;
+  /** False when the server refuses admin-only recipes for this profile; defaults to true. */
+  allowAdminOnlyRecipes?: boolean;
   onSave: (section: SettingsSectionEntry) => void | Promise<void>;
 };
 
@@ -273,14 +307,20 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
     [allCollections, isProfile],
   );
 
+  const allowAdminOnlyRecipes = props.mode === "admin" || props.allowAdminOnlyRecipes !== false;
+  const pickableCatalog = useMemo(
+    () => filterRecipeCatalog(props.recipeCatalog, allowAdminOnlyRecipes),
+    [props.recipeCatalog, allowAdminOnlyRecipes],
+  );
+  const pickableFallbackTypes = fallbackSectionTypes(allowAdminOnlyRecipes);
   const catalogCategories = useMemo(
     () =>
-      props.recipeCatalog
-        ? (Object.keys(props.recipeCatalog.categories) as Category[]).filter(
-            (category) => (props.recipeCatalog?.categories[category]?.length ?? 0) > 0,
+      pickableCatalog
+        ? (Object.keys(pickableCatalog.categories) as Category[]).filter(
+            (category) => (pickableCatalog.categories[category]?.length ?? 0) > 0,
           )
         : [],
-    [props.recipeCatalog],
+    [pickableCatalog],
   );
   const recipeDef = !isLegacyFilterType(sectionType)
     ? lookupRecipe(props.recipeCatalog, sectionType)
@@ -414,17 +454,20 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {!lookupRecipe(props.recipeCatalog, sectionType) &&
+                  {!lookupRecipe(pickableCatalog, sectionType) &&
                   sectionType &&
                   (catalogCategories.length > 0 ||
-                    !SECTION_TYPES.some((type) => type.value === sectionType)) ? (
-                    <SelectItem value={sectionType}>{sectionTypeLabel(sectionType)}</SelectItem>
+                    !pickableFallbackTypes.some((type) => type.value === sectionType)) ? (
+                    <SelectItem value={sectionType}>
+                      {matchRecipePresetFor(props.recipeCatalog, sectionType, recipeParams)
+                        ?.display_name ?? sectionTypeLabel(sectionType)}
+                    </SelectItem>
                   ) : null}
                   {catalogCategories.length > 0
                     ? catalogCategories.map((category) => (
                         <SelectGroup key={category}>
                           <SelectLabel>{CATEGORY_LABELS[category] ?? category}</SelectLabel>
-                          {(props.recipeCatalog?.categories[category] ?? []).map((definition) => {
+                          {(pickableCatalog?.categories[category] ?? []).map((definition) => {
                             // The selected type is labelled by the preset its
                             // params match, so a weekly trending section reads
                             // "TMDB Trending This Week" rather than the first preset.
@@ -442,7 +485,7 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
                           })}
                         </SelectGroup>
                       ))
-                    : SECTION_TYPES.map((type) => (
+                    : pickableFallbackTypes.map((type) => (
                         <SelectItem key={type.value} value={type.value}>
                           {type.label}
                         </SelectItem>
@@ -450,6 +493,12 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
                 </SelectContent>
               </Select>
             )}
+            {!lockSectionType && !allowAdminOnlyRecipes ? (
+              <p className="text-muted-foreground text-xs">
+                Some section types, such as custom filters, are available only to admins on this
+                server.
+              </p>
+            ) : null}
           </div>
 
           <div className="space-y-2">
@@ -593,7 +642,15 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
           ) : null}
 
           {showRecipeParams && recipeDef ? (
-            <RecipeParamFields def={recipeDef} params={recipeParams} onChange={setRecipeParams} />
+            <RecipeParamFields
+              def={recipeDef}
+              params={recipeParams}
+              onChange={setRecipeParams}
+              libraryScoped={
+                props.mode === "admin" ? props.scope === "library" : Boolean(props.libraryScoped)
+              }
+              libraries={props.mode === "admin" ? props.libraries : undefined}
+            />
           ) : null}
         </div>
 

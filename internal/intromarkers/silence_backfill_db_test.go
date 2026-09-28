@@ -292,10 +292,10 @@ func TestSeasonStateRoundTripsAnalyzedAtPostgres(t *testing.T) {
 	repo := NewRepository(pool)
 	cfg := DefaultConfig("ffmpeg")
 	before := time.Now().Add(-time.Minute)
-	if err := repo.UpsertSeasonState(ctx, state, cfg); err != nil {
+	if err := repo.UpsertSeasonState(ctx, state, cfg.AnalysisConfigHash()); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := repo.LoadSeasonState(ctx, state, cfg)
+	loaded, err := repo.LoadSeasonState(ctx, state, cfg.AnalysisConfigHash())
 	if err != nil {
 		t.Fatal(err)
 	}

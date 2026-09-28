@@ -115,15 +115,49 @@ before the Owner existed, the earliest-created enabled administrator became the
 Owner; a server with no enabled administrator at that point has none. There is at
 most one Owner, and `is_owner` in the account projection marks it.
 
-Only the Owner may act on the Owner's account. Other administrators receive
-`403 permission_denied` when they update, delete, or issue a password reset for
-it, when they create an API key for it, or when they change or revoke one of its
-keys. The v1 account and API key routes answer the same refusals with
-`403 owner_protected`. The Owner may not demote, disable, or
-delete itself; those writes return the same 403. Ownership cannot be
-transferred yet. Nobody may impersonate the Owner. Administrators may still
-impersonate only non-administrators, but the Owner may also impersonate other
-administrators.
+Only the Owner manages administrator accounts. Other administrators manage
+ordinary accounts and their own account, and receive `403 permission_denied` when
+they:
+
+- create an administrator, promote an account to administrator, or invite one;
+- update, delete, or issue a password reset for another administrator or the
+  Owner;
+- create an API key for another administrator or the Owner, or change or revoke
+  one of their keys.
+
+The v1 account and API key routes answer the same refusals with
+`403 owner_protected`, and the v1 invitation routes with `403 role_not_allowed`.
+No account may change its own role, disable itself, or delete itself through these
+routes, and that includes the Owner; those writes return the same 403. Nobody may impersonate the Owner. Administrators may still impersonate only
+non-administrators, but the Owner may also impersonate other administrators.
+
+`POST /api/v2/admin/users/{id}/transfer-ownership` makes another enabled
+administrator the Owner and returns 204. The caller must be the Owner, signed in:
+an API key or an impersonation session receives `403 permission_denied`, and so
+does any caller that is not the Owner. A target that is not another enabled
+administrator returns `422 validation_failed`. The previous Owner stays an
+administrator. The operation has no v1 route and is not retryable; a replay is
+refused because the caller is no longer the Owner. The capability endpoint reports
+`ownership_transfer`. Moving ownership ends every session in which someone views the
+server as the new Owner and the previous Owner's sessions viewing as other
+administrators. It deletes the new Owner's API keys and reset link, since the previous
+Owner could have created them; the new Owner creates new keys. It also revokes pending
+administrator invitations, which the new Owner can resend.
+
+Making an account an administrator deletes its API keys and its reset link. Any
+administrator may create those for an ordinary account, so after a promotion they
+would carry administrator authority that only the Owner grants.
+
+These rules stop an administrator who deliberately tries to exceed its authority.
+They check the caller's standing when the request arrives; they do not order
+simultaneous requests around an ownership transfer, which a server sees rarely.
+
+When the Owner account is lost or locked out, someone with shell access to a node
+and the server's `DATABASE_URL` (no other server secret) recovers it with `silo owner set <username>`, for
+example `docker compose exec silo silo owner set alice`. The command makes that
+account the Owner, enables it, and grants it the administrator role if needed; a
+role or status change signs the account out. The previous Owner stays an
+administrator.
 
 ## Access groups
 

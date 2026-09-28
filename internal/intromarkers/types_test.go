@@ -62,3 +62,12 @@ func TestDialogueRefinementKeepsTheMinimumIntroDuration(t *testing.T) {
 			cfg.DialogueRefinementMinimumRemainingSeconds, cfg.MinimumIntroDurationSeconds)
 	}
 }
+
+// Stored season analysis state carries this key, and changing it re-runs every
+// season comparison. A deliberate change, such as bumping
+// AnalysisBehaviorVersion, updates this value in the same commit.
+func TestAnalysisConfigHashKeepsStoredSeasonStateKey(t *testing.T) {
+	if got := DefaultConfig("ffmpeg").AnalysisConfigHash(); got != "1925c82931845811" {
+		t.Fatalf("AnalysisConfigHash() = %s, want the stored season state key 1925c82931845811", got)
+	}
+}

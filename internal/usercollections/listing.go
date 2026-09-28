@@ -20,11 +20,14 @@ type ServerVisibleCollection struct {
 	Description      string `json:"description,omitempty"`
 	CollectionType   string `json:"collection_type"`
 	ItemCount        int    `json:"item_count"`
-	PosterPath       string `json:"-"`
-	PosterURL        string `json:"poster_url,omitempty"`
-	PosterThumbhash  string `json:"poster_thumbhash,omitempty"`
-	CreatedAt        string `json:"created_at"`
-	UpdatedAt        string `json:"updated_at"`
+	QueryDefinition  string `json:"-"`
+	// DisplayQueryDefinition is the collection's display filter, "" when none.
+	DisplayQueryDefinition string `json:"-"`
+	PosterPath             string `json:"-"`
+	PosterURL              string `json:"poster_url,omitempty"`
+	PosterThumbhash        string `json:"poster_thumbhash,omitempty"`
+	CreatedAt              string `json:"created_at"`
+	UpdatedAt              string `json:"updated_at"`
 }
 
 // serverVisibleListLimit caps how many opt-in collections a single library tab
@@ -86,13 +89,13 @@ func listServerVisible(ctx context.Context, pool *pgxpool.Pool, userID int, prof
 	rows, err := pool.Query(ctx,
 		`WITH visible_collections AS (
 			SELECT upc.id, upc.creator_profile_id, upc.name, upc.description, upc.collection_type,
-			       upc.item_count, upc.poster_url, upc.poster_thumbhash, upc.created_at, upc.updated_at,
+			       upc.item_count, upc.query_definition, COALESCE(upc.display_query_definition::text, '') AS display_query_definition, upc.poster_url, upc.poster_thumbhash, upc.created_at, upc.updated_at,
 			       `+scopeConfigExpr+` AS scope_config
 			FROM user_personal_collections upc
 			WHERE `+serverVisibleWhere+`
 		)
 		 SELECT id, creator_profile_id, name, description, collection_type, item_count,
-		        poster_url, poster_thumbhash, created_at, updated_at
+		        query_definition, display_query_definition, poster_url, poster_thumbhash, created_at, updated_at
 		 FROM visible_collections
 		 WHERE `+scopeMatchesLibraries("scope_config", "$3")+`
 		   AND (NOT $4::boolean OR collection_type <> 'playlist')
@@ -111,7 +114,7 @@ func listServerVisible(ctx context.Context, pool *pgxpool.Pool, userID int, prof
 		var createdAt, updatedAt time.Time
 		if err := rows.Scan(
 			&c.ID, &c.CreatorProfileID, &c.Name, &c.Description, &c.CollectionType,
-			&c.ItemCount, &c.PosterPath, &c.PosterThumbhash, &createdAt, &updatedAt,
+			&c.ItemCount, &c.QueryDefinition, &c.DisplayQueryDefinition, &c.PosterPath, &c.PosterThumbhash, &createdAt, &updatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scanning server-visible user collection: %w", err)
 		}

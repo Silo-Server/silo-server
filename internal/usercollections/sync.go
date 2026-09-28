@@ -10,6 +10,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/collectionutil"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -26,6 +27,7 @@ type Service struct {
 	logger        *slog.Logger
 
 	TMDBCollections    catalog.TMDBCollectionFetcher
+	TMDBLists          catalog.TMDBListFetcher
 	TraktCollections   catalog.TraktCollectionFetcher
 	TraktTokenResolver catalog.TraktAccessTokenResolver
 }
@@ -90,6 +92,8 @@ func (s *Service) RunSync(ctx context.Context, store userstore.UserStore, collec
 		return s.syncMDBList(ctx, store, collection, cfg, startedAt)
 	case SourceModeTMDBPreset:
 		return s.syncTMDB(ctx, store, collection, cfg, startedAt)
+	case SourceModeTMDBList:
+		return s.syncTMDBList(ctx, store, collection, cfg, startedAt)
 	case SourceModeTraktPreset:
 		return s.syncTrakt(ctx, store, collection, cfg, startedAt)
 	default:
@@ -315,12 +319,40 @@ func (s *Service) syncTMDB(ctx context.Context, store userstore.UserStore, colle
 	limit := collectionutil.SourceFetchLimit(cfg.Limit)
 	results, err := s.TMDBCollections.GetCollectionPreset(ctx, preset, mediaType, timeWindow, limit)
 	if err != nil {
-		return nil, nil, fmt.Errorf("fetching TMDB preset: %w", err)
+		// The error text reaches the collection's stored sync message, and a
+		// transport error embeds the request URL, which carries the API key.
+		return nil, nil, fmt.Errorf("fetching TMDB preset: %w", logredact.SanitizeURLError(err))
 	}
+	return s.completeTMDBSync(ctx, store, collection, cfg, startedAt, results)
+}
 
-	// TMDB returns mixed-media-type results (the "trending all" preset can
-	// emit both movie and tv). Batch by item type so each gets a single
-	// catalog lookup instead of N round-trips through GetByExternalID.
+// ── TMDB lists ───────────────────────────────────────────────────────────────
+
+func (s *Service) syncTMDBList(ctx context.Context, store userstore.UserStore, collection *userstore.Collection, cfg SourceConfig, startedAt time.Time) (*SyncResult, *userstore.Collection, error) {
+	if s.TMDBLists == nil {
+		return nil, nil, fmt.Errorf("TMDB list sync requires configured TMDB access")
+	}
+	listURL := cfg.URL
+	if strings.TrimSpace(listURL) == "" {
+		listURL = collection.SourceURL
+	}
+	listID, err := collectionutil.ParseTMDBListURL(listURL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("TMDB list sync: %w", err)
+	}
+	results, err := s.TMDBLists.GetList(ctx, listID, collectionutil.SourceFetchLimit(cfg.Limit))
+	if err != nil {
+		return nil, nil, fmt.Errorf("fetching TMDB list %d: %w", listID, logredact.SanitizeURLError(err))
+	}
+	return s.completeTMDBSync(ctx, store, collection, cfg, startedAt, results)
+}
+
+// completeTMDBSync matches fetched TMDB entries against the catalog in source
+// order and stores the result. Shared by the TMDB preset and list sources.
+func (s *Service) completeTMDBSync(ctx context.Context, store userstore.UserStore, collection *userstore.Collection, cfg SourceConfig, startedAt time.Time, results []catalog.TMDBCollectionEntry) (*SyncResult, *userstore.Collection, error) {
+	// TMDB returns mixed-media-type results (the "trending all" preset and
+	// user lists can emit both movie and tv). Batch by item type so each gets
+	// a single catalog lookup instead of N round-trips through GetByExternalID.
 	var movieBatch, seriesBatch catalog.ExternalIDBatch
 	for _, entry := range results {
 		batch := &movieBatch

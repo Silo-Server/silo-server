@@ -100,7 +100,7 @@ func TestComparePairAtShiftBreaksRunsOnBackwardRightJump(t *testing.T) {
 
 	cfg := DefaultConfig("ffmpeg")
 	cfg.MinimumIntroDurationSeconds = 1
-	leftSegment, rightSegment, ok := comparePairAtShift(left, right, cfg, 0)
+	leftSegment, rightSegment, ok := comparePairAtShift(left, right, introProfile(cfg), 0)
 	if !ok {
 		t.Fatal("expected monotonic run after backward jump")
 	}
@@ -126,7 +126,7 @@ func TestComparePairAtShiftAllowsSmallBackwardJitter(t *testing.T) {
 
 	cfg := DefaultConfig("ffmpeg")
 	cfg.MinimumIntroDurationSeconds = 1
-	leftSegment, _, ok := comparePairAtShift(left, right, cfg, 0)
+	leftSegment, _, ok := comparePairAtShift(left, right, introProfile(cfg), 0)
 	if !ok {
 		t.Fatal("expected small backward jitter to remain in the same run")
 	}
@@ -153,11 +153,11 @@ func TestConsensusSegmentUsesMedianOfAgreeingPairs(t *testing.T) {
 
 func TestAdjustSegmentSnapsOnlyNearZeroStarts(t *testing.T) {
 	candidate := Candidate{DurationSeconds: 1800}
-	nearZero := adjustSegment(Segment{Start: 0.4, End: 60}, candidate)
+	nearZero := adjustSegment(Segment{Start: 0.4, End: 60}, fingerprintInput{Candidate: candidate}, introProfile(DefaultConfig("ffmpeg")))
 	if nearZero.Start != 0 {
 		t.Fatalf("start %.2f within the snap window should become 0", nearZero.Start)
 	}
-	afterLogo := adjustSegment(Segment{Start: 4, End: 60}, candidate)
+	afterLogo := adjustSegment(Segment{Start: 4, End: 60}, fingerprintInput{Candidate: candidate}, introProfile(DefaultConfig("ffmpeg")))
 	if want := 4 + chromaprintStartLeadSeconds; afterLogo.Start != want {
 		t.Fatalf("start after a short logo = %.2f, want %.2f", afterLogo.Start, want)
 	}
@@ -522,11 +522,11 @@ func TestUsualIntroDurationPrefersLargestThenLongestCluster(t *testing.T) {
 		}
 		return out
 	}
-	usual, sharing := usualIntroDuration(durations(40, 40.5, 41, 90, 90.2, 90.4))
+	usual, sharing := usualIntroDuration(durations(40, 40.5, 41, 90, 90.2, 90.4), seasonDurationToleranceSeconds)
 	if sharing != 3 || usual < 90 {
 		t.Fatalf("usualIntroDuration = (%.1f, %d), want the longer of two equal clusters", usual, sharing)
 	}
-	usual, sharing = usualIntroDuration(durations(40, 40.5, 41, 41.2, 90))
+	usual, sharing = usualIntroDuration(durations(40, 40.5, 41, 41.2, 90), seasonDurationToleranceSeconds)
 	if sharing != 4 || usual < 40 || usual > 41.5 {
 		t.Fatalf("usualIntroDuration = (%.1f, %d), want the 40-41s cluster of four", usual, sharing)
 	}
@@ -535,7 +535,7 @@ func TestUsualIntroDurationPrefersLargestThenLongestCluster(t *testing.T) {
 		{"e1", 90}, {"e1", 90.1}, {"e1", 90.2}, {"e1", 90.3},
 		{"e2", 40}, {"e3", 40.4},
 	}
-	if usual, sharing = usualIntroDuration(versions); sharing != 2 || usual > 41 {
+	if usual, sharing = usualIntroDuration(versions, seasonDurationToleranceSeconds); sharing != 2 || usual > 41 {
 		t.Fatalf("usualIntroDuration = (%.1f, %d), want the two-episode 40s cluster", usual, sharing)
 	}
 }
@@ -566,7 +566,7 @@ func TestUsualIntroDurationMatchesPairwiseScan(t *testing.T) {
 				wantUsual, wantSharing = candidate.seconds, len(episodes)
 			}
 		}
-		if usual, sharing := usualIntroDuration(durations); usual != wantUsual || sharing != wantSharing {
+		if usual, sharing := usualIntroDuration(durations, seasonDurationToleranceSeconds); usual != wantUsual || sharing != wantSharing {
 			t.Fatalf("trial %d: usualIntroDuration = (%.2f, %d), want (%.2f, %d)", trial, usual, sharing, wantUsual, wantSharing)
 		}
 	}

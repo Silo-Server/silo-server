@@ -22,6 +22,9 @@ func (ownerRefusingAccounts) UpdateAdminAccount(context.Context, int, int64, int
 func (ownerRefusingAccounts) DeleteAdminAccount(context.Context, int, int64, int64) error {
 	return ownerRefusal
 }
+func (ownerRefusingAccounts) TransferAdminOwnership(context.Context, int) error {
+	return ownerRefusal
+}
 
 func TestOwnerRefusalsRenderAsPermissionDenied(t *testing.T) {
 	deps := requestDeps(fixtureRequests())
@@ -40,6 +43,7 @@ func TestOwnerRefusalsRenderAsPermissionDenied(t *testing.T) {
 	for _, tc := range []struct{ name, method, path, body string }{
 		{"update account", http.MethodPut, account, `{"enabled":false}`},
 		{"delete account", http.MethodDelete, account, ""},
+		{"transfer ownership", http.MethodPost, account + "/transfer-ownership", ""},
 		{"issue reset", http.MethodPost, account + "/password-reset", `{"delivery":"link"}`},
 		{"create API key", http.MethodPost, Prefix + adminAPIKeyPath, `{"label":"takeover","user_id":"7"}`},
 		{"change key tier", http.MethodPut, key + "/tier", `{"rate_tier":"elevated"}`},
@@ -52,5 +56,17 @@ func TestOwnerRefusalsRenderAsPermissionDenied(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			requireProblem(t, do(t, h, tc.method, tc.path, tc.body, headers), TypePermissionDenied)
 		})
+	}
+}
+
+func TestTransferOwnershipRendersInvalidTarget(t *testing.T) {
+	deps := requestDeps(fixtureRequests())
+	accounts := fixtureAdminAccounts()
+	accounts.transferErr = &handlers.APIError{Status: http.StatusUnprocessableEntity, Code: "validation_failed", Message: "Ownership can only move to another enabled admin account"}
+	deps.AdminAccounts = accounts
+	h := NewHandler(deps)
+	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/admin/users/7/transfer-ownership", "", actingRequestAdmin), TypeValidationFailed)
+	if accounts.transferredTo != 7 {
+		t.Fatalf("transfer reached account %d, want 7", accounts.transferredTo)
 	}
 }

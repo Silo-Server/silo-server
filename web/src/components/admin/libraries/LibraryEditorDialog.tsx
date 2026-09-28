@@ -15,7 +15,13 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
-import { AdvancedFields, FolderFields, GeneralFields, MetadataFields } from "./LibraryFormSections";
+import {
+  AdvancedFields,
+  FolderFields,
+  GeneralFields,
+  MetadataFields,
+  RealtimeMonitoringFields,
+} from "./LibraryFormSections";
 import { libraryTypeMeta } from "./libraryTypes";
 import { LibraryPosterSection } from "./LibraryPosterSection";
 import { useLibraryForm } from "./useLibraryForm";
@@ -195,7 +201,12 @@ function LibraryEditorBody({
                   posterSlot={library ? <LibraryPosterSection library={library} /> : null}
                 />
               )}
-              {id === "folders" && <FolderFields form={form} />}
+              {id === "folders" && (
+                <div className="space-y-5">
+                  <FolderFields form={form} />
+                  <RealtimeMonitoringFields form={form} />
+                </div>
+              )}
               {id === "metadata" && <MetadataFields form={form} />}
               {id === "advanced" && (
                 <AdvancedFields

@@ -39,15 +39,19 @@ func (h *PasswordResetHandler) PasswordResetCapabilities(ctx context.Context) pa
 }
 
 // IssuePasswordReset issues a reset link for an account. Only the server Owner
-// may reset the Owner's password, and a scoped API key may not reset an admin
-// account: like setting its password, either would let the link's holder sign
-// in with that account's full authority.
+// may reset another admin's password, nobody else may reset the Owner's, and a
+// scoped API key may not reset an admin account: like setting its password,
+// each would let the link's holder sign in with that account's full authority.
 func (h *PasswordResetHandler) IssuePasswordReset(ctx context.Context, input passwordreset.IssueInput) (*passwordreset.IssueResult, error) {
 	target, err := h.users.GetByID(ctx, input.UserID)
 	if err != nil {
 		return nil, err
 	}
-	if err := auth.CheckOwnerTarget(actorUserID(ctx), target); err != nil {
+	actor, err := requestOwnerActor(ctx, h.users)
+	if err != nil {
+		return nil, err
+	}
+	if err := auth.CheckOwnerTarget(actor, target); err != nil {
 		return nil, ownerError(err)
 	}
 	if actorIsScopedAPIKey(ctx) && target.Role == roleAdmin {

@@ -3,9 +3,56 @@ import { toast } from "sonner";
 import { getAllMarkerHistory } from "@/api/v2/markers";
 import { v2 } from "@/api/v2/request";
 import type { MarkerProviderUpdateRequest } from "@/api/types";
+import { useAdminServerSettings } from "@/hooks/queries/admin/settings";
 import { adminKeys } from "@/hooks/queries/keys";
 
 const ADMIN_STALE_TIME = 30_000;
+
+/**
+ * Reads the marker analysis this API build supports. During a rolling deploy
+ * the web bundle can be newer than the node answering, so callers gate newer
+ * marker actions on it and treat a failed read as "not supported".
+ */
+export function useAdminMarkerCapabilities(enabled = true) {
+  return useQuery({
+    queryKey: adminKeys.markerCapabilities(),
+    queryFn: ({ signal }) => v2("GET /api/v2/admin/markers/capabilities", { signal }),
+    staleTime: ADMIN_STALE_TIME,
+    retry: false,
+    enabled,
+  });
+}
+
+/** Which marker kinds local detection finds on this server. */
+export interface MarkerDetectionKinds {
+  intro: boolean;
+  credits: boolean;
+}
+
+/**
+ * Reads the markers.detect_intros and markers.detect_credits settings. It
+ * returns undefined until they load, when they cannot be read, and on an API
+ * node that ignores them, so callers then offer every kind and leave the
+ * decision to the server. A failed refetch counts as unreadable: the cached
+ * answer may describe another node or an outdated setting.
+ */
+export function useMarkerDetectionKinds(enabled = true): MarkerDetectionKinds | undefined {
+  const capabilities = useAdminMarkerCapabilities(enabled);
+  const honorsSettings =
+    !capabilities.isError && capabilities.data?.detection_kind_settings === true;
+  const settings = useAdminServerSettings({ enabled: enabled && honorsSettings });
+  if (!honorsSettings || settings.isError || !settings.data) return undefined;
+  return {
+    intro: detectionToggleEnabled(settings.data["markers.detect_intros"]),
+    credits: detectionToggleEnabled(settings.data["markers.detect_credits"]),
+  };
+}
+
+// Only an explicit false turns a kind off, as on the server, so a server that
+// never saved the setting keeps detecting.
+function detectionToggleEnabled(raw: string | undefined): boolean {
+  return raw?.trim().toLowerCase() !== "false";
+}
 
 export function useMarkerProviders() {
   return useQuery({

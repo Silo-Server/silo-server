@@ -9,6 +9,9 @@ import (
 type fingerprintInput struct {
 	Candidate Candidate
 	Points    []uint32
+	// WindowStart is where the fingerprinted window begins in the file, in
+	// seconds. Points count from it.
+	WindowStart float64
 }
 
 // Chromaprint points each summarize a window of roughly 2.4 seconds that
@@ -62,6 +65,61 @@ const (
 	minimumSeasonCoverage = 0.5
 )
 
+// Adjusted intro bounds: a pair result outside them after the Chromaprint
+// leads, zero snap, and chapter snapping is dropped.
+const (
+	minimumAdjustedIntroSeconds = 10.0
+	maximumAdjustedIntroSeconds = 180.0
+)
+
+// matchProfile is what a marker kind's season comparison looks for.
+type matchProfile struct {
+	// MinSeconds and MaxSeconds bound a raw match between two files.
+	MinSeconds float64
+	MaxSeconds float64
+	// AdjustedMinSeconds and AdjustedMaxSeconds bound a match once its
+	// boundaries are adjusted into file time.
+	AdjustedMinSeconds float64
+	AdjustedMaxSeconds float64
+	// ShortSeconds is the duration below which a match rates ShortConfidence.
+	ShortSeconds float64
+	// SeasonToleranceSeconds is how far a file's match duration may be from
+	// the season's usual duration and still agree with it.
+	SeasonToleranceSeconds float64
+	Algorithm              string
+	ConsistentConfidence   float64
+	InconsistentConfidence float64
+	ShortConfidence        float64
+	// ZeroStartSnapSeconds moves an adjusted start this close to the start of
+	// the file to the start of the file. Zero disables the snap.
+	ZeroStartSnapSeconds float64
+	// EOFSnapSeconds moves an adjusted end this close to the end of the file
+	// to the end of the file. Zero disables the snap.
+	EOFSnapSeconds float64
+	// SnapToChapters moves adjusted boundaries onto nearby chapter
+	// boundaries.
+	SnapToChapters bool
+}
+
+// introProfile is the intro comparison for cfg.
+func introProfile(cfg Config) matchProfile {
+	cfg = cfg.normalized()
+	return matchProfile{
+		MinSeconds:             float64(cfg.MinimumIntroDurationSeconds),
+		MaxSeconds:             float64(cfg.MaximumIntroDurationSeconds),
+		AdjustedMinSeconds:     minimumAdjustedIntroSeconds,
+		AdjustedMaxSeconds:     maximumAdjustedIntroSeconds,
+		ShortSeconds:           shortIntroSeconds,
+		SeasonToleranceSeconds: seasonDurationToleranceSeconds,
+		Algorithm:              ChromaprintAlgorithm,
+		ConsistentConfidence:   chromaprintConsistentConfidence,
+		InconsistentConfidence: chromaprintInconsistentConfidence,
+		ShortConfidence:        chromaprintShortConfidence,
+		ZeroStartSnapSeconds:   zeroStartSnapSeconds,
+		SnapToChapters:         true,
+	}
+}
+
 // CompareFingerprints matches each file against its neighboring episodes, and
 // an unmatched file against a wider set of the season, and
 // reduces the pair results for a file to a consensus: the median boundaries of
@@ -70,7 +128,45 @@ const (
 // confidence depends on whether its intro agrees with the season: a real intro
 // runs the same length in most episodes.
 func CompareFingerprints(inputs []fingerprintInput, cfg Config) map[int]Segment {
-	cfg = cfg.normalized()
+	return compareFingerprints(inputs, introProfile(cfg))
+}
+
+// compareFingerprints is CompareFingerprints for any marker kind's profile.
+func compareFingerprints(inputs []fingerprintInput, profile matchProfile) map[int]Segment {
+	matches := matchSeason(inputs, profile)
+	best := make(map[int]Segment, len(matches))
+	for fileID, match := range matches {
+		segment := match.Segment
+		duration := segment.End - segment.Start
+		switch {
+		case duration < profile.ShortSeconds:
+			segment.Confidence = profile.ShortConfidence
+		case match.SeasonConsistent && match.Confirmations >= 2:
+			segment.Confidence = profile.ConsistentConfidence
+		default:
+			segment.Confidence = profile.InconsistentConfidence
+		}
+		segment.Algorithm = profile.Algorithm
+		best[fileID] = segment
+	}
+	return best
+}
+
+// seasonMatch is a file's consensus match before it is rated.
+type seasonMatch struct {
+	// Segment holds the consensus boundaries, without confidence or
+	// algorithm.
+	Segment Segment
+	// Confirmations is how many partner episodes agreed with the consensus.
+	Confirmations int
+	// SeasonConsistent reports that at least half the season's episodes share
+	// a usual match duration and this match is within tolerance of it.
+	SeasonConsistent bool
+}
+
+// matchSeason compares the files of a season and reduces each file's pair
+// results to a consensus; see CompareFingerprints.
+func matchSeason(inputs []fingerprintInput, profile matchProfile) map[int]seasonMatch {
 	ordered := append([]fingerprintInput(nil), inputs...)
 	sort.SliceStable(ordered, func(i, j int) bool {
 		a, b := ordered[i].Candidate, ordered[j].Candidate
@@ -87,7 +183,7 @@ func CompareFingerprints(inputs []fingerprintInput, cfg Config) map[int]Segment 
 	// still casts a single vote in the consensus.
 	results := map[int]map[string][]Segment{}
 	record := func(input fingerprintInput, partner string, segment Segment) {
-		if !validAdjustedSegment(segment) {
+		if !validAdjustedSegment(segment, profile) {
 			return
 		}
 		byPartner := results[input.Candidate.FileID]
@@ -101,12 +197,12 @@ func CompareFingerprints(inputs []fingerprintInput, cfg Config) map[int]Segment 
 	compare := func(i, j int) {
 		left, right := ordered[min(i, j)], ordered[max(i, j)]
 		compared[[2]int{min(i, j), max(i, j)}] = struct{}{}
-		leftSeg, rightSeg, ok := comparePair(left.Points, right.Points, cfg)
+		leftSeg, rightSeg, ok := comparePair(left.Points, right.Points, profile)
 		if !ok {
 			return
 		}
-		record(left, right.Candidate.EpisodeID, adjustSegment(leftSeg, left.Candidate))
-		record(right, left.Candidate.EpisodeID, adjustSegment(rightSeg, right.Candidate))
+		record(left, right.Candidate.EpisodeID, adjustSegment(leftSeg, left, profile))
+		record(right, left.Candidate.EpisodeID, adjustSegment(rightSeg, right, profile))
 	}
 	comparable := func(i, j int) bool {
 		a, b := ordered[i].Candidate.EpisodeID, ordered[j].Candidate.EpisodeID
@@ -195,27 +291,20 @@ func CompareFingerprints(inputs []fingerprintInput, cfg Config) map[int]Segment 
 		scored[fileID] = fileResult{segment: segment, confirmations: confirmations}
 		durations = append(durations, episodeDuration{episode: episodeOf[fileID], seconds: segment.End - segment.Start})
 	}
-	usualDuration, sharing := usualIntroDuration(durations)
+	usualDuration, sharing := usualIntroDuration(durations, profile.SeasonToleranceSeconds)
 	episodes := distinctFingerprintEpisodeCount(inputs)
 	seasonConsistent := episodes > 0 && float64(sharing)/float64(episodes) >= minimumSeasonCoverage
 
-	best := make(map[int]Segment, len(scored))
+	matches := make(map[int]seasonMatch, len(scored))
 	for fileID, result := range scored {
-		segment := result.segment
-		duration := segment.End - segment.Start
-		switch {
-		case duration < shortIntroSeconds:
-			segment.Confidence = chromaprintShortConfidence
-		case seasonConsistent && result.confirmations >= 2 &&
-			math.Abs(duration-usualDuration) <= seasonDurationToleranceSeconds:
-			segment.Confidence = chromaprintConsistentConfidence
-		default:
-			segment.Confidence = chromaprintInconsistentConfidence
+		duration := result.segment.End - result.segment.Start
+		matches[fileID] = seasonMatch{
+			Segment:          result.segment,
+			Confirmations:    result.confirmations,
+			SeasonConsistent: seasonConsistent && math.Abs(duration-usualDuration) <= profile.SeasonToleranceSeconds,
 		}
-		segment.Algorithm = ChromaprintAlgorithm
-		best[fileID] = segment
 	}
-	return best
+	return matches
 }
 
 // episodeGroups splits files sorted in episode order into [start, end) index
@@ -238,11 +327,11 @@ type episodeDuration struct {
 	seconds float64
 }
 
-// usualIntroDuration returns the intro duration the most episodes share within
-// seasonDurationToleranceSeconds, preferring the longer on a tie, and how many
+// usualIntroDuration returns the match duration the most episodes share
+// within tolerance seconds, preferring the longer on a tie, and how many
 // episodes share it. Versions of one episode count once. A window slides over
 // the sorted durations, so long seasons stay linear after the sort.
-func usualIntroDuration(durations []episodeDuration) (float64, int) {
+func usualIntroDuration(durations []episodeDuration, tolerance float64) (float64, int) {
 	sorted := append([]episodeDuration(nil), durations...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].seconds < sorted[j].seconds })
 	inWindow := map[string]int{}
@@ -255,11 +344,11 @@ func usualIntroDuration(durations []episodeDuration) (float64, int) {
 	usual, sharing := 0.0, 0
 	lo, hi := 0, 0
 	for _, candidate := range sorted {
-		for hi < len(sorted) && sorted[hi].seconds-candidate.seconds <= seasonDurationToleranceSeconds {
+		for hi < len(sorted) && sorted[hi].seconds-candidate.seconds <= tolerance {
 			add(sorted[hi])
 			hi++
 		}
-		for candidate.seconds-sorted[lo].seconds > seasonDurationToleranceSeconds {
+		for candidate.seconds-sorted[lo].seconds > tolerance {
 			remove(sorted[lo])
 			lo++
 		}
@@ -339,7 +428,7 @@ func medianSeconds(values []float64) float64 {
 	return sorted[mid]
 }
 
-func comparePair(left, right []uint32, cfg Config) (Segment, Segment, bool) {
+func comparePair(left, right []uint32, profile matchProfile) (Segment, Segment, bool) {
 	if len(left) == 0 || len(right) == 0 {
 		return Segment{}, Segment{}, false
 	}
@@ -348,7 +437,7 @@ func comparePair(left, right []uint32, cfg Config) (Segment, Segment, bool) {
 	var bestLeft, bestRight Segment
 	bestDuration := 0.0
 	for _, shift := range shifts {
-		leftSeg, rightSeg, ok := comparePairAtShift(left, right, cfg, shift)
+		leftSeg, rightSeg, ok := comparePairAtShift(left, right, profile, shift)
 		if !ok {
 			continue
 		}
@@ -364,7 +453,7 @@ func comparePair(left, right []uint32, cfg Config) (Segment, Segment, bool) {
 	return bestLeft, bestRight, true
 }
 
-func comparePairAtShift(left, right []uint32, cfg Config, shift int) (Segment, Segment, bool) {
+func comparePairAtShift(left, right []uint32, profile matchProfile, shift int) (Segment, Segment, bool) {
 	type pair struct {
 		left  int
 		right int
@@ -416,7 +505,7 @@ func comparePairAtShift(left, right []uint32, cfg Config, shift int) (Segment, S
 	start := float64(bestStart) * DefaultPointHopSeconds
 	end := float64(bestEnd+1) * DefaultPointHopSeconds
 	duration := end - start
-	if duration < float64(cfg.MinimumIntroDurationSeconds) || duration > float64(cfg.MaximumIntroDurationSeconds) {
+	if duration < profile.MinSeconds || duration > profile.MaxSeconds {
 		return Segment{}, Segment{}, false
 	}
 
@@ -485,16 +574,27 @@ func absInt(v int) int {
 	return v
 }
 
-func adjustSegment(segment Segment, candidate Candidate) Segment {
-	segment.Start += chromaprintStartLeadSeconds
-	segment.End += chromaprintEndLeadSeconds
-	if segment.Start <= zeroStartSnapSeconds {
+// adjustSegment moves a pair result from the input's fingerprint points into
+// file time: it adds the window start and the Chromaprint leads, then snaps
+// the boundaries to the start and end of the file and, when the profile asks,
+// to nearby chapter boundaries.
+func adjustSegment(segment Segment, input fingerprintInput, profile matchProfile) Segment {
+	candidate := input.Candidate
+	segment.Start += input.WindowStart + chromaprintStartLeadSeconds
+	segment.End += input.WindowStart + chromaprintEndLeadSeconds
+	if segment.Start <= profile.ZeroStartSnapSeconds {
 		segment.Start = 0
 	}
-	for _, chapter := range candidate.Chapters {
-		segment.Start = snapBoundary(segment.Start, chapter.StartSeconds)
-		segment.End = snapBoundary(segment.End, chapter.StartSeconds)
-		segment.End = snapBoundary(segment.End, chapter.EndSeconds)
+	if profile.EOFSnapSeconds > 0 && candidate.DurationSeconds > 0 &&
+		candidate.DurationSeconds-segment.End <= profile.EOFSnapSeconds {
+		segment.End = candidate.DurationSeconds
+	}
+	if profile.SnapToChapters {
+		for _, chapter := range candidate.Chapters {
+			segment.Start = snapBoundary(segment.Start, chapter.StartSeconds)
+			segment.End = snapBoundary(segment.End, chapter.StartSeconds)
+			segment.End = snapBoundary(segment.End, chapter.EndSeconds)
+		}
 	}
 	if segment.Start < 0 {
 		segment.Start = 0
@@ -513,7 +613,8 @@ func snapBoundary(value, boundary float64) float64 {
 	return value
 }
 
-func validAdjustedSegment(segment Segment) bool {
+func validAdjustedSegment(segment Segment, profile matchProfile) bool {
 	duration := segment.End - segment.Start
-	return segment.Start >= 0 && segment.End > segment.Start && duration >= 10 && duration <= 180
+	return segment.Start >= 0 && segment.End > segment.Start &&
+		duration >= profile.AdjustedMinSeconds && duration <= profile.AdjustedMaxSeconds
 }
