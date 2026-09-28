@@ -177,8 +177,9 @@ var urlInText = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://\S+`)
 // authSchemeInText matches the word after an HTTP auth scheme word. That word
 // is always masked unless it is one of authSchemeProse, a fixed list of words
 // that cannot be credentials, so "basic authentication required" keeps its
-// noun while any token, however short or plain, fails closed.
-var authSchemeInText = regexp.MustCompile(`(?i)\b(bearer|basic)(\s+["']?)([^\s"',;]+)`)
+// noun while any token, however short or plain, fails closed. A quoted value
+// is masked whole, spaces and all; an unterminated quote masks to the end.
+var authSchemeInText = regexp.MustCompile(`(?i)\b(bearer|basic)(\s+)(?:"([^"]*)"?|'([^']*)'?|([^\s"',;]+))`)
 
 var authSchemeProse = map[string]bool{
 	"auth": true, "authentication": true, "authorization": true,
@@ -205,7 +206,14 @@ func submissionErrorText(err error) string {
 	msg = urlInText.ReplaceAllStringFunc(msg, logredact.SanitizeURL)
 	msg = authSchemeInText.ReplaceAllStringFunc(msg, func(match string) string {
 		m := authSchemeInText.FindStringSubmatch(match)
-		if m[3] == logredact.Placeholder || authSchemeProse[strings.ToLower(m[3])] {
+		if quote := match[len(m[1])+len(m[2])]; quote == '"' || quote == '\'' {
+			// Quoted: the whole value is the credential, with no prose exemption.
+			if m[3] == logredact.Placeholder || m[4] == logredact.Placeholder {
+				return match
+			}
+			return m[1] + m[2] + string(quote) + logredact.Placeholder + string(quote)
+		}
+		if m[5] == logredact.Placeholder || authSchemeProse[strings.ToLower(m[5])] {
 			return match
 		}
 		return m[1] + m[2] + logredact.Placeholder

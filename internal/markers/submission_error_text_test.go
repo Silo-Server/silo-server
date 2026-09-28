@@ -56,6 +56,10 @@ func TestSubmissionErrorTextMasksSecretsOutsideHTTPURLs(t *testing.T) {
 		{"Authorization: Bearer " + tok[:6] + "-" + tok[6:], tok[:6] + "-" + tok[6:], "Bearer [REDACTED]"},
 		{"Authorization: Bearer " + tok, tok, "Bearer [REDACTED]"},
 		{`Authorization: Bearer "` + tok + `"`, tok, `Bearer "[REDACTED]"`},
+		// A quoted value is masked whole: every word, and prose words too.
+		{`Authorization: Bearer "` + tok[:6] + " " + tok[6:] + `" rejected`, tok[6:], `Bearer "[REDACTED]" rejected`},
+		{`Authorization: Basic 'token ` + tok + `'`, tok, `Basic '[REDACTED]'`},
+		{`Authorization: Bearer "` + tok + ` unterminated`, tok, `Bearer "[REDACTED]"`},
 		// Harmless numeric pairs keep their values.
 		{"GET /v1/markers?page=1; retry=3 failed", "", "page=1; retry=3 failed"},
 		// An auth scheme word followed by prose is not a credential.
