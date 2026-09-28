@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"math/rand/v2"
 	"net/http"
 	"slices"
@@ -59,6 +60,10 @@ type compatCollection struct {
 	source *usercollections.ServerVisibleCollection
 }
 
+// compatNonVideoMemberTypes are the media types besides audiobook and podcast
+// that a personal collection can hold but a BoxSet's children never list.
+var compatNonVideoMemberTypes = []string{"ebook", "manga"} //nolint:goconst // media_items.type values, named once here.
+
 // newPersonalCompatCollection adapts a personal collection for the BoxSet
 // surface.
 func newPersonalCompatCollection(c usercollections.ServerVisibleCollection) *compatCollection {
@@ -82,7 +87,12 @@ func (h *ItemsHandler) withVisibleItemCounts(ctx context.Context, session *Sessi
 	if len(sources) == 0 {
 		return
 	}
-	counts := h.userCollections.CountVisible(ctx, session.StreamAppUserID, sources, h.resolveAccessFilter(ctx, session))
+	// Children list only video types, so the count leaves out the other
+	// non-video types a personal collection can hold, not just the audiobooks
+	// and podcasts every compat read excludes.
+	access := h.resolveAccessFilter(ctx, session)
+	access.ExcludedMediaTypes = append(slices.Clone(access.ExcludedMediaTypes), compatNonVideoMemberTypes...)
+	counts := h.userCollections.CountVisible(ctx, session.StreamAppUserID, sources, access)
 	for _, c := range collections {
 		if n, ok := counts[c.ID]; ok && c.personal {
 			c.ItemCount = n
@@ -1213,20 +1223,12 @@ func (h *ItemsHandler) hydrateCollectionMembers(ctx context.Context, session *Se
 	return ordered, episodeTargets, nil
 }
 
-// Collection sort and rule field names that personal BoxSet requests map
-// Jellyfin parameters to.
-const (
-	collectionSortTitle   = "title"
-	collectionSortAddedAt = "added_at"
-	queryRuleInProgress   = "in_progress"
-)
-
 // compatVideoTypeGroup limits a personal collection query to the given video
 // types. It uses exact type rules: the catalog's episode scope can expand
 // collections or fall back to their top-level members instead of filtering
 // them. ok is false when no given type is a video type.
 //
-//nolint:goconst // Keep Jellyfin sort and filter vocabulary beside its protocol translation.
+//nolint:goconst // Keep the catalog rule vocabulary beside its protocol translation.
 func compatVideoTypeGroup(itemTypes []string) (catalog.QueryGroup, bool) {
 	rules := make([]catalog.QueryRule, 0, len(itemTypes))
 	for _, itemType := range itemTypes {
@@ -1237,9 +1239,10 @@ func compatVideoTypeGroup(itemTypes []string) (catalog.QueryGroup, bool) {
 	return catalog.QueryGroup{Match: "any", Rules: rules}, len(rules) > 0
 }
 
-// personalLeavesFirstPage is how many members Play all asks the resolver for
-// before it knows the collection's size.
-const personalLeavesFirstPage = 500
+// personalLeavesLimit asks the resolver for a personal collection's whole
+// membership. Its ordered-member path loads every member before paging, so one
+// uncapped request costs no more than a page.
+const personalLeavesLimit = math.MaxInt32
 
 // handlePersonalBoxSetLeaves serves Play all and Shuffle for a personal
 // collection, as handleBoxSetLeaves does for library collections. Members
@@ -1258,17 +1261,10 @@ func (h *ItemsHandler) handlePersonalBoxSetLeaves(w http.ResponseWriter, r *http
 		Source:         catalog.CatalogSourceUserCollection,
 		CollectionID:   collection.ID,
 		Query:          catalog.QueryDefinition{Groups: []catalog.QueryGroup{typeGroup}},
-		Limit:          personalLeavesFirstPage,
+		Limit:          personalLeavesLimit,
 		UseSourceOrder: true,
 	}
 	result, err := h.collectionResolver.Resolve(ctx, req, access)
-	if err == nil && result.Total > len(result.Items) {
-		items := result.Items
-		req.Offset, req.Limit = len(items), result.Total-len(items)
-		if result, err = h.collectionResolver.Resolve(ctx, req, access); err == nil {
-			result.Items = append(items, result.Items...)
-		}
-	}
 	if err != nil {
 		if errors.Is(err, catalog.ErrCatalogSourceNotFound) {
 			writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
@@ -1291,6 +1287,7 @@ func (h *ItemsHandler) handlePersonalBoxSetLeaves(w http.ResponseWriter, r *http
 	h.writeCollectionLeavesPage(w, r, session, query, h.codec.EncodeStringID(EncodedIDUserCollection, collection.ID), leaves)
 }
 
+//nolint:goconst // Keep Jellyfin sort and filter vocabulary beside its protocol translation.
 func (h *ItemsHandler) handlePersonalBoxSetChildren(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery, collection *compatCollection) {
 	if (query.hasItemTypeFilter && len(query.itemTypes) == 0) ||
 		(query.mediaTypesExplicit && !query.mediaTypesSet["video"]) {
@@ -1302,11 +1299,11 @@ func (h *ItemsHandler) handlePersonalBoxSetChildren(w http.ResponseWriter, r *ht
 	if query.sortExplicit {
 		sortField := query.sort
 		switch sortField {
-		case catalog.BrowseSortTitle:
-			sortField = collectionSortTitle
-		case catalog.BrowseSortCreatedAt:
-			sortField = collectionSortAddedAt
-		case compatBrowseRandomSort:
+		case "sort_title":
+			sortField = "title"
+		case "created_at":
+			sortField = "added_at"
+		case "random":
 			randomize = true
 		}
 		if !randomize {
@@ -1339,7 +1336,7 @@ func (h *ItemsHandler) handlePersonalBoxSetChildren(w http.ResponseWriter, r *ht
 		rules = append(rules, catalog.QueryRule{Field: "favorited", Op: "is", Value: true})
 	}
 	if query.isResumable {
-		rules = append(rules, catalog.QueryRule{Field: queryRuleInProgress, Op: "is", Value: true})
+		rules = append(rules, catalog.QueryRule{Field: "in_progress", Op: "is", Value: true})
 	}
 	if len(rules) > 0 {
 		def.Groups = append(def.Groups, catalog.QueryGroup{Match: "all", Rules: rules})

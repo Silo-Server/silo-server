@@ -231,8 +231,11 @@ func TestPersonalBoxSetChildCountIsVisibleCount(t *testing.T) {
 		if personal.gotUserID != 1 {
 			t.Errorf("counted for user %d, want the session's user 1", personal.gotUserID)
 		}
-		if !slices.Contains(personal.gotCountAccess.ExcludedMediaTypes, "audiobook") {
-			t.Errorf("count did not use the compat access filter: %+v", personal.gotCountAccess)
+		// Children list only video types, so the count must leave the others out.
+		for _, excluded := range []string{"audiobook", "podcast", "ebook", "manga"} {
+			if !slices.Contains(personal.gotCountAccess.ExcludedMediaTypes, excluded) {
+				t.Errorf("count access does not exclude %s: %+v", excluded, personal.gotCountAccess)
+			}
 		}
 	}
 
@@ -823,7 +826,8 @@ func TestUserViews_HidesCollectionsViewWhenPersonalCollectionsBelongToOthers(t *
 // TestPersonalBoxSetChildCountMatchesChildrenDB pins, against the real store
 // and catalog resolver, that a personal BoxSet's ChildCount equals the
 // TotalRecordCount of its children: members in hidden libraries, audiobooks
-// (never on the compat surface) and rows for missing items count in neither.
+// and ebooks (never listed as BoxSet children) and rows for missing items
+// count in neither.
 func TestPersonalBoxSetChildCountMatchesChildrenDB(t *testing.T) {
 	pool := newCompatTestPool(t)
 	ctx := context.Background()
@@ -840,10 +844,11 @@ func TestPersonalBoxSetChildCountMatchesChildrenDB(t *testing.T) {
 	}
 	shownA, shownB := "boxset-count-a-"+suffix, "boxset-count-b-"+suffix
 	hidden, book, missing := "boxset-count-hidden-"+suffix, "boxset-count-book-"+suffix, "boxset-count-missing-"+suffix
+	ebook := "boxset-count-ebook-" + suffix
 	for _, seed := range []struct {
 		id, kind string
 		library  int
-	}{{shownA, "movie", shownLib}, {shownB, "series", shownLib}, {hidden, "movie", hiddenLib}, {book, "audiobook", shownLib}} {
+	}{{shownA, "movie", shownLib}, {shownB, "series", shownLib}, {hidden, "movie", hiddenLib}, {book, "audiobook", shownLib}, {ebook, "ebook", shownLib}} {
 		if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title) VALUES ($1, $2, $1)`, seed.id, seed.kind); err != nil {
 			t.Fatal(err)
 		}
@@ -854,7 +859,7 @@ func TestPersonalBoxSetChildCountMatchesChildrenDB(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
 		_, _ = pool.Exec(ctx, `DELETE FROM user_collection_revisions WHERE user_id = $1`, userID)
-		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{shownA, shownB, hidden, book})
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{shownA, shownB, hidden, book, ebook})
 		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = ANY($1)`, []int{shownLib, hiddenLib})
 	})
 
@@ -874,7 +879,7 @@ func TestPersonalBoxSetChildCountMatchesChildrenDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i, member := range []string{shownA, shownB, hidden, book, missing} {
+	for i, member := range []string{shownA, shownB, hidden, book, ebook, missing} {
 		if err := store.AddCollectionItem(ctx, collection.ID, member, i); err != nil {
 			t.Fatal(err)
 		}
@@ -971,22 +976,83 @@ func TestHandleItems_PersonalBoxSetPlayAllExpandsSeries(t *testing.T) {
 	assertNames(t, members.Items, "Movie One", "Show", "Movie Two")
 }
 
-// Play all reads every member even past the resolver's first page, and pages
-// the leaves itself.
+// Play all reads every member in one resolver request, however large the
+// collection, and pages the leaves itself.
 func TestHandleItems_PersonalBoxSetPlayAllReadsWholeCollection(t *testing.T) {
+	const members = 1202
 	h, resolver, parentID := newPersonalPlayAllFixture(t)
 	repo := h.itemRepo.(*fakeBatchItemRepo)
 	resolver.items = nil
-	for i := range personalLeavesFirstPage + 2 {
+	for i := range members {
 		id := fmt.Sprintf("m-%04d", i)
 		item := &models.MediaItem{ContentID: id, Type: "movie", Title: id}
 		resolver.items = append(resolver.items, item)
 		repo.items[id] = item
 	}
 	result := performItemsRequest(t, h, "/Items?ParentId="+parentID+"&Filters=IsNotFolder&Recursive=true&StartIndex="+
-		strconv.Itoa(personalLeavesFirstPage)+"&Limit=5")
-	assertNames(t, result.Items, fmt.Sprintf("m-%04d", personalLeavesFirstPage), fmt.Sprintf("m-%04d", personalLeavesFirstPage+1))
-	if result.TotalRecordCount != personalLeavesFirstPage+2 {
+		strconv.Itoa(members-2)+"&Limit=5")
+	assertNames(t, result.Items, fmt.Sprintf("m-%04d", members-2), fmt.Sprintf("m-%04d", members-1))
+	if result.TotalRecordCount != members {
 		t.Fatalf("expected every member counted, got %d", result.TotalRecordCount)
+	}
+	if len(resolver.reqs) != 1 || resolver.reqs[0].Offset != 0 {
+		t.Fatalf("expected one resolver request from the start, got %+v", resolver.reqs)
+	}
+}
+
+// An owner-supplied remote poster is capped: a body over the limit answers 502
+// instead of streaming, whether the server announces its length or not.
+func TestPersonalCollectionPosterSizeLimit(t *testing.T) {
+	size := maxPersonalPosterBytes + 1
+	chunked := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		if !chunked {
+			w.Header().Set("Content-Length", strconv.Itoa(size))
+		}
+		_, _ = w.Write(make([]byte, size))
+	}))
+	t.Cleanup(server.Close)
+	previous := personalCollectionImageClient
+	personalCollectionImageClient = server.Client()
+	t.Cleanup(func() { personalCollectionImageClient = previous })
+
+	codec := NewResourceIDCodec()
+	row := ownedUserCollection(uuid.NewString(), "My Watchlist")
+	row.PosterPath = server.URL + "/poster.jpg"
+	routeID := codec.EncodeStringID(EncodedIDUserCollection, row.ID)
+	h := &ImagesHandler{
+		codec: codec, images: NewImageCache(time.Hour, time.Now),
+		content:         &librariesContentService{},
+		imageTags:       newImageTagSigner("image-secret"),
+		userCollections: &fakeUserCollectionSource{rows: []fakeUserCollection{row}},
+	}
+	serve := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/Items/"+routeID+"/Images/Primary", nil)
+		req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, collectionsTestSession()))
+		rec := httptest.NewRecorder()
+		h.HandleItemImage(rec, withImageRouteParams(req, routeID, "Primary"))
+		return rec
+	}
+	for _, tc := range []struct {
+		name    string
+		size    int
+		chunked bool
+		want    int
+	}{
+		{"at the limit", maxPersonalPosterBytes, false, http.StatusOK},
+		{"announced over the limit", maxPersonalPosterBytes + 1, false, http.StatusBadGateway},
+		{"streamed over the limit", maxPersonalPosterBytes + 1, true, http.StatusBadGateway},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			size, chunked = tc.size, tc.chunked
+			rec := serve()
+			if rec.Code != tc.want {
+				t.Fatalf("status = %d, want %d", rec.Code, tc.want)
+			}
+			if tc.want == http.StatusOK && rec.Body.Len() != tc.size {
+				t.Fatalf("body = %d bytes, want %d", rec.Body.Len(), tc.size)
+			}
+		})
 	}
 }

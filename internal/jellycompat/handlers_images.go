@@ -23,6 +23,11 @@ import (
 
 var personalCollectionImageClient = imagecache.NewPublicHTTPClient()
 
+// maxPersonalPosterBytes caps a proxied personal-collection poster. Its URL is
+// owner-supplied and a signed tag replays the fetch without a session, so the
+// body must not be unbounded.
+const maxPersonalPosterBytes = 10 << 20
+
 // ImagesHandler serves Jellyfin-compatible image routes.
 const compatImagePrimary = "Primary"
 
@@ -477,7 +482,7 @@ func (h *ImagesHandler) serveCollectionImage(w http.ResponseWriter, r *http.Requ
 			// presigned below may use the trusted (possibly private) image client.
 			w.Header().Set("X-Content-Type-Options", "nosniff")
 			w.Header().Set("Content-Security-Policy", branding.AssetContentSecurityPolicy)
-			h.proxyImageURL(w, r, key, personalCollectionImageClient)
+			h.proxyImageURL(w, r, key, personalCollectionImageClient, maxPersonalPosterBytes)
 			return
 		}
 		if imageURL := h.presignCollectionArtwork(r.Context(), key); imageURL != "" {
@@ -693,7 +698,7 @@ func (h *ImagesHandler) serveImageURL(w http.ResponseWriter, r *http.Request, im
 		return
 	}
 	if shouldProxyCompatImageRequest(r) {
-		h.proxyImageURL(w, r, imageURL, h.httpClient)
+		h.proxyImageURL(w, r, imageURL, h.httpClient, 0)
 		return
 	}
 	h.redirectImageURL(w, r, imageURL)
@@ -740,7 +745,10 @@ func (h *ImagesHandler) redirectImageURL(w http.ResponseWriter, r *http.Request,
 	http.Redirect(w, r, imageURL, http.StatusFound)
 }
 
-func (h *ImagesHandler) proxyImageURL(w http.ResponseWriter, r *http.Request, imageURL string, client *http.Client) {
+// proxyImageURL fetches imageURL with client and relays the response. A
+// positive maxBytes buffers the body and answers 502 when it exceeds the
+// limit; zero streams it unbounded.
+func (h *ImagesHandler) proxyImageURL(w http.ResponseWriter, r *http.Request, imageURL string, client *http.Client, maxBytes int64) {
 	target, err := parseRemoteImageURL(imageURL)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "UpstreamError", "Failed to load image")
@@ -762,7 +770,7 @@ func (h *ImagesHandler) proxyImageURL(w http.ResponseWriter, r *http.Request, im
 		writeError(w, http.StatusBadGateway, "UpstreamError", "Failed to load image")
 		return
 	}
-	proxyImage(w, resp)
+	proxyImage(w, resp, maxBytes)
 }
 
 func parseRemoteImageURL(imageURL string) (*url.URL, error) {
