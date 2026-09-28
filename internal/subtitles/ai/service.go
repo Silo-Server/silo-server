@@ -714,7 +714,11 @@ func (s *Service) loadSource(ctx context.Context, job *Job) ([]SubtitleCue, stri
 			return data, err
 		}
 		var data []byte
-		if s.subtitleCache != nil {
+		if cached, ok := s.subtitleCache.LookupWebVTT(file.FilePath, embeddedIndex); ok {
+			// Native playback already demuxed this track as WebVTT; ParseCues
+			// reads it, so the source is not demuxed again.
+			data = cached
+		} else if s.subtitleCache != nil {
 			// ExtractSubtitle writes SRT for ffmpeg's 0:s:N, the cache's key.
 			data, err = s.subtitleCache.ExtractText(ctx, file.FilePath, embeddedIndex, "srt", extract)
 		} else {

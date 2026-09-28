@@ -3,6 +3,9 @@ package ai
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -107,5 +110,46 @@ func TestLoadSourceFillsCacheOnMiss(t *testing.T) {
 	})
 	if _, _, err := second.loadSource(context.Background(), &Job{MediaFileID: file.ID, SourceIndex: 1}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestLoadSourceReusesPlaybackWebVTT covers the producer/consumer path: native
+// playback's ServeExtract caches a SubRip track as WebVTT, and the first AI
+// translation of that track reads it instead of demuxing the source again.
+func TestLoadSourceReusesPlaybackWebVTT(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "movie.mkv")
+	if err := os.WriteFile(source, []byte("not a real container"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cache := playback.NewSubtitleCache(func() string { return filepath.Join(dir, "transcode") })
+
+	const vtt = "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nBonjour\n\n00:00:03.000 --> 00:00:04.000\nAu revoir\n"
+	req := httptest.NewRequest(http.MethodGet, "/subtitles/1", nil)
+	opts := playback.StreamExtractOpts{InputPath: source, TrackIndex: 1, SourceCodec: "subrip"}
+	if err := cache.ServeExtract(httptest.NewRecorder(), req, opts, func(_ context.Context, o playback.StreamExtractOpts) error {
+		_, err := io.WriteString(o.Writer, vtt)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	file := &models.MediaFile{ID: 7, FilePath: source, SubtitleTracks: []models.SubtitleTrack{
+		{Language: "eng", Codec: "subrip"},
+		{Language: "fre", Codec: "subrip"},
+	}}
+	svc := NewService(context.Background(), Config{}, nil, nil, nil, nil, nil,
+		runTranscribeFileResolver{file: file}, nil, "", nil, nil)
+	svc.SetSubtitleCache(cache)
+	svc.extractEmbedded = func(context.Context, string, int) ([]byte, error) {
+		return nil, errors.New("demuxed the source despite playback's cached WebVTT")
+	}
+
+	cues, language, err := svc.loadSource(context.Background(), &Job{MediaFileID: file.ID, SourceIndex: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if language != "fre" || len(cues) != 2 || cues[0].Lines[0] != "Bonjour" {
+		t.Fatalf("language=%q cues=%+v", language, cues)
 	}
 }
