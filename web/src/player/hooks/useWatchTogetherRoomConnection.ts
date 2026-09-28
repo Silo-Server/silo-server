@@ -450,6 +450,10 @@ export function useWatchTogetherRoomConnection({
           window.clearInterval(pingTimer);
           pingTimer = null;
         }
+        // A command belongs to the connection that delivered it. Kept, the
+        // player would apply it again on reconnect, from a position the room
+        // may have left; the server sends a fresh one once the member attaches.
+        setTransportCommand(null);
         setConnectionState("disconnected");
         scheduleReconnect();
       });
