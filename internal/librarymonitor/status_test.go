@@ -1,6 +1,7 @@
 package librarymonitor
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -202,5 +203,19 @@ func TestRootStatusDetailNamesUnreadableFolders(t *testing.T) {
 	want := "Folders Silo can't read aren't monitored: /lib/Locked."
 	if got := rs.statusDetail(); got != want {
 		t.Fatalf("detail = %q, want %q", got, want)
+	}
+}
+
+// A library folder of "/" is its own parent. Indexing it as its own child
+// would make every walk of its subtree loop forever.
+func TestChildDirsFilesystemRoot(t *testing.T) {
+	c := make(childDirs)
+	for _, p := range []string{"/", "/media", "/media/Movies"} {
+		c.add(p)
+	}
+	got := c.subtree("/")
+	slices.Sort(got)
+	if want := []string{"/", "/media", "/media/Movies"}; !slices.Equal(got, want) {
+		t.Fatalf("subtree(/) = %v, want %v", got, want)
 	}
 }

@@ -188,6 +188,9 @@ type childDirs map[string]map[string]struct{}
 
 func (c childDirs) add(path string) {
 	parent := filepath.Dir(path)
+	if parent == path {
+		return // the filesystem root is nobody's child, and not its own
+	}
 	if c[parent] == nil {
 		c[parent] = make(map[string]struct{})
 	}
