@@ -32,9 +32,8 @@ code: architecture, invariants, API contracts, and development setup. Guides
 for installing, configuring, operating, or troubleshooting Silo belong in the
 [user manual](https://siloserver.org/docs), which lives in
 [Silo-Server/siloserver.org](https://github.com/Silo-Server/siloserver.org).
-This repository does not accept new operator or user guides, including new
-pages or sections under `docs/wiki/`; open those pull requests against the
-website repository instead.
+This repository does not accept operator or user guides; open those pull
+requests against the website repository instead.
 
 Choose the repository that owns the behavior before implementation begins.
 This repository owns the backend, web app, native API, Jellyfin compatibility,

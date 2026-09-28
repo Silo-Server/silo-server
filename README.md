@@ -105,10 +105,10 @@ docker compose up -d
 
 Open <http://localhost:8090> and complete onboarding.
 
-The [Docker deployment guide](docs/wiki/deployment/docker.md) covers the
-`SECRET_KEY` backup requirement, storage paths, GPU acceleration, Meilisearch,
-external PostgreSQL and Redis, distributed roles, PostgreSQL tuning, backups,
-and updates.
+The [user manual](https://siloserver.org/docs) covers the rest, starting with
+[installation](https://siloserver.org/docs/install): backing up `SECRET_KEY`,
+storage, GPU acceleration, Meilisearch, external PostgreSQL and Redis,
+transcode nodes, PostgreSQL tuning, backups, and updates.
 
 ## Builds and releases
 
