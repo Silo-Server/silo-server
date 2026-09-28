@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -663,10 +664,19 @@ func TestInotifyRewalkAfterALostRenameRecordsTheNewName(t *testing.T) {
 	log := drainEvents(b)
 
 	// Stall the reader and queue more events than the kernel keeps
-	// (fs.inotify.max_queued_events, 16384 by default), so the rename that
-	// follows is dropped.
+	// (fs.inotify.max_queued_events), so the rename that follows is dropped.
+	// Each file queues a create and a close-write.
+	maxQueued := 16384
+	if raw, err := os.ReadFile("/proc/sys/fs/inotify/max_queued_events"); err == nil {
+		if n, err := strconv.Atoi(strings.TrimSpace(string(raw))); err == nil {
+			maxQueued = n
+		}
+	}
+	if maxQueued > 200_000 {
+		t.Skipf("fs.inotify.max_queued_events=%d is too large to overflow in a test", maxQueued)
+	}
 	b.mu.Lock()
-	for i := range 10000 {
+	for i := range maxQueued/2 + 2000 {
 		f, err := os.Create(filepath.Join(root, "flood", fmt.Sprintf("f%05d", i)))
 		if err != nil {
 			b.mu.Unlock()
@@ -822,5 +832,32 @@ func TestInotifyMarkerInAnOuterRootKeepsANestedRoot(t *testing.T) {
 	}
 	if got := b.Directories(nested); got != 2 {
 		t.Fatalf("nested root records %d directories, want Shows and Show A", got)
+	}
+}
+
+// Editing the patterns of an ignore file can include or exclude entries
+// without excluding the directory, so the directory is reported for a scan.
+// The ignore files themselves are never reported.
+func TestInotifyIgnoreRuleChangesRescanTheFolder(t *testing.T) {
+	root := t.TempDir()
+	mkdirs(t, root, "Movie A", "Other")
+	writeFile(t, filepath.Join(root, "Movie A", ".ignore"), "*.nfo\n")
+	b := newTestInotify(t, inotifyHooks{})
+	if err := b.AddRoot(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+
+	writeFile(t, filepath.Join(root, "Movie A", ".ignore"), "*.mkv\n")
+	events := nextEvents(t, b, func(ev Event) bool {
+		return ev.Kind == EventMovedTo && ev.Dir == root && ev.Name == "Movie A" && ev.IsDir
+	})
+	writeFile(t, filepath.Join(root, ".siloignore"), "Other\n")
+	more := nextEvents(t, b, func(ev Event) bool {
+		return ev.Kind == EventMovedTo && ev.Dir == root && ev.Name == "Other"
+	})
+	for _, ev := range append(events, more...) {
+		if ignoreFile(ev.Name) {
+			t.Fatalf("an ignore file was reported: %v", eventStrings([]Event{ev}))
+		}
 	}
 }

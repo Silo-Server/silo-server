@@ -223,7 +223,11 @@ directories the scanner would enter (`walkTree`). They skip:
   themselves.
 - Pattern rules inside `.ignore` and `.siloignore` are not applied to the
   walk. A pattern-ignored folder costs a watch, and a change there resolves to
-  a scan that the scanner then filters.
+  a scan that the scanner then filters. Creating, rewriting, or removing an
+  `.ignore` or `.siloignore` in a monitored directory reports the directory for
+  a scan (one change per entry for a library folder itself), so entries its
+  patterns now include or exclude are picked up; the files themselves are never
+  reported.
 - Symlinked directories are followed, as the scanner follows them. Loops are
   cut by physical path within a walk, and across walks because a directory
   already recorded for the same folder under another path is not recorded
@@ -283,7 +287,7 @@ quiet for 5 seconds**; another event on the same path restarts the window.
 | `IN_DELETE` / `IN_MOVED_FROM`, file | Removed or moved out | Vanished-file change, unless the file was created (`IN_CREATE`) since the last report: then it never existed for the catalog and is dropped. That covers rsync's and downloaders' temp names renamed into place. A moved-in file is not dropped this way, because a move can replace an existing file. |
 | `IN_DELETE` / `IN_MOVED_FROM`, directory | Removed or moved out | Vanished-subtree change; pending changes below it are dropped |
 | Move pair inside the tree | Rename | Vanished change for the old path (dropped as above for a path created since the last report) plus a change for the new one. For a directory, pending changes below it move to the new path. |
-| `IN_Q_OVERFLOW` / `FAN_Q_OVERFLOW` | The kernel dropped events | See [Overflow](#overflow) |
+| `IN_Q_OVERFLOW` | The kernel dropped events | See [Overflow](#overflow) |
 | Root deleted, moved, or unmounted | Folder gone | See [Folder loss](#folder-loss) |
 
 ## From changes to scans

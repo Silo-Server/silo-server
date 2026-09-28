@@ -41,14 +41,18 @@ var ignoredDirNames = map[string]bool{
 // Ignore-file names honored by the walk. See
 // docs/architecture/scanner-ignore-files.md.
 const (
-	markerNoMedia  = ".nomedia"
-	ignoreFileName = ".ignore"
+	markerNoMedia      = ".nomedia"
+	ignoreFileName     = ".ignore"
+	siloIgnoreFileName = ".siloignore"
 )
 
-// ignoreMarker reports whether name is an ignore file that can exclude its
-// directory (see dirSkipped).
-func ignoreMarker(name string) bool {
-	return name == markerNoMedia || name == ignoreFileName
+// ignoreFile reports whether name is a file that sets ignore rules for its
+// directory: .nomedia and a marker .ignore exclude it (see dirSkipped), and
+// the patterns in .ignore and .siloignore exclude entries in it. Such files
+// are never reported as changes themselves; a change to one re-checks and
+// rescans its directory.
+func ignoreFile(name string) bool {
+	return name == markerNoMedia || name == ignoreFileName || name == siloIgnoreFileName
 }
 
 // ignoredName reports whether a file or directory name matches the fixed

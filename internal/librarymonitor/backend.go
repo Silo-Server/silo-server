@@ -249,17 +249,18 @@ func expireMoves[M any](moves []M, now time.Time, wait time.Duration, at func(M)
 	return moves[n:]
 }
 
-// reportUnskipped reports a directory whose ignore markers no longer exclude
-// it, so its contents get scanned: one directory change for it, or for a
-// root, whose parent is outside the library, one change per entry in it.
-func reportUnskipped(emit func(Event), dir string, isRoot bool, entries []fs.DirEntry) {
+// reportFolder reports a directory whose contents need a scan, because its
+// ignore markers no longer exclude it or its ignore rules changed: one
+// directory change for it, or for a root, whose parent is outside the
+// library, one change per entry in it.
+func reportFolder(emit func(Event), dir string, isRoot bool, entries []fs.DirEntry) {
 	if !isRoot {
 		emit(Event{Kind: EventMovedTo, Dir: filepath.Dir(dir), Name: filepath.Base(dir), IsDir: true})
 		return
 	}
 	for _, entry := range entries {
 		name := entry.Name()
-		if ignoredName(name) || ignoreMarker(name) {
+		if ignoredName(name) || ignoreFile(name) {
 			continue
 		}
 		isDir := entry.IsDir() || (entry.Type()&fs.ModeSymlink != 0 && symlinkToDir(filepath.Join(dir, name)))

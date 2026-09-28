@@ -566,7 +566,7 @@ func (b *inotifyBackend) handle(wd int, mask, cookie uint32, name string, moves 
 	case mask&unix.IN_CREATE != 0:
 		b.arrived(EventCreate, parents, name, isDir)
 	case mask&unix.IN_CLOSE_WRITE != 0:
-		if !ignoredName(name) && !ignoreMarker(name) && !b.inSkipped(parents) {
+		if !ignoredName(name) && !ignoreFile(name) && !b.inSkipped(parents) {
 			for _, p := range parents {
 				b.emit(Event{Kind: EventCloseWrite, Dir: p.path, Name: name})
 			}
@@ -610,7 +610,7 @@ func (b *inotifyBackend) parentsOf(wd int) []inotifyParent {
 // itself.
 func (b *inotifyBackend) arrived(kind EventKind, parents []inotifyParent, name string, isDir bool) {
 	defer b.markerChanged(parents, name)
-	if ignoredName(name) || (!isDir && ignoreMarker(name)) || b.inSkipped(parents) {
+	if ignoredName(name) || (!isDir && ignoreFile(name)) || b.inSkipped(parents) {
 		return
 	}
 	if !isDir {
@@ -660,7 +660,7 @@ func (b *inotifyBackend) left(kind EventKind, parents []inotifyParent, name stri
 		b.loseRoots(lost)
 		b.rewalkAliased(aliased, lost)
 	}
-	if ignoredName(name) || (isDir && ignoredDir(name)) || (!isDir && ignoreMarker(name)) || b.inSkipped(parents) {
+	if ignoredName(name) || (isDir && ignoredDir(name)) || (!isDir && ignoreFile(name)) || b.inSkipped(parents) {
 		return
 	}
 	for _, p := range parents {
@@ -688,8 +688,8 @@ func (b *inotifyBackend) renamed(from inotifyMove, name string, isDir bool, pare
 	newDir := isDir || symlinkToDir(filepath.Join(parents[0].path, name))
 	// Nothing in a skipped directory is recorded or reported, and an ignore
 	// marker is re-evaluated below instead of reported.
-	oldIgnored := ignoredName(from.name) || (oldDir && ignoredDir(from.name)) || (!oldDir && ignoreMarker(from.name)) || b.inSkipped(from.parents)
-	newIgnored := ignoredName(name) || (newDir && ignoredDir(name)) || (!newDir && ignoreMarker(name)) || b.inSkipped(parents)
+	oldIgnored := ignoredName(from.name) || (oldDir && ignoredDir(from.name)) || (!oldDir && ignoreFile(from.name)) || b.inSkipped(from.parents)
+	newIgnored := ignoredName(name) || (newDir && ignoredDir(name)) || (!newDir && ignoreFile(name)) || b.inSkipped(parents)
 	var detached []int
 	var lost, aliased []string
 	if oldDir {
@@ -818,21 +818,23 @@ func (b *inotifyBackend) flushRewalks() {
 }
 
 // markerChanged re-evaluates the directories parents name after an event on
-// name in them, when name is an ignore marker (.nomedia, .ignore).
+// name in them, when name is an ignore file (see ignoreFile).
 func (b *inotifyBackend) markerChanged(parents []inotifyParent, name string) {
-	if !ignoreMarker(name) {
+	if !ignoreFile(name) {
 		return
 	}
 	for _, p := range parents {
-		b.reevaluate(p)
+		b.reevaluate(p, name != markerNoMedia)
 	}
 }
 
-// reevaluate applies a directory's current ignore markers. A directory they
+// reevaluate applies a directory's current ignore files. A directory they
 // now exclude keeps its own watch but drops everything recorded below it. A
 // directory they no longer exclude is walked, and reported so its contents
-// get scanned.
-func (b *inotifyBackend) reevaluate(p inotifyParent) {
+// get scanned. When rules changed (an .ignore or .siloignore was created,
+// rewritten, or removed) and the directory stays included, it is reported
+// too: its patterns may now include or exclude entries in it.
+func (b *inotifyBackend) reevaluate(p inotifyParent, rulesChanged bool) {
 	entries, err := os.ReadDir(p.path)
 	if err != nil {
 		return // gone; its parent's event drops it
@@ -840,8 +842,17 @@ func (b *inotifyBackend) reevaluate(p inotifyParent) {
 	skipped := dirSkipped(p.path, entries)
 	b.mu.Lock()
 	d := b.byPath[p.path]
-	if d == nil || d.skipped == skipped {
+	if d == nil || (d.skipped == skipped && (skipped || !rulesChanged)) {
 		b.mu.Unlock()
+		return
+	}
+	isRoot := false
+	for _, r := range p.roots {
+		isRoot = isRoot || r.path == p.path
+	}
+	if d.skipped == skipped {
+		b.mu.Unlock()
+		reportFolder(b.emit, p.path, isRoot, entries)
 		return
 	}
 	d.skipped = skipped
@@ -872,13 +883,9 @@ func (b *inotifyBackend) reevaluate(p inotifyParent) {
 		b.rewalkAliased(aliased, nil)
 		return
 	}
-	isRoot := false
-	for _, r := range p.roots {
-		isRoot = isRoot || r.path == p.path
-	}
 	b.mu.Unlock()
 	b.walkRegister(p.path, p.roots, false)
-	reportUnskipped(b.emit, p.path, isRoot, entries)
+	reportFolder(b.emit, p.path, isRoot, entries)
 }
 
 // handleSelf handles events about a watched directory itself. Deleting,
