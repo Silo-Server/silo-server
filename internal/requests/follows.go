@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Following a title: a profile that finds a title someone else has already
@@ -14,6 +15,12 @@ import (
 // is declined or withdrawn: the title is then no longer on its way, and the
 // follower can request it themselves. The requester is always notified and
 // never needs a follow.
+//
+// A series can have a completed request still waiting for the library and a
+// newer open one for other seasons. A follow made after the first completed
+// was made for the open one, so the first request's notification goes only to
+// the follows made before it completed, and closing the open one leaves those
+// follows for the completed request.
 
 // Follower is a profile waiting to hear that a requested title is available.
 type Follower struct {
@@ -159,15 +166,21 @@ func (r *Repository) FollowTitle(ctx context.Context, mediaType MediaType, tmdbI
 
 // forgetTitleFollows removes the follows on the title of a request that was
 // just declined or withdrawn, unless the title has another open request whose
-// followers are still waiting for it.
+// followers are still waiting for it. A follow made before a completed request
+// of the title completed stays until that request's notification goes out.
 func forgetTitleFollows(ctx context.Context, exec requestExecutor, closed *Request) error {
 	if _, err := exec.Exec(ctx, `
-		DELETE FROM media_request_follows
+		DELETE FROM media_request_follows f
 		WHERE media_type = $1 AND tmdb_id = $2
 		  AND NOT EXISTS (
 		    SELECT 1 FROM media_requests
 		    WHERE media_type = $1 AND provider = 'tmdb' AND tmdb_id = $2
 		      AND outcome = 'active' AND status <> 'completed' AND id <> $3)
+		  AND NOT EXISTS (
+		    SELECT 1 FROM media_requests
+		    WHERE media_type = $1 AND provider = 'tmdb' AND tmdb_id = $2
+		      AND outcome = 'active' AND status = 'completed'
+		      AND fulfilled_notified_at IS NULL AND completed_at >= f.created_at)
 	`, closed.MediaType, closed.TMDBID, closed.ID); err != nil {
 		return fmt.Errorf("forget title follows: %w", err)
 	}
@@ -207,12 +220,13 @@ func (r *Repository) FollowedTitles(ctx context.Context, mediaType MediaType, tm
 	return out, rows.Err()
 }
 
-func (r *Repository) ListTitleFollowers(ctx context.Context, mediaType MediaType, tmdbID int) ([]Follower, error) {
+func (r *Repository) ListTitleFollowers(ctx context.Context, mediaType MediaType, tmdbID int, followedBy *time.Time) ([]Follower, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT user_id, profile_id FROM media_request_follows
 		WHERE media_type = $1 AND tmdb_id = $2
+		  AND ($3::timestamptz IS NULL OR created_at <= $3)
 		ORDER BY created_at, user_id, profile_id
-	`, mediaType, tmdbID)
+	`, mediaType, tmdbID, followedBy)
 	if err != nil {
 		return nil, fmt.Errorf("list title followers: %w", err)
 	}

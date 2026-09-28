@@ -1991,7 +1991,8 @@ type fakeStore struct {
 	notified      []string
 	reconciled    []string
 	follows       map[string]Follower // key: media_type/tmdb_id/user_id/profile_id
-	clearErr      error               // returned by ClearTitleFollowers when set
+	followedAt    map[string]time.Time
+	clearErr      error // returned by ClearTitleFollowers when set
 	routes        []Route
 	factsSet      map[string]RoutingFacts
 	groupLimits   map[int64]*GroupLimit
@@ -2553,10 +2554,26 @@ func (f *fakeStore) seedFollow(mediaType MediaType, tmdbID int, viewer Viewer) {
 }
 
 func (f *fakeStore) seedFollowLocked(mediaType MediaType, tmdbID int, viewer Viewer) {
+	f.seedFollowAtLocked(mediaType, tmdbID, viewer, time.Now())
+}
+
+// seedFollowAt records a follow made at a given time.
+func (f *fakeStore) seedFollowAt(mediaType MediaType, tmdbID int, viewer Viewer, at time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.seedFollowAtLocked(mediaType, tmdbID, viewer, at)
+}
+
+func (f *fakeStore) seedFollowAtLocked(mediaType MediaType, tmdbID int, viewer Viewer, at time.Time) {
 	if f.follows == nil {
 		f.follows = map[string]Follower{}
 	}
-	f.follows[followKey(mediaType, tmdbID, viewer.UserID, viewer.ProfileID)] = Follower{UserID: viewer.UserID, ProfileID: viewer.ProfileID}
+	if f.followedAt == nil {
+		f.followedAt = map[string]time.Time{}
+	}
+	key := followKey(mediaType, tmdbID, viewer.UserID, viewer.ProfileID)
+	f.follows[key] = Follower{UserID: viewer.UserID, ProfileID: viewer.ProfileID}
+	f.followedAt[key] = at
 }
 
 func (f *fakeStore) UnfollowTitle(_ context.Context, mediaType MediaType, tmdbID int, viewer Viewer) error {
@@ -2578,13 +2595,13 @@ func (f *fakeStore) FollowedTitles(_ context.Context, mediaType MediaType, tmdbI
 	return out, nil
 }
 
-func (f *fakeStore) ListTitleFollowers(_ context.Context, mediaType MediaType, tmdbID int) ([]Follower, error) {
+func (f *fakeStore) ListTitleFollowers(_ context.Context, mediaType MediaType, tmdbID int, followedBy *time.Time) ([]Follower, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	prefix := fmt.Sprintf("%s/%d/", mediaType, tmdbID)
 	var out []Follower
 	for key, follower := range f.follows {
-		if strings.HasPrefix(key, prefix) {
+		if strings.HasPrefix(key, prefix) && (followedBy == nil || !f.followedAt[key].After(*followedBy)) {
 			out = append(out, follower)
 		}
 	}

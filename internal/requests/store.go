@@ -79,11 +79,12 @@ type Store interface {
 	// FollowTitle, UnfollowTitle and FollowedTitles manage a profile's follows
 	// on titles, keyed by account and profile; ListTitleFollowers and ClearTitleFollowers serve the
 	// fulfilled notification. All are idempotent. FollowTitle answers
-	// ErrNotRequested when the title has no open request.
+	// ErrNotRequested when the title has no open request. ListTitleFollowers
+	// lists the follows made at or before followedBy, or all when it is nil.
 	FollowTitle(ctx context.Context, mediaType MediaType, tmdbID int, viewer Viewer) error
 	UnfollowTitle(ctx context.Context, mediaType MediaType, tmdbID int, viewer Viewer) error
 	FollowedTitles(ctx context.Context, mediaType MediaType, tmdbIDs []int, viewer Viewer) (map[int]bool, error)
-	ListTitleFollowers(ctx context.Context, mediaType MediaType, tmdbID int) ([]Follower, error)
+	ListTitleFollowers(ctx context.Context, mediaType MediaType, tmdbID int, followedBy *time.Time) ([]Follower, error)
 	ClearTitleFollowers(ctx context.Context, mediaType MediaType, tmdbID int, followers []Follower) error
 	// ListRoutes returns every routing rule, in no particular order;
 	// decideRoutes orders them.
