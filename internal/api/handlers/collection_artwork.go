@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 )
@@ -121,10 +122,11 @@ func downloadCollectionImageURL(ctx context.Context, client *http.Client, rawURL
 }
 
 // uploadCollectionImageVariants generates resized variants for the given
-// image bytes, uploads them under
-// "{prefix}/{collectionID}/{imageType}/{contentVersion}/", and returns the S3
-// path of the original variant plus a thumbhash computed from the w300 variant.
-// The content-version segment gives replacement artwork a new URL (issue #1258).
+// image bytes, uploads them as revisioned artwork keys under
+// "{prefix}/{collectionID}/{imageType}/" (e.g. "original.{revision}.webp"), and
+// returns the S3 path of the original variant plus a thumbhash computed from
+// the w300 variant. The content revision gives replacement artwork a new URL
+// (issue #1258).
 func uploadCollectionImageVariants(
 	ctx context.Context,
 	store blobstore.Store,
@@ -149,16 +151,17 @@ func uploadCollectionImageVariants(
 		return "", "", fmt.Errorf("generating image variants: %w", err)
 	}
 
-	// Version the key by content so replacement artwork lands on a new path,
+	// Revision the key by content so replacement artwork lands on a new key,
 	// and therefore a new public URL, rather than overwriting a fixed key that
-	// stays cached by the CDN and browsers (issue #1258). The version is a path
-	// segment under the imageType prefix, so removeCollectionImageVariants still
-	// clears every old version by that prefix.
-	version := collectionImageVersion(fileData)
+	// stays cached by the CDN and browsers (issue #1258). Revisions stay in the
+	// imageType directory, so removeCollectionImageVariants still clears every
+	// one of them by that prefix.
+	basePath := collectionImageDir(prefix, collectionID, imageType)
+	revision := collectionImageRevision(fileData)
 
 	var w300Data []byte
 	for _, v := range result.Variants {
-		key := fmt.Sprintf("%s/%s/%s/%s/%s%s", prefix, collectionID, imageType, version, v.Key, result.Ext)
+		key := artworkkey.Build(basePath, v.Key, revision, result.Ext)
 		if err := store.Put(ctx, key, v.Data); err != nil {
 			return "", "", fmt.Errorf("uploading %s: %w", v.Key, err)
 		}
@@ -179,41 +182,34 @@ func uploadCollectionImageVariants(
 	return s3Path, thumbhashStr, nil
 }
 
-// collectionImageVersion derives a short, content-addressed path segment. Two
-// uploads with the same bytes reuse the same segment (idempotent re-upload);
-// different bytes produce a different segment, so a replacement is served from
-// a new URL that no cache holds yet.
-func collectionImageVersion(data []byte) string {
+// collectionImageRevision derives a short content revision for artwork keys.
+// Two uploads with the same bytes reuse the same revision (idempotent
+// re-upload); different bytes produce a different revision, so a replacement is
+// served from a new URL that no cache holds yet.
+func collectionImageRevision(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:8])
 }
 
-// collectionImagePathVersion extracts the content-version segment from a stored
-// original-variant path such as
-// "{prefix}/{id}/{imageType}/{version}/original.webp". It returns "" for paths
-// that do not carry a version (legacy fixed keys, template paths, empty).
-func collectionImagePathVersion(storedPath string) string {
-	parts := strings.Split(storedPath, "/")
-	if len(parts) < 2 {
-		return ""
-	}
-	return parts[len(parts)-2]
+// collectionImageDir returns the directory holding every revision and variant
+// of one collection image, without a trailing slash.
+func collectionImageDir(prefix, collectionID, imageType string) string {
+	return fmt.Sprintf("%s/%s/%s", prefix, collectionID, imageType)
 }
 
-// removeReplacedCollectionImageVersion deletes the variants of the version that
-// a replacement superseded, identified from the previously stored path. It runs
-// after the new version is committed, and currentPath is the path the row holds
-// on a fresh read at cleanup time.
+// removeReplacedCollectionImageVersion deletes the variants of the revision
+// that a replacement superseded, identified from the previously stored path. It
+// runs after the new revision is committed, and currentPath is the path the row
+// holds on a fresh read at cleanup time.
 //
-// Only the specific superseded version's folder is removed, never "everything
-// but the new version", so a concurrent replacement that committed its own new
-// version is never deleted. The version is skipped when the row still points at
-// it (currentPath), which guards against a concurrent restore of the same
-// content: content-addressed keys mean re-uploading the old bytes reuses the
-// old key, so deleting it would strip the artwork the row now references. When
-// oldPath is not one of our content-versioned keys (a legacy fixed key, a
-// bundled-template path, or empty) there is no versioned folder to remove and
-// this is a no-op; those rare orphans are harmless.
+// Only the superseded revision is removed, never "everything but the new
+// revision", so a concurrent replacement that committed its own revision is
+// never deleted. The revision is skipped when the row still points at it
+// (currentPath), which guards against a concurrent restore of the same content:
+// re-uploading the old bytes reuses the old keys, so deleting them would strip
+// the artwork the row now references. A legacy fixed key (no revision) selects
+// the unrevisioned variants in the same directory. An oldPath outside this
+// collection image's directory (a bundled-template path, or empty) is a no-op.
 func removeReplacedCollectionImageVersion(
 	ctx context.Context,
 	store blobstore.Store,
@@ -222,20 +218,23 @@ func removeReplacedCollectionImageVersion(
 	if store == nil {
 		return nil
 	}
-	oldVersion := collectionImagePathVersion(oldPath)
-	if oldVersion == "" || oldVersion == collectionImagePathVersion(currentPath) {
+	dir := collectionImageDir(prefix, collectionID, imageType) + "/"
+	if !isCollectionImageKeyIn(dir, oldPath) {
 		return nil
 	}
-	// Delete exactly the old version's folder. For a non-versioned oldPath this
-	// prefix does not exist, so List returns nothing and nothing is deleted.
-	versionPrefix := fmt.Sprintf("%s/%s/%s/%s/", prefix, collectionID, imageType, oldVersion)
-	items, _, err := store.List(ctx, versionPrefix, "", 0)
+	oldRevision := artworkkey.Revision(oldPath)
+	if isCollectionImageKeyIn(dir, currentPath) && artworkkey.Revision(currentPath) == oldRevision {
+		return nil
+	}
+	items, _, err := store.List(ctx, dir, "", 0)
 	if err != nil {
 		return fmt.Errorf("listing objects: %w", err)
 	}
 	keys := make([]string, 0, len(items))
 	for _, item := range items {
-		keys = append(keys, item.Key)
+		if isCollectionImageKeyIn(dir, item.Key) && artworkkey.Revision(item.Key) == oldRevision {
+			keys = append(keys, item.Key)
+		}
 	}
 	if len(keys) == 0 {
 		return nil
@@ -244,6 +243,13 @@ func removeReplacedCollectionImageVersion(
 		return fmt.Errorf("deleting replaced collection variants: %w", err)
 	}
 	return nil
+}
+
+// isCollectionImageKeyIn reports whether key is an object directly inside dir
+// (which carries a trailing slash).
+func isCollectionImageKeyIn(dir, key string) bool {
+	name, ok := strings.CutPrefix(key, dir)
+	return ok && name != "" && !strings.Contains(name, "/")
 }
 
 // removeCollectionImageVariants deletes every stored variant for the given

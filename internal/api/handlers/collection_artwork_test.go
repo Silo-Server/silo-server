@@ -9,11 +9,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"testing/fstest"
 
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 )
@@ -136,21 +138,21 @@ func TestStoreBundledCollectionPosterIfS3Configured_UploadsTemplatePoster(t *tes
 	if !stored {
 		t.Fatal("stored = false, want true")
 	}
-	// Keys are content-addressed by the source bytes (issue #1258), so the
-	// stored path carries the version segment for the template's own bytes.
-	version := collectionImageVersion(testCollectionPosterJPEG(t))
-	base := "collection-images/collection-1/poster/" + version
-	if gotPath != base+"/original.webp" {
-		t.Fatalf("path = %q, want %q", gotPath, base+"/original.webp")
+	// Keys carry a content revision of the source bytes (issue #1258), so the
+	// stored path names the revision of the template's own bytes.
+	revision := collectionImageRevision(testCollectionPosterJPEG(t))
+	base := "collection-images/collection-1/poster/"
+	if gotPath != base+"original."+revision+".webp" {
+		t.Fatalf("path = %q, want %q", gotPath, base+"original."+revision+".webp")
 	}
 	if gotThumbhash == "" {
 		t.Fatal("thumbhash is empty")
 	}
 
 	want := map[string]bool{
-		"/public-assets/" + base + "/original.webp": true,
-		"/public-assets/" + base + "/w500.webp":     true,
-		"/public-assets/" + base + "/w300.webp":     true,
+		"/public-assets/" + base + "original." + revision + ".webp": true,
+		"/public-assets/" + base + "w500." + revision + ".webp":     true,
+		"/public-assets/" + base + "w300." + revision + ".webp":     true,
 	}
 	puts := recorder.putPaths()
 	if len(puts) != len(want) {
@@ -165,9 +167,9 @@ func TestStoreBundledCollectionPosterIfS3Configured_UploadsTemplatePoster(t *tes
 
 // Issue #1258: replacing collection artwork left the original image displayed
 // because every upload wrote the same fixed key, so the public URL never
-// changed and CDN/browser caches kept serving the old bytes. Keys are now
-// content-addressed: different bytes yield a different path (a fresh URL),
-// while identical bytes stay stable.
+// changed and CDN/browser caches kept serving the old bytes. Keys now carry a
+// content revision: different bytes yield a different key (a fresh URL), while
+// identical bytes stay stable.
 func TestUploadCollectionImageVariants_ContentAddressedKeysBustCache(t *testing.T) {
 	recorder := newCollectionArtworkS3Recorder(t)
 	store := blobstore.NewS3(recorder.client())
@@ -194,11 +196,15 @@ func TestUploadCollectionImageVariants_ContentAddressedKeysBustCache(t *testing.
 	if pathA != pathARepeat {
 		t.Fatalf("identical bytes produced different keys %q and %q", pathA, pathARepeat)
 	}
-	// The version is a path segment under .../poster/, so the whole prefix is
-	// still cleanable by removeCollectionImageVariants.
-	if !strings.HasPrefix(pathA, "collection-images/collection-1/poster/") ||
-		!strings.HasSuffix(pathA, "/original.webp") {
+	// The revision uses the shared artworkkey shape inside .../poster/, so the
+	// whole prefix is still cleanable by removeCollectionImageVariants and the
+	// signed artwork route treats the key as immutable.
+	if !strings.HasPrefix(pathA, "collection-images/collection-1/poster/original.") ||
+		artworkkey.Revision(pathA) == "" {
 		t.Fatalf("unexpected key shape %q", pathA)
+	}
+	if got := cardThumbnailPath(pathA); got != artworkkey.Variant(pathA, "w300") {
+		t.Fatalf("card thumbnail path = %q, want the w300 variant of %q", got, pathA)
 	}
 }
 
@@ -236,21 +242,6 @@ func testCollectionPosterJPEG(t *testing.T) []byte {
 	return buf.Bytes()
 }
 
-func TestCollectionImagePathVersion(t *testing.T) {
-	cases := map[string]string{
-		"collection-images/c1/poster/abc123def456abcd/original.webp":    "abc123def456abcd",
-		"user-collection-images/c1/backdrop/deadbeefdeadbeef/w300.webp": "deadbeefdeadbeef",
-		"collection-images/c1/poster/original.webp":                     "poster", // legacy fixed key: no version segment
-		"":     "",
-		"solo": "",
-	}
-	for in, want := range cases {
-		if got := collectionImagePathVersion(in); got != want {
-			t.Errorf("collectionImagePathVersion(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 // stubListDeleteStore satisfies blobstore.Store but only implements List and
 // Delete; removeStaleCollectionImageVariants uses no other method.
 type stubListDeleteStore struct {
@@ -276,63 +267,82 @@ func (s *stubListDeleteStore) Delete(_ context.Context, keys []string) (int, err
 
 func TestRemoveReplacedCollectionImageVersion_DeletesOnlySupersededVersion(t *testing.T) {
 	store := &stubListDeleteStore{keys: []string{
-		"collection-images/c1/poster/oldversion000000/original.webp",
-		"collection-images/c1/poster/oldversion000000/w300.webp",
-		// A concurrent replacement's committed version must never be deleted.
-		"collection-images/c1/poster/concurrentaaaa11/original.webp",
-		"collection-images/c1/poster/newversion111111/original.webp",
-		"collection-images/c1/poster/newversion111111/w300.webp",
+		"collection-images/c1/poster/original.0000000000000001.webp",
+		"collection-images/c1/poster/w300.0000000000000001.webp",
+		// A concurrent replacement's committed revision must never be deleted.
+		"collection-images/c1/poster/original.00000000000000cc.webp",
+		"collection-images/c1/poster/original.0000000000000002.webp",
+		"collection-images/c1/poster/w300.0000000000000002.webp",
+		// Legacy fixed keys belong to no revision here.
+		"collection-images/c1/poster/original.webp",
+		// Another image type of the same collection is never touched.
+		"collection-images/c1/backdrop/original.0000000000000001.webp",
 	}}
-	oldPath := "collection-images/c1/poster/oldversion000000/original.webp"
-	currentPath := "collection-images/c1/poster/newversion111111/original.webp"
+	oldPath := "collection-images/c1/poster/original.0000000000000001.webp"
+	currentPath := "collection-images/c1/poster/original.0000000000000002.webp"
 	if err := removeReplacedCollectionImageVersion(context.Background(), store, adminCollectionImagePrefix, "c1", "poster", oldPath, currentPath); err != nil {
 		t.Fatalf("removeReplacedCollectionImageVersion: %v", err)
 	}
-	deleted := map[string]bool{}
-	for _, k := range store.deleted {
-		deleted[k] = true
+	assertCollectionImageDeletes(t, store.deleted,
+		"collection-images/c1/poster/original.0000000000000001.webp",
+		"collection-images/c1/poster/w300.0000000000000001.webp",
+	)
+}
+
+// Replacing pre-revision artwork removes the legacy fixed keys, which no
+// later replacement could otherwise identify, and keeps every revision.
+func TestRemoveReplacedCollectionImageVersion_RemovesLegacyFixedKeys(t *testing.T) {
+	store := &stubListDeleteStore{keys: []string{
+		"collection-images/c1/poster/original.webp",
+		"collection-images/c1/poster/w500.webp",
+		"collection-images/c1/poster/w300.webp",
+		"collection-images/c1/poster/original.0000000000000002.webp",
+		"collection-images/c1/poster/w300.0000000000000002.webp",
+	}}
+	if err := removeReplacedCollectionImageVersion(context.Background(), store, adminCollectionImagePrefix, "c1", "poster",
+		"collection-images/c1/poster/original.webp",
+		"collection-images/c1/poster/original.0000000000000002.webp",
+	); err != nil {
+		t.Fatalf("removeReplacedCollectionImageVersion: %v", err)
 	}
-	for _, k := range []string{
-		"collection-images/c1/poster/oldversion000000/original.webp",
-		"collection-images/c1/poster/oldversion000000/w300.webp",
-	} {
-		if !deleted[k] {
-			t.Errorf("expected superseded %q to be deleted", k)
-		}
-	}
-	// Neither the new version nor a concurrent request's version is touched.
-	for _, k := range []string{
-		"collection-images/c1/poster/newversion111111/original.webp",
-		"collection-images/c1/poster/newversion111111/w300.webp",
-		"collection-images/c1/poster/concurrentaaaa11/original.webp",
-	} {
-		if deleted[k] {
-			t.Errorf("did not expect %q to be deleted", k)
-		}
+	assertCollectionImageDeletes(t, store.deleted,
+		"collection-images/c1/poster/original.webp",
+		"collection-images/c1/poster/w500.webp",
+		"collection-images/c1/poster/w300.webp",
+	)
+}
+
+func assertCollectionImageDeletes(t *testing.T, got []string, want ...string) {
+	t.Helper()
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("deleted = %#v, want %#v", got, want)
 	}
 }
 
 func TestRemoveReplacedCollectionImageVersion_NoopCases(t *testing.T) {
-	current := "collection-images/c1/poster/newversion111111/original.webp"
-	old := "collection-images/c1/poster/oldversion000000/original.webp"
+	current := "collection-images/c1/poster/original.0000000000000002.webp"
+	old := "collection-images/c1/poster/original.0000000000000001.webp"
 	cases := []struct{ name, oldPath, currentPath string }{
-		// A legacy fixed key has no version folder to remove.
-		{"legacy fixed key", "collection-images/c1/poster/original.webp", current},
 		// A bundled-template path is not one of our S3 keys.
 		{"template path", "/images/collection-templates/x.jpg", current},
+		// Another collection's key is never cleaned up from here.
+		{"other collection", "collection-images/c2/poster/original.0000000000000001.webp", current},
 		{"empty", "", current},
-		// Identical content re-upload: same version, nothing to delete.
-		{"same version", current, current},
+		// Identical content re-upload: same revision, nothing to delete.
+		{"same revision", current, current},
 		// Concurrent restore of the old content: the row points back at the
-		// version we would clean up, so it must be preserved.
-		{"row restored old version", old, old},
+		// revision we would clean up, so it must be preserved.
+		{"row restored old revision", old, old},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			store := &stubListDeleteStore{keys: []string{
 				"collection-images/c1/poster/original.webp",
-				"collection-images/c1/poster/oldversion000000/original.webp",
-				"collection-images/c1/poster/newversion111111/original.webp",
+				old,
+				current,
+				"collection-images/c2/poster/original.0000000000000001.webp",
 			}}
 			if err := removeReplacedCollectionImageVersion(context.Background(), store, adminCollectionImagePrefix, "c1", "poster", tc.oldPath, tc.currentPath); err != nil {
 				t.Fatalf("removeReplacedCollectionImageVersion: %v", err)
