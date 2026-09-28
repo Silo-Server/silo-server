@@ -90,7 +90,7 @@ https://siloserver.org/docs/manage-collections.
 
 Every built-in template ships two files named after its ID:
 
-| File | Size | Enforced by |
+| File | Size | Existence checked by |
 | --- | --- | --- |
 | `web/assets-source/collection-templates/raw/{id}.png` | 1024×1536, generated plate without text | `TestBuiltinTemplateSourcePlatesStayOutOfPublicAssets` |
 | `web/public/images/collection-templates/{id}.jpg` | 1000×1500, final poster with text | `TestBuiltinTemplatePosterAssetsExist` |
@@ -98,8 +98,9 @@ Every built-in template ships two files named after its ID:
 The raw plate keeps typography reproducible without generating the image again. Raw plates must
 stay out of `web/public/`: the same test fails if
 `web/public/images/collection-templates/raw` exists. `TestBuiltinCatalog` checks that every
-poster path sits under `/images/collection-templates/`. No test catches an orphaned asset, so
-delete both files when you remove a template.
+poster path sits under `/images/collection-templates/`. No test checks image dimensions or
+catches an orphaned asset (#1641), so size files by hand and delete both when you remove a
+template.
 
 Art rules:
 

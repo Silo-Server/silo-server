@@ -361,9 +361,10 @@ application listener; the API process serves it only on `SILO_METRICS_LISTEN`.
   enumerate media locations. A node's unauthenticated `/health` withholds paths
   on the same terms. Paths appear only in the admin resources response and a
   node's bearer-authenticated `/status`.
-- **Probing is bounded.** At most eight mounts are sampled per host, the
-  transcode scratch directory first, then library roots in order, and the
-  process logs how many go unsampled. Each mount costs a `statfs` per interval,
+- **Probing is bounded.** Each process's sampler checks at most eight mounts:
+  the transcode scratch directory first, then library roots in order. The
+  process logs how many go unsampled. The cap is per process, not per host, so
+  co-located processes each probe their own set. Each mount costs a `statfs` per interval,
   and one on an unresponsive network mount cannot be interrupted, so the cap
   bounds probing as well as reporting. A mount that stops responding keeps its
   last good numbers marked `stale` and never delays a health response; a path
