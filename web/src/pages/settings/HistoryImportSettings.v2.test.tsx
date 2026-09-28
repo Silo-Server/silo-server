@@ -163,22 +163,20 @@ it("lets an admin choose the profile", () => {
   expect(screen.getByRole("combobox", { name: "Import into profile" })).toBeTruthy();
 });
 
-it("explains a refused import into another profile", () => {
+it("keeps the server's message for a secondary profile's refused import", () => {
+  // A secondary profile only imports into itself, so a 403 is some other
+  // refusal (demo mode here) and must not be reworded as a cross-profile one.
   state.createError = new V2ProblemError("createHistoryImportRun", {
     type: "https://silo.example/problems/forbidden",
     title: "Forbidden",
     status: 403,
-    detail: "Only the primary profile can import watch history into another profile",
+    detail: "This action is not available in demo mode.",
     instance: "/api/v2/history-imports/runs",
   });
   renderPage();
-  expect(
-    screen
-      .getAllByRole("alert")
-      .some((alert) =>
-        alert.textContent?.includes("This profile can only import watch history into itself"),
-      ),
-  ).toBe(true);
+  const alerts = screen.getAllByRole("alert").map((alert) => alert.textContent ?? "");
+  expect(alerts.some((text) => text.includes("Ask the primary profile"))).toBe(false);
+  expect(alerts.some((text) => text.includes(state.createError!.message))).toBe(true);
 });
 
 it("keeps the server's message for a refused import by the primary profile", () => {

@@ -3,7 +3,6 @@ import { useNavigate, useSearchParams } from "react-router";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useAuth } from "@/hooks/useAuth";
-import { V2ProblemError } from "@/api/v2/request";
 import { useProfiles } from "@/hooks/queries/profiles";
 import {
   useCreateHistoryImportRun,
@@ -664,13 +663,10 @@ export default function HistoryImportSettings() {
         </div>
         {startError && (
           <p role="alert" className="text-destructive text-sm">
-            {/* The cross-profile rule only limits profiles that import for themselves;
-                a 403 for anyone else (demo mode, an unverified PIN) keeps its own message. */}
-            {!canImportForOthers &&
-            startError instanceof V2ProblemError &&
-            startError.status === 403
-              ? "This profile can only import watch history into itself. Ask the primary profile to import into other profiles."
-              : startError.message}
+            {/* The server's reason is shown as is: a profile that can't import for
+                others only ever targets itself, so its 403 is some other refusal
+                (demo mode, say), and the cross-profile refusal already explains itself. */}
+            {startError.message}
           </p>
         )}
       </SettingsGroup>
