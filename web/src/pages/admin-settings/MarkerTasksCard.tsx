@@ -22,11 +22,13 @@ function formatTaskResult(task: TaskInfo | undefined) {
   if (task.key === "contribute_markers") {
     const submitted = numberFromResultData(data, "submitted");
     const skipped = numberFromResultData(data, "skipped");
+    const invalid = numberFromResultData(data, "invalid");
     const failed = numberFromResultData(data, "failed");
     const retryAfter = numberFromResultData(data, "retry_after_seconds");
     const parts = [
       submitted != null ? `${submitted} submitted` : null,
       skipped != null ? `${skipped} skipped` : null,
+      invalid != null && invalid > 0 ? `${invalid} refused by the provider` : null,
       failed != null ? `${failed} failed` : null,
     ].filter(Boolean);
     if (parts.length > 0) {
@@ -123,7 +125,7 @@ export function MarkerTasksCard() {
       <TaskActionRow
         task={detectTask}
         fallbackName="Detect markers on this server"
-        fallbackDescription="Analyzes files for intros in libraries with marker detection enabled."
+        fallbackDescription="Analyzes files for intros and credits in libraries with marker detection enabled."
         onRun={() => void run("detect_intro_markers")}
         pending={pendingTasks.has("detect_intro_markers")}
       />

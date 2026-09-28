@@ -146,6 +146,15 @@ open source. [GitHub Sponsors](https://github.com/sponsors/quick104) covers AI
 development tooling (Claude, Codex), push-notification relay infrastructure, and
 future project costs. Bug reports, code, and documentation help just as much.
 
+Code review is supported by [Macroscope](https://macroscope.com) through its
+open source program.
+
+<p>
+  <a href="https://macroscope.com">
+    <img alt="Sponsored by Macroscope" src="assets/macroscope-banner.png" width="400">
+  </a>
+</p>
+
 ## License and trademarks
 
 Silo's source code is licensed under the

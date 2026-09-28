@@ -24,7 +24,8 @@ password. Changing the password does not revoke existing login sessions; users c
 revoke those separately through the account sessions API.
 
 Accounts whose local password login is disabled keep their credential at the external provider and
-cannot use this flow.
+cannot use this flow. An administrator can also make a password temporary or issue a reset link;
+see [temporary passwords](#temporary-passwords) and [password reset links](#password-reset-links).
 
 ### `GET /auth/account/capability`
 
@@ -90,6 +91,86 @@ returns `409 conflict`. A capability read does not authorize the write: the
 server checks the current account and profile again. This credential operation
 does not require If-Match.
 
+### Temporary passwords
+
+An administrator can make a password temporary when setting it (see
+[administrator accounts](admin-users-api.md#passwords)). The account's `Account`
+document then reports `password_change_required: true`: in the login, setup,
+signup, device-pairing and invitation token pairs, and in `GET /account/me`.
+
+Until the account chooses a new password, every session it opens may call only:
+
+- `GET /account/me`
+- `GET /account/password/capability`
+- `POST /account/password`
+- `POST /auth/logout`
+
+Anything else returns `403 password_change_required` (v1: `403` with error code
+`password_change_required`). Refreshing is public and stays available. Such a
+session may change the password without selecting a profile. The current
+(temporary) password is still required, and reusing it as the new password returns
+`422 validation_failed` at `body.new_password`.
+
+After `POST /account/password` succeeds, refresh the tokens: the access token keeps
+the restriction until it is replaced, and the refreshed pair no longer carries it.
+The change revokes every other session of the account, since each was opened with
+the temporary password.
+An administrator impersonating the account is not restricted. Jellyfin and
+Audiobookshelf compatible sign-ins refuse an account holding a temporary password,
+because those clients cannot run the change; the account signs in to Silo first.
+
+### Password reset links
+
+An administrator can issue a single-use link that lets the account holder choose a
+new password (see [administrator accounts](admin-users-api.md#passwords)). The link
+opens `/reset-password/{token}` in the web client, which uses two public operations:
+
+- `GET /password-resets/{token}` returns `username`, `server_name`, and `expires_at`.
+- `POST /password-resets/{token}/complete` with `{ "password": "..." }` sets the new
+  password and returns 200.
+
+Every unusable link returns the same `404 not_found`, whether it is unknown, expired,
+used, replaced, or outdated by another password change, or its account is disabled.
+Invalid passwords return `422 validation_failed` at `body.password` and leave the link
+unspent. Both operations spend the `password_reset` rate-limit budget, 20 requests per
+minute per client IP by default.
+
+Completing the reset spends the link, sets the password, clears a pending temporary
+password, and revokes every login session of the account, including administrator
+sessions impersonating it, in one transaction. The response then signs the caller
+in, using the same shape as invitation acceptance: `status: "completed"`, `username`, and
+`login_status`. With `signed_in`, `tokens` carries the new token pair. With
+`sign_in_required`, the password is set but no session was opened; sign in normally.
+Never replay a completion, since the link is already spent.
+
+Links are stored only as SHA-256 digests, and the request log redacts the `{token}`
+path segment.
+
+### Self-service password reset
+
+When an administrator turns on `password_reset.self_service_enabled` (off by
+default), an account holder can request a reset link from the sign-in page. Clients
+read `GET /capabilities/password-reset`, a public server-wide capability document,
+and offer the request only when `state` is `available`. The state is `disabled`
+while the setting is off, and `not_configured` while the server lacks a configured
+mail server or `server.public_url`.
+
+`POST /password-resets` with `{ "login": "..." }` names the account by username or
+email address, the same way sign-in does. Every accepted request returns `202` with
+no body, whether or not an account matched. The server looks the account up and
+sends the email in the background, so neither the answer nor its timing reveals
+whether the account exists. The request fails only when the capability is off
+(`409 capability_disabled`), not configured (`409 capability_not_configured`), or
+rate limited (`429`, the `password_reset_request` budget: 5 requests per minute per
+client IP by default).
+
+The server emails a link only to an enabled account that signs in with a local
+password and has a valid email address. The link opens the same
+`/reset-password/{token}` screen as an administrator's link and expires after an
+hour. An account gets at most one requested link every five minutes. A requested
+link replaces the account's earlier requested link, but never a live link an
+administrator issued; while one exists, requests send nothing.
+
 ## Email addresses
 
 Every v2 write that stores an account address (`setupServer`, `signup`,
@@ -122,8 +203,9 @@ precision. There is no `revoked_at` member because every returned session is act
 `DELETE /api/v2/auth/sessions/{id}` revokes a session owned by the caller's account and returns
 `204 No Content`. A missing session or one owned by another account returns `404 not_found`.
 
-The `cleanup_auth_sessions` scheduled task deletes expired login-session rows at startup and
-once every 24 hours by default. Revoked sessions remain stored until their expiry passes. The v1
+The login-session step of the `database_maintenance` scheduled task deletes expired
+login-session rows daily at 05:00 by default. Revoked sessions remain stored until their
+expiry passes. The v1
 session-list response shape and query remain unchanged, but expired rows disappear from that
 listing once cleanup deletes them. Jellyfin-compatible clients continue to use the shared login
 session validity checks; cleanup removes only sessions that have already expired.

@@ -10,12 +10,7 @@ import (
 )
 
 var (
-	plexEditionTagRe = regexp.MustCompile(`(?i)\{edition-([^}]+)\}`)
-	// Episode bounds allow four digits so absolute-numbered ranges
-	// (S23E1162-E1163) are recognized. Unlike seasonEpisodeRe a longer run
-	// simply fails to match, which only drops an optional multi-episode hint
-	// instead of reporting a truncated range.
-	multiEpisodeRangeRe   = regexp.MustCompile(`(?i)[Ss](\d{1,4})[._\- ]?[Ee](\d{1,4})\s*[-_]\s*[Ee]?(\d{1,4})`)
+	plexEditionTagRe      = regexp.MustCompile(`(?i)\{edition-([^}]+)\}`)
 	presentationPartRe    = regexp.MustCompile(`(?i)(?:^|[.\-_\s])(cd|disc|part|pt)(?:\s*|[._-]?)(\d{1,2})(?:$|[.\-_\s])`)
 	variantReleaseGroupRe = regexp.MustCompile(`(?i)(?:^|[.\s_-])(?:remux|web[ ._-]?dl|webrip|bluray|bdrip|brrip|hdr|dv|2160p|1080p|720p|x264|x265|h\.?264|h\.?265|hevc|av1|aac|ac3|eac3|dts|truehd|atmos).*-([a-z0-9][a-z0-9-]{1,31})$`)
 	variantCleanupSepRe   = regexp.MustCompile(`[.\-_]+`)
@@ -115,7 +110,7 @@ func EditionDisplayLabel(key string) string {
 	return strings.Join(parts, " ")
 }
 
-func ParseVariantHints(filePath string, libraryType string) *VariantHints {
+func ParseVariantHints(filePath string, libraryType string, libraryRoots ...string) *VariantHints {
 	cleanPath := filepath.ToSlash(filepath.Clean(filePath))
 	if cleanPath == "" {
 		return &VariantHints{}
@@ -179,19 +174,21 @@ func ParseVariantHints(filePath string, libraryType string) *VariantHints {
 		}
 	}
 
-	if match := multiEpisodeRangeRe.FindStringSubmatch(baseNoExt); match != nil {
-		start, _ := strconv.Atoi(match[2])
-		end, _ := strconv.Atoi(match[3])
+	seriesLibrary := normalizeInferLibraryType(libraryType) == seriesContentType
+	libraryRoot := deepestContainingLibraryRoot(cleanPath, libraryRoots)
+	directories := directorySegmentsWithinRoot(cleanPath, libraryRoot)
+	allowNumericSeason := seriesLibrary && (libraryRoot == "" || len(directories) > 1)
+	if token, ok := parseEpisodeToken(baseNoExt, directories, allowNumericSeason, seriesLibrary); ok && token.episodeEnd > token.episode {
 		hints.PresentationKind = "multi_episode"
-		hints.PresentationGroupKey = normalizePresentationGroup(baseNoExt, match[0])
-		hints.MultiEpisodeStart = start
-		hints.MultiEpisodeEnd = end
+		hints.PresentationGroupKey = normalizePresentationGroup(baseNoExt, baseNoExt[token.start:token.end])
+		hints.MultiEpisodeStart = token.episode
+		hints.MultiEpisodeEnd = token.episodeEnd
 		return hints
 	}
 
 	if match := presentationPartRe.FindStringSubmatch(" " + baseNoExt + " "); match != nil {
 		partIndex, _ := strconv.Atoi(match[2])
-		ctx := ResolvePathContext(cleanPath, libraryType)
+		ctx := ResolvePathContext(cleanPath, libraryType, libraryRoots...)
 		hints.PresentationKind = "multipart_movie"
 		if ctx != nil && ctx.Type == "series" {
 			hints.PresentationKind = "split_episode"
@@ -209,7 +206,7 @@ func editionHeuristicSurface(baseNoExt string, folderTitle string, folderYear in
 	surface = plexEditionTagRe.ReplaceAllString(surface, " ")
 	if stem := parseInferMovieStem(surface, folderTitle, folderYear); stem.Title != "" && stem.Year != 0 {
 		surface = stem.Remainder
-	} else if m := titleYearRe.FindStringSubmatch(surface); m != nil {
+	} else if m := inferTitleYearRe.FindStringSubmatch(surface); m != nil {
 		surface = strings.TrimSpace(strings.TrimPrefix(surface, m[0]))
 	}
 	surface = variantQualityTokenRe.ReplaceAllString(surface, " ")

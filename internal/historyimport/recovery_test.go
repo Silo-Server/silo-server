@@ -102,24 +102,24 @@ func testImportedStore(t *testing.T, store userstore.UserStore) {
 	service := &Service{stores: provider, watchState: watchstate.NewService(provider)}
 	stamp := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	record := Record{Played: true, DurationSeconds: 100, UpdatedAt: stamp, LastPlayedAt: new(stamp)}
-	updated, created, err := service.applyImportedWatch(ctx, 1, "p", "movie", record)
-	if err != nil || !updated || !created {
-		t.Fatalf("first import=%v/%v %v", updated, created, err)
+	outcome, err := service.applyImportedWatch(ctx, 1, "p", "movie", record)
+	if err != nil || !outcome.ProgressWritten || !outcome.HistoryCreated {
+		t.Fatalf("first import=%+v %v", outcome, err)
 	}
-	updated, created, err = service.applyImportedWatch(ctx, 1, "p", "movie", record)
-	if err != nil || updated || created {
-		t.Fatalf("replay=%v/%v %v", updated, created, err)
+	outcome, err = service.applyImportedWatch(ctx, 1, "p", "movie", record)
+	if err != nil || outcome.ProgressWritten || outcome.HistoryCreated {
+		t.Fatalf("replay=%+v %v", outcome, err)
 	}
 	if err := store.SetProgressAt(ctx, "p", "movie", 50, 100, true, stamp.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	updated, _, err = service.applyImportedWatch(ctx, 1, "p", "movie", Record{DurationSeconds: 100, PositionSeconds: 10, UpdatedAt: stamp.Add(time.Minute)})
-	if err != nil || updated {
-		t.Fatalf("older import=%v %v", updated, err)
+	outcome, err = service.applyImportedWatch(ctx, 1, "p", "movie", Record{DurationSeconds: 100, PositionSeconds: 10, UpdatedAt: stamp.Add(time.Minute)})
+	if err != nil || outcome.ProgressWritten {
+		t.Fatalf("older import=%+v %v", outcome, err)
 	}
-	updated, _, err = service.applyImportedWatch(ctx, 1, "p", "movie", Record{DurationSeconds: 100, PositionSeconds: 20})
-	if err != nil || updated {
-		t.Fatalf("unknown freshness=%v %v", updated, err)
+	outcome, err = service.applyImportedWatch(ctx, 1, "p", "movie", Record{DurationSeconds: 100, PositionSeconds: 20})
+	if err != nil || outcome.ProgressWritten || outcome.HiddenSuppressed {
+		t.Fatalf("unknown freshness=%+v %v", outcome, err)
 	}
 	progress, err := store.GetProgress(ctx, "p", "movie")
 	if err != nil || progress == nil || !progress.Completed || progress.UpdatedAt != stamp.Add(time.Hour).Format(time.RFC3339) {
@@ -128,6 +128,40 @@ func testImportedStore(t *testing.T, store userstore.UserStore) {
 	history, err := store.ListHistory(ctx, "p", 10, 0)
 	if err != nil || len(history) != 1 {
 		t.Fatalf("history=%+v %v", history, err)
+	}
+
+	// A record the source gave no play time for still seeds an item the profile has
+	// no progress for, and is dated so it loses to any local activity that follows.
+	outcome, err = service.applyImportedWatch(ctx, 1, "p", "seeded", Record{DurationSeconds: 100, PositionSeconds: 20})
+	if err != nil || !outcome.ProgressWritten || outcome.HiddenSuppressed {
+		t.Fatalf("undated seed=%+v %v", outcome, err)
+	}
+	seeded, err := store.GetProgress(ctx, "p", "seeded")
+	if err != nil || seeded == nil {
+		t.Fatalf("seeded progress=%+v %v", seeded, err)
+	}
+	seededAt, err := time.Parse(time.RFC3339, seeded.UpdatedAt)
+	if err != nil {
+		t.Fatalf("parsing seeded updated_at %q: %v", seeded.UpdatedAt, err)
+	}
+	if seededAt.After(stamp) {
+		t.Fatalf("seeded updated_at = %s, want a date that cannot outrank local activity", seeded.UpdatedAt)
+	}
+
+	// An item this profile removed from its history stays removed. The run has to
+	// report that separately: every later run drops the same record.
+	if err := store.SetProgressAt(ctx, "p", "hidden", 30, 100, false, stamp); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RemoveHistoryItems(ctx, "p", []string{"hidden"}, stamp.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	outcome, err = service.applyImportedWatch(ctx, 1, "p", "hidden", Record{DurationSeconds: 100, PositionSeconds: 20})
+	if err != nil || outcome.ProgressWritten || !outcome.HiddenSuppressed {
+		t.Fatalf("hidden import=%+v %v", outcome, err)
+	}
+	if hidden, err := store.GetProgress(ctx, "p", "hidden"); err != nil || hidden != nil {
+		t.Fatalf("hidden progress=%+v %v, want nil", hidden, err)
 	}
 	for i := range 2 {
 		added, err := service.addFavorite(ctx, 1, "p", "movie")
@@ -151,7 +185,7 @@ func (importStoreProvider) Close() error { return nil }
 func TestImportedWatchPostgresReplayAndFreshness(t *testing.T) {
 	pool := newPlexWatchlistImportTestPool(t)
 	for _, statement := range []string{
-		`CREATE TEMP TABLE user_history_hidden_items(user_id integer, profile_id text,media_item_id text,hidden_before timestamptz)`,
+		`CREATE TEMP TABLE user_history_hidden_items(user_id integer,profile_id text,media_item_id text,hidden_before timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(user_id,profile_id,media_item_id))`,
 		`CREATE TEMP TABLE user_watch_progress(user_id integer,profile_id text,media_item_id text,position_seconds double precision,duration_seconds double precision,completed boolean,updated_at timestamptz,event_at timestamptz,last_file_id text,last_resolution text,last_hdr text,last_codec_video text,last_edition_key text,PRIMARY KEY(user_id,profile_id,media_item_id))`,
 		`CREATE TEMP TABLE user_watch_history(id text PRIMARY KEY,user_id integer,profile_id text,media_item_id text,watched_at timestamptz,duration_seconds double precision,completed boolean,source text,watch_identity jsonb)`,
 	} {

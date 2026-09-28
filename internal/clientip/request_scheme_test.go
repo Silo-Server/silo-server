@@ -18,23 +18,34 @@ func TestRequestSchemeTrustBoundary(t *testing.T) {
 		values     []string
 		tls        bool
 		want       string
+		upgrade    bool
 	}{
-		{"trusted", "127.0.0.1:80", []string{"https"}, false, "https"},
-		{"ipv6", "[::1]:80", []string{"https"}, false, "https"},
-		{"untrusted", "192.0.2.1:80", []string{"https"}, false, "http"},
-		{"invalid peer", "invalid", []string{"https"}, false, "http"},
-		{"direct tls", "192.0.2.1:80", nil, true, "https"},
-		{"trusted no header", "127.0.0.1:80", nil, false, "http"},
-		{"repeated", "127.0.0.1:80", []string{"https", "https"}, false, ""},
-		{"list", "127.0.0.1:80", []string{"https,http"}, false, ""},
-		{"invalid", "127.0.0.1:80", []string{"wss"}, false, ""},
-		{"empty", "127.0.0.1:80", []string{""}, false, ""},
+		{"trusted", "127.0.0.1:80", []string{"https"}, false, "https", false},
+		{"ipv6", "[::1]:80", []string{"https"}, false, "https", false},
+		{"untrusted", "192.0.2.1:80", []string{"https"}, false, "http", false},
+		{"invalid peer", "invalid", []string{"https"}, false, "http", false},
+		{"direct tls", "192.0.2.1:80", nil, true, "https", false},
+		{"trusted no header", "127.0.0.1:80", nil, false, "http", false},
+		{"repeated", "127.0.0.1:80", []string{"https", "https"}, false, "", false},
+		{"list", "127.0.0.1:80", []string{"https,http"}, false, "", false},
+		{"invalid", "127.0.0.1:80", []string{"wss"}, false, "", false},
+		{"empty", "127.0.0.1:80", []string{""}, false, "", false},
+		// Traefik forwards WebSocket upgrades as wss/ws (#1089).
+		{"websocket wss", "127.0.0.1:80", []string{"wss"}, false, "https", true},
+		{"websocket ws", "127.0.0.1:80", []string{"ws"}, false, "http", true},
+		{"websocket https", "127.0.0.1:80", []string{"https"}, false, "https", true},
+		{"websocket untrusted", "192.0.2.1:80", []string{"wss"}, false, "http", true},
+		{"websocket repeated", "127.0.0.1:80", []string{"wss", "wss"}, false, "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest("GET", "http://example.test:8080/", nil)
 			req.RemoteAddr = tc.peer
 			req.Header["X-Forwarded-Proto"] = tc.values
 			req.Header.Set("X-Forwarded-For", "198.51.100.1")
+			if tc.upgrade {
+				req.Header.Set("Connection", "keep-alive, Upgrade")
+				req.Header.Set("Upgrade", "websocket")
+			}
 			if tc.tls {
 				req.TLS = &tls.ConnectionState{}
 			}

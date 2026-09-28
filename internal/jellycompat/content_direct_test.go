@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
@@ -817,7 +818,7 @@ func TestSearchItemsUsesCatalogSearchProviderWithCompatScope(t *testing.T) {
 			return catalog.AccessFilter{
 				AllowedLibraryIDs:  []int{1, 2},
 				ExcludedMediaTypes: []string{"ebook"},
-				MaxContentRating:   "PG-13",
+				MaturityLimits:     access.MaturityLimits{MaxContentRating: "PG-13"},
 			}
 		},
 	}
@@ -1086,6 +1087,14 @@ func (s *seriesRollupCountingStore) SeriesEpisodeWatchCounts(_ context.Context, 
 		}
 	}
 	return out, nil
+}
+
+func (s *seriesRollupCountingStore) SeriesSeasonWatchCounts(context.Context, string, string) (map[int]userstore.SeriesWatchCounts, error) {
+	return map[int]userstore.SeriesWatchCounts{}, nil
+}
+
+func (s *seriesRollupCountingStore) SeasonEpisodeWatchCounts(context.Context, string, []string) (map[string]userstore.SeriesWatchCounts, error) {
+	return map[string]userstore.SeriesWatchCounts{}, nil
 }
 
 // TestEnrichSeriesUserDataUsesSQLRollup: a store exposing the SQL rollup

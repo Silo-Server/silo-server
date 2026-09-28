@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -31,7 +32,7 @@ func TestRoomMemberStateFiltersContentBeforeReadingMembers(t *testing.T) {
 	provider := &memberStateProvider{store: new(memberStateStore)}
 	lookup := new(memberStateCatalog)
 	h := &WatchTogetherHandler{Service: service, MemberState: watchtogether.NewMemberStateReader(provider, nil, nil), MemberStateCatalog: lookup}
-	filter := catalog.AccessFilter{UserID: 7, ProfileID: "restricted", AllowedLibraryIDs: []int{1}, DisabledLibraryIDs: []int{2}, MaxContentRating: "PG"}
+	filter := catalog.AccessFilter{UserID: 7, ProfileID: "restricted", AllowedLibraryIDs: []int{1}, DisabledLibraryIDs: []int{2}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG"}}
 	_, items, err := h.RoomMemberState(t.Context(), "room", 7, "restricted", []string{"hidden-movie", "episode", "hidden-episode", "movie", "episode", "missing"}, filter)
 	if err != nil {
 		t.Fatal(err)

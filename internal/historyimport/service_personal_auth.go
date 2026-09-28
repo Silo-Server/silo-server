@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/netguard"
 )
 
 // preparePersonalRun performs upstream exchanges without holding database locks.
@@ -35,7 +37,13 @@ func (s *Service) preparePersonalRun(ctx context.Context, userID int, input Crea
 			if baseURL == "" {
 				return out, fmt.Errorf("%w: selected server has no usable address", ErrInvalidInput)
 			}
-			auth, err = s.emby.ConnectExchange(ctx, baseURL, session.ConnectUserID, selected.AccessKey)
+			// Emby Connect lists whatever addresses the account's server
+			// reports, so they are the user's input like a typed address.
+			serverCtx, err := s.localNetwork.CheckServerURL(ctx, userID, baseURL)
+			if err != nil {
+				return out, err
+			}
+			auth, err = s.emby.ConnectExchange(serverCtx, baseURL, session.ConnectUserID, selected.AccessKey)
 			if err != nil {
 				return out, tagUnreachable(err)
 			}
@@ -56,7 +64,8 @@ func (s *Service) preparePersonalRun(ctx context.Context, userID int, input Crea
 			if source.SourceType != SourceTypeEmby {
 				return out, fmt.Errorf("%w: source is not an Emby server", ErrInvalidInput)
 			}
-			auth, err = s.emby.AuthenticateServerUser(ctx, source.BaseURL, input.Username, input.Password)
+			// An admin configured this server, so it may be on the local network.
+			auth, err = s.emby.AuthenticateServerUser(netguard.WithPrivateAccess(ctx), source.BaseURL, input.Username, input.Password)
 			if err != nil {
 				return out, tagUnreachable(err)
 			}
@@ -70,7 +79,11 @@ func (s *Service) preparePersonalRun(ctx context.Context, userID int, input Crea
 		if input.JellyfinBaseURL == "" || input.JellyfinUsername == "" || input.JellyfinPassword == "" {
 			return out, fmt.Errorf("%w: Jellyfin address and credentials are required", ErrInvalidInput)
 		}
-		auth, err := s.jellyfin.AuthenticateServerUser(ctx, input.JellyfinBaseURL, input.JellyfinUsername, input.JellyfinPassword)
+		serverCtx, err := s.localNetwork.CheckServerURL(ctx, userID, input.JellyfinBaseURL)
+		if err != nil {
+			return out, err
+		}
+		auth, err := s.jellyfin.AuthenticateServerUser(serverCtx, input.JellyfinBaseURL, input.JellyfinUsername, input.JellyfinPassword)
 		if err != nil {
 			return out, tagUnreachable(err)
 		}
@@ -96,12 +109,19 @@ func (s *Service) preparePersonalRun(ctx context.Context, userID int, input Crea
 			if baseURL == "" {
 				return out, fmt.Errorf("%w: selected Plex server has no usable address", ErrInvalidInput)
 			}
+			// plex.tv lists whatever addresses the account's server reports.
+			if _, err := s.localNetwork.CheckServerURL(ctx, userID, baseURL); err != nil {
+				return out, err
+			}
 			out.PlexSession = session
 			out.SelectedServerID = selected.ClientIdentifier
 			out.Credentials = personalRunCredentials{BaseURL: baseURL, ServerToken: selected.AccessToken, AccountToken: session.AuthToken}
 		case input.PlexBaseURL != "":
 			if input.PlexToken == "" {
 				return out, fmt.Errorf("%w: Plex token is required", ErrInvalidInput)
+			}
+			if _, err := s.localNetwork.CheckServerURL(ctx, userID, input.PlexBaseURL); err != nil {
+				return out, err
 			}
 			out.Credentials = personalRunCredentials{BaseURL: input.PlexBaseURL, ServerToken: input.PlexToken, AccountToken: firstNonEmpty(input.PlexAccountToken, input.PlexToken)}
 		case input.SourceID > 0:

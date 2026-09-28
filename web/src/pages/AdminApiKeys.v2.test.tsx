@@ -4,7 +4,13 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { v2, V2ProblemError } from "@/api/v2/request";
 import AdminApiKeys from "./AdminApiKeys";
-const state = vi.hoisted(() => ({ profile: "owner" }));
+const state = vi.hoisted(() => ({
+  profile: "owner",
+  viewer: 2,
+  users: [{ id: 2, username: "Admin", is_owner: false }],
+  usersPending: false,
+  usersFailed: false,
+}));
 vi.mock("@/api/v2/request", async (original) => ({
   ...(await original<typeof import("@/api/v2/request")>()),
   v2: vi.fn(),
@@ -21,10 +27,15 @@ vi.mock("@/api/client", async (original) => ({
   isCapturedProfileAuthorityActive: (c: { profileId: string }) => c.profileId === state.profile,
 }));
 vi.mock("@/hooks/useAuth", () => ({
-  useAuth: () => ({ user: { id: 2 }, profile: { id: state.profile } }),
+  useAuth: () => ({ user: { id: state.viewer }, profile: { id: state.profile } }),
 }));
 vi.mock("@/hooks/queries/admin/users", () => ({
-  useAdminUsers: () => ({ data: [{ id: 2, username: "Admin" }] }),
+  useAdminUsers: () =>
+    state.usersPending
+      ? { data: undefined, isPending: true, isError: false }
+      : state.usersFailed
+        ? { data: undefined, isPending: false, isError: true }
+        : { data: state.users, isPending: false, isError: false },
 }));
 const row = {
   id: "7",
@@ -68,6 +79,10 @@ function mount() {
 beforeEach(() => {
   HTMLElement.prototype.scrollIntoView = vi.fn();
   state.profile = "owner";
+  state.viewer = 2;
+  state.users = [{ id: 2, username: "Admin", is_owner: false }];
+  state.usersPending = false;
+  state.usersFailed = false;
   vi.mocked(v2).mockImplementation(baseline);
 });
 afterEach(() => {
@@ -135,13 +150,15 @@ it("preserves tier draft on412 and changes tag only after explicit reload", asyn
     return baseline(op, options);
   });
   mount();
-  fireEvent.click(await screen.findByRole("button", { name: "Edit tier for Automation" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Edit rate limit for Automation" }));
   await screen.findByRole("dialog");
-  fireEvent.click(screen.getByRole("combobox", { name: "New tier" }));
+  fireEvent.click(screen.getByRole("combobox", { name: "New rate limit" }));
   fireEvent.click(await screen.findByRole("option", { name: "Elevated" }));
-  fireEvent.click(screen.getByRole("button", { name: "Save tier" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save rate limit" }));
   await screen.findByRole("alert");
-  expect(screen.getByRole("combobox", { name: "New tier" }).textContent).toContain("Elevated");
+  expect(screen.getByRole("combobox", { name: "New rate limit" }).textContent).toContain(
+    "Elevated",
+  );
   const writes = () =>
     vi.mocked(v2).mock.calls.filter(([op]) => op === "PUT /api/v2/admin/api-keys/{id}/tier");
   expect(writes()).toHaveLength(1);
@@ -152,12 +169,14 @@ it("preserves tier draft on412 and changes tag only after explicit reload", asyn
   });
   fireEvent.click(screen.getByRole("button", { name: "Reload current key" }));
   await waitFor(() =>
-    expect((screen.getByRole("button", { name: "Save tier" }) as HTMLButtonElement).disabled).toBe(
-      false,
-    ),
+    expect(
+      (screen.getByRole("button", { name: "Save rate limit" }) as HTMLButtonElement).disabled,
+    ).toBe(false),
   );
-  expect(screen.getByRole("combobox", { name: "New tier" }).textContent).toContain("Elevated");
-  fireEvent.click(screen.getByRole("button", { name: "Save tier" }));
+  expect(screen.getByRole("combobox", { name: "New rate limit" }).textContent).toContain(
+    "Elevated",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Save rate limit" }));
   await waitFor(() => expect(writes()).toHaveLength(2));
   expect(writes()[1]![1]).toMatchObject({ headers: { "If-Match": '"reloaded"' } });
 });
@@ -175,9 +194,74 @@ it("retains failed revocation and never replays it", async () => {
 });
 it("discards the editor on profile change", async () => {
   const view = mount();
-  fireEvent.click(await screen.findByRole("button", { name: "Edit tier for Automation" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Edit rate limit for Automation" }));
   await screen.findByRole("dialog");
   state.profile = "other";
   view.refresh();
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
+it("labels the key's tier as a rate limit and shows each option's limits", async () => {
+  vi.mocked(v2).mockImplementation((op, options) => {
+    if (op === "GET /api/v2/admin/rate-limits/config")
+      return reply(
+        options,
+        {
+          enabled: true,
+          tiers: {
+            standard: { requests_per_second: 20, requests_per_minute: 1200, burst: 20 },
+            elevated: { requests_per_second: 100, requests_per_minute: 6000, burst: 100 },
+          },
+        },
+        { ETag: '"limits"' },
+      );
+    if (op === "GET /api/v2/admin/rate-limits/status") return reply(options, { active: true });
+    return baseline(op, options);
+  });
+  mount();
+  const table = await screen.findByRole("table");
+  expect(within(table).getByRole("columnheader", { name: "Rate limit" })).toBeTruthy();
+  expect(within(table).queryByRole("columnheader", { name: "Tier" })).toBeNull();
+  expect(within(table).getByRole("cell", { name: "Standard" })).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Edit rate limit for Automation" }));
+  const dialog = await screen.findByRole("dialog");
+  expect(within(dialog).getByText("Edit API key rate limit")).toBeTruthy();
+  expect(within(dialog).getByText(/current rate limit: Standard/)).toBeTruthy();
+  expect(within(dialog).getByText(/doesn't change what the key can access/)).toBeTruthy();
+  await waitFor(() =>
+    expect(within(dialog).getByRole("combobox", { name: "New rate limit" }).textContent).toContain(
+      "Standard — 20 requests/s, 1,200/min",
+    ),
+  );
+  expect(within(dialog).getByRole("button", { name: "Save rate limit" })).toBeTruthy();
+});
+
+it("offers the Owner's keys only to the Owner", async () => {
+  state.users = [
+    { id: 2, username: "Admin", is_owner: true },
+    { id: 3, username: "Other", is_owner: false },
+  ];
+  state.viewer = 3;
+  mount();
+  await screen.findByText("Automation");
+  expect(screen.queryByRole("button", { name: "Edit rate limit for Automation" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Revoke API key Automation" })).toBeNull();
+  cleanup();
+
+  state.viewer = 2;
+  mount();
+  await screen.findByText("Automation");
+  expect(screen.getByRole("button", { name: "Edit rate limit for Automation" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Revoke API key Automation" })).toBeEnabled();
+});
+
+it.each([
+  ["loads", "usersPending"],
+  ["fails to load", "usersFailed"],
+] as const)("offers no key actions while the account list %s", async (_, flag) => {
+  state[flag] = true;
+  mount();
+  await screen.findByText("Automation");
+  expect(screen.queryByRole("button", { name: "Edit rate limit for Automation" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Revoke API key Automation" })).toBeNull();
 });

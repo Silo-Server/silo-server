@@ -34,7 +34,7 @@ func TestPersonalCollectionManualMutationGuards(t *testing.T) {
 				}
 				h := NewCollectionHandler(lifecycleProvider{store: store})
 				h.ItemReader = reader
-				scope := access.Scope{AllowedLibraryIDs: []int{7}, DisabledLibraryIDs: []int{9}, MaxContentRating: "PG"}
+				scope := access.Scope{AllowedLibraryIDs: []int{7}, DisabledLibraryIDs: []int{9}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG"}}
 				ctx := access.SetScope(t.Context(), scope)
 				err := h.AddPersonalCollectionItem(ctx, 1, "owner", "c", "item", 0)
 				allowed := kind == "manual" && visible

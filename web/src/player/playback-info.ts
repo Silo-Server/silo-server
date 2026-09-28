@@ -199,6 +199,10 @@ export function resolveActiveQualityOptionId(
   options: QualityOption[],
   preference: string,
 ): string | null {
+  // A sole rung is effective regardless of the saved preference. Keep the
+  // preference unchanged so it applies again when more qualities are available.
+  if (options.length === 1) return options[0]!.id;
+
   const normalized = preference.trim().toLowerCase();
   const exact = options.find((option) => option.id.toLowerCase() === normalized);
   if (exact) return exact.id;

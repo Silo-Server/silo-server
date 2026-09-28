@@ -75,6 +75,17 @@ type AdminSettingsSnapshot struct {
 	VisibleEffective map[string]string
 }
 
+// ValidatorValues keeps secret settings in the guarded settings revision while
+// excluding internal task state that administrators cannot read or edit.
+func (s AdminSettingsSnapshot) ValidatorValues() (stored, effective map[string]string) {
+	stored = maps.Clone(s.Stored)
+	effective = maps.Clone(s.Effective)
+	isMachineManaged := func(key, _ string) bool { return machineManagedSettingKeys[key] }
+	maps.DeleteFunc(stored, isMachineManaged)
+	maps.DeleteFunc(effective, isMachineManaged)
+	return stored, effective
+}
+
 func (h *AdminHandler) adminSettingsSnapshot(stored map[string]string) AdminSettingsSnapshot {
 	raw := maps.Clone(stored)
 	effective := h.effectiveAdminSettings(raw)

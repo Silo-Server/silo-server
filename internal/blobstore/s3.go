@@ -97,14 +97,17 @@ func (s *S3) List(ctx context.Context, prefix, cursor string, limit int) ([]Obje
 	}
 }
 func (s *S3) Probe(ctx context.Context) error { return s.client.HeadBucket(ctx, s.client.Bucket()) }
-func (s *S3) DirectURL(ctx context.Context, key string, ttl time.Duration) (string, error) {
+func (s *S3) DirectURL(ctx context.Context, key string, ttl, window time.Duration) (string, time.Time, error) {
 	if err := ValidateKey(key); err != nil {
-		return "", err
+		return "", time.Time{}, err
 	}
-	return s.client.PresignGetURL(ctx, s.client.Bucket(), key, ttl)
+	return s.client.PresignGetURLAt(ctx, s.client.Bucket(), key, time.Now(), ttl, window)
 }
 func (s *S3) ObjectAvailable(ctx context.Context, key string) (bool, error) {
 	return s.client.ObjectAvailable(ctx, s.client.Bucket(), key)
+}
+func (s *S3) BeginMutationFence(ctx context.Context) (func(), error) {
+	return s.client.BeginMutationFence(ctx)
 }
 
 // Identity covers the endpoint, bucket, and key prefix. Bucket names and the
@@ -118,6 +121,10 @@ func (s *S3) Identity() string {
 
 // normalizeEndpoint lowercases only the case-insensitive parts of an endpoint
 // URL. An endpoint that does not parse is lowercased whole, as before.
+// NormalizeEndpoint is the endpoint form Identity uses, for callers comparing
+// configured endpoints the way the store will.
+func NormalizeEndpoint(raw string) string { return normalizeEndpoint(raw) }
+
 func normalizeEndpoint(raw string) string {
 	raw = strings.TrimSpace(raw)
 	parsed, err := url.Parse(raw)

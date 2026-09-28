@@ -1,7 +1,9 @@
 package jellycompat
 
 import (
+	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -9,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Silo-Server/silo-server/internal/contentid"
+	"github.com/Silo-Server/silo-server/internal/scanner"
 )
 
 // EncodedIDType distinguishes packed compat UUIDs.
@@ -25,6 +28,7 @@ const (
 	EncodedIDPerson      EncodedIDType = 8
 	EncodedIDImageProxy  EncodedIDType = 9
 	EncodedIDCollection  EncodedIDType = 10
+	EncodedIDThemeSong   EncodedIDType = 11
 )
 
 var (
@@ -51,8 +55,19 @@ type DecodedID struct {
 type ResourceIDCodec struct {
 	mu                sync.RWMutex
 	reverse           map[string]registeredID
-	mediaSourceOwners map[int64]string
+	mediaSourceOwners MediaSourceOwnerLookup
 }
+
+// MediaSourceOwnerLookup resolves a media file to the catalog item it plays
+// as. It returns scanner.ErrFileNotFound for an unknown file and "" for a file
+// linked to no item.
+type MediaSourceOwnerLookup interface {
+	PlayableContentID(ctx context.Context, fileID int) (string, error)
+}
+
+// errMediaSourceOwnerNotFound reports a media-source id whose file is unknown
+// or linked to no item.
+var errMediaSourceOwnerNotFound = errors.New("media source owner not found")
 
 type registeredID struct {
 	kind  EncodedIDType
@@ -67,8 +82,7 @@ func PseudoUserID(userID int, profileID string) uuid.UUID {
 // NewResourceIDCodec creates a new route ID codec.
 func NewResourceIDCodec() *ResourceIDCodec {
 	return &ResourceIDCodec{
-		reverse:           make(map[string]registeredID),
-		mediaSourceOwners: make(map[int64]string),
+		reverse: make(map[string]registeredID),
 	}
 }
 
@@ -206,19 +220,35 @@ func (c *ResourceIDCodec) DecodeIntID(kind EncodedIDType, raw string) (int64, er
 	return int64(decoded.Value), nil
 }
 
-// RegisterMediaSourceOwner records which content item owns a media-source/file ID.
-func (c *ResourceIDCodec) RegisterMediaSourceOwner(fileID int64, contentID string) {
+// SetMediaSourceOwnerLookup installs the file-row lookup behind
+// ResolveMediaSourceOwner. Without one, media-source ids resolve to no item.
+func (c *ResourceIDCodec) SetMediaSourceOwnerLookup(lookup MediaSourceOwnerLookup) {
 	c.mu.Lock()
-	c.mediaSourceOwners[fileID] = contentID
+	c.mediaSourceOwners = lookup
 	c.mu.Unlock()
 }
 
-// LookupMediaSourceOwner resolves a media-source/file ID back to its content item.
-func (c *ResourceIDCodec) LookupMediaSourceOwner(fileID int64) (string, bool) {
+// ResolveMediaSourceOwner resolves a media-source/file ID to the content item
+// that owns it. The file row decides on every call, so every API node gives the
+// same answer and a rematched file resolves to its new item.
+func (c *ResourceIDCodec) ResolveMediaSourceOwner(ctx context.Context, fileID int64) (string, error) {
 	c.mu.RLock()
-	contentID, ok := c.mediaSourceOwners[fileID]
+	lookup := c.mediaSourceOwners
 	c.mu.RUnlock()
-	return contentID, ok
+	if lookup == nil {
+		return "", errMediaSourceOwnerNotFound
+	}
+	contentID, err := lookup.PlayableContentID(ctx, int(fileID))
+	if errors.Is(err, scanner.ErrFileNotFound) {
+		return "", errMediaSourceOwnerNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("resolving media source owner: %w", err)
+	}
+	if contentID == "" {
+		return "", errMediaSourceOwnerNotFound
+	}
+	return contentID, nil
 }
 
 // mediaSourceIDsEqual reports whether two media-source IDs refer to the same

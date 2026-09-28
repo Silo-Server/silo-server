@@ -9,6 +9,7 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
 
 // ratingsRepository defines the data access interface for user ratings.
@@ -20,12 +21,19 @@ type ratingsRepository interface {
 	ListPage(ctx context.Context, userID int, profileID string, after *catalog.RatingKey, limit int) ([]catalog.UserRating, error)
 }
 
+// LocalRatingEventDispatcher sends a profile's rating changes to its watch
+// providers.
+type LocalRatingEventDispatcher interface {
+	HandleLocalRatingEvent(ctx context.Context, event watchsync.LocalRatingEvent) error
+}
+
 // RatingsHandler handles user rating operations.
 type RatingsHandler struct {
 	ratingsRepo             ratingsRepository
 	itemRepo                personalDataItemRepository
 	profileStaler           ProfileStaler
 	profileRefreshRequester ProfileRefreshRequester
+	ratingDispatcher        LocalRatingEventDispatcher
 }
 
 // NewRatingsHandler creates a new RatingsHandler.
@@ -43,8 +51,25 @@ func (h *RatingsHandler) SetProfileRefreshRequester(requester ProfileRefreshRequ
 	h.profileRefreshRequester = requester
 }
 
+// SetLocalRatingEventDispatcher configures where rating changes are sent for
+// watch-provider sync.
+func (h *RatingsHandler) SetLocalRatingEventDispatcher(dispatcher LocalRatingEventDispatcher) {
+	h.ratingDispatcher = dispatcher
+}
+
 func (h *RatingsHandler) markStale(ctx context.Context, userID int, profileID string) {
 	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, userID, profileID)
+}
+
+func (h *RatingsHandler) dispatchRatingChange(ctx context.Context, userID int, profileID, itemID string) {
+	if h.ratingDispatcher == nil {
+		return
+	}
+	_ = h.ratingDispatcher.HandleLocalRatingEvent(ctx, watchsync.LocalRatingEvent{
+		UserID:       userID,
+		ProfileID:    profileID,
+		MediaItemIDs: []string{itemID},
+	})
 }
 
 // --- Response types ---
@@ -111,6 +136,7 @@ func (h *RatingsHandler) SetRating(ctx context.Context, userID int, profileID, i
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to set rating")
 	}
 	h.markStale(ctx, userID, profileID)
+	h.dispatchRatingChange(ctx, userID, profileID, itemID)
 	return nil
 }
 
@@ -140,6 +166,7 @@ func (h *RatingsHandler) DeleteRating(ctx context.Context, userID int, profileID
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to delete rating")
 	}
 	h.markStale(ctx, userID, profileID)
+	h.dispatchRatingChange(ctx, userID, profileID, itemID)
 	return nil
 }
 

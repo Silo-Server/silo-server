@@ -30,6 +30,7 @@ import {
 // actually touches.
 const TRANSCODING_ESSENTIAL_KEYS = [
   "playback.transcode_enabled",
+  "playback.allow_hevc_encoding",
   "playback.hw_accel",
   "allow_4k_transcode",
 ];
@@ -314,9 +315,9 @@ export default function PlaybackSettings() {
           restartAll={allRestart([...TRANSCODING_ESSENTIAL_KEYS, ...TRANSCODING_ADVANCED_KEYS])}
         >
           <SettingField
-            label="Transcoding"
+            label="Video transcoding"
             type="toggle"
-            description="Off serves only files clients can already play."
+            description="Off never re-encodes video. Silo still repackages files and converts audio for devices that need it."
             value={form.getValue("playback.transcode_enabled")}
             onChange={(v) => form.setValue("playback.transcode_enabled", v)}
             restartRequired={restartKeys.has("playback.transcode_enabled")}
@@ -325,11 +326,18 @@ export default function PlaybackSettings() {
             label="Hardware acceleration"
             type="select"
             options={HW_ACCEL_OPTIONS}
-            description="Auto picks the best device this server can see."
+            description="Auto picks the best device. If startup fails, it keeps GPU encoding with CPU decoding before falling back to software."
             status={hwAccelStatus}
             value={hwAccel}
             onChange={(v) => form.setValue("playback.hw_accel", v)}
             restartRequired={restartKeys.has("playback.hw_accel")}
+          />
+          <SettingField
+            label="Allow HEVC encoding"
+            type="toggle"
+            description="Use HEVC for clients that support HEVC over HLS. Other clients keep H.264."
+            value={form.getValue("playback.allow_hevc_encoding")}
+            onChange={(v) => form.setValue("playback.allow_hevc_encoding", v)}
           />
           <SettingField
             label="Allow 4K transcoding"

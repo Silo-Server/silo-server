@@ -30,7 +30,7 @@ describe("TaskStatusBadge", () => {
           result={{
             task_key: taskKey,
             status,
-            result_data: { submitted: 0, skipped: 0, failed, retry_after_seconds: 0 },
+            result_data: { submitted: 0, skipped: 0, invalid: 0, failed, retry_after_seconds: 0 },
           }}
         />,
       );
@@ -49,7 +49,7 @@ describe("TaskStatusBadge", () => {
         result={{
           task_key: "contribute_markers",
           status: "failed",
-          result_data: { submitted: 0, skipped: 0, failed: 18, retry_after_seconds: 0 },
+          result_data: { submitted: 0, skipped: 0, invalid: 0, failed: 18, retry_after_seconds: 0 },
           error_message: "Could not load marker candidates",
         }}
       />,

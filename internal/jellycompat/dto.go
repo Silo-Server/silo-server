@@ -1,5 +1,10 @@
 package jellycompat
 
+import (
+	"cmp"
+	"encoding/json"
+)
+
 // queryResultDTO mirrors Jellyfin's common paged result envelope.
 type queryResultDTO struct {
 	Items            []baseItemDTO `json:"Items"`
@@ -70,6 +75,7 @@ type baseItemDTO struct {
 	CriticRating             *float64                     `json:"CriticRating,omitempty"`
 	Overview                 string                       `json:"Overview,omitempty"`
 	OriginalTitle            string                       `json:"OriginalTitle,omitempty"`
+	OriginalLanguage         string                       `json:"OriginalLanguage,omitempty"`
 	PremiereDate             string                       `json:"PremiereDate,omitempty"`
 	Path                     string                       `json:"Path,omitempty"`
 	ExternalURLs             []map[string]any             `json:"ExternalUrls,omitempty"`
@@ -83,7 +89,7 @@ type baseItemDTO struct {
 	ProductionLocations      []string                     `json:"ProductionLocations,omitempty"`
 	ImageTags                map[string]string            `json:"ImageTags"`
 	PrimaryImageItemID       string                       `json:"PrimaryImageItemId,omitempty"`
-	BackdropImageTags        []string                     `json:"BackdropImageTags,omitempty"`
+	BackdropImageTags        jsonStringArray              `json:"BackdropImageTags"`
 	PrimaryImageAspectRatio  *float64                     `json:"PrimaryImageAspectRatio,omitempty"`
 	ImageBlurHashes          map[string]map[string]string `json:"ImageBlurHashes,omitempty"`
 	UserData                 *itemUserDataDTO             `json:"UserData,omitempty"`
@@ -96,6 +102,8 @@ type baseItemDTO struct {
 	ParentBackdropItemID     string                       `json:"ParentBackdropItemId,omitempty"`
 	ParentThumbImageTag      string                       `json:"ParentThumbImageTag,omitempty"`
 	ParentThumbItemID        string                       `json:"ParentThumbItemId,omitempty"`
+	ParentPrimaryImageItemID string                       `json:"ParentPrimaryImageItemId,omitempty"`
+	ParentPrimaryImageTag    string                       `json:"ParentPrimaryImageTag,omitempty"`
 	ParentID                 string                       `json:"ParentId,omitempty"`
 	SortName                 string                       `json:"SortName,omitempty"`
 	ForcedSortName           string                       `json:"ForcedSortName,omitempty"`
@@ -119,6 +127,21 @@ type baseItemDTO struct {
 	MediaStreams             []mediaStreamDTO             `json:"MediaStreams,omitempty"`
 	Width                    int                          `json:"Width,omitempty"`
 	Height                   int                          `json:"Height,omitempty"`
+}
+
+// jsonStringArray encodes a nil slice as [] instead of null. BackdropImageTags
+// uses it because real Jellyfin always sends an array there, and Roku
+// (BrightScript) clients index the field without checking for it, crashing
+// right after login when it is absent or null. Image filters and
+// ImageTypeLimit=0 still clear the field, so a nil slice is normalized at
+// encode time rather than at every assignment.
+type jsonStringArray []string
+
+func (a jsonStringArray) MarshalJSON() ([]byte, error) {
+	if a == nil {
+		return []byte("[]"), nil
+	}
+	return json.Marshal([]string(a))
 }
 
 type itemUserDataDTO struct {
@@ -236,17 +259,44 @@ type mediaSourceDTO struct {
 	MediaStreams                        []mediaStreamDTO  `json:"MediaStreams,omitempty"`
 }
 
+// MarshalJSON adds the flag labels Jellyfin sets on audio and subtitle streams
+// (MediaStreamRepository): Default and External on both, the rest on subtitles. Clients build track names from them; Wholphin shows
+// "English SRT (null)" for an external track without LocalizedExternal.
+func (s mediaStreamDTO) MarshalJSON() ([]byte, error) {
+	type plain mediaStreamDTO
+	if s.Type == compatStreamTypeAudio || s.Type == compatStreamTypeSubtitle {
+		s.LocalizedDefault = cmp.Or(s.LocalizedDefault, "Default")
+		s.LocalizedExternal = cmp.Or(s.LocalizedExternal, "External")
+	}
+	if s.Type == compatStreamTypeSubtitle {
+		s.LocalizedUndefined = cmp.Or(s.LocalizedUndefined, "Undefined")
+		s.LocalizedForced = cmp.Or(s.LocalizedForced, "Forced")
+		s.LocalizedHearingImpaired = cmp.Or(s.LocalizedHearingImpaired, "Hearing Impaired")
+	}
+	return json.Marshal(plain(s))
+}
+
 type mediaStreamDTO struct {
-	Index                  int     `json:"Index"`
-	Type                   string  `json:"Type"`
-	Codec                  string  `json:"Codec,omitempty"`
-	Language               string  `json:"Language,omitempty"`
-	TimeBase               string  `json:"TimeBase,omitempty"`
-	DisplayTitle           string  `json:"DisplayTitle,omitempty"`
-	Title                  string  `json:"Title,omitempty"`
-	IsDefault              bool    `json:"IsDefault"`
-	IsExternal             bool    `json:"IsExternal"`
-	IsForced               bool    `json:"IsForced"`
+	Index                    int    `json:"Index"`
+	Type                     string `json:"Type"`
+	Codec                    string `json:"Codec,omitempty"`
+	Language                 string `json:"Language,omitempty"`
+	LocalizedLanguage        string `json:"LocalizedLanguage,omitempty"`
+	LocalizedOriginal        string `json:"LocalizedOriginal,omitempty"`
+	LocalizedUndefined       string `json:"LocalizedUndefined,omitempty"`
+	LocalizedDefault         string `json:"LocalizedDefault,omitempty"`
+	LocalizedForced          string `json:"LocalizedForced,omitempty"`
+	LocalizedExternal        string `json:"LocalizedExternal,omitempty"`
+	LocalizedHearingImpaired string `json:"LocalizedHearingImpaired,omitempty"`
+	TimeBase                 string `json:"TimeBase,omitempty"`
+	DisplayTitle             string `json:"DisplayTitle,omitempty"`
+	Title                    string `json:"Title,omitempty"`
+	IsDefault                bool   `json:"IsDefault"`
+	IsExternal               bool   `json:"IsExternal"`
+	IsForced                 bool   `json:"IsForced"`
+	// IsOriginal is required by the Jellyfin 12 SDK models; Silo does not track
+	// which audio track is the original language.
+	IsOriginal             bool    `json:"IsOriginal"`
 	IsHearingImpaired      bool    `json:"IsHearingImpaired"`
 	IsTextSubtitleStream   bool    `json:"IsTextSubtitleStream"`
 	SupportsExternalStream bool    `json:"SupportsExternalStream"`

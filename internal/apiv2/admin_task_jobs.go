@@ -4,14 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strconv"
 	"time"
 
+	"github.com/danielgtaylor/huma/v2"
+
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/notifications"
 )
 
 const adminTaskProgressUnit = "items"
+const adminTaskJobSchemaRef = "#/components/schemas/AdminTaskJob"
 
 type AdminTaskJobsService interface {
 	ListAdminTaskJobs(context.Context, string, time.Time, string, int) ([]*models.AdminJob, error)
@@ -56,20 +61,27 @@ type AdminTaskJobLibraryResult struct {
 	DeletedPrefixes      int  `json:"deleted_prefixes"`
 	DeletedS3Objects     int  `json:"deleted_s3_objects"`
 }
+type AdminTaskJobStorageTransitionResult struct {
+	Phase                 string `json:"phase" enum:"queued,checking_target,copying,verifying,committing,restart_pending,completed,failed,canceled" doc:"Safe transition phase. Internal progress messages and storage locations are omitted."`
+	VerifiedObjects       int    `json:"verified_objects" minimum:"0" doc:"Objects whose destination content was verified during the current copy pass."`
+	FailureCategory       string `json:"failure_category,omitempty" enum:"preparation_failed,target_check_failed,copy_failed,verification_failed,commit_failed,unknown" doc:"Safe failure category; present only for failed transitions."`
+	ManualRestartRequired bool   `json:"manual_restart_required"`
+}
 type AdminTaskJob struct {
 	LibraryID     *ID                        `json:"library_id,omitempty"`
 	LibraryName   string                     `json:"library_name,omitempty"`
 	LibraryResult *AdminTaskJobLibraryResult `json:"library_result,omitempty"`
 	AdminJob
-	LibraryIDs          []ID                       `json:"library_ids"`
-	SourceLabel         string                     `json:"source_label,omitempty"`
-	CatalogResult       *AdminTaskJobCatalogResult `json:"catalog_result,omitempty"`
-	ItemResult          *AdminTaskJobItemResult    `json:"item_result,omitempty"`
-	ArtifactSizeBytes   int64                      `json:"artifact_size_bytes"`
-	DownloadURL         string                     `json:"download_url,omitempty"`
-	DownloadExpiresAt   *Instant                   `json:"download_expires_at,omitempty"`
-	PublicURL           string                     `json:"public_url,omitempty"`
-	PublicLinkSupported bool                       `json:"public_link_supported" doc:"Whether this server can mint a shareable seven-day link. False when exports are stored locally, because only storage-side presigning produces a URL usable off this server."`
+	LibraryIDs              []ID                                 `json:"library_ids"`
+	SourceLabel             string                               `json:"source_label,omitempty"`
+	CatalogResult           *AdminTaskJobCatalogResult           `json:"catalog_result,omitempty"`
+	ItemResult              *AdminTaskJobItemResult              `json:"item_result,omitempty"`
+	StorageTransitionResult *AdminTaskJobStorageTransitionResult `json:"storage_transition_result,omitempty"`
+	ArtifactSizeBytes       int64                                `json:"artifact_size_bytes"`
+	DownloadURL             string                               `json:"download_url,omitempty"`
+	DownloadExpiresAt       *Instant                             `json:"download_expires_at,omitempty"`
+	PublicURL               string                               `json:"public_url,omitempty"`
+	PublicLinkSupported     bool                                 `json:"public_link_supported" doc:"Whether this server can mint a shareable seven-day link. False when exports are stored locally, because only storage-side presigning produces a URL usable off this server."`
 }
 type AdminTaskJobsInput struct {
 	Kind   string `query:"kind"`
@@ -81,6 +93,7 @@ type AdminTaskJobInput struct {
 }
 type AdminTaskJobsOutput struct{ Body Collection[AdminTaskJob] }
 type AdminTaskJobOutput struct {
+	Status     int
 	RetryAfter string `header:"Retry-After"`
 	Body       AdminTaskJob
 }
@@ -95,10 +108,60 @@ func registerAdminTaskJobs(reg *Registry) {
 		return reg.listAdminTaskJobs(ctx, cursors, in)
 	})
 	Register(reg, Operation{Operation: humaOp("GET", Prefix+"/admin/jobs/{id}", "getAdminJob", "admin-tasks", "Read a retained job. Administrators may read all jobs; item refresh owners may read their own safe result."), Class: ClassAuthenticated, ServiceBacked: true}, reg.getAdminTaskJob)
+	cancel := humaOp("POST", Prefix+"/admin/jobs/{id}/cancel", "cancelAdminJob", "admin-tasks", "Request cancellation of a cancellable administrator job. Completed effects and verified storage-copy checkpoints are retained.")
+	cancel.DefaultStatus = 202
+	cancel.Errors = []int{409}
+	cancel.Responses = map[string]*huma.Response{"200": {
+		Description: "The job was already canceled.",
+		Content:     map[string]*huma.MediaType{mediaTypeJSON: {Schema: &huma.Schema{Ref: adminTaskJobSchemaRef}}},
+	}}
+	Register(reg, Operation{Operation: cancel, Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyCoalescing}, reg.cancelAdminTaskJob)
+}
+
+func (reg *Registry) cancelAdminTaskJob(ctx context.Context, in *AdminTaskJobInput) (*AdminTaskJobOutput, error) {
+	if reg.deps.AdminTaskJobs == nil {
+		return nil, unavailable("admin jobs")
+	}
+	job, err := reg.deps.AdminTaskJobs.GetAdminTaskJob(ctx, in.ID)
+	if errors.Is(err, adminjob.ErrJobNotFound) {
+		return nil, NewProblem(TypeNotFound, "Job not found")
+	}
+	if err != nil {
+		return nil, serviceProblem(err)
+	}
+	if job.JobType != adminjob.JobTypeStorageTransition {
+		return nil, NewProblem(TypeJobNotCancelable, "This job cannot be canceled from this endpoint")
+	}
+	canceller, ok := reg.deps.AdminTaskJobs.(interface {
+		RequestAdminTaskJobCancellation(context.Context, string) (*models.AdminJob, error)
+	})
+	if !ok {
+		return nil, unavailable("admin job cancellation")
+	}
+	job, err = canceller.RequestAdminTaskJobCancellation(ctx, in.ID)
+	if errors.Is(err, adminjob.ErrJobNotCancellable) {
+		return nil, NewProblem(TypeJobNotCancelable, "This job cannot be canceled")
+	}
+	if err != nil {
+		return nil, serviceProblem(err)
+	}
+	out := &AdminTaskJobOutput{Status: http.StatusAccepted, Body: reg.adminTaskJobOf(ctx, job, true)}
+	if job.Status == adminjob.StatusCancelled {
+		out.Status = http.StatusOK
+	} else {
+		out.RetryAfter = "5"
+	}
+	return out, nil
 }
 func (reg *Registry) adminTaskJobOf(ctx context.Context, job *models.AdminJob, admin bool) AdminTaskJob {
 	out := AdminTaskJob{AdminJob: adminJobOf(job), LibraryIDs: []ID{}}
-	if job.ProgressTotal > 0 && job.ProgressCurrent >= 0 && job.ProgressCurrent <= job.ProgressTotal {
+	var transitionResult *AdminTaskJobStorageTransitionResult
+	if job.JobType == adminjob.JobTypeStorageTransition {
+		transitionResult = storageTransitionResultOf(job)
+	}
+	if job.ProgressTotal > 0 && job.ProgressCurrent >= 0 && job.ProgressCurrent <= job.ProgressTotal &&
+		(job.JobType != adminjob.JobTypeStorageTransition ||
+			(job.Status != adminjob.StatusQueued && transitionResult.Phase != "checking_target")) {
 		out.Progress = &JobProgress{Current: job.ProgressCurrent, Total: job.ProgressTotal, Unit: adminTaskProgressUnit}
 	}
 	if job.JobType == adminjob.JobTypeItemRefresh && job.Status == adminjob.StatusCompleted {
@@ -113,6 +176,9 @@ func (reg *Registry) adminTaskJobOf(ctx context.Context, job *models.AdminJob, a
 	}
 	if !admin {
 		return out
+	}
+	if transitionResult != nil {
+		out.StorageTransitionResult = transitionResult
 	}
 	if job.JobType == adminjob.JobTypeLibraryRefresh || job.JobType == adminjob.JobTypeDeleteLibrary || job.JobType == adminjob.JobTypeImageCacheCleanup {
 		var request struct {
@@ -161,6 +227,13 @@ func (reg *Registry) adminTaskJobOf(ctx context.Context, job *models.AdminJob, a
 		out.PublicLinkSupported = reg.deps.AdminTaskJobs.AdminTaskJobPublicLinkSupported()
 	}
 	return out
+}
+
+func storageTransitionResultOf(job *models.AdminJob) *AdminTaskJobStorageTransitionResult {
+	safe := notifications.SafeStorageTransitionJob(job)
+	var result AdminTaskJobStorageTransitionResult
+	_ = json.Unmarshal(safe.ResultPayload, &result)
+	return &result
 }
 func (reg *Registry) getAdminTaskJob(ctx context.Context, in *AdminTaskJobInput) (*AdminTaskJobOutput, error) {
 	if reg.deps.AdminTaskJobs == nil {

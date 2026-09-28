@@ -20,6 +20,7 @@ type AdminDashboardStats struct {
 	TotalMovieFiles   int                                `json:"total_movie_files"`
 	TotalShows        int                                `json:"total_shows"`
 	TotalShowFiles    int                                `json:"total_show_files"`
+	AdvisoryTitles    int                                `json:"advisory_titles" doc:"Movies and series that carry an advisory age, the coverage a profile's max_advisory_age limit acts on; compare with total_movies + total_shows"`
 	ActiveStreams     int                                `json:"active_streams"`
 	TotalStorageBytes int64                              `json:"total_storage_bytes"`
 	WatchProviders    []AdminDashboardWatchProviderStats `json:"watch_providers"`
@@ -60,7 +61,7 @@ func registerAdminDashboardStats(reg *Registry) {
 		if err != nil {
 			return nil, serviceProblem(err)
 		}
-		out := AdminDashboardStats{TotalItems: s.TotalItems, TotalFiles: s.TotalFiles, TotalUsers: s.TotalUsers, TotalMovies: s.TotalMovies, TotalMovieFiles: s.TotalMovieFiles, TotalShows: s.TotalShows, TotalShowFiles: s.TotalShowFiles, ActiveStreams: s.ActiveStreams, TotalStorageBytes: s.TotalStorageBytes, WatchProviders: make([]AdminDashboardWatchProviderStats, 0, len(s.WatchProviders))}
+		out := AdminDashboardStats{TotalItems: s.TotalItems, TotalFiles: s.TotalFiles, TotalUsers: s.TotalUsers, TotalMovies: s.TotalMovies, TotalMovieFiles: s.TotalMovieFiles, TotalShows: s.TotalShows, TotalShowFiles: s.TotalShowFiles, AdvisoryTitles: s.AdvisoryTitles, ActiveStreams: s.ActiveStreams, TotalStorageBytes: s.TotalStorageBytes, WatchProviders: make([]AdminDashboardWatchProviderStats, 0, len(s.WatchProviders))}
 		for _, p := range s.WatchProviders {
 			out.WatchProviders = append(out.WatchProviders, AdminDashboardWatchProviderStats{Provider: p.Provider, DisplayName: p.DisplayName, Registered: p.Registered, Scrobbling: p.Scrobbling, Exporting: p.Exporting, ConnectedProfiles: p.ConnectedProfiles, EnabledProfiles: p.EnabledProfiles, ExportEnabledProfiles: p.ExportEnabledProfiles, ScrobbleEnabledProfiles: p.ScrobbleEnabledProfiles, LastSyncCompletedAt: instantPtr(p.LastSyncCompletedAt), SyncRuns24h: p.SyncRuns24h, SyncErrors24h: p.SyncErrors24h, ImportedWatched24h: p.ImportedWatched24h, ImportedProgress24h: p.ImportedProgress24h, ExportedWatched24h: p.ExportedWatched24h, PendingExports: p.PendingExports, FailedExports: p.FailedExports, OpenScrobbles: p.OpenScrobbles, Scrobbles24h: p.Scrobbles24h})
 		}

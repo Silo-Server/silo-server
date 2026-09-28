@@ -2,6 +2,7 @@ package playback
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -141,7 +142,7 @@ func TestScopeSubtitleInventoryV3PreservesPinnedIdentity(t *testing.T) {
 	}
 	// Restoring a frozen inventory must not rebind its pins after a scan.
 	file.ExternalSubtitles = append([]models.ExternalSubtitle{{Path: "/media/new.srt", Format: "srt"}}, file.ExternalSubtitles...)
-	scoped := ScopeSubtitleInventoryV3("new-session", file, inventory)
+	scoped := ScopeSubtitleInventoryV3("new-session", file, inventory, nil)
 	if !strings.Contains(scoped[0].URL, "external_subtitle_key="+wantKey) ||
 		!strings.Contains(scoped[1].URL, "embedded_stream_index=4") ||
 		!strings.Contains(scoped[1].FontBundleURL, "embedded_stream_index=4") {
@@ -162,7 +163,7 @@ func TestSubtitleInventoryV3_OmitsURLsWithoutASession(t *testing.T) {
 }
 
 func TestScopeSubtitleInventoryV3_EncodesEmptyInventoryAsArray(t *testing.T) {
-	items := ScopeSubtitleInventoryV3("sess-empty", &models.MediaFile{ID: 4}, []SubtitleInventoryItemV3{})
+	items := ScopeSubtitleInventoryV3("sess-empty", &models.MediaFile{ID: 4}, []SubtitleInventoryItemV3{}, nil)
 	if items == nil {
 		t.Fatal("expected a non-nil empty inventory")
 	}
@@ -220,6 +221,52 @@ func TestSubtitleURLExtV3(t *testing.T) {
 	}
 }
 
+func TestSubtitleSidecarExtV3OffersOriginalSubRipOnlyWhenNegotiated(t *testing.T) {
+	negotiated := []string{FeatureSubripSidecarV3}
+	for _, tc := range []struct {
+		codec, source string
+		features      []string
+		want          string
+	}{
+		{"srt", SubtitleSourceExternalV3, negotiated, ".srt"},
+		{"subrip", SubtitleSourceDownloadedV3, negotiated, ".srt"},
+		{"srt", SubtitleSourceExternalV3, nil, ".vtt"},
+		{"subrip", SubtitleSourceDownloadedV3, []string{FeatureEmbeddedSubtitlesV3}, ".vtt"},
+		// Embedded tracks have no original SRT bytes to serve.
+		{"subrip", SubtitleSourceEmbeddedV3, negotiated, ".vtt"},
+		{"ass", SubtitleSourceExternalV3, negotiated, ".ass"},
+		{"webvtt", SubtitleSourceExternalV3, negotiated, ".vtt"},
+	} {
+		if got := SubtitleSidecarExtV3(tc.codec, tc.source, tc.features); got != tc.want {
+			t.Errorf("SubtitleSidecarExtV3(%q, %q, %v) = %q, want %q", tc.codec, tc.source, tc.features, got, tc.want)
+		}
+	}
+}
+
+func TestScopeSubtitleInventoryV3PublishesOriginalSubRipToOptedInClients(t *testing.T) {
+	file := &models.MediaFile{
+		ID:                21,
+		ExternalSubtitles: []models.ExternalSubtitle{{Path: "/media/movie.ar.srt", Language: "ar", Format: "srt"}},
+		SubtitleTracks:    []models.SubtitleTrack{{Index: 3, Codec: "subrip"}},
+	}
+	inventory := BuildSubtitleInventoryV3(file, []SubtitleInventoryEntryV3{{CombinedIndex: 2, Codec: "srt", Source: SubtitleSourceDownloadedV3, DownloadedSubtitleID: 9}})
+
+	opted := ScopeSubtitleInventoryV3("sess", file, inventory, []string{FeatureSubripSidecarV3})
+	original := SubtitleOriginalParamV3 + "=1"
+	if !strings.Contains(opted[0].URL, "/subtitles/0.srt?") || !strings.Contains(opted[0].URL, original) ||
+		!strings.Contains(opted[1].URL, "/subtitles/1.vtt?") || strings.Contains(opted[1].URL, original) ||
+		!strings.Contains(opted[2].URL, "/subtitles/2.srt?") || !strings.Contains(opted[2].URL, original) ||
+		!strings.Contains(opted[2].URL, DownloadedSubtitleIDParamV3+"=9") {
+		t.Fatalf("opted-in inventory URLs: %q, %q, %q", opted[0].URL, opted[1].URL, opted[2].URL)
+	}
+	legacy := ScopeSubtitleInventoryV3("sess", file, inventory, nil)
+	for _, item := range legacy {
+		if !strings.Contains(item.URL, ".vtt?") || strings.Contains(item.URL, original) {
+			t.Fatalf("a client without subrip_sidecar_v1 must keep WebVTT URLs: %q", item.URL)
+		}
+	}
+}
+
 // The combined ordinal a plan advertises must be the one the selection path
 // resolves, or a client echoing an inventory entry addresses a different track
 // than the one it picked.
@@ -249,5 +296,29 @@ func TestSubtitleEntryAtCombinedIndexV3_AgreesWithPublishedInventory(t *testing.
 		if entry.Codec != normalizeCodecV3(item.Codec) {
 			t.Errorf("ordinal %d resolves to codec %q, inventory says %q", item.CombinedIndex, entry.Codec, item.Codec)
 		}
+	}
+}
+
+func TestSubtitleFeaturesForPlanV3FollowsThePublishedRepresentation(t *testing.T) {
+	file := &models.MediaFile{ID: 8,
+		ExternalSubtitles: []models.ExternalSubtitle{{Path: "/media/movie.srt", Format: "srt"}},
+		SubtitleTracks:    []models.SubtitleTrack{{Index: 1, Codec: "subrip"}},
+	}
+	base := []string{FeatureEmbeddedSubtitlesV3}
+	withFeature := []string{FeatureEmbeddedSubtitlesV3, FeatureSubripSidecarV3}
+	vtt := ScopeSubtitleInventoryV3("sess", file, BuildSubtitleInventoryV3(file, nil), nil)
+	srt := ScopeSubtitleInventoryV3("sess", file, BuildSubtitleInventoryV3(file, nil), withFeature)
+
+	if got := SubtitleFeaturesForPlanV3(vtt, withFeature); HasFeatureV3(got, FeatureSubripSidecarV3) || !HasFeatureV3(got, FeatureEmbeddedSubtitlesV3) {
+		t.Fatalf("a WebVTT inventory must drop only subrip_sidecar_v1: %v", got)
+	}
+	if got := SubtitleFeaturesForPlanV3(srt, base); !HasFeatureV3(got, FeatureSubripSidecarV3) {
+		t.Fatalf("an original-SRT inventory must add subrip_sidecar_v1: %v", got)
+	}
+	// Only the embedded SRT track has a URL to judge by, and embedded tracks
+	// never change representation, so the features stay as they were.
+	embeddedOnly := ScopeSubtitleInventoryV3("sess", &models.MediaFile{ID: 8, SubtitleTracks: file.SubtitleTracks}, BuildSubtitleInventoryV3(&models.MediaFile{ID: 8, SubtitleTracks: file.SubtitleTracks}, nil), nil)
+	if got := SubtitleFeaturesForPlanV3(embeddedOnly, withFeature); !slices.Equal(got, withFeature) {
+		t.Fatalf("an inventory with no external or downloaded SRT must keep the features: %v", got)
 	}
 }

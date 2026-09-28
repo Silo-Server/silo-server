@@ -37,6 +37,7 @@ import { useActiveScans } from "@/hooks/queries/admin/scans";
 import { buildLibraryReorderEntries } from "./adminLibraryOrder";
 import MatchItemDialog from "@/components/MatchItemDialog";
 import { LibraryEditorDialog } from "@/components/admin/libraries/LibraryEditorDialog";
+import { LibraryRefreshDialog } from "@/components/admin/libraries/LibraryRefreshDialog";
 import { MetadataMatcherQueuesSection } from "@/components/admin/libraries/MetadataMatcherQueuesSection";
 import { CollapsibleDiagnosticsSection } from "@/components/admin/CollapsibleDiagnosticsSection";
 import { Button } from "@/components/ui/button";
@@ -171,6 +172,7 @@ export default function AdminLibraries() {
   const [editingLib, setEditingLib] = useState<Library | null>(null);
   const [confirmDeleteLib, setConfirmDeleteLib] = useState<Library | null>(null);
   const [confirmEmptyRootLib, setConfirmEmptyRootLib] = useState<Library | null>(null);
+  const [refreshLib, setRefreshLib] = useState<Library | null>(null);
   const [lastMountCheckByLibraryId, setLastMountCheckByLibraryId] = useState<
     Record<number, LibraryMountCheckResponse>
   >({});
@@ -406,6 +408,22 @@ export default function AdminLibraries() {
               true
             }
           />
+          <LibraryRefreshDialog
+            libraryName={refreshLib?.name ?? null}
+            onOpenChange={(open) => {
+              // Keep the dialog up until the queued request settles.
+              if (!open && !refreshMutation.isPending) setRefreshLib(null);
+            }}
+            isPending={refreshMutation.isPending}
+            onConfirm={(mode) => {
+              if (!refreshLib) return;
+              const id = refreshLib.id;
+              refreshMutation.mutate(
+                { id, mode },
+                { onSettled: () => setRefreshLib((open) => (open?.id === id ? null : open)) },
+              );
+            }}
+          />
         </div>
       </div>
 
@@ -451,7 +469,7 @@ export default function AdminLibraries() {
                       ).length;
                       const queuedLibraryScans = activeLibraryScans.length - runningLibraryScans;
                       const isRefreshStarting =
-                        refreshMutation.isPending && refreshMutation.variables === lib.id;
+                        refreshMutation.isPending && refreshMutation.variables?.id === lib.id;
                       const isCheckingMount =
                         mountCheckMutation.isPending && mountCheckMutation.variables === lib.id;
                       const mountCheck = lastMountCheckByLibraryId[lib.id];
@@ -580,7 +598,7 @@ export default function AdminLibraries() {
                                       cancelAdminJobMutation.mutate(activeRefreshJob.id);
                                       return;
                                     }
-                                    refreshMutation.mutate(lib.id);
+                                    setRefreshLib(lib);
                                   }}
                                 >
                                   {activeRefreshJob ? (

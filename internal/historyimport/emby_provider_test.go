@@ -126,7 +126,7 @@ func playedEmbyItem(item embyItem, lastPlayed time.Time, count int) embyItem {
 
 func fetchEmbyRecords(t *testing.T, provider *EmbyProvider) (map[string]Record, []string) {
 	t.Helper()
-	records, warnings, err := provider.Fetch(context.Background())
+	records, warnings, err := provider.Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestEmbyClientChunksItemIDLookups(t *testing.T) {
 		fake.series = append(fake.series, embyItem{ID: ids[i], Type: "Series"})
 	}
 	provider := fake.provider(t)
-	items, err := provider.client.FetchItemsByIDs(context.Background(), provider.auth, ids, "Series")
+	items, err := provider.client.FetchItemsByIDs(trustLoopback(context.Background()), provider.auth, ids, "Series")
 	if err != nil {
 		t.Fatalf("FetchItemsByIDs: %v", err)
 	}

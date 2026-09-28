@@ -2,7 +2,10 @@ import { useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { ArrowLeft } from "lucide-react";
 
+import { isNotFoundProblem } from "@/api/v2/request";
 import { Button } from "@/components/ui/button";
+import PageUnavailable from "@/components/PageUnavailable";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CollectionTemplateGallery } from "@/components/CollectionTemplateGallery";
 import { ManualCollectionItemsEditor } from "@/components/collections/ManualCollectionItemsEditor";
@@ -54,7 +57,12 @@ export default function AdminCollectionEditor() {
       },
     });
   }
-  const collection = frozen && frozen.collection.id === id ? frozen.collection : null;
+  // The frozen copy survives background refetches so an edit is never
+  // clobbered, but a 404 means the collection is gone and outranks it.
+  const collection =
+    frozen && frozen.collection.id === id && !isNotFoundProblem(snapshot.error)
+      ? frozen.collection
+      : null;
   const [sourceType, setSourceType] = useState<CollectionSourceType | null>(null);
   const [galleryOpen, setGalleryOpen] = useState(false);
 
@@ -78,28 +86,34 @@ export default function AdminCollectionEditor() {
       ? "Choose how this collection should be created."
       : "Build the collection in a full-page editor instead of a cramped dialog.";
 
-  useDocumentTitle(title);
+  useDocumentTitle(!isCreate && isNotFoundProblem(snapshot.error) ? "Not found" : title);
 
   if ((!isCreate && (snapshot.isLoading || isLoading)) || (isLoading && libraries.length === 0)) {
     return <div className="page-shell py-8">Loading collection editor...</div>;
   }
 
   if (!isCreate && !collection && !isLoading) {
+    if (snapshot.error && !isNotFoundProblem(snapshot.error)) {
+      return (
+        <PageUnavailable
+          title="Couldn't load this collection"
+          description="Something went wrong while loading it. Try again in a moment."
+          onRetry={() => void snapshot.refetch()}
+          retrying={snapshot.isFetching}
+        />
+      );
+    }
     return (
-      <div className="page-shell space-y-4 py-4 sm:py-6">
-        <Button asChild variant="ghost" className="w-fit px-0">
-          <Link to={returnPath}>
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Collections
-          </Link>
+      <PageUnavailable
+        title="Collection not found"
+        description="It may have been deleted, or the link may be wrong."
+      >
+        <Button asChild variant="outline">
+          <ViewTransitionLink to={returnPath} up>
+            All collections
+          </ViewTransitionLink>
         </Button>
-        <Card className="surface-panel rounded-2xl border-0 shadow-none">
-          <CardHeader>
-            <CardTitle>Collection not found</CardTitle>
-            <CardDescription>The selected collection could not be loaded.</CardDescription>
-          </CardHeader>
-        </Card>
-      </div>
+      </PageUnavailable>
     );
   }
 

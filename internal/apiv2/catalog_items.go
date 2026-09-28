@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -342,6 +343,7 @@ type PlaybackVariantPart struct {
 // CatalogItemDetail is the detail page of an item: the card plus everything
 // the page shows.
 type CatalogItemDetail struct {
+	Themes *ThemeSongSet `json:"themes,omitempty"`
 	CatalogItem
 	SortTitle                       string                               `json:"sort_title,omitempty"`
 	OriginalTitle                   string                               `json:"original_title,omitempty"`
@@ -366,6 +368,7 @@ type CatalogItemDetail struct {
 	Versions                        []FileVersion                        `json:"versions" doc:"Empty, never null"`
 	PlaybackVariants                []PlaybackVariant                    `json:"playback_variants,omitempty"`
 	Videos                          []catalogpkg.ItemVideoInfo           `json:"videos,omitempty" doc:"Trailers and clips"`
+	RatingSources                   []CatalogRatingSource                `json:"rating_sources,omitempty" doc:"Per-source ratings on a 0-100 scale for movies and series, in display order; absent when no provider reported any"`
 	Extras                          []catalogpkg.ItemExtraInfo           `json:"extras,omitempty"`
 	FolderPaths                     []string                             `json:"folder_paths,omitempty" doc:"Absent for viewers without file-path visibility"`
 	Subtitles                       []catalogpkg.SubtitleInfo            `json:"subtitles" doc:"Empty, never null"`
@@ -384,6 +387,24 @@ type CatalogItemDetail struct {
 	Audiobook                       *catalogpkg.AudiobookDetailExtension `json:"audiobook,omitempty"`
 	Ebook                           *catalogpkg.EbookDetailExtension     `json:"ebook,omitempty"`
 	Manga                           *catalogpkg.MangaDetailExtension     `json:"manga,omitempty"`
+}
+
+// CatalogRatingSource is one source's rating of an item.
+type CatalogRatingSource struct {
+	Source string  `json:"source" doc:"Rating source: imdb, tmdb, rt_critic, rt_audience, metacritic, metacritic_user, letterboxd, trakt, rogerebert, myanimelist, or mdblist. Clients should ignore names they do not recognize."`
+	Score  float64 `json:"score" minimum:"0" maximum:"100" doc:"Score on a 0-100 scale"`
+	Votes  *int64  `json:"votes,omitempty" minimum:"0" doc:"Number of votes behind the score, when the source reports it"`
+}
+
+func catalogRatingSourcesOf(sources []catalogpkg.ItemRatingSourceInfo) []CatalogRatingSource {
+	if len(sources) == 0 {
+		return nil
+	}
+	out := make([]CatalogRatingSource, 0, len(sources))
+	for _, source := range sources {
+		out = append(out, CatalogRatingSource{Source: source.Source, Score: source.Score, Votes: source.Votes})
+	}
+	return out
 }
 
 // CatalogItemDetailOutput is the getCatalogItem response.
@@ -495,6 +516,7 @@ const (
 
 func registerCatalogItems(reg *Registry) {
 	registerCatalogSearchCapabilities(reg)
+	registerThemeSongs(reg)
 	cursors := NewCursors(reg.deps.CursorSecret)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog", opListCatalogItems, "catalog",
 		"Page the catalog, a section, a collection, a personal list, or a person's credits, filtered and sorted.")),
@@ -1019,7 +1041,19 @@ func (reg *Registry) getCatalogItem(ctx context.Context, in *CatalogItemInput) (
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	return &CatalogItemDetailOutput{Body: catalogItemDetailOf(detail)}, nil
+	out := catalogItemDetailOf(detail)
+	if reg.deps.ThemeSongs != nil && (detail.Type == themeOwnerMovie || detail.Type == themeOwnerSeries || detail.Type == themeOwnerSeason || detail.Type == themeOwnerEpisode) {
+		themes, err := reg.deps.ThemeSongs.Discover(ctx, in.ID, true, viewer.Access)
+		if err != nil {
+			slog.WarnContext(ctx, "catalog theme lookup failed", "component", "apiv2", "item_id", in.ID, "error", err)
+			return &CatalogItemDetailOutput{Body: out}, nil
+		}
+		out.Themes = &ThemeSongSet{OwnerID: themes.OwnerID, Items: []ThemeSong{}}
+		for _, song := range themes.Items {
+			out.Themes.Items = append(out.Themes.Items, ThemeSong(song))
+		}
+	}
+	return &CatalogItemDetailOutput{Body: out}, nil
 }
 
 func (reg *Registry) listCatalogItemVersions(ctx context.Context, in *CatalogItemInput) (*FileVersionCollectionOutput, error) {
@@ -1194,7 +1228,8 @@ func catalogItemDetailOf(d *catalogpkg.ItemDetail) CatalogItemDetail {
 		ContentID: d.ContentID, PlayContentID: d.PlayContentID, Type: d.Type, Title: d.Title,
 		SeriesID: d.SeriesID, SeriesTitle: d.SeriesTitle, SeasonNumber: d.SeasonNumber, EpisodeNumber: d.EpisodeNumber,
 		Year: d.Year, Runtime: d.Runtime, Genres: NonNil(d.Genres), Keywords: []string{}, Studios: d.Studios, Networks: d.Networks,
-		ContentRating: d.ContentRating, ShowStatus: d.ShowStatus,
+		ContentRating: d.ContentRating, AdvisoryAge: d.AdvisoryAge, AdvisorySource: d.AdvisorySource,
+		ShowStatus: d.ShowStatus,
 		RatingIMDB: d.RatingIMDB, RatingTMDB: d.RatingTMDB, RatingRTCritic: d.RatingRTCritic, RatingRTAudience: d.RatingRTAudience,
 		Overview: d.Overview, ReleaseDate: d.ReleaseDate, LastAirDate: d.LastAirDate,
 		PosterURL: d.PosterURL, PosterThumbhash: d.PosterThumbhash, BackdropURL: d.BackdropURL, BackdropThumbhash: d.BackdropThumbhash, LogoURL: d.LogoURL,
@@ -1212,7 +1247,7 @@ func catalogItemDetailOf(d *catalogpkg.ItemDetail) CatalogItemDetail {
 		ImdbID: d.ImdbID, TmdbID: d.TmdbID, TvdbID: d.TvdbID, Cast: NonNil(d.Cast), Crew: NonNil(d.Crew), Countries: d.Countries, LockedFields: d.LockedFields,
 		FirstAirDate: d.FirstAirDate, AirTime: d.AirTime, AirTimezone: d.AirTimezone, SeasonCount: d.SeasonCount, EpisodeCount: d.EpisodeCount,
 		AirDate: d.AirDate, IsSpecials: d.IsSpecials, UserData: watchRollupOf(d.SeasonUserData), UserRating: d.UserRating,
-		Versions: fileVersionsOf(d.Versions), PlaybackVariants: playbackVariantsOf(d.PlaybackVariants), Videos: d.Videos, Extras: d.Extras,
+		Versions: fileVersionsOf(d.Versions), PlaybackVariants: playbackVariantsOf(d.PlaybackVariants), Videos: d.Videos, RatingSources: catalogRatingSourcesOf(d.RatingSources), Extras: d.Extras,
 		FolderPaths: d.FolderPaths, Subtitles: NonNil(d.Subtitles), Intro: d.Intro, Credits: d.Credits, Recap: d.Recap, Preview: d.Preview,
 		EffectiveVersionResolution: d.EffectiveVersionResolution,
 		EffectiveVersionHDR:        d.EffectiveVersionHDR, EffectiveVersionCodecVideo: d.EffectiveVersionCodecVideo, EffectiveVersionEditionKey: d.EffectiveVersionEditionKey,

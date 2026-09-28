@@ -328,6 +328,8 @@ describe("qualityOptionsFromPlanV3", () => {
     ];
 
     expect(resolveActiveQualityOptionId(options, "1080p")).toBe("original");
+    expect(resolveActiveQualityOptionId(options, "auto")).toBe("original");
+    expect(resolveActiveQualityOptionId(options, "480p")).toBe("original");
   });
 
   it("offers no auto entry when the plan publishes a single rung", () => {

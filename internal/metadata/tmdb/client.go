@@ -827,6 +827,50 @@ func (c *Client) GetCollection(ctx context.Context, id int) (*Collection, error)
 	}, nil
 }
 
+// GetList fetches the entries of a public, user-authored TMDB list in list
+// order. Lists mix movies and TV shows; entries of any other media type are
+// skipped. The endpoint pages 20 entries at a time, so reading stops at the
+// list's last page or once limit entries are collected. A limit <= 0 reads
+// the whole list, capped like the presets at maxCollectionPresetResults.
+func (c *Client) GetList(ctx context.Context, id, limit int) ([]CollectionResult, error) {
+	if id <= 0 {
+		return nil, fmt.Errorf("tmdb: list id must be > 0 (got %d)", id)
+	}
+	if limit <= 0 || limit > maxCollectionPresetResults {
+		limit = maxCollectionPresetResults
+	}
+
+	results := make([]CollectionResult, 0, min(limit, 100))
+	for page := 1; len(results) < limit; page++ {
+		var resp listResponse
+		if err := c.doGet(ctx, fmt.Sprintf("/list/%d?page=%d", id, page), &resp); err != nil {
+			return nil, err
+		}
+		for _, item := range resp.Items {
+			if item.MediaType != "movie" && item.MediaType != "tv" {
+				continue
+			}
+			title := item.Title
+			if title == "" {
+				title = item.Name
+			}
+			results = append(results, CollectionResult{
+				ID:        item.ID,
+				MediaType: item.MediaType,
+				Title:     title,
+			})
+		}
+		if page >= resp.TotalPages || len(resp.Items) == 0 {
+			break
+		}
+	}
+
+	if len(results) > limit {
+		results = results[:limit]
+	}
+	return results, nil
+}
+
 // GetMediaDetail fetches a single TMDB movie or series with credits, external
 // IDs, recommendations, and the appropriate certification feed, returning a
 // normalized MediaDetail. mediaType accepts Silo-facing "movie" or "series".
@@ -1104,14 +1148,9 @@ func pickTVRating(cr *contentRatingsResponse) string {
 // the full detail, which would return a 100+ KB payload to extract a handful
 // of identifiers.
 func (c *Client) GetExternalIDs(ctx context.Context, mediaType string, id int) (*ExternalIDs, error) {
-	var path string
-	switch mediaType {
-	case "movie":
-		path = fmt.Sprintf("/movie/%d/external_ids", id)
-	case "tv":
-		path = fmt.Sprintf("/tv/%d/external_ids", id)
-	default:
-		return nil, fmt.Errorf("tmdb: invalid media type: %q", mediaType)
+	path, err := externalIDsPath(mediaType, id)
+	if err != nil {
+		return nil, err
 	}
 
 	cacheKey := "external_ids:" + path
@@ -1145,6 +1184,36 @@ func (c *Client) GetExternalIDs(ctx context.Context, mediaType string, id int) (
 		return nil, fmt.Errorf("tmdb: invalid cached external IDs response")
 	}
 	return cloneExternalIDs(ids), nil
+}
+
+// RefreshExternalIDs fetches an entry's external IDs from TMDB, skipping both
+// the cache and any in-flight cached fetch, and caches the result. It serves
+// callers acting on an ID that may have just been added on TMDB (for example an
+// admin retrying a request after fixing it upstream).
+func (c *Client) RefreshExternalIDs(ctx context.Context, mediaType string, id int) (*ExternalIDs, error) {
+	path, err := externalIDsPath(mediaType, id)
+	if err != nil {
+		return nil, err
+	}
+	ids, err := c.fetchExternalIDs(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	if c.externalIDCache != nil && c.responseCacheTTL > 0 {
+		c.externalIDCache.Set("external_ids:"+path, cloneExternalIDs(ids), c.responseCacheTTL)
+	}
+	return cloneExternalIDs(ids), nil
+}
+
+func externalIDsPath(mediaType string, id int) (string, error) {
+	switch mediaType {
+	case "movie":
+		return fmt.Sprintf("/movie/%d/external_ids", id), nil
+	case "tv":
+		return fmt.Sprintf("/tv/%d/external_ids", id), nil
+	default:
+		return "", fmt.Errorf("tmdb: invalid media type: %q", mediaType)
+	}
 }
 
 func cloneExternalIDs(ids *ExternalIDs) *ExternalIDs {

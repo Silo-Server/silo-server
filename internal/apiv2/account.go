@@ -20,13 +20,14 @@ type Impersonation struct {
 
 // Account is the authenticated caller's login account.
 type Account struct {
-	ID              ID             `json:"id" doc:"Account identifier" example:"1"`
-	Username        string         `json:"username" doc:"Login name" example:"alice"`
-	Email           string         `json:"email" doc:"Contact email; empty when none is set" example:"alice@example.test"`
-	Role            string         `json:"role" enum:"admin,user" doc:"Server-wide role" example:"user"`
-	Permissions     []Permission   `json:"permissions" doc:"Effective assignable permissions; empty for a disabled account" example:"[\"marker_edit\"]"`
-	DownloadAllowed bool           `json:"download_allowed" doc:"Whether the effective policy permits downloads" example:"true"`
-	Impersonation   *Impersonation `json:"impersonation,omitempty" doc:"Present only while an administrator impersonates this account"`
+	ID                     ID             `json:"id" doc:"Account identifier" example:"1"`
+	Username               string         `json:"username" doc:"Login name" example:"alice"`
+	Email                  string         `json:"email" doc:"Contact email; empty when none is set" example:"alice@example.test"`
+	Role                   string         `json:"role" enum:"admin,user" doc:"Server-wide role" example:"user"`
+	Permissions            []Permission   `json:"permissions" doc:"Effective assignable permissions; empty for a disabled account" example:"[\"marker_edit\"]"`
+	DownloadAllowed        bool           `json:"download_allowed" doc:"Whether the effective policy permits downloads" example:"true"`
+	PasswordChangeRequired bool           `json:"password_change_required" doc:"Whether the account holds a temporary password. Until changePassword replaces it, the session may only read the account, change the password, and log out; other operations return 403 password_change_required. Refresh the tokens after the change to lift the restriction" example:"false"`
+	Impersonation          *Impersonation `json:"impersonation,omitempty" doc:"Present only while an administrator impersonates this account"`
 }
 
 // AccountOutput is the getCurrentUser response.
@@ -183,12 +184,13 @@ func (reg *Registry) getCurrentUser(ctx context.Context, _ *struct{}) (*AccountO
 
 func accountFromView(v handlers.UserView) Account {
 	out := Account{
-		ID:              IDFromInt(int64(v.ID)),
-		Username:        v.Username,
-		Email:           v.Email,
-		Role:            roleOf(v.Role),
-		Permissions:     permissionsOf(v.Permissions),
-		DownloadAllowed: v.DownloadAllowed,
+		ID:                     IDFromInt(int64(v.ID)),
+		Username:               v.Username,
+		Email:                  v.Email,
+		Role:                   roleOf(v.Role),
+		Permissions:            permissionsOf(v.Permissions),
+		DownloadAllowed:        v.DownloadAllowed,
+		PasswordChangeRequired: v.PasswordChangeRequired,
 	}
 	if v.Impersonation != nil {
 		out.Impersonation = &Impersonation{

@@ -169,9 +169,11 @@ func overlayOriginsFrom(source *OverlayOriginSource) []string {
 }
 
 // socketOriginAllowed accepts a browser Origin that matches the configured
-// public origin (or, when none is configured, the request's own scheme and
-// host) or one of the overlay origins connected providers report. Both are
-// exact scheme and host matches; forwarded headers are never consulted here.
+// public origin, the request's own scheme and host, or one of the overlay
+// origins connected providers report. The request's own origin stays accepted
+// with a public origin configured so a browser on a LAN address or IP:port can
+// open the sockets of the page it loaded. All are exact scheme and host
+// matches; forwarded host headers are never consulted here.
 func socketOriginAllowed(r *http.Request, publicOrigin string, overlayOrigins []string) bool {
 	origins := r.Header.Values("Origin")
 	if len(origins) == 0 {
@@ -184,15 +186,12 @@ func socketOriginAllowed(r *http.Request, publicOrigin string, overlayOrigins []
 	if err != nil || origin.User != nil || origin.Host == "" || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" || (origin.Scheme != eventsSchemeHTTPS && origin.Scheme != eventsSchemeHTTP) {
 		return false
 	}
-	expected := publicOrigin
-	if expected == "" {
-		scheme := clientip.RequestScheme(r)
-		if scheme == "" {
-			return false
-		}
-		expected = scheme + "://" + r.Host
+	if publicOrigin != "" && originMatches(origin, publicOrigin) {
+		return true
 	}
-	if originMatches(origin, expected) {
+	// An empty scheme means ambiguous proxy metadata; refuse the request's own
+	// origin rather than guess it.
+	if scheme := clientip.RequestScheme(r); scheme != "" && originMatches(origin, scheme+"://"+r.Host) {
 		return true
 	}
 	for _, overlay := range overlayOrigins {

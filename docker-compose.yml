@@ -32,7 +32,8 @@ services:
       retries: 5
 
   meilisearch:
-    image: ${MEILISEARCH_IMAGE:-getmeili/meilisearch:latest}
+    # Pinned: Meilisearch will not open data written by another version.
+    image: ${MEILISEARCH_IMAGE:-getmeili/meilisearch:v1.54.0}
     restart: unless-stopped
     profiles: [search]
     entrypoint:
@@ -46,6 +47,7 @@ services:
         exec /bin/meilisearch
     environment:
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-}
+      MEILI_UPGRADE_DB: ${MEILI_UPGRADE_DB:-false}
     ports:
       - "${MEILISEARCH_HOST:-127.0.0.1}:${MEILISEARCH_PORT:-7700}:7700"
     volumes:

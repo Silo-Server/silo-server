@@ -236,8 +236,13 @@ ownership lookup keys. A front-end that lost its in-memory session rebuilds
 ffmpeg from the token the client re-presents — no shared per-session store, zero
 external dependency for reconstruction on a single box. `HWAccel`/`HWDevice` are
 deliberately *not* carried; they are re-resolved from live config so an operator
-config change applies to reconstructed sessions too. Ownership re-binds to the
-live authenticated caller and refuses `userID==0` / mismatch — the token's `uid`
+config change applies to reconstructed sessions too. Under `hw_accel=auto` a
+reconstruct walks the same fallback as a fresh start (GPU decode and encode, CPU
+decode with GPU encode, then software) in the existing output directory: a
+failed attempt that has a successor stops only its process, and a slow process
+is kept. A recipe that recorded CPU decode starts at the CPU-decode stage.
+Ownership re-binds to the live authenticated caller and refuses `userID==0` /
+mismatch — the token's `uid`
 is never trusted alone (a leaked URL is useless without the owner's auth session
 on the native path).
 

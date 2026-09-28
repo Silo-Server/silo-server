@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
@@ -46,6 +47,11 @@ type Dependencies struct {
 	// IngressTokens validates the X-Silo-Ingress-Token network access
 	// provider plugins stamp on proxied requests. Nil accepts no tokens.
 	IngressTokens *netaccess.Registry
+	// ActivityLogWriter records compat requests in the same activity log as the
+	// native API, attributed to the compat session's account. Nil disables it.
+	ActivityLogWriter activitylog.Writer
+	// NodeID stamps activity log entries with the serving node.
+	NodeID string
 	// StreamTelemetry is the local observation-only registry shared with the
 	// native API process. May be nil, which makes every media route unobserved.
 	StreamTelemetry *streamtelemetry.Registry
@@ -78,6 +84,11 @@ type Dependencies struct {
 	// completes a watch, so fully-watched items leave the watchlist. Optional.
 	WatchCompletionObserver watchstate.CompletionObserver
 
+	// UserStateEvents, when set, carries watched-state changes between the
+	// compatibility layer, first-party clients and API replicas, and feeds the
+	// socket's UserDataChanged notifications.
+	UserStateEvents UserStateEvents
+
 	// Autoscan / admin compatibility support.
 	APIKeyValidator  apiKeyValidator
 	APIKeyUserLoader apiKeyUserLoader
@@ -109,6 +120,7 @@ type Dependencies struct {
 	SessionSyncer          PlaybackSessionSyncer
 	MarkerPopulation       MarkerPopulationService
 	FileResolver           FilePathResolver
+	MediaSourceOwners      MediaSourceOwnerLookup // optional; resolves media-source ids sent as item ids
 	UserStoreProvider      userstore.UserStoreProvider
 	WatchScrobbler         PlaybackWatchScrobbler
 	StableIdentityResolver watchsync.ScrobbleIdentityResolver

@@ -5,6 +5,7 @@ import type { FormEvent } from "react";
 import {
   useImportMDBListCollection,
   useImportTMDBCollection,
+  useImportTMDBListCollection,
   useImportTraktCollection,
 } from "@/hooks/queries/admin/collections";
 import { useProfiles } from "@/hooks/queries/profiles";
@@ -35,6 +36,8 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { CollectionDefaultSortField } from "@/components/collections/CollectionDefaultSortField";
 import { SyncScheduleField } from "@/components/collections/SyncScheduleField";
+import { TMDBListURLField } from "@/components/collections/TMDBListURLField";
+import { isValidTMDBListURL } from "@/lib/tmdbList";
 
 import { MDBListBrowser } from "./MDBListBrowser";
 import { TemplatePosterField, type TemplatePosterMode } from "./TemplatePosterField";
@@ -88,6 +91,7 @@ export function CollectionTemplateConfigForm({
   const tmdbMutation = useImportTMDBCollection();
   const traktMutation = useImportTraktCollection();
   const mdblistMutation = useImportMDBListCollection();
+  const tmdbListMutation = useImportTMDBListCollection();
   const { data: profiles = [] } = useProfiles();
   const eligibility = libraryEligibilityForMediaKind(template.media_kind);
 
@@ -103,6 +107,7 @@ export function CollectionTemplateConfigForm({
   const defaultProfileId = template.requires_profile ? (profiles[0]?.id ?? "") : "";
   const [profileId, setProfileId] = useState(defaultProfileId);
   const [mdblistUrl, setMdblistUrl] = useState(template.mdblist?.url ?? "");
+  const [tmdbListUrl, setTmdbListUrl] = useState(template.tmdb_list?.url ?? "");
   const [posterMode, setPosterMode] = useState<TemplatePosterMode>(() =>
     template.poster_path ? "default" : "custom",
   );
@@ -130,13 +135,23 @@ export function CollectionTemplateConfigForm({
 
   const parsedLimit = parseOptionalPositiveInteger(limit);
   const limitInvalid = limit.trim().length > 0 && parsedLimit === undefined;
-  const isPending = tmdbMutation.isPending || traktMutation.isPending || mdblistMutation.isPending;
+  const isPending =
+    tmdbMutation.isPending ||
+    traktMutation.isPending ||
+    mdblistMutation.isPending ||
+    tmdbListMutation.isPending;
   const missingLibrary = libraryIds.length === 0;
   const missingProfile = template.requires_profile && profileId === "";
   const missingMDBListURL = template.source === "mdblist" && mdblistUrl.trim().length === 0;
+  const invalidTMDBListURL = template.source === "tmdb_list" && !isValidTMDBListURL(tmdbListUrl);
 
   const submitDisabled =
-    isPending || missingLibrary || missingProfile || missingMDBListURL || limitInvalid;
+    isPending ||
+    missingLibrary ||
+    missingProfile ||
+    missingMDBListURL ||
+    invalidTMDBListURL ||
+    limitInvalid;
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -193,6 +208,19 @@ export function CollectionTemplateConfigForm({
           body: {
             ...sharedFields,
             url: mdblistUrl.trim(),
+          },
+        },
+        { onSuccess: onCreated },
+      );
+      return;
+    }
+
+    if (template.source === "tmdb_list") {
+      tmdbListMutation.mutate(
+        {
+          body: {
+            ...sharedFields,
+            url: tmdbListUrl.trim(),
           },
         },
         { onSuccess: onCreated },
@@ -280,6 +308,14 @@ export function CollectionTemplateConfigForm({
             </p>
           </div>
         </div>
+      ) : null}
+
+      {template.source === "tmdb_list" ? (
+        <TMDBListURLField
+          id="template-tmdb-list-url"
+          value={tmdbListUrl}
+          onChange={setTmdbListUrl}
+        />
       ) : null}
 
       {template.requires_profile ? (

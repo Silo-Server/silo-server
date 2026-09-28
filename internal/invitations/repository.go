@@ -8,10 +8,6 @@ package invitations
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -44,18 +40,16 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 // NewToken mints a raw claim token and its SHA-256 hex digest for at-rest
 // storage. The raw token is embedded in the emailed link and never stored.
 func NewToken() (token, tokenHash string, err error) {
-	raw := make([]byte, 32)
-	if _, err := rand.Read(raw); err != nil {
+	token, tokenHash, err = auth.NewLinkToken()
+	if err != nil {
 		return "", "", fmt.Errorf("generate invitation token: %w", err)
 	}
-	token = base64.RawURLEncoding.EncodeToString(raw)
-	return token, HashToken(token), nil
+	return token, tokenHash, nil
 }
 
 // HashToken returns the at-rest digest of a claim token.
 func HashToken(token string) string {
-	sum := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(sum[:])
+	return auth.HashLinkToken(token)
 }
 
 // invitationColumns are the table columns plus the joined inviter name.

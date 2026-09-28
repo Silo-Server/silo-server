@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strconv"
@@ -191,9 +193,9 @@ type releaseDeadlinePlanStoreV3 struct {
 	contextErr   error
 }
 
-func (s *recordingRouteEventPlanStoreV3) RecordRouteEvent(_ context.Context, event playback.RouteEventRecordV3) error {
+func (s *recordingRouteEventPlanStoreV3) RecordRouteEvent(_ context.Context, event playback.RouteEventRecordV3) (bool, error) {
 	s.events <- event
-	return nil
+	return true, nil
 }
 
 func (s *releaseDeadlinePlanStoreV3) ReleaseReplan(ctx context.Context, _, _, _ string) error {
@@ -605,6 +607,20 @@ func (s *mutablePlaybackSettingsV3) Get(_ context.Context, key string) (string, 
 	return s.values[key], nil
 }
 
+func (s *mutablePlaybackSettingsV3) GetMany(ctx context.Context, keys ...string) (map[string]string, error) {
+	out := make(map[string]string, len(keys))
+	for _, key := range keys {
+		value, err := s.Get(ctx, key)
+		if err != nil {
+			return nil, err
+		}
+		if value != "" {
+			out[key] = value
+		}
+	}
+	return out, nil
+}
+
 func TestPlannerSettingsV3ResultPreservesStoreFailure(t *testing.T) {
 	handler := &PlaybackHandler{SettingsRepo: &mutablePlaybackSettingsV3{err: context.DeadlineExceeded}}
 	_, err := handler.plannerSettingsV3Result(context.Background())
@@ -631,7 +647,7 @@ func TestPlannerSettingsV3ResultPreservesAllow4KStoreFailure(t *testing.T) {
 
 func TestPlannerSettingsV3ResultReadsPolicyKeysConcurrently(t *testing.T) {
 	store := &gatedPlaybackSettingsV3{
-		started: make(chan string, 3),
+		started: make(chan string, 4),
 		release: make(chan struct{}),
 	}
 	handler := &PlaybackHandler{SettingsRepo: store}
@@ -641,13 +657,13 @@ func TestPlannerSettingsV3ResultReadsPolicyKeysConcurrently(t *testing.T) {
 		result <- err
 	}()
 
-	started := make(map[string]bool, 3)
-	for len(started) < 3 {
+	started := make(map[string]bool, 4)
+	for len(started) < 4 {
 		select {
 		case key := <-store.started:
 			started[key] = true
 		case <-time.After(time.Second):
-			t.Fatalf("settings reads started concurrently = %v, want all three keys", started)
+			t.Fatalf("settings reads started concurrently = %v, want all four keys", started)
 		}
 	}
 	close(store.release)
@@ -658,6 +674,7 @@ func TestPlannerSettingsV3ResultReadsPolicyKeysConcurrently(t *testing.T) {
 		config.Allow4KTranscodeSettingKey,
 		config.PlaybackTranscodeHardwareToneMapSettingKey,
 		config.PlaybackTranscodeSoftwareToneMapSettingKey,
+		config.PlaybackAllowHEVCEncodingSettingKey,
 	} {
 		if !started[key] {
 			t.Fatalf("settings read missing key %q", key)
@@ -2828,7 +2845,7 @@ func TestAttachSubtitleArtifactV3UsesFrozenDownloadedIdentityWithoutOrdinalLooku
 		SubtitleSource: playback.SubtitleSourceDownloadedV3, DownloadedSubtitleID: 71,
 		SubtitleTrackIndex: selectedIndex, SubtitleCodec: "vtt",
 	}
-	if err := handler.attachSubtitleArtifactV3(context.Background(), "session-frozen-subtitle", file, plan, selectedIndex, &recipe); err != nil {
+	if err := handler.attachSubtitleArtifactV3(context.Background(), "session-frozen-subtitle", file, plan, selectedIndex, &recipe, nil); err != nil {
 		t.Fatalf("attach frozen downloaded subtitle: %v", err)
 	}
 	if plan.Subtitle.Artifact == nil || !strings.Contains(plan.Subtitle.Artifact.URL, "downloaded_subtitle_id=71") {
@@ -2870,7 +2887,7 @@ func TestAttachSubtitleArtifactV3ClearsStaleArtifactWhenNoArtifactMode(t *testin
 					Inventory: playback.BuildSubtitleInventoryV3(file, nil),
 				},
 			}
-			if err := handler.attachSubtitleArtifactV3(context.Background(), "session-current", file, plan, test.selectedIndex, nil); err != nil {
+			if err := handler.attachSubtitleArtifactV3(context.Background(), "session-current", file, plan, test.selectedIndex, nil, nil); err != nil {
 				t.Fatalf("attach: %v", err)
 			}
 			if plan.Subtitle.Artifact != nil {
@@ -2904,7 +2921,7 @@ func TestAttachSubtitleArtifactV3DropsArtifactAcrossRenderToOffReplan(t *testing
 			Inventory: playback.BuildSubtitleInventoryV3(file, nil),
 		},
 	}
-	if err := handler.attachSubtitleArtifactV3(context.Background(), "session-1", file, rendered, 0, nil); err != nil {
+	if err := handler.attachSubtitleArtifactV3(context.Background(), "session-1", file, rendered, 0, nil, nil); err != nil {
 		t.Fatalf("attach render: %v", err)
 	}
 	if rendered.Subtitle.Artifact == nil {
@@ -2914,7 +2931,7 @@ func TestAttachSubtitleArtifactV3DropsArtifactAcrossRenderToOffReplan(t *testing
 	// subtitles off; the durable artifact must not survive the transition.
 	replanned := *rendered
 	replanned.Subtitle.Mode = playback.SubtitleOffV3
-	if err := handler.attachSubtitleArtifactV3(context.Background(), "session-1", file, &replanned, -1, nil); err != nil {
+	if err := handler.attachSubtitleArtifactV3(context.Background(), "session-1", file, &replanned, -1, nil, nil); err != nil {
 		t.Fatalf("attach off: %v", err)
 	}
 	if replanned.Subtitle.Artifact != nil || replanned.Subtitle.TrackID != "" {
@@ -2950,7 +2967,7 @@ func TestSubtitleArtifactStoreFailuresAreRetryable(t *testing.T) {
 		SubtitleSource: playback.SubtitleSourceDownloadedV3, DownloadedSubtitleID: 71,
 		SubtitleTrackIndex: 0, SubtitleCodec: "vtt",
 	}
-	err := handler.attachSubtitleArtifactV3(context.Background(), "session-store-error", file, plan, 0, &recipe)
+	err := handler.attachSubtitleArtifactV3(context.Background(), "session-store-error", file, plan, 0, &recipe, nil)
 	if !errors.Is(err, errSubtitleStoreUnavailableV3) {
 		t.Fatalf("attach error = %v, want wrapped subtitle-store failure", err)
 	}
@@ -4282,6 +4299,86 @@ func TestHandleReplanPlaybackV3PreservesOmittedSubtitleAndReportsUnavailableInFa
 	}
 	if record.NormalizedRequest.SubtitleTrackID != startRequest.SubtitleTrackID || record.CurrentPlan.SelectedTracks.Subtitle == nil {
 		t.Fatalf("terminal fallback changed durable subtitle selection: %#v", record)
+	}
+}
+
+// TestHandleReplanPlaybackV3RemapsSubtitleAcrossFormatsInFallbackVersion
+// covers #1034 end to end: the 1080p fallback carries the selected English
+// subtitle as SRT where the 2160p source has ASS, and the quality change keeps
+// English subtitles on the fallback instead of ending the attempt.
+func TestHandleReplanPlaybackV3RemapsSubtitleAcrossFormatsInFallbackVersion(t *testing.T) {
+	source := v3HandlerFixtureFile(t)
+	source.Resolution = "2160p"
+	source.Bitrate = 32_000
+	source.VideoTracks = append([]models.VideoTrack(nil), source.VideoTracks...)
+	source.VideoTracks[0].Level = 51
+	source.VideoTracks[0].Width = 3840
+	source.VideoTracks[0].Height = 2160
+	source.VideoTracks[0].Bitrate = 32_000
+	source.ExternalSubtitles = []models.ExternalSubtitle{{Path: writePlaybackTestMediaFile(t, "movie.eng.ass"), Language: "eng", Format: "ass"}}
+	alternateValue := *source
+	alternate := &alternateValue
+	alternate.ID = 84
+	alternate.Resolution = "1080p"
+	alternate.Bitrate = 8_000
+	alternate.VideoTracks = append([]models.VideoTrack(nil), source.VideoTracks...)
+	alternate.VideoTracks[0].Level = 41
+	alternate.VideoTracks[0].Width = 1920
+	alternate.VideoTracks[0].Height = 1080
+	alternate.VideoTracks[0].Bitrate = 8_000
+	alternate.ExternalSubtitles = []models.ExternalSubtitle{{Path: writePlaybackTestMediaFile(t, "movie.1080p.eng.srt"), Language: "eng", Format: "srt"}}
+
+	files := map[int]*models.MediaFile{source.ID: source, alternate.ID: alternate}
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{files: files})
+	handler.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{source.ContentID: {source, alternate}}}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "false"}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	startRequest := v3HandlerStartRequest()
+	startRequest.QualityPreference = "auto"
+	startRequest.Capabilities.MaxResolution = "2160p"
+	startRequest.Capabilities.VideoDecode[0].Levels = []int{51}
+	startRequest.Capabilities.VideoDecode[0].MaxWidth = 3840
+	startRequest.Capabilities.VideoDecode[0].MaxHeight = 2160
+	startRequest.Capabilities.VideoDecode[0].MaxBitrateKbps = 50_000
+	subtitleIndex := 0
+	startRequest.SubtitleTrackID = playback.TrackIDV3(source.ID, "subtitle", subtitleIndex)
+	startRequest.SubtitleTrackIndex = &subtitleIndex
+	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3] = playback.DeliveryCapabilityV3{
+		Enabled: true, SupportedOnDevice: true,
+		Subtitles: playback.DeliverySubtitleCapabilitiesV3{SidecarText: true, ASSStyling: true},
+	}
+	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = playback.DeliveryCapabilityV3{
+		Enabled: true, SupportedOnDevice: true,
+		Subtitles: playback.DeliverySubtitleCapabilitiesV3{SidecarText: true, ASSStyling: true},
+	}
+
+	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext())
+	startRR := httptest.NewRecorder()
+	handler.HandleStartPlayback(startRR, startReq)
+	if startRR.Code != http.StatusCreated {
+		t.Fatalf("start status = %d, body = %s", startRR.Code, startRR.Body.String())
+	}
+	var started playback.DecisionResponseV3
+	if err := json.Unmarshal(startRR.Body.Bytes(), &started); err != nil || started.PlaybackPlan == nil {
+		t.Fatalf("start response: err=%v response=%#v", err, started)
+	}
+	currentKey := playback.PlanAttemptKeyV3(*started.PlaybackPlan, startRequest.ClientPlaybackContext.Output.OutputContextID, nil)
+	response := postPlaybackReplanV3(t, handler, started.SessionID, playback.ReplanRequestV3{
+		ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationQualityChangeV3,
+		PlaybackAttemptID: startRequest.PlaybackAttemptID,
+		ReplanRequestID:   "subtitle-format-fallback-0001", FailedPlanID: started.PlaybackPlan.PlanID,
+		PlanAttemptID: "subtitle-format-attempt-0001", PlanAttemptKey: currentKey,
+		AttemptedPlanKeys: []string{currentKey}, AttemptCount: 1, QualityPreference: "1080p",
+		SelectedTracks:        playback.SelectedTracksV3{Audio: started.PlaybackPlan.SelectedTracks.Audio},
+		Capabilities:          startRequest.Capabilities,
+		ClientPlaybackContext: startRequest.ClientPlaybackContext,
+	})
+	if response.Terminal != nil || response.PlaybackPlan == nil {
+		t.Fatalf("cross-format fallback terminal = %#v", response.Terminal)
+	}
+	selected := response.PlaybackPlan.SelectedTracks.Subtitle
+	if selected == nil || selected.ID != playback.TrackIDV3(alternate.ID, "subtitle", 0) {
+		t.Fatalf("fallback subtitle = %#v, want the 1080p English SRT", selected)
 	}
 }
 
@@ -6218,6 +6315,45 @@ func TestPlaybackV3ToneMapBudgetsCoverColdNodeWork(t *testing.T) {
 	}
 }
 
+// A RequireReady node start under hw_accel=auto can wait on one manifest per
+// execution path; the API deadline must not cancel a fallback that succeeds.
+func TestRemotePlaybackTransportTimeoutCoversAutoFallbackAttempts(t *testing.T) {
+	// The node resolves auto against live hardware, so neither a missing nor a
+	// software stored report may shorten the budget.
+	const nodeURL = "https://gpu-node.example"
+	software := &nodepool.Node{URL: nodeURL, Capabilities: json.RawMessage(`{"resolved":"none"}`)}
+	ready := transcodenode.TranscodeStartRequest{TargetCodecVideo: "h264", HWAccel: "auto", RequireReady: true}
+	min := time.Duration(playback.MaxAutoTranscodeStartupAttempts) * transcodenode.TranscodeStartReadinessTimeout
+	for name, handler := range map[string]*PlaybackHandler{
+		"no planner":      {},
+		"software report": {NodePlanner: &v3NodeLookupPlanner{node: software}},
+	} {
+		if got := handler.remotePlaybackTransportTimeout(nodeURL, ready); got <= min {
+			t.Errorf("%s: ready start timeout = %s, want more than %s", name, got, min)
+		}
+	}
+
+	// Starts that cannot fall back keep the single-wait budget, so an
+	// unresponsive node fails over as quickly as before.
+	singleWait := playback.ManifestStartupTimeout + 5*time.Second
+	unready := ready
+	unready.RequireReady = false
+	explicit := ready
+	explicit.HWAccel = "nvenc"
+	copyVideo := ready
+	copyVideo.TargetCodecVideo = "copy"
+	handler := &PlaybackHandler{}
+	for name, request := range map[string]transcodenode.TranscodeStartRequest{
+		"unready":        unready,
+		"explicit accel": explicit,
+		"copy video":     copyVideo,
+	} {
+		if got := handler.remotePlaybackTransportTimeout(nodeURL, request); got != singleWait {
+			t.Errorf("%s: start timeout = %s, want %s", name, got, singleWait)
+		}
+	}
+}
+
 func TestLookupRemoteCapabilitiesStartsCacheTTLAfterRequestCompletes(t *testing.T) {
 	for _, test := range []struct {
 		name   string
@@ -6528,4 +6664,177 @@ func startPlaybackV2IntoRecorder(t *testing.T, h *PlaybackHandler, rr *httptest.
 		t.Fatal(err)
 	}
 	writeJSON(rr, http.StatusCreated, response)
+}
+
+// writePlaybackTestFFmpegFailingOn writes a fake FFmpeg that exits before its
+// first manifest when its arguments contain failPattern and otherwise behaves
+// like writePlaybackTestFFmpeg. Every real transcode invocation is logged.
+func writePlaybackTestFFmpegFailingOn(t *testing.T, failPattern string) (ffmpegPath, logPath string) {
+	t.Helper()
+	dir := t.TempDir()
+	ffmpegPath = filepath.Join(dir, "fake-ffmpeg.sh")
+	logPath = filepath.Join(dir, "invocations.log")
+	script := "#!/bin/sh\n" +
+		"last=\"\"\n" +
+		"for arg in \"$@\"; do last=\"$arg\"; done\n" +
+		"case \"$last\" in *.m3u8) printf '%s\\n' \"$*\" >> \"" + logPath + "\" ;; esac\n" +
+		"case \"$*\" in *'" + failPattern + "'*) echo 'intentional hardware failure' >&2; exit 1 ;; esac\n" +
+		"case \"$last\" in\n" +
+		"  *.m3u8) out=\"$(dirname \"$last\")\"; mkdir -p \"$out\"; " +
+		"printf x > \"$out/init.mp4\"; printf x > \"$out/seg_0.m4s\"; " +
+		"printf x > \"$out/seg_1.m4s\"; printf x > \"$out/seg_2.m4s\"; " +
+		"printf '#EXTM3U\\n#EXT-X-VERSION:7\\n#EXT-X-TARGETDURATION:2\\n" +
+		"#EXT-X-MEDIA-SEQUENCE:0\\n#EXT-X-MAP:URI=\"init.mp4\"\\n" +
+		"#EXTINF:2.0,\\nseg_0.m4s\\n#EXTINF:2.0,\\nseg_1.m4s\\n" +
+		"#EXTINF:2.0,\\nseg_2.m4s\\n' > \"$last\" ;;\n" +
+		"esac\n" +
+		"sleep 30\n"
+	if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake ffmpeg: %v", err)
+	}
+	return ffmpegPath, logPath
+}
+
+func readPlaybackTestFFmpegInvocations(t *testing.T, logPath string) []string {
+	t.Helper()
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read ffmpeg invocations: %v", err)
+	}
+	return strings.Split(strings.TrimSpace(string(data)), "\n")
+}
+
+// autoNVENCPipelineSeamV3 stands in for hw_accel=auto resolving to NVENC, which
+// the test host cannot probe.
+func autoNVENCPipelineSeamV3(t *testing.T) func(context.Context, playback.TranscodeOpts) *playback.AutoTranscodePipeline {
+	return func(_ context.Context, opts playback.TranscodeOpts) *playback.AutoTranscodePipeline {
+		if opts.HWAccel != "auto" {
+			t.Errorf("pipeline built from HWAccel %q, want configured auto", opts.HWAccel)
+		}
+		opts.HWAccel = "nvenc"
+		return playback.NewResolvedAutoTranscodePipelineForTest(opts)
+	}
+}
+
+func prepareAutoLocalTransportV3(t *testing.T, ffmpegPath, sessionID string) (*PlaybackHandler, preparedTransportV3, *transportErrorV3) {
+	t.Helper()
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	transcodeDir := t.TempDir()
+	handler.PlaybackConfig = func() config.PlaybackConfig {
+		return config.PlaybackConfig{FFmpegPath: ffmpegPath, TranscodeDir: transcodeDir, TranscodeEnabled: true, HWAccel: "auto"}
+	}
+	handler.autoTranscodePipelineV3 = autoNVENCPipelineSeamV3(t)
+	file := v3HandlerFixtureFile(t)
+	result := playback.PlannerResultV3{
+		Plan:       &playback.PlanV3{PlanID: "plan:" + sessionID, Delivery: playback.DeliveryTranscodeHLSV3},
+		PlayMethod: playback.PlayTranscode, TargetVideoCodec: "h264", TargetAudioCodec: "aac", TargetResolution: "720p",
+		SubtitleTrackIndex: -1, SubtitleTransportTrackIndex: -1,
+	}
+	request := httptest.NewRequest(http.MethodPost, "/", nil)
+	timeline, timelineErr := handler.prepareTransportTimelineV3(request.Context(), &playback.Session{ID: sessionID}, file, result)
+	if timelineErr != nil {
+		t.Fatalf("prepare timeline: %v", timelineErr)
+	}
+	transport, transportErr := handler.prepareLocalTransportV3(request, &playback.Session{ID: sessionID, UserID: 7, ProfileID: "profile-1"}, file, result, timeline, mediaAuthModeV3{})
+	return handler, transport, transportErr
+}
+
+func TestPrepareLocalTransportV3AutoKeepsGPUEncodeWithCPUDecode(t *testing.T) {
+	ffmpegPath, logPath := writePlaybackTestFFmpegFailingOn(t, "-hwaccel cuda")
+	handler, transport, transportErr := prepareAutoLocalTransportV3(t, ffmpegPath, "session-auto-mixed")
+	if transportErr != nil {
+		t.Fatalf("prepare auto local transport: %v (cause: %v)", transportErr, transportErr.cause)
+	}
+	if commitErr := transport.commit(); commitErr != nil {
+		t.Fatalf("commit: %v", commitErr)
+	}
+	defer handler.tm.CloseTranscodeSession("session-auto-mixed", "")
+
+	live := handler.tm.GetTranscodeSession("session-auto-mixed")
+	if live == nil {
+		t.Fatal("committed transport did not register a transcode session")
+	}
+	if opts := live.Opts(); opts.HWAccel != "nvenc" || !opts.SoftwareVideoDecode {
+		t.Fatalf("live session = %s software decode %v, want NVENC with CPU decode", opts.HWAccel, opts.SoftwareVideoDecode)
+	}
+	if transport.hwAccel != "nvenc" {
+		t.Fatalf("transport hwAccel = %q, want nvenc", transport.hwAccel)
+	}
+	invocations := readPlaybackTestFFmpegInvocations(t, logPath)
+	if len(invocations) != 2 || !strings.Contains(invocations[0], "-hwaccel cuda") ||
+		strings.Contains(invocations[1], "-hwaccel cuda") || !strings.Contains(invocations[1], "h264_nvenc") {
+		t.Fatalf("invocations = %q, want full hardware then CPU decode with NVENC", invocations)
+	}
+}
+
+func TestPrepareLocalTransportV3AutoTerminalFailureKeepsMainError(t *testing.T) {
+	ffmpegPath, logPath := writePlaybackTestFFmpegFailingOn(t, "-f hls")
+	_, transport, transportErr := prepareAutoLocalTransportV3(t, ffmpegPath, "session-auto-terminal")
+	if transportErr == nil {
+		transport.rollback()
+		t.Fatal("failed ffmpeg startup returned a playable transport")
+	}
+	if transportErr.reason != transcodeStartFailedReasonV3 || transportErr.retryable {
+		t.Fatalf("transport error = %#v, want stable non-retryable startup terminal", transportErr)
+	}
+	if transportErr.cause == nil || !strings.Contains(transportErr.cause.Error(), "intentional hardware failure") {
+		t.Fatalf("startup error lost ffmpeg cause: %#v", transportErr)
+	}
+	invocations := readPlaybackTestFFmpegInvocations(t, logPath)
+	if len(invocations) != 3 || !strings.Contains(invocations[2], "libx264") {
+		t.Fatalf("invocations = %q, want full hardware, mixed, then software", invocations)
+	}
+}
+
+func TestRemoteTranscodeRecipeCardV3RecordsNodeSoftwareDecode(t *testing.T) {
+	session := &playback.Session{ID: "session-remote-card", UserID: 7, ProfileID: "profile-1"}
+	file := &models.MediaFile{ID: 42}
+	req := transcodenode.TranscodeStartRequest{InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", HWAccel: "auto"}
+
+	card := remoteTranscodeRecipeCardV3(session, file, "http://node", "transport-1", req,
+		transcodenode.TranscodeStartResponse{HWAccel: "nvenc", SoftwareVideoDecode: true}, "")
+	if !card.SoftwareVideoDecode || card.HWAccel != "nvenc" {
+		t.Fatalf("card = %s software decode %v, want the node's NVENC with CPU decode", card.HWAccel, card.SoftwareVideoDecode)
+	}
+
+	req.SoftwareVideoDecode = true
+	card = remoteTranscodeRecipeCardV3(session, file, "http://node", "transport-1", req,
+		transcodenode.TranscodeStartResponse{HWAccel: "qsv"}, "")
+	if !card.SoftwareVideoDecode {
+		t.Fatal("a node that omits software_video_decode dropped the requested CPU decode")
+	}
+}
+
+func TestPlannerSettingsV3ReadsHEVCEncodingLive(t *testing.T) {
+	store := &mutablePlaybackSettingsV3{values: map[string]string{config.PlaybackAllowHEVCEncodingSettingKey: "true"}}
+	handler := &PlaybackHandler{SettingsRepo: store}
+	settings, err := handler.plannerSettingsV3Result(context.Background())
+	if err != nil || !settings.AllowHEVCEncoding {
+		t.Fatalf("HEVC enabled settings=%+v error=%v", settings, err)
+	}
+	store.mu.Lock()
+	store.values[config.PlaybackAllowHEVCEncodingSettingKey] = "false"
+	store.mu.Unlock()
+	settings, err = handler.plannerSettingsV3Result(context.Background())
+	if err != nil || settings.AllowHEVCEncoding {
+		t.Fatalf("HEVC disabled settings=%+v error=%v", settings, err)
+	}
+	store.getErrors = map[string]error{config.PlaybackAllowHEVCEncodingSettingKey: context.DeadlineExceeded}
+	_, err = handler.plannerSettingsV3Result(context.Background())
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("HEVC policy store failure=%v", err)
+	}
+}
+
+func TestHEVCEncodedPlanCarriesHVC1ToTransport(t *testing.T) {
+	plan := &playback.PlanV3{Delivery: playback.DeliveryTranscodeHLSV3}
+	plan.EffectiveRecipe.VideoCodec = "hevc"
+	plan.EffectiveRecipe.VideoSampleEntry = playback.VideoSampleEntryHVC1
+	if got := videoSampleEntryForPlanV3(plan); got != playback.VideoSampleEntryHVC1 {
+		t.Fatalf("HEVC transport sample entry=%q", got)
+	}
+	plan.EffectiveRecipe.VideoCodec = "h264"
+	if got := videoSampleEntryForPlanV3(plan); got != "" {
+		t.Fatalf("H264 carried HEVC tag=%q", got)
+	}
 }

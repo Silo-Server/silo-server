@@ -174,14 +174,18 @@ export default function WatchTogetherRoomPage() {
     if (room.phase !== "playing" || !room.selected_content_id) return;
     if (lastAutoStartRevisionRef.current === room.selection_revision) return;
     lastAutoStartRevisionRef.current = room.selection_revision;
-    playbackController.startPlayback({
-      contentId: room.selected_content_id,
-      fileId: room.selected_file_id,
-      libraryId: room.selected_library_id,
-      roomId,
-      roomToken,
-      restart: true,
-    });
+    // Started by the room, not by a Play press on this device.
+    playbackController.startPlayback(
+      {
+        contentId: room.selected_content_id,
+        fileId: room.selected_file_id,
+        libraryId: room.selected_library_id,
+        roomId,
+        roomToken,
+        restart: true,
+      },
+      "automatic",
+    );
   }, [connection.replacementReason, playbackController, room, roomId, roomToken]);
 
   // Vote mode from a detail page: the sheet could not suggest before the
@@ -218,14 +222,17 @@ export default function WatchTogetherRoomPage() {
   const rejoinPlayback = useCallback(() => {
     if (!room?.selected_content_id || !roomId || !roomToken) return;
     lastAutoStartRevisionRef.current = room.selection_revision;
-    playbackController.startPlayback({
-      contentId: room.selected_content_id,
-      fileId: room.selected_file_id,
-      libraryId: room.selected_library_id,
-      roomId,
-      roomToken,
-      restart: true,
-    });
+    playbackController.startPlayback(
+      {
+        contentId: room.selected_content_id,
+        fileId: room.selected_file_id,
+        libraryId: room.selected_library_id,
+        roomId,
+        roomToken,
+        restart: true,
+      },
+      "viewer",
+    );
   }, [playbackController, room, roomId, roomToken]);
 
   // What choosing from the shelf does: the host stages in a host-pick lobby;

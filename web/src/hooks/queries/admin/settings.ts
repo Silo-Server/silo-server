@@ -8,6 +8,7 @@ import {
   type SettingsBaseline,
 } from "@/api/v2/adminSettingsSnapshot";
 import { jellyfinCompatStatusKey } from "@/api/v2/jellyfinStatusCache";
+import { PASSWORD_RESET_CAPABILITY_KEY } from "@/hooks/queries/passwordReset";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   captureProfileRequestContext,
@@ -68,13 +69,13 @@ function useRetainedSettingsBaseline(
 
 export type CatalogSearchStatus = V2Result<"GET /api/v2/admin/catalog/search/status">;
 
-export function useAdminServerSettings() {
+export function useAdminServerSettings({ enabled = true }: { enabled?: boolean } = {}) {
   const profileContext = captureProfileRequestContext();
   return useQuery({
     queryKey: profileContext
       ? adminSettingsKey(profileContext)
       : [...adminKeys.serverSettings(), null],
-    enabled: profileContext !== null,
+    enabled: enabled && profileContext !== null,
     queryFn: () => {
       if (!profileContext) throw new StaleApiRequestContextError();
       return readAdminSettings(profileContext);
@@ -83,6 +84,61 @@ export function useAdminServerSettings() {
     // with an older equal-valued record when only a redacted secret changed.
     structuralSharing: false,
     staleTime: 30_000,
+  });
+}
+
+export type StorageTransitionPolicy = "start_fresh" | "preserve_uploads" | "migrate_all";
+export type StorageTransitionCapabilities =
+  V2Result<"GET /api/v2/admin/storage-transitions/capabilities">;
+export type StorageTransitionSourceHealth =
+  V2Result<"GET /api/v2/admin/storage-transitions/source-health">;
+
+export function useStorageTransitionCapabilities() {
+  return useQuery({
+    queryKey: [...adminKeys.serverStatus(), "storage-transition-capabilities"] as const,
+    queryFn: () => v2("GET /api/v2/admin/storage-transitions/capabilities"),
+    retry: false,
+    staleTime: 60_000,
+  });
+}
+
+export function useStorageTransitionSourceHealth(probe: boolean, enabled: boolean) {
+  return useQuery({
+    queryKey: [...adminKeys.serverStatus(), "storage-transition-source-health", probe] as const,
+    enabled,
+    queryFn: () => v2("GET /api/v2/admin/storage-transitions/source-health", { query: { probe } }),
+    retry: false,
+    staleTime: 0,
+    refetchInterval: (query) =>
+      !probe && query.state.data?.recovery_pending === true ? 5_000 : false,
+  });
+}
+
+export function useCreateStorageTransition() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    retry: false,
+    mutationFn: (request: { policy: StorageTransitionPolicy; values: Record<string, string> }) =>
+      v2("POST /api/v2/admin/storage-transitions", { body: request }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: adminKeys.serverSettings() }),
+        queryClient.invalidateQueries({ queryKey: adminKeys.serverStatus() }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "jobs"] }),
+        queryClient.invalidateQueries({ queryKey: adminKeys.jobs("storage_transition") }),
+      ]);
+    },
+  });
+}
+
+export function useCancelStorageTransition() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    retry: false,
+    mutationFn: (id: string) => v2("POST /api/v2/admin/jobs/{id}/cancel", { path: { id } }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: adminKeys.jobs("storage_transition") });
+    },
   });
 }
 
@@ -158,6 +214,18 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
           // The user-facing Connect Apps card reads the same settings and
           // caches them for minutes, so it has to drop its copy too.
           queryClient.invalidateQueries({ queryKey: compatKeys.all }),
+        );
+      }
+      if (keys.includes("server.public_url")) {
+        // Invitation and reset links are built on the public URL, so the
+        // capability answers that gate them change with it.
+        invalidations.push(
+          queryClient.invalidateQueries({
+            queryKey: adminKeys.users(),
+            predicate: (query) => query.queryKey.at(-1) === "capabilities",
+          }),
+          // Self-service reset also needs the public URL.
+          queryClient.invalidateQueries({ queryKey: PASSWORD_RESET_CAPABILITY_KEY }),
         );
       }
       if (keys.some((key) => key.startsWith("catalog.search."))) {

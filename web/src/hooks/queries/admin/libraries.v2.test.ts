@@ -173,12 +173,26 @@ describe("library admin hooks on the v2 contract", () => {
     const { result } = renderHook(() => useRefreshLibraryMetadata(), {
       wrapper: createWrapper(),
     });
-    const job = await result.current.mutateAsync(1);
+    const job = await result.current.mutateAsync({ id: 1, mode: "quick" });
 
     const [request] = requestsOf(fetchMock);
     expect(request?.method).toBe("POST");
     expect(request?.url.pathname).toBe("/api/v2/libraries/1/refresh-metadata");
+    expect(request?.body).toEqual({ mode: "quick" });
     expect(job.job_type).toBe("library_refresh");
+  });
+
+  it("sends the full refresh mode when every item should be refreshed", async () => {
+    const fetchMock = stubFetch(() => jsonResponse(refreshLibraryMetadataAccepted, 202));
+
+    const { result } = renderHook(() => useRefreshLibraryMetadata(), {
+      wrapper: createWrapper(),
+    });
+    await result.current.mutateAsync({ id: 2, mode: "full" });
+
+    const [request] = requestsOf(fetchMock);
+    expect(request?.url.pathname).toBe("/api/v2/libraries/2/refresh-metadata");
+    expect(request?.body).toEqual({ mode: "full" });
   });
 
   it("runs a mount check and keeps the numeric library id the page keys on", async () => {

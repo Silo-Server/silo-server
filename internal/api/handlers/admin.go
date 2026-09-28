@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
@@ -37,6 +38,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/policy"
+	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingsmigrate"
 	subtitleai "github.com/Silo-Server/silo-server/internal/subtitles/ai"
@@ -326,6 +328,11 @@ type AdminUserView struct {
 	CreatedAt                  time.Time           `json:"created_at"`
 	UpdatedAt                  time.Time           `json:"updated_at"`
 	LastActiveAt               *time.Time          `json:"last_active_at,omitempty"`
+	// PasswordLogin, PasswordChangeRequired and IsOwner are v2-only: the
+	// frozen v1 body does not carry them.
+	PasswordLogin          bool `json:"-"`
+	PasswordChangeRequired bool `json:"-"`
+	IsOwner                bool `json:"-"`
 }
 
 // EffectivePolicyView is the resolved policy block on admin user responses.
@@ -411,6 +418,9 @@ func toAdminUserResponse(u *models.User, group *access.GroupPolicy) AdminUserVie
 		DownloadTranscodeAllowed:   clonePtr(u.DownloadTranscodeAllowed),
 		RequestsAllowed:            clonePtr(u.RequestsAllowed),
 		AccessGroupID:              clonePtr(u.AccessGroupID),
+		PasswordLogin:              u.LocalPasswordLoginEnabled && u.PasswordHash != "",
+		PasswordChangeRequired:     u.PasswordChangeRequired,
+		IsOwner:                    u.IsOwner,
 		EffectivePolicy: EffectivePolicyView{
 			LibraryIDs:                 effective.LibraryIDs,
 			MaxPlaybackQuality:         effective.MaxPlaybackQuality,
@@ -792,6 +802,17 @@ func (h *AdminHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) 
 	if rejectScopedAPIKeyCreate(w, r, req.Role) {
 		return
 	}
+	if req.Role == roleAdmin {
+		actor, err := requestOwnerActor(r.Context(), h.userRepo)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch user")
+			return
+		}
+		if err := auth.CheckGrantAdmin(actor, req.Role); err != nil {
+			writeAPIError(w, ownerError(err))
+			return
+		}
+	}
 
 	if req.Username == "" || req.Email == "" || req.Password == "" || req.Role == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "Username, email, password, and role are required")
@@ -977,26 +998,47 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		AccessGroupID:            req.AccessGroupID.Optional(),
 	}
 
-	if currentUser == nil && updateMayRequireSessionRevocation(updateInput) {
-		if currentUser, blocked = h.loadTargetUser(w, r, id); blocked {
-			return
-		}
-	}
-
-	err = h.userRepo.Update(r.Context(), id, updateInput)
-	if err != nil {
-		if auth.IsNotFound(err) {
-			writeError(w, http.StatusNotFound, "not_found", "User not found")
-			return
-		}
+	// As in v2, the Owner rules run against the target account locked in the
+	// transaction that updates it and revokes its sign-ins.
+	repo, ok := h.userRepo.(adminAccountRepository)
+	if !ok {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update user")
 		return
 	}
-	if updateRequiresSessionRevocation(currentUser, updateInput) {
-		if err := h.revokeUserSessions(r.Context(), id); err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to revoke updated user sessions")
-			return
+	actor, err := requestOwnerActor(r.Context(), h.userRepo)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch user")
+		return
+	}
+	revoked := false
+	_, err = repo.MutateAdminAccount(r.Context(), id, -1, &updateInput, func(current *models.User, _ pgx.Tx) (bool, error) {
+		if err := auth.CheckOwnerUpdate(actor, current, updateInput); err != nil {
+			return false, ownerError(err)
 		}
+		// Recheck the scoped-key limits against the locked account: the
+		// target may have been promoted since rejectScopedAPIKeyUpdate read it.
+		if actorIsScopedAPIKey(r.Context()) && current.Role == roleAdmin && (updateInput.Password != nil || updateInput.Role != nil) {
+			return false, apiError(http.StatusForbidden, "insufficient_scope", "A scoped API key may not change the password or role of an admin account")
+		}
+		revoked = updateRequiresSessionRevocation(current, updateInput)
+		return revoked, nil
+	})
+	if err != nil {
+		var apiErr *APIError
+		switch {
+		case errors.As(err, &apiErr):
+			writeAPIError(w, apiErr)
+		case auth.IsNotFound(err):
+			writeError(w, http.StatusNotFound, "not_found", "User not found")
+		case auth.IsDuplicate(err):
+			writeError(w, http.StatusConflict, "duplicate", "A user with that username or email already exists")
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update user")
+		}
+		return
+	}
+	if revoked && h.OnUserSessionsRevoked != nil {
+		h.OnUserSessionsRevoked(r.Context(), id)
 	}
 
 	user, err := h.userRepo.GetByID(r.Context(), id)
@@ -1021,19 +1063,38 @@ func (h *AdminHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid user ID")
 		return
 	}
-
-	err = h.userRepo.Delete(r.Context(), id)
-	if err != nil {
-		if auth.IsNotFound(err) {
-			writeError(w, http.StatusNotFound, "not_found", "User not found")
-			return
-		}
+	repo, ok := h.userRepo.(adminAccountRepository)
+	if !ok {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete user")
 		return
 	}
-	if err := h.revokeUserSessions(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to revoke deleted user sessions")
+	actor, err := requestOwnerActor(r.Context(), h.userRepo)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch user")
 		return
+	}
+	// As for updates, the Owner rules run against the target account locked
+	// in the transaction that deletes it and revokes its sign-ins.
+	_, err = repo.MutateAdminAccount(r.Context(), id, -1, nil, func(current *models.User, _ pgx.Tx) (bool, error) {
+		if err := auth.CheckOwnerDelete(actor, current); err != nil {
+			return false, ownerError(err)
+		}
+		return true, nil
+	})
+	if err != nil {
+		var apiErr *APIError
+		switch {
+		case errors.As(err, &apiErr):
+			writeAPIError(w, apiErr)
+		case auth.IsNotFound(err):
+			writeError(w, http.StatusNotFound, "not_found", "User not found")
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete user")
+		}
+		return
+	}
+	if h.OnUserSessionsRevoked != nil {
+		h.OnUserSessionsRevoked(r.Context(), id)
 	}
 	h.invalidateStats(r.Context(), cache.ChannelAdmin, cache.EventAdminStatsInvalidated, strconv.Itoa(id))
 
@@ -1600,6 +1661,8 @@ var machineManagedSettingKeys = map[string]bool{
 	config.ArtworkStorageReconcileCheckpointKey: true,
 	config.ArtworkStorageSweepCheckpointKey:     true,
 	blobstore.IdentitySettingKey:                true,
+	blobstore.OperationalIdentitySettingKey:     true,
+	config.StorageTransitionTargetKey:           true,
 }
 
 // Setting keys that decide where artwork lives. The s3 keys are the canonical
@@ -1611,26 +1674,36 @@ const (
 	s3PublicBucketKey        = "s3.public_bucket"
 	s3PublicKeyPrefixKey     = "s3.public_key_prefix"
 	s3OperationalBucketKey   = "s3.operational_bucket"
+	s3PrivateEndpointKey     = "s3.private_endpoint"
+	s3PrivateBucketKey       = "s3.private_bucket"
+	s3PrivateKeyPrefixKey    = "s3.private_key_prefix"
 )
 
-// artworkStorageLocked reports whether the artwork storage location can still
-// change. The first artwork write records the store identity; after that the
-// catalog's keys live in exactly one place and there is no migrator, so every
-// setting that selects that place is read-only.
+// artworkStorageLocked reports whether a stored location can no longer be
+// written directly. The first artwork write records the assets identity, and
+// startup records any configured private bucket. After either, the settings
+// that select that place change only through a managed transition.
 func artworkStorageLocked(stored map[string]string) bool {
+	return assetsStorageLocked(stored) || strings.TrimSpace(stored[blobstore.OperationalIdentitySettingKey]) != ""
+}
+
+// assetsStorageLocked reports whether the artwork location itself is recorded.
+func assetsStorageLocked(stored map[string]string) bool {
 	return strings.TrimSpace(stored[blobstore.IdentitySettingKey]) != ""
 }
 
 var errArtworkStorageLocked = &APIError{
 	Status:  http.StatusConflict,
 	Code:    "artwork_storage_locked",
-	Message: "artwork storage cannot change once artwork has been stored; the catalog's artwork keys belong to the recorded storage",
+	Message: "recorded storage locations cannot be changed directly; use a managed storage transition",
 }
 
-// artworkIdentityInputs names the effective settings that decide where
-// artwork lives: the resolved backend and, for that backend, the fields the
-// store folds into its identity. The s3 keys are the canonical names; the
-// effective map already applies the legacy operational aliases.
+// artworkIdentityInputs names the effective settings that decide where public
+// artwork and private operational objects live. The S3 keys are canonical; the
+// effective map already applies the legacy operational aliases. A private
+// bucket owns diagnostics, job artifacts, and avatars on either backend, so its
+// location is locked on a local backend too: adding one would otherwise strand
+// what the local root already holds.
 func artworkIdentityInputs(effective map[string]string) (backend string, inputs map[string]string) {
 	backend = strings.ToLower(strings.TrimSpace(effective[artworkStorageBackendKey]))
 	if backend == "" || backend == config.ArtworkBackendAuto {
@@ -1639,14 +1712,25 @@ func artworkIdentityInputs(effective map[string]string) (backend string, inputs 
 			backend = blobstore.BackendS3
 		}
 	}
+	// Compare locations the way the stores name them: endpoint scheme and host
+	// and the bucket are case-insensitive, and a key prefix ignores its
+	// slashes. An edit that only restyles a value is then a plain save.
 	inputs = map[string]string{}
 	switch backend {
 	case blobstore.BackendS3:
-		for _, key := range []string{s3PublicEndpointKey, s3PublicBucketKey, s3PublicKeyPrefixKey} {
-			inputs[key] = strings.TrimSpace(effective[key])
-		}
+		inputs[s3PublicEndpointKey] = blobstore.NormalizeEndpoint(effective[s3PublicEndpointKey])
+		inputs[s3PublicBucketKey] = strings.ToLower(strings.TrimSpace(effective[s3PublicBucketKey]))
+		inputs[s3PublicKeyPrefixKey] = s3client.NormalizeKeyPrefix(effective[s3PublicKeyPrefixKey])
 	default:
 		inputs[artworkLocalPathKey] = strings.TrimSpace(effective[artworkLocalPathKey])
+	}
+	// Without a bucket there is no private location, so a leftover endpoint or
+	// prefix can change freely.
+	privateBucket := strings.ToLower(strings.TrimSpace(effective[s3PrivateBucketKey]))
+	inputs[s3PrivateBucketKey] = privateBucket
+	if privateBucket != "" {
+		inputs[s3PrivateEndpointKey] = blobstore.NormalizeEndpoint(effective[s3PrivateEndpointKey])
+		inputs[s3PrivateKeyPrefixKey] = s3client.NormalizeKeyPrefix(effective[s3PrivateKeyPrefixKey])
 	}
 	return backend, inputs
 }
@@ -1661,6 +1745,16 @@ func rejectArtworkIdentityChange(recorded string, before, after map[string]strin
 	recordedBackend, _, _ := strings.Cut(strings.TrimSpace(recorded), "|")
 	_, beforeInputs := artworkIdentityInputs(before)
 	afterBackend, afterInputs := artworkIdentityInputs(after)
+	if recordedBackend == "" {
+		// Only the private bucket is recorded. The assets location can still
+		// be chosen until the first artwork write.
+		for key, value := range beforeInputs {
+			if strings.HasPrefix(key, "s3.private_") && afterInputs[key] != value {
+				return errArtworkStorageLocked
+			}
+		}
+		return nil
+	}
 	if afterBackend != recordedBackend {
 		return errArtworkStorageLocked
 	}
@@ -2150,7 +2244,8 @@ func (h *AdminHandler) normalizeBatchSetting(
 	}
 
 	switch key {
-	case markers.SettingMode, markers.SettingLazyPlayback, markers.SettingOnlineStorage:
+	case markers.SettingMode, markers.SettingLazyPlayback, markers.SettingOnlineStorage,
+		markers.SettingDetectIntros, markers.SettingDetectCredits:
 		normalized, err = markers.NormalizeSetting(key, normalized)
 	case clientip.SettingTrustedProxies:
 		normalized, err = clientip.NormalizeCIDRList(normalized)
@@ -2609,7 +2704,8 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 	}
 
 	switch key {
-	case markers.SettingMode, markers.SettingLazyPlayback, markers.SettingOnlineStorage:
+	case markers.SettingMode, markers.SettingLazyPlayback, markers.SettingOnlineStorage,
+		markers.SettingDetectIntros, markers.SettingDetectCredits:
 		if normalized, err := markers.NormalizeSetting(key, req.Value); err != nil {
 			return AdminSettingUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: err.Error()}
 		} else {

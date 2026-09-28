@@ -152,44 +152,47 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     [dirty, keys, localValues, settings],
   );
 
-  const save = useCallback(async () => {
-    if (dirty.size === 0) return;
-    const submittedKeys = Array.from(dirty);
-    const values = Object.fromEntries(submittedKeys.map((key) => [key, localValues[key] ?? ""]));
-    const submittedVersions = new Map(
-      submittedKeys.map((key) => [key, editVersions.current.get(key) ?? 0]),
-    );
-    const result = await updateSettings.mutateAsync(values);
-    // An acknowledged save changes the validator even when newer local edits
-    // remain dirty. Reconcile only with a refresh matching that write's revision;
-    // background reads and failed writes never advance this draft baseline.
-    if (result.settingsSnapshot) editBaseline.current = result.settingsSnapshot;
-    const settledKeys = submittedKeys.filter(
-      (key) => (editVersions.current.get(key) ?? 0) === submittedVersions.get(key),
-    );
-    setLocalValues((previous) => {
-      const next = { ...previous };
-      for (const key of settledKeys) {
-        // The server returns canonical non-secret values. Sensitive values are
-        // intentionally omitted, so erase those drafts after a successful save
-        // instead of retaining plaintext credentials in component state.
-        next[key] = result.values[key] ?? "";
+  const save = useCallback(
+    async (selectedKeys?: string[]) => {
+      const submittedKeys = Array.from(dirty).filter((key) => selectedKeys?.includes(key) ?? true);
+      if (submittedKeys.length === 0) return;
+      const values = Object.fromEntries(submittedKeys.map((key) => [key, localValues[key] ?? ""]));
+      const submittedVersions = new Map(
+        submittedKeys.map((key) => [key, editVersions.current.get(key) ?? 0]),
+      );
+      const result = await updateSettings.mutateAsync(values);
+      // An acknowledged save changes the validator even when newer local edits
+      // remain dirty. Reconcile only with a refresh matching that write's revision;
+      // background reads and failed writes never advance this draft baseline.
+      if (result.settingsSnapshot) editBaseline.current = result.settingsSnapshot;
+      const settledKeys = submittedKeys.filter(
+        (key) => (editVersions.current.get(key) ?? 0) === submittedVersions.get(key),
+      );
+      setLocalValues((previous) => {
+        const next = { ...previous };
+        for (const key of settledKeys) {
+          // The server returns canonical non-secret values. Sensitive values are
+          // intentionally omitted, so erase those drafts after a successful save
+          // instead of retaining plaintext credentials in component state.
+          next[key] = result.values[key] ?? "";
+        }
+        return next;
+      });
+      setDirty((current) => {
+        const next = new Set(current);
+        for (const key of settledKeys) {
+          next.delete(key);
+        }
+        return next;
+      });
+      // Once a restart-required batch was saved, keep the banner up until the
+      // server actually restarts.
+      if (result.restart_required) {
+        setRestartRequired(true);
       }
-      return next;
-    });
-    setDirty((current) => {
-      const next = new Set(current);
-      for (const key of settledKeys) {
-        next.delete(key);
-      }
-      return next;
-    });
-    // Once a restart-required batch was saved, keep the banner up until the
-    // server actually restarts.
-    if (result.restart_required) {
-      setRestartRequired(true);
-    }
-  }, [dirty, localValues, updateSettings]);
+    },
+    [dirty, localValues, updateSettings],
+  );
 
   const discard = useCallback(() => {
     if (!settings) return;

@@ -5,6 +5,7 @@ import { MemoryRouter, Routes, Route } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken } from "@/api/client";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
+import { adminKeys } from "@/hooks/queries/keys";
 import AdminTaskDetail from "./AdminTaskDetail";
 
 beforeEach(() => {
@@ -101,4 +102,141 @@ it("keeps the original schedule guard and draft after412 until explicit revision
     etag: '"revision-2"',
     body: { triggers: [{ type: "interval", interval_ms: 3000 }] },
   });
+});
+
+it("names failed maintenance steps in execution history", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof fetch>(async (url) => {
+      const path = String(url);
+      if (path.endsWith("/triggers"))
+        return new Response(JSON.stringify({ task_key: "database_maintenance", triggers: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json", ETag: '"revision-1"' },
+        });
+      if (path.includes("/history"))
+        return jsonResponse({
+          items: [
+            {
+              id: "1",
+              task_key: "database_maintenance",
+              started_at: "2026-09-23T05:00:00Z",
+              completed_at: "2026-09-23T05:00:01Z",
+              status: "failed",
+              duration_ms: 1000,
+              error_message: "Task failed. Inspect administrator diagnostics for details.",
+              steps: [
+                { key: "cleanup_activity_log", name: "Cleanup Activity Log", status: "completed" },
+                {
+                  key: "cleanup_policy_decision_log",
+                  name: "Cleanup Policy Decision Log",
+                  status: "failed",
+                },
+              ],
+            },
+          ],
+          page: { has_more: false },
+        });
+      return jsonResponse({
+        key: "database_maintenance",
+        name: "Database Maintenance",
+        description: "Task description",
+        category: "system",
+        state: "idle",
+        progress: 0,
+        manual_only: false,
+        triggers: [],
+        execution_scope: "process",
+      });
+    }),
+  );
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <MemoryRouter initialEntries={["/admin/tasks/database_maintenance"]}>
+        <Routes>
+          <Route path="/admin/tasks/:key" element={<AdminTaskDetail />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  expect(await screen.findByText("Failed steps: Cleanup Policy Decision Log")).toBeInTheDocument();
+});
+
+it("shows a way out for a task key the server does not know", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof fetch>(async () =>
+      jsonResponse(
+        {
+          type: "https://siloserver.org/docs/api/v2/problems/not_found",
+          title: "Not Found",
+          status: 404,
+          detail: "Task not found",
+        },
+        404,
+      ),
+    ),
+  );
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <MemoryRouter initialEntries={["/admin/tasks/missing"]}>
+        <Routes>
+          <Route path="/admin/tasks/:key" element={<AdminTaskDetail />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+
+  expect(
+    await screen.findByRole("heading", { level: 1, name: "Task not found" }),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "All tasks" })).toHaveAttribute("href", "/admin/tasks");
+  expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
+});
+
+it("lets a refetch's 404 replace a task that was already cached", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof fetch>(async () =>
+      jsonResponse(
+        {
+          type: "https://siloserver.org/docs/api/v2/problems/not_found",
+          title: "Not Found",
+          status: 404,
+          detail: "Task not found",
+        },
+        404,
+      ),
+    ),
+  );
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(adminKeys.task("retired"), {
+    key: "retired",
+    name: "Retired task",
+    description: "Gone after an update",
+    category: "system",
+    state: "idle",
+    progress: 0,
+    manual_only: false,
+    triggers: [],
+    execution_scope: "process",
+  });
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={["/admin/tasks/retired"]}>
+        <Routes>
+          <Route path="/admin/tasks/:key" element={<AdminTaskDetail />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+
+  expect(
+    await screen.findByRole("heading", { level: 1, name: "Task not found" }),
+  ).toBeInTheDocument();
+  expect(screen.queryByText("Retired task")).not.toBeInTheDocument();
 });

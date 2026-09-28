@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 )
@@ -146,7 +147,7 @@ func TestMeilisearchRankingSessionDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	user := int(time.Now().UnixNano())
-	req := CatalogSearchRequest{CursorPaging: true, Query: "Ranking", ItemTypes: []string{"movie"}, Limit: 3, Access: AccessFilter{UserID: user, ProfileID: "viewer", AllowedLibraryIDs: []int{library}, MaxContentRating: "PG"}, Definition: QueryDefinition{Sort: QuerySort{Field: "relevance"}}}
+	req := CatalogSearchRequest{CursorPaging: true, Query: "Ranking", ItemTypes: []string{"movie"}, Limit: 3, Access: AccessFilter{UserID: user, ProfileID: "viewer", AllowedLibraryIDs: []int{library}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG"}}, Definition: QueryDefinition{Sort: QuerySort{Field: "relevance"}}}
 	first, err := p.Search(ctx, req)
 	if err != nil {
 		t.Fatal(err)

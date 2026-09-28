@@ -810,6 +810,11 @@ func (s *ABSMediaStore) RefreshAuthorCounts(ctx context.Context) error {
 // can't see, so we take the access-aware live path instead. Library-level
 // access is already enforced by scoping to a single resolved library.
 //
+// The advisory-age limit is deliberately not such a predicate here. Advisory
+// ages exist for movies and series only (the host drops one reported for any
+// other type), so no audiobook carries one and the limit cannot hide a book;
+// taking the live path for it would only change a beta surface for nothing.
+//
 // When the MV read returns zero rows (stale, empty, or not-yet-refreshed view)
 // we also fall back to the live GROUP BY so /authors never blanks out.
 func (s *ABSMediaStore) ListLibraryAuthors(ctx context.Context, libraryID int64, limit, offset int, sortBy string, sortDesc bool, access catalog.AccessFilter) ([]abs.AuthorSummary, int, error) {

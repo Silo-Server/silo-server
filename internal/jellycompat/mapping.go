@@ -39,6 +39,12 @@ func newMapper(codec *ResourceIDCodec, cfg *config.Config) *mapper {
 	return &mapper{codec: codec, serverID: serverID, imageTagSigner: newImageTagSigner(imageTagSecret)}
 }
 
+// displayPreferencesID is Jellyfin's DisplayPreferencesId for a view: the
+// view's GUID in "N" format (no hyphens).
+func displayPreferencesID(viewID string) string {
+	return strings.ReplaceAll(viewID, "-", "")
+}
+
 func (m *mapper) viewFromLibrary(library upstreamUserLibrary) baseItemDTO {
 	imgTags := map[string]string{}
 	routeID := m.codec.EncodeIntID(EncodedIDLibrary, int64(library.ID))
@@ -58,7 +64,10 @@ func (m *mapper) viewFromLibrary(library upstreamUserLibrary) baseItemDTO {
 		ServerID:       m.serverID,
 		CollectionType: libraryCollectionType(library.Type),
 		SortName:       strings.ToLower(library.Name),
-		ImageTags:      imgTags,
+		// Jellyfin clients key per-library view settings on this; Jellyfin
+		// for Android TV crashes reopening a library without it.
+		DisplayPreferencesID: displayPreferencesID(routeID),
+		ImageTags:            imgTags,
 		UserData: &itemUserDataDTO{
 			Key:    routeID,
 			ItemID: routeID,
@@ -93,8 +102,10 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 		ProductionYear:  item.Year,
 		OfficialRating:  item.ContentRating,
 		CommunityRating: item.RatingIMDB,
-		ImageTags:       map[string]string{},
-		UserData:        userDataDTO(m.codec.EncodeStringID(EncodedIDItem, item.ContentID), item.UserData, isFavorite, progress),
+		// Jellyfin 12 reports the item's own original language, uninherited.
+		OriginalLanguage: item.OriginalLanguage,
+		ImageTags:        map[string]string{},
+		UserData:         userDataDTO(m.codec.EncodeStringID(EncodedIDItem, item.ContentID), item.UserData, isFavorite, progress),
 	}
 
 	if mt := jellyfinMediaType(item.Type); mt != "" {
@@ -140,6 +151,15 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 		item.BackdropURL,
 	); tags != nil {
 		dto.BackdropImageTags = tags
+	}
+	// Advertise the logo as Jellyfin does, so clients that check ImageTags
+	// know it exists. Episodes carry no logo of their own; theirs belongs to
+	// the series.
+	if item.LogoURL != "" && item.Type != "episode" {
+		dto.ImageTags["Logo"] = m.imageTagSigner.Tag(
+			imageTagSeed(item.ContentID, "Logo", compatCardImageSize, item.LogoPath, "", item.UpdatedAt),
+			item.LogoURL,
+		)
 	}
 	if ratio := primaryAspectRatio(item.Type); ratio != nil {
 		dto.PrimaryImageAspectRatio = ratio
@@ -230,6 +250,7 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 		Type:              item.Type,
 		Title:             item.Title,
 		SortTitle:         item.SortTitle,
+		OriginalLanguage:  item.OriginalLanguage,
 		Year:              item.Year,
 		Genres:            item.Genres,
 		ContentRating:     item.ContentRating,
@@ -241,6 +262,7 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 		PosterThumbhash:   item.PosterThumbhash,
 		BackdropPath:      item.BackdropPath,
 		BackdropThumbhash: item.BackdropThumbhash,
+		LogoURL:           item.LogoURL,
 		LogoPath:          item.LogoPath,
 		UpdatedAt:         item.UpdatedAt,
 		SeasonCount:       item.SeasonCount,
@@ -346,23 +368,16 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 		if wantMediaSources {
 			dto.MediaSources = make([]mediaSourceDTO, 0, len(item.Versions))
 		}
-		// Register every version's file ID as owned by this item, even when the
-		// caller didn't ask for MediaSources/MediaStreams. Skipping this breaks
-		// later /Items/{mediaSourceId} lookups (LookupMediaSourceOwner returns
-		// ok=false → 404) whenever the detail was first materialized through a
-		// list endpoint without those Fields.
-		for _, version := range item.Versions {
-			m.codec.RegisterMediaSourceOwner(int64(version.FileID), item.ContentID)
-			if !wantMediaSources && !wantMediaStreams {
-				continue
-			}
-			sourceID := m.codec.EncodeIntID(EncodedIDMediaSource, int64(version.FileID))
-			streams := buildMediaStreams(routeItemID, sourceID, version)
-			if wantMediaStreams {
-				dto.MediaStreams = append(dto.MediaStreams, streams...)
-			}
-			if wantMediaSources {
-				dto.MediaSources = append(dto.MediaSources, detailMediaSourceDTO(sourceID, version, streams))
+		if wantMediaSources || wantMediaStreams {
+			for _, version := range item.Versions {
+				sourceID := m.codec.EncodeIntID(EncodedIDMediaSource, int64(version.FileID))
+				streams := buildMediaStreams(routeItemID, sourceID, version)
+				if wantMediaStreams {
+					dto.MediaStreams = append(dto.MediaStreams, streams...)
+				}
+				if wantMediaSources {
+					dto.MediaSources = append(dto.MediaSources, detailMediaSourceDTO(sourceID, version, streams))
+				}
 			}
 		}
 		if wantField("chapters") {
@@ -464,6 +479,10 @@ func (m *mapper) applySeriesImages(dto *baseItemDTO, series seriesImageSet) {
 			imageTagSeed(series.ContentID, "Primary", compatCardImageSize, series.PosterPath, series.PosterThumbhash, series.UpdatedAt),
 			series.PosterURL,
 		)
+		if dto.ParentPrimaryImageItemID == "" {
+			dto.ParentPrimaryImageItemID = dto.SeriesID
+			dto.ParentPrimaryImageTag = dto.SeriesPrimaryImageTag
+		}
 	}
 	if series.BackdropURL != "" {
 		tag := m.imageTagSigner.Tag(
@@ -475,6 +494,21 @@ func (m *mapper) applySeriesImages(dto *baseItemDTO, series seriesImageSet) {
 		dto.ParentThumbImageTag = tag
 		dto.ParentThumbItemID = dto.SeriesID
 	}
+}
+
+// applySeasonPrimaryImage points an episode's parent poster at its season,
+// as Jellyfin 12 does, when the season has a poster of its own. Otherwise the
+// series poster set by applySeriesImages stays the parent poster. The tag seed
+// matches seasonFromUpstream so the season image route accepts it.
+func (m *mapper) applySeasonPrimaryImage(dto *baseItemDTO, season seriesImageSet) {
+	if season.ContentID == "" || season.PosterURL == "" {
+		return
+	}
+	dto.ParentPrimaryImageItemID = m.codec.EncodeStringID(EncodedIDSeason, season.ContentID)
+	dto.ParentPrimaryImageTag = m.imageTagSigner.Tag(
+		imageTagSeed(season.ContentID, "Primary", compatCardImageSize, season.PosterPath, season.PosterThumbhash, season.UpdatedAt),
+		season.PosterURL,
+	)
 }
 
 func userDataDTO(itemID string, data *catalog.SeasonUserData, isFavorite bool, progress *upstreamProgress) *itemUserDataDTO {

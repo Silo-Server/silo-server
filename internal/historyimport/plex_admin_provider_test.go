@@ -36,7 +36,7 @@ func TestPlexAdminProviderEnrichesLocalizedMovieForStableMatching(t *testing.T) 
 	defer server.Close()
 
 	provider := NewPlexAdminProvider(newUnthrottledPlexClient(), server.URL, "admin-token", "7")
-	records, warnings, err := provider.Fetch(context.Background())
+	records, warnings, err := provider.Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestPlexAdminProviderEnrichesLocalizedMovieForStableMatching(t *testing.T) 
 	repo := &matcherRepoStub{mediaByExternal: map[string][]mediaLookupRow{
 		"movie:tmdb_id:278": {{ContentID: "movie-278", Title: "The Shawshank Redemption", Year: 1994}},
 	}}
-	match, reason, err := NewMatcher(repo).Match(context.Background(), record)
+	match, reason, err := NewMatcher(repo).Match(trustLoopback(context.Background()), record)
 	if err != nil || reason != "" || match == nil || match.MediaItemID != "movie-278" {
 		t.Fatalf("match = %+v, reason = %q, err = %v", match, reason, err)
 	}
@@ -91,7 +91,7 @@ func TestPlexAdminProviderTreatsPlexOnlyGuidAsUnresolved(t *testing.T) {
 
 	records, warnings, err := NewPlexAdminProvider(
 		newUnthrottledPlexClient(), server.URL, "admin-token", "7",
-	).Fetch(context.Background())
+	).Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestPlexAdminProviderAcceptsMovieTVDBGuid(t *testing.T) {
 
 	records, warnings, err := NewPlexAdminProvider(
 		newUnthrottledPlexClient(), server.URL, "admin-token", "7",
-	).Fetch(context.Background())
+	).Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestPlexAdminProviderFetchesMetadataOncePerRatingKey(t *testing.T) {
 
 	records, warnings, err := NewPlexAdminProvider(
 		newUnthrottledPlexClient(), server.URL, "admin-token", "7",
-	).Fetch(context.Background())
+	).Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestPlexAdminProviderSkipsMetadataForStableProviderGuid(t *testing.T) {
 
 	records, warnings, err := NewPlexAdminProvider(
 		newUnthrottledPlexClient(), server.URL, "admin-token", "7",
-	).Fetch(context.Background())
+	).Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestPlexAdminProviderMetadataFailureLeavesItemUnmatched(t *testing.T) {
 
 			records, warnings, err := NewPlexAdminProvider(
 				newUnthrottledPlexClient(), server.URL, "admin-token", "7",
-			).Fetch(context.Background())
+			).Fetch(trustLoopback(context.Background()))
 			if err != nil {
 				t.Fatalf("Fetch: %v", err)
 			}
@@ -251,7 +251,7 @@ func TestPlexAdminProviderMetadataFailureLeavesItemUnmatched(t *testing.T) {
 				t.Fatalf("warnings = %v, want the first upstream error named", warnings)
 			}
 
-			match, reason, err := NewMatcher(&matcherRepoStub{}).Match(context.Background(), records[0])
+			match, reason, err := NewMatcher(&matcherRepoStub{}).Match(trustLoopback(context.Background()), records[0])
 			if err != nil || match != nil || reason != missingProviderIDsReason {
 				t.Fatalf("match = %+v, reason = %q, err = %v", match, reason, err)
 			}
@@ -284,7 +284,7 @@ func TestPlexAdminProviderPreservesEpisodeSeriesEnrichment(t *testing.T) {
 
 	records, warnings, err := NewPlexAdminProvider(
 		newUnthrottledPlexClient(), server.URL, "admin-token", "7",
-	).Fetch(context.Background())
+	).Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestPlexAdminProviderUsesOneSeriesRequestForEpisodeHistory(t *testing.T) {
 
 	records, warnings, err := NewPlexAdminProvider(
 		newUnthrottledPlexClient(), server.URL, "admin-token", "7",
-	).Fetch(context.Background())
+	).Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -403,7 +403,7 @@ func TestPlexAdminProviderBatchesItemMetadataRequests(t *testing.T) {
 
 	records, warnings, err := NewPlexAdminProvider(
 		newUnthrottledPlexClient(), server.URL, "admin-token", "7",
-	).Fetch(context.Background())
+	).Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -455,7 +455,7 @@ func TestPlexAdminProviderRetriesFailedBatchPerKey(t *testing.T) {
 
 	records, warnings, err := NewPlexAdminProvider(
 		newUnthrottledPlexClient(), server.URL, "admin-token", "7",
-	).Fetch(context.Background())
+	).Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -507,7 +507,7 @@ func TestPlexAdminProviderDoesNotRetrySystematicBatchFailurePerKey(t *testing.T)
 
 	records, warnings, err := NewPlexAdminProvider(
 		newUnthrottledPlexClient(), server.URL, "admin-token", "7",
-	).Fetch(context.Background())
+	).Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -540,7 +540,7 @@ func TestFetchMetadataBatchReadsVideoResponse(t *testing.T) {
 	defer server.Close()
 
 	items, err := newUnthrottledPlexClient().FetchMetadataBatch(
-		context.Background(), server.URL, "admin-token", []string{"42"},
+		trustLoopback(context.Background()), server.URL, "admin-token", []string{"42"},
 	)
 	if err != nil {
 		t.Fatalf("FetchMetadataBatch: %v", err)
@@ -569,7 +569,7 @@ func TestPlexAdminProviderSkipsMetadataForNonVideoItems(t *testing.T) {
 
 	_, warnings, err := NewPlexAdminProvider(
 		newUnthrottledPlexClient(), server.URL, "admin-token", "7",
-	).Fetch(context.Background())
+	).Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -581,7 +581,7 @@ func TestPlexAdminProviderSkipsMetadataForNonVideoItems(t *testing.T) {
 func TestPlexAdminProviderAbortsMetadataSweepOnCancel(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(trustLoopback(context.Background()))
 	defer cancel()
 	metadataCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -628,4 +628,96 @@ func newUnthrottledPlexClient() *PlexClient {
 	client := NewPlexClient()
 	client.limiter = nil
 	return client
+}
+
+// PMS 1.43 history rows carry grandparentKey but no grandparentRatingKey, Guid,
+// year, or duration. Episodes must still reach their series ids through one
+// batched show lookup instead of a metadata request per episode.
+func TestPlexAdminProviderResolvesSeriesFromGrandparentKey(t *testing.T) {
+	t.Parallel()
+
+	var metadataPaths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/status/sessions/history/all":
+			_, _ = fmt.Fprint(w, `{"MediaContainer":{"size":3,"totalSize":3,"offset":0,"Metadata":[
+				{"historyKey":"/status/sessions/history/101","key":"/library/metadata/5001","ratingKey":"5001",
+				 "librarySectionID":"2","parentKey":"/library/metadata/5000","grandparentKey":"/library/metadata/4000",
+				 "title":"The Dragon in Winter","grandparentTitle":"House of the Dragon","type":"episode",
+				 "index":7,"parentIndex":3,"viewedAt":1700000300,"accountID":7,"deviceID":1},
+				{"historyKey":"/status/sessions/history/102","key":"/library/metadata/6001","ratingKey":"6001",
+				 "librarySectionID":"2","parentKey":"/library/metadata/6000","grandparentKey":"/library/metadata/4100",
+				 "title":"Pilot","grandparentTitle":"Chernobyl","type":"episode",
+				 "index":1,"parentIndex":1,"viewedAt":1700000200,"accountID":7,"deviceID":1},
+				{"historyKey":"/status/sessions/history/103","key":"/library/metadata/3001","ratingKey":"3001",
+				 "librarySectionID":"1","title":"Taken 3","type":"movie","originallyAvailableAt":"2014-12-16",
+				 "viewedAt":1700000100,"accountID":7,"deviceID":2}
+			]}}`)
+		case "/library/metadata/4000,4100":
+			metadataPaths = append(metadataPaths, r.URL.Path)
+			_, _ = fmt.Fprint(w, `{"MediaContainer":{"size":2,"Metadata":[
+				{"ratingKey":"4000","type":"show","title":"House of the Dragon","year":2022,
+				 "guid":"plex://show/4000","Guid":[{"id":"imdb://tt11198330"},{"id":"tmdb://94997"},{"id":"tvdb://371572"}]},
+				{"ratingKey":"4100","type":"show","title":"Chernobyl","year":2019,
+				 "guid":"plex://show/4100","Guid":[{"id":"tvdb://360893"}]}
+			]}}`)
+		case "/library/metadata/3001":
+			metadataPaths = append(metadataPaths, r.URL.Path)
+			_, _ = fmt.Fprint(w, `{"MediaContainer":{"size":1,"Metadata":[
+				{"ratingKey":"3001","type":"movie","title":"Taken 3","year":2014,"duration":6537163,
+				 "guid":"plex://movie/3001","Guid":[{"id":"imdb://tt2446042"},{"id":"tmdb://260346"}]}
+			]}}`)
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	records, warnings, err := NewPlexAdminProvider(
+		newUnthrottledPlexClient(), server.URL, "admin-token", "7",
+	).Fetch(trustLoopback(context.Background()))
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", warnings)
+	}
+	if len(metadataPaths) != 2 {
+		t.Fatalf("metadata requests = %v, want one show batch and one movie lookup", metadataPaths)
+	}
+	byKey := map[string]Record{}
+	for _, record := range records {
+		byKey[record.ExternalID] = record
+	}
+	dragon := byKey["5001"]
+	if dragon.SeriesTVDBID != "371572" || dragon.SeriesYear != 2022 || dragon.SeasonNumber != 3 || dragon.EpisodeNumber != 7 {
+		t.Fatalf("episode record = %+v, want series identity and coordinates", dragon)
+	}
+	if byKey["6001"].SeriesTVDBID != "360893" {
+		t.Fatalf("second show's episode = %+v, want its own series identity", byKey["6001"])
+	}
+	movie := byKey["3001"]
+	if movie.TMDBID != "260346" || movie.Year != 2014 || movie.DurationSeconds < 6537 || movie.DurationSeconds > 6538 {
+		t.Fatalf("movie record = %+v, want ids, year, and duration from metadata", movie)
+	}
+	if movie.LastPlayedAt == nil || movie.LastPlayedAt.Unix() != 1700000100 || !movie.UpdatedAt.Equal(*movie.LastPlayedAt) {
+		t.Fatalf("movie watched time = %v / updated %v, want the history viewedAt", movie.LastPlayedAt, movie.UpdatedAt)
+	}
+}
+
+func TestPlexRatingKeyFromMetadataPath(t *testing.T) {
+	t.Parallel()
+	for path, want := range map[string]string{
+		"/library/metadata/4000":          "4000",
+		"":                                "",
+		"/library/metadata/":              "",
+		"/library/metadata/4000/children": "",
+		"/library/sections/2":             "",
+	} {
+		if got := plexRatingKeyFromMetadataPath(path); got != want {
+			t.Errorf("plexRatingKeyFromMetadataPath(%q) = %q, want %q", path, got, want)
+		}
+	}
 }

@@ -87,6 +87,11 @@ type UserImportTMDBRequest struct {
 	TimeWindow string `json:"time_window"`
 }
 
+type UserImportTMDBListRequest struct {
+	UserImportSharedFields
+	URL string `json:"url"`
+}
+
 type UserImportTraktRequest struct {
 	UserImportSharedFields
 	Preset    string `json:"preset"`
@@ -183,6 +188,29 @@ func (h *UserCollectionImportHandler) ImportTMDB(ctx context.Context, userID int
 		Preset:     preset,
 		MediaType:  mediaType,
 		TimeWindow: timeWindow,
+		Limit:      req.Limit,
+		LibraryIDs: req.LibraryIDs,
+	}
+	return h.createImportedCollection(ctx, userID, profileID, "tmdb", cfg, req.UserImportSharedFields)
+}
+
+// ImportTMDBList creates a collection that follows a public TMDB list for the
+// profile and runs its first sync.
+func (h *UserCollectionImportHandler) ImportTMDBList(ctx context.Context, userID int, profileID string, req UserImportTMDBListRequest) (UserImportView, error) {
+	var none UserImportView
+	if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.URL) == "" {
+		return none, apiError(http.StatusBadRequest, policyErrorBadRequest, "title and url are required")
+	}
+	listURL, err := collectionutil.CanonicalTMDBListURL(req.URL)
+	if err != nil {
+		return none, fieldError("url", "url must be a TMDB list (https://www.themoviedb.org/list/...)")
+	}
+	if err := validateOptionalLimit(req.Limit); err != nil {
+		return none, err
+	}
+	cfg := usercollections.SourceConfig{
+		Mode:       usercollections.SourceModeTMDBList,
+		URL:        listURL,
 		Limit:      req.Limit,
 		LibraryIDs: req.LibraryIDs,
 	}

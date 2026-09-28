@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -276,6 +277,42 @@ func TestGetExternalIDsCachesSuccess(t *testing.T) {
 	}
 	if first.IMDbID != "tt123" || first.TVDBID != 456 || second.IMDbID != "tt123" || second.TVDBID != 456 {
 		t.Fatalf("external IDs = first %+v second %+v", first, second)
+	}
+}
+
+func TestRefreshExternalIDsBypassesCache(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := calls.Add(1)
+		if r.URL.Path != "/tv/77/external_ids" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if n == 1 {
+			_, _ = w.Write([]byte(`{"imdb_id":"tt77"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"imdb_id":"tt77","tvdb_id":456}`))
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", 1000)
+	client.SetBaseURL(server.URL)
+
+	if _, err := client.GetExternalIDs(context.Background(), "tv", 77); err != nil {
+		t.Fatalf("GetExternalIDs returned error: %v", err)
+	}
+	refreshed, err := client.RefreshExternalIDs(context.Background(), "tv", 77)
+	if err != nil {
+		t.Fatalf("RefreshExternalIDs returned error: %v", err)
+	}
+	if calls.Load() != 2 || refreshed.TVDBID != 456 {
+		t.Fatalf("upstream calls = %d, refreshed = %+v; want a second fetch with the new TVDB ID", calls.Load(), refreshed)
+	}
+	cached, err := client.GetExternalIDs(context.Background(), "tv", 77)
+	if err != nil || cached.TVDBID != 456 || calls.Load() != 2 {
+		t.Fatalf("GetExternalIDs after refresh = %+v, %v (calls %d); want the refreshed value from cache", cached, err, calls.Load())
 	}
 }
 
@@ -1136,5 +1173,68 @@ func TestGetCertificationSingleflightsConcurrentCallers(t *testing.T) {
 	}
 	if got := calls.Load(); got != 1 {
 		t.Fatalf("upstream calls = %d, want 1 (singleflight)", got)
+	}
+}
+
+func TestGetListPagesMixedEntriesInListOrder(t *testing.T) {
+	var pages []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/list/310" {
+			http.NotFound(w, r)
+			return
+		}
+		page := r.URL.Query().Get("page")
+		pages = append(pages, page)
+		w.Header().Set("Content-Type", "application/json")
+		switch page {
+		case "1":
+			_, _ = w.Write([]byte(`{"id":310,"page":1,"total_pages":2,"items":[
+				{"id":10096,"media_type":"movie","title":"13 Going on 30"},
+				{"id":1399,"media_type":"tv","name":"Game of Thrones"},
+				{"id":287,"media_type":"person","name":"Brad Pitt"}
+			]}`))
+		case "2":
+			_, _ = w.Write([]byte(`{"id":310,"page":2,"total_pages":2,"items":[
+				{"id":550,"media_type":"movie","title":"Fight Club"}
+			]}`))
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", 1000)
+	client.SetBaseURL(server.URL)
+
+	got, err := client.GetList(context.Background(), 310, 0)
+	if err != nil {
+		t.Fatalf("GetList: %v", err)
+	}
+	want := []CollectionResult{
+		{ID: 10096, MediaType: "movie", Title: "13 Going on 30"},
+		{ID: 1399, MediaType: "tv", Title: "Game of Thrones"},
+		{ID: 550, MediaType: "movie", Title: "Fight Club"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("GetList = %#v, want %#v", got, want)
+	}
+	if !reflect.DeepEqual(pages, []string{"1", "2"}) {
+		t.Fatalf("requested pages = %v, want [1 2]", pages)
+	}
+
+	pages = nil
+	got, err = client.GetList(context.Background(), 310, 2)
+	if err != nil {
+		t.Fatalf("GetList(limit=2): %v", err)
+	}
+	if len(got) != 2 || !reflect.DeepEqual(pages, []string{"1"}) {
+		t.Fatalf("GetList(limit=2) = %d entries from pages %v, want 2 entries from page 1", len(got), pages)
+	}
+}
+
+func TestGetListRejectsNonPositiveID(t *testing.T) {
+	client := NewClient("test-key", 1000)
+	if _, err := client.GetList(context.Background(), 0, 10); err == nil {
+		t.Fatal("GetList(0) succeeded, want error")
 	}
 }

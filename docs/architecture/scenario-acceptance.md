@@ -554,25 +554,27 @@ is exercised.
 
 ### Frozen API-key creation refusal pairs
 
-`make test-scenario-api-key-create-refusals` requires five original cases:
+`make test-scenario-api-key-create-refusals` requires six original cases:
 `keys_create.bad_scope`, `keys_create.missing_label`, `keys_create.malformed`,
-`keys_create.demo` and `keys_create.no_token`. Original requests, settings and
-expectations remain unchanged. V2 explicitly records validation 422, malformed
-JSON 400 and demo/authentication 403/401 Problem Details. Ten real-router
-transport requests use per-transport reseeding and 20 full API-key-table
+`keys_create.member_forbidden`, `keys_create.demo` and `keys_create.no_token`.
+The three input cases run as the admin, because only server admins create keys;
+`member_forbidden` records that a regular account is refused with 403 on both
+transports. V2 explicitly records validation 422, malformed JSON 400, demo and
+non-admin 403, and unauthenticated 401 Problem Details. Twelve real-router
+transport requests use per-transport reseeding and 24 full API-key-table
 snapshots to prove all three fixture rows remain unchanged. Required DSN,
 pre-setup occupancy and fixed-selector gates fail closed. No successful
 credential creation, API-key-auth metadata update or external call is exercised.
-These five frozen pairs remain separate from NEW acceptance.
+These six frozen pairs remain separate from NEW acceptance.
 
 ### Frozen successful API-key creation pairs
 
 `make test-scenario-api-key-creations` requires `keys_create.ok`,
-`keys_create.meaning`, `keys_create.scoped` and `keys_create.shape`.
-Original v1 expectations and requests remain unchanged. V2 records string IDs,
-UTC-millisecond timestamps and creation-only secret disclosure. Eight real
+`keys_create.meaning`, `keys_create.scoped` and `keys_create.shape`, all as the
+admin. V2 records string IDs, UTC-millisecond timestamps and creation-only
+secret disclosure. Eight real
 transport requests reseed independently and compare 16 full-table snapshots:
-exactly one new member-owned row must match the returned ID, credential, label,
+exactly one new admin-owned row must match the returned ID, credential, label,
 normalized scopes, standard tier and timestamp, with no usage timestamp; all
 three prior rows remain byte-identical. Credentials stay out of effect-assertion
 messages. Required DSN, pre-setup occupancy and fixed-selector gates fail closed.

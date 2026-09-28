@@ -811,6 +811,16 @@ type RunKey struct {
 // than after in (created_at DESC, id DESC) order, and whether more follow. A
 // nil after starts from the newest run.
 func (r *Repository) ListRunsPageForUser(ctx context.Context, userID int, after *RunKey, limit int) ([]Run, bool, error) {
+	return r.listRunsPage(ctx, userID, "", after, limit)
+}
+
+// ListRunsPageForProfile is ListRunsPageForUser limited to runs that write
+// into one of the account's profiles.
+func (r *Repository) ListRunsPageForProfile(ctx context.Context, userID int, profileID string, after *RunKey, limit int) ([]Run, bool, error) {
+	return r.listRunsPage(ctx, userID, profileID, after, limit)
+}
+
+func (r *Repository) listRunsPage(ctx context.Context, userID int, profileID string, after *RunKey, limit int) ([]Run, bool, error) {
 	if limit <= 0 {
 		limit = 10
 	}
@@ -823,9 +833,13 @@ func (r *Repository) ListRunsPageForUser(ctx context.Context, userID int, after 
 		FROM history_import_runs
 		WHERE user_id = $1`
 	args := []any{userID}
+	if profileID != "" {
+		args = append(args, profileID)
+		query += fmt.Sprintf(` AND profile_id = $%d`, len(args))
+	}
 	if after != nil {
-		query += ` AND (created_at, id) < ($2, $3)`
 		args = append(args, after.CreatedAt, after.ID)
+		query += fmt.Sprintf(` AND (created_at, id) < ($%d, $%d)`, len(args)-1, len(args))
 	}
 	query += fmt.Sprintf(` ORDER BY created_at DESC, id DESC LIMIT %d`, limit+1)
 	rows, err := r.pool.Query(ctx, query, args...)

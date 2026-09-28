@@ -413,6 +413,37 @@ func (r *LibraryCollectionRepository) ListAll(ctx context.Context, libraryID *in
 	return scanLibraryCollections(rows)
 }
 
+// ListContainingItem returns the visible collections that store a membership
+// row for mediaItemID, ordered by title. The membership subquery is served by
+// the library_collection_items media_item_id index. Smart (live-query)
+// collections derive their members at read time and store no rows, so they are
+// not reported.
+func (r *LibraryCollectionRepository) ListContainingItem(ctx context.Context, mediaItemID string) ([]*models.LibraryCollection, error) {
+	query := fmt.Sprintf(`
+		SELECT %s
+		FROM library_collections lc
+		%s
+		LEFT JOIN library_collection_items lci ON lci.collection_id = lc.id
+		LEFT JOIN library_collection_libraries lcl ON lcl.collection_id = lc.id
+		WHERE lc.visibility = 'visible'
+		  AND lc.id IN (
+			SELECT member.collection_id
+			FROM library_collection_items member
+			WHERE member.media_item_id = $1
+		  )
+		GROUP BY lc.id, scope_lcl.group_id, scope_lcl.sort_order
+		ORDER BY lower(lc.title) ASC, lc.title ASC, lc.id ASC
+	`, libraryCollectionColumns, libraryCollectionScopeFallbackJoin)
+
+	rows, err := r.pool.Query(ctx, query, mediaItemID)
+	if err != nil {
+		return nil, fmt.Errorf("listing collections containing item: %w", err)
+	}
+	defer rows.Close()
+
+	return scanLibraryCollections(rows)
+}
+
 // AnyVisibleInLibraries reports whether at least one visible library collection
 // is scoped to any of the given libraries. It mirrors the visibility rules of
 // ListAll + the compat layer's collectionVisible (multi-library scope rows, or

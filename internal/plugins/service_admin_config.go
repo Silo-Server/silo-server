@@ -55,7 +55,7 @@ func (s *Service) SetGlobalConfigWithClears(
 		return fmt.Errorf("plugin config store not configured")
 	}
 
-	_, manifest, err := s.ensureInstallationCache(ctx, installationID, false)
+	_, manifest, err := s.loadForManifestRead(ctx, installationID, false)
 	if err != nil {
 		return err
 	}

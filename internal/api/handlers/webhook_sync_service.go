@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/webhooksync"
 )
 
@@ -43,6 +44,9 @@ func webhookManagementError(err error) error {
 	}
 	status := webhookErrorStatus(err)
 	message := err.Error()
+	if refused, ok := historyimport.ServerAddressMessage(err); ok {
+		message = refused
+	}
 	code := policyErrorBadRequest
 	if status >= http.StatusInternalServerError {
 		message = "Webhook sync request failed"

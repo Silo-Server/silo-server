@@ -202,7 +202,7 @@ func TestPostgresPlanStore(t *testing.T) {
 			t.Fatal("RouteEventNamesV3 returned no events")
 		}
 		for _, name := range names {
-			err := store.RecordRouteEvent(ctx, playback.RouteEventRecordV3{
+			_, err := store.RecordRouteEvent(ctx, playback.RouteEventRecordV3{
 				RouteEventV3: playback.RouteEventV3{
 					ProtocolVersion:       3,
 					PlaybackAttemptID:     "att-events-" + sessionID,
@@ -238,7 +238,7 @@ func TestPostgresPlanStore(t *testing.T) {
 
 	t.Run("RecordTerminalStartEventWithoutSession", func(t *testing.T) {
 		attemptID := "att-terminal-" + uuid.NewString()
-		err := store.RecordRouteEvent(ctx, playback.RouteEventRecordV3{
+		_, err := store.RecordRouteEvent(ctx, playback.RouteEventRecordV3{
 			RouteEventV3: playback.RouteEventV3{
 				ProtocolVersion:   playback.ProtocolV3,
 				PlaybackAttemptID: attemptID,
@@ -652,10 +652,10 @@ func TestPostgresPlanStore(t *testing.T) {
 				ProfileID: "profile-1",
 			}
 		}
-		if err := store.RecordRouteEvent(ctx, event("att-cleanup-old")); err != nil {
+		if _, err := store.RecordRouteEvent(ctx, event("att-cleanup-old")); err != nil {
 			t.Fatalf("RecordRouteEvent old: %v", err)
 		}
-		if err := store.RecordRouteEvent(ctx, event("att-cleanup-recent")); err != nil {
+		if _, err := store.RecordRouteEvent(ctx, event("att-cleanup-recent")); err != nil {
 			t.Fatalf("RecordRouteEvent recent: %v", err)
 		}
 		if _, err := f.pool.Exec(ctx, `

@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"errors"
+	"math"
 	"net/http"
 	"strconv"
 
@@ -96,6 +97,9 @@ type WatchProviderSettings struct {
 	SyncWatchlistRemovalsEnabled bool `json:"sync_watchlist_removals_enabled"`
 	SyncWatchlistOrderEnabled    bool `json:"sync_watchlist_order_enabled"`
 	ScrobbleEnabled              bool `json:"scrobble_enabled"`
+	ImportRatingsEnabled         bool `json:"import_ratings_enabled" doc:"Import the provider's movie and series ratings as stars (1-2 is 1 star, 9-10 is 5 stars)."`
+	ExportRatingsEnabled         bool `json:"export_ratings_enabled" doc:"Send the profile's star ratings to the provider (stars times two) and clear removed ones."`
+	SyncDroppedEnabled           bool `json:"sync_dropped_enabled" doc:"Sync dropped shows both ways: dismissing a show, or one of its episodes, from Home drops the show on the provider, shows dropped on the provider are hidden from Continue Watching and the profile-wide Next Up (a single series' Next Up still lists them), and watching a dropped show again undrops it on both sides."`
 }
 
 func watchProviderSettingsOf(status watchsync.ConnectionStatus) WatchProviderSettings {
@@ -112,6 +116,9 @@ func watchProviderSettingsOf(status watchsync.ConnectionStatus) WatchProviderSet
 		SyncWatchlistRemovalsEnabled: status.SyncWatchlistRemovalsEnabled,
 		SyncWatchlistOrderEnabled:    status.SyncWatchlistOrderEnabled,
 		ScrobbleEnabled:              status.ScrobbleEnabled,
+		ImportRatingsEnabled:         status.ImportRatingsEnabled,
+		ExportRatingsEnabled:         status.ExportRatingsEnabled,
+		SyncDroppedEnabled:           status.SyncDroppedEnabled,
 	}
 }
 
@@ -198,7 +205,7 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 			if err != nil {
 				return nil, serviceProblem(err)
 			}
-			out.Body.Items = append(out.Body.Items, WatchProviderSummary{Key: row.Key, DisplayName: row.DisplayName, Capabilities: row.Capabilities, ConnectionConfigSchema: schemas})
+			out.Body.Items = append(out.Body.Items, WatchProviderSummary{Key: row.Key, DisplayName: row.DisplayName, Capabilities: watchProviderCapabilitiesOf(row.Capabilities), ConnectionConfigSchema: schemas})
 		}
 		return out, nil
 	})
@@ -373,6 +380,12 @@ func watchProviderProblem(err error) *Problem {
 		p := NewProblem(TypeRateLimited, "Watch provider sync recently ran. Try again later.")
 		return p.WithHeader("Retry-After", strconv.Itoa(max(1, cooldown.RetryAfterSeconds)))
 	}
+	if limited, ok := watchsync.AsRateLimited(err); ok {
+		// The provider throttled this call (for example Trakt's slow_down answer
+		// to a device-code poll); pass its wait on so the client backs off.
+		p := NewProblem(TypeRateLimited, "The watch provider is rate limiting requests. Try again later.")
+		return p.WithHeader("Retry-After", strconv.Itoa(max(1, int(math.Ceil(limited.RetryAfter.Seconds())))))
+	}
 	if watchsync.IsInvalidCredentialError(err) {
 		return NewProblem(TypeValidationFailed, "The watch provider rejected the supplied credential.")
 	}
@@ -382,10 +395,53 @@ func watchProviderProblem(err error) *Problem {
 	return NewProblem(TypeInternalError, "Watch-provider operation failed.")
 }
 
+// WatchProviderCapabilities is the v2 projection of a provider's sync
+// capabilities. It is separate from watchsync.Capabilities so the frozen v1
+// responses, which serialize that type, keep their original fields.
+type WatchProviderCapabilities struct {
+	ImportWatched   bool `json:"import_watched"`
+	ImportProgress  bool `json:"import_progress"`
+	ExportWatched   bool `json:"export_watched"`
+	ExportUnwatched bool `json:"export_unwatched"`
+	ImportFavorites bool `json:"import_favorites"`
+	ExportFavorites bool `json:"export_favorites"`
+	RemoveFavorites bool `json:"remove_favorites"`
+	ImportWatchlist bool `json:"import_watchlist"`
+	ExportWatchlist bool `json:"export_watchlist"`
+	RemoveWatchlist bool `json:"remove_watchlist"`
+	// ProvidesWatchlistOrder is true when the provider returns its watchlist in a
+	// user-configurable order that Silo can mirror locally.
+	ProvidesWatchlistOrder bool `json:"provides_watchlist_order"`
+	ScrobblePlayback       bool `json:"scrobble_playback"`
+	ImportRatings          bool `json:"import_ratings"`
+	ExportRatings          bool `json:"export_ratings"`
+	SyncDropped            bool `json:"sync_dropped" doc:"The provider can read, drop, and undrop dropped shows."`
+}
+
+func watchProviderCapabilitiesOf(c watchsync.Capabilities) WatchProviderCapabilities {
+	return WatchProviderCapabilities{
+		ImportWatched:          c.ImportWatched,
+		ImportProgress:         c.ImportProgress,
+		ExportWatched:          c.ExportWatched,
+		ExportUnwatched:        c.ExportUnwatched,
+		ImportFavorites:        c.ImportFavorites,
+		ExportFavorites:        c.ExportFavorites,
+		RemoveFavorites:        c.RemoveFavorites,
+		ImportWatchlist:        c.ImportWatchlist,
+		ExportWatchlist:        c.ExportWatchlist,
+		RemoveWatchlist:        c.RemoveWatchlist,
+		ProvidesWatchlistOrder: c.ProvidesWatchlistOrder,
+		ScrobblePlayback:       c.ScrobblePlayback,
+		ImportRatings:          c.ImportRatings,
+		ExportRatings:          c.ExportRatings,
+		SyncDropped:            c.SyncDropped,
+	}
+}
+
 type WatchProviderConnection struct {
 	Provider                     string                    `json:"provider"`
 	DisplayName                  string                    `json:"display_name"`
-	Capabilities                 watchsync.Capabilities    `json:"capabilities"`
+	Capabilities                 WatchProviderCapabilities `json:"capabilities"`
 	AuthMethod                   string                    `json:"auth_method"`
 	Connected                    bool                      `json:"connected"`
 	ProviderUsername             string                    `json:"provider_username,omitempty"`
@@ -401,6 +457,9 @@ type WatchProviderConnection struct {
 	SyncWatchlistRemovalsEnabled bool                      `json:"sync_watchlist_removals_enabled"`
 	SyncWatchlistOrderEnabled    bool                      `json:"sync_watchlist_order_enabled"`
 	ScrobbleEnabled              bool                      `json:"scrobble_enabled"`
+	ImportRatingsEnabled         bool                      `json:"import_ratings_enabled"`
+	ExportRatingsEnabled         bool                      `json:"export_ratings_enabled"`
+	SyncDroppedEnabled           bool                      `json:"sync_dropped_enabled"`
 	CredentialsConfigured        bool                      `json:"credentials_configured"`
 	ConnectionConfigSchema       []AdminPluginConfigSchema `json:"connection_config_schema,omitempty"`
 	LastInboundSyncAt            *Instant                  `json:"last_inbound_sync_at,omitempty"`
@@ -420,7 +479,7 @@ func watchProviderConnectionOf(s watchsync.ConnectionStatus) (WatchProviderConne
 	return WatchProviderConnection{
 		Provider:                     s.Provider,
 		DisplayName:                  s.DisplayName,
-		Capabilities:                 s.Capabilities,
+		Capabilities:                 watchProviderCapabilitiesOf(s.Capabilities),
 		AuthMethod:                   s.AuthMethod,
 		Connected:                    s.Connected,
 		ProviderUsername:             s.ProviderUsername,
@@ -436,6 +495,9 @@ func watchProviderConnectionOf(s watchsync.ConnectionStatus) (WatchProviderConne
 		SyncWatchlistRemovalsEnabled: s.SyncWatchlistRemovalsEnabled,
 		SyncWatchlistOrderEnabled:    s.SyncWatchlistOrderEnabled,
 		ScrobbleEnabled:              s.ScrobbleEnabled,
+		ImportRatingsEnabled:         s.ImportRatingsEnabled,
+		ExportRatingsEnabled:         s.ExportRatingsEnabled,
+		SyncDroppedEnabled:           s.SyncDroppedEnabled,
 		CredentialsConfigured:        s.CredentialsConfigured,
 		ConnectionConfigSchema:       schemas,
 		LastInboundSyncAt:            instantPtr(s.LastInboundSyncAt),
@@ -470,6 +532,10 @@ type WatchProviderSyncRun struct {
 	OutboundWatchlistFound   int      `json:"outbound_watchlist_found"`
 	OutboundWatchlistSent    int      `json:"outbound_watchlist_sent"`
 	WatchlistRemovalsSent    int      `json:"watchlist_removals_sent"`
+	InboundRatingsFound      int      `json:"inbound_ratings_found"`
+	InboundRatingsImported   int      `json:"inbound_ratings_imported"`
+	OutboundRatingsFound     int      `json:"outbound_ratings_found" doc:"Movie and series ratings the profile holds."`
+	OutboundRatingsSent      int      `json:"outbound_ratings_sent" doc:"Ratings set or cleared on the provider."`
 	Warning                  string   `json:"warning,omitempty"`
 	Error                    string   `json:"error,omitempty"`
 	StartedAt                Instant  `json:"started_at"`
@@ -500,6 +566,10 @@ func watchProviderSyncRunOf(s watchsync.SyncRun) WatchProviderSyncRun {
 		OutboundWatchlistFound:   s.OutboundWatchlistFound,
 		OutboundWatchlistSent:    s.OutboundWatchlistSent,
 		WatchlistRemovalsSent:    s.WatchlistRemovalsSent,
+		InboundRatingsFound:      s.InboundRatingsFound,
+		InboundRatingsImported:   s.InboundRatingsImported,
+		OutboundRatingsFound:     s.OutboundRatingsFound,
+		OutboundRatingsSent:      s.OutboundRatingsSent,
 		Warning:                  s.Warning,
 		Error:                    s.Error,
 		StartedAt:                NewInstant(s.StartedAt),
@@ -514,6 +584,6 @@ var requestLifecycleOperationIDs = []string{"getRequestStatus", "cancelRequest",
 type WatchProviderSummary struct {
 	Key                    string                    `json:"key"`
 	DisplayName            string                    `json:"display_name"`
-	Capabilities           watchsync.Capabilities    `json:"capabilities"`
+	Capabilities           WatchProviderCapabilities `json:"capabilities"`
 	ConnectionConfigSchema []AdminPluginConfigSchema `json:"connection_config_schema,omitempty"`
 }

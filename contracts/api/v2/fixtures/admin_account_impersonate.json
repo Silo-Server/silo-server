@@ -8,6 +8,7 @@
     "email": "",
     "role": "user",
     "permissions": [],
-    "download_allowed": false
+    "download_allowed": false,
+    "password_change_required": false
   }
 }

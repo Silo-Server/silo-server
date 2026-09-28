@@ -51,9 +51,13 @@ Diagnostics orphan cleanup deletes only keys shaped exactly like a bundle,
 `diagnostics` is never swept.
 
 Only the Assets store is wrapped to record the storage identity. When Operational
-shares it, a first write through any caller records it. A private S3 bucket is
-deliberately left unwrapped: recording its identity would name it as the
-catalog's assets location and refuse the real assets store on the next start.
+shares it, a first write through any caller records it. A private S3 bucket stays
+outside that wrapper so its identity cannot become the catalog's assets location.
+At startup, `blobstore.Open` records the configured private bucket under
+`storage.operational_identity`, even when it is empty or was written by an older
+release. A different configured private location fails startup. This row locks
+the private settings independently of the assets identity; an administrator
+changes the location through a managed transition.
 
 ## Backends
 
@@ -159,22 +163,191 @@ The reconcile task certifies the same row after a manual sweep, and the storage
 sweep scopes its cursor to it. Once recorded, the admin settings API rejects
 any write that would resolve to a different identity with
 `409 artwork_storage_locked`: a different backend, `artwork.local_path` for a
-local store, or the public endpoint, bucket, or key prefix for an S3 store. An
-`auto` backend that resolved to local also cannot gain a public bucket, because
-that would flip the resolution on restart; an explicit `local` backend can.
-`GET /admin/server/status` reports `artwork_storage.locked` so the UI disables
-the control. Independently of the lock, an explicit `s3` backend without a
-public bucket is rejected as invalid, since the store could not open on
-restart. Moving artwork is a manual operation:
+local store, or the public endpoint, bucket, or key prefix for an S3 store. When
+only `storage.operational_identity` is recorded, the private location locks and
+the assets location stays free until the first write through Assets. The
+private bucket is locked on either backend, because it owns the operational
+store whatever the backend is; adding one to a local install would strand what
+its root already holds. Its endpoint and key prefix are locked while a bucket is
+configured, and the prefix compares as the store normalizes it, so `ops/` and
+`ops` name the same location. An `auto` backend that resolved to local also
+cannot gain a public bucket, because that would flip the resolution on restart;
+an explicit `local` backend can. `GET /admin/server/status` reports
+`artwork_storage.locked`, and `/api/v2` adds `artwork_storage.private_locked`
+for the operational location. Endpoint scheme and host and bucket names compare
+case-insensitively, and prefixes ignore slashes, so an edit that only restyles
+a value saves directly. For a locked location, the admin settings page opens a
+managed transition when the backend, local path, public S3 location, or private
+S3 location changes. The setup wizard keeps locked location fields read-only.
+Independently of the lock, an explicit `s3` backend without a public bucket is
+rejected as invalid, since the store could not open on restart.
 
-1. Stop artwork writers.
-2. Copy the artwork tree to the new store, preserving logical keys.
-3. Update the backend configuration in the database directly.
-4. Delete the `artwork.storage_identity` row and restart.
+## Managed transitions
 
-This guard does not migrate data. There is no portability format, storage
-health state machine, generation marker, or mount sentinel. Existing revision
-tracking, reconciliation, and garbage collection continue to own lifecycle.
+Administrators change a recorded local or S3 location through the managed
+storage-transition API. `start_fresh` does not read the source;
+`preserve_uploads` copies personal artwork uploads and downloaded subtitles when
+the assets location changes, and profile avatars when the operational location
+changes. When the assets location changes, provider artwork returns to its saved
+provider URL under `start_fresh` and `preserve_uploads`. Cached NFO/sidecar
+artwork is not copied by either policy; refresh metadata for affected libraries
+after restart and artwork reconciliation. Backfill Metadata Images does not
+process local sidecar sources. `migrate_all` copies all data from each source
+location that changes. PostgreSQL catalog metadata is retained and the old
+storage is never deleted automatically.
+
+Admission serializes stage selection and job creation across API nodes. A lost
+job-creation response retains the stage until a separate read confirms that no
+job was admitted. Recovery cleanup clears only its own transition ID, so a late
+finalizer cannot erase a newer transition.
+
+Every API or integrated process takes a shared PostgreSQL advisory lock before
+opening blob storage and keeps that session until process exit. Start briefly
+checks exclusive ownership; the job takes it again before copying and holds it
+through commit and exit. A node that joins while the job is queued makes the
+job fail before copying. A node that arrives during a copy waits until the old
+process exits, then loads the committed settings. If the owner exits before
+commit, its session lock is released and a single restarted node can retry the
+job. The admission session is detached from the connection pool so pool cleanup
+cannot release it while old workers are still running.
+
+An unexpected loss of that PostgreSQL session, such as a database restart or
+failover, releases its advisory lock before the process may notice. Silo probes
+the session every second. A node that holds only the shared lock rejoins on a
+new session with a non-blocking shared acquire, so an ordinary database restart
+does not stop it. While the database cannot be reached, its blob writes are
+paused and reads keep serving. The node stops instead of rejoining when any
+node holds the exclusive lock at that moment, or when the recorded storage
+identities no longer name the stores it opened, which means a transition
+committed and restarted while it was out. It then restarts onto the committed
+settings. The rejoin check reads those identities under the settings mutation
+lock, and the owner confirms its admission session inside the commit's
+transaction, so a node cannot rejoin between a lost owner session and the
+commit. A node that owned the transition stops as well, because its exclusive
+lock went with the session. Writes may still occur between the loss and its
+detection. This bound is operational, not an
+atomic cross-node write fence; verify the source and target before retrying
+after an admission-session failure.
+
+Copy policies run an unfenced bulk pass followed by a full delta pass while
+public and private source mutations are fenced. The delta pass re-enumerates
+from the beginning. PostgreSQL checkpoint rows record each bulk-pass listing
+fingerprint and its execution ID, then mark rows seen by the fenced pass. Receipt
+writes are batched once per listed page and also flush after 256 MiB or ten
+seconds. Every error and cancellation path makes a final bounded write with a
+detached context, so verified work survives even when the job context has been
+canceled. An incomplete fenced listing never runs orphan cleanup. The transition
+does not retain a key-sized set in application memory or issue a database round
+trip per object. During the fenced pass of the same execution, Silo can compare
+reliable listed size, ETag, and modification-time values against those rows,
+avoiding a second object read when all three are unchanged. Bulk passes never
+take this shortcut. Local filesystem listings are deliberately excluded
+from this shortcut because their synthetic ETag cannot distinguish every
+same-size in-place rewrite. New or changed objects, stores without reliable
+listing metadata, and every cross-process resume receive full source-and-target
+digest verification. Orphan cleanup selects checkpoint rows not marked seen in
+the fenced run in bounded pages, deletes each target object first, and only then
+deletes its checkpoint row. It never deletes unrelated target objects or source
+objects. Tests without a database retain an equivalent in-memory implementation.
+The fences remain held after the settings commit until the process restarts,
+and release on every pre-commit failure or cancellation. Copy policies reject
+overlapping source and target namespaces, including targets that overlap the
+opposite source role. Every policy rejects overlapping public and private S3
+targets. Sentinel probes catch endpoint aliases that string identity comparison
+cannot recognize. Before copying or committing, the queued job writes, reads
+back, and deletes a small object at each changed destination. A failed probe or
+cleanup stops the transition.
+
+A transition handles two locations independently: the assets store and the
+operational store. The operational location is the private bucket when one is
+configured, the local root on a local backend without one, and nothing on an S3
+backend without one, matching `blobstore.Open`. The assets copy never carries
+`diagnostics/`, `catalog-seeds/`, or `profile-avatars/`; those follow the
+operational copy, which runs only when the operational location changes.
+`preserve_uploads` copies avatars there; `migrate_all` also copies diagnostic
+bundles and job artifacts. Both copy policies copy downloaded subtitles with the
+assets, in every direction.
+
+Diagnostic and job-artifact rows record their bucket, and a local root records
+`"local"`. After a `migrate_all` restart, boot recovery repoints rows naming the
+old operational bucket to the new one, so rows move between local disk and
+private S3 in either direction. Rows naming `"local"` are repointed under every
+policy: an S3 reader would otherwise presign or delete against a real bucket
+of that name. Their objects were not copied, so they read as missing. Rows
+naming any other bucket are left alone.
+
+Disabling S3 makes local disk the only location: a transition from an S3
+backend to a local one also clears the private bucket, so the operational store
+becomes the local root. The selected policy determines which source objects are
+copied there. A local install keeps its private bucket unless the transition
+changes it, and adding or removing a private bucket on a local install is a
+private-only transition. Profile avatars never enter public S3, so copy policies
+require private S3 when the source has operational storage and the target is S3.
+Legacy shared operational buckets are split by ownership: `diagnostics` and
+`catalog-seeds` move only with the operational copy under `migrate_all`. If one
+source namespace is nested inside the other, the enclosing copy excludes that
+subtree. Source overlap detection also probes endpoint aliases before the bulk
+copy and before writes are fenced; both copy passes reuse that result. A failed
+probe or sentinel cleanup stops the transition before copying or committing
+settings. The final pass fences only the stores the transition copies from, so a
+store whose data stays put keeps accepting writes. A local root is both the
+assets and the operational store, and its writes wait on a single fence, which
+the transition takes once.
+
+Start applies the settings API's per-key rules to the request, so a transition
+cannot commit an unknown backend or a relative local path. It rejects a target
+whose normalized store identities equal the active ones before creating a job,
+and it computes the preflight from those same identities. Clearing the private
+bucket clears the rest of the private location with it. The commit writes the
+location keys the copy verified; every other storage setting keeps its current
+value, so a credential rotated while the copy ran is not reverted. When the
+private location changes, the commit also rewrites `storage.operational_identity`
+to the new bucket, or clears it when private storage is removed.
+
+Each listed page of 250 keys copies through a pool of eight workers; receipts,
+counters, and progress update under one lock, and the page's receipts flush
+before its cursor advances. Job progress is reported at most every two seconds
+rather than per object. Objects up to 8 MiB are read whole and written with
+`Put`, which records the `silo-sha256` checksum S3 compares for the image
+cache's reuse check; larger objects stream. In the fenced pass, an object this
+run already copied or verified is accepted once its source digest still
+matches, without reading the target again: only the transition writes there.
+
+The settings commit records a restart-pending stage before the runner requests
+restart. Catalog artwork reconciliation never runs against an uncommitted
+target. Boot recovery is bounded: it verifies that the committed target is
+active, relocates private artifact references, and repairs an interrupted job
+receipt. After the HTTP listener starts, one API node takes a PostgreSQL
+advisory lock and runs the managed catalog reconcile in the background with the
+same durable checkpoint envelope as the manual reconcile task. Transient
+failures retry in process with capped exponential backoff. Each attempt first
+checks whether staged reconciliation exists, avoiding lock contention while
+idle, then rereads the stage after acquiring the lock. Only the lock owner writes
+running or retry state, and a waiting node can take over after the owner exits. A
+committed-target identity mismatch is instead recorded as blocked and is not
+retried. Unreadable staged state is omitted from configuration snapshots while
+explicit recovery reads continue to report the error; unreadable active
+credentials still fail configuration loading. An unreadable or undecodable staged
+setting does not prevent the server from starting: boot logs the error, the health
+API reports recovery as blocked, and new transitions remain disabled until the
+setting is repaired. Throttled
+progress, the last error, and `running`,
+`waiting_retry`, or `blocked` recovery state are stored with the staged
+transition and exposed through the admin source-health API. The manual reconcile
+task takes the same lock and fails fast if a managed public reconcile is pending,
+preventing concurrent catalog mutation or checkpoint writers. Branding
+references are checked after the catalog sweep, so a branding failure does not repeat completed
+catalog work. A fully verified `migrate_all` skips the catalog sweep but still
+checks the small branding set. Recovery state is cleared only after all required
+post-restart work finishes. A private-only change skips both public catalog and
+branding reconciliation.
+
+Artwork and S3 clients are process-lifetime dependencies: the configuration
+watcher updates its live configuration snapshot but does not rebuild these
+clients. Committing a transition therefore cannot introduce an unfenced client
+in the old process. If the host has no restart callback or refuses the restart,
+the runner leaves the source fences held, records that a manual restart is
+required on the job, and the admin UI surfaces that instruction.
 
 ## Readiness
 
@@ -191,13 +364,37 @@ retained `/api/v1/ready` contract, which previously answered 503 on an S3
 
 Local URLs use an HMAC derived from the JWT secret and the fixed domain
 `silo-artwork-url-v1`. The signature covers `artwork-v1`, the logical key, and
-the expiry. URLs stay stable within issuance buckets of 15 minutes, reduced to
-the TTL for shorter URLs. Their remaining lifetime is at least the configured
-TTL, with up to one bucket added. Invalid or expired capabilities return 404 so
-the route does not reveal whether a key exists.
-Revisioned URLs are cacheable for their remaining lifetime and marked immutable;
-mutable uploads use private caching. S3 installations continue to use direct
-presigned or public URLs.
+the expiry. Invalid or expired capabilities return 404 so the route does not
+reveal whether a key exists.
+
+For artwork, the path is the identity and the query is the authorization.
+Clients and CDNs cache images by full URL, so a new URL for unchanged bytes
+costs a download the client already has. A revisioned key names immutable bytes,
+so at the default lifetime (`s3.metadata_presign_expiry`) its URL stays the same
+for a UTC day on every replica and is valid for at least the TTL. A leaked
+revisioned URL therefore works for up to a day plus the TTL; lowering the
+setting shortens the TTL but not the day.
+
+Every other URL is stable within a 15-minute issuance bucket, or a bucket as
+long as the TTL when that is shorter, and is valid for at least its TTL and at
+most one bucket longer. A mutable key, such as a library poster or collection
+image replaced in place, must get a new URL soon after its bytes change. A
+capability requested for less than the default, such as an avatar or a chapter
+thumbnail, keeps its extra lifetime within its own TTL. Revisioned responses are
+cacheable for the URL's remaining lifetime and marked immutable; mutable keys
+use private caching and revalidate with the ETag.
+
+S3 installations use direct presigned or public URLs. A revisioned key's
+presigned URL at the default lifetime is signed at the start of its UTC day and
+expires a day plus the TTL later, so every replica mints the same URL. That
+relies on every replica signing with the same static access key, the only
+credential mode the S3 client uses; rotating session credentials would change
+the URL at each rotation and end it when the credential expires. A TTL
+near the SigV4 seven-day limit shortens that window rather than the TTL. The
+Cloudflare WAF rule fixes a token's lifetime from its timestamp, so token
+timestamps are truncated to a quarter of the token TTL instead, which leaves
+each URL valid for at least three quarters of it. Other presigned and token
+URLs are issued fresh on every resolve, and public URLs never change.
 
 Local storage publishes each object with an atomic rename, and direct S3 reads
 see an object as soon as its upload returns, so catalog responses resolve the
@@ -219,7 +416,12 @@ renaming it into place, and syncing the containing directory, so a crash after
 show.
 
 Intro and credits markers that an external process places under
-`markers/<file hash>.json` are read through the same store.
+`markers/<file hash>.json` are read through the same store. The scanner reads
+them for new and changed files only. It lists the prefix at most once a minute
+per node and skips the per-file read while the prefix is empty, so a
+producer's first markers apply to files scanned after the next check. A LIST
+that fails or runs longer than five seconds counts as non-empty, and the
+scanner reads markers for every file until the next check.
 
 Profile avatars live in the operational store, so private S3 keeps existing
 uploads and their presigned delivery even when artwork is local, and a local

@@ -429,6 +429,7 @@ func TestProfileAccessFilterUsesStoredStableProfileRestrictions(t *testing.T) {
 	store := &fakeSignalStore{profile: &userstore.Profile{
 		ID:                         "p1",
 		MaxContentRating:           "PG-13",
+		MaxAdvisoryAge:             10,
 		LibraryRestrictionsEnabled: true,
 		AllowedLibraryIDs:          []int{2, 5},
 	}}
@@ -440,6 +441,9 @@ func TestProfileAccessFilterUsesStoredStableProfileRestrictions(t *testing.T) {
 	}
 	if filter.MaxContentRating != "PG-13" {
 		t.Fatalf("MaxContentRating = %q, want PG-13", filter.MaxContentRating)
+	}
+	if filter.MaxAdvisoryAge != 10 {
+		t.Fatalf("MaxAdvisoryAge = %d, want 10", filter.MaxAdvisoryAge)
 	}
 	if !slices.Equal(filter.AllowedLibraryIDs, []int{2, 5}) {
 		t.Fatalf("AllowedLibraryIDs = %#v, want [2 5]", filter.AllowedLibraryIDs)

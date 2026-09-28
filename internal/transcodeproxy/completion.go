@@ -1,5 +1,6 @@
-// Package transcodeproxy owns the private HTTP completion contract shared by
-// Silo's integrated API proxy and its dedicated proxy node.
+// Package transcodeproxy owns the private HTTP relay to transcode nodes shared
+// by Silo's integrated API proxy and its dedicated proxy node: the node client
+// and the segment completion contract.
 package transcodeproxy
 
 import (

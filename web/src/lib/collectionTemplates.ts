@@ -24,7 +24,8 @@ export type CollectionTemplateSource =
   | "trakt"
   | "mdblist"
   | "tmdb_discover"
-  | "tmdb_collection";
+  | "tmdb_collection"
+  | "tmdb_list";
 
 export type CollectionTemplateMediaKind = "movie" | "tv" | "mixed";
 
@@ -38,6 +39,9 @@ export type CollectionTemplateTMDB = Pick<
 export type CollectionTemplateTrakt = Pick<ImportTraktCollectionRequest, "preset" | "media_type">;
 
 export type CollectionTemplateMDBList = Pick<ImportMDBListCollectionRequest, "url">;
+
+// An empty url is a "bring your own list" template that asks for the list URL.
+export type CollectionTemplateTMDBList = Pick<ImportMDBListCollectionRequest, "url">;
 
 // Discover and collection templates ship as backend-driven blueprints that
 // the admin cannot tweak inline; the form surfaces a read-only summary and
@@ -86,6 +90,7 @@ export interface CollectionTemplate {
   mdblist?: CollectionTemplateMDBList;
   tmdb_collection?: CollectionTemplateTMDBCollection;
   tmdb_discover?: CollectionTemplateTMDBDiscover;
+  tmdb_list?: CollectionTemplateTMDBList;
 }
 
 export interface CollectionTemplateGroup {

@@ -356,18 +356,19 @@ func (s *Postgres) CompleteReplan(ctx context.Context, sessionID, requestID, lea
 	return tx.Commit(ctx)
 }
 
-func (s *Postgres) RecordRouteEvent(ctx context.Context, record playback.RouteEventRecordV3) error {
+func (s *Postgres) RecordRouteEvent(ctx context.Context, record playback.RouteEventRecordV3) (bool, error) {
 	if record.Diagnostics == nil {
 		record.Diagnostics = map[string]string{}
 	}
 	diagnostics, err := json.Marshal(record.Diagnostics)
 	if err != nil {
-		return err
+		return false, err
 	}
 	// A v2 report carries an event id: the partial unique index makes a retry
-	// after a lost 202 a no-op instead of a second row. Legacy v1 reports have
-	// no id and keep their unconditional insert.
-	_, err = s.db.Exec(ctx, `
+	// after a lost 202 a no-op instead of a second row, which RowsAffected
+	// reports as zero. Legacy v1 reports have no id and keep their
+	// unconditional insert.
+	tag, err := s.db.Exec(ctx, `
 		INSERT INTO playback_route_events (
 			playback_attempt_id, session_id, plan_id, plan_attempt_id, plan_attempt_key,
 			event, failure_classification, fallback_reason, output_context_id,
@@ -382,7 +383,10 @@ func (s *Postgres) RecordRouteEvent(ctx context.Context, record playback.RouteEv
 		record.Event, record.FailureClassification, record.FallbackReason, record.OutputContextID,
 		diagnostics, record.UserID, record.ProfileID, record.ClientName, record.ClientVersion,
 		record.ClientBuild, record.ClientChannel, record.ClientModel, record.EventID)
-	return err
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 // Progress and stop sequencing. Both are single-statement compare-and-sets on

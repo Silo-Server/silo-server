@@ -1,8 +1,15 @@
 import type { PlayerSubtitleInfo, PlayerSubtitleTrackSignature, SubtitleMode } from "../types";
-import { canonicalLanguageTag, normalizeLanguageCode } from "./languageNames";
+import { canonicalLanguageTag, normalizeLanguageCode } from "@/lib/languageTags";
 import { isBitmapCodec } from "./subtitleCodecs";
 
 const ORIGINAL_LANGUAGE_SENTINEL = "original";
+// playback.audio_language stores the original-language choice as this
+// private-use tag (the settings contract only holds language tags).
+const ORIGINAL_LANGUAGE_TAG = "x-silo-original";
+
+function isOriginalLanguagePreference(normalized: string): boolean {
+  return normalized === ORIGINAL_LANGUAGE_SENTINEL || normalized === ORIGINAL_LANGUAGE_TAG;
+}
 
 const SOURCE_PRIORITY: Record<string, number> = {
   external: 0,
@@ -27,7 +34,7 @@ function normalize(value: string | undefined | null): string {
 
 function normalizeConcreteLanguage(value: string | undefined | null): string | null {
   const normalized = normalize(value);
-  if (!normalized || normalized === ORIGINAL_LANGUAGE_SENTINEL) {
+  if (!normalized || isOriginalLanguagePreference(normalized)) {
     return null;
   }
   return normalized;
@@ -200,7 +207,7 @@ export function resolveSubtitleAutoSelect(options: SubtitleAutoSelectOptions): n
   const normalizedProfileLanguage = normalize(profileLanguage);
   const effectiveProfileLang =
     normalizeConcreteLanguage(profileLanguage) ??
-    (normalizedProfileLanguage === ORIGINAL_LANGUAGE_SENTINEL
+    (isOriginalLanguagePreference(normalizedProfileLanguage)
       ? preferredSubtitleLang
       : normalizedProfileLanguage === ""
         ? "en"

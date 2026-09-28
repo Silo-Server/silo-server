@@ -6,8 +6,8 @@ github.com/PuerkitoBio/goquery v1.8.0 h1:PJTF7AmFCFKk1N6V6jmKfrNH9tV5pNE6lZMkG0g
 github.com/PuerkitoBio/goquery v1.8.0/go.mod h1:ypIiRMtY7COPGk+I/YbZLbxsxn9g5ejnI2HSMtkjZvI=
 github.com/SherClockHolmes/webpush-go v1.4.0 h1:ocnzNKWN23T9nvHi6IfyrQjkIc0oJWv1B1pULsf9i3s=
 github.com/SherClockHolmes/webpush-go v1.4.0/go.mod h1:XSq8pKX11vNV8MJEMwjrlTkxhAj1zKfxmyhdV7Pd6UA=
-github.com/Silo-Server/silo-plugin-sdk v0.16.1 h1:bctPlzlsr75Z9ARQ86VnYY6UhyQ9YPwgoP+mqSRESPA=
-github.com/Silo-Server/silo-plugin-sdk v0.16.1/go.mod h1:abwsCEKuPAAgeAqpNGbwoaut2eQlC/Kj97u89Vvg9qM=
+github.com/Silo-Server/silo-plugin-sdk v0.17.0 h1:dHA4UbObMVIzAaLQC4clq1bSWuPaim88yptIRR5/f/M=
+github.com/Silo-Server/silo-plugin-sdk v0.17.0/go.mod h1:abwsCEKuPAAgeAqpNGbwoaut2eQlC/Kj97u89Vvg9qM=
 github.com/TwiN/go-color v1.4.1 h1:mqG0P/KBgHKVqmtL5ye7K0/Gr4l6hTksPgTgMk3mUzc=
 github.com/TwiN/go-color v1.4.1/go.mod h1:WcPf/jtiW95WBIsEeY1Lc/b8aaWoiqQpu5cf8WFxu+s=
 github.com/abadojack/whatlanggo v1.0.1 h1:19N6YogDnf71CTHm3Mp2qhYfkRdyvbgwWdd2EPxJRG4=
@@ -280,8 +280,8 @@ github.com/sethvargo/go-retry v0.3.0 h1:EEt31A35QhrcRZtrYFDTBg91cqZVnFL2navjDrah
 github.com/sethvargo/go-retry v0.3.0/go.mod h1:mNX17F0C/HguQMyMyJxcnU471gOZGxCLyYaFyAZraas=
 github.com/sirupsen/logrus v1.9.4 h1:TsZE7l11zFCLZnZ+teH4Umoq5BhEIfIzfRDZ1Uzql2w=
 github.com/sirupsen/logrus v1.9.4/go.mod h1:ftWc9WdOfJ0a92nsE2jF5u5ZwH8Bv2zdeOC42RjbV2g=
-github.com/sony/sonyflake v1.3.0 h1:tiB4Dlp0lnmKp/h6BLXA14P8Qi+LYS9+0QRpcrKHvg4=
-github.com/sony/sonyflake v1.3.0/go.mod h1:LORtCywH/cq10ZbyfhKrHYgAUGH7mOBa76enV9txy/Y=
+github.com/sony/sonyflake/v2 v2.2.0 h1:wSzEoewlWnUtc3SZX/MpT8zsWTuAnjwrprUYfuPl9Jg=
+github.com/sony/sonyflake/v2 v2.2.0/go.mod h1:09EcfmR846JLupbkgVfzp8QtQwJ+Y8e69VVayHdawzg=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UVUgZn+9EI=
 github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=

@@ -62,6 +62,43 @@ func TestPlaybackV2RouteEventIsAcceptedAndIdentified(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/playback/route-events", playbackJSON(t, playbackRouteEventFixture()), nil), TypeAuthenticationRequired)
 }
 
+// TestPlaybackV2RouteEventCarriesTheSiloClientName pins where a route event's
+// client name comes from. The first-party apps name themselves with
+// X-Silo-Client, the header the v2 request metrics read, rather than the
+// declared X-Client-Name, and the first-frame histogram's client label depends
+// on the name reaching the service.
+func TestPlaybackV2RouteEventCarriesTheSiloClientName(t *testing.T) {
+	deps, _ := catalogDeps(t)
+	fake := &fakePlaybackService{}
+	deps.Playback = fake
+	h := newTestHandler(t, deps)
+	for _, tc := range []struct {
+		name       string
+		headers    map[string]string
+		clientName string
+		siloClient string
+	}{
+		{name: "first-party app", headers: map[string]string{"X-Silo-Client": "Silo Android"}, siloClient: "Silo Android"},
+		{name: "declared header", headers: map[string]string{"X-Client-Name": "Third Party"}, clientName: "Third Party"},
+		{name: "both", headers: map[string]string{"X-Client-Name": "Third Party", "X-Silo-Client": "Silo Web"}, clientName: "Third Party", siloClient: "Silo Web"},
+		{name: "nameless", headers: map[string]string{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			headers := viewerHeaders()
+			for k, v := range tc.headers {
+				headers[k] = v
+			}
+			rec := do(t, h, http.MethodPost, Prefix+"/playback/route-events", playbackJSON(t, playbackRouteEventFixture()), headers)
+			if rec.Code != 202 {
+				t.Fatalf("route event: %d %s", rec.Code, rec.Body.String())
+			}
+			if fake.caller.ClientName != tc.clientName || fake.caller.SiloClientName != tc.siloClient {
+				t.Fatalf("caller client = %q, silo client = %q; want %q, %q", fake.caller.ClientName, fake.caller.SiloClientName, tc.clientName, tc.siloClient)
+			}
+		})
+	}
+}
+
 func playbackRouteEventFixtureCases() []fixtureCase {
 	event := map[string]any{"installation_id": playbackTestInstallation, "event_id": playbackTestEvent, "protocol_version": 3, "playback_attempt_id": "attempt-0123456789", "session_id": "11111111-1111-4111-8111-111111111111", "event": "first_frame", "diagnostics": map[string]string{"decoder_name": "synthetic"}}
 	return []fixtureCase{

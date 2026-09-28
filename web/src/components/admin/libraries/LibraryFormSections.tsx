@@ -406,11 +406,7 @@ export function AdvancedFields({
         </SettingCard>
       )}
       {form.settingSupport.introDetection && (
-        <SettingCard
-          htmlFor="intro-detection-switch"
-          title="Detect intro markers"
-          description="Runs background audio analysis for episodes in this library. Embedded intro chapters are used when available."
-        >
+        <SettingCard htmlFor="intro-detection-switch" {...markerDetectionCopy(form.settingSupport)}>
           <Switch
             id="intro-detection-switch"
             checked={form.introDetectionEnabled}
@@ -420,4 +416,30 @@ export function AdvancedFields({
       )}
     </div>
   );
+}
+
+// markerDetectionCopy describes what local marker detection covers in a
+// library: movies get best-effort end credits only, episodes get intros and
+// credits, and mixed libraries hold both.
+function markerDetectionCopy(support: {
+  creditsOnlyDetection: boolean;
+  movieCreditsDetection: boolean;
+}): { title: string; description: string } {
+  if (support.creditsOnlyDetection) {
+    return {
+      title: "Detect credits markers (best effort)",
+      description:
+        "Looks for end credits in movies in this library, from embedded chapters and the picture near the end. Some movies get no credits marker, or one that starts late. Needs Detect credits on in server settings.",
+    };
+  }
+  const episodes =
+    "Runs background audio analysis for episodes in this library. Embedded intro and credits chapters are used when available.";
+  const kinds =
+    "Detect intros and Detect credits in server settings choose which markers it finds.";
+  return {
+    title: "Detect intro and credits markers",
+    description: support.movieCreditsDetection
+      ? `${episodes} Movies get end credits only, on a best-effort basis. ${kinds}`
+      : `${episodes} ${kinds}`,
+  };
 }

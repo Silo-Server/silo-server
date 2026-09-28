@@ -32,7 +32,7 @@ type AuthHandler struct {
 
 type accountPasswordService interface {
 	PasswordChangeAvailable(ctx context.Context, userID int) (bool, error)
-	ChangePassword(ctx context.Context, userID int, currentPassword, newPassword string) error
+	ChangePassword(ctx context.Context, userID int, sessionID, currentPassword, newPassword string) error
 }
 
 // NewAuthHandler creates a new AuthHandler backed by the given auth, JWT,
@@ -146,6 +146,8 @@ type UserView struct {
 	Permissions     []string           `json:"permissions"`
 	DownloadAllowed bool               `json:"download_allowed"`
 	Impersonation   *ImpersonationView `json:"impersonation,omitempty"`
+	// PasswordChangeRequired is v2-only: the frozen v1 body does not carry it.
+	PasswordChangeRequired bool `json:"-"`
 }
 
 // sessionResponse represents a session in JSON responses.
@@ -563,6 +565,8 @@ func buildUserResponse(user *models.User, downloadAllowed bool, impersonatorUser
 		Role:            user.Role,
 		Permissions:     auth.EffectivePermissions(user),
 		DownloadAllowed: downloadAllowed,
+		// An impersonating administrator is not restricted (auth.Service.Refresh).
+		PasswordChangeRequired: user.PasswordChangeRequired && impersonatorUserID == nil,
 	}
 	if impersonatorUserID != nil {
 		resp.Impersonation = &ImpersonationView{

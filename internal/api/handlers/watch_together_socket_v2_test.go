@@ -334,3 +334,36 @@ func TestRoomSocketV2MintValidatesRoomAndCurrentPIN(t *testing.T) {
 		t.Fatal("lost PIN")
 	}
 }
+
+// A browser on a LAN address or IP:port sends the address it loaded the page
+// from, not the configured public URL. The room socket admits that same-host
+// origin and still refuses a foreign one.
+func TestRoomSocketV2AdmitsRequestOriginWithPublicOriginConfigured(t *testing.T) {
+	h, _, _ := roomSocketHandler(t)
+	server := roomSocketServer(t, h)
+	h.SetPublicOrigin("https://public.example.test")
+	ticket := roomSocketSeed(t, h, time.Now().Add(time.Minute), time.Now().Add(time.Minute))
+	dialer := websocket.Dialer{Subprotocols: []string{watchtogether.RoomSocketProtocol, eventsTicketProtocolPrefix + ticket}}
+	endpoint := "ws" + strings.TrimPrefix(server.URL, "http") + "/rooms/room/ws"
+	conn, resp, err := dialer.DialContext(t.Context(), endpoint, http.Header{"Origin": []string{"https://foreign.example.test"}})
+	if conn != nil {
+		_ = conn.Close()
+	}
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	if err == nil || resp == nil || resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("foreign origin: want 403 refusal, got resp=%v err=%v", resp, err)
+	}
+	conn, resp, err = dialer.DialContext(t.Context(), endpoint, http.Header{"Origin": []string{server.URL}})
+	if err != nil {
+		t.Fatalf("request origin refused with a public origin configured: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+	defer func() { _ = resp.Body.Close() }()
+	_ = conn.SetReadDeadline(time.Now().Add(time.Second))
+	_, body, err := conn.ReadMessage()
+	if err != nil || !strings.Contains(string(body), `"type":"snapshot"`) {
+		t.Fatalf("snapshot %s %v", body, err)
+	}
+}

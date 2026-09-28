@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
@@ -46,7 +47,7 @@ func TestCatalogManualCollectionCursorDB(t *testing.T) {
 	// the next bounded membership window rather than declare the source empty.
 	for i := range 204 {
 		id := fmt.Sprintf("%s-%03d", prefix, i)
-		if _, err := pool.Exec(ctx, `INSERT INTO media_items(content_id,type,title,status,genres,content_rating) VALUES($1,'movie',$1,'released','{}',$2)`, id, map[bool]string{true: "R", false: "PG"}[i < 200]); err != nil {
+		if _, err := pool.Exec(ctx, `INSERT INTO media_items(content_id,type,title,status,genres,content_rating,content_rating_age) VALUES($1,'movie',$1,'released','{}',$2,$3)`, id, map[bool]string{true: "R", false: "PG"}[i < 200], map[bool]int{true: 17, false: 8}[i < 200]); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, id, library); err != nil {
@@ -62,7 +63,7 @@ func TestCatalogManualCollectionCursorDB(t *testing.T) {
 	}
 	resolver := NewCatalogResolver(NewBrowseRepository(pool), NewItemRepository(pool))
 	req := CatalogRequest{Source: CatalogSourceLibraryCollection, CollectionID: c.ID, CursorPaging: true, UseSourceOrder: true, Limit: 2}
-	access := AccessFilter{AllowedLibraryIDs: []int{library}, MaxContentRating: "PG"}
+	access := AccessFilter{AllowedLibraryIDs: []int{library}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG"}}
 	page, err := resolver.Resolve(ctx, req, access)
 	if err != nil {
 		t.Fatal(err)
@@ -92,11 +93,11 @@ func TestCatalogManualCollectionCursorDB(t *testing.T) {
 			t.Fatalf("observed page: %+v", observed)
 		}
 		revision := observed.CursorScope.Collection.Revision
-		if _, err := pool.Exec(ctx, `UPDATE media_items SET content_rating='R' WHERE content_id=ANY($1)`, []string{inputs[202].MediaItemID, inputs[203].MediaItemID}); err != nil {
+		if _, err := pool.Exec(ctx, `UPDATE media_items SET content_rating='R', content_rating_age=17 WHERE content_id=ANY($1)`, []string{inputs[202].MediaItemID, inputs[203].MediaItemID}); err != nil {
 			t.Fatal(err)
 		}
 		defer func() {
-			_, _ = pool.Exec(context.Background(), `UPDATE media_items SET content_rating='PG' WHERE content_id=ANY($1)`, []string{inputs[202].MediaItemID, inputs[203].MediaItemID})
+			_, _ = pool.Exec(context.Background(), `UPDATE media_items SET content_rating='PG', content_rating_age=8 WHERE content_id=ANY($1)`, []string{inputs[202].MediaItemID, inputs[203].MediaItemID})
 		}()
 		current, err := repo.CollectionRevision(ctx, c.ID)
 		if err != nil || current != revision {

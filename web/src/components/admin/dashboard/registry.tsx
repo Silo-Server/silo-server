@@ -6,6 +6,7 @@ import type {
 } from "./types";
 import {
   ActiveStreamsStatWidget,
+  AdvisoryCoverageStatWidget,
   EgressNowStatWidget,
   MoviesStatWidget,
   ProfilesActiveStatWidget,
@@ -123,6 +124,18 @@ export const DASHBOARD_WIDGETS: DashboardWidgetDefinition[] = [
     maxRows: 2,
     defaultRows: 1,
     Component: ShowsStatWidget,
+  },
+  {
+    id: "stat-advisory-coverage",
+    title: "Advisory ages",
+    description: "Movies and series with an advisory age, which profile advisory-age limits act on",
+    minSpan: 2,
+    maxSpan: 4,
+    defaultSpan: 2,
+    minRows: 1,
+    maxRows: 2,
+    defaultRows: 1,
+    Component: AdvisoryCoverageStatWidget,
   },
   {
     id: "stat-users",

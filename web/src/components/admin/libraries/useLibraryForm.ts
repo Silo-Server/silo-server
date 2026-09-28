@@ -141,9 +141,12 @@ export function useLibraryForm({
   const [chapterThumbnailsEnabled, setChapterThumbnailsEnabled] = useState(
     library?.chapter_thumbnails_enabled ?? false,
   );
-  const [introDetectionEnabled, setIntroDetectionEnabled] = useState(
-    library?.intro_detection_enabled ?? true,
+  // A new library follows its type's default until the switch is set:
+  // detection is on for series and mixed libraries and off for movies.
+  const [introDetectionChoice, setIntroDetectionEnabled] = useState<boolean | null>(
+    library ? (library.intro_detection_enabled ?? true) : null,
   );
+  const introDetectionEnabled = introDetectionChoice ?? !settingSupport.creditsOnlyDetection;
   const [trailerKinds, setTrailerKinds] = useState<string[]>(
     library?.trailer_kinds ?? [...PROVIDER_TRAILER_KINDS],
   );

@@ -10,7 +10,7 @@ import (
 // folderIDPattern matches patterns like [tmdbid-27205], {tmdb-27205},
 // [imdbid-tt1375666], {imdb-tt1375666}, [tvdbid-81189], {tvdb-81189}, etc.
 // The regex captures the provider prefix and the ID value.
-var folderIDPattern = regexp.MustCompile(`(?i)(?:\((tmdb|tmdbid|imdb|imdbid|tvdb|tvdbid)-([a-z0-9]+)\)|\[(tmdb|tmdbid|imdb|imdbid|tvdb|tvdbid)-([a-z0-9]+)\]|\{(tmdb|tmdbid|imdb|imdbid|tvdb|tvdbid)-([a-z0-9]+)\})`)
+var folderIDPattern = regexp.MustCompile(`(?i)(?:\((tmdb|tmdbid|imdb|imdbid|tvdb|tvdbid)[-=]([a-z0-9]+)\)|\[(tmdb|tmdbid|imdb|imdbid|tvdb|tvdbid)[-=]([a-z0-9]+)\]|\{(tmdb|tmdbid|imdb|imdbid|tvdb|tvdbid)[-=]([a-z0-9]+)\})`)
 var trailingImdbIDPattern = regexp.MustCompile(`(?i)(?:^|\s)(tt\d{7,10})$`)
 
 // bracketedBareImdbPattern matches a bare IMDb id wrapped in brackets without a

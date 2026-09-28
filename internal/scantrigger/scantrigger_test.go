@@ -31,6 +31,39 @@ func (r *fakeFolderRepo) List(context.Context) ([]*models.MediaFolder, error) {
 	return r.folders, nil
 }
 
+func TestResolverThemeFileEvents(t *testing.T) {
+	root := t.TempDir()
+	repo := &fakeFolderRepo{folders: []*models.MediaFolder{{ID: 7, Type: "series", Enabled: true, Paths: []string{root}}}}
+	resolver := NewResolver(repo)
+	for _, name := range []string{"Show/theme.mp3", "Show/theme-music/Opening.FLAC", "theme.mp3"} {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("audio"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		target, err := resolver.Resolve(t.Context(), Request{Path: path})
+		if err != nil || target.Mode != ModeFile || target.Path != path {
+			t.Fatalf("existing %s: target=%+v err=%v", name, target, err)
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+		target, err = resolver.ResolveVanishedPath(t.Context(), path, "autoscan")
+		if err != nil || target.Mode != ModeFile || target.Path != path {
+			t.Fatalf("vanished %s: target=%+v err=%v", name, target, err)
+		}
+	}
+	for _, name := range []string{"Show/music.mp3", "Show/theme-music/nested/music.mp3"} {
+		_, err := resolver.ResolveVanishedPath(t.Context(), filepath.Join(root, name), "autoscan")
+		var requestErr *RequestError
+		if !errors.As(err, &requestErr) || requestErr.Reason != ReasonUnsupportedExtension {
+			t.Fatalf("ordinary audio accepted: %s: %v", name, err)
+		}
+	}
+}
+
 func TestResolverClassifiesLibraryRoot(t *testing.T) {
 	root := t.TempDir()
 	repo := &fakeFolderRepo{folders: []*models.MediaFolder{{

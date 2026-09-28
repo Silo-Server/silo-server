@@ -119,6 +119,7 @@ type CollectionCapabilities struct {
 	Capability
 	Groups                    bool                           `json:"groups" doc:"The acting account supports collection groups"`
 	Imports                   bool                           `json:"imports" doc:"The acting account supports imported collections"`
+	ImportSources             []string                       `json:"import_sources" enum:"mdblist,tmdb,tmdb_list" doc:"Import sources the acting account can create a collection from; empty when imports is false" example:"[\"mdblist\",\"tmdb\",\"tmdb_list\"]"`
 	Artwork                   bool                           `json:"artwork" doc:"The acting account supports collection artwork"`
 	ItemReorder               bool                           `json:"item_reorder" doc:"The acting account supports reordering collection items"`
 	DisplayFilterFields       []string                       `json:"display_filter_fields" doc:"Catalog query fields a display filter may use" example:"[\"type\",\"watched\"]"`
@@ -127,6 +128,27 @@ type CollectionCapabilities struct {
 	CollectionSortPreferences bool                           `json:"collection_sort_preferences" example:"true"`
 	EffectiveCollectionSort   bool                           `json:"effective_collection_sort" example:"true"`
 	SortPreferenceKinds       []string                       `json:"sort_preference_kinds" doc:"collection_kind values the sort-preference operations accept" example:"[\"library\",\"user\",\"watchlist\",\"favorites\"]"`
+}
+
+// importableCollectionSources are the import sources a new collection can be
+// created from. Trakt is absent: existing Trakt collections still sync, but
+// new ones are refused.
+var importableCollectionSources = [...]string{importSourceMDBList, importSourceTMDB, importSourceTMDBList}
+
+// Import source names reported in import_sources.
+const (
+	importSourceMDBList  = "mdblist"
+	importSourceTMDB     = "tmdb"
+	importSourceTMDBList = "tmdb_list"
+)
+
+// collectionImportSources reports importableCollectionSources when imports
+// are supported and an empty list otherwise.
+func collectionImportSources(imports bool) []string {
+	if !imports {
+		return []string{}
+	}
+	return importableCollectionSources[:]
 }
 
 // CollectionDisplayFilterPresets are the preset values of the display filter.
@@ -240,6 +262,17 @@ type TMDBCollectionImportInput struct {
 	Body TMDBCollectionImport
 }
 
+// TMDBListCollectionImport is the importTMDBListCollection body.
+type TMDBListCollectionImport struct {
+	CollectionImportBase
+	URL string `json:"url" minLength:"1" doc:"A public TMDB list page (https://www.themoviedb.org/list/...) or its numeric ID" example:"https://www.themoviedb.org/list/310-my-movie-list"`
+}
+
+// TMDBListCollectionImportInput is the importTMDBListCollection request.
+type TMDBListCollectionImportInput struct {
+	Body TMDBListCollectionImport
+}
+
 // TraktCollectionImport is the importTraktCollection body.
 type TraktCollectionImport struct {
 	CollectionImportBase
@@ -326,6 +359,7 @@ type PersonalCollectionService interface {
 type CollectionImportService interface {
 	ImportMDBList(ctx context.Context, userID int, profileID string, req handlers.UserImportMDBListRequest) (handlers.UserImportView, error)
 	ImportTMDB(ctx context.Context, userID int, profileID string, req handlers.UserImportTMDBRequest) (handlers.UserImportView, error)
+	ImportTMDBList(ctx context.Context, userID int, profileID string, req handlers.UserImportTMDBListRequest) (handlers.UserImportView, error)
 	ImportTrakt(ctx context.Context, userID int, profileID string, req handlers.UserImportTraktRequest) (handlers.UserImportView, error)
 	SearchMDBList(ctx context.Context, query string) (handlers.MDBListDiscoveryView, error)
 	TopMDBList(ctx context.Context) (handlers.MDBListDiscoveryView, error)
@@ -396,6 +430,8 @@ func registerPersonalCollections(reg *Registry) {
 		"Import an MDBList list as a synced collection.")), reg.importMDBListCollection)
 	Register(reg, write(importOp("/collections/import/tmdb", "importTMDBCollection",
 		"Import a TMDB preset as a synced collection.")), reg.importTMDBCollection)
+	Register(reg, write(importOp("/collections/import/tmdb-list", "importTMDBListCollection",
+		"Import a public TMDB list as a synced collection.")), reg.importTMDBListCollection)
 	Register(reg, write(importOp("/collections/import/trakt", "importTraktCollection",
 		"Import a Trakt preset as a synced collection.")), reg.importTraktCollection)
 
@@ -552,6 +588,7 @@ func (reg *Registry) getCollectionCapabilities(ctx context.Context, _ *Capabilit
 	}
 	return &CollectionCapabilitiesOutput{Body: CollectionCapabilities{
 		Groups: features.Groups, Imports: features.Imports, Artwork: features.Artwork, ItemReorder: features.ItemReorder,
+		ImportSources:       collectionImportSources(features.Imports),
 		DisplayFilterFields: NonNil(v.DisplayFilterFields),
 		DisplayFilterPresets: CollectionDisplayFilterPresets{
 			Watched: NonNil(v.DisplayFilterPresets.Watched), Media: NonNil(v.DisplayFilterPresets.Media),
@@ -777,6 +814,26 @@ func (reg *Registry) importTMDBCollection(ctx context.Context, in *TMDBCollectio
 		req.TimeWindow = *in.Body.TimeWindow
 	}
 	view, err := svc.ImportTMDB(ctx, userID, profileFrom(ctx), req)
+	if err != nil {
+		return nil, collectionProblem(err)
+	}
+	return importOutput(view), nil
+}
+
+func (reg *Registry) importTMDBListCollection(ctx context.Context, in *TMDBListCollectionImportInput) (*CollectionImportOutput, error) {
+	svc, p := reg.collectionImports()
+	if p != nil {
+		return nil, p
+	}
+	userID, p := actingUserID(ctx)
+	if p != nil {
+		return nil, p
+	}
+	shared, p := importSharedFields(in.Body.CollectionImportBase)
+	if p != nil {
+		return nil, p
+	}
+	view, err := svc.ImportTMDBList(ctx, userID, profileFrom(ctx), handlers.UserImportTMDBListRequest{UserImportSharedFields: shared, URL: in.Body.URL})
 	if err != nil {
 		return nil, collectionProblem(err)
 	}

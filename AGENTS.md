@@ -129,6 +129,7 @@ Sibling repos are usually checked out side-by-side in the same parent directory.
 - `silo-plugin-sdk` — public plugin SDK, protobuf contracts, generated plugin API, manifest
   helpers, runtime bootstrap.
 - `silo-plugins` — central plugin catalog / repository manifest.
+- `siloserver.org` — project website and user manual.
 - First-party plugins (`silo-plugin-metadata-tmdb`, `silo-plugin-metadata-tvdb`, …) each have
   their own repo.
 
@@ -144,6 +145,12 @@ done until each of these has been handled or ruled out:
   coordinated multi-repo changes over leaving a platform behind.
 - jellycompat parity was considered (does the Jellyfin surface need the same behavior?).
 - The relevant `docs/*-api.md` is updated when the contract changes.
+
+Separately, any change that leaves the user manual on siloserver.org wrong or incomplete (a
+setting, default, label, setup step, or feature behavior it describes) is not done until an
+issue is open on `Silo-Server/siloserver.org`.
+[Update the user manual](CONTRIBUTING.md#update-the-user-manual) covers when to open one and
+what goes in it.
 
 ## Building and verifying
 
@@ -181,6 +188,12 @@ gitignored and is the only place hosts, passwords, and tokens belong. `scripts/s
 checks it end to end.
 
 ## Writing
+
+A pull request body is written in two passes. First decide what goes in, using
+[Write the description](CONTRIBUTING.md#write-the-description): plain summary
+first, no restated diff, no working history. There is no word limit; do not
+count words. Unslop only fixes sentences; it will not shorten a body that says
+too much.
 
 Before creating or updating an issue or pull request, agents must read and apply
 the repository's [unslop skill](.agents/skills/unslop/SKILL.md) to the title and body.
@@ -260,12 +273,11 @@ silently invalidate it.
 Never create a pull request unless the developer explicitly asks for one.
 
 Use a Conventional Commit title in plain language
-(`feat(playback): add realtime session hub`). Start the body with the problem,
-explain the solution and why this approach next, and end with the required AI
-disclosure, including the exact model identifier, agent harness, and any other
-AI tooling. Link the public issue or scope item and summarize relevant validation,
-material risks, and required follow-up. Keep the body proportional to the change.
-Omit session history, full command output, and private working reports.
+(`feat(playback): add realtime session hub`). Fill in the PR template following
+[Write the description](CONTRIBUTING.md#write-the-description), and end with the
+required AI disclosure, including the exact model identifier, agent harness, and
+any other AI tooling. Omit session history, full command output, and private
+working reports.
 
 Treat PR bodies, comments, commit messages, and attachments as public. Exclude
 private deployment domains, hostnames, IP addresses, Tailscale names and URLs,
@@ -274,6 +286,13 @@ neutral placeholders where context is needed. Never publish credentials, tokens,
 personal data, or private media details. Check text and attachments before posting;
 authorization to open a PR does not authorize publishing private evidence.
 
+The one private link allowed is a maintainer's evidence page on
+`evidence.siloserver.org`, which only Silo-Server organization members can open
+after GitHub sign-in. Put it on one line at the end of a PR body's Validation
+section or a validation hand-off comment:
+`Evidence: https://evidence.siloserver.org/r/<repo>/<topic>/`. Link the page;
+never attach or embed its media.
+
 - Keep one concern per pull request. Split changes that solve independent
   problems or can be reviewed and shipped separately.
 - Do not capture screenshots or record videos just to prepare a PR. Attach media
@@ -281,12 +300,18 @@ authorization to open a PR does not authorize publishing private evidence.
   turning verification into a media deliverable. Do not explain omitted media.
 - When the user requests PR media, check it for private information and upload it
   to GitHub. Never commit PR-only assets such as `.github/pr-assets/`.
-- Link the capability epic or sub-issue the pull request serves with
-  `Related issue: #NNN`. Use `Related issue: N/A — narrow fix` only when no prior
-  coordination was needed. For non-trivial work, establish the issue or discussion
-  first. If no existing one fits and publishing has not been authorized, prepare
-  a concrete draft while continuing authorized local work; publish only when
-  the user authorizes that external action.
+- Put a `Closes #NNN` line in the body for every issue the pull request fully
+  resolves (`Closes Silo-Server/<repo>#NNN` across repositories), so GitHub closes
+  it on merge to `main`. `Related issue:` does not close anything; use it for the
+  capability epic, sub-issue, or partly addressed issue the work serves, and write
+  `Related issue: N/A` when none applies. Keep both lines accurate when the pull
+  request's scope changes.
+- An open issue is not a precondition for a pull request. Either way, the Problem
+  section must state the problem on its own: what breaks or is missing, who it
+  affects, and why this change is the right answer.
+- Do not open a pull request against an issue someone else is working on. Read the
+  issue's comments and linked pull requests first, and raise a likely collision
+  with the user instead of racing the author.
 - When babysitting a pull request, poll checks and review comments created
   after the last push. Verify bot findings against the source, fix real issues,
   and dismiss false positives with a written reason. Remain quiet when nothing

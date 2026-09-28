@@ -450,9 +450,10 @@ export function settingsCapabilitiesSupportAtomicShortcuts(
   );
 }
 
-export function useSettingsCapabilities() {
+export function useSettingsCapabilities(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: [...settingsKeys.all, "capabilities"] as const,
+    enabled: options?.enabled ?? true,
     queryFn: async (): Promise<SettingsCapabilities> => {
       const capabilities = await v2("GET /api/v2/settings/contract/capabilities");
       // The server's flag describes the v1 header. Report replay only when

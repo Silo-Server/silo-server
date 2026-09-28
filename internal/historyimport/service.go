@@ -34,6 +34,10 @@ type Service struct {
 	stores     userstore.UserStoreProvider
 	bgContext  context.Context
 
+	// localNetwork decides whether a server address a user supplied may be on
+	// this server's own network. Nil limits those addresses to the internet.
+	localNetwork *LocalNetworkAccess
+
 	// runSemaphore limits concurrent run goroutines to maxConcurrentRuns.
 	runSemaphore   chan struct{}
 	queueWake      chan struct{}
@@ -69,6 +73,14 @@ func NewService(bgContext context.Context, repo *Repository, storeProvider users
 // observers have been configured. Construction must not consume persisted jobs.
 func (s *Service) StartBackgroundWork() {
 	s.backgroundOnce.Do(func() { s.startStaleRunMonitor(); s.startImportQueue() })
+}
+
+// SetLocalNetworkAccess installs the policy for server addresses users supply.
+// Without it, those addresses are limited to the public internet.
+func (s *Service) SetLocalNetworkAccess(access *LocalNetworkAccess) {
+	if s != nil {
+		s.localNetwork = access
+	}
 }
 
 func (s *Service) SetStableIdentityResolver(identity *watchstate.StableIdentityResolver) {
@@ -357,6 +369,8 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 	)
 	s.persistClaimProgress(ctx, claim, summary)
 
+	hiddenSuppressed := 0
+	hiddenWarningAt := -1
 	for i, record := range records {
 		if err := s.repo.validateRunClaim(ctx, claim); err != nil {
 			s.failClaim(ctx, claim, summary, err)
@@ -432,17 +446,22 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 			s.failClaim(ctx, claim, summary, err)
 			return
 		}
-		updated, created, err := s.applyImportedWatch(ctx, run.UserID, run.ProfileID, match.MediaItemID, record)
+		outcome, err := s.applyImportedWatch(ctx, run.UserID, run.ProfileID, match.MediaItemID, record)
 		if err != nil {
 			summary.Warnings = append(summary.Warnings, err.Error())
 		} else {
-			if updated {
+			if outcome.ProgressWritten {
 				summary.ProgressUpdated++
 			} else {
 				summary.Skipped++
 			}
-			if created {
+			if outcome.HistoryCreated {
 				summary.HistoryCreated++
+			}
+			if outcome.HiddenSuppressed {
+				hiddenSuppressed++
+				summary.Warnings, hiddenWarningAt = upsertHiddenHistoryWarning(
+					summary.Warnings, hiddenWarningAt, hiddenSuppressed)
 			}
 		}
 
@@ -487,24 +506,67 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 	}
 }
 
-// applyImportedWatch uses the selected user store's atomic freshness guard.
-// Unknown source timestamps sort before real activity, so replay never
-// replaces progress merely because an import happened later.
-func (s *Service) applyImportedWatch(ctx context.Context, userID int, profileID, itemID string, record Record) (bool, bool, error) {
+// importedWatchOutcome reports what applyImportedWatch did with one record.
+type importedWatchOutcome struct {
+	ProgressWritten bool
+	HistoryCreated  bool
+	// HiddenSuppressed marks a record for an item the profile removed from its
+	// history. The store refuses the write, and every later run refuses it the
+	// same way, so the run has to say so rather than count a plain skip.
+	HiddenSuppressed bool
+}
+
+// applyImportedWatch uses the selected user store's atomic freshness guard, so
+// replay never replaces progress merely because an import happened later. A
+// record the source dated nothing goes through seedUndatedProgress, which cannot
+// overwrite local activity at all.
+func (s *Service) applyImportedWatch(ctx context.Context, userID int, profileID, itemID string, record Record) (importedWatchOutcome, error) {
+	var outcome importedWatchOutcome
 	store, err := s.stores.ForUser(ctx, userID)
 	if err != nil {
-		return false, false, err
+		return outcome, err
 	}
-	updatedAt := record.UpdatedAt
-	if updatedAt.IsZero() {
-		updatedAt = time.Unix(0, 0).UTC()
+	if record.UpdatedAt.IsZero() {
+		outcome.ProgressWritten, outcome.HiddenSuppressed, err = s.seedUndatedProgress(ctx, store, profileID, itemID, record)
+	} else {
+		outcome.ProgressWritten, err = store.SetProgressIfNewer(
+			ctx, profileID, itemID, importedPosition(record), record.DurationSeconds, record.Played, record.UpdatedAt)
 	}
-	updated, err := store.SetProgressIfNewer(ctx, profileID, itemID, importedPosition(record), record.DurationSeconds, record.Played, updatedAt)
+	if err != nil {
+		return outcome, err
+	}
+	outcome.HistoryCreated, err = s.watchState.RecordImportedHistory(
+		ctx, userID, profileID, itemID, record.DurationSeconds, record.Played, record.LastPlayedAt)
+	return outcome, err
+}
+
+// seedUndatedProgress imports a record the source gave no play time for. The
+// write is dated at the epoch so it loses every freshness comparison: one atomic
+// write that seeds an item the profile has no progress for and can never replace
+// local activity, whatever else is writing to the row at the same moment.
+//
+// That date is also what a history removal refuses, because the store rejects any
+// write at or before the removal. A refusal with nothing visible to have lost to
+// is that removal, and it is permanent — the record never changes, so every later
+// run is refused the same way — so the caller reports it rather than counting an
+// ordinary skip. The read only classifies that counter, so a row written
+// concurrently simply counts as the skip it is.
+func (s *Service) seedUndatedProgress(
+	ctx context.Context,
+	store userstore.UserStore,
+	profileID, itemID string,
+	record Record,
+) (written, hiddenSuppressed bool, err error) {
+	written, err = store.SetProgressIfNewer(
+		ctx, profileID, itemID, importedPosition(record), record.DurationSeconds, record.Played, time.Unix(0, 0).UTC())
+	if err != nil || written {
+		return written, false, err
+	}
+	existing, err := store.GetProgress(ctx, profileID, itemID)
 	if err != nil {
 		return false, false, err
 	}
-	created, err := s.watchState.RecordImportedHistory(ctx, userID, profileID, itemID, record.DurationSeconds, record.Played, record.LastPlayedAt)
-	return updated, created, err
+	return false, existing == nil, nil
 }
 
 // Run failure messages written for users; run monitors show them verbatim.
@@ -515,6 +577,9 @@ const (
 )
 
 func userFacingRunError(summary ExecutionSummary, err error) string {
+	if message, refused := ServerAddressMessage(err); refused {
+		return message
+	}
 	if UpstreamHTTPStatus(err) == http.StatusUnauthorized {
 		return RunErrorSourceRejected
 	}
@@ -541,6 +606,21 @@ func (s *Service) ListRunsPage(ctx context.Context, userID int, after *RunKey, l
 		limit = 10
 	}
 	return s.repo.ListRunsPageForUser(ctx, userID, after, limit)
+}
+
+// ListRunsPageForProfile is ListRunsPage limited to runs that write into
+// profileID.
+func (s *Service) ListRunsPageForProfile(ctx context.Context, userID int, profileID string, after *RunKey, limit int) ([]Run, bool, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	return s.repo.ListRunsPageForProfile(ctx, userID, profileID, after, limit)
+}
+
+// UserStore returns the account's profile store, which callers use to decide
+// which of the account's profiles the acting profile may import for.
+func (s *Service) UserStore(ctx context.Context, userID int) (userstore.UserStore, error) {
+	return s.stores.ForUser(ctx, userID)
 }
 
 func (s *Service) ListActiveRuns(ctx context.Context, userID int) ([]Run, error) {

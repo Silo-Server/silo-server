@@ -28,6 +28,20 @@ type HistoryImportService interface {
 	LoginEmbyConnect(context.Context, int, historyimport.LoginConnectInput) (*historyimport.ConnectSessionLoginResult, error)
 }
 
+// profileScopedHistoryImports enforces which of the account's profiles the
+// acting profile may import into and see runs for (#1336): the primary
+// profile or an admin acts for every profile, any other profile only for
+// itself. The v1 run handlers use the same authorization rule.
+type profileScopedHistoryImports interface {
+	ListImportRunsPageAs(context.Context, handlers.HistoryImportActor, *historyimport.RunKey, int) ([]historyimport.Run, bool, error)
+	CreateImportRunAs(context.Context, handlers.HistoryImportActor, historyimport.CreateRunInput) (*historyimport.Run, error)
+	GetImportRunAs(context.Context, handlers.HistoryImportActor, string) (*historyimport.Run, error)
+}
+
+func historyImportActor(ctx context.Context, userID int) handlers.HistoryImportActor {
+	return handlers.HistoryImportActor{UserID: userID, ProfileID: profileFrom(ctx), VerifyProfile: verifyHouseholdProfile(ctx)}
+}
+
 // The history-imports domain: pulling a profile's watch history from an
 // Emby, Jellyfin, or Plex server. Every operation is account level (the
 // target profile is named in the run request), so the class is profile
@@ -337,9 +351,11 @@ func (reg *Registry) listHistoryImportRuns(ctx context.Context, cursors *Cursors
 	}
 	scope := CursorScope{
 		OperationID: opListHistoryImportRuns,
-		Security:    strconv.Itoa(userID),
-		Sort:        "-created_at,-id",
-		Tiebreaker:  "id",
+		// The acting profile is part of the scope: which runs a page holds
+		// depends on it, so a cursor must not carry across profiles.
+		Security:   strconv.Itoa(userID) + ":" + profileFrom(ctx),
+		Sort:       loginSessionCursorSort,
+		Tiebreaker: "id",
 	}
 	var after *historyimport.RunKey
 	if in.Cursor != "" {
@@ -349,7 +365,14 @@ func (reg *Registry) listHistoryImportRuns(ctx context.Context, cursors *Cursors
 		}
 		after = &historyimport.RunKey{CreatedAt: pos.CreatedAt, ID: pos.ID}
 	}
-	runs, hasMore, err := svc.ListImportRunsPage(ctx, userID, after, in.Limit)
+	var runs []historyimport.Run
+	var hasMore bool
+	var err error
+	if scoped, ok := svc.(profileScopedHistoryImports); ok {
+		runs, hasMore, err = scoped.ListImportRunsPageAs(ctx, historyImportActor(ctx, userID), after, in.Limit)
+	} else {
+		runs, hasMore, err = svc.ListImportRunsPage(ctx, userID, after, in.Limit)
+	}
 	if err != nil {
 		return nil, historyImportProblem(err)
 	}
@@ -381,7 +404,13 @@ func (reg *Registry) createHistoryImportRun(ctx context.Context, in *HistoryImpo
 	if p != nil {
 		return nil, p
 	}
-	run, err := svc.CreateImportRun(ctx, userID, input)
+	var run *historyimport.Run
+	var err error
+	if scoped, ok := svc.(profileScopedHistoryImports); ok {
+		run, err = scoped.CreateImportRunAs(ctx, historyImportActor(ctx, userID), input)
+	} else {
+		run, err = svc.CreateImportRun(ctx, userID, input)
+	}
 	if err != nil {
 		return nil, historyImportProblem(err)
 	}
@@ -401,7 +430,13 @@ func (reg *Registry) getHistoryImportRun(ctx context.Context, in *HistoryImportR
 	if p != nil {
 		return nil, p
 	}
-	run, err := svc.GetImportRun(ctx, userID, in.ID)
+	var run *historyimport.Run
+	var err error
+	if scoped, ok := svc.(profileScopedHistoryImports); ok {
+		run, err = scoped.GetImportRunAs(ctx, historyImportActor(ctx, userID), in.ID)
+	} else {
+		run, err = svc.GetImportRun(ctx, userID, in.ID)
+	}
 	if err != nil {
 		return nil, historyImportProblem(err)
 	}
@@ -515,6 +550,11 @@ func (b HistoryImportRunCreate) toInput() (historyimport.CreateRunInput, *Proble
 // since the Silo session is fine; a source server that could not answer is
 // the fail-closed problem with a retry hint; the rest follow the status.
 func historyImportProblem(err error) *Problem {
+	// A server address the outbound guard refused is the member's input to fix.
+	if message, refused := historyimport.ServerAddressMessage(err); refused {
+		return NewProblem(TypeValidationFailed, message).
+			WithErrors(ProblemError{Location: locationBody, Code: codeInvalid, Detail: message})
+	}
 	switch {
 	case errors.Is(err, historyimport.ErrPersonalAdmissionUncertain):
 		return NewProblem(TypeDependencyUnavailable, historyimport.ErrPersonalAdmissionUncertain.Error())
@@ -584,7 +624,10 @@ func historyImportSourceOf(s historyimport.Source) HistoryImportSource {
 	}
 }
 
-func historyImportRunOf(run *historyimport.Run) HistoryImportRun {
+func historyImportRunOf(stored *historyimport.Run) HistoryImportRun {
+	// Stored failures, warnings, and reasons are diagnostics; only their fixed
+	// summaries leave the server.
+	run := historyimport.PublicRun(*stored)
 	samples := make([]HistoryImportUnmatchedSample, 0, len(run.UnmatchedSamples))
 	for _, s := range run.UnmatchedSamples {
 		samples = append(samples, HistoryImportUnmatchedSample{Kind: s.Kind, Title: s.Title, Year: s.Year, Reason: s.Reason})
@@ -622,20 +665,6 @@ func historyImportRunOf(run *historyimport.Run) HistoryImportRun {
 	if run.Status == historyimport.RunStatusCancelled {
 		out.ErrorMessage = ""
 	}
-	switch out.ErrorMessage {
-	case "", historyimport.ErrRunConfigurationChanged.Error(), historyimport.LegacyDispatchUnavailableMessage, historyimport.StaleRunInterruptedMessage, historyimport.ErrPersonalCredentialsUnavailable.Error(),
-		historyimport.RunErrorSourceRejected, historyimport.RunErrorStoppedEarly, historyimport.RunErrorNotCompleted:
-	default:
-		out.ErrorMessage = "The import failed. Review the source configuration before starting a new run."
-	}
-	// Stored warnings and reasons are diagnostics; only their fixed summaries
-	// leave the server.
-	out.Warnings = make([]string, 0, len(run.Warnings))
-	for _, warning := range run.Warnings {
-		out.Warnings = append(out.Warnings, historyimport.PublicWarning(warning))
-	}
-	for i := range out.UnmatchedSamples {
-		out.UnmatchedSamples[i].Reason = historyimport.PublicUnmatchedReason(out.UnmatchedSamples[i].Reason)
-	}
+	out.Warnings = append(make([]string, 0, len(run.Warnings)), run.Warnings...)
 	return out
 }

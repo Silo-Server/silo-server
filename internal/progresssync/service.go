@@ -109,7 +109,7 @@ func (s *Service) repository(ctx context.Context, actor Actor) (*Repository, str
 		if current != digest {
 			return "", nil, ErrResetRequired
 		}
-		visible, err := catalog.FilterAccessibleContentIDsInTransaction(ctx, tx, ids, scope.AllowedLibraryIDs, scope.DisabledLibraryIDs, scope.MaxContentRating)
+		visible, err := catalog.FilterAccessibleContentIDsInTransaction(ctx, tx, ids, scope.AllowedLibraryIDs, scope.DisabledLibraryIDs, scope.MaturityLimits)
 		return current, visible, err
 	})
 	return r, digest, err
@@ -170,7 +170,7 @@ func (s *Service) finishActor(ctx context.Context, actor Actor, digest, generati
 	for _, item := range items {
 		ids = append(ids, item.MediaItemID)
 	}
-	visible, err := catalog.FilterAccessibleContentIDsInTransaction(ctx, tx, ids, current.AllowedLibraryIDs, current.DisabledLibraryIDs, current.MaxContentRating)
+	visible, err := catalog.FilterAccessibleContentIDsInTransaction(ctx, tx, ids, current.AllowedLibraryIDs, current.DisabledLibraryIDs, current.MaturityLimits)
 	if err != nil {
 		return err
 	}

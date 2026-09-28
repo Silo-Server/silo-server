@@ -56,6 +56,7 @@ import { CollectionLibraryPicker } from "@/pages/adminCollectionsShared";
 
 import { isCollectionReadOnly } from "./userCollectionsShared";
 import { formatDate as formatPreferredDate } from "@/lib/datetime";
+import { parseTMDBListID, TMDB_LIST_URL_PLACEHOLDER } from "@/lib/tmdbList";
 
 type ImportedType = Extract<UserCollectionType, "mdblist" | "tmdb" | "trakt">;
 
@@ -154,6 +155,8 @@ export function ImportedCollectionEditor({
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const isMDBList = importedType === "mdblist";
+  const isTMDBList = importedType === "tmdb" && isTMDBListSource(collection);
+  const hasEditableSourceURL = isMDBList || isTMDBList;
   const parsedMaxItems = parseMaxItemsInput(maxItemsInput);
 
   const builderLibraries = useMemo(
@@ -186,7 +189,7 @@ export function ImportedCollectionEditor({
   const trimmedPosterSource = posterSourceUrl.trim();
   const posterDirty = posterFile !== null || trimmedPosterSource !== "";
   const trimmedSourceUrl = sourceUrlInput.trim();
-  const sourceUrlDirty = isMDBList && trimmedSourceUrl !== initialSourceUrl;
+  const sourceUrlDirty = hasEditableSourceURL && trimmedSourceUrl !== initialSourceUrl;
   const maxItemsDirty = parsedMaxItems !== initialMaxItems;
   const descriptionDirty = description !== initialDescription;
   const dirtyParts = [
@@ -206,7 +209,9 @@ export function ImportedCollectionEditor({
   const dirtyCount = dirtyParts.filter(Boolean).length;
   const dirty = dirtyCount > 0;
   const maxItemsInvalid = maxItemsInput.trim() !== "" && parsedMaxItems == null;
-  const sourceUrlInvalid = sourceUrlDirty && trimmedSourceUrl === "";
+  const sourceUrlInvalid =
+    sourceUrlDirty &&
+    (trimmedSourceUrl === "" || (isTMDBList && parseTMDBListID(trimmedSourceUrl) === null));
   const saveBlocked = maxItemsInvalid || sourceUrlInvalid;
 
   function handleSave() {
@@ -420,7 +425,7 @@ export function ImportedCollectionEditor({
           >
             <div className="space-y-2">
               <FieldLabel htmlFor="imported-collection-source-url">
-                {isMDBList ? "Source URL" : `${theme.label} preset`}
+                {hasEditableSourceURL ? "Source URL" : `${theme.label} preset`}
               </FieldLabel>
               {isMDBList ? (
                 <>
@@ -439,6 +444,26 @@ export function ImportedCollectionEditor({
                       The MDBList JSON URL the next sync will pull from. Trailing
                       <code className="bg-muted/40 mx-1 rounded px-1 py-px text-[10px]">/json</code>
                       is added automatically.
+                    </p>
+                  )}
+                </>
+              ) : isTMDBList ? (
+                <>
+                  <Input
+                    id="imported-collection-source-url"
+                    value={sourceUrlInput}
+                    onChange={(event) => setSourceUrlInput(event.target.value)}
+                    placeholder={TMDB_LIST_URL_PLACEHOLDER}
+                    disabled={readOnly}
+                    className="h-11 font-mono text-[0.85rem]"
+                  />
+                  {sourceUrlInvalid ? (
+                    <p className="text-destructive text-xs">
+                      Enter a TMDB list URL such as https://www.themoviedb.org/list/310.
+                    </p>
+                  ) : (
+                    <p className="text-muted-foreground text-xs leading-relaxed">
+                      The public TMDB list the next sync will pull from.
                     </p>
                   )}
                 </>
@@ -850,7 +875,11 @@ function SourceSpecSheet({
         </p>
 
         <div className="mt-4 divide-y divide-[color-mix(in_srgb,var(--border)_45%,transparent)]">
-          <SpecRow icon={Hash} label={`${theme.label} preset`} value={sourcePresetLabel} />
+          <SpecRow
+            icon={Hash}
+            label={isTMDBListSource(collection) ? "TMDB list" : `${theme.label} preset`}
+            value={sourcePresetLabel}
+          />
           {sourceUrl ? (
             <SpecRow
               icon={Link2}
@@ -1136,7 +1165,12 @@ function readableSourceURL(collection: Collection): string | null {
   return null;
 }
 
+function isTMDBListSource(collection: Collection): boolean {
+  return collection.source_config?.mode === "tmdb_list";
+}
+
 function sourcePresetSummary(collection: Collection, fallback: string): string {
+  if (isTMDBListSource(collection)) return "Public list";
   const cfg = collection.source_config;
   if (cfg && typeof cfg === "object") {
     const preset = (cfg as Record<string, unknown>).preset;

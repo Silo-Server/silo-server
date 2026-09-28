@@ -14,6 +14,19 @@ import (
 // SelectAudioTrack.
 const OriginalLanguageSentinel = "original"
 
+// OriginalLanguageTag is the settings-contract spelling of the same choice for
+// playback.audio_language. The contract only stores language tags, so it uses
+// the private-use tag catalog.metadata_language already defines for "each
+// item's original language".
+const OriginalLanguageTag = "x-silo-original"
+
+// IsOriginalLanguagePreference reports whether a stored audio language
+// preference means the media item's original language.
+func IsOriginalLanguagePreference(preference string) bool {
+	preference = strings.TrimSpace(preference)
+	return strings.EqualFold(preference, OriginalLanguageSentinel) || strings.EqualFold(preference, OriginalLanguageTag)
+}
+
 // AudioTrackPreference holds a per-series audio track preference.
 type AudioTrackPreference struct {
 	AudioTrackIndex int

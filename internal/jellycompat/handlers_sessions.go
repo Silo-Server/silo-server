@@ -13,9 +13,23 @@ import (
 
 const compatSessionTranscode = "Transcode"
 
+// Jellyfin RepeatMode and PlaybackOrder values for a Silo session, which has
+// no queue controls.
+const (
+	compatRepeatNone           = "RepeatNone"
+	compatPlaybackOrderDefault = "Default"
+)
+
+// sessionPlayStateDTO is Jellyfin's PlayerStateInfo. CanSeek, IsPaused,
+// IsMuted, RepeatMode and PlaybackOrder are required by jellyfin-sdk-kotlin,
+// which rejects the whole /Sessions list without them.
 type sessionPlayStateDTO struct {
 	PositionTicks       int64  `json:"PositionTicks"`
+	CanSeek             bool   `json:"CanSeek"`
 	IsPaused            bool   `json:"IsPaused"`
+	IsMuted             bool   `json:"IsMuted"`
+	RepeatMode          string `json:"RepeatMode"`
+	PlaybackOrder       string `json:"PlaybackOrder"`
 	PlayMethod          string `json:"PlayMethod,omitempty"`
 	AudioStreamIndex    *int   `json:"AudioStreamIndex,omitempty"`
 	SubtitleStreamIndex *int   `json:"SubtitleStreamIndex,omitempty"`
@@ -29,9 +43,13 @@ type sessionInfoDTO struct {
 	DeviceID              string               `json:"DeviceId,omitempty"`
 	DeviceName            string               `json:"DeviceName,omitempty"`
 	LastActivityDate      string               `json:"LastActivityDate"`
+	LastPlaybackCheckIn   string               `json:"LastPlaybackCheckIn"`
 	IsActive              bool                 `json:"IsActive"`
 	SupportsMediaControl  bool                 `json:"SupportsMediaControl"`
 	SupportsRemoteControl bool                 `json:"SupportsRemoteControl"`
+	HasCustomDeviceName   bool                 `json:"HasCustomDeviceName"`
+	PlayableMediaTypes    []string             `json:"PlayableMediaTypes"`
+	SupportedCommands     []string             `json:"SupportedCommands"`
 	PlayState             *sessionPlayStateDTO `json:"PlayState,omitempty"`
 	NowPlayingItem        *baseItemDTO         `json:"NowPlayingItem,omitempty"`
 }
@@ -77,7 +95,7 @@ func (h *PlaybackHandler) HandleSessions(w http.ResponseWriter, r *http.Request)
 		if play.UpstreamSessionID == "" || q.Get("deviceId") != "" && q.Get("deviceId") != play.ClientDeviceID {
 			continue
 		}
-		dto := sessionInfoDTO{ID: play.ID, UserID: session.PseudoUserID.String(), UserName: session.Username, DeviceID: play.ClientDeviceID, LastActivityDate: play.UpdatedAt.UTC().Format(time.RFC3339Nano), IsActive: true}
+		dto := sessionInfoDTO{ID: play.ID, UserID: session.PseudoUserID.String(), UserName: session.Username, DeviceID: play.ClientDeviceID, LastActivityDate: play.UpdatedAt.UTC().Format(time.RFC3339Nano), IsActive: true, PlayableMediaTypes: []string{}, SupportedCommands: []string{}}
 		activity := play.UpdatedAt
 		if h.sessionMgr != nil {
 			if native, err := h.sessionMgr.GetSession(play.UpstreamSessionID); err == nil && native != nil && native.UserID == session.StreamAppUserID && native.ProfileID == session.ProfileID {
@@ -96,7 +114,7 @@ func (h *PlaybackHandler) HandleSessions(w http.ResponseWriter, r *http.Request)
 				case playback.PlayTranscode:
 					method = compatSessionTranscode
 				}
-				dto.PlayState = &sessionPlayStateDTO{PositionTicks: secondsToTicks(native.Position), IsPaused: native.IsPaused, PlayMethod: method}
+				dto.PlayState = &sessionPlayStateDTO{PositionTicks: secondsToTicks(native.Position), CanSeek: true, IsPaused: native.IsPaused, RepeatMode: compatRepeatNone, PlaybackOrder: compatPlaybackOrderDefault, PlayMethod: method}
 				for _, source := range play.MediaSources {
 					if source.FileID == native.MediaFileID {
 						dto.PlayState.AudioStreamIndex = source.SelectedAudioStreamIndex
@@ -106,6 +124,7 @@ func (h *PlaybackHandler) HandleSessions(w http.ResponseWriter, r *http.Request)
 				}
 			}
 		}
+		dto.LastPlaybackCheckIn = dto.LastActivityDate
 		if filterActivity && time.Since(activity) > time.Duration(activeWithin)*time.Second {
 			continue
 		}

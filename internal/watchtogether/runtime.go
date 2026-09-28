@@ -306,6 +306,7 @@ func (s *Service) publishRoomStateAfterCommit(ctx context.Context, room Room) {
 // Reconcile repairs missed notifications and renews the leases of sockets this
 // process still owns. The same row lock protects expiration and readiness.
 func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
+	s.refreshItemEnd(ctx, roomID)
 	_, err := withRoomOperation(ctx, s, roomID, func(ctx context.Context) (struct{}, error) {
 		s.mu.Lock()
 		pending := make([]pendingDisconnect, 0)
@@ -347,6 +348,14 @@ func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
 			user, profile := live.room.HostUserID, live.room.HostProfileID
 			s.mu.Unlock()
 			return struct{}{}, s.closeRoom(ctx, roomID, user, profile)
+		}
+		// The item has finished: everyone goes back to the lobby with it
+		// staged, as if the host had stopped playback, to pick what's next.
+		if s.itemFinishedLocked(live) {
+			user, profile := live.room.HostUserID, live.room.HostProfileID
+			s.mu.Unlock()
+			_, err := s.stopPlaybackOnce(ctx, roomID, user, profile)
+			return struct{}{}, err
 		}
 		force := s.skipUnreadyMembersLocked(live, s.now())
 		snapshots, commands := s.maybeResumeFromWaitingLocked(ctx, live, force)

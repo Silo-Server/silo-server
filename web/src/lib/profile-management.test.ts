@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import type { Profile } from "@/api/types";
 import { avatarPresetRef } from "@/lib/profile-avatars";
 import {
+  ADVISORY_AGE_OPTIONS,
   applyKidsPreset,
   buildProfileAccessSummary,
+  buildProfileRequestFromDraft,
   buildProfileUpdateFromDraft,
   clearKidsPreset,
   createProfileDraft,
@@ -48,6 +50,7 @@ describe("profile-management", () => {
       ),
     ).toEqual({
       contentRating: "PG max",
+      advisoryAge: "",
       libraries: "2 libraries",
       playbackQuality: "Standard quality",
       text: "PG max · 2 libraries · Standard quality",
@@ -152,5 +155,93 @@ describe("profile-management", () => {
       max_playback_quality: "1080p",
       allowed_library_ids: ["1", "3"],
     });
+  });
+
+  it("carries the advisory-age limit through drafts, requests and the summary", () => {
+    const supported = { advisoryAgeSupported: true };
+    const draft = createProfileDraft(makeProfile({ max_advisory_age: 10 }));
+    expect(draft.maxAdvisoryAge).toBe(10);
+    expect(buildProfileUpdateFromDraft(draft, supported).max_advisory_age).toBe(10);
+    // The editor sends the member on a supporting server, so clearing it reaches it.
+    expect(
+      buildProfileUpdateFromDraft({ ...draft, maxAdvisoryAge: null }, supported).max_advisory_age,
+    ).toBe(null);
+
+    // A create body omits "no limit": the contract admits no null there.
+    expect(
+      buildProfileRequestFromDraft({ ...draft, name: "Kid" }, supported).max_advisory_age,
+    ).toBe(10);
+    expect(
+      "max_advisory_age" in
+        buildProfileRequestFromDraft({ ...draft, maxAdvisoryAge: null }, supported),
+    ).toBe(false);
+
+    // An older server rejects the unknown member, so it is never sent without
+    // the capability, whatever the draft holds.
+    expect("max_advisory_age" in buildProfileUpdateFromDraft(draft)).toBe(false);
+    expect("max_advisory_age" in buildProfileRequestFromDraft(draft)).toBe(false);
+
+    expect(
+      buildProfileAccessSummary(makeProfile({ max_content_rating: "PG", max_advisory_age: 10 }))
+        .text,
+    ).toBe("PG max · Advisory age 10 max · All libraries · Any quality");
+    expect(createProfileDraft(makeProfile()).maxAdvisoryAge).toBeNull();
+  });
+
+  it("carries the require-advisory-age option only alongside a limit", () => {
+    const supported = { advisoryAgeSupported: true, requireAdvisoryAgeSupported: true };
+    const draft = createProfileDraft(
+      makeProfile({ max_advisory_age: 10, require_advisory_age: true }),
+    );
+    expect(draft.requireAdvisoryAge).toBe(true);
+    expect(buildProfileUpdateFromDraft(draft, supported).require_advisory_age).toBe(true);
+    expect(
+      buildProfileRequestFromDraft({ ...draft, name: "Kid" }, supported).require_advisory_age,
+    ).toBe(true);
+
+    // Clearing the limit clears the option with it, so a later limit does not
+    // silently come back strict.
+    expect(
+      buildProfileUpdateFromDraft({ ...draft, maxAdvisoryAge: null }, supported)
+        .require_advisory_age,
+    ).toBe(false);
+    expect(
+      "require_advisory_age" in
+        buildProfileRequestFromDraft({ ...draft, maxAdvisoryAge: null }, supported),
+    ).toBe(false);
+
+    // Never sent to a server that does not report it, even one that has the
+    // limit: it rejects unknown members.
+    const limitOnly = { advisoryAgeSupported: true };
+    expect("require_advisory_age" in buildProfileUpdateFromDraft(draft, limitOnly)).toBe(false);
+    expect("require_advisory_age" in buildProfileRequestFromDraft(draft, limitOnly)).toBe(false);
+
+    expect(
+      buildProfileAccessSummary(
+        makeProfile({ max_content_rating: "PG", max_advisory_age: 10, require_advisory_age: true }),
+      ).text,
+    ).toBe("PG max · Advisory age 10 max, rated titles only · All libraries · Any quality");
+    expect(clearKidsPreset(draft).requireAdvisoryAge).toBe(false);
+  });
+
+  it("clears the advisory-age limit with the other kids restrictions", () => {
+    const draft = createProfileDraft(makeProfile({ is_child: true, max_advisory_age: 8 }));
+    expect(clearKidsPreset(draft).maxAdvisoryAge).toBeNull();
+    // Turning the kids preset on leaves the limit to the manager.
+    expect(
+      applyKidsPreset(createProfileDraft(), {
+        contentRatingTouched: false,
+        libraryAccessTouched: false,
+      }).maxAdvisoryAge,
+    ).toBeNull();
+  });
+
+  it("offers every limit the server accepts", () => {
+    const ages = ADVISORY_AGE_OPTIONS.flatMap((option) =>
+      option.value === null ? [] : [option.value],
+    );
+    expect(ADVISORY_AGE_OPTIONS[0]).toEqual({ value: null, label: "No limit" });
+    // Exactly the server's range, so any stored limit has a matching option.
+    expect(ages).toEqual(Array.from({ length: 21 }, (_, index) => index + 1));
   });
 });

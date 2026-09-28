@@ -36,6 +36,31 @@ func (r *ServerSettingsRepo) Get(ctx context.Context, key string) (string, error
 	return value, nil
 }
 
+// GetMany reads keys in one query, so a batch written by SetMany or
+// UpdateAtomic is seen either whole or not at all. Keys without a row are
+// absent from the map.
+func (r *ServerSettingsRepo) GetMany(ctx context.Context, keys ...string) (map[string]string, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT key, value FROM server_settings WHERE key = ANY($1)`, keys,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("server_settings get many: %w", err)
+	}
+	defer rows.Close()
+	values := make(map[string]string, len(keys))
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return nil, fmt.Errorf("server_settings scan: %w", err)
+		}
+		values[key] = value
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("server_settings iterate: %w", err)
+	}
+	return values, nil
+}
+
 // Set upserts a setting.
 func (r *ServerSettingsRepo) Set(ctx context.Context, key, value string) error {
 	return r.withMutationTransaction(ctx, func(tx pgx.Tx) error {

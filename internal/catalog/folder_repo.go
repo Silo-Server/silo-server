@@ -977,16 +977,6 @@ func collectOrphanIDs(ctx context.Context, tx pgx.Tx, contentIDs []string) ([]st
 	return ids, rows.Err()
 }
 
-// collectImageDirs returns S3 directory prefixes for images belonging to the
-// given content IDs that are not still referenced by other surviving content.
-func collectImageDirs(ctx context.Context, q rowQuerier, contentIDs []string) ([]string, error) {
-	dirs, err := collectRawImageDirs(ctx, q, contentIDs)
-	if err != nil {
-		return nil, err
-	}
-	return filterUnreferencedImageDirs(ctx, q, dirs, contentIDs)
-}
-
 // collectRawImageDirs returns the deduped S3 directory prefixes referenced by
 // the given content IDs (items, their seasons, and their episodes), without
 // filtering out dirs still used by other content.
@@ -1026,38 +1016,85 @@ func collectRawImageDirs(ctx context.Context, q rowQuerier, contentIDs []string)
 	return dirs, nil
 }
 
+// filterUnreferencedImageDirs returns the candidate directories that no
+// surviving row still has artwork under: no poster, backdrop, logo, season
+// poster or episode still outside deletingContentIDs has a path that starts
+// with the directory.
+//
+// The obvious form is a correlated `path LIKE candidate || '%'` per candidate,
+// and that is what this used to run. A pattern built from a column cannot be
+// turned into range quals, so it cost one sequential scan of media_items,
+// seasons and episodes per candidate. Reconcile runs it inside the scan's
+// transaction, and on a large catalog a big delete held that transaction open
+// long enough to block vacuum.
+//
+// This reads each table once instead. Every candidate ends in '/', so "path
+// starts with candidate" holds exactly when the candidate equals the path cut
+// just after one of its own '/' separators. The query cuts each surviving path
+// at the candidate lengths where it has a '/' and looks each cut up among the
+// candidates. Work grows with the number of distinct candidate lengths, which
+// the shape of artwork keys keeps small, not with the number of candidates.
+// Matching is literal, so '%' and '_' in a directory name no longer act as
+// wildcards.
+//
+// The lookup is a jsonb key test rather than a join on purpose. The planner
+// cannot estimate how many cuts end in '/', and with a generic plan (pgx caches
+// statements) and no parallel workers it underestimated that count badly and
+// chose a nested-loop anti join over the cuts, which brought back the
+// per-candidate scaling this replaces. A per-row lookup leaves it no join to get wrong, and
+// the only set that reaches the final anti join is the referenced candidates,
+// which cannot outnumber the candidates.
+//
+// lookup is deliberately not MATERIALIZED. Inlined, its aggregate still runs
+// once per process (the leader and each parallel worker), never per path row;
+// a materialized CTE scan is parallel-restricted and pins the whole per-row
+// lookup to the leader, which measured about 4x slower.
+//
+// Candidates come from imageDeletePrefix, which always ends a directory in '/'.
+// Anything else is reported as referenced rather than guessed at: keeping a
+// directory costs storage, deleting a live one loses artwork.
 func filterUnreferencedImageDirs(ctx context.Context, q rowQuerier, dirs, deletingContentIDs []string) ([]string, error) {
-	if len(dirs) == 0 {
+	candidates := make([]string, 0, len(dirs))
+	for _, dir := range dirs {
+		if strings.HasSuffix(dir, "/") {
+			candidates = append(candidates, dir)
+		}
+	}
+	if len(candidates) == 0 {
 		return nil, nil
+	}
+	// pgx sends a nil slice as NULL, and NOT (x = ANY(NULL)) is NULL, which
+	// would drop every surviving row and report every candidate unreferenced.
+	if deletingContentIDs == nil {
+		deletingContentIDs = []string{}
 	}
 
 	rows, err := q.Query(ctx, `
-		SELECT candidate.dir
-		FROM unnest($1::text[]) AS candidate(dir)
-		WHERE NOT EXISTS (
-			SELECT 1
-			FROM media_items mi
-			WHERE NOT (mi.content_id = ANY($2::text[]))
-			  AND (
-				mi.poster_path LIKE candidate.dir || '%'
-				OR mi.backdrop_path LIKE candidate.dir || '%'
-				OR mi.logo_path LIKE candidate.dir || '%'
-			  )
+		WITH lookup AS (
+			SELECT jsonb_object_agg(dir, true) AS keys, array_agg(DISTINCT length(dir)) AS lens
+			FROM unnest($1::text[]) AS t(dir)
+		), referenced_path AS (
+			SELECT a.path FROM media_items mi
+				CROSS JOIN LATERAL (VALUES (mi.poster_path), (mi.backdrop_path), (mi.logo_path)) AS a(path)
+				WHERE NOT (mi.content_id = ANY($2::text[])) AND a.path <> ''
+			UNION ALL
+			SELECT s.poster_path FROM seasons s
+				WHERE NOT (s.series_id = ANY($2::text[])) AND s.poster_path <> ''
+			UNION ALL
+			SELECT e.still_path FROM episodes e
+				WHERE NOT (e.series_id = ANY($2::text[])) AND e.still_path <> ''
+		), referenced AS (
+			SELECT DISTINCT left(p.path, n) AS dir
+			FROM referenced_path p
+			CROSS JOIN lookup
+			CROSS JOIN LATERAL unnest(lookup.lens) AS n
+			WHERE substr(p.path, n, 1) = '/' AND lookup.keys ? left(p.path, n)
 		)
-		AND NOT EXISTS (
-			SELECT 1
-			FROM seasons s
-			WHERE NOT (s.series_id = ANY($2::text[]))
-			  AND s.poster_path LIKE candidate.dir || '%'
-		)
-		AND NOT EXISTS (
-			SELECT 1
-			FROM episodes e
-			WHERE NOT (e.series_id = ANY($2::text[]))
-			  AND e.still_path LIKE candidate.dir || '%'
-		)
-		ORDER BY candidate.dir
-	`, dirs, deletingContentIDs)
+		SELECT DISTINCT c.dir
+		FROM unnest($1::text[]) AS c(dir)
+		WHERE NOT EXISTS (SELECT 1 FROM referenced r WHERE r.dir = c.dir)
+		ORDER BY c.dir
+	`, candidates, deletingContentIDs)
 	if err != nil {
 		return nil, fmt.Errorf("filtering referenced image dirs: %w", err)
 	}
@@ -1099,6 +1136,25 @@ func (r *FolderRepository) DistinctLibraryPaths(ctx context.Context) ([]string, 
 		paths = append(paths, path)
 	}
 	return paths, rows.Err()
+}
+
+// DistinctTypes returns the media_folders.type value of every library, once
+// each, whether or not the library is enabled.
+func (r *FolderRepository) DistinctTypes(ctx context.Context) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `SELECT DISTINCT type FROM media_folders`)
+	if err != nil {
+		return nil, fmt.Errorf("querying library types: %w", err)
+	}
+	defer rows.Close()
+	var types []string
+	for rows.Next() {
+		var libraryType string
+		if err := rows.Scan(&libraryType); err != nil {
+			return nil, fmt.Errorf("scanning library type: %w", err)
+		}
+		types = append(types, libraryType)
+	}
+	return types, rows.Err()
 }
 
 // UpdateLastScanned sets the last_scanned_at timestamp for the given folder.

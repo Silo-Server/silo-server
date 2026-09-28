@@ -11,6 +11,9 @@ import (
 // TriggerFactory is a function that creates a live Trigger from a TriggerConfig.
 type TriggerFactory func(TriggerConfig) Trigger
 
+// LibraryTypesFunc lists the media_folders.type value of every library.
+type LibraryTypesFunc func(ctx context.Context) ([]string, error)
+
 // TaskManager is the central orchestrator for background tasks.
 type TaskManager struct {
 	tasks          map[string]*taskWorker
@@ -20,6 +23,7 @@ type TaskManager struct {
 	triggerFactory TriggerFactory
 	logger         *slog.Logger
 	observers      []Observer
+	libraryTypes   LibraryTypesFunc
 }
 
 // New creates a new TaskManager.
@@ -44,6 +48,15 @@ func (m *TaskManager) AddObserver(observer Observer) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.observers = append(m.observers, observer)
+}
+
+// SetLibraryTypes installs the lookup ListRelevantTasks uses to omit
+// LibraryScopedTask tasks for library kinds this server does not have. Without
+// it, every non-hidden task is listed.
+func (m *TaskManager) SetLibraryTypes(fn LibraryTypesFunc) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.libraryTypes = fn
 }
 
 // Register adds a task to the manager. Must be called before Start.
@@ -76,6 +89,10 @@ func (m *TaskManager) Start(ctx context.Context) {
 			m.logger.ErrorContext(ctx, "failed to load triggers", "task", key, "error", err)
 			// Keep automatic runs idle on storage failure. The trigger loop
 			// still starts so a later administrator edit can recover the task.
+			configs = nil
+		}
+		if isManualOnly(w.task) {
+			// A schedule saved before the task became manual-only must not run it.
 			configs = nil
 		}
 
@@ -300,18 +317,62 @@ func (m *TaskManager) GetTaskInfo(key string) TaskInfo {
 
 // ListTasks returns info for all registered tasks, optionally including hidden ones.
 func (m *TaskManager) ListTasks(includeHidden bool) []TaskInfo {
+	return m.listTasks(func(w *taskWorker) bool { return includeHidden || !w.task.IsHidden() })
+}
+
+// ListRelevantTasks returns the non-hidden tasks an administrator can act on:
+// it also omits library-scoped tasks that no existing library needs. If the
+// library lookup fails, those tasks are listed.
+func (m *TaskManager) ListRelevantTasks(ctx context.Context) []TaskInfo {
+	m.mu.RLock()
+	lookup := m.libraryTypes
+	m.mu.RUnlock()
+
+	scoped := lookup != nil
+	var libraryTypes []string
+	if scoped {
+		types, err := lookup(ctx)
+		if err != nil {
+			m.logger.WarnContext(ctx, "listing library types for task list", "error", err)
+			scoped = false
+		}
+		libraryTypes = types
+	}
+	return m.listTasks(func(w *taskWorker) bool {
+		return !w.task.IsHidden() && (!scoped || servesAnyLibrary(w.task, libraryTypes))
+	})
+}
+
+func (m *TaskManager) listTasks(include func(*taskWorker) bool) []TaskInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	var infos []TaskInfo
 	for _, w := range m.tasks {
-		if !includeHidden && w.task.IsHidden() {
-			continue
+		if include(w) {
+			infos = append(infos, w.info())
 		}
-		infos = append(infos, w.info())
 	}
 	sort.Slice(infos, func(i, j int) bool { return infos[i].Key < infos[j].Key })
 	return infos
+}
+
+func isManualOnly(task Task) bool {
+	manual, ok := task.(ManualOnlyTask)
+	return ok && manual.ManualOnly()
+}
+
+func servesAnyLibrary(task Task, libraryTypes []string) bool {
+	scopedTask, ok := task.(LibraryScopedTask)
+	if !ok {
+		return true
+	}
+	for _, libraryType := range libraryTypes {
+		if scopedTask.ServesLibrary(libraryType) {
+			return true
+		}
+	}
+	return false
 }
 
 // UpdateTriggers replaces the triggers for a task.
@@ -322,7 +383,7 @@ func (m *TaskManager) UpdateTriggers(key string, triggerConfigs []TriggerConfig)
 	}
 	w.scheduleMu.Lock()
 	defer w.scheduleMu.Unlock()
-	if task, ok := w.task.(ManualOnlyTask); ok && task.ManualOnly() && len(triggerConfigs) > 0 {
+	if isManualOnly(w.task) && len(triggerConfigs) > 0 {
 		return ErrTaskManualOnly
 	}
 
@@ -354,7 +415,7 @@ func (m *TaskManager) UpdateSchedule(ctx context.Context, key string, expected i
 	if err != nil {
 		return Schedule{}, err
 	}
-	if task, ok := w.task.(ManualOnlyTask); ok && task.ManualOnly() && len(configs) > 0 {
+	if isManualOnly(w.task) && len(configs) > 0 {
 		return Schedule{}, ErrTaskManualOnly
 	}
 	repo, ok := m.triggerRepo.(GuardedTriggerRepository)

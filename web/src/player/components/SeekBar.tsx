@@ -15,6 +15,8 @@ interface SeekBarProps {
   /** Fires continuously while a handle is dragged. */
   onRegionEdgeChange?: (kind: MarkerKind, edge: "start" | "end", seconds: number) => void;
   onSeek: (seconds: number) => void;
+  /** Unmodified arrow keys skip by the profile's intervals; Shift+Arrow nudges 5s. */
+  onSkip: { back: () => void; forward: () => void };
 }
 
 /** Region tint per marker kind (normal playback). */
@@ -90,6 +92,7 @@ export function SeekBar({
   activeEditKind = null,
   onRegionEdgeChange,
   onSeek,
+  onSkip,
 }: SeekBarProps) {
   const barRef = useRef<HTMLDivElement>(null);
   const [hoverTime, setHoverTime] = useState<number | null>(null);
@@ -229,6 +232,14 @@ export function SeekBar({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      // Browser and platform shortcuts keep their modifier combinations.
+      if (e.ctrlKey || e.altKey || e.metaKey) return;
+      if (!e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+        e.preventDefault();
+        if (e.key === "ArrowLeft") onSkip.back();
+        else onSkip.forward();
+        return;
+      }
       let newTime: number | null = null;
       switch (e.key) {
         case "ArrowRight":
@@ -249,7 +260,7 @@ export function SeekBar({
       e.preventDefault();
       onSeek(newTime);
     },
-    [duration, displayTime, onSeek],
+    [duration, displayTime, onSeek, onSkip],
   );
 
   // Calculate all buffered ranges as percentages.

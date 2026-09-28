@@ -2,12 +2,42 @@ import type { ApiError } from "./types";
 import type { components } from "./v2/schema";
 import { storage } from "../utils/storage";
 import { randomUUID } from "../lib/uuid";
+import { problemId } from "./v2/problemId";
 
 type ProfileUnverifiedListener = () => void;
 let profileUnverifiedListener: ProfileUnverifiedListener | null = null;
 
 export function onProfileUnverified(listener: ProfileUnverifiedListener | null) {
   profileUnverifiedListener = listener;
+}
+
+type SessionRejectedListener = () => void;
+let sessionRejectedListener: SessionRejectedListener | null = null;
+
+/**
+ * Registers the handler for a signed-in session the server stopped accepting
+ * (the account was disabled or the session revoked): a refresh the server
+ * refused while an access token was in use. The handler ends the session.
+ */
+export function onSessionRejected(listener: SessionRejectedListener | null) {
+  sessionRejectedListener = listener;
+}
+
+/**
+ * Whether a refused refresh means the server will never accept this session
+ * again: 401 `session_expired`, sent for a session that was revoked or expired
+ * or whose account was disabled or deleted. The server also answers its own
+ * failures (a database error, say) with 401 `invalid_token`, so no other
+ * refusal ends a session that is in use.
+ */
+async function isSessionRejection(res: Response): Promise<boolean> {
+  if (res.status !== 401) return false;
+  try {
+    const body = (await res.clone().json()) as { type?: unknown };
+    return typeof body.type === "string" && problemId({ type: body.type }) === "session_expired";
+  } catch {
+    return false;
+  }
 }
 
 let accessToken: string | null = null;
@@ -17,6 +47,12 @@ let pendingRefresh: {
   serverOrigin: string;
   promise: Promise<boolean>;
 } | null = null;
+/**
+ * The boot-time restore of a stored session: the first exchange of the
+ * persisted refresh token for an access token. Requests sent while it is in
+ * flight wait for it instead of going out anonymous and coming back 401.
+ */
+let sessionRestore: Promise<boolean> | null = null;
 
 export function setAccessToken(token: string | null) {
   if (accessToken !== token) authContextVersion += 1;
@@ -281,17 +317,39 @@ async function attemptRefresh(): Promise<boolean> {
   // response from overwriting the new account's access or refresh token.
   const startingAuthContextVersion = authContextVersion;
   const startingServerOrigin = currentServerOrigin();
+  const hadAccessToken = accessToken !== null;
+  let sessionRejected = false;
 
   try {
-    const data = await refreshAccessToken(rt, fetch);
-    if (!data) return false;
+    const data = await refreshAccessToken(rt, async (input, init) => {
+      const res = await fetch(input, init);
+      if (!res.ok) sessionRejected = await isSessionRejection(res);
+      return res;
+    });
     if (
       startingAuthContextVersion !== authContextVersion ||
       startingServerOrigin !== currentServerOrigin()
     ) {
       return false;
     }
-    refreshCurrentAccessToken(data.access_token);
+    if (!data) {
+      // Only a mid-session refusal ends the session here. The boot restore
+      // (no access token yet) clears its own tokens, and a server error or
+      // outage may pass, so neither signs the user out. The refresh token is
+      // shared across tabs: when another tab has already stored a new one,
+      // this refusal is about a session that tab replaced.
+      if (hadAccessToken && sessionRejected && getRefreshToken() === rt) {
+        sessionRejectedListener?.();
+      }
+      return false;
+    }
+    if (accessToken === null) {
+      // Nothing to rotate: this exchange establishes the session (the boot
+      // restore), which changes the client's authority the way a login does.
+      setAccessToken(data.access_token);
+    } else {
+      refreshCurrentAccessToken(data.access_token);
+    }
     setRefreshToken(data.refresh_token);
     return true;
   } catch {
@@ -299,27 +357,21 @@ async function attemptRefresh(): Promise<boolean> {
   }
 }
 
-export async function bootstrapAccessToken(fetchImpl: typeof fetch = fetch): Promise<boolean> {
-  if (accessToken) {
-    return true;
-  }
-
-  const rt = getRefreshToken();
-  if (!rt) {
-    return false;
-  }
-
-  try {
-    const data = await refreshAccessToken(rt, fetchImpl);
-    if (!data) {
-      return false;
-    }
-    setAccessToken(data.access_token);
-    setRefreshToken(data.refresh_token);
-    return true;
-  } catch {
-    return false;
-  }
+/**
+ * Restores the stored session at boot; resolves true once an access token is
+ * available. It runs on the refresh single-flight, so a request that meets a
+ * 401 meanwhile joins this exchange instead of spending the refresh token a
+ * second time.
+ */
+export function bootstrapAccessToken(): Promise<boolean> {
+  if (accessToken) return Promise.resolve(true);
+  if (sessionRestore) return sessionRestore;
+  if (!getRefreshToken()) return Promise.resolve(false);
+  const restore = refreshAuthentication().finally(() => {
+    if (sessionRestore === restore) sessionRestore = null;
+  });
+  sessionRestore = restore;
+  return restore;
 }
 
 /** The tokens the v2 refreshSession operation answers with. */
@@ -414,6 +466,11 @@ export async function fetchWithSession(
     (options.headers as Record<string, string> | undefined) ?? {},
     "Authorization",
   );
+  // Wait out a boot-time session restore so the request carries the restored
+  // token. A request that brings its own authority does not depend on it.
+  if (sessionRestore && !accessToken && !explicitAuthorization && !snapshot) {
+    await sessionRestore;
+  }
   const headers = buildApiHeaders(options);
   const requestProfileId = headers["X-Profile-Id"] ?? null;
   const requestProfileToken = headers["X-Profile-Token"] ?? null;
