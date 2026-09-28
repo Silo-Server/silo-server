@@ -94,8 +94,14 @@ type Session struct {
 	SubtitleBurnIn     bool
 	SegmentDuration    int // HLS segment length in seconds (cadence)
 
-	Position                   float64
-	IsPaused                   bool
+	Position float64
+	IsPaused bool
+	// StopReported marks a session a client reported stopped without an ID
+	// that could end it (#1454). It only hides the session from the live
+	// admin view: pause state and idle grace are untouched, so a stale stop
+	// can't shorten the lifetime of a play that is really paused. The next
+	// progress report clears it.
+	StopReported               bool
 	HasWebSocket               bool
 	HasRealtimeConnection      bool
 	DisableProgressPersistence bool
@@ -940,8 +946,23 @@ func (m *SessionManager) UpdateProgress(sessionID string, position float64, isPa
 
 	s.Position = position
 	s.IsPaused = isPaused
+	s.StopReported = false
 	s.streamRevision++
 	m.touchSessionLocked(s)
+	return nil
+}
+
+// MarkStopReported records that a client reported this session stopped
+// without an ID that could end it. It does not count as activity and leaves
+// pause state alone; see Session.StopReported.
+func (m *SessionManager) MarkStopReported(sessionID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return ErrSessionNotFound
+	}
+	s.StopReported = true
 	return nil
 }
 

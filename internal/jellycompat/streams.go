@@ -2236,16 +2236,6 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			)
 		}
 	}
-	// An ID-less Stopped report can't end the play (see below), but it must not
-	// leave the native session paused either: a paused session keeps the long
-	// paused grace, so the admin view shows the stopped play as paused for up
-	// to 30 minutes. Record it as not paused so idle cleanup applies the
-	// active grace once the client goes quiet. A play that is still running
-	// keeps reporting its real pause state and heartbeats.
-	reportedPaused := req.IsPaused
-	if stop && unidentified {
-		reportedPaused = false
-	}
 	var previousSession *playback.Session
 	progressUpdated := false
 	if positionReported && h.sessionMgr != nil {
@@ -2253,7 +2243,7 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			copy := *current
 			previousSession = &copy
 		}
-		err := h.sessionMgr.UpdateProgress(playSession.UpstreamSessionID, positionSeconds, reportedPaused)
+		err := h.sessionMgr.UpdateProgress(playSession.UpstreamSessionID, positionSeconds, req.IsPaused)
 		progressUpdated = err == nil
 		if errors.Is(err, playback.ErrSessionNotFound) && !stop {
 			// The upstream session was reaped as stale (e.g. the client buffered
@@ -2264,6 +2254,21 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 				playSession = revived
 				progressUpdated = h.sessionMgr.UpdateProgress(playSession.UpstreamSessionID, positionSeconds, req.IsPaused) == nil
 				previousSession = nil
+			}
+		}
+	}
+	// An ID-less Stopped report can't end the play (see below): it may be a
+	// stale stop from an earlier play of the same item. It must not touch the
+	// pause state either, since a paused session's long idle grace is what
+	// keeps a really-paused play alive (#1454 review). Mark it instead, which
+	// only hides it from the live admin view until its next progress report.
+	if stop && unidentified && h.sessionMgr != nil {
+		if marker, ok := h.sessionMgr.(interface{ MarkStopReported(string) error }); ok {
+			if err := marker.MarkStopReported(playSession.UpstreamSessionID); err == nil {
+				h.syncSessionsNow(context.WithoutCancel(r.Context()), "compat_unidentified_stop")
+			} else if !errors.Is(err, playback.ErrSessionNotFound) {
+				slog.WarnContext(r.Context(), "jellycompat could not mark an unidentified stop", "component", "jellycompat",
+					"play_session_id", playSession.ID, "error", err)
 			}
 		}
 	}

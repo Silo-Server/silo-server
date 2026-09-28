@@ -2397,12 +2397,7 @@ func main() {
 	var heartbeatWriter *worker.HeartbeatWriter
 	if needsWorkers && deps.DB != nil {
 		sessionProvider := func() []worker.SessionSync {
-			sessions := sessionMgr.AllSessions()
-			syncs := make([]worker.SessionSync, len(sessions))
-			for i, s := range sessions {
-				syncs[i] = buildLiveSessionSync(s, nodeIdentity)
-			}
-			return syncs
+			return buildLiveSessionSyncs(sessionMgr.AllSessions(), nodeIdentity)
 		}
 		reconciler = worker.NewReconciler(deps.DB, nodeIdentity, sessionProvider)
 		reconciler.EventBus = deps.EventBus
