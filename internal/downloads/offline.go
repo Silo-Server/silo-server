@@ -165,9 +165,23 @@ func (e artworkStatusError) Error() string {
 	return "artwork upstream status " + strconv.Itoa(int(e))
 }
 
+// artworkStallTimeout bounds how long the artwork store may take to send its
+// response headers, and how long any one read of the image may wait for data.
+// Time spent writing to a slow client doesn't count against it.
+var artworkStallTimeout = 30 * time.Second
+
 // artworkClient fetches artwork when the service has no client of its own.
-// Artwork is small, so a store that hasn't answered in this time is failing.
-var artworkClient = &http.Client{Timeout: 30 * time.Second}
+var artworkClient = &http.Client{Transport: artworkTransport()}
+
+func artworkTransport() *http.Transport {
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		base = &http.Transport{}
+	}
+	t := base.Clone()
+	t.ResponseHeaderTimeout = artworkStallTimeout
+	return t
+}
 
 func (s *Service) artworkHTTPClient() *http.Client {
 	if s.httpClient != nil {
@@ -177,7 +191,9 @@ func (s *Service) artworkHTTPClient() *http.Client {
 }
 
 func (s *Service) streamArtwork(ctx context.Context, w http.ResponseWriter, _ *http.Request, imageURL string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
+	fetchCtx, stopFetch := context.WithCancel(ctx)
+	defer stopFetch()
+	req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, imageURL, nil)
 	if err != nil {
 		// Not wrapped: the parse error quotes the presigned URL.
 		return errors.New("building artwork request: invalid artwork URL")
@@ -217,7 +233,8 @@ func (s *Service) streamArtwork(ctx context.Context, w http.ResponseWriter, _ *h
 	}
 	// Artwork is immutable for a stored manifest; let the client cache it once.
 	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
-	store := &storeReader{Reader: resp.Body}
+	store := &storeReader{Reader: resp.Body, stall: time.AfterFunc(artworkStallTimeout, stopFetch)}
+	defer store.stall.Stop()
 	if _, err := io.Copy(w, store); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -232,15 +249,19 @@ func (s *Service) streamArtwork(ctx context.Context, w http.ResponseWriter, _ *h
 	return nil
 }
 
-// storeReader remembers why reading from the artwork store failed, so a
-// failed write to the client isn't blamed on the store.
+// storeReader reads the artwork store's response. It gives up on a read that
+// waits longer than artworkStallTimeout, timing only the reads, and remembers
+// why a read failed, so a failed write to the client isn't blamed on the store.
 type storeReader struct {
 	io.Reader
-	err error
+	stall *time.Timer
+	err   error
 }
 
 func (r *storeReader) Read(p []byte) (int, error) {
+	r.stall.Reset(artworkStallTimeout)
 	n, err := r.Reader.Read(p)
+	r.stall.Stop()
 	if err != nil && err != io.EOF {
 		r.err = err
 	}

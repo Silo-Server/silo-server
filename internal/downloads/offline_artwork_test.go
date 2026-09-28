@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestArtworkUpstreamFailuresAreRetryableAndOmitTheURL(t *testing.T) {
@@ -94,6 +95,11 @@ func TestOfflineDepsKeepTheArtworkTimeout(t *testing.T) {
 	if s.artworkHTTPClient() != artworkClient {
 		t.Fatal("artwork fetches lost their timeout")
 	}
+	// A deadline over the whole exchange would also count time spent writing
+	// to a slow client; only the store's own waits are bounded.
+	if artworkClient.Timeout != 0 || artworkClient.Transport.(*http.Transport).ResponseHeaderTimeout == 0 {
+		t.Fatal("artwork client timeouts changed")
+	}
 }
 
 func TestArtworkStoreStoppingMidBodyIsRetryable(t *testing.T) {
@@ -123,5 +129,54 @@ func TestArtworkClientWriteFailureIsNotAStoreFailure(t *testing.T) {
 	err := s.streamArtwork(context.Background(), brokenClientWriter{httptest.NewRecorder()}, nil, upstream.URL+"/poster.jpg")
 	if err == nil || errors.Is(err, ErrAssetUnavailable) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// shortStall shortens the artwork stall timeout for one test.
+func shortStall(t *testing.T) {
+	prev := artworkStallTimeout
+	artworkStallTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { artworkStallTimeout = prev })
+}
+
+// slowClientWriter takes longer to write each chunk than the stall timeout.
+type slowClientWriter struct{ *httptest.ResponseRecorder }
+
+func (w slowClientWriter) Write(p []byte) (int, error) {
+	time.Sleep(80 * time.Millisecond)
+	return w.ResponseRecorder.Write(p)
+}
+
+func TestArtworkSlowClientDoesNotTimeOutTheStore(t *testing.T) {
+	shortStall(t)
+	image := bytes.Repeat([]byte("x"), 128<<10)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(image)
+	}))
+	defer upstream.Close()
+	s := &Service{} // the production client
+	out := slowClientWriter{httptest.NewRecorder()}
+	if err := s.streamArtwork(context.Background(), out, nil, upstream.URL+"/backdrop.jpg"); err != nil || out.Body.Len() != len(image) {
+		t.Fatalf("err = %v, wrote %d of %d bytes", err, out.Body.Len(), len(image))
+	}
+}
+
+func TestArtworkStoreStallingMidBodyIsRetryable(t *testing.T) {
+	shortStall(t)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "10")
+		_, _ = w.Write([]byte("par"))
+		w.(http.Flusher).Flush()
+		select {
+		case <-r.Context().Done():
+		case <-time.After(5 * time.Second):
+		}
+	}))
+	defer upstream.Close()
+	s := &Service{httpClient: upstream.Client()}
+	start := time.Now()
+	err := s.streamArtwork(context.Background(), httptest.NewRecorder(), nil, upstream.URL+"/poster.jpg")
+	if !errors.Is(err, ErrAssetUnavailable) || time.Since(start) > 2*time.Second {
+		t.Fatalf("err = %v after %v", err, time.Since(start))
 	}
 }
