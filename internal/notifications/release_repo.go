@@ -480,8 +480,9 @@ func (r *ReleaseRepository) ListEventsSince(ctx context.Context, tx pgx.Tx, sinc
 
 // RepeatedFromOtherLibraries returns the IDs of the events whose content a
 // different library had already made available before the event was created:
-// the same episode (by series and episode key) or the same flat item. Must
-// run inside the caller's transaction.
+// the same episode (by series and episode key) or the same flat item. Only
+// libraries that still exist count; availability rows outlive a deleted
+// library. Must run inside the caller's transaction.
 //
 // item_availability.item_id keeps the default collation while
 // release_events.item_id is "C"; comparing in the default collation lets the
@@ -497,15 +498,18 @@ func (r *ReleaseRepository) RepeatedFromOtherLibraries(ctx context.Context, tx p
 			WHEN 'episode' THEN EXISTS (
 				SELECT 1 FROM episode_availability ea
 				WHERE ea.series_id = re.series_id AND ea.episode_key = re.episode_key
-				  AND ea.library_id <> re.library_id AND ea.created_at < re.created_at)
+				  AND ea.library_id <> re.library_id AND ea.created_at < re.created_at
+				  AND EXISTS (SELECT 1 FROM media_folders f WHERE f.id = ea.library_id))
 			WHEN 'movie' THEN EXISTS (
 				SELECT 1 FROM movie_availability ma
 				WHERE ma.item_id = re.item_id
-				  AND ma.library_id <> re.library_id AND ma.created_at < re.created_at)
+				  AND ma.library_id <> re.library_id AND ma.created_at < re.created_at
+				  AND EXISTS (SELECT 1 FROM media_folders f WHERE f.id = ma.library_id))
 			ELSE EXISTS (
 				SELECT 1 FROM item_availability ia
 				WHERE ia.item_id = re.item_id COLLATE "default" AND ia.kind = re.kind
-				  AND ia.library_id <> re.library_id AND ia.created_at < re.created_at)
+				  AND ia.library_id <> re.library_id AND ia.created_at < re.created_at
+				  AND EXISTS (SELECT 1 FROM media_folders f WHERE f.id = ia.library_id))
 		END`, eventIDs)
 	if err != nil {
 		return nil, fmt.Errorf("find release events repeated from other libraries: %w", err)

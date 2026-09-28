@@ -27,15 +27,16 @@ func TestRepeatedFromOtherLibraries(t *testing.T) {
 
 	nonce := time.Now().UnixNano()
 	prefix := fmt.Sprintf("repeat-%d", nonce)
-	hd, uhd := 700000+int(nonce%90000), 700000+int(nonce%90000)+1
+	hd, uhd, deleted := 700000+int(nonce%90000), 700000+int(nonce%90000)+1, 700000+int(nonce%90000)+2
 	series := prefix + "-series"
 	earlier := time.Now().Add(-48 * time.Hour).UTC()
 	later := time.Now().Add(-time.Hour).UTC()
 	t.Cleanup(func() {
 		cleanup := context.Background()
 		for _, table := range []string{"release_events", "episode_availability", "movie_availability", "item_availability"} {
-			_, _ = pool.Exec(cleanup, `DELETE FROM `+table+` WHERE library_id = ANY($1)`, []int{hd, uhd})
+			_, _ = pool.Exec(cleanup, `DELETE FROM `+table+` WHERE library_id = ANY($1)`, []int{hd, uhd, deleted})
 		}
+		_, _ = pool.Exec(cleanup, `DELETE FROM media_folders WHERE id = ANY($1)`, []int{hd, uhd})
 	})
 
 	exec := func(sql string, args ...any) {
@@ -73,12 +74,16 @@ func TestRepeatedFromOtherLibraries(t *testing.T) {
 			prefix+id, library, item, at, ItemDedupeKey(EventKindAudiobook, library, item))
 	}
 
+	exec(`INSERT INTO media_folders (id, type, name) VALUES ($1, 'mixed', $3 || '-hd'), ($2, 'mixed', $3 || '-4k')`, hd, uhd, prefix)
+
 	// E1 reached the HD library first; its 4K copy arrives later.
 	addEpisode(hd, 1, earlier)
 	episodeEvent("-e1-hd", hd, 1, earlier)
 	addEpisode(uhd, 1, later)
 	episodeEvent("-e1-4k", uhd, 1, later)
-	// E2 exists only in the 4K library.
+	// E2's earlier copy was in a library that has since been deleted; its
+	// availability row remains but no longer counts.
+	addEpisode(deleted, 2, earlier)
 	addEpisode(uhd, 2, later)
 	episodeEvent("-e2-4k", uhd, 2, later)
 	// The movie's 4K copy came first; the HD copy is the repeat.
