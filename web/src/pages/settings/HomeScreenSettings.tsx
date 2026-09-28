@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useState, useEffect, useRef } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import {
@@ -56,8 +56,6 @@ import {
   type SettingIdentity,
 } from "@/hooks/queries/settingValues";
 import { SETTING_KEYS } from "@/lib/settingsContract";
-import { sectionKeys } from "@/hooks/queries/keys";
-import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 
 const PROFILE_SCOPE: SettingIdentity = { scope: "profile" };
 const HOME_PREFERENCE_KEYS = [SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS] as const;
@@ -218,7 +216,6 @@ export function sectionSaveErrorMessage(error: unknown): string {
 }
 
 export default function HomeScreenSettings() {
-  const queryClient = useQueryClient();
   const { data: libraries } = useUserLibraries();
   const { data: recipeCatalog } = useQuery({
     queryKey: ["recipe-catalog"],
@@ -250,14 +247,7 @@ export default function HomeScreenSettings() {
   const resetMutation = useResetProfileOverrides();
   const canEditSections = canMutateSectionSettings(settingsQuery, rawOverridesQuery);
   const homePreferences = useEffectiveSettings({ keys: HOME_PREFERENCE_KEYS });
-  // Home's cached rows depend on this preference; refresh them from the
-  // mutation itself so leaving Settings mid-save still refreshes Home.
-  const saveHomePreference = useSetSettingValue({
-    onSaved: () => {
-      queryClient.removeQueries({ queryKey: sectionKeys.homeItemsRoot() });
-      bumpHomeRefreshSignal(queryClient);
-    },
-  });
+  const saveHomePreference = useSetSettingValue();
   const hideWatchedItems =
     homePreferences.data?.[SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS]?.value === true;
   const activeSelectionValue = scopeValue;

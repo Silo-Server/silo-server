@@ -84,6 +84,52 @@ func TestFilterWatchedHomeSectionItemsKeepsUnknownState(t *testing.T) {
 	}
 }
 
+func TestHomeHideWatchedPreservesActiveRewatch(t *testing.T) {
+	for _, itemType := range []string{"movie", "episode", "audiobook"} {
+		t.Run(itemType, func(t *testing.T) {
+			ctx := newAuthorizedPlaybackContext()
+			store := newPlaybackTestStore(t)
+			thresholds := userstore.ProgressThresholds{WatchedPct: 90, MinResumePct: 5}
+			for _, position := range []float64{7000, 900} {
+				if err := store.SetProgress(ctx, "profile-1", "rewatch", position, 7200, thresholds); err != nil {
+					t.Fatal(err)
+				}
+			}
+			progress, err := store.ListProgress(ctx, "profile-1", "in_progress", 20, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(progress) != 1 || !progress[0].Completed || progress[0].PositionSeconds != 900 {
+				t.Fatalf("expected a watched item with an active resume point, got %+v", progress)
+			}
+
+			handler := &SectionHandler{StoreProvider: testUserStoreProvider{store: store}}
+			resolved := []sections.ResolvedSection{
+				{ID: "continue", SectionType: sections.SectionContinueWatching, ItemLimit: 20},
+				{ID: "recent", SectionType: sections.SectionRecentlyAdded, ItemLimit: 20},
+			}
+			if itemType == "audiobook" {
+				resolved[0].Config = json.RawMessage(`{"continue_type":"listening"}`)
+			}
+			item := &models.MediaItem{ContentID: "rewatch", Type: itemType}
+			input := []sections.SectionWithItems{
+				{ResolvedSection: resolved[0], Items: []*models.MediaItem{item}, TotalCount: 1},
+				{ResolvedSection: resolved[1], Items: []*models.MediaItem{item}, TotalCount: 1},
+			}
+			filtered, states := handler.filterWatchedHomeSections(ctx, input, resolved)
+			if !states[item.ContentID].Played {
+				t.Fatal("rewatch should retain the watched flag")
+			}
+			if len(filtered[0].Items) != 1 {
+				t.Fatal("active rewatch disappeared from the resume section")
+			}
+			if len(filtered[1].Items) != 0 {
+				t.Fatal("watched item remained in Recently Added")
+			}
+		})
+	}
+}
+
 func TestFilterWatchedHomeSectionItemsRefillsDisplayLimit(t *testing.T) {
 	items := make([]*models.MediaItem, 0, 23)
 	states := make(map[string]*itemUserStateResponse, 23)
@@ -122,6 +168,7 @@ func TestHomeSectionsForFetchExpandsOnlyFilteredSections(t *testing.T) {
 		{ID: "ordinary", SectionType: sections.SectionRecentlyAdded, ItemLimit: 20},
 		{ID: "featured", SectionType: sections.SectionRecentlyAdded, Featured: true, ItemLimit: 20},
 		{ID: "most-watched", SectionType: sections.SectionMostWatched, ItemLimit: 20},
+		{ID: "continue", SectionType: sections.SectionContinueWatching, ItemLimit: 20},
 		{ID: "large", SectionType: sections.SectionRecentlyAdded, ItemLimit: 250},
 	}
 
@@ -131,7 +178,7 @@ func TestHomeSectionsForFetchExpandsOnlyFilteredSections(t *testing.T) {
 	}
 
 	expanded := homeSectionsForFetch(resolved, true)
-	wantLimits := []int{100, 20, 20, 250}
+	wantLimits := []int{100, 20, 20, 20, 250}
 	for i, want := range wantLimits {
 		if got := expanded[i].ItemLimit; got != want {
 			t.Errorf("section %q fetch limit = %d, want %d", expanded[i].ID, got, want)

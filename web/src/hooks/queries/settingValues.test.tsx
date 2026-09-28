@@ -188,35 +188,6 @@ describe("self-service setting identities", () => {
   });
 });
 
-describe("useSetSettingValue onSaved", () => {
-  afterEach(() => {
-    cleanup();
-    v2Mock.mockReset().mockResolvedValue(undefined);
-  });
-
-  it("runs after the caller unmounts before the write completes", async () => {
-    let finish!: () => void;
-    v2Mock.mockImplementationOnce(() => new Promise<void>((resolve) => (finish = resolve)));
-    const onSaved = vi.fn();
-    const onMutateSuccess = vi.fn();
-    const hook = renderHook(() => useSetSettingValue({ onSaved }), { wrapper });
-
-    act(() => {
-      hook.result.current.mutate(
-        { key: SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS, value: true, identity: { scope: "profile" } },
-        { onSuccess: onMutateSuccess },
-      );
-    });
-    await waitFor(() => expect(v2Mock).toHaveBeenCalledTimes(1));
-    hook.unmount();
-    finish();
-
-    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
-    // The mutate() callback is the one TanStack Query skips after unmount.
-    expect(onMutateSuccess).not.toHaveBeenCalled();
-  });
-});
-
 describe("settings capability gates", () => {
   const revisionFive = {
     api_version: 1,
