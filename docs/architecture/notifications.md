@@ -60,12 +60,11 @@ release event's episode key:
 
   Favorites and watchlist are unaffected. The progression cursor is kept, so
   `next_up` resumes from the right episode once a removal lapses. Every
-  removal or restore queues a recompute. Resuming playback can lift a removal
-  without changing any progress state, so a removal queues a second recompute
-  ten minutes later, the first live progress write of a new watch session
-  (more than ten minutes after the previous one) queues one, and so does
-  every applied timestamped write from imports, watch sync, or offline
-  clients. The second
+  removal or restore queues a recompute, and a second one ten minutes later.
+  Resuming playback can lift a removal without changing any progress state,
+  so a progress write that lands more than ten minutes after the stored
+  row's stamp, by its own stamp or by the clock (a new watch session, or a
+  late import), queues one too. The second
   recompute is held in memory; if the node restarts first, the daily interest
   rebuild repairs the row.
 - Profile-level notification preferences are a hard gate: a reason disabled

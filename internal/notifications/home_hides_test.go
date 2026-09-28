@@ -202,7 +202,7 @@ func TestLoadHomeHides(t *testing.T) {
 // stay a no-op rather than dereference it.
 func TestQueueingWithoutNotificationsIsANoOp(t *testing.T) {
 	var updater *InterestUpdater
-	updater.queueRemoval(1, "p1", "series-a")
+	updater.queueHomeChange(1, "p1", "series-a")
 	updater.QueueItemMutation(1, "p1", "series-a")
 	if tracker := TrackDroppedSeries(nil, nil); tracker.updater != nil {
 		t.Fatal("a tracker without a notification system has an updater")
@@ -232,13 +232,11 @@ func TestInterestTrackingStoreQueuesHomeDismissals(t *testing.T) {
 			t.Errorf("no interest mutation queued for %s; a Home removal would not reach notifications", itemID)
 		}
 	}
-	// A removal is rechecked after the session gap, in case playback resumes
-	// sooner; restoring a card needs no recheck.
-	if _, ok := updater.deferred[interestMutation{userID: 1, profileID: "p1", itemID: "ep-1"}]; !ok {
-		t.Error("dismissing a card deferred no second recompute")
-	}
-	if _, ok := updater.deferred[interestMutation{userID: 1, profileID: "p1", itemID: "ep-2"}]; ok {
-		t.Error("restoring a card deferred a recompute")
+	// Removals and restores are rechecked after the session gap.
+	for _, itemID := range []string{"ep-1", "ep-2"} {
+		if _, ok := updater.deferred[interestMutation{userID: 1, profileID: "p1", itemID: itemID}]; !ok {
+			t.Errorf("no second recompute deferred for %s", itemID)
+		}
 	}
 }
 
@@ -299,34 +297,50 @@ func TestInterestTrackingStoreQueuesNewWatchSessions(t *testing.T) {
 	}
 }
 
-func TestInterestTrackingStoreQueuesEveryAppliedImport(t *testing.T) {
+func TestInterestTrackingStoreQueuesLateImports(t *testing.T) {
 	ctx := context.Background()
 	updater := &InterestUpdater{pending: map[interestMutation]int{}}
 	store := &interestTrackingStore{UserStore: newSQLiteUserStore(t), userID: 1, system: &System{}, updater: updater}
 	mutation := interestMutation{userID: 1, profileID: "p1", itemID: "ep-1"}
+	queued := func() bool {
+		_, ok := updater.pending[mutation]
+		clear(updater.pending)
+		return ok
+	}
 
 	stamp := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
 	if err := store.SetProgressAt(ctx, "p1", "ep-1", 30, 100, false, stamp); err != nil {
 		t.Fatalf("SetProgressAt: %v", err)
 	}
-	clear(updater.pending)
+	queued()
 
-	// A late import a few minutes newer keeps the row in progress but moves
-	// the stamp a Continue Watching dismissal may hold for.
-	applied, err := store.SetProgressIfNewer(ctx, "p1", "ep-1", 35, 100, false, stamp.Add(3*time.Minute))
-	if err != nil || !applied {
+	// A late import stamped a few minutes after the stored row keeps it in
+	// progress but moves the stamp a Continue Watching dismissal may hold for.
+	if applied, err := store.SetProgressIfNewer(ctx, "p1", "ep-1", 35, 100, false, stamp.Add(3*time.Minute)); err != nil || !applied {
 		t.Fatalf("SetProgressIfNewer = %v, %v", applied, err)
 	}
-	if _, ok := updater.pending[mutation]; !ok {
-		t.Fatal("an applied import queued no interest recompute")
+	if !queued() {
+		t.Fatal("a late import queued no interest recompute")
 	}
-	clear(updater.pending)
+
+	// A client that stamps its live ticks stays free within a session.
+	now := time.Now().UTC().Truncate(time.Second)
+	if applied, err := store.SetProgressIfNewer(ctx, "p1", "ep-1", 40, 100, false, now.Add(-20*time.Second)); err != nil || !applied {
+		t.Fatalf("SetProgressIfNewer = %v, %v", applied, err)
+	}
+	queued() // the first tick of this session may queue
+	if applied, err := store.SetProgressIfNewer(ctx, "p1", "ep-1", 45, 100, false, now); err != nil || !applied {
+		t.Fatalf("SetProgressIfNewer = %v, %v", applied, err)
+	}
+	if queued() {
+		t.Fatal("a stamped playback tick within one session queued an interest recompute")
+	}
 
 	// An import older than the stored row is not applied and queues nothing.
-	if applied, err := store.SetProgressIfNewer(ctx, "p1", "ep-1", 20, 100, false, stamp.Add(-time.Hour)); err != nil || applied {
+	if applied, err := store.SetProgressIfNewer(ctx, "p1", "ep-1", 20, 100, false, stamp); err != nil || applied {
 		t.Fatalf("SetProgressIfNewer (older) = %v, %v", applied, err)
 	}
-	if _, ok := updater.pending[mutation]; ok {
+	if queued() {
 		t.Fatal("an import that did not apply queued an interest recompute")
 	}
 }

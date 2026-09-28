@@ -175,12 +175,14 @@ func listHomeDismissals(ctx context.Context, store userstore.UserStore, profileI
 	return dismissals, nil
 }
 
-// queueRemoval queues a recompute for a Home removal now and once more after
-// progressSessionGap. Resuming playback lifts a removal without changing any
-// progress state. A resume more than progressSessionGap after the removal
-// starts a new watch session, which queues its own recompute; the second
-// recompute here catches a quicker one.
-func (u *InterestUpdater) queueRemoval(userID int, profileID, itemID string) {
+// queueHomeChange queues a recompute for a Home removal or restore now and
+// once more after progressSessionGap. Resuming playback lifts a removal
+// without changing any progress state; a resume more than progressSessionGap
+// after the removal starts a new watch session, which queues its own
+// recompute, and the second recompute here catches a quicker one. For a
+// restore it repairs a concurrent recompute, such as the interest rebuild,
+// that read the state from before the restore and wrote after it.
+func (u *InterestUpdater) queueHomeChange(userID int, profileID, itemID string) {
 	u.QueueItemMutation(userID, profileID, itemID)
 	u.QueueItemMutationAfter(userID, profileID, itemID, progressSessionGap)
 }
@@ -208,7 +210,7 @@ func (t *DroppedSeriesTracker) Drop(ctx context.Context, userID int, profileID, 
 	if err := t.DroppedSeriesRepo.Drop(ctx, userID, profileID, seriesID); err != nil {
 		return err
 	}
-	t.updater.queueRemoval(userID, profileID, seriesID)
+	t.updater.queueHomeChange(userID, profileID, seriesID)
 	return nil
 }
 
@@ -217,7 +219,7 @@ func (t *DroppedSeriesTracker) Undrop(ctx context.Context, userID int, profileID
 	if err := t.DroppedSeriesRepo.Undrop(ctx, userID, profileID, seriesID); err != nil {
 		return err
 	}
-	t.updater.QueueItemMutation(userID, profileID, seriesID)
+	t.updater.queueHomeChange(userID, profileID, seriesID)
 	return nil
 }
 
@@ -226,7 +228,7 @@ func (t *DroppedSeriesTracker) Undrop(ctx context.Context, userID int, profileID
 func (t *DroppedSeriesTracker) ImportDrop(ctx context.Context, userID int, profileID, seriesID string, droppedAt time.Time, observed *time.Time) (bool, error) {
 	applied, err := t.DroppedSeriesRepo.ImportDrop(ctx, userID, profileID, seriesID, droppedAt, observed)
 	if err == nil && applied {
-		t.updater.queueRemoval(userID, profileID, seriesID)
+		t.updater.queueHomeChange(userID, profileID, seriesID)
 	}
 	return applied, err
 }
@@ -236,7 +238,7 @@ func (t *DroppedSeriesTracker) ImportDrop(ctx context.Context, userID int, profi
 func (t *DroppedSeriesTracker) DeleteIfUnchanged(ctx context.Context, userID int, profileID, seriesID string, observed time.Time) (bool, error) {
 	removed, err := t.DroppedSeriesRepo.DeleteIfUnchanged(ctx, userID, profileID, seriesID, observed)
 	if err == nil && removed {
-		t.updater.QueueItemMutation(userID, profileID, seriesID)
+		t.updater.queueHomeChange(userID, profileID, seriesID)
 	}
 	return removed, err
 }
