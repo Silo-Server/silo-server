@@ -185,12 +185,10 @@ describe("admin log level and component filters", () => {
     expect(screen.getAllByRole("option", { name: "All levels" })).toHaveLength(1);
     expect(screen.queryByRole("option", { name: /^all$/ })).toBeNull();
     await user.keyboard("{Escape}");
-    await user.click(screen.getByRole("combobox", { name: "Component" }));
-    expect(screen.getAllByRole("option", { name: "All components" })).toHaveLength(1);
-    expect(screen.queryByRole("option", { name: /^all$/ })).toBeNull();
+    expect(screen.getByRole("combobox", { name: "Component" })).toHaveValue("all");
   });
 
-  it("updates stream params when level and component selects change, and clears them with All", async () => {
+  it("updates stream params from the filters and clears them", async () => {
     const user = userEvent.setup();
     mount("/admin/logs");
 
@@ -198,8 +196,12 @@ describe("admin log level and component filters", () => {
     await user.click(await screen.findByRole("option", { name: "error" }));
     await waitFor(() => expect(latestAppStreamParams()).toMatchObject({ level: "error" }));
 
-    await user.click(screen.getByRole("combobox", { name: "Component" }));
-    await user.click(await screen.findByRole("option", { name: "scanner" }));
+    const component = screen.getByRole("combobox", { name: "Component" });
+    const suggestions = (component as HTMLInputElement).list;
+    expect(Array.from(suggestions?.options ?? []).map((option) => option.value)).toContain(
+      "scanner",
+    );
+    await user.type(component, "scanner");
     await waitFor(() =>
       expect(latestAppStreamParams()).toMatchObject({
         level: "error",
@@ -209,12 +211,38 @@ describe("admin log level and component filters", () => {
 
     await user.click(screen.getByRole("combobox", { name: "Level" }));
     await user.click(await screen.findByRole("option", { name: "All levels" }));
-    await user.click(screen.getByRole("combobox", { name: "Component" }));
-    await user.click(await screen.findByRole("option", { name: "All components" }));
+    await user.clear(component);
     await waitFor(() => {
       const params = latestAppStreamParams();
       expect(params?.level).toBeUndefined();
       expect(params?.component).toBeUndefined();
     });
   });
+
+  it.each(["apiv2", "subtitles", "notifications.fanout", "future.worker", "allworkers"])(
+    "filters live and history logs by %s, including after clearing and re-entering it",
+    async (value) => {
+      const user = userEvent.setup();
+      mount("/admin/logs?level=error");
+      const component = screen.getByRole("combobox", { name: "Component" });
+
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await user.type(component, value);
+        expect(component).toHaveValue(value);
+        await waitFor(() =>
+          expect(latestAppStreamParams()).toMatchObject({ level: "error", component: value }),
+        );
+        await user.click(screen.getByRole("button", { name: "Browse log history" }));
+        await waitFor(() =>
+          expect(vi.mocked(v2).mock.calls.at(-1)).toMatchObject([
+            "GET /api/v2/admin/logs/app",
+            { query: { level: "error", component: value, cursor: undefined } },
+          ]),
+        );
+        await user.clear(component);
+        expect(screen.getByRole("button", { name: "Browse log history" })).toBeTruthy();
+        await waitFor(() => expect(latestAppStreamParams()?.component).toBeUndefined());
+      }
+    },
+  );
 });

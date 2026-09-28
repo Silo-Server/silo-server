@@ -76,10 +76,7 @@ function AdminLogsPage() {
   const requestID = searchParams.get("request_id") ?? "";
   const messageQuery = searchParams.get("q") ?? "";
   const level = normalizeLogFilterParam(searchParams.get("level") ?? "");
-  const component = normalizeLogFilterParam(
-    searchParams.get("component") ??
-      (playbackFocused && searchParams.get("playback_session_id") ? "" : ""),
-  );
+  const component = searchParams.get("component") ?? "";
   const method = searchParams.get("method") ?? "";
   const clientIP = searchParams.get("client_ip") ?? "";
   const playbackSessionID = searchParams.get("playback_session_id") ?? "";
@@ -87,10 +84,6 @@ function AdminLogsPage() {
   const levelOptions = useMemo(
     () => withUnknownFilterOption(LOG_LEVEL_FILTER_OPTIONS, level),
     [level],
-  );
-  const componentOptions = useMemo(
-    () => withUnknownFilterOption(LOG_COMPONENT_FILTER_OPTIONS, component),
-    [component],
   );
 
   function updateSearchParam(key: string, value: string) {
@@ -109,7 +102,7 @@ function AdminLogsPage() {
       request_id: requestID || undefined,
       q: messageQuery || undefined,
       level: level || undefined,
-      component: component || undefined,
+      component: normalizeLogFilterParam(component) || undefined,
       playback_session_id: playbackSessionID || undefined,
     }),
     [requestID, messageQuery, level, component, playbackSessionID],
@@ -239,24 +232,19 @@ function AdminLogsPage() {
                 ))}
               </SelectContent>
             </Select>
-            <Select
-              value={component || LOG_FILTER_ALL}
-              onValueChange={(value) =>
-                updateSearchParam("component", value === LOG_FILTER_ALL ? "" : value)
-              }
-            >
-              <SelectTrigger className="w-[200px]" aria-label="Component">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={LOG_FILTER_ALL}>All components</SelectItem>
-                {componentOptions.map((value) => (
-                  <SelectItem key={value} value={value}>
-                    {value}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Input
+              aria-label="Component"
+              placeholder="All components"
+              list="log-component-options"
+              value={component}
+              onChange={(e) => updateSearchParam("component", e.target.value)}
+              className="max-w-xs"
+            />
+            <datalist id="log-component-options">
+              {LOG_COMPONENT_FILTER_OPTIONS.map((value) => (
+                <option key={value} value={value} />
+              ))}
+            </datalist>
             {playbackFocused && playbackSessionID && (
               <button
                 type="button"
