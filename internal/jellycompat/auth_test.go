@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -195,6 +196,72 @@ func TestRequireAdminAPIKey_AcceptsAdminKey(t *testing.T) {
 
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAdminAPIKeyActivityAttribution(t *testing.T) {
+	for _, route := range []struct {
+		method string
+		path   string
+		wrap   func(*AdminAPIKeyAuthenticator) func(http.Handler) http.Handler
+	}{
+		{http.MethodPost, "/Library/Media/Updated", func(a *AdminAPIKeyAuthenticator) func(http.Handler) http.Handler {
+			return a.RequireAdminAPIKey
+		}},
+		{http.MethodGet, "/Library/VirtualFolders", func(a *AdminAPIKeyAuthenticator) func(http.Handler) http.Handler {
+			return RequireSessionOrAdminAPIKey(NewAuthenticator(NewSessionStore(time.Hour, nil), nil), a)
+		}},
+	} {
+		for _, tc := range []struct {
+			name   string
+			token  string
+			role   string
+			scopes []string
+			status int
+		}{
+			{name: "valid", token: "sa_test", role: "admin", status: http.StatusNoContent},
+			{name: "unknown", token: "sa_unknown", role: "admin", status: http.StatusUnauthorized},
+			{name: "non-admin", token: "sa_test", role: "user", status: http.StatusForbidden},
+			{name: "scoped", token: "sa_test", role: "admin", scopes: []string{auth.ScopeAdminUsers}, status: http.StatusForbidden},
+		} {
+			t.Run(route.path+"/"+tc.name, func(t *testing.T) {
+				authn := newAdminAPIKeyAuthForTest(
+					&fakeAPIKeyValidator{key: &models.APIKey{ID: 1, UserID: 2, Key: "sa_test", Scopes: tc.scopes}},
+					&fakeAPIKeyUserLoader{user: &models.User{ID: 2, Role: tc.role, Enabled: true}},
+				)
+				capture := &activityCapture{}
+				called := false
+				handler := activitylog.NewMiddleware(capture, "node-a")(route.wrap(authn)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					called = true
+					if !AdminAPIKeyFromContext(r.Context()) {
+						t.Fatal("missing admin API key marker")
+					}
+					w.WriteHeader(http.StatusNoContent)
+				})))
+				req := httptest.NewRequest(route.method, route.path, nil)
+				req.Header.Set("X-Emby-Token", tc.token)
+				rec := httptest.NewRecorder()
+				handler.ServeHTTP(rec, req)
+				if rec.Code != tc.status {
+					t.Fatalf("status = %d, want %d", rec.Code, tc.status)
+				}
+				accepted := tc.status == http.StatusNoContent
+				if called != accepted {
+					t.Fatalf("handler called = %v, want %v", called, accepted)
+				}
+				entries := capture.take()
+				if len(entries) != 1 || entries[0].StatusCode != tc.status {
+					t.Fatalf("entries = %+v, want one entry with status %d", entries, tc.status)
+				}
+				if accepted {
+					if entries[0].UserID == nil || *entries[0].UserID != 2 {
+						t.Fatalf("UserID = %v, want account 2", entries[0].UserID)
+					}
+				} else if entries[0].UserID != nil {
+					t.Fatalf("rejected request UserID = %v, want nil", entries[0].UserID)
+				}
+			})
+		}
 	}
 }
 
