@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/database/pglock"
 	"github.com/Silo-Server/silo-server/internal/requests"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -47,8 +49,58 @@ type RequestReconciler interface {
 type ReconcileRequestsTask struct {
 	reconciler RequestReconciler
 	limit      int
-	lock       clusterLock
-	writeLock  waitingClusterLock
+	locks      reconcileLocker
+}
+
+// reconcileLockOutcome is how taking the reconcile pass's locks went.
+type reconcileLockOutcome int
+
+const (
+	reconcileLocksHeld reconcileLockOutcome = iota
+	// reconcileLocksBusy: another server's reconcile pass is running.
+	reconcileLocksBusy
+	// reconcileLocksWaitedOut: a download refresh pass held the request target
+	// write lock past requestTargetWriteWait.
+	reconcileLocksWaitedOut
+)
+
+// reconcileLocker takes both of the reconcile pass's locks. release is set
+// only when outcome is reconcileLocksHeld.
+type reconcileLocker interface {
+	Acquire(ctx context.Context) (release func(), outcome reconcileLockOutcome, err error)
+}
+
+// requestReconcileLocks takes requestReconcileAdvisoryLock without waiting,
+// then requestTargetWriteAdvisoryLock with a wait of requestTargetWriteWait,
+// both on one database session. One session leaves the rest of the pool to
+// the pass itself: a session per lock would take both connections of a
+// two-connection pool and leave the pass none.
+type requestReconcileLocks struct {
+	pool *pgxpool.Pool
+}
+
+func (l requestReconcileLocks) Acquire(ctx context.Context) (func(), reconcileLockOutcome, error) {
+	lock, acquired, err := pglock.TryAcquire(ctx, l.pool, requestReconcileAdvisoryLock)
+	if err != nil {
+		return nil, reconcileLocksBusy, fmt.Errorf("acquiring request reconcile lock: %w", err)
+	}
+	if !acquired {
+		return nil, reconcileLocksBusy, nil
+	}
+	release := func() {
+		if err := lock.Release(ctx); err != nil {
+			slog.WarnContext(ctx, "releasing request reconcile locks failed", "component", "taskmanager", "error", err)
+		}
+	}
+	held, err := lock.AcquireAlso(ctx, requestTargetWriteAdvisoryLock, requestTargetWriteWait)
+	if err != nil || !held {
+		release()
+		if err != nil {
+			return nil, reconcileLocksWaitedOut, fmt.Errorf("acquiring request target write lock: %w", err)
+		}
+		return nil, reconcileLocksWaitedOut, nil
+	}
+	return release, reconcileLocksHeld, nil
 }
 
 // NewReconcileRequestsTask constructs the task. A nil pool runs without the
@@ -59,8 +111,7 @@ func NewReconcileRequestsTask(reconciler RequestReconciler, limit int, pool *pgx
 	}
 	t := &ReconcileRequestsTask{reconciler: reconciler, limit: limit}
 	if pool != nil {
-		t.lock = advisoryClusterLock{pool: pool, key: requestReconcileAdvisoryLock, name: "request reconcile"}
-		t.writeLock = advisoryClusterLock{pool: pool, key: requestTargetWriteAdvisoryLock, name: "request target writes", wait: requestTargetWriteWait}
+		t.locks = requestReconcileLocks{pool: pool}
 	}
 	return t
 }
@@ -87,23 +138,16 @@ func (t *ReconcileRequestsTask) Execute(ctx context.Context, progress taskmanage
 		progress.Report(100, "Request reconciliation unavailable")
 		return nil
 	}
-	if t.lock != nil {
-		release, acquired, err := t.lock.TryAcquire(ctx)
+	if t.locks != nil {
+		release, outcome, err := t.locks.Acquire(ctx)
 		if err != nil {
-			return fmt.Errorf("acquiring request reconcile lock: %w", err)
+			return err
 		}
-		if !acquired {
+		switch outcome {
+		case reconcileLocksBusy:
 			progress.Report(100, "Another server is reconciling media requests")
 			return nil
-		}
-		defer release()
-	}
-	if t.writeLock != nil {
-		release, acquired, err := t.writeLock.Acquire(ctx)
-		if err != nil {
-			return fmt.Errorf("acquiring request target write lock: %w", err)
-		}
-		if !acquired {
+		case reconcileLocksWaitedOut:
 			return fmt.Errorf("request download refresh held the request target write lock for over %s", requestTargetWriteWait)
 		}
 		defer release()

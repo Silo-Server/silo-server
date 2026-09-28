@@ -121,7 +121,13 @@ func (r *Request) Download() *DownloadProgress {
 	var out *DownloadProgress
 	sizeKnown := true
 	for _, t := range r.Targets {
-		if t.Download == nil || (t.Status != StatusQueued && t.Status != StatusDownloading) {
+		if t.Status != StatusQueued && t.Status != StatusDownloading {
+			continue
+		}
+		if t.Download == nil {
+			// A live target reporting nothing yet still has a size to come; a
+			// percentage without it would cover only part of the request.
+			sizeKnown = false
 			continue
 		}
 		d := *t.Download

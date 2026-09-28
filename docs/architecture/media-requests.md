@@ -368,9 +368,10 @@ downloading target has progress.
 Two advisory locks keep the passes apart. The reconcile lock lets one server
 run each reconcile pass; the others skip. The request target write lock keeps
 the two passes from writing the same target at once. A reconcile pass takes it
-after its own lock and waits up to two minutes for a refresh pass that holds
-it, so a refresh never makes a reconcile pass skip; a wait that runs out fails
-the pass. A refresh pass only tries the write lock, so it runs on one server at
+after its own lock, on the same database session so the pass keeps the rest of
+the connection pool for its own work, and waits up to two minutes for a
+refresh pass that holds it, so a refresh never makes a reconcile pass skip; a
+wait that runs out fails the pass. A refresh pass only tries the write lock, so it runs on one server at
 a time and skips while a reconcile pass runs anywhere in the cluster. A refresh
 pass also stops after 90 seconds, cutting the plugin call in flight and leaving
 the requests it has not reached for the next pass, so it always ends inside the
@@ -437,7 +438,8 @@ and on the title detail's request state. The request's figure combines its live
 targets (1080p and 4K together): bytes and downloads summed, the phase by the
 order above, the latest estimate, and the oldest report's time, so a client
 that hides figures older than about ten minutes hides a partly stale one too.
-Its size is unknown while any target's is. `percent` is
+Its size is unknown while any live target's is, including a live target that
+has reported no progress yet. `percent` is
 `floor((total - left) * 100 / total)`, and the byte counts and percent are
 absent while the size is unknown. Only the title detail
 (`GET /api/v2/requests/detail/{media_type}/{tmdb_id}`) fills the request

@@ -92,6 +92,25 @@ func TestRequestDownloadWithAnUnknownSizeHasNoTotal(t *testing.T) {
 	}
 }
 
+// A live target that reports no progress yet (a 4K copy still waiting for a
+// release, say) leaves the request's size unknown, so the request shows no
+// percentage for its 1080p copy alone.
+func TestRequestDownloadWithASilentLiveTargetHasNoTotal(t *testing.T) {
+	req := Request{Targets: []Target{
+		{Quality: Quality1080p, Status: StatusDownloading, Download: &DownloadProgress{Phase: DownloadPhaseDownloading, BytesTotal: 4000, BytesLeft: 400, Downloads: 1}},
+		{Quality: Quality2160p, Status: StatusQueued},
+	}}
+	got := req.Download()
+	if got == nil || got.Phase != DownloadPhaseDownloading || got.BytesTotal != 0 || got.BytesLeft != 0 || got.Downloads != 1 {
+		t.Fatalf("aggregate = %+v, want downloading with no total while the 4K copy reports nothing", got)
+	}
+	// A finished target is not live and does not hide the total.
+	req.Targets[1].Status = StatusCompleted
+	if got := req.Download(); got == nil || got.BytesTotal != 4000 || got.BytesLeft != 400 {
+		t.Fatalf("aggregate = %+v, want the 1080p figures once the 4K copy is done", got)
+	}
+}
+
 func TestRequestDownloadIgnoresFinishedTargetsAndTargetsWithoutProgress(t *testing.T) {
 	stale := &DownloadProgress{Phase: DownloadPhaseDownloading, BytesTotal: 100}
 	req := Request{Targets: []Target{

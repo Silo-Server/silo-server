@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -34,12 +33,6 @@ type clusterLock interface {
 	TryAcquire(ctx context.Context) (release func(), acquired bool, err error)
 }
 
-// waitingClusterLock takes a lock shared by every server, waiting a bounded
-// time for the server holding it. acquired is false when the wait runs out.
-type waitingClusterLock interface {
-	Acquire(ctx context.Context) (release func(), acquired bool, err error)
-}
-
 // fullMetadataRefreshAdvisoryLock spells "SILOFULR".
 const fullMetadataRefreshAdvisoryLock int64 = 0x53494C4F46554C52
 
@@ -48,8 +41,6 @@ type advisoryClusterLock struct {
 	key  int64
 	// name labels the guarded work in the release-failure log.
 	name string
-	// wait bounds Acquire's wait; TryAcquire never waits.
-	wait time.Duration
 }
 
 func (l advisoryClusterLock) TryAcquire(ctx context.Context) (func(), bool, error) {
@@ -57,23 +48,11 @@ func (l advisoryClusterLock) TryAcquire(ctx context.Context) (func(), bool, erro
 	if err != nil || !acquired {
 		return nil, false, err
 	}
-	return l.releaser(ctx, lock), true, nil
-}
-
-func (l advisoryClusterLock) Acquire(ctx context.Context) (func(), bool, error) {
-	lock, acquired, err := pglock.Acquire(ctx, l.pool, l.key, l.wait)
-	if err != nil || !acquired {
-		return nil, false, err
-	}
-	return l.releaser(ctx, lock), true, nil
-}
-
-func (l advisoryClusterLock) releaser(ctx context.Context, lock *pglock.Lock) func() {
 	return func() {
 		if err := lock.Release(ctx); err != nil {
 			slog.WarnContext(ctx, "releasing cluster task advisory lock failed", "component", "taskmanager", "work", l.name, "error", err)
 		}
-	}
+	}, true, nil
 }
 
 // RefreshAllLibraryMetadataTask re-fetches provider metadata for every item in

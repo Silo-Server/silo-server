@@ -57,20 +57,20 @@ func (s *reconcilerStub) ReconcileRequests(ctx context.Context, _ int) (requests
 	return requests.ReconcileResult{}, nil
 }
 
-// fakeWaitingLock stands in for a lock taken with a bounded wait.
-type fakeWaitingLock struct {
-	acquired bool
+// fakeReconcileLocks stands in for the reconcile pass's two locks.
+type fakeReconcileLocks struct {
+	outcome  reconcileLockOutcome
 	err      error
-	waits    int
+	takes    int
 	released int
 }
 
-func (f *fakeWaitingLock) Acquire(context.Context) (func(), bool, error) {
-	f.waits++
-	if f.err != nil || !f.acquired {
-		return nil, false, f.err
+func (f *fakeReconcileLocks) Acquire(context.Context) (func(), reconcileLockOutcome, error) {
+	f.takes++
+	if f.err != nil || f.outcome != reconcileLocksHeld {
+		return nil, f.outcome, f.err
 	}
-	return func() { f.released++ }, true, nil
+	return func() { f.released++ }, reconcileLocksHeld, nil
 }
 
 func TestRefreshRequestDownloadsTaskRunsUnderTheLock(t *testing.T) {
@@ -134,9 +134,8 @@ func TestRefreshRequestDownloadsTaskShouldRun(t *testing.T) {
 	}
 }
 
-// Reconcile keeps its own lock as the one-pass-at-a-time guard and waits for
-// the target write lock; the refresh tries only the write lock. The pool never
-// connects here.
+// The refresh tries only the target write lock; reconcile takes its own lock
+// and the write lock together on one session. The pool never connects here.
 func TestRequestTaskLockKeys(t *testing.T) {
 	pool, err := pgxpool.New(context.Background(), "postgres://silo@127.0.0.1:1/silo?sslmode=disable")
 	if err != nil {
@@ -144,17 +143,11 @@ func TestRequestTaskLockKeys(t *testing.T) {
 	}
 	t.Cleanup(pool.Close)
 	refresh, _ := NewRefreshRequestDownloadsTask(&downloadRefresherStub{}, 0, pool).lock.(advisoryClusterLock)
-	reconcileTask := NewReconcileRequestsTask(nil, 0, pool)
-	reconcile, _ := reconcileTask.lock.(advisoryClusterLock)
-	writes, _ := reconcileTask.writeLock.(advisoryClusterLock)
 	if refresh.key != requestTargetWriteAdvisoryLock {
 		t.Fatalf("refresh lock key = %#x, want the target write lock %#x", refresh.key, requestTargetWriteAdvisoryLock)
 	}
-	if reconcile.key != requestReconcileAdvisoryLock {
-		t.Fatalf("reconcile lock key = %#x, want %#x", reconcile.key, requestReconcileAdvisoryLock)
-	}
-	if writes.key != requestTargetWriteAdvisoryLock || writes.wait != requestTargetWriteWait {
-		t.Fatalf("reconcile write lock = %#x waiting %s, want %#x waiting %s", writes.key, writes.wait, requestTargetWriteAdvisoryLock, requestTargetWriteWait)
+	if locks, ok := NewReconcileRequestsTask(nil, 0, pool).locks.(requestReconcileLocks); !ok || locks.pool != pool {
+		t.Fatalf("reconcile locks = %#v, want requestReconcileLocks on the pool", locks)
 	}
 }
 
@@ -169,33 +162,30 @@ func TestRequestDownloadRefreshBudgetEndsInsideTheReconcileWait(t *testing.T) {
 	}
 }
 
-func TestReconcileRequestsTaskWaitsForTheWriteLock(t *testing.T) {
+func TestReconcileRequestsTaskRunsUnderItsLocks(t *testing.T) {
 	reconciler := &reconcilerStub{}
 	task := NewReconcileRequestsTask(reconciler, 0, nil)
-	lock := &fakeClusterLock{acquired: true}
-	writes := &fakeWaitingLock{acquired: true}
-	task.lock, task.writeLock = lock, writes
+	locks := &fakeReconcileLocks{outcome: reconcileLocksHeld}
+	task.locks = locks
 
 	if err := task.Execute(context.Background(), &bulkEnrichmentTaskProgress{}); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if reconciler.runs.Load() != 1 || writes.waits != 1 || writes.released != 1 || lock.released != 1 {
-		t.Fatalf("runs = %d, write lock waits = %d and releases = %d, reconcile lock releases = %d; want 1 each",
-			reconciler.runs.Load(), writes.waits, writes.released, lock.released)
+	if reconciler.runs.Load() != 1 || locks.takes != 1 || locks.released != 1 {
+		t.Fatalf("runs = %d, lock takes = %d, releases = %d; want 1 each", reconciler.runs.Load(), locks.takes, locks.released)
 	}
 }
 
 func TestReconcileRequestsTaskSkipsWhileAnotherReconcileRuns(t *testing.T) {
 	reconciler := &reconcilerStub{}
 	task := NewReconcileRequestsTask(reconciler, 0, nil)
-	writes := &fakeWaitingLock{acquired: true}
-	task.lock, task.writeLock = &fakeClusterLock{acquired: false}, writes
+	task.locks = &fakeReconcileLocks{outcome: reconcileLocksBusy}
 
 	if err := task.Execute(context.Background(), &bulkEnrichmentTaskProgress{}); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if reconciler.runs.Load() != 0 || writes.waits != 0 {
-		t.Fatalf("runs = %d, write lock waits = %d; want neither while another reconcile runs", reconciler.runs.Load(), writes.waits)
+	if runs := reconciler.runs.Load(); runs != 0 {
+		t.Fatalf("runs = %d while another reconcile runs, want 0", runs)
 	}
 }
 
@@ -204,14 +194,13 @@ func TestReconcileRequestsTaskSkipsWhileAnotherReconcileRuns(t *testing.T) {
 func TestReconcileRequestsTaskFailsWhenTheWaitRunsOut(t *testing.T) {
 	reconciler := &reconcilerStub{}
 	task := NewReconcileRequestsTask(reconciler, 0, nil)
-	lock := &fakeClusterLock{acquired: true}
-	task.lock, task.writeLock = lock, &fakeWaitingLock{acquired: false}
+	task.locks = &fakeReconcileLocks{outcome: reconcileLocksWaitedOut}
 
 	if err := task.Execute(context.Background(), &bulkEnrichmentTaskProgress{}); err == nil {
 		t.Fatal("Execute() error = nil, want the wait to fail the pass")
 	}
-	if reconciler.runs.Load() != 0 || lock.released != 1 {
-		t.Fatalf("runs = %d, reconcile lock releases = %d; want 0 and 1", reconciler.runs.Load(), lock.released)
+	if runs := reconciler.runs.Load(); runs != 0 {
+		t.Fatalf("runs = %d, want 0", runs)
 	}
 }
 
@@ -284,6 +273,46 @@ func TestReconcileWaitsForADownloadRefreshPostgres(t *testing.T) {
 	if runs := reconciler.runs.Load(); runs != 1 {
 		t.Fatalf("runs = %d, want 1 once the refresh finished", runs)
 	}
+}
+
+// The reconcile pass holds both of its locks on one session, so a pool of two
+// connections still has one for the pass itself. With a session per lock, the
+// pass's first query would wait forever for a connection.
+func TestReconcileLeavesAConnectionForItsPassPostgres(t *testing.T) {
+	base := requestLockTestPool(t)
+	config := base.Config().Copy()
+	config.MaxConns = 2
+	pool, err := pgxpool.NewWithConfig(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	reconciler := &queryingReconcilerStub{pool: pool}
+	task := NewReconcileRequestsTask(reconciler, 0, pool)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	if err := task.Execute(ctx, &bulkEnrichmentTaskProgress{}); err != nil {
+		t.Fatalf("Execute() with a two-connection pool: %v", err)
+	}
+	if reconciler.queries.Load() != 1 {
+		t.Fatalf("queries = %d, want the pass to have run one", reconciler.queries.Load())
+	}
+}
+
+// queryingReconcilerStub runs one query on pool, as a real pass would.
+type queryingReconcilerStub struct {
+	pool    *pgxpool.Pool
+	queries atomic.Int32
+}
+
+func (s *queryingReconcilerStub) ReconcileRequests(ctx context.Context, _ int) (requests.ReconcileResult, error) {
+	var one int
+	if err := s.pool.QueryRow(ctx, `SELECT 1`).Scan(&one); err != nil {
+		return requests.ReconcileResult{}, err
+	}
+	s.queries.Add(1)
+	return requests.ReconcileResult{}, nil
 }
 
 // Reconcile stays one pass at a time across the cluster.
