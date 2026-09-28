@@ -196,3 +196,11 @@ func TestRootStatusDetailSummarizesNetworkFolders(t *testing.T) {
 		t.Fatalf("detail = %q, want %q", got, want)
 	}
 }
+
+func TestRootStatusDetailNamesUnreadableFolders(t *testing.T) {
+	rs := &rootState{state: StateMonitoring, unreadable: []string{"/lib/Locked"}}
+	want := "Folders Silo can't read aren't monitored: /lib/Locked."
+	if got := rs.statusDetail(); got != want {
+		t.Fatalf("detail = %q, want %q", got, want)
+	}
+}

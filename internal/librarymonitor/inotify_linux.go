@@ -37,6 +37,10 @@ const inotifyReadBuffer = 64 * 1024
 // errWalkLimit aborts a runtime walk that hit the watch limit.
 var errWalkLimit = errors.New("librarymonitor: watch limit reached")
 
+// errFolderUnreadable marks a directory Silo may not read, so the kernel
+// refuses to watch it.
+var errFolderUnreadable = errors.New("the folder is not readable")
+
 // inotifyBackend is the unprivileged backend: one inotify instance for the
 // process and one watch per recorded directory.
 //
@@ -219,6 +223,12 @@ func (b *inotifyBackend) AddRoot(ctx context.Context, root string) error {
 				limited = true
 				return true, nil
 			}
+			if errors.Is(err, errFolderUnreadable) && dir != root {
+				// The scanner cannot read it either. The status names it
+				// instead of claiming it.
+				skippedPathsFrom(ctx).addUnreadable(dir)
+				ok, err = false, nil
+			}
 			if err != nil {
 				return false, err
 			}
@@ -272,16 +282,23 @@ func (b *inotifyBackend) RemoveRoot(root string) {
 
 // register adds a watch for dir and records it for roots; link is set when
 // the walk reached dir through a symlink. It reports whether dir was
-// recorded for any root: false when dir vanished, is not a directory, cannot
-// be watched, or is an alias of a directory already recorded for the same
-// root under another path.
+// recorded for any root: false when dir vanished while the walk ran (or is no
+// longer a directory), or is an alias of a directory already recorded for the
+// same root under another path. Any other failure is an error: ENOSPC (the
+// watch limit), errFolderUnreadable when Silo may not read dir, or the
+// kernel's error, so no status claims a directory it does not watch.
 func (b *inotifyBackend) register(dir string, link bool, roots []*inotifyRoot) (bool, error) {
 	wd, err := b.addWatch(dir)
-	if err != nil {
-		if errors.Is(err, unix.ENOSPC) || errors.Is(err, errBackendClosed) {
-			return false, err
-		}
-		return false, nil
+	switch {
+	case err == nil:
+	case errors.Is(err, unix.ENOENT), errors.Is(err, unix.ENOTDIR):
+		return false, nil // gone, or replaced by a file, since it was listed
+	case errors.Is(err, unix.EACCES), errors.Is(err, unix.EPERM):
+		return false, fmt.Errorf("watch %s: %w: %w", dir, errFolderUnreadable, err)
+	case errors.Is(err, unix.ENOSPC), errors.Is(err, errBackendClosed):
+		return false, err
+	default:
+		return false, fmt.Errorf("watch %s: %w", dir, err)
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -748,7 +765,22 @@ func (b *inotifyBackend) walkRegister(dir string, roots []*inotifyRoot, created 
 		}
 	}
 	err := walkTree(b.ctx, dir, v)
-	if !errors.Is(err, errWalkLimit) {
+	if err != nil && !errors.Is(err, errWalkLimit) {
+		// A directory below could not be watched (unreadable, or a kernel
+		// error). Walk the roots again: that walk names an unreadable
+		// directory in the status, or fails and reports the error.
+		if b.ctx.Err() == nil {
+			b.mu.Lock()
+			for _, r := range roots {
+				if b.roots[r.path] == r {
+					b.rewalks[r.path] = struct{}{}
+				}
+			}
+			b.mu.Unlock()
+		}
+		return
+	}
+	if err == nil {
 		return
 	}
 	limit := b.hooks.maxUserWatches()

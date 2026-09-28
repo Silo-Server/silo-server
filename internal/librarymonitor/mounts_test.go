@@ -117,7 +117,7 @@ func TestWalkTreeDoesNotFollowSymlinksOntoNetworkMounts(t *testing.T) {
 		walkMounts.mu.Unlock()
 	})
 
-	ctx, links := withNetworkLinks(context.Background())
+	ctx, skipped := withSkippedPaths(context.Background())
 	var entered []string
 	err = walkTree(ctx, root, walkVisitor{enter: func(dir string, _ bool) (bool, error) {
 		entered = append(entered, rel(t, root, dir))
@@ -129,7 +129,7 @@ func TestWalkTreeDoesNotFollowSymlinksOntoNetworkMounts(t *testing.T) {
 	if want := []string{".", "Local"}; !slices.Equal(entered, want) {
 		t.Fatalf("walk entered %v, want %v", entered, want)
 	}
-	if got, want := links.list(), []string{filepath.Join(root, "Linked Movie")}; !slices.Equal(got, want) {
+	if got, want := firstList(skipped.lists()), []string{filepath.Join(root, "Linked Movie")}; !slices.Equal(got, want) {
 		t.Fatalf("reported network links %v, want %v", got, want)
 	}
 }
@@ -171,3 +171,5 @@ func setWalkMounts(t *testing.T, mounts map[string]bool) {
 		walkMounts.mu.Unlock()
 	})
 }
+
+func firstList(first, _ []string) []string { return first }

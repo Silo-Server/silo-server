@@ -176,6 +176,9 @@ func (rs *rootState) statusDetail() string {
 		if len(rs.unsupportedMounts) > 0 {
 			parts = append(parts, "Folders on network filesystems aren't monitored: "+summarizePaths(rs.unsupportedMounts)+".")
 		}
+		if len(rs.unreadable) > 0 {
+			parts = append(parts, "Folders Silo can't read aren't monitored: "+summarizePaths(rs.unreadable)+".")
+		}
 		return strings.Join(parts, " ")
 	case StateUnsupportedFilesystem:
 		return fmt.Sprintf("%s network filesystems aren't supported. Changes here are picked up by arr webhooks, the CephFS autoscan source, or the nightly scan.", rs.fsName)

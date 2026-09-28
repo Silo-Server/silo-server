@@ -720,3 +720,75 @@ func TestInotifySymlinkTargetMovedOutsideAsksForARewalk(t *testing.T) {
 		t.Fatalf("watches = %d, want only the root's", got)
 	}
 }
+
+// failWatch makes the kernel refuse to watch the given paths with err.
+func failWatch(err error, paths ...string) inotifyHooks {
+	return inotifyHooks{addWatch: func(fd int, path string, mask uint32) (int, error) {
+		if slices.Contains(paths, path) {
+			return -1, err
+		}
+		return unix.InotifyAddWatch(fd, path, mask)
+	}}
+}
+
+// A directory Silo may not read cannot be watched. The walk skips it, and
+// the root's status names it instead of claiming it.
+func TestInotifyUnreadableFolderIsReportedNotClaimed(t *testing.T) {
+	root := t.TempDir()
+	mkdirs(t, root, "Open", "Locked/Inside")
+	locked := filepath.Join(root, "Locked")
+	b := newTestInotify(t, failWatch(unix.EACCES, locked))
+	ctx, skipped := withSkippedPaths(context.Background())
+	if err := b.AddRoot(ctx, root); err != nil {
+		t.Fatalf("AddRoot: %v", err)
+	}
+	if _, unreadable := skipped.lists(); !slices.Equal(unreadable, []string{locked}) {
+		t.Fatalf("unreadable = %v, want [%s]", unreadable, locked)
+	}
+	if got := b.pathsWithPrefix(locked); len(got) != 0 {
+		t.Fatalf("recorded %v under the unreadable folder", got)
+	}
+	if got := b.Directories(root); got != 2 {
+		t.Fatalf("directories = %d, want the root and Open", got)
+	}
+}
+
+// A root that cannot be watched, or a kernel error other than the directory
+// vanishing, fails the walk instead of passing as monitored.
+func TestInotifyWatchFailuresFailTheWalk(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		sub  bool
+	}{
+		{name: "unreadable root", err: unix.EACCES},
+		{name: "out of kernel memory below the root", err: unix.ENOMEM, sub: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			mkdirs(t, root, "Sub")
+			target := root
+			if tc.sub {
+				target = filepath.Join(root, "Sub")
+			}
+			b := newTestInotify(t, failWatch(tc.err, target))
+			err := b.AddRoot(context.Background(), root)
+			if !errors.Is(err, tc.err) {
+				t.Fatalf("AddRoot error = %v, want one wrapping %v", err, tc.err)
+			}
+		})
+	}
+}
+
+// A new directory that cannot be watched at runtime asks for a re-walk, so
+// the status names it.
+func TestInotifyUnwatchableNewFolderAsksForARewalk(t *testing.T) {
+	root := t.TempDir()
+	locked := filepath.Join(root, "Locked")
+	b := newTestInotify(t, failWatch(unix.EACCES, locked))
+	if err := b.AddRoot(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+	mkdirs(t, root, "Locked")
+	nextEvents(t, b, func(ev Event) bool { return ev.Kind == EventRewalk && ev.Root == root })
+}

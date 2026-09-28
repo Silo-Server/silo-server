@@ -222,7 +222,10 @@ type rootState struct {
 	// the walk skipped.
 	mounts            string
 	unsupportedMounts []string
-	everSeen          bool
+	// unreadable are directories below the root the walk could not watch
+	// because Silo may not read them; the scanner cannot read them either.
+	unreadable []string
+	everSeen   bool
 }
 
 // rootRelease is a root to drop from a backend. Detaching collects them
@@ -643,13 +646,16 @@ type outcome struct {
 	limit       int
 	identity    fileID
 	mounts      mountView
+	// unreadable lists directories below the root that could not be
+	// watched because Silo may not read them.
+	unreadable []string
 }
 
 // try checks that a root is visible, then verifies or re-walks an attached
 // root, or attaches it to a backend by walking it. It runs in the root's own
 // goroutine so a hung mount blocks only this root.
 func (m *Monitor) try(ctx context.Context, rs *rootState, ticket *walkTicket) outcome {
-	ctx, _ = withNetworkLinks(ctx)
+	ctx, _ = withSkippedPaths(ctx)
 	// A release of this path collected before the attempt started (a
 	// previous attempt's, or a previous rootState's) must not land after
 	// the walk below.
@@ -767,10 +773,13 @@ func (m *Monitor) walkOutcome(ctx context.Context, path string, b Backend, err e
 	if err == nil {
 		// Symlinks the walk left alone because they lead onto network
 		// filesystems are reported like network mounts inside the root.
-		if links := networkLinksFrom(ctx); links != nil {
-			mounts.unsupported = append(slices.Clone(mounts.unsupported), links.list()...)
+		var unreadable []string
+		if sp := skippedPathsFrom(ctx); sp != nil {
+			var links []string
+			links, unreadable = sp.lists()
+			mounts.unsupported = append(slices.Clone(mounts.unsupported), links...)
 		}
-		return outcome{state: StateMonitoring, backend: b, backendName: b.Name(), notes: notes, identity: id, mounts: mounts}
+		return outcome{state: StateMonitoring, backend: b, backendName: b.Name(), notes: notes, identity: id, mounts: mounts, unreadable: unreadable}
 	}
 	if ctx.Err() != nil {
 		return outcome{canceled: true}
@@ -939,11 +948,13 @@ func (m *Monitor) finishLocked(rs *rootState, out outcome) (retry bool, releases
 		rs.identity = out.identity
 		rs.mounts = out.mounts.signature
 		rs.unsupportedMounts = out.mounts.unsupported
+		rs.unreadable = out.unreadable
 		rs.everSeen = true
 	} else {
 		releases = m.detachLocked(rs, releases)
 		rs.mounts = ""
 		rs.unsupportedMounts = nil
+		rs.unreadable = nil
 	}
 	rs.backendName = out.backendName
 	if out.state == StateLimitReached {

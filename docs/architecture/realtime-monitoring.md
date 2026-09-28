@@ -251,7 +251,18 @@ directories the scanner would enter (`walkTree`). They skip:
   library still reports `monitoring`, because its own folder is monitored,
   even when every entry is such a link; only the detail says what is left
   out.
-- An unreadable directory stays recorded but is not descended into.
+- A directory Silo may not read cannot be watched (`inotify_add_watch` fails
+  with `EACCES` or `EPERM`); the scanner cannot read it either. Below a
+  library folder it is skipped with everything under it, and the folder's
+  status detail names it ("Folders Silo can't read aren't monitored: …") so
+  the status never claims it. It is checked again on the folder's next walk;
+  a directory that appears unreadable at runtime asks for one at once. A
+  library folder Silo cannot watch, or any other kernel error, fails the walk,
+  and the folder shows `error` with the reason. Only a directory that vanished
+  or stopped being a directory after it was listed (`ENOENT`, `ENOTDIR`) is
+  skipped silently.
+- A directory that can be watched but not listed stays recorded but is not
+  descended into.
 
 ## Event handling
 

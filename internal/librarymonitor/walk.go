@@ -40,7 +40,7 @@ type walkVisitor struct {
 //
 // The same holds for a symlink whose target is on such a filesystem: it is
 // not followed, and its logical path is reported to the collector ctx
-// carries (see withNetworkLinks), if any.
+// carries (see withSkippedPaths), if any.
 //
 // Unreadable directories stay recorded but are not descended into; a
 // canceled ctx aborts the walk.
@@ -50,15 +50,15 @@ func walkTree(ctx context.Context, dir string, v walkVisitor) error {
 		physical = dir
 	}
 	w := &treeWalk{
-		visited:      make(map[string]struct{}),
-		unsupported:  unsupportedMountPoints(),
-		networkLinks: networkLinksFrom(ctx),
-		v:            v,
+		visited:     make(map[string]struct{}),
+		unsupported: unsupportedMountPoints(),
+		skipped:     skippedPathsFrom(ctx),
+		v:           v,
 	}
 	if w.onUnsupportedMount(filepath.Clean(physical)) {
 		// A runtime walk of a folder that resolves onto a network
 		// filesystem (roots on one are rejected before any walk).
-		w.networkLinks.add(dir)
+		w.skipped.addNetwork(dir)
 		return nil
 	}
 	info, err := os.Lstat(dir)
@@ -67,10 +67,10 @@ func walkTree(ctx context.Context, dir string, v walkVisitor) error {
 }
 
 type treeWalk struct {
-	visited      map[string]struct{}
-	unsupported  map[string]bool
-	networkLinks *networkLinks
-	v            walkVisitor
+	visited     map[string]struct{}
+	unsupported map[string]bool
+	skipped     *skippedPaths
+	v           walkVisitor
 }
 
 // onUnsupportedMount reports whether physical is on a filesystem the walk
@@ -79,42 +79,57 @@ func (w *treeWalk) onUnsupportedMount(physical string) bool {
 	return onUnsupportedMount(w.unsupported, physical)
 }
 
-// networkLinks collects the symlinks a walk did not follow because their
-// targets are on network filesystems.
-type networkLinks struct {
-	mu    sync.Mutex
-	paths map[string]struct{}
+// skippedPaths collects what one walk left unmonitored below a root and the
+// status names: symlinks onto network filesystems, and directories the
+// backend could not watch because Silo may not read them.
+type skippedPaths struct {
+	mu         sync.Mutex
+	network    map[string]struct{}
+	unreadable map[string]struct{}
 }
 
-type networkLinksKey struct{}
+type skippedPathsKey struct{}
 
-// withNetworkLinks returns a context whose walks report skipped network
-// symlinks to the returned collector.
-func withNetworkLinks(ctx context.Context) (context.Context, *networkLinks) {
-	links := &networkLinks{paths: make(map[string]struct{})}
-	return context.WithValue(ctx, networkLinksKey{}, links), links
+// withSkippedPaths returns a context whose walks report skipped paths to the
+// returned collector.
+func withSkippedPaths(ctx context.Context) (context.Context, *skippedPaths) {
+	sp := &skippedPaths{network: make(map[string]struct{}), unreadable: make(map[string]struct{})}
+	return context.WithValue(ctx, skippedPathsKey{}, sp), sp
 }
 
-func networkLinksFrom(ctx context.Context) *networkLinks {
-	links, _ := ctx.Value(networkLinksKey{}).(*networkLinks)
-	return links
+func skippedPathsFrom(ctx context.Context) *skippedPaths {
+	sp, _ := ctx.Value(skippedPathsKey{}).(*skippedPaths)
+	return sp
 }
 
-func (l *networkLinks) add(path string) {
-	if l == nil {
-		return
+func (sp *skippedPaths) addNetwork(path string) {
+	if sp != nil {
+		sp.add(sp.network, path)
 	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.paths[path] = struct{}{}
 }
 
-// list returns the collected paths in order.
-func (l *networkLinks) list() []string {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	out := make([]string, 0, len(l.paths))
-	for p := range l.paths {
+func (sp *skippedPaths) addUnreadable(path string) {
+	if sp != nil {
+		sp.add(sp.unreadable, path)
+	}
+}
+
+func (sp *skippedPaths) add(set map[string]struct{}, path string) {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	set[path] = struct{}{}
+}
+
+// lists returns the collected paths of each kind, in order.
+func (sp *skippedPaths) lists() (network, unreadable []string) {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	return sortedKeys(sp.network), sortedKeys(sp.unreadable)
+}
+
+func sortedKeys(set map[string]struct{}) []string {
+	out := make([]string, 0, len(set))
+	for p := range set {
 		out = append(out, p)
 	}
 	sort.Strings(out)
@@ -164,7 +179,7 @@ func (w *treeWalk) dir(ctx context.Context, logical, physical string, link bool)
 			// Decide from the link text first, so a link into a hung
 			// network mount is never resolved or stat'ed.
 			if linkOntoUnsupportedMount(w.unsupported, childLogical, physical) {
-				w.networkLinks.add(childLogical)
+				w.skipped.addNetwork(childLogical)
 				continue
 			}
 			resolved, err := filepath.EvalSymlinks(childLogical)
@@ -182,7 +197,7 @@ func (w *treeWalk) dir(ctx context.Context, logical, physical string, link bool)
 			childPhysical = filepath.Clean(resolved)
 			if w.onUnsupportedMount(childPhysical) {
 				// Reached through another link.
-				w.networkLinks.add(childLogical)
+				w.skipped.addNetwork(childLogical)
 				continue
 			}
 		default:
