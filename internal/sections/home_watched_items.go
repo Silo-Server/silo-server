@@ -46,10 +46,13 @@ func HideWatchedItemsFromHome(ctx context.Context, store userstore.UserStore, pr
 
 // PreserveWatchedItemsOnHome identifies sections whose meaning depends on
 // watched history. Featured sections are handled separately because Featured
-// is section configuration rather than a section type.
+// is section configuration rather than a section type. Continue Watching (and
+// its listening and reading variants, which share the type) is exempt: a
+// rewatch keeps Completed set while its resume position is active, and hiding
+// it would drop the one card the viewer is resuming.
 func PreserveWatchedItemsOnHome(sectionType SectionType) bool {
 	switch sectionType {
-	case SectionMostWatched, SectionProfileActivityFeed, SectionForgottenFavorites:
+	case SectionMostWatched, SectionProfileActivityFeed, SectionForgottenFavorites, SectionContinueWatching:
 		return true
 	default:
 		return false

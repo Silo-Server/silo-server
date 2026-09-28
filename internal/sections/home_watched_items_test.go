@@ -53,6 +53,7 @@ func TestPreserveWatchedItemsOnHome(t *testing.T) {
 		SectionMostWatched,
 		SectionProfileActivityFeed,
 		SectionForgottenFavorites,
+		SectionContinueWatching,
 	} {
 		if !PreserveWatchedItemsOnHome(sectionType) {
 			t.Errorf("PreserveWatchedItemsOnHome(%q) = false, want true", sectionType)

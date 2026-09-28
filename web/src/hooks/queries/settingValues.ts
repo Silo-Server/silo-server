@@ -282,7 +282,12 @@ function invalidateSettingValueQueries(
 }
 
 /** Write one value at one scope. */
-export function useSetSettingValue() {
+/**
+ * `onSaved` runs as a mutation-level success handler, so it still runs when
+ * the calling component unmounts before the write completes; callbacks
+ * passed to `mutate()` are skipped in that case.
+ */
+export function useSetSettingValue({ onSaved }: { onSaved?: () => void } = {}) {
   const qc = useQueryClient();
 
   return useMutation({
@@ -308,6 +313,7 @@ export function useSetSettingValue() {
         body: { value },
       }),
     onSuccess: (_data, variables) => {
+      onSaved?.();
       if (variables.invalidateOnSettled === false) return;
       // Keep ordinary controls pending until their active effective-value
       // reads reconcile. Otherwise a rapid follow-up edit can spread a stale

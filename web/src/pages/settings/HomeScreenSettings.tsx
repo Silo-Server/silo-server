@@ -214,7 +214,14 @@ export default function HomeScreenSettings() {
   const resetMutation = useResetProfileOverrides();
   const canEditSections = canMutateSectionSettings(settingsQuery, rawOverridesQuery);
   const homePreferences = useEffectiveSettings({ keys: HOME_PREFERENCE_KEYS });
-  const saveHomePreference = useSetSettingValue();
+  // Home's cached rows depend on this preference; refresh them from the
+  // mutation itself so leaving Settings mid-save still refreshes Home.
+  const saveHomePreference = useSetSettingValue({
+    onSaved: () => {
+      queryClient.removeQueries({ queryKey: sectionKeys.homeItemsRoot() });
+      bumpHomeRefreshSignal(queryClient);
+    },
+  });
   const hideWatchedItems =
     homePreferences.data?.[SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS]?.value === true;
   const activeSelectionValue = scopeValue;
@@ -449,13 +456,7 @@ export default function HomeScreenSettings() {
         value: enabled,
         identity: PROFILE_SCOPE,
       },
-      {
-        onSuccess: () => {
-          queryClient.removeQueries({ queryKey: sectionKeys.homeItemsRoot() });
-          bumpHomeRefreshSignal(queryClient);
-        },
-        onError: () => toast.error("Failed to save Home preference"),
-      },
+      { onError: () => toast.error("Failed to save Home preference") },
     );
   }
 
