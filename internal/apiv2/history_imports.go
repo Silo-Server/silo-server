@@ -31,7 +31,7 @@ type HistoryImportService interface {
 // profileScopedHistoryImports enforces which of the account's profiles the
 // acting profile may import into and see runs for (#1336): the primary
 // profile or an admin acts for every profile, any other profile only for
-// itself. The v1 routes keep their account-wide behavior.
+// itself. The v1 run handlers use the same authorization rule.
 type profileScopedHistoryImports interface {
 	ListImportRunsPageAs(context.Context, handlers.HistoryImportActor, *historyimport.RunKey, int) ([]historyimport.Run, bool, error)
 	CreateImportRunAs(context.Context, handlers.HistoryImportActor, historyimport.CreateRunInput) (*historyimport.Run, error)

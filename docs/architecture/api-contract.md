@@ -1820,10 +1820,16 @@ management surface and keeps its existing behavior.
 ### History imports
 
 Seven v2 operations list sources, list/create/read import runs, create/check a Plex
-PIN and perform Emby Connect login. These are account operations with an optional
-profile header; creating a run separately verifies ownership of the target profile
-before source authentication. Run lists use signed `(created_at, id)` cursors scoped
-to the account. A 202 response identifies the persisted run and its polling location.
+PIN and perform Emby Connect login. Source discovery and external sign-in are account
+operations. Run creation, listing, and reads enforce the acting profile: a secondary
+profile acts only for itself, while an admin or the primary profile with any required
+PIN verification may act for its household. Non-admin creation requires an acting
+profile. Target account ownership is checked before source authentication. Run lists
+use signed `(created_at, id)` cursors scoped to the account and acting profile.
+The retained v1 run handlers enforce the same rule as a critical bridge fix, preserving
+their existing envelopes, success statuses, and 50-run list cap. See
+[Personal history import acceptance and monitoring](../admin-api.md#personal-history-import-acceptance-and-monitoring).
+A 202 response identifies the persisted run and its polling location.
 Execution is dispatched within the server process; persistence of run status is not
 a durable job-dispatch guarantee.
 
