@@ -193,6 +193,29 @@ func TestFlushRetriesAFailedEnqueueOnce(t *testing.T) {
 	assertNoBatch(t, queue)
 }
 
+// A target kept for a retry after a failed enqueue is dropped when its
+// library turned monitoring off before the retry.
+func TestFlushDropsRetryTargetsOfLibrariesNoLongerMonitored(t *testing.T) {
+	lib := library(1, "/lib")
+	resolver := &fakeResolver{fn: func(_ changeKind, path string) (*scantrigger.Target, error) {
+		return dirTarget(lib, path), nil
+	}}
+	queue := newFakeQueue()
+	queue.failures = 1
+	m := newFlushMonitor(t, resolver, queue, lib)
+	m.tracker.observe(Event{Kind: EventDelete, Dir: "/lib", Name: "A", IsDir: true}, t0)
+
+	m.flush(context.Background(), t0.Add(5*time.Second))
+	if got := takeBatch(t, queue); len(got) != 1 {
+		t.Fatalf("first batch %v, want the one target", got)
+	}
+	m.mu.Lock()
+	m.desired = map[int]*models.MediaFolder{}
+	m.mu.Unlock()
+	m.flush(context.Background(), t0.Add(6*time.Second))
+	assertNoBatch(t, queue)
+}
+
 func TestFlushOverflowLibraryScanSupersedesPathTargets(t *testing.T) {
 	lib := library(1, "/lib")
 	other := library(2, "/other")

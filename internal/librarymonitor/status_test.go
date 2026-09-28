@@ -3,6 +3,8 @@ package librarymonitor
 import (
 	"strings"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 func TestAggregateLibrary(t *testing.T) {
@@ -14,6 +16,8 @@ func TestAggregateLibrary(t *testing.T) {
 		wantInDet []string
 		// exactDet makes wantInDet's only entry the whole detail.
 		exactDet bool
+		// configured is the library's path count; 0 means len(roots).
+		configured int
 	}{
 		{
 			name:   "no visible root writes no row",
@@ -98,6 +102,19 @@ func TestAggregateLibrary(t *testing.T) {
 			exactDet:  true,
 		},
 		{
+			// A library path this node has no state for yet still counts:
+			// the detail must name the root it belongs to.
+			name: "a path without state keeps the detail's path",
+			roots: []rootView{
+				{path: "/a", state: StateMonitoring, backend: "inotify", detail: "fanotify unavailable: reason."},
+			},
+			configured: 2,
+			wantOK:     true,
+			want:       LibraryStatus{LibraryID: 7, State: StateMonitoring, Backend: "inotify"},
+			wantInDet:  []string{"/a: fanotify unavailable: reason."},
+			exactDet:   true,
+		},
+		{
 			name: "roots with the same detail are named together",
 			roots: []rootView{
 				{path: "/a", state: StateMonitoring, backend: "inotify", detail: "One."},
@@ -112,7 +129,11 @@ func TestAggregateLibrary(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok := aggregateLibrary(7, tt.roots)
+			configured := tt.configured
+			if configured == 0 {
+				configured = len(tt.roots)
+			}
+			got, ok := aggregateLibrary(7, tt.roots, configured)
 			if ok != tt.wantOK {
 				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
 			}
@@ -133,6 +154,27 @@ func TestAggregateLibrary(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A library whose second path has no root state yet (its attempt was not
+// spawned, or it was just added) must still name the path its first root's
+// detail belongs to.
+func TestStatusRowsNameThePathWhileAnotherHasNoState(t *testing.T) {
+	m, err := New(Config{Folders: &fakeFolders{}, Resolver: &fakeResolver{}, Queue: newFakeQueue(), Logger: quietLogger()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lib := library(1, "/a", "/b", "/a/")
+	m.desiredOrder = []*models.MediaFolder{lib}
+	m.roots["/a"] = &rootState{path: "/a", state: StateMonitoring, backendName: BackendInotify, notes: []string{"Note."}}
+	rows := m.statusRowsLocked()
+	if len(rows) != 1 || rows[0].Detail != "/a: Note." {
+		t.Fatalf("rows = %+v, want one row whose detail names /a", rows)
+	}
+	m.roots["/b"] = &rootState{path: "/b", state: StateMonitoring, backendName: BackendInotify, notes: []string{"Note."}}
+	if rows := m.statusRowsLocked(); rows[0].Detail != "Note." {
+		t.Fatalf("detail = %q once both paths share it, want it without paths", rows[0].Detail)
 	}
 }
 

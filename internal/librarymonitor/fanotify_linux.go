@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -148,6 +149,11 @@ type fanotifyBackend struct {
 	byPath     map[string]*fanotifyDir
 	children   childDirs
 	roots      map[string]*fanotifyRoot
+
+	// rewalks collects, while one read is handled, the roots to walk again
+	// because a path the walk reached through a symlink was dropped (see
+	// fanotifyDir.link). Only the read loop uses it.
+	rewalks map[string]struct{}
 }
 
 // fanotifyMark is one filesystem mark and the roots that hold it.
@@ -170,6 +176,9 @@ type fanotifyDir struct {
 	// roots maps each covering root to the walk generation that last
 	// recorded this path for it; a re-walk drops paths it did not reach.
 	roots map[*fanotifyRoot]uint64
+	// link and skipped mean what they mean for inotify (see inotifyDir).
+	link    bool
+	skipped bool
 }
 
 type fanotifyRoot struct {
@@ -195,6 +204,8 @@ type fanotifyMove struct {
 	isDir   bool
 	key     handleKey
 	parents []fanotifyParent
+	// at is when the read loop saw the FAN_MOVED_FROM.
+	at time.Time
 }
 
 // fanotifyRecord is one parsed event.
@@ -242,6 +253,7 @@ func newFanotify(opts BackendOptions, hooks fanotifyHooks) (*fanotifyBackend, er
 		byPath:     make(map[string]*fanotifyDir),
 		children:   make(childDirs),
 		roots:      make(map[string]*fanotifyRoot),
+		rewalks:    make(map[string]struct{}),
 	}
 	go b.readLoop()
 	return b, nil
@@ -298,10 +310,10 @@ func (b *fanotifyBackend) AddRoot(ctx context.Context, root string) error {
 		return fmt.Errorf("name_to_handle_at %s: %w", root, err)
 	}
 	err := walkTree(ctx, root, walkVisitor{
-		enter: func(dir string) (bool, error) {
-			return b.register(dir, []*fanotifyRoot{r})
+		enter: func(dir string, link bool) (bool, error) {
+			return b.register(dir, link, []*fanotifyRoot{r})
 		},
-		skip: func(dir string) { b.unregister(dir, r) },
+		listed: b.setSkipped,
 	})
 	if err != nil {
 		return err
@@ -387,12 +399,13 @@ func vanishedPath(err error) bool {
 }
 
 // register records dir for roots by its file handle and holds a mark on its
-// filesystem for each root. It reports whether dir was recorded for any
-// root: false when dir vanished or cannot be read, or is an alias of a
-// directory already recorded for the same root under another path. A
-// directory on a filesystem fanotify cannot identify or mark is an error:
-// the root would be monitored with holes.
-func (b *fanotifyBackend) register(dir string, roots []*fanotifyRoot) (bool, error) {
+// filesystem for each root; link is set when the walk reached dir through a
+// symlink. It reports whether dir was recorded for any root: false when dir
+// vanished or cannot be read, or is an alias of a directory already
+// recorded for the same root under another path. A directory on a
+// filesystem fanotify cannot identify or mark is an error: the root would
+// be monitored with holes.
+func (b *fanotifyBackend) register(dir string, link bool, roots []*fanotifyRoot) (bool, error) {
 	key, mountID, err := b.identify(dir)
 	if err != nil {
 		if noFileHandles(err) {
@@ -421,12 +434,13 @@ func (b *fanotifyBackend) register(dir string, roots []*fanotifyRoot) (bool, err
 	var lost []string
 	for _, p := range stale {
 		if d := b.byPath[p]; d != nil && d.key == key {
-			lost = append(lost, b.dropSubtreeLocked(p)...)
+			l, _ := b.dropSubtreeLocked(p)
+			lost = append(lost, l...)
 		}
 	}
 	if d := b.byPath[dir]; d != nil && d.key != key {
 		// The path now names a different directory than the one recorded.
-		b.dropSubtreeLocked(dir)
+		_, _ = b.dropSubtreeLocked(dir)
 	}
 	h := b.byHandle[key]
 	if h == nil {
@@ -452,6 +466,7 @@ func (b *fanotifyBackend) register(dir string, roots []*fanotifyRoot) (bool, err
 			r.dirs++
 		}
 		d.roots[r] = r.gen
+		d.link = link
 		recorded = true
 	}
 	if len(h.paths) == 0 {
@@ -460,6 +475,28 @@ func (b *fanotifyBackend) register(dir string, roots []*fanotifyRoot) (bool, err
 	b.mu.Unlock()
 	b.loseRoots(lost)
 	return recorded, nil
+}
+
+// setSkipped records whether dir's ignore files exclude what is below it.
+func (b *fanotifyBackend) setSkipped(dir string, skipped bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if d := b.byPath[dir]; d != nil {
+		d.skipped = skipped
+	}
+}
+
+// inSkipped reports whether the directory parents name is one whose ignore
+// files exclude everything below it.
+func (b *fanotifyBackend) inSkipped(parents []fanotifyParent) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, p := range parents {
+		if d := b.byPath[p.path]; d != nil && d.skipped {
+			return true
+		}
+	}
+	return false
 }
 
 // staleAliases returns the other recorded paths of key that no longer name
@@ -659,16 +696,6 @@ func (b *fanotifyBackend) aliasLocked(h *fanotifyHandle, r *fanotifyRoot) bool {
 	return false
 }
 
-func (b *fanotifyBackend) unregister(dir string, r *fanotifyRoot) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if d := b.byPath[dir]; d != nil {
-		if _, ok := d.roots[r]; ok {
-			b.removeRootFromPathLocked(dir, d, r)
-		}
-	}
-}
-
 func (b *fanotifyBackend) removeRootFromPathLocked(path string, d *fanotifyDir, r *fanotifyRoot) {
 	delete(d.roots, r)
 	r.dirs--
@@ -698,20 +725,51 @@ func (b *fanotifyBackend) dropPathLocked(path string) {
 
 // dropSubtreeLocked forgets path and every recorded path below it. It
 // returns the roots whose own directory was among them: a root nested in
-// another root's tree is lost through its parent's event.
-func (b *fanotifyBackend) dropSubtreeLocked(path string) []string {
-	var lost []string
+// another root's tree is lost through its parent's event. It also returns
+// the other roots that covered a dropped path the walk reached through a
+// symlink (see inotifyDir.link); they need a re-walk.
+func (b *fanotifyBackend) dropSubtreeLocked(path string) (lost, aliased []string) {
 	for _, p := range b.children.subtree(path) {
 		if d := b.byPath[p]; d != nil {
 			for r := range d.roots {
-				if r.path == p {
+				switch {
+				case r.path == p:
 					lost = append(lost, r.path)
+				case d.link:
+					aliased = append(aliased, r.path)
 				}
 			}
 		}
 		b.dropPathLocked(p)
 	}
-	return lost
+	return lost, aliased
+}
+
+// rewalkAliased asks for a re-walk of the aliased roots (see
+// dropSubtreeLocked), except those in covered: lost roots, or roots a walk
+// already records again.
+func (b *fanotifyBackend) rewalkAliased(aliased, covered []string) {
+	for _, root := range aliased {
+		if !slices.Contains(covered, root) {
+			b.rewalks[root] = struct{}{}
+		}
+	}
+}
+
+// flushRewalks asks for one re-walk per root collected in rewalks.
+func (b *fanotifyBackend) flushRewalks() {
+	if len(b.rewalks) == 0 {
+		return
+	}
+	roots := make([]string, 0, len(b.rewalks))
+	for root := range b.rewalks {
+		roots = append(roots, root)
+	}
+	clear(b.rewalks)
+	sort.Strings(roots)
+	for _, root := range roots {
+		b.emit(Event{Kind: EventRewalk, Root: root})
+	}
 }
 
 // loseRoots releases roots that disappeared and reports them.
@@ -737,23 +795,25 @@ func (b *fanotifyBackend) readLoop() {
 	var moves []fanotifyMove
 	for {
 		n, err := b.file.Read(buf)
-		if err != nil {
-			if errors.Is(err, os.ErrDeadlineExceeded) {
-				b.movedOut(moves)
-				moves = nil
-				_ = b.file.SetReadDeadline(time.Time{})
-				continue
-			}
+		switch {
+		case err == nil:
+			moves = b.process(buf[:n], moves)
+		case errors.Is(err, os.ErrDeadlineExceeded):
+		default:
 			if !b.isClosed() {
 				b.log.Error("librarymonitor: fanotify read failed", "component", "librarymonitor", "err", err)
 			}
 			return
 		}
-		moves = b.process(buf[:n], moves)
+		// Checked after every read, as in the inotify backend: a steady
+		// stream of events must not keep a move pending.
+		moves = expireMoves(moves, time.Now(), fanotifyMoveWait, func(mv fanotifyMove) time.Time { return mv.at }, b.movedOut)
+		b.flushRewalks()
 		if len(moves) > 0 {
-			if err := b.file.SetReadDeadline(time.Now().Add(fanotifyMoveWait)); err != nil {
+			if err := b.file.SetReadDeadline(moves[0].at.Add(fanotifyMoveWait)); err != nil {
 				b.movedOut(moves)
 				moves = nil
+				b.flushRewalks()
 			}
 		} else {
 			_ = b.file.SetReadDeadline(time.Time{})
@@ -842,9 +902,11 @@ func (b *fanotifyBackend) process(buf []byte, moves []fanotifyMove) []fanotifyMo
 		// Events after the fault are lost; treat it like an overflow.
 		b.log.Error("librarymonitor: dropping unreadable fanotify events", "component", "librarymonitor", "err", err)
 		b.movedOut(moves)
+		b.flushRewalks()
 		b.emit(Event{Kind: EventOverflow})
 		return nil
 	}
+	b.flushRewalks()
 	return moves
 }
 
@@ -931,7 +993,7 @@ func (b *fanotifyBackend) arrival(mask uint64, parents []fanotifyParent, name st
 // moveFrom captures a FAN_MOVED_FROM until its FAN_MOVED_TO arrives or the
 // read ends.
 func (b *fanotifyBackend) moveFrom(parents []fanotifyParent, name string, isDir bool) fanotifyMove {
-	mv := fanotifyMove{name: name, isDir: isDir, parents: parents}
+	mv := fanotifyMove{name: name, isDir: isDir, parents: parents, at: time.Now()}
 	if isDir {
 		b.mu.Lock()
 		for _, p := range parents {
@@ -1004,9 +1066,13 @@ func (b *fanotifyBackend) parentsOf(key handleKey) []fanotifyParent {
 
 // arrived handles a created or moved-in entry. A new directory (or a
 // symlink to one, which the scanner follows) is recorded, then listed by
-// the walk, before the event is emitted.
+// the walk, before the event is emitted. Nothing that arrives in a skipped
+// directory is recorded or reported. An ignore marker (.nomedia, .ignore) is
+// never reported, only re-evaluated: the scanner has nothing to do with the
+// file itself.
 func (b *fanotifyBackend) arrived(kind EventKind, parents []fanotifyParent, name string, isDir bool) {
-	if ignoredName(name) {
+	defer b.markerChanged(parents, name)
+	if ignoredName(name) || (!isDir && ignoreMarker(name)) || b.inSkipped(parents) {
 		return
 	}
 	if !isDir {
@@ -1042,17 +1108,20 @@ func (b *fanotifyBackend) recordedDir(parents []fanotifyParent, name string) boo
 // left handles a deleted or moved-out entry. A directory's recorded
 // subtree is dropped, so no event arrives under a stale path.
 func (b *fanotifyBackend) left(kind EventKind, parents []fanotifyParent, name string, isDir bool) {
+	defer b.markerChanged(parents, name)
 	isDir = isDir || b.recordedDir(parents, name)
 	if isDir {
-		var lost []string
+		var lost, aliased []string
 		b.mu.Lock()
 		for _, p := range parents {
-			lost = append(lost, b.dropSubtreeLocked(filepath.Join(p.path, name))...)
+			l, a := b.dropSubtreeLocked(filepath.Join(p.path, name))
+			lost, aliased = append(lost, l...), append(aliased, a...)
 		}
 		b.mu.Unlock()
 		b.loseRoots(lost)
+		b.rewalkAliased(aliased, lost)
 	}
-	if ignoredName(name) || (isDir && ignoredDir(name)) {
+	if ignoredName(name) || (isDir && ignoredDir(name)) || (!isDir && ignoreMarker(name)) || b.inSkipped(parents) {
 		return
 	}
 	for _, p := range parents {
@@ -1061,7 +1130,8 @@ func (b *fanotifyBackend) left(kind EventKind, parents []fanotifyParent, name st
 }
 
 func (b *fanotifyBackend) closeWritten(parents []fanotifyParent, name string) {
-	if ignoredName(name) {
+	defer b.markerChanged(parents, name)
+	if ignoredName(name) || ignoreMarker(name) || b.inSkipped(parents) {
 		return
 	}
 	for _, p := range parents {
@@ -1083,27 +1153,86 @@ func (b *fanotifyBackend) movedOut(moves []fanotifyMove) {
 func (b *fanotifyBackend) renamed(from fanotifyMove, name string, isDir bool, parents []fanotifyParent) {
 	oldDir := isDir || b.recordedDir(from.parents, from.name)
 	newDir := isDir || symlinkToDir(filepath.Join(parents[0].path, name))
-	oldIgnored := ignoredName(from.name) || (oldDir && ignoredDir(from.name))
-	newIgnored := ignoredName(name) || (newDir && ignoredDir(name))
+	// Nothing in a skipped directory is recorded or reported, and an ignore
+	// marker is re-evaluated below instead of reported.
+	oldIgnored := ignoredName(from.name) || (oldDir && ignoredDir(from.name)) || (!oldDir && ignoreMarker(from.name)) || b.inSkipped(from.parents)
+	newIgnored := ignoredName(name) || (newDir && ignoredDir(name)) || (!newDir && ignoreMarker(name)) || b.inSkipped(parents)
+	var lost, aliased []string
 	if oldDir {
-		var lost []string
 		b.mu.Lock()
 		for _, p := range from.parents {
-			lost = append(lost, b.dropSubtreeLocked(filepath.Join(p.path, from.name))...)
+			l, a := b.dropSubtreeLocked(filepath.Join(p.path, from.name))
+			lost, aliased = append(lost, l...), append(aliased, a...)
 		}
 		b.mu.Unlock()
 		// A root inside the moved directory is gone from its configured
 		// path; release it before the walk records the new location.
 		b.loseRoots(lost)
 	}
+	// A lost root needs no re-walk, and the walk of the new location records
+	// the moved aliases again for its roots.
+	covered := slices.Clone(lost)
 	if newDir && !newIgnored {
 		for _, p := range parents {
 			b.walkRegister(filepath.Join(p.path, name), p.roots)
+			for _, r := range p.roots {
+				covered = append(covered, r.path)
+			}
 		}
 	}
+	b.rewalkAliased(aliased, covered)
 	emitRename(b.emit,
 		renameSide{dirs: fanotifyPaths(from.parents), name: from.name, isDir: oldDir, ignored: oldIgnored},
 		renameSide{dirs: fanotifyPaths(parents), name: name, isDir: newDir, ignored: newIgnored})
+	b.markerChanged(from.parents, from.name)
+	b.markerChanged(parents, name)
+}
+
+// markerChanged re-evaluates the directories parents name after an event on
+// name in them, when name is an ignore marker (.nomedia, .ignore).
+func (b *fanotifyBackend) markerChanged(parents []fanotifyParent, name string) {
+	if !ignoreMarker(name) {
+		return
+	}
+	for _, p := range parents {
+		b.reevaluate(p)
+	}
+}
+
+// reevaluate applies a directory's current ignore markers, as the inotify
+// backend does: a directory they now exclude drops everything recorded
+// below it; one they no longer exclude is walked and reported for a scan.
+func (b *fanotifyBackend) reevaluate(p fanotifyParent) {
+	entries, err := os.ReadDir(p.path)
+	if err != nil {
+		return // gone; its parent's event drops it
+	}
+	skipped := dirSkipped(p.path, entries)
+	b.mu.Lock()
+	d := b.byPath[p.path]
+	if d == nil || d.skipped == skipped {
+		b.mu.Unlock()
+		return
+	}
+	d.skipped = skipped
+	if skipped {
+		var lost, aliased []string
+		for _, child := range b.children.of(p.path) {
+			l, a := b.dropSubtreeLocked(child)
+			lost, aliased = append(lost, l...), append(aliased, a...)
+		}
+		b.mu.Unlock()
+		b.loseRoots(lost)
+		b.rewalkAliased(aliased, lost)
+		return
+	}
+	isRoot := false
+	for _, r := range p.roots {
+		isRoot = isRoot || r.path == p.path
+	}
+	b.mu.Unlock()
+	b.walkRegister(p.path, p.roots)
+	reportUnskipped(b.emit, p.path, isRoot, entries)
 }
 
 func fanotifyPaths(parents []fanotifyParent) []string {
@@ -1121,14 +1250,10 @@ func fanotifyPaths(parents []fanotifyParent) []string {
 // refusal then moves them to inotify.
 func (b *fanotifyBackend) walkRegister(dir string, roots []*fanotifyRoot) {
 	err := walkTree(b.ctx, dir, walkVisitor{
-		enter: func(d string) (bool, error) {
-			return b.register(d, roots)
+		enter: func(d string, link bool) (bool, error) {
+			return b.register(d, link, roots)
 		},
-		skip: func(d string) {
-			for _, r := range roots {
-				b.unregister(d, r)
-			}
-		},
+		listed: b.setSkipped,
 	})
 	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, errBackendClosed) {
 		return
@@ -1159,7 +1284,11 @@ func (b *fanotifyBackend) handleSelf(key handleKey, mask uint64) {
 	var lost []string
 	if h := b.byHandle[key]; h != nil {
 		for p := range h.paths {
-			for r := range b.byPath[p].roots {
+			d := b.byPath[p]
+			if d == nil {
+				continue
+			}
+			for r := range d.roots {
 				if r.path == p {
 					lost = append(lost, r.path)
 				}

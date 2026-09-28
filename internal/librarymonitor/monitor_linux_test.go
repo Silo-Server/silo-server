@@ -196,6 +196,111 @@ func TestOverflowRewalksAndQueuesOneLibraryScanPerLibrary(t *testing.T) {
 	}
 }
 
+// A root whose first walk is still running already gets events; an overflow
+// then may have hidden a directory created during the walk. The root must be
+// walked again once the walk ends, and its library rescanned.
+func TestOverflowDuringTheFirstWalkRewalksAndRescans(t *testing.T) {
+	root := t.TempDir()
+	folders := &fakeFolders{}
+	folders.set(library(1, root))
+	b := newFakeBackend("inotify")
+	release := make(chan struct{})
+	b.block[root] = release
+	queue, status := newFakeQueue(), newFakeStatus()
+	cfg := testConfig(folders, queue, status)
+	cfg.hooks.primary = func(BackendOptions) (Backend, error) { return b, nil }
+	cfg.hooks.noFanotify = true
+	startMonitor(t, cfg)
+	waitCall(t, b, "add "+root)
+
+	b.events <- Event{Kind: EventOverflow}
+	waitTargets(t, queue, "1 library  realtime_monitor")
+	close(release)
+	waitCall(t, b, "add "+root)
+	waitStatus(t, status, "monitoring after the second walk", onlyMonitoring(1))
+	if n := b.addCount(root); n != 2 {
+		t.Fatalf("AddRoot called %d times, want the first walk and a re-walk", n)
+	}
+}
+
+// RemoveRoot can hang on a dead mount (fanotify stats and marks paths). It
+// must not run under the monitor's lock, which the status loop and Stop take.
+func TestHungRemoveRootDoesNotHoldTheMonitorLock(t *testing.T) {
+	rootA, rootB := t.TempDir(), t.TempDir()
+	folders := &fakeFolders{}
+	folders.set(library(1, rootA), library(2, rootB))
+	m, b, _, status := fakeMonitor(t, folders, func(cfg *Config) {
+		cfg.hooks.stopWait = 20 * time.Millisecond
+	})
+	waitStatus(t, status, "monitoring", onlyMonitoring(1, 2))
+	hung := make(chan struct{})
+	t.Cleanup(func() { close(hung) })
+	b.mu.Lock()
+	b.removeBlock[rootA] = hung
+	b.mu.Unlock()
+
+	folders.set(library(2, rootB))
+	m.Poke()
+	waitCall(t, b, "removing "+rootA)
+	waitStatus(t, status, "library 1 gone while its release hangs", onlyMonitoring(2))
+	stopped := make(chan struct{})
+	go func() {
+		m.Stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(waitTimeout):
+		t.Fatal("Stop waited for a hung RemoveRoot")
+	}
+}
+
+// A release collected by one attempt runs after the monitor's lock is
+// dropped. An attempt started in that gap must not record the root before
+// the release ran, or the late release would drop the fresh walk.
+func TestAttemptWaitsForAnEarlierRelease(t *testing.T) {
+	root := t.TempDir()
+	folders := &fakeFolders{}
+	folders.set(library(1, root))
+	attempts := make(chan State, 16)
+	m, b, _, status := fakeMonitor(t, folders, func(cfg *Config) {
+		cfg.hooks.afterAttempt = func(_ string, state State) { attempts <- state }
+		// The hung attempt's walk ticket stops holding the next one back
+		// at once, so only the pending release can.
+		cfg.WalkStall = time.Millisecond
+	})
+	waitStatus(t, status, "monitoring", onlyMonitoring(1))
+	<-attempts
+	drain(b.calls)
+
+	// A re-walk fails, so its attempt detaches the root; that release hangs.
+	hung := make(chan struct{})
+	var unhang sync.Once
+	t.Cleanup(func() { unhang.Do(func() { close(hung) }) })
+	b.mu.Lock()
+	b.addErr[root] = errors.New("walk failed")
+	b.removeBlock[root] = hung
+	b.mu.Unlock()
+	b.events <- Event{Kind: EventRewalk, Root: root}
+	waitCall(t, b, "removing "+root)
+
+	b.mu.Lock()
+	delete(b.addErr, root)
+	b.mu.Unlock()
+	m.Poke()
+	select {
+	case call := <-b.calls:
+		t.Fatalf("backend call %q while an earlier release of the root was pending", call)
+	case <-time.After(200 * time.Millisecond):
+	}
+	unhang.Do(func() { close(hung) })
+	waitCall(t, b, "remove "+root, "add "+root)
+	waitStatus(t, status, "monitoring again", onlyMonitoring(1))
+	if n := b.Directories(root); n == 0 {
+		t.Fatal("the late release dropped the new walk")
+	}
+}
+
 func TestRootLostReportsUnavailableAndQueuesNothing(t *testing.T) {
 	parent := t.TempDir()
 	root := filepath.Join(parent, "media")

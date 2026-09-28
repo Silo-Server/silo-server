@@ -45,6 +45,12 @@ const (
 	ignoreFileName = ".ignore"
 )
 
+// ignoreMarker reports whether name is an ignore file that can exclude its
+// directory (see dirSkipped).
+func ignoreMarker(name string) bool {
+	return name == markerNoMedia || name == ignoreFileName
+}
+
 // ignoredName reports whether a file or directory name matches the fixed
 // ignore list.
 func ignoredName(name string) bool {

@@ -5,8 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"path/filepath"
+	"time"
 )
 
 var errBackendClosed = errors.New("librarymonitor: backend closed")
@@ -200,6 +202,15 @@ func (c childDirs) remove(path string) {
 	}
 }
 
+// of returns the indexed paths directly below path.
+func (c childDirs) of(path string) []string {
+	out := make([]string, 0, len(c[path]))
+	for child := range c[path] {
+		out = append(out, child)
+	}
+	return out
+}
+
 // subtree returns path and every indexed path below it.
 func (c childDirs) subtree(path string) []string {
 	stack := []string{path}
@@ -213,6 +224,48 @@ func (c childDirs) subtree(path string) []string {
 		}
 	}
 	return all
+}
+
+// maxPendingMoves bounds how many moved-from halves a backend keeps waiting
+// for their partner; the oldest beyond it count as moves out.
+const maxPendingMoves = 1024
+
+// expireMoves reports, oldest first, the pending moves whose partner did not
+// arrive within wait as moves out, and returns the rest. The kernel queues
+// both halves of a rename together, so a partner that is not there by then
+// never comes. Moves beyond maxPendingMoves are reported as well. moves must
+// be in arrival order.
+func expireMoves[M any](moves []M, now time.Time, wait time.Duration, at func(M) time.Time, movedOut func([]M)) []M {
+	n := 0
+	for n < len(moves) && (len(moves)-n > maxPendingMoves || now.Sub(at(moves[n])) >= wait) {
+		n++
+	}
+	if n == 0 {
+		return moves
+	}
+	movedOut(moves[:n])
+	return moves[n:]
+}
+
+// reportUnskipped reports a directory whose ignore markers no longer exclude
+// it, so its contents get scanned: one directory change for it, or for a
+// root, whose parent is outside the library, one change per entry in it.
+func reportUnskipped(emit func(Event), dir string, isRoot bool, entries []fs.DirEntry) {
+	if !isRoot {
+		emit(Event{Kind: EventMovedTo, Dir: filepath.Dir(dir), Name: filepath.Base(dir), IsDir: true})
+		return
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if ignoredName(name) || ignoreMarker(name) {
+			continue
+		}
+		isDir := entry.IsDir() || (entry.Type()&fs.ModeSymlink != 0 && symlinkToDir(filepath.Join(dir, name)))
+		if isDir && ignoredDir(name) {
+			continue
+		}
+		emit(Event{Kind: EventMovedTo, Dir: dir, Name: name, IsDir: isDir})
+	}
 }
 
 // eventName returns an entry name from a kernel event without the NUL

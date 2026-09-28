@@ -12,19 +12,24 @@ import (
 // directories through it, so they skip exactly the same folders.
 type walkVisitor struct {
 	// enter records dir before it is listed, so a file created while the
-	// listing runs still produces an event. It returns false to leave dir
-	// unlisted: the backend already records it for this root under another
-	// path (a symlink alias), or it could not be recorded. A non-nil error
-	// aborts the walk.
-	enter func(dir string) (bool, error)
-	// skip undoes enter for a directory whose ignore files exclude it.
-	skip func(dir string)
+	// listing runs still produces an event. link reports that the walk
+	// reached dir through a symlink to a directory. It returns false to
+	// leave dir unlisted: the backend already records it for this root under
+	// another path (a symlink alias), or it could not be recorded. A non-nil
+	// error aborts the walk.
+	enter func(dir string, link bool) (bool, error)
+	// listed reports, once dir was listed, whether its ignore files exclude
+	// it and everything below it. A skipped directory stays recorded as a
+	// boundary, so adding or removing its .nomedia or .ignore is seen, but
+	// the walk does not descend into it.
+	listed func(dir string, skipped bool)
 }
 
 // walkTree records dir and every directory below it that the scanner would
 // enter: it lists each directory in name order, skips directories by the
 // fixed ignore list, the scanner's ignored names, and their .nomedia or
-// pattern-less .ignore files, and follows symlinked directories as the
+// pattern-less .ignore files (a directory skipped that way is still recorded
+// itself, see walkVisitor.listed), and follows symlinked directories as the
 // scanner does. Paths stay logical (built from dir), while loops through
 // symlinks are cut by the physical directory, like the scanner's walk. A
 // network filesystem mounted below dir is not entered: it is unsupported for
@@ -53,7 +58,9 @@ func walkTree(ctx context.Context, dir string, v walkVisitor) error {
 		w.networkLinks.add(dir)
 		return nil
 	}
-	return w.dir(ctx, dir, filepath.Clean(physical))
+	info, err := os.Lstat(dir)
+	link := err == nil && info.Mode()&os.ModeSymlink != 0
+	return w.dir(ctx, dir, filepath.Clean(physical), link)
 }
 
 type treeWalk struct {
@@ -111,7 +118,7 @@ func (l *networkLinks) list() []string {
 	return out
 }
 
-func (w *treeWalk) dir(ctx context.Context, logical, physical string) error {
+func (w *treeWalk) dir(ctx context.Context, logical, physical string, link bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -120,7 +127,7 @@ func (w *treeWalk) dir(ctx context.Context, logical, physical string) error {
 	}
 	w.visited[physical] = struct{}{}
 
-	ok, err := w.v.enter(logical)
+	ok, err := w.v.enter(logical, link)
 	if err != nil {
 		return err
 	}
@@ -132,10 +139,11 @@ func (w *treeWalk) dir(ctx context.Context, logical, physical string) error {
 		// Unreadable: nothing below it can be recorded. Not a walk failure.
 		return nil //nolint:nilerr // an unreadable directory must not abort the walk.
 	}
-	if dirSkipped(logical, entries) {
-		if w.v.skip != nil {
-			w.v.skip(logical)
-		}
+	skipped := dirSkipped(logical, entries)
+	if w.v.listed != nil {
+		w.v.listed(logical, skipped)
+	}
+	if skipped {
 		return nil
 	}
 	for _, entry := range entries {
@@ -145,9 +153,11 @@ func (w *treeWalk) dir(ctx context.Context, logical, physical string) error {
 		}
 		childLogical := filepath.Join(logical, name)
 		childPhysical := filepath.Join(physical, name)
+		childLink := false
 		switch {
 		case entry.IsDir():
 		case entry.Type()&os.ModeSymlink != 0:
+			childLink = true
 			// Decide from the link text first, so a link into a hung
 			// network mount is never resolved or stat'ed.
 			if linkOntoUnsupportedMount(w.unsupported, childLogical, physical) {
@@ -174,7 +184,7 @@ func (w *treeWalk) dir(ctx context.Context, logical, physical string) error {
 		if w.onUnsupportedMount(childPhysical) {
 			continue
 		}
-		if err := w.dir(ctx, childLogical, childPhysical); err != nil {
+		if err := w.dir(ctx, childLogical, childPhysical, childLink); err != nil {
 			return err
 		}
 	}

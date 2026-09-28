@@ -32,6 +32,18 @@ var integrationBackends = []integrationBackend{
 type scenarioEnv struct {
 	root    string
 	outside string
+	// walks receives the path of every walk after the initial one.
+	walks chan string
+}
+
+// waitWalk waits until the monitor walked the library folder again.
+func (e scenarioEnv) waitWalk(t *testing.T) {
+	t.Helper()
+	select {
+	case <-e.walks:
+	case <-time.After(waitTimeout):
+		t.Fatal("timed out waiting for the library folder to be walked again")
+	}
 }
 
 func (e scenarioEnv) in(parts ...string) string {
@@ -295,6 +307,76 @@ func integrationScenarios() []scenario {
 			},
 		},
 		{
+			name: "nothing in a folder with .nomedia is scanned",
+			setup: func(t *testing.T, e scenarioEnv) {
+				mkdirs(t, e.root, "Ignored")
+				writeFile(t, e.in("Ignored", ".nomedia"), "")
+			},
+			steps: []scenarioStep{{
+				act: func(t *testing.T, e scenarioEnv) {
+					writeFile(t, e.in("Ignored", "a.mkv"), "data")
+					mkdirs(t, e.root, "Ignored/Sub")
+					writeFile(t, e.in("Ignored", "Sub", "b.mkv"), "data")
+				},
+			}},
+		},
+		{
+			name: "folder with .nomedia is watched again once the marker goes",
+			setup: func(t *testing.T, e scenarioEnv) {
+				mkdirs(t, e.root, "Movie Q/Extras", "Movie Q/Other")
+				writeFile(t, e.in("Movie Q", ".nomedia"), "")
+				writeFile(t, e.in("Movie Q", "q.mkv"), "data")
+			},
+			steps: []scenarioStep{
+				{
+					act: func(t *testing.T, e scenarioEnv) {
+						if err := os.Remove(e.in("Movie Q", ".nomedia")); err != nil {
+							t.Fatal(err)
+						}
+					},
+					want: func(e scenarioEnv) []string { return []string{e.subtree("Movie Q")} },
+				},
+				{
+					act:  func(t *testing.T, e scenarioEnv) { writeFile(t, e.in("Movie Q", "Extras", "x.mkv"), "data") },
+					want: func(e scenarioEnv) []string { return []string{e.subtree("Movie Q", "Extras")} },
+				},
+				{
+					// Ignored again: the sentinel check catches a target for
+					// Other.
+					act: func(t *testing.T, e scenarioEnv) {
+						writeFile(t, e.in("Movie Q", ".nomedia"), "")
+						writeFile(t, e.in("Movie Q", "Other", "o.mkv"), "data")
+					},
+				},
+			},
+		},
+		{
+			// The walk records Target/Deep only through Linked, which sorts
+			// first; deleting the link must not leave Target unwatched.
+			name: "symlink alias deleted, its target folder stays watched",
+			setup: func(t *testing.T, e scenarioEnv) {
+				mkdirs(t, e.root, "Target/Deep")
+				if err := os.Symlink(e.in("Target"), e.in("Linked")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			steps: []scenarioStep{
+				{
+					act: func(t *testing.T, e scenarioEnv) {
+						if err := os.Remove(e.in("Linked")); err != nil {
+							t.Fatal(err)
+						}
+						e.waitWalk(t)
+					},
+					want: func(e scenarioEnv) []string { return []string{e.subtree("Linked")} },
+				},
+				{
+					act:  func(t *testing.T, e scenarioEnv) { writeFile(t, e.in("Target", "Deep", "x.mkv"), "data") },
+					want: func(e scenarioEnv) []string { return []string{e.subtree("Target", "Deep")} },
+				},
+			},
+		},
+		{
 			name:  "download renamed from a temp name",
 			setup: func(t *testing.T, e scenarioEnv) { mkdirs(t, e.root, "Movie M") },
 			steps: []scenarioStep{{
@@ -322,7 +404,8 @@ func TestIntegrationScenarios(t *testing.T) {
 
 func runScenario(t *testing.T, backend integrationBackend, sc scenario) {
 	parent := t.TempDir()
-	env := scenarioEnv{root: filepath.Join(parent, "library"), outside: filepath.Join(parent, "outside")}
+	walks := make(chan string, 16)
+	env := scenarioEnv{root: filepath.Join(parent, "library"), outside: filepath.Join(parent, "outside"), walks: walks}
 	mkdirs(t, parent, "outside", "Sentinel")
 	if sc.symlinkRoot {
 		mkdirs(t, parent, "real")
@@ -341,12 +424,20 @@ func runScenario(t *testing.T, backend integrationBackend, sc scenario) {
 	folders.set(library(1, env.root))
 	queue, status := newFakeQueue(), newFakeStatus()
 	cfg := testConfig(folders, queue, status)
+	cfg.hooks.afterWalk = func(path, _ string) {
+		select {
+		case walks <- path:
+		default:
+		}
+	}
 	backend.configure(t, &cfg)
 	startMonitor(t, cfg)
 	rows := waitStatus(t, status, "monitoring", hasState(1, StateMonitoring))
 	if rows[0].Backend != backend.name {
 		t.Fatalf("backend = %q, want %q", rows[0].Backend, backend.name)
 	}
+	// The initial walk; steps wait for the ones after it.
+	env.waitWalk(t)
 
 	allowed := map[string]bool{env.subtree("Sentinel"): true}
 	var received []string

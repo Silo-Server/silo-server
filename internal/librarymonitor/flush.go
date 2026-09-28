@@ -19,8 +19,6 @@ import (
 func (m *Monitor) flush(ctx context.Context, now time.Time) {
 	changes := append(m.retry, m.tracker.ready(now)...)
 	m.retry = nil
-	retried := m.retryTargets
-	m.retryTargets = nil
 
 	m.mu.Lock()
 	desired := m.desired
@@ -30,6 +28,15 @@ func (m *Monitor) flush(ctx context.Context, now time.Time) {
 	}
 	clear(m.libraryScans)
 	m.mu.Unlock()
+	// A target kept for a retry is dropped like a fresh one when its
+	// library turned monitoring off in the meantime.
+	var retried []scantrigger.Target
+	for _, t := range m.retryTargets {
+		if _, ok := desired[t.Folder.ID]; ok {
+			retried = append(retried, t)
+		}
+	}
+	m.retryTargets = nil
 	if len(changes) == 0 && len(libraryScans) == 0 && len(retried) == 0 {
 		return
 	}

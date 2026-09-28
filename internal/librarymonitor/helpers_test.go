@@ -170,25 +170,29 @@ type fakeBackend struct {
 	events chan Event
 	calls  chan string
 
-	mu      sync.Mutex
-	roots   map[string]int
-	addErr  map[string]error
-	block   map[string]chan struct{}
-	adds    map[string]int
-	removes map[string]int
-	closed  bool
+	mu     sync.Mutex
+	roots  map[string]int
+	addErr map[string]error
+	block  map[string]chan struct{}
+	// removeBlock holds RemoveRoot for a root, as a hung mount would, after
+	// it reported "removing <root>".
+	removeBlock map[string]chan struct{}
+	adds        map[string]int
+	removes     map[string]int
+	closed      bool
 }
 
 func newFakeBackend(name string) *fakeBackend {
 	return &fakeBackend{
-		name:    name,
-		events:  make(chan Event, 64),
-		calls:   make(chan string, 1024),
-		roots:   make(map[string]int),
-		addErr:  make(map[string]error),
-		block:   make(map[string]chan struct{}),
-		adds:    make(map[string]int),
-		removes: make(map[string]int),
+		name:        name,
+		events:      make(chan Event, 64),
+		calls:       make(chan string, 1024),
+		roots:       make(map[string]int),
+		addErr:      make(map[string]error),
+		block:       make(map[string]chan struct{}),
+		removeBlock: make(map[string]chan struct{}),
+		adds:        make(map[string]int),
+		removes:     make(map[string]int),
 	}
 }
 
@@ -220,6 +224,13 @@ func (b *fakeBackend) AddRoot(ctx context.Context, root string) error {
 func (b *fakeBackend) RemoveRoot(root string) {
 	b.mu.Lock()
 	b.removes[root]++
+	gate := b.removeBlock[root]
+	b.mu.Unlock()
+	if gate != nil {
+		b.calls <- "removing " + root
+		<-gate
+	}
+	b.mu.Lock()
 	delete(b.roots, root)
 	b.mu.Unlock()
 	b.calls <- "remove " + root

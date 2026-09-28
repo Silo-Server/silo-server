@@ -83,7 +83,7 @@ func TestWalkTreeSkipsNetworkMountsBelowTheRoot(t *testing.T) {
 	})
 
 	var entered []string
-	err = walkTree(context.Background(), root, walkVisitor{enter: func(dir string) (bool, error) {
+	err = walkTree(context.Background(), root, walkVisitor{enter: func(dir string, _ bool) (bool, error) {
 		entered = append(entered, rel(t, root, dir))
 		return true, nil
 	}})
@@ -119,7 +119,7 @@ func TestWalkTreeDoesNotFollowSymlinksOntoNetworkMounts(t *testing.T) {
 
 	ctx, links := withNetworkLinks(context.Background())
 	var entered []string
-	err = walkTree(ctx, root, walkVisitor{enter: func(dir string) (bool, error) {
+	err = walkTree(ctx, root, walkVisitor{enter: func(dir string, _ bool) (bool, error) {
 		entered = append(entered, rel(t, root, dir))
 		return true, nil
 	}})

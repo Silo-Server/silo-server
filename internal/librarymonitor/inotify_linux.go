@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -67,9 +68,11 @@ type inotifyBackend struct {
 	children childDirs
 	roots    map[string]*inotifyRoot
 
-	// unmounted collects, during one read, the roots with a filesystem
-	// unmounted below them. Only the read loop uses it.
-	unmounted map[string]struct{}
+	// rewalks collects, during one read, the roots to walk again: a
+	// filesystem was unmounted below them, or a path the walk reached
+	// through a symlink was dropped (see inotifyDir.link). Only the read
+	// loop uses it.
+	rewalks map[string]struct{}
 }
 
 type inotifyWatch struct {
@@ -82,6 +85,15 @@ type inotifyDir struct {
 	// roots maps each covering root to the walk generation that last
 	// recorded this path for it; a re-walk drops paths it did not reach.
 	roots map[*inotifyRoot]uint64
+	// link is set when the walk reached this path through a symlink to a
+	// directory. The walk records each physical directory once per root, so
+	// the directory may also sit in the root under its own path, unrecorded;
+	// dropping this path then needs a re-walk to record it there.
+	link bool
+	// skipped is set when the directory's ignore files exclude everything
+	// below it: it keeps its watch, so a change to its .nomedia or .ignore
+	// is seen, but nothing below it is recorded.
+	skipped bool
 }
 
 type inotifyRoot struct {
@@ -105,6 +117,8 @@ type inotifyMove struct {
 	name    string
 	isDir   bool
 	parents []inotifyParent
+	// at is when the read loop saw the IN_MOVED_FROM.
+	at time.Time
 }
 
 func newInotifyBackend(opts BackendOptions, hooks inotifyHooks) (Backend, error) {
@@ -140,7 +154,7 @@ func newInotifyBackend(opts BackendOptions, hooks inotifyHooks) (Backend, error)
 		children: make(childDirs),
 		roots:    make(map[string]*inotifyRoot),
 
-		unmounted: make(map[string]struct{}),
+		rewalks: make(map[string]struct{}),
 	}
 	go b.readLoop()
 	return b, nil
@@ -195,12 +209,12 @@ func (b *inotifyBackend) AddRoot(ctx context.Context, root string) error {
 	total := 0
 	limited := false
 	err := walkTree(ctx, root, walkVisitor{
-		enter: func(dir string) (bool, error) {
+		enter: func(dir string, link bool) (bool, error) {
 			total++
 			if limited {
 				return true, nil
 			}
-			ok, err := b.register(dir, []*inotifyRoot{r})
+			ok, err := b.register(dir, link, []*inotifyRoot{r})
 			if errors.Is(err, unix.ENOSPC) {
 				limited = true
 				return true, nil
@@ -213,12 +227,7 @@ func (b *inotifyBackend) AddRoot(ctx context.Context, root string) error {
 			}
 			return ok, nil
 		},
-		skip: func(dir string) {
-			total--
-			if !limited {
-				b.unregister(dir, r)
-			}
-		},
+		listed: b.setSkipped,
 	})
 	if err != nil {
 		return err
@@ -261,11 +270,12 @@ func (b *inotifyBackend) RemoveRoot(root string) {
 	}
 }
 
-// register adds a watch for dir and records it for roots. It reports whether
-// dir was recorded for any root: false when dir vanished, is not a
-// directory, cannot be watched, or is an alias of a directory already
-// recorded for the same root under another path.
-func (b *inotifyBackend) register(dir string, roots []*inotifyRoot) (bool, error) {
+// register adds a watch for dir and records it for roots; link is set when
+// the walk reached dir through a symlink. It reports whether dir was
+// recorded for any root: false when dir vanished, is not a directory, cannot
+// be watched, or is an alias of a directory already recorded for the same
+// root under another path.
+func (b *inotifyBackend) register(dir string, link bool, roots []*inotifyRoot) (bool, error) {
 	wd, err := b.addWatch(dir)
 	if err != nil {
 		if errors.Is(err, unix.ENOSPC) || errors.Is(err, errBackendClosed) {
@@ -280,7 +290,7 @@ func (b *inotifyBackend) register(dir string, roots []*inotifyRoot) (bool, error
 	}
 	if d := b.byPath[dir]; d != nil && d.wd != wd {
 		// The path now names a different directory than the one recorded.
-		b.dropSubtreeLocked(dir, b.rmWatchLocked)
+		_, _ = b.dropSubtreeLocked(dir, b.rmWatchLocked)
 	}
 	w := b.byWD[wd]
 	if w == nil {
@@ -306,6 +316,7 @@ func (b *inotifyBackend) register(dir string, roots []*inotifyRoot) (bool, error
 			r.dirs++
 		}
 		d.roots[r] = r.gen
+		d.link = link
 		recorded = true
 	}
 	if len(w.paths) == 0 {
@@ -313,6 +324,28 @@ func (b *inotifyBackend) register(dir string, roots []*inotifyRoot) (bool, error
 		b.rmWatchLocked(wd)
 	}
 	return recorded, nil
+}
+
+// setSkipped records whether dir's ignore files exclude what is below it.
+func (b *inotifyBackend) setSkipped(dir string, skipped bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if d := b.byPath[dir]; d != nil {
+		d.skipped = skipped
+	}
+}
+
+// inSkipped reports whether the directory parents name is one whose ignore
+// files exclude everything below it.
+func (b *inotifyBackend) inSkipped(parents []inotifyParent) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, p := range parents {
+		if d := b.byPath[p.path]; d != nil && d.skipped {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *inotifyBackend) addWatch(dir string) (int, error) {
@@ -341,16 +374,6 @@ func (b *inotifyBackend) aliasLocked(w *inotifyWatch, r *inotifyRoot) bool {
 		}
 	}
 	return false
-}
-
-func (b *inotifyBackend) unregister(dir string, r *inotifyRoot) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if d := b.byPath[dir]; d != nil {
-		if _, ok := d.roots[r]; ok {
-			b.removeRootFromPathLocked(dir, d, r)
-		}
-	}
 }
 
 func (b *inotifyBackend) removeRootFromPathLocked(path string, d *inotifyDir, r *inotifyRoot) {
@@ -385,20 +408,35 @@ func (b *inotifyBackend) dropPathLocked(path string, rm func(wd int)) {
 // dropSubtreeLocked forgets path and every recorded path below it. It
 // returns the roots whose own directory was among them: a root nested in
 // another root's tree is lost through its parent's event, before (or
-// instead of) an event on the root itself.
-func (b *inotifyBackend) dropSubtreeLocked(path string, rm func(wd int)) []string {
-	var lost []string
+// instead of) an event on the root itself. It also returns the other roots
+// that covered a dropped path the walk reached through a symlink (see
+// inotifyDir.link); they need a re-walk.
+func (b *inotifyBackend) dropSubtreeLocked(path string, rm func(wd int)) (lost, aliased []string) {
 	for _, p := range b.children.subtree(path) {
 		if d := b.byPath[p]; d != nil {
 			for r := range d.roots {
-				if r.path == p {
+				switch {
+				case r.path == p:
 					lost = append(lost, r.path)
+				case d.link:
+					aliased = append(aliased, r.path)
 				}
 			}
 		}
 		b.dropPathLocked(p, rm)
 	}
-	return lost
+	return lost, aliased
+}
+
+// rewalkAliased asks for a re-walk of the aliased roots (see
+// dropSubtreeLocked), except those in covered: lost roots, or roots a walk
+// already records again.
+func (b *inotifyBackend) rewalkAliased(aliased, covered []string) {
+	for _, root := range aliased {
+		if !slices.Contains(covered, root) {
+			b.rewalks[root] = struct{}{}
+		}
+	}
 }
 
 // loseRoots releases roots that disappeared and reports them.
@@ -432,24 +470,26 @@ func (b *inotifyBackend) readLoop() {
 	var moves []inotifyMove
 	for {
 		n, err := b.file.Read(buf)
-		if err != nil {
-			if errors.Is(err, os.ErrDeadlineExceeded) {
-				b.movedOut(moves)
-				moves = nil
-				_ = b.file.SetReadDeadline(time.Time{})
-				continue
-			}
+		switch {
+		case err == nil:
+			moves = b.process(buf[:n], moves)
+		case errors.Is(err, os.ErrDeadlineExceeded):
+		default:
 			if !b.isClosed() {
 				b.log.Error("librarymonitor: inotify read failed", "component", "librarymonitor", "err", err)
 			}
 			return
 		}
-		moves = b.process(buf[:n], moves)
-		b.flushUnmounted()
+		// Checked after every read, not only when a read times out: a
+		// steady stream of events would otherwise keep a move out pending,
+		// and unreported, for as long as the stream lasts.
+		moves = expireMoves(moves, time.Now(), inotifyMoveWait, func(mv inotifyMove) time.Time { return mv.at }, b.movedOut)
+		b.flushRewalks()
 		if len(moves) > 0 {
-			if err := b.file.SetReadDeadline(time.Now().Add(inotifyMoveWait)); err != nil {
+			if err := b.file.SetReadDeadline(moves[0].at.Add(inotifyMoveWait)); err != nil {
 				b.movedOut(moves)
 				moves = nil
+				b.flushRewalks()
 			}
 		} else {
 			_ = b.file.SetReadDeadline(time.Time{})
@@ -491,7 +531,7 @@ func (b *inotifyBackend) handle(wd int, mask, cookie uint32, name string, moves 
 	isDir := mask&unix.IN_ISDIR != 0
 	switch {
 	case mask&unix.IN_MOVED_FROM != 0:
-		return append(moves, inotifyMove{cookie: cookie, name: name, isDir: isDir, parents: parents})
+		return append(moves, inotifyMove{cookie: cookie, name: name, isDir: isDir, parents: parents, at: time.Now()})
 	case mask&unix.IN_MOVED_TO != 0:
 		for i, mv := range moves {
 			if mv.cookie == cookie {
@@ -504,11 +544,12 @@ func (b *inotifyBackend) handle(wd int, mask, cookie uint32, name string, moves 
 	case mask&unix.IN_CREATE != 0:
 		b.arrived(EventCreate, parents, name, isDir)
 	case mask&unix.IN_CLOSE_WRITE != 0:
-		if !ignoredName(name) {
+		if !ignoredName(name) && !ignoreMarker(name) && !b.inSkipped(parents) {
 			for _, p := range parents {
 				b.emit(Event{Kind: EventCloseWrite, Dir: p.path, Name: name})
 			}
 		}
+		b.markerChanged(parents, name)
 	case mask&unix.IN_DELETE != 0:
 		b.left(EventDelete, parents, name, isDir)
 	}
@@ -541,9 +582,13 @@ func (b *inotifyBackend) parentsOf(wd int) []inotifyParent {
 
 // arrived handles a created or moved-in entry. A new directory (or a symlink
 // to one, which the scanner follows) is recorded, then listed by the walk,
-// before the event is emitted.
+// before the event is emitted. Nothing that arrives in a skipped directory
+// is recorded or reported. An ignore marker (.nomedia, .ignore) is never
+// reported, only re-evaluated: the scanner has nothing to do with the file
+// itself.
 func (b *inotifyBackend) arrived(kind EventKind, parents []inotifyParent, name string, isDir bool) {
-	if ignoredName(name) {
+	defer b.markerChanged(parents, name)
+	if ignoredName(name) || (!isDir && ignoreMarker(name)) || b.inSkipped(parents) {
 		return
 	}
 	if !isDir {
@@ -578,19 +623,22 @@ func (b *inotifyBackend) recordedDir(parents []inotifyParent, name string) bool 
 
 // left handles a deleted or moved-out entry.
 func (b *inotifyBackend) left(kind EventKind, parents []inotifyParent, name string, isDir bool) {
+	defer b.markerChanged(parents, name)
 	isDir = isDir || b.recordedDir(parents, name)
 	if isDir {
 		// A directory moved out of the tree keeps its watches on the moved
 		// inodes; drop them so no event arrives under a stale path.
-		var lost []string
+		var lost, aliased []string
 		b.mu.Lock()
 		for _, p := range parents {
-			lost = append(lost, b.dropSubtreeLocked(filepath.Join(p.path, name), b.rmWatchLocked)...)
+			l, a := b.dropSubtreeLocked(filepath.Join(p.path, name), b.rmWatchLocked)
+			lost, aliased = append(lost, l...), append(aliased, a...)
 		}
 		b.mu.Unlock()
 		b.loseRoots(lost)
+		b.rewalkAliased(aliased, lost)
 	}
-	if ignoredName(name) || (isDir && ignoredDir(name)) {
+	if ignoredName(name) || (isDir && ignoredDir(name)) || (!isDir && ignoreMarker(name)) || b.inSkipped(parents) {
 		return
 	}
 	for _, p := range parents {
@@ -616,25 +664,35 @@ func (b *inotifyBackend) movedOut(moves []inotifyMove) {
 func (b *inotifyBackend) renamed(from inotifyMove, name string, isDir bool, parents []inotifyParent) {
 	oldDir := isDir || b.recordedDir(from.parents, from.name)
 	newDir := isDir || symlinkToDir(filepath.Join(parents[0].path, name))
-	oldIgnored := ignoredName(from.name) || (oldDir && ignoredDir(from.name))
-	newIgnored := ignoredName(name) || (newDir && ignoredDir(name))
+	// Nothing in a skipped directory is recorded or reported, and an ignore
+	// marker is re-evaluated below instead of reported.
+	oldIgnored := ignoredName(from.name) || (oldDir && ignoredDir(from.name)) || (!oldDir && ignoreMarker(from.name)) || b.inSkipped(from.parents)
+	newIgnored := ignoredName(name) || (newDir && ignoredDir(name)) || (!newDir && ignoreMarker(name)) || b.inSkipped(parents)
 	var detached []int
+	var lost, aliased []string
 	if oldDir {
-		var lost []string
 		b.mu.Lock()
 		for _, p := range from.parents {
-			lost = append(lost, b.dropSubtreeLocked(filepath.Join(p.path, from.name), func(wd int) { detached = append(detached, wd) })...)
+			l, a := b.dropSubtreeLocked(filepath.Join(p.path, from.name), func(wd int) { detached = append(detached, wd) })
+			lost, aliased = append(lost, l...), append(aliased, a...)
 		}
 		b.mu.Unlock()
 		// A root inside the moved directory is gone from its configured
 		// path; release it before the walk re-records the new location.
 		b.loseRoots(lost)
 	}
+	// A lost root needs no re-walk, and the walk of the new location records
+	// the moved aliases again for its roots.
+	covered := slices.Clone(lost)
 	if newDir && !newIgnored {
 		for _, p := range parents {
 			b.walkRegister(filepath.Join(p.path, name), p.roots)
+			for _, r := range p.roots {
+				covered = append(covered, r.path)
+			}
 		}
 	}
+	b.rewalkAliased(aliased, covered)
 	if len(detached) > 0 {
 		b.mu.Lock()
 		for _, wd := range detached {
@@ -647,6 +705,8 @@ func (b *inotifyBackend) renamed(from inotifyMove, name string, isDir bool, pare
 	emitRename(b.emit,
 		renameSide{dirs: inotifyPaths(from.parents), name: from.name, isDir: oldDir, ignored: oldIgnored},
 		renameSide{dirs: inotifyPaths(parents), name: name, isDir: newDir, ignored: newIgnored})
+	b.markerChanged(from.parents, from.name)
+	b.markerChanged(parents, name)
 }
 
 func inotifyPaths(parents []inotifyParent) []string {
@@ -662,18 +722,14 @@ func inotifyPaths(parents []inotifyParent) []string {
 // coverage with holes.
 func (b *inotifyBackend) walkRegister(dir string, roots []*inotifyRoot) {
 	err := walkTree(b.ctx, dir, walkVisitor{
-		enter: func(d string) (bool, error) {
-			ok, err := b.register(d, roots)
+		enter: func(d string, link bool) (bool, error) {
+			ok, err := b.register(d, link, roots)
 			if errors.Is(err, unix.ENOSPC) {
 				return false, errWalkLimit
 			}
 			return ok, err
 		},
-		skip: func(d string) {
-			for _, r := range roots {
-				b.unregister(d, r)
-			}
-		},
+		listed: b.setSkipped,
 	})
 	if !errors.Is(err, errWalkLimit) {
 		return
@@ -695,21 +751,69 @@ func (b *inotifyBackend) walkRegister(dir string, roots []*inotifyRoot) {
 	}
 }
 
-// flushUnmounted asks for one re-walk per root that had a filesystem
-// unmounted below it during the last read.
-func (b *inotifyBackend) flushUnmounted() {
-	if len(b.unmounted) == 0 {
+// flushRewalks asks for one re-walk per root collected during the last read
+// (see rewalks).
+func (b *inotifyBackend) flushRewalks() {
+	if len(b.rewalks) == 0 {
 		return
 	}
-	roots := make([]string, 0, len(b.unmounted))
-	for root := range b.unmounted {
+	roots := make([]string, 0, len(b.rewalks))
+	for root := range b.rewalks {
 		roots = append(roots, root)
 	}
-	clear(b.unmounted)
+	clear(b.rewalks)
 	sort.Strings(roots)
 	for _, root := range roots {
 		b.emit(Event{Kind: EventRewalk, Root: root})
 	}
+}
+
+// markerChanged re-evaluates the directories parents name after an event on
+// name in them, when name is an ignore marker (.nomedia, .ignore).
+func (b *inotifyBackend) markerChanged(parents []inotifyParent, name string) {
+	if !ignoreMarker(name) {
+		return
+	}
+	for _, p := range parents {
+		b.reevaluate(p)
+	}
+}
+
+// reevaluate applies a directory's current ignore markers. A directory they
+// now exclude keeps its own watch but drops everything recorded below it. A
+// directory they no longer exclude is walked, and reported so its contents
+// get scanned.
+func (b *inotifyBackend) reevaluate(p inotifyParent) {
+	entries, err := os.ReadDir(p.path)
+	if err != nil {
+		return // gone; its parent's event drops it
+	}
+	skipped := dirSkipped(p.path, entries)
+	b.mu.Lock()
+	d := b.byPath[p.path]
+	if d == nil || d.skipped == skipped {
+		b.mu.Unlock()
+		return
+	}
+	d.skipped = skipped
+	if skipped {
+		var lost, aliased []string
+		for _, child := range b.children.of(p.path) {
+			l, a := b.dropSubtreeLocked(child, b.rmWatchLocked)
+			lost, aliased = append(lost, l...), append(aliased, a...)
+		}
+		b.mu.Unlock()
+		b.loseRoots(lost)
+		b.rewalkAliased(aliased, lost)
+		return
+	}
+	isRoot := false
+	for _, r := range p.roots {
+		isRoot = isRoot || r.path == p.path
+	}
+	b.mu.Unlock()
+	b.walkRegister(p.path, p.roots)
+	reportUnskipped(b.emit, p.path, isRoot, entries)
 }
 
 // handleSelf handles events about a watched directory itself. Deleting,
@@ -724,7 +828,11 @@ func (b *inotifyBackend) handleSelf(wd int, mask uint32) {
 	var lost []string
 	if w := b.byWD[wd]; w != nil {
 		for p := range w.paths {
-			for r := range b.byPath[p].roots {
+			d := b.byPath[p]
+			if d == nil {
+				continue
+			}
+			for r := range d.roots {
 				if r.path == p {
 					lost = append(lost, r.path)
 				} else if mask&unix.IN_UNMOUNT != 0 {
@@ -733,7 +841,7 @@ func (b *inotifyBackend) handleSelf(wd int, mask uint32) {
 					// again, and reconcile walks it once more when a
 					// filesystem is mounted there again, which sends no
 					// event.
-					b.unmounted[r.path] = struct{}{}
+					b.rewalks[r.path] = struct{}{}
 				}
 			}
 		}

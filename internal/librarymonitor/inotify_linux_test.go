@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -21,7 +22,11 @@ func newTestInotify(t *testing.T, hooks inotifyHooks) *inotifyBackend {
 	if err != nil {
 		t.Fatalf("newInotifyBackend: %v", err)
 	}
-	t.Cleanup(func() { _ = b.Close() })
+	t.Cleanup(func() {
+		if err := b.Close(); err != nil {
+			t.Errorf("closing the inotify backend: %v", err)
+		}
+	})
 	return b.(*inotifyBackend)
 }
 
@@ -394,5 +399,158 @@ func TestInotifyRuntimeSymlinkOntoNetworkMountIsNotWalked(t *testing.T) {
 	}
 	if got := b.watchCount(); got != 1 {
 		t.Fatalf("watches = %d, want only the root's", got)
+	}
+}
+
+// A folder with .nomedia keeps its own watch, so removing the marker is seen:
+// the folder is then recorded below and reported for a scan. Adding the
+// marker again drops what is below it.
+func TestInotifyIgnoreMarkerKeepsItsFolderWatched(t *testing.T) {
+	root := t.TempDir()
+	movie := filepath.Join(root, "Movie")
+	mkdirs(t, root, "Movie/Extras")
+	writeFile(t, filepath.Join(movie, ".nomedia"), "")
+	b := newTestInotify(t, inotifyHooks{})
+	if err := b.AddRoot(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+	if got := b.pathsWithPrefix(movie); len(got) != 1 {
+		t.Fatalf("recorded %v, want only the ignored folder itself", got)
+	}
+
+	writeFile(t, filepath.Join(movie, "a.mkv"), "x")
+	if err := os.Remove(filepath.Join(movie, ".nomedia")); err != nil {
+		t.Fatal(err)
+	}
+	events := nextEvents(t, b, isEvent(EventMovedTo, root, "Movie"))
+	if got := eventStrings(events); len(got) != 1 || !events[0].IsDir {
+		t.Fatalf("events = %v, want only the folder reported", got)
+	}
+	if got := b.pathsWithPrefix(movie); len(got) != 2 {
+		t.Fatalf("recorded %v after the marker went, want the folder and Extras", got)
+	}
+	writeFile(t, filepath.Join(movie, "Extras", "x.mkv"), "x")
+	nextEvents(t, b, isEvent(EventCloseWrite, filepath.Join(movie, "Extras"), "x.mkv"))
+
+	writeFile(t, filepath.Join(movie, ".nomedia"), "")
+	// The sentinel's event follows the marker's handling.
+	writeFile(t, filepath.Join(root, "sentinel"), "x")
+	nextEvents(t, b, isEvent(EventCloseWrite, root, "sentinel"))
+	if got := b.pathsWithPrefix(movie); len(got) != 1 {
+		t.Fatalf("recorded %v after the marker came back, want only the folder", got)
+	}
+}
+
+// A library folder with .nomedia is recorded, so its status does not claim
+// monitoring with nothing watched, and removing the marker reports every
+// entry in it (the folder's parent is outside the library).
+func TestInotifyIgnoreMarkerAtTheLibraryFolder(t *testing.T) {
+	root := t.TempDir()
+	mkdirs(t, root, "Movie")
+	writeFile(t, filepath.Join(root, ".nomedia"), "")
+	b := newTestInotify(t, inotifyHooks{})
+	if err := b.AddRoot(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+	if got := b.Directories(root); got != 1 {
+		t.Fatalf("directories = %d, want the library folder itself", got)
+	}
+	if err := os.Remove(filepath.Join(root, ".nomedia")); err != nil {
+		t.Fatal(err)
+	}
+	nextEvents(t, b, isEvent(EventMovedTo, root, "Movie"))
+	if got := b.Directories(root); got != 2 {
+		t.Fatalf("directories = %d after the marker went, want 2", got)
+	}
+}
+
+// The walk records a directory once per root: with Linked -> Target in the
+// root, Target is recorded only as Linked. Deleting the link must ask for a
+// re-walk, which records Target under its own path.
+func TestInotifyDroppedSymlinkAliasAsksForARewalk(t *testing.T) {
+	root := t.TempDir()
+	mkdirs(t, root, "Target/Deep")
+	if err := os.Symlink(filepath.Join(root, "Target"), filepath.Join(root, "Linked")); err != nil {
+		t.Fatal(err)
+	}
+	b := newTestInotify(t, inotifyHooks{})
+	if err := b.AddRoot(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+	if got := b.pathsWithPrefix(filepath.Join(root, "Target")); len(got) != 0 {
+		t.Fatalf("recorded %v, want Target only through Linked", got)
+	}
+	if err := os.Remove(filepath.Join(root, "Linked")); err != nil {
+		t.Fatal(err)
+	}
+	nextEvents(t, b, func(ev Event) bool { return ev.Kind == EventRewalk && ev.Root == root })
+	if err := b.AddRoot(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(root, "Target", "Deep", "x.mkv"), "x")
+	nextEvents(t, b, isEvent(EventCloseWrite, filepath.Join(root, "Target", "Deep"), "x.mkv"))
+}
+
+// A move out of the tree is reported even while other events keep every
+// read well inside the move wait.
+func TestInotifyMoveOutReportedDuringASteadyStream(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	mkdirs(t, root, "Movie", "Busy")
+	writeFile(t, filepath.Join(root, "Movie", "a.mkv"), "x")
+	b := newTestInotify(t, inotifyHooks{})
+	if err := b.AddRoot(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+	stop, stopped := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(stopped)
+		busy := filepath.Join(root, "Busy", "busy.mkv")
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_ = os.WriteFile(busy, []byte("x"), 0o644)
+			time.Sleep(time.Millisecond)
+		}
+	}()
+	defer func() {
+		close(stop)
+		<-stopped
+	}()
+	nextEvents(t, b, isEvent(EventCloseWrite, filepath.Join(root, "Busy"), "busy.mkv"))
+	mustRename(t, filepath.Join(root, "Movie", "a.mkv"), filepath.Join(outside, "a.mkv"))
+	nextEvents(t, b, isEvent(EventMovedFrom, filepath.Join(root, "Movie"), "a.mkv"))
+}
+
+func TestExpireMovesReportsExpiredAndExcessMoves(t *testing.T) {
+	now := time.Now()
+	type move struct {
+		id int
+		at time.Time
+	}
+	var out []int
+	movedOut := func(moves []move) {
+		for _, mv := range moves {
+			out = append(out, mv.id)
+		}
+	}
+	at := func(mv move) time.Time { return mv.at }
+
+	moves := []move{{1, now.Add(-30 * time.Millisecond)}, {2, now.Add(-20 * time.Millisecond)}, {3, now.Add(-time.Millisecond)}}
+	kept := expireMoves(moves, now, 20*time.Millisecond, at, movedOut)
+	if len(kept) != 1 || kept[0].id != 3 || !slices.Equal(out, []int{1, 2}) {
+		t.Fatalf("kept %v, moved out %v; want 3 kept and 1, 2 moved out", kept, out)
+	}
+
+	out = nil
+	moves = nil
+	for i := range maxPendingMoves + 2 {
+		moves = append(moves, move{i, now})
+	}
+	kept = expireMoves(moves, now, time.Hour, at, movedOut)
+	if len(kept) != maxPendingMoves || !slices.Equal(out, []int{0, 1}) {
+		t.Fatalf("kept %d, moved out %v; want %d kept and the two oldest moved out", len(kept), out, maxPendingMoves)
 	}
 }

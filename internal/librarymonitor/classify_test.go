@@ -91,12 +91,18 @@ func TestWalkTreeSkipsWhatTheScannerSkips(t *testing.T) {
 
 	var entered []string
 	err := walkTree(context.Background(), root, walkVisitor{
-		enter: func(dir string) (bool, error) {
-			entered = append(entered, rel(t, root, dir))
+		enter: func(dir string, link bool) (bool, error) {
+			if link {
+				entered = append(entered, rel(t, root, dir)+" (link)")
+			} else {
+				entered = append(entered, rel(t, root, dir))
+			}
 			return true, nil
 		},
-		skip: func(dir string) {
-			entered = append(entered, "skip "+rel(t, root, dir))
+		listed: func(dir string, skipped bool) {
+			if skipped {
+				entered = append(entered, "skip "+rel(t, root, dir))
+			}
 		},
 	})
 	if err != nil {
@@ -105,7 +111,7 @@ func TestWalkTreeSkipsWhatTheScannerSkips(t *testing.T) {
 	want := []string{
 		".",
 		"EmptyIgnore", "skip EmptyIgnore",
-		"Linked", "Linked/Deep",
+		"Linked (link)", "Linked/Deep",
 		"Movie A", "Movie A/Extras",
 		"NoMedia", "skip NoMedia",
 		"PatternIgnore", "PatternIgnore/Inside",

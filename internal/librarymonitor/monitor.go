@@ -173,6 +173,9 @@ type Monitor struct {
 	// removals counts detached roots; a limit_reached root retries when
 	// watches were freed since it hit the limit.
 	removals uint64
+	// releasing counts, per root path, the backend releases collected under
+	// mu that have not run yet (see rootRelease).
+	releasing map[string]*pendingReleases
 
 	// Owned by the event loop.
 	tracker      *tracker
@@ -196,6 +199,10 @@ type rootState struct {
 	lost bool
 	// rewalk asks the next attempt to walk an attached root again.
 	rewalk bool
+	// attaching is the backend a running attempt is recording a root with
+	// that has none yet. It already delivers the root's events, so an
+	// overflow on it during that first walk counts for the root.
+	attaching Backend
 	// limitHit records a runtime watch-limit hit that arrived while an
 	// attempt ran; finish applies it instead of the attempt's outcome.
 	limitHit *WatchLimitError
@@ -216,6 +223,23 @@ type rootState struct {
 	mounts            string
 	unsupportedMounts []string
 	everSeen          bool
+}
+
+// rootRelease is a root to drop from a backend. Detaching collects them
+// under m.mu and runs them once it is unlocked: RemoveRoot can stat and
+// mark paths (fanotify), which blocks forever on a hung mount, and nothing
+// that holds m.mu may wait on a mount.
+type rootRelease struct {
+	backend Backend
+	path    string
+}
+
+// pendingReleases counts a path's collected releases that have not run.
+// An attempt on the path waits for done before it records the path again,
+// so a late RemoveRoot cannot drop a fresh walk.
+type pendingReleases struct {
+	n    int
+	done chan struct{}
 }
 
 // fileID is a directory's device and inode; zero when unknown.
@@ -257,6 +281,7 @@ func New(cfg Config) (*Monitor, error) {
 		roots:        make(map[string]*rootState),
 		desired:      make(map[int]*models.MediaFolder),
 		libraryScans: make(map[int]struct{}),
+		releasing:    make(map[string]*pendingReleases),
 		tracker:      newTracker(cfg.QuietWindow, cfg.CreatedFallback, cfg.StablePoll),
 	}
 	if cfg.hooks.stat != nil {
@@ -460,6 +485,7 @@ func (m *Monitor) applyFolders(folders []*models.MediaFolder) {
 	m.mu.Lock()
 	m.desiredOrder = order
 	m.desired = desired
+	var releases []rootRelease
 	for path, rs := range m.roots {
 		if _, ok := rootLibs[path]; ok {
 			continue
@@ -469,9 +495,15 @@ func (m *Monitor) applyFolders(folders []*models.MediaFolder) {
 			rs.cancel()
 			continue
 		}
-		m.detachLocked(rs)
+		releases = m.detachLocked(rs, releases)
 		delete(m.roots, path)
 	}
+	m.mu.Unlock()
+	m.markDirty()
+	// Released before any attempt starts, so a limit_reached root retried
+	// below finds the watches freed.
+	m.runReleases(releases)
+	m.mu.Lock()
 	for _, path := range rootOrder {
 		rs := m.roots[path]
 		if rs == nil {
@@ -547,14 +579,62 @@ func (m *Monitor) spawnLocked(rs *rootState) {
 	}()
 }
 
-// detachLocked releases the root's registration with its backend.
-func (m *Monitor) detachLocked(rs *rootState) {
+// detachLocked forgets the root's backend and adds the release of its
+// registration to releases, which the caller runs with runReleases once
+// m.mu is unlocked.
+func (m *Monitor) detachLocked(rs *rootState, releases []rootRelease) []rootRelease {
 	if rs.backend != nil {
-		rs.backend.RemoveRoot(rs.path)
+		releases = m.queueReleaseLocked(releases, rs.backend, rs.path)
 		rs.backend = nil
 		m.removals++
 	}
 	rs.backendName = ""
+	return releases
+}
+
+// queueReleaseLocked adds the release of path from b to releases and marks
+// it pending, so the next attempt on path waits for it.
+func (m *Monitor) queueReleaseLocked(releases []rootRelease, b Backend, path string) []rootRelease {
+	p := m.releasing[path]
+	if p == nil {
+		p = &pendingReleases{done: make(chan struct{})}
+		m.releasing[path] = p
+	}
+	p.n++
+	return append(releases, rootRelease{backend: b, path: path})
+}
+
+// runReleases runs releases collected under m.mu. The caller must not hold
+// m.mu.
+func (m *Monitor) runReleases(releases []rootRelease) {
+	for _, r := range releases {
+		r.backend.RemoveRoot(r.path)
+		m.mu.Lock()
+		if p := m.releasing[r.path]; p != nil {
+			p.n--
+			if p.n == 0 {
+				close(p.done)
+				delete(m.releasing, r.path)
+			}
+		}
+		m.mu.Unlock()
+	}
+}
+
+// waitReleases waits until the releases of path collected so far have run.
+func (m *Monitor) waitReleases(ctx context.Context, path string) error {
+	m.mu.Lock()
+	p := m.releasing[path]
+	m.mu.Unlock()
+	if p == nil {
+		return nil
+	}
+	select {
+	case <-p.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // outcome is the result of one attempt on a root.
@@ -580,6 +660,12 @@ type outcome struct {
 // goroutine so a hung mount blocks only this root.
 func (m *Monitor) try(ctx context.Context, rs *rootState, ticket *walkTicket) outcome {
 	ctx, _ = withNetworkLinks(ctx)
+	// A release of this path collected before the attempt started (a
+	// previous attempt's, or a previous rootState's) must not land after
+	// the walk below.
+	if err := m.waitReleases(ctx, rs.path); err != nil {
+		return outcome{canceled: true}
+	}
 	m.mu.Lock()
 	attached, rewalk, everSeen, recorded := rs.backend, rs.rewalk, rs.everSeen, rs.identity
 	recordedMounts := rs.mounts
@@ -618,11 +704,13 @@ func (m *Monitor) try(ctx context.Context, rs *rootState, ticket *walkTicket) ou
 			return m.walkOutcome(ctx, rs.path, attached, attached.AddRoot(ctx, rs.path), notes, id, mounts)
 		}
 		// The folder was replaced or remounted: record it from scratch.
+		var releases []rootRelease
 		m.mu.Lock()
 		if rs.backend == attached {
-			m.detachLocked(rs)
+			releases = m.detachLocked(rs, releases)
 		}
 		m.mu.Unlock()
+		m.runReleases(releases)
 	}
 	return m.attach(ctx, rs, ticket, id, mounts)
 }
@@ -663,7 +751,7 @@ func (m *Monitor) attach(ctx context.Context, rs *rootState, ticket *walkTicket,
 	if err := m.gate.wait(ctx, ticket); err != nil {
 		return outcome{canceled: true}
 	}
-	b, reason, err := m.attachBackend(ctx, rs.path, ticket)
+	b, reason, err := m.attachBackend(ctx, rs, ticket)
 	if reason != "" {
 		notes = append([]string{reason}, notes...)
 	}
@@ -711,12 +799,14 @@ func (m *Monitor) walkOutcome(ctx context.Context, path string, b Backend, err e
 	return outcome{state: StateError, errText: err.Error()}
 }
 
-// attachBackend records path with fanotify when that backend is registered
-// and accepts the root, and otherwise with inotify. The returned reason
-// explains a fallback for the status detail.
-func (m *Monitor) attachBackend(ctx context.Context, path string, ticket *walkTicket) (Backend, string, error) {
+// attachBackend records the root with fanotify when that backend is
+// registered and accepts the root, and otherwise with inotify. The returned
+// reason explains a fallback for the status detail.
+func (m *Monitor) attachBackend(ctx context.Context, rs *rootState, ticket *walkTicket) (Backend, string, error) {
+	path := rs.path
 	reason := ""
 	if fb, ferr := m.fanotifyBackend(); fb != nil {
+		m.setAttaching(rs, fb)
 		m.gate.setProgress(ticket, func() int { return fb.Directories(path) })
 		err := fb.AddRoot(ctx, path)
 		if err == nil {
@@ -735,12 +825,19 @@ func (m *Monitor) attachBackend(ctx context.Context, path string, ticket *walkTi
 	if err != nil {
 		return nil, reason, err
 	}
+	m.setAttaching(rs, b)
 	m.gate.setProgress(ticket, func() int { return b.Directories(path) })
 	if err := b.AddRoot(ctx, path); err != nil {
 		b.RemoveRoot(path)
 		return nil, reason, err
 	}
 	return b, reason, nil
+}
+
+func (m *Monitor) setAttaching(rs *rootState, b Backend) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	rs.attaching = b
 }
 
 // fanotifyBackend creates the fanotify backend once, when a factory is
@@ -812,10 +909,11 @@ func (m *Monitor) forward(b Backend) {
 // finish applies an attempt's outcome.
 func (m *Monitor) finish(rs *rootState, out outcome) {
 	m.mu.Lock()
-	retry := m.finishLocked(rs, out)
+	retry, releases := m.finishLocked(rs, out)
 	state := rs.state
 	walked := out.backend != nil && rs.backend == out.backend && !out.keep && !out.canceled
 	m.mu.Unlock()
+	m.runReleases(releases)
 	m.markDirty()
 	if retry {
 		m.Poke()
@@ -828,30 +926,33 @@ func (m *Monitor) finish(rs *rootState, out outcome) {
 	}
 }
 
-func (m *Monitor) finishLocked(rs *rootState, out outcome) (retry bool) {
+// finishLocked applies an attempt's outcome. It returns whether to reconcile
+// again at once, and the releases to run once m.mu is unlocked.
+func (m *Monitor) finishLocked(rs *rootState, out outcome) (retry bool, releases []rootRelease) {
 	rs.running = false
 	rs.cancel = nil
+	rs.attaching = nil
 	hit := rs.limitHit
 	rs.limitHit = nil
 	if !rs.wanted || m.stopped {
-		m.discardLocked(rs, out)
+		releases = m.discardLocked(rs, out, releases)
 		if !rs.wanted && m.roots[rs.path] == rs {
 			delete(m.roots, rs.path)
 		}
-		return false
+		return false, releases
 	}
 	if rs.lost {
 		// The root disappeared while the attempt ran.
 		rs.lost = false
-		m.discardLocked(rs, out)
+		releases = m.discardLocked(rs, out, releases)
 		rs.state = StateRootUnavailable
 		rs.everSeen = true
-		return false
+		return false, releases
 	}
 	if hit != nil {
 		// The watch limit was hit at runtime while the attempt ran, and the
 		// backend released the root; the attempt's outcome no longer holds.
-		m.discardLocked(rs, out)
+		releases = m.discardLocked(rs, out, releases)
 		rs.state = StateLimitReached
 		rs.backendName = BackendInotify
 		if out.notes != nil {
@@ -861,15 +962,15 @@ func (m *Monitor) finishLocked(rs *rootState, out outcome) (retry bool) {
 		rs.limit = hit.Limit
 		rs.limitSeen = m.removals
 		rs.everSeen = true
-		return false
+		return false, releases
 	}
 	if out.canceled {
 		// Canceled, then wanted again before it finished: retry now.
-		return true
+		return true, releases
 	}
 	if out.keep {
 		// A re-walk asked for while the attempt ran starts right away.
-		return rs.rewalk
+		return rs.rewalk, releases
 	}
 	rs.state = out.state
 	rs.notes = out.notes
@@ -884,7 +985,7 @@ func (m *Monitor) finishLocked(rs *rootState, out outcome) (retry bool) {
 		rs.unsupportedMounts = out.mounts.unsupported
 		rs.everSeen = true
 	} else {
-		m.detachLocked(rs)
+		releases = m.detachLocked(rs, releases)
 		rs.mounts = ""
 		rs.unsupportedMounts = nil
 	}
@@ -892,16 +993,17 @@ func (m *Monitor) finishLocked(rs *rootState, out outcome) (retry bool) {
 	if out.state == StateLimitReached {
 		rs.limitSeen = m.removals
 	}
-	return rs.backend != nil && rs.rewalk
+	return rs.backend != nil && rs.rewalk, releases
 }
 
-// discardLocked drops an attempt's result: it releases the root from the
-// backend the attempt recorded it with, and from the one it was attached to.
-func (m *Monitor) discardLocked(rs *rootState, out outcome) {
+// discardLocked drops an attempt's result: it queues the root's release from
+// the backend the attempt recorded it with, and from the one it was
+// attached to.
+func (m *Monitor) discardLocked(rs *rootState, out outcome, releases []rootRelease) []rootRelease {
 	if out.backend != nil {
-		out.backend.RemoveRoot(rs.path)
+		releases = m.queueReleaseLocked(releases, out.backend, rs.path)
 	}
-	m.detachLocked(rs)
+	return m.detachLocked(rs, releases)
 }
 
 // handleEvent routes one backend event.
@@ -935,13 +1037,16 @@ func (m *Monitor) handleEvent(be backendEvent, now time.Time) {
 }
 
 // handleOverflow re-walks every root on the backend, to record directories
-// created in the gap, and queues one library scan per affected library.
+// created in the gap, and queues one library scan per affected library. A
+// root whose first walk on the backend is still running counts too: the
+// walk may have missed a directory created in the gap, and it is walked
+// again once it ends.
 func (m *Monitor) handleOverflow(b Backend) {
 	m.log.Warn("librarymonitor: kernel event queue overflowed; rescanning monitored libraries", "backend", b.Name())
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, rs := range m.roots {
-		if rs.backend != b || !rs.wanted {
+		if (rs.backend != b && rs.attaching != b) || !rs.wanted {
 			continue
 		}
 		for _, id := range rs.libraries {

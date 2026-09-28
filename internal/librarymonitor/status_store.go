@@ -158,7 +158,7 @@ func (r *StatusReader) RealtimeMonitoringStatus(ctx context.Context) (StatusSnap
 	}
 	reports, err := r.Store.FreshReports(ctx)
 	if err != nil {
-		return StatusSnapshot{}, err
+		return StatusSnapshot{}, fmt.Errorf("read library monitor status: %w", err)
 	}
 	enabled := true
 	if r.ServerEnabled != nil {

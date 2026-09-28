@@ -55,7 +55,11 @@ func newTestFanotify(t *testing.T, hooks fanotifyHooks) *fanotifyBackend {
 	if err != nil {
 		t.Skipf("fanotify_init is unavailable: %v", err)
 	}
-	t.Cleanup(func() { _ = b.Close() })
+	t.Cleanup(func() {
+		if err := b.Close(); err != nil {
+			t.Errorf("closing the fanotify backend: %v", err)
+		}
+	})
 	return b
 }
 
@@ -526,6 +530,95 @@ func TestFanotifyEventTranslation(t *testing.T) {
 		b.process(fanEvent(unix.FAN_Q_OVERFLOW, "", 0, ""), nil)
 		b.process([]byte{1, 2, 3}, nil)
 		assertEvents(t, collect(b), "overflow", "overflow")
+	})
+}
+
+// TestFanotifyIgnoreMarkersAndSymlinkAliases feeds kernel-format events, like
+// TestFanotifyEventTranslation, for the cases where a change must reach
+// directories the walk did not record.
+func TestFanotifyIgnoreMarkersAndSymlinkAliases(t *testing.T) {
+	setup := func(t *testing.T, dirs ...string) (*fanotifyBackend, string) {
+		b := newTestFanotify(t, fanotifyHooks{mark: (&markRecorder{}).mark})
+		root := filepath.Join(t.TempDir(), "library")
+		mkdirs(t, root, dirs...)
+		return b, root
+	}
+
+	t.Run("a folder with .nomedia stays recorded and is re-evaluated", func(t *testing.T) {
+		b, root := setup(t, "Movie/Extras")
+		movie := filepath.Join(root, "Movie")
+		writeFile(t, filepath.Join(movie, ".nomedia"), "")
+		if err := b.AddRoot(context.Background(), root); err != nil {
+			t.Fatal(err)
+		}
+		if got := b.pathsWithPrefix(movie); len(got) != 1 {
+			t.Fatalf("recorded %v, want only the ignored folder itself", got)
+		}
+		key := b.keyOf(t, movie)
+
+		writeFile(t, filepath.Join(movie, "a.mkv"), "x")
+		if err := os.Remove(filepath.Join(movie, ".nomedia")); err != nil {
+			t.Fatal(err)
+		}
+		b.process(joinEvents(
+			dirent(unix.FAN_CREATE|unix.FAN_CLOSE_WRITE, key, "a.mkv"),
+			dirent(unix.FAN_DELETE, key, ".nomedia"),
+		), nil)
+		assertEvents(t, collect(b), "moved_to "+movie)
+		if got := b.pathsWithPrefix(movie); len(got) != 2 {
+			t.Fatalf("recorded %v after the marker went, want the folder and Extras", got)
+		}
+
+		writeFile(t, filepath.Join(movie, ".nomedia"), "")
+		b.process(dirent(unix.FAN_CREATE|unix.FAN_CLOSE_WRITE, key, ".nomedia"), nil)
+		assertEvents(t, collect(b))
+		if got := b.pathsWithPrefix(movie); len(got) != 1 {
+			t.Fatalf("recorded %v after the marker came back, want only the folder", got)
+		}
+	})
+
+	t.Run("a library folder with .nomedia is recorded", func(t *testing.T) {
+		b, root := setup(t, "Movie")
+		writeFile(t, filepath.Join(root, ".nomedia"), "")
+		if err := b.AddRoot(context.Background(), root); err != nil {
+			t.Fatal(err)
+		}
+		if got := b.Directories(root); got != 1 {
+			t.Fatalf("directories = %d, want the library folder itself", got)
+		}
+		if err := os.Remove(filepath.Join(root, ".nomedia")); err != nil {
+			t.Fatal(err)
+		}
+		b.process(dirent(unix.FAN_DELETE, b.keyOf(t, root), ".nomedia"), nil)
+		assertEvents(t, collect(b), "moved_to "+filepath.Join(root, "Movie"))
+		if got := b.Directories(root); got != 2 {
+			t.Fatalf("directories = %d after the marker went, want 2", got)
+		}
+	})
+
+	t.Run("a dropped symlink alias asks for a re-walk", func(t *testing.T) {
+		b, root := setup(t, "Target/Deep")
+		linked := filepath.Join(root, "Linked")
+		if err := os.Symlink(filepath.Join(root, "Target"), linked); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.AddRoot(context.Background(), root); err != nil {
+			t.Fatal(err)
+		}
+		if got := b.pathsWithPrefix(filepath.Join(root, "Target")); len(got) != 0 {
+			t.Fatalf("recorded %v, want Target only through Linked", got)
+		}
+		if err := os.Remove(linked); err != nil {
+			t.Fatal(err)
+		}
+		b.process(dirent(unix.FAN_DELETE, b.keyOf(t, root), "Linked"), nil)
+		assertEvents(t, collect(b), "delete "+linked, "rewalk "+root)
+		if err := b.AddRoot(context.Background(), root); err != nil {
+			t.Fatal(err)
+		}
+		if got := b.pathsWithPrefix(filepath.Join(root, "Target")); len(got) != 2 {
+			t.Fatalf("recorded %v after the re-walk, want Target and Target/Deep", got)
+		}
 	})
 }
 

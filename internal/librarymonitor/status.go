@@ -74,12 +74,14 @@ type rootView struct {
 }
 
 // aggregateLibrary builds one library's node row from its roots, in library
-// path order. Roots this node cannot see are skipped; when none is visible
-// there is no row. The worst root's state wins and directories are summed.
-// The detail says each distinct thing once: roots with the same detail are
-// named together, and a detail every root of the library shares is not
-// prefixed with paths at all.
-func aggregateLibrary(libraryID int, roots []rootView) (LibraryStatus, bool) {
+// path order. configured is how many distinct paths the library has, which
+// can be more than len(roots): a path with no state on this node yet has no
+// view. Roots this node cannot see are skipped; when none is visible there
+// is no row. The worst root's state wins and directories are summed. The
+// detail says each distinct thing once: roots with the same detail are named
+// together, and a detail every path of the library shares is not prefixed
+// with paths at all.
+func aggregateLibrary(libraryID int, roots []rootView, configured int) (LibraryStatus, bool) {
 	status := LibraryStatus{LibraryID: libraryID}
 	type detailGroup struct {
 		detail string
@@ -124,10 +126,10 @@ func aggregateLibrary(libraryID int, roots []rootView) (LibraryStatus, bool) {
 	}
 	details := make([]string, 0, len(groups))
 	for _, g := range groups {
-		// Compared with every root, not just the visible ones: a library
-		// with a root this node cannot see still needs paths to tell its
-		// roots apart.
-		if len(g.paths) == len(roots) {
+		// Compared with every configured path, not just the visible ones: a
+		// library with a root this node cannot see, or has no state for yet,
+		// still needs paths to tell its roots apart.
+		if len(g.paths) == configured {
 			details = append(details, g.detail)
 			continue
 		}
@@ -142,7 +144,8 @@ func aggregateLibrary(libraryID int, roots []rootView) (LibraryStatus, bool) {
 func (m *Monitor) statusRowsLocked() []LibraryStatus {
 	rows := make([]LibraryStatus, 0, len(m.desiredOrder))
 	for _, folder := range m.desiredOrder {
-		row, ok := aggregateLibrary(folder.ID, m.rootViewsLocked(folder))
+		views, configured := m.rootViewsLocked(folder)
+		row, ok := aggregateLibrary(folder.ID, views, configured)
 		if ok {
 			rows = append(rows, row)
 		}
@@ -150,7 +153,9 @@ func (m *Monitor) statusRowsLocked() []LibraryStatus {
 	return rows
 }
 
-func (m *Monitor) rootViewsLocked(folder *models.MediaFolder) []rootView {
+// rootViewsLocked returns the views of the folder's roots that have state,
+// and how many distinct paths the folder has.
+func (m *Monitor) rootViewsLocked(folder *models.MediaFolder) ([]rootView, int) {
 	seen := make(map[string]bool, len(folder.Paths))
 	views := make([]rootView, 0, len(folder.Paths))
 	for _, raw := range folder.Paths {
@@ -169,7 +174,7 @@ func (m *Monitor) rootViewsLocked(folder *models.MediaFolder) []rootView {
 		}
 		views = append(views, view)
 	}
-	return views
+	return views, len(seen)
 }
 
 // statusDetail is the root's contribution to the row detail.

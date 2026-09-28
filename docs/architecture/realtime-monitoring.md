@@ -204,7 +204,9 @@ There is no setting to choose a backend. Granting or withholding
   went away) asks the monitor to walk the folder again.
 - Move halves are paired by cookie. If a read ends between the two halves, the
   moved-from waits at most 20 ms for its partner before it counts as a move
-  out.
+  out. The wait is checked after every read, so a steady stream of other
+  events cannot hold a move open, and at most 1,024 moved-from halves wait at
+  once; older ones count as moves out.
 - `inotify_add_watch` resolves a path and can block on a hung mount, so it runs
   outside the lock that status reads take.
 - Limited by `fs.inotify.max_user_watches`; see
@@ -281,14 +283,25 @@ directories the scanner would enter. Both backends use the same walk
   `@Recycle`, `.Trash`, `$RECYCLE.BIN`, `.deleted`, `.inbound`, `.downloads`.
 - A directory holding a regular `.nomedia` file, or a regular `.ignore` file
   without a pattern, is skipped with everything below it, as in
-  [scanner-ignore-files](scanner-ignore-files.md).
+  [scanner-ignore-files](scanner-ignore-files.md). The directory itself stays
+  recorded (a library folder with such a marker holds one watch), so its
+  markers keep being checked. Other changes in it are dropped. When a marker
+  is deleted, moved away, or rewritten so it no longer excludes the directory,
+  the directory is walked and reported as one folder change. A library folder
+  itself reports one change per entry in it. When a marker appears,
+  everything recorded below the directory is dropped. Marker files are never
+  reported as changes themselves.
 - Pattern rules inside `.ignore` and `.siloignore` are not applied: the
   scanner's matcher is internal to its package. A pattern-ignored folder costs
   a watch, and a change there resolves to a scan that the scanner then filters.
 - Symlinked directories are followed, as the scanner follows them. Loops are
   cut by physical path within a walk, and across walks because a directory
   already recorded for the same folder under another path is not recorded
-  again.
+  again. So a directory can be recorded only through a symlink that sorts
+  before its own path (`Linked -> Target`). When a path the walk reached
+  through a symlink is dropped (the link, or a folder holding it, is
+  deleted, moved out, or excluded by a marker), the folder is walked again,
+  which records the directory under whatever path still reaches it.
 - A network filesystem (NFS, SMB/CIFS, CephFS, 9p, by the mountinfo type)
   mounted below a folder is not entered, for the same reasons a network folder
   is not monitored. The walk finds such mounts in `/proc/self/mountinfo`
@@ -367,7 +380,9 @@ and the monitor report the same import, the queue merges them.
 When the kernel reports a queue overflow, the monitor re-walks every folder on
 that backend, to record directories created in the gap, and queues one
 whole-library scan for each library with a folder on that backend. Libraries
-on the other backend are unaffected.
+on the other backend are unaffected. A folder whose first walk on that backend
+is still running counts too: its library scan is queued at once, and the
+folder is walked again as soon as the first walk ends.
 
 ## Folder loss
 
@@ -553,10 +568,13 @@ not.
   stall event reading for every folder on that backend. Direct links onto
   network filesystems are skipped without being touched; a chain of links
   into one is resolved first.
-- The monitor's event loop stats created files, and the flush's resolver stats
-  changed paths. A hung FUSE mount (a dead mergerfs branch) can hold that loop
-  and delay changes for every library until the call returns. Shutdown does not
-  wait for a stuck loop: `Stop` gives it 5 seconds, then goes on.
+- The monitor's event loop stats created files, releases library folders
+  removed from the desired set (fanotify stats and unmarks paths there), and
+  the flush's resolver stats changed paths. A hung FUSE mount (a dead mergerfs
+  branch) can hold that loop and delay changes for every library until the
+  call returns. Releases never run under the monitor's lock, so status reports
+  keep going. Shutdown does not wait for a stuck loop: `Stop` gives it 5
+  seconds, then goes on.
 - The mount check only covers mounts below a folder's physical path. A local
   filesystem reached through a symlink inside a library is not re-walked when
   it is remounted, until an overflow or a restart.
