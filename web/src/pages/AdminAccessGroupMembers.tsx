@@ -75,6 +75,9 @@ export function AccessGroupMembers({
   const [pending, setPending] = useState<GroupMove | null>(null);
   const [saving, setSaving] = useState(false);
   const [failures, setFailures] = useState<string[]>([]);
+  const [failedAdding, setFailedAdding] = useState(false);
+  // Users an add couldn't move in, pre-selected when Add users reopens.
+  const [addRetryIds, setAddRetryIds] = useState<Set<number>>(new Set());
 
   const members = useMemo(
     () =>
@@ -98,6 +101,7 @@ export function AccessGroupMembers({
   }
 
   async function applyMove(move: GroupMove) {
+    const isAdd = String(move.target.id) === String(group.id);
     setSaving(true);
     setFailures([]);
     const context = captureAdminUserAuthority();
@@ -115,7 +119,9 @@ export function AccessGroupMembers({
       } catch (err) {
         failedIds.add(user.id);
         failed.push(
-          `${user.username}: ${err instanceof Error ? err.message : "could not be moved"}`,
+          `${user.username}: ${
+            err instanceof Error ? err.message : isAdd ? "could not be added" : "could not be moved"
+          }`,
         );
       }
     }
@@ -124,16 +130,21 @@ export function AccessGroupMembers({
     void queryClient.invalidateQueries({ queryKey: accessGroupsKey(scope) });
     setSaving(false);
     setPending(null);
-    // After moving members out, keep the ones that failed selected, with the
-    // same target, so the move can be retried as is. Adding users into this
-    // group doesn't use the member selection, so it is left alone.
-    if (String(move.target.id) !== String(group.id)) {
+    // Keep the users that failed ready for a retry: members moving out stay
+    // selected with the same target; users being added are pre-selected the
+    // next time Add users opens.
+    if (isAdd) {
+      setAddRetryIds(failedIds);
+    } else {
       setSelected(failedIds);
       if (failedIds.size === 0) setMoveTarget("");
     }
+    setFailedAdding(isAdd);
     setFailures(failed);
     if (moved > 0) {
-      toast.success(`Moved ${moved} ${moved === 1 ? "user" : "users"} to ${move.target.name}`);
+      toast.success(
+        `${isAdd ? "Added" : "Moved"} ${moved} ${moved === 1 ? "user" : "users"} to ${move.target.name}`,
+      );
     }
   }
 
@@ -176,7 +187,7 @@ export function AccessGroupMembers({
       )}
       {failures.length > 0 && (
         <div role="alert" className="text-sm">
-          <p>Some users could not be moved:</p>
+          <p>Some users could not be {failedAdding ? "added" : "moved"}:</p>
           <ul className="list-disc pl-5">
             {failures.map((failure) => (
               <li key={failure}>{failure}</li>
@@ -243,6 +254,7 @@ export function AccessGroupMembers({
           group={group}
           groups={groups}
           users={users.data ?? []}
+          initialChosen={addRetryIds}
           onClose={() => setAdding(false)}
           onChoose={(chosen) => {
             setAdding(false);
@@ -271,17 +283,19 @@ function AddUsersDialog({
   group,
   groups,
   users,
+  initialChosen,
   onClose,
   onChoose,
 }: {
   group: AccessGroup;
   groups: AccessGroup[];
   users: AdminUser[];
+  initialChosen?: ReadonlySet<number>;
   onClose: () => void;
   onChoose: (users: AdminUser[]) => void;
 }) {
   const [search, setSearch] = useState("");
-  const [chosen, setChosen] = useState<Set<number>>(new Set());
+  const [chosen, setChosen] = useState<Set<number>>(() => new Set(initialChosen));
   const groupNames = new Map(groups.map((candidate) => [String(candidate.id), candidate.name]));
   // Admin accounts can't join groups, and members are already here.
   const eligible = users

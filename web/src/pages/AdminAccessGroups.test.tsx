@@ -357,6 +357,31 @@ describe("AdminAccessGroups", () => {
     adminUsers.data = [];
   });
 
+  it("names users that could not be added and keeps them for a retry", async () => {
+    withGuestsGroup();
+    adminUsers.data = [member(8, "sam", "user", 2)];
+    adminUsers.update.mockReset().mockRejectedValueOnce(new Error("This user changed."));
+    const user = userEvent.setup();
+    renderPage("/admin/access-groups/1");
+    const members = await screen.findByRole("region", { name: "Members" });
+
+    await user.click(within(members).getByRole("button", { name: "Add users" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("checkbox"));
+    await user.click(within(dialog).getByRole("button", { name: /Add 1 selected/ }));
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Move" }),
+    );
+
+    const alert = await within(members).findByRole("alert");
+    expect(alert).toHaveTextContent("Some users could not be added");
+    expect(alert).toHaveTextContent("sam: This user changed.");
+    // Reopening Add users has the failed user chosen, ready to retry.
+    await user.click(within(members).getByRole("button", { name: "Add users" }));
+    expect(within(await screen.findByRole("dialog")).getByRole("checkbox")).toBeChecked();
+    adminUsers.data = [];
+  });
+
   it("names members that could not be moved", async () => {
     withGuestsGroup();
     adminUsers.data = [member(7, "taylor", "user", 1), member(8, "sam", "user", 1)];
