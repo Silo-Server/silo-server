@@ -1234,6 +1234,9 @@ func (m *SessionManager) applyReplacementLocked(
 	}
 
 	s.MediaFileID = replacement.EffectiveMediaFileID
+	// A replacement stream means the play is active again, so a stop mark from
+	// an ID-less stop no longer applies.
+	s.StopReported = false
 	applySessionStreamStateLocked(s, replacement.StreamState)
 	if replacement.PositionSeconds != nil {
 		s.Position = *replacement.PositionSeconds
@@ -1261,6 +1264,8 @@ func (m *SessionManager) RollbackReplacement(sessionID string, rollback SessionR
 		return ErrSessionReplacementSuperseded
 	}
 	s.MediaFileID = rollback.previousEffectiveMediaFileID
+	// Rolling back a replacement is still an active play, not a stopped one.
+	s.StopReported = false
 	restoreSessionStreamStateLocked(s, rollback.previousStreamState)
 	if rollback.restoreProgress {
 		s.Position = rollback.previousPosition

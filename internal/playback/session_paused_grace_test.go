@@ -143,3 +143,33 @@ func TestStopReportedPausedSessionKeepsPausedGrace(t *testing.T) {
 		t.Fatal("a progress report must clear the stop mark")
 	}
 }
+
+// A replacement stream (and its rollback) is an active play, so it clears a
+// stop mark rather than leaving the play hidden from the admin view.
+func TestReplacementClearsStopReported(t *testing.T) {
+	m := NewSessionManager(0, 0)
+	session, err := m.StartSession(1, "profile-1", 100, PlayDirect, false)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if err := m.MarkStopReported(session.ID); err != nil {
+		t.Fatal(err)
+	}
+	rollback, err := m.ApplyReplacement(session.ID, SessionReplacement{EffectiveMediaFileID: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := m.GetSession(session.ID); got.StopReported {
+		t.Fatal("ApplyReplacement kept the stop mark")
+	}
+
+	if err := m.MarkStopReported(session.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.RollbackReplacement(session.ID, rollback); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := m.GetSession(session.ID); got.StopReported {
+		t.Fatal("RollbackReplacement kept the stop mark")
+	}
+}
