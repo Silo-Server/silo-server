@@ -45,6 +45,20 @@ release event's episode key:
 - `next_up` notifies only when the episode is at or beyond the profile's
   `next_expected_episode_key`.
 - Suppress when `last_notified_episode_key >= episode_key`.
+- `continue_watching` and `next_up` follow Home. The interest recompute
+  clears them for a series the profile removed from that surface:
+  - An active series drop clears both until the profile watches the series
+    again.
+  - A per-card Continue Watching dismissal clears `continue_watching` while
+    the dismissed episode's progress is unchanged.
+  - A per-card Next Up dismissal clears `next_up` while the dismissed episode
+    is still the one at the progression cursor, the same test Home applies.
+
+  Favorites and watchlist are unaffected. The progression cursor is kept, so
+  `next_up` resumes from the right episode once a removal lapses. Every
+  removal or restore queues a recompute, and so does the first progress write
+  of a new watch session, since resuming playback can lift a removal without
+  changing any progress state.
 - Profile-level notification preferences are a hard gate: a reason disabled
   in preferences can never match, so no delivery row is created and no
   channel — including webhooks — ever sees the event. Per-webhook reason

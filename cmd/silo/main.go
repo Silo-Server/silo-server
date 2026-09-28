@@ -2335,7 +2335,7 @@ func main() {
 			WithWatchState(watchstate.NewService(userStoreProvider).WithStableIdentityResolver(historyIdentity)).
 			WithUserStoreProvider(userStoreProvider).
 			WithRatingStore(catalog.NewRatingsRepo(deps.DB), recommendations.NewRepo(deps.DB)).
-			WithDroppedStore(catalog.NewDroppedSeriesRepo(deps.DB))
+			WithDroppedStore(notifications.TrackDroppedSeries(catalog.NewDroppedSeriesRepo(deps.DB), notificationSystem))
 		backgroundInit = append(backgroundInit, func(ctx context.Context) {
 			if compatTerminalRecoveryReady != nil {
 				select {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -48,6 +49,7 @@ type InterestUpdater struct {
 	interests *InterestRepository
 	stores    userstore.UserStoreProvider
 	scopes    ScopeResolver
+	drops     droppedSeriesLister
 	logger    *slog.Logger
 
 	mu sync.Mutex
@@ -63,7 +65,7 @@ func NewInterestUpdater(
 	stores userstore.UserStoreProvider,
 	scopes ScopeResolver,
 ) *InterestUpdater {
-	return &InterestUpdater{
+	updater := &InterestUpdater{
 		pool:      pool,
 		interests: interests,
 		stores:    stores,
@@ -71,12 +73,16 @@ func NewInterestUpdater(
 		logger:    slog.Default().With("component", "notifications.interest"),
 		pending:   make(map[interestMutation]int),
 	}
+	if pool != nil {
+		updater.drops = catalog.NewDroppedSeriesRepo(pool)
+	}
+	return updater
 }
 
 // QueueItemMutation records that a profile's relationship to a media item
-// (favorite, watchlist, watch progress) changed. The item is resolved to its
-// parent series asynchronously; movie targets are ignored. Safe to call from
-// hot request paths.
+// (favorite, watchlist, watch progress, Home removal) changed. The item is
+// resolved to its parent series asynchronously; movie targets are ignored.
+// Safe to call from hot request paths.
 func (u *InterestUpdater) QueueItemMutation(userID int, profileID, itemID string) {
 	if u == nil || userID <= 0 || profileID == "" || itemID == "" {
 		return
@@ -286,7 +292,7 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 		return fmt.Errorf("load watchlist: %w", err)
 	}
 
-	continueWatching := false
+	var inProgress []userstore.WatchProgress
 	hasProgression := false
 	lastCompletedKey := 0
 	hasCompleted := false
@@ -306,7 +312,8 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 		for episodeID, entry := range progress {
 			hasProgression = true
 			if !entry.Completed && entry.PositionSeconds > 0 {
-				continueWatching = true
+				entry.MediaItemID = episodeID
+				inProgress = append(inProgress, entry)
 			}
 			if entry.Completed {
 				markCompleted(episodeID)
@@ -352,7 +359,21 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 		lastCompleted = &completed
 		nextExpected = &expected
 	}
-	nextUpCandidate := hasProgression
+
+	// Notifications follow Home: a series the profile removed from Continue
+	// Watching or Next Up stops notifying for that reason. The progression
+	// cursor is kept, so next_up resumes from the right episode once the
+	// removal lapses.
+	continueWatching, nextUpCandidate := false, false
+	if hasProgression {
+		hides, err := u.loadHomeHides(ctx, store, userID, profileID, seriesID, episodeKeys,
+			len(inProgress) > 0, nextExpected != nil)
+		if err != nil {
+			return err
+		}
+		continueWatching = hides.continueWatchingVisible(inProgress)
+		nextUpCandidate = hides.nextUpVisible(nextEpisodeAt(episodeKeys, nextExpected))
+	}
 
 	flags := SeriesInterest{
 		UserID:                  userID,
