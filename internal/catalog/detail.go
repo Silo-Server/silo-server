@@ -3020,13 +3020,17 @@ func (s *DetailService) buildEpisodeDetail(ctx context.Context, episode *models.
 	)
 	detail.OverlaySummary = overlays.BuildSummary(files)
 	s.episodeSubtitleDefaults(ctx, seriesCtx, filter, episode.SeriesID, files).applyToItemDetail(detail)
-	if seriesCtx.versionPref.HasAny {
-		if seriesCtx.versionPref.Resolution != "" {
-			detail.EffectiveVersionResolution = stringPtr(seriesCtx.versionPref.Resolution)
+	versionPref := seriesCtx.versionPref
+	if episode.SeriesID != seriesCtx.series.ContentID {
+		versionPref = s.effectiveVersionDefaults(ctx, filter, episode.SeriesID)
+	}
+	if versionPref.HasAny {
+		if versionPref.Resolution != "" {
+			detail.EffectiveVersionResolution = stringPtr(versionPref.Resolution)
 		}
-		detail.EffectiveVersionHDR = boolPtr(seriesCtx.versionPref.HDR)
-		if seriesCtx.versionPref.CodecVideo != "" {
-			detail.EffectiveVersionCodecVideo = stringPtr(seriesCtx.versionPref.CodecVideo)
+		detail.EffectiveVersionHDR = boolPtr(versionPref.HDR)
+		if versionPref.CodecVideo != "" {
+			detail.EffectiveVersionCodecVideo = stringPtr(versionPref.CodecVideo)
 		}
 	}
 

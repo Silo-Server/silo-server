@@ -413,8 +413,8 @@ func TestGetEpisodeDetailsForSeriesResolvesPreferencesOncePerSeries(t *testing.T
 }
 
 // A batch shares the series' preference lookups only with that series'
-// episodes; an episode of another series keeps its own series-level subtitle
-// and audio choices.
+// episodes; an episode of another series keeps its own series-level subtitle,
+// audio and version choices.
 func TestGetEpisodeDetailsForSeriesKeepsAnotherSeriesPreferences(t *testing.T) {
 	f := newVersionsFixture(t)
 	store := newDetailTestStore(t)
@@ -434,6 +434,12 @@ func TestGetEpisodeDetailsForSeriesKeepsAnotherSeriesPreferences(t *testing.T) {
 	// Audio too: English for the profile, French for the other series.
 	setProfileAudioLanguage(t, store, "en")
 	setScopedAudioLanguage(t, store, settingscontract.ScopeProfileSeries, f.ids["series"]+"-other", 0, "fr")
+	// Version preference: 1080p for the batch series, 2160p for the other.
+	for series, resolution := range map[string]string{f.ids["series"]: "1080p", f.ids["series"] + "-other": "2160p"} {
+		if err := store.SetSeriesPlaybackPreference(t.Context(), userstore.SeriesPlaybackPreference{ProfileID: "profile-1", SeriesID: series, Resolution: resolution}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	f.svc.SetUserStoreProvider(&countingUserStores{store: store})
 
 	otherSeries, otherEpisode := f.ids["series"]+"-other", f.ids["episode"]+"-other"
@@ -450,9 +456,9 @@ func TestGetEpisodeDetailsForSeriesKeepsAnotherSeriesPreferences(t *testing.T) {
 		t.Fatal(err)
 	}
 	for id, want := range map[string]struct {
-		mode  string
-		audio int
-	}{f.ids["episode"]: {"always", 0}, otherEpisode: {"off", 1}} {
+		mode, resolution string
+		audio            int
+	}{f.ids["episode"]: {"always", "1080p", 0}, otherEpisode: {"off", "2160p", 1}} {
 		if details[id] == nil {
 			t.Fatalf("episode %s missing from the batch", id)
 		}
@@ -465,6 +471,13 @@ func TestGetEpisodeDetailsForSeriesKeepsAnotherSeriesPreferences(t *testing.T) {
 		}
 		if *got != want.audio {
 			t.Fatalf("episode %s audio track = %d, want %d", id, *got, want.audio)
+		}
+		res := details[id].EffectiveVersionResolution
+		if res == nil {
+			t.Fatalf("episode %s has no effective version resolution", id)
+		}
+		if *res != want.resolution {
+			t.Fatalf("episode %s version resolution = %s, want %s", id, *res, want.resolution)
 		}
 	}
 }
