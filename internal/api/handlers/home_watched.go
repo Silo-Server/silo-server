@@ -74,6 +74,11 @@ func effectiveHomeItemLimit(itemLimit int) int {
 	return itemLimit
 }
 
+// homeWatchedCandidateLimit widens a filtered row's fetch window so it can
+// refill after watched items are removed. It is a bound, not a guarantee: a
+// profile that has watched most of the window gets a shorter row rather than a
+// second fetch. The advertised item_limit stays as configured, as on the
+// unfiltered path.
 func homeWatchedCandidateLimit(displayLimit int) int {
 	displayLimit = effectiveHomeItemLimit(displayLimit)
 	if displayLimit >= homeWatchedMaxExpandedCandidates {

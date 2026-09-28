@@ -149,6 +149,7 @@ func TestHomeWatchedCandidateLimitCapsExpandedWindow(t *testing.T) {
 	}{
 		// No configured limit means the fetcher's default of 20.
 		{display: 0, want: 100},
+		{display: -1, want: 100},
 		{display: 20, want: 100},
 		{display: 50, want: 200},
 		{display: 250, want: 250},
