@@ -1624,9 +1624,22 @@ func (s *DetailService) buildSeriesDetailContext(ctx context.Context, seriesID s
 	}, nil
 }
 
+// episodeAudioResolver returns the series' shared audio resolver, or a fresh
+// one for an episode of another series.
+func (s *DetailService) episodeAudioResolver(ctx context.Context, seriesCtx *seriesDetailContext, filter AccessFilter, seriesID string) *audioPrefResolver {
+	if seriesID != seriesCtx.series.ContentID {
+		return s.newAudioPrefResolver(ctx, filter, seriesID)
+	}
+	return seriesCtx.audio
+}
+
 // episodeSubtitleDefaults memoizes effectiveSubtitleDefaults for the series by
-// the library that decides the settings scope.
+// the library that decides the settings scope. An episode of another series
+// resolves its own.
 func (s *DetailService) episodeSubtitleDefaults(ctx context.Context, seriesCtx *seriesDetailContext, filter AccessFilter, seriesID string, files []*models.MediaFile) subtitleDefaults {
+	if seriesID != seriesCtx.series.ContentID {
+		return s.effectiveSubtitleDefaults(ctx, filter, seriesID, files)
+	}
 	libraryID := preferredPlayableLibraryID(files, filter.SelectedFileID)
 	if defaults, ok := seriesCtx.subtitleDefaults[libraryID]; ok {
 		return defaults
@@ -3003,7 +3016,7 @@ func (s *DetailService) buildEpisodeDetail(ctx context.Context, episode *models.
 		ctx,
 		files,
 		filter,
-		seriesCtx.audio,
+		s.episodeAudioResolver(ctx, seriesCtx, filter, episode.SeriesID),
 	)
 	detail.OverlaySummary = overlays.BuildSummary(files)
 	s.episodeSubtitleDefaults(ctx, seriesCtx, filter, episode.SeriesID, files).applyToItemDetail(detail)

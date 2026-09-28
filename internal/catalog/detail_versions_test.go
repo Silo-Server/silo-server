@@ -411,3 +411,46 @@ func TestGetEpisodeDetailsForSeriesResolvesPreferencesOncePerSeries(t *testing.T
 		t.Fatalf("user store lookups = %d for %d episodes, %d for one", all, len(episodes), one)
 	}
 }
+
+// A batch shares the series' preference lookups only with that series'
+// episodes; an episode of another series keeps its own series-level choice.
+func TestGetEpisodeDetailsForSeriesKeepsAnotherSeriesPreferences(t *testing.T) {
+	f := newVersionsFixture(t)
+	store := newDetailTestStore(t)
+	for _, seed := range []struct {
+		scope    settingscontract.Scope
+		seriesID string
+		mode     string
+	}{
+		{settingscontract.ScopeProfile, "", "always"},
+		{settingscontract.ScopeProfileSeries, f.ids["series"] + "-other", "off"},
+	} {
+		encoded, _ := json.Marshal(seed.mode)
+		if _, err := store.UpsertSettingValue(t.Context(), userstore.SettingIdentity{Key: settingskeys.PlaybackSubtitleMode, Scope: seed.scope, ProfileID: "profile-1", SeriesID: seed.seriesID}, encoded); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.svc.SetUserStoreProvider(&countingUserStores{store: store})
+
+	otherSeries, otherEpisode := f.ids["series"]+"-other", f.ids["episode"]+"-other"
+	if _, err := f.pool.Exec(t.Context(), `INSERT INTO media_items (content_id,type,title,genres) VALUES ($1,'series',$1,'{}')`, otherSeries); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(t.Context(), `INSERT INTO episodes (content_id,series_id,season_number,episode_number,title) VALUES ($1,$2,1,1,'Episode')`, otherEpisode, otherSeries); err != nil {
+		t.Fatal(err)
+	}
+	f.files.files[otherEpisode] = f.files.files[f.ids["episode"]]
+
+	details, err := f.svc.GetEpisodeDetailsForSeries(t.Context(), f.ids["series"], []string{f.ids["episode"], otherEpisode}, AccessFilter{UserID: 1, ProfileID: "profile-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]string{f.ids["episode"]: "always", otherEpisode: "off"} {
+		if details[id] == nil {
+			t.Fatalf("episode %s missing from the batch", id)
+		}
+		if got := details[id].EffectiveSubtitleMode; got != want {
+			t.Fatalf("episode %s subtitle mode = %q, want %q", id, got, want)
+		}
+	}
+}
