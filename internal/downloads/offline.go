@@ -217,15 +217,34 @@ func (s *Service) streamArtwork(ctx context.Context, w http.ResponseWriter, _ *h
 	}
 	// Artwork is immutable for a stored manifest; let the client cache it once.
 	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
-	if _, err := io.Copy(w, resp.Body); err != nil {
+	store := &storeReader{Reader: resp.Body}
+	if _, err := io.Copy(w, store); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		// The store stopped sending, or timed out mid-body. Before the first
-		// byte is written, v2 can still answer 503.
-		return fmt.Errorf("streaming artwork: %w: %w", ErrAssetUnavailable, err)
+		if store.err != nil {
+			// The store stopped sending, or timed out mid-body. Before the
+			// first byte is written, v2 can still answer 503.
+			return fmt.Errorf("streaming artwork: %w: %w", ErrAssetUnavailable, err)
+		}
+		return fmt.Errorf("streaming artwork: %w", err)
 	}
 	return nil
+}
+
+// storeReader remembers why reading from the artwork store failed, so a
+// failed write to the client isn't blamed on the store.
+type storeReader struct {
+	io.Reader
+	err error
+}
+
+func (r *storeReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	if err != nil && err != io.EOF {
+		r.err = err
+	}
+	return n, err
 }
 
 // ServeSubtitle streams a subtitle asset (external sidecar or downloaded S3 file)

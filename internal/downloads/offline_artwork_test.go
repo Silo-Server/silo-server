@@ -107,3 +107,20 @@ func TestArtworkStoreStoppingMidBodyIsRetryable(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// brokenClientWriter fails every write, as a connection the client dropped does.
+type brokenClientWriter struct{ *httptest.ResponseRecorder }
+
+func (brokenClientWriter) Write([]byte) (int, error) { return 0, errors.New("broken pipe") }
+
+func TestArtworkClientWriteFailureIsNotAStoreFailure(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("image"))
+	}))
+	defer upstream.Close()
+	s := &Service{httpClient: upstream.Client()}
+	err := s.streamArtwork(context.Background(), brokenClientWriter{httptest.NewRecorder()}, nil, upstream.URL+"/poster.jpg")
+	if err == nil || errors.Is(err, ErrAssetUnavailable) {
+		t.Fatalf("err = %v", err)
+	}
+}
