@@ -415,12 +415,19 @@ func (s *interestTrackingStore) SetProgress(ctx context.Context, profileID, medi
 	return err
 }
 
+// timestampedAfter is the state a timestamped write leaves. Both stores keep
+// completion sticky on these writes, so a rewatch tick with completed=false
+// leaves a completed row completed.
+func timestampedAfter(before progressState, position float64, completed bool) progressState {
+	completed = completed || before.completed
+	return progressState{exists: true, inProgress: !completed && position > 0, completed: completed}
+}
+
 func (s *interestTrackingStore) SetProgressAt(ctx context.Context, profileID, mediaItemID string, position, duration float64, completed bool, updatedAt time.Time) error {
 	before := s.currentProgressState(ctx, profileID, mediaItemID)
 	err := s.UserStore.SetProgressAt(ctx, profileID, mediaItemID, position, duration, completed, updatedAt)
 	if err == nil {
-		after := progressState{exists: true, inProgress: !completed && position > 0, completed: completed}
-		s.queueOnTransition(profileID, mediaItemID, before, after, updatedAt)
+		s.queueOnTransition(profileID, mediaItemID, before, timestampedAfter(before, position, completed), updatedAt)
 	}
 	return err
 }
@@ -439,8 +446,7 @@ func (s *interestTrackingStore) SetProgressIfNewer(ctx context.Context, profileI
 	before := s.currentProgressState(ctx, profileID, mediaItemID)
 	applied, err := s.UserStore.SetProgressIfNewer(ctx, profileID, mediaItemID, position, duration, completed, updatedAt)
 	if err == nil && applied {
-		after := progressState{exists: true, inProgress: !completed && position > 0, completed: completed}
-		s.queueOnTransition(profileID, mediaItemID, before, after, updatedAt)
+		s.queueOnTransition(profileID, mediaItemID, before, timestampedAfter(before, position, completed), updatedAt)
 	}
 	return applied, err
 }

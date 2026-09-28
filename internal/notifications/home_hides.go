@@ -85,20 +85,27 @@ func supersededInProgress(inProgress []userstore.WatchProgress, completed []comp
 
 // nextUpEpisode returns the episode Home's Next Up shows after its anchor:
 // the first episode with a key of at least from that has a present file and
-// that the profile has not started. It is empty when there is none.
-func (u *InterestUpdater) nextUpEpisode(ctx context.Context, seriesID string, next int, started []string) (string, error) {
+// that the profile has not started. "Started" matches the Home query's
+// next_ep lateral (catalog.buildListNextUpQuery): any progress row that is
+// completed or has a position, including rows a history hide covers. It is
+// empty when there is none.
+func (u *InterestUpdater) nextUpEpisode(ctx context.Context, userID int, profileID, seriesID string, from int) (string, error) {
 	var episodeID string
 	err := u.pool.QueryRow(ctx, `
 		SELECT e.content_id FROM episodes e
-		WHERE e.series_id = $1
+		WHERE e.series_id = $3
 		  AND `+availabilityOrdinalGuard+`
-		  AND `+availabilityKeyExpr+` >= $2
-		  AND NOT (e.content_id = ANY($3))
+		  AND `+availabilityKeyExpr+` >= $4
 		  AND EXISTS (
 			SELECT 1 FROM media_files mf
 			WHERE mf.episode_id = e.content_id AND mf.missing_since IS NULL)
+		  AND NOT EXISTS (
+			SELECT 1 FROM user_watch_progress uwp
+			WHERE uwp.user_id = $1 AND uwp.profile_id = $2
+			  AND uwp.media_item_id = e.content_id
+			  AND (uwp.completed = TRUE OR uwp.position_seconds > 0))
 		ORDER BY e.season_number, e.episode_number, e.content_id
-		LIMIT 1`, seriesID, next, started).Scan(&episodeID)
+		LIMIT 1`, userID, profileID, seriesID, from).Scan(&episodeID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}

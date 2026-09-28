@@ -343,6 +343,19 @@ func TestInterestTrackingStoreQueuesLateImports(t *testing.T) {
 	if queued() {
 		t.Fatal("an import that did not apply queued an interest recompute")
 	}
+
+	// Completion is sticky, so stamped rewatch ticks of a finished episode
+	// change no state.
+	if applied, err := store.SetProgressIfNewer(ctx, "p1", "ep-1", 100, 100, true, now.Add(time.Second)); err != nil || !applied {
+		t.Fatalf("SetProgressIfNewer (complete) = %v, %v", applied, err)
+	}
+	queued()
+	if applied, err := store.SetProgressIfNewer(ctx, "p1", "ep-1", 10, 100, false, now.Add(2*time.Second)); err != nil || !applied {
+		t.Fatalf("SetProgressIfNewer (rewatch) = %v, %v", applied, err)
+	}
+	if queued() {
+		t.Fatal("a stamped rewatch tick of a completed episode queued an interest recompute")
+	}
 }
 
 func TestSupersededInProgress(t *testing.T) {
@@ -582,4 +595,15 @@ func TestRecomputeSeriesFollowsHomeRemovalsPostgres(t *testing.T) {
 		t.Fatalf("dismiss E3 from Next Up: %v", err)
 	}
 	recompute("E3 card dismissed after a rewatch", flags{favorite: true}, afterE4)
+
+	// Home's Next Up counts any progress row as started, even one a history
+	// hide covers. Starting E3 and hiding it leaves no card after E1.
+	startedAt := time.Now().Add(-30 * time.Second).UTC().Truncate(time.Second)
+	setProgress(episodes[2], false, startedAt)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO user_history_hidden_items (user_id, profile_id, media_item_id, hidden_before, updated_at)
+		VALUES ($1, $2, $3, $4, $4)`, userID, profileID, episodes[2], startedAt.Add(time.Second)); err != nil {
+		t.Fatalf("hide E3: %v", err)
+	}
+	recompute("E3 started and hidden", flags{favorite: true, nextUp: true}, afterE4)
 }

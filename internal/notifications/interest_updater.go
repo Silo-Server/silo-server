@@ -328,7 +328,6 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 	}
 
 	var inProgress []userstore.WatchProgress
-	started := make([]string, 0, 16)
 	var completedEpisodes []completedEpisode
 	// Home anchors Next Up on the most recently completed episode, ties going
 	// to the later episode.
@@ -352,9 +351,6 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 		}
 		for episodeID, entry := range progress {
 			hasProgression = true
-			if entry.Completed || entry.PositionSeconds > 0 {
-				started = append(started, episodeID)
-			}
 			if !entry.Completed && entry.PositionSeconds > 0 {
 				entry.MediaItemID = episodeID
 				inProgress = append(inProgress, entry)
@@ -434,7 +430,7 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 		continueWatching = hides.continueWatchingVisible(inProgress)
 		nextUpCandidate = !hides.dropped
 		if nextUpCandidate && len(hides.nextUp) > 0 {
-			next, err := u.nextUpEpisode(ctx, seriesID, anchorKey+1, started)
+			next, err := u.nextUpEpisode(ctx, userID, profileID, seriesID, anchorKey+1)
 			if err != nil {
 				return err
 			}
