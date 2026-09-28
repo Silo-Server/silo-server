@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -65,6 +66,10 @@ func (h *AutoscanHandler) HandleItemRefresh(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	files, found, err := h.itemRefreshFiles(ctx, rawID)
+	if errors.Is(err, errSeasonRefreshUnavailable) {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Season refresh not available")
+		return
+	}
 	if err != nil {
 		slog.ErrorContext(ctx, "jellycompat item refresh: listing item files", "component", "jellycompat", "item_id", rawID, "error", err)
 		writeError(w, http.StatusInternalServerError, "InternalServerError", "Failed to refresh item")
@@ -77,6 +82,10 @@ func (h *AutoscanHandler) HandleItemRefresh(w http.ResponseWriter, r *http.Reque
 
 	targets := make([]scantrigger.Target, 0, len(files))
 	seen := make(map[autoscanTargetKey]struct{}, len(files))
+	// A file resolves to its directory, so one file per directory gives the
+	// same targets; a series costs one resolve per season folder, not one per
+	// episode.
+	resolvedDirs := make(map[string]struct{}, len(files))
 	for _, file := range files {
 		if file == nil {
 			continue
@@ -85,6 +94,11 @@ func (h *AutoscanHandler) HandleItemRefresh(w http.ResponseWriter, r *http.Reque
 		if path == "" {
 			continue
 		}
+		dir := filepath.Dir(filepath.Clean(path))
+		if _, done := resolvedDirs[dir]; done {
+			continue
+		}
+		resolvedDirs[dir] = struct{}{}
 		target, resolveErr := resolveAutoscanPath(ctx, resolver, path, itemRefreshTrigger, "item refresh", "item_id", rawID)
 		if resolveErr != nil {
 			writeScanTriggerError(w, resolveErr)
@@ -156,9 +170,13 @@ func (h *AutoscanHandler) itemRefreshFiles(ctx context.Context, rawID string) ([
 	return files, len(files) > 0, nil
 }
 
+// errSeasonRefreshUnavailable means no season store is wired, so a season id
+// can't be looked up; the handler answers 503 rather than a false 404.
+var errSeasonRefreshUnavailable = errors.New("season refresh not available")
+
 func (h *AutoscanHandler) seasonRefreshFiles(ctx context.Context, seasonID string) ([]*models.MediaFile, error) {
 	if h.seasons == nil {
-		return nil, nil
+		return nil, errSeasonRefreshUnavailable
 	}
 	season, err := h.seasons.GetByID(ctx, seasonID)
 	if err != nil {

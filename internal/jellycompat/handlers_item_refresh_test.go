@@ -325,3 +325,19 @@ func assertQueuedScans(t *testing.T, queue *fakeAutoscanQueue, want []queuedScan
 		}
 	}
 }
+
+// A season id with no season store wired is a missing dependency, not a
+// missing season: answer 503 rather than a false 404.
+func TestItemRefreshSeasonWithoutSeasonStoreIsUnavailable(t *testing.T) {
+	queue := &fakeAutoscanQueue{}
+	handler := newItemRefreshHandler(t.TempDir(), "tv", queue, &fakeItemRefreshFiles{}, nil)
+
+	rec := serveItemRefresh(handler, handler.codec.EncodeStringID(EncodedIDSeason, "season-tvdb-200-2"))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(queue.calls) != 0 {
+		t.Fatalf("expected no queued scans, got %#v", queue.calls)
+	}
+}
