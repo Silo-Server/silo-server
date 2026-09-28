@@ -78,13 +78,17 @@ profile — no interest index, no fanout. `request.fulfilled` also goes to every
 profile that followed the title (see
 [media-requests.md](media-requests.md#following-a-title)), with `follower: true`
 in its `reason_flags` so every channel words it as a followed title rather than
-the recipient's own request. The same per-profile unique index keeps each
-follower's copy idempotent. Their `reason_flags` carry request
+the recipient's own request. Their `reason_flags` carry request
 identifiers (request ID, TMDB ID, media type; approved/declined also carry
 the title since no catalog item exists yet) rather than the four reason
-booleans. Partial unique indexes per `(profile_id, request_id, type)` make
-the inserts idempotent, and the per-webhook `notify_requests` flag gates the
-webhook channel for them.
+booleans. Partial unique indexes make the inserts idempotent:
+`request.fulfilled` per `(user_id, profile_id, request_id)`, because a
+follower on another account can share the requester's profile id (every
+account from before profiles has a `default` profile), and approved/declined,
+which only reach the requester, per `(profile_id, request_id, type)`. An
+operational delivery's webhook, web push and mobile push targets are the
+recipient profile's on the recipient's account. The per-webhook
+`notify_requests` flag gates the webhook channel for them.
 
 Approval is the one transition whose two destinations disagree. Server
 channels see `request.approved` for every approval; the requester only gets a

@@ -3,6 +3,7 @@ package notifications
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/requests"
@@ -114,5 +115,86 @@ func TestFulfilledCopyForFollowers(t *testing.T) {
 	}
 	if got := discordEmbedAuthorLine(follower); got != "Now available on Silo" {
 		t.Fatalf("follower Discord author = %q", got)
+	}
+}
+
+// Two accounts' legacy "default" profiles, one the requester and one a
+// follower, each get exactly one request.fulfilled delivery, on their own
+// account, and only their own account's devices are pushed. A second pass is
+// deduped per account.
+func TestNotifyFulfilledDeliversOncePerAccountForSharedProfileID(t *testing.T) {
+	p := inboxPageDB(t)
+	ctx := t.Context()
+	if _, err := p.Exec(ctx, `
+		CREATE TABLE push_devices (LIKE public.push_devices INCLUDING ALL);
+		CREATE TABLE push_delivery_attempts (LIKE public.push_delivery_attempts INCLUDING ALL);
+		INSERT INTO push_devices
+			(id, user_id, profile_id, device_id, platform, provider, apns_environment, apns_topic,
+			 apns_token_ciphertext, apns_token_hash, server_device_id, push_mode, enabled)
+		VALUES
+			('device-account-1', 1, 'default', 'local-1', 'apple', 'silo_relay', 'sandbox',
+			 'org.siloserver.silo', 'ciphertext', 'hash-1', 'server-1', 'private_push', true),
+			('device-account-2', 2, 'default', 'local-2', 'apple', 'silo_relay', 'sandbox',
+			 'org.siloserver.silo', 'ciphertext', 'hash-2', 'server-2', 'private_push', true)`); err != nil {
+		t.Fatalf("create push tables: %v", err)
+	}
+	system := &System{
+		pool:           p,
+		Settings:       NewSettings(mapSettingReader{SettingApplePushDeliveryEnabled: "true"}),
+		Deliveries:     NewDeliveryRepository(p),
+		Preferences:    NewPreferencesRepository(p),
+		pushDeviceRepo: NewPushDeviceRepository(p),
+		dispatcher:     NewMultiDispatcher(),
+		logger:         slog.New(slog.DiscardHandler),
+	}
+	notifier := NewRequestFulfillmentNotifier(system)
+	req := fulfilledRequest(requests.Follower{UserID: 2, ProfileID: "default"})
+	req.RequestedByProfileID = "default"
+
+	for range 2 {
+		if err := notifier.NotifyFulfilled(ctx, req, "movie-tmdb-949"); err != nil {
+			t.Fatalf("NotifyFulfilled: %v", err)
+		}
+	}
+
+	rows, err := p.Query(ctx, `
+		SELECT d.id, d.user_id, d.reason_flags, a.push_device_id
+		FROM notification_deliveries d
+		LEFT JOIN push_delivery_attempts a ON a.notification_delivery_id = d.id
+		WHERE d.type = $1
+		ORDER BY d.user_id, a.push_device_id`, DeliveryTypeRequestFulfilled)
+	if err != nil {
+		t.Fatalf("query deliveries: %v", err)
+	}
+	type got struct {
+		userID   int
+		follower bool
+		device   *string
+	}
+	var out []got
+	for rows.Next() {
+		var id string
+		var row got
+		var flags []byte
+		if err := rows.Scan(&id, &row.userID, &flags, &row.device); err != nil {
+			t.Fatalf("scan delivery: %v", err)
+		}
+		row.follower = parseRequestFlags(flags).Follower
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read deliveries: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("deliveries with push attempts = %+v, want one per account", out)
+	}
+	for i, want := range []struct {
+		userID   int
+		follower bool
+		device   string
+	}{{1, false, "device-account-1"}, {2, true, "device-account-2"}} {
+		if out[i].userID != want.userID || out[i].follower != want.follower || out[i].device == nil || *out[i].device != want.device {
+			t.Fatalf("delivery %d = {user %d follower %v device %v}, want %+v", i, out[i].userID, out[i].follower, out[i].device, want)
+		}
 	}
 }

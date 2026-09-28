@@ -261,7 +261,7 @@ type MediaRequestCreate struct {
 	Overview     string `json:"overview,omitempty"`
 	PosterPath   string `json:"poster_path,omitempty" doc:"TMDB image path"`
 	BackdropPath string `json:"backdrop_path,omitempty" doc:"TMDB image path"`
-	Seasons      []int  `json:"seasons,omitempty" maxItems:"200" doc:"Series only: the season numbers to request. Omitted: every aired season not yet complete in the library" example:"[2,3]"`
+	Seasons      []int  `json:"seasons,omitempty" maxItems:"200" doc:"Series only: the season numbers to request, starting at 1 (a season below 1 is refused). Omitted: every aired season not yet complete in the library" example:"[2,3]"`
 }
 
 // MediaRequestCreateInput is the createRequest request.

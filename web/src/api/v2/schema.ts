@@ -21303,7 +21303,7 @@ export interface components {
       /** @description TMDB image path */
       poster_path?: string;
       /**
-       * @description Series only: the season numbers to request. Omitted: every aired season not yet complete in the library
+       * @description Series only: the season numbers to request, starting at 1 (a season below 1 is refused). Omitted: every aired season not yet complete in the library
        * @example [
        *       2,
        *       3

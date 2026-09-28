@@ -278,6 +278,14 @@ func TestCreateRequest(t *testing.T) {
 	// An unknown member is refused.
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/requests", `{"media_type":"movie","tmdb_id":1,"title":"x","quality":"4k"}`, requestOwner), TypeValidationFailed)
 
+	// A season refused by the service names the seasons field.
+	svc.err = &mediarequests.ValidationError{FieldErrors: map[string]string{"seasons": "Season numbers start at 1."}}
+	p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/requests", `{"media_type":"series","tmdb_id":1399,"title":"x","seasons":[0]}`, requestOwner), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "body.seasons" {
+		t.Fatalf("errors = %+v, want one at body.seasons", p.Errors)
+	}
+	svc.err = nil
+
 	// Service decisions render as problems.
 	svc.err = mediarequests.QuotaError{Used: 5, Limit: 5, WindowDays: 7}
 	rec = do(t, h, http.MethodPost, "/api/v2/requests", `{"media_type":"movie","tmdb_id":7,"title":"x"}`, requestOwner)

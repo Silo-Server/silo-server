@@ -227,8 +227,9 @@ nothing is left to send, the remaining targets decide the status.
 
 ## Season requests
 
-A series request names the seasons it wants (`seasons`). When the requester
-names none, the server asks for every aired regular season (TMDB's seasons that
+A series request names the seasons it wants (`seasons`). Season numbers start
+at 1: a request naming season 0 (specials) or a negative number is refused with
+`validation_failed`, never read as naming none. When the requester names none, the server asks for every aired regular season (TMDB's seasons that
 have started airing, specials excluded) that is not complete in the library.
 Requests from before season requests, and every v1 request, have no seasons:
 they mean the whole series and keep the old rule that any episode in the

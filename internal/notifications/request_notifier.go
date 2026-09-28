@@ -11,10 +11,12 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
-// Request lifecycle delivery types posted to the requesting profile. Their
-// reason_flags carry RequestFlags instead of reason booleans; partial unique
-// indexes per (profile_id, request_id, type) make the inserts idempotent, and
-// the per-webhook notify_requests flag gates the webhook channel.
+// Request lifecycle delivery types posted to the requesting profile (and, for
+// request.fulfilled, to followers). Their reason_flags carry RequestFlags
+// instead of reason booleans; partial unique indexes make the inserts
+// idempotent (request.fulfilled per account, profile and request; approved
+// and declined per profile, request and type), and the per-webhook
+// notify_requests flag gates the webhook channel.
 const (
 	// DeliveryTypeRequestFulfilled is the operational notice posted once the
 	// requested media is present in the catalog
@@ -83,6 +85,9 @@ type fulfillmentBackend interface {
 	dispatchFulfilled(ctx context.Context, delivery Delivery) error
 }
 
+// notificationsEnabled reads the profile's master toggle. Notification
+// preferences are keyed by profile id alone, so two accounts' legacy
+// "default" profiles share one row, as they do for every notification type.
 func (s *System) notificationsEnabled(ctx context.Context, profileID string) (bool, error) {
 	prefs, err := s.Preferences.Get(ctx, profileID)
 	if err != nil {
@@ -111,7 +116,8 @@ func NewRequestFulfillmentNotifier(system *System) *RequestFulfillmentNotifier {
 // that one field renders the title, poster, and deep link for movies and
 // series alike. It tells the requester, then every follower, and returns the
 // first dispatch error so the caller retries the whole request later; a
-// recipient already told is deduped by the (profile, request) unique index.
+// recipient already told is deduped by the (account, profile, request) unique
+// index.
 // Skipping a recipient (master toggle off, missing attribution) still counts
 // as handled.
 func (n *RequestFulfillmentNotifier) NotifyFulfilled(ctx context.Context, req requests.Request, contentID string) error {

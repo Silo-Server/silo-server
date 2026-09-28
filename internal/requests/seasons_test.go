@@ -89,6 +89,15 @@ func TestCreateSeriesRequestForNamedSeasons(t *testing.T) {
 	if _, err := svc.CreateRequest(context.Background(), testViewer(2), CreateRequestInput{MediaType: MediaTypeMovie, TMDBID: 550, Title: "Fight Club", Seasons: []int{1}}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("movie with seasons: err = %v, want ErrInvalidInput", err)
 	}
+	// A season below 1 is refused on the seasons field, never dropped into a
+	// request for every missing season.
+	for _, seasons := range [][]int{{0}, {-1}, {2, 0}} {
+		_, err := svc.CreateRequest(context.Background(), testViewer(2), CreateRequestInput{MediaType: MediaTypeSeries, TMDBID: 95396, Title: "Severance", Seasons: seasons})
+		verr, ok := errors.AsType[*ValidationError](err)
+		if !ok || verr.FieldErrors["seasons"] == "" {
+			t.Fatalf("seasons %v: err = %v, want a validation error on seasons", seasons, err)
+		}
+	}
 }
 
 func TestCreateSeriesRequestRefusesACompleteSeries(t *testing.T) {

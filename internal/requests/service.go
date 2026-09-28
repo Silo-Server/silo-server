@@ -3226,7 +3226,9 @@ func normalizeCreateInput(input CreateRequestInput) (CreateRequestInput, error) 
 	}
 	for _, season := range input.Seasons {
 		if season <= 0 {
-			return CreateRequestInput{}, fmt.Errorf("%w: season numbers start at 1", ErrInvalidInput)
+			// Refused, never dropped: an emptied list would mean every
+			// missing season.
+			return CreateRequestInput{}, &ValidationError{FieldErrors: map[string]string{"seasons": "Season numbers start at 1."}}
 		}
 	}
 	return input, nil
