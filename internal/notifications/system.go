@@ -720,13 +720,11 @@ func (s *System) rebuildProfileInterest(ctx context.Context, store userstore.Use
 	for _, seriesID := range existing {
 		seriesIDs[seriesID] = struct{}{}
 	}
-	// Every series of the profile shares one read of its Home dismissals.
-	dismissals := &homeDismissals{}
 	for seriesID := range seriesIDs {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if err := s.Interest.recomputeSeries(ctx, userID, profileID, seriesID, dismissals); err != nil {
+		if err := s.Interest.RecomputeSeries(ctx, userID, profileID, seriesID); err != nil {
 			s.logger.WarnContext(ctx, "interest rebuild: series recompute failed",
 				"user_id", userID, "profile_id", profileID, "series_id", seriesID, "error", err)
 		}

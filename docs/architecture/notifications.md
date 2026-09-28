@@ -52,8 +52,9 @@ release event's episode key:
   - A per-card Continue Watching dismissal clears `continue_watching` while
     the dismissed episode's progress is unchanged.
   - A per-card Next Up dismissal clears `next_up` while the dismissed episode
-    is still the card Home would show: the first episode at the progression
-    cursor or later with a present file that the profile has not started.
+    is still the card Home would show: the first episode after the most
+    recently completed one that has a present file and that the profile has
+    not started.
 
   Favorites and watchlist are unaffected. The progression cursor is kept, so
   `next_up` resumes from the right episode once a removal lapses. Every

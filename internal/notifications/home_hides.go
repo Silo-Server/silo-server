@@ -38,20 +38,6 @@ func (h homeHides) continueWatchingVisible(inProgress []userstore.WatchProgress)
 	return !h.dropped && len(h.continueWatching.FilterProgress(inProgress)) > 0
 }
 
-// dismissesNextUpIn reports whether any episode of the series was dismissed
-// from Next Up, which is when the Next Up episode has to be looked up.
-func (h homeHides) dismissesNextUpIn(episodeKeys map[string]int) bool {
-	if len(h.nextUp) == 0 {
-		return false
-	}
-	for id := range h.nextUp {
-		if _, ok := episodeKeys[id]; ok {
-			return true
-		}
-	}
-	return false
-}
-
 // nextUpVisible reports whether the series still shows in Next Up, given the
 // episode Home would show (nextUpEpisode). Like the Home fetcher
 // (sections.Fetcher.filterNextUpDismissals), a per-card dismissal hides the
@@ -65,11 +51,9 @@ func (h homeHides) nextUpVisible(nextEpisodeID string) bool {
 	return !dismissed
 }
 
-// nextUpEpisode returns the episode Home's Next Up shows at the progression
-// cursor: the first episode at or after next that has a present file and
-// that the profile has not started. It is empty when there is none. Home
-// anchors on the most recently completed episode rather than the highest, so
-// the two differ only after a rewatch of an earlier episode.
+// nextUpEpisode returns the episode Home's Next Up shows after its anchor:
+// the first episode with a key of at least from that has a present file and
+// that the profile has not started. It is empty when there is none.
 func (u *InterestUpdater) nextUpEpisode(ctx context.Context, seriesID string, next int, started []string) (string, error) {
 	var episodeID string
 	err := u.pool.QueryRow(ctx, `
@@ -92,54 +76,10 @@ func (u *InterestUpdater) nextUpEpisode(ctx context.Context, seriesID string, ne
 	return episodeID, nil
 }
 
-// homeDismissals caches a profile's Home dismissals by surface. A nil cache
-// reads the store on every call; a rebuild shares one per profile so each
-// list is read once, not once per series.
-type homeDismissals struct {
-	continueWatching catalog.HomeDismissalIndex
-	nextUp           map[string]struct{}
-	loadedCW         bool
-	loadedNextUp     bool
-}
-
-func (d *homeDismissals) continueWatchingIndex(ctx context.Context, store userstore.UserStore, profileID string) (catalog.HomeDismissalIndex, error) {
-	if d != nil && d.loadedCW {
-		return d.continueWatching, nil
-	}
-	dismissals, err := store.ListHomeDismissals(ctx, profileID, userstore.HomeSurfaceContinueWatching)
-	if err != nil {
-		return nil, fmt.Errorf("load continue watching dismissals: %w", err)
-	}
-	index := catalog.NewHomeDismissalIndex(dismissals)
-	if d != nil {
-		d.continueWatching, d.loadedCW = index, true
-	}
-	return index, nil
-}
-
-func (d *homeDismissals) nextUpItems(ctx context.Context, store userstore.UserStore, profileID string) (map[string]struct{}, error) {
-	if d != nil && d.loadedNextUp {
-		return d.nextUp, nil
-	}
-	dismissals, err := store.ListHomeDismissals(ctx, profileID, userstore.HomeSurfaceNextUp)
-	if err != nil {
-		return nil, fmt.Errorf("load next up dismissals: %w", err)
-	}
-	items := make(map[string]struct{}, len(dismissals))
-	for _, dismissal := range dismissals {
-		items[dismissal.MediaItemID] = struct{}{}
-	}
-	if d != nil {
-		d.nextUp, d.loadedNextUp = items, true
-	}
-	return items, nil
-}
-
-// loadHomeHides reads the profile's Home removals that apply to the series.
-// A dismissal list is read only for a surface that could show the series:
-// continueWatching when an episode is in progress, nextUp when the profile
-// has a progression cursor.
-func (u *InterestUpdater) loadHomeHides(ctx context.Context, store userstore.UserStore, dismissals *homeDismissals, userID int, profileID, seriesID string, continueWatching, nextUp bool) (homeHides, error) {
+// loadHomeHides reads the profile's Home removals that apply to the series:
+// its drop, and its per-card dismissals of the given items on each surface.
+// A surface with no items is not read.
+func (u *InterestUpdater) loadHomeHides(ctx context.Context, store userstore.UserStore, userID int, profileID, seriesID string, continueWatchingItems, nextUpItems []string) (homeHides, error) {
 	var hides homeHides
 	if u.drops != nil {
 		drops, err := u.drops.ListDropped(ctx, userID, profileID, []string{seriesID})
@@ -154,18 +94,53 @@ func (u *InterestUpdater) loadHomeHides(ctx context.Context, store userstore.Use
 		}
 	}
 
-	var err error
-	if continueWatching {
-		if hides.continueWatching, err = dismissals.continueWatchingIndex(ctx, store, profileID); err != nil {
+	if len(continueWatchingItems) > 0 {
+		dismissals, err := listHomeDismissals(ctx, store, profileID, userstore.HomeSurfaceContinueWatching, continueWatchingItems)
+		if err != nil {
 			return homeHides{}, err
 		}
+		hides.continueWatching = catalog.NewHomeDismissalIndex(dismissals)
 	}
-	if nextUp {
-		if hides.nextUp, err = dismissals.nextUpItems(ctx, store, profileID); err != nil {
+	if len(nextUpItems) > 0 {
+		dismissals, err := listHomeDismissals(ctx, store, profileID, userstore.HomeSurfaceNextUp, nextUpItems)
+		if err != nil {
 			return homeHides{}, err
+		}
+		for _, dismissal := range dismissals {
+			if hides.nextUp == nil {
+				hides.nextUp = make(map[string]struct{}, len(dismissals))
+			}
+			hides.nextUp[dismissal.MediaItemID] = struct{}{}
 		}
 	}
 	return hides, nil
+}
+
+// listHomeDismissals returns the profile's dismissals of itemIDs on a surface,
+// reading only those items when the store supports it.
+func listHomeDismissals(ctx context.Context, store userstore.UserStore, profileID, surface string, itemIDs []string) ([]userstore.HomeItemDismissal, error) {
+	if reader, ok := store.(userstore.HomeDismissalItemReader); ok {
+		dismissals, err := reader.ListHomeDismissalsForItems(ctx, profileID, surface, itemIDs)
+		if err != nil {
+			return nil, fmt.Errorf("load %s dismissals: %w", surface, err)
+		}
+		return dismissals, nil
+	}
+	all, err := store.ListHomeDismissals(ctx, profileID, surface)
+	if err != nil {
+		return nil, fmt.Errorf("load %s dismissals: %w", surface, err)
+	}
+	wanted := make(map[string]struct{}, len(itemIDs))
+	for _, id := range itemIDs {
+		wanted[id] = struct{}{}
+	}
+	dismissals := make([]userstore.HomeItemDismissal, 0, len(all))
+	for _, dismissal := range all {
+		if _, ok := wanted[dismissal.MediaItemID]; ok {
+			dismissals = append(dismissals, dismissal)
+		}
+	}
+	return dismissals, nil
 }
 
 // queueRemoval queues a recompute for a Home removal now and once more after

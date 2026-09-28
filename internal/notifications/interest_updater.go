@@ -293,12 +293,6 @@ func (u *InterestUpdater) resolveSeriesIDs(ctx context.Context, itemIDs []string
 // source-of-truth user state. It is the single shared path for live updates,
 // backfill, and repair, so all three stay drift-free.
 func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profileID, seriesID string) error {
-	return u.recomputeSeries(ctx, userID, profileID, seriesID, nil)
-}
-
-// recomputeSeries is RecomputeSeries with an optional cache of the profile's
-// Home dismissals, which a rebuild shares across the profile's series.
-func (u *InterestUpdater) recomputeSeries(ctx context.Context, userID int, profileID, seriesID string, dismissals *homeDismissals) error {
 	store, err := u.stores.ForUser(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("open user store: %w", err)
@@ -335,6 +329,10 @@ func (u *InterestUpdater) recomputeSeries(ctx context.Context, userID int, profi
 
 	var inProgress []userstore.WatchProgress
 	started := make([]string, 0, 16)
+	// Home anchors Next Up on the most recently completed episode, ties going
+	// to the later episode.
+	anchorKey, hasAnchor := 0, false
+	var anchorAt time.Time
 	hasProgression := false
 	lastCompletedKey := 0
 	hasCompleted := false
@@ -362,6 +360,12 @@ func (u *InterestUpdater) recomputeSeries(ctx context.Context, userID int, profi
 			}
 			if entry.Completed {
 				markCompleted(episodeID)
+				if key, ok := episodeKeys[episodeID]; ok {
+					at, _ := time.Parse(time.RFC3339, entry.UpdatedAt)
+					if !hasAnchor || at.After(anchorAt) || (at.Equal(anchorAt) && key > anchorKey) {
+						anchorKey, anchorAt, hasAnchor = key, at, true
+					}
+				}
 			}
 		}
 	}
@@ -411,15 +415,22 @@ func (u *InterestUpdater) recomputeSeries(ctx context.Context, userID int, profi
 	// removal lapses.
 	continueWatching, nextUpCandidate := false, false
 	if hasProgression {
-		hides, err := u.loadHomeHides(ctx, store, dismissals, userID, profileID, seriesID,
-			len(inProgress) > 0, nextExpected != nil)
+		inProgressIDs := make([]string, len(inProgress))
+		for i, entry := range inProgress {
+			inProgressIDs[i] = entry.MediaItemID
+		}
+		var nextUpItems []string
+		if hasAnchor {
+			nextUpItems = episodeIDs
+		}
+		hides, err := u.loadHomeHides(ctx, store, userID, profileID, seriesID, inProgressIDs, nextUpItems)
 		if err != nil {
 			return err
 		}
 		continueWatching = hides.continueWatchingVisible(inProgress)
 		nextUpCandidate = !hides.dropped
-		if nextUpCandidate && hides.dismissesNextUpIn(episodeKeys) {
-			next, err := u.nextUpEpisode(ctx, seriesID, *nextExpected, started)
+		if nextUpCandidate && len(hides.nextUp) > 0 {
+			next, err := u.nextUpEpisode(ctx, seriesID, anchorKey+1, started)
 			if err != nil {
 				return err
 			}

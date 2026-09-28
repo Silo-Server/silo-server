@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -110,6 +111,27 @@ func (s *countingDismissalStore) ListHomeDismissals(ctx context.Context, profile
 	return s.UserStore.ListHomeDismissals(ctx, profileID, surface)
 }
 
+// itemReaderStore adds the targeted dismissal read, as the Postgres store has.
+type itemReaderStore struct {
+	*countingDismissalStore
+	itemReads int
+}
+
+func (s *itemReaderStore) ListHomeDismissalsForItems(ctx context.Context, profileID, surface string, ids []string) ([]userstore.HomeItemDismissal, error) {
+	s.itemReads++
+	all, err := s.UserStore.ListHomeDismissals(ctx, profileID, surface)
+	if err != nil {
+		return nil, err
+	}
+	var out []userstore.HomeItemDismissal
+	for _, dismissal := range all {
+		if slices.Contains(ids, dismissal.MediaItemID) {
+			out = append(out, dismissal)
+		}
+	}
+	return out, nil
+}
+
 func TestLoadHomeHides(t *testing.T) {
 	ctx := context.Background()
 	store := &countingDismissalStore{UserStore: newSQLiteUserStore(t), reads: map[string]int{}}
@@ -125,47 +147,49 @@ func TestLoadHomeHides(t *testing.T) {
 			t.Fatalf("UpsertHomeDismissal: %v", err)
 		}
 	}
-	seriesA := map[string]int{"a-e1": EpisodeKey(1, 1), "a-e2": EpisodeKey(1, 2), "a-e3": EpisodeKey(1, 3)}
-	seriesC := map[string]int{"c-e1": EpisodeKey(1, 1)}
+	seriesA := []string{"a-e1", "a-e2", "a-e3"}
 
 	updater := &InterestUpdater{drops: fakeDroppedSeries{{SeriesID: seriesID, Active: false}}}
-	hides, err := updater.loadHomeHides(ctx, store, nil, 1, "p1", seriesID, true, true)
+	hides, err := updater.loadHomeHides(ctx, store, 1, "p1", seriesID, []string{"a-e2"}, seriesA)
 	if err != nil {
 		t.Fatalf("loadHomeHides: %v", err)
 	}
 	if hides.dropped {
 		t.Fatal("an inactive drop must not hide the series")
 	}
-	if !hides.dismissesNextUpIn(seriesA) || hides.dismissesNextUpIn(seriesC) {
-		t.Fatalf("dismissesNextUpIn: want series A only, nextUp = %v", hides.nextUp)
+	// Without a targeted reader the full list is read and cut to the series.
+	if _, ok := hides.nextUp["a-e3"]; len(hides.nextUp) != 1 || !ok {
+		t.Fatalf("nextUp = %v, want only a-e3", hides.nextUp)
 	}
 	if hides.continueWatchingVisible([]userstore.WatchProgress{{MediaItemID: "a-e2", PositionSeconds: 30, UpdatedAt: stamp}}) {
 		t.Fatal("the Continue Watching dismissal did not load")
 	}
 
-	// A surface that cannot show the series is not read.
+	// A surface with no items to check is not read.
 	store.reads = map[string]int{}
-	if _, err := updater.loadHomeHides(ctx, store, nil, 1, "p1", seriesID, false, false); err != nil {
+	if _, err := updater.loadHomeHides(ctx, store, 1, "p1", seriesID, nil, nil); err != nil {
 		t.Fatalf("loadHomeHides: %v", err)
 	}
 	if len(store.reads) != 0 {
-		t.Fatalf("read dismissals %v for surfaces that cannot show the series", store.reads)
+		t.Fatalf("read dismissals %v with no items to check", store.reads)
 	}
 
-	// A shared cache reads each list once across a profile's series.
+	// A store with the targeted reader never lists a whole surface.
 	store.reads = map[string]int{}
-	cache := &homeDismissals{}
-	for _, series := range []string{seriesID, otherSeries, "series-c"} {
-		if _, err := updater.loadHomeHides(ctx, store, cache, 1, "p1", series, true, true); err != nil {
-			t.Fatalf("loadHomeHides: %v", err)
-		}
+	targeted := &itemReaderStore{countingDismissalStore: store}
+	hides, err = updater.loadHomeHides(ctx, targeted, 1, "p1", seriesID, []string{"a-e2"}, seriesA)
+	if err != nil {
+		t.Fatalf("loadHomeHides: %v", err)
 	}
-	if store.reads[userstore.HomeSurfaceContinueWatching] != 1 || store.reads[userstore.HomeSurfaceNextUp] != 1 {
-		t.Fatalf("reads = %v, want one per surface", store.reads)
+	if targeted.itemReads != 2 || len(store.reads) != 0 {
+		t.Fatalf("targeted reads = %d, full reads = %v; want 2 and none", targeted.itemReads, store.reads)
+	}
+	if _, ok := hides.nextUp["a-e3"]; len(hides.nextUp) != 1 || !ok {
+		t.Fatalf("nextUp = %v, want only a-e3", hides.nextUp)
 	}
 
 	updater.drops = fakeDroppedSeries{{SeriesID: seriesID, Active: true}}
-	hides, err = updater.loadHomeHides(ctx, store, nil, 1, "p1", seriesID, true, true)
+	hides, err = updater.loadHomeHides(ctx, store, 1, "p1", seriesID, []string{"a-e2"}, seriesA)
 	if err != nil {
 		t.Fatalf("loadHomeHides: %v", err)
 	}
@@ -480,4 +504,20 @@ func TestRecomputeSeriesFollowsHomeRemovalsPostgres(t *testing.T) {
 	}
 	requireQueued("removing an imported drop")
 	recompute("imported drop removed", flags{favorite: true, nextUp: true}, afterE4)
+
+	// Home anchors Next Up on the most recently completed episode. E3 gets a
+	// file and the profile rewatches E1, so Home's card becomes E3 even though
+	// E4 is the highest episode watched.
+	if _, err := pool.Exec(ctx, `INSERT INTO media_files (id, media_folder_id, file_path, episode_id) VALUES ($1, $2, $3 || '/e3.mkv', $4)`,
+		nonce%1_000_000_000_000+3, libraryID, "/"+prefix, episodes[2]); err != nil {
+		t.Fatalf("add E3 file: %v", err)
+	}
+	setProgress(episodes[0], true, time.Now().UTC().Truncate(time.Second))
+	if err := store.UpsertHomeDismissal(ctx, userstore.HomeItemDismissal{
+		ProfileID: profileID, Surface: userstore.HomeSurfaceNextUp, MediaItemID: episodes[2],
+		SeriesID: &seriesID, DismissedAt: time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatalf("dismiss E3 from Next Up: %v", err)
+	}
+	recompute("E3 card dismissed after a rewatch", flags{favorite: true}, afterE4)
 }
