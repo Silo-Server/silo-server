@@ -331,6 +331,12 @@ export function parseTmdbCollectionId(value: string): number | undefined {
   return trimmed !== "" && Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
+// parseTmdbCollectionLimit reads the franchise Max Items input the same way,
+// so "1e2" saves as 100. Blank means no limit.
+export function parseTmdbCollectionLimit(value: string): number | undefined {
+  return parseTmdbCollectionId(value);
+}
+
 export function buildTMDBCollectionSourceInput({
   collectionId,
   limit,
@@ -342,7 +348,7 @@ export function buildTMDBCollectionSourceInput({
   source_config: Record<string, unknown>;
 } {
   const parsedId = parseTmdbCollectionId(collectionId) ?? 0;
-  const parsedLimit = parseOptionalPositiveInteger(limit);
+  const parsedLimit = parseTmdbCollectionLimit(limit);
   const source_config: Record<string, unknown> = {
     mode: "tmdb_collection",
     collection_id: parsedId,
@@ -1684,7 +1690,9 @@ export function CollectionEditForm({
   const missingSourceURL = isMDBListCollection && sourceUrl.trim().length === 0;
   const hasInvalidTmdbCollectionId =
     isTMDBFranchise && parseTmdbCollectionId(tmdbCollectionId) === undefined;
-  const parsedTmdbLimit = parseOptionalPositiveInteger(tmdbLimit);
+  const parsedTmdbLimit = isTMDBFranchise
+    ? parseTmdbCollectionLimit(tmdbLimit)
+    : parseOptionalPositiveInteger(tmdbLimit);
   const hasInvalidTmdbLimit = tmdbLimit.trim().length > 0 && parsedTmdbLimit === undefined;
   const parsedTraktLimit = parseOptionalPositiveInteger(traktLimit);
   const hasInvalidTraktLimit = traktLimit.trim().length > 0 && parsedTraktLimit === undefined;
@@ -1964,8 +1972,8 @@ export function CollectionEditForm({
 
         {isTMDBCollection && tmdbSourceKind === "other" ? (
           <p className="text-muted-foreground border-border rounded-lg border px-4 py-3 text-sm">
-            This collection follows a TMDB discover filter from a template. Its source can&apos;t
-            be changed here; saving keeps it as it is.
+            This collection follows a TMDB discover filter from a template. Its source can&apos;t be
+            changed here; saving keeps it as it is.
           </p>
         ) : null}
 

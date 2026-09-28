@@ -9,6 +9,7 @@ import {
   parseTMDBCollectionSourceConfig,
   parseTMDBPresetSourceConfig,
   parseTmdbCollectionId,
+  parseTmdbCollectionLimit,
   toAdminCollectionBuilderValue,
   toAdminCollectionRequest,
 } from "./adminCollectionsShared";
@@ -256,5 +257,12 @@ describe("AdminCollections helpers", () => {
       expect(parseTmdbCollectionId(invalid)).toBeUndefined();
     }
     expect(parseTmdbCollectionId(" 1e3 ")).toBe(1000);
+  });
+
+  it("parses the franchise limit as a whole value", () => {
+    const input = buildTMDBCollectionSourceInput({ collectionId: "10", limit: "1e2" });
+    expect(input.source_config.limit).toBe(100);
+    expect(parseTmdbCollectionLimit("1.5")).toBeUndefined();
+    expect(parseTmdbCollectionLimit("")).toBeUndefined();
   });
 });
