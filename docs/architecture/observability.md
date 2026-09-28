@@ -352,13 +352,13 @@ claiming coverage. No second waiter or reaper is installed.
 `internal/nodemetrics` samples CPU, memory, disk, network and GPU in every
 serving process every five seconds and keeps only the current sample; trends and
 alerts belong to Prometheus. The sample feeds the admin Nodes page, each node's
-`/health` and `/status`, `GET /api/v2/admin/system/resources`, and
+`/api/v1/health` and `/status`, `GET /api/v2/admin/system/resources`, and
 `streamapp_node_*` gauges. Proxy and transcode nodes serve `/metrics` on their
 application listener; the API process serves it only on `SILO_METRICS_LISTEN`.
 
 - **Paths stay private.** Disk series are labeled by role (`mount="scratch"`,
   `mount="library-1"`), never by path, so an unauthenticated scrape cannot
-  enumerate media locations. A node's unauthenticated `/health` withholds paths
+  enumerate media locations. A node's unauthenticated `/api/v1/health` withholds paths
   on the same terms. Paths appear only in the admin resources response and a
   node's bearer-authenticated `/status`.
 - **Probing is bounded.** Each process's sampler checks at most eight mounts:
