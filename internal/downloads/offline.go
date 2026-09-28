@@ -235,7 +235,14 @@ func (s *Service) streamArtwork(ctx context.Context, w http.ResponseWriter, _ *h
 	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
 	store := &storeReader{Reader: resp.Body, stall: time.AfterFunc(artworkStallTimeout, stopFetch)}
 	defer store.stall.Stop()
-	if _, err := io.Copy(w, store); err != nil {
+	if written, err := io.Copy(w, store); err != nil {
+		if written == 0 {
+			// Nothing reached the client, so an error response may follow;
+			// it mustn't carry the image's length or cache policy.
+			for _, name := range []string{"Content-Type", "Content-Length", "Cache-Control"} {
+				w.Header().Del(name)
+			}
+		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}

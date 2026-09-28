@@ -180,3 +180,24 @@ func TestArtworkStoreStallingMidBodyIsRetryable(t *testing.T) {
 		t.Fatalf("err = %v after %v", err, time.Since(start))
 	}
 }
+
+func TestArtworkStallBeforeFirstByteDropsImageHeaders(t *testing.T) {
+	shortStall(t)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.Header().Set("Content-Length", "10")
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		select {
+		case <-r.Context().Done():
+		case <-time.After(5 * time.Second):
+		}
+	}))
+	defer upstream.Close()
+	s := &Service{httpClient: upstream.Client()}
+	rec := httptest.NewRecorder()
+	err := s.streamArtwork(context.Background(), rec, nil, upstream.URL+"/poster.jpg")
+	if !errors.Is(err, ErrAssetUnavailable) || rec.Header().Get("Content-Length") != "" || rec.Header().Get("Cache-Control") != "" {
+		t.Fatalf("err = %v, headers %v", err, rec.Header())
+	}
+}
