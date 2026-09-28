@@ -147,3 +147,78 @@ func TestQueryExecutorCountMatchesCursorTotalDB(t *testing.T) {
 		})
 	}
 }
+
+// The list must not repeat the same catalog count for each smart collection,
+// and batching distinct definitions must preserve their arguments and limits.
+func TestCountPersonalCollectionsBatchedDB(t *testing.T) {
+	pool := newBatchEquivTestPool(t)
+	ctx := t.Context()
+	var library int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders(type,name,enabled) VALUES('movies',$1,true) RETURNING id`, fmt.Sprintf("batch-count-%d", time.Now().UnixNano())).Scan(&library); err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for i, year := range []int{2000, 2010, 2020} {
+		id := fmt.Sprintf("batch-count-%d-%d", library, i)
+		ids = append(ids, id)
+		batchEquivExec(t, pool, `INSERT INTO media_items(content_id,type,title,year) VALUES($1,'movie',$1,$2)`, id, year)
+		batchEquivExec(t, pool, `INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, id, library)
+	}
+	t.Cleanup(func() {
+		batchEquivExec(t, pool, `DELETE FROM media_items WHERE content_id=ANY($1)`, ids)
+		batchEquivExec(t, pool, `DELETE FROM media_folders WHERE id=$1`, library)
+	})
+	viewer := AccessFilter{AllowedLibraryIDs: []int{library}}
+	duplicate := PersonalCollectionDefinition{CollectionType: "smart", QueryDefinition: `{"media_scope":"movie","groups":[]}`}
+	var duplicates []PersonalCollectionDefinition
+	for i := range 50 {
+		c := duplicate
+		c.ID = fmt.Sprintf("duplicate-%d", i)
+		duplicates = append(duplicates, c)
+	}
+	before := pool.Stat().AcquireCount()
+	counts, err := CountPersonalCollections(ctx, pool, 0, duplicates, viewer)
+	queries := pool.Stat().AcquireCount() - before
+	if err != nil || len(counts) != len(duplicates) || queries != 1 {
+		t.Fatalf("duplicate counts: %d results, %d queries, error %v", len(counts), queries, err)
+	}
+	for _, c := range duplicates {
+		if counts[c.ID] != 3 {
+			t.Errorf("%s = %d, want 3", c.ID, counts[c.ID])
+		}
+	}
+
+	var distinct []PersonalCollectionDefinition
+	wants := make(map[string]int)
+	for i := range 40 {
+		year := 1990 + i
+		c := PersonalCollectionDefinition{ID: fmt.Sprintf("year-%d", year), CollectionType: "smart", QueryDefinition: fmt.Sprintf(`{"media_scope":"movie","groups":[{"rules":[{"field":"year","op":"gte","value":%d}]}],"limit":2}`, year)}
+		distinct = append(distinct, c)
+		for _, itemYear := range []int{2000, 2010, 2020} {
+			if itemYear >= year {
+				wants[c.ID]++
+			}
+		}
+		wants[c.ID] = min(wants[c.ID], 2)
+	}
+	before = pool.Stat().AcquireCount()
+	counts, err = CountPersonalCollections(ctx, pool, 0, distinct, viewer)
+	queries = pool.Stat().AcquireCount() - before
+	if err != nil || len(counts) != len(distinct) || queries > 2 {
+		t.Fatalf("distinct counts: %d results, %d queries, error %v", len(counts), queries, err)
+	}
+	for id, want := range wants {
+		if counts[id] != want {
+			t.Errorf("%s = %d, want %d", id, counts[id], want)
+		}
+	}
+
+	// The reuse is per request, and one invalid definition cannot hide valid
+	// counts returned alongside it.
+	batchEquivExec(t, pool, `DELETE FROM media_items WHERE content_id=$1`, ids[0])
+	duplicates = append(duplicates, PersonalCollectionDefinition{ID: "invalid", CollectionType: "smart", QueryDefinition: "{"})
+	counts, err = CountPersonalCollections(ctx, pool, 0, duplicates, viewer)
+	if err == nil || len(counts) != 50 || counts[duplicates[0].ID] != 2 {
+		t.Fatalf("next request: %d results, first count %d, error %v", len(counts), counts[duplicates[0].ID], err)
+	}
+}

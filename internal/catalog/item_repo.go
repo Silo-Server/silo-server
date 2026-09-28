@@ -811,7 +811,7 @@ func itemAccessConditions(access AccessFilter, args *[]any, argIdx *int) []strin
 // CountVisiblePersonalCollectionMembers counts, per collection, the members of
 // the account's hand-picked or imported personal collections that the viewer
 // can see, as their catalog view counts them. It ignores smart definitions and
-// display filters; CountPersonalCollection handles those collections.
+// display filters; CountPersonalCollections handles those collections.
 // Collections with no visible members are absent from the result. It reads the
 // Postgres user store's membership table, so callers must not use it for
 // collections kept elsewhere.

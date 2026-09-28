@@ -23,19 +23,22 @@ func visiblePersonalCollectionCounts(ctx context.Context, executor *catalog.Quer
 		return counts
 	}
 	// Hand-picked and imported collections without a display filter share one
-	// grouped count; the rest need their own query.
+	// grouped count; dynamic definitions are deduplicated and batched.
 	var memberIDs []string
+	var dynamic []catalog.PersonalCollectionDefinition
 	for _, c := range collections {
 		if !catalog.IsLiveQueryType(c.CollectionType) && strings.TrimSpace(c.DisplayQueryDefinition) == "" {
 			memberIDs = append(memberIDs, c.ID)
 			continue
 		}
-		n, err := catalog.CountPersonalCollection(ctx, executor.Pool, userID, c, filter)
+		dynamic = append(dynamic, c)
+	}
+	if len(dynamic) > 0 {
+		var err error
+		counts, err = catalog.CountPersonalCollections(ctx, executor.Pool, userID, dynamic, filter)
 		if err != nil {
-			slog.WarnContext(ctx, "counting personal collection failed", "component", "collections", "collection_id", c.ID, "error", err)
-			continue
+			slog.WarnContext(ctx, "counting personal collections failed", "component", "collections", "error", err)
 		}
-		counts[c.ID] = n
 	}
 	if len(memberIDs) == 0 {
 		return counts

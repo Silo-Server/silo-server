@@ -58,19 +58,27 @@ func (e *QueryExecutor) Count(ctx context.Context, def QueryDefinition, access A
 	if e == nil || e.Pool == nil {
 		return 0, fmt.Errorf("query executor requires a database pool")
 	}
-	plan, err := e.buildPreviewPagePlan(def, access, 1, 0)
+	countSQL, countArgs, err := e.buildCountQuery(def, access)
 	if err != nil {
 		return 0, err
 	}
-	if def.Limit != nil && !e.GroupByWork {
-		plan.maxResults = *def.Limit
-	}
-	countSQL, countArgs := plan.countSQL()
 	var total int
 	if err := e.Pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
 		return 0, fmt.Errorf("counting query matches: %w", err)
 	}
 	return total, nil
+}
+
+func (e *QueryExecutor) buildCountQuery(def QueryDefinition, access AccessFilter) (string, []any, error) {
+	plan, err := e.buildPreviewPagePlan(def, access, 1, 0)
+	if err != nil {
+		return "", nil, err
+	}
+	if def.Limit != nil && !e.GroupByWork {
+		plan.maxResults = *def.Limit
+	}
+	countSQL, countArgs := plan.countSQL()
+	return countSQL, countArgs, nil
 }
 
 func (e *QueryExecutor) PreviewPage(
@@ -629,6 +637,14 @@ func buildLibraryScopeJoin(
 	}
 
 	if len(disabledLibraryIDs) > 0 {
+		// Match per-item access: a disabled-only scope must not admit orphan
+		// items through a vacuous NOT EXISTS.
+		if len(allowedLibraryIDs) == 0 {
+			clauses = append(clauses, fmt.Sprintf(
+				`EXISTS (SELECT 1 FROM %s mil_scope_in WHERE mil_scope_in.%s = %s)`,
+				tableName, keyColumn, itemContentExpr,
+			))
+		}
 		clauses = append(clauses, fmt.Sprintf(
 			`NOT EXISTS (SELECT 1 FROM %s mil_scope_out WHERE mil_scope_out.%s = %s AND mil_scope_out.media_folder_id = ANY($%d))`,
 			tableName, keyColumn, itemContentExpr, argIdx,

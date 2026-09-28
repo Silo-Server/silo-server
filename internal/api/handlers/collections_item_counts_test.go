@@ -105,7 +105,9 @@ func TestPersonalCollectionItemCountsDB(t *testing.T) {
 		f.exec(t, `INSERT INTO media_items(content_id,type,title) VALUES($1,'series','Same title')`, series)
 		f.exec(t, `INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, series, f.library)
 		t.Cleanup(func() {
-			_, _ = f.pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, series)
+			if _, err := f.pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, series); err != nil {
+				t.Errorf("cleanup series: %v", err)
+			}
 		})
 		display := func(kind string) string {
 			return `{"match":"all","groups":[{"match":"all","rules":[{"field":"type","op":"is","value":"` + kind + `"}]}]}`
@@ -166,4 +168,43 @@ func TestPersonalCollectionItemCountsDB(t *testing.T) {
 			t.Fatalf("create: item_count = %d, want 4", created.ItemCount)
 		}
 	})
+}
+
+func TestPersonalCollectionCountMatchesDisabledLibraryViewDB(t *testing.T) {
+	f := newPagingIntegrationFixture(t)
+	provider := pgstore.NewPostgresProvider(f.pool)
+	store, err := provider.ForUser(t.Context(), f.account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := store.CreateCollection(t.Context(), userstore.CreateCollectionInput{CreatorProfileID: "owner", Name: "Disabled libraries", CollectionType: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, id := range f.ids[:3] {
+		if err := store.AddCollectionItem(t.Context(), c.ID, id, i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// One member belongs to a disabled library, one has lost its last library
+	// membership, and one remains in the visible library.
+	f.exec(t, `DELETE FROM media_item_libraries WHERE content_id=$1`, f.ids[1])
+	ctx := access.SetScope(t.Context(), access.Scope{DisabledLibraryIDs: []int{f.hidden}})
+	h := NewCollectionHandler(provider)
+	h.Executor = &catalog.QueryExecutor{Pool: f.pool}
+	got, err := h.GetPersonalCollection(ctx, f.account, "owner", c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := catalog.NewCatalogResolver(catalog.NewBrowseRepository(f.pool), catalog.NewItemRepository(f.pool)).WithUserStoreProvider(provider)
+	viewer := AccessFilterFromContext(ctx, "")
+	viewer.UserID, viewer.ProfileID = f.account, "owner"
+	page, err := resolver.Resolve(ctx, catalog.CatalogRequest{Source: catalog.CatalogSourceUserCollection, CollectionID: c.ID, CursorPaging: true, UseSourceOrder: true, Limit: 10}, viewer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("count=%d, catalog total=%d, listed=%d", got.ItemCount, page.Total, len(page.Items))
+	if got.ItemCount != 1 || page.Total != 1 || len(page.Items) != 1 || page.Items[0].ContentID != f.ids[2] {
+		t.Fatalf("disabled or orphan member visible: count=%d total=%d items=%v", got.ItemCount, page.Total, page.Items)
+	}
 }
