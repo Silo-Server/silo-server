@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -140,6 +141,15 @@ func TestDownloadRawAssetFailureBoundaries(t *testing.T) {
 	rec := do(t, h, "GET", path, "", viewer)
 	if rec.Code != 500 || rec.Header().Get("Content-Length") != "" || rec.Header().Get("Content-Type") != problemContentType || strings.Contains(rec.Body.String(), "synthetic upstream") {
 		t.Fatalf("%d %v %s", rec.Code, rec.Header(), rec.Body.String())
+	}
+	// An image store that failed or couldn't be reached is worth a retry,
+	// not a server fault.
+	// An upstream error status is also not-found for v1; v2 still retries.
+	domain.err = fmt.Errorf("artwork upstream status 503: %w: %w", downloads.ErrAssetUnavailable, downloads.ErrAssetNotFound)
+	rec = do(t, h, "GET", path, "", viewer)
+	requireProblem(t, rec, TypeDependencyUnavailable)
+	if rec.Header().Get("Retry-After") != "5" || strings.Contains(rec.Body.String(), "upstream status") {
+		t.Fatalf("unavailable artwork: %v %s", rec.Header(), rec.Body.String())
 	}
 	domain.partial = true
 	rec = do(t, h, "GET", path, "", viewer)

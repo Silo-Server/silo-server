@@ -7,8 +7,10 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -121,37 +123,66 @@ func (s *Service) ServeArtwork(ctx context.Context, w http.ResponseWriter, r *ht
 	if err != nil {
 		return err
 	}
-	var url string
+	var imageURL string
 	switch kind {
 	case "poster":
-		url = detail.PosterURL
+		imageURL = detail.PosterURL
 	case "backdrop":
-		url = detail.BackdropURL
+		imageURL = detail.BackdropURL
 	case "logo":
-		url = detail.LogoURL
+		imageURL = detail.LogoURL
 	default:
 		return ErrAssetNotFound
 	}
-	if url == "" {
+	if imageURL == "" {
 		return ErrAssetNotFound
 	}
-	return s.streamArtwork(ctx, w, r, url)
+	err = s.streamArtwork(ctx, w, r, imageURL)
+	if errors.Is(err, ErrAssetUnavailable) {
+		slog.WarnContext(ctx, "download artwork unavailable", "component", "downloads",
+			"download_id", downloadID, "kind", kind, "error", err)
+	}
+	return err
 }
 
-func (s *Service) streamArtwork(ctx context.Context, w http.ResponseWriter, _ *http.Request, url string) error {
+// artworkClient fetches artwork when the service has no client of its own.
+// Artwork is small, so a store that hasn't answered in this time is failing.
+var artworkClient = &http.Client{Timeout: 30 * time.Second}
+
+func (s *Service) streamArtwork(ctx context.Context, w http.ResponseWriter, _ *http.Request, imageURL string) error {
 	client := s.httpClient
 	if client == nil {
-		client = http.DefaultClient
+		client = artworkClient
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
 	if err != nil {
-		return fmt.Errorf("building artwork request: %w", err)
+		return errors.New("building artwork request: invalid artwork URL")
+	}
+	if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+		// Local artwork storage signs server-relative URLs, which can't be
+		// fetched over HTTP. Retrying won't help.
+		return errors.New("fetching artwork: artwork URL is not an absolute http(s) URL")
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("fetching artwork: %w", err)
+		if ctx.Err() != nil {
+			// The client went away; the store isn't at fault.
+			return ctx.Err()
+		}
+		// A failed request's error text repeats the presigned URL; keep only
+		// the cause.
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			err = urlErr.Err
+		}
+		return fmt.Errorf("fetching artwork: %w: %w", ErrAssetUnavailable, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError {
+		// Also ErrAssetNotFound, which the frozen v1 route answers with 404
+		// as it always has.
+		return fmt.Errorf("artwork upstream status %d: %w: %w", resp.StatusCode, ErrAssetUnavailable, ErrAssetNotFound)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("artwork upstream status %d: %w", resp.StatusCode, ErrAssetNotFound)
 	}

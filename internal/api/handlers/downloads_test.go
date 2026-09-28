@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -1214,6 +1215,27 @@ func TestManagedArtworkThreadsIdentity(t *testing.T) {
 	}
 	if svc.gotArtwork != (identityCall{7, "pA", "devA", "dl1"}) || svc.gotArtworkKind != "backdrop" {
 		t.Fatalf("artwork identity = %+v kind = %q", svc.gotArtwork, svc.gotArtworkKind)
+	}
+}
+
+// The frozen v1 artwork route keeps its status codes when the image store
+// fails: an upstream error status stays 404, a store it couldn't reach 500.
+func TestManagedArtworkStoreFailureKeepsV1Statuses(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want int
+	}{
+		{fmt.Errorf("artwork upstream status 503: %w: %w", downloads.ErrAssetUnavailable, downloads.ErrAssetNotFound), http.StatusNotFound},
+		{fmt.Errorf("fetching artwork: %w: %w", downloads.ErrAssetUnavailable, errors.New("i/o timeout")), http.StatusInternalServerError},
+	} {
+		h := NewDownloadHandler(&fakeDownloadService{artworkErr: tc.err})
+		req := withChiParams(downloadTestRequest(http.MethodGet, "/downloads/dl1/artwork/poster", nil, 7, "pA", "devA"),
+			map[string]string{"id": "dl1", "kind": "poster"})
+		rec := httptest.NewRecorder()
+		h.HandleArtwork(rec, req)
+		if rec.Code != tc.want {
+			t.Errorf("%v: status = %d, want %d", tc.err, rec.Code, tc.want)
+		}
 	}
 }
 

@@ -109,6 +109,9 @@ func downloadEntryOf(row *downloads.Download) DownloadEntry {
 }
 func downloadProblem(err error) *Problem {
 	switch {
+	// Before not-found: an upstream 5xx is both, and v2 reports it as retryable.
+	case errors.Is(err, downloads.ErrAssetUnavailable):
+		return NewProblem(TypeDependencyUnavailable, "The asset is temporarily unavailable.").WithRetryAfter(5)
 	case errors.Is(err, downloads.ErrNotFound), errors.Is(err, downloads.ErrSubscriptionNotFound), errors.Is(err, downloads.ErrAssetNotFound), errors.Is(err, catalogpkg.ErrItemNotFound):
 		return NewProblem(TypeNotFound, "Download not found.")
 	case errors.Is(err, downloads.ErrDownloadNotActive):
