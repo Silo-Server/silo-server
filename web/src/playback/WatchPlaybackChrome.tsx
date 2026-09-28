@@ -832,6 +832,10 @@ function WatchPlaybackHostContent() {
   useEffect(() => {
     seriesIdRef.current = activeItem?.series_id;
   }, [activeItem?.series_id]);
+  const roomIdRef = useRef(activeRequest?.roomId);
+  useEffect(() => {
+    roomIdRef.current = activeRequest?.roomId;
+  }, [activeRequest?.roomId]);
 
   // Reset post-roll tracking when the playback session changes.
   useEffect(() => {
@@ -931,8 +935,12 @@ function WatchPlaybackHostContent() {
       // Enter post-roll early when approaching end of a series episode.
       // Fires regardless of whether a next episode exists so the end-of-
       // series case still gets a graceful overlay instead of an HLS tail loop.
+      // A Watch Together room decides what follows for everyone: it returns to
+      // its lobby when the item finishes, and the player's room exit only
+      // navigates there from the foreground, so the player stays put.
       if (
         !postRollEnteredRef.current &&
+        !roomIdRef.current &&
         seriesIdRef.current &&
         modeRef.current === "foreground" &&
         snapshot.duration > 0 &&
