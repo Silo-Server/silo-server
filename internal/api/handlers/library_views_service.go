@@ -237,11 +237,7 @@ func (h *LibraryCollectionHandler) LibraryUserCollections(ctx context.Context, l
 // withVisibleItemCounts sets each personal collection's item_count to the
 // members the acting profile can see, as the personal collection routes do.
 func (h *LibraryCollectionHandler) withVisibleItemCounts(ctx context.Context, userID int, collections []usercollections.ServerVisibleCollection) {
-	sources := make([]catalog.PersonalCollectionDefinition, 0, len(collections))
-	for _, c := range collections {
-		sources = append(sources, catalog.PersonalCollectionDefinition{ID: c.ID, CollectionType: c.CollectionType, QueryDefinition: c.QueryDefinition, DisplayQueryDefinition: c.DisplayQueryDefinition})
-	}
-	counts := visiblePersonalCollectionCounts(ctx, h.Executor, userID, sources, AccessFilterFromContext(ctx, ""))
+	counts := catalog.CountVisiblePersonalCollections(ctx, executorPool(h.Executor), userID, usercollections.CountDefinitions(collections), AccessFilterFromContext(ctx, ""))
 	for i := range collections {
 		if n, ok := counts[collections[i].ID]; ok {
 			collections[i].ItemCount = n

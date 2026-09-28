@@ -8,6 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
 // ServerVisibleCollection is the per-user view of a personal collection the
@@ -155,7 +157,7 @@ func (s *Store) Get(ctx context.Context, userID int, profileID, key string, visi
 	err := s.pool.QueryRow(ctx,
 		`WITH visible_collection AS (
 			SELECT upc.id, upc.creator_profile_id, upc.name, upc.description, upc.collection_type,
-			       upc.item_count, upc.poster_url, upc.poster_thumbhash, upc.created_at, upc.updated_at,
+			       upc.item_count, upc.query_definition, COALESCE(upc.display_query_definition::text, '') AS display_query_definition, upc.poster_url, upc.poster_thumbhash, upc.created_at, upc.updated_at,
 			       `+scopeConfigExpr+` AS scope_config
 			FROM user_personal_collections upc
 			WHERE `+serverVisibleWhere+`
@@ -163,13 +165,13 @@ func (s *Store) Get(ctx context.Context, userID int, profileID, key string, visi
 			  AND upc.collection_type <> 'playlist'
 		)
 		 SELECT id, creator_profile_id, name, description, collection_type, item_count,
-		        poster_url, poster_thumbhash, created_at, updated_at
+		        query_definition, display_query_definition, poster_url, poster_thumbhash, created_at, updated_at
 		 FROM visible_collection
 		 WHERE `+scopeMatchesLibraries("scope_config", "$4"),
 		userID, profileID, key, visibleLibraryIDs,
 	).Scan(
 		&c.ID, &c.CreatorProfileID, &c.Name, &c.Description, &c.CollectionType,
-		&c.ItemCount, &c.PosterPath, &c.PosterThumbhash, &createdAt, &updatedAt,
+		&c.ItemCount, &c.QueryDefinition, &c.DisplayQueryDefinition, &c.PosterPath, &c.PosterThumbhash, &createdAt, &updatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -180,6 +182,28 @@ func (s *Store) Get(ctx context.Context, userID int, profileID, key string, visi
 	c.CreatedAt = createdAt.UTC().Format(time.RFC3339)
 	c.UpdatedAt = updatedAt.UTC().Format(time.RFC3339)
 	return &c, nil
+}
+
+// CountVisible returns how many items each collection shows the viewer under
+// access, keyed by collection ID; see catalog.CountVisiblePersonalCollections.
+// A collection whose count cannot be read is absent from the result.
+func (s *Store) CountVisible(ctx context.Context, userID int, collections []ServerVisibleCollection, access catalog.AccessFilter) map[string]int {
+	return catalog.CountVisiblePersonalCollections(ctx, s.pool, userID, CountDefinitions(collections), access)
+}
+
+// CountDefinitions returns the part of each collection that decides which
+// items it shows, for catalog.CountVisiblePersonalCollections.
+func CountDefinitions(collections []ServerVisibleCollection) []catalog.PersonalCollectionDefinition {
+	defs := make([]catalog.PersonalCollectionDefinition, 0, len(collections))
+	for _, c := range collections {
+		defs = append(defs, catalog.PersonalCollectionDefinition{
+			ID:                     c.ID,
+			CollectionType:         c.CollectionType,
+			QueryDefinition:        c.QueryDefinition,
+			DisplayQueryDefinition: c.DisplayQueryDefinition,
+		})
+	}
+	return defs
 }
 
 // AnyVisible reports whether the profile has at least one server-visible

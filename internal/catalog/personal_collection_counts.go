@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -147,4 +148,50 @@ func CountPersonalCollections(ctx context.Context, pool *pgxpool.Pool, userID in
 		}
 	}
 	return counts, errors.Join(failures...)
+}
+
+// CountVisiblePersonalCollections answers how many items each personal
+// collection shows the viewer, the total of its catalog view: its visible
+// members, or its smart definition's matches, narrowed by its display filter.
+// The stored item_count column is written only by import syncs, so it cannot
+// answer this. A collection whose count cannot be read is absent from the
+// result and keeps its stored count.
+//
+// Membership is read from the Postgres user store; callers skip stores that
+// keep collections elsewhere.
+func CountVisiblePersonalCollections(ctx context.Context, pool *pgxpool.Pool, userID int, collections []PersonalCollectionDefinition, access AccessFilter) map[string]int {
+	counts := make(map[string]int, len(collections))
+	if pool == nil || len(collections) == 0 {
+		return counts
+	}
+	// Hand-picked and imported collections without a display filter share one
+	// grouped count; dynamic definitions are deduplicated and batched.
+	var memberIDs []string
+	var dynamic []PersonalCollectionDefinition
+	for _, c := range collections {
+		if !IsLiveQueryType(c.CollectionType) && strings.TrimSpace(c.DisplayQueryDefinition) == "" {
+			memberIDs = append(memberIDs, c.ID)
+			continue
+		}
+		dynamic = append(dynamic, c)
+	}
+	if len(dynamic) > 0 {
+		var err error
+		counts, err = CountPersonalCollections(ctx, pool, userID, dynamic, access)
+		if err != nil {
+			slog.WarnContext(ctx, "counting personal collections failed", "component", "collections", "error", err)
+		}
+	}
+	if len(memberIDs) == 0 {
+		return counts
+	}
+	visible, err := NewItemRepository(pool).CountVisiblePersonalCollectionMembers(ctx, userID, memberIDs, access)
+	if err != nil {
+		slog.WarnContext(ctx, "counting personal collection members failed", "component", "collections", "error", err)
+		return counts
+	}
+	for _, id := range memberIDs {
+		counts[id] = visible[id]
+	}
+	return counts
 }

@@ -48,6 +48,11 @@ type fakeUserCollectionSource struct {
 	gotUserID     int
 	gotProfileID  string
 	gotLibraryIDs []int
+
+	// counts answers CountVisible; a missing ID mimics a count that failed.
+	counts         map[string]int
+	gotCountIDs    []string
+	gotCountAccess catalog.AccessFilter
 }
 
 type fakePersonalCollectionResolver struct {
@@ -102,6 +107,19 @@ func (f *fakeUserCollectionSource) AnyVisible(_ context.Context, userID int, pro
 		}
 	}
 	return false, nil
+}
+
+func (f *fakeUserCollectionSource) CountVisible(_ context.Context, userID int, collections []usercollections.ServerVisibleCollection, access catalog.AccessFilter) map[string]int {
+	f.gotUserID, f.gotCountAccess = userID, access
+	f.gotCountIDs = f.gotCountIDs[:0]
+	out := make(map[string]int, len(collections))
+	for _, c := range collections {
+		f.gotCountIDs = append(f.gotCountIDs, c.ID)
+		if n, ok := f.counts[c.ID]; ok {
+			out[c.ID] = n
+		}
+	}
+	return out
 }
 
 func (f *fakeUserCollectionSource) ImageCandidates(_ context.Context, id string) ([]usercollections.ServerVisibleCollection, error) {
@@ -170,7 +188,8 @@ func TestHandleItems_BoxSetListingIncludesOwnPersonalCollections(t *testing.T) {
 	for _, item := range result.Items {
 		switch item.Name {
 		case "My Watchlist":
-			if item.Type != "BoxSet" || !item.IsFolder || item.ChildCount != 0 {
+			// No live count in the fake, so the stored count is the fallback.
+			if item.Type != "BoxSet" || !item.IsFolder || item.ChildCount != 7 {
 				t.Fatalf("unexpected personal BoxSet DTO: %+v", item)
 			}
 		case "Studio Picks":
@@ -179,6 +198,64 @@ func TestHandleItems_BoxSetListingIncludesOwnPersonalCollections(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestPersonalBoxSetChildCountIsVisibleCount pins that personal BoxSets report
+// the items they show this viewer, as the native collection routes do, on the
+// listing, the detail route and Ids re-hydration. The stored item_count is
+// written only by import syncs, so it only stands in when a count fails.
+func TestPersonalBoxSetChildCountIsVisibleCount(t *testing.T) {
+	const collectionID = "731d3da2-4f4b-4a71-8f2f-38e1d34775b0"
+	counted := ownedUserCollection(collectionID, "Hand Picked")
+	counted.CollectionType = "manual"
+	uncounted := ownedUserCollection("u-2", "Imported")
+	uncounted.ItemCount = 9
+	personal := &fakeUserCollectionSource{
+		rows:   []fakeUserCollection{counted, uncounted},
+		counts: map[string]int{collectionID: 4},
+	}
+	h := newUserCollectionsTestHandler(&fakeCollectionSource{}, personal,
+		[]upstreamUserLibrary{{ID: 1, Name: "Movies", Type: "movies"}}, nil)
+
+	wantCounts := map[string]int{"Hand Picked": 4, "Imported": 9}
+	checkCounts := func(t *testing.T, items []baseItemDTO) {
+		t.Helper()
+		if len(items) == 0 {
+			t.Fatal("expected BoxSets")
+		}
+		for _, item := range items {
+			if want := wantCounts[item.Name]; item.ChildCount != want || item.RecursiveItemCount != want {
+				t.Errorf("%s: ChildCount=%d RecursiveItemCount=%d, want %d", item.Name, item.ChildCount, item.RecursiveItemCount, want)
+			}
+		}
+		if personal.gotUserID != 1 {
+			t.Errorf("counted for user %d, want the session's user 1", personal.gotUserID)
+		}
+		if !slices.Contains(personal.gotCountAccess.ExcludedMediaTypes, "audiobook") {
+			t.Errorf("count did not use the compat access filter: %+v", personal.gotCountAccess)
+		}
+	}
+
+	t.Run("listing", func(t *testing.T) {
+		result := performItemsRequest(t, h, "/Items?ParentId="+collectionsViewID)
+		checkCounts(t, result.Items)
+	})
+	t.Run("detail", func(t *testing.T) {
+		rec := requestBoxSetItem(t, h, collectionID)
+		if rec.Code != 200 {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+		var item baseItemDTO
+		if err := json.Unmarshal(rec.Body.Bytes(), &item); err != nil {
+			t.Fatalf("unmarshal response: %v", err)
+		}
+		checkCounts(t, []baseItemDTO{item})
+	})
+	t.Run("ids", func(t *testing.T) {
+		routeID := NewResourceIDCodec().EncodeStringID(EncodedIDUserCollection, collectionID)
+		result := performItemsRequest(t, h, "/Items?Ids="+routeID)
+		checkCounts(t, result.Items)
+	})
 }
 
 // TestHandleItems_BoxSetListingHidesOtherProfilesPersonalCollections is the
@@ -740,5 +817,176 @@ func TestUserViews_HidesCollectionsViewWhenPersonalCollectionsBelongToOthers(t *
 	result := performItemsRequest(t, h, "/Items")
 	if len(result.Items) != 1 || result.Items[0].ID == collectionsViewID {
 		t.Fatalf("expected only the library view, got %+v", result.Items)
+	}
+}
+
+// TestPersonalBoxSetChildCountMatchesChildrenDB pins, against the real store
+// and catalog resolver, that a personal BoxSet's ChildCount equals the
+// TotalRecordCount of its children: members in hidden libraries, audiobooks
+// (never on the compat surface) and rows for missing items count in neither.
+func TestPersonalBoxSetChildCountMatchesChildrenDB(t *testing.T) {
+	pool := newCompatTestPool(t)
+	ctx := context.Background()
+	suffix := uuid.NewString()
+	var userID, shownLib, hiddenLib int
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`, "boxset-count-"+suffix).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	for i, target := range []*int{&shownLib, &hiddenLib} {
+		if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('movies', $1, true) RETURNING id`,
+			fmt.Sprintf("boxset-count-%s-%d", suffix, i)).Scan(target); err != nil {
+			t.Fatal(err)
+		}
+	}
+	shownA, shownB := "boxset-count-a-"+suffix, "boxset-count-b-"+suffix
+	hidden, book, missing := "boxset-count-hidden-"+suffix, "boxset-count-book-"+suffix, "boxset-count-missing-"+suffix
+	for _, seed := range []struct {
+		id, kind string
+		library  int
+	}{{shownA, "movie", shownLib}, {shownB, "series", shownLib}, {hidden, "movie", hiddenLib}, {book, "audiobook", shownLib}} {
+		if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title) VALUES ($1, $2, $1)`, seed.id, seed.kind); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, seed.id, seed.library); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM user_collection_revisions WHERE user_id = $1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{shownA, shownB, hidden, book})
+		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = ANY($1)`, []int{shownLib, hiddenLib})
+	})
+
+	provider := pgstore.NewPostgresProvider(pool)
+	store, err := provider.ForUser(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := &Session{StreamAppUserID: userID, ProfileID: uuid.NewString()}
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: session.ProfileID, Name: "Test profile"}); err != nil {
+		t.Fatal(err)
+	}
+	collection, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
+		CreatorProfileID: session.ProfileID, Name: "Hand Picked", CollectionType: "manual",
+		AllowedProfileIDs: []string{session.ProfileID}, IncludeInServerCollections: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, member := range []string{shownA, shownB, hidden, book, missing} {
+		if err := store.AddCollectionItem(ctx, collection.ID, member, i); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	h := newCollectionsTestHandler(&fakeCollectionSource{}, []upstreamUserLibrary{{ID: shownLib, Name: "Movies", Type: "movies"}}, nil)
+	h.userCollections = usercollections.NewStore(pool)
+	h.collectionResolver = catalog.NewCatalogResolver(catalog.NewBrowseRepository(pool), catalog.NewItemRepository(pool)).
+		WithUserStoreProvider(provider)
+	h.accessFilter = func(_ context.Context, userID int, profileID string) catalog.AccessFilter {
+		return catalog.AccessFilter{UserID: userID, ProfileID: profileID, AllowedLibraryIDs: []int{shownLib}}
+	}
+
+	listing := performItemsRequest(t, h, "/Items?IncludeItemTypes=BoxSet", session)
+	if len(listing.Items) != 1 {
+		t.Fatalf("expected the personal BoxSet, got %+v", listing.Items)
+	}
+	children := performItemsRequest(t, h, "/Items?ParentId="+listing.Items[0].ID, session)
+	if children.TotalRecordCount != 2 || len(children.Items) != 2 {
+		t.Fatalf("children: total=%d items=%d, want 2 visible video members", children.TotalRecordCount, len(children.Items))
+	}
+	if got := listing.Items[0].ChildCount; got != children.TotalRecordCount {
+		t.Fatalf("ChildCount=%d, children TotalRecordCount=%d", got, children.TotalRecordCount)
+	}
+}
+
+// pagingPersonalResolver serves a fixed member list in pages, as the catalog
+// resolver does, and records each request.
+type pagingPersonalResolver struct {
+	items []*models.MediaItem
+	reqs  []catalog.CatalogRequest
+}
+
+func (f *pagingPersonalResolver) Resolve(_ context.Context, req catalog.CatalogRequest, _ catalog.AccessFilter) (*catalog.CatalogResult, error) {
+	f.reqs = append(f.reqs, req)
+	start := min(req.Offset, len(f.items))
+	end := len(f.items)
+	if req.Limit > 0 {
+		end = min(start+req.Limit, end)
+	}
+	return &catalog.CatalogResult{Items: f.items[start:end], Total: len(f.items)}, nil
+}
+
+// newPersonalPlayAllFixture exposes newPlayAllFixture's members [movie m-1,
+// series s-1, movie m-2] as a personal collection, in the order the catalog
+// resolver returns them.
+func newPersonalPlayAllFixture(t *testing.T) (*ItemsHandler, *pagingPersonalResolver, string) {
+	t.Helper()
+	const collectionID = "731d3da2-4f4b-4a71-8f2f-38e1d34775b0"
+	h, _ := newPlayAllFixture(t)
+	h.userCollections = &fakeUserCollectionSource{rows: []fakeUserCollection{ownedUserCollection(collectionID, "Mine")}}
+	resolver := &pagingPersonalResolver{items: []*models.MediaItem{
+		{ContentID: "m-1", Type: "movie", Title: "Movie One"},
+		{ContentID: "s-1", Type: "series", Title: "Show"},
+		{ContentID: "m-2", Type: "movie", Title: "Movie Two"},
+	}}
+	h.collectionResolver = resolver
+	return h, resolver, h.codec.EncodeStringID(EncodedIDUserCollection, collectionID)
+}
+
+// Play all and Shuffle on a personal BoxSet return its playable leaves, as for
+// library collections: series expand to their playable episodes with season
+// and series context, in the order the collection lists its members.
+func TestHandleItems_PersonalBoxSetPlayAllExpandsSeries(t *testing.T) {
+	h, resolver, parentID := newPersonalPlayAllFixture(t)
+	result := performItemsRequest(t, h, "/Users/u/Items?ParentId="+parentID+
+		"&Filters=IsNotFolder&Recursive=true&MediaTypes=Audio,Video&Fields=Chapters,MediaSources,Trickplay&Limit=300")
+	assertNames(t, result.Items, "Movie One", "S1E1", "S1E2", "S2E1", "Special", "Movie Two")
+	if result.TotalRecordCount != 6 {
+		t.Fatalf("expected TotalRecordCount 6, got %d", result.TotalRecordCount)
+	}
+	seriesID := h.codec.EncodeStringID(EncodedIDItem, "s-1")
+	for _, item := range result.Items {
+		if item.IsFolder || item.ParentID == "" || len(item.MediaSources) != 1 {
+			t.Fatalf("%q: expected a playable leaf under the BoxSet, got %+v", item.Name, item)
+		}
+		if item.Type == "Episode" && (item.SeriesID != seriesID || item.SeasonID == "") {
+			t.Fatalf("%q: expected series and season context, got SeriesId=%q SeasonId=%q", item.Name, item.SeriesID, item.SeasonID)
+		}
+	}
+	if got := resolver.reqs[0]; got.Source != catalog.CatalogSourceUserCollection || !got.UseSourceOrder || got.Randomize {
+		t.Fatalf("members must come in the collection's listing order: %+v", got)
+	}
+
+	episodesOnly := performItemsRequest(t, h, "/Items?ParentId="+parentID+"&Recursive=true&IncludeItemTypes=Episode")
+	assertNames(t, episodesOnly.Items, "S1E1", "S1E2", "S2E1", "Special")
+
+	shuffled := performItemsRequest(t, h, "/Items?ParentId="+parentID+"&Filters=IsNotFolder&Recursive=true&SortBy=Random&Limit=300")
+	if len(shuffled.Items) != 6 || shuffled.TotalRecordCount != 6 {
+		t.Fatalf("expected 6 of 6 shuffled leaves, got %d of %d", len(shuffled.Items), shuffled.TotalRecordCount)
+	}
+
+	members := performItemsRequest(t, h, "/Items?ParentId="+parentID+"&Recursive=true")
+	assertNames(t, members.Items, "Movie One", "Show", "Movie Two")
+}
+
+// Play all reads every member even past the resolver's first page, and pages
+// the leaves itself.
+func TestHandleItems_PersonalBoxSetPlayAllReadsWholeCollection(t *testing.T) {
+	h, resolver, parentID := newPersonalPlayAllFixture(t)
+	repo := h.itemRepo.(*fakeBatchItemRepo)
+	resolver.items = nil
+	for i := range personalLeavesFirstPage + 2 {
+		id := fmt.Sprintf("m-%04d", i)
+		item := &models.MediaItem{ContentID: id, Type: "movie", Title: id}
+		resolver.items = append(resolver.items, item)
+		repo.items[id] = item
+	}
+	result := performItemsRequest(t, h, "/Items?ParentId="+parentID+"&Filters=IsNotFolder&Recursive=true&StartIndex="+
+		strconv.Itoa(personalLeavesFirstPage)+"&Limit=5")
+	assertNames(t, result.Items, fmt.Sprintf("m-%04d", personalLeavesFirstPage), fmt.Sprintf("m-%04d", personalLeavesFirstPage+1))
+	if result.TotalRecordCount != personalLeavesFirstPage+2 {
+		t.Fatalf("expected every member counted, got %d", result.TotalRecordCount)
 	}
 }
