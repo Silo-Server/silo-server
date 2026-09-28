@@ -507,3 +507,18 @@ func TestHiddenTierDefaultsAreExposed(t *testing.T) {
 		}
 	}
 }
+
+func TestHEVCEncodingSettingDefaultAndValidation(t *testing.T) {
+	if got := EffectiveAdminSettings(nil)[PlaybackAllowHEVCEncodingSettingKey]; got != "false" {
+		t.Fatalf("HEVC default=%q", got)
+	}
+	for _, raw := range []string{"true", "false"} {
+		got, err := NormalizeAdminSetting(PlaybackAllowHEVCEncodingSettingKey, raw)
+		if err != nil || got != raw {
+			t.Fatalf("normalize %q: %q %v", raw, got, err)
+		}
+	}
+	if _, err := NormalizeAdminSetting(PlaybackAllowHEVCEncodingSettingKey, "invalid"); err == nil {
+		t.Fatal("invalid HEVC boolean accepted")
+	}
+}

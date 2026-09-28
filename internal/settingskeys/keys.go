@@ -25,6 +25,8 @@ const (
 	DownloadsKeepWatched = "downloads.keep_watched"
 	// Download over Wi-Fi only
 	DownloadsWifiOnly = "downloads.wifi_only"
+	// Hide watched items from Home
+	HomeHideWatchedItems = "home.hide_watched_items"
 	// Primary menu
 	NavPrimaryMenu = "nav.primary_menu"
 	// Navigation shortcuts
@@ -148,6 +150,7 @@ var Remote = []string{
 	CatalogMetadataLanguage,
 	CatalogMetadataLanguageOverrides,
 	CatalogShowAdvisoryAge,
+	HomeHideWatchedItems,
 	NavPrimaryMenu,
 	NavShortcuts,
 	PlaybackAudioLanguage,

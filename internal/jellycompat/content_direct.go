@@ -1493,6 +1493,7 @@ func itemDetailToUpstream(d *catalog.ItemDetail) upstreamItemDetail {
 	detail.SubtitleModeSet = d.HasEffectiveSubtitleMode
 	// playback.show_forced_subtitles defaults to true.
 	detail.ShowForcedSubtitles = !d.HasEffectiveShowForcedSubtitles || d.EffectiveShowForcedSubtitles
+	detail.SubtitleTrackSignature = d.EffectiveSubtitleTrackSignature
 	return detail
 }
 

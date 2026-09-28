@@ -12,7 +12,8 @@ import {
 } from "@/lib/settingsContract";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import type { ShortcutTarget } from "@/lib/uiCustomization";
-import { deviceKeys, settingsKeys } from "./keys";
+import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
+import { deviceKeys, sectionKeys, settingsKeys } from "./keys";
 
 /**
  * Typed access to the canonical settings API.
@@ -265,12 +266,23 @@ function shouldReconcileAfterMutationError(error: unknown): boolean {
   return !isDefinitiveSettingMutationRejection(error);
 }
 
+function refreshHomeForSetting(queryClient: ReturnType<typeof useQueryClient>, key?: string) {
+  if (key !== SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS) return;
+  // Home uses observer-less fetchQuery calls. Mark its data stale before
+  // resetting the load queue, including when the settings screen has unmounted.
+  return queryClient
+    .invalidateQueries({ queryKey: sectionKeys.home(), refetchType: "none" })
+    .then(() => bumpHomeRefreshSignal(queryClient));
+}
+
 function invalidateSettingValueQueries(
   queryClient: ReturnType<typeof useQueryClient>,
   identity: SettingIdentity,
+  key: SettingKey,
 ) {
   const invalidations = [
     queryClient.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] }),
+    refreshHomeForSetting(queryClient, key),
   ];
   // A device-scoped write changes that device's "how many things differ"
   // count, which the device list shows. Without this the badge stays stale
@@ -312,12 +324,12 @@ export function useSetSettingValue() {
       // Keep ordinary controls pending until their active effective-value
       // reads reconcile. Otherwise a rapid follow-up edit can spread a stale
       // object and silently undo the first field that was just saved.
-      return invalidateSettingValueQueries(qc, variables.identity);
+      return invalidateSettingValueQueries(qc, variables.identity, variables.key);
     },
     onError: (error, variables) => {
       if (variables.invalidateOnSettled === false) return;
       if (shouldReconcileAfterMutationError(error)) {
-        return invalidateSettingValueQueries(qc, variables.identity);
+        return invalidateSettingValueQueries(qc, variables.identity, variables.key);
       }
     },
   });
@@ -377,13 +389,13 @@ export function useClearSettingValue() {
     mutationFn: ({ key, identity }: { key: SettingKey; identity: SettingIdentity }) =>
       v2("DELETE /api/v2/settings/values/{key}", { path: { key }, query: identityQuery(identity) }),
     onSuccess: (_data, variables) => {
-      return invalidateSettingValueQueries(qc, variables.identity);
+      return invalidateSettingValueQueries(qc, variables.identity, variables.key);
     },
     onError: (error, variables) => {
       // DELETE is idempotent for reset callers: a 404 means another client
       // already cleared the value, so stale effective caches must catch up.
       if (shouldReconcileAfterMutationError(error) || isSettingValueMissing(error)) {
-        return invalidateSettingValueQueries(qc, variables.identity);
+        return invalidateSettingValueQueries(qc, variables.identity, variables.key);
       }
     },
   });
@@ -509,6 +521,7 @@ export function useSettingValuesRealtime() {
         if (changedProfile && activeProfile && changedProfile !== activeProfile) return;
 
         qc.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] });
+        void refreshHomeForSetting(qc, event.data?.key);
       },
     }),
     [qc],

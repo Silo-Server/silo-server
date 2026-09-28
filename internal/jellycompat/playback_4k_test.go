@@ -47,6 +47,28 @@ func TestAllow4KVideoTranscode(t *testing.T) {
 	}
 }
 
+func TestAllowHEVCVideoEncoding(t *testing.T) {
+	tests := []struct {
+		name string
+		repo SettingsReader
+		want bool
+	}{
+		{name: "nil repo defaults to deny", repo: nil},
+		{name: "unset defaults to deny", repo: stubSettingsReader{}},
+		{name: "read error defaults to deny", repo: stubSettingsReader{err: errors.New("read failed")}},
+		{name: "explicit false denies", repo: stubSettingsReader{values: map[string]string{config.PlaybackAllowHEVCEncodingSettingKey: "false"}}},
+		{name: "case-insensitive true allows", repo: stubSettingsReader{values: map[string]string{config.PlaybackAllowHEVCEncodingSettingKey: " TRUE "}}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := &PlaybackHandler{SettingsRepo: tt.repo}
+			if got := h.allowHEVCVideoEncoding(context.Background()); got != tt.want {
+				t.Errorf("allowHEVCVideoEncoding() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestToneMapPolicyResultPreservesStoreFailure(t *testing.T) {
 	handler := &PlaybackHandler{SettingsRepo: stubSettingsReader{err: context.DeadlineExceeded}}
 	_, err := handler.toneMapPolicyResult(context.Background())

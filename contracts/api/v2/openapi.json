@@ -190888,6 +190888,9 @@
           "copy_fmp4_recipe_version": {
             "type": "string"
           },
+          "encoder_hw_accel": {
+            "type": "string"
+          },
           "hw_accel": {
             "type": "string"
           },

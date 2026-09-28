@@ -992,6 +992,20 @@
       "notes": "Moved from account to profile scope; the account row is copied to every profile during migration."
     },
     {
+      "key": "home.hide_watched_items",
+      "introduced_in": 12,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": false,
+      "platforms": ["web", "ios", "tvos", "macos", "android", "android_tv"],
+      "category": "navigation",
+      "label": "Hide watched items from Home",
+      "description": "Remove watched items from ordinary Home sections while keeping Featured and watch-history sections unchanged.",
+      "recommended_control": "switch"
+    },
+    {
       "key": "ui.library_page_state",
       "introduced_in": 1,
       "persistence": "remote",

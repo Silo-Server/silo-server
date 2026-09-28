@@ -299,7 +299,7 @@ export const ADMIN_SETTINGS_GROUPS: AdminSettingsSearchGroup[] = [
           "4k",
         ],
         settings: settingIndex(
-          "Transcoding",
+          "Video transcoding",
           "Hardware acceleration",
           "Allow 4K transcoding",
           "FFmpeg path",

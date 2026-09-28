@@ -647,7 +647,7 @@ func TestPlannerSettingsV3ResultPreservesAllow4KStoreFailure(t *testing.T) {
 
 func TestPlannerSettingsV3ResultReadsPolicyKeysConcurrently(t *testing.T) {
 	store := &gatedPlaybackSettingsV3{
-		started: make(chan string, 3),
+		started: make(chan string, 4),
 		release: make(chan struct{}),
 	}
 	handler := &PlaybackHandler{SettingsRepo: store}
@@ -657,13 +657,13 @@ func TestPlannerSettingsV3ResultReadsPolicyKeysConcurrently(t *testing.T) {
 		result <- err
 	}()
 
-	started := make(map[string]bool, 3)
-	for len(started) < 3 {
+	started := make(map[string]bool, 4)
+	for len(started) < 4 {
 		select {
 		case key := <-store.started:
 			started[key] = true
 		case <-time.After(time.Second):
-			t.Fatalf("settings reads started concurrently = %v, want all three keys", started)
+			t.Fatalf("settings reads started concurrently = %v, want all four keys", started)
 		}
 	}
 	close(store.release)
@@ -674,6 +674,7 @@ func TestPlannerSettingsV3ResultReadsPolicyKeysConcurrently(t *testing.T) {
 		config.Allow4KTranscodeSettingKey,
 		config.PlaybackTranscodeHardwareToneMapSettingKey,
 		config.PlaybackTranscodeSoftwareToneMapSettingKey,
+		config.PlaybackAllowHEVCEncodingSettingKey,
 	} {
 		if !started[key] {
 			t.Fatalf("settings read missing key %q", key)
@@ -6801,5 +6802,39 @@ func TestRemoteTranscodeRecipeCardV3RecordsNodeSoftwareDecode(t *testing.T) {
 		transcodenode.TranscodeStartResponse{HWAccel: "qsv"}, "")
 	if !card.SoftwareVideoDecode {
 		t.Fatal("a node that omits software_video_decode dropped the requested CPU decode")
+	}
+}
+
+func TestPlannerSettingsV3ReadsHEVCEncodingLive(t *testing.T) {
+	store := &mutablePlaybackSettingsV3{values: map[string]string{config.PlaybackAllowHEVCEncodingSettingKey: "true"}}
+	handler := &PlaybackHandler{SettingsRepo: store}
+	settings, err := handler.plannerSettingsV3Result(context.Background())
+	if err != nil || !settings.AllowHEVCEncoding {
+		t.Fatalf("HEVC enabled settings=%+v error=%v", settings, err)
+	}
+	store.mu.Lock()
+	store.values[config.PlaybackAllowHEVCEncodingSettingKey] = "false"
+	store.mu.Unlock()
+	settings, err = handler.plannerSettingsV3Result(context.Background())
+	if err != nil || settings.AllowHEVCEncoding {
+		t.Fatalf("HEVC disabled settings=%+v error=%v", settings, err)
+	}
+	store.getErrors = map[string]error{config.PlaybackAllowHEVCEncodingSettingKey: context.DeadlineExceeded}
+	_, err = handler.plannerSettingsV3Result(context.Background())
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("HEVC policy store failure=%v", err)
+	}
+}
+
+func TestHEVCEncodedPlanCarriesHVC1ToTransport(t *testing.T) {
+	plan := &playback.PlanV3{Delivery: playback.DeliveryTranscodeHLSV3}
+	plan.EffectiveRecipe.VideoCodec = "hevc"
+	plan.EffectiveRecipe.VideoSampleEntry = playback.VideoSampleEntryHVC1
+	if got := videoSampleEntryForPlanV3(plan); got != playback.VideoSampleEntryHVC1 {
+		t.Fatalf("HEVC transport sample entry=%q", got)
+	}
+	plan.EffectiveRecipe.VideoCodec = "h264"
+	if got := videoSampleEntryForPlanV3(plan); got != "" {
+		t.Fatalf("H264 carried HEVC tag=%q", got)
 	}
 }

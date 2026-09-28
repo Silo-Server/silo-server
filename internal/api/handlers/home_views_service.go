@@ -29,11 +29,19 @@ func (h *SectionHandler) HomeSections(ctx context.Context, viewer SectionViewer)
 	userID := apimw.GetUserID(ctx)
 	resolved = h.maybeInjectNextUp(ctx, resolved, userID)
 	nextUpAt := time.Now()
-	withItems := h.fetcher.FetchAll(ctx, resolved, nil, libraryIDs, userID, profileID, accessFilter)
+	hideWatched := h.homeHidesWatchedItems(ctx)
+	withItems := h.fetcher.FetchAll(ctx, homeSectionsForFetch(resolved, hideWatched), nil, libraryIDs, userID, profileID, accessFilter)
 	fetchedAt := time.Now()
+	var userStates map[string]*itemUserStateResponse
+	if hideWatched {
+		// Filter before the cross-section diversity pass so a watched item
+		// cut here can't suppress the same title in a later section.
+		withItems, userStates = h.filterWatchedHomeSections(ctx, withItems, resolved)
+		withItems = dropEmptyWatchedHomeSections(withItems)
+	}
 	withItems = applyDiversityFilter(withItems)
 	withItems = dropEmptySeasonalSections(withItems)
-	response := h.buildSections(ctx, withItems, nil, viewer.Access, viewer.ImageSize)
+	response := h.buildSectionsWithUserStates(ctx, withItems, nil, viewer.Access, viewer.ImageSize, userStates)
 	itemCount := 0
 	for _, section := range withItems {
 		itemCount += len(section.Items)
@@ -62,11 +70,12 @@ func (h *SectionHandler) HomeSectionItems(ctx context.Context, sectionID string,
 	}
 	userID := apimw.GetUserID(ctx)
 	resolved = h.maybeInjectNextUp(ctx, resolved, userID)
+	hideWatched := h.homeHidesWatchedItems(ctx)
 	for _, s := range resolved {
 		if s.ID != sectionID {
 			continue
 		}
-		withItems, fetchErr := h.fetcher.FetchOne(ctx, s, nil, libraryIDs, userID, profileID, accessFilter)
+		withItems, fetchErr := h.fetcher.FetchOne(ctx, homeSectionsForFetch([]sections.ResolvedSection{s}, hideWatched)[0], nil, libraryIDs, userID, profileID, accessFilter)
 		if fetchErr != nil {
 			slog.ErrorContext(ctx, "fetching section items", "component", "api", "section_id", s.ID, "type", s.SectionType, "error", fetchErr)
 			withItems = sections.SectionWithItems{
@@ -74,7 +83,15 @@ func (h *SectionHandler) HomeSectionItems(ctx context.Context, sectionID string,
 				Items:           []*models.MediaItem{},
 			}
 		}
-		resp := h.buildSections(ctx, []sections.SectionWithItems{withItems}, nil, viewer.Access, viewer.ImageSize)
+		withItems.ItemLimit = s.ItemLimit
+		items := []sections.SectionWithItems{withItems}
+		var userStates map[string]*itemUserStateResponse
+		if hideWatched {
+			// The direct section endpoint returns the section even if the
+			// filter empties it; only aggregate Home drops such sections.
+			items, userStates = h.filterWatchedHomeSections(ctx, items, []sections.ResolvedSection{s})
+		}
+		resp := h.buildSectionsWithUserStates(ctx, items, nil, viewer.Access, viewer.ImageSize, userStates)
 		if len(resp.Sections) == 0 {
 			return resolvedSectionResponse{
 				ID:          withItems.ID,

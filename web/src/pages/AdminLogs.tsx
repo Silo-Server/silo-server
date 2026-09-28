@@ -4,6 +4,13 @@ import { useSearchParams } from "react-router";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -26,6 +33,13 @@ import { useOperationalLogs, useAuditLogs } from "@/hooks/queries/admin/logs";
 import { useAdminLogStream } from "@/hooks/admin/useAdminLogStream";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
 import { useDateTimeFormat } from "@/hooks/useDateTimeFormat";
+import {
+  LOG_COMPONENT_FILTER_OPTIONS,
+  LOG_FILTER_ALL,
+  LOG_LEVEL_FILTER_OPTIONS,
+  normalizeLogFilterParam,
+  withUnknownFilterOption,
+} from "@/pages/adminLogsFilters";
 
 export default function AdminLogs() {
   useOptionalAuth();
@@ -61,13 +75,16 @@ function AdminLogsPage() {
   const tab = tabParam === "audit" ? "audit" : "app";
   const requestID = searchParams.get("request_id") ?? "";
   const messageQuery = searchParams.get("q") ?? "";
-  const component =
-    searchParams.get("component") ??
-    (playbackFocused && searchParams.get("playback_session_id") ? "" : "");
+  const level = normalizeLogFilterParam(searchParams.get("level") ?? "");
+  const component = searchParams.get("component") ?? "";
   const method = searchParams.get("method") ?? "";
   const clientIP = searchParams.get("client_ip") ?? "";
   const playbackSessionID = searchParams.get("playback_session_id") ?? "";
   const [selectedEntry, setSelectedEntry] = useState<OperationalLogEntry | null>(null);
+  const levelOptions = useMemo(
+    () => withUnknownFilterOption(LOG_LEVEL_FILTER_OPTIONS, level),
+    [level],
+  );
 
   function updateSearchParam(key: string, value: string) {
     const next = new URLSearchParams(searchParams);
@@ -84,10 +101,11 @@ function AdminLogsPage() {
     () => ({
       request_id: requestID || undefined,
       q: messageQuery || undefined,
-      component: component || undefined,
+      level: level || undefined,
+      component: normalizeLogFilterParam(component) || undefined,
       playback_session_id: playbackSessionID || undefined,
     }),
-    [requestID, messageQuery, component, playbackSessionID],
+    [requestID, messageQuery, level, component, playbackSessionID],
   );
   const auditParams = useMemo(
     () => ({
@@ -196,12 +214,37 @@ function AdminLogsPage() {
               onChange={(e) => updateSearchParam("q", e.target.value)}
               className="max-w-sm"
             />
+            <Select
+              value={level || LOG_FILTER_ALL}
+              onValueChange={(value) =>
+                updateSearchParam("level", value === LOG_FILTER_ALL ? "" : value)
+              }
+            >
+              <SelectTrigger className="w-[170px]" aria-label="Level">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={LOG_FILTER_ALL}>All levels</SelectItem>
+                {levelOptions.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {value}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Input
-              placeholder="Component"
+              aria-label="Component"
+              placeholder="All components"
+              list="log-component-options"
               value={component}
               onChange={(e) => updateSearchParam("component", e.target.value)}
               className="max-w-xs"
             />
+            <datalist id="log-component-options">
+              {LOG_COMPONENT_FILTER_OPTIONS.map((value) => (
+                <option key={value} value={value} />
+              ))}
+            </datalist>
             {playbackFocused && playbackSessionID && (
               <button
                 type="button"

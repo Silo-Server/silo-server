@@ -22,7 +22,16 @@ type collectionGuardHTTPStore struct {
 	userstore.CollectionItemsPager
 	userstore.CollectionMutationStore
 	userstore.CollectionFeatureProvider
-	beforeUpdate func()
+	beforeUpdate  func()
+	liveItemCount *int
+}
+
+func (s *collectionGuardHTTPStore) GetCollection(ctx context.Context, id string) (*userstore.Collection, error) {
+	c, err := s.UserStore.GetCollection(ctx, id)
+	if err == nil && s.liveItemCount != nil {
+		c.ItemCount = *s.liveItemCount
+	}
+	return c, err
 }
 
 func (s *collectionGuardHTTPStore) UpdateCollection(ctx context.Context, input userstore.UpdateCollectionInput) error {
@@ -208,5 +217,63 @@ func TestSQLiteCollectionHTTPProfileAccessAndCapabilities(t *testing.T) {
 	unsupported := do(t, h, http.MethodPost, "/api/v2/collections/groups", `{"name":"Unavailable"}`, viewerHeaders())
 	if unsupported.Code != 501 {
 		t.Fatalf("unsupported groups: %d %s", unsupported.Code, unsupported.Body.String())
+	}
+}
+
+// Catalog and watch-state changes can alter the displayed count without
+// changing the stored collection revision. Exercise that through the real
+// editor, guard and mutation paths without needing a database in the HTTP suite.
+func TestCollectionHTTPPreconditionsTrackLiveItemCount(t *testing.T) {
+	h, store := newCollectionGuardHTTP(t)
+	count := 1
+	store.liveItemCount = &count
+	path := guardHTTPCreate(t, h, `{"name":"Live count"}`)
+	initial := guardHTTPGet(t, h, path, viewerHeaders())
+	id := strings.TrimPrefix(path, "/api/v2/collections/")
+	revision, err := store.CollectionRevision(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	same := guardHTTPGet(t, h, path, viewerHeaders())
+	if same.Body.String() != initial.Body.String() || same.Header().Get("ETag") != initial.Header().Get("ETag") {
+		t.Fatal("unchanged count and revision changed the response or tag")
+	}
+
+	count = 2
+	current := guardHTTPGet(t, h, path, viewerHeaders())
+	var view PersonalCollection
+	if err := json.Unmarshal(current.Body.Bytes(), &view); err != nil {
+		t.Fatal(err)
+	}
+	if view.ItemCount != count || current.Header().Get("ETag") == initial.Header().Get("ETag") {
+		t.Fatal("live count change did not change the body and strong ETag")
+	}
+	afterRevision, err := store.CollectionRevision(t.Context(), id)
+	if err != nil || afterRevision != revision {
+		t.Fatalf("count change must leave the stored revision alone: %d -> %d, %v", revision, afterRevision, err)
+	}
+	for _, method := range []string{http.MethodPatch, http.MethodDelete} {
+		body := ""
+		if method == http.MethodPatch {
+			body = `{"name":"Stale edit"}`
+		}
+		stale := do(t, h, method, path, body, with(viewerHeaders(), "If-Match", initial.Header().Get("ETag")))
+		requireProblem(t, stale, TypePreconditionFailed)
+		if stale.Header().Get("ETag") != current.Header().Get("ETag") {
+			t.Fatal("stale count response omitted the current validator")
+		}
+	}
+	unchanged := guardHTTPGet(t, h, path, viewerHeaders())
+	if unchanged.Body.String() != current.Body.String() || unchanged.Header().Get("ETag") != current.Header().Get("ETag") {
+		t.Fatal("a stale request changed the collection")
+	}
+	fresh := do(t, h, http.MethodPatch, path, `{"name":"Fresh edit"}`, with(viewerHeaders(), "If-Match", current.Header().Get("ETag")))
+	if fresh.Code != http.StatusOK || fresh.Header().Get("ETag") == current.Header().Get("ETag") {
+		t.Fatalf("fresh edit did not succeed and advance the tag: %d %s", fresh.Code, fresh.Body.String())
+	}
+	count = 3
+	wildcard := do(t, h, http.MethodDelete, path, "", with(viewerHeaders(), "If-Match", "*"))
+	if wildcard.Code != http.StatusNoContent {
+		t.Fatalf("explicit overwrite failed after another count change: %d %s", wildcard.Code, wildcard.Body.String())
 	}
 }

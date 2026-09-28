@@ -3525,3 +3525,52 @@ describe("VideoPlayer translation handoff", () => {
     expect(controls.current?.videoFit).toBe("contain");
   });
 });
+
+describe("VideoPlayer controls auto-hide", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    controls.current = null;
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  function renderPlaying() {
+    const rendered = renderPlayer({ shouldAutoPlay: false });
+    const video = rendered.container.querySelector("video")!;
+    Object.defineProperty(video, "paused", { configurable: true, value: false });
+    act(() => {
+      fireEvent.play(video);
+    });
+    const container = rendered.container.querySelector(".player-container")!;
+    return { container };
+  }
+
+  it("keeps the controls up while a player menu is open", async () => {
+    const { container } = renderPlaying();
+    const menu = document.createElement("div");
+    menu.setAttribute("role", "menu");
+    container.appendChild(menu);
+
+    await act(() => vi.advanceTimersByTimeAsync(10_000));
+    expect(controls.current?.visible).toBe(true);
+    fireEvent.mouseLeave(container);
+    expect(controls.current?.visible).toBe(true);
+
+    menu.remove();
+    await act(() => vi.advanceTimersByTimeAsync(3_000));
+    expect(controls.current?.visible).toBe(false);
+  });
+
+  it("hides idle controls during playback when no menu is open", async () => {
+    renderPlaying();
+    await act(() => vi.advanceTimersByTimeAsync(3_000));
+    expect(controls.current?.visible).toBe(false);
+  });
+});

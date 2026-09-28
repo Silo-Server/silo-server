@@ -94,8 +94,14 @@ type Session struct {
 	SubtitleBurnIn     bool
 	SegmentDuration    int // HLS segment length in seconds (cadence)
 
-	Position                   float64
-	IsPaused                   bool
+	Position float64
+	IsPaused bool
+	// StopReported marks a session a client reported stopped without an ID
+	// that could end it (#1454). It only hides the session from the live
+	// admin view: pause state and idle grace are untouched, so a stale stop
+	// can't shorten the lifetime of a play that is really paused. The next
+	// progress report clears it.
+	StopReported               bool
 	HasWebSocket               bool
 	HasRealtimeConnection      bool
 	DisableProgressPersistence bool
@@ -777,20 +783,33 @@ func (m *SessionManager) RollbackReconstructedToneMap(expected *Session) bool {
 	return true
 }
 
-// ConfirmReconstructedToneMap publishes the executor selected by a successful
+// CaptureReconstructedExecution records the session incarnation and stream
+// revision before a runtime rebuild. The pointer is only an ownership token.
+func (m *SessionManager) CaptureReconstructedExecution(sessionID string) (*Session, uint64) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	current := m.sessions[sessionID]
+	if current == nil {
+		return nil, 0
+	}
+	return current, current.streamRevision
+}
+
+// ConfirmReconstructedExecution publishes the executors selected by a successful
 // runtime reconstruction only while expected still owns the session ID. It
 // returns the current session so callers yield to a concurrent legitimate
 // successor instead of overwriting it with stale execution facts.
-func (m *SessionManager) ConfirmReconstructedToneMap(expected *Session, mode tonemap.Mode) *Session {
+func (m *SessionManager) ConfirmReconstructedExecution(expected *Session, revision uint64, mode tonemap.Mode, encoderHWAccel string) *Session {
 	if expected == nil || expected.ID == "" {
 		return nil
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	current := m.sessions[expected.ID]
-	if current == expected {
-		if current.ToneMapMode != mode {
+	if current == expected && current.streamRevision == revision {
+		if current.ToneMapMode != mode || current.TranscodeHWAccel != encoderHWAccel {
 			current.ToneMapMode = mode
+			current.TranscodeHWAccel = encoderHWAccel
 			current.streamRevision++
 		}
 		m.touchSessionLocked(current)
@@ -819,6 +838,12 @@ func (m *SessionManager) limitsForUser(ctx context.Context, userID int) (Session
 			userID, errors.Join(ErrLimitProviderUnavailable, err))
 	}
 	return limits, nil
+}
+
+// LimitsForUser returns the account-level playback limits admission enforces
+// for userID, so planning can avoid offering routes admission would refuse.
+func (m *SessionManager) LimitsForUser(ctx context.Context, userID int) (SessionLimits, error) {
+	return m.limitsForUser(ctx, userID)
 }
 
 // CheckTranscodingAllowed verifies account-level restrictions before an
@@ -940,8 +965,23 @@ func (m *SessionManager) UpdateProgress(sessionID string, position float64, isPa
 
 	s.Position = position
 	s.IsPaused = isPaused
+	s.StopReported = false
 	s.streamRevision++
 	m.touchSessionLocked(s)
+	return nil
+}
+
+// MarkStopReported records that a client reported this session stopped
+// without an ID that could end it. It does not count as activity and leaves
+// pause state alone; see Session.StopReported.
+func (m *SessionManager) MarkStopReported(sessionID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return ErrSessionNotFound
+	}
+	s.StopReported = true
 	return nil
 }
 
@@ -1213,6 +1253,9 @@ func (m *SessionManager) applyReplacementLocked(
 	}
 
 	s.MediaFileID = replacement.EffectiveMediaFileID
+	// A replacement stream means the play is active again, so a stop mark from
+	// an ID-less stop no longer applies.
+	s.StopReported = false
 	applySessionStreamStateLocked(s, replacement.StreamState)
 	if replacement.PositionSeconds != nil {
 		s.Position = *replacement.PositionSeconds
@@ -1240,6 +1283,8 @@ func (m *SessionManager) RollbackReplacement(sessionID string, rollback SessionR
 		return ErrSessionReplacementSuperseded
 	}
 	s.MediaFileID = rollback.previousEffectiveMediaFileID
+	// Rolling back a replacement is still an active play, not a stopped one.
+	s.StopReported = false
 	restoreSessionStreamStateLocked(s, rollback.previousStreamState)
 	if rollback.restoreProgress {
 		s.Position = rollback.previousPosition

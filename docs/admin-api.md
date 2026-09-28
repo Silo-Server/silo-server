@@ -1510,6 +1510,22 @@ issued token so the administrator can assign it to a source.
 
 ### Personal history import acceptance and monitoring
 
+Personal history imports on both `/api/v1` and `/api/v2` use the acting
+`X-Profile-Id`. A non-primary profile can import only into itself and see only runs
+targeting itself. The primary profile (with its PIN verified when it has one) and
+server admins can act for any profile on their own account. An API key's exemption
+from PIN entry does not grant household authority to a locked primary profile.
+Creating a run for another profile without this authority returns 403; reading its
+run returns 404. A non-admin request without an acting profile cannot create a run
+and sees no runs. Lists apply the profile filter before their limit, and v2 cursors
+are bound to the account and acting profile.
+
+This deliberately tightens the frozen v1 bridge as a security fix: otherwise its
+run routes would bypass the v2 profile restriction. V1 keeps its existing response
+envelopes, 201 create response, and maximum list size of 50. Web uses v2;
+Apple and Android have no personal history-import consumer, and jellycompat has
+no corresponding import operation.
+
 `POST /api/v2/history-imports/runs` accepts an account-owned import for the supplied
 profile. It returns 202 with the persisted queued run, canonical `Location`, and
 `Retry-After: 2` only after both execution intent and encrypted run credentials commit.
@@ -1519,8 +1535,9 @@ automatically resubmitted; check the account's import list before starting anoth
 
 Poll `GET /api/v2/history-imports/runs/{id}` at its `Location`. The response has a strong
 `ETag`, supports `If-Match` and `If-None-Match`, and returns a bodyless 304 when unchanged.
-The account ownership check runs before evaluating either precondition; another
-account's run returns 404. Nonterminal responses, including 304, carry `Retry-After`.
+The account and profile checks run before evaluating either precondition; a run
+outside the caller's authority returns 404. Nonterminal responses, including 304,
+carry `Retry-After`.
 When `terminal` is true, stop polling; terminal responses omit the polling hint.
 
 The personal projection always reports `cancelable: false`: this surface has no cancel

@@ -104,6 +104,39 @@ func TestWebOSUnidentifiedStopSavesFinalPositionWithoutTearingDownPlayback(t *te
 	}
 }
 
+// Issue #1454: an ID-less stop can't end the play and may be a stale stop
+// from an earlier play of the same item, so it keeps the session's pause
+// state (and with it the paused idle grace) and only marks it stopped, which
+// hides it from the live admin view until its next progress report.
+func TestWebOSUnidentifiedStopMarksSessionWithoutUnpausing(t *testing.T) {
+	h, mgr, item, source := newReportLivenessHandler("upstream-1", true)
+	auth := &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}
+	postProgressReport(h, fmt.Sprintf(`{"PlaySessionId":"","ItemId":%q,"MediaSourceId":%q,"PositionTicks":15523810000,"IsPaused":true}`, item, source))
+
+	rec := httptest.NewRecorder()
+	h.HandleSessionPlayingStopped(rec, viewerRequest("POST", "/Sessions/Playing/Stopped", fmt.Sprintf(`{"PlaySessionId":"","ItemId":%q,"MediaSourceId":%q,"PositionTicks":15523810000,"IsPaused":true}`, item, source), "", "", auth))
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status=%d: %s", rec.Code, rec.Body.String())
+	}
+	native := mgr.sessions["upstream-1"]
+	if !native.IsPaused {
+		t.Fatal("unidentified stop unpaused the session; a stale stop would shorten a paused play's grace")
+	}
+	if !native.StopReported {
+		t.Fatal("unidentified stop was not marked; the admin view keeps showing the stopped play")
+	}
+	if len(mgr.stopCalls) != 0 {
+		t.Fatalf("unidentified stop tore down playback: %v", mgr.stopCalls)
+	}
+
+	// A play that is still running reports again, which clears the mark.
+	postProgressReport(h, fmt.Sprintf(`{"PlaySessionId":"","ItemId":%q,"MediaSourceId":%q,"PositionTicks":15623810000,"IsPaused":true}`, item, source))
+	if native.StopReported {
+		t.Fatal("a later progress report must clear the stop mark")
+	}
+}
+
 func TestWebOSStaticResumeReusesStartedSession(t *testing.T) {
 	h, _, item, source := newReportLivenessHandler("upstream-1", true)
 	active, _ := h.playbackStore.Get("play-1")

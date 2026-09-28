@@ -14,8 +14,13 @@ import (
 type PlannerSettingsV3 struct {
 	TranscodeEnabled       bool
 	Allow4KTranscode       bool
+	AllowHEVCEncoding      bool
 	HardwareToneMapEnabled bool
 	SoftwareToneMapEnabled bool
+	// ViewerTranscodeDisabled reflects the viewer's account policy. Session
+	// admission enforces it; the planner only uses it to stop advertising
+	// quality rungs the viewer cannot start.
+	ViewerTranscodeDisabled bool
 }
 
 const (
@@ -763,7 +768,7 @@ func availableQualitiesForRouteV3(input PlannerInputV3, source SourceDescriptorV
 		// probe metadata cannot prove that any advertised rung avoids upscaling.
 		return qualities
 	}
-	if !deliveryAvailableV3(input.Request, DeliveryClassHLSV3) || !input.Settings.TranscodeEnabled {
+	if !deliveryAvailableV3(input.Request, DeliveryClassHLSV3) || !input.Settings.TranscodeEnabled || input.Settings.ViewerTranscodeDisabled {
 		return qualities
 	}
 	if is4KSourceV3(input.EffectiveFile, source) && !input.Settings.Allow4KTranscode {
@@ -1030,13 +1035,20 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	if hlsRegistry == nil || !hlsRegistry.Available(TransformationVideoToH264V3) || !hlsRegistry.Available(TransformationAudioToAACV3) {
 		return terminalPlannerResultV3("conversion_tool_unavailable", "The required validated H.264/AAC conversion toolchain is unavailable.", true)
 	}
+	targetVideoCodec := transcodeCodecH264
+	if input.Settings.AllowHEVCEncoding && hlsRegistry.Available(TransformationVideoToHEVCV3) && hlsHEVCOutputSupportedV3(input.Request, quality, source) {
+		targetVideoCodec = transcodeCodecHEVC
+	}
 	if source.DynamicRange != "" && source.DynamicRange != DynamicRangeSDRV3 {
 		base.AvailableQualities = availableQualitiesForRouteV3(input, source)
 	}
 	plan := base
 	plan.Delivery = DeliveryTranscodeHLSV3
 	plan.Stream = StreamV3{Protocol: StreamHLSV3, Container: containerHLSV3, MIMEType: "application/vnd.apple.mpegurl", Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
-	plan.EffectiveRecipe.VideoCodec = "h264"
+	plan.EffectiveRecipe.VideoCodec = targetVideoCodec
+	if targetVideoCodec == transcodeCodecHEVC {
+		plan.EffectiveRecipe.VideoSampleEntry = VideoSampleEntryHVC1
+	}
 	plan.EffectiveRecipe.AudioCodec = "aac"
 	plan.EffectiveRecipe.Width = intPointerV3(quality.Width)
 	plan.EffectiveRecipe.Height = intPointerV3(quality.Height)
@@ -1059,7 +1071,7 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	plan.EffectiveRecipe.AudioChannels = intPointerV3(targetAudioChannels)
 	plan.EffectiveRecipe.AudioLayout = audioLayout
 	plan.Transformations = append(plan.Transformations,
-		TransformationV3{Name: TransformationVideoToH264V3, Executor: ExecutorServerV3, RecipeVersion: TransformationVideoToH264RecipeVersionV3, ValidatedClaims: []string{ClaimH264DecodeV3}},
+		videoTransformationForTargetV3(targetVideoCodec),
 		TransformationV3{Name: TransformationAudioToAACV3, Executor: ExecutorServerV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, ValidatedClaims: []string{ClaimAudioDecodeV3}},
 	)
 	toneMapPolicy := toneMapRecipe.policy
@@ -1103,10 +1115,75 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		return terminalPlannerResultV3("adaptation_unavailable", "The HLS delivery cannot decode the planned transcode recipe.", false)
 	}
 	finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
+	// A failed HEVC attempt does not exhaust the H.264 route. Rebuild the
+	// candidate before checking exhaustion so recovery can downgrade codecs on
+	// the same HLS delivery without changing source/remux behavior.
+	if targetVideoCodec == transcodeCodecHEVC && planAttemptedV3(plan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
+		targetVideoCodec = transcodeCodecH264
+		plan.EffectiveRecipe.VideoCodec = targetVideoCodec
+		plan.EffectiveRecipe.VideoSampleEntry = ""
+		if !replaceVideoTransformationV3(&plan, targetVideoCodec) || !deliverySupportsPlanV3(input.Request, DeliveryClassHLSV3, plan) {
+			return terminalPlannerResultV3("adaptation_unavailable", "The HLS delivery cannot decode the H.264 fallback recipe.", false)
+		}
+		finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
+	}
 	if planAttemptedV3(plan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
 		return terminalPlannerResultV3("adaptation_exhausted", "All compatible playback recipes have already failed for this output route.", false)
 	}
-	return PlannerResultV3{Plan: &plan, PlayMethod: PlayTranscode, TranscodeAudio: true, TargetVideoCodec: "h264", TargetAudioCodec: "aac", SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, targetAudioChannels, true), TargetAudioChannels: targetAudioChannels, TargetAudioBitrateKbps: targetAudioBitrateKbps, TargetResolution: quality.Label, TargetBitrateKbps: quality.BitrateKbps, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleBurnIn: subtitle.RequiresBurn, SubtitleCodec: subtitle.Codec, DownloadedSubtitleID: subtitle.DownloadedSubtitleID, ToneMapPolicy: toneMapPolicy, ToneMapMode: toneMapMode, ToneMapSourceKind: toneMapSourceKind, ToneMapRecipeVersion: toneMapRecipeVersionV3(toneMapOK), ToneMapPreflightRequired: toneMapResolution.PreflightRequired, ToneMapSourceRevision: toneMapRevision}
+	return PlannerResultV3{Plan: &plan, PlayMethod: PlayTranscode, TranscodeAudio: true, TargetVideoCodec: targetVideoCodec, TargetAudioCodec: "aac", SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, targetAudioChannels, true), TargetAudioChannels: targetAudioChannels, TargetAudioBitrateKbps: targetAudioBitrateKbps, TargetResolution: quality.Label, TargetBitrateKbps: quality.BitrateKbps, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleBurnIn: subtitle.RequiresBurn, SubtitleCodec: subtitle.Codec, DownloadedSubtitleID: subtitle.DownloadedSubtitleID, ToneMapPolicy: toneMapPolicy, ToneMapMode: toneMapMode, ToneMapSourceKind: toneMapSourceKind, ToneMapRecipeVersion: toneMapRecipeVersionV3(toneMapOK), ToneMapPreflightRequired: toneMapResolution.PreflightRequired, ToneMapSourceRevision: toneMapRevision}
+}
+
+func videoTransformationForTargetV3(codec string) TransformationV3 {
+	if codec == transcodeCodecHEVC {
+		return TransformationV3{Name: TransformationVideoToHEVCV3, Executor: ExecutorServerV3, RecipeVersion: TransformationVideoToHEVCRecipeVersionV3, ValidatedClaims: []string{ClaimHEVCDecodeV3}}
+	}
+	return TransformationV3{Name: TransformationVideoToH264V3, Executor: ExecutorServerV3, RecipeVersion: TransformationVideoToH264RecipeVersionV3, ValidatedClaims: []string{ClaimH264DecodeV3}}
+}
+
+func replaceVideoTransformationV3(plan *PlanV3, codec string) bool {
+	if plan == nil {
+		return false
+	}
+	for i, transformation := range plan.Transformations {
+		if transformation.Name == TransformationVideoToH264V3 || transformation.Name == TransformationVideoToHEVCV3 {
+			plan.Transformations[i] = videoTransformationForTargetV3(codec)
+			return true
+		}
+	}
+	return false
+}
+
+const hevcMainProfileV3 = "main"
+
+// hlsHEVCOutputSupportedV3 requires the selected HLS executor to name HEVC
+// explicitly and verifies its detailed decoder can handle this server's Main
+// 8-bit SDR output at the chosen dimensions and bitrate. Flat codec lists are
+// insufficient here: they can describe source copy support without proving
+// the fMP4 transcode decoder that will receive this recipe.
+func hlsHEVCOutputSupportedV3(request StartRequestV3, quality QualityResultV3, source SourceDescriptorV3) bool {
+	delivery, ok := request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
+	if !ok || !delivery.Enabled || !delivery.SupportedOnDevice || !containsFoldV3(delivery.VideoCodecs, transcodeCodecHEVC) {
+		return false
+	}
+	output := source
+	output.VideoCodec = transcodeCodecHEVC
+	output.VideoProfile = hevcMainProfileV3
+	output.BitDepth = 8
+	output.Width = quality.Width
+	output.Height = quality.Height
+	output.BitrateKbps = quality.BitrateKbps
+	output.DynamicRange = DynamicRangeSDRV3
+	// The FFmpeg HEVC recipe does not currently pin -level:v, so it must not
+	// claim a level to an exact decoder with a bounded level list. A level-bound
+	// client stays on H.264 until the target level is selected, frozen, and
+	// enforced as part of the executable HEVC recipe.
+	for _, decoder := range request.Capabilities.VideoDecode {
+		if strings.EqualFold(decoder.Codec, transcodeCodecHEVC) && len(decoder.Levels) > 0 {
+			return false
+		}
+	}
+	ok, _ = videoEligibleV3(output, request)
+	return ok
 }
 
 // applySubtitleDecisionV3 changes the delivery-specific subtitle policy without
@@ -1359,13 +1436,9 @@ func compoundRungQualityResultV3(rung ladderRungV3, source SourceDescriptorV3, c
 	if width == 0 {
 		width, _ = dimensionsFromResolutionV3(resolutionLabelV3(height))
 	}
-	targetLabel := resolutionLabelV3(height)
-	if sameResolutionClass && source.Height > 0 && source.Height != rung.Height {
-		// The transcoder treats an unknown exact-height label as "do not scale",
-		// which preserves the source's cinema crop while still applying the
-		// selected bitrate and tone-map recipe.
-		targetLabel = strconv.Itoa(source.Height) + "p"
-	}
+	// Keep the clamped height exact. The transcoder leaves non-ladder heights
+	// unscaled, preserving the source crop even on a lower-class rung.
+	targetLabel := strconv.Itoa(height) + "p"
 	return QualityResultV3{
 		Label:             targetLabel,
 		Width:             width,
@@ -1662,20 +1735,27 @@ func ladderRungForLabelV3(label string) (ladderRungV3, bool) {
 	return ladderRungV3{}, false
 }
 
-// sourceLadderHeightV3 classifies cinema-aspect encodes by width as well as
-// height. A 3840x1540 source is still a 4K source for menu purposes.
+// sourceLadderHeightV3 classifies a source by the smallest class whose bounds
+// contain both dimensions, the scanner's buckets for a file's resolution label
+// (scanner.mapResolution). Cropped and cinema-aspect encodes therefore land in
+// the class the catalog shows: 1918x872 is 1080p and 3840x1540 is 2160p. An 8K
+// source is 4320p, above every rung, so its 4K rungs scale down to 2160 lines.
 func sourceLadderHeightV3(source SourceDescriptorV3) int {
 	switch {
-	case source.Width >= 3840 || source.Height >= 2160:
-		return 2160
-	case source.Width >= 1920 || source.Height >= 1080:
-		return 1080
-	case source.Width >= 1280 || source.Height >= 720:
-		return 720
-	case source.Width > 0 || source.Height > 0:
-		return 480
-	default:
+	case source.Width <= 0 && source.Height <= 0:
 		return 0
+	case source.Width <= 854 && source.Height <= 480:
+		return 480
+	case source.Width <= 1280 && source.Height <= 962:
+		return 720
+	case source.Width <= 2560 && source.Height <= 1440:
+		return 1080
+	case source.Width <= 4096 && source.Height <= 3072:
+		return 2160
+	case source.Width <= 8192 && source.Height <= 6144:
+		return 4320
+	default:
+		return 2160
 	}
 }
 

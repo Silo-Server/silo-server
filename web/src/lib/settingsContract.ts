@@ -192,6 +192,8 @@ export const SETTING_KEYS = {
   DOWNLOADS_KEEP_WATCHED: "downloads.keep_watched",
   /** Download over Wi-Fi only */
   DOWNLOADS_WIFI_ONLY: "downloads.wifi_only",
+  /** Hide watched items from Home */
+  HOME_HIDE_WATCHED_ITEMS: "home.hide_watched_items",
   /** Primary menu */
   NAV_PRIMARY_MENU: "nav.primary_menu",
   /** Navigation shortcuts */
@@ -466,6 +468,23 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     category: "downloads",
     control: "switch",
     platforms: ["ios", "android"],
+  },
+  "home.hide_watched_items": {
+    key: "home.hide_watched_items",
+    type: "boolean",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 12,
+    scopes: ["profile"],
+    scopeIntroducedIn: [12],
+    resolutionOrder: ["profile", "default"],
+    defaultValue: false,
+    label: "Hide watched items from Home",
+    description:
+      "Remove watched items from ordinary Home sections while keeping Featured and watch-history sections unchanged.",
+    category: "navigation",
+    control: "switch",
+    platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],
   },
   "nav.primary_menu": {
     key: "nav.primary_menu",
