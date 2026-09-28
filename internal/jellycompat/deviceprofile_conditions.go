@@ -93,7 +93,11 @@ func (p DeviceProfile) hlsRemuxCodecProfileCompatibility(version catalog.FileVer
 	// (PrimaryDVProfile, the probed integer field) — not from
 	// compatDolbyVisionProfile's descriptive-string fallback — so negotiation
 	// can never promise a dvh1 tag the muxer will not write.
-	if tag := playback.VideoSampleEntryForDVCopy(compatPrimaryVideoTrack(version).DVProfile); tag != "" {
+	tag := p.hlsRemuxSampleEntry
+	if tag == "" {
+		tag = playback.VideoSampleEntryForDVCopy(compatPrimaryVideoTrack(version).DVProfile)
+	}
+	if tag != "" {
 		values["videocodectag"] = conditionValue{text: tag}
 	}
 	return p.codecProfileCompatibilityWithValues(version, audioStreamIndex, values, "mp4", true)

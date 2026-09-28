@@ -40,6 +40,31 @@ func TestEncryptedSettings_UnreadableTransitionDoesNotBlockConfigLoad(t *testing
 	}
 }
 
+func TestEncryptedSettingsGetManyDecryptsEachKey(t *testing.T) {
+	raw := newMemSettings()
+	dec := NewEncryptedSettingsRepo(raw, newCipher(t))
+	for key, value := range map[string]string{"auth.jwt_secret": "active-secret", "markers.detect_credits": "false"} {
+		if err := dec.Set(t.Context(), key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if raw.m["auth.jwt_secret"] == "active-secret" {
+		t.Fatal("sensitive value was stored in plaintext")
+	}
+	got, err := dec.GetMany(t.Context(), "auth.jwt_secret", "markers.detect_credits", "markers.detect_intros")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"auth.jwt_secret": "active-secret", "markers.detect_credits": "false"}
+	if len(got) != len(want) || got["auth.jwt_secret"] != want["auth.jwt_secret"] || got["markers.detect_credits"] != want["markers.detect_credits"] {
+		t.Fatalf("GetMany = %v, want %v", got, want)
+	}
+	raw.m["auth.jwt_secret"] = "enc:v1:invalid-envelope"
+	if _, err := dec.GetMany(t.Context(), "auth.jwt_secret"); err == nil {
+		t.Fatal("GetMany ignored an unreadable ciphertext")
+	}
+}
+
 // memSettings is an in-memory raw SettingsStore for DB-free decorator tests.
 type memSettings struct{ m map[string]string }
 
@@ -49,6 +74,15 @@ func (s *memSettings) Get(_ context.Context, key string) (string, error) { retur
 func (s *memSettings) Set(_ context.Context, key, value string) error {
 	s.m[key] = value
 	return nil
+}
+func (s *memSettings) GetMany(_ context.Context, keys ...string) (map[string]string, error) {
+	out := make(map[string]string, len(keys))
+	for _, key := range keys {
+		if value, ok := s.m[key]; ok {
+			out[key] = value
+		}
+	}
+	return out, nil
 }
 func (s *memSettings) GetAll(_ context.Context) (map[string]string, error) {
 	out := make(map[string]string, len(s.m))

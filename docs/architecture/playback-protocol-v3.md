@@ -1248,7 +1248,9 @@ compute rungs.
 The source rung is always present, labelled `original`, with
 `preserves_source: true`. Transcode rungs are added below the source resolution
 class, plus at the same class when they reduce bitrate, and only when HLS is
-available to the client, transcoding is enabled, and 4K transcoding is permitted
+available to the client, transcoding is enabled, the viewer's account may
+transcode video (`transcode_allowed`; admission still enforces it), and 4K
+transcoding is permitted
 for a 4K-or-higher source. A source falls under that policy when its catalog
 resolution label reads `2160p`, `4k`, `uhd`, `4320p`, or `8k` (case- and
 whitespace-insensitive), its probed width is at least 3840, or its probed height
@@ -1347,6 +1349,13 @@ mutation rewrites whole, the compat session structs preserve JSON fields they
 do not declare; a binary that predates that envelope can still erase
 newer-generation fields (such as the remux flags) during the single rolling
 deploy that introduces them.
+
+A Jellyfin HLS remux that strips Dolby Vision to its HDR10 base layer uses the
+literal `remux-dv-v1` segment for every audio mode, taking precedence over
+`remux-v1` and `audio-v2`. An older binary would keep the strip flag without
+acting on it and copy Dolby Vision to a client that rejected it; its router has
+no handler for this segment, so the request fails instead. Current handlers
+reject a strip session on any other path and any other session on this one.
 
 A remote start carrying source-channel facts is valid only for the exact AAC
 stereo shape and must echo recipe version 2 after FFmpeg reaches readiness. The

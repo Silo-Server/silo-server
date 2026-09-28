@@ -10,13 +10,7 @@ import {
 import { v2 } from "@/api/v2/request";
 import { adminKeys, themeKeys } from "../keys";
 
-export type BrandingAssetKind =
-  | "wordmark"
-  | "mark"
-  | "wordmark_light"
-  | "mark_light"
-  | "favicon"
-  | "login_bg";
+export type BrandingAssetKind = "wordmark" | "mark" | "favicon" | "login_bg";
 
 /** A branding asset write, captured with the authority it was requested under. */
 type BrandingAssetIntent = {

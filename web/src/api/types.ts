@@ -1671,6 +1671,13 @@ export interface ImportMDBListCollectionResponse {
   sync_run?: LibraryCollectionSyncRun;
 }
 
+/**
+ * Imports a public TMDB list. `url` is the list page
+ * (https://www.themoviedb.org/list/{id}-{slug}) or its numeric ID; the body is
+ * otherwise the same as an MDBList import.
+ */
+export type ImportTMDBListCollectionRequest = ImportMDBListCollectionRequest;
+
 export interface ImportTMDBCollectionRequest {
   library_id?: number;
   library_ids?: number[];
@@ -1781,6 +1788,11 @@ export interface ImportUserTMDBCollectionRequest extends UserImportSharedFields 
   preset: ImportTMDBCollectionRequest["preset"];
   media_type: ImportTMDBCollectionRequest["media_type"];
   time_window?: ImportTMDBCollectionRequest["time_window"];
+}
+
+export interface ImportUserTMDBListCollectionRequest extends UserImportSharedFields {
+  /** A public TMDB list page URL or its numeric ID. */
+  url: string;
 }
 
 export interface ImportUserTraktCollectionRequest extends UserImportSharedFields {

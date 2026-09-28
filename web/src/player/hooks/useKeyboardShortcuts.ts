@@ -7,7 +7,7 @@ import { useEffect } from "react";
  */
 export function useKeyboardShortcuts(
   videoRef: React.RefObject<HTMLVideoElement | null>,
-  containerRef: React.RefObject<HTMLElement | null>,
+  toggleFullscreen: () => void,
   handlePlayPause: () => void,
   skip: { back: () => void; forward: () => void },
   toggleCaptions: () => void,
@@ -42,33 +42,7 @@ export function useKeyboardShortcuts(
         case "f":
         case "F":
           e.preventDefault();
-          {
-            const webkitVideo = video as HTMLVideoElement & {
-              webkitSupportsFullscreen?: boolean;
-              webkitDisplayingFullscreen?: boolean;
-              webkitEnterFullscreen?: () => void;
-              webkitExitFullscreen?: () => void;
-            };
-            if (document.fullscreenElement) {
-              document.exitFullscreen().catch(() => {});
-            } else if (webkitVideo.webkitDisplayingFullscreen) {
-              webkitVideo.webkitExitFullscreen?.();
-            } else if (containerRef.current?.requestFullscreen) {
-              containerRef.current.requestFullscreen().catch(() => {
-                if (
-                  webkitVideo.webkitSupportsFullscreen !== false &&
-                  typeof webkitVideo.webkitEnterFullscreen === "function"
-                ) {
-                  webkitVideo.webkitEnterFullscreen();
-                }
-              });
-            } else if (
-              webkitVideo.webkitSupportsFullscreen !== false &&
-              typeof webkitVideo.webkitEnterFullscreen === "function"
-            ) {
-              webkitVideo.webkitEnterFullscreen();
-            }
-          }
+          toggleFullscreen();
           break;
 
         case "m":
@@ -116,11 +90,11 @@ export function useKeyboardShortcuts(
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [
-    containerRef,
     enabled,
     handlePlayPause,
     skip,
     toggleCaptions,
+    toggleFullscreen,
     toggleMuted,
     togglePiP,
     videoRef,

@@ -125,7 +125,7 @@ export function MarkerTasksCard() {
       <TaskActionRow
         task={detectTask}
         fallbackName="Detect markers on this server"
-        fallbackDescription="Analyzes files for intros in libraries with marker detection enabled."
+        fallbackDescription="Analyzes files for intros and credits in libraries with marker detection enabled."
         onRun={() => void run("detect_intro_markers")}
         pending={pendingTasks.has("detect_intro_markers")}
       />

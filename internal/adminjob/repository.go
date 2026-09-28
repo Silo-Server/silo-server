@@ -686,6 +686,38 @@ func (r *Repository) CancelQueued(ctx context.Context, id, message string, expir
 	return nil, ErrJobNotFound
 }
 
+// Yield returns a running job to the queue with its progress and partial
+// result, so the runner can claim other work before this job continues. The
+// next claim reads both back and resumes from them. requested_at is kept: the
+// admin job list sorts and pages by it, and among queued jobs of one type the
+// oldest still finishes first.
+func (r *Repository) Yield(ctx context.Context, id string, current, total int, message string, result any) error {
+	payload, err := marshalPayload(result)
+	if err != nil {
+		return fmt.Errorf("marshaling admin job result payload: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE admin_jobs
+		SET status = $2,
+			progress_current = $3,
+			progress_total = $4,
+			message = $5,
+			result_payload = $6,
+			started_at = NULL,
+			heartbeat_at = NULL,
+			updated_at = NOW()
+		WHERE id = $1 AND status = $7 AND ($8::bigint IS NULL OR claim_generation = $8)`,
+		id, StatusQueued, current, total, message, payload, StatusRunning, r.claim,
+	)
+	if err != nil {
+		return fmt.Errorf("yielding admin job: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrJobNotFound
+	}
+	return nil
+}
+
 func (r *Repository) RequeueStaleRunning(ctx context.Context, before time.Time) (int, error) {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE admin_jobs

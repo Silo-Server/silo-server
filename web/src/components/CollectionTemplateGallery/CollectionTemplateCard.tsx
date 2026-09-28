@@ -7,6 +7,7 @@ const SOURCE_LABEL: Record<CollectionTemplate["source"], string> = {
   mdblist: "MDBList",
   tmdb_discover: "TMDB Discover",
   tmdb_collection: "TMDB Franchise",
+  tmdb_list: "TMDB List",
 };
 
 interface Props {

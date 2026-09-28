@@ -18,16 +18,16 @@ related:
 # Collection Templates
 
 Collection templates are pre-configured "blueprints" for a synced library collection. Picking
-one in the admin UI seeds a new collection wired to TMDB, Trakt, or MDBList — including a
+one in the admin UI seeds a new collection wired to TMDB, a public TMDB list, Trakt, or MDBList — including a
 sensible default sync schedule — without the operator hand-typing presets, URLs, or cron
 expressions. The built-in catalog ships over a hundred templates; **Template Bundles** let an
 operator apply dozens of them across one or more libraries in a single action instead of
 clicking through the gallery one card at a time.
 
 Use a template when you want a synced shelf that follows a well-known feed (TMDB Trending, Trakt
-Popular Shows, your favourite MDBList list, a TMDB franchise). Use the manual "Add Collection"
-flow when you need a smart query, a hand-curated manual list, or a one-off MDBList URL you don't
-want to reuse.
+Popular Shows, your favourite MDBList or TMDB list, a TMDB franchise). Use the manual "Add
+Collection" flow when you need a smart query, a hand-curated manual list, or a one-off MDBList or
+TMDB list URL you don't want to reuse.
 
 ## Where to find them
 
@@ -38,10 +38,10 @@ Two entry points open the same gallery:
    chooser.
 
 The gallery lists individual templates by category, and — when any are registered — a row of
-**Template Bundle** cards above the search box. Picking an individual `tmdb`, `trakt`, or
-`mdblist` template opens a confirmation drawer that posts to the matching import endpoint
-(`/admin/collections/import/{tmdb,trakt,mdblist}`), so the resulting collection looks identical
-to one created through the standard import form. Picking a `tmdb_discover` or `tmdb_collection`
+**Template Bundle** cards above the search box. Picking an individual `tmdb`, `trakt`,
+`mdblist`, or `tmdb_list` template opens a confirmation drawer that posts to the matching import
+endpoint (`/admin/collections/import/{tmdb,trakt,mdblist,tmdb-list}`), so the resulting
+collection looks identical to one created through the standard import form. Picking a `tmdb_discover` or `tmdb_collection`
 template instead shows a read-only summary: those two sources are **bundle-only** — their filter
 set or franchise ID ships from the server catalog and isn't editable inline, so the gallery
 points you at Template Bundles to apply them.
@@ -53,10 +53,11 @@ points you at Template Bundles to apply them.
 | `tmdb` | A TMDB API key in Settings (`tmdb.api_key`, encrypted, restart-required). | Yes — opens the standard confirmation drawer. |
 | `trakt` | A Trakt API app (`Client ID`/`Client Secret`) configured server-wide in Settings. Templates tagged "recommended" additionally need the chosen profile to have a Trakt account connected under **Settings → Watch Providers**. | Yes. |
 | `mdblist` | Nothing required to *use* a list — fetching a public MDBList `/json` URL is an unauthenticated request. An optional MDBList API key in Settings only powers in-app list *search/browse* while picking a URL. | Yes. |
+| `tmdb_list` | Same TMDB access as `tmdb` (the configured key, or Silo's built-in project key when none is set). The list must be public on themoviedb.org. TMDB has no list search API, so the form takes a list URL only; there is no browse panel like MDBList's. | Yes. |
 | `tmdb_discover` | Same TMDB API key as `tmdb` (same underlying client, hit via TMDB's `/discover` endpoint). | No — bundle-only; shows a read-only filter summary. |
 | `tmdb_collection` | Same TMDB API key as `tmdb` (hit via TMDB's `/collection/{id}` endpoint). | No — bundle-only; shows a read-only summary. |
 
-None of the five sources go through the plugin runtime — they're all built-in HTTP clients. The
+None of the six sources go through the plugin runtime — they're all built-in HTTP clients. The
 plugin system is reserved for metadata/subtitle/watch-provider implementations, not these
 collection sources.
 
@@ -77,7 +78,7 @@ handful of gallery categories:
 | Top Rated | TMDB/MDBList all-time top lists (including IMDb Top 250) and TMDB Discover genre shelves sorted by vote average. | Top Rated Movies, IMDb Top 250 Shows, Top Rated Documentary. |
 | In Theaters / Upcoming / On Air | TMDB's now-playing, upcoming, and airing-today/this-week feeds. | Now Playing in Theaters, Upcoming Movies, Airing Today. |
 | Editorial | The largest, most varied category: Trakt per-profile recommendations, hand-picked MDBList themes, Oscar/Golden Globe winners, yearly "Best of 2023–2025" roundups, seasonal and heritage-month lists (Halloween, Christmas, Pride Month, AAPI Heritage Month, …), studio/distributor catalogs (Criterion Collection, A24, Studio Ghibli), a PG-capped Kids Movies shelf, and TMDB franchise/saga collections (Star Wars, James Bond, Lord of the Rings, Jurassic Park, …) plus a generic franchise placeholder an admin fills in with any TMDB collection ID. | Trakt Recommended Movies, Oscar Winners, Best of 2024, Halloween, Criterion Collection, Star Wars Saga. |
-| Custom | A "bring your own URL" MDBList template that opens the standard MDBList import form. | Custom MDBList. |
+| Custom | "Bring your own URL" templates: one takes any public MDBList list, the other any public TMDB list. | Custom MDBList, Custom TMDB List. |
 
 Templates default to 100 items. Finite canonical lists override that so the collection can hold
 what the title promises: the IMDb Top 250 templates use 250, and catalog lists (Criterion
@@ -119,7 +120,7 @@ auto-generated bundle:
 | Popular Genres | TMDB Discover genre shelves sorted by current popularity, plus the Kids Movies shelf. |
 | Top Rated Genres | The same genre set, sorted by vote average with a vote-count floor. |
 | Franchise Collections | TMDB saga/franchise collections (Star Wars, James Bond, Wizarding World, Fast & Furious, Lord of the Rings, The Hobbit, Jurassic Park, Pirates of the Caribbean, Mission: Impossible, MonsterVerse) plus a blank franchise placeholder. |
-| All Defaults | Auto-generated at startup as the de-duplicated union of the eight bundles above. It does **not** include the plain Trakt trending/popular/recommended templates, the individual streaming-service "what's on this provider" lists, or the "bring your own URL" Custom MDBList template — those 16 templates are only reachable by picking them individually from the gallery. |
+| All Defaults | Auto-generated at startup as the de-duplicated union of the eight bundles above. It does **not** include the plain Trakt trending/popular/recommended templates, the individual streaming-service "what's on this provider" lists, or the "bring your own URL" Custom MDBList and Custom TMDB List templates — those are only reachable by picking them individually from the gallery. |
 
 ### Applying a bundle
 
@@ -147,13 +148,15 @@ before the first sync runs.
 
 ## How a single template becomes a collection
 
-Picking a `tmdb`, `trakt`, or `mdblist` template opens a confirmation drawer with:
+Picking a `tmdb`, `trakt`, `mdblist`, or `tmdb_list` template opens a confirmation drawer with:
 
 - **Libraries** — a multi-select (`library_ids: number[]`); the collection can be created in more
   than one library at once.
 - **Title / Description** — pre-filled from the template, fully editable.
 - **MDBList URL** — only shown when the template's source is MDBList; includes a browser to pick
   a public list without typing a URL.
+- **TMDB list URL** — only shown when the template's source is `tmdb_list`; accepts a list page
+  such as `https://www.themoviedb.org/list/310-my-movie-list` or just the list's number.
 - **Profile** — only shown when the template requires one (Trakt Recommended).
 - **Poster** — use the template's default artwork or supply a custom image URL.
 - **Max Items**, **Default Sort**, **Sync Schedule**, and **Featured** — pre-filled with the
@@ -237,6 +240,7 @@ To add a template:
 | `tmdb` | `preset`, `media_type`; `time_window` for `trending` | Same shape the existing TMDB import endpoint accepts. `preset` must be one of `trending`, `popular`, `top_rated`, `now_playing`, `upcoming`, `airing_today`, `on_the_air`, each with its own allowed `media_type` values. |
 | `trakt` | `preset` (`trending`, `popular`, or `recommended`), `media_type` (`movie` or `tv`) | Set `requires_profile: true` if and only if `preset` is `recommended` — validation rejects either mismatch. |
 | `mdblist` | `url` (optional — empty means "ask the operator") | Empty URL renders an MDBList URL field in the drawer. A non-empty URL must use `http` or `https`, the `mdblist.com` or `www.mdblist.com` host, no explicit port other than 80 or 443, no userinfo, and a `/lists/` path. |
+| `tmdb_list` | `url` (optional — empty means "ask the operator") | Empty URL renders a TMDB list URL field in the drawer. A non-empty URL must be a `themoviedb.org` or `www.themoviedb.org` `/list/{id}` page (the slug after the ID is ignored) or a bare numeric list ID. Sync reads the list through the TMDB API in list order; movies and shows both match. |
 | `tmdb_discover` | `media_type` (`movie` or `tv`), `sort_by` (one of TMDB's documented discover sort values) | Optional filters (genres, vote/runtime/date/certification bounds, original language) are validated for shape (non-negative counts, `YYYY-MM-DD` dates, 2-letter language codes, `gte <= lte`) but are otherwise passed straight to TMDB's `/discover` endpoint. |
 | `tmdb_collection` | `collection_id` (>= 0) | `0` is a permitted placeholder/sentinel for a generic "fill in your own franchise" template; sync fails loudly until an admin edits the resulting collection's source config with a real TMDB collection ID. |
 

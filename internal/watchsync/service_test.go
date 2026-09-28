@@ -51,6 +51,7 @@ type serviceFakeRepo struct {
 	historyLookupLimit     int
 	listItemStates         []ListItemState
 	ratingStates           []RatingSyncState
+	droppedStates          []DroppedSyncState
 	listMedia              map[string]LocalFavorite
 	scrobbleConnections    []Connection
 	scrobbleSessions       []ScrobbleSession
@@ -607,6 +608,75 @@ func (r *serviceFakeRepo) ClearRatingSyncStates(_ context.Context, connectionID,
 		}
 	}
 	r.ratingStates = kept
+	return nil
+}
+
+func (r *serviceFakeRepo) ListDroppedEventConnections(_ context.Context, userID int, profileID string) ([]Connection, error) {
+	var conns []Connection
+	for _, conn := range r.connections {
+		if conn.UserID == userID && conn.ProfileID == profileID && conn.SyncDroppedEnabled {
+			conns = append(conns, cloneConnectionForTest(conn))
+		}
+	}
+	return conns, nil
+}
+
+func (r *serviceFakeRepo) ListDroppedSyncStates(_ context.Context, connectionID, providerAccountID string, seriesIDs []string) ([]DroppedSyncState, error) {
+	var states []DroppedSyncState
+	for _, state := range r.droppedStates {
+		if state.ConnectionID != connectionID || state.ProviderAccountID != providerAccountID {
+			continue
+		}
+		if seriesIDs != nil && !containsString(seriesIDs, state.SeriesID) {
+			continue
+		}
+		states = append(states, state)
+	}
+	return states, nil
+}
+
+func (r *serviceFakeRepo) UpsertDroppedSyncStates(_ context.Context, states []DroppedSyncState) error {
+	for _, state := range states {
+		state.UpdatedAt = time.Now()
+		replaced := false
+		for i := range r.droppedStates {
+			existing := &r.droppedStates[i]
+			if existing.ConnectionID == state.ConnectionID && existing.SeriesID == state.SeriesID {
+				if state.ProviderItemKey == "" {
+					state.ProviderItemKey = existing.ProviderItemKey
+				}
+				*existing = state
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			r.droppedStates = append(r.droppedStates, state)
+		}
+	}
+	return nil
+}
+
+func (r *serviceFakeRepo) DeleteDroppedSyncStates(_ context.Context, connectionID, providerAccountID string, seriesIDs []string) error {
+	kept := r.droppedStates[:0]
+	for _, state := range r.droppedStates {
+		if state.ConnectionID == connectionID && state.ProviderAccountID == providerAccountID && containsString(seriesIDs, state.SeriesID) {
+			continue
+		}
+		kept = append(kept, state)
+	}
+	r.droppedStates = kept
+	return nil
+}
+
+func (r *serviceFakeRepo) ClearDroppedSyncStates(_ context.Context, connectionID, keepAccountID string) error {
+	kept := r.droppedStates[:0]
+	for _, state := range r.droppedStates {
+		if state.ConnectionID != connectionID || state.ProviderAccountID == keepAccountID {
+			kept = append(kept, state)
+		}
+	}
+	r.droppedStates = kept
 	return nil
 }
 

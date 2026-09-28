@@ -4,6 +4,7 @@ import type { FormEvent } from "react";
 import type {
   ImportUserMDBListCollectionRequest,
   ImportUserTMDBCollectionRequest,
+  ImportUserTMDBListCollectionRequest,
   ImportUserTraktCollectionRequest,
   UserCollectionMediaFilter,
   UserCollectionSyncSchedule,
@@ -12,6 +13,7 @@ import type {
 import {
   useImportUserMDBListCollection,
   useImportUserTMDBCollection,
+  useImportUserTMDBListCollection,
   useImportUserTraktCollection,
 } from "@/hooks/queries/userCollectionImports";
 import { useUserLibraries } from "@/hooks/queries/libraries";
@@ -22,6 +24,8 @@ import {
 } from "@/lib/collectionDisplayFilters";
 import { COLLECTION_SOURCE_ORDER, selectValueToSortConfig } from "@/lib/collectionSortConfig";
 import { CollectionDefaultSortField } from "@/components/collections/CollectionDefaultSortField";
+import { TMDBListURLField } from "@/components/collections/TMDBListURLField";
+import { isValidTMDBListURL } from "@/lib/tmdbList";
 import {
   COLLECTION_MAX_ITEMS,
   libraryEligibilityForMediaKind,
@@ -92,6 +96,7 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
   const tmdbMutation = useImportUserTMDBCollection();
   const traktMutation = useImportUserTraktCollection();
   const mdblistMutation = useImportUserMDBListCollection();
+  const tmdbListMutation = useImportUserTMDBListCollection();
   const { data: libraries = [] } = useUserLibraries();
 
   const [title, setTitle] = useState(template.title);
@@ -102,6 +107,7 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
   );
   const [isShared, setIsShared] = useState(false);
   const [mdblistUrl, setMdblistUrl] = useState(template.mdblist?.url ?? "");
+  const [tmdbListUrl, setTmdbListUrl] = useState(template.tmdb_list?.url ?? "");
   const [libraryIds, setLibraryIds] = useState<number[]>([]);
   const [watchFilter, setWatchFilter] = useState<UserCollectionWatchFilter>("all");
   const [mediaFilter, setMediaFilter] = useState<UserCollectionMediaFilter>("all");
@@ -120,9 +126,14 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
 
   const parsedLimit = parseOptionalPositiveInteger(limit);
   const limitInvalid = limit.trim().length > 0 && parsedLimit === undefined;
-  const isPending = tmdbMutation.isPending || traktMutation.isPending || mdblistMutation.isPending;
+  const isPending =
+    tmdbMutation.isPending ||
+    traktMutation.isPending ||
+    mdblistMutation.isPending ||
+    tmdbListMutation.isPending;
   const missingMDBListURL = template.source === "mdblist" && mdblistUrl.trim().length === 0;
-  const submitDisabled = isPending || limitInvalid || missingMDBListURL;
+  const invalidTMDBListURL = template.source === "tmdb_list" && !isValidTMDBListURL(tmdbListUrl);
+  const submitDisabled = isPending || limitInvalid || missingMDBListURL || invalidTMDBListURL;
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -170,6 +181,15 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
         url: mdblistUrl.trim(),
       };
       mdblistMutation.mutate(body, { onSuccess: onCreated });
+      return;
+    }
+
+    if (template.source === "tmdb_list") {
+      const body: ImportUserTMDBListCollectionRequest = {
+        ...sharedFields,
+        url: tmdbListUrl.trim(),
+      };
+      tmdbListMutation.mutate(body, { onSuccess: onCreated });
       return;
     }
   }
@@ -242,6 +262,14 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
             </p>
           </div>
         </div>
+      ) : null}
+
+      {template.source === "tmdb_list" ? (
+        <TMDBListURLField
+          id="user-template-tmdb-list-url"
+          value={tmdbListUrl}
+          onChange={setTmdbListUrl}
+        />
       ) : null}
 
       <div className="space-y-2">

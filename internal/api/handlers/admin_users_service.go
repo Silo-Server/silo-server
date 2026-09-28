@@ -117,6 +117,15 @@ func (h *AdminHandler) CreateAdminAccount(ctx context.Context, input auth.Create
 	if actorIsScopedAPIKey(ctx) && input.User.Role == roleAdmin {
 		return 0, apiError(403, "insufficient_scope", "A scoped API key may not create an admin account")
 	}
+	if input.User.Role == roleAdmin {
+		actor, err := requestOwnerActor(ctx, h.userRepo)
+		if err != nil {
+			return 0, err
+		}
+		if err := auth.CheckGrantAdmin(actor, input.User.Role); err != nil {
+			return 0, ownerError(err)
+		}
+	}
 	if input.User.MaxProfiles != nil && *input.User.MaxProfiles < 1 {
 		return 0, fieldError("max_profiles", "Must be at least 1")
 	}
@@ -203,6 +212,10 @@ func (h *AdminHandler) UpdateAdminAccount(ctx context.Context, id int, revision,
 		}
 		input.MaxPlaybackQuality.Value = new(value)
 	}
+	actor, err := requestOwnerActor(ctx, h.userRepo)
+	if err != nil {
+		return 0, err
+	}
 	revoked := false
 	snapshot, err := repo.MutateAdminAccount(ctx, id, revision, &input, func(current *models.User, tx pgx.Tx) (bool, error) {
 		if revision != -1 {
@@ -214,7 +227,7 @@ func (h *AdminHandler) UpdateAdminAccount(ctx context.Context, id int, revision,
 				return false, auth.ErrAdminUserRevision
 			}
 		}
-		if err := auth.CheckOwnerUpdate(actorUserID(ctx), current, input); err != nil {
+		if err := auth.CheckOwnerUpdate(actor, current, input); err != nil {
 			return false, ownerError(err)
 		}
 		role := current.Role
@@ -250,7 +263,11 @@ func (h *AdminHandler) DeleteAdminAccount(ctx context.Context, id int, revision,
 	if !ok {
 		return apiError(501, "capability_unsupported", "Guarded account management is unavailable")
 	}
-	_, err := repo.MutateAdminAccount(ctx, id, revision, nil, func(current *models.User, tx pgx.Tx) (bool, error) {
+	actor, err := requestOwnerActor(ctx, h.userRepo)
+	if err != nil {
+		return err
+	}
+	_, err = repo.MutateAdminAccount(ctx, id, revision, nil, func(current *models.User, tx pgx.Tx) (bool, error) {
 		if revision != -1 {
 			_, actual, err := adminAccountTransactionGroup(ctx, tx, current)
 			if err != nil {
@@ -260,7 +277,7 @@ func (h *AdminHandler) DeleteAdminAccount(ctx context.Context, id int, revision,
 				return false, auth.ErrAdminUserRevision
 			}
 		}
-		if err := auth.CheckOwnerDelete(actorUserID(ctx), current); err != nil {
+		if err := auth.CheckOwnerDelete(actor, current); err != nil {
 			return false, ownerError(err)
 		}
 		return true, nil
@@ -287,6 +304,27 @@ func (h *AdminHandler) ImpersonateAdminAccount(ctx context.Context, id int, devi
 		return TokenPairView{}, err
 	}
 	return TokenPairView(buildLoginResponse(pair, user, effectiveDownloadAllowed(ctx, user, h.groupPolicyProvider()), actor)), nil
+}
+
+// ownershipTransferrer moves the server Owner role. *auth.UserRepository
+// implements it.
+type ownershipTransferrer interface {
+	TransferOwnership(ctx context.Context, fromID, toID int) error
+}
+
+// TransferAdminOwnership makes account id the server Owner in place of the
+// caller, who must be the Owner acting from a signed-in session: an API key
+// or an impersonation session may not hand the server over.
+func (h *AdminHandler) TransferAdminOwnership(ctx context.Context, id int) error {
+	claims := apimw.GetClaims(ctx)
+	if claims == nil || claims.TokenType == auth.TokenTypeAPIKey || claims.SessionID == "" || claims.ImpersonatorUserID != nil {
+		return ownerError(auth.ErrNotOwner)
+	}
+	repo, ok := h.userRepo.(ownershipTransferrer)
+	if !ok {
+		return apiError(501, "capability_unsupported", "Ownership transfer is unavailable")
+	}
+	return ownerError(repo.TransferOwnership(ctx, claims.UserID, id))
 }
 func (h *AdminHandler) ListAdminAccountProfiles(ctx context.Context, id int) ([]AdminProfileView, error) {
 	if _, err := h.userRepo.GetByID(ctx, id); err != nil {

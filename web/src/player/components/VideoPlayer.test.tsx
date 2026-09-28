@@ -3,6 +3,7 @@ import { createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PlayerConfigProvider, type PlayerConfig } from "../context/PlayerConfigContext";
+import { PlayerFullscreenRootContext } from "../context/PlayerFullscreenContext";
 import type { WatchTogetherRoomConnectionResult } from "../hooks/useWatchTogetherRoomConnection";
 import { fixturePlanV3 } from "../protocol-v3.fixtures";
 import type {
@@ -3439,6 +3440,50 @@ describe("VideoPlayer translation handoff", () => {
     },
   );
 
+  it("makes the host's fullscreen root fullscreen instead of its own container", () => {
+    const root = document.createElement("div");
+    const requestRootFullscreen = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(root, "requestFullscreen", {
+      value: requestRootFullscreen,
+      configurable: true,
+    });
+    const { container } = render(createElement(VideoPlayer, playerProps()), {
+      wrapper: ({ children }) =>
+        wrapper({
+          children: createElement(PlayerFullscreenRootContext.Provider, {
+            value: { current: root },
+            children,
+          }),
+        }),
+    });
+    const playerContainer = container.querySelector(".player-container") as HTMLElement;
+    const requestContainerFullscreen = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(playerContainer, "requestFullscreen", {
+      value: requestContainerFullscreen,
+      configurable: true,
+    });
+
+    act(() => {
+      controls.current?.onFullscreenToggle?.();
+    });
+
+    expect(requestRootFullscreen).toHaveBeenCalledOnce();
+    expect(requestContainerFullscreen).not.toHaveBeenCalled();
+  });
+
+  it("starts in fullscreen when mounted inside a fullscreen host", () => {
+    Object.defineProperty(document, "fullscreenElement", {
+      value: document.body,
+      configurable: true,
+    });
+    try {
+      renderPlayer();
+      expect(controls.current?.isFullscreen).toBe(true);
+    } finally {
+      delete (document as { fullscreenElement?: Element | null }).fullscreenElement;
+    }
+  });
+
   it("tracks WebKit fullscreen events on the video element", async () => {
     const { container } = renderPlayer();
 
@@ -3478,5 +3523,54 @@ describe("VideoPlayer translation handoff", () => {
 
     expect(video).toHaveClass("object-contain");
     expect(controls.current?.videoFit).toBe("contain");
+  });
+});
+
+describe("VideoPlayer controls auto-hide", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    controls.current = null;
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  function renderPlaying() {
+    const rendered = renderPlayer({ shouldAutoPlay: false });
+    const video = rendered.container.querySelector("video")!;
+    Object.defineProperty(video, "paused", { configurable: true, value: false });
+    act(() => {
+      fireEvent.play(video);
+    });
+    const container = rendered.container.querySelector(".player-container")!;
+    return { container };
+  }
+
+  it("keeps the controls up while a player menu is open", async () => {
+    const { container } = renderPlaying();
+    const menu = document.createElement("div");
+    menu.setAttribute("role", "menu");
+    container.appendChild(menu);
+
+    await act(() => vi.advanceTimersByTimeAsync(10_000));
+    expect(controls.current?.visible).toBe(true);
+    fireEvent.mouseLeave(container);
+    expect(controls.current?.visible).toBe(true);
+
+    menu.remove();
+    await act(() => vi.advanceTimersByTimeAsync(3_000));
+    expect(controls.current?.visible).toBe(false);
+  });
+
+  it("hides idle controls during playback when no menu is open", async () => {
+    renderPlaying();
+    await act(() => vi.advanceTimersByTimeAsync(3_000));
+    expect(controls.current?.visible).toBe(false);
   });
 });

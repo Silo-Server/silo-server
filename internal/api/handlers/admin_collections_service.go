@@ -29,6 +29,7 @@ type AdminCollectionPreview = previewLibraryCollectionResponse
 type AdminCollectionPreviewRequest = previewCollectionRequest
 type AdminCollectionImportMDBList = importMDBListRequest
 type AdminCollectionImportTMDB = importTMDBRequest
+type AdminCollectionImportTMDBList = importTMDBListRequest
 type AdminCollectionImportTrakt = importTraktRequest
 type AdminCollectionImportResult = importCollectionResponse
 type AdminCollectionTemplateApply = applyTemplateBundleRequest
@@ -114,6 +115,9 @@ func (h *LibraryCollectionHandler) createAdminCollection(ctx context.Context, re
 	}
 	if !hasLibrarySelection(req.LibraryID, req.LibraryIDs) || strings.TrimSpace(req.Title) == "" {
 		return none, apiError(http.StatusBadRequest, "bad_request", "library_id/library_ids and title are required")
+	}
+	if err := validateTMDBListSourceConfig(req.SourceConfig, req.SourceURL); err != nil {
+		return none, apiError(http.StatusBadRequest, "bad_request", err.Error())
 	}
 	if req.Slug == "" {
 		req.Slug = slugifyCollectionName(req.Title)
@@ -323,6 +327,9 @@ func validateAdminCollectionSourceUpdate(existing *models.LibraryCollection, req
 	if !wasTrakt && willBeTrakt {
 		return apiError(http.StatusBadRequest, "unsupported_source", "new Trakt collections are not supported")
 	}
+	if err := validateTMDBListSourceConfig(proposedConfig, proposedURL); err != nil {
+		return apiError(http.StatusBadRequest, "bad_request", err.Error())
+	}
 	if wasTrakt {
 		activatesSchedule := req.SyncSchedule != nil && strings.TrimSpace(*req.SyncSchedule) != "" && (existing.SyncSchedule == nil || strings.TrimSpace(*existing.SyncSchedule) == "")
 		changesLibraries := req.LibraryIDs != nil && !samePositiveIntSet(existing.LibraryIDs, *req.LibraryIDs)
@@ -470,6 +477,48 @@ func (h *LibraryCollectionHandler) importAdminTMDB(ctx context.Context, req Admi
 }
 func (h *LibraryCollectionHandler) ImportAdminTMDB(ctx context.Context, req AdminCollectionImportTMDB) (AdminCollectionImportResult, error) {
 	return h.importAdminTMDB(ctx, req, h.adminArtworkSources(ctx))
+}
+
+func (h *LibraryCollectionHandler) importAdminTMDBList(ctx context.Context, req AdminCollectionImportTMDBList, artwork adminCollectionArtwork) (AdminCollectionImportResult, error) {
+	var none AdminCollectionImportResult
+	if !hasLibrarySelection(req.LibraryID, req.LibraryIDs) || strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.URL) == "" {
+		return none, apiError(http.StatusBadRequest, "bad_request", "library_id/library_ids, title, and url are required")
+	}
+	if req.Limit != nil && *req.Limit <= 0 {
+		return none, apiError(http.StatusBadRequest, "bad_request", "limit must be greater than 0")
+	}
+
+	collection, err := h.createTMDBListCollection(ctx, req)
+	if err != nil {
+		if validationErr, ok := errors.AsType[requestValidationError](err); ok {
+			return none, apiError(http.StatusBadRequest, "bad_request", validationErr.Error())
+		}
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to create collection")
+	}
+
+	// Process admin artwork before sync so maybeGenerateCollage sees the
+	// uploaded poster and skips collage generation.
+	if err := artwork(collection.ID, req.PosterSourceURL, req.BackdropSourceURL); err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process uploaded images")
+	}
+
+	run, err := h.service.SyncCollection(ctx, collection.ID)
+	if err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to sync TMDB list collection")
+	}
+
+	refreshed, err := h.repo.GetByID(ctx, collection.ID)
+	if err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load collection")
+	}
+
+	return importCollectionResponse{
+		Collection: h.libraryCollectionResponseOf(ctx, refreshed),
+		SyncRun:    run,
+	}, nil
+}
+func (h *LibraryCollectionHandler) ImportAdminTMDBList(ctx context.Context, req AdminCollectionImportTMDBList) (AdminCollectionImportResult, error) {
+	return h.importAdminTMDBList(ctx, req, h.adminArtworkSources(ctx))
 }
 
 func (h *LibraryCollectionHandler) importAdminTrakt(ctx context.Context, req AdminCollectionImportTrakt, artwork adminCollectionArtwork) (AdminCollectionImportResult, error) {

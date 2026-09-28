@@ -161,7 +161,8 @@ func (s *Service) send(ctx context.Context, input SendInput, sourceID *int64) (*
 	if role != roleUser && role != roleAdmin {
 		return nil, ErrRoleNotAllowed
 	}
-	if role == roleAdmin && inviter.Role != roleAdmin {
+	// Only the server Owner may grant the admin role.
+	if role == roleAdmin && (inviter.Role != roleAdmin || !inviter.IsOwner) {
 		return nil, ErrRoleNotAllowed
 	}
 	// Admins are never grouped; refuse here so the pending invitation does not

@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/activitylog"
@@ -880,6 +881,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			requestSvc.SetUserRepository(userRepo)
 		}
 		requestSvc.SetRequesterIdentityResolver(plugins.RequesterIdentityFromLookup(plugins.NewPgUserIdentityLookup(deps.DB)))
+		if tvdbResolver, ok := deps.MetadataService.(mediarequests.TVDBIDResolver); ok {
+			requestSvc.SetTVDBIDResolver(tvdbResolver)
+		}
 		if viewerResolver != nil {
 			requestSvc.SetEntitlementResolver(scopeEntitlementResolver{resolver: viewerResolver})
 		}
@@ -992,6 +996,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		profileHandler = handlers.NewProfileHandler(deps.UserStoreProvider)
 		profileHandler.UserRepo = userRepo
 		profileHandler.EventsHub = deps.EventsHub
+		if deps.DB != nil {
+			// Drops live in Postgres whichever store holds the profile.
+			profileHandler.DroppedSeriesPurger = catalog.NewDroppedSeriesRepo(deps.DB)
+		}
 		profileHandler.ProfileTokens = profileTokenService
 		// Private S3 preserves existing avatar keys and presigned delivery. Local
 		// avatars use the signed artwork endpoint. Never use public S3 here.
@@ -1076,6 +1084,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 		deviceHandler.ProfileTokens = profileTokenService
 		homeDismissalHandler = handlers.NewHomeDismissalHandler(deps.UserStoreProvider)
 		homeDismissalHandler.EventsHub = deps.EventsHub
+		if deps.DB != nil {
+			homeDismissalHandler.SetSeriesDrops(catalog.NewDroppedSeriesRepo(deps.DB), itemRepo)
+		}
+		if dispatcher, ok := deps.WatchProviderService.(handlers.LocalDroppedEventDispatcher); ok {
+			homeDismissalHandler.SetLocalDroppedEventDispatcher(dispatcher)
+		}
 		subtitlePrefHandler = handlers.NewSubtitlePrefHandler(deps.UserStoreProvider)
 		subtitlePrefHandler.EventsHub = deps.EventsHub
 		audioPrefHandler = handlers.NewAudioPrefHandler(deps.UserStoreProvider)
@@ -1792,6 +1806,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 				client: tmdb.NewClient(apiKey, 40),
 			}
 		}
+		if libraryCollectionService.TMDBLists == nil {
+			apiKey := ""
+			if deps.Config != nil {
+				apiKey = deps.Config.TMDBAPIKey
+			}
+			libraryCollectionService.TMDBLists = &tmdbListAdapter{
+				client: tmdb.NewClient(apiKey, 40),
+			}
+		}
 		if libraryCollectionService.TraktCollections == nil {
 			// The client ID is resolved per call rather than captured here, so
 			// saving new Trakt credentials applies without a server restart.
@@ -1821,6 +1844,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			}
 			if deps.UserCollectionSync.TMDBCollections == nil {
 				deps.UserCollectionSync.TMDBCollections = libraryCollectionService.TMDBCollections
+			}
+			if deps.UserCollectionSync.TMDBLists == nil {
+				deps.UserCollectionSync.TMDBLists = libraryCollectionService.TMDBLists
 			}
 		}
 
@@ -2228,7 +2254,6 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if settingsRepo != nil {
 		themeHandler = handlers.NewThemeHandler(settingsRepo)
 		v2deps.ThemeOverrides = themeHandler
-		v2deps.ThemeCatalog = themeHandler
 	}
 	if deps.BrandingService != nil {
 		v2deps.Branding = deps.BrandingService
@@ -4646,6 +4671,50 @@ func (a *tmdbDiscoverAdapter) Discover(ctx context.Context, mediaType string, pa
 			entry.TVDBID = externalIDs.TVDBID
 		}
 		entries[i] = entry
+	}
+	return entries, nil
+}
+
+// tmdbListAdapter adapts tmdb.Client to catalog.TMDBListFetcher for the
+// `tmdb_list` sync mode. Like the other TMDB adapters, it enriches each entry
+// with external IDs so the matcher can fall back to IMDb/TVDB when a local
+// item lacks a TMDB ID.
+type tmdbListAdapter struct {
+	client *tmdb.Client
+}
+
+// tmdbListExternalIDLookups bounds the concurrent external-ID lookups for one
+// list. A list can hold up to 500 entries and the import runs its first sync
+// inside the request, so sequential lookups (one round trip each) would take
+// far longer than the client's shared rate limit requires.
+const tmdbListExternalIDLookups = 8
+
+func (a *tmdbListAdapter) GetList(ctx context.Context, id, limit int) ([]catalog.TMDBCollectionEntry, error) {
+	results, err := a.client.GetList(ctx, id, limit)
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]catalog.TMDBCollectionEntry, len(results))
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(tmdbListExternalIDLookups)
+	for i, r := range results {
+		entries[i] = catalog.TMDBCollectionEntry{
+			ID:        r.ID,
+			MediaType: r.MediaType,
+			Title:     r.Title,
+		}
+		g.Go(func() error {
+			// A failed lookup leaves the entry matchable by TMDB ID alone; only
+			// cancellation ends the sync.
+			if externalIDs, err := a.client.GetExternalIDs(gctx, r.MediaType, r.ID); err == nil && externalIDs != nil {
+				entries[i].IMDbID = externalIDs.IMDbID
+				entries[i].TVDBID = externalIDs.TVDBID
+			}
+			return gctx.Err()
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
 	return entries, nil
 }

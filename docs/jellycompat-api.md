@@ -128,12 +128,31 @@ its owning series and takes precedence over the path series and numeric season.
 Episode SQL queries default to 24 rows and cap each page at 1,000. Clients should
 page using `TotalRecordCount` and `StartIndex`.
 
+`/Items?ParentId={boxSetId}` lists a collection's members (movies, series, and
+the episodes of episode-scoped smart collections) in collection order unless
+`SortBy` is sent. Members get the same detail fields, such as `MediaSources` and
+`Path`, as they do when listed from their library. Episode-scoped smart
+collections honor `SortBy` over their own members; catalog and user-state
+filters on them are not supported yet and return no episodes.
+
+`Recursive=true` together with `Filters=IsNotFolder`, or with an
+`IncludeItemTypes` that names `Episode` but not `Series` or `Season`, returns the
+collection's playable leaves for Play all and Shuffle: movies and episodes, with
+member series expanded to the episodes that have a live file in a library the
+profile may access. Regular seasons come first, then specials. `SortBy=Random`
+shuffles the leaves; other sorts keep collection order. Other recursive
+requests list the members.
+
 `EnableImages=false`, `EnableImageTypes`, `ImageTypeLimit`, and
 `EnableUserData=false` control item response presentation. Fields requiring
 real detail are hydrated from the catalog; list responses no longer invent
 media-source IDs or person IDs from titles. When `Fields` requests
 `MediaSourceCount`, library, Latest, and NextUp lists report the number of
 present, accessible versions of each movie or episode.
+
+Global `/Shows/NextUp` and the Resume lists leave out series the profile dropped,
+as Silo's Home does; `/Shows/NextUp?SeriesId=` still answers for a dropped series.
+See [dropped-shows.md](architecture/dropped-shows.md).
 
 Items carry Jellyfin 12's `OriginalLanguage` (movies and series). Episodes set
 `ParentPrimaryImageItemId` and `ParentPrimaryImageTag` to their season's poster,
@@ -151,10 +170,10 @@ request disables Primary images.
 | `GET /Items/{id}/ThemeSongs`, `/ThemeVideos` | Local theme songs for a visible owner; theme videos remain empty. |
 | `GET /Persons`, `/Persons/{name}` | People with credits in movies or series visible to the current profile. `/Persons` accepts Jellyfin 12's `StartIndex`, `NameStartsWith`, `NameLessThan`, and `NameStartsWithOrGreater` (lowercased name comparisons) and a library or movie/series `ParentId`; other parents match nobody. Pages without `SearchTerm` hold up to 100 people; searches stay capped at 20. Person photo tags are signed and appear only in responses that passed this visibility check. `GET /Items/{personId}/Images/Primary` accepts a matching signed `tag` without authentication, as Jellyfin Web sends image requests without credentials; otherwise the session must see a credit for the person. Either check runs before cached artwork is used. |
 
-These changes do not implement every advanced query option. Random and compound
-sorts, full `IsMissing` semantics, multiple person-ID predicates, populated tag
-facets, and the `Tags`, `StudioIds`, and `HasSubtitles` item filters remain
-outside this subset.
+These changes do not implement every advanced query option. Compound sorts,
+full `IsMissing` semantics, multiple person-ID predicates, populated tag facets,
+and the `Tags`, `StudioIds`, and `HasSubtitles` item filters remain outside this
+subset.
 
 ## Playback negotiation and media
 
@@ -253,6 +272,17 @@ layer (HEVC profile 5, AV1 profile 10), a client whose device profile lists
 variant, listed before the `hvc1` fallback. MPEG-TS remuxes keep the single
 variant. Audio and subtitle streams carry `LocalizedLanguage`, and audio
 streams carry `LocalizedOriginal`, in English.
+
+When a client's `VideoRangeType` conditions reject a Dolby Vision stream with
+an HDR10 base layer (HEVC profile 7, or profile 8 with compatibility ID 1) but
+accept HDR10, `PlaybackInfo` offers an HLS remux that strips the Dolby Vision
+RPUs with FFmpeg's `dovi_rpu` filter, as Jellyfin does. The client receives the
+HDR10 base layer tagged `hvc1` with `VIDEO-RANGE=PQ`, without a re-encode or
+tone mapping. The strip runs only where the remux routing policy allows: on
+the API server when its FFmpeg has the filter (FFmpeg 7.1 or later), or on a
+transcode node that advertises `server_dv7_to_hdr10`. With no such executor,
+or when the file's RPUs cannot be parsed, negotiation falls back to a full
+encode, which needs tone mapping.
 
 Subtitle inventory preserves text and bitmap tracks. Selected embedded text or
 bitmap subtitles can burn through the existing local or remote full-encode

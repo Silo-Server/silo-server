@@ -55,6 +55,7 @@ import type {
 import { useSeriesEpisodes } from "@/player/hooks/useSeriesEpisodes";
 import { formatTime } from "@/player/components/SeekBar";
 import { storage } from "@/utils/storage";
+import { PlaybackFullscreenRoot } from "./PlaybackFullscreenRoot";
 import { WatchPlaybackControllerContext } from "./watchPlaybackContext";
 import type { WatchPlaybackControllerValue } from "./watchPlaybackContext";
 import type { WatchPlaybackTransportControls } from "./watchPlaybackReducer";
@@ -494,6 +495,14 @@ export function WatchPlaybackProvider({ children }: { children: ReactNode }) {
 }
 
 export function WatchPlaybackHost() {
+  return (
+    <PlaybackFullscreenRoot>
+      <WatchPlaybackHostContent />
+    </PlaybackFullscreenRoot>
+  );
+}
+
+function WatchPlaybackHostContent() {
   // The host is mounted on every screen, the login screen included; its
   // settings reads wait for a session instead of answering 401.
   const { user } = useAuth();

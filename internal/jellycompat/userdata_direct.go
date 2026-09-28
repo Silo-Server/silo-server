@@ -198,8 +198,8 @@ func (s *directUserDataService) ListProgressFiltered(ctx context.Context, sessio
 }
 
 // FilterResumeProgress applies the same hiding rules as the first-party
-// Continue Watching fetcher: dismissed entries and episodes superseded by a
-// later-completed episode in the same series.
+// Continue Watching fetcher: dismissed entries, episodes of dropped series,
+// and episodes superseded by a later-completed episode in the same series.
 func (s *directUserDataService) FilterResumeProgress(ctx context.Context, session *Session, entries []upstreamProgress) ([]upstreamProgress, error) {
 	if len(entries) == 0 {
 		return entries, nil
@@ -220,6 +220,11 @@ func (s *directUserDataService) FilterResumeProgress(ctx context.Context, sessio
 		slog.ErrorContext(ctx, "listing continue watching dismissals", "component", "jellycompat", "profile_id", session.ProfileID, "error", err)
 	} else {
 		progress = catalog.NewHomeDismissalIndex(dismissals).FilterProgress(progress)
+	}
+	if filtered, err := s.resumeFilter.FilterDroppedProgress(ctx, session.StreamAppUserID, session.ProfileID, progress); err != nil {
+		slog.ErrorContext(ctx, "filtering dropped series from resume", "component", "jellycompat", "profile_id", session.ProfileID, "error", err)
+	} else {
+		progress = filtered
 	}
 
 	superseded, err := s.resumeFilter.SupersededEpisodeProgressIDs(ctx, store, session.ProfileID, progress)

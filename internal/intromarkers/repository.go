@@ -9,10 +9,13 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -24,10 +27,21 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-var ErrEpisodeNotFound = errors.New("episode not found")
+// ErrMarkerItemNotFound reports an item that is neither an episode nor a
+// movie, the items local marker analysis works on.
+var ErrMarkerItemNotFound = errors.New("item is not an episode or a movie")
 
-type EpisodeIntroEligibility struct {
-	EpisodeID             string
+// Item kinds local marker analysis works on.
+const (
+	MarkerItemEpisode = "episode"
+	MarkerItemMovie   = "movie"
+)
+
+// MarkerItemEligibility is whether an item's files can be analyzed locally.
+type MarkerItemEligibility struct {
+	ItemID string
+	// Kind is MarkerItemEpisode or MarkerItemMovie. Movies get credits only.
+	Kind                  string
 	HasMediaFiles         bool
 	IntroDetectionEnabled bool
 }
@@ -39,7 +53,14 @@ const baseCandidateSelect = baseCandidateSelectFrom + baseCandidateWhere
 const baseCandidateSelectFrom = `
 	SELECT mf.id,
 	       mf.episode_id,
-	       e.season_id,
+	       e.season_id,` + candidateFileColumns + `
+	FROM media_files mf
+	JOIN media_folders folders ON folders.id = mf.media_folder_id
+	JOIN episodes e ON e.content_id = mf.episode_id`
+
+// candidateFileColumns are the candidate columns after the file ID, episode
+// ID, and season ID, in scanCandidates order.
+const candidateFileColumns = `
 	       mf.media_folder_id,
 	       mf.file_path,
 	       COALESCE(mf.file_hash, ''),
@@ -56,15 +77,21 @@ const baseCandidateSelectFrom = `
 	       mf.intro_markers_source,
 	       mf.intro_markers_confidence,
 	       mf.intro_markers_algorithm,
+	       mf.credits_start,
+	       mf.credits_end,
+	       mf.credits_markers_source,
+	       mf.credits_markers_confidence,
+	       mf.credits_markers_algorithm,
+	       mf.preview_start,
 	       mf.markers_source,
 	       COALESCE(mf.content_id, ''),
 	       COALESCE(mf.extra_id, ''),
 	       COALESCE(mf.season_number, 0),
 	       COALESCE(mf.episode_number, 0),
-	       mf.file_modified_at
-	FROM media_files mf
-	JOIN media_folders folders ON folders.id = mf.media_folder_id
-	JOIN episodes e ON e.content_id = mf.episode_id`
+	       mf.file_modified_at,
+	       COALESCE(mf.codec_video, ''),
+	       COALESCE(mf.codec_audio, ''),
+	       mf.video_tracks->0`
 
 const baseCandidateWhere = `
 	WHERE mf.episode_id IS NOT NULL
@@ -266,35 +293,62 @@ func (r *Repository) UpsertSilenceRefinementAttempt(ctx context.Context, attempt
 	return nil
 }
 
-func (r *Repository) EpisodeIntroEligibility(ctx context.Context, episodeID string) (*EpisodeIntroEligibility, error) {
-	var exists bool
-	if err := r.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM episodes WHERE content_id = $1)`, episodeID).Scan(&exists); err != nil {
-		return nil, fmt.Errorf("checking episode existence for intro detection: %w", err)
+// MarkerItemEligibility reports whether local marker analysis may run for an
+// episode or a movie: the item exists, has files, and at least one of them
+// is in an enabled library of a kind the analysis covers with marker
+// detection on.
+func (r *Repository) MarkerItemEligibility(ctx context.Context, itemID string) (*MarkerItemEligibility, error) {
+	var isEpisode bool
+	if err := r.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM episodes WHERE content_id = $1)`, itemID).Scan(&isEpisode); err != nil {
+		return nil, fmt.Errorf("checking episode existence for marker detection: %w", err)
 	}
-	if !exists {
-		return nil, ErrEpisodeNotFound
+	if isEpisode {
+		return r.itemEligibility(ctx, itemID, MarkerItemEpisode, `
+			SELECT COUNT(*),
+			       COUNT(*) FILTER (
+			           WHERE folders.enabled = true
+			             AND folders.intro_detection_enabled = true
+			             AND folders.type IN ('series', 'mixed')
+			       )
+			FROM media_files mf
+			JOIN media_folders folders ON folders.id = mf.media_folder_id
+			WHERE mf.episode_id = $1
+			  AND mf.missing_since IS NULL`)
 	}
-
-	var fileCount, introEnabledCount int
-	err := r.pool.QueryRow(ctx, `
+	var isMovie bool
+	if err := r.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM media_items WHERE content_id = $1 AND type = 'movie')`, itemID).Scan(&isMovie); err != nil {
+		return nil, fmt.Errorf("checking movie existence for marker detection: %w", err)
+	}
+	if !isMovie {
+		return nil, ErrMarkerItemNotFound
+	}
+	return r.itemEligibility(ctx, itemID, MarkerItemMovie, `
 		SELECT COUNT(*),
 		       COUNT(*) FILTER (
 		           WHERE folders.enabled = true
 		             AND folders.intro_detection_enabled = true
-		             AND folders.type IN ('series', 'mixed')
+		             AND folders.type IN ('movies', 'mixed')
 		       )
 		FROM media_files mf
 		JOIN media_folders folders ON folders.id = mf.media_folder_id
-		WHERE mf.episode_id = $1
-		  AND mf.missing_since IS NULL`, episodeID).Scan(&fileCount, &introEnabledCount)
-	if err != nil {
-		return nil, fmt.Errorf("checking episode intro eligibility: %w", err)
-	}
+		WHERE mf.content_id = $1
+		  AND mf.episode_id IS NULL
+		  AND COALESCE(mf.extra_id, '') = ''
+		  AND mf.missing_since IS NULL`)
+}
 
-	return &EpisodeIntroEligibility{
-		EpisodeID:             episodeID,
+// itemEligibility counts an item's files and those in libraries with marker
+// detection on, with query taking the item ID.
+func (r *Repository) itemEligibility(ctx context.Context, itemID, kind, query string) (*MarkerItemEligibility, error) {
+	var fileCount, enabledCount int
+	if err := r.pool.QueryRow(ctx, query, itemID).Scan(&fileCount, &enabledCount); err != nil {
+		return nil, fmt.Errorf("checking %s marker eligibility: %w", kind, err)
+	}
+	return &MarkerItemEligibility{
+		ItemID:                itemID,
+		Kind:                  kind,
 		HasMediaFiles:         fileCount > 0,
-		IntroDetectionEnabled: introEnabledCount > 0,
+		IntroDetectionEnabled: enabledCount > 0,
 	}, nil
 }
 
@@ -339,13 +393,16 @@ func (r *Repository) IsFileInEnabledLibrary(ctx context.Context, fileID int) (bo
 	return true, nil
 }
 
-func scanCandidates(rows pgx.Rows) ([]Candidate, error) {
+// scanCandidates scans candidates from rows. A query that selects more
+// columns after the candidate columns passes their destinations as extra;
+// after the scan they hold the last row's values.
+func scanCandidates(rows pgx.Rows, extra ...any) ([]Candidate, error) {
 	defer rows.Close()
 	var candidates []Candidate
 	for rows.Next() {
 		var c Candidate
-		var chaptersJSON, audioTracksJSON, subtitleTracksJSON, externalSubtitlesJSON []byte
-		if err := rows.Scan(
+		var chaptersJSON, audioTracksJSON, subtitleTracksJSON, externalSubtitlesJSON, videoTrackJSON []byte
+		if err := rows.Scan(append([]any{
 			&c.FileID,
 			&c.EpisodeID,
 			&c.SeasonID,
@@ -365,13 +422,22 @@ func scanCandidates(rows pgx.Rows) ([]Candidate, error) {
 			&c.IntroMarkersSource,
 			&c.IntroMarkersConfidence,
 			&c.IntroMarkersAlgorithm,
+			&c.CreditsStart,
+			&c.CreditsEnd,
+			&c.CreditsMarkersSource,
+			&c.CreditsMarkersConfidence,
+			&c.CreditsMarkersAlgorithm,
+			&c.PreviewStart,
 			&c.MarkersSource,
 			&c.ContentID,
 			&c.ExtraID,
 			&c.SeasonNumber,
 			&c.EpisodeNumber,
 			&c.FileModifiedAt,
-		); err != nil {
+			&c.CodecVideo,
+			&c.CodecAudio,
+			&videoTrackJSON,
+		}, extra...)...); err != nil {
 			return nil, fmt.Errorf("scanning intro marker candidate: %w", err)
 		}
 		c.ChaptersHash = chaptersHash(chaptersJSON)
@@ -386,6 +452,12 @@ func scanCandidates(rows pgx.Rows) ([]Candidate, error) {
 				return nil, fmt.Errorf("unmarshaling audio tracks for file %d: %w", c.FileID, err)
 			}
 			c.AudioLanguage = effectiveAudioLanguage(tracks)
+		}
+		// The bit depth only shapes a hardware decode, so a video track that
+		// does not parse leaves it unknown rather than failing the scan.
+		var videoTrack models.VideoTrack
+		if len(videoTrackJSON) > 0 && json.Unmarshal(videoTrackJSON, &videoTrack) == nil {
+			c.VideoBitDepth = models.NormalizeVideoBitDepth(videoTrack.BitDepth, videoTrack.PixelFormat, videoTrack.Profile)
 		}
 		if len(subtitleTracksJSON) > 0 {
 			if err := json.Unmarshal(subtitleTracksJSON, &c.SubtitleTracks); err != nil {
@@ -413,6 +485,8 @@ func chaptersHash(raw []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// CountEnabledLibraries counts the enabled libraries with marker detection on
+// whose kind local analysis covers: series, mixed, and movies.
 func (r *Repository) CountEnabledLibraries(ctx context.Context) (int, error) {
 	var count int
 	err := r.pool.QueryRow(ctx, `
@@ -420,139 +494,432 @@ func (r *Repository) CountEnabledLibraries(ctx context.Context) (int, error) {
 		FROM media_folders
 		WHERE enabled = true
 		  AND intro_detection_enabled = true
-		  AND type IN ('series', 'mixed')`).Scan(&count)
+		  AND type IN ('series', 'mixed', 'movies')`).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("counting intro-enabled libraries: %w", err)
 	}
 	return count, nil
 }
 
-func (r *Repository) PatchIntroMarker(ctx context.Context, patch IntroMarkerPatch) (bool, error) {
+// PatchMarker writes a detected marker of patch.Kind through the scanner's
+// marker write policy, which keeps higher-priority markers in place.
+func (r *Repository) PatchMarker(ctx context.Context, patch MarkerPatch) (bool, error) {
+	update, err := patch.markerUpdate()
+	if err != nil {
+		return false, err
+	}
+	return scanner.NewFileRepository(r.pool).UpsertMarkers(ctx, patch.FileID, update)
+}
+
+// WithdrawMarker clears a file's marker of withdrawal.Kind while it still
+// holds the scanner result withdrawal.Algorithm wrote, and reports whether it
+// did. A marker another source or detector has written since stays.
+func (r *Repository) WithdrawMarker(ctx context.Context, withdrawal MarkerWithdrawal) (bool, error) {
+	if withdrawal.Kind != kindIntro && withdrawal.Kind != kindCredits {
+		return false, fmt.Errorf("marker withdrawal for file %d has no marker kind", withdrawal.FileID)
+	}
+	return scanner.NewFileRepository(r.pool).WithdrawScannerMarker(ctx, withdrawal.FileID, withdrawal.Kind.String(), withdrawal.Algorithm, withdrawal.ExpectedFile)
+}
+
+func (patch MarkerPatch) markerUpdate() (scanner.MarkerUpdate, error) {
+	if patch.Kind != kindIntro && patch.Kind != kindCredits {
+		return scanner.MarkerUpdate{}, fmt.Errorf("marker patch for file %d has no marker kind", patch.FileID)
+	}
 	if patch.Source == "" {
-		return false, fmt.Errorf("intro marker source is required")
+		return scanner.MarkerUpdate{}, fmt.Errorf("%s marker source is required", patch.Kind)
 	}
 	if patch.Algorithm == "" {
-		return false, fmt.Errorf("intro marker algorithm is required")
+		return scanner.MarkerUpdate{}, fmt.Errorf("%s marker algorithm is required", patch.Kind)
 	}
 	if patch.Start < 0 || patch.End <= patch.Start {
-		return false, fmt.Errorf("invalid intro marker range %.3f-%.3f", patch.Start, patch.End)
+		return scanner.MarkerUpdate{}, fmt.Errorf("invalid %s marker range %.3f-%.3f", patch.Kind, patch.Start, patch.End)
 	}
-	return scanner.NewFileRepository(r.pool).UpsertMarkers(ctx, patch.FileID, scanner.MarkerUpdate{
-		IntroStart:        &patch.Start,
-		IntroEnd:          &patch.End,
+	update := scanner.MarkerUpdate{
 		MarkersSource:     patch.Source,
 		MarkersConfidence: &patch.Confidence,
 		MarkersAlgorithm:  patch.Algorithm,
 		DetectedAt:        patch.DetectedAt,
 		ExpectedFile:      patch.ExpectedFile,
-	})
+	}
+	if patch.Kind == kindCredits {
+		update.CreditsStart, update.CreditsEnd = &patch.Start, &patch.End
+	} else {
+		update.IntroStart, update.IntroEnd = &patch.Start, &patch.End
+	}
+	return update, nil
 }
 
-func (r *Repository) LoadFingerprint(ctx context.Context, candidate Candidate, cfg Config) (*Fingerprint, error) {
-	cfg = cfg.normalized()
-	var fp Fingerprint
-	var points []byte
-	err := r.pool.QueryRow(ctx, `
-		SELECT media_file_id,
-		       file_hash,
-		       COALESCE(file_size, 0),
-		       duration_seconds,
-		       window_start_seconds,
-		       window_end_seconds,
-		       algorithm_version,
-		       config_hash,
-		       fingerprint_format,
-		       sample_duration_seconds,
-		       points
-		FROM media_intro_fingerprints
+// ErrArtifactKindConflict reports an artifact whose primary key is already
+// held by another kind's row, which means two kinds derived the same
+// config_hash. ArtifactConfigHash prevents that.
+var ErrArtifactKindConflict = errors.New("media analysis artifact key belongs to another kind")
+
+const artifactSelect = `
+	SELECT media_file_id,
+	       kind,
+	       algorithm_version,
+	       config_hash,
+	       file_hash,
+	       COALESCE(file_size, 0),
+	       duration_seconds,
+	       window_start_seconds,
+	       window_end_seconds,
+	       status,
+	       COALESCE(detail, ''),
+	       fingerprint_format,
+	       sample_duration_seconds,
+	       point_count,
+	       points,
+	       failure_count,
+	       COALESCE(last_error, ''),
+	       retry_after,
+	       recorded_by,
+	       updated_at
+	FROM media_intro_fingerprints`
+
+func scanArtifact(row pgx.Row) (Artifact, error) {
+	var a Artifact
+	err := row.Scan(
+		&a.MediaFileID,
+		&a.Kind,
+		&a.AlgorithmVersion,
+		&a.ConfigHash,
+		&a.FileHash,
+		&a.FileSize,
+		&a.DurationSeconds,
+		&a.WindowStartSeconds,
+		&a.WindowEndSeconds,
+		&a.Status,
+		&a.Detail,
+		&a.PayloadFormat,
+		&a.SampleDurationSeconds,
+		&a.ItemCount,
+		&a.Payload,
+		&a.FailureCount,
+		&a.LastError,
+		&a.RetryAfter,
+		&a.RecordedBy,
+		&a.UpdatedAt,
+	)
+	return a, err
+}
+
+// LoadArtifact returns a file's stored artifact for key whatever its status,
+// or nil when there is none. Artifact.State says whether it applies.
+func (r *Repository) LoadArtifact(ctx context.Context, fileID int, key ArtifactKey) (*Artifact, error) {
+	return loadArtifact(ctx, r.pool, fileID, key, false)
+}
+
+// artifactDB is a pool or a transaction.
+type artifactDB interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+func loadArtifact(ctx context.Context, q artifactDB, fileID int, key ArtifactKey, forUpdate bool) (*Artifact, error) {
+	query := artifactSelect + `
 		WHERE media_file_id = $1
 		  AND algorithm_version = $2
-		  AND config_hash = $3`,
-		candidate.FileID,
-		AlgorithmVersion,
-		cfg.ConfigHash(),
-	).Scan(
-		&fp.MediaFileID,
-		&fp.FileHash,
-		&fp.FileSize,
-		&fp.DurationSeconds,
-		&fp.WindowStartSeconds,
-		&fp.WindowEndSeconds,
-		&fp.AlgorithmVersion,
-		&fp.ConfigHash,
-		&fp.FingerprintFormat,
-		&fp.SampleDurationSeconds,
-		&points,
-	)
+		  AND config_hash = $3
+		  AND kind = $4`
+	if forUpdate {
+		query += `
+		FOR UPDATE`
+	}
+	a, err := scanArtifact(q.QueryRow(ctx, query, fileID, key.AlgorithmVersion, key.ConfigHash, key.Kind))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("loading intro fingerprint: %w", err)
+		return nil, fmt.Errorf("loading %s artifact for file %d: %w", key.Kind, fileID, err)
 	}
-	fp.Points = decodeRawPoints(points)
-	if fp.FileHash != candidate.FileHash ||
-		fp.FileSize != candidate.FileSize ||
-		fp.DurationSeconds != candidate.DurationSeconds ||
-		fp.WindowStartSeconds != 0 ||
-		fp.WindowEndSeconds != analysisWindowEnd(candidate.DurationSeconds, cfg) ||
-		fp.FingerprintFormat != ChromaprintFormat ||
-		len(fp.Points) == 0 {
-		return nil, nil
-	}
-	return &fp, nil
+	return &a, nil
 }
 
-func (r *Repository) UpsertFingerprint(ctx context.Context, fp Fingerprint) error {
-	_, err := r.pool.Exec(ctx, `
-		INSERT INTO media_intro_fingerprints (
-		    media_file_id,
-		    file_hash,
-		    file_size,
-		    duration_seconds,
-		    window_start_seconds,
-		    window_end_seconds,
-		    algorithm_version,
-		    config_hash,
-		    fingerprint_format,
-		    sample_duration_seconds,
-		    point_count,
-		    points
-		) VALUES (
-		    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
-		)
-		ON CONFLICT (media_file_id, algorithm_version, config_hash) DO UPDATE SET
-		    file_hash = EXCLUDED.file_hash,
-		    file_size = EXCLUDED.file_size,
-		    duration_seconds = EXCLUDED.duration_seconds,
-		    window_start_seconds = EXCLUDED.window_start_seconds,
-		    window_end_seconds = EXCLUDED.window_end_seconds,
-		    fingerprint_format = EXCLUDED.fingerprint_format,
-		    sample_duration_seconds = EXCLUDED.sample_duration_seconds,
-		    point_count = EXCLUDED.point_count,
-		    points = EXCLUDED.points,
-		    updated_at = NOW()`,
-		fp.MediaFileID,
-		fp.FileHash,
-		fp.FileSize,
-		fp.DurationSeconds,
-		fp.WindowStartSeconds,
-		fp.WindowEndSeconds,
-		fp.AlgorithmVersion,
-		fp.ConfigHash,
-		fp.FingerprintFormat,
-		fp.SampleDurationSeconds,
-		len(fp.Points),
-		encodeRawPoints(fp.Points),
-	)
+// LoadArtifacts returns the stored artifacts for key of the given files,
+// whatever their status, keyed by file ID. Files without one are absent.
+func (r *Repository) LoadArtifacts(ctx context.Context, fileIDs []int, key ArtifactKey) (map[int]Artifact, error) {
+	artifacts := make(map[int]Artifact, len(fileIDs))
+	if len(fileIDs) == 0 {
+		return artifacts, nil
+	}
+	rows, err := r.pool.Query(ctx, artifactSelect+`
+		WHERE media_file_id = ANY($1::bigint[])
+		  AND algorithm_version = $2
+		  AND config_hash = $3
+		  AND kind = $4`, fileIDs, key.AlgorithmVersion, key.ConfigHash, key.Kind)
 	if err != nil {
-		return fmt.Errorf("upserting intro fingerprint: %w", err)
+		return nil, fmt.Errorf("loading %s artifacts: %w", key.Kind, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		a, err := scanArtifact(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scanning %s artifact: %w", key.Kind, err)
+		}
+		artifacts[a.MediaFileID] = a
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating %s artifacts: %w", key.Kind, err)
+	}
+	return artifacts, nil
+}
+
+// artifactInsert writes every column of a row. The statements built on it
+// conflict on the primary key older binaries upsert on.
+const artifactInsert = `
+	INSERT INTO media_intro_fingerprints (
+	    media_file_id,
+	    kind,
+	    algorithm_version,
+	    config_hash,
+	    file_hash,
+	    file_size,
+	    duration_seconds,
+	    window_start_seconds,
+	    window_end_seconds,
+	    status,
+	    detail,
+	    fingerprint_format,
+	    sample_duration_seconds,
+	    point_count,
+	    points,
+	    failure_count,
+	    last_error,
+	    retry_after,
+	    recorded_by
+	) VALUES (
+	    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULLIF($11, ''), $12, $13, $14, $15, $16, NULLIF($17, ''), $18, $19
+	)`
+
+// artifactUpsert replaces any row for the key, but never another kind's.
+const artifactUpsert = artifactInsert + `
+	ON CONFLICT (media_file_id, algorithm_version, config_hash) DO UPDATE SET
+	    file_hash = EXCLUDED.file_hash,
+	    file_size = EXCLUDED.file_size,
+	    duration_seconds = EXCLUDED.duration_seconds,
+	    window_start_seconds = EXCLUDED.window_start_seconds,
+	    window_end_seconds = EXCLUDED.window_end_seconds,
+	    status = EXCLUDED.status,
+	    detail = EXCLUDED.detail,
+	    fingerprint_format = EXCLUDED.fingerprint_format,
+	    sample_duration_seconds = EXCLUDED.sample_duration_seconds,
+	    point_count = EXCLUDED.point_count,
+	    points = EXCLUDED.points,
+	    failure_count = EXCLUDED.failure_count,
+	    last_error = EXCLUDED.last_error,
+	    retry_after = EXCLUDED.retry_after,
+	    recorded_by = EXCLUDED.recorded_by,
+	    updated_at = NOW()
+	WHERE media_intro_fingerprints.kind = EXCLUDED.kind`
+
+// artifactInsertNew writes a row only when the key has none.
+const artifactInsertNew = artifactInsert + `
+	ON CONFLICT (media_file_id, algorithm_version, config_hash) DO NOTHING`
+
+func execArtifactUpsert(ctx context.Context, q artifactDB, a Artifact) error {
+	written, err := execArtifactWrite(ctx, q, artifactUpsert, a)
+	if err != nil {
+		return err
+	}
+	if !written {
+		return fmt.Errorf("upserting %s artifact for file %d: %w", a.Kind, a.MediaFileID, ErrArtifactKindConflict)
 	}
 	return nil
 }
 
-func (r *Repository) LoadSeasonState(ctx context.Context, state SeasonState, cfg Config) (*SeasonState, error) {
+// execArtifactWrite runs one of the artifactInsert statements for a and
+// reports whether it wrote a row.
+func execArtifactWrite(ctx context.Context, q artifactDB, query string, a Artifact) (bool, error) {
+	payload := a.Payload
+	if payload == nil {
+		payload = []byte{}
+	}
+	tag, err := q.Exec(ctx, query,
+		a.MediaFileID,
+		a.Kind,
+		a.AlgorithmVersion,
+		a.ConfigHash,
+		a.FileHash,
+		a.FileSize,
+		a.DurationSeconds,
+		a.WindowStartSeconds,
+		a.WindowEndSeconds,
+		a.Status,
+		a.Detail,
+		a.PayloadFormat,
+		a.SampleDurationSeconds,
+		a.ItemCount,
+		payload,
+		a.FailureCount,
+		a.LastError,
+		a.RetryAfter,
+		a.RecordedBy,
+	)
+	if err != nil {
+		return false, fmt.Errorf("writing %s artifact for file %d: %w", a.Kind, a.MediaFileID, err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+func validateArtifactKey(key ArtifactKey) error {
+	if strings.TrimSpace(key.Kind) == "" || strings.TrimSpace(key.ConfigHash) == "" {
+		return fmt.Errorf("media analysis artifact needs a kind and a config hash")
+	}
+	return nil
+}
+
+// UpsertArtifact stores a complete or unusable artifact, replacing any
+// earlier row for its key and clearing recorded failures. An unusable
+// artifact carries no payload, so binaries that predate artifact statuses
+// read it as a cache miss.
+func (r *Repository) UpsertArtifact(ctx context.Context, a Artifact) error {
+	if err := validateArtifactKey(a.ArtifactKey); err != nil {
+		return err
+	}
+	switch a.Status {
+	case ArtifactComplete:
+	case ArtifactUnusable:
+		if len(a.Payload) > 0 || a.ItemCount != 0 {
+			return fmt.Errorf("unusable %s artifact for file %d carries a payload", a.Kind, a.MediaFileID)
+		}
+	default:
+		return fmt.Errorf("upserting %s artifact for file %d: status %q is not complete or unusable", a.Kind, a.MediaFileID, a.Status)
+	}
+	a.FailureCount = 0
+	a.LastError = ""
+	a.RetryAfter = nil
+	return execArtifactUpsert(ctx, r.pool, a)
+}
+
+// RecordArtifactFailure records a failed analysis with a retry time that
+// backs off over the recording server's consecutive failures. It leaves a
+// complete or unusable row for the same file identity in place: that result
+// still stands, and was most likely written by another server meanwhile.
+// A failed row carries no payload, so binaries that predate artifact statuses
+// read it as a cache miss.
+func (r *Repository) RecordArtifactFailure(ctx context.Context, failure ArtifactFailure) error {
+	if err := validateArtifactKey(failure.ArtifactKey); err != nil {
+		return err
+	}
+	if strings.TrimSpace(failure.RecordedBy) == "" {
+		return errors.New("intromarkers: artifact failure requires the recording server")
+	}
+	if failure.At.IsZero() {
+		failure.At = time.Now().UTC()
+	}
+	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		// Locking the row serializes this with other writers only when it
+		// exists. Without one, the failure is inserted only if the key is
+		// still free; a row another server wrote meanwhile is locked and
+		// judged on the second pass.
+		for range 2 {
+			previous, err := loadArtifact(ctx, tx, failure.MediaFileID, failure.ArtifactKey, true)
+			if err != nil {
+				return err
+			}
+			if previous != nil && previous.ArtifactIdentity == failure.ArtifactIdentity &&
+				(previous.Status == ArtifactComplete || previous.Status == ArtifactUnusable) {
+				return nil
+			}
+			count, retryAfter := nextArtifactFailure(previous, failure)
+			row := Artifact{
+				MediaFileID:      failure.MediaFileID,
+				ArtifactKey:      failure.ArtifactKey,
+				ArtifactIdentity: failure.ArtifactIdentity,
+				Status:           ArtifactFailed,
+				FailureCount:     count,
+				LastError:        failure.Error,
+				RetryAfter:       &retryAfter,
+				RecordedBy:       failure.RecordedBy,
+			}
+			if previous != nil {
+				return execArtifactUpsert(ctx, tx, row)
+			}
+			inserted, err := execArtifactWrite(ctx, tx, artifactInsertNew, row)
+			if err != nil || inserted {
+				return err
+			}
+		}
+		// The key stayed taken by a row this kind cannot see: another kind's.
+		return fmt.Errorf("recording %s artifact failure for file %d: %w", failure.Kind, failure.MediaFileID, ErrArtifactKindConflict)
+	})
+}
+
+// introFingerprintKey and introFingerprintIdentity locate a candidate's intro
+// fingerprint: the opening window of the file, keyed by Config.ConfigHash.
+func introFingerprintKey(cfg Config) ArtifactKey {
+	return ArtifactKey{
+		Kind:             ArtifactKindIntroFingerprint,
+		AlgorithmVersion: AlgorithmVersion,
+		ConfigHash:       cfg.ConfigHash(),
+	}
+}
+
+func introFingerprintIdentity(candidate Candidate, cfg Config) ArtifactIdentity {
+	return headWindow(candidate, cfg).identity(candidate)
+}
+
+// LoadFingerprint returns the candidate's cached intro fingerprint, or nil
+// when none is stored for its current file and analysis window.
+func (r *Repository) LoadFingerprint(ctx context.Context, candidate Candidate, cfg Config) (*Fingerprint, error) {
 	cfg = cfg.normalized()
+	artifact, err := r.LoadArtifact(ctx, candidate.FileID, introFingerprintKey(cfg))
+	if err != nil {
+		return nil, err
+	}
+	if artifact.State(introFingerprintIdentity(candidate, cfg), "", time.Time{}) != ArtifactReady ||
+		artifact.PayloadFormat != ChromaprintFormat {
+		return nil, nil
+	}
+	points := mediasample.DecodeRawFingerprint(artifact.Payload)
+	if len(points) == 0 {
+		return nil, nil
+	}
+	return &Fingerprint{
+		MediaFileID:           artifact.MediaFileID,
+		FileHash:              artifact.FileHash,
+		FileSize:              artifact.FileSize,
+		DurationSeconds:       artifact.DurationSeconds,
+		WindowStartSeconds:    artifact.WindowStartSeconds,
+		WindowEndSeconds:      artifact.WindowEndSeconds,
+		AlgorithmVersion:      artifact.AlgorithmVersion,
+		ConfigHash:            artifact.ConfigHash,
+		FingerprintFormat:     artifact.PayloadFormat,
+		SampleDurationSeconds: artifact.SampleDurationSeconds,
+		Points:                points,
+	}, nil
+}
+
+// UpsertFingerprint stores a computed intro fingerprint as a complete
+// artifact.
+func (r *Repository) UpsertFingerprint(ctx context.Context, fp Fingerprint) error {
+	return r.UpsertArtifact(ctx, Artifact{
+		MediaFileID: fp.MediaFileID,
+		ArtifactKey: ArtifactKey{
+			Kind:             ArtifactKindIntroFingerprint,
+			AlgorithmVersion: fp.AlgorithmVersion,
+			ConfigHash:       fp.ConfigHash,
+		},
+		ArtifactIdentity: ArtifactIdentity{
+			FileHash:           fp.FileHash,
+			FileSize:           fp.FileSize,
+			DurationSeconds:    fp.DurationSeconds,
+			WindowStartSeconds: fp.WindowStartSeconds,
+			WindowEndSeconds:   fp.WindowEndSeconds,
+		},
+		Status:                ArtifactComplete,
+		PayloadFormat:         fp.FingerprintFormat,
+		SampleDurationSeconds: fp.SampleDurationSeconds,
+		ItemCount:             len(fp.Points),
+		Payload:               mediasample.EncodeRawFingerprint(fp.Points),
+	})
+}
+
+// LoadSeasonState returns a season group's stored analysis under
+// analysisHash, which keys the state of one marker kind's analysis settings
+// (Config.AnalysisConfigHash for intros), or nil when there is none.
+func (r *Repository) LoadSeasonState(ctx context.Context, state SeasonState, analysisHash string) (*SeasonState, error) {
 	var existing SeasonState
 	err := r.pool.QueryRow(ctx, `
 		SELECT season_id,
@@ -575,7 +942,7 @@ func (r *Repository) LoadSeasonState(ctx context.Context, state SeasonState, cfg
 		state.MediaFolderID,
 		state.AnalysisGroupKey,
 		AlgorithmVersion,
-		cfg.AnalysisConfigHash(),
+		analysisHash,
 	).Scan(
 		&existing.SeasonID,
 		&existing.MediaFolderID,
@@ -597,8 +964,9 @@ func (r *Repository) LoadSeasonState(ctx context.Context, state SeasonState, cfg
 	return &existing, nil
 }
 
-func (r *Repository) UpsertSeasonState(ctx context.Context, state SeasonState, cfg Config) error {
-	cfg = cfg.normalized()
+// UpsertSeasonState stores a season group's analysis under analysisHash; see
+// LoadSeasonState.
+func (r *Repository) UpsertSeasonState(ctx context.Context, state SeasonState, analysisHash string) error {
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO intro_season_analysis_state (
 		    season_id,
@@ -627,7 +995,7 @@ func (r *Repository) UpsertSeasonState(ctx context.Context, state SeasonState, c
 		state.MediaFolderID,
 		state.AnalysisGroupKey,
 		AlgorithmVersion,
-		cfg.AnalysisConfigHash(),
+		analysisHash,
 		state.InputSignature,
 		state.EpisodeCount,
 		state.FileCount,

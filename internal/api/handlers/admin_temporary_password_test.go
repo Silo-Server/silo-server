@@ -19,6 +19,19 @@ type mutatingUserRepo struct {
 	applied bool
 }
 
+// GetByID knows the stored account and the Owner, so the Owner rules can
+// load the caller.
+func (r *mutatingUserRepo) GetByID(_ context.Context, id int) (*models.User, error) {
+	if id == r.current.ID {
+		return &r.current, nil
+	}
+	if id == testOwnerID {
+		owner := ownerAccount()
+		return &owner, nil
+	}
+	return nil, auth.ErrNotFound
+}
+
 func (r *mutatingUserRepo) GetAdminSnapshot(context.Context, int) (auth.AdminUserSnapshot, error) {
 	return auth.AdminUserSnapshot{User: &r.current}, nil
 }

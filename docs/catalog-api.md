@@ -98,6 +98,12 @@ Check it before saving a Watchlist or Favorites preference. The
 all, so it cannot be used to detect the personal-list kinds. The document supports
 `If-None-Match` and returns `304` when the caller's copy is current.
 
+The document's `import_sources` lists the sources a new imported collection can come
+from (`mdblist`, `tmdb`, `tmdb_list`); it is empty when `imports` is false. Check for
+`tmdb_list` before calling `importTMDBListCollection` (`POST /api/v2/collections/import/tmdb-list`),
+which follows a public TMDB list. The administrator capability document
+(`getAdminCollectionCapabilities`) carries the same field for `importAdminTMDBList`.
+
 ## Library-scoped version lists
 
 `library_id` on `getCatalogItem`, `listCatalogItemVersions`, `listCatalogItemEpisodes`,

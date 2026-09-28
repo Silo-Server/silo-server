@@ -45,13 +45,14 @@ func CanWriteMarkerUpdate(existing, incoming SegmentPayload) bool {
 		if existing.Confidence == nil || existing.Algorithm == "" {
 			return true
 		}
-		// Chromaprint results are scored against the whole season on every
-		// analysis, so the latest result of the same detector version
-		// replaces the stored one even at lower confidence: a season that no
-		// longer agrees must not keep an older, higher score. A plain and a
-		// subtitle-refined result of one version count as the same detector,
-		// so a file that loses its subtitle also loses the refined score.
-		if sameChromaprintVersion(existing.Algorithm, incoming.Algorithm) {
+		// Chromaprint intro and credits audio results are scored against the
+		// whole season on every analysis, so the latest result of the same
+		// detector version replaces the stored one even at lower confidence:
+		// a season that no longer agrees must not keep an older, higher
+		// score. A plain and a refined result of one version count as the
+		// same detector, so a file that loses its subtitle or video evidence
+		// also loses the refined score.
+		if sameSeasonScoredVersion(existing.Algorithm, incoming.Algorithm) {
 			return incoming.Algorithm != existing.Algorithm ||
 				confidenceGreater(incoming.Confidence, existing.Confidence) ||
 				confidenceGreater(existing.Confidence, incoming.Confidence) ||
@@ -140,22 +141,43 @@ func markerRanges(payload SegmentPayload) []models.MarkerSegment {
 	return ranges
 }
 
-// sameChromaprintVersion reports whether two scanner algorithms are the plain
-// or subtitle-refined result of one Chromaprint version, whose confidence is
-// recomputed from the whole season each time it is analyzed.
-func sameChromaprintVersion(a, b string) bool {
-	const family, refined = "chromaprint:", "dialogue:" //nolint:misspell // Persisted algorithm identifier.
-	version := func(algorithm string) (string, bool) {
-		rest, ok := strings.CutPrefix(algorithm, family)
-		if !ok {
-			return "", false
-		}
-		return strings.TrimPrefix(rest, refined), true
-	}
-	va, okA := version(a)
-	vb, okB := version(b)
-	return okA && okB && va == vb
+// seasonScoredFamilies are the scanner detectors whose results are rated
+// against a whole season, each with the infix its refined results carry:
+// Chromaprint intros refined by subtitles, and credits audio refined by video.
+var seasonScoredFamilies = []struct{ family, refined string }{
+	{"chromaprint:", "dialogue:"}, //nolint:misspell // Persisted algorithm identifier.
+	{"credits-audio:", "video:"},
 }
+
+// sameSeasonScoredVersion reports whether two scanner algorithms are the
+// plain or refined result of one version of a season-scored detector, whose
+// confidence is recomputed from the whole season each time it is analyzed.
+func sameSeasonScoredVersion(a, b string) bool {
+	for _, f := range seasonScoredFamilies {
+		version := func(algorithm string) (string, bool) {
+			rest, ok := strings.CutPrefix(algorithm, f.family)
+			if !ok {
+				return "", false
+			}
+			return strings.TrimPrefix(rest, f.refined), true
+		}
+		va, okA := version(a)
+		vb, okB := version(b)
+		if okA || okB {
+			return okA && okB && va == vb
+		}
+	}
+	return false
+}
+
+// Credits detector identifiers, as local analysis persists them.
+const (
+	creditsChapterAlgorithm     = "credits-chapter:v1"
+	creditsVersionCopyAlgorithm = "credits-version-copy:v1"
+	creditsAudioVideoAlgorithm  = "credits-audio:video:v1"
+	creditsAudioAlgorithm       = "credits-audio:v1"
+	creditsVideoAlgorithm       = "credits-video:v1"
+)
 
 // scannerAlgorithmPriority ranks local detector outputs. A superseded version
 // ranks below its replacement so re-analysis can overwrite what it wrote.
@@ -185,6 +207,18 @@ func scannerAlgorithmPriority(algorithm string) int {
 		return 15
 	case "chromaprint:v1":
 		return 10
+	// Credits detectors rank like their intro counterparts: chapters, then
+	// version copies, then season-scored audio, then video alone.
+	case creditsChapterAlgorithm:
+		return 30
+	case creditsVersionCopyAlgorithm:
+		return 24
+	case creditsAudioVideoAlgorithm:
+		return 22
+	case creditsAudioAlgorithm:
+		return 21
+	case creditsVideoAlgorithm:
+		return 12
 	default:
 		return 0
 	}
@@ -317,40 +351,22 @@ func ApplyResult(file *models.MediaFile, result Result) *models.MediaFile {
 		return nil
 	}
 	next := *file
-	byKind := make(map[string][]models.MarkerSegment, 4)
-	for _, segment := range models.EffectiveMarkerSegments(file) {
-		byKind[segment.Kind] = append(byKind[segment.Kind], segment)
-	}
+	byKind := segmentsByKind(file)
 	payload := BuildUpdatePayload(result)
-	now := time.Now().UTC()
-	targets := []struct {
-		kind                        string
-		incoming                    SegmentPayload
-		start, end                  **float64
-		source, provider, algorithm **string
-		confidence                  **float64
-		detectedAt                  **time.Time
-	}{
-		{models.MarkerSegmentIntro, payload.Intro, &next.IntroStart, &next.IntroEnd, &next.IntroMarkersSource, &next.IntroMarkersProvider, &next.IntroMarkersAlgorithm, &next.IntroMarkersConfidence, &next.IntroMarkersDetectedAt},
-		{models.MarkerSegmentCredits, payload.Credits, &next.CreditsStart, &next.CreditsEnd, &next.CreditsMarkersSource, &next.CreditsMarkersProvider, &next.CreditsMarkersAlgorithm, &next.CreditsMarkersConfidence, &next.CreditsMarkersDetectedAt},
-		{models.MarkerSegmentRecap, payload.Recap, &next.RecapStart, &next.RecapEnd, &next.RecapMarkersSource, &next.RecapMarkersProvider, &next.RecapMarkersAlgorithm, &next.RecapMarkersConfidence, &next.RecapMarkersDetectedAt},
-		{models.MarkerSegmentPreview, payload.Preview, &next.PreviewStart, &next.PreviewEnd, &next.PreviewMarkersSource, &next.PreviewMarkersProvider, &next.PreviewMarkersAlgorithm, &next.PreviewMarkersConfidence, &next.PreviewMarkersDetectedAt},
+	incomingByKind := map[string]SegmentPayload{
+		models.MarkerSegmentIntro:   payload.Intro,
+		models.MarkerSegmentCredits: payload.Credits,
+		models.MarkerSegmentRecap:   payload.Recap,
+		models.MarkerSegmentPreview: payload.Preview,
 	}
-	for _, target := range targets {
-		existing := SegmentPayload{Start: *target.start, End: *target.end, Ranges: byKind[target.kind], Provider: *target.provider, Confidence: *target.confidence}
-		if *target.source != nil {
-			existing.Source = **target.source
-		} else if existing.Present() && file.MarkersSource != nil {
-			existing.Source = *file.MarkersSource
-		}
-		if *target.algorithm != nil {
-			existing.Algorithm = **target.algorithm
-		}
-		incoming := target.incoming
+	now := time.Now().UTC()
+	for _, target := range fileSegmentFields(&next) {
+		existing := target.payload(file, byKind[target.kind])
+		incoming := incomingByKind[target.kind]
 		if !incoming.Present() {
 			if existing.Source != models.MarkerSourceManual && existing.Provider != nil && slices.Contains(result.RefreshedProviders, *existing.Provider) {
 				delete(byKind, target.kind)
-				*target.start, *target.end, *target.source, *target.provider, *target.algorithm, *target.confidence, *target.detectedAt = nil, nil, nil, nil, nil, nil, nil
+				target.clear()
 			}
 			continue
 		}
@@ -368,28 +384,8 @@ func ApplyResult(file *models.MediaFile, result Result) *models.MediaFile {
 		*target.source, *target.provider, *target.algorithm = &incoming.Source, incoming.Provider, &incoming.Algorithm
 		*target.confidence, *target.detectedAt = incoming.Confidence, &now
 	}
-	next.MarkerSegments = make([]models.MarkerSegment, 0)
-	for _, kind := range []string{models.MarkerSegmentIntro, models.MarkerSegmentCredits, models.MarkerSegmentRecap, models.MarkerSegmentPreview} {
-		next.MarkerSegments = append(next.MarkerSegments, byKind[kind]...)
-	}
-	next.MarkerSegments = models.EffectiveMarkerSegments(&next)
-	next.MarkersSource, next.MarkersConfidence = nil, nil
-	for _, target := range targets {
-		if len(byKind[target.kind]) == 0 {
-			continue
-		}
-		source, confidence := *target.source, *target.confidence
-		if source == nil {
-			source, confidence = file.MarkersSource, file.MarkersConfidence
-		}
-		if source == nil {
-			continue
-		}
-		if next.MarkersSource == nil || models.MarkerSourcePriority(*source) > models.MarkerSourcePriority(*next.MarkersSource) ||
-			(models.MarkerSourcePriority(*source) == models.MarkerSourcePriority(*next.MarkersSource) && confidenceGreater(confidence, next.MarkersConfidence)) {
-			next.MarkersSource, next.MarkersConfidence = source, confidence
-		}
-	}
+	setSegments(&next, byKind)
+	summarizeSources(&next, file.MarkersSource, file.MarkersConfidence)
 	return &next
 }
 

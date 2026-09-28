@@ -20,6 +20,7 @@ import {
   deleteAdminUser,
   impersonateAdminUser,
   issueAdminPasswordReset,
+  transferAdminUserOwnership,
   getAdminUserCapabilities,
   type AdminUserEditor,
 } from "@/api/v2/adminUsers";
@@ -560,6 +561,25 @@ export function useIssuePasswordReset() {
     mutationFn: ({ id, delivery }: { id: number; delivery: "email" | "link" }) =>
       issueAdminPasswordReset(id, delivery),
     gcTime: 0,
+  });
+}
+
+/** Makes another enabled admin the server Owner, then refreshes the account list
+ * so the Owner badge and the actions it gates follow. */
+export function useTransferOwnership() {
+  const client = useQueryClient();
+  return useMutation({
+    retry: false,
+    mutationFn: ({
+      id,
+      profileContext,
+    }: {
+      id: number;
+      profileContext: ReturnType<typeof captureAdminUserAuthority>;
+    }) => transferAdminUserOwnership(id, profileContext),
+    onSuccess: (_data, { profileContext }) => {
+      void client.invalidateQueries({ queryKey: adminUsersKey(adminUserScope(profileContext)) });
+    },
   });
 }
 

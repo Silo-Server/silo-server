@@ -4,6 +4,7 @@ import { captureProfileRequestContext } from "@/api/client";
 import { v2, V2ProblemError } from "@/api/v2/request";
 import { favoriteKeys, watchlistKeys, watchProviderKeys } from "./keys";
 import { invalidateAllRatingSurfaceQueries } from "./ratingsSurfaceRefresh";
+import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 import { toast } from "sonner";
 import { storage } from "@/utils/storage";
 import type { PluginConfigSchema } from "@/api/types";
@@ -39,6 +40,7 @@ export interface WatchProviderCapabilities {
   scrobble_playback: boolean;
   import_ratings: boolean;
   export_ratings: boolean;
+  sync_dropped: boolean;
 }
 
 export interface WatchProviderConnection {
@@ -63,6 +65,7 @@ export interface WatchProviderConnection {
   scrobble_enabled: boolean;
   import_ratings_enabled: boolean;
   export_ratings_enabled: boolean;
+  sync_dropped_enabled: boolean;
   credentials_configured: boolean;
   connection_config_schema?: PluginConfigSchema[];
   last_inbound_sync_at?: string;
@@ -138,6 +141,7 @@ export type UpdateWatchProviderConnection = Partial<
     | "scrobble_enabled"
     | "import_ratings_enabled"
     | "export_ratings_enabled"
+    | "sync_dropped_enabled"
   >
 >;
 
@@ -258,8 +262,9 @@ export function useWatchProviderSyncRuns(provider: string, enabled = true) {
       return latest && isActiveSyncRun(latest) ? 4_000 : false;
     },
   });
-  // A sync imports favorites, watchlist entries and ratings while it runs, so
-  // the surfaces showing them refresh once the run this page watched finishes.
+  // A sync imports favorites, watchlist entries, ratings and dropped shows
+  // while it runs, so the surfaces showing them refresh once the run this page
+  // watched finishes.
   const latest = query.data?.runs?.[0];
   const observed = useRef<WatchProviderSyncRun | undefined>(undefined);
   useEffect(() => {
@@ -295,6 +300,7 @@ async function invalidateSyncedSurfaces(queryClient: QueryClient) {
     queryClient.invalidateQueries({ queryKey: watchlistKeys.list() }),
     invalidateAllRatingSurfaceQueries(queryClient),
   ]);
+  bumpHomeRefreshSignal(queryClient);
 }
 
 export function useStartWatchProviderDeviceAuth(provider: string) {

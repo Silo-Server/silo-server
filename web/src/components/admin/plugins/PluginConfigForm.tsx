@@ -30,6 +30,11 @@ type Props = {
   ) => Promise<ConnectionCheckResponse>;
   isSaving?: boolean;
   isTesting?: boolean;
+  /**
+   * Leave out the form's own title, description, and border, for a page panel
+   * that already shows them.
+   */
+  bare?: boolean;
 };
 
 function defaultValueForField(field: PluginAdminFormField): string | boolean {
@@ -75,6 +80,7 @@ export function PluginConfigForm({
   onTest,
   isSaving = false,
   isTesting = false,
+  bare = false,
 }: Props) {
   const inferredDescriptor = useMemo(() => adminFormForConfigSchema(schema), [schema]);
   const fields = inferredDescriptor?.fields ?? EMPTY_FIELDS;
@@ -148,13 +154,18 @@ export function PluginConfigForm({
   }
 
   return (
-    <fieldset disabled={isSaving || isTesting} className="space-y-3 rounded-md border p-3">
-      <div className="space-y-1">
-        <Label>{schema.title || schema.key}</Label>
-        {schema.description ? (
-          <p className="text-muted-foreground text-xs">{schema.description}</p>
-        ) : null}
-      </div>
+    <fieldset
+      disabled={isSaving || isTesting}
+      className={bare ? "space-y-3" : "space-y-3 rounded-md border p-3"}
+    >
+      {bare ? null : (
+        <div className="space-y-1">
+          <Label>{schema.title || schema.key}</Label>
+          {schema.description ? (
+            <p className="text-muted-foreground text-xs">{schema.description}</p>
+          ) : null}
+        </div>
+      )}
 
       <SchemaForm
         descriptor={descriptor}

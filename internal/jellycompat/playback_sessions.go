@@ -117,7 +117,11 @@ type PlaybackMediaSource struct {
 	// layer (HEVC profile 5, AV1 profile 10) for a client whose device profile
 	// explicitly lists DOVI. As in Jellyfin 12, the fMP4 master playlist then
 	// offers a dvh1/dav1 variant ahead of the hvc1 fallback.
-	DOVIVariant                 bool
+	DOVIVariant bool
+	// DVStripToHDR10 marks an HLS remux that strips Dolby Vision RPUs so the
+	// client receives the HDR10 base layer it accepts in place of the Dolby
+	// Vision range type its device profile rejects.
+	DVStripToHDR10              bool
 	HLSRemuxAudioStreamIndexes  []int
 	TranscodeAudio              bool
 	DefaultAudioStreamIndex     *int

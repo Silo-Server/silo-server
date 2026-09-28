@@ -3,9 +3,10 @@
 import { Profiler, useEffect, type ReactNode } from "react";
 import { act, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
 import { createWatchRouteRequest } from "@/pages/watchRouteHelpers";
+import { PlaybackFullscreenRoot } from "./PlaybackFullscreenRoot";
 import { WatchPlaybackBar, WatchPlaybackProvider } from "./WatchPlaybackChrome";
 import {
   useWatchPlaybackController,
@@ -244,5 +245,91 @@ describe("WatchPlaybackBar time updates", () => {
     act(() => harness.controller().startPlayback({ contentId: "movie-2", libraryId: 1 }, "viewer"));
     expect(screen.getByText("0:00")).toBeInTheDocument();
     expect(screen.getByText("1:30:00")).toBeInTheDocument();
+  });
+});
+
+describe("PlaybackFullscreenRoot", () => {
+  afterEach(() => {
+    delete (document as { fullscreenElement?: Element | null }).fullscreenElement;
+    delete (document as { exitFullscreen?: () => Promise<void> }).exitFullscreen;
+  });
+
+  // Stands in for the player, which the host replaces for every request.
+  function EpisodePlayer() {
+    const { state } = useWatchPlaybackController();
+    const requestKey = state.request?.requestKey ?? "none";
+    return <span key={requestKey} data-testid="player" />;
+  }
+
+  function renderFullscreenHarness(fullscreenElement: () => Element | null) {
+    const exitFullscreen = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(document, "fullscreenElement", {
+      get: fullscreenElement,
+      configurable: true,
+    });
+    Object.defineProperty(document, "exitFullscreen", {
+      value: exitFullscreen,
+      configurable: true,
+    });
+    const harness = renderPlaybackHarness(
+      <PlaybackFullscreenRoot>
+        <EpisodePlayer />
+      </PlaybackFullscreenRoot>,
+    );
+    const request = createWatchRouteRequest({ contentId: "episode-1", libraryId: 1 });
+    act(() => harness.controller().syncRouteRequest(request));
+    return { ...harness, exitFullscreen, root: screen.getByTestId("player").parentElement };
+  }
+
+  it("stays fullscreen through post-roll and the next episode's player", () => {
+    let root: Element | null = null;
+    const harness = renderFullscreenHarness(() => root);
+    root = harness.root;
+    const firstPlayer = screen.getByTestId("player");
+
+    act(() => harness.controller().enterPostRoll(harness.controller().state.request!.requestKey));
+    act(() =>
+      harness.controller().startPlayback({ contentId: "episode-2", libraryId: 1 }, "automatic"),
+    );
+
+    expect(screen.getByTestId("player")).not.toBe(firstPlayer);
+    expect(screen.getByTestId("player").parentElement).toBe(root);
+    expect(harness.exitFullscreen).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["minimizing", (controller: WatchPlaybackControllerValue) => controller.minimizePlayback()],
+    ["stopping", (controller: WatchPlaybackControllerValue) => controller.stopPlayback()],
+  ])("leaves fullscreen when %s playback", (_, leave) => {
+    let root: Element | null = null;
+    const harness = renderFullscreenHarness(() => root);
+    root = harness.root;
+
+    act(() => leave(harness.controller()));
+
+    expect(harness.exitFullscreen).toHaveBeenCalledOnce();
+  });
+
+  it("leaves fullscreen that a pending request enters after playback stops", () => {
+    let fullscreenElement: Element | null = null;
+    const harness = renderFullscreenHarness(() => fullscreenElement);
+
+    act(() => harness.controller().stopPlayback());
+    expect(harness.exitFullscreen).not.toHaveBeenCalled();
+
+    fullscreenElement = harness.root;
+    act(() => {
+      document.dispatchEvent(new Event("fullscreenchange"));
+    });
+
+    expect(harness.exitFullscreen).toHaveBeenCalledOnce();
+  });
+
+  it("leaves another element's fullscreen alone", () => {
+    const harness = renderFullscreenHarness(() => document.body);
+
+    act(() => harness.controller().stopPlayback());
+
+    expect(harness.exitFullscreen).not.toHaveBeenCalled();
   });
 });

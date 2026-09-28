@@ -834,6 +834,13 @@ func verifyHWAccelBackend(ctx context.Context, backend, ffmpegPath string, candi
 	return entry, complete
 }
 
+// HWProbeGeneration reports how many times InvalidateHWProbeCache has run. A
+// caller that keeps a resolved backend of its own compares it to know when
+// that backend must be resolved again.
+func HWProbeGeneration() uint64 {
+	return hwProbeGeneration()
+}
+
 // hwProbeGeneration reads the current invalidation generation.
 func hwProbeGeneration() uint64 {
 	hwProbeCache.Lock()

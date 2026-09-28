@@ -123,10 +123,12 @@ type AdminCollectionCapabilityOutput struct {
 
 type AdminCollectionCapabilityOutputBody struct {
 	Capability
-	Groups      bool `json:"groups"`
-	Imports     bool `json:"imports"`
-	Artwork     bool `json:"artwork"`
-	ItemReorder bool `json:"item_reorder"`
+	Groups  bool `json:"groups"`
+	Imports bool `json:"imports"`
+	// ImportSources lists the sources a new collection can be imported from.
+	ImportSources []string `json:"import_sources" enum:"mdblist,tmdb,tmdb_list" doc:"Import sources a new collection can be created from; empty when imports is false" example:"[\"mdblist\",\"tmdb\",\"tmdb_list\"]"`
+	Artwork       bool     `json:"artwork"`
+	ItemReorder   bool     `json:"item_reorder"`
 }
 
 func adminCollectionOperation(method, path, id, summary string, guarded bool) Operation {
@@ -163,6 +165,7 @@ func registerAdminCollections(reg *Registry) {
 		out := &AdminCollectionCapabilityOutput{}
 		out.Body.Groups = v.Groups
 		out.Body.Imports = v.Imports
+		out.Body.ImportSources = collectionImportSources(v.Imports)
 		out.Body.Artwork = v.Artwork
 		out.Body.ItemReorder = v.ItemReorder
 		return out, nil
