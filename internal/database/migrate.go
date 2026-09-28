@@ -90,25 +90,28 @@ func MigrateDownTo(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS, dir stri
 	defer func() { _ = provider.Close() }()
 
 	logger := slog.Default()
-	// goose's DownTo rolls every migration back before it returns, so progress
-	// can't name the migration running at the moment. Log the migrations the
-	// rollback will undo instead, so a long rollback shows what it covers.
-	statuses, statusErr := provider.Status(ctx)
-	if statusErr != nil {
-		logger.WarnContext(ctx, "could not list the migrations to roll back", "to_version", version, "error", statusErr)
-		logger.InfoContext(ctx, "rolling back database migrations", "to_version", version)
-	} else {
-		plan := migrationRollbackPlan(statuses, version)
-		logger.InfoContext(ctx, "rolling back database migrations",
-			"to_version", version,
-			"count", len(plan),
-			"migrations", migrationNames(plan))
-	}
+	// Log and start the heartbeat before Status: it takes the migration lock,
+	// and waiting on another primary's lock must not be silent.
+	logger.InfoContext(ctx, "rolling back database migrations", "to_version", version)
 	started := time.Now()
 	stop := startMigrationHeartbeat(migrationHeartbeatInterval, func(elapsed string) {
 		logger.InfoContext(ctx, "database migration rollback still running",
 			"to_version", version, "elapsed", elapsed)
 	})
+	defer stop()
+	// goose's DownTo rolls every migration back before it returns, so progress
+	// can't name the migration running at the moment. Log the applied
+	// migrations newer than the target instead, so a long rollback shows what
+	// it may cover.
+	if statuses, statusErr := provider.Status(ctx); statusErr != nil {
+		logger.WarnContext(ctx, "could not list the migrations to roll back", "to_version", version, "error", statusErr)
+	} else {
+		candidates := migrationRollbackCandidates(statuses, version)
+		logger.InfoContext(ctx, "database migration rollback candidates",
+			"to_version", version,
+			"count", len(candidates),
+			"candidates", migrationNames(candidates))
+	}
 	results, err := provider.DownTo(ctx, version)
 	stop()
 	rolledBack := logMigrationRollbackResults(ctx, logger, version, results, err)

@@ -183,9 +183,13 @@ func startMigrationHeartbeat(interval time.Duration, beat func(elapsed string)) 
 	}
 }
 
-// migrationRollbackPlan lists the applied migrations newer than toVersion,
-// newest first: the set a DownTo(toVersion) run rolls back.
-func migrationRollbackPlan(statuses []*goose.MigrationStatus, toVersion int64) []*goose.Source {
+// migrationRollbackCandidates lists the applied migrations newer than
+// toVersion, newest first. They are candidates, not a plan: DownTo walks
+// application history newest first and stops at the first version at or below
+// the target, so with migrations applied out of order (which this provider
+// allows) it can undo fewer than these. The results DownTo returns are what
+// actually rolled back.
+func migrationRollbackCandidates(statuses []*goose.MigrationStatus, toVersion int64) []*goose.Source {
 	var plan []*goose.Source
 	for _, status := range statuses {
 		if status != nil && status.State == goose.StateApplied && status.Source != nil && status.Source.Version > toVersion {
@@ -205,8 +209,12 @@ func migrationNames(sources []*goose.Source) []string {
 }
 
 func migrationName(source *goose.Source) string {
-	if source == nil || source.Path == "" {
+	if source == nil {
 		return ""
+	}
+	if source.Path == "" {
+		// A Go migration registered without a name: fall back to its version.
+		return fmt.Sprintf("%d (go)", source.Version)
 	}
 	return path.Base(source.Path)
 }

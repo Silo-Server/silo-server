@@ -33,11 +33,15 @@ const displayPrefsMoveVersion int64 = 20260728132327
 // restored over a migrated database) from failing or clobbering the
 // already-moved value.
 func displayPrefsMoveMigration() *goose.Migration {
-	return goose.NewGoMigration(
+	m := goose.NewGoMigration(
 		displayPrefsMoveVersion,
 		&goose.GoFunc{RunTx: moveDisplayPrefs},
 		&goose.GoFunc{RunTx: unmoveDisplayPrefs},
 	)
+	// Go migrations registered in code have no source path; name them so
+	// migration progress logs identify them.
+	m.Source = "displayprefs_move.go"
+	return m
 }
 
 // moveDisplayPrefs copies every user's jellycompat rows over, then removes

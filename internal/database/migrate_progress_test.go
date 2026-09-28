@@ -333,7 +333,7 @@ func TestLogMigrationRollbackResultsReportsPartialFailure(t *testing.T) {
 	}
 }
 
-func TestMigrationRollbackPlanListsAppliedMigrationsAboveTheTarget(t *testing.T) {
+func TestMigrationRollbackCandidatesListAppliedMigrationsAboveTheTarget(t *testing.T) {
 	statuses := []*goose.MigrationStatus{
 		{Source: source(100, "100_keep.sql"), State: goose.StateApplied},
 		{Source: source(103, "103_newest.sql"), State: goose.StateApplied},
@@ -341,12 +341,34 @@ func TestMigrationRollbackPlanListsAppliedMigrationsAboveTheTarget(t *testing.T)
 		{Source: source(102, "102_pending.sql"), State: goose.StatePending},
 		nil,
 	}
-	plan := migrationRollbackPlan(statuses, 100)
+	plan := migrationRollbackCandidates(statuses, 100)
 	names := migrationNames(plan)
 	if len(names) != 2 || names[0] != "103_newest.sql" || names[1] != "101_old.sql" {
 		t.Fatalf("plan = %v, want the applied migrations above 100, newest first", names)
 	}
-	if got := migrationRollbackPlan(statuses, 103); len(got) != 0 {
+	if got := migrationRollbackCandidates(statuses, 103); len(got) != 0 {
 		t.Fatalf("plan above the newest applied = %v, want none", migrationNames(got))
+	}
+}
+
+// TestRegisteredGoMigrationsHaveNames covers the three Go migrations this
+// provider registers: goose leaves their source path empty, so without a name
+// their progress logs would carry name="".
+func TestRegisteredGoMigrationsHaveNames(t *testing.T) {
+	for _, m := range []*goose.Migration{
+		settingsBackfillMigration(),
+		displayPrefsMoveMigration(),
+		subtitleLanguageBackfillMigration(),
+	} {
+		name := migrationName(&goose.Source{Type: goose.TypeGo, Path: m.Source, Version: m.Version})
+		if name == "" || name != m.Source {
+			t.Errorf("Go migration %d is logged as %q, want its file name", m.Version, name)
+		}
+	}
+}
+
+func TestMigrationNameFallsBackToVersionForAnUnnamedGoMigration(t *testing.T) {
+	if got := migrationName(&goose.Source{Type: goose.TypeGo, Version: 42}); got != "42 (go)" {
+		t.Fatalf("migrationName = %q, want %q", got, "42 (go)")
 	}
 }

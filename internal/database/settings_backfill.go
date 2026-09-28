@@ -30,11 +30,15 @@ const settingsBackfillVersion int64 = 20260727010622
 // migration is the one state neither an operator's backup nor a rollback
 // covers.
 func settingsBackfillMigration() *goose.Migration {
-	return goose.NewGoMigration(
+	m := goose.NewGoMigration(
 		settingsBackfillVersion,
 		&goose.GoFunc{RunTx: backfillSettingValues},
 		&goose.GoFunc{RunTx: rollbackSettingValues},
 	)
+	// Go migrations registered in code have no source path; name them so
+	// migration progress logs identify them.
+	m.Source = "settings_backfill.go"
+	return m
 }
 
 // backfillSettingValues converts every user's legacy settings.
