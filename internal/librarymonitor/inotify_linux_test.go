@@ -792,3 +792,35 @@ func TestInotifyUnwatchableNewFolderAsksForARewalk(t *testing.T) {
 	mkdirs(t, root, "Locked")
 	nextEvents(t, b, func(ev Event) bool { return ev.Kind == EventRewalk && ev.Root == root })
 }
+
+// A marker in an outer library folder stops only that folder's walk. A
+// library folder configured below it keeps everything it records: markers
+// above a library folder do not apply to it, as in the scanner.
+func TestInotifyMarkerInAnOuterRootKeepsANestedRoot(t *testing.T) {
+	outer := t.TempDir()
+	mkdirs(t, outer, "Shows/Show A", "Movies/Movie A")
+	nested := filepath.Join(outer, "Shows")
+	b := newTestInotify(t, inotifyHooks{})
+	for _, root := range []string{outer, nested} {
+		if err := b.AddRoot(context.Background(), root); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Events are handled in order, so once the file written after the
+	// marker is reported, the marker has been handled too.
+	writeFile(t, filepath.Join(outer, ".nomedia"), "")
+	writeFile(t, filepath.Join(nested, "Show A", "e01.mkv"), "x")
+	events := nextEvents(t, b, isEvent(EventCloseWrite, filepath.Join(nested, "Show A"), "e01.mkv"))
+	for _, ev := range events {
+		if ev.Kind == EventRootLost {
+			t.Fatalf("root lost: %s", ev.Root)
+		}
+	}
+	if got := b.pathsWithPrefix(filepath.Join(outer, "Movies")); len(got) != 0 {
+		t.Fatalf("outer folder still records %v below its marker", got)
+	}
+	if got := b.Directories(nested); got != 2 {
+		t.Fatalf("nested root records %d directories, want Shows and Show A", got)
+	}
+}

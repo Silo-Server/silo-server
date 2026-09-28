@@ -846,14 +846,30 @@ func (b *inotifyBackend) reevaluate(p inotifyParent) {
 	}
 	d.skipped = skipped
 	if skipped {
-		var lost, aliased []string
+		// Only roots that reach p.path from above, or start there, stop at
+		// the marker. A library folder configured below it is walked from its
+		// own path, and markers above a root do not apply to it, as in the
+		// scanner; it keeps everything it records.
+		var aliased []string
 		for _, child := range b.children.of(p.path) {
-			l, a := b.dropSubtreeLocked(child, b.rmWatchLocked)
-			lost, aliased = append(lost, l...), append(aliased, a...)
+			for _, sub := range b.children.subtree(child) {
+				sd := b.byPath[sub]
+				if sd == nil {
+					continue
+				}
+				for r := range sd.roots {
+					if isBelow(r.path, p.path) {
+						continue
+					}
+					if sd.link {
+						aliased = append(aliased, r.path)
+					}
+					b.removeRootFromPathLocked(sub, sd, r)
+				}
+			}
 		}
 		b.mu.Unlock()
-		b.loseRoots(lost)
-		b.rewalkAliased(aliased, lost)
+		b.rewalkAliased(aliased, nil)
 		return
 	}
 	isRoot := false
