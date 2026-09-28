@@ -562,6 +562,10 @@ manifest's `artwork_urls` point here. Fetch each available image once while onli
 and cache the bytes locally. Artwork and subtitle assets are whole-object,
 privately cached deliveries; they do not advertise byte ranges.
 
+When the artwork store fails, times out, or answers 429 or 5xx, the route returns
+`503 dependency_unavailable` with `Retry-After: 5`; retry the same request later.
+Other failures, such as `404 not_found`, won't succeed on a retry.
+
 ### 4.9 Subtitle proxy
 
 ```http

@@ -1,8 +1,11 @@
 package downloads
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -42,6 +45,11 @@ func TestArtworkUpstreamFailuresAreRetryableAndOmitTheURL(t *testing.T) {
 		t.Errorf("relative URL: err = %v", err)
 	}
 
+	// No host: the URL is broken, not the store.
+	if err := s.streamArtwork(context.Background(), httptest.NewRecorder(), nil, "http:///poster.jpg"); err == nil || errors.Is(err, ErrAssetUnavailable) {
+		t.Errorf("hostless URL: err = %v", err)
+	}
+
 	// A client that left isn't the store failing.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -54,5 +62,37 @@ func TestArtworkUpstreamFailuresAreRetryableAndOmitTheURL(t *testing.T) {
 	err := s.streamArtwork(context.Background(), httptest.NewRecorder(), nil, signed)
 	if !errors.Is(err, ErrAssetUnavailable) || strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "poster.jpg") {
 		t.Fatalf("unreachable store: err = %v", err)
+	}
+}
+
+func TestArtworkFailureLogOmitsThePresignedURL(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Go's client quotes a Location it can't parse in its error.
+		w.Header().Set("Location", "/poster%zz.jpg?X-Amz-Signature=redirect-secret")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer upstream.Close()
+	s := &Service{httpClient: upstream.Client()}
+	err := s.streamArtwork(context.Background(), httptest.NewRecorder(), nil, upstream.URL+"/poster.jpg")
+	if !errors.Is(err, ErrAssetUnavailable) {
+		t.Fatalf("err = %v", err)
+	}
+
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	logArtworkUnavailable(context.Background(), "d1", "poster", err)
+	logArtworkUnavailable(context.Background(), "d1", "poster", fmt.Errorf("%w: %w", artworkStatusError(http.StatusBadGateway), ErrAssetUnavailable))
+	if out := buf.String(); strings.Contains(out, "redirect-secret") || !strings.Contains(out, `"upstream_status":502`) {
+		t.Fatalf("log = %s", out)
+	}
+}
+
+func TestOfflineDepsKeepTheArtworkTimeout(t *testing.T) {
+	s := &Service{}
+	s.SetOfflineDeps(nil, nil, nil)
+	if s.artworkHTTPClient() != artworkClient {
+		t.Fatal("artwork fetches lost their timeout")
 	}
 }

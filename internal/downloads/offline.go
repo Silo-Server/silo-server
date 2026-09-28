@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -139,26 +140,52 @@ func (s *Service) ServeArtwork(ctx context.Context, w http.ResponseWriter, r *ht
 	}
 	err = s.streamArtwork(ctx, w, r, imageURL)
 	if errors.Is(err, ErrAssetUnavailable) {
-		slog.WarnContext(ctx, "download artwork unavailable", "component", "downloads",
-			"download_id", downloadID, "kind", kind, "error", err)
+		logArtworkUnavailable(ctx, downloadID, kind, err)
 	}
 	return err
+}
+
+// logArtworkUnavailable records a failing artwork store. The error itself can
+// quote the presigned URL (a malformed redirect's Location, for one), so only
+// the upstream status or whether the fetch timed out is logged.
+func logArtworkUnavailable(ctx context.Context, downloadID, kind string, err error) {
+	attrs := []any{"component", "downloads", "download_id", downloadID, "kind", kind}
+	var status artworkStatusError
+	var netErr net.Error
+	switch {
+	case errors.As(err, &status):
+		attrs = append(attrs, "upstream_status", int(status))
+	case errors.As(err, &netErr):
+		attrs = append(attrs, "timeout", netErr.Timeout())
+	}
+	slog.WarnContext(ctx, "download artwork unavailable", attrs...)
+}
+
+// artworkStatusError is the artwork store's answer when it wasn't 200.
+type artworkStatusError int
+
+func (e artworkStatusError) Error() string {
+	return "artwork upstream status " + strconv.Itoa(int(e))
 }
 
 // artworkClient fetches artwork when the service has no client of its own.
 // Artwork is small, so a store that hasn't answered in this time is failing.
 var artworkClient = &http.Client{Timeout: 30 * time.Second}
 
-func (s *Service) streamArtwork(ctx context.Context, w http.ResponseWriter, _ *http.Request, imageURL string) error {
-	client := s.httpClient
-	if client == nil {
-		client = artworkClient
+func (s *Service) artworkHTTPClient() *http.Client {
+	if s.httpClient != nil {
+		return s.httpClient
 	}
+	return artworkClient
+}
+
+func (s *Service) streamArtwork(ctx context.Context, w http.ResponseWriter, _ *http.Request, imageURL string) error {
+	client := s.artworkHTTPClient()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
 	if err != nil {
 		return errors.New("building artwork request: invalid artwork URL")
 	}
-	if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+	if (req.URL.Scheme != "http" && req.URL.Scheme != "https") || req.URL.Host == "" {
 		// Local artwork storage signs server-relative URLs, which can't be
 		// fetched over HTTP. Retrying won't help.
 		return errors.New("fetching artwork: artwork URL is not an absolute http(s) URL")
@@ -181,10 +208,10 @@ func (s *Service) streamArtwork(ctx context.Context, w http.ResponseWriter, _ *h
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError {
 		// Also ErrAssetNotFound, which the frozen v1 route answers with 404
 		// as it always has.
-		return fmt.Errorf("artwork upstream status %d: %w: %w", resp.StatusCode, ErrAssetUnavailable, ErrAssetNotFound)
+		return fmt.Errorf("%w: %w: %w", artworkStatusError(resp.StatusCode), ErrAssetUnavailable, ErrAssetNotFound)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("artwork upstream status %d: %w", resp.StatusCode, ErrAssetNotFound)
+		return fmt.Errorf("%w: %w", artworkStatusError(resp.StatusCode), ErrAssetNotFound)
 	}
 	if ct := resp.Header.Get("Content-Type"); ct != "" {
 		w.Header().Set("Content-Type", ct)

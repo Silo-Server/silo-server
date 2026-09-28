@@ -157,9 +157,7 @@ func (s *Service) SetOfflineDeps(detail ManifestSource, subs SubtitleSource, cli
 		return s.artifacts.repo.GetByID(ctx, id)
 	})
 	s.manifest.MarkerPopulation = s.markerPopulation
-	if client == nil {
-		client = http.DefaultClient
-	}
+	// A nil client leaves artwork fetches on artworkClient and its timeout.
 	s.httpClient = client
 }
 
