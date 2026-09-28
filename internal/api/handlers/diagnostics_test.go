@@ -891,3 +891,56 @@ func sameStringSlice(a, b []string) bool {
 	}
 	return true
 }
+
+func TestOpenAdminDiagnosticDownloadAlwaysStreams(t *testing.T) {
+	service := newFakeDiagnosticsService()
+	service.getReport = readyDiagnosticsReport()
+	service.presignURL = "https://storage.example.test/report"
+	service.openData = []byte("bundle")
+	download, err := NewDiagnosticsHandler(service).OpenAdminDiagnosticDownload(t.Context(), "report-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer download.Body.Close()
+	body, err := io.ReadAll(download.Body)
+	if err != nil || string(body) != "bundle" || service.presignCalls != 0 || service.openCalls != 1 || download.Size == nil || download.Filename == "" {
+		t.Fatal(download, err, service.presignCalls, service.openCalls)
+	}
+	service.getReport.State = diagnostics.StateReceiving
+	_, err = NewDiagnosticsHandler(service).OpenAdminDiagnosticDownload(t.Context(), "report-1")
+	if !errors.Is(err, diagnostics.ErrReportNotReady) || service.openCalls != 1 {
+		t.Fatal(err, service.openCalls)
+	}
+}
+
+func TestAdminDiagnosticReadServicesReuseStore(t *testing.T) {
+	service := newFakeDiagnosticsService()
+	service.getReport = readyDiagnosticsReport()
+	service.listResult = diagnostics.ListResult{Reports: []diagnostics.Report{*service.getReport}, NextCursor: "next"}
+	handler := NewDiagnosticsHandler(service)
+	filters := diagnostics.ListFilters{UserID: new(7), Limit: 5, Cursor: "position"}
+	page, err := handler.ListAdminDiagnosticReports(t.Context(), filters)
+	if err != nil || len(page.Reports) != 1 || service.listFilters.Cursor != "position" || service.listFilters.Limit != 5 {
+		t.Fatal(page, err, service.listFilters)
+	}
+	report, err := handler.GetAdminDiagnosticReport(t.Context(), "report-1")
+	if err != nil || report != service.getReport {
+		t.Fatal(report, err)
+	}
+}
+
+func TestDeleteAdminDiagnosticReportTreatsAbsentAsSuccess(t *testing.T) {
+	service := newFakeDiagnosticsService()
+	handler := NewDiagnosticsHandler(service)
+	if err := handler.DeleteAdminDiagnosticReport(t.Context(), "report-1"); err != nil {
+		t.Fatal(err)
+	}
+	service.deleteErr = diagnostics.ErrNotFound
+	if err := handler.DeleteAdminDiagnosticReport(t.Context(), "report-1"); err != nil {
+		t.Fatal(err)
+	}
+	service.deleteErr = errors.New("database failed")
+	if err := handler.DeleteAdminDiagnosticReport(t.Context(), "report-1"); err == nil {
+		t.Fatal("database error suppressed")
+	}
+}

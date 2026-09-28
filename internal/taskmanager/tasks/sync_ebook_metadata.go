@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/ebooks"
+	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 )
 
@@ -94,6 +95,15 @@ func (t *ebookMetadataTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategoryMetadata
 }
 func (t *ebookMetadataTask) IsHidden() bool { return false }
+
+// IsHidden keeps the legacy backlog drain off the task list. Only the
+// ebook_enrichment_jobs migration fills its queue, so it drains on schedule
+// without an administrator and has no work at all on a new install.
+func (t *BackfillEbookMetadataTask) IsHidden() bool { return true }
+
+func (t *ebookMetadataTask) ServesLibrary(libraryType string) bool {
+	return librarykind.IsEbook(libraryType)
+}
 
 func (t *ebookMetadataTask) DefaultTriggers() []taskmanager.TriggerConfig {
 	return append([]taskmanager.TriggerConfig(nil), t.triggers...)

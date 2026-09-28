@@ -1,0 +1,51 @@
+{
+  "items": [
+    {
+      "id": "01",
+      "name": "Example",
+      "type": "generic",
+      "url_host": "example.test",
+      "enabled": false,
+      "notify_new_movies": false,
+      "notify_new_episodes": false,
+      "notify_new_audiobooks": false,
+      "notify_new_ebooks": false,
+      "notify_request_submitted": false,
+      "notify_request_approved": false,
+      "notify_request_declined": false,
+      "notify_request_fulfilled": false,
+      "consecutive_failures": 0,
+      "disabled_reason": null,
+      "last_success_at": null,
+      "last_failure_at": null,
+      "last_failure_status": null,
+      "last_failure_message": null,
+      "created_at": "2026-01-02T03:04:05.678Z"
+    },
+    {
+      "id": "02",
+      "name": "Other",
+      "type": "generic",
+      "url_host": "example.test",
+      "enabled": false,
+      "notify_new_movies": false,
+      "notify_new_episodes": false,
+      "notify_new_audiobooks": false,
+      "notify_new_ebooks": false,
+      "notify_request_submitted": false,
+      "notify_request_approved": false,
+      "notify_request_declined": false,
+      "notify_request_fulfilled": false,
+      "consecutive_failures": 0,
+      "disabled_reason": null,
+      "last_success_at": null,
+      "last_failure_at": null,
+      "last_failure_status": null,
+      "last_failure_message": null,
+      "created_at": "2026-01-02T03:04:05.678Z"
+    }
+  ],
+  "page": {
+    "has_more": false
+  }
+}

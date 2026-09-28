@@ -55,7 +55,8 @@ export function prefetchRouteChunks(
   };
 }
 
-function scheduleWhenIdle(task: () => void): () => void {
+/** Runs `task` in the next idle window, or after the idle timeout at the latest. */
+export function scheduleWhenIdle(task: () => void): () => void {
   if (typeof globalThis.requestIdleCallback === "function") {
     const handle = globalThis.requestIdleCallback(() => task(), {
       timeout: ROUTE_CHUNK_IDLE_TIMEOUT_MS,

@@ -1,136 +1,136 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { api, ApiClientError } from "@/api/client";
-import type { ExecutionResult, TaskInfo, TriggerConfig } from "@/api/types";
+import { v2, V2ProblemError } from "@/api/v2/request";
+import type { components } from "@/api/v2/schema";
+import type { TriggerConfig } from "@/api/types";
 import { adminKeys } from "@/hooks/queries/keys";
 import { usePageActivity } from "@/hooks/usePageActivity";
 
-export interface MetadataRefreshReasonCount {
-  reason: string;
-  count: number;
+export type MetadataRefreshMetrics = components["schemas"]["AdminTaskMetrics"];
+export type TaskSchedule = components["schemas"]["AdminTaskSchedule"] & { etag: string };
+export async function fetchTaskSchedule(key: string): Promise<TaskSchedule> {
+  let etag = "";
+  const schedule = await v2("GET /api/v2/admin/tasks/{key}/triggers", {
+    path: { key },
+    onResponse: (response) => {
+      etag = response.headers.get("ETag") ?? "";
+    },
+  });
+  if (!etag || etag === "*" || etag.startsWith("W/"))
+    throw new Error("Schedule revision unavailable. Reload before editing.");
+  return { ...schedule, etag };
 }
-
-export interface MetadataRefreshAttemptBucket {
-  label: string;
-  count: number;
+export function taskMutationMessage(error: unknown) {
+  if (error instanceof V2ProblemError && error.status === 412)
+    return "The schedule changed. Your draft is kept. Review the current schedule before submitting a new edit.";
+  if (error instanceof V2ProblemError) return error.message;
+  return "The outcome is unknown. Check current task state before trying again.";
 }
-
-export interface MetadataRefreshDebtSample {
-  content_id: string;
-  title: string;
-  type: string;
-  reason_mask: number;
-  next_refresh_at: string;
-  last_attempt_at?: string | null;
-  attempt_count: number;
-  last_error: string;
-}
-
-export interface MetadataRefreshMetrics {
-  total: number;
-  due: number;
-  leased: number;
-  oldest_due_at?: string | null;
-  oldest_lease_expires_at?: string | null;
-  reason_counts: MetadataRefreshReasonCount[];
-  attempt_buckets: MetadataRefreshAttemptBucket[];
-  due_samples: MetadataRefreshDebtSample[];
-  recent_errors: MetadataRefreshDebtSample[];
-}
-
 export function useTasks() {
   return useQuery({
     queryKey: adminKeys.tasks(),
-    queryFn: () => api<TaskInfo[]>("/admin/tasks"),
+    queryFn: async () => (await v2("GET /api/v2/admin/tasks")).items,
     staleTime: 0,
   });
 }
-
+// Hidden tasks are internal workers the Scheduled Tasks page omits. Activity
+// views still need them to show what is running right now.
+export function useTasksIncludingHidden() {
+  return useQuery({
+    queryKey: adminKeys.tasksIncludingHidden(),
+    queryFn: async () =>
+      (await v2("GET /api/v2/admin/tasks", { query: { include_hidden: true } })).items,
+    staleTime: 0,
+  });
+}
 export function useTask(key: string) {
   return useQuery({
     queryKey: adminKeys.task(key),
-    queryFn: () => api<TaskInfo>(`/admin/tasks/${encodeURIComponent(key)}`),
+    queryFn: () => v2("GET /api/v2/admin/tasks/{key}", { path: { key } }),
     staleTime: 0,
   });
 }
-
 export function useTaskHistory(key: string) {
-  return useQuery({
-    queryKey: adminKeys.taskHistory(key),
-    queryFn: () =>
-      api<ExecutionResult[]>(`/admin/tasks/${encodeURIComponent(key)}/history?limit=20`),
+  const client = useQueryClient();
+  const query = useInfiniteQuery({
+    queryKey: [...adminKeys.taskHistory(key), "pages"],
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
+      v2("GET /api/v2/admin/tasks/{key}/history", {
+        path: { key },
+        query: { limit: 20, cursor: pageParam },
+      }),
+    getNextPageParam: (page) => (page.page?.has_more ? page.page.next_cursor : undefined),
     staleTime: 0,
   });
+  return {
+    ...query,
+    data: query.data?.pages.flatMap((page) => page.items),
+    restart: () => client.resetQueries({ queryKey: adminKeys.taskHistory(key) }),
+  };
 }
-
 export function useTaskMetrics(key: string) {
-  const pageActivity = usePageActivity();
-
+  const activity = usePageActivity();
   return useQuery({
     queryKey: adminKeys.taskMetrics(key),
-    queryFn: () => api<MetadataRefreshMetrics>(`/admin/tasks/${encodeURIComponent(key)}/metrics`),
+    queryFn: () => v2("GET /api/v2/admin/tasks/{key}/metrics", { path: { key } }),
     enabled: key === "refresh_metadata",
     staleTime: 0,
-    refetchInterval: pageActivity.canApplyRealtimeUpdates ? 30_000 : false,
+    refetchInterval: activity.canApplyRealtimeUpdates ? 30_000 : false,
   });
 }
-
 export function useRunTask() {
-  const queryClient = useQueryClient();
+  const client = useQueryClient();
   return useMutation({
+    retry: false,
     mutationFn: (key: string) =>
-      api<{ status: string }>(`/admin/tasks/${encodeURIComponent(key)}/run`, {
-        method: "POST",
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: adminKeys.tasks() });
-      queryClient.invalidateQueries({ queryKey: adminKeys.taskMetrics("refresh_metadata") });
-      toast.success("Task started");
+      v2("POST /api/v2/admin/tasks/{key}/run", { path: { key }, retryAuthentication: false }),
+    onSuccess: (_, key) => {
+      void client.invalidateQueries({ queryKey: adminKeys.tasks() });
+      void client.invalidateQueries({ queryKey: adminKeys.task(key) });
+      toast.success("Task started on this server");
     },
-    onError: (error: Error) => {
-      if (error instanceof ApiClientError && error.status === 409) {
-        toast.error("Task is already running");
-      } else {
-        toast.error("Failed to start task");
-      }
-    },
+    onError: (error) => toast.error(taskMutationMessage(error)),
   });
 }
-
 export function useCancelTask() {
-  const queryClient = useQueryClient();
+  const client = useQueryClient();
   return useMutation({
+    retry: false,
     mutationFn: (key: string) =>
-      api<{ status: string }>(`/admin/tasks/${encodeURIComponent(key)}/cancel`, {
-        method: "POST",
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: adminKeys.tasks() });
-      queryClient.invalidateQueries({ queryKey: adminKeys.taskMetrics("refresh_metadata") });
-      toast.success("Cancellation requested");
+      v2("POST /api/v2/admin/tasks/{key}/cancel", { path: { key }, retryAuthentication: false }),
+    onSuccess: (_, key) => {
+      void client.invalidateQueries({ queryKey: adminKeys.tasks() });
+      void client.invalidateQueries({ queryKey: adminKeys.task(key) });
+      toast.success("Cancellation requested on this server");
     },
-    onError: () => {
-      toast.error("Failed to cancel task");
-    },
+    onError: (error) => toast.error(taskMutationMessage(error)),
   });
 }
-
 export function useUpdateTriggers() {
-  const queryClient = useQueryClient();
+  const client = useQueryClient();
   return useMutation({
-    mutationFn: ({ key, triggers }: { key: string; triggers: TriggerConfig[] }) =>
-      api<TaskInfo>(`/admin/tasks/${encodeURIComponent(key)}/triggers`, {
-        method: "PUT",
-        body: JSON.stringify(triggers),
+    retry: false,
+    mutationFn: ({
+      key,
+      triggers,
+      etag,
+    }: {
+      key: string;
+      triggers: TriggerConfig[];
+      etag: string;
+    }) =>
+      v2("PUT /api/v2/admin/tasks/{key}/triggers", {
+        path: { key },
+        headers: { "If-Match": etag },
+        body: { triggers },
+        retryAuthentication: false,
       }),
-    onSuccess: (_data, { key }) => {
-      queryClient.invalidateQueries({ queryKey: adminKeys.task(key) });
-      queryClient.invalidateQueries({ queryKey: adminKeys.tasks() });
-      queryClient.invalidateQueries({ queryKey: adminKeys.taskMetrics(key) });
-      toast.success("Schedule updated");
+    onSuccess: (_, { key }) => {
+      void client.invalidateQueries({ queryKey: adminKeys.task(key) });
+      void client.invalidateQueries({ queryKey: adminKeys.tasks() });
+      toast.success("Schedule saved and applied on this server. Other servers load it on restart.");
     },
-    onError: () => {
-      toast.error("Failed to update schedule");
-    },
+    onError: (error) => toast.error(taskMutationMessage(error)),
   });
 }

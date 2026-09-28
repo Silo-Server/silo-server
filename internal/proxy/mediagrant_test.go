@@ -301,6 +301,40 @@ func TestProxyGrantTranscodeRelaysToTheNodeWithAProxyMintedToken(t *testing.T) {
 	}
 }
 
+func TestProxyGrantProgressiveRemuxRelaysToTranscodeNode(t *testing.T) {
+	var forwarded, relayPath, relayQuery string
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		forwarded = r.Header.Get("X-Silo-Stream-Token")
+		relayPath = r.URL.Path
+		relayQuery = r.URL.RawQuery
+		_, _ = w.Write([]byte("remote-remux"))
+	}))
+	t.Cleanup(node.Close)
+
+	card := playback.NewRemuxRecipeCard("session-remux", 7, "profile-1", 42, false, 0, playback.RemuxDVPreserveV3)
+	card.InputPath = "/media/movie.mkv"
+	card.TranscodeNodeURL = node.URL
+	card.TranscodeTransportID = "session-remux-plan-a"
+	card.RoutingWorkload = string(noderouting.WorkloadRemux)
+	card.RoutingExecution = string(noderouting.ExecutionTranscode)
+	card.RoutingEgress = string(noderouting.EgressProxy)
+	card.RoutingEgressNodeID = 11
+	srv := newGrantProxyServer(t, map[string]playback.RecipeCard{card.SessionID: card})
+	srv.nodeRowID = func() (int, bool) { return 11, true }
+
+	rr := grantRequest(t, srv, http.MethodGet, "/stream/v3/session-remux?seek=8", grantAccessToken(t, 7, "login-1"))
+	if rr.Code != http.StatusOK || rr.Body.String() != "remote-remux" {
+		t.Fatalf("response = %d %q", rr.Code, rr.Body.String())
+	}
+	if relayPath != "/remux/session-remux-plan-a" || relayQuery != "seek=8" {
+		t.Fatalf("relay = %q?%s", relayPath, relayQuery)
+	}
+	claims, err := streamtoken.Verify(forwarded, grantTestSecret)
+	if err != nil || claims.TranscodeNode != node.URL || claims.RoutingExecution != string(noderouting.ExecutionTranscode) {
+		t.Fatalf("forwarded claims = %#v, err=%v", claims, err)
+	}
+}
+
 // A transcode session has no progressive body to serve, and answering one from
 // the identity route would hand the client a stream the plan never described.
 func TestProxyGrantIdentityRefusesATranscodeGrant(t *testing.T) {

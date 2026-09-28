@@ -118,7 +118,7 @@ describe("AdminSectionCommandDialog", () => {
     await userEvent.type(searchBox, "arrproxy");
     await userEvent.click(screen.getByRole("option", { name: /ArrProxy/ }));
 
-    expect(mocks.navigateToPluginRoute).toHaveBeenCalledWith("/api/v1/plugins/7/");
+    expect(mocks.navigateToPluginRoute).toHaveBeenCalledWith("/api/v2/plugin-content/plugins/7/");
     expect(screen.queryByRole("searchbox", { name: "Search admin sections" })).toBeNull();
   });
 

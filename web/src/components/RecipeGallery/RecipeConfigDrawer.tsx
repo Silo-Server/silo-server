@@ -15,6 +15,7 @@ export interface AddPayload {
 }
 
 interface Props {
+  libraryCollectionsOnly?: boolean;
   def: RecipeDefinition;
   preset: GalleryPreset;
   /** Close the drawer without saving. Used by the bottom Cancel button. */
@@ -37,6 +38,7 @@ export default function RecipeConfigDrawer({
   onAdd,
   showBulkApply = true,
   showEnabled = true,
+  libraryCollectionsOnly = false,
 }: Props) {
   const [title, setTitle] = useState(preset.display_name);
   const [params, setParams] = useState<Record<string, unknown>>({ ...preset.default_params });
@@ -114,7 +116,12 @@ export default function RecipeConfigDrawer({
       </div>
 
       <div className="mt-4">
-        <RecipeParamFields def={def} params={params} onChange={setParams} />
+        <RecipeParamFields
+          def={def}
+          params={params}
+          onChange={setParams}
+          libraryCollectionsOnly={libraryCollectionsOnly}
+        />
       </div>
 
       {collectionMissing ? (

@@ -28,6 +28,10 @@ type Store interface {
 	ListAdmin(ctx context.Context, filter ListFilter) ([]*Request, error)
 	SetStatus(ctx context.Context, id string, status Status, actor Viewer) (*Request, error)
 	SetOutcome(ctx context.Context, id string, outcome Outcome, actor Viewer, message string) (*Request, error)
+	// SetExternalIDs records a TVDB ID resolved after the request was created,
+	// and fills the IMDb ID when the row has none. An existing positive TVDB ID
+	// is kept; the TVDB ID the row holds afterwards is returned.
+	SetExternalIDs(ctx context.Context, id string, tvdbID int, imdbID string) (int, error)
 	ListTargets(ctx context.Context, requestID string) ([]Target, error)
 	CreateTarget(ctx context.Context, target Target) (Target, error)
 	DeleteTarget(ctx context.Context, id int64) error

@@ -34,7 +34,7 @@ func TestMediaFileAuthorizerMapsMissingFileToNotFound(t *testing.T) {
 
 func TestHandleUploadMissingMediaFileReturns404(t *testing.T) {
 	repo := newMockSubtitleRepoForHandler()
-	manager := subtitles.NewManager(repo, newMockS3ClientForHandler(), "test-bucket")
+	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
 	handler := NewSubtitleSearchHandler(manager, repo, stubSubtitleMediaResolver{})
 	handler.FileAuthorizer = &MediaFileAuthorizer{
 		FileResolver: stubMediaFileResolver{err: scanner.ErrFileNotFound},
@@ -52,7 +52,7 @@ func TestHandleUploadMissingMediaFileReturns404(t *testing.T) {
 
 func TestHandleListMissingMediaFileReturns404(t *testing.T) {
 	repo := newMockSubtitleRepoForHandler()
-	manager := subtitles.NewManager(repo, newMockS3ClientForHandler(), "test-bucket")
+	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
 	handler := NewSubtitleSearchHandler(manager, repo, stubSubtitleMediaResolver{})
 	handler.FileAuthorizer = &MediaFileAuthorizer{
 		FileResolver: stubMediaFileResolver{err: scanner.ErrFileNotFound},

@@ -94,7 +94,7 @@ func TestPlanPlaybackV3TranscodeUsesHLSDeliverySubtitleCapabilities(t *testing.T
 	if result.Plan.Subtitle.Mode == SubtitleRenderV3 {
 		t.Fatalf("HLS transcode plan claims client render the HLS engine cannot honor: %#v", result.Plan.Subtitle)
 	}
-	if result.Plan.Subtitle.Mode != SubtitleConvertV3 || result.Plan.Claims.Subtitles.Reason != "server_text_conversion" {
+	if result.Plan.Subtitle.Mode != SubtitleBurnInV3 || result.Plan.Claims.Subtitles.Reason != "server_burn_in_required" {
 		t.Fatalf("subtitle decision = %#v claims = %#v", result.Plan.Subtitle, result.Plan.Claims.Subtitles)
 	}
 	if result.SubtitleTrackIndex != index {

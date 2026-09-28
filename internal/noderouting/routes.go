@@ -51,6 +51,12 @@ type Shape struct {
 	Egress    Egress
 }
 
+const (
+	ShapeProgressiveRemuxAPI            = "progressive_remux_api"
+	ShapeProgressiveRemuxTranscodeProxy = "progressive_remux_transcode_proxy"
+	ShapeHLSRemuxAPI                    = "hls_remux_api"
+)
+
 func (s Shape) NeedsTranscodeNode() bool { return s.Execution == ExecutionTranscode }
 func (s Shape) NeedsProxyNode() bool     { return s.Egress == EgressProxy }
 
@@ -151,12 +157,13 @@ func legalShapes(workload Workload, delivery Delivery) []Shape {
 		}
 	case DeliveryProgressiveRemux:
 		return []Shape{
-			shape("progressive_remux_api", ExecutionAPI, EgressAPI),
+			shape(ShapeProgressiveRemuxAPI, ExecutionAPI, EgressAPI),
 			shape("progressive_remux_proxy", ExecutionProxy, EgressProxy),
+			shape(ShapeProgressiveRemuxTranscodeProxy, ExecutionTranscode, EgressProxy),
 		}
 	case DeliveryHLSRemux:
 		return []Shape{
-			shape("hls_remux_api", ExecutionAPI, EgressAPI),
+			shape(ShapeHLSRemuxAPI, ExecutionAPI, EgressAPI),
 			shape("hls_remux_transcode_api", ExecutionTranscode, EgressAPI),
 			shape("hls_remux_transcode_proxy", ExecutionTranscode, EgressProxy),
 		}
@@ -222,6 +229,15 @@ func rank(shape Shape, execution config.PlaybackExecutionPreference, egress conf
 	case config.PlaybackExecutionPreferWorker:
 		if !isWorker(shape.Execution) {
 			executionMiss = 1
+		}
+	case config.PlaybackExecutionPreferTranscode:
+		switch shape.Execution {
+		case ExecutionTranscode:
+			executionMiss = 0
+		case ExecutionProxy:
+			executionMiss = 1
+		default:
+			executionMiss = 2
 		}
 	case config.PlaybackExecutionPreferAPI:
 		if shape.Execution != ExecutionAPI {

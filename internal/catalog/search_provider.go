@@ -16,6 +16,8 @@ import (
 )
 
 const (
+	searchModeKeyword         = "keyword"
+	searchModeHybrid          = "hybrid"
 	SearchProviderPostgres    = "postgres"
 	SearchProviderMeilisearch = "meilisearch"
 
@@ -55,15 +57,24 @@ const (
 var ErrSearchProviderFallback = errors.New("catalog search provider fallback")
 
 type CatalogSearchRequest struct {
-	Query     string
-	ItemTypes []string
-	Limit     int
-	Offset    int
-	Access    AccessFilter
-	SkipTotal bool
+	Definition   QueryDefinition
+	GroupByWork  bool
+	CursorPaging bool
+	Continuation *CatalogSearchCursor
+	Seek         *int
+	Query        string
+	ItemTypes    []string
+	Limit        int
+	Offset       int
+	Access       AccessFilter
+	SkipTotal    bool
 }
 
 type CatalogSearchResult struct {
+	ResultWindowLimit  int
+	SessionExpiresAt   *time.Time
+	Next               *CatalogSearchCursor
+	CursorScope        *CatalogSearchCursor
 	Items              []*models.MediaItem
 	Total              int
 	HasMore            bool
@@ -120,6 +131,9 @@ func NewPostgresSearchProvider(itemRepo *ItemRepository) *PostgresSearchProvider
 func (p *PostgresSearchProvider) Search(ctx context.Context, req CatalogSearchRequest) (*CatalogSearchResult, error) {
 	if p == nil || p.itemRepo == nil {
 		return nil, fmt.Errorf("postgres search provider requires item repository")
+	}
+	if req.CursorPaging {
+		return p.searchCursorPage(ctx, req)
 	}
 	items, total, hasMore, totalExact, err := p.itemRepo.SearchPage(ctx, req.Query, req.ItemTypes, req.Limit, req.Offset, req.Access, !req.SkipTotal)
 	if err != nil {

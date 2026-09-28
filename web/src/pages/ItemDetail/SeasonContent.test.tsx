@@ -36,9 +36,13 @@ const mocks = vi.hoisted(() => {
     useSetRating: vi.fn(),
     useDeleteRating: vi.fn(),
     useAuth: vi.fn(),
+    useDetailWatchTogether: vi.fn(() => ({ menu: undefined, sheet: null })),
   };
 });
 
+vi.mock("@/pages/watchtogether/DetailWatchTogether", () => ({
+  useDetailWatchTogether: mocks.useDetailWatchTogether,
+}));
 vi.mock("@/hooks/queries/episodes", () => ({
   useItemEpisodes: mocks.useItemEpisodes,
 }));
@@ -162,6 +166,7 @@ function makeSeasonItem(
 
 describe("SeasonContent", () => {
   beforeEach(() => {
+    mocks.useDetailWatchTogether.mockClear();
     mocks.capturedActionBarProps.value = null;
     mocks.capturedDetailHeroProps.value = null;
     mocks.capturedMediaMenuProps.length = 0;
@@ -187,6 +192,49 @@ describe("SeasonContent", () => {
     mocks.useRating.mockReturnValue({ data: { rating: 4, rated_at: "2026-03-22T00:00:00Z" } });
     mocks.useSetRating.mockReturnValue({ mutate: vi.fn() });
     mocks.useDeleteRating.mockReturnValue({ mutate: vi.fn() });
+  });
+
+  it.each([
+    { name: "skips unavailable unwatched episodes", playablePlayed: false, hasPlayable: true },
+    { name: "falls back to a playable watched episode", playablePlayed: true, hasPlayable: true },
+    {
+      name: "leaves the target empty when no episode is playable",
+      playablePlayed: false,
+      hasPlayable: false,
+    },
+  ])("$name", ({ playablePlayed, hasPlayable }) => {
+    mocks.useItemEpisodes.mockReturnValue({
+      data: {
+        episodes: [
+          {
+            content_id: "missing",
+            title: "Missing",
+            episode_number: 1,
+            files: [],
+            user_data: { played: false },
+          },
+          {
+            content_id: "playable",
+            title: "Available",
+            episode_number: 2,
+            files: hasPlayable ? [{ file_id: 2 }] : [],
+            user_data: { played: playablePlayed },
+          },
+        ],
+      },
+      isLoading: false,
+      error: null,
+    });
+    renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/item/season-1"]}>
+        <SeasonContent item={makeSeasonItem()} />
+      </MemoryRouter>,
+    );
+    expect(mocks.useDetailWatchTogether).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: hasPlayable ? expect.objectContaining({ content_id: "playable" }) : null,
+      }),
+    );
   });
 
   it("does not pass rating props to ActionBar", () => {

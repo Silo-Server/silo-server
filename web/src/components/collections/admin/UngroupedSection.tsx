@@ -11,6 +11,7 @@ export interface UngroupedSectionProps {
   onSyncCollection: (collection: LibraryCollection) => void;
   syncingCollectionID?: string | null;
   collapsed?: boolean;
+  dragDisabled?: boolean;
 }
 
 export function UngroupedSection({
@@ -20,9 +21,11 @@ export function UngroupedSection({
   onSyncCollection,
   syncingCollectionID = null,
   collapsed = false,
+  dragDisabled = false,
 }: UngroupedSectionProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: "ungrouped",
+    disabled: dragDisabled,
     data: { kind: "group", id: "ungrouped" },
   });
   const style = {
@@ -45,6 +48,7 @@ export function UngroupedSection({
           {...attributes}
           {...listeners}
           className="text-muted-foreground hover:text-foreground cursor-grab"
+          disabled={dragDisabled}
           aria-label="Drag ungrouped section"
           type="button"
         >
@@ -64,6 +68,7 @@ export function UngroupedSection({
               <div className="space-y-2">
                 {collections.map((c) => (
                   <CollectionRow
+                    dragDisabled={dragDisabled}
                     key={c.id}
                     collection={c}
                     parentGroupID="ungrouped"

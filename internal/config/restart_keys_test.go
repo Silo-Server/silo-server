@@ -43,6 +43,8 @@ func TestRestartRequired(t *testing.T) {
 		{"branding.server_name", false},
 		{"overlays.enabled", false},
 		{"markers.mode", false},
+		{"markers.detect_intros", false},
+		{"markers.detect_credits", false},
 		{"download.enabled", false},
 		{"download.transcode_enabled", false},
 		{"download.max_concurrent_prepares", false},

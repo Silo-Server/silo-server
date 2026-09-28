@@ -23,7 +23,9 @@ const (
 	ScopeAdminUsers = "admin:users"
 
 	// ScopeAdminAccessGroupsRead covers read-only access-group discovery.
-	ScopeAdminAccessGroupsRead = "admin:access-groups:read"
+	ScopeAdminAccessGroupsRead    = "admin:access-groups:read"
+	ScopeAdminSessionsSummaryRead = "admin:sessions:summary:read"
+	ScopeLibrariesRead            = "libraries:read"
 )
 
 // APIKeyScope is one scope a key may carry, paired with the description
@@ -38,6 +40,8 @@ type APIKeyScope struct {
 // GET /api/v1/api-keys/scopes feature-detection endpoint.
 func APIKeyScopeCatalog() []APIKeyScope {
 	return []APIKeyScope{
+		{Name: ScopeAdminSessionsSummaryRead, Description: "Read live playback summaries without diagnostic details or session control."},
+		{Name: ScopeLibrariesRead, Description: "Discover libraries visible to the account or selected profile, without storage metadata."},
 		{
 			Name: ScopeAdminUsers,
 			Description: "Manage user accounts: create, list, read, update, and delete users and " +
@@ -48,6 +52,38 @@ func APIKeyScopeCatalog() []APIKeyScope {
 			Description: "Read access groups and their policies.",
 		},
 	}
+}
+
+// UnknownAPIKeyScopeError names a requested scope that the catalog being
+// validated against does not contain. Callers use it to report which scope a
+// client sent without re-parsing the message.
+type UnknownAPIKeyScopeError struct {
+	Scope string
+}
+
+func (e *UnknownAPIKeyScopeError) Error() string {
+	return fmt.Sprintf("unknown api key scope %q", e.Scope)
+}
+
+func V1APIKeyScopeCatalog() []APIKeyScope {
+	return []APIKeyScope{{Name: ScopeAdminUsers, Description: "Manage user accounts: create, list, read, update, and delete users and read their profiles. Cannot create or modify admin accounts."}, {Name: ScopeAdminAccessGroupsRead, Description: "Read access groups and their policies."}}
+}
+func NormalizeV1APIKeyScopes(scopes []string) ([]string, error) {
+	if len(scopes) == 0 {
+		return []string{}, nil
+	}
+	valid := []string{ScopeAdminUsers, ScopeAdminAccessGroupsRead}
+	out := []string{}
+	for _, s := range scopes {
+		if !slices.Contains(valid, s) {
+			return nil, &UnknownAPIKeyScopeError{Scope: s}
+		}
+		if !slices.Contains(out, s) {
+			out = append(out, s)
+		}
+	}
+	slices.Sort(out)
+	return out, nil
 }
 
 // ValidAPIKeyScopes returns every scope a key may carry.
@@ -70,7 +106,7 @@ func NormalizeAPIKeyScopes(scopes []string) ([]string, error) {
 	out := make([]string, 0, len(scopes))
 	for _, s := range scopes {
 		if !slices.Contains(valid, s) {
-			return nil, fmt.Errorf("unknown api key scope %q", s)
+			return nil, &UnknownAPIKeyScopeError{Scope: s}
 		}
 		if !slices.Contains(out, s) {
 			out = append(out, s)

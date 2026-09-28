@@ -13,10 +13,10 @@ import {
 } from "./settingValues";
 import type { EventChannelHandlers } from "@/components/realtimeEventsContext";
 
-const apiMock = vi.hoisted(() => vi.fn());
-vi.mock("@/api/client", async () => {
-  const actual = await vi.importActual<typeof import("@/api/client")>("@/api/client");
-  return { ...actual, api: apiMock };
+const v2Mock = vi.hoisted(() => vi.fn());
+vi.mock("@/api/v2/request", async () => {
+  const actual = await vi.importActual<typeof import("@/api/v2/request")>("@/api/v2/request");
+  return { ...actual, v2: v2Mock };
 });
 
 // The provider owns the websocket; the hook under test only cares that it
@@ -78,7 +78,7 @@ function seedEffective(queryClient: QueryClient, value: string) {
 
 describe("useSettingValuesRealtime", () => {
   beforeEach(() => {
-    apiMock.mockReset();
+    v2Mock.mockReset();
     subscriptions.length = 0;
     storage.set(storage.KEYS.PROFILE_ID, "profile-1");
   });
@@ -92,10 +92,12 @@ describe("useSettingValuesRealtime", () => {
   it("refetches a mounted reader when another device changes this profile", async () => {
     const { wrapper } = createHarness();
     let served = "dark";
-    apiMock.mockImplementation(() =>
+    v2Mock.mockImplementation(() =>
       Promise.resolve({
         revision: 1,
-        settings: [{ key: SETTING_KEYS.UI_THEME, value: served, source: "profile" }],
+        items: [
+          { key: SETTING_KEYS.UI_THEME, value: served, source: "profile", definition_revision: 1 },
+        ],
       }),
     );
 
@@ -176,6 +178,6 @@ describe("useSettingValuesRealtime", () => {
       handlers?.onEvent?.(changedFrame({ key, scope: "profile", profile_id: "profile-1" }));
     }
 
-    expect(apiMock).not.toHaveBeenCalled();
+    expect(v2Mock).not.toHaveBeenCalled();
   });
 });
