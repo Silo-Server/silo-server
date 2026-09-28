@@ -181,11 +181,13 @@ var urlInText = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://\S+`)
 // is masked whole, spaces and all; an unterminated quote masks to the end.
 var authSchemeInText = regexp.MustCompile(`(?i)\b(bearer|basic)(\s+)(?:"([^"]*)"?|'([^']*)'?|([^\s"',;]+))`)
 
-var authSchemeProse = map[string]bool{
-	"auth": true, "authentication": true, "authorization": true,
-	"credential": true, "credentials": true, "header": true,
-	"realm": true, "scheme": true, "token": true,
-}
+var authSchemeProse = func() map[string]bool {
+	words := map[string]bool{}
+	for _, w := range strings.Fields("auth authentication authorization credential credentials header realm scheme token") {
+		words[w] = true
+	}
+	return words
+}()
 
 // keyValueInText matches a key followed by ":" or "=" and its value, as in
 // "api_key=abc" or `"x-api-key": "abc"`. Whether the key names a secret is
