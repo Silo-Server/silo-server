@@ -78,18 +78,14 @@ func registerDownloadDelivery(reg *Registry) {
 				op.Responses["307"].Content = map[string]*huma.MediaType{"text/html": {Schema: &huma.Schema{Type: huma.TypeString}}}
 			}
 		}
-		raw := RawOperation{Operation: Operation{Operation: op, Class: ClassProfileScoped, ServiceBacked: true}, Protocol: "managed-download-" + route.kind, Reason: "Offline media and assets are binary streams; file routes preserve HTTP range, conditional and optional proxy semantics."}
-		RegisterRaw(reg, raw, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if route.kind == "artwork" {
+			op.Responses["503"] = problem("Service Unavailable")
+			op.Responses["503"].Headers = map[string]*huma.Header{}
+			op.Responses["503"].Headers["Retry-After"] = &huma.Header{Schema: &huma.Schema{Type: huma.TypeString}, Description: "Seconds to wait before retrying when the artwork store failed or could not be reached."}
+		}
+		RegisterRaw(reg, RawOperation{Operation: Operation{Operation: op, Class: ClassProfileScoped, ServiceBacked: true}, Protocol: "managed-download-" + route.kind, Reason: "Offline media and assets are binary streams; file routes preserve HTTP range, conditional and optional proxy semantics."}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			reg.serveDownloadDelivery(w, r, route.kind, route.proxy)
 		}))
-		if route.kind == "artwork" {
-			if response := registeredOperation(reg.api.OpenAPI(), raw.Operation).Responses["503"]; response != nil {
-				if response.Headers == nil {
-					response.Headers = map[string]*huma.Header{}
-				}
-				response.Headers["Retry-After"] = &huma.Header{Schema: &huma.Schema{Type: huma.TypeString}, Description: "Seconds to wait before retrying when the artwork store failed or could not be reached."}
-			}
-		}
 	}
 }
 func (reg *Registry) serveDownloadDelivery(w http.ResponseWriter, r *http.Request, kind string, proxy bool) {

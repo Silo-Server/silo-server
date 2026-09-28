@@ -150,12 +150,9 @@ func (s *Service) ServeArtwork(ctx context.Context, w http.ResponseWriter, r *ht
 // the upstream status or whether the fetch timed out is logged.
 func logArtworkUnavailable(ctx context.Context, downloadID, kind string, err error) {
 	attrs := []any{"component", "downloads", "download_id", downloadID, "kind", kind}
-	var status artworkStatusError
-	var netErr net.Error
-	switch {
-	case errors.As(err, &status):
+	if status, ok := errors.AsType[artworkStatusError](err); ok {
 		attrs = append(attrs, "upstream_status", int(status))
-	case errors.As(err, &netErr):
+	} else if netErr, ok := errors.AsType[net.Error](err); ok {
 		attrs = append(attrs, "timeout", netErr.Timeout())
 	}
 	slog.WarnContext(ctx, "download artwork unavailable", attrs...)
@@ -180,9 +177,9 @@ func (s *Service) artworkHTTPClient() *http.Client {
 }
 
 func (s *Service) streamArtwork(ctx context.Context, w http.ResponseWriter, _ *http.Request, imageURL string) error {
-	client := s.artworkHTTPClient()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
 	if err != nil {
+		// Not wrapped: the parse error quotes the presigned URL.
 		return errors.New("building artwork request: invalid artwork URL")
 	}
 	if (req.URL.Scheme != "http" && req.URL.Scheme != "https") || req.URL.Host == "" {
@@ -190,7 +187,7 @@ func (s *Service) streamArtwork(ctx context.Context, w http.ResponseWriter, _ *h
 		// fetched over HTTP. Retrying won't help.
 		return errors.New("fetching artwork: artwork URL is not an absolute http(s) URL")
 	}
-	resp, err := client.Do(req)
+	resp, err := s.artworkHTTPClient().Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
 			// The client went away; the store isn't at fault.
@@ -198,8 +195,7 @@ func (s *Service) streamArtwork(ctx context.Context, w http.ResponseWriter, _ *h
 		}
 		// A failed request's error text repeats the presigned URL; keep only
 		// the cause.
-		var urlErr *url.Error
-		if errors.As(err, &urlErr) {
+		if urlErr, ok := errors.AsType[*url.Error](err); ok {
 			err = urlErr.Err
 		}
 		return fmt.Errorf("fetching artwork: %w: %w", ErrAssetUnavailable, err)
@@ -222,7 +218,12 @@ func (s *Service) streamArtwork(ctx context.Context, w http.ResponseWriter, _ *h
 	// Artwork is immutable for a stored manifest; let the client cache it once.
 	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
 	if _, err := io.Copy(w, resp.Body); err != nil {
-		return fmt.Errorf("streaming artwork: %w", err)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		// The store stopped sending, or timed out mid-body. Before the first
+		// byte is written, v2 can still answer 503.
+		return fmt.Errorf("streaming artwork: %w: %w", ErrAssetUnavailable, err)
 	}
 	return nil
 }

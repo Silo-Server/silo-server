@@ -34,20 +34,18 @@ func TestArtworkUpstreamFailuresAreRetryableAndOmitTheURL(t *testing.T) {
 	} {
 		status = tc.status
 		err := s.streamArtwork(context.Background(), httptest.NewRecorder(), nil, signed)
-		if !errors.Is(err, tc.want) {
+		if !errors.Is(err, tc.want) || (tc.status < 429 && errors.Is(err, ErrAssetUnavailable)) {
 			t.Errorf("upstream %d: err = %v, want %v", tc.status, err, tc.want)
 		}
 	}
 
-	// Local artwork storage signs server-relative URLs: not worth a retry.
-	if err := s.streamArtwork(context.Background(), httptest.NewRecorder(), nil, "/api/v2/artwork/p.jpg?sig=secret"); err == nil ||
-		errors.Is(err, ErrAssetUnavailable) || strings.Contains(err.Error(), "secret") {
-		t.Errorf("relative URL: err = %v", err)
-	}
-
-	// No host: the URL is broken, not the store.
-	if err := s.streamArtwork(context.Background(), httptest.NewRecorder(), nil, "http:///poster.jpg"); err == nil || errors.Is(err, ErrAssetUnavailable) {
-		t.Errorf("hostless URL: err = %v", err)
+	// A server-relative URL (local artwork storage signs these) or a hostless
+	// one is broken, not the store: not worth a retry.
+	for _, broken := range []string{"/api/v2/artwork/p.jpg?sig=secret", "http:///poster.jpg"} {
+		if err := s.streamArtwork(context.Background(), httptest.NewRecorder(), nil, broken); err == nil ||
+			errors.Is(err, ErrAssetUnavailable) || strings.Contains(err.Error(), "secret") {
+			t.Errorf("%s: err = %v", broken, err)
+		}
 	}
 
 	// A client that left isn't the store failing.
@@ -94,5 +92,18 @@ func TestOfflineDepsKeepTheArtworkTimeout(t *testing.T) {
 	s.SetOfflineDeps(nil, nil, nil)
 	if s.artworkHTTPClient() != artworkClient {
 		t.Fatal("artwork fetches lost their timeout")
+	}
+}
+
+func TestArtworkStoreStoppingMidBodyIsRetryable(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Promise bytes, then end the response without sending them.
+		w.Header().Set("Content-Length", "10")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+	s := &Service{httpClient: upstream.Client()}
+	if err := s.streamArtwork(context.Background(), httptest.NewRecorder(), nil, upstream.URL+"/poster.jpg"); !errors.Is(err, ErrAssetUnavailable) {
+		t.Fatalf("err = %v", err)
 	}
 }

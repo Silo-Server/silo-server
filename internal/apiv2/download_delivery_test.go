@@ -142,9 +142,8 @@ func TestDownloadRawAssetFailureBoundaries(t *testing.T) {
 	if rec.Code != 500 || rec.Header().Get("Content-Length") != "" || rec.Header().Get("Content-Type") != problemContentType || strings.Contains(rec.Body.String(), "synthetic upstream") {
 		t.Fatalf("%d %v %s", rec.Code, rec.Header(), rec.Body.String())
 	}
-	// An image store that failed or couldn't be reached is worth a retry,
-	// not a server fault.
-	// An upstream error status is also not-found for v1; v2 still retries.
+	// A failing image store is worth a retry, not a server fault, even when
+	// v1 also reads its error status as not-found.
 	domain.err = fmt.Errorf("artwork upstream status 503: %w: %w", downloads.ErrAssetUnavailable, downloads.ErrAssetNotFound)
 	rec = do(t, h, "GET", path, "", viewer)
 	requireProblem(t, rec, TypeDependencyUnavailable)
