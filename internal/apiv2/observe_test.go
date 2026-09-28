@@ -2,12 +2,14 @@ package apiv2
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -236,5 +238,40 @@ func TestObservedMediaResponseKeepsZeroCopyAndCountsBytes(t *testing.T) {
 	}
 	if inner.Code != http.StatusOK || !strings.Contains(buf.String(), `"body_bytes":65536`) || !strings.Contains(buf.String(), `"status":200`) {
 		t.Fatalf("status %d, log %s", inner.Code, buf.String())
+	}
+}
+
+func TestObservedCopyFailingOnFirstReadKeepsErrorStatus(t *testing.T) {
+	buf := captureLogs(t)
+	inner := &zeroCopyWriter{ResponseRecorder: httptest.NewRecorder()}
+	h := observe(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.Copy(w, struct{ io.Reader }{iotest.ErrReader(io.ErrUnexpectedEOF)}); err == nil {
+			t.Error("copy succeeded")
+		}
+		http.Error(w, "upstream failed", http.StatusInternalServerError)
+	}))
+	h.ServeHTTP(inner, httptest.NewRequest(http.MethodGet, "/api/v2/downloads/d1/artwork/poster", nil))
+	if inner.Code != http.StatusInternalServerError || !strings.Contains(buf.String(), `"status":500`) {
+		t.Fatalf("status %d, log %s", inner.Code, buf.String())
+	}
+}
+
+// failingFlushWriter reports a transport error when flushed, as net/http does
+// after a write deadline passes.
+type failingFlushWriter struct{ *httptest.ResponseRecorder }
+
+func (failingFlushWriter) FlushError() error { return errFlushFailed }
+
+var errFlushFailed = errors.New("synthetic flush failure")
+
+func TestObservedFlushReturnsTransportError(t *testing.T) {
+	inner := failingFlushWriter{httptest.NewRecorder()}
+	var got error
+	h := observe(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = http.NewResponseController(w).Flush()
+	}))
+	h.ServeHTTP(inner, httptest.NewRequest(http.MethodGet, "/api/v2/downloads/d1/file", nil))
+	if !errors.Is(got, errFlushFailed) {
+		t.Fatalf("flush error = %v", got)
 	}
 }

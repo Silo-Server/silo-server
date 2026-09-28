@@ -199,20 +199,28 @@ func (s *statusRecorder) Write(p []byte) (int, error) {
 // only when the writer it wraps does, so without this a managed download file
 // is copied through a 32 KB buffer instead of sendfile.
 func (s *statusRecorder) ReadFrom(src io.Reader) (int64, error) {
-	if s.status == 0 {
-		s.status = http.StatusOK
-	}
 	// Bytes that fall back to Write are counted there.
-	return httpstream.ForwardReadFrom(s.ResponseWriter, s, src, 0, func(n int64, _ error) { s.bytes += n })
+	return httpstream.ForwardReadFrom(s.ResponseWriter, s, src, 0, func(n int64, _ error) {
+		// net/http commits the header only once the source yields bytes, so
+		// a handler whose copy failed at once can still send an error status.
+		if n > 0 && s.status == 0 {
+			s.status = http.StatusOK
+		}
+		s.bytes += n
+	})
 }
 
-// Flush commits the headers like the writer it wraps would.
-func (s *statusRecorder) Flush() {
+// FlushError commits the headers like the writer it wraps would, and passes
+// that writer's flush error to http.ResponseController callers.
+func (s *statusRecorder) FlushError() error {
 	if s.status == 0 {
 		s.status = http.StatusOK
 	}
-	_ = http.NewResponseController(s.ResponseWriter).Flush()
+	return http.NewResponseController(s.ResponseWriter).Flush()
 }
+
+// Flush serves callers that use http.Flusher.
+func (s *statusRecorder) Flush() { _ = s.FlushError() }
 
 func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 

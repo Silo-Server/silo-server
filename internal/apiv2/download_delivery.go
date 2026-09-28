@@ -95,14 +95,20 @@ func (reg *Registry) serveDownloadDelivery(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writer := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
+	// Artwork and subtitles are copied from stores that can fail on the first
+	// read. Hiding ReadFrom leaves the wrapper to commit 200 on the first byte
+	// written rather than before the first read, so that failure still gets
+	// its problem response. Files keep ReadFrom for sendfile; ServeContent
+	// writes their header before copying anyway.
+	asset := struct{ http.ResponseWriter }{writer}
 	var err error
 	switch kind {
 	case "file":
 		err = reg.deps.DownloadDelivery.ServeDownloadFile(writer, r, id, proxy)
 	case "artwork":
-		err = reg.deps.DownloadDelivery.ServeDownloadArtwork(writer, r, id, chi.URLParam(r, "kind"))
+		err = reg.deps.DownloadDelivery.ServeDownloadArtwork(asset, r, id, chi.URLParam(r, "kind"))
 	case "subtitle":
-		err = reg.deps.DownloadDelivery.ServeDownloadSubtitle(writer, r, id, chi.URLParam(r, "ref"))
+		err = reg.deps.DownloadDelivery.ServeDownloadSubtitle(asset, r, id, chi.URLParam(r, "ref"))
 	}
 	if err == nil || writer.Status() != 0 {
 		return
