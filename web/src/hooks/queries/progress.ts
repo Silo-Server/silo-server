@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueries, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/api/client";
-import type { ProgressListResponse, ProgressEntry, ItemDetail } from "@/api/types";
+import type { ItemDetail } from "@/api/types";
+import { v2, type V2Result } from "@/api/v2/request";
 import { catalogKeys, progressKeys } from "./keys";
 import { fetchCatalogItemDetail } from "./catalogRead";
 
@@ -8,25 +8,27 @@ interface ContinueWatchingOptions {
   enabled?: boolean;
 }
 
+/** The first page of the profile's progress list as the v2 contract returns it. */
+export type ProgressList = V2Result<"GET /api/v2/progress">;
+export type ProgressListEntry = ProgressList["items"][number];
+
 export function useProgressList(libraryId?: number, options?: ContinueWatchingOptions) {
   return useQuery({
     queryKey: progressKeys.list("in_progress", libraryId),
-    queryFn: () => {
-      const searchParams = new URLSearchParams({
-        status: "in_progress",
-        limit: "20",
-      });
-      if (libraryId) {
-        searchParams.set("library_id", String(libraryId));
-      }
-      return api<ProgressListResponse>(`/progress?${searchParams.toString()}`);
-    },
+    queryFn: () =>
+      v2("GET /api/v2/progress", {
+        query: {
+          status: "in_progress",
+          limit: 20,
+          library_id: libraryId ? String(libraryId) : undefined,
+        },
+      }),
     enabled: options?.enabled ?? true,
   });
 }
 
 export interface ContinueWatchingItem {
-  progress: ProgressEntry;
+  progress: ProgressListEntry;
   detail: ItemDetail | undefined;
   isLoading: boolean;
 }
@@ -43,12 +45,12 @@ export function useContinueWatching(
     enabled,
   });
 
-  const entries = progressData?.progress ?? [];
+  const entries = progressData?.items ?? [];
 
   const detailQueries = useQueries({
     queries: entries.map((entry) => ({
       queryKey: catalogKeys.itemDetail(entry.media_item_id),
-      queryFn: () => fetchCatalogItemDetail(entry.media_item_id),
+      queryFn: ({ signal }) => fetchCatalogItemDetail(entry.media_item_id, undefined, { signal }),
       enabled: enabled && !!entry.media_item_id,
       staleTime: 2 * 60 * 1000,
     })),
@@ -76,25 +78,28 @@ interface ReportMediaProgressVars {
 export function useReportMediaProgress() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({
+    mutationFn: async ({
       contentId,
       positionSeconds,
       durationSeconds,
       forceOverwrite = true,
-    }: ReportMediaProgressVars) =>
-      api("/sync/progress", {
-        method: "POST",
-        body: JSON.stringify({
+    }: ReportMediaProgressVars) => {
+      const result = await v2("POST /api/v2/sync/progress", {
+        body: {
           items: [
             {
               media_item_id: contentId,
-              position: positionSeconds,
-              duration: durationSeconds,
+              position_ms: Math.round(positionSeconds * 1000),
+              duration_ms: Math.round(durationSeconds * 1000),
               force_overwrite: forceOverwrite,
             },
           ],
-        }),
-      }),
+        },
+      });
+      const failed = result.items.find((item) => item.status === "failure");
+      if (failed?.status === "failure") throw new Error(failed.failure.detail);
+      return result;
+    },
     onSuccess: (_data, variables) => {
       // Progress genuinely changed → refresh progress-derived surfaces
       // (continue-watching etc.). Scope the catalog invalidation to THIS item's

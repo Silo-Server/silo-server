@@ -30,6 +30,7 @@ type RequestService interface {
 	Cancel(ctx context.Context, viewer mediarequests.Viewer, id, reason string) (*mediarequests.Request, error)
 	Retry(ctx context.Context, viewer mediarequests.Viewer, id string) (*mediarequests.Request, error)
 	GetFeatureStatus(ctx context.Context, viewer mediarequests.Viewer) (mediarequests.FeatureStatus, error)
+	RequestCapabilityAllowed(ctx context.Context, viewer mediarequests.Viewer) (bool, error)
 	GetSettings(ctx context.Context, viewer mediarequests.Viewer) (mediarequests.Settings, error)
 	UpdateSettings(ctx context.Context, viewer mediarequests.Viewer, settings mediarequests.Settings) (mediarequests.Settings, error)
 	GetUserLimit(ctx context.Context, viewer mediarequests.Viewer, userID int) (*mediarequests.UserLimit, error)
@@ -55,6 +56,10 @@ type RequestsHandler struct {
 func NewRequestsHandler(service RequestService) *RequestsHandler {
 	return &RequestsHandler{service: service}
 }
+
+// Service is the request service this handler routes to; the v2 listener
+// calls the same value so both surfaces share one store and one policy.
+func (h *RequestsHandler) Service() RequestService { return h.service }
 
 func (h *RequestsHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 	viewer, ok := requestViewer(w, r, true)

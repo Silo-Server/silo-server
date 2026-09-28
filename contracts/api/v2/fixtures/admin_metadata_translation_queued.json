@@ -1,0 +1,18 @@
+{
+  "id": "7",
+  "target_kind": "",
+  "content_id": "item-1",
+  "include_children": false,
+  "source_language": "",
+  "target_language": "de",
+  "engine": "",
+  "model": "",
+  "status": "",
+  "progress": 0,
+  "progress_message": "",
+  "fields_done": 0,
+  "fields_total": 0,
+  "force": false,
+  "created_at": "2026-01-02T03:04:05.678Z",
+  "updated_at": "2026-01-02T03:04:05.678Z"
+}

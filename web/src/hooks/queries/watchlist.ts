@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/api/client";
 import type { BrowseItem } from "@/api/types";
+import { catalogItemFromV2 } from "@/api/v2/catalog";
+import { v2 } from "@/api/v2/request";
 import { watchlistKeys } from "./keys";
 import { toast } from "sonner";
 import {
@@ -12,7 +13,8 @@ import {
 export function useWatchlist() {
   return useQuery({
     queryKey: watchlistKeys.list(),
-    queryFn: () => api<{ items: BrowseItem[] }>("/watchlist").then((d) => d.items ?? []),
+    queryFn: ({ signal }): Promise<BrowseItem[]> =>
+      v2("GET /api/v2/watchlist", { signal }).then((data) => data.items.map(catalogItemFromV2)),
   });
 }
 
@@ -21,9 +23,9 @@ export function useToggleWatchlist(itemId: string) {
 
   return useMutation({
     mutationFn: (currentlyInWatchlist: boolean) =>
-      api(`/watchlist/${itemId}`, {
-        method: currentlyInWatchlist ? "DELETE" : "PUT",
-      }),
+      currentlyInWatchlist
+        ? v2("DELETE /api/v2/watchlist/{item_id}", { path: { item_id: itemId } })
+        : v2("PUT /api/v2/watchlist/{item_id}", { path: { item_id: itemId } }),
     onMutate: async (currentlyInWatchlist: boolean) => {
       await cancelItemDetailQueries(queryClient, itemId);
       updateCatalogItemDetail(queryClient, itemId, (detail) => ({

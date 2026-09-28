@@ -1,7 +1,18 @@
+import {
+  captureEbookProgressIntent,
+  fetchEbookReaderProgress,
+  saveEbookReaderProgress,
+  type EbookProgressIntent,
+  type EbookReaderProgress,
+  type EbookReaderProgressPayload,
+} from "./ebookProgressApi";
+export { fetchEbookReaderProgress, saveEbookReaderProgress } from "./ebookProgressApi";
+export type { EbookReaderProgress, EbookReaderProgressPayload } from "./ebookProgressApi";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
+import { readEbookBlob } from "@/api/v2/ebookFile";
 
-import { api, apiBlob, apiKeepalive } from "@/api/client";
+import { captureProfileRequestContext, isCapturedProfileAuthorityActive } from "@/api/client";
 import type { FileVersion } from "@/api/types";
 import { ebookKeys } from "@/hooks/queries/keys";
 import type { EbookReaderAnnotation } from "@/reader/ebookReaderApi";
@@ -36,17 +47,6 @@ type FoliateViewElement = HTMLElement & {
 export type ReaderLoadState = {
   objectUrl: string;
   filename: string;
-};
-
-export type EbookReaderProgressPayload = {
-  file_id: number;
-  location: string;
-  progress: number;
-};
-
-export type EbookReaderProgress = EbookReaderProgressPayload & {
-  content_id?: string;
-  updated_at?: string;
 };
 
 export type RestoreProgressTarget =
@@ -175,14 +175,6 @@ export const DEFAULT_READER_SETTINGS: ReaderSettings = {
   readingRuler: false,
   readingRulerTop: 50,
 };
-
-export function ebookReadPath(contentID: string, fileID: number): string {
-  return `/ebooks/${encodeURIComponent(contentID)}/files/${fileID}/read`;
-}
-
-export function ebookProgressPath(contentID: string): string {
-  return `/ebooks/${encodeURIComponent(contentID)}/progress`;
-}
 
 export function ebookReaderProgressQueryKey(contentID: string | undefined) {
   return ebookKeys.readerProgress(contentID);
@@ -363,35 +355,6 @@ export function normalizeReaderSettings(settings?: Partial<ReaderSettings>): Rea
   };
 }
 
-export async function fetchEbookReaderProgress(
-  contentID: string,
-): Promise<EbookReaderProgress | null> {
-  const progress = await api<Partial<EbookReaderProgress>>(ebookProgressPath(contentID));
-  if (!progress || typeof progress.location !== "string" || progress.location.trim() === "") {
-    return null;
-  }
-  if (typeof progress.file_id !== "number" || typeof progress.progress !== "number") {
-    return null;
-  }
-  return {
-    file_id: progress.file_id,
-    location: progress.location,
-    progress: progress.progress,
-    content_id: progress.content_id,
-    updated_at: progress.updated_at,
-  };
-}
-
-export async function saveEbookReaderProgress(
-  contentID: string,
-  progress: EbookReaderProgressPayload,
-): Promise<EbookReaderProgress> {
-  return api<EbookReaderProgress>(ebookProgressPath(contentID), {
-    method: "PUT",
-    body: JSON.stringify(progress),
-  });
-}
-
 function readerColors(theme: ReaderTheme) {
   switch (theme) {
     case "dark":
@@ -521,7 +484,7 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
     const viewRef = useRef<FoliateViewElement | null>(null);
     const initializedRef = useRef(false);
     const saveTimerRef = useRef<number | null>(null);
-    const pendingProgressRef = useRef<EbookReaderProgressPayload | null>(null);
+    const pendingProgressRef = useRef<EbookProgressIntent | null>(null);
     const progressSaveSeqRef = useRef(0);
     const settingsRef = useRef(normalizeReaderSettings(settings));
     const appliedRendererKeyRef = useRef("");
@@ -683,6 +646,7 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
     }, [annotations, drawAnnotations]);
 
     useEffect(() => {
+      const progressAuthority = captureProfileRequestContext();
       let cancelled = false;
       let objectUrl: string | null = null;
       let openedBook: DisposableBookDoc | null = null;
@@ -725,16 +689,18 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
         if (options?.keepalive) {
           // The page may be unloading; fire a keepalive PUT so the write survives
           // teardown. The response cannot be observed, so skip cache updates.
-          apiKeepalive(ebookProgressPath(contentID), {
-            method: "PUT",
-            body: JSON.stringify(pending),
+          void saveEbookReaderProgress(contentID, pending, true).catch(() => {
+            // Best-effort during unload; the captured event and authority stay fixed.
           });
           return;
         }
         saveEbookReaderProgress(contentID, pending).then(
           (saved) => {
             // Saves can resolve out of order; only the newest may cache its response.
-            if (seq === progressSaveSeqRef.current) {
+            if (
+              seq === progressSaveSeqRef.current &&
+              isCapturedProfileAuthorityActive(pending.profileContext)
+            ) {
               cacheEbookReaderProgress(queryClient, contentID, saved);
             }
           },
@@ -745,7 +711,7 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
       };
 
       const scheduleProgressSave = (progress: EbookReaderProgressPayload) => {
-        pendingProgressRef.current = progress;
+        pendingProgressRef.current = captureEbookProgressIntent(progress, progressAuthority);
         if (saveTimerRef.current !== null) {
           window.clearTimeout(saveTimerRef.current);
         }
@@ -769,7 +735,7 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
         try {
           const format = readerFileFormat(file);
           const [blob, savedProgress] = await Promise.all([
-            apiBlob(ebookReadPath(contentID, file.file_id)),
+            readEbookBlob(contentID, file.file_id, progressAuthority),
             fetchEbookReaderProgress(contentID),
           ]);
           if (cancelled) return;

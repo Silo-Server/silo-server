@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SETTING_KEYS } from "@/lib/settingsContract";
@@ -43,7 +44,7 @@ function resolved(value: unknown, source: EffectiveSetting["source"]): Effective
   return { [KEY]: { key: KEY, value, source } };
 }
 
-function renderScreen() {
+function renderScreen(props: Partial<ComponentProps<typeof PlayingNextScreen>> = {}) {
   render(
     <PlayingNextScreen
       seriesId="series-1"
@@ -59,6 +60,7 @@ function renderScreen() {
       videoEnded={false}
       onPlayItem={() => {}}
       onClose={() => {}}
+      {...props}
     />,
   );
 }
@@ -131,5 +133,43 @@ describe("PlayingNextScreen auto-play toggle", () => {
         identity: { scope: "profile_device" },
       }),
     );
+  });
+});
+
+describe("PlayingNextScreen next-episode start", () => {
+  beforeEach(() => {
+    mocks.useEffectiveSettings.mockReset().mockReturnValue({ data: {}, isLoading: false });
+    mocks.useSetSettingValue
+      .mockReset()
+      .mockReturnValue({ isPending: false, mutateAsync: vi.fn() });
+    mocks.useClearSettingValue
+      .mockReset()
+      .mockReturnValue({ isPending: false, mutateAsync: vi.fn() });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("starts the next episode as an automatic start when the countdown runs out", () => {
+    vi.useFakeTimers();
+    const onPlayNow = vi.fn();
+    renderScreen({ videoEnded: true, onPlayNow });
+
+    act(() => vi.advanceTimersByTime(10_000));
+
+    expect(onPlayNow).toHaveBeenCalledOnce();
+    expect(onPlayNow).toHaveBeenCalledWith("automatic");
+  });
+
+  it("starts the next episode as the viewer's start from Play Now or Enter", () => {
+    const onPlayNow = vi.fn();
+    renderScreen({ onPlayNow });
+
+    fireEvent.click(screen.getByRole("button", { name: "Play Now" }));
+    fireEvent.keyDown(document, { key: "Enter" });
+
+    expect(onPlayNow.mock.calls).toEqual([["viewer"], ["viewer"]]);
   });
 });

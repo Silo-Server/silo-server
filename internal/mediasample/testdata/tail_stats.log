@@ -1,0 +1,88 @@
+# jellyfin-ffmpeg 7.1.4 log lines of a keyframes-only tail pass (crop .9x.8, blackframe 20/26/32).
+# Taken from a validation run; paths and titles removed, a third frame cut short and silences added.
+[hevc @ 0x58621b685900] Multiple Dolby Vision RPUs found in one AU. Skipping previous.
+    Last message repeated 241 times
+[Parsed_blackframe_3 @ 0x79f0e400ff00] frame:0 pblack:45 pts:1160 t:1.160000 type:I last_keyframe:0
+[Parsed_blackframe_4 @ 0x79f0e4010180] frame:0 pblack:57 pts:1160 t:1.160000 type:I last_keyframe:0
+[Parsed_blackframe_5 @ 0x79f0e4010400] frame:0 pblack:67 pts:1160 t:1.160000 type:I last_keyframe:0
+[hevc @ 0x58621b685900] Multiple Dolby Vision RPUs found in one AU. Skipping previous.
+    Last message repeated 7 times
+[Parsed_metadata_7 @ 0x79f0e4010880] frame:0    pts:1160    pts_time:1.16
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.blackframe.pblack=67
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.YMIN=15
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.YLOW=16
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.YAVG=29.2094
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.YHIGH=50
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.YMAX=158
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.UMIN=117
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.ULOW=125
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.UAVG=126.871
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.UHIGH=128
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.UMAX=138
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.VMIN=122
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.VLOW=128
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.VAVG=128.192
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.VHIGH=129
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.VMAX=140
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.SATMIN=0
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.SATLOW=0
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.SATAVG=1.32843
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.SATHIGH=3
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.SATMAX=13
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.HUEMED=135
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.HUEAVG=135.761
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.YDIF=0
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.UDIF=0
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.VDIF=0
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.YBITDEPTH=8
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.UBITDEPTH=8
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.VBITDEPTH=8
+[hevc @ 0x58621b685900] Multiple Dolby Vision RPUs found in one AU. Skipping previous.
+    Last message repeated 49 times
+[Parsed_blackframe_3 @ 0x79f0e400ff00] frame:1 pblack:0 pts:4288 t:4.288000 type:I last_keyframe:1
+[hevc @ 0x58621b685900] Multiple Dolby Vision RPUs found in one AU. Skipping previous.
+    Last message repeated 2 times
+[Parsed_blackframe_4 @ 0x79f0e4010180] frame:1 pblack:25 pts:4288 t:4.288000 type:I last_keyframe:1
+[hevc @ 0x58621b685900] Multiple Dolby Vision RPUs found in one AU. Skipping previous.
+    Last message repeated 2 times
+[Parsed_blackframe_5 @ 0x79f0e4010400] frame:1 pblack:71 pts:4288 t:4.288000 type:I last_keyframe:1
+[hevc @ 0x58621b685900] Multiple Dolby Vision RPUs found in one AU. Skipping previous.
+    Last message repeated 3 times
+[Parsed_metadata_7 @ 0x79f0e4010880] frame:1    pts:4288    pts_time:4.288
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.blackframe.pblack=71
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.YMIN=23
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.YLOW=24
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.YAVG=30.8923
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.YHIGH=42
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.YMAX=131
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.UMIN=120
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.ULOW=125
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.UAVG=126.978
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.UHIGH=128
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.UMAX=131
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.VMIN=125
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.VLOW=127
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.VAVG=128.093
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.VHIGH=129
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.VMAX=134
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.SATMIN=0
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.SATLOW=0
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.SATAVG=1.14626
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.SATHIGH=3
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.SATMAX=9
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.HUEMED=90
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.HUEAVG=111.122
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.YDIF=14.6236
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.UDIF=1.35903
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.VDIF=0.585164
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.YBITDEPTH=8
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.UBITDEPTH=8
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.signalstats.VBITDEPTH=8
+[hevc @ 0x58621b685900] Multiple Dolby Vision RPUs found in one AU. Skipping previous.
+    Last message repeated 43 times
+frame=    2 fps=0.0 q=-0.0 size=N/A time=00:00:04.28 bitrate=N/A speed=8.1x    [Parsed_blackframe_3 @ 0x79f0e400ff00] frame:2 pblack:99 pts:9300 t:9.300000 type:I last_keyframe:2
+[Parsed_blackframe_5 @ 0x79f0e4010400] frame:2 pblack:99 pts:9300 t:9.300000 type:I last_keyframe:2
+[Parsed_metadata_7 @ 0x79f0e4010880] frame:2    pts:9300    pts_time:9.3
+[Parsed_metadata_7 @ 0x79f0e4010880] lavfi.blackframe.pblack=99
+[silencedetect @ 0x777348001100] silence_start: 5.183708
+[silencedetect @ 0x777348001100] silence_end: 9.5 | silence_duration: 4.316292

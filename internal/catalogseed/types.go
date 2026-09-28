@@ -36,14 +36,20 @@ type LibraryRecord struct {
 }
 
 type ItemRecord struct {
-	ContentID         string     `json:"content_id"`
-	Type              string     `json:"type"`
-	Title             string     `json:"title"`
-	SortTitle         string     `json:"sort_title"`
-	OriginalTitle     string     `json:"original_title"`
-	Year              int        `json:"year"`
-	Genres            []string   `json:"genres"`
-	ContentRating     string     `json:"content_rating"`
+	ContentID     string   `json:"content_id"`
+	Type          string   `json:"type"`
+	Title         string   `json:"title"`
+	SortTitle     string   `json:"sort_title"`
+	OriginalTitle string   `json:"original_title"`
+	Year          int      `json:"year"`
+	Genres        []string `json:"genres"`
+	ContentRating string   `json:"content_rating"`
+	// AdvisoryAge and AdvisorySource round-trip the item's advisory.
+	// Unlike content_rating_age they are not derivable from anything else in
+	// the bundle, and the providers that supply them are rate limited, so an
+	// import that dropped them would need a re-enrichment pass to recover.
+	AdvisoryAge       *int       `json:"advisory_age,omitempty"`
+	AdvisorySource    string     `json:"advisory_source,omitempty"`
 	Runtime           int        `json:"runtime"`
 	Overview          string     `json:"overview"`
 	Tagline           string     `json:"tagline"`

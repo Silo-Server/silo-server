@@ -1,0 +1,8 @@
+{
+  "subscription_id": "monitor",
+  "registered": 1,
+  "examined": 3,
+  "page": {
+    "has_more": false
+  }
+}

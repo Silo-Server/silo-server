@@ -1,0 +1,9 @@
+{
+  "task_key": "fixture",
+  "triggers": [
+    {
+      "type": "interval",
+      "interval_ms": 1000
+    }
+  ]
+}

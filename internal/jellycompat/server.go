@@ -9,10 +9,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
@@ -27,16 +29,29 @@ import (
 // Dependencies holds the pluggable pieces used by the compat server.
 type Dependencies struct {
 	Config *config.Config
+	// ArtworkHandler serves signed native asset URLs after compatibility redirects.
+	ArtworkHandler http.Handler
 	// AppContext is the process lifecycle context. When set, it bounds the
 	// periodic orphan-transcode sweep so it stops on shutdown; nil (tests) makes
 	// the sweep a single boot-time run instead of a long-lived ticker.
 	AppContext context.Context
+	// RegisterShutdownWork retains asynchronous cleanup completion until the
+	// owning process's graceful-shutdown deadline. Nil is valid for embeddings.
+	RegisterShutdownWork func(<-chan struct{})
 	// LiveConfig returns the current hot-reloaded config. May be nil (tests,
 	// worker modes); read through CurrentConfig(), which falls back to Config.
 	LiveConfig       func() *config.Config
 	DB               *pgxpool.Pool
 	SecretCipher     *secret.Cipher // at-rest credential cipher (required when DB is set)
 	ClientIPResolver *clientip.Resolver
+	// IngressTokens validates the X-Silo-Ingress-Token network access
+	// provider plugins stamp on proxied requests. Nil accepts no tokens.
+	IngressTokens *netaccess.Registry
+	// ActivityLogWriter records compat requests in the same activity log as the
+	// native API, attributed to the compat session's account. Nil disables it.
+	ActivityLogWriter activitylog.Writer
+	// NodeID stamps activity log entries with the serving node.
+	NodeID string
 	// StreamTelemetry is the local observation-only registry shared with the
 	// native API process. May be nil, which makes every media route unobserved.
 	StreamTelemetry *streamtelemetry.Registry
@@ -69,6 +84,11 @@ type Dependencies struct {
 	// completes a watch, so fully-watched items leave the watchlist. Optional.
 	WatchCompletionObserver watchstate.CompletionObserver
 
+	// UserStateEvents, when set, carries watched-state changes between the
+	// compatibility layer, first-party clients and API replicas, and feeds the
+	// socket's UserDataChanged notifications.
+	UserStateEvents UserStateEvents
+
 	// Autoscan / admin compatibility support.
 	APIKeyValidator  apiKeyValidator
 	APIKeyUserLoader apiKeyUserLoader
@@ -98,11 +118,14 @@ type Dependencies struct {
 	// the activity dashboard doesn't wait for the periodic reconciler tick.
 	// Optional.
 	SessionSyncer          PlaybackSessionSyncer
+	MarkerPopulation       MarkerPopulationService
 	FileResolver           FilePathResolver
+	MediaSourceOwners      MediaSourceOwnerLookup // optional; resolves media-source ids sent as item ids
 	UserStoreProvider      userstore.UserStoreProvider
 	WatchScrobbler         PlaybackWatchScrobbler
 	StableIdentityResolver watchsync.ScrobbleIdentityResolver
 	AccessFilterFn         AccessFilterResolver
+	PlaybackScopeResolver  ScopeResolver
 	NodePlanner            nodepool.SessionPlanner
 	JWTSecret              string
 	Recommender            recommendations.Recommender
@@ -112,9 +135,8 @@ type Dependencies struct {
 	SettingsRepo SettingsReader
 
 	// Subtitle support (optional)
-	SubtitleRepo subtitles.Repository // optional; downloaded subtitle support
-	S3Client     subtitles.S3Client   // optional
-	S3Bucket     string               // optional
+	SubtitleRepo  subtitles.Repository // optional; downloaded subtitle support
+	SubtitleBlobs subtitles.BlobStore  // optional; backs downloaded subtitle reads
 }
 
 // CurrentConfig returns the live config when hot reload is wired, falling
@@ -181,7 +203,7 @@ func (s *Server) SessionStore() *SessionStore {
 func (s *Server) StartBackgroundTasks(ctx context.Context) <-chan struct{} {
 	if s.deps.DB != nil {
 		repo := NewSessionRepository(s.deps.DB, s.deps.SecretCipher)
-		StartSessionCleanupWithPlaybackStore(ctx, repo, s.deps.PlaybackStore, 1*time.Hour)
+		StartSessionCleanupWithPlaybackStore(ctx, repo, s.deps.PlaybackStore, s.deps.DeviceProfiles, 1*time.Hour)
 	}
 	return StartTerminalScrobbleRecovery(ctx, s.deps.PlaybackStore, s.deps.WatchScrobbler, 30*time.Second)
 }

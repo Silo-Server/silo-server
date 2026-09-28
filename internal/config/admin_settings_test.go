@@ -34,6 +34,29 @@ func TestEffectiveAdminSettingsUsesRuntimeDefaults(t *testing.T) {
 	}
 }
 
+func TestEffectiveAdminSettingsMarkerDefaultsPreserveExplicitModes(t *testing.T) {
+	for _, mode := range []string{"", "off", "local", "online", "both"} {
+		t.Run("mode_"+mode, func(t *testing.T) {
+			effective := EffectiveAdminSettings(map[string]string{"markers.mode": mode})
+			want := mode
+			if want == "" {
+				want = "both"
+			}
+			if got := effective["markers.mode"]; got != want {
+				t.Fatalf("markers.mode = %q, want %q", got, want)
+			}
+			if got := effective["markers.online_storage"]; got != "stored" {
+				t.Fatalf("markers.online_storage = %q, want stored", got)
+			}
+			for _, key := range []string{"markers.detect_intros", "markers.detect_credits"} {
+				if got := effective[key]; got != "true" {
+					t.Fatalf("%s = %q, want true", key, got)
+				}
+			}
+		})
+	}
+}
+
 func TestEffectiveAdminSettingsUsesLegacyS3FallbacksBeforeDefaults(t *testing.T) {
 	effective := EffectiveAdminSettings(map[string]string{
 		"s3.operational_path_style": "false",
@@ -462,7 +485,7 @@ func TestHiddenTierDefaultsAreExposed(t *testing.T) {
 		"recommendations.embedding_provider":     "ollama",
 		"recommendations.embeddings_job_timeout": "24h",
 		"policy.editor_enabled":                  "false",
-		"policy.eval_timeout_ms":                 "25",
+		"policy.eval_timeout_ms":                 "100",
 		"subtitle_ai.live_asr_chunk_seconds":     "30",
 		"scanner.max_concurrent_libraries":       "1",
 		"scanner.max_concurrent_scoped":          "2",
@@ -480,5 +503,20 @@ func TestHiddenTierDefaultsAreExposed(t *testing.T) {
 		if _, err := NormalizeAdminSetting(key, value); err != nil {
 			t.Errorf("default for %q is rejected by NormalizeAdminSetting: %v", key, err)
 		}
+	}
+}
+
+func TestHEVCEncodingSettingDefaultAndValidation(t *testing.T) {
+	if got := EffectiveAdminSettings(nil)[PlaybackAllowHEVCEncodingSettingKey]; got != "false" {
+		t.Fatalf("HEVC default=%q", got)
+	}
+	for _, raw := range []string{"true", "false"} {
+		got, err := NormalizeAdminSetting(PlaybackAllowHEVCEncodingSettingKey, raw)
+		if err != nil || got != raw {
+			t.Fatalf("normalize %q: %q %v", raw, got, err)
+		}
+	}
+	if _, err := NormalizeAdminSetting(PlaybackAllowHEVCEncodingSettingKey, "invalid"); err == nil {
+		t.Fatal("invalid HEVC boolean accepted")
 	}
 }

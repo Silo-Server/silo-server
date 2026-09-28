@@ -112,7 +112,9 @@ func (h *AutoscanHandler) SetPublicURL(publicURL string) {
 
 // --- Settings ---
 
-type autoscanSettingsResponse struct {
+type autoscanSettingsResponse = AdminAutoscanSettingsView
+
+type AdminAutoscanSettingsView struct {
 	Enabled                    bool `json:"enabled"`
 	DefaultPollIntervalSeconds int  `json:"default_poll_interval_seconds"`
 	DebounceSeconds            int  `json:"debounce_seconds"`
@@ -127,12 +129,20 @@ func settingsResponse(s autoscan.Settings) autoscanSettingsResponse {
 }
 
 func (h *AutoscanHandler) HandleGetSettings(w http.ResponseWriter, r *http.Request) {
-	settings, err := h.repo.GetSettings(r.Context())
+	settings, err := h.ReadAdminAutoscanSettings(r.Context())
 	if err != nil {
 		writeAutoscanError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, settingsResponse(settings))
+	writeJSON(w, http.StatusOK, settings)
+}
+
+func (h *AutoscanHandler) ReadAdminAutoscanSettings(ctx context.Context) (AdminAutoscanSettingsView, error) {
+	settings, err := h.repo.GetSettings(ctx)
+	if err != nil {
+		return AdminAutoscanSettingsView{}, err
+	}
+	return settingsResponse(settings), nil
 }
 
 func (h *AutoscanHandler) HandleUpdateSettings(w http.ResponseWriter, r *http.Request) {
@@ -179,7 +189,9 @@ func (h *AutoscanHandler) HandleUpdateSettings(w http.ResponseWriter, r *http.Re
 // includes api_key_ref or any resolved credential: callers manage credentials
 // either by setting an api-key ref (write-only) or by linking a Requests
 // integration.
-type autoscanConnectionResponse struct {
+type autoscanConnectionResponse = AdminAutoscanConnectionView
+
+type AdminAutoscanConnectionView struct {
 	ID                   string  `json:"id"`
 	Name                 string  `json:"name"`
 	Kind                 string  `json:"kind"`
@@ -245,18 +257,27 @@ func normalizeRequestIntegrationID(ref *string) *string {
 }
 
 func (h *AutoscanHandler) HandleListConnections(w http.ResponseWriter, r *http.Request) {
-	conns, err := h.repo.ListConnections(r.Context())
+	out, err := h.ReadAdminAutoscanConnections(r.Context())
 	if err != nil {
 		writeAutoscanError(w, err)
 		return
 	}
-	out := make([]autoscanConnectionResponse, 0, len(conns))
+	writeJSON(w, http.StatusOK, struct {
+		Connections []AdminAutoscanConnectionView `json:"connections"`
+	}{out})
+}
+
+// ReadAdminAutoscanConnections returns configured connections without resolving credentials.
+func (h *AutoscanHandler) ReadAdminAutoscanConnections(ctx context.Context) ([]AdminAutoscanConnectionView, error) {
+	conns, err := h.repo.ListConnections(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AdminAutoscanConnectionView, 0, len(conns))
 	for _, c := range conns {
 		out = append(out, connectionResponse(c))
 	}
-	writeJSON(w, http.StatusOK, struct {
-		Connections []autoscanConnectionResponse `json:"connections"`
-	}{Connections: out})
+	return out, nil
 }
 
 func (h *AutoscanHandler) HandleCreateConnection(w http.ResponseWriter, r *http.Request) {
@@ -333,7 +354,9 @@ func (h *AutoscanHandler) HandleDeleteConnection(w http.ResponseWriter, r *http.
 // admin-only setup surface; webhook_url deliberately stays redisplayable (the
 // token's blast radius is spurious scans of already-registered library paths,
 // and one-time display would force a rotation after any config loss).
-type autoscanSourceResponse struct {
+type autoscanSourceResponse = AdminAutoscanSourceView
+
+type AdminAutoscanSourceView struct {
 	ID                      string                 `json:"id"`
 	PluginID                string                 `json:"plugin_id"`
 	CapabilityID            string                 `json:"capability_id"`
@@ -385,8 +408,13 @@ func sourceResponse(s autoscan.Source) autoscanSourceResponse {
 // webhookURLFor builds the delivery URL for a token: fully qualified when the
 // server knows its public URL, otherwise an absolute path the admin UI
 // completes with its own origin.
+//
+// Minted in the v2 namespace. The URL is copied into an external system
+// (Sonarr/Radarr and friends) and has to keep resolving after the /api/v1
+// tombstone; the bridge serves both delivery routes, so a v1 admin client
+// reading this value stays correct.
 func (h *AutoscanHandler) webhookURLFor(token string) string {
-	return h.publicURL + "/api/v1/autoscan/webhooks/" + token
+	return h.publicURL + "/api/v2/autoscan/webhooks/" + token
 }
 
 // attachWebhookState decorates a source response with its endpoint status and
@@ -422,18 +450,28 @@ func (h *AutoscanHandler) sourceResponseWithWebhook(ctx context.Context, s autos
 }
 
 func (h *AutoscanHandler) HandleListSources(w http.ResponseWriter, r *http.Request) {
-	// Sources are operator-created (no auto-seed): just list what exists. Use
-	// GET /scan-source-plugins for the Add-source picker of installed capabilities.
-	sources, err := h.repo.ListSources(r.Context())
+	sources, err := h.ReadAdminAutoscanSources(r.Context())
 	if err != nil {
 		writeAutoscanError(w, err)
 		return
 	}
-	// One batched endpoint query for the whole listing (not per source).
-	endpoints, err := h.repo.ListWebhookEndpoints(r.Context())
+	writeJSON(w, http.StatusOK, struct {
+		Sources []AdminAutoscanSourceView `json:"sources"`
+	}{sources})
+}
+
+// ReadAdminAutoscanSources reuses the batched endpoint query and existing token reveal.
+func (h *AutoscanHandler) ReadAdminAutoscanSources(ctx context.Context) ([]AdminAutoscanSourceView, error) {
+	// Sources are operator-created (no auto-seed): just list what exists. Use
+	// GET /scan-source-plugins for the Add-source picker of installed capabilities.
+	sources, err := h.repo.ListSources(ctx)
 	if err != nil {
-		writeAutoscanError(w, err)
-		return
+		return nil, err
+	}
+	// One batched endpoint query for the whole listing (not per source).
+	endpoints, err := h.repo.ListWebhookEndpoints(ctx)
+	if err != nil {
+		return nil, err
 	}
 	endpointBySource := make(map[string]autoscan.WebhookEndpoint, len(endpoints))
 	for _, e := range endpoints {
@@ -443,13 +481,11 @@ func (h *AutoscanHandler) HandleListSources(w http.ResponseWriter, r *http.Reque
 	for _, s := range sources {
 		resp := sourceResponse(s)
 		if endpoint, ok := endpointBySource[s.ID]; ok {
-			h.attachWebhookState(r.Context(), &resp, endpoint)
+			h.attachWebhookState(ctx, &resp, endpoint)
 		}
 		out = append(out, resp)
 	}
-	writeJSON(w, http.StatusOK, struct {
-		Sources []autoscanSourceResponse `json:"sources"`
-	}{Sources: out})
+	return out, nil
 }
 
 // --- Available scan-source plugins (Add-source picker) ---
@@ -1136,7 +1172,9 @@ type autoscanRunningPollResponse struct {
 	MarkerBefore *string   `json:"marker_before,omitempty"`
 }
 
-type autoscanStatusResponse struct {
+type autoscanStatusResponse = AdminAutoscanStatusView
+
+type AdminAutoscanStatusView struct {
 	Enabled       bool                          `json:"enabled"`
 	Sources       []autoscanStatusSource        `json:"sources"`
 	RunningPolls  []autoscanRunningPollResponse `json:"running_polls"`
@@ -1147,31 +1185,35 @@ type autoscanStatusResponse struct {
 }
 
 func (h *AutoscanHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	s, err := h.repo.GetSettings(ctx)
+	status, err := h.ReadAdminAutoscanStatus(r.Context())
 	if err != nil {
 		writeAutoscanError(w, err)
 		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
+// ReadAdminAutoscanStatus retains the existing sequential queue/source observations.
+func (h *AutoscanHandler) ReadAdminAutoscanStatus(ctx context.Context) (AdminAutoscanStatusView, error) {
+	s, err := h.repo.GetSettings(ctx)
+	if err != nil {
+		return AdminAutoscanStatusView{}, err
 	}
 	sources, err := h.repo.ListSources(ctx)
 	if err != nil {
-		writeAutoscanError(w, err)
-		return
+		return AdminAutoscanStatusView{}, err
 	}
 	queue, err := h.repo.GetQueueSummary(ctx)
 	if err != nil {
-		writeAutoscanError(w, err)
-		return
+		return AdminAutoscanStatusView{}, err
 	}
 	runningEvents, err := h.repo.ListRunningEvents(ctx)
 	if err != nil {
-		writeAutoscanError(w, err)
-		return
+		return AdminAutoscanStatusView{}, err
 	}
 	latestEventAt, err := h.repo.LatestEventAt(ctx)
 	if err != nil {
-		writeAutoscanError(w, err)
-		return
+		return AdminAutoscanStatusView{}, err
 	}
 	trimmed := make([]autoscanStatusSource, 0, len(sources))
 	for _, src := range sources {
@@ -1208,7 +1250,7 @@ func (h *AutoscanHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 			MarkerBefore: event.MarkerBefore,
 		})
 	}
-	writeJSON(w, http.StatusOK, autoscanStatusResponse{
+	return autoscanStatusResponse{
 		Enabled:       s.Enabled,
 		Sources:       trimmed,
 		RunningPolls:  runningPolls,
@@ -1216,7 +1258,7 @@ func (h *AutoscanHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 		AcceptedScans: queue.Accepted,
 		RunningScans:  queue.Running,
 		LatestEventAt: latestEventAt,
-	})
+	}, nil
 }
 
 // writeAutoscanError maps autoscan repository/service errors to HTTP status
@@ -1230,4 +1272,150 @@ func writeAutoscanError(w http.ResponseWriter, err error) {
 		return
 	}
 	writeError(w, http.StatusInternalServerError, "internal_error", "Autoscan operation failed")
+}
+
+// ReadAdminAutoscanAvailableSources reuses discovery without reading source secrets or invoking a provider.
+func (h *AutoscanHandler) ReadAdminAutoscanAvailableSources(ctx context.Context) ([]autoscan.AvailableScanSource, error) {
+	return h.svc.ListAvailableScanSources(ctx)
+}
+
+// ReadAdminAutoscanRewriteSuggestions preserves the existing synchronous provider read.
+func (h *AutoscanHandler) ReadAdminAutoscanRewriteSuggestions(ctx context.Context, id string) (autoscan.RewriteSuggestions, error) {
+	return h.svc.SuggestRewrites(ctx, id)
+}
+
+// AdminAutoscanConnectionTestInput carries the existing advisory test intent.
+type AdminAutoscanConnectionTestInput = autoscanTestConnectionInput
+
+var ErrAdminAutoscanConnectionTestUnavailable = errors.New("autoscan connection test unavailable")
+
+func (h *AutoscanHandler) TestAdminAutoscanConnection(ctx context.Context, in AdminAutoscanConnectionTestInput) (autoscan.ConnectionTestResult, error) {
+	if h == nil || h.svc == nil {
+		return autoscan.ConnectionTestResult{}, ErrAdminAutoscanConnectionTestUnavailable
+	}
+	if in.ConnectionID != nil && strings.TrimSpace(*in.ConnectionID) != "" {
+		return h.svc.TestConnectionByID(ctx, strings.TrimSpace(*in.ConnectionID))
+	}
+	return h.svc.TestConnection(ctx, autoscan.Connection{BaseURL: strings.TrimSpace(in.BaseURL), APIKeyRef: strings.TrimSpace(in.APIKeyRef), RequestIntegrationID: in.RequestIntegrationID})
+}
+
+// AdminAutoscanConnectionCreateInput retains the existing write-only credential input.
+type AdminAutoscanConnectionCreateInput = autoscanConnectionInput
+
+var ErrAdminAutoscanConnectionCreateUnavailable = errors.New("autoscan connection creation unavailable")
+var ErrAdminAutoscanConnectionCreateInvalid = errors.New("autoscan connection name and URL or integration are required")
+
+func (h *AutoscanHandler) CreateAdminAutoscanConnection(ctx context.Context, in AdminAutoscanConnectionCreateInput) (AdminAutoscanConnectionView, error) {
+	if h == nil || h.repo == nil {
+		return AdminAutoscanConnectionView{}, ErrAdminAutoscanConnectionCreateUnavailable
+	}
+	if strings.TrimSpace(in.Name) == "" || validateConnectionInput(in) != nil {
+		return AdminAutoscanConnectionView{}, ErrAdminAutoscanConnectionCreateInvalid
+	}
+	created, err := h.repo.CreateConnection(ctx, autoscan.Connection{Name: strings.TrimSpace(in.Name), Kind: strings.TrimSpace(in.Kind), BaseURL: strings.TrimSpace(in.BaseURL), APIKeyRef: strings.TrimSpace(in.APIKeyRef), RequestIntegrationID: normalizeRequestIntegrationID(in.RequestIntegrationID)})
+	if err != nil {
+		return AdminAutoscanConnectionView{}, err
+	}
+	return connectionResponse(created), nil
+}
+
+// AdminAutoscanConnectionUpdateInput retains the existing write-only credential input.
+type AdminAutoscanConnectionUpdateInput = autoscanConnectionInput
+
+var ErrAdminAutoscanConnectionUpdateUnavailable = errors.New("autoscan connection update unavailable")
+var ErrAdminAutoscanConnectionUpdateInvalid = errors.New("autoscan connection name and URL or integration are required")
+
+func (h *AutoscanHandler) UpdateAdminAutoscanConnection(ctx context.Context, id string, in AdminAutoscanConnectionUpdateInput) (AdminAutoscanConnectionView, error) {
+	if h == nil || h.repo == nil {
+		return AdminAutoscanConnectionView{}, ErrAdminAutoscanConnectionUpdateUnavailable
+	}
+	if strings.TrimSpace(in.Name) == "" || validateConnectionInput(in) != nil {
+		return AdminAutoscanConnectionView{}, ErrAdminAutoscanConnectionUpdateInvalid
+	}
+	created, err := h.repo.UpdateConnection(ctx, autoscan.Connection{ID: strings.TrimSpace(id), Name: strings.TrimSpace(in.Name), Kind: strings.TrimSpace(in.Kind), BaseURL: strings.TrimSpace(in.BaseURL), APIKeyRef: strings.TrimSpace(in.APIKeyRef), RequestIntegrationID: normalizeRequestIntegrationID(in.RequestIntegrationID)})
+	if err != nil {
+		return AdminAutoscanConnectionView{}, err
+	}
+	return connectionResponse(created), nil
+}
+
+var ErrAdminAutoscanConnectionDeleteUnavailable = errors.New("autoscan connection deletion unavailable")
+
+func (h *AutoscanHandler) DeleteAdminAutoscanConnection(ctx context.Context, id string) error {
+	if h == nil || h.repo == nil {
+		return ErrAdminAutoscanConnectionDeleteUnavailable
+	}
+	return h.repo.DeleteConnection(ctx, strings.TrimSpace(id))
+}
+
+var ErrAdminAutoscanScansUnavailable = errors.New("autoscan scan history unavailable")
+
+func (h *AutoscanHandler) ReadAdminAutoscanScans(ctx context.Context, filter autoscan.ScanListFilter) ([]autoscan.ScanWithEvent, int, error) {
+	if h == nil || h.repo == nil {
+		return nil, 0, ErrAdminAutoscanScansUnavailable
+	}
+	rows, err := h.repo.ListAutoscanScans(ctx, filter)
+	if err != nil {
+		return nil, 0, err
+	}
+	total, err := h.repo.CountAutoscanScans(ctx, filter)
+	return rows, total, err
+}
+
+var ErrAdminAutoscanEventsUnavailable = errors.New("autoscan event history unavailable")
+
+func (h *AutoscanHandler) ReadAdminAutoscanEvents(ctx context.Context, filter autoscan.EventListFilter) ([]autoscan.EventWithRuns, int, error) {
+	if h == nil || h.repo == nil {
+		return nil, 0, ErrAdminAutoscanEventsUnavailable
+	}
+	rows, err := h.repo.ListEvents(ctx, filter)
+	if err != nil {
+		return nil, 0, err
+	}
+	total, err := h.repo.CountEvents(ctx, filter)
+	return rows, total, err
+}
+
+var ErrAdminAutoscanSettingsWriteUnavailable = errors.New("autoscan settings writer unavailable")
+var ErrAdminAutoscanSettingsWriteInvalid = errors.New("invalid autoscan settings")
+
+const (
+	autoscanRescheduleNotConfigured = "not_configured"
+	autoscanRescheduleApplied       = "applied"
+	autoscanRescheduleFailed        = "failed"
+)
+
+type AdminAutoscanSettingsWriteView struct {
+	Settings        autoscan.Settings
+	RescheduleState string
+}
+
+func (h *AutoscanHandler) UpdateAdminAutoscanSettings(ctx context.Context, input autoscan.Settings) (AdminAutoscanSettingsWriteView, error) {
+	if h == nil || h.repo == nil {
+		return AdminAutoscanSettingsWriteView{}, ErrAdminAutoscanSettingsWriteUnavailable
+	}
+	if input.DefaultPollIntervalSeconds <= 0 || input.DefaultPollIntervalSeconds > 2147483647 || input.DebounceSeconds < 0 || input.DebounceSeconds > 2147483647 {
+		return AdminAutoscanSettingsWriteView{}, ErrAdminAutoscanSettingsWriteInvalid
+	}
+	updated, err := h.repo.UpdateSettings(ctx, input)
+	if err != nil {
+		return AdminAutoscanSettingsWriteView{}, err
+	}
+	out := AdminAutoscanSettingsWriteView{Settings: updated, RescheduleState: autoscanRescheduleNotConfigured}
+	if h.triggers != nil {
+		out.RescheduleState = autoscanRescheduleApplied
+		if err := h.triggers.UpdateTriggers(autoscanPollTaskKey, []taskmanager.TriggerConfig{{Type: taskmanager.TriggerTypeInterval, IntervalMs: int64(updated.DefaultPollIntervalSeconds) * 1000}}); err != nil {
+			out.RescheduleState = autoscanRescheduleFailed
+		}
+	}
+	return out, nil
+}
+
+var ErrAdminAutoscanSourceDeleteUnavailable = errors.New("autoscan source deletion unavailable")
+
+func (h *AutoscanHandler) DeleteAdminAutoscanSource(ctx context.Context, id string) error {
+	if h == nil || h.repo == nil {
+		return ErrAdminAutoscanSourceDeleteUnavailable
+	}
+	return h.repo.DeleteSource(ctx, strings.TrimSpace(id))
 }

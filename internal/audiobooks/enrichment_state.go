@@ -33,6 +33,19 @@ const (
 	EnrichmentOutcomeSkipped EnrichmentOutcome = "skipped"
 )
 
+// Clean no-match results are retried a small number of times consecutively.
+// Provider catalogs change, and a one-shot no-match made a temporary provider
+// omission indistinguishable from a real absence. Any successful match or
+// transient failure resets that consecutive no-match streak. Skips (for
+// example, a library with no configured provider chain) remain retryable
+// indefinitely at a slower cadence so enabling a provider later does not
+// require rebuilding the item.
+const (
+	audiobookNoMatchRetryLimit = 3
+	audiobookNoMatchRetryDelay = 24 * time.Hour
+	audiobookSkippedRetryDelay = 6 * time.Hour
+)
+
 // EnrichmentErrorClass distinguishes failures that should come back from those
 // that should not. Recording it is the difference between a readable backlog
 // and the ebook situation, where 90,721 rows carried no error class at all and
@@ -76,10 +89,11 @@ func newEnrichmentStateStore(pool *pgxpool.Pool) *enrichmentStateStore {
 	return &enrichmentStateStore{pool: pool}
 }
 
-// RecordOutcome stamps a terminal result and clears any parked retry or active
-// lease. Production passes the claim token; an empty token is reserved for
-// administrative repair paths and DB tests that intentionally write state
-// without claiming work first.
+// RecordOutcome records a clean result and clears any active lease. Successful
+// results are terminal; no-match results are retried a bounded number of times
+// and skipped results are parked for a later configuration retry. Production
+// passes the claim token; an empty token is reserved for administrative repair
+// paths and DB tests that intentionally write state without claiming work.
 func (s *enrichmentStateStore) RecordOutcome(ctx context.Context, contentID, claimToken string, outcome EnrichmentOutcome) error {
 	if s == nil || s.pool == nil || contentID == "" {
 		return nil
@@ -87,20 +101,29 @@ func (s *enrichmentStateStore) RecordOutcome(ctx context.Context, contentID, cla
 	if claimToken != "" {
 		tag, err := s.pool.Exec(ctx, `
 			UPDATE audiobook_enrichment_state
-			SET attempts         = attempts + 1,
+			SET attempts         = CASE WHEN $3 = 'no_match' AND outcome IS DISTINCT FROM 'no_match' THEN 1 ELSE attempts + 1 END,
 			    outcome          = $3,
 			    last_error_class = NULL,
 			    last_error       = NULL,
-			    next_attempt_at  = NULL,
+			    next_attempt_at  = CASE
+			        WHEN $3 = 'no_match' AND (CASE WHEN $3 = 'no_match' AND outcome IS DISTINCT FROM 'no_match' THEN 1 ELSE attempts + 1 END) < $4
+			            THEN now() + make_interval(secs => $5::double precision)
+			        WHEN $3 = 'skipped'
+			            THEN now() + make_interval(secs => $6::double precision)
+			        ELSE NULL
+			    END,
 			    last_attempt_at  = now(),
-			    completed_at     = now(),
+			    completed_at     = CASE
+			        WHEN $3 = 'success' OR ($3 = 'no_match' AND (CASE WHEN $3 = 'no_match' AND outcome IS DISTINCT FROM 'no_match' THEN 1 ELSE attempts + 1 END) >= $4)
+			            THEN now() ELSE NULL END,
 			    claim_token      = NULL,
 			    lease_until      = NULL,
 			    updated_at       = now()
 			WHERE content_id = $1
 			  AND claim_token = $2
 			  AND lease_until > now()
-		`, contentID, claimToken, string(outcome))
+		`, contentID, claimToken, string(outcome), audiobookNoMatchRetryLimit,
+			audiobookNoMatchRetryDelay.Seconds(), audiobookSkippedRetryDelay.Seconds())
 		if err != nil {
 			return fmt.Errorf("recording claimed audiobook enrichment outcome: %w", err)
 		}
@@ -114,21 +137,65 @@ func (s *enrichmentStateStore) RecordOutcome(ctx context.Context, contentID, cla
 			content_id, attempts, outcome, last_error_class, last_error,
 			next_attempt_at, last_attempt_at, completed_at, claim_token,
 			lease_until, updated_at
-		) VALUES ($1, 1, $2, NULL, NULL, NULL, now(), now(), NULL, NULL, now())
+		) VALUES (
+			$1, 1, $2, NULL, NULL,
+			CASE
+			    WHEN $2 = 'no_match' AND 1 < $3
+			        THEN now() + make_interval(secs => $4::double precision)
+			    WHEN $2 = 'skipped'
+			        THEN now() + make_interval(secs => $5::double precision)
+			    ELSE NULL
+			END,
+			now(),
+			CASE WHEN $2 = 'success' OR ($2 = 'no_match' AND 1 >= $3)
+			     THEN now() ELSE NULL END,
+			NULL, NULL, now())
 		ON CONFLICT (content_id) DO UPDATE SET
-			attempts         = audiobook_enrichment_state.attempts + 1,
+			attempts         = CASE
+				WHEN EXCLUDED.outcome = 'no_match' AND audiobook_enrichment_state.outcome = 'no_match' THEN audiobook_enrichment_state.attempts + 1
+				ELSE 1
+			END,
 			outcome          = EXCLUDED.outcome,
 			last_error_class = NULL,
-			last_error       = NULL,
-			next_attempt_at  = NULL,
+				last_error       = NULL,
+				next_attempt_at  = CASE
+				    WHEN EXCLUDED.outcome = 'no_match' AND (CASE WHEN audiobook_enrichment_state.outcome = 'no_match' THEN audiobook_enrichment_state.attempts + 1 ELSE 1 END) < $3
+				        THEN now() + make_interval(secs => $4::double precision)
+				    WHEN EXCLUDED.outcome = 'skipped'
+				        THEN now() + make_interval(secs => $5::double precision)
+				    ELSE NULL
+				END,
 			last_attempt_at  = now(),
-			completed_at     = now(),
+			completed_at     = CASE
+				    WHEN EXCLUDED.outcome = 'success' OR (EXCLUDED.outcome = 'no_match' AND (CASE WHEN audiobook_enrichment_state.outcome = 'no_match' THEN audiobook_enrichment_state.attempts + 1 ELSE 1 END) >= $3)
+			        THEN now() ELSE NULL END,
 			claim_token      = NULL,
 			lease_until      = NULL,
 			updated_at       = now()
-	`, contentID, string(outcome))
+	`, contentID, string(outcome), audiobookNoMatchRetryLimit,
+		audiobookNoMatchRetryDelay.Seconds(), audiobookSkippedRetryDelay.Seconds())
 	if err != nil {
 		return fmt.Errorf("recording audiobook enrichment outcome: %w", err)
+	}
+	return nil
+}
+
+// ReleaseClaim returns unprocessed work to the queue when a sweep is
+// canceled. A canceled request context cannot be used for cleanup, so callers
+// should pass a short-lived context derived from context.WithoutCancel.
+func (s *enrichmentStateStore) ReleaseClaim(ctx context.Context, contentID, claimToken string) error {
+	if s == nil || s.pool == nil || contentID == "" || claimToken == "" {
+		return nil
+	}
+	_, err := s.pool.Exec(ctx, `
+		UPDATE audiobook_enrichment_state
+		SET claim_token = NULL,
+		    lease_until = NULL,
+		    updated_at  = now()
+		WHERE content_id = $1 AND claim_token = $2
+	`, contentID, claimToken)
+	if err != nil {
+		return fmt.Errorf("releasing audiobook enrichment claim: %w", err)
 	}
 	return nil
 }
@@ -263,7 +330,8 @@ func (s *enrichmentStateStore) AssertClaimTx(ctx context.Context, tx pgx.Tx, con
 }
 
 // RecordOutcomeTx completes a claim inside the same transaction as its durable
-// provider IDs, scalar metadata, search event, and terminal media timestamp.
+// provider IDs, scalar metadata, search event, and media timestamp. A clean
+// no-match or skipped result remains eligible according to its retry policy.
 func (s *enrichmentStateStore) RecordOutcomeTx(
 	ctx context.Context,
 	tx pgx.Tx,
@@ -275,19 +343,28 @@ func (s *enrichmentStateStore) RecordOutcomeTx(
 	}
 	tag, err := tx.Exec(ctx, `
 		UPDATE audiobook_enrichment_state
-		SET attempts         = attempts + 1,
+		SET attempts         = CASE WHEN $3 = 'no_match' AND outcome IS DISTINCT FROM 'no_match' THEN 1 ELSE attempts + 1 END,
 		    outcome          = $3,
 		    last_error_class = NULL,
 		    last_error       = NULL,
-		    next_attempt_at  = NULL,
+		    next_attempt_at  = CASE
+		        WHEN $3 = 'no_match' AND (CASE WHEN $3 = 'no_match' AND outcome IS DISTINCT FROM 'no_match' THEN 1 ELSE attempts + 1 END) < $4
+		            THEN now() + make_interval(secs => $5::double precision)
+		        WHEN $3 = 'skipped'
+		            THEN now() + make_interval(secs => $6::double precision)
+		        ELSE NULL
+		    END,
 		    last_attempt_at  = now(),
-		    completed_at     = now(),
+		    completed_at     = CASE
+		        WHEN $3 = 'success' OR ($3 = 'no_match' AND (CASE WHEN $3 = 'no_match' AND outcome IS DISTINCT FROM 'no_match' THEN 1 ELSE attempts + 1 END) >= $4)
+		            THEN now() ELSE NULL END,
 		    claim_token      = NULL,
 		    lease_until      = NULL,
 		    updated_at       = now()
 		WHERE content_id = $1
 		  AND claim_token = $2
-	`, contentID, claimToken, string(outcome))
+	`, contentID, claimToken, string(outcome), audiobookNoMatchRetryLimit,
+		audiobookNoMatchRetryDelay.Seconds(), audiobookSkippedRetryDelay.Seconds())
 	if err != nil {
 		return fmt.Errorf("completing audiobook enrichment claim: %w", err)
 	}

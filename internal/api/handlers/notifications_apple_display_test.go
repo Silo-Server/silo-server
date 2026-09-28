@@ -118,6 +118,14 @@ func TestHandleApplePushDisplayDB(t *testing.T) {
 		t.Fatalf("response = %+v", response)
 	}
 
+	view, err := handler.NotificationPushDisplay(t.Context(), "profile-1", "delivery-1")
+	if err != nil || view != response {
+		t.Fatalf("v2 service differs from bridge: %+v, %v", view, err)
+	}
+	if _, err := handler.NotificationPushDisplay(t.Context(), "other-profile", "delivery-1"); err == nil {
+		t.Fatal("v2 display admitted another profile")
+	}
+
 	req = httptest.NewRequest(http.MethodGet, "/notifications/push/apple/display/delivery-1", nil)
 	req = req.WithContext(apimw.SetProfileID(req.Context(), "other-profile"))
 	rr = httptest.NewRecorder()

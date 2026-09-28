@@ -71,6 +71,13 @@ func (h *AutoscanHandler) HandleDeleteSourceWebhook(w http.ResponseWriter, r *ht
 	w.WriteHeader(http.StatusNoContent)
 }
 
+const (
+	autoscanDeliveryAccepted      = "accepted"
+	autoscanDeliveryNotFound      = "not_found"
+	autoscanDeliveryInternalError = "internal_error"
+	autoscanDeliveryBadRequest    = "bad_request"
+)
+
 // --- Public delivery endpoint ---
 
 // webhookAccepted is the 202 body for every accepted delivery (including
@@ -90,28 +97,52 @@ type webhookAccepted struct {
 //
 // The token, request URL, and body are never logged.
 func (h *AutoscanHandler) HandleWebhookDelivery(w http.ResponseWriter, r *http.Request) {
+	if err := h.DeliverAutoscanWebhook(w, r, chi.URLParam(r, "token")); err != nil {
+		failure := autoscanDeliveryFailure(err)
+		writeError(w, failure.Status, failure.Code, failure.Message)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, webhookAccepted{Status: autoscanDeliveryAccepted})
+}
+
+// AutoscanDeliveryFailure carries safe delivery failure details to each transport.
+type AutoscanDeliveryFailure struct {
+	Status  int
+	Code    string
+	Message string
+}
+
+func (e *AutoscanDeliveryFailure) Error() string { return e.Message }
+func autoscanDeliveryFailure(err error) *AutoscanDeliveryFailure {
+	if failure, ok := errors.AsType[*AutoscanDeliveryFailure](err); ok {
+		return failure
+	}
+	if errors.Is(err, autoscan.ErrNotFound) {
+		return &AutoscanDeliveryFailure{Status: http.StatusNotFound, Code: autoscanDeliveryNotFound, Message: "Autoscan resource not found"}
+	}
+	return &AutoscanDeliveryFailure{Status: http.StatusInternalServerError, Code: autoscanDeliveryInternalError, Message: "Autoscan operation failed"}
+}
+
+// DeliverAutoscanWebhook validates the capability before reading bounded provider
+// bytes and delegates durable acceptance to the existing ingest service. It does
+// not encode a response or configure schedules/callback URLs.
+func (h *AutoscanHandler) DeliverAutoscanWebhook(w http.ResponseWriter, r *http.Request, token string) error {
 	receivedAt := time.Now()
-	token := chi.URLParam(r, "token")
 
 	source, _, err := h.repo.ResolveWebhookToken(r.Context(), token)
 	if err != nil {
 		if errors.Is(err, autoscan.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Not found")
-			return
+			return &AutoscanDeliveryFailure{Status: http.StatusNotFound, Code: autoscanDeliveryNotFound, Message: "Not found"}
 		}
-		writeAutoscanError(w, err)
-		return
+		return autoscanDeliveryFailure(err)
 	}
 
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxWebhookBodyBytes))
 	if err != nil {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
-			writeError(w, http.StatusRequestEntityTooLarge, "payload_too_large", "Request body exceeds the webhook payload cap")
-			return
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+			return &AutoscanDeliveryFailure{Status: http.StatusRequestEntityTooLarge, Code: "payload_too_large", Message: "Request body exceeds the webhook payload cap"}
 		}
-		writeError(w, http.StatusBadRequest, "bad_request", "Could not read request body")
-		return
+		return &AutoscanDeliveryFailure{Status: http.StatusBadRequest, Code: autoscanDeliveryBadRequest, Message: "Could not read request body"}
 	}
 
 	parsed, err := arrwebhook.Parse(source.SourceConfig["webhook_provider"], body)
@@ -119,8 +150,7 @@ func (h *AutoscanHandler) HandleWebhookDelivery(w http.ResponseWriter, r *http.R
 		// Parse errors carry no payload content; recording and returning them
 		// is safe. The token stays out of every message.
 		_ = h.repo.RecordWebhookError(r.Context(), source.ID, err.Error())
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
+		return &AutoscanDeliveryFailure{Status: http.StatusBadRequest, Code: autoscanDeliveryBadRequest, Message: err.Error()}
 	}
 
 	// Test events, unsupported event types, disabled sources, and globally
@@ -129,15 +159,13 @@ func (h *AutoscanHandler) HandleWebhookDelivery(w http.ResponseWriter, r *http.R
 	// wired up" signal honest even while disabled.
 	settings, err := h.repo.GetSettings(r.Context())
 	if err != nil {
-		writeAutoscanError(w, err)
-		return
+		return autoscanDeliveryFailure(err)
 	}
 	if terr := h.repo.TouchWebhookReceived(r.Context(), source.ID); terr != nil {
 		slog.WarnContext(r.Context(), "autoscan: touch webhook received failed", "component", "api", "source_id", source.ID, "err", terr)
 	}
 	if parsed.Test || len(parsed.Changes) == 0 || !settings.Enabled || !source.Enabled {
-		writeJSON(w, http.StatusAccepted, webhookAccepted{Status: "accepted"})
-		return
+		return nil
 	}
 
 	result, err := h.svc.IngestChanges(r.Context(), autoscan.ChangeIngest{
@@ -157,8 +185,7 @@ func (h *AutoscanHandler) HandleWebhookDelivery(w http.ResponseWriter, r *http.R
 			"err", err,
 		)
 		_ = h.repo.RecordWebhookError(r.Context(), source.ID, err.Error())
-		writeError(w, http.StatusInternalServerError, "internal_error", "Could not durably accept delivery")
-		return
+		return &AutoscanDeliveryFailure{Status: http.StatusInternalServerError, Code: autoscanDeliveryInternalError, Message: "Could not durably accept delivery"}
 	}
 	if result.Pending {
 		slog.WarnContext(r.Context(), "autoscan: webhook delivery queued for retry", "component", "api",
@@ -178,5 +205,5 @@ func (h *AutoscanHandler) HandleWebhookDelivery(w http.ResponseWriter, r *http.R
 		"unresolved", result.Unresolved,
 		"pending", result.Pending,
 	)
-	writeJSON(w, http.StatusAccepted, webhookAccepted{Status: "accepted"})
+	return nil
 }

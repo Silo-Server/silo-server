@@ -38,6 +38,25 @@ type adminServerStatusResponse struct {
 	RestartRequested   bool              `json:"restart_requested"`
 	RestartRequestedAt *time.Time        `json:"restart_requested_at,omitempty"`
 	Health             adminServerHealth `json:"health"`
+	// ArtworkStorage tells the settings UI whether the artwork backend can
+	// still be chosen. Once artwork has been written the backend is locked to
+	// the recorded storage.
+	ArtworkStorage adminArtworkStorageStatus `json:"artwork_storage"`
+}
+
+// adminArtworkStorageStatus is the settings-page view of artwork storage.
+// Backend is the resolved backend of this process ("local" or "s3", empty
+// in modes that do not open artwork). Locked is true once the first artwork
+// write recorded the store identity.
+type adminArtworkStorageStatus struct {
+	Backend string `json:"backend,omitempty"`
+	Locked  bool   `json:"locked"`
+	// StatusKnown is false when the settings lookup failed, so a false Locked
+	// value cannot be mistaken for a confirmed editable location.
+	StatusKnown bool `json:"-"`
+	// PrivateLocked is true once a configured private bucket is recorded at
+	// startup, or once artwork is recorded. Only /api/v2 reports it.
+	PrivateLocked bool `json:"-"`
 }
 
 // adminServerHealth backs the dashboard health strip. Version, uptime and node
@@ -67,46 +86,7 @@ type adminLogLevelCounts [2]int64
 
 // HandleGetServerStatus handles GET /admin/server/status.
 func (h *AdminHandler) HandleGetServerStatus(w http.ResponseWriter, r *http.Request) {
-	snapshot := h.RestartStatus.Snapshot()
-	resp := adminServerStatusResponse{
-		StartedAt:              snapshot.StartedAt,
-		RestartRequired:        snapshot.RestartRequired,
-		RestartRequiredAt:      snapshot.RestartRequiredAt,
-		RestartRequiredReason:  snapshot.RestartRequiredReason,
-		RestartRequiredReasons: snapshot.RestartReasons,
-		RestartMarkCount:       snapshot.RestartMarkCount,
-		RestartRequested:       snapshot.RestartRequested,
-		RestartRequestedAt:     snapshot.RestartRequestedAt,
-	}
-
-	// Settings live in Postgres, so this lookup fails in exactly the outage the
-	// health object below exists to report. A failure therefore skips the
-	// jellycompat restart derivation instead of aborting the response — a 500
-	// here would hide postgres.ok:false from the one page built to show it —
-	// and the lookup is bounded like the probes: a wedged pool must not hold
-	// this optional derivation, and with it the whole response, to the request
-	// deadline.
-	if h.SettingsRepo != nil {
-		settingsCtx, cancel := context.WithTimeout(r.Context(), adminHealthProbeTimeout)
-		settings, err := h.SettingsRepo.GetAll(settingsCtx)
-		cancel()
-		if err == nil && jellycompat.WebComponentStatusForConfig(h.Config, settings).RestartRequired {
-			resp.RestartRequired = true
-			if resp.RestartRequiredReason == "" {
-				resp.RestartRequiredReason = "jellyfin_compat"
-			}
-			// This requirement is derived here rather than marked on the
-			// tracker, so the accumulated list has to gain it too — a client
-			// scoping restarts by reason would otherwise never see it.
-			if !slices.Contains(resp.RestartRequiredReasons, "jellyfin_compat") {
-				resp.RestartRequiredReasons = append(resp.RestartRequiredReasons, "jellyfin_compat")
-			}
-		}
-	}
-
-	resp.Health = h.collectHealth(r.Context())
-
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(w, http.StatusOK, h.ReadAdminServerStatus(r.Context()))
 }
 
 // collectHealth probes the backing services and reads the recent log tallies.
@@ -197,4 +177,58 @@ func (h *AdminHandler) markServerRestartRequired(reason string) {
 		return
 	}
 	h.RestartStatus.MarkRequired(reason)
+}
+
+// AdminServerStatusSnapshot is the shared runtime status projection.
+type AdminServerStatusSnapshot = adminServerStatusResponse
+
+// ReadAdminServerStatus reports the process-local tracker and existing bounded
+// health probes. An unhealthy dependency remains observable in a successful read.
+func (h *AdminHandler) ReadAdminServerStatus(ctx context.Context) AdminServerStatusSnapshot {
+	snapshot := h.RestartStatus.Snapshot()
+	resp := adminServerStatusResponse{
+		StartedAt:              snapshot.StartedAt,
+		RestartRequired:        snapshot.RestartRequired,
+		RestartRequiredAt:      snapshot.RestartRequiredAt,
+		RestartRequiredReason:  snapshot.RestartRequiredReason,
+		RestartRequiredReasons: snapshot.RestartReasons,
+		RestartMarkCount:       snapshot.RestartMarkCount,
+		RestartRequested:       snapshot.RestartRequested,
+		RestartRequestedAt:     snapshot.RestartRequestedAt,
+	}
+
+	// Settings live in Postgres, so this lookup fails in exactly the outage the
+	// health object below exists to report. A failure therefore skips the
+	// jellycompat restart derivation instead of aborting the response — a 500
+	// here would hide postgres.ok:false from the one page built to show it —
+	// and the lookup is bounded like the probes: a wedged pool must not hold
+	// this optional derivation, and with it the whole response, to the request
+	// deadline.
+	if h.SettingsRepo != nil {
+		settingsCtx, cancel := context.WithTimeout(ctx, adminHealthProbeTimeout)
+		settings, err := h.SettingsRepo.GetAll(settingsCtx)
+		cancel()
+		if err == nil {
+			resp.ArtworkStorage.Locked = assetsStorageLocked(settings)
+			resp.ArtworkStorage.PrivateLocked = artworkStorageLocked(settings)
+			resp.ArtworkStorage.StatusKnown = true
+		}
+		if err == nil && jellycompat.WebComponentStatusForConfig(h.Config, settings).RestartRequired {
+			resp.RestartRequired = true
+			if resp.RestartRequiredReason == "" {
+				resp.RestartRequiredReason = "jellyfin_compat"
+			}
+			// This requirement is derived here rather than marked on the
+			// tracker, so the accumulated list has to gain it too — a client
+			// scoping restarts by reason would otherwise never see it.
+			if !slices.Contains(resp.RestartRequiredReasons, "jellyfin_compat") {
+				resp.RestartRequiredReasons = append(resp.RestartRequiredReasons, "jellyfin_compat")
+			}
+		}
+	}
+
+	resp.ArtworkStorage.Backend = h.ArtworkBackend
+	resp.Health = h.collectHealth(ctx)
+
+	return resp
 }

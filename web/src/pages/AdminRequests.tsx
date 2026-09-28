@@ -1,3 +1,8 @@
+import {
+  getAdminRequestIntegrationV2,
+  isRequestEditorConflict,
+  requestValidationErrors,
+} from "@/api/v2/adminRequests";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
@@ -23,7 +28,6 @@ import type {
   RequestApprovalMode,
   RequestIntegration,
   RequestIntegrationOptions,
-  RequestIntegrationValidationError,
   RequestLimitMode,
   RequestSettings,
   RequestTarget,
@@ -66,6 +70,7 @@ import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
 import {
   useAdminMediaRequests,
+  useAdminRequestCapabilities,
   useApproveMediaRequest,
   useCreateRequestIntegration,
   useDeclineMediaRequest,
@@ -107,6 +112,7 @@ function normalizeAdminRequestTab(value: string | null): AdminRequestTab {
 export default function AdminRequests() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = normalizeAdminRequestTab(searchParams.get("tab"));
+  const capabilities = useAdminRequestCapabilities();
 
   function setActiveTab(value: string) {
     const nextTab = normalizeAdminRequestTab(value);
@@ -119,6 +125,19 @@ export default function AdminRequests() {
     }
 
     setSearchParams(next, { replace: true });
+  }
+
+  if (capabilities.isLoading) return <RowsSkeleton />;
+  if (
+    !capabilities.data?.available ||
+    (activeTab !== "queue" && !capabilities.data.guarded_configuration)
+  ) {
+    return (
+      <EmptyPanel
+        title="Request administration unavailable"
+        detail="Request administration could not be enabled on this server."
+      />
+    );
   }
 
   return (
@@ -475,19 +494,37 @@ type SettingsFormState = {
 
 function RequestSettingsTab() {
   const settings = useRequestSettings();
+  const [generation, setGeneration] = useState(0);
 
   if (settings.isLoading) return <RowsSkeleton />;
-  if (settings.isError) {
+  if (settings.isError && !settings.data) {
     return <EmptyPanel title="Settings failed" detail="Request settings could not be loaded." />;
   }
   if (!settings.data) {
     return <EmptyPanel title="No settings" detail="Request settings are not available." />;
   }
 
-  return <RequestSettingsForm key={settings.data.updated_at} settings={settings.data} />;
+  return (
+    <RequestSettingsForm
+      key={generation}
+      settings={settings.data}
+      onReload={async () => {
+        const result = await settings.refetch();
+        if (result.isSuccess) setGeneration((n) => n + 1);
+      }}
+    />
+  );
 }
 
-function RequestSettingsForm({ settings }: { settings: RequestSettings }) {
+function RequestSettingsForm({
+  settings,
+  onReload,
+}: {
+  settings: RequestSettings;
+  onReload: () => Promise<void>;
+}) {
+  const [etag, setETag] = useState(settings.etag);
+  const [conflict, setConflict] = useState(false);
   const updateSettings = useUpdateRequestSettings();
   const [form, setForm] = useState<SettingsFormState>(() => ({
     requests_enabled: settings.requests_enabled,
@@ -506,8 +543,12 @@ function RequestSettingsForm({ settings }: { settings: RequestSettings }) {
       global_auto_approval_enabled: form.global_auto_approval_enabled,
       force_dual_quality: form.force_dual_quality,
       updated_at: form.updated_at,
+      etag,
     };
-    updateSettings.mutate(payload);
+    updateSettings.mutate(payload, {
+      onSuccess: (saved) => setETag(saved.etag),
+      onError: (error) => setConflict(isRequestEditorConflict(error)),
+    });
   }
 
   return (
@@ -564,7 +605,8 @@ function RequestSettingsForm({ settings }: { settings: RequestSettings }) {
         </div>
       </div>
 
-      <Button onClick={saveSettings} disabled={updateSettings.isPending}>
+      {conflict ? <EditorConflict onReload={onReload} /> : null}
+      <Button onClick={saveSettings} disabled={updateSettings.isPending || conflict || !etag}>
         <Save className="h-4 w-4" />
         Save Settings
       </Button>
@@ -638,19 +680,14 @@ function RequestIntegrationsTab() {
   const integrations = useRequestIntegrations();
 
   if (integrations.isLoading) return <RowsSkeleton />;
-  if (integrations.isError) {
+  if (integrations.isError && !integrations.data) {
     return (
       <EmptyPanel title="Integrations failed" detail="Request integrations could not be loaded." />
     );
   }
 
   const list = integrations.data ?? [];
-  const integrationsKey =
-    list.length === 0
-      ? "empty"
-      : list.map((integration) => `${integration.id}:${integration.updated_at ?? ""}`).join("|");
-
-  return <RequestIntegrationsForm key={integrationsKey} integrations={list} />;
+  return <RequestIntegrationsForm integrations={list} />;
 }
 
 type IntegrationCard = {
@@ -869,7 +906,7 @@ function RequestIntegrationsForm({ integrations }: { integrations: RequestIntegr
         <div className="grid gap-4 xl:grid-cols-2">
           {cards.map((card) => (
             <IntegrationEditor
-              key={card.key}
+              key={`${card.key}:${card.source?.etag ?? "new"}`}
               form={card.form}
               pluginConfig={card.pluginConfig}
               installations={routerInstallations}
@@ -878,6 +915,20 @@ function RequestIntegrationsForm({ integrations }: { integrations: RequestIntegr
               onChange={(patch) => updateCard(card.key, patch)}
               onConfigChange={(config) => updateCardConfig(card.key, config)}
               onRemove={() => removeCard(card.key)}
+              onSaved={(saved) =>
+                setCards((current) =>
+                  current.map((c) =>
+                    c.key === card.key
+                      ? {
+                          key: c.key,
+                          form: integrationToForm(saved),
+                          pluginConfig: { ...(saved.plugin_config ?? {}) },
+                          source: saved,
+                        }
+                      : c,
+                  ),
+                )
+              }
             />
           ))}
         </div>
@@ -895,6 +946,7 @@ function IntegrationEditor({
   onChange,
   onConfigChange,
   onRemove,
+  onSaved,
 }: {
   form: IntegrationFormState;
   pluginConfig: Record<string, unknown>;
@@ -904,12 +956,22 @@ function IntegrationEditor({
   onChange: (patch: Partial<IntegrationFormState>) => void;
   onConfigChange: (config: Record<string, unknown>) => void;
   onRemove: () => void;
+  onSaved: (saved: RequestIntegration) => void;
 }) {
   const isNew = form.id === "";
   const createIntegration = useCreateRequestIntegration();
   const updateIntegration = useUpdateRequestIntegration();
   const deleteIntegration = useDeleteRequestIntegration();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [conflict, setConflict] = useState(false);
+  const etag = source?.etag;
+  const reload = async () => {
+    try {
+      onSaved(await getAdminRequestIntegrationV2(form.id));
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Reload failed");
+    }
+  };
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   // SchemaForm owns config validation and reports it up; the editor consumes the
@@ -1027,6 +1089,8 @@ function IntegrationEditor({
   // schemaValid is reported by SchemaForm via onValidityChange. With no descriptor
   // (no plugin form) there's nothing to validate, so the chrome checks govern.
   const canSave =
+    !conflict &&
+    (isNew || Boolean(etag)) &&
     form.name.trim().length > 0 &&
     form.base_url.trim().length > 0 &&
     hasApiKey &&
@@ -1044,6 +1108,7 @@ function IntegrationEditor({
     // only the generic connection chrome (name, base_url, api_key, installation).
     const payload = {
       id: form.id,
+      etag,
       name: form.name.trim(),
       enabled: form.enabled,
       base_url: form.base_url.trim(),
@@ -1058,12 +1123,14 @@ function IntegrationEditor({
     setFormError(null);
     const mut = isNew ? createIntegration : updateIntegration;
     mut.mutate(payload, {
+      onSuccess: onSaved,
       onError: (err) => {
-        const body = (err as { body?: unknown })?.body as
-          | RequestIntegrationValidationError
-          | undefined;
-        if (body?.field_errors) setFieldErrors(body.field_errors);
-        if (body?.form_error) setFormError(body.form_error);
+        if (isRequestEditorConflict(err)) setConflict(true);
+        const validation = requestValidationErrors(err);
+        if (validation) {
+          setFieldErrors(validation.fields);
+          setFormError(validation.message);
+        }
       },
     });
   }
@@ -1090,15 +1157,17 @@ function IntegrationEditor({
       ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Name">
+        <Field label="Name" error={fieldErrors.name}>
           <Input
+            aria-invalid={Boolean(fieldErrors.name)}
             value={form.name}
             onChange={(event) => patchForm({ name: event.target.value })}
             placeholder="Connection name"
           />
         </Field>
-        <Field label="API key or setting key">
+        <Field label="API key or setting key" error={fieldErrors.api_key_ref}>
           <Input
+            aria-invalid={Boolean(fieldErrors.api_key_ref)}
             value={form.api_key_ref}
             onChange={(event) => patchForm({ api_key_ref: event.target.value })}
             placeholder={form.has_api_key ? "Leave blank to keep saved key" : "API key"}
@@ -1106,15 +1175,19 @@ function IntegrationEditor({
         </Field>
       </div>
 
-      <Field label="Base URL">
+      <Field label="Base URL" error={fieldErrors.base_url}>
         <Input
+          aria-invalid={Boolean(fieldErrors.base_url)}
           value={form.base_url}
           onChange={(event) => patchForm({ base_url: event.target.value })}
           placeholder="http://localhost:7878"
         />
       </Field>
 
-      <Field label="Plugin">
+      <Field
+        label="Plugin"
+        error={[fieldErrors.installation_id, fieldErrors.capability_id].filter(Boolean).join(" ")}
+      >
         {installationsLoading ? (
           <Skeleton className="h-9 w-full rounded-md" />
         ) : installations.length === 0 ? (
@@ -1179,6 +1252,7 @@ function IntegrationEditor({
         </p>
       )}
 
+      {conflict ? <EditorConflict onReload={reload} /> : null}
       <div className="flex flex-wrap items-center gap-2">
         <Button type="button" onClick={handleSave} disabled={!canSave || saving}>
           <Save className="h-4 w-4" />
@@ -1195,7 +1269,7 @@ function IntegrationEditor({
             variant="ghost"
             className="text-destructive"
             onClick={() => setConfirmDelete(true)}
-            disabled={deleteIntegration.isPending}
+            disabled={deleteIntegration.isPending || conflict || !etag}
           >
             <Trash2 className="h-4 w-4" />
             Delete
@@ -1216,6 +1290,7 @@ function IntegrationEditor({
               {`"${form.name.trim() || title}" will be permanently removed. New requests will no longer route to this connection.`}
             </DialogDescription>
           </DialogHeader>
+          {conflict ? <EditorConflict onReload={reload} /> : null}
           <DialogFooter>
             <Button variant="ghost" onClick={() => setConfirmDelete(false)}>
               Cancel
@@ -1223,10 +1298,20 @@ function IntegrationEditor({
             <Button
               variant="destructive"
               onClick={() => {
-                deleteIntegration.mutate(form.id);
-                setConfirmDelete(false);
+                deleteIntegration.mutate(
+                  { id: form.id, etag },
+                  {
+                    onSuccess: () => {
+                      setConfirmDelete(false);
+                      onRemove();
+                    },
+                    onError: (error) => {
+                      if (isRequestEditorConflict(error)) setConflict(true);
+                    },
+                  },
+                );
               }}
-              disabled={deleteIntegration.isPending}
+              disabled={deleteIntegration.isPending || conflict || !etag}
             >
               <Trash2 className="h-4 w-4" />
               Delete
@@ -1250,6 +1335,7 @@ function UserOverridesTab() {
   const [selectedUserID, setSelectedUserID] = useState<number | undefined>();
   const effectiveUserID = selectedUserID ?? users.data?.[0]?.id;
   const limit = useRequestUserLimit(effectiveUserID);
+  const [generation, setGeneration] = useState(0);
 
   const selectedUser = useMemo(
     () => users.data?.find((user) => user.id === effectiveUserID),
@@ -1288,11 +1374,15 @@ function UserOverridesTab() {
 
       {limit.isLoading ? (
         <RowsSkeleton />
-      ) : limit.isError || !limit.data || !effectiveUserID ? (
+      ) : !limit.data || !effectiveUserID ? (
         <EmptyPanel title="Limit failed" detail="The selected user limit could not be loaded." />
       ) : (
         <UserLimitEditor
-          key={userLimitFormKey(limit.data)}
+          key={`${effectiveUserID}:${generation}`}
+          onReload={async () => {
+            const result = await limit.refetch();
+            if (result.isSuccess) setGeneration((n) => n + 1);
+          }}
           userID={effectiveUserID}
           limit={limit.data}
           userAvailable={Boolean(selectedUser)}
@@ -1306,12 +1396,16 @@ function UserLimitEditor({
   userID,
   limit,
   userAvailable,
+  onReload,
 }: {
   userID: number;
   limit: RequestUserLimit;
   userAvailable: boolean;
+  onReload: () => Promise<void>;
 }) {
   const updateLimit = useUpdateRequestUserLimit();
+  const [etag, setETag] = useState(limit.etag);
+  const [conflict, setConflict] = useState(false);
   const [form, setForm] = useState<UserLimitFormState>(() => ({
     limit_mode: limit.limit_mode,
     max_requests: limit.max_requests == null ? "" : String(limit.max_requests),
@@ -1323,12 +1417,19 @@ function UserLimitEditor({
     const custom = form.limit_mode === "custom";
     const payload: RequestUserLimit = {
       user_id: userID,
+      etag,
       limit_mode: form.limit_mode,
       approval_mode: form.approval_mode,
       max_requests: custom ? Math.max(0, Number(form.max_requests) || 0) : undefined,
       window_days: custom ? Math.max(1, Number(form.window_days) || 1) : undefined,
     };
-    updateLimit.mutate({ userId: userID, body: payload });
+    updateLimit.mutate(
+      { userId: userID, body: payload },
+      {
+        onSuccess: (saved) => setETag(saved.etag),
+        onError: (error) => setConflict(isRequestEditorConflict(error)),
+      },
+    );
   }
 
   return (
@@ -1399,7 +1500,11 @@ function UserLimitEditor({
         ) : null}
       </div>
 
-      <Button onClick={saveLimit} disabled={!userAvailable || updateLimit.isPending}>
+      {conflict ? <EditorConflict onReload={onReload} /> : null}
+      <Button
+        onClick={saveLimit}
+        disabled={!userAvailable || updateLimit.isPending || conflict || !etag}
+      >
         <Save className="h-4 w-4" />
         Save Override
       </Button>
@@ -1407,15 +1512,43 @@ function UserLimitEditor({
   );
 }
 
-function userLimitFormKey(limit: RequestUserLimit): string {
-  return `${limit.user_id}:${limit.updated_at ?? ""}:${limit.limit_mode}:${limit.approval_mode}`;
+function EditorConflict({ onReload }: { onReload: () => Promise<void> }) {
+  const [loading, setLoading] = useState(false);
+  return (
+    <div role="alert" className="space-y-2 text-sm">
+      <p>
+        This was changed by another administrator. Your edits have been kept. Reload to review the
+        latest version before saving again.
+      </p>
+      <Button
+        type="button"
+        variant="outline"
+        disabled={loading}
+        onClick={async () => {
+          setLoading(true);
+          try {
+            await onReload();
+          } finally {
+            setLoading(false);
+          }
+        }}
+      >
+        Reload latest version
+      </Button>
+    </div>
+  );
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function Field({ label, children, error }: { label: string; children: ReactNode; error?: string }) {
   return (
     <div className="space-y-2">
       <Label>{label}</Label>
       {children}
+      {error ? (
+        <p role="alert" className="text-destructive text-xs">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

@@ -109,6 +109,20 @@ func TestHandlePlaybackInfoReplacesDuplicateJellyfinWebNegotiation(t *testing.T)
 	}
 }
 
+func TestHandlePlaybackInfoPreservesNegotiationsWithDifferentSubtitleSelections(t *testing.T) {
+	handler, routeID := newSubtitleSelectionHandler(t)
+	first := postPlaybackInfoForDeviceBody(t, handler, routeID, "web-device", `{"SubtitleStreamIndex":-1}`)
+	second := postPlaybackInfoForDeviceBody(t, handler, routeID, "web-device", `{"SubtitleStreamIndex":2}`)
+
+	store := handler.playbackStore.(*PlaybackSessionStore)
+	if _, ok := store.Get(first.PlaySessionID); !ok {
+		t.Fatal("subtitles-off negotiation was invalidated before its manifest request")
+	}
+	if _, ok := store.Get(second.PlaySessionID); !ok {
+		t.Fatal("embedded-subtitle negotiation was not routable")
+	}
+}
+
 func TestHandlePlaybackInfoStripsNULFromClientDeviceID(t *testing.T) {
 	handler, routeID := newSubtitleSelectionHandler(t)
 	result := postPlaybackInfoForDevice(t, handler, routeID, "vidhub\x00device")
@@ -167,7 +181,18 @@ func postPlaybackInfoForDevice(
 	deviceID string,
 ) playbackInfoResponseDTO {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/Items/"+routeID+"/PlaybackInfo", strings.NewReader(`{}`))
+	return postPlaybackInfoForDeviceBody(t, handler, routeID, deviceID, `{}`)
+}
+
+func postPlaybackInfoForDeviceBody(
+	t *testing.T,
+	handler *PlaybackHandler,
+	routeID string,
+	deviceID string,
+	body string,
+) playbackInfoResponseDTO {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/Items/"+routeID+"/PlaybackInfo", strings.NewReader(body))
 	req.Header.Set(
 		"X-Emby-Authorization",
 		`MediaBrowser Client="Jellyfin Web", Device="Chrome", DeviceId="`+deviceID+`", Version="10.11.6"`,

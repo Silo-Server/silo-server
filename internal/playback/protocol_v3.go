@@ -11,15 +11,18 @@ import (
 )
 
 const (
-	ProtocolV3                   = 3
-	FeaturePlaybackPlanV3        = "playback_plan_v3"
-	FeatureNeutralContractV3     = "neutral_playback_v3_contract_v1"
-	FeatureLayoutPassthrough     = "layout_aware_passthrough"
-	FeatureClientVideoTransforms = "client_video_transformations_v1"
-	FeatureRouteDiagnostics      = "playback_route_diagnostics"
-	FeatureDeviceQuirksV3        = "device_quirks_v1"
-	FeatureSeekReanchorV3        = "seek_reanchor_v1"
-	FeatureOutputChangeV3        = "output_change_v1"
+	ProtocolV3                               = 3
+	FeaturePlaybackPlanV3                    = "playback_plan_v3"
+	FeatureServerRemoteStreamBitratePolicyV3 = "server_remote_stream_bitrate_policy_v1"
+	FeatureServerLocalStreamBitratePolicyV3  = "server_local_stream_bitrate_policy_v1"
+	FeatureEmbeddedSubtitlesV3               = "embedded_subtitles_v1"
+	FeatureNeutralContractV3                 = "neutral_playback_v3_contract_v1"
+	FeatureLayoutPassthrough                 = "layout_aware_passthrough"
+	FeatureClientVideoTransforms             = "client_video_transformations_v1"
+	FeatureRouteDiagnostics                  = "playback_route_diagnostics"
+	FeatureDeviceQuirksV3                    = "device_quirks_v1"
+	FeatureSeekReanchorV3                    = "seek_reanchor_v1"
+	FeatureOutputChangeV3                    = "output_change_v1"
 	// FeatureOutputDisplayEvidenceV3 tells a client this server understands
 	// output.display and its hdr_evidence tier. A pre-feature server ignores
 	// the field and falls back from a missing output.hdr_details to the
@@ -65,7 +68,14 @@ const (
 	// negotiate the token, or has no realtime connection, is stopped instead;
 	// the client's ordinary recovery then mints a fresh attempt that plans
 	// against the now-persisted verdict.
-	FeaturePlanInvalidatedV3   = "plan_invalidated_v1"
+	FeaturePlanInvalidatedV3 = "plan_invalidated_v1"
+	// FeatureSubripSidecarV3 is the client's statement that it parses SubRip
+	// itself, including {\anN} placement. An opted-in client receives
+	// external and downloaded SRT tracks as the original .srt bytes instead
+	// of the WebVTT conversion, which cannot carry every SRT feature. Embedded
+	// SRT tracks keep their existing delivery. It exists only on /api/v2 (see
+	// NativeServerFeaturesV3).
+	FeatureSubripSidecarV3     = "subrip_sidecar_v1"
 	PlanRecipeVersionV3        = "v3.4"
 	ClientDV7ToDV81V3          = "client_dv7_to_dv81"
 	ClientDV7ToHDR10V3         = "client_dv7_to_hdr10"
@@ -99,6 +109,10 @@ const (
 const (
 	TransportFeatureProgressiveRemuxExecutionV1 = "progressive_remux_execution_v1"
 	TransportFeatureProgressiveRemuxRelayV1     = "progressive_remux_relay_v1"
+	// Theme audio markers: a proxy that serves /stream/theme, and a transcode
+	// node that approves theme files as progressive AAC inputs.
+	TransportFeatureThemeAudioEgressV1    = "theme_audio_egress_v1"
+	TransportFeatureThemeAudioExecutionV1 = "theme_audio_execution_v1"
 )
 
 // Degradation warning codes reported by playback plans.
@@ -110,7 +124,10 @@ const DegradationWarningHDRToneMappedV3 = "hdr_tone_mapped"
 func ServerFeaturesV3() []string {
 	return []string{
 		FeaturePlaybackPlanV3,
+		FeatureServerRemoteStreamBitratePolicyV3,
+		FeatureServerLocalStreamBitratePolicyV3,
 		FeatureNeutralContractV3,
+		FeatureEmbeddedSubtitlesV3,
 		FeatureLayoutPassthrough,
 		FeatureRouteDiagnostics,
 		FeatureDeviceQuirksV3,
@@ -129,6 +146,20 @@ func ServerFeaturesV3() []string {
 		// fallback is still required.
 		FeaturePlanSourceDurationV3,
 	}
+}
+
+// NativeServerFeaturesV3 is ServerFeaturesV3 plus the features the server
+// advertises and honors only on /api/v2. They postdate the /api/v1 freeze, so
+// the frozen surface neither advertises nor negotiates them.
+func NativeServerFeaturesV3() []string {
+	return append(ServerFeaturesV3(), FeatureSubripSidecarV3)
+}
+
+// WithoutFeatureV3 returns features with every spelling of feature removed.
+func WithoutFeatureV3(features []string, feature string) []string {
+	return slices.DeleteFunc(slices.Clone(features), func(candidate string) bool {
+		return strings.EqualFold(strings.TrimSpace(candidate), feature)
+	})
 }
 
 type DecisionOutcomeV3 string
@@ -209,10 +240,12 @@ const (
 const (
 	TransformationAudioToAACV3      = "audio_to_aac"
 	TransformationVideoToH264V3     = "video_to_h264"
+	TransformationVideoToHEVCV3     = "video_to_hevc"
 	TransformationServerDV7HDR10V3  = "server_dv7_to_hdr10"
 	TransformationHDRToSDRToneMapV3 = "hdr_to_sdr_tonemap"
 
 	TransformationVideoToH264RecipeVersionV3     = "2"
+	TransformationVideoToHEVCRecipeVersionV3     = "1"
 	TransformationAudioToAACRecipeVersionV3      = "4"
 	TransformationHDRToSDRToneMapRecipeVersionV3 = "1"
 )
@@ -230,6 +263,7 @@ const (
 const (
 	ClaimAudioDecodeV3                = "audio_decode"
 	ClaimH264DecodeV3                 = "h264_decode"
+	ClaimHEVCDecodeV3                 = "hevc_decode"
 	ClaimDolbyVisionMetadataRemovedV3 = "dolby_vision_metadata_removed"
 	ClaimHDR10BaseLayerPreservedV3    = "hdr10_base_layer_preserved"
 	ClaimEnhancementLayerDiscardedV3  = "enhancement_layer_discarded"
@@ -250,6 +284,10 @@ const (
 	TerminalHDRTranscodeUnsupportedV3    = "hdr_transcode_unsupported"
 	TerminalDVConversionUnsupportedV3    = "dv_conversion_unsupported"
 )
+
+// TerminalBitratePolicyUnavailableV3 reports that no route fits the
+// administrator's local or remote per-stream bitrate limit for this version.
+const TerminalBitratePolicyUnavailableV3 = "bitrate_policy_unavailable"
 
 type SubtitleModeV3 string
 
@@ -446,13 +484,29 @@ const (
 	OutputHDREvidenceUnknownV3 = "unknown"
 )
 
+const (
+	subtitleIdentityFFmpegV3    = "ffmpeg_stream_index"
+	subtitleIdentityContainerV3 = "container_track_id"
+)
+
+// NativeEmbeddedSubtitleCapabilityV3 attests native selection for one container
+// and codec set. Stream indexes and container track IDs are distinct namespaces.
+type NativeEmbeddedSubtitleCapabilityV3 struct {
+	Container       string   `json:"container"`
+	Codecs          []string `json:"codecs"`
+	TrackIdentity   string   `json:"track_identity"`
+	ASSStyling      bool     `json:"ass_styling"`
+	FontAttachments bool     `json:"font_attachments"`
+}
+
 type DeliverySubtitleCapabilitiesV3 struct {
-	EmbeddedText    bool `json:"embedded_text"`
-	SidecarText     bool `json:"sidecar_text"`
-	ASSStyling      bool `json:"ass_styling"`
-	EmbeddedBitmap  bool `json:"embedded_bitmap"`
-	SidecarBitmap   bool `json:"sidecar_bitmap"`
-	FontAttachments bool `json:"font_attachments"`
+	NativeEmbedded  []NativeEmbeddedSubtitleCapabilityV3 `json:"native_embedded,omitempty"`
+	EmbeddedText    bool                                 `json:"embedded_text"`
+	SidecarText     bool                                 `json:"sidecar_text"`
+	ASSStyling      bool                                 `json:"ass_styling"`
+	EmbeddedBitmap  bool                                 `json:"embedded_bitmap"`
+	SidecarBitmap   bool                                 `json:"sidecar_bitmap"`
+	FontAttachments bool                                 `json:"font_attachments"`
 }
 
 type DeliveryCapabilityV3 struct {
@@ -490,12 +544,15 @@ type ClientPlaybackContextV3 struct {
 }
 
 type StartRequestV3 struct {
-	ProtocolVersion            int                       `json:"protocol_version"`
-	ClientFeatures             []string                  `json:"client_features"`
-	FileID                     int                       `json:"file_id"`
-	ProfileID                  string                    `json:"profile_id"`
-	PlaybackAttemptID          string                    `json:"playback_attempt_id"`
-	QualityPreference          string                    `json:"quality_preference"`
+	ProtocolVersion   int      `json:"protocol_version"`
+	ClientFeatures    []string `json:"client_features"`
+	FileID            int      `json:"file_id"`
+	ProfileID         string   `json:"profile_id"`
+	PlaybackAttemptID string   `json:"playback_attempt_id"`
+	QualityPreference string   `json:"quality_preference"`
+	// False pins the source file through start and every replan. Encoding and
+	// delivery can still adapt to the viewer without changing the timeline.
+	AllowAlternateVersions     *bool                     `json:"allow_alternate_versions,omitempty"`
 	SubtitleFidelityPreference SubtitleFidelityV3        `json:"subtitle_fidelity_preference"`
 	StartPosition              *float64                  `json:"start_position,omitempty"`
 	ProgressPersistence        ProgressPersistenceV3     `json:"progress_persistence,omitempty"`
@@ -508,6 +565,10 @@ type StartRequestV3 struct {
 	BandwidthCapKbps           *int                      `json:"bandwidth_cap_kbps,omitempty"`
 	Capabilities               ClientCodecCapabilitiesV3 `json:"client_capabilities"`
 	ClientPlaybackContext      ClientPlaybackContextV3   `json:"client_playback_context"`
+}
+
+func (r StartRequestV3) AllowsAlternateVersions() bool {
+	return r.AllowAlternateVersions == nil || *r.AllowAlternateVersions
 }
 
 // ProgressPersistenceV3 declares which side owns durable item resume/history.
@@ -763,10 +824,18 @@ type SubtitleArtifactV3 struct {
 	TimingOriginSeconds float64 `json:"timing_origin_seconds"`
 }
 
+// EmbeddedSubtitleV3 selects a track in the unmodified media source. The
+// container identifier is canonical decimal when the probe supplies one.
+type EmbeddedSubtitleV3 struct {
+	StreamIndex      int    `json:"stream_index"`
+	ContainerTrackID string `json:"container_track_id,omitempty"`
+}
+
 type SubtitleDecisionV3 struct {
-	Mode    SubtitleModeV3 `json:"mode"`
-	TrackID string         `json:"track_id,omitempty"`
-	// Artifact is the single track the client draws. It exists only under
+	Embedded *EmbeddedSubtitleV3 `json:"embedded,omitempty"`
+	Mode     SubtitleModeV3      `json:"mode"`
+	TrackID  string              `json:"track_id,omitempty"`
+	// Artifact is the selected sidecar, mutually exclusive with Embedded. It exists only under
 	// SubtitleRenderV3 and SubtitleConvertV3; SubtitleOffV3 and
 	// SubtitleBurnInV3 have no client-fetchable artifact and must publish none,
 	// including on a plan derived from an earlier plan of the same session.
@@ -1174,6 +1243,25 @@ func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackCon
 				}
 			}
 		}
+		if len(delivery.Subtitles.NativeEmbedded) > 16 {
+			return errors.New("native subtitle capability list exceeds supported size")
+		}
+		for i := range delivery.Subtitles.NativeEmbedded {
+			native := &delivery.Subtitles.NativeEmbedded[i]
+			native.Container = strings.ToLower(strings.TrimSpace(native.Container))
+			if native.Container == "" || len(native.Container) > 32 || len(native.Codecs) == 0 || len(native.Codecs) > 32 {
+				return errors.New("invalid native subtitle capability")
+			}
+			if native.TrackIdentity != subtitleIdentityFFmpegV3 && native.TrackIdentity != subtitleIdentityContainerV3 {
+				return errors.New("invalid native subtitle track identity")
+			}
+			for j, codec := range native.Codecs {
+				if strings.TrimSpace(codec) == "" || len(codec) > 64 {
+					return errors.New("invalid native subtitle codec")
+				}
+				native.Codecs[j] = normalizeNativeSubtitleCodecV3(codec)
+			}
+		}
 		seenTransformations := make(map[string]struct{}, len(delivery.Transformations))
 		for i := range delivery.Transformations {
 			transformation := &delivery.Transformations[i]
@@ -1304,10 +1392,13 @@ func HasFeatureV3(features []string, wanted string) bool {
 //   - software_video_decode_v1 widens the direct-play evidence tiers. Dropping
 //     it on a replan silently converts a direct route into a transcode and
 //     persists that downgrade into the durable normalized request.
+//   - subrip_sidecar_v1 picks the representation of every SRT sidecar URL.
+//     Switching it mid-attempt would publish one track under two URLs, and a
+//     seek reanchor must reproduce the frozen plan's artifact exactly.
 //
 // Stop/start is the explicit boundary for changing any of them.
 func AttemptStickyFeaturesV3() []string {
-	return []string{FeatureHeaderAuthenticatedMediaV3, FeatureAuthorizedMediaOriginsV3, FeatureSoftwareVideoDecodeV3}
+	return []string{FeatureHeaderAuthenticatedMediaV3, FeatureAuthorizedMediaOriginsV3, FeatureSoftwareVideoDecodeV3, FeatureSubripSidecarV3}
 }
 
 // PinAttemptStickyFeaturesV3 returns requested with every attempt-sticky

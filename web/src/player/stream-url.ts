@@ -42,10 +42,22 @@ export function buildPlayerStreamUrl(
   streamPath: string,
   token: string | null,
 ): string {
+  // Realtime subtitle events carry domain-relative paths; v2 plans may also
+  // replay older local paths. Project only API-local delivery routes, keeping
+  // absolute distributed URLs and their signed routing untouched.
+  streamPath = streamPath.replace(
+    /^(?:\/api\/v1)?\/(stream\/|playback\/transcode\/)/,
+    "/api/v2/$1",
+  );
+  // Versioned server paths are relative to the API installation root; the
+  // player's configured base already includes the bridge API namespace.
+  const apiRoot = /^\/api\/v[12]\//.test(streamPath)
+    ? apiBaseUrl.replace(/\/api\/v[12]\/?$/, "")
+    : apiBaseUrl;
   const base =
     streamPath.startsWith("http://") || streamPath.startsWith("https://")
       ? streamPath
-      : `${apiBaseUrl}${streamPath}`;
+      : `${apiRoot}${streamPath}`;
   if (!token) {
     return base;
   }

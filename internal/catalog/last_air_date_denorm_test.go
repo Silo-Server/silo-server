@@ -33,7 +33,7 @@ func TestEffectiveLastAirDateExpr_NonSeriesFallsBackToFirstAirDate(t *testing.T)
 }
 
 // TestNoEpisodeDeletePath_ProtectsLastAirDateDenorm pins the invariant that
-// no code path deletes from `episodes`. The denormalized
+// no production code path deletes from `episodes`. The denormalized
 // media_items.last_air_date_at column is currently maintained only on
 // Upsert/BulkUpsert (see updateSeriesLastAirDateSQL / batchUpdateSeriesLastAirDateSQL).
 // If a future PR adds an episode-delete code path, last_air_date_at will
@@ -49,7 +49,7 @@ func TestEffectiveLastAirDateExpr_NonSeriesFallsBackToFirstAirDate(t *testing.T)
 func TestNoEpisodeDeletePath_ProtectsLastAirDateDenorm(t *testing.T) {
 	// Sites that may legitimately mention "DELETE FROM episodes" without
 	// breaking the invariant — e.g., schema migrations that drop and
-	// recreate the table, or tests asserting the absence itself.
+	// recreate the table. Go test files are excluded below.
 	knownEpisodeDeleteSites := map[string]bool{
 		// Migration 001 owns the initial schema; subsequent migrations may
 		// rebuild the table. Add specific migration filenames here.
@@ -83,8 +83,9 @@ func TestNoEpisodeDeletePath_ProtectsLastAirDateDenorm(t *testing.T) {
 			if ext != ".go" && ext != ".sql" {
 				return nil
 			}
-			// Don't match this file itself (it contains the regex literal).
-			if strings.HasSuffix(path, "last_air_date_denorm_test.go") {
+			// Go tests may delete their isolated fixtures. Keep every production
+			// Go file and SQL file in scope, including scenario executor code.
+			if strings.HasSuffix(path, "_test.go") {
 				return nil
 			}
 			rel := filepath.ToSlash(path)

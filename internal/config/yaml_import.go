@@ -197,6 +197,10 @@ func YAMLToSettingsMap(path string) (map[string]string, error) {
 	setIfNonEmpty(m, "scanner.file_removal_grace", raw.Scanner.FileRemovalGrace)
 	m["scanner.empty_trash_after_scan"] = strconv.FormatBool(raw.Scanner.EmptyTrashAfterScan)
 
+	// Artwork
+	setIfNonEmpty(m, "artwork.storage_backend", raw.Artwork.StorageBackend)
+	setIfNonEmpty(m, "artwork.local_path", raw.Artwork.LocalPath)
+
 	// Matcher
 	if raw.Matcher.Workers != 0 {
 		m["matcher.workers"] = strconv.Itoa(raw.Matcher.Workers)

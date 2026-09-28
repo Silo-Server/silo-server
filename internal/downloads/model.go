@@ -138,6 +138,7 @@ type Download struct {
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	CompletedAt       *time.Time
+	StatusEventAt     *time.Time // timestamp of the last accepted client status event
 }
 
 // SkippedDownload explains why a bulk series/season request did not create a

@@ -9,8 +9,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
-	"github.com/Silo-Server/silo-server/internal/s3client"
 )
 
 // Shared artwork helpers used by both the admin library_collections handler
@@ -29,12 +29,12 @@ const (
 // installs and non-template paths keep the original persisted path.
 func storeBundledCollectionPosterIfS3Configured(
 	ctx context.Context,
-	s3GP *s3client.Client,
+	store blobstore.Store,
 	frontendFS fs.FS,
 	collectionID, prefix, posterPath string,
 ) (storedPath, thumbhashStr string, stored bool, err error) {
 	posterPath = strings.TrimSpace(posterPath)
-	if s3GP == nil || !strings.HasPrefix(posterPath, collectionTemplateImageDir) {
+	if store == nil || !strings.HasPrefix(posterPath, collectionTemplateImageDir) {
 		return posterPath, "", false, nil
 	}
 	if frontendFS == nil {
@@ -47,7 +47,7 @@ func storeBundledCollectionPosterIfS3Configured(
 		return "", "", false, fmt.Errorf("reading bundled poster %q: %w", posterPath, err)
 	}
 
-	storedPath, thumbhashStr, err = uploadCollectionImageVariants(ctx, s3GP, prefix, collectionID, "poster", data)
+	storedPath, thumbhashStr, err = uploadCollectionImageVariants(ctx, store, prefix, collectionID, "poster", data)
 	if err != nil {
 		return "", "", false, err
 	}
@@ -124,11 +124,11 @@ func downloadCollectionImageURL(ctx context.Context, client *http.Client, rawURL
 // the w300 variant.
 func uploadCollectionImageVariants(
 	ctx context.Context,
-	s3GP *s3client.Client,
+	store blobstore.Store,
 	prefix, collectionID, imageType string,
 	fileData []byte,
 ) (s3Path, thumbhashStr string, err error) {
-	if s3GP == nil {
+	if store == nil {
 		return "", "", fmt.Errorf("image upload requires configured S3 storage")
 	}
 	var widths []int
@@ -146,11 +146,10 @@ func uploadCollectionImageVariants(
 		return "", "", fmt.Errorf("generating image variants: %w", err)
 	}
 
-	bucket := s3GP.Bucket()
 	var w300Data []byte
 	for _, v := range result.Variants {
 		key := fmt.Sprintf("%s/%s/%s/%s%s", prefix, collectionID, imageType, v.Key, result.Ext)
-		if err := s3GP.PutObject(ctx, bucket, key, v.Data); err != nil {
+		if err := store.Put(ctx, key, v.Data); err != nil {
 			return "", "", fmt.Errorf("uploading %s: %w", v.Key, err)
 		}
 		if v.Key == "w300" {
@@ -174,21 +173,23 @@ func uploadCollectionImageVariants(
 // collection / imageType under the supplied S3 prefix.
 func removeCollectionImageVariants(
 	ctx context.Context,
-	s3GP *s3client.Client,
+	store blobstore.Store,
 	prefix, collectionID, imageType string,
 ) error {
-	if s3GP == nil {
+	if store == nil {
 		return nil
 	}
 	p := fmt.Sprintf("%s/%s/%s/", prefix, collectionID, imageType)
-	keys, err := s3GP.ListObjects(ctx, s3GP.Bucket(), p)
+	items, _, err := store.List(ctx, p, "", 0)
 	if err != nil {
 		return fmt.Errorf("listing objects: %w", err)
 	}
-	for _, key := range keys {
-		if err := s3GP.DeleteObject(ctx, s3GP.Bucket(), key); err != nil {
-			return fmt.Errorf("deleting %s: %w", key, err)
-		}
+	keys := make([]string, 0, len(items))
+	for _, item := range items {
+		keys = append(keys, item.Key)
+	}
+	if _, err := store.Delete(ctx, keys); err != nil {
+		return fmt.Errorf("deleting collection variants: %w", err)
 	}
 	return nil
 }

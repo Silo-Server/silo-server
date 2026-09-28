@@ -20,6 +20,25 @@ import (
 )
 
 const (
+	diagnosticsInternalCode = "internal_error"
+	diagnosticsDisabledCode = "disabled"
+	diagnosticsBusyCode     = "busy"
+
+	diagnosticsStatusFailureMessage = "Failed to load diagnostics status"
+	diagnosticsDisabledMessage      = "Diagnostics uploads are disabled"
+	diagnosticsStorageMessage       = "Diagnostics storage is not configured"
+	diagnosticsTooLargeCode         = "too_large"
+	diagnosticsInvalidBundleCode    = "invalid_bundle"
+	diagnosticsTooLargeMessage      = "Diagnostics upload is too large"
+	diagnosticsBusyMessage          = "Diagnostics upload capacity is busy"
+	diagnosticsUploadErrorCode      = "upload_error"
+
+	// Exported for native API adapters.
+	DiagnosticsDisabledCode           = diagnosticsDisabledCode
+	DiagnosticsStorageUnavailableCode = errCodeStorageUnavailable
+	diagnosticsSessionNotFoundMessage = "Upload session not found"
+	diagnosticsUploadFailedMessage    = "Diagnostics upload failed"
+
 	diagnosticsMultipartOverheadBytes = int64(128 * 1024)
 	diagnosticsBusyRetryAfter         = "5"
 	diagnosticsQuotaRetryAfter        = "60"
@@ -74,7 +93,7 @@ func (h *DiagnosticsHandler) HandleStatus(w http.ResponseWriter, r *http.Request
 	}
 	status, err := h.service.Status(r.Context(), userID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load diagnostics status")
+		writeError(w, http.StatusInternalServerError, diagnosticsInternalCode, diagnosticsStatusFailureMessage)
 		return
 	}
 	writeJSON(w, http.StatusOK, status)
@@ -108,7 +127,6 @@ func (h *DiagnosticsHandler) extendDiagnosticsUploadDeadlines(w http.ResponseWri
 
 func (h *DiagnosticsHandler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 	h.extendDiagnosticsUploadDeadlines(w, r, true)
-
 	userID, ok := diagnosticsUserID(w, r)
 	if !ok {
 		claims := apimw.GetClaims(r.Context())
@@ -117,11 +135,38 @@ func (h *DiagnosticsHandler) HandleUpload(w http.ResponseWriter, r *http.Request
 		}
 		return
 	}
+	var profileID *string
+	if value := strings.TrimSpace(r.Header.Get("X-Profile-Id")); value != "" {
+		profileID = new(value)
+	}
+	result, err := h.IngestMultipart(w, r, userID, profileID)
+	if err != nil {
+		writeDiagnosticsUploadFailure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, result)
+}
 
+// UploadStatus returns the same account-specific availability and quota limits
+// used by both upload transports.
+func (h *DiagnosticsHandler) UploadStatus(ctx context.Context, userID int) (diagnostics.Status, error) {
+	return h.service.Status(ctx, userID)
+}
+
+// ExtendUploadDeadlines keeps slow uploads within the existing finite ten-minute
+// read/write budget. Structured adapters call it before consuming the stream.
+func (h *DiagnosticsHandler) ExtendUploadDeadlines(w http.ResponseWriter, r *http.Request) {
+	h.extendDiagnosticsUploadDeadlines(w, r, true)
+}
+
+// IngestMultipart streams the ordered manifest/bundle parts through the existing
+// ingest service and shared bridge/chunk completion limiter. The caller must
+// authenticate a user access token; the service validates captured attribution.
+// It returns classified failures without encoding an HTTP response.
+func (h *DiagnosticsHandler) IngestMultipart(w http.ResponseWriter, r *http.Request, userID int, profileID *string) (diagnostics.IngestResult, error) {
 	status, err := h.service.Status(r.Context(), userID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load diagnostics status")
-		return
+		return diagnostics.IngestResult{}, &DiagnosticsUploadFailure{Status: http.StatusInternalServerError, Code: diagnosticsInternalCode, Message: diagnosticsStatusFailureMessage}
 	}
 	maxBundleBytes := status.MaxBundleBytes
 	if maxBundleBytes <= 0 {
@@ -131,69 +176,53 @@ func (h *DiagnosticsHandler) HandleUpload(w http.ResponseWriter, r *http.Request
 
 	switch status.Status {
 	case diagnostics.StatusDisabled:
-		writeError(w, http.StatusForbidden, "disabled", "Diagnostics uploads are disabled")
-		return
+		return diagnostics.IngestResult{}, &DiagnosticsUploadFailure{Status: http.StatusForbidden, Code: diagnosticsDisabledCode, Message: diagnosticsDisabledMessage}
 	case diagnostics.StatusStorageUnavailable:
-		writeError(w, http.StatusServiceUnavailable, "storage_unavailable", "Diagnostics storage is not configured")
-		return
+		return diagnostics.IngestResult{}, &DiagnosticsUploadFailure{Status: http.StatusServiceUnavailable, Code: errCodeStorageUnavailable, Message: diagnosticsStorageMessage}
 	case diagnostics.StatusAvailable:
 	default:
-		writeError(w, http.StatusServiceUnavailable, "storage_unavailable", "Diagnostics storage is not available")
-		return
+		return diagnostics.IngestResult{}, &DiagnosticsUploadFailure{Status: http.StatusServiceUnavailable, Code: errCodeStorageUnavailable, Message: "Diagnostics storage is not available"}
 	}
 
 	release, acquired := h.inflight.acquire(userID)
 	if !acquired {
-		h.logRejected(r.Context(), userID, "busy")
-		w.Header().Set("Retry-After", diagnosticsBusyRetryAfter)
-		writeError(w, http.StatusServiceUnavailable, "busy", "Diagnostics upload capacity is busy")
-		return
+		h.logRejected(r.Context(), userID, diagnosticsBusyCode)
+		return diagnostics.IngestResult{}, &DiagnosticsUploadFailure{Status: http.StatusServiceUnavailable, Code: diagnosticsBusyCode, Message: diagnosticsBusyMessage, RetryAfter: diagnosticsBusyRetryAfter}
 	}
 	defer release()
 
 	mr, err := r.MultipartReader()
 	if err != nil {
-		h.writeDiagnosticsMultipartError(r.Context(), userID, w, err)
-		return
+		return diagnostics.IngestResult{}, h.diagnosticsMultipartFailure(r.Context(), userID, err)
 	}
 
 	manifestPart, err := nextDiagnosticsPart(mr, "manifest", "application/json")
 	if err != nil {
-		h.writeDiagnosticsMultipartError(r.Context(), userID, w, err)
-		return
+		return diagnostics.IngestResult{}, h.diagnosticsMultipartFailure(r.Context(), userID, err)
 	}
 	manifestJSON, err := readDiagnosticsPart(manifestPart, diagnostics.MaxManifestBytes)
 	_ = manifestPart.Close()
 	if err != nil {
-		h.writeDiagnosticsMultipartError(r.Context(), userID, w, err)
-		return
+		return diagnostics.IngestResult{}, h.diagnosticsMultipartFailure(r.Context(), userID, err)
 	}
 
 	bundlePart, err := nextDiagnosticsPart(mr, "bundle", diagnostics.BundleContentType)
 	if err != nil {
-		h.writeDiagnosticsMultipartError(r.Context(), userID, w, err)
-		return
+		return diagnostics.IngestResult{}, h.diagnosticsMultipartFailure(r.Context(), userID, err)
 	}
 	defer bundlePart.Close()
-
-	profileID := strings.TrimSpace(r.Header.Get("X-Profile-Id"))
-	var profileIDPtr *string
-	if profileID != "" {
-		profileIDPtr = &profileID
-	}
 
 	result, err := h.service.Ingest(
 		r.Context(),
 		userID,
-		profileIDPtr,
+		profileID,
 		manifestJSON,
 		&exactlyTwoPartBundleReader{part: bundlePart, mr: mr},
 	)
 	if err != nil {
-		writeDiagnosticsServiceError(w, err)
-		return
+		return diagnostics.IngestResult{}, diagnosticsServiceFailure(err)
 	}
-	writeJSON(w, http.StatusCreated, result)
+	return result, nil
 }
 
 func diagnosticsUserID(w http.ResponseWriter, r *http.Request) (int, bool) {
@@ -292,15 +321,15 @@ func (r *exactlyTwoPartBundleReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func (h *DiagnosticsHandler) writeDiagnosticsMultipartError(ctx context.Context, userID int, w http.ResponseWriter, err error) {
-	var maxBytesErr *http.MaxBytesError
+func (h *DiagnosticsHandler) diagnosticsMultipartFailure(ctx context.Context, userID int, err error) error {
+	_, maxBytesExceeded := errors.AsType[*http.MaxBytesError](err)
 	switch {
-	case errors.As(err, &maxBytesErr), errors.Is(err, errDiagnosticsPartTooLarge):
-		h.logRejected(ctx, userID, "too_large")
-		writeError(w, http.StatusRequestEntityTooLarge, "too_large", "Diagnostics upload is too large")
+	case maxBytesExceeded, errors.Is(err, errDiagnosticsPartTooLarge):
+		h.logRejected(ctx, userID, diagnosticsTooLargeCode)
+		return &DiagnosticsUploadFailure{Status: http.StatusRequestEntityTooLarge, Code: diagnosticsTooLargeCode, Message: diagnosticsTooLargeMessage}
 	default:
-		h.logRejected(ctx, userID, "invalid_bundle")
-		writeError(w, http.StatusBadRequest, "invalid_bundle", "Invalid diagnostics upload")
+		h.logRejected(ctx, userID, diagnosticsInvalidBundleCode)
+		return &DiagnosticsUploadFailure{Status: http.StatusBadRequest, Code: diagnosticsInvalidBundleCode, Message: "Invalid diagnostics upload"}
 	}
 }
 
@@ -320,34 +349,55 @@ func (h *DiagnosticsHandler) logRejected(ctx context.Context, userID int, reason
 	logger.InfoContext(ctx, "diagnostic report rejected", args...)
 }
 
-func writeDiagnosticsServiceError(w http.ResponseWriter, err error) {
-	var maxBytesErr *http.MaxBytesError
+// DiagnosticsUploadFailure preserves the bridge's public error classification.
+// The v2 adapter translates it into its catalogued Problem Details response.
+type DiagnosticsUploadFailure struct {
+	Status     int
+	Code       string
+	Message    string
+	RetryAfter string
+}
+
+func (e *DiagnosticsUploadFailure) Error() string { return e.Message }
+
+func writeDiagnosticsUploadFailure(w http.ResponseWriter, err error) {
+	failure, ok := errors.AsType[*DiagnosticsUploadFailure](err)
+	if !ok {
+		failure = &DiagnosticsUploadFailure{Status: http.StatusInternalServerError, Code: diagnosticsInternalCode, Message: diagnosticsUploadFailedMessage}
+	}
+	if failure.RetryAfter != "" {
+		w.Header().Set("Retry-After", failure.RetryAfter)
+	}
+	writeError(w, failure.Status, failure.Code, failure.Message)
+}
+
+func diagnosticsServiceFailure(err error) error {
+	_, maxBytesExceeded := errors.AsType[*http.MaxBytesError](err)
 	switch {
-	case errors.As(err, &maxBytesErr), errors.Is(err, diagnostics.ErrTooLarge):
-		writeError(w, http.StatusRequestEntityTooLarge, "too_large", "Diagnostics upload is too large")
+	case maxBytesExceeded, errors.Is(err, diagnostics.ErrTooLarge):
+		return &DiagnosticsUploadFailure{Status: http.StatusRequestEntityTooLarge, Code: diagnosticsTooLargeCode, Message: diagnosticsTooLargeMessage}
 	case errors.Is(err, diagnostics.ErrDisabled):
-		writeError(w, http.StatusForbidden, "disabled", "Diagnostics uploads are disabled")
+		return &DiagnosticsUploadFailure{Status: http.StatusForbidden, Code: diagnosticsDisabledCode, Message: diagnosticsDisabledMessage}
 	case errors.Is(err, diagnostics.ErrStorageUnavailable):
-		writeError(w, http.StatusServiceUnavailable, "storage_unavailable", "Diagnostics storage is not configured")
+		return &DiagnosticsUploadFailure{Status: http.StatusServiceUnavailable, Code: errCodeStorageUnavailable, Message: diagnosticsStorageMessage}
 	case errors.Is(err, diagnostics.ErrQuotaExceeded):
-		w.Header().Set("Retry-After", diagnosticsQuotaRetryAfter)
-		writeError(w, http.StatusTooManyRequests, "quota_exceeded", "Diagnostics upload quota exceeded")
+		return &DiagnosticsUploadFailure{Status: http.StatusTooManyRequests, Code: "quota_exceeded", Message: "Diagnostics upload quota exceeded", RetryAfter: diagnosticsQuotaRetryAfter}
 	case errors.Is(err, diagnostics.ErrUnsupportedSchema):
-		writeError(w, http.StatusBadRequest, "unsupported_schema", "Diagnostics schema version is not supported")
+		return &DiagnosticsUploadFailure{Status: http.StatusBadRequest, Code: "unsupported_schema", Message: "Diagnostics schema version is not supported"}
 	case errors.Is(err, diagnostics.ErrDestinationMismatch):
-		writeError(w, http.StatusBadRequest, "destination_mismatch", "Diagnostics destination does not match this server")
+		return &DiagnosticsUploadFailure{Status: http.StatusBadRequest, Code: "destination_mismatch", Message: "Diagnostics destination does not match this server"}
 	case errors.Is(err, diagnostics.ErrStaleConsent):
-		writeError(w, http.StatusBadRequest, "stale_consent", "Diagnostics consent notice is stale")
+		return &DiagnosticsUploadFailure{Status: http.StatusBadRequest, Code: "stale_consent", Message: "Diagnostics consent notice is stale"}
 	case errors.Is(err, diagnostics.ErrArchiveMismatch):
-		writeError(w, http.StatusBadRequest, "archive_mismatch", "Diagnostics archive metadata does not match")
+		return &DiagnosticsUploadFailure{Status: http.StatusBadRequest, Code: "archive_mismatch", Message: "Diagnostics archive metadata does not match"}
 	case errors.Is(err, diagnostics.ErrProfileMismatch):
-		writeError(w, http.StatusBadRequest, "profile_mismatch", "Diagnostics profile does not match the captured report")
+		return &DiagnosticsUploadFailure{Status: http.StatusBadRequest, Code: "profile_mismatch", Message: "Diagnostics profile does not match the captured report"}
 	case errors.Is(err, diagnostics.ErrChildProfileForbidden):
-		writeError(w, http.StatusForbidden, "child_profile_forbidden", "Diagnostics cannot be attributed to a child profile")
+		return &DiagnosticsUploadFailure{Status: http.StatusForbidden, Code: "child_profile_forbidden", Message: "Diagnostics cannot be attributed to a child profile"}
 	case errors.Is(err, diagnostics.ErrInvalidBundle):
-		writeError(w, http.StatusBadRequest, "invalid_bundle", "Invalid diagnostics bundle")
+		return &DiagnosticsUploadFailure{Status: http.StatusBadRequest, Code: diagnosticsInvalidBundleCode, Message: "Invalid diagnostics bundle"}
 	default:
-		writeError(w, http.StatusInternalServerError, "internal_error", "Diagnostics upload failed")
+		return &DiagnosticsUploadFailure{Status: http.StatusInternalServerError, Code: diagnosticsInternalCode, Message: diagnosticsUploadFailedMessage}
 	}
 }
 

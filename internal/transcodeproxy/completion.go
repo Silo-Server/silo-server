@@ -1,5 +1,6 @@
-// Package transcodeproxy owns the private HTTP completion contract shared by
-// Silo's integrated API proxy and its dedicated proxy node.
+// Package transcodeproxy owns the private HTTP relay to transcode nodes shared
+// by Silo's integrated API proxy and its dedicated proxy node: the node client
+// and the segment completion contract.
 package transcodeproxy
 
 import (
@@ -10,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/telemetry"
 )
 
 const (
@@ -97,7 +100,7 @@ func Acknowledge(ctx context.Context, client *http.Client, targetURL, jwtSecret,
 	}
 	req.Header.Set("Authorization", "Bearer "+jwtSecret)
 	req.Header.Set(GenerationHeader, generation)
-	resp, err := client.Do(req)
+	resp, err := telemetry.DoTrustedNode(client, req, "stream_ack")
 	if err != nil {
 		return fmt.Errorf("send acknowledgement: %w", err)
 	}

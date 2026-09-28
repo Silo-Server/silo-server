@@ -10,6 +10,7 @@ import (
 	"image/color"
 	_ "image/jpeg"
 	_ "image/png"
+	"slices"
 	"sort"
 
 	"github.com/h2non/bimg"
@@ -20,6 +21,13 @@ const (
 	webpQuality              = 90
 	thumbhashSourceDimension = 100
 )
+
+// libvips threading: bimg's package init pins libvips to a single thread per
+// operation (vips_concurrency_set(1)) unless VIPS_CONCURRENCY is set in the
+// environment. Every caller in Silo runs encodes from its own worker pool, so
+// that pool is the only source of parallelism and the pools are sized per
+// CPU core; see tasks.imageCacheWorkerCount. Do not raise VIPS_CONCURRENCY
+// in deployments without lowering those pools, or the host oversubscribes.
 
 // MaxCachedOriginalDimension caps the longest edge of a cached "original"
 // variant. Provider artwork wider than this is downscaled on ingest, so a
@@ -69,12 +77,13 @@ func GenerateVariants(data []byte, widths []int) (*VariantResult, error) {
 	variants = append(variants, Variant{Key: "original", Data: original})
 
 	// Sort widths descending (largest first).
-	sorted := make([]int, len(widths))
-	copy(sorted, widths)
-	sort.Sort(sort.Reverse(sort.IntSlice(sorted)))
+	sorted := slices.Clone(widths)
+	slices.Sort(sorted)
+	slices.Reverse(sorted)
 
+	previousWidth, previousHeight := originalOptions.Width, originalOptions.Height
+	previousOutput := original
 	for _, w := range sorted {
-		size, _ := bimg.NewImage(data).Size()
 		opts := bimg.Options{
 			Type:          bimg.WEBP,
 			Quality:       webpQuality,
@@ -83,10 +92,18 @@ func GenerateVariants(data []byte, widths []int) (*VariantResult, error) {
 		if size.Width > w {
 			opts.Width = w
 		}
-		out, err := bimg.NewImage(data).Process(opts)
-		if err != nil {
-			return nil, fmt.Errorf("imageutil: resize to w%d: %w", w, err)
+		var out []byte
+		if opts.Width == previousWidth && opts.Height == previousHeight {
+			// Equivalent encodes share the work, while each variant retains its
+			// own buffer. Compare both dimensions: tall originals may be capped.
+			out = bytes.Clone(previousOutput)
+		} else {
+			out, err = bimg.NewImage(data).Process(opts)
+			if err != nil {
+				return nil, fmt.Errorf("imageutil: resize to w%d: %w", w, err)
+			}
 		}
+		previousWidth, previousHeight, previousOutput = opts.Width, opts.Height, out
 		variants = append(variants, Variant{Key: fmt.Sprintf("w%d", w), Data: out})
 	}
 

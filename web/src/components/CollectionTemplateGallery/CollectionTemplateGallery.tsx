@@ -137,7 +137,7 @@ export function CollectionTemplateGallery(props: Props) {
               ? "Confirm details, then we'll create and sync the collection for you."
               : pickedBundle
                 ? "Choose libraries, preview the defaults, then apply the bundle."
-                : "Pick a curated source — TMDB, Trakt, or MDBList — and we'll seed a synced collection."}
+                : "Pick a curated source — TMDB or MDBList — and we'll seed a synced collection."}
           </DialogDescription>
         </DialogHeader>
 

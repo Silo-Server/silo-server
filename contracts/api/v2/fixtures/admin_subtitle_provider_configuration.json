@@ -1,0 +1,17 @@
+{
+  "providers": [
+    {
+      "provider_name": "subdl",
+      "enabled": true,
+      "has_api_key": true,
+      "has_credentials": false,
+      "updated_at": "2026-01-02T03:04:05.678Z"
+    },
+    {
+      "provider_name": "opensubtitles",
+      "enabled": false,
+      "has_api_key": false,
+      "has_credentials": false
+    }
+  ]
+}

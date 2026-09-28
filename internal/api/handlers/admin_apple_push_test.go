@@ -171,3 +171,49 @@ func TestAdminApplePushHandlerRotatesExistingCapability(t *testing.T) {
 		t.Fatalf("stored capability = %q", got)
 	}
 }
+
+func TestAdminApplePushHandlerRegistersFreshDeploymentWhenRotationIsRejected(t *testing.T) {
+	settings := &fakeServerSettingsStore{values: map[string]string{
+		notifications.SettingPushRelayDeploymentID: "deployment-superseded",
+		notifications.SettingPushRelayAPIKey:       "superseded.capability.value",
+		notifications.SettingPushRelayExpiresAt:    "2026-08-01T00:00:00Z",
+	}}
+	var paths []string
+	relay := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/v1/deployments/rotate":
+			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": map[string]any{"code": "capability_revoked", "message": "rejected"}})
+		case "/v1/deployments/register":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"request_id":    "register-request",
+				"deployment_id": "deployment-fresh",
+				"api_key":       "fresh.capability.value",
+				"key_prefix":    "cap_v2_fresh",
+				"expires_at":    "2026-09-01T00:00:00Z",
+			})
+		default:
+			t.Fatalf("relay path = %q", r.URL.Path)
+		}
+	}))
+	t.Cleanup(relay.Close)
+	settings.values[notifications.SettingPushRelayURL] = relay.URL
+	h := NewAdminApplePushHandler(&notifications.System{Settings: notifications.NewSettings(settings)}, settings)
+	h.client = relay.Client()
+	h.developmentRelayURL = relay.URL
+
+	rec := httptest.NewRecorder()
+	h.HandleRegisterRelay(rec, httptest.NewRequest(http.MethodPost, "/admin/notifications/push/relay/register", strings.NewReader(`{"relay_url":"`+relay.URL+`"}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s), want 200", rec.Code, rec.Body.String())
+	}
+	if len(paths) != 2 || paths[0] != "/v1/deployments/rotate" || paths[1] != "/v1/deployments/register" {
+		t.Fatalf("relay paths = %#v", paths)
+	}
+	if got := settings.values[notifications.SettingPushRelayDeploymentID]; got != "deployment-fresh" {
+		t.Fatalf("stored deployment = %q", got)
+	}
+	if got := settings.values[notifications.SettingPushRelayReregister]; got != "false" {
+		t.Fatalf("stored marker = %q", got)
+	}
+}

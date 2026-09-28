@@ -29,6 +29,7 @@ export const ADMIN_SETTINGS_PAGE_IDS = [
   "ai",
   "notifications",
   "compatibility",
+  "network-access",
 ] as const;
 
 export type AdminSettingsPageID = (typeof ADMIN_SETTINGS_PAGE_IDS)[number];
@@ -293,7 +294,7 @@ function buildTiles(input: SettingsOverviewInput): OverviewTile[] {
         ? "Saved changes apply after a restart"
         : transcodeEnabled
           ? join([transcodeMode, renderDevice])
-          : "Clients only get what they can already play",
+          : "Video plays as-is; remux and audio conversion still run",
       action: tileAction(transcodeState, "playback"),
     },
     {

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-time setup for the rsync+air dev workflow on the Silo LXC.
-# Installs Go, Node, pnpm, libvips, jellyfin-ffmpeg7, air, and tmux.
+# Installs Go, Node, pnpm, libvips, ffmpeg (linked at the jellyfin-ffmpeg path), air, and tmux.
 # Usage: DEV_HOST=root@silo-dev.example.invalid ./scripts/dev-remote-setup.sh
 set -euo pipefail
 

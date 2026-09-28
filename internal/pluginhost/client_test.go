@@ -25,7 +25,7 @@ func makeTestClient(t *testing.T, capabilities []*pluginv1.CapabilityDescriptor)
 
 	rpc := sdkruntime.NewClient(conn)
 	manifest := &pluginv1.PluginManifest{Capabilities: capabilities}
-	return newClient(0, rpc, manifest)
+	return newClient(0, rpc, manifest, 0)
 }
 
 func TestClient_ScheduledTask_CapabilityGate(t *testing.T) {

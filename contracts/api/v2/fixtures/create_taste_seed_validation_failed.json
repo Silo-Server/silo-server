@@ -1,0 +1,14 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/validation_failed",
+  "title": "Validation failed",
+  "status": 422,
+  "detail": "The request did not pass validation; see errors.",
+  "instance": "urn:silo:request:00000000000000000000008c",
+  "errors": [
+    {
+      "location": "body.item_ids",
+      "code": "out_of_range",
+      "detail": "expected array length >= 1"
+    }
+  ]
+}

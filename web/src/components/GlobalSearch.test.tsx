@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   useQuery: vi.fn(),
   useCanRequest: vi.fn(),
   useRequestSearch: vi.fn(),
+  usePersonSearch: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-query", async () => {
@@ -36,6 +37,10 @@ vi.mock("@/hooks/useViewTransition", () => ({
 
 vi.mock("@/hooks/queries/useRequests", () => ({
   useRequestSearch: (...args: unknown[]) => mocks.useRequestSearch(...args),
+}));
+
+vi.mock("@/hooks/queries/personSearch", () => ({
+  usePersonSearch: (...args: unknown[]) => mocks.usePersonSearch(...args),
 }));
 
 vi.mock("@/components/RequestToAddSection", () => ({
@@ -124,6 +129,17 @@ function renderSearchMarkup(props: Partial<Parameters<typeof GlobalSearch>[0]> =
     </QueryClientProvider>,
   );
 }
+
+const personFixture = {
+  id: "9007199254740993",
+  name: "Test Actor",
+  photo_url: "",
+};
+
+beforeEach(() => {
+  mocks.usePersonSearch.mockReset();
+  mocks.usePersonSearch.mockReturnValue({ data: [], isFetching: false });
+});
 
 describe("GlobalSearch", () => {
   beforeEach(() => {
@@ -393,6 +409,214 @@ describe("GlobalSearch", () => {
     // item page the surrounding row points at.
     expect(mocks.navigate).not.toHaveBeenCalled();
     expect(screen.queryByTestId("dialog")).not.toBeInTheDocument();
+  });
+});
+
+describe("GlobalSearch people results", () => {
+  beforeEach(() => {
+    mocks.navigate.mockReset();
+    mocks.useQuery.mockReset();
+    mocks.useCanRequest.mockReturnValue({
+      discoveryEnabled: false,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
+    mocks.useRequestSearch.mockReturnValue({ data: undefined, isLoading: false, isError: false });
+    mocks.useQuery.mockReturnValue({
+      data: { total: 1, has_more: false, items: [browseFixture] },
+      isFetching: false,
+      isError: false,
+    });
+    mocks.usePersonSearch.mockReturnValue({ data: [personFixture], isFetching: false });
+  });
+
+  function renderOpen(initialQuery = "Test") {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <GlobalSearch defaultOpen initialQuery={initialQuery} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const input = screen.getByRole("combobox", { name: "Search" });
+    input.focus();
+    return input;
+  }
+
+  it("searches people with the preview scope only while the dialog is open", () => {
+    renderSearchMarkup({ defaultOpen: true, initialQuery: " Test " });
+    // The unset profile preference defaults to Media.
+    expect(mocks.usePersonSearch).toHaveBeenLastCalledWith("Test", 4, true, "video");
+
+    renderSearchMarkup();
+    expect(mocks.usePersonSearch).toHaveBeenLastCalledWith("", 4, false, "video");
+  });
+
+  it("lists people in their own group after the title results", () => {
+    renderOpen();
+
+    const options = screen.getAllByRole("option");
+    expect(options.map((option) => option.getAttribute("aria-label"))).toEqual([
+      "Test Movie, 2020, Movie",
+      "Test Actor, Person",
+    ]);
+    const titles = screen.getByRole("group", { name: "Titles" });
+    const people = screen.getByRole("group", { name: "People" });
+    expect(titles).toContainElement(options[0]!);
+    expect(people).toContainElement(options[1]!);
+    // Only the lower group draws the divider between the two.
+    expect(people).toHaveClass("border-t");
+    expect(titles).not.toHaveClass("border-t");
+    expect(screen.getByText("TA")).toBeInTheDocument();
+  });
+
+  it("leads with exact person matches only, leaving partial names to the search page", () => {
+    mocks.usePersonSearch.mockReturnValue({
+      data: [
+        { ...personFixture, id: "1", name: "Chris" },
+        { ...personFixture, id: "2", name: "Aaron Christ" },
+      ],
+      isFetching: false,
+    });
+    renderOpen("chris");
+
+    expect(
+      screen.getAllByRole("option").map((option) => option.getAttribute("aria-label")),
+    ).toEqual(["Chris, Person", "Test Movie, 2020, Movie"]);
+  });
+
+  it("puts the divider above the titles when people lead", () => {
+    renderOpen("Test Actor");
+
+    expect(screen.getByRole("group", { name: "Titles" })).toHaveClass("border-t");
+    expect(screen.getByRole("group", { name: "People" })).not.toHaveClass("border-t");
+  });
+
+  it("leaves title-only results without group headings", () => {
+    mocks.usePersonSearch.mockReturnValue({ data: [], isFetching: false });
+    renderOpen();
+
+    expect(screen.getByRole("option", { name: "Test Movie, 2020, Movie" })).toBeInTheDocument();
+    expect(screen.queryByRole("group")).not.toBeInTheDocument();
+    expect(screen.queryByText("Titles")).not.toBeInTheDocument();
+  });
+
+  it("opens a person picked with the mouse", async () => {
+    renderOpen();
+
+    await userEvent.click(screen.getByRole("option", { name: "Test Actor, Person" }));
+
+    expect(mocks.navigate).toHaveBeenCalledWith("/person/9007199254740993");
+    expect(screen.queryByTestId("dialog")).not.toBeInTheDocument();
+  });
+
+  it("moves keyboard selection from titles into people and opens the person on Enter", () => {
+    const input = renderOpen();
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(input).toHaveAttribute("aria-activedescendant", "search-result-1");
+    expect(screen.getByRole("option", { selected: true })).toHaveAccessibleName(
+      "Test Actor, Person",
+    );
+
+    // Past the last person wraps back to the first title.
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(input).toHaveAttribute("aria-activedescendant", "search-result-0");
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(mocks.navigate).toHaveBeenCalledWith("/person/9007199254740993");
+  });
+
+  it("leads with people when a person's name matches the query exactly", () => {
+    const input = renderOpen("test actor");
+
+    expect(
+      screen.getAllByRole("option").map((option) => option.getAttribute("aria-label")),
+    ).toEqual(["Test Actor, Person", "Test Movie, 2020, Movie"]);
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(mocks.navigate).toHaveBeenCalledWith("/person/9007199254740993");
+  });
+
+  it("keeps the selected title selected when an exact person match moves it down", () => {
+    mocks.usePersonSearch.mockReturnValue({ data: undefined, isFetching: true });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const tree = () => (
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <GlobalSearch defaultOpen initialQuery="Test Actor" />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    const { rerender } = render(tree());
+    const input = screen.getByRole("combobox", { name: "Search" });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(input).toHaveAttribute("aria-activedescendant", "search-result-0");
+
+    mocks.usePersonSearch.mockReturnValue({ data: [personFixture], isFetching: false });
+    rerender(tree());
+
+    expect(input).toHaveAttribute("aria-activedescendant", "search-result-1");
+    expect(screen.getByRole("option", { selected: true })).toHaveAccessibleName(
+      "Test Movie, 2020, Movie",
+    );
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(mocks.navigate).toHaveBeenCalledWith("/item/movie-99");
+  });
+
+  it("shows people instead of 'No matches' when no title matches", () => {
+    mocks.useQuery.mockReturnValue({
+      data: { total: 0, has_more: false, items: [] },
+      isFetching: false,
+      isError: false,
+    });
+
+    const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "Test Actor" });
+
+    expect(markup).toContain("Test Actor, Person");
+    expect(markup).not.toContain("No matches");
+    expect(markup).toContain("1 results found");
+  });
+
+  it("keeps searching instead of showing 'No matches' while people are still loading", () => {
+    mocks.useQuery.mockReturnValue({
+      data: { total: 0, has_more: false, items: [] },
+      isFetching: false,
+      isError: false,
+    });
+    mocks.usePersonSearch.mockReturnValue({ data: undefined, isFetching: true });
+
+    const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "Test Actor" });
+
+    expect(markup).toContain("Searching...");
+    expect(markup).not.toContain("No matches");
+  });
+
+  it("reports a failed people search instead of 'No matches' when no title matches", () => {
+    mocks.useQuery.mockReturnValue({
+      data: { total: 0, has_more: false, items: [] },
+      isFetching: false,
+      isError: false,
+    });
+    mocks.usePersonSearch.mockReturnValue({ data: undefined, isFetching: false, isError: true });
+
+    const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "Test Actor" });
+
+    expect(markup).toContain("Could not load results");
+    expect(markup).not.toContain("No matches");
+  });
+
+  it("hides the people group when the people search fails", () => {
+    mocks.usePersonSearch.mockReturnValue({ data: undefined, isFetching: false, isError: true });
+
+    const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "Test" });
+
+    expect(markup).toContain("Test Movie");
+    expect(markup).not.toContain("People");
   });
 });
 

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -167,16 +168,8 @@ func (h *AdminHandler) HandleGetDownloadsStats(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	var stats *AdminDownloadsStats
-	switch {
-	case h.DownloadsStatsSource != nil:
-		if isTruthyQuery(r.URL.Query().Get("refresh")) {
-			h.DownloadsStatsSource.Invalidate()
-		}
-		stats, err = h.DownloadsStatsSource.Get(r.Context(), limit)
-	case h.pool != nil:
-		stats, err = queryAdminDownloadsStats(r.Context(), h.pool, limit)
-	default:
+	stats, err := h.ReadAdminDownloadsStats(r.Context(), limit, isTruthyQuery(r.URL.Query().Get("refresh")))
+	if errors.Is(err, ErrAdminDashboardUnavailable) {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Database not configured")
 		return
 	}

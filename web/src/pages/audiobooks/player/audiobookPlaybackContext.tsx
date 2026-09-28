@@ -1,12 +1,29 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
-import { getAccessToken, getOrCreateDeviceId, getProfileToken } from "@/api/client";
+import {
+  createContext,
+  lazy,
+  Suspense,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import {
+  getAccessToken,
+  getAuthContextVersion,
+  getOrCreateDeviceId,
+  getProfileToken,
+  refreshAuthentication,
+} from "@/api/client";
+import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import type { AudiobookFile } from "@/lib/audiobooks/types";
 import { PlayerConfigProvider, type PlayerConfig } from "@/player/context/PlayerConfigContext";
 import { storage } from "@/utils/storage";
-import AudiobookPlayer, {
-  type AudiobookPlayerControls,
-  type AudiobookPlayerStatus,
-} from "./AudiobookPlayer";
+import type { AudiobookPlayerControls, AudiobookPlayerStatus } from "./AudiobookPlayer";
+
+const AudiobookPlayer = lazy(() => import("./AudiobookPlayer"));
 
 export interface AudiobookPlaybackStartInput {
   contentId: string;
@@ -44,13 +61,18 @@ export function AudiobookPlaybackProvider({ children }: { children: ReactNode })
   const [activeRequest, setActiveRequest] = useState<ActiveAudiobookPlayback | null>(null);
   const [active, setActive] = useState<AudiobookPlayerStatus | null>(null);
   const [controls, setControls] = useState<AudiobookPlayerControls | null>(null);
+  const { profile } = useCurrentProfile();
+  const profileId = profile?.id ?? null;
+  const playbackProfileRef = useRef<string | null>(null);
   const playerConfig = useMemo<PlayerConfig>(
     () => ({
-      apiBaseUrl: "/api/v1",
+      apiBaseUrl: "/api/v2",
       getAccessToken: () => getAccessToken(),
       getProfileId: () => storage.get(storage.KEYS.PROFILE_ID),
       getProfileToken: () => getProfileToken(),
       getDeviceId: () => getOrCreateDeviceId(),
+      refreshToken: refreshAuthentication,
+      getAuthContext: getAuthContextVersion,
     }),
     [],
   );
@@ -73,6 +95,23 @@ export function AudiobookPlaybackProvider({ children }: { children: ReactNode })
     setActiveRequest(null);
   }, []);
 
+  // The book belongs to the profile that started it: a profile switch must
+  // not keep it playing or report its progress under the new profile.
+  useEffect(() => {
+    if (!activeRequest) {
+      playbackProfileRef.current = null;
+      return;
+    }
+    if (playbackProfileRef.current === null) {
+      playbackProfileRef.current = profileId;
+      return;
+    }
+    if (playbackProfileRef.current !== profileId) {
+      playbackProfileRef.current = null;
+      stopPlayback();
+    }
+  }, [activeRequest, profileId, stopPlayback]);
+
   const toggleActivePlayback = useCallback(() => {
     controls?.togglePlay();
   }, [controls]);
@@ -94,20 +133,22 @@ export function AudiobookPlaybackProvider({ children }: { children: ReactNode })
       {children}
       {activeRequest && (
         <PlayerConfigProvider config={playerConfig}>
-          <AudiobookPlayer
-            key={`${activeRequest.contentId}-${activeRequest.requestKey}`}
-            contentId={activeRequest.contentId}
-            title={activeRequest.title}
-            author={activeRequest.author}
-            narrator={activeRequest.narrator}
-            posterUrl={activeRequest.posterUrl}
-            files={activeRequest.files}
-            initialPositionSeconds={activeRequest.initialPositionSeconds}
-            autoPlay={activeRequest.autoPlay}
-            onClose={stopPlayback}
-            onPlaybackStateChange={setActive}
-            onControlsChange={setControls}
-          />
+          <Suspense fallback={null}>
+            <AudiobookPlayer
+              key={`${activeRequest.contentId}-${activeRequest.requestKey}`}
+              contentId={activeRequest.contentId}
+              title={activeRequest.title}
+              author={activeRequest.author}
+              narrator={activeRequest.narrator}
+              posterUrl={activeRequest.posterUrl}
+              files={activeRequest.files}
+              initialPositionSeconds={activeRequest.initialPositionSeconds}
+              autoPlay={activeRequest.autoPlay}
+              onClose={stopPlayback}
+              onPlaybackStateChange={setActive}
+              onControlsChange={setControls}
+            />
+          </Suspense>
         </PlayerConfigProvider>
       )}
     </AudiobookPlaybackControllerContext.Provider>
