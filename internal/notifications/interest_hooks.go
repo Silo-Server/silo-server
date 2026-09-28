@@ -394,7 +394,7 @@ func (s *interestTrackingStore) DeleteHomeDismissal(ctx context.Context, profile
 	return err
 }
 
-// --- Progress: queue on transitions and new watch sessions only.
+// --- Progress: live writes queue on transitions and new watch sessions only.
 
 func (s *interestTrackingStore) UpdateProgress(ctx context.Context, profileID, mediaItemID string, position, duration float64, thresholds userstore.ProgressThresholds) error {
 	before := s.currentProgressState(ctx, profileID, mediaItemID)
@@ -414,12 +414,15 @@ func (s *interestTrackingStore) SetProgress(ctx context.Context, profileID, medi
 	return err
 }
 
+// Timestamped writes come from imports, watch sync, and offline-queued
+// client events, never from playback ticks. Each applied one queues: it can
+// move the progress stamp a Continue Watching dismissal holds for, and a late
+// import need not start a new watch session.
+
 func (s *interestTrackingStore) SetProgressAt(ctx context.Context, profileID, mediaItemID string, position, duration float64, completed bool, updatedAt time.Time) error {
-	before := s.currentProgressState(ctx, profileID, mediaItemID)
 	err := s.UserStore.SetProgressAt(ctx, profileID, mediaItemID, position, duration, completed, updatedAt)
 	if err == nil {
-		after := progressState{exists: true, inProgress: !completed && position > 0, completed: completed}
-		s.queueOnTransition(profileID, mediaItemID, before, after, updatedAt)
+		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
 	}
 	return err
 }
@@ -435,11 +438,9 @@ func (s *interestTrackingStore) ListJellycompatProgressDates(ctx context.Context
 }
 
 func (s *interestTrackingStore) SetProgressIfNewer(ctx context.Context, profileID, mediaItemID string, position, duration float64, completed bool, updatedAt time.Time) (bool, error) {
-	before := s.currentProgressState(ctx, profileID, mediaItemID)
 	applied, err := s.UserStore.SetProgressIfNewer(ctx, profileID, mediaItemID, position, duration, completed, updatedAt)
 	if err == nil && applied {
-		after := progressState{exists: true, inProgress: !completed && position > 0, completed: completed}
-		s.queueOnTransition(profileID, mediaItemID, before, after, updatedAt)
+		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
 	}
 	return applied, err
 }

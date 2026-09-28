@@ -299,6 +299,54 @@ func TestInterestTrackingStoreQueuesNewWatchSessions(t *testing.T) {
 	}
 }
 
+func TestInterestTrackingStoreQueuesEveryAppliedImport(t *testing.T) {
+	ctx := context.Background()
+	updater := &InterestUpdater{pending: map[interestMutation]int{}}
+	store := &interestTrackingStore{UserStore: newSQLiteUserStore(t), userID: 1, system: &System{}, updater: updater}
+	mutation := interestMutation{userID: 1, profileID: "p1", itemID: "ep-1"}
+
+	stamp := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
+	if err := store.SetProgressAt(ctx, "p1", "ep-1", 30, 100, false, stamp); err != nil {
+		t.Fatalf("SetProgressAt: %v", err)
+	}
+	clear(updater.pending)
+
+	// A late import a few minutes newer keeps the row in progress but moves
+	// the stamp a Continue Watching dismissal may hold for.
+	applied, err := store.SetProgressIfNewer(ctx, "p1", "ep-1", 35, 100, false, stamp.Add(3*time.Minute))
+	if err != nil || !applied {
+		t.Fatalf("SetProgressIfNewer = %v, %v", applied, err)
+	}
+	if _, ok := updater.pending[mutation]; !ok {
+		t.Fatal("an applied import queued no interest recompute")
+	}
+	clear(updater.pending)
+
+	// An import older than the stored row is not applied and queues nothing.
+	if applied, err := store.SetProgressIfNewer(ctx, "p1", "ep-1", 20, 100, false, stamp.Add(-time.Hour)); err != nil || applied {
+		t.Fatalf("SetProgressIfNewer (older) = %v, %v", applied, err)
+	}
+	if _, ok := updater.pending[mutation]; ok {
+		t.Fatal("an import that did not apply queued an interest recompute")
+	}
+}
+
+func TestSupersededInProgress(t *testing.T) {
+	keys := map[string]int{"e2": EpisodeKey(1, 2), "e3": EpisodeKey(1, 3), "e5": EpisodeKey(1, 5)}
+	at := func(minutes int) time.Time { return time.Date(2026, 9, 1, 10, minutes, 0, 0, time.UTC) }
+	inProgress := []userstore.WatchProgress{
+		{MediaItemID: "e2", PositionSeconds: 30, UpdatedAt: at(0).Format(time.RFC3339)},
+		{MediaItemID: "e3", PositionSeconds: 30, UpdatedAt: at(20).Format(time.RFC3339)},
+	}
+	// E5 was completed after E2's progress but before E3's.
+	completed := []completedEpisode{{key: EpisodeKey(1, 5), at: at(10)}}
+
+	got := supersededInProgress(inProgress, completed, keys)
+	if _, ok := got["e2"]; !ok || len(got) != 1 {
+		t.Fatalf("superseded = %v, want only e2", got)
+	}
+}
+
 type allLibrariesScope struct{}
 
 func (allLibrariesScope) Resolve(_ context.Context, input access.ResolveInput) (access.Scope, error) {

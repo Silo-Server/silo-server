@@ -51,6 +51,38 @@ func (h homeHides) nextUpVisible(nextEpisodeID string) bool {
 	return !dismissed
 }
 
+// completedEpisode is a completed progress row of the series.
+type completedEpisode struct {
+	key int
+	at  time.Time
+}
+
+// supersededInProgress returns the in-progress episodes Home's Continue
+// Watching hides because a later episode of the series was completed more
+// recently: the viewer moved past them. It applies the rule of
+// catalog.ContinueWatchingProgressFilter to the series' progress the
+// recompute already holds.
+func supersededInProgress(inProgress []userstore.WatchProgress, completed []completedEpisode, episodeKeys map[string]int) map[string]struct{} {
+	superseded := make(map[string]struct{})
+	for _, entry := range inProgress {
+		key, ok := episodeKeys[entry.MediaItemID]
+		if !ok {
+			continue
+		}
+		at, err := time.Parse(time.RFC3339, entry.UpdatedAt)
+		if err != nil {
+			continue
+		}
+		for _, done := range completed {
+			if done.key > key && done.at.After(at) {
+				superseded[entry.MediaItemID] = struct{}{}
+				break
+			}
+		}
+	}
+	return superseded
+}
+
 // nextUpEpisode returns the episode Home's Next Up shows after its anchor:
 // the first episode with a key of at least from that has a present file and
 // that the profile has not started. It is empty when there is none.

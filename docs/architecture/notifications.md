@@ -50,7 +50,9 @@ release event's episode key:
   - An active series drop clears both until the profile watches the series
     again.
   - A per-card Continue Watching dismissal clears `continue_watching` while
-    the dismissed episode's progress is unchanged.
+    the dismissed episode's progress is unchanged. As on Home, an in-progress
+    episode no longer counts once a later episode of the series was completed
+    more recently.
   - A per-card Next Up dismissal clears `next_up` while the dismissed episode
     is still the card Home would show: the first episode after the most
     recently completed one that has a present file and that the profile has
@@ -60,8 +62,10 @@ release event's episode key:
   `next_up` resumes from the right episode once a removal lapses. Every
   removal or restore queues a recompute. Resuming playback can lift a removal
   without changing any progress state, so a removal queues a second recompute
-  ten minutes later, and the first progress write of a new watch session
-  (more than ten minutes after the previous one) queues one too. The second
+  ten minutes later, the first live progress write of a new watch session
+  (more than ten minutes after the previous one) queues one, and so does
+  every applied timestamped write from imports, watch sync, or offline
+  clients. The second
   recompute is held in memory; if the node restarts first, the daily interest
   rebuild repairs the row.
 - Profile-level notification preferences are a hard gate: a reason disabled

@@ -329,6 +329,7 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 
 	var inProgress []userstore.WatchProgress
 	started := make([]string, 0, 16)
+	var completedEpisodes []completedEpisode
 	// Home anchors Next Up on the most recently completed episode, ties going
 	// to the later episode.
 	anchorKey, hasAnchor := 0, false
@@ -362,6 +363,7 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 				markCompleted(episodeID)
 				if key, ok := episodeKeys[episodeID]; ok {
 					at, _ := time.Parse(time.RFC3339, entry.UpdatedAt)
+					completedEpisodes = append(completedEpisodes, completedEpisode{key: key, at: at})
 					if !hasAnchor || at.After(anchorAt) || (at.Equal(anchorAt) && key > anchorKey) {
 						anchorKey, anchorAt, hasAnchor = key, at, true
 					}
@@ -414,6 +416,8 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 	// cursor is kept, so next_up resumes from the right episode once the
 	// removal lapses.
 	continueWatching, nextUpCandidate := false, false
+	inProgress = catalog.FilterSupersededProgress(inProgress,
+		supersededInProgress(inProgress, completedEpisodes, episodeKeys))
 	if hasProgression {
 		inProgressIDs := make([]string, len(inProgress))
 		for i, entry := range inProgress {
