@@ -439,3 +439,23 @@ func TestProcessCollectionPoster_ReplacementRemovesOldRevision(t *testing.T) {
 		}
 	}
 }
+
+// A replacement committed just before the client disconnects still removes the
+// revision it superseded.
+func TestCleanUpReplacedCollectionImage_OutlivesCanceledRequest(t *testing.T) {
+	store := &stubListDeleteStore{keys: []string{
+		"collection-images/c1/poster/original.0000000000000001.webp",
+		"collection-images/c1/poster/original.0000000000000002.webp",
+	}}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	readCurrent := func(ctx context.Context) (string, error) {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		return "collection-images/c1/poster/original.0000000000000002.webp", nil
+	}
+	cleanUpReplacedCollectionImage(ctx, store, adminCollectionImagePrefix, "c1", "poster",
+		"collection-images/c1/poster/original.0000000000000001.webp", readCurrent)
+	assertCollectionImageDeletes(t, store.deleted, "collection-images/c1/poster/original.0000000000000001.webp")
+}

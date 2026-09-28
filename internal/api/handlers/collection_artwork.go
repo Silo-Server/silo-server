@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
@@ -26,6 +27,8 @@ const (
 	collectionTemplateImageDir = "/images/collection-templates/"
 
 	collectionImageMaxBytes = 10 << 20 // 10 MB
+
+	collectionImageCleanupTimeout = 30 * time.Second
 )
 
 // storeBundledCollectionPosterIfS3Configured stores a built-in collection
@@ -251,13 +254,16 @@ func removeReplacedCollectionImageVersion(
 // Callers upload the replacement under its own revision and commit it before
 // calling this, so a failed upload or update leaves the stored artwork intact.
 // Failures here only log: the committed artwork is intact and the worst case
-// is an orphaned revision.
+// is an orphaned revision. The replacement is already committed, so cleanup
+// outlives a canceled request, bounded by collectionImageCleanupTimeout.
 func cleanUpReplacedCollectionImage(
 	ctx context.Context,
 	store blobstore.Store,
 	prefix, collectionID, imageType, oldPath string,
 	readCurrent func(context.Context) (string, error),
 ) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), collectionImageCleanupTimeout)
+	defer cancel()
 	currentPath, err := readCurrent(ctx)
 	if err != nil {
 		slog.WarnContext(ctx, "collection artwork: skipping variant cleanup, re-read failed", "component", "api", "collection_id", collectionID, "kind", imageType, "error", err)
