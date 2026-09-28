@@ -54,8 +54,7 @@ func (s *downloadDeliveryDomain) ServeArtwork(_ context.Context, w http.Response
 		w.Header().Set("Content-Type", "image/png")
 		if s.failsOnRead {
 			w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
-			// Hide ErrReader's type so io.Copy has to use the writer.
-			_, err := io.Copy(w, struct{ io.Reader }{iotest.ErrReader(s.err)})
+			_, err := io.Copy(w, iotest.ErrReader(s.err))
 			return err
 		}
 		if s.partial {

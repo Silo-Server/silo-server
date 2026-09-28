@@ -219,7 +219,8 @@ func (s *statusRecorder) FlushError() error {
 	return http.NewResponseController(s.ResponseWriter).Flush()
 }
 
-// Flush serves callers that use http.Flusher.
+// Flush serves http.Flusher callers, chi's wrapper among them: it offers
+// ReadFrom only when the writer it wraps can also flush.
 func (s *statusRecorder) Flush() { _ = s.FlushError() }
 
 func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }

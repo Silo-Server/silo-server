@@ -11,11 +11,10 @@ import (
 	"testing"
 	"testing/iotest"
 
+	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	dto "github.com/prometheus/client_model/go"
-
-	chimw "github.com/go-chi/chi/v5/middleware"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/logredact"
@@ -245,7 +244,7 @@ func TestObservedCopyFailingOnFirstReadKeepsErrorStatus(t *testing.T) {
 	buf := captureLogs(t)
 	inner := &zeroCopyWriter{ResponseRecorder: httptest.NewRecorder()}
 	h := observe(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, err := io.Copy(w, struct{ io.Reader }{iotest.ErrReader(io.ErrUnexpectedEOF)}); err == nil {
+		if _, err := io.Copy(w, iotest.ErrReader(io.ErrUnexpectedEOF)); err == nil {
 			t.Error("copy succeeded")
 		}
 		http.Error(w, "upstream failed", http.StatusInternalServerError)
