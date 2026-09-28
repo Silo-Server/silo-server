@@ -106,6 +106,9 @@ func downloadCollectionImageURL(ctx context.Context, client *http.Client, rawURL
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return nil, invalidCollectionImage("The image source URL must use http or https.", nil)
 	}
+	if parsed.Hostname() == "" {
+		return nil, invalidCollectionImage("The image source URL is not valid.", nil)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("building request: %w", err)

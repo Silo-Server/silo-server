@@ -208,6 +208,8 @@ func TestDownloadCollectionImageURL_ClientErrorsAre400(t *testing.T) {
 	for name, rawURL := range map[string]string{
 		"missing source": server.URL + "/poster.jpg",
 		"non-http":       "ftp://example.invalid/poster.jpg",
+		"no host":        "http://",
+		"opaque":         "http:example.invalid/poster.jpg",
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := downloadCollectionImageURL(context.Background(), server.Client(), rawURL)
