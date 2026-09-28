@@ -146,3 +146,67 @@ func TestDisplayPreferencesRoundTripUsesDedicatedTable(t *testing.T) {
 		t.Fatal("another client's read returned the emby document")
 	}
 }
+
+func TestNormalizeSavedCustomPrefsJellyfin12(t *testing.T) {
+	prefs := map[string]string{
+		"skipForwardLength": "",
+		"landing-abc":       "",
+		"Landing-def":       "suggestions",
+		"homesection0":      "resume",
+	}
+	normalizeSavedCustomPrefs(prefs)
+	if prefs["skipForwardLength"] != "15000" || prefs["skipBackLength"] != "15000" {
+		t.Fatalf("skip lengths = %q/%q, want 15000/15000", prefs["skipForwardLength"], prefs["skipBackLength"])
+	}
+	if _, ok := prefs["landing-abc"]; ok {
+		t.Fatal("empty landing preference must be dropped")
+	}
+	if prefs["Landing-def"] != "suggestions" || prefs["homesection0"] != "resume" {
+		t.Fatalf("other preferences changed: %v", prefs)
+	}
+
+	kept := map[string]string{"skipForwardLength": "30000", "skipBackLength": "5000"}
+	normalizeSavedCustomPrefs(kept)
+	if kept["skipForwardLength"] != "30000" || kept["skipBackLength"] != "5000" {
+		t.Fatalf("explicit skip lengths overwritten: %v", kept)
+	}
+}
+
+// Jellyfin Web posts the whole usersettings document back. Reads must carry
+// Jellyfin's 10 s/30 s skip defaults so an unrelated save keeps them instead
+// of storing the 15 s write fallback.
+func TestDisplayPreferencesReadThenSaveKeepsSkipDefaults(t *testing.T) {
+	store := newJellycompatUserStore(t)
+	handler := NewDisplayPreferencesHandler(compatTestUserStoreProvider{store: store})
+	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
+
+	rec := httptest.NewRecorder()
+	handler.HandleGetDisplayPreferences(rec, viewerRequest("GET", "/?client=emby", "", "displayPreferencesId", "usersettings", session))
+	var dto displayPreferencesDTO
+	if err := json.NewDecoder(rec.Body).Decode(&dto); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if dto.CustomPrefs["skipBackLength"] != "10000" || dto.CustomPrefs["skipForwardLength"] != "30000" {
+		t.Fatalf("read defaults = %v", dto.CustomPrefs)
+	}
+
+	dto.CustomPrefs["appTheme"] = "dark"
+	body, err := json.Marshal(dto)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec = httptest.NewRecorder()
+	handler.HandleUpdateDisplayPreferences(rec, viewerRequest("POST", "/?client=emby", string(body), "displayPreferencesId", "usersettings", session))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("update status = %d %s", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	handler.HandleGetDisplayPreferences(rec, viewerRequest("GET", "/?client=emby", "", "displayPreferencesId", "usersettings", session))
+	dto = displayPreferencesDTO{}
+	if err := json.NewDecoder(rec.Body).Decode(&dto); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if dto.CustomPrefs["skipBackLength"] != "10000" || dto.CustomPrefs["skipForwardLength"] != "30000" || dto.CustomPrefs["appTheme"] != "dark" {
+		t.Fatalf("round trip = %v", dto.CustomPrefs)
+	}
+}

@@ -41,6 +41,7 @@ func describeWorkerProtocols() workerProtocolRegistry {
 	operations = append(operations, transcodenode.ProtocolSegmentAcknowledgement())
 	operations = append(operations, transcodenode.ProtocolDownloadPreparation(schemas))
 	operations = append(operations, proxy.ProtocolDownloads()...)
+	operations = append(operations, proxy.ProtocolThemeAudio()...)
 	operations = append(operations, transcodenode.ProtocolLegacyStop())
 	operations = append(operations, transcodenode.ProtocolTranscodeStart(schemas))
 	operations = append(operations, proxy.ProtocolDirectPlayback()...)

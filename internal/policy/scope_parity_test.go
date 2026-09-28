@@ -21,11 +21,14 @@ import (
 // parity instead of passing by coincidence.
 const parityMetadataLang = "fr"
 
-func parityMetadataLangValues(profile *userstore.Profile) []userstore.SettingValue {
+// parityPreferenceValues are the parity profile's stored canonical rows: the
+// metadata language and, when the case hides any, its hidden libraries. Both
+// keys are profile-scoped, so a case without a profile stores neither.
+func parityPreferenceValues(profile *userstore.Profile, disabled []int) []userstore.SettingValue {
 	if profile == nil {
 		return nil
 	}
-	return []userstore.SettingValue{{
+	values := []userstore.SettingValue{{
 		SettingIdentity: userstore.SettingIdentity{
 			Key:       settingskeys.CatalogMetadataLanguage,
 			Scope:     settingscontract.ScopeProfile,
@@ -33,6 +36,18 @@ func parityMetadataLangValues(profile *userstore.Profile) []userstore.SettingVal
 		},
 		Value: json.RawMessage(`"` + parityMetadataLang + `"`),
 	}}
+	if len(disabled) > 0 {
+		raw, _ := json.Marshal(disabled)
+		values = append(values, userstore.SettingValue{
+			SettingIdentity: userstore.SettingIdentity{
+				Key:       settingskeys.UiDisabledLibraryIds,
+				Scope:     settingscontract.ScopeProfile,
+				ProfileID: profile.ID,
+			},
+			Value: raw,
+		})
+	}
+	return values
 }
 
 func TestResolveViewerScopeParity(t *testing.T) {
@@ -104,11 +119,16 @@ func TestResolveViewerScopeParity(t *testing.T) {
 									if profile != nil {
 										profile.MaxPlaybackQuality = profileQualityCase.value
 										profile.MaxContentRating = ratingCase.value
+										// The maturity limits travel together: the
+										// unrestricted rating case also drops the
+										// advisory-age limit.
+										if ratingCase.value == "" {
+											profile.MaxAdvisoryAge = 0
+										}
 									}
 									store := parityStore{
 										profile:       profile,
-										settings:      disabledSetting(disabledCase.ids),
-										settingValues: parityMetadataLangValues(profile),
+										settingValues: parityPreferenceValues(profile, disabledCase.ids),
 									}
 									resolver := access.NewResolver(
 										parityUserRepo{user: user},
@@ -196,9 +216,10 @@ func parityProfile(restricted bool, allowed []int) *userstore.Profile {
 		ID:                 "prof-1",
 		PINHash:            "pin-hash",
 		MaxContentRating:   "PG-13",
+		MaxAdvisoryAge:     12,
 		MaxPlaybackQuality: "720p",
 		// A decoy: the canonical value is parityMetadataLang, stored through
-		// parityMetadataLangValues. This column must no longer be read.
+		// parityPreferenceValues. This column must no longer be read.
 		PreferredMetadataLanguage:  "hu",
 		LibraryRestrictionsEnabled: restricted,
 		AllowedLibraryIDs:          cloneParityInts(allowed),
@@ -214,7 +235,6 @@ func scopeInputFromParity(user *models.User, profile *userstore.Profile, disable
 		AccountRestricted:    user.LibraryIDs != nil,
 		AccountMaxQuality:    access.ApplyGroupPolicy(user, nil).MaxPlaybackQuality,
 		AccessPolicyRevision: user.AccessPolicyRevision,
-		DisabledLibraryIDs:   cloneParityInts(disabled),
 		ProfileVerified:      true,
 		RequestTime:          "2026-07-02T12:00:00Z",
 		DeviceID:             "device-1",
@@ -225,11 +245,15 @@ func scopeInputFromParity(user *models.User, profile *userstore.Profile, disable
 		input.ProfileID = profile.ID
 		input.ProfilePresent = true
 		input.ProfileMaxRating = profile.MaxContentRating
+		input.ProfileMaxAdvisoryAge = profile.MaxAdvisoryAge
 		input.ProfileMaxQuality = profile.MaxPlaybackQuality
 		input.ProfileLibraryLimited = profile.LibraryRestrictionsEnabled
 		input.ProfileLibraryIDs = cloneParityInts(profile.AllowedLibraryIDs)
 		input.ProfileHasPIN = profile.PINHash != ""
 		input.ProfileVerified = verified
+		// Hidden libraries are a profile-scoped row; without a profile there
+		// are none to pass.
+		input.DisabledLibraryIDs = cloneParityInts(disabled)
 		// Canonically resolved, mirroring ViewerResolver — the legacy profile
 		// column is no longer a policy input.
 		input.ProfileMetadataLang = parityMetadataLang
@@ -250,12 +274,15 @@ func decisionToAccessScope(input ScopeInput, decision ScopeDecision) access.Scop
 		disabled = nil
 	}
 	return access.Scope{
-		UserID:                    input.UserID,
-		ProfileID:                 input.ProfileID,
-		AllowedLibraryIDs:         allowed,
-		DisabledLibraryIDs:        disabled,
-		LibrariesRestricted:       decision.LibrariesRestricted,
-		MaxContentRating:          decision.MaxContentRating,
+		UserID:              input.UserID,
+		ProfileID:           input.ProfileID,
+		AllowedLibraryIDs:   allowed,
+		DisabledLibraryIDs:  disabled,
+		LibrariesRestricted: decision.LibrariesRestricted,
+		MaturityLimits: access.MaturityLimits{
+			MaxContentRating: access.StricterCeiling(decision.MaxContentRating, decision.MaxContentRatingOverride),
+			MaxAdvisoryAge:   decision.MaxAdvisoryAge,
+		},
 		MaxPlaybackQuality:        decision.MaxPlaybackQuality,
 		PreferredMetadataLanguage: decision.PreferredMetadataLanguage,
 		PolicyRevision:            decision.PolicyRevision,
@@ -263,15 +290,18 @@ func decisionToAccessScope(input ScopeInput, decision ScopeDecision) access.Scop
 		// The parity harness passes SkipPINVerification for every verified
 		// PIN-locked profile, so both resolvers must report the skip.
 		PINVerificationSkipped: decision.ProfileVerified && input.ProfileHasPIN && input.ProfilePresent,
+		NextUpMode:             parityNextUpMode(input),
 	}
 }
 
-func disabledSetting(ids []int) map[string]string {
-	if len(ids) == 0 {
-		return nil
+// parityNextUpMode is the ui.next_up_mode both resolvers carry: the contract
+// default for a profile, since the parity store holds no row for it, and
+// nothing without one.
+func parityNextUpMode(input ScopeInput) string {
+	if !input.ProfilePresent {
+		return ""
 	}
-	raw, _ := json.Marshal(ids)
-	return map[string]string{"disabled_library_ids": string(raw)}
+	return "combined"
 }
 
 func cloneParityInts(values []int) []int {
@@ -318,7 +348,6 @@ func (p parityStoreProvider) Close() error {
 type parityStore struct {
 	userstore.UserStore
 	profile       *userstore.Profile
-	settings      map[string]string
 	settingValues []userstore.SettingValue
 }
 
@@ -331,8 +360,4 @@ func (s parityStore) GetProfile(_ context.Context, id string) (*userstore.Profil
 		return nil, nil
 	}
 	return s.profile, nil
-}
-
-func (s parityStore) GetSetting(_ context.Context, key string) (string, error) {
-	return s.settings[key], nil
 }

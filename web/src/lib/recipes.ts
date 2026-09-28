@@ -33,6 +33,30 @@ export interface RecipeCatalogResponse {
   categories: Partial<Record<Category, RecipeDefinition[]>>;
 }
 
+// matchRecipePreset returns the gallery preset a section's config came from.
+// Several presets can share one recipe type and differ only in their params
+// (TMDB Trending Today vs This Week), so the type alone cannot name the
+// section. The preset whose default params the config matches on the most
+// keys wins; a config that matches none falls back to the first preset.
+export function matchRecipePreset(
+  def: RecipeDefinition,
+  config: Record<string, unknown> | undefined,
+): GalleryPreset | undefined {
+  let best: GalleryPreset | undefined;
+  let bestScore = -1;
+  for (const preset of def.presets) {
+    const entries = Object.entries(preset.default_params ?? {});
+    const matches = entries.every(
+      ([key, value]) => JSON.stringify(config?.[key]) === JSON.stringify(value),
+    );
+    if (matches && entries.length > bestScore) {
+      best = preset;
+      bestScore = entries.length;
+    }
+  }
+  return best ?? def.presets[0];
+}
+
 export interface Candidate {
   value: string;
   display_name: string;

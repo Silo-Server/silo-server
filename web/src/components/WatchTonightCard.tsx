@@ -70,13 +70,16 @@ export default function WatchTonightCard({ item, onPlay }: WatchTonightCardProps
 
       event.preventDefault();
       onPlay();
-      playbackController.startPlayback({
-        contentId: parsed.contentId,
-        fileId: parsed.fileId,
-        libraryId: parsed.libraryId,
-        restart: parsed.restart,
-        returnHref: `${location.pathname}${location.search}`,
-      });
+      playbackController.startPlayback(
+        {
+          contentId: parsed.contentId,
+          fileId: parsed.fileId,
+          libraryId: parsed.libraryId,
+          restart: parsed.restart,
+          returnHref: `${location.pathname}${location.search}`,
+        },
+        "viewer",
+      );
     },
     [watchHref, location.pathname, location.search, playbackController, onPlay],
   );

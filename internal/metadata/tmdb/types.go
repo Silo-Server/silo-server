@@ -126,6 +126,14 @@ type collectionResponsePart struct {
 	ReleaseDate string `json:"release_date"`
 }
 
+// listResponse is the wire format of one /list/{id} page. Unlike the
+// discovery endpoints, a list pages its entries under "items".
+type listResponse struct {
+	Page       int              `json:"page"`
+	TotalPages int              `json:"total_pages"`
+	Items      []TrendingResult `json:"items"`
+}
+
 type mediaMovieResponse struct {
 	ID           int     `json:"id"`
 	Title        string  `json:"title"`

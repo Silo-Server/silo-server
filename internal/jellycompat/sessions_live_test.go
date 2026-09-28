@@ -1,6 +1,7 @@
 package jellycompat
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -50,6 +51,23 @@ func TestSessionsExposeOnlyCallerActiveDeviceAndPingPreservesPosition(t *testing
 	if rec.Code != 200 || len(result) != 1 || result[0].ID != "own" || result[0].PlayState == nil || result[0].PlayState.PositionTicks != 1230000000 || result[0].PlayState.PlayMethod != "DirectPlay" || result[0].SupportsRemoteControl {
 		t.Fatalf("sessions %d %+v %s", rec.Code, result, rec.Body.String())
 	}
+	// jellyfin-sdk-kotlin rejects the whole list when a required
+	// SessionInfoDto or PlayerStateInfo field is missing or null.
+	var raw []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"PlayableMediaTypes", "UserId", "LastActivityDate", "LastPlaybackCheckIn", "IsActive", "SupportsMediaControl", "SupportsRemoteControl", "HasCustomDeviceName", "SupportedCommands"} {
+		if raw[0][key] == nil {
+			t.Errorf("SessionInfoDto missing required %s: %s", key, rec.Body.String())
+		}
+	}
+	playState, _ := raw[0]["PlayState"].(map[string]any)
+	for _, key := range []string{"CanSeek", "IsPaused", "IsMuted", "RepeatMode", "PlaybackOrder"} {
+		if playState[key] == nil {
+			t.Errorf("PlayerStateInfo missing required %s: %s", key, rec.Body.String())
+		}
+	}
 	now = now.Add(time.Second)
 	rec = httptest.NewRecorder()
 	h.HandleSessionPlayingPing(rec, viewerRequest("POST", "/?playSessionId=own", "", "", "", session))
@@ -72,7 +90,9 @@ func TestSessionsExposeOnlyCallerActiveDeviceAndPingPreservesPosition(t *testing
 func TestSocketKeepAliveAndRevocation(t *testing.T) {
 	var valid atomic.Bool
 	valid.Store(true)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { serveCompatSocket(w, r, valid.Load, 10*time.Millisecond) }))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serveCompatSocket(w, r, func(context.Context) bool { return valid.Load() }, 10*time.Millisecond)
+	}))
 	defer server.Close()
 	conn, response, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), nil)
 	if response != nil {
@@ -87,16 +107,17 @@ func TestSocketKeepAliveAndRevocation(t *testing.T) {
 	if err := conn.ReadJSON(&msg); err != nil {
 		t.Fatal(err)
 	}
-	if msg.MessageType != "ForceKeepAlive" || string(msg.Data) != "60" {
+	if msg.MessageType != "ForceKeepAlive" || string(msg.Data) != "60" || uuid.Validate(msg.MessageID) != nil {
 		t.Fatalf("initial message %+v", msg)
 	}
+	forceID := msg.MessageID
 	if err := conn.WriteJSON(wsMessage{MessageType: "KeepAlive"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := conn.ReadJSON(&msg); err != nil {
 		t.Fatal(err)
 	}
-	if msg.MessageType != "KeepAlive" {
+	if msg.MessageType != "KeepAlive" || uuid.Validate(msg.MessageID) != nil || msg.MessageID == forceID {
 		t.Fatalf("response %+v", msg)
 	}
 	valid.Store(false)

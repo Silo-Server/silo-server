@@ -154,3 +154,90 @@ func TestSubtitleExternalIdentitySurvivesReordering(t *testing.T) {
 		}
 	}
 }
+
+// The published .srt?original=1 URL on /api/v2 answers an external SRT with the original
+// bytes, which keep {\an8} for a client that parses SubRip. .vtt, and a bare
+// .srt as the frozen v1 route has always done, answer with the WebVTT
+// conversion.
+func TestSubtitleExternalSRTServesOriginalOrConvertedRepresentation(t *testing.T) {
+	const srtFile = "1\n00:00:01,000 --> 00:00:02,000\n{\\an8}Top line\n"
+	path := filepath.Join(t.TempDir(), "movie.ar.srt")
+	if err := os.WriteFile(path, []byte(srtFile), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file := &models.MediaFile{ID: 42, FilePath: "/synthetic/movie.mkv",
+		ExternalSubtitles: []models.ExternalSubtitle{{Path: path, Format: "srt"}},
+		SubtitleTracks:    []models.SubtitleTrack{{Index: 2, Codec: "subrip"}},
+	}
+	manager := playback.NewSessionManager(0, 0)
+	session, err := manager.StartSession(1, "profile-1", 42, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewStreamHandler(manager, testPlaybackFileResolver{file: file})
+	request := func(method, track, query string) *httptest.ResponseRecorder {
+		response := httptest.NewRecorder()
+		req := playbackTestRequest(method,
+			"/stream/"+session.ID+"/subtitles/"+track+"?file_id=42"+query, nil,
+			map[string]string{"session_id": session.ID, "track": track})
+		handler.HandleSubtitle(response, req.WithContext(WithNativeAPIV2(req.Context())))
+		return response
+	}
+	const original = "&" + playback.SubtitleOriginalParamV3 + "=1"
+
+	srt := request(http.MethodGet, "0.srt", original)
+	if srt.Code != http.StatusOK || srt.Body.String() != srtFile ||
+		!strings.HasPrefix(srt.Header().Get("Content-Type"), "application/x-subrip") {
+		t.Fatalf(".srt must serve the original file: %d %q %q", srt.Code, srt.Header().Get("Content-Type"), srt.Body.String())
+	}
+	// The frozen /api/v1 route shares the handler and keeps WebVTT for the
+	// same URL.
+	v1 := httptest.NewRecorder()
+	handler.HandleSubtitle(v1, playbackTestRequest(http.MethodGet,
+		"/stream/"+session.ID+"/subtitles/0.srt?file_id=42"+original, nil,
+		map[string]string{"session_id": session.ID, "track": "0.srt"}))
+	if v1.Code != http.StatusOK || !strings.HasPrefix(v1.Header().Get("Content-Type"), "text/vtt") {
+		t.Fatalf("/api/v1 .srt?original=1 must keep WebVTT: %d %q", v1.Code, v1.Header().Get("Content-Type"))
+	}
+
+	for _, converted := range []struct{ track, query string }{{"0.vtt", ""}, {"0.srt", ""}, {"0.vtt", original}} {
+		vtt := request(http.MethodGet, converted.track, converted.query)
+		if vtt.Code != http.StatusOK || !strings.HasPrefix(vtt.Header().Get("Content-Type"), "text/vtt") ||
+			!strings.HasPrefix(vtt.Body.String(), "WEBVTT") || !strings.Contains(vtt.Body.String(), "00:00:01.000 --> 00:00:02.000") {
+			t.Fatalf("%s%s must serve the WebVTT conversion: %d %q", converted.track, converted.query, vtt.Code, vtt.Body.String())
+		}
+	}
+
+	for _, tc := range []struct{ track, query, want string }{
+		{"0.srt", original, "application/x-subrip"},
+		{"0.srt", "", "text/vtt"},
+		{"0.vtt", "", "text/vtt"},
+		// Embedded text streams as WebVTT whatever the extension.
+		{"1.srt", original, "text/vtt"},
+	} {
+		head := request(http.MethodHead, tc.track, tc.query)
+		if head.Code != http.StatusOK || !strings.HasPrefix(head.Header().Get("Content-Type"), tc.want) {
+			t.Errorf("HEAD %s%s = %d %q, want %s", tc.track, tc.query, head.Code, head.Header().Get("Content-Type"), tc.want)
+		}
+	}
+}
+
+// SRT declares no encoding, so original bytes that are not UTF-8 are served
+// without a UTF-8 charset label.
+func TestOriginalSubRipDeclaresUTF8OnlyForUTF8Bytes(t *testing.T) {
+	for name, tc := range map[string]struct {
+		data []byte
+		want string
+	}{
+		"utf-8":        {[]byte("1\n00:00:01,000 --> 00:00:02,000\nمرحبا\n"), "application/x-subrip; charset=utf-8"},
+		"windows-1256": {[]byte("1\n00:00:01,000 --> 00:00:02,000\n\xe3\xd1\xcd\xc8\xc7\n"), "application/x-subrip"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			serveOriginalSubRip(rr, tc.data)
+			if got := rr.Header().Get("Content-Type"); got != tc.want || rr.Body.String() != string(tc.data) {
+				t.Fatalf("content type = %q, want %q; body changed: %v", got, tc.want, rr.Body.String() != string(tc.data))
+			}
+		})
+	}
+}

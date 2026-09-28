@@ -168,6 +168,6 @@ func applyMigrationForTest(ctx context.Context, t *testing.T, pool *pgxpool.Pool
 	}
 	defer func() { _ = provider.Close() }()
 	if _, err := provider.Up(ctx); err != nil {
-		t.Fatalf("apply Dolby Vision probe migration: %v", err)
+		t.Fatalf("apply %s: %v", filepath.Base(path), err)
 	}
 }

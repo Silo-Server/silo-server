@@ -131,16 +131,24 @@ func (s *Service) providerForClaim(ctx context.Context, run *Run, claim RunClaim
 		if err != nil {
 			return nil, err
 		}
+		var provider Provider
 		switch run.SourceType {
 		case SourceTypeEmby:
-			return NewEmbyProvider(s.emby, embyLocalAuth{BaseURL: credential.BaseURL, UserID: credential.ExternalUserID, AccessToken: credential.ServerToken}), nil
+			provider = NewEmbyProvider(s.emby, embyLocalAuth{BaseURL: credential.BaseURL, UserID: credential.ExternalUserID, AccessToken: credential.ServerToken})
 		case SourceTypeJellyfin:
-			return NewJellyfinProvider(s.jellyfin, jellyfinLocalAuth{BaseURL: credential.BaseURL, UserID: credential.ExternalUserID, AccessToken: credential.ServerToken}), nil
+			provider = NewJellyfinProvider(s.jellyfin, jellyfinLocalAuth{BaseURL: credential.BaseURL, UserID: credential.ExternalUserID, AccessToken: credential.ServerToken})
 		case SourceTypePlex:
-			return NewPlexServerProvider(s.plex, credential.BaseURL, credential.ServerToken).WithAccountToken(credential.AccountToken), nil
+			provider = NewPlexServerProvider(s.plex, credential.BaseURL, credential.ServerToken).WithAccountToken(credential.AccountToken)
 		default:
 			return nil, ErrPersonalCredentialsUnavailable
 		}
+		// A predefined server was configured by an admin. Any other address
+		// came from the user, so the policy is read again now: turning the
+		// setting off or demoting the account also stops queued runs.
+		if run.ConnectionMode == ConnectionModePredefined || s.localNetwork.Allowed(ctx, run.UserID) {
+			return privateNetworkProvider{provider}, nil
+		}
+		return provider, nil
 	}
 	source, token, err := s.repo.GetSourceWithAdminToken(ctx, claim.SourceID)
 	if err != nil {
@@ -149,5 +157,9 @@ func (s *Service) providerForClaim(ctx context.Context, run *Run, claim RunClaim
 	if source.Revision != claim.SourceRevision {
 		return nil, ErrRunConfigurationChanged
 	}
-	return s.buildAdminProvider(source, token, claim.ExternalUserID)
+	provider, err := s.buildAdminProvider(source, token, claim.ExternalUserID)
+	if err != nil {
+		return nil, err
+	}
+	return privateNetworkProvider{provider}, nil
 }

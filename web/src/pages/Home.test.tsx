@@ -5,11 +5,13 @@ import type { ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import Home from "./Home";
 import { SIDEBAR_DETAILS_REVEAL_DEADLINE_MS } from "@/components/sidebarItemNavigation";
 import { sectionKeys } from "@/hooks/queries/keys";
+import { bumpHomeRefreshSignal } from "./homeSurfaceRefresh";
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -48,8 +50,12 @@ vi.mock("@/components/HeroBanner", () => ({
 }));
 
 vi.mock("@/components/SectionRow", () => ({
-  default: ({ section }: { section: { id: string } }) => (
-    <div data-kind="section-row" data-section-id={section.id} />
+  default: ({ section }: { section: { id: string; items: Array<{ title: string }> } }) => (
+    <div
+      data-kind="section-row"
+      data-section-id={section.id}
+      data-first-item={section.items[0]?.title}
+    />
   ),
 }));
 
@@ -586,7 +592,201 @@ describe("Home", () => {
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
+
+  describe("refresh bump during a section load", () => {
+    const layout = [homeLayout("row-1"), homeLayout("row-2"), homeLayout("row-3")];
+
+    beforeEach(() => {
+      mockUseHomeLayout.mockReturnValue({
+        data: { sections: layout },
+        isLoading: false,
+        isError: false,
+        refetch: vi.fn(),
+      });
+    });
+
+    it("keeps a cold load out of the error state and renders the newest data", async () => {
+      const requests = deferSectionRequests();
+      const queryClient = new QueryClient();
+
+      await renderHome(queryClient);
+      await waitForRequestCount(requests, 3);
+      expect(requests.map((request) => request.sectionId)).toEqual(["row-1", "row-2", "row-3"]);
+
+      bumpHomeRefreshSignal(queryClient);
+      await waitForRequestCount(requests, 6);
+
+      expect(sectionErrorCount()).toBe(0);
+      const [firstGeneration, secondGeneration] = [requests.slice(0, 3), requests.slice(3)];
+      expect(firstGeneration.every((request) => request.signal.aborted)).toBe(true);
+      expect(secondGeneration.map((request) => request.sectionId)).toEqual([
+        "row-1",
+        "row-2",
+        "row-3",
+      ]);
+
+      // The cancelled generation answers after the new one, so a stale result
+      // that got through would overwrite the new data.
+      secondGeneration.forEach((request) => request.resolve("after bump"));
+      firstGeneration.forEach((request) => request.resolve("before bump"));
+      await waitForRenderedFirstItems({
+        "row-1": "row-1 after bump",
+        "row-2": "row-2 after bump",
+        "row-3": "row-3 after bump",
+      });
+
+      expect(sectionErrorCount()).toBe(0);
+      expect(requests).toHaveLength(6);
+    });
+
+    it("refreshes stale cached rows that were in flight when the bump landed", async () => {
+      const requests = deferSectionRequests();
+      const queryClient = new QueryClient();
+      layout.forEach((section) => {
+        queryClient.setQueryData(
+          sectionKeys.homeItems(section.id),
+          homeSection(section.id, "cached"),
+          { updatedAt: Date.now() - 11 * 60 * 1000 },
+        );
+      });
+
+      await renderHome(queryClient);
+      await waitForRequestCount(requests, 3);
+
+      bumpHomeRefreshSignal(queryClient);
+      await waitForRequestCount(requests, 6);
+
+      expect(sectionErrorCount()).toBe(0);
+      const secondGeneration = requests.slice(3);
+      expect(secondGeneration.map((request) => request.sectionId)).toEqual([
+        "row-1",
+        "row-2",
+        "row-3",
+      ]);
+
+      secondGeneration.forEach((request) => request.resolve("after bump"));
+      await waitForRenderedFirstItems({
+        "row-1": "row-1 after bump",
+        "row-2": "row-2 after bump",
+        "row-3": "row-3 after bump",
+      });
+
+      expect(sectionErrorCount()).toBe(0);
+      expect(requests).toHaveLength(6);
+    });
+
+    it("renders the newest generation when two bumps land before any request settles", async () => {
+      const requests = deferSectionRequests();
+      const queryClient = new QueryClient();
+
+      await renderHome(queryClient);
+      await waitForRequestCount(requests, 3);
+      for (const expectedRequests of [6, 9]) {
+        bumpHomeRefreshSignal(queryClient);
+        await waitForRequestCount(requests, expectedRequests);
+        expect(sectionErrorCount()).toBe(0);
+      }
+
+      const [olderGenerations, newestGeneration] = [requests.slice(0, 6), requests.slice(6)];
+      expect(olderGenerations.every((request) => request.signal.aborted)).toBe(true);
+      expect(newestGeneration.map((request) => request.sectionId)).toEqual([
+        "row-1",
+        "row-2",
+        "row-3",
+      ]);
+
+      // The older generations answer after the newest one, so a stale result
+      // that got through would overwrite the newest data.
+      newestGeneration.forEach((request) => request.resolve("newest"));
+      olderGenerations.forEach((request) => request.resolve("older"));
+      await waitForRenderedFirstItems({
+        "row-1": "row-1 newest",
+        "row-2": "row-2 newest",
+        "row-3": "row-3 newest",
+      });
+
+      expect(sectionErrorCount()).toBe(0);
+      expect(requests).toHaveLength(9);
+    });
+
+    it("still shows an error row when a section request really fails", async () => {
+      const requests = deferSectionRequests();
+      const queryClient = new QueryClient();
+
+      await renderHome(queryClient);
+      await waitForRequestCount(requests, 3);
+
+      requests[0]!.reject(new Error("boom"));
+      requests.slice(1).forEach((request) => request.resolve("loaded"));
+      await waitFor(() => {
+        expect(sectionErrorCount()).toBe(1);
+        expect(renderedFirstItems()).toEqual({
+          "row-2": "row-2 loaded",
+          "row-3": "row-3 loaded",
+        });
+      });
+    });
+  });
+
+  async function renderHome(queryClient: QueryClient) {
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <Home />
+        </QueryClientProvider>,
+      );
+    });
+  }
+
+  function sectionErrorCount() {
+    return (container.textContent?.match(/could not be loaded right now/g) ?? []).length;
+  }
+
+  function renderedFirstItems() {
+    return Object.fromEntries(
+      Array.from(container.querySelectorAll('[data-kind="section-row"]')).map((row) => [
+        row.getAttribute("data-section-id"),
+        row.getAttribute("data-first-item"),
+      ]),
+    );
+  }
+
+  async function waitForRenderedFirstItems(expected: Record<string, string>) {
+    await waitFor(() => expect(renderedFirstItems()).toEqual(expected));
+  }
 });
+
+interface DeferredSectionRequest {
+  sectionId: string;
+  signal: AbortSignal;
+  resolve: (label: string) => void;
+  reject: (error: Error) => void;
+}
+
+// Holds every section request open until the test settles it, so a refresh
+// bump can land while the first generation is still in flight.
+function deferSectionRequests(): DeferredSectionRequest[] {
+  const requests: DeferredSectionRequest[] = [];
+  mockFetchHomeSectionItems.mockImplementation(
+    (sectionId: string, options: { signal: AbortSignal }) =>
+      new Promise((resolve, reject) => {
+        requests.push({
+          sectionId,
+          signal: options.signal,
+          resolve: (label) => resolve(homeSection(sectionId, label)),
+          reject,
+        });
+      }),
+  );
+  return requests;
+}
+
+// Home hears about a refresh bump through a query observer that TanStack
+// notifies on its own schedule. The next generation's requests are the
+// observable sign that Home has reset and re-requested its sections.
+async function waitForRequestCount(requests: DeferredSectionRequest[], count: number) {
+  await waitFor(() => expect(requests).toHaveLength(count));
+}
 
 function homeLayout(id: string) {
   return {
@@ -600,7 +800,7 @@ function homeLayout(id: string) {
   };
 }
 
-function homeSection(id: string) {
+function homeSection(id: string, label = "item") {
   return {
     section: {
       ...homeLayout(id),
@@ -609,7 +809,7 @@ function homeSection(id: string) {
         {
           content_id: `${id}-item`,
           type: "movie",
-          title: `${id} item`,
+          title: `${id} ${label}`,
           year: 2026,
           genres: [],
           status: "matched",

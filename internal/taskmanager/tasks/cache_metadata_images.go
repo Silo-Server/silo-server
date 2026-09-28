@@ -201,7 +201,7 @@ func (t *CacheMetadataImagesTask) Description() string {
 func (t *CacheMetadataImagesTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategoryMetadata
 }
-func (t *CacheMetadataImagesTask) IsHidden() bool { return false }
+func (t *CacheMetadataImagesTask) IsHidden() bool { return true }
 
 func (t *BackfillMetadataImagesTask) Key() string  { return "backfill_metadata_images" }
 func (t *BackfillMetadataImagesTask) Name() string { return "Backfill Metadata Images" }

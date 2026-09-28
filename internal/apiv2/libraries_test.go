@@ -50,7 +50,7 @@ func libraryFixture(id int, name string) handlers.LibraryView {
 	code := "empty_root"
 	return handlers.LibraryView{
 		ID: id, Paths: []string{"/media/" + strings.ToLower(name)}, Type: "movies", Name: name, Enabled: true,
-		MetadataLanguage: "en", ChapterThumbnailsSupported: true, TrailerKinds: []string{"trailer"}, SortOrder: id - 1,
+		MetadataLanguage: "en", ChapterThumbnailsSupported: true, TrailerKinds: []string{"trailer"}, RealtimeMonitoring: true, SortOrder: id - 1,
 		PosterURL: "https://s3.example.test/poster.jpg", LastScannedAt: ptr(fixedTime()),
 		ScanWarningCode: &code, ScanWarningMessage: ptr("Root is empty"), ScanWarningAt: &warnAt,
 	}
@@ -78,6 +78,9 @@ func (f *fakeLibraryAdmin) CreateLibrary(_ context.Context, req handlers.Library
 	v := libraryFixture(3, req.Name)
 	v.Paths = req.Paths
 	v.Type = req.Type
+	if req.RealtimeMonitoring != nil {
+		v.RealtimeMonitoring = *req.RealtimeMonitoring
+	}
 	return v, nil
 }
 
@@ -90,6 +93,9 @@ func (f *fakeLibraryAdmin) UpdateLibrary(_ context.Context, id, userID int, req 
 		if v.ID == id {
 			if req.Name != nil {
 				v.Name = *req.Name
+			}
+			if req.RealtimeMonitoring != nil {
+				v.RealtimeMonitoring = *req.RealtimeMonitoring
 			}
 			return v, nil
 		}
@@ -326,7 +332,7 @@ func TestListLibraries(t *testing.T) {
 	}
 	for field, want := range map[string]string{
 		"id": `"1"`, "name": `"Movies"`, "paths": `["/media/movies"]`, "trailer_kinds": `["trailer"]`, "sort_order": `0`,
-		"chapter_thumbnails_supported": `true`, "poster_url": `"https://s3.example.test/poster.jpg"`,
+		"chapter_thumbnails_supported": `true`, "realtime_monitoring": `true`, "poster_url": `"https://s3.example.test/poster.jpg"`,
 		"last_scanned_at": `"2026-01-02T03:04:05.678Z"`, "scan_warning_code": `"empty_root"`, "scan_warning_at": `"2026-01-02T03:04:05.678Z"`,
 	} {
 		if string(body.Items[0][field]) != want {
@@ -424,6 +430,63 @@ func TestUpdateLibrary(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/libraries/9", `{"name":"x"}`, bearer(adminToken)), TypeNotFound)
 	requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/libraries/abc", `{"name":"x"}`, bearer(adminToken)), TypeNotFound)
 	requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/libraries/1", `{"name":"x"}`, bearer(memberToken)), TypePermissionDenied)
+}
+
+func TestLibraryRealtimeMonitoring(t *testing.T) {
+	deps, fake := libraryDeps(t)
+	h := newTestHandler(t, deps)
+
+	// Omitted on create reaches the seam as nil, which the repository reads
+	// as on.
+	rec := do(t, h, http.MethodPost, "/api/v2/libraries", `{"paths":["/media/x"],"type":"movies","name":"X"}`, bearer(adminToken))
+	if rec.Code != 201 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if fake.lastCreate.RealtimeMonitoring != nil {
+		t.Fatalf("omitted realtime_monitoring = %v, want nil", *fake.lastCreate.RealtimeMonitoring)
+	}
+	var body map[string]json.RawMessage
+	decodeJSON(t, rec.Body, &body)
+	if string(body["realtime_monitoring"]) != `true` {
+		t.Fatalf("created realtime_monitoring = %s, want true", body["realtime_monitoring"])
+	}
+
+	rec = do(t, h, http.MethodPost, "/api/v2/libraries", `{"paths":["/media/y"],"type":"movies","name":"Y","realtime_monitoring":false}`, bearer(adminToken))
+	if rec.Code != 201 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if fake.lastCreate.RealtimeMonitoring == nil || *fake.lastCreate.RealtimeMonitoring {
+		t.Fatalf("explicit false create = %v, want false", fake.lastCreate.RealtimeMonitoring)
+	}
+	decodeJSON(t, rec.Body, &body)
+	if string(body["realtime_monitoring"]) != `false` {
+		t.Fatalf("created realtime_monitoring = %s, want false", body["realtime_monitoring"])
+	}
+
+	// PATCH carries the switch; omitting it leaves it unchanged.
+	rec = do(t, h, http.MethodPatch, "/api/v2/libraries/1", `{"realtime_monitoring":false}`, bearer(adminToken))
+	if rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	if fake.lastUpdate.RealtimeMonitoring == nil || *fake.lastUpdate.RealtimeMonitoring {
+		t.Fatalf("update command = %v, want false", fake.lastUpdate.RealtimeMonitoring)
+	}
+	decodeJSON(t, rec.Body, &body)
+	if string(body["realtime_monitoring"]) != `false` {
+		t.Fatalf("updated realtime_monitoring = %s, want false", body["realtime_monitoring"])
+	}
+	if rec := do(t, h, http.MethodPatch, "/api/v2/libraries/1", `{"name":"Films"}`, bearer(adminToken)); rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	if fake.lastUpdate.RealtimeMonitoring != nil {
+		t.Fatalf("omitted update realtime_monitoring = %v, want nil", *fake.lastUpdate.RealtimeMonitoring)
+	}
+
+	// The member does not admit null.
+	p := requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/libraries/1", `{"realtime_monitoring":null}`, bearer(adminToken)), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "body.realtime_monitoring" {
+		t.Fatalf("errors = %+v", p.Errors)
+	}
 }
 
 func TestDeleteLibrary(t *testing.T) {

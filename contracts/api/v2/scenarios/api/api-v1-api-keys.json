@@ -777,7 +777,7 @@
           "category": "status_headers",
           "description": "Creating a labelled key answers 201 with the key.",
           "principal": {
-            "class": "authenticated"
+            "class": "admin"
           },
           "request": {
             "path": "/api/v1/api-keys/",
@@ -859,7 +859,7 @@
                 {
                   "pointer": "/user_id",
                   "op": "equals",
-                  "value": "${member_user_id}"
+                  "value": "${admin_user_id}"
                 },
                 {
                   "pointer": "/key",
@@ -898,7 +898,7 @@
           "category": "data_meaning",
           "description": "The key belongs to the caller, starts on the standard tier, unscoped.",
           "principal": {
-            "class": "authenticated"
+            "class": "admin"
           },
           "request": {
             "path": "/api/v1/api-keys/",
@@ -912,7 +912,7 @@
               {
                 "pointer": "/user_id",
                 "op": "equals",
-                "value": "${member_user_id:int}"
+                "value": "${admin_user_id:int}"
               },
               {
                 "pointer": "/rate_tier",
@@ -975,7 +975,7 @@
                 {
                   "pointer": "/user_id",
                   "op": "equals",
-                  "value": "${member_user_id}"
+                  "value": "${admin_user_id}"
                 },
                 {
                   "pointer": "/key",
@@ -1014,7 +1014,7 @@
           "category": "filtering",
           "description": "Valid scopes are normalized and stored.",
           "principal": {
-            "class": "authenticated"
+            "class": "admin"
           },
           "request": {
             "path": "/api/v1/api-keys/",
@@ -1086,7 +1086,7 @@
                 {
                   "pointer": "/user_id",
                   "op": "equals",
-                  "value": "${member_user_id}"
+                  "value": "${admin_user_id}"
                 },
                 {
                   "pointer": "/key",
@@ -1127,7 +1127,7 @@
           "category": "error",
           "description": "An unknown scope is 400.",
           "principal": {
-            "class": "authenticated"
+            "class": "admin"
           },
           "request": {
             "path": "/api/v1/api-keys/",
@@ -1234,7 +1234,7 @@
           "category": "error",
           "description": "An empty label is 400.",
           "principal": {
-            "class": "authenticated"
+            "class": "admin"
           },
           "request": {
             "path": "/api/v1/api-keys/",
@@ -1340,7 +1340,7 @@
           "category": "error",
           "description": "A non-JSON body is 400.",
           "principal": {
-            "class": "authenticated"
+            "class": "admin"
           },
           "request": {
             "path": "/api/v1/api-keys/",
@@ -1547,6 +1547,107 @@
           }
         },
         {
+          "id": "keys_create.member_forbidden",
+          "category": "authorization",
+          "description": "A regular (non-admin) account cannot create API keys: 403 forbidden.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/",
+            "body": {
+              "label": "fixture-created"
+            }
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "Only server admins create API keys on either transport (#1189 AC2): a regular account's login session is refused with 403 before the body is read, and no credential row changes.",
+            "recorded_in": "internal/scenariocatalog/executor/api_key_create_refusal_pairing_test.go",
+            "operation_id": "createPersonalAPIKey",
+            "method": "POST",
+            "request": {
+              "path": "/api/v2/api-keys",
+              "body": {
+                "label": "x"
+              }
+            },
+            "expect": {
+              "status": 403,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/problem+json"
+                },
+                {
+                  "name": "Cache-Control",
+                  "op": "equals",
+                  "value": "no-store"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "/status",
+                  "op": "equals",
+                  "value": 403
+                },
+                {
+                  "pointer": "/type",
+                  "op": "matches",
+                  "value": "/permission_denied$"
+                },
+                {
+                  "pointer": "/title",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/detail",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/instance",
+                  "op": "non_empty"
+                }
+              ]
+            }
+          }
+        },
+        {
           "id": "keys_create.demo",
           "category": "authorization",
           "description": "In demo mode a non-admin mutation on this path is 403 demo_restricted.",
@@ -1640,7 +1741,7 @@
           "category": "field_presence_nullability",
           "description": "last_used_at is absent on a new key.",
           "principal": {
-            "class": "authenticated"
+            "class": "admin"
           },
           "request": {
             "path": "/api/v1/api-keys/",
@@ -1705,7 +1806,7 @@
                 {
                   "pointer": "/user_id",
                   "op": "equals",
-                  "value": "${member_user_id}"
+                  "value": "${admin_user_id}"
                 },
                 {
                   "pointer": "/key",

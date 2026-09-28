@@ -303,7 +303,7 @@ func TestParseFilename(t *testing.T) {
 		{
 			name:       "numeric folder not treated as season without evidence",
 			path:       "/movies/2024/Some.Movie.mkv",
-			wantTitle:  "Some.Movie",
+			wantTitle:  "Some Movie",
 			wantYear:   0,
 			wantType:   "movie",
 			wantSeason: 0,
@@ -549,7 +549,7 @@ func TestResolvePathContext(t *testing.T) {
 			path:                    "/movies/2024/Some.Movie.mkv",
 			wantType:                "movie",
 			wantRoot:                "/movies/2024/Some.Movie",
-			wantTitle:               "Some.Movie",
+			wantTitle:               "Some Movie",
 			wantEpisodePattern:      false,
 			wantSeasonStructure:     false,
 			wantMovieFolderEvidence: false,

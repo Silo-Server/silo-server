@@ -27,7 +27,7 @@ func TestResponseWritersPreserveReaderFrom(t *testing.T) {
 		name string
 		new  func(*readerFromSpy) io.ReaderFrom
 	}{
-		{"request log", func(spy *readerFromSpy) io.ReaderFrom { return &loggingResponseWriter{ResponseWriter: spy} }},
+		{"request status", func(spy *readerFromSpy) io.ReaderFrom { return &statusResponseWriter{ResponseWriter: spy} }},
 		{"debug media", func(spy *readerFromSpy) io.ReaderFrom {
 			spy.header.Set("Content-Type", "video/mp4")
 			return &debugResponseWriter{ResponseWriter: spy}

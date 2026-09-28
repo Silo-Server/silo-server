@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"gopkg.in/natefinch/lumberjack.v2"
 
+	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -22,6 +23,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
+	"github.com/Silo-Server/silo-server/internal/themesongs"
 )
 
 const sqliteUserStoreBackend = "sqlite"
@@ -34,11 +36,17 @@ func NewRouter(deps Dependencies) chi.Router {
 	r := chi.NewRouter()
 	r.Use(stripSlashesExceptWeb)
 	r.Use(middleware.RequestID)
+	r.Use(observeCompatRequest)
 	if deps.ClientIPResolver != nil {
 		r.Use(clientip.Middleware(deps.ClientIPResolver))
 	}
 	if deps.IngressTokens != nil {
 		r.Use(netaccess.Middleware(deps.IngressTokens))
+	}
+	// After client IP resolution and ingress-token stripping, before auth, so
+	// failed sign-ins are recorded too. Matches the native base middleware.
+	if deps.ActivityLogWriter != nil {
+		r.Use(activitylog.NewFilteredMiddleware(deps.ActivityLogWriter, deps.NodeID, skipCompatActivityLog))
 	}
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: []string{"*"},
@@ -76,8 +84,8 @@ func NewRouter(deps Dependencies) chi.Router {
 	if artworkHandler == nil {
 		artworkHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })
 	}
-	r.Method(http.MethodGet, "/api/v2/artwork/*", artworkHandler)
-	r.Method(http.MethodHead, "/api/v2/artwork/*", artworkHandler)
+	r.Method(http.MethodGet, compatArtworkRoute, artworkHandler)
+	r.Method(http.MethodHead, compatArtworkRoute, artworkHandler)
 
 	systemHandler := NewSystemHandler(deps.CurrentConfig)
 	authHandler := NewAuthHandler(deps.CurrentConfig, deps.LoginResolver, deps.Authenticator).WithUserStore(deps.UserStoreProvider)
@@ -89,11 +97,13 @@ func NewRouter(deps Dependencies) chi.Router {
 		subtitleRepo = subtitles.NewPgRepository(deps.DB, deps.SecretCipher)
 	}
 	itemsHandler := NewItemsHandler(deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.ImageCache, nextUpRepo, deps.BrowseRepo, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.EpisodeRepo, deps.SeasonRepo, deps.AccessFilterFn, subtitleRepo)
+	itemsHandler.storeProvider = deps.UserStoreProvider
 	itemsHandler.MarkerPopulation = deps.MarkerPopulation
 	itemsHandler.FileResolver = deps.FileResolver
 	itemsHandler.catalogUserState = deps.Config != nil && deps.Config.UserDB.Backend != sqliteUserStoreBackend
 	itemsHandler.recommender = deps.Recommender
 	if deps.DB != nil {
+		itemsHandler.themeSongs = themesongs.NewRepository(deps.DB)
 		itemsHandler.collections = catalog.NewLibraryCollectionRepository(deps.DB)
 		// Smart (live-query) collections derive membership at read time, so the
 		// BoxSet children path needs a query executor to resolve them.
@@ -110,6 +120,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	}
 	itemsHandler.posterPresigner = deps.PosterPresigner
 	itemsHandler.presignTTL = deps.PresignTTL
+	itemsHandler.realtimeMonitoring = deps.RealtimeMonitoringEnabled
 	autoscanHandler := NewAutoscanHandler(deps.FolderRepo, deps.ScanQueue, deps.IDCodec, itemsHandler)
 	if files, ok := deps.FileResolver.(itemRefreshFileLister); ok {
 		autoscanHandler.files = files
@@ -117,6 +128,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	if deps.SeasonRepo != nil {
 		autoscanHandler.seasons = deps.SeasonRepo
 	}
+	autoscanHandler.realtimeMonitoring = deps.RealtimeMonitoringEnabled
 	adminAPIKeyAuth := NewAdminAPIKeyAuthenticator(deps.APIKeyValidator, deps.APIKeyUserLoader, deps.UserStoreProvider, deps.Now)
 	autoscanVirtualFoldersRegistered := false
 	if deps.Authenticator != nil && adminAPIKeyAuth != nil && autoscanHandler != nil {
@@ -139,6 +151,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 	}
 	playbackHandler := NewPlaybackHandler(deps.Config, deps.ContentService, deps.IDCodec, deps.DeviceProfiles, deps.PlaybackStore, deps.SessionMgr, deps.FileResolver, deps.UserStoreProvider)
+	playbackHandler.ScopeResolver = deps.PlaybackScopeResolver
 	startupSegmentRetention := playbackHandler.SegmentRetentionSeconds
 	playbackHandler.SegmentRetentionSeconds = func() int {
 		if cfg := deps.CurrentConfig(); cfg != nil {
@@ -172,6 +185,8 @@ func NewRouter(deps Dependencies) chi.Router {
 	playbackHandler.profileRefreshRequester = deps.RecWorker
 	playbackHandler.SettingsRepo = deps.SettingsRepo
 	playbackHandler.RecipeNodeStore = deps.RecipeNodeStore
+	itemsHandler.themeRouter = compatThemeRouter(deps, playbackHandler)
+	itemsHandler.themeFFmpegPath = func() string { return playback.ResolveFFmpegPath(playbackHandler.FFmpegPath) }
 	playbackHandler.SessionSyncer = deps.SessionSyncer
 	playbackHandler.WatchScrobbler = deps.WatchScrobbler
 	playbackHandler.StableIdentityResolver = deps.StableIdentityResolver
@@ -194,17 +209,17 @@ func NewRouter(deps Dependencies) chi.Router {
 	r.Get("/QuickConnect/Enabled", systemHandler.HandleQuickConnectEnabled)
 	r.Get("/Users/Public", authHandler.HandlePublicUsers)
 	r.Post("/Users/AuthenticateByName", authHandler.HandleAuthenticateByName)
-	r.Get("/Items/{id}/Images/{imageType}", imagesHandler.HandleItemImage)
-	r.Get("/Items/{id}/Images/{imageType}/{index}", imagesHandler.HandleItemImage)
+	r.Get(compatItemImageRoute, imagesHandler.HandleItemImage)
+	r.Get(compatItemImageIndexRoute, imagesHandler.HandleItemImage)
 	// Jellyfin user-avatar images are anonymous: clients fetch them via plain
 	// <img> tags that carry no auth, so the route is registered top-level rather
 	// than inside the session-auth group.
-	r.Get("/Users/{id}/Images/Primary", imagesHandler.HandleUserImage)
-	r.Method(http.MethodHead, "/Users/{id}/Images/Primary", http.HandlerFunc(imagesHandler.HandleUserImage))
+	r.Get(compatUserImageRoute, imagesHandler.HandleUserImage)
+	r.Method(http.MethodHead, compatUserImageRoute, http.HandlerFunc(imagesHandler.HandleUserImage))
 	// Modern Jellyfin clients fetch the current user's avatar via /UserImage?userId=
 	// (the path form above is [Obsolete] upstream). Same anonymous palette handler.
-	r.Get("/UserImage", imagesHandler.HandleUserImage)
-	r.Method(http.MethodHead, "/UserImage", http.HandlerFunc(imagesHandler.HandleUserImage))
+	r.Get(compatUserImageQueryRoute, imagesHandler.HandleUserImage)
+	r.Method(http.MethodHead, compatUserImageQueryRoute, http.HandlerFunc(imagesHandler.HandleUserImage))
 	webHandler := http.StripPrefix("/web", newDynamicCompatWebHandler(deps))
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/web/", http.StatusFound)
@@ -212,7 +227,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	r.Get("/web", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/web/", http.StatusFound)
 	})
-	r.Handle("/web/*", webHandler)
+	r.Handle(compatWebAssetsRoute, webHandler)
 
 	if deps.Authenticator != nil {
 		r.Group(func(r chi.Router) {
@@ -222,6 +237,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Users/{id}", authHandler.HandleUserByID)
 			r.Get("/UserViews", itemsHandler.HandleViews)
 			r.Get("/UserViews/GroupingOptions", itemsHandler.HandleGroupingOptionsStub)
+			r.Get("/Users/{userId}/GroupingOptions", itemsHandler.HandleGroupingOptionsStub)
 			if !autoscanVirtualFoldersRegistered {
 				r.Get("/Library/VirtualFolders", itemsHandler.HandleVirtualFolders)
 			}
@@ -238,14 +254,15 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Shows/{id}/Similar", itemsHandler.HandleSimilar)
 			r.Get("/Items/{id}/ThemeMedia", itemsHandler.HandleThemeMedia)
 			r.Get("/Items/{id}/Ancestors", itemsHandler.HandleAncestors)
+			r.Get("/Items/{id}/Collections", itemsHandler.HandleItemCollections)
 			r.Get("/Items/{id}/ThemeVideos", itemsHandler.HandleThemeSongsStub)
-			r.Get("/Items/{id}/ThemeSongs", itemsHandler.HandleThemeSongsStub)
+			r.Get("/Items/{id}/ThemeSongs", itemsHandler.HandleThemeSongs)
 			r.Get("/Items/{id}/SpecialFeatures", itemsHandler.HandleSpecialFeatures)
 			r.Get("/Items/{id}/Intros", itemsHandler.HandleItemStub)
 			r.Get("/Items/{id}/LocalTrailers", itemsHandler.HandleLocalTrailers)
 			r.Get("/Users/{userId}/Items/{id}/ThemeMedia", itemsHandler.HandleThemeMedia)
 			r.Get("/Users/{userId}/Items/{id}/ThemeVideos", itemsHandler.HandleThemeSongsStub)
-			r.Get("/Users/{userId}/Items/{id}/ThemeSongs", itemsHandler.HandleThemeSongsStub)
+			r.Get("/Users/{userId}/Items/{id}/ThemeSongs", itemsHandler.HandleThemeSongs)
 			r.Get("/Users/{userId}/Items/{id}/SpecialFeatures", itemsHandler.HandleSpecialFeatures)
 			r.Get("/Users/{userId}/Items/{id}/Intros", itemsHandler.HandleItemStub)
 			r.Get("/Users/{userId}/Items/{id}/LocalTrailers", itemsHandler.HandleLocalTrailers)
@@ -269,6 +286,10 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Post("/Users/Configuration", authHandler.HandleUpdateConfiguration)
 			r.Post("/Users/{userId}/Configuration", authHandler.HandleUpdateConfiguration)
 			r.Get("/Localization/Cultures", authHandler.HandleCultures)
+			// Clients probe group discovery even when SyncPlayAccess is None.
+			r.Get("/SyncPlay/List", func(w http.ResponseWriter, r *http.Request) {
+				writeJSON(w, http.StatusOK, []struct{}{})
+			})
 			r.Post("/UserFavoriteItems/{itemId}", userDataHandler.HandleAddFavorite)
 			r.Delete("/UserFavoriteItems/{itemId}", userDataHandler.HandleRemoveFavorite)
 			r.Post("/UserPlayedItems/{itemId}", userDataHandler.HandleMarkPlayed)
@@ -305,7 +326,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Delete("/Videos/ActiveEncodings", playbackHandler.HandleDeleteActiveEncodings)
 			r.Post("/Sessions/Logout", authHandler.HandleLogout)
 			r.Post("/ClientLog/Document", HandleClientLogDocument)
-			r.Get("/socket", NewSocketHandler(deps.SessionStore, adminAPIKeyAuth))
+			r.Get("/socket", NewSocketHandlerWithUserData(deps.SessionStore, adminAPIKeyAuth, deps.UserStateEvents, deps.IDCodec))
 		})
 	}
 
@@ -315,6 +336,12 @@ func NewRouter(deps Dependencies) chi.Router {
 		r.Method(http.MethodHead, "/Items/{id}/Download", observeCompat(deps.StreamTelemetry, http.MethodHead, "/Items/{id}/Download", playbackHandler.HandleDownload))
 		r.Get("/Items/{id}/Download", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Items/{id}/Download", playbackHandler.HandleDownload))
 		r.Method(http.MethodHead, "/Videos/{id}/stream", observeCompat(deps.StreamTelemetry, http.MethodHead, "/Videos/{id}/stream", playbackHandler.HandleVideoStream))
+		r.Get("/Audio/{itemId}/stream", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Audio/{itemId}/stream", itemsHandler.HandleThemeAudio))
+		r.Head("/Audio/{itemId}/stream", observeCompat(deps.StreamTelemetry, http.MethodHead, "/Audio/{itemId}/stream", itemsHandler.HandleThemeAudio))
+		r.Get("/Audio/{itemId}/stream.{container}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Audio/{itemId}/stream.{container}", itemsHandler.HandleThemeAudio))
+		r.Head("/Audio/{itemId}/stream.{container}", observeCompat(deps.StreamTelemetry, http.MethodHead, "/Audio/{itemId}/stream.{container}", itemsHandler.HandleThemeAudio))
+		r.Get("/Audio/{itemId}/universal", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Audio/{itemId}/universal", itemsHandler.HandleThemeAudio))
+		r.Head("/Audio/{itemId}/universal", observeCompat(deps.StreamTelemetry, http.MethodHead, "/Audio/{itemId}/universal", itemsHandler.HandleThemeAudio))
 		r.Get("/Videos/{id}/stream", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/stream", playbackHandler.HandleVideoStream))
 		r.Method(http.MethodHead, "/Videos/{id}/stream.{container}", observeCompat(deps.StreamTelemetry, http.MethodHead, "/Videos/{id}/stream.{container}", playbackHandler.HandleVideoStream))
 		r.Get("/Videos/{id}/stream.{container}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/stream.{container}", playbackHandler.HandleVideoStream))
@@ -328,12 +355,18 @@ func NewRouter(deps Dependencies) chi.Router {
 		r.Get("/Videos/{id}/audio-v2/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/audio-v2/master.m3u8", playbackHandler.HandleAudioV2MasterManifest))
 		r.Get("/Videos/{id}/audio-v2/hls/{playlistId}/stream.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/audio-v2/hls/{playlistId}/stream.m3u8", playbackHandler.HandleAudioV2HLSManifest))
 		r.Get("/Videos/{id}/audio-v2/hls/{playlistId}/{segmentId}.{segmentContainer}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/audio-v2/hls/{playlistId}/{segmentId}.{segmentContainer}", playbackHandler.HandleAudioV2HLSSegment))
+		r.Get("/Videos/{id}/hevc-v1/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/hevc-v1/master.m3u8", playbackHandler.HandleHEVCV1MasterManifest))
+		r.Get("/Videos/{id}/hevc-v1/hls/{playlistId}/stream.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/hevc-v1/hls/{playlistId}/stream.m3u8", playbackHandler.HandleHEVCV1HLSManifest))
+		r.Get("/Videos/{id}/hevc-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/hevc-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", playbackHandler.HandleHEVCV1HLSSegment))
 		r.Get("/Videos/{id}/remux-v1/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-v1/master.m3u8", playbackHandler.HandleRemuxV1MasterManifest))
 		r.Get("/Videos/{id}/remux-v1/hls/{playlistId}/stream.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-v1/hls/{playlistId}/stream.m3u8", playbackHandler.HandleRemuxV1HLSManifest))
 		r.Get("/Videos/{id}/remux-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", playbackHandler.HandleRemuxV1HLSSegment))
 		r.Get("/Videos/{id}/remux-ts-v1/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-ts-v1/master.m3u8", playbackHandler.HandleRemuxTSV1MasterManifest))
 		r.Get("/Videos/{id}/remux-ts-v1/hls/{playlistId}/stream.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-ts-v1/hls/{playlistId}/stream.m3u8", playbackHandler.HandleRemuxTSV1HLSManifest))
 		r.Get("/Videos/{id}/remux-ts-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-ts-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", playbackHandler.HandleRemuxTSV1HLSSegment))
+		r.Get("/Videos/{id}/remux-dv-v1/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-dv-v1/master.m3u8", playbackHandler.HandleRemuxDVV1MasterManifest))
+		r.Get("/Videos/{id}/remux-dv-v1/hls/{playlistId}/stream.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-dv-v1/hls/{playlistId}/stream.m3u8", playbackHandler.HandleRemuxDVV1HLSManifest))
+		r.Get("/Videos/{id}/remux-dv-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-dv-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", playbackHandler.HandleRemuxDVV1HLSSegment))
 		r.Get("/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}", playbackHandler.HandleSubtitleStream))
 		r.Get("/Videos/{id}/{routeMediaSourceId}/Attachments/{routeIndex}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/{routeMediaSourceId}/Attachments/{routeIndex}", playbackHandler.HandleAttachment))
 		// Jellyfin subtitle routes encode the start position in ticks in this component.
@@ -347,6 +380,29 @@ func NewRouter(deps Dependencies) chi.Router {
 	return r
 }
 
+// Route patterns shared by the router and skipCompatActivityLog.
+const (
+	compatArtworkRoute        = "/api/v2/artwork/*"
+	compatItemImageRoute      = "/Items/{id}/Images/{imageType}"
+	compatItemImageIndexRoute = "/Items/{id}/Images/{imageType}/{index}"
+	compatUserImageRoute      = "/Users/{id}/Images/Primary"
+	compatUserImageQueryRoute = "/UserImage"
+	compatWebAssetsRoute      = "/web/*"
+)
+
+// skipCompatActivityLog leaves out routes that a single page view or playback
+// fetches many times over: artwork, the bundled jellyfin-web assets, and HLS
+// variant playlists and segments. The PlaybackInfo and master playlist requests
+// that start playback are still recorded, as native stream starts are.
+func skipCompatActivityLog(pattern string) bool {
+	switch pattern {
+	case compatItemImageRoute, compatItemImageIndexRoute, compatUserImageRoute,
+		compatUserImageQueryRoute, compatArtworkRoute, compatWebAssetsRoute:
+		return true
+	}
+	return strings.HasPrefix(pattern, "/Videos/") && strings.Contains(pattern, "/hls/{playlistId}/")
+}
+
 func skipCompatMediaCompression(r *http.Request) bool {
 	const (
 		videosSegment = "Videos"
@@ -357,6 +413,8 @@ func skipCompatMediaCompression(r *http.Request) bool {
 	}
 	p := strings.Split(strings.TrimPrefix(r.URL.Path, "/"), "/")
 	switch {
+	case len(p) == 3 && p[0] == compatThemeAudio && p[1] != "" && (p[2] == compatThemeStream || strings.HasPrefix(p[2], "stream.") || p[2] == compatThemeUniversal):
+		return true
 	case len(p) == 3 && p[0] == videosSegment && p[1] != "" && (p[2] == "stream" || strings.HasPrefix(p[2], "stream.")):
 		return p[2] == "stream" || len(strings.TrimPrefix(p[2], "stream.")) > 0
 	case len(p) == 4 && p[0] == videosSegment && p[1] != "" && p[2] == compatAudioV2PathSegment && (p[3] == "stream" || strings.HasPrefix(p[3], "stream.")):
@@ -364,7 +422,7 @@ func skipCompatMediaCompression(r *http.Request) bool {
 	case len(p) == 5 && p[0] == videosSegment && p[1] != "" && p[2] == compatHLSPathSegment && p[3] != "" && p[4] != "":
 		return p[4] != hlsManifest && strings.Contains(p[4], ".")
 	case len(p) == 6 && p[0] == videosSegment && p[1] != "" &&
-		(p[2] == compatAudioV2PathSegment || p[2] == compatRemuxV1PathSegment || p[2] == compatRemuxTSV1PathSegment) &&
+		(p[2] == compatAudioV2PathSegment || p[2] == compatRemuxV1PathSegment || p[2] == compatRemuxTSV1PathSegment || p[2] == compatRemuxDVV1PathSegment) &&
 		p[3] == compatHLSPathSegment && p[4] != "" && p[5] != "":
 		return p[5] != hlsManifest && strings.Contains(p[5], ".")
 	case len(p) == 3 && p[0] == "Items" && p[1] != "" && p[2] == "Download":
@@ -401,6 +459,9 @@ func withDefaults(deps Dependencies) Dependencies {
 	}
 	if deps.IDCodec == nil {
 		deps.IDCodec = NewResourceIDCodec()
+	}
+	if deps.MediaSourceOwners != nil {
+		deps.IDCodec.SetMediaSourceOwnerLookup(deps.MediaSourceOwners)
 	}
 	if deps.ImageCache == nil {
 		cacheTTL := 24 * time.Hour
@@ -467,7 +528,7 @@ func withDefaults(deps Dependencies) Dependencies {
 		if deps.BrowseRepo != nil {
 			pool = deps.BrowseRepo.Pool()
 		}
-		deps.UserDataService = newDirectUserDataService(
+		svc := newDirectUserDataService(
 			deps.UserStoreProvider,
 			deps.ItemRepo,
 			deps.EpisodeRepo,
@@ -478,6 +539,8 @@ func withDefaults(deps Dependencies) Dependencies {
 			deps.RecWorker,
 			deps.WatchCompletionObserver,
 		)
+		svc.events = deps.UserStateEvents
+		deps.UserDataService = svc
 	}
 
 	// Build LoginResolver from auth service if not provided

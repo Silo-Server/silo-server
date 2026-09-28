@@ -44,7 +44,7 @@ func registerWatchTogetherSocket(reg *Registry) {
 	raw.Parameters = []*huma.Param{
 		{Name: "room_id", In: roomSocketPathParameter, Required: true, Schema: &huma.Schema{Type: huma.TypeString}},
 		{Name: eventsProtocolHeader, In: paramInHeader, Required: true, Schema: &huma.Schema{Type: huma.TypeString}, Description: "Offer silo.room.v2 followed by silo.ticket.<single-use-ticket>."},
-		{Name: eventsOriginHeader, In: paramInHeader, Schema: &huma.Schema{Type: huma.TypeString}, Description: "Browser origin must match configured public origin."},
+		{Name: eventsOriginHeader, In: paramInHeader, Schema: &huma.Schema{Type: huma.TypeString}, Description: socketOriginHeaderDoc},
 	}
 	RegisterRaw(reg, RawOperation{Operation: raw, Protocol: eventsRawProtocol, Reason: "Room-bound single-use session proof, Origin and subprotocol checks precede upgrade; connection authority and lifetime are bounded."}, socketHandler(reg.deps.WatchTogetherSocket, "room socket unavailable"))
 }

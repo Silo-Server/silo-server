@@ -93,6 +93,9 @@ const (
 	// apiKeyToken is an unscoped API key owned by the member account: no
 	// login session, exempt from profile PIN verification at the gate.
 	apiKeyToken = "sa_member"
+	// temporaryPasswordToken is member 1's session opened with a temporary
+	// password: it may only change the password.
+	temporaryPasswordToken = "tok-temporary-password"
 )
 
 type fakeAPIKeys struct{ keys map[string]*models.APIKey }
@@ -107,12 +110,13 @@ func (f fakeAPIKeys) UpdateLastUsed(context.Context, int64) error { return nil }
 
 func fakeAuth(users map[int]*models.User) *apimw.AuthMiddleware {
 	claims := map[string]*auth.Claims{
-		"tok-events":      {UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess, RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC))}},
-		memberToken:       {UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess},
-		adminToken:        {UserID: 2, Role: "admin", SessionID: "s2", TokenType: auth.TokenTypeAccess},
-		otherAdminToken:   {UserID: 3, Role: "admin", SessionID: "s3", TokenType: auth.TokenTypeAccess},
-		expiredToken:      {UserID: 1, Role: "user", SessionID: "s-gone", TokenType: auth.TokenTypeAccess},
-		impersonatedToken: {UserID: 1, Role: "user", SessionID: "s4", TokenType: auth.TokenTypeAccess, ImpersonatorUserID: ptr(2)},
+		"tok-events":           {UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess, RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC))}},
+		memberToken:            {UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess},
+		adminToken:             {UserID: 2, Role: "admin", SessionID: "s2", TokenType: auth.TokenTypeAccess},
+		otherAdminToken:        {UserID: 3, Role: "admin", SessionID: "s3", TokenType: auth.TokenTypeAccess},
+		expiredToken:           {UserID: 1, Role: "user", SessionID: "s-gone", TokenType: auth.TokenTypeAccess},
+		impersonatedToken:      {UserID: 1, Role: "user", SessionID: "s4", TokenType: auth.TokenTypeAccess, ImpersonatorUserID: ptr(2)},
+		temporaryPasswordToken: {UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess, PasswordChangeRequired: true},
 	}
 	keys := fakeAPIKeys{map[string]*models.APIKey{apiKeyToken: {ID: 7, UserID: 1}}}
 	return apimw.NewAuthMiddleware(fakeTokens{claims}, fakeSessions{map[string]bool{"s1": true, "s2": true, "s3": true, "s4": true}}, keys, fakeUsers{users})

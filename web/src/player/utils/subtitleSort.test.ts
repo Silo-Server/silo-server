@@ -342,6 +342,21 @@ describe("resolveSubtitleAutoSelect", () => {
       ).toBeNull();
     });
 
+    it.each(["x-silo-original", "X-Silo-Original"])(
+      "treats the %s settings tag like the original-language sentinel",
+      (profileLanguage) => {
+        const base = {
+          mode: "auto" as const,
+          tracks: [{ index: 0, language: "en", source: "external" as const }],
+          preferredLanguage: "en",
+          profileLanguage,
+          showForcedSubtitles: false,
+        };
+        expect(resolveSubtitleAutoSelect(opts({ ...base, audioLanguage: "ja" }))).toBe(0);
+        expect(resolveSubtitleAutoSelect(opts({ ...base, audioLanguage: "en" }))).toBeNull();
+      },
+    );
+
     it("falls back to profile language when no preferred subtitle language", () => {
       expect(
         resolveSubtitleAutoSelect(

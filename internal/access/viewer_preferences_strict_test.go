@@ -10,9 +10,6 @@ import (
 
 type failedViewerPreferences struct{ err error }
 
-func (s failedViewerPreferences) GetSetting(context.Context, string) (string, error) {
-	return "", s.err
-}
 func (s failedViewerPreferences) ListSettingValuesForResolution(context.Context, userstore.SettingResolutionQuery) ([]userstore.SettingValue, error) {
 	return nil, s.err
 }

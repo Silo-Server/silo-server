@@ -9,6 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import checkLibraryMountOk from "../../../../../contracts/api/v2/fixtures/check_library_mount_ok.json";
 import createLibraryOk from "../../../../../contracts/api/v2/fixtures/create_library_ok.json";
 import deleteLibraryAccepted from "../../../../../contracts/api/v2/fixtures/delete_library_accepted.json";
+import getLibraryCapabilitiesOk from "../../../../../contracts/api/v2/fixtures/get_library_capabilities_ok.json";
+import getLibraryRealtimeMonitoringOk from "../../../../../contracts/api/v2/fixtures/get_library_realtime_monitoring_ok.json";
 import getLibraryProvidersOk from "../../../../../contracts/api/v2/fixtures/get_library_providers_ok.json";
 import getMetadataMatchQueueOk from "../../../../../contracts/api/v2/fixtures/get_metadata_match_queue_ok.json";
 import listLibrariesOk from "../../../../../contracts/api/v2/fixtures/list_libraries_ok.json";
@@ -33,7 +35,9 @@ import {
   useDeleteLibrary,
   useLibraryMetadataMatchQueues,
   useLibraryMetadataMatchQueueDetail,
+  useLibraryCapabilities,
   useLibraryProviders,
+  useLibraryRealtimeMonitoring,
   useLibraryRoots,
   useSkippedLibraryRoots,
   flattenLibraryRoots,
@@ -132,6 +136,61 @@ describe("library admin hooks on the v2 contract", () => {
     expect(created.id).toBe(Number(createLibraryOk.id));
   });
 
+  it("sends the real-time monitoring switch on create", async () => {
+    const fetchMock = stubFetch(() => jsonResponse(createLibraryOk, 201));
+
+    const { result } = renderHook(() => useCreateLibrary(), { wrapper: createWrapper() });
+    const created = await result.current.mutateAsync({
+      paths: ["/media/movies"],
+      type: "movies",
+      name: "Movies",
+      realtime_monitoring: false,
+    });
+
+    expect(requestsOf(fetchMock)[0]?.body).toEqual({
+      paths: ["/media/movies"],
+      type: "movies",
+      name: "Movies",
+      realtime_monitoring: false,
+    });
+    expect(created.realtime_monitoring).toBe(createLibraryOk.realtime_monitoring);
+  });
+
+  it("sends the real-time monitoring switch on update", async () => {
+    const fetchMock = stubFetch(() => jsonResponse(updateLibraryOk));
+
+    const { result } = renderHook(() => useUpdateLibrary(), { wrapper: createWrapper() });
+    await result.current.mutateAsync({ id: 1, body: { realtime_monitoring: false } });
+
+    expect(requestsOf(fetchMock)[0]?.body).toEqual({ realtime_monitoring: false });
+  });
+
+  it("reads the real-time monitoring status with numeric library ids", async () => {
+    const fetchMock = stubFetch(() => jsonResponse(getLibraryRealtimeMonitoringOk));
+
+    const { result } = renderHook(() => useLibraryRealtimeMonitoring(), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(requestsOf(fetchMock)[0]?.url.pathname).toBe("/api/v2/libraries/realtime-monitoring");
+    expect(result.current.data?.server_enabled).toBe(true);
+    expect(result.current.data?.libraries.map((entry) => [entry.library_id, entry.state])).toEqual([
+      [1, "monitoring"],
+      [2, "not_reporting"],
+    ]);
+  });
+
+  it("reads the library capabilities", async () => {
+    const fetchMock = stubFetch(() => jsonResponse(getLibraryCapabilitiesOk));
+
+    const { result } = renderHook(() => useLibraryCapabilities(), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(requestsOf(fetchMock)[0]?.url.pathname).toBe("/api/v2/libraries/capabilities");
+    expect(result.current.data?.realtime_monitoring).toBe(true);
+  });
+
   it("updates a library with PATCH and returns the updated row", async () => {
     const fetchMock = stubFetch(() => jsonResponse(updateLibraryOk));
 
@@ -173,12 +232,26 @@ describe("library admin hooks on the v2 contract", () => {
     const { result } = renderHook(() => useRefreshLibraryMetadata(), {
       wrapper: createWrapper(),
     });
-    const job = await result.current.mutateAsync(1);
+    const job = await result.current.mutateAsync({ id: 1, mode: "quick" });
 
     const [request] = requestsOf(fetchMock);
     expect(request?.method).toBe("POST");
     expect(request?.url.pathname).toBe("/api/v2/libraries/1/refresh-metadata");
+    expect(request?.body).toEqual({ mode: "quick" });
     expect(job.job_type).toBe("library_refresh");
+  });
+
+  it("sends the full refresh mode when every item should be refreshed", async () => {
+    const fetchMock = stubFetch(() => jsonResponse(refreshLibraryMetadataAccepted, 202));
+
+    const { result } = renderHook(() => useRefreshLibraryMetadata(), {
+      wrapper: createWrapper(),
+    });
+    await result.current.mutateAsync({ id: 2, mode: "full" });
+
+    const [request] = requestsOf(fetchMock);
+    expect(request?.url.pathname).toBe("/api/v2/libraries/2/refresh-metadata");
+    expect(request?.body).toEqual({ mode: "full" });
   });
 
   it("runs a mount check and keeps the numeric library id the page keys on", async () => {

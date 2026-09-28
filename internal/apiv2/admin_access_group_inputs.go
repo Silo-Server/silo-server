@@ -20,7 +20,7 @@ func groupInput(body AdminAccessGroupBody, raw []byte) (access.UpdateGroupInput,
 	if p := rejectNonNullableNulls(raw, map[string]bool{groupLibraryIDsField: true, "allowed_permissions": true}); p != nil {
 		return access.UpdateGroupInput{}, p
 	}
-	in := access.UpdateGroupInput{Name: body.Name, Description: body.Description, MaxPlaybackQuality: body.MaxPlaybackQuality, DownloadAllowed: body.DownloadAllowed, DownloadTranscodeAllowed: body.DownloadTranscodeAllowed, TranscodeAllowed: body.TranscodeAllowed, AudioTranscodeAllowed: body.AudioTranscodeAllowed, MaxStreams: body.MaxStreams, MaxTranscodes: body.MaxTranscodes, AllowedPermissions: body.AllowedPermissions, RequestsAllowed: body.RequestsAllowed, IsDefault: body.IsDefault}
+	in := access.UpdateGroupInput{Name: body.Name, Description: body.Description, MaxPlaybackQuality: body.MaxPlaybackQuality, DownloadAllowed: body.DownloadAllowed, DownloadTranscodeAllowed: body.DownloadTranscodeAllowed, TranscodeAllowed: body.TranscodeAllowed, AudioTranscodeAllowed: body.AudioTranscodeAllowed, MaxStreams: body.MaxStreams, MaxTranscodes: body.MaxTranscodes, MaxRemoteStreamBitrateKbps: body.MaxRemoteStreamBitrateKbps, MaxLocalStreamBitrateKbps: body.MaxLocalStreamBitrateKbps, AllowedPermissions: body.AllowedPermissions, RequestsAllowed: body.RequestsAllowed, IsDefault: body.IsDefault}
 	if body.LibraryIDs != nil {
 		ids := make([]int, 0, len(*body.LibraryIDs))
 		for _, id := range *body.LibraryIDs {
@@ -73,6 +73,12 @@ func applyGroupCreate(out *access.CreateGroupInput, in access.UpdateGroupInput) 
 	}
 	if in.MaxTranscodes != nil {
 		out.MaxTranscodes = *in.MaxTranscodes
+	}
+	if in.MaxRemoteStreamBitrateKbps != nil {
+		out.MaxRemoteStreamBitrateKbps = *in.MaxRemoteStreamBitrateKbps
+	}
+	if in.MaxLocalStreamBitrateKbps != nil {
+		out.MaxLocalStreamBitrateKbps = *in.MaxLocalStreamBitrateKbps
 	}
 	if in.AllowedPermissions != nil {
 		out.AllowedPermissions = *in.AllowedPermissions

@@ -341,6 +341,12 @@ Settings that change the index format, including enabling meaning-based search,
 also trigger an automatic background rebuild after restart. A compatible older
 Meilisearch index keeps serving keyword results while its replacement is built.
 
+The Compose file pins the Meilisearch version because Meilisearch will not open
+data written by a different version. To move to a new version, change
+`MEILISEARCH_IMAGE` and set `MEILI_UPGRADE_DB=true` in `.env` for one start,
+then remove it. Alternatively, empty `${SILO_DATA_ROOT}/meilisearch` and let
+Silo rebuild the index.
+
 ## External PostgreSQL and Redis
 
 > [!IMPORTANT]
@@ -367,6 +373,42 @@ docker compose -f docker-compose.yml -f your-override.yml config --quiet
 Running PostgreSQL on a dedicated VM or managed service simplifies upgrades,
 tuning, and backups. Redis can stay local or move to shared infrastructure if
 you already have it.
+
+### Valkey in place of Redis
+
+> [!WARNING]
+> Silo is currently tested only against Redis. Valkey support is provided
+> as-is, with no support offered for Valkey-specific problems.
+
+[Valkey](https://valkey.io/) supports the Redis protocol and the core commands
+Silo uses. The Go client connects to either server with a `redis://` URL; no
+Valkey-specific setting is needed. To connect to an existing Valkey server,
+follow the external-service Compose instructions above and set the Silo
+service's `REDIS_URL` to that server's address.
+
+For a new installation, save this bundled-service override as
+`valkey-override.yml`:
+
+```yaml
+services:
+  redis:
+    image: valkey/valkey:alpine
+```
+
+The base Compose file's `redis-cli ping` healthcheck works with the official
+Valkey image, which provides `redis-cli` as a compatibility link. Check the
+merged configuration and start the stack with the override:
+
+```sh
+docker compose -f docker-compose.yml -f valkey-override.yml config --quiet
+docker compose -f docker-compose.yml -f valkey-override.yml up -d
+```
+
+For an existing installation, check the Redis version and follow
+[Valkey's migration guide](https://valkey.io/topics/migration/) for its
+persisted data before switching images. The bundled Compose file reuses the
+same `/data` mount, but Redis 7.4 and later write data files that Valkey
+cannot read.
 
 ## Server roles and distributed deployments
 

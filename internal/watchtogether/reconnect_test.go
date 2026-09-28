@@ -36,7 +36,9 @@ func TestReconnectPreservesPlayingSession(t *testing.T) {
 	}
 }
 
-func TestReplacementSessionBufferingRequiresReadinessBarrier(t *testing.T) {
+// A replacement or late-joining stream starts behind a room that keeps
+// playing. It syncs alone, and its startup stall does not pause the others.
+func TestReplacementSessionSyncsWithoutPausingTheRoom(t *testing.T) {
 	for _, test := range []struct {
 		name      string
 		paused    bool
@@ -53,7 +55,8 @@ func TestReplacementSessionBufferingRequiresReadinessBarrier(t *testing.T) {
 			if test.paused {
 				room.IsPaused, room.PlaybackState = true, RoomPlaybackStatePaused
 			}
-			s := newServiceForTest(now, &stubRepo{room: room}, &stubSessions{session: &playback.Session{UserID: 7, ProfileID: "host", MediaFileID: 1}}, &stubFiles{file: &models.MediaFile{ContentID: "movie-1"}}, nil)
+			repo := &stubRepo{room: room}
+			s := newServiceForTest(now, repo, &stubSessions{session: &playback.Session{UserID: 7, ProfileID: "host", MediaFileID: 1}}, &stubFiles{file: &models.MediaFile{ContentID: "movie-1"}}, nil)
 			t.Cleanup(s.Close)
 			conn := new(recordingConn)
 			live := s.rooms[room.ID]
@@ -61,21 +64,31 @@ func TestReplacementSessionBufferingRequiresReadinessBarrier(t *testing.T) {
 			if test.withGuest {
 				live.members[buildMemberKey(8, "guest")] = &memberState{userID: 8, profileID: "guest", sessionID: "guest-session", connection: new(recordingConn), isReady: true}
 			}
-			snapshot, err := s.AttachSessionForConnection(t.Context(), registrationFor(room.ID, 7, "host", conn), 7, "host", "replacement-session")
+			reg := registrationFor(room.ID, 7, "host", conn)
+			snapshot, err := s.AttachSessionForConnection(t.Context(), reg, 7, "host", "replacement-session")
 			if err != nil {
 				t.Fatal(err)
 			}
-			wantWaiting := test.withGuest && !test.paused
-			if (snapshot.PlaybackState == RoomPlaybackStateWaiting) != wantWaiting {
-				t.Fatalf("playback state = %s; want waiting %v", snapshot.PlaybackState, wantWaiting)
+			if snapshot.PlaybackState != room.PlaybackState || repo.room.Generation != room.Generation {
+				t.Fatalf("attaching a stream changed the room: %+v", snapshot)
 			}
 			for _, member := range snapshot.Members {
-				if member.ProfileID == "host" && (member.IsBuffering != wantWaiting || member.IsSyncing != wantWaiting) {
-					t.Fatalf("replacement session status = %+v; want buffering and syncing %v", member, wantWaiting)
+				if member.ProfileID == "host" && (member.IsBuffering || member.IsSyncing) {
+					t.Fatalf("replacement session status = %+v; want neither buffering nor syncing", member)
 				}
 			}
-			if command := lastTransport(t, conn); command.SessionID != "replacement-session" || command.PlaybackState != snapshot.PlaybackState {
+			if command := lastTransport(t, conn); command.SessionID != "replacement-session" || command.PlaybackState != room.PlaybackState {
 				t.Fatalf("replacement session command = %+v", command)
+			}
+			if test.paused || !test.withGuest {
+				return
+			}
+			snapshot, err = s.HandleBufferingForConnection(t.Context(), reg, 7, "host", StateReport{SessionID: "replacement-session", PositionSeconds: 0})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if snapshot.PlaybackState != RoomPlaybackStatePlaying || repo.room.Generation != room.Generation {
+				t.Fatalf("startup stall paused the room: %+v", snapshot)
 			}
 		})
 	}

@@ -35,6 +35,7 @@ type Library struct {
 	ChapterThumbnailsSupported bool     `json:"chapter_thumbnails_supported" doc:"Whether the server can produce chapter thumbnails (public asset storage is configured)" example:"true"`
 	IntroDetectionEnabled      bool     `json:"intro_detection_enabled" example:"false"`
 	TrailerKinds               []string `json:"trailer_kinds" doc:"Remote video kinds fetched during metadata refresh; empty disables them" example:"[\"trailer\"]"`
+	RealtimeMonitoring         bool     `json:"realtime_monitoring" doc:"Scan automatically when files in the library's folders change. Takes effect only while the server-wide scanner.realtime_monitoring setting is on." example:"true"`
 	SortOrder                  int      `json:"sort_order" doc:"Position among libraries, lowest first" example:"0"`
 	PosterURL                  string   `json:"poster_url,omitempty" doc:"Presigned poster URL; absent when the library has no poster"`
 	LastScannedAt              *Instant `json:"last_scanned_at,omitempty" doc:"Absent until the first scan completes"`
@@ -52,6 +53,7 @@ type LibraryCreate struct {
 	ChapterThumbnailsEnabled bool     `json:"chapter_thumbnails_enabled,omitempty" doc:"Requires public asset storage" example:"false"`
 	IntroDetectionEnabled    bool     `json:"intro_detection_enabled,omitempty" example:"false"`
 	TrailerKinds             []string `json:"trailer_kinds,omitempty" doc:"Remote video kinds to fetch; omitted applies the default (every provider kind), empty disables them" example:"[\"trailer\"]"`
+	RealtimeMonitoring       *bool    `json:"realtime_monitoring,omitempty" doc:"Scan automatically when files in the library's folders change; omitted means true. Takes effect only while the server-wide scanner.realtime_monitoring setting is on." example:"true"`
 }
 
 // LibraryUpdate is the updateLibrary body; omitted members are unchanged
@@ -66,6 +68,7 @@ type LibraryUpdate struct {
 	ChapterThumbnailsEnabled *bool     `json:"chapter_thumbnails_enabled,omitempty" nullable:"false" example:"false"`
 	IntroDetectionEnabled    *bool     `json:"intro_detection_enabled,omitempty" nullable:"false" example:"false"`
 	TrailerKinds             *[]string `json:"trailer_kinds,omitempty" nullable:"false" doc:"Replaces the allow-list; empty disables remote videos" example:"[\"trailer\"]"`
+	RealtimeMonitoring       *bool     `json:"realtime_monitoring,omitempty" nullable:"false" doc:"Scan automatically when files in the library's folders change. Takes effect only while the server-wide scanner.realtime_monitoring setting is on." example:"true"`
 }
 
 // LibraryCreateInput is the createLibrary request.
@@ -1056,6 +1059,7 @@ func (reg *Registry) createLibrary(ctx context.Context, in *LibraryCreateInput) 
 		ChapterThumbnailsEnabled: in.Body.ChapterThumbnailsEnabled,
 		IntroDetectionEnabled:    in.Body.IntroDetectionEnabled,
 		TrailerKinds:             in.Body.TrailerKinds,
+		RealtimeMonitoring:       in.Body.RealtimeMonitoring,
 	})
 	if err != nil {
 		return nil, libraryProblem(err)
@@ -1090,6 +1094,7 @@ func (reg *Registry) updateLibrary(ctx context.Context, in *LibraryUpdateInput) 
 		ChapterThumbnailsEnabled: in.Body.ChapterThumbnailsEnabled,
 		IntroDetectionEnabled:    in.Body.IntroDetectionEnabled,
 		TrailerKinds:             in.Body.TrailerKinds,
+		RealtimeMonitoring:       in.Body.RealtimeMonitoring,
 	})
 	if err != nil {
 		return nil, libraryProblem(err)
@@ -1488,6 +1493,7 @@ func libraryOf(v handlers.LibraryView) Library {
 		ChapterThumbnailsSupported: v.ChapterThumbnailsSupported,
 		IntroDetectionEnabled:      v.IntroDetectionEnabled,
 		TrailerKinds:               NonNil(v.TrailerKinds),
+		RealtimeMonitoring:         v.RealtimeMonitoring,
 		SortOrder:                  v.SortOrder,
 		PosterURL:                  v.PosterURL,
 		LastScannedAt:              instantPtr(v.LastScannedAt),

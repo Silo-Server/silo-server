@@ -96,6 +96,39 @@ func CompatibleTag(value string) string {
 	return CanonicalTag(value)
 }
 
+// bibliographicCodes holds the ISO 639-2/B codes that differ from the 639-2/T
+// form. Media filenames and older tags use either spelling.
+var bibliographicCodes = map[string]string{
+	"sq": "alb", "hy": "arm", "eu": "baq", "my": "bur", "zh": "chi", //nolint:goconst // ISO 639-2/B codes, listed verbatim
+	"cs": "cze", "nl": "dut", "fr": "fre", "ka": "geo", "de": "ger", //nolint:goconst // ISO 639-2/B codes, listed verbatim
+	"el": "gre", "is": "ice", "mk": "mac", "mi": "mao", "ms": "may",
+	"fa": "per", "ro": "rum", "sk": "slo", "bo": "tib", "cy": "wel",
+}
+
+// CodeAliases lists the spellings stored values may use for a language: its
+// canonical tag plus, for a bare language, the ISO 639-2/T and 639-2/B codes.
+// A tag with a script, region or other subtag returns only its canonical form.
+// Malformed values return nil.
+func CodeAliases(value string) []string {
+	canonical := CanonicalTag(value)
+	if canonical == "" {
+		return nil
+	}
+	aliases := []string{canonical}
+	if strings.Contains(canonical, "-") {
+		return aliases
+	}
+	if tag, err := language.Parse(canonical); err == nil {
+		if base, _ := tag.Base(); base.ISO3() != canonical && base.ISO3() != "und" {
+			aliases = append(aliases, base.ISO3())
+		}
+	}
+	if code, ok := bibliographicCodes[canonical]; ok {
+		aliases = append(aliases, code)
+	}
+	return aliases
+}
+
 // PrimaryLanguage intentionally drops script and region for language matching.
 // It never infers a language from an undefined or private-use tag.
 func PrimaryLanguage(value string) string {

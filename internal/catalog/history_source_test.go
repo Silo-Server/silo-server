@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/access"
 )
 
 func TestBuildHistoryDisplayBaseQueryIncludesSnapshotAndLibraryAccess(t *testing.T) {
@@ -15,7 +17,7 @@ func TestBuildHistoryDisplayBaseQueryIncludesSnapshotAndLibraryAccess(t *testing
 		ProfileID:          "profile-1",
 		AllowedLibraryIDs:  []int{11, 12},
 		DisabledLibraryIDs: []int{99},
-		MaxContentRating:   "PG-13",
+		MaturityLimits:     access.MaturityLimits{MaxContentRating: "PG-13"},
 	}, &snapshot, false)
 
 	expectedFragments := []string{
@@ -26,7 +28,7 @@ func TestBuildHistoryDisplayBaseQueryIncludesSnapshotAndLibraryAccess(t *testing
 		"media_folder_id = ANY($4)",
 		"media_item_libraries mil_disabled",
 		"media_folder_id = ANY($5)",
-		"mi.content_rating = ANY($",
+		"mi.content_rating_age IS NOT NULL AND mi.content_rating_age <= $",
 		// Anchored episode ids resolve their show by string transform; the
 		// episodes probe is null-poisoned (skipped) for them and kept only for
 		// non-anchored (legacy/local/malformed) ids. The predicate requires the

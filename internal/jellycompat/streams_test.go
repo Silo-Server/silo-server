@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -420,6 +421,20 @@ func TestGenerateFullManifest_HLSVersionForResumeStartTag(t *testing.T) {
 				t.Fatalf("EXT-X-START presence = %v, want %v; manifest:\n%s", hasStart, tc.wantStart, got)
 			}
 		})
+	}
+}
+
+func TestCompatHLSUsesFMP4ForEncodedHEVC(t *testing.T) {
+	hevc := PlaybackMediaSource{TargetVideoCodec: compatVideoCodecHEVC}
+	if !compatHLSUsesFMP4(hevc) {
+		t.Fatal("encoded HEVC did not select fMP4 manifest")
+	}
+	manifest := string(generateFullManifest(60, 2, compatHLSUsesFMP4(hevc), 0))
+	if !strings.Contains(manifest, `#EXT-X-MAP:URI="init.mp4"`) || !strings.Contains(manifest, "seg_00000.m4s") || strings.Contains(manifest, "seg_00000.ts") {
+		t.Fatalf("encoded HEVC manifest does not match fMP4 output: %s", manifest)
+	}
+	if compatHLSUsesFMP4(PlaybackMediaSource{}) {
+		t.Fatal("legacy H264 encode unexpectedly selected fMP4")
 	}
 }
 
@@ -1507,13 +1522,75 @@ type recordingSessionSyncer struct {
 	calls           int
 	lastCtxErr      error
 	lastHadDeadline bool
+	onSync          func()
 }
 
 func (s *recordingSessionSyncer) SyncNow(ctx context.Context) error {
 	s.calls++
 	s.lastCtxErr = ctx.Err()
 	_, s.lastHadDeadline = ctx.Deadline()
+	if s.onSync != nil {
+		s.onSync()
+	}
 	return nil
+}
+
+type outputFormatTestSessionManager struct {
+	*testCompatSessionManager
+}
+
+func (m *outputFormatTestSessionManager) SetOutputFormat(id, container, protocol string) error {
+	session, err := m.GetSession(id)
+	if err != nil {
+		return err
+	}
+	session.OutputContainer, session.OutputProtocol = container, protocol
+	return nil
+}
+
+func TestHandleVideoStreamSyncsChangedRemuxOutputFormat(t *testing.T) {
+	for _, direct := range []bool{false, true} {
+		t.Run(fmt.Sprintf("direct_%t", direct), func(t *testing.T) {
+			handler, routeID, directBody := newStaticDirectPlayHandler(t)
+			source := testCompatSource(handler.codec, testCompatVersion())
+			source.SupportsDirectPlay, source.SupportsDirectStream = direct, true
+			method := "remux"
+			wantBody := "remuxed"
+			if direct {
+				method, wantBody = "direct", directBody
+			} else {
+				handler.FFmpegPath, _, _ = writeCompatAudioRecipeFFmpeg(t, false, wantBody)
+			}
+			mgr := &outputFormatTestSessionManager{&testCompatSessionManager{sessions: map[string]*playback.Session{
+				"upstream-1": {ID: "upstream-1", PlayMethod: playback.PlayMethod(method), BasePlayMethod: playback.PlayMethod(method)},
+			}}}
+			handler.sessionMgr = mgr
+			handler.playbackStore.Put(PlaybackSession{
+				ID: "play-1", CompatToken: "token-1", RouteItemID: routeID,
+				UpstreamSessionID: "upstream-1", UpstreamPlayMethod: method, MediaSources: []PlaybackMediaSource{source},
+			})
+			syncer := &recordingSessionSyncer{onSync: func() {
+				session, _ := mgr.GetSession("upstream-1")
+				if session.OutputContainer != playback.OutputContainerFMP4 || session.OutputProtocol != playback.OutputProtocolHTTP {
+					t.Fatal("immediate admin sync ran before the remux output format was recorded")
+				}
+			}}
+			handler.SessionSyncer = syncer
+			for range 2 {
+				rec := serveCompatVideoStream(handler, routeID, "PlaySessionId=play-1&MediaSourceId="+url.QueryEscape(source.ID), false)
+				if rec.Code != http.StatusOK || rec.Body.String() != wantBody {
+					t.Fatalf("stream = %d %q, want 200 %q", rec.Code, rec.Body.String(), wantBody)
+				}
+				wantCalls := 1
+				if direct {
+					wantCalls = 0
+				}
+				if syncer.calls != wantCalls {
+					t.Fatalf("admin sync calls = %d, want %d; unchanged requests must not flush again", syncer.calls, wantCalls)
+				}
+			}
+		})
+	}
 }
 
 // TestHandleSessionPlayingStopped_TearsDownAndSyncsImmediately verifies the
@@ -1627,5 +1704,87 @@ func TestEnsureUpstreamPlayback_SyncsOnNewSession(t *testing.T) {
 	}
 	if syncer.calls != 1 {
 		t.Fatalf("SyncNow calls after reuse = %d; want 1", syncer.calls)
+	}
+}
+
+func TestEnsureUpstreamPlayback_KeepsNegotiatedStreamLocation(t *testing.T) {
+	store := NewPlaybackSessionStore(time.Hour, nil)
+	store.Put(PlaybackSession{ID: "ps-location", CompatToken: "tok"})
+	manager := playback.NewSessionManager(0, 0)
+	h := &PlaybackHandler{playbackStore: store, sessionMgr: manager}
+	source := PlaybackMediaSource{ID: "source", FileID: 42, StreamLocation: "remote"}
+	// The media request is local, but PlaybackInfo selected the remote policy.
+	ctx := clientip.SetContext(t.Context(), "192.168.1.8")
+	playSession, err := h.ensureUpstreamPlayback(ctx, &Session{Token: "tok", StreamAppUserID: 7, ProfileID: "profile"}, "ps-location", source, "direct")
+	if err != nil {
+		t.Fatal(err)
+	}
+	upstream, err := manager.GetSession(playSession.UpstreamSessionID)
+	if err != nil || upstream.StreamLocation != "remote" || upstream.ClientIP != "192.168.1.8" {
+		t.Fatalf("upstream policy location = %v, err = %v", upstream, err)
+	}
+	card := h.upstreamRecipeCard(playSession, &Session{StreamAppUserID: 7, ProfileID: "profile"}, source, "direct")
+	if card.StreamLocation != "remote" {
+		t.Fatalf("reconstruction location = %q", card.StreamLocation)
+	}
+}
+
+func TestGenerateCompatCopyVideoMasterManifestJellyfin12DolbyVisionVariant(t *testing.T) {
+	source := PlaybackMediaSource{
+		ID: "source-1",
+		Version: catalog.FileVersion{
+			Bitrate: 18_000,
+			VideoTracks: []models.VideoTrack{{
+				Codec: "hevc", Profile: "Main 10", Level: 153, Width: 3840, Height: 2160,
+				DVProfile: 5, DVLevel: 6, VideoRangeType: compatRangeDOVI,
+			}},
+			AudioTracks: []models.AudioTrack{{Codec: "eac3", Default: true}},
+		},
+		HLSRemux:    true,
+		DOVIVariant: true,
+	}
+
+	got := string(generateCompatCopyVideoMasterManifest(source, "item-1", "play-1", ""))
+	variants := strings.Split(strings.TrimSpace(got), "#EXT-X-STREAM-INF:")
+	if len(variants) != 3 {
+		t.Fatalf("want a Dolby Vision variant plus the hvc1 fallback:\n%s", got)
+	}
+	if !strings.Contains(variants[1], `VIDEO-RANGE=PQ,CODECS="dvh1.05.06,ec-3",RESOLUTION=3840x2160`) {
+		t.Fatalf("first variant must be the spec-compliant dvh1 stream:\n%s", got)
+	}
+	if !strings.Contains(variants[2], `CODECS="hvc1.2.4.L153.B0,ec-3"`) {
+		t.Fatalf("second variant must stay the hvc1 fallback:\n%s", got)
+	}
+
+	source.HLSRemuxMPEGTS = true
+	if ts := string(generateCompatCopyVideoMasterManifest(source, "item-1", "play-1", "")); strings.Contains(ts, "dvh1") {
+		t.Fatalf("MPEG-TS remuxes cannot carry the Dolby Vision variant:\n%s", ts)
+	}
+}
+
+func TestCompatMasterAudioCodecJellyfin12Strings(t *testing.T) {
+	cases := []struct {
+		codec, profile string
+		transcode      bool
+		want           string
+	}{
+		{"aac", "HE-AAC", false, "mp4a.40.5"},
+		{"aac", "HE-AACv2", false, "mp4a.40.29"},
+		{"aac", "LC", false, "mp4a.40.2"},
+		{"aac", "HE-AAC", true, "mp4a.40.2"},
+		{"truehd", "", false, "mlpa"},
+		{"dts", "DTS-HD MA + DTS:X", false, "dtsh"},
+		{"dts", "DTS-HD HRA", false, "dtsh"},
+		{"dts", "DTS-HD HRA + DTS:X", false, "dtsh"},
+		{"dts", "DTS-HD HRA + DTS:X IMAX", false, "dtsh"},
+		{"dts", "DTS Express", false, "dtse"},
+		{"dts", "DTS-ES", false, "dtsc"},
+		{"dts", "", false, "dtsc"},
+	}
+	for _, tc := range cases {
+		source := PlaybackMediaSource{HLSRemux: true, TranscodeAudio: tc.transcode}
+		if got := compatMasterAudioCodec(source, models.AudioTrack{Codec: tc.codec, Profile: tc.profile}); got != tc.want {
+			t.Errorf("%s/%s transcode=%v = %q, want %q", tc.codec, tc.profile, tc.transcode, got, tc.want)
+		}
 	}
 }

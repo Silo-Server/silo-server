@@ -41,7 +41,7 @@ export default function AdminSubtitleEditSheet({
 }: AdminSubtitleEditSheetProps) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="flex w-full flex-col sm:max-w-md">
+      <SheetContent className="flex w-full flex-col overflow-y-auto sm:max-w-md">
         {intent ? (
           <AdminSubtitleEditorLoader
             key={intent.subtitle.id + intent.scope}

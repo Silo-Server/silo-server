@@ -136,7 +136,21 @@ function setRoute(pathname: string, key: string, search = "") {
   mocks.location = { pathname, search, key };
 }
 
+let onHeaderResize: ResizeObserverCallback;
+const disconnectHeaderObserver = vi.fn();
+
 beforeEach(() => {
+  disconnectHeaderObserver.mockReset();
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(callback: ResizeObserverCallback) {
+        onHeaderResize = callback;
+      }
+      observe = vi.fn();
+      disconnect = disconnectHeaderObserver;
+    },
+  );
   vi.useFakeTimers();
   mocks.location = { pathname: "/", search: "", key: "home" };
   mocks.navigate.mockReset();
@@ -171,6 +185,23 @@ afterEach(() => {
 });
 
 describe("Layout mobile profile", () => {
+  it("updates the viewport offset when the mobile header resizes or disappears", () => {
+    const view = renderLayout();
+    const header = view.container.querySelector<HTMLElement>(".mobile-header")!;
+    const shell = header.parentElement!;
+    header.style.marginTop = "15px";
+    const bounds = vi.spyOn(header, "getBoundingClientRect");
+    bounds.mockReturnValue({ height: 82 } as DOMRect);
+    act(() => onHeaderResize([], {} as ResizeObserver));
+    expect(shell.style.getPropertyValue("--detail-header-height")).toBe("97px");
+
+    bounds.mockReturnValue({ height: 0 } as DOMRect);
+    act(() => onHeaderResize([], {} as ResizeObserver));
+    expect(shell.style.getPropertyValue("--detail-header-height")).toBe("0px");
+    view.unmount();
+    expect(disconnectHeaderObserver).toHaveBeenCalledOnce();
+  });
+
   it("renders the current profile avatar in the settings link", () => {
     renderLayout();
 

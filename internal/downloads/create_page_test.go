@@ -46,7 +46,9 @@ func (f *createFileResolver) GetByID(context.Context, int) (*models.MediaFile, e
 }
 
 func TestDownloadCreatePagesPostgres(t *testing.T) {
-	repo := statusEventTestRepo(t)
+	// Managed creates clear monitor exclusions, so the schema needs the
+	// subscription tables too.
+	repo := NewRepository(subscriptionMutationTestRepo(t).pool)
 	_, err := repo.pool.Exec(t.Context(), `CREATE UNIQUE INDEX managed_identity ON downloads(user_id,profile_id,device_id,content_id,COALESCE(episode_id,'')) WHERE device_id IS NOT NULL;
  CREATE TABLE user_devices(user_id integer,profile_id text,device_id text,device_name text,device_platform text,last_seen_at timestamptz,PRIMARY KEY(user_id,profile_id,device_id))`)
 	if err != nil {

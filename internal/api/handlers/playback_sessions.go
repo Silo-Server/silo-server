@@ -13,6 +13,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -46,6 +47,7 @@ type playbackSessionRow struct {
 	IsPaused             bool      `json:"is_paused"`
 	HasPlaybackControl   bool      `json:"has_playback_control"`
 	ClientIP             string    `json:"client_ip,omitempty"`
+	StreamLocation       string    `json:"-"`
 	ClientName           string    `json:"client_name,omitempty"`
 	ClientVersion        string    `json:"client_version,omitempty"`
 	ClientBuild          string    `json:"client_build,omitempty"`
@@ -59,7 +61,11 @@ type playbackSessionRow struct {
 	TranscodeNodeURL     string    `json:"-"`
 	TargetResolution     string    `json:"target_resolution,omitempty"`
 	TargetVideoCodec     string    `json:"target_video_codec,omitempty"`
-	TargetAudioCodec     string    `json:"target_audio_codec,omitempty"`
+	// OutputContainer and OutputProtocol are the serving transport's reported
+	// format. They are native-only: the frozen bridge payload omits them.
+	OutputContainer  string `json:"-"`
+	OutputProtocol   string `json:"-"`
+	TargetAudioCodec string `json:"target_audio_codec,omitempty"`
 	// TargetAudioChannels is the channel count the transcode actually encodes.
 	// Absent when the reporting node did not know it — clients must then show
 	// the target codec with no channel layout rather than reusing
@@ -317,7 +323,10 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			COALESCE(s.routing_egress, ''),
 			s.routing_egress_node_id,
 			COALESCE(egress_node.name, ''),
-			s.routing_network_provider
+			s.routing_network_provider,
+			COALESCE(s.output_container, ''),
+			COALESCE(s.output_protocol, ''),
+			COALESCE(s.stream_location, '')
 		 FROM playback_sessions_sync s
 		 LEFT JOIN users u ON u.id = s.user_id
 		 LEFT JOIN media_files mf ON mf.id = s.media_file_id
@@ -388,6 +397,7 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			&s.SourceAudioCodec, &sourceAudioChannels, &audioTracksJSON, &s.RequestedVideoCodec, &s.RequestedVideoResolution,
 			&s.CompatOrigin, &s.RoutingWorkload, &s.RoutingExecution, &s.RoutingExecutionNodeID,
 			&s.RoutingExecutionNodeName, &s.RoutingEgress, &s.RoutingEgressNodeID, &s.RoutingEgressNodeName, &s.RoutingNetworkProvider,
+			&s.OutputContainer, &s.OutputProtocol, &s.StreamLocation,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scanning playback session: %w", err)
 		}
@@ -434,6 +444,10 @@ func enrichPlaybackSessionRow(row *playbackSessionRow, audioTracksJSON []byte) {
 
 	row.VideoDecision, row.AudioDecision = sessionComponentDecision(row.PlayMethod, row.TranscodeAudio, row.TargetVideoCodec)
 	row.EffectivePlayMethod = effectivePlayMethod(row.VideoDecision, row.AudioDecision)
+	if row.PlayMethod == string(playback.PlayDirect) {
+		row.OutputContainer = row.SourceContainer
+		row.OutputProtocol = playback.OutputProtocolHTTP
+	}
 	row.IsJellyfinClient = row.CompatOrigin || isJellyfinEcosystemClient(row.ClientName, row.ClientUserAgent)
 
 	var audioTracks []models.AudioTrack
@@ -528,7 +542,7 @@ func sessionComponentDecision(playMethod string, transcodeAudio bool, targetVide
 // and an audio-only re-encode reports "remux" — the decisions carry what
 // actually costs CPU.
 //   - video re-encoded        -> "transcode"
-//   - only audio re-encoded   -> "audio"
+//   - only audio re-encoded   -> "audio" (the native API reports "direct_stream")
 //   - streams only repackaged -> "remux"
 //   - nothing touched         -> "direct"
 //

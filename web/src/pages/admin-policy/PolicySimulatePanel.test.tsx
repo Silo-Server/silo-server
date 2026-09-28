@@ -26,7 +26,9 @@ describe("PolicySimulatePanel", () => {
             schema_version: 1,
             unrestricted: false,
             allowed_library_ids: [1, 2],
-            max_content_rating: "PG",
+            // The override's ceiling arrives beside an unrestricted base one.
+            max_content_rating: "",
+            max_content_rating_override: "PG",
           },
           eval_time_ns: 14200,
           generation: 8,

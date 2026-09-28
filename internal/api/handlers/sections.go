@@ -342,21 +342,26 @@ type upcomingEventResponse struct {
 }
 
 type sectionItemResponse struct {
-	ContentID         string                 `json:"content_id"`
-	PlayContentID     string                 `json:"play_content_id,omitempty"`
-	Type              string                 `json:"type"`
-	Title             string                 `json:"title"`
-	SeriesID          string                 `json:"series_id,omitempty"`
-	SeriesTitle       string                 `json:"series_title,omitempty"`
-	SeasonNumber      *int                   `json:"season_number,omitempty"`
-	EpisodeNumber     *int                   `json:"episode_number,omitempty"`
-	Year              int                    `json:"year,omitempty"`
-	Runtime           int                    `json:"runtime,omitempty"`
-	Genres            []string               `json:"genres"`
-	Keywords          []string               `json:"keywords"`
-	Studios           []string               `json:"studios,omitempty"`
-	Networks          []string               `json:"networks,omitempty"`
-	ContentRating     string                 `json:"content_rating,omitempty"`
+	ContentID     string   `json:"content_id"`
+	PlayContentID string   `json:"play_content_id,omitempty"`
+	Type          string   `json:"type"`
+	Title         string   `json:"title"`
+	SeriesID      string   `json:"series_id,omitempty"`
+	SeriesTitle   string   `json:"series_title,omitempty"`
+	SeasonNumber  *int     `json:"season_number,omitempty"`
+	EpisodeNumber *int     `json:"episode_number,omitempty"`
+	Year          int      `json:"year,omitempty"`
+	Runtime       int      `json:"runtime,omitempty"`
+	Genres        []string `json:"genres"`
+	Keywords      []string `json:"keywords"`
+	Studios       []string `json:"studios,omitempty"`
+	Networks      []string `json:"networks,omitempty"`
+	ContentRating string   `json:"content_rating,omitempty"`
+	// AdvisoryAge and AdvisorySource carry the item's advisory to the
+	// v2 card renderer. json:"-" because /api/v1 is frozen: the fields exist on
+	// the Go struct only, and apiv2 emits them under its own names.
+	AdvisoryAge       *int                   `json:"-"`
+	AdvisorySource    string                 `json:"-"`
 	Status            string                 `json:"status"`
 	ShowStatus        string                 `json:"show_status,omitempty"`
 	RatingIMDB        *float64               `json:"rating_imdb,omitempty"`
@@ -553,7 +558,7 @@ func (h *SectionHandler) loadResolvedHomeSections(ctx context.Context) ([]sectio
 		libraryIDs = scope.AllowedLibraryIDs
 		accessFilter.AllowedLibraryIDs = scope.AllowedLibraryIDs
 		accessFilter.DisabledLibraryIDs = scope.DisabledLibraryIDs
-		accessFilter.MaxContentRating = scope.MaxContentRating
+		accessFilter.MaturityLimits = scope.MaturityLimits
 	} else if h.UserRepo != nil {
 		// Fail closed: an unresolved policy must not serve unrestricted
 		// sections, so a lookup failure becomes an error for the caller
@@ -618,7 +623,7 @@ func (h *SectionHandler) loadResolvedLibrarySections(ctx context.Context, librar
 	if scope, ok := access.GetScope(ctx); ok {
 		accessFilter.AllowedLibraryIDs = scope.AllowedLibraryIDs
 		accessFilter.DisabledLibraryIDs = scope.DisabledLibraryIDs
-		accessFilter.MaxContentRating = scope.MaxContentRating
+		accessFilter.MaturityLimits = scope.MaturityLimits
 	}
 
 	return resolved, accessFilter, profileID, nil
@@ -1301,6 +1306,13 @@ func (h *SectionHandler) buildSectionsResponse(r *http.Request, withItems []sect
 // buildSections renders sections for a viewer described by its context,
 // access filter and artwork size; it is what v1 and v2 share.
 func (h *SectionHandler) buildSections(ctx context.Context, withItems []sections.SectionWithItems, libraryID *int, viewerAccess catalog.AccessFilter, size imagesize.Size) homeSectionsResponse {
+	return h.buildSectionsWithUserStates(ctx, withItems, libraryID, viewerAccess, size, nil)
+}
+
+// buildSectionsWithUserStates is buildSections reusing user states the caller
+// already loaded for these items (the Home hide-watched filter does); nil
+// loads them as buildSections does.
+func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withItems []sections.SectionWithItems, libraryID *int, viewerAccess catalog.AccessFilter, size imagesize.Size, knownUserStates map[string]*itemUserStateResponse) homeSectionsResponse {
 	deduplicateSectionItems(ctx, withItems)
 
 	contentIDs := make([]string, 0)
@@ -1379,7 +1391,11 @@ func (h *SectionHandler) buildSections(ctx context.Context, withItems []sections
 		playTargets = resolvedTargets
 	})
 
-	wg.Go(func() { userStates = h.listSectionItemUserStates(ctx, allItems) })
+	if knownUserStates != nil {
+		userStates = knownUserStates
+	} else {
+		wg.Go(func() { userStates = h.listSectionItemUserStates(ctx, allItems) })
+	}
 	wg.Go(func() { imageURLs = h.resolveSectionItemImageURLs(ctx, withItems, size) })
 	wg.Go(func() { episodeMeta = h.listSectionEpisodeItemMeta(ctx, withItems, viewerAccess) })
 	wg.Go(func() { mangaChapterMeta = h.listSectionMangaChapterItemMeta(ctx, allItems) })
@@ -1640,6 +1656,8 @@ func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType,
 		Studios:           item.Studios,
 		Networks:          item.Networks,
 		ContentRating:     item.ContentRating,
+		AdvisoryAge:       item.AdvisoryAge,
+		AdvisorySource:    item.AdvisorySource,
 		Status:            item.Status,
 		ShowStatus:        item.ShowStatus,
 		RatingIMDB:        item.RatingIMDB,
@@ -1746,6 +1764,8 @@ func (h *SectionHandler) maybeInjectNextUp(ctx context.Context, resolved []secti
 
 // injectNextUpSection inserts a synthetic SectionNextUp entry after the
 // contiguous continue rows that start with the video Continue Watching row.
+// The row has no override of its own, so it shows as many items as that
+// Continue Watching row.
 func injectNextUpSection(resolved []sections.ResolvedSection) []sections.ResolvedSection {
 	nextUp := sections.ResolvedSection{
 		ID:          "system-next-up",
@@ -1756,6 +1776,9 @@ func injectNextUpSection(resolved []sections.ResolvedSection) []sections.Resolve
 
 	for i, s := range resolved {
 		if s.SectionType == sections.SectionContinueWatching && sections.ContinueTypeFromConfig(s.Config) == sections.ContinueTypeWatching {
+			if s.ItemLimit > 0 {
+				nextUp.ItemLimit = s.ItemLimit
+			}
 			insertAt := i + 1
 			for insertAt < len(resolved) && resolved[insertAt].SectionType == sections.SectionContinueWatching {
 				insertAt++

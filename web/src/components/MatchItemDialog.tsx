@@ -164,7 +164,7 @@ export default function MatchItemDialog({ item, open, onOpenChange }: MatchItemD
           <DialogTitle>Match Item</DialogTitle>
         </DialogHeader>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
+        <div className="overlay-scroll flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain pr-1">
           {/* Current item summary */}
           <div className="bg-muted/50 shrink-0 rounded-lg px-3 py-2 text-sm">
             <span className="font-medium">{item.title}</span>
@@ -311,10 +311,10 @@ export default function MatchItemDialog({ item, open, onOpenChange }: MatchItemD
           )}
           {/* Candidate list */}
           {candidates.length > 0 && (
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-hidden">
-              <Label className="shrink-0">Results</Label>
+            <div className="flex min-w-0 flex-col gap-2">
+              <Label>Results</Label>
               <TooltipProvider delayDuration={150}>
-                <div className="overlay-scroll min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain pr-1 pb-1">
+                <div className="space-y-1 pb-1">
                   {candidates.map((candidate, index) => {
                     const candidateKey = Object.entries(candidate.provider_ids)
                       .map(([k, v]) => `${k}-${v}`)

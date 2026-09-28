@@ -14,17 +14,24 @@ import (
 type PlannerSettingsV3 struct {
 	TranscodeEnabled       bool
 	Allow4KTranscode       bool
+	AllowHEVCEncoding      bool
 	HardwareToneMapEnabled bool
 	SoftwareToneMapEnabled bool
+	// ViewerTranscodeDisabled reflects the viewer's account policy. Session
+	// admission enforces it; the planner only uses it to stop advertising
+	// quality rungs the viewer cannot start.
+	ViewerTranscodeDisabled bool
 }
 
 const (
 	TerminalMessage4KTranscodeDisabledV3   = "A lower-resolution source is required because 4K transcoding is disabled."
 	containerMP4V3                         = "mp4"
 	containerMKVV3                         = "mkv"
+	containerHLSV3                         = "hls"
 	mimeVideoMP4V3                         = "video/mp4"
 	degradationAudioConvertedV3            = "audio_converted"
 	audioCodecAACV3                        = "aac"
+	codecCopyV3                            = "copy"
 	serverAudioAdaptationReasonV3          = "server_audio_adaptation"
 	decisionReasonAudioAdaptationV3        = "audio_adaptation"
 	hlsAudioAdaptationReasonV3             = "hls_audio_adaptation"
@@ -35,11 +42,14 @@ const (
 )
 
 type PlannerInputV3 struct {
-	Request         StartRequestV3
-	RequestedFile   *models.MediaFile
-	EffectiveFile   *models.MediaFile
-	AudioTrackIndex int
-	Settings        PlannerSettingsV3
+	Request StartRequestV3
+	// ServerBitrateCapKbps is an administrator-owned, per-attempt ceiling.
+	// Unlike a client's bandwidth preference it must fail closed.
+	ServerBitrateCapKbps int
+	RequestedFile        *models.MediaFile
+	EffectiveFile        *models.MediaFile
+	AudioTrackIndex      int
+	Settings             PlannerSettingsV3
 	// Registry holds the transformations the local binary can execute.
 	Registry *TransformationRegistryV3
 	// ProgressiveRemuxRegistry, HLSRemuxRegistry, and HLSVideoRegistry report
@@ -181,7 +191,7 @@ func (input PlannerInputV3) hlsToneMapCapabilities() tonemap.Capabilities {
 }
 
 // PlanPlaybackV3 chooses a playable protocol-v3 route from source and client facts.
-func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
+func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 	if input.RequestedFile == nil {
 		return terminalPlannerResultV3("source_unavailable", "The requested media source is unavailable.", false)
 	}
@@ -193,6 +203,29 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		input.Now = time.Now()
 	}
 	source := SourceDescriptorFromFileV3(file, input.AudioTrackIndex)
+	serverBitrateRequiresEncode := false
+	if input.ServerBitrateCapKbps > 0 {
+		if cap := optionalValueV3(input.Request.BandwidthCapKbps); cap == 0 || input.ServerBitrateCapKbps < cap {
+			input.Request.BandwidthCapKbps = &input.ServerBitrateCapKbps
+		}
+		// The video track rate excludes audio and container overhead. Only a
+		// known total rate can establish that a source-preserving route fits.
+		cap := optionalValueV3(input.Request.BandwidthCapKbps)
+		totalBitrateKbps := normalizeBitrateKbpsV3(file.Bitrate)
+		serverBitrateRequiresEncode = totalBitrateKbps <= 0 || totalBitrateKbps > cap || source.BitrateKbps > cap
+		if serverBitrateRequiresEncode {
+			defer func() {
+				compliant := result.Plan != nil &&
+					(result.PlayMethod == PlayTranscode || file.IsAudioOnly() && result.TranscodeAudio)
+				if result.Terminal != nil || !compliant {
+					// Keep a transient blocker (such as a missing toolchain)
+					// retryable after naming the bitrate limit as the refusal.
+					retryable := result.Terminal != nil && result.Terminal.Retryable
+					result = terminalPlannerResultV3(TerminalBitratePolicyUnavailableV3, "This stream exceeds the server bitrate limit, and no compliant transcoding route is available.", retryable)
+				}
+			}()
+		}
+	}
 	// A source without any video track is audio-only (audiobooks, future
 	// music): the video, HDR, and subtitle-burn gates below have nothing to
 	// gate, and requiring complete video metadata would terminal a perfectly
@@ -226,6 +259,18 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 	remuxSubtitleOK := remuxSubtitle.Terminal == nil && !remuxSubtitle.RequiresBurn
 	hlsRemuxSubtitleOK := hlsSubtitle.Terminal == nil && !hlsSubtitle.RequiresBurn
 	quality := ResolveQualityPolicyV3(input.Request, source)
+	if serverBitrateRequiresEncode {
+		// The quality resolver uses the video track rate to choose an encode
+		// target, which can undercount a source-preserving route's total rate.
+		quality.RequiresTranscode = true
+		quality.PreservesSource = false
+		cap := optionalValueV3(input.Request.BandwidthCapKbps)
+		if quality.BitrateKbps <= 0 {
+			quality.BitrateKbps = cap
+		} else {
+			quality.BitrateKbps = min(quality.BitrateKbps, cap)
+		}
+	}
 	videoOK, videoEvidenceInsufficient := videoEligibleV3(source, input.Request)
 	var high10Quirk *AppliedQuirkV3
 	if !videoOK {
@@ -358,7 +403,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 	// transcode route entirely), deliver the source at original quality with a
 	// degradation warning instead of refusing playback. Explicit user-selected
 	// rungs keep the existing terminals.
-	if quality.RequiresTranscode && !quality.ExplicitRung && (originalSubtitleOK || remuxSubtitleOK || hlsRemuxSubtitleOK) && videoOK &&
+	if input.ServerBitrateCapKbps == 0 && quality.RequiresTranscode && !quality.ExplicitRung && (originalSubtitleOK || remuxSubtitleOK || hlsRemuxSubtitleOK) && videoOK &&
 		(originalRangeOK || dvStripEligible || clientDV81Eligible || clientHDR10Eligible) &&
 		!videoTranscodeExecutableV3(input, source) {
 		warnings := append(quality.Warnings, DegradationWarningV3{
@@ -530,118 +575,145 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 				return terminalPlannerResultV3(TerminalAudioConversionUnsupportedV3, "The required validated AAC conversion toolchain is unavailable.", true)
 			}
 		}
-		dvStrip := dvStripEligible && (source.DVProfile == 7 || !rangeOK)
-		remuxBase := base
-		if dvStrip {
-			remuxBase.Transformations = append(remuxBase.Transformations, TransformationV3{Name: TransformationServerDV7HDR10V3, Executor: ExecutorServerV3, RecipeVersion: "1", ValidatedClaims: DV7ToHDR10ClaimsV3()})
-			remuxBase.EffectiveRecipe.DynamicRange = DynamicRangeHDR10V3
-			remuxBase.Claims.Video = VideoClaimsV3{HDR10: true}
-			remuxBase.DegradationWarnings = append(remuxBase.DegradationWarnings, DegradationWarningV3{Code: "dolby_vision_removed", Message: "Dolby Vision metadata is removed and the validated HDR10 base layer is preserved."})
+		// Native Dolby Vision and the HDR10 strip are separate remux recipes. A
+		// Profile 8.1 source the output can take natively tries native DV
+		// first; once every native-DV remux has been attempted on this output
+		// route, the strip is the next source-preserving recipe, ahead of any
+		// transcode. Profile 7 and outputs without the source range only ever
+		// take the strip.
+		dvStripModes := []bool{dvStripEligible && (source.DVProfile == 7 || !rangeOK)}
+		if !dvStripModes[0] && dvStripEligible {
+			dvStripModes = append(dvStripModes, true)
 		}
+		hlsAudioConversionUnavailable := ""
+		for _, dvStrip := range dvStripModes {
+			hlsTranscodeAudio := hlsTranscodeAudio
+			remuxBase := cloneRemuxPlanCandidateV3(base)
+			if dvStrip {
+				remuxBase.Transformations = append(remuxBase.Transformations, TransformationV3{Name: TransformationServerDV7HDR10V3, Executor: ExecutorServerV3, RecipeVersion: "1", ValidatedClaims: DV7ToHDR10ClaimsV3()})
+				remuxBase.EffectiveRecipe.DynamicRange = DynamicRangeHDR10V3
+				remuxBase.Claims.Video = VideoClaimsV3{HDR10: true}
+				remuxBase.DegradationWarnings = append(remuxBase.DegradationWarnings, DegradationWarningV3{Code: "dolby_vision_removed", Message: "Dolby Vision metadata is removed and the validated HDR10 base layer is preserved."})
+			}
 
-		progressivePlan := cloneRemuxPlanCandidateV3(remuxBase)
-		progressivePlan.Delivery = DeliveryRemuxProgressiveV3
-		progressivePlan.Stream = StreamV3{Protocol: StreamHTTPProgressiveV3, Container: containerMP4V3, MIMEType: mimeVideoMP4V3, Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
-		progressivePlan.DecisionReason = decisionReasonContainerNormalizationV3
-		progressiveAudioChannels := 0
-		if progressiveTranscodeAudio && progressiveAudioConvertOK {
-			progressiveAudioChannels = aacOutputChannelsV3(input.Request, DeliveryClassProgressiveV3, source.AudioChannels, false)
-			progressivePlan.EffectiveRecipe.AudioCodec = audioCodecAACV3
-			progressivePlan.EffectiveRecipe.AudioChannels = intPointerV3(progressiveAudioChannels)
-			progressivePlan.EffectiveRecipe.AudioLayout = audioLayoutForChannelsV3(progressiveAudioChannels)
-			progressivePlan.Claims.Audio = AudioClaimsV3{Codec: audioCodecAACV3, Reason: serverAudioAdaptationReasonV3}
-			progressivePlan.Transformations = append(progressivePlan.Transformations, TransformationV3{Name: TransformationAudioToAACV3, Executor: ExecutorServerV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, ValidatedClaims: []string{ClaimAudioDecodeV3}})
-			progressivePlan.DegradationWarnings = append(progressivePlan.DegradationWarnings, DegradationWarningV3{Code: degradationAudioConvertedV3, Message: fmt.Sprintf("The selected audio track is converted to AAC %s.", audioLayoutForChannelsV3(progressiveAudioChannels))})
-			progressivePlan.DecisionReason = decisionReasonAudioAdaptationV3
-		}
-		if normalizeMatroskaAAC {
-			appendAppliedQuirkV3(&progressivePlan, *firefoxAACTimingQuirk, "")
-		}
-		if !dvStrip {
-			applyCopiedVideoQuirksV3(&progressivePlan, source, input.Request, high10Quirk)
-		}
-		progressiveExecutable := (!progressiveTranscodeAudio || progressiveAudioConvertOK) && (!dvStrip || dvStripEligibleProgressive)
-		tryProgressive := func() (PlannerResultV3, bool) {
-			if !remuxSubtitleOK || !progressiveExecutable {
-				return PlannerResultV3{}, false
-			}
-			candidate := cloneRemuxPlanCandidateV3(progressivePlan)
-			applySubtitleDecisionV3(&candidate, remuxSubtitle.Decision)
-			candidate.Claims.Subtitles = remuxSubtitle.Claims
-			finalizePlanIdentityV3(&candidate, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
-			if deliverySupportsPlanV3(input.Request, DeliveryClassProgressiveV3, candidate) && !planAttemptedV3(candidate, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
-				return PlannerResultV3{Plan: &candidate, PlayMethod: PlayRemux, TranscodeAudio: progressiveTranscodeAudio, TargetAudioCodec: candidate.EffectiveRecipe.AudioCodec, SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, progressiveAudioChannels, progressiveTranscodeAudio), TargetAudioChannels: progressiveAudioChannels, SubtitleTrackIndex: remuxSubtitle.SelectedIndex, SubtitleTransportTrackIndex: remuxSubtitle.TransportIndex, SubtitleCodec: remuxSubtitle.Codec, DownloadedSubtitleID: remuxSubtitle.DownloadedSubtitleID}, true
-			}
-			return PlannerResultV3{}, false
-		}
-		progressiveFirst := !progressiveTranscodeAudio || hlsTranscodeAudio || hlsAudioQuirkOK
-		if progressiveFirst {
-			if result, ok := tryProgressive(); ok {
-				return result
-			}
-		}
-		if deliveryAvailableV3(input.Request, DeliveryClassHLSV3) && hlsRemuxSubtitleOK && (!dvStrip || dvStripEligibleHLS) {
-			plan := cloneRemuxPlanCandidateV3(remuxBase)
-			plan.Delivery = DeliveryRemuxHLSV3
-			plan.Stream = StreamV3{Protocol: StreamHLSV3, Container: "hls", MIMEType: "application/vnd.apple.mpegurl", Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
-			plan.EffectiveRecipe.VideoSampleEntry = hlsVideoSampleEntryV3(source, input.Request, dvStrip)
-			hlsAudioChannels := 0
-			if hlsTranscodeAudio {
-				if !input.hlsRemuxRegistry().Available(TransformationAudioToAACV3) {
-					return terminalPlannerResultV3(TerminalAudioConversionUnsupportedV3, "The HLS route requires the validated AAC conversion toolchain.", true)
-				}
-				// HLS packaging cannot safely copy non-native codecs such as
-				// DTS, TrueHD, or Opus. Preserve surround when adapting those
-				// codecs; a native codec rejected by the scoped client claim
-				// keeps the normal compatibility downmix policy.
-				hlsAudioChannels = aacOutputChannelsV3(input.Request, DeliveryClassHLSV3, source.AudioChannels, !hlsNativeAudioCodecV3(source.AudioCodec))
-				plan.EffectiveRecipe.AudioCodec = "aac"
-				plan.EffectiveRecipe.AudioChannels = intPointerV3(hlsAudioChannels)
-				plan.EffectiveRecipe.AudioLayout = audioLayoutForChannelsV3(hlsAudioChannels)
-				plan.Claims.Audio = AudioClaimsV3{Codec: "aac", Reason: hlsAudioAdaptationReasonV3}
-				plan.Transformations = append(plan.Transformations, TransformationV3{Name: TransformationAudioToAACV3, Executor: ExecutorServerV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, ValidatedClaims: []string{ClaimAudioDecodeV3}})
-				plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{Code: degradationAudioConvertedV3, Message: "The selected audio track is converted to AAC for HLS delivery."})
+			progressivePlan := cloneRemuxPlanCandidateV3(remuxBase)
+			progressivePlan.Delivery = DeliveryRemuxProgressiveV3
+			progressivePlan.Stream = StreamV3{Protocol: StreamHTTPProgressiveV3, Container: containerMP4V3, MIMEType: mimeVideoMP4V3, Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
+			progressivePlan.DecisionReason = decisionReasonContainerNormalizationV3
+			progressiveAudioChannels := 0
+			if progressiveTranscodeAudio && progressiveAudioConvertOK {
+				progressiveAudioChannels = aacOutputChannelsV3(input.Request, DeliveryClassProgressiveV3, source.AudioChannels, false)
+				progressivePlan.EffectiveRecipe.AudioCodec = audioCodecAACV3
+				progressivePlan.EffectiveRecipe.AudioChannels = intPointerV3(progressiveAudioChannels)
+				progressivePlan.EffectiveRecipe.AudioLayout = audioLayoutForChannelsV3(progressiveAudioChannels)
+				progressivePlan.Claims.Audio = AudioClaimsV3{Codec: audioCodecAACV3, Reason: serverAudioAdaptationReasonV3}
+				progressivePlan.Transformations = append(progressivePlan.Transformations, TransformationV3{Name: TransformationAudioToAACV3, Executor: ExecutorServerV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, ValidatedClaims: []string{ClaimAudioDecodeV3}})
+				progressivePlan.DegradationWarnings = append(progressivePlan.DegradationWarnings, DegradationWarningV3{Code: degradationAudioConvertedV3, Message: fmt.Sprintf("The selected audio track is converted to AAC %s.", audioLayoutForChannelsV3(progressiveAudioChannels))})
+				progressivePlan.DecisionReason = decisionReasonAudioAdaptationV3
 			}
 			if normalizeMatroskaAAC {
-				appendAppliedQuirkV3(&plan, *firefoxAACTimingQuirk, "")
-			}
-			if hlsAudioQuirkOK && !hlsTranscodeAudio {
-				if !input.hlsRemuxRegistry().Available(TransformationAudioToAACV3) {
-					return terminalPlannerResultV3(TerminalAudioConversionUnsupportedV3, "The device-specific HLS route requires the validated AAC conversion toolchain.", true)
-				}
-				hlsTranscodeAudio = true
-				hlsAudioChannels = aacOutputChannelsV3(input.Request, DeliveryClassHLSV3, source.AudioChannels, false)
-				plan.EffectiveRecipe.AudioCodec = "aac"
-				plan.EffectiveRecipe.AudioChannels = intPointerV3(hlsAudioChannels)
-				plan.EffectiveRecipe.AudioLayout = audioLayoutForChannelsV3(hlsAudioChannels)
-				plan.Claims.Audio = AudioClaimsV3{Codec: "aac", Reason: "device_hls_audio_adaptation"}
-				plan.Transformations = append(plan.Transformations, TransformationV3{Name: TransformationAudioToAACV3, Executor: ExecutorServerV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, ValidatedClaims: []string{ClaimAudioDecodeV3}})
-				plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{Code: degradationAudioConvertedV3, Message: fmt.Sprintf("The selected audio track is converted to AAC %s for this device's HLS route.", audioLayoutForChannelsV3(hlsAudioChannels))})
-				appendAppliedQuirkV3(&plan, *hlsAudioQuirk, "")
+				appendAppliedQuirkV3(&progressivePlan, *firefoxAACTimingQuirk, "")
 			}
 			if !dvStrip {
-				applyCopiedVideoQuirksV3(&plan, source, input.Request, high10Quirk)
+				applyCopiedVideoQuirksV3(&progressivePlan, source, input.Request, high10Quirk)
 			}
-			if hlsTranscodeAudio {
-				plan.DecisionReason = hlsAudioAdaptationReasonV3
-			} else {
-				plan.DecisionReason = "hls_packaging_required"
-			}
-			applySubtitleDecisionV3(&plan, hlsSubtitle.Decision)
-			plan.Claims.Subtitles = hlsSubtitle.Claims
-			finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
-			if deliverySupportsPlanV3(input.Request, DeliveryClassHLSV3, plan) && !planAttemptedV3(plan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
-				targetAudio := "copy"
-				if hlsTranscodeAudio {
-					targetAudio = "aac"
+			progressiveExecutable := (!progressiveTranscodeAudio || progressiveAudioConvertOK) && (!dvStrip || dvStripEligibleProgressive)
+			tryProgressive := func() (PlannerResultV3, bool) {
+				if !remuxSubtitleOK || !progressiveExecutable || input.ServerBitrateCapKbps > 0 && progressiveTranscodeAudio {
+					return PlannerResultV3{}, false
 				}
-				return PlannerResultV3{Plan: &plan, PlayMethod: PlayRemux, TranscodeAudio: hlsTranscodeAudio, TargetVideoCodec: "copy", TargetAudioCodec: targetAudio, SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, hlsAudioChannels, hlsTranscodeAudio), TargetAudioChannels: hlsAudioChannels, TargetResolution: resolutionLabelV3(source.Height), TargetBitrateKbps: source.BitrateKbps, SubtitleTrackIndex: hlsSubtitle.SelectedIndex, SubtitleTransportTrackIndex: hlsSubtitle.TransportIndex, SubtitleCodec: hlsSubtitle.Codec, DownloadedSubtitleID: hlsSubtitle.DownloadedSubtitleID}
+				candidate := cloneRemuxPlanCandidateV3(progressivePlan)
+				applySubtitleDecisionV3(&candidate, remuxSubtitle.Decision)
+				candidate.Claims.Subtitles = remuxSubtitle.Claims
+				finalizePlanIdentityV3(&candidate, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
+				if deliverySupportsPlanV3(input.Request, DeliveryClassProgressiveV3, candidate) && !planAttemptedV3(candidate, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
+					return PlannerResultV3{Plan: &candidate, PlayMethod: PlayRemux, TranscodeAudio: progressiveTranscodeAudio, TargetAudioCodec: candidate.EffectiveRecipe.AudioCodec, SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, progressiveAudioChannels, progressiveTranscodeAudio), TargetAudioChannels: progressiveAudioChannels, SubtitleTrackIndex: remuxSubtitle.SelectedIndex, SubtitleTransportTrackIndex: remuxSubtitle.TransportIndex, SubtitleCodec: remuxSubtitle.Codec, DownloadedSubtitleID: remuxSubtitle.DownloadedSubtitleID}, true
+				}
+				return PlannerResultV3{}, false
+			}
+			progressiveFirst := !progressiveTranscodeAudio || hlsTranscodeAudio || hlsAudioQuirkOK
+			if progressiveFirst {
+				if result, ok := tryProgressive(); ok {
+					return result
+				}
+			}
+			hlsRouteOK := deliveryAvailableV3(input.Request, DeliveryClassHLSV3) && hlsRemuxSubtitleOK && (!dvStrip || dvStripEligibleHLS) && (input.ServerBitrateCapKbps <= 0 || (!hlsTranscodeAudio && !hlsAudioQuirkOK))
+			if hlsRouteOK && (hlsTranscodeAudio || hlsAudioQuirkOK) && !input.hlsRemuxRegistry().Available(TransformationAudioToAACV3) {
+				// HLS needs an AAC conversion that no HLS executor offers. Skip
+				// only this route: a later recipe (the Dolby Vision HDR10 strip)
+				// may still play over progressive. The terminal is reported once
+				// every remux recipe is exhausted.
+				hlsRouteOK = false
+				hlsAudioConversionUnavailable = "The HLS route requires the validated AAC conversion toolchain."
+				if !hlsTranscodeAudio {
+					hlsAudioConversionUnavailable = "The device-specific HLS route requires the validated AAC conversion toolchain."
+				}
+			}
+			if hlsRouteOK {
+				plan := cloneRemuxPlanCandidateV3(remuxBase)
+				plan.Delivery = DeliveryRemuxHLSV3
+				plan.Stream = StreamV3{Protocol: StreamHLSV3, Container: containerHLSV3, MIMEType: "application/vnd.apple.mpegurl", Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
+				plan.EffectiveRecipe.VideoSampleEntry = hlsVideoSampleEntryV3(source, input.Request, dvStrip)
+				hlsAudioChannels := 0
+				if hlsTranscodeAudio {
+					// HLS packaging cannot safely copy non-native codecs such as
+					// DTS, TrueHD, or Opus. Preserve surround when adapting those
+					// codecs; a native codec rejected by the scoped client claim
+					// keeps the normal compatibility downmix policy.
+					hlsAudioChannels = aacOutputChannelsV3(input.Request, DeliveryClassHLSV3, source.AudioChannels, !hlsNativeAudioCodecV3(source.AudioCodec))
+					plan.EffectiveRecipe.AudioCodec = audioCodecAACV3
+					plan.EffectiveRecipe.AudioChannels = intPointerV3(hlsAudioChannels)
+					plan.EffectiveRecipe.AudioLayout = audioLayoutForChannelsV3(hlsAudioChannels)
+					plan.Claims.Audio = AudioClaimsV3{Codec: audioCodecAACV3, Reason: hlsAudioAdaptationReasonV3}
+					plan.Transformations = append(plan.Transformations, TransformationV3{Name: TransformationAudioToAACV3, Executor: ExecutorServerV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, ValidatedClaims: []string{ClaimAudioDecodeV3}})
+					plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{Code: degradationAudioConvertedV3, Message: "The selected audio track is converted to AAC for HLS delivery."})
+				}
+				if normalizeMatroskaAAC {
+					appendAppliedQuirkV3(&plan, *firefoxAACTimingQuirk, "")
+				}
+				if hlsAudioQuirkOK && !hlsTranscodeAudio {
+					hlsTranscodeAudio = true
+					hlsAudioChannels = aacOutputChannelsV3(input.Request, DeliveryClassHLSV3, source.AudioChannels, false)
+					plan.EffectiveRecipe.AudioCodec = audioCodecAACV3
+					plan.EffectiveRecipe.AudioChannels = intPointerV3(hlsAudioChannels)
+					plan.EffectiveRecipe.AudioLayout = audioLayoutForChannelsV3(hlsAudioChannels)
+					plan.Claims.Audio = AudioClaimsV3{Codec: audioCodecAACV3, Reason: "device_hls_audio_adaptation"}
+					plan.Transformations = append(plan.Transformations, TransformationV3{Name: TransformationAudioToAACV3, Executor: ExecutorServerV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, ValidatedClaims: []string{ClaimAudioDecodeV3}})
+					plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{Code: degradationAudioConvertedV3, Message: fmt.Sprintf("The selected audio track is converted to AAC %s for this device's HLS route.", audioLayoutForChannelsV3(hlsAudioChannels))})
+					appendAppliedQuirkV3(&plan, *hlsAudioQuirk, "")
+				}
+				if !dvStrip {
+					applyCopiedVideoQuirksV3(&plan, source, input.Request, high10Quirk)
+				}
+				if hlsTranscodeAudio {
+					plan.DecisionReason = hlsAudioAdaptationReasonV3
+				} else {
+					plan.DecisionReason = "hls_packaging_required"
+				}
+				applySubtitleDecisionV3(&plan, hlsSubtitle.Decision)
+				plan.Claims.Subtitles = hlsSubtitle.Claims
+				finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
+				if deliverySupportsPlanV3(input.Request, DeliveryClassHLSV3, plan) && !planAttemptedV3(plan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
+					targetAudio := codecCopyV3
+					if hlsTranscodeAudio {
+						targetAudio = audioCodecAACV3
+					}
+					return PlannerResultV3{Plan: &plan, PlayMethod: PlayRemux, TranscodeAudio: hlsTranscodeAudio, TargetVideoCodec: codecCopyV3, TargetAudioCodec: targetAudio, SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, hlsAudioChannels, hlsTranscodeAudio), TargetAudioChannels: hlsAudioChannels, TargetResolution: resolutionLabelV3(source.Height), TargetBitrateKbps: source.BitrateKbps, SubtitleTrackIndex: hlsSubtitle.SelectedIndex, SubtitleTransportTrackIndex: hlsSubtitle.TransportIndex, SubtitleCodec: hlsSubtitle.Codec, DownloadedSubtitleID: hlsSubtitle.DownloadedSubtitleID}
+				}
+			}
+			if !progressiveFirst {
+				if result, ok := tryProgressive(); ok {
+					return result
+				}
 			}
 		}
-		if !progressiveFirst {
-			if result, ok := tryProgressive(); ok {
-				return result
-			}
+		if hlsAudioConversionUnavailable != "" {
+			return terminalPlannerResultV3(TerminalAudioConversionUnsupportedV3, hlsAudioConversionUnavailable, true)
+		}
+		if input.ServerBitrateCapKbps > 0 && (progressiveTranscodeAudio || hlsTranscodeAudio || hlsAudioQuirkOK) {
+			// Audio re-encoding can raise a copy remux above a source that only
+			// just fits the cap. Encode both tracks with an explicit budget.
+			return planVideoTranscodeV3(input, base, source, quality, hlsSubtitle, "", false)
 		}
 	}
 	if deliveryAvailableV3(input.Request, DeliveryClassHLSV3) {
@@ -696,7 +768,7 @@ func availableQualitiesForRouteV3(input PlannerInputV3, source SourceDescriptorV
 		// probe metadata cannot prove that any advertised rung avoids upscaling.
 		return qualities
 	}
-	if !deliveryAvailableV3(input.Request, DeliveryClassHLSV3) || !input.Settings.TranscodeEnabled {
+	if !deliveryAvailableV3(input.Request, DeliveryClassHLSV3) || !input.Settings.TranscodeEnabled || input.Settings.ViewerTranscodeDisabled {
 		return qualities
 	}
 	if is4KSourceV3(input.EffectiveFile, source) && !input.Settings.Allow4KTranscode {
@@ -753,7 +825,7 @@ func planAudioOnlyV3(input PlannerInputV3, file *models.MediaFile, source Source
 	originalAudioSelectionOK := audioSelectionUsesContainerDefaultV3(file, input.AudioTrackIndex) ||
 		clientSelectsOriginalAudioTrackV3(request)
 	bandwidthCapKbps := optionalValueV3(request.BandwidthCapKbps)
-	bandwidthCapExceeded := bandwidthCapKbps > 0 && source.BitrateKbps > bandwidthCapKbps
+	bandwidthCapExceeded := bandwidthCapKbps > 0 && (source.BitrateKbps > bandwidthCapKbps || input.ServerBitrateCapKbps > 0 && source.BitrateKbps <= 0)
 	if source.AudioCodec == "" {
 		// A file with neither a video track nor a probed audio codec has no
 		// stream the planner can validate a route for.
@@ -813,6 +885,12 @@ func planAudioOnlyV3(input PlannerInputV3, file *models.MediaFile, source Source
 	targetAudioBitrateKbps := 0
 	if transcodeAudio {
 		targetAudioBitrateKbps = audioOnlyAACBitrateKbpsV3(bandwidthCapKbps)
+		if input.ServerBitrateCapKbps > 0 {
+			targetAudioBitrateKbps = min(targetAudioBitrateKbps, input.ServerBitrateCapKbps*95/100)
+			if targetAudioBitrateKbps < 32 {
+				return terminalPlannerResultV3(TerminalBitratePolicyUnavailableV3, "The server bitrate limit is too low for a playable audio stream.", false)
+			}
+		}
 		applyAudioOnlyAACConversionV3(&plan, targetAudioChannels, targetAudioBitrateKbps, bandwidthCapExceeded)
 	} else if !deliverySupportsPlanV3(request, DeliveryClassProgressiveV3, plan) {
 		progressiveRegistry = input.progressiveRemuxRegistry()
@@ -957,16 +1035,34 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	if hlsRegistry == nil || !hlsRegistry.Available(TransformationVideoToH264V3) || !hlsRegistry.Available(TransformationAudioToAACV3) {
 		return terminalPlannerResultV3("conversion_tool_unavailable", "The required validated H.264/AAC conversion toolchain is unavailable.", true)
 	}
+	targetVideoCodec := transcodeCodecH264
+	if input.Settings.AllowHEVCEncoding && hlsRegistry.Available(TransformationVideoToHEVCV3) && hlsHEVCOutputSupportedV3(input.Request, quality, source) {
+		targetVideoCodec = transcodeCodecHEVC
+	}
 	if source.DynamicRange != "" && source.DynamicRange != DynamicRangeSDRV3 {
 		base.AvailableQualities = availableQualitiesForRouteV3(input, source)
 	}
 	plan := base
 	plan.Delivery = DeliveryTranscodeHLSV3
-	plan.Stream = StreamV3{Protocol: StreamHLSV3, Container: "hls", MIMEType: "application/vnd.apple.mpegurl", Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
-	plan.EffectiveRecipe.VideoCodec = "h264"
+	plan.Stream = StreamV3{Protocol: StreamHLSV3, Container: containerHLSV3, MIMEType: "application/vnd.apple.mpegurl", Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
+	plan.EffectiveRecipe.VideoCodec = targetVideoCodec
+	if targetVideoCodec == transcodeCodecHEVC {
+		plan.EffectiveRecipe.VideoSampleEntry = VideoSampleEntryHVC1
+	}
 	plan.EffectiveRecipe.AudioCodec = "aac"
 	plan.EffectiveRecipe.Width = intPointerV3(quality.Width)
 	plan.EffectiveRecipe.Height = intPointerV3(quality.Height)
+	targetAudioBitrateKbps := 0
+	if input.ServerBitrateCapKbps > 0 {
+		channels := aacOutputChannelsV3(input.Request, DeliveryClassHLSV3, source.AudioChannels, true)
+		_, defaultAudioBitrateKbps := ResolveAACOutputV3(channels, 0)
+		budget := optionalValueV3(input.Request.BandwidthCapKbps) * 95 / 100
+		targetAudioBitrateKbps = min(defaultAudioBitrateKbps, max(64, budget/4))
+		if budget-targetAudioBitrateKbps < 64 {
+			return terminalPlannerResultV3(TerminalBitratePolicyUnavailableV3, "The server bitrate limit is too low for a playable video stream.", false)
+		}
+		quality.BitrateKbps = min(quality.BitrateKbps, budget-targetAudioBitrateKbps)
+	}
 	plan.EffectiveRecipe.BitrateKbps = intPointerV3(quality.BitrateKbps)
 	// Surround sources keep 5.1 through the AAC re-encode (universal Media3
 	// decode); only stereo/mono sources — and unknown layouts — downmix to 2.0.
@@ -975,7 +1071,7 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	plan.EffectiveRecipe.AudioChannels = intPointerV3(targetAudioChannels)
 	plan.EffectiveRecipe.AudioLayout = audioLayout
 	plan.Transformations = append(plan.Transformations,
-		TransformationV3{Name: TransformationVideoToH264V3, Executor: ExecutorServerV3, RecipeVersion: TransformationVideoToH264RecipeVersionV3, ValidatedClaims: []string{ClaimH264DecodeV3}},
+		videoTransformationForTargetV3(targetVideoCodec),
 		TransformationV3{Name: TransformationAudioToAACV3, Executor: ExecutorServerV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, ValidatedClaims: []string{ClaimAudioDecodeV3}},
 	)
 	toneMapPolicy := toneMapRecipe.policy
@@ -1019,10 +1115,75 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		return terminalPlannerResultV3("adaptation_unavailable", "The HLS delivery cannot decode the planned transcode recipe.", false)
 	}
 	finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
+	// A failed HEVC attempt does not exhaust the H.264 route. Rebuild the
+	// candidate before checking exhaustion so recovery can downgrade codecs on
+	// the same HLS delivery without changing source/remux behavior.
+	if targetVideoCodec == transcodeCodecHEVC && planAttemptedV3(plan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
+		targetVideoCodec = transcodeCodecH264
+		plan.EffectiveRecipe.VideoCodec = targetVideoCodec
+		plan.EffectiveRecipe.VideoSampleEntry = ""
+		if !replaceVideoTransformationV3(&plan, targetVideoCodec) || !deliverySupportsPlanV3(input.Request, DeliveryClassHLSV3, plan) {
+			return terminalPlannerResultV3("adaptation_unavailable", "The HLS delivery cannot decode the H.264 fallback recipe.", false)
+		}
+		finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
+	}
 	if planAttemptedV3(plan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
 		return terminalPlannerResultV3("adaptation_exhausted", "All compatible playback recipes have already failed for this output route.", false)
 	}
-	return PlannerResultV3{Plan: &plan, PlayMethod: PlayTranscode, TranscodeAudio: true, TargetVideoCodec: "h264", TargetAudioCodec: "aac", SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, targetAudioChannels, true), TargetAudioChannels: targetAudioChannels, TargetResolution: quality.Label, TargetBitrateKbps: quality.BitrateKbps, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleBurnIn: subtitle.RequiresBurn, SubtitleCodec: subtitle.Codec, DownloadedSubtitleID: subtitle.DownloadedSubtitleID, ToneMapPolicy: toneMapPolicy, ToneMapMode: toneMapMode, ToneMapSourceKind: toneMapSourceKind, ToneMapRecipeVersion: toneMapRecipeVersionV3(toneMapOK), ToneMapPreflightRequired: toneMapResolution.PreflightRequired, ToneMapSourceRevision: toneMapRevision}
+	return PlannerResultV3{Plan: &plan, PlayMethod: PlayTranscode, TranscodeAudio: true, TargetVideoCodec: targetVideoCodec, TargetAudioCodec: "aac", SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, targetAudioChannels, true), TargetAudioChannels: targetAudioChannels, TargetAudioBitrateKbps: targetAudioBitrateKbps, TargetResolution: quality.Label, TargetBitrateKbps: quality.BitrateKbps, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleBurnIn: subtitle.RequiresBurn, SubtitleCodec: subtitle.Codec, DownloadedSubtitleID: subtitle.DownloadedSubtitleID, ToneMapPolicy: toneMapPolicy, ToneMapMode: toneMapMode, ToneMapSourceKind: toneMapSourceKind, ToneMapRecipeVersion: toneMapRecipeVersionV3(toneMapOK), ToneMapPreflightRequired: toneMapResolution.PreflightRequired, ToneMapSourceRevision: toneMapRevision}
+}
+
+func videoTransformationForTargetV3(codec string) TransformationV3 {
+	if codec == transcodeCodecHEVC {
+		return TransformationV3{Name: TransformationVideoToHEVCV3, Executor: ExecutorServerV3, RecipeVersion: TransformationVideoToHEVCRecipeVersionV3, ValidatedClaims: []string{ClaimHEVCDecodeV3}}
+	}
+	return TransformationV3{Name: TransformationVideoToH264V3, Executor: ExecutorServerV3, RecipeVersion: TransformationVideoToH264RecipeVersionV3, ValidatedClaims: []string{ClaimH264DecodeV3}}
+}
+
+func replaceVideoTransformationV3(plan *PlanV3, codec string) bool {
+	if plan == nil {
+		return false
+	}
+	for i, transformation := range plan.Transformations {
+		if transformation.Name == TransformationVideoToH264V3 || transformation.Name == TransformationVideoToHEVCV3 {
+			plan.Transformations[i] = videoTransformationForTargetV3(codec)
+			return true
+		}
+	}
+	return false
+}
+
+const hevcMainProfileV3 = "main"
+
+// hlsHEVCOutputSupportedV3 requires the selected HLS executor to name HEVC
+// explicitly and verifies its detailed decoder can handle this server's Main
+// 8-bit SDR output at the chosen dimensions and bitrate. Flat codec lists are
+// insufficient here: they can describe source copy support without proving
+// the fMP4 transcode decoder that will receive this recipe.
+func hlsHEVCOutputSupportedV3(request StartRequestV3, quality QualityResultV3, source SourceDescriptorV3) bool {
+	delivery, ok := request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
+	if !ok || !delivery.Enabled || !delivery.SupportedOnDevice || !containsFoldV3(delivery.VideoCodecs, transcodeCodecHEVC) {
+		return false
+	}
+	output := source
+	output.VideoCodec = transcodeCodecHEVC
+	output.VideoProfile = hevcMainProfileV3
+	output.BitDepth = 8
+	output.Width = quality.Width
+	output.Height = quality.Height
+	output.BitrateKbps = quality.BitrateKbps
+	output.DynamicRange = DynamicRangeSDRV3
+	// The FFmpeg HEVC recipe does not currently pin -level:v, so it must not
+	// claim a level to an exact decoder with a bounded level list. A level-bound
+	// client stays on H.264 until the target level is selected, frozen, and
+	// enforced as part of the executable HEVC recipe.
+	for _, decoder := range request.Capabilities.VideoDecode {
+		if strings.EqualFold(decoder.Codec, transcodeCodecHEVC) && len(decoder.Levels) > 0 {
+			return false
+		}
+	}
+	ok, _ = videoEligibleV3(output, request)
+	return ok
 }
 
 // applySubtitleDecisionV3 changes the delivery-specific subtitle policy without
@@ -1275,13 +1436,9 @@ func compoundRungQualityResultV3(rung ladderRungV3, source SourceDescriptorV3, c
 	if width == 0 {
 		width, _ = dimensionsFromResolutionV3(resolutionLabelV3(height))
 	}
-	targetLabel := resolutionLabelV3(height)
-	if sameResolutionClass && source.Height > 0 && source.Height != rung.Height {
-		// The transcoder treats an unknown exact-height label as "do not scale",
-		// which preserves the source's cinema crop while still applying the
-		// selected bitrate and tone-map recipe.
-		targetLabel = strconv.Itoa(source.Height) + "p"
-	}
+	// Keep the clamped height exact. The transcoder leaves non-ladder heights
+	// unscaled, preserving the source crop even on a lower-class rung.
+	targetLabel := strconv.Itoa(height) + "p"
 	return QualityResultV3{
 		Label:             targetLabel,
 		Width:             width,
@@ -1578,20 +1735,27 @@ func ladderRungForLabelV3(label string) (ladderRungV3, bool) {
 	return ladderRungV3{}, false
 }
 
-// sourceLadderHeightV3 classifies cinema-aspect encodes by width as well as
-// height. A 3840x1540 source is still a 4K source for menu purposes.
+// sourceLadderHeightV3 classifies a source by the smallest class whose bounds
+// contain both dimensions, the scanner's buckets for a file's resolution label
+// (scanner.mapResolution). Cropped and cinema-aspect encodes therefore land in
+// the class the catalog shows: 1918x872 is 1080p and 3840x1540 is 2160p. An 8K
+// source is 4320p, above every rung, so its 4K rungs scale down to 2160 lines.
 func sourceLadderHeightV3(source SourceDescriptorV3) int {
 	switch {
-	case source.Width >= 3840 || source.Height >= 2160:
-		return 2160
-	case source.Width >= 1920 || source.Height >= 1080:
-		return 1080
-	case source.Width >= 1280 || source.Height >= 720:
-		return 720
-	case source.Width > 0 || source.Height > 0:
-		return 480
-	default:
+	case source.Width <= 0 && source.Height <= 0:
 		return 0
+	case source.Width <= 854 && source.Height <= 480:
+		return 480
+	case source.Width <= 1280 && source.Height <= 962:
+		return 720
+	case source.Width <= 2560 && source.Height <= 1440:
+		return 1080
+	case source.Width <= 4096 && source.Height <= 3072:
+		return 2160
+	case source.Width <= 8192 && source.Height <= 6144:
+		return 4320
+	default:
+		return 2160
 	}
 }
 

@@ -18,6 +18,23 @@ export function useFavorites() {
   });
 }
 
+/**
+ * Whether the acting profile has any favorite, for surfaces that only need
+ * that bit (the taste-seed gate and banner). It asks for a one-card page
+ * rather than the full list. An empty page that still carries a cursor means
+ * the newest favorite is one the viewer may not see and more follow; the
+ * profile has favorited something, so it counts as having favorites.
+ */
+export function useHasFavorites() {
+  return useQuery({
+    queryKey: favoriteKeys.exists(),
+    queryFn: ({ signal }): Promise<boolean> =>
+      v2("GET /api/v2/favorites", { query: { limit: 1 }, signal }).then(
+        (data) => data.items.length > 0 || data.page?.has_more === true,
+      ),
+  });
+}
+
 export function useToggleFavorite(itemId: string) {
   const queryClient = useQueryClient();
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -22,6 +23,14 @@ const (
 	trendingRefreshEmpty   = "empty"
 	trendingRefreshSkipped = "skipped"
 	trendingRefreshError   = "error"
+)
+
+// CalendarTrendingSource and CalendarTrendingWindow name the snapshot behind
+// the calendar's Trending preset. RunOnce always refreshes it, so the calendar
+// does not depend on a home section happening to use the same feed.
+const (
+	CalendarTrendingSource = sourceTMDB
+	CalendarTrendingWindow = windowWeek
 )
 
 // trendingSectionConfigLister enumerates enabled trending_discover section
@@ -148,16 +157,18 @@ func distinctTrendingCombos(configs []json.RawMessage) []trendingCombo {
 	return out
 }
 
-// RunOnce refreshes every (source, window) used by an enabled trending_discover
-// section. Per-combo failures are recorded and never abort the others. The JSON
-// summary is suitable for task result data.
+// RunOnce refreshes the calendar's feed and every (source, window) used by an
+// enabled trending_discover section. Per-combo failures are recorded and never
+// abort the others; a failed section listing still refreshes the calendar feed
+// before returning its error. The JSON summary is suitable for task result data.
 func (r *TrendingRefresher) RunOnce(ctx context.Context) (json.RawMessage, error) {
-	configs, err := r.Sections.ListTrendingDiscoverConfigs(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing trending_discover sections: %w", err)
-	}
+	configs, listErr := r.Sections.ListTrendingDiscoverConfigs(ctx)
 
 	combos := distinctTrendingCombos(configs)
+	calendar := trendingCombo{source: CalendarTrendingSource, window: CalendarTrendingWindow}
+	if !slices.Contains(combos, calendar) {
+		combos = append(combos, calendar)
+	}
 	result := TrendingRefreshResult{Combos: len(combos)}
 	for _, c := range combos {
 		switch r.refreshCombo(ctx, c.source, c.window) {
@@ -173,6 +184,9 @@ func (r *TrendingRefresher) RunOnce(ctx context.Context) (json.RawMessage, error
 	}
 
 	data, _ := json.Marshal(result)
+	if listErr != nil {
+		return data, fmt.Errorf("listing trending_discover sections: %w", listErr)
+	}
 	return data, nil
 }
 

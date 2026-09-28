@@ -131,14 +131,34 @@ describe("SecurityAccessSettings", () => {
     expect(screen.getByRole("heading", { name: "Security & Access" })).toBeInTheDocument();
   });
 
-  it("keeps the token and proxy keys on the batched settings form", () => {
+  it("keeps the token, proxy, and local server keys on the batched settings form", () => {
     render(<SecurityAccessSettings />);
 
     expect(useSettingsFormMock.mock.calls[0]?.[0]?.keys).toEqual([
       "auth.access_token_expiry",
       "auth.refresh_token_expiry",
       "clientip.trusted_proxies",
+      "media_servers.allow_private_destinations",
     ]);
+  });
+
+  it("stages the local server switch and warns while it is on", async () => {
+    const setValue = vi.fn();
+    useSettingsFormMock.mockReturnValue(makeForm({ setValue }));
+    const { rerender } = render(<SecurityAccessSettings />);
+
+    expect(screen.queryByText(/Anyone who can sign in/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("switch", { name: /Local servers for every account/i }));
+    expect(setValue).toHaveBeenCalledWith("media_servers.allow_private_destinations", "true");
+
+    useSettingsFormMock.mockReturnValue(
+      makeForm({
+        getValue: (key: string) =>
+          key === "media_servers.allow_private_destinations" ? "true" : "",
+      }),
+    );
+    rerender(<SecurityAccessSettings />);
+    expect(screen.getByText(/Anyone who can sign in/)).toBeInTheDocument();
   });
 
   it("shows only the rate limiting switch until Advanced is opened", async () => {

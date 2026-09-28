@@ -184,7 +184,7 @@ func (reg *Registry) getPersonalCollection(ctx context.Context, in *PersonalColl
 	if err != nil {
 		return nil, collectionProblem(err)
 	}
-	return &PersonalCollectionOutput{ETag: collectionEditorTag(ctx, "collection", string(in.ID), v.Revision).String(), Body: personalCollectionOf(v.Collection)}, nil
+	return &PersonalCollectionOutput{ETag: personalCollectionEditorTag(ctx, string(in.ID), v).String(), Body: personalCollectionOf(v.Collection)}, nil
 }
 func (reg *Registry) updatePersonalCollection(ctx context.Context, in *PersonalCollectionUpdateInput) (*PersonalCollectionOutput, error) {
 	s, p := reg.collectionLifecycle()

@@ -440,7 +440,7 @@ func TestGuestDriftCorrectionIsCoalescedAndRearmed(t *testing.T) {
 	if _, err := service.HandleStateReportForConnection(t.Context(), reg, 8, "guest", report); err != nil {
 		t.Fatal(err)
 	}
-	if got := len(conn.payloads); got != 1 {
+	if got := transportCount(conn); got != 1 {
 		t.Fatalf("repeated drift report dispatched %d corrections, want 1", got)
 	}
 
@@ -449,7 +449,7 @@ func TestGuestDriftCorrectionIsCoalescedAndRearmed(t *testing.T) {
 		t.Fatal(err)
 	}
 	second := lastTransport(t, conn)
-	if got := len(conn.payloads); got != 2 {
+	if got := transportCount(conn); got != 2 {
 		t.Fatalf("expired correction dispatched %d corrections, want 2", got)
 	}
 	if second.CommandID == first.CommandID {
@@ -466,9 +466,21 @@ func TestGuestDriftCorrectionIsCoalescedAndRearmed(t *testing.T) {
 	if _, err := service.HandleStateReportForConnection(t.Context(), reg, 8, "guest", report); err != nil {
 		t.Fatal(err)
 	}
-	if got := len(conn.payloads); got != 3 {
+	if got := transportCount(conn); got != 3 {
 		t.Fatalf("in-sync report did not re-arm correction, got %d corrections, want 3", got)
 	}
+}
+
+// transportCount counts the transport commands a connection received,
+// ignoring snapshots.
+func transportCount(conn *recordingConn) int {
+	count := 0
+	for _, payload := range conn.payloads {
+		if _, ok := payload["command"].(TransportCommand); ok {
+			count++
+		}
+	}
+	return count
 }
 
 func TestCorrectionCommandRoundTripsRoomRuntime(t *testing.T) {

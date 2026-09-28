@@ -230,15 +230,28 @@ func nodeAuthorityRecordDigest(data []byte) string {
 // Put stores the reconstruction recipe for a remote transcode session. Best
 // effort: a write error is returned for the caller to log, never fatal.
 func (s *Store) Put(ctx context.Context, sessionID string, card playback.RecipeCard) error {
+	if s == nil {
+		return nil
+	}
+	return s.PutTTL(ctx, sessionID, card, s.ttl)
+}
+
+// PutTTL is Put with a record lifetime shorter than the store's. A transport
+// with no session lifecycle, such as a theme conversion, expires with the
+// token that names it instead of waiting for an explicit stop.
+func (s *Store) PutTTL(ctx context.Context, sessionID string, card playback.RecipeCard, ttl time.Duration) error {
 	if s == nil || s.rdb == nil || sessionID == "" {
 		return nil
+	}
+	if ttl <= 0 || ttl > s.ttl {
+		ttl = s.ttl
 	}
 	data, err := marshalCard(card)
 	if err != nil {
 		return err
 	}
 	if authorityKey := nodeAuthorityGenerationKeyForCard(card); s.prefix == KeyPrefix && authorityKey != "" {
-		ttlMillis := max(s.ttl.Milliseconds(), 1)
+		ttlMillis := max(ttl.Milliseconds(), 1)
 		return putNodeRecipeScript.Run(ctx, s.rdb, []string{
 			s.key(sessionID),
 			nodeAuthorityRecordGenerationKey(sessionID),
@@ -246,7 +259,7 @@ func (s *Store) Put(ctx context.Context, sessionID string, card playback.RecipeC
 			nodeAuthorityRecordDigestKey(sessionID),
 		}, data, ttlMillis, nodeAuthorityRecordDigest(data)).Err()
 	}
-	return s.rdb.Set(ctx, s.key(sessionID), data, s.ttl).Err()
+	return s.rdb.Set(ctx, s.key(sessionID), data, ttl).Err()
 }
 
 // Get returns the stored recipe for sessionID. It fails CLOSED — a miss or any

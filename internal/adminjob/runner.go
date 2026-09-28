@@ -31,6 +31,16 @@ type ArtifactStore interface {
 
 const remoteCatalogImportTimeout = 10 * time.Minute
 
+const (
+	// imageCacheCleanupMaxStalledClaims bounds how long a cleanup keeps
+	// yielding without deleting anything, e.g. while storage writes are
+	// fenced or a delete hangs: twelve slices, an hour by default.
+	imageCacheCleanupMaxStalledClaims = 12
+	// A cleanup job's row carries every prefix, so each progress event
+	// reloads and publishes megabytes; record progress sparingly.
+	imageCacheCleanupProgressInterval = 10 * time.Second
+)
+
 // Maximum wall-clock time a single admin job execution may run before its
 // context is cancelled. This is the safety net that prevents a hung
 // operation (e.g. an unreachable S3 endpoint) from blocking the job queue
@@ -38,32 +48,47 @@ const remoteCatalogImportTimeout = 10 * time.Minute
 // actual scope.
 const (
 	deleteLibraryTimeout       = 2 * time.Hour
-	imageCacheCleanupTimeout   = 2 * time.Hour
-	libraryRefreshTimeout      = 6 * time.Hour
+	imageCacheCleanupSlice     = 5 * time.Minute
+	LibraryRefreshTimeout      = 6 * time.Hour // also bounds each library in the full refresh task
 	templateBundleApplyTimeout = 2 * time.Hour
+	storageTransitionTimeout   = 7 * 24 * time.Hour
 	jobTimeoutLong             = 2 * time.Hour // catalog_export, catalog_import
 )
 
 type Runner struct {
-	observation         *workmetrics.Run
-	workCtx             context.Context
-	repo                *Repository
-	exporter            *catalogseed.Service
-	store               ArtifactStore
-	itemRefresh         itemRefreshExecutor
-	libraryRefresh      libraryRefreshExecutor
-	libraryDelete       deleteLibraryExecutor
-	imageCacheCleanup   imageCacheCleanupExecutor
-	templateBundleApply templateBundleApplyExecutor
-	realtimeHub         *notifications.Hub
-	pollInterval        time.Duration
-	cleanupInterval     time.Duration
-	heartbeatInterval   time.Duration
-	staleAfter          time.Duration
-	retention           time.Duration
-	cancelRegistry      *CancelRegistry
-	stop                chan struct{}
-	stopOnce            sync.Once
+	observation                *workmetrics.Run
+	workCtx                    context.Context
+	repo                       *Repository
+	exporter                   *catalogseed.Service
+	store                      ArtifactStore
+	itemRefresh                itemRefreshExecutor
+	libraryRefresh             libraryRefreshExecutor
+	libraryDelete              deleteLibraryExecutor
+	imageCacheCleanup          imageCacheCleanupExecutor
+	templateBundleApply        templateBundleApplyExecutor
+	storageTransition          storageTransitionExecutor
+	storageTransitionCommitted func(context.Context) error
+	realtimeHub                *notifications.Hub
+	imageCacheCleanupSlice     time.Duration
+	pollInterval               time.Duration
+	cleanupInterval            time.Duration
+	heartbeatInterval          time.Duration
+	staleAfter                 time.Duration
+	retention                  time.Duration
+	cancelRegistry             *CancelRegistry
+	storageRestart             *storageRestartState
+	stop                       chan struct{}
+	stopOnce                   sync.Once
+}
+
+// storageRestartState is shared by every job this runner executes. Once the
+// process commits a transition, or cannot confirm its commit, it keeps the
+// source fences until it restarts. A later claim of the same transition must
+// not execute again or request a second restart.
+type storageRestartState struct {
+	mu      sync.Mutex
+	pending bool
+	manual  bool
 }
 
 type itemRefreshExecutor interface {
@@ -76,6 +101,47 @@ type libraryRefreshExecutor interface {
 
 type templateBundleApplyExecutor interface {
 	ExecuteTemplateBundleApply(ctx context.Context, req TemplateBundleApplyRequest, progress func(current, total int, message string)) (any, error)
+}
+
+type StorageTransitionRequest struct {
+	TransitionID string `json:"transition_id"`
+	Policy       string `json:"policy"`
+}
+
+// StorageTransitionProgress carries a phase chosen by the transition owner.
+// Message may contain storage object keys and must stay out of API responses.
+type StorageTransitionProgress struct {
+	Current int
+	Total   int
+	Phase   string
+	Message string
+}
+
+const storageTransitionPhaseRestartPending = "restart_pending"
+
+type StorageTransitionReceipt struct {
+	Phase                 string `json:"phase"`
+	VerifiedObjects       int    `json:"verified_objects"`
+	ClaimGeneration       int64  `json:"claim_generation,omitzero"`
+	FailureCategory       string `json:"failure_category,omitempty"`
+	RestartRequired       bool   `json:"restart_required,omitzero"`
+	ManualRestartRequired bool   `json:"manual_restart_required,omitzero"`
+}
+
+type storageTransitionExecutor interface {
+	ExecuteStorageTransition(context.Context, StorageTransitionRequest, func(StorageTransitionProgress)) (any, error)
+}
+
+type storageTransitionCancellationRecorder interface {
+	CancelStorageTransition(context.Context, StorageTransitionRequest) error
+}
+
+type storageTransitionCommitResult interface {
+	StorageTransitionCommitUnknown() bool
+}
+
+type storageTransitionRestartResult interface {
+	WithStorageTransitionRestartReceipt(bool, int64) any
 }
 
 func NewRunner(
@@ -105,6 +171,7 @@ func NewRunner(
 		staleAfter:          2 * time.Minute,
 		retention:           7 * 24 * time.Hour,
 		cancelRegistry:      NewCancelRegistry(),
+		storageRestart:      &storageRestartState{},
 		stop:                make(chan struct{}),
 	}
 }
@@ -113,6 +180,14 @@ func (r *Runner) SetCancelRegistry(registry *CancelRegistry) {
 	if registry != nil {
 		r.cancelRegistry = registry
 	}
+}
+
+func (r *Runner) SetStorageTransitionExecutor(executor storageTransitionExecutor) {
+	r.storageTransition = executor
+}
+
+func (r *Runner) SetStorageTransitionCommitted(callback func(context.Context) error) {
+	r.storageTransitionCommitted = callback
 }
 
 func (r *Runner) Start() {
@@ -154,6 +229,7 @@ func (r *Runner) runNext() {
 		JobTypeLibraryRefresh,
 		JobTypeDeleteLibrary,
 		JobTypeTemplateBundleApply,
+		JobTypeStorageTransition,
 	})
 	cancel()
 	if err != nil {
@@ -181,11 +257,43 @@ func (r *Runner) runNext() {
 		observation: observation, workCtx: workCtx,
 		repo: r.repo.withClaim(job), exporter: r.exporter, store: r.store,
 		itemRefresh: r.itemRefresh, libraryRefresh: r.libraryRefresh, libraryDelete: r.libraryDelete,
-		imageCacheCleanup: r.imageCacheCleanup, templateBundleApply: r.templateBundleApply,
-		realtimeHub: r.realtimeHub, heartbeatInterval: r.heartbeatInterval, retention: r.retention, cancelRegistry: r.cancelRegistry,
+		imageCacheCleanup: r.imageCacheCleanup, imageCacheCleanupSlice: r.imageCacheCleanupSlice,
+		templateBundleApply: r.templateBundleApply, storageTransition: r.storageTransition,
+		storageTransitionCommitted: r.storageTransitionCommitted,
+		realtimeHub:                r.realtimeHub, heartbeatInterval: r.heartbeatInterval, retention: r.retention, cancelRegistry: r.cancelRegistry,
+		storageRestart: r.storageRestart, stop: r.stop,
+	}
+	if job.JobType == JobTypeStorageTransition && r.storageRestartPending() {
+		// Stale recovery requeued a transition this process committed or could
+		// not confirm. Its fences are still held; only the restart settles it.
+		r.settleCommittedStorageTransition(job, job.ProgressCurrent, job.ProgressTotal, false)
+		return
 	}
 	if job.CancelRequested {
-		r.cancelJob(job.ID, job.ProgressCurrent, job.ProgressTotal, "Library metadata refresh canceled")
+		message := "Library metadata refresh canceled"
+		if job.JobType == JobTypeStorageTransition {
+			message = "Storage transition canceled; verified copy checkpoints retained"
+			if recorder, ok := r.storageTransition.(storageTransitionCancellationRecorder); ok {
+				var req StorageTransitionRequest
+				if err := json.Unmarshal(job.RequestPayload, &req); err != nil {
+					slog.Warn("admin jobs: decode queued storage transition cancellation", "job_id", job.ID, "error", err)
+					return
+				}
+				cancelCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				err := recorder.CancelStorageTransition(cancelCtx, req)
+				cancel()
+				if errors.Is(err, ErrStorageTransitionAlreadyCommitted) {
+					// The transition committed before this cancellation was seen.
+					r.settleCommittedStorageTransition(job, job.ProgressCurrent, job.ProgressTotal, true)
+					return
+				}
+				if err != nil {
+					slog.Warn("admin jobs: release queued storage transition", "job_id", job.ID, "error", err)
+					return
+				}
+			}
+		}
+		r.cancelJob(job.ID, job.ProgressCurrent, job.ProgressTotal, message)
 		return
 	}
 	r.publishJob(context.Background(), notifications.TypeJobProgress, job)
@@ -205,9 +313,207 @@ func (r *Runner) runNext() {
 		r.executeTemplateBundleApply(job)
 	case JobTypeImageCacheCleanup:
 		r.executeImageCacheCleanup(job)
+	case JobTypeStorageTransition:
+		r.executeStorageTransition(job)
 	default:
 		r.failJob(job.ID, 0, 0, "Admin job failed", "unsupported admin job type")
 	}
+}
+
+func (r *Runner) executeStorageTransition(job *models.AdminJob) {
+	if r.storageTransition == nil {
+		r.failJob(job.ID, 0, 0, "Storage transition failed", "storage transition executor is not configured")
+		return
+	}
+	var req StorageTransitionRequest
+	if err := json.Unmarshal(job.RequestPayload, &req); err != nil {
+		r.failJob(job.ID, 0, 0, "Storage transition failed", "invalid transition request: "+err.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.executionContext(), storageTransitionTimeout)
+	defer cancel()
+	go func() {
+		ticker := time.NewTicker(r.heartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				current, err := r.repo.GetByID(ctx, job.ID)
+				if err == nil && (current.CancelRequested || current.ClaimGeneration != job.ClaimGeneration) {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	unregisterCancel := r.cancelRegistry.Register(job.ID, cancel)
+	defer unregisterCancel()
+	heartbeatStop := make(chan struct{})
+	go r.heartbeatLoop(ctx, job.ID, heartbeatStop)
+	defer close(heartbeatStop)
+	current, total := 0, 0
+	phase := "preparing"
+	result, err := r.storageTransition.ExecuteStorageTransition(ctx, req, func(progress StorageTransitionProgress) {
+		current, total, phase = progress.Current, progress.Total, progress.Phase
+		receipt := StorageTransitionReceipt{Phase: progress.Phase, VerifiedObjects: max(progress.Current, 0), ClaimGeneration: job.ClaimGeneration}
+		if updateErr := r.repo.UpdateProgressResult(ctx, job.ID, current, total, progress.Message, receipt); updateErr != nil {
+			slog.Warn("admin jobs: failed to update storage transition progress", "job_id", job.ID, "error", updateErr)
+			return
+		}
+		r.publishJobByID(ctx, notifications.TypeJobProgress, job.ID)
+	})
+	if errors.Is(err, ErrStorageTransitionAlreadyCommitted) {
+		r.settleCommittedStorageTransition(job, current, total, true)
+		return
+	}
+	if err != nil {
+		if errors.Is(ctx.Err(), context.Canceled) {
+			r.cancelJob(job.ID, current, total, "Storage transition canceled; verified copy checkpoints retained")
+			return
+		}
+		r.failJobWithResult(job.ID, current, total, "Storage transition failed", err.Error(), StorageTransitionReceipt{
+			Phase: "failed", VerifiedObjects: max(current, 0), ClaimGeneration: job.ClaimGeneration, FailureCategory: storageTransitionFailureCategory(phase),
+		})
+		return
+	}
+	if total == 0 {
+		current, total = 1, 1
+	}
+	// ExecuteStorageTransition only returns success after the new storage
+	// settings have committed. From that point onward the source mutation fences
+	// intentionally remain held until this process exits, so requesting the
+	// restart must not depend on the best-effort job receipt write below. In
+	// particular, a canceled context or a transient database outage must not
+	// leave the old process running indefinitely with storage writes blocked.
+	message := "Storage transition completed; restarting Silo"
+	manual := r.requestStorageTransitionRestartOnce(job.ID)
+	if uncertain, ok := result.(storageTransitionCommitResult); ok && uncertain.StorageTransitionCommitUnknown() {
+		message = "Storage commit outcome is unknown; restarting Silo to recover safely"
+		if manual {
+			message = "Storage commit outcome is unknown; automatic restart unavailable — restart Silo manually"
+		}
+		if structured, ok := result.(storageTransitionRestartResult); ok {
+			result = structured.WithStorageTransitionRestartReceipt(manual, job.ClaimGeneration)
+		}
+		r.holdStorageTransitionForRestart(job.ID, current, total, message, result)
+		return
+	}
+	if manual {
+		message = "Storage transition committed; automatic restart unavailable — restart Silo manually"
+	}
+	if structured, ok := result.(storageTransitionRestartResult); ok {
+		result = structured.WithStorageTransitionRestartReceipt(manual, job.ClaimGeneration)
+	}
+	completeCtx, completeCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer completeCancel()
+	if err := r.repo.CompleteCommittedStorageTransition(completeCtx, job.ID, CompleteJobInput{ResultPayload: result, Message: message, ProgressCurrent: current, ProgressTotal: total, ExpiresAt: time.Now().UTC().Add(r.retention)}); err != nil {
+		slog.Warn("admin jobs: failed to complete storage transition", "job_id", job.ID, "error", err)
+		r.keepStorageTransitionReceiptAlive(job.ID)
+		return
+	}
+	r.publishJobByID(completeCtx, notifications.TypeJobCompleted, job.ID)
+}
+
+func storageTransitionFailureCategory(phase string) string {
+	switch phase {
+	case "checking_target":
+		return "target_check_failed"
+	case "copying":
+		return "copy_failed"
+	case "verifying":
+		return "verification_failed"
+	case "committing", storageTransitionPhaseRestartPending:
+		return "commit_failed"
+	default:
+		return "preparation_failed"
+	}
+}
+
+// A possibly committed transition keeps its source mutation fences until the
+// process exits. Keep its running receipt alive for the same period so this
+// process cannot reclaim it while those fences are still held. A restart ends
+// the heartbeat and lets boot finalization or stale job recovery decide what
+// the database actually committed.
+func (r *Runner) keepStorageTransitionReceiptAlive(jobID string) {
+	go r.heartbeatLoop(context.Background(), jobID, r.stop)
+}
+
+func (r *Runner) storageRestartPending() bool {
+	if r.storageRestart == nil {
+		return false
+	}
+	r.storageRestart.mu.Lock()
+	defer r.storageRestart.mu.Unlock()
+	return r.storageRestart.pending
+}
+
+// requestStorageTransitionRestartOnce asks the host to restart after a commit
+// and reports whether the administrator must restart Silo by hand. A second
+// request in the same process reuses the first outcome: the host refuses a
+// repeated request, which would otherwise read as a missing restart callback.
+func (r *Runner) requestStorageTransitionRestartOnce(jobID string) (manual bool) {
+	state := r.storageRestart
+	if state == nil {
+		state = &storageRestartState{}
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.pending {
+		return state.manual
+	}
+	if err := r.requestStorageTransitionRestart(jobID); err != nil {
+		slog.Warn("admin jobs: storage transition requires a manual restart", "job_id", jobID, "error", err)
+		state.manual = true
+	}
+	state.pending = true
+	return state.manual
+}
+
+// settleCommittedStorageTransition handles a claim that must not execute: its
+// transition already committed, or this process committed or could not confirm
+// it and still holds the source fences. The claim records the restart receipt
+// and keeps it alive; after the restart, boot recovery completes a committed
+// job and stale recovery requeues one whose commit did not apply.
+func (r *Runner) settleCommittedStorageTransition(job *models.AdminJob, current, total int, committed bool) {
+	manual := r.requestStorageTransitionRestartOnce(job.ID)
+	state := "Storage transition is waiting for a restart"
+	if committed {
+		state = "Storage transition committed"
+	}
+	message := state + "; restarting Silo to finish recovery"
+	if manual {
+		message = state + "; automatic restart unavailable — restart Silo manually"
+	}
+	receipt := StorageTransitionReceipt{
+		Phase: storageTransitionPhaseRestartPending, VerifiedObjects: max(current, 0),
+		ClaimGeneration: job.ClaimGeneration, RestartRequired: true, ManualRestartRequired: manual,
+	}
+	r.holdStorageTransitionForRestart(job.ID, current, total, message, receipt)
+}
+
+// holdStorageTransitionForRestart records the receipt, clearing any pending
+// cancellation, and keeps it alive until the process exits.
+func (r *Runner) holdStorageTransitionForRestart(jobID string, current, total int, message string, result any) {
+	updateCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := r.repo.HoldStorageTransitionForRestart(updateCtx, jobID, current, total, message, result); err != nil {
+		slog.Warn("admin jobs: failed to record storage transition restart receipt", "job_id", jobID, "error", err)
+	} else {
+		r.publishJobByID(updateCtx, notifications.TypeJobProgress, jobID)
+	}
+	r.keepStorageTransitionReceiptAlive(jobID)
+}
+
+func (r *Runner) requestStorageTransitionRestart(jobID string) error {
+	if r.storageTransitionCommitted == nil {
+		return errors.New("server restart callback is not configured")
+	}
+	if err := r.storageTransitionCommitted(context.Background()); err != nil {
+		return fmt.Errorf("request server restart for job %s: %w", jobID, err)
+	}
+	return nil
 }
 
 func (r *Runner) executeDeleteLibrary(job *models.AdminJob) {
@@ -252,7 +558,9 @@ func (r *Runner) executeDeleteLibrary(job *models.AdminJob) {
 		result.ImageCleanupJobID = cleanupJob.ID
 	}
 
-	if err := r.repo.Complete(ctx, job.ID, CompleteJobInput{
+	finishCtx, finishCancel := r.finalizeContext()
+	defer finishCancel()
+	if err := r.repo.Complete(finishCtx, job.ID, CompleteJobInput{
 		ResultPayload:   result,
 		Message:         "Library deletion completed",
 		ProgressCurrent: 5,
@@ -262,7 +570,7 @@ func (r *Runner) executeDeleteLibrary(job *models.AdminJob) {
 		slog.Warn("admin jobs: failed to mark library deletion complete", "job_id", job.ID, "error", err)
 		return
 	}
-	r.publishJobByID(ctx, notifications.TypeJobCompleted, job.ID)
+	r.publishJobByID(finishCtx, notifications.TypeJobCompleted, job.ID)
 }
 
 func (r *Runner) queueImageCacheCleanup(ctx context.Context, createdByUserID int, result *DeleteLibraryResult) *models.AdminJob {
@@ -305,42 +613,88 @@ func (r *Runner) executeImageCacheCleanup(job *models.AdminJob) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.executionContext(), imageCacheCleanupTimeout)
+	// Earlier claims recorded how far they got and what they deleted. Continue
+	// from there, whether the last claim yielded or its worker stopped
+	// heartbeating: starting over would repeat work that a large library
+	// cannot finish within any single claim.
+	total := len(req.Prefixes)
+	start := min(max(job.ProgressCurrent, 0), total)
+	var earlier ImageCacheCleanupResult
+	_ = json.Unmarshal(job.ResultPayload, &earlier)
+	totals := func(deleted ImageCacheCleanupResult) ImageCacheCleanupResult {
+		deleted.DeletedPrefixes += earlier.DeletedPrefixes
+		deleted.DeletedS3Objects += earlier.DeletedS3Objects
+		return deleted
+	}
+
+	// The cleanup has no overall time limit. Each claim works for at most one
+	// slice and then yields, so the runner can claim catalog, refresh and
+	// deletion jobs in between; the next claim continues where this one stops.
+	slice := r.imageCacheCleanupSlice
+	if slice <= 0 {
+		slice = imageCacheCleanupSlice
+	}
+	ctx, cancel := context.WithTimeout(r.executionContext(), slice)
 	defer cancel()
 
 	heartbeatStop := make(chan struct{})
 	go r.heartbeatLoop(ctx, job.ID, heartbeatStop)
 	defer close(heartbeatStop)
 
-	progress := func(current, total int, message string) {
-		if err := r.repo.UpdateProgress(ctx, job.ID, current, total, message); err != nil {
+	var lastUpdate time.Time
+	progress := func(next int, deleted ImageCacheCleanupResult) {
+		if next != total && time.Since(lastUpdate) < imageCacheCleanupProgressInterval {
+			return
+		}
+		lastUpdate = time.Now()
+		message := fmt.Sprintf("Cleaning cached images %d/%d", next, total)
+		if err := r.repo.UpdateProgressResult(ctx, job.ID, next, total, message, totals(deleted)); err != nil {
 			slog.Warn("admin jobs: failed to update image cache cleanup progress", "job_id", job.ID, "error", err)
 			return
 		}
 		r.publishJobByID(ctx, notifications.TypeJobProgress, job.ID)
 	}
 
-	result, err := r.imageCacheCleanup.Execute(ctx, req, progress)
-	if err != nil {
-		msg := err.Error()
-		if ctx.Err() != nil {
-			msg = fmt.Sprintf("timed out after %s: %s", imageCacheCleanupTimeout, msg)
-		}
-		r.failJob(job.ID, 0, len(req.Prefixes), "Image cache cleanup failed", msg)
-		return
-	}
+	next, deleted, err := r.imageCacheCleanup.Execute(ctx, req, start, progress)
+	result := totals(deleted)
 
-	if err := r.repo.Complete(ctx, job.ID, CompleteJobInput{
-		ResultPayload:   result,
-		Message:         "Cached image cleanup completed",
-		ProgressCurrent: len(req.Prefixes),
-		ProgressTotal:   len(req.Prefixes),
-		ExpiresAt:       time.Now().UTC().Add(r.retention),
-	}); err != nil {
-		slog.Warn("admin jobs: failed to mark image cache cleanup complete", "job_id", job.ID, "error", err)
-		return
+	finishCtx, finishCancel := r.finalizeContext()
+	defer finishCancel()
+	switch {
+	case err == nil:
+		if err := r.repo.Complete(finishCtx, job.ID, CompleteJobInput{
+			ResultPayload:   result,
+			Message:         "Cached image cleanup completed",
+			ProgressCurrent: total,
+			ProgressTotal:   total,
+			ExpiresAt:       time.Now().UTC().Add(r.retention),
+		}); err != nil {
+			slog.Warn("admin jobs: failed to mark image cache cleanup complete", "job_id", job.ID, "error", err)
+			return
+		}
+		r.publishJobByID(finishCtx, notifications.TypeJobCompleted, job.ID)
+	case errors.Is(err, context.DeadlineExceeded):
+		// A prefix cut off by the deadline may still have lost objects;
+		// that is progress, and the next claim deletes the rest.
+		if next == start && deleted.DeletedS3Objects == 0 {
+			result.StalledClaims = earlier.StalledClaims + 1
+			if result.StalledClaims >= imageCacheCleanupMaxStalledClaims {
+				r.failJobWithResult(job.ID, next, total, "Image cache cleanup failed",
+					fmt.Sprintf("no cached image deleted in %d consecutive claims of %s", result.StalledClaims, slice), result)
+				return
+			}
+			slog.Warn("admin jobs: image cache cleanup deleted nothing this claim", "job_id", job.ID,
+				"prefix_index", next, "stalled_claims", result.StalledClaims)
+		}
+		message := fmt.Sprintf("Cleaning cached images %d/%d", next, total)
+		if err := r.repo.Yield(finishCtx, job.ID, next, total, message, result); err != nil {
+			slog.Warn("admin jobs: failed to yield image cache cleanup", "job_id", job.ID, "error", err)
+			return
+		}
+		r.publishJobByID(finishCtx, notifications.TypeJobProgress, job.ID)
+	default:
+		r.failJobWithResult(job.ID, next, total, "Image cache cleanup failed", err.Error(), result)
 	}
-	r.publishJobByID(ctx, notifications.TypeJobCompleted, job.ID)
 }
 
 func (r *Runner) executeLibraryRefresh(job *models.AdminJob) {
@@ -354,8 +708,12 @@ func (r *Runner) executeLibraryRefresh(job *models.AdminJob) {
 		r.failJob(job.ID, 0, 0, "Library metadata refresh failed", err.Error())
 		return
 	}
+	// A later claim recovers a job from a worker that stopped heartbeating.
+	// That worker may still hold the library lock, so wait for it to let go
+	// rather than failing the job against its own earlier attempt.
+	req.waitForLibraryLock = job.ClaimGeneration > 1
 
-	ctx, cancel := context.WithTimeout(r.executionContext(), libraryRefreshTimeout)
+	ctx, cancel := context.WithTimeout(r.executionContext(), LibraryRefreshTimeout)
 	defer cancel()
 	go func() {
 		ticker := time.NewTicker(r.heartbeatInterval)
@@ -409,13 +767,15 @@ func (r *Runner) executeLibraryRefresh(job *models.AdminJob) {
 		}
 		msg := err.Error()
 		if ctx.Err() != nil {
-			msg = fmt.Sprintf("timed out after %s: %s", libraryRefreshTimeout, msg)
+			msg = fmt.Sprintf("timed out after %s: %s", LibraryRefreshTimeout, msg)
 		}
 		r.failJob(job.ID, current, total, "Library metadata refresh failed", msg)
 		return
 	}
 
-	if err := r.repo.Complete(ctx, job.ID, CompleteJobInput{
+	finishCtx, finishCancel := r.finalizeContext()
+	defer finishCancel()
+	if err := r.repo.Complete(finishCtx, job.ID, CompleteJobInput{
 		ResultPayload:   result,
 		Message:         "Library metadata refresh completed",
 		ProgressCurrent: current,
@@ -425,7 +785,7 @@ func (r *Runner) executeLibraryRefresh(job *models.AdminJob) {
 		slog.Warn("admin jobs: failed to complete library refresh", "job_id", job.ID, "error", err)
 		return
 	}
-	r.publishJobByID(ctx, notifications.TypeJobCompleted, job.ID)
+	r.publishJobByID(finishCtx, notifications.TypeJobCompleted, job.ID)
 }
 
 func (r *Runner) executeTemplateBundleApply(job *models.AdminJob) {
@@ -478,7 +838,9 @@ func (r *Runner) executeTemplateBundleApply(job *models.AdminJob) {
 		return
 	}
 
-	if err := r.repo.Complete(ctx, job.ID, CompleteJobInput{
+	finishCtx, finishCancel := r.finalizeContext()
+	defer finishCancel()
+	if err := r.repo.Complete(finishCtx, job.ID, CompleteJobInput{
 		ResultPayload:   result,
 		Message:         "Collection defaults applied",
 		ProgressCurrent: lastCurrent,
@@ -488,7 +850,7 @@ func (r *Runner) executeTemplateBundleApply(job *models.AdminJob) {
 		slog.Warn("admin jobs: failed to complete template bundle apply", "job_id", job.ID, "error", err)
 		return
 	}
-	r.publishJobByID(ctx, notifications.TypeJobCompleted, job.ID)
+	r.publishJobByID(finishCtx, notifications.TypeJobCompleted, job.ID)
 }
 
 func (r *Runner) requeueStaleJobs() {
@@ -582,7 +944,9 @@ func (r *Runner) executeCatalogExport(job *models.AdminJob) {
 		return
 	}
 
-	if err := r.repo.Complete(uploadCtx, job.ID, CompleteJobInput{
+	finishCtx, finishCancel := r.finalizeContext()
+	defer finishCancel()
+	if err := r.repo.Complete(finishCtx, job.ID, CompleteJobInput{
 		ResultPayload:     summary,
 		Message:           "Catalog export completed",
 		ProgressCurrent:   lastProgress.Total,
@@ -595,7 +959,7 @@ func (r *Runner) executeCatalogExport(job *models.AdminJob) {
 		slog.Warn("admin jobs: failed to mark export complete", "job_id", job.ID, "error", err)
 		return
 	}
-	r.publishJobByID(uploadCtx, notifications.TypeJobCompleted, job.ID)
+	r.publishJobByID(finishCtx, notifications.TypeJobCompleted, job.ID)
 }
 
 func (r *Runner) executeCatalogImport(job *models.AdminJob) {
@@ -915,12 +1279,17 @@ func (r *Runner) publishJob(ctx context.Context, eventType notifications.Type, j
 }
 
 func (r *Runner) failJob(id string, current, total int, message, errorMessage string) {
-	ctx, cancel := context.WithTimeout(r.executionContext(), 30*time.Second)
+	r.failJobWithResult(id, current, total, message, errorMessage, nil)
+}
+
+func (r *Runner) failJobWithResult(id string, current, total int, message, errorMessage string, result any) {
+	ctx, cancel := r.finalizeContext()
 	defer cancel()
 
 	if err := r.repo.Fail(ctx, id, FailJobInput{
 		Message:         message,
 		ErrorMessage:    errorMessage,
+		ResultPayload:   result,
 		ProgressCurrent: current,
 		ProgressTotal:   total,
 		ExpiresAt:       time.Now().UTC().Add(r.retention),
@@ -932,7 +1301,7 @@ func (r *Runner) failJob(id string, current, total int, message, errorMessage st
 }
 
 func (r *Runner) cancelJob(id string, current, total int, message string) {
-	ctx, cancel := context.WithTimeout(r.executionContext(), 30*time.Second)
+	ctx, cancel := r.finalizeContext()
 	defer cancel()
 	if err := r.repo.UpdateProgress(ctx, id, current, total, message); err != nil {
 		slog.Warn("admin jobs: failed to update cancellation progress", "job_id", id, "error", err)
@@ -950,6 +1319,14 @@ func (r *Runner) cancelJob(id string, current, total int, message string) {
 			slog.Warn("admin jobs: failed to publish job cancellation", "job_id", id, "error", err)
 		}
 	}
+}
+
+// finalizeContext bounds recording a job's outcome. It never derives from the
+// job's execution context: once that context has timed out or been canceled,
+// the write would fail, the row would stay running, and stale recovery would
+// run the job again.
+func (r *Runner) finalizeContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(r.executionContext(), 30*time.Second)
 }
 
 func (r *Runner) executionContext() context.Context {

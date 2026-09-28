@@ -14,11 +14,8 @@ interface BrandingApiResponse {
   server_name?: string;
   login_subtitle?: string;
   accent_color?: string;
-  default_theme?: string;
   wordmark_url?: string;
-  wordmark_light_url?: string;
   mark_url?: string;
-  mark_light_url?: string;
   favicon_url?: string;
   login_bg_url?: string;
   storage_available?: boolean;
@@ -29,15 +26,9 @@ export interface BrandingContextValue {
   loginSubtitle: string;
   /** Brand accent color (hex), or null when unset. */
   accentColor: string | null;
-  /** Admin-selected default theme id, or null when unset. */
-  defaultTheme: string | null;
   /** Custom asset URLs (stable, cache-busted) or null to use bundled defaults. */
   wordmarkUrl: string | null;
   markUrl: string | null;
-  /** Light-theme variants of the logo assets, or null to fall back to the
-   * main asset (and then the bundled default). */
-  wordmarkLightUrl: string | null;
-  markLightUrl: string | null;
   faviconUrl: string | null;
   loginBgUrl: string | null;
   /** Whether the running server has an active object-store client for assets. */
@@ -48,11 +39,8 @@ const DEFAULT_BRANDING: BrandingContextValue = {
   serverName: DEFAULT_SERVER_NAME,
   loginSubtitle: DEFAULT_LOGIN_SUBTITLE,
   accentColor: null,
-  defaultTheme: null,
   wordmarkUrl: null,
   markUrl: null,
-  wordmarkLightUrl: null,
-  markLightUrl: null,
   faviconUrl: null,
   loginBgUrl: null,
   storageAvailable: false,
@@ -67,11 +55,8 @@ function mapResponse(data: BrandingApiResponse | undefined): BrandingContextValu
     serverName: data?.server_name || DEFAULT_SERVER_NAME,
     loginSubtitle: data?.login_subtitle || DEFAULT_LOGIN_SUBTITLE,
     accentColor: data?.accent_color || null,
-    defaultTheme: data?.default_theme || null,
     wordmarkUrl: data?.wordmark_url || null,
     markUrl: data?.mark_url || null,
-    wordmarkLightUrl: data?.wordmark_light_url || null,
-    markLightUrl: data?.mark_light_url || null,
     faviconUrl: data?.favicon_url || null,
     loginBgUrl: data?.login_bg_url || null,
     storageAvailable: data?.storage_available ?? false,

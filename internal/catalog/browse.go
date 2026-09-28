@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -21,6 +22,8 @@ const (
 	BrowseSortTitle         = "sort_title"
 	BrowseSortReleaseDate   = "release_date"
 	BrowseSortCreatedAt     = "created_at"
+	BrowseSortYear          = "year"
+	BrowseSortRatingIMDB    = "rating_imdb"
 	BrowseOrderDescending   = "desc"
 )
 
@@ -42,7 +45,8 @@ type BrowseFilters struct {
 	LibraryID          int      // filter by specific library
 	LibraryIDs         []int    // accessible library IDs (nil = all)
 	DisabledLibraryIDs []int    // libraries whose membership globally hides an item
-	MaxContentRating   string   // maximum allowed content rating ceiling
+	// MaturityLimits mirrors AccessFilter.MaturityLimits.
+	access.MaturityLimits
 	YearMin            int      // minimum year (inclusive)
 	YearMax            int      // maximum year (inclusive)
 	ContentRating      []string // comma-separated content ratings (e.g., PG-13, TV-MA)
@@ -55,6 +59,24 @@ type BrowseFilters struct {
 	Offset             int
 	SnapshotAt         *time.Time // pagination fence: exclude items created after this timestamp
 	RequireBackdrop    bool       // only return items with a non-empty backdrop_path (Jellyfin ImageTypes=Backdrop filter)
+	AudioLanguages     []string   // any accessible file has an audio track in one of these languages
+	SubtitleLanguages  []string   // any accessible file has an embedded or external subtitle in one of these languages
+	MaxPlaybackQuality string     // viewer quality ceiling for file-level language predicates and facets
+	// Jellyfin-compat predicates, applied by appendCompatBrowsePredicates.
+	// NameLessThan and NameStartsWithOrGreater compare the sort_title order key
+	// so a count of the preceding rows is a grid position (letter jump).
+	NameLessThan            string
+	NameStartsWithOrGreater string
+	ExcludeContentIDs       []string
+	Studios                 []string // any matching studio name
+	OfficialRatings         []string // exact content ratings
+	MinCommunityRating      float64  // minimum rating_imdb, the compat CommunityRating
+	MinPremiereDate         string   // inclusive YYYY-MM-DD on release/first-air date
+	MaxPremiereDate         string   // inclusive YYYY-MM-DD on release/first-air date
+	// ScopeFacetFilesToAccess limits the audio/subtitle language facets to
+	// files the viewer may play (library lists and MaxPlaybackQuality), as the
+	// Jellyfin-compat Filters2 languages must agree with its language filters.
+	ScopeFacetFilesToAccess bool
 	// Internal source scope stays in SQL instead of materializing an ID allowlist.
 	contentSourceSQL  string
 	contentSourceArgs []any
@@ -143,6 +165,24 @@ func (r *BrowseRepository) browse(ctx context.Context, filters BrowseFilters, in
 		Total:   total,
 		HasMore: hasMore,
 	}, nil
+}
+
+// BrowseCount returns the total a browse of filters would report without
+// fetching a page (Jellyfin's Limit=0).
+func (r *BrowseRepository) BrowseCount(ctx context.Context, filters BrowseFilters) (int, error) {
+	plan, earlyEmpty, err := r.buildBrowsePlan(filters)
+	if err != nil {
+		return 0, err
+	}
+	if earlyEmpty {
+		return 0, nil
+	}
+	countSQL, countArgs := plan.countSQL()
+	var total int
+	if err := r.pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
+		return 0, fmt.Errorf("count browse: %w", err)
+	}
+	return total, nil
 }
 
 // BrowseRecentlyAddedAcrossLibraries serves a recently_added browse spanning
@@ -529,7 +569,7 @@ func (r *BrowseRepository) buildBrowsePlan(filters BrowseFilters) (browseQueryPl
 		argIdx++
 	}
 
-	applyAccessFilter("mi", AccessFilter{MaxContentRating: filters.MaxContentRating}, &conditions, &args, &argIdx)
+	applyAccessFilter("mi", AccessFilter{MaturityLimits: filters.MaturityLimits}, &conditions, &args, &argIdx)
 
 	// Manga chapters (type='ebook' rows linked into a manga series) are internal
 	// sub-units and must never surface as standalone catalog items.
@@ -725,7 +765,7 @@ func filterWhereClauseForSource(filters BrowseFilters, baseRelation string, medi
 		appendEpisodeParentLibraryAccessByEpisodeID(libraryContentExpr, parentAccess, &conditions, &args, &argIdx)
 	}
 
-	applyAccessFilter("mi", AccessFilter{MaxContentRating: filters.MaxContentRating}, &conditions, &args, &argIdx)
+	applyAccessFilter("mi", AccessFilter{MaturityLimits: filters.MaturityLimits}, &conditions, &args, &argIdx)
 
 	fromClause = baseRelation
 	if filters.PersonID > 0 {
@@ -939,6 +979,7 @@ func listSubtitleLanguagesWithSource(
 		return nil, nil
 	}
 	mediaFileJoin := catalogMediaFileJoinConditionForScope(mediaScope, "mf", "mi")
+	fileAccess, args := facetFileAccessSQL(filters, args)
 
 	// Embedded subtitles use the migration 104 generated text[]
 	// `subtitle_language_codes`; external subs still need a JSONB unnest
@@ -957,7 +998,7 @@ func listSubtitleLanguagesWithSource(
 			JOIN media_files mf ON %s
 			CROSS JOIN LATERAL UNNEST(mf.subtitle_language_codes) AS lang
 			%s
-			  AND mf.missing_since IS NULL
+			  AND mf.missing_since IS NULL%s
 
 			UNION ALL
 
@@ -966,12 +1007,12 @@ func listSubtitleLanguagesWithSource(
 			JOIN media_files mf ON %s
 			CROSS JOIN LATERAL jsonb_array_elements(COALESCE(mf.external_subtitles, '[]'::jsonb)) AS track
 			%s
-			  AND mf.missing_since IS NULL
+			  AND mf.missing_since IS NULL%s
 		) languages
 		WHERE value IS NOT NULL AND value <> ''
 		ORDER BY value ASC
 		LIMIT %d
-	`, fromClause, mediaFileJoin, browseFilterPrefix(whereClause), fromClause, mediaFileJoin, browseFilterPrefix(whereClause), catalogFacetMaxValues)
+	`, fromClause, mediaFileJoin, browseFilterPrefix(whereClause), fileAccess, fromClause, mediaFileJoin, browseFilterPrefix(whereClause), fileAccess, catalogFacetMaxValues)
 	values, err := queryDistinctStrings(ctx, pool, query, args)
 	if err != nil {
 		return nil, err
@@ -1296,6 +1337,7 @@ func listDistinctJSONBLanguageWithSource(
 		return nil, nil
 	}
 	mediaFileJoin := catalogMediaFileJoinConditionForScope(mediaScope, "mf", "mi")
+	fileAccess, args := facetFileAccessSQL(filters, args)
 
 	// Migration 104 added STORED text[] generated columns derived from the
 	// JSONB tracks. Use them when available so this listing UNNESTs an
@@ -1309,12 +1351,12 @@ func listDistinctJSONBLanguageWithSource(
 			JOIN media_files mf ON %s
 			CROSS JOIN LATERAL UNNEST(mf.%s) AS lang
 			%s
-			  AND mf.missing_since IS NULL
+			  AND mf.missing_since IS NULL%s
 			  AND lang IS NOT NULL
 			  AND lang <> ''
 			ORDER BY value ASC
 			LIMIT %d
-		`, fromClause, mediaFileJoin, arrayColumn, browseFilterPrefix(whereClause), catalogFacetMaxValues)
+		`, fromClause, mediaFileJoin, arrayColumn, browseFilterPrefix(whereClause), fileAccess, catalogFacetMaxValues)
 		return queryDistinctStrings(ctx, pool, query, args)
 	}
 
@@ -1324,11 +1366,11 @@ func listDistinctJSONBLanguageWithSource(
 		JOIN media_files mf ON %s
 		CROSS JOIN LATERAL jsonb_array_elements(COALESCE(mf.%s, '[]'::jsonb)) AS track
 		%s
-		  AND mf.missing_since IS NULL
+		  AND mf.missing_since IS NULL%s
 		  AND COALESCE(track->>'language', '') <> ''
 		ORDER BY value ASC
 		LIMIT %d
-	`, fromClause, mediaFileJoin, column, browseFilterPrefix(whereClause), catalogFacetMaxValues)
+	`, fromClause, mediaFileJoin, column, browseFilterPrefix(whereClause), fileAccess, catalogFacetMaxValues)
 	return queryDistinctStrings(ctx, pool, query, args)
 }
 
@@ -1388,11 +1430,20 @@ func browseItemColumns(alias string) string {
 		"studios", "networks", "countries", "keywords", "original_language", "release_date::text", "first_air_date", "last_air_date",
 		"show_status",
 		"matched_at", "episode_metadata_incomplete", "episode_metadata_last_checked_at", "status", "created_at", "updated_at",
+		advisoryAgeColumn, advisorySourceColumn,
 	}
 	prefixed := make([]string, len(cols))
 	for i, col := range cols {
 		if col == "last_air_date" {
 			prefixed[i] = effectiveLastAirDateExpr(alias)
+			continue
+		}
+		if col == advisorySourceColumn {
+			// Nullable in the table but a plain string on MediaItem, so it is
+			// coalesced here the way item_repo coalesces its nullable string
+			// columns. browseGroupByColumns groups by the bare column, which
+			// this expression depends on and nothing else.
+			prefixed[i] = "COALESCE(" + alias + "." + advisorySourceColumn + ", '') AS " + advisorySourceColumn
 			continue
 		}
 		prefixed[i] = alias + "." + col
@@ -1470,6 +1521,7 @@ func browseGroupByColumns(alias string) string {
 		"studios", "networks", "countries", "keywords", "original_language", "release_date::text", "first_air_date", "last_air_date",
 		"show_status",
 		"matched_at", "episode_metadata_incomplete", "episode_metadata_last_checked_at", "status", "created_at", "updated_at",
+		advisoryAgeColumn, advisorySourceColumn,
 	}
 	prefixed := make([]string, len(cols))
 	for i, col := range cols {
@@ -1534,6 +1586,8 @@ func scanBrowseItems(rows pgx.Rows) ([]*models.MediaItem, error) {
 			&item.Status,
 			&item.CreatedAt,
 			&item.UpdatedAt,
+			&item.AdvisoryAge,
+			&item.AdvisorySource,
 			&item.MangaChapterCount,
 			&item.MangaVolumeCount,
 			&item.AddedAt,
@@ -1687,6 +1741,13 @@ func splitTypes(s string) []string {
 	return result
 }
 
+// sortTitleKeyExpr is the sort_title order key (see the sort_title ORDER BY).
+const sortTitleKeyExpr = "LOWER(COALESCE(NULLIF(BTRIM(mi.sort_title), ''), mi.title))"
+
+// premiereDateKeyExpr is the release_date order key; first_air_date is text, so
+// both sides compare as ISO dates.
+const premiereDateKeyExpr = "COALESCE(mi.release_date::text, NULLIF(BTRIM(mi.first_air_date), ''))"
+
 func appendCompatBrowsePredicates(filters BrowseFilters, conditions *[]string, args *[]any, argIdx *int) {
 	add := func(sql string, value any) {
 		*conditions = append(*conditions, fmt.Sprintf(sql, *argIdx))
@@ -1701,6 +1762,52 @@ func appendCompatBrowsePredicates(filters BrowseFilters, conditions *[]string, a
 	}
 	if filters.SearchTerm != "" {
 		add("mi.title ILIKE $%d ESCAPE '\\'", "%"+strings.TrimSuffix(likePrefixPattern(filters.SearchTerm), "%")+"%")
+	}
+	if value := strings.TrimSpace(filters.NameLessThan); value != "" {
+		add(sortTitleKeyExpr+" < LOWER($%d)", value)
+	}
+	if value := strings.TrimSpace(filters.NameStartsWithOrGreater); value != "" {
+		add(sortTitleKeyExpr+" >= LOWER($%d)", value)
+	}
+	if len(filters.ExcludeContentIDs) > 0 {
+		add("NOT (mi.content_id = ANY($%d::text[]))", filters.ExcludeContentIDs)
+	}
+	if len(filters.Studios) > 0 {
+		add("mi.studios && $%d::text[]", filters.Studios)
+	}
+	if len(filters.OfficialRatings) > 0 {
+		add("mi.content_rating = ANY($%d::text[])", filters.OfficialRatings)
+	}
+	if filters.MinCommunityRating > 0 {
+		add("mi.rating_imdb >= $%d", filters.MinCommunityRating)
+	}
+	if filters.MinPremiereDate != "" {
+		add(premiereDateKeyExpr+" >= $%d", filters.MinPremiereDate)
+	}
+	if filters.MaxPremiereDate != "" {
+		add(premiereDateKeyExpr+" <= $%d", filters.MaxPremiereDate)
+	}
+	audioCodes := languageFilterCodes(filters.AudioLanguages)
+	subtitleCodes := languageFilterCodes(filters.SubtitleLanguages)
+	if len(audioCodes) > 0 || len(subtitleCodes) > 0 {
+		bind := func(value any) int {
+			*args = append(*args, value)
+			*argIdx++
+			return *argIdx - 1
+		}
+		// Only files the viewer may play count, matching the versions the
+		// detail path lists.
+		fileScope := playableFileExists
+		for _, condition := range mediaFileAccessConditions("mf", compatMediaFileAccess(filters), bind) {
+			fileScope += " AND " + condition
+		}
+		mediaFileJoin := catalogMediaFileJoinConditionForScope(filters.Type, "mf", "mi")
+		if len(audioCodes) > 0 {
+			*conditions = append(*conditions, fmt.Sprintf(`EXISTS (SELECT 1 FROM media_files mf WHERE %s AND %s AND mf.audio_language_codes && $%d::text[])`, mediaFileJoin, fileScope, bind(audioCodes)))
+		}
+		if len(subtitleCodes) > 0 {
+			*conditions = append(*conditions, fmt.Sprintf(`EXISTS (SELECT 1 FROM media_files mf WHERE %s AND %s AND (mf.subtitle_language_codes && $%[3]d::text[] OR EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(mf.external_subtitles, '[]'::jsonb)) AS track WHERE LOWER(COALESCE(track->>'language', '')) = ANY($%[3]d::text[]))))`, mediaFileJoin, fileScope, bind(subtitleCodes)))
+		}
 	}
 	if !filters.IsFavorite && filters.IsPlayed == nil && !filters.IsResumable {
 		return
@@ -1732,6 +1839,60 @@ func appendCompatBrowsePredicates(filters BrowseFilters, conditions *[]string, a
 	if filters.IsResumable {
 		*conditions = append(*conditions, fmt.Sprintf(`EXISTS (SELECT 1 FROM user_watch_progress uwp WHERE uwp.user_id = $%d AND uwp.profile_id = $%d AND uwp.media_item_id = mi.content_id AND uwp.position_seconds > 0 AND NOT uwp.completed AND NOT EXISTS (SELECT 1 FROM user_history_hidden_items hhi WHERE hhi.user_id = uwp.user_id AND hhi.profile_id = uwp.profile_id AND hhi.media_item_id = uwp.media_item_id AND uwp.updated_at <= hhi.hidden_before))`, userArg, profileArg))
 	}
+}
+
+// compatMediaFileAccess is the file-level part of the viewer's access carried
+// on BrowseFilters.
+func compatMediaFileAccess(filters BrowseFilters) AccessFilter {
+	return AccessFilter{
+		AllowedLibraryIDs:  filters.LibraryIDs,
+		DisabledLibraryIDs: filters.DisabledLibraryIDs,
+		MaxPlaybackQuality: filters.MaxPlaybackQuality,
+	}
+}
+
+// facetFileAccessSQL returns " AND ..." conditions restricting a facet
+// query's media_files alias mf to files the viewer may play, or "" when the
+// filters do not ask for it. Placeholders continue after args.
+func facetFileAccessSQL(filters BrowseFilters, args []any) (string, []any) {
+	if !filters.ScopeFacetFilesToAccess {
+		return "", args
+	}
+	conditions, args := MediaFileAccessSQL("mf", compatMediaFileAccess(filters), args)
+	if len(conditions) == 0 {
+		return "", args
+	}
+	return " AND " + strings.Join(conditions, " AND "), args
+}
+
+// languageFilterCodes lowercases requested track languages into the stored
+// form of media_files.audio_language_codes / subtitle_language_codes. Both the
+// canonical tag ("eng" -> "en") and the raw code are kept, because the stored
+// columns canonicalize only a fixed ISO 639-2 table and keep other codes as
+// written.
+func languageFilterCodes(values []string) []string {
+	out := make([]string, 0, len(values)*2)
+	seen := make(map[string]struct{}, len(values)*2)
+	addCode := func(code string) {
+		code = strings.ToLower(strings.TrimSpace(code))
+		if code == "" {
+			return
+		}
+		if _, dup := seen[code]; dup {
+			return
+		}
+		seen[code] = struct{}{}
+		out = append(out, code)
+	}
+	// External subtitle tags keep the spelling of their filename ("spa",
+	// "ger"), while facets offer the canonical code, so match every alias.
+	for _, value := range values {
+		for _, alias := range lang.CodeAliases(value) {
+			addCode(alias)
+		}
+		addCode(value)
+	}
+	return out
 }
 
 // ListYears returns release years from the same viewer-scoped facet relation.

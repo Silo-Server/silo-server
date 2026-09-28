@@ -16,6 +16,7 @@ import (
 
 type AdminTaskService interface {
 	ListTasks(bool) []taskmanager.TaskInfo
+	ListRelevantTasks(context.Context) []taskmanager.TaskInfo
 	GetTaskInfo(string) taskmanager.TaskInfo
 	StartTask(string) (taskmanager.TaskInfo, error)
 	CancelTask(string) error
@@ -39,13 +40,25 @@ type AdminTaskExecution struct {
 }
 
 type AdminTaskMarkerResult struct {
-	Submitted         int `json:"submitted"`
-	Skipped           int `json:"skipped"`
+	Submitted int `json:"submitted"`
+	Skipped   int `json:"skipped"`
+	// Invalid counts items the provider refused, such as a season it does not
+	// list. They are retried after 30 days rather than every run.
+	Invalid           int `json:"invalid"`
 	Failed            int `json:"failed"`
 	RetryAfterSeconds int `json:"retry_after_seconds"`
 }
+
+// AdminTaskStepResult reports one step of a task that runs several steps.
+// Error details stay in server logs, like other task failures.
+type AdminTaskStepResult struct {
+	Key    string `json:"key"`
+	Name   string `json:"name"`
+	Status string `json:"status" enum:"completed,failed"`
+}
 type AdminTaskExecutionSummary struct {
 	ResultData   *AdminTaskMarkerResult `json:"result_data,omitempty"`
+	Steps        []AdminTaskStepResult  `json:"steps,omitempty" doc:"Per-step outcomes for tasks that run several steps, such as database_maintenance."`
 	TaskKey      string                 `json:"task_key"`
 	StartedAt    Instant                `json:"started_at"`
 	CompletedAt  Instant                `json:"completed_at"`
@@ -120,6 +133,14 @@ func taskExecutionOf(e taskmanager.ExecutionResult) AdminTaskExecution {
 			out.ResultData = &result
 		}
 	}
+	if e.TaskKey == "database_maintenance" && len(e.ResultData) > 0 {
+		var result struct {
+			Steps []AdminTaskStepResult `json:"steps"`
+		}
+		if json.Unmarshal(e.ResultData, &result) == nil {
+			out.Steps = result.Steps
+		}
+	}
 	if e.Status == adminjob.StatusFailed {
 		out.ErrorMessage = "Task failed. Inspect administrator diagnostics for details."
 	}
@@ -178,12 +199,18 @@ func taskProblem(err error) error {
 		return serviceProblem(err)
 	}
 }
-func (reg *Registry) listAdminTasks(_ context.Context, in *AdminTasksInput) (*AdminTasksOutput, error) {
+func (reg *Registry) listAdminTasks(ctx context.Context, in *AdminTasksInput) (*AdminTasksOutput, error) {
 	if reg.deps.AdminTasks == nil {
 		return nil, unavailable("admin tasks")
 	}
 	items := []AdminTask{}
-	for _, t := range reg.deps.AdminTasks.ListTasks(in.IncludeHidden) {
+	var listed []taskmanager.TaskInfo
+	if in.IncludeHidden {
+		listed = reg.deps.AdminTasks.ListTasks(true)
+	} else {
+		listed = reg.deps.AdminTasks.ListRelevantTasks(ctx)
+	}
+	for _, t := range listed {
 		items = append(items, taskOf(t))
 	}
 	return &AdminTasksOutput{Body: Collection[AdminTask]{Items: items}}, nil

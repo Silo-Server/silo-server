@@ -11,6 +11,7 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
+import { Link } from "react-router";
 
 import FolderBrowser from "@/components/FolderBrowser";
 import PathAutocompleteInput from "@/components/PathAutocompleteInput";
@@ -25,11 +26,17 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { useLibraryRealtimeMonitoring } from "@/hooks/queries/admin/libraries";
 import { cn } from "@/lib/utils";
 import { extraKindGroupLabel, PROVIDER_TRAILER_KINDS } from "@/lib/extraKinds";
 import { LANGUAGES } from "@/player/utils/languageNames";
 
 import { LIBRARY_TYPES } from "./libraryTypes";
+import {
+  REALTIME_MONITORING_SETTINGS_PATH,
+  realtimeMonitoringNeedsAttention,
+  realtimeMonitoringStatusText,
+} from "./realtimeMonitoring";
 import { contentLevelLabel } from "./useLibraryForm";
 import type { LevelChainItem, LibraryFormController } from "./useLibraryForm";
 
@@ -182,6 +189,66 @@ export function FolderFields({ form }: { form: LibraryFormController }) {
         existingPaths={form.paths.filter((path) => path.trim())}
       />
     </div>
+  );
+}
+
+/**
+ * The library's real-time monitoring switch and the server's status line for
+ * it. It stays out of FolderFields, which the setup wizard also renders, so
+ * only the admin library editor fetches the monitoring status.
+ */
+export function RealtimeMonitoringFields({ form }: { form: LibraryFormController }) {
+  const { data: status } = useLibraryRealtimeMonitoring();
+  const serverOff = status?.server_enabled === false;
+  const { library } = form;
+  const entry = library
+    ? status?.libraries.find((candidate) => candidate.library_id === library.id)
+    : undefined;
+  // The status describes the saved switch, so an unsaved change hides it
+  // rather than contradicting it.
+  const hasUnsavedChange = form.realtimeMonitoring !== (library?.realtime_monitoring ?? true);
+
+  let footer: ReactNode = null;
+  if (serverOff) {
+    footer = (
+      <p className="text-muted-foreground text-xs">
+        Real-time monitoring is turned off server-wide. Turn it on in{" "}
+        <Link
+          to={REALTIME_MONITORING_SETTINGS_PATH}
+          className="text-foreground font-medium underline underline-offset-2"
+        >
+          Settings → Library &amp; Metadata
+        </Link>
+        .
+      </p>
+    );
+  } else if (entry && !hasUnsavedChange) {
+    footer = (
+      <p
+        className={cn(
+          "text-xs",
+          realtimeMonitoringNeedsAttention(entry) ? "text-warning" : "text-muted-foreground",
+        )}
+      >
+        Status: {realtimeMonitoringStatusText(entry)}
+      </p>
+    );
+  }
+
+  return (
+    <SettingCard
+      htmlFor="realtime-monitoring-switch"
+      title="Real-time monitoring"
+      description="Scan this library automatically when its files change."
+      footer={footer}
+    >
+      <Switch
+        id="realtime-monitoring-switch"
+        checked={form.realtimeMonitoring}
+        disabled={serverOff}
+        onCheckedChange={form.setRealtimeMonitoring}
+      />
+    </SettingCard>
   );
 }
 
@@ -406,11 +473,7 @@ export function AdvancedFields({
         </SettingCard>
       )}
       {form.settingSupport.introDetection && (
-        <SettingCard
-          htmlFor="intro-detection-switch"
-          title="Detect intro markers"
-          description="Runs background audio analysis for episodes in this library. Embedded intro chapters are used when available."
-        >
+        <SettingCard htmlFor="intro-detection-switch" {...markerDetectionCopy(form.settingSupport)}>
           <Switch
             id="intro-detection-switch"
             checked={form.introDetectionEnabled}
@@ -420,4 +483,30 @@ export function AdvancedFields({
       )}
     </div>
   );
+}
+
+// markerDetectionCopy describes what local marker detection covers in a
+// library: movies get best-effort end credits only, episodes get intros and
+// credits, and mixed libraries hold both.
+function markerDetectionCopy(support: {
+  creditsOnlyDetection: boolean;
+  movieCreditsDetection: boolean;
+}): { title: string; description: string } {
+  if (support.creditsOnlyDetection) {
+    return {
+      title: "Detect credits markers (best effort)",
+      description:
+        "Looks for end credits in movies in this library, from embedded chapters and the picture near the end. Some movies get no credits marker, or one that starts late. Needs Detect credits on in server settings.",
+    };
+  }
+  const episodes =
+    "Runs background audio analysis for episodes in this library. Embedded intro and credits chapters are used when available.";
+  const kinds =
+    "Detect intros and Detect credits in server settings choose which markers it finds.";
+  return {
+    title: "Detect intro and credits markers",
+    description: support.movieCreditsDetection
+      ? `${episodes} Movies get end credits only, on a best-effort basis. ${kinds}`
+      : `${episodes} ${kinds}`,
+  };
 }

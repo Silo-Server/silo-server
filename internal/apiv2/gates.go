@@ -227,6 +227,11 @@ func (d *denialWriter) problem() *Problem {
 		// keeps a type of its own rather than collapsing into permission_denied.
 		p = NewProblem(TypeProfileVerificationRequired,
 			"The declared profile is locked; verify it and retry with X-Profile-Token.")
+	case apimw.CodePasswordChangeRequired:
+		// Clients route to the password change on this type rather than
+		// treating the refusal as a missing permission.
+		p = NewProblem(TypePasswordChangeRequired,
+			"The account holds a temporary password; change it, then refresh the session.")
 	case legacyForbiddenCode, legacyDemoRestrictedCode:
 		p = NewProblem(TypePermissionDenied, safeDetail(legacy.Message, "The caller is not permitted to perform this operation."))
 	case TypeNotFound.ID:

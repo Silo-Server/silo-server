@@ -37,6 +37,12 @@ func (r *SubscriptionRepository) CreateOrGet(ctx context.Context, sub *Subscript
 	if err != nil {
 		return nil, err
 	}
+	// Clients patch a monitor they know, so a create that finds one (a monitor
+	// an earlier install left behind, say) asks for the series from scratch:
+	// forget the episodes deleted under it.
+	if _, err := tx.Exec(ctx, `DELETE FROM download_subscription_exclusions WHERE subscription_id = $1`, stored.ID); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}

@@ -31,17 +31,17 @@ export function AdminUserImpersonationDialog({
         if (!open && !busy.current) onClose();
       }}
       title="View as user"
-      description={`Continue as "${user.username}"? Actions you take will run as this user. Admin access will be unavailable until you end this session.`}
+      description={
+        user.role === "admin"
+          ? `Continue as "${user.username}"? Actions you take will run as this admin, with their access, until you end this session.`
+          : `Continue as "${user.username}"? Actions you take will run as this user. Admin access will be unavailable until you end this session.`
+      }
       confirmLabel="View as user"
       isPending={impersonateMutation.isPending}
       onConfirm={() => {
-        if (
-          busy.current ||
-          capabilities.data?.available !== true ||
-          user.role === "admin" ||
-          !user.enabled
-        )
-          return;
+        // Callers offer only accounts the viewer may view as
+        // (canViewAsAccount); the server enforces the same rules.
+        if (busy.current || capabilities.data?.available !== true || !user.enabled) return;
         busy.current = true;
         onError("");
         void impersonateMutation

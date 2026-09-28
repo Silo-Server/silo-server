@@ -44,12 +44,12 @@ func personalKeyHandler() (http.Handler, *fakePersonalAPIKeys) {
 }
 func TestPersonalAPIKeysAccountAndSecrets(t *testing.T) {
 	h, f := personalKeyHandler()
-	created := do(t, h, "POST", Prefix+"/api-keys", `{"label":"Script"}`, bearer(memberToken))
-	if created.Code != 201 || f.createUser != 1 || !strings.Contains(created.Body.String(), `"key":"creation-secret"`) {
+	created := do(t, h, "POST", Prefix+"/api-keys", `{"label":"Script"}`, bearer(adminToken))
+	if created.Code != 201 || f.createUser != 2 || !strings.Contains(created.Body.String(), `"key":"creation-secret"`) {
 		t.Fatal(created.Code, created.Body.String(), f.createUser)
 	}
-	listed := do(t, h, "GET", Prefix+"/api-keys", "", bearer(memberToken))
-	if listed.Code != 200 || f.account != 1 {
+	listed := do(t, h, "GET", Prefix+"/api-keys", "", bearer(adminToken))
+	if listed.Code != 200 || f.account != 2 {
 		t.Fatal(listed.Code, listed.Body.String(), f.account)
 	}
 	for _, secret := range []string{`"key":`, `"revision":`, `"username":`} {
@@ -75,7 +75,7 @@ func TestPersonalAPIKeysCredentialPolicyAndValidation(t *testing.T) {
 		requireProblem(t, do(t, h, op.method, Prefix+op.path, op.body, nil), TypeAuthenticationRequired)
 	}
 	for _, body := range []string{`{"label":"Script","scopes":null}`, `{"label":null}`, `{"label":"Script","user_id":"2"}`} {
-		requireProblem(t, do(t, h, "POST", Prefix+"/api-keys", body, bearer(memberToken)), TypeValidationFailed)
+		requireProblem(t, do(t, h, "POST", Prefix+"/api-keys", body, bearer(adminToken)), TypeValidationFailed)
 	}
 	if f.writes != 0 || f.reads != 0 {
 		t.Fatal("rejected requests reached service")
@@ -93,6 +93,26 @@ func TestPersonalAPIKeysCredentialPolicyAndValidation(t *testing.T) {
 		t.Fatal(scopes.Code, scopes.Body.String())
 	}
 }
+
+// TestPersonalAPIKeysCreationRequiresAdmin covers #1361: a regular account's
+// login session must not mint an API key through the personal route, while
+// listing and revoking the keys it already owns keep working.
+func TestPersonalAPIKeysCreationRequiresAdmin(t *testing.T) {
+	h, f := personalKeyHandler()
+	requireProblem(t, do(t, h, "POST", Prefix+"/api-keys", `{"label":"Script","scopes":[]}`, bearer(memberToken)), TypePermissionDenied)
+	requireProblem(t, do(t, h, "POST", Prefix+"/api-keys", `{"label":"Script"}`, bearer(impersonatedToken)), TypePermissionDenied)
+	if f.writes != 0 {
+		t.Fatal("a non-admin create reached the service")
+	}
+	if listed := do(t, h, "GET", Prefix+"/api-keys", "", bearer(memberToken)); listed.Code != 200 {
+		t.Fatal(listed.Code, listed.Body.String())
+	}
+	f.row.UserID = 1
+	if deleted := do(t, h, "DELETE", Prefix+"/api-keys/7", "", bearer(memberToken)); deleted.Code != 204 {
+		t.Fatal(deleted.Code, deleted.Body.String())
+	}
+}
+
 func TestPersonalAPIKeysCursorIsolation(t *testing.T) {
 	h, f := personalKeyHandler()
 	listed := do(t, h, "GET", Prefix+"/api-keys?limit=1", "", bearer(memberToken))

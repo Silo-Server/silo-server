@@ -19,54 +19,63 @@ import (
 	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
-type loggingResponseWriter struct {
+// statusResponseWriter records the response status for the request log and
+// the request metrics. It forwards the optional writer interfaces so media
+// keeps sendfile, progressive bodies keep flushing, and the session socket can
+// hijack the connection.
+type statusResponseWriter struct {
 	http.ResponseWriter
-	status int
+	status   int
+	hijacked bool
 }
 
-func (w *loggingResponseWriter) WriteHeader(status int) {
+func (w *statusResponseWriter) WriteHeader(status int) {
 	w.status = status
 	w.ResponseWriter.WriteHeader(status)
 }
 
-func (w *loggingResponseWriter) Write(b []byte) (int, error) {
+func (w *statusResponseWriter) Write(b []byte) (int, error) {
 	if w.status == 0 {
 		w.status = http.StatusOK
 	}
 	return w.ResponseWriter.Write(b)
 }
 
-func (w *loggingResponseWriter) ReadFrom(src io.Reader) (int64, error) {
+func (w *statusResponseWriter) ReadFrom(src io.Reader) (int64, error) {
 	if w.status == 0 {
 		w.status = http.StatusOK
 	}
 	return httpstream.ForwardReadFrom(w.ResponseWriter, w, src, 0, nil)
 }
 
-func (w *loggingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	if hj, ok := w.ResponseWriter.(http.Hijacker); ok {
-		return hj.Hijack()
+// Hijack reaches the connection through any Unwrap-only writers beneath. A
+// hijack alone does not prove which status the handler sent on the raw
+// connection, so it is recorded as a flag rather than a fabricated status.
+func (w *statusResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	conn, rw, err := http.NewResponseController(w.ResponseWriter).Hijack()
+	if err == nil {
+		w.hijacked = true
 	}
-	return nil, nil, fmt.Errorf("underlying ResponseWriter does not implement http.Hijacker")
+	return conn, rw, err
 }
 
 // Flush implements http.Flusher so progressive responses (subtitle extracts,
-// streamed media) keep flushing through the logging wrapper.
-func (w *loggingResponseWriter) Flush() {
+// streamed media) keep flushing through the wrapper.
+func (w *statusResponseWriter) Flush() {
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
 }
 
 // Unwrap returns the underlying ResponseWriter for http.ResponseController.
-func (w *loggingResponseWriter) Unwrap() http.ResponseWriter {
+func (w *statusResponseWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
 }
 
 func requestLoggerMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		ww := &loggingResponseWriter{ResponseWriter: w}
+		ww := &statusResponseWriter{ResponseWriter: w}
 
 		next.ServeHTTP(ww, r)
 

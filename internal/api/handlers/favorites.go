@@ -846,6 +846,8 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 			Year:              mi.Year,
 			Genres:            mi.Genres,
 			ContentRating:     mi.ContentRating,
+			AdvisoryAge:       mi.AdvisoryAge,
+			AdvisorySource:    mi.AdvisorySource,
 			RatingIMDB:        mi.RatingIMDB,
 			Overview:          mi.Overview,
 			PosterThumbhash:   mi.PosterThumbhash,

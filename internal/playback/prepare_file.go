@@ -92,6 +92,14 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 	hwDevice, releaseHWDevice := AcquireHWDevice(opts.HWDevice, opts.HWAccel)
 	opts.HWDevice = hwDevice
 	defer releaseHWDevice()
+	var encoderErr error
+	opts, encoderErr = resolveHEVCTranscodeEncoder(ctx, opts)
+	if encoderErr != nil {
+		return fmt.Errorf("prepare-file: %w", encoderErr)
+	}
+	if opts.HWAccel == transcodeHWNone {
+		releaseHWDevice()
+	}
 	if err := validateToneMapSource(ctx, opts); err != nil {
 		return fmt.Errorf("prepare-file: %w", err)
 	}

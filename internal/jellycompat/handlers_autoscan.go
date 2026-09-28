@@ -34,6 +34,9 @@ type AutoscanHandler struct {
 	// library ids can be refreshed.
 	files   itemRefreshFileLister
 	seasons itemRefreshSeasonLoader
+	// realtimeMonitoring reads the live server-wide
+	// scanner.realtime_monitoring switch. Nil counts as on, the default.
+	realtimeMonitoring func() bool
 }
 
 func NewAutoscanHandler(
@@ -83,7 +86,7 @@ func (h *AutoscanHandler) HandleVirtualFolders(w http.ResponseWriter, r *http.Re
 			ItemID:         h.codec.EncodeIntID(EncodedIDLibrary, int64(folder.ID)),
 			LibraryOptions: virtualLibraryOptDTO{
 				Enabled:                 true,
-				EnableRealtimeMonitor:   true,
+				EnableRealtimeMonitor:   enableRealtimeMonitor(h.realtimeMonitoring, folder.RealtimeMonitoring),
 				EnableInternetProviders: true,
 				SeasonZeroDisplayName:   "Specials",
 				TypeOptions:             []string{},

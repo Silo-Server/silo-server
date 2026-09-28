@@ -56,6 +56,21 @@ See [Marker API](markers-api.md) for reads, manual edits, and provenance.
 
 ## Start
 
+When `playback.allow_hevc_encoding` is enabled, video adaptation may encode
+HEVC for clients that explicitly support HEVC on their HLS delivery route.
+The server advertises `video_to_hevc` through the existing transformation
+capability inventory. The effective recipe and frozen transcode target identify
+HEVC; existing H.264-only clients continue to receive H.264. Disabling the
+setting affects new planning decisions without changing active frozen recipes.
+HEVC direct play and remux remain independent of the encoding setting.
+
+HEVC execution validates the selected hardware encoder on its assigned device.
+When that encoder is unavailable, a validated software encoder can retain the
+negotiated HEVC output. Hardware tone mapping can still perform the HDR-to-SDR
+conversion before its frames feed the software encoder. An optional HEVC probe
+failure removes HEVC availability without invalidating successful AAC or H.264
+capability checks.
+
 The body is the v3 start request plus `installation_id`. `file_id` and
 `profile_id` are strings; `profile_id` must be the authenticated profile. Start
 is idempotent on `playback_attempt_id` plus a digest of the request: replaying
@@ -84,6 +99,19 @@ play, the server returns an adaptation refusal instead of substituting another
 version with a potentially different timeline. Omitted or `true` retains the
 existing alternate-version behavior. The choice is persisted with the attempt
 and cannot be relaxed by a replan.
+
+When an administrator sets a positive bitrate limit for the stream's location
+(local or remote), a new start allows the original file only when its probed
+bitrate fits. Otherwise the server plans
+a lower-bitrate transcode, including an audio and mux-overhead budget. A
+client's lower bandwidth preference still wins. If no compliant encode route
+exists, the server tries the item's other versions as it does for 4K and HDR
+refusals. When none fits, the decision is terminal with
+`bitrate_policy_unavailable`; it never falls back to the oversized original.
+The selected limit is frozen on a new playback attempt and reused through
+replans, so later policy edits do not interrupt it.
+`server_remote_stream_bitrate_policy_v1` and
+`server_local_stream_bitrate_policy_v1` in `features` advertise this behavior.
 
 The web Watch Party player requires this capability and sends `false`. When a
 source cannot be adapted, `watch_party_source_fallback_v1` allows connected

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -50,8 +51,8 @@ func TestResolvedListCacheScopeIsolation(t *testing.T) {
 		SectionType: SectionRecentlyAdded,
 		ItemLimit:   20,
 	}
-	scopeA := catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2}, MaxContentRating: "PG-13"}
-	scopeB := catalog.AccessFilter{AllowedLibraryIDs: []int{3}, MaxContentRating: "R"}
+	scopeA := catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}}
+	scopeB := catalog.AccessFilter{AllowedLibraryIDs: []int{3}, MaturityLimits: access.MaturityLimits{MaxContentRating: "R"}}
 
 	keyA := resolvedListCacheKey(resolved, nil, nil, scopeA)
 	keyB := resolvedListCacheKey(resolved, nil, nil, scopeB)
@@ -341,7 +342,7 @@ func TestResolvedListCacheInvalidationIsolatesInflightRefresh(t *testing.T) {
 // jellyfin-compat /Items/Latest collapse to one shared cache entry.
 func TestResolvedListCacheKeyIgnoresSectionID(t *testing.T) {
 	cfg := json.RawMessage(`{"filter_type":"movie"}`)
-	scope := catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2}, MaxContentRating: "PG-13"}
+	scope := catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}}
 	libraryID := 7
 
 	native := ResolvedSection{ID: "home-rail-42", SectionType: SectionRecentlyAdded, ItemLimit: 24, Config: cfg}
@@ -361,7 +362,7 @@ func TestResolvedListCacheKeyIgnoresSectionID(t *testing.T) {
 	if resolvedListCacheKey(ResolvedSection{ID: "x", SectionType: SectionRecentlyAdded, ItemLimit: 12, Config: cfg}, &libraryID, nil, scope) == keyNative {
 		t.Fatalf("different item limit must change the key")
 	}
-	if resolvedListCacheKey(native, &libraryID, nil, catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2}, MaxContentRating: "R"}) == keyNative {
+	if resolvedListCacheKey(native, &libraryID, nil, catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2}, MaturityLimits: access.MaturityLimits{MaxContentRating: "R"}}) == keyNative {
 		t.Fatalf("different max content rating must change the key")
 	}
 	otherLibrary := 8
@@ -393,7 +394,7 @@ func TestResolvedListCacheSharedAcrossEquivalentSections(t *testing.T) {
 	defer resetResolvedListCacheForTest()
 
 	cfg := json.RawMessage(`{"filter_type":"movie"}`)
-	scope := catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2}, MaxContentRating: "PG-13"}
+	scope := catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}}
 	libraryID := 7
 	now := time.Unix(1_700_000_000, 0)
 
@@ -436,7 +437,7 @@ func TestResolvedListCacheSharedAcrossEquivalentSections(t *testing.T) {
 func TestResolvedListCacheKeyScopeStillIsolatesWithoutID(t *testing.T) {
 	// Deliberately identical section identity to prove scope alone splits the key.
 	resolved := ResolvedSection{ID: "same-id", SectionType: SectionRecentlyAdded, ItemLimit: 24, Config: json.RawMessage(`{"filter_type":"movie"}`)}
-	base := catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2}, MaxContentRating: "PG-13"}
+	base := catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}}
 	lib1, lib2 := 7, 8
 
 	baseline := resolvedListCacheKey(resolved, &lib1, nil, base)
@@ -511,7 +512,7 @@ func TestResolvedListCacheEvictsExpiredEntries(t *testing.T) {
 // profile can never be served an unrestricted profile's membership.
 func TestResolvedListCacheKeyContentBoundaries(t *testing.T) {
 	resolved := ResolvedSection{ID: "sec-1", SectionType: SectionGenre, ItemLimit: 20}
-	base := catalog.AccessFilter{AllowedLibraryIDs: []int{1}, MaxContentRating: "PG-13"}
+	base := catalog.AccessFilter{AllowedLibraryIDs: []int{1}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}}
 
 	// nil (unrestricted) vs empty (restrict-to-nothing) vs a concrete allow-list
 	// must all differ, and two different allow-lists must differ.

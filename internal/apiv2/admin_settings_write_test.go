@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/config"
 )
 
 type fakeAdminSettingsWrite struct {
@@ -18,7 +19,53 @@ type fakeAdminSettingsWrite struct {
 func (f *fakeAdminSettingsWrite) InspectAdminSettingsSnapshot(context.Context) (handlers.AdminSettingsSnapshot, error) {
 	visible := maps.Clone(f.stored)
 	delete(visible, "email.smtp_password")
+	delete(visible, config.StorageTransitionTargetKey)
+	delete(visible, config.ArtworkStorageReconcileCheckpointKey)
 	return handlers.AdminSettingsSnapshot{Stored: maps.Clone(f.stored), Effective: maps.Clone(f.stored), VisibleStored: visible, VisibleEffective: visible}, nil
+}
+
+func TestAdminSettingsValidatorIgnoresRecoveryState(t *testing.T) {
+	f := &fakeAdminSettingsWrite{stored: map[string]string{
+		"server.log_level":                          "info",
+		config.StorageTransitionTargetKey:           "running:10",
+		config.ArtworkStorageReconcileCheckpointKey: "checkpoint:1",
+	}}
+	deps := pilotDeps(nil, nil)
+	deps.CursorSecret = []byte("synthetic-settings-test-secret")
+	deps.AdminSettingsInspection = f
+	deps.AdminSettingsWrite = f
+	h := NewHandler(deps)
+	path := Prefix + "/admin/settings"
+	read := do(t, h, "GET", path+"/effective", "", bearer(adminToken))
+	tag := read.Header().Get("ETag")
+	if read.Code != 200 || tag == "" {
+		t.Fatalf("initial settings read: status=%d tag=%q body=%s", read.Code, tag, read.Body.String())
+	}
+
+	f.stored[config.StorageTransitionTargetKey] = "running:20"
+	f.stored[config.ArtworkStorageReconcileCheckpointKey] = "checkpoint:2"
+	read = do(t, h, "GET", path+"/effective", "", bearer(adminToken))
+	if read.Code != 200 || read.Header().Get("ETag") != tag {
+		t.Fatalf("recovery state changed settings validator: status=%d old=%q new=%q", read.Code, tag, read.Header().Get("ETag"))
+	}
+
+	headers := with(bearer(adminToken), "If-Match", tag)
+	saved := do(t, h, "PUT", path, `{"values":{"server.log_level":"debug"}}`, headers)
+	if saved.Code != 200 || f.stored["server.log_level"] != "debug" || f.writes != 1 {
+		t.Fatalf("save after recovery progress: status=%d writes=%d body=%s", saved.Code, f.writes, saved.Body.String())
+	}
+	read = do(t, h, "GET", path+"/effective", "", bearer(adminToken))
+	newTag := read.Header().Get("ETag")
+	if newTag == "" || newTag == tag {
+		t.Fatalf("admin edit did not advance validator: old=%q new=%q", tag, newTag)
+	}
+
+	f.stored["server.log_level"] = "error"
+	stale := do(t, h, "PUT", path+"/server.log_level", `{"value":"warn"}`, with(bearer(adminToken), "If-Match", newTag))
+	requireProblem(t, stale, TypePreconditionFailed)
+	if f.stored["server.log_level"] != "error" || f.writes != 1 {
+		t.Fatal("stale admin edit overwrote a newer setting")
+	}
 }
 func (f *fakeAdminSettingsWrite) UpdateAdminSettings(ctx context.Context, values map[string]string, guard func(handlers.AdminSettingsSnapshot) error) (handlers.AdminSettingsUpdateResult, error) {
 	snapshot, _ := f.InspectAdminSettingsSnapshot(ctx)

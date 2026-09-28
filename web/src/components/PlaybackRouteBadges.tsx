@@ -36,6 +36,15 @@ export function PlaybackRouteBadges({ session }: { session: AdminSession }) {
   const provider = session.routing_network_provider;
   return (
     <>
+      {session.stream_location && (
+        <span
+          title={`The server classified this stream as ${session.stream_location} for bitrate policy.`}
+          aria-label={`Stream location: ${session.stream_location === "local" ? "Local" : "Remote"}`}
+          className="border-primary/20 bg-primary/10 text-primary inline-flex items-center rounded border px-1.5 py-0.5 text-[9px] font-semibold"
+        >
+          {session.stream_location === "local" ? "Local" : "Remote"}
+        </span>
+      )}
       {provider ? (
         <OverlayNetworkBadge provider={provider} />
       ) : (

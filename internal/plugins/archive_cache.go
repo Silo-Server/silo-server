@@ -7,6 +7,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"hash"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -22,7 +24,8 @@ type archiveStore interface {
 
 type ArchiveCache struct {
 	// mu protects rehydration and pruning from concurrent status and
-	// reconcile calls, including cache-hit validation during extraction.
+	// reconcile calls, including cache-hit validation during extraction, and
+	// guards verified.
 	mu       sync.Mutex
 	archives archiveStore
 	// root, when set, is this host's own plugin cache dir. Installations are
@@ -30,6 +33,21 @@ type ArchiveCache struct {
 	// install path the API server recorded, which on a proxy node names a
 	// directory on another machine.
 	root string
+	// verified holds, per installation, the binary this cache last hashed
+	// and found matching its manifest. Only Manifest consults it.
+	verified map[int]verifiedBinary
+	// newHash, when set, replaces sha256.New for checking an installed
+	// binary against its manifest checksum. Tests use it to count the bytes a
+	// read hashes.
+	newHash func() hash.Hash
+}
+
+// verifiedBinary is a binary whose hash matched checksum: its path and the
+// file info taken from the open file before hashing.
+type verifiedBinary struct {
+	path     string
+	checksum string
+	info     os.FileInfo
 }
 
 func NewArchiveCache(archives archiveStore) *ArchiveCache {
@@ -83,8 +101,33 @@ func (c *ArchiveCache) LocalInstallPath(installation *Installation) string {
 
 // Ensure makes the installation's files present at LocalInstallPath,
 // rehydrating them from plugin_archives when they are missing, incomplete, or corrupted,
-// and returns the installed manifest.
+// and returns the installed manifest. It hashes the binary on every call, so
+// every path that executes the binary goes through it.
 func (c *ArchiveCache) Ensure(ctx context.Context, installation *Installation) (*pluginv1.PluginManifest, error) {
+	return c.ensure(ctx, installation, false)
+}
+
+// Manifest is Ensure for callers that read the manifest or serve packaged
+// assets and never execute the binary. It skips the hash when the binary is
+// the same file, with the same size and modification time, that this cache
+// last hashed against the checksum the manifest still names; any change sends
+// it through Ensure's full check and repair.
+//
+// Skipping the hash here does not weaken what these callers get. The manifest
+// is read and validated from disk on every call, and the binary hash never
+// covered it: it proves only that the binary matches the manifest's checksum.
+// A binary rewritten in place with its size and mtime restored is not
+// executed by a manifest read, and the next launch's Ensure hashes it,
+// rejects it, and restores the stored archive.
+func (c *ArchiveCache) Manifest(ctx context.Context, installation *Installation) (*pluginv1.PluginManifest, error) {
+	return c.ensure(ctx, installation, true)
+}
+
+func (c *ArchiveCache) ensure(
+	ctx context.Context,
+	installation *Installation,
+	trustVerified bool,
+) (*pluginv1.PluginManifest, error) {
 	if installation == nil {
 		return nil, fmt.Errorf("plugin installation is required")
 	}
@@ -96,15 +139,21 @@ func (c *ArchiveCache) Ensure(ctx context.Context, installation *Installation) (
 	binaryPath := c.LocalInstallPath(installation)
 
 	if manifest, err := LoadManifestFile(InstalledManifestPath(binaryPath)); err == nil {
-		if err := validateInstalledFiles(binaryPath, manifest); err == nil {
+		if trustVerified && c.stillVerified(installation.ID, binaryPath, manifest) {
+			return manifest, nil
+		}
+		if info, err := c.validateInstalledFiles(binaryPath, manifest); err == nil {
 			if c.root != "" {
 				if err := checkBinaryPlatform(binaryPath); err != nil {
 					return nil, fmt.Errorf("cached plugin for installation %d: %w", installation.ID, err)
 				}
 			}
+			c.markVerified(installation.ID, binaryPath, manifest, info)
 			return manifest, nil
 		}
 	}
+	// The installed files failed the check; forget any earlier verification.
+	delete(c.verified, installation.ID)
 
 	archive, err := c.archives.GetArchive(ctx, installation.ID)
 	if err != nil {
@@ -150,7 +199,8 @@ func (c *ArchiveCache) Ensure(ctx context.Context, installation *Installation) (
 		_ = os.RemoveAll(installDir)
 		return nil, fmt.Errorf("extract stored plugin archive for installation %d: %w", installation.ID, err)
 	}
-	if err := validateInstalledFiles(binaryPath, manifest); err != nil {
+	info, err := c.validateInstalledFiles(binaryPath, manifest)
+	if err != nil {
 		_ = os.RemoveAll(installDir)
 		return nil, fmt.Errorf("validate rehydrated plugin cache for installation %d: %w", installation.ID, err)
 	}
@@ -162,9 +212,33 @@ func (c *ArchiveCache) Ensure(ctx context.Context, installation *Installation) (
 			return nil, fmt.Errorf("rehydrate plugin for installation %d: %w", installation.ID, err)
 		}
 	}
+	c.markVerified(installation.ID, binaryPath, manifest, info)
 	c.pruneStaleReleases(ctx, installation, installDir)
 
 	return manifest, nil
+}
+
+// stillVerified reports whether the installed files are present and the
+// binary is the one markVerified last recorded for the installation: same
+// path, same file, same size and modification time, and a manifest that still
+// names the checksum it matched. Callers hold mu.
+func (c *ArchiveCache) stillVerified(installationID int, binaryPath string, manifest *pluginv1.PluginManifest) bool {
+	seen, ok := c.verified[installationID]
+	if !ok || seen.path != binaryPath || seen.checksum != manifest.GetChecksum() {
+		return false
+	}
+	info, err := installedFilesPresent(binaryPath, manifest)
+	return err == nil && os.SameFile(seen.info, info) &&
+		info.Size() == seen.info.Size() && info.ModTime().Equal(seen.info.ModTime())
+}
+
+// markVerified records that the binary at binaryPath, described by info,
+// hashed to the manifest's checksum. Callers hold mu.
+func (c *ArchiveCache) markVerified(installationID int, binaryPath string, manifest *pluginv1.PluginManifest, info os.FileInfo) {
+	if c.verified == nil {
+		c.verified = make(map[int]verifiedBinary)
+	}
+	c.verified[installationID] = verifiedBinary{path: binaryPath, checksum: manifest.GetChecksum(), info: info}
 }
 
 // pruneStaleReleases drops this host's copies of the plugin's other releases
@@ -343,42 +417,59 @@ func extractArchiveFiles(reader *zip.Reader, root string) error {
 	return nil
 }
 
-func validateInstalledFiles(binaryPath string, manifest *pluginv1.PluginManifest) error {
-	if err := installedFilesPresent(binaryPath, manifest); err != nil {
-		return err
+// validateInstalledFiles checks the installed files are present and hashes
+// the binary against the manifest checksum. It returns the binary's file info,
+// taken from the open file before hashing, so it describes the file that
+// matched.
+func (c *ArchiveCache) validateInstalledFiles(binaryPath string, manifest *pluginv1.PluginManifest) (os.FileInfo, error) {
+	if _, err := installedFilesPresent(binaryPath, manifest); err != nil {
+		return nil, err
 	}
 
-	binaryBytes, err := os.ReadFile(binaryPath)
+	binary, err := os.Open(binaryPath)
 	if err != nil {
-		return fmt.Errorf("read plugin binary %q: %w", binaryPath, err)
+		return nil, fmt.Errorf("read plugin binary %q: %w", binaryPath, err)
 	}
-	checksum := sha256.Sum256(binaryBytes)
-	if manifest.GetChecksum() != hex.EncodeToString(checksum[:]) {
-		return fmt.Errorf("plugin binary checksum does not match manifest")
+	defer func() { _ = binary.Close() }()
+	info, err := binary.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("read plugin binary %q: %w", binaryPath, err)
+	}
+	digest := sha256.New()
+	if c.newHash != nil {
+		digest = c.newHash()
+	}
+	if _, err := io.Copy(digest, binary); err != nil {
+		return nil, fmt.Errorf("read plugin binary %q: %w", binaryPath, err)
+	}
+	if manifest.GetChecksum() != hex.EncodeToString(digest.Sum(nil)) {
+		return nil, fmt.Errorf("plugin binary checksum does not match manifest")
 	}
 
-	return nil
+	return info, nil
 }
 
-func installedFilesPresent(binaryPath string, manifest *pluginv1.PluginManifest) error {
+// installedFilesPresent checks the binary and every packaged asset exist, and
+// returns the binary's file info.
+func installedFilesPresent(binaryPath string, manifest *pluginv1.PluginManifest) (os.FileInfo, error) {
 	binaryInfo, err := os.Stat(binaryPath)
 	if err != nil {
-		return fmt.Errorf("plugin binary %q: %w", binaryPath, err)
+		return nil, fmt.Errorf("plugin binary %q: %w", binaryPath, err)
 	}
 	if binaryInfo.IsDir() {
-		return fmt.Errorf("plugin binary %q is a directory", binaryPath)
+		return nil, fmt.Errorf("plugin binary %q is a directory", binaryPath)
 	}
 
 	for _, asset := range manifest.GetAssets() {
 		resolved := filepath.Join(filepath.Dir(binaryPath), asset.GetPath())
 		info, err := os.Stat(resolved)
 		if err != nil {
-			return fmt.Errorf("plugin asset %q: %w", asset.GetPath(), err)
+			return nil, fmt.Errorf("plugin asset %q: %w", asset.GetPath(), err)
 		}
 		if info.IsDir() {
-			return fmt.Errorf("plugin asset %q resolved to a directory", asset.GetPath())
+			return nil, fmt.Errorf("plugin asset %q resolved to a directory", asset.GetPath())
 		}
 	}
 
-	return nil
+	return binaryInfo, nil
 }

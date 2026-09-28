@@ -79,6 +79,39 @@ func TestPlaybackConstraintsFreezeTransportAndRecipe(t *testing.T) {
 	}
 }
 
+func TestServerBitrateCapNegotiatesAndFreezesCompliantSource(t *testing.T) {
+	version := catalog.FileVersion{FileID: 42, Container: "mkv", CodecVideo: "h264", CodecAudio: "aac", Bitrate: 8_000, VideoTracks: []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080}}, AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2}}}
+	h := &PlaybackHandler{codec: NewResourceIDCodec()}
+	profile := DeviceProfile{DirectPlayProfiles: []DirectPlayProfile{{Type: "Video", Container: "mkv", VideoCodec: "h264", AudioCodec: "aac"}}, TranscodingProfiles: []TranscodingProfile{{Type: "Video", Container: "ts", Protocol: "hls", VideoCodec: "h264", AudioCodec: "aac"}}}
+	request := playbackInfoRequest{serverBitrateCapKbps: 4_000, streamLocation: "remote"}
+	source := h.buildPlaybackSource("item", "play", version, profile, request, true)
+	if source.SupportsDirectPlay || source.SupportsDirectStream || !source.SupportsTranscoding || source.ServerBitrateCapKbps != 4_000 {
+		t.Fatalf("over-limit source = %+v", source)
+	}
+	if source.TargetBitrateKbps+192 > 3_800 {
+		t.Fatalf("transcode target exceeds reserved cap: %d + 192", source.TargetBitrateKbps)
+	}
+	data, err := json.Marshal(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted PlaybackMediaSource
+	if err := json.Unmarshal(data, &persisted); err != nil || persisted.ServerBitrateCapKbps != 4_000 || persisted.TargetBitrateKbps != source.TargetBitrateKbps || persisted.StreamLocation != "remote" {
+		t.Fatalf("frozen source = %+v, err = %v", persisted, err)
+	}
+
+	version.Bitrate = 3_000
+	source = h.buildPlaybackSource("item", "play", version, profile, request, true)
+	if !source.SupportsDirectPlay {
+		t.Fatalf("source within limit should direct play: %+v", source)
+	}
+	request.MaxStreamingBitrate = 2_000_000
+	source = h.buildPlaybackSource("item", "play", version, profile, request, true)
+	if source.SupportsDirectPlay || source.TargetBitrateKbps+192 > 1_900 {
+		t.Fatalf("lower client preference was not honored: %+v", source)
+	}
+}
+
 func TestPlaybackInfoMonoOnlyTranscodingProfile(t *testing.T) {
 	h, item := newSubtitleSelectionHandler(t)
 	response := postPlaybackInfo(t, h, item, `{"MaxAudioChannels":1,"EnableDirectPlay":false,"EnableDirectStream":false,"DeviceProfile":{"TranscodingProfiles":[{"Type":"Video","Protocol":"hls","Container":"ts","VideoCodec":"h264","AudioCodec":"aac","MaxAudioChannels":"1"}]}}`)
@@ -308,6 +341,34 @@ func TestJSONSubtitleTimingWindow(t *testing.T) {
 				t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 			}
 		})
+	}
+}
+
+// A windowed SRT response is SRT -> WebVTT -> SRT. The {\an8} placement that
+// the WebVTT step turns into cue settings must come back as the SRT tag.
+func TestWindowedSRTSubtitleKeepsAlignmentTag(t *testing.T) {
+	r := httptest.NewRequest("GET", "/subtitle?StartPositionTicks=30000000", nil)
+	route := chi.NewRouteContext()
+	route.URLParams.Add("routeFormat", "srt")
+	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, route))
+	rr := httptest.NewRecorder()
+	(&PlaybackHandler{}).deliverSubtitle(rr, r, "srt", []byte("1\n00:00:01,000 --> 00:00:02,000\nEarly\n\n2\n00:00:05,000 --> 00:00:06,000\n{\\an8}Later top\n"))
+	if want := "1\n00:00:02,000 --> 00:00:03,000\n{\\an8}Later top\n\n"; rr.Code != 200 || rr.Body.String() != want {
+		t.Fatalf("status=%d body=%q, want %q", rr.Code, rr.Body.String(), want)
+	}
+}
+
+// A cue line that contains an arrow stays cue text through the SRT conversion,
+// so windowing never tries to parse it as a timestamp.
+func TestWindowedSRTSubtitleKeepsArrowCueText(t *testing.T) {
+	r := httptest.NewRequest("GET", "/subtitle?StartPositionTicks=5000000", nil)
+	route := chi.NewRouteContext()
+	route.URLParams.Add("routeFormat", "srt")
+	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, route))
+	rr := httptest.NewRecorder()
+	(&PlaybackHandler{}).deliverSubtitle(rr, r, "srt", []byte("1\n00:00:01,000 --> 00:00:02,000\nMeet at 10:30. --> go now\n"))
+	if want := "1\n00:00:00,500 --> 00:00:01,500\nMeet at 10:30. --> go now\n\n"; rr.Code != 200 || rr.Body.String() != want {
+		t.Fatalf("status=%d body=%q, want %q", rr.Code, rr.Body.String(), want)
 	}
 }
 

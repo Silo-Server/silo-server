@@ -22,6 +22,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogsvc "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/downloads"
+	"github.com/Silo-Server/silo-server/internal/librarymonitor"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/routeinventory"
@@ -367,7 +368,7 @@ func fixtureCases() []fixtureCase {
 		{name: "upload_library_poster_ok", operationID: "uploadLibraryPoster",
 			scenario: "A multipart poster upload; the library is answered with its new presigned poster URL.",
 			method:   http.MethodPut, path: "/api/v2/libraries/1/poster", headers: with(bearer(adminToken), "Content-Type", fixtureMultipartType),
-			body:   fixtureMultipart("poster", "poster.png", "image/png", strings.Repeat("\x89", 16)),
+			body:   fixtureMultipart("poster", "poster.png", "image/png", "png-bytes"),
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/Library"},
 		{name: "upload_library_poster_unsupported_media_type", operationID: "uploadLibraryPoster",
 			scenario: "A JSON body on the multipart upload operation.",
@@ -376,7 +377,7 @@ func fixtureCases() []fixtureCase {
 		{name: "upload_library_poster_unsupported_image", operationID: "uploadLibraryPoster",
 			scenario: "A part whose media type is not JPEG, PNG or WebP is a validation failure naming body.poster.",
 			method:   http.MethodPut, path: "/api/v2/libraries/1/poster", headers: with(bearer(adminToken), "Content-Type", fixtureMultipartType),
-			body:   fixtureMultipart("poster", "poster.png", "image/gif", strings.Repeat("\x89", 16)),
+			body:   fixtureMultipart("poster", "poster.png", "image/gif", "gif-bytes"),
 			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: "delete_library_poster_not_found", operationID: "deleteLibraryPoster",
 			scenario: "A library identifier that names no library; success answers 204 with no body.",
@@ -1657,7 +1658,6 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, subtitleDownloadFixtureCases()...)
 	cases = append(cases, subtitleUploadFixtureCases()...)
 	cases = append(cases, adminSubtitleInspectionFixtureCases()...)
-	cases = append(cases, themeCatalogFixtureCases()...)
 	cases = append(cases, ebookProgressFixtureCases()...)
 	cases = append(cases, ebookConfigFixtureCases()...)
 	cases = append(cases, ebookAnnotationFixtureCases()...)
@@ -1720,7 +1720,10 @@ func fixtureCases() []fixtureCase {
 	// Request ids are positional: new fixtures append here so committed
 	// fixtures keep their ids.
 	cases = append(cases, networkAccessFixtureCases()...)
-	return append(cases, serverIdentityFixtureCases()...)
+	cases = append(cases, serverIdentityFixtureCases()...)
+	cases = append(cases, themeSongsFixtureCases()...)
+	cases = append(cases, passwordResetFixtureCases()...)
+	return append(cases, libraryMonitoringFixtureCases()...)
 }
 
 // fixtureMultipartType is the multipart Content-Type of the avatar fixtures,
@@ -1764,6 +1767,12 @@ func fixtureDeps() Dependencies {
 	deps.PersonalCollections = &fixturePersonalCollections{fakePersonalCollections: fakePersonalCollections{list: handlers.PersonalCollectionListView{Collections: []handlers.PersonalCollectionView{fixtureCollectionView()}, Groups: []handlers.CollectionGroupView{}}}}
 	deps.CollectionImports = &fakeCollectionImports{configured: true}
 	deps, _ = withLibraryAdmin(deps)
+	deps.LibraryMonitoring = &fakeLibraryMonitoring{snap: librarymonitor.StatusSnapshot{
+		ServerEnabled: true,
+		Libraries:     []*models.MediaFolder{monitoredFolder(1, 0), monitoredFolder(2, 1)},
+		Reports: []librarymonitor.NodeReport{{NodeID: "node-a", LibraryID: 1, State: librarymonitor.StateMonitoring,
+			Backend: librarymonitor.BackendInotify, Directories: 4812, UpdatedAt: fixedTime()}},
+	}}
 	deps.DeviceSettings = &fakeDeviceSettings{}
 	deps.LibraryJobs = &fakeLibraryJobs{job: &models.AdminJob{ID: "job-2", JobType: adminjob.JobTypeLibraryRefresh, Status: adminjob.StatusQueued, RequestedAt: fixedTime()}}
 
@@ -1817,11 +1826,12 @@ func fixtureDeps() Dependencies {
 	deps.AdminRequests = fixtureAdminRequests()
 	deps.AdminHistoryImports = fixtureAdminHistoryImports()
 	deps.AdminAPIKeys = fixtureAdminAPIKeys()
-	deps.ThemeCatalog = fixtureThemeCatalog()
+	deps.ThemeSongs = &fakeThemeSongs{}
 	deps.UserLibraries = new(fakeUserLibraries)
 	deps.AdminPlaybackSessions = new(fakeAdminPlaybackSessions)
 	deps.AdminDevices = new(fakeAdminDevices)
 	deps.Invitations = fixtureInvitations()
+	deps.PasswordResets = fixturePasswordResets()
 	deps.NotificationInbox = fixtureNotificationInbox()
 	deps.AdminNotificationPush = new(fakeAdminNotificationPush)
 	deps.AdminNotificationDiscord = new(fakeAdminNotificationDiscord)

@@ -60,8 +60,8 @@ task's triggers with its configured poll interval.
 ## Branding assets
 
 Uploadable images white-label the server: the sidebar wordmark, the square
-mark (collapsed sidebar and installed PWA), optional light-theme variants of
-both, the browser favicon, and the login background. Each is stored in the public S3 bucket and referenced from a
+mark (collapsed sidebar and installed PWA), the browser favicon, and the login
+background. Each is stored in the public S3 bucket and referenced from a
 `server_settings` row, so uploads return `503 unavailable` until
 `s3.public_bucket` is configured.
 
@@ -75,7 +75,10 @@ both, the browser favicon, and the login background. Each is stored in the publi
 Public reads are deliberately unauthenticated: branding has to apply on the
 login page, before anyone has a session.
 
-`{kind}` is one of `wordmark`, `wordmark_light`, `mark`, `mark_light`, `favicon`, `login_bg` — the light variants follow their base kind's processing. Uploads are
+`{kind}` is one of `wordmark`, `mark`, `favicon`, `login_bg`. The web client has a
+single dark theme, so the former light-theme variants are gone from v2; the frozen
+v1 upload route still accepts `wordmark_light` and `mark_light` until v1 retires,
+and the public asset route still serves them. Uploads are
 processed per kind — the numbers below are the contract the admin UI quotes back
 to the operator, and they live in `internal/branding/assets.go`:
 
@@ -121,7 +124,7 @@ Some settings are only read at startup. Two routes carry that contract:
 | `restart_required_reasons` | string[] | Every distinct reason since boot, first-seen order. Settings saves record one `setting:<key>` entry per restart-required key, so a client can scope a pending restart to the subsystem it belongs to. |
 | `restart_mark_count` | int | Increments on every restart-required save. Because the boolean latches, this counter is the only signal that a **new** requirement arrived — the admin UI re-arms its dismissed restart banner on it. |
 | `restart_requested`, `restart_requested_at` | bool, RFC3339 string | An in-app restart was requested, and when. |
-| `artwork_storage` | object | `backend` is the resolved artwork backend of this process (`local` or `s3`); `locked` is true once artwork has been stored and `artwork.storage_backend` can no longer change. |
+| `artwork_storage` | object | `backend` is the resolved artwork backend of this process (`local` or `s3`); `locked` is true once the assets storage identity has been recorded and its location can no longer change directly. `/api/v2` also reports `status_known`, true only when the settings read succeeded, and `private_locked`, true when a configured private bucket is recorded at startup, even if empty, or when the assets location is locked. Clients must treat `status_known: false` as an unknown lock state. |
 
 ## Playback node routing
 
@@ -184,11 +187,37 @@ or reverse proxy access. This records the prepared route, not a live measurement
 of every media request or an inference from the client's IP address. Provider
 display names come from `/api/v2/network-access/capabilities`.
 
+`stream_location` on each v2 admin session row reports `local` or `remote` using
+the same trusted client-IP and provider-path classification as the bitrate
+policy. Private, loopback, and link-local clients on the default path are local;
+provider paths and public or unknown client addresses are remote. The web
+Activity panel shows this separately from the access-network badge.
+`GET /api/v2/admin/sessions/capabilities` advertises `stream_location` for client
+feature detection. The displayed location is fixed at playback negotiation,
+even if a later media request arrives over another network path.
+
 The web activity views show that network alongside the named execution and egress
 nodes. API egress is labeled "API server"; its reporting identity remains in the
 tooltip. Native and Jellyfin-compatible playback both populate the route, including
 session recovery. This additive admin observation does not change Apple, Android,
 or Jellyfin playback contracts; those clients need no changes to report it.
+
+`effective_play_method` is the server's whole-session classification:
+`direct` (Direct Play), `remux` (copied audio and video in a streaming
+container), `direct_stream` (copied video with converted audio), or `transcode`
+(converted video). Unknown decisions omit the field, and the capability's
+`effective_play_method_values` lists the vocabulary. The frozen `/api/v1`
+bridge keeps reporting its alpha `audio` value instead of `direct_stream`.
+Per-stream Copy means no re-encoding; it does not promise byte-identical packets
+after a permitted bitstream transformation.
+
+`output_format: true` on the same capability response advertises optional
+`output_container` and `output_protocol` fields on v2 session rows. The serving
+transport reports the container (`fmp4`, `mpegts`, or the source container for
+Direct Play) separately from the protocol (`hls` or `http`). An older node can
+omit both; clients then show the output as unknown rather than inferring it
+from `play_method`, the source container, or the video codec. The frozen
+`/api/v1` bridge does not carry these fields.
 
 `silo_playback_routing_decisions_total` counts routing outcomes with bounded
 `workload`, `execution`, `egress`, `outcome`, and `reason` labels. It never
@@ -1481,6 +1510,22 @@ issued token so the administrator can assign it to a source.
 
 ### Personal history import acceptance and monitoring
 
+Personal history imports on both `/api/v1` and `/api/v2` use the acting
+`X-Profile-Id`. A non-primary profile can import only into itself and see only runs
+targeting itself. The primary profile (with its PIN verified when it has one) and
+server admins can act for any profile on their own account. An API key's exemption
+from PIN entry does not grant household authority to a locked primary profile.
+Creating a run for another profile without this authority returns 403; reading its
+run returns 404. A non-admin request without an acting profile cannot create a run
+and sees no runs. Lists apply the profile filter before their limit, and v2 cursors
+are bound to the account and acting profile.
+
+This deliberately tightens the frozen v1 bridge as a security fix: otherwise its
+run routes would bypass the v2 profile restriction. V1 keeps its existing response
+envelopes, 201 create response, and maximum list size of 50. Web uses v2;
+Apple and Android have no personal history-import consumer, and jellycompat has
+no corresponding import operation.
+
 `POST /api/v2/history-imports/runs` accepts an account-owned import for the supplied
 profile. It returns 202 with the persisted queued run, canonical `Location`, and
 `Retry-After: 2` only after both execution intent and encrypted run credentials commit.
@@ -1490,15 +1535,30 @@ automatically resubmitted; check the account's import list before starting anoth
 
 Poll `GET /api/v2/history-imports/runs/{id}` at its `Location`. The response has a strong
 `ETag`, supports `If-Match` and `If-None-Match`, and returns a bodyless 304 when unchanged.
-The account ownership check runs before evaluating either precondition; another
-account's run returns 404. Nonterminal responses, including 304, carry `Retry-After`.
+The account and profile checks run before evaluating either precondition; a run
+outside the caller's authority returns 404. Nonterminal responses, including 304,
+carry `Retry-After`.
 When `terminal` is true, stop polling; terminal responses omit the polling hint.
 
 The personal projection always reports `cancelable: false`: this surface has no cancel
 command. Existing administrator cancellation can appear as nonterminal `canceling`
 until the worker acknowledges it, then terminal `cancelled`. Both personal and admin
 monitors replace persisted diagnostic errors, warnings, and unmatched reasons with safe
-summaries. Run credentials and private dispatch metadata never appear in these responses.
+summaries. Known diagnostics map to a fixed summary of their cause, such as an item with
+no provider ID or a show missing from the library; anything else reads as a generic
+summary. Run credentials and private dispatch metadata never appear in these responses.
+
+A server address the user supplied must be on the public internet unless the
+account is an admin or an admin turned on `media_servers.allow_private_destinations`.
+That covers a typed Jellyfin or Plex URL and the server addresses Emby Connect or
+plex.tv list for the account; servers an admin configured as import sources are
+exempt. A refused address returns `422 validation_failed` whose detail says the
+address is on the server's local network (v1 answers 400 `bad_request` with the
+same message). Cloud metadata, link-local, and other blocked addresses are refused
+for every account. The policy is read again when a queued run starts, so a run
+admitted before the setting was turned off fails with the same message. v1 run
+responses and realtime history-import events carry the same safe summaries as
+the v2 monitors. See [Outbound address guard](architecture/outbound-address-guard.md).
 
 New queued personal imports survive server restart. Source changes invalidate captured
 configuration without retargeting the import; stale running executions fail without replay.

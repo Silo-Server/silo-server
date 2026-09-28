@@ -9,7 +9,7 @@ import type {
   ItemSplitRequest,
   WatchDetail,
 } from "@/api/types";
-import { v2, type V2Result } from "@/api/v2/request";
+import { V2ProblemError, V2TransportError, v2, type V2Result } from "@/api/v2/request";
 import { adminTaskJobFromV2 } from "@/api/v2/adminTasks";
 import { catalogItemDetailFromV2 } from "@/api/v2/catalog";
 import { watchDetailFromV2 } from "@/api/v2/watch";
@@ -203,7 +203,26 @@ export function useRefreshItemMetadata() {
   });
 }
 
+/** The marker kinds an admin re-detection runs; a movie has credits only. */
+export type RedetectMarkersKind = "intro" | "credits" | "all";
+export type RedetectItemMarkersResponse =
+  V2Result<"POST /api/v2/admin/items/{id}/redetect-markers">;
+export async function redetectItemMarkers(
+  itemId: string,
+  kind: RedetectMarkersKind,
+): Promise<RedetectItemMarkersResponse> {
+  return v2("POST /api/v2/admin/items/{id}/redetect-markers", {
+    path: { id: itemId },
+    body: { kind },
+    retryAuthentication: false,
+  });
+}
+
 export type RedetectEpisodeIntroResponse = V2Result<"POST /api/v2/admin/items/{id}/redetect-intro">;
+/**
+ * Re-detects an episode's intro through the older episode-only operation,
+ * for API nodes that do not advertise the redetect_markers capability.
+ */
 export async function redetectEpisodeIntro(
   episodeId: string,
 ): Promise<RedetectEpisodeIntroResponse> {
@@ -213,20 +232,55 @@ export async function redetectEpisodeIntro(
   });
 }
 
+const redetectionToasts = {
+  onSuccess: (response: { status: string }) => {
+    toast.success(
+      response.status === "already_running"
+        ? "Re-detection already running"
+        : "Re-detection started",
+    );
+  },
+  onError: (error: unknown) => {
+    toast.error(error instanceof Error ? error.message : "Failed to start re-detection");
+  },
+};
+
+function isMissingOperation(error: unknown): boolean {
+  return (
+    (error instanceof V2ProblemError || error instanceof V2TransportError) && error.status === 404
+  );
+}
+
+/**
+ * Re-detects an item's markers. The capability read and this call can reach
+ * different API nodes during a rolling deploy or rollback, so a 404 drops the
+ * cached capability; with `introFallback` (episodes) an intro-only request
+ * retries once through the older episode-only operation. Other kinds surface
+ * the error, since that operation cannot re-detect credits.
+ */
+export function useRedetectItemMarkers({ introFallback = false } = {}) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    retry: false,
+    mutationFn: async ({ itemId, kind }: { itemId: string; kind: RedetectMarkersKind }) => {
+      try {
+        return await redetectItemMarkers(itemId, kind);
+      } catch (error) {
+        if (!isMissingOperation(error)) throw error;
+        void queryClient.invalidateQueries({ queryKey: adminKeys.markerCapabilities() });
+        if (!introFallback || kind !== "intro") throw error;
+        return redetectEpisodeIntro(itemId);
+      }
+    },
+    ...redetectionToasts,
+  });
+}
+
 export function useRedetectEpisodeIntro() {
   return useMutation({
     retry: false,
     mutationFn: redetectEpisodeIntro,
-    onSuccess: (response) => {
-      toast.success(
-        response.status === "already_running"
-          ? "Re-detection already running"
-          : "Re-detection started",
-      );
-    },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Failed to start re-detection");
-    },
+    ...redetectionToasts,
   });
 }
 

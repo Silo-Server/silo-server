@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => ({
   useUpsertLibraryRootOverride: vi.fn(),
   useDeleteLibraryRootOverride: vi.fn(),
   useActiveScans: vi.fn(),
+  useLibraryRealtimeMonitoring: vi.fn(),
 }));
 
 vi.mock("@/hooks/queries/admin/libraries", () => ({
@@ -75,6 +76,7 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
     data?.pages.flatMap((page) => page.roots) ?? [],
   useUpsertLibraryRootOverride: (...args: unknown[]) => mocks.useUpsertLibraryRootOverride(...args),
   useDeleteLibraryRootOverride: (...args: unknown[]) => mocks.useDeleteLibraryRootOverride(...args),
+  useLibraryRealtimeMonitoring: (...args: unknown[]) => mocks.useLibraryRealtimeMonitoring(...args),
   UNMATCHED_PAGE_SIZE: 10,
 }));
 
@@ -258,6 +260,7 @@ describe("AdminLibraries", () => {
     mocks.useUpsertLibraryRootOverride.mockReturnValue(queryState);
     mocks.useDeleteLibraryRootOverride.mockReturnValue(queryState);
     mocks.useActiveScans.mockReturnValue({ data: [], isLoading: false });
+    mocks.useLibraryRealtimeMonitoring.mockReturnValue({ data: undefined });
   });
 
   it("uses scan language instead of metadata refresh language on the admin libraries page", () => {
@@ -299,6 +302,50 @@ describe("AdminLibraries", () => {
     expect(markup).toContain("Scan could not read or resolve 3 paths");
     expect(markup).not.toContain("Confirm Cleanup");
     expect(markup).not.toContain("Confirm Empty-Root Cleanup");
+  });
+
+  it.each([
+    ["limit_reached", "Watch limit reached", "Raise fs.inotify.max_user_watches on the host"],
+    ["root_unavailable", "Folder unavailable", "/media/movies is not mounted"],
+    ["unsupported_filesystem", "Unsupported filesystem", "/media/movies is on NFS"],
+    ["error", "Error", "inotify_init failed"],
+  ])("flags a library whose real-time monitoring is %s", (state, label, detail) => {
+    mocks.useLibraryRealtimeMonitoring.mockReturnValue({
+      data: {
+        server_enabled: true,
+        libraries: [{ library_id: 1, enabled: true, state, backend: "", detail, directories: 0 }],
+      },
+    });
+
+    const container = document.createElement("div");
+    container.innerHTML = renderPage();
+    const badge = Array.from(container.querySelectorAll('[data-slot="badge"]')).find((el) =>
+      el.textContent?.startsWith("Monitoring:"),
+    );
+
+    expect(badge?.textContent).toContain(`Monitoring: ${label}`);
+    expect(badge?.getAttribute("title")).toBe(detail || `Real-time monitoring: ${label}`);
+  });
+
+  it.each([
+    "monitoring",
+    "starting",
+    "monitoring_off",
+    "library_disabled",
+    "server_disabled",
+    "not_reporting",
+    "unsupported_platform",
+  ])("shows no monitoring badge while monitoring is %s", (state) => {
+    mocks.useLibraryRealtimeMonitoring.mockReturnValue({
+      data: {
+        server_enabled: state !== "server_disabled",
+        libraries: [
+          { library_id: 1, enabled: true, state, backend: "", detail: "", directories: 0 },
+        ],
+      },
+    });
+
+    expect(renderPage()).not.toContain("Monitoring:");
   });
 
   it("offers confirmed cleanup for a suspect-empty dead-root warning", () => {

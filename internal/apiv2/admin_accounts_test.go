@@ -21,6 +21,8 @@ type fakeAdminAccounts struct {
 	allowImpersonation bool
 	race               bool
 	err                error
+	transferredTo      int
+	transferErr        error
 }
 
 func fixtureAdminAccounts() *fakeAdminAccounts {
@@ -50,6 +52,10 @@ func (f *fakeAdminAccounts) DeleteAdminAccount(_ context.Context, _ int, rev, gr
 	}
 	f.writes++
 	return nil
+}
+func (f *fakeAdminAccounts) TransferAdminOwnership(_ context.Context, id int) error {
+	f.transferredTo = id
+	return f.transferErr
 }
 func (f *fakeAdminAccounts) ImpersonateAdminAccount(context.Context, int, string, string) (handlers.TokenPairView, error) {
 	if f.allowImpersonation {

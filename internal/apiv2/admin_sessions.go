@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/streamlocation"
 )
 
 type AdminPlaybackSessionService interface {
@@ -40,6 +41,7 @@ type AdminPlaybackSession struct {
 	IsPaused                 bool    `json:"is_paused"`
 	HasPlaybackControl       bool    `json:"has_playback_control"`
 	ClientIP                 string  `json:"client_ip,omitempty"`
+	StreamLocation           string  `json:"stream_location" enum:"local,remote" doc:"Local or remote classification used by the server bitrate policy."`
 	ClientName               string  `json:"client_name,omitempty"`
 	ClientVersion            string  `json:"client_version,omitempty"`
 	ClientBuild              string  `json:"client_build,omitempty"`
@@ -57,6 +59,8 @@ type AdminPlaybackSession struct {
 	TargetBitrateKbps        *int    `json:"target_bitrate_kbps"`
 	TranscodeHWAccel         string  `json:"transcode_hw_accel,omitempty"`
 	ToneMapMode              string  `json:"tone_map_mode,omitempty"`
+	OutputContainer          string  `json:"output_container,omitempty" doc:"Container the serving transport produces: fmp4, mpegts, or the source container for direct play. Absent when the node did not report it; clients must not infer it from play_method or the source."`
+	OutputProtocol           string  `json:"output_protocol,omitempty" doc:"Delivery protocol, hls or http, independent of the container. Absent when the node did not report it."`
 	SourceContainer          string  `json:"source_container,omitempty"`
 	SourceBitrateKbps        *int    `json:"source_bitrate_kbps"`
 	SourceVideoCodec         string  `json:"source_video_codec,omitempty"`
@@ -70,7 +74,7 @@ type AdminPlaybackSession struct {
 	RequestedVideoResolution string  `json:"requested_video_resolution,omitempty"`
 	VideoDecision            string  `json:"video_decision,omitempty"`
 	AudioDecision            string  `json:"audio_decision,omitempty"`
-	EffectivePlayMethod      string  `json:"effective_play_method,omitempty"`
+	EffectivePlayMethod      string  `json:"effective_play_method,omitempty" doc:"Whole-session method: direct, remux, direct_stream (copied video, converted audio) or transcode; absent when unknown"`
 	IsJellyfinClient         bool    `json:"is_jellyfin_client,omitzero"`
 	RoutingNetworkProvider   *string `json:"routing_network_provider,omitempty" doc:"Access network selected for playback: empty means default; absent means unknown; otherwise the validated provider identifier."`
 	RoutingWorkload          string  `json:"routing_workload,omitempty"`
@@ -82,6 +86,17 @@ type AdminPlaybackSession struct {
 	RoutingEgressNodeName    string  `json:"routing_egress_node_name,omitempty"`
 }
 
+// directStreamPlayMethod is the native bucket for copied video with converted
+// audio. The frozen bridge's shared read model calls it "audio".
+const directStreamPlayMethod = "direct_stream"
+
+func nativeEffectivePlayMethod(bridge string) string {
+	if bridge == "audio" {
+		return directStreamPlayMethod
+	}
+	return bridge
+}
+
 func adminSessionNodeID(id *int) *ID {
 	if id == nil {
 		return nil
@@ -89,6 +104,14 @@ func adminSessionNodeID(id *int) *ID {
 	return new(IDFromInt(int64(*id)))
 }
 func adminPlaybackSessionOf(v handlers.AdminPlaybackSessionView) AdminPlaybackSession {
+	provider := ""
+	if v.RoutingNetworkProvider != nil {
+		provider = *v.RoutingNetworkProvider
+	}
+	location := v.StreamLocation
+	if location != string(streamlocation.Local) && location != string(streamlocation.Remote) {
+		location = string(streamlocation.FromMetadata(v.ClientIP, provider))
+	}
 	return AdminPlaybackSession{
 		SessionID:                v.SessionID,
 		UserID:                   IDFromInt(int64(v.UserID)),
@@ -115,6 +138,7 @@ func adminPlaybackSessionOf(v handlers.AdminPlaybackSessionView) AdminPlaybackSe
 		IsPaused:                 v.IsPaused,
 		HasPlaybackControl:       v.HasPlaybackControl,
 		ClientIP:                 v.ClientIP,
+		StreamLocation:           location,
 		ClientName:               v.ClientName,
 		ClientVersion:            v.ClientVersion,
 		ClientBuild:              v.ClientBuild,
@@ -132,6 +156,8 @@ func adminPlaybackSessionOf(v handlers.AdminPlaybackSessionView) AdminPlaybackSe
 		TargetBitrateKbps:        v.TargetBitrateKbps,
 		TranscodeHWAccel:         v.TranscodeHWAccel,
 		ToneMapMode:              v.ToneMapMode,
+		OutputContainer:          v.OutputContainer,
+		OutputProtocol:           v.OutputProtocol,
 		SourceContainer:          v.SourceContainer,
 		SourceBitrateKbps:        v.SourceBitrateKbps,
 		SourceVideoCodec:         v.SourceVideoCodec,
@@ -145,7 +171,7 @@ func adminPlaybackSessionOf(v handlers.AdminPlaybackSessionView) AdminPlaybackSe
 		RequestedVideoResolution: v.RequestedVideoResolution,
 		VideoDecision:            v.VideoDecision,
 		AudioDecision:            v.AudioDecision,
-		EffectivePlayMethod:      v.EffectivePlayMethod,
+		EffectivePlayMethod:      nativeEffectivePlayMethod(v.EffectivePlayMethod),
 		IsJellyfinClient:         v.IsJellyfinClient,
 		RoutingNetworkProvider:   v.RoutingNetworkProvider,
 		RoutingWorkload:          v.RoutingWorkload,
@@ -189,7 +215,9 @@ type AdminPlaybackSessionCapabilitiesOutputBody struct {
 	ClientChannel             bool     `json:"client_channel"`
 	TargetAudioChannels       bool     `json:"target_audio_channels"`
 	NetworkAccessRoute        bool     `json:"network_access_route"`
+	StreamLocation            bool     `json:"stream_location"`
 	NodeRouting               bool     `json:"node_routing"`
+	OutputFormat              bool     `json:"output_format" doc:"Rows may carry output_container and output_protocol"`
 }
 
 const opListAdminPlaybackSessions = "listAdminPlaybackSessions"
@@ -207,7 +235,10 @@ func registerAdminPlaybackSessions(reg *Registry) {
 		out.Body.NodeObservations = reg.deps.AdminNodeSessions != nil && reg.deps.AdminNodeSessions.Available()
 		f := handlers.AdminPlaybackSessionFeatures()
 		out.Body.EffectivePlayMethod = f.EffectivePlayMethod
-		out.Body.EffectivePlayMethodValues = f.EffectivePlayMethodValues
+		out.Body.EffectivePlayMethodValues = make([]string, len(f.EffectivePlayMethodValues))
+		for i, method := range f.EffectivePlayMethodValues {
+			out.Body.EffectivePlayMethodValues[i] = nativeEffectivePlayMethod(method)
+		}
 		out.Body.IsJellyfinClient = f.IsJellyfinClient
 		out.Body.TranscodeHWAccel = f.TranscodeHWAccel
 		out.Body.ToneMapMode = f.ToneMapMode
@@ -217,6 +248,8 @@ func registerAdminPlaybackSessions(reg *Registry) {
 		out.Body.TargetAudioChannels = f.TargetAudioChannels
 		out.Body.NodeRouting = f.NodeRouting
 		out.Body.NetworkAccessRoute = true
+		out.Body.StreamLocation = true
+		out.Body.OutputFormat = true
 		return out, nil
 	})
 	Register(reg, op("", opListAdminPlaybackSessions), func(ctx context.Context, in *AdminPlaybackSessionsInput) (*AdminPlaybackSessionsOutput, error) {

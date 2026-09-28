@@ -11,8 +11,11 @@ while transactions wait for another pooled connection.
 A transport command has one identity across the room. Seek readiness is tied to
 that identity and destination, including an attachment during the seek. A new
 selection clears previous attachments and readiness. Readiness considers all
-attached, connected members across API servers. The existing 30-second waiting
-deadline excludes stragglers so one client cannot hold everyone indefinitely. The
+attached, connected members across API servers. A 10-second waiting deadline
+excludes stragglers so one client cannot hold everyone indefinitely. It applies
+only once at least one member is ready; until then the room keeps waiting,
+because resuming without an audience would only skip content. Past the
+deadline, the first member to become ready resumes the room. The
 shared coordinator checks the persisted command time during reconciliation; it
 does not retain process timers that could outlive a remotely replaced barrier.
 
@@ -59,11 +62,63 @@ recover. Other viewers' broadcasts do not wait for its write deadline. Each
 broadcast builds and sorts the common roster once, then adds each viewer's own
 permissions and identity flags.
 
-The web player keeps stalls shorter than 500 ms local. A sustained lack of media
-reports buffering and enters the room barrier while playback is running. Pausing
-cancels pending browser reports, and the server ignores delayed buffering reports
-for a paused room. Viewer status identifies who is still buffering or syncing. The timeline remains at the requested seek position
-while the player waits for the replacement stream.
+## Buffering policy
+
+The room waits for a viewer once, then lets them catch up. One slow connection
+must not pause everyone repeatedly, and one short hiccup must not make a viewer
+miss the scene.
+
+- Stalls shorter than 2 seconds stay local. The web player reports buffering
+  only after 2 seconds without playable media, and the viewer converges on the
+  room by playback rate. It sends no position reports while its element is
+  stalled, or while its media is unplayable and a readiness acknowledgement is
+  pending, because a stalled position is not a decision.
+- A longer stall pauses the room for at most the 10-second waiting deadline,
+  and the overlay names who everyone is waiting for.
+- A viewer who missed the deadline, or who stalls again within 5 minutes of
+  their last stall, catches up on their own: the room keeps playing and their
+  stalls no longer pause it. Buffering also cannot pause the room within 1
+  minute of the last buffering pause, whoever stalls. A stall from a viewer with
+  nobody else watching always pauses the room, and the room waits for them past
+  the deadline. A viewer left alone while catching up resumes the room from
+  wherever they recover instead of skipping ahead.
+- Explicit shared actions stay coordinated: start, seek, resume, and a new
+  selection. Viewers who are catching up receive every command but do not hold
+  those barriers. A new selection clears every viewer's stall history.
+- A late joiner, or a viewer whose playback session is replaced, syncs to the
+  room alone. The room keeps playing, and the new stream's startup counts as
+  that viewer's stall.
+- A viewer who is catching up acknowledges recovery with `ready` once the latest
+  command has executed and its media is playable again. The server clears its
+  buffering status, keeps its stall history, and sends it the room's current
+  position. A member reported as buffering receives no position corrections for
+  up to 30 seconds; the acknowledgement ends that hold. A position report that
+  matches the room also marks the member ready, which covers late joiners and
+  clients that never send `ready`.
+- The host follows the same rules. While the host is buffering or catching up,
+  and whenever the host has drifted by 2 seconds or less, the host is corrected
+  like any viewer instead of moving the room anchor. A larger jump or a pause
+  mismatch still moves the room.
+
+Stall times and the last buffering pause live in the room runtime, so every API
+server applies the same limits and a reconnect through another server does not
+reset them.
+
+Catching up is bounded on the web player. A small drift converges by playback
+rate, and a correction to media that is already buffered seeks at once. A
+correction that has to load new media, by a range request or a stream rebuild,
+lands late by its load time; chasing the advancing room with a fresh load on
+every correction never converges. Only one such load runs at a time. The next
+waits 10 seconds after the previous one started playing, doubling to 60 seconds
+until the viewer converges, and aims ahead of the room by the load time the
+previous one took, up to 10 seconds. After two sustained stalls within 5
+minutes, the player offers a lower quality for the same source file. Explicit
+room seeks are never delayed by this budget.
+
+Pausing cancels pending browser reports, and the server ignores delayed
+buffering reports for a paused room. Viewer status identifies who is still
+buffering or syncing. The timeline remains at the requested seek position while
+the player waits for the replacement stream.
 
 ## Deployment and clients
 

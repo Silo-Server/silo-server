@@ -53,6 +53,54 @@ func (r *RatingsRepo) Set(ctx context.Context, userID int, profileID, mediaItemI
 	return nil
 }
 
+// ObservedRating is the rating and rating time a caller read earlier, used to
+// detect a change made since. A zero Rating means the item was unrated.
+type ObservedRating struct {
+	Rating  int
+	RatedAt time.Time
+}
+
+// SetIfUnchanged writes a rating observed elsewhere (a watch provider) only if
+// the item's rating is still the observed one. Every local write stamps
+// rated_at, so comparing it too catches a change back to the same value.
+// ratedAt is the time the new rating was made. It reports whether the write
+// applied; false means a concurrent change won, and the caller should re-read
+// before retrying.
+func (r *RatingsRepo) SetIfUnchanged(ctx context.Context, userID int, profileID, mediaItemID string, observed ObservedRating, rating int, ratedAt time.Time) (bool, error) {
+	var query string
+	args := []any{userID, profileID, mediaItemID, rating, ratedAt}
+	if observed.Rating == 0 {
+		query = `
+			INSERT INTO user_ratings (user_id, profile_id, media_item_id, rating, rated_at)
+			VALUES ($1, $2, $3, $4, $5)
+			ON CONFLICT (user_id, profile_id, media_item_id) DO NOTHING`
+	} else {
+		query = `
+			UPDATE user_ratings SET rating = $4, rated_at = $5
+			WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3 AND rating = $6 AND rated_at = $7`
+		args = append(args, observed.Rating, observed.RatedAt)
+	}
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return false, fmt.Errorf("set rating if unchanged: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// DeleteIfUnchanged removes a rating only if it is still the observed one. It
+// reports whether a row was deleted.
+func (r *RatingsRepo) DeleteIfUnchanged(ctx context.Context, userID int, profileID, mediaItemID string, observed ObservedRating) (bool, error) {
+	tag, err := r.pool.Exec(ctx, `
+		DELETE FROM user_ratings
+		WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3 AND rating = $4 AND rated_at = $5`,
+		userID, profileID, mediaItemID, observed.Rating, observed.RatedAt,
+	)
+	if err != nil {
+		return false, fmt.Errorf("delete rating if unchanged: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
 // Get retrieves a user's rating for an item. Returns nil if not rated.
 func (r *RatingsRepo) Get(ctx context.Context, userID int, profileID, mediaItemID string) (*UserRating, error) {
 	var ur UserRating
@@ -133,6 +181,32 @@ func (r *RatingsRepo) List(ctx context.Context, userID int, profileID string, li
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list ratings: %w", err)
+	}
+	defer rows.Close()
+
+	var ratings []UserRating
+	for rows.Next() {
+		var ur UserRating
+		if err := rows.Scan(&ur.UserID, &ur.ProfileID, &ur.MediaItemID, &ur.Rating, &ur.RatedAt); err != nil {
+			return nil, fmt.Errorf("scan rating: %w", err)
+		}
+		ratings = append(ratings, ur)
+	}
+	return ratings, rows.Err()
+}
+
+// ListAll returns every rating of a profile in one query, so the caller reads a
+// single consistent snapshot.
+func (r *RatingsRepo) ListAll(ctx context.Context, userID int, profileID string) ([]UserRating, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT user_id, profile_id, media_item_id, rating, rated_at
+		FROM user_ratings
+		WHERE user_id = $1 AND profile_id = $2
+		ORDER BY media_item_id`,
+		userID, profileID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list all ratings: %w", err)
 	}
 	defer rows.Close()
 

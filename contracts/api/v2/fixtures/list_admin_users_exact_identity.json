@@ -11,6 +11,8 @@
       "max_playback_quality": null,
       "max_streams": 2,
       "max_transcodes": null,
+      "max_remote_stream_bitrate_kbps": null,
+      "max_local_stream_bitrate_kbps": null,
       "transcode_allowed": null,
       "audio_transcode_allowed": null,
       "max_profiles": 5,
@@ -18,6 +20,9 @@
       "download_transcode_allowed": null,
       "requests_allowed": null,
       "access_group_id": "2",
+      "password_login": false,
+      "password_change_required": false,
+      "is_owner": false,
       "effective_policy": {
         "library_ids": [
           "3"
@@ -25,6 +30,8 @@
         "max_playback_quality": "1080p",
         "max_streams": 2,
         "max_transcodes": 0,
+        "max_remote_stream_bitrate_kbps": 0,
+        "max_local_stream_bitrate_kbps": 0,
         "transcode_allowed": true,
         "audio_transcode_allowed": false,
         "download_allowed": false,

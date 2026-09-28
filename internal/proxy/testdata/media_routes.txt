@@ -20,6 +20,8 @@ GET /stream/remux/{token}	media	playback	viewer_egress	true	true
 HEAD /stream/remux/{token}	media	playback	viewer_egress	true	true
 GET /stream/subtitles/{token}/{track}	media	playback	viewer_egress	true	true
 GET /stream/subtitles/{token}/{track}/fonts	media	playback	viewer_egress	true	true
+GET /stream/theme/{token}	media	transfer	viewer_egress	false	true
+HEAD /stream/theme/{token}	media	transfer	viewer_egress	false	true
 GET /stream/transcode/{token}/master.m3u8	media	manifest	viewer_egress	true	true
 HEAD /stream/transcode/{token}/master.m3u8	media	manifest	viewer_egress	true	true
 GET /stream/transcode/{token}/segment/{name}	media	playback	viewer_egress	true	true
@@ -50,6 +52,8 @@ GET /stream/remux/{token}	media	playback	viewer_egress	true	true
 HEAD /stream/remux/{token}	media	playback	viewer_egress	true	true
 GET /stream/subtitles/{token}/{track}	media	playback	viewer_egress	true	true
 GET /stream/subtitles/{token}/{track}/fonts	media	playback	viewer_egress	true	true
+GET /stream/theme/{token}	media	transfer	viewer_egress	false	true
+HEAD /stream/theme/{token}	media	transfer	viewer_egress	false	true
 GET /stream/transcode/{token}/master.m3u8	media	manifest	viewer_egress	true	true
 HEAD /stream/transcode/{token}/master.m3u8	media	manifest	viewer_egress	true	true
 GET /stream/transcode/{token}/segment/{name}	media	playback	viewer_egress	true	true

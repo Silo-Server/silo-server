@@ -3,6 +3,7 @@
  * Uses PlayerConfig for API base URL and auth — never imports app-specific code.
  */
 
+import { V2_CLIENT_HEADERS } from "@/api/v2/request";
 import type { PlayerConfig } from "./context/PlayerConfigContext";
 
 interface PlayerErrorEnvelope {
@@ -23,9 +24,11 @@ export class PlayerFetchError extends Error {
 }
 
 /**
- * The auth, profile and device headers every player request carries, built
- * from PlayerConfig so a host that embeds the player elsewhere keeps control
- * of them. `hasJsonBody` adds the JSON content type for a non-FormData body.
+ * The client, auth, profile and device headers every player request carries.
+ * Credentials come from PlayerConfig so a host that embeds the player
+ * elsewhere keeps control of them. The client identity is the one every web
+ * v2 request sends; the server labels playback metrics with it.
+ * `hasJsonBody` adds the JSON content type for a non-FormData body.
  */
 export function playerRequestHeaders(
   config: PlayerConfig,
@@ -33,6 +36,7 @@ export function playerRequestHeaders(
   hasJsonBody: boolean,
 ): Record<string, string> {
   const headers: Record<string, string> = {
+    ...V2_CLIENT_HEADERS,
     ...(base as Record<string, string>),
   };
   if (hasJsonBody) {

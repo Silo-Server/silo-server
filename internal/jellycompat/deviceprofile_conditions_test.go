@@ -67,6 +67,143 @@ func TestMatchesCodecProfileContainerUsesJellyfinLiteralTokens(t *testing.T) {
 	}
 }
 
+func TestHLSRemuxDV8HDR10BaseLayerMatchesExplicitDOVIAndHDR10Declaration(t *testing.T) {
+	version := hlsRemuxDV8HDR10BaseLayerTestVersion()
+	profile := hlsRemuxDV8HDR10BaseLayerTestProfile([]ProfileCondition{
+		{Condition: "EqualsAny", Property: "VideoRangeType", Value: "SDR|HDR10|HDR10Plus|HLG|DOVI", IsRequired: true},
+		{Condition: "EqualsAny", Property: "VideoCodecTag", Value: "hvc1|dvh1", IsRequired: true},
+	})
+	if !profile.SupportsHLSRemuxForAudioStream(version, defaultAudioStreamIndex(version)) {
+		t.Fatal("proven single-layer DV8.1 HDR10-base source did not match the client's explicit DOVI+HDR10 HLS declaration")
+	}
+}
+
+func TestDV8HDR10BaseLayerDoesNotWidenOriginalMKVDirectPlay(t *testing.T) {
+	version := hlsRemuxDV8HDR10BaseLayerTestVersion()
+	profile := DeviceProfile{
+		DirectPlayProfiles: []DirectPlayProfile{{Type: "Video", Container: "mkv", VideoCodec: "hevc", AudioCodec: "eac3"}},
+		CodecProfiles: []CodecProfile{{
+			Type: "Video", Container: "mkv", Codec: "hevc",
+			Conditions: []ProfileCondition{{
+				Condition: "EqualsAny", Property: "VideoRangeType", Value: "HDR10|DOVI", IsRequired: true,
+			}},
+		}},
+	}
+	if profile.SupportsDirectPlay(version) {
+		t.Fatal("original MKV direct play unexpectedly accepted the HLS-only DV8 range exception")
+	}
+}
+
+func TestHLSRemuxDV8HDR10BaseLayerKeepsAllOtherConditionsExact(t *testing.T) {
+	version := hlsRemuxDV8HDR10BaseLayerTestVersion()
+	tests := []struct {
+		name       string
+		conditions []ProfileCondition
+	}{
+		{
+			name: "width limit",
+			conditions: []ProfileCondition{
+				{Condition: "EqualsAny", Property: "VideoRangeType", Value: "HDR10|DOVI", IsRequired: true},
+				{Condition: "LessThanEqual", Property: "Width", Value: "1920", IsRequired: true},
+			},
+		},
+		{
+			name: "level limit",
+			conditions: []ProfileCondition{
+				{Condition: "EqualsAny", Property: "VideoRangeType", Value: "HDR10|DOVI", IsRequired: true},
+				{Condition: "LessThanEqual", Property: "VideoLevel", Value: "150", IsRequired: true},
+			},
+		},
+		{
+			name: "sample entry",
+			conditions: []ProfileCondition{
+				{Condition: "EqualsAny", Property: "VideoRangeType", Value: "HDR10|DOVI", IsRequired: true},
+				{Condition: "Equals", Property: "VideoCodecTag", Value: "hvc1", IsRequired: true},
+			},
+		},
+		{
+			name: "explicit actual range exclusion",
+			conditions: []ProfileCondition{
+				{Condition: "NotEquals", Property: "VideoRangeType", Value: "DOVIWithHDR10", IsRequired: true},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			profile := hlsRemuxDV8HDR10BaseLayerTestProfile(tt.conditions)
+			if profile.SupportsHLSRemuxForAudioStream(version, defaultAudioStreamIndex(version)) {
+				t.Fatal("HLS remux was accepted despite an unsatisfied exact condition")
+			}
+		})
+	}
+}
+
+func TestHLSRemuxDV8HDR10BaseLayerDoesNotWidenAudioProfiles(t *testing.T) {
+	version := hlsRemuxDV8HDR10BaseLayerTestVersion()
+	for _, profileType := range []string{"Audio", "VideoAudio"} {
+		t.Run(profileType, func(t *testing.T) {
+			profile := DeviceProfile{
+				TranscodingProfiles: []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: "mp4", VideoCodec: "hevc", AudioCodec: "eac3"}},
+				CodecProfiles: []CodecProfile{{
+					Type: profileType, Codec: "eac3",
+					Conditions: []ProfileCondition{{
+						Condition: "EqualsAny", Property: "VideoRangeType", Value: "HDR10|DOVI", IsRequired: true,
+					}},
+				}},
+			}
+			if profile.SupportsHLSRemuxForAudioStream(version, defaultAudioStreamIndex(version)) {
+				t.Fatal("audio profile unexpectedly accepted the DV8 video-range exception")
+			}
+		})
+	}
+}
+
+func TestHLSRemuxDV8HDR10BaseLayerFailsClosedWithoutProvenSingleLayerMetadata(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*models.VideoTrack)
+	}{
+		{name: "missing base layer", mutate: func(video *models.VideoTrack) { video.DVBLPresent = false }},
+		{name: "profile 5", mutate: func(video *models.VideoTrack) { video.DVProfile = 5 }},
+		{name: "enhancement layer", mutate: func(video *models.VideoTrack) { video.DVELPresent = true }},
+		{name: "unknown enhancement layer", mutate: func(video *models.VideoTrack) { video.DVEnhancementLayer = "unknown" }},
+		{name: "HDR10 only declaration", mutate: func(video *models.VideoTrack) {}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			version := hlsRemuxDV8HDR10BaseLayerTestVersion()
+			tt.mutate(&version.VideoTracks[0])
+			conditions := []ProfileCondition{{Condition: "EqualsAny", Property: "VideoRangeType", Value: "HDR10|DOVI", IsRequired: true}}
+			if tt.name == "HDR10 only declaration" {
+				conditions[0].Value = "HDR10"
+			}
+			profile := hlsRemuxDV8HDR10BaseLayerTestProfile(conditions)
+			if profile.SupportsHLSRemuxForAudioStream(version, defaultAudioStreamIndex(version)) {
+				t.Fatal("unproven or non-DV declaration unexpectedly gained an HLS remux route")
+			}
+		})
+	}
+}
+
+func hlsRemuxDV8HDR10BaseLayerTestVersion() catalog.FileVersion {
+	return catalog.FileVersion{
+		FileID: 1, Container: "mkv", CodecVideo: "hevc", CodecAudio: "eac3", HDR: true,
+		VideoTracks: []models.VideoTrack{{
+			Codec: "hevc", Profile: "Main 10", Level: 153, Width: 3840, Height: 2160, BitDepth: 10,
+			DVProfile: 8, DVBLCompatID: 1, DVConfigPresent: true, DVBLCompatIDPresent: true,
+			DVBLPresent: true, DVRPUPresent: true, DVEnhancementLayer: "none", VideoRangeType: "DOVIWithHDR10",
+		}},
+		AudioTracks: []models.AudioTrack{{Codec: "eac3", Channels: 6, Default: true}},
+	}
+}
+
+func hlsRemuxDV8HDR10BaseLayerTestProfile(conditions []ProfileCondition) DeviceProfile {
+	return DeviceProfile{
+		TranscodingProfiles: []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: "mp4", VideoCodec: "hevc", AudioCodec: "eac3"}},
+		CodecProfiles:       []CodecProfile{{Type: "Video", Container: "hls", SubContainer: "mp4", Codec: "hevc", Conditions: conditions}},
+	}
+}
+
 func TestBuildPlaybackSourceCodecProfiles(t *testing.T) {
 	h := &PlaybackHandler{codec: NewResourceIDCodec()}
 	baseVersion := catalog.FileVersion{
@@ -902,5 +1039,85 @@ func TestAudioTranscodeRemuxTriesLaterProfileConditions(t *testing.T) {
 				t.Fatalf("supports remux=%v want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestDeviceProfileDeclaresVideoRangeType(t *testing.T) {
+	declared := DeviceProfile{CodecProfiles: []CodecProfile{{
+		Type:  "Video",
+		Codec: "hevc,h265",
+		Conditions: []ProfileCondition{{
+			Condition: "EqualsAny", Property: "VideoRangeType", Value: "SDR|HDR10|DOVI|DOVIWithHDR10",
+		}},
+	}}}
+	if !declared.declaresVideoRangeType("hevc", compatRangeDOVI) {
+		t.Fatal("an explicit DOVI range type must be detected")
+	}
+	if declared.declaresVideoRangeType("av1", compatRangeDOVI) {
+		t.Fatal("a declaration for hevc must not apply to av1")
+	}
+	if (DeviceProfile{}).declaresVideoRangeType("hevc", compatRangeDOVI) {
+		t.Fatal("a profile without range conditions does not declare DOVI")
+	}
+	notEquals := DeviceProfile{CodecProfiles: []CodecProfile{{Type: "Video", Conditions: []ProfileCondition{{Condition: "NotEquals", Property: "VideoRangeType", Value: "DOVI"}}}}}
+	if notEquals.declaresVideoRangeType("hevc", compatRangeDOVI) {
+		t.Fatal("NotEquals DOVI is not a declaration of support")
+	}
+}
+
+func TestBuildPlaybackSourceFlagsJellyfin12DolbyVisionVariant(t *testing.T) {
+	version := catalog.FileVersion{
+		FileID:     7,
+		Container:  "mkv",
+		CodecVideo: "hevc",
+		HDR:        true,
+		Bitrate:    18_000,
+		VideoTracks: []models.VideoTrack{{
+			Codec: "hevc", Profile: "Main 10", Level: 153, Width: 3840, Height: 2160,
+			DVProfile: 5, DVLevel: 6, VideoRangeType: compatRangeDOVI,
+		}},
+		AudioTracks: []models.AudioTrack{{Codec: "eac3", Channels: 6, Default: true}},
+	}
+	profileWith := func(conditions ...ProfileCondition) DeviceProfile {
+		return DeviceProfile{
+			DirectPlayProfiles:  []DirectPlayProfile{{Type: "Video", Container: "mp4", VideoCodec: "h264", AudioCodec: "aac"}},
+			TranscodingProfiles: []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: "mp4", VideoCodec: "hevc,h264", AudioCodec: "eac3,aac"}},
+			CodecProfiles:       []CodecProfile{{Type: "Video", Codec: "hevc", Conditions: conditions}},
+		}
+	}
+	h := &PlaybackHandler{codec: NewResourceIDCodec()}
+
+	declared := h.buildPlaybackSource("item", "play", version, profileWith(ProfileCondition{Condition: "EqualsAny", Property: "VideoRangeType", Value: "SDR|HDR10|DOVI"}), playbackInfoRequest{}, true)
+	if !declared.HLSRemux || !declared.DOVIVariant {
+		t.Fatalf("declared DOVI remux: HLSRemux=%v DOVIVariant=%v", declared.HLSRemux, declared.DOVIVariant)
+	}
+
+	permissive := h.buildPlaybackSource("item", "play", version, profileWith(), playbackInfoRequest{}, true)
+	if !permissive.HLSRemux || permissive.DOVIVariant {
+		t.Fatalf("a profile that never names DOVI must keep the single hvc1 variant: HLSRemux=%v DOVIVariant=%v", permissive.HLSRemux, permissive.DOVIVariant)
+	}
+}
+
+// Only HEVC profile 5 and AV1 profile 10 have a dvh1/dav1 stream to offer; an
+// AVC Dolby Vision track must not be advertised as dvh1.
+func TestCompatDOVIVariantEligibleCodecProfiles(t *testing.T) {
+	for _, tc := range []struct {
+		codec   string
+		profile int
+		want    bool
+	}{
+		{"hevc", 5, true},
+		{"h265", 5, true},
+		{"av1", 10, true},
+		{"h264", 9, false},
+		{"hevc", 10, false},
+		{"av1", 5, false},
+	} {
+		version := catalog.FileVersion{HDR: true, VideoTracks: []models.VideoTrack{{
+			Codec: tc.codec, DVProfile: tc.profile, DVLevel: 6, VideoRangeType: compatRangeDOVI,
+		}}}
+		if got := compatDOVIVariantEligible(version); got != tc.want {
+			t.Errorf("%s profile %d eligible = %v, want %v", tc.codec, tc.profile, got, tc.want)
+		}
 	}
 }

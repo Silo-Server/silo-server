@@ -23,6 +23,9 @@ type Service struct {
 	matcher        mediaMatcher
 	watchState     watchStateImporter
 	storeProvider  userstore.UserStoreProvider
+	ratings        ratingStore
+	ratingStaler   ratingProfileStaler
+	dropped        droppedStore
 	locks          sync.Map
 	scrobbleQueues sync.Map
 }
@@ -139,6 +142,9 @@ func (s *Service) GetConnectionStatus(ctx context.Context, userID int, profileID
 		SyncWatchlistRemovalsEnabled: false,
 		SyncWatchlistOrderEnabled:    true,
 		ScrobbleEnabled:              true,
+		ImportRatingsEnabled:         true,
+		ExportRatingsEnabled:         true,
+		SyncDroppedEnabled:           true,
 	}
 	if configurable, ok := provider.(connectionConfigProvider); ok {
 		status.ConnectionConfigSchema = configurable.ConnectionConfigSchema()
@@ -158,6 +164,9 @@ func (s *Service) GetConnectionStatus(ctx context.Context, userID int, profileID
 		status.SyncWatchlistRemovalsEnabled = conn.SyncWatchlistRemovalsEnabled
 		status.SyncWatchlistOrderEnabled = conn.SyncWatchlistOrderEnabled
 		status.ScrobbleEnabled = conn.ScrobbleEnabled
+		status.ImportRatingsEnabled = conn.ImportRatingsEnabled
+		status.ExportRatingsEnabled = conn.ExportRatingsEnabled
+		status.SyncDroppedEnabled = conn.SyncDroppedEnabled
 		status.LastInboundSyncAt = conn.LastInboundSyncAt
 		status.LastProgressSyncAt = conn.LastProgressSyncAt
 		status.LastOutboundSyncAt = conn.LastOutboundSyncAt
@@ -215,7 +224,31 @@ func (s *Service) clearWatchlistOrder(ctx context.Context, conn Connection) erro
 }
 
 func (s *Service) DeleteConnection(ctx context.Context, userID int, profileID string, providerKey string) error {
-	return s.repo.DeleteConnection(ctx, providerKey, userID, profileID)
+	// Wait for any rating reconciliation of the connection to end, so once a
+	// disconnect returns no run imports or sends with the removed connection.
+	// The row is read again under the lock and deleted only if it is still
+	// the one locked; a reconnect that replaced it meanwhile is locked in turn.
+	for {
+		conn, ok, err := s.repo.GetConnection(ctx, providerKey, userID, profileID)
+		if err != nil || !ok {
+			return err
+		}
+		replaced := false
+		_, err = s.repo.WithRatingSyncLock(ctx, conn.ID, true, func(ctx context.Context) error {
+			current, ok, err := s.repo.GetConnection(ctx, providerKey, userID, profileID)
+			if err != nil || !ok {
+				return err
+			}
+			if current.ID != conn.ID {
+				replaced = true
+				return nil
+			}
+			return s.repo.DeleteConnection(ctx, providerKey, userID, profileID)
+		})
+		if err != nil || !replaced {
+			return err
+		}
+	}
 }
 
 func (s *Service) RequestManualSync(ctx context.Context, userID int, profileID string, providerKey string) (ManualSyncResult, error) {
@@ -599,7 +632,15 @@ func (s *Service) persistConnection(
 			ExportWatchlistEnabled:    true,
 			SyncWatchlistOrderEnabled: true,
 			ScrobbleEnabled:           true,
+			ImportRatingsEnabled:      true,
+			ExportRatingsEnabled:      true,
+			SyncDroppedEnabled:        true,
 		}
+	}
+	rebound := ok && conn.ProviderAccountID != "" && account.ID != "" && account.ID != conn.ProviderAccountID
+	if rebound {
+		// Rating and dropped-show read cursors belong to the previous account.
+		conn.SyncCursors = withoutDroppedCursors(withoutRatingCursors(conn.SyncCursors))
 	}
 	conn.Provider = providerKey
 	conn.UserID = userID
@@ -609,7 +650,31 @@ func (s *Service) persistConnection(
 	conn.ProviderUsername = account.Username
 	conn.LastError = ""
 
-	return s.repo.UpsertConnection(ctx, conn)
+	if !rebound {
+		return s.repo.UpsertConnection(ctx, conn)
+	}
+	// A switch waits for any rating reconciliation of the connection to end,
+	// so no run applies the previous account's ratings after the switch.
+	var saved Connection
+	_, err = s.repo.WithRatingSyncLock(ctx, conn.ID, true, func(ctx context.Context) error {
+		var err error
+		saved, err = s.repo.UpsertConnection(ctx, conn)
+		if err != nil {
+			return err
+		}
+		// Agreed ratings are scoped to their account, so the previous
+		// account's rows are already ignored; dropping them only after the
+		// new binding is saved means a failed save never leaves the old
+		// account without them.
+		if err := s.repo.ClearRatingSyncStates(ctx, saved.ID, saved.ProviderAccountID); err != nil {
+			slog.WarnContext(ctx, "failed to clear agreed ratings of a previous provider account", "component", "watchsync", "provider", providerKey, "connection_id", saved.ID, "error", err)
+		}
+		if err := s.repo.ClearDroppedSyncStates(ctx, saved.ID, saved.ProviderAccountID); err != nil {
+			slog.WarnContext(ctx, "failed to clear agreed drops of a previous provider account", "component", "watchsync", "provider", providerKey, "connection_id", saved.ID, "error", err)
+		}
+		return nil
+	})
+	return saved, err
 }
 
 func (s *Service) SyncDueConnections(ctx context.Context) error {
@@ -746,7 +811,22 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			rateLimited = &rle
 		}
 	}
-	if conn.ImportWatchedEnabled && provider.Capabilities().ImportWatched {
+	// Dropped shows run first: they cost a request or two, and a large
+	// history read that exhausts the provider's rate limit must not starve
+	// them. Order does not change the merge: imported history keeps its
+	// original watch time, and providers undrop a show that is watched.
+	if conn.SyncDroppedEnabled && provider.Capabilities().SyncDropped {
+		result, err := s.syncDropped(ctx, conn, cfg, provider)
+		run.Warning = appendWarning(run.Warning, result.Warnings)
+		if err != nil {
+			recordFlowError("dropped shows", err)
+		} else if refreshed, refreshErr := s.reloadConnection(ctx, conn); refreshErr != nil {
+			flowErrors = append(flowErrors, "dropped shows connection refresh: "+refreshErr.Error())
+		} else {
+			conn = refreshed
+		}
+	}
+	if rateLimited == nil && conn.ImportWatchedEnabled && provider.Capabilities().ImportWatched {
 		importer, ok := provider.(WatchedImporter)
 		if !ok {
 			flowErrors = append(flowErrors, fmt.Sprintf("provider %q does not implement watched import", conn.Provider))
@@ -837,6 +917,22 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			}
 		}
 	}
+	if rateLimited == nil && (conn.ImportRatingsEnabled || conn.ExportRatingsEnabled) &&
+		(provider.Capabilities().ImportRatings || provider.Capabilities().ExportRatings) {
+		result, err := s.syncRatings(ctx, conn, cfg, provider)
+		run.InboundRatingsFound = result.RemoteFound
+		run.InboundRatingsImported = result.Imported
+		run.OutboundRatingsFound = result.LocalFound
+		run.OutboundRatingsSent = result.Sent
+		run.Warning = appendWarning(run.Warning, result.Warnings)
+		if err != nil {
+			recordFlowError("ratings", err)
+		} else if refreshed, refreshErr := s.reloadConnection(ctx, conn); refreshErr != nil {
+			flowErrors = append(flowErrors, "ratings connection refresh: "+refreshErr.Error())
+		} else {
+			conn = refreshed
+		}
+	}
 
 	if rateLimited != nil {
 		if err := s.deferRateLimitedConnection(ctx, conn, *rateLimited); err != nil {
@@ -923,7 +1019,10 @@ func providerSyncNeedsAccessToken(caps Capabilities) bool {
 		caps.ImportWatchlist ||
 		caps.ExportWatchlist ||
 		caps.RemoveWatchlist ||
-		caps.ScrobblePlayback
+		caps.ScrobblePlayback ||
+		caps.ImportRatings ||
+		caps.ExportRatings ||
+		caps.SyncDropped
 }
 
 func (s *Service) completeSyncRun(ctx context.Context, run SyncRun) (SyncRun, error) {
@@ -1793,14 +1892,20 @@ func providerItemKeyForRemoteFavorite(favorite RemoteFavorite) string {
 	}
 }
 
-func exportResultSentSet(result ExportResult) map[string]bool {
-	sent := make(map[string]bool, len(result.Sent))
-	for _, value := range result.Sent {
-		if value != "" {
-			sent[value] = true
+// exportItemOutcome reports whether a provider answered for one item as sent or
+// as not found. Providers name items by media item id, provider key, or both.
+// The id decides whenever the result names it, because items of different
+// kinds can share a key such as tmdb:550; the key is only a fallback.
+func exportItemOutcome(result ExportResult, mediaItemID, key string) (sent, notFound bool) {
+	if mediaItemID != "" {
+		_, failed := result.Failed[mediaItemID]
+		sent = containsString(result.Sent, mediaItemID)
+		notFound = containsString(result.NotFound, mediaItemID)
+		if sent || notFound || failed {
+			return sent, notFound
 		}
 	}
-	return sent
+	return containsString(result.Sent, key), containsString(result.NotFound, key)
 }
 
 func containsString(values []string, candidate string) bool {

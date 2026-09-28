@@ -191,10 +191,12 @@ Completed-child metrics consume the owner's existing process exit state:
 Maximum RSS is a peak, not current memory or a summable concurrent total. Linux
 KiB values are normalized to bytes; Darwin already reports bytes. Unsupported
 platforms omit maximum-RSS samples. Instrumented owners include playback
-transcode/restarts, progressive remux, scanner probes, and plugin shutdown/failed
-startup. Plugin accounting is delayed until the host joins the existing plugin
-process owner. Other FFmpeg uses need their own owner instrumentation before
-claiming coverage. No second waiter or reaper is installed.
+transcode/restarts, progressive remux, scanner probes, plugin shutdown/failed
+startup, and media analysis and chapter thumbnail runs through
+`internal/mediasample` (workloads `analysis` and `thumbnail`). Plugin
+accounting is delayed until the host joins the existing plugin process owner.
+Other FFmpeg uses need their own owner instrumentation before claiming
+coverage. No second waiter or reaper is installed.
 
 Compare equivalent workloads and binaries before and after a change. Measure
 ordinary metrics, sampled tracing, CPU profiling, execution tracing, and

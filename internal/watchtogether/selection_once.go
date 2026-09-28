@@ -152,19 +152,11 @@ func (s *Service) adoptSelectionWriteLocked(live *liveRoom, room *Room) {
 	if room.SelectionRevision > live.room.SelectionRevision {
 		live.command = nil
 		for _, member := range live.members {
-			if member == nil {
-				continue
+			if member != nil {
+				member.resetForSelection()
 			}
-			member.sessionID = ""
-			member.isReady = false
-			member.isBuffering = false
-			member.ignoreWait = false
-			member.waitingCommand = nil
-			member.correctionCommand = nil
-			member.lastCommandID = ""
-			member.syncingToRoom = false
-			member.lobbyReady = false
 		}
+		live.bufferingWaitAt = time.Time{}
 		s.disarmWaitingDeadlineLocked(live)
 	}
 	live.room = *room

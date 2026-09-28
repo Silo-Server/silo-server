@@ -65,6 +65,7 @@ POST /api/v2/admin/collections	non-media
 GET /api/v2/admin/collections/capabilities	non-media
 POST /api/v2/admin/collections/import/mdblist	non-media
 POST /api/v2/admin/collections/import/tmdb	non-media
+POST /api/v2/admin/collections/import/tmdb-list	non-media
 POST /api/v2/admin/collections/import/trakt	non-media
 GET /api/v2/admin/collections/order	non-media
 PUT /api/v2/admin/collections/order	non-media
@@ -144,6 +145,7 @@ POST /api/v2/admin/items/{id}/metadata-translation	non-media
 GET /api/v2/admin/items/{id}/metadata-translation/jobs	non-media
 POST /api/v2/admin/items/{id}/metadata-translation/jobs/{job_id}/cancel	non-media
 POST /api/v2/admin/items/{id}/redetect-intro	non-media
+POST /api/v2/admin/items/{id}/redetect-markers	non-media
 POST /api/v2/admin/items/{id}/refresh-markers	non-media
 POST /api/v2/admin/items/{id}/refresh-metadata	non-media
 POST /api/v2/admin/items/{id}/split	non-media
@@ -155,6 +157,7 @@ GET /api/v2/admin/jobs	non-media
 GET /api/v2/admin/jobs/capabilities	non-media
 GET /api/v2/admin/jobs/{id}	non-media
 GET /api/v2/admin/jobs/{id}/artifact	non-media
+POST /api/v2/admin/jobs/{id}/cancel	non-media
 GET /api/v2/admin/libraries/{library_id}/collection-groups	non-media
 POST /api/v2/admin/libraries/{library_id}/collection-groups	non-media
 GET /api/v2/admin/libraries/{library_id}/collection-groups/order	non-media
@@ -169,6 +172,7 @@ GET /api/v2/admin/logs/audit	non-media
 GET /api/v2/admin/logs/ws	non-media
 POST /api/v2/admin/logs/ws-ticket	non-media
 GET /api/v2/admin/logs/ws/capabilities	non-media
+GET /api/v2/admin/markers/capabilities	non-media
 GET /api/v2/admin/markers/files/{fileId}/history	non-media
 GET /api/v2/admin/markers/history	non-media
 GET /api/v2/admin/markers/items/{id}/history	non-media
@@ -300,6 +304,9 @@ GET /api/v2/admin/stats/downloads	non-media
 GET /api/v2/admin/stats/playback-activity	non-media
 GET /api/v2/admin/stats/timeseries	non-media
 GET /api/v2/admin/stats/top-activity	non-media
+POST /api/v2/admin/storage-transitions	non-media
+GET /api/v2/admin/storage-transitions/capabilities	non-media
+GET /api/v2/admin/storage-transitions/source-health	non-media
 GET /api/v2/admin/stream-telemetry/parity	non-media
 GET /api/v2/admin/subtitle-providers	non-media
 GET /api/v2/admin/subtitle-providers/{provider}	non-media
@@ -332,10 +339,12 @@ PUT /api/v2/admin/users/{id}	non-media
 GET /api/v2/admin/users/{id}/api-keys	non-media
 POST /api/v2/admin/users/{id}/impersonate	non-media
 GET /api/v2/admin/users/{id}/ips	non-media
+POST /api/v2/admin/users/{id}/password-reset	non-media
 GET /api/v2/admin/users/{id}/profiles	non-media
 GET /api/v2/admin/users/{id}/settings/values	non-media
 DELETE /api/v2/admin/users/{id}/settings/values/{key}	non-media
 PUT /api/v2/admin/users/{id}/settings/values/{key}	non-media
+POST /api/v2/admin/users/{id}/transfer-ownership	non-media
 GET /api/v2/api-keys	non-media
 POST /api/v2/api-keys	non-media
 GET /api/v2/api-keys/scopes	non-media
@@ -375,6 +384,7 @@ GET /api/v2/calendar	non-media
 GET /api/v2/capabilities/downloads	non-media
 GET /api/v2/capabilities/ebooks	non-media
 GET /api/v2/capabilities/metadata-ai	non-media
+GET /api/v2/capabilities/password-reset	non-media
 GET /api/v2/capabilities/trailers	non-media
 GET /api/v2/catalog	non-media
 GET /api/v2/catalog/audiobook-groups	non-media
@@ -383,6 +393,9 @@ GET /api/v2/catalog/filters/search	non-media
 GET /api/v2/catalog/items/{id}	non-media
 GET /api/v2/catalog/items/{id}/episodes	non-media
 GET /api/v2/catalog/items/{id}/manga-files	non-media
+GET /api/v2/catalog/items/{id}/themes/{theme_id}/audio	media	transfer	viewer_egress	false	true
+HEAD /api/v2/catalog/items/{id}/themes/{theme_id}/audio	media	transfer	viewer_egress	false	true
+POST /api/v2/catalog/items/{id}/themes/{theme_id}/playback	non-media
 POST /api/v2/catalog/items/{id}/trailers/refresh	non-media
 POST /api/v2/catalog/items/{id}/translate-description	non-media
 GET /api/v2/catalog/items/{id}/versions	non-media
@@ -394,6 +407,7 @@ GET /api/v2/catalog/search/capabilities	non-media
 GET /api/v2/catalog/series/{id}/seasons	non-media
 GET /api/v2/catalog/series/{id}/seasons/{num}	non-media
 GET /api/v2/catalog/series/{id}/seasons/{num}/episodes	non-media
+GET /api/v2/catalog/themes/capabilities	non-media
 GET /api/v2/catalog/works/{work_id}	non-media
 GET /api/v2/collections	non-media
 POST /api/v2/collections	non-media
@@ -408,6 +422,7 @@ POST /api/v2/collections/import/mdblist	non-media
 GET /api/v2/collections/import/mdblist/search	non-media
 GET /api/v2/collections/import/mdblist/top	non-media
 POST /api/v2/collections/import/tmdb	non-media
+POST /api/v2/collections/import/tmdb-list	non-media
 POST /api/v2/collections/import/trakt	non-media
 GET /api/v2/collections/order	non-media
 PUT /api/v2/collections/order	non-media
@@ -508,8 +523,10 @@ GET /api/v2/invitations/{token}	non-media
 POST /api/v2/invitations/{token}/accept	non-media
 GET /api/v2/libraries	non-media
 POST /api/v2/libraries	non-media
+GET /api/v2/libraries/capabilities	non-media
 GET /api/v2/libraries/metadata-match-queue	non-media
 GET /api/v2/libraries/provider-defaults	non-media
+GET /api/v2/libraries/realtime-monitoring	non-media
 POST /api/v2/libraries/reorder	non-media
 GET /api/v2/libraries/roots	non-media
 DELETE /api/v2/libraries/roots/override	non-media
@@ -588,6 +605,9 @@ GET /api/v2/onboarding/flow	non-media
 PUT /api/v2/onboarding/progress	non-media
 GET /api/v2/onboarding/state	non-media
 GET /api/v2/openapi.json	non-media
+POST /api/v2/password-resets	non-media
+GET /api/v2/password-resets/{token}	non-media
+POST /api/v2/password-resets/{token}/complete	non-media
 GET /api/v2/playback/capabilities	non-media
 POST /api/v2/playback/route-events	non-media
 GET /api/v2/playback/sessions/control/capabilities	non-media
@@ -722,10 +742,6 @@ GET /api/v2/system/setup	non-media
 GET /api/v2/theme/admin-css	non-media
 GET /api/v2/theme/branding	non-media
 GET /api/v2/theme/capabilities	non-media
-GET /api/v2/theme/catalog	non-media
-GET /api/v2/theme/catalog/capabilities	non-media
-POST /api/v2/theme/catalog/refresh	non-media
-GET /api/v2/theme/download	non-media
 GET /api/v2/user/libraries	non-media
 GET /api/v2/user/libraries/capabilities	non-media
 GET /api/v2/watch-providers	non-media
@@ -1215,6 +1231,7 @@ POST /api/v2/admin/collections	non-media
 GET /api/v2/admin/collections/capabilities	non-media
 POST /api/v2/admin/collections/import/mdblist	non-media
 POST /api/v2/admin/collections/import/tmdb	non-media
+POST /api/v2/admin/collections/import/tmdb-list	non-media
 POST /api/v2/admin/collections/import/trakt	non-media
 GET /api/v2/admin/collections/order	non-media
 PUT /api/v2/admin/collections/order	non-media
@@ -1294,6 +1311,7 @@ POST /api/v2/admin/items/{id}/metadata-translation	non-media
 GET /api/v2/admin/items/{id}/metadata-translation/jobs	non-media
 POST /api/v2/admin/items/{id}/metadata-translation/jobs/{job_id}/cancel	non-media
 POST /api/v2/admin/items/{id}/redetect-intro	non-media
+POST /api/v2/admin/items/{id}/redetect-markers	non-media
 POST /api/v2/admin/items/{id}/refresh-markers	non-media
 POST /api/v2/admin/items/{id}/refresh-metadata	non-media
 POST /api/v2/admin/items/{id}/split	non-media
@@ -1305,6 +1323,7 @@ GET /api/v2/admin/jobs	non-media
 GET /api/v2/admin/jobs/capabilities	non-media
 GET /api/v2/admin/jobs/{id}	non-media
 GET /api/v2/admin/jobs/{id}/artifact	non-media
+POST /api/v2/admin/jobs/{id}/cancel	non-media
 GET /api/v2/admin/libraries/{library_id}/collection-groups	non-media
 POST /api/v2/admin/libraries/{library_id}/collection-groups	non-media
 GET /api/v2/admin/libraries/{library_id}/collection-groups/order	non-media
@@ -1319,6 +1338,7 @@ GET /api/v2/admin/logs/audit	non-media
 GET /api/v2/admin/logs/ws	non-media
 POST /api/v2/admin/logs/ws-ticket	non-media
 GET /api/v2/admin/logs/ws/capabilities	non-media
+GET /api/v2/admin/markers/capabilities	non-media
 GET /api/v2/admin/markers/files/{fileId}/history	non-media
 GET /api/v2/admin/markers/history	non-media
 GET /api/v2/admin/markers/items/{id}/history	non-media
@@ -1450,6 +1470,9 @@ GET /api/v2/admin/stats/downloads	non-media
 GET /api/v2/admin/stats/playback-activity	non-media
 GET /api/v2/admin/stats/timeseries	non-media
 GET /api/v2/admin/stats/top-activity	non-media
+POST /api/v2/admin/storage-transitions	non-media
+GET /api/v2/admin/storage-transitions/capabilities	non-media
+GET /api/v2/admin/storage-transitions/source-health	non-media
 GET /api/v2/admin/stream-telemetry/parity	non-media
 GET /api/v2/admin/subtitle-providers	non-media
 GET /api/v2/admin/subtitle-providers/{provider}	non-media
@@ -1482,10 +1505,12 @@ PUT /api/v2/admin/users/{id}	non-media
 GET /api/v2/admin/users/{id}/api-keys	non-media
 POST /api/v2/admin/users/{id}/impersonate	non-media
 GET /api/v2/admin/users/{id}/ips	non-media
+POST /api/v2/admin/users/{id}/password-reset	non-media
 GET /api/v2/admin/users/{id}/profiles	non-media
 GET /api/v2/admin/users/{id}/settings/values	non-media
 DELETE /api/v2/admin/users/{id}/settings/values/{key}	non-media
 PUT /api/v2/admin/users/{id}/settings/values/{key}	non-media
+POST /api/v2/admin/users/{id}/transfer-ownership	non-media
 GET /api/v2/api-keys	non-media
 POST /api/v2/api-keys	non-media
 GET /api/v2/api-keys/scopes	non-media
@@ -1525,6 +1550,7 @@ GET /api/v2/calendar	non-media
 GET /api/v2/capabilities/downloads	non-media
 GET /api/v2/capabilities/ebooks	non-media
 GET /api/v2/capabilities/metadata-ai	non-media
+GET /api/v2/capabilities/password-reset	non-media
 GET /api/v2/capabilities/trailers	non-media
 GET /api/v2/catalog	non-media
 GET /api/v2/catalog/audiobook-groups	non-media
@@ -1533,6 +1559,9 @@ GET /api/v2/catalog/filters/search	non-media
 GET /api/v2/catalog/items/{id}	non-media
 GET /api/v2/catalog/items/{id}/episodes	non-media
 GET /api/v2/catalog/items/{id}/manga-files	non-media
+GET /api/v2/catalog/items/{id}/themes/{theme_id}/audio	media	transfer	viewer_egress	false	true
+HEAD /api/v2/catalog/items/{id}/themes/{theme_id}/audio	media	transfer	viewer_egress	false	true
+POST /api/v2/catalog/items/{id}/themes/{theme_id}/playback	non-media
 POST /api/v2/catalog/items/{id}/trailers/refresh	non-media
 POST /api/v2/catalog/items/{id}/translate-description	non-media
 GET /api/v2/catalog/items/{id}/versions	non-media
@@ -1544,6 +1573,7 @@ GET /api/v2/catalog/search/capabilities	non-media
 GET /api/v2/catalog/series/{id}/seasons	non-media
 GET /api/v2/catalog/series/{id}/seasons/{num}	non-media
 GET /api/v2/catalog/series/{id}/seasons/{num}/episodes	non-media
+GET /api/v2/catalog/themes/capabilities	non-media
 GET /api/v2/catalog/works/{work_id}	non-media
 GET /api/v2/collections	non-media
 POST /api/v2/collections	non-media
@@ -1558,6 +1588,7 @@ POST /api/v2/collections/import/mdblist	non-media
 GET /api/v2/collections/import/mdblist/search	non-media
 GET /api/v2/collections/import/mdblist/top	non-media
 POST /api/v2/collections/import/tmdb	non-media
+POST /api/v2/collections/import/tmdb-list	non-media
 POST /api/v2/collections/import/trakt	non-media
 GET /api/v2/collections/order	non-media
 PUT /api/v2/collections/order	non-media
@@ -1658,8 +1689,10 @@ GET /api/v2/invitations/{token}	non-media
 POST /api/v2/invitations/{token}/accept	non-media
 GET /api/v2/libraries	non-media
 POST /api/v2/libraries	non-media
+GET /api/v2/libraries/capabilities	non-media
 GET /api/v2/libraries/metadata-match-queue	non-media
 GET /api/v2/libraries/provider-defaults	non-media
+GET /api/v2/libraries/realtime-monitoring	non-media
 POST /api/v2/libraries/reorder	non-media
 GET /api/v2/libraries/roots	non-media
 DELETE /api/v2/libraries/roots/override	non-media
@@ -1738,6 +1771,9 @@ GET /api/v2/onboarding/flow	non-media
 PUT /api/v2/onboarding/progress	non-media
 GET /api/v2/onboarding/state	non-media
 GET /api/v2/openapi.json	non-media
+POST /api/v2/password-resets	non-media
+GET /api/v2/password-resets/{token}	non-media
+POST /api/v2/password-resets/{token}/complete	non-media
 GET /api/v2/playback/capabilities	non-media
 POST /api/v2/playback/route-events	non-media
 GET /api/v2/playback/sessions/control/capabilities	non-media
@@ -1872,10 +1908,6 @@ GET /api/v2/system/setup	non-media
 GET /api/v2/theme/admin-css	non-media
 GET /api/v2/theme/branding	non-media
 GET /api/v2/theme/capabilities	non-media
-GET /api/v2/theme/catalog	non-media
-GET /api/v2/theme/catalog/capabilities	non-media
-POST /api/v2/theme/catalog/refresh	non-media
-GET /api/v2/theme/download	non-media
 GET /api/v2/user/libraries	non-media
 GET /api/v2/user/libraries/capabilities	non-media
 GET /api/v2/watch-providers	non-media

@@ -108,9 +108,11 @@ network position:
 - The destination host must never resolve to a private or special-purpose
   address. The deny set covers the IPv4 private/special ranges (loopback,
   RFC 1918, link-local, CGNAT, TEST-NETs, benchmarking, multicast, reserved)
-  and the IPv6 equivalents (unspecified, loopback, ULA, link-local,
-  documentation, NAT64). IPv4-mapped IPv6 addresses are unwrapped before
-  checking so `::ffff:127.0.0.1` cannot bypass the IPv4 entries.
+  and the IPv6 equivalents (unspecified, loopback, ULA, site-local, link-local,
+  documentation, NAT64, multicast). IPv4-mapped IPv6 addresses are unwrapped
+  before checking so `::ffff:127.0.0.1` cannot bypass the IPv4 entries. The
+  address classes are shared with every other user-supplied destination; see
+  [Outbound address guard](outbound-address-guard.md).
 - The guard runs at registration *and* at connect time (the dialer
   re-validates the resolved address) to defeat DNS rebinding. Redirects are
   bounded and each hop is re-checked.

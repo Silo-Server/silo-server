@@ -38,9 +38,10 @@ in order: `silo.events.v2`, `silo.ticket.<ticket>`. The server selects only
 `silo.events.v2`, never the credential-bearing entry. Neither bearer tokens nor
 tickets belong in the URL. Only the `channels` query selection is needed for
 clients using declared subscriptions. Request bodies are refused. An Origin,
-when present, must equal the configured public origin; without that setting it
-must match the request scheme and host. Forwarded host headers grant no Origin
-exception. Native clients may omit Origin but need the same session proof.
+when present, must equal the configured public origin, the request's own scheme
+and host, or a connected network access overlay origin (see
+[native-raw-handshakes.md](architecture/native-raw-handshakes.md#websocket-origin-behind-a-reverse-proxy)).
+Forwarded host headers grant no Origin exception. Native clients may omit Origin but need the same session proof.
 Malformed upgrades and rejected origins do not consume valid tickets.
 
 Consumption is atomic through Redis `GETDEL`. A Redis failure fails closed.
@@ -89,7 +90,7 @@ Connect to `GET /api/v2/playback/sessions/{session_id}/control/ws`
 (`connectPlaybackControlSocket`) offering exactly `silo.playback-control.v2`
 then `silo.ticket.<ticket>`; the server selects only the protocol. Neither
 bearer tokens nor tickets belong in the URL, request bodies are refused, and an
-Origin, when present, must equal the configured public origin. Malformed
+Origin, when present, must pass the same check as the events socket. Malformed
 upgrades and rejected origins do not consume the credential. At upgrade the
 credential is consumed atomically (Redis `GETDEL`; process-local without
 Redis), login authority is re-validated, and ownership and installation are
@@ -228,7 +229,9 @@ The lobby ready check is advisory. The server never gates start on it; the web c
 
 Stop locks the authoritative row and returns a playing room to the lobby: lobby phase, idle playback state, resume-on-ready cleared, anchor reset to zero and paused, selection revision and generation advanced. The selection columns are left alone, so the item that was playing is the lobby's staged item and the host can start it again or stage something else. Advancing the revision is what ends the playback epoch: every member's attached session, buffering readiness, ignore-wait and lobby ready state is dropped and the waiting deadline is disarmed, exactly as a start does. Members in the player see the room leave the playing phase and return to the room page. A room that is not playing answers with its current snapshot unchanged, so the call is naturally idempotent and a duplicate press cannot disturb the lobby it produced.
 
-Ending the room (`DELETE .../rooms/{room_id}`) remains the way to dismiss everyone. Frozen v1 has no stop: v1 rooms either play or end.
+The server performs the same stop on the host's behalf when the item finishes: once the room's position is within two seconds of the playing file's duration, whether the host paused there at the end or the room's clock ran past it. The file is the room's selected file, or the host's attached file when the selection does not pin one; a file without a known duration never finishes this way. Clients need no new message: they see the same lobby snapshot a host's stop produces.
+
+Ending the room (`DELETE .../rooms/{room_id}`) remains the way to dismiss everyone. Frozen v1 has no stop route, but a v1 client in a room still sees it return to the lobby when a v2 host stops playback or the item finishes.
 
 ### Switch a lobby's selection mode
 
@@ -307,7 +310,7 @@ This storage foundation does not expose a socket or validate current account/ses
 
 `POST /api/v2/watch-together/rooms/{room_id}/ws-ticket` (`createWatchTogetherSocketTicket`) requires authenticated profile/demo authority, an expiring access login session, and the original `X-Room-Token` matching room/account/profile. API keys and profile-only room proof cannot delegate a socket. The room proof must have a valid HS256 signature and signed expiry; frozen v1 proof validation is unchanged. Current session validity, enabled account/role, profile PIN verification, viewer scope, and room existence are checked before minting. The response carries `ticket`, `expires_in`, `max_connection_seconds` (300), and `protocol` (`silo.room.v2`). Credential storage failure returns 503; invalid original proof or authority returns 403; closed rooms return 409. No automatic room-proof renewal occurs here.
 
-Connect with `GET /api/v2/watch-together/rooms/{room_id}/ws` (`connectWatchTogetherSocket`), offering exactly `silo.room.v2` and `silo.ticket.<ticket>` in that order. Only `silo.room.v2` is echoed. Request bodies and all query strings are refused, including legacy bearer/profile/PIN/room credentials. A supplied browser Origin must match the configured public origin; absent Origin is permitted for independently authenticated native callers. Forwarded headers do not authorize an Origin. Malformed upgrades are refused before consuming the credential. After consumption, current session/account/profile/PIN/scope and room existence are checked again before 101.
+Connect with `GET /api/v2/watch-together/rooms/{room_id}/ws` (`connectWatchTogetherSocket`), offering exactly `silo.room.v2` and `silo.ticket.<ticket>` in that order. Only `silo.room.v2` is echoed. Request bodies and all query strings are refused, including legacy bearer/profile/PIN/room credentials. A supplied browser Origin must pass the same check as the events socket: the configured public origin, the request's own scheme and host, or a connected overlay origin; absent Origin is permitted for independently authenticated native callers. Forwarded host headers do not authorize an Origin; only a trusted proxy's single `X-Forwarded-Proto` value can supply the scheme for the request-origin match. Malformed upgrades are refused before consuming the credential. After consumption, current session/account/profile/PIN/scope and room existence are checked again before 101.
 
 The handler closes the underlying socket at the earlier of five minutes, access expiry, or original room-proof expiry. Every 15 seconds it rechecks current authority and room existence with a two-second validation timeout; errors close the connection rather than extending its deadline. Revocation is therefore bounded by that polling interval and timeout, not instantaneous. Missing Redis prevents runtime socket wiring; Redis errors never use an in-memory fallback.
 
@@ -393,13 +396,29 @@ acknowledgements and returns to ordinary state reports every 1.5 s, even while
 other members are still waiting. A readiness reset for a new command enables
 retries again. Reports without `is_ready` are still ignored while waiting.
 
+A viewer the room stopped waiting for sends `ready` while the room is `playing`
+or `paused`. The v2 snapshot shows this state as `self_ignore_wait: true`, or as
+the viewer's own member entry still marked `is_buffering`. The client sends the
+acknowledgement once it has executed the latest transport command and its media
+is playable, and retries every 500 ms until its own member entry is `is_ready`.
+The server then clears the viewer's buffering status and, while the room plays,
+sends it a transport command at the room's current position. When nobody else is
+watching, for example after the other viewers left, the room's position moves to
+the viewer's reported position first, so the viewer does not skip ahead. A `state_report` within one second of the room's
+position, with a matching pause state, also marks the member ready and clears
+the same status; this covers late joiners and clients that never send
+`ready`. Seek-destination checks apply only while the room is
+`waiting`.
+
 `command_id` is optional for older clients on the shared v1/v2 message loop. Their
 seek acknowledgements still need to reach the destination, but a client that
 omits the ID cannot distinguish consecutive seeks to the same position. Older
 servers ignore these additive request fields. Updated servers advertise
 `watch_party_coordinator_v1` in playback capabilities. The waiting deadline,
 after which members that never became ready stop blocking the room, is 10
-seconds; it is a safety net rather than the expected path.
+seconds; it is a safety net rather than the expected path. It takes effect only
+once at least one attached member is ready, so a room where nobody is ready
+keeps waiting. Past the deadline, the first `ready` resumes the room.
 
 
 ### Room membership and buffering
@@ -449,13 +468,26 @@ readiness barrier. HTTP v2 snapshots and raw socket snapshots expose these field
 The frozen v1 HTTP responses and room socket omit these status fields. The web
 player lists viewer status and names the viewers it is waiting for.
 
-The web player reports buffering after 500 ms without playable media. Recovery,
-a changed command/session, pause, a phase change, disconnect, and unmount cancel
-a pending report. The server ignores late buffering reports for paused rooms. A
-reconnected socket retains its validated playback-session attachment, and
-reattaching that session does not pause a playing room. A member attaching during
-an explicit seek receives the seek command and must reach its destination before
-acknowledging readiness.
+The web player reports buffering after 2 seconds without playable media and
+sends no `state_report` while its element is stalled, or while its media is
+unplayable and a readiness acknowledgement is pending. Recovery, a changed
+command/session, pause, a phase change, disconnect, and unmount cancel a pending
+report. The server ignores late buffering reports for paused rooms. A buffering
+report pauses a playing room only when the viewer has not stalled in the last 5
+minutes, the room has not paused for buffering in the last minute, and the viewer
+is not already catching up; a stall from a viewer with nobody else watching
+always pauses the room. Otherwise the room keeps playing and the viewer's snapshot reports
+`self_ignore_wait: true` until it acknowledges recovery. The waiting deadline
+also sets `self_ignore_wait` for the members it skips.
+
+A reconnected socket retains its validated playback-session attachment, and
+reattaching that session does not pause a playing room. Attaching a new playback
+session while the room plays does not pause it either: the member receives a
+transport command at the room's position and catches up alone. A member attaching
+during an explicit seek receives the seek command and must reach its destination
+before acknowledging readiness. See
+[Watch Party synchronization](architecture/watch-party-synchronization.md#buffering-policy)
+for the full buffering policy.
 
 See [Watch Party synchronization](architecture/watch-party-synchronization.md)
 for transaction, lease, delivery, and deployment behavior.

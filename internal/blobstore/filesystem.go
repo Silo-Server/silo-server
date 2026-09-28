@@ -22,12 +22,34 @@ import (
 type Filesystem struct{ root string }
 
 func NewFilesystem(root string) (*Filesystem, error) {
+	abs, err := resolveRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	if err = ensureRoot(abs); err != nil && !temporaryStorageError(err) {
+		return nil, err
+	}
+	return &Filesystem{root: abs}, nil
+}
+
+// LocalIdentity is the Identity a filesystem store rooted at root would report,
+// computed without creating the root. Storage transitions compare it with the
+// active store before any directory exists.
+func LocalIdentity(root string) (string, error) {
+	abs, err := resolveRoot(root)
+	if err != nil {
+		return "", err
+	}
+	return BackendLocal + "|" + abs, nil
+}
+
+func resolveRoot(root string) (string, error) {
 	if strings.TrimSpace(root) == "" {
-		return nil, fmt.Errorf("artwork filesystem root is empty")
+		return "", fmt.Errorf("artwork filesystem root is empty")
 	}
 	abs, err := filepath.Abs(root)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	// Resolve existing ancestor aliases once (for example macOS /var). The
 	// configured root itself and paths within it must still be real directories.
@@ -45,10 +67,7 @@ func NewFilesystem(root string) (*Filesystem, error) {
 		suffix = filepath.Join(filepath.Base(parent), suffix)
 		parent = filepath.Dir(parent)
 	}
-	if err = ensureRoot(abs); err != nil && !temporaryStorageError(err) {
-		return nil, err
-	}
-	return &Filesystem{root: filepath.Clean(abs)}, nil
+	return filepath.Clean(abs), nil
 }
 
 func temporaryStorageError(err error) bool {

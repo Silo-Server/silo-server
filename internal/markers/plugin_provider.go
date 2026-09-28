@@ -391,13 +391,24 @@ func pluginProviderError(providerID string, err error) error {
 	if ok {
 		message = st.Message()
 	}
-	upstreamStatus, legacyHTTPConflict := pluginSubmissionHTTPStatus(message)
-	if (ok && st.Code() == codes.AlreadyExists) || (legacyHTTPConflict && upstreamStatus == http.StatusConflict) {
+	upstreamStatus, legacyHTTPStatus := pluginSubmissionHTTPStatus(message)
+	if (ok && st.Code() == codes.AlreadyExists) || (legacyHTTPStatus && upstreamStatus == http.StatusConflict) {
 		return &SubmissionConflictError{
 			Provider:   providerID,
 			HTTPStatus: http.StatusConflict,
 			Message:    err.Error(),
 		}
+	}
+	// InvalidArgument describes the request itself. FailedPrecondition and
+	// similar codes describe provider state, such as missing setup, and stay
+	// retryable.
+	if (ok && st.Code() == codes.InvalidArgument) ||
+		(legacyHTTPStatus && permanentSubmissionHTTPStatus(upstreamStatus)) {
+		invalid := &SubmissionInvalidError{Provider: providerID, Message: err.Error()}
+		if legacyHTTPStatus {
+			invalid.HTTPStatus = upstreamStatus
+		}
+		return invalid
 	}
 	if !ok || st.Code() != codes.ResourceExhausted {
 		return err
@@ -430,6 +441,18 @@ func pluginSubmissionHTTPStatus(message string) (int, bool) {
 		return 0, false
 	}
 	return code, true
+}
+
+// permanentSubmissionHTTPStatus reports upstream refusals of the submitted
+// item that retrying cannot fix. Timeouts, conflicts, and rate limits are
+// handled elsewhere or stay retryable.
+func permanentSubmissionHTTPStatus(code int) bool {
+	switch code {
+	case http.StatusBadRequest, http.StatusNotFound, http.StatusUnprocessableEntity:
+		return true
+	default:
+		return false
+	}
 }
 
 func PluginRequiredExternalIDsFromMetadata(metadata map[string]any) []string {

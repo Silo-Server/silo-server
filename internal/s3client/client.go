@@ -19,14 +19,18 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 	"github.com/aws/smithy-go/middleware"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 )
@@ -47,6 +51,8 @@ const streamUploadPartSize = 8 * 1024 * 1024
 
 // publicDeliveryProbeTimeout bounds background artwork delivery verification.
 const publicDeliveryProbeTimeout = 5 * time.Second
+
+const mutationFenceWeight int64 = 1 << 30
 
 // BucketConfig holds the configuration for connecting to a single S3 bucket.
 // Each bucket may have different credentials and endpoints, allowing per-bucket
@@ -82,6 +88,7 @@ type Client struct {
 	tokenSecret    string
 	tokenParam     string
 	tokenTTL       int
+	mutations      *semaphore.Weighted
 }
 
 // ObjectInfo describes an object stored in S3.
@@ -145,6 +152,7 @@ func NewClient(cfg BucketConfig) *Client {
 		tokenSecret:    cfg.TokenSecret,
 		tokenParam:     tokenParam,
 		tokenTTL:       tokenTTL,
+		mutations:      semaphore.NewWeighted(mutationFenceWeight),
 	}
 }
 
@@ -158,6 +166,16 @@ func (c *Client) Endpoint() string { return c.endpoint }
 
 // KeyPrefix returns the normalized key prefix applied to every object key.
 func (c *Client) KeyPrefix() string { return c.keyPrefix }
+
+// BeginMutationFence waits for active object mutations and blocks new ones
+// until the returned function is called. Reads and presigning remain available.
+func (c *Client) BeginMutationFence(ctx context.Context) (func(), error) {
+	if err := c.mutations.Acquire(ctx, mutationFenceWeight); err != nil {
+		return nil, err
+	}
+	var once sync.Once
+	return func() { once.Do(func() { c.mutations.Release(mutationFenceWeight) }) }, nil
+}
 
 // GetObject fetches the object at the given key and returns its contents.
 // Returns ErrNotFound if the object does not exist.
@@ -210,6 +228,10 @@ func (c *Client) GetObjectStreamInfo(ctx context.Context, bucket, key string) (i
 // PutObject uploads data to the given key, inferring Content-Type from the
 // file extension so that CDNs and browsers serve files with the correct MIME type.
 func (c *Client) PutObject(ctx context.Context, bucket, key string, data []byte) error {
+	if err := c.mutations.Acquire(ctx, 1); err != nil {
+		return err
+	}
+	defer c.mutations.Release(1)
 	body := newBytesReadSeeker(data)
 	objectKey := c.prefixedKey(key)
 
@@ -240,6 +262,10 @@ func (c *Client) PutObject(ctx context.Context, bucket, key string, data []byte)
 // known Content-Length, which backends like Cloudflare R2 require (a plain
 // PutObject with an unsized stream is rejected with 411 MissingContentLength).
 func (c *Client) PutObjectStream(ctx context.Context, bucket, key string, r io.Reader, contentType string) error {
+	if err := c.mutations.Acquire(ctx, 1); err != nil {
+		return err
+	}
+	defer c.mutations.Release(1)
 	objectKey := c.prefixedKey(key)
 
 	input := &s3.PutObjectInput{
@@ -266,6 +292,10 @@ func (c *Client) PutObjectStream(ctx context.Context, bucket, key string, r io.R
 
 // MakeObjectPublic updates the object ACL to allow anonymous reads.
 func (c *Client) MakeObjectPublic(ctx context.Context, bucket, key string) error {
+	if err := c.mutations.Acquire(ctx, 1); err != nil {
+		return err
+	}
+	defer c.mutations.Release(1)
 	objectKey := c.prefixedKey(key)
 	_, err := c.s3Client.PutObjectAcl(ctx, &s3.PutObjectAclInput{
 		Bucket: aws.String(bucket),
@@ -280,6 +310,10 @@ func (c *Client) MakeObjectPublic(ctx context.Context, bucket, key string) error
 
 // UploadFile uploads the file at path to the given key and returns the size in bytes.
 func (c *Client) UploadFile(ctx context.Context, bucket, key, path, contentType string) (int64, error) {
+	if err := c.mutations.Acquire(ctx, 1); err != nil {
+		return 0, err
+	}
+	defer c.mutations.Release(1)
 	file, err := os.Open(path)
 	if err != nil {
 		return 0, fmt.Errorf("opening upload file %s: %w", path, err)
@@ -308,31 +342,77 @@ func (c *Client) UploadFile(ctx context.Context, bucket, key, path, contentType 
 	return info.Size(), nil
 }
 
+// maxPresignLifetime is the longest X-Amz-Expires that SigV4 accepts.
+const maxPresignLifetime = 7 * 24 * time.Hour
+
 // PresignGetURL generates a read URL for the given object. The strategy depends
 // on the configured URLAuth:
 //   - "cloudflare_token": HMAC-signed URL via the public endpoint
 //   - "public": unsigned URL via the public endpoint
 //   - "presigned" (default): standard S3 presigned URL
 func (c *Client) PresignGetURL(ctx context.Context, bucket, key string, expiry time.Duration) (string, error) {
+	u, _, err := c.PresignGetURLAt(ctx, bucket, key, time.Now(), expiry, 0)
+	return u, err
+}
+
+// PresignGetURLAt is PresignGetURL issued for the window containing now, and
+// it also reports when the URL stops working. Every call in the same window,
+// on any replica, returns the same URL, so clients and CDNs that cache by URL
+// keep hitting. A zero window issues a fresh URL, as PresignGetURL does.
+//
+// A presigned URL is signed at the window start and stays valid for window
+// plus expiry, so it outlives now by at least expiry; SigV4's seven-day limit
+// shortens the window, never the expiry. The WAF rule fixes a Cloudflare
+// token's lifetime from its timestamp, so the window is capped to a quarter of
+// the token TTL and the URL stays valid for at least three quarters of it.
+func (c *Client) PresignGetURLAt(ctx context.Context, bucket, key string, now time.Time, expiry, window time.Duration) (string, time.Time, error) {
 	objectKey := c.prefixedKey(key)
 	if c.publicEndpoint != "" {
 		switch c.urlAuth {
 		case URLAuthCloudflareToken:
-			return c.cloudflareTokenURL(objectKey), nil
+			tokenTTL := time.Duration(c.tokenTTL) * time.Second
+			issued := now.Truncate(min(window, tokenTTL/4))
+			return c.cloudflareTokenURL(objectKey, issued), issued.Add(tokenTTL), nil
 		case URLAuthPublic:
-			return c.PublicURL(bucket, key)
+			u, err := c.PublicURL(bucket, key)
+			if err != nil {
+				return "", time.Time{}, err
+			}
+			return u, now.Add(expiry), nil
 		}
 	}
 
+	window = max(0, min(window, maxPresignLifetime-expiry))
+	issued := now.Truncate(window)
+	lifetime := window + expiry
 	req, err := c.presignClient.PresignGetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(objectKey),
-	}, s3.WithPresignExpires(expiry))
+	}, s3.WithPresignExpires(lifetime), signAt(issued))
 	if err != nil {
-		return "", fmt.Errorf("s3 PresignGetObject %s/%s: %w", bucket, key, err)
+		return "", time.Time{}, fmt.Errorf("s3 PresignGetObject %s/%s: %w", bucket, key, err)
 	}
 
-	return req.URL, nil
+	return req.URL, issued.Add(lifetime), nil
+}
+
+// signAt makes a presign use a fixed signing time instead of the SDK clock.
+func signAt(at time.Time) func(*s3.PresignOptions) {
+	return func(o *s3.PresignOptions) {
+		o.Presigner = fixedTimePresigner{inner: o.Presigner, at: at}
+	}
+}
+
+type fixedTimePresigner struct {
+	inner s3.HTTPPresignerV4
+	at    time.Time
+}
+
+func (p fixedTimePresigner) PresignHTTP(
+	ctx context.Context, credentials aws.Credentials, r *http.Request,
+	payloadHash, service, region string, _ time.Time, optFns ...func(*v4.SignerOptions),
+) (string, http.Header, error) {
+	return p.inner.PresignHTTP(ctx, credentials, r, payloadHash, service, region, p.at, optFns...)
 }
 
 // EffectivePresignTTL returns the longest validity window that the client can
@@ -350,12 +430,13 @@ func (c *Client) EffectivePresignTTL(requested time.Duration) time.Duration {
 	return requested
 }
 
-// cloudflareTokenURL generates a Cloudflare WAF token-authenticated URL.
+// cloudflareTokenURL generates a Cloudflare WAF token-authenticated URL issued
+// at the given time.
 // Format: {publicEndpoint}/{key}?{param}={timestamp}-{base64_hmac}
 // The HMAC is SHA256(secret, "/{key}" + timestamp).
-func (c *Client) cloudflareTokenURL(key string) string {
+func (c *Client) cloudflareTokenURL(key string, issued time.Time) string {
 	path := "/" + key
-	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	ts := strconv.FormatInt(issued.Unix(), 10)
 
 	mac := hmac.New(sha256.New, []byte(c.tokenSecret))
 	mac.Write([]byte(path))
@@ -563,12 +644,23 @@ func objectSHA256(data []byte) string {
 
 // DeleteObject deletes the object at the given key.
 func (c *Client) DeleteObject(ctx context.Context, bucket, key string) error {
+	if err := c.mutations.Acquire(ctx, 1); err != nil {
+		return err
+	}
+	defer c.mutations.Release(1)
+	return c.deleteObject(ctx, bucket, key)
+}
+
+func (c *Client) deleteObject(ctx context.Context, bucket, key string) error {
 	objectKey := c.prefixedKey(key)
 	_, err := c.s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(objectKey),
 	})
 	if err != nil {
+		if apiErr, ok := errors.AsType[smithy.APIError](err); ok && isMissingObjectCode(apiErr.ErrorCode()) {
+			return nil
+		}
 		return fmt.Errorf("s3 DeleteObject %s/%s: %w", bucket, key, err)
 	}
 
@@ -579,6 +671,10 @@ func (c *Client) DeleteObject(ctx context.Context, bucket, key string) error {
 // DeleteObjects (up to 1000 keys per request). Returns the number of objects
 // deleted. Falls back to individual deletes if batch is not supported.
 func (c *Client) DeletePrefix(ctx context.Context, bucket, prefix string) (int, error) {
+	if err := c.mutations.Acquire(ctx, 1); err != nil {
+		return 0, err
+	}
+	defer c.mutations.Release(1)
 	keys, err := c.ListObjects(ctx, bucket, prefix)
 	if err != nil {
 		return 0, err
@@ -586,12 +682,20 @@ func (c *Client) DeletePrefix(ctx context.Context, bucket, prefix string) (int, 
 	if len(keys) == 0 {
 		return 0, nil
 	}
-	return c.DeleteObjects(ctx, bucket, keys)
+	return c.deleteObjects(ctx, bucket, keys)
 }
 
 // DeleteObjects deletes the given keys in batches of up to 1000 (the S3 API
 // limit). Returns the total number of successfully deleted objects.
 func (c *Client) DeleteObjects(ctx context.Context, bucket string, keys []string) (int, error) {
+	if err := c.mutations.Acquire(ctx, 1); err != nil {
+		return 0, err
+	}
+	defer c.mutations.Release(1)
+	return c.deleteObjects(ctx, bucket, keys)
+}
+
+func (c *Client) deleteObjects(ctx context.Context, bucket string, keys []string) (int, error) {
 	const batchSize = 1000
 	deleted := 0
 
@@ -617,7 +721,7 @@ func (c *Client) DeleteObjects(ctx context.Context, bucket string, keys []string
 		if err != nil {
 			// Fall back to individual deletes if batch is not supported.
 			for _, key := range batch {
-				if delErr := c.DeleteObject(ctx, bucket, key); delErr != nil {
+				if delErr := c.deleteObject(ctx, bucket, key); delErr != nil {
 					slog.WarnContext(ctx, "s3 DeleteObjects fallback: failed to delete", "component", "s3client", "key", key, "error", delErr)
 					continue
 				}
@@ -628,8 +732,11 @@ func (c *Client) DeleteObjects(ctx context.Context, bucket string, keys []string
 
 		deleted += len(batch)
 		if out != nil {
-			deleted -= len(out.Errors)
 			for _, e := range out.Errors {
+				if isMissingObjectCode(aws.ToString(e.Code)) {
+					continue
+				}
+				deleted--
 				slog.WarnContext(ctx, "s3 DeleteObjects: partial failure", "component", "s3client",
 					"key", aws.ToString(e.Key), "code", aws.ToString(e.Code), "message", aws.ToString(e.Message))
 			}
@@ -637,6 +744,10 @@ func (c *Client) DeleteObjects(ctx context.Context, bucket string, keys []string
 	}
 
 	return deleted, nil
+}
+
+func isMissingObjectCode(code string) bool {
+	return code == "NoSuchKey" || code == "NotFound"
 }
 
 // ListObjects lists all object keys with the given prefix.

@@ -28,6 +28,7 @@ func TestAdminServerStatusRead(t *testing.T) {
 	s.status.Health.Postgres.OK = new(false)
 	s.status.Health.Postgres.LatencyMS = new(2.25)
 	s.status.Health.Errors24h = 4
+	s.status.ArtworkStorage.StatusKnown = true
 	deps := requestDeps(fixtureRequests())
 	deps.AdminServerStatus = s
 	h := NewHandler(deps)
@@ -40,7 +41,7 @@ func TestAdminServerStatusRead(t *testing.T) {
 	if r.Code != 200 || s.calls != 1 || s.user == 0 {
 		t.Fatal(r.Code, r.Body.String(), s.calls, s.user)
 	}
-	for _, want := range []string{`"started_at":"2026-09-01T00:02:03.987Z"`, `"restart_mark_count":2`, `"restart_required_reasons":["setting:server.listen"]`, `"postgres":{"configured":true,"ok":false,"latency_ms":2.25}`, `"redis":{"configured":false}`} {
+	for _, want := range []string{`"started_at":"2026-09-01T00:02:03.987Z"`, `"restart_mark_count":2`, `"restart_required_reasons":["setting:server.listen"]`, `"postgres":{"configured":true,"ok":false,"latency_ms":2.25}`, `"redis":{"configured":false}`, `"status_known":true`} {
 		if !strings.Contains(r.Body.String(), want) {
 			t.Fatal(r.Body.String(), want)
 		}

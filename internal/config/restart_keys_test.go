@@ -43,12 +43,16 @@ func TestRestartRequired(t *testing.T) {
 		{"branding.server_name", false},
 		{"overlays.enabled", false},
 		{"markers.mode", false},
+		{"markers.detect_intros", false},
+		{"markers.detect_credits", false},
 		{"download.enabled", false},
 		{"download.transcode_enabled", false},
 		{"download.max_concurrent_prepares", false},
 		{"policy.editor_enabled", false},
 		{"allow_4k_transcode", false},
 		{"defaults.card_overlays", false},
+		// The real-time monitor applies the server switch through OnChange.
+		{"scanner.realtime_monitoring", false},
 		// Unknown keys default to live.
 		{"some.future_setting", false},
 	}

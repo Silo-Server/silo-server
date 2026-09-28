@@ -231,7 +231,7 @@ export default function SubtitleSearchDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl overflow-hidden sm:max-w-3xl">
+      <DialogContent className="flex max-w-3xl flex-col overflow-hidden sm:max-w-3xl">
         <DialogHeader className="min-w-0">
           <DialogTitle>Add Subtitles</DialogTitle>
           <DialogDescription className="truncate">
@@ -241,7 +241,7 @@ export default function SubtitleSearchDialog({
         </DialogHeader>
 
         <TooltipProvider delayDuration={250}>
-          <div className="min-w-0 space-y-4">
+          <div className="overlay-scroll min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto overscroll-contain pr-1">
             {version && (
               <SubtitleUploadForm
                 mediaFileId={version.file_id}
@@ -302,7 +302,7 @@ export default function SubtitleSearchDialog({
             )}
 
             {!onlineSearchEnabled ? null : parsedResults.length > 0 ? (
-              <div className="-mr-1 max-h-[28rem] min-w-0 space-y-2 overflow-x-hidden overflow-y-auto pr-1">
+              <div className="min-w-0 space-y-2">
                 {parsedResults.map(({ result, key, names }) => {
                   const provider = providerInfo[result.provider] ?? {
                     abbr: result.provider.slice(0, 2).toUpperCase(),

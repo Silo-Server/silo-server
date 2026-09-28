@@ -2,6 +2,7 @@ package s3client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,8 +11,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
@@ -20,6 +23,105 @@ type recordedRequest struct {
 	Path     string
 	RawQuery string
 	Body     string
+}
+
+type mutationFenceHTTPClient func(*http.Request) (*http.Response, error)
+
+func (f mutationFenceHTTPClient) Do(r *http.Request) (*http.Response, error) { return f(r) }
+
+func newMutationFenceTestClient(httpClient mutationFenceHTTPClient) *Client {
+	client := NewClient(BucketConfig{Endpoint: "https://storage.invalid", Region: "us-east-1", Bucket: "artwork", PathStyle: true, AccessKey: "test", SecretKey: "test"})
+	client.s3Client = s3.New(client.s3Client.Options(), func(o *s3.Options) { o.HTTPClient = httpClient })
+	return client
+}
+
+func TestBlockedMutationHonorsContextCancellation(t *testing.T) {
+	client := newMutationFenceTestClient(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: http.NoBody}, nil
+	})
+	synctest.Test(t, func(t *testing.T) {
+		release, err := client.BeginMutationFence(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer release()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		done := make(chan error, 1)
+		go func() { done <- client.PutObject(ctx, client.Bucket(), "blocked.webp", []byte("image")) }()
+		synctest.Wait()
+		select {
+		case err := <-done:
+			t.Fatalf("PutObject() passed an active fence: %v", err)
+		default:
+		}
+		cancel()
+		if err := <-done; !errors.Is(err, context.Canceled) {
+			t.Fatalf("PutObject() error = %v, want context.Canceled", err)
+		}
+	})
+}
+
+func TestMutationFenceAcquisitionHonorsContextCancellation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		entered := make(chan struct{})
+		releaseRequest := make(chan struct{})
+		releaseActiveWrite := sync.OnceFunc(func() { close(releaseRequest) })
+		defer releaseActiveWrite()
+		client := newMutationFenceTestClient(func(r *http.Request) (*http.Response, error) {
+			if r.Method == http.MethodPut {
+				close(entered)
+				<-releaseRequest
+			}
+			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: http.NoBody}, nil
+		})
+		writeDone := make(chan error, 1)
+		go func() {
+			writeDone <- client.PutObject(context.Background(), client.Bucket(), "active.webp", []byte("image"))
+		}()
+		select {
+		case <-entered:
+		case <-time.After(time.Second):
+			t.Fatal("active mutation did not start")
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		type fenceResult struct {
+			release func()
+			err     error
+		}
+		fenceDone := make(chan fenceResult, 1)
+		go func() {
+			release, err := client.BeginMutationFence(ctx)
+			fenceDone <- fenceResult{release: release, err: err}
+		}()
+		synctest.Wait()
+		select {
+		case result := <-fenceDone:
+			if result.release != nil {
+				result.release()
+			}
+			t.Fatalf("BeginMutationFence() passed an active write: %v", result.err)
+		default:
+		}
+		cancel()
+		select {
+		case result := <-fenceDone:
+			if result.release != nil {
+				result.release()
+				t.Fatal("BeginMutationFence() returned a release function after cancellation")
+			}
+			if !errors.Is(result.err, context.Canceled) {
+				t.Fatalf("BeginMutationFence() error = %v, want context.Canceled", result.err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("BeginMutationFence() did not honor context cancellation")
+		}
+		releaseActiveWrite()
+		if err := <-writeDone; err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 type s3TestServer struct {
@@ -84,6 +186,89 @@ func (s *s3TestServer) Requests() []recordedRequest {
 	out := make([]recordedRequest, len(s.requests))
 	copy(out, s.requests)
 	return out
+}
+
+func TestDeleteObjectsFallbackCountsMissingKeysOnRetry(t *testing.T) {
+	var mu sync.Mutex
+	objects := map[string]bool{"existing.webp": true}
+	var batchCalls, objectCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/xml")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Query().Has("delete"):
+			mu.Lock()
+			batchCalls++
+			mu.Unlock()
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			_, _ = io.WriteString(w, "<Error><Code>NotImplemented</Code></Error>")
+		case r.Method == http.MethodDelete:
+			key := strings.TrimPrefix(r.URL.Path, "/silo/")
+			mu.Lock()
+			objectCalls++
+			exists := objects[key]
+			delete(objects, key)
+			missingCode := "NoSuchKey"
+			if batchCalls == 2 {
+				missingCode = "NotFound"
+			}
+			mu.Unlock()
+			if exists {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = fmt.Fprintf(w, "<Error><Code>%s</Code></Error>", missingCode)
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	t.Cleanup(server.Close)
+	client := NewClient(BucketConfig{Endpoint: server.URL, Region: "us-east-1", Bucket: "silo", PathStyle: true, AccessKey: "test", SecretKey: "test"})
+	keys := []string{"missing.webp", "existing.webp"}
+	for attempt := range 2 {
+		deleted, err := client.DeleteObjects(t.Context(), client.Bucket(), keys)
+		if err != nil || deleted != len(keys) {
+			t.Fatalf("attempt %d: DeleteObjects() = %d, %v; want %d, nil", attempt+1, deleted, err, len(keys))
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if batchCalls != 2 || objectCalls != 4 {
+		t.Fatalf("batch requests=%d, per-key requests=%d; want 2 and 4", batchCalls, objectCalls)
+	}
+}
+
+func TestDeleteObjectsCountsOnlyMissingObjectBatchErrors(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || !r.URL.Query().Has("delete") {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = io.WriteString(w, `<DeleteResult>
+			<Error><Key>missing.webp</Key><Code>NoSuchKey</Code></Error>
+			<Error><Key>denied.webp</Key><Code>AccessDenied</Code></Error>
+		</DeleteResult>`)
+	}))
+	t.Cleanup(server.Close)
+	client := NewClient(BucketConfig{Endpoint: server.URL, Region: "us-east-1", Bucket: "silo", PathStyle: true, AccessKey: "test", SecretKey: "test"})
+	deleted, err := client.DeleteObjects(t.Context(), client.Bucket(), []string{"missing.webp", "existing.webp", "denied.webp"})
+	if err != nil || deleted != 2 {
+		t.Fatalf("DeleteObjects() = %d, %v; want 2, nil", deleted, err)
+	}
+}
+
+func TestDeleteObjectDoesNotIgnoreMissingBucket(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/xml")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, "<Error><Code>NoSuchBucket</Code></Error>")
+	}))
+	t.Cleanup(server.Close)
+	client := NewClient(BucketConfig{Endpoint: server.URL, Region: "us-east-1", Bucket: "silo", PathStyle: true, AccessKey: "test", SecretKey: "test"})
+	if err := client.DeleteObject(t.Context(), client.Bucket(), "missing.webp"); err == nil {
+		t.Fatal("DeleteObject() ignored a missing bucket")
+	}
 }
 
 func TestClientWithoutKeyPrefixUsesLogicalKeys(t *testing.T) {

@@ -102,7 +102,7 @@ func (h *MetadataAIHandler) HandleTranslateOnView(w http.ResponseWriter, r *http
 	filter := catalog.AccessFilter{
 		AllowedLibraryIDs:  scope.AllowedLibraryIDs,
 		DisabledLibraryIDs: scope.DisabledLibraryIDs,
-		MaxContentRating:   scope.MaxContentRating,
+		MaturityLimits:     scope.MaturityLimits,
 		UserID:             scope.UserID,
 		ProfileID:          scope.ProfileID,
 	}

@@ -2,6 +2,7 @@ package blobstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -83,11 +84,16 @@ func Open(ctx context.Context, opts Options) (Stores, string, error) {
 		}
 		assets = recorded
 	}
+	// Storage transitions pause writes before their final copy pass. Fence the
+	// assets store before a local backend shares it as the operational store, so
+	// subtitle, diagnostic, artifact, and avatar writes wait on the same fence.
+	assets = WithMutationFence(assets)
 	// A configured private bucket owns operational blobs whatever the backend
 	// is. Avatars in particular have always lived there, so a catalog moving to
 	// local artwork must not strand the profile-avatars keys already uploaded.
-	// It stays unwrapped: recording its identity would name it as the catalog's
-	// assets location and refuse the real assets store on the next start.
+	// It stays unwrapped by the assets recorder. Bind its separate identity at
+	// startup so buckets written by older releases are protected before another
+	// private upload occurs.
 	operational := assets
 	if opts.S3Private != nil {
 		operational = NewS3(opts.S3Private)
@@ -96,7 +102,73 @@ func Open(ctx context.Context, opts Options) (Stores, string, error) {
 		// configurations, and these blobs are not.
 		operational = nil
 	}
+	if opts.Settings != nil {
+		if err := bindOperationalIdentity(ctx, opts.S3Private, opts.Settings); err != nil {
+			return Stores{}, "", err
+		}
+	}
 	return Stores{Assets: assets, Operational: operational}, backend, nil
+}
+
+// ErrLocationMoved reports recorded storage identities that no longer name the
+// stores a running process opened: a managed transition committed elsewhere.
+var ErrLocationMoved = errors.New("recorded storage location no longer matches this process")
+
+// CheckRecordedLocation compares the recorded storage identities in a settings
+// snapshot with the assets and private stores this process serves. An empty
+// assets row means no artwork was written yet; the private row is bound at
+// startup whenever a private bucket is configured, so it must match exactly.
+func CheckRecordedLocation(recorded map[string]string, assetsIdentity, privateIdentity string) error {
+	if assets := recorded[IdentitySettingKey]; assets != "" && assets != assetsIdentity && !legacyIdentityMatches(assets, assetsIdentity) {
+		return fmt.Errorf("%w: artwork storage is recorded as %q", ErrLocationMoved, assets)
+	}
+	if private := recorded[OperationalIdentitySettingKey]; private != privateIdentity {
+		return fmt.Errorf("%w: private storage is recorded as %q", ErrLocationMoved, private)
+	}
+	return nil
+}
+
+// bindOperationalIdentity protects a configured private bucket before serving
+// requests. Older releases wrote private objects without recording this row,
+// so waiting for the next write would leave existing data open to a direct
+// settings change. A previously recorded identity must match at startup too.
+func bindOperationalIdentity(ctx context.Context, client *s3client.Client, settings SettingsStore) error {
+	identity := ""
+	if client != nil {
+		identity = NewS3(client).Identity()
+	}
+	active, err := settings.Get(ctx, OperationalIdentitySettingKey)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", OperationalIdentitySettingKey, err)
+	}
+	if active != "" {
+		if active != identity {
+			return fmt.Errorf(
+				"private storage identity mismatch: %s records %q but the configured location is %q; "+
+					"stop all API writers and restore the effective private S3 endpoint, bucket, and key prefix in server_settings before restarting, then use a managed storage transition",
+				OperationalIdentitySettingKey, active, identity,
+			)
+		}
+		return nil
+	}
+	if identity == "" {
+		return nil
+	}
+	inserted, err := settings.SetIfAbsent(ctx, OperationalIdentitySettingKey, identity)
+	if err != nil {
+		return fmt.Errorf("record private storage: %w", err)
+	}
+	if inserted {
+		return nil
+	}
+	active, err = settings.Get(ctx, OperationalIdentitySettingKey)
+	if err != nil {
+		return fmt.Errorf("verify recorded private storage: %w", err)
+	}
+	if active != identity {
+		return fmt.Errorf("private storage changed concurrently: recorded %q, configured %q", active, identity)
+	}
+	return nil
 }
 
 // openRecorded binds store to the identity recorded in settings: it refuses a
@@ -113,7 +185,7 @@ func openRecorded(ctx context.Context, store Store, settings SettingsStore) (Sto
 	}
 	if active != "" && active != store.Identity() {
 		if !legacyIdentityMatches(active, store.Identity()) {
-			return nil, "", fmt.Errorf("artwork storage is recorded as %q but configured as %q; copy the artwork tree to the new storage, then delete the %s row", active, store.Identity(), IdentitySettingKey)
+			return nil, "", fmt.Errorf("artwork storage is recorded as %q but configured as %q; use the managed storage transition in Admin settings", active, store.Identity())
 		}
 		// The row was translated from a release that lowercased the whole
 		// endpoint. It names this store; rewrite it in the exact form so the
@@ -125,7 +197,14 @@ func openRecorded(ctx context.Context, store Store, settings SettingsStore) (Sto
 	}
 	wrapped := &recordingStore{Store: store, settings: settings}
 	if direct, ok := store.(DirectURLer); ok {
-		return &recordingDirectStore{recordingStore: wrapped, DirectURLer: direct}, active, nil
+		directStore := &recordingDirectStore{recordingStore: wrapped, DirectURLer: direct}
+		if fencer, ok := store.(MutationFencer); ok {
+			return &recordingFencedDirectStore{recordingDirectStore: directStore, fencer: fencer}, active, nil
+		}
+		return directStore, active, nil
+	}
+	if fencer, ok := store.(MutationFencer); ok {
+		return &recordingFencedStore{recordingStore: wrapped, fencer: fencer}, active, nil
 	}
 	return wrapped, active, nil
 }
@@ -161,6 +240,24 @@ type recordingStore struct {
 type recordingDirectStore struct {
 	*recordingStore
 	DirectURLer
+}
+
+type recordingFencedStore struct {
+	*recordingStore
+	fencer MutationFencer
+}
+
+func (s *recordingFencedStore) BeginMutationFence(ctx context.Context) (func(), error) {
+	return s.fencer.BeginMutationFence(ctx)
+}
+
+type recordingFencedDirectStore struct {
+	*recordingDirectStore
+	fencer MutationFencer
+}
+
+func (s *recordingFencedDirectStore) BeginMutationFence(ctx context.Context) (func(), error) {
+	return s.fencer.BeginMutationFence(ctx)
 }
 
 func (s *recordingDirectStore) ObjectAvailable(ctx context.Context, key string) (bool, error) {

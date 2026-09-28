@@ -25,6 +25,7 @@ import {
   librariesFromV2,
   libraryCreateToV2,
   libraryFromV2,
+  libraryRealtimeMonitoringFromV2,
   libraryRootFromV2,
   metadataMatchQueueStatusFromV2,
   mountCheckFromV2,
@@ -95,6 +96,35 @@ export function useAdminLibraries() {
     queryKey: adminKeys.libraries(),
     queryFn: ({ signal }) => fetchAdminLibraries(signal),
     staleTime: ADMIN_STALE_TIME,
+  });
+}
+
+/**
+ * Per-library real-time monitoring status. Only the admin library screens
+ * read it. A node refreshes its report every minute and writes a state change
+ * immediately, so the query polls while the page is active. Library create,
+ * update, and delete invalidate it through the shared admin libraries prefix.
+ */
+export function useLibraryRealtimeMonitoring() {
+  const pageActivity = usePageActivity();
+
+  return useQuery({
+    queryKey: adminKeys.libraryRealtimeMonitoring(),
+    queryFn: ({ signal }) =>
+      v2("GET /api/v2/libraries/realtime-monitoring", { signal }).then(
+        libraryRealtimeMonitoringFromV2,
+      ),
+    staleTime: 0,
+    refetchInterval: pageActivity.canApplyRealtimeUpdates ? 30_000 : false,
+  });
+}
+
+/** Library feature detection; `realtime_monitoring` says the server offers the status above. */
+export function useLibraryCapabilities() {
+  return useQuery({
+    queryKey: adminKeys.libraryCapabilities(),
+    queryFn: ({ signal }) => v2("GET /api/v2/libraries/capabilities", { signal }),
+    staleTime: Infinity,
   });
 }
 
@@ -658,15 +688,24 @@ export function useDeleteLibraryPoster() {
   });
 }
 
+// quick refreshes only stale items; full refreshes every item in the library.
+export type LibraryRefreshMode = "quick" | "full";
+
+export interface RefreshLibraryMetadataVariables {
+  id: number;
+  mode: LibraryRefreshMode;
+}
+
 export function useRefreshLibraryMetadata() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: number): Promise<AdminJob> =>
+    mutationFn: ({ id, mode }: RefreshLibraryMetadataVariables): Promise<AdminJob> =>
       v2("POST /api/v2/libraries/{id}/refresh-metadata", {
         path: { id: String(id) },
+        body: { mode },
       }).then(adminJobFromV2),
-    onSuccess: () => {
-      toast.success("Metadata refresh queued");
+    onSuccess: (_job, { mode }) => {
+      toast.success(mode === "full" ? "Full metadata refresh queued" : "Metadata refresh queued");
       queryClient.invalidateQueries({ queryKey: adminKeys.jobs("library_refresh") });
       queryClient.invalidateQueries({ queryKey: adminKeys.jobs("__all") });
     },

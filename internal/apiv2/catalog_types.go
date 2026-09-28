@@ -30,6 +30,8 @@ type CatalogItem struct {
 	Studios           []string                  `json:"studios,omitempty"`
 	Networks          []string                  `json:"networks,omitempty"`
 	ContentRating     string                    `json:"content_rating,omitempty" example:"R"`
+	AdvisoryAge       *int                      `json:"advisory_age,omitempty" doc:"Recommended minimum viewer age from an advisory service. A profile with max_advisory_age hides titles whose advisory age is above it; the age never changes the content-rating ceiling" example:"13"`
+	AdvisorySource    string                    `json:"advisory_source,omitempty" doc:"Who recommended advisory_age" enum:"commonsense,mdblist" example:"commonsense"`
 	Status            string                    `json:"status" doc:"Metadata match state of the item" example:"matched"`
 	ShowStatus        string                    `json:"show_status,omitempty" doc:"Airing state of a series"`
 	RatingIMDB        *float64                  `json:"rating_imdb,omitempty"`
@@ -151,7 +153,8 @@ func catalogItemOfSection(v handlers.SectionItemView) CatalogItem {
 		ContentID: v.ContentID, PlayContentID: v.PlayContentID, Type: v.Type, Title: v.Title,
 		SeriesID: v.SeriesID, SeriesTitle: v.SeriesTitle, SeasonNumber: v.SeasonNumber, EpisodeNumber: v.EpisodeNumber,
 		Year: v.Year, Runtime: v.Runtime, Genres: NonNil(v.Genres), Keywords: NonNil(v.Keywords), Studios: v.Studios, Networks: v.Networks,
-		ContentRating: v.ContentRating, Status: v.Status, ShowStatus: v.ShowStatus,
+		ContentRating: v.ContentRating, AdvisoryAge: v.AdvisoryAge, AdvisorySource: v.AdvisorySource,
+		Status: v.Status, ShowStatus: v.ShowStatus,
 		RatingIMDB: v.RatingIMDB, RatingTMDB: v.RatingTMDB, RatingRTCritic: v.RatingRTCritic, RatingRTAudience: v.RatingRTAudience,
 		OriginalLanguage: v.OriginalLanguage, Overview: v.Overview,
 		PositionSeconds: v.PositionSeconds, DurationSeconds: v.DurationSeconds, ProgressUpdatedAt: instantOfRFC3339(v.ProgressUpdatedAt),
@@ -171,7 +174,8 @@ func catalogItemOfListing(v handlers.CollectionItemView) CatalogItem {
 		ContentID: v.ContentID, PlayContentID: v.PlayContentID, Type: v.Type, Title: v.Title,
 		SeriesID: v.SeriesID, SeriesTitle: v.SeriesTitle, SeasonNumber: v.SeasonNumber, EpisodeNumber: v.EpisodeNumber,
 		Year: v.Year, Runtime: v.Runtime, Genres: NonNil(v.Genres), Keywords: NonNil(v.Keywords), Studios: v.Studios, Networks: v.Networks,
-		ContentRating: v.ContentRating, Status: v.Status, ShowStatus: v.ShowStatus,
+		ContentRating: v.ContentRating, AdvisoryAge: v.AdvisoryAge, AdvisorySource: v.AdvisorySource,
+		Status: v.Status, ShowStatus: v.ShowStatus,
 		RatingIMDB: v.RatingIMDB, RatingTMDB: v.RatingTMDB, RatingRTCritic: v.RatingRTCritic, RatingRTAudience: v.RatingRTAudience,
 		OriginalLanguage: v.OriginalLanguage, Overview: v.Overview, ReleaseDate: v.ReleaseDate, LastAirDate: v.LastAirDate, AddedAt: instantPtr(v.AddedAt),
 		PosterURL: v.PosterURL, PosterThumbhash: v.PosterThumbhash, BackdropURL: v.BackdropURL, BackdropThumbhash: v.BackdropThumbhash,

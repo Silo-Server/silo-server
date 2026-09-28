@@ -7,7 +7,7 @@ import {
   isAdminImportConflict,
 } from "@/api/v2/adminHistoryImports";
 import { useOptionalAuth } from "@/hooks/useAuth";
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useId } from "react";
 import { useSearchParams } from "react-router";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import {
@@ -308,6 +308,7 @@ function SourceDialog({
               onChange={(e) => setBaseURL(e.target.value)}
             />
           </div>
+          {isPlex ? <PlexAdminImportLimits /> : null}
 
           {existing?.needs_reconfiguration ? (
             <p role="alert" className="text-warning text-sm">
@@ -388,6 +389,10 @@ function SourceDialog({
                       value={plexPass}
                       onChange={(e) => setPlexPass(e.target.value)}
                     />
+                    <p className="text-muted-foreground text-xs">
+                      If your Plex account uses two-step verification, type the 6-digit code
+                      straight after your password.
+                    </p>
                   </div>
                 </div>
               ) : (
@@ -559,6 +564,10 @@ function TokenDialog({
                   value={plexPass}
                   onChange={(e) => setPlexPass(e.target.value)}
                 />
+                <p className="text-muted-foreground text-xs">
+                  If your Plex account uses two-step verification, type the 6-digit code straight
+                  after your password.
+                </p>
               </div>
             </div>
           ) : (
@@ -1505,6 +1514,7 @@ function AdminHistoryImportPage() {
         onSetToken={setTokenSource}
       />
 
+      {selected?.source_type === "plex" ? <PlexAdminImportLimits /> : null}
       {selected?.needs_reconfiguration ? (
         <p role="alert" className="text-warning text-sm">
           This source needs reconfiguration. Edit the server address and credential before
@@ -1572,6 +1582,40 @@ function AdminHistoryImportPage() {
             );
         }}
       />
+    </div>
+  );
+}
+
+// PlexAdminImportLimits states what an admin-token Plex import cannot read. Plex
+// session history only records finished plays; resume points, titles marked
+// watched, and watchlists are per-user state that only the user's own sign-in reaches.
+function PlexAdminImportLimits() {
+  const headingId = useId();
+  return (
+    <div
+      role="note"
+      aria-labelledby={headingId}
+      className="border-warning/40 bg-warning/10 flex max-w-3xl gap-3 rounded-xl border p-4 text-sm"
+    >
+      <AlertTriangle className="text-warning mt-0.5 h-4 w-4 shrink-0" />
+      <div className="space-y-2">
+        <p id={headingId} className="font-medium">
+          Plex admin imports only bring over finished plays
+        </p>
+        <p>
+          Silo reads this server&apos;s play history, which records each title a person played
+          through, and when. It can&apos;t see anything else, so these are not imported:
+        </p>
+        <ul className="list-disc space-y-0.5 pl-5">
+          <li>Resume points for titles still in progress</li>
+          <li>Titles, seasons, or shows marked as watched without playing them</li>
+          <li>Watchlists</li>
+        </ul>
+        <p>
+          To bring those over, each person imports from their own Plex account in Settings &rarr;
+          History Import.
+        </p>
+      </div>
     </div>
   );
 }

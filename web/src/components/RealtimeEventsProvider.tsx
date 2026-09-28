@@ -656,6 +656,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
           const task = message.data as Pick<TaskInfo, "key" | "state">;
           const filters: QueryFilters[] = [
             { queryKey: adminKeys.tasks(), exact: true },
+            { queryKey: adminKeys.tasksIncludingHidden(), exact: true },
             { queryKey: adminKeys.task(task.key), exact: true },
           ];
           if (task.state === "idle") {

@@ -8,7 +8,8 @@ import (
 )
 
 // TestRouteEventIDDedup proves a v2 event id records once per attempt while
-// legacy id-less reports keep their unconditional insert.
+// legacy id-less reports keep their unconditional insert. The inserted flag
+// must agree with the rows, because metrics count only inserted events.
 func TestRouteEventIDDedup(t *testing.T) {
 	f := newPlanstoreFixture(t)
 	store := NewPostgres(f.pool)
@@ -19,16 +20,24 @@ func TestRouteEventIDDedup(t *testing.T) {
 	}
 	id := uuid.NewString()
 	record := playback.RouteEventRecordV3{RouteEventV3: playback.RouteEventV3{ProtocolVersion: 3, PlaybackAttemptID: attempt, Event: playback.RouteEventFirstFrameV3, Diagnostics: map[string]string{}}, EventID: id, UserID: f.userID, ProfileID: "profile-1"}
-	for range 3 {
-		if err := store.RecordRouteEvent(ctx, record); err != nil {
+	for i := range 3 {
+		inserted, err := store.RecordRouteEvent(ctx, record)
+		if err != nil {
 			t.Fatal(err)
+		}
+		if inserted != (i == 0) {
+			t.Fatalf("report %d with the same event id: inserted = %v", i+1, inserted)
 		}
 	}
 	legacy := record
 	legacy.EventID = ""
-	for range 2 {
-		if err := store.RecordRouteEvent(ctx, legacy); err != nil {
+	for i := range 2 {
+		inserted, err := store.RecordRouteEvent(ctx, legacy)
+		if err != nil {
 			t.Fatal(err)
+		}
+		if !inserted {
+			t.Fatalf("legacy report %d: inserted = false", i+1)
 		}
 	}
 	var withID, withoutID int

@@ -40,7 +40,7 @@ func (s CursorScope) key() string {
 // viewerScopeDigest is a stable digest of the visibility-affecting fields of
 // the request's effective access policy (policy revision, whether library
 // access is restricted at all, allowed and disabled library IDs,
-// content-rating ceiling). It goes into CursorScope.Security for
+// content-rating ceiling and whether it admits unrated titles). It goes into CursorScope.Security for
 // access-filtered collections. "none" stands for a request that resolved no
 // viewer scope.
 //
@@ -70,13 +70,27 @@ func viewerScopeDigest(ctx context.Context) string {
 	if scope.LibrariesRestricted {
 		restricted = "1"
 	}
-	canonical := strings.Join([]string{
+	parts := []string{
 		strconv.FormatInt(scope.PolicyRevision, 10),
 		restricted,
 		ids(scope.AllowedLibraryIDs),
 		ids(scope.DisabledLibraryIDs),
 		scope.MaxContentRating,
-	}, "\x00")
+		strconv.FormatBool(scope.AllowUnratedContent),
+	}
+	// Appended only when set, so a scope without an advisory-age limit keeps
+	// the digest it had before the limit existed and its in-flight cursors
+	// survive the upgrade.
+	if scope.MaxAdvisoryAge > 0 {
+		parts = append(parts, "advisory="+strconv.Itoa(scope.MaxAdvisoryAge))
+	}
+	// Same rule: only a profile that requires an advisory age changes its
+	// digest, so turning the option on or off moves cursors to page 1 while
+	// every other scope keeps the digest it had.
+	if scope.HidesUnadvised() {
+		parts = append(parts, "requireadvisory")
+	}
+	canonical := strings.Join(parts, "\x00")
 	sum := sha256.Sum256([]byte(canonical))
 	return hex.EncodeToString(sum[:8])
 }

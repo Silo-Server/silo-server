@@ -1,4 +1,4 @@
-import type { AdminUser } from "@/api/types";
+import type { AccessGroup, AdminUser } from "@/api/types";
 import { V2ProblemError } from "@/api/v2/request";
 import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 // @vitest-environment jsdom
@@ -11,13 +11,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AdminUsers from "./AdminUsers";
 
 vi.mock("@/hooks/useAuth", () => ({
-  useAuth: () => ({ beginImpersonation: mocks.beginImpersonation }),
+  useAuth: () => ({ beginImpersonation: mocks.beginImpersonation, user: mocks.viewer }),
 }));
 vi.mock("@/hooks/queries/admin/users", () => ({
+  useViewerIsOwner: (id?: number) => mocks.users.some((u) => u.id === id && u.is_owner),
   useAdminUserCapabilities: () => ({ data: { available: mocks.available, default_profile: true } }),
   useImpersonateUser: () => ({ mutateAsync: mocks.impersonate, reset: vi.fn(), isPending: false }),
   useAdminUsers: () => ({ data: mocks.users, isLoading: false }),
-  useCreateUser: () => ({ mutate: vi.fn(), isPending: false }),
+  useCreateUser: () => ({ mutateAsync: mocks.create, reset: vi.fn(), isPending: false }),
   useUpdateUser: () => ({ mutateAsync: mocks.update, isPending: false }),
   useDeleteUser: () => ({ mutate: vi.fn(), isPending: false }),
 }));
@@ -25,11 +26,18 @@ vi.mock("@/hooks/queries/admin/users", () => ({
 const mocks = vi.hoisted(() => ({
   useAdminServerSettings: vi.fn(),
   users: [] as AdminUser[],
+  /** The signed-in account. */
+  viewer: { id: 1 } as { id: number } | null,
   update: vi.fn(),
+  create: vi.fn(),
   reads: 0,
   available: true,
   impersonate: vi.fn(),
   beginImpersonation: vi.fn(),
+  accessGroups: [] as AccessGroup[],
+  accessGroupsLoaded: false,
+  accessGroupsFailed: false,
+  refetchAccessGroups: vi.fn(),
 }));
 
 vi.mock("@/api/v2/adminUsers", async (importOriginal) => ({
@@ -50,7 +58,12 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
 }));
 
 vi.mock("@/hooks/queries/admin/accessGroups", () => ({
-  useAccessGroups: () => ({ data: [] }),
+  useAccessGroups: () => ({
+    data: mocks.accessGroups,
+    isSuccess: mocks.accessGroupsLoaded,
+    isError: mocks.accessGroupsFailed,
+    refetch: mocks.refetchAccessGroups,
+  }),
 }));
 
 vi.mock("./admin-settings/InvitationsTab", () => ({
@@ -210,17 +223,24 @@ const adminUser: AdminUser = {
   max_playback_quality: null,
   max_streams: null,
   max_transcodes: null,
+  max_remote_stream_bitrate_kbps: null,
+  max_local_stream_bitrate_kbps: null,
   transcode_allowed: null,
   audio_transcode_allowed: null,
   max_profiles: 4,
   download_allowed: null,
   download_transcode_allowed: null,
   requests_allowed: null,
+  password_login: true,
+  password_change_required: false,
+  is_owner: false,
   effective_policy: {
     library_ids: null,
     max_playback_quality: "",
     max_streams: 0,
     max_transcodes: 0,
+    max_remote_stream_bitrate_kbps: 0,
+    max_local_stream_bitrate_kbps: 0,
     transcode_allowed: true,
     audio_transcode_allowed: true,
     download_allowed: true,
@@ -230,6 +250,15 @@ const adminUser: AdminUser = {
   },
   created_at: "2026-07-01T12:00:00Z",
   updated_at: "2026-07-01T12:00:00Z",
+};
+// The signed-in viewer (mocks.viewer, id 1) as the server Owner.
+const ownerViewer: AdminUser = {
+  ...adminUser,
+  id: 1,
+  username: "owner",
+  email: "owner@example.test",
+  role: "admin",
+  is_owner: true,
 };
 
 it("seeds list edits from canonical GET and preserves drafts through explicit conflict reload", async () => {
@@ -289,9 +318,55 @@ describe("AdminUsers row actions", () => {
     setProfileId("owner");
     setProfileToken(null);
     mocks.users = [adminUser];
+    mocks.viewer = { id: 1 };
     mocks.available = true;
     mocks.impersonate.mockReset();
     mocks.beginImpersonation.mockReset();
+  });
+
+  const owner = { ...adminUser, id: 1, username: "founder", role: "admin", is_owner: true };
+
+  it("keeps another admin off the owner's account", () => {
+    mocks.users = [adminUser, owner];
+    mocks.viewer = { id: 8 };
+    renderPage();
+    const row = screen.getByRole("link", { name: "founder" }).closest("tr")!;
+    expect(within(row).getByText("owner")).toBeInTheDocument();
+    expect(within(row).queryByText("admin")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit founder" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete founder" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "View as user: founder" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Edit taylor" })).toBeInTheDocument();
+  });
+
+  it("keeps an admin other than the owner off other admin accounts", () => {
+    const other = { ...adminUser, id: 9, username: "other", role: "admin" };
+    const self = { ...adminUser, id: 8, username: "self", role: "admin" };
+    mocks.users = [adminUser, owner, other, self];
+    mocks.viewer = { id: 8 };
+    renderPage();
+    expect(screen.queryByRole("button", { name: "Edit other" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete other" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Edit self" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete self" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Edit taylor" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete taylor" })).toBeInTheDocument();
+  });
+
+  it("lets the owner manage other admins", () => {
+    mocks.users = [owner, { ...adminUser, id: 9, username: "other", role: "admin" }];
+    renderPage();
+    expect(screen.getByRole("button", { name: "Edit other" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete other" })).toBeInTheDocument();
+  });
+
+  it("lets the owner edit itself and view as another admin, but not delete itself", () => {
+    mocks.users = [owner, { ...adminUser, id: 8, username: "admin", role: "admin" }];
+    renderPage();
+    expect(screen.getByRole("button", { name: "View as user: admin" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Edit founder" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete founder" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "View as user: founder" })).toBeNull();
   });
 
   it("offers View as user only for enabled non-admin accounts", () => {
@@ -364,6 +439,25 @@ describe("AdminUsers row actions", () => {
     expect(screen.getByTestId("location")).toHaveTextContent("/profiles");
   });
 
+  it("lets the owner view as another admin after confirmation", async () => {
+    const user = userEvent.setup();
+    mocks.users = [
+      { ...adminUser, id: 1, username: "founder", role: "admin", is_owner: true },
+      { ...adminUser, id: 8, username: "admin", role: "admin" },
+    ];
+    mocks.impersonate.mockImplementation(async ({ profileContext }) => ({
+      session: {},
+      profileContext,
+    }));
+    renderPage();
+    await user.click(screen.getByRole("button", { name: "View as user: admin" }));
+    const dialog = screen.getByRole("alertdialog");
+    expect(within(dialog).getByText(/run as this admin, with their access/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "View as user" }));
+    await waitFor(() => expect(mocks.beginImpersonation).toHaveBeenCalledWith({}, "/admin/users"));
+    expect(mocks.impersonate.mock.calls[0]![0].id).toBe(8);
+  });
+
   it("preserves the current session when starting View as user fails", async () => {
     const user = userEvent.setup();
     mocks.impersonate.mockRejectedValue(new Error("This user is disabled."));
@@ -375,5 +469,284 @@ describe("AdminUsers row actions", () => {
     expect(await screen.findByText("This user is disabled.")).toBeInTheDocument();
     expect(mocks.beginImpersonation).not.toHaveBeenCalled();
     expect(screen.getByTestId("location")).toHaveTextContent("/admin/users");
+  });
+});
+
+const defaultGroup: AccessGroup = {
+  id: 2,
+  name: "Everyone",
+  description: "",
+  library_ids: null,
+  max_playback_quality: "",
+  download_allowed: true,
+  download_transcode_allowed: true,
+  transcode_allowed: true,
+  audio_transcode_allowed: true,
+  max_streams: 5,
+  max_transcodes: 3,
+  max_remote_stream_bitrate_kbps: 0,
+  max_local_stream_bitrate_kbps: 0,
+  allowed_permissions: null,
+  requests_allowed: true,
+  is_default: true,
+  member_count: 1,
+  created_at: "2026-07-01T12:00:00Z",
+  updated_at: "2026-07-01T12:00:00Z",
+};
+
+describe("AdminUsers user dialog policy hints", () => {
+  beforeEach(() => {
+    setAccessToken("account");
+    setProfileId("owner");
+    setProfileToken(null);
+    mocks.users = [];
+    mocks.available = true;
+    mocks.accessGroups = [];
+    mocks.accessGroupsLoaded = false;
+    mocks.useAdminServerSettings.mockReturnValue({ data: {}, isLoading: false });
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    // Radix Select reads pointer capture and scrolls options into view, which
+    // jsdom does not implement.
+    Object.defineProperties(Element.prototype, {
+      hasPointerCapture: { configurable: true, value: () => false },
+      setPointerCapture: { configurable: true, value: () => {} },
+      releasePointerCapture: { configurable: true, value: () => {} },
+      scrollIntoView: { configurable: true, value: () => {} },
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  async function openLimits(user: ReturnType<typeof userEvent.setup>, button: string | RegExp) {
+    await user.click(screen.getByRole("button", { name: button }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("tab", { name: "Limits" }));
+    return dialog;
+  }
+
+  async function chooseRole(
+    user: ReturnType<typeof userEvent.setup>,
+    dialog: HTMLElement,
+    role: string,
+  ) {
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    await user.click(within(dialog).getByRole("combobox", { name: "Role" }));
+    await user.click(await screen.findByRole("option", { name: role }));
+    await user.click(within(dialog).getByRole("tab", { name: "Limits" }));
+  }
+
+  it("keeps a new user's hints on its group while the group list loads", async () => {
+    // Only the server Owner may create an admin.
+    mocks.users = [ownerViewer];
+    const user = userEvent.setup();
+    renderPage();
+    const dialog = await openLimits(user, /Add User/);
+
+    // A new regular account always joins the default group, so until the
+    // list loads its values are unknown, not the server's no-group ones.
+    expect(within(dialog).getAllByText("Inherited from group").length).toBeGreaterThan(0);
+    expect(within(dialog).queryByText(/Server default|Unlimited/)).not.toBeInTheDocument();
+
+    await chooseRole(user, dialog, "Admin");
+    expect(within(dialog).getAllByText("Admin default: Unlimited")).toHaveLength(4);
+    expect(within(dialog).queryByText(/Inherit/)).not.toBeInTheDocument();
+  });
+
+  it("previews the default group a new user joins", async () => {
+    mocks.accessGroups = [defaultGroup];
+    mocks.accessGroupsLoaded = true;
+    const user = userEvent.setup();
+    renderPage();
+    const dialog = await openLimits(user, /Add User/);
+
+    expect(within(dialog).getByText("Inherited: 5")).toBeInTheDocument();
+    expect(within(dialog).getByText("Inherited: 3")).toBeInTheDocument();
+  });
+
+  it("uses the server defaults once a loaded list has no default group", async () => {
+    mocks.accessGroupsLoaded = true;
+    const user = userEvent.setup();
+    renderPage();
+    const dialog = await openLimits(user, /Add User/);
+
+    // The server then creates the account without a group.
+    expect(within(dialog).getAllByText("Server default: Unlimited")).toHaveLength(4);
+    expect(within(dialog).queryByText(/Inherit/)).not.toBeInTheDocument();
+  });
+
+  async function openAccess(user: ReturnType<typeof userEvent.setup>, button: string | RegExp) {
+    await user.click(screen.getByRole("button", { name: button }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("tab", { name: "Access" }));
+    return dialog;
+  }
+
+  const guests = { ...defaultGroup, id: 3, name: "Guests", is_default: false } as AccessGroup;
+
+  it("lets an admin change a user's group from the list", async () => {
+    mocks.users = [{ ...adminUser, access_group_id: defaultGroup.id }];
+    mocks.accessGroups = [defaultGroup, guests];
+    mocks.accessGroupsLoaded = true;
+    mocks.update.mockReset().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    renderPage();
+    const dialog = await openAccess(user, "Edit taylor");
+
+    const group = within(dialog).getByRole("combobox", { name: "Group" });
+    expect(group).toHaveTextContent(defaultGroup.name);
+    await user.click(group);
+    await user.click(await screen.findByRole("option", { name: "Guests" }));
+    await user.click(within(dialog).getByRole("button", { name: /save/i }));
+
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1));
+    expect(mocks.update.mock.calls[0]![0].body.access_group_id).toBe(3);
+  });
+
+  it("creates a user in the chosen group, defaulting to the default group", async () => {
+    mocks.accessGroups = [defaultGroup, guests];
+    mocks.accessGroupsLoaded = true;
+    mocks.create.mockReset().mockResolvedValue({ id: 11 });
+    const user = userEvent.setup();
+    renderPage();
+    const dialog = await openAccess(user, /Add User/);
+
+    const group = within(dialog).getByRole("combobox", { name: "Group" });
+    expect(group).toHaveTextContent(defaultGroup.name);
+    await user.click(group);
+    // The server places a new account in the default group when none is sent,
+    // so creation doesn't offer "No group".
+    expect(screen.queryByRole("option", { name: "No group" })).toBeNull();
+    await user.click(await screen.findByRole("option", { name: "Guests" }));
+
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    await user.type(within(dialog).getByLabelText("Username"), "newbie");
+    await user.type(within(dialog).getByLabelText("Email"), "newbie@example.test");
+    await user.type(within(dialog).getByLabelText(/^Password/), "a-long-password");
+    await user.click(within(dialog).getByRole("button", { name: /create|save/i }));
+
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1));
+    expect(mocks.create.mock.calls[0]![0].body.access_group_id).toBe(3);
+  });
+
+  it("disables the group picker for admins", async () => {
+    mocks.users = [{ ...adminUser, username: "root", role: "admin" }, ownerViewer];
+    mocks.accessGroups = [defaultGroup, guests];
+    mocks.accessGroupsLoaded = true;
+    const user = userEvent.setup();
+    renderPage();
+    const dialog = await openAccess(user, "Edit root");
+    expect(within(dialog).getByRole("combobox", { name: "Group" })).toBeDisabled();
+    expect(within(dialog).getByText("Admin accounts can't join groups.")).toBeInTheDocument();
+  });
+
+  it("previews the default group for an admin demoted from the list", async () => {
+    // Only the server Owner may demote another admin.
+    mocks.users = [{ ...adminUser, username: "root", role: "admin" }, ownerViewer];
+    mocks.accessGroups = [defaultGroup];
+    mocks.accessGroupsLoaded = true;
+    const user = userEvent.setup();
+    renderPage();
+    const dialog = await openLimits(user, "Edit root");
+    expect(within(dialog).getAllByText("Admin default: Unlimited")).toHaveLength(4);
+
+    // This form sends no group for a regular account, and the server moves a
+    // demoted admin into the default group.
+    await chooseRole(user, dialog, "User");
+    expect(within(dialog).getByText("Inherited: 5")).toBeInTheDocument();
+    expect(within(dialog).queryByText(/Server default/)).not.toBeInTheDocument();
+  });
+});
+
+describe("AdminUsers access group column and filter", () => {
+  beforeEach(() => {
+    setAccessToken("account");
+    setProfileId("owner");
+    setProfileToken(null);
+    mocks.available = true;
+    mocks.useAdminServerSettings.mockReturnValue({ data: {}, isLoading: false });
+    mocks.accessGroups = [
+      { id: 1, name: "Kids" } as AccessGroup,
+      { id: 2, name: "Guests" } as AccessGroup,
+    ];
+    mocks.accessGroupsLoaded = true;
+    mocks.users = [
+      { ...adminUser, id: 7, username: "taylor", role: "user", access_group_id: 1 },
+      { ...adminUser, id: 8, username: "sam", role: "user", access_group_id: 2 },
+      { ...adminUser, id: 9, username: "robin", role: "user", access_group_id: null },
+      { ...adminUser, id: 10, username: "root", role: "admin", access_group_id: null },
+    ];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    Object.defineProperties(Element.prototype, {
+      hasPointerCapture: { configurable: true, value: () => false },
+      setPointerCapture: { configurable: true, value: () => {} },
+      releasePointerCapture: { configurable: true, value: () => {} },
+      scrollIntoView: { configurable: true, value: () => {} },
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  function rowFor(username: string) {
+    return screen.getByRole("link", { name: username }).closest("tr")!;
+  }
+
+  it("shows each user's access group, linking to the group", () => {
+    renderPage();
+    expect(screen.getByRole("columnheader", { name: "Group" })).toBeInTheDocument();
+    expect(within(rowFor("taylor")).getByRole("link", { name: "Kids" })).toHaveAttribute(
+      "href",
+      "/admin/access-groups/1",
+    );
+    expect(within(rowFor("robin")).getByText("No group")).toBeInTheDocument();
+    expect(within(rowFor("root")).getByText("—")).toBeInTheDocument();
+  });
+
+  it("reports a failed access group load and retries it", async () => {
+    mocks.accessGroups = [];
+    mocks.accessGroupsLoaded = false;
+    mocks.accessGroupsFailed = true;
+    mocks.refetchAccessGroups.mockClear();
+    const user = userEvent.setup();
+    renderPage();
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("Could not load access groups");
+    await user.click(within(alert).getByRole("button", { name: "Retry" }));
+    expect(mocks.refetchAccessGroups).toHaveBeenCalled();
+    mocks.accessGroupsFailed = false;
+  });
+
+  it("filters users by access group", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    const filter = screen.getByRole("combobox", { name: "Filter by access group" });
+
+    await user.click(filter);
+    await user.click(await screen.findByRole("option", { name: "Guests" }));
+    expect(screen.getByRole("link", { name: "sam" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "taylor" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "root" })).toBeNull();
+
+    await user.click(filter);
+    await user.click(await screen.findByRole("option", { name: "No group" }));
+    expect(screen.getByRole("link", { name: "robin" })).toBeInTheDocument();
+    // Admin accounts can't join groups, so they aren't listed as "No group".
+    expect(screen.queryByRole("link", { name: "root" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "sam" })).toBeNull();
+
+    await user.click(filter);
+    await user.click(await screen.findByRole("option", { name: "All groups" }));
+    expect(screen.getByRole("link", { name: "root" })).toBeInTheDocument();
   });
 });

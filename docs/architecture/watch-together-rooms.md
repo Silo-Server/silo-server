@@ -41,6 +41,10 @@ Transitions:
   lobby (staged). Host only. Keeps the selection columns so the item that was
   playing is now staged; advances the revision so every attached session is
   dropped. A room that is not playing is a no-op receipt.
+- **Finish** (`Service.reconcileRoom`, `internal/watchtogether/item_end.go`):
+  playing → lobby (staged). The reconciler performs the host's stop when the
+  room's position reaches the last two seconds of the playing file, so every
+  client returns to the lobby at the end of an item without calling stop.
 - **Switch mode** (`Service.UpdateSelectionMode`, `PATCH .../selection-mode`):
   lobby → lobby. Drops the staged item. Refused while playing.
 

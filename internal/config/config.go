@@ -140,6 +140,10 @@ type ScannerConfig struct {
 	MaxConcurrentScoped    int           `yaml:"max_concurrent_scoped"`
 	EmptyTrashAfterScan    bool          `yaml:"-"`
 	FileRemovalGrace       time.Duration `yaml:"-"`
+	// RealtimeMonitoring is the server-wide real-time monitoring switch
+	// (scanner.realtime_monitoring). It hot-reloads; each library also has
+	// its own switch.
+	RealtimeMonitoring bool `yaml:"-"`
 }
 
 // scannerConfigRaw is the raw YAML representation with duration strings.
@@ -149,6 +153,7 @@ type scannerConfigRaw struct {
 	MaxConcurrentLibraries int    `yaml:"max_concurrent_libraries"`
 	MaxConcurrentScoped    int    `yaml:"max_concurrent_scoped"`
 	EmptyTrashAfterScan    bool   `yaml:"empty_trash_after_scan"`
+	RealtimeMonitoring     bool   `yaml:"realtime_monitoring"`
 }
 
 // MatcherConfig holds metadata matching settings.
@@ -348,6 +353,13 @@ type PolicyConfig struct {
 	DecisionLogRetentionDays   int    `yaml:"-"` // policy decision log retention window
 }
 
+// MarkersConfig holds local marker detection settings.
+type MarkersConfig struct {
+	// DetectionWorkers is how many seasons intro detection analyzes at once,
+	// which also bounds its ffmpeg processes.
+	DetectionWorkers int `yaml:"-"`
+}
+
 // MetadataConfig holds metadata pipeline settings.
 type MetadataConfig struct {
 	CacheImages bool `yaml:"-"`
@@ -378,6 +390,7 @@ type Config struct {
 	Matcher              MatcherConfig              `yaml:"matcher"`
 	Artwork              ArtworkConfig              `yaml:"artwork"`
 	Metadata             MetadataConfig             `yaml:"-"`
+	Markers              MarkersConfig              `yaml:"-"`
 	Playback             PlaybackConfig             `yaml:"playback"`
 	Redis                RedisConfig                `yaml:"redis"`
 	RateLimit            RateLimitConfig            `yaml:"rate_limiting"`
@@ -451,8 +464,8 @@ func EffectiveDownloadArtifactDir(artifactDir, transcodeDir string) string {
 	return filepath.Join(filepath.Dir(filepath.Clean(transcodeDir)), "silo-download-artifacts")
 }
 
-const DefaultJellyfinCompatEmulatedServerVersion = "10.12.0"
-const DefaultJellyfinWebVersion = "10.11.6"
+const DefaultJellyfinCompatEmulatedServerVersion = "12.1.0"
+const DefaultJellyfinWebVersion = "12.1"
 const DefaultJellyfinWebInstallDir = "/var/lib/silo/compat/jellyfin-web"
 const DefaultJellyfinWebDir = DefaultJellyfinWebInstallDir + "/current"
 
@@ -510,6 +523,7 @@ func setDefaults() *configRaw {
 			Workers:                8,
 			MaxConcurrentLibraries: 1,
 			MaxConcurrentScoped:    2,
+			RealtimeMonitoring:     true,
 		},
 		Artwork: ArtworkConfig{StorageBackend: artworkBackendAuto, LocalPath: "/var/lib/silo/artwork"},
 		Matcher: MatcherConfig{

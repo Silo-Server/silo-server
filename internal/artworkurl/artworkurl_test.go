@@ -53,11 +53,11 @@ func TestDirectResolver(t *testing.T) {
 
 type fakeDirect struct{}
 
-func (fakeDirect) DirectURL(_ context.Context, key string, _ time.Duration) (string, error) {
+func (fakeDirect) DirectURL(_ context.Context, key string, ttl, _ time.Duration) (string, time.Time, error) {
 	if key == "missing" {
-		return "", errors.New("unavailable")
+		return "", time.Time{}, errors.New("unavailable")
 	}
-	return "https://example/" + key, nil
+	return "https://example/" + key, time.Now().Add(ttl), nil
 }
 
 func TestSignerRejectsWrongSecretAndExpiryTamper(t *testing.T) {
@@ -191,7 +191,7 @@ func TestResolveURLForUsesLifetimeOnBothResolvers(t *testing.T) {
 	}
 	direct := NewDirectResolver(ttlRecordingDirect{}, time.Hour)
 	resolved, ok = ResolveURLFor(ctx, direct, "a.webp", 15*time.Minute)
-	if !ok || resolved.URL != "https://example/a.webp?ttl=15m0s" {
+	if !ok || resolved.URL != "https://example/a.webp?ttl=15m0s&window=0s" {
 		t.Fatalf("direct resolver ignored the lifetime: %+v", resolved)
 	}
 	if _, ok := ResolveURLFor(ctx, direct, "missing", 15*time.Minute); ok {
@@ -204,9 +204,104 @@ func TestResolveURLForUsesLifetimeOnBothResolvers(t *testing.T) {
 
 type ttlRecordingDirect struct{}
 
-func (ttlRecordingDirect) DirectURL(_ context.Context, key string, ttl time.Duration) (string, error) {
+func (ttlRecordingDirect) DirectURL(_ context.Context, key string, ttl, window time.Duration) (string, time.Time, error) {
 	if key == "missing" {
-		return "", errors.New("unavailable")
+		return "", time.Time{}, errors.New("unavailable")
 	}
-	return "https://example/" + key + "?ttl=" + ttl.String(), nil
+	return "https://example/" + key + "?ttl=" + ttl.String() + "&window=" + window.String(), time.Now().Add(ttl), nil
+}
+
+// Clients and CDNs cache images by full URL. Over a simulated day of
+// per-minute resolves, a revisioned key keeps at most two URLs (one UTC
+// midnight rollover), a second replica mints the same URL, and every URL stays
+// valid for at least the TTL.
+func TestRevisionedURLHoldsForADayAcrossReplicas(t *testing.T) {
+	const ttl = 4 * time.Hour
+	key := "tmdb/movie/1/poster/w500.0123abcd.webp"
+	a, b := NewSigner("secret", ttl), NewSigner("secret", ttl)
+	start := time.Date(2026, 1, 2, 3, 7, 0, 0, time.UTC)
+	distinct := map[string]bool{}
+	for i := range 24 * 60 {
+		now := start.Add(time.Duration(i) * time.Minute)
+		path, exp := a.Sign(key, now)
+		if replica, _ := b.Sign(key, now.Add(20*time.Second)); replica != path {
+			t.Fatalf("replicas disagree at %s: %s vs %s", now, path, replica)
+		}
+		if remaining := exp.Sub(now); remaining < ttl || remaining > revisionedURLWindow+ttl {
+			t.Fatalf("remaining lifetime %s at %s", remaining, now)
+		}
+		parsed, err := url.Parse(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Verify(key, exp.Unix(), parsed.Query().Get("sig"), now); err != nil {
+			t.Fatal(err)
+		}
+		distinct[path] = true
+	}
+	t.Logf("distinct URLs over a day of per-minute resolves: %d", len(distinct))
+	if len(distinct) > 2 {
+		t.Fatalf("revisioned URL took %d values in a day, want at most 2", len(distinct))
+	}
+}
+
+// Mutable keys, capabilities shorter than the default, and job artifacts keep
+// 15-minute buckets: a day that starts mid-bucket spans 97 of them.
+func TestMutableAndShortLivedURLsKeepShortBuckets(t *testing.T) {
+	artwork := NewSigner("secret", 4*time.Hour)
+	jobs := NewJobArtifactSigner("secret", 15*time.Minute)
+	start := time.Date(2026, 1, 2, 3, 7, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name string
+		ttl  time.Duration
+		sign func(time.Time) (string, time.Time)
+	}{
+		{"mutable key", 4 * time.Hour, func(now time.Time) (string, time.Time) {
+			return artwork.Sign("library-posters/5.jpg", now)
+		}},
+		{"short capability", 15 * time.Minute, func(now time.Time) (string, time.Time) {
+			return artwork.SignFor("chapters/1/w300.0123abcd.webp", now, 15*time.Minute)
+		}},
+		{"job artifact", 15 * time.Minute, func(now time.Time) (string, time.Time) {
+			return jobs.SignFor("job.0123abcd", now, 15*time.Minute)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			distinct := map[string]bool{}
+			for i := range 24 * 60 {
+				now := start.Add(time.Duration(i) * time.Minute)
+				path, exp := tc.sign(now)
+				if remaining := exp.Sub(now); remaining < tc.ttl || remaining > tc.ttl+shortURLBucket {
+					t.Fatalf("remaining lifetime %s at %s", remaining, now)
+				}
+				distinct[path] = true
+			}
+			if len(distinct) != 97 {
+				t.Fatalf("got %d URLs in a day, want 97 15-minute buckets", len(distinct))
+			}
+		})
+	}
+}
+
+func TestDirectResolverHoldsOnlyRevisionedDefaultLifetimeURLs(t *testing.T) {
+	ctx := context.Background()
+	direct := NewDirectResolver(ttlRecordingDirect{}, time.Hour)
+	revisioned := "tmdb/movie/1/poster/w500.0123abcd.webp"
+	for _, tc := range []struct {
+		name, key string
+		ttl       time.Duration
+		window    string
+	}{
+		{"revisioned default", revisioned, 0, "24h0m0s"},
+		{"mutable default", "library-posters/5.jpg", 0, "0s"},
+		{"revisioned short", revisioned, 15 * time.Minute, "0s"},
+	} {
+		resolved, ok := ResolveURLFor(ctx, direct, tc.key, tc.ttl)
+		if !ok || !strings.HasSuffix(resolved.URL, "&window="+tc.window) {
+			t.Fatalf("%s: got %+v, want window %s", tc.name, resolved, tc.window)
+		}
+	}
+	if got := direct.ResolveURLs(ctx, []string{revisioned})[revisioned].URL; !strings.HasSuffix(got, "&window=24h0m0s") {
+		t.Fatalf("batch resolve did not hold the revisioned URL: %s", got)
+	}
 }

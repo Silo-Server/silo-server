@@ -25,10 +25,11 @@ func deviceProfileTokenHash(token string) string {
 }
 
 func (s *DeviceProfileStore) PutForDevice(ctx context.Context, token, deviceID string, profile DeviceProfile) error {
-	data, err := encodeDeviceProfile(profile, deviceID)
+	data, err := encodeDeviceProfile(profile)
 	if err != nil {
 		return err
 	}
+	deviceID = deviceProfileStorageID(deviceID)
 	now := s.now()
 	if s.pool == nil {
 		if err := ctx.Err(); err != nil {
@@ -87,6 +88,7 @@ func (s *DeviceProfileStore) PutForDevice(ctx context.Context, token, deviceID s
 }
 
 func (s *DeviceProfileStore) GetForDevice(ctx context.Context, token, deviceID string) (DeviceProfile, bool, error) {
+	deviceID = deviceProfileStorageID(deviceID)
 	if s.pool == nil {
 		profile, ok := s.Get(token + "\x00" + deviceID)
 		// Old callers had no device identity. Only equally anonymous requests can

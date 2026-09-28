@@ -3,7 +3,7 @@ import { v2 } from "@/api/v2/request";
 import { adminTaskJobFromV2 } from "@/api/v2/adminTasks";
 import { adminKeys } from "@/hooks/queries/keys";
 
-export function useAdminTaskJobs(kind: string, limit = 20) {
+export function useAdminTaskJobs(kind: string, limit = 20, poll = false) {
   const client = useQueryClient();
   const query = useInfiniteQuery({
     queryKey: [...adminKeys.jobs(kind || "__all"), "pages", limit],
@@ -14,6 +14,13 @@ export function useAdminTaskJobs(kind: string, limit = 20) {
       }),
     getNextPageParam: (page) => (page.page?.has_more ? page.page.next_cursor : undefined),
     staleTime: 0,
+    refetchInterval: (currentQuery) => {
+      if (!poll) return false;
+      const latest = currentQuery.state.data?.pages[0]?.items[0];
+      if (!latest) return false;
+      const status = adminTaskJobFromV2(latest).status;
+      return status === "queued" || status === "running" ? 2_000 : false;
+    },
   });
   return {
     ...query,

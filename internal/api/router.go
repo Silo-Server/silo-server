@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/activitylog"
@@ -59,6 +60,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/onboarding"
 	"github.com/Silo-Server/silo-server/internal/opslog"
+	"github.com/Silo-Server/silo-server/internal/passwordreset"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/playback/planstore"
 	"github.com/Silo-Server/silo-server/internal/plugins"
@@ -74,6 +76,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/serveridentity"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/storagetransition"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	subtitleai "github.com/Silo-Server/silo-server/internal/subtitles/ai"
@@ -82,6 +85,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/subtitles/subsource"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 	"github.com/Silo-Server/silo-server/internal/taskmanager/repository"
+	"github.com/Silo-Server/silo-server/internal/themedelivery"
+	"github.com/Silo-Server/silo-server/internal/themesongs"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchstate"
@@ -185,6 +190,8 @@ type Dependencies struct {
 	EventsHub                 *evt.Hub
 	ScanRegistry              *evt.ScanRegistry
 	LibraryScanQueue          *scanqueue.Service
+	LibraryMonitor            interface{ Poke() }            // real-time library monitor, reconciled after library mutations (nil when this node runs none)
+	LibraryMonitoring         apiv2.LibraryMonitoringService // real-time monitoring status for the v2 admin read (may be nil)
 	ActivityLogWriter         activitylog.Writer
 	ActivityLogRepo           *activitylog.Repo
 	OpsLogRepo                *opslog.Repo
@@ -231,6 +238,7 @@ type Dependencies struct {
 	v2RouteSnapshot        func([]streamtelemetry.WalkedRoute)
 	OnServerSettingUpdated func(ctx context.Context, key, value string)
 	RequestServerRestart   func(ctx context.Context) error
+	StorageTransition      *storagetransition.Service
 	ServerRestartStatus    *handlers.ServerRestartStatusTracker
 
 	// UserCollectionSync handles per-profile imported collections (TMDB /
@@ -277,6 +285,26 @@ func (d *Dependencies) CurrentConfig() *config.Config {
 		}
 	}
 	return d.Config
+}
+
+// themeRouter routes theme audio with the same planner, token secret, recipe
+// store and routing policy as video playback. The local AAC recipe is read
+// from the playback handler's cached FFmpeg registry.
+func (deps Dependencies) themeRouter(playbackHandler *handlers.PlaybackHandler) *themedelivery.Router {
+	router := &themedelivery.Router{
+		Secret:  func() string { return deps.CurrentConfig().Auth.JWTSecret },
+		Recipes: noderecipe.NewStore(deps.RedisClient, 0),
+		Policy:  func() config.PlaybackRoutingPolicy { return deps.CurrentConfig().Playback.Routing },
+		LocalConversion: func(ctx context.Context) bool {
+			return playbackHandler.LocalTransformationAvailableV3(ctx, playback.TransformationAudioToAACV3)
+		},
+	}
+	// Assigned only when present: a nil *Planner in the interface would read
+	// as a worker pool.
+	if deps.NodePlanner != nil {
+		router.Planner = deps.NodePlanner
+	}
+	return router
 }
 
 // invalidateNodeCapabilities drops every cached view of one node's hardware.
@@ -419,6 +447,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if deps.DB != nil {
 		settingsRepo = catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(deps.DB), deps.SecretCipher)
 	}
+	// One reader for access.unrated_content shared by every resolver built here.
+	unratedContent := config.NewUnratedContentPolicy(settingsRepo)
 	var accessGroupStore *access.GroupStore
 	if deps.DB != nil {
 		accessGroupStore = access.NewGroupStore(deps.DB)
@@ -465,6 +495,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var userRepo *auth.UserRepository
 	var inviteCodeRepo *auth.InviteCodeRepository
 	var invitationService *invitations.Service
+	var passwordResetService *passwordreset.Service
 	var apiKeyRepo *auth.APIKeyRepository
 	var authService *auth.Service
 	var authHandler *handlers.AuthHandler
@@ -516,6 +547,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 				settingsRepo,
 				"",
 			)
+			passwordResetService = passwordreset.NewService(
+				passwordreset.NewRepository(deps.DB),
+				userRepo,
+				authService,
+				mail.NewSMTPSender(settingsRepo),
+				settingsRepo,
+				"",
+			)
+			passwordResetService.OnSessionsRevoked(deps.OnUserSessionsRevoked)
 		}
 		profileTokenService = access.NewProfileTokenService(deps.Config.Auth.JWTSecret, 0)
 		deviceLoginService = auth.NewDeviceLoginService(
@@ -534,10 +574,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		authMiddleware = apimw.NewAuthMiddleware(jwtService, sessionRepo, apiKeyRepo, userRepo)
 		if deps.UserStoreProvider != nil {
 			if deps.PolicySystem != nil {
-				viewerResolver = policy.NewViewerResolver(userRepo, deps.UserStoreProvider, profileTokenService, deps.PolicySystem.PDP(), accessGroupStore)
+				viewerResolver = policy.NewViewerResolver(userRepo, deps.UserStoreProvider, profileTokenService, deps.PolicySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent)
 			} else {
 				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-				viewerResolver = access.NewResolver(userRepo, deps.UserStoreProvider, profileTokenService, accessGroupStore)
+				viewerResolver = access.NewResolver(userRepo, deps.UserStoreProvider, profileTokenService, accessGroupStore).WithUnratedContentPolicy(unratedContent)
 			}
 			viewerAccessMiddleware = apimw.NewViewerAccessMiddleware(viewerResolver)
 		}
@@ -617,6 +657,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		libraryHandler.EventsHub = deps.EventsHub
 		libraryHandler.ScanRegistry = deps.ScanRegistry
 		libraryHandler.ScanQueue = deps.LibraryScanQueue
+		libraryHandler.RealtimeMonitor = deps.LibraryMonitor
 		libraryHandler.MovieMatchQueueRepo = deps.MovieMatchQueueRepo
 		libraryHandler.SeriesMatchQueueRepo = deps.SeriesRootMatchQueueRepo
 		libraryHandler.RawMatchBacklogRepo = deps.FileRepo
@@ -843,6 +884,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			requestSvc.SetUserRepository(userRepo)
 		}
 		requestSvc.SetRequesterIdentityResolver(plugins.RequesterIdentityFromLookup(plugins.NewPgUserIdentityLookup(deps.DB)))
+		if tvdbResolver, ok := deps.MetadataService.(mediarequests.TVDBIDResolver); ok {
+			requestSvc.SetTVDBIDResolver(tvdbResolver)
+		}
 		if viewerResolver != nil {
 			requestSvc.SetEntitlementResolver(scopeEntitlementResolver{resolver: viewerResolver})
 		}
@@ -955,6 +999,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		profileHandler = handlers.NewProfileHandler(deps.UserStoreProvider)
 		profileHandler.UserRepo = userRepo
 		profileHandler.EventsHub = deps.EventsHub
+		if deps.DB != nil {
+			// Drops live in Postgres whichever store holds the profile.
+			profileHandler.DroppedSeriesPurger = catalog.NewDroppedSeriesRepo(deps.DB)
+		}
 		profileHandler.ProfileTokens = profileTokenService
 		// Private S3 preserves existing avatar keys and presigned delivery. Local
 		// avatars use the signed artwork endpoint. Never use public S3 here.
@@ -1039,6 +1087,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 		deviceHandler.ProfileTokens = profileTokenService
 		homeDismissalHandler = handlers.NewHomeDismissalHandler(deps.UserStoreProvider)
 		homeDismissalHandler.EventsHub = deps.EventsHub
+		if deps.DB != nil {
+			homeDismissalHandler.SetSeriesDrops(catalog.NewDroppedSeriesRepo(deps.DB), itemRepo)
+		}
+		if dispatcher, ok := deps.WatchProviderService.(handlers.LocalDroppedEventDispatcher); ok {
+			homeDismissalHandler.SetLocalDroppedEventDispatcher(dispatcher)
+		}
 		subtitlePrefHandler = handlers.NewSubtitlePrefHandler(deps.UserStoreProvider)
 		subtitlePrefHandler.EventsHub = deps.EventsHub
 		audioPrefHandler = handlers.NewAudioPrefHandler(deps.UserStoreProvider)
@@ -1060,6 +1114,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var recsRepoForStale *recommendations.Repo
 	if ratingsRepo != nil && itemRepo != nil {
 		ratingsHandler = handlers.NewRatingsHandler(ratingsRepo, itemRepo)
+		if dispatcher, ok := deps.WatchProviderService.(handlers.LocalRatingEventDispatcher); ok {
+			ratingsHandler.SetLocalRatingEventDispatcher(dispatcher)
+		}
 		if deps.DB != nil {
 			recsRepoForStale = recommendations.NewRepo(deps.DB)
 			ratingsHandler.SetProfileStaler(recsRepoForStale)
@@ -1285,7 +1342,13 @@ func newChiRouter(deps Dependencies) chi.Router {
 			if subtitleRepo != nil {
 				subtitleReader = subtitleRepo
 			}
-			if resolver := handlers.NewSubtitleInventoryResolver(deps.FileRepo, subtitleReader); resolver != nil {
+			// The attempt store is an interface field: pass it only when set so
+			// the resolver never holds a typed nil either.
+			var attempts playback.PlanStoreV3
+			if playbackHandler.PlanStoreV3 != nil {
+				attempts = playbackHandler.PlanStoreV3
+			}
+			if resolver := handlers.NewSubtitleInventoryResolver(deps.FileRepo, subtitleReader, attempts); resolver != nil {
 				subtitleInventoryResolver = resolver
 			}
 		}
@@ -1746,6 +1809,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 				client: tmdb.NewClient(apiKey, 40),
 			}
 		}
+		if libraryCollectionService.TMDBLists == nil {
+			apiKey := ""
+			if deps.Config != nil {
+				apiKey = deps.Config.TMDBAPIKey
+			}
+			libraryCollectionService.TMDBLists = &tmdbListAdapter{
+				client: tmdb.NewClient(apiKey, 40),
+			}
+		}
 		if libraryCollectionService.TraktCollections == nil {
 			// The client ID is resolved per call rather than captured here, so
 			// saving new Trakt credentials applies without a server restart.
@@ -1775,6 +1847,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			}
 			if deps.UserCollectionSync.TMDBCollections == nil {
 				deps.UserCollectionSync.TMDBCollections = libraryCollectionService.TMDBCollections
+			}
+			if deps.UserCollectionSync.TMDBLists == nil {
+				deps.UserCollectionSync.TMDBLists = libraryCollectionService.TMDBLists
 			}
 		}
 
@@ -1941,6 +2016,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// devices sync on app open / background refresh; there is no server
 		// background worker.
 		downloadSvc.SetSubscriptions(downloads.NewSubscriptionRepository(deps.DB))
+		if deps.UserStoreProvider != nil {
+			// delete_watched monitors skip episodes the profile has finished.
+			downloadSvc.SetProgressStores(deps.UserStoreProvider)
+		}
 		downloadHandler = handlers.NewDownloadHandler(downloadSvc)
 		if deps.NodePlanner != nil {
 			downloadHandler.SetProxyDelivery(deps.NodePlanner, func() string {
@@ -1979,6 +2058,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if deps.DB != nil {
 		historyRepo := historyimport.NewRepository(deps.DB, deps.SecretCipher)
 		historyImportSvc = historyimport.NewService(deps.AppContext, historyRepo, deps.UserStoreProvider)
+		// One policy for every media server address a user supplies.
+		localNetworkAccess := historyimport.NewLocalNetworkAccess(settingsRepo, historyRepo)
+		historyImportSvc.SetLocalNetworkAccess(localNetworkAccess)
 		historyIdentity := watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, providerIDRepo)
 		historyImportSvc.SetStableIdentityResolver(historyIdentity)
 		if deps.EventsHub != nil {
@@ -1988,6 +2070,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		historyImportHandler = handlers.NewHistoryImportHandler(historyImportSvc)
 		if deps.UserStoreProvider != nil {
 			webhookSyncSvc := webhooksync.NewService(webhooksync.NewRepository(deps.DB, deps.SecretCipher), historyRepo, deps.UserStoreProvider)
+			webhookSyncSvc.SetLocalNetworkAccess(localNetworkAccess)
 			webhookSyncSvc.SetStableIdentityResolver(historyIdentity)
 			webhookSyncHandler = handlers.NewWebhookSyncHandler(webhookSyncSvc)
 		}
@@ -2144,6 +2227,13 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.DiagnosticsIngress = diagnosticsHandler
 		v2deps.DiagnosticsChunks = diagnosticsHandler
 	}
+	if passwordResetService != nil {
+		passwordResetHandler := handlers.NewPasswordResetHandler(passwordResetService, userRepo)
+		if accessGroupStore != nil {
+			passwordResetHandler.SetAccessGroupProvider(accessGroupStore)
+		}
+		v2deps.PasswordResets = passwordResetHandler
+	}
 	var invitationHandler *handlers.InvitationHandler
 	if invitationService != nil {
 		invitationHandler = handlers.NewInvitationHandler(invitationService)
@@ -2152,11 +2242,21 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		v2deps.Invitations = invitationHandler
 	}
+	if deps.DB != nil && deps.Config != nil && viewerResolver != nil {
+		v2deps.ThemeSongs = &handlers.ThemeSongsHandler{
+			Service: themesongs.NewService(themesongs.NewRepository(deps.DB), deps.Config.Auth.JWTSecret), Sessions: sessionRepo, Users: userRepo, Resolver: viewerResolver,
+			Router:     deps.themeRouter(playbackHandler),
+			FFmpegPath: func() string { return deps.CurrentConfig().Playback.FFmpegPath },
+		}
+	}
+	v2deps.ObserveThemeAudio = func(method string, handler http.Handler) http.Handler {
+		return observeNative(deps.StreamTelemetry, method, "/api/v2/catalog/items/{id}/themes/{theme_id}/audio", handler.ServeHTTP)
+	}
+
 	var themeHandler *handlers.ThemeHandler
 	if settingsRepo != nil {
 		themeHandler = handlers.NewThemeHandler(settingsRepo)
 		v2deps.ThemeOverrides = themeHandler
-		v2deps.ThemeCatalog = themeHandler
 	}
 	if deps.BrandingService != nil {
 		v2deps.Branding = deps.BrandingService
@@ -2167,7 +2267,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 
 	if apiKeyRepo != nil {
-		v2deps.AdminAPIKeys = handlers.NewAPIKeyHandler(apiKeyRepo)
+		adminAPIKeys := handlers.NewAPIKeyHandler(apiKeyRepo)
+		if userRepo != nil {
+			adminAPIKeys.Owners = userRepo
+		}
+		v2deps.AdminAPIKeys = adminAPIKeys
 		v2deps.PersonalAPIKeys = handlers.NewAPIKeyHandler(apiKeyRepo)
 	}
 	if markersHandler != nil {
@@ -2222,7 +2326,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 				observeNative(deps.StreamTelemetry, r.Method, "/api/v2/stream/{session_id}", streamHandler.HandleStream)(w, r)
 			})
 			v2deps.PlaybackMedia.Subtitle = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				observeNative(deps.StreamTelemetry, r.Method, "/api/v2/stream/{session_id}/subtitles/{track}", streamHandler.HandleSubtitle)(w, r)
+				observeNative(deps.StreamTelemetry, r.Method, "/api/v2/stream/{session_id}/subtitles/{track}", streamHandler.HandleSubtitle)(w, r.WithContext(handlers.WithNativeAPIV2(r.Context())))
 			})
 			v2deps.PlaybackMedia.SubtitleFonts = streamHandler
 		}
@@ -2373,6 +2477,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if subtitlePrefHandler != nil {
 		v2deps.SubtitlePreferences = subtitlePrefHandler
 	}
+	v2deps.LibraryMonitoring = deps.LibraryMonitoring
 	if libraryHandler != nil {
 		v2deps.LibraryAdmin = libraryHandler
 		v2deps.UserLibraries = libraryHandler
@@ -2388,6 +2493,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			v2deps.AdminJobArtifacts = adminJobsHandler
 			v2deps.AdminJobArtifactSigner = signer
 		}
+	}
+	if deps.StorageTransition != nil {
+		v2deps.AdminStorageTransition = deps.StorageTransition
 	}
 	if catalogSeedHandler != nil {
 		v2deps.AdminCatalogSources = catalogSeedHandler
@@ -4139,6 +4247,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 
 							if apiKeyRepo != nil {
 								apiKeyHandler := handlers.NewAPIKeyHandler(apiKeyRepo)
+								if userRepo != nil {
+									apiKeyHandler.Owners = userRepo
+								}
 								r.Get("/users/{userId}/api-keys", apiKeyHandler.HandleAdminListUserAPIKeys)
 								r.Get("/api-keys", apiKeyHandler.HandleAdminListAllAPIKeys)
 								r.Post("/api-keys", apiKeyHandler.HandleAdminCreateAPIKey)
@@ -4290,6 +4401,8 @@ func skipNativeMediaCompression(r *http.Request) bool {
 		return false
 	}
 	switch {
+	case len(p) == 8 && p[1] == "v2" && p[2] == "catalog" && p[3] == "items" && p[4] != "" && p[5] == "themes" && p[6] != "" && p[7] == "audio":
+		return true
 	case len(p) == 4 && p[2] == "stream" && p[3] != "":
 		return true
 	case len(p) == 7 && p[2] == "playback" && p[3] == "transcode" && p[4] != "" && p[5] == "segment" && p[6] != "":
@@ -4439,6 +4552,10 @@ func resolveOptionalPluginAccessUser(
 	if err != nil || (claims.TokenType != auth.TokenTypeAccess && claims.TokenType != auth.TokenTypePluginAccess) {
 		return false, false, 0, ""
 	}
+	// A session holding a temporary password may only change it.
+	if claims.PasswordChangeRequired {
+		return false, false, 0, ""
+	}
 	valid, err := sessionRepo.IsValid(r.Context(), claims.SessionID)
 	if err != nil || !valid {
 		return false, false, 0, ""
@@ -4558,6 +4675,50 @@ func (a *tmdbDiscoverAdapter) Discover(ctx context.Context, mediaType string, pa
 			entry.TVDBID = externalIDs.TVDBID
 		}
 		entries[i] = entry
+	}
+	return entries, nil
+}
+
+// tmdbListAdapter adapts tmdb.Client to catalog.TMDBListFetcher for the
+// `tmdb_list` sync mode. Like the other TMDB adapters, it enriches each entry
+// with external IDs so the matcher can fall back to IMDb/TVDB when a local
+// item lacks a TMDB ID.
+type tmdbListAdapter struct {
+	client *tmdb.Client
+}
+
+// tmdbListExternalIDLookups bounds the concurrent external-ID lookups for one
+// list. A list can hold up to 500 entries and the import runs its first sync
+// inside the request, so sequential lookups (one round trip each) would take
+// far longer than the client's shared rate limit requires.
+const tmdbListExternalIDLookups = 8
+
+func (a *tmdbListAdapter) GetList(ctx context.Context, id, limit int) ([]catalog.TMDBCollectionEntry, error) {
+	results, err := a.client.GetList(ctx, id, limit)
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]catalog.TMDBCollectionEntry, len(results))
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(tmdbListExternalIDLookups)
+	for i, r := range results {
+		entries[i] = catalog.TMDBCollectionEntry{
+			ID:        r.ID,
+			MediaType: r.MediaType,
+			Title:     r.Title,
+		}
+		g.Go(func() error {
+			// A failed lookup leaves the entry matchable by TMDB ID alone; only
+			// cancellation ends the sync.
+			if externalIDs, err := a.client.GetExternalIDs(gctx, r.MediaType, r.ID); err == nil && externalIDs != nil {
+				entries[i].IMDbID = externalIDs.IMDbID
+				entries[i].TVDBID = externalIDs.TVDBID
+			}
+			return gctx.Err()
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
 	return entries, nil
 }

@@ -10,6 +10,8 @@ import {
   triggerWatchProviderSync,
   updateWatchProviderConnection,
   deleteWatchProviderConnection,
+  syncRunFinished,
+  type WatchProviderSyncRun,
 } from "./watchProviders";
 
 vi.mock("@/api/v2/request", () => ({
@@ -72,5 +74,28 @@ describe("watch provider v2 queries", () => {
     await expect(triggerWatchProviderSync("trakt")).resolves.toMatchObject({
       run: { id: "run-1" },
     });
+  });
+});
+
+describe("syncRunFinished", () => {
+  const run = (id: string, status: WatchProviderSyncRun["status"]) =>
+    ({ id, status }) as WatchProviderSyncRun;
+
+  it("fires when a watched run leaves queued or running", () => {
+    expect(syncRunFinished(run("a", "running"), run("a", "success"))).toBe(true);
+    expect(syncRunFinished(run("a", "queued"), run("a", "warning"))).toBe(true);
+    expect(syncRunFinished(run("a", "queued"), run("a", "running"))).toBe(false);
+    expect(syncRunFinished(run("a", "success"), run("a", "success"))).toBe(false);
+  });
+
+  it("fires for a newer run first seen already final", () => {
+    // A scheduled run can start and finish between two reads.
+    expect(syncRunFinished(run("a", "success"), run("b", "success"))).toBe(true);
+    expect(syncRunFinished(run("a", "running"), run("b", "failed"))).toBe(true);
+    expect(syncRunFinished(run("a", "success"), run("b", "running"))).toBe(false);
+  });
+
+  it("does not fire on the first read", () => {
+    expect(syncRunFinished(undefined, run("a", "success"))).toBe(false);
   });
 });

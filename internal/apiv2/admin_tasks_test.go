@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -26,6 +27,9 @@ func newFakeAdminTasks() *fakeAdminTasks {
 }
 func (f *fakeAdminTasks) ListTasks(bool) []taskmanager.TaskInfo {
 	return []taskmanager.TaskInfo{f.GetTaskInfo("fixture")}
+}
+func (f *fakeAdminTasks) ListRelevantTasks(context.Context) []taskmanager.TaskInfo {
+	return f.ListTasks(false)
 }
 func (f *fakeAdminTasks) GetTaskInfo(key string) taskmanager.TaskInfo {
 	if key != "fixture" && key != "refresh_metadata" {
@@ -94,6 +98,170 @@ func (f *fakeAdminTasks) AdminTaskJobDownload(context.Context, *models.AdminJob)
 	return "", nil
 }
 func (f *fakeAdminTasks) AdminTaskJobPublicLinkSupported() bool { return f.publicLinks }
+
+type fakeStorageTransitionJobs struct {
+	job *models.AdminJob
+}
+
+func (f *fakeStorageTransitionJobs) ListAdminTaskJobs(context.Context, string, time.Time, string, int) ([]*models.AdminJob, error) {
+	return []*models.AdminJob{f.job}, nil
+}
+func (f *fakeStorageTransitionJobs) GetAdminTaskJob(_ context.Context, id string) (*models.AdminJob, error) {
+	if id != f.job.ID {
+		return nil, adminjob.ErrJobNotFound
+	}
+	return f.job, nil
+}
+func (f *fakeStorageTransitionJobs) AdminTaskJobDownload(context.Context, *models.AdminJob) (string, *time.Time) {
+	return "", nil
+}
+func (f *fakeStorageTransitionJobs) AdminTaskJobPublicLinkSupported() bool { return false }
+func (f *fakeStorageTransitionJobs) RequestAdminTaskJobCancellation(_ context.Context, id string) (*models.AdminJob, error) {
+	if id != f.job.ID {
+		return nil, adminjob.ErrJobNotFound
+	}
+	if f.job.Status == adminjob.StatusCancelled {
+		return f.job, nil
+	}
+	if f.job.Status != adminjob.StatusQueued && f.job.Status != adminjob.StatusRunning {
+		return nil, adminjob.ErrJobNotCancellable
+	}
+	f.job.CancelRequested = true
+	return f.job, nil
+}
+
+func TestStorageTransitionJobCancellationContract(t *testing.T) {
+	job := &models.AdminJob{ID: "transition", JobType: adminjob.JobTypeStorageTransition, Status: adminjob.StatusRunning, RequestedAt: fixedTime()}
+	jobs := &fakeStorageTransitionJobs{job: job}
+	deps, _ := libraryDeps(t)
+	deps.AdminTaskJobs = jobs
+	h := newTestHandler(t, deps)
+	monitor := Prefix + "/admin/jobs/transition"
+	cancel := monitor + "/cancel"
+
+	get := do(t, h, http.MethodGet, monitor, "", bearer(adminToken))
+	var body AdminTaskJob
+	decodeJSON(t, get.Body, &body)
+	if get.Code != http.StatusOK || !body.Cancelable {
+		t.Fatalf("active transition monitor: %d %s", get.Code, get.Body)
+	}
+	list := do(t, h, http.MethodGet, Prefix+"/admin/jobs", "", bearer(adminToken))
+	var page Collection[AdminTaskJob]
+	decodeJSON(t, list.Body, &page)
+	if list.Code != http.StatusOK || len(page.Items) != 1 || !page.Items[0].Cancelable {
+		t.Fatalf("active transition list: %d %s", list.Code, list.Body)
+	}
+
+	for range 2 {
+		response := do(t, h, http.MethodPost, cancel, "", bearer(adminToken))
+		decodeJSON(t, response.Body, &body)
+		if response.Code != http.StatusAccepted || response.Header().Get("Retry-After") != "5" || body.State != "canceling" || !body.Cancelable {
+			t.Fatalf("pending transition cancellation: %d %s", response.Code, response.Body)
+		}
+	}
+	job.Status = adminjob.StatusCancelled
+	response := do(t, h, http.MethodPost, cancel, "", bearer(adminToken))
+	decodeJSON(t, response.Body, &body)
+	if response.Code != http.StatusOK || response.Header().Get("Retry-After") != "" || body.State != "canceled" || body.Cancelable {
+		t.Fatalf("already canceled transition: %d %s", response.Code, response.Body)
+	}
+	for _, status := range []string{adminjob.StatusCompleted, adminjob.StatusFailed} {
+		job.Status = status
+		requireProblem(t, do(t, h, http.MethodPost, cancel, "", bearer(adminToken)), TypeJobNotCancelable)
+	}
+}
+
+func TestStorageTransitionJobProjectsSafeProgressAndFailure(t *testing.T) {
+	job := &models.AdminJob{
+		ID: "transition", JobType: adminjob.JobTypeStorageTransition, Status: adminjob.StatusRunning,
+		RequestedAt: fixedTime(), ProgressCurrent: 19, Message: "copying private/key", ErrorMessage: "secret endpoint",
+		ResultPayload: json.RawMessage(`{"phase":"copying","verified_objects":19,"failure_category":"secret endpoint","source_identity":"private/bucket"}`),
+	}
+	deps, _ := libraryDeps(t)
+	deps.AdminTaskJobs = &fakeStorageTransitionJobs{job: job}
+	h := newTestHandler(t, deps)
+	path := Prefix + "/admin/jobs/transition"
+	for _, requestPath := range []string{path, Prefix + "/admin/jobs?kind=storage_transition"} {
+		response := do(t, h, http.MethodGet, requestPath, "", bearer(adminToken))
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", requestPath, response.Code, response.Body)
+		}
+		if strings.Contains(response.Body.String(), "private/key") || strings.Contains(response.Body.String(), "private/bucket") || strings.Contains(response.Body.String(), "secret endpoint") {
+			t.Fatalf("private transition details leaked in %s: %s", requestPath, response.Body)
+		}
+		var projected AdminTaskJob
+		if requestPath == path {
+			decodeJSON(t, response.Body, &projected)
+		} else {
+			var page Collection[AdminTaskJob]
+			decodeJSON(t, response.Body, &page)
+			projected = page.Items[0]
+		}
+		if projected.StorageTransitionResult == nil || projected.StorageTransitionResult.Phase != "copying" || projected.StorageTransitionResult.VerifiedObjects != 19 || projected.StorageTransitionResult.FailureCategory != "" {
+			t.Fatalf("safe progress projection = %+v", projected.StorageTransitionResult)
+		}
+	}
+	job.Status = adminjob.StatusFailed
+	job.ResultPayload = json.RawMessage(`{"phase":"secret endpoint","verified_objects":19,"failure_category":"target_check_failed"}`)
+	response := do(t, h, http.MethodGet, path, "", bearer(adminToken))
+	var failed AdminTaskJob
+	decodeJSON(t, response.Body, &failed)
+	if response.Code != http.StatusOK || failed.StorageTransitionResult == nil || failed.StorageTransitionResult.Phase != "failed" || failed.StorageTransitionResult.FailureCategory != "target_check_failed" || strings.Contains(response.Body.String(), "secret endpoint") {
+		t.Fatalf("safe failure projection = %d %s", response.Code, response.Body)
+	}
+}
+
+func TestStorageTransitionJobHidesProgressFromEarlierClaim(t *testing.T) {
+	job := &models.AdminJob{
+		ID: "requeued-transition", JobType: adminjob.JobTypeStorageTransition, Status: adminjob.StatusQueued,
+		RequestedAt: fixedTime(), ClaimGeneration: 1, ProgressCurrent: 7, ProgressTotal: 10,
+		ResultPayload: json.RawMessage(`{"phase":"copying","verified_objects":7,"claim_generation":1}`),
+	}
+	deps, _ := libraryDeps(t)
+	deps.AdminTaskJobs = &fakeStorageTransitionJobs{job: job}
+	h := newTestHandler(t, deps)
+	read := func() AdminTaskJob {
+		t.Helper()
+		response := do(t, h, http.MethodGet, Prefix+"/admin/jobs/"+job.ID, "", bearer(adminToken))
+		if response.Code != http.StatusOK {
+			t.Fatalf("job response: %d %s", response.Code, response.Body)
+		}
+		var projected AdminTaskJob
+		decodeJSON(t, response.Body, &projected)
+		return projected
+	}
+	assertWaiting := func(projected AdminTaskJob, wantPhase string) {
+		t.Helper()
+		result := projected.StorageTransitionResult
+		if projected.Progress != nil || result == nil || result.Phase != wantPhase || result.VerifiedObjects != 0 || result.ManualRestartRequired {
+			t.Fatalf("waiting transition exposed stale progress: %+v", projected)
+		}
+	}
+
+	assertWaiting(read(), "queued")
+	job.Status = adminjob.StatusRunning
+	job.ClaimGeneration = 2
+	assertWaiting(read(), "checking_target")
+
+	job.ProgressCurrent = 2
+	job.ResultPayload = json.RawMessage(`{"phase":"copying","verified_objects":2,"claim_generation":2}`)
+	current := read()
+	if current.StorageTransitionResult == nil || current.StorageTransitionResult.Phase != "copying" || current.StorageTransitionResult.VerifiedObjects != 2 || current.Progress == nil || current.Progress.Current != 2 {
+		t.Fatalf("current claim progress = %+v", current)
+	}
+
+	// A committed result stays in the database for restart repair. Queued
+	// status does not confirm that the restarted worker has recovered it yet.
+	job.Status = adminjob.StatusQueued
+	job.ResultPayload = json.RawMessage(`{"phase":"restart_pending","verified_objects":7,"copied_objects":7,"manual_restart_required":true,"commit_outcome_unknown":true}`)
+	assertWaiting(read(), "queued")
+	job.Status = adminjob.StatusCompleted
+	completed := read()
+	if completed.StorageTransitionResult == nil || completed.StorageTransitionResult.Phase != "restart_pending" || completed.StorageTransitionResult.VerifiedObjects != 7 || !completed.StorageTransitionResult.ManualRestartRequired {
+		t.Fatalf("recovered committed result = %+v", completed.StorageTransitionResult)
+	}
+}
+
 func adminTasksTestHandler(t *testing.T, f *fakeAdminTasks) http.Handler {
 	deps, _ := libraryDeps(t)
 	deps.AdminTasks = f
@@ -225,5 +393,39 @@ func TestAdminTaskScheduleRejectsNestedNullWithoutWrites(t *testing.T) {
 				t.Fatalf("zero/default changed: %+v", f.schedule)
 			}
 		})
+	}
+}
+
+func TestTaskExecutionExposesMaintenanceStepsWithoutErrors(t *testing.T) {
+	completed := time.Date(2026, 9, 23, 5, 0, 1, 0, time.UTC)
+	result := taskmanager.ExecutionResult{
+		TaskKey:     "database_maintenance",
+		Status:      "failed",
+		StartedAt:   completed.Add(-time.Second),
+		CompletedAt: completed,
+		ResultData: json.RawMessage(`{"steps":[` +
+			`{"key":"cleanup_activity_log","name":"Cleanup Activity Log","status":"completed","result":{"deleted":2}},` +
+			`{"key":"cleanup_policy_decision_log","name":"Cleanup Policy Decision Log","status":"failed","error":"partition exists"}]}`),
+	}
+
+	got := taskExecutionOf(result)
+	want := []AdminTaskStepResult{
+		{Key: "cleanup_activity_log", Name: "Cleanup Activity Log", Status: "completed"},
+		{Key: "cleanup_policy_decision_log", Name: "Cleanup Policy Decision Log", Status: "failed"},
+	}
+	if !reflect.DeepEqual(got.Steps, want) {
+		t.Fatalf("Steps = %+v, want %+v", got.Steps, want)
+	}
+	body, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "partition exists") {
+		t.Fatalf("step error text leaked into the v2 execution: %s", body)
+	}
+
+	other := taskExecutionOf(taskmanager.ExecutionResult{TaskKey: "match_media", ResultData: result.ResultData})
+	if other.Steps != nil {
+		t.Fatalf("Steps for another task = %+v, want none", other.Steps)
 	}
 }

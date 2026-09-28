@@ -222,16 +222,22 @@ export function useAdminPluginRepositories() {
   });
 }
 
-export function useAdminPlugins() {
-  const repositoriesQuery = useAdminPluginRepositories();
-
+// useAdminPluginCatalog reads the merged catalog. The server fetches every
+// repository index live for this call, so pages that only sometimes need the
+// catalog (a plugin page previewing an uninstalled plugin) pass `enabled`.
+export function useAdminPluginCatalog(options: { enabled?: boolean } = {}) {
   const profileContext = captureProfileRequestContext();
-  const catalogQuery = useQuery({
+  return useQuery({
     queryKey: [...adminKeys.pluginCatalog(), ...profileScopeKey(profileContext)],
     queryFn: () => fetchPluginCatalog(profileContext),
     staleTime: ADMIN_STALE_TIME,
-    enabled: profileContext !== null,
+    enabled: profileContext !== null && (options.enabled ?? true),
   });
+}
+
+export function useAdminPlugins() {
+  const repositoriesQuery = useAdminPluginRepositories();
+  const catalogQuery = useAdminPluginCatalog();
 
   const installationsQuery = useAdminPluginInstallations();
 
@@ -376,9 +382,11 @@ export function useCreatePluginRepository() {
   });
   return {
     ...mutation,
-    mutate: (body: CreatePluginRepositoryRequest) => {
+    mutate: (body: CreatePluginRepositoryRequest, options?: { onSuccess?: () => void }) => {
       try {
-        mutation.mutate(captureRepositoryCreation(body));
+        mutation.mutate(captureRepositoryCreation(body), {
+          onSuccess: () => options?.onSuccess?.(),
+        });
       } catch {
         toast.error("Select an administrator profile before adding a repository.");
       }
@@ -810,9 +818,9 @@ export function useDeletePluginInstallation() {
   });
   return {
     ...mutation,
-    mutate: (id: number) => {
+    mutate: (id: number, options?: { onSuccess?: () => void }) => {
       try {
-        mutation.mutate(captureInstallation(id));
+        mutation.mutate(captureInstallation(id), { onSuccess: () => options?.onSuccess?.() });
       } catch {
         toast.error("Select an administrator profile before removing a plugin.");
       }

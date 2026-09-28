@@ -78,10 +78,13 @@ export default function CardStack({
       navigate(target.href);
       return;
     }
-    playbackController.startPlayback({
-      contentId: card.content_id,
-      returnHref: `${location.pathname}${location.search}`,
-    });
+    playbackController.startPlayback(
+      {
+        contentId: card.content_id,
+        returnHref: `${location.pathname}${location.search}`,
+      },
+      "viewer",
+    );
   }, [cards, topIndex, onClose, playbackController, location.pathname, location.search, navigate]);
 
   // Keyboard navigation.

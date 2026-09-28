@@ -9,6 +9,8 @@ import (
 )
 
 var nativeMediaRoutes = []streamtelemetry.MediaRoute{
+	nativeRoute(http.MethodGet, "/api/v2/catalog/items/{id}/themes/{theme_id}/audio", streamtelemetry.ClassTransfer, false),
+	nativeRoute(http.MethodHead, "/api/v2/catalog/items/{id}/themes/{theme_id}/audio", streamtelemetry.ClassTransfer, false),
 	nativeRoute(http.MethodGet, "/api/v1/stream/{session_id}", streamtelemetry.ClassPlayback, true),
 	nativeRoute(http.MethodHead, "/api/v1/stream/{session_id}", streamtelemetry.ClassPlayback, true),
 	nativeRoute(http.MethodGet, "/api/v1/stream/{session_id}/subtitles/{track}", streamtelemetry.ClassPlayback, true),

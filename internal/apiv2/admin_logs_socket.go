@@ -53,7 +53,7 @@ const (
 	adminLogsQueryLimit         = "limit"
 	adminLogsHandshakeHeaderDoc = "WebSocket handshake header."
 	// socketOriginHeaderDoc documents the Origin requirement shared by every socket handshake.
-	socketOriginHeaderDoc = "Browser origin must match the configured public origin."
+	socketOriginHeaderDoc = "Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin."
 )
 
 func registerAdminLogsSocket(reg *Registry) {

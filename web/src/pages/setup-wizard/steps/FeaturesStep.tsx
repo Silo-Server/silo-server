@@ -163,7 +163,7 @@ export function FeaturesStep() {
         <SettingField
           label="Detect markers on this server"
           type="toggle"
-          description="Detect missing intros using this server's CPU. Saved online intros take priority. Applies to libraries with marker detection enabled."
+          description="Detect missing intros and credits using this server's CPU. Saved online markers take priority. Applies to libraries with marker detection enabled."
           value={localMarkersEnabled ? "true" : "false"}
           onChange={(value) => setLocalMarkers(value === "true")}
         />

@@ -26,6 +26,12 @@ const (
 	// PlayMethodCopyFMP4Transcode makes the versioned copy-video timestamp and
 	// bitstream recipe fail closed on readers predating that recipe.
 	PlayMethodCopyFMP4Transcode = "transcode_copy_fmp4_v1"
+	// PlayMethodThemeDirect and PlayMethodThemeAAC authorize a detail-page
+	// theme song: its original bytes, or its progressive AAC conversion. They
+	// are not playback sessions, and workers that predate them reject them, so
+	// a theme token can never reach a video route or an older worker.
+	PlayMethodThemeDirect = "theme_direct_v1"
+	PlayMethodThemeAAC    = "theme_aac_v1"
 )
 
 // Claims holds everything a stateless proxy or transcode node needs
@@ -47,6 +53,7 @@ type Claims struct {
 	TranscodeNode          string  `json:"tnode,omitempty"`
 	TranscodeTransportID   string  `json:"tid,omitempty"`
 	RoutingNetworkProvider *string `json:"rnp,omitempty"`
+	StreamLocation         string  `json:"sl,omitempty"`
 	RoutingWorkload        string  `json:"rwl,omitempty"`
 	RoutingExecution       string  `json:"rex,omitempty"`
 	RoutingExecutionNodeID int     `json:"rxnid,omitzero"`
@@ -87,6 +94,13 @@ type Claims struct {
 	// DownloadFilename is the client-facing attachment name. Remote artifact
 	// ids are internal attempt handles and must never become saved filenames.
 	DownloadFilename string `json:"dfn,omitempty"`
+	// ThemeID, ThemeSize and ThemeModifiedUnixNano identify the theme file a
+	// theme token authorizes. A worker refuses the file once its size or
+	// modification time no longer match, until a scan and a new token describe
+	// the replacement; a transcode node also re-approves the id and path.
+	ThemeID               int64 `json:"thid,omitempty"`
+	ThemeSize             int64 `json:"thsz,omitempty"`
+	ThemeModifiedUnixNano int64 `json:"thmt,omitempty"`
 
 	// Reconstruction recipe — the byte-affecting encode parameters, mirroring the
 	// former playback.RecipeCard. Zero for direct/remux tokens, which reconstruct

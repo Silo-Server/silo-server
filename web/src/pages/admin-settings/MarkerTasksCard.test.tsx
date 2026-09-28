@@ -40,7 +40,7 @@ function task(
       completed_at: "2026-09-21T00:01:00Z",
       duration_ms: 60_000,
       result_data: resultData
-        ? { submitted: 0, skipped: 0, failed: 0, retry_after_seconds: 0, ...resultData }
+        ? { submitted: 0, skipped: 0, invalid: 0, failed: 0, retry_after_seconds: 0, ...resultData }
         : undefined,
     },
   };
@@ -97,6 +97,16 @@ describe("MarkerTasksCard", () => {
       screen.getByText(`Last run: ${formatDateTime(detection.last_execution!.completed_at)}`),
     ).toBeInTheDocument();
     expect(screen.getByText("Last result: 2 submitted, 3 skipped, 0 failed")).toBeInTheDocument();
+  });
+
+  it("reports items the provider refused", () => {
+    tasks = [task("contribute_markers", { submitted: 4, skipped: 10, invalid: 3, failed: 0 })];
+
+    renderCard();
+
+    expect(
+      screen.getByText("Last result: 4 submitted, 10 skipped, 3 refused by the provider, 0 failed"),
+    ).toBeInTheDocument();
   });
 
   it("describes a recorded rate limit without presenting it as a pending retry", () => {

@@ -50,7 +50,8 @@ type DownloadSubscriptionDeleteInput struct {
 }
 
 func registerDownloadSubscriptionMutations(reg *Registry) {
-	create := Operation{Operation: humaOp(http.MethodPost, Prefix+"/downloads/subscriptions", "createDownloadSubscription", "downloads", "Create a monitor or return the existing monitor without changing it. Sync explicitly after receipt; do not automatically resend an uncertain create."), Class: ClassProfileScoped, ServiceBacked: true, DemoRestricted: true, RetrySafety: RetrySafetyNonRetryable}
+	create := Operation{Operation: humaOp(http.MethodPost, Prefix+"/downloads/subscriptions", "createDownloadSubscription", "downloads", "Create a monitor or return the device's existing monitor for the series."), Class: ClassProfileScoped, ServiceBacked: true, DemoRestricted: true, RetrySafety: RetrySafetyNonRetryable}
+	create.Description = "An existing monitor keeps its options and forgets the episodes deleted under it, so the next sync can register them again. Sync explicitly after receipt; do not automatically resend an uncertain create."
 	create.MaxBodyBytes = 128 << 10
 	Register(reg, create, reg.createDownloadSubscription)
 	update := Operation{Operation: humaOp(http.MethodPatch, Prefix+"/downloads/subscriptions/{id}", "updateDownloadSubscription", "downloads", "Edit monitor options under the current validator. Sync explicitly after changing scope; null fields are rejected."), Class: ClassProfileScoped, ServiceBacked: true, Guarded: true, RetrySafety: RetrySafetyNaturalIdempotent}

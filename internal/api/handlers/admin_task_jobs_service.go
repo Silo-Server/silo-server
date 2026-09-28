@@ -100,6 +100,15 @@ func (h *AdminJobsHandler) ListAdminTaskJobs(ctx context.Context, kind string, b
 func (h *AdminJobsHandler) GetAdminTaskJob(ctx context.Context, id string) (*models.AdminJob, error) {
 	return h.repo.GetByID(ctx, id)
 }
+func (h *AdminJobsHandler) RequestAdminTaskJobCancellation(ctx context.Context, id string) (*models.AdminJob, error) {
+	repo, ok := h.repo.(interface {
+		RequestCancellation(context.Context, string) (*models.AdminJob, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("admin job cancellation unavailable")
+	}
+	return repo.RequestCancellation(ctx, id)
+}
 func (h *AdminJobsHandler) AdminTaskJobDownload(ctx context.Context, job *models.AdminJob) (string, *time.Time) {
 	if h.store == nil || job.Status != adminjob.StatusCompleted || job.ArtifactBucket == "" || job.ArtifactKey == "" {
 		return "", nil

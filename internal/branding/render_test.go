@@ -64,6 +64,17 @@ func TestRenderIndexHTMLInjectsThemeColorOnlyWhenAccentSet(t *testing.T) {
 	}
 }
 
+func TestRenderIndexHTMLDoesNotStampADefaultTheme(t *testing.T) {
+	in := []byte(`<!doctype html><html lang="en" data-theme="midnight-cinema"><head></head></html>`)
+	out := string(RenderIndexHTML(in, newSnapshot("X")))
+	if strings.Contains(out, "data-default-theme") {
+		t.Fatalf("the shell has one theme and carries no default-theme attribute: %q", out)
+	}
+	if !strings.Contains(out, `<html lang="en" data-theme="midnight-cinema">`) {
+		t.Fatalf("static data-theme should be left alone: %q", out)
+	}
+}
+
 func TestRenderKeyIncludesWordmarkLight(t *testing.T) {
 	snap := newSnapshot("Acme")
 	baseline := snap.RenderKey()

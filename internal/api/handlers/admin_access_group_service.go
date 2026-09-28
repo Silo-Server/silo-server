@@ -35,7 +35,7 @@ func (h *AccessGroupHandler) CreateAdminAccessGroup(ctx context.Context, in acce
 	if h == nil || h.store == nil {
 		return nil, ErrAccessGroupUnavailable
 	}
-	update := access.UpdateGroupInput{Name: &in.Name, LibraryIDs: &in.LibraryIDs, MaxPlaybackQuality: &in.MaxPlaybackQuality, MaxStreams: &in.MaxStreams, MaxTranscodes: &in.MaxTranscodes, AllowedPermissions: &in.AllowedPermissions}
+	update := access.UpdateGroupInput{Name: &in.Name, LibraryIDs: &in.LibraryIDs, MaxPlaybackQuality: &in.MaxPlaybackQuality, MaxStreams: &in.MaxStreams, MaxTranscodes: &in.MaxTranscodes, MaxRemoteStreamBitrateKbps: &in.MaxRemoteStreamBitrateKbps, MaxLocalStreamBitrateKbps: &in.MaxLocalStreamBitrateKbps, AllowedPermissions: &in.AllowedPermissions}
 	if err := normalizeAdminGroupInput(&update); err != nil {
 		return nil, err
 	}
@@ -76,7 +76,7 @@ func normalizeAdminGroupInput(in *access.UpdateGroupInput) error {
 			}
 		}
 	}
-	if in.MaxStreams != nil && *in.MaxStreams < 0 || in.MaxTranscodes != nil && *in.MaxTranscodes < 0 {
+	if in.MaxStreams != nil && *in.MaxStreams < 0 || in.MaxTranscodes != nil && *in.MaxTranscodes < 0 || in.MaxRemoteStreamBitrateKbps != nil && *in.MaxRemoteStreamBitrateKbps < 0 || in.MaxLocalStreamBitrateKbps != nil && *in.MaxLocalStreamBitrateKbps < 0 {
 		return ErrInvalidAccessGroup
 	}
 	if in.MaxPlaybackQuality != nil {

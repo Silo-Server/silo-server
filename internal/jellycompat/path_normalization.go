@@ -11,6 +11,9 @@ type requestContextKey string
 const originalPathKey requestContextKey = "jellycompat_original_path"
 
 var compatPathSegments = map[string]string{
+	compatThemeAudioLower: compatThemeAudio,
+	compatThemeUniversal:  compatThemeUniversal,
+
 	"system":             "System",
 	"info":               "Info",
 	"public":             "Public",
@@ -113,9 +116,24 @@ func canonicalizeCompatPath(path string) string {
 			parts = append([]string{""}, parts[2:]...)
 		}
 	}
+	// Match discovery routes as whole paths: these words can also be opaque
+	// IDs (for example /DisplayPreferences/list), whose case must not change.
+	switch strings.ToLower(strings.Join(parts, "/")) {
+	case "/localization/cultures":
+		return "/Localization/Cultures"
+	case "/syncplay/list":
+		return "/SyncPlay/List"
+	}
 	for i := 1; i < len(parts); i++ {
 		part := parts[i]
 		if part == "" {
+			continue
+		}
+		// LocalTrailers is matched only in its route position,
+		// /Items/{id}/LocalTrailers, so a DisplayPreferences id or other
+		// opaque value that happens to read "localtrailers" keeps its case.
+		if i >= 3 && strings.EqualFold(part, "localtrailers") && strings.EqualFold(parts[i-2], "items") {
+			parts[i] = "LocalTrailers"
 			continue
 		}
 		parts[i] = canonicalizeCompatSegment(part)

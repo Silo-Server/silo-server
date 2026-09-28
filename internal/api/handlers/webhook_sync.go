@@ -404,6 +404,10 @@ func (h *WebhookSyncHandler) receiveWebhook(r *http.Request, secret string, limi
 
 func (h *WebhookSyncHandler) writeError(w http.ResponseWriter, err error) {
 	statusCode := webhookErrorStatus(err)
+	if message, refused := historyimport.ServerAddressMessage(err); refused {
+		writeError(w, statusCode, "bad_request", message)
+		return
+	}
 	switch {
 	case errors.Is(err, webhooksync.ErrConnectionNotFound), errors.Is(err, historyimport.ErrProfileNotFound):
 		writeError(w, statusCode, "not_found", err.Error())
@@ -429,6 +433,9 @@ func (h *WebhookSyncHandler) writeError(w http.ResponseWriter, err error) {
 }
 
 func webhookErrorStatus(err error) int {
+	if _, refused := historyimport.ServerAddressMessage(err); refused {
+		return http.StatusBadRequest
+	}
 	switch {
 	case errors.Is(err, webhooksync.ErrWebhookTooLarge):
 		return http.StatusRequestEntityTooLarge

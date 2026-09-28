@@ -134,17 +134,10 @@ type remoteArtifactMissReporter interface {
 // tracker.
 func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Server {
 	server := &Server{
-		watcher: watcher,
-		tracker: tracker,
-		// No overall timeout — stream bodies are long-lived. Hung nodes are
-		// bounded by the transport's response-header timeout instead.
-		httpClient: &http.Client{
-			Transport: newStreamTransport(),
-			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		},
-		egress: newEgressMeter(),
+		watcher:    watcher,
+		tracker:    tracker,
+		httpClient: transcodeproxy.NodeClient(),
+		egress:     newEgressMeter(),
 		subCache: playback.NewSubtitleCache(func() string {
 			return watcher.Config().Playback.TranscodeDir
 		}),
@@ -214,20 +207,6 @@ func (s *Server) sessionDenied(ctx context.Context, claims *streamtoken.Claims) 
 // tokens expire.
 func writeStreamDenied(w http.ResponseWriter) {
 	http.Error(w, "playback session ended", http.StatusGone)
-}
-
-// newStreamTransport tunes the proxy→transcode-node connection pool. Many
-// concurrent viewers fan their segment fetches through one proxy→node pair,
-// and Go's default of 2 idle connections per host causes constant connection
-// churn (and TLS re-handshakes) under load. The response-header timeout
-// bounds requests to a hung node; the longest legitimate server-side wait is
-// the 30s manifest-readiness poll on the transcode node.
-func newStreamTransport() *http.Transport {
-	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.MaxIdleConns = 128
-	t.MaxIdleConnsPerHost = 32
-	t.ResponseHeaderTimeout = 60 * time.Second
-	return t
 }
 
 // sealedHandler is what Handler hands out: the finished router behind an
@@ -312,6 +291,8 @@ func (s *Server) router() chi.Router {
 		r.Get("/stream/v3/{session_id}/segment/{name}", observeProxy(s.telemetry, http.MethodGet, "/stream/v3/{session_id}/segment/{name}", s.handleGrantTranscodeSegment))
 		r.Get("/stream/subtitles/{token}/{track}/fonts", observeProxy(s.telemetry, http.MethodGet, "/stream/subtitles/{token}/{track}/fonts", s.handleSubtitleFonts))
 		r.Get("/stream/subtitles/{token}/{track}", observeProxy(s.telemetry, http.MethodGet, "/stream/subtitles/{token}/{track}", s.handleSubtitle))
+		r.Head("/stream/theme/{token}", observeProxy(s.telemetry, http.MethodHead, "/stream/theme/{token}", s.handleThemeAudio))
+		r.Get("/stream/theme/{token}", observeProxy(s.telemetry, http.MethodGet, "/stream/theme/{token}", s.handleThemeAudio))
 		r.Head("/downloads/file/{token}", observeProxy(s.telemetry, http.MethodHead, "/downloads/file/{token}", s.handleDownloadFile))
 		r.Get("/downloads/file/{token}", observeProxy(s.telemetry, http.MethodGet, "/downloads/file/{token}", s.handleDownloadFile))
 	})
@@ -426,7 +407,7 @@ func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HW
 		return playback.HWAccelInfo{}, err
 	}
 	info.Transformations = registry.Advertised()
-	info.TransportFeatures = []string{playback.TransportFeatureProgressiveRemuxRelayV1}
+	info.TransportFeatures = []string{playback.TransportFeatureProgressiveRemuxRelayV1, playback.TransportFeatureThemeAudioEgressV1}
 	// Advertised before the hash is taken, because it is part of what the hash
 	// covers: a build that needs longer reaches the sweep rather than sitting
 	// behind an unchanged identity.
@@ -849,7 +830,10 @@ func (s *Server) relayDownloadArtifact(w http.ResponseWriter, r *http.Request, c
 		http.Error(w, "download unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	client := downloadprepare.HTTPPreparer{Client: s.httpClient}
+	// The zero preparer uses the artifact client with a bounded response-header
+	// wait, as the API relay does. s.httpClient waits on headers without a
+	// deadline for transcode rebuilds, which an artifact read never needs.
+	client := downloadprepare.HTTPPreparer{}
 	resp, err := client.Open(r.Context(), claims.TranscodeNode, cfg.Auth.JWTSecret, claims.DownloadArtifactID, r.Method, r.Header)
 	if err != nil {
 		slog.WarnContext(r.Context(), "download artifact relay failed", "component", "proxy", "artifact_id", claims.DownloadArtifactID, "node", claims.TranscodeNode, "error", err)

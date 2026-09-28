@@ -69,6 +69,7 @@ describe("GeneralSettings", () => {
       "branding.server_name",
       "branding.login_subtitle",
       "signup.enabled",
+      "password_reset.self_service_enabled",
       "server.log_level",
       "server.log_quiet",
     ]);
@@ -85,6 +86,18 @@ describe("GeneralSettings", () => {
     expect(screen.getByRole("link", { name: /Manage invite codes/i })).toHaveAttribute(
       "href",
       "/admin/users?tab=invite-codes",
+    );
+  });
+
+  it("shows the self-service password reset toggle in its saved state", () => {
+    useSettingsFormMock.mockReturnValue(
+      makeForm({ "password_reset.self_service_enabled": "true" }),
+    );
+    renderPage();
+
+    expect(screen.getByRole("switch", { name: /Self-service password reset/i })).toHaveAttribute(
+      "aria-checked",
+      "true",
     );
   });
 

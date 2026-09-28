@@ -286,6 +286,11 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		fileRemovalGrace = 0
 	}
 	cfg.Scanner.FileRemovalGrace = fileRemovalGrace
+	realtimeMonitoring, err := boolOr(m, "scanner.realtime_monitoring", true)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Scanner.RealtimeMonitoring = realtimeMonitoring
 
 	// Matcher
 	matcherWorkers, err := intOr(m, "matcher.workers", 8)
@@ -325,6 +330,11 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, err
 	}
 	cfg.Metadata.ImageWorkers = imageWorkers
+	detectionWorkers, err := intOr(m, MarkersDetectionWorkersSettingKey, 1)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Markers.DetectionWorkers = detectionWorkers
 
 	// Playback
 	cfg.Playback.FFmpegPath = stringOr(m, "playback.ffmpeg_path", "")
@@ -637,7 +647,7 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	cfg.Download.ArtifactMaxBytes = artifactMaxBytes
 
 	// Policy
-	policyEvalTimeoutMS, err := intOr(m, "policy.eval_timeout_ms", 25)
+	policyEvalTimeoutMS, err := intOr(m, "policy.eval_timeout_ms", 100)
 	if err != nil {
 		return nil, err
 	}

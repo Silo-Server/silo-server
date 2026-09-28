@@ -266,24 +266,34 @@ func TestSendRejectsExistingAccountAndBadInput(t *testing.T) {
 	}
 }
 
-func TestSendAdminRoleRequiresAdminInviter(t *testing.T) {
+func TestSendAdminRoleRequiresOwnerInviter(t *testing.T) {
 	users := adminInviter()
+	users.byID[1].IsOwner = true
 	regular := &models.User{ID: 5, Username: "pleb", Email: "pleb@example.com", Role: "user"}
 	users.byID[5] = regular
 	users.byEmail["pleb@example.com"] = regular
+	admin := &models.User{ID: 6, Username: "second", Email: "second@example.com", Role: roleAdmin}
+	users.byID[6] = admin
+	users.byEmail["second@example.com"] = admin
 	svc := newTestService(newFakeRepo(), users, &fakeAccounts{}, &fakeSessions{}, &fakeMail{configured: true}, fakeSettings{})
 
 	if _, err := svc.Send(context.Background(), SendInput{Email: "m@example.com", Role: roleAdmin, InvitedBy: 5}); !errors.Is(err, ErrRoleNotAllowed) {
 		t.Errorf("non-admin minting admin: err = %v, want ErrRoleNotAllowed", err)
 	}
+	if _, err := svc.Send(context.Background(), SendInput{Email: "m@example.com", Role: roleAdmin, InvitedBy: 6}); !errors.Is(err, ErrRoleNotAllowed) {
+		t.Errorf("admin other than the owner minting admin: err = %v, want ErrRoleNotAllowed", err)
+	}
+	if _, err := svc.Send(context.Background(), SendInput{Email: "m@example.com", Role: "user", InvitedBy: 6}); err != nil {
+		t.Errorf("admin other than the owner inviting a user: %v", err)
+	}
 	groupID := int64(5)
-	if _, err := svc.Send(context.Background(), SendInput{Email: "m@example.com", Role: roleAdmin, AccessGroupID: &groupID, InvitedBy: 1}); !errors.Is(err, ErrAdminGrouped) {
+	if _, err := svc.Send(context.Background(), SendInput{Email: "m2@example.com", Role: roleAdmin, AccessGroupID: &groupID, InvitedBy: 1}); !errors.Is(err, ErrAdminGrouped) {
 		t.Errorf("admin invite with group: err = %v, want ErrAdminGrouped", err)
 	}
-	if _, err := svc.Send(context.Background(), SendInput{Email: "m@example.com", Role: roleAdmin, InvitedBy: 1}); err != nil {
-		t.Errorf("admin minting admin: %v", err)
+	if _, err := svc.Send(context.Background(), SendInput{Email: "m2@example.com", Role: roleAdmin, InvitedBy: 1}); err != nil {
+		t.Errorf("owner minting admin: %v", err)
 	}
-	if _, err := svc.Send(context.Background(), SendInput{Email: "m2@example.com", Role: "root", InvitedBy: 1}); !errors.Is(err, ErrRoleNotAllowed) {
+	if _, err := svc.Send(context.Background(), SendInput{Email: "m3@example.com", Role: "root", InvitedBy: 1}); !errors.Is(err, ErrRoleNotAllowed) {
 		t.Errorf("unknown role: err = %v, want ErrRoleNotAllowed", err)
 	}
 }
