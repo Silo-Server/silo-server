@@ -194,6 +194,34 @@ func TestInterestTrackingStoreQueuesHomeDismissals(t *testing.T) {
 			t.Errorf("no interest mutation queued for %s; a Home removal would not reach notifications", itemID)
 		}
 	}
+	// A removal is rechecked after the session gap, in case playback resumes
+	// sooner; restoring a card needs no recheck.
+	if _, ok := updater.deferred[interestMutation{userID: 1, profileID: "p1", itemID: "ep-1"}]; !ok {
+		t.Error("dismissing a card deferred no second recompute")
+	}
+	if _, ok := updater.deferred[interestMutation{userID: 1, profileID: "p1", itemID: "ep-2"}]; ok {
+		t.Error("restoring a card deferred a recompute")
+	}
+}
+
+func TestPromoteDeferredMovesOnlyDueMutations(t *testing.T) {
+	now := time.Now()
+	due := interestMutation{userID: 1, profileID: "p1", itemID: "due"}
+	later := interestMutation{userID: 1, profileID: "p1", itemID: "later"}
+	updater := &InterestUpdater{
+		pending:  map[interestMutation]int{},
+		deferred: map[interestMutation]time.Time{due: now.Add(-time.Second), later: now.Add(time.Minute)},
+	}
+	updater.promoteDeferred(now)
+	if _, ok := updater.pending[due]; !ok {
+		t.Error("a due deferred mutation was not queued")
+	}
+	if _, ok := updater.pending[later]; ok {
+		t.Error("a deferred mutation was queued before it was due")
+	}
+	if _, ok := updater.deferred[later]; !ok || len(updater.deferred) != 1 {
+		t.Errorf("deferred = %v, want only the later mutation", updater.deferred)
+	}
 }
 
 func TestInterestTrackingStoreQueuesNewWatchSessions(t *testing.T) {
@@ -399,6 +427,12 @@ func TestRecomputeSeriesFollowsHomeRemovalsPostgres(t *testing.T) {
 		t.Fatalf("Drop: %v", err)
 	}
 	requireQueued("dropping the series")
+	updater.mu.Lock()
+	_, deferred := updater.deferred[interestMutation{userID: userID, profileID: profileID, itemID: seriesID}]
+	updater.mu.Unlock()
+	if !deferred {
+		t.Fatal("dropping the series deferred no second recompute")
+	}
 	recompute("series dropped", flags{favorite: true}, afterE2)
 
 	if err := drops.Undrop(ctx, userID, profileID, seriesID); err != nil {

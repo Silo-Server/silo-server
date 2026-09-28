@@ -381,7 +381,7 @@ func (s *interestTrackingStore) RemoveFromWatchlist(ctx context.Context, profile
 func (s *interestTrackingStore) UpsertHomeDismissal(ctx context.Context, dismissal userstore.HomeItemDismissal) error {
 	err := s.UserStore.UpsertHomeDismissal(ctx, dismissal)
 	if err == nil {
-		s.updater.QueueItemMutation(s.userID, dismissal.ProfileID, dismissal.MediaItemID)
+		s.updater.queueRemoval(s.userID, dismissal.ProfileID, dismissal.MediaItemID)
 	}
 	return err
 }

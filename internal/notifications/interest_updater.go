@@ -56,6 +56,8 @@ type InterestUpdater struct {
 	// pending maps each queued mutation to how many flushes have already
 	// failed it (transient failures requeue instead of dropping).
 	pending map[interestMutation]int
+	// deferred maps mutations to the time they join pending.
+	deferred map[interestMutation]time.Time
 }
 
 // NewInterestUpdater creates an InterestUpdater.
@@ -95,6 +97,38 @@ func (u *InterestUpdater) QueueItemMutation(userID int, profileID, itemID string
 	u.mu.Unlock()
 }
 
+// QueueItemMutationAfter queues the mutation once delay has passed. Queuing
+// the same mutation again moves its due time later, never earlier.
+func (u *InterestUpdater) QueueItemMutationAfter(userID int, profileID, itemID string, delay time.Duration) {
+	if u == nil || userID <= 0 || profileID == "" || itemID == "" {
+		return
+	}
+	mutation := interestMutation{userID: userID, profileID: profileID, itemID: itemID}
+	due := time.Now().Add(delay)
+	u.mu.Lock()
+	if u.deferred == nil {
+		u.deferred = make(map[interestMutation]time.Time)
+	}
+	if due.After(u.deferred[mutation]) {
+		u.deferred[mutation] = due
+	}
+	u.mu.Unlock()
+}
+
+// promoteDeferred moves deferred mutations due by now into pending. The
+// caller holds u.mu.
+func (u *InterestUpdater) promoteDeferred(now time.Time) {
+	for mutation, due := range u.deferred {
+		if due.After(now) {
+			continue
+		}
+		delete(u.deferred, mutation)
+		if _, queued := u.pending[mutation]; !queued {
+			u.pending[mutation] = 0
+		}
+	}
+}
+
 // Run drains the mutation queue until ctx is canceled.
 func (u *InterestUpdater) Run(ctx context.Context) {
 	ticker := time.NewTicker(interestFlushInterval)
@@ -111,6 +145,7 @@ func (u *InterestUpdater) Run(ctx context.Context) {
 
 func (u *InterestUpdater) flush(ctx context.Context) {
 	u.mu.Lock()
+	u.promoteDeferred(time.Now())
 	if len(u.pending) == 0 {
 		u.mu.Unlock()
 		return

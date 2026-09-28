@@ -56,9 +56,12 @@ release event's episode key:
 
   Favorites and watchlist are unaffected. The progression cursor is kept, so
   `next_up` resumes from the right episode once a removal lapses. Every
-  removal or restore queues a recompute, and so does the first progress write
-  of a new watch session, since resuming playback can lift a removal without
-  changing any progress state.
+  removal or restore queues a recompute. Resuming playback can lift a removal
+  without changing any progress state, so a removal queues a second recompute
+  ten minutes later, and the first progress write of a new watch session
+  (more than ten minutes after the previous one) queues one too. The second
+  recompute is held in memory; if the node restarts first, the daily interest
+  rebuild repairs the row.
 - Profile-level notification preferences are a hard gate: a reason disabled
   in preferences can never match, so no delivery row is created and no
   channel — including webhooks — ever sees the event. Per-webhook reason

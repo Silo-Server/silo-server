@@ -113,6 +113,16 @@ func (u *InterestUpdater) loadHomeHides(ctx context.Context, store userstore.Use
 	return hides, nil
 }
 
+// queueRemoval queues a recompute for a Home removal now and once more after
+// progressSessionGap. Resuming playback lifts a removal without changing any
+// progress state. A resume more than progressSessionGap after the removal
+// starts a new watch session, which queues its own recompute; the second
+// recompute here catches a quicker one.
+func (u *InterestUpdater) queueRemoval(userID int, profileID, itemID string) {
+	u.QueueItemMutation(userID, profileID, itemID)
+	u.QueueItemMutationAfter(userID, profileID, itemID, progressSessionGap)
+}
+
 // DroppedSeriesTracker decorates the dropped-series store so every change to
 // a profile's drops recomputes its interest in that series. The Home
 // dismissal handler and watch-provider sync both write drops through it.
@@ -136,7 +146,7 @@ func (t *DroppedSeriesTracker) Drop(ctx context.Context, userID int, profileID, 
 	if err := t.DroppedSeriesRepo.Drop(ctx, userID, profileID, seriesID); err != nil {
 		return err
 	}
-	t.updater.QueueItemMutation(userID, profileID, seriesID)
+	t.updater.queueRemoval(userID, profileID, seriesID)
 	return nil
 }
 
@@ -154,7 +164,7 @@ func (t *DroppedSeriesTracker) Undrop(ctx context.Context, userID int, profileID
 func (t *DroppedSeriesTracker) ImportDrop(ctx context.Context, userID int, profileID, seriesID string, droppedAt time.Time, observed *time.Time) (bool, error) {
 	applied, err := t.DroppedSeriesRepo.ImportDrop(ctx, userID, profileID, seriesID, droppedAt, observed)
 	if err == nil && applied {
-		t.updater.QueueItemMutation(userID, profileID, seriesID)
+		t.updater.queueRemoval(userID, profileID, seriesID)
 	}
 	return applied, err
 }
