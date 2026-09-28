@@ -207,9 +207,9 @@ func (h *LibraryCollectionHandler) GenerateCollectionPoster(ctx context.Context,
 		return err
 	}
 
-	// Delete any existing auto-generated images before uploading new ones.
-	if err := h.deleteCollectionImages(ctx, collectionID, "poster"); err != nil {
-		slog.WarnContext(ctx, "collage: failed to clean up old poster images", "component", "api", "collection_id", collectionID, "error", err)
+	oldPath, err := h.adminCollectionImagePath(ctx, collectionID, collectionImagePoster)
+	if err != nil {
+		return fmt.Errorf("loading collection poster: %w", err)
 	}
 
 	// Process through the standard image pipeline (generates WebP variants + thumbhash).
@@ -229,6 +229,7 @@ func (h *LibraryCollectionHandler) GenerateCollectionPoster(ctx context.Context,
 	}); err != nil {
 		return fmt.Errorf("updating collection poster: %w", err)
 	}
+	h.cleanUpReplacedCollectionImage(ctx, collectionID, collectionImagePoster, oldPath)
 
 	slog.InfoContext(ctx, "collage: poster generated successfully", "component", "api", "collection_id", collectionID, "s3_path", s3Path)
 	return nil
@@ -3102,6 +3103,27 @@ func (h *LibraryCollectionHandler) deleteCollectionImages(ctx context.Context, c
 	return removeCollectionImageVariants(ctx, h.ArtworkStore, adminCollectionImagePrefix, collectionID, imageType)
 }
 
+// adminCollectionImagePath returns the stored path of one admin collection
+// image.
+func (h *LibraryCollectionHandler) adminCollectionImagePath(ctx context.Context, collectionID, imageType string) (string, error) {
+	collection, err := h.repo.GetByID(ctx, collectionID)
+	if err != nil {
+		return "", err
+	}
+	if imageType == adminCollectionBackdrop {
+		return collection.BackdropURL, nil
+	}
+	return collection.PosterURL, nil
+}
+
+// cleanUpReplacedCollectionImage removes the revision that a committed
+// replacement of an admin collection image superseded.
+func (h *LibraryCollectionHandler) cleanUpReplacedCollectionImage(ctx context.Context, collectionID, imageType, oldPath string) {
+	cleanUpReplacedCollectionImage(ctx, h.ArtworkStore, adminCollectionImagePrefix, collectionID, imageType, oldPath, func(ctx context.Context) (string, error) {
+		return h.adminCollectionImagePath(ctx, collectionID, imageType)
+	})
+}
+
 func (h *LibraryCollectionHandler) processArtworkInputs(r *http.Request, collectionID, posterSourceURL, backdropSourceURL string) error {
 	sourceByType := map[string]string{
 		"poster":   strings.TrimSpace(posterSourceURL),
@@ -3134,10 +3156,10 @@ func (h *LibraryCollectionHandler) processArtworkInputs(r *http.Request, collect
 			return fmt.Errorf("%s: %w", imageType, err)
 		}
 
-		if err := h.deleteCollectionImages(r.Context(), collectionID, imageType); err != nil {
-			return fmt.Errorf("deleting %s images: %w", imageType, err)
+		oldPath, err := h.adminCollectionImagePath(r.Context(), collectionID, imageType)
+		if err != nil {
+			return fmt.Errorf("loading %s: %w", imageType, err)
 		}
-
 		s3Path, thumbhash, err := h.processCollectionImage(r.Context(), collectionID, imageType, fileData)
 		if err != nil {
 			return fmt.Errorf("%s: %w", imageType, err)
@@ -3169,6 +3191,7 @@ func (h *LibraryCollectionHandler) processArtworkInputs(r *http.Request, collect
 		if err := h.repo.Update(r.Context(), update); err != nil {
 			return fmt.Errorf("updating %s: %w", imageType, err)
 		}
+		h.cleanUpReplacedCollectionImage(r.Context(), collectionID, imageType, oldPath)
 	}
 	return nil
 }

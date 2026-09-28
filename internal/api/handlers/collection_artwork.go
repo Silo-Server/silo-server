@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -243,6 +244,28 @@ func removeReplacedCollectionImageVersion(
 		return fmt.Errorf("deleting replaced collection variants: %w", err)
 	}
 	return nil
+}
+
+// cleanUpReplacedCollectionImage runs after a replacement image is committed.
+// It reads the path the row now holds and removes the revision oldPath named.
+// Callers upload the replacement under its own revision and commit it before
+// calling this, so a failed upload or update leaves the stored artwork intact.
+// Failures here only log: the committed artwork is intact and the worst case
+// is an orphaned revision.
+func cleanUpReplacedCollectionImage(
+	ctx context.Context,
+	store blobstore.Store,
+	prefix, collectionID, imageType, oldPath string,
+	readCurrent func(context.Context) (string, error),
+) {
+	currentPath, err := readCurrent(ctx)
+	if err != nil {
+		slog.WarnContext(ctx, "collection artwork: skipping variant cleanup, re-read failed", "component", "api", "collection_id", collectionID, "kind", imageType, "error", err)
+		return
+	}
+	if err := removeReplacedCollectionImageVersion(ctx, store, prefix, collectionID, imageType, oldPath, currentPath); err != nil {
+		slog.WarnContext(ctx, "collection artwork: previous variant cleanup failed", "component", "api", "collection_id", collectionID, "kind", imageType, "error", err)
+	}
 }
 
 // isCollectionImageKeyIn reports whether key is an object directly inside dir

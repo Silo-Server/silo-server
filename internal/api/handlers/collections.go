@@ -533,10 +533,13 @@ func (h *CollectionHandler) processCollectionPoster(
 	if artwork == nil {
 		return true, fmt.Errorf("poster upload requires configured artwork storage")
 	}
-	if err := removeCollectionImageVariants(ctx, artwork, userCollectionImagePrefix, collectionID, "poster"); err != nil {
-		return true, fmt.Errorf("clearing previous poster: %w", err)
+	existing, err := store.GetCollection(ctx, collectionID)
+	if err != nil {
+		return true, fmt.Errorf("loading collection: %w", err)
 	}
-	s3Path, thumbhash, err := uploadCollectionImageVariants(ctx, artwork, userCollectionImagePrefix, collectionID, "poster", fileData)
+	// Revisioned keys (issue #1258) put the replacement under a new key, so
+	// the current poster stays in place until the new path is committed.
+	s3Path, thumbhash, err := uploadCollectionImageVariants(ctx, artwork, userCollectionImagePrefix, collectionID, collectionImagePoster, fileData)
 	if err != nil {
 		return true, fmt.Errorf("poster: %w", err)
 	}
@@ -552,6 +555,13 @@ func (h *CollectionHandler) processCollectionPoster(
 		}
 		return true, fmt.Errorf("persisting poster: %w", err)
 	}
+	cleanUpReplacedCollectionImage(ctx, artwork, userCollectionImagePrefix, collectionID, collectionImagePoster, existing.PosterURL, func(ctx context.Context) (string, error) {
+		current, err := store.GetCollection(ctx, collectionID)
+		if err != nil {
+			return "", err
+		}
+		return current.PosterURL, nil
+	})
 	return true, nil
 }
 

@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"errors"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -18,6 +19,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/s3client"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 type collectionArtworkS3Recorder struct {
@@ -351,5 +353,89 @@ func TestRemoveReplacedCollectionImageVersion_NoopCases(t *testing.T) {
 				t.Fatalf("expected no deletions, got %#v", store.deleted)
 			}
 		})
+	}
+}
+
+// posterUpdateStore is a personal collection store that holds one poster path
+// and can fail the poster update.
+type posterUpdateStore struct {
+	userstore.UserStore
+	posterURL string
+	updateErr error
+}
+
+func (s *posterUpdateStore) GetCollection(_ context.Context, id string) (*userstore.Collection, error) {
+	return &userstore.Collection{ID: id, PosterURL: s.posterURL}, nil
+}
+
+func (s *posterUpdateStore) UpdateCollection(_ context.Context, input userstore.UpdateCollectionInput) error {
+	if s.updateErr != nil {
+		return s.updateErr
+	}
+	if input.PosterURL != nil {
+		s.posterURL = *input.PosterURL
+	}
+	return nil
+}
+
+func seedPersonalPoster(t *testing.T, artwork blobstore.Store) string {
+	t.Helper()
+	oldPath, _, err := uploadCollectionImageVariants(t.Context(), artwork, userCollectionImagePrefix, "c1", collectionImagePoster, testCollectionPosterJPEG(t))
+	if err != nil {
+		t.Fatalf("seed poster: %v", err)
+	}
+	return oldPath
+}
+
+// A replacement whose upload succeeds but whose update fails must leave the
+// stored poster readable: the row still points at the old key.
+func TestProcessCollectionPoster_FailedUpdateKeepsStoredPoster(t *testing.T) {
+	artwork, err := blobstore.NewFilesystem(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFilesystem: %v", err)
+	}
+	oldPath := seedPersonalPoster(t, artwork)
+	store := &posterUpdateStore{posterURL: oldPath, updateErr: errors.New("update failed")}
+	h := &CollectionHandler{ArtworkStore: artwork}
+
+	replacement := testCollectionSolidJPEG(t)
+	if _, err := h.processCollectionPoster(t.Context(), store, "c1", "p1", func() ([]byte, error) { return replacement, nil }, ""); err == nil {
+		t.Fatal("processCollectionPoster succeeded, want the update error")
+	}
+	for _, key := range []string{oldPath, cardThumbnailPath(oldPath)} {
+		if _, err := artwork.Stat(t.Context(), key); err != nil {
+			t.Fatalf("stored poster %q is gone after a failed update: %v", key, err)
+		}
+	}
+}
+
+// A committed replacement removes the revision it superseded and keeps its own.
+func TestProcessCollectionPoster_ReplacementRemovesOldRevision(t *testing.T) {
+	artwork, err := blobstore.NewFilesystem(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFilesystem: %v", err)
+	}
+	oldPath := seedPersonalPoster(t, artwork)
+	store := &posterUpdateStore{posterURL: oldPath}
+	h := &CollectionHandler{ArtworkStore: artwork}
+
+	replacement := testCollectionSolidJPEG(t)
+	if _, err := h.processCollectionPoster(t.Context(), store, "c1", "p1", func() ([]byte, error) { return replacement, nil }, ""); err != nil {
+		t.Fatalf("processCollectionPoster: %v", err)
+	}
+	if store.posterURL == oldPath || artworkkey.Revision(store.posterURL) == "" {
+		t.Fatalf("poster path = %q, want a new revision replacing %q", store.posterURL, oldPath)
+	}
+	if _, err := artwork.Stat(t.Context(), store.posterURL); err != nil {
+		t.Fatalf("new poster %q missing: %v", store.posterURL, err)
+	}
+	items, _, err := artwork.List(t.Context(), "user-collection-images/c1/poster/", "", 0)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	for _, item := range items {
+		if artworkkey.Revision(item.Key) != artworkkey.Revision(store.posterURL) {
+			t.Fatalf("superseded object %q was not removed", item.Key)
+		}
 	}
 }
