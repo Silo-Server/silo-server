@@ -39,8 +39,9 @@ func displayPrefsMoveMigration() *goose.Migration {
 		&goose.GoFunc{RunTx: unmoveDisplayPrefs},
 	)
 	// Go migrations registered in code have no source path; name them so
-	// migration progress logs identify them.
-	m.Source = "displayprefs_move.go"
+	// migration progress logs identify them. goose requires the name to start
+	// with the version.
+	m.Source = fmt.Sprintf("%d_displayprefs_move.go", displayPrefsMoveVersion)
 	return m
 }
 

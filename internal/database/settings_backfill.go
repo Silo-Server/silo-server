@@ -36,8 +36,9 @@ func settingsBackfillMigration() *goose.Migration {
 		&goose.GoFunc{RunTx: rollbackSettingValues},
 	)
 	// Go migrations registered in code have no source path; name them so
-	// migration progress logs identify them.
-	m.Source = "settings_backfill.go"
+	// migration progress logs identify them. goose requires the name to start
+	// with the version.
+	m.Source = fmt.Sprintf("%d_settings_backfill.go", settingsBackfillVersion)
 	return m
 }
 

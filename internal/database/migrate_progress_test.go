@@ -364,6 +364,11 @@ func TestRegisteredGoMigrationsHaveNames(t *testing.T) {
 		if name == "" || name != m.Source {
 			t.Errorf("Go migration %d is logged as %q, want its file name", m.Version, name)
 		}
+		// goose rejects a registered Go migration whose source name doesn't
+		// start with its version.
+		if version, err := goose.NumericComponent(m.Source); err != nil || version != m.Version {
+			t.Errorf("Go migration %d source %q: version %d, err %v", m.Version, m.Source, version, err)
+		}
 	}
 }
 
