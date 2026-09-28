@@ -194,11 +194,12 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 		if requests == nil {
 			return nil, unavailable("requests")
 		}
-		result, err := requests.Cancel(ctx, lifecycleViewer(ctx), string(in.ID), in.Body.Reason)
+		viewer := lifecycleViewer(ctx)
+		result, err := requests.Cancel(ctx, viewer, string(in.ID), in.Body.Reason)
 		if err != nil {
 			return nil, requestProblem(err)
 		}
-		return &MediaRequestOutput{Body: mediaRequestOf(result)}, nil
+		return &MediaRequestOutput{Body: mediaRequestOf(result, viewer)}, nil
 	})
 	scope := func(ctx context.Context) (int, string, error) {
 		if providers == nil {

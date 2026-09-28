@@ -21200,7 +21200,9 @@ export interface components {
       created_at: string;
       /** @description How far the request's downloads are over all its servers (1080p and 4K together), while any reports them: bytes summed, the phase that needs the most attention, the latest estimate, and the oldest report's time */
       download?: components["schemas"]["RequestDownload"];
+      /** @description Admins only: the integration's own identifier */
       external_id?: string;
+      /** @description Admins only: the status as the download server reports it */
       external_status?: string;
       /**
        * @description Opaque identifier
@@ -21209,9 +21211,13 @@ export interface components {
       id: string;
       /** @example tt0113277 */
       imdb_id?: string;
-      /** @example radarr */
+      /**
+       * @description Admins only: the download server's kind
+       * @example radarr
+       */
       integration_kind?: string;
       is_anime: boolean;
+      /** @description Admins only: why the last submission to a download server failed. It can name servers and routing rules */
       last_error?: string;
       /** @description The catalog item once the media is in the library */
       library_content_id?: string;
@@ -24687,19 +24693,26 @@ export interface components {
       created_at: string;
       /** @description How far this target's downloads are, while its download server reports them */
       download?: components["schemas"]["RequestDownload"];
-      /** @description The integration's own identifier */
+      /** @description Admins only: the integration's own identifier */
       external_id?: string;
+      /** @description Admins only: the status as the download server reports it */
       external_status?: string;
       /**
        * @description Opaque identifier
        * @example 42
        */
       id: string;
+      /** @description Admins only: the download server's name */
       instance_name?: string;
+      /** @description Admins only: the download server holding this target */
       integration_id?: string;
-      /** @example radarr */
+      /**
+       * @description Admins only: the download server's kind
+       * @example radarr
+       */
       integration_kind?: string;
       is_anime: boolean;
+      /** @description Admins only: why the download server failed this target */
       last_error?: string;
       /** @example 1080p */
       quality: string;
@@ -24708,7 +24721,7 @@ export interface components {
        * @example 1834729
        */
       request_id: string;
-      /** @description The routing rule that sent this target to its server, as named when it was sent */
+      /** @description Admins only: the routing rule that sent this target to its server, as named when it was sent */
       route_name?: string;
       /** @example queued */
       status: string;

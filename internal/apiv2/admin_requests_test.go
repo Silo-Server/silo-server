@@ -22,6 +22,9 @@ type fakeAdminRequests struct {
 	filter                    mediarequests.ListFilter
 	action, reason, requestID string
 	probedBaseURL             string
+	// failed gives every returned request the errors a failed submission
+	// leaves (withSubmissionErrors).
+	failed bool
 }
 
 func fixtureAdminRequests() *fakeAdminRequests {
@@ -130,7 +133,7 @@ func TestAdminRequestOptionsUnreachableIntegration(t *testing.T) {
 func (f *fakeAdminRequests) ListAdmin(_ context.Context, v mediarequests.Viewer, filter mediarequests.ListFilter) ([]*mediarequests.Request, error) {
 	f.viewer = v
 	f.filter = filter
-	rows := []*mediarequests.Request{fixtureMediaRequest("r-3", 3), fixtureMediaRequest("r-2", 2), fixtureMediaRequest("r-1", 1)}
+	rows := []*mediarequests.Request{f.request("r-3", 3), f.request("r-2", 2), f.request("r-1", 1)}
 	out := []*mediarequests.Request{}
 	for _, r := range rows {
 		if filter.Before != nil && r.ID >= filter.Before.ID {
@@ -147,7 +150,14 @@ func (f *fakeAdminRequests) moderate(v mediarequests.Viewer, action, id, reason 
 	f.viewer = v
 	f.action, f.requestID, f.reason = action, id, reason
 	f.writes++
-	return fixtureMediaRequest(id, 1), nil
+	return f.request(id, 1), nil
+}
+func (f *fakeAdminRequests) request(id string, tmdbID int) *mediarequests.Request {
+	r := fixtureMediaRequest(id, tmdbID)
+	if f.failed {
+		withSubmissionErrors(r)
+	}
+	return r
 }
 func (f *fakeAdminRequests) Approve(_ context.Context, v mediarequests.Viewer, id string) (*mediarequests.Request, error) {
 	return f.moderate(v, "approve", id, "")
@@ -317,6 +327,31 @@ func TestAdminRequestLimitsModerationAndOptions(t *testing.T) {
 	p := requireProblem(t, do(t, h, http.MethodPost, Prefix+"/admin/request-integrations/new/options", `{"api_key_ref":"bad"}`, actingRequestAdmin), TypeValidationFailed)
 	if len(p.Errors) != 1 || p.Errors[0].Location != "body.api_key_ref" {
 		t.Fatalf("validation %+v", p)
+	}
+}
+
+// The admin request operations carry every download server detail.
+func TestAdminRequestsCarryDownloadServerDetails(t *testing.T) {
+	f := fixtureAdminRequests()
+	f.failed = true
+	h := adminRequestsHandler(f)
+	rec := do(t, h, http.MethodGet, Prefix+"/admin/requests", "", actingRequestAdmin)
+	var page struct {
+		Items []map[string]any `json:"items"`
+	}
+	decodeBody(t, rec.Body, &page)
+	if rec.Code != http.StatusOK || len(page.Items) != 3 {
+		t.Fatalf("listAdminRequests: %d %s", rec.Code, rec.Body.String())
+	}
+	for _, item := range page.Items {
+		if targets, _ := item["targets"].([]any); len(targets) == 0 {
+			t.Fatalf("listAdminRequests: no targets in %v", item)
+		}
+		requireAdminMembers(t, "listAdminRequests", item, adminRequestMembers, adminTargetMembers)
+	}
+	for _, action := range []string{"approve", "decline", "cancel", "retry"} {
+		got := requireTargets(t, action, do(t, h, http.MethodPost, Prefix+"/admin/requests/r-1/"+action, `{}`, actingRequestAdmin))
+		requireAdminMembers(t, action, got, adminRequestMembers, adminTargetMembers)
 	}
 }
 func TestAdminRequestCursorBoundaries(t *testing.T) {

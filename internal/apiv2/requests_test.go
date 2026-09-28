@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -28,13 +29,20 @@ type fakeRequests struct {
 	lastArgs   []any
 }
 
+// fixtureMediaRequest is an approved movie request with one queued target.
+// The target names its download server and routing rule, which only an
+// admin sees.
 func fixtureMediaRequest(id string, tmdbID int) *mediarequests.Request {
 	year := 1995
 	approved := fixedTime()
 	return &mediarequests.Request{
 		ID: id, Provider: "tmdb", MediaType: mediarequests.MediaTypeMovie, TMDBID: tmdbID, Title: "Heat", Year: &year,
 		Status: mediarequests.StatusApproved, Outcome: mediarequests.OutcomeActive, RequestedByUserID: 1, RequestedByProfileID: "p-owner",
-		IntegrationKind: "radarr", Targets: []mediarequests.Target{{ID: 42, RequestID: id, Quality: mediarequests.Quality1080p, Status: mediarequests.StatusQueued, CreatedAt: fixedTime(), UpdatedAt: fixedTime()}},
+		IntegrationKind: "radarr", Targets: []mediarequests.Target{{
+			ID: 42, RequestID: id, IntegrationID: "integration-1", IntegrationKind: "radarr", InstanceName: "Radarr",
+			Quality: mediarequests.Quality1080p, ExternalID: "7", ExternalStatus: "queued", Status: mediarequests.StatusQueued,
+			RouteName: "Movies", CreatedAt: fixedTime(), UpdatedAt: fixedTime(),
+		}},
 		CreatedAt: fixedTime(), UpdatedAt: fixedTime(), ApprovedAt: &approved,
 	}
 }
@@ -373,6 +381,142 @@ func TestGetRequest(t *testing.T) {
 	if rec := do(t, h, http.MethodGet, "/api/v2/requests/r-3", "", with(bearer(adminToken), "X-Profile-Id", "p-primary")); rec.Code != 200 {
 		t.Fatalf("admin: %d %s", rec.Code, rec.Body.String())
 	}
+}
+
+// A request's download server details are for admins only: the servers and
+// routing rules a request went to, the servers' own ids and raw statuses, and
+// errors that can name them.
+var (
+	adminRequestMembers = []string{"integration_kind", "external_id", "external_status", "last_error"}
+	adminTargetMembers  = []string{"integration_id", "integration_kind", "instance_name", "external_id", "external_status", "last_error", "route_name"}
+	// serverRequestMembers and serverTargetMembers are the ones
+	// fixtureMediaRequest fills; withSubmissionErrors fills the rest.
+	serverRequestMembers = []string{"integration_kind"}
+	serverTargetMembers  = []string{"integration_id", "integration_kind", "instance_name", "external_id", "external_status", "route_name"}
+	// requesterTargetMembers are what every viewer gets on a target.
+	requesterTargetMembers = []string{"id", "request_id", "quality", "is_anime", "status", "created_at", "updated_at"}
+)
+
+// withSubmissionErrors adds the rest of the admin details: the errors a failed
+// submission leaves, which name a server and a routing rule, and the request's
+// own server fields.
+func withSubmissionErrors(r *mediarequests.Request) {
+	r.ExternalID, r.ExternalStatus = "3", "5"
+	r.LastError = `route "Movies" sends to "Radarr", which is disabled`
+	for i := range r.Targets {
+		r.Targets[i].LastError = `Post "http://radarr.lan:7878/api/v3/movie": connection refused`
+	}
+}
+
+// requireAdminMembers checks that a request body carries exactly the wanted
+// admin-only members, on the request and on each of its targets, and that its
+// targets keep what a requester sees.
+func requireAdminMembers(t *testing.T, label string, req map[string]any, wantRequest, wantTarget []string) {
+	t.Helper()
+	for _, m := range adminRequestMembers {
+		if _, got := req[m]; got != slices.Contains(wantRequest, m) {
+			t.Errorf("%s: request %s present = %v", label, m, got)
+		}
+	}
+	targets, _ := req["targets"].([]any)
+	for _, raw := range targets {
+		target, _ := raw.(map[string]any)
+		for _, m := range adminTargetMembers {
+			if _, got := target[m]; got != slices.Contains(wantTarget, m) {
+				t.Errorf("%s: target %s present = %v", label, m, got)
+			}
+		}
+		for _, m := range requesterTargetMembers {
+			if _, ok := target[m]; !ok {
+				t.Errorf("%s: target lost %s", label, m)
+			}
+		}
+	}
+}
+
+// requireTargets decodes one request body and checks it has targets.
+func requireTargets(t *testing.T, label string, rec *httptest.ResponseRecorder) map[string]any {
+	t.Helper()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("%s: %d %s", label, rec.Code, rec.Body.String())
+	}
+	var req map[string]any
+	decodeBody(t, rec.Body, &req)
+	if targets, _ := req["targets"].([]any); len(targets) == 0 {
+		t.Fatalf("%s: no targets in %s", label, rec.Body.String())
+	}
+	return req
+}
+
+// The profile-scoped request operations leave the download server details
+// out for a requester and keep them for an admin.
+func TestRequestDownloadServerDetailsAreForAdmins(t *testing.T) {
+	svc := fixtureRequests()
+	for _, r := range svc.requests {
+		withSubmissionErrors(r)
+	}
+	deps := requestDeps(svc)
+	deps.RequestLifecycle = &fakeLifecycle{}
+	h := newTestHandler(t, deps)
+	admin := with(bearer(adminToken), "X-Profile-Id", "p-primary")
+
+	// A requester sees none of them, on any operation that answers with a
+	// request.
+	created := do(t, h, http.MethodPost, "/api/v2/requests", `{"media_type":"movie","tmdb_id":7,"title":"Heat"}`, requestOwner)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("createRequest: %d %s", created.Code, created.Body.String())
+	}
+	var body map[string]any
+	decodeBody(t, created.Body, &body)
+	requireAdminMembers(t, "createRequest", body, nil, nil)
+
+	var mine struct {
+		Items []map[string]any `json:"items"`
+	}
+	rec := do(t, h, http.MethodGet, "/api/v2/requests/mine", "", requestOwner)
+	decodeBody(t, rec.Body, &mine)
+	if rec.Code != http.StatusOK || len(mine.Items) != 2 {
+		t.Fatalf("listMyRequests: %d %s", rec.Code, rec.Body.String())
+	}
+	for _, item := range mine.Items {
+		requireAdminMembers(t, "listMyRequests", item, nil, nil)
+	}
+	got := requireTargets(t, "getRequest", do(t, h, http.MethodGet, "/api/v2/requests/r-1", "", requestOwner))
+	requireAdminMembers(t, "getRequest", got, nil, nil)
+	target := got["targets"].([]any)[0].(map[string]any)
+	if target["quality"] != "1080p" || target["status"] != "downloading" || target["download"] == nil {
+		t.Fatalf("getRequest: target = %v, want its quality, status and download", target)
+	}
+	got = requireTargets(t, "cancelRequest", do(t, h, http.MethodPost, "/api/v2/requests/r-1/cancel", `{}`, requestOwner))
+	requireAdminMembers(t, "cancelRequest", got, nil, nil)
+
+	// An admin sees every one the request has on the same operations. The
+	// create and cancel fakes answer with a fresh fixture, which carries no
+	// errors and, once created, no targets.
+	created = do(t, h, http.MethodPost, "/api/v2/requests", `{"media_type":"movie","tmdb_id":8,"title":"Heat"}`, admin)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("admin createRequest: %d %s", created.Code, created.Body.String())
+	}
+	var adminBody map[string]any
+	decodeBody(t, created.Body, &adminBody)
+	requireAdminMembers(t, "admin createRequest", adminBody, serverRequestMembers, nil)
+	var adminMine struct {
+		Items []map[string]any `json:"items"`
+	}
+	rec = do(t, h, http.MethodGet, "/api/v2/requests/mine", "", admin)
+	decodeBody(t, rec.Body, &adminMine)
+	if rec.Code != http.StatusOK || len(adminMine.Items) != 1 {
+		t.Fatalf("admin listMyRequests: %d %s", rec.Code, rec.Body.String())
+	}
+	requireAdminMembers(t, "admin listMyRequests", adminMine.Items[0], adminRequestMembers, adminTargetMembers)
+	got = requireTargets(t, "admin getRequest", do(t, h, http.MethodGet, "/api/v2/requests/r-1", "", admin))
+	requireAdminMembers(t, "admin getRequest", got, adminRequestMembers, adminTargetMembers)
+	target = got["targets"].([]any)[0].(map[string]any)
+	if target["instance_name"] != "Radarr" || target["route_name"] != "Movies" || target["last_error"] != `Post "http://radarr.lan:7878/api/v3/movie": connection refused` {
+		t.Fatalf("admin getRequest: target = %v", target)
+	}
+	got = requireTargets(t, "admin cancelRequest", do(t, h, http.MethodPost, "/api/v2/requests/r-1/cancel", `{}`, admin))
+	requireAdminMembers(t, "admin cancelRequest", got, serverRequestMembers, serverTargetMembers)
 }
 
 func TestSearchRequestMedia(t *testing.T) {

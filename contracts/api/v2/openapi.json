@@ -28544,9 +28544,11 @@
             "description": "How far the request's downloads are over all its servers (1080p and 4K together), while any reports them: bytes summed, the phase that needs the most attention, the latest estimate, and the oldest report's time"
           },
           "external_id": {
+            "description": "Admins only: the integration's own identifier",
             "type": "string"
           },
           "external_status": {
+            "description": "Admins only: the status as the download server reports it",
             "type": "string"
           },
           "id": {
@@ -28564,6 +28566,7 @@
             "type": "string"
           },
           "integration_kind": {
+            "description": "Admins only: the download server's kind",
             "examples": [
               "radarr"
             ],
@@ -28573,6 +28576,7 @@
             "type": "boolean"
           },
           "last_error": {
+            "description": "Admins only: why the last submission to a download server failed. It can name servers and routing rules",
             "type": "string"
           },
           "library_content_id": {
@@ -36939,10 +36943,11 @@
             "description": "How far this target's downloads are, while its download server reports them"
           },
           "external_id": {
-            "description": "The integration's own identifier",
+            "description": "Admins only: the integration's own identifier",
             "type": "string"
           },
           "external_status": {
+            "description": "Admins only: the status as the download server reports it",
             "type": "string"
           },
           "id": {
@@ -36954,12 +36959,15 @@
             "type": "string"
           },
           "instance_name": {
+            "description": "Admins only: the download server's name",
             "type": "string"
           },
           "integration_id": {
+            "description": "Admins only: the download server holding this target",
             "type": "string"
           },
           "integration_kind": {
+            "description": "Admins only: the download server's kind",
             "examples": [
               "radarr"
             ],
@@ -36969,6 +36977,7 @@
             "type": "boolean"
           },
           "last_error": {
+            "description": "Admins only: why the download server failed this target",
             "type": "string"
           },
           "quality": {
@@ -36986,7 +36995,7 @@
             "type": "string"
           },
           "route_name": {
-            "description": "The routing rule that sent this target to its server, as named when it was sent",
+            "description": "Admins only: the routing rule that sent this target to its server, as named when it was sent",
             "type": "string"
           },
           "status": {
