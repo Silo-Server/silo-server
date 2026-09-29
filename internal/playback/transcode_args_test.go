@@ -2067,6 +2067,46 @@ func TestBuildFFmpegArgs_NVENCFullHardwareArgsUnchanged(t *testing.T) {
 	}
 }
 
+// Every backend scales to the same height for a ladder label or an exact
+// box-fit height, and leaves the source alone for anything else.
+func TestScaleFiltersShareTargetHeightParsing(t *testing.T) {
+	for _, tc := range []struct {
+		res    string
+		height string
+	}{
+		{"2160p", "2160"}, {"1080p", "1080"}, {"720p", "720"}, {"540p", "540"},
+		{"480p", "480"}, {"420p", "420"}, {"328p", "328"}, {"800p", "800"}, {" 1080P ", "1080"},
+		{"66p", "66"}, // a very wide source fitted into the 480p box
+	} {
+		if got, want := resolutionToScale(tc.res), "scale=-2:"+tc.height; got != want {
+			t.Errorf("resolutionToScale(%q) = %q, want %q", tc.res, got, want)
+		}
+		if got, want := vaapiScaleFilter(tc.res), "scale_vaapi=w=-2:h="+tc.height+":format=nv12"; got != want {
+			t.Errorf("vaapiScaleFilter(%q) = %q, want %q", tc.res, got, want)
+		}
+		if got, want := qsvScaleFilter(tc.res), "scale_vaapi=w=-2:h="+tc.height+":format=nv12,hwmap=derive_device=qsv,format=qsv"; got != want {
+			t.Errorf("qsvScaleFilter(%q) = %q, want %q", tc.res, got, want)
+		}
+		if got, want := nvencScaleFilter(tc.res), "scale_cuda=w=-2:h="+tc.height+":format=nv12"; got != want {
+			t.Errorf("nvencScaleFilter(%q) = %q, want %q", tc.res, got, want)
+		}
+		if w, h := videoToolboxScaleDimensions(tc.res); w != "-2" || h != tc.height {
+			t.Errorf("videoToolboxScaleDimensions(%q) = %s:%s, want -2:%s", tc.res, w, h, tc.height)
+		}
+	}
+	for _, res := range []string{"", "4k", "original", "817p", "8640p", "0p", "-2p", "p"} {
+		if got := resolutionToScale(res); got != "" {
+			t.Errorf("resolutionToScale(%q) = %q, want no scale", res, got)
+		}
+		if got := vaapiScaleFilter(res); got != "scale_vaapi=format=nv12" {
+			t.Errorf("vaapiScaleFilter(%q) = %q, want format-only", res, got)
+		}
+		if w, h := videoToolboxScaleDimensions(res); w != "iw" || h != "ih" {
+			t.Errorf("videoToolboxScaleDimensions(%q) = %s:%s, want iw:ih", res, w, h)
+		}
+	}
+}
+
 // The rate-control probe runs the ordinary VAAPI smoke encode in the capped
 // mode a transcode would request, and a detected mode is forced.
 func TestVAAPIRateControlSmokeArgsAndForcedMode(t *testing.T) {

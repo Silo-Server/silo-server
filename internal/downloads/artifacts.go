@@ -1097,7 +1097,7 @@ func (m *ArtifactManager) buildOpts(file *models.MediaFile, a *Artifact) playbac
 		SoftwareVideoDecode:        playback.RequiresSoftwareVideoDecode(sourceVideoCodec, sourceVideoProfile, sourceVideoBitDepth),
 		TargetCodecVideo:           a.CodecVideo,
 		TargetCodecAudio:           a.CodecAudio,
-		TargetResolution:           a.Resolution,
+		TargetResolution:           playback.DownloadScaleResolution(file, a.Resolution),
 		TargetBitrateKbps:          a.TargetBitrateKbps,
 		ToneMapPolicy:              toneMapPolicy,
 		ToneMapMode:                a.ToneMapMode,

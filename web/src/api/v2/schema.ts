@@ -18681,6 +18681,7 @@ export interface components {
       monitoring_modes: string[];
       ordered_status: boolean;
       proxy_delivery: boolean;
+      quality_options: components["schemas"]["DownloadQualityOption"][];
       quality_presets: string[];
       /** @description Opaque revision of this document */
       revision: string;
@@ -18880,6 +18881,13 @@ export interface components {
       end: number;
       /** Format: double */
       start: number;
+    };
+    DownloadQualityOption: {
+      /** Format: int64 */
+      bitrate_kbps?: number;
+      /** Format: int64 */
+      max_height?: number;
+      preset: string;
     };
     DownloadStatusBody: {
       /**
