@@ -353,7 +353,7 @@ describe("GlobalSearch", () => {
     expect(input).not.toHaveAttribute("aria-activedescendant");
   });
 
-  it("wraps ArrowUp from an unselected input to the last result and wraps at both ends", () => {
+  it("moves ArrowUp from an unselected input to the last result and stops at both ends", () => {
     const input = renderTwoResults();
 
     fireEvent.keyDown(input, { key: "ArrowUp" });
@@ -361,13 +361,28 @@ describe("GlobalSearch", () => {
     expect(screen.getByRole("option", { selected: true })).toHaveTextContent("Second Movie");
     expect(input).toHaveFocus();
 
-    // Past the end wraps back to the first result.
+    // Past the end stays on the last result.
     fireEvent.keyDown(input, { key: "ArrowDown" });
-    expect(input).toHaveAttribute("aria-activedescendant", "search-result-0");
-
-    // Before the start wraps back to the last result.
-    fireEvent.keyDown(input, { key: "ArrowUp" });
     expect(input).toHaveAttribute("aria-activedescendant", "search-result-1");
+
+    // Before the start stays on the first result.
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(input).toHaveAttribute("aria-activedescendant", "search-result-0");
+  });
+
+  it("highlights the selected title row", () => {
+    const input = renderTwoResults();
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+
+    // The highlight class lives on the row wrapper around the option, so the
+    // selection marker must be there too for the selector to match.
+    const option = screen.getByRole("option", { selected: true });
+    const highlighted = option.closest("[data-selected]");
+    expect(highlighted).not.toBeNull();
+    expect(highlighted).toHaveClass("data-[selected]:bg-accent");
+    expect(document.querySelectorAll("[data-selected]")).toHaveLength(1);
   });
 
   it("opens the selected result when Enter is pressed", () => {
@@ -536,10 +551,9 @@ describe("GlobalSearch people results", () => {
       "Test Actor, Person",
     );
 
-    // Past the last person wraps back to the first title.
+    // Past the last person stays on it.
     fireEvent.keyDown(input, { key: "ArrowDown" });
-    expect(input).toHaveAttribute("aria-activedescendant", "search-result-0");
-    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(input).toHaveAttribute("aria-activedescendant", "search-result-1");
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(mocks.navigate).toHaveBeenCalledWith("/person/9007199254740993");
@@ -724,11 +738,9 @@ describe("GlobalSearch request rows", () => {
     expect(input).toHaveAttribute("aria-activedescendant", "search-result-1");
     expect(screen.getByRole("option", { selected: true })).toHaveTextContent("Requested Show");
 
-    // Past the last request row wraps back to the first library row.
+    // Past the last request row stays on it.
     fireEvent.keyDown(input, { key: "ArrowDown" });
-    expect(input).toHaveAttribute("aria-activedescendant", "search-result-0");
-
-    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(input).toHaveAttribute("aria-activedescendant", "search-result-1");
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith("/title/series/7");

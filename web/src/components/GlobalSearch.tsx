@@ -127,7 +127,10 @@ function GlobalSearchResultRow({
   // layout (same gap/padding/poster box) so it tracks the poster without
   // hard-coded offsets, and is pointer-events-none so row clicks pass through.
   return (
-    <div className="group/media hover:bg-muted/80 data-[selected]:bg-accent relative rounded-md transition-colors">
+    <div
+      data-selected={isSelected || undefined}
+      className="group/media hover:bg-muted/80 data-[selected]:bg-accent relative rounded-md transition-colors"
+    >
       <div
         id={searchResultOptionId(index)}
         role="option"
@@ -135,7 +138,6 @@ function GlobalSearchResultRow({
         aria-label={[item.title, item.year > 0 ? String(item.year) : null, typeLabel(item.type)]
           .filter(Boolean)
           .join(", ")}
-        data-selected={isSelected || undefined}
         onClick={() => onPick(item.content_id)}
         className={ROW_LAYOUT_CLASSES}
       >
@@ -462,7 +464,7 @@ export function GlobalSearch({
       searchInputRef.current?.focus();
       return;
     }
-    setSelectedKey(optionKeys[((nextIndex % optionCount) + optionCount) % optionCount]!);
+    setSelectedKey(optionKeys[Math.min(Math.max(nextIndex, 0), optionCount - 1)]!);
   }
   function pickSelected() {
     const item = items[selectedIndex - itemOffset];
