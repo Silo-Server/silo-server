@@ -239,7 +239,7 @@ function BooleanPolicyRow({
         value={selectValue}
         onValueChange={(next) => onValueChange(next === INHERIT ? null : next === "allowed")}
       >
-        <SelectTrigger id={id} className="w-40 shrink-0">
+        <SelectTrigger id={id} className="min-w-40 shrink-0">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
