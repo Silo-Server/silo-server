@@ -17,9 +17,11 @@ import {
   formatRequestReason,
   formatRequestSeasonMeta,
   formatSeasonList,
+  latestRequestSeason,
   requestInputFromMediaResult,
   seasonHasAired,
   seasonRequestable,
+  upcomingRequestSeasons,
 } from "@/lib/mediaRequests";
 import { cn } from "@/lib/utils";
 
@@ -72,6 +74,8 @@ export function RequestSeasonsDialog({
   const serverChooses =
     picked === null && (seasons.length === 0 || defaults.length > 0 || !inLibrary);
   const allPicked = choices.length > 0 && choices.every((s) => selected.includes(s.season_number));
+  const latest = requestable ? latestRequestSeason(seasons) : null;
+  const upcoming = upcomingRequestSeasons(choices);
 
   const close = (next: boolean) => {
     if (!next) setPicked(null);
@@ -126,6 +130,20 @@ export function RequestSeasonsDialog({
                   ? "Pick the upcoming seasons to request."
                   : "No season has aired yet, so the request covers the whole series unless you pick seasons."}
               </p>
+            ) : null}
+            {choices.length > 1 && (latest !== null || upcoming.length > 0) ? (
+              <div className="flex flex-wrap gap-2">
+                {latest !== null ? (
+                  <Button variant="outline" size="sm" onClick={() => setPicked([latest])}>
+                    Latest season
+                  </Button>
+                ) : null}
+                {upcoming.length > 0 ? (
+                  <Button variant="outline" size="sm" onClick={() => setPicked(upcoming)}>
+                    Upcoming seasons
+                  </Button>
+                ) : null}
+              </div>
             ) : null}
             <div className="max-h-[min(60vh,28rem)] overflow-y-auto rounded-md border">
               {choices.length > 1 ? (
