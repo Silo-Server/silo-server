@@ -13,7 +13,7 @@ func TestGetDeviceLoginCapability(t *testing.T) {
 	if rec.Code != 200 || rec.Header().Get("Cache-Control") != cachePrivateNoCache {
 		t.Fatalf("%d %s %s", rec.Code, rec.Header().Get("Cache-Control"), rec.Body.String())
 	}
-	want := `{"revision":"1","state":"available","remote_playback_handoff":true,"protocol_versions":[2]}` + "\n"
+	want := `{"revision":"1","state":"available","remote_playback_handoff":true,"cancel":true,"protocol_versions":[2]}` + "\n"
 	if !capabilityBodyMatches(t, rec.Body.Bytes(), want) {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
@@ -74,11 +74,12 @@ func TestStartDeviceLoginRateLimited(t *testing.T) {
 	}
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/device/poll", `{"device_code":"x"}`, nil), TypeRateLimited)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/auth/device?code=ABCD-1234", "", nil), TypeRateLimited)
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/device/cancel", `{"device_code":"x"}`, nil), TypeRateLimited)
 	// The capability document has no bucket and is never limited.
 	if rec := do(t, h, http.MethodGet, "/api/v2/auth/device/capability", "", nil); rec.Code != 200 {
 		t.Fatalf("capability limited: %d", rec.Code)
 	}
-	if len(buckets) != 3 || buckets[0] != "device_start" || buckets[1] != "device_poll" || buckets[2] != "device_lookup" {
+	if len(buckets) != 4 || buckets[0] != "device_start" || buckets[1] != "device_poll" || buckets[2] != "device_lookup" || buckets[3] != "device_poll" {
 		t.Fatalf("buckets = %v", buckets)
 	}
 }
@@ -181,3 +182,41 @@ func TestDecideDeviceLoginDenied(t *testing.T) {
 }
 
 func contains(s, sub string) bool { return strings.Contains(s, sub) }
+
+func TestCancelDeviceLogin(t *testing.T) {
+	h := newTestHandler(t, pilotDeps(nil, nil))
+	cancel := func(code string) string {
+		t.Helper()
+		rec := do(t, h, http.MethodPost, "/api/v2/auth/device/cancel", `{"device_code":"`+code+`"}`, nil)
+		if rec.Code != 200 {
+			t.Fatalf("cancel %s: %d %s", code, rec.Code, rec.Body.String())
+		}
+		return rec.Body.String()
+	}
+	// A pending request is withdrawn, and saying so again changes nothing.
+	for range 2 {
+		if body := cancel("dev-pending"); body != `{"status":"cancelled"}`+"\n" { //nolint:misspell // the state's wire value
+			t.Fatalf("body = %s", body)
+		}
+	}
+	// The approver's lookup and the device's poll both report it.
+	if rec := do(t, h, http.MethodGet, "/api/v2/auth/device?code=ABCD-1234", "", nil); !contains(rec.Body.String(), `"status":"cancelled"`) { //nolint:misspell // the state's wire value
+		t.Fatalf("lookup = %s", rec.Body.String())
+	}
+	if rec := do(t, h, http.MethodPost, "/api/v2/auth/device/poll", `{"device_code":"dev-pending"}`, nil); !contains(rec.Body.String(), `"status":"cancelled"`) { //nolint:misspell // the state's wire value
+		t.Fatalf("poll = %s", rec.Body.String())
+	}
+	// A request that already has a decision keeps it.
+	if body := cancel("dev-approved"); body != `{"status":"approved"}`+"\n" {
+		t.Fatalf("body = %s", body)
+	}
+	// Deciding on a withdrawn request is a conflict.
+	for _, path := range []string{"/api/v2/auth/device/approve", "/api/v2/auth/device/deny"} {
+		requireProblem(t, do(t, h, http.MethodPost, path, `{"token":"br-withdrawn"}`, bearer(memberToken)), TypeConflict)
+	}
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/device/cancel", `{"device_code":"nope"}`, nil), TypeNotFound)
+	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/device/cancel", `{"device_code":""}`, nil), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "body.device_code" {
+		t.Fatalf("errors = %+v", p.Errors)
+	}
+}

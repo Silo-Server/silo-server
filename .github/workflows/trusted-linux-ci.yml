@@ -332,12 +332,12 @@ jobs:
           : "${SILO_TEST_DATABASE_URL:?A disposable PG17 database is required}"
           go test -race -count=1 ./internal/watchtogether/
 
-      - name: Test history import cancellation and profile authorization against Postgres
+      - name: Test history import and device login cancellation and profile authorization against Postgres
         env:
           SILO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/watch_party?sslmode=disable
         run: |
           : "${SILO_TEST_DATABASE_URL:?A disposable PG17 database is required}"
-          go test -race -count=1 -run '^(TestHistoryImportCancellation.*|TestQueue.*|TestHistoryImportV1ProfileAuthorization)$' ./migrations/ ./internal/historyimport/ ./internal/api/handlers/
+          go test -race -count=1 -run '^(TestHistoryImportCancellation.*|TestDeviceLoginCancellationStatusPostgres|TestQueue.*|TestHistoryImportV1ProfileAuthorization)$' ./migrations/ ./internal/historyimport/ ./internal/api/handlers/
 
       # 20260925144545 moves marker claims between rows that share a payload
       # while the payload index still exists. The replay seeds a winner-first

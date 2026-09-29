@@ -18610,6 +18610,23 @@
         ],
         "type": "object"
       },
+      "CancelDeviceLoginInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "device_code": {
+            "description": "The device code from startDeviceLogin",
+            "examples": [
+              "d3v1c3c0d3"
+            ],
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "device_code"
+        ],
+        "type": "object"
+      },
       "Capability": {
         "additionalProperties": false,
         "properties": {
@@ -22756,7 +22773,8 @@
               "approved",
               "denied",
               "consumed",
-              "expired"
+              "expired",
+              "cancelled"
             ],
             "examples": [
               "pending"
@@ -22790,11 +22808,41 @@
         ],
         "type": "object"
       },
+      "DeviceLoginCancellation": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "description": "State after the cancel; only a pending request changes",
+            "enum": [
+              "cancelled",
+              "approved",
+              "denied",
+              "consumed",
+              "expired"
+            ],
+            "examples": [
+              "cancelled"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
       "DeviceLoginCapability": {
         "additionalProperties": false,
         "properties": {
           "allowed": {
             "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "cancel": {
+            "description": "Whether a device can withdraw its pending request with cancelDeviceLogin",
+            "examples": [
+              true
+            ],
             "type": "boolean"
           },
           "protocol_versions": {
@@ -22834,6 +22882,7 @@
         },
         "required": [
           "remote_playback_handoff",
+          "cancel",
           "protocol_versions",
           "revision",
           "state"
@@ -22902,7 +22951,8 @@
               "approved",
               "denied",
               "consumed",
-              "expired"
+              "expired",
+              "cancelled"
             ],
             "examples": [
               "pending"
@@ -115364,6 +115414,130 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-retry-safety": "domain_identity",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/auth/device/cancel": {
+      "post": {
+        "operationId": "cancelDeviceLogin",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelDeviceLoginInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceLoginCancellation"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Withdraw a pending pairing request from the device that opened it.",
+        "tags": [
+          "device-login"
+        ],
+        "x-silo-class": "public",
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
     },

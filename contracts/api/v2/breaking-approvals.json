@@ -1,18 +1,18 @@
 {
   "approvals": [
     {
-      "operation_id": "createAdminInvitation",
+      "operation_id": "getDeviceLogin",
       "change_id": "response-property-enum-value-added",
-      "fingerprint": "48670f767ffb787b9f6980eb29452f9f3c38ac267974b19572357bb9bdf416b9",
-      "reason": "Link invitations report delivery_status not_requested. Only the web admin creates or resends invitations, and it ships with this change; the apps do not call these administrator operations.",
-      "approved_in": "#1390"
+      "fingerprint": "2f5a2a2a7c5da0d245c53d069bc443b9503cce53c46cea1fccb376b60857e90c",
+      "reason": "Pre-lock addition from #1682: a device can withdraw its pending sign-in request, and the approver's lookup reports it as cancelled. The bundled web approval page shows the state in the same change. The phone approvers (silo-android DevicePairingViewModel, silo-apple CompanionPairingCoordinator) don't branch on the lookup status, and when approving fails they show the 409 message, which says the device cancelled. The frozen v1 lookup reports such a request as expired.",
+      "approved_in": "#1682"
     },
     {
-      "operation_id": "resendAdminInvitation",
+      "operation_id": "pollDeviceLogin",
       "change_id": "response-property-enum-value-added",
-      "fingerprint": "99e31b0048e3170e6691db0a8acd2beeef2d2779a1799bb7307f4bc33af642c4",
-      "reason": "Link invitations report delivery_status not_requested. Only the web admin creates or resends invitations, and it ships with this change; the apps do not call these administrator operations.",
-      "approved_in": "#1390"
+      "fingerprint": "7597747b38973400f0135f1167940768623c512a06f2c1376bda719f6a974c9d",
+      "reason": "Pre-lock addition from #1682: a device can withdraw its pending sign-in request, and a later poll reports it as cancelled. Only the device holding the device_code can cancel and poll, so the only client that sees the value is one that just called cancel; the TV sign-in fixes in silo-apple#553 and silo-android#420 add that call. The frozen v1 poll reports such a request as expired.",
+      "approved_in": "#1682"
     }
   ]
 }

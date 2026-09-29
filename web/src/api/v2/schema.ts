@@ -5057,6 +5057,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/auth/device/cancel": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Withdraw a pending pairing request from the device that opened it. */
+    post: operations["cancelDeviceLogin"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/auth/device/capability": {
     parameters: {
       query?: never;
@@ -17671,6 +17688,13 @@ export interface components {
       /** @example false */
       watched: boolean;
     };
+    CancelDeviceLoginInputBody: {
+      /**
+       * @description The device code from startDeviceLogin
+       * @example d3v1c3c0d3
+       */
+      device_code: string;
+    };
     Capability: {
       /** @description Whether the current principal may use the capability */
       allowed?: boolean;
@@ -19181,7 +19205,7 @@ export interface components {
        * @example pending
        * @enum {string}
        */
-      status: "pending" | "approved" | "denied" | "consumed" | "expired";
+      status: "pending" | "approved" | "denied" | "consumed" | "expired" | "cancelled";
       /**
        * @description Whether the resulting session will be temporary
        * @example false
@@ -19193,9 +19217,22 @@ export interface components {
        */
       user_code: string;
     };
+    DeviceLoginCancellation: {
+      /**
+       * @description State after the cancel; only a pending request changes
+       * @example cancelled
+       * @enum {string}
+       */
+      status: "cancelled" | "approved" | "denied" | "consumed" | "expired";
+    };
     DeviceLoginCapability: {
       /** @description Whether the current principal may use the capability */
       allowed?: boolean;
+      /**
+       * @description Whether a device can withdraw its pending request with cancelDeviceLogin
+       * @example true
+       */
+      cancel: boolean;
       /**
        * @description Pairing protocol versions this server speaks
        * @example [
@@ -19252,7 +19289,7 @@ export interface components {
        * @example pending
        * @enum {string}
        */
-      status: "pending" | "approved" | "denied" | "consumed" | "expired";
+      status: "pending" | "approved" | "denied" | "consumed" | "expired" | "cancelled";
       /**
        * @description Whether the issued session is temporary
        * @example false
@@ -75929,6 +75966,111 @@ export interface operations {
       };
       /** @description Too Many Requests */
       429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  cancelDeviceLogin: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CancelDeviceLoginInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DeviceLoginCancellation"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
         headers: {
           [name: string]: unknown;
         };

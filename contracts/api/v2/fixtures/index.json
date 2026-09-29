@@ -3512,6 +3512,42 @@
       "body_file": "authentication_required.json"
     },
     {
+      "name": "cancel_device_login_device_code_required",
+      "operation_id": "cancelDeviceLogin",
+      "scenario": "A cancel without its device code is a validation failure naming the member.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/device/cancel",
+        "body": "{}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "cancel_device_login_device_code_required.json"
+    },
+    {
+      "name": "cancel_device_login_ok",
+      "operation_id": "cancelDeviceLogin",
+      "scenario": "The device withdraws its pending request when it stops showing the code.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/device/cancel",
+        "body": "{\"device_code\":\"dev-cancel\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/DeviceLoginCancellation",
+      "body_file": "cancel_device_login_ok.json"
+    },
+    {
       "name": "cancel_library_job_accepted",
       "operation_id": "cancelLibraryJob",
       "scenario": "Cancellation returns the canonical canceling job; completed metadata changes are retained.",

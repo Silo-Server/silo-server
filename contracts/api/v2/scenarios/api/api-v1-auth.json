@@ -5578,6 +5578,7 @@
                     "revision",
                     "state",
                     "remote_playback_handoff",
+                    "cancel",
                     "protocol_versions"
                   ]
                 },
@@ -5629,7 +5630,7 @@
           },
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "V2 adds capability revision and configured state while preserving remote handoff and protocol version semantics.",
+            "summary": "V2 adds capability revision, configured state and the cancel flag while preserving remote handoff and protocol version semantics.",
             "recorded_in": "internal/scenariocatalog/executor/device_capability_pairing_test.go",
             "operation_id": "getDeviceLoginCapability",
             "method": "GET",
@@ -5658,6 +5659,7 @@
                     "revision",
                     "state",
                     "remote_playback_handoff",
+                    "cancel",
                     "protocol_versions"
                   ]
                 },
@@ -5730,7 +5732,7 @@
           },
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "V2 adds capability revision and configured state while preserving remote handoff and protocol version semantics.",
+            "summary": "V2 adds capability revision, configured state and the cancel flag while preserving remote handoff and protocol version semantics.",
             "recorded_in": "internal/scenariocatalog/executor/device_capability_pairing_test.go",
             "operation_id": "getDeviceLoginCapability",
             "method": "GET",
@@ -5759,6 +5761,7 @@
                     "revision",
                     "state",
                     "remote_playback_handoff",
+                    "cancel",
                     "protocol_versions"
                   ]
                 },

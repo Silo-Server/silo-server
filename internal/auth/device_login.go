@@ -24,6 +24,7 @@ var (
 	ErrDeviceLoginNotFound   = errors.New("device login request not found")
 	ErrDeviceLoginExpired    = errors.New("device login request expired")
 	ErrDeviceLoginDenied     = errors.New("device login request denied")
+	ErrDeviceLoginCancelled  = errors.New("device login request canceled by the device")
 	ErrDeviceLoginConsumed   = errors.New("device login request already consumed")
 	ErrDeviceLoginUnapproved = errors.New("device login request not approved")
 	ErrDeviceLoginBadPurpose = errors.New("invalid device login purpose")
@@ -37,8 +38,13 @@ const (
 	DeviceLoginStatusApproved = "approved"
 	DeviceLoginStatusDenied   = "denied"
 	DeviceLoginStatusConsumed = "consumed"
-	DeviceLoginPurposeLogin   = "device_login"
-	DeviceLoginPurposeRemote  = "remote_playback"
+	// DeviceLoginStatusExpired is reported, never stored, for a request past
+	// its expiry.
+	DeviceLoginStatusExpired = "expired"
+	// DeviceLoginStatusCancelled is a pending request the device withdrew.
+	DeviceLoginStatusCancelled = "cancelled" //nolint:misspell // #1682's state name, spelled like the request and task states
+	DeviceLoginPurposeLogin    = "device_login"
+	DeviceLoginPurposeRemote   = "remote_playback"
 
 	deviceLoginTTL           = 10 * time.Minute
 	deviceLoginPollInterval  = 3 * time.Second
@@ -398,6 +404,9 @@ func (s *DeviceLoginService) Deny(ctx context.Context, input DeviceLoginLookupIn
 	if record.Status == DeviceLoginStatusDenied {
 		return nil
 	}
+	if record.Status == DeviceLoginStatusCancelled {
+		return ErrDeviceLoginCancelled
+	}
 
 	now := time.Now().UTC()
 	tag, err := s.pool.Exec(ctx, `
@@ -425,6 +434,42 @@ func (s *DeviceLoginService) Deny(ctx context.Context, input DeviceLoginLookupIn
 		return s.reloadDenyState(ctx, record.ID)
 	}
 	return nil
+}
+
+// Cancel withdraws the pending request that deviceCode belongs to, so the
+// approver is told the device stopped waiting instead of offered a decision.
+// A request in any other state, including an expired one, is left as it is.
+// It returns the state after the call, reported the way Poll reports it.
+func (s *DeviceLoginService) Cancel(ctx context.Context, deviceCode string) (string, error) {
+	hash := hashDeviceLoginSecret(strings.TrimSpace(deviceCode))
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE device_login_requests
+		SET status = $2,
+			updated_at = NOW()
+		WHERE device_code_hash = $1
+			AND status = $3
+			AND expires_at > NOW()
+	`,
+		hash,
+		DeviceLoginStatusCancelled,
+		DeviceLoginStatusPending,
+	)
+	if err != nil {
+		return "", fmt.Errorf("cancel device login: %w", err)
+	}
+	if tag.RowsAffected() == 1 {
+		return DeviceLoginStatusCancelled, nil
+	}
+	record, err := s.getByHash(ctx, "device_code_hash", hash)
+	if err != nil {
+		return "", err
+	}
+	// Still pending after the guarded UPDATE missed means the database found
+	// it expired, even if this process's clock disagrees.
+	if isDeviceLoginExpired(record) || record.Status == DeviceLoginStatusPending {
+		return DeviceLoginStatusExpired, nil
+	}
+	return record.Status, nil
 }
 
 func (s *DeviceLoginService) Poll(ctx context.Context, deviceCode string) (*DeviceLoginPollResult, error) {
@@ -460,6 +505,11 @@ func (s *DeviceLoginService) Poll(ctx context.Context, deviceCode string) (*Devi
 	case DeviceLoginStatusConsumed:
 		return &DeviceLoginPollResult{
 			Status:    DeviceLoginStatusConsumed,
+			PollAfter: int(deviceLoginPollInterval.Seconds()),
+		}, nil
+	case DeviceLoginStatusCancelled:
+		return &DeviceLoginPollResult{
+			Status:    DeviceLoginStatusCancelled,
 			PollAfter: int(deviceLoginPollInterval.Seconds()),
 		}, nil
 	case DeviceLoginStatusApproved:
@@ -640,6 +690,10 @@ func (s *DeviceLoginService) getByHash(ctx context.Context, column, hash string)
 		query = deviceLoginSelectColumns + `
 		WHERE user_code_hash = $1
 	`
+	case "device_code_hash":
+		query = deviceLoginSelectColumns + `
+		WHERE device_code_hash = $1
+	`
 	default:
 		return nil, fmt.Errorf("unsupported device login lookup column %q", column)
 	}
@@ -686,6 +740,8 @@ func (s *DeviceLoginService) reloadApprovalState(
 		return ErrDeviceLoginConsumed
 	case DeviceLoginStatusDenied:
 		return ErrDeviceLoginDenied
+	case DeviceLoginStatusCancelled:
+		return ErrDeviceLoginCancelled
 	case DeviceLoginStatusApproved:
 		if sameApprovedIdentity(record, approverUserID, profileID) {
 			return nil
@@ -709,6 +765,8 @@ func (s *DeviceLoginService) reloadDenyState(ctx context.Context, recordID strin
 		return ErrDeviceLoginConsumed
 	case DeviceLoginStatusDenied:
 		return nil
+	case DeviceLoginStatusCancelled:
+		return ErrDeviceLoginCancelled
 	default:
 		return ErrDeviceLoginConflict
 	}
@@ -759,6 +817,8 @@ func validateDeviceLoginDecision(record *deviceLoginRecord) error {
 		return ErrDeviceLoginConsumed
 	case DeviceLoginStatusDenied:
 		return ErrDeviceLoginDenied
+	case DeviceLoginStatusCancelled:
+		return ErrDeviceLoginCancelled
 	case DeviceLoginStatusPending, DeviceLoginStatusApproved:
 		return nil
 	default:

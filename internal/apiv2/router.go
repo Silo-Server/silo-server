@@ -1172,6 +1172,7 @@ type DeviceLoginService interface {
 	StartDeviceLogin(ctx context.Context, input auth.DeviceLoginStartInput) (*auth.DeviceLoginStartResult, error)
 	LookupDeviceLogin(ctx context.Context, input auth.DeviceLoginLookupInput) (*auth.DeviceLoginInfo, error)
 	PollDeviceLogin(ctx context.Context, deviceCode string) (*handlers.DeviceLoginPollView, error)
+	CancelDeviceLogin(ctx context.Context, deviceCode string) (handlers.DeviceLoginDecision, error)
 	ApproveDeviceLogin(ctx context.Context, input auth.DeviceLoginLookupInput, userID int) (handlers.DeviceLoginDecision, error)
 	ApproveDeviceHandoff(ctx context.Context, input auth.DeviceLoginLookupInput, userID int, profileID string) (handlers.DeviceLoginDecision, error)
 	DenyDeviceLogin(ctx context.Context, input auth.DeviceLoginLookupInput, userID int) (handlers.DeviceLoginDecision, error)

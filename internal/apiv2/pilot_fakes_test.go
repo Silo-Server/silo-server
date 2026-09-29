@@ -1103,8 +1103,25 @@ func (f fakeDevices) decide(in auth.DeviceLoginLookupInput, want string) (handle
 		return handlers.DeviceLoginDecision{}, &handlers.APIError{Status: 409, Code: "consumed", Message: "Device login request has already been used"}
 	case auth.DeviceLoginStatusDenied:
 		return handlers.DeviceLoginDecision{}, &handlers.APIError{Status: 409, Code: "denied", Message: "Device login request has already been denied"}
+	case auth.DeviceLoginStatusCancelled:
+		return handlers.DeviceLoginDecision{}, &handlers.APIError{Status: 409, Code: "cancelled", Message: "The device canceled this sign-in request"} //nolint:misspell // the state's wire value
 	}
 	return handlers.DeviceLoginDecision{Status: want}, nil
+}
+
+// CancelDeviceLogin withdraws a pending request; any other keeps its state.
+func (f fakeDevices) CancelDeviceLogin(_ context.Context, deviceCode string) (handlers.DeviceLoginDecision, error) {
+	if f.err != nil {
+		return handlers.DeviceLoginDecision{}, f.err
+	}
+	r := f.requests[deviceCode]
+	if r == nil {
+		return handlers.DeviceLoginDecision{}, &handlers.APIError{Status: 404, Code: "not_found", Message: "Device login request not found"}
+	}
+	if r.Status == auth.DeviceLoginStatusPending {
+		r.Status = auth.DeviceLoginStatusCancelled
+	}
+	return handlers.DeviceLoginDecision{Status: r.Status}, nil
 }
 
 func (f fakeDevices) ApproveDeviceLogin(_ context.Context, in auth.DeviceLoginLookupInput, userID int) (handlers.DeviceLoginDecision, error) {
@@ -1151,6 +1168,10 @@ func fixtureDevices() fakeDevices {
 		"br-expired":   {Status: "expired", Purpose: auth.DeviceLoginPurposeLogin},
 		"br-consumed":  {Status: auth.DeviceLoginStatusConsumed, Purpose: auth.DeviceLoginPurposeLogin, ExpiresAt: exp},
 		"br-denied":    {Status: auth.DeviceLoginStatusDenied, Purpose: auth.DeviceLoginPurposeLogin, ExpiresAt: exp},
+		"br-withdrawn": {Status: auth.DeviceLoginStatusCancelled, Purpose: auth.DeviceLoginPurposeLogin, ExpiresAt: exp},
+		// A pending request of its own, so withdrawing it leaves dev-pending
+		// for the approval cases.
+		"dev-cancel": {Status: auth.DeviceLoginStatusPending, Purpose: auth.DeviceLoginPurposeLogin, ExpiresAt: exp},
 	}}
 }
 

@@ -251,6 +251,13 @@ new login flow; refreshing an unrelated session cannot repair a refusal. A devic
 poll's scheduled continuation is a separate request governed by `poll_after`.
 Authenticated account reads retain refresh recovery.
 
+A device that stops showing its code withdraws the request with
+`POST /api/v2/auth/device/cancel` (`cancelDeviceLogin`) and its `device_code`, when
+the device-login capability reports `cancel`. Only a pending request changes; the
+approver's lookup and any later poll then report `cancelled`, and approving or
+denying it answers `409 conflict`. The frozen v1 device routes keep their
+vocabulary and report such a request as `expired`.
+
 Omitting an optional login, setup, signup, or device-pairing member selects its
 default. Explicit JSON `null` is rejected with `422 validation_failed` at that
 member before the service performs any effect. Provider identifiers are accepted

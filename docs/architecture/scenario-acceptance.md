@@ -712,7 +712,7 @@ separate from NEW acceptance.
 
 `make test-scenario-device-capability` requires `capability.meaning` and
 `capability.shape`. Original handoff/protocol assertions remain unchanged; v2
-adds revision and configured state. Four transport requests reseed independently;
+adds revision, configured state and the `cancel` flag. Four transport requests reseed independently;
 eight combined snapshots cover complete users, profiles, API-key, settings,
 login-session and device-login-request tables (48 observations), with all rows
 unchanged. Required DSN, pre-setup scratch/API-key occupancy and fixed-selector

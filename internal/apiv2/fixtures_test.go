@@ -1733,7 +1733,8 @@ func fixtureCases() []fixtureCase {
 		method:   http.MethodGet, path: "/api/v2/account/me", headers: bearer(demotedToken),
 		status: http.StatusUnauthorized, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/Problem"})
 	cases = append(cases, watchTrickplayFixtureCases()...)
-	return append(cases, adminTrickplayFixtureCases()...)
+	cases = append(cases, adminTrickplayFixtureCases()...)
+	return append(cases, deviceLoginCancelFixtureCases()...)
 }
 
 // fixtureMultipartType is the multipart Content-Type of the avatar fixtures,

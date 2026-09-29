@@ -634,6 +634,7 @@ export const v2Operations = {
   "POST /api/v2/api-keys": "createPersonalAPIKey",
   "POST /api/v2/auth/device/approve": "approveDeviceLogin",
   "POST /api/v2/auth/device/approve-handoff": "approveDeviceHandoff",
+  "POST /api/v2/auth/device/cancel": "cancelDeviceLogin",
   "POST /api/v2/auth/device/deny": "denyDeviceLogin",
   "POST /api/v2/auth/device/poll": "pollDeviceLogin",
   "POST /api/v2/auth/device/start": "startDeviceLogin",

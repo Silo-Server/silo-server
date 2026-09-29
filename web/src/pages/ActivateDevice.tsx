@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useSearchParams } from "react-router";
-import { v2, type V2Result } from "@/api/v2/request";
+import { V2ProblemError, v2, type V2Result } from "@/api/v2/request";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -80,6 +80,12 @@ export default function ActivateDevice() {
       await loadDetails();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : `Failed to ${action} request`);
+      // A conflict or expiry means the request changed since the page loaded,
+      // for example the device cancelled it, so show its current state. Other
+      // failures keep the page as it is so the approver can retry.
+      if (error instanceof V2ProblemError && (error.status === 409 || error.status === 410)) {
+        await loadDetails();
+      }
     } finally {
       setActing(false);
     }
@@ -194,6 +200,11 @@ export default function ActivateDevice() {
                 <p className="text-sm">This device is already signed in.</p>
               ) : details.status === "denied" ? (
                 <p className="text-sm">This sign-in request was denied.</p>
+              ) : details.status === "cancelled" ? (
+                <p className="text-sm">
+                  The device canceled this sign-in request. Start again on the device if you still
+                  want to sign in.
+                </p>
               ) : (
                 <p className="text-sm">This sign-in request has expired.</p>
               )}

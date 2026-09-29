@@ -1,7 +1,8 @@
 {
-  "revision": "d1230b3bc959bb5d4086098504fabf629fc4c15e1e906f256fb9e7e9e711bc9a",
+  "revision": "86de32ece2b72ff3d26e9b1dc6b1ef4f96ae52fd514f6dfae9522f640471ed3c",
   "state": "available",
   "remote_playback_handoff": true,
+  "cancel": true,
   "protocol_versions": [
     2
   ]

@@ -146,7 +146,7 @@ func (h *AuthHandler) HandleDeviceLookup(w http.ResponseWriter, r *http.Request)
 	}
 
 	response := deviceLookupResponse{
-		Status:         info.Status,
+		Status:         v1DeviceStatus(info.Status),
 		UserCode:       info.UserCode,
 		MatchCode:      info.MatchCode,
 		DeviceName:     info.DeviceName,
@@ -184,7 +184,7 @@ func (h *AuthHandler) HandleDevicePoll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := devicePollResponse{
-		Status:    result.Status,
+		Status:    v1DeviceStatus(result.Status),
 		PollAfter: result.PollAfter,
 	}
 	if result.Tokens != nil {
@@ -203,6 +203,25 @@ func (h *AuthHandler) HandleDevicePoll(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// v1DeviceStatus keeps the frozen v1 status vocabulary. A request a device
+// withdrew through v2 reads as expired there: it can no longer be approved,
+// which is what v1 clients already handle for expired.
+func v1DeviceStatus(status string) string {
+	if status == auth.DeviceLoginStatusCancelled {
+		return auth.DeviceLoginStatusExpired
+	}
+	return status
+}
+
+// v1DeviceDecisionError answers a v1 decision on a withdrawn request with the
+// v1 expired error rather than a code v1 never had.
+func v1DeviceDecisionError(err error) error {
+	if errors.Is(err, auth.ErrDeviceLoginCancelled) {
+		return deviceDecisionError(auth.ErrDeviceLoginExpired)
+	}
+	return err
 }
 
 // DeviceLoginPollView is the poll outcome the v1 and v2 handlers both render.
@@ -293,6 +312,23 @@ func (h *AuthHandler) PollDeviceLogin(ctx context.Context, deviceCode string) (*
 	return view, nil
 }
 
+// CancelDeviceLogin withdraws the waiting device's pending request and
+// returns the state the request is in afterwards. Only v2 cancelDeviceLogin
+// calls it.
+func (h *AuthHandler) CancelDeviceLogin(ctx context.Context, deviceCode string) (DeviceLoginDecision, error) {
+	if h.device == nil {
+		return DeviceLoginDecision{}, apiError(http.StatusServiceUnavailable, "unavailable", "Device login is not configured")
+	}
+	status, err := h.device.Cancel(ctx, deviceCode)
+	if err != nil {
+		if errors.Is(err, auth.ErrDeviceLoginNotFound) {
+			return DeviceLoginDecision{}, apiError(http.StatusNotFound, "not_found", "Device login request not found")
+		}
+		return DeviceLoginDecision{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to cancel device login")
+	}
+	return DeviceLoginDecision{Status: status}, nil
+}
+
 // DeviceLoginDecision is the shared outcome of approve, approve-handoff and
 // deny: the state the request is now in.
 type DeviceLoginDecision struct {
@@ -358,6 +394,8 @@ func deviceDecisionError(err error) *APIError {
 		out = apiError(http.StatusConflict, "consumed", "Device login request has already been used")
 	case errors.Is(err, auth.ErrDeviceLoginDenied):
 		out = apiError(http.StatusConflict, "denied", "Device login request has already been denied")
+	case errors.Is(err, auth.ErrDeviceLoginCancelled):
+		out = apiError(http.StatusConflict, "cancelled", "The device canceled this sign-in request") //nolint:misspell // the code is the state's name
 	case errors.Is(err, auth.ErrUserDisabled):
 		out = apiError(http.StatusForbidden, "user_disabled", "User account is disabled")
 	case errors.Is(err, auth.ErrDeviceLoginPurpose):
@@ -396,7 +434,7 @@ func (h *AuthHandler) HandleDeviceApprove(w http.ResponseWriter, r *http.Request
 		UserCode:    req.Code,
 	}, userID)
 	if err != nil {
-		writeAPIError(w, err)
+		writeAPIError(w, v1DeviceDecisionError(err))
 		return
 	}
 
@@ -426,7 +464,7 @@ func (h *AuthHandler) HandleDeviceApproveHandoff(w http.ResponseWriter, r *http.
 		UserCode:    req.Code,
 	}, scope.UserID, scope.ProfileID)
 	if err != nil {
-		writeAPIError(w, err)
+		writeAPIError(w, v1DeviceDecisionError(err))
 		return
 	}
 
@@ -456,7 +494,7 @@ func (h *AuthHandler) HandleDeviceDeny(w http.ResponseWriter, r *http.Request) {
 		UserCode:    req.Code,
 	}, userID)
 	if err != nil {
-		writeAPIError(w, err)
+		writeAPIError(w, v1DeviceDecisionError(err))
 		return
 	}
 

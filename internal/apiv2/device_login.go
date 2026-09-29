@@ -12,7 +12,7 @@ import (
 
 // The device-pairing domain: a device without a keyboard opens a pairing
 // request, shows a code, and polls; a logged-in browser looks the request up
-// and approves or denies it. One state machine, six operations plus the
+// and approves or denies it. One state machine, seven operations plus the
 // capability document. The states and their poll/lookup answers:
 //
 //	pending   — waiting for a decision (poll: 200, keep polling)
@@ -20,12 +20,14 @@ import (
 //	            and answers 200 with the token pair, moving to consumed)
 //	consumed  — the device collected its tokens (poll/lookup: 200)
 //	denied    — refused by the approver (poll/lookup: 200)
+//	canceled  — withdrawn by the device before a decision (poll/lookup:
+//	            200); the wire value is spelled as DeviceLogin.Status lists it
 //	expired   — the request outlived its window (poll/lookup: 200 with
 //	            status expired; a decision on it: 410 device_login_expired)
 //
-// A decision on a request that is already consumed, denied, approved by
-// another identity, or of the other purpose is 409 conflict; an unknown
-// request is 404 not_found.
+// A decision on a request that is already consumed, denied, withdrawn by the
+// device, approved by another identity, or of the other purpose is 409
+// conflict; an unknown request is 404 not_found.
 
 // TokenPair is the credential response login, setup, signup and device poll
 // share. Every response carrying it is Cache-Control: no-store.
@@ -44,6 +46,7 @@ func tokenPairFromView(v handlers.TokenPairView) TokenPair {
 type DeviceLoginCapability struct {
 	Capability
 	RemotePlaybackHandoff bool  `json:"remote_playback_handoff" doc:"Whether approve-handoff (remote playback pairing) is supported" example:"true"`
+	Cancel                bool  `json:"cancel" doc:"Whether a device can withdraw its pending request with cancelDeviceLogin" example:"true"`
 	ProtocolVersions      []int `json:"protocol_versions" doc:"Pairing protocol versions this server speaks" example:"[2]"`
 }
 
@@ -96,7 +99,7 @@ type GetDeviceLoginInput struct {
 
 // DeviceLogin is the pairing request as the approver sees it.
 type DeviceLogin struct {
-	Status         string   `json:"status" enum:"pending,approved,denied,consumed,expired" doc:"Current state; see the domain notes" example:"pending"`
+	Status         string   `json:"status" enum:"pending,approved,denied,consumed,expired,cancelled" doc:"Current state; see the domain notes" example:"pending"` //nolint:misspell // #1682's state name, spelled like the request and task states
 	UserCode       string   `json:"user_code" doc:"User code; empty once the request is no longer decidable" example:"ABCD-1234"`
 	MatchCode      string   `json:"match_code" doc:"Confirmation code shown on the device" example:"42"`
 	DeviceName     string   `json:"device_name" doc:"Device name the request was opened with" example:"Living room TV"`
@@ -122,7 +125,7 @@ type PollDeviceLoginInput struct {
 // DeviceLoginPoll is the poll answer. Tokens are present exactly once, on the
 // poll that collects an approved request.
 type DeviceLoginPoll struct {
-	Status           string     `json:"status" enum:"pending,approved,denied,consumed,expired" doc:"State after this poll; approved carries tokens" example:"pending"`
+	Status           string     `json:"status" enum:"pending,approved,denied,consumed,expired,cancelled" doc:"State after this poll; approved carries tokens" example:"pending"` //nolint:misspell // #1682's state name, spelled like the request and task states
 	PollAfter        int        `json:"poll_after" doc:"Seconds to wait before polling again" example:"5"`
 	Tokens           *TokenPair `json:"tokens,omitempty" doc:"The issued credentials; present only when status is approved"`
 	ProfileID        string     `json:"profile_id" doc:"Profile the temporary session is bound to; empty for a full login" example:""`
@@ -134,6 +137,24 @@ type DeviceLoginPoll struct {
 // DeviceLoginPollOutput is the pollDeviceLogin response.
 type DeviceLoginPollOutput struct {
 	Body DeviceLoginPoll
+}
+
+// CancelDeviceLoginInput is the device withdrawing its own request.
+type CancelDeviceLoginInput struct {
+	Body struct {
+		DeviceCode string `json:"device_code" minLength:"1" doc:"The device code from startDeviceLogin" example:"d3v1c3c0d3"`
+	}
+}
+
+// DeviceLoginCancellation is the state the request is in after a cancel. A
+// pending request is withdrawn; any other request keeps its state.
+type DeviceLoginCancellation struct {
+	Status string `json:"status" enum:"cancelled,approved,denied,consumed,expired" doc:"State after the cancel; only a pending request changes" example:"cancelled"` //nolint:misspell // #1682's state name, spelled like the request and task states
+}
+
+// DeviceLoginCancellationOutput is the cancelDeviceLogin response.
+type DeviceLoginCancellationOutput struct {
+	Body DeviceLoginCancellation
 }
 
 // DecideDeviceLoginInput identifies the request being approved or denied by
@@ -177,6 +198,13 @@ func registerDeviceLogin(reg *Registry) {
 		"Approve a pairing request as the caller's account.")
 	approve.Errors = []int{http.StatusNotFound, http.StatusConflict, http.StatusGone}
 	Register(reg, Operation{Operation: approve, RetrySafety: RetrySafetyDomainIdentity, Class: ClassAuthenticated, ServiceBacked: true}, reg.approveDeviceLogin)
+	cancel := humaOp(http.MethodPost, Prefix+"/auth/device/cancel", "cancelDeviceLogin", "device-login",
+		"Withdraw a pending pairing request from the device that opened it.")
+	cancel.Errors = []int{http.StatusNotFound}
+	Register(reg, Operation{
+		Operation: cancel, RetrySafety: RetrySafetyNaturalIdempotent,
+		Class: ClassPublic, ServiceBacked: true, RateLimitBucket: bucketDevicePoll,
+	}, reg.cancelDeviceLogin)
 	handoff := humaOp(http.MethodPost, Prefix+"/auth/device/approve-handoff", "approveDeviceHandoff", "device-login",
 		"Approve a remote-playback pairing request for the caller's verified profile.")
 	handoff.Errors = []int{http.StatusConflict, http.StatusGone}
@@ -216,6 +244,7 @@ func (reg *Registry) getDeviceLoginCapability(_ context.Context, _ *CapabilityIn
 		Body: DeviceLoginCapability{
 			Capability:            Capability{State: state},
 			RemotePlaybackHandoff: true,
+			Cancel:                true,
 			ProtocolVersions:      []int{2},
 		},
 	}, nil
@@ -310,6 +339,17 @@ func (reg *Registry) pollDeviceLogin(ctx context.Context, in *PollDeviceLoginInp
 		}
 	}
 	return &DeviceLoginPollOutput{Body: out}, nil
+}
+
+func (reg *Registry) cancelDeviceLogin(ctx context.Context, in *CancelDeviceLoginInput) (*DeviceLoginCancellationOutput, error) {
+	if reg.deps.Devices == nil {
+		return nil, unavailable("device login")
+	}
+	d, err := reg.deps.Devices.CancelDeviceLogin(ctx, in.Body.DeviceCode)
+	if err != nil {
+		return nil, deviceProblem(err)
+	}
+	return &DeviceLoginCancellationOutput{Body: DeviceLoginCancellation{Status: d.Status}}, nil
 }
 
 func (reg *Registry) approveDeviceLogin(ctx context.Context, in *DecideDeviceLoginInput) (*DeviceLoginDecisionOutput, error) {
