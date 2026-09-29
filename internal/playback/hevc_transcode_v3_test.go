@@ -109,6 +109,26 @@ func TestPlanPlaybackV3HEVCCheckedAfterServerCapAudioReserve(t *testing.T) {
 	}
 }
 
+// A same-size conversion to HEVC is also capped at the source's bits counted
+// as HEVC: an 8 Mbps H.264 source that must be re-encoded for an HEVC-only
+// client with a 6 Mbps decoder gets a 4.8 Mbps HEVC stream.
+func TestPlanPlaybackV3HEVCConversionAtSourceSizeIsCapped(t *testing.T) {
+	input := hevcTranscodePlannerInputV3(true, true, true)
+	file := *input.RequestedFile
+	file.CodecVideo, file.Bitrate = "h264", 8_200
+	file.VideoTracks = []models.VideoTrack{{Codec: "h264", Profile: "High", Width: 1920, Height: 1080, FrameRate: "24/1", Bitrate: 8_000, BitDepth: 8, VideoRange: "SDR"}}
+	input.RequestedFile, input.EffectiveFile = &file, &file
+	input.Request.QualityPreference = QualityOriginalV3
+	hls := input.Request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
+	hls.VideoCodecs = []string{"hevc"}
+	input.Request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
+	input.Request.Capabilities.VideoDecode[0].MaxBitrateKbps = 6_000
+	result := PlanPlaybackV3(input)
+	if result.Plan == nil || result.TargetVideoCodec != "hevc" || result.TargetBitrateKbps != 4_800 {
+		t.Fatalf("plan = %s codec %q bitrate %d, want HEVC at 4800", ExplainPlannerResultV3(result), result.TargetVideoCodec, result.TargetBitrateKbps)
+	}
+}
+
 func TestPlanPlaybackV3HEVCFailureFallsBackToH264(t *testing.T) {
 	input := hevcTranscodePlannerInputV3(true, true, true)
 	first := PlanPlaybackV3(input)

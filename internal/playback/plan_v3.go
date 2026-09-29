@@ -1052,11 +1052,11 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	// h264BitrateKbps is kept for the H.264 fallback after a failed HEVC attempt.
 	h264BitrateKbps := quality.BitrateKbps
 	if input.Settings.AllowHEVCEncoding && hlsRegistry.Available(TransformationVideoToHEVCV3) {
-		// The quality policy bounds a scaled encode by the source's bits
-		// counted as H.264; HEVC output needs no more than them counted as
-		// HEVC, and the decoder is checked against that HEVC target.
+		// HEVC output needs no more than the source's bits counted as HEVC,
+		// whether it scales the source or only converts it at its own size,
+		// and the decoder is checked against that HEVC target.
 		hevcQuality := quality
-		if sourceKbps := sourceEquivalentKbps(source, transcodeCodecHEVC); sourceKbps > 0 && hevcQuality.BitrateKbps > 0 && !hevcQuality.PreservesSource {
+		if sourceKbps := sourceEquivalentKbps(source, transcodeCodecHEVC); sourceKbps > 0 && hevcQuality.BitrateKbps > 0 {
 			hevcQuality.BitrateKbps = min(hevcQuality.BitrateKbps, sourceKbps)
 		}
 		if hlsHEVCOutputSupportedV3(input.Request, hevcQuality, source) {

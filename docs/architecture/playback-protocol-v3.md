@@ -1299,9 +1299,11 @@ remain accepted for stored/default preferences and size their output like
 
 `auto` picks its resolution from the shared bitrate ladder
 ([quality-ladder.md](quality-ladder.md)): 80% of the bandwidth estimate or cap
-earns a class for the source's frame rate. Automatic and plain-label targets fit
-the source into that class's 16:9 box, so a 3840x1600 film at the 1080p class
-streams at 1920x800, and encode at the class bitrate: 20000 kbps for 2160p, 6000
+earns a class for the source's frame rate. A source whose height already fits
+the class is sent as-is when its bitrate allows, even when it is wider than the
+16:9 box (a 2560x1080 film at the 1080p class). Otherwise automatic and
+plain-label targets fit the source into that class's 16:9 box, so a 3840x1600
+film at the 1080p class streams at 1920x800, and encode at the class bitrate: 20000 kbps for 2160p, 6000
 for 1080p, 2000 for 720p, 1800 for 540p and 1500 for 480p, never above that 80%
 budget. A source that already fits the class but whose bitrate exceeds 80% of the
 bandwidth estimate is re-encoded at its own size within that budget rather than
@@ -1309,7 +1311,8 @@ sent as-is; a source of unknown bitrate counts as needing its class's full
 bitrate. Under a cap, a source over the cap itself is re-encoded, and so is a
 video source of unknown bitrate, since it cannot be shown to fit. A transcode
 also never targets more than the source's own bitrate, counted in the output
-codec (H.264, or HEVC when the planner chooses it).
+codec (H.264 for a scaled encode, or HEVC for any encode when the planner
+chooses HEVC).
 
 Registry availability is deliberately *not* consulted when building the menu: a
 capability check there could trigger lazy node fetches that a source-preserving
