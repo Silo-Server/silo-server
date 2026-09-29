@@ -7,20 +7,37 @@
 ALTER TABLE public.media_request_follows ADD COLUMN request_id text;
 
 -- A title has one open request at a time, so the request open when a follow
--- was made is the title's latest request created before it. A follow whose
--- request is gone (a failed request its requester replaced) goes to the
--- title's open request, as a new request takes such follows over.
+-- was made is the title's latest request created before it, provided that
+-- request could still have been open then: still active, or completed no
+-- earlier than the follow. Otherwise the follow's own request is gone (a failed
+-- request its requester replaced) and the follow goes to the title's open
+-- request, as a new request takes such follows over; with none open, it stays
+-- with a failed request for the title's next request to take over.
 UPDATE public.media_request_follows f
-SET request_id = coalesce(
-    (SELECT r.id FROM public.media_requests r
-     WHERE r.media_type = f.media_type AND r.provider = 'tmdb' AND r.tmdb_id = f.tmdb_id
-       AND r.created_at <= f.created_at
-     ORDER BY r.created_at DESC, r.id DESC
-     LIMIT 1),
-    (SELECT r.id FROM public.media_requests r
-     WHERE r.media_type = f.media_type AND r.provider = 'tmdb' AND r.tmdb_id = f.tmdb_id
-       AND r.outcome = 'active' AND r.status <> 'completed'
-     LIMIT 1));
+SET request_id = CASE
+    WHEN made_for.outcome = 'active'
+     AND (made_for.status <> 'completed' OR made_for.completed_at >= f.created_at)
+        THEN made_for.id
+    ELSE coalesce(
+        (SELECT r.id FROM public.media_requests r
+         WHERE r.media_type = f.media_type AND r.provider = 'tmdb' AND r.tmdb_id = f.tmdb_id
+           AND r.outcome = 'active' AND r.status <> 'completed'
+         LIMIT 1),
+        CASE WHEN made_for.outcome = 'failed' THEN made_for.id END)
+    END
+FROM (
+    SELECT DISTINCT ON (f2.media_type, f2.tmdb_id, f2.user_id, f2.profile_id)
+        f2.media_type, f2.tmdb_id, f2.user_id, f2.profile_id,
+        r.id, r.outcome, r.status, r.completed_at
+    FROM public.media_request_follows f2
+    LEFT JOIN public.media_requests r
+      ON r.media_type = f2.media_type AND r.provider = 'tmdb' AND r.tmdb_id = f2.tmdb_id
+     AND r.created_at <= f2.created_at
+    ORDER BY f2.media_type, f2.tmdb_id, f2.user_id, f2.profile_id, r.created_at DESC NULLS LAST, r.id DESC
+) made_for
+WHERE made_for.media_type = f.media_type AND made_for.tmdb_id = f.tmdb_id
+  AND made_for.user_id = f.user_id AND made_for.profile_id = f.profile_id;
+
 -- A follow no request is left to tell has nothing to wait for.
 DELETE FROM public.media_request_follows WHERE request_id IS NULL;
 

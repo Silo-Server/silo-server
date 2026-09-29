@@ -586,6 +586,68 @@ func TestNewRequestAdoptsFollowsOfFailedRequestDatabase(t *testing.T) {
 	}
 }
 
+// An unfollow that runs while a new request takes over a failed request's
+// follows waits for it and removes the moved follow, rather than returning
+// with the profile still following the new request.
+func TestUnfollowDuringAdoptionDatabase(t *testing.T) {
+	repo, pool := lifecycleTestRepository(t)
+	ctx := t.Context()
+	follower := Viewer{UserID: 1, ProfileID: "profile-a"}
+	insertLifecycleRequest(t, repo, "failed", 5, 979, StatusApproved)
+	if err := repo.FollowTitle(ctx, MediaTypeMovie, 979, follower); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE media_requests SET outcome = 'failed' WHERE id = 'failed'`); err != nil {
+		t.Fatal(err)
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	var adopter int
+	if err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&adopter); err != nil {
+		t.Fatal(err)
+	}
+	retry, err := repo.insertRequest(ctx, tx, CreateRequestRecord{
+		ID:        "retry",
+		Input:     CreateRequestInput{MediaType: MediaTypeMovie, TMDBID: 979, Title: "Retry"},
+		Requester: Viewer{UserID: 6, ProfileID: "profile"},
+	}, StatusPending, OutcomeActive, time.Now(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := adoptTitleFollows(ctx, tx, retry); err != nil {
+		t.Fatal(err)
+	}
+
+	unfollowed := make(chan error, 1)
+	go func() { unfollowed <- repo.UnfollowTitle(ctx, MediaTypeMovie, 979, follower) }()
+	for blocked := false; !blocked; {
+		select {
+		case err := <-unfollowed:
+			t.Fatalf("unfollow finished while the adoption was open: err = %v, want it to wait", err)
+		default:
+		}
+		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)))`, adopter).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		}
+		if !blocked {
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-unfollowed; err != nil {
+		t.Fatal(err)
+	}
+	if followers, err := titleFollowers(ctx, pool, MediaTypeMovie, 979); err != nil || len(followers) != 0 {
+		t.Fatalf("follows after the unfollow = %+v, err = %v; want none", followers, err)
+	}
+}
+
 // A follow racing a withdrawal must not outlive it: the follow waits for the
 // withdrawal to commit, sees the request closed, and inserts nothing, so the
 // follow cleanup that ran with the withdrawal leaves no stray follower behind.

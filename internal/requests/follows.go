@@ -177,19 +177,26 @@ func forgetTitleFollows(ctx context.Context, exec requestExecutor, closed *Reque
 // requests, so a follow survives its request failing. The caller creates the
 // request in the same transaction, before deleting any failed request it
 // replaces.
+//
+// The follows move in place: an UnfollowTitle that waited on a moved row
+// re-checks the moved row, still on the title and the profile, and deletes it,
+// where a delete and re-insert would leave it a row it cannot see.
 func adoptTitleFollows(ctx context.Context, exec requestExecutor, req *Request) error {
+	const failed = `SELECT id FROM media_requests
+		WHERE media_type = $1 AND provider = 'tmdb' AND tmdb_id = $2 AND outcome = 'failed'`
+	// A profile that followed two failed requests keeps its earliest follow.
 	if _, err := exec.Exec(ctx, `
-		WITH failed AS (
-			SELECT id FROM media_requests
-			WHERE media_type = $1 AND provider = 'tmdb' AND tmdb_id = $2 AND outcome = 'failed'
-		), moved AS (
-			DELETE FROM media_request_follows WHERE request_id IN (SELECT id FROM failed)
-			RETURNING user_id, profile_id, created_at
-		)
-		INSERT INTO media_request_follows (media_type, tmdb_id, user_id, profile_id, request_id, created_at)
-		SELECT $1, $2, user_id, profile_id, $3, min(created_at) FROM moved
-		GROUP BY user_id, profile_id
-		ON CONFLICT (user_id, profile_id, request_id) DO NOTHING
+		DELETE FROM media_request_follows f
+		USING media_request_follows keep
+		WHERE f.request_id IN (`+failed+`) AND keep.request_id IN (`+failed+`)
+		  AND keep.user_id = f.user_id AND keep.profile_id = f.profile_id
+		  AND (keep.created_at, keep.request_id) < (f.created_at, f.request_id)
+	`, req.MediaType, req.TMDBID); err != nil {
+		return fmt.Errorf("adopt title follows: %w", err)
+	}
+	if _, err := exec.Exec(ctx, `
+		UPDATE media_request_follows SET request_id = $3
+		WHERE request_id IN (`+failed+`)
 	`, req.MediaType, req.TMDBID, req.ID); err != nil {
 		return fmt.Errorf("adopt title follows: %w", err)
 	}
