@@ -2076,6 +2076,7 @@ func TestScaleFiltersShareTargetHeightParsing(t *testing.T) {
 	}{
 		{"2160p", "2160"}, {"1080p", "1080"}, {"720p", "720"}, {"540p", "540"},
 		{"480p", "480"}, {"420p", "420"}, {"328p", "328"}, {"800p", "800"}, {" 1080P ", "1080"},
+		{"66p", "66"}, // a very wide source fitted into the 480p box
 	} {
 		if got, want := resolutionToScale(tc.res), "scale=-2:"+tc.height; got != want {
 			t.Errorf("resolutionToScale(%q) = %q, want %q", tc.res, got, want)
@@ -2093,7 +2094,7 @@ func TestScaleFiltersShareTargetHeightParsing(t *testing.T) {
 			t.Errorf("videoToolboxScaleDimensions(%q) = %s:%s, want -2:%s", tc.res, w, h, tc.height)
 		}
 	}
-	for _, res := range []string{"", "4k", "original", "817p", "8640p", "100p", "p"} {
+	for _, res := range []string{"", "4k", "original", "817p", "8640p", "0p", "-2p", "p"} {
 		if got := resolutionToScale(res); got != "" {
 			t.Errorf("resolutionToScale(%q) = %q, want no scale", res, got)
 		}

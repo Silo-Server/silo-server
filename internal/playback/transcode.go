@@ -1815,9 +1815,10 @@ func resolutionToScale(res string) string {
 
 // scaleTargetHeight parses a target resolution label into the output height
 // the scale filters produce: a ladder label such as "1080p" or an exact
-// box-fit height such as "800p" for a cinema-aspect download. Labels outside
-// the even 144-4320 range leave the source unscaled, as unknown labels always
-// have.
+// box-fit height such as "800p" for a cinema-aspect download, or the short
+// frame an unusually wide source fits to. Odd heights, which 4:2:0 output
+// cannot take, and heights above 4320 leave the source unscaled, as unknown
+// labels always have.
 func scaleTargetHeight(res string) (int, bool) {
 	label := strings.ToLower(strings.TrimSpace(res))
 	digits, ok := strings.CutSuffix(label, "p")
@@ -1825,7 +1826,7 @@ func scaleTargetHeight(res string) (int, bool) {
 		return 0, false
 	}
 	height, err := strconv.Atoi(digits)
-	if err != nil || height < 144 || height > 4320 || height%2 != 0 {
+	if err != nil || height < 2 || height > 4320 || height%2 != 0 {
 		return 0, false
 	}
 	return height, true
