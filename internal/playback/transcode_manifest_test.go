@@ -439,6 +439,35 @@ func TestCanGenerateSyntheticManifestBoundsSegmentCount(t *testing.T) {
 	}
 }
 
+func TestHEVCTranscodeManifestAndProgressUseFMP4Segments(t *testing.T) {
+	dir := t.TempDir()
+	opts := TranscodeOpts{
+		OutputDir: dir, TargetCodecVideo: "hevc", TargetCodecAudio: "aac",
+		SourceVideoCodec: "av1", SegmentDuration: 2, TotalDuration: 8,
+	}
+	session := &TranscodeSession{outputDir: dir, opts: opts, running: true}
+	manifest := session.GenerateFullManifest("", "")
+	text := string(manifest)
+	for _, want := range []string{`#EXT-X-MAP:URI="init.mp4"`, "seg_00000.m4s", "seg_00003.m4s"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("HEVC manifest missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, ".ts") {
+		t.Fatalf("HEVC manifest exposed MPEG-TS segment: %s", text)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "stream.m3u8"), manifest, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "seg_00000.m4s"), []byte("segment"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	progress := session.SegmentProgress(time.Now())
+	if progress.ProducedCount != 1 || progress.ProducedHead != 0 {
+		t.Fatalf("HEVC segment progress = %#v, want one produced fMP4 segment", progress)
+	}
+}
+
 func TestBuildPlaybackManifest_UnknownDurationRejectsBrokenManifest(t *testing.T) {
 	tempDir := t.TempDir()
 	manifest := strings.Join([]string{

@@ -300,3 +300,56 @@ func TestCanWriteMarkerUpdateLetsChromaprintRescoreDownward(t *testing.T) {
 		t.Error("a lower-confidence chapter result must not replace a higher one")
 	}
 }
+
+// Credits detectors rank like their intro counterparts: chapters above
+// version copies above season-scored audio above video alone.
+func TestCanWriteMarkerUpdateRanksCreditsDetectors(t *testing.T) {
+	payload := func(algorithm string, confidence, start, end float64) SegmentPayload {
+		return SegmentPayload{Start: new(start), End: new(end), Source: models.MarkerSourceScanner,
+			Confidence: new(confidence), Algorithm: algorithm}
+	}
+	ranks := []string{"credits-chapter:v1", "credits-version-copy:v1", "credits-audio:video:v1", "credits-audio:v1", "credits-video:v1"}
+	for i := 1; i < len(ranks); i++ {
+		if scannerAlgorithmPriority(ranks[i-1]) <= scannerAlgorithmPriority(ranks[i]) {
+			t.Fatalf("%s must outrank %s", ranks[i-1], ranks[i])
+		}
+	}
+	cases := []struct {
+		name               string
+		existing, incoming SegmentPayload
+		want               bool
+	}{
+		{"chapter over audio", payload("credits-audio:v1", 0.9, 1300, 1400), payload("credits-chapter:v1", 0.95, 1310, 1400), true},
+		{"audio cannot replace chapter", payload("credits-chapter:v1", 0.95, 1310, 1400), payload("credits-audio:v1", 0.9, 1300, 1400), false},
+		{"audio cannot replace version copy", payload("credits-version-copy:v1", 0.85, 1310, 1400), payload("credits-audio:video:v1", 0.95, 1300, 1400), false},
+		{"video alone cannot replace audio", payload("credits-audio:v1", 0.65, 1300, 1400), payload("credits-video:v1", 0.6, 1290, 1400), false},
+		{"audio rescored lower", payload("credits-audio:v1", 0.9, 1300, 1400), payload("credits-audio:v1", 0.65, 1300, 1400), true},
+		{"plain audio replaces video-refined audio", payload("credits-audio:video:v1", 0.95, 1305, 1400), payload("credits-audio:v1", 0.65, 1300, 1400), true},
+		{"identical audio result is a no-op", payload("credits-audio:v1", 0.9, 1300, 1400), payload("credits-audio:v1", 0.9, 1300.2, 1400), false},
+	}
+	for _, tc := range cases {
+		if got := CanWriteMarkerUpdate(tc.existing, tc.incoming); got != tc.want {
+			t.Errorf("%s: CanWriteMarkerUpdate = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestSameSeasonScoredVersion(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want bool
+	}{
+		{"chromaprint:v4", "chromaprint:dialogue:v4", true}, //nolint:misspell // Persisted algorithm identifier.
+		{"chromaprint:v4", "chromaprint:v3", false},
+		{"credits-audio:v1", "credits-audio:video:v1", true},
+		{"credits-audio:v1", "credits-audio:v2", false},
+		{"credits-audio:v1", "chromaprint:v1", false},
+		{"credits-chapter:v1", "credits-chapter:v1", false},
+		{"credits-video:v1", "credits-audio:v1", false},
+	}
+	for _, tc := range cases {
+		if got := sameSeasonScoredVersion(tc.a, tc.b); got != tc.want {
+			t.Errorf("sameSeasonScoredVersion(%q, %q) = %v, want %v", tc.a, tc.b, got, tc.want)
+		}
+	}
+}

@@ -74,11 +74,8 @@ func (h *CollectionHandler) ListPersonalCollections(ctx context.Context, userID 
 	groups := <-groupsCh
 
 	resp := PersonalCollectionListView{
-		Collections: make([]PersonalCollectionView, 0, len(collections)),
+		Collections: h.collectionViews(ctx, store, userID, collections),
 		Groups:      make([]CollectionGroupView, 0, len(groups)),
-	}
-	for _, c := range collections {
-		resp.Collections = append(resp.Collections, h.collectionView(ctx, c))
 	}
 	for _, g := range groups {
 		resp.Groups = append(resp.Groups, collectionGroupView(g))
@@ -166,7 +163,7 @@ func (h *CollectionHandler) CreatePersonalCollection(ctx context.Context, cmd Pe
 			collection = refreshed
 		}
 	}
-	return h.collectionView(ctx, *collection), nil
+	return h.collectionView(ctx, store, cmd.UserID, *collection), nil
 }
 
 // ReorderPersonalCollections replaces the order of one group's collections.
@@ -295,11 +292,32 @@ func (h *CollectionHandler) ReorderCollectionGroups(ctx context.Context, userID 
 	return nil
 }
 
-// collectionView renders a stored collection with its poster presigned.
-func (h *CollectionHandler) collectionView(ctx context.Context, c userstore.Collection) PersonalCollectionView {
-	resp := toCollectionResponse(c)
-	resp.PosterURL = h.presignUserCollectionPoster(ctx, c.PosterURL)
-	return resp
+// collectionViews renders stored collections with their posters presigned and
+// item_count set to the members the acting profile can see.
+func (h *CollectionHandler) collectionViews(ctx context.Context, store userstore.UserStore, userID int, collections []userstore.Collection) []PersonalCollectionView {
+	var counts map[string]int
+	if userstore.HasCatalogSQLState(store) {
+		sources := make([]catalog.PersonalCollectionDefinition, 0, len(collections))
+		for _, c := range collections {
+			sources = append(sources, catalog.PersonalCollectionDefinition{ID: c.ID, CollectionType: c.CollectionType, QueryDefinition: c.QueryDefinition, DisplayQueryDefinition: c.DisplayQueryDefinition})
+		}
+		counts = visiblePersonalCollectionCounts(ctx, h.Executor, userID, sources, AccessFilterFromContext(ctx, ""))
+	}
+	views := make([]PersonalCollectionView, 0, len(collections))
+	for _, c := range collections {
+		if n, ok := counts[c.ID]; ok {
+			c.ItemCount = n
+		}
+		resp := toCollectionResponse(c)
+		resp.PosterURL = h.presignUserCollectionPoster(ctx, c.PosterURL)
+		views = append(views, resp)
+	}
+	return views
+}
+
+// collectionView renders one stored collection as collectionViews does.
+func (h *CollectionHandler) collectionView(ctx context.Context, store userstore.UserStore, userID int, c userstore.Collection) PersonalCollectionView {
+	return h.collectionViews(ctx, store, userID, []userstore.Collection{c})[0]
 }
 
 func collectionGroupView(g userstore.CollectionGroup) CollectionGroupView {

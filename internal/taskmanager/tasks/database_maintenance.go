@@ -48,7 +48,7 @@ type databaseMaintenanceStepResult struct {
 func NewDatabaseMaintenanceTask(pool *pgxpool.Pool, steps ...taskmanager.Task) *DatabaseMaintenanceTask {
 	t := &DatabaseMaintenanceTask{}
 	if pool != nil {
-		t.lock = advisoryClusterLock{pool: pool, key: databaseMaintenanceAdvisoryLock}
+		t.lock = advisoryClusterLock{pool: pool, key: databaseMaintenanceAdvisoryLock, name: "database maintenance"}
 	}
 	for _, step := range steps {
 		if step != nil {

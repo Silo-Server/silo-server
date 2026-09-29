@@ -98,6 +98,12 @@ Check it before saving a Watchlist or Favorites preference. The
 all, so it cannot be used to detect the personal-list kinds. The document supports
 `If-None-Match` and returns `304` when the caller's copy is current.
 
+The document's `import_sources` lists the sources a new imported collection can come
+from (`mdblist`, `tmdb`, `tmdb_list`); it is empty when `imports` is false. Check for
+`tmdb_list` before calling `importTMDBListCollection` (`POST /api/v2/collections/import/tmdb-list`),
+which follows a public TMDB list. The administrator capability document
+(`getAdminCollectionCapabilities`) carries the same field for `importAdminTMDBList`.
+
 ## Library-scoped version lists
 
 `library_id` on `getCatalogItem`, `listCatalogItemVersions`, `listCatalogItemEpisodes`,
@@ -163,6 +169,12 @@ It accepts the browse source identifiers, `q`, `name_prefix`, `type`, rule
 `query_limit` for the complete result traversal. GET accepts the same rule groups
 as a JSON array in `groups` and expresses descending sort as `sort=-field`.
 Unknown rule fields and unsupported operators return `422`.
+
+`name_prefix` matches the start of the key title sorting uses: the sort title,
+or the title when no sort title is set. "The Hobbit" with sort title
+"Hobbit, The" matches `h`, not `t` or `the`. Jellyfin's `NameStartsWith`
+follows the same rule. The one exception is recently added TV, which also
+matches an episode's own title so episode cards can be found by name.
 
 Both operations return shared catalog cards, `page.next_cursor`, `page.has_more`,
 `total`, `total_exact`, and `window_cursor`. Send `next_cursor` unchanged for the

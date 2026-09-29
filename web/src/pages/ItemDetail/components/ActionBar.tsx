@@ -12,13 +12,17 @@ import {
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router";
 import {
+  type LucideIcon,
   Heart,
   Plus,
   Check,
   Captions,
   Download,
+  ExternalLink,
   FolderPlus,
+  Inbox,
   Info,
+  Loader2,
   MoreVertical,
   Play,
   RefreshCw,
@@ -39,7 +43,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { FileVersion, PlaybackVariant } from "@/api/types";
-import type { RefreshItemMetadataMode } from "@/hooks/queries/items";
+import type { RedetectMarkersKind, RefreshItemMetadataMode } from "@/hooks/queries/items";
 import type {
   PlayerSubtitleTrackSignature,
   PrePlaySubtitleSelection,
@@ -47,6 +51,7 @@ import type {
 } from "@/player/types";
 import RefreshMetadataDialog from "@/components/RefreshMetadataDialog";
 import { MarkerEditor } from "@/components/markers/MarkerEditor";
+import RedetectMarkersDialog from "@/components/markers/RedetectMarkersDialog";
 import StarRating from "@/components/StarRating";
 import { MediaActionIcon } from "@/components/mediaActionIcons";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
@@ -96,6 +101,34 @@ function DetailOverflowMenuItem({
   );
 }
 
+/** Drawn like the Play pill in each of its states: enabled, disabled, or in flight. */
+function PrimaryActionButton({ action }: { action: ActionBarPrimaryAction }) {
+  const inert = Boolean(action.disabled || action.pending);
+  const variant = action.variant ?? "default";
+  const Icon = action.pending ? Loader2 : action.icon;
+  const interactiveClass = inert
+    ? ""
+    : `${variant === "default" ? responsivePlayActionClass : responsivePrimaryActionClass} cursor-pointer shadow-md`;
+
+  return (
+    <Button
+      variant={variant}
+      onClick={action.onClick}
+      disabled={inert}
+      aria-busy={action.pending || undefined}
+      className={`${interactiveClass} relative h-11 gap-2.5 overflow-hidden rounded-full px-8 text-[15px] font-bold tracking-wide`}
+    >
+      {Icon && (
+        <Icon
+          aria-hidden="true"
+          className={`size-[18px] ${action.pending ? "animate-spin" : ""}`}
+        />
+      )}
+      {action.label}
+    </Button>
+  );
+}
+
 /** The Watch Together group in the overflow menu. */
 export interface ActionBarWatchTogether {
   onStartParty: () => void;
@@ -103,10 +136,48 @@ export interface ActionBarWatchTogether {
   liveRoom?: { code: string; onSuggest: () => void; onPlay?: () => void };
 }
 
+/**
+ * Takes the Play pill's place on a title that cannot be played here, such as
+ * one not in the library yet. A state the viewer cannot act on ("Requested",
+ * "In the library") is a disabled primary action rather than a badge.
+ */
+export interface ActionBarPrimaryAction {
+  label: string;
+  icon?: LucideIcon;
+  onClick?: () => void;
+  /** Shows a spinner and blocks the action while it is in flight. */
+  pending?: boolean;
+  disabled?: boolean;
+  /** Defaults to the Play pill's styling. */
+  variant?: "default" | "glass";
+}
+
+/** A labelled glass pill after the primary action. */
+export interface ActionBarSecondaryAction {
+  /** Stable key, since a toggle's label changes with its state. */
+  id: string;
+  label: string;
+  icon?: LucideIcon;
+  onClick: () => void;
+  pending?: boolean;
+  /** Set on a toggle, such as following a title. */
+  pressed?: boolean;
+}
+
+/** An external page for the title, such as IMDb or TMDB. */
+export interface ActionBarLink {
+  label: string;
+  href: string;
+}
+
 export interface ActionBarProps {
   compactMobile?: boolean;
   contentId?: string;
   watchTogether?: ActionBarWatchTogether;
+  /** Replaces the Play action. */
+  primaryAction?: ActionBarPrimaryAction;
+  secondaryActions?: ActionBarSecondaryAction[];
+  links?: ActionBarLink[];
   playHref?: string;
   playLabel?: string;
   playProgress?: number;
@@ -127,8 +198,14 @@ export interface ActionBarProps {
   inWatchlist?: boolean;
   onRefresh?: (mode: RefreshItemMetadataMode) => void;
   isRefreshing?: boolean;
-  onRedetectIntro?: () => void;
-  isRedetectingIntro?: boolean;
+  /** Re-detects local markers; without redetectKind the admin picks intro, credits, or both. */
+  onRedetectMarkers?: (kind: RedetectMarkersKind) => void;
+  /**
+   * Re-detects this one kind directly, without the picker: credits for a movie,
+   * which has no intro, or intro for an episode on a server without redetect-markers.
+   */
+  redetectKind?: "intro" | "credits";
+  isRedetectingMarkers?: boolean;
   onEditMetadata?: () => void;
   onMatchItem?: () => void;
   onSplitItem?: () => void;
@@ -143,6 +220,8 @@ export interface ActionBarProps {
   onSelectVersion?: (version: FileVersion) => void;
   onDownload?: () => void;
   onSearchSubtitles?: () => void;
+  /** Opens the season picker to request seasons the library is missing. */
+  onRequestSeasons?: () => void;
   rating?: number | null;
   onRatingChange?: (rating: number | null) => void;
   qualityPreference?: string | null;
@@ -166,6 +245,9 @@ export default function ActionBar({
   compactMobile = false,
   contentId,
   watchTogether,
+  primaryAction,
+  secondaryActions,
+  links,
   playHref,
   playLabel = "Play",
   playProgress,
@@ -182,8 +264,9 @@ export default function ActionBar({
   inWatchlist = false,
   onRefresh,
   isRefreshing = false,
-  onRedetectIntro,
-  isRedetectingIntro = false,
+  onRedetectMarkers,
+  redetectKind,
+  isRedetectingMarkers = false,
   onEditMetadata,
   onMatchItem,
   onSplitItem,
@@ -197,6 +280,7 @@ export default function ActionBar({
   onSelectVersion,
   onDownload,
   onSearchSubtitles,
+  onRequestSeasons,
   rating,
   onRatingChange,
   audioSelectionMode = "auto",
@@ -228,6 +312,7 @@ export default function ActionBar({
   const scrollFrameRef = useRef<number | null>(null);
   const typeaheadRef = useRef<{ query: string; at: number }>({ query: "", at: 0 });
   const [refreshDialogOpen, setRefreshDialogOpen] = useState(false);
+  const [redetectDialogOpen, setRedetectDialogOpen] = useState(false);
   const [addToCollectionOpen, setAddToCollectionOpen] = useState(false);
   const [markerEditorOpen, setMarkerEditorOpen] = useState(false);
   const showMarkerEditor = canEditMarkers && !!contentId;
@@ -314,6 +399,10 @@ export default function ActionBar({
   const handleRefreshConfirm = (mode: RefreshItemMetadataMode) => {
     setRefreshDialogOpen(false);
     onRefresh?.(mode);
+  };
+  const handleRedetectConfirm = (kind: RedetectMarkersKind) => {
+    setRedetectDialogOpen(false);
+    onRedetectMarkers?.(kind);
   };
   const closeOverflowMenu = useCallback(() => setOverflowOpen(false), []);
   const toggleOverflowMenu = useCallback(() => {
@@ -468,9 +557,9 @@ export default function ActionBar({
     items[nextIndex]?.focus({ preventScroll: true });
   };
   const hasOverflowActions = Boolean(
-    restartHref || onToggleWatchlist || onDownload || onSearchSubtitles,
+    restartHref || onToggleWatchlist || onDownload || onSearchSubtitles || onRequestSeasons,
   );
-  const hasAdminActions = Boolean(isAdmin && (contentId || onRedetectIntro));
+  const hasAdminActions = Boolean(isAdmin && (contentId || onRedetectMarkers));
   const hasMetadataActions = Boolean(
     (canCurateMetadata && (onRefresh || onEditMetadata || onMatchItem || onShowMediaInfo)) ||
     showMarkerEditor,
@@ -520,7 +609,9 @@ export default function ActionBar({
       {/* ── Primary actions ──────────────────────────────────── */}
       <div className="detail-primary-actions flex flex-wrap items-center gap-3">
         {/* ── Play button ────────────────────────────────────── */}
-        {playHref ? (
+        {primaryAction ? (
+          <PrimaryActionButton action={primaryAction} />
+        ) : playHref ? (
           showPlayChoiceDialog ? (
             <Button
               onClick={openPlayChoiceDialog}
@@ -558,6 +649,43 @@ export default function ActionBar({
             {playLabel}
           </Button>
         )}
+
+        {secondaryActions?.map((action) => {
+          const Icon = action.pending ? Loader2 : action.icon;
+          return (
+            <Button
+              key={action.id}
+              variant="glass"
+              onClick={action.onClick}
+              disabled={action.pending}
+              aria-busy={action.pending || undefined}
+              aria-pressed={action.pressed}
+              className={`${responsivePrimaryActionClass} h-11 rounded-full px-5 text-[14px] font-semibold enabled:cursor-pointer`}
+            >
+              {Icon && (
+                <Icon
+                  aria-hidden="true"
+                  className={`size-[18px] ${action.pending ? "animate-spin" : ""}`}
+                />
+              )}
+              {action.label}
+            </Button>
+          );
+        })}
+
+        {links?.map((link) => (
+          <Button
+            key={link.href}
+            asChild
+            variant="glass"
+            className={`${staticGlassActionClass} h-11 cursor-pointer rounded-full px-4 text-[13px] font-semibold tracking-wide`}
+          >
+            <a href={link.href} target="_blank" rel="noreferrer">
+              {link.label}
+              <ExternalLink aria-hidden="true" className="size-3.5 opacity-60" />
+            </a>
+          </Button>
+        ))}
 
         {/* ── Watched toggle ─────────────────────────────────── */}
         {watchedLabel && onToggleWatched && (
@@ -696,6 +824,12 @@ export default function ActionBar({
                   Add Subtitles
                 </DetailOverflowMenuItem>
               )}
+              {onRequestSeasons && (
+                <DetailOverflowMenuItem closeMenu={closeOverflowMenu} onAction={onRequestSeasons}>
+                  <Inbox className="size-4" />
+                  Request Seasons
+                </DetailOverflowMenuItem>
+              )}
               {watchTogether && (
                 <>
                   <div role="separator" className="bg-border -mx-1 my-1 h-px" />
@@ -773,14 +907,22 @@ export default function ActionBar({
                       Refresh Metadata
                     </DetailOverflowMenuItem>
                   )}
-                  {isAdmin && onRedetectIntro && (
+                  {isAdmin && onRedetectMarkers && (
                     <DetailOverflowMenuItem
                       closeMenu={closeOverflowMenu}
-                      disabled={isRedetectingIntro}
-                      onAction={onRedetectIntro}
+                      disabled={isRedetectingMarkers}
+                      onAction={() =>
+                        redetectKind ? onRedetectMarkers(redetectKind) : setRedetectDialogOpen(true)
+                      }
                     >
-                      <RefreshCw className={`size-4 ${isRedetectingIntro ? "animate-spin" : ""}`} />
-                      Re-detect Intro Markers
+                      <RefreshCw
+                        className={`size-4 ${isRedetectingMarkers ? "animate-spin" : ""}`}
+                      />
+                      {redetectKind === "credits"
+                        ? "Re-detect Credits"
+                        : redetectKind === "intro"
+                          ? "Re-detect Intro Markers"
+                          : "Re-detect Markers"}
                     </DetailOverflowMenuItem>
                   )}
                   {canCurateMetadata && onEditMetadata && (
@@ -855,6 +997,14 @@ export default function ActionBar({
           onConfirm={handleRefreshConfirm}
           isPending={isRefreshing}
         />
+        {isAdmin && onRedetectMarkers && !redetectKind && (
+          <RedetectMarkersDialog
+            open={redetectDialogOpen}
+            onOpenChange={setRedetectDialogOpen}
+            onConfirm={handleRedetectConfirm}
+            isPending={isRedetectingMarkers}
+          />
+        )}
         {contentId && (
           <AddToCollectionDialog
             open={addToCollectionOpen}

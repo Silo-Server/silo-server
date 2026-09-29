@@ -24,6 +24,7 @@ export const ADMIN_SETTINGS_PAGE_IDS = [
   "library",
   "playback",
   "downloads",
+  "requests",
   "providers",
   "watch-sync",
   "ai",
@@ -294,7 +295,7 @@ function buildTiles(input: SettingsOverviewInput): OverviewTile[] {
         ? "Saved changes apply after a restart"
         : transcodeEnabled
           ? join([transcodeMode, renderDevice])
-          : "Clients only get what they can already play",
+          : "Video plays as-is; remux and audio conversion still run",
       action: tileAction(transcodeState, "playback"),
     },
     {

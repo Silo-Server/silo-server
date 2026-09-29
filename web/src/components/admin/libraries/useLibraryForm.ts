@@ -141,11 +141,17 @@ export function useLibraryForm({
   const [chapterThumbnailsEnabled, setChapterThumbnailsEnabled] = useState(
     library?.chapter_thumbnails_enabled ?? false,
   );
-  const [introDetectionEnabled, setIntroDetectionEnabled] = useState(
-    library?.intro_detection_enabled ?? true,
+  // A new library follows its type's default until the switch is set:
+  // detection is on for series and mixed libraries and off for movies.
+  const [introDetectionChoice, setIntroDetectionEnabled] = useState<boolean | null>(
+    library ? (library.intro_detection_enabled ?? true) : null,
   );
+  const introDetectionEnabled = introDetectionChoice ?? !settingSupport.creditsOnlyDetection;
   const [trailerKinds, setTrailerKinds] = useState<string[]>(
     library?.trailer_kinds ?? [...PROVIDER_TRAILER_KINDS],
+  );
+  const [realtimeMonitoring, setRealtimeMonitoring] = useState(
+    library?.realtime_monitoring ?? true,
   );
   const [levelChains, setLevelChains] = useState<Record<string, LevelChainItem[]>>({});
   const [chainDirty, setChainDirty] = useState(false);
@@ -271,6 +277,7 @@ export function useLibraryForm({
       chapter_thumbnails_enabled: settingSupport.chapterThumbnails && chapterThumbnailsEnabled,
       intro_detection_enabled: settingSupport.introDetection && introDetectionEnabled,
       trailer_kinds: settingSupport.trailers ? trailerKinds : [],
+      realtime_monitoring: realtimeMonitoring,
     };
 
     if (library) {
@@ -337,6 +344,8 @@ export function useLibraryForm({
     setIntroDetectionEnabled,
     trailerKinds,
     toggleTrailerKind,
+    realtimeMonitoring,
+    setRealtimeMonitoring,
     contentLevels: contentLevelsForType(type),
     activeLevelChains,
     chainLoading,

@@ -12,6 +12,7 @@ interface OverlaySourceItem {
   rating_rt_critic?: number | null;
   rating_rt_audience?: number | null;
   content_rating?: string;
+  advisory_age?: number | null;
   year?: number | null;
   runtime?: number;
   original_language?: string;
@@ -48,6 +49,7 @@ function extract(item: OverlaySourceItem): OverlayData {
     rating_rt_critic: item.rating_rt_critic,
     rating_rt_audience: item.rating_rt_audience,
     content_rating: item.content_rating || undefined,
+    advisory_age: item.advisory_age ?? null,
     year: item.year || null,
     runtime: item.runtime ?? null,
     original_language: item.original_language,

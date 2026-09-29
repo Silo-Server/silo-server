@@ -42,7 +42,7 @@ func editorTestRepository(t *testing.T) *Repository {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	for _, table := range []string{"request_settings", "request_user_limits", "request_integrations"} {
+	for _, table := range []string{"request_settings", "request_user_limits", "request_integrations", "request_routing"} {
 		var count int
 		if err = admin.QueryRow(t.Context(), `SELECT count(*) FROM pg_trigger WHERE tgrelid=$1::regclass AND tgname=$2`, "public."+table, table+"_revision").Scan(&count); err != nil || count != 1 {
 			t.Fatalf("production revision trigger %s: %d %v", table, count, err)

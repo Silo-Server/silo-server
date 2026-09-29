@@ -3026,6 +3026,25 @@
           "groups": {
             "type": "boolean"
           },
+          "import_sources": {
+            "description": "Import sources a new collection can be created from; empty when imports is false",
+            "examples": [
+              [
+                "mdblist",
+                "tmdb",
+                "tmdb_list"
+              ]
+            ],
+            "items": {
+              "enum": [
+                "mdblist",
+                "tmdb",
+                "tmdb_list"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
           "imports": {
             "type": "boolean"
           },
@@ -3050,6 +3069,7 @@
         "required": [
           "groups",
           "imports",
+          "import_sources",
           "artwork",
           "item_reorder",
           "revision",
@@ -6060,6 +6080,25 @@
         ],
         "type": "object"
       },
+      "AdminItemMarkersRedetect": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "default": "all",
+            "description": "intro, credits, or all (both). A movie has credits only: all means credits, and intro is rejected.",
+            "enum": [
+              "intro",
+              "credits",
+              "all"
+            ],
+            "examples": [
+              "credits"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "AdminItemMetadataRefreshInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -6913,6 +6952,50 @@
         "required": [
           "title",
           "url"
+        ],
+        "type": "object"
+      },
+      "AdminMarkerCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "detection_kind_settings": {
+            "description": "Local detection honors the markers.detect_intros and markers.detect_credits server settings, which turn intro and credits detection on or off separately",
+            "type": "boolean"
+          },
+          "movie_credits": {
+            "description": "The item refresh-markers operation, and redetect-markers with kind credits or all, accept movies, and local analysis looks for their end credits on a best-effort basis; redetect-intro stays episode-only, since movies never get intros",
+            "type": "boolean"
+          },
+          "redetect_markers": {
+            "description": "The item redetect-markers operation reruns local detection of the kind requested: intro, credits, or all",
+            "type": "boolean"
+          },
+          "revision": {
+            "description": "Opaque revision of this document",
+            "type": "string"
+          },
+          "state": {
+            "description": "Support and configuration state, not health",
+            "enum": [
+              "available",
+              "disabled",
+              "not_configured",
+              "unsupported"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "movie_credits",
+          "redetect_markers",
+          "detection_kind_settings",
+          "revision",
+          "state",
+          "allowed"
         ],
         "type": "object"
       },
@@ -11223,6 +11306,10 @@
             "description": "Opaque revision of this document",
             "type": "string"
           },
+          "routing": {
+            "description": "Whether request routing is available: the routing rules under /admin/request-routes and the Standard/Advanced routing mode under /admin/request-routing",
+            "type": "boolean"
+          },
           "state": {
             "description": "Support and configuration state, not health",
             "enum": [
@@ -11237,9 +11324,240 @@
         "required": [
           "available",
           "guarded_configuration",
+          "routing",
           "revision",
           "state",
           "allowed"
+        ],
+        "type": "object"
+      },
+      "AdminRequestCounts": {
+        "additionalProperties": false,
+        "properties": {
+          "done": {
+            "description": "Completed requests, and those closed by a decline or cancellation",
+            "examples": [
+              42
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "failed": {
+            "description": "Failed requests; Retry sends them again",
+            "examples": [
+              1
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "in_progress": {
+            "description": "Approved requests on their way to the library",
+            "examples": [
+              5
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "needs_approval": {
+            "description": "Pending requests waiting for an admin",
+            "examples": [
+              3
+            ],
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "needs_approval",
+          "in_progress",
+          "failed",
+          "done"
+        ],
+        "type": "object"
+      },
+      "AdminRequestEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_user_id": {
+            "description": "The account that acted; absent for the server itself",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "actor_username": {
+            "description": "The acting account's username, while the account exists",
+            "examples": [
+              "admin"
+            ],
+            "type": "string"
+          },
+          "created_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "981"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "message": {
+            "description": "A reason or error that came with the event",
+            "examples": [
+              "auto approved"
+            ],
+            "type": "string"
+          },
+          "type": {
+            "description": "What happened: created, approved, retried, submit_deferred, available_in_library, status_\u003cstatus\u003e or outcome_\u003coutcome\u003e; clients show unknown types as they are",
+            "examples": [
+              "approved"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "AdminRequestEventCollection": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/AdminRequestEvent"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "AdminRequestGroupLimit": {
+        "additionalProperties": false,
+        "properties": {
+          "approval_mode": {
+            "description": "inherit uses the server-wide approval setting",
+            "enum": [
+              "inherit",
+              "manual",
+              "auto"
+            ],
+            "examples": [
+              "manual"
+            ],
+            "type": "string"
+          },
+          "group_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "2"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "limit_mode": {
+            "description": "inherit uses the server-wide limit; custom uses max_requests per window_days",
+            "enum": [
+              "inherit",
+              "custom",
+              "unlimited"
+            ],
+            "examples": [
+              "custom"
+            ],
+            "type": "string"
+          },
+          "max_requests": {
+            "examples": [
+              10
+            ],
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "window_days": {
+            "examples": [
+              7
+            ],
+            "format": "int64",
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "group_id",
+          "limit_mode",
+          "max_requests",
+          "window_days",
+          "approval_mode"
+        ],
+        "type": "object"
+      },
+      "AdminRequestGroupLimitBody": {
+        "additionalProperties": false,
+        "properties": {
+          "approval_mode": {
+            "enum": [
+              "inherit",
+              "manual",
+              "auto"
+            ],
+            "type": "string"
+          },
+          "limit_mode": {
+            "enum": [
+              "inherit",
+              "custom",
+              "unlimited"
+            ],
+            "type": "string"
+          },
+          "max_requests": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "window_days": {
+            "format": "int64",
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "limit_mode",
+          "max_requests",
+          "window_days",
+          "approval_mode"
         ],
         "type": "object"
       },
@@ -11480,6 +11798,634 @@
         },
         "type": "object"
       },
+      "AdminRequestRoute": {
+        "additionalProperties": false,
+        "properties": {
+          "conditions": {
+            "$ref": "#/components/schemas/AdminRequestRouteConditions"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "hd": {
+            "$ref": "#/components/schemas/AdminRequestRouteDestination",
+            "description": "Where the HD (1080p) copy goes"
+          },
+          "id": {
+            "description": "Opaque route ID; the fallback's is fallback-movie or fallback-series",
+            "examples": [
+              "fallback-movie"
+            ],
+            "type": "string"
+          },
+          "is_fallback": {
+            "description": "The media type's Everything else: it has no conditions, comes last and cannot be deleted; with no 4K server it makes no 4K copy",
+            "type": "boolean"
+          },
+          "media_type": {
+            "enum": [
+              "movie",
+              "series"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "examples": [
+              "Anime"
+            ],
+            "type": "string"
+          },
+          "position": {
+            "description": "Evaluation order within the media type; the fallback is always last",
+            "format": "int64",
+            "type": "integer"
+          },
+          "skip_uhd": {
+            "description": "Matching titles get no 4K copy at all",
+            "type": "boolean"
+          },
+          "uhd": {
+            "$ref": "#/components/schemas/AdminRequestRouteDestination",
+            "description": "Where the 4K copy goes"
+          }
+        },
+        "required": [
+          "id",
+          "media_type",
+          "position",
+          "name",
+          "enabled",
+          "is_fallback",
+          "conditions",
+          "hd",
+          "uhd",
+          "skip_uhd"
+        ],
+        "type": "object"
+      },
+      "AdminRequestRouteBody": {
+        "additionalProperties": false,
+        "properties": {
+          "conditions": {
+            "$ref": "#/components/schemas/AdminRequestRouteConditions"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "hd": {
+            "$ref": "#/components/schemas/AdminRequestRouteDestination"
+          },
+          "media_type": {
+            "description": "Required on create; ignored on update",
+            "enum": [
+              "movie",
+              "series"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 100,
+            "type": "string"
+          },
+          "skip_uhd": {
+            "type": "boolean"
+          },
+          "uhd": {
+            "$ref": "#/components/schemas/AdminRequestRouteDestination"
+          }
+        },
+        "required": [
+          "enabled",
+          "conditions",
+          "hd",
+          "uhd",
+          "skip_uhd"
+        ],
+        "type": "object"
+      },
+      "AdminRequestRouteConditions": {
+        "additionalProperties": false,
+        "properties": {
+          "anime": {
+            "description": "Match anime (true) or not (false): Japanese animation, and titles TMDB tags anime or an AniDB-based list names",
+            "type": "boolean"
+          },
+          "company_ids": {
+            "description": "TMDB production company IDs (movies)",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "exclude_company_ids": {
+            "description": "Match movies from none of these TMDB companies",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "exclude_genre_ids": {
+            "description": "Match titles with none of these TMDB genre IDs",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "exclude_keyword_ids": {
+            "description": "Match titles with none of these TMDB keyword IDs",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "exclude_network_ids": {
+            "description": "Match series on none of these TMDB networks",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "exclude_origin_countries": {
+            "description": "Match titles from none of these ISO 3166-1 countries",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "exclude_original_languages": {
+            "description": "Match titles whose original language is none of these ISO 639-1 codes",
+            "examples": [
+              [
+                "en"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "exclude_requester_user_ids": {
+            "description": "Match requests from none of these accounts",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "genre_ids": {
+            "description": "TMDB genre IDs",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "keyword_ids": {
+            "description": "TMDB keyword IDs",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "max_content_rating": {
+            "description": "Match titles whose rating is at most this one, by minimum age: the US rating, or the title's own country's when it has none; a title with neither does not match",
+            "examples": [
+              "PG"
+            ],
+            "type": "string"
+          },
+          "network_ids": {
+            "description": "TMDB network IDs (series)",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "origin_countries": {
+            "description": "ISO 3166-1 country codes",
+            "examples": [
+              [
+                "JP"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "original_languages": {
+            "description": "ISO 639-1 codes of the original language",
+            "examples": [
+              [
+                "ja"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "requester_user_ids": {
+            "description": "Accounts whose requests the route applies to",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "year_from": {
+            "description": "First release (or first-air) year, inclusive",
+            "examples": [
+              1980
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "year_to": {
+            "description": "Last release (or first-air) year, inclusive",
+            "examples": [
+              1989
+            ],
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "AdminRequestRouteDestination": {
+        "additionalProperties": false,
+        "properties": {
+          "integration_id": {
+            "description": "The request server; empty when the route sends nothing for this tier",
+            "type": "string"
+          },
+          "overrides": {
+            "additionalProperties": {},
+            "description": "Server settings this route replaces, keyed like the server's plugin config: root_folder, quality_profile_id, tags, series_type, minimum_availability, ...",
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "AdminRequestRouteFacts": {
+        "additionalProperties": false,
+        "properties": {
+          "anime": {
+            "description": "Japanese animation, or a title TMDB tags anime or an AniDB-based list names",
+            "type": "boolean"
+          },
+          "company_ids": {
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "content_rating": {
+            "description": "The title's US rating, or its own country's prefixed with the country code (JP:PG12) when it has none; absent when TMDB has neither",
+            "examples": [
+              "TV-14"
+            ],
+            "type": "string"
+          },
+          "genre_ids": {
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "keyword_ids": {
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "network_ids": {
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "origin_countries": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "original_language": {
+            "type": "string"
+          },
+          "year": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "genre_ids",
+          "keyword_ids",
+          "origin_countries",
+          "network_ids",
+          "company_ids",
+          "anime"
+        ],
+        "type": "object"
+      },
+      "AdminRequestRoutePreviewInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "media_type": {
+            "enum": [
+              "movie",
+              "series"
+            ],
+            "type": "string"
+          },
+          "requester_user_id": {
+            "description": "Route as this account's request; without it, rules for certain accounts do not match",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "tmdb_id": {
+            "description": "TMDB identifier (external, not a Silo ID)",
+            "examples": [
+              129
+            ],
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "media_type",
+          "tmdb_id"
+        ],
+        "type": "object"
+      },
+      "AdminRequestRoutePreviewOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "facts": {
+            "$ref": "#/components/schemas/AdminRequestRouteFacts"
+          },
+          "rules": {
+            "description": "Every route of the media type in evaluation order, with what it did",
+            "items": {
+              "$ref": "#/components/schemas/AdminRequestRoutePreviewRule"
+            },
+            "type": "array"
+          },
+          "tiers": {
+            "items": {
+              "$ref": "#/components/schemas/AdminRequestRoutePreviewTier"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "facts",
+          "tiers",
+          "rules"
+        ],
+        "type": "object"
+      },
+      "AdminRequestRoutePreviewRule": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "hd": {
+            "description": "What the route did for the HD copy",
+            "enum": [
+              "sends",
+              "skips",
+              "passes",
+              "no_match",
+              "already_decided"
+            ],
+            "type": "string"
+          },
+          "is_fallback": {
+            "type": "boolean"
+          },
+          "route_id": {
+            "type": "string"
+          },
+          "route_name": {
+            "type": "string"
+          },
+          "uhd": {
+            "description": "What the route did for the 4K copy",
+            "enum": [
+              "sends",
+              "skips",
+              "passes",
+              "no_match",
+              "already_decided"
+            ],
+            "type": "string"
+          },
+          "unmet_conditions": {
+            "description": "The conditions the title fails, by field name (e.g. genre_ids); empty when it matches",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "route_id",
+          "route_name",
+          "is_fallback",
+          "enabled",
+          "unmet_conditions",
+          "hd",
+          "uhd"
+        ],
+        "type": "object"
+      },
+      "AdminRequestRoutePreviewTier": {
+        "additionalProperties": false,
+        "properties": {
+          "integration_id": {
+            "type": "string"
+          },
+          "integration_name": {
+            "type": "string"
+          },
+          "note": {
+            "description": "Why no route sends the tier, or why it would fail",
+            "type": "string"
+          },
+          "overrides": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "quality": {
+            "enum": [
+              "1080p",
+              "2160p"
+            ],
+            "type": "string"
+          },
+          "route_id": {
+            "type": "string"
+          },
+          "route_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "quality"
+        ],
+        "type": "object"
+      },
+      "AdminRequestRouteReorderInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "ids": {
+            "description": "Every rule of the media type, fallback excluded, in the new order",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "media_type": {
+            "enum": [
+              "movie",
+              "series"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "media_type",
+          "ids"
+        ],
+        "type": "object"
+      },
+      "AdminRequestRouteTitle": {
+        "additionalProperties": false,
+        "properties": {
+          "media_type": {
+            "enum": [
+              "movie",
+              "series"
+            ],
+            "type": "string"
+          },
+          "poster_path": {
+            "description": "TMDB image path",
+            "type": "string"
+          },
+          "title": {
+            "examples": [
+              "Spirited Away"
+            ],
+            "type": "string"
+          },
+          "tmdb_id": {
+            "description": "TMDB identifier (external, not a Silo ID)",
+            "examples": [
+              129
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "year": {
+            "examples": [
+              2001
+            ],
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tmdb_id",
+          "media_type",
+          "title"
+        ],
+        "type": "object"
+      },
+      "AdminRequestRouteTitleCollection": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/AdminRequestRouteTitle"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "AdminRequestRouting": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "description": "standard sends each media type to its one server, and 4K copies to its one server marked 4K, with each server's own settings; the routing rules are kept but paused. advanced routes with the rules.",
+            "enum": [
+              "standard",
+              "advanced"
+            ],
+            "type": "string"
+          },
+          "standard": {
+            "description": "Where Standard sends each media type that has a server; empty when Standard cannot be used",
+            "items": {
+              "$ref": "#/components/schemas/AdminRequestStandardDestination"
+            },
+            "type": "array"
+          },
+          "standard_unavailable_reason": {
+            "description": "Why Standard cannot be used (a media type has more than one server of a kind); absent when it can. Adding or enabling such a server turns Advanced on.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "standard"
+        ],
+        "type": "object"
+      },
+      "AdminRequestRoutingUpdateInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "enum": [
+              "standard",
+              "advanced"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "type": "object"
+      },
       "AdminRequestSettings": {
         "additionalProperties": false,
         "properties": {
@@ -11509,6 +12455,30 @@
           "global_window_days",
           "global_auto_approval_enabled",
           "force_dual_quality"
+        ],
+        "type": "object"
+      },
+      "AdminRequestStandardDestination": {
+        "additionalProperties": false,
+        "properties": {
+          "hd_integration_id": {
+            "description": "The media type's one server that is not marked 4K; absent when it has none",
+            "type": "string"
+          },
+          "media_type": {
+            "enum": [
+              "movie",
+              "series"
+            ],
+            "type": "string"
+          },
+          "uhd_integration_id": {
+            "description": "The media type's one server marked 4K; absent when it has none, and then there is no 4K copy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "media_type"
         ],
         "type": "object"
       },
@@ -13597,6 +14567,79 @@
         },
         "required": [
           "title"
+        ],
+        "type": "object"
+      },
+      "AdminTMDBListImport": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "featured": {
+            "type": "boolean"
+          },
+          "library_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "library_ids": {
+            "items": {
+              "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "type": "array"
+          },
+          "limit": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "management_key": {
+            "type": "string"
+          },
+          "management_mode": {
+            "type": "string"
+          },
+          "management_source": {
+            "type": "string"
+          },
+          "poster_url": {
+            "type": "string"
+          },
+          "sort_config": {},
+          "sort_order": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "sync_schedule": {
+            "type": "string"
+          },
+          "title": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "url": {
+            "description": "A public TMDB list page (https://www.themoviedb.org/list/...) or its numeric ID",
+            "examples": [
+              "https://www.themoviedb.org/list/310-my-movie-list"
+            ],
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "url"
         ],
         "type": "object"
       },
@@ -17786,6 +18829,7 @@
             "type": "string"
           },
           "name_prefix": {
+            "description": "Alphabetical jump: only titles whose sort title (or title, when none is set) starts here",
             "type": "string"
           },
           "order": {
@@ -18915,6 +19959,26 @@
         ],
         "type": "object"
       },
+      "CollectionAdminRequestRoute": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/AdminRequestRoute"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "CollectionAdminSection": {
         "additionalProperties": false,
         "properties": {
@@ -19084,6 +20148,25 @@
             "description": "The acting account supports collection groups",
             "type": "boolean"
           },
+          "import_sources": {
+            "description": "Import sources the acting account can create a collection from; empty when imports is false",
+            "examples": [
+              [
+                "mdblist",
+                "tmdb",
+                "tmdb_list"
+              ]
+            ],
+            "items": {
+              "enum": [
+                "mdblist",
+                "tmdb",
+                "tmdb_list"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
           "imports": {
             "description": "The acting account supports imported collections",
             "type": "boolean"
@@ -19125,6 +20208,7 @@
         "required": [
           "groups",
           "imports",
+          "import_sources",
           "artwork",
           "item_reorder",
           "display_filter_fields",
@@ -19759,6 +20843,9 @@
           },
           "tmdb_discover": {
             "$ref": "#/components/schemas/TMDBDiscoverSpec"
+          },
+          "tmdb_list": {
+            "$ref": "#/components/schemas/TMDBListSpec"
           },
           "trakt": {
             "$ref": "#/components/schemas/TraktSpec"
@@ -23583,6 +24670,17 @@
             "description": "Whether the current principal may use the capability",
             "type": "boolean"
           },
+          "download_progress_supported": {
+            "description": "Whether the server reports download progress (download on requests, their targets, and the title detail's request state). Whether a given request has any depends on its download server's request plugin.",
+            "type": "boolean"
+          },
+          "follow_supported": {
+            "type": "boolean"
+          },
+          "missing_seasons_requestable": {
+            "description": "Whether a series already in the library can be requested for the seasons it is missing. False while a download server that takes series uses a request plugin that cannot fetch individual seasons, so such a series stays already_available.",
+            "type": "boolean"
+          },
           "rating_restrictions_enforced": {
             "type": "boolean"
           },
@@ -23592,6 +24690,9 @@
           "revision": {
             "description": "Opaque revision of this document",
             "type": "string"
+          },
+          "season_requests_supported": {
+            "type": "boolean"
           },
           "state": {
             "description": "Support and configuration state, not health",
@@ -23607,6 +24708,10 @@
         "required": [
           "requests_enabled",
           "rating_restrictions_enforced",
+          "follow_supported",
+          "season_requests_supported",
+          "missing_seasons_requestable",
+          "download_progress_supported",
           "revision",
           "state",
           "allowed"
@@ -25342,6 +26447,13 @@
             "description": "Presigned poster URL; absent when the library has no poster",
             "type": "string"
           },
+          "realtime_monitoring": {
+            "description": "Scan automatically when files in the library's folders change. Takes effect only while the server-wide scanner.realtime_monitoring setting is on.",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "scan_warning_at": {
             "description": "When the warning was raised; absent when none",
             "format": "date-time",
@@ -25400,7 +26512,45 @@
           "chapter_thumbnails_supported",
           "intro_detection_enabled",
           "trailer_kinds",
+          "realtime_monitoring",
           "sort_order"
+        ],
+        "type": "object"
+      },
+      "LibraryCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "realtime_monitoring": {
+            "description": "This build supports real-time library monitoring and its status read",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "revision": {
+            "description": "Opaque revision of this document",
+            "type": "string"
+          },
+          "state": {
+            "description": "Support and configuration state, not health",
+            "enum": [
+              "available",
+              "disabled",
+              "not_configured",
+              "unsupported"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "realtime_monitoring",
+          "revision",
+          "state",
+          "allowed"
         ],
         "type": "object"
       },
@@ -25623,6 +26773,13 @@
             },
             "minItems": 1,
             "type": "array"
+          },
+          "realtime_monitoring": {
+            "description": "Scan automatically when files in the library's folders change; omitted means true. Takes effect only while the server-wide scanner.realtime_monitoring setting is on.",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           },
           "trailer_kinds": {
             "description": "Remote video kinds to fetch; omitted applies the default (every provider kind), empty disables them",
@@ -26016,6 +27173,115 @@
         ],
         "type": "object"
       },
+      "LibraryRealtimeMonitoring": {
+        "additionalProperties": false,
+        "properties": {
+          "libraries": {
+            "description": "One entry per library, in sort order then by ID",
+            "items": {
+              "$ref": "#/components/schemas/LibraryRealtimeMonitoringEntry"
+            },
+            "type": "array"
+          },
+          "server_enabled": {
+            "description": "The server-wide scanner.realtime_monitoring setting",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "server_enabled",
+          "libraries"
+        ],
+        "type": "object"
+      },
+      "LibraryRealtimeMonitoringEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "backend": {
+            "description": "Kernel notification backend of the reporting node: inotify, or empty when none is recorded",
+            "examples": [
+              "inotify"
+            ],
+            "type": "string"
+          },
+          "detail": {
+            "description": "Why monitoring is not working, or a caveat about it; empty when there is nothing to say",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "directories": {
+            "description": "Folders the reporting node records for the library",
+            "examples": [
+              4812
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "enabled": {
+            "description": "The library's own realtime_monitoring switch",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "library_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "node_id": {
+            "description": "The server node whose report the state comes from; absent without a fresh report",
+            "examples": [
+              "node-a"
+            ],
+            "type": "string"
+          },
+          "state": {
+            "description": "server_disabled, library_disabled, monitoring_off and not_reporting are derived from settings and report freshness, checked in that order; otherwise the best state a server node reported in the last 3 minutes (monitoring, then starting, limit_reached, root_unavailable, unsupported_filesystem, unsupported_platform, error)",
+            "enum": [
+              "server_disabled",
+              "library_disabled",
+              "monitoring_off",
+              "not_reporting",
+              "starting",
+              "monitoring",
+              "unsupported_filesystem",
+              "unsupported_platform",
+              "limit_reached",
+              "root_unavailable",
+              "error"
+            ],
+            "examples": [
+              "monitoring"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "When that node last reported; absent without a fresh report",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "library_id",
+          "enabled",
+          "state",
+          "backend",
+          "detail",
+          "directories"
+        ],
+        "type": "object"
+      },
       "LibraryRefresh": {
         "additionalProperties": false,
         "properties": {
@@ -26293,6 +27559,13 @@
             },
             "minItems": 1,
             "type": "array"
+          },
+          "realtime_monitoring": {
+            "description": "Scan automatically when files in the library's folders change. Takes effect only while the server-wide scanner.realtime_monitoring setting is on.",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           },
           "trailer_kinds": {
             "description": "Replaces the allow-list; empty disables remote videos",
@@ -27267,10 +28540,16 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "download": {
+            "$ref": "#/components/schemas/RequestDownload",
+            "description": "How far the request's downloads are over all its servers (1080p and 4K together), while any reports them: bytes summed, the phase that needs the most attention, the latest estimate, and the oldest report's time"
+          },
           "external_id": {
+            "description": "Admins only: the integration's own identifier",
             "type": "string"
           },
           "external_status": {
+            "description": "Admins only: the status as the download server reports it",
             "type": "string"
           },
           "id": {
@@ -27288,6 +28567,7 @@
             "type": "string"
           },
           "integration_kind": {
+            "description": "Admins only: the download server's kind",
             "examples": [
               "radarr"
             ],
@@ -27297,6 +28577,7 @@
             "type": "boolean"
           },
           "last_error": {
+            "description": "Admins only: why the last submission to a download server failed. It can name servers and routing rules",
             "type": "string"
           },
           "library_content_id": {
@@ -27315,6 +28596,10 @@
             "examples": [
               "active"
             ],
+            "type": "string"
+          },
+          "outcome_reason": {
+            "description": "Why the request was declined or withdrawn, when a reason was given",
             "type": "string"
           },
           "overview": {
@@ -27344,6 +28629,28 @@
               "1"
             ],
             "minLength": 1,
+            "type": "string"
+          },
+          "season_progress": {
+            "description": "Series season requests: each requested season's episodes, once the series is in the library; empty otherwise",
+            "items": {
+              "$ref": "#/components/schemas/RequestSeasonProgress"
+            },
+            "type": "array"
+          },
+          "seasons": {
+            "description": "Series: the requested season numbers; empty means the whole series (requests made through v1 or before season requests)",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "state": {
+            "description": "The one state to show a user: pending, approved, processing, partially_available (some requested seasons are in the library), available (in the library), declined, cancelled or failed",
+            "examples": [
+              "pending"
+            ],
             "type": "string"
           },
           "status": {
@@ -27405,6 +28712,9 @@
           "title",
           "status",
           "outcome",
+          "state",
+          "seasons",
+          "season_progress",
           "is_anime",
           "targets",
           "created_at",
@@ -27461,6 +28771,21 @@
           "poster_path": {
             "description": "TMDB image path",
             "type": "string"
+          },
+          "seasons": {
+            "description": "Series only: the season numbers to request, starting at 1 (a season below 1 is refused). Omitted: every aired season not yet complete in the library",
+            "examples": [
+              [
+                2,
+                3
+              ]
+            ],
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "maxItems": 200,
+            "type": "array"
           },
           "title": {
             "examples": [
@@ -35013,6 +36338,81 @@
         },
         "type": "object"
       },
+      "RequestDownload": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes_left": {
+            "description": "Bytes still to download; present whenever bytes_total is",
+            "examples": [
+              2448131358
+            ],
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "bytes_total": {
+            "description": "Size of the downloads in bytes; absent while unknown",
+            "examples": [
+              4294967296
+            ],
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "downloads": {
+            "description": "Distinct downloads in flight; a season pack counts once",
+            "examples": [
+              1
+            ],
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "estimated_completion_at": {
+            "description": "When the download server expects the downloads to finish; absent when it cannot tell",
+            "examples": [
+              "2026-01-02T03:16:05.000Z"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "percent": {
+            "description": "How much has downloaded, rounded down; absent while the size is unknown",
+            "examples": [
+              43
+            ],
+            "format": "int64",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "phase": {
+            "description": "queued, downloading, paused, stalled, importing or import_blocked. More values may be added: read an unknown one as downloading, without a percentage",
+            "examples": [
+              "downloading"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "When the server last heard from the download server. A client may hide figures older than about ten minutes",
+            "examples": [
+              "2026-01-02T03:04:05.000Z"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "phase",
+          "downloads",
+          "updated_at"
+        ],
+        "type": "object"
+      },
       "RequestMediaCastMember": {
         "additionalProperties": false,
         "properties": {
@@ -35172,6 +36572,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "seasons": {
+            "description": "Series: the regular seasons (specials excluded) with library availability and request coverage; empty for movies",
+            "items": {
+              "$ref": "#/components/schemas/RequestMediaSeason"
+            },
+            "type": "array"
+          },
           "status": {
             "description": "TMDB release status",
             "examples": [
@@ -35228,7 +36635,8 @@
           "creators",
           "recommendations",
           "availability",
-          "request"
+          "request",
+          "seasons"
         ],
         "type": "object"
       },
@@ -35359,9 +36767,80 @@
         ],
         "type": "object"
       },
+      "RequestMediaSeason": {
+        "additionalProperties": false,
+        "properties": {
+          "air_date": {
+            "description": "Calendar date, YYYY-MM-DD",
+            "examples": [
+              "2025-01-17"
+            ],
+            "type": "string"
+          },
+          "availability": {
+            "description": "Whether every aired episode is in the library",
+            "enum": [
+              "missing",
+              "partial",
+              "available"
+            ],
+            "examples": [
+              "partial"
+            ],
+            "type": "string"
+          },
+          "episode_count": {
+            "description": "Episodes TMDB lists for the season, aired or not",
+            "examples": [
+              10
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "examples": [
+              "Season 2"
+            ],
+            "type": "string"
+          },
+          "poster_path": {
+            "description": "TMDB image path",
+            "type": "string"
+          },
+          "requested": {
+            "description": "The title's active request covers this season",
+            "type": "boolean"
+          },
+          "season_number": {
+            "examples": [
+              2
+            ],
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "season_number",
+          "episode_count",
+          "availability",
+          "requested"
+        ],
+        "type": "object"
+      },
       "RequestMediaState": {
         "additionalProperties": false,
         "properties": {
+          "download": {
+            "$ref": "#/components/schemas/RequestDownload",
+            "description": "How far the active request's downloads are, while its download server reports them. Only the title detail (getRequestMediaDetail) carries it"
+          },
+          "following": {
+            "description": "Whether the viewer will be notified when the media becomes available: they requested it or follow it",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "reason": {
             "description": "Why the media is not requestable",
             "examples": [
@@ -35384,6 +36863,20 @@
             ],
             "type": "boolean"
           },
+          "requested_by_viewer": {
+            "description": "Whether the viewing profile made the active request, so there is nothing to follow",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "state": {
+            "description": "User-facing state of the active request, when one exists: pending, approved or processing",
+            "examples": [
+              "pending"
+            ],
+            "type": "string"
+          },
           "status": {
             "description": "Status of the active request, when one exists",
             "examples": [
@@ -35393,7 +36886,43 @@
           }
         },
         "required": [
-          "requestable"
+          "requestable",
+          "following",
+          "requested_by_viewer"
+        ],
+        "type": "object"
+      },
+      "RequestSeasonProgress": {
+        "additionalProperties": false,
+        "properties": {
+          "episodes_aired": {
+            "description": "Aired episodes by the library's own metadata; 0 when it has no air dates yet",
+            "examples": [
+              10
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "episodes_available": {
+            "description": "Episodes with a file in an enabled library",
+            "examples": [
+              4
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "season_number": {
+            "examples": [
+              2
+            ],
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "season_number",
+          "episodes_aired",
+          "episodes_available"
         ],
         "type": "object"
       },
@@ -35410,11 +36939,16 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "download": {
+            "$ref": "#/components/schemas/RequestDownload",
+            "description": "How far this target's downloads are, while its download server reports them"
+          },
           "external_id": {
-            "description": "The integration's own identifier",
+            "description": "Admins only: the integration's own identifier",
             "type": "string"
           },
           "external_status": {
+            "description": "Admins only: the status as the download server reports it",
             "type": "string"
           },
           "id": {
@@ -35426,12 +36960,15 @@
             "type": "string"
           },
           "instance_name": {
+            "description": "Admins only: the download server's name",
             "type": "string"
           },
           "integration_id": {
+            "description": "Admins only: the download server holding this target",
             "type": "string"
           },
           "integration_kind": {
+            "description": "Admins only: the download server's kind",
             "examples": [
               "radarr"
             ],
@@ -35441,6 +36978,7 @@
             "type": "boolean"
           },
           "last_error": {
+            "description": "Admins only: why the download server failed this target",
             "type": "string"
           },
           "quality": {
@@ -35455,6 +36993,10 @@
               "1834729"
             ],
             "minLength": 1,
+            "type": "string"
+          },
+          "route_name": {
+            "description": "Admins only: the routing rule that sent this target to its server, as named when it was sent",
             "type": "string"
           },
           "status": {
@@ -38750,6 +40292,102 @@
         "required": [
           "media_type",
           "sort_by"
+        ],
+        "type": "object"
+      },
+      "TMDBListCollectionImport": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "display_query_definition": {
+            "description": "Display filter fragment"
+          },
+          "is_shared": {
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "library_ids": {
+            "description": "Libraries the sync matches against; every library when omitted",
+            "examples": [
+              [
+                "1"
+              ]
+            ],
+            "items": {
+              "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "limit": {
+            "description": "Cap on synced items; the server's own maximum applies when omitted",
+            "examples": [
+              50
+            ],
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "poster_url": {
+            "description": "A bundled template poster path or an image URL",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "sort_config": {
+            "description": "Default sort document"
+          },
+          "sync_schedule": {
+            "description": "Sync cadence name; the server default when omitted",
+            "examples": [
+              "daily"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "description": "The new collection's name; trimmed",
+            "examples": [
+              "Trending movies"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "url": {
+            "description": "A public TMDB list page (https://www.themoviedb.org/list/...) or its numeric ID",
+            "examples": [
+              "https://www.themoviedb.org/list/310-my-movie-list"
+            ],
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "title"
+        ],
+        "type": "object"
+      },
+      "TMDBListSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
         ],
         "type": "object"
       },
@@ -53496,6 +55134,197 @@
           }
         ],
         "summary": "Import a TMDB collection.",
+        "tags": [
+          "admin-collections"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/collections/import/tmdb-list": {
+      "post": {
+        "operationId": "importAdminTMDBList",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminTMDBListImport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminCollectionImportResult"
+                }
+              }
+            },
+            "description": "Created",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Import a public TMDB list as a collection.",
         "tags": [
           "admin-collections"
         ],
@@ -68375,7 +70204,211 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Refresh episode markers using configured sources, or explicitly rerun local intro detection.",
+        "summary": "Explicitly rerun local intro detection for an episode; other items, movies included, are rejected.",
+        "tags": [
+          "admin-catalog"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/items/{id}/redetect-markers": {
+      "post": {
+        "operationId": "redetectAdminItemMarkers",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminItemMarkersRedetect",
+                "description": "Absent re-detects all kinds"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminEpisodeMarkersStatus"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Explicitly rerun local detection of an episode's intro, credits, or both, or of a movie's best-effort credits.",
         "tags": [
           "admin-catalog"
         ],
@@ -68483,6 +70516,16 @@
             },
             "description": "Not Acceptable"
           },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -68529,7 +70572,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Refresh episode markers using configured sources, or explicitly rerun local intro detection.",
+        "summary": "Refresh episode or movie markers using configured sources; movies get best-effort local credits only.",
         "tags": [
           "admin-catalog"
         ],
@@ -73174,6 +75217,205 @@
         "x-silo-class": "acting_admin",
         "x-silo-conditional": true,
         "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/markers/capabilities": {
+      "get": {
+        "operationId": "getAdminMarkerCapabilities",
+        "parameters": [
+          {
+            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminMarkerCapabilities"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current; no body.",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Discover marker analysis supported by this build, such as local movie credits. Support does not promise that marker settings or a library allow analysis.",
+        "tags": [
+          "admin-catalog"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-conditional": true
       }
     },
     "/api/v2/admin/markers/files/{fileId}/history": {
@@ -87089,6 +89331,421 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/admin/request-groups/{group_id}/limit": {
+      "get": {
+        "operationId": "getAdminRequestGroupLimit",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The access group",
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "description": "The access group",
+              "examples": [
+                "2"
+              ],
+              "minLength": 1,
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRequestGroupLimit"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get an access group's request approval and limit.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      },
+      "put": {
+        "operationId": "updateAdminRequestGroupLimit",
+        "parameters": [
+          {
+            "description": "The resource's current ETag, or \"*\" to overwrite deliberately. A missing field is 428 precondition_required; a stale tag is 412 precondition_failed with the current ETag.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional second precondition, evaluated after If-Match succeeds: \"*\" or any tag matching the current representation is 412 precondition_failed with the current ETag.",
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The access group",
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "description": "The access group",
+              "examples": [
+                "2"
+              ],
+              "minLength": 1,
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminRequestGroupLimitBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRequestGroupLimit"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Required"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Replace an access group's request approval and limit.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-guarded": true,
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/admin/request-integrations": {
       "get": {
         "operationId": "listRequestIntegrations",
@@ -88261,6 +90918,1973 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/admin/request-routes": {
+      "get": {
+        "operationId": "listRequestRoutes",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionAdminRequestRoute"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the request routing rules, in evaluation order per media type.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      },
+      "post": {
+        "operationId": "createRequestRoute",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminRequestRouteBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRequestRoute"
+                }
+              }
+            },
+            "description": "Created",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Add a request routing rule after the media type's existing rules.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/request-routes/order": {
+      "post": {
+        "operationId": "reorderRequestRoutes",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminRequestRouteReorderInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionAdminRequestRoute"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Set the evaluation order of a media type's routing rules.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/request-routes/preview": {
+      "post": {
+        "operationId": "previewRequestRoute",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminRequestRoutePreviewInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRequestRoutePreviewOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Show which server each quality tier of a title would go to.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/request-routes/titles": {
+      "get": {
+        "operationId": "searchRequestRouteTitles",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "media_type",
+            "required": true,
+            "schema": {
+              "enum": [
+                "movie",
+                "series"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Title to search TMDB for",
+            "explode": false,
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "description": "Title to search TMDB for",
+              "examples": [
+                "spirited away"
+              ],
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRequestRouteTitleCollection"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Search TMDB for titles to try the routing rules on; works while requests are turned off.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/request-routes/{id}": {
+      "delete": {
+        "operationId": "deleteRequestRoute",
+        "parameters": [
+          {
+            "description": "The resource's current ETag, or \"*\" to overwrite deliberately. A missing field is 428 precondition_required; a stale tag is 412 precondition_failed with the current ETag.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional second precondition, evaluated after If-Match succeeds: \"*\" or any tag matching the current representation is 412 precondition_failed with the current ETag.",
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The route",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "The route",
+              "examples": [
+                "fallback-movie"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Required"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete a request routing rule.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-guarded": true,
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      },
+      "get": {
+        "operationId": "getRequestRoute",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The route",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "The route",
+              "examples": [
+                "fallback-movie"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRequestRoute"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get one request routing rule.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      },
+      "put": {
+        "operationId": "updateRequestRoute",
+        "parameters": [
+          {
+            "description": "The resource's current ETag, or \"*\" to overwrite deliberately. A missing field is 428 precondition_required; a stale tag is 412 precondition_failed with the current ETag.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional second precondition, evaluated after If-Match succeeds: \"*\" or any tag matching the current representation is 412 precondition_failed with the current ETag.",
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The route",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "The route",
+              "examples": [
+                "fallback-movie"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminRequestRouteBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRequestRoute"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Required"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Replace a request routing rule; saving a media type's fallback creates it.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-guarded": true,
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/request-routing": {
+      "get": {
+        "operationId": "getRequestRouting",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRequestRouting"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get the request routing mode and where Standard routing would send each media type.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      },
+      "put": {
+        "operationId": "updateRequestRouting",
+        "parameters": [
+          {
+            "description": "The resource's current ETag, or \"*\" to overwrite deliberately. A missing field is 428 precondition_required; a stale tag is 412 precondition_failed with the current ETag.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional second precondition, evaluated after If-Match succeeds: \"*\" or any tag matching the current representation is 412 precondition_failed with the current ETag.",
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminRequestRoutingUpdateInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRequestRouting"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Required"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Switch request routing between Standard and Advanced; Standard is refused while a media type has more than one server of a kind.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-guarded": true,
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/admin/request-settings": {
       "get": {
         "operationId": "getAdminRequestSettings",
@@ -89127,6 +93751,70 @@
             }
           },
           {
+            "description": "Only requests in this queue view: needs_approval (pending), in_progress (approved, queued or downloading), failed, or done (completed, or closed by a decline or cancellation)",
+            "explode": false,
+            "in": "query",
+            "name": "view",
+            "schema": {
+              "description": "Only requests in this queue view: needs_approval (pending), in_progress (approved, queued or downloading), failed, or done (completed, or closed by a decline or cancellation)",
+              "enum": [
+                "needs_approval",
+                "in_progress",
+                "failed",
+                "done"
+              ],
+              "examples": [
+                "needs_approval"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only requests whose title contains this text, or whose TMDB ID equals it",
+            "explode": false,
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "description": "Only requests whose title contains this text, or whose TMDB ID equals it",
+              "examples": [
+                "severance"
+              ],
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only requests for this media type",
+            "explode": false,
+            "in": "query",
+            "name": "media_type",
+            "schema": {
+              "description": "Only requests for this media type",
+              "enum": [
+                "movie",
+                "series"
+              ],
+              "examples": [
+                "series"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only requests made by this account; at most 2147483647",
+            "explode": false,
+            "in": "query",
+            "name": "requested_by_user_id",
+            "schema": {
+              "description": "Only requests made by this account; at most 2147483647",
+              "examples": [
+                "7"
+              ],
+              "pattern": "^[1-9][0-9]{0,9}$",
+              "type": "string"
+            }
+          },
+          {
             "description": "Page size; default 50, maximum 50",
             "explode": false,
             "in": "query",
@@ -89469,6 +94157,148 @@
         ],
         "x-silo-class": "acting_admin",
         "x-silo-conditional": true,
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/requests/counts": {
+      "get": {
+        "operationId": "getAdminRequestCounts",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRequestCounts"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Count the requests in each admin queue view.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
         "x-silo-service-backed": true
       }
     },
@@ -90063,6 +94893,162 @@
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
         "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/requests/{id}/events": {
+      "get": {
+        "operationId": "listAdminRequestEvents",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The request",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "The request",
+              "examples": [
+                "1834729"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRequestEventCollection"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List a request's history, newest first (at most 200 entries).",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
         "x-silo-service-backed": true
       }
     },
@@ -110745,12 +115731,12 @@
             }
           },
           {
-            "description": "Alphabetical jump: only titles starting here",
+            "description": "Alphabetical jump: only titles whose sort title (or title, when none is set) starts here",
             "explode": false,
             "in": "query",
             "name": "name_prefix",
             "schema": {
-              "description": "Alphabetical jump: only titles starting here",
+              "description": "Alphabetical jump: only titles whose sort title (or title, when none is set) starts here",
               "type": "string"
             }
           },
@@ -118098,6 +123084,199 @@
           }
         ],
         "summary": "Import a TMDB preset as a synced collection. Creates the collection and runs its first sync. Not idempotent: a retry after a lost response creates a second collection.",
+        "tags": [
+          "collections"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/collections/import/tmdb-list": {
+      "post": {
+        "operationId": "importTMDBListCollection",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TMDBListCollectionImport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionImportResult"
+                }
+              }
+            },
+            "description": "Created",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "description": "The created collection's resource path",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Import a public TMDB list as a synced collection. Creates the collection and runs its first sync. Not idempotent: a retry after a lost response creates a second collection.",
         "tags": [
           "collections"
         ],
@@ -128035,7 +133214,15 @@
                 }
               }
             },
-            "description": "Service Unavailable"
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before retrying when the artwork store failed or could not be reached.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -137502,6 +142689,205 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/libraries/capabilities": {
+      "get": {
+        "operationId": "getLibraryCapabilities",
+        "parameters": [
+          {
+            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryCapabilities"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current; no body.",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Discover library features supported by this build.",
+        "tags": [
+          "libraries"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-conditional": true
+      }
+    },
     "/api/v2/libraries/metadata-match-queue": {
       "get": {
         "operationId": "listMetadataMatchQueues",
@@ -137794,6 +143180,148 @@
           }
         ],
         "summary": "The provider chain a new library of a type would be seeded with, per content level.",
+        "tags": [
+          "libraries"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/libraries/realtime-monitoring": {
+      "get": {
+        "operationId": "getLibraryRealtimeMonitoring",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryRealtimeMonitoring"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Report whether real-time monitoring works for each library: the server switch, then each library's effective state from settings and the fresh reports of the server nodes that can see its folders.",
         "tags": [
           "libraries"
         ],
@@ -161836,6 +167364,361 @@
           "requests"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/requests/follows/{media_type}/{tmdb_id}": {
+      "delete": {
+        "operationId": "unfollowRequestMedia",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The media type",
+            "in": "path",
+            "name": "media_type",
+            "required": true,
+            "schema": {
+              "description": "The media type",
+              "enum": [
+                "movie",
+                "series"
+              ],
+              "examples": [
+                "movie"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "TMDB identifier (external, not a Silo ID)",
+            "in": "path",
+            "name": "tmdb_id",
+            "required": true,
+            "schema": {
+              "description": "TMDB identifier (external, not a Silo ID)",
+              "examples": [
+                949
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Stop following a title.",
+        "tags": [
+          "requests"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      },
+      "put": {
+        "operationId": "followRequestMedia",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The media type",
+            "in": "path",
+            "name": "media_type",
+            "required": true,
+            "schema": {
+              "description": "The media type",
+              "enum": [
+                "movie",
+                "series"
+              ],
+              "examples": [
+                "movie"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "TMDB identifier (external, not a Silo ID)",
+            "in": "path",
+            "name": "tmdb_id",
+            "required": true,
+            "schema": {
+              "description": "TMDB identifier (external, not a Silo ID)",
+              "examples": [
+                949
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestMediaState"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get notified when a title that already has an active request becomes available.",
+        "tags": [
+          "requests"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
     },
@@ -189305,6 +195188,9 @@
             "type": "string"
           },
           "copy_fmp4_recipe_version": {
+            "type": "string"
+          },
+          "encoder_hw_accel": {
             "type": "string"
           },
           "hw_accel": {

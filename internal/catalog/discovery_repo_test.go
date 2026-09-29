@@ -442,11 +442,11 @@ func assertNoLibraryJoin(t *testing.T, query string) {
 
 func assertDenyOnlyRequiresLibraryMembership(t *testing.T, query string) {
 	t.Helper()
-	membershipPredicate := "EXISTS (SELECT 1 FROM media_item_libraries mil_scope_any WHERE mil_scope_any.content_id = mi.content_id)"
+	membershipPredicate := "EXISTS (SELECT 1 FROM media_item_libraries mil_scope_in WHERE mil_scope_in.content_id = mi.content_id)"
 	if !strings.Contains(query, membershipPredicate) {
 		t.Fatalf("deny-only library filters must require positive library membership, got:\n%s", query)
 	}
-	if strings.Contains(query, "mil_scope_any.media_folder_id") {
+	if strings.Contains(query, "mil_scope_in.media_folder_id") {
 		t.Fatalf("positive membership predicate should not bind a specific library, got:\n%s", query)
 	}
 }

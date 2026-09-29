@@ -3,9 +3,9 @@
 Implements #216: Kodi/Jellyfin-style `.nfo` files and sidecar images
 (`poster.jpg`, `fanart.jpg`, …) next to movies and shows are read by a builtin
 metadata provider, so curated local libraries work with partial or zero
-TMDB/TVDB coverage. Admin-facing usage lives in
-`docs/wiki/admin/nfo-local-metadata.md`; this page records the architecture for
-maintainers.
+TMDB/TVDB coverage. Admin-facing usage lives in the user manual at
+https://siloserver.org/docs/local-metadata; this page records the architecture
+for maintainers.
 
 ## Registration: a builtin provider in the plugin chain
 
@@ -124,3 +124,13 @@ contract for sports/mixed libraries (events as movies, weekly shows as series).
 - Feature detection: the `nfo` capability's presence in
   `GET /api/v1/libraries/provider-defaults` (see
   `docs/architecture/v1-scope.md`).
+- `<set>` (movie collections) is not mapped: `MetadataResult` has no
+  collection field, so `nfoCommon` (`internal/metadata/nfo/nfo.go`) does not
+  decode it.
+- `<userrating>` is parsed into `UserRating` but never emitted; Silo has no
+  per-user rating slot in `MetadataResult`. `TestParseNFOData_TableCases`
+  covers a document with only `<userrating>` producing no ratings.
+- Multi-episode NFOs (several `<episodedetails>` roots in one file) are not
+  supported. The parser keeps the first block and sets `MultiEpisode`, and
+  `internal/metadata/nfo/series_depth.go` logs a warning with the file path
+  (`TestParseEpisodeNFO_MultiEpisodeDocumentTakesFirst`).

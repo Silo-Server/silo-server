@@ -60,6 +60,7 @@ const (
 // readers. Keep them here with the effective admin-setting defaults.
 const (
 	Allow4KTranscodeSettingKey               = "allow_4k_transcode"
+	PlaybackAllowHEVCEncodingSettingKey      = "playback.allow_hevc_encoding"
 	DownloadLocalTranscodeFallbackSettingKey = "download.local_transcode_fallback"
 )
 
@@ -123,6 +124,7 @@ var adminSettingDefaults = map[string]string{
 	"scanner.max_concurrent_scoped":        "2",
 	"scanner.file_removal_grace":           "24h",
 	"scanner.empty_trash_after_scan":       "true",
+	"scanner.realtime_monitoring":          "true",
 	"matcher.workers":                      "8",
 	"matcher.batch_size":                   "500",
 	"matcher.enable_tv_series_root_queue":  "true",
@@ -134,12 +136,15 @@ var adminSettingDefaults = map[string]string{
 	"markers.lazy_playback":                "true",
 	MarkersDetectionWorkersSettingKey:      "1",
 	"markers.online_storage":               "stored",
+	"markers.detect_intros":                "true",
+	"markers.detect_credits":               "true",
 
 	"playback.ffmpeg_path":                           "",
 	playbackTranscodeDirSettingKey:                   DefaultTranscodeDir,
 	playbackSegmentRetentionSettingKey:               "600",
 	"playback.hw_accel":                              "auto",
 	"playback.transcode_enabled":                     "true",
+	PlaybackAllowHEVCEncodingSettingKey:              "false",
 	PlaybackRoutingDirectPlayEgressSettingKey:        string(PlaybackEgressPreferProxy),
 	PlaybackRoutingRemuxExecutionSettingKey:          string(PlaybackExecutionPreferTranscode),
 	PlaybackRoutingRemuxEgressSettingKey:             string(PlaybackEgressPreferProxy),
@@ -382,7 +387,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 	value := strings.TrimSpace(raw)
 
 	switch key {
-	case "metadata.cache_images", "playback.transcode_enabled",
+	case "metadata.cache_images", "playback.transcode_enabled", PlaybackAllowHEVCEncodingSettingKey,
 		chapterThumbnailSoftwareToneMapKey, PlaybackTranscodeHardwareToneMapSettingKey,
 		PlaybackTranscodeSoftwareToneMapSettingKey, CatalogScopeVersionsToLibrarySettingKey,
 		Allow4KTranscodeSettingKey, "enable_transcode_throttle", "audiobookshelf_compat.enabled",
@@ -390,7 +395,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		"subtitle_ai.enabled", "subtitle_ai.transcribe_enabled", "metadata_ai.enabled",
 		"download.enabled", "download.transcode_enabled", DownloadLocalTranscodeFallbackSettingKey,
 		"email.enabled", "signup.enabled", "password_reset.self_service_enabled", SetupCompletedSettingKey,
-		"scanner.empty_trash_after_scan", "matcher.enable_tv_series_root_queue",
+		"scanner.empty_trash_after_scan", "scanner.realtime_monitoring", "matcher.enable_tv_series_root_queue",
 		"matcher.enable_tv_series_group_queue", "policy.editor_enabled",
 		"overlays.enabled", "notifications.release_events_enabled", "notifications.fanout_enabled",
 		"notifications.ui_enabled", "notifications.webhooks_enabled",

@@ -19,12 +19,23 @@ type fakeIntroRepository struct {
 	episodeCandidates  map[string][]Candidate
 	groupCandidates    map[string][]Candidate
 	backfillCandidates []Candidate
+	movieCandidates    []Candidate
 	fingerprints       map[int]*Fingerprint
 	seasonState        *SeasonState
 	upsertedStates     []SeasonState
-	patches            []IntroMarkerPatch
+	patches            []MarkerPatch
+	withdrawals        []MarkerWithdrawal
 	silenceAttempts    map[int]SilenceRefinementAttempt
 	upsertedAttempts   []SilenceRefinementAttempt
+	artifacts          map[artifactSlot]Artifact
+	artifactFailures   []ArtifactFailure
+	groupListCalls     int
+	movieListCalls     int
+	// seasonStateHash, when set, is the only analysis hash seasonState
+	// answers for.
+	seasonStateHash string
+	// patchErr, when set, fails the patches it returns an error for.
+	patchErr func(MarkerPatch) error
 }
 
 func (f *fakeIntroRepository) CountEnabledLibraries(context.Context) (int, error) {
@@ -48,6 +59,7 @@ func (f *fakeIntroRepository) ListCandidatesForEpisode(_ context.Context, episod
 func (f *fakeIntroRepository) ListCandidatesForGroup(_ context.Context, mediaFolderID int, seasonID, analysisGroupKey string) ([]Candidate, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.groupListCalls++
 	key := groupKey(mediaFolderID, seasonID, analysisGroupKey)
 	return append([]Candidate(nil), f.groupCandidates[key]...), nil
 }
@@ -56,6 +68,47 @@ func (f *fakeIntroRepository) ListChapterSilenceBackfillCandidates(context.Conte
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]Candidate(nil), f.backfillCandidates...), nil
+}
+
+// ListMovieCandidates pages movieCandidates in order; its cursor holds only
+// the last file's ID.
+func (f *fakeIntroRepository) ListMovieCandidates(_ context.Context, _ string, after *movieCandidateCursor, limit int) ([]Candidate, *movieCandidateCursor, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.movieListCalls++
+	start := 0
+	if after != nil {
+		for i, candidate := range f.movieCandidates {
+			if candidate.FileID == after.fileID {
+				start = i + 1
+			}
+		}
+	}
+	page := append([]Candidate(nil), f.movieCandidates[start:min(len(f.movieCandidates), start+limit)]...)
+	if len(page) == 0 {
+		return nil, nil, nil
+	}
+	return page, &movieCandidateCursor{fileID: page[len(page)-1].FileID}, nil
+}
+
+func (f *fakeIntroRepository) ListMovieCandidatesForItem(_ context.Context, contentID string) ([]Candidate, error) {
+	return f.movieCandidatesWhere(func(c Candidate) bool { return c.ContentID == contentID }), nil
+}
+
+func (f *fakeIntroRepository) ListMovieCandidatesForFile(_ context.Context, fileID int) ([]Candidate, error) {
+	return f.movieCandidatesWhere(func(c Candidate) bool { return c.FileID == fileID }), nil
+}
+
+func (f *fakeIntroRepository) movieCandidatesWhere(keep func(Candidate) bool) []Candidate {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []Candidate
+	for _, candidate := range f.movieCandidates {
+		if keep(candidate) {
+			out = append(out, candidate)
+		}
+	}
+	return out
 }
 
 func (f *fakeIntroRepository) LoadSilenceRefinementAttempt(_ context.Context, fileID int) (*SilenceRefinementAttempt, error) {
@@ -79,24 +132,39 @@ func (f *fakeIntroRepository) UpsertSilenceRefinementAttempt(_ context.Context, 
 	return nil
 }
 
-func (f *fakeIntroRepository) PatchIntroMarker(_ context.Context, patch IntroMarkerPatch) (bool, error) {
+func (f *fakeIntroRepository) PatchMarker(_ context.Context, patch MarkerPatch) (bool, error) {
+	if _, err := patch.markerUpdate(); err != nil {
+		return false, err
+	}
+	if f.patchErr != nil {
+		if err := f.patchErr(patch); err != nil {
+			return false, err
+		}
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.patches = append(f.patches, patch)
 	return true, nil
 }
 
-func (f *fakeIntroRepository) LoadSeasonState(context.Context, SeasonState, Config) (*SeasonState, error) {
+func (f *fakeIntroRepository) WithdrawMarker(_ context.Context, withdrawal MarkerWithdrawal) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.seasonState == nil {
+	f.withdrawals = append(f.withdrawals, withdrawal)
+	return true, nil
+}
+
+func (f *fakeIntroRepository) LoadSeasonState(_ context.Context, _ SeasonState, analysisHash string) (*SeasonState, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.seasonState == nil || (f.seasonStateHash != "" && f.seasonStateHash != analysisHash) {
 		return nil, nil
 	}
 	state := *f.seasonState
 	return &state, nil
 }
 
-func (f *fakeIntroRepository) UpsertSeasonState(_ context.Context, state SeasonState, _ Config) error {
+func (f *fakeIntroRepository) UpsertSeasonState(_ context.Context, state SeasonState, _ string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.upsertedStates = append(f.upsertedStates, state)
@@ -121,10 +189,76 @@ func (f *fakeIntroRepository) UpsertFingerprint(context.Context, Fingerprint) er
 	return nil
 }
 
+// artifactSlot is where the fake repository keeps a file's artifact of one
+// kind.
+type artifactSlot struct {
+	fileID int
+	kind   string
+}
+
+// artifact returns the stored artifact of kind for a file.
+func (f *fakeIntroRepository) artifact(fileID int, kind string) Artifact {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.artifacts[artifactSlot{fileID, kind}]
+}
+
+func (f *fakeIntroRepository) LoadArtifacts(_ context.Context, fileIDs []int, key ArtifactKey) (map[int]Artifact, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	artifacts := map[int]Artifact{}
+	for _, fileID := range fileIDs {
+		if artifact, ok := f.artifacts[artifactSlot{fileID, key.Kind}]; ok && artifact.ArtifactKey == key {
+			artifact.Payload = append([]byte(nil), artifact.Payload...)
+			artifacts[fileID] = artifact
+		}
+	}
+	return artifacts, nil
+}
+
+func (f *fakeIntroRepository) UpsertArtifact(_ context.Context, artifact Artifact) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.artifacts == nil {
+		f.artifacts = map[artifactSlot]Artifact{}
+	}
+	f.artifacts[artifactSlot{artifact.MediaFileID, artifact.Kind}] = artifact
+	return nil
+}
+
+func (f *fakeIntroRepository) RecordArtifactFailure(_ context.Context, failure ArtifactFailure) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.artifactFailures = append(f.artifactFailures, failure)
+	if f.artifacts == nil {
+		f.artifacts = map[artifactSlot]Artifact{}
+	}
+	slot := artifactSlot{failure.MediaFileID, failure.Kind}
+	var previous *Artifact
+	if stored, ok := f.artifacts[slot]; ok {
+		previous = &stored
+	}
+	count, retryAfter := nextArtifactFailure(previous, failure)
+	f.artifacts[slot] = Artifact{
+		MediaFileID:      failure.MediaFileID,
+		ArtifactKey:      failure.ArtifactKey,
+		ArtifactIdentity: failure.ArtifactIdentity,
+		Status:           ArtifactFailed,
+		FailureCount:     count,
+		LastError:        failure.Error,
+		RetryAfter:       &retryAfter,
+		RecordedBy:       failure.RecordedBy,
+	}
+	return nil
+}
+
 type fakeFingerprintExtractor struct {
-	mu             sync.Mutex
-	preflightCalls int
-	extractCalls   int
+	mu                  sync.Mutex
+	preflightCalls      int
+	extractCalls        int
+	creditsExtractCalls int
+	// creditsErr is returned by every ExtractCredits call.
+	creditsErr error
 }
 
 func (f *fakeFingerprintExtractor) Preflight(context.Context) error {
@@ -139,6 +273,13 @@ func (f *fakeFingerprintExtractor) Extract(context.Context, Candidate) (Fingerpr
 	defer f.mu.Unlock()
 	f.extractCalls++
 	return Fingerprint{}, false, nil
+}
+
+func (f *fakeFingerprintExtractor) ExtractCredits(context.Context, Candidate) (Fingerprint, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.creditsExtractCalls++
+	return Fingerprint{}, false, f.creditsErr
 }
 
 type fakeBoundaryRefiner struct {
@@ -613,7 +754,7 @@ func TestAnalyzeGroupKeepsMarkerWhenDialogueRefinementFails(t *testing.T) {
 	if summary.DialogueRefinementErrors != 2 {
 		t.Fatalf("refinement errors = %d, want 2", summary.DialogueRefinementErrors)
 	}
-	patched := map[int]IntroMarkerPatch{}
+	patched := map[int]MarkerPatch{}
 	for _, patch := range repo.patches {
 		patched[patch.FileID] = patch
 	}
@@ -738,7 +879,7 @@ func TestRunBackfillsExistingChapterMarkerWithSilenceBudget(t *testing.T) {
 	}}
 	analyzer := &Analyzer{repo: repo, extractor: &fakeFingerprintExtractor{}, refiner: refiner, config: DefaultConfig("ffmpeg")}
 
-	summary, err := analyzer.Run(context.Background(), nil)
+	summary, err := analyzer.Run(context.Background(), allMarkerKinds, nil)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -789,7 +930,7 @@ func TestRunBackfillRecordsNoImprovementAttempt(t *testing.T) {
 	}
 	analyzer := &Analyzer{repo: repo, extractor: &fakeFingerprintExtractor{}, refiner: &fakeBoundaryRefiner{}, config: cfg, node: "node-a"}
 
-	summary, err := analyzer.Run(context.Background(), nil)
+	summary, err := analyzer.Run(context.Background(), allMarkerKinds, nil)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -882,7 +1023,7 @@ func TestSilenceRefinementFailureBacksOff(t *testing.T) {
 			refiner := &fakeBoundaryRefiner{errors: map[int]error{10: errors.New("ffmpeg exited 1")}}
 			analyzer := &Analyzer{repo: repo, refiner: refiner, config: cfg, logger: slog.New(slog.DiscardHandler), node: "node-a"}
 
-			summary, err := analyzer.runSilenceBackfill(context.Background())
+			summary, err := analyzer.runSilenceBackfill(context.Background(), allMarkerKinds)
 			if err != nil {
 				t.Fatalf("runSilenceBackfill returned error: %v", err)
 			}
@@ -931,7 +1072,7 @@ func TestSilenceRefinementCancellationIsNotRecorded(t *testing.T) {
 	repo := &fakeIntroRepository{backfillCandidates: []Candidate{chapterBackfillCandidate(10)}}
 	analyzer := &Analyzer{repo: repo, refiner: cancelingBoundaryRefiner{cancel: cancel}, config: DefaultConfig("ffmpeg"), logger: slog.New(slog.DiscardHandler)}
 
-	if _, err := analyzer.runSilenceBackfill(ctx); err != nil {
+	if _, err := analyzer.runSilenceBackfill(ctx, allMarkerKinds); err != nil {
 		t.Fatalf("runSilenceBackfill returned error: %v", err)
 	}
 	if len(repo.upsertedAttempts) != 0 {
@@ -939,7 +1080,7 @@ func TestSilenceRefinementCancellationIsNotRecorded(t *testing.T) {
 	}
 }
 
-func TestSilenceRetryDelay(t *testing.T) {
+func TestRetryDelay(t *testing.T) {
 	for failures, want := range map[int]time.Duration{
 		0:  12 * time.Hour,
 		1:  12 * time.Hour,
@@ -949,8 +1090,8 @@ func TestSilenceRetryDelay(t *testing.T) {
 		5:  7 * 24 * time.Hour,
 		60: 7 * 24 * time.Hour,
 	} {
-		if got := silenceRetryDelay(failures); got != want {
-			t.Errorf("silenceRetryDelay(%d) = %v, want %v", failures, got, want)
+		if got := retryDelay(failures); got != want {
+			t.Errorf("retryDelay(%d) = %v, want %v", failures, got, want)
 		}
 	}
 }

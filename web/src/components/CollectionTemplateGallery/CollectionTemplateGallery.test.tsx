@@ -103,6 +103,23 @@ const catalogResponse = {
         },
       ],
     },
+    {
+      category: "custom",
+      label: "Custom",
+      templates: [
+        {
+          id: "tmdb_list_custom",
+          title: "Custom TMDB List",
+          description: "Paste any public TMDB list URL to seed a synced collection.",
+          icon: "🎞️",
+          category: "custom",
+          source: "tmdb_list",
+          media_kind: "mixed",
+          default_limit: 100,
+          tmdb_list: { url: "" },
+        },
+      ],
+    },
   ],
 };
 
@@ -263,6 +280,52 @@ describe("CollectionTemplateGallery", () => {
       expect(fetchMock).toHaveBeenCalledWith(
         "POST /api/v2/admin/collections/import/trakt",
         expect.any(Object),
+      );
+    });
+  });
+
+  it("asks for a TMDB list URL and imports a Custom TMDB List template", async () => {
+    const user = userEvent.setup();
+    renderGallery();
+
+    await waitFor(() => {
+      expect(screen.getByText("Custom TMDB List")).toBeInTheDocument();
+    });
+
+    fetchMock.mockImplementation((path: string) => {
+      if (path === "GET /api/v2/admin/collections/templates")
+        return Promise.resolve(catalogResponse);
+      if (path === "GET /api/v2/admin/collections/template-bundles")
+        return Promise.resolve(bundlesResponse);
+      if (path === "POST /api/v2/admin/collections/import/tmdb-list") {
+        return Promise.resolve({ collection: { id: "z" } });
+      }
+      throw new Error(`unexpected path: ${path}`);
+    });
+
+    await user.click(screen.getByText("Custom TMDB List"));
+    const submit = screen.getByRole("button", { name: /Create Collection/i });
+    expect(submit).toBeDisabled();
+
+    const url = screen.getByLabelText("TMDB list URL");
+    await user.type(url, "https://www.themoviedb.org/movie/550");
+    expect(url).toHaveAttribute("aria-invalid", "true");
+    expect(submit).toBeDisabled();
+
+    await user.clear(url);
+    await user.type(url, "https://www.themoviedb.org/list/310-my-movie-list");
+    expect(url).not.toHaveAttribute("aria-invalid");
+    await user.click(submit);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "POST /api/v2/admin/collections/import/tmdb-list",
+        expect.objectContaining({
+          body: expect.objectContaining({
+            url: "https://www.themoviedb.org/list/310-my-movie-list",
+            library_ids: ["1"],
+          }),
+        }),
       );
     });
   });

@@ -2333,21 +2333,36 @@ export function VideoPlayer({
     }
   }, []);
 
+  // Menus live inside the controls, so hiding the controls under an open menu
+  // leaves it inert (and Safari keeps painting its backdrop-filter surface).
+  const hasOpenPlayerMenu = useCallback(
+    () => containerRef.current?.querySelector('[role="menu"]') != null,
+    [],
+  );
+
   const resetControlsTimer = useCallback(() => {
     setControlsVisible(true);
     clearControlsTimer();
-    hideTimerRef.current = setTimeout(() => {
-      if (videoRef.current && !videoRef.current.paused) {
-        setControlsVisible(false);
-      }
-      hideTimerRef.current = null;
-    }, 3000);
-  }, [clearControlsTimer]);
+    const scheduleHide = () => {
+      hideTimerRef.current = setTimeout(() => {
+        if (hasOpenPlayerMenu()) {
+          scheduleHide();
+          return;
+        }
+        if (videoRef.current && !videoRef.current.paused) {
+          setControlsVisible(false);
+        }
+        hideTimerRef.current = null;
+      }, 3000);
+    };
+    scheduleHide();
+  }, [clearControlsTimer, hasOpenPlayerMenu]);
 
   const hideControlsOnMouseLeave = useCallback(() => {
+    if (hasOpenPlayerMenu()) return;
     clearControlsTimer();
     setControlsVisible(false);
-  }, [clearControlsTimer]);
+  }, [clearControlsTimer, hasOpenPlayerMenu]);
 
   // Show controls when paused, start hide timer when playing.
   useEffect(() => {

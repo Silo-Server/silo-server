@@ -225,7 +225,7 @@ export function PlayerControls({
       {compactControls && (
         <div className="player-compact-transport pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-[max(0.75rem,env(safe-area-inset-left))]">
           <div
-            className="pointer-events-auto flex items-center gap-2"
+            className={`flex items-center gap-2 ${visible ? "pointer-events-auto" : ""}`}
             onClick={(event) => event.stopPropagation()}
           >
             {showEpisodeSlots ? (

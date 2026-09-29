@@ -110,6 +110,7 @@ export function ChaptersMenu({
 
       {open && (
         <PlayerMenuSurface
+          anchorRef={menuRef}
           className="absolute right-0 bottom-full z-30 mb-2 flex max-h-[60vh] min-w-[280px] flex-col overflow-y-auto rounded-lg bg-black/90 py-1.5 shadow-xl backdrop-blur-sm"
           onClose={() => setOpen(false)}
           onKeyDown={handleMenuKeyDown}

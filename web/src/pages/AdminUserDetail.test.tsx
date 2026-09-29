@@ -70,7 +70,7 @@ const adminUser: AdminUser = {
     transcode_allowed: true,
     audio_transcode_allowed: true,
     download_allowed: true,
-    download_transcode_allowed: true,
+    download_transcode_allowed: false,
     requests_allowed: true,
     permissions: [],
   },
@@ -188,6 +188,15 @@ vi.mock("@/hooks/queries/admin/accessGroups", () => ({
 
 vi.mock("@/hooks/queries/admin/libraries", () => ({
   useAdminLibraries: () => ({ data: [] }),
+}));
+
+// The Requests section reads through react-query; its own test covers it.
+vi.mock("./admin-users/AccountRequestsPanel", () => ({
+  AccountRequestsPanel: ({ user, groupName }: { user: AdminUser; groupName?: string }) => (
+    <section aria-label="Requests">
+      Requests for {user.username} in {groupName ?? "no group"}
+    </section>
+  ),
 }));
 
 vi.mock("@/hooks/queries/admin/history", () => ({
@@ -480,6 +489,94 @@ async function selectGuestsGroup(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("AdminUserDetail inherit hints", () => {
+  it("uses the saved account's resolved policy when the group list is stale", async () => {
+    const user = userEvent.setup();
+    mocks.user = {
+      ...adminUser,
+      access_group_id: 5,
+      effective_policy: {
+        ...adminUser.effective_policy,
+        max_remote_stream_bitrate_kbps: 30_720,
+      },
+    };
+    renderUserDetail();
+
+    await openLimitsTab(user);
+
+    expect(screen.getByText("Inherited: 30.72 Mbps")).toBeInTheDocument();
+  });
+
+  it("uses the group policy after clearing an account override", async () => {
+    const user = userEvent.setup();
+    mocks.user = {
+      ...adminUser,
+      access_group_id: 5,
+      max_remote_stream_bitrate_kbps: 2_000,
+      effective_policy: {
+        ...adminUser.effective_policy,
+        max_remote_stream_bitrate_kbps: 2_000,
+      },
+    };
+    renderUserDetail();
+
+    await openLimitsTab(user);
+    await user.click(overrideSwitch(2));
+
+    expect(screen.getByText("Inherited: 8 Mbps")).toBeInTheDocument();
+    expect(screen.queryByText("Inherited: 2 Mbps")).not.toBeInTheDocument();
+  });
+
+  it("omits the hint for a cleared override when the group is not loaded", async () => {
+    const user = userEvent.setup();
+    mocks.user = {
+      ...adminUser,
+      access_group_id: 99,
+      max_remote_stream_bitrate_kbps: 2_000,
+      effective_policy: {
+        ...adminUser.effective_policy,
+        max_remote_stream_bitrate_kbps: 2_000,
+      },
+    };
+    renderUserDetail();
+
+    await openLimitsTab(user);
+    await user.click(overrideSwitch(2));
+
+    expect(screen.getByText("Inherited from group")).toBeInTheDocument();
+    expect(screen.queryByText("Inherited: 2 Mbps")).not.toBeInTheDocument();
+  });
+
+  it("omits unknown library and quality values when clearing overrides", async () => {
+    const user = userEvent.setup();
+    mocks.user = {
+      ...adminUser,
+      access_group_id: 99,
+      library_ids: [],
+      max_playback_quality: "1080p",
+      effective_policy: {
+        ...adminUser.effective_policy,
+        library_ids: [],
+        max_playback_quality: "1080p",
+      },
+    };
+    renderUserDetail();
+
+    await user.click(screen.getByRole("button", { name: /edit/i }));
+    await user.click(screen.getByRole("tab", { name: "Access" }));
+    const libraryControl = within(screen.getByRole("dialog")).getByText(
+      "Library Access",
+    ).parentElement!;
+    await user.click(within(libraryControl).getByRole("switch"));
+    expect(screen.getByText("Inherited from group")).toBeInTheDocument();
+    expect(screen.queryByText("Inherited: All libraries")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Limits" }));
+    const quality = screen.getByRole("combobox", { name: "Max Playback Quality" });
+    await user.click(quality);
+    await user.click(await screen.findByRole("option", { name: "Inherited from group" }));
+    expect(quality).toHaveTextContent("Inherited from group");
+  });
+
   it("derives hints from the group selected in the dialog, on both tabs", async () => {
     const user = userEvent.setup();
     renderUserDetail();
@@ -689,6 +786,17 @@ describe("AdminUserDetail effective values", () => {
     renderUserDetail();
 
     expect(rowValue("Audio Transcodes")).toBe("Not allowed");
+  });
+
+  it("shows the Requests section with the account's group", () => {
+    mocks.user = { ...adminUser, access_group_id: 3 };
+    renderUserDetail();
+
+    expect(screen.getByRole("region", { name: "Requests" })).toHaveTextContent(
+      "Requests for taylor in Kids",
+    );
+    // The requests switch stays with the account's other effective values.
+    expect(rowValue("Media Requests")).toBe("Allowed");
   });
 });
 

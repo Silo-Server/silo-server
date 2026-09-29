@@ -120,6 +120,9 @@ func TestJobClaimRecoveryAndTerminalRace(t *testing.T) {
 			if err = stale.UpdateProgress(t.Context(), queued.ID, 9, 10, "stale"); !errors.Is(err, ErrJobNotFound) {
 				t.Fatalf("stale progress %v", err)
 			}
+			if err = stale.Yield(t.Context(), queued.ID, 9, 10, "stale", nil); !errors.Is(err, ErrJobNotFound) {
+				t.Fatalf("stale yield %v", err)
+			}
 			owner := r.withClaim(fresh)
 			start := make(chan struct{})
 			results := make(chan error, 2)

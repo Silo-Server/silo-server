@@ -22,6 +22,7 @@ export const SAMPLE_MOVIE_DATA: OverlayData = {
   rating_rt_critic: 96,
   rating_rt_audience: 92,
   content_rating: "PG-13",
+  advisory_age: 13,
   year: 2024,
   runtime: 148,
   original_language: "EN",

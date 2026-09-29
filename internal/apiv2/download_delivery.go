@@ -78,6 +78,11 @@ func registerDownloadDelivery(reg *Registry) {
 				op.Responses["307"].Content = map[string]*huma.MediaType{"text/html": {Schema: &huma.Schema{Type: huma.TypeString}}}
 			}
 		}
+		if route.kind == "artwork" {
+			op.Responses["503"] = problem("Service Unavailable")
+			op.Responses["503"].Headers = map[string]*huma.Header{}
+			op.Responses["503"].Headers["Retry-After"] = &huma.Header{Schema: &huma.Schema{Type: huma.TypeString}, Description: "Seconds to wait before retrying when the artwork store failed or could not be reached."}
+		}
 		RegisterRaw(reg, RawOperation{Operation: Operation{Operation: op, Class: ClassProfileScoped, ServiceBacked: true}, Protocol: "managed-download-" + route.kind, Reason: "Offline media and assets are binary streams; file routes preserve HTTP range, conditional and optional proxy semantics."}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			reg.serveDownloadDelivery(w, r, route.kind, route.proxy)
 		}))
@@ -95,14 +100,20 @@ func (reg *Registry) serveDownloadDelivery(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writer := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
+	// Artwork and subtitles are copied from stores that can fail on the first
+	// read. Hiding ReadFrom leaves the wrapper to commit 200 on the first byte
+	// written rather than before the first read, so that failure still gets
+	// its problem response. Files keep ReadFrom for sendfile; ServeContent
+	// writes their header before copying anyway.
+	asset := struct{ http.ResponseWriter }{writer}
 	var err error
 	switch kind {
 	case "file":
 		err = reg.deps.DownloadDelivery.ServeDownloadFile(writer, r, id, proxy)
 	case "artwork":
-		err = reg.deps.DownloadDelivery.ServeDownloadArtwork(writer, r, id, chi.URLParam(r, "kind"))
+		err = reg.deps.DownloadDelivery.ServeDownloadArtwork(asset, r, id, chi.URLParam(r, "kind"))
 	case "subtitle":
-		err = reg.deps.DownloadDelivery.ServeDownloadSubtitle(writer, r, id, chi.URLParam(r, "ref"))
+		err = reg.deps.DownloadDelivery.ServeDownloadSubtitle(asset, r, id, chi.URLParam(r, "ref"))
 	}
 	if err == nil || writer.Status() != 0 {
 		return

@@ -2342,23 +2342,36 @@ func (s *Service) syncMemberToRoomLocked(live *liveRoom, sessionID string) []com
 	if sessionID == "" {
 		return nil
 	}
+	var dispatches []commandDispatch
 	if live.room.PlaybackState == RoomPlaybackStateWaiting && live.command != nil && live.command.SelectionRevision == live.room.SelectionRevision {
-		return s.targetedCommandDispatchesLocked(live, sessionID, *live.command)
+		dispatches = s.targetedCommandDispatchesLocked(live, sessionID, *live.command)
+	} else {
+		position := expectedPosition(live.room, s.now())
+		action := TransportActionPause
+		if live.room.PlaybackState == RoomPlaybackStatePlaying {
+			action = TransportActionPlay
+		}
+		dispatches = s.targetedCommandDispatchesLocked(live, sessionID, TransportCommand{
+			CommandID:         uuid.NewString(),
+			SelectionRevision: live.room.SelectionRevision,
+			Action:            action,
+			PositionSeconds:   math.Max(0, position),
+			ExecuteAt:         s.now().Add(s.highestPingLocked(live)).UTC().Format(time.RFC3339Nano),
+			IssuedAt:          s.now().UTC().Format(time.RFC3339Nano),
+			PlaybackState:     live.room.PlaybackState,
+		})
 	}
-	position := expectedPosition(live.room, s.now())
-	action := TransportActionPause
-	if live.room.PlaybackState == RoomPlaybackStatePlaying {
-		action = TransportActionPlay
+	// The sync brings the member to where the room is now, so the room's last
+	// command has nothing left to deliver to it. Connect clears the mark for
+	// every new socket; left clear, the reconciler resends that command after
+	// a socket renewal, and the member applies it on top of the sync,
+	// projected from when it first ran.
+	if live.command != nil {
+		for _, dispatch := range dispatches {
+			live.members[dispatch.memberKey].lastCommandID = live.command.CommandID
+		}
 	}
-	return s.targetedCommandDispatchesLocked(live, sessionID, TransportCommand{
-		CommandID:         uuid.NewString(),
-		SelectionRevision: live.room.SelectionRevision,
-		Action:            action,
-		PositionSeconds:   math.Max(0, position),
-		ExecuteAt:         s.now().Add(s.highestPingLocked(live)).UTC().Format(time.RFC3339Nano),
-		IssuedAt:          s.now().UTC().Format(time.RFC3339Nano),
-		PlaybackState:     live.room.PlaybackState,
-	})
+	return dispatches
 }
 
 func expectedPosition(room Room, now time.Time) float64 {

@@ -1,114 +1,186 @@
 package notifications
 
 import (
-	"bytes"
 	"context"
 	"log/slog"
-	"slices"
-	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/requests"
 )
 
-type recordedServerRequestEvent struct {
-	event string
-	info  RequestEventInfo
+type fakeFulfillmentBackend struct {
+	disabled    map[string]bool
+	deliveries  []Delivery
+	channelPost int
 }
 
-// recordingRequestLifecycleBackend stands in for *System. Both backend methods
-// detach in production, so recording them synchronously here keeps the
-// adapter's decisions observable without a goroutine to join.
-type recordingRequestLifecycleBackend struct {
-	serverEvents       []recordedServerRequestEvent
-	personalDeliveries []string
+func (f *fakeFulfillmentBackend) PostServerChannelRequestEvent(context.Context, string, RequestEventInfo) {
+	f.channelPost++
 }
 
-func (b *recordingRequestLifecycleBackend) PostServerChannelRequestEvent(
-	_ context.Context,
-	event string,
-	info RequestEventInfo,
-) {
-	b.serverEvents = append(b.serverEvents, recordedServerRequestEvent{event: event, info: info})
+func (f *fakeFulfillmentBackend) notificationsEnabled(_ context.Context, profileID string) (bool, error) {
+	return !f.disabled[profileID], nil
 }
 
-func (b *recordingRequestLifecycleBackend) dispatchRequestLifecycleDetached(
-	_ context.Context,
-	_ requests.Request,
-	deliveryType string,
-) {
-	b.personalDeliveries = append(b.personalDeliveries, deliveryType)
+func (f *fakeFulfillmentBackend) dispatchFulfilled(_ context.Context, delivery Delivery) error {
+	f.deliveries = append(f.deliveries, delivery)
+	return nil
 }
 
-// approve runs one approval through the adapter, checks the server-channel
-// broadcast that every origin owes, and returns the backend plus whatever was
-// logged for the personal-delivery assertions below.
-func approve(t *testing.T, origin requests.ApprovalOrigin) (*recordingRequestLifecycleBackend, string) {
-	t.Helper()
-	var logs bytes.Buffer
-	backend := &recordingRequestLifecycleBackend{}
-	notifier := &RequestLifecycleNotifier{backend: backend, logger: slog.New(slog.NewTextHandler(&logs, nil))}
-
-	notifier.RequestApproved(context.Background(), requests.Request{
-		ID:                   "req-1",
-		MediaType:            requests.MediaTypeMovie,
-		TMDBID:               550,
-		Title:                "Fight Club",
-		RequestedByUserID:    7,
-		RequestedByProfileID: "profile-7",
-	}, origin)
-
-	if len(backend.serverEvents) != 1 {
-		t.Fatalf("server events = %+v, want one approval event", backend.serverEvents)
-	}
-	got := backend.serverEvents[0]
-	if got.event != ServerChannelEventRequestApproved || got.info.RequestID != "req-1" {
-		t.Fatalf("server event = %+v, want request.approved for req-1", got)
-	}
-	return backend, logs.String()
-}
-
-func TestRequestApprovedByAdminKeepsServerAndPersonalDelivery(t *testing.T) {
-	backend, _ := approve(t, requests.ApprovalOriginAdmin)
-
-	want := []string{DeliveryTypeRequestApproved}
-	if !slices.Equal(backend.personalDeliveries, want) {
-		t.Fatalf("personal deliveries = %v, want %v", backend.personalDeliveries, want)
+func fulfilledRequest(followers ...requests.Follower) requests.Request {
+	return requests.Request{
+		ID: "req-1", MediaType: requests.MediaTypeMovie, TMDBID: 949, Title: "Heat",
+		RequestedByUserID: 1, RequestedByProfileID: "requester", Followers: followers,
 	}
 }
 
-func TestRequestApprovedByPolicyKeepsServerEventAndSkipsPersonalDelivery(t *testing.T) {
-	backend, logs := approve(t, requests.ApprovalOriginPolicy)
+func TestNotifyFulfilledTellsRequesterAndFollowers(t *testing.T) {
+	backend := &fakeFulfillmentBackend{disabled: map[string]bool{"muted": true}}
+	notifier := &RequestFulfillmentNotifier{backend: backend}
 
-	if len(backend.personalDeliveries) != 0 {
-		t.Fatalf("personal deliveries = %v, want none", backend.personalDeliveries)
+	err := notifier.NotifyFulfilled(context.Background(), fulfilledRequest(
+		requests.Follower{UserID: 2, ProfileID: "follower"},
+		requests.Follower{UserID: 1, ProfileID: "requester"}, // a leftover follow by the requester
+		requests.Follower{UserID: 3, ProfileID: "muted"},
+	), "movie-tmdb-949")
+	if err != nil {
+		t.Fatalf("NotifyFulfilled: %v", err)
 	}
-	if strings.Contains(logs, "unrecognized request approval origin") {
-		t.Fatalf("auto-approval logged an unrecognized origin: %s", logs)
+	if len(backend.deliveries) != 2 {
+		t.Fatalf("deliveries = %+v, want the requester and the one unmuted follower", backend.deliveries)
+	}
+	requester, follower := backend.deliveries[0], backend.deliveries[1]
+	if requester.ProfileID != "requester" || parseRequestFlags(requester.ReasonFlags).Follower {
+		t.Fatalf("first delivery = %+v, want the requester's own copy", requester)
+	}
+	if follower.ProfileID != "follower" || follower.UserID != 2 || !parseRequestFlags(follower.ReasonFlags).Follower {
+		t.Fatalf("second delivery = %+v, want the follower's copy marked as such", follower)
+	}
+	if flags := parseRequestFlags(follower.ReasonFlags); flags.RequestID != "req-1" || flags.TMDBID != 949 {
+		t.Fatalf("follower flags = %+v, want the request identity", flags)
+	}
+	// The server-wide post waits for AnnounceFulfilled, which the caller runs
+	// once the request is stamped, so a retried delivery never repeats it.
+	if backend.channelPost != 0 {
+		t.Fatalf("channel posts after NotifyFulfilled = %d, want none", backend.channelPost)
+	}
+	notifier.AnnounceFulfilled(context.Background(), fulfilledRequest())
+	if backend.channelPost != 1 {
+		t.Fatalf("channel posts after AnnounceFulfilled = %d, want 1", backend.channelPost)
 	}
 }
 
-// An origin this build does not know about must fail closed: a future
-// policy-driven approval path may not silently resurrect the requester notice
-// (issue #590). The warning is that trade-off's safety net.
-func TestRequestApprovedUnknownOriginSkipsPersonalDeliveryAndWarns(t *testing.T) {
-	cases := []struct {
-		name   string
-		origin requests.ApprovalOrigin
-	}{
-		{name: "unspecified", origin: requests.ApprovalOriginUnspecified},
-		{name: "unknown", origin: requests.ApprovalOrigin("future")},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			backend, logs := approve(t, tc.origin)
+// Profile ids repeat across accounts, so a follower on another account whose
+// profile id matches the requester's is still a separate recipient.
+func TestNotifyFulfilledKeysRecipientsByAccount(t *testing.T) {
+	backend := &fakeFulfillmentBackend{}
+	notifier := &RequestFulfillmentNotifier{backend: backend}
+	req := fulfilledRequest(requests.Follower{UserID: 2, ProfileID: "default"})
+	req.RequestedByProfileID = "default"
 
-			if len(backend.personalDeliveries) != 0 {
-				t.Fatalf("personal deliveries = %v, want none", backend.personalDeliveries)
-			}
-			if !strings.Contains(logs, "unrecognized request approval origin") {
-				t.Fatalf("logs = %q, want a warning about the unrecognized origin", logs)
-			}
-		})
+	if err := notifier.NotifyFulfilled(context.Background(), req, "movie-tmdb-949"); err != nil {
+		t.Fatalf("NotifyFulfilled: %v", err)
+	}
+	if len(backend.deliveries) != 2 || backend.deliveries[1].UserID != 2 || !parseRequestFlags(backend.deliveries[1].ReasonFlags).Follower {
+		t.Fatalf("deliveries = %+v, want the requester and the other account's follower", backend.deliveries)
+	}
+}
+
+func TestFulfilledCopyForFollowers(t *testing.T) {
+	requester := DeliveryRow{Delivery: Delivery{Type: DeliveryTypeRequestFulfilled, ReasonFlags: []byte(`{"request_id":"req-1"}`)}}
+	follower := DeliveryRow{Delivery: Delivery{Type: DeliveryTypeRequestFulfilled, ReasonFlags: []byte(`{"request_id":"req-1","follower":true}`)}}
+
+	if got := BuildNotificationDisplay(requester); got.Title != "Your request is now available" {
+		t.Fatalf("requester title = %q", got.Title)
+	}
+	if got := BuildNotificationDisplay(follower); got.Title != followedTitleAvailable || got.Body == "Your media request has arrived in the library." {
+		t.Fatalf("follower display = %+v, want copy that does not claim the request", got)
+	}
+	if got := requestLine(follower); got != followedTitleAvailable {
+		t.Fatalf("follower email line = %q", got)
+	}
+	if got := discordEmbedAuthorLine(follower); got != "Now available on Silo" {
+		t.Fatalf("follower Discord author = %q", got)
+	}
+}
+
+// Two accounts' legacy "default" profiles, one the requester and one a
+// follower, each get exactly one request.fulfilled delivery, on their own
+// account, and only their own account's devices are pushed. A second pass is
+// deduped per account.
+func TestNotifyFulfilledDeliversOncePerAccountForSharedProfileID(t *testing.T) {
+	p := inboxPageDB(t)
+	ctx := t.Context()
+	if _, err := p.Exec(ctx, `
+		CREATE TABLE push_devices (LIKE public.push_devices INCLUDING ALL);
+		CREATE TABLE push_delivery_attempts (LIKE public.push_delivery_attempts INCLUDING ALL);
+		INSERT INTO push_devices
+			(id, user_id, profile_id, device_id, platform, provider, apns_environment, apns_topic,
+			 apns_token_ciphertext, apns_token_hash, server_device_id, push_mode, enabled)
+		VALUES
+			('device-account-1', 1, 'default', 'local-1', 'apple', 'silo_relay', 'sandbox',
+			 'org.siloserver.silo', 'ciphertext', 'hash-1', 'server-1', 'private_push', true),
+			('device-account-2', 2, 'default', 'local-2', 'apple', 'silo_relay', 'sandbox',
+			 'org.siloserver.silo', 'ciphertext', 'hash-2', 'server-2', 'private_push', true)`); err != nil {
+		t.Fatalf("create push tables: %v", err)
+	}
+	system := &System{
+		pool:           p,
+		Settings:       NewSettings(mapSettingReader{SettingApplePushDeliveryEnabled: "true"}),
+		Deliveries:     NewDeliveryRepository(p),
+		Preferences:    NewPreferencesRepository(p),
+		pushDeviceRepo: NewPushDeviceRepository(p),
+		dispatcher:     NewMultiDispatcher(),
+		logger:         slog.New(slog.DiscardHandler),
+	}
+	notifier := NewRequestFulfillmentNotifier(system)
+	req := fulfilledRequest(requests.Follower{UserID: 2, ProfileID: "default"})
+	req.RequestedByProfileID = "default"
+
+	for range 2 {
+		if err := notifier.NotifyFulfilled(ctx, req, "movie-tmdb-949"); err != nil {
+			t.Fatalf("NotifyFulfilled: %v", err)
+		}
+	}
+
+	rows, err := p.Query(ctx, `
+		SELECT d.id, d.user_id, d.reason_flags, a.push_device_id
+		FROM notification_deliveries d
+		LEFT JOIN push_delivery_attempts a ON a.notification_delivery_id = d.id
+		WHERE d.type = $1
+		ORDER BY d.user_id, a.push_device_id`, DeliveryTypeRequestFulfilled)
+	if err != nil {
+		t.Fatalf("query deliveries: %v", err)
+	}
+	type got struct {
+		userID   int
+		follower bool
+		device   *string
+	}
+	var out []got
+	for rows.Next() {
+		var id string
+		var row got
+		var flags []byte
+		if err := rows.Scan(&id, &row.userID, &flags, &row.device); err != nil {
+			t.Fatalf("scan delivery: %v", err)
+		}
+		row.follower = parseRequestFlags(flags).Follower
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read deliveries: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("deliveries with push attempts = %+v, want one per account", out)
+	}
+	for i, want := range []struct {
+		userID   int
+		follower bool
+		device   string
+	}{{1, false, "device-account-1"}, {2, true, "device-account-2"}} {
+		if out[i].userID != want.userID || out[i].follower != want.follower || out[i].device == nil || *out[i].device != want.device {
+			t.Fatalf("delivery %d = {user %d follower %v device %v}, want %+v", i, out[i].userID, out[i].follower, out[i].device, want)
+		}
 	}
 }

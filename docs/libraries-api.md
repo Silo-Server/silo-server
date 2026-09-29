@@ -29,6 +29,46 @@ Library poster uploads allow a file of up to 10 MiB plus 1 MiB of multipart fram
 The file limit is checked separately from the total request size. Accepted library
 deletion and metadata-refresh jobs return their canonical job URI in `Location`.
 
+## Real-time monitoring
+
+The v2 library resource carries `realtime_monitoring`, the library's real-time
+monitoring switch: scan automatically when files in the library's folders
+change. It appears on every library read, is optional on `createLibrary`
+(omitted means `true`), and is an optional, non-nullable member of the
+`updateLibrary` body (omitted leaves it unchanged). Existing libraries have it
+on. Monitoring takes effect only while the server-wide
+`scanner.realtime_monitoring` setting is on and the library is enabled.
+The frozen `/api/v1` library routes neither return nor accept the member, and a
+v1 update leaves it unchanged.
+
+`GET /api/v2/libraries/realtime-monitoring` (`getLibraryRealtimeMonitoring`,
+administrators only) reports whether monitoring works for each library. The body
+is `server_enabled` (the server-wide setting) and `libraries`, one entry per
+library ordered by `sort_order` then ID. Each entry carries `library_id`,
+`enabled` (the library's own switch), `state`, `backend` (`inotify`, or empty
+when the node records no folder), `detail`, and `directories`. `node_id` and `updated_at` name the
+server node whose report the state comes from, and are omitted when the state
+does not come from a node report.
+
+Monitoring is node-local: every API or integrated node monitors the library
+folders it can see, stores one status row per library, refreshes it every 60
+seconds, and deletes its rows on clean shutdown. A report older than 3 minutes
+is ignored. `state` is the first that applies:
+
+| State | Meaning |
+|---|---|
+| `server_disabled` | `scanner.realtime_monitoring` is off. |
+| `library_disabled` | The library is disabled. |
+| `monitoring_off` | The library's `realtime_monitoring` switch is off. |
+| `not_reporting` | No node has a fresh report; no node can see the library's folders. |
+| node report | The best state any node reported: `monitoring`, then `starting`, `limit_reached`, `root_unavailable`, `unsupported_filesystem`, `unsupported_platform`, `error`. |
+
+`GET /api/v2/libraries/capabilities` (`getLibraryCapabilities`, administrators
+only) is the feature-detection document for these library features; it answers
+`realtime_monitoring: true` alongside the common capability members.
+
+Scans the monitor queues carry the trigger `realtime_monitor`.
+
 
 ## Accepted library work
 

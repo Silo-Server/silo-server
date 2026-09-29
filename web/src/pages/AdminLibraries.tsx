@@ -26,6 +26,7 @@ import {
   useDeleteLibrary,
   useScanLibrary,
   useScanAllLibraries,
+  useLibraryRealtimeMonitoring,
   useLibraryRefreshJobs,
   useRefreshLibraryMetadata,
   useCancelAdminJob,
@@ -38,6 +39,7 @@ import { buildLibraryReorderEntries } from "./adminLibraryOrder";
 import MatchItemDialog from "@/components/MatchItemDialog";
 import { LibraryEditorDialog } from "@/components/admin/libraries/LibraryEditorDialog";
 import { LibraryRefreshDialog } from "@/components/admin/libraries/LibraryRefreshDialog";
+import { RealtimeMonitoringBadge } from "@/components/admin/libraries/RealtimeMonitoringBadge";
 import { MetadataMatcherQueuesSection } from "@/components/admin/libraries/MetadataMatcherQueuesSection";
 import { CollapsibleDiagnosticsSection } from "@/components/admin/CollapsibleDiagnosticsSection";
 import { Button } from "@/components/ui/button";
@@ -166,6 +168,11 @@ export default function AdminLibraries() {
 
   const { data: libraries = [], isLoading } = useAdminLibraries();
   const { data: activeScans = [] } = useActiveScans();
+  const { data: realtimeMonitoring } = useLibraryRealtimeMonitoring();
+  const realtimeMonitoringByLibraryId = useMemo(
+    () => new Map(realtimeMonitoring?.libraries.map((entry) => [entry.library_id, entry]) ?? []),
+    [realtimeMonitoring],
+  );
   const refreshJobsQuery = useLibraryRefreshJobs();
   const libraryRefreshJobs = useMemo(() => refreshJobsQuery.data ?? [], [refreshJobsQuery.data]);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -524,6 +531,9 @@ export default function AdminLibraries() {
                                 {lib.scan_warning_code === "partial_walk" ? (
                                   <Badge variant="destructive">Partial scan</Badge>
                                 ) : null}
+                                <RealtimeMonitoringBadge
+                                  entry={realtimeMonitoringByLibraryId.get(lib.id)}
+                                />
                               </div>
                             </TableCell>
                             <TableCell className="text-muted-foreground text-xs">

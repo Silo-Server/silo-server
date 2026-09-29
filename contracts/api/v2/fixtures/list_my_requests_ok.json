@@ -9,9 +9,11 @@
       "year": 1995,
       "status": "pending",
       "outcome": "active",
+      "state": "pending",
+      "seasons": [],
+      "season_progress": [],
       "requested_by_user_id": "1",
       "requested_by_profile_id": "p-owner",
-      "integration_kind": "radarr",
       "is_anime": false,
       "targets": [
         {
@@ -35,11 +37,13 @@
       "tmdb_id": 949,
       "title": "Heat",
       "year": 1995,
-      "status": "approved",
+      "status": "downloading",
       "outcome": "active",
+      "state": "processing",
+      "seasons": [],
+      "season_progress": [],
       "requested_by_user_id": "1",
       "requested_by_profile_id": "p-owner",
-      "integration_kind": "radarr",
       "is_anime": false,
       "targets": [
         {
@@ -47,14 +51,32 @@
           "request_id": "r-1",
           "quality": "1080p",
           "is_anime": false,
-          "status": "queued",
+          "status": "downloading",
           "created_at": "2026-01-02T03:04:05.678Z",
-          "updated_at": "2026-01-02T03:04:05.678Z"
+          "updated_at": "2026-01-02T03:04:05.678Z",
+          "download": {
+            "phase": "downloading",
+            "percent": 43,
+            "bytes_total": 4294967296,
+            "bytes_left": 2448131358,
+            "estimated_completion_at": "2026-01-02T03:16:05.678Z",
+            "downloads": 1,
+            "updated_at": "2026-01-02T03:04:05.678Z"
+          }
         }
       ],
       "created_at": "2026-01-02T03:04:05.678Z",
       "updated_at": "2026-01-02T03:04:05.678Z",
-      "approved_at": "2026-01-02T03:04:05.678Z"
+      "approved_at": "2026-01-02T03:04:05.678Z",
+      "download": {
+        "phase": "downloading",
+        "percent": 43,
+        "bytes_total": 4294967296,
+        "bytes_left": 2448131358,
+        "estimated_completion_at": "2026-01-02T03:16:05.678Z",
+        "downloads": 1,
+        "updated_at": "2026-01-02T03:04:05.678Z"
+      }
     }
   ],
   "page": {

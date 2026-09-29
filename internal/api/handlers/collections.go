@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -534,14 +533,13 @@ func (h *CollectionHandler) processCollectionPoster(
 	if artwork == nil {
 		return true, fmt.Errorf("poster upload requires configured artwork storage")
 	}
-	// Decode and store before pruning so a file that cannot be decoded or
-	// stored never leaves the collection without a poster. The variant keys
-	// are fixed, so storing overwrites the current poster in place.
-	variants, err := generateCollectionImageVariants("poster", fileData)
+	existing, err := store.GetCollection(ctx, collectionID)
 	if err != nil {
-		return true, fmt.Errorf("poster: %w", err)
+		return true, fmt.Errorf("loading collection: %w", err)
 	}
-	s3Path, thumbhash, err := storeCollectionImageVariants(ctx, artwork, userCollectionImagePrefix, collectionID, "poster", variants)
+	// Revisioned keys (issue #1258) put the replacement under a new key, so
+	// the current poster stays in place until the new path is committed.
+	s3Path, thumbhash, err := uploadCollectionImageVariants(ctx, artwork, userCollectionImagePrefix, collectionID, collectionImagePoster, fileData)
 	if err != nil {
 		return true, fmt.Errorf("poster: %w", err)
 	}
@@ -557,10 +555,13 @@ func (h *CollectionHandler) processCollectionPoster(
 		}
 		return true, fmt.Errorf("persisting poster: %w", err)
 	}
-	if err := pruneCollectionImageVariants(ctx, artwork, userCollectionImagePrefix, collectionID, "poster", variants); err != nil {
-		slog.WarnContext(ctx, "failed to prune stale collection poster variants", "component", "api",
-			"collection_id", collectionID, "error", err)
-	}
+	cleanUpReplacedCollectionImage(ctx, artwork, userCollectionImagePrefix, collectionID, collectionImagePoster, existing.PosterURL, func(ctx context.Context) (string, error) {
+		current, err := store.GetCollection(ctx, collectionID)
+		if err != nil {
+			return "", err
+		}
+		return current.PosterURL, nil
+	})
 	return true, nil
 }
 

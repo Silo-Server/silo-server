@@ -56,7 +56,7 @@ func (s *Service) SyncSubscriptionPage(ctx context.Context, userID int, profileI
 	if err != nil {
 		return SubscriptionSyncPage{}, err
 	}
-	items, err := s.subscriptionEpisodeItems(ctx, sub, episodes)
+	items, err := s.subscriptionEpisodeItems(ctx, sub, episodes, true, filter)
 	if err != nil {
 		return SubscriptionSyncPage{}, err
 	}

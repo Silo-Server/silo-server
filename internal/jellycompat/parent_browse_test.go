@@ -57,6 +57,18 @@ func (f *fakeSeasonEpisodeRepo) ListBySeason(_ context.Context, seriesID string,
 	return f.bySeason[episodeBySeasonKey(seriesID, seasonNum)], nil
 }
 
+func (f *fakeSeasonEpisodeRepo) ListBySeriesIDs(ctx context.Context, seriesIDs []string) (map[string][]*models.Episode, error) {
+	out := make(map[string][]*models.Episode, len(seriesIDs))
+	for _, seriesID := range seriesIDs {
+		episodes, err := f.ListBySeries(ctx, seriesID)
+		if err != nil {
+			return nil, err
+		}
+		out[seriesID] = episodes
+	}
+	return out, nil
+}
+
 func (f *fakeSeasonEpisodeRepo) ListBySeries(_ context.Context, seriesID string) ([]*models.Episode, error) {
 	var out []*models.Episode
 	for key, eps := range f.bySeason {

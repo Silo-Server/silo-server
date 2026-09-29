@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import Notifications from "./Notifications";
 const state = vi.hoisted(() => ({
   list: {
@@ -67,6 +68,105 @@ it("retains partial rows and requires explicit reload after a mark-all failure",
   await waitFor(() => expect(state.all.reset).toHaveBeenCalledOnce());
   expect(state.list.restart).toHaveBeenCalledOnce();
   expect(state.all.mutateAsync).not.toHaveBeenCalled();
+});
+it.each([
+  [
+    "request.approved",
+    { media_type: "movie", tmdb_id: 603, title: "The Matrix" },
+    "/title/movie/603",
+  ],
+  [
+    "request.declined",
+    { media_type: "series", tmdb_id: 1399, title: "A Show" },
+    "/title/series/1399",
+  ],
+])("links a %s row to the title's page", (type, flags, href) => {
+  state.list.data = {
+    pages: [{ notifications: [{ ...row, type, reason_flags: flags }], read_cutoff: "c" }],
+  };
+  render(
+    <MemoryRouter>
+      <Notifications />
+    </MemoryRouter>,
+  );
+  expect(screen.getByRole("link", { name: new RegExp(flags.title) })).toHaveAttribute("href", href);
+});
+it("keeps a fulfilled request linked to its catalog item", () => {
+  state.list.data = {
+    pages: [
+      {
+        notifications: [
+          {
+            ...row,
+            type: "request.fulfilled",
+            series_id: "movie-603",
+            series_title: "The Matrix",
+            reason_flags: { media_type: "movie", tmdb_id: 603 },
+          },
+        ],
+        read_cutoff: "c",
+      },
+    ],
+  };
+  render(
+    <MemoryRouter>
+      <Notifications />
+    </MemoryRouter>,
+  );
+  expect(screen.getByRole("link", { name: /The Matrix/ })).toHaveAttribute(
+    "href",
+    "/item/movie-603",
+  );
+});
+it.each([
+  [{ media_type: "movie", tmdb_id: 603 }, "Your requested movie is now available"],
+  [{ media_type: "movie", tmdb_id: 603, follower: true }, "A movie you followed is now available"],
+])("words a fulfilled row for the requester or a follower (%o)", (flags, text) => {
+  state.list.data = {
+    pages: [
+      {
+        notifications: [
+          {
+            ...row,
+            type: "request.fulfilled",
+            series_id: "movie-603",
+            series_title: "The Matrix",
+            reason_flags: flags,
+          },
+        ],
+        read_cutoff: "c",
+      },
+    ],
+  };
+  render(
+    <MemoryRouter>
+      <Notifications />
+    </MemoryRouter>,
+  );
+  expect(screen.getByText(text)).toBeInTheDocument();
+});
+it("leaves a request row unlinked when its payload lacks the TMDB id", () => {
+  state.list.data = {
+    pages: [
+      {
+        notifications: [
+          {
+            ...row,
+            type: "request.approved",
+            reason_flags: { title: "No Id", media_type: "movie" },
+          },
+        ],
+        read_cutoff: "c",
+      },
+    ],
+  };
+  render(
+    <MemoryRouter>
+      <Notifications />
+    </MemoryRouter>,
+  );
+  expect(screen.getByText("No Id")).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: /No Id/ })).not.toBeInTheDocument();
 });
 it("does not describe failed initial loading as an empty inbox or permit an unbounded read-all", () => {
   state.list.data = undefined;

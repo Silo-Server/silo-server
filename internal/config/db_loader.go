@@ -286,6 +286,11 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		fileRemovalGrace = 0
 	}
 	cfg.Scanner.FileRemovalGrace = fileRemovalGrace
+	realtimeMonitoring, err := boolOr(m, "scanner.realtime_monitoring", true)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Scanner.RealtimeMonitoring = realtimeMonitoring
 
 	// Matcher
 	matcherWorkers, err := intOr(m, "matcher.workers", 8)

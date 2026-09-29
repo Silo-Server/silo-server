@@ -27,6 +27,14 @@ Durable architecture and contracts live under `docs/architecture/`.
 Implementation plans and working notes belong in the issue or pull request, not
 in the repository.
 
+Documentation in this repository is for people and coding agents changing the
+code: architecture, invariants, API contracts, and development setup. Guides
+for installing, configuring, operating, or troubleshooting Silo belong in the
+[user manual](https://siloserver.org/docs), which lives in
+[Silo-Server/siloserver.org](https://github.com/Silo-Server/siloserver.org).
+This repository does not accept operator or user guides; open those pull
+requests against the website repository instead.
+
 Choose the repository that owns the behavior before implementation begins.
 This repository owns the backend, web app, native API, Jellyfin compatibility,
 and plugin host. Client-only work belongs in `silo-apple` or `silo-android`;
@@ -144,6 +152,43 @@ Summarize the relevant commands and results in the pull request. Name required
 checks that were skipped or failed, and include short output excerpts only when
 they help explain a failure. Describe the test environment without identifying
 private infrastructure. Never claim a check passed or ran on a target it did not.
+
+## Update the user manual
+
+The user manual and feature pages on [siloserver.org](https://siloserver.org)
+live in a separate repository,
+[Silo-Server/siloserver.org](https://github.com/Silo-Server/siloserver.org),
+and nothing updates them automatically. To write or fix a guide, open a pull
+request there. When a code change here leaves the site wrong or incomplete,
+open an issue there.
+
+A change needs a docs issue when it:
+
+- adds, renames, or removes a setting, menu item, or screen, or changes a
+  default;
+- changes what a feature does or supports, or how to set it up, including
+  installation, Docker, environment variables, storage, and plugins;
+- makes anything else on the site inaccurate, such as a feature description.
+
+Fixes that make Silo behave the way the manual already says, internal
+refactors, and changes users cannot see do not need one. If you are unsure,
+search the site for the feature.
+
+Open the issue when the pull request is ready for review, or as soon as you
+notice that an already merged change needs one. Reference the pull request as
+`Silo-Server/silo-server#NNN` so GitHub links the two, and say that the site
+update waits for it to merge. In the issue:
+
+- say what changed for users;
+- list the pages to update and what each now gets wrong, with labels and
+  defaults copied from the app source;
+- note what is out of scope, such as apps that need no change.
+
+[#29](https://github.com/Silo-Server/siloserver.org/issues/29) and
+[#30](https://github.com/Silo-Server/siloserver.org/issues/30) are examples.
+If an open issue already covers the same pages, comment on it instead. Update
+the issue when review changes the behavior, and close it if the pull request
+closes without merging.
 
 ## AI-assisted contributions
 

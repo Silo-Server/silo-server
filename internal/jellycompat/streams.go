@@ -44,6 +44,23 @@ const (
 	compatPlaybackRouteUnboundCode     = "PlaybackRouteUnbound"
 )
 
+func compatSourceTargetVideoCodec(source PlaybackMediaSource) string {
+	if compatHLSCopiesVideo(source) {
+		return compatCopyCodec
+	}
+	if strings.EqualFold(strings.TrimSpace(source.TargetVideoCodec), compatVideoCodecHEVC) {
+		return compatVideoCodecHEVC
+	}
+	return compatTargetVideoCodec
+}
+
+func compatSourceVideoSampleEntry(source PlaybackMediaSource) string {
+	if compatSourceTargetVideoCodec(source) == compatVideoCodecHEVC {
+		return playback.VideoSampleEntryHVC1
+	}
+	return ""
+}
+
 var errServerBitrateScopeUnavailable = errors.New("stream bitrate policy unavailable")
 var errServerBitrateDirectUnavailable = errors.New("direct playback exceeds server bitrate limit")
 
@@ -135,12 +152,14 @@ const (
 	compatRemuxV1PathSegment   = "remux-v1"
 	compatRemuxTSV1PathSegment = "remux-ts-v1"
 	compatRemuxDVV1PathSegment = "remux-dv-v1"
+	compatHEVCV1PathSegment    = "hevc-v1"
 )
 
 type compatAudioV2RouteContextKey struct{}
 type compatRemuxV1RouteContextKey struct{}
 type compatRemuxTSV1RouteContextKey struct{}
 type compatRemuxDVV1RouteContextKey struct{}
+type compatHEVCV1RouteContextKey struct{}
 
 func withCompatAudioV2Route(r *http.Request) *http.Request {
 	return r.WithContext(context.WithValue(r.Context(), compatAudioV2RouteContextKey{}, true))
@@ -176,6 +195,23 @@ func withCompatRemuxDVV1Route(r *http.Request) *http.Request {
 func isCompatRemuxDVV1Route(r *http.Request) bool {
 	marked, _ := r.Context().Value(compatRemuxDVV1RouteContextKey{}).(bool)
 	return marked
+}
+
+func withCompatHEVCV1Route(r *http.Request) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), compatHEVCV1RouteContextKey{}, true))
+}
+
+func isCompatHEVCV1Route(r *http.Request) bool {
+	marked, _ := r.Context().Value(compatHEVCV1RouteContextKey{}).(bool)
+	return marked
+}
+
+func validateCompatHEVCV1Route(w http.ResponseWriter, r *http.Request, required bool) bool {
+	if isCompatHEVCV1Route(r) == required {
+		return true
+	}
+	writeError(w, http.StatusNotFound, "NotFound", "Playback route not found")
+	return false
 }
 
 func validateCompatAudioV2Route(w http.ResponseWriter, r *http.Request, required bool) bool {
@@ -217,7 +253,7 @@ func validateCompatAudioV2RouteIdentity(
 	source *PlaybackMediaSource,
 	routeItemID, routeMediaSourceID string,
 ) bool {
-	if !isCompatAudioV2Route(r) {
+	if !isCompatAudioV2Route(r) && !isCompatHEVCV1Route(r) {
 		return true
 	}
 	if playSession == nil || source == nil || routeItemID == "" || routeMediaSourceID == "" ||
@@ -247,6 +283,9 @@ func compatHLSUsesAudioCopyV1(source PlaybackMediaSource) bool {
 }
 
 func compatHLSRoutePathSegment(source PlaybackMediaSource) string {
+	if compatHLSUsesHEVCV1Route(source) {
+		return compatHEVCV1PathSegment
+	}
 	if compatHLSUsesRemuxDVV1Route(source) {
 		return compatRemuxDVV1PathSegment
 	}
@@ -263,7 +302,14 @@ func compatHLSRoutePathSegment(source PlaybackMediaSource) string {
 }
 
 func compatHLSUsesAudioV2Route(source PlaybackMediaSource) bool {
-	return !source.HLSRemuxMPEGTS && !compatHLSUsesRemuxDVV1Route(source) && compatHLSRequiresAudioV2(source)
+	return !source.HLSRemuxMPEGTS && !compatHLSUsesRemuxDVV1Route(source) && !compatHLSUsesHEVCV1Route(source) && compatHLSRequiresAudioV2(source)
+}
+
+// HEVC encoding uses a route older API binaries cannot serve. Those binaries
+// preserve TargetVideoCodec in shared session JSON but still execute H.264.
+// This route also includes the audio-v2 recipe when the source needs downmixing.
+func compatHLSUsesHEVCV1Route(source PlaybackMediaSource) bool {
+	return compatSourceTargetVideoCodec(source) == compatVideoCodecHEVC
 }
 
 func compatHLSUsesRemuxV1Route(source PlaybackMediaSource) bool {
@@ -287,7 +333,8 @@ func compatHLSCopiesVideo(source PlaybackMediaSource) bool {
 }
 
 func compatHLSUsesFMP4(source PlaybackMediaSource) bool {
-	return compatHLSCopiesVideo(source) && !source.HLSRemuxMPEGTS
+	return (compatHLSCopiesVideo(source) && !source.HLSRemuxMPEGTS) ||
+		compatSourceTargetVideoCodec(source) == compatVideoCodecHEVC
 }
 
 func compatWebOSDVMPEGTS(userAgent string, source PlaybackMediaSource) bool {
@@ -330,12 +377,28 @@ func compatSourceHasSurroundAudio(source PlaybackMediaSource) bool {
 func compatRecipeMatchesSource(recipe *playback.RecipeCard, source PlaybackMediaSource) bool {
 	return recipe != nil &&
 		recipe.MediaFileID == source.FileID &&
+		compatRecipeTargetVideoMatchesSource(recipe, source) &&
 		recipe.AudioTrackIndex == compatAudioTrackIndexOrDefault(source) &&
 		recipe.SourceAudioChannels == compatHLSRecipeSourceAudioChannels(source) &&
 		recipe.CopyVideoMPEGTS == source.HLSRemuxMPEGTS &&
 		recipe.SubtitleBurnIn == source.SubtitleBurnIn && (!source.SubtitleBurnIn || (recipe.SubtitleTrackIndex == source.SubtitleTrackIndex && recipe.SubtitleCodec == source.SubtitleCodec)) &&
 		(source.TargetBitrateKbps == 0 || recipe.TargetBitrateKbps == source.TargetBitrateKbps) &&
 		(source.TargetResolution == "" || recipe.TargetResolution == source.TargetResolution)
+}
+
+// compatRecipeTargetVideoMatchesSource accepts target-less cards written
+// before target codec became part of the compat session schema. New HEVC
+// sources always carry a target, so they cannot adopt that legacy H.264/card
+// ambiguity.
+func compatRecipeTargetVideoMatchesSource(recipe *playback.RecipeCard, source PlaybackMediaSource) bool {
+	if recipe == nil {
+		return false
+	}
+	actual := strings.TrimSpace(recipe.TargetCodecVideo)
+	if actual == "" {
+		return strings.TrimSpace(source.TargetVideoCodec) == ""
+	}
+	return strings.EqualFold(actual, compatSourceTargetVideoCodec(source))
 }
 
 // Versioned wrappers put a literal path segment in every byte URL whose
@@ -394,6 +457,18 @@ func (h *PlaybackHandler) HandleRemuxDVV1HLSSegment(w http.ResponseWriter, r *ht
 	h.HandleHLSSegment(w, withCompatRemuxDVV1Route(r))
 }
 
+func (h *PlaybackHandler) HandleHEVCV1MasterManifest(w http.ResponseWriter, r *http.Request) {
+	h.HandleMasterManifest(w, withCompatHEVCV1Route(r))
+}
+
+func (h *PlaybackHandler) HandleHEVCV1HLSManifest(w http.ResponseWriter, r *http.Request) {
+	h.HandleHLSManifest(w, withCompatHEVCV1Route(r))
+}
+
+func (h *PlaybackHandler) HandleHEVCV1HLSSegment(w http.ResponseWriter, r *http.Request) {
+	h.HandleHLSSegment(w, withCompatHEVCV1Route(r))
+}
+
 // errUpstreamReplaced signals that a concurrent request attached a different
 // upstream session to the play session while this one was being created.
 var errUpstreamReplaced = errors.New("upstream session replaced concurrently")
@@ -435,14 +510,13 @@ func (h *PlaybackHandler) requireLocalAudioDownmixCapability(ctx context.Context
 }
 
 // localAudioTransformationRegistry mirrors the native v3 registry's
-// success-only cache. A complete positive or negative capability result is
-// stable for one FFmpeg path; infrastructure and deadline failures remain
-// retryable and are never cached.
+// success-only cache. Complete positive and negative capabilities are stable
+// for one FFmpeg path; incomplete optional HEVC probes expire for a retry.
 func (h *PlaybackHandler) localAudioTransformationRegistry(ctx context.Context) (*playback.TransformationRegistryV3, error) {
 	ffmpegPath := playback.ResolveFFmpegPath(h.FFmpegPath)
 	h.compatAudioRegistryMu.Lock()
 	defer h.compatAudioRegistryMu.Unlock()
-	if h.compatAudioRegistry != nil && h.compatAudioRegistryPath == ffmpegPath {
+	if h.compatAudioRegistryPath == ffmpegPath && !h.compatAudioRegistry.NeedsRefresh(time.Now()) {
 		return h.compatAudioRegistry, nil
 	}
 	probe := playback.ProbeTransformationRegistryWithToneMapV3Result
@@ -744,6 +818,9 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 	if !validateCompatAudioV2RouteIdentity(w, r, playSession, source, chiURLParam(r, "id"), firstNonEmpty(r.URL.Query().Get("MediaSourceId"), r.URL.Query().Get("mediaSourceId"))) {
 		return
 	}
+	if !validateCompatHEVCV1Route(w, r, compatHLSUsesHEVCV1Route(*source)) {
+		return
+	}
 	if !validateCompatAudioV2Route(w, r, compatHLSUsesAudioV2Route(*source)) {
 		return
 	}
@@ -1024,6 +1101,9 @@ func (h *PlaybackHandler) HandleHLSManifest(w http.ResponseWriter, r *http.Reque
 	if !validateCompatAudioV2RouteIdentity(w, r, playSession, source, chiURLParam(r, "id"), firstNonEmpty(r.URL.Query().Get("MediaSourceId"), r.URL.Query().Get("mediaSourceId"))) {
 		return
 	}
+	if !validateCompatHEVCV1Route(w, r, compatHLSUsesHEVCV1Route(*source)) {
+		return
+	}
 	if !validateCompatAudioV2Route(w, r, compatHLSUsesAudioV2Route(*source)) {
 		return
 	}
@@ -1093,6 +1173,9 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if !validateCompatAudioV2RouteIdentity(w, r, playSession, source, chiURLParam(r, "id"), firstNonEmpty(r.URL.Query().Get("MediaSourceId"), r.URL.Query().Get("mediaSourceId"))) {
+		return
+	}
+	if !validateCompatHEVCV1Route(w, r, compatHLSUsesHEVCV1Route(*source)) {
 		return
 	}
 	if !validateCompatAudioV2Route(w, r, compatHLSUsesAudioV2Route(*source)) {
@@ -2311,6 +2394,21 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			}
 		}
 	}
+	// An ID-less Stopped report can't end the play (see below): it may be a
+	// stale stop from an earlier play of the same item. It must not touch the
+	// pause state either, since a paused session's long idle grace is what
+	// keeps a really-paused play alive (#1454 review). Mark it instead, which
+	// only hides it from the live admin view until its next progress report.
+	if stop && unidentified && h.sessionMgr != nil {
+		if marker, ok := h.sessionMgr.(interface{ MarkStopReported(string) error }); ok {
+			if err := marker.MarkStopReported(playSession.UpstreamSessionID); err == nil {
+				h.syncSessionsNow(context.WithoutCancel(r.Context()), "compat_unidentified_stop")
+			} else if !errors.Is(err, playback.ErrSessionNotFound) {
+				slog.WarnContext(r.Context(), "jellycompat could not mark an unidentified stop", "component", "jellycompat",
+					"play_session_id", playSession.ID, "error", err)
+			}
+		}
+	}
 	if progressUpdated && !stop && previousSession != nil && previousSession.IsPaused != req.IsPaused {
 		updatedSession := *previousSession
 		updatedSession.Position = positionSeconds
@@ -2781,8 +2879,9 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 		TargetBitrateKbps:      source.TargetBitrateKbps,
 		TargetResolution:       source.TargetResolution,
 		TargetAudioChannels:    source.TargetAudioChannels,
-		TargetCodecVideo:       compatTargetVideoCodec,
+		TargetCodecVideo:       compatSourceTargetVideoCodec(source),
 		TargetCodecAudio:       compatTargetAudioCodec,
+		VideoSampleEntry:       compatSourceVideoSampleEntry(source),
 		FFmpegPath:             h.FFmpegPath,
 		HWAccel:                h.HWAccel,
 		AudioTrackIndex:        audioTrackIndex,
@@ -3804,10 +3903,12 @@ func compatAACCodecString(profile string, transcoded bool) string {
 // compatDTSCodecString maps a copied DTS track's probed profile to its HLS
 // sample-entry code, matching Jellyfin 12: core DTS (and unknown profiles) is
 // dtsc, the lossless and high-resolution DTS-HD profiles are dtsh, and DTS
-// Express is dtse.
+// Express is dtse. jellyfin-ffmpeg 8 also reports DTS:X on an HRA stream; that
+// is still DTS-HD HRA underneath, so it stays dtsh where Jellyfin 12 falls
+// back to dtsc.
 func compatDTSCodecString(profile string) string {
 	switch strings.ToUpper(strings.TrimSpace(profile)) {
-	case "DTS-HD HRA", "DTS-HD MA", "DTS-HD MA + DTS:X", "DTS-HD MA + DTS:X IMAX": //nolint:goconst // ffprobe DTS profile names
+	case "DTS-HD HRA", "DTS-HD HRA + DTS:X", "DTS-HD HRA + DTS:X IMAX", "DTS-HD MA", "DTS-HD MA + DTS:X", "DTS-HD MA + DTS:X IMAX": //nolint:goconst // ffprobe DTS profile names
 		return hlsCodecDTSHD
 	case "DTS EXPRESS":
 		return "dtse"

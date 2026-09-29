@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, waitFor } from "@testing-library/react";
 
 import { SETTING_KEYS } from "@/lib/settingsContract";
+import { mediaSurfaceKeys, sectionKeys } from "./keys";
 import { storage } from "@/utils/storage";
 import {
   effectiveSettingsQueryKey,
@@ -88,6 +89,32 @@ describe("useSettingValuesRealtime", () => {
     render(<Subscriber />, { wrapper });
     expect(subscriptions.map((entry) => entry.channel)).toContain("user_settings");
   });
+
+  it.each(["profile-1", "profile-2"])(
+    "refreshes Home only for its active profile (%s)",
+    async (profileId) => {
+      const { queryClient, wrapper } = createHarness();
+      const homeKey = sectionKeys.homeItems("recent");
+      queryClient.setQueryData(homeKey, { section: { items: [{ content_id: "watched" }] } });
+      queryClient.setQueryData(mediaSurfaceKeys.refreshSignal(), 0);
+      render(<Subscriber />, { wrapper });
+      subscriptions
+        .find((entry) => entry.channel === "user_settings")
+        ?.handlers?.onEvent?.(
+          changedFrame({
+            key: SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS,
+            scope: "profile",
+            profile_id: profileId,
+          }),
+        );
+      await waitFor(() => {
+        expect(queryClient.getQueryState(homeKey)?.isInvalidated).toBe(profileId === "profile-1");
+        expect(queryClient.getQueryData(mediaSurfaceKeys.refreshSignal())).toBe(
+          profileId === "profile-1" ? 1 : 0,
+        );
+      });
+    },
+  );
 
   it("refetches a mounted reader when another device changes this profile", async () => {
     const { wrapper } = createHarness();

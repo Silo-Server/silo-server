@@ -46,6 +46,7 @@ import {
   policyInheritHints,
   policyStateFromUser,
   policyUpdateFields,
+  savedUserPolicyInheritHints,
 } from "@/components/UserPolicyFields";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -118,6 +119,7 @@ import {
 } from "@/lib/datetime";
 
 import { formatDecisionLabel } from "./adminActivityPresentation";
+import { AccountRequestsPanel } from "./admin-users/AccountRequestsPanel";
 
 export default function AdminUserDetail() {
   useAuth();
@@ -432,11 +434,12 @@ function OverviewTab({ user }: { user: AdminUser }) {
               return lib ? lib.name : `#${id}`;
             })
             .join(", ");
-  const groupName =
+  const knownGroupName =
     user.access_group_id === null
-      ? "None"
-      : (accessGroups.find((group) => group.id === user.access_group_id)?.name ??
-        `#${user.access_group_id}`);
+      ? undefined
+      : accessGroups.find((group) => group.id === user.access_group_id)?.name;
+  const groupName =
+    user.access_group_id === null ? "None" : (knownGroupName ?? `#${user.access_group_id}`);
 
   // Effective values, annotated when the account overrides its group.
   const overridden = (isOverride: boolean) => (isOverride ? " (override)" : "");
@@ -444,18 +447,21 @@ function OverviewTab({ user }: { user: AdminUser }) {
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-      <div className="surface-panel overflow-hidden rounded-2xl border-0">
-        <div className="border-border border-b px-4 py-3">
-          <h3 className="text-sm font-medium">Account</h3>
+      <div className="flex min-w-0 flex-col gap-6">
+        <div className="surface-panel overflow-hidden rounded-2xl border-0">
+          <div className="border-border border-b px-4 py-3">
+            <h3 className="text-sm font-medium">Account</h3>
+          </div>
+          <div className="divide-border divide-y">
+            <DetailRow label="Username" value={user.username} />
+            <DetailRow label="Email" value={user.email} />
+            <DetailRow label="Role" value={accountRoleLabel(user)} />
+            <DetailRow label="Status" value={user.enabled ? "Active" : "Disabled"} />
+            <DetailRow label="Created" value={formatDate(user.created_at)} />
+            <DetailRow label="Updated" value={formatDate(user.updated_at)} />
+          </div>
         </div>
-        <div className="divide-border divide-y">
-          <DetailRow label="Username" value={user.username} />
-          <DetailRow label="Email" value={user.email} />
-          <DetailRow label="Role" value={accountRoleLabel(user)} />
-          <DetailRow label="Status" value={user.enabled ? "Active" : "Disabled"} />
-          <DetailRow label="Created" value={formatDate(user.created_at)} />
-          <DetailRow label="Updated" value={formatDate(user.updated_at)} />
-        </div>
+        <AccountRequestsPanel user={user} groupName={knownGroupName} />
       </div>
 
       <div className="surface-panel overflow-hidden rounded-2xl border-0">
@@ -1308,17 +1314,18 @@ function EditUserForm({
   const metadataCurationId = useId();
   const updateMutation = useUpdateUser();
   const accessGroupValue = accessGroupID === null ? "none" : String(accessGroupID);
-  // Hints come from the group selected right now, so they follow the picker
-  // instead of describing the group the account was last saved with. When that
-  // group is not in the loaded list, fall back to the resolved policy the
-  // server sent — but only while the saved group is still the selected one.
-  // An admin inherits from no group, so preview the no-group policy while the
-  // picked group is kept for toggling the role back.
+  // The account response is authoritative for its saved group and cannot be
+  // made stale by an older access-group list. Once the picker changes, preview
+  // that unsaved selection from the group list instead. An admin inherits from
+  // no group, so preview the no-group policy while the picked group is kept for
+  // toggling the role back.
   const hintGroupID = effectiveAccessGroupID(role, accessGroupID);
+  const groupInheritHints = policyInheritHints(hintGroupID, accessGroups);
   const hintSource = policyDefaultSource(role, hintGroupID);
   const inheritHints =
-    policyInheritHints(hintGroupID, accessGroups) ??
-    (hintGroupID === user.access_group_id ? user.effective_policy : undefined);
+    hintGroupID === user.access_group_id
+      ? savedUserPolicyInheritHints(user, groupInheritHints)
+      : groupInheritHints;
   const selectedGroupMissing =
     accessGroupID !== null && !accessGroups.some((group) => group.id === accessGroupID);
 

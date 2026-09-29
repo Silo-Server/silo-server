@@ -9,6 +9,7 @@ import { SecretField } from "@/components/settings/SecretField";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useAdminMarkerCapabilities } from "@/hooks/queries/admin/markers";
 import {
   useCatalogSearchStatus,
   useCheckAdminSettingsConnection,
@@ -26,6 +27,10 @@ const ARTWORK_KEYS = ["metadata.cache_images"];
 
 const BROWSING_KEYS = ["catalog.scope_versions_to_library", "access.unrated_content"];
 
+// A top-level toggle in the Scanning group, outside the collapsed worker
+// tuning, and applied live without a restart.
+const REALTIME_MONITORING_KEY = "scanner.realtime_monitoring";
+
 const SCANNER_KEYS = [
   "scanner.workers",
   "matcher.workers",
@@ -33,11 +38,15 @@ const SCANNER_KEYS = [
   "metadata.image_workers",
 ];
 
+const SCANNING_GROUP_KEYS = [REALTIME_MONITORING_KEY, ...SCANNER_KEYS];
+
 const MARKER_KEYS = [
   "markers.mode",
   "markers.lazy_playback",
   "markers.online_storage",
   "markers.detection_workers",
+  "markers.detect_intros",
+  "markers.detect_credits",
 ];
 
 const MEILI_URL_KEY = "catalog.search.meilisearch.url";
@@ -60,7 +69,13 @@ const SEARCH_KEYS = ["catalog.search.provider", ...MEILI_KEYS];
 // without a control here because the defaults are right for every deployment we
 // support — catalog.search.meilisearch.{rebuild_batch_size,
 // rebuild_task_queue_depth,index_types,embedder,binary_quantized}.
-const KEYS = [...ARTWORK_KEYS, ...BROWSING_KEYS, ...SCANNER_KEYS, ...MARKER_KEYS, ...SEARCH_KEYS];
+const KEYS = [
+  ...ARTWORK_KEYS,
+  ...BROWSING_KEYS,
+  ...SCANNING_GROUP_KEYS,
+  ...MARKER_KEYS,
+  ...SEARCH_KEYS,
+];
 
 export default function LibraryMetadataSettings() {
   const form = useSettingsForm({ keys: KEYS });
@@ -71,6 +86,10 @@ export default function LibraryMetadataSettings() {
   const provider = form.getValue("catalog.search.provider") || "postgres";
   const meiliEnabled = provider === "meilisearch";
   const { data: searchStatus } = useCatalogSearchStatus(meiliEnabled);
+  // An older API node saves the detection kind switches but ignores them, so
+  // they are offered only where the server says it honors them.
+  const { data: markerCapabilities } = useAdminMarkerCapabilities();
+  const detectionKindSettings = markerCapabilities?.detection_kind_settings === true;
   const anyDirty = (keys: string[]) => keys.some((key) => form.isDirty(key));
   const allRestart = (keys: string[]) => keys.every((key) => restartKeys.has(key));
   // Restoring stages every worker value at once; the save bar still confirms
@@ -109,6 +128,7 @@ export default function LibraryMetadataSettings() {
   const markerMode = form.getValue("markers.mode") || "both";
   const onlineMarkersEnabled = markerMode === "online" || markerMode === "both";
   const onlineMarkerStorage = form.getValue("markers.online_storage") || "stored";
+  const localMarkersEnabled = markerMode === "local" || markerMode === "both";
 
   if (form.isLoading) {
     return (
@@ -171,8 +191,8 @@ export default function LibraryMetadataSettings() {
 
         <FieldGroup
           label="Scanning"
-          restartAll={allRestart(SCANNER_KEYS)}
-          dirty={anyDirty(SCANNER_KEYS)}
+          restartAll={allRestart(SCANNING_GROUP_KEYS)}
+          dirty={anyDirty(SCANNING_GROUP_KEYS)}
           actions={
             workerOverrides ? (
               <Button
@@ -188,6 +208,14 @@ export default function LibraryMetadataSettings() {
             ) : undefined
           }
         >
+          <SettingField
+            label="Real-time monitoring"
+            type="toggle"
+            description="Scan automatically when files in library folders change. Silo scans only what changed, usually within seconds. Works on local disks; network shares (NFS, SMB) aren't supported. Libraries can opt out individually."
+            value={form.getValue(REALTIME_MONITORING_KEY) || "true"}
+            onChange={(value) => form.setValue(REALTIME_MONITORING_KEY, value)}
+            restartRequired={restartKeys.has(REALTIME_MONITORING_KEY)}
+          />
           <AdvancedSection
             id="library.scanning"
             count={SCANNER_KEYS.length}
@@ -250,7 +278,7 @@ export default function LibraryMetadataSettings() {
           <SettingField
             label="Marker source"
             type="select"
-            description="Online markers take priority. Silo skips local intro detection when an online intro is saved in your library. Local detection uses CPU."
+            description="Online markers take priority. Silo skips local detection of an intro or credits when an online one is saved in your library. Local detection uses CPU."
             className="[&_[data-slot=select-trigger]]:h-auto [&_[data-slot=select-trigger]]:min-h-9 [&_[data-slot=select-value]]:line-clamp-none [&_[data-slot=select-value]]:text-left [&_[data-slot=select-value]]:whitespace-normal"
             options={[
               { value: "off", label: "Off" },
@@ -262,6 +290,27 @@ export default function LibraryMetadataSettings() {
             onChange={(value) => form.setValue("markers.mode", value)}
             restartRequired={restartKeys.has("markers.mode")}
           />
+
+          {localMarkersEnabled && detectionKindSettings && (
+            <>
+              <SettingField
+                label="Detect intros"
+                type="toggle"
+                description="Finds each episode's opening from embedded chapters, or by comparing the start of episodes in a season."
+                value={form.getValue("markers.detect_intros") || "true"}
+                onChange={(value) => form.setValue("markers.detect_intros", value)}
+                restartRequired={restartKeys.has("markers.detect_intros")}
+              />
+              <SettingField
+                label="Detect credits"
+                type="toggle"
+                description="Finds end credits from embedded chapters, or by reading the end of each episode and movie. Uses more CPU than intro detection."
+                value={form.getValue("markers.detect_credits") || "true"}
+                onChange={(value) => form.setValue("markers.detect_credits", value)}
+                restartRequired={restartKeys.has("markers.detect_credits")}
+              />
+            </>
+          )}
 
           {onlineMarkersEnabled && (
             <SettingField
@@ -292,7 +341,7 @@ export default function LibraryMetadataSettings() {
               description={
                 onlineMarkersEnabled
                   ? markerMode === "both"
-                    ? "Check online first when playback starts. If intro or credits markers are available, skip local detection. Otherwise, detect locally using this server's CPU."
+                    ? "Check online first when playback starts. Silo detects only the intro or credits online providers don't have, using this server's CPU."
                     : "Check online for missing or outdated markers when playback starts."
                   : "Detect missing markers when playback starts. Local analysis uses CPU."
               }
@@ -302,11 +351,11 @@ export default function LibraryMetadataSettings() {
             />
           )}
 
-          {(markerMode === "local" || markerMode === "both") && (
+          {localMarkersEnabled && (
             <SettingField
               label="Detection workers"
               type="number"
-              description="How many seasons Silo analyzes for intros at once, each reading audio with its own ffmpeg process. Defaults to 1. Raise it to finish a large library sooner if your storage and CPU have room."
+              description="How many seasons or movies Silo analyzes at once, each with its own ffmpeg process. Defaults to 1. Raise it to finish a large library sooner if your storage and CPU have room."
               value={form.getValue("markers.detection_workers")}
               onChange={(value) => form.setValue("markers.detection_workers", value)}
               restartRequired={restartKeys.has("markers.detection_workers")}

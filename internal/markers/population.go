@@ -73,6 +73,12 @@ func (s *PopulationService) OnlineStorage(ctx context.Context) (OnlineStorage, e
 	if err != nil {
 		return "", err
 	}
+	return ParseOnlineStorage(raw)
+}
+
+// ParseOnlineStorage reads a stored markers.online_storage value. An unset
+// value means stored.
+func ParseOnlineStorage(raw string) (OnlineStorage, error) {
 	if strings.TrimSpace(raw) == "" {
 		return OnlineStorageStored, nil
 	}

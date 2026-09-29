@@ -37,6 +37,8 @@ type itemsQuery struct {
 	totalOverride          *int
 	isFavorite             bool
 	isResumable            bool
+	isNotFolder            bool // Filters=IsNotFolder or IsFolder=false: leaf items only
+	includesOnlyLeafTypes  bool // IncludeItemTypes names Episode and no Series or Season
 	hasItemTypeFilter      bool // true when IncludeItemTypes or ExcludeItemTypes was present in the request
 	wantsBoxSets           bool // true when IncludeItemTypes contains BoxSet
 	wantsViews             bool // true when IncludeItemTypes contains CollectionFolder
@@ -190,6 +192,9 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 	result.itemTypes = effectiveItemTypes(rawItemTypes, rawExcludedItemTypes)
 	result.wantsBoxSets = includeItemTypesContain(rawItemTypes, "boxset")
 	result.wantsViews = includeItemTypesContain(rawItemTypes, "collectionfolder")
+	includedTypes := mapIncludeItemTypes(rawItemTypes)
+	result.includesOnlyLeafTypes = itemTypesContain(includedTypes, "episode") &&
+		!itemTypesContain(includedTypes, "series") && !itemTypesContain(includedTypes, "season")
 	result.sortExplicit = strings.TrimSpace(q.Get("SortBy")) != ""
 	if result.sort == "latest_episode_added" && !itemTypesOnlySeries(result.itemTypes) {
 		result.sort = "created_at"
@@ -206,6 +211,7 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 	result.hasRootFilter = hasAnyNonEmptyParam(q, jellyfinRootFilterParams)
 	result.isFavorite = hasFilter(q.Get("Filters"), "IsFavorite") || parseBool(q.Get("IsFavorite"), false)
 	result.isResumable = hasFilter(q.Get("Filters"), "IsResumable")
+	result.isNotFolder = hasFilter(q.Get("Filters"), "IsNotFolder") || strings.EqualFold(strings.TrimSpace(q.Get("IsFolder")), "false")
 
 	if hasFilter(q.Get("Filters"), "IsPlayed") {
 		result.isPlayed = new(true)
@@ -898,4 +904,21 @@ func parsePremiereDateBound(raw string, isMin bool) string {
 // rails can discard filters. Unfiltered rails keep their episode-aware semantics.
 func (q itemsQuery) hasIntersectingFilters() bool {
 	return len(q.genres) > 0 || len(q.years) > 0 || q.hasCompatBrowseFilters() || q.genreName != "" || q.personID > 0 || q.requireBackdrop || len(q.audioLanguages) > 0 || len(q.subtitleLanguages) > 0 || q.maxOfficialRating != "" || q.namePrefix != "" || (q.searchTerm != "" && (q.isFavorite || q.isPlayed != nil || q.isResumable || q.sortExplicit)) || (q.isFavorite && (q.isPlayed != nil || q.isResumable)) || (q.isResumable && q.isPlayed != nil)
+}
+
+// hasMemberFilters reports whether the request narrows results by catalog
+// fields, search, or user state.
+func (q itemsQuery) hasMemberFilters() bool {
+	return q.hasIntersectingFilters() || q.searchTerm != "" || q.isFavorite || q.isPlayed != nil || q.isResumable
+}
+
+// allowsItemType reports whether the IncludeItemTypes/ExcludeItemTypes filter,
+// if any, admits the native item type.
+func (q itemsQuery) allowsItemType(itemType string) bool {
+	return !q.hasItemTypeFilter || itemTypesContain(q.itemTypes, itemType)
+}
+
+// allowsVideo reports whether the MediaTypes filter, if any, admits video.
+func (q itemsQuery) allowsVideo() bool {
+	return !q.mediaTypesExplicit || q.mediaTypesSet["video"]
 }

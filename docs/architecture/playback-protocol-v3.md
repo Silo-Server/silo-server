@@ -1248,7 +1248,9 @@ compute rungs.
 The source rung is always present, labelled `original`, with
 `preserves_source: true`. Transcode rungs are added below the source resolution
 class, plus at the same class when they reduce bitrate, and only when HLS is
-available to the client, transcoding is enabled, and 4K transcoding is permitted
+available to the client, transcoding is enabled, the viewer's account may
+transcode video (`transcode_allowed`; admission still enforces it), and 4K
+transcoding is permitted
 for a 4K-or-higher source. A source falls under that policy when its catalog
 resolution label reads `2160p`, `4k`, `uhd`, `4320p`, or `8k` (case- and
 whitespace-insensitive), its probed width is at least 3840, or its probed height
@@ -1281,9 +1283,14 @@ remux without video encoding.
 A rung below the source resolution class is always useful. At the source's own
 class, a rung is published only when it undercuts the source bitrate; a 25.2
 Mbps 4K file therefore offers 4K Medium and 4K Low but not a pointless 40 Mbps
-4K High encode. Resolution classification also considers width, so cinema-crop
-UHD sources such as 3840x1540 retain their native dimensions on a 4K bitrate
-step instead of being upscaled to 2160 lines.
+4K High encode. A source's class is the smallest one whose bounds hold both
+dimensions: 480p up to 854x480, 720p up to 1280x962, 1080p up to 2560x1440,
+2160p up to 4096x3072, and 4320p up to 8192x6144. These are the scanner's
+buckets for the catalog's resolution label. Cropped and cinema-aspect encodes
+therefore keep their labelled class: a 1918x872 file is 1080p, and a 3840x1540
+UHD source retains its native dimensions on a 4K bitrate step instead of being
+upscaled to 2160 lines. An 8K source sits above every rung, so its 4K rungs
+scale it down to 2160 lines.
 
 Compound rungs are strict resolution/bitrate selections. A bandwidth cap can
 clamp their bitrate but does not silently demote their resolution. Plain labels

@@ -757,7 +757,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                       />
                     )}
                     <Sparkles className="h-[18px] w-[18px] shrink-0" />
-                    <SidebarLabel show={showLabels}>Recommendations</SidebarLabel>
+                    <SidebarLabel show={showLabels}>For You</SidebarLabel>
                   </ViewTransitionLink>
                 </li>
               ) : null}

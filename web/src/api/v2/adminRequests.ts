@@ -6,13 +6,35 @@ import {
 } from "@/api/client";
 import type {
   LoadRequestIntegrationOptionsRequest,
+  MediaRequest,
   RequestIntegration,
-  RequestListParams,
+  RequestMediaType,
   RequestSettings,
   RequestUserLimit,
 } from "@/api/types";
-import { v2, type V2Body, type V2Result, V2ProblemError } from "./request";
+import { v2, type V2Body, type V2Query, V2ProblemError } from "./request";
 import { mediaRequestFromV2 } from "./requests";
+import type { components } from "./schema";
+
+type Schemas = components["schemas"];
+
+export type RequestRouteMediaType = Schemas["AdminRequestRoute"]["media_type"];
+export type RequestRouteConditions = Schemas["AdminRequestRouteConditions"];
+export type RequestRouteDestination = Schemas["AdminRequestRouteDestination"];
+/** The editable part of a routing rule; `media_type` is read on create only. */
+export type RequestRouteBody = Schemas["AdminRequestRouteBody"];
+export type RequestRoutePreview = Schemas["AdminRequestRoutePreviewOutputBody"];
+export type RequestRoutePreviewTier = Schemas["AdminRequestRoutePreviewTier"];
+export type RequestRoutePreviewRule = Schemas["AdminRequestRoutePreviewRule"];
+export type RequestRouteFacts = Schemas["AdminRequestRouteFacts"];
+export type RequestRouteTitle = Schemas["AdminRequestRouteTitle"];
+
+/**
+ * A routing rule, or a media type's fallback, with the validator of the read
+ * it came from. A fallback that was never saved still has one: the server
+ * answers it at revision zero, and its first save sends that tag.
+ */
+export type RequestRoute = Schemas["AdminRequestRoute"] & { etag: string };
 
 function requireETag(etag?: string) {
   if (!etag) throw new Error("Reload this editor before saving.");
@@ -63,6 +85,32 @@ export async function putAdminRequestSettingsV2(
   });
   return { ...body, updated_at: "", etag: requireETag(etag) };
 }
+/** How requests find their server: Standard, or Advanced with the rules. */
+export type RequestRouting = Schemas["AdminRequestRouting"] & { etag: string };
+export type RequestRoutingMode = RequestRouting["mode"];
+export async function getAdminRequestRoutingV2(): Promise<RequestRouting> {
+  let etag = "";
+  const body = await v2("GET /api/v2/admin/request-routing", {
+    onResponse: (r) => {
+      etag = r.headers.get("ETag") ?? "";
+    },
+  });
+  return { ...body, etag: requireETag(etag) };
+}
+export async function putAdminRequestRoutingV2(
+  mode: RequestRoutingMode,
+  current: Pick<RequestRouting, "etag">,
+): Promise<RequestRouting> {
+  let etag = "";
+  const body = await v2("PUT /api/v2/admin/request-routing", {
+    headers: { "If-Match": requireETag(current.etag) },
+    body: { mode },
+    onResponse: (r) => {
+      etag = r.headers.get("ETag") ?? "";
+    },
+  });
+  return { ...body, etag: requireETag(etag) };
+}
 export async function getAdminRequestUserLimitV2(userId: number): Promise<RequestUserLimit> {
   let etag = "";
   const body = await v2("GET /api/v2/admin/request-users/{user_id}/limit", {
@@ -92,6 +140,53 @@ export async function putAdminRequestUserLimitV2(
     },
   });
   return { ...body, user_id: Number(body.user_id), etag: requireETag(etag) };
+}
+
+/**
+ * An access group's request approval and limit, with the validator of the
+ * read it came from. A group with nothing saved reads as inherit at revision
+ * zero, and its first save sends that tag.
+ */
+export type RequestGroupLimit = Omit<Schemas["AdminRequestGroupLimit"], "group_id"> & {
+  group_id: number;
+  etag: string;
+};
+export type RequestGroupLimitBody = Schemas["AdminRequestGroupLimitBody"];
+
+/**
+ * The validator names the profile that read it, so the limit is read and
+ * saved under one captured authority.
+ */
+export async function getAdminRequestGroupLimitV2(
+  groupId: number,
+  profileContext?: ProfileRequestContextSnapshot,
+): Promise<RequestGroupLimit> {
+  let etag = "";
+  const body = await v2("GET /api/v2/admin/request-groups/{group_id}/limit", {
+    path: { group_id: String(groupId) },
+    profileContext,
+    onResponse: (r) => {
+      etag = r.headers.get("ETag") ?? "";
+    },
+  });
+  return { ...body, group_id: Number(body.group_id), etag: requireETag(etag) };
+}
+export async function putAdminRequestGroupLimitV2(
+  limit: Pick<RequestGroupLimit, "group_id" | "etag">,
+  body: RequestGroupLimitBody,
+  profileContext?: ProfileRequestContextSnapshot,
+): Promise<RequestGroupLimit> {
+  let etag = "";
+  const saved = await v2("PUT /api/v2/admin/request-groups/{group_id}/limit", {
+    path: { group_id: String(limit.group_id) },
+    headers: { "If-Match": requireETag(limit.etag) },
+    body,
+    profileContext,
+    onResponse: (r) => {
+      etag = r.headers.get("ETag") ?? "";
+    },
+  });
+  return { ...saved, group_id: Number(saved.group_id), etag: requireETag(etag) };
 }
 function integrationBody(
   integration: RequestIntegration,
@@ -185,33 +280,68 @@ export async function listAdminRequestIntegrationsV2(): Promise<RequestIntegrati
   if (!isProfileRequestContextCurrent(profileContext)) throw new StaleApiRequestContextError();
   return rows;
 }
-export async function listAdminMediaRequestsV2(params: RequestListParams = {}) {
+/** A queue view: what an admin does next with the requests in it. */
+export type AdminRequestQueueView = NonNullable<V2Query<"GET /api/v2/admin/requests">["view"]>;
+export type AdminRequestCounts = Schemas["AdminRequestCounts"];
+export type AdminRequestEvent = Schemas["AdminRequestEvent"];
+
+export interface AdminRequestQueueFilter {
+  view: AdminRequestQueueView;
+  /** A title substring, or an exact TMDB ID. */
+  q?: string;
+  mediaType?: RequestMediaType;
+  requestedByUserId?: number;
+}
+
+export interface AdminRequestQueuePage {
+  items: MediaRequest[];
+  /** Where the next page starts; absent on the last page. */
+  nextCursor?: string;
+}
+
+/** One page of the admin queue, newest request first. */
+export async function listAdminRequestQueuePageV2(
+  filter: AdminRequestQueueFilter,
+  options: { limit?: number; cursor?: string; signal?: AbortSignal } = {},
+): Promise<AdminRequestQueuePage> {
   const profileContext = captureProfileRequestContext();
   if (!profileContext) throw new StaleApiRequestContextError();
-  const seen = new Set<string>();
-  const wanted = Math.min(100, Math.max(1, params.limit ?? 50));
-  const out = [];
-  let cursor: string | undefined;
-  while (out.length < wanted) {
-    if (!isProfileRequestContextCurrent(profileContext)) throw new StaleApiRequestContextError();
-    const page: V2Result<"GET /api/v2/admin/requests"> = await v2("GET /api/v2/admin/requests", {
-      profileContext,
-      query: {
-        limit: Math.min(50, wanted - out.length),
-        cursor,
-        status: params.status && params.status !== "all" ? params.status : undefined,
-        outcome: params.outcome && params.outcome !== "all" ? params.outcome : undefined,
-      },
-    });
-    out.push(...page.items.map(mediaRequestFromV2));
-    if (!page.page?.has_more) break;
-    const next = page.page.next_cursor;
-    if (!next || seen.has(next)) throw new Error("Incomplete request page. Reload to try again.");
-    seen.add(next);
-    cursor = next;
-  }
+  const q = filter.q?.trim();
+  const page = await v2("GET /api/v2/admin/requests", {
+    profileContext,
+    signal: options.signal,
+    query: {
+      view: filter.view,
+      q: q || undefined,
+      media_type: filter.mediaType,
+      requested_by_user_id:
+        filter.requestedByUserId === undefined ? undefined : String(filter.requestedByUserId),
+      limit: options.limit,
+      cursor: options.cursor,
+    },
+  });
   if (!isProfileRequestContextCurrent(profileContext)) throw new StaleApiRequestContextError();
-  return out;
+  if (page.page?.has_more && !page.page.next_cursor) {
+    throw new Error("Incomplete request page. Reload to try again.");
+  }
+  return {
+    items: page.items.map(mediaRequestFromV2),
+    nextCursor: page.page?.has_more ? page.page.next_cursor : undefined,
+  };
+}
+export function getAdminRequestCountsV2(): Promise<AdminRequestCounts> {
+  return v2("GET /api/v2/admin/requests/counts");
+}
+/** A request's history, newest first. */
+export function listAdminRequestEventsV2(id: string): Promise<AdminRequestEvent[]> {
+  return v2("GET /api/v2/admin/requests/{id}/events", { path: { id } }).then(
+    (result) => result.items,
+  );
+}
+export function cancelAdminRequestV2(id: string, reason?: string) {
+  return v2("POST /api/v2/admin/requests/{id}/cancel", { path: { id }, body: { reason } }).then(
+    mediaRequestFromV2,
+  );
 }
 export function approveAdminRequestV2(id: string) {
   return v2("POST /api/v2/admin/requests/{id}/approve", { path: { id }, body: {} }).then(
@@ -227,6 +357,103 @@ export function declineAdminRequestV2(id: string, reason?: string) {
   return v2("POST /api/v2/admin/requests/{id}/decline", { path: { id }, body: { reason } }).then(
     mediaRequestFromV2,
   );
+}
+export async function getAdminRequestRouteV2(
+  id: string,
+  profileContext?: ProfileRequestContextSnapshot,
+): Promise<RequestRoute> {
+  let etag = "";
+  const body = await v2("GET /api/v2/admin/request-routes/{id}", {
+    profileContext,
+    path: { id },
+    onResponse: (r) => {
+      etag = r.headers.get("ETag") ?? "";
+    },
+  });
+  return { ...body, etag: requireETag(etag) };
+}
+/**
+ * Every route, in evaluation order per media type, each from its own read so
+ * an editor always starts from a row and the validator that read returned.
+ */
+export async function listAdminRequestRoutesV2(): Promise<RequestRoute[]> {
+  const profileContext = captureProfileRequestContext();
+  if (!profileContext) throw new StaleApiRequestContextError();
+  const list = await v2("GET /api/v2/admin/request-routes", { profileContext });
+  const rows = await Promise.all(
+    list.items.map((route) => getAdminRequestRouteV2(route.id, profileContext)),
+  );
+  if (!isProfileRequestContextCurrent(profileContext)) throw new StaleApiRequestContextError();
+  return rows;
+}
+export async function createAdminRequestRouteV2(body: RequestRouteBody): Promise<RequestRoute> {
+  let etag = "";
+  const saved = await v2("POST /api/v2/admin/request-routes", {
+    body,
+    onResponse: (r) => {
+      etag = r.headers.get("ETag") ?? "";
+    },
+  });
+  return { ...saved, etag: requireETag(etag) };
+}
+export async function updateAdminRequestRouteV2(
+  route: Pick<RequestRoute, "id" | "etag">,
+  body: RequestRouteBody,
+): Promise<RequestRoute> {
+  let etag = "";
+  const saved = await v2("PUT /api/v2/admin/request-routes/{id}", {
+    path: { id: route.id },
+    headers: { "If-Match": requireETag(route.etag) },
+    body,
+    onResponse: (r) => {
+      etag = r.headers.get("ETag") ?? "";
+    },
+  });
+  return { ...saved, etag: requireETag(etag) };
+}
+export function deleteAdminRequestRouteV2(route: Pick<RequestRoute, "id" | "etag">) {
+  return v2("DELETE /api/v2/admin/request-routes/{id}", {
+    path: { id: route.id },
+    headers: { "If-Match": requireETag(route.etag) },
+  });
+}
+/** Sets the order of a media type's rules; `ids` lists every rule, fallback excluded. */
+export function reorderAdminRequestRoutesV2(mediaType: RequestRouteMediaType, ids: string[]) {
+  return v2("POST /api/v2/admin/request-routes/order", {
+    body: { media_type: mediaType, ids },
+  }).then((result) => result.items);
+}
+/**
+ * Where each quality tier of a request for the title would go now. With a
+ * requester, rules that match on the account apply as they would to that
+ * account's request; without one they are skipped.
+ */
+export function previewAdminRequestRouteV2(
+  mediaType: RequestRouteMediaType,
+  tmdbId: number,
+  requesterUserId?: number,
+): Promise<RequestRoutePreview> {
+  return v2("POST /api/v2/admin/request-routes/preview", {
+    body: {
+      media_type: mediaType,
+      tmdb_id: tmdbId,
+      requester_user_id: requesterUserId === undefined ? undefined : String(requesterUserId),
+    },
+  });
+}
+/**
+ * Titles to try the routing rules on, from TMDB. Admin-only, and answers
+ * whether or not requests are turned on.
+ */
+export function searchAdminRequestRouteTitlesV2(
+  mediaType: RequestRouteMediaType,
+  q: string,
+  signal?: AbortSignal,
+): Promise<RequestRouteTitle[]> {
+  return v2("GET /api/v2/admin/request-routes/titles", {
+    signal,
+    query: { media_type: mediaType, q },
+  }).then((result) => result.items);
 }
 export function loadAdminRequestIntegrationOptionsV2(
   id: string,

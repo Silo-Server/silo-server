@@ -28,6 +28,16 @@ const (
 	ChromaprintFormat            = "chromaprint:raw:uint32le"
 	DefaultPointHopSeconds       = 0.123
 
+	// Credits algorithm identifiers. Credits season comparisons are keyed by
+	// CreditsAnalysisConfigHash; bump CreditsBehaviorVersion to re-run them
+	// over cached credits fingerprints.
+	CreditsBehaviorVersion      = 2
+	CreditsChapterAlgorithm     = "credits-chapter:v1"
+	CreditsVersionCopyAlgorithm = "credits-version-copy:v1"
+	CreditsAudioAlgorithm       = "credits-audio:v1"
+	CreditsAudioVideoAlgorithm  = "credits-audio:video:v1"
+	CreditsVideoAlgorithm       = "credits-video:v1"
+
 	// chromaprintDialogueAlgorithmPrefix matches every version of the
 	// subtitle-refined Chromaprint identifier.
 	chromaprintDialogueAlgorithmPrefix = "chromaprint:dialogue:" //nolint:misspell // Persisted algorithm identifier.
@@ -57,6 +67,12 @@ type Config struct {
 	DialogueRefinementWindowSeconds           float64
 	DialogueRefinementMaxShiftSeconds         float64
 	DialogueRefinementMinimumRemainingSeconds float64
+	// HWAccel and HWDevice are the playback.hw_accel and playback.hw_device
+	// settings. Credits tail passes decode keyframes on the hardware they
+	// resolve to and fall back to software (see hwdecode.go). They shape no
+	// artifact or hash.
+	HWAccel  string
+	HWDevice string
 }
 
 // Intro duration bounds for a Chromaprint match. Twelve seconds keeps most
@@ -224,19 +240,26 @@ func (c Config) SilenceConfigHash() string {
 }
 
 type Candidate struct {
-	ContentID              string
-	ExtraID                string
-	SeasonNumber           int
-	EpisodeNumber          int
-	FileModifiedAt         *time.Time
-	FileID                 int
-	EpisodeID              string
-	SeasonID               string
-	MediaFolderID          int
-	FilePath               string
-	FileHash               string
-	FileSize               int64
-	DurationSeconds        float64
+	ContentID       string
+	ExtraID         string
+	SeasonNumber    int
+	EpisodeNumber   int
+	FileModifiedAt  *time.Time
+	FileID          int
+	EpisodeID       string
+	SeasonID        string
+	MediaFolderID   int
+	FilePath        string
+	FileHash        string
+	FileSize        int64
+	DurationSeconds float64
+	// CodecVideo and CodecAudio are the probed codecs of the file's first
+	// video and audio streams, empty when it has none.
+	CodecVideo string
+	CodecAudio string
+	// VideoBitDepth is the probed bit depth of the first video stream, zero
+	// when unknown. Hardware decoding on VideoToolbox needs it.
+	VideoBitDepth          int
 	PresentationGroupKey   string
 	EditionKey             string
 	AudioLanguage          string
@@ -249,7 +272,17 @@ type Candidate struct {
 	IntroMarkersSource     *string
 	IntroMarkersConfidence *float64
 	IntroMarkersAlgorithm  *string
-	MarkersSource          *string
+	// Credits fields let each marker kind be judged on its own; see
+	// Candidate.marker.
+	CreditsStart             *float64
+	CreditsEnd               *float64
+	CreditsMarkersSource     *string
+	CreditsMarkersConfidence *float64
+	CreditsMarkersAlgorithm  *string
+	// PreviewStart is where the file's preview marker starts, which ends
+	// any credits it starts inside.
+	PreviewStart  *float64
+	MarkersSource *string
 }
 
 // expectedFile preserves the identity loaded with the candidate so a completed
@@ -285,23 +318,6 @@ func (c Candidate) AnalysisGroupKey() string {
 	return strings.Join([]string{group, edition, audio}, "|")
 }
 
-func (c Candidate) EffectiveIntroSource() string {
-	if c.IntroMarkersSource != nil && strings.TrimSpace(*c.IntroMarkersSource) != "" {
-		return strings.TrimSpace(*c.IntroMarkersSource)
-	}
-	if c.IntroStart != nil && c.IntroEnd != nil && c.MarkersSource != nil {
-		return strings.TrimSpace(*c.MarkersSource)
-	}
-	return ""
-}
-
-func (c Candidate) HasHigherPriorityIntro(source string) bool {
-	if c.IntroStart == nil || c.IntroEnd == nil {
-		return false
-	}
-	return models.MarkerSourcePriority(c.EffectiveIntroSource()) > models.MarkerSourcePriority(source)
-}
-
 type Segment struct {
 	Start      float64
 	End        float64
@@ -309,7 +325,9 @@ type Segment struct {
 	Algorithm  string
 }
 
-type IntroMarkerPatch struct {
+// MarkerPatch is a detected marker of one kind to write onto a file.
+type MarkerPatch struct {
+	Kind         markerKind
 	ExpectedFile *models.MediaFile
 	FileID       int
 	Start        float64
@@ -318,6 +336,15 @@ type IntroMarkerPatch struct {
 	Confidence   float64
 	Algorithm    string
 	DetectedAt   time.Time
+}
+
+// MarkerWithdrawal takes back a file's marker of one kind that local analysis
+// wrote with Algorithm, when its current rules no longer produce it.
+type MarkerWithdrawal struct {
+	Kind         markerKind
+	ExpectedFile *models.MediaFile
+	FileID       int
+	Algorithm    string
 }
 
 type Fingerprint struct {
@@ -429,4 +456,34 @@ type RunSummary struct {
 	DialogueRefinementsAttempted int      `json:"dialogue_refinements_attempted"`
 	DialogueRefinementsApplied   int      `json:"dialogue_refinements_applied"`
 	DialogueRefinementErrors     int      `json:"dialogue_refinement_errors"`
+	// Credits counters. Credits season groups and tail fingerprints are
+	// counted apart from the intro groups and fingerprints above.
+	CreditsSeasonGroupsConsidered int `json:"credits_season_groups_considered"`
+	CreditsGroupsNotFound         int `json:"credits_groups_not_found"`
+	CreditsGroupsSkipped          int `json:"credits_groups_skipped"`
+	CreditsChapterMarkersWritten  int `json:"credits_chapter_markers_written"`
+	CreditsVersionMarkersCopied   int `json:"credits_version_markers_copied"`
+	// CreditsChapterMarkersWithdrawn counts chapter credits cleared because
+	// the file's chapters no longer produce them.
+	CreditsChapterMarkersWithdrawn int `json:"credits_chapter_markers_withdrawn"`
+	CreditsFingerprintsComputed    int `json:"credits_fingerprints_computed"`
+	CreditsFingerprintCacheHits    int `json:"credits_fingerprint_cache_hits"`
+	CreditsFingerprintErrors       int `json:"credits_fingerprint_errors"`
+	CreditsAudioMarkersWritten     int `json:"credits_audio_markers_written"`
+	CreditsRejected                int `json:"credits_rejected"`
+	// Credits tail pass counters: keyframe statistics and silences of the
+	// files whose credits are placed, and the markers video helped place.
+	CreditsTailScansComputed        int `json:"credits_tail_scans_computed"`
+	CreditsTailCacheHits            int `json:"credits_tail_cache_hits"`
+	CreditsTailScanErrors           int `json:"credits_tail_scan_errors"`
+	CreditsTailUnusable             int `json:"credits_tail_unusable"`
+	CreditsAudioVideoMarkersWritten int `json:"credits_audio_video_markers_written"`
+	CreditsVideoMarkersWritten      int `json:"credits_video_markers_written"`
+	// Movie counters. Movies get credits only, from chapters and video; the
+	// credits tail counters above include their tail passes.
+	MoviesConsidered           int `json:"movies_considered"`
+	MovieCreditsMarkersWritten int `json:"movie_credits_markers_written"`
+	// MovieBudgetExhausted reports that the run stopped starting movies
+	// when the movie budget ran out; the rest wait for the next run.
+	MovieBudgetExhausted bool `json:"movie_budget_exhausted"`
 }

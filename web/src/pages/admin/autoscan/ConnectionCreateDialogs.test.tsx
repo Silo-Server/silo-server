@@ -5,7 +5,7 @@ import { setAccessToken, setRefreshToken, setProfileId, setProfileToken } from "
 import ConnectionsPanel from "./ConnectionsPanel";
 import { InlineConnectionPicker } from "./InlineConnectionPicker";
 
-vi.mock("@/hooks/queries/useRequests", () => ({ useRequestIntegrations: () => ({ data: [] }) }));
+vi.mock("@/hooks/queries/admin/requests", () => ({ useRequestIntegrations: () => ({ data: [] }) }));
 vi.mock("@/hooks/queries/useAutoscan", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/queries/useAutoscan")>();
   return {

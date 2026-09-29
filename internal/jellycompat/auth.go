@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -144,6 +145,18 @@ func (a *Authenticator) RequireSession(next http.Handler) http.Handler {
 	})
 }
 
+// attributeActivity records the session's account on the activity log entry
+// for this request, when the activity log middleware is mounted.
+func attributeActivity(r *http.Request, session *Session) {
+	if session == nil {
+		return
+	}
+	if lc := activitylog.GetLogContext(r.Context()); lc != nil {
+		uid := session.StreamAppUserID
+		lc.UserID = &uid
+	}
+}
+
 // safeTokenPrefix returns the first 8 characters of a token for logging.
 func safeTokenPrefix(token string) string {
 	if len(token) <= 8 {
@@ -155,6 +168,7 @@ func safeTokenPrefix(token string) string {
 // serveWithSession injects the resolved compat session into the request context
 // and continues the handler chain.
 func serveWithSession(next http.Handler, w http.ResponseWriter, r *http.Request, session *Session) {
+	attributeActivity(r, session)
 	ctx := context.WithValue(r.Context(), compatSessionKey, session)
 	ctx = playback.WithClientInfo(ctx, compatPlaybackClientInfo(r))
 	next.ServeHTTP(w, r.WithContext(ctx))

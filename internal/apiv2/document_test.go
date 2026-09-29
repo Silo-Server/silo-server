@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -215,6 +216,8 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 
 		"refreshAdminEpisodeMarkers": true,
 		"redetectAdminEpisodeIntro":  true,
+		"redetectAdminItemMarkers":   true,
+		"getAdminMarkerCapabilities": true,
 		"createDownloads":            true,
 		"createDownloadSubscription": true,
 		"updateDownloadSubscription": true,
@@ -302,7 +305,7 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 	for _, id := range append(requestOperationIDs, requestLifecycleOperationIDs...) {
 		profileToken[id] = true
 	}
-	for _, id := range adminRequestOperationIDs {
+	for _, id := range slices.Concat(adminRequestOperationIDs, adminRequestRouteOperationIDs, adminRequestQueueOperationIDs, adminRequestGroupOperationIDs) {
 		profileToken[id] = true
 	}
 	expect[opCreateRequest] = map[int]bool{http.StatusCreated: true, http.StatusConflict: true, http.StatusTooManyRequests: true, http.StatusNotFound: true}
@@ -311,7 +314,7 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 	for _, id := range personalCollectionOperationIDs {
 		profileToken[id] = true
 	}
-	for _, id := range []string{"addAdminCollectionItem", "applyAdminCollectionTemplateBundle", "createAdminCollection", "createAdminCollectionGroup", "deleteAdminCollection", "deleteAdminCollectionGroup", "deleteAdminCollectionImage", "getAdminCollection", "getAdminCollectionCapabilities", "getAdminCollectionGroup", "getAdminCollectionGroupOrder", "getAdminCollectionItems", "getAdminCollectionItemsOrder", "getAdminCollectionJob", "getAdminCollectionOrder", "getAdminGroupCollectionOrder", "importAdminMDBList", "importAdminTMDB", "importAdminTrakt", "listAdminCollectionGroups", "listAdminCollectionTemplateBundles", "listAdminCollectionTemplates", "listAdminCollections", "moveAndReorderAdminGroupCollections", "previewAdminCollection", "removeAdminCollectionItem", "reorderAdminCollectionGroups", "reorderAdminCollectionItems", "reorderAdminCollections", "startAdminCollectionTemplateBundleJob", "syncAdminCollection", "updateAdminCollection", "updateAdminCollectionGroup", "uploadAdminCollectionBackdrop", "uploadAdminCollectionPoster"} {
+	for _, id := range []string{"addAdminCollectionItem", "applyAdminCollectionTemplateBundle", "createAdminCollection", "createAdminCollectionGroup", "deleteAdminCollection", "deleteAdminCollectionGroup", "deleteAdminCollectionImage", "getAdminCollection", "getAdminCollectionCapabilities", "getAdminCollectionGroup", "getAdminCollectionGroupOrder", "getAdminCollectionItems", "getAdminCollectionItemsOrder", "getAdminCollectionJob", "getAdminCollectionOrder", "getAdminGroupCollectionOrder", "importAdminMDBList", "importAdminTMDB", "importAdminTMDBList", "importAdminTrakt", "listAdminCollectionGroups", "listAdminCollectionTemplateBundles", "listAdminCollectionTemplates", "listAdminCollections", "moveAndReorderAdminGroupCollections", "previewAdminCollection", "removeAdminCollectionItem", "reorderAdminCollectionGroups", "reorderAdminCollectionItems", "reorderAdminCollections", "startAdminCollectionTemplateBundleJob", "syncAdminCollection", "updateAdminCollection", "updateAdminCollectionGroup", "uploadAdminCollectionBackdrop", "uploadAdminCollectionPoster"} {
 		profileToken[id] = true
 	}
 	expect["createCollection"] = map[int]bool{http.StatusCreated: true, http.StatusOK: false}
@@ -495,6 +498,7 @@ var libraryOperationIDs = []string{
 	"setRootOverride", "deleteRootOverride", "listSkippedRoots", "listStaleIds", "rematchStaleId", "listUnmatchedItems",
 	"confirmEmptyRootCleanup", "getMetadataMatchQueue", "retryMetadataMatchQueue", "cancelMetadataMatchQueue", "refreshLibraryMetadata",
 	"getLibraryProviders", "setLibraryProviders", "uploadLibraryPoster", "deleteLibraryPoster",
+	"getLibraryRealtimeMonitoring", "getLibraryCapabilities",
 }
 
 // libraryViewOperationIDs is every profile-scoped library read the
@@ -1242,6 +1246,7 @@ var personalCollectionOperationIDs = []string{
 	"getLibraryCollectionItems",
 	"importMDBListCollection",
 	"importTMDBCollection",
+	"importTMDBListCollection",
 	"importTraktCollection",
 	"listCollectionTemplates",
 	"listCollections",

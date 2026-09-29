@@ -19,6 +19,7 @@ import {
 import { useAccessGroups } from "@/hooks/queries/admin/accessGroups";
 import { useViewerIsOwner } from "@/hooks/queries/admin/users";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
+import { useAdminServerSettings } from "@/hooks/queries/admin/settings";
 import { effectiveAccessGroupID } from "@/components/UserPolicyFields";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,7 +51,8 @@ import {
 } from "@/components/ui/dialog";
 import { LibraryAccessSelector } from "@/components/LibraryAccessSelector";
 
-import { Copy, MailPlus, RotateCw, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowRight, Copy, MailPlus, RotateCw, Trash2 } from "lucide-react";
+import { Link } from "react-router";
 import { toast } from "sonner";
 import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
 import { formatDate } from "@/lib/datetime";
@@ -119,6 +121,11 @@ function InvitationManager() {
   const capabilities = useInvitationCapabilities();
   const available = capabilities.data?.state === "available";
   const history = useAdminInvitations(available);
+  // Invitation links are built on the public URL, and the server refuses to
+  // create one without it. Settings that are loading or unreadable block nothing.
+  const serverSettings = useAdminServerSettings().data;
+  const publicURLMissing =
+    serverSettings !== undefined && (serverSettings["server.public_url"] ?? "").trim() === "";
   const invitations = history.data?.pages.flatMap((page) => page.items) ?? [];
   const resend = useResendInvitation();
   const revoke = useRevokeInvitation();
@@ -300,7 +307,7 @@ function InvitationManager() {
           }}
         >
           <DialogTrigger asChild>
-            <Button size="sm">
+            <Button size="sm" disabled={publicURLMissing}>
               <MailPlus className="mr-1 h-4 w-4" />
               Invite someone
             </Button>
@@ -330,6 +337,21 @@ function InvitationManager() {
           </DialogContent>
         </Dialog>
       </div>
+      {publicURLMissing && (
+        <div className="flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" aria-hidden="true" />
+          <p className="text-[13px] leading-relaxed">
+            Set the Silo public URL to create invitation links.{" "}
+            <Link
+              to="/admin/settings/general"
+              className="text-foreground inline-flex items-center gap-1 font-medium hover:underline"
+            >
+              General settings
+              <ArrowRight className="h-3 w-3" aria-hidden="true" />
+            </Link>
+          </p>
+        </div>
+      )}
       {resendError && !resendOpen && (
         <div role="alert">
           <p>{resendError}</p>
@@ -383,6 +405,8 @@ function InvitationManager() {
                     setConfirmRevoke({ row: inv, profileContext: captureInvitationAuthority() });
                   }}
                   resending={resend.isPending || revoke.isPending || !!resendError}
+                  // A fresh link needs the public URL; revoking one does not.
+                  resendBlocked={publicURLMissing}
                 />
               ))}
             </TableBody>
@@ -407,12 +431,14 @@ function InvitationRow({
   onResend,
   onRevoke,
   resending,
+  resendBlocked,
   resendAllowed,
 }: {
   invitation: Invitation;
   onResend: () => void;
   onRevoke: () => void;
   resending: boolean;
+  resendBlocked: boolean;
   resendAllowed: boolean;
 }) {
   const badge = STATUS_BADGES[invitation.status];
@@ -449,7 +475,7 @@ function InvitationRow({
               variant="ghost"
               size="sm"
               onClick={onResend}
-              disabled={resending}
+              disabled={resending || resendBlocked}
               title="Resend with a fresh link"
             >
               <RotateCw className="h-4 w-4" />
