@@ -4,6 +4,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 const unavailableDisplay = "unavailable"
@@ -39,6 +40,19 @@ func Current() Info {
 	}
 	return resolve(info.Settings, overrideRevision, overrideDirty, overrideBuildNumber, overrideBuiltAt)
 }
+
+// UserAgent names this Silo build for third-party APIs that ask callers to
+// identify their application and version, for example "Silo/ce6a0f53". A build
+// without revision metadata reports "Silo/dev".
+func UserAgent() string { return userAgent() }
+
+var userAgent = sync.OnceValue(func() string {
+	info := Current()
+	if !info.Available {
+		return "Silo/dev"
+	}
+	return "Silo/" + info.Display
+})
 
 func resolve(settings []debug.BuildSetting, fallbackRevision string, fallbackDirty bool, buildNumber uint64, builtAt string) Info {
 	var (

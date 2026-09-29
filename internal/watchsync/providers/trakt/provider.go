@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/buildinfo"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
@@ -151,7 +152,7 @@ func (p *Provider) StartDeviceAuth(
 		return watchsync.DeviceAuthSession{}, watchsync.RateLimitedError{Provider: p.Key(), RetryAfter: wait}
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return watchsync.DeviceAuthSession{}, fmt.Errorf("trakt device auth request failed: status %d", resp.StatusCode)
+		return watchsync.DeviceAuthSession{}, responseError(http.MethodPost, "/oauth/device/code", "", resp)
 	}
 
 	var response struct {
@@ -183,6 +184,7 @@ func (p *Provider) addHeaders(req *http.Request, cfg watchsync.ServerConfig, tok
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("trakt-api-version", "2")
 	req.Header.Set("trakt-api-key", cfg.ClientID)
+	req.Header.Set("User-Agent", buildinfo.UserAgent())
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -851,7 +853,7 @@ func (p *Provider) doOnce(
 		return nil, wait, true, nil
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, 0, false, fmt.Errorf("trakt request %s %s failed: status %d", method, path, resp.StatusCode)
+		return nil, 0, false, responseError(method, path, token, resp)
 	}
 	if out == nil {
 		return resp.Header, 0, false, nil
@@ -860,6 +862,58 @@ func (p *Provider) doOnce(
 		return nil, 0, false, fmt.Errorf("decode trakt response: %w", err)
 	}
 	return resp.Header, 0, false, nil
+}
+
+// maxErrorBody bounds how much of a failed response is read for its message.
+const maxErrorBody = 4 << 10
+
+// statusAccountLimitExceeded is Trakt's 420, sent when a free account is over
+// an item limit that Trakt VIP raises. net/http has no constant for it.
+const statusAccountLimitExceeded = 420
+
+// oauthError is the body Trakt's OAuth endpoints send with a failed token
+// exchange, for example {"error":"invalid_grant","error_description":"session
+// not found"}.
+type oauthError struct {
+	Code        string `json:"error"`
+	Description string `json:"error_description"`
+}
+
+// responseError describes a failed Trakt response. A rejected access token
+// (401 on a call that sent one) or refresh token (invalid_grant) wraps
+// watchsync.ErrInvalidCredential, so the connection records the error and the
+// profile owner is told to reconnect. Refresh tokens issued before Trakt's
+// 2026 authentication migration fail this way and need one new sign-in. The
+// other account and app statuses say who can fix them.
+func responseError(method, path, token string, resp *http.Response) error {
+	failed := fmt.Sprintf("trakt request %s %s failed: status %d", method, path, resp.StatusCode)
+	var oauth oauthError
+	if body, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody)); err == nil {
+		_ = json.Unmarshal(body, &oauth)
+	}
+	if oauth.Code != "" {
+		failed += " (" + oauth.Code
+		if oauth.Description != "" {
+			failed += ": " + oauth.Description
+		}
+		failed += ")"
+	}
+	switch {
+	case oauth.Code == "invalid_grant", resp.StatusCode == http.StatusUnauthorized && token != "":
+		return fmt.Errorf("%s: Trakt no longer accepts this connection's sign-in; reconnect Trakt: %w", failed, watchsync.ErrInvalidCredential)
+	case resp.StatusCode == http.StatusUnauthorized, resp.StatusCode == http.StatusForbidden:
+		return fmt.Errorf("%s: Trakt rejected the server's app credentials; an administrator should check the Trakt client ID and secret", failed)
+	case resp.StatusCode == statusAccountLimitExceeded:
+		if limit := strings.TrimSpace(resp.Header.Get("X-Account-Limit")); limit != "" {
+			return fmt.Errorf("%s: the Trakt account has reached its limit of %s items; Trakt VIP raises the limit", failed, limit)
+		}
+		return fmt.Errorf("%s: the Trakt account has reached an item limit; Trakt VIP raises the limit", failed)
+	case resp.StatusCode == http.StatusLocked:
+		return fmt.Errorf("%s: the Trakt account is locked or deactivated; its owner should contact Trakt support", failed)
+	case resp.StatusCode == http.StatusUpgradeRequired:
+		return fmt.Errorf("%s: this Trakt feature needs Trakt VIP", failed)
+	}
+	return errors.New(failed)
 }
 
 type tokenResponse struct {

@@ -91,7 +91,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchstate"
-	watchtrakt "github.com/Silo-Server/silo-server/internal/watchsync/providers/trakt"
 	"github.com/Silo-Server/silo-server/internal/watchtogether"
 	"github.com/Silo-Server/silo-server/internal/webhooksync"
 )
@@ -1829,12 +1828,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 				settings: settingsRepo,
 			}
 		}
-		if libraryCollectionService.TraktTokenResolver == nil && deps.DB != nil && settingsRepo != nil {
+		if tokens, ok := deps.WatchProviderService.(watchProviderAccessTokens); ok && libraryCollectionService.TraktTokenResolver == nil && deps.DB != nil {
 			libraryCollectionService.TraktTokenResolver = &traktCollectionTokenResolver{
-				pool:     deps.DB,
-				settings: settingsRepo,
-				cipher:   deps.SecretCipher,
-				provider: watchtrakt.NewProvider(nil, ""),
+				pool:   deps.DB,
+				tokens: tokens,
 			}
 		}
 
