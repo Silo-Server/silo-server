@@ -206,6 +206,29 @@ function ResultGroupHeading({ id, children }: { id: string; children: string }) 
   );
 }
 
+const KBD_CLASSES =
+  "bg-muted text-muted-foreground pointer-events-none rounded border px-1.5 py-0.5 text-[10px] font-medium select-none";
+
+function KeyHint({ keys, children }: { keys: string[]; children: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {keys.map((key) => (
+        <kbd key={key} className={KBD_CLASSES}>
+          {key}
+        </kbd>
+      ))}
+      {children}
+    </span>
+  );
+}
+
+// What Enter opens for each kind of selected row, keyed by result-key prefix.
+const OPEN_HINTS: Record<string, string> = {
+  item: "Open title",
+  person: "Open person",
+  request: "Open request page",
+};
+
 function GlobalSearchPersonRow({
   person,
   index,
@@ -459,13 +482,14 @@ export function GlobalSearch({
   // With nothing else to show, a failed people search cannot claim "No matches".
   const showError = previewQuery.isError || (peopleQuery.isError && resultCount === 0);
   function moveResultFocus(nextIndex: number) {
-    if (optionCount === 0) {
+    if (optionCount === 0 || nextIndex < 0) {
       setSelectedKey(null);
       searchInputRef.current?.focus();
       return;
     }
-    setSelectedKey(optionKeys[Math.min(Math.max(nextIndex, 0), optionCount - 1)]!);
+    setSelectedKey(optionKeys[Math.min(nextIndex, optionCount - 1)]!);
   }
+  const openHint = selectedIndex >= 0 ? OPEN_HINTS[selectedKey!.split(":")[0]!] : undefined;
   function pickSelected() {
     const item = items[selectedIndex - itemOffset];
     if (item) {
@@ -579,7 +603,7 @@ export function GlobalSearch({
                   moveResultFocus(selectedIndex + 1);
                 } else if (e.key === "ArrowUp") {
                   e.preventDefault();
-                  moveResultFocus(selectedIndex < 0 ? optionCount - 1 : selectedIndex - 1);
+                  moveResultFocus(selectedIndex - 1);
                 } else if (e.key === "Enter" && pickSelected()) {
                   e.preventDefault();
                 } else if (e.key === "Escape") {
@@ -587,9 +611,7 @@ export function GlobalSearch({
                 }
               }}
             />
-            <kbd className="bg-muted text-muted-foreground pointer-events-none ml-2 hidden rounded border px-1.5 py-0.5 text-[10px] font-medium select-none sm:inline-flex">
-              ESC
-            </kbd>
+            <kbd className={cn(KBD_CLASSES, "ml-2 hidden sm:inline-flex")}>ESC</kbd>
           </div>
         </form>
         {showResultsPanel && (
@@ -641,11 +663,26 @@ export function GlobalSearch({
                 ? `${resultCount} library results, ${requestRows.length} request suggestions`
                 : `${resultCount} results found`}
             </div>
-            <div className="text-muted-foreground border-t px-3 py-2 text-center text-xs">
-              {hasMore ? (
-                <p>Showing top results. Press Enter for all results.</p>
+            {/* Says what Enter does right now: search from the input, or open the
+                selected row. */}
+            <div className="text-muted-foreground flex flex-wrap items-center justify-center gap-x-4 gap-y-1 border-t px-3 py-2 text-xs">
+              {openHint ? (
+                <>
+                  <KeyHint keys={["Enter"]}>{openHint}</KeyHint>
+                  {selectedIndex === 0 ? (
+                    <KeyHint keys={["↑"]}>Back to search</KeyHint>
+                  ) : (
+                    <KeyHint keys={["↑", "↓"]}>Move</KeyHint>
+                  )}
+                </>
               ) : (
-                <p>Press Enter to open the full search page.</p>
+                <>
+                  {hasMore && <span>Showing top results.</span>}
+                  <KeyHint keys={["Enter"]}>
+                    {hasMore ? "See all results" : "Open the full search page"}
+                  </KeyHint>
+                  {resultCount > 0 && <KeyHint keys={["↓"]}>Select a result</KeyHint>}
+                </>
               )}
             </div>
           </div>

@@ -99,6 +99,7 @@ vi.mock("@/components/CardPlayOverlay", () => ({
   ),
 }));
 
+import { buildQueryCatalogHref } from "@/pages/catalogSearchParams";
 import { GlobalSearch } from "./GlobalSearch";
 
 const browseFixture = {
@@ -191,7 +192,7 @@ describe("GlobalSearch", () => {
     expect(markup).toContain("Test Movie");
     expect(markup).toContain("Showing top results");
     expect(markup).not.toContain("of 50");
-    expect(markup).toContain("Press Enter for all results");
+    expect(markup).toContain("See all results");
   });
 
   it("shows a compact independent play target for playable library results", () => {
@@ -353,10 +354,15 @@ describe("GlobalSearch", () => {
     expect(input).not.toHaveAttribute("aria-activedescendant");
   });
 
-  it("moves ArrowUp from an unselected input to the last result and stops at both ends", () => {
+  it("stops at the last result and returns to the search box above the first", () => {
     const input = renderTwoResults();
 
+    // Nothing sits above the search box.
     fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(input).not.toHaveAttribute("aria-activedescendant");
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
     expect(input).toHaveAttribute("aria-activedescendant", "search-result-1");
     expect(screen.getByRole("option", { selected: true })).toHaveTextContent("Second Movie");
     expect(input).toHaveFocus();
@@ -365,10 +371,38 @@ describe("GlobalSearch", () => {
     fireEvent.keyDown(input, { key: "ArrowDown" });
     expect(input).toHaveAttribute("aria-activedescendant", "search-result-1");
 
-    // Before the start stays on the first result.
-    fireEvent.keyDown(input, { key: "ArrowUp" });
+    // Up from the first result clears the selection, back in the search box.
     fireEvent.keyDown(input, { key: "ArrowUp" });
     expect(input).toHaveAttribute("aria-activedescendant", "search-result-0");
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(input).not.toHaveAttribute("aria-activedescendant");
+    expect(screen.queryByRole("option", { selected: true })).not.toBeInTheDocument();
+    expect(input).toHaveFocus();
+  });
+
+  it("says in the footer what Enter will do as the selection moves", async () => {
+    const input = renderTwoResults();
+    const footer = () => screen.getByText("Open the full search page").closest("div");
+
+    expect(screen.getByText("Open the full search page")).toBeInTheDocument();
+    expect(screen.getByText("Select a result")).toBeInTheDocument();
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(screen.queryByText("Open the full search page")).not.toBeInTheDocument();
+    expect(screen.getByText("Open title")).toBeInTheDocument();
+    expect(screen.getByText("Back to search")).toBeInTheDocument();
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(screen.getByText("Open title")).toBeInTheDocument();
+    expect(screen.getByText("Move")).toBeInTheDocument();
+
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(footer()).toHaveTextContent("Open the full search page");
+
+    // Back in the search box, Enter searches instead of opening a row.
+    await userEvent.keyboard("{Enter}");
+    expect(mocks.navigate).toHaveBeenCalledWith(buildQueryCatalogHref("Test"));
   });
 
   it("highlights the selected title row", () => {
