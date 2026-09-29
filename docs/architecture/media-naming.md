@@ -15,17 +15,21 @@ In a `mixed` library, `ResolvePathContext` (`internal/naming/filename.go`) and
    such as `01` counts only when the file name has an episode token; series libraries accept it
    without one.
 2. Movie-folder evidence (`detectInferMovieFolderEvidence`) makes it a movie: the parent folder
-   carries a provider tag, or is a trusted title-and-year folder whose title the file name
-   matches.
+   carries a TMDB or IMDb tag, or is a trusted title-and-year folder whose title the file name
+   matches. A TVDB-only tag isn't evidence by itself, because Sonarr adds the show's TVDB ID to
+   series folders. A TVDB-only folder has no movie evidence when the file name has an episode
+   token and the folder's own title doesn't look like an episode code; otherwise it gets the
+   title-and-year check.
 3. An episode token (`S01E02`, `1x02`, ...) makes it a series.
 4. Anything else is a movie.
 
 `movies` and `series` libraries skip this and take the library type. Step 2 comes before step 3
 on purpose: a tagged movie folder must not become a series because its title looks like an
 episode code (`TestResolvePathContext`, "mixed library obvious movie folder beats episode
-token"). As a result, episodes in a provider-tagged show folder with no season folder classify as
-movies, and an air-date name alone never makes a file a series. Metadata providers run after this
-decision; an NFO never changes the type (see [local-nfo-metadata.md](local-nfo-metadata.md)).
+token"). As a result, episodes in a TMDB- or IMDb-tagged show folder with no season folder
+classify as movies, and an air-date name alone never makes a file a series. Metadata providers
+run after this decision; an NFO never changes the type (see
+[local-nfo-metadata.md](local-nfo-metadata.md)).
 `TestEpisodePatternAgreesAcrossClassifiers` keeps the two classifiers' episode detection in step.
 
 ## Episode numbers
