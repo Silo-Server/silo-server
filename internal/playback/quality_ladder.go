@@ -15,7 +15,9 @@ type ladderClass struct {
 // bitrateLadder pairs a bitrate budget with the largest output that budget
 // encodes well. The floors follow Apple's HLS authoring ladder and Jellyfin's
 // ResolutionNormalizer for H.264 at <=30 fps; 480p takes everything below
-// 540p's floor. Download presets read this table.
+// 540p's floor. Download presets, automatic streaming quality, and
+// jellycompat all read this one table so a given bitrate always means the
+// same resolution.
 var bitrateLadder = []ladderClass{
 	{Height: 2160, Width: 3840, FloorKbps: 20_000},
 	{Height: 1080, Width: 1920, FloorKbps: 5_000},
@@ -69,6 +71,23 @@ func ladderClassesFrom(height int) []ladderClass {
 		}
 	}
 	return bitrateLadder[len(bitrateLadder)-1:]
+}
+
+// ladderClassForSize is the smallest ladder class whose box holds a frame,
+// the class a source already belongs to: 1920x800 is 1080p, 1280x720 is
+// 720p. A frame known only by its height is classed by that height, a frame
+// larger than every box is the largest class, and an unknown size is 0.
+func ladderClassForSize(width, height int) int {
+	if height <= 0 {
+		return 0
+	}
+	for i := len(bitrateLadder) - 1; i >= 0; i-- {
+		class := bitrateLadder[i]
+		if height <= class.Height && (width <= 0 || width <= class.Width) {
+			return class.Height
+		}
+	}
+	return bitrateLadder[0].Height
 }
 
 // FitLadderBox scales a source into a class's 16:9 box, keeping its aspect

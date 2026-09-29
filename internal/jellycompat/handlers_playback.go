@@ -1147,18 +1147,26 @@ func compatVideoToolboxToneMapBitrateKbps(version catalog.FileVersion, recipe co
 	}
 }
 
-func compatMaxResolutionForBitrateKbps(kbps int64) string {
+// compatTargetResolutionForBitrate is the encoder height a Jellyfin client's
+// bitrate limit earns on Silo's shared ladder (playback.LadderClassForBitrate),
+// fit to the source's aspect ratio. Empty leaves the source unscaled: at 20
+// Mbps and above, and whenever the source already fits the class.
+func compatTargetResolutionForBitrate(kbps int64, track models.VideoTrack) string {
+	if kbps <= 0 {
+		return ""
+	}
+	class := playback.LadderClassForBitrate(int(kbps), parseCompatFrameRate(track.FrameRate), compatTargetVideoCodec)
+	if class >= 2160 {
+		return ""
+	}
+	width, height := playback.FitLadderBox(track.Width, track.Height, class)
 	switch {
-	case kbps <= 0:
+	case height == 0:
+		return strconv.Itoa(class) + "p"
+	case width == track.Width && height == track.Height:
 		return ""
-	case kbps < 2000:
-		return "480p"
-	case kbps < 6000:
-		return compatResolution720p
-	case kbps < 20000:
-		return compatResolution1080p
 	default:
-		return ""
+		return strconv.Itoa(height) + "p"
 	}
 }
 
@@ -2538,14 +2546,10 @@ func (h *PlaybackHandler) buildPlaybackSource(
 		_, audioBitrateKbps := playback.ResolveAACOutputV3(targetAudioChannels, 0)
 		targetBitrateKbps = int(maxBitrate*95/100/1000) - audioBitrateKbps
 	}
-	targetResolution := compatMaxResolutionForBitrateKbps(maxBitrate / 1000)
-	if ceiling, err := strconv.Atoi(strings.TrimSuffix(targetResolution, "p")); err == nil {
-		if height := compatPrimaryVideoTrack(version).Height; height > 0 && height <= ceiling {
-			// FFmpeg scales to an exact height; a bandwidth ceiling must not
-			// enlarge a source already below it.
-			targetResolution = ""
-		}
-	}
+	// The class follows the video's share of the ceiling, the same budget the
+	// encode targets, so a limit near a class floor does not earn a class its
+	// video bitrate cannot fill.
+	targetResolution := compatTargetResolutionForBitrate(int64(max(targetBitrateKbps, 0)), compatPrimaryVideoTrack(version))
 	targetVideoCodec := compatTargetVideoCodec
 	canEncodeOutput := profile.supportsTranscodingOutput(version, targetAudioChannels, max(targetBitrateKbps, 0), targetResolution)
 	// HEVC needs server opt-in and an explicit compatible HLS fMP4 profile.
