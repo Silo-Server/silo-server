@@ -205,3 +205,48 @@ func TestBareSeasonFolderAtLibraryRootIsNotLifted(t *testing.T) {
 		t.Errorf("bare season folder at library root lifted to the library root: %q", got)
 	}
 }
+
+func TestBareSeasonFolderOnlyCountsAsImmediateParent(t *testing.T) {
+	cases := map[string]string{
+		"/tv/Genres/Season/Shows/Example Show/Example.Show.S01E01.mkv": "/tv/Genres/Season/Shows/Example Show",
+		"/tv/Season/Example.Show.S01E01.mkv":                           "/tv/Season",
+	}
+	for filePath, want := range cases {
+		root, ok := deriveSeriesRoot(filePath, true, false, "/tv")
+		if !ok || root.RootPath != want {
+			t.Errorf("%s: root %+v ok=%v, want %q", filePath, root, ok, want)
+		}
+	}
+	// A show named "Season" with a numbered season folder keeps its own name.
+	root, ok := deriveSeriesRoot("/tv/Season/Season 1/Season.S01E01.mkv", true, false, "/tv")
+	if !ok || root.RootPath != "/tv/Season" {
+		t.Errorf("show named Season: root %+v ok=%v", root, ok)
+	}
+}
+
+func TestBareSeasonFolderIsSeasonStructureEvidence(t *testing.T) {
+	filePath := "/tv/Example Show/Season/Example.Show.S01E01.mkv"
+	ctx := ResolvePathContext(filePath, "series", "/tv")
+	if !ctx.HasSeasonStructure {
+		t.Errorf("ResolvePathContext: HasSeasonStructure=false for bare season folder")
+	}
+	if ctx.RootPath != "/tv/Example Show" {
+		t.Errorf("ResolvePathContext root %q", ctx.RootPath)
+	}
+	evidence := extractPathEvidence(filePath, "series", "/tv")
+	if !evidence.HasSeasonStructure {
+		t.Errorf("extractPathEvidence: HasSeasonStructure=false for bare season folder")
+	}
+	if _, ok := firstSeasonNumber([]string{"Example Show", "Season"}, true, true); ok {
+		t.Errorf("bare season folder must not supply a season number")
+	}
+	// A bare folder higher up is not season structure.
+	if found, _ := detectSeasonStructure([]string{"Genres", "Season", "Shows", "Example Show"}, true, true); found {
+		t.Errorf("ancestor bare season folder counted as season structure")
+	}
+	_, assignments := InferRootAssignments([]string{filePath}, "series", 1, nil, "/tv")
+	group := InferGroupIdentity(filePath, "series", assignments[filePath])
+	if group.Confidence != "high" {
+		t.Errorf("group confidence %q, want high", group.Confidence)
+	}
+}

@@ -266,6 +266,16 @@ func parseAirDate(name string) (string, bool) {
 }
 
 func detectSeasonStructure(parts []string, allowNumeric bool, configuredRoot ...bool) (bool, int) {
+	found, number, _ := scanSeasonStructure(parts, allowNumeric, configuredRoot...)
+	return found, number
+}
+
+// scanSeasonStructure walks the directories from the file upward. numbered is
+// false when the match is a bare season folder such as "Season": that folder
+// counts as season structure but carries no season number. A bare folder only
+// counts as the file's immediate parent, the same place deriveSeriesRoot
+// accepts it.
+func scanSeasonStructure(parts []string, allowNumeric bool, configuredRoot ...bool) (found bool, number int, numbered bool) {
 	for i := len(parts) - 1; i >= 0; i-- {
 		parent := ""
 		if i > 0 {
@@ -273,15 +283,18 @@ func detectSeasonStructure(parts []string, allowNumeric bool, configuredRoot ...
 		}
 		numericSeason := allowNumeric && (i != 0 || len(configuredRoot) == 0 || !configuredRoot[0])
 		if number, ok := seasonDirectoryNumber(parts[i], parent, numericSeason); ok {
-			return true, number
+			return true, number, true
+		}
+		if i == len(parts)-1 && numericSeason && i > 0 && isBareSeasonDirectory(parts[i]) {
+			return true, 0, false
 		}
 	}
-	return false, 0
+	return false, 0, false
 }
 
 func firstSeasonNumber(parts []string, allowNumeric bool, configuredRoot ...bool) (int, bool) {
-	found, seasonNum := detectSeasonStructure(parts, allowNumeric, configuredRoot...)
-	return seasonNum, found
+	_, seasonNum, numbered := scanSeasonStructure(parts, allowNumeric, configuredRoot...)
+	return seasonNum, numbered
 }
 
 func hasExplicitFolderIDs(name string) bool {
@@ -323,7 +336,10 @@ func deriveSeriesRoot(filePath string, hasEpisodePattern bool, forceParent bool,
 		segment := path.Base(current)
 		allowNumeric := (hasEpisodePattern || forceParent) && (libraryRoot == "" || filepath.Clean(path.Dir(current)) != libraryRoot)
 		_, isSeason := seasonDirectoryNumber(segment, path.Base(path.Dir(current)), allowNumeric)
-		if !isSeason && allowNumeric && isBareSeasonDirectory(segment) {
+		// A bare "Season" folder only marks the season level when it holds the
+		// file directly. Higher up it is more likely a category folder or a
+		// show that happens to be named Season.
+		if !isSeason && allowNumeric && current == parentDir && isBareSeasonDirectory(segment) {
 			isSeason = true
 		}
 		if isSeason {
