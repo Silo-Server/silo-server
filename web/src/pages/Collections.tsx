@@ -41,6 +41,7 @@ import {
 import { CollectionPosterCard } from "@/components/collections/CollectionPosterCard";
 import MediaCarousel from "@/components/MediaCarousel";
 import { useSyncUserCollection } from "@/hooks/queries/userCollectionImports";
+import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Badge } from "@/components/ui/badge";
@@ -58,6 +59,7 @@ import { carouselCardWidthClasses } from "@/lib/uiCustomization";
 import {
   buildUserCollectionCatalogHref,
   buildUserCollectionEditorPath,
+  isCollectionReadOnly,
 } from "./userCollectionsShared";
 
 type ImportedCollectionType = Extract<UserCollectionType, "mdblist" | "tmdb" | "trakt">;
@@ -75,7 +77,28 @@ function CollectionList() {
   const { data, isLoading } = useCollections();
   const { data: groupsData } = useCollectionGroups();
   const { data: capabilities } = useCollectionCapabilities();
-  const collections = useMemo(() => data ?? [], [data]);
+  const { profile } = useCurrentProfile();
+  const ownIDs = useMemo(
+    () =>
+      new Set(
+        (data ?? [])
+          .filter((item) => !isCollectionReadOnly(item, profile?.id))
+          .map((item) => item.id),
+      ),
+    [data, profile?.id],
+  );
+  // A profile orders only the collections it created, so those come first.
+  // Collections other profiles shared follow, grouped by owner in a fixed
+  // order, each group in its owner's order.
+  const collections = useMemo(() => {
+    const all = data ?? [];
+    const shared = all.filter((item) => !ownIDs.has(item.id));
+    const owners = [...new Set(shared.map((item) => item.creator_profile_id))].sort();
+    return [
+      ...all.filter((item) => ownIDs.has(item.id)),
+      ...owners.flatMap((owner) => shared.filter((item) => item.creator_profile_id === owner)),
+    ];
+  }, [data, ownIDs]);
   const groups = useMemo(() => groupsData ?? [], [groupsData]);
   const [confirmDeleteCollection, setConfirmDeleteCollection] =
     useState<CollectionEditSnapshot | null>(null);
@@ -104,11 +127,14 @@ function CollectionList() {
           fetchCollectionOrderSnapshot(dragged.group_id ?? null),
           fetchCollectionEditSnapshot(id),
         ]).then(([order, collection]) => {
-          const visible = collections
-            .filter((item) => (item.group_id ?? null) === (dragged.group_id ?? null))
+          const own = collections
+            .filter(
+              (item) =>
+                (item.group_id ?? null) === (dragged.group_id ?? null) && ownIDs.has(item.id),
+            )
             .map((item) => item.id);
           if (
-            !sameIDs(order.ordered_ids, visible) ||
+            !sameIDs(order.ordered_ids, own) ||
             (collection.collection.group_id ?? null) !== (dragged.group_id ?? null)
           )
             throw new Error("Collection order changed. Reload before moving collections.");
@@ -250,7 +276,7 @@ function CollectionList() {
               return (
                 <SortableCollectionCard
                   collection={collection}
-                  canReorder={capabilities?.groups === true}
+                  canReorder={capabilities?.groups === true && ownIDs.has(collection.id)}
                   syncable={syncable}
                   isSyncing={isSyncing}
                   onSync={() => syncMutation.mutate(collection.id)}
@@ -265,7 +291,11 @@ function CollectionList() {
             }}
             onReorderInGroup={(groupId, orderedIds) =>
               withDragSnapshot((snapshot) =>
-                reorderMutation.mutate({ orderedIds, groupId, etag: snapshot.etag }),
+                reorderMutation.mutate({
+                  orderedIds: orderedIds.filter((id) => ownIDs.has(id)),
+                  groupId,
+                  etag: snapshot.etag,
+                }),
               )
             }
             onMoveItemAcross={(itemId, toGroupId) =>

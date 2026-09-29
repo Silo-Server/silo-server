@@ -280,8 +280,8 @@ type reorderRequest struct {
 }
 
 // HandleReorderCollections handles PUT /collections/order.
-// The body must contain every collection in scope; concurrent edits that
-// would silently drop one are rejected.
+// The body must contain every collection the profile created in scope;
+// concurrent edits that would silently drop one are rejected.
 func (h *CollectionHandler) HandleReorderCollections(w http.ResponseWriter, r *http.Request) {
 	var req reorderRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
