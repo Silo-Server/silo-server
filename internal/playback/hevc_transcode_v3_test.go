@@ -195,6 +195,19 @@ func TestPlanPlaybackV3H264TargetStepsDownToTheDecoderSize(t *testing.T) {
 	// Limits that match no ladder box still bound the fitted size itself.
 	decoderWidth, decoderHeight = 1280, 962
 	check("a 1280x962 decoder", PlanPlaybackV3(input(false)), "h264", "720p", 1280, 2_000)
+
+	// A same-size codec conversion is fitted too: a 5 Mbps 1080p HEVC source
+	// fits the estimate, but an H.264-only client with a 720p decoder needs
+	// an H.264 encode it can take.
+	decoderWidth, decoderHeight = 1280, 720
+	conversion := input(false)
+	file := *conversion.RequestedFile
+	file.CodecVideo, file.Bitrate = "hevc", 5_200
+	file.VideoTracks = []models.VideoTrack{{Codec: "hevc", Profile: "Main", Width: 1920, Height: 1080, FrameRate: "24/1", Bitrate: 5_000, BitDepth: 8, VideoRange: "SDR"}}
+	conversion.RequestedFile, conversion.EffectiveFile = &file, &file
+	conversion.Request.Capabilities.CodecsVideo = []string{"h264"}
+	conversion.Request.Capabilities.VideoDecode = conversion.Request.Capabilities.VideoDecode[1:]
+	check("a same-size conversion", PlanPlaybackV3(conversion), "h264", "720p", 1280, 2_000)
 }
 
 func TestPlanPlaybackV3HEVCFailureFallsBackToH264(t *testing.T) {

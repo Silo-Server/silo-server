@@ -1155,10 +1155,10 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 }
 
 // h264BoundedQualityV3 fits a transcode target to the client's attested
-// H.264 decoders. A scaled encode that no decoder takes steps down the ladder
-// until its fitted size does, stopping at the smallest class since H.264 is
-// the universal HLS output; a same-size conversion keeps its size. Either way
-// the bitrate stays within the limit of a decoder that takes the output.
+// H.264 decoders. An encode that no decoder takes, scaled or a same-size
+// codec conversion, steps down the ladder until its fitted size does,
+// stopping at the smallest class since H.264 is the universal HLS output.
+// The bitrate then stays within the limit of a decoder that takes the output.
 func h264BoundedQualityV3(request StartRequestV3, quality QualityResultV3, source SourceDescriptorV3) QualityResultV3 {
 	decoders := attestedH264DecodersV3(request)
 	if len(decoders) == 0 {
@@ -1175,7 +1175,7 @@ func h264BoundedQualityV3(request StartRequestV3, quality QualityResultV3, sourc
 		}
 		return false
 	}
-	if !quality.PreservesSource && quality.Height > 0 && !anyTakes(quality.Width, quality.Height) {
+	if quality.Height > 0 && !anyTakes(quality.Width, quality.Height) {
 		classes := ladderClassesFrom(ladderClassForSize(quality.Width, quality.Height))
 		for i, class := range classes {
 			width, height := FitLadderBox(source.Width, source.Height, class.Height)
@@ -1188,6 +1188,7 @@ func h264BoundedQualityV3(request StartRequestV3, quality QualityResultV3, sourc
 			if anyTakes(width, height) || i == len(classes)-1 {
 				quality.Label, quality.Width, quality.Height = heightLabel(height), width, height
 				quality.BitrateKbps = minPositiveV3(quality.BitrateKbps, ladderClassBitrateKbpsV3(class.Height))
+				quality.PreservesSource = false
 				break
 			}
 		}
