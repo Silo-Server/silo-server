@@ -69,8 +69,12 @@ type serviceFakeRepo struct {
 	// sync lock; ratingLocks records each lock taken, with whether it waited.
 	ratingLockBusy map[string]bool
 	ratingLocks    []string
-	// beforeTokenRefresh stands in for another holder of the token refresh
-	// lock that finishes just before this caller acquires it.
+	// tokenRefreshMu gives the token refresh lock its one-holder-at-a-time
+	// behavior. onTokenRefreshWait runs as a caller starts waiting for the
+	// lock; beforeTokenRefresh stands in for another holder that finishes just
+	// before this caller acquires it.
+	tokenRefreshMu     sync.Mutex
+	onTokenRefreshWait func()
 	beforeTokenRefresh func()
 	// upsertRatingErr fails UpsertRatingSyncStates when set.
 	upsertRatingErr error
@@ -592,6 +596,11 @@ func (r *serviceFakeRepo) WithRatingSyncLock(ctx context.Context, connectionID s
 }
 
 func (r *serviceFakeRepo) WithTokenRefreshLock(ctx context.Context, _ string, fn func(context.Context) error) error {
+	if r.onTokenRefreshWait != nil {
+		r.onTokenRefreshWait()
+	}
+	r.tokenRefreshMu.Lock()
+	defer r.tokenRefreshMu.Unlock()
 	if r.beforeTokenRefresh != nil {
 		r.beforeTokenRefresh()
 	}
@@ -886,6 +895,10 @@ type authProviderStub struct {
 	refreshed     bool
 	refreshTokens TokenSet
 	refreshErr    error
+	// refreshEntered, when set, receives once RefreshToken is called, which
+	// then waits for refreshRelease: a refresh in flight at the provider.
+	refreshEntered chan<- struct{}
+	refreshRelease <-chan struct{}
 }
 
 func (p *authProviderStub) Key() string {
@@ -929,6 +942,10 @@ func (p *authProviderStub) PollDeviceAuth(
 }
 
 func (p *authProviderStub) RefreshToken(context.Context, ServerConfig, Connection) (TokenSet, error) {
+	if p.refreshEntered != nil {
+		p.refreshEntered <- struct{}{}
+		<-p.refreshRelease
+	}
 	p.refreshed = true
 	if p.refreshErr != nil {
 		return TokenSet{}, p.refreshErr
@@ -1021,6 +1038,7 @@ type watchedExporterStub struct {
 	exportResult ExportResult
 	exported     *[]LocalPlay
 	remote       []RemotePlay
+	precision    time.Duration
 	key          string
 	source       userstore.WatchHistorySource
 }
@@ -1051,6 +1069,10 @@ func (p watchedExporterStub) Capabilities() Capabilities {
 
 func (p watchedExporterStub) FetchHistory(context.Context, ServerConfig, Connection) ([]RemotePlay, error) {
 	return p.remote, nil
+}
+
+func (p watchedExporterStub) HistoryTimePrecision() time.Duration {
+	return p.precision
 }
 
 func (p watchedExporterStub) ExportHistory(_ context.Context, _ ServerConfig, _ Connection, plays []LocalPlay) (ExportResult, error) {
@@ -1833,6 +1855,70 @@ func TestServiceSyncConnectionRefreshesExpiredToken(t *testing.T) {
 	}
 }
 
+// A refresh saves the whole connection, so a disconnect that lands while one
+// is in flight must wait for it; otherwise the refresh recreates the row.
+func TestServiceDisconnectWaitsForAnInFlightTokenRefresh(t *testing.T) {
+	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
+	expiresAt := now.Add(-time.Minute)
+	refreshedExpiresAt := now.Add(time.Hour)
+	entered, release := make(chan struct{}), make(chan struct{})
+	provider := &authProviderStub{
+		refreshTokens:  TokenSet{AccessToken: "new-access", RefreshToken: "new-refresh", TokenExpiresAt: &refreshedExpiresAt},
+		refreshEntered: entered,
+		refreshRelease: release,
+	}
+	reg := NewRegistry()
+	if err := reg.Register(provider); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	repo := newServiceFakeRepo()
+	service := NewService(repo, reg)
+	service.now = func() time.Time { return now }
+	key := connectionKey("trakt", 7, "profile-1")
+	repo.connections[key] = Connection{
+		ID:             "conn-1",
+		Provider:       "trakt",
+		UserID:         7,
+		ProfileID:      "profile-1",
+		AccessToken:    testOldAccessToken,
+		RefreshToken:   testOldRefreshToken,
+		TokenExpiresAt: &expiresAt,
+	}
+	ctx := context.Background()
+
+	refreshDone := make(chan error, 1)
+	go func() {
+		_, err := service.AccessToken(ctx, "conn-1")
+		refreshDone <- err
+	}()
+	<-entered
+
+	deleteWaiting := make(chan struct{}, 1)
+	repo.onTokenRefreshWait = func() { deleteWaiting <- struct{}{} }
+	deleteDone := make(chan error, 1)
+	go func() { deleteDone <- service.DeleteConnection(ctx, 7, "profile-1", "trakt") }()
+	var deleteErr error
+	deleted := false
+	select {
+	case <-deleteWaiting:
+	case deleteErr = <-deleteDone:
+		deleted = true
+	}
+	close(release)
+	if err := <-refreshDone; err != nil {
+		t.Fatalf("AccessToken: %v", err)
+	}
+	if !deleted {
+		deleteErr = <-deleteDone
+	}
+	if deleteErr != nil {
+		t.Fatalf("DeleteConnection: %v", deleteErr)
+	}
+	if _, ok := repo.connections[key]; ok {
+		t.Fatal("the refresh recreated the disconnected connection")
+	}
+}
+
 func TestServicePluginRefreshPersistsAuthoritativeCredentialsBeforeFault(t *testing.T) {
 	repo := newServiceFakeRepo()
 	now := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
@@ -2289,56 +2375,71 @@ func TestServiceExportWatchedDrainsPendingBatches(t *testing.T) {
 	}
 }
 
-// Trakt stores watched_at without seconds, so a local play keeps its seconds
-// while the provider's copy of the same play reads :00.
-func TestServiceExportWatchedMatchesRemotePlayToTheMinute(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
+// A provider that stores watch times to the minute (Trakt) returns :00 for a
+// local play that kept its seconds; one that keeps seconds must not match a
+// different time in the same minute.
+func TestServiceExportWatchedMatchesRemotePlaysAtProviderPrecision(t *testing.T) {
+	tests := []struct {
+		name         string
+		precision    time.Duration
+		wantMatched  bool
+		wantExported int
+	}{
+		{name: "provider stores minutes", precision: time.Minute, wantMatched: true},
+		{name: "provider stores seconds", wantExported: 1},
 	}
-	defer func() { _ = db.Close() }()
-	if err := userdb.InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
-	if err := userdb.AddHistory(db, userstore.WatchHistoryEntry{
-		ID:              "history-1",
-		ProfileID:       "profile-1",
-		MediaItemID:     testMovieMediaID,
-		WatchedAt:       "2026-05-04T12:00:37Z",
-		DurationSeconds: 7200,
-		Completed:       true,
-		Source:          userstore.WatchHistorySourcePlayback,
-		Identity: userstore.WatchIdentity{
-			StableType:  "movie",
-			ProviderIDs: map[string]string{"tmdb": "603"},
-		},
-	}); err != nil {
-		t.Fatalf("AddHistory: %v", err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, err := sql.Open("sqlite3", ":memory:")
+			if err != nil {
+				t.Fatalf("open sqlite: %v", err)
+			}
+			defer func() { _ = db.Close() }()
+			if err := userdb.InitSchema(db); err != nil {
+				t.Fatalf("InitSchema: %v", err)
+			}
+			if err := userdb.AddHistory(db, userstore.WatchHistoryEntry{
+				ID:              "history-1",
+				ProfileID:       "profile-1",
+				MediaItemID:     testMovieMediaID,
+				WatchedAt:       "2026-05-04T12:00:37Z",
+				DurationSeconds: 7200,
+				Completed:       true,
+				Source:          userstore.WatchHistorySourcePlayback,
+				Identity: userstore.WatchIdentity{
+					StableType:  "movie",
+					ProviderIDs: map[string]string{"tmdb": "603"},
+				},
+			}); err != nil {
+				t.Fatalf("AddHistory: %v", err)
+			}
 
-	var exported []LocalPlay
-	provider := watchedExporterStub{
-		exported: &exported,
-		remote: []RemotePlay{{
-			ProviderItemKey: "tmdb:603",
-			WatchedAt:       time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
-		}},
-	}
-	repo := newServiceFakeRepo()
-	service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{
-		store: userdb.NewSQLiteUserStore(db),
-	})
-	result, err := service.ExportWatched(context.Background(), Connection{
-		ID:        "conn-1",
-		Provider:  "trakt",
-		UserID:    7,
-		ProfileID: "profile-1",
-	}, ServerConfig{}, provider)
-	if err != nil {
-		t.Fatalf("ExportWatched: %v", err)
-	}
-	if result.RemotePresent != 1 || result.Sent != 0 || len(exported) != 0 {
-		t.Fatalf("result = %+v, exported = %+v; want the play matched on the provider and not sent", result, exported)
+			var exported []LocalPlay
+			provider := watchedExporterStub{
+				exported:  &exported,
+				precision: tt.precision,
+				remote: []RemotePlay{{
+					ProviderItemKey: "tmdb:603",
+					WatchedAt:       time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
+				}},
+			}
+			repo := newServiceFakeRepo()
+			service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{
+				store: userdb.NewSQLiteUserStore(db),
+			})
+			result, err := service.ExportWatched(context.Background(), Connection{
+				ID:        "conn-1",
+				Provider:  "trakt",
+				UserID:    7,
+				ProfileID: "profile-1",
+			}, ServerConfig{}, provider)
+			if err != nil {
+				t.Fatalf("ExportWatched: %v", err)
+			}
+			if matched := result.RemotePresent == 1; matched != tt.wantMatched || len(exported) != tt.wantExported {
+				t.Fatalf("result = %+v, exported %d plays; want matched=%v and %d exported", result, len(exported), tt.wantMatched, tt.wantExported)
+			}
+		})
 	}
 }
 

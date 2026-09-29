@@ -226,7 +226,10 @@ func (s *Service) clearWatchlistOrder(ctx context.Context, conn Connection) erro
 func (s *Service) DeleteConnection(ctx context.Context, userID int, profileID string, providerKey string) error {
 	// Wait for any rating reconciliation of the connection to end, so once a
 	// disconnect returns no run imports or sends with the removed connection.
-	// The row is read again under the lock and deleted only if it is still
+	// A token refresh in flight is waited for too: it saves the whole
+	// connection, which would otherwise recreate the row after the delete.
+	// Token refresh never takes the rating lock, so this order cannot deadlock.
+	// The row is read again under the locks and deleted only if it is still
 	// the one locked; a reconnect that replaced it meanwhile is locked in turn.
 	for {
 		conn, ok, err := s.repo.GetConnection(ctx, providerKey, userID, profileID)
@@ -235,15 +238,17 @@ func (s *Service) DeleteConnection(ctx context.Context, userID int, profileID st
 		}
 		replaced := false
 		_, err = s.repo.WithRatingSyncLock(ctx, conn.ID, true, func(ctx context.Context) error {
-			current, ok, err := s.repo.GetConnection(ctx, providerKey, userID, profileID)
-			if err != nil || !ok {
-				return err
-			}
-			if current.ID != conn.ID {
-				replaced = true
-				return nil
-			}
-			return s.repo.DeleteConnection(ctx, providerKey, userID, profileID)
+			return s.repo.WithTokenRefreshLock(ctx, conn.ID, func(ctx context.Context) error {
+				current, ok, err := s.repo.GetConnection(ctx, providerKey, userID, profileID)
+				if err != nil || !ok {
+					return err
+				}
+				if current.ID != conn.ID {
+					replaced = true
+					return nil
+				}
+				return s.repo.DeleteConnection(ctx, providerKey, userID, profileID)
+			})
 		})
 		if err != nil || !replaced {
 			return err
@@ -1577,7 +1582,7 @@ func (s *Service) ExportWatched(
 	}
 	result.LocalFound = len(local)
 
-	exports := reconcileHistoryExports(conn.ID, local, remote)
+	exports := reconcileHistoryExports(conn.ID, local, remote, historyMatchPrecision(exporter))
 	for _, export := range exports {
 		switch export.Status {
 		case historyExportStatusRemotePresent:
@@ -1844,15 +1849,15 @@ func watchedExportBatchSize(exporter WatchedExporter, fallback int) int {
 	return max(1, bounded.ExportBatchSize())
 }
 
-func reconcileHistoryExports(connectionID string, local []LocalPlay, remote []RemotePlay) []HistoryExport {
+func reconcileHistoryExports(connectionID string, local []LocalPlay, remote []RemotePlay, precision time.Duration) []HistoryExport {
 	remoteExact := make(map[string]struct{}, len(remote))
 	for _, play := range remote {
-		remoteExact[remotePlayKey(play.ProviderItemKey, play.WatchedAt)] = struct{}{}
+		remoteExact[remotePlayKey(play.ProviderItemKey, play.WatchedAt, precision)] = struct{}{}
 	}
 	exports := make([]HistoryExport, 0, len(local))
 	for _, play := range local {
 		status := historyExportStatusPending
-		if _, ok := remoteExact[remotePlayKey(play.ProviderItemKey, play.WatchedAt)]; ok {
+		if _, ok := remoteExact[remotePlayKey(play.ProviderItemKey, play.WatchedAt, precision)]; ok {
 			status = historyExportStatusRemotePresent
 		}
 		exports = append(exports, HistoryExport{
@@ -1867,11 +1872,17 @@ func reconcileHistoryExports(connectionID string, local []LocalPlay, remote []Re
 	return exports
 }
 
-// remotePlayKey matches plays to the minute. Trakt stores watched_at without
-// seconds, so a local play at 21:14:37 is the remote play at 21:14:00, and two
-// plays of one item inside the same minute are the same viewing.
-func remotePlayKey(providerItemKey string, watchedAt time.Time) string {
-	return providerItemKey + "|" + watchedAt.UTC().Truncate(time.Minute).Format(time.RFC3339)
+// historyMatchPrecision is the precision history export compares watch times
+// at: the provider's own when it declares one coarser than a second.
+func historyMatchPrecision(exporter WatchedExporter) time.Duration {
+	if declared, ok := exporter.(historyPrecisionExporter); ok && declared.HistoryTimePrecision() > time.Second {
+		return declared.HistoryTimePrecision()
+	}
+	return time.Second
+}
+
+func remotePlayKey(providerItemKey string, watchedAt time.Time, precision time.Duration) string {
+	return providerItemKey + "|" + watchedAt.UTC().Truncate(precision).Format(time.RFC3339)
 }
 
 func localPlayFromHistory(row userstore.WatchHistoryEntry) (LocalPlay, bool) {

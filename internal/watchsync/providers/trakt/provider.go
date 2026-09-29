@@ -108,6 +108,12 @@ func (p *Provider) Capabilities() watchsync.Capabilities {
 	}
 }
 
+// HistoryTimePrecision reports that Trakt stores watched_at to the minute: it
+// drops seconds from every play it records or returns.
+func (p *Provider) HistoryTimePrecision() time.Duration {
+	return time.Minute
+}
+
 func (p *Provider) HistorySource() userstore.WatchHistorySource {
 	return userstore.WatchHistorySourceTrakt
 }
