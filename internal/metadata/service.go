@@ -1587,7 +1587,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 					delete(accumulatedIDs, key)
 				}
 			}
-			rejectIdentityProviderIDs(rejectedIdentityIDs, stored, chosen)
+			rejectIdentityProviderIDs(rejectedIdentityIDs, chosen, storedIdentityProviderIDs(existing), req.durableProviderIDs)
 		}
 		if existing != nil && contentType == "" {
 			contentType = existing.Type
@@ -1664,7 +1664,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				}
 			}
 			searchQuery.ProviderIDs = accumulatedIDs
-			rejectIdentityProviderIDs(rejectedIdentityIDs, stored, hinted)
+			rejectIdentityProviderIDs(rejectedIdentityIDs, hinted, storedIdentityProviderIDs(existing), req.durableProviderIDs)
 		}
 		searchQuery = suppressTitleYearFallbackForTrustedIDs(searchQuery)
 		allResults := make([]SearchResult, 0)
@@ -8457,14 +8457,17 @@ func identityChoiceCorrects(chosen, stored map[string]string) bool {
 }
 
 // rejectIdentityProviderIDs records the stored identity values a correction
-// rejects: each stored TMDB, TVDB or IMDb ID that the chosen IDs don't
+// rejects: each TMDB, TVDB or IMDb ID in any of the item's stored sources (its
+// columns and its durable rows, which can disagree) that the chosen IDs don't
 // restate. They came from the wrong match. Recording values rather than keys
 // leaves a different value for the same key alone, such as the IDs of an
 // existing item that a re-anchor merges into.
-func rejectIdentityProviderIDs(rejected providerIDValueSet, stored, chosen map[string]string) {
-	for _, key := range trustedSearchIDKeys {
-		if value := strings.TrimSpace(stored[key]); value != "" && value != chosen[key] {
-			rejected.add(key, value)
+func rejectIdentityProviderIDs(rejected providerIDValueSet, chosen map[string]string, sources ...map[string]string) {
+	for _, source := range sources {
+		for key, value := range canonicalIdentityProviderIDs(source) {
+			if value != chosen[key] {
+				rejected.add(key, value)
+			}
 		}
 	}
 }
