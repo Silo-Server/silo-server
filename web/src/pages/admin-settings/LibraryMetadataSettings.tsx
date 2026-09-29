@@ -18,6 +18,12 @@ import { useRestartKeys } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { FieldGroup } from "./FieldGroup";
 import { MarkerTasksCard } from "./MarkerTasksCard";
+import {
+  EXTRA_RATING_SOURCES_KEY,
+  OPTIONAL_RATING_SOURCES,
+  parseRatingSources,
+  toggleRatingSource,
+} from "./ratingSources";
 import { SaveBar } from "./SaveBar";
 import { SearchStatusPanel } from "./SearchStatusPanel";
 import { SettingField, SettingFieldStatus } from "./SettingField";
@@ -26,6 +32,8 @@ import { WORKER_SETTING_DEFAULTS, hasWorkerOverrides } from "./settingsWorkerDef
 const ARTWORK_KEYS = ["metadata.cache_images"];
 
 const BROWSING_KEYS = ["catalog.scope_versions_to_library", "access.unrated_content"];
+
+const RATINGS_KEYS = [EXTRA_RATING_SOURCES_KEY];
 
 // A top-level toggle in the Scanning group, outside the collapsed worker
 // tuning, and applied live without a restart.
@@ -72,6 +80,7 @@ const SEARCH_KEYS = ["catalog.search.provider", ...MEILI_KEYS];
 const KEYS = [
   ...ARTWORK_KEYS,
   ...BROWSING_KEYS,
+  ...RATINGS_KEYS,
   ...SCANNING_GROUP_KEYS,
   ...MARKER_KEYS,
   ...SEARCH_KEYS,
@@ -125,6 +134,7 @@ export default function LibraryMetadataSettings() {
     }
   }
 
+  const extraRatingSources = parseRatingSources(form.getValue(EXTRA_RATING_SOURCES_KEY));
   const markerMode = form.getValue("markers.mode") || "both";
   const onlineMarkersEnabled = markerMode === "online" || markerMode === "both";
   const onlineMarkerStorage = form.getValue("markers.online_storage") || "stored";
@@ -187,6 +197,32 @@ export default function LibraryMetadataSettings() {
             ]}
             restartRequired={restartKeys.has("access.unrated_content")}
           />
+        </FieldGroup>
+
+        <FieldGroup
+          label="Ratings"
+          description="IMDb and TMDB scores always show. Turn on another source to show its scores on title pages and poster badges in every app; some, such as Rotten Tomatoes and Metacritic, restrict how others may display their scores. A source's scores appear only when a metadata provider such as MDBList reports them."
+          restartAll={allRestart(RATINGS_KEYS)}
+        >
+          {OPTIONAL_RATING_SOURCES.map(({ source, label }) => (
+            <SettingField
+              key={source}
+              label={label}
+              type="toggle"
+              value={String(extraRatingSources.includes(source))}
+              onChange={(value) =>
+                form.setValue(
+                  EXTRA_RATING_SOURCES_KEY,
+                  toggleRatingSource(
+                    form.getValue(EXTRA_RATING_SOURCES_KEY),
+                    source,
+                    value === "true",
+                  ),
+                )
+              }
+              restartRequired={restartKeys.has(EXTRA_RATING_SOURCES_KEY)}
+            />
+          ))}
         </FieldGroup>
 
         <FieldGroup

@@ -77,5 +77,13 @@
       "score": 86
     }
   ],
+  "ratings": [
+    {
+      "source": "imdb",
+      "name": "IMDb",
+      "score": 83,
+      "display": "8.3"
+    }
+  ],
   "subtitles": []
 }

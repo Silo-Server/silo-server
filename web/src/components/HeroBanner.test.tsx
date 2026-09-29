@@ -127,7 +127,33 @@ describe("formatHeroMetadata", () => {
       ),
     ).toEqual([
       { key: "year", label: "2025" },
-      { key: "imdb", label: "IMDb 10.0" },
+      {
+        key: "rating",
+        label: "IMDb 10.0",
+        rating: { source: "imdb", name: "IMDb", score: 100, display: "10.0" },
+      },
+    ]);
+  });
+
+  it("falls back to the TMDB score when there is no IMDb score", () => {
+    expect(
+      formatHeroMetadata(
+        movieSlide({
+          runtime: undefined,
+          duration_seconds: undefined,
+          rating_imdb: undefined,
+          rating_tmdb: 7.25,
+          genres: [],
+          content_rating: undefined,
+        }),
+      ),
+    ).toEqual([
+      { key: "year", label: "2025" },
+      {
+        key: "rating",
+        label: "TMDB 7.3",
+        rating: { source: "tmdb", name: "TMDB", score: 72.5, display: "7.3" },
+      },
     ]);
   });
 

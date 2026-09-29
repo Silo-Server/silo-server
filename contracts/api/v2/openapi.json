@@ -18434,7 +18434,7 @@
             "type": "integer"
           },
           "rating_sources": {
-            "description": "Per-source ratings on a 0-100 scale for movies and series, in display order; absent when no provider reported any",
+            "description": "Per-source ratings on a 0-100 scale for movies and series, in display order; absent when no provider reported any. This is stored data: title pages show ratings, not this list.",
             "items": {
               "$ref": "#/components/schemas/CatalogRatingSource"
             },
@@ -18443,6 +18443,13 @@
           "rating_tmdb": {
             "format": "double",
             "type": "number"
+          },
+          "ratings": {
+            "description": "The external ratings a title page shows, in display order: IMDb and TMDB, plus the sources an administrator turned on. Render every entry as its name and display text. Empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/CatalogRating"
+            },
+            "type": "array"
           },
           "recap": {
             "$ref": "#/components/schemas/Marker"
@@ -18587,6 +18594,7 @@
           "cast",
           "crew",
           "versions",
+          "ratings",
           "subtitles",
           "content_id",
           "type",
@@ -18947,6 +18955,46 @@
           "field",
           "op",
           "value"
+        ],
+        "type": "object"
+      },
+      "CatalogRating": {
+        "additionalProperties": false,
+        "properties": {
+          "display": {
+            "description": "The score on the source's own scale, formatted for display",
+            "examples": [
+              "8.5"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "The source's name as a plain-text mark, shown next to the score",
+            "examples": [
+              "IMDb"
+            ],
+            "type": "string"
+          },
+          "score": {
+            "description": "Score on a 0-100 scale",
+            "format": "double",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "number"
+          },
+          "source": {
+            "description": "Rating source, such as imdb, tmdb, rt_critic or rt_audience. Clients may use it to pick a source's mark and should fall back to name for one they do not recognize.",
+            "examples": [
+              "imdb"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "name",
+          "score",
+          "display"
         ],
         "type": "object"
       },

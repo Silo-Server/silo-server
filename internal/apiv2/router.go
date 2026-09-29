@@ -29,6 +29,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/literaryworks"
 	"github.com/Silo-Server/silo-server/internal/metadata/translation"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
 	"github.com/Silo-Server/silo-server/internal/sections"
@@ -261,6 +262,9 @@ type Dependencies struct {
 	// CatalogSettings reads the server settings catalog reads consult per
 	// request (catalog.scope_versions_to_library); nil means every default.
 	CatalogSettings CatalogSettingsReader
+	// RatingSources decides which external ratings cards and title pages
+	// show; nil shows IMDb and TMDB only.
+	RatingSources *ratingsources.Policy
 	// RateLimit is the generic authenticated-route limiter.
 	RateLimit func(http.Handler) http.Handler
 	// CursorSecret keys pagination cursors. It must be shared by every replica

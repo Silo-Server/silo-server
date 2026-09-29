@@ -68,6 +68,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/Silo-Server/silo-server/internal/progresssync"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
 	"github.com/Silo-Server/silo-server/internal/s3client"
@@ -4913,6 +4914,7 @@ func v2Dependencies(
 	if settings != nil {
 		out.DemoSettings = settings
 		out.CatalogSettings = settings
+		out.RatingSources = ratingsources.NewPolicy(settings)
 	}
 	if deps.RateLimitMW != nil {
 		out.RateLimit = deps.RateLimitMW.Handler

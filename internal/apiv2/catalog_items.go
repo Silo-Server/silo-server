@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 )
 
 // Section catalog-items: the profile-scoped catalog browse, facet documents,
@@ -368,7 +369,8 @@ type CatalogItemDetail struct {
 	Versions                        []FileVersion                        `json:"versions" doc:"Empty, never null"`
 	PlaybackVariants                []PlaybackVariant                    `json:"playback_variants,omitempty"`
 	Videos                          []catalogpkg.ItemVideoInfo           `json:"videos,omitempty" doc:"Trailers and clips"`
-	RatingSources                   []CatalogRatingSource                `json:"rating_sources,omitempty" doc:"Per-source ratings on a 0-100 scale for movies and series, in display order; absent when no provider reported any"`
+	RatingSources                   []CatalogRatingSource                `json:"rating_sources,omitempty" doc:"Per-source ratings on a 0-100 scale for movies and series, in display order; absent when no provider reported any. This is stored data: title pages show ratings, not this list."`
+	Ratings                         []CatalogRating                      `json:"ratings" doc:"The external ratings a title page shows, in display order: IMDb and TMDB, plus the sources an administrator turned on. Render every entry as its name and display text. Empty, never null"`
 	Extras                          []catalogpkg.ItemExtraInfo           `json:"extras,omitempty"`
 	FolderPaths                     []string                             `json:"folder_paths,omitempty" doc:"Absent for viewers without file-path visibility"`
 	Subtitles                       []catalogpkg.SubtitleInfo            `json:"subtitles" doc:"Empty, never null"`
@@ -394,6 +396,32 @@ type CatalogRatingSource struct {
 	Source string  `json:"source" doc:"Rating source: imdb, tmdb, rt_critic, rt_audience, metacritic, metacritic_user, letterboxd, trakt, rogerebert, myanimelist, or mdblist. Clients should ignore names they do not recognize."`
 	Score  float64 `json:"score" minimum:"0" maximum:"100" doc:"Score on a 0-100 scale"`
 	Votes  *int64  `json:"votes,omitempty" minimum:"0" doc:"Number of votes behind the score, when the source reports it"`
+}
+
+// CatalogRating is one external rating as a title page shows it.
+type CatalogRating struct {
+	Source  string  `json:"source" doc:"Rating source, such as imdb, tmdb, rt_critic or rt_audience. Clients may use it to pick a source's mark and should fall back to name for one they do not recognize." example:"imdb"`
+	Name    string  `json:"name" doc:"The source's name as a plain-text mark, shown next to the score" example:"IMDb"`
+	Score   float64 `json:"score" minimum:"0" maximum:"100" doc:"Score on a 0-100 scale"`
+	Display string  `json:"display" doc:"The score on the source's own scale, formatted for display" example:"8.5"`
+}
+
+// catalogRatingsOf builds the title page's ratings from the stored columns
+// and per-source rows, keeping only the sources sel shows.
+func catalogRatingsOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) []CatalogRating {
+	item := ratingsources.Item{IMDB: d.RatingIMDB, TMDB: d.RatingTMDB, RTCritic: d.RatingRTCritic, RTAudience: d.RatingRTAudience}
+	if len(d.RatingSources) > 0 {
+		item.Sources = make(map[string]float64, len(d.RatingSources))
+		for _, source := range d.RatingSources {
+			item.Sources[source.Source] = source.Score
+		}
+	}
+	built := ratingsources.Build(item, sel)
+	out := make([]CatalogRating, 0, len(built))
+	for _, r := range built {
+		out = append(out, CatalogRating{Source: r.Source, Name: r.Name, Score: r.Score, Display: r.Display})
+	}
+	return out
 }
 
 func catalogRatingSourcesOf(sources []catalogpkg.ItemRatingSourceInfo) []CatalogRatingSource {
@@ -622,6 +650,12 @@ func (reg *Registry) versionsScopedToLibrary(ctx context.Context) bool {
 		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(value), "true")
+}
+
+// ratingSelection is the set of external rating sources the administrator
+// shows (IMDb and TMDB always).
+func (reg *Registry) ratingSelection(ctx context.Context) ratingsources.Selection {
+	return reg.deps.RatingSources.Selection(ctx)
 }
 
 // positive parses a canonical decimal ID that must name a positive integer.
@@ -871,8 +905,9 @@ func (reg *Registry) listCatalogItems(ctx context.Context, cursors *Cursors, in 
 		}
 	}
 	items := make([]CatalogItem, 0, len(view.Items))
+	sel := reg.ratingSelection(ctx)
 	for _, item := range view.Items {
-		items = append(items, catalogItemOfListing(item))
+		items = append(items, catalogItemOfListing(item, sel))
 	}
 	window, err := cursors.Encode(scope, catalogBrowsePosition{Snapshot: view.Snapshot, Sort: req.ResolvedSort, After: view.CursorScope})
 	if err != nil {
@@ -1041,7 +1076,7 @@ func (reg *Registry) getCatalogItem(ctx context.Context, in *CatalogItemInput) (
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	out := catalogItemDetailOf(detail)
+	out := catalogItemDetailOf(detail, reg.ratingSelection(ctx))
 	if reg.deps.ThemeSongs != nil && (detail.Type == themeOwnerMovie || detail.Type == themeOwnerSeries || detail.Type == themeOwnerSeason || detail.Type == themeOwnerEpisode) {
 		themes, err := reg.deps.ThemeSongs.Discover(ctx, in.ID, true, viewer.Access)
 		if err != nil {
@@ -1223,7 +1258,7 @@ func playbackVariantsOf(vs []catalogpkg.PlaybackVariant) []PlaybackVariant {
 // from the same detail, so a detail never disagrees with its own card. The
 // detail service does not load keywords, the original language, or the
 // match status, so those card members are empty here as they are in v1.
-func catalogItemDetailOf(d *catalogpkg.ItemDetail) CatalogItemDetail {
+func catalogItemDetailOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) CatalogItemDetail {
 	card := CatalogItem{
 		ContentID: d.ContentID, PlayContentID: d.PlayContentID, Type: d.Type, Title: d.Title,
 		SeriesID: d.SeriesID, SeriesTitle: d.SeriesTitle, SeasonNumber: d.SeasonNumber, EpisodeNumber: d.EpisodeNumber,
@@ -1247,7 +1282,7 @@ func catalogItemDetailOf(d *catalogpkg.ItemDetail) CatalogItemDetail {
 		ImdbID: d.ImdbID, TmdbID: d.TmdbID, TvdbID: d.TvdbID, Cast: NonNil(d.Cast), Crew: NonNil(d.Crew), Countries: d.Countries, LockedFields: d.LockedFields,
 		FirstAirDate: d.FirstAirDate, AirTime: d.AirTime, AirTimezone: d.AirTimezone, SeasonCount: d.SeasonCount, EpisodeCount: d.EpisodeCount,
 		AirDate: d.AirDate, IsSpecials: d.IsSpecials, UserData: watchRollupOf(d.SeasonUserData), UserRating: d.UserRating,
-		Versions: fileVersionsOf(d.Versions), PlaybackVariants: playbackVariantsOf(d.PlaybackVariants), Videos: d.Videos, RatingSources: catalogRatingSourcesOf(d.RatingSources), Extras: d.Extras,
+		Versions: fileVersionsOf(d.Versions), PlaybackVariants: playbackVariantsOf(d.PlaybackVariants), Videos: d.Videos, RatingSources: catalogRatingSourcesOf(d.RatingSources), Ratings: catalogRatingsOf(d, sel), Extras: d.Extras,
 		FolderPaths: d.FolderPaths, Subtitles: NonNil(d.Subtitles), Intro: d.Intro, Credits: d.Credits, Recap: d.Recap, Preview: d.Preview,
 		EffectiveVersionResolution: d.EffectiveVersionResolution,
 		EffectiveVersionHDR:        d.EffectiveVersionHDR, EffectiveVersionCodecVideo: d.EffectiveVersionCodecVideo, EffectiveVersionEditionKey: d.EffectiveVersionEditionKey,

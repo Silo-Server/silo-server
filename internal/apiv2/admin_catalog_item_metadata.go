@@ -85,5 +85,5 @@ func (reg *Registry) updateAdminItemMetadata(ctx context.Context, in *AdminItemM
 	if err != nil {
 		return nil, collectionProblem(err)
 	}
-	return &CatalogItemDetailOutput{Body: catalogItemDetailOf(detail)}, nil
+	return &CatalogItemDetailOutput{Body: catalogItemDetailOf(detail, reg.ratingSelection(ctx))}, nil
 }

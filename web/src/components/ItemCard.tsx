@@ -41,11 +41,21 @@ function formatRuntime(minutes?: number | null) {
   return remainingMinutes === 0 ? `${hours}h` : `${hours}h ${remainingMinutes}m`;
 }
 
-function formatRating(value?: number | null, max = 10) {
-  return value != null ? `${value.toFixed(1)} / ${max}` : null;
+// A rating reads the same as on the title page: its source's mark, then the
+// score on the source's own scale ("IMDb 8.1", "RT 93%").
+function ratingLabel(mark: string, score: string | null) {
+  return score != null ? (
+    <>
+      <span className="not-uppercase">{mark}</span> {score}
+    </>
+  ) : null;
 }
 
-function formatPercent(value?: number | null) {
+function outOfTen(value?: number | null) {
+  return value != null ? value.toFixed(1) : null;
+}
+
+function percent(value?: number | null) {
   return value != null ? `${value}%` : null;
 }
 
@@ -127,19 +137,13 @@ function SortMeta({ item, sortField }: { item: BrowseItem; sortField?: string })
         <>{formatRuntime(item.sort_metrics?.runtime_minutes ?? item.runtime) ?? defaultLabel}</>
       );
     case "rating_imdb":
-      return item.rating_imdb != null ? (
-        <>
-          <span className="not-uppercase">★</span> {item.rating_imdb.toFixed(1)} / 10
-        </>
-      ) : (
-        <>{defaultLabel}</>
-      );
+      return ratingLabel("IMDb", outOfTen(item.rating_imdb)) ?? <>{defaultLabel}</>;
     case "rating_tmdb":
-      return <>{formatRating(item.rating_tmdb) ?? defaultLabel}</>;
+      return ratingLabel("TMDB", outOfTen(item.rating_tmdb)) ?? <>{defaultLabel}</>;
     case "rating_rt_critic":
-      return <>{formatPercent(item.rating_rt_critic) ?? defaultLabel}</>;
+      return ratingLabel("RT", percent(item.rating_rt_critic)) ?? <>{defaultLabel}</>;
     case "rating_rt_audience":
-      return <>{formatPercent(item.rating_rt_audience) ?? defaultLabel}</>;
+      return ratingLabel("RT Audience", percent(item.rating_rt_audience)) ?? <>{defaultLabel}</>;
     case "release_date":
       return (
         <>{formatDate(item.sort_metrics?.release_date ?? item.release_date) ?? defaultLabel}</>

@@ -979,6 +979,14 @@ catalog read return only the versions stored in the `library_id` it was given.
 It is server-wide, applies without a restart, and never affects playback; see
 "Library-scoped version lists" in [catalog-api.md](catalog-api.md).
 
+`catalog.extra_rating_sources` (default empty) lists, comma-separated, the
+external rating sources clients show in addition to IMDb and TMDB, which always
+show: `rt_critic`, `rt_audience`, `metacritic`, `letterboxd`, and the other
+source names in "Rating sources" in [catalog-api.md](catalog-api.md). A name
+must match `^[a-z][a-z0-9_]{0,31}$`; names Silo does not know are kept. It is
+server-wide and applies within seconds, without a restart; see "Ratings on
+title pages" in [catalog-api.md](catalog-api.md).
+
 `scanner.realtime_monitoring` (default `true`) is the server-wide real-time
 monitoring switch: Silo scans library folders automatically when their files
 change. A library is monitored only while this setting, the library's own

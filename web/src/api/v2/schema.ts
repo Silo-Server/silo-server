@@ -17208,10 +17208,12 @@ export interface components {
       rating_rt_audience?: number;
       /** Format: int64 */
       rating_rt_critic?: number;
-      /** @description Per-source ratings on a 0-100 scale for movies and series, in display order; absent when no provider reported any */
+      /** @description Per-source ratings on a 0-100 scale for movies and series, in display order; absent when no provider reported any. This is stored data: title pages show ratings, not this list. */
       rating_sources?: components["schemas"]["CatalogRatingSource"][];
       /** Format: double */
       rating_tmdb?: number;
+      /** @description The external ratings a title page shows, in display order: IMDb and TMDB, plus the sources an administrator turned on. Render every entry as its name and display text. Empty, never null */
+      ratings: components["schemas"]["CatalogRating"][];
       recap?: components["schemas"]["Marker"];
       /**
        * @description Calendar date, YYYY-MM-DD
@@ -17417,6 +17419,28 @@ export interface components {
       op: string;
       /** @description Scalar or array, as the operator requires */
       value: unknown;
+    };
+    CatalogRating: {
+      /**
+       * @description The score on the source's own scale, formatted for display
+       * @example 8.5
+       */
+      display: string;
+      /**
+       * @description The source's name as a plain-text mark, shown next to the score
+       * @example IMDb
+       */
+      name: string;
+      /**
+       * Format: double
+       * @description Score on a 0-100 scale
+       */
+      score: number;
+      /**
+       * @description Rating source, such as imdb, tmdb, rt_critic or rt_audience. Clients may use it to pick a source's mark and should fall back to name for one they do not recognize.
+       * @example imdb
+       */
+      source: string;
     };
     CatalogRatingSource: {
       /**

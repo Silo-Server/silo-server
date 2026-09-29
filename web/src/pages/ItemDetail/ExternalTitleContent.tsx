@@ -9,6 +9,7 @@ import type {
 } from "@/api/types";
 import CastCarousel from "@/components/CastCarousel";
 import PageBack from "@/components/PageBack";
+import { tmdbRating } from "@/components/ratings/ratings";
 import { MoreLikeThisRow } from "@/components/RecommendationGrid";
 import RequestPosterCard from "@/components/RequestPosterCard";
 import { SeasonStatus } from "@/components/RequestSeasonsDialog";
@@ -46,6 +47,8 @@ export default function ExternalTitleContent({ item, libraryHref }: ExternalTitl
     [isSeries, item.creators, item.director],
   );
   const recommendations = item.recommendations ?? [];
+  const tmdbScore = tmdbRating(item.vote_average);
+  const tmdbRatings = tmdbScore ? [tmdbScore] : [];
 
   return (
     <DetailLayout
@@ -68,9 +71,7 @@ export default function ExternalTitleContent({ item, libraryHref }: ExternalTitl
               status={isSeries ? item.status || undefined : undefined}
             />
           }
-          scoreRow={
-            <ScoreRow ratingTmdb={item.vote_average || undefined} tmdbVoteCount={item.vote_count} />
-          }
+          scoreRow={<ScoreRow ratings={tmdbRatings} tmdbVoteCount={item.vote_count} />}
           overview={item.overview}
           crewLine={
             <HeroCrewLine

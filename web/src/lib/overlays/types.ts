@@ -172,8 +172,7 @@ export type OverlayIconId =
   | "hdr"
   | "dolby-vision"
   | "atmos"
-  | "av1"
-  | "tomato";
+  | "av1";
 
 // Wordmark icons render their text as the mark itself (defined in icons.tsx).
 // When a badge's label says the same thing, the renderer suppresses the label
