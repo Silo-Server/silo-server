@@ -37,7 +37,9 @@ ladder and Jellyfin's `ResolutionNormalizer`.
   Streaming keeps H.264 as its universal output: an H.264 encode, scaled or a
   same-size conversion, steps down until an attested H.264 decoder takes its
   frame, stops at the smallest class if none does, and keeps its bitrate within
-  that decoder's limit.
+  that decoder's limit. As for downloads, a decoder takes a class only when its
+  bitrate limit earns that class, and hardware decoders are preferred only when
+  one takes the source's frame rate.
 - **Caps are ceilings.** Every encoder treats the cap as `-maxrate`, not as a
   constant-bitrate target (`appendCappedVBRArgs`).
 - **Downloads store the class, not the height.** An artifact records the class
