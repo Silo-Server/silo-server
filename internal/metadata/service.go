@@ -1571,8 +1571,13 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		if req.ContentID != "" {
 			var err error
 			existing, err = s.itemRepo.GetByID(ctx, req.ContentID)
-			if err != nil {
+			switch {
+			case errors.Is(err, catalog.ErrItemNotFound):
 				existing = nil
+			case err != nil:
+				// The correction below compares the choice with the stored
+				// columns; guessing them missing would restore the wrong match.
+				return nil, fmt.Errorf("loading item to identify: %w", err)
 			}
 		}
 		// An admin whose choice corrects the item's match (see
