@@ -25,6 +25,23 @@ func TestAdminCollectionServiceRejectsArtworkInDefinition(t *testing.T) {
 	}
 }
 
+func TestAdminCollectionServiceRejectsUnknownVisibility(t *testing.T) {
+	h := &LibraryCollectionHandler{}
+	_, err := h.CreateAdminCollection(t.Context(), AdminCollectionCreate{LibraryID: 1, Title: "repro", Visibility: "public"})
+	if e, ok := errors.AsType[*APIError](err); !ok || e.Status != 400 || e.Field != "visibility" {
+		t.Fatalf("create: expected visibility field error, got %v", err)
+	}
+	_, err = h.UpdateAdminCollection(t.Context(), "collection", AdminCollectionUpdate{Visibility: new("public")})
+	if e, ok := errors.AsType[*APIError](err); !ok || e.Status != 400 || e.Field != "visibility" {
+		t.Fatalf("update: expected visibility field error, got %v", err)
+	}
+	for _, v := range []string{"", "visible", "hidden"} {
+		if err := validateCollectionVisibility(v); err != nil {
+			t.Fatalf("%q rejected: %v", v, err)
+		}
+	}
+}
+
 func TestAdminCollectionLookupAPIErrorPreservesFailureClass(t *testing.T) {
 	for _, tc := range []struct {
 		name       string

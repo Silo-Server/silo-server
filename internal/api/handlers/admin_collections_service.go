@@ -113,6 +113,9 @@ func (h *LibraryCollectionHandler) createAdminCollection(ctx context.Context, re
 	if req.CollectionType == adminCollectionTrakt || isTraktCollectionSourceConfig(req.SourceConfig) {
 		return none, apiError(http.StatusBadRequest, "unsupported_source", "new Trakt collections are not supported")
 	}
+	if err := validateCollectionVisibility(req.Visibility); err != nil {
+		return none, err
+	}
 	if !hasLibrarySelection(req.LibraryID, req.LibraryIDs) || strings.TrimSpace(req.Title) == "" {
 		return none, apiError(http.StatusBadRequest, "bad_request", "library_id/library_ids and title are required")
 	}
@@ -208,6 +211,11 @@ func (h *LibraryCollectionHandler) CreateAdminCollection(ctx context.Context, re
 
 func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, collectionID string, req AdminCollectionUpdate, artwork adminCollectionArtwork) (AdminCollection, error) {
 	var none AdminCollection
+	if req.Visibility != nil {
+		if err := validateCollectionVisibility(*req.Visibility); err != nil {
+			return none, err
+		}
+	}
 	existing, err := h.repo.GetByID(ctx, collectionID)
 	if err != nil {
 		return none, adminCollectionLookupAPIError(err)
@@ -300,6 +308,16 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 		h.refreshSmartCountAsync(collectionID)
 	}
 	return h.libraryCollectionResponseOf(ctx, updated), nil
+}
+
+// validateCollectionVisibility rejects values the library_collections
+// visibility CHECK constraint would refuse. An empty value means the default.
+func validateCollectionVisibility(visibility string) error {
+	switch visibility {
+	case "", "visible", "hidden":
+		return nil
+	}
+	return fieldError("visibility", "visibility must be visible or hidden")
 }
 
 func adminCollectionLookupAPIError(err error) error {
