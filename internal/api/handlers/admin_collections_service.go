@@ -19,6 +19,7 @@ const (
 	adminCollectionBackdrop = "backdrop"
 	adminCollectionTrakt    = "trakt"
 	adminCollectionVisible  = "visible"
+	adminCollectionHidden   = "hidden"
 )
 
 type AdminCollection = libraryCollectionResponse
@@ -314,7 +315,7 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 // visibility CHECK constraint would refuse. An empty value means the default.
 func validateCollectionVisibility(visibility string) error {
 	switch visibility {
-	case "", "visible", "hidden":
+	case "", adminCollectionVisible, adminCollectionHidden:
 		return nil
 	}
 	return fieldError("visibility", "visibility must be visible or hidden")
