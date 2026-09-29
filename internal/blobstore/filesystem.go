@@ -380,11 +380,19 @@ func (f *Filesystem) DeletePrefix(ctx context.Context, prefix string) (int, erro
 		return 0, err
 	}
 	n := 0
+	var dirs []string
 	err = fs.WalkDir(root.FS(), prefix, func(p string, d fs.DirEntry, e error) error {
 		if e != nil {
 			return e
 		}
 		if e = ctx.Err(); e != nil {
+			return e
+		}
+		if d.IsDir() {
+			dirs = append(dirs, p)
+			return nil
+		}
+		if e = root.Remove(p); e != nil && !os.IsNotExist(e) {
 			return e
 		}
 		if d.Type().IsRegular() {
@@ -393,13 +401,15 @@ func (f *Filesystem) DeletePrefix(ctx context.Context, prefix string) (int, erro
 		return nil
 	})
 	if os.IsNotExist(err) {
-		return 0, nil
+		err = nil
+	}
+	// Remove emptied directories deepest first, even after a context error,
+	// so a partial delete leaves no empty directories behind.
+	for i := len(dirs) - 1; i >= 0; i-- {
+		_ = root.Remove(dirs[i])
 	}
 	if err != nil {
-		return 0, err
-	}
-	if err = root.RemoveAll(prefix); err != nil {
-		return 0, err
+		return n, err
 	}
 	prune(root, path.Dir(prefix))
 	return n, nil
