@@ -570,6 +570,57 @@ describe("AdminAccessGroups", () => {
     expect(screen.getByText(/make another group the default first/i)).toBeInTheDocument();
   });
 
+  it("says a deleted group's members move to the default group", async () => {
+    group = { ...GROUP, is_default: false };
+    const everyone = { ...GROUP, id: "2", name: "Everyone", is_default: true, member_count: 0 };
+    const serve = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) =>
+        String(input) === "/api/v2/admin/access-groups?limit=200" &&
+        (init?.method ?? "GET") === "GET"
+          ? jsonResponse({ items: [group, everyone], page: { has_more: false } })
+          : serve(input, init),
+      ),
+    );
+    renderPage("/admin/access-groups/1");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Delete group" }));
+    const dialog = await screen.findByRole("alertdialog");
+    await waitFor(() =>
+      expect(dialog).toHaveTextContent(
+        "3 members will move to the default group, Everyone, and be signed out",
+      ),
+    );
+    expect(dialog).not.toHaveTextContent("no group");
+  });
+
+  it("keeps the move warning when the cached member count is zero", async () => {
+    // The list's count can be stale: an account may have joined since it loaded.
+    group = { ...GROUP, is_default: false, member_count: 0 };
+    const everyone = { ...GROUP, id: "2", name: "Everyone", is_default: true, member_count: 0 };
+    const serve = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) =>
+        String(input) === "/api/v2/admin/access-groups?limit=200" &&
+        (init?.method ?? "GET") === "GET"
+          ? jsonResponse({ items: [group, everyone], page: { has_more: false } })
+          : serve(input, init),
+      ),
+    );
+    renderPage("/admin/access-groups/1");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Delete group" }));
+    const dialog = await screen.findByRole("alertdialog");
+    await waitFor(() =>
+      expect(dialog).toHaveTextContent(
+        "Any members (none when this list last loaded) will move to the default group, Everyone, and be signed out",
+      ),
+    );
+    expect(dialog).not.toHaveTextContent("This group has no members");
+  });
+
   it("saves a custom Mbps bitrate limit as whole kbps", async () => {
     const user = userEvent.setup();
     renderPage();

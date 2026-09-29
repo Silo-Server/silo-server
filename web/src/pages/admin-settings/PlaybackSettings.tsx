@@ -481,7 +481,7 @@ export default function PlaybackSettings() {
             <SettingField
               label="Chapter thumbnail workers"
               type="number"
-              description="Parallel extraction jobs per library scan."
+              description="How many files Silo extracts chapter thumbnails from at once. One more worker takes only titles that are playing, so they aren't stuck behind the queue."
               value={form.getValue("playback.chapter_thumbnail_workers")}
               onChange={(v) => form.setValue("playback.chapter_thumbnail_workers", v)}
               restartRequired={restartKeys.has("playback.chapter_thumbnail_workers")}

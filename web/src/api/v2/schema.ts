@@ -17369,6 +17369,7 @@ export interface components {
        * @enum {string}
        */
       match?: "all" | "any";
+      /** @description Alphabetical jump: only titles whose sort title (or title, when none is set) starts here */
       name_prefix?: string;
       /** @enum {string} */
       order?: "asc" | "desc";
@@ -76407,7 +76408,7 @@ export interface operations {
         limit?: number;
         /** @description How the filters combine; default all */
         match?: "all" | "any";
-        /** @description Alphabetical jump: only titles starting here */
+        /** @description Alphabetical jump: only titles whose sort title (or title, when none is set) starts here */
         name_prefix?: string;
         /** @description For source=person */
         person_id?: string;
@@ -86502,6 +86503,8 @@ export interface operations {
       /** @description Service Unavailable */
       503: {
         headers: {
+          /** @description Seconds to wait before retrying when the artwork store failed or could not be reached. */
+          "Retry-After"?: string;
           [name: string]: unknown;
         };
         content: {

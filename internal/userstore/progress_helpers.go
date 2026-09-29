@@ -167,6 +167,14 @@ type SeriesEpisodeRollupStore interface {
 	SeasonEpisodeWatchCounts(ctx context.Context, profileID string, seasonIDs []string) (map[string]SeriesWatchCounts, error)
 }
 
+// HomeDismissalItemReader reads a profile's dismissals of specific items on
+// one Home surface, so a caller that needs a series' episodes does not list
+// every dismissal of the surface. Implemented by the Postgres store; callers
+// fall back to ListHomeDismissals and filter.
+type HomeDismissalItemReader interface {
+	ListHomeDismissalsForItems(ctx context.Context, profileID, surface string, mediaItemIDs []string) ([]HomeItemDismissal, error)
+}
+
 // EpisodeParentCompletionStore determines whether every available episode of a
 // series or season is completed. Empty parents are not completed. Implementations
 // must use the same progress and completed-history visibility rules as

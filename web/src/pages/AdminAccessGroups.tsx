@@ -427,6 +427,28 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
   const updateGroup = useUpdateAccessGroup();
   const deleteGroup = useDeleteAccessGroup();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Deleting a group moves its members into the default group (server-side,
+  // in the same transaction), so the confirmation names where they go.
+  const allGroups = useAccessGroups();
+  const defaultGroupName = (allGroups.data ?? []).find(
+    (candidate) => candidate.is_default && String(candidate.id) !== String(group.id),
+  )?.name;
+  // The single-group read carries no member count; the list does.
+  const memberCount = (allGroups.data ?? []).find(
+    (candidate) => String(candidate.id) === String(group.id),
+  )?.member_count;
+  const destination = defaultGroupName
+    ? `the default group, ${defaultGroupName},`
+    : "the default group";
+  // The count is cached and can be stale (an account may have joined since the
+  // list loaded), so a zero never drops the move and sign-out warning.
+  const movers =
+    memberCount === undefined
+      ? "Its members"
+      : memberCount === 0
+        ? "Any members (none when this list last loaded)"
+        : `${memberCount} ${memberCount === 1 ? "member" : "members"}`;
+  const deleteDescription = `${movers} will move to ${destination} and be signed out so their new access applies. Settings they override on their own account are unchanged. This can't be undone.`;
 
   // Draft state, keyed by group id via the parent's selection so switching
   // groups remounts this component with fresh initial values.
@@ -855,13 +877,7 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete “{group.name}”?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {group.member_count > 0
-                ? `${group.member_count} ${
-                    group.member_count === 1 ? "member" : "members"
-                  } will move to no group and fall back to the built-in defaults. Their own restrictions are unchanged.`
-                : "Members will move to no group and fall back to built-in defaults. This can't be undone."}
-            </AlertDialogDescription>
+            <AlertDialogDescription>{deleteDescription}</AlertDialogDescription>
           </AlertDialogHeader>
           {error && <p role="alert">{error}</p>}
           {conflict && (

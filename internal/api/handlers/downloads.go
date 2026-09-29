@@ -821,6 +821,10 @@ func (h *DownloadHandler) writeAssetError(w http.ResponseWriter, asset, id strin
 		errors.Is(err, downloads.ErrAssetNotFound),
 		errors.Is(err, catalog.ErrItemNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "Not found")
+	case errors.Is(err, downloads.ErrAssetUnavailable):
+		// The service already logged the store failure; the frozen v1
+		// answer stays the 500 it has always been.
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to serve download asset")
 	case errors.Is(err, downloads.ErrInvalidSubtitleRef):
 		writeError(w, http.StatusBadRequest, "invalid_subtitle_ref", "Invalid subtitle reference")
 	case errors.Is(err, downloads.ErrDownloadNotActive):

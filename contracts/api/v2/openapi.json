@@ -18829,6 +18829,7 @@
             "type": "string"
           },
           "name_prefix": {
+            "description": "Alphabetical jump: only titles whose sort title (or title, when none is set) starts here",
             "type": "string"
           },
           "order": {
@@ -115730,12 +115731,12 @@
             }
           },
           {
-            "description": "Alphabetical jump: only titles starting here",
+            "description": "Alphabetical jump: only titles whose sort title (or title, when none is set) starts here",
             "explode": false,
             "in": "query",
             "name": "name_prefix",
             "schema": {
-              "description": "Alphabetical jump: only titles starting here",
+              "description": "Alphabetical jump: only titles whose sort title (or title, when none is set) starts here",
               "type": "string"
             }
           },
@@ -133213,7 +133214,15 @@
                 }
               }
             },
-            "description": "Service Unavailable"
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before retrying when the artwork store failed or could not be reached.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         },
         "security": [

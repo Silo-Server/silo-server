@@ -176,8 +176,8 @@ The finite `/debug/pprof/` route set on `operational_debug` and `/metrics` on
 `operational_metrics` are explicitly outside native migration decisions and
 native release-scenario catalogs. They are validated by the profiling,
 metrics-listener, and route-inventory suites and documented in
-[the profiling runbook](../operations/profiling.md) and
-[the monitoring runbook](../operations/monitoring.md). Each exclusion matches
+[Observability](observability.md#profiling-and-resource-boundaries) and its
+[deployment section](observability.md#deployment-and-retention). Each exclusion matches
 its exact listener, methods, and paths; it cannot hide a profiling or metrics
 path on a native listener or an unexpected route on an operational listener.
 The root listener's own `/metrics` row, which answers 404 so a disabled metrics

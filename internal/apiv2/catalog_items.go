@@ -34,7 +34,7 @@ type CatalogBrowseInput struct {
 	CollectionID  string   `query:"collection_id" doc:"For source=library_collection or user_collection"`
 	PersonID      ID       `query:"person_id" doc:"For source=person"`
 	Q             string   `query:"q" doc:"Search text" example:"heat"`
-	NamePrefix    string   `query:"name_prefix" doc:"Alphabetical jump: only titles starting here"`
+	NamePrefix    string   `query:"name_prefix" doc:"Alphabetical jump: only titles whose sort title (or title, when none is set) starts here"`
 	Match         string   `query:"match" enum:"all,any" doc:"How the filters combine; default all"`
 	Type          string   `query:"type" doc:"Media scope: movie, series, episode, audiobook, ebook, podcast, video, …" example:"movie"`
 	Genre         string   `query:"genre" example:"Crime"`
@@ -108,7 +108,7 @@ type CatalogQuery struct {
 	CollectionID string              `json:"collection_id,omitempty"`
 	PersonID     ID                  `json:"person_id,omitempty"`
 	Q            string              `json:"q,omitempty"`
-	NamePrefix   string              `json:"name_prefix,omitempty"`
+	NamePrefix   string              `json:"name_prefix,omitempty" doc:"Alphabetical jump: only titles whose sort title (or title, when none is set) starts here"`
 	Type         string              `json:"type,omitempty"`
 	Group        string              `json:"group,omitempty" enum:"work"`
 	SkipTotal    bool                `json:"skip_total,omitzero"`

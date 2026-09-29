@@ -92,7 +92,7 @@ func (reg *Registry) createDownloads(ctx context.Context, cursors *Cursors, in *
 		return nil, p
 	}
 	body := in.Body
-	req := downloads.CreateRequest{StrictIdentity: true, ContentID: body.ContentID, EpisodeID: body.EpisodeID, Quality: body.Quality, ProfileID: profile, DeviceID: in.DeviceID, DeviceName: in.DeviceName, DevicePlatform: in.DevicePlatform, ExpectedRevision: body.ExpectedRevision, BatchID: string(body.BatchID), ExpectedDownloadID: string(body.ExpectedDownloadID)}
+	req := downloads.CreateRequest{StrictIdentity: true, VersionFromHistory: true, ContentID: body.ContentID, EpisodeID: body.EpisodeID, Quality: body.Quality, ProfileID: profile, DeviceID: in.DeviceID, DeviceName: in.DeviceName, DevicePlatform: in.DevicePlatform, ExpectedRevision: body.ExpectedRevision, BatchID: string(body.BatchID), ExpectedDownloadID: string(body.ExpectedDownloadID)}
 	if body.MediaFileID != "" {
 		id, err := strconv.Atoi(string(body.MediaFileID))
 		if err != nil || id < 1 || strconv.Itoa(id) != string(body.MediaFileID) {
