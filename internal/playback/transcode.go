@@ -1160,14 +1160,17 @@ func appendVideoArgs(args []string, opts TranscodeOpts) []string {
 		args = append(args, "-c:v", "h264_vaapi")
 		if hasBitrateCap {
 			// An explicit -qp selects CQP, which ignores -maxrate entirely.
-			args = appendCappedVBRArgs(append(args, "-rc_mode", "VBR"), opts.TargetBitrateKbps)
+			// Without it FFmpeg picks VBR, or CBR on drivers without VBR;
+			// both honor the cap, and neither is forced on a driver that
+			// lacks it.
+			args = appendCappedVBRArgs(args, opts.TargetBitrateKbps)
 		} else {
 			args = append(args, "-qp", "23")
 		}
 	case opts.HWAccel == "vaapi" && codec == transcodeCodecHEVC:
 		args = append(args, "-c:v", "hevc_vaapi")
 		if hasBitrateCap {
-			args = appendCappedVBRArgs(append(args, "-rc_mode", "VBR"), opts.TargetBitrateKbps)
+			args = appendCappedVBRArgs(args, opts.TargetBitrateKbps)
 		} else {
 			args = append(args, "-qp", "28")
 		}

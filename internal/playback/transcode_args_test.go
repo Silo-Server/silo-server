@@ -1546,14 +1546,16 @@ func TestBuildFFmpegArgs_NVENCH264UsesCudaPipeline(t *testing.T) {
 
 // A cap must be a ceiling on every hardware encoder: QSV selects CBR when
 // -b:v equals -maxrate, and VAAPI ignores -maxrate once -qp selects CQP.
+// VAAPI is left to choose VBR or CBR itself, since forcing a mode the
+// driver lacks fails encoder initialization.
 func TestAppendVideoArgs_HardwareBitrateCapIsVBRCeiling(t *testing.T) {
 	for _, tc := range []struct {
 		hwAccel, codec, want string
 	}{
 		{"qsv", "h264", "-c:v h264_qsv -preset veryfast -b:v 4500k -maxrate 5000k -bufsize 10000k"},
 		{"qsv", "hevc", "-c:v hevc_qsv -preset veryfast -b:v 4500k -maxrate 5000k -bufsize 10000k"},
-		{"vaapi", "h264", "-c:v h264_vaapi -rc_mode VBR -b:v 4500k -maxrate 5000k -bufsize 10000k"},
-		{"vaapi", "hevc", "-c:v hevc_vaapi -rc_mode VBR -b:v 4500k -maxrate 5000k -bufsize 10000k"},
+		{"vaapi", "h264", "-c:v h264_vaapi -b:v 4500k -maxrate 5000k -bufsize 10000k"},
+		{"vaapi", "hevc", "-c:v hevc_vaapi -b:v 4500k -maxrate 5000k -bufsize 10000k"},
 		{"nvenc", "h264", "-c:v h264_nvenc -rc:v vbr -b:v 4500k -maxrate 5000k -bufsize 10000k"},
 		{"nvenc", "hevc", "-c:v hevc_nvenc -rc:v vbr -b:v 4500k -maxrate 5000k -bufsize 10000k"},
 	} {
@@ -1562,7 +1564,7 @@ func TestAppendVideoArgs_HardwareBitrateCapIsVBRCeiling(t *testing.T) {
 			t.Errorf("%s/%s capped args = %q, want %q", tc.hwAccel, tc.codec, joined, tc.want)
 		}
 		uncapped := strings.Join(appendVideoArgs(nil, TranscodeOpts{HWAccel: tc.hwAccel, TargetCodecVideo: tc.codec}), " ")
-		if strings.Contains(uncapped, "-maxrate") || strings.Contains(uncapped, "-rc_mode") {
+		if strings.Contains(uncapped, "-maxrate") {
 			t.Errorf("%s/%s uncapped args must keep constant-quality mode: %q", tc.hwAccel, tc.codec, uncapped)
 		}
 	}
