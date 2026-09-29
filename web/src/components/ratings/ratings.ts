@@ -2,6 +2,13 @@ import type { DisplayRating } from "@/api/types";
 
 export type { DisplayRating };
 
+/**
+ * A phone-width title page shows at most this many ratings, the first ones in
+ * the server's order, so the row stays on one line. Wider layouts show all of
+ * them. Every Silo client follows the same rule.
+ */
+export const PHONE_RATING_LIMIT = 3;
+
 function scoreOutOfTen(value: number | null | undefined): value is number {
   return value != null && Number.isFinite(value) && value > 0 && value <= 10;
 }
