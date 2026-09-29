@@ -171,6 +171,27 @@ func TestStorageTransitionJobCancellationContract(t *testing.T) {
 	}
 }
 
+func TestImageCacheCleanupJobCanBeCanceled(t *testing.T) {
+	job := &models.AdminJob{ID: "cleanup", JobType: adminjob.JobTypeImageCacheCleanup, Status: adminjob.StatusRunning, RequestedAt: fixedTime()}
+	deps, _ := libraryDeps(t)
+	deps.AdminTaskJobs = &fakeStorageTransitionJobs{job: job}
+	h := newTestHandler(t, deps)
+	cancel := Prefix + "/admin/jobs/cleanup/cancel"
+
+	var body AdminTaskJob
+	response := do(t, h, http.MethodPost, cancel, "", bearer(adminToken))
+	decodeJSON(t, response.Body, &body)
+	if response.Code != http.StatusAccepted || body.State != "canceling" || !body.Cancelable {
+		t.Fatalf("pending cleanup cancellation: %d %s", response.Code, response.Body)
+	}
+	job.Status = adminjob.StatusCancelled
+	response = do(t, h, http.MethodPost, cancel, "", bearer(adminToken))
+	decodeJSON(t, response.Body, &body)
+	if response.Code != http.StatusOK || body.State != "canceled" || body.Cancelable {
+		t.Fatalf("already canceled cleanup: %d %s", response.Code, response.Body)
+	}
+}
+
 func TestStorageTransitionJobProjectsSafeProgressAndFailure(t *testing.T) {
 	job := &models.AdminJob{
 		ID: "transition", JobType: adminjob.JobTypeStorageTransition, Status: adminjob.StatusRunning,

@@ -797,7 +797,7 @@ func (r *Repository) RequestCancellation(ctx context.Context, id string) (*model
 	job, err := scanAdminJob(r.pool.QueryRow(ctx, `UPDATE admin_jobs
  SET cancel_requested = true, updated_at = CASE WHEN cancel_requested THEN updated_at ELSE NOW() END
  WHERE id = $1 AND job_type = ANY($2) AND status IN ('queued', 'running')
-	 RETURNING `+adminJobColumns, id, []string{JobTypeLibraryRefresh, JobTypeStorageTransition}))
+	 RETURNING `+adminJobColumns, id, []string{JobTypeLibraryRefresh, JobTypeStorageTransition, JobTypeImageCacheCleanup}))
 	if err == nil {
 		return job, nil
 	}
@@ -808,7 +808,7 @@ func (r *Repository) RequestCancellation(ctx context.Context, id string) (*model
 	if err != nil {
 		return nil, err
 	}
-	if (job.JobType == JobTypeLibraryRefresh || job.JobType == JobTypeStorageTransition) && job.Status == StatusCancelled {
+	if (job.JobType == JobTypeLibraryRefresh || job.JobType == JobTypeStorageTransition || job.JobType == JobTypeImageCacheCleanup) && job.Status == StatusCancelled {
 		return job, nil
 	}
 	return nil, ErrJobNotCancellable

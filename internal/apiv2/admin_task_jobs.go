@@ -129,7 +129,7 @@ func (reg *Registry) cancelAdminTaskJob(ctx context.Context, in *AdminTaskJobInp
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	if job.JobType != adminjob.JobTypeStorageTransition {
+	if job.JobType != adminjob.JobTypeStorageTransition && job.JobType != adminjob.JobTypeImageCacheCleanup {
 		return nil, NewProblem(TypeJobNotCancelable, "This job cannot be canceled from this endpoint")
 	}
 	canceller, ok := reg.deps.AdminTaskJobs.(interface {

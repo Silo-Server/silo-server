@@ -271,6 +271,9 @@ func (r *Runner) runNext() {
 	}
 	if job.CancelRequested {
 		message := "Library metadata refresh canceled"
+		if job.JobType == JobTypeImageCacheCleanup {
+			message = "Image cache cleanup canceled; cached images not yet deleted remain in storage"
+		}
 		if job.JobType == JobTypeStorageTransition {
 			message = "Storage transition canceled; verified copy checkpoints retained"
 			if recorder, ok := r.storageTransition.(storageTransitionCancellationRecorder); ok {
