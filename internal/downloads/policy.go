@@ -75,7 +75,7 @@ func (r DownloadQualityResolver) Resolve(
 			return QualityDecision{}, err
 		}
 		presetKbps := QualityBitrateKbps(quality)
-		target, ok := downloadTranscodeTarget(file, caps, cfg, presetKbps, ceiling)
+		target, ok := downloadTranscodeTarget(file, caps, cfg, user, presetKbps, ceiling)
 		if !ok {
 			return QualityDecision{}, ErrQualityUnavailable
 		}
@@ -103,7 +103,7 @@ func (r DownloadQualityResolver) Resolve(
 	if err != nil {
 		return QualityDecision{}, err
 	}
-	target, ok := downloadTranscodeTarget(file, caps, cfg, QualityBitrateKbps(Quality20Mbps), ceiling)
+	target, ok := downloadTranscodeTarget(file, caps, cfg, user, QualityBitrateKbps(Quality20Mbps), ceiling)
 	if !ok {
 		return QualityDecision{}, ErrQualityUnavailable
 	}
@@ -169,15 +169,20 @@ func transcodeDecision(requested, effective string, target playback.PrepareTarge
 }
 
 // downloadTranscodeTarget resolves a bitrate-capped encode for file. The
-// policy ceiling (non-empty only when a custom override narrows the user's max
-// playback quality) caps the ladder class: it applies to what is served, so a
-// capped transcode of an over-ceiling source stays downloadable — mirroring
-// the serve-time rule in serveDownloadBytes. Without 4K transcoding the class
-// stops at 1080p, as quality_options advertises, so a 4K source is never
-// served or kept at 4K under a preset. ok is false when the device's caps
-// attest no decoder the output can fit.
-func downloadTranscodeTarget(file *models.MediaFile, caps playback.ClientCapabilities, cfg config.DownloadConfig, kbps int, ceiling string) (playback.PrepareTarget, bool) {
+// user's max playback quality and the policy ceiling (non-empty only when a
+// custom override narrows it) cap the ladder class: they apply to what is
+// served, so a capped transcode of an over-ceiling source stays downloadable —
+// mirroring the serve-time rule in serveDownloadBytes. Without 4K transcoding
+// the class stops at 1080p, as quality_options advertises, so a 4K source is
+// never served or kept at 4K under a preset. ok is false when the device's
+// caps attest no decoder the output can fit.
+func downloadTranscodeTarget(file *models.MediaFile, caps playback.ClientCapabilities, cfg config.DownloadConfig, user *PolicyUser, kbps int, ceiling string) (playback.PrepareTarget, bool) {
 	maxHeight := qualityHeight(ceiling)
+	if user != nil {
+		if height := qualityHeight(user.Policy.MaxPlaybackQuality); height > 0 && (maxHeight == 0 || height < maxHeight) {
+			maxHeight = height
+		}
+	}
 	if !cfg.Allow4KTranscode && (maxHeight == 0 || maxHeight > nonUHDMaxHeight) {
 		maxHeight = nonUHDMaxHeight
 	}
