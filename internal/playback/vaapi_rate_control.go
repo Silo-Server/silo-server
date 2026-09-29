@@ -2,8 +2,11 @@ package playback
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 // vaapiCappedModes are the VAAPI rate-control modes that keep a capped encode
@@ -19,14 +22,15 @@ var vaapiCappedModes = []string{vaapiRateControlVBR, vaapiRateControlCBR}
 
 // resolveVAAPIRateControl records the rate-control mode a capped encode on
 // the concrete VAAPI device should force: VBR where the driver offers it for
-// the target encoder, else CBR. When neither passes, the mode is left to
-// FFmpeg so an explicitly configured VAAPI backend still starts. Each answer
-// is cached per device and derived again on every start, like the HEVC
-// encoder choice, so recipe cards never freeze it. A canceled context is
-// returned so the caller stops before launching FFmpeg.
+// the target encoder, else CBR. When neither passes, the encode moves to
+// software, as it does on a device without HEVC encoding, because no VAAPI
+// mode left to FFmpeg is known to honor the cap. Each answer is cached per
+// device and derived again on every start, like the HEVC encoder choice, so
+// recipe cards never freeze it. A canceled context is returned so the caller
+// stops before launching FFmpeg.
 func resolveVAAPIRateControl(ctx context.Context, opts TranscodeOpts) (TranscodeOpts, error) {
 	opts.vaapiRateControl = ""
-	if opts.HWAccel != transcodeHWVAAPI || opts.TargetBitrateKbps <= 0 || opts.softwareHEVCEncode {
+	if opts.HWAccel != transcodeHWVAAPI || opts.TargetBitrateKbps <= 0 || opts.softwareEncode {
 		return opts, nil
 	}
 	encoder, key := encoderH264VAAPI, transcodeHWVAAPI
@@ -53,6 +57,12 @@ func resolveVAAPIRateControl(ctx context.Context, opts TranscodeOpts) (Transcode
 			return opts, nil
 		}
 	}
+	if opts.ToneMapMode == tonemap.ModeHardware {
+		opts.softwareEncode = true
+	} else {
+		opts.HWAccel = transcodeHWNone
+	}
+	slog.WarnContext(ctx, "VAAPI offers no capped rate control; using software encoding", "device", opts.HWDevice, "encoder", encoder)
 	return opts, nil
 }
 

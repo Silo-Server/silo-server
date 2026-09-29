@@ -91,12 +91,14 @@ type TranscodeOpts struct {
 	// stream tokens never freeze it: a reconstruct under auto rebuilds the
 	// pipeline and derives it again from live configuration.
 	nvencSoftwareDecode bool
-	// softwareHEVCEncode retains a frozen GPU tone-map graph while its final
-	// SDR frames feed libx265. It is derived again on reconstruction.
-	softwareHEVCEncode bool
+	// softwareEncode retains a frozen GPU tone-map graph while its final
+	// SDR frames feed a software encoder: libx265 on a device without HEVC
+	// encoding, or either codec on a VAAPI device with no capped rate
+	// control. It is derived again on reconstruction.
+	softwareEncode bool
 	// vaapiRateControl is the capped rate-control mode the selected VAAPI
-	// device offers for the target encoder ("VBR", "CBR", or "" to leave it
-	// to FFmpeg); see resolveVAAPIRateControl. Derived on every start.
+	// device offers for the target encoder ("VBR" or "CBR"; empty for an
+	// uncapped encode); see resolveVAAPIRateControl. Derived on every start.
 	vaapiRateControl           string
 	ToneMapPolicy              tonemap.Policy
 	ToneMapMode                tonemap.Mode
@@ -1016,7 +1018,7 @@ func appendTimestampNormalizationArgs(args []string, opts TranscodeOpts) []strin
 // encoder's GOP instead of the synthetic manifest's fixed-duration timeline,
 // giving the same segment number different source times after a seek restart.
 func appendSegmentBoundaryArgs(args []string, opts TranscodeOpts) []string {
-	if opts.softwareHEVCEncode {
+	if opts.softwareEncode {
 		opts.HWAccel = transcodeHWNone
 	}
 	args = append(args, "-sc_threshold", "0")
@@ -1134,7 +1136,7 @@ func videoPreset(opts TranscodeOpts, hwAccel string) string {
 
 // appendVideoArgs adds video codec arguments.
 func appendVideoArgs(args []string, opts TranscodeOpts) []string {
-	if opts.softwareHEVCEncode {
+	if opts.softwareEncode {
 		opts.HWAccel = transcodeHWNone
 	}
 	codec := opts.TargetCodecVideo
@@ -1239,7 +1241,7 @@ func appendVideoArgs(args []string, opts TranscodeOpts) []string {
 		// QSV, and CUDA frames. VideoToolbox has already downloaded an NV12
 		// software frame here and needs the explicit matrix because its encoder
 		// otherwise preserves the source BT.2020 matrix in the H.264 stream.
-		if opts.ToneMapMode == tonemap.ModeSoftware || opts.HWAccel == transcodeHWVideoToolbox || opts.softwareHEVCEncode {
+		if opts.ToneMapMode == tonemap.ModeSoftware || opts.HWAccel == transcodeHWVideoToolbox || opts.softwareEncode {
 			args = append(args, "-colorspace", "bt709")
 		}
 	}
@@ -1329,7 +1331,7 @@ func appendVideoFilterArgs(args []string, opts TranscodeOpts) []string {
 func appendToneMapFilterArgs(args []string, opts TranscodeOpts) []string {
 	start := len(args)
 	args = appendToneMapExecutorFilterArgs(args, opts)
-	if opts.softwareHEVCEncode && opts.HWAccel != transcodeHWVideoToolbox {
+	if opts.softwareEncode && opts.HWAccel != transcodeHWVideoToolbox {
 		// Each GPU graph ends in NV12 surfaces. VideoToolbox already returns
 		// CPU frames; the other executors download only after conversion,
 		// scaling, subtitle composition, and HDR metadata removal.
@@ -3043,22 +3045,22 @@ func (s *TranscodeSession) cleanStaleSegments(startSegment int) {
 // seek; any difference makes the older segments wrong-generation media and
 // their manifest a description of a stream that no longer exists.
 type emittedStreamRecipe struct {
-	videoCodec         string
-	bitstreamFilter    string
-	toneMapMode        tonemap.Mode
-	toneMapFilter      string
-	hwAccel            string
-	softwareHEVCEncode bool
+	videoCodec      string
+	bitstreamFilter string
+	toneMapMode     tonemap.Mode
+	toneMapFilter   string
+	hwAccel         string
+	softwareEncode  bool
 }
 
 func emittedRecipeOf(opts TranscodeOpts) emittedStreamRecipe {
 	return emittedStreamRecipe{
-		videoCodec:         strings.ToLower(strings.TrimSpace(opts.TargetCodecVideo)),
-		bitstreamFilter:    strings.TrimSpace(opts.VideoBitstreamFilter),
-		toneMapMode:        opts.ToneMapMode,
-		toneMapFilter:      strings.TrimSpace(opts.ToneMapFilter),
-		hwAccel:            strings.ToLower(strings.TrimSpace(opts.HWAccel)),
-		softwareHEVCEncode: opts.softwareHEVCEncode,
+		videoCodec:      strings.ToLower(strings.TrimSpace(opts.TargetCodecVideo)),
+		bitstreamFilter: strings.TrimSpace(opts.VideoBitstreamFilter),
+		toneMapMode:     opts.ToneMapMode,
+		toneMapFilter:   strings.TrimSpace(opts.ToneMapFilter),
+		hwAccel:         strings.ToLower(strings.TrimSpace(opts.HWAccel)),
+		softwareEncode:  opts.softwareEncode,
 	}
 }
 

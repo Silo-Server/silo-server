@@ -191,10 +191,10 @@ func TestHEVCEncoderProbeCacheSeparatesDevicesAndInvalidates(t *testing.T) {
 
 	working, _ := hevcEncoderTestFFmpeg(t, true, false)
 	opts.FFmpegPath = working
-	opts.softwareHEVCEncode = true
+	opts.softwareEncode = true
 	opts.EncoderHWAccel = transcodeHWNone
 	resolved, err := resolveHEVCTranscodeEncoder(context.Background(), opts)
-	if err != nil || resolved.softwareHEVCEncode || resolved.EffectiveEncoderHWAccel() != transcodeHWVAAPI {
+	if err != nil || resolved.softwareEncode || resolved.EffectiveEncoderHWAccel() != transcodeHWVAAPI {
 		t.Fatalf("healthy HEVC encoder kept a stale software fallback: %v, %#v", err, resolved)
 	}
 }
@@ -298,5 +298,55 @@ func TestHEVCFallbackProducesDecodableMain8FMP4(t *testing.T) {
 	}
 	if output, err := exec.CommandContext(ctx, ffmpeg, "-v", "error", "-xerror", "-i", manifest, "-f", "null", "-").CombinedOutput(); err != nil {
 		t.Fatalf("decode fallback: %v\n%s", err, output)
+	}
+}
+
+// A capped VAAPI encode forces the first verified capped mode, and moves to
+// software when the device verifies none, keeping a frozen GPU tone-map graph.
+func TestVAAPIRateControlFallsBackToCBRThenSoftware(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		vbr, cbr bool
+		toneMap  tonemap.Mode
+		wantMode string
+		wantHW   string
+		wantSW   bool
+	}{
+		{name: "vbr", vbr: true, cbr: true, wantMode: vaapiRateControlVBR, wantHW: transcodeHWVAAPI},
+		{name: "cbr only", cbr: true, wantMode: vaapiRateControlCBR, wantHW: transcodeHWVAAPI},
+		{name: "neither", wantHW: transcodeHWNone},
+		{name: "neither, hardware tone map", toneMap: tonemap.ModeHardware, wantHW: transcodeHWVAAPI, wantSW: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupHEVCEncoderTest(t)
+			exit := func(ok bool) int {
+				if ok {
+					return 0
+				}
+				return 1
+			}
+			ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
+			script := fmt.Sprintf("#!/bin/sh\ncase \" $* \" in\n*' -rc_mode VBR '*) exit %d ;;\n*' -rc_mode CBR '*) exit %d ;;\nesac\n", exit(tc.vbr), exit(tc.cbr))
+			if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			opts := TranscodeOpts{
+				FFmpegPath: ffmpeg, HWAccel: transcodeHWVAAPI, HWDevice: "selected-device",
+				TargetCodecVideo: transcodeCodecH264, TargetBitrateKbps: 5000, ToneMapMode: tc.toneMap,
+			}
+			resolved, err := resolveVAAPIRateControl(context.Background(), opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resolved.vaapiRateControl != tc.wantMode || resolved.HWAccel != tc.wantHW || resolved.softwareEncode != tc.wantSW {
+				t.Fatalf("mode/backend/software = %q/%q/%v, want %q/%q/%v",
+					resolved.vaapiRateControl, resolved.HWAccel, resolved.softwareEncode, tc.wantMode, tc.wantHW, tc.wantSW)
+			}
+			if tc.wantHW == transcodeHWNone || tc.wantSW {
+				if args := strings.Join(appendVideoArgs(nil, resolved), " "); !strings.Contains(args, "-c:v libx264") {
+					t.Fatalf("software fallback did not encode with libx264: %s", args)
+				}
+			}
+		})
 	}
 }

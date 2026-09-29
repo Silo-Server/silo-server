@@ -13,7 +13,7 @@ import (
 // EffectiveEncoderHWAccel reports video encoding independently of a GPU used
 // for decoding or tone mapping. The execution backend remains in HWAccel.
 func (opts TranscodeOpts) EffectiveEncoderHWAccel() string {
-	if opts.softwareHEVCEncode {
+	if opts.softwareEncode {
 		return transcodeHWNone
 	}
 	if opts.EncoderHWAccel != "" {
@@ -26,7 +26,7 @@ func (opts TranscodeOpts) EffectiveEncoderHWAccel() string {
 // selected by the allocator. Backend detection establishes H.264 readiness;
 // older GPUs may still lack HEVC encoding even when FFmpeg lists that encoder.
 func resolveHEVCTranscodeEncoder(ctx context.Context, opts TranscodeOpts) (TranscodeOpts, error) {
-	opts.softwareHEVCEncode = false
+	opts.softwareEncode = false
 	opts.EncoderHWAccel = ""
 	if !strings.EqualFold(opts.TargetCodecVideo, transcodeCodecHEVC) {
 		return opts, nil
@@ -75,7 +75,7 @@ func resolveHEVCTranscodeEncoder(ctx context.Context, opts TranscodeOpts) (Trans
 	if opts.ToneMapMode == tonemap.ModeHardware {
 		// Preserve the frozen GPU conversion; only its final SDR frames move
 		// to the CPU encoder. Reconstruction validates the target again.
-		opts.softwareHEVCEncode = true
+		opts.softwareEncode = true
 	} else {
 		opts.HWAccel = transcodeHWNone
 	}
