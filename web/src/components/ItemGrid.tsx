@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useLayoutEffect, useState } from "react";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import type { BrowseItem } from "@/api/types";
 import ItemCard from "./ItemCard";
@@ -66,7 +66,16 @@ export default function ItemGrid(props: ItemGridProps) {
     layoutKey: cardPresentation.poster_size,
   });
   const [anchorEl, setAnchorEl] = useState<HTMLDivElement | null>(null);
-  const { columnCount, rowHeight } = layout;
+  const { columnCount, rowHeight: estimatedRowHeight } = layout;
+  // The estimate adds a fixed caption height, but the rendered caption depends
+  // on line heights, an episode line and the text scale, so it runs taller.
+  // Rows reserved at the estimate then spill past the page bottom (#1613), so
+  // the pitch measured from the rendered grid replaces it once known.
+  // A measurement only holds for the layout it was taken under; a poster size,
+  // caption or column change produces a new estimate and a fresh measurement.
+  const [measured, setMeasured] = useState<{ estimate: number; rowHeight: number } | null>(null);
+  const rowHeight =
+    measured?.estimate === estimatedRowHeight ? measured.rowHeight : estimatedRowHeight;
   const scrollMargin = anchorEl ? anchorEl.getBoundingClientRect().top + window.scrollY : 0;
 
   // Use the full totalItems for virtualizer height so the scrollbar reflects
@@ -89,6 +98,21 @@ export default function ItemGrid(props: ItemGridProps) {
   }, [rowHeight, virtualizer]);
 
   const virtualRows = virtualizer.getVirtualItems();
+
+  // The visible rows render as one CSS grid, so its height divided by the row
+  // count (gaps included) is the real row pitch.
+  const renderedRowCount = virtualRows.length;
+  const showsItems = !loading && totalItems > 0;
+  useLayoutEffect(() => {
+    const grid = containerRef.current;
+    if (!showsItems || !grid || renderedRowCount === 0) return;
+    const gridHeight = grid.offsetHeight;
+    if (gridHeight <= 0) return;
+    const pitch = (gridHeight + gridGap) / renderedRowCount;
+    if (Math.abs(pitch - rowHeight) > 0.5) {
+      setMeasured({ estimate: estimatedRowHeight, rowHeight: pitch });
+    }
+  });
 
   // Report visible item range to parent for page fetching
   const firstRow = virtualRows[0]?.index ?? 0;
