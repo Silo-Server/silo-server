@@ -221,6 +221,17 @@ func TestPlanPlaybackV3H264TargetStepsDownToTheDecoderSize(t *testing.T) {
 	estimate := 9_000
 	fast.Request.BandwidthEstimateKbps = &estimate
 	check("a 60 fps source", PlanPlaybackV3(fast), "h264", "720p", 1280, 2_000)
+
+	// The decoder is checked against the even frame the encoder writes: a
+	// 1917-wide source becomes 1918 wide, past a 1917-wide decoder.
+	odd := input(false)
+	oddFile := *odd.RequestedFile
+	oddFile.VideoTracks = []models.VideoTrack{{Codec: "h264", Profile: "High", Width: 1917, Height: 1080, FrameRate: "24/1", Bitrate: 8_000, BitDepth: 8, VideoRange: "SDR"}}
+	odd.RequestedFile, odd.EffectiveFile = &oddFile, &oddFile
+	odd.Request.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{
+		{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 1917, MaxHeight: 1080, MaxFrameRate: 60, Hardware: true},
+	}
+	check("an odd-width source at the decoder limit", PlanPlaybackV3(odd), "h264", "720p", 1278, 2_000)
 }
 
 func TestPlanPlaybackV3HEVCFailureFallsBackToH264(t *testing.T) {

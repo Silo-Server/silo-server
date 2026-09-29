@@ -1181,6 +1181,7 @@ func h264BoundedQualityV3(request StartRequestV3, quality QualityResultV3, sourc
 		classes := ladderClassesFrom(ladderClassForSize(quality.Width, quality.Height))
 		for i, class := range classes {
 			width, height := FitLadderBox(source.Width, source.Height, class.Height)
+			width, height = encodedFrame(source.Width, source.Height, width, height)
 			if height == 0 {
 				height = class.Height
 			}
@@ -1518,14 +1519,8 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 	if width == 0 {
 		width = class.Width
 	}
-	if effectiveHeight%2 != 0 || width%2 != 0 {
-		// A fit that keeps an odd source frame still needs an even one for
-		// 4:2:0 output; the encoder's scale=-2 evens the width.
-		effectiveHeight &^= 1
-		if source.Width > 0 && source.Height > 0 {
-			width = scaledEvenWidth(source.Width, source.Height, effectiveHeight)
-		}
-	}
+	// A fit that keeps an odd source frame still encodes an even one.
+	width, effectiveHeight = encodedFrame(source.Width, source.Height, width, effectiveHeight)
 	label := heightLabel(effectiveHeight)
 	bitrate := ladderClassBitrateKbpsV3(class.Height)
 	if budgetKbps > 0 && bitrate > budgetKbps {
@@ -1646,10 +1641,7 @@ func sourceFrameV3(source SourceDescriptorV3) (label string, width, height int) 
 	if source.Height <= 0 {
 		return "", source.Width, source.Height
 	}
-	width, height = source.Width, source.Height&^1
-	if width > 0 && (height != source.Height || width%2 != 0) {
-		width = scaledEvenWidth(source.Width, source.Height, height)
-	}
+	width, height = encodedFrame(source.Width, source.Height, source.Width, source.Height)
 	return heightLabel(height), width, height
 }
 
