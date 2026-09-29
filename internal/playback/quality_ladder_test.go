@@ -327,4 +327,37 @@ func TestOriginalQualityResultKeepsTheSourceHeight(t *testing.T) {
 	if got := originalQualityResultV3(SourceDescriptorV3{}); got.Label != "" {
 		t.Fatalf("unknown source height label = %q, want no scale", got.Label)
 	}
+	// An odd height still scales, to the even height 4:2:0 output needs.
+	if got := originalQualityResultV3(SourceDescriptorV3{Width: 1920, Height: 1081}); got.Label != "1080p" || resolutionToScale(got.Label) != "scale=-2:1080" {
+		t.Fatalf("odd source height label = %q (scale %q), want 1080p", got.Label, resolutionToScale(got.Label))
+	}
+}
+
+// A source of unknown bitrate is sent as-is only when the estimate's budget
+// covers its class's full bitrate; otherwise it is re-encoded at its own size.
+func TestResolveQualityPolicyV3AutoUnknownSourceBitrate(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		source       SourceDescriptorV3
+		estimate     int
+		wantPreserve bool
+		wantBitrate  int
+	}{
+		{"1080p at 7 Mbps is re-encoded within the budget", SourceDescriptorV3{Width: 1920, Height: 1080, FrameRate: 24}, 7_000, false, 5_600},
+		{"1080p at 10 Mbps is sent as-is", SourceDescriptorV3{Width: 1920, Height: 1080, FrameRate: 24}, 10_000, true, 0},
+		{"720p at 7 Mbps is sent as-is", SourceDescriptorV3{Width: 1280, Height: 720, FrameRate: 24}, 7_000, true, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := validStartRequestV3()
+			req.QualityPreference = "auto"
+			req.BandwidthEstimateKbps = &tc.estimate
+			got := ResolveQualityPolicyV3(req, tc.source)
+			if got.PreservesSource != tc.wantPreserve || got.RequiresTranscode == tc.wantPreserve {
+				t.Fatalf("preserve/transcode = %v/%v, want preserve %v", got.PreservesSource, got.RequiresTranscode, tc.wantPreserve)
+			}
+			if !tc.wantPreserve && (got.Width != tc.source.Width || got.Height != tc.source.Height || got.BitrateKbps != tc.wantBitrate) {
+				t.Fatalf("re-encode = %dx%d at %d kbps, want the source size at %d kbps", got.Width, got.Height, got.BitrateKbps, tc.wantBitrate)
+			}
+		})
+	}
 }

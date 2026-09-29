@@ -1339,7 +1339,14 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 		if bandwidth > 0 {
 			targetHeight = minPositiveV3(targetHeight, streamLadderClassV3(bandwidth, source))
 			budgetKbps = streamBudgetKbpsV3(bandwidth)
-			overEstimate = fromEstimate && source.BitrateKbps > budgetKbps
+			// A source of unknown bitrate counts as needing the full bitrate
+			// of the class it would be sent at, so it goes as-is only when the
+			// budget covers that.
+			sourceKbps := source.BitrateKbps
+			if sourceKbps <= 0 {
+				sourceKbps = ladderClassBitrateKbpsV3(ladderClassesFrom(minPositiveV3(targetHeight, source.Height))[0].Height)
+			}
+			overEstimate = fromEstimate && sourceKbps > budgetKbps
 			reason = "quality_bandwidth_limit"
 		} else if request.Metered {
 			if capped := minPositiveV3(targetHeight, 720); capped != targetHeight {
@@ -1373,7 +1380,7 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 	}
 	if source.Height > 0 && targetHeight >= source.Height && !capApplied && !overEstimate {
 		return QualityResultV3{
-			Label:           strconv.Itoa(source.Height) + "p",
+			Label:           sourceScaleLabelV3(source.Height),
 			Width:           source.Width,
 			Height:          source.Height,
 			BitrateKbps:     source.BitrateKbps,
@@ -1442,7 +1449,7 @@ func compoundRungQualityResultV3(rung ladderRungV3, source SourceDescriptorV3, c
 	fitsRung := sourceClassHeight > 0 && sourceClassHeight <= rung.Height && source.BitrateKbps > 0 && source.BitrateKbps <= rung.BitrateKbps
 	if fitsRung && !capApplied {
 		return QualityResultV3{
-			Label:           strconv.Itoa(source.Height) + "p",
+			Label:           sourceScaleLabelV3(source.Height),
 			Width:           source.Width,
 			Height:          source.Height,
 			BitrateKbps:     source.BitrateKbps,
@@ -1479,11 +1486,17 @@ func compoundRungQualityResultV3(rung ladderRungV3, source SourceDescriptorV3, c
 // source height: a class label would scale a 3840x1600 source to 1080 lines
 // whenever the original route still needs a video transcode.
 func originalQualityResultV3(source SourceDescriptorV3) QualityResultV3 {
-	label := ""
-	if source.Height > 0 {
-		label = heightLabel(source.Height)
+	return QualityResultV3{Label: sourceScaleLabelV3(source.Height), Width: source.Width, Height: source.Height, BitrateKbps: source.BitrateKbps, PreservesSource: true, Reason: "quality_original"}
+}
+
+// sourceScaleLabelV3 labels a route that keeps the source frame. A route that
+// still encodes (a codec conversion) scales to this height, so an odd height
+// rounds down to the even one 4:2:0 output needs; an unknown height is empty.
+func sourceScaleLabelV3(height int) string {
+	if height <= 0 {
+		return ""
 	}
-	return QualityResultV3{Label: label, Width: source.Width, Height: source.Height, BitrateKbps: source.BitrateKbps, PreservesSource: true, Reason: "quality_original"}
+	return heightLabel(height &^ 1)
 }
 
 // hlsNativeAudioCodecV3 reports whether an audio codec can be stream-copied
