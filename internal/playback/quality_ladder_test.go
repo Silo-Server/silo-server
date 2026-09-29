@@ -145,3 +145,48 @@ func TestDownloadScaleResolution(t *testing.T) {
 		}
 	}
 }
+
+// Exact-tier decoder facts beyond size bound the download: a decoder that
+// cannot take the source's frame rate or the High profile is not chosen, a
+// level-bound HEVC decoder keeps the encode on H.264, and the target bitrate
+// stays within the chosen decoder's maximum.
+func TestResolveDownloadTranscodeTargetHonorsDecoderLimits(t *testing.T) {
+	uhd60 := ladderTestFile(3840, 2160, "hevc", "60", 40_000)
+	uhd := ladderTestFile(3840, 2160, "hevc", "24", 40_000)
+	exact := func(decoders ...VideoDecodeCapabilityV3) ClientCapabilities {
+		return ClientCapabilities{VideoEvidence: EvidenceExactV3, CodecsVideo: []string{"h264", "hevc"}, VideoDecode: decoders}
+	}
+	for _, tc := range []struct {
+		name        string
+		file        *models.MediaFile
+		caps        ClientCapabilities
+		kbps        int
+		hevc        bool
+		wantCodec   string
+		wantRes     string
+		wantBitrate int
+	}{
+		{"a decoder too slow for 60 fps is skipped", uhd60, exact(
+			VideoDecodeCapabilityV3{Codec: "h264", BitDepths: []int{8}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 30, Hardware: true},
+			VideoDecodeCapabilityV3{Codec: "h264", BitDepths: []int{8}, MaxWidth: 1280, MaxHeight: 720, MaxFrameRate: 60, Hardware: true},
+		), 20_000, false, "h264", "720p", 20_000},
+		{"a Baseline-only decoder is not used for High output", uhd, exact(
+			VideoDecodeCapabilityV3{Codec: "h264", Profiles: []string{"baseline"}, BitDepths: []int{8}, MaxWidth: 3840, MaxHeight: 2160, Hardware: true},
+			VideoDecodeCapabilityV3{Codec: "h264", Profiles: []string{"baseline", "main", "high"}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, Hardware: true},
+		), 20_000, false, "h264", "1080p", 20_000},
+		{"a level-bound HEVC decoder keeps H.264", uhd, exact(
+			VideoDecodeCapabilityV3{Codec: "h264", BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, Hardware: true},
+			VideoDecodeCapabilityV3{Codec: "hevc", Levels: []int{150}, BitDepths: []int{8}, MaxWidth: 3840, MaxHeight: 2160, Hardware: true},
+		), 10_000, true, "h264", "1080p", 10_000},
+		{"the decoder's bitrate limit caps the target", uhd, exact(
+			VideoDecodeCapabilityV3{Codec: "h264", BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxBitrateKbps: 8_000, Hardware: true},
+		), 10_000, false, "h264", "1080p", 8_000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ResolveDownloadTranscodeTarget(tc.file, tc.caps, tc.kbps, DownloadTranscodeSettings{AllowHEVCEncoding: tc.hevc})
+			if got.CodecVideo != tc.wantCodec || got.Resolution != tc.wantRes || got.TargetBitrateKbps != tc.wantBitrate {
+				t.Fatalf("target = codec %q res %q bitrate %d, want %q %q %d", got.CodecVideo, got.Resolution, got.TargetBitrateKbps, tc.wantCodec, tc.wantRes, tc.wantBitrate)
+			}
+		})
+	}
+}

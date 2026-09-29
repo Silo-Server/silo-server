@@ -15,8 +15,7 @@ type ladderClass struct {
 // bitrateLadder pairs a bitrate budget with the largest output that budget
 // encodes well. The floors follow Apple's HLS authoring ladder and Jellyfin's
 // ResolutionNormalizer for H.264 at <=30 fps; 480p takes everything below
-// 540p's floor. Downloads, automatic streaming quality, and jellycompat all
-// read this one table so a given bitrate always means the same resolution.
+// 540p's floor. Download presets read this table.
 var bitrateLadder = []ladderClass{
 	{Height: 2160, Width: 3840, FloorKbps: 20_000},
 	{Height: 1080, Width: 1920, FloorKbps: 5_000},

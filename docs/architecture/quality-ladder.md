@@ -1,8 +1,7 @@
 # Bitrate and resolution ladder
 
-A bitrate cap means one output resolution everywhere in Silo. The table lives in
-`internal/playback/quality_ladder.go` (`bitrateLadder`), and no other package keeps
-its own bitrate-to-resolution mapping.
+One table pairs a bitrate budget with the largest output resolution it encodes
+well. It lives in `internal/playback/quality_ladder.go` (`bitrateLadder`).
 
 ## The table
 

@@ -72,7 +72,9 @@ resolution the bitrate encodes cleanly, then:
   3840x1600 film at `10mbps` becomes 1920x800;
 - never encodes above the source's own bitrate;
 - steps the resolution down until the device's decoder can take it, using the
-  `video_decode` bounds from `caps` when sent, otherwise `max_resolution`;
+  `video_decode` entries from `caps` when sent (size, frame rate, and at the
+  `exact` tier the output profile), otherwise `max_resolution`, and keeps the
+  bitrate within that decoder's `max_bitrate_kbps`;
 - encodes HEVC instead of H.264 when the server's HEVC encoding setting is on
   and `caps` attest an 8-bit HEVC decoder that reaches at least the same size
   (HEVC also earns `1mbps` 540p instead of 480p);
