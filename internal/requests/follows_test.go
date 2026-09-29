@@ -39,8 +39,8 @@ func TestFollowTitleSomeoneElseRequested(t *testing.T) {
 	if !state.Following || state.RequestedByViewer || state.Requestable || state.Reason != "already_requested" || state.RequestID != "" {
 		t.Fatalf("state = %+v, want following, not requestable, request id hidden from another account", state)
 	}
-	followed, _ := store.FollowedTitles(context.Background(), MediaTypeMovie, []int{949}, testViewer(1))
-	if !followed[949] {
+	followed, _ := store.FollowedRequests(context.Background(), []string{"req-owner"}, testViewer(1))
+	if !followed["req-owner"] {
 		t.Fatal("follow was not stored")
 	}
 	if _, err := svc.Follow(context.Background(), testViewer(1), MediaTypeMovie, 949); err != nil {
@@ -50,8 +50,8 @@ func TestFollowTitleSomeoneElseRequested(t *testing.T) {
 	if err := svc.Unfollow(context.Background(), testViewer(1), MediaTypeMovie, 949); err != nil {
 		t.Fatalf("Unfollow: %v", err)
 	}
-	followed, _ = store.FollowedTitles(context.Background(), MediaTypeMovie, []int{949}, testViewer(1))
-	if followed[949] {
+	followed, _ = store.FollowedRequests(context.Background(), []string{"req-owner"}, testViewer(1))
+	if followed["req-owner"] {
 		t.Fatal("follow survived Unfollow")
 	}
 }
@@ -322,12 +322,12 @@ func TestFollowsDatabase(t *testing.T) {
 	if len(followers) != 2 {
 		t.Fatalf("movie followers = %+v, want two (the series follow is a different title)", followers)
 	}
-	followed, err := repo.FollowedTitles(ctx, MediaTypeMovie, []int{949, 950}, a)
+	followed, err := repo.FollowedRequests(ctx, []string{"movie-949", "series-949", "other"}, b)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !followed[949] || followed[950] {
-		t.Fatalf("followed = %v, want only 949", followed)
+	if !followed["movie-949"] || len(followed) != 1 {
+		t.Fatalf("followed = %v, want only movie-949", followed)
 	}
 
 	if err := repo.ClearRequestFollowers(ctx, Request{ID: "movie-949", MediaType: MediaTypeMovie, TMDBID: 949}, []Follower{{UserID: a.UserID, ProfileID: a.ProfileID}}); err != nil {
@@ -354,7 +354,7 @@ func TestFollowsDatabase(t *testing.T) {
 	if followers, _ := repo.ListRequestFollowers(ctx, Request{ID: "movie-949", MediaType: MediaTypeMovie, TMDBID: 949}); len(followers) != 2 {
 		t.Fatalf("followers sharing a profile id = %+v, want one per account", followers)
 	}
-	if followed, _ := repo.FollowedTitles(ctx, MediaTypeMovie, []int{949}, Viewer{UserID: 3, ProfileID: "default"}); followed[949] {
+	if followed, _ := repo.FollowedRequests(ctx, []string{"movie-949"}, Viewer{UserID: 3, ProfileID: "default"}); followed["movie-949"] {
 		t.Fatal("a third account's default profile sees the others' follow")
 	}
 	if err := repo.UnfollowTitle(ctx, MediaTypeMovie, 949, mine); err != nil {
@@ -499,6 +499,14 @@ func TestRequestFollowersDatabase(t *testing.T) {
 	}
 	if got := list("third"); len(got) != 1 {
 		t.Fatalf("third's followers after newer's clear = %+v, want profile-b kept", got)
+	}
+	// profile-a, still waiting for older, follows third too.
+	follow(a)
+	if got := list("third"); len(got) != 2 {
+		t.Fatalf("third's followers = %+v, want profile-a and profile-b", got)
+	}
+	if followed, err := repo.FollowedRequests(ctx, []string{"third"}, a); err != nil || !followed["third"] {
+		t.Fatalf("profile-a follows third = %v, err = %v; want true", followed, err)
 	}
 
 	if _, err := repo.SetOutcome(ctx, "third", guardWithdrawable, OutcomeDeclined, Viewer{}, ""); err != nil {

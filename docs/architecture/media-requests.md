@@ -308,11 +308,12 @@ row until the follow commits, so a follow cannot land just after the request
 was declined, cancelled or completed, and miss that transition's follow
 cleanup.
 
-A follow belongs to a title and a profile (`media_request_follows`, keyed
-by account and profile id, since profile ids repeat across accounts) and records
-the request that was open when it was made. A series can have completed
-requests still waiting for the library beside a newer open request for other
-seasons, and each request's notification goes to its own follows. A follow
+A follow belongs to a profile and the request that was open when it was made
+(`media_request_follows`, keyed by account, profile id and request, since
+profile ids repeat across accounts). A series can have completed requests still
+waiting for the library beside a newer open request for other seasons; each
+request's notification goes to its own follows, and a profile can follow each
+of them. Unfollowing a title removes the profile's follows on all of them. A follow
 survives its request failing: the title's next request takes over the follows
 of a failed request, or one its requester replaced. Declining or cancelling a
 request clears its follows: the title is no longer on its way, and the follower

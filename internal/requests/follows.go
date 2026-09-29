@@ -3,16 +3,19 @@ package requests
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 )
 
 // Following a title: a profile that finds a title someone else has already
 // requested can ask to be notified when it becomes available, instead of
-// requesting it again. A follow records the request that was open when it was
-// made, since a series can have completed requests still waiting for the
+// requesting it again. A follow belongs to the request that was open when it
+// was made, since a series can have completed requests still waiting for the
 // library beside a newer open request for other seasons; each request's
-// notification goes to its own follows. A follow survives its request failing:
-// the title's next request takes over the follows of a failed or replaced one.
+// notification goes to its own follows, and a profile can follow each of them.
+// A follow survives its request failing: the title's next request takes over
+// the follows of a failed or replaced one.
 // It is cleared once the fulfilled notification has gone out, and when its
 // request is declined or withdrawn: the title is then no longer on its way,
 // and the follower can request it themselves. The requester is always
@@ -100,7 +103,7 @@ func (s *Service) Unfollow(ctx context.Context, viewer Viewer, mediaType MediaTy
 // is waiting on, either as the requesting profile or as a follower.
 func (s *Service) followedTitles(ctx context.Context, viewer Viewer, mediaType MediaType, active map[int]*Request) (map[int]bool, error) {
 	out := map[int]bool{}
-	var others []int
+	others := map[string]int{}
 	for tmdbID, req := range active {
 		if req == nil {
 			continue
@@ -109,18 +112,18 @@ func (s *Service) followedTitles(ctx context.Context, viewer Viewer, mediaType M
 			out[tmdbID] = true
 			continue
 		}
-		others = append(others, tmdbID)
+		others[req.ID] = tmdbID
 	}
 	if len(others) == 0 || strings.TrimSpace(viewer.ProfileID) == "" {
 		return out, nil
 	}
-	followed, err := s.store.FollowedTitles(ctx, mediaType, others, viewer)
+	followed, err := s.store.FollowedRequests(ctx, slices.Collect(maps.Keys(others)), viewer)
 	if err != nil {
 		return nil, err
 	}
-	for tmdbID, ok := range followed {
+	for id, ok := range followed {
 		if ok {
-			out[tmdbID] = true
+			out[others[id]] = true
 		}
 	}
 	return out, nil
@@ -149,7 +152,7 @@ func (r *Repository) FollowTitle(ctx context.Context, mediaType MediaType, tmdbI
 		), inserted AS (
 			INSERT INTO media_request_follows (media_type, tmdb_id, user_id, profile_id, request_id)
 			SELECT $1, $2, $3, $4, id FROM open_request
-			ON CONFLICT (media_type, tmdb_id, user_id, profile_id) DO NOTHING
+			ON CONFLICT (user_id, profile_id, request_id) DO NOTHING
 		)
 		SELECT EXISTS (SELECT 1 FROM open_request)
 	`, mediaType, tmdbID, viewer.UserID, viewer.ProfileID).Scan(&open); err != nil {
@@ -170,21 +173,30 @@ func forgetTitleFollows(ctx context.Context, exec requestExecutor, closed *Reque
 	return nil
 }
 
-// adoptTitleFollows gives a new request the title's follows that have no
-// request waiting to tell them: their request failed, or was replaced by its
-// requester. The caller creates the request in the same transaction.
+// adoptTitleFollows gives a new request the follows of the title's failed
+// requests, so a follow survives its request failing. The caller creates the
+// request in the same transaction, before deleting any failed request it
+// replaces.
 func adoptTitleFollows(ctx context.Context, exec requestExecutor, req *Request) error {
 	if _, err := exec.Exec(ctx, `
-		UPDATE media_request_follows f SET request_id = $3
-		WHERE f.media_type = $1 AND f.tmdb_id = $2
-		  AND NOT EXISTS (
-		    SELECT 1 FROM media_requests r WHERE r.id = f.request_id AND r.outcome <> 'failed')
+		WITH failed AS (
+			SELECT id FROM media_requests
+			WHERE media_type = $1 AND provider = 'tmdb' AND tmdb_id = $2 AND outcome = 'failed'
+		), moved AS (
+			DELETE FROM media_request_follows WHERE request_id IN (SELECT id FROM failed)
+			RETURNING user_id, profile_id, created_at
+		)
+		INSERT INTO media_request_follows (media_type, tmdb_id, user_id, profile_id, request_id, created_at)
+		SELECT $1, $2, user_id, profile_id, $3, min(created_at) FROM moved
+		GROUP BY user_id, profile_id
+		ON CONFLICT (user_id, profile_id, request_id) DO NOTHING
 	`, req.MediaType, req.TMDBID, req.ID); err != nil {
 		return fmt.Errorf("adopt title follows: %w", err)
 	}
 	return nil
 }
 
+// UnfollowTitle removes the profile's follows on every request of the title.
 func (r *Repository) UnfollowTitle(ctx context.Context, mediaType MediaType, tmdbID int, viewer Viewer) error {
 	if _, err := r.pool.Exec(ctx, `
 		DELETE FROM media_request_follows
@@ -195,25 +207,26 @@ func (r *Repository) UnfollowTitle(ctx context.Context, mediaType MediaType, tmd
 	return nil
 }
 
-func (r *Repository) FollowedTitles(ctx context.Context, mediaType MediaType, tmdbIDs []int, viewer Viewer) (map[int]bool, error) {
-	out := map[int]bool{}
-	if len(tmdbIDs) == 0 {
+// FollowedRequests reports which of the requests the profile follows.
+func (r *Repository) FollowedRequests(ctx context.Context, requestIDs []string, viewer Viewer) (map[string]bool, error) {
+	out := map[string]bool{}
+	if len(requestIDs) == 0 {
 		return out, nil
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT tmdb_id FROM media_request_follows
-		WHERE media_type = $1 AND tmdb_id = ANY($2) AND user_id = $3 AND profile_id = $4
-	`, mediaType, tmdbIDs, viewer.UserID, viewer.ProfileID)
+		SELECT request_id FROM media_request_follows
+		WHERE request_id = ANY($1) AND user_id = $2 AND profile_id = $3
+	`, requestIDs, viewer.UserID, viewer.ProfileID)
 	if err != nil {
-		return nil, fmt.Errorf("list followed titles: %w", err)
+		return nil, fmt.Errorf("list followed requests: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var tmdbID int
-		if err := rows.Scan(&tmdbID); err != nil {
+		var id string
+		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		out[tmdbID] = true
+		out[id] = true
 	}
 	return out, rows.Err()
 }

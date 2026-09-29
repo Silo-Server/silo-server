@@ -2530,8 +2530,9 @@ func (f *fakeStore) DeleteIntegration(_ context.Context, id string) error {
 	return ErrNotFound
 }
 
-func followKey(mediaType MediaType, tmdbID int, userID int, profileID string) string {
-	return fmt.Sprintf("%s/%d/%d/%s", mediaType, tmdbID, userID, profileID)
+// followKey names one profile's follow of one request of a title.
+func followKey(mediaType MediaType, tmdbID int, userID int, profileID, requestID string) string {
+	return fmt.Sprintf("%s/%d/%d/%s/%s", mediaType, tmdbID, userID, profileID, requestID)
 }
 
 func (f *fakeStore) FollowTitle(_ context.Context, mediaType MediaType, tmdbID int, viewer Viewer) error {
@@ -2582,7 +2583,7 @@ func (f *fakeStore) seedFollowForLocked(mediaType MediaType, tmdbID int, viewer 
 	if f.followFor == nil {
 		f.followFor = map[string]string{}
 	}
-	key := followKey(mediaType, tmdbID, viewer.UserID, viewer.ProfileID)
+	key := followKey(mediaType, tmdbID, viewer.UserID, viewer.ProfileID, requestID)
 	f.follows[key] = Follower{UserID: viewer.UserID, ProfileID: viewer.ProfileID}
 	f.followFor[key] = requestID
 }
@@ -2590,17 +2591,22 @@ func (f *fakeStore) seedFollowForLocked(mediaType MediaType, tmdbID int, viewer 
 func (f *fakeStore) UnfollowTitle(_ context.Context, mediaType MediaType, tmdbID int, viewer Viewer) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	delete(f.follows, followKey(mediaType, tmdbID, viewer.UserID, viewer.ProfileID))
+	prefix := fmt.Sprintf("%s/%d/%d/%s/", mediaType, tmdbID, viewer.UserID, viewer.ProfileID)
+	for key := range f.follows {
+		if strings.HasPrefix(key, prefix) {
+			delete(f.follows, key)
+		}
+	}
 	return nil
 }
 
-func (f *fakeStore) FollowedTitles(_ context.Context, mediaType MediaType, tmdbIDs []int, viewer Viewer) (map[int]bool, error) {
+func (f *fakeStore) FollowedRequests(_ context.Context, requestIDs []string, viewer Viewer) (map[string]bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	out := map[int]bool{}
-	for _, id := range tmdbIDs {
-		if _, ok := f.follows[followKey(mediaType, id, viewer.UserID, viewer.ProfileID)]; ok {
-			out[id] = true
+	out := map[string]bool{}
+	for key, follower := range f.follows {
+		if follower.UserID == viewer.UserID && follower.ProfileID == viewer.ProfileID && slices.Contains(requestIDs, f.followFor[key]) {
+			out[f.followFor[key]] = true
 		}
 	}
 	return out, nil
@@ -2645,10 +2651,7 @@ func (f *fakeStore) ClearRequestFollowers(_ context.Context, req Request, follow
 		return f.clearErr
 	}
 	for _, follower := range followers {
-		key := followKey(req.MediaType, req.TMDBID, follower.UserID, follower.ProfileID)
-		if f.followFor[key] == req.ID {
-			delete(f.follows, key)
-		}
+		delete(f.follows, followKey(req.MediaType, req.TMDBID, follower.UserID, follower.ProfileID, req.ID))
 	}
 	return nil
 }

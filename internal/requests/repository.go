@@ -237,20 +237,6 @@ func (r *Repository) CreateRequest(ctx context.Context, input CreateRequestRecor
 			return nil, fmt.Errorf("acquire request quota lock: %w", err)
 		}
 	}
-	if input.ReplaceFailed {
-		// Only the requester's own rows: other accounts' failed requests for
-		// the title are their history.
-		if _, err := tx.Exec(ctx, `
-			DELETE FROM media_requests
-			WHERE requested_by_user_id = $1
-			  AND media_type = $2
-			  AND provider = 'tmdb'
-			  AND tmdb_id = $3
-			  AND outcome = 'failed'
-		`, input.Requester.UserID, input.Input.MediaType, input.Input.TMDBID); err != nil {
-			return nil, fmt.Errorf("replace failed requests: %w", err)
-		}
-	}
 	if input.Quota != nil {
 		var count int
 		if err := tx.QueryRow(ctx, `
@@ -294,6 +280,22 @@ func (r *Repository) CreateRequest(ctx context.Context, input CreateRequestRecor
 	}
 	if err := adoptTitleFollows(ctx, tx, req); err != nil {
 		return nil, err
+	}
+	// Failed requests do not count against the quota, so the ones this
+	// replaces go after the insert, once their follows have moved to it.
+	if input.ReplaceFailed {
+		// Only the requester's own rows: other accounts' failed requests for
+		// the title are their history.
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM media_requests
+			WHERE requested_by_user_id = $1
+			  AND media_type = $2
+			  AND provider = 'tmdb'
+			  AND tmdb_id = $3
+			  AND outcome = 'failed'
+		`, input.Requester.UserID, input.Input.MediaType, input.Input.TMDBID); err != nil {
+			return nil, fmt.Errorf("replace failed requests: %w", err)
+		}
 	}
 	if err := r.recordEvent(ctx, tx, req.ID, "created", input.Requester, ""); err != nil {
 		return nil, err
