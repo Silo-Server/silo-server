@@ -1189,6 +1189,49 @@ func TestStateReportConflictClearsStaleCorrectionCommands(t *testing.T) {
 	}
 }
 
+func TestHostPauseReportPausesTheRoom(t *testing.T) {
+	f := newBufferingRoom(t, "guest")
+	hostReport := func(paused bool) {
+		t.Helper()
+		if _, err := f.s.HandleStateReportForConnection(t.Context(), f.reg("host"), 7, "host", StateReport{
+			SessionID: "host-session", PositionSeconds: 100, IsPaused: paused,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// The host pauses from the system controls: a state report, not a request.
+	hostReport(true)
+	if f.repo.room.PlaybackState != RoomPlaybackStatePaused || f.repo.room.ResumeOnReady {
+		t.Fatalf("room = %s, resume on ready %v; want paused without resume", f.repo.room.PlaybackState, f.repo.room.ResumeOnReady)
+	}
+
+	// A guest still playing is corrected to the pause, not told to play.
+	f.now = f.now.Add(30 * time.Second)
+	f.report("guest", 130)
+	payloads := f.conns["guest"].payloads
+	if len(payloads) == 0 {
+		t.Fatal("guest received no correction")
+	}
+	command, ok := payloads[len(payloads)-1][commandPayloadKey].(TransportCommand)
+	if !ok || command.Action != TransportActionPause || command.PositionSeconds != 100 {
+		t.Fatalf("guest correction = %+v; want pause at 100", command)
+	}
+
+	// Resuming from the system controls plays the room again.
+	hostReport(false)
+	if f.repo.room.PlaybackState != RoomPlaybackStatePlaying || !f.repo.room.ResumeOnReady {
+		t.Fatalf("room = %s, resume on ready %v; want playing with resume", f.repo.room.PlaybackState, f.repo.room.ResumeOnReady)
+	}
+
+	// After another pause, a guest stall does not arm a barrier that resumes the room.
+	hostReport(true)
+	f.buffer("guest")
+	if f.repo.room.PlaybackState != RoomPlaybackStatePaused || f.repo.room.ResumeOnReady {
+		t.Fatalf("room = %s, resume on ready %v after a guest stall; want paused without resume", f.repo.room.PlaybackState, f.repo.room.ResumeOnReady)
+	}
+}
+
 func intPtr(value int) *int {
 	return &value
 }

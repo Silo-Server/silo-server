@@ -866,6 +866,18 @@ func (s *Service) handleStateReportForConnection(
 	if isHost {
 		live.room.AnchorPositionSeconds = math.Max(0, report.PositionSeconds)
 		live.room.IsPaused = report.IsPaused
+		// A host that pauses or resumes from the system controls reports the
+		// change instead of requesting it. Corrections, re-attaches, and
+		// buffering barriers read PlaybackState and ResumeOnReady, so move them
+		// with IsPaused, as a transport request does; otherwise a paused room
+		// keeps telling members to play.
+		if live.room.Phase == RoomPhasePlaying {
+			live.room.ResumeOnReady = !report.IsPaused
+			live.room.PlaybackState = RoomPlaybackStatePlaying
+			if report.IsPaused {
+				live.room.PlaybackState = RoomPlaybackStatePaused
+			}
+		}
 		live.room.AnchorUpdatedAt = s.now()
 		conflict, updateErr := s.persistAnchorLocked(ctx, live)
 		if updateErr != nil {
