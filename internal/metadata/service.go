@@ -1299,6 +1299,7 @@ func (s *MetadataService) prepareProcessRequest(ctx context.Context, req Process
 	if err != nil {
 		return req, err
 	}
+	req.durableProviderIDs = maps.Clone(durableIDs)
 	req.recordedStaleProviderIDs, err = s.loadRecordedStaleProviderIDs(ctx, req.ContentID)
 	if err != nil {
 		return req, err
@@ -1579,7 +1580,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		// fetched and kept; the providers re-supply the right ones. Naming
 		// only IDs the item already has confirms the match and keeps them.
 		chosen := canonicalIdentityProviderIDs(req.callerProviderIDs)
-		if identityChoiceCorrects(chosen, storedIdentityForIdentify(existing, req.ProviderIDs, chosen)) {
+		if identityChoiceCorrects(chosen, storedIdentityForIdentify(existing, req.durableProviderIDs)) {
 			for _, key := range trustedSearchIDKeys {
 				if chosen[key] == "" {
 					delete(accumulatedIDs, key)
@@ -8427,17 +8428,14 @@ func canonicalIdentityProviderIDs(ids map[string]string) map[string]string {
 }
 
 // storedIdentityForIdentify returns the TMDB, TVDB and IMDb IDs an item
-// already has: its columns, then the durable IDs prepareProcessRequest merged
-// into the request, which are its keys the caller didn't choose.
-func storedIdentityForIdentify(item *models.MediaItem, requestIDs, chosen map[string]string) map[string]string {
+// already has: its columns, then its durable provider-ID rows for any key the
+// columns leave empty.
+func storedIdentityForIdentify(item *models.MediaItem, durable map[string]string) map[string]string {
 	stored := storedIdentityProviderIDs(item)
 	if stored == nil {
 		stored = map[string]string{}
 	}
-	for key, value := range canonicalIdentityProviderIDs(requestIDs) {
-		if _, sent := chosen[key]; sent {
-			continue
-		}
+	for key, value := range canonicalIdentityProviderIDs(durable) {
 		if strings.TrimSpace(stored[key]) == "" {
 			stored[key] = value
 		}

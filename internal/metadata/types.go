@@ -75,6 +75,9 @@ type ProcessRequest struct {
 	// callerProviderIDs is ProviderIDs as the caller sent it, before
 	// prepareProcessRequest merges in the item's durable IDs.
 	callerProviderIDs map[string]string
+	// durableProviderIDs is the item's stored provider-ID rows as loaded,
+	// before any request IDs are merged with them.
+	durableProviderIDs map[string]string
 	// enrichmentOnly marks a bulk enrichment write: one enrichment provider's
 	// fields merged into an item that is already matched. See
 	// persistEnrichment for how it differs from a scheduled refresh.
