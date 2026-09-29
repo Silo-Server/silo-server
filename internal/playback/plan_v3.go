@@ -1164,8 +1164,10 @@ func h264BoundedQualityV3(request StartRequestV3, quality QualityResultV3, sourc
 	if len(decoders) == 0 {
 		return quality
 	}
+	// The encode keeps the source's frame rate, so a decoder must take it too.
 	takes := func(decoder VideoDecodeCapabilityV3, width, height int) bool {
-		return (decoder.MaxWidth <= 0 || width <= decoder.MaxWidth) && (decoder.MaxHeight <= 0 || height <= decoder.MaxHeight)
+		return (decoder.MaxWidth <= 0 || width <= decoder.MaxWidth) && (decoder.MaxHeight <= 0 || height <= decoder.MaxHeight) &&
+			(decoder.MaxFrameRate <= 0 || source.FrameRate <= decoder.MaxFrameRate+0.01)
 	}
 	anyTakes := func(width, height int) bool {
 		for _, decoder := range decoders {

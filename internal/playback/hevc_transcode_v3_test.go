@@ -208,6 +208,19 @@ func TestPlanPlaybackV3H264TargetStepsDownToTheDecoderSize(t *testing.T) {
 	conversion.Request.Capabilities.CodecsVideo = []string{"h264"}
 	conversion.Request.Capabilities.VideoDecode = conversion.Request.Capabilities.VideoDecode[1:]
 	check("a same-size conversion", PlanPlaybackV3(conversion), "h264", "720p", 1280, 2_000)
+
+	// A decoder must also take the source's frame rate, which the encode keeps.
+	fast := input(false)
+	fastFile := *fast.RequestedFile
+	fastFile.VideoTracks = []models.VideoTrack{{Codec: "h264", Profile: "High", Width: 1920, Height: 1080, FrameRate: "60/1", Bitrate: 8_000, BitDepth: 8, VideoRange: "SDR"}}
+	fast.RequestedFile, fast.EffectiveFile = &fastFile, &fastFile
+	fast.Request.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{
+		{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 30, Hardware: true},
+		{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 1280, MaxHeight: 720, MaxFrameRate: 60, Hardware: true},
+	}
+	estimate := 9_000
+	fast.Request.BandwidthEstimateKbps = &estimate
+	check("a 60 fps source", PlanPlaybackV3(fast), "h264", "720p", 1280, 2_000)
 }
 
 func TestPlanPlaybackV3HEVCFailureFallsBackToH264(t *testing.T) {
