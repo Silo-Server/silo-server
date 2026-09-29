@@ -87,6 +87,21 @@ describe("ItemGrid row pitch", () => {
     expect(getByRole("list").style.gridAutoRows).toBe("329px");
   });
 
+  it("reserves the rendered CSS gap when larger text scales rem spacing", () => {
+    mockCardHeights(() => 328);
+    const getStyle = window.getComputedStyle;
+    vi.spyOn(window, "getComputedStyle").mockImplementation((element) => {
+      const style = getStyle(element);
+      Object.defineProperty(style, "rowGap", { value: "15px" });
+      return style;
+    });
+
+    const { getByRole } = render(<ItemGrid items={items} />);
+
+    expect(mocks.estimateSizes.at(-1)).toBe(328 + 1 + 15);
+    expect(getByRole("list").style.gridAutoRows).toBe("329px");
+  });
+
   it("never lowers the measured pitch, so mixed card heights can't oscillate", () => {
     let height = 328;
     mockCardHeights(() => height);

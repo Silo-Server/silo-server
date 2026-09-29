@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useLayoutEffect, useState } from "react";
+import { useEffect, useCallback, useLayoutEffect, useRef, useState } from "react";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import type { BrowseItem } from "@/api/types";
 import ItemCard from "./ItemCard";
@@ -75,9 +75,15 @@ export default function ItemGrid(props: ItemGridProps) {
   // heights match exactly, row for row. A measurement only holds for the
   // layout it was taken under; a poster size, caption or column change
   // produces a new estimate and a fresh measurement.
-  const [measured, setMeasured] = useState<{ estimate: number; rowHeight: number } | null>(null);
+  const [measured, setMeasured] = useState<{
+    estimate: number;
+    rowHeight: number;
+    gap: number;
+  } | null>(null);
   const rowHeight =
     measured?.estimate === estimatedRowHeight ? measured.rowHeight : estimatedRowHeight;
+  const rowGap = measured?.estimate === estimatedRowHeight ? measured.gap : gridGap;
+  const scrollAnchorRef = useRef<{ index: number; offset: number } | null>(null);
   const scrollMargin = anchorEl ? anchorEl.getBoundingClientRect().top + window.scrollY : 0;
 
   // Use the full totalItems for virtualizer height so the scrollbar reflects
@@ -95,8 +101,16 @@ export default function ItemGrid(props: ItemGridProps) {
 
   // The estimate function closes over rowHeight. Explicitly invalidate the
   // cached measurements when a poster/caption preset changes that height.
-  useEffect(() => {
+  useLayoutEffect(() => {
     virtualizer.measure();
+    const anchor = scrollAnchorRef.current;
+    if (anchor) {
+      scrollAnchorRef.current = null;
+      virtualizer.scrollToOffset(
+        virtualizer.options.scrollMargin + anchor.index * rowHeight + anchor.offset,
+        { behavior: "instant" },
+      );
+    }
   }, [rowHeight, virtualizer]);
 
   const virtualRows = virtualizer.getVirtualItems();
@@ -123,9 +137,26 @@ export default function ItemGrid(props: ItemGridProps) {
     // offsetHeight ignores transforms (cards scale on hover), which keeps a
     // hovered card from inflating the pitch, but it rounds to whole pixels;
     // one extra pixel covers a fractional card height.
-    const pitch = tallest + 1 + gridGap;
-    if (pitch > rowHeight) {
-      setMeasured({ estimate: estimatedRowHeight, rowHeight: pitch });
+    // Tailwind gaps use rem, so larger text also scales the rendered gap.
+    const cssGap = Number.parseFloat(getComputedStyle(grid).rowGap);
+    const renderedGap = Number.isFinite(cssGap) ? cssGap : gridGap;
+    const pitch = tallest + 1 + renderedGap;
+    if (pitch > rowHeight || renderedGap !== rowGap) {
+      // Growing every row also moves the content above the viewport. Keep
+      // the first visible row at its current offset instead of jumping back
+      // to earlier items when a taller card or a loaded page enters overscan.
+      const anchor = virtualizer
+        .getVirtualItems()
+        .find((row) => row.start <= window.scrollY && row.end > window.scrollY);
+      scrollAnchorRef.current =
+        pitch > rowHeight && anchor
+          ? { index: anchor.index, offset: window.scrollY - anchor.start }
+          : null;
+      setMeasured({
+        estimate: estimatedRowHeight,
+        rowHeight: Math.max(rowHeight, pitch),
+        gap: renderedGap,
+      });
     }
   }, [
     showsItems,
@@ -134,8 +165,10 @@ export default function ItemGrid(props: ItemGridProps) {
     content,
     estimatedRowHeight,
     rowHeight,
+    rowGap,
     gridGap,
     containerRef,
+    virtualizer,
   ]);
 
   useEffect(() => {
@@ -169,9 +202,14 @@ export default function ItemGrid(props: ItemGridProps) {
       ) : (
         <div
           style={{
-            height: virtualizer.getTotalSize(),
+            // Commit the new extent before restoring the scroll anchor, so
+            // the browser can scroll to it even near the end of the list.
+            height: rowCount * rowHeight,
             position: "relative",
             overflow: "visible",
+            // The virtualizer owns anchoring; browser anchoring would apply
+            // a second adjustment when the rendered range changes.
+            overflowAnchor: "none",
           }}
         >
           <div
@@ -185,7 +223,7 @@ export default function ItemGrid(props: ItemGridProps) {
               right: 0,
               overflow: "visible",
               // Every row is exactly the pitch the virtualizer reserves.
-              gridAutoRows: `${Math.max(rowHeight - gridGap, 0)}px`,
+              gridAutoRows: `${Math.max(rowHeight - rowGap, 0)}px`,
               transform: `translateY(${(virtualRows[0]?.start ?? 0) - scrollMargin}px)`,
             }}
           >
