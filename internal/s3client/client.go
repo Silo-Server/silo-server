@@ -764,8 +764,10 @@ func (c *Client) deleteObjects(ctx context.Context, bucket string, keys []string
 				}
 				deleted--
 				slog.WarnContext(ctx, "s3 DeleteObjects: partial failure", "component", "s3client",
-					"key", aws.ToString(e.Key), "code", aws.ToString(e.Code), "message", aws.ToString(e.Message))
-				recordFailure(fmt.Errorf("s3 DeleteObjects %s/%s: %s: %s", bucket, aws.ToString(e.Key), aws.ToString(e.Code), aws.ToString(e.Message)))
+					"key", aws.ToString(e.Key), "code", aws.ToString(e.Code))
+				// The backend's free-form message is omitted from both the log
+				// and the returned error: it may echo credentials or signed URLs.
+				recordFailure(fmt.Errorf("s3 DeleteObjects %s/%s: %s", bucket, aws.ToString(e.Key), aws.ToString(e.Code)))
 			}
 		}
 	}

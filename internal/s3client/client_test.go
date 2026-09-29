@@ -247,7 +247,7 @@ func TestDeleteObjectsCountsOnlyMissingObjectBatchErrors(t *testing.T) {
 		w.Header().Set("Content-Type", "application/xml")
 		_, _ = io.WriteString(w, `<DeleteResult>
 			<Error><Key>missing.webp</Key><Code>NoSuchKey</Code></Error>
-			<Error><Key>denied.webp</Key><Code>AccessDenied</Code></Error>
+			<Error><Key>denied.webp</Key><Code>AccessDenied</Code><Message>signed https://x/?X-Amz-Signature=SECRETSIG</Message></Error>
 		</DeleteResult>`)
 	}))
 	t.Cleanup(server.Close)
@@ -258,6 +258,12 @@ func TestDeleteObjectsCountsOnlyMissingObjectBatchErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "denied.webp") {
 		t.Fatalf("DeleteObjects() error = %v; want it to name denied.webp", err)
+	}
+	if !strings.Contains(err.Error(), "AccessDenied") {
+		t.Fatalf("DeleteObjects() error = %v; want it to carry the error code", err)
+	}
+	if strings.Contains(err.Error(), "SECRETSIG") {
+		t.Fatalf("DeleteObjects() error = %v; must not echo the backend message", err)
 	}
 }
 
