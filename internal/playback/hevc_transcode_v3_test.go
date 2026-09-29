@@ -163,6 +163,7 @@ func TestPlanPlaybackV3H264TargetStaysWithinTheDecoderBitrate(t *testing.T) {
 // decoder takes, while HEVC output keeps the class its own decoder takes; the
 // H.264 fallback after a failed HEVC attempt uses the H.264 size.
 func TestPlanPlaybackV3H264TargetStepsDownToTheDecoderSize(t *testing.T) {
+	decoderWidth, decoderHeight := 1280, 720
 	input := func(allowHEVC bool) PlannerInputV3 {
 		input := hevcTranscodePlannerInputV3(allowHEVC, true, true)
 		file := *input.RequestedFile
@@ -171,7 +172,7 @@ func TestPlanPlaybackV3H264TargetStepsDownToTheDecoderSize(t *testing.T) {
 		input.RequestedFile, input.EffectiveFile = &file, &file
 		input.Request.Capabilities.CodecsVideo = []string{"h264", "hevc"}
 		input.Request.Capabilities.VideoDecode = append(input.Request.Capabilities.VideoDecode,
-			VideoDecodeCapabilityV3{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 1280, MaxHeight: 720, MaxFrameRate: 60, Hardware: true})
+			VideoDecodeCapabilityV3{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: decoderWidth, MaxHeight: decoderHeight, MaxFrameRate: 60, Hardware: true})
 		input.Request.QualityPreference = "auto"
 		estimate := 7_000
 		input.Request.BandwidthEstimateKbps = &estimate
@@ -190,6 +191,10 @@ func TestPlanPlaybackV3H264TargetStepsDownToTheDecoderSize(t *testing.T) {
 	retry := input(true)
 	retry.AttemptedKeys = []string{first.Plan.PlanAttemptKey}
 	check("after a failed HEVC attempt", PlanPlaybackV3(retry), "h264", "720p", 1280, 2_000)
+
+	// Limits that match no ladder box still bound the fitted size itself.
+	decoderWidth, decoderHeight = 1280, 962
+	check("a 1280x962 decoder", PlanPlaybackV3(input(false)), "h264", "720p", 1280, 2_000)
 }
 
 func TestPlanPlaybackV3HEVCFailureFallsBackToH264(t *testing.T) {

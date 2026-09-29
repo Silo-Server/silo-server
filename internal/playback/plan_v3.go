@@ -1155,39 +1155,46 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 }
 
 // h264BoundedQualityV3 fits a transcode target to the client's attested
-// H.264 decoders. A scaled encode larger than every one steps down to the
-// tallest class one takes; a same-size conversion keeps its size. Either way
+// H.264 decoders. A scaled encode that no decoder takes steps down the ladder
+// until its fitted size does, stopping at the smallest class since H.264 is
+// the universal HLS output; a same-size conversion keeps its size. Either way
 // the bitrate stays within the limit of a decoder that takes the output.
 func h264BoundedQualityV3(request StartRequestV3, quality QualityResultV3, source SourceDescriptorV3) QualityResultV3 {
 	decoders := attestedH264DecodersV3(request)
 	if len(decoders) == 0 {
 		return quality
 	}
-	if !quality.PreservesSource && quality.Height > 0 {
-		class := 0
+	takes := func(decoder VideoDecodeCapabilityV3, width, height int) bool {
+		return (decoder.MaxWidth <= 0 || width <= decoder.MaxWidth) && (decoder.MaxHeight <= 0 || height <= decoder.MaxHeight)
+	}
+	anyTakes := func(width, height int) bool {
 		for _, decoder := range decoders {
-			if decoder.MaxWidth <= 0 || decoder.MaxHeight <= 0 {
-				class = 0
-				break
+			if takes(decoder, width, height) {
+				return true
 			}
-			class = max(class, ladderClassForSize(decoder.MaxWidth, decoder.MaxHeight))
 		}
-		if class > 0 && ladderClassForSize(quality.Width, quality.Height) > class {
-			box := ladderClassesFrom(class)[0]
-			width, height := FitLadderBox(source.Width, source.Height, class)
+		return false
+	}
+	if !quality.PreservesSource && quality.Height > 0 && !anyTakes(quality.Width, quality.Height) {
+		classes := ladderClassesFrom(ladderClassForSize(quality.Width, quality.Height))
+		for i, class := range classes {
+			width, height := FitLadderBox(source.Width, source.Height, class.Height)
 			if height == 0 {
-				height = class
+				height = class.Height
 			}
 			if width == 0 {
-				width = box.Width
+				width = class.Width
 			}
-			quality.Label, quality.Width, quality.Height = heightLabel(height), width, height
-			quality.BitrateKbps = minPositiveV3(quality.BitrateKbps, ladderClassBitrateKbpsV3(class))
+			if anyTakes(width, height) || i == len(classes)-1 {
+				quality.Label, quality.Width, quality.Height = heightLabel(height), width, height
+				quality.BitrateKbps = minPositiveV3(quality.BitrateKbps, ladderClassBitrateKbpsV3(class.Height))
+				break
+			}
 		}
 	}
 	limit := 0
 	for _, decoder := range decoders {
-		if decoder.MaxWidth > 0 && quality.Width > decoder.MaxWidth || decoder.MaxHeight > 0 && quality.Height > decoder.MaxHeight {
+		if !takes(decoder, quality.Width, quality.Height) {
 			continue
 		}
 		if decoder.MaxBitrateKbps <= 0 {
