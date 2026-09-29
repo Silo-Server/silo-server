@@ -394,15 +394,20 @@ func TestFilesystemDeletePrefixStopsOnCancellation(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// The walk checks the context once per entry: the prefix directory, then
-	// a hash directory and its file for each item. Allow the first two files.
-	n, err := s.DeletePrefix(&cancelAfter{Context: ctx, n: 5}, "item")
+	// The walk checks the context once per entry and once before removing
+	// each directory: the prefix, then per item its hash directory, its file,
+	// and the directory removal. Allow two files; the second hash directory is
+	// left behind (empty) because cancellation stops before removing it.
+	n, err := s.DeletePrefix(&cancelAfter{Context: ctx, n: 6}, "item")
 	if !errors.Is(err, context.Canceled) || n != 2 {
 		t.Fatalf("partial delete = %d, %v; want 2, context.Canceled", n, err)
 	}
 	keys, _, err := s.List(ctx, "item/", "", 100)
 	if err != nil || len(keys) != 8 {
 		t.Fatalf("remaining = %d, %v; want 8", len(keys), err)
+	}
+	if _, err = os.Stat(filepath.Join(s.root, "item", "h0")); !os.IsNotExist(err) {
+		t.Fatalf("emptied directory not removed during the walk: %v", err)
 	}
 	if n, err = s.DeletePrefix(ctx, "item"); err != nil || n != 8 {
 		t.Fatalf("resumed delete = %d, %v; want 8", n, err)
