@@ -1294,8 +1294,8 @@ scale it down to 2160 lines.
 
 Compound rungs are strict resolution/bitrate selections. A bandwidth cap can
 clamp their bitrate but does not silently demote their resolution. Plain labels
-remain accepted for stored/default preferences and retain their existing
-height-only behavior.
+remain accepted for stored/default preferences and size their output like
+`auto` below.
 
 `auto` picks its resolution from the shared bitrate ladder
 ([quality-ladder.md](quality-ladder.md)): 80% of the bandwidth estimate or cap
@@ -1305,9 +1305,11 @@ streams at 1920x800, and encode at the class bitrate: 20000 kbps for 2160p, 6000
 for 1080p, 2000 for 720p, 1800 for 540p and 1500 for 480p, never above that 80%
 budget. A source that already fits the class but whose bitrate exceeds 80% of the
 bandwidth estimate is re-encoded at its own size within that budget rather than
-sent as-is; a cap keeps the rule above, where only a source over the cap itself
-is re-encoded. A transcode also never targets more than the source's own
-bitrate, counted as H.264.
+sent as-is; a source of unknown bitrate counts as needing its class's full
+bitrate. Under a cap, a source over the cap itself is re-encoded, and so is a
+video source of unknown bitrate, since it cannot be shown to fit. A transcode
+also never targets more than the source's own bitrate, counted in the output
+codec (H.264, or HEVC when the planner chooses it).
 
 Registry availability is deliberately *not* consulted when building the menu: a
 capability check there could trigger lazy node fetches that a source-preserving
