@@ -9,10 +9,11 @@ ALTER TABLE public.media_request_follows ADD COLUMN request_id text;
 -- A title has one open request at a time, so the request open when a follow
 -- was made is the title's latest request created before it, provided that
 -- request could still have been open then: still active, or completed no
--- earlier than the follow. Otherwise the follow's own request is gone (a failed
--- request its requester replaced) and the follow goes to the title's open
--- request, as a new request takes such follows over; with none open, it stays
--- with a failed request for the title's next request to take over.
+-- earlier than the follow. Otherwise that request had closed (a failed request,
+-- or one its requester replaced and deleted), and the follow goes to the
+-- title's first request since that still has a notification to send, as a new
+-- request takes such follows over. With none, it stays with a failed request
+-- for the title's next request to take over.
 UPDATE public.media_request_follows f
 SET request_id = CASE
     WHEN made_for.outcome = 'active'
@@ -21,7 +22,9 @@ SET request_id = CASE
     ELSE coalesce(
         (SELECT r.id FROM public.media_requests r
          WHERE r.media_type = f.media_type AND r.provider = 'tmdb' AND r.tmdb_id = f.tmdb_id
-           AND r.outcome = 'active' AND r.status <> 'completed'
+           AND r.created_at > f.created_at AND r.outcome = 'active'
+           AND (r.status <> 'completed' OR r.fulfilled_notified_at IS NULL)
+         ORDER BY r.created_at, r.id
          LIMIT 1),
         CASE WHEN made_for.outcome = 'failed' THEN made_for.id END)
     END
