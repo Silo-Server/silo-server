@@ -447,7 +447,21 @@ func (f *fakePersonalCollections) PersonalCollectionItemsOrderEditor(_ context.C
 // The personal template gallery offered TMDB Discover and franchise templates
 // that can't become personal collections, so Create did nothing (#1640).
 func TestImportableCollectionTemplatesKeepsPersonalSources(t *testing.T) {
-	full := templates.NewRegistry().Catalog()
+	full := templates.CatalogDefault()
+	want := map[templates.Source]int{}
+	hasExcludedSource := false
+	for _, group := range full.Categories {
+		for _, template := range group.Templates {
+			if slices.Contains(importableCollectionSources[:], string(template.Source)) {
+				want[template.Source]++
+			} else {
+				hasExcludedSource = true
+			}
+		}
+	}
+	if len(want) == 0 || !hasExcludedSource {
+		t.Fatal("built-in catalog must contain both importable and excluded sources")
+	}
 	got := importableCollectionTemplates(full)
 
 	kept := map[templates.Source]int{}
@@ -464,11 +478,9 @@ func TestImportableCollectionTemplatesKeepsPersonalSources(t *testing.T) {
 			t.Errorf("catalog keeps %d templates with source %q, which personal collections can't import", kept[source], source)
 		}
 	}
-	for _, group := range full.Categories {
-		for _, template := range group.Templates {
-			if slices.Contains(importableCollectionSources[:], string(template.Source)) && kept[template.Source] == 0 {
-				t.Errorf("importable source %q was dropped", template.Source)
-			}
+	for source, count := range want {
+		if kept[source] != count {
+			t.Errorf("kept %d templates with importable source %q, want %d", kept[source], source, count)
 		}
 	}
 }
