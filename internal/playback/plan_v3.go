@@ -1412,6 +1412,14 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 	if width == 0 {
 		width = class.Width
 	}
+	if effectiveHeight%2 != 0 || width%2 != 0 {
+		// A fit that keeps an odd source frame still needs an even one for
+		// 4:2:0 output; the encoder's scale=-2 evens the width.
+		effectiveHeight &^= 1
+		if source.Width > 0 && source.Height > 0 {
+			width = scaledEvenWidth(source.Width, source.Height, effectiveHeight)
+		}
+	}
 	label := heightLabel(effectiveHeight)
 	bitrate := ladderClassBitrateKbpsV3(class.Height)
 	if budgetKbps > 0 && bitrate > budgetKbps {
