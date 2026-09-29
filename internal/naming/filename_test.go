@@ -439,6 +439,22 @@ func TestResolvePathContext(t *testing.T) {
 			wantMovieFolderEvidence: false,
 		},
 		{
+			// A release name repeating the show's title and year still has its
+			// episode token decide in a TVDB-only folder.
+			name:                    "mixed library tvdb-only show folder with release-named episode is series",
+			path:                    "/mixed/Show (2024) {tvdb-12345}/Show.2024.S01E03.1080p.WEB-DL.mkv",
+			libraryType:             "mixed",
+			wantType:                "series",
+			wantRoot:                "/mixed/Show (2024) {tvdb-12345}",
+			wantTitle:               "Show",
+			wantYear:                2024,
+			wantSeason:              1,
+			wantEpisode:             3,
+			wantEpisodePattern:      true,
+			wantSeasonStructure:     false,
+			wantMovieFolderEvidence: false,
+		},
+		{
 			// The title check still applies to a TVDB-only folder, so a file
 			// repeating the folder's title and year is movie evidence.
 			name:                    "mixed library tvdb-only movie folder stays movie",
