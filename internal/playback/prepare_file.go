@@ -268,7 +268,7 @@ type downloadDecoder struct {
 // prefer hardware decoders, since a download plays back later on the same
 // device. A decoder qualifies when it takes the source's frame rate and lists
 // the profile the encode produces; as in HLS playback, a platform-attested
-// hardware decoder is exempt from the profile and level lists, and a
+// hardware decoder is exempt from the profile and level lists, and any other
 // level-bound HEVC decoder is skipped because the HEVC recipe does not pin a
 // level. If no listed H.264 decoder qualifies, their sizes still bound the
 // output, since H.264 is the fallback and a smaller frame is the best the
@@ -310,7 +310,7 @@ func strictDownloadDecoders(caps ClientCapabilities, codec string, frameRate flo
 			}
 			if qualify && ((decoder.MaxFrameRate > 0 && frameRate > decoder.MaxFrameRate+0.01) ||
 				(checkLists && len(decoder.Profiles) > 0 && !videoProfileSupportedV3(codec, outputProfile, decoder.Profiles)) ||
-				(codec == transcodeCodecHEVC && len(decoder.Levels) > 0)) {
+				(checkLists && codec == transcodeCodecHEVC && len(decoder.Levels) > 0)) {
 				continue
 			}
 			bound := downloadDecoder{maxWidth: decoder.MaxWidth, maxHeight: decoder.MaxHeight, maxBitrateKbps: decoder.MaxBitrateKbps}

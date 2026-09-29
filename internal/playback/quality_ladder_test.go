@@ -207,6 +207,13 @@ func TestResolveDownloadTranscodeTargetHonorsDecoderLimits(t *testing.T) {
 			VideoDecodeCapabilityV3{Codec: "h264", BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, Hardware: true},
 			VideoDecodeCapabilityV3{Codec: "hevc", Levels: []int{150}, BitDepths: []int{8}, MaxWidth: 3840, MaxHeight: 2160, Hardware: true},
 		), 10_000, true, "h264", "1080p", 10_000},
+		{"a platform-attested hardware HEVC decoder's level list is not binding", uhd, ClientCapabilities{
+			VideoEvidence: EvidencePlatformAttestedV3, CodecsVideo: []string{"h264", "hevc"},
+			VideoDecode: []VideoDecodeCapabilityV3{
+				{Codec: "h264", BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, Hardware: true},
+				{Codec: "hevc", Levels: []int{150}, BitDepths: []int{8}, MaxWidth: 3840, MaxHeight: 2160, Hardware: true},
+			},
+		}, 10_000, true, "hevc", "1080p", 10_000},
 		{"the decoder's bitrate limit caps the target", uhd, exact(
 			VideoDecodeCapabilityV3{Codec: "h264", BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxBitrateKbps: 8_000, Hardware: true},
 		), 10_000, false, "h264", "1080p", 8_000},
