@@ -6621,7 +6621,7 @@ export interface paths {
     };
     /** Read the canonical collection editor state and its strong validator. */
     get: operations["getCollectionOrder"];
-    /** Replace the order of the collections in one group (or the ungrouped section). Retries are not safe after an intervening mutation. */
+    /** Replace the order of the acting profile's own collections in one group (or the ungrouped section). Retries are not safe after an intervening mutation. */
     put: operations["reorderCollections"];
     post?: never;
     delete?: never;
@@ -19786,7 +19786,7 @@ export interface components {
        */
       group_id?: string | null;
       /**
-       * @description Every visible collection in the scope, exactly once, in the new order
+       * @description The collections the acting profile created in the scope, each once, in order. A write rejects a collection another profile created, even one shared with this profile
        * @example [
        *       "01J9Z8C3W4R5T6Y7U8I9O0P1Q4"
        *     ]

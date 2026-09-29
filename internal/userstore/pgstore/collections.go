@@ -482,8 +482,10 @@ func (s *PostgresUserStore) reorderCollectionItems(ctx context.Context, collecti
 }
 
 // ReorderCollections sets each collection's sort_order to its index in the
-// supplied list. The list must be a permutation of the user's collections in
-// the supplied group. A nil groupID targets the implicit Ungrouped bucket.
+// supplied list. The list must be a permutation of the collections profileID
+// created in the supplied group; other profiles' collections, including ones
+// shared with profileID, keep their order. A nil groupID targets the implicit
+// Ungrouped bucket.
 func (s *PostgresUserStore) ReorderCollections(ctx context.Context, profileID string, groupID *string, orderedIDs []string) error {
 	return s.reorderCollections(ctx, profileID, groupID, orderedIDs, nil)
 }
@@ -516,6 +518,7 @@ func (s *PostgresUserStore) reorderCollections(ctx context.Context, profileID st
 		  WHERE t.user_id = $2
 		    AND t.id = supplied.id
 		    AND t.group_id IS NOT DISTINCT FROM $4
+		    AND t.creator_profile_id = $5
 		    AND EXISTS (
 		      SELECT 1
 		      FROM user_personal_collection_profiles p
@@ -529,6 +532,7 @@ func (s *PostgresUserStore) reorderCollections(ctx context.Context, profileID st
 		       (SELECT count(*) FROM user_personal_collections
 		         WHERE user_id = $2
 		           AND group_id IS NOT DISTINCT FROM $4
+		           AND creator_profile_id = $5
 		           AND EXISTS (
 		             SELECT 1
 		             FROM user_personal_collection_profiles p

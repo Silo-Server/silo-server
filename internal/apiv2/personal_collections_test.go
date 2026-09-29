@@ -67,7 +67,7 @@ func (f *fakePersonalCollections) ReorderPersonalCollections(_ context.Context, 
 		return f.err
 	}
 	if len(orderedIDs) == 0 {
-		return &handlers.APIError{Status: 400, Code: "bad_request", Message: "ordered_ids must include every visible collection in the group exactly once", Field: "ordered_ids"}
+		return &handlers.APIError{Status: 400, Code: "bad_request", Message: "ordered_ids must include every collection this profile created in the group exactly once", Field: "ordered_ids"}
 	}
 	return nil
 }

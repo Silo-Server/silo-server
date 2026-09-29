@@ -22952,7 +22952,7 @@
             ]
           },
           "ordered_ids": {
-            "description": "Every visible collection in the scope, exactly once, in the new order",
+            "description": "The collections the acting profile created in the scope, each once, in order. A write rejects a collection another profile created, even one shared with this profile",
             "examples": [
               [
                 "01J9Z8C3W4R5T6Y7U8I9O0P1Q4"
@@ -132567,7 +132567,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Replace the order of the collections in one group (or the ungrouped section). Retries are not safe after an intervening mutation.",
+        "summary": "Replace the order of the acting profile's own collections in one group (or the ungrouped section). Retries are not safe after an intervening mutation.",
         "tags": [
           "collections"
         ],

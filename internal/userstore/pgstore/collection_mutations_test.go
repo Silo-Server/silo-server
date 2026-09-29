@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/collectionutil"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -169,6 +171,79 @@ func TestCollectionCASOrderScopePostgres(t *testing.T) {
 	}
 	if err := store.ReorderCollectionsIfRevision(ctx, "owner", nil, []string{visible.ID}, version); err != nil {
 		t.Fatalf("correct visible permutation rejected: %v", err)
+	}
+}
+
+func TestReorderCollectionsOnlyOrdersOwnCollectionsPostgres(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	var uid int
+	if err := pool.QueryRow(ctx, `INSERT INTO users(username,role) VALUES($1,'user') RETURNING id`, fmt.Sprintf("collection-order-own-%d", time.Now().UnixNano())).Scan(&uid); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, uid)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM user_collection_revisions WHERE user_id=$1`, uid)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM user_collection_order_revisions WHERE user_id=$1`, uid)
+	}()
+	store := newStore(pool, uid)
+	create := func(creator, name string, shareWith ...string) *userstore.Collection {
+		c, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{CreatorProfileID: creator, Name: name, IsShared: len(shareWith) > 0, AllowedProfileIDs: shareWith})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	ownerPrivate := create("owner", "owner private")
+	ownerShared := create("owner", "owner shared", "viewer")
+	viewerOwn := create("viewer", "viewer own")
+	sortOrders := func() map[string]int {
+		out := map[string]int{}
+		for _, c := range []*userstore.Collection{ownerPrivate, ownerShared, viewerOwn} {
+			got, err := store.GetCollection(ctx, c.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out[c.Name] = got.SortOrder
+		}
+		return out
+	}
+	before := sortOrders()
+
+	// The viewer can see the owner's shared collection but can't order it.
+	for _, ids := range [][]string{{ownerShared.ID, viewerOwn.ID}, {viewerOwn.ID, ownerShared.ID}} {
+		if err := store.ReorderCollections(ctx, "viewer", nil, ids); !errors.Is(err, collectionutil.ErrOrderedIDsMismatch) {
+			t.Fatalf("viewer reorder of %v: got %v, want ErrOrderedIDsMismatch", ids, err)
+		}
+	}
+	if got := sortOrders(); !reflect.DeepEqual(got, before) {
+		t.Fatalf("rejected reorder changed sort order: %v -> %v", before, got)
+	}
+
+	// The viewer's own order leaves the owner's collections where they were.
+	if err := store.ReorderCollections(ctx, "viewer", nil, []string{viewerOwn.ID}); err != nil {
+		t.Fatalf("viewer reorder of its own collection: %v", err)
+	}
+	got := sortOrders()
+	if got["owner private"] != before["owner private"] || got["owner shared"] != before["owner shared"] || got["viewer own"] != 0 {
+		t.Fatalf("viewer reorder: %v -> %v", before, got)
+	}
+
+	// The owner orders both of its collections, shared or not.
+	if err := store.ReorderCollections(ctx, "owner", nil, []string{ownerShared.ID, ownerPrivate.ID}); err != nil {
+		t.Fatalf("owner reorder: %v", err)
+	}
+	got = sortOrders()
+	if got["owner shared"] != 0 || got["owner private"] != 1 || got["viewer own"] != 0 {
+		t.Fatalf("owner reorder: %v", got)
 	}
 }
 

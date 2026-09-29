@@ -4,8 +4,14 @@ import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ProfileRequestContextSnapshot } from "@/api/client";
+import type { Collection, CollectionsListResponse } from "@/api/types";
 import { V2ProblemError } from "@/api/v2/request";
-import { useSetCollectionSortPreference, useUpdateCollection } from "./collections";
+import {
+  useReorderCollections,
+  useSetCollectionSortPreference,
+  useUpdateCollection,
+} from "./collections";
+import { collectionKeys } from "./keys";
 
 const apiMock = vi.hoisted(() => vi.fn());
 const apiWithProfileRequestContextMock = vi.hoisted(() => vi.fn());
@@ -226,5 +232,35 @@ describe("guarded collection editing", () => {
     );
     expect(errorToast).toHaveBeenCalledWith(expect.stringContaining("Reload"));
     expect(invalidate).toHaveBeenCalled();
+  });
+});
+
+describe("useReorderCollections", () => {
+  it("keeps collections left out of ordered_ids in place while the reorder is pending", async () => {
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const collection = (id: string, sortOrder: number) =>
+      ({ id, sort_order: sortOrder, group_id: null }) as Collection;
+    client.setQueryData<CollectionsListResponse>(collectionKeys.list(), {
+      collections: [collection("own-a", 0), collection("shared", 1), collection("own-b", 2)],
+      groups: [],
+    });
+    const response = deferred<unknown>();
+    apiWithProfileRequestContextMock.mockReset().mockReturnValue(response.promise);
+    const { result } = renderHook(() => useReorderCollections(), { wrapper });
+
+    act(() => {
+      result.current.mutate({ orderedIds: ["own-b", "own-a"], groupId: null, etag: '"v"' });
+    });
+
+    await waitFor(() => expect(apiWithProfileRequestContextMock).toHaveBeenCalledTimes(1));
+    const cached = client.getQueryData<CollectionsListResponse>(collectionKeys.list());
+    expect(cached?.collections.map((item) => item.id)).toEqual(["own-b", "shared", "own-a"]);
+    expect(apiWithProfileRequestContextMock).toHaveBeenCalledWith(
+      "PUT /api/v2/collections/order",
+      expect.objectContaining({ body: { ordered_ids: ["own-b", "own-a"], group_id: null } }),
+    );
   });
 });

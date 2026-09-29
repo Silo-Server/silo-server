@@ -2053,6 +2053,8 @@ then changes the poster; artwork failure leaves the saved collection intact and 
 separately. Membership and artwork operations check creator ownership, and item additions also
 require catalog visibility. Adding an existing native member preserves its position; order changes
 use the explicit ordering operation. Shared viewers can read permitted collections but cannot mutate them.
+`GET` and `PUT /collections/order` cover only the collections the acting profile created; a shared
+collection keeps its owner's position, and another profile's ID in `ordered_ids` is rejected.
 Native membership operations preserve audiobook chapter entries in the same storage table.
 
 Collection capabilities describe the acting account's selected user store:
