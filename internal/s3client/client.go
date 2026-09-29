@@ -686,7 +686,9 @@ func (c *Client) DeletePrefix(ctx context.Context, bucket, prefix string) (int, 
 }
 
 // DeleteObjects deletes the given keys in batches of up to 1000 (the S3 API
-// limit). Returns the total number of successfully deleted objects.
+// limit). Returns the total number of successfully deleted objects. Missing
+// keys count as deleted; any other failure is returned as an error alongside
+// the count, and a cancelled context stops the deletion with its error.
 func (c *Client) DeleteObjects(ctx context.Context, bucket string, keys []string) (int, error) {
 	if err := c.mutations.Acquire(ctx, 1); err != nil {
 		return 0, err
@@ -698,8 +700,19 @@ func (c *Client) DeleteObjects(ctx context.Context, bucket string, keys []string
 func (c *Client) deleteObjects(ctx context.Context, bucket string, keys []string) (int, error) {
 	const batchSize = 1000
 	deleted := 0
+	failed := 0
+	var firstErr error
+	recordFailure := func(err error) {
+		failed++
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
 
 	for i := 0; i < len(keys); i += batchSize {
+		if err := ctx.Err(); err != nil {
+			return deleted, err
+		}
 		end := i + batchSize
 		if end > len(keys) {
 			end = len(keys)
@@ -719,10 +732,23 @@ func (c *Client) deleteObjects(ctx context.Context, bucket string, keys []string
 			},
 		})
 		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return deleted, ctxErr
+			}
+			if !isBatchDeleteUnsupported(err) {
+				return deleted, fmt.Errorf("s3 DeleteObjects %s: %w", bucket, err)
+			}
 			// Fall back to individual deletes if batch is not supported.
 			for _, key := range batch {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return deleted, ctxErr
+				}
 				if delErr := c.deleteObject(ctx, bucket, key); delErr != nil {
+					if ctxErr := ctx.Err(); ctxErr != nil {
+						return deleted, ctxErr
+					}
 					slog.WarnContext(ctx, "s3 DeleteObjects fallback: failed to delete", "component", "s3client", "key", key, "error", delErr)
+					recordFailure(delErr)
 					continue
 				}
 				deleted++
@@ -739,11 +765,35 @@ func (c *Client) deleteObjects(ctx context.Context, bucket string, keys []string
 				deleted--
 				slog.WarnContext(ctx, "s3 DeleteObjects: partial failure", "component", "s3client",
 					"key", aws.ToString(e.Key), "code", aws.ToString(e.Code), "message", aws.ToString(e.Message))
+				recordFailure(fmt.Errorf("s3 DeleteObjects %s/%s: %s: %s", bucket, aws.ToString(e.Key), aws.ToString(e.Code), aws.ToString(e.Message)))
 			}
 		}
 	}
 
+	if failed > 0 {
+		return deleted, fmt.Errorf("s3 DeleteObjects %s: %d of %d objects not deleted: %w", bucket, failed, len(keys), firstErr)
+	}
 	return deleted, nil
+}
+
+// isBatchDeleteUnsupported reports whether a DeleteObjects error means the
+// endpoint does not implement batch deletes, so per-object deletes should be
+// used instead.
+func isBatchDeleteUnsupported(err error) bool {
+	if apiErr, ok := errors.AsType[smithy.APIError](err); ok && apiErr.ErrorCode() == "NotImplemented" {
+		return true
+	}
+	type httpResponseError interface {
+		HTTPStatusCode() int
+	}
+	var httpErr httpResponseError
+	if errors.As(err, &httpErr) {
+		switch httpErr.HTTPStatusCode() {
+		case http.StatusNotImplemented, http.StatusMethodNotAllowed:
+			return true
+		}
+	}
+	return false
 }
 
 func isMissingObjectCode(code string) bool {
