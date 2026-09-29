@@ -131,22 +131,35 @@ func bitrateLimitAbove(a, b int) bool {
 // DownloadScaleResolution converts a download artifact's ladder class into
 // the exact height the encoder scales to, so a cinema-aspect source keeps its
 // shape inside the class box. An empty class, or a source already inside the
-// box, leaves the source unscaled.
+// box, leaves the source unscaled unless its frame is odd.
 func DownloadScaleResolution(file *models.MediaFile, classLabel string) string {
+	source := SourceDescriptorFromFileV3(file, 0)
 	class := resolutionHeightV3(classLabel)
 	if class <= 0 {
+		if classLabel == "" {
+			return evenFrameLabel(source)
+		}
 		return classLabel
 	}
-	source := SourceDescriptorFromFileV3(file, 0)
 	width, height := FitLadderBox(source.Width, source.Height, class)
 	switch {
 	case height == 0:
 		return heightLabel(class)
 	case width == source.Width && height == source.Height:
-		return ""
+		return evenFrameLabel(source)
 	default:
 		return heightLabel(height)
 	}
+}
+
+// evenFrameLabel is the scale an encode that keeps the source frame still
+// needs: none for an even frame, and the even height at or below an odd one,
+// since 4:2:0 output needs even dimensions and scale=-2 evens the width.
+func evenFrameLabel(source SourceDescriptorV3) string {
+	if source.Height <= 0 || source.Height%2 == 0 && source.Width%2 == 0 {
+		return ""
+	}
+	return heightLabel(source.Height &^ 1)
 }
 
 // downloadLadderClass returns the tallest ladder class, at or below the one

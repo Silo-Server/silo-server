@@ -144,6 +144,9 @@ func TestDownloadScaleResolution(t *testing.T) {
 		{ladderTestFile(1920, 1080, "h264", "24", 8_000), "1080p", ""},
 		{ladderTestFile(1920, 1080, "h264", "24", 8_000), "", ""},
 		{&models.MediaFile{CodecVideo: "h264"}, "720p", "720p"},
+		{ladderTestFile(1920, 1079, "h264", "24", 8_000), "", "1078p"},      // an odd frame still gets an even size
+		{ladderTestFile(1917, 1080, "h264", "24", 8_000), "1080p", "1080p"}, // scale=-2 evens the width
+		{ladderTestFile(1920, 1079, "h264", "24", 8_000), "1080p", "1078p"},
 	} {
 		if got := DownloadScaleResolution(tc.file, tc.class); got != tc.want {
 			t.Errorf("DownloadScaleResolution(%dx?, %q) = %q, want %q", len(tc.file.VideoTracks), tc.class, got, tc.want)
