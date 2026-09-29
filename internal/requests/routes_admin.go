@@ -398,6 +398,30 @@ func (s *Service) ensureRoutesKeepServerKind(ctx context.Context, in Integration
 		}
 		checkTier = settings.Mode != RoutingStandard
 	}
+	fields := routeKindConflicts(in, routes)
+	if checkTier {
+		current, err := s.store.GetIntegration(ctx, in.ID)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return err
+		}
+		if current == nil || is4KServer(*current) != is4KServer(in) {
+			if msg := tierConflict(in, routes); msg != "" {
+				fields["plugin_config."+configIs4K] = msg
+			}
+		}
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	return &ValidationError{FieldErrors: fields}
+}
+
+// routeKindConflicts explains, by field, why the routes sending to a server
+// keep its type and media types where they are: they send it requests it
+// would no longer take. It is empty when none do. The repository checks again
+// under the server's row lock (ensureRoutesStillFit), since a route save can
+// commit between this check and the server save.
+func routeKindConflicts(in Integration, routes []Route) map[string]string {
 	var wrongKind, unsupported []string
 	for _, r := range routes {
 		if r.HD.IntegrationID != in.ID && r.UHD.IntegrationID != in.ID {
@@ -419,21 +443,7 @@ func (s *Service) ensureRoutesKeepServerKind(ctx context.Context, in Integration
 		fields["supported_media_types"] = "Routing sends a media type this server would no longer take to it (" +
 			strings.Join(unsupported, ", ") + "); change those routes first."
 	}
-	if checkTier {
-		current, err := s.store.GetIntegration(ctx, in.ID)
-		if err != nil && !errors.Is(err, ErrNotFound) {
-			return err
-		}
-		if current == nil || is4KServer(*current) != is4KServer(in) {
-			if msg := tierConflict(in, routes); msg != "" {
-				fields["plugin_config."+configIs4K] = msg
-			}
-		}
-	}
-	if len(fields) == 0 {
-		return nil
-	}
-	return &ValidationError{FieldErrors: fields}
+	return fields
 }
 
 // tierConflict explains why routes keep a server's 4K switch where it is: they
@@ -536,6 +546,22 @@ func tierMismatch(in Integration, uhd bool) string {
 	return ""
 }
 
+// destinationMismatch explains why a server can't take a route's HD or 4K
+// version: it is the other type of server, doesn't take the media type, or is
+// on the other side of the 4K switch. It is empty when the server fits.
+func destinationMismatch(in Integration, mediaType MediaType, uhd bool) string {
+	if kind, _ := in.PluginConfig[configServiceKind].(string); kind != "" {
+		wantKind := map[MediaType]string{MediaTypeMovie: kindRadarr, MediaTypeSeries: kindSonarr}[mediaType]
+		if wantKind != "" && kind != wantKind {
+			return fmt.Sprintf("%s is a %s server; %s need %s.", in.Name, kindLabel(kind), mediaTypePlural(mediaType), kindLabel(wantKind))
+		}
+	}
+	if mediaType != "" && !integrationSupportsMediaType(in, mediaType) {
+		return fmt.Sprintf("%s does not take %s.", in.Name, mediaTypePlural(mediaType))
+	}
+	return tierMismatch(in, uhd)
+}
+
 func validateDestination(field string, dest *RouteDestination, mediaType MediaType, integrations []Integration, fields map[string]string) {
 	dest.IntegrationID = strings.TrimSpace(dest.IntegrationID)
 	if dest.IntegrationID == "" {
@@ -552,19 +578,8 @@ func validateDestination(field string, dest *RouteDestination, mediaType MediaTy
 		fields[field+".integration_id"] = "That server no longer exists."
 		return
 	}
-	if kind, _ := in.PluginConfig[configServiceKind].(string); kind != "" {
-		wantKind := map[MediaType]string{MediaTypeMovie: kindRadarr, MediaTypeSeries: kindSonarr}[mediaType]
-		if wantKind != "" && kind != wantKind {
-			fields[field+".integration_id"] = fmt.Sprintf("%s is a %s server; %s need %s.", in.Name, kindLabel(kind), mediaTypePlural(mediaType), kindLabel(wantKind))
-		}
-	}
-	if mediaType != "" && fields[field+".integration_id"] == "" && !integrationSupportsMediaType(*in, mediaType) {
-		fields[field+".integration_id"] = fmt.Sprintf("%s does not take %s.", in.Name, mediaTypePlural(mediaType))
-	}
-	if fields[field+".integration_id"] == "" {
-		if msg := tierMismatch(*in, field == fieldUHD); msg != "" {
-			fields[field+".integration_id"] = msg
-		}
+	if msg := destinationMismatch(*in, mediaType, field == fieldUHD); msg != "" {
+		fields[field+".integration_id"] = msg
 	}
 	for _, key := range routingOwnedConfigKeys {
 		if _, ok := dest.Overrides[key]; ok {
@@ -732,7 +747,7 @@ func (r *Repository) SaveRouteConditional(ctx context.Context, route Route, expe
 	allowMissing := expected == 0 || route.IsFallback
 	// Servers before the route row, the order a server save that turns
 	// Advanced on takes them in.
-	if err := ensureDestinationTiers(ctx, tx, route); err != nil {
+	if err := ensureDestinationsFit(ctx, tx, route); err != nil {
 		return nil, err
 	}
 	if err := lockRevision(ctx, tx, `SELECT revision FROM request_routes WHERE id = $1 FOR UPDATE`, []any{route.ID}, expected, allowMissing); err != nil {
@@ -762,11 +777,11 @@ func (r *Repository) SaveRouteConditional(ctx context.Context, route Route, expe
 	return &saved, tx.Commit(ctx)
 }
 
-// ensureDestinationTiers checks the route's servers against the tier rule
-// again inside the save, holding their rows FOR SHARE: a 4K switch change
-// committed since validateRoute is seen here, and one still in flight waits
-// for this save and then finds the route (ensureTierKeptUnderAdvanced).
-func ensureDestinationTiers(ctx context.Context, tx pgx.Tx, route Route) error {
+// ensureDestinationsFit checks the route's servers again inside the save,
+// holding their rows FOR SHARE: a change to a server's type, media types or 4K
+// switch committed since validateRoute is seen here, and one still in flight
+// waits for this save and then finds the route (ensureRoutesStillFit).
+func ensureDestinationsFit(ctx context.Context, tx pgx.Tx, route Route) error {
 	ids := make([]string, 0, 2)
 	for _, id := range []string{route.HD.IntegrationID, route.UHD.IntegrationID} {
 		if id != "" {
@@ -776,7 +791,7 @@ func ensureDestinationTiers(ctx context.Context, tx pgx.Tx, route Route) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	rows, err := tx.Query(ctx, `SELECT id, name, plugin_config FROM request_integrations WHERE id = ANY($1) ORDER BY id FOR SHARE`, ids)
+	rows, err := tx.Query(ctx, `SELECT id, name, supported_media_types, plugin_config FROM request_integrations WHERE id = ANY($1) ORDER BY id FOR SHARE`, ids)
 	if err != nil {
 		return fmt.Errorf("lock route servers: %w", err)
 	}
@@ -785,7 +800,7 @@ func ensureDestinationTiers(ctx context.Context, tx pgx.Tx, route Route) error {
 	for rows.Next() {
 		var in Integration
 		var raw []byte
-		if err := rows.Scan(&in.ID, &in.Name, &raw); err != nil {
+		if err := rows.Scan(&in.ID, &in.Name, &in.SupportedMediaTypes, &raw); err != nil {
 			return fmt.Errorf("scan route server: %w", err)
 		}
 		if len(raw) > 0 {
@@ -799,7 +814,7 @@ func ensureDestinationTiers(ctx context.Context, tx pgx.Tx, route Route) error {
 				dest = route.UHD
 			}
 			if dest.IntegrationID == in.ID {
-				if msg := tierMismatch(in, uhd); msg != "" {
+				if msg := destinationMismatch(in, route.MediaType, uhd); msg != "" {
 					fields[field+".integration_id"] = msg
 				}
 			}

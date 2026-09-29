@@ -442,14 +442,15 @@ func (r *Repository) standardBeforeSave(ctx context.Context, tx pgx.Tx) (layout 
 	return layout, true, nil
 }
 
-// ensureTierKeptUnderAdvanced refuses, under the routing-mode lock taken by
-// standardBeforeSave, a server update whose 4K switch leaves an active route
-// sending it the other version. The service checks the same before the save;
-// this catches Advanced turned on in between.
-func ensureTierKeptUnderAdvanced(ctx context.Context, tx pgx.Tx, in Integration) error {
+// ensureRoutesStillFit refuses, under the routing-mode lock taken by
+// standardBeforeSave and the server's row lock, a server update that leaves a
+// route sending it requests it would no longer take: the other media type, or
+// under Advanced the other version. The service checks the same before the
+// save; this catches a route saved, or Advanced turned on, in between.
+func ensureRoutesStillFit(ctx context.Context, tx pgx.Tx, in Integration, advanced bool) error {
 	var raw []byte
 	// FOR UPDATE before reading the routes: a route save holds its servers
-	// FOR SHARE (ensureDestinationTiers), so one in flight commits first and
+	// FOR SHARE (ensureDestinationsFit), so one in flight commits first and
 	// its route is read below.
 	err := tx.QueryRow(ctx, `SELECT plugin_config FROM request_integrations WHERE id = $1 FOR UPDATE`, in.ID).Scan(&raw)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -464,15 +465,18 @@ func ensureTierKeptUnderAdvanced(ctx context.Context, tx pgx.Tx, in Integration)
 			return fmt.Errorf("decode request integration %s config: %w", in.ID, err)
 		}
 	}
-	if is4KServer(stored) == is4KServer(in) {
-		return nil
-	}
 	routes, err := listRoutes(ctx, tx)
 	if err != nil {
 		return err
 	}
-	if msg := tierConflict(in, routes); msg != "" {
-		return &ValidationError{FieldErrors: map[string]string{"plugin_config." + configIs4K: msg}}
+	fields := routeKindConflicts(in, routes)
+	if advanced && is4KServer(stored) != is4KServer(in) {
+		if msg := tierConflict(in, routes); msg != "" {
+			fields["plugin_config."+configIs4K] = msg
+		}
+	}
+	if len(fields) > 0 {
+		return &ValidationError{FieldErrors: fields}
 	}
 	return nil
 }

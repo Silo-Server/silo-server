@@ -119,6 +119,10 @@ marked 4K (the plugin's `is_4k` switch, or its older `is_default_4k`), HD
 versions only to one that is not. Saving a route that breaks this is refused,
 and so, under Advanced, is changing a server's 4K switch while a route sends it
 the other version. A server of another plugin (Seerr) takes either version.
+Changing a server's type or media types while a route sends it a media type it
+would no longer take is refused too. A route save and a server save each check
+the other again with the server row locked, so two admins saving at once
+cannot leave a route pointing at a server that no longer fits.
 
 The migration that introduced routes carried the Sonarr/Radarr plugin's routing
 over unchanged: each media type's first usable default and default-4K servers
@@ -305,15 +309,20 @@ row until the follow commits, so a follow cannot land just after the request
 was declined, cancelled or completed, and miss that transition's follow
 cleanup.
 
-A follow belongs to the title and the profile (`media_request_follows`, keyed
-by account and profile id, since profile ids repeat across accounts), not to
-one request, so it survives the request failing and being retried or requested
-again. Declining or cancelling the request clears the title's follows: the title
-is no longer on its way, and the follower can request it themselves. The
-requesting profile never needs a follow: the fulfilled notification always
-reaches it. When a request's fulfilled notification goes out, it is also sent
-to every follower of the title, marked `follower` so its wording does not say
-"your request", and those follows are then cleared. A dispatch failure leaves
+A follow belongs to a profile and the request that was open when it was made
+(`media_request_follows`, keyed by account, profile id and request, since
+profile ids repeat across accounts). A series can have completed requests still
+waiting for the library beside a newer open request for other seasons; each
+request's notification goes to its own follows, and a profile can follow each
+of them. Unfollowing a title removes the profile's follows on all of them. A follow
+survives its request failing: the title's next request takes over the follows
+of a failed request, or one its requester replaced. Declining or cancelling a
+request clears its follows: the title is no longer on its way, and the follower
+can request it themselves. The requesting profile never needs a follow: the
+fulfilled notification always reaches it. When a request's fulfilled
+notification goes out, it is also sent to the request's followers, marked
+`follower` so its wording does not say "your request", and those follows are
+then cleared. A dispatch failure leaves
 the follows for the retry, and the server-channel announcement waits until an
 attempt has reached every recipient, so a retry does not repeat it.
 

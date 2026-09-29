@@ -80,15 +80,16 @@ type Store interface {
 	// RecomputeStatus re-derives an approved request's status and outcome from
 	// its targets, for a submission that found nothing left to send.
 	RecomputeStatus(ctx context.Context, id string, actor Viewer) (*Request, error)
-	// FollowTitle, UnfollowTitle and FollowedTitles manage a profile's follows
-	// on titles, keyed by account and profile; ListTitleFollowers and ClearTitleFollowers serve the
-	// fulfilled notification. All are idempotent. FollowTitle answers
-	// ErrNotRequested when the title has no open request.
+	// FollowTitle, UnfollowTitle and FollowedRequests manage a profile's
+	// follows, keyed by account, profile and request; ListRequestFollowers and
+	// ClearRequestFollowers serve a request's fulfilled notification. All are
+	// idempotent. FollowTitle answers ErrNotRequested when the title has no
+	// open request.
 	FollowTitle(ctx context.Context, mediaType MediaType, tmdbID int, viewer Viewer) error
 	UnfollowTitle(ctx context.Context, mediaType MediaType, tmdbID int, viewer Viewer) error
-	FollowedTitles(ctx context.Context, mediaType MediaType, tmdbIDs []int, viewer Viewer) (map[int]bool, error)
-	ListTitleFollowers(ctx context.Context, mediaType MediaType, tmdbID int) ([]Follower, error)
-	ClearTitleFollowers(ctx context.Context, mediaType MediaType, tmdbID int, followers []Follower) error
+	FollowedRequests(ctx context.Context, requestIDs []string, viewer Viewer) (map[string]bool, error)
+	ListRequestFollowers(ctx context.Context, req Request) ([]Follower, error)
+	ClearRequestFollowers(ctx context.Context, req Request, followers []Follower) error
 	// ListRoutes returns every routing rule, in no particular order;
 	// decideRoutes orders them.
 	ListRoutes(ctx context.Context) ([]Route, error)

@@ -823,3 +823,34 @@ func TestSaveRechecksTierUnderAdvancedDatabase(t *testing.T) {
 		t.Fatalf("rename the 4K server an older rule sends HD to: %v", err)
 	}
 }
+
+// A route saved after the service checked the server's routes is found by the
+// save's locked check, under Standard too: the server can't become a Sonarr
+// while a rule sends it movies.
+func TestSaveRechecksServerKindUnderLockDatabase(t *testing.T) {
+	ctx := t.Context()
+	repo, pool := routingModeRepository(t)
+	in := arrServer("radarr", kindRadarr, nil)
+	in.APIKeyRef = ""
+	if _, err := repo.SaveIntegrationWithDefaults(ctx, in, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO request_routes (id, media_type, position, name, enabled, conditions, hd_integration_id)
+		VALUES ('anime', 'movie', 0, 'Anime', true, '{"anime":true}', 'radarr')`); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repo.GetIntegration(ctx, "radarr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sonarr := *stored
+	sonarr.PluginConfig["service_kind"] = kindSonarr
+	sonarr.SupportedMediaTypes = []string{string(MediaTypeSeries)}
+	_, err = repo.UpdateIntegrationConditional(ctx, sonarr, sonarr.Revision)
+	if fields := fieldErrors(t, err); !strings.Contains(fields["plugin_config.service_kind"], "Anime") || !strings.Contains(fields["supported_media_types"], "Anime") {
+		t.Fatalf("conditional save making radarr a Sonarr: %v, want the type and media type refused naming Anime", fields)
+	}
+	if _, err := repo.SaveIntegrationWithDefaults(ctx, sonarr, false); !strings.Contains(fieldErrors(t, err)["plugin_config.service_kind"], "Anime") {
+		t.Fatalf("save making radarr a Sonarr: %v, want a service_kind field error", err)
+	}
+}

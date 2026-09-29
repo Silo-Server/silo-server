@@ -113,10 +113,8 @@ func (r *Repository) UpdateIntegrationConditional(ctx context.Context, in Integr
 	if err = lockRevision(ctx, tx, `SELECT revision FROM request_integrations WHERE id=$1 FOR UPDATE`, []any{in.ID}, expected, false); err != nil {
 		return nil, err
 	}
-	if !standard {
-		if err = ensureTierKeptUnderAdvanced(ctx, tx, in); err != nil {
-			return nil, err
-		}
+	if err = ensureRoutesStillFit(ctx, tx, in, !standard); err != nil {
+		return nil, err
 	}
 	out, err := r.updateIntegration(ctx, tx, in)
 	if err == nil && standard {

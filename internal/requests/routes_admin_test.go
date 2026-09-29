@@ -586,3 +586,26 @@ func TestSaveRouteRechecksTierDatabase(t *testing.T) {
 		t.Fatalf("4K only: %v", err)
 	}
 }
+
+// A server's type changed after the editor validated the route is caught by
+// the same locked check: movies can't go to what is now a Sonarr.
+func TestSaveRouteRechecksServerKindDatabase(t *testing.T) {
+	ctx := t.Context()
+	repo, pool := routingModeRepository(t)
+	in := arrServer("radarr", kindRadarr, nil)
+	in.APIKeyRef = ""
+	if _, err := repo.SaveIntegrationWithDefaults(ctx, in, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE request_integrations
+		SET plugin_config = plugin_config || '{"service_kind": "sonarr"}', supported_media_types = '{series}'
+		WHERE id = 'radarr'`); err != nil {
+		t.Fatal(err)
+	}
+	route := Route{ID: "anime", MediaType: MediaTypeMovie, Name: "Anime", Enabled: true,
+		Conditions: RouteConditions{Anime: boolPtr(true)}, HD: RouteDestination{IntegrationID: "radarr"}, SkipUHD: true}
+	_, err := repo.SaveRouteConditional(ctx, route, 0)
+	if msg := fieldErrors(t, err)["hd.integration_id"]; !strings.Contains(msg, "is a Sonarr server") {
+		t.Fatalf("hd.integration_id = %q, want the server type refused", msg)
+	}
+}

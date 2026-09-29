@@ -1991,7 +1991,8 @@ type fakeStore struct {
 	notified      []string
 	reconciled    []string
 	follows       map[string]Follower // key: media_type/tmdb_id/user_id/profile_id
-	clearErr      error               // returned by ClearTitleFollowers when set
+	followFor     map[string]string   // follow key -> the request it waits for
+	clearErr      error               // returned by ClearRequestFollowers when set
 	routes        []Route
 	factsSet      map[string]RoutingFacts
 	groupLimits   map[int64]*GroupLimit
@@ -2386,9 +2387,8 @@ func (f *fakeStore) SetOutcome(_ context.Context, id string, from StateGuard, ou
 	req.LastError = message
 	if outcome == OutcomeDeclined || outcome == OutcomeCancelled {
 		req.OutcomeReason = message
-		prefix := fmt.Sprintf("%s/%d/", req.MediaType, req.TMDBID)
 		for key := range f.follows {
-			if strings.HasPrefix(key, prefix) {
+			if f.followFor[key] == req.ID {
 				delete(f.follows, key)
 			}
 		}
@@ -2598,8 +2598,9 @@ func (f *fakeStore) DeleteIntegration(_ context.Context, id string) error {
 	return ErrNotFound
 }
 
-func followKey(mediaType MediaType, tmdbID int, userID int, profileID string) string {
-	return fmt.Sprintf("%s/%d/%d/%s", mediaType, tmdbID, userID, profileID)
+// followKey names one profile's follow of one request of a title.
+func followKey(mediaType MediaType, tmdbID int, userID int, profileID, requestID string) string {
+	return fmt.Sprintf("%s/%d/%d/%s/%s", mediaType, tmdbID, userID, profileID, requestID)
 }
 
 func (f *fakeStore) FollowTitle(_ context.Context, mediaType MediaType, tmdbID int, viewer Viewer) error {
@@ -2620,39 +2621,71 @@ func (f *fakeStore) seedFollow(mediaType MediaType, tmdbID int, viewer Viewer) {
 	f.seedFollowLocked(mediaType, tmdbID, viewer)
 }
 
+// seedFollowLocked records a follow for the title's open request, or else
+// for the title's request in f.requests with the lowest id.
 func (f *fakeStore) seedFollowLocked(mediaType MediaType, tmdbID int, viewer Viewer) {
+	requestID := ""
+	if req := f.active[mediaType][tmdbID]; req != nil {
+		requestID = req.ID
+	} else {
+		for id, req := range f.requests {
+			if req.MediaType == mediaType && req.TMDBID == tmdbID && (requestID == "" || id < requestID) {
+				requestID = id
+			}
+		}
+	}
+	f.seedFollowForLocked(mediaType, tmdbID, viewer, requestID)
+}
+
+// seedFollowFor records a follow waiting for a given request.
+func (f *fakeStore) seedFollowFor(mediaType MediaType, tmdbID int, viewer Viewer, requestID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.seedFollowForLocked(mediaType, tmdbID, viewer, requestID)
+}
+
+func (f *fakeStore) seedFollowForLocked(mediaType MediaType, tmdbID int, viewer Viewer, requestID string) {
 	if f.follows == nil {
 		f.follows = map[string]Follower{}
 	}
-	f.follows[followKey(mediaType, tmdbID, viewer.UserID, viewer.ProfileID)] = Follower{UserID: viewer.UserID, ProfileID: viewer.ProfileID}
+	if f.followFor == nil {
+		f.followFor = map[string]string{}
+	}
+	key := followKey(mediaType, tmdbID, viewer.UserID, viewer.ProfileID, requestID)
+	f.follows[key] = Follower{UserID: viewer.UserID, ProfileID: viewer.ProfileID}
+	f.followFor[key] = requestID
 }
 
 func (f *fakeStore) UnfollowTitle(_ context.Context, mediaType MediaType, tmdbID int, viewer Viewer) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	delete(f.follows, followKey(mediaType, tmdbID, viewer.UserID, viewer.ProfileID))
+	prefix := fmt.Sprintf("%s/%d/%d/%s/", mediaType, tmdbID, viewer.UserID, viewer.ProfileID)
+	for key := range f.follows {
+		if strings.HasPrefix(key, prefix) {
+			delete(f.follows, key)
+		}
+	}
 	return nil
 }
 
-func (f *fakeStore) FollowedTitles(_ context.Context, mediaType MediaType, tmdbIDs []int, viewer Viewer) (map[int]bool, error) {
+func (f *fakeStore) FollowedRequests(_ context.Context, requestIDs []string, viewer Viewer) (map[string]bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	out := map[int]bool{}
-	for _, id := range tmdbIDs {
-		if _, ok := f.follows[followKey(mediaType, id, viewer.UserID, viewer.ProfileID)]; ok {
-			out[id] = true
+	out := map[string]bool{}
+	for key, follower := range f.follows {
+		if follower.UserID == viewer.UserID && follower.ProfileID == viewer.ProfileID && slices.Contains(requestIDs, f.followFor[key]) {
+			out[f.followFor[key]] = true
 		}
 	}
 	return out, nil
 }
 
-func (f *fakeStore) ListTitleFollowers(_ context.Context, mediaType MediaType, tmdbID int) ([]Follower, error) {
+func (f *fakeStore) ListRequestFollowers(_ context.Context, req Request) ([]Follower, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	prefix := fmt.Sprintf("%s/%d/", mediaType, tmdbID)
 	var out []Follower
 	for key, follower := range f.follows {
-		if strings.HasPrefix(key, prefix) {
+		if f.followFor[key] == req.ID {
 			out = append(out, follower)
 		}
 	}
@@ -2665,14 +2698,28 @@ func (f *fakeStore) ListTitleFollowers(_ context.Context, mediaType MediaType, t
 	return out, nil
 }
 
-func (f *fakeStore) ClearTitleFollowers(_ context.Context, mediaType MediaType, tmdbID int, followers []Follower) error {
+// titleFollowers lists every follow on a title, whichever request it waits for.
+func (f *fakeStore) titleFollowers(mediaType MediaType, tmdbID int) ([]Follower, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	prefix := fmt.Sprintf("%s/%d/", mediaType, tmdbID)
+	var out []Follower
+	for key, follower := range f.follows {
+		if strings.HasPrefix(key, prefix) {
+			out = append(out, follower)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeStore) ClearRequestFollowers(_ context.Context, req Request, followers []Follower) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.clearErr != nil {
 		return f.clearErr
 	}
 	for _, follower := range followers {
-		delete(f.follows, followKey(mediaType, tmdbID, follower.UserID, follower.ProfileID))
+		delete(f.follows, followKey(req.MediaType, req.TMDBID, follower.UserID, follower.ProfileID, req.ID))
 	}
 	return nil
 }
