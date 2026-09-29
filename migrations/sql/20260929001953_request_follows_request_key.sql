@@ -9,15 +9,24 @@ ALTER TABLE public.media_request_follows ADD COLUMN request_id text;
 -- A title has one open request at a time, so the request open when a follow
 -- was made is the title's latest request created before it, provided that
 -- request could still have been open then: still active, or completed no
--- earlier than the follow. Otherwise that request had closed (a failed request,
--- or one its requester replaced and deleted), and the follow goes to the
--- title's first request since that still has a notification to send, as a new
--- request takes such follows over. With none, it stays with a failed request
--- for the title's next request to take over.
+-- earlier than the follow. A completed request that has not notified also
+-- keeps a follow stamped just after its completion when the title has no
+-- request since: a completion's timestamp is taken when its transaction
+-- begins, so a follow that committed during it can look later, and a deleted
+-- request always has a replacement created after the follow. Otherwise that
+-- request had closed (a failed request, or one its requester replaced and
+-- deleted), and the follow goes to the title's first request since that still
+-- has a notification to send, as a new request takes such follows over. With
+-- none, it stays with a failed request for the title's next request to take
+-- over.
 UPDATE public.media_request_follows f
 SET request_id = CASE
     WHEN made_for.outcome = 'active'
-     AND (made_for.status <> 'completed' OR made_for.completed_at >= f.created_at)
+     AND (made_for.status <> 'completed' OR made_for.completed_at >= f.created_at
+          OR (made_for.fulfilled_notified_at IS NULL AND NOT EXISTS (
+            SELECT 1 FROM public.media_requests r
+            WHERE r.media_type = f.media_type AND r.provider = 'tmdb' AND r.tmdb_id = f.tmdb_id
+              AND r.created_at > f.created_at)))
         THEN made_for.id
     ELSE coalesce(
         (SELECT r.id FROM public.media_requests r
@@ -31,7 +40,7 @@ SET request_id = CASE
 FROM (
     SELECT DISTINCT ON (f2.media_type, f2.tmdb_id, f2.user_id, f2.profile_id)
         f2.media_type, f2.tmdb_id, f2.user_id, f2.profile_id,
-        r.id, r.outcome, r.status, r.completed_at
+        r.id, r.outcome, r.status, r.completed_at, r.fulfilled_notified_at
     FROM public.media_request_follows f2
     LEFT JOIN public.media_requests r
       ON r.media_type = f2.media_type AND r.provider = 'tmdb' AND r.tmdb_id = f2.tmdb_id
