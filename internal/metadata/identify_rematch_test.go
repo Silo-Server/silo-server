@@ -133,7 +133,7 @@ func TestProcess_IdentifyConfirmingDurableOnlyMatchKeepsStoredIDs(t *testing.T) 
 // An item that only has the wrong film's IMDb ID, identified by a TMDB ID,
 // drops that IMDb ID: the admin named the item's identity.
 func TestProcess_IdentifyByTMDBDropsStoredIMDbOnlyMatch(t *testing.T) {
-	const contentID = "local-imdb-only"
+	const contentID = "movie:imdb:tt0000100"
 	h := newTestHarness()
 	providerRepo := seedMovieIdentity(t, h, contentID, "", "tt0000100")
 	provider := &capturingMetadataProvider{response: &MetadataResult{
