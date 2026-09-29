@@ -422,7 +422,14 @@ func detectInferMovieFolderEvidence(parentBase string, nameNoExt string, hasSeas
 	if hasSeasonStructure {
 		return false
 	}
-	if ParseFolderIDs(parentBase) != nil {
+	if hints := ParseFolderIDs(parentBase); hints != nil {
+		// A TVDB-only tag isn't movie evidence: Sonarr adds the show's TVDB ID
+		// to series folders, and TVDB lists series and movies alike. Leave the
+		// file to its episode token; a TVDB-tagged movie without one still
+		// defaults to movie (#1642). A TMDB or IMDb tag keeps today's rule.
+		if hints.TmdbID == "" && hints.ImdbID == "" {
+			return false
+		}
 		return true
 	}
 	parentTitle, parentYear, trusted := parseInferFolderTitleYear(parentBase)
