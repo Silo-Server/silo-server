@@ -736,7 +736,7 @@ func (c *Client) deleteObjects(ctx context.Context, bucket string, keys []string
 				return deleted, ctxErr
 			}
 			if !isBatchDeleteUnsupported(err) {
-				return deleted, fmt.Errorf("s3 DeleteObjects %s: %w", bucket, err)
+				return deleted, fmt.Errorf("s3 DeleteObjects %s: %s", bucket, s3ErrorCode(err))
 			}
 			// Fall back to individual deletes if batch is not supported.
 			for _, key := range batch {
@@ -747,8 +747,8 @@ func (c *Client) deleteObjects(ctx context.Context, bucket string, keys []string
 					if ctxErr := ctx.Err(); ctxErr != nil {
 						return deleted, ctxErr
 					}
-					slog.WarnContext(ctx, "s3 DeleteObjects fallback: failed to delete", "component", "s3client", "key", key, "error", delErr)
-					recordFailure(delErr)
+					slog.WarnContext(ctx, "s3 DeleteObjects fallback: failed to delete", "component", "s3client", "key", key, "code", s3ErrorCode(delErr))
+					recordFailure(fmt.Errorf("s3 DeleteObjects %s/%s: %s", bucket, key, s3ErrorCode(delErr)))
 					continue
 				}
 				deleted++
@@ -776,6 +776,15 @@ func (c *Client) deleteObjects(ctx context.Context, bucket string, keys []string
 		return deleted, fmt.Errorf("s3 DeleteObjects %s: %d of %d objects not deleted: %w", bucket, failed, len(keys), firstErr)
 	}
 	return deleted, nil
+}
+
+// s3ErrorCode returns the backend error code for err without its free-form
+// message, which may echo credentials or signed URLs.
+func s3ErrorCode(err error) string {
+	if apiErr, ok := errors.AsType[smithy.APIError](err); ok && apiErr.ErrorCode() != "" {
+		return apiErr.ErrorCode()
+	}
+	return "request failed"
 }
 
 // isBatchDeleteUnsupported reports whether a DeleteObjects error means the

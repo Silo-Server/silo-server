@@ -257,13 +257,13 @@ func TestDeleteObjectsCountsOnlyMissingObjectBatchErrors(t *testing.T) {
 		t.Fatalf("DeleteObjects() = %d, %v; want 2 and an error", deleted, err)
 	}
 	if !strings.Contains(err.Error(), "denied.webp") {
-		t.Fatalf("DeleteObjects() error = %v; want it to name denied.webp", err)
+		t.Fatal("DeleteObjects() error did not name denied.webp")
 	}
 	if !strings.Contains(err.Error(), "AccessDenied") {
-		t.Fatalf("DeleteObjects() error = %v; want it to carry the error code", err)
+		t.Fatal("DeleteObjects() error did not carry the AccessDenied error code")
 	}
 	if strings.Contains(err.Error(), "SECRETSIG") {
-		t.Fatalf("DeleteObjects() error = %v; must not echo the backend message", err)
+		t.Fatal("DeleteObjects() error echoed the backend message")
 	}
 }
 
@@ -283,7 +283,7 @@ func TestDeletePrefixReturnsErrorWhenBatchDeleteFails(t *testing.T) {
 			batchCalls++
 			mu.Unlock()
 			w.WriteHeader(http.StatusForbidden)
-			_, _ = io.WriteString(w, "<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>")
+			_, _ = io.WriteString(w, "<Error><Code>AccessDenied</Code><Message>signed ?X-Amz-Signature=SECRETSIG</Message></Error>")
 		case r.Method == http.MethodDelete:
 			mu.Lock()
 			objectCalls++
@@ -299,6 +299,9 @@ func TestDeletePrefixReturnsErrorWhenBatchDeleteFails(t *testing.T) {
 	deleted, err := client.DeletePrefix(t.Context(), client.Bucket(), "local/ebooks/1/")
 	if err == nil || deleted != 0 {
 		t.Fatalf("DeletePrefix() = %d, %v; want 0 and an error", deleted, err)
+	}
+	if !strings.Contains(err.Error(), "AccessDenied") || strings.Contains(err.Error(), "SECRETSIG") {
+		t.Fatal("DeletePrefix() error must carry the code without the backend message")
 	}
 	mu.Lock()
 	defer mu.Unlock()
