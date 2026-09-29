@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"testing"
 )
@@ -32,7 +33,7 @@ func TestHandlerSnapshotsValuesTheCallerOwns(t *testing.T) {
 		t.Fatal(err)
 	}
 	// encoding/json sorts map keys, so the encoding is stable.
-	want := `{"counts":{"movies":1},"error":{},"ids":[1,2],"static":{"movies":1},"status":200}`
+	want := `{"counts":{"movies":1},"error":"boom","ids":[1,2],"static":{"movies":1},"status":200}`
 	if string(got) != want {
 		t.Fatalf("attrs = %s, want %s", got, want)
 	}
@@ -55,5 +56,27 @@ func TestHandlerKeepsAValueItCannotEncode(t *testing.T) {
 	}
 	if entry.Attrs["status"] != int64(200) {
 		t.Fatalf("attrs[status] = %#v, want 200", entry.Attrs["status"])
+	}
+}
+
+// TestHandlerRecordsErrorText checks that an error attr is stored as its
+// text. Errors from errors.New and fmt.Errorf have no exported fields, so a
+// JSON encode would store {} and hide why the logged operation failed.
+func TestHandlerRecordsErrorText(t *testing.T) {
+	t.Parallel()
+	writer := &recordingWriter{}
+	logger := slog.New(NewHandler(slog.DiscardHandler, writer, slog.LevelInfo, "node-a"))
+
+	wrapped := fmt.Errorf("loading overlay summaries: %w", errors.New("connection refused"))
+	logger.With("static_err", errors.New("static")).ErrorContext(context.Background(), "probe: error", "error", wrapped)
+
+	writer.mu.Lock()
+	entry := writer.entries[0]
+	writer.mu.Unlock()
+	if got := entry.Attrs["error"]; got != "loading overlay summaries: connection refused" {
+		t.Fatalf("attrs[error] = %#v, want the error text", got)
+	}
+	if got := entry.Attrs["static_err"]; got != "static" {
+		t.Fatalf("attrs[static_err] = %#v, want the error text", got)
 	}
 }

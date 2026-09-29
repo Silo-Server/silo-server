@@ -173,6 +173,12 @@ func attrValue(v slog.Value) any {
 	case slog.KindTime:
 		return v.Time().UTC().Format(time.RFC3339Nano)
 	case slog.KindAny:
+		// Error types from errors.New and fmt.Errorf have no exported fields
+		// and would encode as {}, hiding the failure cause. Record the text,
+		// as the console handler does.
+		if err, ok := v.Any().(error); ok && err != nil {
+			return err.Error()
+		}
 		return snapshot(v.Any())
 	default:
 		return v.String()
