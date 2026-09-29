@@ -306,3 +306,18 @@ func TestAdminCollectionErrorRendersInvalidArtworkAsValidationProblem(t *testing
 		t.Fatalf("problem errors = %#v", p.Errors)
 	}
 }
+
+// The personal poster operation renders artwork errors through collectionProblem.
+func TestCollectionProblemRendersInvalidArtworkAsValidationProblem(t *testing.T) {
+	p := collectionProblem(&handlers.APIError{
+		Status:  http.StatusBadRequest,
+		Code:    "bad_request",
+		Message: "The image source did not return an image.",
+	})
+	if p.Status != http.StatusUnprocessableEntity || p.Type != TypeValidationFailed.URI() {
+		t.Fatalf("problem = %#v", p)
+	}
+	if len(p.Errors) != 1 || p.Errors[0].Detail != "The image source did not return an image." {
+		t.Fatalf("problem errors = %#v", p.Errors)
+	}
+}

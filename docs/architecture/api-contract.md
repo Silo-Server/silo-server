@@ -1984,7 +1984,9 @@ complete, accessible manual order; the canonical item-order read never returns m
 Artwork changes use `PUT /collections/{id}/poster` with either a bounded multipart `poster` or
 `source_url`. Definition PATCH does not download artwork. The web saves the definition first,
 then changes the poster; artwork failure leaves the saved collection intact and is reported
-separately. Membership and artwork operations check creator ownership, and item additions also
+separately. A file that is not a decodable image, or a `source_url` that has no http(s) host,
+answers other than `200`, or does not return an image, is a `422 validation_failed` problem and
+leaves the stored poster unchanged. Membership and artwork operations check creator ownership, and item additions also
 require catalog visibility. Adding an existing native member preserves its position; order changes
 use the explicit ordering operation. Shared viewers can read permitted collections but cannot mutate them.
 Native membership operations preserve audiobook chapter entries in the same storage table.
@@ -2124,7 +2126,8 @@ The administrator collection surface uses `/api/v2/admin/collections` and
 the demo write guard. Library IDs are opaque strings at the boundary. JSON definition inputs
 exclude artwork source URLs; poster and backdrop changes each use a separate bounded multipart
 PUT with `image` or `source_url`. A definition can save successfully even if a later artwork
-request fails. Creation, provider imports, sync, template application, and artwork changes are
+request fails. Undecodable artwork and unusable source URLs are `422 validation_failed` problems,
+as on the personal poster operation, and leave the stored artwork unchanged. Creation, provider imports, sync, template application, and artwork changes are
 non-retryable. The capability endpoint reports configured groups, imports, artwork, and item
 ordering support.
 
