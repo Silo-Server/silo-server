@@ -233,6 +233,9 @@ func TestResolveDownloadTranscodeTargetHonorsDecoderLimits(t *testing.T) {
 		{"the H.264 level is checked at the bitrate the encoder gets", ladderTestFile(1920, 1080, "h264", "24", 3_000), exact(
 			VideoDecodeCapabilityV3{Codec: "h264", Levels: []int{40}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, Hardware: true},
 		), 20_000, false, "h264", "", 3_000},
+		{"an odd source is checked at the even frame it encodes to", ladderTestFile(1917, 1080, "hevc", "24", 8_000), exact(
+			VideoDecodeCapabilityV3{Codec: "h264", BitDepths: []int{8}, MaxWidth: 1917, MaxHeight: 1080, Hardware: true},
+		), 20_000, false, "h264", "720p", 13_333},
 		{"HEVC-only caps use HEVC when the server allows it", uhd, exact(
 			VideoDecodeCapabilityV3{Codec: "hevc", BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, Hardware: true},
 		), 10_000, true, "hevc", "1080p", 10_000},

@@ -183,7 +183,10 @@ func downloadLadderClass(source SourceDescriptorV3, decoder downloadDecoder, cap
 		top = min(top, maxHeight)
 	}
 	for _, class := range ladderClassesFrom(top) {
+		// The decoder must take the frame the encoder writes, which evens an
+		// odd source size.
 		width, height := FitLadderBox(source.Width, source.Height, class.Height)
+		width, height = encodedFrame(source.Width, source.Height, width, height)
 		if width == 0 {
 			// An unknown width is checked as the full class box.
 			width, height = class.Width, max(height, class.Height)

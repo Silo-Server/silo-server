@@ -105,6 +105,20 @@ func FitLadderBox(sourceWidth, sourceHeight, classHeight int) (int, int) {
 	return width, height
 }
 
+// encodedFrame is the frame an encode of a box-fit size actually produces:
+// an odd height rounds down to even, since 4:2:0 output needs it, and the
+// width is then what scale=-2 gives. An even fit is returned unchanged.
+func encodedFrame(sourceWidth, sourceHeight, width, height int) (int, int) {
+	if width%2 == 0 && height%2 == 0 {
+		return width, height
+	}
+	height &^= 1
+	if sourceWidth > 0 && sourceHeight > 0 {
+		width = scaledEvenWidth(sourceWidth, sourceHeight, height)
+	}
+	return width, height
+}
+
 // scaledEvenWidth is the width FFmpeg's scale=-2:height gives a source: the
 // aspect-preserving width rounded to the nearest even number.
 func scaledEvenWidth(sourceWidth, sourceHeight, height int) int {
