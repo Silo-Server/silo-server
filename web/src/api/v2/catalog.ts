@@ -61,6 +61,8 @@ export function catalogItemFromV2(item: CatalogItemV2): CatalogCardItem {
     studios: item.studios,
     networks: item.networks,
     content_rating: item.content_rating ?? "",
+    advisory_age: item.advisory_age ?? null,
+    advisory_source: item.advisory_source ?? "",
     status: item.status as CatalogCardItem["status"],
     show_status: item.show_status,
     rating_imdb: item.rating_imdb ?? null,

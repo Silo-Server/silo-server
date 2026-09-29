@@ -29,6 +29,7 @@ export type OverlayId =
   | "rating_rt"
   | "rating_rt_audience"
   | "content_rating"
+  | "advisory_age"
   // metadata
   | "year"
   | "runtime"
@@ -61,6 +62,7 @@ export interface OverlayData {
   rating_rt_critic?: number | null;
   rating_rt_audience?: number | null;
   content_rating?: string;
+  advisory_age?: number | null;
   year?: number | null;
   runtime?: number | null;
   original_language?: string;
@@ -161,6 +163,7 @@ export type OverlayIconId =
   | "volume"
   | "calendar"
   | "globe"
+  | "users"
   // brand marks (inline SVG)
   | "hdr10"
   | "hdr"

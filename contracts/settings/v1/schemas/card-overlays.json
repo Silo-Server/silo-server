@@ -66,6 +66,7 @@
         "rating_rt",
         "rating_rt_audience",
         "content_rating",
+        "advisory_age",
         "year",
         "runtime",
         "original_language",
