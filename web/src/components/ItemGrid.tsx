@@ -120,7 +120,10 @@ export default function ItemGrid(props: ItemGridProps) {
       if (card instanceof HTMLElement) tallest = Math.max(tallest, card.offsetHeight);
     }
     if (tallest <= 0) return;
-    const pitch = Math.ceil(tallest) + gridGap;
+    // offsetHeight ignores transforms (cards scale on hover), which keeps a
+    // hovered card from inflating the pitch, but it rounds to whole pixels;
+    // one extra pixel covers a fractional card height.
+    const pitch = tallest + 1 + gridGap;
     if (pitch > rowHeight) {
       setMeasured({ estimate: estimatedRowHeight, rowHeight: pitch });
     }
