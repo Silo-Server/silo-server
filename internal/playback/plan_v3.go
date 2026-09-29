@@ -1035,6 +1035,19 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	if hlsRegistry == nil || !hlsRegistry.Available(TransformationVideoToH264V3) || !hlsRegistry.Available(TransformationAudioToAACV3) {
 		return terminalPlannerResultV3("conversion_tool_unavailable", "The required validated H.264/AAC conversion toolchain is unavailable.", true)
 	}
+	// A server bitrate cap reserves the AAC and mux share before either video
+	// codec is sized, so the HEVC decoder check below sees the real target.
+	targetAudioBitrateKbps := 0
+	if input.ServerBitrateCapKbps > 0 {
+		channels := aacOutputChannelsV3(input.Request, DeliveryClassHLSV3, source.AudioChannels, true)
+		_, defaultAudioBitrateKbps := ResolveAACOutputV3(channels, 0)
+		budget := optionalValueV3(input.Request.BandwidthCapKbps) * 95 / 100
+		targetAudioBitrateKbps = min(defaultAudioBitrateKbps, max(64, budget/4))
+		if budget-targetAudioBitrateKbps < 64 {
+			return terminalPlannerResultV3(TerminalBitratePolicyUnavailableV3, "The server bitrate limit is too low for a playable video stream.", false)
+		}
+		quality.BitrateKbps = min(quality.BitrateKbps, budget-targetAudioBitrateKbps)
+	}
 	targetVideoCodec := transcodeCodecH264
 	// h264BitrateKbps is kept for the H.264 fallback after a failed HEVC attempt.
 	h264BitrateKbps := quality.BitrateKbps
@@ -1063,18 +1076,6 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	plan.EffectiveRecipe.AudioCodec = "aac"
 	plan.EffectiveRecipe.Width = intPointerV3(quality.Width)
 	plan.EffectiveRecipe.Height = intPointerV3(quality.Height)
-	targetAudioBitrateKbps := 0
-	if input.ServerBitrateCapKbps > 0 {
-		channels := aacOutputChannelsV3(input.Request, DeliveryClassHLSV3, source.AudioChannels, true)
-		_, defaultAudioBitrateKbps := ResolveAACOutputV3(channels, 0)
-		budget := optionalValueV3(input.Request.BandwidthCapKbps) * 95 / 100
-		targetAudioBitrateKbps = min(defaultAudioBitrateKbps, max(64, budget/4))
-		if budget-targetAudioBitrateKbps < 64 {
-			return terminalPlannerResultV3(TerminalBitratePolicyUnavailableV3, "The server bitrate limit is too low for a playable video stream.", false)
-		}
-		quality.BitrateKbps = min(quality.BitrateKbps, budget-targetAudioBitrateKbps)
-		h264BitrateKbps = min(h264BitrateKbps, budget-targetAudioBitrateKbps)
-	}
 	plan.EffectiveRecipe.BitrateKbps = intPointerV3(quality.BitrateKbps)
 	// Surround sources keep 5.1 through the AAC re-encode (universal Media3
 	// decode); only stereo/mono sources — and unknown layouts — downmix to 2.0.

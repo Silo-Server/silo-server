@@ -88,6 +88,27 @@ func TestPlanPlaybackV3HEVCOutputKeepsTheSourceBitrateBound(t *testing.T) {
 	check("HEVC-only delivery with a 4 Mbps decoder", PlanPlaybackV3(hevcOnly), "hevc", 3_000)
 }
 
+// A server bitrate cap reserves the audio share before the HEVC decoder is
+// checked, so an HEVC-only client whose decoder takes the capped video rate
+// is not refused over the uncapped one.
+func TestPlanPlaybackV3HEVCCheckedAfterServerCapAudioReserve(t *testing.T) {
+	input := hevcTranscodePlannerInputV3(true, true, true)
+	file := *input.RequestedFile
+	file.CodecVideo, file.Bitrate = "hevc", 5_100
+	file.VideoTracks = []models.VideoTrack{{Codec: "hevc", Profile: "Main", Width: 1920, Height: 1080, FrameRate: "24/1", Bitrate: 4_800, BitDepth: 8, VideoRange: "SDR"}}
+	input.RequestedFile, input.EffectiveFile = &file, &file
+	input.ServerBitrateCapKbps = 5_000
+	input.Request.QualityPreference = QualityOriginalV3
+	hls := input.Request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
+	hls.VideoCodecs = []string{"hevc"}
+	input.Request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
+	input.Request.Capabilities.VideoDecode[0].MaxBitrateKbps = 4_700
+	result := PlanPlaybackV3(input)
+	if result.Plan == nil || result.TargetVideoCodec != "hevc" || result.TargetBitrateKbps <= 0 || result.TargetBitrateKbps > 4_700 {
+		t.Fatalf("plan = %s codec %q bitrate %d, want HEVC within the 4.7 Mbps decoder", ExplainPlannerResultV3(result), result.TargetVideoCodec, result.TargetBitrateKbps)
+	}
+}
+
 func TestPlanPlaybackV3HEVCFailureFallsBackToH264(t *testing.T) {
 	input := hevcTranscodePlannerInputV3(true, true, true)
 	first := PlanPlaybackV3(input)
