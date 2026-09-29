@@ -2029,6 +2029,7 @@ export interface CreateMediaRequestInput {
   seasons?: number[];
 }
 
+/** The download server details (integration_*, instance_name, route_name, external_*, last_error) reach admins only. */
 export interface RequestTarget {
   id: number;
   request_id: string;
@@ -2048,6 +2049,7 @@ export interface RequestTarget {
   updated_at: string;
 }
 
+/** integration_kind, external_id, external_status and last_error reach admins only. */
 export interface MediaRequest {
   id: string;
   provider: string;

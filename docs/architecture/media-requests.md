@@ -465,6 +465,23 @@ accounts' failed requests are left alone as those users' history. Retrying one
 of them after someone else has requested the title answers
 `ErrAlreadyRequested`, since only one active request per title may exist.
 
+## What a requester sees
+
+The v2 request operations a profile calls (`createRequest`, `listMyRequests`,
+`getRequest` and `cancelRequest`) give a viewer who is not an admin the request
+without its download server details: the request's `integration_kind`,
+`external_id`, `external_status` and `last_error`, and each target's
+`integration_id`, `integration_kind`, `instance_name`, `external_id`,
+`external_status`, `route_name` and `last_error`. These name the admin's
+download servers and routing rules and carry the servers' raw statuses and
+errors, none of which a requester can act on. The request's `last_error` is
+written for the admin who fixes the submission: it can name a server or a
+routing rule, or pass on a plugin's own error text. A requester still sees the
+request's state and `outcome_reason`, and each target's quality, status and
+`download`. An admin sees every field, on those operations and on the
+`/api/v2/admin/requests` operations. The frozen `/api/v1` request routes still
+return them to everyone.
+
 ## Admin queue
 
 The admin queue groups requests by what an admin does next, from status and
