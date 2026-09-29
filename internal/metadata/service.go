@@ -1564,8 +1564,12 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		// Use user-provided IDs directly.
 		maps.Copy(accumulatedIDs, req.ProviderIDs)
 		sanitizeCanonicalProviderIDsInPlace(accumulatedIDs)
-		if contentType == "" && req.ContentID != "" {
-			if existing, err := s.itemRepo.GetByID(ctx, req.ContentID); err == nil {
+		if req.ContentID != "" {
+			existing, err := s.itemRepo.GetByID(ctx, req.ContentID)
+			if err == nil && identityProviderIDsChanged(storedIdentityProviderIDs(existing), accumulatedIDs) {
+				markIdentityProviderIDsReplaced(replacedProviderIDKeys)
+			}
+			if err == nil && contentType == "" {
 				contentType = existing.Type
 				itemLevel = providerChainContentLevel(contentType)
 				itemChain, err = resolveChain(itemLevel)
@@ -1630,6 +1634,17 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			}
 		}
 		wonHints := applyBuiltinIdentityHints(ctx, itemChain, searchQuery, accumulatedIDs, protectedKeys)
+		if req.Mode == ModeManualRefresh && identityProviderIDsChanged(storedIdentityProviderIDs(existing), wonHints) {
+			// The stored IDs came from the match the corrected NFO overrides,
+			// so any the NFO doesn't restate are dropped, not re-fetched.
+			for _, key := range trustedSearchIDKeys {
+				if wonHints[key] == "" {
+					delete(accumulatedIDs, key)
+				}
+			}
+			searchQuery.ProviderIDs = accumulatedIDs
+			markIdentityProviderIDsReplaced(replacedProviderIDKeys)
+		}
 		searchQuery = suppressTitleYearFallbackForTrustedIDs(searchQuery)
 		allResults := make([]SearchResult, 0)
 		for _, p := range itemChain {
@@ -2380,6 +2395,9 @@ func (s *MetadataService) mergeAndPersist(
 		}
 		for key, value := range durableIDs {
 			if _, quarantined := accumulator.quarantinedProviderIDKeys[key]; quarantined {
+				continue
+			}
+			if _, replaced := accumulator.replacedProviderIDKeys[key]; replaced {
 				continue
 			}
 			if _, exists := accumulator.ProviderIDs[key]; !exists {
@@ -8351,6 +8369,37 @@ func applyCandidateProviderIDConsensus(accumulatedIDs map[string]string, winner 
 		accumulatedIDs[key] = value
 	}
 	return replaced
+}
+
+// storedIdentityProviderIDs returns an item's stored TMDB, TVDB and IMDb IDs.
+func storedIdentityProviderIDs(item *models.MediaItem) map[string]string {
+	if item == nil {
+		return nil
+	}
+	return map[string]string{"tmdb": item.TmdbID, "tvdb": item.TvdbID, "imdb": item.ImdbID}
+}
+
+// identityProviderIDsChanged reports whether chosen gives a different value for
+// an identity ID the item already stores, i.e. whether it corrects a match
+// rather than confirming or extending it.
+func identityProviderIDsChanged(stored, chosen map[string]string) bool {
+	for _, key := range trustedSearchIDKeys {
+		old := strings.TrimSpace(stored[key])
+		next := strings.TrimSpace(chosen[key])
+		if old != "" && next != "" && old != next {
+			return true
+		}
+	}
+	return false
+}
+
+// markIdentityProviderIDsReplaced makes a corrected match replace the stored
+// identity IDs instead of merging into them. The stored IDs came from the
+// wrong match, so a key the corrected match lacks is dropped rather than kept.
+func markIdentityProviderIDsReplaced(replaced map[string]struct{}) {
+	for _, key := range trustedSearchIDKeys {
+		replaced[key] = struct{}{}
+	}
 }
 
 func mediaItemWithProviderIDs(item *models.MediaItem, providerIDs map[string]string) *models.MediaItem {
