@@ -25,6 +25,8 @@ export {
   serializeOverlayPrefs,
   orderedOverlaysForPosition,
   isOverlaySuppressed,
+  isOverlaySupportedAt,
+  overlayPrefsForManifest,
 } from "./schema";
 export { OVERLAY_PRESETS, PRESET_IDS, getPreset, ACCENT_PALETTE } from "./presets";
 export { POSITION_OPTIONS, CATEGORY_GROUPS, CATEGORY_META } from "./ui-constants";

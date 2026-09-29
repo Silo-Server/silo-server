@@ -43,6 +43,7 @@ vi.mock("@/utils/storage", () => ({
 
 import { v2Problem } from "@/api/v2/problems.test-support";
 import { SETTING_KEYS } from "@/lib/settingsContract";
+import { buildDefaultPrefs, type CardOverlayPrefs } from "@/lib/overlays";
 
 import { useOverlayPrefs } from "./useOverlayPrefs";
 import { useUpdateServerSettings } from "./queries/admin/settings";
@@ -284,6 +285,42 @@ describe("useOverlayPrefs", () => {
       expect.objectContaining({ onError: expect.any(Function) }),
     );
   });
+
+  // ui.card_overlays validation is all-or-nothing, so one overlay id the
+  // server's schema predates would fail every badge save on that server.
+  it.each([
+    { manifestRevision: 12, stored: false },
+    { manifestRevision: 13, stored: true },
+  ])(
+    "writes advisory_age only to a server that accepts it (revision $manifestRevision)",
+    async ({ manifestRevision, stored }) => {
+      mocks.profileId = "profile-1";
+      mocks.effective = {};
+      mocks.v2.mockImplementation(async (operation: string) => {
+        if (operation === "GET /api/v2/settings/contract/capabilities") {
+          return {
+            api_version: 1,
+            manifest_revision: manifestRevision,
+            supports_batched_effective: true,
+          };
+        }
+        return { enabled: true };
+      });
+      const { result } = renderHook(() => useOverlayPrefs(), { wrapper: createWrapper() });
+
+      await waitFor(() => expect(result.current.isOverlaySupported("advisory_age")).toBe(stored));
+
+      const next = buildDefaultPrefs();
+      next.order = ["advisory_age", "year"];
+      next.items.advisory_age = { enabled: true, position: "bottom-right" };
+      act(() => result.current.setPrefs(next));
+
+      const written = mocks.setValue.mock.calls[0]![0].value as CardOverlayPrefs;
+      expect("advisory_age" in written.items).toBe(stored);
+      expect(written.order).toEqual(stored ? ["advisory_age", "year"] : ["year"]);
+      expect(written.items.year).toEqual(next.items.year);
+    },
+  );
 
   it("refreshes the shared overlay configuration immediately after an admin save", async () => {
     const queryClient = new QueryClient({

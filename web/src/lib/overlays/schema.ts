@@ -125,6 +125,29 @@ export function parseOverlayPrefs(raw: unknown): CardOverlayPrefs {
   return migrateFromV1(obj);
 }
 
+// Whether a server at this settings manifest revision accepts `id` in
+// ui.card_overlays. Validation rejects the whole document over one unknown
+// id, so an unknown revision fails closed.
+export function isOverlaySupportedAt(id: OverlayId, manifestRevision: number | undefined): boolean {
+  const since = OVERLAY_MAP.get(id)?.introducedInManifest;
+  return since === undefined || (manifestRevision !== undefined && manifestRevision >= since);
+}
+
+// The document as a server at this manifest revision can store it: ids its
+// schema predates are dropped from items and order.
+export function overlayPrefsForManifest(
+  prefs: CardOverlayPrefs,
+  manifestRevision: number | undefined,
+): CardOverlayPrefs {
+  const items = Object.fromEntries(
+    Object.entries(prefs.items).filter(([id]) =>
+      isOverlaySupportedAt(id as OverlayId, manifestRevision),
+    ),
+  ) as CardOverlayPrefs["items"];
+  const order = prefs.order.filter((id) => isOverlaySupportedAt(id, manifestRevision));
+  return { ...prefs, order, items };
+}
+
 export function serializeOverlayPrefs(prefs: CardOverlayPrefs): string {
   return JSON.stringify(prefs);
 }

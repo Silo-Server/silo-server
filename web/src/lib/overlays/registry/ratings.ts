@@ -79,6 +79,7 @@ export const RATINGS_OVERLAYS: readonly OverlayDef[] = [
     defaultEnabled: false,
     iconId: "users",
     iconCapable: true,
+    introducedInManifest: 13,
     getValue: (d) => (d.advisory_age != null && d.advisory_age > 0 ? `${d.advisory_age}+` : null),
   },
 ];

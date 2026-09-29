@@ -139,6 +139,9 @@ export interface OverlayDef {
   defaultAccent?: string; // suggested accent color in palette pickers
   iconCapable: boolean; // whether the icon toggle should appear in settings
   availabilityNote?: string; // shown when data source isn't wired up yet
+  // Settings manifest revision whose card-overlays schema first accepts this
+  // id. Absent means every revision does.
+  introducedInManifest?: number;
   getValue: (data: OverlayData) => string | null;
   getIcon?: (data: OverlayData) => OverlayIconId | null; // dynamic icon by data
 }

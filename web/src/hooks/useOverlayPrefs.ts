@@ -8,13 +8,21 @@ import {
   useClearSettingValue,
   useEffectiveSettings,
   useSetSettingValue,
+  useSettingsCapabilities,
   type EffectiveSettingsMap,
 } from "@/hooks/queries/settingValues";
 import type { SettingIdentity } from "@/hooks/queries/settingValues";
-import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
+import { SETTING_KEYS, SETTINGS_API_VERSION, type SettingKey } from "@/lib/settingsContract";
 import { settingsKeys } from "@/hooks/queries/keys";
 import { storage } from "@/utils/storage";
-import { parseOverlayPrefs, serializeOverlayPrefs, type CardOverlayPrefs } from "@/lib/overlays";
+import {
+  isOverlaySupportedAt,
+  overlayPrefsForManifest,
+  parseOverlayPrefs,
+  serializeOverlayPrefs,
+  type CardOverlayPrefs,
+  type OverlayId,
+} from "@/lib/overlays";
 import {
   normalizeCardQuickActionMode,
   type EnabledCardQuickActionMode,
@@ -58,6 +66,9 @@ export function useOverlayPrefs() {
     enabled: hasProfile,
   });
   const { data: config, isLoading: configLoading } = useOverlayConfig();
+  const { data: capabilities } = useSettingsCapabilities({ enabled: hasProfile });
+  const manifestRevision =
+    capabilities?.api_version === SETTINGS_API_VERSION ? capabilities.manifest_revision : undefined;
   const { mutate: setSettingValue } = useSetSettingValue();
   const clearValue = useClearSettingValue();
   const queryClient = useQueryClient();
@@ -124,18 +135,28 @@ export function useOverlayPrefs() {
 
   const setPrefs = useCallback(
     (next: CardOverlayPrefs) => {
+      // An older server rejects the whole document over an overlay id its
+      // schema predates, so those ids never reach it.
+      const storable = overlayPrefsForManifest(next, manifestRevision);
       // Avoid a network round-trip and downstream re-render cascade when
       // the user toggles a control to its current value. Comparison goes
       // through the parser so key ordering in the stored JSON is irrelevant.
       if (
         userValue != null &&
-        serializeOverlayPrefs(parseOverlayPrefs(userValue)) === serializeOverlayPrefs(next)
+        serializeOverlayPrefs(
+          overlayPrefsForManifest(parseOverlayPrefs(userValue), manifestRevision),
+        ) === serializeOverlayPrefs(storable)
       ) {
         return;
       }
-      setProfileValue(SETTING_KEYS.UI_CARD_OVERLAYS, next);
+      setProfileValue(SETTING_KEYS.UI_CARD_OVERLAYS, storable);
     },
-    [userValue, setProfileValue],
+    [manifestRevision, userValue, setProfileValue],
+  );
+
+  const isOverlaySupported = useCallback(
+    (id: OverlayId) => isOverlaySupportedAt(id, manifestRevision),
+    [manifestRevision],
   );
 
   const setOverlaysEnabled = useCallback(
@@ -183,6 +204,7 @@ export function useOverlayPrefs() {
   return {
     prefs: overlaysEnabled && !isLoading ? prefs : null,
     setPrefs,
+    isOverlaySupported,
     overlaysEnabled,
     setOverlaysEnabled,
     quickActionMode:
