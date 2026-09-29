@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -78,5 +80,49 @@ func TestHandlerRecordsErrorText(t *testing.T) {
 	}
 	if got := entry.Attrs["static_err"]; got != "static" {
 		t.Fatalf("attrs[static_err] = %#v, want the error text", got)
+	}
+}
+
+type nilPtrErr struct{ msg string }
+
+func (e *nilPtrErr) Error() string { return e.msg }
+
+// TestHandlerRecordsTypedNilError checks that a nil pointer satisfying error
+// is recorded instead of panicking when Error dereferences the receiver.
+func TestHandlerRecordsTypedNilError(t *testing.T) {
+	t.Parallel()
+	writer := &recordingWriter{}
+	logger := slog.New(NewHandler(slog.DiscardHandler, writer, slog.LevelInfo, "node-a"))
+
+	var err *nilPtrErr
+	logger.ErrorContext(context.Background(), "probe: error", "error", err)
+
+	writer.mu.Lock()
+	entry := writer.entries[0]
+	writer.mu.Unlock()
+	if got := entry.Attrs["error"]; got != "<nil *opslog.nilPtrErr>" {
+		t.Fatalf("attrs[error] = %#v, want a nil placeholder", got)
+	}
+}
+
+// TestHandlerSanitizesErrorURLs checks that a requested URL inside an error
+// chain loses its query string and credentials before it is stored.
+func TestHandlerSanitizesErrorURLs(t *testing.T) {
+	t.Parallel()
+	writer := &recordingWriter{}
+	logger := slog.New(NewHandler(slog.DiscardHandler, writer, slog.LevelInfo, "node-a"))
+
+	urlErr := &url.Error{Op: "Get", URL: "https://user:pass@cdn.example/v.mp4?token=s3cret&sig=abc", Err: errors.New("timeout")}
+	logger.ErrorContext(context.Background(), "probe: error", "error", fmt.Errorf("fetch stream: %w", urlErr))
+
+	writer.mu.Lock()
+	entry := writer.entries[0]
+	writer.mu.Unlock()
+	got, _ := entry.Attrs["error"].(string)
+	if strings.Contains(got, "s3cret") || strings.Contains(got, "pass") || strings.Contains(got, "sig=") {
+		t.Fatalf("attrs[error] = %q leaks a secret", got)
+	}
+	if !strings.Contains(got, "fetch stream") || !strings.Contains(got, "timeout") {
+		t.Fatalf("attrs[error] = %q, want the wrapper and cause kept", got)
 	}
 }

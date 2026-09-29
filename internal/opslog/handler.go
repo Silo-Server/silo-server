@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"strings"
 	"time"
 
@@ -177,12 +178,30 @@ func attrValue(v slog.Value) any {
 		// and would encode as {}, hiding the failure cause. Record the text,
 		// as the console handler does.
 		if err, ok := v.Any().(error); ok && err != nil {
-			return err.Error()
+			return errorText(err)
 		}
 		return snapshot(v.Any())
 	default:
 		return v.String()
 	}
+}
+
+// errorText records an error's message for the stored entry. Requested URLs
+// inside the chain are sanitized with logredact.SanitizeURLError, the same
+// helper transport errors pass through elsewhere, so signed stream URLs and
+// query-string tokens are not written to the database. A typed-nil pointer
+// that satisfies error is recorded as a placeholder instead of calling Error
+// on a nil receiver, and a panicking Error method is contained.
+func errorText(err error) (text string) {
+	if rv := reflect.ValueOf(err); rv.Kind() == reflect.Pointer && rv.IsNil() {
+		return fmt.Sprintf("<nil %T>", err)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			text = fmt.Sprintf("<%T: Error panicked>", err)
+		}
+	}()
+	return logredact.SanitizeURLError(err).Error()
 }
 
 // snapshot encodes a value the caller still owns, such as a map, slice or
