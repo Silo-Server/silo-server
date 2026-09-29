@@ -1546,9 +1546,8 @@ func TestBuildFFmpegArgs_NVENCH264UsesCudaPipeline(t *testing.T) {
 
 // A cap must be a ceiling on every hardware encoder: QSV selects CBR when
 // -b:v equals -maxrate, and VAAPI ignores -maxrate once -qp selects CQP.
-// VAAPI forces VBR only on a device detected to offer it (FFmpeg's automatic
-// mode tries AVBR first, which does not honor -maxrate); elsewhere FFmpeg
-// chooses, so a driver without VBR still starts.
+// VAAPI forces the capped mode detected on the device (FFmpeg's automatic
+// mode can pick AVBR, which does not honor -maxrate).
 func TestAppendVideoArgs_HardwareBitrateCapIsVBRCeiling(t *testing.T) {
 	for _, tc := range []struct {
 		hwAccel, codec, want string
@@ -1565,12 +1564,12 @@ func TestAppendVideoArgs_HardwareBitrateCapIsVBRCeiling(t *testing.T) {
 			t.Errorf("%s/%s capped args = %q, want %q", tc.hwAccel, tc.codec, joined, tc.want)
 		}
 		if tc.hwAccel == "vaapi" {
-			detected := strings.Join(appendVideoArgs(nil, TranscodeOpts{HWAccel: tc.hwAccel, TargetCodecVideo: tc.codec, TargetBitrateKbps: 5000, vaapiVBR: true}), " ")
+			detected := strings.Join(appendVideoArgs(nil, TranscodeOpts{HWAccel: tc.hwAccel, TargetCodecVideo: tc.codec, TargetBitrateKbps: 5000, vaapiRateControl: "VBR"}), " ")
 			if want := strings.Replace(tc.want, "_vaapi ", "_vaapi -rc_mode VBR ", 1); detected != want {
 				t.Errorf("%s/%s capped args with VBR detected = %q, want %q", tc.hwAccel, tc.codec, detected, want)
 			}
 		}
-		uncapped := strings.Join(appendVideoArgs(nil, TranscodeOpts{HWAccel: tc.hwAccel, TargetCodecVideo: tc.codec, vaapiVBR: true}), " ")
+		uncapped := strings.Join(appendVideoArgs(nil, TranscodeOpts{HWAccel: tc.hwAccel, TargetCodecVideo: tc.codec, vaapiRateControl: "VBR"}), " ")
 		if strings.Contains(uncapped, "-maxrate") || strings.Contains(uncapped, "-rc_mode") {
 			t.Errorf("%s/%s uncapped args must keep constant-quality mode: %q", tc.hwAccel, tc.codec, uncapped)
 		}
@@ -2068,19 +2067,28 @@ func TestBuildFFmpegArgs_NVENCFullHardwareArgsUnchanged(t *testing.T) {
 	}
 }
 
-// The VBR probe runs the ordinary VAAPI smoke encode in the mode a capped
-// encode would request.
-func TestVAAPIVBRSmokeArgsRequestCappedVBR(t *testing.T) {
-	joined := strings.Join(vaapiVBRSmokeArgs("/dev/dri/renderD128", "hevc_vaapi"), " ")
-	for _, want := range []string{"-c:v hevc_vaapi -rc_mode VBR -b:v 1800k -maxrate 2000k -f null -", "/dev/dri/renderD128"} {
+// The rate-control probe runs the ordinary VAAPI smoke encode in the capped
+// mode a transcode would request, and a detected mode is forced.
+func TestVAAPIRateControlSmokeArgsAndForcedMode(t *testing.T) {
+	joined := strings.Join(vaapiRateControlSmokeArgs("/dev/dri/renderD128", "hevc_vaapi", "CBR"), " ")
+	for _, want := range []string{"-c:v hevc_vaapi -rc_mode CBR -b:v 1800k -maxrate 2000k -f null -", "/dev/dri/renderD128"} {
 		if !strings.Contains(joined, want) {
-			t.Fatalf("VBR smoke args missing %q: %s", want, joined)
+			t.Fatalf("rate-control smoke args missing %q: %s", want, joined)
 		}
 	}
-	if opts := resolveVAAPIRateControl(context.Background(), TranscodeOpts{HWAccel: "qsv", TargetBitrateKbps: 5000, vaapiVBR: true}); opts.vaapiVBR {
-		t.Fatal("a non-VAAPI encode must not keep the VAAPI VBR flag")
+	cbr := strings.Join(appendVideoArgs(nil, TranscodeOpts{HWAccel: "vaapi", TargetCodecVideo: "h264", TargetBitrateKbps: 5000, vaapiRateControl: "CBR"}), " ")
+	if cbr != "-c:v h264_vaapi -rc_mode CBR -b:v 4500k -maxrate 5000k -bufsize 10000k" {
+		t.Fatalf("CBR-only device args = %q", cbr)
 	}
-	if opts := resolveVAAPIRateControl(context.Background(), TranscodeOpts{HWAccel: "vaapi", vaapiVBR: true}); opts.vaapiVBR {
-		t.Fatal("an uncapped VAAPI encode needs no VBR probe")
+	if opts, err := resolveVAAPIRateControl(context.Background(), TranscodeOpts{HWAccel: "qsv", TargetBitrateKbps: 5000, vaapiRateControl: "VBR"}); err != nil || opts.vaapiRateControl != "" {
+		t.Fatalf("a non-VAAPI encode must not keep a VAAPI mode: %q %v", opts.vaapiRateControl, err)
+	}
+	if opts, err := resolveVAAPIRateControl(context.Background(), TranscodeOpts{HWAccel: "vaapi", vaapiRateControl: "VBR"}); err != nil || opts.vaapiRateControl != "" {
+		t.Fatalf("an uncapped VAAPI encode needs no mode: %q %v", opts.vaapiRateControl, err)
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := resolveVAAPIRateControl(canceled, TranscodeOpts{HWAccel: "vaapi", TargetCodecVideo: "h264", TargetBitrateKbps: 5000, FFmpegPath: "/nonexistent/ffmpeg"}); err == nil {
+		t.Fatal("a canceled start must stop instead of launching FFmpeg")
 	}
 }

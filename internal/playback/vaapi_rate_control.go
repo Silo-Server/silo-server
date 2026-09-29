@@ -6,39 +6,59 @@ import (
 	"time"
 )
 
-// resolveVAAPIRateControl records whether the concrete VAAPI device offers
-// VBR for the target encoder. A capped encode forces VBR where it exists,
-// because FFmpeg's automatic VAAPI mode tries AVBR first and AVBR does not
-// honor -maxrate. On a driver without VBR the mode is left to FFmpeg, which
-// falls back to CBR, so an explicitly configured VAAPI backend still starts.
-// The answer is cached per device and derived again on every start, like the
-// HEVC encoder choice, so recipe cards never freeze it.
-func resolveVAAPIRateControl(ctx context.Context, opts TranscodeOpts) TranscodeOpts {
-	opts.vaapiVBR = false
+// vaapiCappedModes are the VAAPI rate-control modes that keep a capped encode
+// under -maxrate, in order of preference. FFmpeg's automatic mode is avoided
+// because it tries AVBR first (FFmpeg 7.x even with a buffer size), and AVBR
+// does not honor -maxrate.
+const (
+	vaapiRateControlVBR = "VBR"
+	vaapiRateControlCBR = "CBR"
+)
+
+var vaapiCappedModes = []string{vaapiRateControlVBR, vaapiRateControlCBR}
+
+// resolveVAAPIRateControl records the rate-control mode a capped encode on
+// the concrete VAAPI device should force: VBR where the driver offers it for
+// the target encoder, else CBR. When neither passes, the mode is left to
+// FFmpeg so an explicitly configured VAAPI backend still starts. Each answer
+// is cached per device and derived again on every start, like the HEVC
+// encoder choice, so recipe cards never freeze it. A canceled context is
+// returned so the caller stops before launching FFmpeg.
+func resolveVAAPIRateControl(ctx context.Context, opts TranscodeOpts) (TranscodeOpts, error) {
+	opts.vaapiRateControl = ""
 	if opts.HWAccel != transcodeHWVAAPI || opts.TargetBitrateKbps <= 0 || opts.softwareHEVCEncode {
-		return opts
+		return opts, nil
 	}
-	encoder, key := encoderH264VAAPI, "vaapi:vbr"
+	encoder, key := encoderH264VAAPI, transcodeHWVAAPI
 	switch strings.ToLower(strings.TrimSpace(opts.TargetCodecVideo)) {
 	case codecCopyV3:
-		return opts
+		return opts, nil
 	case transcodeCodecHEVC:
-		encoder, key = "hevc_vaapi", "vaapi:hevc:vbr"
+		encoder, key = "hevc_vaapi", "vaapi:hevc"
 	}
-	probe := hwBackendProbe{commandCount: 1, run: func(ctx context.Context, path, device string, timeout time.Duration) hwProbeResult {
-		output, err := runFFmpegProbe(ctx, timeout, path, vaapiVBRSmokeArgs(device, encoder)...)
-		if err != nil {
-			return hwProbeResult{reason: FormatFFmpegProbeFailure(err, output)}
+	for _, mode := range vaapiCappedModes {
+		probe := hwBackendProbe{commandCount: 1, run: func(ctx context.Context, path, device string, timeout time.Duration) hwProbeResult {
+			output, err := runFFmpegProbe(ctx, timeout, path, vaapiRateControlSmokeArgs(device, encoder, mode)...)
+			if err != nil {
+				return hwProbeResult{reason: FormatFFmpegProbeFailure(err, output)}
+			}
+			return hwProbeResult{available: true}
+		}}
+		available, _ := cachedHardwareProbeContext(ctx, key+":"+strings.ToLower(mode), opts.FFmpegPath, opts.HWDevice, probe)
+		if err := ctx.Err(); err != nil {
+			return opts, err
 		}
-		return hwProbeResult{available: true}
-	}}
-	opts.vaapiVBR, _ = cachedHardwareProbeContext(ctx, key, opts.FFmpegPath, opts.HWDevice, probe)
-	return opts
+		if available {
+			opts.vaapiRateControl = mode
+			return opts, nil
+		}
+	}
+	return opts, nil
 }
 
-// vaapiVBRSmokeArgs is the VAAPI hardware smoke encode with the encoder
-// swapped in and the capped VBR mode the transcode would request.
-func vaapiVBRSmokeArgs(device, encoder string) []string {
+// vaapiRateControlSmokeArgs is the VAAPI hardware smoke encode with the
+// encoder swapped in and the capped mode the transcode would request.
+func vaapiRateControlSmokeArgs(device, encoder, mode string) []string {
 	base := hardwareSmokeEncodeArgs(transcodeHWVAAPI, device)
 	sink := base[len(base)-3:] // -f null -
 	args := append([]string{}, base[:len(base)-3]...)
@@ -47,6 +67,6 @@ func vaapiVBRSmokeArgs(device, encoder string) []string {
 			args[i] = encoder
 		}
 	}
-	args = append(args, "-rc_mode", "VBR", "-b:v", "1800k", "-maxrate", "2000k")
+	args = append(args, "-rc_mode", mode, "-b:v", "1800k", "-maxrate", "2000k")
 	return append(args, sink...)
 }

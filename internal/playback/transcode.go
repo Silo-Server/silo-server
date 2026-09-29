@@ -94,9 +94,10 @@ type TranscodeOpts struct {
 	// softwareHEVCEncode retains a frozen GPU tone-map graph while its final
 	// SDR frames feed libx265. It is derived again on reconstruction.
 	softwareHEVCEncode bool
-	// vaapiVBR reports that the selected VAAPI device offers VBR for the
-	// target encoder; see resolveVAAPIRateControl. Derived on every start.
-	vaapiVBR                   bool
+	// vaapiRateControl is the capped rate-control mode the selected VAAPI
+	// device offers for the target encoder ("VBR", "CBR", or "" to leave it
+	// to FFmpeg); see resolveVAAPIRateControl. Derived on every start.
+	vaapiRateControl           string
 	ToneMapPolicy              tonemap.Policy
 	ToneMapMode                tonemap.Mode
 	ToneMapSourceKind          tonemap.SourceKind
@@ -372,7 +373,10 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		releaseHWDevice()
 		return nil, encoderErr
 	}
-	opts = resolveVAAPIRateControl(ctx, opts)
+	if opts, encoderErr = resolveVAAPIRateControl(ctx, opts); encoderErr != nil {
+		releaseHWDevice()
+		return nil, encoderErr
+	}
 	if opts.HWAccel == transcodeHWNone {
 		releaseHWDevice()
 		hwWorkloadDevice = ""
@@ -1243,12 +1247,12 @@ func appendVideoArgs(args []string, opts TranscodeOpts) []string {
 	return args
 }
 
-// appendVAAPIRateControl forces VBR on a device known to offer it; FFmpeg's
-// automatic mode would try AVBR first, which does not honor -maxrate.
-// Elsewhere the mode is left to FFmpeg (CBR on a driver without VBR).
+// appendVAAPIRateControl forces the capped mode resolveVAAPIRateControl
+// found on the device; FFmpeg's automatic mode could pick AVBR, which does
+// not honor -maxrate.
 func appendVAAPIRateControl(args []string, opts TranscodeOpts) []string {
-	if opts.vaapiVBR {
-		return append(args, "-rc_mode", "VBR")
+	if opts.vaapiRateControl != "" {
+		return append(args, "-rc_mode", opts.vaapiRateControl)
 	}
 	return args
 }
