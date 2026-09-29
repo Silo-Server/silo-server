@@ -482,6 +482,9 @@ export function useWatchTogetherRoomConnection({
       ) {
         socket.close();
       }
+      // The close handler ignores a socket this cleanup has already let go,
+      // so its command is dropped here, for the same reason.
+      setTransportCommand(null);
     };
   }, [
     markClosed,
