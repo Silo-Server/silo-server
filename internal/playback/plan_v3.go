@@ -1309,7 +1309,9 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 		warnings = append(warnings, DegradationWarningV3{Code: "quality_preference_normalized", Message: "Unknown quality preference was normalized to auto."})
 	}
 	capKbps := optionalValueV3(request.BandwidthCapKbps)
-	capExceededBySource := capKbps > 0 && source.BitrateKbps > capKbps
+	// The cap is a hard ceiling, so a video source whose bitrate is unknown
+	// cannot be shown to fit it, as with the server cap.
+	capExceededBySource := capKbps > 0 && (source.BitrateKbps > capKbps || source.BitrateKbps <= 0 && source.VideoCodec != "")
 	if quality == QualityOriginalV3 && !capExceededBySource {
 		result := originalQualityResultV3(source)
 		result.Warnings = warnings

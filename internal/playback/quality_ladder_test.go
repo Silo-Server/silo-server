@@ -367,6 +367,31 @@ func TestResolveQualityPolicyV3AutoUnknownSourceBitrate(t *testing.T) {
 	}
 }
 
+// A bandwidth cap is a hard ceiling: a source of unknown bitrate cannot be
+// shown to fit it, so it is re-encoded under the cap even when its class fits.
+func TestResolveQualityPolicyV3CapWithUnknownSourceBitrate(t *testing.T) {
+	source := SourceDescriptorV3{VideoCodec: "h264", Width: 1920, Height: 1080, FrameRate: 24}
+	for _, preference := range []string{"auto", QualityOriginalV3} {
+		req := validStartRequestV3()
+		req.QualityPreference = preference
+		capKbps := 7_000
+		req.BandwidthCapKbps = &capKbps
+		got := ResolveQualityPolicyV3(req, source)
+		if got.PreservesSource || !got.RequiresTranscode || got.BitrateKbps <= 0 || got.BitrateKbps > capKbps {
+			t.Fatalf("%s under a 7 Mbps cap = %#v, want a transcode within the cap", preference, got)
+		}
+	}
+	known := source
+	known.BitrateKbps = 5_000
+	req := validStartRequestV3()
+	req.QualityPreference = "auto"
+	capKbps := 7_000
+	req.BandwidthCapKbps = &capKbps
+	if got := ResolveQualityPolicyV3(req, known); !got.PreservesSource {
+		t.Fatalf("a 5 Mbps source under a 7 Mbps cap = %#v, want it preserved", got)
+	}
+}
+
 func TestLadderClassForSize(t *testing.T) {
 	for _, tc := range []struct{ w, h, want int }{
 		{1920, 1080, 1080}, {1920, 800, 1080}, {1280, 720, 720}, {1280, 960, 1080},
