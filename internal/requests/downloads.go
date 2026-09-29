@@ -2,6 +2,7 @@ package requests
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -106,16 +107,24 @@ func (s *Service) RefreshDownloads(ctx context.Context, limit int, budget time.D
 // cleared: it is stale, and clearing it takes the target off this pass.
 // checkCtx bounds only the plugin calls; the writes that apply their answers
 // run on ctx, so a call the pass's budget cuts still moves its targets back in
-// the rotation. checked is false when no target was asked about.
+// the rotation. A target whose plugin's features cannot be read is settled as
+// unanswered, so it too moves back instead of heading every batch, and the
+// request's other targets are still asked about. checked is false when no
+// target was asked about.
 func (s *Service) refreshRequestDownloads(ctx, checkCtx context.Context, fc *fulfillContext, req Request, targets []Target) (change reconcileChange, checked bool, err error) {
 	var polled []Target
+	var featureErr error
 	for _, t := range targets {
 		if t.Status != StatusDownloading || t.Download == nil {
 			continue
 		}
 		reports, err := s.targetReportsProgress(ctx, fc, req.MediaType, t)
 		if err != nil {
-			return reconcileUnchanged, false, err
+			featureErr = errors.Join(featureErr, err)
+			if err := s.settleUnansweredDownload(ctx, t); err != nil {
+				return reconcileUnchanged, false, errors.Join(featureErr, err)
+			}
+			continue
 		}
 		if !reports {
 			if err := s.store.UpdateTargetDownload(ctx, t.ID, nil); err != nil {
@@ -126,14 +135,14 @@ func (s *Service) refreshRequestDownloads(ctx, checkCtx context.Context, fc *ful
 		polled = append(polled, t)
 	}
 	if len(polled) == 0 {
-		return reconcileUnchanged, false, nil
+		return reconcileUnchanged, false, featureErr
 	}
 	statuses, checkErr := s.checkTargetStatuses(checkCtx, req, polled, fc)
 	change, err = s.applyTargetStatuses(ctx, polled, statuses)
 	if err != nil {
-		return reconcileUnchanged, true, err
+		return reconcileUnchanged, true, errors.Join(featureErr, err)
 	}
-	return change, true, checkErr
+	return change, true, errors.Join(featureErr, checkErr)
 }
 
 // HasDownloadsToRefresh reports whether the download refresh pass has any

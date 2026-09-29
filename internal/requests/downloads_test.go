@@ -710,6 +710,33 @@ func TestRefreshDownloadsRotatesPastATargetWithoutAnAnswer(t *testing.T) {
 	}
 }
 
+// A target whose plugin's features cannot be read moves to the back of the
+// rotation like one its server did not answer for, so a lasting failure does
+// not keep the other downloads from being refreshed.
+func TestRefreshDownloadsRotatesPastAFeatureReadFailure(t *testing.T) {
+	store := newFakeStore()
+	service, router := downloadRefreshService(store)
+	store.integrations = append(store.integrations, routerInstOn("router-3", 1))
+	now := time.Now().UTC()
+	seedDownloadTarget(t, store, "req-first", "router-1", Quality1080p, StatusDownloading,
+		&DownloadProgress{Phase: DownloadPhaseDownloading, BytesTotal: 1000, BytesLeft: 900, Downloads: 1, UpdatedAt: now.Add(-2 * time.Minute)})
+	seedDownloadTarget(t, store, "req-second", "router-3", Quality1080p, StatusDownloading,
+		&DownloadProgress{Phase: DownloadPhaseDownloading, BytesTotal: 1000, BytesLeft: 900, Downloads: 1, UpdatedAt: now.Add(-time.Minute)})
+	router.featuresErr = errors.New("capability metadata unavailable")
+
+	result, err := service.RefreshDownloads(context.Background(), 1, 0)
+	if err != nil || result.Errors != 1 {
+		t.Fatalf("RefreshDownloads = %+v, %v; want one error", result, err)
+	}
+	router.featuresErr = nil
+	if _, err := service.RefreshDownloads(context.Background(), 1, 0); err != nil {
+		t.Fatalf("RefreshDownloads: %v", err)
+	}
+	if len(router.statusLog) != 1 || router.statusLog[0].conns[0].ID != "router-3" {
+		t.Fatalf("status calls = %+v, want req-second's once req-first moved back", router.statusLog)
+	}
+}
+
 // A pass ends within its budget even while a download server has stopped
 // answering and each call to it would run to the router's deadline. The call
 // in flight is cut, its target goes to the back of the rotation, and the
