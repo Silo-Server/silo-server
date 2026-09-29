@@ -25,6 +25,7 @@ vi.mock("@/components/CollectionTemplateGallery", () => ({
   CollectionTemplateGallery: () => <div>Import gallery</div>,
 }));
 vi.mock("@/hooks/useDocumentTitle", () => ({ useDocumentTitle: () => {} }));
+vi.mock("@/hooks/useCurrentProfile", () => ({ useCurrentProfile: () => ({ profile: null }) }));
 
 function show() {
   render(
