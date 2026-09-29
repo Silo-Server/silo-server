@@ -797,7 +797,7 @@ func (s *Service) handleStateReportForConnection(
 	}
 
 	var dispatches []snapshotDispatch
-	var correctionDispatches []commandDispatch
+	var correctionDispatches, hostCommandDispatches []commandDispatch
 
 	s.mu.Lock()
 	member := live.members[reg.memberKey]
@@ -891,10 +891,22 @@ func (s *Service) handleStateReportForConnection(
 			return snapshot, nil
 		}
 		s.clearCorrectionCommandsLocked(live)
-		// The report now defines the room's transport. The last room command
-		// no longer describes it, and the reconciler would replay it to any
-		// member whose socket renews before it re-attaches.
-		live.command = nil
+		// The report is the room's transport decision, so issue it as the room
+		// command, as a play or pause request would. Members here get it now,
+		// members on other servers through the reconciler, and an earlier
+		// command can no longer be replayed after a socket renewal.
+		if live.room.Phase == RoomPhasePlaying {
+			action := TransportActionPause
+			if live.room.PlaybackState == RoomPlaybackStatePlaying {
+				action = TransportActionPlay
+			}
+			hostCommandDispatches = s.transportCommandDispatchesLocked(
+				live,
+				action,
+				live.room.AnchorPositionSeconds,
+				now.Add(s.highestPingLocked(live)),
+			)
+		}
 		dispatches = s.prepareSnapshotDispatchesLocked(live)
 	} else if holdCorrection {
 		member.correctionCommand = nil
@@ -928,6 +940,7 @@ func (s *Service) handleStateReportForConnection(
 	s.mu.Unlock()
 	s.sendDispatches(ctx, dispatches)
 	if isHost {
+		s.sendCommandDispatches(ctx, hostCommandDispatches)
 		return snapshot, nil
 	}
 
