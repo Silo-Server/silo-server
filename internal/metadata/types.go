@@ -277,6 +277,10 @@ type MetadataResult struct {
 	// replacedProviderIDKeys forces an owning-provider consensus replacement to
 	// overwrite the corresponding stored provider-ID column during merge.
 	replacedProviderIDKeys map[string]struct{}
+	// rejectedIdentityProviderIDs holds the stored identity values an Identify
+	// or corrected NFO rejected. They are suppressed by value, so a re-anchor
+	// that merges into another item keeps that item's own IDs.
+	rejectedIdentityProviderIDs providerIDValueSet
 	// recordedStaleProviderIDs contains provider values known dead before this
 	// refresh and suppresses them when durable state is merged.
 	recordedStaleProviderIDs providerIDValueSet

@@ -261,3 +261,22 @@ func TestManualRefresh_CorrectedNFOReplacesIMDbOnlyMatch(t *testing.T) {
 	}
 	assertIdentityIDs(t, h, providerRepo, contentID, "200", "")
 }
+
+// A correction rejects the source's stored values, not whole keys, so a
+// re-anchor that merges into an existing item keeps that item's own IDs.
+func TestRejectedIdentityIDsKeepAnotherItemsValues(t *testing.T) {
+	rejected := make(providerIDValueSet)
+	rejectIdentityProviderIDs(rejected,
+		map[string]string{"tmdb": "100", "imdb": "tt0000100"}, map[string]string{"tmdb": "200"})
+
+	destination := map[string]string{"tmdb": "200", "imdb": "tt0000200"}
+	suppressProviderIDValues(destination, rejected)
+	if destination["tmdb"] != "200" || destination["imdb"] != "tt0000200" {
+		t.Fatalf("destination IDs after suppression = %#v, want them unchanged", destination)
+	}
+	source := map[string]string{"tmdb": "100", "imdb": "tt0000100"}
+	suppressProviderIDValues(source, rejected)
+	if len(source) != 0 {
+		t.Fatalf("source IDs after suppression = %#v, want the rejected match gone", source)
+	}
+}

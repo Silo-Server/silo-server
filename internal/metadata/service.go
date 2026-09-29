@@ -1379,6 +1379,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 	var providerMatchErrors []error
 	quarantinedProviderIDKeys := make(map[string]struct{})
 	replacedProviderIDKeys := make(map[string]struct{})
+	rejectedIdentityIDs := make(providerIDValueSet)
 
 	switch req.Mode {
 	case ModeInitialMatch:
@@ -1580,13 +1581,13 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		// rather than fetched and kept, and the providers re-supply the right
 		// ones. A choice that confirms or extends the match keeps them.
 		chosen := canonicalIdentityProviderIDs(req.callerProviderIDs)
-		if identityChoiceCorrects(chosen, storedItemIdentity(existing, req.durableProviderIDs)) {
+		if stored := storedItemIdentity(existing, req.durableProviderIDs); identityChoiceCorrects(chosen, stored) {
 			for _, key := range trustedSearchIDKeys {
 				if chosen[key] == "" {
 					delete(accumulatedIDs, key)
 				}
 			}
-			markIdentityProviderIDsReplaced(replacedProviderIDKeys)
+			rejectIdentityProviderIDs(rejectedIdentityIDs, stored, chosen)
 		}
 		if existing != nil && contentType == "" {
 			contentType = existing.Type
@@ -1653,7 +1654,8 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			}
 		}
 		wonHints := applyBuiltinIdentityHints(ctx, itemChain, searchQuery, accumulatedIDs, protectedKeys)
-		if req.Mode == ModeManualRefresh && identityChoiceCorrects(canonicalIdentityProviderIDs(wonHints), storedItemIdentity(existing, req.durableProviderIDs)) {
+		stored, hinted := storedItemIdentity(existing, req.durableProviderIDs), canonicalIdentityProviderIDs(wonHints)
+		if req.Mode == ModeManualRefresh && identityChoiceCorrects(hinted, stored) {
 			// The stored IDs came from the match the corrected NFO overrides,
 			// so any the NFO doesn't restate are dropped, not re-fetched.
 			for _, key := range trustedSearchIDKeys {
@@ -1662,7 +1664,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				}
 			}
 			searchQuery.ProviderIDs = accumulatedIDs
-			markIdentityProviderIDsReplaced(replacedProviderIDKeys)
+			rejectIdentityProviderIDs(rejectedIdentityIDs, stored, hinted)
 		}
 		searchQuery = suppressTitleYearFallbackForTrustedIDs(searchQuery)
 		allResults := make([]SearchResult, 0)
@@ -1811,6 +1813,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 	accumulatedIDs = accumulator.ProviderIDs
 	if len(replacedProviderIDKeys) > 0 {
 		accumulator.replacedProviderIDKeys = maps.Clone(replacedProviderIDKeys)
+	}
+	if len(rejectedIdentityIDs) > 0 {
+		accumulator.rejectedIdentityProviderIDs = rejectedIdentityIDs
 	}
 	// Phase 3: Images — all ImageProviders run, collect all available images.
 	var allImages []RemoteImage
@@ -2408,15 +2413,13 @@ func (s *MetadataService) mergeAndPersist(
 
 	suppressProviderIDValues(durableIDs, accumulator.recordedStaleProviderIDs)
 	suppressProviderIDValues(durableIDs, accumulator.sameRunStaleProviderIDs)
+	suppressProviderIDValues(durableIDs, accumulator.rejectedIdentityProviderIDs)
 	if len(durableIDs) > 0 {
 		if accumulator.ProviderIDs == nil {
 			accumulator.ProviderIDs = make(map[string]string, len(durableIDs))
 		}
 		for key, value := range durableIDs {
 			if _, quarantined := accumulator.quarantinedProviderIDKeys[key]; quarantined {
-				continue
-			}
-			if _, replaced := accumulator.replacedProviderIDKeys[key]; replaced {
 				continue
 			}
 			if _, exists := accumulator.ProviderIDs[key]; !exists {
@@ -2451,6 +2454,7 @@ func (s *MetadataService) mergeAndPersist(
 		existingResult := itemToMetadataResult(existingItem)
 		suppressProviderIDValues(existingResult.ProviderIDs, accumulator.recordedStaleProviderIDs)
 		suppressProviderIDValues(existingResult.ProviderIDs, accumulator.sameRunStaleProviderIDs)
+		suppressProviderIDValues(existingResult.ProviderIDs, accumulator.rejectedIdentityProviderIDs)
 		for key := range accumulator.replacedProviderIDKeys {
 			delete(existingResult.ProviderIDs, key)
 		}
@@ -2471,6 +2475,7 @@ func (s *MetadataService) mergeAndPersist(
 		existingResult.replacedProviderIDKeys = accumulator.replacedProviderIDKeys
 		existingResult.recordedStaleProviderIDs = accumulator.recordedStaleProviderIDs
 		existingResult.sameRunStaleProviderIDs = accumulator.sameRunStaleProviderIDs
+		existingResult.rejectedIdentityProviderIDs = accumulator.rejectedIdentityProviderIDs
 		accumulator = existingResult
 	}
 
@@ -8451,12 +8456,16 @@ func identityChoiceCorrects(chosen, stored map[string]string) bool {
 	return hasStored && !agrees && len(chosen) > 0
 }
 
-// markIdentityProviderIDsReplaced makes a corrected match replace the stored
-// identity IDs instead of merging into them. The stored IDs came from the
-// wrong match, so a key the corrected match lacks is dropped rather than kept.
-func markIdentityProviderIDsReplaced(replaced map[string]struct{}) {
+// rejectIdentityProviderIDs records the stored identity values a correction
+// rejects: each stored TMDB, TVDB or IMDb ID that the chosen IDs don't
+// restate. They came from the wrong match. Recording values rather than keys
+// leaves a different value for the same key alone, such as the IDs of an
+// existing item that a re-anchor merges into.
+func rejectIdentityProviderIDs(rejected providerIDValueSet, stored, chosen map[string]string) {
 	for _, key := range trustedSearchIDKeys {
-		replaced[key] = struct{}{}
+		if value := strings.TrimSpace(stored[key]); value != "" && value != chosen[key] {
+			rejected.add(key, value)
+		}
 	}
 }
 
