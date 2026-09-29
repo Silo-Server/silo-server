@@ -1294,6 +1294,7 @@ func (s *MetadataService) ProcessWithProviders(ctx context.Context, req ProcessR
 }
 
 func (s *MetadataService) prepareProcessRequest(ctx context.Context, req ProcessRequest) (ProcessRequest, error) {
+	req.callerProviderIDs = maps.Clone(req.ProviderIDs)
 	durableIDs, err := s.loadDurableProviderIDs(ctx, req.ContentID)
 	if err != nil {
 		return req, err
@@ -1564,11 +1565,20 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		// Use user-provided IDs directly.
 		maps.Copy(accumulatedIDs, req.ProviderIDs)
 		sanitizeCanonicalProviderIDsInPlace(accumulatedIDs)
+		// An admin who names a TMDB, TVDB or IMDb ID is choosing the item's
+		// identity, not adding to it. Stored identity IDs they didn't name
+		// came from the previous match, so they're dropped rather than
+		// fetched and kept; the providers re-supply the right ones.
+		if chosen := canonicalIdentityProviderIDs(req.callerProviderIDs); len(chosen) > 0 {
+			for _, key := range trustedSearchIDKeys {
+				if chosen[key] == "" {
+					delete(accumulatedIDs, key)
+				}
+			}
+			markIdentityProviderIDsReplaced(replacedProviderIDKeys)
+		}
 		if req.ContentID != "" {
 			existing, err := s.itemRepo.GetByID(ctx, req.ContentID)
-			if err == nil && identityProviderIDsChanged(storedIdentityProviderIDs(existing), accumulatedIDs) {
-				markIdentityProviderIDsReplaced(replacedProviderIDKeys)
-			}
 			if err == nil && contentType == "" {
 				contentType = existing.Type
 				itemLevel = providerChainContentLevel(contentType)
@@ -8391,6 +8401,21 @@ func identityProviderIDsChanged(stored, chosen map[string]string) bool {
 		}
 	}
 	return false
+}
+
+// canonicalIdentityProviderIDs returns the valid TMDB, TVDB and IMDb IDs in ids.
+func canonicalIdentityProviderIDs(ids map[string]string) map[string]string {
+	chosen := make(map[string]string, len(trustedSearchIDKeys))
+	for key, value := range ids {
+		key = strings.ToLower(strings.TrimSpace(key))
+		if !slices.Contains(trustedSearchIDKeys, key) {
+			continue
+		}
+		if value, valid := sanitizeProviderIDValue(key, value); valid {
+			chosen[key] = value
+		}
+	}
+	return chosen
 }
 
 // markIdentityProviderIDsReplaced makes a corrected match replace the stored

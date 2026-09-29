@@ -72,6 +72,9 @@ type ProcessRequest struct {
 	// metadata language actually re-fetches titles/overviews.
 	AdoptLanguage            bool
 	recordedStaleProviderIDs providerIDValueSet
+	// callerProviderIDs is ProviderIDs as the caller sent it, before
+	// prepareProcessRequest merges in the item's durable IDs.
+	callerProviderIDs map[string]string
 	// enrichmentOnly marks a bulk enrichment write: one enrichment provider's
 	// fields merged into an item that is already matched. See
 	// persistEnrichment for how it differs from a scheduled refresh.

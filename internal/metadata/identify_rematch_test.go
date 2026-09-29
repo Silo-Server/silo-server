@@ -12,18 +12,28 @@ import (
 // provider-ID rows.
 func seedWrongMatch(t *testing.T, h *testHarness, contentID string) *fakeProviderIDRepo {
 	t.Helper()
+	return seedMovieIdentity(t, h, contentID, "100", "tt0000100")
+}
+
+// seedMovieIdentity stores a matched movie with the given TMDB and IMDb IDs
+// (either may be empty) in the item columns and the durable provider-ID rows.
+func seedMovieIdentity(t *testing.T, h *testHarness, contentID, tmdb, imdb string) *fakeProviderIDRepo {
+	t.Helper()
 	if err := h.itemRepo.Upsert(context.Background(), &models.MediaItem{
 		ContentID: contentID, Type: "movie", Title: "Wrong Film", Year: 2006, Status: "matched",
-		TmdbID: "100", ImdbID: "tt0000100",
+		TmdbID: tmdb, ImdbID: imdb,
 		Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
 	}); err != nil {
 		t.Fatalf("seed item: %v", err)
 	}
+	var rows []*models.MediaItemProviderID
+	for provider, id := range map[string]string{"tmdb": tmdb, "imdb": imdb} {
+		if id != "" {
+			rows = append(rows, &models.MediaItemProviderID{ContentID: contentID, ItemType: "movie", Provider: provider, ProviderID: id})
+		}
+	}
 	providerRepo := newFakeProviderIDRepo()
-	providerRepo.set(contentID,
-		&models.MediaItemProviderID{ContentID: contentID, ItemType: "movie", Provider: "tmdb", ProviderID: "100"},
-		&models.MediaItemProviderID{ContentID: contentID, ItemType: "movie", Provider: "imdb", ProviderID: "tt0000100"},
-	)
+	providerRepo.set(contentID, rows...)
 	h.service.providerIDRepo = providerRepo
 	return providerRepo
 }
@@ -75,15 +85,15 @@ func TestProcess_IdentifyReplacesWrongMatchIDs(t *testing.T) {
 	assertIdentityIDs(t, h, providerRepo, contentID, "200", "")
 }
 
-// Re-applying the match an item already has confirms it rather than correcting
-// it, so IDs the provider doesn't repeat are kept.
-func TestProcess_IdentifyConfirmingMatchKeepsStoredIDs(t *testing.T) {
+// Re-applying the match an item already has keeps the IDs the provider
+// returns for it.
+func TestProcess_IdentifySameMatchKeepsReturnedIDs(t *testing.T) {
 	const contentID = "movie-tmdb-100"
 	h := newTestHarness()
 	providerRepo := seedWrongMatch(t, h, contentID)
 	provider := &capturingMetadataProvider{response: &MetadataResult{
 		HasMetadata: true, Title: "Wrong Film", Year: 2006,
-		ProviderIDs: map[string]string{"tmdb": "100"},
+		ProviderIDs: map[string]string{"tmdb": "100", "imdb": "tt0000100"},
 	}}
 
 	if _, err := h.service.ProcessWithProviders(context.Background(), ProcessRequest{
@@ -95,6 +105,31 @@ func TestProcess_IdentifyConfirmingMatchKeepsStoredIDs(t *testing.T) {
 		t.Fatalf("ProcessWithProviders: %v", err)
 	}
 	assertIdentityIDs(t, h, providerRepo, contentID, "100", "tt0000100")
+}
+
+// An item that only has the wrong film's IMDb ID, identified by a TMDB ID,
+// drops that IMDb ID: the admin named the item's identity.
+func TestProcess_IdentifyByTMDBDropsStoredIMDbOnlyMatch(t *testing.T) {
+	const contentID = "local-imdb-only"
+	h := newTestHarness()
+	providerRepo := seedMovieIdentity(t, h, contentID, "", "tt0000100")
+	provider := &capturingMetadataProvider{response: &MetadataResult{
+		HasMetadata: true, Title: "Right Film", Year: 2015,
+		ProviderIDs: map[string]string{"tmdb": "200"},
+	}}
+
+	if _, err := h.service.ProcessWithProviders(context.Background(), ProcessRequest{
+		ContentID:   contentID,
+		ProviderIDs: map[string]string{"tmdb": "200"},
+		Language:    "en",
+		Mode:        ModeIdentify,
+	}, []Provider{provider}); err != nil {
+		t.Fatalf("ProcessWithProviders: %v", err)
+	}
+	if got := provider.lastRequest().ProviderIDs["imdb"]; got != "" {
+		t.Errorf("identify fetched with the stored imdb id %q", got)
+	}
+	assertIdentityIDs(t, h, providerRepo, contentID, "200", "")
 }
 
 // A corrected NFO <uniqueid> plus a manual refresh is the documented recovery
