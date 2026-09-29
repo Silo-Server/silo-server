@@ -129,8 +129,6 @@ func (s *Service) notifyFulfilledPending(ctx context.Context) {
 			s.markNotifyChecked(ctx, req.ID)
 			continue
 		}
-		// Only the follows made while this request was the title's open
-		// one: a series can have several requests for different seasons.
 		followers, err := s.store.ListRequestFollowers(ctx, *req)
 		if err != nil {
 			slog.WarnContext(ctx, "request fulfill-notify: list followers failed", "component", "requests",

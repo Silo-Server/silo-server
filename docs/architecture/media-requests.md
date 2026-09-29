@@ -308,22 +308,19 @@ row until the follow commits, so a follow cannot land just after the request
 was declined, cancelled or completed, and miss that transition's follow
 cleanup.
 
-A follow belongs to the title and the profile (`media_request_follows`, keyed
-by account and profile id, since profile ids repeat across accounts), not to
-one request, so it survives the request failing and being retried or requested
-again. Declining or cancelling the request clears the title's follows: the title
-is no longer on its way, and the follower can request it themselves. The
-requesting profile never needs a follow: the fulfilled notification always
-reaches it. When a request's fulfilled notification goes out, it is also sent
-to the title's followers, marked `follower` so its wording does not say
-"your request", and those follows are then cleared. A series can have
-completed requests still waiting for the library beside a newer open request
-for other seasons. A title has one open request at a time, so a request's
-notification goes to the follows made after the title's previous request
-completed and no later than it did; the others wait for their own request.
-Declining the open request leaves the follows the completed ones are waiting
-to tell, and clearing a request's follows spares a profile that followed again
-since. A dispatch failure leaves
+A follow belongs to a title and a profile (`media_request_follows`, keyed
+by account and profile id, since profile ids repeat across accounts) and records
+the request that was open when it was made. A series can have completed
+requests still waiting for the library beside a newer open request for other
+seasons, and each request's notification goes to its own follows. A follow
+survives its request failing: the title's next request takes over the follows
+of a failed request, or one its requester replaced. Declining or cancelling a
+request clears its follows: the title is no longer on its way, and the follower
+can request it themselves. The requesting profile never needs a follow: the
+fulfilled notification always reaches it. When a request's fulfilled
+notification goes out, it is also sent to the request's followers, marked
+`follower` so its wording does not say "your request", and those follows are
+then cleared. A dispatch failure leaves
 the follows for the retry, and the server-channel announcement waits until an
 attempt has reached every recipient, so a retry does not repeat it.
 

@@ -8,19 +8,15 @@ import (
 
 // Following a title: a profile that finds a title someone else has already
 // requested can ask to be notified when it becomes available, instead of
-// requesting it again. A follow belongs to the title, not to one request, so it
-// survives the request failing and being retried or requested again. It is
-// cleared once the fulfilled notification has gone out, and when the request
-// is declined or withdrawn: the title is then no longer on its way, and the
-// follower can request it themselves. The requester is always notified and
-// never needs a follow.
-//
-// A series can have completed requests still waiting for the library and a
-// newer open one for other seasons. A title has one open request at a time, so
-// each follow was made for the request open then: a request's notification
-// goes to the follows made after the title's previous request completed and no
-// later than it did, and closing the open request leaves the follows the
-// completed ones are waiting to tell.
+// requesting it again. A follow records the request that was open when it was
+// made, since a series can have completed requests still waiting for the
+// library beside a newer open request for other seasons; each request's
+// notification goes to its own follows. A follow survives its request failing:
+// the title's next request takes over the follows of a failed or replaced one.
+// It is cleared once the fulfilled notification has gone out, and when its
+// request is declined or withdrawn: the title is then no longer on its way,
+// and the follower can request it themselves. The requester is always
+// notified and never needs a follow.
 
 // Follower is a profile waiting to hear that a requested title is available.
 type Follower struct {
@@ -134,7 +130,8 @@ func (s *Service) followedTitles(ctx context.Context, viewer Viewer, mediaType M
 // the same statement, so a follow cannot land just after the request
 // completed and never be told. It answers ErrNotRequested when there is none.
 //
-// FOR SHARE holds the open request until the follow commits. Every transition
+// The follow records the open request it read. FOR SHARE holds that request
+// until the follow commits. Every transition
 // that closes a request (decline, cancel, completion) updates its row, and
 // that row lock conflicts with FOR SHARE, so the close cannot commit, and its
 // follow cleanup cannot run, between the read and the insert. A follow that
@@ -144,14 +141,14 @@ func (r *Repository) FollowTitle(ctx context.Context, mediaType MediaType, tmdbI
 	var open bool
 	if err := r.pool.QueryRow(ctx, `
 		WITH open_request AS (
-			SELECT 1 FROM media_requests
+			SELECT id FROM media_requests
 			WHERE media_type = $1 AND provider = 'tmdb' AND tmdb_id = $2
 			  AND outcome = 'active' AND status <> 'completed'
 			LIMIT 1
 			FOR SHARE
 		), inserted AS (
-			INSERT INTO media_request_follows (media_type, tmdb_id, user_id, profile_id)
-			SELECT $1, $2, $3, $4 FROM open_request
+			INSERT INTO media_request_follows (media_type, tmdb_id, user_id, profile_id, request_id)
+			SELECT $1, $2, $3, $4, id FROM open_request
 			ON CONFLICT (media_type, tmdb_id, user_id, profile_id) DO NOTHING
 		)
 		SELECT EXISTS (SELECT 1 FROM open_request)
@@ -164,25 +161,26 @@ func (r *Repository) FollowTitle(ctx context.Context, mediaType MediaType, tmdbI
 	return nil
 }
 
-// forgetTitleFollows removes the follows on the title of a request that was
-// just declined or withdrawn, unless the title has another open request whose
-// followers are still waiting for it. A follow made before a completed request
-// of the title completed stays until that request's notification goes out.
+// forgetTitleFollows removes the follows of a request that was just declined
+// or withdrawn.
 func forgetTitleFollows(ctx context.Context, exec requestExecutor, closed *Request) error {
-	if _, err := exec.Exec(ctx, `
-		DELETE FROM media_request_follows f
-		WHERE media_type = $1 AND tmdb_id = $2
-		  AND NOT EXISTS (
-		    SELECT 1 FROM media_requests
-		    WHERE media_type = $1 AND provider = 'tmdb' AND tmdb_id = $2
-		      AND outcome = 'active' AND status <> 'completed' AND id <> $3)
-		  AND NOT EXISTS (
-		    SELECT 1 FROM media_requests
-		    WHERE media_type = $1 AND provider = 'tmdb' AND tmdb_id = $2
-		      AND outcome = 'active' AND status = 'completed'
-		      AND fulfilled_notified_at IS NULL AND completed_at >= f.created_at)
-	`, closed.MediaType, closed.TMDBID, closed.ID); err != nil {
+	if _, err := exec.Exec(ctx, `DELETE FROM media_request_follows WHERE request_id = $1`, closed.ID); err != nil {
 		return fmt.Errorf("forget title follows: %w", err)
+	}
+	return nil
+}
+
+// adoptTitleFollows gives a new request the title's follows that have no
+// request waiting to tell them: their request failed, or was replaced by its
+// requester. The caller creates the request in the same transaction.
+func adoptTitleFollows(ctx context.Context, exec requestExecutor, req *Request) error {
+	if _, err := exec.Exec(ctx, `
+		UPDATE media_request_follows f SET request_id = $3
+		WHERE f.media_type = $1 AND f.tmdb_id = $2
+		  AND NOT EXISTS (
+		    SELECT 1 FROM media_requests r WHERE r.id = f.request_id AND r.outcome <> 'failed')
+	`, req.MediaType, req.TMDBID, req.ID); err != nil {
+		return fmt.Errorf("adopt title follows: %w", err)
 	}
 	return nil
 }
@@ -220,21 +218,13 @@ func (r *Repository) FollowedTitles(ctx context.Context, mediaType MediaType, tm
 	return out, rows.Err()
 }
 
-// ListRequestFollowers lists the follows a completed request's notification
-// goes to. A title has at most one open request at a time, so its follows were
-// made after the title's previous request completed and no later than this one
-// did. A request without a completion time reaches every follow on the title.
+// ListRequestFollowers lists the follows a request's notification goes to.
 func (r *Repository) ListRequestFollowers(ctx context.Context, req Request) ([]Follower, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT user_id, profile_id FROM media_request_follows
-		WHERE media_type = $1 AND tmdb_id = $2
-		  AND ($3::timestamptz IS NULL OR created_at <= $3)
-		  AND created_at > coalesce((
-		    SELECT max(completed_at) FROM media_requests
-		    WHERE media_type = $1 AND provider = 'tmdb' AND tmdb_id = $2
-		      AND status = 'completed' AND id <> $4 AND completed_at < $3), '-infinity')
+		WHERE request_id = $1
 		ORDER BY created_at, user_id, profile_id
-	`, req.MediaType, req.TMDBID, req.CompletedAt, req.ID)
+	`, req.ID)
 	if err != nil {
 		return nil, fmt.Errorf("list request followers: %w", err)
 	}
@@ -265,10 +255,9 @@ func (r *Repository) ClearRequestFollowers(ctx context.Context, req Request, fol
 	}
 	if _, err := r.pool.Exec(ctx, `
 		DELETE FROM media_request_follows
-		WHERE media_type = $1 AND tmdb_id = $2
-		  AND ($3::timestamptz IS NULL OR created_at <= $3)
-		  AND (user_id, profile_id) IN (SELECT * FROM unnest($4::int[], $5::text[]))
-	`, req.MediaType, req.TMDBID, req.CompletedAt, userIDs, profileIDs); err != nil {
+		WHERE request_id = $1
+		  AND (user_id, profile_id) IN (SELECT * FROM unnest($2::int[], $3::text[]))
+	`, req.ID, userIDs, profileIDs); err != nil {
 		return fmt.Errorf("clear request followers: %w", err)
 	}
 	return nil

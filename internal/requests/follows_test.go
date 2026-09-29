@@ -3,9 +3,13 @@ package requests
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 )
@@ -87,7 +91,7 @@ func TestFollowSameProfileIDOnAnotherAccount(t *testing.T) {
 	if !state.Following || state.RequestedByViewer {
 		t.Fatalf("state = %+v, want following and not requested by the viewer", state)
 	}
-	followers, _ := store.ListRequestFollowers(context.Background(), Request{MediaType: MediaTypeMovie, TMDBID: 949})
+	followers, _ := store.titleFollowers(MediaTypeMovie, 949)
 	if len(followers) != 1 || followers[0] != (Follower{UserID: 1, ProfileID: "default"}) {
 		t.Fatalf("followers = %+v, want the other account's default profile", followers)
 	}
@@ -160,7 +164,7 @@ func TestWithdrawingRequestForgetsFollows(t *testing.T) {
 			if err := tc.withdraw(svc); err != nil {
 				t.Fatalf("%s: %v", tc.name, err)
 			}
-			if followers, _ := store.ListRequestFollowers(context.Background(), Request{MediaType: MediaTypeMovie, TMDBID: 949}); len(followers) != 0 {
+			if followers, _ := store.titleFollowers(MediaTypeMovie, 949); len(followers) != 0 {
 				t.Fatalf("followers after %s = %+v, want none", tc.name, followers)
 			}
 		})
@@ -214,25 +218,20 @@ func TestNotifyFulfilledTellsFollowersAndClearsThem(t *testing.T) {
 	if len(notifier.followers) != 1 || len(notifier.followers[0]) != 1 || notifier.followers[0][0] != (Follower{UserID: 3, ProfileID: "follower-profile"}) {
 		t.Fatalf("followers handed to the notifier = %+v, want the one follower", notifier.followers)
 	}
-	if followers, _ := store.ListRequestFollowers(context.Background(), Request{MediaType: MediaTypeMovie, TMDBID: 42}); len(followers) != 0 {
+	if followers, _ := store.titleFollowers(MediaTypeMovie, 42); len(followers) != 0 {
 		t.Fatalf("followers after notifying = %+v, want cleared", followers)
 	}
 }
 
 // A series can have a completed request waiting for the library beside a newer
-// open request for other seasons. Its notification goes to the follows made
-// before it completed; one made since was made for the open request.
+// open request for other seasons. Its notification goes to its own follows;
+// the open request's follows wait for it.
 func TestNotifyFulfilledLeavesFollowsOfNewerRequest(t *testing.T) {
 	store := newFakeStore()
-	completed := time.Now().Add(-time.Hour)
-	req := completedRequestFixture("req1", 42)
-	req.CompletedAt = &completed
-	store.requests["req1"] = req
+	store.requests["req1"] = completedRequestFixture("req1", 42)
 	store.unnotified = []string{"req1"}
-	early := Viewer{UserID: 3, ProfileID: "early"}
-	late := Viewer{UserID: 4, ProfileID: "late"}
-	store.seedFollowAt(MediaTypeMovie, 42, early, completed.Add(-time.Minute))
-	store.seedFollowAt(MediaTypeMovie, 42, late, completed.Add(time.Minute))
+	store.seedFollowFor(MediaTypeMovie, 42, Viewer{UserID: 3, ProfileID: "early"}, "req1")
+	store.seedFollowFor(MediaTypeMovie, 42, Viewer{UserID: 4, ProfileID: "late"}, "req2")
 	notifier := &fakeNotifier{}
 	svc := NewService(store, &fakeTMDBClient{}, presentMovie(42))
 	svc.SetFulfillmentNotifier(notifier)
@@ -240,11 +239,11 @@ func TestNotifyFulfilledLeavesFollowsOfNewerRequest(t *testing.T) {
 	svc.notifyFulfilledPending(context.Background())
 
 	if len(notifier.followers) != 1 || !slices.Equal(notifier.followers[0], []Follower{{UserID: 3, ProfileID: "early"}}) {
-		t.Fatalf("followers handed to the notifier = %+v, want only the follow made before completion", notifier.followers)
+		t.Fatalf("followers handed to the notifier = %+v, want only req1's follower", notifier.followers)
 	}
-	left, _ := store.ListRequestFollowers(context.Background(), Request{MediaType: MediaTypeMovie, TMDBID: 42})
+	left, _ := store.ListRequestFollowers(context.Background(), Request{ID: "req2", MediaType: MediaTypeMovie, TMDBID: 42})
 	if !slices.Equal(left, []Follower{{UserID: 4, ProfileID: "late"}}) {
-		t.Fatalf("followers left = %+v, want the newer request's follower", left)
+		t.Fatalf("req2's followers = %+v, want kept", left)
 	}
 }
 
@@ -258,7 +257,7 @@ func TestNotifyFulfilledKeepsFollowersWhenDispatchFails(t *testing.T) {
 
 	svc.notifyFulfilledPending(context.Background())
 
-	if followers, _ := store.ListRequestFollowers(context.Background(), Request{MediaType: MediaTypeMovie, TMDBID: 42}); len(followers) != 1 {
+	if followers, _ := store.titleFollowers(MediaTypeMovie, 42); len(followers) != 1 {
 		t.Fatalf("followers after a failed dispatch = %+v, want kept for the retry", followers)
 	}
 }
@@ -284,7 +283,7 @@ func TestNotifyFulfilledRetriesWhenClearingFollowersFails(t *testing.T) {
 	if len(store.unnotified) != 0 {
 		t.Fatalf("unnotified after the retry = %v, want none", store.unnotified)
 	}
-	if followers, _ := store.ListRequestFollowers(context.Background(), Request{MediaType: MediaTypeMovie, TMDBID: 42}); len(followers) != 0 {
+	if followers, _ := store.titleFollowers(MediaTypeMovie, 42); len(followers) != 0 {
 		t.Fatalf("followers after the retry = %+v, want cleared", followers)
 	}
 }
@@ -316,7 +315,7 @@ func TestFollowsDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	followers, err := repo.ListRequestFollowers(ctx, Request{MediaType: MediaTypeMovie, TMDBID: 949})
+	followers, err := repo.ListRequestFollowers(ctx, Request{ID: "movie-949", MediaType: MediaTypeMovie, TMDBID: 949})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,16 +330,16 @@ func TestFollowsDatabase(t *testing.T) {
 		t.Fatalf("followed = %v, want only 949", followed)
 	}
 
-	if err := repo.ClearRequestFollowers(ctx, Request{MediaType: MediaTypeMovie, TMDBID: 949}, []Follower{{UserID: a.UserID, ProfileID: a.ProfileID}}); err != nil {
+	if err := repo.ClearRequestFollowers(ctx, Request{ID: "movie-949", MediaType: MediaTypeMovie, TMDBID: 949}, []Follower{{UserID: a.UserID, ProfileID: a.ProfileID}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.UnfollowTitle(ctx, MediaTypeMovie, 949, b); err != nil {
 		t.Fatal(err)
 	}
-	if followers, _ := repo.ListRequestFollowers(ctx, Request{MediaType: MediaTypeMovie, TMDBID: 949}); len(followers) != 0 {
+	if followers, _ := repo.ListRequestFollowers(ctx, Request{ID: "movie-949", MediaType: MediaTypeMovie, TMDBID: 949}); len(followers) != 0 {
 		t.Fatalf("movie followers after clear and unfollow = %+v, want none", followers)
 	}
-	if followers, _ := repo.ListRequestFollowers(ctx, Request{MediaType: MediaTypeSeries, TMDBID: 949}); len(followers) != 1 {
+	if followers, _ := repo.ListRequestFollowers(ctx, Request{ID: "series-949", MediaType: MediaTypeSeries, TMDBID: 949}); len(followers) != 1 {
 		t.Fatalf("series followers = %+v, want the one untouched follow", followers)
 	}
 
@@ -352,7 +351,7 @@ func TestFollowsDatabase(t *testing.T) {
 			t.Fatalf("follow as account %d: %v", v.UserID, err)
 		}
 	}
-	if followers, _ := repo.ListRequestFollowers(ctx, Request{MediaType: MediaTypeMovie, TMDBID: 949}); len(followers) != 2 {
+	if followers, _ := repo.ListRequestFollowers(ctx, Request{ID: "movie-949", MediaType: MediaTypeMovie, TMDBID: 949}); len(followers) != 2 {
 		t.Fatalf("followers sharing a profile id = %+v, want one per account", followers)
 	}
 	if followed, _ := repo.FollowedTitles(ctx, MediaTypeMovie, []int{949}, Viewer{UserID: 3, ProfileID: "default"}); followed[949] {
@@ -361,27 +360,27 @@ func TestFollowsDatabase(t *testing.T) {
 	if err := repo.UnfollowTitle(ctx, MediaTypeMovie, 949, mine); err != nil {
 		t.Fatal(err)
 	}
-	followers, err = repo.ListRequestFollowers(ctx, Request{MediaType: MediaTypeMovie, TMDBID: 949})
+	followers, err = repo.ListRequestFollowers(ctx, Request{ID: "movie-949", MediaType: MediaTypeMovie, TMDBID: 949})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(followers) != 1 || followers[0] != (Follower{UserID: theirs.UserID, ProfileID: theirs.ProfileID}) {
 		t.Fatalf("followers after one account unfollowed = %+v, want only the other account's", followers)
 	}
-	if err := repo.ClearRequestFollowers(ctx, Request{MediaType: MediaTypeMovie, TMDBID: 949}, []Follower{{UserID: mine.UserID, ProfileID: mine.ProfileID}}); err != nil {
+	if err := repo.ClearRequestFollowers(ctx, Request{ID: "movie-949", MediaType: MediaTypeMovie, TMDBID: 949}, []Follower{{UserID: mine.UserID, ProfileID: mine.ProfileID}}); err != nil {
 		t.Fatal(err)
 	}
-	if followers, _ := repo.ListRequestFollowers(ctx, Request{MediaType: MediaTypeMovie, TMDBID: 949}); len(followers) != 1 {
+	if followers, _ := repo.ListRequestFollowers(ctx, Request{ID: "movie-949", MediaType: MediaTypeMovie, TMDBID: 949}); len(followers) != 1 {
 		t.Fatalf("clearing one account's follow removed %+v, want the other account's kept", followers)
 	}
 
 	if _, err := repo.SetOutcome(ctx, "series-949", guardWithdrawable, OutcomeCancelled, Viewer{}, ""); err != nil {
 		t.Fatal(err)
 	}
-	if followers, _ := repo.ListRequestFollowers(ctx, Request{MediaType: MediaTypeSeries, TMDBID: 949}); len(followers) != 0 {
+	if followers, _ := repo.ListRequestFollowers(ctx, Request{ID: "series-949", MediaType: MediaTypeSeries, TMDBID: 949}); len(followers) != 0 {
 		t.Fatalf("series followers after the withdrawal = %+v, want none", followers)
 	}
-	if followers, _ := repo.ListRequestFollowers(ctx, Request{MediaType: MediaTypeMovie, TMDBID: 949}); len(followers) != 1 {
+	if followers, _ := repo.ListRequestFollowers(ctx, Request{ID: "movie-949", MediaType: MediaTypeMovie, TMDBID: 949}); len(followers) != 1 {
 		t.Fatalf("movie followers after the series withdrawal = %+v, want the one left", followers)
 	}
 }
@@ -408,7 +407,7 @@ func TestClosingRequestForgetsFollowsDatabase(t *testing.T) {
 		if _, err := repo.SetOutcome(ctx, tc.id, guardWithdrawable, tc.outcome, Viewer{}, ""); err != nil {
 			t.Fatal(err)
 		}
-		if followers, err := repo.ListRequestFollowers(ctx, Request{MediaType: MediaTypeMovie, TMDBID: tc.tmdbID}); err != nil || len(followers) != 0 {
+		if followers, err := titleFollowers(ctx, pool, MediaTypeMovie, tc.tmdbID); err != nil || len(followers) != 0 {
 			t.Fatalf("followers once %s committed = %+v, err = %v; want none", tc.id, followers, err)
 		}
 	}
@@ -426,107 +425,156 @@ func TestClosingRequestForgetsFollowsDatabase(t *testing.T) {
 	if _, err := repo.SetOutcome(ctx, "failed", StateGuard{Outcomes: []Outcome{OutcomeFailed}}, OutcomeCancelled, Viewer{}, ""); err != nil {
 		t.Fatal(err)
 	}
-	if followers, err := repo.ListRequestFollowers(ctx, Request{MediaType: MediaTypeMovie, TMDBID: 973}); err != nil || len(followers) != 1 {
+	if followers, err := titleFollowers(ctx, pool, MediaTypeMovie, 973); err != nil || len(followers) != 1 {
 		t.Fatalf("followers of the open request after closing the failed one = %+v, err = %v; want one", followers, err)
 	}
 }
 
-// A completed request still waiting for the library keeps the follows made
-// before it completed when a newer request for the title is declined; the
-// follows made for the declined request go.
-func TestDecliningNewerRequestKeepsCompletedRequestFollowsDatabase(t *testing.T) {
-	repo, pool := lifecycleTestRepository(t)
-	ctx := t.Context()
-	early := Viewer{UserID: 1, ProfileID: "profile-early"}
-	late := Viewer{UserID: 2, ProfileID: "profile-late"}
-	insertLifecycleRequest(t, repo, "done", 5, 974, StatusPending)
-	if err := repo.FollowTitle(ctx, MediaTypeMovie, 974, early); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, `UPDATE media_requests SET status = 'completed', completed_at = now() WHERE id = 'done'`); err != nil {
-		t.Fatal(err)
-	}
-	insertLifecycleRequest(t, repo, "next", 6, 974, StatusPending)
-	if err := repo.FollowTitle(ctx, MediaTypeMovie, 974, late); err != nil {
-		t.Fatal(err)
-	}
-	// Pin the follow times either side of the completion.
-	if _, err := pool.Exec(ctx, `
-		UPDATE media_request_follows f SET created_at = r.completed_at
-		  + CASE WHEN f.profile_id = 'profile-early' THEN -interval '1 minute' ELSE interval '1 minute' END
-		FROM media_requests r WHERE r.id = 'done' AND f.tmdb_id = 974`); err != nil {
-		t.Fatal(err)
-	}
-	done, err := repo.GetRequest(ctx, "done")
+// titleFollowers lists every follow on a title, whichever request it waits for.
+func titleFollowers(ctx context.Context, pool *pgxpool.Pool, mediaType MediaType, tmdbID int) ([]Follower, error) {
+	rows, err := pool.Query(ctx, `SELECT user_id, profile_id FROM media_request_follows
+		WHERE media_type = $1 AND tmdb_id = $2 ORDER BY user_id, profile_id`, mediaType, tmdbID)
 	if err != nil {
-		t.Fatal(err)
+		return nil, err
 	}
-	followers, err := repo.ListRequestFollowers(ctx, *done)
-	if err != nil || !slices.Equal(followers, []Follower{{UserID: 1, ProfileID: "profile-early"}}) {
-		t.Fatalf("followers of the completed request = %+v, err = %v; want the early follow only", followers, err)
-	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Follower, error) {
+		var f Follower
+		err := row.Scan(&f.UserID, &f.ProfileID)
+		return f, err
+	})
+}
 
-	if _, err := repo.SetOutcome(ctx, "next", guardWithdrawable, OutcomeDeclined, Viewer{}, ""); err != nil {
+func completeLifecycleRequest(t *testing.T, pool *pgxpool.Pool, id string) {
+	t.Helper()
+	if _, err := pool.Exec(t.Context(), `UPDATE media_requests SET status = 'completed', completed_at = now() WHERE id = $1`, id); err != nil {
 		t.Fatal(err)
-	}
-	followers, err = repo.ListRequestFollowers(ctx, Request{MediaType: MediaTypeMovie, TMDBID: 974})
-	if err != nil || !slices.Equal(followers, []Follower{{UserID: 1, ProfileID: "profile-early"}}) {
-		t.Fatalf("followers after declining the newer request = %+v, err = %v; want the completed request's follower kept", followers, err)
 	}
 }
 
-// Two completed requests for one title can both wait for the library, and the
-// newer one can arrive first. Each tells only the follows made while it was
-// the title's open request, and a clear spares a follow made again since.
-func TestRequestFollowersWindowDatabase(t *testing.T) {
+// A series can have completed requests still waiting for the library beside a
+// newer open request for other seasons. Each request's notification goes to
+// the follows made while it was open; clearing them spares a profile that
+// followed again since, and declining the open request keeps the others.
+func TestRequestFollowersDatabase(t *testing.T) {
 	repo, pool := lifecycleTestRepository(t)
 	ctx := t.Context()
-	insertLifecycleRequest(t, repo, "older", 5, 975, StatusPending)
-	if _, err := pool.Exec(ctx, `UPDATE media_requests SET status = 'completed', completed_at = now() - interval '2 hours' WHERE id = 'older'`); err != nil {
-		t.Fatal(err)
-	}
-	insertLifecycleRequest(t, repo, "newer", 6, 975, StatusPending)
-	if _, err := pool.Exec(ctx, `UPDATE media_requests SET status = 'completed', completed_at = now() - interval '1 hour' WHERE id = 'newer'`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, `INSERT INTO media_request_follows (media_type, tmdb_id, user_id, profile_id, created_at) VALUES
-		('movie', 975, 1, 'profile-older', now() - interval '3 hours'),
-		('movie', 975, 2, 'profile-newer', now() - interval '90 minutes')`); err != nil {
-		t.Fatal(err)
-	}
-	get := func(id string) Request {
+	a := Viewer{UserID: 1, ProfileID: "profile-a"}
+	b := Viewer{UserID: 2, ProfileID: "profile-b"}
+	follow := func(v Viewer) {
 		t.Helper()
-		req, err := repo.GetRequest(ctx, id)
+		if err := repo.FollowTitle(ctx, MediaTypeMovie, 975, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list := func(id string) []Follower {
+		t.Helper()
+		followers, err := repo.ListRequestFollowers(ctx, Request{ID: id, MediaType: MediaTypeMovie, TMDBID: 975})
 		if err != nil {
 			t.Fatal(err)
 		}
-		return *req
+		return followers
 	}
-	older, newer := get("older"), get("newer")
-	for _, tc := range []struct {
-		req  Request
-		want Follower
-	}{
-		{newer, Follower{UserID: 2, ProfileID: "profile-newer"}},
-		{older, Follower{UserID: 1, ProfileID: "profile-older"}},
-	} {
-		followers, err := repo.ListRequestFollowers(ctx, tc.req)
-		if err != nil || !slices.Equal(followers, []Follower{tc.want}) {
-			t.Fatalf("followers of %s = %+v, err = %v; want %+v", tc.req.ID, followers, err, tc.want)
-		}
+	insertLifecycleRequest(t, repo, "older", 5, 975, StatusPending)
+	follow(a)
+	completeLifecycleRequest(t, pool, "older")
+	insertLifecycleRequest(t, repo, "newer", 6, 975, StatusPending)
+	follow(b)
+	completeLifecycleRequest(t, pool, "newer")
+	if got := list("older"); !slices.Equal(got, []Follower{{UserID: 1, ProfileID: "profile-a"}}) {
+		t.Fatalf("older's followers = %+v, want profile-a", got)
+	}
+	if got := list("newer"); !slices.Equal(got, []Follower{{UserID: 2, ProfileID: "profile-b"}}) {
+		t.Fatalf("newer's followers = %+v, want profile-b", got)
 	}
 
-	// profile-newer unfollowed and followed again while the notification was
-	// going out; the new follow is for a later request.
-	if _, err := pool.Exec(ctx, `UPDATE media_request_follows SET created_at = now() WHERE profile_id = 'profile-newer'`); err != nil {
+	// profile-b unfollows and follows a third request while newer's
+	// notification is going out; newer's clear leaves the new follow.
+	if err := repo.UnfollowTitle(ctx, MediaTypeMovie, 975, b); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.ClearRequestFollowers(ctx, newer, []Follower{{UserID: 2, ProfileID: "profile-newer"}}); err != nil {
+	insertLifecycleRequest(t, repo, "third", 7, 975, StatusPending)
+	follow(b)
+	if err := repo.ClearRequestFollowers(ctx, Request{ID: "newer", MediaType: MediaTypeMovie, TMDBID: 975}, []Follower{{UserID: 2, ProfileID: "profile-b"}}); err != nil {
 		t.Fatal(err)
 	}
-	left, err := repo.ListRequestFollowers(ctx, Request{MediaType: MediaTypeMovie, TMDBID: 975})
-	if err != nil || len(left) != 2 {
-		t.Fatalf("follows after the clear = %+v, err = %v; want both kept", left, err)
+	if got := list("third"); len(got) != 1 {
+		t.Fatalf("third's followers after newer's clear = %+v, want profile-b kept", got)
+	}
+
+	if _, err := repo.SetOutcome(ctx, "third", guardWithdrawable, OutcomeDeclined, Viewer{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := titleFollowers(ctx, pool, MediaTypeMovie, 975); err != nil || !slices.Equal(got, []Follower{{UserID: 1, ProfileID: "profile-a"}}) {
+		t.Fatalf("follows after declining third = %+v, err = %v; want older's kept", got, err)
+	}
+}
+
+// A follow that commits while a completion is under way belongs to the
+// request it read, even though the completion's timestamp, taken when its
+// transaction began, is earlier than the follow's.
+func TestFollowDuringCompletionDatabase(t *testing.T) {
+	repo, pool := lifecycleTestRepository(t)
+	ctx := t.Context()
+	insertLifecycleRequest(t, repo, "req", 5, 976, StatusPending)
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT now()`); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.FollowTitle(ctx, MediaTypeMovie, 976, Viewer{UserID: 1, ProfileID: "profile-a"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE media_requests SET status = 'completed', completed_at = now() WHERE id = 'req'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var inverted bool
+	if err := pool.QueryRow(ctx, `SELECT f.created_at > r.completed_at FROM media_request_follows f
+		JOIN media_requests r ON r.id = 'req' WHERE f.tmdb_id = 976`).Scan(&inverted); err != nil || !inverted {
+		t.Fatalf("follow made after the completion's timestamp = %v, err = %v; the race was not reproduced", inverted, err)
+	}
+	followers, err := repo.ListRequestFollowers(ctx, Request{ID: "req", MediaType: MediaTypeMovie, TMDBID: 976})
+	if err != nil || len(followers) != 1 {
+		t.Fatalf("followers = %+v, err = %v; want the follow made during the completion", followers, err)
+	}
+}
+
+// A follow survives its request failing: the title's next request takes it,
+// including when the requester's new request replaces the failed one.
+func TestNewRequestAdoptsFollowsOfFailedRequestDatabase(t *testing.T) {
+	repo, pool := lifecycleTestRepository(t)
+	ctx := t.Context()
+	for _, tc := range []struct {
+		tmdbID  int
+		replace bool
+	}{{977, false}, {978, true}} {
+		insertLifecycleRequest(t, repo, fmt.Sprintf("failed-%d", tc.tmdbID), 5, tc.tmdbID, StatusApproved)
+		if err := repo.FollowTitle(ctx, MediaTypeMovie, tc.tmdbID, Viewer{UserID: 1, ProfileID: "profile-a"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `UPDATE media_requests SET outcome = 'failed' WHERE id = $1`, fmt.Sprintf("failed-%d", tc.tmdbID)); err != nil {
+			t.Fatal(err)
+		}
+		retry := fmt.Sprintf("retry-%d", tc.tmdbID)
+		if _, err := repo.CreateRequest(ctx, CreateRequestRecord{
+			ID:            retry,
+			Input:         CreateRequestInput{MediaType: MediaTypeMovie, TMDBID: tc.tmdbID, Title: "Retry"},
+			Status:        StatusPending,
+			Outcome:       OutcomeActive,
+			Requester:     Viewer{UserID: 5, ProfileID: "profile"},
+			ReplaceFailed: tc.replace,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		followers, err := repo.ListRequestFollowers(ctx, Request{ID: retry, MediaType: MediaTypeMovie, TMDBID: tc.tmdbID})
+		if err != nil || len(followers) != 1 {
+			t.Fatalf("replace=%v: the new request's followers = %+v, err = %v; want the failed request's follow", tc.replace, followers, err)
+		}
 	}
 }
 
@@ -580,7 +628,7 @@ func TestFollowWaitsForConcurrentWithdrawalDatabase(t *testing.T) {
 	if err := <-followed; !errors.Is(err, ErrNotRequested) {
 		t.Fatalf("follow after the withdrawal: err = %v, want ErrNotRequested", err)
 	}
-	if followers, err := repo.ListRequestFollowers(ctx, Request{MediaType: MediaTypeMovie, TMDBID: 959}); err != nil || len(followers) != 0 {
+	if followers, err := titleFollowers(ctx, pool, MediaTypeMovie, 959); err != nil || len(followers) != 0 {
 		t.Fatalf("followers after the withdrawal = %+v, err = %v; want none", followers, err)
 	}
 }

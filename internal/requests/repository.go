@@ -292,6 +292,9 @@ func (r *Repository) CreateRequest(ctx context.Context, input CreateRequestRecor
 		}
 		return nil, err
 	}
+	if err := adoptTitleFollows(ctx, tx, req); err != nil {
+		return nil, err
+	}
 	if err := r.recordEvent(ctx, tx, req.ID, "created", input.Requester, ""); err != nil {
 		return nil, err
 	}
