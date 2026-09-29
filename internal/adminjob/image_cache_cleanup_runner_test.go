@@ -334,7 +334,7 @@ func TestImageCacheCleanupCancelledBetweenSlicesKeepsTotals(t *testing.T) {
 		t.Fatal(err)
 	}
 	if canceled.Status != StatusCancelled || canceled.ProgressCurrent != 3 || canceled.ProgressTotal != 8 {
-		t.Fatalf("after cancellation: status=%s progress=%d/%d, want cancelled 3/8", canceled.Status, canceled.ProgressCurrent, canceled.ProgressTotal)
+		t.Fatalf("after cancellation: status=%s progress=%d/%d, want canceled 3/8", canceled.Status, canceled.ProgressCurrent, canceled.ProgressTotal)
 	}
 	if !strings.Contains(canceled.Message, "remain in storage") {
 		t.Fatalf("cancellation message %q does not say undeleted images remain", canceled.Message)
