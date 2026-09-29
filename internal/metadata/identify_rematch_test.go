@@ -85,15 +85,15 @@ func TestProcess_IdentifyReplacesWrongMatchIDs(t *testing.T) {
 	assertIdentityIDs(t, h, providerRepo, contentID, "200", "")
 }
 
-// Re-applying the match an item already has keeps the IDs the provider
-// returns for it.
-func TestProcess_IdentifySameMatchKeepsReturnedIDs(t *testing.T) {
+// Re-applying the match an item already has confirms it rather than
+// correcting it, so IDs the provider doesn't repeat are kept.
+func TestProcess_IdentifyConfirmingMatchKeepsStoredIDs(t *testing.T) {
 	const contentID = "movie-tmdb-100"
 	h := newTestHarness()
 	providerRepo := seedWrongMatch(t, h, contentID)
 	provider := &capturingMetadataProvider{response: &MetadataResult{
 		HasMetadata: true, Title: "Wrong Film", Year: 2006,
-		ProviderIDs: map[string]string{"tmdb": "100", "imdb": "tt0000100"},
+		ProviderIDs: map[string]string{"tmdb": "100"},
 	}}
 
 	if _, err := h.service.ProcessWithProviders(context.Background(), ProcessRequest{

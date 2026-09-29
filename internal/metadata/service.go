@@ -1565,11 +1565,21 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		// Use user-provided IDs directly.
 		maps.Copy(accumulatedIDs, req.ProviderIDs)
 		sanitizeCanonicalProviderIDsInPlace(accumulatedIDs)
-		// An admin who names a TMDB, TVDB or IMDb ID is choosing the item's
-		// identity, not adding to it. Stored identity IDs they didn't name
-		// came from the previous match, so they're dropped rather than
-		// fetched and kept; the providers re-supply the right ones.
-		if chosen := canonicalIdentityProviderIDs(req.callerProviderIDs); len(chosen) > 0 {
+		var existing *models.MediaItem
+		if req.ContentID != "" {
+			var err error
+			existing, err = s.itemRepo.GetByID(ctx, req.ContentID)
+			if err != nil {
+				existing = nil
+			}
+		}
+		// An admin who names a TMDB, TVDB or IMDb ID the item doesn't already
+		// have is correcting its match. The stored identity IDs they didn't
+		// name came from the previous match, so they're dropped rather than
+		// fetched and kept; the providers re-supply the right ones. Naming
+		// only IDs the item already has confirms the match and keeps them.
+		chosen := canonicalIdentityProviderIDs(req.callerProviderIDs)
+		if identityChoiceCorrects(chosen, storedIdentityForIdentify(existing, req.ProviderIDs, chosen)) {
 			for _, key := range trustedSearchIDKeys {
 				if chosen[key] == "" {
 					delete(accumulatedIDs, key)
@@ -1577,15 +1587,13 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			}
 			markIdentityProviderIDsReplaced(replacedProviderIDKeys)
 		}
-		if req.ContentID != "" {
-			existing, err := s.itemRepo.GetByID(ctx, req.ContentID)
-			if err == nil && contentType == "" {
-				contentType = existing.Type
-				itemLevel = providerChainContentLevel(contentType)
-				itemChain, err = resolveChain(itemLevel)
-				if err != nil {
-					return nil, err
-				}
+		if existing != nil && contentType == "" {
+			contentType = existing.Type
+			itemLevel = providerChainContentLevel(contentType)
+			var err error
+			itemChain, err = resolveChain(itemLevel)
+			if err != nil {
+				return nil, err
 			}
 		}
 
@@ -8416,6 +8424,38 @@ func canonicalIdentityProviderIDs(ids map[string]string) map[string]string {
 		}
 	}
 	return chosen
+}
+
+// storedIdentityForIdentify returns the TMDB, TVDB and IMDb IDs an item
+// already has: its columns, then the durable IDs prepareProcessRequest merged
+// into the request, which are its keys the caller didn't choose.
+func storedIdentityForIdentify(item *models.MediaItem, requestIDs, chosen map[string]string) map[string]string {
+	stored := storedIdentityProviderIDs(item)
+	if stored == nil {
+		stored = map[string]string{}
+	}
+	for key, value := range canonicalIdentityProviderIDs(requestIDs) {
+		if _, sent := chosen[key]; sent {
+			continue
+		}
+		if strings.TrimSpace(stored[key]) == "" {
+			stored[key] = value
+		}
+	}
+	return stored
+}
+
+// identityChoiceCorrects reports whether an Identify's chosen identity IDs
+// correct the item's match: some chosen ID differs from the stored value for
+// its key or names a key the item doesn't have. Choosing only IDs the item
+// already has confirms the match.
+func identityChoiceCorrects(chosen, stored map[string]string) bool {
+	for key, value := range chosen {
+		if strings.TrimSpace(stored[key]) != value {
+			return true
+		}
+	}
+	return false
 }
 
 // markIdentityProviderIDsReplaced makes a corrected match replace the stored
