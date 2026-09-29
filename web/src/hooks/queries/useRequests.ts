@@ -20,6 +20,7 @@ import {
   listDiscoverNetworksV2,
   listDiscoverSectionsV2,
   listDiscoverStudiosV2,
+  getMediaRequestV2,
   listMyMediaRequestsV2,
   searchRequestMediaV2,
 } from "@/api/v2/requests";
@@ -335,6 +336,16 @@ export function useCancelMediaRequest() {
  * The viewer's own requests. A surface that shows no download progress passes
  * pollDownloads: false so a download does not make it read the list again.
  */
+/** One request by ID; the viewer's account's own, or any for an admin. */
+export function useMediaRequest(id: string | undefined, options: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: requestKeys.one(id ?? ""),
+    queryFn: () => getMediaRequestV2(id as string),
+    enabled: Boolean(id) && (options.enabled ?? true),
+    staleTime: REQUESTS_STALE_TIME,
+  });
+}
+
 export function useMyMediaRequests(
   params: RequestListParams = {},
   options: { enabled?: boolean; pollDownloads?: boolean } = {},

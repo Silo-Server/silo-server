@@ -18,9 +18,11 @@ import { RequestSeasonsDialog } from "@/components/RequestSeasonsDialog";
 import {
   useCancelMediaRequest,
   useCreateMediaRequest,
+  useMediaRequest,
   useMyMediaRequests,
   useToggleRequestFollow,
 } from "@/hooks/queries/useRequests";
+import { useAuth } from "@/hooks/useAuth";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import {
   canCancelOwnRequest,
@@ -176,25 +178,34 @@ export default function RequestActionBar({ item, libraryHref }: RequestActionBar
 }
 
 /**
- * The viewer's own request for this title, while they can still cancel it. The
- * detail payload says a title has a request but not whose it is, so look for
- * it among the account's own active requests. The title's download progress
- * comes from the detail, so another request downloading is no reason to read
- * the list again.
+ * The viewer's own request for this title, while they can still cancel it.
+ * The detail names the request when it is the account's own (or the viewer is
+ * an admin), so that request is read directly and kept only if the account
+ * made it; an account's active requests can run past one list page. A detail
+ * without the ID falls back to the account's active requests. The title's
+ * download progress comes from the detail, so another request downloading is
+ * no reason to read the list again.
  */
 function useOwnCancellableRequest(item: RequestMediaDetail): MediaRequest | undefined {
+  const { user } = useAuth();
   const mayCancel = item.request.status === "pending" || item.request.status === "approved";
+  const requestID = item.request.request_id;
+  const named = useMediaRequest(requestID, { enabled: mayCancel });
   const mine = useMyMediaRequests(
     { outcome: "active" },
-    { enabled: mayCancel, pollDownloads: false },
+    { enabled: mayCancel && !requestID, pollDownloads: false },
   );
   if (!mayCancel) return undefined;
-  const requestID = item.request.request_id;
+  if (requestID) {
+    const request = named.data;
+    return request && request.requested_by_user_id === user?.id && canCancelOwnRequest(request)
+      ? request
+      : undefined;
+  }
   return mine.data?.find(
     (request) =>
-      (requestID
-        ? request.id === requestID
-        : request.media_type === item.media_type && request.tmdb_id === item.tmdb_id) &&
+      request.media_type === item.media_type &&
+      request.tmdb_id === item.tmdb_id &&
       canCancelOwnRequest(request),
   );
 }

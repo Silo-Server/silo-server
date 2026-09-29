@@ -9,7 +9,9 @@ const mocks = vi.hoisted(() => ({
   detail: {} as Record<string, unknown>,
   library: {} as Record<string, unknown>,
   mine: [] as unknown[],
+  named: undefined as unknown,
   useRequestMediaDetail: vi.fn(),
+  useMediaRequest: vi.fn(),
   useCatalogItemDetail: vi.fn(),
   useMyMediaRequests: vi.fn(),
   create: vi.fn(),
@@ -28,6 +30,10 @@ vi.mock("@/hooks/queries/useRequests", () => ({
     mocks.useMyMediaRequests(...args);
     return { data: mocks.mine };
   },
+  useMediaRequest: (...args: unknown[]) => {
+    mocks.useMediaRequest(...args);
+    return { data: mocks.named };
+  },
   useCancelMediaRequest: () => ({ mutate: mocks.cancel, isPending: false }),
   useToggleRequestFollow: () => ({ mutate: mocks.toggleFollow, isPending: false }),
 }));
@@ -38,6 +44,7 @@ vi.mock("@/hooks/queries/catalogRead", () => ({
   },
 }));
 vi.mock("@/hooks/useDocumentTitle", () => ({ useDocumentTitle: () => {} }));
+vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ user: { id: 7 } }) }));
 vi.mock("@/playback/watchPlaybackContext", () => ({
   useWatchPlaybackController: () => ({ startPlayback: vi.fn() }),
 }));
@@ -109,6 +116,7 @@ const ownPending: MediaRequest = {
   title: "The Matrix",
   status: "pending",
   outcome: "active",
+  requested_by_user_id: 7,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };
@@ -192,7 +200,9 @@ describe("TitleDetail", () => {
     mocks.detail = detailQuery(baseDetail);
     mocks.library = libraryQuery();
     mocks.mine = [ownPending];
+    mocks.named = ownPending;
     mocks.useRequestMediaDetail.mockReset();
+    mocks.useMediaRequest.mockReset();
     mocks.useCatalogItemDetail.mockReset();
     mocks.useMyMediaRequests.mockReset();
     mocks.create.mockReset();
@@ -296,8 +306,20 @@ describe("TitleDetail", () => {
       expect(screen.queryByRole("button", { name: /Stop notifying/ })).not.toBeInTheDocument();
     });
 
-    it("hides Cancel request when the pending request belongs to someone else", () => {
-      mocks.mine = [{ ...ownPending, id: "req-other" }];
+    it("offers Cancel request for a request older than the first page of the viewer's requests", () => {
+      mocks.mine = [];
+      renderDetail();
+
+      expect(primaryButton("Cancel request")).toBeEnabled();
+      expect(mocks.useMediaRequest).toHaveBeenCalledWith("req-1", { enabled: true });
+      expect(mocks.useMyMediaRequests).toHaveBeenCalledWith(
+        { outcome: "active" },
+        { enabled: false, pollDownloads: false },
+      );
+    });
+
+    it("hides Cancel request from an admin viewing another account's pending request", () => {
+      mocks.named = { ...ownPending, requested_by_user_id: 8 };
       renderDetail();
 
       expect(primaryButton("Requested")).toBeDisabled();
@@ -314,9 +336,12 @@ describe("TitleDetail", () => {
         { outcome: "active" },
         { enabled: false, pollDownloads: false },
       );
+      expect(mocks.useMediaRequest).toHaveBeenCalledWith("req-1", { enabled: false });
     });
 
     it("does not poll the viewer's requests while another of them downloads", () => {
+      // A detail that does not name the request falls back to the list.
+      const unnamed = { ...baseDetail, request: { ...baseDetail.request, request_id: undefined } };
       mocks.mine = [
         ownPending,
         {
@@ -327,7 +352,7 @@ describe("TitleDetail", () => {
           download: { phase: "downloading", downloads: 1, updated_at: "2026-01-01T00:00:00Z" },
         },
       ];
-      renderDetail();
+      renderDetail(unnamed);
 
       // The title shows only its own progress, which comes from its detail.
       expect(primaryButton("Cancel request")).toBeEnabled();

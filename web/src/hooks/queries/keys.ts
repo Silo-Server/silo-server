@@ -140,6 +140,7 @@ export const requestKeys = {
     ["requests", "search", viewerKey, mediaType, query, page] as const,
   detail: (mediaType: string, tmdbID: number) => ["requests", "detail", mediaType, tmdbID] as const,
   mine: (params: Record<string, unknown>) => ["requests", "mine", params] as const,
+  one: (id: string) => ["requests", "one", id] as const,
   // Prefixes for refreshing every params variant at once.
   discoverBrowseAll: () => ["requests", "discover", "browse"] as const,
   detailAll: () => ["requests", "detail"] as const,
