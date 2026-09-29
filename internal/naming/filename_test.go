@@ -439,7 +439,9 @@ func TestResolvePathContext(t *testing.T) {
 			wantMovieFolderEvidence: false,
 		},
 		{
-			name:                    "mixed library tvdb-only movie folder without episode token stays movie",
+			// The title check still applies to a TVDB-only folder, so a file
+			// repeating the folder's title and year is movie evidence.
+			name:                    "mixed library tvdb-only movie folder stays movie",
 			path:                    "/mixed/Movie (2020) {tvdb-12345}/Movie (2020).mkv",
 			libraryType:             "mixed",
 			wantType:                "movie",
@@ -448,7 +450,20 @@ func TestResolvePathContext(t *testing.T) {
 			wantYear:                2020,
 			wantEpisodePattern:      false,
 			wantSeasonStructure:     false,
-			wantMovieFolderEvidence: false,
+			wantMovieFolderEvidence: true,
+		},
+		{
+			// ...even when that title looks like an episode code.
+			name:                    "mixed library tvdb-only movie folder with episode-like title stays movie",
+			path:                    "/mixed/s01e03 (2020) {tvdb-12345}/s01e03 (2020).mkv",
+			libraryType:             "mixed",
+			wantType:                "movie",
+			wantRoot:                "/mixed/s01e03 (2020) {tvdb-12345}",
+			wantTitle:               "s01e03",
+			wantYear:                2020,
+			wantEpisodePattern:      true,
+			wantSeasonStructure:     false,
+			wantMovieFolderEvidence: true,
 		},
 		{
 			name:                    "mixed library obvious movie folder beats episode token",
