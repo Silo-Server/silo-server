@@ -1297,6 +1297,17 @@ clamp their bitrate but does not silently demote their resolution. Plain labels
 remain accepted for stored/default preferences and retain their existing
 height-only behavior.
 
+`auto` picks its resolution from the shared bitrate ladder
+([quality-ladder.md](quality-ladder.md)): 80% of the bandwidth estimate or cap
+earns a class for the source's frame rate. Automatic and plain-label targets fit
+the source into that class's 16:9 box, so a 3840x1600 film at the 1080p class
+streams at 1920x800, and encode at the class bitrate: 20000 kbps for 2160p, 6000
+for 1080p, 2000 for 720p, 1800 for 540p and 1500 for 480p, never above that 80%
+budget. A source that already fits the class but whose bitrate exceeds 80% of the
+bandwidth estimate is re-encoded at its own size within that budget rather than
+sent as-is; a cap keeps the rule above, where only a source over the cap itself
+is re-encoded.
+
 Registry availability is deliberately *not* consulted when building the menu: a
 capability check there could trigger lazy node fetches that a source-preserving
 start must never pay for. A rung whose toolchain turns out to be missing degrades

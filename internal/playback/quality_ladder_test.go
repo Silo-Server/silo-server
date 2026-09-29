@@ -270,3 +270,60 @@ func TestResolveDownloadTranscodeTargetWithoutAttestedDecoder(t *testing.T) {
 		t.Fatalf("a 640x360 decoder resolved %+v", target)
 	}
 }
+
+// Automatic streaming quality reads the same ladder as download presets,
+// keeping a fifth of the bandwidth estimate as headroom.
+func TestResolveQualityPolicyV3AutoUsesTheLadder(t *testing.T) {
+	fitsBudget := SourceDescriptorV3{Width: 1920, Height: 1080, BitrateKbps: 5_000, FrameRate: 24}
+	req := validStartRequestV3()
+	req.QualityPreference = "auto"
+	estimate := 7_000
+	req.BandwidthEstimateKbps = &estimate
+	if got := ResolveQualityPolicyV3(req, fitsBudget); !got.PreservesSource || got.RequiresTranscode {
+		t.Fatalf("a source within the budget = %#v, want it preserved", got)
+	}
+
+	uhd := SourceDescriptorV3{Width: 3840, Height: 2160, BitrateKbps: 40_000, FrameRate: 23.976}
+	scope := SourceDescriptorV3{Width: 3840, Height: 1600, BitrateKbps: 30_000, FrameRate: 23.976}
+	uhd60 := SourceDescriptorV3{Width: 3840, Height: 2160, BitrateKbps: 40_000, FrameRate: 60}
+	for _, tc := range []struct {
+		name        string
+		source      SourceDescriptorV3
+		estimate    int
+		wantW       int
+		wantH       int
+		wantLabel   string
+		wantBitrate int
+	}{
+		{"7 Mbps reaches 1080p within its budget", uhd, 7_000, 1920, 1080, "1080p", 5_600},
+		{"10 Mbps encodes 1080p at the class bitrate", uhd, 10_000, 1920, 1080, "1080p", 6_000},
+		{"4 Mbps is 720p", uhd, 4_000, 1280, 720, "720p", 2_000},
+		{"2 Mbps is 540p", uhd, 2_000, 960, 540, "540p", 1_600},
+		{"1 Mbps is 480p", uhd, 1_000, 854, 480, "480p", 800},
+		{"scope keeps its shape", scope, 10_000, 1920, 800, "800p", 6_000},
+		{"60 fps drops a class", uhd60, 7_000, 1280, 720, "720p", 2_000},
+		{"a source over the budget is re-encoded at its own size", SourceDescriptorV3{Width: 1920, Height: 1080, BitrateKbps: 8_000, FrameRate: 24}, 7_000, 1920, 1080, "1080p", 5_600},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := validStartRequestV3()
+			req.QualityPreference = "auto"
+			req.BandwidthEstimateKbps = &tc.estimate
+			got := ResolveQualityPolicyV3(req, tc.source)
+			if got.Width != tc.wantW || got.Height != tc.wantH || got.Label != tc.wantLabel || got.BitrateKbps != tc.wantBitrate || !got.RequiresTranscode {
+				t.Fatalf("auto at %d kbps = %dx%d %q %d kbps (transcode %v), want %dx%d %q %d kbps",
+					tc.estimate, got.Width, got.Height, got.Label, got.BitrateKbps, got.RequiresTranscode, tc.wantW, tc.wantH, tc.wantLabel, tc.wantBitrate)
+			}
+		})
+	}
+}
+
+// An original-quality route that still transcodes keeps the source frame.
+func TestOriginalQualityResultKeepsTheSourceHeight(t *testing.T) {
+	got := originalQualityResultV3(SourceDescriptorV3{Width: 3840, Height: 1600})
+	if got.Label != "1600p" || resolutionToScale(got.Label) != "scale=-2:1600" {
+		t.Fatalf("original label = %q (scale %q), want 1600p", got.Label, resolutionToScale(got.Label))
+	}
+	if got := originalQualityResultV3(SourceDescriptorV3{}); got.Label != "" {
+		t.Fatalf("unknown source height label = %q, want no scale", got.Label)
+	}
+}

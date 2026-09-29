@@ -41,3 +41,9 @@ ladder and Jellyfin's `ResolutionNormalizer`.
 - Download presets: `playback.ResolveDownloadTranscodeTarget`, reached from
   `downloads.DownloadQualityResolver`. Presets and their labels are in
   [docs/downloads-api.md](../downloads-api.md).
+- Automatic streaming quality: `playback.ResolveQualityPolicyV3` for `auto`, the
+  plain resolution labels, and bandwidth caps; see
+  [playback-protocol-v3.md](playback-protocol-v3.md). Explicit menu rungs
+  (`ladderRungsV3`) are user choices and keep their own table.
+- jellycompat: `compatTargetResolutionForBitrate` turns a Jellyfin client's
+  maximum streaming bitrate into the encoder height.
