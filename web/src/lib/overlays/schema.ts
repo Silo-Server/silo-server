@@ -125,6 +125,54 @@ export function parseOverlayPrefs(raw: unknown): CardOverlayPrefs {
   return migrateFromV1(obj);
 }
 
+// The overlay ids a stored ui.card_overlays value actually contains, before
+// parsing fills in the rest of the registry. The server validated that value,
+// so it accepts every one of them.
+export function storedOverlayIds(raw: unknown): ReadonlySet<string> {
+  let parsed = raw;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return new Set();
+    }
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return new Set();
+  const obj = parsed as Record<string, unknown>;
+  const items = looksLikeV2(obj) ? obj.items : obj;
+  return new Set(items && typeof items === "object" ? Object.keys(items) : []);
+}
+
+// What a server can store in ui.card_overlays: its settings manifest revision
+// when known, and the ids its stored value already holds.
+export interface OverlayServerSupport {
+  manifestRevision: number | undefined;
+  storedIds: ReadonlySet<string>;
+}
+
+// Whether the server accepts `id` in ui.card_overlays. Validation rejects the
+// whole document over one unknown id, so while the revision is unknown only
+// ids the server already stored count as supported.
+export function isOverlaySupportedBy(id: OverlayId, support: OverlayServerSupport): boolean {
+  const since = OVERLAY_MAP.get(id)?.introducedInManifest;
+  if (since === undefined) return true;
+  if (support.manifestRevision !== undefined) return support.manifestRevision >= since;
+  return support.storedIds.has(id);
+}
+
+// The document as the server can store it: ids it does not accept are
+// dropped from items and order.
+export function overlayPrefsForServer(
+  prefs: CardOverlayPrefs,
+  support: OverlayServerSupport,
+): CardOverlayPrefs {
+  const items = Object.fromEntries(
+    Object.entries(prefs.items).filter(([id]) => isOverlaySupportedBy(id as OverlayId, support)),
+  ) as CardOverlayPrefs["items"];
+  const order = prefs.order.filter((id) => isOverlaySupportedBy(id, support));
+  return { ...prefs, order, items };
+}
+
 export function serializeOverlayPrefs(prefs: CardOverlayPrefs): string {
   return JSON.stringify(prefs);
 }

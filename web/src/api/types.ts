@@ -794,6 +794,9 @@ export interface BrowseItem {
   studios?: string[];
   networks?: string[];
   content_rating: string;
+  /** Display-only advisory age; see ItemDetail.advisory_age. */
+  advisory_age?: number | null;
+  advisory_source?: string;
   status: "pending" | "matched" | "unmatched" | "ambiguous";
   show_status?: string;
   rating_imdb: number | null;
@@ -4298,6 +4301,9 @@ export interface SectionItem {
   studios?: string[];
   networks?: string[];
   content_rating?: string;
+  /** Display-only advisory age; see ItemDetail.advisory_age. */
+  advisory_age?: number | null;
+  advisory_source?: string;
   status: "pending" | "matched" | "unmatched" | "ambiguous";
   show_status?: string;
   rating_imdb: number | null;
