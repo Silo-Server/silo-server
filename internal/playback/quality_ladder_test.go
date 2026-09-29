@@ -303,6 +303,7 @@ func TestResolveQualityPolicyV3AutoUsesTheLadder(t *testing.T) {
 		{"scope keeps its shape", scope, 10_000, 1920, 800, "800p", 6_000},
 		{"60 fps drops a class", uhd60, 7_000, 1280, 720, "720p", 2_000},
 		{"a source over the budget is re-encoded at its own size", SourceDescriptorV3{Width: 1920, Height: 1080, BitrateKbps: 8_000, FrameRate: 24}, 7_000, 1920, 1080, "1080p", 5_600},
+		{"a scaled transcode never exceeds the source's bitrate", SourceDescriptorV3{Width: 3840, Height: 2160, VideoCodec: "hevc", BitrateKbps: 3_000, FrameRate: 24}, 10_000, 1920, 1080, "1080p", 5_000},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := validStartRequestV3()

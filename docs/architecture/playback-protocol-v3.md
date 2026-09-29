@@ -1306,7 +1306,8 @@ for 1080p, 2000 for 720p, 1800 for 540p and 1500 for 480p, never above that 80%
 budget. A source that already fits the class but whose bitrate exceeds 80% of the
 bandwidth estimate is re-encoded at its own size within that budget rather than
 sent as-is; a cap keeps the rule above, where only a source over the cap itself
-is re-encoded.
+is re-encoded. A transcode also never targets more than the source's own
+bitrate, counted as H.264.
 
 Registry availability is deliberately *not* consulted when building the menu: a
 capability check there could trigger lazy node fetches that a source-preserving

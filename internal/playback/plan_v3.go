@@ -1398,6 +1398,12 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 		// bitrate; keep the headroom the class choice assumed.
 		bitrate = budgetKbps
 	}
+	if source.BitrateKbps > 0 {
+		// A smaller frame never needs more bits than the whole source used,
+		// counted as H.264, the output the planner starts from.
+		sourceEquivalent := int(float64(source.BitrateKbps) / codecEfficiency(source.VideoCodec))
+		bitrate = min(bitrate, max(sourceEquivalent, 1))
+	}
 	if capKbps > 0 && bitrate > capKbps {
 		// The ladder has no rung below 480p, so a cap under the lowest rung's
 		// bitrate is honored by lowering the encode target directly: the cap
