@@ -1848,6 +1848,30 @@ export interface RequestState {
   requested_by_viewer?: boolean;
   /** User-facing state of the active request. */
   state?: RequestUserState;
+  /** How far the active request's downloads are. Only the title detail carries it. */
+  download?: RequestDownload;
+}
+
+/**
+ * How far a request's downloads are, while its download server reports them:
+ * for one server on a target, summed over its servers on a request.
+ */
+export interface RequestDownload {
+  /**
+   * queued, downloading, paused, stalled, importing or import_blocked. The
+   * server may add phases; read one this client does not know as downloading.
+   */
+  phase: string;
+  /** Rounded down; absent while the size is unknown. */
+  percent?: number;
+  bytes_total?: number;
+  bytes_left?: number;
+  /** Absent when the download server cannot tell. */
+  estimated_completion_at?: string;
+  /** Distinct downloads in flight; a season pack counts once. */
+  downloads: number;
+  /** When the server last heard from the download server. */
+  updated_at: string;
 }
 
 export interface RequestMediaResult {
@@ -2005,6 +2029,7 @@ export interface CreateMediaRequestInput {
   seasons?: number[];
 }
 
+/** The download server details (integration_*, instance_name, route_name, external_*, last_error) reach admins only. */
 export interface RequestTarget {
   id: number;
   request_id: string;
@@ -2019,10 +2044,12 @@ export interface RequestTarget {
   external_status?: string;
   status: MediaRequestStatus | "failed";
   last_error?: string;
+  download?: RequestDownload;
   created_at: string;
   updated_at: string;
 }
 
+/** integration_kind, external_id, external_status and last_error reach admins only. */
 export interface MediaRequest {
   id: string;
   provider: string;
@@ -2049,6 +2076,8 @@ export interface MediaRequest {
   /** Series season requests: each requested season's episodes, once the series is in the library. */
   season_progress?: RequestSeasonProgress[];
   targets?: RequestTarget[];
+  /** Over every server of the request: the phase that needs the most attention, the latest estimate. */
+  download?: RequestDownload;
   integration_kind?: string;
   external_id?: string;
   external_status?: string;

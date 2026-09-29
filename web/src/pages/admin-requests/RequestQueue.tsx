@@ -5,6 +5,7 @@ import { AlertTriangle, Maximize2, RefreshCw, Search, X } from "lucide-react";
 import type { MediaRequest } from "@/api/types";
 import type { AdminRequestCounts } from "@/api/v2/adminRequests";
 import { BulkSelectionCheckbox } from "@/components/BulkSelectionCheckbox";
+import { RequestDownloadProgress } from "@/components/RequestDownloadProgress";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -744,6 +745,13 @@ function TargetList({ request }: { request: MediaRequest }) {
           </div>
           {target.route_name ? (
             <p className="text-muted-foreground truncate">by {target.route_name}</p>
+          ) : null}
+          {target.download ? (
+            <RequestDownloadProgress
+              download={target.download}
+              admin
+              className="mt-1 w-56 max-w-full"
+            />
           ) : null}
           {target.last_error ? (
             <p className="text-destructive line-clamp-2 break-words">{target.last_error}</p>

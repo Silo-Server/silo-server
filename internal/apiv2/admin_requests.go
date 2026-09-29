@@ -250,7 +250,7 @@ func registerAdminRequests(reg *Registry) {
 			if err != nil {
 				return nil, requestProblem(err)
 			}
-			return &MediaRequestOutput{Body: mediaRequestOf(r)}, nil
+			return &MediaRequestOutput{Body: mediaRequestOf(r, v)}, nil
 		})
 	}
 	Register(reg, op(http.MethodGet, "/admin/request-settings", opGetAdminRequestSettings, false), reg.getAdminRequestSettings)
@@ -306,7 +306,7 @@ func (reg *Registry) listAdminRequests(ctx context.Context, cursors *Cursors, in
 	}
 	items := make([]MediaRequest, 0, len(rows))
 	for _, r := range rows {
-		items = append(items, mediaRequestOf(r))
+		items = append(items, mediaRequestOf(r, v))
 	}
 	return &MediaRequestCollectionOutput{Body: MediaRequestCollection{Collection: Paginated(items, next)}}, nil
 }

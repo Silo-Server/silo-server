@@ -404,10 +404,10 @@ type fulfillContext struct {
 	// standardOn is set when Standard routing is in effect.
 	standardOn bool
 
-	// mu guards seasonSupport, which caches whether each router capability
-	// takes seasons (see routerSupportsSeasons).
-	mu            sync.Mutex
-	seasonSupport map[routerCapabilityKey]bool
+	// mu guards features, which caches the features each router capability
+	// declares (see routerFeatures).
+	mu       sync.Mutex
+	features map[routerCapabilityKey]RouterFeatures
 }
 
 // routesFor returns the media type's routing rules; none means the router
@@ -788,6 +788,9 @@ func (s *Service) GetDetail(ctx context.Context, viewer Viewer, mediaType MediaT
 	}
 	primaryState := requestStateFor(viewer, policy, available, primaryRequests[raw.ID])
 	primaryState.Following = primaryRequests[raw.ID] != nil && primaryFollowing[raw.ID]
+	if primaryState.Download, err = s.activeRequestDownload(ctx, primaryRequests[raw.ID]); err != nil {
+		return nil, err
+	}
 
 	detail := &MediaDetail{
 		MediaType:           mediaType,
@@ -2864,41 +2867,78 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfill
 		return reconcileUnchanged, nil
 	}
 	statuses, checkErr := s.checkTargetStatuses(ctx, req, targets, fc)
+	change, err := s.applyTargetStatuses(ctx, targets, statuses)
+	if err != nil {
+		return reconcileUnchanged, err
+	}
+	return change, checkErr
+}
 
+// applyTargetStatuses writes the statuses a router reported for the given
+// targets, matched by quality and connection, and the download progress of
+// each target still queued or downloading afterwards. A target that reports
+// no progress has any it had cleared; one that had none is not written, so an
+// idle target costs no write per pass. A target with progress that got no
+// status back (its server was skipped or failed, or the call did) keeps it
+// until it goes stale; see settleUnansweredDownload. Both reconcile and the
+// download refresh pass apply statuses here.
+func (s *Service) applyTargetStatuses(ctx context.Context, targets []Target, statuses []RouterTargetStatus) (reconcileChange, error) {
 	change := reconcileUnchanged
+	answered := make([]bool, len(targets))
 	for _, st := range statuses {
 		// Match the returned status to the live target by (quality, connection).
 		var target *Target
 		for i := range targets {
 			if targets[i].Quality == st.Quality && targets[i].IntegrationID == st.ConnectionID {
 				target = &targets[i]
+				answered[i] = true
 				break
 			}
 		}
 		if target == nil || target.Status == StatusCompleted || target.Status == StatusFailed {
 			continue
 		}
-		newStatus := st.Status
-		if newStatus == "" || newStatus == target.Status {
-			continue
-		}
-		if _, err := s.store.UpdateTargetStatus(ctx, target.ID, newStatus, "", st.ExternalStatus, st.Message, Viewer{}); err != nil {
-			return reconcileUnchanged, err
-		}
-		switch newStatus {
-		case StatusCompleted:
-			change = reconcileCompleted
-		case StatusDownloading:
-			if change == reconcileUnchanged {
-				change = reconcileDownloading
+		status := target.Status
+		if newStatus := st.Status; newStatus != "" && newStatus != target.Status {
+			if _, err := s.store.UpdateTargetStatus(ctx, target.ID, newStatus, "", st.ExternalStatus, st.Message, Viewer{}); err != nil {
+				return reconcileUnchanged, err
 			}
-		case StatusFailed:
-			if change == reconcileUnchanged {
-				change = reconcileFailed
+			status = newStatus
+			switch newStatus {
+			case StatusCompleted:
+				change = reconcileCompleted
+			case StatusDownloading:
+				if change == reconcileUnchanged {
+					change = reconcileDownloading
+				}
+			case StatusFailed:
+				if change == reconcileUnchanged {
+					change = reconcileFailed
+				}
+			}
+		} else if st.ExternalStatus != "" && st.ExternalStatus != target.ExternalStatus {
+			// The server's own state moved without changing the target's
+			// status (say, a download went from importing to stalled). Keep
+			// the raw status in step with the progress shown beside it.
+			if err := s.store.UpdateTargetExternalStatus(ctx, target.ID, st.ExternalStatus); err != nil {
+				return reconcileUnchanged, err
+			}
+		}
+		if (status == StatusQueued || status == StatusDownloading) && (st.Progress != nil || target.Download != nil) {
+			if err := s.store.UpdateTargetDownload(ctx, target.ID, st.Progress); err != nil {
+				return reconcileUnchanged, err
 			}
 		}
 	}
-	return change, checkErr
+	for i, target := range targets {
+		if answered[i] {
+			continue
+		}
+		if err := s.settleUnansweredDownload(ctx, target); err != nil {
+			return reconcileUnchanged, err
+		}
+	}
+	return change, nil
 }
 
 // checkTargetStatuses asks each live target's plugin for its status. Targets
@@ -2955,7 +2995,7 @@ func (s *Service) checkTargetStatuses(ctx context.Context, req Request, targets 
 			continue
 		}
 		in := integrationByID(fc, t.IntegrationID)
-		if in == nil || !in.Enabled || in.InstallationID == nil || in.CapabilityID == "" || strings.TrimSpace(in.APIKeyRef) == "" {
+		if !statusCheckable(in) {
 			continue
 		}
 		g := groupFor(owner{*in.InstallationID, in.CapabilityID})
@@ -2973,6 +3013,10 @@ func (s *Service) checkTargetStatuses(ctx context.Context, req Request, targets 
 			errs = append(errs, err)
 			continue
 		}
+		keepProgress, err := s.keepsReportedProgress(ctx, fc, key.installationID, key.capabilityID, statuses)
+		if err != nil {
+			errs = append(errs, err)
+		}
 		// A plugin that omits connection_id from its statuses omits it from
 		// its targets too, and a routed target was recorded on its server
 		// anyway. When every target in the group is on one server, a status
@@ -2981,6 +3025,9 @@ func (s *Service) checkTargetStatuses(ctx context.Context, req Request, targets 
 		for _, st := range statuses {
 			if st.ConnectionID == "" {
 				st.ConnectionID = server
+			}
+			if !keepProgress {
+				st.Progress = nil
 			}
 			out = append(out, st)
 		}
@@ -2999,6 +3046,13 @@ func soleRefConnection(refs []RouterTargetRef) string {
 		server = ref.ConnectionID
 	}
 	return server
+}
+
+// statusCheckable reports whether a target's server can be asked for the
+// target's status: it still exists, is enabled, is bound to a router
+// capability, and has an API key.
+func statusCheckable(in *Integration) bool {
+	return in != nil && in.Enabled && in.InstallationID != nil && in.CapabilityID != "" && strings.TrimSpace(in.APIKeyRef) != ""
 }
 
 func integrationByID(fc *fulfillContext, id string) *Integration {

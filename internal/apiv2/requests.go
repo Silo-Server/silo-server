@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"math/bits"
 	"net/http"
 	"slices"
 	"strconv"
@@ -30,6 +31,21 @@ type RequestMediaState struct {
 	Following   bool   `json:"following" doc:"Whether the viewer will be notified when the media becomes available: they requested it or follow it" example:"false"`
 	// RequestedByViewer tells a client whether to offer a follow toggle.
 	RequestedByViewer bool `json:"requested_by_viewer" doc:"Whether the viewing profile made the active request, so there is nothing to follow" example:"false"`
+	// Download is filled on the title detail only: search and discovery do
+	// not load each result's targets.
+	Download *RequestDownload `json:"download,omitempty" doc:"How far the active request's downloads are, while its download server reports them. Only the title detail (getRequestMediaDetail) carries it"`
+}
+
+// RequestDownload is how far downloads are, as the download server last
+// reported them.
+type RequestDownload struct {
+	Phase                 string   `json:"phase" doc:"queued, downloading, paused, stalled, importing or import_blocked. More values may be added: read an unknown one as downloading, without a percentage" example:"downloading"`
+	Percent               *int     `json:"percent,omitempty" minimum:"0" maximum:"100" doc:"How much has downloaded, rounded down; absent while the size is unknown" example:"43"`
+	BytesTotal            *int64   `json:"bytes_total,omitempty" minimum:"1" doc:"Size of the downloads in bytes; absent while unknown" example:"4294967296"`
+	BytesLeft             *int64   `json:"bytes_left,omitempty" minimum:"0" doc:"Bytes still to download; present whenever bytes_total is" example:"2448131358"`
+	EstimatedCompletionAt *Instant `json:"estimated_completion_at,omitempty" doc:"When the download server expects the downloads to finish; absent when it cannot tell" example:"2026-01-02T03:16:05.000Z"`
+	Downloads             int      `json:"downloads" minimum:"0" doc:"Distinct downloads in flight; a season pack counts once" example:"1"`
+	UpdatedAt             Instant  `json:"updated_at" doc:"When the server last heard from the download server. A client may hide figures older than about ten minutes" example:"2026-01-02T03:04:05.000Z"`
 }
 
 // RequestMediaResult is one discovery or search card.
@@ -168,22 +184,25 @@ type DiscoverBrowsePage struct {
 }
 
 // RequestTarget is one fulfillment of a request against one integration
-// instance at one quality.
+// instance at one quality. The download server details are for admins only:
+// see mediaRequestOf.
 type RequestTarget struct {
 	ID              ID      `json:"id" example:"42"`
 	RequestID       ID      `json:"request_id" example:"1834729"`
-	IntegrationID   string  `json:"integration_id,omitempty"`
-	IntegrationKind string  `json:"integration_kind,omitempty" example:"radarr"`
-	InstanceName    string  `json:"instance_name,omitempty"`
+	IntegrationID   string  `json:"integration_id,omitempty" doc:"Admins only: the download server holding this target"`
+	IntegrationKind string  `json:"integration_kind,omitempty" doc:"Admins only: the download server's kind" example:"radarr"`
+	InstanceName    string  `json:"instance_name,omitempty" doc:"Admins only: the download server's name"`
 	Quality         string  `json:"quality" example:"1080p"`
 	IsAnime         bool    `json:"is_anime"`
-	ExternalID      string  `json:"external_id,omitempty" doc:"The integration's own identifier"`
-	ExternalStatus  string  `json:"external_status,omitempty"`
+	ExternalID      string  `json:"external_id,omitempty" doc:"Admins only: the integration's own identifier"`
+	ExternalStatus  string  `json:"external_status,omitempty" doc:"Admins only: the status as the download server reports it"`
 	Status          string  `json:"status" example:"queued"`
-	LastError       string  `json:"last_error,omitempty"`
-	RouteName       string  `json:"route_name,omitempty" doc:"The routing rule that sent this target to its server, as named when it was sent"`
+	LastError       string  `json:"last_error,omitempty" doc:"Admins only: why the download server failed this target"`
+	RouteName       string  `json:"route_name,omitempty" doc:"Admins only: the routing rule that sent this target to its server, as named when it was sent"`
 	CreatedAt       Instant `json:"created_at" example:"2026-01-02T03:04:05.000Z"`
 	UpdatedAt       Instant `json:"updated_at" example:"2026-01-02T03:04:05.000Z"`
+	// Download is set while the target's router plugin reports progress.
+	Download *RequestDownload `json:"download,omitempty" doc:"How far this target's downloads are, while its download server reports them"`
 }
 
 // MediaRequest is one media request.
@@ -207,17 +226,18 @@ type MediaRequest struct {
 	OutcomeReason        string                  `json:"outcome_reason,omitempty" doc:"Why the request was declined or withdrawn, when a reason was given"`
 	RequestedByUserID    ID                      `json:"requested_by_user_id,omitempty" example:"1"`
 	RequestedByProfileID ID                      `json:"requested_by_profile_id,omitempty" example:"p-owner"`
-	IntegrationKind      string                  `json:"integration_kind,omitempty" example:"radarr"`
+	IntegrationKind      string                  `json:"integration_kind,omitempty" doc:"Admins only: the download server's kind" example:"radarr"`
 	IsAnime              bool                    `json:"is_anime"`
 	Targets              []RequestTarget         `json:"targets" doc:"Empty, never null"`
-	ExternalID           string                  `json:"external_id,omitempty"`
-	ExternalStatus       string                  `json:"external_status,omitempty"`
+	ExternalID           string                  `json:"external_id,omitempty" doc:"Admins only: the integration's own identifier"`
+	ExternalStatus       string                  `json:"external_status,omitempty" doc:"Admins only: the status as the download server reports it"`
 	LibraryContentID     string                  `json:"library_content_id,omitempty" doc:"The catalog item once the media is in the library"`
-	LastError            string                  `json:"last_error,omitempty"`
+	LastError            string                  `json:"last_error,omitempty" doc:"Admins only: why the last submission to a download server failed. It can name servers and routing rules"`
 	CreatedAt            Instant                 `json:"created_at" example:"2026-01-02T03:04:05.000Z"`
 	UpdatedAt            Instant                 `json:"updated_at" example:"2026-01-02T03:04:05.000Z"`
 	ApprovedAt           *Instant                `json:"approved_at,omitempty"`
 	CompletedAt          *Instant                `json:"completed_at,omitempty"`
+	Download             *RequestDownload        `json:"download,omitempty" doc:"How far the request's downloads are over all its servers (1080p and 4K together), while any reports them: bytes summed, the phase that needs the most attention, the latest estimate, and the oldest report's time"`
 }
 
 // MediaRequestOutput is a single-request response.
@@ -503,7 +523,7 @@ func (reg *Registry) createRequest(ctx context.Context, in *MediaRequestCreateIn
 	if err != nil {
 		return nil, requestProblem(err)
 	}
-	return &MediaRequestOutput{Body: mediaRequestOf(req)}, nil
+	return &MediaRequestOutput{Body: mediaRequestOf(req, viewer)}, nil
 }
 
 // listMyRequests pages by the last emitted creation time and unique request ID.
@@ -549,7 +569,7 @@ func (reg *Registry) listMyRequests(ctx context.Context, cursors *Cursors, in *M
 	}
 	items := make([]MediaRequest, 0, len(rows))
 	for _, r := range rows {
-		items = append(items, mediaRequestOf(r))
+		items = append(items, mediaRequestOf(r, viewer))
 	}
 	return &MediaRequestCollectionOutput{Body: MediaRequestCollection{Collection: Paginated(items, next)}}, nil
 }
@@ -564,7 +584,7 @@ func (reg *Registry) getRequest(ctx context.Context, in *MediaRequestGetInput) (
 	if err != nil {
 		return nil, requestProblem(err)
 	}
-	return &MediaRequestOutput{Body: mediaRequestOf(req)}, nil
+	return &MediaRequestOutput{Body: mediaRequestOf(req, viewer)}, nil
 }
 
 // searchRequestMedia is v1 GET /requests/search.
@@ -780,7 +800,12 @@ func requestProblem(err error) *Problem {
 	return NewProblem(TypeInternalError, "An unexpected error occurred.")
 }
 
-func mediaRequestOf(r *mediarequests.Request) MediaRequest {
+// mediaRequestOf maps a request for the viewer. The download server details
+// (which server and routing rule took each target, the server's own ids and
+// raw statuses, and the submission and target errors, which can name servers
+// and routing rules) go to an admin only. A requester keeps each target's
+// quality, status and download progress.
+func mediaRequestOf(r *mediarequests.Request, viewer mediarequests.Viewer) MediaRequest {
 	out := MediaRequest{
 		ID:               ID(r.ID),
 		Provider:         r.Provider,
@@ -799,31 +824,63 @@ func mediaRequestOf(r *mediarequests.Request) MediaRequest {
 		Seasons:          NonNil(r.Seasons),
 		SeasonProgress:   requestSeasonProgressOf(r.SeasonProgress),
 		OutcomeReason:    r.OutcomeReason,
-		IntegrationKind:  r.IntegrationKind,
 		IsAnime:          r.IsAnime,
 		Targets:          make([]RequestTarget, 0, len(r.Targets)),
-		ExternalID:       r.ExternalID,
-		ExternalStatus:   r.ExternalStatus,
 		LibraryContentID: r.LibraryContentID,
-		LastError:        r.LastError,
 		CreatedAt:        NewInstant(r.CreatedAt),
 		UpdatedAt:        NewInstant(r.UpdatedAt),
 		ApprovedAt:       instantPtr(r.ApprovedAt),
 		CompletedAt:      instantPtr(r.CompletedAt),
+		Download:         requestDownloadOf(r.Download()),
+	}
+	if viewer.IsAdmin {
+		out.IntegrationKind, out.ExternalID, out.ExternalStatus, out.LastError = r.IntegrationKind, r.ExternalID, r.ExternalStatus, r.LastError
 	}
 	if r.RequestedByUserID != 0 {
 		out.RequestedByUserID = IDFromInt(int64(r.RequestedByUserID))
 	}
 	out.RequestedByProfileID = ID(r.RequestedByProfileID)
 	for _, t := range r.Targets {
-		out.Targets = append(out.Targets, RequestTarget{
-			ID: IDFromInt(t.ID), RequestID: ID(t.RequestID), IntegrationID: t.IntegrationID,
-			IntegrationKind: t.IntegrationKind, InstanceName: t.InstanceName, Quality: string(t.Quality),
-			IsAnime: t.IsAnime, ExternalID: t.ExternalID, ExternalStatus: t.ExternalStatus, Status: string(t.Status),
-			LastError: t.LastError, RouteName: t.RouteName, CreatedAt: NewInstant(t.CreatedAt), UpdatedAt: NewInstant(t.UpdatedAt),
-		})
+		target := RequestTarget{
+			ID: IDFromInt(t.ID), RequestID: ID(t.RequestID), Quality: string(t.Quality), IsAnime: t.IsAnime,
+			Status: string(t.Status), CreatedAt: NewInstant(t.CreatedAt), UpdatedAt: NewInstant(t.UpdatedAt),
+			Download: requestDownloadOf(t.Download),
+		}
+		if viewer.IsAdmin {
+			target.IntegrationID, target.IntegrationKind, target.InstanceName = t.IntegrationID, t.IntegrationKind, t.InstanceName
+			target.ExternalID, target.ExternalStatus, target.LastError, target.RouteName = t.ExternalID, t.ExternalStatus, t.LastError, t.RouteName
+		}
+		out.Targets = append(out.Targets, target)
 	}
 	return out
+}
+
+// requestDownloadOf maps download progress. The byte counts and percent are
+// left out while the size is unknown (a total of 0).
+func requestDownloadOf(d *mediarequests.DownloadProgress) *RequestDownload {
+	if d == nil {
+		return nil
+	}
+	out := &RequestDownload{
+		Phase:                 string(d.Phase),
+		EstimatedCompletionAt: instantPtr(d.EstimatedCompletion),
+		Downloads:             max(d.Downloads, 0),
+		UpdatedAt:             NewInstant(d.UpdatedAt),
+	}
+	if d.BytesTotal > 0 {
+		total, left := d.BytesTotal, min(max(d.BytesLeft, 0), d.BytesTotal)
+		percent := downloadPercent(total, left)
+		out.BytesTotal, out.BytesLeft, out.Percent = &total, &left, &percent
+	}
+	return out
+}
+
+// downloadPercent is floor((total-left)*100/total) for 0 <= left <= total and
+// total > 0. The product is taken in 128 bits, so no total can overflow it.
+func downloadPercent(total, left int64) int {
+	hi, lo := bits.Mul64(uint64(total-left), 100)
+	percent, _ := bits.Div64(hi, lo, uint64(total))
+	return int(percent)
 }
 
 func requestSeasonProgressOf(progress []mediarequests.SeasonProgress) []RequestSeasonProgress {
@@ -835,7 +892,7 @@ func requestSeasonProgressOf(progress []mediarequests.SeasonProgress) []RequestS
 }
 
 func requestMediaStateOf(s mediarequests.RequestState) RequestMediaState {
-	return RequestMediaState{Status: string(s.Status), Requestable: s.Requestable, Reason: s.Reason, RequestID: ID(s.RequestID), Following: s.Following, RequestedByViewer: s.RequestedByViewer, State: string(s.State)}
+	return RequestMediaState{Status: string(s.Status), Requestable: s.Requestable, Reason: s.Reason, RequestID: ID(s.RequestID), Following: s.Following, RequestedByViewer: s.RequestedByViewer, State: string(s.State), Download: requestDownloadOf(s.Download)}
 }
 
 func requestMediaResultsOf(results []mediarequests.MediaResult) []RequestMediaResult {

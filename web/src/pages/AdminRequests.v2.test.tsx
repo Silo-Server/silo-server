@@ -632,6 +632,54 @@ describe("request administration", () => {
     expect(screen.queryByRole("link", { name: "Waiting Title" })).not.toBeInTheDocument();
   });
 
+  it("shows each server's download progress and names a blocked import", async () => {
+    const heard = "2026-09-01T00:05:00Z";
+    serve({
+      ...queue({
+        in_progress: [
+          request("r3", "Downloading Title", {
+            status: "downloading",
+            state: "processing",
+            targets: [
+              target("t1", {
+                status: "downloading",
+                download: {
+                  phase: "import_blocked",
+                  percent: 100,
+                  downloads: 1,
+                  updated_at: heard,
+                },
+              }),
+              target("t2", {
+                quality: "2160p",
+                instance_name: "Radarr 4K",
+                status: "downloading",
+                download: { phase: "downloading", percent: 43, downloads: 1, updated_at: heard },
+              }),
+            ],
+            download: { phase: "import_blocked", percent: 71, downloads: 2, updated_at: heard },
+          }),
+        ],
+      }),
+      "GET /api/v2/admin/requests/{id}/events": () => ({ items: [] }),
+    });
+    mount("/admin/requests?view=in_progress");
+    const row = await rowOf("Downloading Title");
+    expect(within(row).getByText("Import blocked")).toBeInTheDocument();
+    expect(within(row).getByText("Downloading · 43%")).toBeInTheDocument();
+    expect(
+      within(row)
+        .getAllByRole("progressbar")
+        .map((bar) => bar.getAttribute("aria-valuenow")),
+    ).toEqual(["100", "43"]);
+    expect(within(row).queryByText("Waiting for import")).not.toBeInTheDocument();
+
+    fireEvent.click(within(row).getByRole("button", { name: "Details: Downloading Title" }));
+    const servers = within(await screen.findByRole("dialog")).getByRole("table");
+    expect(within(servers).getByText("Import blocked")).toBeInTheDocument();
+    expect(within(servers).getByText("Downloading · 43%")).toBeInTheDocument();
+  });
+
   it("loads the next page from the cursor the last one returned", async () => {
     serve({
       ...queue({}),

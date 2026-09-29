@@ -33,7 +33,10 @@ func (a PluginRequestRouterAdapter) RouterFeatures(ctx context.Context, installa
 	if err != nil {
 		return mediarequests.RouterFeatures{}, err
 	}
-	return mediarequests.RouterFeatures{SupportsSeasons: descriptor.GetSupportsSeasons()}, nil
+	return mediarequests.RouterFeatures{
+		SupportsSeasons:         descriptor.GetSupportsSeasons(),
+		ReportsDownloadProgress: descriptor.GetReportsDownloadProgress(),
+	}, nil
 }
 
 // AttachRequestRouter wires the plugin-backed router provider onto a requests

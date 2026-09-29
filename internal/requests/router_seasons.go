@@ -13,6 +13,9 @@ type RouterFeatures struct {
 	// them to a series its download server already has, leaving the other
 	// seasons alone. Any other plugin takes the whole series.
 	SupportsSeasons bool
+	// ReportsDownloadProgress: CheckStatus fills each live target's download
+	// progress. The download refresh pass polls only such plugins.
+	ReportsDownloadProgress bool
 }
 
 // RouterFeatureReader reads a router capability's declared features from the
@@ -28,32 +31,39 @@ type routerCapabilityKey struct {
 	capabilityID   string
 }
 
-// routerSupportsSeasons reports whether the router capability takes a request
-// for particular seasons. The answer is kept for the fulfill context's
-// lifetime, one reconcile pass or one request.
-func (s *Service) routerSupportsSeasons(ctx context.Context, fc *fulfillContext, installationID int, capabilityID string) (bool, error) {
+// routerFeatures returns the features a router capability declares. The
+// answer is kept for the fulfill context's lifetime, one reconcile pass or one
+// request.
+func (s *Service) routerFeatures(ctx context.Context, fc *fulfillContext, installationID int, capabilityID string) (RouterFeatures, error) {
 	reader, ok := s.router.(RouterFeatureReader)
 	if !ok {
-		return false, nil
+		return RouterFeatures{}, nil
 	}
 	key := routerCapabilityKey{installationID, capabilityID}
 	fc.mu.Lock()
-	supported, cached := fc.seasonSupport[key]
+	features, cached := fc.features[key]
 	fc.mu.Unlock()
 	if cached {
-		return supported, nil
+		return features, nil
 	}
 	features, err := reader.RouterFeatures(ctx, installationID, capabilityID)
 	if err != nil {
-		return false, fmt.Errorf("read request router features: %w", err)
+		return RouterFeatures{}, fmt.Errorf("read request router features: %w", err)
 	}
 	fc.mu.Lock()
-	if fc.seasonSupport == nil {
-		fc.seasonSupport = map[routerCapabilityKey]bool{}
+	if fc.features == nil {
+		fc.features = map[routerCapabilityKey]RouterFeatures{}
 	}
-	fc.seasonSupport[key] = features.SupportsSeasons
+	fc.features[key] = features
 	fc.mu.Unlock()
-	return features.SupportsSeasons, nil
+	return features, nil
+}
+
+// routerSupportsSeasons reports whether the router capability takes a request
+// for particular seasons.
+func (s *Service) routerSupportsSeasons(ctx context.Context, fc *fulfillContext, installationID int, capabilityID string) (bool, error) {
+	features, err := s.routerFeatures(ctx, fc, installationID, capabilityID)
+	return features.SupportsSeasons, err
 }
 
 // allTakeSeasons reports whether every given connection is bound to a router

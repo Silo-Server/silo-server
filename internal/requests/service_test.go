@@ -2001,8 +2001,25 @@ type fakeStore struct {
 
 	setExternalIDsErr error
 
+	// downloadWrites records each progress write UpdateTargetDownload
+	// applied; downloadErr fails it. downloadChecked holds when each target
+	// was last asked about, as the repository's download_checked_at, and
+	// downloadChecks the targets MarkTargetDownloadChecked stamped.
+	downloadWrites  []downloadWrite
+	downloadErr     error
+	downloadChecked map[int64]time.Time
+	downloadChecks  []int64
+	// externalStatusWrites records the targets UpdateTargetExternalStatus
+	// wrote.
+	externalStatusWrites []int64
+
 	listIntegrationsCalls int
 	getSettingsCalls      int
+}
+
+type downloadWrite struct {
+	targetID int64
+	progress *DownloadProgress
 }
 
 type requestGroupProvider struct {
@@ -2147,6 +2164,57 @@ func (f *fakeStore) ListLibraryWaitCandidates(context.Context, int) ([]*Request,
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.waiting, nil
+}
+
+// ListDownloadingRequests mirrors the repository: active requests with a
+// downloading target that has progress, by the one asked about longest ago,
+// then id. A seeded target that was never asked about counts as asked when
+// its progress was reported.
+func (f *fakeStore) ListDownloadingRequests(_ context.Context, limit int) ([]*Request, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	type candidate struct {
+		req     *Request
+		checked time.Time
+	}
+	var found []candidate
+	for id, targets := range f.targets {
+		req := f.requests[id]
+		if req == nil || req.Outcome != OutcomeActive {
+			continue
+		}
+		var checked *time.Time
+		for _, t := range targets {
+			if t.Status != StatusDownloading || t.Download == nil {
+				continue
+			}
+			at, ok := f.downloadChecked[t.ID]
+			if !ok {
+				at = t.Download.UpdatedAt
+			}
+			if checked == nil || at.Before(*checked) {
+				checked = &at
+			}
+		}
+		if checked != nil {
+			copy := *req
+			found = append(found, candidate{req: &copy, checked: *checked})
+		}
+	}
+	slices.SortFunc(found, func(a, b candidate) int {
+		if c := a.checked.Compare(b.checked); c != 0 {
+			return c
+		}
+		return strings.Compare(a.req.ID, b.req.ID)
+	})
+	out := make([]*Request, 0, len(found))
+	for _, c := range found {
+		if limit > 0 && len(out) == limit {
+			break
+		}
+		out = append(out, c.req)
+	}
+	return out, nil
 }
 
 func (f *fakeStore) ListFulfilledUnnotified(context.Context, int) ([]*Request, error) {
@@ -2729,6 +2797,91 @@ func (f *fakeStore) UpdateTargetStatus(_ context.Context, targetID int64, status
 	return f.updateTargetLocked(targetID, status, externalID, externalStatus, lastErr)
 }
 
+// UpdateTargetDownload mirrors the repository: it writes only while the
+// target is queued or downloading, and touches nothing but the progress.
+// Every write it applies is recorded in downloadWrites.
+func (f *fakeStore) UpdateTargetDownload(_ context.Context, targetID int64, progress *DownloadProgress) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.downloadErr != nil {
+		return f.downloadErr
+	}
+	for rid, ts := range f.targets {
+		for i := range ts {
+			if ts[i].ID != targetID {
+				continue
+			}
+			if ts[i].Status != StatusQueued && ts[i].Status != StatusDownloading {
+				return nil
+			}
+			var stored *DownloadProgress
+			if f.downloadChecked == nil {
+				f.downloadChecked = map[int64]time.Time{}
+			}
+			delete(f.downloadChecked, targetID)
+			if progress != nil {
+				copy := *progress
+				copy.UpdatedAt = time.Now().UTC()
+				stored = &copy
+				f.downloadChecked[targetID] = copy.UpdatedAt
+			}
+			f.targets[rid][i].Download = stored
+			f.downloadWrites = append(f.downloadWrites, downloadWrite{targetID: targetID, progress: stored})
+			return nil
+		}
+	}
+	return nil
+}
+
+// MarkTargetDownloadChecked mirrors the repository: it stamps a queued or
+// downloading target that has progress as asked about now, leaving the
+// progress alone, and records the stamp in downloadChecks.
+func (f *fakeStore) MarkTargetDownloadChecked(_ context.Context, targetID int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.downloadErr != nil {
+		return f.downloadErr
+	}
+	for _, ts := range f.targets {
+		for _, t := range ts {
+			if t.ID != targetID {
+				continue
+			}
+			if t.Download == nil || (t.Status != StatusQueued && t.Status != StatusDownloading) {
+				return nil
+			}
+			if f.downloadChecked == nil {
+				f.downloadChecked = map[int64]time.Time{}
+			}
+			f.downloadChecked[targetID] = time.Now().UTC()
+			f.downloadChecks = append(f.downloadChecks, targetID)
+			return nil
+		}
+	}
+	return nil
+}
+
+// UpdateTargetExternalStatus mirrors the repository: it writes only a changed
+// raw status on a queued or downloading target, and touches nothing else.
+func (f *fakeStore) UpdateTargetExternalStatus(_ context.Context, targetID int64, externalStatus string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for rid, ts := range f.targets {
+		for i := range ts {
+			if ts[i].ID != targetID {
+				continue
+			}
+			if (ts[i].Status != StatusQueued && ts[i].Status != StatusDownloading) || ts[i].ExternalStatus == externalStatus {
+				return nil
+			}
+			f.targets[rid][i].ExternalStatus = externalStatus
+			f.externalStatusWrites = append(f.externalStatusWrites, targetID)
+			return nil
+		}
+	}
+	return nil
+}
+
 // RecordSubmission mirrors the repository's lease fence, then records each
 // target the way a create followed by a status update would.
 func (f *fakeStore) RecordSubmission(_ context.Context, id string, leaseUntil time.Time, targets []Target, _ Viewer) (*Request, error) {
@@ -2776,6 +2929,10 @@ func (f *fakeStore) updateTargetLocked(targetID int64, status Status, externalID
 				}
 				f.targets[rid][i].Status = status
 				f.targets[rid][i].LastError = lastErr
+				if status == StatusCompleted || status == StatusFailed {
+					f.targets[rid][i].Download = nil
+					delete(f.downloadChecked, targetID)
+				}
 				requestID = rid
 			}
 		}
@@ -3197,16 +3354,23 @@ type fakeRouterProvider struct {
 	// seasonCapable marks the installations whose router declares
 	// supports_seasons; RouterFeatures answers from it.
 	seasonCapable map[int]bool
-	featuresErr   error
-	gotTVDBID     *int
+	// progressCapable marks the installations whose router declares
+	// reports_download_progress.
+	progressCapable map[int]bool
+	featuresErr     error
+	gotTVDBID       *int
 
 	// CheckStatus behavior.
 	statuses  []RouterTargetStatus
 	statusErr error
 	// statusErrFor fails CheckStatus for one installation only.
 	statusErrFor map[int]error
-	statusCalls  int
-	statusLog    []statusCall
+	// statusHangFor makes CheckStatus for an installation wait until its
+	// context ends, the way a call to a server that stopped answering runs to
+	// its deadline.
+	statusHangFor map[int]bool
+	statusCalls   int
+	statusLog     []statusCall
 
 	// ListConfigOptions behavior.
 	options        map[string][]RouterOption
@@ -3225,7 +3389,10 @@ type fakeRouterProvider struct {
 func (f *fakeRouterProvider) RouterFeatures(_ context.Context, installationID int, _ string) (RouterFeatures, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return RouterFeatures{SupportsSeasons: f.seasonCapable[installationID]}, f.featuresErr
+	return RouterFeatures{
+		SupportsSeasons:         f.seasonCapable[installationID],
+		ReportsDownloadProgress: f.progressCapable[installationID],
+	}, f.featuresErr
 }
 
 func (f *fakeRouterProvider) Fulfill(_ context.Context, installationID int, _ string, req Request, qualities []Quality, conns []ResolvedRouterConnection) ([]RouterTarget, string, error) {
@@ -3270,11 +3437,18 @@ func (f *fakeRouterProvider) Fulfill(_ context.Context, installationID int, _ st
 	return out, f.fulfillMsg, nil
 }
 
-func (f *fakeRouterProvider) CheckStatus(_ context.Context, installationID int, capabilityID string, _ Request, refs []RouterTargetRef, conns []ResolvedRouterConnection) ([]RouterTargetStatus, error) {
+func (f *fakeRouterProvider) CheckStatus(ctx context.Context, installationID int, capabilityID string, _ Request, refs []RouterTargetRef, conns []ResolvedRouterConnection) ([]RouterTargetStatus, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.statusCalls++
 	f.statusLog = append(f.statusLog, statusCall{installationID: installationID, capabilityID: capabilityID, refs: slices.Clone(refs), conns: slices.Clone(conns)})
+	hang := f.statusHangFor[installationID]
+	f.mu.Unlock()
+	if hang {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if err := f.statusErrFor[installationID]; err != nil {
 		return nil, err
 	}

@@ -19547,6 +19547,8 @@ export interface components {
     FeatureStatus: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
+      /** @description Whether the server reports download progress (download on requests, their targets, and the title detail's request state). Whether a given request has any depends on its download server's request plugin. */
+      download_progress_supported: boolean;
       follow_supported: boolean;
       /** @description Whether a series already in the library can be requested for the seasons it is missing. False while a download server that takes series uses a request plugin that cannot fetch individual seasons, so such a series stays already_available. */
       missing_seasons_requestable: boolean;
@@ -21196,7 +21198,11 @@ export interface components {
        * @example 2026-01-02T03:04:05.000Z
        */
       created_at: string;
+      /** @description How far the request's downloads are over all its servers (1080p and 4K together), while any reports them: bytes summed, the phase that needs the most attention, the latest estimate, and the oldest report's time */
+      download?: components["schemas"]["RequestDownload"];
+      /** @description Admins only: the integration's own identifier */
       external_id?: string;
+      /** @description Admins only: the status as the download server reports it */
       external_status?: string;
       /**
        * @description Opaque identifier
@@ -21205,9 +21211,13 @@ export interface components {
       id: string;
       /** @example tt0113277 */
       imdb_id?: string;
-      /** @example radarr */
+      /**
+       * @description Admins only: the download server's kind
+       * @example radarr
+       */
       integration_kind?: string;
       is_anime: boolean;
+      /** @description Admins only: why the last submission to a download server failed. It can name servers and routing rules */
       last_error?: string;
       /** @description The catalog item once the media is in the library */
       library_content_id?: string;
@@ -24378,6 +24388,49 @@ export interface components {
     RequestCancelInputBody: {
       reason?: string;
     };
+    RequestDownload: {
+      /**
+       * Format: int64
+       * @description Bytes still to download; present whenever bytes_total is
+       * @example 2448131358
+       */
+      bytes_left?: number;
+      /**
+       * Format: int64
+       * @description Size of the downloads in bytes; absent while unknown
+       * @example 4294967296
+       */
+      bytes_total?: number;
+      /**
+       * Format: int64
+       * @description Distinct downloads in flight; a season pack counts once
+       * @example 1
+       */
+      downloads: number;
+      /**
+       * Format: date-time
+       * @description When the download server expects the downloads to finish; absent when it cannot tell
+       * @example 2026-01-02T03:16:05.000Z
+       */
+      estimated_completion_at?: string;
+      /**
+       * Format: int64
+       * @description How much has downloaded, rounded down; absent while the size is unknown
+       * @example 43
+       */
+      percent?: number;
+      /**
+       * @description queued, downloading, paused, stalled, importing or import_blocked. More values may be added: read an unknown one as downloading, without a percentage
+       * @example downloading
+       */
+      phase: string;
+      /**
+       * Format: date-time
+       * @description When the server last heard from the download server. A client may hide figures older than about ten minutes
+       * @example 2026-01-02T03:04:05.000Z
+       */
+      updated_at: string;
+    };
     RequestMediaCastMember: {
       /** @example Vincent Hanna */
       character?: string;
@@ -24574,6 +24627,8 @@ export interface components {
       season_number: number;
     };
     RequestMediaState: {
+      /** @description How far the active request's downloads are, while its download server reports them. Only the title detail (getRequestMediaDetail) carries it */
+      download?: components["schemas"]["RequestDownload"];
       /**
        * @description Whether the viewer will be notified when the media becomes available: they requested it or follow it
        * @example false
@@ -24636,19 +24691,28 @@ export interface components {
        * @example 2026-01-02T03:04:05.000Z
        */
       created_at: string;
-      /** @description The integration's own identifier */
+      /** @description How far this target's downloads are, while its download server reports them */
+      download?: components["schemas"]["RequestDownload"];
+      /** @description Admins only: the integration's own identifier */
       external_id?: string;
+      /** @description Admins only: the status as the download server reports it */
       external_status?: string;
       /**
        * @description Opaque identifier
        * @example 42
        */
       id: string;
+      /** @description Admins only: the download server's name */
       instance_name?: string;
+      /** @description Admins only: the download server holding this target */
       integration_id?: string;
-      /** @example radarr */
+      /**
+       * @description Admins only: the download server's kind
+       * @example radarr
+       */
       integration_kind?: string;
       is_anime: boolean;
+      /** @description Admins only: why the download server failed this target */
       last_error?: string;
       /** @example 1080p */
       quality: string;
@@ -24657,7 +24721,7 @@ export interface components {
        * @example 1834729
        */
       request_id: string;
-      /** @description The routing rule that sent this target to its server, as named when it was sent */
+      /** @description Admins only: the routing rule that sent this target to its server, as named when it was sent */
       route_name?: string;
       /** @example queued */
       status: string;

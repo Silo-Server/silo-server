@@ -20,6 +20,10 @@ type Store interface {
 	// last_reconciled_at.
 	ListReconciliationCandidates(ctx context.Context, limit int) ([]*Request, error)
 	ListLibraryWaitCandidates(ctx context.Context, limit int) ([]*Request, error)
+	// ListDownloadingRequests returns active requests with a downloading
+	// target that has download progress, for the download refresh pass, the
+	// least recently asked about first. Targets without progress are ignored.
+	ListDownloadingRequests(ctx context.Context, limit int) ([]*Request, error)
 	// ListFulfilledUnnotified returns completed requests whose fulfillment
 	// notification has not fired yet (presence-gated notify pass).
 	ListFulfilledUnnotified(ctx context.Context, limit int) ([]*Request, error)
@@ -100,7 +104,21 @@ type Store interface {
 	ListTargetsForRequests(ctx context.Context, requestIDs []string) (map[string][]Target, error)
 	CreateTarget(ctx context.Context, target Target) (Target, error)
 	DeleteTarget(ctx context.Context, id int64) error
+	// UpdateTargetStatus also clears the target's download progress when it
+	// completes or fails.
 	UpdateTargetStatus(ctx context.Context, targetID int64, status Status, externalID, externalStatus, lastErr string, actor Viewer) (*Request, error)
+	// UpdateTargetDownload stores a target's download progress, or clears it
+	// when progress is nil, only while the target is queued or downloading. It
+	// leaves updated_at, the request aggregate and the request's history alone.
+	UpdateTargetDownload(ctx context.Context, targetID int64, progress *DownloadProgress) error
+	// MarkTargetDownloadChecked records that a pass asked about a target
+	// with progress and got no status back, without changing the progress.
+	MarkTargetDownloadChecked(ctx context.Context, targetID int64) error
+	// UpdateTargetExternalStatus records the raw status a queued or
+	// downloading target's server reported when the target's own status did
+	// not change. Like UpdateTargetDownload, it leaves updated_at, the
+	// request aggregate and the request's history alone.
+	UpdateTargetExternalStatus(ctx context.Context, targetID int64, externalStatus string) error
 	ListIntegrations(ctx context.Context) ([]Integration, error)
 	GetIntegration(ctx context.Context, id string) (*Integration, error)
 	CreateIntegration(ctx context.Context, integration Integration) (*Integration, error)

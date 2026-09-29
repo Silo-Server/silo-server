@@ -28,6 +28,7 @@ import type {
   CreateMediaRequestInput,
   DiscoverBrowseKind,
   DiscoverBrowseResponse,
+  MediaRequest,
   RequestDiscoverySection,
   RequestListParams,
   RequestMediaPage,
@@ -40,6 +41,22 @@ import { adminKeys, requestKeys } from "./keys";
 export const REQUESTS_STALE_TIME = 30_000;
 const DISCOVER_BRAND_STALE_TIME = 24 * 60 * 60 * 1000;
 const BROWSE_STALE_TIME = 60 * 1000;
+/** How often a request surface is read again while something on it downloads. */
+export const REQUEST_DOWNLOAD_REFETCH_INTERVAL = 30_000;
+
+/**
+ * Polls while a loaded request, or one of its servers, reports download
+ * progress, and stops once none does. The server refreshes progress about
+ * once a minute.
+ */
+export function requestDownloadRefetchInterval(
+  requests: readonly Pick<MediaRequest, "download" | "targets">[] | undefined,
+): number | false {
+  const downloading = requests?.some(
+    (request) => request.download || request.targets?.some((target) => target.download),
+  );
+  return downloading ? REQUEST_DOWNLOAD_REFETCH_INTERVAL : false;
+}
 
 function listParamsKey(params: RequestListParams) {
   return {
@@ -191,6 +208,8 @@ export function useRequestMediaDetail(
     queryFn: () => getRequestMediaDetailV2(mediaType, tmdbID),
     enabled: tmdbID > 0 && (options.enabled ?? true),
     staleTime: REQUESTS_STALE_TIME,
+    refetchInterval: (query) =>
+      query.state.data?.request.download ? REQUEST_DOWNLOAD_REFETCH_INTERVAL : false,
   });
 }
 
@@ -312,15 +331,22 @@ export function useCancelMediaRequest() {
   });
 }
 
+/**
+ * The viewer's own requests. A surface that shows no download progress passes
+ * pollDownloads: false so a download does not make it read the list again.
+ */
 export function useMyMediaRequests(
   params: RequestListParams = {},
-  options: { enabled?: boolean } = {},
+  options: { enabled?: boolean; pollDownloads?: boolean } = {},
 ) {
   const key = listParamsKey(params);
+  const pollDownloads = options.pollDownloads ?? true;
   return useQuery({
     queryKey: requestKeys.mine(key),
     queryFn: () => listMyMediaRequestsV2(params),
     enabled: options.enabled ?? true,
     staleTime: REQUESTS_STALE_TIME,
+    refetchInterval: (query) =>
+      pollDownloads ? requestDownloadRefetchInterval(query.state.data) : false,
   });
 }

@@ -10,6 +10,7 @@ import { adminKeys, requestKeys } from "./keys";
 
 const mocks = vi.hoisted(() => ({
   useQuery: vi.fn(),
+  useInfiniteQuery: vi.fn(),
   useCurrentProfile: vi.fn(),
   api: vi.fn(),
 }));
@@ -20,6 +21,7 @@ vi.mock("@tanstack/react-query", async () => {
   return {
     ...actual,
     useQuery: (...args: unknown[]) => mocks.useQuery(...args),
+    useInfiniteQuery: (...args: unknown[]) => mocks.useInfiniteQuery(...args),
   };
 });
 
@@ -37,12 +39,15 @@ import {
   nextDiscoverySectionPage,
   useCancelMediaRequest,
   useCreateMediaRequest,
+  useMyMediaRequests,
   useRequestFeatureStatus,
+  useRequestMediaDetail,
   useRequestSearch,
   useToggleRequestFollow,
 } from "./useRequests";
 import {
   useAdminCancelMediaRequest,
+  useAdminRequestQueue,
   useRequestGroupLimit,
   useUpdateRequestGroupLimit,
 } from "./admin/requests";
@@ -457,5 +462,84 @@ describe("useToggleRequestFollow", () => {
       ],
     ]);
     expect(invalidations).toHaveBeenCalledWith({ queryKey: ["requests"] });
+  });
+});
+
+describe("polling while something downloads", () => {
+  const download = { phase: "downloading", downloads: 1, updated_at: "2026-01-02T03:04:05Z" };
+  type RefetchInterval = (query: { state: { data: unknown } }) => number | false;
+
+  function refetchInterval(hook: typeof mocks.useQuery): RefetchInterval {
+    return (hook.mock.calls.at(-1)![0] as { refetchInterval: RefetchInterval }).refetchInterval;
+  }
+
+  beforeEach(() => {
+    mocks.useQuery.mockReset();
+    mocks.useInfiniteQuery.mockReset();
+  });
+
+  it("reads the viewer's requests every 30 seconds while one of them downloads", () => {
+    function CallMine() {
+      useMyMediaRequests({ limit: 100 });
+      return null;
+    }
+    render(<CallMine />);
+    const interval = refetchInterval(mocks.useQuery);
+
+    expect(interval({ state: { data: undefined } })).toBe(false);
+    expect(interval({ state: { data: [{ id: "a" }, { id: "b", targets: [{ id: 1 }] }] } })).toBe(
+      false,
+    );
+    expect(interval({ state: { data: [{ id: "a" }, { id: "b", download }] } })).toBe(30_000);
+    expect(interval({ state: { data: [{ id: "a", targets: [{ id: 1, download }] }] } })).toBe(
+      30_000,
+    );
+  });
+
+  it("leaves the viewer's requests alone on a surface that opts out", () => {
+    function CallMine() {
+      useMyMediaRequests({ outcome: "active" }, { pollDownloads: false });
+      return null;
+    }
+    render(<CallMine />);
+    const interval = refetchInterval(mocks.useQuery);
+
+    expect(interval({ state: { data: [{ id: "a" }, { id: "b", download }] } })).toBe(false);
+    expect(interval({ state: { data: [{ id: "a", targets: [{ id: 1, download }] }] } })).toBe(
+      false,
+    );
+  });
+
+  it("reads a title's request every 30 seconds while it downloads", () => {
+    function CallDetail() {
+      useRequestMediaDetail("movie", 949);
+      return null;
+    }
+    render(<CallDetail />);
+    const interval = refetchInterval(mocks.useQuery);
+
+    expect(interval({ state: { data: undefined } })).toBe(false);
+    expect(interval({ state: { data: { request: { requestable: false } } } })).toBe(false);
+    expect(interval({ state: { data: { request: { requestable: false, download } } } })).toBe(
+      30_000,
+    );
+  });
+
+  it("reads the admin queue every 30 seconds while a row on any loaded page downloads", () => {
+    function CallQueue() {
+      useAdminRequestQueue({ view: "in_progress" });
+      return null;
+    }
+    render(<CallQueue />);
+    const interval = refetchInterval(mocks.useInfiniteQuery);
+    const pages = (...items: unknown[][]) => ({ pages: items.map((rows) => ({ items: rows })) });
+
+    expect(interval({ state: { data: undefined } })).toBe(false);
+    expect(interval({ state: { data: pages([{ id: "a", targets: [] }]) } })).toBe(false);
+    expect(
+      interval({
+        state: { data: pages([{ id: "a" }], [{ id: "b", targets: [{ id: 1, download }] }]) },
+      }),
+    ).toBe(30_000);
   });
 });

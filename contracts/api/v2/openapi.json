@@ -24669,6 +24669,10 @@
             "description": "Whether the current principal may use the capability",
             "type": "boolean"
           },
+          "download_progress_supported": {
+            "description": "Whether the server reports download progress (download on requests, their targets, and the title detail's request state). Whether a given request has any depends on its download server's request plugin.",
+            "type": "boolean"
+          },
           "follow_supported": {
             "type": "boolean"
           },
@@ -24706,6 +24710,7 @@
           "follow_supported",
           "season_requests_supported",
           "missing_seasons_requestable",
+          "download_progress_supported",
           "revision",
           "state",
           "allowed"
@@ -28534,10 +28539,16 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "download": {
+            "$ref": "#/components/schemas/RequestDownload",
+            "description": "How far the request's downloads are over all its servers (1080p and 4K together), while any reports them: bytes summed, the phase that needs the most attention, the latest estimate, and the oldest report's time"
+          },
           "external_id": {
+            "description": "Admins only: the integration's own identifier",
             "type": "string"
           },
           "external_status": {
+            "description": "Admins only: the status as the download server reports it",
             "type": "string"
           },
           "id": {
@@ -28555,6 +28566,7 @@
             "type": "string"
           },
           "integration_kind": {
+            "description": "Admins only: the download server's kind",
             "examples": [
               "radarr"
             ],
@@ -28564,6 +28576,7 @@
             "type": "boolean"
           },
           "last_error": {
+            "description": "Admins only: why the last submission to a download server failed. It can name servers and routing rules",
             "type": "string"
           },
           "library_content_id": {
@@ -36324,6 +36337,81 @@
         },
         "type": "object"
       },
+      "RequestDownload": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes_left": {
+            "description": "Bytes still to download; present whenever bytes_total is",
+            "examples": [
+              2448131358
+            ],
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "bytes_total": {
+            "description": "Size of the downloads in bytes; absent while unknown",
+            "examples": [
+              4294967296
+            ],
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "downloads": {
+            "description": "Distinct downloads in flight; a season pack counts once",
+            "examples": [
+              1
+            ],
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "estimated_completion_at": {
+            "description": "When the download server expects the downloads to finish; absent when it cannot tell",
+            "examples": [
+              "2026-01-02T03:16:05.000Z"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "percent": {
+            "description": "How much has downloaded, rounded down; absent while the size is unknown",
+            "examples": [
+              43
+            ],
+            "format": "int64",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "phase": {
+            "description": "queued, downloading, paused, stalled, importing or import_blocked. More values may be added: read an unknown one as downloading, without a percentage",
+            "examples": [
+              "downloading"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "When the server last heard from the download server. A client may hide figures older than about ten minutes",
+            "examples": [
+              "2026-01-02T03:04:05.000Z"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "phase",
+          "downloads",
+          "updated_at"
+        ],
+        "type": "object"
+      },
       "RequestMediaCastMember": {
         "additionalProperties": false,
         "properties": {
@@ -36741,6 +36829,10 @@
       "RequestMediaState": {
         "additionalProperties": false,
         "properties": {
+          "download": {
+            "$ref": "#/components/schemas/RequestDownload",
+            "description": "How far the active request's downloads are, while its download server reports them. Only the title detail (getRequestMediaDetail) carries it"
+          },
           "following": {
             "description": "Whether the viewer will be notified when the media becomes available: they requested it or follow it",
             "examples": [
@@ -36846,11 +36938,16 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "download": {
+            "$ref": "#/components/schemas/RequestDownload",
+            "description": "How far this target's downloads are, while its download server reports them"
+          },
           "external_id": {
-            "description": "The integration's own identifier",
+            "description": "Admins only: the integration's own identifier",
             "type": "string"
           },
           "external_status": {
+            "description": "Admins only: the status as the download server reports it",
             "type": "string"
           },
           "id": {
@@ -36862,12 +36959,15 @@
             "type": "string"
           },
           "instance_name": {
+            "description": "Admins only: the download server's name",
             "type": "string"
           },
           "integration_id": {
+            "description": "Admins only: the download server holding this target",
             "type": "string"
           },
           "integration_kind": {
+            "description": "Admins only: the download server's kind",
             "examples": [
               "radarr"
             ],
@@ -36877,6 +36977,7 @@
             "type": "boolean"
           },
           "last_error": {
+            "description": "Admins only: why the download server failed this target",
             "type": "string"
           },
           "quality": {
@@ -36894,7 +36995,7 @@
             "type": "string"
           },
           "route_name": {
-            "description": "The routing rule that sent this target to its server, as named when it was sent",
+            "description": "Admins only: the routing rule that sent this target to its server, as named when it was sent",
             "type": "string"
           },
           "status": {
