@@ -187,10 +187,7 @@ func hardwareSmokeEncodeArgs(backend, device string) []string {
 	case transcodeHWQSV:
 		base = append(base, "-vf", "format=nv12,hwupload=extra_hw_frames=64", "-frames:v", "1", "-an", "-c:v", "h264_qsv")
 	case transcodeHWVAAPI:
-		// Capped VAAPI encodes force VBR (see appendVideoArgs), so the probe
-		// verifies the driver offers it rather than the default mode.
-		base = append(base, "-vf", "format=nv12,hwupload", "-frames:v", "1", "-an", "-c:v", "h264_vaapi",
-			"-rc_mode", "VBR", "-b:v", "1800k", "-maxrate", "2000k")
+		base = append(base, "-vf", "format=nv12,hwupload", "-frames:v", "1", "-an", "-c:v", "h264_vaapi")
 	case transcodeHWNVENC:
 		if strings.TrimSpace(device) != "" {
 			base = append(base, "-vf", "hwupload_cuda")

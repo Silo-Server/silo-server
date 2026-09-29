@@ -97,6 +97,7 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 	if encoderErr != nil {
 		return fmt.Errorf("prepare-file: %w", encoderErr)
 	}
+	opts = resolveVAAPIRateControl(ctx, opts)
 	if opts.HWAccel == transcodeHWNone {
 		releaseHWDevice()
 	}

@@ -1546,16 +1546,17 @@ func TestBuildFFmpegArgs_NVENCH264UsesCudaPipeline(t *testing.T) {
 
 // A cap must be a ceiling on every hardware encoder: QSV selects CBR when
 // -b:v equals -maxrate, and VAAPI ignores -maxrate once -qp selects CQP.
-// VAAPI forces VBR because its automatic mode tries AVBR first, which does
-// not honor -maxrate.
+// VAAPI forces VBR only on a device detected to offer it (FFmpeg's automatic
+// mode tries AVBR first, which does not honor -maxrate); elsewhere FFmpeg
+// chooses, so a driver without VBR still starts.
 func TestAppendVideoArgs_HardwareBitrateCapIsVBRCeiling(t *testing.T) {
 	for _, tc := range []struct {
 		hwAccel, codec, want string
 	}{
 		{"qsv", "h264", "-c:v h264_qsv -preset veryfast -b:v 4500k -maxrate 5000k -bufsize 10000k"},
 		{"qsv", "hevc", "-c:v hevc_qsv -preset veryfast -b:v 4500k -maxrate 5000k -bufsize 10000k"},
-		{"vaapi", "h264", "-c:v h264_vaapi -rc_mode VBR -b:v 4500k -maxrate 5000k -bufsize 10000k"},
-		{"vaapi", "hevc", "-c:v hevc_vaapi -rc_mode VBR -b:v 4500k -maxrate 5000k -bufsize 10000k"},
+		{"vaapi", "h264", "-c:v h264_vaapi -b:v 4500k -maxrate 5000k -bufsize 10000k"},
+		{"vaapi", "hevc", "-c:v hevc_vaapi -b:v 4500k -maxrate 5000k -bufsize 10000k"},
 		{"nvenc", "h264", "-c:v h264_nvenc -rc:v vbr -b:v 4500k -maxrate 5000k -bufsize 10000k"},
 		{"nvenc", "hevc", "-c:v hevc_nvenc -rc:v vbr -b:v 4500k -maxrate 5000k -bufsize 10000k"},
 	} {
@@ -1563,7 +1564,13 @@ func TestAppendVideoArgs_HardwareBitrateCapIsVBRCeiling(t *testing.T) {
 		if joined != tc.want {
 			t.Errorf("%s/%s capped args = %q, want %q", tc.hwAccel, tc.codec, joined, tc.want)
 		}
-		uncapped := strings.Join(appendVideoArgs(nil, TranscodeOpts{HWAccel: tc.hwAccel, TargetCodecVideo: tc.codec}), " ")
+		if tc.hwAccel == "vaapi" {
+			detected := strings.Join(appendVideoArgs(nil, TranscodeOpts{HWAccel: tc.hwAccel, TargetCodecVideo: tc.codec, TargetBitrateKbps: 5000, vaapiVBR: true}), " ")
+			if want := strings.Replace(tc.want, "_vaapi ", "_vaapi -rc_mode VBR ", 1); detected != want {
+				t.Errorf("%s/%s capped args with VBR detected = %q, want %q", tc.hwAccel, tc.codec, detected, want)
+			}
+		}
+		uncapped := strings.Join(appendVideoArgs(nil, TranscodeOpts{HWAccel: tc.hwAccel, TargetCodecVideo: tc.codec, vaapiVBR: true}), " ")
 		if strings.Contains(uncapped, "-maxrate") || strings.Contains(uncapped, "-rc_mode") {
 			t.Errorf("%s/%s uncapped args must keep constant-quality mode: %q", tc.hwAccel, tc.codec, uncapped)
 		}
@@ -2058,5 +2065,22 @@ func TestBuildFFmpegArgs_NVENCFullHardwareArgsUnchanged(t *testing.T) {
 				t.Fatalf("full-hardware NVENC should scale CUDA frames directly: %s", joined)
 			}
 		})
+	}
+}
+
+// The VBR probe runs the ordinary VAAPI smoke encode in the mode a capped
+// encode would request.
+func TestVAAPIVBRSmokeArgsRequestCappedVBR(t *testing.T) {
+	joined := strings.Join(vaapiVBRSmokeArgs("/dev/dri/renderD128", "hevc_vaapi"), " ")
+	for _, want := range []string{"-c:v hevc_vaapi -rc_mode VBR -b:v 1800k -maxrate 2000k -f null -", "/dev/dri/renderD128"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("VBR smoke args missing %q: %s", want, joined)
+		}
+	}
+	if opts := resolveVAAPIRateControl(context.Background(), TranscodeOpts{HWAccel: "qsv", TargetBitrateKbps: 5000, vaapiVBR: true}); opts.vaapiVBR {
+		t.Fatal("a non-VAAPI encode must not keep the VAAPI VBR flag")
+	}
+	if opts := resolveVAAPIRateControl(context.Background(), TranscodeOpts{HWAccel: "vaapi", vaapiVBR: true}); opts.vaapiVBR {
+		t.Fatal("an uncapped VAAPI encode needs no VBR probe")
 	}
 }
