@@ -39,9 +39,9 @@ ladder and Jellyfin's `ResolutionNormalizer`.
   frame, stops at the smallest class if none does, and keeps its bitrate within
   that decoder's limit. As for downloads, a decoder takes a class only when its
   bitrate limit earns that class, and hardware decoders are preferred only when
-  one takes the source's frame rate. When no attested decoder takes that rate,
-  their sizes alone bound the encode: a reported rate holds at the decoder's
-  largest size, and a smaller class keeps the source's rate anyway.
+  one takes the source's frame rate. A reported rate holds at the decoder's
+  largest size, so a smaller class may exceed it within the same pixel rate:
+  a 4K30 decoder takes 1080p60, and a 1080p30 decoder takes 720p60.
 - **Transcodes stop at 2160p.** A source taller than the top class that keeps
   its own frame on the original route is fitted into the 2160p box when it has
   to be re-encoded.

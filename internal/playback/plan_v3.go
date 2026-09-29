@@ -1177,16 +1177,8 @@ func h264BoundedQualityV3(request StartRequestV3, quality QualityResultV3, sourc
 		return quality
 	}
 	// The encode keeps the source's frame rate, so a decoder must take it too.
-	// When none does, the sizes alone bound the encode, as for downloads: a
-	// reported rate holds at the decoder's largest size (a 4K30 decoder still
-	// takes 1080p60), and no smaller class would lower the rate anyway.
-	rateBound := false
-	for _, decoder := range decoders {
-		rateBound = rateBound || h264DecoderTakesFrameRateV3(decoder, source.FrameRate)
-	}
 	takes := func(decoder VideoDecodeCapabilityV3, width, height int) bool {
-		return (decoder.MaxWidth <= 0 || width <= decoder.MaxWidth) && (decoder.MaxHeight <= 0 || height <= decoder.MaxHeight) &&
-			(!rateBound || h264DecoderTakesFrameRateV3(decoder, source.FrameRate))
+		return h264DecoderTakesFrameV3(decoder, width, height, source.FrameRate)
 	}
 	anyTakes := func(width, height, class int) bool {
 		for _, decoder := range decoders {
@@ -1274,6 +1266,22 @@ func attestedH264DecodersV3(request StartRequestV3, frameRate float64) []VideoDe
 // the source's frame rate; an unknown rate or limit always passes.
 func h264DecoderTakesFrameRateV3(decoder VideoDecodeCapabilityV3, frameRate float64) bool {
 	return decoder.MaxFrameRate <= 0 || frameRate <= decoder.MaxFrameRate+0.01
+}
+
+// h264DecoderTakesFrameV3 reports whether a decoder takes a width x height
+// encode at the source's frame rate. A reported rate holds at the decoder's
+// largest size (Android derives it there), so a smaller frame may run faster
+// within the same pixel rate: a 4K30 decoder takes 1080p60, while a 1080p30
+// one takes 720p60 but not 1080p60.
+func h264DecoderTakesFrameV3(decoder VideoDecodeCapabilityV3, width, height int, frameRate float64) bool {
+	if (decoder.MaxWidth > 0 && width > decoder.MaxWidth) || (decoder.MaxHeight > 0 && height > decoder.MaxHeight) {
+		return false
+	}
+	if h264DecoderTakesFrameRateV3(decoder, frameRate) {
+		return true
+	}
+	return decoder.MaxWidth > 0 && decoder.MaxHeight > 0 && width > 0 && height > 0 &&
+		float64(width)*float64(height)*frameRate <= float64(decoder.MaxWidth)*float64(decoder.MaxHeight)*(decoder.MaxFrameRate+0.01)
 }
 
 func videoTransformationForTargetV3(codec string) TransformationV3 {

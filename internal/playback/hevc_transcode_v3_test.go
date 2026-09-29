@@ -259,13 +259,13 @@ func TestPlanPlaybackV3H264TargetStepsDownToTheDecoderSize(t *testing.T) {
 	}
 	check("a 60 fps software decoder", PlanPlaybackV3(software), "h264", "1080p", 1920, 6_000)
 	// Without the opt-in only the hardware decoder is left. Its 30 fps limit
-	// holds at its largest size, and no smaller class lowers the rate, so its
-	// size alone bounds the encode rather than dropping a 60 fps source to 480p.
+	// holds at its largest size, so it takes the largest class whose pixel
+	// rate fits: 720p60 from a 1080p30 decoder, 1080p60 from a 4K30 one.
 	software.Request.ClientFeatures = []string{FeaturePlaybackPlanV3}
-	check("software decode not opted in", PlanPlaybackV3(software), "h264", "1080p", 1920, 6_000)
+	check("software decode not opted in", PlanPlaybackV3(software), "h264", "720p", 1280, 2_000)
 	software.Request.Capabilities.VideoDecode = software.Request.Capabilities.VideoDecode[:1]
-	software.Request.Capabilities.VideoDecode[0].MaxWidth, software.Request.Capabilities.VideoDecode[0].MaxHeight = 1280, 720
-	check("a 720p30 decoder for a 60 fps source", PlanPlaybackV3(software), "h264", "720p", 1280, 2_000)
+	software.Request.Capabilities.VideoDecode[0].MaxWidth, software.Request.Capabilities.VideoDecode[0].MaxHeight = 3840, 2160
+	check("a 4K30 decoder for a 60 fps source", PlanPlaybackV3(software), "h264", "1080p", 1920, 6_000)
 
 	// A same-size conversion of a wide source keeps the class its height
 	// earns (2560x1080 is 1080p), so a decoder whose bitrate limit earns
