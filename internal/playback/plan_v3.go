@@ -1038,6 +1038,11 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	targetVideoCodec := transcodeCodecH264
 	if input.Settings.AllowHEVCEncoding && hlsRegistry.Available(TransformationVideoToHEVCV3) && hlsHEVCOutputSupportedV3(input.Request, quality, source) {
 		targetVideoCodec = transcodeCodecHEVC
+		// The quality policy bounds a scaled encode by the source's bits
+		// counted as H.264; HEVC output needs no more than them counted as HEVC.
+		if sourceKbps := sourceEquivalentKbps(source, transcodeCodecHEVC); sourceKbps > 0 && quality.BitrateKbps > 0 && !quality.PreservesSource {
+			quality.BitrateKbps = min(quality.BitrateKbps, sourceKbps)
+		}
 	}
 	if source.DynamicRange != "" && source.DynamicRange != DynamicRangeSDRV3 {
 		base.AvailableQualities = availableQualitiesForRouteV3(input, source)

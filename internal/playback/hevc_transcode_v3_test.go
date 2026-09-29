@@ -47,6 +47,34 @@ func TestPlanPlaybackV3HEVCTranscodeSelectionAndFallbacks(t *testing.T) {
 	}
 }
 
+// A scaled encode never targets more than the source's own bits counted in
+// the output codec: a 3 Mbps HEVC source converted to 1080p HEVC stays at
+// 3 Mbps, while H.264 output may use the 5 Mbps H.264 equivalent.
+func TestPlanPlaybackV3HEVCOutputKeepsTheSourceBitrateBound(t *testing.T) {
+	for _, tc := range []struct {
+		allowHEVC   bool
+		wantCodec   string
+		wantBitrate int
+	}{
+		{true, "hevc", 3_000},
+		{false, "h264", 5_000},
+	} {
+		input := hevcTranscodePlannerInputV3(tc.allowHEVC, true, true)
+		file := *input.RequestedFile
+		file.CodecVideo, file.Resolution, file.Bitrate = "hevc", "2160p", 3_000
+		file.VideoTracks = []models.VideoTrack{{Codec: "hevc", Profile: "Main", Width: 3840, Height: 2160, FrameRate: "24/1", Bitrate: 3_000, BitDepth: 8, VideoRange: "SDR"}}
+		input.RequestedFile, input.EffectiveFile = &file, &file
+		input.Settings.Allow4KTranscode = true
+		input.Request.QualityPreference = "auto"
+		estimate := 10_000
+		input.Request.BandwidthEstimateKbps = &estimate
+		result := PlanPlaybackV3(input)
+		if result.Plan == nil || result.TargetVideoCodec != tc.wantCodec || result.TargetBitrateKbps != tc.wantBitrate || result.TargetResolution != "1080p" {
+			t.Fatalf("HEVC allowed %v: %s codec %q res %q bitrate %d, want %s 1080p %d", tc.allowHEVC, ExplainPlannerResultV3(result), result.TargetVideoCodec, result.TargetResolution, result.TargetBitrateKbps, tc.wantCodec, tc.wantBitrate)
+		}
+	}
+}
+
 func TestPlanPlaybackV3HEVCFailureFallsBackToH264(t *testing.T) {
 	input := hevcTranscodePlannerInputV3(true, true, true)
 	first := PlanPlaybackV3(input)
