@@ -72,14 +72,18 @@ resolution the bitrate encodes cleanly, then:
   3840x1600 film at `10mbps` becomes 1920x800;
 - never encodes above the source's own bitrate;
 - steps the resolution down until the device's decoder can take it, using the
-  `video_decode` entries from `caps` when sent (size, frame rate, and at the
-  `exact` tier the output profile and H.264 level), otherwise
-  `max_resolution`, and keeps the bitrate within that decoder's
-  `max_bitrate_kbps` and level. When no H.264 decoder meets every limit, the
-  largest one's size still bounds the output;
+  `video_decode` entries from `caps` when sent, otherwise `max_resolution`.
+  Each decoder is checked for size, frame rate, and its profile and H.264
+  level lists (a hardware decoder at the `platform_attested` tier is exempt
+  from those lists, as in playback). The decoder that reaches the largest
+  resolution is used, and the bitrate stays within its `max_bitrate_kbps` and
+  level. When no H.264 decoder meets every limit, the listed ones' sizes still
+  bound the output;
 - encodes HEVC instead of H.264 when the server's HEVC encoding setting is on
-  and `caps` attest an 8-bit HEVC decoder that reaches at least the same size
-  (HEVC also earns `1mbps` 540p instead of 480p);
+  and `caps` attest an 8-bit HEVC decoder that reaches at least the same
+  resolution (HEVC also earns `1mbps` 540p instead of 480p);
+- answers `quality_unavailable` when strict `video_decode` entries list no
+  decoder for any codec the server may encode;
 - converts a 4K source only when the server allows 4K transcoding, as streaming
   does; otherwise every preset of a 4K title answers `quality_unavailable`.
 

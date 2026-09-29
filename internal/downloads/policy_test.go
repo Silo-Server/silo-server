@@ -61,17 +61,26 @@ func TestDownloadQualityResolverResolve(t *testing.T) {
 		CodecsAudio: []string{"aac"},
 		Containers:  []string{"mp4"},
 	}
+	hevcDecoder := playback.VideoDecodeCapabilityV3{
+		Codec: "hevc", BitDepths: []int{8, 10}, MaxWidth: 1920,
+		MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 40_000,
+		Hardware: true,
+	}
 	detailedCaps := playback.ClientCapabilities{
 		VideoEvidence: playback.EvidencePlatformAttestedV3,
-		CodecsVideo:   []string{"hevc"},
+		CodecsVideo:   []string{"h264", "hevc"},
 		CodecsAudio:   []string{"aac"},
 		Containers:    []string{"mp4"},
-		VideoDecode: []playback.VideoDecodeCapabilityV3{{
-			Codec: "hevc", BitDepths: []int{8, 10}, MaxWidth: 1920,
-			MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 40_000,
-			Hardware: true,
+		VideoDecode: []playback.VideoDecodeCapabilityV3{hevcDecoder, {
+			Codec: "h264", BitDepths: []int{8}, MaxWidth: 1920,
+			MaxHeight: 1080, MaxFrameRate: 60, Hardware: true,
 		}},
 	}
+	// Strict caps that attest no H.264 decoder leave a server without HEVC
+	// encoding nothing the device is known to play.
+	hevcOnlyCaps := detailedCaps
+	hevcOnlyCaps.CodecsVideo = []string{"hevc"}
+	hevcOnlyCaps.VideoDecode = []playback.VideoDecodeCapabilityV3{hevcDecoder}
 
 	cases := []struct {
 		name               string
@@ -158,6 +167,16 @@ func TestDownloadQualityResolverResolve(t *testing.T) {
 			wantQuality:        QualityOriginal,
 			wantEffective:      Quality20Mbps,
 			wantBitrate:        20000,
+		},
+		{
+			name:               "no attested decoder for a converted download",
+			requested:          Quality10Mbps,
+			file:               boundedFile,
+			caps:               hevcOnlyCaps,
+			transcodeEnabled:   true,
+			userTranscode:      true,
+			artifactsAvailable: true,
+			wantErr:            ErrQualityUnavailable,
 		},
 		{
 			name:      "remux is not a public quality",
@@ -283,29 +302,31 @@ func TestResolvePresetOnTheLadder(t *testing.T) {
 
 func TestQualityOptionsFor(t *testing.T) {
 	presets := []string{QualityOriginal, Quality20Mbps, Quality10Mbps, Quality5Mbps, Quality2Mbps, Quality1Mbps}
-	heights := func(cfg config.DownloadConfig, user *PolicyUser) []int {
+	heights := func(cfg config.DownloadConfig, user *PolicyUser, policyCeiling string) []int {
 		var out []int
-		for _, option := range qualityOptionsFor(presets, cfg, user) {
+		for _, option := range qualityOptionsFor(presets, cfg, user, policyCeiling) {
 			out = append(out, option.MaxHeight)
 		}
 		return out
 	}
 	for _, tc := range []struct {
-		name string
-		cfg  config.DownloadConfig
-		user *PolicyUser
-		want []int
+		name          string
+		cfg           config.DownloadConfig
+		user          *PolicyUser
+		policyCeiling string
+		want          []int
 	}{
-		{"4K transcoding allowed", config.DownloadConfig{Allow4KTranscode: true}, nil, []int{0, 2160, 1080, 1080, 720, 480}},
-		{"4K transcoding off caps at 1080p", config.DownloadConfig{}, nil, []int{0, 1080, 1080, 1080, 720, 480}},
-		{"HEVC stretches the lowest preset", config.DownloadConfig{Allow4KTranscode: true, AllowHEVCEncoding: true}, nil, []int{0, 2160, 1080, 1080, 720, 540}},
-		{"a policy ceiling applies", config.DownloadConfig{Allow4KTranscode: true}, &PolicyUser{Policy: access.EffectiveUserPolicy{MaxPlaybackQuality: "1080p"}}, []int{0, 1080, 1080, 1080, 720, 480}},
+		{"4K transcoding allowed", config.DownloadConfig{Allow4KTranscode: true}, nil, "", []int{0, 2160, 1080, 1080, 720, 480}},
+		{"4K transcoding off caps at 1080p", config.DownloadConfig{}, nil, "", []int{0, 1080, 1080, 1080, 720, 480}},
+		{"HEVC stretches the lowest preset", config.DownloadConfig{Allow4KTranscode: true, AllowHEVCEncoding: true}, nil, "", []int{0, 2160, 1080, 1080, 720, 540}},
+		{"a policy ceiling applies", config.DownloadConfig{Allow4KTranscode: true}, &PolicyUser{Policy: access.EffectiveUserPolicy{MaxPlaybackQuality: "1080p"}}, "", []int{0, 1080, 1080, 1080, 720, 480}},
+		{"an override's transcode ceiling applies", config.DownloadConfig{Allow4KTranscode: true}, &PolicyUser{Policy: access.EffectiveUserPolicy{MaxPlaybackQuality: "2160p"}}, "1080p", []int{0, 1080, 1080, 1080, 720, 480}},
 	} {
-		if got := heights(tc.cfg, tc.user); !slices.Equal(got, tc.want) {
+		if got := heights(tc.cfg, tc.user, tc.policyCeiling); !slices.Equal(got, tc.want) {
 			t.Errorf("%s: max heights = %v, want %v", tc.name, got, tc.want)
 		}
 	}
-	options := qualityOptionsFor(presets, config.DownloadConfig{}, nil)
+	options := qualityOptionsFor(presets, config.DownloadConfig{}, nil, "")
 	if options[0] != (QualityOption{Preset: QualityOriginal}) || options[2] != (QualityOption{Preset: Quality10Mbps, BitrateKbps: 10_000, MaxHeight: 1080}) {
 		t.Fatalf("options = %+v", options)
 	}

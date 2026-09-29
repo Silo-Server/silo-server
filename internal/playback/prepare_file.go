@@ -66,22 +66,24 @@ type DownloadTranscodeSettings struct {
 // decoder can take the box-fit output; and the source is never enlarged nor
 // re-encoded above its own bitrate. HEVC is chosen when the server allows HEVC
 // encoding and the caps attest an 8-bit HEVC decoder that reaches at least the
-// size H.264 would, otherwise the output is H.264.
+// class H.264 would, otherwise the output is H.264. ok is false when strict
+// caps attest no decoder for any codec the server may encode.
 //
 // Resolution holds the ladder class label ("1080p") when the source must be
 // downscaled and is empty when the source already fits; DownloadScaleResolution
 // turns the class back into the exact encoder height for this file.
-func ResolveDownloadTranscodeTarget(file *models.MediaFile, caps ClientCapabilities, capKbps int, settings DownloadTranscodeSettings) PrepareTarget {
+func ResolveDownloadTranscodeTarget(file *models.MediaFile, caps ClientCapabilities, capKbps int, settings DownloadTranscodeSettings) (PrepareTarget, bool) {
 	source := SourceDescriptorFromFileV3(file, 0)
 	codec := transcodeCodecH264
-	decoder := downloadDecoderFor(caps, codec, source.FrameRate)
-	class := downloadLadderClass(source, decoder, capKbps, codec, settings.MaxHeight)
+	decoder, class, ok := bestDownloadDecoder(source, downloadDecodersFor(caps, codec, source.FrameRate), capKbps, codec, settings.MaxHeight)
 	if settings.AllowHEVCEncoding && caps.hasDetailedVideoEvidence() {
-		if hevc := downloadDecoderFor(caps, transcodeCodecHEVC, source.FrameRate); hevc.ok {
-			if hevcClass := downloadLadderClass(source, hevc, capKbps, transcodeCodecHEVC, settings.MaxHeight); hevcClass >= class {
-				codec, class, decoder = transcodeCodecHEVC, hevcClass, hevc
-			}
+		hevc, hevcClass, hevcOK := bestDownloadDecoder(source, downloadDecodersFor(caps, transcodeCodecHEVC, source.FrameRate), capKbps, transcodeCodecHEVC, settings.MaxHeight)
+		if hevcOK && (!ok || hevcClass >= class) {
+			codec, decoder, class, ok = transcodeCodecHEVC, hevc, hevcClass, true
 		}
+	}
+	if !ok {
+		return PrepareTarget{}, false
 	}
 	target := PrepareTarget{Container: containerMP4V3, CodecVideo: codec, CodecAudio: audioCodecAACV3, AudioTrackIndex: -1, TargetBitrateKbps: capKbps}
 	if width, height := FitLadderBox(source.Width, source.Height, class); width == 0 || width != source.Width || height != source.Height {
@@ -94,7 +96,27 @@ func ResolveDownloadTranscodeTarget(file *models.MediaFile, caps ClientCapabilit
 	if decoder.maxBitrateKbps > 0 {
 		target.TargetBitrateKbps = min(target.TargetBitrateKbps, decoder.maxBitrateKbps)
 	}
-	return target
+	return target, true
+}
+
+// bestDownloadDecoder returns the decoder whose limits let the encode reach
+// the tallest ladder class, and that class. A tie goes to the higher bitrate
+// limit, so a large but slow decoder never wins over one the preset can use in
+// full. ok is false when there is no decoder.
+func bestDownloadDecoder(source SourceDescriptorV3, decoders []downloadDecoder, capKbps int, codec string, maxHeight int) (best downloadDecoder, class int, ok bool) {
+	for _, decoder := range decoders {
+		decoderClass := downloadLadderClass(source, decoder, capKbps, codec, maxHeight)
+		if !ok || decoderClass > class || decoderClass == class && bitrateLimitAbove(decoder.maxBitrateKbps, best.maxBitrateKbps) {
+			best, class, ok = decoder, decoderClass, true
+		}
+	}
+	return best, class, ok
+}
+
+// bitrateLimitAbove reports whether limit a allows more than b, treating zero
+// as unlimited.
+func bitrateLimitAbove(a, b int) bool {
+	return b > 0 && (a == 0 || a > b)
 }
 
 // DownloadScaleResolution converts a download artifact's ladder class into
@@ -202,58 +224,53 @@ func h264LevelBitrateKbps(idc int) int {
 const h264HighProfileV3 = "high"
 
 // downloadDecoder is the decoder bound a download encode must fit. Zero
-// fields are unbounded; ok is false when strict-tier caps list no decoder
-// that can take this output.
+// fields are unbounded.
 type downloadDecoder struct {
 	maxWidth, maxHeight, maxBitrateKbps int
-	// maxLevel is the highest H.264 level_idc an exact-tier decoder lists.
+	// maxLevel is the highest H.264 level_idc the decoder lists when its
+	// levels are checked.
 	maxLevel int
-	ok       bool
 }
 
-// downloadDecoderFor returns the largest decoder the caps say plays an 8-bit
+// downloadDecodersFor returns the decoders the caps say play an 8-bit
 // download in codec. Strict-tier video_decode entries are authoritative and
 // prefer hardware decoders, since a download plays back later on the same
-// device. A decoder qualifies when it takes the source's frame rate and, at
-// the exact tier, lists the profile the encode produces; a level-bound HEVC
-// decoder is skipped because the HEVC recipe does not pin a level (the same
-// rule HLS applies). If no H.264 decoder qualifies, the largest one's size
-// still bounds the output, since H.264 is the fallback and a smaller frame is
-// the best the encode can offer. Without strict entries the coarse
-// max_resolution ceiling applies.
-func downloadDecoderFor(caps ClientCapabilities, codec string, frameRate float64) downloadDecoder {
+// device. A decoder qualifies when it takes the source's frame rate and lists
+// the profile the encode produces; as in HLS playback, a platform-attested
+// hardware decoder is exempt from the profile and level lists, and a
+// level-bound HEVC decoder is skipped because the HEVC recipe does not pin a
+// level. If no listed H.264 decoder qualifies, their sizes still bound the
+// output, since H.264 is the fallback and a smaller frame is the best the
+// encode can offer. Strict caps with no decoder for codec return none.
+// Without strict entries the coarse max_resolution ceiling applies.
+func downloadDecodersFor(caps ClientCapabilities, codec string, frameRate float64) []downloadDecoder {
 	if caps.hasDetailedVideoEvidence() {
-		if best := strictDownloadDecoder(caps, codec, frameRate, true); best.ok {
-			return best
+		if decoders := strictDownloadDecoders(caps, codec, frameRate, true); len(decoders) > 0 || codec != transcodeCodecH264 {
+			return decoders
 		}
-		if codec != transcodeCodecH264 {
-			return downloadDecoder{}
-		}
-		if best := strictDownloadDecoder(caps, codec, frameRate, false); best.ok {
-			return best
-		}
-		// Strict caps that omit H.264 entirely fall through to the coarse
-		// ceiling rather than failing: H.264 is the universal fallback.
+		return strictDownloadDecoders(caps, codec, frameRate, false)
 	}
 	if height := resolutionHeightV3(caps.MaxResolution); height > 0 {
 		width, _ := dimensionsFromResolutionV3(heightLabel(height))
-		return downloadDecoder{maxWidth: width, maxHeight: height, ok: true}
+		return []downloadDecoder{{maxWidth: width, maxHeight: height}}
 	}
-	return downloadDecoder{ok: true}
+	return []downloadDecoder{{}}
 }
 
-// strictDownloadDecoder picks the largest strict-tier decoder for codec,
-// hardware first. With qualify set it also requires the frame rate, exact
-// profile and (for HEVC) level rules downloadDecoderFor describes.
-func strictDownloadDecoder(caps ClientCapabilities, codec string, frameRate float64, qualify bool) downloadDecoder {
+// strictDownloadDecoders lists the strict-tier decoders for codec: the
+// hardware ones when any is usable, else the opted-in software ones. With
+// qualify set it also applies the frame rate, profile and level rules
+// downloadDecodersFor describes.
+func strictDownloadDecoders(caps ClientCapabilities, codec string, frameRate float64, qualify bool) []downloadDecoder {
 	softwareOptIn := HasFeatureV3(caps.ClientFeatures, FeatureSoftwareVideoDecodeV3)
 	outputProfile := h264HighProfileV3
 	if codec == transcodeCodecHEVC {
 		outputProfile = hevcMainProfileV3
 	}
-	exact := caps.VideoEvidence == EvidenceExactV3
 	for _, hardware := range []bool{true, false} {
-		var best downloadDecoder
+		// Platform attestation vouches for the platform's hardware decoders only.
+		checkLists := caps.VideoEvidence == EvidenceExactV3 || !hardware
+		var decoders []downloadDecoder
 		for _, decoder := range caps.VideoDecode {
 			if decoder.Hardware != hardware || (!hardware && !softwareOptIn) ||
 				!strings.EqualFold(decoder.Codec, codec) ||
@@ -261,39 +278,26 @@ func strictDownloadDecoder(caps ClientCapabilities, codec string, frameRate floa
 				continue
 			}
 			if qualify && ((decoder.MaxFrameRate > 0 && frameRate > decoder.MaxFrameRate+0.01) ||
-				(exact && len(decoder.Profiles) > 0 && !videoProfileSupportedV3(codec, outputProfile, decoder.Profiles)) ||
+				(checkLists && len(decoder.Profiles) > 0 && !videoProfileSupportedV3(codec, outputProfile, decoder.Profiles)) ||
 				(codec == transcodeCodecHEVC && len(decoder.Levels) > 0)) {
 				continue
 			}
-			if !best.ok || boxLarger(decoder.MaxWidth, decoder.MaxHeight, best.maxWidth, best.maxHeight) {
-				best = downloadDecoder{maxWidth: decoder.MaxWidth, maxHeight: decoder.MaxHeight, maxBitrateKbps: decoder.MaxBitrateKbps, ok: true}
-				if exact && codec == transcodeCodecH264 && len(decoder.Levels) > 0 {
-					best.maxLevel = slices.Max(decoder.Levels)
-					// The level also bounds the rate and buffer the encode may use.
-					if levelKbps := h264LevelBitrateKbps(best.maxLevel); levelKbps > 0 &&
-						(best.maxBitrateKbps == 0 || levelKbps < best.maxBitrateKbps) {
-						best.maxBitrateKbps = levelKbps
-					}
+			bound := downloadDecoder{maxWidth: decoder.MaxWidth, maxHeight: decoder.MaxHeight, maxBitrateKbps: decoder.MaxBitrateKbps}
+			if checkLists && codec == transcodeCodecH264 && len(decoder.Levels) > 0 {
+				bound.maxLevel = slices.Max(decoder.Levels)
+				// The level also bounds the rate and buffer the encode may use.
+				if levelKbps := h264LevelBitrateKbps(bound.maxLevel); levelKbps > 0 &&
+					(bound.maxBitrateKbps == 0 || levelKbps < bound.maxBitrateKbps) {
+					bound.maxBitrateKbps = levelKbps
 				}
 			}
+			decoders = append(decoders, bound)
 		}
-		if best.ok {
-			return best
+		if len(decoders) > 0 {
+			return decoders
 		}
 	}
-	return downloadDecoder{}
-}
-
-// boxLarger reports whether a decoder bound is larger than the current one,
-// treating zero as unbounded.
-func boxLarger(width, height, currentWidth, currentHeight int) bool {
-	if currentWidth == 0 && currentHeight == 0 {
-		return false
-	}
-	if width == 0 && height == 0 {
-		return true
-	}
-	return width*height > currentWidth*currentHeight
+	return nil
 }
 
 // PrepareFile encodes a single finalized MP4 (with a relocated moov atom via

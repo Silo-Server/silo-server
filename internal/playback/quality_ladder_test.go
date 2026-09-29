@@ -117,7 +117,10 @@ func TestResolveDownloadTranscodeTarget(t *testing.T) {
 		{"HEVC source counts as more bits in H.264", ladderTestFile(1920, 1080, "hevc", "24", 3_000), ClientCapabilities{}, 10_000, DownloadTranscodeSettings{}, "h264", "", 5_000},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := ResolveDownloadTranscodeTarget(tc.file, tc.caps, tc.kbps, tc.settings)
+			got, ok := ResolveDownloadTranscodeTarget(tc.file, tc.caps, tc.kbps, tc.settings)
+			if !ok {
+				t.Fatal("no decoder for the download")
+			}
 			if got.CodecVideo != tc.wantCodec || got.Resolution != tc.wantRes || got.TargetBitrateKbps != tc.wantBitrate {
 				t.Fatalf("target = codec %q res %q bitrate %d, want %q %q %d", got.CodecVideo, got.Resolution, got.TargetBitrateKbps, tc.wantCodec, tc.wantRes, tc.wantBitrate)
 			}
@@ -211,12 +214,41 @@ func TestResolveDownloadTranscodeTargetHonorsDecoderLimits(t *testing.T) {
 		{"a decoder too slow for the frame rate still bounds the size", uhd60, exact(
 			VideoDecodeCapabilityV3{Codec: "h264", BitDepths: []int{8}, MaxWidth: 1280, MaxHeight: 720, MaxFrameRate: 30, Hardware: true},
 		), 20_000, false, "h264", "720p", 20_000},
+		{"the decoder reaching the best class wins over the largest", uhd, exact(
+			VideoDecodeCapabilityV3{Codec: "h264", BitDepths: []int{8}, MaxWidth: 3840, MaxHeight: 2160, MaxBitrateKbps: 1_000, Hardware: true},
+			VideoDecodeCapabilityV3{Codec: "h264", BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxBitrateKbps: 20_000, Hardware: true},
+		), 10_000, false, "h264", "1080p", 10_000},
+		{"a platform-attested software decoder keeps its profile list", uhd, ClientCapabilities{
+			VideoEvidence: EvidencePlatformAttestedV3, ClientFeatures: []string{FeatureSoftwareVideoDecodeV3}, CodecsVideo: []string{"h264"},
+			VideoDecode: []VideoDecodeCapabilityV3{
+				{Codec: "h264", Profiles: []string{"baseline"}, BitDepths: []int{8}, MaxWidth: 3840, MaxHeight: 2160},
+				{Codec: "h264", Profiles: []string{"high"}, BitDepths: []int{8}, MaxWidth: 1280, MaxHeight: 720},
+			},
+		}, 20_000, false, "h264", "720p", 20_000},
+		{"HEVC-only caps use HEVC when the server allows it", uhd, exact(
+			VideoDecodeCapabilityV3{Codec: "hevc", BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, Hardware: true},
+		), 10_000, true, "hevc", "1080p", 10_000},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := ResolveDownloadTranscodeTarget(tc.file, tc.caps, tc.kbps, DownloadTranscodeSettings{AllowHEVCEncoding: tc.hevc})
+			got, ok := ResolveDownloadTranscodeTarget(tc.file, tc.caps, tc.kbps, DownloadTranscodeSettings{AllowHEVCEncoding: tc.hevc})
+			if !ok {
+				t.Fatal("no decoder for the download")
+			}
 			if got.CodecVideo != tc.wantCodec || got.Resolution != tc.wantRes || got.TargetBitrateKbps != tc.wantBitrate {
 				t.Fatalf("target = codec %q res %q bitrate %d, want %q %q %d", got.CodecVideo, got.Resolution, got.TargetBitrateKbps, tc.wantCodec, tc.wantRes, tc.wantBitrate)
 			}
 		})
+	}
+}
+
+// Strict caps that attest no decoder for any codec the server may encode
+// leave nothing to convert to, rather than an H.264 file the device never
+// claimed to play.
+func TestResolveDownloadTranscodeTargetWithoutAttestedDecoder(t *testing.T) {
+	caps := ClientCapabilities{VideoEvidence: EvidenceExactV3, CodecsVideo: []string{"hevc"}, VideoDecode: []VideoDecodeCapabilityV3{
+		{Codec: "hevc", BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, Hardware: true},
+	}}
+	if target, ok := ResolveDownloadTranscodeTarget(ladderTestFile(3840, 2160, "hevc", "24", 40_000), caps, 10_000, DownloadTranscodeSettings{}); ok {
+		t.Fatalf("HEVC-only caps without HEVC encoding resolved %+v", target)
 	}
 }

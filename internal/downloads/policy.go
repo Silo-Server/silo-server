@@ -75,7 +75,10 @@ func (r DownloadQualityResolver) Resolve(
 			return QualityDecision{}, err
 		}
 		presetKbps := QualityBitrateKbps(quality)
-		target := downloadTranscodeTarget(file, caps, cfg, presetKbps, ceiling)
+		target, ok := downloadTranscodeTarget(file, caps, cfg, presetKbps, ceiling)
+		if !ok {
+			return QualityDecision{}, ErrQualityUnavailable
+		}
 		if sourceFitsPreset(file, caps, target, presetKbps) {
 			method := playback.Resolve(file, caps, playback.AdminSettings{TranscodeEnabled: true}).Method
 			// A source the ladder would not change is still re-encoded when
@@ -100,7 +103,10 @@ func (r DownloadQualityResolver) Resolve(
 	if err != nil {
 		return QualityDecision{}, err
 	}
-	target := downloadTranscodeTarget(file, caps, cfg, QualityBitrateKbps(Quality20Mbps), ceiling)
+	target, ok := downloadTranscodeTarget(file, caps, cfg, QualityBitrateKbps(Quality20Mbps), ceiling)
+	if !ok {
+		return QualityDecision{}, ErrQualityUnavailable
+	}
 	return transcodeDecision(QualityOriginal, Quality20Mbps, target), nil
 }
 
@@ -166,8 +172,9 @@ func transcodeDecision(requested, effective string, target playback.PrepareTarge
 // policy ceiling (non-empty only when a custom override narrows the user's max
 // playback quality) caps the ladder class: it applies to what is served, so a
 // capped transcode of an over-ceiling source stays downloadable — mirroring
-// the serve-time rule in serveDownloadBytes.
-func downloadTranscodeTarget(file *models.MediaFile, caps playback.ClientCapabilities, cfg config.DownloadConfig, kbps int, ceiling string) playback.PrepareTarget {
+// the serve-time rule in serveDownloadBytes. ok is false when the device's
+// strict caps attest no decoder for a codec the server may encode.
+func downloadTranscodeTarget(file *models.MediaFile, caps playback.ClientCapabilities, cfg config.DownloadConfig, kbps int, ceiling string) (playback.PrepareTarget, bool) {
 	return playback.ResolveDownloadTranscodeTarget(file, caps, kbps, playback.DownloadTranscodeSettings{
 		AllowHEVCEncoding: cfg.AllowHEVCEncoding,
 		MaxHeight:         qualityHeight(ceiling),
@@ -220,8 +227,9 @@ type QualityOption struct {
 // the bitrate earns at <=30 fps in the most efficient codec the server may
 // encode, so it is an honest "up to": a 60 fps source, a smaller source, or a
 // device that decodes less all land at or below it. 4K sources convert only
-// when 4K transcoding is allowed, and a policy quality ceiling caps it too.
-func qualityOptionsFor(presets []string, cfg config.DownloadConfig, user *PolicyUser) []QualityOption {
+// when 4K transcoding is allowed, and the user's quality ceiling and a policy
+// override's transcode ceiling (policyCeiling) cap it too.
+func qualityOptionsFor(presets []string, cfg config.DownloadConfig, user *PolicyUser, policyCeiling string) []QualityOption {
 	codec := outputCodecH264
 	if cfg.AllowHEVCEncoding {
 		codec = outputCodecHEVC
@@ -230,8 +238,12 @@ func qualityOptionsFor(presets []string, cfg config.DownloadConfig, user *Policy
 	if !cfg.Allow4KTranscode {
 		ceiling = 1080
 	}
+	limits := []string{policyCeiling}
 	if user != nil {
-		if height := qualityHeight(user.Policy.MaxPlaybackQuality); height > 0 && (ceiling == 0 || height < ceiling) {
+		limits = append(limits, user.Policy.MaxPlaybackQuality)
+	}
+	for _, limit := range limits {
+		if height := qualityHeight(limit); height > 0 && (ceiling == 0 || height < ceiling) {
 			ceiling = height
 		}
 	}
@@ -270,20 +282,24 @@ func (s *Service) SetActionDecider(decider ActionDecider) {
 	s.policy.actionDecider = decider
 }
 
+// policyPresetsFor returns the presets the policy engine allows and the
+// quality ceiling it puts on converted downloads, so the capability labels
+// what Resolve will produce.
 func (s *Service) policyPresetsFor(
 	ctx context.Context,
 	user *PolicyUser,
 	cfg config.DownloadConfig,
 	artifactsAvailable bool,
-) []string {
+) ([]string, string) {
 	if err := s.checkDownloadAction(ctx, policyengine.ActionDownload, userIDForPolicy(user), user, cfg, artifactsAvailable, ""); err != nil {
-		return []string{}
+		return []string{}, ""
 	}
 	presets := []string{QualityOriginal}
-	if err := s.checkDownloadAction(ctx, policyengine.ActionDownloadTranscode, userIDForPolicy(user), user, cfg, artifactsAvailable, ""); err == nil {
+	ceiling, err := s.policy.ensureTranscodeAvailable(ctx, user, cfg, artifactsAvailable, "", "")
+	if err == nil {
 		presets = append(presets, Quality20Mbps, Quality10Mbps, Quality5Mbps, Quality2Mbps, Quality1Mbps)
 	}
-	return presets
+	return presets, ceiling
 }
 
 func (s *Service) downloadConfigForUser(

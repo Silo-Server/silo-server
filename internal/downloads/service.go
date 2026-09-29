@@ -311,12 +311,13 @@ func (s *Service) Capability(ctx context.Context, userID int) (Capability, error
 		TranscodeEnabled:     cfg.TranscodeEnabled,
 		TranscodeUserAllowed: policyUser.Policy.DownloadTranscodeAllowed,
 	}
+	policyCeiling := ""
 	if s.actionDecider != nil {
-		c.QualityPresets = s.policyPresetsFor(ctx, policyUser, cfg, s.artifacts != nil)
+		c.QualityPresets, policyCeiling = s.policyPresetsFor(ctx, policyUser, cfg, s.artifacts != nil)
 	} else {
 		c.QualityPresets = s.policy.PresetsFor(policyUser, cfg, s.artifacts != nil)
 	}
-	c.QualityOptions = qualityOptionsFor(c.QualityPresets, cfg, policyUser)
+	c.QualityOptions = qualityOptionsFor(c.QualityPresets, cfg, policyUser, policyCeiling)
 	if len(c.QualityPresets) > 0 {
 		// Per-season download is always available when downloads are enabled;
 		// auto-download monitoring additionally requires the subscription repo.
