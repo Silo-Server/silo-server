@@ -368,3 +368,46 @@ func TestFilesystemIdentityIsAbsoluteRoot(t *testing.T) {
 		t.Fatal("different roots share an identity")
 	}
 }
+
+// cancelAfter reports cancellation once Err has been called more than n times.
+type cancelAfter struct {
+	context.Context
+	n int
+}
+
+func (c *cancelAfter) Err() error {
+	if c.n <= 0 {
+		return context.Canceled
+	}
+	c.n--
+	return nil
+}
+
+func TestFilesystemDeletePrefixStopsOnCancellation(t *testing.T) {
+	s, err := NewFilesystem(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for i := range 10 {
+		if err = s.Put(ctx, fmt.Sprintf("item/h%d/image.jpg", i), []byte("x")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The walk checks the context once per entry: the prefix directory, then
+	// a hash directory and its file for each item. Allow the first two files.
+	n, err := s.DeletePrefix(&cancelAfter{Context: ctx, n: 5}, "item")
+	if !errors.Is(err, context.Canceled) || n != 2 {
+		t.Fatalf("partial delete = %d, %v; want 2, context.Canceled", n, err)
+	}
+	keys, _, err := s.List(ctx, "item/", "", 100)
+	if err != nil || len(keys) != 8 {
+		t.Fatalf("remaining = %d, %v; want 8", len(keys), err)
+	}
+	if n, err = s.DeletePrefix(ctx, "item"); err != nil || n != 8 {
+		t.Fatalf("resumed delete = %d, %v; want 8", n, err)
+	}
+	if _, err = os.Stat(filepath.Join(s.root, "item")); !os.IsNotExist(err) {
+		t.Fatalf("prefix directory left behind: %v", err)
+	}
+}
