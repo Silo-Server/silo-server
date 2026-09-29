@@ -1157,27 +1157,30 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 // h264BoundedQualityV3 fits a transcode target to the client's attested
 // H.264 decoders. An encode that no decoder takes, scaled or a same-size
 // codec conversion, steps down the ladder until its fitted size does,
-// stopping at the smallest class since H.264 is the universal HLS output.
+// stopping at the smallest class since H.264 is the universal HLS output. A
+// decoder takes a class only when its bitrate limit earns that class on the
+// ladder, so a 1080p decoder limited to 3 Mbps gets 720p, as downloads do.
 // The bitrate then stays within the limit of a decoder that takes the output.
 func h264BoundedQualityV3(request StartRequestV3, quality QualityResultV3, source SourceDescriptorV3) QualityResultV3 {
-	decoders := attestedH264DecodersV3(request)
+	decoders := attestedH264DecodersV3(request, source.FrameRate)
 	if len(decoders) == 0 {
 		return quality
 	}
 	// The encode keeps the source's frame rate, so a decoder must take it too.
 	takes := func(decoder VideoDecodeCapabilityV3, width, height int) bool {
 		return (decoder.MaxWidth <= 0 || width <= decoder.MaxWidth) && (decoder.MaxHeight <= 0 || height <= decoder.MaxHeight) &&
-			(decoder.MaxFrameRate <= 0 || source.FrameRate <= decoder.MaxFrameRate+0.01)
+			h264DecoderTakesFrameRateV3(decoder, source.FrameRate)
 	}
-	anyTakes := func(width, height int) bool {
+	anyTakes := func(width, height, class int) bool {
 		for _, decoder := range decoders {
-			if takes(decoder, width, height) {
+			if takes(decoder, width, height) &&
+				(decoder.MaxBitrateKbps <= 0 || LadderClassForBitrate(decoder.MaxBitrateKbps, source.FrameRate, transcodeCodecH264) >= class) {
 				return true
 			}
 		}
 		return false
 	}
-	if quality.Height > 0 && !anyTakes(quality.Width, quality.Height) {
+	if quality.Height > 0 && !anyTakes(quality.Width, quality.Height, ladderClassForSize(quality.Width, quality.Height)) {
 		classes := ladderClassesFrom(ladderClassForSize(quality.Width, quality.Height))
 		for i, class := range classes {
 			width, height := FitLadderBox(source.Width, source.Height, class.Height)
@@ -1188,7 +1191,7 @@ func h264BoundedQualityV3(request StartRequestV3, quality QualityResultV3, sourc
 			if width == 0 {
 				width = class.Width
 			}
-			if anyTakes(width, height) || i == len(classes)-1 {
+			if anyTakes(width, height, class.Height) || i == len(classes)-1 {
 				quality.Label, quality.Width, quality.Height = heightLabel(height), width, height
 				quality.BitrateKbps = minPositiveV3(quality.BitrateKbps, ladderClassBitrateKbpsV3(class.Height))
 				quality.PreservesSource = false
@@ -1213,28 +1216,41 @@ func h264BoundedQualityV3(request StartRequestV3, quality QualityResultV3, sourc
 }
 
 // attestedH264DecodersV3 lists the 8-bit H.264 decoders strict caps attest:
-// the hardware ones when any exist, else the opted-in software ones. It is
+// the hardware ones when any takes the source's frame rate, else the opted-in
+// software ones that do, else every attested one, hardware first. It is
 // empty without detailed evidence, when H.264 stays unbounded.
-func attestedH264DecodersV3(request StartRequestV3) []VideoDecodeCapabilityV3 {
+func attestedH264DecodersV3(request StartRequestV3, frameRate float64) []VideoDecodeCapabilityV3 {
 	caps := request.Capabilities
 	if caps.VideoEvidence != EvidenceExactV3 && caps.VideoEvidence != EvidencePlatformAttestedV3 {
 		return nil
 	}
 	softwareOptIn := HasFeatureV3(request.ClientFeatures, FeatureSoftwareVideoDecodeV3)
+	var fallback []VideoDecodeCapabilityV3
 	for _, hardware := range []bool{true, false} {
 		var decoders []VideoDecodeCapabilityV3
+		usable := false
 		for _, decoder := range caps.VideoDecode {
 			if decoder.Hardware != hardware || (!hardware && !softwareOptIn) || !strings.EqualFold(decoder.Codec, transcodeCodecH264) ||
 				(len(decoder.BitDepths) > 0 && !containsIntV3(decoder.BitDepths, 8)) {
 				continue
 			}
 			decoders = append(decoders, decoder)
+			usable = usable || h264DecoderTakesFrameRateV3(decoder, frameRate)
 		}
-		if len(decoders) > 0 {
+		if usable {
 			return decoders
 		}
+		if fallback == nil {
+			fallback = decoders
+		}
 	}
-	return nil
+	return fallback
+}
+
+// h264DecoderTakesFrameRateV3 reports whether a decoder takes an encode at
+// the source's frame rate; an unknown rate or limit always passes.
+func h264DecoderTakesFrameRateV3(decoder VideoDecodeCapabilityV3, frameRate float64) bool {
+	return decoder.MaxFrameRate <= 0 || frameRate <= decoder.MaxFrameRate+0.01
 }
 
 func videoTransformationForTargetV3(codec string) TransformationV3 {

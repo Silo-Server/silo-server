@@ -131,14 +131,14 @@ func TestPlanPlaybackV3HEVCConversionAtSourceSizeIsCapped(t *testing.T) {
 
 // H.264 stays the universal HLS output, but its bitrate stays within an
 // attested H.264 decoder's limit for the output size; HEVC output is checked
-// against its own decoder instead.
+// against its own decoder instead. The 5 Mbps limit still earns 1080p.
 func TestPlanPlaybackV3H264TargetStaysWithinTheDecoderBitrate(t *testing.T) {
 	for _, tc := range []struct {
 		allowHEVC   bool
 		wantCodec   string
 		wantBitrate int
 	}{
-		{false, "h264", 4_000},
+		{false, "h264", 5_000},
 		{true, "hevc", 4_800},
 	} {
 		input := hevcTranscodePlannerInputV3(tc.allowHEVC, true, true)
@@ -148,7 +148,7 @@ func TestPlanPlaybackV3H264TargetStaysWithinTheDecoderBitrate(t *testing.T) {
 		input.RequestedFile, input.EffectiveFile = &file, &file
 		input.Request.Capabilities.CodecsVideo = []string{"h264", "hevc"}
 		input.Request.Capabilities.VideoDecode = append(input.Request.Capabilities.VideoDecode,
-			VideoDecodeCapabilityV3{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 4_000, Hardware: true})
+			VideoDecodeCapabilityV3{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 5_000, Hardware: true})
 		input.Request.QualityPreference = "auto"
 		estimate := 7_000
 		input.Request.BandwidthEstimateKbps = &estimate
@@ -232,6 +232,35 @@ func TestPlanPlaybackV3H264TargetStepsDownToTheDecoderSize(t *testing.T) {
 		{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 1917, MaxHeight: 1080, MaxFrameRate: 60, Hardware: true},
 	}
 	check("an odd-width source at the decoder limit", PlanPlaybackV3(odd), "h264", "720p", 1278, 2_000)
+
+	// A decoder takes a class only when its bitrate limit earns it on the
+	// ladder: a 1080p decoder limited to 3 Mbps gets 720p, not 1080p at 3 Mbps.
+	slow := input(false)
+	slow.Request.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{
+		{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 3_000, Hardware: true},
+	}
+	check("a 3 Mbps decoder limit", PlanPlaybackV3(slow), "h264", "720p", 1280, 2_000)
+	// A large decoder with a low limit does not hold back a smaller, faster one.
+	slow.Request.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{
+		{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 1_000, Hardware: true},
+		{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 20_000, Hardware: true},
+	}
+	check("a slow 4K decoder beside a fast 1080p one", PlanPlaybackV3(slow), "h264", "1080p", 1920, 5_600)
+
+	// Hardware decoders win only when one takes the source's frame rate; an
+	// opted-in software decoder that does is used instead.
+	software := input(false)
+	software.RequestedFile, software.EffectiveFile = &fastFile, &fastFile
+	software.Request.BandwidthEstimateKbps = &estimate
+	software.Request.ClientFeatures = append(software.Request.ClientFeatures, FeatureSoftwareVideoDecodeV3)
+	software.Request.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{
+		{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 30, Hardware: true},
+		{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60},
+	}
+	check("a 60 fps software decoder", PlanPlaybackV3(software), "h264", "1080p", 1920, 6_000)
+	// Without the opt-in the hardware decoder still bounds the encode.
+	software.Request.ClientFeatures = []string{FeaturePlaybackPlanV3}
+	check("software decode not opted in", PlanPlaybackV3(software), "h264", "480p", 854, 1_500)
 }
 
 func TestPlanPlaybackV3HEVCFailureFallsBackToH264(t *testing.T) {
