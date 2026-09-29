@@ -159,6 +159,39 @@ func TestPlanPlaybackV3H264TargetStaysWithinTheDecoderBitrate(t *testing.T) {
 	}
 }
 
+// A scaled H.264 encode steps down to the tallest class an attested H.264
+// decoder takes, while HEVC output keeps the class its own decoder takes; the
+// H.264 fallback after a failed HEVC attempt uses the H.264 size.
+func TestPlanPlaybackV3H264TargetStepsDownToTheDecoderSize(t *testing.T) {
+	input := func(allowHEVC bool) PlannerInputV3 {
+		input := hevcTranscodePlannerInputV3(allowHEVC, true, true)
+		file := *input.RequestedFile
+		file.CodecVideo, file.Bitrate = "h264", 8_200
+		file.VideoTracks = []models.VideoTrack{{Codec: "h264", Profile: "High", Width: 1920, Height: 1080, FrameRate: "24/1", Bitrate: 8_000, BitDepth: 8, VideoRange: "SDR"}}
+		input.RequestedFile, input.EffectiveFile = &file, &file
+		input.Request.Capabilities.CodecsVideo = []string{"h264", "hevc"}
+		input.Request.Capabilities.VideoDecode = append(input.Request.Capabilities.VideoDecode,
+			VideoDecodeCapabilityV3{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 1280, MaxHeight: 720, MaxFrameRate: 60, Hardware: true})
+		input.Request.QualityPreference = "auto"
+		estimate := 7_000
+		input.Request.BandwidthEstimateKbps = &estimate
+		return input
+	}
+	check := func(name string, result PlannerResultV3, codec, res string, width, bitrate int) {
+		t.Helper()
+		if result.Plan == nil || result.TargetVideoCodec != codec || result.TargetResolution != res || result.TargetBitrateKbps != bitrate ||
+			result.Plan.EffectiveRecipe.Width == nil || *result.Plan.EffectiveRecipe.Width != width {
+			t.Fatalf("%s: %s codec %q res %q bitrate %d, want %s %s %d wide at %d", name, ExplainPlannerResultV3(result), result.TargetVideoCodec, result.TargetResolution, result.TargetBitrateKbps, codec, res, width, bitrate)
+		}
+	}
+	check("H.264 only", PlanPlaybackV3(input(false)), "h264", "720p", 1280, 2_000)
+	first := PlanPlaybackV3(input(true))
+	check("HEVC allowed", first, "hevc", "1080p", 1920, 4_800)
+	retry := input(true)
+	retry.AttemptedKeys = []string{first.Plan.PlanAttemptKey}
+	check("after a failed HEVC attempt", PlanPlaybackV3(retry), "h264", "720p", 1280, 2_000)
+}
+
 func TestPlanPlaybackV3HEVCFailureFallsBackToH264(t *testing.T) {
 	input := hevcTranscodePlannerInputV3(true, true, true)
 	first := PlanPlaybackV3(input)

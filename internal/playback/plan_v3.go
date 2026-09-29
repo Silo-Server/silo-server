@@ -1049,15 +1049,13 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		quality.BitrateKbps = min(quality.BitrateKbps, budget-targetAudioBitrateKbps)
 	}
 	targetVideoCodec := transcodeCodecH264
-	// H.264 is always an allowed output, but its bitrate stays within what an
-	// attested H.264 decoder for this size takes. h264BitrateKbps is also
-	// kept for the H.264 fallback after a failed HEVC attempt.
-	h264BitrateKbps := quality.BitrateKbps
-	if limit := h264DecoderBitrateLimitV3(input.Request, quality.Width, quality.Height); limit > 0 && (h264BitrateKbps <= 0 || h264BitrateKbps > limit) {
-		h264BitrateKbps = limit
-	}
+	// H.264 is always an allowed output, but it stays within an attested
+	// H.264 decoder: a scaled encode steps down to the tallest class one
+	// takes, and the bitrate stays within that decoder's limit. h264Quality
+	// is also kept for the H.264 fallback after a failed HEVC attempt.
+	h264Quality := h264BoundedQualityV3(input.Request, quality, source)
 	hevcQuality := quality
-	quality.BitrateKbps = h264BitrateKbps
+	quality = h264Quality
 	if input.Settings.AllowHEVCEncoding && hlsRegistry.Available(TransformationVideoToHEVCV3) {
 		// HEVC output needs no more than the source's bits counted as HEVC,
 		// whether it scales the source or only converts it at its own size,
@@ -1139,8 +1137,10 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	// the same HLS delivery without changing source/remux behavior.
 	if targetVideoCodec == transcodeCodecHEVC && planAttemptedV3(plan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
 		targetVideoCodec = transcodeCodecH264
-		quality.BitrateKbps = h264BitrateKbps
-		plan.EffectiveRecipe.BitrateKbps = intPointerV3(h264BitrateKbps)
+		quality = h264Quality
+		plan.EffectiveRecipe.Width = intPointerV3(quality.Width)
+		plan.EffectiveRecipe.Height = intPointerV3(quality.Height)
+		plan.EffectiveRecipe.BitrateKbps = intPointerV3(quality.BitrateKbps)
 		plan.EffectiveRecipe.VideoCodec = targetVideoCodec
 		plan.EffectiveRecipe.VideoSampleEntry = ""
 		if !replaceVideoTransformationV3(&plan, targetVideoCodec) || !deliverySupportsPlanV3(input.Request, DeliveryClassHLSV3, plan) {
@@ -1154,34 +1154,76 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	return PlannerResultV3{Plan: &plan, PlayMethod: PlayTranscode, TranscodeAudio: true, TargetVideoCodec: targetVideoCodec, TargetAudioCodec: "aac", SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, targetAudioChannels, true), TargetAudioChannels: targetAudioChannels, TargetAudioBitrateKbps: targetAudioBitrateKbps, TargetResolution: quality.Label, TargetBitrateKbps: quality.BitrateKbps, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleBurnIn: subtitle.RequiresBurn, SubtitleCodec: subtitle.Codec, DownloadedSubtitleID: subtitle.DownloadedSubtitleID, ToneMapPolicy: toneMapPolicy, ToneMapMode: toneMapMode, ToneMapSourceKind: toneMapSourceKind, ToneMapRecipeVersion: toneMapRecipeVersionV3(toneMapOK), ToneMapPreflightRequired: toneMapResolution.PreflightRequired, ToneMapSourceRevision: toneMapRevision}
 }
 
-// h264DecoderBitrateLimitV3 is the most an attested H.264 decoder that takes
-// a width x height output accepts, in kbps; 0 when strict caps do not bound
-// it (no detailed evidence, an unlimited decoder, or none for that size).
-// Hardware decoders are preferred, as for downloads.
-func h264DecoderBitrateLimitV3(request StartRequestV3, width, height int) int {
+// h264BoundedQualityV3 fits a transcode target to the client's attested
+// H.264 decoders. A scaled encode larger than every one steps down to the
+// tallest class one takes; a same-size conversion keeps its size. Either way
+// the bitrate stays within the limit of a decoder that takes the output.
+func h264BoundedQualityV3(request StartRequestV3, quality QualityResultV3, source SourceDescriptorV3) QualityResultV3 {
+	decoders := attestedH264DecodersV3(request)
+	if len(decoders) == 0 {
+		return quality
+	}
+	if !quality.PreservesSource && quality.Height > 0 {
+		class := 0
+		for _, decoder := range decoders {
+			if decoder.MaxWidth <= 0 || decoder.MaxHeight <= 0 {
+				class = 0
+				break
+			}
+			class = max(class, ladderClassForSize(decoder.MaxWidth, decoder.MaxHeight))
+		}
+		if class > 0 && ladderClassForSize(quality.Width, quality.Height) > class {
+			box := ladderClassesFrom(class)[0]
+			width, height := FitLadderBox(source.Width, source.Height, class)
+			if height == 0 {
+				height = class
+			}
+			if width == 0 {
+				width = box.Width
+			}
+			quality.Label, quality.Width, quality.Height = heightLabel(height), width, height
+			quality.BitrateKbps = minPositiveV3(quality.BitrateKbps, ladderClassBitrateKbpsV3(class))
+		}
+	}
+	limit := 0
+	for _, decoder := range decoders {
+		if decoder.MaxWidth > 0 && quality.Width > decoder.MaxWidth || decoder.MaxHeight > 0 && quality.Height > decoder.MaxHeight {
+			continue
+		}
+		if decoder.MaxBitrateKbps <= 0 {
+			return quality
+		}
+		limit = max(limit, decoder.MaxBitrateKbps)
+	}
+	if limit > 0 && (quality.BitrateKbps <= 0 || quality.BitrateKbps > limit) {
+		quality.BitrateKbps = limit
+	}
+	return quality
+}
+
+// attestedH264DecodersV3 lists the 8-bit H.264 decoders strict caps attest:
+// the hardware ones when any exist, else the opted-in software ones. It is
+// empty without detailed evidence, when H.264 stays unbounded.
+func attestedH264DecodersV3(request StartRequestV3) []VideoDecodeCapabilityV3 {
 	caps := request.Capabilities
 	if caps.VideoEvidence != EvidenceExactV3 && caps.VideoEvidence != EvidencePlatformAttestedV3 {
-		return 0
+		return nil
 	}
 	softwareOptIn := HasFeatureV3(request.ClientFeatures, FeatureSoftwareVideoDecodeV3)
 	for _, hardware := range []bool{true, false} {
-		limit, found := 0, false
+		var decoders []VideoDecodeCapabilityV3
 		for _, decoder := range caps.VideoDecode {
 			if decoder.Hardware != hardware || (!hardware && !softwareOptIn) || !strings.EqualFold(decoder.Codec, transcodeCodecH264) ||
-				(len(decoder.BitDepths) > 0 && !containsIntV3(decoder.BitDepths, 8)) ||
-				decoder.MaxWidth > 0 && width > decoder.MaxWidth || decoder.MaxHeight > 0 && height > decoder.MaxHeight {
+				(len(decoder.BitDepths) > 0 && !containsIntV3(decoder.BitDepths, 8)) {
 				continue
 			}
-			if decoder.MaxBitrateKbps <= 0 {
-				return 0
-			}
-			limit, found = max(limit, decoder.MaxBitrateKbps), true
+			decoders = append(decoders, decoder)
 		}
-		if found {
-			return limit
+		if len(decoders) > 0 {
+			return decoders
 		}
 	}
-	return 0
+	return nil
 }
 
 func videoTransformationForTargetV3(codec string) TransformationV3 {

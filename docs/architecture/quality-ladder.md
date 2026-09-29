@@ -32,8 +32,9 @@ ladder and Jellyfin's `ResolutionNormalizer`.
 - **Never exceed the source's bitrate.** A transcode's cap is the smaller of the
   budget and the source's bitrate converted by codec efficiency.
 - **Device bounds step down, never up.** The class drops until the device's decoder
-  takes the fitted size. Streaming keeps H.264 as its universal output and only
-  lowers an H.264 target's bitrate to an attested decoder's limit.
+  takes the fitted size. Streaming keeps H.264 as its universal output: a scaled
+  H.264 encode steps down to the tallest class an attested H.264 decoder takes,
+  and its bitrate stays within that decoder's limit.
 - **Caps are ceilings.** Every encoder treats the cap as `-maxrate`, not as a
   constant-bitrate target (`appendCappedVBRArgs`).
 - **Downloads store the class, not the height.** An artifact records the class
