@@ -36,6 +36,7 @@ vi.mock("@/hooks/useCanRequest", () => ({
 
 vi.mock("@/hooks/useViewTransition", () => ({
   useViewTransitionNavigate: () => mocks.navigate,
+  shouldUseRouteViewTransition: () => true,
 }));
 
 vi.mock("@/hooks/queries/useRequests", () => ({
@@ -426,6 +427,23 @@ describe("GlobalSearch", () => {
     expect(input).toHaveFocus();
   });
 
+  it("scrolls rows into view for the keyboard but not the pointer", () => {
+    const input = renderTwoResults();
+    const original = Element.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      fireEvent.mouseMove(screen.getByRole("option", { name: /Second Movie/ }));
+      expect(scrollIntoView).not.toHaveBeenCalled();
+
+      fireEvent.keyDown(input, { key: "ArrowUp" });
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(scrollIntoView.mock.contexts[0]).toHaveAttribute("id", "search-result-0");
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
   it("highlights the selected title row", () => {
     const input = renderTwoResults();
 
@@ -471,6 +489,8 @@ describe("GlobalSearch", () => {
 
     expect(input).toHaveFocus();
     expect(input).not.toHaveAttribute("aria-activedescendant");
+    // With nothing listed there is nothing to "see all" of.
+    expect(screen.queryByText("See all")).not.toBeInTheDocument();
   });
 
   it("keeps Play an independent control alongside the selectable row", async () => {

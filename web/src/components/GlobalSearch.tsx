@@ -451,15 +451,6 @@ export function GlobalSearch({
   const optionCount = optionKeys.length;
   const selectedIndex = selectedKey === null ? -1 : optionKeys.indexOf(selectedKey);
 
-  // Auto-scroll the selected result into view. DOM focus deliberately stays in
-  // the input; aria-activedescendant carries the selection.
-  useEffect(() => {
-    if (selectedIndex >= 0) {
-      document.getElementById(searchResultOptionId(selectedIndex))?.scrollIntoView?.({
-        block: "nearest",
-      });
-    }
-  }, [selectedIndex]);
   const showLoading = (previewQuery.isFetching || peopleQuery.isFetching) && resultCount === 0;
   const showEmpty =
     !previewQuery.isFetching &&
@@ -480,7 +471,9 @@ export function GlobalSearch({
       searchInputRef.current?.focus();
       return;
     }
-    setSelectedKey(optionKeys[Math.min(nextIndex, optionCount - 1)]!);
+    const index = Math.min(nextIndex, optionCount - 1);
+    setSelectedKey(optionKeys[index]!);
+    document.getElementById(searchResultOptionId(index))?.scrollIntoView?.({ block: "nearest" });
   }
   function pickSelected() {
     const item = items[selectedIndex - itemOffset];
@@ -580,6 +573,7 @@ export function GlobalSearch({
               // as soon as the search box takes focus.
               onFocus={prefetchCatalog}
               aria-label="Search"
+              enterKeyHint="search"
               role="combobox"
               aria-expanded={showResultsPanel}
               aria-autocomplete="list"
@@ -609,7 +603,7 @@ export function GlobalSearch({
                 selected, Enter searches, so the ↵ chip sits here. */}
             {!showResultsPanel ? (
               <Kbd className="ml-2 hidden sm:inline-flex">ESC</Kbd>
-            ) : selectedIndex < 0 ? (
+            ) : resultCount > 0 && selectedIndex < 0 ? (
               <span className="text-muted-foreground ml-2 hidden shrink-0 items-center gap-1.5 text-xs sm:inline-flex">
                 <EnterKeyHint />
                 See all

@@ -1,6 +1,5 @@
 import { useRef } from "react";
 import type { MouseEvent } from "react";
-import { Link } from "react-router";
 import { Film, RefreshCw, Tv } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useCanRequest } from "@/hooks/useCanRequest";
@@ -19,6 +18,7 @@ import {
 } from "@/lib/mediaRequests";
 import { cn } from "@/lib/utils";
 import { EnterKeyHint } from "@/components/ui/kbd";
+import ViewTransitionLink from "./ViewTransitionLink";
 import { RequestStatusBadge } from "./RequestStatusBadge";
 import RequestResultsGrid, { RequestResultsPager } from "./RequestResultsGrid";
 
@@ -233,7 +233,7 @@ function DialogRow({
   // Keyboard focus stays in the host's search input, which points at this row
   // with aria-activedescendant, so the row is not a tab stop.
   return (
-    <Link
+    <ViewTransitionLink
       id={optionId}
       role="option"
       aria-selected={isSelected}
@@ -281,7 +281,7 @@ function DialogRow({
         </span>
       ) : null}
       {isSelected && <EnterKeyHint />}
-    </Link>
+    </ViewTransitionLink>
   );
 }
 
