@@ -58,19 +58,8 @@ func resolveHEVCTranscodeEncoder(ctx context.Context, opts TranscodeOpts) (Trans
 	if hardwareOK {
 		return opts, nil
 	}
-	softwareProbe := hwBackendProbe{commandCount: 1, run: func(ctx context.Context, path, _ string, timeout time.Duration) hwProbeResult {
-		output, err := runFFmpegProbe(ctx, timeout, path, hevcSoftwareSmokeArgsV3()...)
-		if err != nil {
-			return hwProbeResult{reason: FormatFFmpegProbeFailure(err, output)}
-		}
-		return hwProbeResult{available: true}
-	}}
-	available, reason := cachedHardwareProbeContext(ctx, "software:hevc", opts.FFmpegPath, "", softwareProbe)
-	if err := ctx.Err(); err != nil {
+	if err := requireSoftwareHEVCEncoder(ctx, opts.FFmpegPath); err != nil {
 		return opts, err
-	}
-	if !available {
-		return opts, fmt.Errorf("HEVC encoder unavailable: %s", reason)
 	}
 	if opts.ToneMapMode == tonemap.ModeHardware {
 		// Preserve the frozen GPU conversion; only its final SDR frames move
@@ -83,4 +72,24 @@ func resolveHEVCTranscodeEncoder(ctx context.Context, opts TranscodeOpts) (Trans
 		slog.InfoContext(ctx, "HEVC hardware encoder unavailable; using libx265", "backend", backend, "tone_map_mode", opts.ToneMapMode)
 	}
 	return opts, nil
+}
+
+// requireSoftwareHEVCEncoder verifies, once per FFmpeg binary, that libx265
+// can encode, so a software HEVC fallback never starts on a build without it.
+func requireSoftwareHEVCEncoder(ctx context.Context, ffmpegPath string) error {
+	probe := hwBackendProbe{commandCount: 1, run: func(ctx context.Context, path, _ string, timeout time.Duration) hwProbeResult {
+		output, err := runFFmpegProbe(ctx, timeout, path, hevcSoftwareSmokeArgsV3()...)
+		if err != nil {
+			return hwProbeResult{reason: FormatFFmpegProbeFailure(err, output)}
+		}
+		return hwProbeResult{available: true}
+	}}
+	available, reason := cachedHardwareProbeContext(ctx, "software:hevc", ffmpegPath, "", probe)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !available {
+		return fmt.Errorf("HEVC encoder unavailable: %s", reason)
+	}
+	return nil
 }

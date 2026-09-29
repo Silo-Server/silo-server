@@ -307,15 +307,20 @@ func TestVAAPIRateControlFallsBackToCBRThenSoftware(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		vbr, cbr bool
+		codec    string
+		x265     bool
 		toneMap  tonemap.Mode
 		wantMode string
 		wantHW   string
 		wantSW   bool
+		wantErr  bool
 	}{
 		{name: "vbr", vbr: true, cbr: true, wantMode: vaapiRateControlVBR, wantHW: transcodeHWVAAPI},
 		{name: "cbr only", cbr: true, wantMode: vaapiRateControlCBR, wantHW: transcodeHWVAAPI},
 		{name: "neither", wantHW: transcodeHWNone},
 		{name: "neither, hardware tone map", toneMap: tonemap.ModeHardware, wantHW: transcodeHWVAAPI, wantSW: true},
+		{name: "neither, HEVC", codec: transcodeCodecHEVC, x265: true, wantHW: transcodeHWNone},
+		{name: "neither, HEVC without libx265", codec: transcodeCodecHEVC, wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			setupHEVCEncoderTest(t)
@@ -326,15 +331,25 @@ func TestVAAPIRateControlFallsBackToCBRThenSoftware(t *testing.T) {
 				return 1
 			}
 			ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
-			script := fmt.Sprintf("#!/bin/sh\ncase \" $* \" in\n*' -rc_mode VBR '*) exit %d ;;\n*' -rc_mode CBR '*) exit %d ;;\nesac\n", exit(tc.vbr), exit(tc.cbr))
+			script := fmt.Sprintf("#!/bin/sh\ncase \" $* \" in\n*' -rc_mode VBR '*) exit %d ;;\n*' -rc_mode CBR '*) exit %d ;;\n*' -c:v libx265 '*) exit %d ;;\nesac\n", exit(tc.vbr), exit(tc.cbr), exit(tc.x265))
 			if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
 				t.Fatal(err)
 			}
+			codec := tc.codec
+			if codec == "" {
+				codec = transcodeCodecH264
+			}
 			opts := TranscodeOpts{
 				FFmpegPath: ffmpeg, HWAccel: transcodeHWVAAPI, HWDevice: "selected-device",
-				TargetCodecVideo: transcodeCodecH264, TargetBitrateKbps: 5000, ToneMapMode: tc.toneMap,
+				TargetCodecVideo: codec, TargetBitrateKbps: 5000, ToneMapMode: tc.toneMap,
 			}
 			resolved, err := resolveVAAPIRateControl(context.Background(), opts)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("software fallback started without a working libx265: %#v", resolved)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -343,8 +358,9 @@ func TestVAAPIRateControlFallsBackToCBRThenSoftware(t *testing.T) {
 					resolved.vaapiRateControl, resolved.HWAccel, resolved.softwareEncode, tc.wantMode, tc.wantHW, tc.wantSW)
 			}
 			if tc.wantHW == transcodeHWNone || tc.wantSW {
-				if args := strings.Join(appendVideoArgs(nil, resolved), " "); !strings.Contains(args, "-c:v libx264") {
-					t.Fatalf("software fallback did not encode with libx264: %s", args)
+				want := map[string]string{transcodeCodecH264: "-c:v libx264", transcodeCodecHEVC: "-c:v libx265"}[codec]
+				if args := strings.Join(appendVideoArgs(nil, resolved), " "); !strings.Contains(args, want) {
+					t.Fatalf("software fallback args missing %q: %s", want, args)
 				}
 			}
 		})
