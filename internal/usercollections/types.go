@@ -3,10 +3,10 @@
 // library_collections subsystem).
 //
 // User collections live in user_personal_collections and use external sources
-// (TMDB / Trakt / MDBList) the same way admin collections do, but resolved
-// against the entire catalog. Per-user library access is enforced at read
-// time by the catalog resolver, so the sync service does not have to scope
-// item resolution to a particular set of libraries.
+// (TMDB / Trakt / MDBList) the same way admin collections do. A sync keeps
+// only the titles the collection's creator profile can see, so the item limit
+// fills with those titles; each viewer's access is still applied at read time
+// by the catalog resolver.
 package usercollections
 
 import (
