@@ -72,7 +72,7 @@ type itemsQuery struct {
 	minPremiereDate         string // YYYY-MM-DD
 	maxPremiereDate         string // YYYY-MM-DD
 	countOnly               bool   // Limit=0 was sent: only TotalRecordCount is wanted
-	limitExplicit           bool   // Limit was sent; otherwise limit holds the default page size
+	limitDefaulted          bool   // Limit was absent, so limit holds the default page size
 }
 
 func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
@@ -163,7 +163,7 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 	}
 
 	result.countOnly = strings.TrimSpace(q.Get("Limit")) == "0"
-	result.limitExplicit = strings.TrimSpace(q.Get("Limit")) != ""
+	result.limitDefaulted = strings.TrimSpace(q.Get("Limit")) == ""
 	result.nameLessThan = strings.TrimSpace(q.Get("NameLessThan"))
 	result.nameStartsWithOrGreater = strings.TrimSpace(q.Get("NameStartsWithOrGreater"))
 	for _, raw := range splitCommaValues(q.Values("ExcludeItemIds")) {

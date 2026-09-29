@@ -1872,7 +1872,7 @@ func (h *ItemsHandler) writeSeriesEpisodesResponse(w http.ResponseWriter, r *htt
 	// Jellyfin returns every episode when Limit is absent, and Infuse relies on
 	// that to build its season list; parseItemsQuery's default page size is for
 	// item browsing.
-	if !query.limitExplicit {
+	if query.limitDefaulted {
 		query.limit = catalog.MaxEpisodePageSize
 	}
 	seasons, err := h.content.ListSeasons(r.Context(), session, seriesID, nil)
