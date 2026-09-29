@@ -1048,6 +1048,16 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		}
 		quality.BitrateKbps = min(quality.BitrateKbps, budget-targetAudioBitrateKbps)
 	}
+	// Encodes stop at the ladder's top class. A taller source (8K, a square
+	// VR frame) that keeps its own frame on the original route is fitted into
+	// the 2160p box, as the resolution buckets did, instead of asking an
+	// encoder for more lines than hardware H.264 takes.
+	if top := bitrateLadder[0]; quality.Height > top.Height {
+		width, height := FitLadderBox(source.Width, source.Height, top.Height)
+		width, height = encodedFrame(source.Width, source.Height, width, height)
+		quality.Label, quality.Width, quality.Height = heightLabel(height), width, height
+		quality.PreservesSource = false
+	}
 	targetVideoCodec := transcodeCodecH264
 	// H.264 is always an allowed output, but it stays within an attested
 	// H.264 decoder: a scaled encode steps down to the tallest class one
@@ -1167,9 +1177,16 @@ func h264BoundedQualityV3(request StartRequestV3, quality QualityResultV3, sourc
 		return quality
 	}
 	// The encode keeps the source's frame rate, so a decoder must take it too.
+	// When none does, the sizes alone bound the encode, as for downloads: a
+	// reported rate holds at the decoder's largest size (a 4K30 decoder still
+	// takes 1080p60), and no smaller class would lower the rate anyway.
+	rateBound := false
+	for _, decoder := range decoders {
+		rateBound = rateBound || h264DecoderTakesFrameRateV3(decoder, source.FrameRate)
+	}
 	takes := func(decoder VideoDecodeCapabilityV3, width, height int) bool {
 		return (decoder.MaxWidth <= 0 || width <= decoder.MaxWidth) && (decoder.MaxHeight <= 0 || height <= decoder.MaxHeight) &&
-			h264DecoderTakesFrameRateV3(decoder, source.FrameRate)
+			(!rateBound || h264DecoderTakesFrameRateV3(decoder, source.FrameRate))
 	}
 	anyTakes := func(width, height, class int) bool {
 		for _, decoder := range decoders {
@@ -1180,7 +1197,13 @@ func h264BoundedQualityV3(request StartRequestV3, quality QualityResultV3, sourc
 		}
 		return false
 	}
-	if quality.Height > 0 && !anyTakes(quality.Width, quality.Height, ladderClassForSize(quality.Width, quality.Height)) {
+	outputClass := ladderClassForSize(quality.Width, quality.Height)
+	if quality.PreservesSource {
+		// A source-size conversion keeps the class its height earned on the
+		// preserving route: a 2560x1080 film is 1080p here, not 2160p.
+		outputClass = ladderClassForSize(0, quality.Height)
+	}
+	if quality.Height > 0 && !anyTakes(quality.Width, quality.Height, outputClass) {
 		classes := ladderClassesFrom(ladderClassForSize(quality.Width, quality.Height))
 		for i, class := range classes {
 			width, height := FitLadderBox(source.Width, source.Height, class.Height)

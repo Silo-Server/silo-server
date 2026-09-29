@@ -258,9 +258,61 @@ func TestPlanPlaybackV3H264TargetStepsDownToTheDecoderSize(t *testing.T) {
 		{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60},
 	}
 	check("a 60 fps software decoder", PlanPlaybackV3(software), "h264", "1080p", 1920, 6_000)
-	// Without the opt-in the hardware decoder still bounds the encode.
+	// Without the opt-in only the hardware decoder is left. Its 30 fps limit
+	// holds at its largest size, and no smaller class lowers the rate, so its
+	// size alone bounds the encode rather than dropping a 60 fps source to 480p.
 	software.Request.ClientFeatures = []string{FeaturePlaybackPlanV3}
-	check("software decode not opted in", PlanPlaybackV3(software), "h264", "480p", 854, 1_500)
+	check("software decode not opted in", PlanPlaybackV3(software), "h264", "1080p", 1920, 6_000)
+	software.Request.Capabilities.VideoDecode = software.Request.Capabilities.VideoDecode[:1]
+	software.Request.Capabilities.VideoDecode[0].MaxWidth, software.Request.Capabilities.VideoDecode[0].MaxHeight = 1280, 720
+	check("a 720p30 decoder for a 60 fps source", PlanPlaybackV3(software), "h264", "720p", 1280, 2_000)
+
+	// A same-size conversion of a wide source keeps the class its height
+	// earns (2560x1080 is 1080p), so a decoder whose bitrate limit earns
+	// 1080p takes it at its own size.
+	wide := input(false)
+	wideFile := *wide.RequestedFile
+	wideFile.CodecVideo, wideFile.Bitrate = "hevc", 5_200
+	wideFile.VideoTracks = []models.VideoTrack{{Codec: "hevc", Profile: "Main", Width: 2560, Height: 1080, FrameRate: "24/1", Bitrate: 5_000, BitDepth: 8, VideoRange: "SDR"}}
+	wide.RequestedFile, wide.EffectiveFile = &wideFile, &wideFile
+	wide.Request.Capabilities.CodecsVideo = []string{"h264"}
+	wide.Request.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{
+		{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 15_000, Hardware: true},
+	}
+	wideEstimate := 10_000
+	wide.Request.BandwidthEstimateKbps = &wideEstimate
+	check("a 2560x1080 conversion under a 15 Mbps decoder", PlanPlaybackV3(wide), "h264", "1080p", 2560, 5_000)
+}
+
+// A transcode never asks for more than the ladder's 2160p class. On the
+// original route a source taller than that is fitted into the 2160p box, as
+// the old resolution buckets did, instead of being encoded at its own height.
+func TestPlanPlaybackV3OriginalTranscodeStopsAt2160(t *testing.T) {
+	for _, tc := range []struct {
+		width, height int
+		wantRes       string
+		wantWidth     int
+	}{
+		{7680, 4320, "2160p", 3840},
+		{7680, 3200, "1600p", 3840},
+		{5760, 5760, "2160p", 2160},
+	} {
+		input := hevcTranscodePlannerInputV3(false, false, true)
+		file := *input.RequestedFile
+		file.CodecVideo, file.Bitrate = "hevc", 60_000
+		file.VideoTracks = []models.VideoTrack{{Codec: "hevc", Profile: "Main", Width: tc.width, Height: tc.height, FrameRate: "30/1", Bitrate: 60_000, BitDepth: 8, VideoRange: "SDR"}}
+		input.RequestedFile, input.EffectiveFile = &file, &file
+		input.Request.QualityPreference = QualityOriginalV3
+		input.Request.Capabilities.CodecsVideo = []string{"h264"}
+		input.Request.Capabilities.VideoEvidence = EvidenceDeclaredV3
+		input.Request.Capabilities.VideoDecode = nil
+		input.Settings.Allow4KTranscode = true
+		result := PlanPlaybackV3(input)
+		if result.Plan == nil || result.TargetVideoCodec != "h264" || result.TargetResolution != tc.wantRes ||
+			result.Plan.EffectiveRecipe.Width == nil || *result.Plan.EffectiveRecipe.Width != tc.wantWidth {
+			t.Fatalf("%dx%d: %s codec %q res %q, want h264 %s %d wide", tc.width, tc.height, ExplainPlannerResultV3(result), result.TargetVideoCodec, result.TargetResolution, tc.wantRes, tc.wantWidth)
+		}
+	}
 }
 
 func TestPlanPlaybackV3HEVCFailureFallsBackToH264(t *testing.T) {

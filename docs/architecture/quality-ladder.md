@@ -39,7 +39,12 @@ ladder and Jellyfin's `ResolutionNormalizer`.
   frame, stops at the smallest class if none does, and keeps its bitrate within
   that decoder's limit. As for downloads, a decoder takes a class only when its
   bitrate limit earns that class, and hardware decoders are preferred only when
-  one takes the source's frame rate.
+  one takes the source's frame rate. When no attested decoder takes that rate,
+  their sizes alone bound the encode: a reported rate holds at the decoder's
+  largest size, and a smaller class keeps the source's rate anyway.
+- **Transcodes stop at 2160p.** A source taller than the top class that keeps
+  its own frame on the original route is fitted into the 2160p box when it has
+  to be re-encoded.
 - **Caps are ceilings.** Every encoder treats the cap as `-maxrate`, not as a
   constant-bitrate target (`appendCappedVBRArgs`).
 - **Downloads store the class, not the height.** An artifact records the class
