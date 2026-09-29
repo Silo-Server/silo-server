@@ -66,6 +66,11 @@ type CompleteJobInput struct {
 	ArtifactKey       string
 	ArtifactSizeBytes int64
 	ExpiresAt         time.Time
+	// CanceledMessage, when set, is recorded instead of Message if a
+	// cancellation was requested before this write. The result payload is
+	// then kept rather than cleared, so partial totals survive a cancel that
+	// races completion.
+	CanceledMessage string
 }
 
 type FailJobInput struct {
@@ -480,8 +485,8 @@ func (r *Repository) Complete(ctx context.Context, id string, input CompleteJobI
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE admin_jobs
 		SET status = CASE WHEN cancel_requested THEN 'cancelled' ELSE $2 END,
-			result_payload = CASE WHEN cancel_requested THEN '{}'::jsonb ELSE $3 END,
-			message = $4,
+			result_payload = CASE WHEN cancel_requested AND $12 = '' THEN '{}'::jsonb ELSE $3 END,
+			message = CASE WHEN cancel_requested AND $12 <> '' THEN $12 ELSE $4 END,
 			error_message = '',
 			progress_current = $5,
 			progress_total = $6,
@@ -504,6 +509,7 @@ func (r *Repository) Complete(ctx context.Context, id string, input CompleteJobI
 		input.ArtifactSizeBytes,
 		input.ExpiresAt,
 		r.claim,
+		input.CanceledMessage,
 	)
 	if err != nil {
 		return fmt.Errorf("completing admin job: %w", err)

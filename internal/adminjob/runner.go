@@ -719,6 +719,7 @@ func (r *Runner) executeImageCacheCleanup(job *models.AdminJob) {
 		if err := r.repo.Complete(finishCtx, job.ID, CompleteJobInput{
 			ResultPayload:   result,
 			Message:         "Cached image cleanup completed",
+			CanceledMessage: fmt.Sprintf("Image cache cleanup canceled after %d/%d prefixes; all prefixes were already processed", total, total),
 			ProgressCurrent: total,
 			ProgressTotal:   total,
 			ExpiresAt:       time.Now().UTC().Add(r.retention),
@@ -726,7 +727,11 @@ func (r *Runner) executeImageCacheCleanup(job *models.AdminJob) {
 			slog.Warn("admin jobs: failed to mark image cache cleanup complete", "job_id", job.ID, "error", err)
 			return
 		}
-		r.publishJobByID(finishCtx, notifications.TypeJobCompleted, job.ID)
+		event := notifications.TypeJobCompleted
+		if current, getErr := r.repo.GetByID(finishCtx, job.ID); getErr == nil && current.Status == StatusCancelled {
+			event = notifications.TypeJobCancelled
+		}
+		r.publishJobByID(finishCtx, event, job.ID)
 	case errors.Is(err, context.DeadlineExceeded):
 		// A prefix cut off by the deadline may still have lost objects;
 		// that is progress, and the next claim deletes the rest.
