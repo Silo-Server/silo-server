@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { AlertTriangle, ExternalLink, Library, X } from "lucide-react";
 import type { MediaRequest } from "@/api/types";
+import { RequestDownloadProgress } from "@/components/RequestDownloadProgress";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -271,6 +272,13 @@ function TargetRows({ target }: { target: NonNullable<MediaRequest["targets"]>[n
             <TargetStatusBadge target={target} />
             {target.external_status ? (
               <span className="text-muted-foreground text-xs">{target.external_status}</span>
+            ) : null}
+            {target.download ? (
+              <RequestDownloadProgress
+                download={target.download}
+                admin
+                className="mt-1 w-full min-w-32"
+              />
             ) : null}
           </div>
         </TableCell>

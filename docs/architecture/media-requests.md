@@ -4,7 +4,8 @@ A user asks for a movie or series the server does not have, an admin approves it
 (or the user's policy approves it automatically), a request-router plugin sends it
 to a downstream service such as Sonarr or Radarr, and the request completes when
 the media is in the library. The code lives in `internal/requests`; the reconcile
-pass is the `reconcile_requests` task in `internal/taskmanager/tasks`.
+pass is the `reconcile_requests` task in `internal/taskmanager/tasks`, and the
+download refresh pass is `refresh_request_downloads` beside it.
 
 ## State
 
@@ -353,6 +354,107 @@ candidates in `last_reconciled_at` order, stamps each one when checked, even if
 it errors, and looks presence up in one batch per media type. The 30-day bound
 keeps an upgrade from completing, and notifying, a backlog of old failures.
 
+A second task, `refresh_request_downloads`, runs every minute between reconcile
+passes (see [Download progress](#download-progress)). It asks only about
+targets in `downloading` that already have download progress and whose plugin
+declares `reports_download_progress`, and applies what the plugin answers
+through the same code as reconcile: status transitions and download progress.
+It submits nothing, checks no library presence and sends no notification; those
+stay with the reconcile pass. `queued` targets stay on the five-minute cadence
+on purpose: a requested but unreleased movie can sit `queued` for months, and
+polling it every minute would multiply calls to the download server for
+nothing. A scheduled run is skipped, without a task history entry, while no
+downloading target has progress.
+
+Two advisory locks keep the passes apart. The reconcile lock lets one server
+run each reconcile pass; the others skip. The request target write lock keeps
+the two passes from writing the same target at once. A reconcile pass takes it
+after its own lock, on the same database session so the pass keeps the rest of
+the connection pool for its own work, and waits up to two minutes for a
+refresh pass that holds it, so a refresh never makes a reconcile pass skip; a
+wait that runs out fails the pass. A refresh pass only tries the write lock, so it runs on one server at
+a time and skips while a reconcile pass runs anywhere in the cluster. A refresh
+pass also stops after 90 seconds, cutting the plugin call in flight and leaving
+the requests it has not reached for the next pass, so it always ends inside the
+reconcile pass's wait, even while a download server stops answering and every
+call to it runs to the router's 60-second deadline.
+
+## Download progress
+
+While a target downloads, its router plugin can report how far along it is in
+`CheckStatus` (`TargetStatus.progress`): a phase, the size and bytes left summed
+over the target's distinct downloads (a season pack counts once), the latest
+estimated completion, and the number of downloads. A plugin declares that it
+does with `request_router.reports_download_progress` in its manifest, which the
+host reads from the stored capability metadata without launching the plugin.
+The host keeps progress only from a declaring plugin; any other plugin has none
+and keeps the five-minute cadence.
+
+The phase is `queued`, `downloading`, `paused`, `stalled`, `importing` or
+`import_blocked`. The host reads an unknown or empty phase as `downloading`,
+and a report with neither a phase nor a size as none. The set is open: clients
+must render an unknown phase like `downloading`, without a percentage. When
+several downloads or targets are combined, the phase follows
+`import_blocked` > `stalled` > `downloading` > `importing` > `paused` >
+`queued`, so a download that needs attention shows, and otherwise
+`downloading` wins while anything still downloads.
+
+Progress lives on the target row (`download_*` columns on
+`media_request_targets`), so any node serves the latest value and a node dying
+loses nothing. `download_updated_at` records when the server last heard from
+the plugin. A progress write touches only those columns, and only while the
+target is `queued` or `downloading`, so a late report cannot give a finished
+target progress again. It does not move the target's `updated_at`, which dates
+status changes for the stalled-target backstop, recompute the request's status,
+or add to its history. When the server's own state moves without changing the
+target's status (an import that stalls), the pass records the new raw
+`external_status` the same way, so the raw status and the progress shown
+beside it agree. Progress is cleared when a target completes or fails,
+and when the plugin stops reporting any for a live target (the download left
+the queue). A pass writes nothing for a target that has no progress and
+reports none. A target with progress that a pass asks about without getting
+its status back (the plugin skipped a server that errored or no longer has the
+title, or the call failed) keeps its progress, since one missed answer is
+usually a blip, until the last report is 15 minutes old; the next unanswered
+pass then clears it, so a frozen figure stops showing and clients stop polling
+for it.
+
+The reconcile pass records a download's first progress, so progress appears
+within one reconcile pass of a download starting. From then on the refresh
+task refreshes it every minute, taking requests by their downloading target
+with progress asked about longest ago (`download_checked_at`), at most 200 a
+minute. A target counts as asked about whether or not its server answered, so
+one that stops answering takes its turn and moves to the back instead of
+heading every batch. A target leaves the refresh task as soon as its progress
+clears. A downloading target without progress stays with the reconcile pass
+however long it waits: a plugin can report a title downloading with nothing in
+its download queue for it (Seerr keeps media at Processing until a release
+arrives), and such targets must not crowd out the ones that are downloading.
+The refresh task also clears, without a call, the progress of a target whose
+server is gone, disabled or unusable, or whose plugin no longer declares
+progress, since nothing will refresh it.
+
+The v2 API carries `download` on each request target, on the request itself,
+and on the title detail's request state. The request's figure combines its live
+targets (1080p and 4K together): bytes and downloads summed, the phase by the
+order above, the latest estimate, and the oldest report's time, so a client
+that hides figures older than about ten minutes hides a partly stale one too.
+Its size is unknown while any live target's is, including a live target that
+has reported no progress yet. `percent` is
+`floor((total - left) * 100 / total)`, and the byte counts and percent are
+absent while the size is unknown. Only the title detail
+(`GET /api/v2/requests/detail/{media_type}/{tmdb_id}`) fills the request
+state's `download`, with one targets query for an active request that is queued
+or downloading; search and discovery do not load targets per result. It
+carries no requester identity, so anyone who can see the title's request state
+sees it. `GET /api/v2/requests/status` advertises
+`download_progress_supported`. v1 does not carry progress. Release names,
+indexers, download clients, paths and queue messages never reach a client.
+Clients poll every 30 seconds while anything they show has `download`, and stop
+polling otherwise. The TMDB client keeps a title's detail for two minutes, so
+title pages polling a download share one TMDB fetch per server however many are
+open.
+
 ## Re-requesting a failed title
 
 Creating a request deletes the requester's own failed requests for the same
@@ -362,6 +464,23 @@ request counts against it (see [Who can request](#who-can-request)). Other
 accounts' failed requests are left alone as those users' history. Retrying one
 of them after someone else has requested the title answers
 `ErrAlreadyRequested`, since only one active request per title may exist.
+
+## What a requester sees
+
+The v2 request operations a profile calls (`createRequest`, `listMyRequests`,
+`getRequest` and `cancelRequest`) give a viewer who is not an admin the request
+without its download server details: the request's `integration_kind`,
+`external_id`, `external_status` and `last_error`, and each target's
+`integration_id`, `integration_kind`, `instance_name`, `external_id`,
+`external_status`, `route_name` and `last_error`. These name the admin's
+download servers and routing rules and carry the servers' raw statuses and
+errors, none of which a requester can act on. The request's `last_error` is
+written for the admin who fixes the submission: it can name a server or a
+routing rule, or pass on a plugin's own error text. A requester still sees the
+request's state and `outcome_reason`, and each target's quality, status and
+`download`. An admin sees every field, on those operations and on the
+`/api/v2/admin/requests` operations. The frozen `/api/v1` request routes still
+return them to everyone.
 
 ## Admin queue
 

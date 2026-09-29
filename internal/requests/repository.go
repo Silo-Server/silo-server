@@ -401,6 +401,47 @@ func (r *Repository) ListReconciliationCandidates(ctx context.Context, limit int
 	return out, nil
 }
 
+// ListDownloadingRequests returns active requests with a downloading target
+// that has download progress, the one asked about longest ago first: a
+// request is as due as its most overdue such target. A target counts as asked
+// whether or not its server answered, so one that stops answering takes its
+// turn and moves to the back instead of heading every batch. A downloading
+// target without progress is not listed, however many there are, so targets
+// whose plugin never reports any (or has nothing queued) cannot crowd the
+// batch; the reconcile pass records a download's first progress.
+func (r *Repository) ListDownloadingRequests(ctx context.Context, limit int) ([]*Request, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	rows, err := r.pool.Query(ctx, requestSelectSQL()+`
+		JOIN (
+			SELECT request_id, min(download_checked_at) AS checked_at
+			FROM media_request_targets
+			WHERE status = 'downloading' AND download_phase IS NOT NULL
+			GROUP BY request_id
+		) downloading ON downloading.request_id = media_requests.id
+		WHERE outcome = 'active'
+		ORDER BY downloading.checked_at NULLS FIRST, media_requests.id
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list downloading requests: %w", err)
+	}
+	defer rows.Close()
+	var out []*Request
+	for rows.Next() {
+		req, err := scanRequest(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, req)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate downloading requests: %w", err)
+	}
+	return out, nil
+}
+
 // ListLibraryWaitCandidates returns the requests that only the library can
 // complete: pending ones, and ones that failed in the last 30 days without
 // delivering anything. Older failures are left alone so an upgrade does not

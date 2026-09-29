@@ -58,6 +58,7 @@ import {
   REQUESTS_STALE_TIME,
   invalidateRequestSurfaces,
   isValidationFailure,
+  requestDownloadRefetchInterval,
 } from "../useRequests";
 
 const ADMIN_QUEUE_STALE_TIME = 10_000;
@@ -79,7 +80,8 @@ function requestQueueKey(filter: AdminRequestQueueFilter) {
  * One queue view, a page at a time. A new search or type filter keeps the
  * rows on screen until its first page arrives; a new view does not, since its
  * rows take different actions. With `enabled: false` it only reads the rows
- * another reader of the same view loads, and follows their refetches.
+ * another reader of the same view loads, and follows their refetches. While
+ * a loaded row downloads, the view is read again every 30 seconds.
  */
 export function useAdminRequestQueue(
   filter: AdminRequestQueueFilter,
@@ -103,6 +105,8 @@ export function useAdminRequestQueue(
         ? previous
         : undefined,
     staleTime: ADMIN_QUEUE_STALE_TIME,
+    refetchInterval: (query) =>
+      requestDownloadRefetchInterval(query.state.data?.pages.flatMap((page) => page.items)),
   });
 }
 

@@ -4,6 +4,7 @@ import { Film, Info, Library, RefreshCw, Tv } from "lucide-react";
 import BrandCarousel from "@/components/BrandCarousel";
 import { CancelRequestDialog } from "@/components/CancelRequestDialog";
 import MediaCarousel from "@/components/MediaCarousel";
+import { RequestDownloadProgress } from "@/components/RequestDownloadProgress";
 import RequestPosterCard from "@/components/RequestPosterCard";
 import { RequestStatusBadge } from "@/components/RequestStatusBadge";
 import SearchBar from "@/components/SearchBar";
@@ -428,6 +429,12 @@ function RequestRow({
             {state ? <RequestStatusBadge state={state} /> : null}
           </div>
           <p className="text-muted-foreground text-xs">{details.join(" · ")}</p>
+          {request.download ? (
+            <RequestDownloadProgress
+              download={request.download}
+              className="w-64 max-w-full py-0.5"
+            />
+          ) : null}
           <p className="text-muted-foreground text-xs">
             Requested{" "}
             <time dateTime={request.created_at} title={formatDate(request.created_at, "medium")}>

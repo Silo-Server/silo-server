@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1339,5 +1340,236 @@ func TestGetListRejectsNonPositiveID(t *testing.T) {
 	client := NewClient("test-key", 1000)
 	if _, err := client.GetList(context.Background(), 0, 10); err == nil {
 		t.Fatal("GetList(0) succeeded, want error")
+	}
+}
+
+// A title page polls its detail while a request downloads, and several people
+// may have it open: they share one fetch for the cache's TTL, each with a copy
+// of its own. A failure is not cached.
+func TestGetMediaDetailIsCachedBriefly(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/movie/129":
+			_, _ = w.Write([]byte(`{"id": 129, "title": "Spirited Away", "genres": [{"id": 16, "name": "Animation"}],
+				"recommendations": {"results": [{"id": 4935, "title": "Howl's Moving Castle"}]}}`))
+		case "/tv/95396":
+			_, _ = w.Write([]byte(`{"id": 95396, "name": "Severance"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	client := NewClient("key", 40)
+	defer client.Close()
+	client.SetBaseURL(server.URL)
+	ctx := context.Background()
+
+	first, err := client.GetMediaDetail(ctx, "movie", 129)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.Genres[0], first.Recommendations[0].Title = "changed", "changed"
+	second, err := client.GetMediaDetail(ctx, "movie", 129)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("upstream calls = %d, want 1 while the detail is cached", calls.Load())
+	}
+	if second.Genres[0] != "Animation" || second.Recommendations[0].Title != "Howl's Moving Castle" {
+		t.Fatalf("second detail = %+v; a caller's change reached the cache", second)
+	}
+
+	// "series" and "tv" name the same title.
+	for _, mediaType := range []string{"series", "tv"} {
+		if detail, err := client.GetMediaDetail(ctx, mediaType, 95396); err != nil || detail.Title != "Severance" {
+			t.Fatalf("GetMediaDetail(%s) = %+v, %v", mediaType, detail, err)
+		}
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("upstream calls = %d, want 2", calls.Load())
+	}
+
+	for range 2 {
+		if _, err := client.GetMediaDetail(ctx, "movie", 404); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("err = %v, want ErrNotFound", err)
+		}
+	}
+	if calls.Load() != 4 {
+		t.Fatalf("upstream calls = %d, want each failure fetched again", calls.Load())
+	}
+}
+
+// blockedDetailServer answers /movie/129 once release is closed. started is
+// closed when the first request arrives; calls counts every request.
+func blockedDetailServer(t *testing.T) (client *Client, started <-chan struct{}, release func(), calls *atomic.Int32) {
+	t.Helper()
+	startedCh := make(chan struct{})
+	releaseCh := make(chan struct{})
+	var startOnce, releaseOnce sync.Once
+	calls = new(atomic.Int32)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		startOnce.Do(func() { close(startedCh) })
+		<-releaseCh
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id": 129, "title": "Spirited Away"}`))
+	}))
+	release = func() { releaseOnce.Do(func() { close(releaseCh) }) }
+	client = NewClient("key", 1000)
+	client.SetBaseURL(server.URL)
+	t.Cleanup(func() {
+		release()
+		server.Close()
+		client.Close()
+	})
+	return client, startedCh, release, calls
+}
+
+// waitingCtx closes waiting the first time its caller selects on Done. A
+// follower does that only once it has joined the in-flight fetch.
+type waitingCtx struct {
+	context.Context
+	once    sync.Once
+	waiting chan struct{}
+}
+
+func newWaitingCtx(parent context.Context) *waitingCtx {
+	return &waitingCtx{Context: parent, waiting: make(chan struct{})}
+}
+
+func (c *waitingCtx) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.waiting) })
+	return c.Context.Done()
+}
+
+type detailResult struct {
+	detail *MediaDetail
+	err    error
+}
+
+func getMediaDetailAsync(ctx context.Context, client *Client) <-chan detailResult {
+	out := make(chan detailResult, 1)
+	go func() {
+		detail, err := client.GetMediaDetail(ctx, "movie", 129)
+		out <- detailResult{detail, err}
+	}()
+	return out
+}
+
+func awaitDetail(t *testing.T, who string, ch <-chan detailResult) detailResult {
+	t.Helper()
+	select {
+	case result := <-ch:
+		return result
+	case <-time.After(5 * time.Second):
+		t.Fatalf("%s is still blocked on the shared detail fetch", who)
+		return detailResult{}
+	}
+}
+
+// The caller that starts a shared detail fetch may disconnect; everyone else
+// waiting on the same title still gets it.
+func TestGetMediaDetailSurvivesLeaderCancellation(t *testing.T) {
+	client, started, release, calls := blockedDetailServer(t)
+
+	leaderCtx, cancelLeader := context.WithCancel(context.Background())
+	defer cancelLeader()
+	leader := getMediaDetailAsync(leaderCtx, client)
+	<-started
+
+	followerCtx := newWaitingCtx(context.Background())
+	follower := getMediaDetailAsync(followerCtx, client)
+	select {
+	case <-followerCtx.waiting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("follower never waited on its own context")
+	}
+
+	cancelLeader()
+	if got := awaitDetail(t, "canceled leader", leader); !errors.Is(got.err, context.Canceled) {
+		t.Fatalf("leader err = %v, want context.Canceled", got.err)
+	}
+	release()
+	got := awaitDetail(t, "follower", follower)
+	if got.err != nil || got.detail.Title != "Spirited Away" {
+		t.Fatalf("follower = %+v, %v; want the detail after the leader canceled", got.detail, got.err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("upstream calls = %d, want 1 shared fetch", calls.Load())
+	}
+}
+
+// A waiting caller that disconnects stops waiting at once, and the shared
+// fetch still completes for the caller that started it.
+func TestGetMediaDetailFollowerStopsWaitingOnCancel(t *testing.T) {
+	client, started, release, calls := blockedDetailServer(t)
+
+	leader := getMediaDetailAsync(context.Background(), client)
+	<-started
+
+	followerCtx, cancelFollower := context.WithCancel(context.Background())
+	defer cancelFollower()
+	waiting := newWaitingCtx(followerCtx)
+	follower := getMediaDetailAsync(waiting, client)
+	select {
+	case <-waiting.waiting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("follower never waited on its own context")
+	}
+
+	cancelFollower()
+	if got := awaitDetail(t, "canceled follower", follower); !errors.Is(got.err, context.Canceled) {
+		t.Fatalf("follower err = %v, want context.Canceled", got.err)
+	}
+	release()
+	got := awaitDetail(t, "leader", leader)
+	if got.err != nil || got.detail.Title != "Spirited Away" {
+		t.Fatalf("leader = %+v, %v; want the detail after the follower canceled", got.detail, got.err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("upstream calls = %d, want 1 shared fetch", calls.Load())
+	}
+}
+
+// Every slice and map a detail holds is copied, so no caller shares one with
+// the cache; a field added later is caught here.
+func TestCloneMediaDetailCopiesEveryReference(t *testing.T) {
+	var detail MediaDetail
+	v := reflect.ValueOf(&detail).Elem()
+	for i := range v.NumField() {
+		field := v.Field(i)
+		switch field.Kind() {
+		case reflect.Slice:
+			field.Set(reflect.MakeSlice(field.Type(), 1, 1))
+		case reflect.Map:
+			m := reflect.MakeMap(field.Type())
+			m.SetMapIndex(reflect.New(field.Type().Key()).Elem(), reflect.MakeSlice(field.Type().Elem(), 1, 1))
+			field.Set(m)
+		case reflect.Pointer, reflect.Interface, reflect.Chan, reflect.Func:
+			t.Fatalf("MediaDetail.%s is a %s; teach cloneMediaDetail to copy it", v.Type().Field(i).Name, field.Kind())
+		}
+	}
+	cloned := reflect.ValueOf(cloneMediaDetail(&detail)).Elem()
+	for i := range v.NumField() {
+		name := v.Type().Field(i).Name
+		switch v.Field(i).Kind() {
+		case reflect.Slice:
+			if cloned.Field(i).Pointer() == v.Field(i).Pointer() {
+				t.Errorf("MediaDetail.%s shares its backing array with the cached detail", name)
+			}
+		case reflect.Map:
+			if cloned.Field(i).Pointer() == v.Field(i).Pointer() {
+				t.Errorf("MediaDetail.%s shares its map with the cached detail", name)
+			}
+			for _, key := range v.Field(i).MapKeys() {
+				if cloned.Field(i).MapIndex(key).Pointer() == v.Field(i).MapIndex(key).Pointer() {
+					t.Errorf("MediaDetail.%s[%v] shares its slice with the cached detail", name, key)
+				}
+			}
+		}
 	}
 }

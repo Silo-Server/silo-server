@@ -11,7 +11,14 @@ import (
 
 const targetColumns = `t.id, t.request_id, t.integration_id, t.integration_kind,
 	COALESCE(ri.name, ''), t.quality, t.is_anime, t.external_id, t.external_status,
-	t.status, t.last_error, t.created_at, t.updated_at, COALESCE(t.route_id, ''), t.route_name`
+	t.status, t.last_error, t.created_at, t.updated_at, COALESCE(t.route_id, ''), t.route_name,
+	t.download_phase, t.download_bytes_total, t.download_bytes_left, t.download_eta,
+	t.download_count, t.download_updated_at`
+
+// clearTargetDownload empties a target's download progress columns.
+const clearTargetDownload = `download_phase = NULL, download_bytes_total = NULL,
+	download_bytes_left = NULL, download_eta = NULL, download_count = NULL,
+	download_updated_at = NULL, download_checked_at = NULL`
 
 // aggregateStatus derives a request's status/outcome from its targets.
 func aggregateStatus(targets []Target) (Status, Outcome) {
@@ -54,14 +61,34 @@ func aggregateStatus(targets []Target) (Status, Outcome) {
 
 func scanTarget(row requestScanner) (Target, error) {
 	var t Target
-	var integrationID *string
+	var integrationID, downloadPhase *string
+	var bytesTotal, bytesLeft *int64
+	var downloadCount *int
+	var downloadETA, downloadUpdatedAt *time.Time
 	if err := row.Scan(&t.ID, &t.RequestID, &integrationID, &t.IntegrationKind,
 		&t.InstanceName, &t.Quality, &t.IsAnime, &t.ExternalID, &t.ExternalStatus,
-		&t.Status, &t.LastError, &t.CreatedAt, &t.UpdatedAt, &t.RouteID, &t.RouteName); err != nil {
+		&t.Status, &t.LastError, &t.CreatedAt, &t.UpdatedAt, &t.RouteID, &t.RouteName,
+		&downloadPhase, &bytesTotal, &bytesLeft, &downloadETA, &downloadCount, &downloadUpdatedAt); err != nil {
 		return Target{}, err
 	}
 	if integrationID != nil {
 		t.IntegrationID = *integrationID
+	}
+	if downloadPhase != nil {
+		d := &DownloadProgress{Phase: DownloadPhase(*downloadPhase), EstimatedCompletion: downloadETA}
+		if bytesTotal != nil {
+			d.BytesTotal = *bytesTotal
+		}
+		if bytesLeft != nil {
+			d.BytesLeft = *bytesLeft
+		}
+		if downloadCount != nil {
+			d.Downloads = *downloadCount
+		}
+		if downloadUpdatedAt != nil {
+			d.UpdatedAt = *downloadUpdatedAt
+		}
+		t.Download = d
 	}
 	return t, nil
 }
@@ -187,7 +214,8 @@ func (r *Repository) DeleteTarget(ctx context.Context, id int64) error {
 }
 
 // UpdateTargetStatus updates one target and recomputes the parent request's
-// aggregate status/outcome, all in one transaction.
+// aggregate status/outcome, all in one transaction. A target that completes
+// or fails loses its download progress.
 func (r *Repository) UpdateTargetStatus(ctx context.Context, targetID int64, status Status,
 	externalID, externalStatus, lastErr string, actor Viewer) (*Request, error) {
 	tx, err := r.pool.Begin(ctx)
@@ -210,6 +238,11 @@ func (r *Repository) UpdateTargetStatus(ctx context.Context, targetID int64, sta
 		}
 		return nil, fmt.Errorf("update target: %w", err)
 	}
+	if status == StatusCompleted || status == StatusFailed {
+		if _, err := tx.Exec(ctx, `UPDATE media_request_targets SET `+clearTargetDownload+` WHERE id = $1`, targetID); err != nil {
+			return nil, fmt.Errorf("clear target download progress: %w", err)
+		}
+	}
 
 	req, err := r.recomputeAggregate(ctx, tx, requestID, actor)
 	if err != nil {
@@ -219,6 +252,59 @@ func (r *Repository) UpdateTargetStatus(ctx context.Context, targetID int64, sta
 		return nil, fmt.Errorf("commit target update: %w", err)
 	}
 	return req, nil
+}
+
+// UpdateTargetDownload stores a target's download progress, stamped now as
+// both heard from and asked about, or clears it when progress is nil. It
+// writes only while the target is queued or downloading, so a late report
+// cannot give a finished target progress again, and it touches nothing else:
+// not updated_at, which dates status changes for the stalled-target backstop,
+// not the request, and not its history.
+func (r *Repository) UpdateTargetDownload(ctx context.Context, targetID int64, progress *DownloadProgress) error {
+	const live = ` WHERE id = $1 AND status IN ('queued', 'downloading')`
+	var err error
+	if progress == nil {
+		_, err = r.pool.Exec(ctx, `UPDATE media_request_targets SET `+clearTargetDownload+live, targetID)
+	} else {
+		_, err = r.pool.Exec(ctx, `
+			UPDATE media_request_targets
+			SET download_phase = $2, download_bytes_total = $3, download_bytes_left = $4,
+			    download_eta = $5, download_count = $6, download_updated_at = now(),
+			    download_checked_at = now()`+live,
+			targetID, string(progress.Phase), progress.BytesTotal, progress.BytesLeft,
+			progress.EstimatedCompletion, progress.Downloads)
+	}
+	if err != nil {
+		return fmt.Errorf("update target download progress: %w", err)
+	}
+	return nil
+}
+
+// MarkTargetDownloadChecked records that a pass asked about a target's
+// download without getting its status back. It moves the target to the back
+// of the download refresh rotation and leaves the progress, and when it was
+// last heard from, alone. A target without progress, or no longer queued or
+// downloading, is not written.
+func (r *Repository) MarkTargetDownloadChecked(ctx context.Context, targetID int64) error {
+	if _, err := r.pool.Exec(ctx, `
+		UPDATE media_request_targets SET download_checked_at = now()
+		WHERE id = $1 AND status IN ('queued', 'downloading') AND download_phase IS NOT NULL`, targetID); err != nil {
+		return fmt.Errorf("mark target download checked: %w", err)
+	}
+	return nil
+}
+
+// UpdateTargetExternalStatus records the raw status a target's server last
+// reported, while the target is queued or downloading. It leaves updated_at
+// alone, since that dates the target's last status change, and writes nothing
+// when the status is unchanged.
+func (r *Repository) UpdateTargetExternalStatus(ctx context.Context, targetID int64, externalStatus string) error {
+	if _, err := r.pool.Exec(ctx, `
+		UPDATE media_request_targets SET external_status = $2
+		WHERE id = $1 AND status IN ('queued', 'downloading') AND external_status <> $2`, targetID, externalStatus); err != nil {
+		return fmt.Errorf("update target external status: %w", err)
+	}
+	return nil
 }
 
 func (r *Repository) recomputeAggregate(ctx context.Context, exec requestExecutor, requestID string, actor Viewer) (*Request, error) {

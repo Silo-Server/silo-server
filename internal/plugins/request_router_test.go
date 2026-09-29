@@ -9,13 +9,14 @@ import (
 	"github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
 )
 
-// The host reads supports_seasons from the capability metadata stored from the
-// manifest, the way install records it.
+// The host reads supports_seasons and reports_download_progress from the
+// capability metadata stored from the manifest, the way install records it.
 func TestRequestRouterDescriptorReadsStoredManifestFlag(t *testing.T) {
 	records, err := CapabilityRecordsFromManifest(&pluginv1.PluginManifest{
 		Capabilities: []*pluginv1.CapabilityDescriptor{
 			{Type: capability.RequestRouter, Id: "arr", RequestRouter: &pluginv1.RequestRouterDescriptor{SupportsSeasons: true}},
 			{Type: capability.RequestRouter, Id: "legacy"},
+			{Type: capability.RequestRouter, Id: "progress", RequestRouter: &pluginv1.RequestRouterDescriptor{SupportsSeasons: true, ReportsDownloadProgress: true}},
 		},
 	})
 	if err != nil {
@@ -30,10 +31,12 @@ func TestRequestRouterDescriptorReadsStoredManifestFlag(t *testing.T) {
 	for _, tc := range []struct {
 		capabilityID string
 		want         bool
+		wantProgress bool
 	}{
-		{"arr", true},
-		{"legacy", false},  // built before the descriptor existed
-		{"missing", false}, // not declared at all
+		{"arr", true, false},      // built before reports_download_progress existed
+		{"legacy", false, false},  // built before the descriptor existed
+		{"missing", false, false}, // not declared at all
+		{"progress", true, true},
 	} {
 		got, err := service.RequestRouterDescriptor(context.Background(), 5, tc.capabilityID)
 		if err != nil {
@@ -41,6 +44,9 @@ func TestRequestRouterDescriptorReadsStoredManifestFlag(t *testing.T) {
 		}
 		if got.GetSupportsSeasons() != tc.want {
 			t.Errorf("%s: supports_seasons = %v, want %v", tc.capabilityID, got.GetSupportsSeasons(), tc.want)
+		}
+		if got.GetReportsDownloadProgress() != tc.wantProgress {
+			t.Errorf("%s: reports_download_progress = %v, want %v", tc.capabilityID, got.GetReportsDownloadProgress(), tc.wantProgress)
 		}
 	}
 }
