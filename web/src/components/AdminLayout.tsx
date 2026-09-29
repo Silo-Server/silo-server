@@ -167,23 +167,24 @@ export default function AdminLayout() {
         <ServerActivity />
       </div>
 
+      {/* `lg:pt-16` starts the content below the fixed Search/activity
+          controls (top-5, h-9 → they end 3.5rem down). With less, a page
+          header's right-aligned buttons sit underneath them until the capped
+          content column pulls away from the viewport's right edge. */}
       <main
         id="main-content"
         tabIndex={-1}
-        className={`relative z-10 min-h-screen min-w-0 px-4 py-4 sm:px-6 lg:ml-[240px] lg:px-8 lg:py-8 xl:px-10 ${
+        className={`relative z-10 min-h-screen min-w-0 px-4 py-4 sm:px-6 lg:ml-[240px] lg:px-8 lg:pt-16 lg:pb-8 xl:px-10 ${
           hasBackgroundBar ? "pb-32 sm:pb-36" : ""
         }`}
       >
         <div className="admin-shell">
           {/* Above the routed page and inside the content column, so every
               admin page carries the prompt and none of them can be covered by
-              it. `lg:mt-7` clears the fixed Search/activity controls in the
-              top-right corner (top-5, h-9 → they end 3.5rem down), which would
-              otherwise float over the banner's buttons. */}
+              it. */}
           <RestartBanner
             restartRequired={serverStatus?.restart_required}
             restartSignal={serverStatus?.restart_mark_count}
-            className="lg:mt-7"
           />
           <Outlet />
         </div>
