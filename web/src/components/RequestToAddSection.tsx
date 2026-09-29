@@ -18,6 +18,7 @@ import {
   tmdbPageCount,
 } from "@/lib/mediaRequests";
 import { cn } from "@/lib/utils";
+import { EnterKeyHint } from "@/components/ui/kbd";
 import { RequestStatusBadge } from "./RequestStatusBadge";
 import RequestResultsGrid, { RequestResultsPager } from "./RequestResultsGrid";
 
@@ -42,6 +43,8 @@ export interface RequestSuggestionCombobox {
   optionId: (index: number) => string;
   /** Position of the highlighted suggestion, or -1 when none is highlighted. */
   selectedIndex: number;
+  /** The pointer moved onto a suggestion. */
+  onSelect?: (index: number) => void;
   onPick: (item: RequestMediaResult) => void;
 }
 
@@ -188,6 +191,7 @@ function DialogVariant({
             item={item}
             optionId={combobox?.optionId(index)}
             isSelected={combobox?.selectedIndex === index}
+            onSelect={combobox?.onSelect ? () => combobox.onSelect?.(index) : undefined}
             onPick={combobox?.onPick}
           />
         ))}
@@ -200,11 +204,13 @@ function DialogRow({
   item,
   optionId,
   isSelected,
+  onSelect,
   onPick,
 }: {
   item: RequestMediaResult;
   optionId?: string;
   isSelected: boolean;
+  onSelect?: () => void;
   onPick?: (item: RequestMediaResult) => void;
 }) {
   const poster = tmdbImageURL(item.poster_path);
@@ -240,10 +246,11 @@ function DialogRow({
         .filter(Boolean)
         .join(", ")}
       data-selected={isSelected || undefined}
+      onMouseMove={isSelected ? undefined : onSelect}
       tabIndex={-1}
       to={requestDetailHref(item.media_type, item.tmdb_id)}
       onClick={handleClick}
-      className="hover:bg-muted/80 data-[selected]:bg-accent flex w-full items-center gap-3 rounded-md px-3 py-2 text-left transition-colors"
+      className="data-[selected]:bg-accent flex w-full items-center gap-3 rounded-md px-3 py-2 text-left transition-colors"
     >
       <div
         className={cn(
@@ -273,6 +280,7 @@ function DialogRow({
           {reasonLabel}
         </span>
       ) : null}
+      {isSelected && <EnterKeyHint />}
     </Link>
   );
 }

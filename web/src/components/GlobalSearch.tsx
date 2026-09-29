@@ -38,6 +38,7 @@ import { decodeThumbhash } from "@/lib/thumbhash";
 import { getInitials } from "@/lib/text";
 import { cn } from "@/lib/utils";
 import { Search } from "lucide-react";
+import { EnterKeyHint, Kbd } from "@/components/ui/kbd";
 import CardPlayOverlay from "./CardPlayOverlay";
 import { LocalErrorBoundary } from "./LocalErrorBoundary";
 
@@ -105,12 +106,14 @@ function GlobalSearchResultRow({
   item,
   index,
   isSelected,
+  onSelect,
   onPick,
   onPlay,
 }: {
   item: BrowseItem;
   index: number;
   isSelected: boolean;
+  onSelect: () => void;
   onPick: (contentId: string) => void;
   onPlay: () => void;
 }) {
@@ -129,7 +132,8 @@ function GlobalSearchResultRow({
   return (
     <div
       data-selected={isSelected || undefined}
-      className="group/media hover:bg-muted/80 data-[selected]:bg-accent relative rounded-md transition-colors"
+      onMouseMove={isSelected ? undefined : onSelect}
+      className="group/media data-[selected]:bg-accent relative rounded-md transition-colors"
     >
       <div
         id={searchResultOptionId(index)}
@@ -175,6 +179,7 @@ function GlobalSearchResultRow({
             {typeLabel(item.type)}
           </div>
         </div>
+        {isSelected && <EnterKeyHint />}
       </div>
       {item.play_content_id ? (
         <div className={`pointer-events-none absolute inset-0 ${ROW_LAYOUT_CLASSES}`}>
@@ -206,38 +211,28 @@ function ResultGroupHeading({ id, children }: { id: string; children: string }) 
   );
 }
 
-const KBD_CLASSES =
-  "bg-muted text-muted-foreground pointer-events-none rounded border px-1.5 py-0.5 text-[10px] font-medium select-none";
-
 function KeyHint({ keys, children }: { keys: string[]; children: string }) {
   return (
     <span className="inline-flex items-center gap-1.5">
       {keys.map((key) => (
-        <kbd key={key} className={KBD_CLASSES}>
-          {key}
-        </kbd>
+        <Kbd key={key}>{key}</Kbd>
       ))}
       {children}
     </span>
   );
 }
 
-// What Enter opens for each kind of selected row, keyed by result-key prefix.
-const OPEN_HINTS: Record<string, string> = {
-  item: "Open title",
-  person: "Open person",
-  request: "Open request page",
-};
-
 function GlobalSearchPersonRow({
   person,
   index,
   isSelected,
+  onSelect,
   onPick,
 }: {
   person: Person;
   index: number;
   isSelected: boolean;
+  onSelect: () => void;
   onPick: (personId: string) => void;
 }) {
   const { loaded, onLoad, onError } = useImageLoaded(person.photo_url);
@@ -250,11 +245,9 @@ function GlobalSearchPersonRow({
       aria-selected={isSelected}
       aria-label={`${person.name}, Person`}
       data-selected={isSelected || undefined}
+      onMouseMove={isSelected ? undefined : onSelect}
       onClick={() => onPick(person.id)}
-      className={cn(
-        ROW_LAYOUT_CLASSES,
-        "hover:bg-muted/80 data-[selected]:bg-accent rounded-md transition-colors",
-      )}
+      className={cn(ROW_LAYOUT_CLASSES, "data-[selected]:bg-accent rounded-md transition-colors")}
     >
       <div className="flex w-10 shrink-0 justify-center">
         <div
@@ -287,6 +280,7 @@ function GlobalSearchPersonRow({
         <div className="truncate text-sm font-medium">{person.name}</div>
         <div className="text-muted-foreground text-xs">Person</div>
       </div>
+      {isSelected && <EnterKeyHint />}
     </div>
   );
 }
@@ -466,7 +460,6 @@ export function GlobalSearch({
       });
     }
   }, [selectedIndex]);
-  const hasMore = previewQuery.data?.has_more ?? false;
   const showLoading = (previewQuery.isFetching || peopleQuery.isFetching) && resultCount === 0;
   const showEmpty =
     !previewQuery.isFetching &&
@@ -489,7 +482,6 @@ export function GlobalSearch({
     }
     setSelectedKey(optionKeys[Math.min(nextIndex, optionCount - 1)]!);
   }
-  const openHint = selectedIndex >= 0 ? OPEN_HINTS[selectedKey!.split(":")[0]!] : undefined;
   function pickSelected() {
     const item = items[selectedIndex - itemOffset];
     if (item) {
@@ -514,6 +506,7 @@ export function GlobalSearch({
       item={item}
       index={itemOffset + i}
       isSelected={itemOffset + i === selectedIndex}
+      onSelect={() => setSelectedKey(`item:${item.content_id}`)}
       onPick={handlePickItem}
       onPlay={() => setOpen(false)}
     />
@@ -535,6 +528,7 @@ export function GlobalSearch({
             person={person}
             index={peopleOffset + i}
             isSelected={peopleOffset + i === selectedIndex}
+            onSelect={() => setSelectedKey(`person:${person.id}`)}
             onPick={handlePickPerson}
           />
         ))}
@@ -611,7 +605,16 @@ export function GlobalSearch({
                 }
               }}
             />
-            <kbd className={cn(KBD_CLASSES, "ml-2 hidden sm:inline-flex")}>ESC</kbd>
+            {/* Esc moves to the footer once there are results; until a row is
+                selected, Enter searches, so the ↵ chip sits here. */}
+            {!showResultsPanel ? (
+              <Kbd className="ml-2 hidden sm:inline-flex">ESC</Kbd>
+            ) : selectedIndex < 0 ? (
+              <span className="text-muted-foreground ml-2 hidden shrink-0 items-center gap-1.5 text-xs sm:inline-flex">
+                <EnterKeyHint />
+                See all
+              </span>
+            ) : null}
           </div>
         </form>
         {showResultsPanel && (
@@ -651,6 +654,7 @@ export function GlobalSearch({
                         optionId: (index) => searchResultOptionId(resultCount + index),
                         selectedIndex:
                           selectedIndex >= resultCount ? selectedIndex - resultCount : -1,
+                        onSelect: (index) => setSelectedKey(optionKeys[resultCount + index]!),
                         onPick: handlePickRequest,
                       }}
                     />
@@ -663,27 +667,9 @@ export function GlobalSearch({
                 ? `${resultCount} library results, ${requestRows.length} request suggestions`
                 : `${resultCount} results found`}
             </div>
-            {/* Says what Enter does right now: search from the input, or open the
-                selected row. */}
-            <div className="text-muted-foreground flex flex-wrap items-center justify-center gap-x-4 gap-y-1 border-t px-3 py-2 text-xs">
-              {openHint ? (
-                <>
-                  <KeyHint keys={["Enter"]}>{openHint}</KeyHint>
-                  {selectedIndex === 0 ? (
-                    <KeyHint keys={["↑"]}>Back to search</KeyHint>
-                  ) : (
-                    <KeyHint keys={["↑", "↓"]}>Move</KeyHint>
-                  )}
-                </>
-              ) : (
-                <>
-                  {hasMore && <span>Showing top results.</span>}
-                  <KeyHint keys={["Enter"]}>
-                    {hasMore ? "See all results" : "Open the full search page"}
-                  </KeyHint>
-                  {resultCount > 0 && <KeyHint keys={["↓"]}>Select a result</KeyHint>}
-                </>
-              )}
+            <div className="text-muted-foreground hidden items-center justify-center gap-4 border-t px-3 py-2 text-xs sm:flex">
+              <KeyHint keys={["↑", "↓"]}>Navigate</KeyHint>
+              <KeyHint keys={["Esc"]}>Close</KeyHint>
             </div>
           </div>
         )}

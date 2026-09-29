@@ -184,15 +184,24 @@ describe("GlobalSearch", () => {
     });
   });
 
-  it("renders preview rows and an approximate more-results hint", () => {
+  it("renders preview rows with keyboard hints", () => {
     const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "Test" });
 
     expect(markup).toContain('data-testid="dialog"');
     expect(markup).toContain('placeholder="Search library..."');
     expect(markup).toContain("Test Movie");
-    expect(markup).toContain("Showing top results");
     expect(markup).not.toContain("of 50");
-    expect(markup).toContain("See all results");
+    expect(markup).toContain("See all");
+    expect(markup).toContain("Navigate");
+    expect(markup).toContain("Close");
+  });
+
+  it("keeps the Esc hint in the search box until there are results", () => {
+    const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "" });
+
+    expect(markup).toContain("ESC");
+    expect(markup).not.toContain("See all");
+    expect(markup).not.toContain("Navigate");
   });
 
   it("shows a compact independent play target for playable library results", () => {
@@ -380,29 +389,41 @@ describe("GlobalSearch", () => {
     expect(input).toHaveFocus();
   });
 
-  it("says in the footer what Enter will do as the selection moves", async () => {
+  it("moves the Enter hint from the search box to the selected row and back", async () => {
     const input = renderTwoResults();
-    const footer = () => screen.getByText("Open the full search page").closest("div");
+    const rowHints = () =>
+      screen.getAllByRole("option").filter((option) => option.textContent?.includes("↵"));
 
-    expect(screen.getByText("Open the full search page")).toBeInTheDocument();
-    expect(screen.getByText("Select a result")).toBeInTheDocument();
-
-    fireEvent.keyDown(input, { key: "ArrowDown" });
-    expect(screen.queryByText("Open the full search page")).not.toBeInTheDocument();
-    expect(screen.getByText("Open title")).toBeInTheDocument();
-    expect(screen.getByText("Back to search")).toBeInTheDocument();
+    expect(screen.getByText("See all")).toBeInTheDocument();
+    expect(rowHints()).toHaveLength(0);
 
     fireEvent.keyDown(input, { key: "ArrowDown" });
-    expect(screen.getByText("Open title")).toBeInTheDocument();
-    expect(screen.getByText("Move")).toBeInTheDocument();
+    expect(screen.queryByText("See all")).not.toBeInTheDocument();
+    expect(rowHints()).toEqual([screen.getByRole("option", { selected: true })]);
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(rowHints()).toEqual([screen.getByRole("option", { name: /Second Movie/ })]);
 
     fireEvent.keyDown(input, { key: "ArrowUp" });
     fireEvent.keyDown(input, { key: "ArrowUp" });
-    expect(footer()).toHaveTextContent("Open the full search page");
+    expect(screen.getByText("See all")).toBeInTheDocument();
+    expect(rowHints()).toHaveLength(0);
 
     // Back in the search box, Enter searches instead of opening a row.
     await userEvent.keyboard("{Enter}");
     expect(mocks.navigate).toHaveBeenCalledWith(buildQueryCatalogHref("Test"));
+  });
+
+  it("selects the row under the moving pointer", () => {
+    const input = renderTwoResults();
+
+    fireEvent.mouseMove(screen.getByRole("option", { name: /Second Movie/ }));
+    expect(input).toHaveAttribute("aria-activedescendant", "search-result-1");
+
+    // Keyboard selection still moves on from the pointer's row.
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(input).toHaveAttribute("aria-activedescendant", "search-result-0");
+    expect(input).toHaveFocus();
   });
 
   it("highlights the selected title row", () => {
