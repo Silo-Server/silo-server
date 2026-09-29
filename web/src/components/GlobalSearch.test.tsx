@@ -661,10 +661,19 @@ describe("GlobalSearch people results", () => {
     fireEvent.keyDown(input, { key: "ArrowDown" });
     expect(input).toHaveAttribute("aria-activedescendant", "search-result-0");
 
-    mocks.usePersonSearch.mockReturnValue({ data: [personFixture], isFetching: false });
-    rerender(tree());
+    const original = Element.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      mocks.usePersonSearch.mockReturnValue({ data: [personFixture], isFetching: false });
+      rerender(tree());
 
-    expect(input).toHaveAttribute("aria-activedescendant", "search-result-1");
+      expect(input).toHaveAttribute("aria-activedescendant", "search-result-1");
+      // The moved row stays in view.
+      expect(scrollIntoView.mock.contexts.at(-1)).toHaveAttribute("id", "search-result-1");
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
     expect(screen.getByRole("option", { selected: true })).toHaveAccessibleName(
       "Test Movie, 2020, Movie",
     );

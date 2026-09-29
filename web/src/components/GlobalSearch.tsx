@@ -294,6 +294,8 @@ export function GlobalSearch({
   // Selection follows a result, not a position, so a row stays selected when
   // people results arrive and reorder the list.
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  // Whether the pointer made the current selection, so it is not scrolled.
+  const selectedByPointerRef = useRef(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const navigate = useViewTransitionNavigate();
   const beginSidebarItemNavigation = useSidebarItemNavigation();
@@ -451,6 +453,21 @@ export function GlobalSearch({
   const optionCount = optionKeys.length;
   const selectedIndex = selectedKey === null ? -1 : optionKeys.indexOf(selectedKey);
 
+  // Keep a keyboard selection in view, including when late results move it.
+  // A pointer selection is already under the pointer; scrolling it would slide
+  // the next row under a still pointer and select that one too.
+  useEffect(() => {
+    if (selectedIndex >= 0 && !selectedByPointerRef.current) {
+      document.getElementById(searchResultOptionId(selectedIndex))?.scrollIntoView?.({
+        block: "nearest",
+      });
+    }
+  }, [selectedIndex]);
+  const selectByPointer = (key: string) => {
+    selectedByPointerRef.current = true;
+    setSelectedKey(key);
+  };
+
   const showLoading = (previewQuery.isFetching || peopleQuery.isFetching) && resultCount === 0;
   const showEmpty =
     !previewQuery.isFetching &&
@@ -471,9 +488,8 @@ export function GlobalSearch({
       searchInputRef.current?.focus();
       return;
     }
-    const index = Math.min(nextIndex, optionCount - 1);
-    setSelectedKey(optionKeys[index]!);
-    document.getElementById(searchResultOptionId(index))?.scrollIntoView?.({ block: "nearest" });
+    selectedByPointerRef.current = false;
+    setSelectedKey(optionKeys[Math.min(nextIndex, optionCount - 1)]!);
   }
   function pickSelected() {
     const item = items[selectedIndex - itemOffset];
@@ -499,7 +515,7 @@ export function GlobalSearch({
       item={item}
       index={itemOffset + i}
       isSelected={itemOffset + i === selectedIndex}
-      onSelect={() => setSelectedKey(`item:${item.content_id}`)}
+      onSelect={() => selectByPointer(`item:${item.content_id}`)}
       onPick={handlePickItem}
       onPlay={() => setOpen(false)}
     />
@@ -521,7 +537,7 @@ export function GlobalSearch({
             person={person}
             index={peopleOffset + i}
             isSelected={peopleOffset + i === selectedIndex}
-            onSelect={() => setSelectedKey(`person:${person.id}`)}
+            onSelect={() => selectByPointer(`person:${person.id}`)}
             onPick={handlePickPerson}
           />
         ))}
@@ -648,7 +664,7 @@ export function GlobalSearch({
                         optionId: (index) => searchResultOptionId(resultCount + index),
                         selectedIndex:
                           selectedIndex >= resultCount ? selectedIndex - resultCount : -1,
-                        onSelect: (index) => setSelectedKey(optionKeys[resultCount + index]!),
+                        onSelect: (index) => selectByPointer(optionKeys[resultCount + index]!),
                         onPick: handlePickRequest,
                       }}
                     />
