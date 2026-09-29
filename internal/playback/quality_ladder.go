@@ -73,6 +73,23 @@ func ladderClassesFrom(height int) []ladderClass {
 	return bitrateLadder[len(bitrateLadder)-1:]
 }
 
+// ladderClassForSize is the smallest ladder class whose box holds a frame,
+// the class a source already belongs to: 1920x800 is 1080p, 1280x720 is
+// 720p. A frame known only by its height is classed by that height, a frame
+// larger than every box is the largest class, and an unknown size is 0.
+func ladderClassForSize(width, height int) int {
+	if height <= 0 {
+		return 0
+	}
+	for i := len(bitrateLadder) - 1; i >= 0; i-- {
+		class := bitrateLadder[i]
+		if height <= class.Height && (width <= 0 || width <= class.Width) {
+			return class.Height
+		}
+	}
+	return bitrateLadder[0].Height
+}
+
 // FitLadderBox scales a source into a class's 16:9 box, keeping its aspect
 // ratio and never enlarging it. A 3840x1600 scope film fits the 1080p class
 // as 1920x800 rather than 2592x1080. Dimensions are even, as H.264 and HEVC

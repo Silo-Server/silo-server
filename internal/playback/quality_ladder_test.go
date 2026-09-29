@@ -303,6 +303,9 @@ func TestResolveQualityPolicyV3AutoUsesTheLadder(t *testing.T) {
 		{"scope keeps its shape", scope, 10_000, 1920, 800, "800p", 6_000},
 		{"60 fps drops a class", uhd60, 7_000, 1280, 720, "720p", 2_000},
 		{"a source over the budget is re-encoded at its own size", SourceDescriptorV3{Width: 1920, Height: 1080, BitrateKbps: 8_000, FrameRate: 24}, 7_000, 1920, 1080, "1080p", 5_600},
+		{"a cropped source over the budget keeps its size and class", SourceDescriptorV3{Width: 1920, Height: 800, BitrateKbps: 8_000, FrameRate: 24}, 7_000, 1920, 800, "800p", 5_600},
+		{"a 4:3 source over the budget keeps its size", SourceDescriptorV3{Width: 1280, Height: 960, BitrateKbps: 8_000, FrameRate: 24}, 7_000, 1280, 960, "960p", 5_600},
+		{"a 720p source over the budget keeps the 720p bitrate", SourceDescriptorV3{Width: 1280, Height: 720, BitrateKbps: 8_000, FrameRate: 24}, 7_000, 1280, 720, "720p", 2_000},
 		{"a scaled transcode never exceeds the source's bitrate", SourceDescriptorV3{Width: 3840, Height: 2160, VideoCodec: "hevc", BitrateKbps: 3_000, FrameRate: 24}, 10_000, 1920, 1080, "1080p", 5_000},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -344,6 +347,7 @@ func TestResolveQualityPolicyV3AutoUnknownSourceBitrate(t *testing.T) {
 		wantBitrate  int
 	}{
 		{"1080p at 7 Mbps is re-encoded within the budget", SourceDescriptorV3{Width: 1920, Height: 1080, FrameRate: 24}, 7_000, false, 5_600},
+		{"a cropped 1080p-class film counts as 1080p", SourceDescriptorV3{Width: 1920, Height: 800, FrameRate: 24}, 7_000, false, 5_600},
 		{"1080p at 10 Mbps is sent as-is", SourceDescriptorV3{Width: 1920, Height: 1080, FrameRate: 24}, 10_000, true, 0},
 		{"720p at 7 Mbps is sent as-is", SourceDescriptorV3{Width: 1280, Height: 720, FrameRate: 24}, 7_000, true, 0},
 	} {
@@ -359,5 +363,17 @@ func TestResolveQualityPolicyV3AutoUnknownSourceBitrate(t *testing.T) {
 				t.Fatalf("re-encode = %dx%d at %d kbps, want the source size at %d kbps", got.Width, got.Height, got.BitrateKbps, tc.wantBitrate)
 			}
 		})
+	}
+}
+
+func TestLadderClassForSize(t *testing.T) {
+	for _, tc := range []struct{ w, h, want int }{
+		{1920, 1080, 1080}, {1920, 800, 1080}, {1280, 720, 720}, {1280, 960, 1080},
+		{960, 540, 540}, {640, 360, 480}, {3840, 1600, 2160}, {7680, 4320, 2160},
+		{0, 800, 1080}, {0, 0, 0},
+	} {
+		if got := ladderClassForSize(tc.w, tc.h); got != tc.want {
+			t.Errorf("ladderClassForSize(%dx%d) = %d, want %d", tc.w, tc.h, got, tc.want)
+		}
 	}
 }

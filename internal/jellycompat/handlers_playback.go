@@ -1161,7 +1161,7 @@ func compatTargetResolutionForBitrate(kbps int64, track models.VideoTrack) strin
 	}
 	width, height := playback.FitLadderBox(track.Width, track.Height, class)
 	switch {
-	case width == 0:
+	case height == 0:
 		return strconv.Itoa(class) + "p"
 	case width == track.Width && height == track.Height:
 		return ""

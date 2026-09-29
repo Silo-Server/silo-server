@@ -114,6 +114,8 @@ func TestPlaybackBitrateResolutionDoesNotUpscale(t *testing.T) {
 		{"larger source", 1920, 1080, "720p"},
 		{"scope source keeps its shape", 1920, 800, "532p"},
 		{"unknown source", 0, 0, "720p"},
+		{"height known, width not, fits", 0, 480, ""},
+		{"height known, width not, too tall", 0, 1080, "720p"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			version := testCompatVersion()
