@@ -1574,13 +1574,13 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				existing = nil
 			}
 		}
-		// An admin who names a TMDB, TVDB or IMDb ID the item doesn't already
-		// have is correcting its match. The stored identity IDs they didn't
-		// name came from the previous match, so they're dropped rather than
-		// fetched and kept; the providers re-supply the right ones. Naming
-		// only IDs the item already has confirms the match and keeps them.
+		// An admin whose choice corrects the item's match (see
+		// identityChoiceCorrects) sets its identity: the stored identity IDs
+		// they didn't name came from the previous match, so they're dropped
+		// rather than fetched and kept, and the providers re-supply the right
+		// ones. A choice that confirms or extends the match keeps them.
 		chosen := canonicalIdentityProviderIDs(req.callerProviderIDs)
-		if identityChoiceCorrects(chosen, storedIdentityForIdentify(existing, req.durableProviderIDs)) {
+		if identityChoiceCorrects(chosen, storedItemIdentity(existing, req.durableProviderIDs)) {
 			for _, key := range trustedSearchIDKeys {
 				if chosen[key] == "" {
 					delete(accumulatedIDs, key)
@@ -1653,7 +1653,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			}
 		}
 		wonHints := applyBuiltinIdentityHints(ctx, itemChain, searchQuery, accumulatedIDs, protectedKeys)
-		if req.Mode == ModeManualRefresh && identityProviderIDsChanged(storedIdentityProviderIDs(existing), wonHints) {
+		if req.Mode == ModeManualRefresh && identityChoiceCorrects(canonicalIdentityProviderIDs(wonHints), storedItemIdentity(existing, req.durableProviderIDs)) {
 			// The stored IDs came from the match the corrected NFO overrides,
 			// so any the NFO doesn't restate are dropped, not re-fetched.
 			for _, key := range trustedSearchIDKeys {
@@ -8398,20 +8398,6 @@ func storedIdentityProviderIDs(item *models.MediaItem) map[string]string {
 	return map[string]string{"tmdb": item.TmdbID, "tvdb": item.TvdbID, "imdb": item.ImdbID}
 }
 
-// identityProviderIDsChanged reports whether chosen gives a different value for
-// an identity ID the item already stores, i.e. whether it corrects a match
-// rather than confirming or extending it.
-func identityProviderIDsChanged(stored, chosen map[string]string) bool {
-	for _, key := range trustedSearchIDKeys {
-		old := strings.TrimSpace(stored[key])
-		next := strings.TrimSpace(chosen[key])
-		if old != "" && next != "" && old != next {
-			return true
-		}
-	}
-	return false
-}
-
 // canonicalIdentityProviderIDs returns the valid TMDB, TVDB and IMDb IDs in ids.
 func canonicalIdentityProviderIDs(ids map[string]string) map[string]string {
 	chosen := make(map[string]string, len(trustedSearchIDKeys))
@@ -8427,10 +8413,10 @@ func canonicalIdentityProviderIDs(ids map[string]string) map[string]string {
 	return chosen
 }
 
-// storedIdentityForIdentify returns the TMDB, TVDB and IMDb IDs an item
+// storedItemIdentity returns the TMDB, TVDB and IMDb IDs an item
 // already has: its columns, then its durable provider-ID rows for any key the
 // columns leave empty.
-func storedIdentityForIdentify(item *models.MediaItem, durable map[string]string) map[string]string {
+func storedItemIdentity(item *models.MediaItem, durable map[string]string) map[string]string {
 	stored := storedIdentityProviderIDs(item)
 	if stored == nil {
 		stored = map[string]string{}
@@ -8443,17 +8429,26 @@ func storedIdentityForIdentify(item *models.MediaItem, durable map[string]string
 	return stored
 }
 
-// identityChoiceCorrects reports whether an Identify's chosen identity IDs
-// correct the item's match: some chosen ID differs from the stored value for
-// its key or names a key the item doesn't have. Choosing only IDs the item
-// already has confirms the match.
+// identityChoiceCorrects reports whether chosen identity IDs (an Identify's,
+// or an NFO's on a manual refresh) correct the item's stored match: a chosen
+// ID differs from the stored value for its key, or the item stores identity
+// IDs and none of the chosen ones agrees with them. Restating a stored ID,
+// with or without adding one the item lacks, confirms or extends the match.
 func identityChoiceCorrects(chosen, stored map[string]string) bool {
-	for key, value := range chosen {
-		if strings.TrimSpace(stored[key]) != value {
+	agrees, hasStored := false, false
+	for _, key := range trustedSearchIDKeys {
+		old := strings.TrimSpace(stored[key])
+		hasStored = hasStored || old != ""
+		next := chosen[key]
+		if old == "" || next == "" {
+			continue
+		}
+		if old != next {
 			return true
 		}
+		agrees = true
 	}
-	return false
+	return hasStored && !agrees && len(chosen) > 0
 }
 
 // markIdentityProviderIDsReplaced makes a corrected match replace the stored

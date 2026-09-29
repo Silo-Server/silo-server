@@ -187,3 +187,77 @@ func TestManualRefresh_CorrectedNFOReplacesStoredIDs(t *testing.T) {
 	}
 	assertIdentityIDs(t, h, providerRepo, contentID, "200", "")
 }
+
+// Restating the stored TMDB ID while adding a TVDB ID extends the match, so
+// the stored IMDb ID is kept.
+func TestProcess_IdentifyExtendingMatchKeepsStoredIDs(t *testing.T) {
+	const contentID = "movie-tmdb-100"
+	h := newTestHarness()
+	providerRepo := seedWrongMatch(t, h, contentID)
+	provider := &capturingMetadataProvider{response: &MetadataResult{
+		HasMetadata: true, Title: "Wrong Film", Year: 2006,
+		ProviderIDs: map[string]string{"tmdb": "100", "tvdb": "555"},
+	}}
+
+	if _, err := h.service.ProcessWithProviders(context.Background(), ProcessRequest{
+		ContentID:   contentID,
+		ProviderIDs: map[string]string{"tmdb": "100", "tvdb": "555"},
+		Language:    "en",
+		Mode:        ModeIdentify,
+	}, []Provider{provider}); err != nil {
+		t.Fatalf("ProcessWithProviders: %v", err)
+	}
+	assertIdentityIDs(t, h, providerRepo, contentID, "100", "tt0000100")
+}
+
+// runNFOCorrection runs a manual refresh whose NFO names TMDB 200 and whose
+// provider returns only that ID.
+func runNFOCorrection(t *testing.T, h *testHarness, contentID string) *remoteStubProvider {
+	t.Helper()
+	nfo := &localHintStubProvider{
+		hints:    map[string]string{"tmdb": "200"},
+		metadata: &MetadataResult{HasMetadata: true, Title: "Right Film"},
+	}
+	remote := &remoteStubProvider{
+		slug:     "tmdb",
+		metadata: &MetadataResult{HasMetadata: true, Title: "Right Film", Year: 2015, ProviderIDs: map[string]string{"tmdb": "200"}},
+	}
+	if _, err := h.service.ProcessWithProviders(context.Background(), ProcessRequest{
+		ContentID: contentID,
+		Language:  "en",
+		Mode:      ModeManualRefresh,
+	}, []Provider{nfo, remote}); err != nil {
+		t.Fatalf("ProcessWithProviders: %v", err)
+	}
+	return remote
+}
+
+// A TMDB ID stored only in the durable rows still counts as the item's match
+// when a corrected NFO names a different one.
+func TestManualRefresh_CorrectedNFOReplacesDurableOnlyIDs(t *testing.T) {
+	const contentID = "movie:durable:100"
+	h := newTestHarness()
+	providerRepo := seedMovieIdentity(t, h, contentID, "100", "tt0000100")
+	h.itemRepo.items[contentID].TmdbID = ""
+	h.itemRepo.items[contentID].ImdbID = ""
+
+	remote := runNFOCorrection(t, h, contentID)
+	if got := remote.lastMetadataIDs()["imdb"]; got != "" {
+		t.Errorf("manual refresh fetched with the wrong film's imdb id %q", got)
+	}
+	assertIdentityIDs(t, h, providerRepo, contentID, "200", "")
+}
+
+// An item that only has the wrong film's IMDb ID, given a TMDB ID by a
+// corrected NFO, drops that IMDb ID.
+func TestManualRefresh_CorrectedNFOReplacesIMDbOnlyMatch(t *testing.T) {
+	const contentID = "movie:imdb:tt0000100"
+	h := newTestHarness()
+	providerRepo := seedMovieIdentity(t, h, contentID, "", "tt0000100")
+
+	remote := runNFOCorrection(t, h, contentID)
+	if got := remote.lastMetadataIDs()["imdb"]; got != "" {
+		t.Errorf("manual refresh fetched with the stored imdb id %q", got)
+	}
+	assertIdentityIDs(t, h, providerRepo, contentID, "200", "")
+}
