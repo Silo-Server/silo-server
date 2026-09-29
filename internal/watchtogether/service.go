@@ -891,6 +891,10 @@ func (s *Service) handleStateReportForConnection(
 			return snapshot, nil
 		}
 		s.clearCorrectionCommandsLocked(live)
+		// The report now defines the room's transport. The last room command
+		// no longer describes it, and the reconciler would replay it to any
+		// member whose socket renews before it re-attaches.
+		live.command = nil
 		dispatches = s.prepareSnapshotDispatchesLocked(live)
 	} else if holdCorrection {
 		member.correctionCommand = nil

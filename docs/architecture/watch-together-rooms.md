@@ -70,7 +70,9 @@ transport request. It moves `Room.PlaybackState` (`playing`/`paused`) and
 `Room.ResumeOnReady` together with `Room.IsPaused`, the same way a play or
 pause request does. Guest corrections, re-attach syncs, and buffering barriers
 choose play or pause from those two fields; a report that updates only `IsPaused`
-would leave a paused room telling members to play.
+would leave a paused room telling members to play. Any authoritative host report
+also retires the room's last transport command, which the reconciler would
+otherwise replay to a member whose socket renews before it re-attaches.
 
 ## Two counters
 

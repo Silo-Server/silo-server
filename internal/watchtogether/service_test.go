@@ -1218,10 +1218,23 @@ func TestHostPauseReportPausesTheRoom(t *testing.T) {
 		t.Fatalf("guest correction = %+v; want pause at 100", command)
 	}
 
-	// Resuming from the system controls plays the room again.
+	// An explicit pause leaves a room command behind; resuming by report plays
+	// the room again and retires that command, so a socket renewal cannot
+	// replay the pause into the playing room.
+	if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host", TransportRequest{
+		Action: TransportActionPause, PositionSeconds: new(100.0),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if f.s.rooms[f.repo.room.ID].command == nil {
+		t.Fatal("explicit pause left no room command")
+	}
 	hostReport(false)
 	if f.repo.room.PlaybackState != RoomPlaybackStatePlaying || !f.repo.room.ResumeOnReady {
 		t.Fatalf("room = %s, resume on ready %v; want playing with resume", f.repo.room.PlaybackState, f.repo.room.ResumeOnReady)
+	}
+	if command := f.s.rooms[f.repo.room.ID].command; command != nil {
+		t.Fatalf("room command %s survived the host's resume report", command.Action)
 	}
 
 	// After another pause, a guest stall does not arm a barrier that resumes the room.
