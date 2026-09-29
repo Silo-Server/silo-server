@@ -207,9 +207,9 @@ func uploadCollectionImageVariants(
 func generateCollectionImageVariants(imageType string, fileData []byte) (*imageutil.VariantResult, error) {
 	var widths []int
 	switch imageType {
-	case "poster":
+	case collectionImagePoster:
 		widths = []int{500, 300}
-	case "backdrop":
+	case adminCollectionBackdrop:
 		widths = []int{1280, 300}
 	default:
 		return nil, fmt.Errorf("invalid image type: %s", imageType)
