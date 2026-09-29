@@ -688,7 +688,7 @@ func (c *Client) DeletePrefix(ctx context.Context, bucket, prefix string) (int, 
 // DeleteObjects deletes the given keys in batches of up to 1000 (the S3 API
 // limit). Returns the total number of successfully deleted objects. Missing
 // keys count as deleted; any other failure is returned as an error alongside
-// the count, and a cancelled context stops the deletion with its error.
+// the count, and a canceled context stops the deletion with its error.
 func (c *Client) DeleteObjects(ctx context.Context, bucket string, keys []string) (int, error) {
 	if err := c.mutations.Acquire(ctx, 1); err != nil {
 		return 0, err
