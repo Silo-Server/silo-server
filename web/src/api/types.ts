@@ -1798,11 +1798,6 @@ export interface ImportUserTMDBListCollectionRequest extends UserImportSharedFie
   url: string;
 }
 
-export interface ImportUserTraktCollectionRequest extends UserImportSharedFields {
-  preset: ImportTraktCollectionRequest["preset"];
-  media_type: ImportTraktCollectionRequest["media_type"];
-}
-
 // A completed sync always has a non-empty status; the empty-string variant in
 // UserCollectionSyncStatus only appears on un-synced rows.
 export type UserCollectionSyncResultStatus = Exclude<UserCollectionSyncStatus, "">;
