@@ -75,6 +75,23 @@ describe("ItemGrid row pitch", () => {
     expect(mocks.estimateSizes.at(-1)).toBe(realPitch);
   });
 
+  it("never lowers the measured pitch, so mixed row heights can't oscillate", () => {
+    let pitch = 340;
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return this.getAttribute("role") === "list" ? 3 * pitch - GAP : 0;
+    });
+
+    const { rerender } = render(<ItemGrid items={items} />);
+    expect(mocks.estimateSizes.at(-1)).toBe(340);
+
+    // A shorter window of rows must not shrink the reserved height.
+    pitch = 320;
+    rerender(<ItemGrid items={[...items]} />);
+    expect(mocks.estimateSizes.at(-1)).toBe(340);
+  });
+
   it("keeps the estimate when nothing has been measured", () => {
     render(<ItemGrid items={items} />);
 

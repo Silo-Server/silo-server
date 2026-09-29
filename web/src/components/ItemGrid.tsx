@@ -109,7 +109,11 @@ export default function ItemGrid(props: ItemGridProps) {
     const gridHeight = grid.offsetHeight;
     if (gridHeight <= 0) return;
     const pitch = (gridHeight + gridGap) / renderedRowCount;
-    if (Math.abs(pitch - rowHeight) > 0.5) {
+    // Only ever grow within a layout. The pitch averages the visible rows, and
+    // with mixed card heights a new range could lower it, move the range and
+    // raise it again, looping renders. Keeping the largest pitch seen settles
+    // it; a slight over-reserve leaves spare space instead of spilling rows.
+    if (pitch > rowHeight + 0.5) {
       setMeasured({ estimate: estimatedRowHeight, rowHeight: pitch });
     }
   });
