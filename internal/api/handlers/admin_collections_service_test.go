@@ -40,6 +40,15 @@ func TestAdminCollectionServiceRejectsUnknownVisibility(t *testing.T) {
 			t.Fatalf("%q rejected: %v", v, err)
 		}
 	}
+	if got, err := normalizeCollectionVisibilityUpdate(nil); err != nil || got != nil {
+		t.Fatalf("nil update: got %v, %v", got, err)
+	}
+	for in, want := range map[string]string{"": adminCollectionVisible, adminCollectionHidden: adminCollectionHidden, adminCollectionVisible: adminCollectionVisible} {
+		got, err := normalizeCollectionVisibilityUpdate(new(in))
+		if err != nil || got == nil || *got != want {
+			t.Fatalf("%q: got %v, %v, want %q", in, got, err, want)
+		}
+	}
 }
 
 func TestAdminCollectionLookupAPIErrorPreservesFailureClass(t *testing.T) {

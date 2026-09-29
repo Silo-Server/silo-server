@@ -212,11 +212,11 @@ func (h *LibraryCollectionHandler) CreateAdminCollection(ctx context.Context, re
 
 func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, collectionID string, req AdminCollectionUpdate, artwork adminCollectionArtwork) (AdminCollection, error) {
 	var none AdminCollection
-	if req.Visibility != nil {
-		if err := validateCollectionVisibility(*req.Visibility); err != nil {
-			return none, err
-		}
+	visibility, err := normalizeCollectionVisibilityUpdate(req.Visibility)
+	if err != nil {
+		return none, err
 	}
+	req.Visibility = visibility
 	existing, err := h.repo.GetByID(ctx, collectionID)
 	if err != nil {
 		return none, adminCollectionLookupAPIError(err)
@@ -309,6 +309,23 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 		h.refreshSmartCountAsync(collectionID)
 	}
 	return h.libraryCollectionResponseOf(ctx, updated), nil
+}
+
+// normalizeCollectionVisibilityUpdate validates an update's visibility. Nil
+// means "not provided" and stays nil; an explicit empty value means the
+// default, so it becomes visible rather than reaching the CHECK constraint.
+func normalizeCollectionVisibilityUpdate(visibility *string) (*string, error) {
+	if visibility == nil {
+		return nil, nil
+	}
+	if err := validateCollectionVisibility(*visibility); err != nil {
+		return nil, err
+	}
+	if *visibility == "" {
+		v := adminCollectionVisible
+		return &v, nil
+	}
+	return visibility, nil
 }
 
 // validateCollectionVisibility rejects values the library_collections
