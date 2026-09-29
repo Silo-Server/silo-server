@@ -734,6 +734,11 @@ func (r *Repository) ReopenFailed(ctx context.Context, id string, actor Viewer) 
 		}
 		return nil, fmt.Errorf("reopen failed request: %w", err)
 	}
+	// A request for the title created after this one failed may have taken
+	// its follows and failed too; they come back with the retry.
+	if err := adoptTitleFollows(ctx, tx, req); err != nil {
+		return nil, err
+	}
 	if err := r.recordEvent(ctx, tx, id, "retried", actor, ""); err != nil {
 		return nil, err
 	}
@@ -857,6 +862,12 @@ func (r *Repository) MarkAvailable(ctx context.Context, id string, actor Viewer)
 		      SELECT 1 FROM media_request_targets t
 		      WHERE t.request_id = media_requests.id AND t.status = 'completed'))
 		  )
+		  -- The title arriving completes only a request with nothing still on
+		  -- its way; a submission that queued a target since the caller looked
+		  -- lets the targets drive completion instead.
+		  AND NOT EXISTS (
+		    SELECT 1 FROM media_request_targets t
+		    WHERE t.request_id = media_requests.id AND t.status IN ('queued', 'downloading'))
 		RETURNING `+requestColumns(), id))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

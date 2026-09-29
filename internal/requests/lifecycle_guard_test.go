@@ -374,6 +374,56 @@ func TestMarkAvailableWaitsForSubmissionClaimDatabase(t *testing.T) {
 	}
 }
 
+// A request submitted after the caller found none of its targets live keeps
+// going: the title arriving does not complete it over a queued target.
+func TestMarkAvailableRefusesLiveTargetsDatabase(t *testing.T) {
+	repo, pool := lifecycleTestRepository(t)
+	ctx := t.Context()
+	insertLifecycleRequest(t, repo, "req-queued", 1, 708, StatusPending)
+	if _, err := pool.Exec(ctx, `
+		UPDATE media_requests SET status = 'queued' WHERE id = 'req-queued';
+		INSERT INTO media_request_targets (request_id, quality, status, updated_at) VALUES ('req-queued', '1080p', 'queued', now());`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.MarkAvailable(ctx, "req-queued", Viewer{}); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("mark available over a queued target: err = %v, want ErrInvalidState", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE media_request_targets SET status = 'completed' WHERE request_id = 'req-queued'`); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := repo.MarkAvailable(ctx, "req-queued", Viewer{}); err != nil || got.Status != StatusCompleted {
+		t.Fatalf("mark available once nothing is on its way: %+v, %v", got, err)
+	}
+}
+
+// A request retried after a later request for the title took its follows and
+// failed too gets them back.
+func TestReopenFailedTakesBackFollowsDatabase(t *testing.T) {
+	repo, pool := lifecycleTestRepository(t)
+	ctx := t.Context()
+	fail := func(id string) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `UPDATE media_requests SET outcome = 'failed' WHERE id = $1`, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insertLifecycleRequest(t, repo, "first", 1, 709, StatusApproved)
+	if err := repo.FollowTitle(ctx, MediaTypeMovie, 709, Viewer{UserID: 3, ProfileID: "profile-a"}); err != nil {
+		t.Fatal(err)
+	}
+	fail("first")
+	insertLifecycleRequest(t, repo, "second", 2, 709, StatusApproved)
+	fail("second")
+
+	if _, err := repo.ReopenFailed(ctx, "first", Viewer{}); err != nil {
+		t.Fatal(err)
+	}
+	followers, err := repo.ListRequestFollowers(ctx, Request{ID: "first", MediaType: MediaTypeMovie, TMDBID: 709})
+	if err != nil || len(followers) != 1 {
+		t.Fatalf("followers of the retried request = %+v, err = %v; want the follow back", followers, err)
+	}
+}
+
 func TestReconcileCandidatesRotateDatabase(t *testing.T) {
 	repo, _ := lifecycleTestRepository(t)
 	ctx := t.Context()
