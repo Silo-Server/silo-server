@@ -24,8 +24,8 @@ var vaapiCappedModes = []string{vaapiRateControlVBR, vaapiRateControlCBR}
 // the concrete VAAPI device should force: VBR where the driver offers it for
 // the target encoder, else CBR. When neither passes, the encode moves to
 // software, as it does on a device without HEVC encoding, because no VAAPI
-// mode left to FFmpeg is known to honor the cap; an HEVC target first checks
-// that libx265 works, like the HEVC encoder choice. Each answer is cached per
+// mode left to FFmpeg is known to honor the cap; it first checks that the
+// software encoder (libx264 or libx265) works, like the HEVC encoder choice. Each answer is cached per
 // device and derived again on every start, like the HEVC encoder choice, so
 // recipe cards never freeze it. A canceled context is returned so the caller
 // stops before launching FFmpeg.
@@ -58,10 +58,8 @@ func resolveVAAPIRateControl(ctx context.Context, opts TranscodeOpts) (Transcode
 			return opts, nil
 		}
 	}
-	if encoder == "hevc_vaapi" {
-		if err := requireSoftwareHEVCEncoder(ctx, opts.FFmpegPath); err != nil {
-			return opts, err
-		}
+	if err := requireSoftwareEncoder(ctx, opts.FFmpegPath, opts.TargetCodecVideo); err != nil {
+		return opts, err
 	}
 	if opts.ToneMapMode == tonemap.ModeHardware {
 		opts.softwareEncode = true
