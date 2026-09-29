@@ -8462,10 +8462,18 @@ func identityChoiceCorrects(chosen, stored map[string]string) bool {
 // restate. They came from the wrong match. Recording values rather than keys
 // leaves a different value for the same key alone, such as the IDs of an
 // existing item that a re-anchor merges into.
+//
+// Stored values are taken as they are, not validated: a malformed legacy ID
+// from the wrong match must be rejected too, or the merge would restore it.
 func rejectIdentityProviderIDs(rejected providerIDValueSet, chosen map[string]string, sources ...map[string]string) {
 	for _, source := range sources {
-		for key, value := range canonicalIdentityProviderIDs(source) {
-			if value != chosen[key] {
+		for rawKey, rawValue := range source {
+			key := strings.ToLower(strings.TrimSpace(rawKey))
+			value := strings.TrimSpace(rawValue)
+			if value == "" || !slices.Contains(trustedSearchIDKeys, key) {
+				continue
+			}
+			if normalizeProviderIDComparisonValue(key, value) != normalizeProviderIDComparisonValue(key, chosen[key]) {
 				rejected.add(key, value)
 			}
 		}

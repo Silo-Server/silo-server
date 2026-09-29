@@ -329,3 +329,17 @@ func TestProcess_IdentifyReplacesDivergentStoredIDs(t *testing.T) {
 		})
 	}
 }
+
+// A malformed legacy ID from the wrong match is rejected as it is stored, so
+// the merge can't restore it after a correction.
+func TestRejectIdentityProviderIDsIncludesMalformedStoredValues(t *testing.T) {
+	rejected := make(providerIDValueSet)
+	rejectIdentityProviderIDs(rejected, map[string]string{"tmdb": "200"},
+		map[string]string{"TMDB": "100", "imdb": "nm0000100"})
+
+	stored := map[string]string{"tmdb": "100", "imdb": "nm0000100"}
+	suppressProviderIDValues(stored, rejected)
+	if len(stored) != 0 {
+		t.Fatalf("stored IDs after suppression = %#v, want the malformed IMDb value rejected too", stored)
+	}
+}
