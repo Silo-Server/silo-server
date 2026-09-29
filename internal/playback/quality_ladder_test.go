@@ -1,0 +1,147 @@
+package playback
+
+import (
+	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/models"
+)
+
+func TestLadderClassForBitrate(t *testing.T) {
+	for _, tc := range []struct {
+		kbps  int
+		fps   float64
+		codec string
+		want  int
+	}{
+		// The download presets at film and video frame rates.
+		{20_000, 23.976, "h264", 2160},
+		{10_000, 23.976, "h264", 1080},
+		{5_000, 23.976, "h264", 1080},
+		{2_000, 23.976, "h264", 720},
+		{1_000, 23.976, "h264", 480},
+		{20_000, 60, "h264", 1080},
+		{10_000, 60, "h264", 1080},
+		{5_000, 60, "h264", 720},
+		{2_000, 60, "h264", 540},
+		{1_000, 60, "h264", 480},
+		// HEVC stretches the same budget further.
+		{12_000, 24, "hevc", 2160},
+		{1_000, 24, "hevc", 540},
+		// Unknown frame rates are treated as <=30 fps.
+		{5_000, 0, "h264", 1080},
+		{1_199, 24, "h264", 480},
+		{1_200, 24, "h264", 540},
+	} {
+		if got := LadderClassForBitrate(tc.kbps, tc.fps, tc.codec); got != tc.want {
+			t.Errorf("LadderClassForBitrate(%d, %v, %s) = %d, want %d", tc.kbps, tc.fps, tc.codec, got, tc.want)
+		}
+	}
+}
+
+func TestFitLadderBox(t *testing.T) {
+	for _, tc := range []struct {
+		srcW, srcH, class int
+		wantW, wantH      int
+	}{
+		{3840, 2160, 1080, 1920, 1080},
+		{3840, 1600, 1080, 1920, 800}, // scope keeps its shape
+		{3840, 1606, 720, 1276, 534},  // 536 would scale to 1282 wide
+		{1920, 800, 720, 1276, 532},
+		{1440, 1080, 720, 960, 720}, // 4:3 is bounded by height
+		{1920, 1080, 1080, 1920, 1080},
+		{1280, 720, 1080, 1280, 720},  // never enlarged
+		{1080, 1920, 1080, 608, 1080}, // portrait
+		{1918, 872, 540, 960, 436},
+		{0, 0, 1080, 0, 0},
+	} {
+		w, h := FitLadderBox(tc.srcW, tc.srcH, tc.class)
+		if w != tc.wantW || h != tc.wantH {
+			t.Errorf("FitLadderBox(%dx%d, %d) = %dx%d, want %dx%d", tc.srcW, tc.srcH, tc.class, w, h, tc.wantW, tc.wantH)
+		}
+	}
+}
+
+func ladderTestFile(width, height int, codec, frameRate string, bitrateKbps int) *models.MediaFile {
+	return &models.MediaFile{
+		CodecVideo: codec, Container: "mkv", Bitrate: bitrateKbps,
+		VideoTracks: []models.VideoTrack{{Codec: codec, Width: width, Height: height, FrameRate: frameRate, BitDepth: 8, Bitrate: bitrateKbps}},
+	}
+}
+
+// appleDownloadCaps mirrors the Apple client's download caps: a flat 1080p
+// ceiling for old servers plus attested hardware decoders that reach 4K.
+func appleDownloadCaps() ClientCapabilities {
+	return ClientCapabilities{
+		ClientFeatures: []string{FeatureSoftwareVideoDecodeV3},
+		VideoEvidence:  EvidencePlatformAttestedV3,
+		CodecsVideo:    []string{"h264", "hevc"},
+		MaxResolution:  "1080p",
+		VideoDecode: []VideoDecodeCapabilityV3{
+			{Codec: "h264", BitDepths: []int{8}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, Hardware: true},
+			{Codec: "hevc", BitDepths: []int{8, 10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, Hardware: true},
+			{Codec: "h264", Profiles: []string{"high 10"}, BitDepths: []int{10}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 30},
+		},
+	}
+}
+
+func TestResolveDownloadTranscodeTarget(t *testing.T) {
+	uhd := ladderTestFile(3840, 2160, "hevc", "24000/1001", 40_000)
+	scope := ladderTestFile(3840, 1600, "hevc", "24000/1001", 30_000)
+	hd := ladderTestFile(1920, 1080, "h264", "24000/1001", 8_000)
+	smallWeb := ladderTestFile(1920, 1080, "h264", "24", 3_000)
+	uhd60 := ladderTestFile(3840, 2160, "hevc", "60", 40_000)
+	h264Only := ClientCapabilities{VideoEvidence: EvidencePlatformAttestedV3, CodecsVideo: []string{"h264"}, VideoDecode: []VideoDecodeCapabilityV3{
+		{Codec: "h264", BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, Hardware: true},
+	}}
+	for _, tc := range []struct {
+		name        string
+		file        *models.MediaFile
+		caps        ClientCapabilities
+		kbps        int
+		settings    DownloadTranscodeSettings
+		wantCodec   string
+		wantRes     string
+		wantBitrate int
+	}{
+		{"no caps: 4K at 1 Mbps drops to 480p", uhd, ClientCapabilities{}, 1_000, DownloadTranscodeSettings{}, "h264", "480p", 1_000},
+		{"Apple caps reach 4K at 20 Mbps", uhd, appleDownloadCaps(), 20_000, DownloadTranscodeSettings{}, "h264", "", 20_000},
+		{"Apple caps: HEVC when allowed", uhd, appleDownloadCaps(), 10_000, DownloadTranscodeSettings{AllowHEVCEncoding: true}, "hevc", "1080p", 10_000},
+		{"HEVC not attested stays H.264", uhd, h264Only, 10_000, DownloadTranscodeSettings{AllowHEVCEncoding: true}, "h264", "1080p", 10_000},
+		{"device ceiling beats the ladder", uhd, h264Only, 20_000, DownloadTranscodeSettings{}, "h264", "1080p", 20_000},
+		{"flat ceiling without detailed caps", uhd, ClientCapabilities{MaxResolution: "720p"}, 10_000, DownloadTranscodeSettings{}, "h264", "720p", 10_000},
+		{"policy ceiling", uhd, appleDownloadCaps(), 20_000, DownloadTranscodeSettings{MaxHeight: 1080}, "h264", "1080p", 20_000},
+		{"scope keeps the class label", scope, ClientCapabilities{}, 5_000, DownloadTranscodeSettings{}, "h264", "1080p", 5_000},
+		{"60 fps drops a class", uhd60, ClientCapabilities{}, 5_000, DownloadTranscodeSettings{}, "h264", "720p", 5_000},
+		{"source fits: no scale", hd, ClientCapabilities{}, 10_000, DownloadTranscodeSettings{}, "h264", "", 8_000},
+		{"never above the source bitrate", smallWeb, ClientCapabilities{}, 10_000, DownloadTranscodeSettings{}, "h264", "", 3_000},
+		{"HEVC source counts as more bits in H.264", ladderTestFile(1920, 1080, "hevc", "24", 3_000), ClientCapabilities{}, 10_000, DownloadTranscodeSettings{}, "h264", "", 5_000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ResolveDownloadTranscodeTarget(tc.file, tc.caps, tc.kbps, tc.settings)
+			if got.CodecVideo != tc.wantCodec || got.Resolution != tc.wantRes || got.TargetBitrateKbps != tc.wantBitrate {
+				t.Fatalf("target = codec %q res %q bitrate %d, want %q %q %d", got.CodecVideo, got.Resolution, got.TargetBitrateKbps, tc.wantCodec, tc.wantRes, tc.wantBitrate)
+			}
+			if got.Container != "mp4" || got.CodecAudio != "aac" || got.AudioTrackIndex != -1 {
+				t.Fatalf("target container/audio = %+v", got)
+			}
+		})
+	}
+}
+
+func TestDownloadScaleResolution(t *testing.T) {
+	for _, tc := range []struct {
+		file  *models.MediaFile
+		class string
+		want  string
+	}{
+		{ladderTestFile(3840, 1600, "hevc", "24", 30_000), "1080p", "800p"},
+		{ladderTestFile(3840, 2160, "hevc", "24", 30_000), "540p", "540p"},
+		{ladderTestFile(1920, 1080, "h264", "24", 8_000), "1080p", ""},
+		{ladderTestFile(1920, 1080, "h264", "24", 8_000), "", ""},
+		{&models.MediaFile{CodecVideo: "h264"}, "720p", "720p"},
+	} {
+		if got := DownloadScaleResolution(tc.file, tc.class); got != tc.want {
+			t.Errorf("DownloadScaleResolution(%dx?, %q) = %q, want %q", len(tc.file.VideoTracks), tc.class, got, tc.want)
+		}
+	}
+}

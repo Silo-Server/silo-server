@@ -20,7 +20,15 @@ type fakeDownloadRegistry struct {
 }
 
 func (f *fakeDownloadRegistry) Capability(context.Context, int) (downloads.Capability, error) {
-	return downloads.Capability{Enabled: true, DownloadAllowed: true, QualityPresets: []string{"original"}}, f.err
+	return downloads.Capability{
+		Enabled: true, DownloadAllowed: true, TranscodeEnabled: true, TranscodeUserAllowed: true,
+		QualityPresets: []string{"original", "10mbps", "2mbps"},
+		QualityOptions: []downloads.QualityOption{
+			{Preset: "original"},
+			{Preset: "10mbps", BitrateKbps: 10_000, MaxHeight: 1080},
+			{Preset: "2mbps", BitrateKbps: 2_000, MaxHeight: 720},
+		},
+	}, f.err
 }
 func (f *fakeDownloadRegistry) ListPage(_ context.Context, user int, profile, device string, after *downloads.RegistryPosition, limit int) ([]*downloads.Download, error) {
 	f.user = user

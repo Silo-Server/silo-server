@@ -645,6 +645,10 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	cfg.Download.ArtifactDir = artifactDir
 	cfg.Download.MaxConcurrentPrepares = maxConcurrentPrepares
 	cfg.Download.ArtifactMaxBytes = artifactMaxBytes
+	// Playback owns these keys and reads them as exact "true"; parse them the
+	// same way so one malformed value cannot stall the whole download config.
+	cfg.Download.Allow4KTranscode = strings.EqualFold(strings.TrimSpace(m[Allow4KTranscodeSettingKey]), "true")
+	cfg.Download.AllowHEVCEncoding = strings.EqualFold(strings.TrimSpace(m[PlaybackAllowHEVCEncodingSettingKey]), "true")
 
 	// Policy
 	policyEvalTimeoutMS, err := intOr(m, "policy.eval_timeout_ms", 100)

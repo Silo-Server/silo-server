@@ -1,0 +1,44 @@
+# Bitrate and resolution ladder
+
+A bitrate cap means one output resolution everywhere in Silo. The table lives in
+`internal/playback/quality_ladder.go` (`bitrateLadder`), and no other package keeps
+its own bitrate-to-resolution mapping.
+
+## The table
+
+The floors are H.264 bitrates at 30 fps or less. They follow Apple's HLS authoring
+ladder and Jellyfin's `ResolutionNormalizer`.
+
+| Class | 16:9 box  | Floor     |
+| ----- | --------- | --------- |
+| 2160p | 3840x2160 | 20 Mbps   |
+| 1080p | 1920x1080 | 5 Mbps    |
+| 720p  | 1280x720  | 2 Mbps    |
+| 540p  | 960x540   | 1.2 Mbps  |
+| 480p  | 854x480   | below that |
+
+`LadderClassForBitrate` normalizes a budget before looking it up:
+
+- above 30 fps it divides by the square root of `fps / 30`;
+- HEVC and VP9 output divide it by 0.6, and AV1 by 0.5.
+
+## Invariants
+
+- **Never enlarge.** `FitLadderBox` keeps the source's aspect ratio inside the
+  class box. A 3840x1600 film at 1080p is 1920x800, not 2592x1080. Decide "unchanged"
+  by comparing the fitted size with the source size, never by class labels.
+- **Never exceed the source's bitrate.** A transcode's cap is the smaller of the
+  budget and the source's bitrate converted by codec efficiency.
+- **Device bounds step down, never up.** The class drops until the device's decoder
+  takes the fitted size.
+- **Caps are ceilings.** Every encoder treats the cap as `-maxrate`, not as a
+  constant-bitrate target (`appendCappedVBRArgs`).
+- **Downloads store the class, not the height.** An artifact records the class
+  label (`1080p`) for manifests and access checks. `DownloadScaleResolution`
+  derives the exact encoder height from the file when the job runs.
+
+## Consumers
+
+- Download presets: `playback.ResolveDownloadTranscodeTarget`, reached from
+  `downloads.DownloadQualityResolver`. Presets and their labels are in
+  [docs/downloads-api.md](../downloads-api.md).

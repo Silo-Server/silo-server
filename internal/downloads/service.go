@@ -72,6 +72,7 @@ type Capability struct {
 	Enabled              bool
 	DownloadAllowed      bool
 	QualityPresets       []string
+	QualityOptions       []QualityOption
 	TranscodeEnabled     bool
 	TranscodeUserAllowed bool
 	// SeasonDownload reports whether per-season series downloads are available;
@@ -315,6 +316,7 @@ func (s *Service) Capability(ctx context.Context, userID int) (Capability, error
 	} else {
 		c.QualityPresets = s.policy.PresetsFor(policyUser, cfg, s.artifacts != nil)
 	}
+	c.QualityOptions = qualityOptionsFor(c.QualityPresets, cfg, policyUser)
 	if len(c.QualityPresets) > 0 {
 		// Per-season download is always available when downloads are enabled;
 		// auto-download monitoring additionally requires the subscription repo.
@@ -369,10 +371,11 @@ type CreateRequest struct {
 	Caps playback.ClientCapabilities
 }
 
-// Create creates a download for a single item (movie or episode). For
-// public `original` it registers an idempotent managed entry or queues an
-// ephemeral row unless compatibility requires a prepared artifact. Bitrate
-// qualities always prepare a transcode artifact before the row becomes ready.
+// Create creates a download for a single item (movie or episode). When the
+// source is served as-is — `original`, or a bitrate preset the source already
+// fits — it registers an idempotent managed entry or queues an ephemeral row;
+// otherwise it prepares a remux or transcode artifact before the row becomes
+// ready.
 func (s *Service) Create(ctx context.Context, userID int, req CreateRequest, filter catalog.AccessFilter) (*Download, error) {
 	cfg, user, err := s.downloadConfigForUser(ctx, userID, req.DeviceID)
 	if err != nil {
@@ -430,8 +433,8 @@ func (s *Service) Create(ctx context.Context, userID int, req CreateRequest, fil
 			Kind:             KindQueued,
 			Status:           StatusQueued,
 			Format:           FormatOriginal,
-			Quality:          QualityOriginal,
-			EffectiveQuality: QualityOriginal,
+			Quality:          decision.RequestedQuality,
+			EffectiveQuality: decision.EffectiveQuality,
 			Revision:         1,
 			FileSize:         file.FileSize,
 			CreatedAt:        now,

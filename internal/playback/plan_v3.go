@@ -1436,8 +1436,8 @@ func compoundRungQualityResultV3(rung ladderRungV3, source SourceDescriptorV3, c
 	if width == 0 {
 		width, _ = dimensionsFromResolutionV3(resolutionLabelV3(height))
 	}
-	// Keep the clamped height exact. The transcoder leaves non-ladder heights
-	// unscaled, preserving the source crop even on a lower-class rung.
+	// Keep the clamped height exact. The transcoder scales to exactly this
+	// height, so a source crop is preserved even on a lower-class rung.
 	targetLabel := strconv.Itoa(height) + "p"
 	return QualityResultV3{
 		Label:             targetLabel,

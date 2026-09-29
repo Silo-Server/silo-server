@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -37,33 +38,150 @@ type PrepareTarget struct {
 	ToneMapDVRPUPresent        bool
 }
 
-// ResolvePrepareTarget computes the encode target for a remux/transcode download
-// of file, reusing Resolve so a download's encoding matches the streaming
-// decision for the same client (no duplicated codec logic).
-//
-//   - remux: copy video; copy audio unless the client can't decode it (then AAC);
-//     keep source resolution.
-//   - transcode: H.264/AAC, downscaled to the client's max resolution when the
-//     source exceeds it.
-func ResolvePrepareTarget(file *models.MediaFile, format string, caps ClientCapabilities, settings AdminSettings) PrepareTarget {
-	t := PrepareTarget{Container: "mp4", AudioTrackIndex: -1}
-	decision := Resolve(file, caps, settings)
-	if format == "remux" {
-		t.CodecVideo = "copy"
-		if decision.TranscodeAudio {
-			t.CodecAudio = "aac"
-		} else {
-			t.CodecAudio = "copy"
-		}
-		return t
-	}
-	// transcode
-	t.CodecVideo = "h264"
-	t.CodecAudio = "aac"
-	if caps.MaxResolution != "" && resolutionOrder(file.Resolution) > resolutionOrder(caps.MaxResolution) {
-		t.Resolution = caps.MaxResolution
+// ResolveRemuxTarget computes the encode target for a remux download of file,
+// reusing Resolve so a download's audio decision matches the streaming
+// decision for the same client: copy video, copy audio unless the client
+// can't decode it (then AAC), and keep the source resolution.
+func ResolveRemuxTarget(file *models.MediaFile, caps ClientCapabilities, settings AdminSettings) PrepareTarget {
+	t := PrepareTarget{Container: containerMP4V3, CodecVideo: codecCopyV3, CodecAudio: codecCopyV3, AudioTrackIndex: -1}
+	if Resolve(file, caps, settings).TranscodeAudio {
+		t.CodecAudio = audioCodecAACV3
 	}
 	return t
+}
+
+// DownloadTranscodeSettings are the server switches and policy limits a
+// bitrate-capped download encode honors.
+type DownloadTranscodeSettings struct {
+	AllowHEVCEncoding bool
+	// MaxHeight is a policy ceiling on the output ladder class; 0 means none.
+	MaxHeight int
+}
+
+// ResolveDownloadTranscodeTarget computes a bitrate-capped download encode.
+// The bitrate picks the largest ladder class it encodes well at the source's
+// frame rate (LadderClassForBitrate); the class steps down until the device's
+// decoder can take the box-fit output; and the source is never enlarged nor
+// re-encoded above its own bitrate. HEVC is chosen when the server allows HEVC
+// encoding and the caps attest an 8-bit HEVC decoder that reaches at least the
+// size H.264 would, otherwise the output is H.264.
+//
+// Resolution holds the ladder class label ("1080p") when the source must be
+// downscaled and is empty when the source already fits; DownloadScaleResolution
+// turns the class back into the exact encoder height for this file.
+func ResolveDownloadTranscodeTarget(file *models.MediaFile, caps ClientCapabilities, capKbps int, settings DownloadTranscodeSettings) PrepareTarget {
+	source := SourceDescriptorFromFileV3(file, 0)
+	codec := transcodeCodecH264
+	class := downloadLadderClass(source, caps, capKbps, codec, settings.MaxHeight)
+	if settings.AllowHEVCEncoding && caps.hasDetailedVideoEvidence() {
+		if _, _, ok := downloadDecodeBox(caps, transcodeCodecHEVC); ok {
+			if hevcClass := downloadLadderClass(source, caps, capKbps, transcodeCodecHEVC, settings.MaxHeight); hevcClass >= class {
+				codec, class = transcodeCodecHEVC, hevcClass
+			}
+		}
+	}
+	target := PrepareTarget{Container: containerMP4V3, CodecVideo: codec, CodecAudio: audioCodecAACV3, AudioTrackIndex: -1, TargetBitrateKbps: capKbps}
+	if width, height := FitLadderBox(source.Width, source.Height, class); width == 0 || width != source.Width || height != source.Height {
+		target.Resolution = heightLabel(class)
+	}
+	if source.BitrateKbps > 0 {
+		sourceEquivalent := int(float64(source.BitrateKbps) * codecEfficiency(codec) / codecEfficiency(source.VideoCodec))
+		target.TargetBitrateKbps = min(capKbps, max(sourceEquivalent, 1))
+	}
+	return target
+}
+
+// DownloadScaleResolution converts a download artifact's ladder class into
+// the exact height the encoder scales to, so a cinema-aspect source keeps its
+// shape inside the class box. An empty class, or a source already inside the
+// box, leaves the source unscaled.
+func DownloadScaleResolution(file *models.MediaFile, classLabel string) string {
+	class := resolutionHeightV3(classLabel)
+	if class <= 0 {
+		return classLabel
+	}
+	source := SourceDescriptorFromFileV3(file, 0)
+	width, height := FitLadderBox(source.Width, source.Height, class)
+	switch {
+	case width == 0:
+		return heightLabel(class)
+	case width == source.Width && height == source.Height:
+		return ""
+	default:
+		return heightLabel(height)
+	}
+}
+
+// downloadLadderClass returns the tallest ladder class, at or below the one
+// the bitrate earns, whose box-fit output the device can decode in codec. The
+// smallest class is the floor: the ladder never drops below it.
+func downloadLadderClass(source SourceDescriptorV3, caps ClientCapabilities, capKbps int, codec string, maxHeight int) int {
+	top := LadderClassForBitrate(capKbps, source.FrameRate, codec)
+	if maxHeight > 0 {
+		top = min(top, maxHeight)
+	}
+	maxWidth, maxDecodeHeight, _ := downloadDecodeBox(caps, codec)
+	classes := ladderClassesFrom(top)
+	for _, class := range classes {
+		width, height := FitLadderBox(source.Width, source.Height, class.Height)
+		if width == 0 {
+			width, height = class.Width, class.Height
+		}
+		if (maxWidth == 0 || width <= maxWidth) && (maxDecodeHeight == 0 || height <= maxDecodeHeight) {
+			return class.Height
+		}
+	}
+	return classes[len(classes)-1].Height
+}
+
+// downloadDecodeBox returns the largest 8-bit frame the caps say the device
+// decodes in codec; zero width or height means unbounded. Strict-tier
+// video_decode entries are authoritative and prefer hardware decoders, since
+// a download plays back later on the same device; otherwise the coarse
+// max_resolution ceiling applies. ok is false when strict-tier caps list no
+// decoder for codec.
+func downloadDecodeBox(caps ClientCapabilities, codec string) (width, height int, ok bool) {
+	if caps.hasDetailedVideoEvidence() {
+		softwareOptIn := HasFeatureV3(caps.ClientFeatures, FeatureSoftwareVideoDecodeV3)
+		for _, hardware := range []bool{true, false} {
+			for _, decoder := range caps.VideoDecode {
+				if decoder.Hardware != hardware || (!hardware && !softwareOptIn) ||
+					!strings.EqualFold(decoder.Codec, codec) ||
+					(len(decoder.BitDepths) > 0 && !containsIntV3(decoder.BitDepths, 8)) {
+					continue
+				}
+				if !ok || boxLarger(decoder.MaxWidth, decoder.MaxHeight, width, height) {
+					width, height = decoder.MaxWidth, decoder.MaxHeight
+				}
+				ok = true
+			}
+			if ok {
+				return width, height, true
+			}
+		}
+		if codec != transcodeCodecH264 {
+			return 0, 0, false
+		}
+		// H.264 is the universal fallback output; strict caps that omit it
+		// still fall through to the coarse ceiling rather than failing.
+	}
+	if height := resolutionHeightV3(caps.MaxResolution); height > 0 {
+		width, _ := dimensionsFromResolutionV3(heightLabel(height))
+		return width, height, true
+	}
+	return 0, 0, true
+}
+
+// boxLarger reports whether a decoder bound is larger than the current one,
+// treating zero as unbounded.
+func boxLarger(width, height, currentWidth, currentHeight int) bool {
+	if currentWidth == 0 && currentHeight == 0 {
+		return false
+	}
+	if width == 0 && height == 0 {
+		return true
+	}
+	return width*height > currentWidth*currentHeight
 }
 
 // PrepareFile encodes a single finalized MP4 (with a relocated moov atom via
@@ -209,7 +327,13 @@ func buildPrepareFileArgs(opts TranscodeOpts, outputPath string) []string {
 	if isVideoCopy {
 		args = append(args, "-c:v", "copy")
 	} else {
+		opts.preparedFileEncode = true
 		args = appendVideoArgs(args, opts)
+		if strings.EqualFold(opts.TargetCodecVideo, transcodeCodecHEVC) {
+			// Apple players only open HEVC in MP4 under the hvc1 sample entry;
+			// FFmpeg's default hev1 plays elsewhere but not on iOS or tvOS.
+			args = append(args, "-tag:v", VideoSampleEntryHVC1)
+		}
 	}
 	if isVideoCopy && !isAudioCopy {
 		args = append(args, "-threads", "1", "-filter_threads", "1", "-filter_complex_threads", "1")

@@ -22472,6 +22472,12 @@
           "proxy_delivery": {
             "type": "boolean"
           },
+          "quality_options": {
+            "items": {
+              "$ref": "#/components/schemas/DownloadQualityOption"
+            },
+            "type": "array"
+          },
           "quality_presets": {
             "items": {
               "type": "string"
@@ -22523,6 +22529,7 @@
           "proxy_delivery",
           "ordered_status",
           "quality_presets",
+          "quality_options",
           "transcode_enabled",
           "transcode_user_allowed",
           "season_download",
@@ -23031,6 +23038,26 @@
         "required": [
           "start",
           "end"
+        ],
+        "type": "object"
+      },
+      "DownloadQualityOption": {
+        "additionalProperties": false,
+        "properties": {
+          "bitrate_kbps": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "max_height": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "preset": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "preset"
         ],
         "type": "object"
       },

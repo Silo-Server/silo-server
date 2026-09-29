@@ -3,6 +3,7 @@ package downloads
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -212,5 +213,100 @@ func TestDownloadQualityResolverResolve(t *testing.T) {
 				t.Fatalf("Resolve(%q) = %+v", tc.requested, got)
 			}
 		})
+	}
+}
+
+func ladderPolicyFile(width, height int, codec string, bitrateKbps int, hdr bool) *models.MediaFile {
+	track := models.VideoTrack{Codec: codec, Profile: "High", Width: width, Height: height, FrameRate: "24000/1001", BitDepth: 8, Bitrate: bitrateKbps}
+	if hdr {
+		track.ColorTransfer, track.ColorPrimaries, track.BitDepth, track.Profile = "smpte2084", "bt2020", 10, "Main 10"
+	}
+	return &models.MediaFile{
+		ID: 9, CodecVideo: codec, CodecAudio: "aac", Container: "mp4", Resolution: "1080p",
+		Bitrate: bitrateKbps + 256, HDR: hdr, VideoTracks: []models.VideoTrack{track},
+	}
+}
+
+func attestedDownloadCaps() playback.ClientCapabilities {
+	return playback.ClientCapabilities{
+		VideoEvidence: playback.EvidencePlatformAttestedV3,
+		CodecsVideo:   []string{"h264", "hevc"},
+		CodecsAudio:   []string{"aac"},
+		Containers:    []string{"mp4"},
+		VideoDecode: []playback.VideoDecodeCapabilityV3{
+			{Codec: "h264", BitDepths: []int{8}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 120_000, Hardware: true},
+			{Codec: "hevc", BitDepths: []int{8, 10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 120_000, Hardware: true},
+		},
+	}
+}
+
+func TestResolvePresetOnTheLadder(t *testing.T) {
+	var resolver DownloadQualityResolver
+	user := &PolicyUser{Policy: access.EffectiveUserPolicy{DownloadAllowed: true, DownloadTranscodeAllowed: true}}
+	cfg := config.DownloadConfig{Enabled: true, TranscodeEnabled: true}
+	for _, tc := range []struct {
+		name          string
+		requested     string
+		file          *models.MediaFile
+		caps          playback.ClientCapabilities
+		hevc          bool
+		wantFormat    string
+		wantEffective string
+		wantCodec     string
+		wantRes       string
+		wantBitrate   int
+	}{
+		{"a small source the device plays is served as-is", Quality5Mbps, ladderPolicyFile(1920, 1080, "h264", 3_000, false), attestedDownloadCaps(), false, FormatOriginal, QualityOriginal, "", "", 0},
+		{"without caps the fitting source is still transcoded", Quality5Mbps, ladderPolicyFile(1920, 1080, "h264", 3_000, false), playback.ClientCapabilities{}, false, FormatTranscode, Quality5Mbps, "h264", "", 3_000},
+		{"an HDR source that fits is still converted", Quality20Mbps, ladderPolicyFile(1920, 1080, "hevc", 8_000, true), attestedDownloadCaps(), false, FormatTranscode, Quality20Mbps, "h264", "", 13_333},
+		{"a source above the preset bitrate is transcoded", Quality5Mbps, ladderPolicyFile(1920, 1080, "h264", 12_000, false), attestedDownloadCaps(), false, FormatTranscode, Quality5Mbps, "h264", "", 5_000},
+		{"1 Mbps drops 1080p to 480p", Quality1Mbps, ladderPolicyFile(1920, 1080, "h264", 12_000, false), attestedDownloadCaps(), false, FormatTranscode, Quality1Mbps, "h264", "480p", 1_000},
+		{"HEVC output when the server allows it", Quality10Mbps, ladderPolicyFile(3840, 2160, "hevc", 40_000, false), attestedDownloadCaps(), true, FormatTranscode, Quality10Mbps, "hevc", "1080p", 10_000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := cfg
+			cfg.AllowHEVCEncoding = tc.hevc
+			got, err := resolver.Resolve(context.Background(), tc.requested, user, cfg, tc.file, tc.caps, true, "")
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
+			}
+			if got.RequestedQuality != tc.requested {
+				t.Errorf("RequestedQuality = %q, want the requested %q", got.RequestedQuality, tc.requested)
+			}
+			if got.DeliveryFormat != tc.wantFormat || got.EffectiveQuality != tc.wantEffective ||
+				got.PrepareTarget.CodecVideo != tc.wantCodec || got.PrepareTarget.Resolution != tc.wantRes || got.TargetBitrateKbps != tc.wantBitrate {
+				t.Fatalf("Resolve = format %q effective %q codec %q res %q bitrate %d", got.DeliveryFormat, got.EffectiveQuality, got.PrepareTarget.CodecVideo, got.PrepareTarget.Resolution, got.TargetBitrateKbps)
+			}
+		})
+	}
+}
+
+func TestQualityOptionsFor(t *testing.T) {
+	presets := []string{QualityOriginal, Quality20Mbps, Quality10Mbps, Quality5Mbps, Quality2Mbps, Quality1Mbps}
+	heights := func(cfg config.DownloadConfig, user *PolicyUser) []int {
+		var out []int
+		for _, option := range qualityOptionsFor(presets, cfg, user) {
+			out = append(out, option.MaxHeight)
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		name string
+		cfg  config.DownloadConfig
+		user *PolicyUser
+		want []int
+	}{
+		{"4K transcoding allowed", config.DownloadConfig{Allow4KTranscode: true}, nil, []int{0, 2160, 1080, 1080, 720, 480}},
+		{"4K transcoding off caps at 1080p", config.DownloadConfig{}, nil, []int{0, 1080, 1080, 1080, 720, 480}},
+		{"HEVC stretches the lowest preset", config.DownloadConfig{Allow4KTranscode: true, AllowHEVCEncoding: true}, nil, []int{0, 2160, 1080, 1080, 720, 540}},
+		{"a policy ceiling applies", config.DownloadConfig{Allow4KTranscode: true}, &PolicyUser{Policy: access.EffectiveUserPolicy{MaxPlaybackQuality: "1080p"}}, []int{0, 1080, 1080, 1080, 720, 480}},
+	} {
+		if got := heights(tc.cfg, tc.user); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: max heights = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	options := qualityOptionsFor(presets, config.DownloadConfig{}, nil)
+	if options[0] != (QualityOption{Preset: QualityOriginal}) || options[2] != (QualityOption{Preset: Quality10Mbps, BitrateKbps: 10_000, MaxHeight: 1080}) {
+		t.Fatalf("options = %+v", options)
 	}
 }

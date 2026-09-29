@@ -99,7 +99,10 @@ type TranscodeOpts struct {
 	// vaapiRateControl is the capped rate-control mode the selected VAAPI
 	// device offers for the target encoder ("VBR" or "CBR"; empty for an
 	// uncapped encode); see resolveVAAPIRateControl. Derived on every start.
-	vaapiRateControl           string
+	vaapiRateControl string
+	// preparedFileEncode marks a single-file download encode. Nothing waits on
+	// it in real time, so it trades encode speed for quality; HLS never sets it.
+	preparedFileEncode         bool
 	ToneMapPolicy              tonemap.Policy
 	ToneMapMode                tonemap.Mode
 	ToneMapSourceKind          tonemap.SourceKind
@@ -181,8 +184,6 @@ const (
 	transcodeHWNVENC         = "nvenc"
 	transcodeHWVideoToolbox  = "videotoolbox"
 	transcodeHWNone          = "none"
-	transcodeResolution328p  = "328p"
-	transcodeResolution420p  = "420p"
 	transcodeResolution480p  = "480p"
 	transcodeResolution720p  = "720p"
 	transcodeResolution1080p = "1080p"
@@ -1125,6 +1126,14 @@ func appendHWAccelArgs(args []string, opts TranscodeOpts) []string {
 // fast-start preset for initial playback, while QSV stays on the fastest
 // preset family it supports.
 func videoPreset(opts TranscodeOpts, hwAccel string) string {
+	if opts.preparedFileEncode {
+		// Software HEVC at "medium" takes hours for a 4K film; "fast" keeps a
+		// download's preparation practical while still beating veryfast.
+		if hwAccel != "qsv" && strings.EqualFold(opts.TargetCodecVideo, transcodeCodecHEVC) {
+			return "fast"
+		}
+		return "medium"
+	}
 	if hwAccel == "qsv" {
 		return "veryfast"
 	}
@@ -1223,7 +1232,12 @@ func appendVideoArgs(args []string, opts TranscodeOpts) []string {
 			args = append(args, "-c:v", "libx265", "-preset", preset, "-crf", "28", "-pix_fmt", "yuv420p")
 		} else {
 			args = append(args, "-c:v", "libx264", "-preset", preset, "-crf", "23",
-				"-pix_fmt", "yuv420p", "-profile:v", "high", "-level", "4.1")
+				"-pix_fmt", "yuv420p", "-profile:v", "high")
+			// Level 4.1 caps H.264 at 1080p30; a download may be 4K or 60 fps,
+			// so libx264 picks the level from the actual output instead.
+			if !opts.preparedFileEncode {
+				args = append(args, "-level", "4.1")
+			}
 		}
 		if hasBitrateCap {
 			args = append(args,
@@ -1511,22 +1525,10 @@ func videoToolboxToneMapCPUFilter(opts TranscodeOpts) string {
 }
 
 func videoToolboxScaleDimensions(resolution string) (string, string) {
-	switch resolution {
-	case transcodeResolution2160p:
-		return "-2", "2160"
-	case transcodeResolution1080p:
-		return "-2", "1080"
-	case transcodeResolution720p:
-		return "-2", "720"
-	case transcodeResolution480p:
-		return "-2", "480"
-	case transcodeResolution420p:
-		return "-2", "420"
-	case transcodeResolution328p:
-		return "-2", "328"
-	default:
-		return "iw", "ih"
+	if height, ok := scaleTargetHeight(resolution); ok {
+		return "-2", strconv.Itoa(height)
 	}
+	return "iw", "ih"
 }
 
 // TranscodesAudio reports whether a transcode with the given target audio
@@ -1805,23 +1807,32 @@ func appendSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string {
 
 // resolutionToScale returns an ffmpeg scale filter string for the target resolution.
 func resolutionToScale(res string) string {
-	switch res {
-	case "2160p":
-		return "scale=-2:2160"
-	case "1080p":
-		return "scale=-2:1080"
-	case "720p":
-		return "scale=-2:720"
-	case "480p":
-		return "scale=-2:480"
-	case transcodeResolution420p:
-		return "scale=-2:420"
-	case transcodeResolution328p:
-		return "scale=-2:328"
-	default:
-		return ""
+	if height, ok := scaleTargetHeight(res); ok {
+		return fmt.Sprintf("scale=-2:%d", height)
 	}
+	return ""
 }
+
+// scaleTargetHeight parses a target resolution label into the output height
+// the scale filters produce: a ladder label such as "1080p" or an exact
+// box-fit height such as "800p" for a cinema-aspect download. Labels outside
+// the even 144-4320 range leave the source unscaled, as unknown labels always
+// have.
+func scaleTargetHeight(res string) (int, bool) {
+	label := strings.ToLower(strings.TrimSpace(res))
+	digits, ok := strings.CutSuffix(label, "p")
+	if !ok {
+		return 0, false
+	}
+	height, err := strconv.Atoi(digits)
+	if err != nil || height < 144 || height > 4320 || height%2 != 0 {
+		return 0, false
+	}
+	return height, true
+}
+
+// vaapiNV12Filter converts VAAPI frames to NV12 without scaling.
+const vaapiNV12Filter = "scale_vaapi=format=nv12"
 
 // qsvScaleFilter returns the VAAPI→QSV filter chain with optional resolution scaling.
 func qsvScaleFilter(res string) string {
@@ -1833,22 +1844,10 @@ func qsvScaleFilterWithMapMode(res, mapMode string) string {
 	if mapMode != "" {
 		hwmap += ":mode=" + mapMode
 	}
-	switch res {
-	case "2160p":
-		return "scale_vaapi=w=-2:h=2160:format=nv12," + hwmap + ",format=qsv"
-	case "1080p":
-		return "scale_vaapi=w=-2:h=1080:format=nv12," + hwmap + ",format=qsv"
-	case "720p":
-		return "scale_vaapi=w=-2:h=720:format=nv12," + hwmap + ",format=qsv"
-	case "480p":
-		return "scale_vaapi=w=-2:h=480:format=nv12," + hwmap + ",format=qsv"
-	case transcodeResolution420p:
-		return "scale_vaapi=w=-2:h=420:format=nv12," + hwmap + ",format=qsv"
-	case transcodeResolution328p:
-		return "scale_vaapi=w=-2:h=328:format=nv12," + hwmap + ",format=qsv"
-	default:
-		return "scale_vaapi=format=nv12," + hwmap + ",format=qsv"
+	if height, ok := scaleTargetHeight(res); ok {
+		return fmt.Sprintf("scale_vaapi=w=-2:h=%d:format=nv12,", height) + hwmap + ",format=qsv"
 	}
+	return vaapiNV12Filter + "," + hwmap + ",format=qsv"
 }
 
 // qsvToneMapScaleFilter maps VAAPI tone-map output with read/write access. The default
@@ -1874,22 +1873,10 @@ func qsvSoftwareDecodeFilter(res string) string {
 // browser-compatible encoder format. Using the CPU scale filter on VAAPI frames
 // causes FFmpeg auto_scale format-negotiation failures.
 func vaapiScaleFilter(res string) string {
-	switch res {
-	case "2160p":
-		return "scale_vaapi=w=-2:h=2160:format=nv12"
-	case "1080p":
-		return "scale_vaapi=w=-2:h=1080:format=nv12"
-	case "720p":
-		return "scale_vaapi=w=-2:h=720:format=nv12"
-	case "480p":
-		return "scale_vaapi=w=-2:h=480:format=nv12"
-	case transcodeResolution420p:
-		return "scale_vaapi=w=-2:h=420:format=nv12"
-	case transcodeResolution328p:
-		return "scale_vaapi=w=-2:h=328:format=nv12"
-	default:
-		return "scale_vaapi=format=nv12"
+	if height, ok := scaleTargetHeight(res); ok {
+		return fmt.Sprintf("scale_vaapi=w=-2:h=%d:format=nv12", height)
 	}
+	return vaapiNV12Filter
 }
 
 func vaapiSoftwareDecodeFilter(res string) string {
@@ -1907,22 +1894,10 @@ func nvencSoftwareDecodeFilter(res string) string {
 }
 
 func nvencScaleFilter(res string) string {
-	switch res {
-	case "2160p":
-		return "scale_cuda=w=-2:h=2160:format=nv12"
-	case "1080p":
-		return "scale_cuda=w=-2:h=1080:format=nv12"
-	case "720p":
-		return "scale_cuda=w=-2:h=720:format=nv12"
-	case "480p":
-		return "scale_cuda=w=-2:h=480:format=nv12"
-	case transcodeResolution420p:
-		return "scale_cuda=w=-2:h=420:format=nv12"
-	case transcodeResolution328p:
-		return "scale_cuda=w=-2:h=328:format=nv12"
-	default:
-		return "scale_cuda=format=nv12"
+	if height, ok := scaleTargetHeight(res); ok {
+		return fmt.Sprintf("scale_cuda=w=-2:h=%d:format=nv12", height)
 	}
+	return "scale_cuda=format=nv12"
 }
 
 // filterPathReplacer escapes special characters in file paths for ffmpeg filter syntax.
