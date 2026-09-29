@@ -17,8 +17,8 @@ ALTER TABLE public.media_request_follows ADD COLUMN request_id text;
 -- request had closed (a failed request, or one its requester replaced and
 -- deleted), and the follow goes to the title's first request since that still
 -- has a notification to send, as a new request takes such follows over. With
--- none, it stays with a failed request for the title's next request to take
--- over.
+-- none, it stays with the title's failed request, the one it was made for or
+-- else the latest, for the title's next request to take over.
 UPDATE public.media_request_follows f
 SET request_id = CASE
     WHEN made_for.outcome = 'active'
@@ -35,7 +35,12 @@ SET request_id = CASE
            AND (r.status <> 'completed' OR r.fulfilled_notified_at IS NULL)
          ORDER BY r.created_at, r.id
          LIMIT 1),
-        CASE WHEN made_for.outcome = 'failed' THEN made_for.id END)
+        CASE WHEN made_for.outcome = 'failed' THEN made_for.id END,
+        (SELECT r.id FROM public.media_requests r
+         WHERE r.media_type = f.media_type AND r.provider = 'tmdb' AND r.tmdb_id = f.tmdb_id
+           AND r.outcome = 'failed'
+         ORDER BY r.created_at DESC, r.id DESC
+         LIMIT 1))
     END
 FROM (
     SELECT DISTINCT ON (f2.media_type, f2.tmdb_id, f2.user_id, f2.profile_id)
