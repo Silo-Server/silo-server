@@ -1049,13 +1049,19 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		quality.BitrateKbps = min(quality.BitrateKbps, budget-targetAudioBitrateKbps)
 	}
 	targetVideoCodec := transcodeCodecH264
-	// h264BitrateKbps is kept for the H.264 fallback after a failed HEVC attempt.
+	// H.264 is always an allowed output, but its bitrate stays within what an
+	// attested H.264 decoder for this size takes. h264BitrateKbps is also
+	// kept for the H.264 fallback after a failed HEVC attempt.
 	h264BitrateKbps := quality.BitrateKbps
+	if limit := h264DecoderBitrateLimitV3(input.Request, quality.Width, quality.Height); limit > 0 && (h264BitrateKbps <= 0 || h264BitrateKbps > limit) {
+		h264BitrateKbps = limit
+	}
+	hevcQuality := quality
+	quality.BitrateKbps = h264BitrateKbps
 	if input.Settings.AllowHEVCEncoding && hlsRegistry.Available(TransformationVideoToHEVCV3) {
 		// HEVC output needs no more than the source's bits counted as HEVC,
 		// whether it scales the source or only converts it at its own size,
 		// and the decoder is checked against that HEVC target.
-		hevcQuality := quality
 		if sourceKbps := sourceEquivalentKbps(source, transcodeCodecHEVC); sourceKbps > 0 && hevcQuality.BitrateKbps > 0 {
 			hevcQuality.BitrateKbps = min(hevcQuality.BitrateKbps, sourceKbps)
 		}
@@ -1146,6 +1152,36 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		return terminalPlannerResultV3("adaptation_exhausted", "All compatible playback recipes have already failed for this output route.", false)
 	}
 	return PlannerResultV3{Plan: &plan, PlayMethod: PlayTranscode, TranscodeAudio: true, TargetVideoCodec: targetVideoCodec, TargetAudioCodec: "aac", SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, targetAudioChannels, true), TargetAudioChannels: targetAudioChannels, TargetAudioBitrateKbps: targetAudioBitrateKbps, TargetResolution: quality.Label, TargetBitrateKbps: quality.BitrateKbps, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleBurnIn: subtitle.RequiresBurn, SubtitleCodec: subtitle.Codec, DownloadedSubtitleID: subtitle.DownloadedSubtitleID, ToneMapPolicy: toneMapPolicy, ToneMapMode: toneMapMode, ToneMapSourceKind: toneMapSourceKind, ToneMapRecipeVersion: toneMapRecipeVersionV3(toneMapOK), ToneMapPreflightRequired: toneMapResolution.PreflightRequired, ToneMapSourceRevision: toneMapRevision}
+}
+
+// h264DecoderBitrateLimitV3 is the most an attested H.264 decoder that takes
+// a width x height output accepts, in kbps; 0 when strict caps do not bound
+// it (no detailed evidence, an unlimited decoder, or none for that size).
+// Hardware decoders are preferred, as for downloads.
+func h264DecoderBitrateLimitV3(request StartRequestV3, width, height int) int {
+	caps := request.Capabilities
+	if caps.VideoEvidence != EvidenceExactV3 && caps.VideoEvidence != EvidencePlatformAttestedV3 {
+		return 0
+	}
+	softwareOptIn := HasFeatureV3(request.ClientFeatures, FeatureSoftwareVideoDecodeV3)
+	for _, hardware := range []bool{true, false} {
+		limit, found := 0, false
+		for _, decoder := range caps.VideoDecode {
+			if decoder.Hardware != hardware || (!hardware && !softwareOptIn) || !strings.EqualFold(decoder.Codec, transcodeCodecH264) ||
+				(len(decoder.BitDepths) > 0 && !containsIntV3(decoder.BitDepths, 8)) ||
+				decoder.MaxWidth > 0 && width > decoder.MaxWidth || decoder.MaxHeight > 0 && height > decoder.MaxHeight {
+				continue
+			}
+			if decoder.MaxBitrateKbps <= 0 {
+				return 0
+			}
+			limit, found = max(limit, decoder.MaxBitrateKbps), true
+		}
+		if found {
+			return limit
+		}
+	}
+	return 0
 }
 
 func videoTransformationForTargetV3(codec string) TransformationV3 {

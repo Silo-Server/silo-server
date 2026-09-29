@@ -25,11 +25,15 @@ ladder and Jellyfin's `ResolutionNormalizer`.
 
 - **Never enlarge.** `FitLadderBox` keeps the source's aspect ratio inside the
   class box. A 3840x1600 film at 1080p is 1920x800, not 2592x1080. Decide "unchanged"
-  by comparing the fitted size with the source size, never by class labels.
+  by comparing the fitted size with the source size, never by class labels. The
+  one exception is streaming's source-preserving route: a source whose height
+  fits the class is sent as-is when its bitrate allows, even when it is wider
+  than the box (a 2560x1080 film at 1080p). Once it is re-encoded, it is fitted.
 - **Never exceed the source's bitrate.** A transcode's cap is the smaller of the
   budget and the source's bitrate converted by codec efficiency.
 - **Device bounds step down, never up.** The class drops until the device's decoder
-  takes the fitted size.
+  takes the fitted size. Streaming keeps H.264 as its universal output and only
+  lowers an H.264 target's bitrate to an attested decoder's limit.
 - **Caps are ceilings.** Every encoder treats the cap as `-maxrate`, not as a
   constant-bitrate target (`appendCappedVBRArgs`).
 - **Downloads store the class, not the height.** An artifact records the class
