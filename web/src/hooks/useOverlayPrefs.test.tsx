@@ -44,6 +44,7 @@ vi.mock("@/utils/storage", () => ({
 import { v2Problem } from "@/api/v2/problems.test-support";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { buildDefaultPrefs, type CardOverlayPrefs } from "@/lib/overlays";
+import { settingsKeys } from "@/hooks/queries/keys";
 
 import { useOverlayPrefs } from "./useOverlayPrefs";
 import { useUpdateServerSettings } from "./queries/admin/settings";
@@ -287,40 +288,59 @@ describe("useOverlayPrefs", () => {
   });
 
   // ui.card_overlays validation is all-or-nothing, so one overlay id the
-  // server's schema predates would fail every badge save on that server.
+  // server's schema predates would fail every badge save on that server. With
+  // the revision unknown, an id the server already stored is still accepted.
   it.each([
-    { manifestRevision: 12, stored: false },
-    { manifestRevision: 13, stored: true },
-  ])(
-    "writes advisory_age only to a server that accepts it (revision $manifestRevision)",
-    async ({ manifestRevision, stored }) => {
-      mocks.profileId = "profile-1";
-      mocks.effective = {};
-      mocks.v2.mockImplementation(async (operation: string) => {
-        if (operation === "GET /api/v2/settings/contract/capabilities") {
-          return {
-            api_version: 1,
-            manifest_revision: manifestRevision,
-            supports_batched_effective: true,
-          };
-        }
-        return { enabled: true };
-      });
-      const { result } = renderHook(() => useOverlayPrefs(), { wrapper: createWrapper() });
-
-      await waitFor(() => expect(result.current.isOverlaySupported("advisory_age")).toBe(stored));
-
-      const next = buildDefaultPrefs();
-      next.order = ["advisory_age", "year"];
-      next.items.advisory_age = { enabled: true, position: "bottom-right" };
-      act(() => result.current.setPrefs(next));
-
-      const written = mocks.setValue.mock.calls[0]![0].value as CardOverlayPrefs;
-      expect("advisory_age" in written.items).toBe(stored);
-      expect(written.order).toEqual(stored ? ["advisory_age", "year"] : ["year"]);
-      expect(written.items.year).toEqual(next.items.year);
+    { name: "a revision-12 server", revision: 12, storedAdvisory: false, kept: false },
+    { name: "a revision-13 server", revision: 13, storedAdvisory: false, kept: true },
+    { name: "an unknown revision", revision: undefined, storedAdvisory: false, kept: false },
+    {
+      name: "an unknown revision with a stored advisory badge",
+      revision: undefined,
+      storedAdvisory: true,
+      kept: true,
     },
-  );
+  ])("writes advisory_age only where it is accepted: $name", async (c) => {
+    mocks.profileId = "profile-1";
+    mocks.effective = c.storedAdvisory
+      ? (effectiveOverlayValue({
+          version: 2,
+          preset: "classic",
+          order: [],
+          items: { advisory_age: { enabled: true, position: "bottom-right" } },
+        }).data as Record<string, { value: unknown }>)
+      : {};
+    mocks.v2.mockImplementation(async (operation: string) => {
+      if (operation === "GET /api/v2/settings/contract/capabilities") {
+        if (c.revision === undefined) throw new Error("capabilities unavailable");
+        return { api_version: 1, manifest_revision: c.revision, supports_batched_effective: true };
+      }
+      return { enabled: true };
+    });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client: queryClient }, children);
+    const { result } = renderHook(() => useOverlayPrefs(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+      expect(queryClient.getQueryState([...settingsKeys.all, "capabilities"])?.status).not.toBe(
+        "pending",
+      );
+    });
+    expect(result.current.isOverlaySupported("advisory_age")).toBe(c.kept);
+
+    const next = buildDefaultPrefs();
+    next.preset = "pill";
+    next.order = ["advisory_age", "year"];
+    next.items.advisory_age = { enabled: true, position: "bottom-right" };
+    act(() => result.current.setPrefs(next));
+
+    const written = mocks.setValue.mock.calls[0]![0].value as CardOverlayPrefs;
+    expect("advisory_age" in written.items).toBe(c.kept);
+    expect(written.order).toEqual(c.kept ? ["advisory_age", "year"] : ["year"]);
+    expect(written.items.year).toEqual(next.items.year);
+  });
 
   it("refreshes the shared overlay configuration immediately after an admin save", async () => {
     const queryClient = new QueryClient({
