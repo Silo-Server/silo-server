@@ -10,72 +10,99 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-// A corrected NFO re-anchors a wrongly matched movie onto the item that
-// already holds the right TMDB ID. The merge must keep that item's own IMDb ID
-// even when the provider response names only TMDB.
+// Corrected NFO matches preserve a surviving destination's own IDs while
+// removing rejected source IDs after a merge or rename.
 func TestManualRefresh_CorrectedNFOReanchorKeepsDestinationIDs(t *testing.T) {
-	pool := chainBuiltinTestPool(t)
-	ctx := context.Background()
-	items := catalog.NewItemRepository(pool)
-	pids := catalog.NewProviderIDRepository(pool)
-	svc := NewMetadataService(nil, nil, nil, items, pids,
-		catalog.NewEpisodeRepository(pool), catalog.NewSeasonRepository(pool),
-		catalog.NewLibraryItemRepository(pool), catalog.NewFolderRepository(pool),
-		catalog.NewPersonRepository(pool), nil, nil, nil, catalog.NewRootClaimRepository(pool))
-
-	suffix := time.Now().UnixNano() % 100_000_000
-	wrong, right := fmt.Sprintf("%d", 700_000_000+suffix), fmt.Sprintf("%d", 800_000_000+suffix)
-	wrongIMDb, rightIMDb := fmt.Sprintf("tt7%08d", suffix), fmt.Sprintf("tt8%08d", suffix)
-	from, to := "movie-tmdb-"+wrong, "movie-tmdb-"+right
-	seed := func(contentID, title, tmdb, imdb string) {
-		t.Helper()
-		if err := items.Upsert(ctx, &models.MediaItem{
-			ContentID: contentID, Type: "movie", Title: title, Year: 2015, Status: "matched",
-			TmdbID: tmdb, ImdbID: imdb, DefaultMetadataLanguage: "en",
-			Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
-		}); err != nil {
-			t.Fatalf("seed %s: %v", contentID, err)
-		}
-		if err := pids.ReplaceByContentID(ctx, contentID, map[string]string{"tmdb": tmdb, "imdb": imdb}); err != nil {
-			t.Fatalf("seed provider ids for %s: %v", contentID, err)
-		}
-	}
-	seed(from, "Wrong Film", wrong, wrongIMDb)
-	seed(to, "Right Film", right, rightIMDb)
-
-	nfo := &localHintStubProvider{
-		hints:    map[string]string{"tmdb": right},
-		metadata: &MetadataResult{HasMetadata: true, Title: "Right Film"},
-	}
-	remote := &remoteStubProvider{
-		slug:     "tmdb",
-		metadata: &MetadataResult{HasMetadata: true, Title: "Right Film", Year: 2015, ProviderIDs: map[string]string{"tmdb": right}},
-	}
-	result, err := svc.ProcessWithProviders(ctx, ProcessRequest{ContentID: from, Language: "en", Mode: ModeManualRefresh},
-		[]Provider{nfo, remote})
-	if err != nil {
-		t.Fatalf("manual refresh: %v", err)
-	}
-	if result == nil || result.ContentID != to {
-		t.Fatalf("result = %#v, want re-anchored onto %s", result, to)
-	}
-
-	item, err := items.GetByID(ctx, to)
-	if err != nil {
-		t.Fatalf("load %s: %v", to, err)
-	}
-	if item.TmdbID != right || item.ImdbID != rightIMDb {
-		t.Errorf("%s tmdb_id=%q imdb_id=%q, want %s and its own %s", to, item.TmdbID, item.ImdbID, right, rightIMDb)
-	}
-	rows, err := pids.GetByContentID(ctx, to)
-	if err != nil {
-		t.Fatalf("load provider ids for %s: %v", to, err)
-	}
-	stored := map[string]string{}
-	for _, row := range rows {
-		stored[row.Provider] = row.ProviderID
-	}
-	if stored["tmdb"] != right || stored["imdb"] != rightIMDb {
-		t.Errorf("%s provider ids = %#v, want tmdb=%s imdb=%s", to, stored, right, rightIMDb)
+	for _, tc := range []struct {
+		name              string
+		targetExists      bool
+		targetHasIMDb     bool
+		durableOnlyIMDb   bool
+		sourceDurableOnly bool
+	}{
+		{name: "existing destination", targetExists: true, targetHasIMDb: true},
+		{name: "durable destination identity", targetExists: true, targetHasIMDb: true, durableOnlyIMDb: true, sourceDurableOnly: true},
+		{name: "source identity moved to destination", targetExists: true},
+		{name: "rename source"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pool := chainBuiltinTestPool(t)
+			ctx := t.Context()
+			items := catalog.NewItemRepository(pool)
+			providerIDs := catalog.NewProviderIDRepository(pool)
+			service := NewMetadataService(nil, nil, nil, items, providerIDs,
+				catalog.NewEpisodeRepository(pool), catalog.NewSeasonRepository(pool),
+				catalog.NewLibraryItemRepository(pool), catalog.NewFolderRepository(pool),
+				nil, nil, nil, nil, nil)
+			nonce := time.Now().UnixNano() % 100_000_000
+			wrongTMDB := fmt.Sprintf("%d", 600_000_000+nonce)
+			rightTMDB := fmt.Sprintf("%d", 700_000_000+nonce)
+			wrongIMDb := fmt.Sprintf("tt8%08d", nonce)
+			rightIMDb := fmt.Sprintf("tt9%08d", nonce)
+			from, to := "movie-tmdb-"+wrongTMDB, "movie-tmdb-"+rightTMDB
+			t.Cleanup(func() {
+				_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{from, to})
+			})
+			seed := func(id, tmdb, imdb string, durableOnly bool) {
+				t.Helper()
+				item := &models.MediaItem{
+					ContentID: id, Type: "movie", Title: "Rematch fixture", Status: "matched",
+					TmdbID: tmdb, ImdbID: imdb, DefaultMetadataLanguage: "en",
+					Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
+				}
+				if durableOnly {
+					item.ImdbID = ""
+				}
+				if err := items.Upsert(ctx, item); err != nil {
+					t.Fatal(err)
+				}
+				ids := map[string]string{"tmdb": tmdb}
+				if imdb != "" {
+					ids["imdb"] = imdb
+				}
+				if err := providerIDs.ReplaceByContentID(ctx, id, ids); err != nil {
+					t.Fatal(err)
+				}
+			}
+			seed(from, wrongTMDB, wrongIMDb, tc.sourceDurableOnly)
+			wantIMDb := ""
+			if tc.targetHasIMDb {
+				wantIMDb = rightIMDb
+			}
+			if tc.targetExists {
+				seed(to, rightTMDB, wantIMDb, tc.durableOnlyIMDb)
+			}
+			nfo := &localHintStubProvider{
+				hints:    map[string]string{"tmdb": rightTMDB},
+				metadata: &MetadataResult{HasMetadata: true, Title: "Corrected fixture"},
+			}
+			remote := &remoteStubProvider{
+				slug:     "tmdb",
+				metadata: &MetadataResult{HasMetadata: true, Title: "Corrected fixture", ProviderIDs: map[string]string{"tmdb": rightTMDB}},
+			}
+			request := ProcessRequest{ContentID: from, Language: "en", Mode: ModeManualRefresh}
+			result, err := service.ProcessWithProviders(ctx, request, []Provider{nfo, remote})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result == nil || !result.Updated || result.ContentID != to {
+				t.Fatalf("refresh result = %#v, want destination %s", result, to)
+			}
+			item, err := items.GetByID(ctx, to)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if item.TmdbID != rightTMDB || item.ImdbID != wantIMDb {
+				t.Errorf("destination columns = tmdb:%q imdb:%q, want %q and %q", item.TmdbID, item.ImdbID, rightTMDB, wantIMDb)
+			}
+			rows, err := providerIDs.GetByContentID(ctx, to)
+			if err != nil {
+				t.Fatal(err)
+			}
+			persisted := providerIDMapFromRows(rows)
+			if persisted["tmdb"] != rightTMDB || persisted["imdb"] != wantIMDb {
+				t.Errorf("destination provider rows = %#v, want tmdb:%q imdb:%q", persisted, rightTMDB, wantIMDb)
+			}
+		})
 	}
 }

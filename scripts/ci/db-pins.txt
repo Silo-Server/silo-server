@@ -49,6 +49,9 @@
 ./internal/metadata TestRefreshSeriesEpisodeMetadataStateDebtQueries
 ./internal/metadata TestRefreshSeriesEpisodeMetadataStateRetainsFailureDuringIncompleteSync
 
+# Corrected matches preserve destination IDs and remove rejected source IDs.
+./internal/metadata TestManualRefresh_CorrectedNFOReanchorKeepsDestinationIDs
+
 # Home sections: one overlay summary row read per card.
 ./internal/sections TestOverlaySummariesOnlyDecodeWinner
 ./internal/sections TestOverlaySummariesRankingMatchesGo
