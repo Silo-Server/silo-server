@@ -77,10 +77,14 @@ func ladderClassesFrom(height int) []ladderClass {
 // 4:2:0 encodes require. The encoder is given only the height and derives the
 // width as FFmpeg's scale=-2 does, so the width here is computed the same way
 // and the height steps down until that width fits the box. An unknown source
-// size returns zeros.
+// size returns zeros; a source known only by its height keeps a zero width and
+// its own height, or the class height when it is taller.
 func FitLadderBox(sourceWidth, sourceHeight, classHeight int) (int, int) {
-	if sourceWidth <= 0 || sourceHeight <= 0 {
+	if sourceHeight <= 0 {
 		return 0, 0
+	}
+	if sourceWidth <= 0 {
+		return 0, min(sourceHeight, classHeight)
 	}
 	boxWidth, boxHeight := classHeight*16/9, classHeight
 	for _, class := range bitrateLadder {

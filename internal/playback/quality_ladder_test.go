@@ -53,6 +53,8 @@ func TestFitLadderBox(t *testing.T) {
 		{1080, 1920, 1080, 608, 1080}, // portrait
 		{1918, 872, 540, 960, 436},
 		{0, 0, 1080, 0, 0},
+		{0, 480, 720, 0, 480},  // known only by height: never enlarged
+		{0, 1080, 720, 0, 720}, // and scaled down to the class
 	} {
 		w, h := FitLadderBox(tc.srcW, tc.srcH, tc.class)
 		if w != tc.wantW || h != tc.wantH {

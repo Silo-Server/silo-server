@@ -87,7 +87,7 @@ func ResolveDownloadTranscodeTarget(file *models.MediaFile, caps ClientCapabilit
 		return PrepareTarget{}, false
 	}
 	target := PrepareTarget{Container: containerMP4V3, CodecVideo: codec, CodecAudio: audioCodecAACV3, AudioTrackIndex: -1, TargetBitrateKbps: capKbps}
-	if width, height := FitLadderBox(source.Width, source.Height, class); width == 0 || width != source.Width || height != source.Height {
+	if width, height := FitLadderBox(source.Width, source.Height, class); height == 0 || width != source.Width || height != source.Height {
 		target.Resolution = heightLabel(class)
 	}
 	if sourceKbps := sourceEquivalentKbps(source, codec); sourceKbps > 0 {
@@ -140,7 +140,7 @@ func DownloadScaleResolution(file *models.MediaFile, classLabel string) string {
 	source := SourceDescriptorFromFileV3(file, 0)
 	width, height := FitLadderBox(source.Width, source.Height, class)
 	switch {
-	case width == 0:
+	case height == 0:
 		return heightLabel(class)
 	case width == source.Width && height == source.Height:
 		return ""
@@ -172,7 +172,8 @@ func downloadLadderClass(source SourceDescriptorV3, decoder downloadDecoder, cap
 	for _, class := range ladderClassesFrom(top) {
 		width, height := FitLadderBox(source.Width, source.Height, class.Height)
 		if width == 0 {
-			width, height = class.Width, class.Height
+			// An unknown width is checked as the full class box.
+			width, height = class.Width, max(height, class.Height)
 		}
 		if decoder.maxWidth > 0 && width > decoder.maxWidth || decoder.maxHeight > 0 && height > decoder.maxHeight {
 			continue
