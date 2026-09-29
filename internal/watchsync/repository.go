@@ -22,6 +22,7 @@ type Repository interface {
 	UpsertAuthSession(ctx context.Context, session DeviceAuthSession) (DeviceAuthSession, error)
 	GetAuthSession(ctx context.Context, id string) (DeviceAuthSession, error)
 	UpsertConnection(ctx context.Context, conn Connection) (Connection, error)
+	UpdateConnectionTokens(ctx context.Context, expected, updated Connection) (Connection, error)
 	GetConnection(ctx context.Context, provider string, userID int, profileID string) (Connection, bool, error)
 	GetConnectionByID(ctx context.Context, id string) (Connection, bool, error)
 	DeleteConnection(ctx context.Context, provider string, userID int, profileID string) error

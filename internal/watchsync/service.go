@@ -226,8 +226,7 @@ func (s *Service) clearWatchlistOrder(ctx context.Context, conn Connection) erro
 func (s *Service) DeleteConnection(ctx context.Context, userID int, profileID string, providerKey string) error {
 	// Wait for any rating reconciliation of the connection to end, so once a
 	// disconnect returns no run imports or sends with the removed connection.
-	// A token refresh in flight is waited for too: it saves the whole
-	// connection, which would otherwise recreate the row after the delete.
+	// Wait for an in-flight token refresh before removing its connection.
 	// Token refresh never takes the rating lock, so this order cannot deadlock.
 	// The row is read again under the locks and deleted only if it is still
 	// the one locked; a reconnect that replaced it meanwhile is locked in turn.
@@ -789,11 +788,6 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 		}
 		return completed, err
 	}
-	// An expired deferral is cleared in memory here; the first successful
-	// flow persists the cleared value through its UpsertConnection call.
-	if conn.RateLimitedUntil != nil && !conn.RateLimitedUntil.After(s.now()) {
-		conn.RateLimitedUntil = nil
-	}
 	conn, err = s.refreshConnectionIfNeeded(ctx, provider, cfg, conn)
 	if err != nil {
 		run.Status = string(SyncRunStatusFailed)
@@ -803,6 +797,11 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			return SyncRun{}, completeErr
 		}
 		return completed, err
+	}
+	// Clear an expired deferral after refresh, which reloads the connection.
+	// The first successful flow persists the cleared value.
+	if conn.RateLimitedUntil != nil && !conn.RateLimitedUntil.After(s.now()) {
+		conn.RateLimitedUntil = nil
 	}
 
 	// The first RateLimitedError stops the remaining flows: the provider
@@ -1461,7 +1460,7 @@ func (s *Service) refreshConnectionIfNeeded(ctx context.Context, provider Provid
 		if err != nil {
 			return err
 		}
-		conn = connectionWithTokens(conn, storedTokens(stored))
+		conn = stored
 		if !s.tokenNeedsRefresh(conn) {
 			return nil
 		}
@@ -1493,6 +1492,7 @@ func (s *Service) refreshConnectionTokens(ctx context.Context, provider Provider
 	if !ok {
 		return Connection{}, fmt.Errorf("provider %q does not support token refresh", conn.Provider)
 	}
+	expected := conn
 	tokens, err := authProvider.RefreshToken(ctx, cfg, conn)
 	_, authoritative := provider.(authoritativeRefreshProvider)
 	if authoritative && strings.TrimSpace(tokens.AccessToken) != "" {
@@ -1515,7 +1515,13 @@ func (s *Service) refreshConnectionTokens(ctx context.Context, provider Provider
 	}
 	credentialsReturned := authoritative && strings.TrimSpace(tokens.AccessToken) != ""
 	if err == nil || credentialsReturned || isWatchSyncInvalidCredentialError(err) {
-		persisted, persistErr := s.repo.UpsertConnection(ctx, conn)
+		var persisted Connection
+		var persistErr error
+		if conn.ID == "" {
+			persisted, persistErr = s.repo.UpsertConnection(ctx, conn)
+		} else {
+			persisted, persistErr = s.repo.UpdateConnectionTokens(ctx, expected, conn)
+		}
 		if persistErr != nil {
 			return Connection{}, fmt.Errorf("persist refreshed %s connection: %w", conn.Provider, persistErr)
 		}
@@ -1850,14 +1856,16 @@ func watchedExportBatchSize(exporter WatchedExporter, fallback int) int {
 }
 
 func reconcileHistoryExports(connectionID string, local []LocalPlay, remote []RemotePlay, precision time.Duration) []HistoryExport {
-	remoteExact := make(map[string]struct{}, len(remote))
+	remoteExact := make(map[string]int, len(remote))
 	for _, play := range remote {
-		remoteExact[remotePlayKey(play.ProviderItemKey, play.WatchedAt, precision)] = struct{}{}
+		remoteExact[remotePlayKey(play.ProviderItemKey, play.WatchedAt, precision)]++
 	}
 	exports := make([]HistoryExport, 0, len(local))
 	for _, play := range local {
 		status := historyExportStatusPending
-		if _, ok := remoteExact[remotePlayKey(play.ProviderItemKey, play.WatchedAt, precision)]; ok {
+		key := remotePlayKey(play.ProviderItemKey, play.WatchedAt, precision)
+		if remoteExact[key] > 0 {
+			remoteExact[key]--
 			status = historyExportStatusRemotePresent
 		}
 		exports = append(exports, HistoryExport{

@@ -1940,6 +1940,15 @@ cleanup deadline, and failures leave the settings unchanged. Cleanup may already
 committed if the later connection transaction fails, so the operation remains
 non-retryable and does not promise an atomic cross-store mutation.
 
+Token refresh uses a separate advisory lock per connection across API nodes. A
+waiting caller reloads the complete connection before deciding whether to refresh.
+Persistence locks the existing row and compares its account binding and previous
+credential set before updating only credentials and the connection error. A
+removed row or replaced sign-in makes the old refresh fail; refresh never
+recreates a deleted row or overwrites the new sign-in. Disconnect waits for an
+in-flight refresh before deleting the row. Concurrent preference changes, sync
+cursors, timestamps and rate-limit deferrals survive token rotation.
+
 The full connection metadata read has no ETag: provider capabilities, display labels,
 credential availability and configuration schemas may change independently of the
 connection row. The canonical settings read exists to keep that external metadata

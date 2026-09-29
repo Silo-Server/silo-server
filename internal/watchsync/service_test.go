@@ -151,6 +151,22 @@ func (r *serviceFakeRepo) GetConnection(
 	return cloneConnectionForTest(conn), ok, nil
 }
 
+func (r *serviceFakeRepo) UpdateConnectionTokens(ctx context.Context, expected, updated Connection) (Connection, error) {
+	current, ok, err := r.GetConnectionByID(ctx, expected.ID)
+	if err != nil {
+		return Connection{}, err
+	}
+	if !ok {
+		return Connection{}, ErrConnectionNotFound
+	}
+	if !connectionCredentialsMatch(current, expected) {
+		return Connection{}, ErrStaleConnection
+	}
+	current = connectionWithTokens(current, storedTokens(updated))
+	current.LastError = updated.LastError
+	return r.UpsertConnection(ctx, current)
+}
+
 func (r *serviceFakeRepo) DeferConnectionsForAccount(
 	_ context.Context,
 	provider string,
@@ -895,6 +911,7 @@ type authProviderStub struct {
 	refreshed     bool
 	refreshTokens TokenSet
 	refreshErr    error
+	beforeRefresh func(context.Context, Connection) error
 	// refreshEntered, when set, receives once RefreshToken is called, which
 	// then waits for refreshRelease: a refresh in flight at the provider.
 	refreshEntered chan<- struct{}
@@ -941,12 +958,17 @@ func (p *authProviderStub) PollDeviceAuth(
 	return TokenSet{AccessToken: testAccessToken, RefreshToken: testRefreshToken, TokenExpiresAt: &expires}, nil
 }
 
-func (p *authProviderStub) RefreshToken(context.Context, ServerConfig, Connection) (TokenSet, error) {
+func (p *authProviderStub) RefreshToken(ctx context.Context, _ ServerConfig, conn Connection) (TokenSet, error) {
 	if p.refreshEntered != nil {
 		p.refreshEntered <- struct{}{}
 		<-p.refreshRelease
 	}
 	p.refreshed = true
+	if p.beforeRefresh != nil {
+		if err := p.beforeRefresh(ctx, conn); err != nil {
+			return TokenSet{}, err
+		}
+	}
 	if p.refreshErr != nil {
 		return TokenSet{}, p.refreshErr
 	}
@@ -1855,8 +1877,106 @@ func TestServiceSyncConnectionRefreshesExpiredToken(t *testing.T) {
 	}
 }
 
-// A refresh saves the whole connection, so a disconnect that lands while one
-// is in flight must wait for it; otherwise the refresh recreates the row.
+func TestServiceTokenRefreshPreservesConcurrentConnectionChanges(t *testing.T) {
+	for _, change := range []string{"disconnect", "reconnect", "account switch", "sync state"} {
+		t.Run(change, func(t *testing.T) {
+			repo := newServiceFakeRepo()
+			now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+			conn := Connection{
+				ID: "conn-1", Provider: "trakt", UserID: 7, ProfileID: "profile-1",
+				ProviderAccountID: "old-account", AccessToken: testOldAccessToken,
+				RefreshToken: testOldRefreshToken, TokenExpiresAt: new(now.Add(-time.Minute)),
+				ExportWatchedEnabled: true, ScrobbleEnabled: true,
+			}
+			key := connectionKey(conn.Provider, conn.UserID, conn.ProfileID)
+			repo.connections[key] = conn
+			provider := &authProviderStub{refreshTokens: TokenSet{
+				AccessToken: "new-access", RefreshToken: "new-refresh", TokenExpiresAt: new(now.Add(time.Hour)),
+			}}
+			registry := NewRegistry()
+			if err := registry.Register(provider); err != nil {
+				t.Fatal(err)
+			}
+			service := NewService(repo, registry)
+			service.now = func() time.Time { return now }
+			provider.beforeRefresh = func(ctx context.Context, _ Connection) error {
+				if change == "disconnect" {
+					return repo.DeleteConnection(ctx, conn.Provider, conn.UserID, conn.ProfileID)
+				}
+				current := repo.connections[key]
+				switch change {
+				case "reconnect", "account switch":
+					current.AccessToken, current.RefreshToken = "reconnected-access", "reconnected-refresh"
+					if change == "account switch" {
+						current.ProviderAccountID = "new-account"
+					}
+				case "sync state":
+					current.SyncCursors = map[string]string{"trakt.watched": "new-cursor"}
+					current.LastOutboundSyncAt = new(now)
+					current.ScrobbleEnabled = false
+				}
+				repo.connections[key] = current
+				return nil
+			}
+			_, err := service.AccessToken(t.Context(), conn.ID)
+			current, exists := repo.connections[key]
+			switch change {
+			case "disconnect":
+				if exists || !errors.Is(err, ErrConnectionNotFound) {
+					t.Fatalf("disconnected connection restored: exists=%v err=%v", exists, err)
+				}
+			case "reconnect", "account switch":
+				if !errors.Is(err, ErrStaleConnection) || current.AccessToken != "reconnected-access" {
+					t.Fatalf("reconnected credentials overwritten: access=%q err=%v", current.AccessToken, err)
+				}
+				if change == "account switch" && current.ProviderAccountID != "new-account" {
+					t.Fatal("account switch overwritten")
+				}
+			case "sync state":
+				if err != nil || current.AccessToken != "new-access" || current.SyncCursors["trakt.watched"] != "new-cursor" || current.LastOutboundSyncAt == nil || current.ScrobbleEnabled {
+					t.Fatalf("sync state lost during refresh: connection=%+v err=%v", current, err)
+				}
+			}
+		})
+	}
+}
+
+func TestServiceTokenRefreshReloadsAccountBinding(t *testing.T) {
+	repo := newServiceFakeRepo()
+	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	conn := Connection{
+		ID: "conn-1", Provider: "trakt", UserID: 7, ProfileID: "profile-1",
+		ProviderAccountID: "old-account", AccessToken: testOldAccessToken,
+		RefreshToken: testOldRefreshToken, TokenExpiresAt: new(now.Add(-time.Minute)),
+	}
+	key := connectionKey(conn.Provider, conn.UserID, conn.ProfileID)
+	repo.connections[key] = conn
+	repo.beforeTokenRefresh = func() {
+		current := repo.connections[key]
+		current.ProviderAccountID = "new-account"
+		repo.connections[key] = current
+	}
+	provider := &authProviderStub{
+		refreshTokens: TokenSet{AccessToken: "new-access", RefreshToken: "new-refresh", TokenExpiresAt: new(now.Add(time.Hour))},
+		beforeRefresh: func(_ context.Context, current Connection) error {
+			if current.ProviderAccountID != "new-account" {
+				t.Fatalf("refresh received old account binding: %q", current.ProviderAccountID)
+			}
+			return nil
+		},
+	}
+	registry := NewRegistry()
+	if err := registry.Register(provider); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(repo, registry)
+	service.now = func() time.Time { return now }
+	if _, err := service.AccessToken(t.Context(), conn.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A disconnect waits for the refresh to finish before deleting its connection.
 func TestServiceDisconnectWaitsForAnInFlightTokenRefresh(t *testing.T) {
 	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
 	expiresAt := now.Add(-time.Minute)
