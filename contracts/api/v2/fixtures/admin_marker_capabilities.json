@@ -1,0 +1,8 @@
+{
+  "revision": "c0ca6e32dcea034aa6d04646259c515f5c390595ec2b5d75fd9bed0f9cddf31c",
+  "state": "available",
+  "allowed": true,
+  "movie_credits": true,
+  "redetect_markers": true,
+  "detection_kind_settings": true
+}

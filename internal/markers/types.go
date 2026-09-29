@@ -22,6 +22,10 @@ const (
 	SettingMode          = "markers.mode"
 	SettingLazyPlayback  = "markers.lazy_playback"
 	SettingOnlineStorage = "markers.online_storage"
+	// SettingDetectIntros and SettingDetectCredits choose which marker kinds
+	// local detection finds. Each is independent; an unset value means enabled.
+	SettingDetectIntros  = "markers.detect_intros"
+	SettingDetectCredits = "markers.detect_credits"
 )
 
 type OnlineStorage string
@@ -495,6 +499,13 @@ func ShouldRunLocal(mode Mode) bool {
 	return mode == ModeLocal || mode == ModeBoth
 }
 
+// DetectionToggleEnabled reads a markers.detect_intros or
+// markers.detect_credits value. Only an explicit false turns detection off,
+// so servers that never saved the setting keep detecting.
+func DetectionToggleEnabled(raw string) bool {
+	return strings.ToLower(strings.TrimSpace(raw)) != settingDisabled
+}
+
 func NormalizeSetting(key, value string) (string, error) {
 	switch key {
 	case SettingMode:
@@ -503,10 +514,10 @@ func NormalizeSetting(key, value string) (string, error) {
 			return "", fmt.Errorf("%w: %s must be one of off, local, online, both", ErrInvalidSetting, SettingMode)
 		}
 		return normalized, nil
-	case SettingLazyPlayback:
+	case SettingLazyPlayback, SettingDetectIntros, SettingDetectCredits:
 		normalized := strings.ToLower(strings.TrimSpace(value))
 		if normalized != settingEnabled && normalized != settingDisabled {
-			return "", fmt.Errorf("%w: %s must be true or false", ErrInvalidSetting, SettingLazyPlayback)
+			return "", fmt.Errorf("%w: %s must be true or false", ErrInvalidSetting, key)
 		}
 		return normalized, nil
 	case SettingOnlineStorage:

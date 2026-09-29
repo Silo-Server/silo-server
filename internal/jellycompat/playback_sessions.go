@@ -101,12 +101,15 @@ type PlaybackMediaSource struct {
 	TargetBitrateKbps        int
 	TargetResolution         string
 	TargetAudioChannels      int
-	ID                       string
-	FileID                   int
-	Version                  catalog.FileVersion
-	SupportsDirectPlay       bool
-	SupportsDirectStream     bool
-	SupportsTranscoding      bool
+	// TargetVideoCodec fixes encoded HLS codec during PlaybackInfo negotiation.
+	// Empty values are legacy H.264 sessions.
+	TargetVideoCodec     string
+	ID                   string
+	FileID               int
+	Version              catalog.FileVersion
+	SupportsDirectPlay   bool
+	SupportsDirectStream bool
+	SupportsTranscoding  bool
 	// HLSRemux selects HLS with video copy. TranscodeAudio remains the
 	// independent audio-encode decision, so a compatible audio codec can stay
 	// bit-for-bit copied. HLSRemuxMPEGTS overrides the normal fMP4 packaging for
@@ -117,7 +120,11 @@ type PlaybackMediaSource struct {
 	// layer (HEVC profile 5, AV1 profile 10) for a client whose device profile
 	// explicitly lists DOVI. As in Jellyfin 12, the fMP4 master playlist then
 	// offers a dvh1/dav1 variant ahead of the hvc1 fallback.
-	DOVIVariant                 bool
+	DOVIVariant bool
+	// DVStripToHDR10 marks an HLS remux that strips Dolby Vision RPUs so the
+	// client receives the HDR10 base layer it accepts in place of the Dolby
+	// Vision range type its device profile rejects.
+	DVStripToHDR10              bool
 	HLSRemuxAudioStreamIndexes  []int
 	TranscodeAudio              bool
 	DefaultAudioStreamIndex     *int

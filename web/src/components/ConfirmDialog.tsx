@@ -15,6 +15,8 @@ interface ConfirmDialogProps {
   title: string;
   description: string;
   confirmLabel?: string;
+  /** Label for the dismiss button; change it when "Cancel" would read as the action. */
+  cancelLabel?: string;
   variant?: "default" | "destructive";
   onConfirm: () => void;
   isPending?: boolean;
@@ -26,6 +28,7 @@ export function ConfirmDialog({
   title,
   description,
   confirmLabel = "Confirm",
+  cancelLabel = "Cancel",
   variant = "default",
   onConfirm,
   isPending,
@@ -38,7 +41,7 @@ export function ConfirmDialog({
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel>{cancelLabel}</AlertDialogCancel>
           <AlertDialogAction
             onClick={onConfirm}
             variant={variant === "destructive" ? "destructive" : "default"}

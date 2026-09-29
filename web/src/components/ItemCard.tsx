@@ -1,9 +1,12 @@
 import { useRef } from "react";
-import { useImageLoaded } from "@/hooks/useImageLoaded";
 import { Check, Layers } from "lucide-react";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
+import MediaCardArtwork, {
+  MEDIA_CARD_CAPTION_CLASS,
+  MEDIA_CARD_META_CLASS,
+  MEDIA_CARD_TITLE_CLASS,
+} from "@/components/MediaCardArtwork";
 import type { BrowseItem } from "@/api/types";
-import { decodeThumbhash } from "@/lib/thumbhash";
 import { timeAgo } from "@/lib/timeAgo";
 import MediaItemMenu from "@/components/MediaItemMenu";
 import CardOverlays from "@/components/overlays/CardOverlays";
@@ -190,8 +193,6 @@ export default function ItemCard({
   selected?: boolean;
   onToggleSelect?: (item: BrowseItem) => void;
 }) {
-  const { loaded, onLoad, onError } = useImageLoaded(item.poster_url);
-  const thumbhashUrl = item.poster_thumbhash ? decodeThumbhash(item.poster_thumbhash) : "";
   const itemHref = buildItemHref({ contentId: item.content_id, libraryId });
   const episodeLabels = buildEpisodeCardLabels(item);
   const displayTitle = episodeLabels ? episodeLabels.seriesTitle : item.title;
@@ -214,34 +215,14 @@ export default function ItemCard({
           aria-label={displayTitle}
           className="block overflow-hidden rounded-xl"
         >
-          <div
-            className={`media-card-image relative ${
-              item.type === "audiobook" ? "aspect-square" : "aspect-[2/3]"
-            }`}
-            style={
-              thumbhashUrl
-                ? {
-                    backgroundImage: `url(${thumbhashUrl})`,
-                    backgroundSize: "cover",
-                    backgroundPosition: "center",
-                  }
-                : undefined
-            }
+          <MediaCardArtwork
+            src={item.poster_url}
+            alt={displayTitle}
+            fallbackLabel={displayTitle}
+            thumbhash={item.poster_thumbhash}
+            square={item.type === "audiobook"}
+            scrim="background"
           >
-            {item.poster_url ? (
-              <img
-                src={item.poster_url}
-                alt={displayTitle}
-                className={`h-full w-full object-cover transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
-                onLoad={onLoad}
-                onError={onError}
-              />
-            ) : (
-              <div className="text-muted-foreground flex h-full w-full flex-col items-center justify-center gap-1 p-3 text-center text-sm">
-                <span className="line-clamp-3 font-medium">{displayTitle || "No Poster"}</span>
-              </div>
-            )}
-            <div className="from-background/70 pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t to-transparent opacity-90" />
             {item.status === "pending" && (
               <span className="glass-subtle text-foreground absolute top-2.5 left-2.5 rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-semibold tracking-[0.14em] uppercase">
                 Scanning
@@ -283,7 +264,7 @@ export default function ItemCard({
                 )}
               </div>
             )}
-          </div>
+          </MediaCardArtwork>
         </ViewTransitionLink>
         {!selectionMode && item.play_content_id ? (
           <CardPlayOverlay
@@ -331,11 +312,8 @@ export default function ItemCard({
         />
       </div>
       {showCaption ? (
-        <div className="px-1 pt-3">
-          <ViewTransitionLink
-            to={headingHref}
-            className="block truncate text-[14px] font-semibold tracking-tight hover:underline"
-          >
+        <div className={MEDIA_CARD_CAPTION_CLASS}>
+          <ViewTransitionLink to={headingHref} className={MEDIA_CARD_TITLE_CLASS}>
             {displayTitle}
           </ViewTransitionLink>
           {showMetadata && episodeLabels?.episodeTitle ? (
@@ -347,10 +325,7 @@ export default function ItemCard({
             </ViewTransitionLink>
           ) : null}
           {showMetadata ? (
-            <ViewTransitionLink
-              to={itemHref}
-              className="text-muted-foreground mt-1 block truncate text-[11px] font-medium tracking-[0.14em] uppercase hover:underline"
-            >
+            <ViewTransitionLink to={itemHref} className={MEDIA_CARD_META_CLASS}>
               <SortMeta item={item} sortField={sortField} />
             </ViewTransitionLink>
           ) : null}

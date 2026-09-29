@@ -322,10 +322,11 @@ func (s *directContentService) ListUserLibraries(ctx context.Context, session *S
 			continue
 		}
 		lib := upstreamUserLibrary{
-			ID:         f.ID,
-			Name:       f.Name,
-			Type:       f.Type,
-			PosterPath: f.PosterPath,
+			ID:                 f.ID,
+			Name:               f.Name,
+			Type:               f.Type,
+			PosterPath:         f.PosterPath,
+			RealtimeMonitoring: f.RealtimeMonitoring,
 		}
 		if f.PosterPath != "" && s.posterPresigner != nil {
 			ttl := s.presignTTL
@@ -1492,6 +1493,7 @@ func itemDetailToUpstream(d *catalog.ItemDetail) upstreamItemDetail {
 	detail.SubtitleModeSet = d.HasEffectiveSubtitleMode
 	// playback.show_forced_subtitles defaults to true.
 	detail.ShowForcedSubtitles = !d.HasEffectiveShowForcedSubtitles || d.EffectiveShowForcedSubtitles
+	detail.SubtitleTrackSignature = d.EffectiveSubtitleTrackSignature
 	return detail
 }
 

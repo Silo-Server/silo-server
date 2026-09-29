@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 11,
+  "revision": 13,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -850,7 +850,8 @@
       "label": "Theme",
       "description": "Colour theme for the Silo interface.",
       "recommended_control": "select",
-      "notes": "Renamed from the unregistered legacy key \"ui_theme\", which the extension bag accepted without validation. Moved from account to profile scope: appearance is per household member, and the account row is copied to every profile during migration. Carries a device override because the right theme is partly a function of the screen and the room — a light theme on a phone in daylight, a dark one on a TV at night — which is the same reasoning that gives ui.text_scale one. Note that ui.custom_theme_vars and ui.custom_css stay profile-wide, so a profile's custom styling still applies on top of a device's theme override. Adding a theme is an additive enum widening. The admin-set default theme stays in server_settings and is not a user setting. Migration must also update internal/plugins/user_theme_lookup.go, which reads this value with raw SQL bound to both the old name and the account scope (SELECT value FROM user_settings WHERE user_id = $1 AND key = 'ui_theme') and feeds the X-Silo-Theme header on every plugin request. Left alone, that query matches nothing after the rename and every plugin UI silently falls back to its own theme, with no error to notice."
+      "deprecated": true,
+      "notes": "Deprecated in revision 12: the web client has one theme, Cinema Dark, which only the admin customizes (accent color plus the ui.admin_theme_vars and ui.admin_custom_css server settings), and it no longer reads or writes this key. Web-only (platforms: web). Stored values were deleted by migration 20260926233851_retire_profile_themes (SQLite user store schema v29). The definition stays published so a stale cached web bundle's write is accepted rather than failing; nothing reads what it stores. Renamed from the unregistered legacy key \"ui_theme\" at the settings cutover."
     },
     {
       "key": "ui.text_scale",
@@ -928,7 +929,8 @@
       "label": "Custom theme variables",
       "description": "Per-token overrides applied on top of the selected theme.",
       "recommended_control": "panel",
-      "notes": "Renamed from the unregistered legacy key \"ui_custom_theme_vars\", which stored arbitrary unvalidated JSON."
+      "deprecated": true,
+      "notes": "Deprecated in revision 12: the web client has one theme, Cinema Dark, which only the admin customizes (accent color plus the ui.admin_theme_vars and ui.admin_custom_css server settings), and it no longer reads or writes this key. Web-only (platforms: web). Stored values were deleted by migration 20260926233851_retire_profile_themes (SQLite user store schema v29). The definition stays published so a stale cached web bundle's write is accepted rather than failing; nothing reads what it stores. Renamed from the unregistered legacy key \"ui_custom_theme_vars\", which stored arbitrary unvalidated JSON."
     },
     {
       "key": "ui.custom_css",
@@ -943,7 +945,8 @@
       "label": "Custom CSS",
       "description": "Raw CSS applied on top of the selected theme.",
       "recommended_control": "text",
-      "notes": "Renamed from the unregistered legacy key \"ui_custom_css\". Sanitization stays in the web client (web/src/lib/cssSanitizer.ts); the contract only bounds length. This value is per-profile and is never applied to another profile's session."
+      "deprecated": true,
+      "notes": "Deprecated in revision 12: the web client has one theme, Cinema Dark, which only the admin customizes (accent color plus the ui.admin_theme_vars and ui.admin_custom_css server settings), and it no longer reads or writes this key. Web-only (platforms: web). Stored values were deleted by migration 20260926233851_retire_profile_themes (SQLite user store schema v29). The definition stays published so a stale cached web bundle's write is accepted rather than failing; nothing reads what it stores. Renamed from the unregistered legacy key \"ui_custom_css\". The contract only bounds length."
     },
     {
       "key": "ui.date_format",
@@ -987,6 +990,20 @@
       "description": "How clock times are written across the interface.",
       "recommended_control": "select",
       "notes": "Moved from account to profile scope; the account row is copied to every profile during migration."
+    },
+    {
+      "key": "home.hide_watched_items",
+      "introduced_in": 12,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": false,
+      "platforms": ["web", "ios", "tvos", "macos", "android", "android_tv"],
+      "category": "navigation",
+      "label": "Hide watched items from Home",
+      "description": "Remove watched items from ordinary Home sections while keeping Featured and watch-history sections unchanged.",
+      "recommended_control": "switch"
     },
     {
       "key": "ui.library_page_state",
@@ -1057,7 +1074,7 @@
       "category": "appearance",
       "label": "Poster badges",
       "description": "Which badges appear on poster cards, and where.",
-      "notes": "Registered from the legacy unprefixed key card_overlays, which reached the server only through the unknown-key extension bag — stored as an arbitrary string with no validation. null means the user has expressed no preference, which is what lets the server-wide admin default in the overlay-config endpoint apply; writing a resolved-but-unchosen value would silently pin them. The server-wide default configuration stays in server_settings and is not a user setting. This key describes which badges to show, not whether to show them — that is ui.card_overlays_enabled."
+      "notes": "Registered from the legacy unprefixed key card_overlays, which reached the server only through the unknown-key extension bag — stored as an arbitrary string with no validation. null means the user has expressed no preference, which is what lets the server-wide admin default in the overlay-config endpoint apply; writing a resolved-but-unchosen value would silently pin them. The server-wide default configuration stays in server_settings and is not a user setting. This key describes which badges to show, not whether to show them — that is ui.card_overlays_enabled. Revision 13 adds the advisory_age overlay id; a server below revision 13 rejects a value that contains it, so a client offers that badge only when manifest_revision is at least 13."
     },
     {
       "key": "ui.card_overlays_enabled",

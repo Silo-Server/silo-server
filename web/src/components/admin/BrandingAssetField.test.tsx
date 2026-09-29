@@ -34,27 +34,6 @@ describe("BrandingAssetField", () => {
     expect(screen.getByRole("button", { name: /Upload/ })).toBeInTheDocument();
   });
 
-  it("previews the main asset an empty light slot actually falls back to", () => {
-    render(
-      <BrandingAssetField
-        label="Logo (wordmark, light themes)"
-        kind="wordmark_light"
-        currentUrl={null}
-        fallbackUrl="/custom/wordmark.webp"
-        accept="image/png"
-        enabled
-        previewBg="light"
-      />,
-    );
-
-    // The spec has no bundled light asset; what visitors see is the main
-    // logo, so that is what the empty slot must preview.
-    const preview = screen.getByAltText("Logo (wordmark, light themes) preview");
-    expect(preview).toHaveAttribute("src", "/custom/wordmark.webp");
-    expect(preview.className).toContain("opacity-40");
-    expect(screen.getByText("Falls back to the main logo")).toBeInTheDocument();
-  });
-
   it("labels the empty login background as the theme gradient instead of an image", () => {
     render(
       <BrandingAssetField

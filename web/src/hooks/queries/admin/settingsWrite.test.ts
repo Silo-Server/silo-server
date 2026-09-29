@@ -243,3 +243,29 @@ it.each([false, true])(
     expect(result.current.dirtyCount).toBe(competitor ? 1 : 0);
   },
 );
+it("refreshes the link capabilities when the public URL changes", async () => {
+  const fetchMock = vi
+    .fn()
+    .mockImplementation(async (_url, init) =>
+      init?.method === "PUT"
+        ? response({ values: {}, restart_required: false })
+        : response({ "server.public_url": "" }),
+    );
+  vi.stubGlobal("fetch", fetchMock);
+  const { client, wrapper } = fixture();
+  const capabilitiesKey = ["admin", "users", "scope", "capabilities"];
+  const listKey = ["admin", "users", "scope"];
+  client.setQueryData(capabilitiesKey, { password_reset_link: false });
+  client.setQueryData(listKey, []);
+  client.setQueryData(["auth", "password-reset-capability"], { state: "unavailable" });
+  const { result } = renderHook(
+    () => ({ read: useAdminServerSettings(), write: useUpdateServerSettings() }),
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.read.isSuccess).toBe(true));
+  act(() => result.current.write.mutate({ "server.public_url": "https://media.example.test" }));
+  await waitFor(() => expect(result.current.write.isSuccess).toBe(true));
+  expect(client.getQueryState(capabilitiesKey)?.isInvalidated).toBe(true);
+  expect(client.getQueryState(listKey)?.isInvalidated).toBe(false);
+  expect(client.getQueryState(["auth", "password-reset-capability"])?.isInvalidated).toBe(true);
+});

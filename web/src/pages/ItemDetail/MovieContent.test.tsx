@@ -41,6 +41,8 @@ const mocks = vi.hoisted(() => {
     useIsInWatchlist: vi.fn(),
     useToggleWatchlist: vi.fn(),
     useRefreshItemMetadata: vi.fn(),
+    useRedetectItemMarkers: vi.fn(),
+    useAdminMarkerCapabilities: vi.fn(),
     useWatchedStateMutation: vi.fn(),
     useRating: vi.fn(),
     useSetRating: vi.fn(),
@@ -69,8 +71,13 @@ vi.mock("@/hooks/queries/watchlist", () => ({
   useToggleWatchlist: mocks.useToggleWatchlist,
 }));
 
+vi.mock("@/hooks/queries/admin/markers", () => ({
+  useAdminMarkerCapabilities: mocks.useAdminMarkerCapabilities,
+}));
+
 vi.mock("@/hooks/queries/items", () => ({
   useRefreshItemMetadata: mocks.useRefreshItemMetadata,
+  useRedetectItemMarkers: mocks.useRedetectItemMarkers,
   useWatchedStateMutation: mocks.useWatchedStateMutation,
 }));
 
@@ -127,6 +134,10 @@ vi.mock("@/components/EditMetadataDialog", () => ({
 }));
 
 vi.mock("@/components/MatchItemDialog", () => ({
+  default: () => <div />,
+}));
+
+vi.mock("@/components/SplitItemDialog", () => ({
   default: () => <div />,
 }));
 
@@ -249,6 +260,8 @@ describe("MovieContent", () => {
     mocks.useIsInWatchlist.mockReturnValue({ data: false });
     mocks.useToggleWatchlist.mockReturnValue({ mutate: vi.fn() });
     mocks.useRefreshItemMetadata.mockReturnValue({ mutate: vi.fn(), isPending: false });
+    mocks.useRedetectItemMarkers.mockReturnValue({ mutate: vi.fn(), isPending: false });
+    mocks.useAdminMarkerCapabilities.mockReturnValue({ data: undefined });
     mocks.useWatchedStateMutation.mockReturnValue({ mutate: vi.fn(), isPending: false });
     mocks.useRating.mockReturnValue({ data: { rating: 4, rated_at: "2026-03-22T00:00:00Z" } });
     mocks.useSetRating.mockReturnValue({ mutate: vi.fn() });
@@ -393,5 +406,62 @@ describe("MovieContent", () => {
       canCurateMetadata: false,
       canEditMarkers: true,
     });
+  });
+
+  it("passes credits re-detection only for admins", () => {
+    const redetect = vi.fn();
+    mocks.useAuth.mockReturnValue({ user: { role: "admin" } });
+    mocks.useRedetectItemMarkers.mockReturnValue({ mutate: redetect, isPending: false });
+    mocks.useAdminMarkerCapabilities.mockReturnValue({
+      data: { redetect_markers: true, movie_credits: true },
+    });
+
+    renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/item/movie-1"]}>
+        <MovieContent item={makeMovieItem()} />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.capturedActionBarProps.value).toMatchObject({
+      isAdmin: true,
+      redetectKind: "credits",
+      isRedetectingMarkers: false,
+    });
+    const onRedetectMarkers = mocks.capturedActionBarProps.value?.onRedetectMarkers;
+    expect(typeof onRedetectMarkers).toBe("function");
+    (onRedetectMarkers as (kind: string) => void)("credits");
+    expect(redetect).toHaveBeenCalledWith({ itemId: "movie-1", kind: "credits" });
+
+    mocks.useAuth.mockReturnValue({ user: null });
+    renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/item/movie-1"]}>
+        <MovieContent item={makeMovieItem()} />
+      </MemoryRouter>,
+    );
+    expect(mocks.capturedActionBarProps.value?.onRedetectMarkers).toBeUndefined();
+  });
+
+  it.each([
+    ["a pending capability read", { data: undefined }],
+    ["a failed capability read", { data: undefined, isError: true }],
+    ["a node without redetect_markers", { data: { movie_credits: true } }],
+    [
+      "a node with redetect_markers off",
+      { data: { redetect_markers: false, movie_credits: true } },
+    ],
+    ["a node without movie_credits", { data: { redetect_markers: true } }],
+    ["a node with movie_credits off", { data: { redetect_markers: true, movie_credits: false } }],
+  ])("offers no credits re-detection for %s", (_label, capability) => {
+    mocks.useAuth.mockReturnValue({ user: { role: "admin" } });
+    mocks.useAdminMarkerCapabilities.mockReturnValue(capability);
+
+    renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/item/movie-1"]}>
+        <MovieContent item={makeMovieItem()} />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.capturedActionBarProps.value?.isAdmin).toBe(true);
+    expect(mocks.capturedActionBarProps.value?.onRedetectMarkers).toBeUndefined();
   });
 });

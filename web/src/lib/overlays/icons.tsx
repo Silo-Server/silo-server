@@ -14,6 +14,7 @@ import {
   Star,
   Subtitles,
   Tv,
+  Users,
   Volume2,
   type LucideIcon,
 } from "lucide-react";
@@ -38,6 +39,7 @@ const LUCIDE_ICONS: Partial<Record<OverlayIconId, LucideIcon>> = {
   volume: Volume2,
   calendar: Calendar,
   globe: Globe,
+  users: Users,
 };
 
 // Inline brand marks. Each is a tiny SVG component that fills currentColor so

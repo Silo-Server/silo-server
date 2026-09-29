@@ -77,10 +77,11 @@ func (h *WatchProviderHandler) HandleUpdateConnection(w http.ResponseWriter, r *
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	// Rating sync settings exist only on /api/v2; the frozen v1 contract keeps
-	// its original settings.
+	// Rating and dropped-show sync settings exist only on /api/v2; the frozen
+	// v1 contract keeps its original settings.
 	update.ImportRatingsEnabled = nil
 	update.ExportRatingsEnabled = nil
+	update.SyncDroppedEnabled = nil
 	status, err := h.service.UpdateConnection(r.Context(), userID, profileID, provider, update)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "watch_provider_error", err.Error())

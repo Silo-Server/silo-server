@@ -2,7 +2,7 @@ import { V2ProblemError } from "@/api/v2/request";
 import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 // @vitest-environment jsdom
 
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   updateUserMutate: vi.fn(),
   getReads: 0,
   impersonate: vi.fn(),
+  transfer: vi.fn(),
   beginImpersonation: vi.fn(),
   updateSettingMutate: vi.fn(),
   deleteSettingMutate: vi.fn(),
@@ -69,7 +70,7 @@ const adminUser: AdminUser = {
     transcode_allowed: true,
     audio_transcode_allowed: true,
     download_allowed: true,
-    download_transcode_allowed: true,
+    download_transcode_allowed: false,
     requests_allowed: true,
     permissions: [],
   },
@@ -114,7 +115,10 @@ vi.mock("@/api/v2/adminUsers", async (importOriginal) => ({
 }));
 vi.mock("@/hooks/queries/admin/users", () => ({
   useViewerIsOwner: () => mocks.viewerIsOwner,
-  useAdminUserCapabilities: () => ({ data: { available: true, default_profile: true } }),
+  useTransferOwnership: () => ({ mutate: mocks.transfer, isPending: false }),
+  useAdminUserCapabilities: () => ({
+    data: { available: true, default_profile: true, ownership_transfer: true },
+  }),
   useAdminUser: () => ({
     data: mocks.user ?? undefined,
     isLoading: false,
@@ -186,6 +190,15 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
   useAdminLibraries: () => ({ data: [] }),
 }));
 
+// The Requests section reads through react-query; its own test covers it.
+vi.mock("./admin-users/AccountRequestsPanel", () => ({
+  AccountRequestsPanel: ({ user, groupName }: { user: AdminUser; groupName?: string }) => (
+    <section aria-label="Requests">
+      Requests for {user.username} in {groupName ?? "no group"}
+    </section>
+  ),
+}));
+
 vi.mock("@/hooks/queries/admin/history", () => ({
   useAdminUserProfiles: () => ({ data: [], isLoading: false }),
   useAdminPlaybackHistory: () => ({ data: { entries: [] }, isLoading: false }),
@@ -218,6 +231,7 @@ beforeEach(() => {
   mocks.updateUserMutate.mockReset();
   mocks.getReads = 0;
   mocks.impersonate.mockReset();
+  mocks.transfer.mockReset();
   mocks.beginImpersonation.mockReset();
   mocks.updateSettingMutate.mockReset();
   mocks.deleteSettingMutate.mockReset();
@@ -258,6 +272,8 @@ describe("AdminUserDetail access group picker", () => {
   });
 
   it("clears the group when the account is promoted to admin", async () => {
+    // Only the server Owner may promote an account or edit another admin.
+    mocks.viewerIsOwner = true;
     const user = userEvent.setup();
     mocks.user = { ...adminUser, access_group_id: 5 };
     renderUserDetail();
@@ -274,6 +290,8 @@ describe("AdminUserDetail access group picker", () => {
   });
 
   it("keeps the picked group when the role is toggled to admin and back", async () => {
+    // Only the server Owner may promote an account or edit another admin.
+    mocks.viewerIsOwner = true;
     const user = userEvent.setup();
     renderUserDetail();
 
@@ -471,6 +489,94 @@ async function selectGuestsGroup(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("AdminUserDetail inherit hints", () => {
+  it("uses the saved account's resolved policy when the group list is stale", async () => {
+    const user = userEvent.setup();
+    mocks.user = {
+      ...adminUser,
+      access_group_id: 5,
+      effective_policy: {
+        ...adminUser.effective_policy,
+        max_remote_stream_bitrate_kbps: 30_720,
+      },
+    };
+    renderUserDetail();
+
+    await openLimitsTab(user);
+
+    expect(screen.getByText("Inherited: 30.72 Mbps")).toBeInTheDocument();
+  });
+
+  it("uses the group policy after clearing an account override", async () => {
+    const user = userEvent.setup();
+    mocks.user = {
+      ...adminUser,
+      access_group_id: 5,
+      max_remote_stream_bitrate_kbps: 2_000,
+      effective_policy: {
+        ...adminUser.effective_policy,
+        max_remote_stream_bitrate_kbps: 2_000,
+      },
+    };
+    renderUserDetail();
+
+    await openLimitsTab(user);
+    await user.click(overrideSwitch(2));
+
+    expect(screen.getByText("Inherited: 8 Mbps")).toBeInTheDocument();
+    expect(screen.queryByText("Inherited: 2 Mbps")).not.toBeInTheDocument();
+  });
+
+  it("omits the hint for a cleared override when the group is not loaded", async () => {
+    const user = userEvent.setup();
+    mocks.user = {
+      ...adminUser,
+      access_group_id: 99,
+      max_remote_stream_bitrate_kbps: 2_000,
+      effective_policy: {
+        ...adminUser.effective_policy,
+        max_remote_stream_bitrate_kbps: 2_000,
+      },
+    };
+    renderUserDetail();
+
+    await openLimitsTab(user);
+    await user.click(overrideSwitch(2));
+
+    expect(screen.getByText("Inherited from group")).toBeInTheDocument();
+    expect(screen.queryByText("Inherited: 2 Mbps")).not.toBeInTheDocument();
+  });
+
+  it("omits unknown library and quality values when clearing overrides", async () => {
+    const user = userEvent.setup();
+    mocks.user = {
+      ...adminUser,
+      access_group_id: 99,
+      library_ids: [],
+      max_playback_quality: "1080p",
+      effective_policy: {
+        ...adminUser.effective_policy,
+        library_ids: [],
+        max_playback_quality: "1080p",
+      },
+    };
+    renderUserDetail();
+
+    await user.click(screen.getByRole("button", { name: /edit/i }));
+    await user.click(screen.getByRole("tab", { name: "Access" }));
+    const libraryControl = within(screen.getByRole("dialog")).getByText(
+      "Library Access",
+    ).parentElement!;
+    await user.click(within(libraryControl).getByRole("switch"));
+    expect(screen.getByText("Inherited from group")).toBeInTheDocument();
+    expect(screen.queryByText("Inherited: All libraries")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Limits" }));
+    const quality = screen.getByRole("combobox", { name: "Max Playback Quality" });
+    await user.click(quality);
+    await user.click(await screen.findByRole("option", { name: "Inherited from group" }));
+    expect(quality).toHaveTextContent("Inherited from group");
+  });
+
   it("derives hints from the group selected in the dialog, on both tabs", async () => {
     const user = userEvent.setup();
     renderUserDetail();
@@ -538,6 +644,8 @@ describe("AdminUserDetail inherit hints", () => {
   });
 
   it("labels an admin's defaults as admin defaults, never as inherited", async () => {
+    // Only the server Owner may promote an account or edit another admin.
+    mocks.viewerIsOwner = true;
     const user = userEvent.setup();
     mocks.user = { ...adminUser, role: "admin" };
     renderUserDetail();
@@ -556,6 +664,8 @@ describe("AdminUserDetail inherit hints", () => {
   });
 
   it("follows the role and group pickers from admin default to inherited", async () => {
+    // Only the server Owner may promote an account or edit another admin.
+    mocks.viewerIsOwner = true;
     const user = userEvent.setup();
     mocks.user = { ...adminUser, role: "admin" };
     renderUserDetail();
@@ -676,6 +786,17 @@ describe("AdminUserDetail effective values", () => {
     renderUserDetail();
 
     expect(rowValue("Audio Transcodes")).toBe("Not allowed");
+  });
+
+  it("shows the Requests section with the account's group", () => {
+    mocks.user = { ...adminUser, access_group_id: 3 };
+    renderUserDetail();
+
+    expect(screen.getByRole("region", { name: "Requests" })).toHaveTextContent(
+      "Requests for taylor in Kids",
+    );
+    // The requests switch stays with the account's other effective values.
+    expect(rowValue("Media Requests")).toBe("Allowed");
   });
 });
 
@@ -860,11 +981,88 @@ describe("AdminUserDetail server owner", () => {
     mocks.user = { ...adminUser, role: "admin", is_owner: true };
     mocks.viewer = { id: 99 };
     renderUserDetail();
-    expect(await screen.findByText("Owner")).toBeInTheDocument();
+    // The header badge and the Account panel both show "owner" in place of "admin".
+    expect(await screen.findAllByText("owner")).toHaveLength(2);
+    expect(screen.queryByText("admin")).toBeNull();
     expect(screen.getByText(/Only the owner can change this account/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Edit/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: "View as user" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: /Reset password/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+  });
+
+  it("keeps an admin other than the owner from changing another admin", async () => {
+    mocks.user = { ...adminUser, role: "admin" };
+    mocks.viewer = { id: 99 };
+    renderUserDetail();
+    expect(
+      await screen.findByText("Only the server owner can change another admin account."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Edit/ })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /Reset password/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Make owner" })).toBeNull();
+  });
+
+  it("lets the owner make another enabled admin the owner", async () => {
+    const user = userEvent.setup();
+    mocks.user = { ...adminUser, role: "admin" };
+    mocks.viewerIsOwner = true;
+    renderUserDetail();
+    await user.click(await screen.findByRole("button", { name: "Make owner" }));
+    await user.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Make owner" }),
+    );
+    expect(mocks.transfer).toHaveBeenCalledWith(
+      expect.objectContaining({ id: adminUser.id }),
+      expect.anything(),
+    );
+    // Confirming closes the dialog, so a stale confirmation cannot send a
+    // second transfer.
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  });
+
+  it("offers ownership only for an enabled admin", () => {
+    mocks.viewerIsOwner = true;
+    mocks.user = { ...adminUser, role: "user" };
+    renderUserDetail();
+    expect(screen.queryByRole("button", { name: "Make owner" })).toBeNull();
+    cleanup();
+    mocks.user = { ...adminUser, role: "admin", enabled: false };
+    renderUserDetail();
+    expect(screen.queryByRole("button", { name: "Make owner" })).toBeNull();
+  });
+
+  it("offers an admin other than the owner no admin role", async () => {
+    const user = userEvent.setup();
+    mocks.user = { ...adminUser, role: "user" };
+    renderUserDetail();
+    await user.click(screen.getByRole("button", { name: /edit/i }));
+    await user.click(screen.getByRole("combobox", { name: "Role" }));
+    expect(await screen.findByRole("option", { name: "Admin" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    expect(screen.getByText("Only the server owner can grant the admin role.")).toBeInTheDocument();
+  });
+
+  it("keeps an admin from changing its own role or disabling itself", async () => {
+    const user = userEvent.setup();
+    mocks.user = { ...adminUser, role: "admin" };
+    mocks.viewer = { id: adminUser.id };
+    renderUserDetail();
+    await user.click(screen.getByRole("button", { name: /edit/i }));
+    expect(screen.getByRole("combobox", { name: "Role" })).toBeDisabled();
+    expect(screen.getByText("You can't change your own role.")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Enabled" })).toBeDisabled();
+    expect(screen.getByText("You can't disable your own account.")).toBeInTheDocument();
+  });
+
+  it("offers no Delete on the viewer's own account", async () => {
+    mocks.user = { ...adminUser, role: "admin" };
+    mocks.viewer = { id: adminUser.id };
+    renderUserDetail();
+    expect(await screen.findByRole("button", { name: /Edit/ })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
   });
 

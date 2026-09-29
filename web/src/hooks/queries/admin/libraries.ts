@@ -25,6 +25,7 @@ import {
   librariesFromV2,
   libraryCreateToV2,
   libraryFromV2,
+  libraryRealtimeMonitoringFromV2,
   libraryRootFromV2,
   metadataMatchQueueStatusFromV2,
   mountCheckFromV2,
@@ -95,6 +96,35 @@ export function useAdminLibraries() {
     queryKey: adminKeys.libraries(),
     queryFn: ({ signal }) => fetchAdminLibraries(signal),
     staleTime: ADMIN_STALE_TIME,
+  });
+}
+
+/**
+ * Per-library real-time monitoring status. Only the admin library screens
+ * read it. A node refreshes its report every minute and writes a state change
+ * immediately, so the query polls while the page is active. Library create,
+ * update, and delete invalidate it through the shared admin libraries prefix.
+ */
+export function useLibraryRealtimeMonitoring() {
+  const pageActivity = usePageActivity();
+
+  return useQuery({
+    queryKey: adminKeys.libraryRealtimeMonitoring(),
+    queryFn: ({ signal }) =>
+      v2("GET /api/v2/libraries/realtime-monitoring", { signal }).then(
+        libraryRealtimeMonitoringFromV2,
+      ),
+    staleTime: 0,
+    refetchInterval: pageActivity.canApplyRealtimeUpdates ? 30_000 : false,
+  });
+}
+
+/** Library feature detection; `realtime_monitoring` says the server offers the status above. */
+export function useLibraryCapabilities() {
+  return useQuery({
+    queryKey: adminKeys.libraryCapabilities(),
+    queryFn: ({ signal }) => v2("GET /api/v2/libraries/capabilities", { signal }),
+    staleTime: Infinity,
   });
 }
 

@@ -5,12 +5,20 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/auth"
 )
 
 var ErrInvalidAccessGroup = errors.New("invalid access group configuration")
 var ErrAccessGroupUnavailable = errors.New("access group administration unavailable")
+
+// memberMovingGroupStore deletes a group after moving its members into the
+// default group in the same transaction (access.GroupStore).
+type memberMovingGroupStore interface {
+	DeleteMovingMembers(context.Context, int64, access.GroupPrecondition, func(context.Context, pgx.Tx, []int) error) ([]int, error)
+}
 
 type guardedAccessGroupStore interface {
 	ListPage(context.Context, *access.GroupPageKey, int) ([]access.Group, bool, error)
@@ -54,12 +62,30 @@ func (h *AccessGroupHandler) UpdateAdminAccessGroup(ctx context.Context, id int6
 	}
 	return s.UpdateConditional(ctx, id, in, guard)
 }
+
+// DeleteAdminAccessGroup deletes a group. Its members move into the default
+// group in the same transaction and are signed out, as a single-user group
+// change signs the user out, so no regular account is left without a group.
 func (h *AccessGroupHandler) DeleteAdminAccessGroup(ctx context.Context, id int64, guard access.GroupPrecondition) error {
 	s, ok := guardedGroupStore(h)
 	if !ok {
 		return ErrAccessGroupUnavailable
 	}
-	return s.DeleteConditional(ctx, id, guard)
+	mover, ok := h.store.(memberMovingGroupStore)
+	if !ok {
+		return s.DeleteConditional(ctx, id, guard)
+	}
+	// Set-based, so the group-writer lock is not held for per-member statements.
+	moved, err := mover.DeleteMovingMembers(ctx, id, guard, auth.RevokeSignInsForUsersInTransaction)
+	if err != nil {
+		return err
+	}
+	if h.OnUserSessionsRevoked != nil {
+		for _, userID := range moved {
+			h.OnUserSessionsRevoked(ctx, userID)
+		}
+	}
+	return nil
 }
 func normalizeAdminGroupInput(in *access.UpdateGroupInput) error {
 	if in.Name != nil {

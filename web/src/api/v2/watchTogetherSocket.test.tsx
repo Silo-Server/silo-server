@@ -184,6 +184,53 @@ it("gets a fresh ticket after socket close and preserves ping/message callbacks"
   expect(fetch).toHaveBeenCalledTimes(2);
   expect(RoomSocket.all[1]!.protocols[1]).toBe(`silo.ticket.${"b".repeat(43)}`);
 });
+it("drops a transport command with the socket that delivered it", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ticket()),
+  );
+  const view = renderHook(() =>
+    useWatchTogetherRoomConnection({ roomId: "room", roomToken: "room-proof" }),
+  );
+  await waitFor(() => expect(RoomSocket.all.length).toBe(1));
+  const old = RoomSocket.all[0]!;
+  act(() => old.open());
+  act(() => old.message({ type: "transport_command", command: { command_id: "old" } }));
+  expect(view.result.current.transportCommand?.command_id).toBe("old");
+
+  act(() => old.close());
+  expect(view.result.current.transportCommand).toBeNull();
+
+  // The reconnected socket carries only what the server sends on it.
+  await waitFor(() => expect(RoomSocket.all.length).toBe(2));
+  const current = RoomSocket.all[1]!;
+  act(() => current.open());
+  expect(view.result.current.connectionState).toBe("connected");
+  expect(view.result.current.transportCommand).toBeNull();
+  act(() => current.message({ type: "transport_command", command: { command_id: "new" } }));
+  expect(view.result.current.transportCommand?.command_id).toBe("new");
+});
+it("drops a transport command when a new authority replaces the socket", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ticket()),
+  );
+  const view = renderHook(() =>
+    useWatchTogetherRoomConnection({ roomId: "room", roomToken: "room-proof" }),
+  );
+  await waitFor(() => expect(RoomSocket.all.length).toBe(1));
+  const old = RoomSocket.all[0]!;
+  act(() => old.open());
+  act(() => old.message({ type: "transport_command", command: { command_id: "old" } }));
+  expect(view.result.current.transportCommand?.command_id).toBe("old");
+
+  setProfileToken("pin-B");
+  view.rerender();
+  await waitFor(() => expect(RoomSocket.all.length).toBe(2));
+  act(() => RoomSocket.all[1]!.open());
+  expect(view.result.current.connectionState).toBe("connected");
+  expect(view.result.current.transportCommand).toBeNull();
+});
 it("stops replacement reconnects before close, keeps the room, and rejoins only on request", async () => {
   vi.useFakeTimers();
   const fetch = vi.fn(async () => ticket());

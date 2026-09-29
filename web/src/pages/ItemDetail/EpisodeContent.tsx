@@ -9,7 +9,12 @@ import { useAuth } from "@/hooks/useAuth";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useOnViewTranslation } from "@/hooks/useOnViewTranslation";
-import { useRedetectEpisodeIntro, useRefreshItemMetadata } from "@/hooks/queries/items";
+import {
+  useRedetectEpisodeIntro,
+  useRedetectItemMarkers,
+  useRefreshItemMetadata,
+} from "@/hooks/queries/items";
+import { useAdminMarkerCapabilities } from "@/hooks/queries/admin/markers";
 import CastCarousel from "@/components/CastCarousel";
 import CrewList from "@/components/CrewList";
 import DownloadVersionPicker from "@/components/DownloadVersionPicker";
@@ -65,7 +70,12 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
   const [mediaInfoOpen, setMediaInfoOpen] = useState(false);
   const [mediaInfoFileId, setMediaInfoFileId] = useState<number | null>(null);
   const refreshMetadataMutation = useRefreshItemMetadata();
+  const redetectMarkersMutation = useRedetectItemMarkers({ introFallback: true });
   const redetectIntroMutation = useRedetectEpisodeIntro();
+  // An API node without redetect-markers (rolling deploy, rollback) keeps the
+  // older intro-only re-detection.
+  const markerCapabilities = useAdminMarkerCapabilities(isAdmin);
+  const canRedetectMarkers = markerCapabilities.data?.redetect_markers === true;
   const deleteSubtitlePreference = useDeleteSubtitlePreference();
   const setSubtitlePreference = useSetSubtitlePreference();
 
@@ -367,10 +377,17 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
                   : undefined
               }
               isRefreshing={refreshMetadataMutation.isPending}
-              onRedetectIntro={
-                isAdmin ? () => redetectIntroMutation.mutate(item.content_id) : undefined
+              onRedetectMarkers={
+                !isAdmin
+                  ? undefined
+                  : canRedetectMarkers
+                    ? (kind) => redetectMarkersMutation.mutate({ itemId: item.content_id, kind })
+                    : () => redetectIntroMutation.mutate(item.content_id)
               }
-              isRedetectingIntro={redetectIntroMutation.isPending}
+              redetectKind={canRedetectMarkers ? undefined : "intro"}
+              isRedetectingMarkers={
+                redetectMarkersMutation.isPending || redetectIntroMutation.isPending
+              }
               isAdmin={isAdmin}
               canCurateMetadata={canCurateMetadata}
               canEditMarkers={canEditMarkers}

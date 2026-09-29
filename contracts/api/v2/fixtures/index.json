@@ -423,6 +423,26 @@
       "body_file": "admin_account_settings.json"
     },
     {
+      "name": "admin_account_transfer_ownership",
+      "operation_id": "transferAdminUserOwnership",
+      "scenario": "Administrator account and group management with synthetic records.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/users/7/transfer-ownership",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 204,
+      "response_headers": {
+        "Cache-Control": "no-store"
+      },
+      "response_media_type": null,
+      "schema": null,
+      "body_file": null
+    },
+    {
       "name": "admin_account_update",
       "operation_id": "updateAdminUser",
       "scenario": "Administrator account and group management with synthetic records.",
@@ -1318,6 +1338,46 @@
       "body_file": "admin_item_images.json"
     },
     {
+      "name": "admin_item_markers_redetect",
+      "operation_id": "redetectAdminItemMarkers",
+      "scenario": "Marker re-detection reruns local detection of the requested kinds.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/items/episode-1/redetect-markers",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{\"kind\":\"credits\"}"
+      },
+      "expected_status": 202,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminEpisodeMarkersStatus",
+      "body_file": "admin_item_markers_redetect.json"
+    },
+    {
+      "name": "admin_item_markers_redetect_unknown_kind",
+      "operation_id": "redetectAdminItemMarkers",
+      "scenario": "A kind other than intro, credits, or all is rejected before analysis is queued.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/items/episode-1/redetect-markers",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{\"kind\":\"outro\"}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "admin_item_markers_redetect_unknown_kind.json"
+    },
+    {
       "name": "admin_item_merge",
       "operation_id": "mergeAdminItem",
       "scenario": "Administrator file grouping preserves synchronous repair and dry-run projection.",
@@ -1532,6 +1592,26 @@
       "response_media_type": null,
       "schema": null,
       "body_file": null
+    },
+    {
+      "name": "admin_marker_capabilities",
+      "operation_id": "getAdminMarkerCapabilities",
+      "scenario": "Marker capabilities report local movie credits, marker re-detection, and detection kind settings support.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/markers/capabilities",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminMarkerCapabilities",
+      "body_file": "admin_marker_capabilities.json"
     },
     {
       "name": "admin_marker_contribute",
@@ -5484,7 +5564,7 @@
       "expected_status": 200,
       "response_headers": {
         "Content-Type": "application/json",
-        "ETag": "\"1ccfbbd89c0c45a4c0c5565a.2yjng52toqtml\""
+        "ETag": "\"457e318bf2388a46420c6eb8.1njpabgklvmqp\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/PersonalCollection",
@@ -5949,6 +6029,26 @@
       "body_file": "get_item_markers_ok.json"
     },
     {
+      "name": "get_library_capabilities_ok",
+      "operation_id": "getLibraryCapabilities",
+      "scenario": "Administrator discovery of the library features this build supports.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/libraries/capabilities",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/LibraryCapabilities",
+      "body_file": "get_library_capabilities_ok.json"
+    },
+    {
       "name": "get_library_collections_locked_profile",
       "operation_id": "getLibraryCollections",
       "scenario": "A PIN-locked profile without X-Profile-Token.",
@@ -6132,6 +6232,26 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/LibraryProviders",
       "body_file": "get_library_providers_ok.json"
+    },
+    {
+      "name": "get_library_realtime_monitoring_ok",
+      "operation_id": "getLibraryRealtimeMonitoring",
+      "scenario": "One library monitored by a node, one with no fresh node report.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/libraries/realtime-monitoring",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/LibraryRealtimeMonitoring",
+      "body_file": "get_library_realtime_monitoring_ok.json"
     },
     {
       "name": "get_library_section_items_not_found",
@@ -12182,67 +12302,6 @@
       "body_file": "sync_progress_validation_failed.json"
     },
     {
-      "name": "theme_catalog_document",
-      "operation_id": "getThemeCatalog",
-      "scenario": "An account-authenticated read returns a typed portable catalog with explicit freshness and non-null tags.",
-      "request": {
-        "method": "GET",
-        "path": "/api/v2/theme/catalog",
-        "headers": {
-          "Authorization": "Bearer tok-member"
-        }
-      },
-      "expected_status": 200,
-      "response_headers": {
-        "Cache-Control": "no-store",
-        "Content-Type": "application/json"
-      },
-      "response_media_type": "application/json",
-      "schema": "#/components/schemas/ThemeCatalogResponse",
-      "body_file": "theme_catalog_document.json"
-    },
-    {
-      "name": "theme_catalog_refreshed",
-      "operation_id": "refreshThemeCatalog",
-      "scenario": "Acting-admin refresh completes synchronously and returns the portable catalog; it is not a job acknowledgment.",
-      "request": {
-        "method": "POST",
-        "path": "/api/v2/theme/catalog/refresh",
-        "headers": {
-          "Authorization": "Bearer tok-admin",
-          "X-Profile-Id": "p-primary"
-        }
-      },
-      "expected_status": 200,
-      "response_headers": {
-        "Cache-Control": "no-store",
-        "Content-Type": "application/json"
-      },
-      "response_media_type": "application/json",
-      "schema": "#/components/schemas/ThemeCatalogResponse",
-      "body_file": "theme_catalog_refreshed.json"
-    },
-    {
-      "name": "theme_download_document",
-      "operation_id": "downloadThemeFile",
-      "scenario": "A downloaded portable theme preserves baseTheme, vars and customCss inside the native document envelope.",
-      "request": {
-        "method": "GET",
-        "path": "/api/v2/theme/download?url=https%3A%2F%2Fthemes.example%2Ftheme.json",
-        "headers": {
-          "Authorization": "Bearer tok-member"
-        }
-      },
-      "expected_status": 200,
-      "response_headers": {
-        "Cache-Control": "no-store",
-        "Content-Type": "application/json"
-      },
-      "response_media_type": "application/json",
-      "schema": "#/components/schemas/ThemeDownloadResponse",
-      "body_file": "theme_download_document.json"
-    },
-    {
       "name": "theme_songs_capability",
       "operation_id": "getThemeSongsCapability",
       "scenario": "A profile can discover routed theme audio, conversion and cluster delivery.",
@@ -13026,7 +13085,7 @@
           "Authorization": "Bearer tok-admin",
           "Content-Type": "multipart/form-data; boundary=silo-fixture-boundary"
         },
-        "body": "--silo-fixture-boundary\r\nContent-Disposition: form-data; name=\"poster\"; filename=\"poster.png\"\r\nContent-Type: image/png\r\n\r\n\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\r\n--silo-fixture-boundary--\r\n"
+        "body": "--silo-fixture-boundary\r\nContent-Disposition: form-data; name=\"poster\"; filename=\"poster.png\"\r\nContent-Type: image/png\r\n\r\npng-bytes\r\n--silo-fixture-boundary--\r\n"
       },
       "expected_status": 200,
       "response_headers": {
@@ -13048,7 +13107,7 @@
           "Authorization": "Bearer tok-admin",
           "Content-Type": "multipart/form-data; boundary=silo-fixture-boundary"
         },
-        "body": "--silo-fixture-boundary\r\nContent-Disposition: form-data; name=\"poster\"; filename=\"poster.png\"\r\nContent-Type: image/gif\r\n\r\n\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\r\n--silo-fixture-boundary--\r\n"
+        "body": "--silo-fixture-boundary\r\nContent-Disposition: form-data; name=\"poster\"; filename=\"poster.png\"\r\nContent-Type: image/gif\r\n\r\ngif-bytes\r\n--silo-fixture-boundary--\r\n"
       },
       "expected_status": 422,
       "response_headers": {

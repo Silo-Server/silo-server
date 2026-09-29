@@ -58,6 +58,7 @@ func adminAccountFixtureCases() []fixtureCase {
 		{name: "admin_account_create", operationID: "createAdminUser", method: "POST", path: "/api/v2/admin/users", body: `{"username":"sample","email":"sample@example.test","password":"synthetic-password","role":"user","create_default_profile":false}`, status: 201, schema: "AdminAccountCreatedBody"},
 		{name: "admin_account_update", operationID: "updateAdminUser", method: "PUT", path: "/api/v2/admin/users/7", body: `{"enabled":false}`, status: 204},
 		{name: "admin_account_delete", operationID: "deleteAdminUser", method: "DELETE", path: "/api/v2/admin/users/7", status: 204},
+		{name: "admin_account_transfer_ownership", operationID: "transferAdminUserOwnership", method: "POST", path: "/api/v2/admin/users/7/transfer-ownership", status: 204},
 		{name: "admin_account_impersonate", operationID: "impersonateAdminUser", method: "POST", path: "/api/v2/admin/users/7/impersonate", status: 200, schema: "TokenPair"},
 		{name: "admin_account_profiles", operationID: "listAdminUserProfiles", method: "GET", path: "/api/v2/admin/users/7/profiles", status: 200, schema: "CollectionAdminAccountProfile"},
 		{name: "admin_account_api_keys", operationID: "listAdminUserAPIKeys", method: "GET", path: "/api/v2/admin/users/7/api-keys?limit=1", status: 200, schema: "CollectionAdminAPIKeyListItem"},

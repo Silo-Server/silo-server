@@ -115,6 +115,13 @@ disagrees with the code is wrong. Any committed doc must not contain local absol
 filesystem paths or transient worktree IDs — use repository-relative paths and wording like
 "Commands assume the repository root is the cwd." `make verify-local-paths` enforces this.
 
+**Docs audience.** Docs in this repo are for people and agents changing the code:
+architecture, invariants, API contracts, development setup. Guides for installing, configuring,
+operating, or troubleshooting Silo belong in the user manual (`siloserver.org`, see Multi-repo).
+Do not add operator or user guides here. The one exception is `docs/update-to-1.0.md`, a draft
+that moves to the manual when 1.0 ships. When a change affects the manual, follow "Update the
+user manual" in CONTRIBUTING.md.
+
 **Dev frontend against a remote backend.** Set `VITE_API_PROXY_TARGET` in `web/.env.local` before
 `make dev-frontend`; the frontend calls relative `/api` URLs that Vite proxies.
 
@@ -129,6 +136,7 @@ Sibling repos are usually checked out side-by-side in the same parent directory.
 - `silo-plugin-sdk` — public plugin SDK, protobuf contracts, generated plugin API, manifest
   helpers, runtime bootstrap.
 - `silo-plugins` — central plugin catalog / repository manifest.
+- `siloserver.org` — project website and user manual.
 - First-party plugins (`silo-plugin-metadata-tmdb`, `silo-plugin-metadata-tvdb`, …) each have
   their own repo.
 
@@ -144,6 +152,12 @@ done until each of these has been handled or ruled out:
   coordinated multi-repo changes over leaving a platform behind.
 - jellycompat parity was considered (does the Jellyfin surface need the same behavior?).
 - The relevant `docs/*-api.md` is updated when the contract changes.
+
+Separately, any change that leaves the user manual on siloserver.org wrong or incomplete (a
+setting, default, label, setup step, or feature behavior it describes) is not done until an
+issue is open on `Silo-Server/siloserver.org`.
+[Update the user manual](CONTRIBUTING.md#update-the-user-manual) covers when to open one and
+what goes in it.
 
 ## Building and verifying
 
@@ -279,6 +293,13 @@ neutral placeholders where context is needed. Never publish credentials, tokens,
 personal data, or private media details. Check text and attachments before posting;
 authorization to open a PR does not authorize publishing private evidence.
 
+The one private link allowed is a maintainer's evidence page on
+`evidence.siloserver.org`, which only Silo-Server organization members can open
+after GitHub sign-in. Put it on one line at the end of a PR body's Validation
+section or a validation hand-off comment:
+`Evidence: https://evidence.siloserver.org/r/<repo>/<topic>/`. Link the page;
+never attach or embed its media.
+
 - Keep one concern per pull request. Split changes that solve independent
   problems or can be reviewed and shipped separately.
 - Do not capture screenshots or record videos just to prepare a PR. Attach media
@@ -286,11 +307,15 @@ authorization to open a PR does not authorize publishing private evidence.
   turning verification into a media deliverable. Do not explain omitted media.
 - When the user requests PR media, check it for private information and upload it
   to GitHub. Never commit PR-only assets such as `.github/pr-assets/`.
-- An open issue is not a precondition for a pull request. Link the capability
-  epic or sub-issue the pull request serves with `Related issue: #NNN` when one
-  covers the work, and write `Related issue: N/A` when none does. Either way, the
-  Problem section must state the problem on its own: what breaks or is missing,
-  who it affects, and why this change is the right answer.
+- Put a `Closes #NNN` line in the body for every issue the pull request fully
+  resolves (`Closes Silo-Server/<repo>#NNN` across repositories), so GitHub closes
+  it on merge to `main`. `Related issue:` does not close anything; use it for the
+  capability epic, sub-issue, or partly addressed issue the work serves, and write
+  `Related issue: N/A` when none applies. Keep both lines accurate when the pull
+  request's scope changes.
+- An open issue is not a precondition for a pull request. Either way, the Problem
+  section must state the problem on its own: what breaks or is missing, who it
+  affects, and why this change is the right answer.
 - Do not open a pull request against an issue someone else is working on. Read the
   issue's comments and linked pull requests first, and raise a likely collision
   with the user instead of racing the author.

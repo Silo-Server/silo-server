@@ -157,9 +157,7 @@ func (s *Service) SetOfflineDeps(detail ManifestSource, subs SubtitleSource, cli
 		return s.artifacts.repo.GetByID(ctx, id)
 	})
 	s.manifest.MarkerPopulation = s.markerPopulation
-	if client == nil {
-		client = http.DefaultClient
-	}
+	// A nil client leaves artwork fetches on artworkClient and its timeout.
 	s.httpClient = client
 }
 
@@ -343,6 +341,11 @@ func (s *Service) effectiveDownloadUser(ctx context.Context, user *models.User) 
 // CreateRequest holds the parameters for creating a download. A non-empty
 // DeviceID makes it a managed device-library entry; empty is ephemeral/web.
 type CreateRequest struct {
+	// VersionFromHistory picks the default version from the profile's watch
+	// history (see versionPreference) when no FileID is named. Native
+	// requests set it; the frozen v1 bridge keeps the highest-resolution
+	// default, so a repeated v1 series request never swaps downloaded files.
+	VersionFromHistory bool
 	// ExpectedRevision is native optimistic creation/replacement authority: zero
 	// requires an absent managed entry; positive values identify the chosen row.
 	// Nil preserves the frozen bridge behavior.
@@ -375,7 +378,7 @@ func (s *Service) Create(ctx context.Context, userID int, req CreateRequest, fil
 	if err != nil {
 		return nil, err
 	}
-	file, err := s.resolveFile(ctx, req)
+	file, err := s.resolveFile(ctx, userID, req, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -649,7 +652,7 @@ func (s *Service) createSeriesScoped(ctx context.Context, userID int, req Create
 		return nil, "", nil, fmt.Errorf("listing episodes: %w", err)
 	}
 
-	items, skipped, err := s.episodeItemsWithSkipped(ctx, req.ContentID, episodes)
+	items, skipped, err := s.episodeItemsWithSkipped(ctx, userID, req.historyProfile(), req.ContentID, episodes, filter)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -717,16 +720,17 @@ func (s *Service) createSeriesScoped(ctx context.Context, userID int, req Create
 	return dls, batchID, skipped, nil
 }
 
-// episodeItems resolves the best downloadable file per episode into managedItems,
-// skipping episodes that have no file. It batches the file lookup into one query
-// (not one per episode) and preserves episode order. Shared by series/season
-// downloads and subscription backfill so file selection stays identical.
-func (s *Service) episodeItems(ctx context.Context, seriesID string, episodes []*models.Episode) ([]managedItem, error) {
-	items, _, err := s.episodeItemsWithSkipped(ctx, seriesID, episodes)
+// episodeItems resolves the profile's preferred downloadable file per episode
+// (see versionPreference) into managedItems, skipping episodes that have no
+// file. It batches the file lookup into one query (not one per episode) and
+// preserves episode order. Shared by series/season downloads and subscription
+// backfill so file selection stays identical.
+func (s *Service) episodeItems(ctx context.Context, userID int, profileID, seriesID string, episodes []*models.Episode, filter catalog.AccessFilter) ([]managedItem, error) {
+	items, _, err := s.episodeItemsWithSkipped(ctx, userID, profileID, seriesID, episodes, filter)
 	return items, err
 }
 
-func (s *Service) episodeItemsWithSkipped(ctx context.Context, seriesID string, episodes []*models.Episode) ([]managedItem, []SkippedDownload, error) {
+func (s *Service) episodeItemsWithSkipped(ctx context.Context, userID int, profileID, seriesID string, episodes []*models.Episode, filter catalog.AccessFilter) ([]managedItem, []SkippedDownload, error) {
 	if len(episodes) == 0 {
 		return nil, nil, nil
 	}
@@ -738,6 +742,13 @@ func (s *Service) episodeItemsWithSkipped(ctx context.Context, seriesID string, 
 	if err != nil {
 		return nil, nil, fmt.Errorf("resolving files for %d episodes: %w", len(episodes), err)
 	}
+	var pref versionPreference
+	for _, files := range filesByEpisode {
+		if len(files) > 1 {
+			pref = s.loadVersionPreference(ctx, userID, profileID, seriesID, episodeIDs)
+			break
+		}
+	}
 	items := make([]managedItem, 0, len(episodes))
 	skipped := make([]SkippedDownload, 0)
 	for _, ep := range episodes {
@@ -746,7 +757,7 @@ func (s *Service) episodeItemsWithSkipped(ctx context.Context, seriesID string, 
 			skipped = append(skipped, SkippedDownload{EpisodeID: ep.ContentID, Reason: "no_file"})
 			continue
 		}
-		items = append(items, managedItem{file: pickBestFile(files), contentID: seriesID, episodeID: ep.ContentID})
+		items = append(items, managedItem{file: pref.pick(ep.ContentID, allowedCandidates(files, filter)), contentID: seriesID, episodeID: ep.ContentID})
 	}
 	return items, skipped, nil
 }
@@ -1186,7 +1197,9 @@ func translateFileLookupError(err error) error {
 	return fmt.Errorf("loading media file: %w", err)
 }
 
-func (s *Service) resolveFile(ctx context.Context, req CreateRequest) (*models.MediaFile, error) {
+// resolveFile returns the requested file, or the profile's preferred version
+// of the movie or episode when the request names none (see versionPreference).
+func (s *Service) resolveFile(ctx context.Context, userID int, req CreateRequest, filter catalog.AccessFilter) (*models.MediaFile, error) {
 	if req.FileID > 0 {
 		file, err := s.fileRepo.GetByID(ctx, req.FileID)
 		if err != nil {
@@ -1200,7 +1213,9 @@ func (s *Service) resolveFile(ctx context.Context, req CreateRequest) (*models.M
 
 	var files []*models.MediaFile
 	var err error
+	itemID, seriesID := req.ContentID, ""
 	if req.EpisodeID != "" {
+		itemID, seriesID = req.EpisodeID, req.ContentID
 		files, err = s.fileRepo.GetByEpisodeID(ctx, req.EpisodeID)
 	} else {
 		files, err = s.fileRepo.GetByContentID(ctx, req.ContentID)
@@ -1211,8 +1226,20 @@ func (s *Service) resolveFile(ctx context.Context, req CreateRequest) (*models.M
 	if len(files) == 0 {
 		return nil, catalog.ErrItemNotFound
 	}
+	files = allowedCandidates(files, filter)
+	if len(files) == 1 {
+		return files[0], nil
+	}
+	return s.loadVersionPreference(ctx, userID, req.historyProfile(), seriesID, []string{itemID}).pick(itemID, files), nil
+}
 
-	return pickBestFile(files), nil
+// historyProfile is the profile whose watch history picks a default version,
+// or "" for the highest-resolution default.
+func (r CreateRequest) historyProfile() string {
+	if !r.VersionFromHistory {
+		return ""
+	}
+	return r.ProfileID
 }
 
 // serveDownloadBytes serves the bytes for a download row: the prepared artifact
@@ -1394,22 +1421,6 @@ func (s *Service) serveFileTarget(ctx context.Context, w http.ResponseWriter, r 
 		return fmt.Errorf("%w: relaying remote artifact: %w", ErrResponseCommitted, err)
 	}
 	return nil
-}
-
-// pickBestFile selects the highest-resolution file from a list.
-func pickBestFile(files []*models.MediaFile) *models.MediaFile {
-	if len(files) == 1 {
-		return files[0]
-	}
-	best := files[0]
-	for _, f := range files[1:] {
-		// access.CompareQuality is the codebase's one resolution ordering
-		// (includes 4320p); download file selection must agree with playback.
-		if access.CompareQuality(f.Resolution, best.Resolution) > 0 {
-			best = f
-		}
-	}
-	return best
 }
 
 func sanitizeFilename(name string) string {

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
@@ -801,6 +802,17 @@ func (h *AdminHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) 
 	if rejectScopedAPIKeyCreate(w, r, req.Role) {
 		return
 	}
+	if req.Role == roleAdmin {
+		actor, err := requestOwnerActor(r.Context(), h.userRepo)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch user")
+			return
+		}
+		if err := auth.CheckGrantAdmin(actor, req.Role); err != nil {
+			writeAPIError(w, ownerError(err))
+			return
+		}
+	}
 
 	if req.Username == "" || req.Email == "" || req.Password == "" || req.Role == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "Username, email, password, and role are required")
@@ -986,34 +998,47 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		AccessGroupID:            req.AccessGroupID.Optional(),
 	}
 
-	if currentUser == nil {
-		if currentUser, blocked = h.loadTargetUser(w, r, id); blocked {
-			return
-		}
-	}
-	if err := auth.CheckOwnerUpdate(actorUserID(r.Context()), currentUser, updateInput); err != nil {
-		writeAPIError(w, ownerError(err))
-		return
-	}
-
-	err = h.userRepo.Update(r.Context(), id, updateInput)
-	if err != nil {
-		if auth.IsNotFound(err) {
-			writeError(w, http.StatusNotFound, "not_found", "User not found")
-			return
-		}
-		if auth.IsDuplicate(err) {
-			writeError(w, http.StatusConflict, "duplicate", "A user with that username or email already exists")
-			return
-		}
+	// As in v2, the Owner rules run against the target account locked in the
+	// transaction that updates it and revokes its sign-ins.
+	repo, ok := h.userRepo.(adminAccountRepository)
+	if !ok {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update user")
 		return
 	}
-	if updateRequiresSessionRevocation(currentUser, updateInput) {
-		if err := h.revokeUserSessions(r.Context(), id); err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to revoke updated user sessions")
-			return
+	actor, err := requestOwnerActor(r.Context(), h.userRepo)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch user")
+		return
+	}
+	revoked := false
+	_, err = repo.MutateAdminAccount(r.Context(), id, -1, &updateInput, func(current *models.User, _ pgx.Tx) (bool, error) {
+		if err := auth.CheckOwnerUpdate(actor, current, updateInput); err != nil {
+			return false, ownerError(err)
 		}
+		// Recheck the scoped-key limits against the locked account: the
+		// target may have been promoted since rejectScopedAPIKeyUpdate read it.
+		if actorIsScopedAPIKey(r.Context()) && current.Role == roleAdmin && (updateInput.Password != nil || updateInput.Role != nil) {
+			return false, apiError(http.StatusForbidden, "insufficient_scope", "A scoped API key may not change the password or role of an admin account")
+		}
+		revoked = updateRequiresSessionRevocation(current, updateInput)
+		return revoked, nil
+	})
+	if err != nil {
+		var apiErr *APIError
+		switch {
+		case errors.As(err, &apiErr):
+			writeAPIError(w, apiErr)
+		case auth.IsNotFound(err):
+			writeError(w, http.StatusNotFound, "not_found", "User not found")
+		case auth.IsDuplicate(err):
+			writeError(w, http.StatusConflict, "duplicate", "A user with that username or email already exists")
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update user")
+		}
+		return
+	}
+	if revoked && h.OnUserSessionsRevoked != nil {
+		h.OnUserSessionsRevoked(r.Context(), id)
 	}
 
 	user, err := h.userRepo.GetByID(r.Context(), id)
@@ -1038,27 +1063,38 @@ func (h *AdminHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid user ID")
 		return
 	}
-	target, blocked := h.loadTargetUser(w, r, id)
-	if blocked {
-		return
-	}
-	if err := auth.CheckOwnerDelete(actorUserID(r.Context()), target); err != nil {
-		writeAPIError(w, ownerError(err))
-		return
-	}
-
-	err = h.userRepo.Delete(r.Context(), id)
-	if err != nil {
-		if auth.IsNotFound(err) {
-			writeError(w, http.StatusNotFound, "not_found", "User not found")
-			return
-		}
+	repo, ok := h.userRepo.(adminAccountRepository)
+	if !ok {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete user")
 		return
 	}
-	if err := h.revokeUserSessions(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to revoke deleted user sessions")
+	actor, err := requestOwnerActor(r.Context(), h.userRepo)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch user")
 		return
+	}
+	// As for updates, the Owner rules run against the target account locked
+	// in the transaction that deletes it and revokes its sign-ins.
+	_, err = repo.MutateAdminAccount(r.Context(), id, -1, nil, func(current *models.User, _ pgx.Tx) (bool, error) {
+		if err := auth.CheckOwnerDelete(actor, current); err != nil {
+			return false, ownerError(err)
+		}
+		return true, nil
+	})
+	if err != nil {
+		var apiErr *APIError
+		switch {
+		case errors.As(err, &apiErr):
+			writeAPIError(w, apiErr)
+		case auth.IsNotFound(err):
+			writeError(w, http.StatusNotFound, "not_found", "User not found")
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete user")
+		}
+		return
+	}
+	if h.OnUserSessionsRevoked != nil {
+		h.OnUserSessionsRevoked(r.Context(), id)
 	}
 	h.invalidateStats(r.Context(), cache.ChannelAdmin, cache.EventAdminStatsInvalidated, strconv.Itoa(id))
 
@@ -2208,7 +2244,8 @@ func (h *AdminHandler) normalizeBatchSetting(
 	}
 
 	switch key {
-	case markers.SettingMode, markers.SettingLazyPlayback, markers.SettingOnlineStorage:
+	case markers.SettingMode, markers.SettingLazyPlayback, markers.SettingOnlineStorage,
+		markers.SettingDetectIntros, markers.SettingDetectCredits:
 		normalized, err = markers.NormalizeSetting(key, normalized)
 	case clientip.SettingTrustedProxies:
 		normalized, err = clientip.NormalizeCIDRList(normalized)
@@ -2667,7 +2704,8 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 	}
 
 	switch key {
-	case markers.SettingMode, markers.SettingLazyPlayback, markers.SettingOnlineStorage:
+	case markers.SettingMode, markers.SettingLazyPlayback, markers.SettingOnlineStorage,
+		markers.SettingDetectIntros, markers.SettingDetectCredits:
 		if normalized, err := markers.NormalizeSetting(key, req.Value); err != nil {
 			return AdminSettingUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: err.Error()}
 		} else {

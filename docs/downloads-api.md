@@ -238,7 +238,7 @@ Request body:
 | --------------- | ------ | ---------------------------------------------------------------------------- |
 | `content_id`    | string | Required. Movie or series content id.                                        |
 | `episode_id`    | string | Episode content id for an episode download.                                  |
-| `media_file_id` | string | Optional explicit media-file/version id, as a canonical positive decimal string. |
+| `media_file_id` | string | Optional explicit media-file/version id, as a canonical positive decimal string. Omitted: the server picks the version (see below). |
 | `quality`       | string | `original` by default, or one of `quality_presets`.                          |
 | `series`        | bool   | `true` means download every episode of `content_id` at original quality.     |
 | `season_number` | int    | With `series: true`, restrict to one season. `0` is the Specials season; negative values are rejected with `400`. Dispatch is on field presence: omit the field entirely for a whole-series download. |
@@ -247,6 +247,24 @@ Request body:
 | `expected_revision` | int | Managed single-item guard. `0` requires an absent entry; a positive value reuses, revives or replaces the entry named by `expected_download_id`. |
 | `expected_download_id` | string | The exact registry entry a positive `expected_revision` targets.      |
 | `expected_entries` | object | Up to 100 episode-ID to `{id, revision}` guards for a batch page.        |
+
+When a single download omits `media_file_id`, and for every episode of a
+series or season page or a series monitor, the server picks the version from
+the profile's watch history, in this order:
+
+1. The file the profile last played for that movie or episode.
+2. For an episode, the version closest to the series' most recent play within
+   the profile's latest 200 progress entries, matched on edition, then
+   resolution, HDR and video codec.
+3. The highest resolution; equal resolutions go to the lowest file id.
+
+Only versions the profile may play (library access and quality ceiling) are
+candidates. When none of an item's versions qualify, the server picks from all
+of them as above. The create, or the later file request, is then refused
+unless a `quality` preset brings the download under the ceiling.
+
+A client that shows a version to the user should send its `media_file_id`, so
+the download is the file the user saw.
 
 Capabilities mirror streaming playback caps:
 
@@ -543,6 +561,10 @@ GET /api/v2/downloads/{id}/artwork/{kind}
 manifest's `artwork_urls` point here. Fetch each available image once while online
 and cache the bytes locally. Artwork and subtitle assets are whole-object,
 privately cached deliveries; they do not advertise byte ranges.
+
+When the artwork store fails, times out, or answers 429 or 5xx, the route returns
+`503 dependency_unavailable` with `Retry-After: 5`; retry the same request later.
+Other failures, such as `404 not_found`, won't succeed on a retry.
 
 ### 4.9 Subtitle proxy
 

@@ -60,8 +60,8 @@ task's triggers with its configured poll interval.
 ## Branding assets
 
 Uploadable images white-label the server: the sidebar wordmark, the square
-mark (collapsed sidebar and installed PWA), optional light-theme variants of
-both, the browser favicon, and the login background. Each is stored in the public S3 bucket and referenced from a
+mark (collapsed sidebar and installed PWA), the browser favicon, and the login
+background. Each is stored in the public S3 bucket and referenced from a
 `server_settings` row, so uploads return `503 unavailable` until
 `s3.public_bucket` is configured.
 
@@ -75,7 +75,10 @@ both, the browser favicon, and the login background. Each is stored in the publi
 Public reads are deliberately unauthenticated: branding has to apply on the
 login page, before anyone has a session.
 
-`{kind}` is one of `wordmark`, `wordmark_light`, `mark`, `mark_light`, `favicon`, `login_bg` — the light variants follow their base kind's processing. Uploads are
+`{kind}` is one of `wordmark`, `mark`, `favicon`, `login_bg`. The web client has a
+single dark theme, so the former light-theme variants are gone from v2; the frozen
+v1 upload route still accepts `wordmark_light` and `mark_light` until v1 retires,
+and the public asset route still serves them. Uploads are
 processed per kind — the numbers below are the contract the admin UI quotes back
 to the operator, and they live in `internal/branding/assets.go`:
 
@@ -385,8 +388,8 @@ Cgroup correction alone is not always enough: a Docker container nested inside
 an LXC container sees no limit on its own cgroup (the LXC's cap lives on an
 ancestor cgroup outside its namespace), so `cpu_pct`, `cores`, `load1`, and the
 memory fields below read as the bare-metal host's totals unless the deployment
-bind-mounts lxcfs's virtualized `/proc` files in — see the LXC section of
-[docs/wiki/deployment/docker.md](wiki/deployment/docker.md#node-metrics).
+bind-mounts lxcfs's virtualized `/proc` files in — see
+[Node resource sampling](architecture/observability.md#node-resource-sampling).
 
 `last_stats.system`:
 
@@ -1507,6 +1510,22 @@ issued token so the administrator can assign it to a source.
 
 ### Personal history import acceptance and monitoring
 
+Personal history imports on both `/api/v1` and `/api/v2` use the acting
+`X-Profile-Id`. A non-primary profile can import only into itself and see only runs
+targeting itself. The primary profile (with its PIN verified when it has one) and
+server admins can act for any profile on their own account. An API key's exemption
+from PIN entry does not grant household authority to a locked primary profile.
+Creating a run for another profile without this authority returns 403; reading its
+run returns 404. A non-admin request without an acting profile cannot create a run
+and sees no runs. Lists apply the profile filter before their limit, and v2 cursors
+are bound to the account and acting profile.
+
+This deliberately tightens the frozen v1 bridge as a security fix: otherwise its
+run routes would bypass the v2 profile restriction. V1 keeps its existing response
+envelopes, 201 create response, and maximum list size of 50. Web uses v2;
+Apple and Android have no personal history-import consumer, and jellycompat has
+no corresponding import operation.
+
 `POST /api/v2/history-imports/runs` accepts an account-owned import for the supplied
 profile. It returns 202 with the persisted queued run, canonical `Location`, and
 `Retry-After: 2` only after both execution intent and encrypted run credentials commit.
@@ -1516,8 +1535,9 @@ automatically resubmitted; check the account's import list before starting anoth
 
 Poll `GET /api/v2/history-imports/runs/{id}` at its `Location`. The response has a strong
 `ETag`, supports `If-Match` and `If-None-Match`, and returns a bodyless 304 when unchanged.
-The account ownership check runs before evaluating either precondition; another
-account's run returns 404. Nonterminal responses, including 304, carry `Retry-After`.
+The account and profile checks run before evaluating either precondition; a run
+outside the caller's authority returns 404. Nonterminal responses, including 304,
+carry `Retry-After`.
 When `terminal` is true, stop polling; terminal responses omit the polling hint.
 
 The personal projection always reports `cancelable: false`: this surface has no cancel

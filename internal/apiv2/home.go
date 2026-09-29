@@ -72,7 +72,7 @@ type HomeDismissalInput struct {
 // HomeDismissal is what a dismissal is anchored to, by surface.
 type HomeDismissal struct {
 	SeriesID          string   `json:"series_id,omitempty" doc:"Required for next_up: the series the episode card belongs to" example:"series:severance"`
-	ProgressUpdatedAt *Instant `json:"progress_updated_at,omitempty" doc:"Required for continue_watching: the card's progress_updated_at; the dismissal holds until the item is played again"`
+	ProgressUpdatedAt *Instant `json:"progress_updated_at,omitempty" doc:"Required for continue_watching: the card's progress_updated_at; the dismissal holds until the item is played again. An episode dismissal drops its whole show instead, which holds until any episode of it is played again."`
 }
 
 // HomeDismissalUpsertInput is the dismissHomeItem request.
@@ -172,14 +172,14 @@ func registerHome(reg *Registry) {
 		"Upcoming and recent airings and releases in a window of the viewer's local days, grouped by day.")), reg.getCalendar)
 
 	dismiss := humaOp(http.MethodPut, Prefix+"/home/dismissals/{surface}/{item_id}", opDismissHomeItem, "home",
-		"Hide a card from Continue Watching or Next Up for the acting profile; repeating it refreshes the dismissal.")
+		"Hide a card from Continue Watching or Next Up for the acting profile; repeating it refreshes the dismissal. Dismissing an episode or series drops the whole show: every card of it leaves both rows until the profile watches it again or the dismissal is undone. Watch provider connections with dropped-show sync on, for providers that support it, send the drop to the provider.")
 	dismiss.DefaultStatus = http.StatusNoContent
 	dismissOp := viewerOperation(dismiss)
 	dismissOp.RetrySafety = RetrySafetyNaturalIdempotent
 	Register(reg, dismissOp, reg.dismissHomeItem)
 
 	undismiss := humaOp(http.MethodDelete, Prefix+"/home/dismissals/{surface}/{item_id}", opUndismissHomeItem, "home",
-		"Show a dismissed card again; an item that was not dismissed is left as is.")
+		"Show a dismissed card again; an item that was not dismissed is left as is. For an episode or series this undrops the show.")
 	undismiss.DefaultStatus = http.StatusNoContent
 	undismissOp := viewerOperation(undismiss)
 	undismissOp.RetrySafety = RetrySafetyNaturalIdempotent

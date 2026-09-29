@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/mediasample"
 )
 
 // concurrencyProbeExtractor records how many extractions overlap. Each call
@@ -30,7 +32,15 @@ func (e failingExtractor) Extract(_ context.Context, candidate Candidate) (Finge
 	return Fingerprint{}, false, e.errFor[candidate.FileID]
 }
 
+func (e failingExtractor) ExtractCredits(ctx context.Context, candidate Candidate) (Fingerprint, bool, error) {
+	return e.Extract(ctx, candidate)
+}
+
 func (e *concurrencyProbeExtractor) Preflight(context.Context) error { return nil }
+
+func (e *concurrencyProbeExtractor) ExtractCredits(ctx context.Context, candidate Candidate) (Fingerprint, bool, error) {
+	return e.Extract(ctx, candidate)
+}
 
 func (e *concurrencyProbeExtractor) Extract(context.Context, Candidate) (Fingerprint, bool, error) {
 	e.mu.Lock()
@@ -69,10 +79,10 @@ func TestRunAnalyzesGroupsInParallelWithinFFmpegLimit(t *testing.T) {
 	cfg.MaxParallelFFmpeg = 2
 	analyzer := &Analyzer{
 		repo: repo, extractor: extractor, config: cfg,
-		logger: slog.New(slog.DiscardHandler), ffmpegSlots: newSlotLimiter(2),
+		logger: slog.New(slog.DiscardHandler), ffmpegSlots: mediasample.NewLimiter(2),
 	}
 
-	summary, err := analyzer.Run(context.Background(), nil)
+	summary, err := analyzer.Run(context.Background(), allMarkerKinds, nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -134,8 +144,8 @@ func TestDetectionRunsOneWorkerByDefault(t *testing.T) {
 }
 
 func TestInteractiveAnalysisUsesReservedFFmpegSlot(t *testing.T) {
-	analyzer := &Analyzer{ffmpegSlots: newSlotLimiter(1), interactiveSlots: make(chan struct{}, 1)}
-	if ok, _ := analyzer.ffmpegSlots.tryAcquire(); !ok { // the nightly run holds every shared slot
+	analyzer := &Analyzer{ffmpegSlots: mediasample.NewLimiter(1)}
+	if _, err := analyzer.ffmpegSlots.Acquire(context.Background()); err != nil { // the nightly run holds every shared slot
 		t.Fatal("could not take the only shared slot")
 	}
 
@@ -185,7 +195,7 @@ func TestAnalyzeEpisodeReportsExtractionFailures(t *testing.T) {
 }
 
 func TestSetWorkersResizesTheFFmpegLimit(t *testing.T) {
-	analyzer := &Analyzer{config: DefaultConfig("ffmpeg"), ffmpegSlots: newSlotLimiter(2), workers: 2}
+	analyzer := &Analyzer{config: DefaultConfig("ffmpeg"), ffmpegSlots: mediasample.NewLimiter(2), workers: 2}
 
 	// An extraction started under the old limit releases that limit.
 	release, err := analyzer.acquireFFmpeg(context.Background())
@@ -257,7 +267,7 @@ func assertGranted(t *testing.T, granted <-chan func(), why string) func() {
 }
 
 func TestSetWorkersLoweringTheLimitWaitsForHoldersToDrain(t *testing.T) {
-	analyzer := &Analyzer{config: DefaultConfig("ffmpeg"), ffmpegSlots: newSlotLimiter(3), workers: 3}
+	analyzer := &Analyzer{config: DefaultConfig("ffmpeg"), ffmpegSlots: mediasample.NewLimiter(3), workers: 3}
 	var held []func()
 	for range 3 {
 		release, err := analyzer.acquireFFmpeg(context.Background())
@@ -280,7 +290,7 @@ func TestSetWorkersLoweringTheLimitWaitsForHoldersToDrain(t *testing.T) {
 }
 
 func TestSetWorkersRaisingTheLimitWakesWaiters(t *testing.T) {
-	analyzer := &Analyzer{config: DefaultConfig("ffmpeg"), ffmpegSlots: newSlotLimiter(1), workers: 1}
+	analyzer := &Analyzer{config: DefaultConfig("ffmpeg"), ffmpegSlots: mediasample.NewLimiter(1), workers: 1}
 	release, err := analyzer.acquireFFmpeg(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -350,10 +360,10 @@ func TestFingerprintLookupsShareOneBoundAcrossGroups(t *testing.T) {
 	cfg := DefaultConfig("ffmpeg")
 	analyzer := &Analyzer{
 		repo: repo, extractor: failingExtractor{}, config: cfg,
-		logger: slog.New(slog.DiscardHandler), ffmpegSlots: newSlotLimiter(3), workers: 3,
+		logger: slog.New(slog.DiscardHandler), ffmpegSlots: mediasample.NewLimiter(3), workers: 3,
 	}
 
-	if _, err := analyzer.Run(context.Background(), nil); err != nil {
+	if _, err := analyzer.Run(context.Background(), allMarkerKinds, nil); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if repo.peak != maxConcurrentFingerprintLookups {

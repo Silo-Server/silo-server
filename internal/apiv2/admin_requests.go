@@ -174,6 +174,7 @@ type AdminRequestCapabilitiesOutputBody struct {
 	Capability
 	Available            bool `json:"available"`
 	GuardedConfiguration bool `json:"guarded_configuration"`
+	Routing              bool `json:"routing" doc:"Whether request routing is available: the routing rules under /admin/request-routes and the Standard/Advanced routing mode under /admin/request-routing"`
 }
 
 func adminRequestViewer(ctx context.Context) mediarequests.Viewer {
@@ -217,9 +218,10 @@ func registerAdminRequests(reg *Registry) {
 		out := new(AdminRequestCapabilitiesOutput)
 		out.Body.Available = reg.deps.AdminRequests != nil
 		_, out.Body.GuardedConfiguration = reg.deps.AdminRequests.(guardedAdminRequests)
+		_, out.Body.Routing = reg.deps.AdminRequests.(adminRequestRoutes)
 		return out, nil
 	})
-	Register(reg, op(http.MethodGet, "/admin/requests", opListAdminRequests, false), func(ctx context.Context, in *MediaRequestListInput) (*MediaRequestCollectionOutput, error) {
+	Register(reg, op(http.MethodGet, "/admin/requests", opListAdminRequests, false), func(ctx context.Context, in *AdminMediaRequestListInput) (*MediaRequestCollectionOutput, error) {
 		return reg.listAdminRequests(ctx, cursors, in)
 	})
 	for _, action := range []string{adminActionApprove, adminActionDecline, adminActionCancel, adminActionRetry} {
@@ -237,14 +239,18 @@ func registerAdminRequests(reg *Registry) {
 			case adminActionDecline:
 				r, err = s.Decline(ctx, v, string(in.ID), in.Body.Reason)
 			case adminActionCancel:
-				r, err = s.Cancel(ctx, v, string(in.ID), in.Body.Reason)
+				if closer, ok := s.(adminRequestCloser); ok {
+					r, err = closer.AdminCancel(ctx, v, string(in.ID), in.Body.Reason)
+				} else {
+					r, err = s.Cancel(ctx, v, string(in.ID), in.Body.Reason)
+				}
 			case adminActionRetry:
 				r, err = s.Retry(ctx, v, string(in.ID))
 			}
 			if err != nil {
 				return nil, requestProblem(err)
 			}
-			return &MediaRequestOutput{Body: mediaRequestOf(r)}, nil
+			return &MediaRequestOutput{Body: mediaRequestOf(r, v)}, nil
 		})
 	}
 	Register(reg, op(http.MethodGet, "/admin/request-settings", opGetAdminRequestSettings, false), reg.getAdminRequestSettings)
@@ -263,13 +269,13 @@ func registerAdminRequests(reg *Registry) {
 	Register(reg, op(http.MethodPost, "/admin/request-integrations/{id}/options", opLoadRequestIntegrationOptions, false), reg.loadAdminRequestOptions)
 }
 
-func (reg *Registry) listAdminRequests(ctx context.Context, cursors *Cursors, in *MediaRequestListInput) (*MediaRequestCollectionOutput, error) {
+func (reg *Registry) listAdminRequests(ctx context.Context, cursors *Cursors, in *AdminMediaRequestListInput) (*MediaRequestCollectionOutput, error) {
 	s, p := reg.adminRequestService()
 	if p != nil {
 		return nil, p
 	}
 	v := adminRequestViewer(ctx)
-	scope := CursorScope{OperationID: opListAdminRequests, Security: strconv.Itoa(v.UserID) + "/" + v.ProfileID, Filter: in.Status + "|" + in.Outcome, Sort: adminRequestSort, Tiebreaker: "id"}
+	scope := CursorScope{OperationID: opListAdminRequests, Security: strconv.Itoa(v.UserID) + "/" + v.ProfileID, Filter: in.filterKey(), Sort: adminRequestSort, Tiebreaker: "id"}
 	var before *mediarequests.RequestPageKey
 	if in.Cursor != "" {
 		before = new(mediarequests.RequestPageKey)
@@ -280,7 +286,12 @@ func (reg *Registry) listAdminRequests(ctx context.Context, cursors *Cursors, in
 			return nil, NewProblem(TypeInvalidCursor, "The cursor position is invalid.")
 		}
 	}
-	rows, err := s.ListAdmin(ctx, v, mediarequests.ListFilter{Status: mediarequests.Status(in.Status), Outcome: mediarequests.Outcome(in.Outcome), Limit: in.Limit + 1, Before: before})
+	filter, p := adminListFilter(in)
+	if p != nil {
+		return nil, p
+	}
+	filter.Limit, filter.Before = in.Limit+1, before
+	rows, err := s.ListAdmin(ctx, v, filter)
 	if err != nil {
 		return nil, requestProblem(err)
 	}
@@ -295,7 +306,7 @@ func (reg *Registry) listAdminRequests(ctx context.Context, cursors *Cursors, in
 	}
 	items := make([]MediaRequest, 0, len(rows))
 	for _, r := range rows {
-		items = append(items, mediaRequestOf(r))
+		items = append(items, mediaRequestOf(r, v))
 	}
 	return &MediaRequestCollectionOutput{Body: MediaRequestCollection{Collection: Paginated(items, next)}}, nil
 }
@@ -420,12 +431,31 @@ func adminIntegrationOf(r mediarequests.Integration) AdminRequestIntegration {
 	}
 	return AdminRequestIntegration{ID: ID(r.ID), Name: r.Name, CapabilityID: r.CapabilityID, InstallationID: install, SupportedMediaTypes: types, PluginConfig: config, Enabled: r.Enabled, BaseURL: r.BaseURL, HasAPIKey: strings.TrimSpace(r.APIKeyRef) != "", LastCheckAt: checked, LastCheckStatus: r.LastCheckStatus, LastCheckError: r.LastCheckError, UpdatedAt: NewInstant(r.UpdatedAt)}
 }
+
+// adminRequestBaseURL is the address a v2 probe or save sends on: http://
+// assumed and no trailing slash, so the probe and the saved row agree. A blank
+// address stays blank; the service then uses the saved one.
+func adminRequestBaseURL(raw string) (string, *Problem) {
+	if strings.TrimSpace(raw) == "" {
+		return raw, nil
+	}
+	normalized, err := mediarequests.NormalizeIntegrationBaseURL(raw)
+	if err != nil {
+		return "", requestProblem(err)
+	}
+	return normalized, nil
+}
+
 func (b AdminRequestIntegrationBody) domain() (mediarequests.Integration, *Problem) {
 	id, err := strconv.Atoi(string(b.InstallationID))
 	if err != nil || id <= 0 {
 		return mediarequests.Integration{}, NewProblem(TypeValidationFailed, "Invalid installation ID.")
 	}
-	return mediarequests.Integration{Name: b.Name, CapabilityID: b.CapabilityID, InstallationID: &id, SupportedMediaTypes: b.SupportedMediaTypes, PluginConfig: b.PluginConfig, Enabled: b.Enabled, BaseURL: b.BaseURL, APIKeyRef: b.APIKey}, nil
+	baseURL, p := adminRequestBaseURL(b.BaseURL)
+	if p != nil {
+		return mediarequests.Integration{}, p
+	}
+	return mediarequests.Integration{Name: b.Name, CapabilityID: b.CapabilityID, InstallationID: &id, SupportedMediaTypes: b.SupportedMediaTypes, PluginConfig: b.PluginConfig, Enabled: b.Enabled, BaseURL: baseURL, APIKeyRef: b.APIKey}, nil
 }
 func (reg *Registry) listAdminRequestIntegrations(ctx context.Context, cursors *Cursors, in *CursorListInput) (*AdminRequestIntegrationCollectionOutput, error) {
 	s, p := reg.adminRequestService()
@@ -564,7 +594,11 @@ func (reg *Registry) loadAdminRequestOptions(ctx context.Context, in *AdminReque
 		}
 		install = &id
 	}
-	options, err := s.LoadIntegrationOptions(ctx, adminRequestViewer(ctx), mediarequests.Integration{ID: string(in.ID), Name: b.Name, CapabilityID: b.CapabilityID, InstallationID: install, BaseURL: b.BaseURL, APIKeyRef: b.APIKey, PluginConfig: b.PluginConfig})
+	baseURL, p := adminRequestBaseURL(b.BaseURL)
+	if p != nil {
+		return nil, p
+	}
+	options, err := s.LoadIntegrationOptions(ctx, adminRequestViewer(ctx), mediarequests.Integration{ID: string(in.ID), Name: b.Name, CapabilityID: b.CapabilityID, InstallationID: install, BaseURL: baseURL, APIKeyRef: b.APIKey, PluginConfig: b.PluginConfig})
 	if err != nil {
 		return nil, requestProblem(err)
 	}

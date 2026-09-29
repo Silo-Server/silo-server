@@ -310,3 +310,52 @@ func TestIssueUnlessRecentHoldsTheCooldownDB(t *testing.T) {
 		}
 	}
 }
+
+// TestResetCompletionLocksAccountBeforeLinkDB holds the account the way a
+// promotion does and checks that completing its link waits on the account
+// before locking the link, so the promotion can still delete the link
+// instead of deadlocking.
+func TestResetCompletionLocksAccountBeforeLinkDB(t *testing.T) {
+	d := newResetDB(t)
+	id := d.account(t, "racing", true, true)
+	d.issue(t, id, "racing-link", time.Now().Add(time.Hour))
+	promotion, err := d.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = promotion.Rollback(t.Context()) }()
+	if _, err := promotion.Exec(t.Context(), `UPDATE users SET role = 'admin' WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := d.repo.Complete(t.Context(), auth.HashLinkToken("racing-link"), "brand-new-password")
+		done <- err
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var waiting int
+		if err := d.pool.QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("completion never waited on the account")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := promotion.Exec(t.Context(), `SET LOCAL lock_timeout = '2s'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := promotion.Exec(t.Context(), `DELETE FROM password_reset_tokens WHERE user_id = $1`, id); err != nil {
+		t.Fatalf("completion locked the link before the account: %v", err)
+	}
+	if err := promotion.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; !errors.Is(err, ErrNotFound) {
+		t.Fatalf("completing a link the promotion deleted: %v", err)
+	}
+}

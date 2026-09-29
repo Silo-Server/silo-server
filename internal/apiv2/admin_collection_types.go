@@ -130,6 +130,23 @@ type AdminTMDBImport struct {
 	ManagementKey    string          `json:"management_key,omitempty"`
 }
 
+type AdminTMDBListImport struct {
+	SortConfig       json.RawMessage `json:"sort_config,omitempty"`
+	LibraryID        ID              `json:"library_id,omitempty"`
+	LibraryIDs       []ID            `json:"library_ids,omitempty" maxItems:"1000"`
+	Title            string          `json:"title" minLength:"1"`
+	Description      string          `json:"description,omitempty"`
+	URL              string          `json:"url" minLength:"1" doc:"A public TMDB list page (https://www.themoviedb.org/list/...) or its numeric ID" example:"https://www.themoviedb.org/list/310-my-movie-list"`
+	Limit            *int            `json:"limit,omitempty" nullable:"false" minimum:"1"`
+	Featured         bool            `json:"featured,omitempty"`
+	SortOrder        int             `json:"sort_order,omitempty"`
+	PosterURL        string          `json:"poster_url,omitempty"`
+	SyncSchedule     string          `json:"sync_schedule,omitempty"`
+	ManagementMode   string          `json:"management_mode,omitempty"`
+	ManagementSource string          `json:"management_source,omitempty"`
+	ManagementKey    string          `json:"management_key,omitempty"`
+}
+
 type AdminTraktImport struct {
 	SortConfig       json.RawMessage `json:"sort_config,omitempty"`
 	LibraryID        ID              `json:"library_id,omitempty"`
@@ -321,6 +338,25 @@ func (v AdminTMDBImport) command() (handlers.AdminCollectionImportTMDB, *Problem
 	c.LibraryID, c.LibraryIDs, c.Title, c.Description = libraryID, ids, v.Title, v.Description
 	c.Preset, c.TimeWindow, c.MediaType, c.Limit = v.Preset, v.TimeWindow, v.MediaType, v.Limit
 	c.SortConfig, c.Featured, c.SortOrder, c.PosterURL, c.SyncSchedule = v.SortConfig, v.Featured, v.SortOrder, v.PosterURL, v.SyncSchedule
+	c.ManagementMode, c.ManagementSource, c.ManagementKey = v.ManagementMode, v.ManagementSource, v.ManagementKey
+	return c, nil
+}
+func (v AdminTMDBListImport) command() (handlers.AdminCollectionImportTMDBList, *Problem) {
+	var c handlers.AdminCollectionImportTMDBList
+	ids, p := intsOfIDs(v.LibraryIDs, "library_ids")
+	if p != nil {
+		return c, p
+	}
+	var libraryID int
+	if v.LibraryID != "" {
+		lowered, p := intsOfIDs([]ID{v.LibraryID}, "library_id")
+		if p != nil {
+			return c, p
+		}
+		libraryID = lowered[0]
+	}
+	c.LibraryID, c.LibraryIDs, c.Title, c.Description, c.URL = libraryID, ids, v.Title, v.Description, v.URL
+	c.SortConfig, c.Limit, c.Featured, c.SortOrder, c.PosterURL, c.SyncSchedule = v.SortConfig, v.Limit, v.Featured, v.SortOrder, v.PosterURL, v.SyncSchedule
 	c.ManagementMode, c.ManagementSource, c.ManagementKey = v.ManagementMode, v.ManagementSource, v.ManagementKey
 	return c, nil
 }

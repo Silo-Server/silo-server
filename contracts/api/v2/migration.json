@@ -8022,17 +8022,9 @@
       "upgrades_websocket": false,
       "capability_endpoint": null,
       "consumers": [
-        "web"
+        "unused"
       ],
-      "consumer_call_sites": [
-        {
-          "repo": "web",
-          "file": "src/hooks/queries/items.ts",
-          "line": 210,
-          "types": [],
-          "match": "mechanical"
-        }
-      ],
+      "consumer_call_sites": [],
       "section": "admin-catalog",
       "release_flow": "other_admin",
       "tier": 2,
@@ -8046,7 +8038,7 @@
         "path": "/api/v2/admin/items/{id}/redetect-intro",
         "operation_id": "redetectAdminEpisodeIntro"
       },
-      "notes": "Shared frozen-v1 marker analysis service with unchanged mode/eligibility checks and local background lifecycle; independently reviewed and ratified. Typed202 queued/already_running is not persisted job acceptance. Existing web re-detection adopted; no native administrator callers or Jellyfin equivalent found.",
+      "notes": "Shared frozen-v1 marker analysis service with unchanged mode/eligibility checks and local background lifecycle; independently reviewed and ratified. Episodes and intros only, as in v1. Typed202 queued/already_running is not persisted job acceptance. Web re-detection moved to the v2-only redetectAdminItemMarkers, which also offers credits and movies; no native administrator callers or Jellyfin equivalent found.",
       "retry_safety": "non_retryable",
       "retry_safety_note": "An in-process in-flight map coalesces active work only; no durable receipt, cluster-wide lease, or persisted job. Web disables mutation and authentication retries."
     },
@@ -36058,7 +36050,7 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "Retained as unversioned probe on api listener with public; no v2 JSON operation (owner decision 2026-09-07, Quick104): GET /api/v1/ready stays exactly as served today, outside the OpenAPI artifact and the /api/v1 tombstone; 200 {status:ok} when Postgres pings and S3 is unconfigured or its bucket answers, otherwise 503 {status:error, postgres, s3} with the booleans present only on failure. Orchestrator readiness probes stay pointed here (docs/continuum-to-silo-docker-migration.md). Contract: docs/architecture/api-contract.md."
+      "notes": "Retained as unversioned probe on api listener with public; no v2 JSON operation (owner decision 2026-09-07, Quick104): GET /api/v1/ready stays exactly as served today, outside the OpenAPI artifact and the /api/v1 tombstone; 200 {status:ok} when Postgres pings and S3 is unconfigured or its bucket answers, otherwise 503 {status:error, postgres, s3} with the booleans present only on failure. Orchestrator readiness probes stay pointed here. Contract: docs/architecture/api-contract.md."
     },
     {
       "listener": "api",
@@ -41767,18 +41759,18 @@
       ],
       "section": "settings-branding",
       "release_flow": "browse_search",
-      "tier": 1,
-      "disposition": "ported",
-      "disposition_rule": "default_ported",
-      "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
-      "owner": null,
+      "tier": 2,
+      "disposition": "removed",
+      "disposition_rule": "v1_scope_removals_table",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"The community theme catalog routes\"); still registered on the bridge surface, retired by the tombstone. No successor: the web client has a single theme and no theme catalog.",
+      "owner": "Quick104",
       "review_state": "ratified",
       "v2": {
-        "method": "GET",
-        "path": "/api/v2/theme/catalog",
-        "operation_id": "getThemeCatalog"
+        "method": null,
+        "path": null,
+        "operation_id": null
       },
-      "notes": "Implemented shared theme upstream/cache application methods and typed portable document envelopes; independently reviewed and accepted. Frozen v1 bytes, status/error codes, size caps and cache/stale headers retained. V2 validates document shape and rejects cap-sized possibly truncated reads. Approved HTTPS initial/redirect targets unchanged. Account-authenticated reads and acting-admin synchronous per-node refresh. Bundled web uses v2 and retains parser/CSS sanitization; no native or Jellyfin theme-catalog/download consumer. Capability GET /api/v2/theme/catalog/capabilities."
+      "notes": "Section settings-branding. The v2 theme catalog operations (getThemeCatalog, refreshThemeCatalog, downloadThemeFile, getThemeCatalogCapabilities) were removed before the v2 lock when theming was reduced to the single Cinema Dark theme, which only the admin customizes through accent color, ui.admin_theme_vars and ui.admin_custom_css. The bundled web client no longer calls the catalog; no native or Jellyfin consumer exists. The frozen v1 route keeps its bytes, status and error codes, size caps and cache headers, and the theme.catalog_url server setting keeps its default for it, until the /api/v1 tombstone retires it. Removal ratified 2026-09-26 (owner decision, Quick104)."
     },
     {
       "listener": "api",
@@ -41823,20 +41815,18 @@
       ],
       "section": "settings-branding",
       "release_flow": "core_admin",
-      "tier": 1,
-      "disposition": "ported",
-      "disposition_rule": "default_ported",
-      "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
-      "owner": null,
+      "tier": 2,
+      "disposition": "removed",
+      "disposition_rule": "v1_scope_removals_table",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"The community theme catalog routes\"); still registered on the bridge surface, retired by the tombstone. No successor: the web client has a single theme and no theme catalog.",
+      "owner": "Quick104",
       "review_state": "ratified",
       "v2": {
-        "method": "POST",
-        "path": "/api/v2/theme/catalog/refresh",
-        "operation_id": "refreshThemeCatalog"
+        "method": null,
+        "path": null,
+        "operation_id": null
       },
-      "notes": "Implemented shared theme upstream/cache application methods and typed portable document envelopes; independently reviewed and accepted. Frozen v1 bytes, status/error codes, size caps and cache/stale headers retained. V2 validates document shape and rejects cap-sized possibly truncated reads. Approved HTTPS initial/redirect targets unchanged. Account-authenticated reads and acting-admin synchronous per-node refresh. Bundled web uses v2 and retains parser/CSS sanitization; no native or Jellyfin theme-catalog/download consumer. Capability GET /api/v2/theme/catalog/capabilities.",
-      "retry_safety": "natural_idempotent",
-      "retry_safety_note": "Resets a cache timestamp; converges."
+      "notes": "Section settings-branding. The v2 theme catalog operations (getThemeCatalog, refreshThemeCatalog, downloadThemeFile, getThemeCatalogCapabilities) were removed before the v2 lock when theming was reduced to the single Cinema Dark theme, which only the admin customizes through accent color, ui.admin_theme_vars and ui.admin_custom_css. The bundled web client no longer calls the catalog; no native or Jellyfin consumer exists. The frozen v1 route keeps its bytes, status and error codes, size caps and cache headers, and the theme.catalog_url server setting keeps its default for it, until the /api/v1 tombstone retires it. Removal ratified 2026-09-26 (owner decision, Quick104)."
     },
     {
       "listener": "api",
@@ -41880,18 +41870,18 @@
       ],
       "section": "settings-branding",
       "release_flow": "browse_search",
-      "tier": 1,
-      "disposition": "ported",
-      "disposition_rule": "default_ported",
-      "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
-      "owner": null,
+      "tier": 2,
+      "disposition": "removed",
+      "disposition_rule": "v1_scope_removals_table",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"The community theme catalog routes\"); still registered on the bridge surface, retired by the tombstone. No successor: the web client has a single theme and no theme catalog.",
+      "owner": "Quick104",
       "review_state": "ratified",
       "v2": {
-        "method": "GET",
-        "path": "/api/v2/theme/download",
-        "operation_id": "downloadThemeFile"
+        "method": null,
+        "path": null,
+        "operation_id": null
       },
-      "notes": "Implemented shared theme upstream/cache application methods and typed portable document envelopes; independently reviewed and accepted. Frozen v1 bytes, status/error codes, size caps and cache/stale headers retained. V2 validates document shape and rejects cap-sized possibly truncated reads. Approved HTTPS initial/redirect targets unchanged. Account-authenticated reads and acting-admin synchronous per-node refresh. Bundled web uses v2 and retains parser/CSS sanitization; no native or Jellyfin theme-catalog/download consumer. Capability GET /api/v2/theme/catalog/capabilities."
+      "notes": "Section settings-branding. The v2 theme catalog operations (getThemeCatalog, refreshThemeCatalog, downloadThemeFile, getThemeCatalogCapabilities) were removed before the v2 lock when theming was reduced to the single Cinema Dark theme, which only the admin customizes through accent color, ui.admin_theme_vars and ui.admin_custom_css. The bundled web client no longer calls the catalog; no native or Jellyfin consumer exists. The frozen v1 route keeps its bytes, status and error codes, size caps and cache headers, and the theme.catalog_url server setting keeps its default for it, until the /api/v1 tombstone retires it. Removal ratified 2026-09-26 (owner decision, Quick104)."
     },
     {
       "listener": "api",

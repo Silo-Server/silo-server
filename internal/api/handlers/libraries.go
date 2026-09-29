@@ -68,6 +68,22 @@ type LibraryHandler struct {
 	EventsHub             *evt.Hub
 	ScanRegistry          *evt.ScanRegistry
 	ScanQueue             libraryScanQueuer
+	// RealtimeMonitor, when set, reconciles real-time library monitoring
+	// right after a library create, update or delete handled on this node.
+	RealtimeMonitor libraryMonitorPoker
+}
+
+// libraryMonitorPoker is the slice of *librarymonitor.Monitor the library
+// mutations use.
+type libraryMonitorPoker interface {
+	Poke()
+}
+
+// pokeRealtimeMonitor asks the monitor, if any, to reconcile now.
+func (h *LibraryHandler) pokeRealtimeMonitor() {
+	if h.RealtimeMonitor != nil {
+		h.RealtimeMonitor.Poke()
+	}
 }
 
 // pluginInstallationLister provides access to plugin installations and capabilities
@@ -184,6 +200,9 @@ type createLibraryRequest struct {
 	// TrailerKinds is the allow-list of remote video kinds fetched during
 	// metadata refresh; omitted = default (all provider kinds).
 	TrailerKinds []string `json:"trailer_kinds,omitempty"`
+	// RealtimeMonitoring is set only by the v2 createLibrary operation; the
+	// frozen /api/v1 body never carries it. nil means on.
+	RealtimeMonitoring *bool `json:"-"`
 }
 
 // updateLibraryRequest represents the JSON body for PUT /libraries/{id}.
@@ -199,6 +218,9 @@ type updateLibraryRequest struct {
 	// TrailerKinds is the allow-list of remote video kinds fetched during
 	// metadata refresh (ExtraKind values); empty array disables remote videos.
 	TrailerKinds *[]string `json:"trailer_kinds,omitempty"`
+	// RealtimeMonitoring is set only by the v2 updateLibrary operation; the
+	// frozen /api/v1 body never carries it, so v1 updates leave it unchanged.
+	RealtimeMonitoring *bool `json:"-"`
 }
 
 // scanRequest represents the JSON body for POST /scan.
@@ -248,6 +270,9 @@ type libraryResponse struct {
 	ScanWarningCode            *string    `json:"scan_warning_code,omitempty"`
 	ScanWarningMessage         *string    `json:"scan_warning_message,omitempty"`
 	ScanWarningAt              *time.Time `json:"scan_warning_at,omitempty"`
+	// RealtimeMonitoring is read by the v2 library view only; the frozen
+	// /api/v1 response does not carry it.
+	RealtimeMonitoring bool `json:"-"`
 }
 
 type libraryMountCheckRootResponse struct {
@@ -387,6 +412,7 @@ func toLibraryResponse(f *models.MediaFolder) libraryResponse {
 		ScanWarningCode:            f.ScanWarningCode,
 		ScanWarningMessage:         f.ScanWarningMessage,
 		ScanWarningAt:              f.ScanWarningAt,
+		RealtimeMonitoring:         f.RealtimeMonitoring,
 	}
 }
 

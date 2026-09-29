@@ -249,7 +249,7 @@ func (h *PlaybackHandler) recordTranscodeStreamDetails(ctx context.Context, upst
 		return
 	}
 	transcodeAudio := playback.TranscodesAudio(opts.TargetCodecAudio)
-	if err := setter.SetTranscodeStreamDetails(upstreamSessionID, opts.TargetCodecVideo, opts.TargetCodecAudio, transcodeAudio, opts.HWAccel, opts.ToneMapMode); err != nil {
+	if err := setter.SetTranscodeStreamDetails(upstreamSessionID, opts.TargetCodecVideo, opts.TargetCodecAudio, transcodeAudio, opts.EffectiveEncoderHWAccel(), opts.ToneMapMode); err != nil {
 		slog.WarnContext(ctx, "record transcode stream details failed", "component", "jellycompat",
 			"error", err, "playback_session_id", upstreamSessionID)
 		return
@@ -340,8 +340,12 @@ type PlaybackHandler struct {
 	// driven to refresh a stale token, so the node reconstructs from this
 	// server-authoritative store instead (see internal/noderecipe). Optional
 	// (nil disables it — integrated/no-node deployments need no handoff).
-	RecipeNodeStore          recipeNodePutter
-	compatToneMapProbe       func(context.Context, string, string, string) (tonemap.Capabilities, error)
+	RecipeNodeStore    recipeNodePutter
+	compatToneMapProbe func(context.Context, string, string, string) (tonemap.Capabilities, error)
+	// Test hooks for the Dolby Vision strip: the per-file RPU probe and the
+	// API host's dovi_rpu filter check.
+	compatDVRPUProbe         func(context.Context, string) bool
+	compatDVStripLocalProbe  func() bool
 	compatAudioRegistryMu    sync.Mutex
 	compatAudioRegistry      *playback.TransformationRegistryV3
 	compatAudioRegistryPath  string
@@ -711,6 +715,17 @@ func compatSupportsAudioBoost(transformations []playback.TransformationV3) bool 
 	return false
 }
 
+func compatSupportsHEVCEncoding(transformations []playback.TransformationV3) bool {
+	for _, transformation := range transformations {
+		if strings.EqualFold(strings.TrimSpace(transformation.Name), playback.TransformationVideoToHEVCV3) &&
+			strings.EqualFold(strings.TrimSpace(transformation.Executor), playback.ExecutorServerV3) &&
+			strings.TrimSpace(transformation.RecipeVersion) == playback.TransformationVideoToHEVCRecipeVersionV3 {
+			return true
+		}
+	}
+	return false
+}
+
 // toneMapCapabilityTimeout bounds one capability sweep. Every caller wraps a
 // single deadline around concurrent per-node fetches (plus the local probe),
 // so the budget has to cover the slowest node in the fan-out, not a typical
@@ -1024,6 +1039,12 @@ func (h *PlaybackHandler) resolveCompatHLSRouteOnNodeWithPolicy(
 	if err != nil {
 		return noderouting.Decision{}, err
 	}
+	if source.DVStripToHDR10 && !videoTranscode {
+		eligible, excludedShapes = h.compatDVStripRouting(ctx, eligible, excludedShapes, compatHLSRecipeSourceAudioChannels(source))
+	}
+	if compatSourceTargetVideoCodec(source) == compatVideoCodecHEVC {
+		eligible, excludedShapes = h.compatHEVCRouting(ctx, source, eligible, excludedShapes)
+	}
 	currentTranscodeURL := session.TranscodeNodeURL
 	if requiredTranscodeURL != "" {
 		requiredTranscodeURL = strings.TrimRight(requiredTranscodeURL, "/")
@@ -1063,6 +1084,16 @@ func (h *PlaybackHandler) allow4KVideoTranscode(ctx context.Context) bool {
 	}
 	v, _ := h.SettingsRepo.Get(ctx, config.Allow4KTranscodeSettingKey)
 	return v == "true"
+}
+
+// allowHEVCVideoEncoding reads opt-in HEVC encoding. Missing or unreadable
+// settings fail closed and retain the H.264 ladder.
+func (h *PlaybackHandler) allowHEVCVideoEncoding(ctx context.Context) bool {
+	if h.SettingsRepo == nil {
+		return false
+	}
+	v, _ := h.SettingsRepo.Get(ctx, config.PlaybackAllowHEVCEncodingSettingKey)
+	return strings.EqualFold(strings.TrimSpace(v), "true")
 }
 
 func is4KResolution(res string) bool {
@@ -1508,6 +1539,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		expectedAudioTrackIndex := compatAudioTrackIndexOrDefault(source)
 		if current, ok := h.playbackStore.Get(playSessionID); ok && current.TranscodeStarted && current.Recipe != nil && current.Recipe.TranscodeNodeURL != "" &&
 			current.Recipe.MediaFileID == source.FileID &&
+			compatRecipeTargetVideoMatchesSource(current.Recipe, source) &&
 			current.Recipe.SourceAudioChannels == expectedSourceAudioChannels &&
 			current.Recipe.AudioTrackIndex == expectedAudioTrackIndex &&
 			playback.ValidateCopyFMP4RecipeCard(*current.Recipe) == nil {
@@ -1517,16 +1549,27 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 			}
 		}
 	}
-	if sourceAudioChannels := compatHLSRecipeSourceAudioChannels(source); sourceAudioChannels > 0 {
+	sourceAudioChannels := compatHLSRecipeSourceAudioChannels(source)
+	hevcEncoding := compatSourceTargetVideoCodec(source) == compatVideoCodecHEVC
+	if sourceAudioChannels > 0 || hevcEncoding {
 		capabilityCtx, cancelCapabilityFetch := context.WithTimeout(ctx, h.toneMapCapabilityTimeout())
 		info, capabilityErr := h.remoteToneMapCapabilityInfo(capabilityCtx, transcodeNodeURL)
 		cancelCapabilityFetch()
 		if capabilityErr != nil {
-			return fmt.Errorf("load transcode node audio recipe capabilities: %w", capabilityErr)
+			return fmt.Errorf("load transcode node recipe capabilities: %w", capabilityErr)
 		}
-		if !compatSupportsAudioBoost(info.Transformations) {
+		if sourceAudioChannels > 0 && !compatSupportsAudioBoost(info.Transformations) {
 			return fmt.Errorf("transcode node does not support %s recipe %s", playback.TransformationAudioToAACV3, playback.TransformationAudioToAACRecipeVersionV3)
 		}
+		if hevcEncoding && !compatSupportsHEVCEncoding(info.Transformations) {
+			// Keep the negotiated codec and packaging frozen. The caller can
+			// exclude this node and try another executor without sending it a
+			// recipe it cannot run or silently replacing HEVC with H.264.
+			return fmt.Errorf("transcode node does not support %s recipe %s", playback.TransformationVideoToHEVCV3, playback.TransformationVideoToHEVCRecipeVersionV3)
+		}
+	}
+	if source.DVStripToHDR10 && compatHLSCopiesVideo(source) && !h.compatTranscodeNodeCanStrip(transcodeNodeURL) {
+		return fmt.Errorf("transcode node does not support %s recipe %s", playback.TransformationServerDV7HDR10V3, compatDVStripRecipeVersion)
 	}
 	if h.sessionMgr != nil {
 		if err := h.sessionMgr.SetTranscodeNodeURL(upstreamSessionID, transcodeNodeURL); err != nil {
@@ -1626,8 +1669,9 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		TargetBitrateKbps:      source.TargetBitrateKbps,
 		TargetResolution:       source.TargetResolution,
 		TargetAudioChannels:    source.TargetAudioChannels,
-		TargetCodecVideo:       compatTargetVideoCodec,
+		TargetCodecVideo:       compatSourceTargetVideoCodec(source),
 		TargetCodecAudio:       compatTargetAudioCodec,
+		VideoSampleEntry:       compatSourceVideoSampleEntry(source),
 		SegmentDuration:        segmentDuration,
 		HWAccel:                h.remoteDispatchHWAccel(transcodeNodeURL),
 		AudioTrackIndex:        compatAudioTrackIndexOrDefault(source),
@@ -1662,7 +1706,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	}
 	if compatHLSCopiesVideo(source) {
 		reqBody.TargetCodecVideo = compatCopyCodec
-		reqBody.VideoSampleEntry = playback.VideoSampleEntryForDVCopy(file.PrimaryDVProfile())
+		reqBody.VideoSampleEntry, reqBody.VideoBitstreamFilter = compatCopyVideoRecipe(source, file.PrimaryDVProfile())
 		reqBody.CopyVideoMPEGTS = source.HLSRemuxMPEGTS
 		reqBody.CopyFMP4RecipeVersion = playback.CopyFMP4RecipeVersion
 	}
@@ -1867,6 +1911,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		SubtitleCodec:          reqBody.SubtitleCodec,
 		TargetBitrateKbps:      reqBody.TargetBitrateKbps,
 		VideoSampleEntry:       reqBody.VideoSampleEntry,
+		VideoBitstreamFilter:   reqBody.VideoBitstreamFilter,
 		CopyVideoMPEGTS:        reqBody.CopyVideoMPEGTS,
 		SegmentDuration:        reqBody.SegmentDuration,
 		AudioTrackIndex:        reqBody.AudioTrackIndex,
@@ -1880,6 +1925,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	}
 	toneMapRecipe.apply(&opts)
 	opts.HWAccel = strings.TrimSpace(nodeResponse.HWAccel)
+	opts.EncoderHWAccel = strings.TrimSpace(nodeResponse.EncoderHWAccel)
 	opts.ToneMapMode = nodeResponse.ToneMapMode
 	if compatHLSCopiesVideo(source) {
 		opts.TargetCodecVideo = compatCopyCodec
@@ -2145,6 +2191,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 	defer cancelAttachmentProbe()
 
 	allow4KTranscode := h.allow4KVideoTranscode(r.Context())
+	allowHEVCEncoding := h.allowHEVCVideoEncoding(r.Context())
 	toneMapPolicy := tonemap.PolicyNone
 	toneMapPolicyLoaded := false
 	var toneMapCapabilities tonemap.Capabilities
@@ -2173,10 +2220,11 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	for _, version := range detail.Versions {
-		source := h.buildPlaybackSource(routeItemID, playSessionID, version, profile, req, allow4KTranscode)
+		source := h.buildPlaybackSource(routeItemID, playSessionID, version, profile, req, allow4KTranscode, allowHEVCEncoding)
 		if req.MediaSourceID != "" && !mediaSourceIDsEqual(source.ID, req.MediaSourceID) {
 			continue
 		}
+		source = h.applyCompatDVStrip(r.Context(), routeItemID, playSessionID, source, profile, req, allow4KTranscode)
 
 		// Resolve the client's subtitle selection against both the
 		// embedded/external tracks and any downloaded subtitles before
@@ -2245,6 +2293,13 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 			source = applyCompatToneMapAvailabilityWithPolicy(source, toneMapCapabilities, toneMapPolicy)
 		}
 
+		// Choose the fallback before publishing codec/container URLs. A later
+		// executor retry must preserve the negotiated stream format.
+		if source.SupportsTranscoding && compatSourceTargetVideoCodec(source) == compatVideoCodecHEVC &&
+			!h.compatHEVCExecutable(r.Context(), source) {
+			source.TargetVideoCodec = compatTargetVideoCodec
+			source.SupportsTranscoding = profile.supportsTranscodingOutput(version, source.TargetAudioChannels, source.TargetBitrateKbps, source.TargetResolution)
+		}
 		source.SiloSeekReanchor = req.SiloSeekReanchor && compatHLSCopiesVideo(source) && source.SupportsTranscoding
 		sources = append(sources, source)
 		dto := h.mediaSourceDTO(routeItemID, playSessionID, session.Token, source)
@@ -2403,6 +2458,7 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	profile DeviceProfile,
 	req playbackInfoRequest,
 	allow4KTranscode bool,
+	allowHEVCEncoding ...bool,
 ) PlaybackMediaSource {
 	sourceID := h.codec.EncodeIntID(EncodedIDMediaSource, int64(version.FileID))
 	enableDirectPlay := boolDefault(req.EnableDirectPlay, true)
@@ -2490,7 +2546,14 @@ func (h *PlaybackHandler) buildPlaybackSource(
 			targetResolution = ""
 		}
 	}
+	targetVideoCodec := compatTargetVideoCodec
 	canEncodeOutput := profile.supportsTranscodingOutput(version, targetAudioChannels, max(targetBitrateKbps, 0), targetResolution)
+	// HEVC needs server opt-in and an explicit compatible HLS fMP4 profile.
+	if len(allowHEVCEncoding) > 0 && allowHEVCEncoding[0] &&
+		profile.supportsHEVCTranscodingOutput(version, targetAudioChannels, max(targetBitrateKbps, 0), targetResolution) {
+		targetVideoCodec = compatVideoCodecHEVC
+		canEncodeOutput = true
+	}
 	supportsTranscoding := enableTranscoding &&
 		(hlsAudioCopy || transcodeAudio || canEncodeOutput)
 	// Don't offer full video encodes of 4K sources when allow_4k_transcode is
@@ -2510,6 +2573,7 @@ func (h *PlaybackHandler) buildPlaybackSource(
 		TargetBitrateKbps:          max(targetBitrateKbps, 0),
 		TargetResolution:           targetResolution,
 		TargetAudioChannels:        targetAudioChannels,
+		TargetVideoCodec:           targetVideoCodec,
 		ID:                         sourceID,
 		FileID:                     version.FileID,
 		Version:                    version,
@@ -2641,6 +2705,8 @@ func (h *PlaybackHandler) mediaSourceDTO(routeItemID, playSessionID, compatToken
 			} else {
 				dto.TranscodingContainer = compatContainerMP4
 			}
+		} else if compatSourceTargetVideoCodec(source) == compatVideoCodecHEVC {
+			dto.TranscodingContainer = compatContainerMP4
 		} else {
 			dto.TranscodingContainer = "ts"
 		}
@@ -2773,13 +2839,14 @@ func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version c
 func compatNegotiationVariant(sources []PlaybackMediaSource) string {
 	var variant strings.Builder
 	for _, source := range sources {
-		fmt.Fprintf(&variant, "%s|a=%s|s=%s|r=%t|ts=%t|ta=%t;",
+		fmt.Fprintf(&variant, "%s|a=%s|s=%s|r=%t|ts=%t|ta=%t|dv=%t;",
 			source.ID,
 			compatOptionalIndex(source.SelectedAudioStreamIndex),
 			compatOptionalIndex(source.SelectedSubtitleStreamIndex),
 			source.HLSRemux,
 			source.HLSRemuxMPEGTS,
 			source.TranscodeAudio,
+			source.DVStripToHDR10,
 		)
 	}
 	return variant.String()
@@ -3678,6 +3745,7 @@ func applyCompatSubtitleDelivery(source *PlaybackMediaSource, profile DeviceProf
 			source.HLSRemux = false
 			source.HLSRemuxAudioStreamIndexes = nil
 			source.HLSRemuxMPEGTS = false
+			source.DVStripToHDR10 = false
 			if source.SupportsTranscoding {
 				ordinal := 0
 				for preceding := 0; preceding < index; preceding++ {

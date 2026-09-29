@@ -28,27 +28,49 @@ func TestNextIDReturnsIncreasingDecimalIDs(t *testing.T) {
 	}
 }
 
-func TestNewSonyflakeFallsBackWithoutPrivateIPv4(t *testing.T) {
-	gen, err := newSonyflake(sonyflake.Settings{
-		StartTime: epoch,
-		MachineID: func() (int, error) { return 0, sonyflake.ErrNoPrivateAddress },
-	})
+func TestNextIDRefusesAnExpiredLease(t *testing.T) {
+	restoreActive(t)
+	g, err := newGenerator(42)
 	if err != nil {
-		t.Fatalf("newSonyflake: %v", err)
+		t.Fatal(err)
 	}
-	if _, err := gen.NextID(); err != nil {
-		t.Fatalf("NextID: %v", err)
+	g.validUntil.Store(&instant{})
+	active.Store(g)
+	if _, err := NextID(); !errors.Is(err, ErrLeaseExpired) {
+		t.Fatalf("NextID error = %v, want ErrLeaseExpired", err)
 	}
 }
 
-func TestNewSonyflakeReportsOtherMachineIDErrors(t *testing.T) {
-	wantErr := errors.New("interface lookup failed")
-	_, err := newSonyflake(sonyflake.Settings{
-		StartTime: epoch,
-		MachineID: func() (int, error) { return 0, wantErr },
+// After a host suspension the monotonic clock has not moved, but the wall
+// clock has, and another process may have taken the machine ID.
+func TestNextIDRefusesALeaseThatLapsedWhileSuspended(t *testing.T) {
+	restoreActive(t)
+	g, err := newGenerator(42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := currentInstant()
+	g.validUntil.Store(&instant{mono: now.mono + int64(time.Hour), wall: now.wall - 1})
+	active.Store(g)
+	if _, err := NextID(); !errors.Is(err, ErrLeaseExpired) {
+		t.Fatalf("NextID error = %v, want ErrLeaseExpired", err)
+	}
+}
+
+func TestNextIDRefusesIDMintedAfterLeaseExpiry(t *testing.T) {
+	g, err := newGenerator(42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := currentInstant()
+	g.validUntil.Store(&instant{mono: deadline.mono + int64(time.Hour), wall: deadline.wall + int64(time.Hour)})
+
+	id, err := mintID(g, func() (int64, error) {
+		g.validUntil.Store(&instant{})
+		return 123, nil
 	})
-	if !errors.Is(err, wantErr) {
-		t.Fatalf("newSonyflake error = %v, want %v", err, wantErr)
+	if id != "" || !errors.Is(err, ErrLeaseExpired) {
+		t.Fatalf("mintID after lease expiry = (%q, %v), want empty ID and ErrLeaseExpired", id, err)
 	}
 }
 

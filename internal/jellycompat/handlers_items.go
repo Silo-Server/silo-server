@@ -74,6 +74,9 @@ type ItemsHandler struct {
 	// unbounded progress scan. It is the section subsystem's read-time fetcher and
 	// is independent of any virtual-library/hub-section exposure.
 	sectionsFetcher *sections.Fetcher
+	// realtimeMonitoring reads the live server-wide
+	// scanner.realtime_monitoring switch. Nil counts as on, the default.
+	realtimeMonitoring func() bool
 }
 
 type MarkerPopulationService interface {
@@ -915,6 +918,14 @@ func (h *ItemsHandler) HandleGroupingOptionsStub(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusOK, []struct{}{})
 }
 
+// enableRealtimeMonitor is a library's Jellyfin EnableRealtimeMonitor value:
+// real-time monitoring is effective only while both the library's switch and
+// the live server-wide switch are on. A nil server reader counts as on, the
+// setting's default.
+func enableRealtimeMonitor(server func() bool, library bool) bool {
+	return library && (server == nil || server())
+}
+
 // HandleVirtualFolders serves GET /Library/VirtualFolders.
 // Returns library metadata so clients like Infuse know library collection types.
 func (h *ItemsHandler) HandleVirtualFolders(w http.ResponseWriter, r *http.Request) {
@@ -939,7 +950,7 @@ func (h *ItemsHandler) HandleVirtualFolders(w http.ResponseWriter, r *http.Reque
 			ItemID:         h.codec.EncodeIntID(EncodedIDLibrary, int64(lib.ID)),
 			LibraryOptions: virtualLibraryOptDTO{
 				Enabled:                 true,
-				EnableRealtimeMonitor:   true,
+				EnableRealtimeMonitor:   enableRealtimeMonitor(h.realtimeMonitoring, lib.RealtimeMonitoring),
 				EnableInternetProviders: true,
 				SeasonZeroDisplayName:   "Specials",
 				TypeOptions:             []string{},

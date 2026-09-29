@@ -424,6 +424,20 @@ func TestGenerateFullManifest_HLSVersionForResumeStartTag(t *testing.T) {
 	}
 }
 
+func TestCompatHLSUsesFMP4ForEncodedHEVC(t *testing.T) {
+	hevc := PlaybackMediaSource{TargetVideoCodec: compatVideoCodecHEVC}
+	if !compatHLSUsesFMP4(hevc) {
+		t.Fatal("encoded HEVC did not select fMP4 manifest")
+	}
+	manifest := string(generateFullManifest(60, 2, compatHLSUsesFMP4(hevc), 0))
+	if !strings.Contains(manifest, `#EXT-X-MAP:URI="init.mp4"`) || !strings.Contains(manifest, "seg_00000.m4s") || strings.Contains(manifest, "seg_00000.ts") {
+		t.Fatalf("encoded HEVC manifest does not match fMP4 output: %s", manifest)
+	}
+	if compatHLSUsesFMP4(PlaybackMediaSource{}) {
+		t.Fatal("legacy H264 encode unexpectedly selected fMP4")
+	}
+}
+
 func TestShouldGenerateCompatFullManifestBoundsSegmentCount(t *testing.T) {
 	short := PlaybackMediaSource{Version: catalog.FileVersion{Duration: 100_000}}
 	if !shouldGenerateCompatFullManifest(short, 2) {
@@ -1761,6 +1775,8 @@ func TestCompatMasterAudioCodecJellyfin12Strings(t *testing.T) {
 		{"truehd", "", false, "mlpa"},
 		{"dts", "DTS-HD MA + DTS:X", false, "dtsh"},
 		{"dts", "DTS-HD HRA", false, "dtsh"},
+		{"dts", "DTS-HD HRA + DTS:X", false, "dtsh"},
+		{"dts", "DTS-HD HRA + DTS:X IMAX", false, "dtsh"},
 		{"dts", "DTS Express", false, "dtse"},
 		{"dts", "DTS-ES", false, "dtsc"},
 		{"dts", "", false, "dtsc"},

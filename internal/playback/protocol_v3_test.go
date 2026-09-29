@@ -167,6 +167,56 @@ func TestResolveQualityPolicyV3CompoundRung(t *testing.T) {
 	}
 }
 
+func TestPlanPlaybackV3CroppedRungKeepsEncoderHeight(t *testing.T) {
+	for _, tc := range []struct {
+		name                      string
+		width, height             int
+		rung                      string
+		wantWidth, wantHeight     int
+		wantResolution, wantScale string
+	}{
+		{"cropped 1080p on 720p rung", 1918, 700, QualityRung720pMediumV3, 1918, 700, "700p", ""},
+		{"cropped 720p on 480p rung", 1024, 436, "480p", 1024, 436, "436p", ""},
+		{"same class crop", 1918, 872, QualityRung1080pMediumV3, 1918, 872, "872p", ""},
+		{"lower resolution", 1920, 1080, QualityRung720pMediumV3, 1280, 720, "720p", "scale=-2:720"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := bitratePolicyFixtureV3()
+			input.EffectiveFile.VideoTracks[0].Width = tc.width
+			input.EffectiveFile.VideoTracks[0].Height = tc.height
+			input.Request.QualityPreference = tc.rung
+			result := PlanPlaybackV3(input)
+			if result.Plan == nil || result.PlayMethod != PlayTranscode {
+				t.Fatalf("expected a transcode plan: %s", ExplainPlannerResultV3(result))
+			}
+			advertised := false
+			for _, quality := range result.Plan.AvailableQualities {
+				if quality.Label == tc.rung {
+					advertised = true
+				}
+			}
+			if !advertised {
+				t.Fatalf("selected rung %q is missing from the menu", tc.rung)
+			}
+			recipe := result.Plan.EffectiveRecipe
+			if optionalValueV3(recipe.Width) != tc.wantWidth || optionalValueV3(recipe.Height) != tc.wantHeight {
+				t.Fatalf("recipe dimensions = %dx%d, want %dx%d", optionalValueV3(recipe.Width), optionalValueV3(recipe.Height), tc.wantWidth, tc.wantHeight)
+			}
+			if result.TargetResolution != tc.wantResolution {
+				t.Errorf("encoder target = %q, want %q", result.TargetResolution, tc.wantResolution)
+			}
+			args := appendVideoFilterArgs(nil, TranscodeOpts{TargetResolution: result.TargetResolution})
+			var wantArgs []string
+			if tc.wantScale != "" {
+				wantArgs = []string{"-vf", tc.wantScale}
+			}
+			if !reflect.DeepEqual(args, wantArgs) {
+				t.Errorf("encoder filter args = %v, want %v", args, wantArgs)
+			}
+		})
+	}
+}
+
 func TestReplanRequestV3OperationDefaultsAndValidates(t *testing.T) {
 	start := validStartRequestV3()
 	request := ReplanRequestV3{
@@ -3037,6 +3087,88 @@ func TestPlanPlaybackV3PublishesAvailableQualities(t *testing.T) {
 	result = PlanPlaybackV3(PlannerInputV3{Request: noHLS, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
 	if result.Plan == nil || len(result.Plan.AvailableQualities) != 1 || result.Plan.AvailableQualities[0].Label != "original" {
 		t.Fatalf("no-HLS qualities = %#v (%s)", result.Plan, ExplainPlannerResultV3(result))
+	}
+}
+
+// Cropped encodes sit a few pixels under the nominal class size. They must
+// land in the class the scanner labels them with, or the ladder drops the
+// same-class rungs (a 1918x872 "1080p" file offered no 1080p rungs).
+func TestSourceLadderHeightV3MatchesScannerBuckets(t *testing.T) {
+	cases := []struct {
+		width, height, want int
+	}{
+		{0, 0, 0},
+		{720, 404, 480},
+		{854, 480, 480},
+		{1276, 532, 720},
+		{1280, 720, 720},
+		{1918, 872, 1080},
+		{1920, 800, 1080},
+		{1440, 1080, 1080},
+		{1920, 1080, 1080},
+		{3836, 1600, 2160},
+		{3840, 2160, 2160},
+		{7680, 3200, 4320},
+		{7680, 4320, 4320},
+	}
+	for _, tc := range cases {
+		if got := sourceLadderHeightV3(SourceDescriptorV3{Width: tc.width, Height: tc.height}); got != tc.want {
+			t.Errorf("sourceLadderHeightV3(%dx%d) = %d, want %d", tc.width, tc.height, got, tc.want)
+		}
+	}
+}
+
+// An 8K source is above every rung, so a 4K rung must scale it to 2160 lines
+// rather than keep 4320 lines as a same-class rung would.
+func TestCompoundRungQualityResultV3Scales8KToFourK(t *testing.T) {
+	rung, ok := ladderRungForLabelV3(QualityRung2160pMediumV3)
+	if !ok {
+		t.Fatal("2160p-medium rung missing")
+	}
+	source := SourceDescriptorV3{VideoCodec: "hevc", Width: 7680, Height: 4320, BitrateKbps: 80_000}
+	got := compoundRungQualityResultV3(rung, source, 0, nil)
+	if got.Height != 2160 || got.Label != "2160p" || !got.RequiresTranscode {
+		t.Fatalf("8K on 4K Medium = %+v, want a 2160-line transcode", got)
+	}
+}
+
+func TestAvailableQualitiesV3CroppedSourceKeepsSameClassRungs(t *testing.T) {
+	source := SourceDescriptorV3{VideoCodec: "h264", Width: 1918, Height: 872, BitrateKbps: 10_858, DynamicRange: DynamicRangeSDRV3}
+	qualities := availableQualitiesV3(PlannerInputV3{
+		Request:  validStartRequestV3(),
+		Settings: PlannerSettingsV3{TranscodeEnabled: true},
+	}, source)
+	labels := make([]string, 0, len(qualities))
+	for _, quality := range qualities {
+		labels = append(labels, quality.Label)
+	}
+	want := []string{
+		QualityOriginalV3,
+		QualityRung1080pHighV3, QualityRung1080pMediumV3, QualityRung1080pLowV3,
+		QualityRung720pHighV3, QualityRung720pMediumV3, QualityRung720pLowV3,
+		"480p",
+	}
+	if !reflect.DeepEqual(labels, want) {
+		t.Fatalf("labels = %v, want %v", labels, want)
+	}
+}
+
+// A viewer whose account may not transcode is refused every rung at
+// admission, so the ladder must not offer them.
+func TestAvailableQualitiesV3ViewerTranscodeDisabledPublishesOriginalOnly(t *testing.T) {
+	source := SourceDescriptorV3{VideoCodec: "h264", Width: 1920, Height: 960, BitrateKbps: 10_852, DynamicRange: DynamicRangeSDRV3}
+	input := PlannerInputV3{
+		Request:  validStartRequestV3(),
+		Settings: PlannerSettingsV3{TranscodeEnabled: true},
+	}
+	if got := availableQualitiesV3(input, source); len(got) < 2 {
+		t.Fatalf("allowed viewer qualities = %#v, want the transcode ladder", got)
+	}
+
+	input.Settings.ViewerTranscodeDisabled = true
+	got := availableQualitiesV3(input, source)
+	if len(got) != 1 || got[0].Label != QualityOriginalV3 || !got[0].PreservesSource {
+		t.Fatalf("restricted viewer qualities = %#v, want original only", got)
 	}
 }
 

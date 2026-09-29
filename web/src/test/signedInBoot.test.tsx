@@ -193,7 +193,7 @@ describe("app boot request budget", () => {
       unauthorized: 0,
       refreshes: 1,
       duplicateGets: 0,
-      total: 19,
+      total: 18,
     });
     // The session restore starts beside the public setup reads, not after them.
     expect(
@@ -398,7 +398,7 @@ describe("app boot request budget", () => {
       unauthorized: 0,
       refreshes: 0,
       duplicateGets: 1,
-      total: 9,
+      total: 8,
     });
     expect(
       viewedAccount.filter((request) => request.operation === "GET /api/v2/profiles"),

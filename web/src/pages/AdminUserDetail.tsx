@@ -21,6 +21,7 @@ import {
   useUpdateUser,
   useAdminUserCapabilities,
   useViewerIsOwner,
+  useTransferOwnership,
   useAdminUserDeviceSettings,
   useAdminUserSettings,
   useDeleteAdminUserDeviceSetting,
@@ -45,6 +46,7 @@ import {
   policyInheritHints,
   policyStateFromUser,
   policyUpdateFields,
+  savedUserPolicyInheritHints,
 } from "@/components/UserPolicyFields";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -78,8 +80,14 @@ import {
 import { useNavigate } from "react-router";
 import { AdminUserImpersonationDialog } from "@/components/AdminUserImpersonationDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
-import { canManageAccount, canViewAsAccount } from "@/lib/accountOwner";
+import {
+  accountRoleLabel,
+  canManageAccount,
+  canTransferOwnership,
+  canViewAsAccount,
+} from "@/lib/accountOwner";
 import { formatPlaybackQualityPreset } from "@/lib/playback-quality";
 import { formatStreamBitrateLimit } from "@/lib/streamBitrateLimit";
 import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
@@ -111,6 +119,7 @@ import {
 } from "@/lib/datetime";
 
 import { formatDecisionLabel } from "./adminActivityPresentation";
+import { AccountRequestsPanel } from "./admin-users/AccountRequestsPanel";
 
 export default function AdminUserDetail() {
   useAuth();
@@ -139,6 +148,8 @@ function AdminUserDetailPage() {
   const available = capabilities.data?.available === true;
   const [confirmImpersonateOpen, setConfirmImpersonateOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const transferOwnership = useTransferOwnership();
 
   if (isLoading) return <div className="page-shell py-8">Loading user...</div>;
   if (!user) {
@@ -183,7 +194,23 @@ function AdminUserDetailPage() {
   }
 
   const impersonationDisabled = !canViewAsAccount(user, viewerId, viewerIsOwner);
-  const manageable = canManageAccount(user, viewerId);
+  const manageable = canManageAccount(user, viewerId, viewerIsOwner);
+  const transferable =
+    capabilities.data?.ownership_transfer === true &&
+    canTransferOwnership(user, viewerId, viewerIsOwner);
+
+  function handleTransfer() {
+    if (!user) return;
+    setActionError("");
+    transferOwnership.mutate(
+      { id: user.id, profileContext: authority },
+      {
+        onSuccess: () => toast.success(`${user.username} is now the server owner`),
+        onError: (err) =>
+          setActionError(err instanceof Error ? err.message : "Could not transfer ownership."),
+      },
+    );
+  }
 
   async function loadEditor(deleting = false) {
     if (busy.current || !available) return;
@@ -229,8 +256,9 @@ function AdminUserDetailPage() {
         <div className="min-w-0 flex-1 space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">{user.username}</h1>
-            <Badge variant={user.role === "admin" ? "default" : "secondary"}>{user.role}</Badge>
-            {user.is_owner && <Badge variant="outline">Owner</Badge>}
+            <Badge variant={user.role === "admin" ? "default" : "secondary"}>
+              {accountRoleLabel(user)}
+            </Badge>
             <Badge variant={user.enabled ? "outline" : "destructive"}>
               {user.enabled ? "Active" : "Disabled"}
             </Badge>
@@ -239,7 +267,9 @@ function AdminUserDetailPage() {
           <p className="page-subtitle text-sm sm:text-base">{user.email}</p>
           {!manageable && (
             <p className="text-muted-foreground text-sm">
-              This is the server owner. Only the owner can change this account.
+              {user.is_owner
+                ? "This is the server owner. Only the owner can change this account."
+                : "Only the server owner can change another admin account."}
             </p>
           )}
         </div>
@@ -295,7 +325,18 @@ function AdminUserDetailPage() {
               <KeyRound className="mr-1 h-3.5 w-3.5" /> Reset password
             </Button>
           )}
-          {!user.is_owner && (
+          {transferable && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 sm:flex-none"
+              onClick={() => setTransferOpen(true)}
+              disabled={!available || transferOwnership.isPending}
+            >
+              Make owner
+            </Button>
+          )}
+          {!user.is_owner && user.id !== viewerId && manageable && (
             <Button
               variant="destructive"
               size="sm"
@@ -341,6 +382,15 @@ function AdminUserDetailPage() {
           <IPHistoryTab userId={userId} />
         </TabsContent>
       </Tabs>
+      <ConfirmDialog
+        open={transferOpen}
+        onOpenChange={setTransferOpen}
+        title={`Make ${user.username} the server owner?`}
+        description={`${user.username} becomes the only account that can manage admins, and you stay an admin. Only ${user.username} can transfer ownership back.`}
+        confirmLabel="Make owner"
+        onConfirm={handleTransfer}
+        isPending={transferOwnership.isPending}
+      />
       {confirmImpersonateOpen && (
         <AdminUserImpersonationDialog
           user={user}
@@ -384,11 +434,12 @@ function OverviewTab({ user }: { user: AdminUser }) {
               return lib ? lib.name : `#${id}`;
             })
             .join(", ");
-  const groupName =
+  const knownGroupName =
     user.access_group_id === null
-      ? "None"
-      : (accessGroups.find((group) => group.id === user.access_group_id)?.name ??
-        `#${user.access_group_id}`);
+      ? undefined
+      : accessGroups.find((group) => group.id === user.access_group_id)?.name;
+  const groupName =
+    user.access_group_id === null ? "None" : (knownGroupName ?? `#${user.access_group_id}`);
 
   // Effective values, annotated when the account overrides its group.
   const overridden = (isOverride: boolean) => (isOverride ? " (override)" : "");
@@ -396,18 +447,21 @@ function OverviewTab({ user }: { user: AdminUser }) {
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-      <div className="surface-panel overflow-hidden rounded-2xl border-0">
-        <div className="border-border border-b px-4 py-3">
-          <h3 className="text-sm font-medium">Account</h3>
+      <div className="flex min-w-0 flex-col gap-6">
+        <div className="surface-panel overflow-hidden rounded-2xl border-0">
+          <div className="border-border border-b px-4 py-3">
+            <h3 className="text-sm font-medium">Account</h3>
+          </div>
+          <div className="divide-border divide-y">
+            <DetailRow label="Username" value={user.username} />
+            <DetailRow label="Email" value={user.email} />
+            <DetailRow label="Role" value={accountRoleLabel(user)} />
+            <DetailRow label="Status" value={user.enabled ? "Active" : "Disabled"} />
+            <DetailRow label="Created" value={formatDate(user.created_at)} />
+            <DetailRow label="Updated" value={formatDate(user.updated_at)} />
+          </div>
         </div>
-        <div className="divide-border divide-y">
-          <DetailRow label="Username" value={user.username} />
-          <DetailRow label="Email" value={user.email} />
-          <DetailRow label="Role" value={user.role} />
-          <DetailRow label="Status" value={user.enabled ? "Active" : "Disabled"} />
-          <DetailRow label="Created" value={formatDate(user.created_at)} />
-          <DetailRow label="Updated" value={formatDate(user.updated_at)} />
-        </div>
+        <AccountRequestsPanel user={user} groupName={knownGroupName} />
       </div>
 
       <div className="surface-panel overflow-hidden rounded-2xl border-0">
@@ -1208,6 +1262,13 @@ function EditUserForm({
 }) {
   const [editor, setEditor] = useState(initialEditor);
   const user = editor.user;
+  // Only the server Owner may grant the admin role; the server refuses anyone else.
+  const viewerId = useAuth().user?.id;
+  const viewerIsOwner = useViewerIsOwner(viewerId);
+  const adminRoleLocked = !viewerIsOwner && user.role !== "admin";
+  // No account changes its own role or disables itself; the server refuses
+  // both. The Owner's standing fixes the same fields.
+  const ownAccount = user.id === viewerId;
   const busy = useRef(false);
   const [conflict, setConflict] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -1246,23 +1307,25 @@ function EditUserForm({
   const [maxProfiles, setMaxProfiles] = useState(user.max_profiles);
   const accessGroupSelectId = useId();
   const roleSelectId = useId();
+  const enabledSwitchId = useId();
   const passwordInputId = useId();
   const requireChangeId = useId();
   const markerEditId = useId();
   const metadataCurationId = useId();
   const updateMutation = useUpdateUser();
   const accessGroupValue = accessGroupID === null ? "none" : String(accessGroupID);
-  // Hints come from the group selected right now, so they follow the picker
-  // instead of describing the group the account was last saved with. When that
-  // group is not in the loaded list, fall back to the resolved policy the
-  // server sent — but only while the saved group is still the selected one.
-  // An admin inherits from no group, so preview the no-group policy while the
-  // picked group is kept for toggling the role back.
+  // The account response is authoritative for its saved group and cannot be
+  // made stale by an older access-group list. Once the picker changes, preview
+  // that unsaved selection from the group list instead. An admin inherits from
+  // no group, so preview the no-group policy while the picked group is kept for
+  // toggling the role back.
   const hintGroupID = effectiveAccessGroupID(role, accessGroupID);
+  const groupInheritHints = policyInheritHints(hintGroupID, accessGroups);
   const hintSource = policyDefaultSource(role, hintGroupID);
   const inheritHints =
-    policyInheritHints(hintGroupID, accessGroups) ??
-    (hintGroupID === user.access_group_id ? user.effective_policy : undefined);
+    hintGroupID === user.access_group_id
+      ? savedUserPolicyInheritHints(user, groupInheritHints)
+      : groupInheritHints;
   const selectedGroupMissing =
     accessGroupID !== null && !accessGroups.some((group) => group.id === accessGroupID);
 
@@ -1380,15 +1443,31 @@ function EditUserForm({
               )}
               <div className="space-y-2">
                 <Label htmlFor={roleSelectId}>Role</Label>
-                <Select value={role} onValueChange={setRole} disabled={user.is_owner}>
+                <Select
+                  value={user.is_owner ? "owner" : role}
+                  onValueChange={setRole}
+                  disabled={user.is_owner || ownAccount}
+                >
                   <SelectTrigger id={roleSelectId}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
+                    {user.is_owner && <SelectItem value="owner">Owner</SelectItem>}
                     <SelectItem value="user">User</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
+                    <SelectItem value="admin" disabled={adminRoleLocked}>
+                      Admin
+                    </SelectItem>
                   </SelectContent>
                 </Select>
+                {ownAccount ? (
+                  <p className="text-muted-foreground text-xs">You can't change your own role.</p>
+                ) : (
+                  adminRoleLocked && (
+                    <p className="text-muted-foreground text-xs">
+                      Only the server owner can grant the admin role.
+                    </p>
+                  )
+                )}
               </div>
             </div>
             <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
@@ -1397,12 +1476,21 @@ function EditUserForm({
                 <div className="text-muted-foreground text-xs">
                   {user.is_owner
                     ? "The server owner stays an enabled admin."
-                    : "Disable access without deleting the user."}
+                    : ownAccount
+                      ? "You can't disable your own account."
+                      : "Disable access without deleting the user."}
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <Label className="text-xs">Enabled</Label>
-                <Switch checked={enabled} onCheckedChange={setEnabled} disabled={user.is_owner} />
+                <Label htmlFor={enabledSwitchId} className="text-xs">
+                  Enabled
+                </Label>
+                <Switch
+                  id={enabledSwitchId}
+                  checked={enabled}
+                  onCheckedChange={setEnabled}
+                  disabled={user.is_owner || ownAccount}
+                />
               </div>
             </div>
           </TabsContent>

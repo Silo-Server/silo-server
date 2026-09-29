@@ -38,9 +38,11 @@ dump yields no usable links.
 - **Enumeration resistance.** The public lookup returns the same not-found
   result for unknown, expired, revoked, and accepted tokens; the public
   endpoints sit behind the auth-endpoint rate limiter.
-- **Privilege ceiling.** An invitation granting `admin` requires the inviter
-  to be an admin, enforced in the service against the inviter's row in the
-  database, not the request.
+- **Privilege ceiling.** Creating or resending an invitation granting `admin`
+  requires the server Owner, enforced in the service against the inviter's row
+  in the database, not the request. Moving ownership revokes pending `admin`
+  invitations, so a former Owner cannot keep a link that grants the role; the
+  new Owner resends any it still wants.
 - **Invitation binding unchanged.** Pre-bound `library_ids` and
   `access_group_id` are applied verbatim at accept and then feed the existing
   inherit/override policy resolver: the group supplies every field the

@@ -20,7 +20,7 @@ func TestLocalMarkerWritePolicyAllowsSameAlgorithmRangeCorrection(t *testing.T) 
 		Confidence: &confidence,
 		Algorithm:  algorithm,
 	}
-	patch := IntroMarkerPatch{
+	patch := MarkerPatch{
 		Start:      60,
 		End:        132,
 		Source:     models.MarkerSourceScanner,
@@ -49,7 +49,7 @@ func TestLocalMarkerWritePolicyRejectsLowerPrioritySource(t *testing.T) {
 		Confidence: &confidence,
 		Algorithm:  algorithm,
 	}
-	patch := IntroMarkerPatch{
+	patch := MarkerPatch{
 		Start:      60,
 		End:        132,
 		Source:     models.MarkerSourceScanner,
@@ -78,7 +78,7 @@ func TestLocalMarkerWritePolicyRejectsLowerConfidenceAlgorithmChange(t *testing.
 		Confidence: &confidence,
 		Algorithm:  algorithm,
 	}
-	patch := IntroMarkerPatch{
+	patch := MarkerPatch{
 		Start:      322.014,
 		End:        363.465,
 		Source:     models.MarkerSourceScanner,
@@ -107,7 +107,7 @@ func TestLocalMarkerWritePolicyRejectsEqualConfidenceLowerRankAlgorithm(t *testi
 		Confidence: &confidence,
 		Algorithm:  algorithm,
 	}
-	patch := IntroMarkerPatch{
+	patch := MarkerPatch{
 		Start:      322.014,
 		End:        363.465,
 		Source:     models.MarkerSourceScanner,
@@ -136,7 +136,7 @@ func TestLocalMarkerWritePolicyRejectsHigherConfidenceLowerRankAlgorithm(t *test
 		Confidence: &confidence,
 		Algorithm:  algorithm,
 	}
-	patch := IntroMarkerPatch{
+	patch := MarkerPatch{
 		Start:      322.014,
 		End:        363.465,
 		Source:     models.MarkerSourceScanner,
@@ -165,7 +165,7 @@ func TestLocalMarkerWritePolicyAllowsHigherRankLowerConfidenceAlgorithm(t *testi
 		Confidence: &confidence,
 		Algorithm:  algorithm,
 	}
-	patch := IntroMarkerPatch{
+	patch := MarkerPatch{
 		Start:      322.014,
 		End:        363.465,
 		Source:     models.MarkerSourceScanner,

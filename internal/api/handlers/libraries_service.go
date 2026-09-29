@@ -108,6 +108,7 @@ func (h *LibraryHandler) CreateLibrary(ctx context.Context, req LibraryCreateReq
 		ChapterThumbnailsEnabled: req.ChapterThumbnailsEnabled,
 		IntroDetectionEnabled:    req.IntroDetectionEnabled,
 		TrailerKinds:             req.TrailerKinds,
+		RealtimeMonitoring:       req.RealtimeMonitoring,
 	})
 	if err != nil {
 		if errors.Is(err, catalog.ErrDuplicatePath) {
@@ -116,6 +117,7 @@ func (h *LibraryHandler) CreateLibrary(ctx context.Context, req LibraryCreateReq
 		slog.ErrorContext(ctx, "creating library", "component", "api", "error", err)
 		return LibraryView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to create library")
 	}
+	h.pokeRealtimeMonitor()
 
 	// Seed default sections for the new library.
 	if h.SectionRepo != nil {
@@ -198,6 +200,7 @@ func (h *LibraryHandler) UpdateLibrary(ctx context.Context, id, userID int, req 
 		ChapterThumbnailsEnabled: req.ChapterThumbnailsEnabled,
 		IntroDetectionEnabled:    req.IntroDetectionEnabled,
 		TrailerKinds:             req.TrailerKinds,
+		RealtimeMonitoring:       req.RealtimeMonitoring,
 	})
 	if err != nil {
 		if errors.Is(err, catalog.ErrFolderNotFound) {
@@ -209,6 +212,7 @@ func (h *LibraryHandler) UpdateLibrary(ctx context.Context, id, userID int, req 
 		slog.ErrorContext(ctx, "updating library", "component", "api", "error", err)
 		return LibraryView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to update library")
 	}
+	h.pokeRealtimeMonitor()
 
 	// Fetch the updated folder to return it.
 	folder, err := h.folderRepo.GetByID(ctx, id)
@@ -301,6 +305,8 @@ func (h *LibraryHandler) DeleteLibrary(ctx context.Context, id, userID int) (*mo
 		slog.ErrorContext(ctx, "queuing library delete job", "component", "api", "library_id", id, "error", err)
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to queue library delete")
 	}
+	// Queuing the deletion disabled the library; stop monitoring it now.
+	h.pokeRealtimeMonitor()
 
 	if h.ingester != nil {
 		canceled := h.ingester.CancelLibrary(folder.ID)

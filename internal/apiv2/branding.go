@@ -25,11 +25,8 @@ type BrandingConfiguration struct {
 	ServerName       string `json:"server_name"`
 	LoginSubtitle    string `json:"login_subtitle"`
 	AccentColor      string `json:"accent_color,omitempty"`
-	DefaultTheme     string `json:"default_theme,omitempty"`
 	WordmarkURL      string `json:"wordmark_url,omitempty"`
-	WordmarkLightURL string `json:"wordmark_light_url,omitempty"`
 	MarkURL          string `json:"mark_url,omitempty"`
-	MarkLightURL     string `json:"mark_light_url,omitempty"`
 	FaviconURL       string `json:"favicon_url,omitempty"`
 	LoginBgURL       string `json:"login_bg_url,omitempty"`
 	StorageAvailable bool   `json:"storage_available"`
@@ -79,7 +76,7 @@ func registerBranding(reg *Registry) {
 			snap = reg.deps.Branding.Load(ctx)
 			storage = reg.deps.Branding.HasStorage()
 		}
-		return &BrandingOutput{Body: BrandingConfiguration{ServerName: snap.ServerName, LoginSubtitle: snap.LoginSubtitle, AccentColor: snap.AccentColor, DefaultTheme: snap.DefaultTheme, WordmarkURL: brandingAssetURL(snap, branding.KindWordmark), WordmarkLightURL: brandingAssetURL(snap, branding.KindWordmarkLight), MarkURL: brandingAssetURL(snap, branding.KindMark), MarkLightURL: brandingAssetURL(snap, branding.KindMarkLight), FaviconURL: brandingAssetURL(snap, branding.KindFavicon), LoginBgURL: brandingAssetURL(snap, branding.KindLoginBg), StorageAvailable: storage}}, nil
+		return &BrandingOutput{Body: BrandingConfiguration{ServerName: snap.ServerName, LoginSubtitle: snap.LoginSubtitle, AccentColor: snap.AccentColor, WordmarkURL: brandingAssetURL(snap, branding.KindWordmark), MarkURL: brandingAssetURL(snap, branding.KindMark), FaviconURL: brandingAssetURL(snap, branding.KindFavicon), LoginBgURL: brandingAssetURL(snap, branding.KindLoginBg), StorageAvailable: storage}}, nil
 	})
 	Register(reg, op("/theme/admin-css", "getThemeOverrides", "Read public pre-login theme overrides."), func(ctx context.Context, _ *struct{}) (*ThemeOverridesOutput, error) {
 		view := handlers.AdminCSSView{}
@@ -95,6 +92,9 @@ func registerBranding(reg *Registry) {
 		}
 		raw := op("/branding/assets/{kind}", id, "Read a public branding image with content-version validation.")
 		raw.Method = method
+		// The light logo kinds stay readable here although v2 neither uploads
+		// nor advertises them: the frozen v1 branding response mints their URLs
+		// in this namespace, and v1 can still upload them.
 		raw.Parameters = []*huma.Param{
 			{Name: "kind", In: "path", Required: true, Schema: &huma.Schema{Type: "string", Enum: []any{"wordmark", "wordmark_light", "mark", "mark_light", "favicon", "login_bg"}}},
 			{Name: "v", In: "query", Schema: &huma.Schema{Type: "string"}, Description: "Content reference returned by branding discovery; a stale reference returns 404."},

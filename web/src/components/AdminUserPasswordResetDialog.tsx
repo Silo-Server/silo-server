@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
-import { Copy } from "lucide-react";
+import { ArrowRight, Copy } from "lucide-react";
+import { Link } from "react-router";
 import { toast } from "sonner";
 import type { AdminUser } from "@/api/types";
 import type { AdminPasswordReset } from "@/api/v2/adminUsers";
@@ -117,11 +118,22 @@ export function AdminUserPasswordResetDialog({
 
         {!done && (!canEmail || !linkAvailable) && (
           <p className="text-muted-foreground text-xs">
-            {!linkAvailable
-              ? "Set the server's public URL in Settings to create reset links."
-              : user.email === ""
-                ? "This account has no email address, so share a link instead."
-                : "Set up email in Settings to send reset links."}
+            {!linkAvailable ? (
+              <>
+                Set the Silo public URL to create reset links.{" "}
+                <Link
+                  to="/admin/settings/general"
+                  className="text-foreground inline-flex items-center gap-1 font-medium hover:underline"
+                >
+                  General settings
+                  <ArrowRight className="h-3 w-3" aria-hidden="true" />
+                </Link>
+              </>
+            ) : user.email === "" ? (
+              "This account has no email address, so share a link instead."
+            ) : (
+              "Set up email in Settings to send reset links."
+            )}
           </p>
         )}
 

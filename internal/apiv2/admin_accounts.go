@@ -21,6 +21,7 @@ type AdminAccountService interface {
 	UpdateAdminAccount(context.Context, int, int64, int64, models.UpdateUserInput) (int64, error)
 	DeleteAdminAccount(context.Context, int, int64, int64) error
 	ImpersonateAdminAccount(context.Context, int, string, string) (handlers.TokenPairView, error)
+	TransferAdminOwnership(context.Context, int) error
 	ListAdminAccountProfiles(context.Context, int) ([]handlers.AdminProfileView, error)
 }
 type AdminAccountInput struct {
@@ -58,6 +59,7 @@ type AdminAccountCapabilitiesOutputBody struct {
 	AccessGroups         bool `json:"access_groups"`
 	PasswordResetLink    bool `json:"password_reset_link" doc:"Whether createAdminUserPasswordReset can return a link to share; needs the server's public URL"`
 	PasswordResetEmail   bool `json:"password_reset_email" doc:"Whether createAdminUserPasswordReset can email the link; needs the public URL and a configured mail server"`
+	OwnershipTransfer    bool `json:"ownership_transfer" doc:"Whether transferAdminUserOwnership can make another enabled admin the server Owner"`
 }
 
 type AdminAccountPolicyInput struct {
@@ -107,6 +109,9 @@ type AdminAccountUpdateInput struct {
 	IfNoneMatch string `header:"If-None-Match"`
 	Body        AdminAccountUpdateBody
 	RawBody     []byte
+}
+type AdminAccountTransferInput struct {
+	ID ID `path:"id"`
 }
 type AdminAccountImpersonateInput struct {
 	ID        ID     `path:"id"`
@@ -229,6 +234,7 @@ func registerAdminAccounts(reg *Registry) {
 		if svc := reg.deps.AdminAccounts; svc != nil {
 			out.Body.Available, out.Body.DefaultProfile = svc.AdminAccountCapabilities()
 			out.Body.GuardedConfiguration = out.Body.Available
+			out.Body.OwnershipTransfer = out.Body.Available
 		}
 		out.Body.AccessGroups = reg.deps.AdminAccessGroups != nil
 		out.Body.ExactIdentityFilter = reg.deps.AdminUsers != nil
@@ -297,6 +303,28 @@ func registerAdminAccounts(reg *Registry) {
 			return nil, adminAccountError(err)
 		}
 		return &TokenPairOutput{Body: tokenPairFromView(view)}, nil
+	})
+	// Only the Owner, from a signed-in session, may make another enabled
+	// admin the Owner; the caller stays an admin.
+	transfer := adminAccountOperation(http.MethodPost, "/{id}/transfer-ownership", "transferAdminUserOwnership", false)
+	transfer.Summary = "Transfer server ownership to another enabled admin account."
+	transfer.Description = "Only the server Owner may call this, from a signed-in session: an API key or an impersonation session is refused with 403, like any caller that is not the Owner. The previous Owner stays an admin."
+	transfer.DefaultStatus = 204
+	// A target that is not another enabled admin is 422.
+	transfer.Errors = append(transfer.Errors, http.StatusUnprocessableEntity)
+	Register(reg, transfer, func(ctx context.Context, in *AdminAccountTransferInput) (*struct{}, error) {
+		svc, p := reg.adminAccounts()
+		if p != nil {
+			return nil, p
+		}
+		id, p := adminAccountID(in.ID)
+		if p != nil {
+			return nil, p
+		}
+		if err := svc.TransferAdminOwnership(ctx, id); err != nil {
+			return nil, adminAccountError(err)
+		}
+		return &struct{}{}, nil
 	})
 	Register(reg, adminAccountOperation(http.MethodGet, "/{id}/profiles", "listAdminUserProfiles", false), func(ctx context.Context, in *AdminAccountInput) (*AdminAccountProfilesOutput, error) {
 		svc, p := reg.adminAccounts()

@@ -242,6 +242,32 @@ export function buildCatalogQueryUpdateHref(state: CatalogSearchState, q: string
   return `/catalog?${params.toString()}`;
 }
 
+/**
+ * The search URL parameter holding the Request to add grid's page, so Back,
+ * a reload, and a shared link return to it. Filter and query changes build
+ * fresh params without it, which starts the grid over.
+ */
+export const CATALOG_REQUEST_PAGE_PARAM = "request_page";
+
+/** The Request to add page a search URL asks for; 1 when absent or invalid. */
+export function readCatalogRequestPage(searchParams: URLSearchParams): number {
+  return parsePositiveInt(searchParams.get(CATALOG_REQUEST_PAGE_PARAM)) ?? 1;
+}
+
+/** A copy of the params that shows the Request to add grid at this page. */
+export function withCatalogRequestPage(
+  searchParams: URLSearchParams,
+  page: number,
+): URLSearchParams {
+  const next = new URLSearchParams(searchParams);
+  if (page > 1) {
+    next.set(CATALOG_REQUEST_PAGE_PARAM, String(page));
+  } else {
+    next.delete(CATALOG_REQUEST_PAGE_PARAM);
+  }
+  return next;
+}
+
 export function buildQueryCatalogHref(q?: string): string {
   const params = new URLSearchParams({ source: "query" });
   if (q) params.set("q", q);
@@ -257,7 +283,7 @@ export function buildPersonalCatalogHref(source: "favorites" | "watchlist" | "hi
 }
 
 export function buildPersonCatalogHref(personId: string): string {
-  return `/person/${personId}`;
+  return `/person/${encodeURIComponent(personId)}`;
 }
 
 export function buildSectionCatalogHref(destination: SectionCatalogDestination): string {

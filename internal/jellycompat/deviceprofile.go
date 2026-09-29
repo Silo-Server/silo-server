@@ -34,6 +34,11 @@ type DeviceProfile struct {
 	ContainerProfiles   []ContainerProfile   `json:"ContainerProfiles,omitempty"`
 	CodecProfiles       []CodecProfile       `json:"CodecProfiles,omitempty"`
 	SubtitleProfiles    []SubtitleProfile    `json:"SubtitleProfiles,omitempty"`
+
+	// hlsRemuxSampleEntry, when set, is the sample entry a copy-video HLS remux
+	// will write, overriding the one derived from the source's Dolby Vision
+	// profile. The HDR10 strip sets it because its output is always hvc1.
+	hlsRemuxSampleEntry string
 }
 
 type ContainerProfile struct {
@@ -245,20 +250,30 @@ func (p DeviceProfile) SupportsTranscoding(version catalog.FileVersion) bool {
 }
 
 func (p DeviceProfile) supportsTranscodingOutput(version catalog.FileVersion, channels, videoBitrateKbps int, resolution string) bool {
+	return p.supportsVideoTranscodingOutput(version, channels, videoBitrateKbps, resolution, compatTargetVideoCodec, "ts", false)
+}
+
+// supportsHEVCTranscodingOutput requires an explicit HLS fMP4 profile. HEVC
+// output has no permissive fallback because decode support is not encode-route support.
+func (p DeviceProfile) supportsHEVCTranscodingOutput(version catalog.FileVersion, channels, videoBitrateKbps int, resolution string) bool {
+	return p.supportsVideoTranscodingOutput(version, channels, videoBitrateKbps, resolution, compatVideoCodecHEVC, compatContainerMP4, true)
+}
+
+func (p DeviceProfile) supportsVideoTranscodingOutput(version catalog.FileVersion, channels, videoBitrateKbps int, resolution, videoCodec, container string, requireExplicitProfile bool) bool {
 	channels, audioBitrateKbps := playback.ResolveAACOutputV3(channels, 0)
 	output := version
-	output.Container = "ts"
-	output.CodecVideo = compatTargetVideoCodec
+	output.Container = container
+	output.CodecVideo = videoCodec
 	output.CodecAudio = compatTargetAudioCodec
 	output.Bitrate = 0
 	output.HDR = false
 	sourceVideo := compatPrimaryVideoTrack(version)
 	// Source codec levels, reference frames and HDR metadata do not describe
-	// the encoded H264 stream. Profile and level depend on the chosen worker's
+	// the encoded stream. Profile and level depend on the chosen worker's
 	// encoder; leave them unknown so required conditions remain fail-closed.
 	// Full HDR encodes are separately gated on tone-map availability.
 	video := models.VideoTrack{
-		Codec: compatTargetVideoCodec, BitDepth: 8, VideoRangeType: compatRangeSDR,
+		Codec: videoCodec, BitDepth: 8, VideoRangeType: compatRangeSDR,
 		Width: sourceVideo.Width, Height: sourceVideo.Height,
 		AspectRatio: sourceVideo.AspectRatio, FrameRate: sourceVideo.FrameRate,
 		Interlaced: sourceVideo.Interlaced,
@@ -278,18 +293,21 @@ func (p DeviceProfile) supportsTranscodingOutput(version catalog.FileVersion, ch
 	output.VideoTracks = []models.VideoTrack{video}
 	output.AudioTracks = []models.AudioTrack{{Codec: compatTargetAudioCodec, Channels: channels, Bitrate: audioBitrateKbps * 1000}}
 	audioIndex := len(output.VideoTracks)
-	if !p.codecProfileCompatibility(output, &audioIndex).supportsDirectPlay() {
+	// Both encoded outputs use HLS. Apply codec profiles scoped to its
+	// segment container, including Container=hls with SubContainer=mp4/ts.
+	if !p.codecProfileCompatibilityWithValues(output, &audioIndex, buildConditionValues(output, &audioIndex), container, true).supportsDirectPlay() {
 		return false
 	}
 
-	if len(p.TranscodingProfiles) == 0 {
+	if len(p.TranscodingProfiles) == 0 && !requireExplicitProfile {
 		return true
 	}
 	for _, profile := range p.TranscodingProfiles {
 		if !matchesVideoType(profile.Type) {
 			continue
 		}
-		if protocol := strings.ToLower(strings.TrimSpace(profile.Protocol)); protocol != "" && protocol != "hls" {
+		protocol := strings.ToLower(strings.TrimSpace(profile.Protocol))
+		if (requireExplicitProfile && protocol != compatHLSPathSegment) || (!requireExplicitProfile && protocol != "" && protocol != compatHLSPathSegment) {
 			continue
 		}
 		if maxChannels, _ := strconv.Atoi(profile.MaxAudioChannels); maxChannels > 0 && channels > maxChannels {
@@ -298,13 +316,13 @@ func (p DeviceProfile) supportsTranscodingOutput(version catalog.FileVersion, ch
 		if !conditionsMatch(profile.Conditions, buildConditionValues(output, &audioIndex)) {
 			continue
 		}
-		if !matchesCSV(profile.VideoCodec, compatTargetVideoCodec) {
+		if (requireExplicitProfile && strings.TrimSpace(profile.VideoCodec) == "") || !matchesCSV(profile.VideoCodec, videoCodec) {
 			continue
 		}
 		if !matchesCSV(profile.AudioCodec, compatTargetAudioCodec) {
 			continue
 		}
-		if profile.Container != "" && !matchesCSV(profile.Container, "ts") && !matchesCSV(profile.Container, "mpegts") {
+		if (requireExplicitProfile && strings.TrimSpace(profile.Container) == "") || (profile.Container != "" && !matchesCSV(profile.Container, container) && (container != "ts" || !matchesCSV(profile.Container, "mpegts"))) {
 			continue
 		}
 		return true
@@ -331,7 +349,7 @@ func (p DeviceProfile) SupportsHLSRemuxForAudioStream(version catalog.FileVersio
 		if !matchesVideoType(profile.Type) {
 			continue
 		}
-		if protocol := strings.ToLower(strings.TrimSpace(profile.Protocol)); protocol != "" && protocol != "hls" {
+		if protocol := strings.ToLower(strings.TrimSpace(profile.Protocol)); protocol != "" && protocol != compatHLSPathSegment {
 			continue
 		}
 		if !matchesCSV(profile.Container, "mp4") ||
@@ -378,7 +396,7 @@ func (p DeviceProfile) supportsHLSRemuxWithAudioTranscodeForAudioStream(version 
 		if !matchesVideoType(profile.Type) {
 			continue
 		}
-		if protocol := strings.ToLower(strings.TrimSpace(profile.Protocol)); protocol != "" && protocol != "hls" {
+		if protocol := strings.ToLower(strings.TrimSpace(profile.Protocol)); protocol != "" && protocol != compatHLSPathSegment {
 			continue
 		}
 		if !matchesCSV(profile.Container, "mp4") ||

@@ -287,6 +287,7 @@ export default function CardOverlaySettings() {
     hasOverride,
     isResetting,
     isLoading,
+    isOverlaySupported,
   } = useOverlayPrefs();
   const [previewVariant, setPreviewVariant] = useState<OverlayPreviewVariant>("movie");
   const [confirmRestoreOpen, setConfirmRestoreOpen] = useState(false);
@@ -436,7 +437,9 @@ export default function CardOverlaySettings() {
 
           <TabsContent value="overlays" className="mt-4 space-y-6">
             {CATEGORY_GROUPS.map(({ category, title, description }) => {
-              const overlays = OVERLAY_REGISTRY.filter((d) => d.category === category);
+              const overlays = OVERLAY_REGISTRY.filter(
+                (d) => d.category === category && isOverlaySupported(d.id),
+              );
               if (overlays.length === 0) return null;
               return (
                 <SettingsGroup key={category} title={title} description={description}>

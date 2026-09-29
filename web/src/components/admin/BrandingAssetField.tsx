@@ -21,17 +21,6 @@ interface BrandingAssetFieldProps {
   enabled: boolean;
   /** Square preview suits the icon/favicon; wide suits the wordmark/background. */
   preview?: "square" | "wide";
-  /**
-   * Forces the preview tile's backdrop. Light-theme assets are dark-on-transparent,
-   * so they would be invisible on the default muted tile in a dark admin theme.
-   */
-  previewBg?: "light";
-  /**
-   * What an empty slot actually serves when the kind has no bundled default of
-   * its own — the light variants fall back to the main logo/icon, so the
-   * preview must show that image, not a placeholder.
-   */
-  fallbackUrl?: string | null;
 }
 
 export function BrandingAssetField({
@@ -42,19 +31,16 @@ export function BrandingAssetField({
   accept,
   enabled,
   preview = "wide",
-  previewBg,
-  fallbackUrl,
 }: BrandingAssetFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const upload = useUploadBrandingAsset();
   const remove = useDeleteBrandingAsset();
   const busy = upload.isPending || remove.isPending;
   const spec = BRANDING_ASSET_SPECS[kind];
-  // An empty slot is not "no image" — the bundled default (or, for the light
-  // variants, the main asset they fall back to) is what visitors see. Show
-  // that instead of a placeholder glyph, dimmed and captioned so it never
-  // reads as the admin's own upload.
-  const shownUrl = currentUrl ?? spec.defaultUrl ?? fallbackUrl ?? null;
+  // An empty slot is not "no image" — the bundled default is what visitors
+  // see. Show that instead of a placeholder glyph, dimmed and captioned so it
+  // never reads as the admin's own upload.
+  const shownUrl = currentUrl ?? spec.defaultUrl ?? null;
   const showingDefault = currentUrl === null;
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -71,7 +57,7 @@ export function BrandingAssetField({
         <div
           className={cn(
             "border-border flex items-center justify-center overflow-hidden rounded-lg border",
-            previewBg === "light" ? "bg-white" : "bg-muted/40",
+            "bg-muted/40",
             preview === "square" ? "h-14 w-14" : "h-14 w-28",
           )}
         >

@@ -878,7 +878,12 @@ func TestConcurrencyMarkingIsRestricted(t *testing.T) {
 // legacy route and so have no ledger row to mark, each with the reason. It
 // is empty today; the reconcile test refuses an unmapped guarded operation
 // that is not listed here.
-var guardedWithoutLegacyRow = map[string]string{}
+var guardedWithoutLegacyRow = map[string]string{
+	"updateRequestRoute":           "V2-only request routing rule: the rule's revision from request_editor_revision_seq is its ETag.",
+	"deleteRequestRoute":           "V2-only request routing rule: deletion is guarded by the rule's revision.",
+	"updateAdminRequestGroupLimit": "V2-only access-group request limit: the limit's revision from request_editor_revision_seq is its ETag; a group with none saved is revision zero.",
+	"updateRequestRouting":         "V2-only request routing mode (Standard or Advanced): the mode's revision from request_editor_revision_seq is its ETag.",
+}
 
 // TestGuardedOperationsAreMarkedIfMatch reconciles the v2 registry with the
 // ledger: every operation registered Guarded must have each legacy row that
@@ -1207,6 +1212,19 @@ func TestRetrySafetyMismatchesFire(t *testing.T) {
 // mutation that is not listed here, the same rule guardedWithoutLegacyRow
 // applies to concurrency.
 var mutationWithoutLegacyRow = map[string]string{
+	"redetectAdminItemMarkers":             "V2-only choice of marker kinds to re-detect: v1 re-detected episode intros only, which redetectAdminEpisodeIntro keeps porting. Work is coalesced per item within the process, so a replay while it runs reports already_running; a later replay analyzes again, so it is non-retryable like the intro action.",
+	"transferAdminUserOwnership":           "V2-only server ownership transfer (issue #1382): v1 had no Owner. Replaying a completed transfer is refused because the caller is no longer the Owner, so it cannot move ownership twice.",
+	"createRequestRoute":                   "V2-only request routing rule (routing replaced the router plugin's per-connection default switches). Creating a rule is non-retryable: a replay adds a second rule.",
+	"updateRequestRoute":                   "V2-only request routing rule replacement, guarded by If-Match on the rule's revision; a replay after success answers 412.",
+	"deleteRequestRoute":                   "V2-only request routing rule deletion, guarded by If-Match on the rule's revision; a replay finds no rule.",
+	"updateAdminRequestGroupLimit":         "V2-only access-group request limit replacement, guarded by If-Match on the limit's revision; a replay after success answers 412.",
+	"updateRequestRouting":                 "V2-only request routing mode switch, guarded by If-Match on the mode's revision; a replay after success answers 412.",
+	"reorderRequestRoutes":                 "V2-only reorder of a media type's routing rules. The body names the full order, so a replay sets the same positions; it is non-retryable because it moves every rule to a new revision.",
+	"previewRequestRoute":                  "V2-only read-only route preview (POST for the request body). It reads TMDB and the rules and writes nothing, so a replay returns the same answer.",
+	"followRequestMedia":                   "V2-only title follow (Requests acceptance AC1/AC5): v1 had no way to follow a title someone else requested. The follow row is keyed by title and profile, so a replay converges on the same follow.",
+	"unfollowRequestMedia":                 "V2-only title unfollow, the inverse of followRequestMedia. Deleting an absent follow is a no-op, so a replay converges on no follow.",
+	"importAdminTMDBList":                  "V2-only administrator import of a public TMDB list: v1 had no TMDB list source. Like the other imports it creates a new collection per call and is non-retryable.",
+	"importTMDBListCollection":             "V2-only personal import of a public TMDB list: v1 had no TMDB list source. Like the other imports it creates a new collection per call and is non-retryable.",
 	"createAdminUserPasswordReset":         "V2-only password reset link issue (issue #1442): v1 had no reset links. Each call replaces the account's single live link, so a replay only supersedes the previous link; it is non-retryable because an emailed link may already have been delivered.",
 	"completePasswordReset":                "V2-only public password reset completion (issue #1442): v1 had no reset links. Deleting the single-use link commits in the same transaction as the new password, so a replay finds no link and changes nothing.",
 	"requestPasswordReset":                 "V2-only self-service password reset request (issue #1443): v1 had no reset links. A replay inside the per-account cooldown changes nothing; after it, the replay replaces the link and sends another email, so it is non-retryable.",

@@ -113,6 +113,10 @@ Every list-valued query parameter is sent once per value. `keys=<csv>` becomes
 `listEffectiveSettings`. A comma inside a value is part of the key name and will be rejected as
 an unknown key.
 
+The examples in this section mirror the committed v2 fixtures, which use `ui.theme`. That
+key is deprecated and no client reads it (see [Retired theme settings](#retired-theme-settings));
+the request and response mechanics are the same for every key.
+
 ```http
 GET /api/v2/settings/values?scope=profile&keys=ui.theme&keys=playback.preferred_quality
 GET /api/v2/settings/values/effective?keys=ui.theme&library_ids=3&library_ids=7
@@ -447,7 +451,7 @@ Branding remains public so it can render before sign-in:
 | Method | Path | Response |
 |---|---|---|
 | GET | `/api/v2/theme/capabilities` | Branding, CSS-override, and asset-storage availability |
-| GET | `/api/v2/theme/branding` | Server name, login subtitle, optional accent/theme and asset URLs, storage availability |
+| GET | `/api/v2/theme/branding` | Server name, login subtitle, optional accent color and asset URLs, storage availability |
 | GET | `/api/v2/theme/admin-css` | JSON object with `vars` and `raw_css` strings |
 | GET / HEAD | `/api/v2/branding/assets/{kind}` | Image bytes or matching headers without a body |
 
@@ -467,53 +471,23 @@ A valid kind without a configured asset returns `404`; missing asset storage ret
 `503`. Assets use the raw HTTP registry rather than JSON encoding.
 
 The frozen v1 routes and administrator asset upload/delete operations are unchanged.
-Theme catalog/download and catalog refresh are separate operations.
 
+The web client has one theme, Cinema Dark. Only an administrator customizes it, with
+the accent color and the overrides `admin-css` returns (`ui.admin_theme_vars` and
+`ui.admin_custom_css`), layered on that theme. The v2 branding document therefore
+has no default theme and no light-theme logo URLs, and v2 has no theme catalog.
+The frozen v1 `/theme/branding` response is unchanged: it still reports a stored
+`default_theme` and light logo URLs. The server keeps those settings for v1 alone. The v1
+`/theme/catalog`, `/theme/catalog/refresh` and `/theme/download` routes keep their
+behavior, and `theme.catalog_url` its default, until v1 retires.
 
-## Theme catalog and portable downloads
+### Retired theme settings
 
-| Method | Path | Response |
-|---|---|---|
-| GET | `/api/v2/theme/catalog/capabilities` | Availability and accepted document byte limits |
-| GET | `/api/v2/theme/catalog` | `{document, stale}` catalog envelope |
-| POST | `/api/v2/theme/catalog/refresh` | The same envelope after clearing this node's cache and fetching synchronously |
-| GET | `/api/v2/theme/download?url=...` | `{document}` portable theme file envelope |
-
-Reads require account authentication and do not require a profile. Refresh requires
-acting-admin authority. It invalidates the serving node's cache; it is neither a
-cluster-wide invalidation nor a durable job. Repeated refresh converges, matching its
-natural-idempotent retry declaration. The bundled web still disables automatic
-mutation retries and authentication replay for the refresh button.
-
-The `document` objects preserve the portable theme format's established property
-names, including `updatedAt`, `downloadUrl`, `baseTheme`, `customCss`, and `createdAt`.
-Catalog documents carry `version` and `themes`; each theme includes its identifier,
-name, author/description, preview colors, tags, download URL, and version. Theme file
-documents carry `version`, `name`, `baseTheme`, a string-valued `vars` object, and
-`customCss`, with optional author, description, and creation time. Unsupported theme
-versions/base themes remain subject to the installing client's parser. The web keeps
-its existing portable-file validation and CSS sanitizer before applying a download.
-
-Both transports call the same application methods for upstream access and caching.
-Initial and redirected requests retain the existing approved-host HTTPS restriction
-and timeout. The cache remains bound to the configured catalog URL; a fresh cache
-from a previous URL cannot hide a configuration change. Upstream connection or
-non-200 failures may return an expired catalog for the same URL, indicated by
-`stale: true`. Invalid JSON and read failures do not use that fallback. Refresh clears
-the cache before fetching and therefore cannot fall back to its former contents.
-
-V2 responses use `no-store`; the frozen v1 transport keeps its original cache and
-stale headers and byte-preserving JSON response. V1 reads remain capped at 1 MiB for
-catalogs and 256 KiB for files. Because a capped read can be a valid JSON prefix of a
-larger document, v2 refuses bodies exactly at those caps: its capability reports
-1,048,575 and 262,143 accepted bytes respectively. Malformed portable documents and
-upstream failures return `503 dependency_unavailable`; invalid requested URLs return
-`422 validation_failed`, and disallowed download targets return
-`403 permission_denied`. V1 status codes and error identifiers are unchanged.
-
-There are no first-party Apple, Android, or Jellyfin callers of these theme catalog,
-download, and refresh operations to migrate. The separate public branding discovery
-consumer work remains tracked independently.
+Manifest revision 12 deprecates `ui.theme`, `ui.custom_theme_vars` and
+`ui.custom_css`. They were web-only, and the web client no longer reads or writes
+them. Migration `20260926233851_retire_profile_themes` (SQLite user store schema
+v29) deleted every stored value at every scope. The definitions stay published, so
+a write from a stale cached web bundle still succeeds, but nothing reads the value.
 
 ### Viewer library discovery
 
@@ -1004,6 +978,12 @@ requires a public S3 bucket because local artwork storage is available.
 catalog read return only the versions stored in the `library_id` it was given.
 It is server-wide, applies without a restart, and never affects playback; see
 "Library-scoped version lists" in [catalog-api.md](catalog-api.md).
+
+`scanner.realtime_monitoring` (default `true`) is the server-wide real-time
+monitoring switch: Silo scans library folders automatically when their files
+change. A library is monitored only while this setting, the library's own
+`realtime_monitoring` switch (see [libraries-api.md](libraries-api.md)), and the
+library itself are all on. The setting applies without a restart.
 
 `access.unrated_content` (`hide` or `allow`, default `hide`) decides whether a
 profile with a content-rating ceiling sees titles that have no rating: an empty
