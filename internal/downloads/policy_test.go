@@ -300,6 +300,39 @@ func TestResolvePresetOnTheLadder(t *testing.T) {
 	}
 }
 
+// Without 4K transcoding a preset stops at 1080p, as quality_options says: a
+// 4K original within the preset is not served as-is and a 1440p source is
+// scaled down. With it, the same original is served.
+func TestResolvePresetHonorsTheFourKSetting(t *testing.T) {
+	var resolver DownloadQualityResolver
+	user := &PolicyUser{Policy: access.EffectiveUserPolicy{DownloadAllowed: true, DownloadTranscodeAllowed: true}}
+	uhd := ladderPolicyFile(3840, 2160, "h264", 15_000, false)
+	qhd := ladderPolicyFile(2560, 1440, "h264", 25_000, false)
+	for _, tc := range []struct {
+		name       string
+		file       *models.MediaFile
+		allow4K    bool
+		wantFormat string
+		wantRes    string
+	}{
+		{"4K off: a playable 4K original is not served", uhd, false, FormatTranscode, "1080p"},
+		{"4K on: the same original is served", uhd, true, FormatOriginal, ""},
+		{"4K off: 1440p scales to 1080p", qhd, false, FormatTranscode, "1080p"},
+		{"4K on: 1440p keeps its size", qhd, true, FormatTranscode, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := config.DownloadConfig{Enabled: true, TranscodeEnabled: true, Allow4KTranscode: tc.allow4K}
+			got, err := resolver.Resolve(context.Background(), Quality20Mbps, user, cfg, tc.file, attestedDownloadCaps(), true, "")
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
+			}
+			if got.DeliveryFormat != tc.wantFormat || got.PrepareTarget.Resolution != tc.wantRes {
+				t.Fatalf("Resolve = format %q res %q, want %q %q", got.DeliveryFormat, got.PrepareTarget.Resolution, tc.wantFormat, tc.wantRes)
+			}
+		})
+	}
+}
+
 func TestQualityOptionsFor(t *testing.T) {
 	presets := []string{QualityOriginal, Quality20Mbps, Quality10Mbps, Quality5Mbps, Quality2Mbps, Quality1Mbps}
 	heights := func(cfg config.DownloadConfig, user *PolicyUser, policyCeiling string) []int {

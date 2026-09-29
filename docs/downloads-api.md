@@ -83,9 +83,10 @@ resolution the bitrate encodes cleanly, then:
   and `caps` attest an 8-bit HEVC decoder that reaches at least the same
   resolution (HEVC also earns `1mbps` 540p instead of 480p);
 - answers `quality_unavailable` when strict `video_decode` entries list no
-  decoder for any codec the server may encode;
+  decoder for any codec the server may encode, or none that takes 480p;
 - converts a 4K source only when the server allows 4K transcoding, as streaming
-  does; otherwise every preset of a 4K title answers `quality_unavailable`.
+  does. Otherwise presets stop at 1080p and every preset of a 4K title answers
+  `quality_unavailable`.
 
 When a preset would leave the source unchanged — `caps` prove the device plays
 it, it is SDR, it already fits the preset's resolution, and its total bitrate is

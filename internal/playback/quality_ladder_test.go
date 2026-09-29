@@ -225,6 +225,9 @@ func TestResolveDownloadTranscodeTargetHonorsDecoderLimits(t *testing.T) {
 				{Codec: "h264", Profiles: []string{"high"}, BitDepths: []int{8}, MaxWidth: 1280, MaxHeight: 720},
 			},
 		}, 20_000, false, "h264", "720p", 20_000},
+		{"the H.264 level is checked at the bitrate the encoder gets", ladderTestFile(1920, 1080, "h264", "24", 3_000), exact(
+			VideoDecodeCapabilityV3{Codec: "h264", Levels: []int{40}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, Hardware: true},
+		), 20_000, false, "h264", "", 3_000},
 		{"HEVC-only caps use HEVC when the server allows it", uhd, exact(
 			VideoDecodeCapabilityV3{Codec: "hevc", BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, Hardware: true},
 		), 10_000, true, "hevc", "1080p", 10_000},
@@ -250,5 +253,12 @@ func TestResolveDownloadTranscodeTargetWithoutAttestedDecoder(t *testing.T) {
 	}}
 	if target, ok := ResolveDownloadTranscodeTarget(ladderTestFile(3840, 2160, "hevc", "24", 40_000), caps, 10_000, DownloadTranscodeSettings{}); ok {
 		t.Fatalf("HEVC-only caps without HEVC encoding resolved %+v", target)
+	}
+	// A decoder smaller than the smallest class takes no ladder output.
+	tiny := ClientCapabilities{VideoEvidence: EvidenceExactV3, CodecsVideo: []string{"h264"}, VideoDecode: []VideoDecodeCapabilityV3{
+		{Codec: "h264", BitDepths: []int{8}, MaxWidth: 640, MaxHeight: 360, Hardware: true},
+	}}
+	if target, ok := ResolveDownloadTranscodeTarget(ladderTestFile(1920, 1080, "h264", "24", 8_000), tiny, 1_000, DownloadTranscodeSettings{}); ok {
+		t.Fatalf("a 640x360 decoder resolved %+v", target)
 	}
 }

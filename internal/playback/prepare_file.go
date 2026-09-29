@@ -66,8 +66,9 @@ type DownloadTranscodeSettings struct {
 // decoder can take the box-fit output; and the source is never enlarged nor
 // re-encoded above its own bitrate. HEVC is chosen when the server allows HEVC
 // encoding and the caps attest an 8-bit HEVC decoder that reaches at least the
-// class H.264 would, otherwise the output is H.264. ok is false when strict
-// caps attest no decoder for any codec the server may encode.
+// class H.264 would, otherwise the output is H.264. ok is false when the caps
+// attest no decoder, for any codec the server may encode, that takes at least
+// the smallest ladder class.
 //
 // Resolution holds the ladder class label ("1080p") when the source must be
 // downscaled and is empty when the source already fits; DownloadScaleResolution
@@ -89,9 +90,8 @@ func ResolveDownloadTranscodeTarget(file *models.MediaFile, caps ClientCapabilit
 	if width, height := FitLadderBox(source.Width, source.Height, class); width == 0 || width != source.Width || height != source.Height {
 		target.Resolution = heightLabel(class)
 	}
-	if source.BitrateKbps > 0 {
-		sourceEquivalent := int(float64(source.BitrateKbps) * codecEfficiency(codec) / codecEfficiency(source.VideoCodec))
-		target.TargetBitrateKbps = min(capKbps, max(sourceEquivalent, 1))
+	if sourceKbps := sourceEquivalentKbps(source, codec); sourceKbps > 0 {
+		target.TargetBitrateKbps = min(capKbps, sourceKbps)
 	}
 	if decoder.maxBitrateKbps > 0 {
 		target.TargetBitrateKbps = min(target.TargetBitrateKbps, decoder.maxBitrateKbps)
@@ -99,14 +99,23 @@ func ResolveDownloadTranscodeTarget(file *models.MediaFile, caps ClientCapabilit
 	return target, true
 }
 
+// sourceEquivalentKbps is the source's video bitrate converted to codec, the
+// most a re-encode of it ever needs; 0 when the source bitrate is unknown.
+func sourceEquivalentKbps(source SourceDescriptorV3, codec string) int {
+	if source.BitrateKbps <= 0 {
+		return 0
+	}
+	return max(int(float64(source.BitrateKbps)*codecEfficiency(codec)/codecEfficiency(source.VideoCodec)), 1)
+}
+
 // bestDownloadDecoder returns the decoder whose limits let the encode reach
 // the tallest ladder class, and that class. A tie goes to the higher bitrate
 // limit, so a large but slow decoder never wins over one the preset can use in
-// full. ok is false when there is no decoder.
+// full. ok is false when no decoder takes any ladder class.
 func bestDownloadDecoder(source SourceDescriptorV3, decoders []downloadDecoder, capKbps int, codec string, maxHeight int) (best downloadDecoder, class int, ok bool) {
 	for _, decoder := range decoders {
-		decoderClass := downloadLadderClass(source, decoder, capKbps, codec, maxHeight)
-		if !ok || decoderClass > class || decoderClass == class && bitrateLimitAbove(decoder.maxBitrateKbps, best.maxBitrateKbps) {
+		decoderClass, fits := downloadLadderClass(source, decoder, capKbps, codec, maxHeight)
+		if fits && (!ok || decoderClass > class || decoderClass == class && bitrateLimitAbove(decoder.maxBitrateKbps, best.maxBitrateKbps)) {
 			best, class, ok = decoder, decoderClass, true
 		}
 	}
@@ -143,19 +152,24 @@ func DownloadScaleResolution(file *models.MediaFile, classLabel string) string {
 // downloadLadderClass returns the tallest ladder class, at or below the one
 // the bitrate earns, whose box-fit output fits the device's decoder. The
 // budget is the preset or the decoder's bitrate limit, whichever is lower, so
-// a 3 Mbps decoder limit never earns a class that needs 5 Mbps. The smallest
-// class is the floor: the ladder never drops below it.
-func downloadLadderClass(source SourceDescriptorV3, decoder downloadDecoder, capKbps int, codec string, maxHeight int) int {
+// a 3 Mbps decoder limit never earns a class that needs 5 Mbps. The H.264
+// level is checked at the bitrate the encoder will get, which never exceeds
+// the source's own. fits is false when even the smallest class is too large
+// for the decoder: the ladder does not go below it.
+func downloadLadderClass(source SourceDescriptorV3, decoder downloadDecoder, capKbps int, codec string, maxHeight int) (class int, fits bool) {
 	budget := capKbps
 	if decoder.maxBitrateKbps > 0 {
 		budget = min(budget, decoder.maxBitrateKbps)
+	}
+	encodeKbps := budget
+	if sourceKbps := sourceEquivalentKbps(source, codec); sourceKbps > 0 {
+		encodeKbps = min(encodeKbps, sourceKbps)
 	}
 	top := LadderClassForBitrate(budget, source.FrameRate, codec)
 	if maxHeight > 0 {
 		top = min(top, maxHeight)
 	}
-	classes := ladderClassesFrom(top)
-	for _, class := range classes {
+	for _, class := range ladderClassesFrom(top) {
 		width, height := FitLadderBox(source.Width, source.Height, class.Height)
 		if width == 0 {
 			width, height = class.Width, class.Height
@@ -163,12 +177,12 @@ func downloadLadderClass(source SourceDescriptorV3, decoder downloadDecoder, cap
 		if decoder.maxWidth > 0 && width > decoder.maxWidth || decoder.maxHeight > 0 && height > decoder.maxHeight {
 			continue
 		}
-		if decoder.maxLevel > 0 && h264LevelFor(width, height, source.FrameRate, budget) > decoder.maxLevel {
+		if decoder.maxLevel > 0 && h264LevelFor(width, height, source.FrameRate, encodeKbps) > decoder.maxLevel {
 			continue
 		}
-		return class.Height
+		return class.Height, true
 	}
-	return classes[len(classes)-1].Height
+	return 0, false
 }
 
 // h264Level is one row of the H.264 level limits (Table A-1): frame size in

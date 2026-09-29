@@ -172,14 +172,23 @@ func transcodeDecision(requested, effective string, target playback.PrepareTarge
 // policy ceiling (non-empty only when a custom override narrows the user's max
 // playback quality) caps the ladder class: it applies to what is served, so a
 // capped transcode of an over-ceiling source stays downloadable — mirroring
-// the serve-time rule in serveDownloadBytes. ok is false when the device's
-// strict caps attest no decoder for a codec the server may encode.
+// the serve-time rule in serveDownloadBytes. Without 4K transcoding the class
+// stops at 1080p, as quality_options advertises, so a 4K source is never
+// served or kept at 4K under a preset. ok is false when the device's caps
+// attest no decoder the output can fit.
 func downloadTranscodeTarget(file *models.MediaFile, caps playback.ClientCapabilities, cfg config.DownloadConfig, kbps int, ceiling string) (playback.PrepareTarget, bool) {
+	maxHeight := qualityHeight(ceiling)
+	if !cfg.Allow4KTranscode && (maxHeight == 0 || maxHeight > nonUHDMaxHeight) {
+		maxHeight = nonUHDMaxHeight
+	}
 	return playback.ResolveDownloadTranscodeTarget(file, caps, kbps, playback.DownloadTranscodeSettings{
 		AllowHEVCEncoding: cfg.AllowHEVCEncoding,
-		MaxHeight:         qualityHeight(ceiling),
+		MaxHeight:         maxHeight,
 	})
 }
+
+// nonUHDMaxHeight is the tallest preset output while 4K transcoding is off.
+const nonUHDMaxHeight = 1080
 
 // sourceFitsPreset reports whether a preset transcode would keep the source's
 // frame size and bitrate, so a re-encode could only lose quality. It needs the
@@ -236,7 +245,7 @@ func qualityOptionsFor(presets []string, cfg config.DownloadConfig, user *Policy
 	}
 	ceiling := 0
 	if !cfg.Allow4KTranscode {
-		ceiling = 1080
+		ceiling = nonUHDMaxHeight
 	}
 	limits := []string{policyCeiling}
 	if user != nil {
