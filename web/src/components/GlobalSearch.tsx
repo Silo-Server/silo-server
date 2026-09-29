@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useCallback, useRef } from "react";
+import { lazy, Suspense, useMemo, useState, useEffect, useCallback, useRef } from "react";
 import { useImageLoaded } from "@/hooks/useImageLoaded";
 import { useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -29,8 +29,15 @@ import { decodeThumbhash } from "@/lib/thumbhash";
 import { getInitials } from "@/lib/text";
 import { cn } from "@/lib/utils";
 import { Search } from "lucide-react";
-import { RequestToAddSection } from "./RequestToAddSection";
 import CardPlayOverlay from "./CardPlayOverlay";
+import { LocalErrorBoundary } from "./LocalErrorBoundary";
+
+// The request suggestions show only once a search has run, so their cards stay
+// out of the launch bundle. The rows' keyboard options come from the query
+// here, not the component, so they are in place before it loads.
+const RequestToAddSection = lazy(() =>
+  import("./RequestToAddSection").then((m) => ({ default: m.RequestToAddSection })),
+);
 
 const PREVIEW_LIMIT = 8;
 const PEOPLE_PREVIEW_LIMIT = 4;
@@ -582,18 +589,23 @@ export function GlobalSearch({
                 {!peopleFirst && peopleGroup}
               </div>
               {showRequestSection && (
-                <RequestToAddSection
-                  variant="dialog"
-                  query={tmdbDebouncedQuery}
-                  libraryHadHits={items.length > 0}
-                  libraryResultsKnown={!previewQuery.isFetching && !previewQuery.isError}
-                  combobox={{
-                    listboxId: REQUEST_LISTBOX_ID,
-                    optionId: (index) => searchResultOptionId(resultCount + index),
-                    selectedIndex: selectedIndex >= resultCount ? selectedIndex - resultCount : -1,
-                    onPick: handlePickRequest,
-                  }}
-                />
+                <LocalErrorBoundary>
+                  <Suspense fallback={null}>
+                    <RequestToAddSection
+                      variant="dialog"
+                      query={tmdbDebouncedQuery}
+                      libraryHadHits={items.length > 0}
+                      libraryResultsKnown={!previewQuery.isFetching && !previewQuery.isError}
+                      combobox={{
+                        listboxId: REQUEST_LISTBOX_ID,
+                        optionId: (index) => searchResultOptionId(resultCount + index),
+                        selectedIndex:
+                          selectedIndex >= resultCount ? selectedIndex - resultCount : -1,
+                        onPick: handlePickRequest,
+                      }}
+                    />
+                  </Suspense>
+                </LocalErrorBoundary>
               )}
             </div>
             <div role="status" aria-live="polite" className="sr-only">
