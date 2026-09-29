@@ -19,11 +19,14 @@ func TestManualRefresh_CorrectedNFOReanchorKeepsDestinationIDs(t *testing.T) {
 		targetHasIMDb     bool
 		durableOnlyIMDb   bool
 		sourceDurableOnly bool
+		sourceIMDbDiffers bool
 	}{
 		{name: "existing destination", targetExists: true, targetHasIMDb: true},
 		{name: "durable destination identity", targetExists: true, targetHasIMDb: true, durableOnlyIMDb: true, sourceDurableOnly: true},
 		{name: "source identity moved to destination", targetExists: true},
 		{name: "rename source"},
+		{name: "conflicting source IDs after rename", sourceIMDbDiffers: true},
+		{name: "conflicting source IDs after merge", targetExists: true, sourceIMDbDiffers: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pool := chainBuiltinTestPool(t)
@@ -65,6 +68,13 @@ func TestManualRefresh_CorrectedNFOReanchorKeepsDestinationIDs(t *testing.T) {
 				}
 			}
 			seed(from, wrongTMDB, wrongIMDb, tc.sourceDurableOnly)
+			if tc.sourceIMDbDiffers {
+				if err := providerIDs.ReplaceByContentID(ctx, from, map[string]string{
+					"tmdb": wrongTMDB, "imdb": fmt.Sprintf("tt6%08d", nonce),
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
 			wantIMDb := ""
 			if tc.targetHasIMDb {
 				wantIMDb = rightIMDb

@@ -300,3 +300,32 @@ func TestRejectIdentityProviderIDsCoversColumnsAndDurableRows(t *testing.T) {
 		t.Fatalf("the chosen TMDB ID was rejected: %#v", chosen)
 	}
 }
+
+func TestProcess_IdentifyReplacesDivergentStoredIDs(t *testing.T) {
+	for _, chosenIMDb := range []string{"", "tt0000200"} {
+		t.Run("chosen IMDb="+chosenIMDb, func(t *testing.T) {
+			const contentID = "movie-tmdb-100"
+			h := newTestHarness()
+			providerRepo := seedWrongMatch(t, h, contentID)
+			providerRepo.set(contentID,
+				&models.MediaItemProviderID{ContentID: contentID, ItemType: "movie", Provider: "tmdb", ProviderID: "100"},
+				&models.MediaItemProviderID{ContentID: contentID, ItemType: "movie", Provider: "imdb", ProviderID: "tt0000200"})
+			chosen := map[string]string{"tmdb": "200"}
+			if chosenIMDb != "" {
+				chosen["imdb"] = chosenIMDb
+			}
+			provider := &capturingMetadataProvider{response: &MetadataResult{
+				HasMetadata: true, Title: "Right Film", ProviderIDs: map[string]string{"tmdb": "200"},
+			}}
+			if _, err := h.service.ProcessWithProviders(t.Context(), ProcessRequest{
+				ContentID: contentID, ProviderIDs: chosen, Language: "en", Mode: ModeIdentify,
+			}, []Provider{provider}); err != nil {
+				t.Fatal(err)
+			}
+			if got := provider.lastRequest().ProviderIDs["imdb"]; got != chosenIMDb {
+				t.Errorf("requested IMDb = %q, want %q", got, chosenIMDb)
+			}
+			assertIdentityIDs(t, h, providerRepo, contentID, "200", chosenIMDb)
+		})
+	}
+}
