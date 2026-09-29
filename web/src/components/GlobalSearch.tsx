@@ -76,6 +76,10 @@ function searchResultOptionId(index: number): string {
   return `search-result-${index}`;
 }
 
+function scrollSearchResultIntoView(index: number) {
+  document.getElementById(searchResultOptionId(index))?.scrollIntoView?.({ block: "nearest" });
+}
+
 function typeLabel(type: BrowseItem["type"]): string {
   switch (type) {
     case "movie":
@@ -458,9 +462,7 @@ export function GlobalSearch({
   // the next row under a still pointer and select that one too.
   useEffect(() => {
     if (selectedIndex >= 0 && !selectedByPointerRef.current) {
-      document.getElementById(searchResultOptionId(selectedIndex))?.scrollIntoView?.({
-        block: "nearest",
-      });
+      scrollSearchResultIntoView(selectedIndex);
     }
   }, [selectedIndex]);
   const selectByPointer = (key: string) => {
@@ -489,7 +491,11 @@ export function GlobalSearch({
       return;
     }
     selectedByPointerRef.current = false;
-    setSelectedKey(optionKeys[Math.min(nextIndex, optionCount - 1)]!);
+    const index = Math.min(nextIndex, optionCount - 1);
+    setSelectedKey(optionKeys[index]!);
+    // Clamping can keep the same selection, so the effect above will not run.
+    // Reveal it now if the pointer selected a clipped row or the viewer scrolled away.
+    if (index === selectedIndex) scrollSearchResultIntoView(index);
   }
   function pickSelected() {
     const item = items[selectedIndex - itemOffset];
@@ -619,7 +625,7 @@ export function GlobalSearch({
                 selected, Enter searches, so the ↵ chip sits here. */}
             {!showResultsPanel ? (
               <Kbd className="ml-2 hidden sm:inline-flex">ESC</Kbd>
-            ) : resultCount > 0 && selectedIndex < 0 ? (
+            ) : optionCount > 0 && selectedIndex < 0 ? (
               <span className="text-muted-foreground ml-2 hidden shrink-0 items-center gap-1.5 text-xs sm:inline-flex">
                 <EnterKeyHint />
                 See all

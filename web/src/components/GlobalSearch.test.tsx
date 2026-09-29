@@ -444,6 +444,30 @@ describe("GlobalSearch", () => {
     }
   });
 
+  it("reveals the last row when ArrowDown keeps the same selection", () => {
+    const input = renderTwoResults();
+    const scrollIntoView = vi.fn();
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      fireEvent.mouseMove(screen.getByRole("option", { name: /Second Movie/ }));
+      expect(scrollIntoView).not.toHaveBeenCalled();
+
+      fireEvent.keyDown(input, { key: "ArrowDown" });
+      expect(input).toHaveAttribute("aria-activedescendant", "search-result-1");
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(scrollIntoView.mock.contexts[0]).toHaveAttribute("id", "search-result-1");
+
+      // After the viewer scrolls away, the same key must reveal the row again.
+      scrollIntoView.mockClear();
+      fireEvent.keyDown(input, { key: "ArrowDown" });
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(scrollIntoView.mock.contexts[0]).toHaveAttribute("id", "search-result-1");
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
   it("highlights the selected title row", () => {
     const input = renderTwoResults();
 
@@ -794,6 +818,16 @@ describe("GlobalSearch request rows", () => {
     return input;
   }
 
+  it("offers See all when only request suggestions match", async () => {
+    mocks.useQuery.mockReturnValue({
+      data: { total: 0, has_more: false, items: [] },
+      isFetching: false,
+      isError: false,
+    });
+    await renderOpenSearch();
+    expect(screen.getByText("See all")).toBeInTheDocument();
+  });
+
   it("mentions requests in the placeholder when discovery is on", async () => {
     const input = await renderOpenSearch();
 
@@ -829,6 +863,44 @@ describe("GlobalSearch request rows", () => {
 
     expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith("/title/series/7");
     expect(screen.queryByTestId("dialog")).not.toBeInTheDocument();
+  });
+
+  it("reveals a pointer-selected last request row when ArrowDown takes over", async () => {
+    const input = await renderOpenSearch();
+    const scrollIntoView = vi.fn();
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      const row = screen.getByRole("option", { name: /Requested Show/ });
+      fireEvent.mouseMove(row);
+      expect(input).toHaveAttribute("aria-activedescendant", "search-result-1");
+      expect(row).toHaveTextContent("↵");
+      expect(scrollIntoView).not.toHaveBeenCalled();
+
+      fireEvent.keyDown(input, { key: "ArrowDown" });
+      expect(input).toHaveAttribute("aria-activedescendant", "search-result-1");
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(scrollIntoView.mock.contexts[0]).toBe(row);
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
+  it("keeps the dialog and search when a request row opens in another tab", async () => {
+    const input = await renderOpenSearch();
+    const row = screen.getByRole("option", { name: /Requested Show/ });
+    const preventNavigation = (event: Event) => event.preventDefault();
+    document.addEventListener("click", preventNavigation);
+    try {
+      fireEvent.click(row, { metaKey: true });
+      fireEvent.click(row, { ctrlKey: true });
+      fireEvent.click(row, { shiftKey: true });
+    } finally {
+      document.removeEventListener("click", preventNavigation);
+    }
+    expect(input).toHaveValue("Show");
+    expect(screen.getByTestId("dialog")).toBeInTheDocument();
+    expect(mocks.navigate).not.toHaveBeenCalled();
   });
 
   it("shows the shared status badge on a requested row", async () => {
