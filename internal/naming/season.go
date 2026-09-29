@@ -12,7 +12,18 @@ const seasonDirectoryLabels = `season|staffel|stagione|sæson|temporada|series|k
 var (
 	seasonDirectoryTokenRe    = regexp.MustCompile(`(?i)(?:^|[ ._\-\[\]])(?:` + seasonDirectoryLabels + `)[ ._-]*(\d{1,4})(?:$|[ ._\-\[\]])`)
 	reversedSeasonDirectoryRe = regexp.MustCompile(`(?i)^(\d{1,4})[ ._-]+(?:` + seasonDirectoryLabels + `)(?:$|[ ._\-\[\]])`)
+	// bareSeasonDirRe matches a folder named only with a season label and no
+	// number. "series" and "s" are left out so category folders such as
+	// "Series" are not taken for seasons.
+	bareSeasonDirRe = regexp.MustCompile(`(?i)^(?:season|staffel|stagione|sæson|temporada|kausi|säsong|seizoen|seasong|sezon|sezona|sezóna|sezonul|시즌|シーズン|сезон)$`)
 )
+
+// isBareSeasonDirectory reports whether segment is a season label with no
+// number, such as "Season". It is not a season number: the episode numbers in
+// the file names still decide the season.
+func isBareSeasonDirectory(segment string) bool {
+	return bareSeasonDirRe.MatchString(strings.TrimSpace(segment))
+}
 
 // seasonDirectoryNumber recognizes a season directory without borrowing numbers
 // from a show title. A title before the season label must match the parent show

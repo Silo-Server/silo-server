@@ -164,3 +164,44 @@ func TestConfiguredRootDistinguishesNumericShowsFromSeasons(t *testing.T) {
 		})
 	}
 }
+
+func TestBareSeasonFolderJoinsParentShow(t *testing.T) {
+	show := "/media/tv/Example Show (2013) {tvdb-123456}"
+	paths := []string{
+		show + "/Season/Example Show - S01E01.mkv",
+		show + "/Season 2/Example Show - S02E01.mkv",
+		show + "/Staffel/Example Show - S03E01.mkv",
+	}
+	_, assignments := InferRootAssignments(paths, "series", 1, nil, "/media/tv")
+	for _, p := range paths {
+		assignment := assignments[p]
+		if assignment.RootPath != show {
+			t.Errorf("%s: root %q, want %q", p, assignment.RootPath, show)
+		}
+		group := InferGroupIdentity(p, "series", assignment)
+		if group.BaseTitle != "Example Show" || group.TvdbID != "123456" {
+			t.Errorf("%s: identity %+v", p, group)
+		}
+	}
+}
+
+func TestBareSeasonLabelsExcludeCategoryFolders(t *testing.T) {
+	for _, name := range []string{"Season", "season", "Staffel", "Temporada"} {
+		if !isBareSeasonDirectory(name) {
+			t.Errorf("%q should be a bare season folder", name)
+		}
+	}
+	for _, name := range []string{"Series", "S", "Seasons", "Season 2", "Show"} {
+		if isBareSeasonDirectory(name) {
+			t.Errorf("%q should not be a bare season folder", name)
+		}
+	}
+}
+
+func TestBareSeasonFolderAtLibraryRootIsNotLifted(t *testing.T) {
+	filePath := "/media/tv/Season/Example Show - S01E01.mkv"
+	_, assignments := InferRootAssignments([]string{filePath}, "series", 1, nil, "/media/tv")
+	if got := assignments[filePath].RootPath; got == "/media/tv" {
+		t.Errorf("bare season folder at library root lifted to the library root: %q", got)
+	}
+}

@@ -322,7 +322,11 @@ func deriveSeriesRoot(filePath string, hasEpisodePattern bool, forceParent bool,
 		}
 		segment := path.Base(current)
 		allowNumeric := (hasEpisodePattern || forceParent) && (libraryRoot == "" || filepath.Clean(path.Dir(current)) != libraryRoot)
-		if _, ok := seasonDirectoryNumber(segment, path.Base(path.Dir(current)), allowNumeric); ok {
+		_, isSeason := seasonDirectoryNumber(segment, path.Base(path.Dir(current)), allowNumeric)
+		if !isSeason && allowNumeric && isBareSeasonDirectory(segment) {
+			isSeason = true
+		}
+		if isSeason {
 			rootPath := path.Dir(current)
 			if rootPath == "." || rootPath == "/" || rootPath == "" {
 				return nil, false
