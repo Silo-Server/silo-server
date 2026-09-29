@@ -1,4 +1,13 @@
-import { lazy, Suspense, useMemo, useState, useEffect, useCallback, useRef } from "react";
+import {
+  lazy,
+  Suspense,
+  useMemo,
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+  useRef,
+} from "react";
 import { useImageLoaded } from "@/hooks/useImageLoaded";
 import { useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -33,11 +42,24 @@ import CardPlayOverlay from "./CardPlayOverlay";
 import { LocalErrorBoundary } from "./LocalErrorBoundary";
 
 // The request suggestions show only once a search has run, so their cards stay
-// out of the launch bundle. The rows' keyboard options come from the query
-// here, not the component, so they are in place before it loads.
+// out of the launch bundle.
 const RequestToAddSection = lazy(() =>
   import("./RequestToAddSection").then((m) => ({ default: m.RequestToAddSection })),
 );
+
+/**
+ * Reports whether the request suggestions are on screen. It sits in their
+ * Suspense boundary, so it mounts in the same commit as they do, and never
+ * mounts when their code fails to load.
+ */
+function MountSignal({ onChange }: { onChange: (mounted: boolean) => void }) {
+  // A layout effect, so the rows are options from the frame they first paint.
+  useLayoutEffect(() => {
+    onChange(true);
+    return () => onChange(false);
+  }, [onChange]);
+  return null;
+}
 
 const PREVIEW_LIMIT = 8;
 const PEOPLE_PREVIEW_LIMIT = 4;
@@ -267,13 +289,16 @@ export function GlobalSearch({
     retry: false,
   });
   const showRequestSection = canRequest.discoveryEnabled && tmdbDebouncedQuery.length > 1;
+  const [requestSectionShown, setRequestSectionShown] = useState(false);
   // The same rows RequestToAddSection renders: it reads this query from the
   // shared cache and applies the same selection.
-  const requestRows = showRequestSection
+  const suggestedRows = showRequestSection
     ? requestSuggestions(tmdbQuery.data?.results, REQUEST_DIALOG_SUGGESTION_LIMIT)
     : [];
+  // Only rows on screen are keyboard options.
+  const requestRows = requestSectionShown ? suggestedRows : [];
   const tmdbStillLoading = showRequestSection && tmdbQuery.isLoading;
-  const tmdbWillRender = requestRows.length > 0;
+  const tmdbWillRender = suggestedRows.length > 0;
   // Hide empty state while the TMDB debounce trails the library debounce; otherwise
   // the user sees "No matches" flash between t=200ms and t=400ms after typing.
   const tmdbDebounceCatchingUp =
@@ -591,6 +616,7 @@ export function GlobalSearch({
               {showRequestSection && (
                 <LocalErrorBoundary>
                   <Suspense fallback={null}>
+                    <MountSignal onChange={setRequestSectionShown} />
                     <RequestToAddSection
                       variant="dialog"
                       query={tmdbDebouncedQuery}
