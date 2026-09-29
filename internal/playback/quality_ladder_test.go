@@ -150,6 +150,27 @@ func TestDownloadScaleResolution(t *testing.T) {
 // cannot take the source's frame rate or the High profile is not chosen, a
 // level-bound HEVC decoder keeps the encode on H.264, and the target bitrate
 // stays within the chosen decoder's maximum.
+func TestH264LevelFor(t *testing.T) {
+	for _, tc := range []struct {
+		w, h int
+		fps  float64
+		kbps int
+		want int
+	}{
+		{1280, 720, 24, 2_000, 31},
+		{1920, 1080, 24, 10_000, 40},
+		{1920, 1080, 24, 20_000, 41}, // a 40 Mbit buffer outgrows level 4.0
+		{1920, 1080, 24, 30_000, 41},
+		{1920, 1080, 60, 10_000, 42},
+		{3840, 2160, 24, 20_000, 51},
+		{3840, 2160, 60, 20_000, 52},
+	} {
+		if got := h264LevelFor(tc.w, tc.h, tc.fps, tc.kbps); got != tc.want {
+			t.Errorf("h264LevelFor(%dx%d@%v, %d) = %d, want %d", tc.w, tc.h, tc.fps, tc.kbps, got, tc.want)
+		}
+	}
+}
+
 func TestResolveDownloadTranscodeTargetHonorsDecoderLimits(t *testing.T) {
 	uhd60 := ladderTestFile(3840, 2160, "hevc", "60", 40_000)
 	uhd := ladderTestFile(3840, 2160, "hevc", "24", 40_000)
@@ -181,6 +202,15 @@ func TestResolveDownloadTranscodeTargetHonorsDecoderLimits(t *testing.T) {
 		{"the decoder's bitrate limit caps the target", uhd, exact(
 			VideoDecodeCapabilityV3{Codec: "h264", BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxBitrateKbps: 8_000, Hardware: true},
 		), 10_000, false, "h264", "1080p", 8_000},
+		{"a low decoder bitrate limit also lowers the class", uhd, exact(
+			VideoDecodeCapabilityV3{Codec: "h264", BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxBitrateKbps: 3_000, Hardware: true},
+		), 10_000, false, "h264", "720p", 3_000},
+		{"an H.264 level limit bounds the size and rate", uhd, exact(
+			VideoDecodeCapabilityV3{Codec: "h264", Levels: []int{31}, BitDepths: []int{8}, MaxWidth: 3840, MaxHeight: 2160, Hardware: true},
+		), 10_000, false, "h264", "720p", 8_750},
+		{"a decoder too slow for the frame rate still bounds the size", uhd60, exact(
+			VideoDecodeCapabilityV3{Codec: "h264", BitDepths: []int{8}, MaxWidth: 1280, MaxHeight: 720, MaxFrameRate: 30, Hardware: true},
+		), 20_000, false, "h264", "720p", 20_000},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := ResolveDownloadTranscodeTarget(tc.file, tc.caps, tc.kbps, DownloadTranscodeSettings{AllowHEVCEncoding: tc.hevc})
