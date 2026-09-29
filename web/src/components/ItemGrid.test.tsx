@@ -59,35 +59,42 @@ describe("ItemGrid row pitch", () => {
     vi.restoreAllMocks();
   });
 
-  it("sizes rows from the rendered grid, not the caption estimate (#1613)", () => {
-    // Three rendered rows at a real pitch of 340px (captions taller than the
-    // estimate): the grid is 3 * 340 - gap tall.
-    const realPitch = 340;
+  // Cards report their natural height; the grid cell around them doesn't.
+  function mockCardHeights(height: () => number) {
     vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (
       this: HTMLElement,
     ) {
-      return this.getAttribute("role") === "list" ? 3 * realPitch - GAP : 0;
+      return this.parentElement?.getAttribute("role") === "listitem" ? height() : 0;
     });
+  }
+
+  it("sizes rows from the tallest rendered card, not the caption estimate (#1613)", () => {
+    // Cards 328px tall (captions taller than the estimate) need a 340px pitch.
+    mockCardHeights(() => 328);
 
     render(<ItemGrid items={items} />);
 
     expect(mocks.estimateSizes[0]).toBe(ESTIMATED_ROW_HEIGHT);
-    expect(mocks.estimateSizes.at(-1)).toBe(realPitch);
+    expect(mocks.estimateSizes.at(-1)).toBe(328 + GAP);
   });
 
-  it("never lowers the measured pitch, so mixed row heights can't oscillate", () => {
-    let pitch = 340;
-    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (
-      this: HTMLElement,
-    ) {
-      return this.getAttribute("role") === "list" ? 3 * pitch - GAP : 0;
-    });
+  it("pins every CSS row to the reserved pitch, so rows can't drift", () => {
+    mockCardHeights(() => 328);
+
+    const { getByRole } = render(<ItemGrid items={items} />);
+
+    expect(getByRole("list").style.gridAutoRows).toBe("328px");
+  });
+
+  it("never lowers the measured pitch, so mixed card heights can't oscillate", () => {
+    let height = 328;
+    mockCardHeights(() => height);
 
     const { rerender } = render(<ItemGrid items={items} />);
     expect(mocks.estimateSizes.at(-1)).toBe(340);
 
-    // A shorter window of rows must not shrink the reserved height.
-    pitch = 320;
+    // Shorter cards in a later range must not shrink the reserved height.
+    height = 308;
     rerender(<ItemGrid items={[...items]} />);
     expect(mocks.estimateSizes.at(-1)).toBe(340);
   });

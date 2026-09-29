@@ -69,10 +69,12 @@ export default function ItemGrid(props: ItemGridProps) {
   const { columnCount, rowHeight: estimatedRowHeight } = layout;
   // The estimate adds a fixed caption height, but the rendered caption depends
   // on line heights, an episode line and the text scale, so it runs taller.
-  // Rows reserved at the estimate then spill past the page bottom (#1613), so
-  // the pitch measured from the rendered grid replaces it once known.
-  // A measurement only holds for the layout it was taken under; a poster size,
-  // caption or column change produces a new estimate and a fresh measurement.
+  // Rows reserved at the estimate then spilled past the page bottom (#1613).
+  // The grid now pins every CSS row to the pitch the virtualizer reserves, and
+  // that pitch grows to fit the tallest card rendered, so reserved and drawn
+  // heights match exactly, row for row. A measurement only holds for the
+  // layout it was taken under; a poster size, caption or column change
+  // produces a new estimate and a fresh measurement.
   const [measured, setMeasured] = useState<{ estimate: number; rowHeight: number } | null>(null);
   const rowHeight =
     measured?.estimate === estimatedRowHeight ? measured.rowHeight : estimatedRowHeight;
@@ -99,28 +101,39 @@ export default function ItemGrid(props: ItemGridProps) {
 
   const virtualRows = virtualizer.getVirtualItems();
 
-  // The visible rows render as one CSS grid, so its height divided by the row
-  // count (gaps included) is the real row pitch.
-  const renderedRowCount = virtualRows.length;
   const showsItems = !loading && totalItems > 0;
-  useLayoutEffect(() => {
-    const grid = containerRef.current;
-    if (!showsItems || !grid || renderedRowCount === 0) return;
-    const gridHeight = grid.offsetHeight;
-    if (gridHeight <= 0) return;
-    const pitch = (gridHeight + gridGap) / renderedRowCount;
-    // Only ever grow within a layout. The pitch averages the visible rows, and
-    // with mixed card heights a new range could lower it, move the range and
-    // raise it again, looping renders. Keeping the largest pitch seen settles
-    // it; a slight over-reserve leaves spare space instead of spilling rows.
-    if (pitch > rowHeight + 0.5) {
-      setMeasured({ estimate: estimatedRowHeight, rowHeight: pitch });
-    }
-  });
-
+  // Static grids rebuild `pages` each render; key on the data behind it.
+  const content = hasStaticItems(props) ? props.items : props.pages;
   // Report visible item range to parent for page fetching
   const firstRow = virtualRows[0]?.index ?? 0;
   const lastRow = virtualRows[virtualRows.length - 1]?.index ?? 0;
+  // Measure each rendered card's natural height (its content, not the grid
+  // cell stretched to the pinned row) when the rendered range or content
+  // changes, not after every commit. The pitch only grows within a layout, so
+  // it can't be pulled back and forth by which cards are on screen.
+  useLayoutEffect(() => {
+    const grid = containerRef.current;
+    if (!showsItems || !grid) return;
+    let tallest = 0;
+    for (const cell of Array.from(grid.children)) {
+      const card = cell.firstElementChild;
+      if (card instanceof HTMLElement) tallest = Math.max(tallest, card.offsetHeight);
+    }
+    if (tallest <= 0) return;
+    const pitch = Math.ceil(tallest) + gridGap;
+    if (pitch > rowHeight) {
+      setMeasured({ estimate: estimatedRowHeight, rowHeight: pitch });
+    }
+  }, [
+    showsItems,
+    firstRow,
+    lastRow,
+    content,
+    estimatedRowHeight,
+    rowHeight,
+    gridGap,
+    containerRef,
+  ]);
 
   useEffect(() => {
     const start = firstRow * columnCount;
@@ -168,6 +181,8 @@ export default function ItemGrid(props: ItemGridProps) {
               left: 0,
               right: 0,
               overflow: "visible",
+              // Every row is exactly the pitch the virtualizer reserves.
+              gridAutoRows: `${Math.max(rowHeight - gridGap, 0)}px`,
               transform: `translateY(${(virtualRows[0]?.start ?? 0) - scrollMargin}px)`,
             }}
           >
