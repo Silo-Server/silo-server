@@ -1036,12 +1036,18 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		return terminalPlannerResultV3("conversion_tool_unavailable", "The required validated H.264/AAC conversion toolchain is unavailable.", true)
 	}
 	targetVideoCodec := transcodeCodecH264
-	if input.Settings.AllowHEVCEncoding && hlsRegistry.Available(TransformationVideoToHEVCV3) && hlsHEVCOutputSupportedV3(input.Request, quality, source) {
-		targetVideoCodec = transcodeCodecHEVC
+	// h264BitrateKbps is kept for the H.264 fallback after a failed HEVC attempt.
+	h264BitrateKbps := quality.BitrateKbps
+	if input.Settings.AllowHEVCEncoding && hlsRegistry.Available(TransformationVideoToHEVCV3) {
 		// The quality policy bounds a scaled encode by the source's bits
-		// counted as H.264; HEVC output needs no more than them counted as HEVC.
-		if sourceKbps := sourceEquivalentKbps(source, transcodeCodecHEVC); sourceKbps > 0 && quality.BitrateKbps > 0 && !quality.PreservesSource {
-			quality.BitrateKbps = min(quality.BitrateKbps, sourceKbps)
+		// counted as H.264; HEVC output needs no more than them counted as
+		// HEVC, and the decoder is checked against that HEVC target.
+		hevcQuality := quality
+		if sourceKbps := sourceEquivalentKbps(source, transcodeCodecHEVC); sourceKbps > 0 && hevcQuality.BitrateKbps > 0 && !hevcQuality.PreservesSource {
+			hevcQuality.BitrateKbps = min(hevcQuality.BitrateKbps, sourceKbps)
+		}
+		if hlsHEVCOutputSupportedV3(input.Request, hevcQuality, source) {
+			targetVideoCodec, quality = transcodeCodecHEVC, hevcQuality
 		}
 	}
 	if source.DynamicRange != "" && source.DynamicRange != DynamicRangeSDRV3 {
@@ -1067,6 +1073,7 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 			return terminalPlannerResultV3(TerminalBitratePolicyUnavailableV3, "The server bitrate limit is too low for a playable video stream.", false)
 		}
 		quality.BitrateKbps = min(quality.BitrateKbps, budget-targetAudioBitrateKbps)
+		h264BitrateKbps = min(h264BitrateKbps, budget-targetAudioBitrateKbps)
 	}
 	plan.EffectiveRecipe.BitrateKbps = intPointerV3(quality.BitrateKbps)
 	// Surround sources keep 5.1 through the AAC re-encode (universal Media3
@@ -1125,6 +1132,8 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	// the same HLS delivery without changing source/remux behavior.
 	if targetVideoCodec == transcodeCodecHEVC && planAttemptedV3(plan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
 		targetVideoCodec = transcodeCodecH264
+		quality.BitrateKbps = h264BitrateKbps
+		plan.EffectiveRecipe.BitrateKbps = intPointerV3(h264BitrateKbps)
 		plan.EffectiveRecipe.VideoCodec = targetVideoCodec
 		plan.EffectiveRecipe.VideoSampleEntry = ""
 		if !replaceVideoTransformationV3(&plan, targetVideoCodec) || !deliverySupportsPlanV3(input.Request, DeliveryClassHLSV3, plan) {
@@ -1395,10 +1404,11 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 		warnings = append(warnings, DegradationWarningV3{Code: "bandwidth_cap_applied", Message: "Delivery quality is limited by the configured bandwidth cap."})
 	}
 	if source.Height > 0 && targetHeight >= source.Height && !capApplied && !overEstimate {
+		label, width, height := sourceFrameV3(source)
 		return QualityResultV3{
-			Label:           sourceScaleLabelV3(source.Height),
-			Width:           source.Width,
-			Height:          source.Height,
+			Label:           label,
+			Width:           width,
+			Height:          height,
 			BitrateKbps:     source.BitrateKbps,
 			PreservesSource: true,
 			ExplicitRung:    explicitRung,
@@ -1475,10 +1485,11 @@ func compoundRungQualityResultV3(rung ladderRungV3, source SourceDescriptorV3, c
 	}
 	fitsRung := sourceClassHeight > 0 && sourceClassHeight <= rung.Height && source.BitrateKbps > 0 && source.BitrateKbps <= rung.BitrateKbps
 	if fitsRung && !capApplied {
+		label, width, height := sourceFrameV3(source)
 		return QualityResultV3{
-			Label:           sourceScaleLabelV3(source.Height),
-			Width:           source.Width,
-			Height:          source.Height,
+			Label:           label,
+			Width:           width,
+			Height:          height,
 			BitrateKbps:     source.BitrateKbps,
 			PreservesSource: true,
 			ExplicitRung:    true,
@@ -1513,7 +1524,8 @@ func compoundRungQualityResultV3(rung ladderRungV3, source SourceDescriptorV3, c
 // source height: a class label would scale a 3840x1600 source to 1080 lines
 // whenever the original route still needs a video transcode.
 func originalQualityResultV3(source SourceDescriptorV3) QualityResultV3 {
-	return QualityResultV3{Label: sourceScaleLabelV3(source.Height), Width: source.Width, Height: source.Height, BitrateKbps: source.BitrateKbps, PreservesSource: true, Reason: "quality_original"}
+	label, width, height := sourceFrameV3(source)
+	return QualityResultV3{Label: label, Width: width, Height: height, BitrateKbps: source.BitrateKbps, PreservesSource: true, Reason: "quality_original"}
 }
 
 // streamClassV3 is the ladder class an automatic encode snaps into for a
@@ -1535,14 +1547,19 @@ func streamClassV3(targetHeight, limit int, source SourceDescriptorV3) int {
 	return class
 }
 
-// sourceScaleLabelV3 labels a route that keeps the source frame. A route that
-// still encodes (a codec conversion) scales to this height, so an odd height
-// rounds down to the even one 4:2:0 output needs; an unknown height is empty.
-func sourceScaleLabelV3(height int) string {
-	if height <= 0 {
-		return ""
+// sourceFrameV3 is the frame a route that keeps the source size encodes when
+// it still converts (a codec change): the source frame with an odd height
+// rounded down to the even one 4:2:0 output needs, the width scale=-2 then
+// gives, and that height as the label. An unknown height has no label.
+func sourceFrameV3(source SourceDescriptorV3) (label string, width, height int) {
+	if source.Height <= 0 {
+		return "", source.Width, source.Height
 	}
-	return heightLabel(height &^ 1)
+	width, height = source.Width, source.Height&^1
+	if width > 0 && (height != source.Height || width%2 != 0) {
+		width = scaledEvenWidth(source.Width, source.Height, height)
+	}
+	return heightLabel(height), width, height
 }
 
 // hlsNativeAudioCodecV3 reports whether an audio codec can be stream-copied

@@ -332,8 +332,8 @@ func TestOriginalQualityResultKeepsTheSourceHeight(t *testing.T) {
 		t.Fatalf("unknown source height label = %q, want no scale", got.Label)
 	}
 	// An odd height still scales, to the even height 4:2:0 output needs.
-	if got := originalQualityResultV3(SourceDescriptorV3{Width: 1920, Height: 1081}); got.Label != "1080p" || resolutionToScale(got.Label) != "scale=-2:1080" {
-		t.Fatalf("odd source height label = %q (scale %q), want 1080p", got.Label, resolutionToScale(got.Label))
+	if got := originalQualityResultV3(SourceDescriptorV3{Width: 1920, Height: 1081}); got.Label != "1080p" || resolutionToScale(got.Label) != "scale=-2:1080" || got.Width != 1918 || got.Height != 1080 {
+		t.Fatalf("odd source = %q %dx%d (scale %q), want 1080p 1918x1080", got.Label, got.Width, got.Height, resolutionToScale(got.Label))
 	}
 }
 
