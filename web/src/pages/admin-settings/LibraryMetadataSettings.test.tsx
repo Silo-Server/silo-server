@@ -32,6 +32,28 @@ vi.mock("@/hooks/queries/admin/markers", () => ({
   useAdminMarkerCapabilities: () => markerCapabilitiesMock(),
 }));
 
+const ratingSourcesMock = vi.fn(() => ({
+  isError: false,
+  data: {
+    items: [
+      { source: "imdb", label: "IMDb", name: "IMDb", always_shown: true },
+      { source: "tmdb", label: "TMDB", name: "TMDB", always_shown: true },
+      { source: "rt_critic", label: "Rotten Tomatoes critics", name: "RT", always_shown: false },
+      {
+        source: "kinopoisk",
+        label: "Kinopoisk",
+        name: "Kinopoisk",
+        always_shown: false,
+        provider: "Kinopoisk Metadata",
+      },
+    ],
+  },
+}));
+
+vi.mock("@/hooks/queries/admin/ratingSources", () => ({
+  useAdminRatingSources: () => ratingSourcesMock(),
+}));
+
 vi.mock("@/hooks/queries/admin/tasks", () => ({
   useTasks: () => ({ data: [] }),
   useRunTask: () => ({ mutateAsync: vi.fn() }),
@@ -406,5 +428,19 @@ describe("LibraryMetadataSettings", () => {
     expect(rendered).toContain("Enabling this changes the index format");
     expect(rendered).toContain("rebuilds the index automatically");
     expect(rendered).toContain("Keyword search stays available");
+  });
+
+  it("offers every source the server lists except IMDb and TMDB, which always show", () => {
+    const markup = render({ "catalog.extra_rating_sources": "kinopoisk" });
+    const page = text(markup);
+
+    expect(page).toContain("Rotten Tomatoes critics");
+    expect(page).toContain("Kinopoisk");
+    expect(page).toContain("From the Kinopoisk Metadata plugin.");
+    const container = document.createElement("div");
+    container.innerHTML = markup;
+    const labels = Array.from(container.querySelectorAll("label")).map((l) => l.textContent);
+    expect(labels).not.toContain("IMDb");
+    expect(labels).not.toContain("TMDB");
   });
 });

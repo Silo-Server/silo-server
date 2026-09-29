@@ -640,6 +640,7 @@ func registerAll(reg *Registry) {
 	registerAdminCatalogSearch(reg)
 	registerAdminCatalogLiterary(reg)
 	registerAdminRecommendations(reg)
+	registerAdminRatingSources(reg)
 	registerAdminCatalogPeople(reg)
 	registerAdminCatalogTranslation(reg)
 	registerAdminCatalogItemMetadata(reg)

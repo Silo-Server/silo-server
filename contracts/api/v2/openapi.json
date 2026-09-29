@@ -11219,6 +11219,50 @@
         ],
         "type": "object"
       },
+      "AdminRatingSource": {
+        "additionalProperties": false,
+        "properties": {
+          "always_shown": {
+            "description": "True for IMDb and TMDB, which always show; every other source shows only once catalog.extra_rating_sources lists it",
+            "type": "boolean"
+          },
+          "label": {
+            "description": "The source's name in full",
+            "examples": [
+              "Rotten Tomatoes critics"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "The plain-text mark clients show next to its score",
+            "examples": [
+              "RT"
+            ],
+            "type": "string"
+          },
+          "provider": {
+            "description": "The metadata plugin that declared the source; absent for Silo's own sources",
+            "examples": [
+              "Kinopoisk"
+            ],
+            "type": "string"
+          },
+          "source": {
+            "description": "Source name, the value catalog.extra_rating_sources lists",
+            "examples": [
+              "rt_critic"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "label",
+          "name",
+          "always_shown"
+        ],
+        "type": "object"
+      },
       "AdminRecommendationJobStatus": {
         "additionalProperties": false,
         "properties": {
@@ -19974,6 +20018,26 @@
             "description": "The page's items; empty, never null",
             "items": {
               "$ref": "#/components/schemas/AdminPolicyVersion"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "CollectionAdminRatingSource": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/AdminRatingSource"
             },
             "type": "array"
           },
@@ -88684,6 +88748,148 @@
           }
         ],
         "summary": "Read process-local limiter backend and configured Redis availability; no reachability probe.",
+        "tags": [
+          "admin-settings"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/rating-sources": {
+      "get": {
+        "operationId": "listAdminRatingSources",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionAdminRatingSource"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the external rating sources an administrator can show on title pages, including sources metadata plugins declare.",
         "tags": [
           "admin-settings"
         ],

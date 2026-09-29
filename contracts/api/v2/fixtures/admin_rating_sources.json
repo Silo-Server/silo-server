@@ -1,0 +1,77 @@
+{
+  "items": [
+    {
+      "source": "imdb",
+      "label": "IMDb",
+      "name": "IMDb",
+      "always_shown": true
+    },
+    {
+      "source": "tmdb",
+      "label": "TMDB",
+      "name": "TMDB",
+      "always_shown": true
+    },
+    {
+      "source": "rt_critic",
+      "label": "Rotten Tomatoes critics",
+      "name": "RT",
+      "always_shown": false
+    },
+    {
+      "source": "rt_audience",
+      "label": "Rotten Tomatoes audience",
+      "name": "RT Audience",
+      "always_shown": false
+    },
+    {
+      "source": "metacritic",
+      "label": "Metacritic",
+      "name": "Metacritic",
+      "always_shown": false
+    },
+    {
+      "source": "metacritic_user",
+      "label": "Metacritic users",
+      "name": "Metacritic Users",
+      "always_shown": false
+    },
+    {
+      "source": "letterboxd",
+      "label": "Letterboxd",
+      "name": "Letterboxd",
+      "always_shown": false
+    },
+    {
+      "source": "trakt",
+      "label": "Trakt",
+      "name": "Trakt",
+      "always_shown": false
+    },
+    {
+      "source": "rogerebert",
+      "label": "Roger Ebert",
+      "name": "Roger Ebert",
+      "always_shown": false
+    },
+    {
+      "source": "myanimelist",
+      "label": "MyAnimeList",
+      "name": "MyAnimeList",
+      "always_shown": false
+    },
+    {
+      "source": "mdblist",
+      "label": "MDBList score",
+      "name": "MDBList",
+      "always_shown": false
+    },
+    {
+      "source": "kinopoisk",
+      "label": "Kinopoisk",
+      "name": "Kinopoisk",
+      "always_shown": false,
+      "provider": "Kinopoisk"
+    }
+  ]
+}

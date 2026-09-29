@@ -5,6 +5,7 @@
 // IMDb and TMDB are always shown. Every other source is shown only after an
 // administrator turns it on under config.CatalogExtraRatingSourcesSettingKey,
 // because the owners of those scores restrict how others may display them.
+// That includes sources a metadata plugin declares beyond Silo's own.
 package ratingsources
 
 import (
@@ -19,9 +20,18 @@ import (
 )
 
 // Selection is the set of sources an administrator turned on in addition to
-// the ones that are always shown. The zero value shows only those.
+// the ones that are always shown, and the definitions of the sources metadata
+// plugins declared. The zero value shows only IMDb and TMDB.
 type Selection struct {
-	extra map[string]struct{}
+	extra    map[string]struct{}
+	declared []models.RatingSourceDefinition
+}
+
+// WithDeclared returns the selection with the given plugin-declared source
+// definitions, which Build lists after Silo's own sources when shown.
+func (s Selection) WithDeclared(declared []models.RatingSourceDefinition) Selection {
+	s.declared = declared
+	return s
 }
 
 // NewSelection returns a selection that shows the given extra sources.
@@ -48,10 +58,22 @@ func (s Selection) Shows(source string) bool {
 // seconds.
 const cacheTTL = 10 * time.Second
 
-// Policy reads config.CatalogExtraRatingSourcesSettingKey and caches a
-// successful read for cacheTTL.
+// DeclaredSource is a rating source a metadata plugin declared.
+type DeclaredSource struct {
+	models.RatingSourceDefinition
+	// Provider names the metadata provider that declared it.
+	Provider string
+}
+
+// DeclaredFunc lists the rating sources the enabled metadata plugins declare,
+// in provider order, each source once.
+type DeclaredFunc func(ctx context.Context) ([]DeclaredSource, error)
+
+// Policy reads config.CatalogExtraRatingSourcesSettingKey and the sources
+// metadata plugins declare, and caches a successful read for cacheTTL.
 type Policy struct {
 	settings config.SettingReader
+	declared DeclaredFunc
 	now      func() time.Time
 
 	mu        sync.Mutex
@@ -59,15 +81,16 @@ type Policy struct {
 	expires   time.Time
 }
 
-// NewPolicy binds the policy to a server settings reader. A nil reader, or a
-// nil policy, shows only the sources that are always shown.
-func NewPolicy(settings config.SettingReader) *Policy {
-	return &Policy{settings: settings, now: time.Now}
+// NewPolicy binds the policy to a server settings reader and the lister of
+// plugin-declared sources. A nil reader, or a nil policy, shows only the
+// sources that are always shown; a nil lister shows no plugin sources.
+func NewPolicy(settings config.SettingReader, declared DeclaredFunc) *Policy {
+	return &Policy{settings: settings, declared: declared, now: time.Now}
 }
 
-// Selection returns the sources to show. A read failure answers with the
-// selection last read successfully, or the default when none has been; the
-// failed read is not cached, so the next call retries.
+// Selection returns the sources to show. A failed settings read answers with
+// what was last read successfully, or the default when nothing has been, and
+// is not cached, so the next call retries.
 func (p *Policy) Selection(ctx context.Context) Selection {
 	if p == nil || p.settings == nil {
 		return Selection{}
@@ -83,13 +106,59 @@ func (p *Policy) Selection(ctx context.Context) Selection {
 	if err != nil {
 		return sel
 	}
-	sel = NewSelection(config.ParseRatingSourceList(value)...)
+	// A failed read of the plugin declarations keeps the last list read, and
+	// is retried after cacheTTL like any other read.
+	declared := sel.declared
+	if p.declared != nil {
+		if sources, err := p.declared(ctx); err == nil {
+			declared = definitionsOf(sources)
+		}
+	}
+	sel = NewSelection(config.ParseRatingSourceList(value)...).WithDeclared(declared)
 
 	p.mu.Lock()
 	p.selection = sel
 	p.expires = p.now().Add(cacheTTL)
 	p.mu.Unlock()
 	return sel
+}
+
+func definitionsOf(sources []DeclaredSource) []models.RatingSourceDefinition {
+	out := make([]models.RatingSourceDefinition, 0, len(sources))
+	for _, source := range sources {
+		out = append(out, source.RatingSourceDefinition)
+	}
+	return out
+}
+
+// Source is one rating source an administrator can show.
+type Source struct {
+	models.RatingSourceDefinition
+	// AlwaysShown is true for IMDb and TMDB, which no setting hides.
+	AlwaysShown bool
+	// Provider names the metadata plugin that declared the source; empty for
+	// Silo's own sources.
+	Provider string
+}
+
+// Sources lists Silo's own rating sources and those the enabled metadata
+// plugins declare, read fresh, in display order.
+func (p *Policy) Sources(ctx context.Context) ([]Source, error) {
+	var out []Source
+	for _, definition := range models.RatingSourceDefinitions() {
+		out = append(out, Source{RatingSourceDefinition: definition, AlwaysShown: models.RatingSourceAlwaysShown(definition.Source)})
+	}
+	if p == nil || p.declared == nil {
+		return out, nil
+	}
+	declared, err := p.declared(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, source := range declared {
+		out = append(out, Source{RatingSourceDefinition: source.RatingSourceDefinition, Provider: source.Provider})
+	}
+	return out, nil
 }
 
 // Rating is one entry of the list clients render.
@@ -119,6 +188,7 @@ type Item struct {
 // IMDb, TMDB, and Rotten Tomatoes come from the rating columns, which are also
 // what poster badges, browse sorting, and filters read, so every surface shows
 // the same number. A per-source row fills in only when its column is empty.
+// Plugin-declared sources follow Silo's own, in the order they were declared.
 // Values outside a source's scale are dropped rather than shown.
 func Build(item Item, sel Selection) []Rating {
 	scores := make(map[string]float64, len(item.Sources)+4)
@@ -147,7 +217,7 @@ func Build(item Item, sel Selection) []Rating {
 	}
 
 	var out []Rating
-	for _, definition := range models.RatingSourceDefinitions() {
+	for _, definition := range append(models.RatingSourceDefinitions(), sel.declared...) {
 		score, ok := scores[definition.Source]
 		if !ok || !sel.Shows(definition.Source) {
 			continue

@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -340,6 +344,9 @@ type CapabilityInfo struct {
 	// into one upstream request (bulk_lookup_limit), or 0 when it did not opt
 	// into the bulk enrichment pass. See extractBulkLookupLimit.
 	BulkLookupLimit int
+	// RatingSources are the rating sources of its own the capability declares
+	// (rating_sources), beyond Silo's built-in ones. See extractRatingSources.
+	RatingSources []models.RatingSourceDefinition
 }
 
 // resolveEnabledProviders returns all enabled providers in installation ID order.
@@ -571,6 +578,70 @@ func extractBulkLookupLimit(metadataJSON []byte) int {
 	return min(limit, maxBulkLookupLimit)
 }
 
+// maxDeclaredRatingSources caps how many rating sources one capability may
+// declare, so a plugin cannot crowd a title page.
+const maxDeclaredRatingSources = 8
+
+// maxRatingSourceNameRunes caps a declared source's name, the mark clients
+// show next to its score.
+const maxRatingSourceNameRunes = 24
+
+// extractRatingSources parses a capability's rating_sources: rating sources of
+// its own, beyond Silo's built-in ones, that it reports under
+// ratings.sources. Each entry is {"id", "name", "scale", "percent"}:
+//
+//	"rating_sources": [{"id": "kinopoisk", "name": "Kinopoisk", "scale": 10}]
+//
+// id is a source name (see models.ValidRatingSourceID, compared lowercased)
+// that is not one of Silo's own, name is the plain-text mark clients show, scale is the top of
+// the source's own scale (10 shows a stored 72 as 7.2), and percent shows the
+// score as a percentage. An entry that breaks any of these is dropped on its
+// own; duplicates keep the first; at most maxDeclaredRatingSources are kept.
+// Declared sources stay hidden until an administrator turns them on.
+func extractRatingSources(metadataJSON []byte) []models.RatingSourceDefinition {
+	raw, ok := capabilityMetadataField(metadataJSON, "rating_sources")
+	if !ok {
+		return nil
+	}
+	var entries []json.RawMessage
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil
+	}
+	var out []models.RatingSourceDefinition
+	seen := make(map[string]struct{}, len(entries))
+	for _, rawEntry := range entries {
+		var entry struct {
+			ID      string  `json:"id"`
+			Name    string  `json:"name"`
+			Scale   float64 `json:"scale"`
+			Percent bool    `json:"percent"`
+		}
+		if err := json.Unmarshal(rawEntry, &entry); err != nil {
+			continue
+		}
+		id := strings.ToLower(strings.TrimSpace(entry.ID))
+		name := strings.TrimSpace(entry.Name)
+		if !models.ValidRatingSourceID(id) || models.IsBuiltinRatingSource(id) {
+			continue
+		}
+		if name == "" || utf8.RuneCountInString(name) > maxRatingSourceNameRunes {
+			continue
+		}
+		if math.IsNaN(entry.Scale) || entry.Scale <= 0 || entry.Scale > 100 {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, models.RatingSourceDefinition{Source: id, Name: name, Label: name, Scale: entry.Scale, Percent: entry.Percent})
+		if len(out) == maxDeclaredRatingSources {
+			break
+		}
+	}
+	return out
+}
+
 // capabilityMetadataField reads one plugin-declared field from capability
 // metadata JSON. The field may sit at the top level or inside the "metadata"
 // envelope the SDK wraps plugin-declared fields in; the top level wins.
@@ -660,9 +731,32 @@ func ListEnabledMetadataCapabilities(ctx context.Context, pool *pgxpool.Pool) ([
 		}
 		c.LookupProviderIDs = extractLookupProviderIDs(metadataJSON)
 		c.BulkLookupLimit = extractBulkLookupLimit(metadataJSON)
+		c.RatingSources = extractRatingSources(metadataJSON)
 		caps = append(caps, c)
 	}
 	return caps, rows.Err()
+}
+
+// DeclaredRatingSources lists the rating sources the enabled metadata plugins
+// declare (rating_sources), in installation order. When two plugins declare
+// the same source, the first declaration names and scales it.
+func DeclaredRatingSources(ctx context.Context, pool *pgxpool.Pool) ([]ratingsources.DeclaredSource, error) {
+	caps, err := ListEnabledMetadataCapabilities(ctx, pool)
+	if err != nil {
+		return nil, err
+	}
+	var out []ratingsources.DeclaredSource
+	seen := map[string]struct{}{}
+	for _, c := range caps {
+		for _, definition := range c.RatingSources {
+			if _, dup := seen[definition.Source]; dup {
+				continue
+			}
+			seen[definition.Source] = struct{}{}
+			out = append(out, ratingsources.DeclaredSource{RatingSourceDefinition: definition, Provider: c.DisplayName})
+		}
+	}
+	return out, nil
 }
 
 // resolveChainEntries builds Provider instances from explicit chain entries,
@@ -717,7 +811,7 @@ func buildProviders(
 			continue
 		}
 
-		provider, err := NewPluginProviderFromCapability(c.PluginInstallationID, c.CapabilityID, c.DisplayName, c.LookupProviderIDs, resolver)
+		provider, err := NewPluginProviderFromCapability(c.PluginInstallationID, c.CapabilityID, c.DisplayName, c.LookupProviderIDs, c.RatingSources, resolver)
 		if err != nil {
 			slog.WarnContext(ctx, "skipping metadata provider during chain resolution", "component", "metadata",
 				"installation_id", c.PluginInstallationID,
@@ -789,5 +883,6 @@ func lookupCapabilityInfo(ctx context.Context, pool *pgxpool.Pool, installationI
 	}
 	info.LookupProviderIDs = extractLookupProviderIDs(metadataJSON)
 	info.BulkLookupLimit = extractBulkLookupLimit(metadataJSON)
+	info.RatingSources = extractRatingSources(metadataJSON)
 	return info
 }

@@ -43,7 +43,7 @@ func TestRatingSourcesFromStruct(t *testing.T) {
 		"metacritic_user": number(75),
 	})
 
-	got := ratingSourcesFromStruct(ratings, "mdblist")
+	got := ratingSourcesFromStruct(ratings, "mdblist", nil)
 	want := map[string]RatingSource{
 		models.RatingSourceIMDB:       {Score: 81, Votes: 673852, Provider: "mdblist"},
 		models.RatingSourceMetacritic: {Score: 87.5, Votes: 21, Provider: "mdblist"},
@@ -74,7 +74,7 @@ func TestRatingSourcesFromStructDropsMalformedVotesOnly(t *testing.T) {
 			ratings := ratingsStructWithSources(t, map[string]*structpb.Value{
 				"imdb": sourceEntry(map[string]*structpb.Value{"score": number(70), "votes": votes}),
 			})
-			got := ratingSourcesFromStruct(ratings, "mdblist")
+			got := ratingSourcesFromStruct(ratings, "mdblist", nil)
 			want := map[string]RatingSource{models.RatingSourceIMDB: {Score: 70, Provider: "mdblist"}}
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("ratingSourcesFromStruct() = %+v, want %+v", got, want)
@@ -96,7 +96,7 @@ func TestRatingSourcesFromStructWithoutSources(t *testing.T) {
 	}
 	for name, ratings := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := ratingSourcesFromStruct(ratings, "mdblist"); got != nil {
+			if got := ratingSourcesFromStruct(ratings, "mdblist", nil); got != nil {
 				t.Fatalf("ratingSourcesFromStruct() = %+v, want nil", got)
 			}
 		})

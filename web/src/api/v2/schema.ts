@@ -3195,6 +3195,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/rating-sources": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the external rating sources an administrator can show on title pages, including sources metadata plugins declare. */
+    get: operations["listAdminRatingSources"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/recommendations/status": {
     parameters: {
       query?: never;
@@ -14616,6 +14633,30 @@ export interface components {
       restart_required: boolean;
       status: string;
     };
+    AdminRatingSource: {
+      /** @description True for IMDb and TMDB, which always show; every other source shows only once catalog.extra_rating_sources lists it */
+      always_shown: boolean;
+      /**
+       * @description The source's name in full
+       * @example Rotten Tomatoes critics
+       */
+      label: string;
+      /**
+       * @description The plain-text mark clients show next to its score
+       * @example RT
+       */
+      name: string;
+      /**
+       * @description The metadata plugin that declared the source; absent for Silo's own sources
+       * @example Kinopoisk
+       */
+      provider?: string;
+      /**
+       * @description Source name, the value catalog.extra_rating_sources lists
+       * @example rt_critic
+       */
+      source: string;
+    };
     AdminRecommendationJobStatus: {
       /** Format: int64 */
       count: number;
@@ -17754,6 +17795,12 @@ export interface components {
     CollectionAdminPolicyVersion: {
       /** @description The page's items; empty, never null */
       items: components["schemas"]["AdminPolicyVersion"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
+    };
+    CollectionAdminRatingSource: {
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["AdminRatingSource"][];
       /** @description Cursor state; absent for bounded unpaginated collections */
       page?: components["schemas"]["PageInfo"];
     };
@@ -57684,6 +57731,112 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AdminRateLimitStatus"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listAdminRatingSources: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionAdminRatingSource"];
         };
       };
       /** @description Bad Request */

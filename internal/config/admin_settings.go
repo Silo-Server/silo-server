@@ -7,10 +7,10 @@ import (
 	"net/mail"
 	"net/url"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/models"
 	redisv9 "github.com/redis/go-redis/v9"
 	"github.com/robfig/cron/v3"
 )
@@ -64,10 +64,6 @@ const (
 // restrict how others may display them. See internal/ratingsources.
 const CatalogExtraRatingSourcesSettingKey = "catalog.extra_rating_sources"
 
-// ratingSourceIDPattern is the shape of a rating source name: the built-in
-// names and any a metadata plugin declares.
-var ratingSourceIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
-
 // ParseRatingSourceList splits a CatalogExtraRatingSourcesSettingKey value
 // into source names, dropping blanks, duplicates, and malformed names.
 func ParseRatingSourceList(raw string) []string {
@@ -75,7 +71,7 @@ func ParseRatingSourceList(raw string) []string {
 	seen := map[string]struct{}{}
 	for _, entry := range strings.Split(raw, ",") {
 		source := strings.ToLower(strings.TrimSpace(entry))
-		if !ratingSourceIDPattern.MatchString(source) {
+		if !models.ValidRatingSourceID(source) {
 			continue
 		}
 		if _, dup := seen[source]; dup {
@@ -833,7 +829,7 @@ func normalizeRatingSourceList(key, value string) (string, error) {
 		if source == "" {
 			continue
 		}
-		if !ratingSourceIDPattern.MatchString(source) {
+		if !models.ValidRatingSourceID(source) {
 			return "", fmt.Errorf("%s: %q is not a rating source name", key, source)
 		}
 		if _, dup := seen[source]; dup {

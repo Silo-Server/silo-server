@@ -359,8 +359,8 @@ server. It is present on every v2 item detail, as an empty array when there is
 nothing to show; a detail without the member comes from an older server. Each
 entry has:
 
-- `source`: `imdb`, `tmdb`, `rt_critic`, `rt_audience`, or another source name
-  from the list below.
+- `source`: `imdb`, `tmdb`, `rt_critic`, `rt_audience`, another source name
+  from the list below, or a name a metadata plugin declared.
 - `name`: the source's plain-text mark (`IMDb`, `TMDB`, `RT`, `RT Audience`,
   `Metacritic`, ...).
 - `score`: the rating on a 0-100 scale.
@@ -420,9 +420,33 @@ new match reports replace the stored set, and a source it does not report is
 removed.
 
 Plugins send them under `ratings.sources` in a metadata item, as
-`{"<source>": {"score": 0-100, "votes": n}}`. The server drops an unknown
-source name or a score outside 0-100, and drops a vote count that is not a
-whole, non-negative number while keeping its score.
+`{"<source>": {"score": 0-100, "votes": n}}`. The server drops a source name
+that is neither one of the names above nor one the plugin declared, or a score
+outside 0-100, and drops a vote count that is not a whole, non-negative number
+while keeping its score.
+
+A metadata plugin adds a source of its own by declaring it in its capability's
+manifest metadata, at the top level or inside the SDK's `metadata` envelope:
+
+```json
+"rating_sources": [{"id": "kinopoisk", "name": "Kinopoisk", "scale": 10}]
+```
+
+- `id`: the source name, matching `^[a-z][a-z0-9_]{0,31}$` and not one of the
+  names above.
+- `name`: the plain-text mark clients show next to the score, at most 24
+  characters.
+- `scale`: the top of the source's own scale, above 0 and at most 100. The
+  plugin still sends a 0-100 `score`; a `scale` of 10 shows 72 as `7.2`.
+- `percent`: optional; `true` shows the score as a percentage.
+
+An entry that breaks a rule is dropped on its own, a repeated `id` keeps the
+first, and a capability keeps at most eight. When two enabled plugins declare
+the same `id`, the first by installation order names and scales it. A declared
+source is stored like the others and is shown only after an administrator adds
+its `id` to `catalog.extra_rating_sources`; title pages list it after Silo's
+own sources. `GET /api/v2/admin/rating-sources` lists every source an
+administrator can show, with the plugin that declared it.
 
 Frozen v1 responses do not expose this member.
 
