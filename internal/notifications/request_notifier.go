@@ -146,13 +146,19 @@ func (n *RequestFulfillmentNotifier) NotifyFulfilled(ctx context.Context, req re
 			return err
 		}
 	}
-	// The server-channel post goes last, and only once every recipient was
-	// dispatched: a failure above makes the caller retry the request, and
-	// posting first would repeat the community announcement on every retry.
-	// It is not gated by anyone's personal preferences, and it is detached
-	// and best-effort.
-	n.backend.PostServerChannelRequestEvent(ctx, ServerChannelEventRequestFulfilled, requestEventInfoFor(req))
 	return nil
+}
+
+// AnnounceFulfilled implements requests.FulfillmentNotifier: the server-channel
+// post. The caller runs it once, after the request is stamped as notified,
+// since a retried NotifyFulfilled would otherwise repeat the community
+// announcement. It is not gated by anyone's personal preferences, and it is
+// detached and best-effort.
+func (n *RequestFulfillmentNotifier) AnnounceFulfilled(ctx context.Context, req requests.Request) {
+	if n == nil || n.backend == nil {
+		return
+	}
+	n.backend.PostServerChannelRequestEvent(ctx, ServerChannelEventRequestFulfilled, requestEventInfoFor(req))
 }
 
 // notifyFulfilledProfile posts one request.fulfilled delivery to a profile

@@ -11,6 +11,7 @@ type fakeNotifier struct {
 	requestIDs []string
 	contentIDs []string
 	followers  [][]Follower
+	announced  []string
 	err        error
 }
 
@@ -35,6 +36,10 @@ func (n *recordingLifecycleNotifier) RequestApproved(_ context.Context, req Requ
 
 func (n *recordingLifecycleNotifier) RequestDeclined(_ context.Context, req Request) {
 	n.declined = append(n.declined, req.ID)
+}
+
+func (f *fakeNotifier) AnnounceFulfilled(_ context.Context, req Request) {
+	f.announced = append(f.announced, req.ID)
 }
 
 func (f *fakeNotifier) NotifyFulfilled(_ context.Context, req Request, contentID string) error {

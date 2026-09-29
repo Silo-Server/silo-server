@@ -521,15 +521,16 @@ func (r *Repository) ListFulfilledUnnotified(ctx context.Context, limit int) ([]
 	return out, nil
 }
 
-// MarkFulfilledNotified stamps the fulfillment-notification marker. Idempotent.
-func (r *Repository) MarkFulfilledNotified(ctx context.Context, id string) error {
-	_, err := r.pool.Exec(ctx, `
+// MarkFulfilledNotified stamps the fulfillment-notification marker. Idempotent;
+// stamped reports whether this call set it.
+func (r *Repository) MarkFulfilledNotified(ctx context.Context, id string) (bool, error) {
+	tag, err := r.pool.Exec(ctx, `
 		UPDATE media_requests SET fulfilled_notified_at = now()
 		WHERE id = $1 AND fulfilled_notified_at IS NULL`, id)
 	if err != nil {
-		return fmt.Errorf("mark request fulfill-notified: %w", err)
+		return false, fmt.Errorf("mark request fulfill-notified: %w", err)
 	}
-	return nil
+	return tag.RowsAffected() == 1, nil
 }
 
 func (r *Repository) SetExternalIDs(ctx context.Context, id string, tvdbID int, imdbID string) (int, error) {

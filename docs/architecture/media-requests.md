@@ -322,9 +322,10 @@ can request it themselves. The requesting profile never needs a follow: the
 fulfilled notification always reaches it. When a request's fulfilled
 notification goes out, it is also sent to the request's followers, marked
 `follower` so its wording does not say "your request", and those follows are
-then cleared. A dispatch failure leaves
-the follows for the retry, and the server-channel announcement waits until an
-attempt has reached every recipient, so a retry does not repeat it.
+then cleared. A dispatch failure leaves the follows for the retry; each
+recipient's delivery is deduplicated, so a retry tells only those not yet told.
+The server-channel announcement has no such guard, so it goes out once, after
+the request is stamped as notified, from the pass whose stamp took.
 
 Request state carries `following` (the viewer requested or follows the title)
 and `requested_by_viewer` (the viewing profile made the request, so there is

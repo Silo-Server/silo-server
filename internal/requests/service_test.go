@@ -1993,6 +1993,7 @@ type fakeStore struct {
 	follows       map[string]Follower // key: media_type/tmdb_id/user_id/profile_id
 	followFor     map[string]string   // follow key -> the request it waits for
 	clearErr      error               // returned by ClearRequestFollowers when set
+	markErr       error               // returned by MarkFulfilledNotified when set
 	routes        []Route
 	factsSet      map[string]RoutingFacts
 	groupLimits   map[int64]*GroupLimit
@@ -2250,9 +2251,15 @@ func (f *fakeStore) SetExternalIDs(_ context.Context, id string, tvdbID int, imd
 	return *req.TVDBID, nil
 }
 
-func (f *fakeStore) MarkFulfilledNotified(_ context.Context, id string) error {
+func (f *fakeStore) MarkFulfilledNotified(_ context.Context, id string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.markErr != nil {
+		return false, f.markErr
+	}
+	if slices.Contains(f.notified, id) {
+		return false, nil
+	}
 	kept := f.unnotified[:0]
 	for _, pending := range f.unnotified {
 		if pending != id {
@@ -2261,7 +2268,7 @@ func (f *fakeStore) MarkFulfilledNotified(_ context.Context, id string) error {
 	}
 	f.unnotified = kept
 	f.notified = append(f.notified, id)
-	return nil
+	return true, nil
 }
 
 func (f *fakeStore) ListMine(context.Context, int, ListFilter) ([]*Request, error) {

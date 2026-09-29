@@ -28,8 +28,9 @@ type Store interface {
 	// notification has not fired yet (presence-gated notify pass).
 	ListFulfilledUnnotified(ctx context.Context, limit int) ([]*Request, error)
 	// MarkFulfilledNotified stamps a request's fulfillment-notification
-	// marker so the notify pass stops considering it. Idempotent.
-	MarkFulfilledNotified(ctx context.Context, id string) error
+	// marker so the notify pass stops considering it. Idempotent; stamped
+	// reports whether this call set it.
+	MarkFulfilledNotified(ctx context.Context, id string) (stamped bool, err error)
 	ListMine(ctx context.Context, userID int, filter ListFilter) ([]*Request, error)
 	ListAdmin(ctx context.Context, filter ListFilter) ([]*Request, error)
 	CountAdminViews(ctx context.Context) (AdminViewCounts, error)

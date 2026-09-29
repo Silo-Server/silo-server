@@ -2,7 +2,6 @@ package notifications
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"testing"
 
@@ -11,7 +10,6 @@ import (
 
 type fakeFulfillmentBackend struct {
 	disabled    map[string]bool
-	failFor     string
 	deliveries  []Delivery
 	channelPost int
 }
@@ -25,9 +23,6 @@ func (f *fakeFulfillmentBackend) notificationsEnabled(_ context.Context, profile
 }
 
 func (f *fakeFulfillmentBackend) dispatchFulfilled(_ context.Context, delivery Delivery) error {
-	if delivery.ProfileID == f.failFor {
-		return errors.New("dispatch failed")
-	}
 	f.deliveries = append(f.deliveries, delivery)
 	return nil
 }
@@ -64,8 +59,14 @@ func TestNotifyFulfilledTellsRequesterAndFollowers(t *testing.T) {
 	if flags := parseRequestFlags(follower.ReasonFlags); flags.RequestID != "req-1" || flags.TMDBID != 949 {
 		t.Fatalf("follower flags = %+v, want the request identity", flags)
 	}
+	// The server-wide post waits for AnnounceFulfilled, which the caller runs
+	// once the request is stamped, so a retried delivery never repeats it.
+	if backend.channelPost != 0 {
+		t.Fatalf("channel posts after NotifyFulfilled = %d, want none", backend.channelPost)
+	}
+	notifier.AnnounceFulfilled(context.Background(), fulfilledRequest())
 	if backend.channelPost != 1 {
-		t.Fatalf("channel posts = %d, want 1", backend.channelPost)
+		t.Fatalf("channel posts after AnnounceFulfilled = %d, want 1", backend.channelPost)
 	}
 }
 
@@ -82,21 +83,6 @@ func TestNotifyFulfilledKeysRecipientsByAccount(t *testing.T) {
 	}
 	if len(backend.deliveries) != 2 || backend.deliveries[1].UserID != 2 || !parseRequestFlags(backend.deliveries[1].ReasonFlags).Follower {
 		t.Fatalf("deliveries = %+v, want the requester and the other account's follower", backend.deliveries)
-	}
-}
-
-// A failed recipient makes the caller retry the whole request; the community
-// channel must not be posted until an attempt reaches everyone.
-func TestNotifyFulfilledPostsChannelOnlyAfterEveryRecipient(t *testing.T) {
-	backend := &fakeFulfillmentBackend{failFor: "follower"}
-	notifier := &RequestFulfillmentNotifier{backend: backend}
-
-	err := notifier.NotifyFulfilled(context.Background(), fulfilledRequest(requests.Follower{UserID: 2, ProfileID: "follower"}), "movie-tmdb-949")
-	if err == nil {
-		t.Fatal("NotifyFulfilled succeeded, want the follower's dispatch error")
-	}
-	if backend.channelPost != 0 {
-		t.Fatalf("channel posts = %d, want none before every recipient is told", backend.channelPost)
 	}
 }
 

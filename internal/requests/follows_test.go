@@ -247,6 +247,31 @@ func TestNotifyFulfilledLeavesFollowsOfNewerRequest(t *testing.T) {
 	}
 }
 
+// The server-wide announcement has no per-recipient dedupe, so it goes out
+// once, from the pass whose stamp took, and not from a pass whose stamp failed
+// and is retried.
+func TestNotifyFulfilledAnnouncesOnceAfterTheStamp(t *testing.T) {
+	store := newFakeStore()
+	store.requests["req1"] = completedRequestFixture("req1", 42)
+	store.unnotified = []string{"req1"}
+	store.markErr = errors.New("stamp failed")
+	notifier := &fakeNotifier{}
+	svc := NewService(store, &fakeTMDBClient{}, presentMovie(42))
+	svc.SetFulfillmentNotifier(notifier)
+
+	svc.notifyFulfilledPending(context.Background())
+	if len(notifier.requestIDs) != 1 || len(notifier.announced) != 0 {
+		t.Fatalf("after a failed stamp: delivered %v, announced %v; want delivered and not announced", notifier.requestIDs, notifier.announced)
+	}
+
+	store.markErr = nil
+	svc.notifyFulfilledPending(context.Background())
+	svc.notifyFulfilledPending(context.Background())
+	if !slices.Equal(notifier.announced, []string{"req1"}) {
+		t.Fatalf("announced = %v, want req1 once", notifier.announced)
+	}
+}
+
 func TestNotifyFulfilledKeepsFollowersWhenDispatchFails(t *testing.T) {
 	store := newFakeStore()
 	store.requests["req1"] = completedRequestFixture("req1", 42)
