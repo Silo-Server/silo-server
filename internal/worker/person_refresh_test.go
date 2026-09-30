@@ -211,6 +211,52 @@ func TestPersonRefreshWorkerRateLimitBackoff(t *testing.T) {
 	}
 }
 
+// The rate holds across batches: the first lookup of the next batch waits
+// out the delay after the last lookup of the one before.
+func TestPersonRefreshWorkerPacesLookupsAcrossBatches(t *testing.T) {
+	service := &fakePersonRefresher{batches: [][]int64{{1}, {2}, {3}}}
+	w := NewPersonRefreshWorker(service, PersonRefreshWorkerConfig{BatchSize: 1})
+	const delay = 30 * time.Millisecond
+	w.delay.Store(int64(delay))
+	var starts []time.Time
+	service.onRefresh = func(int64) { starts = append(starts, time.Now()) }
+
+	w.drain()
+
+	if len(starts) != 3 {
+		t.Fatalf("refreshed %v, want [1 2 3]", service.refreshed)
+	}
+	for i := 1; i < len(starts); i++ {
+		if gap := starts[i].Sub(starts[i-1]); gap < delay {
+			t.Fatalf("lookup %d started %s after the one before, want at least %s", i+1, gap, delay)
+		}
+	}
+}
+
+// A slow rate claims only the people it can start before the claim's lease
+// runs out.
+func TestPersonRefreshWorkerClaimLimitFitsTheLease(t *testing.T) {
+	w := NewPersonRefreshWorker(&fakePersonRefresher{}, PersonRefreshWorkerConfig{
+		BatchSize:      100,
+		RefreshTimeout: 2 * time.Minute,
+		ClaimLease:     time.Hour,
+	})
+	for _, tc := range []struct {
+		perMinute int
+		want      int
+	}{
+		{perMinute: 120, want: 100},
+		// One a minute starts at 0, 1, ..., 58 minutes: 59 before the last
+		// safe start, 58 minutes into the hour.
+		{perMinute: 1, want: 59},
+	} {
+		w.SetRatePerMinute(tc.perMinute)
+		if got := w.claimLimit(); got != tc.want {
+			t.Errorf("claimLimit() at %d/min = %d, want %d", tc.perMinute, got, tc.want)
+		}
+	}
+}
+
 func TestPersonRefreshWorkerSetRatePerMinute(t *testing.T) {
 	w := newTestPersonRefreshWorker(&fakePersonRefresher{})
 	w.SetRatePerMinute(60)

@@ -73,7 +73,10 @@ type PersonRefreshWorker struct {
 	// backoff and pausedUntil hold the rate-limit pause, under mu.
 	backoff     time.Duration
 	pausedUntil time.Time
-	now         func() time.Time
+	// nextLookup is the earliest a background lookup may start, so the rate
+	// holds across batches. Only the worker goroutine uses it.
+	nextLookup time.Time
+	now        func() time.Time
 }
 
 func NewPersonRefreshWorker(service PersonRefresher, config PersonRefreshWorkerConfig) *PersonRefreshWorker {
@@ -194,7 +197,8 @@ func (w *PersonRefreshWorker) processBatch() bool {
 		return false
 	}
 	lastStart := w.now().Add(w.config.ClaimLease - w.config.RefreshTimeout)
-	batch, err := w.service.ClaimCandidates(context.Background(), w.config.BatchSize)
+	limit := w.claimLimit()
+	batch, err := w.service.ClaimCandidates(context.Background(), limit)
 	if err != nil {
 		slog.Warn("person refresh worker: failed to claim candidates", "error", err)
 		return false
@@ -209,25 +213,48 @@ func (w *PersonRefreshWorker) processBatch() bool {
 			// Its on-demand lookup already ran, or is pending and will cover it.
 			continue
 		}
+		if !w.waitForNextLookup() {
+			return false
+		}
 		if w.now().After(lastStart) {
 			slog.Warn("person refresh worker: batch outlasted its claim; leaving the rest for later",
 				"remaining", len(batch)-index)
 			return true
 		}
+		w.nextLookup = w.now().Add(time.Duration(w.delay.Load()))
 		if err := w.refresh(id); w.rateLimited(err) {
 			// The rest of the batch comes back when its claims' lease runs out.
 			return false
 		}
-
-		if delay := time.Duration(w.delay.Load()); delay > 0 && index < len(batch)-1 {
-			select {
-			case <-time.After(delay):
-			case <-w.stop:
-				return false
-			}
-		}
 	}
-	return len(batch) >= w.config.BatchSize
+	return len(batch) >= limit
+}
+
+// claimLimit is how many people to claim: the batch size, or fewer when the
+// lookup rate is too slow to start them all before the claim's lease runs
+// out, so a slow rate doesn't claim people only to release them.
+func (w *PersonRefreshWorker) claimLimit() int {
+	delay := time.Duration(w.delay.Load())
+	if delay <= 0 {
+		return w.config.BatchSize
+	}
+	fits := int((w.config.ClaimLease-w.config.RefreshTimeout)/delay) + 1
+	return max(1, min(w.config.BatchSize, fits))
+}
+
+// waitForNextLookup waits until the rate allows the next background lookup.
+// It reports false if the worker stopped meanwhile.
+func (w *PersonRefreshWorker) waitForNextLookup() bool {
+	wait := w.nextLookup.Sub(w.now())
+	if wait <= 0 {
+		return true
+	}
+	select {
+	case <-time.After(wait):
+		return true
+	case <-w.stop:
+		return false
+	}
 }
 
 // rateLimited pauses background lookups when err reports a provider rate
