@@ -26519,6 +26519,20 @@
             },
             "type": "array"
           },
+          "trickplay_enabled": {
+            "description": "Generate seek-bar preview images for the library's video files",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "trickplay_supported": {
+            "description": "Whether the server can produce seek-bar previews (public asset storage is configured)",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "type": {
             "description": "Library kind (movies, series, mixed, audiobooks, ebooks, podcasts, manga); free-form until the vocabulary is ratified (#135)",
             "examples": [
@@ -26538,6 +26552,8 @@
           "chapter_thumbnails_enabled",
           "chapter_thumbnails_supported",
           "intro_detection_enabled",
+          "trickplay_enabled",
+          "trickplay_supported",
           "trailer_kinds",
           "realtime_monitoring",
           "sort_order"
@@ -26571,10 +26587,18 @@
               "unsupported"
             ],
             "type": "string"
+          },
+          "trickplay": {
+            "description": "This build supports the per-library trickplay_enabled setting, which generates seek-bar previews",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           }
         },
         "required": [
           "realtime_monitoring",
+          "trickplay",
           "revision",
           "state",
           "allowed"
@@ -26819,6 +26843,13 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "trickplay_enabled": {
+            "description": "Generate seek-bar preview images; requires public asset storage",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
           },
           "type": {
             "description": "Library kind (movies, series, mixed, audiobooks, ebooks, podcasts, manga)",
@@ -27605,6 +27636,13 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "trickplay_enabled": {
+            "description": "Generate seek-bar preview images; turning it off deletes the library's previews",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
           },
           "type": {
             "examples": [
