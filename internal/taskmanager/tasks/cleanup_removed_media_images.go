@@ -33,7 +33,7 @@ func NewCleanupRemovedMediaImagesTask(collector RemovedMediaImagesCollector) *Cl
 func (t *CleanupRemovedMediaImagesTask) Key() string  { return "cleanup_removed_media_images" }
 func (t *CleanupRemovedMediaImagesTask) Name() string { return "Clean Removed Media Images" }
 func (t *CleanupRemovedMediaImagesTask) Description() string {
-	return "Deletes the chapter thumbnails of media files removed from the catalog, a day after their removal."
+	return "Deletes the chapter thumbnails and seek previews of media files removed from the catalog, and seek previews that were replaced, after a grace period."
 }
 func (t *CleanupRemovedMediaImagesTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategoryMetadata
