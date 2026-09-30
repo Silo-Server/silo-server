@@ -10,10 +10,10 @@ import (
 )
 
 type PersonRefresher interface {
-	RefreshPerson(ctx context.Context, id int64) (*models.Person, error)
-	// RefreshClaimedPerson refreshes a person claimed at claimedAt, unless a
-	// lookup started since (a person page on another node).
-	RefreshClaimedPerson(ctx context.Context, id int64, claimedAt time.Time) (*models.Person, error)
+	// RefreshPersonUnlessStartedSince refreshes a person unless a lookup for
+	// them, on any API node, started after since: the claim, or the page
+	// request.
+	RefreshPersonUnlessStartedSince(ctx context.Context, id int64, since time.Time) (*models.Person, error)
 	// ClaimCandidates claims up to limit people due for a background lookup,
 	// so API nodes sweeping at once never get the same person.
 	ClaimCandidates(ctx context.Context, limit int) ([]int64, error)
@@ -49,10 +49,11 @@ type PersonRefreshWorker struct {
 
 	mu          sync.Mutex
 	manualQueue []int64
-	queued      map[int64]struct{}
-	stop        chan struct{}
-	wake        chan struct{}
-	now         func() time.Time
+	// queued holds when each pending on-demand request was made.
+	queued map[int64]time.Time
+	stop   chan struct{}
+	wake   chan struct{}
+	now    func() time.Time
 }
 
 func NewPersonRefreshWorker(service PersonRefresher, config PersonRefreshWorkerConfig) *PersonRefreshWorker {
@@ -75,7 +76,7 @@ func NewPersonRefreshWorker(service PersonRefresher, config PersonRefreshWorkerC
 	return &PersonRefreshWorker{
 		service: service,
 		config:  config,
-		queued:  make(map[int64]struct{}),
+		queued:  make(map[int64]time.Time),
 		stop:    make(chan struct{}),
 		wake:    make(chan struct{}, 1),
 		now:     time.Now,
@@ -94,7 +95,7 @@ func (w *PersonRefreshWorker) Enqueue(id int64) {
 		w.mu.Unlock()
 		return
 	}
-	w.queued[id] = struct{}{}
+	w.queued[id] = w.now()
 	w.manualQueue = append(w.manualQueue, id)
 	w.mu.Unlock()
 
@@ -198,9 +199,10 @@ func (w *PersonRefreshWorker) runManual(done map[int64]struct{}) {
 		}
 		id := w.manualQueue[0]
 		w.manualQueue = w.manualQueue[1:]
+		requestedAt := w.queued[id]
 		w.mu.Unlock()
 
-		w.refresh(id, time.Time{})
+		w.refresh(id, requestedAt)
 		done[id] = struct{}{}
 
 		w.mu.Lock()
@@ -209,18 +211,12 @@ func (w *PersonRefreshWorker) runManual(done map[int64]struct{}) {
 	}
 }
 
-// refresh looks id up: a background claim made at claimedAt, or an on-demand
-// request when claimedAt is zero.
-func (w *PersonRefreshWorker) refresh(id int64, claimedAt time.Time) {
+// refresh looks id up unless a lookup started after since, when it was claimed
+// or requested.
+func (w *PersonRefreshWorker) refresh(id int64, since time.Time) {
 	ctx, cancel := context.WithTimeout(context.Background(), w.config.RefreshTimeout)
 	defer cancel()
-	var err error
-	if claimedAt.IsZero() {
-		_, err = w.service.RefreshPerson(ctx, id)
-	} else {
-		_, err = w.service.RefreshClaimedPerson(ctx, id, claimedAt)
-	}
-	if err != nil {
+	if _, err := w.service.RefreshPersonUnlessStartedSince(ctx, id, since); err != nil {
 		slog.Warn("person refresh worker: refresh failed", "person_id", id, "error", err)
 	}
 }
