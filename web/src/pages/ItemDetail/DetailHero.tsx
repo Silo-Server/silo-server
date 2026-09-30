@@ -30,6 +30,9 @@ interface DetailHeroProps {
   overviewTranslating?: boolean;
   /** When set, renders a small "Translate" chip under the overview. */
   onTranslateOverview?: () => void;
+  /** Spoiler protection: keep the overview behind a reveal button. */
+  overviewHidden?: boolean;
+  onRevealOverview?: () => void;
   actions?: ReactNode;
   aside?: ReactNode;
   studioLabel?: string;
@@ -57,6 +60,8 @@ export default function DetailHero({
   overview,
   overviewTranslating = false,
   onTranslateOverview,
+  overviewHidden = false,
+  onRevealOverview,
   actions,
   aside,
   studioLabel,
@@ -279,6 +284,8 @@ export default function DetailHero({
                     clamp={isViewportBounded}
                     translating={overviewTranslating}
                     onTranslate={onTranslateOverview}
+                    hidden={overviewHidden}
+                    onReveal={onRevealOverview}
                   />
                 )}
 

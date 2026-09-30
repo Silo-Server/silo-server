@@ -12,10 +12,13 @@ import { upcomingBadgeClass, upcomingBadgeLabel } from "@/lib/upcomingEventPrese
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { parseWatchHref } from "@/pages/watchRouteHelpers";
 import { buildItemHref, buildMediaPlayHref, isVideoWatchHref } from "@/lib/mediaNavigation";
+import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { carouselCardWidthClasses } from "@/lib/uiCustomization";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
+import { isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
+import { cn } from "@/lib/utils";
 
 type ContinueWatchingCardProps = (
   | {
@@ -39,6 +42,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
   const location = useLocation();
   const playbackController = useWatchPlaybackController();
   const { cardPresentation } = useUICustomization();
+  const spoilerPrefs = useEpisodeSpoilerPrefs();
   const cardRef = useRef<HTMLDivElement>(null);
   const card =
     "sectionItem" in props && props.sectionItem
@@ -233,6 +237,17 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
         ? card.backdropUrl
         : card.posterUrl;
   const imageSrc = imagePrimary || imageFallback;
+  // Only the wide variant shows the episode's own still; the poster variant
+  // shows season or series art. In practice this blurs Next Up, since a
+  // Continue Watching episode has already been started.
+  const hideImage =
+    spoilerPrefs.hideImages &&
+    card.type === "episode" &&
+    !isPoster &&
+    isEpisodeUnwatched({
+      played: (props.sectionItem ?? props.detail)?.user_state?.played,
+      position_seconds: card.positionSeconds,
+    });
 
   return (
     <div ref={cardRef} className={`media-card-longpress group/card ${containerWidth}`}>
@@ -243,7 +258,10 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
               <img
                 src={imageSrc}
                 alt={heading}
-                className="h-full w-full object-cover transition-transform duration-300 group-hover/media:scale-105"
+                className={cn(
+                  "h-full w-full object-cover transition-transform duration-300",
+                  hideImage ? SPOILER_IMAGE_CLASS : "group-hover/media:scale-105",
+                )}
                 loading="lazy"
                 decoding="async"
               />

@@ -9,10 +9,14 @@
 package settingskeys
 
 // Revision is the manifest revision these bindings were generated from.
-const Revision = 14
+const Revision = 15
 
 // Setting keys, one constant per definition.
 const (
+	// Blur unwatched episode images
+	CatalogHideUnwatchedEpisodeImages = "catalog.hide_unwatched_episode_images"
+	// Hide unwatched episode descriptions
+	CatalogHideUnwatchedEpisodeOverviews = "catalog.hide_unwatched_episode_overviews"
 	// Metadata language
 	CatalogMetadataLanguage = "catalog.metadata_language"
 	// Metadata language exceptions
@@ -147,6 +151,8 @@ const (
 
 // Remote lists every key the server stores.
 var Remote = []string{
+	CatalogHideUnwatchedEpisodeImages,
+	CatalogHideUnwatchedEpisodeOverviews,
 	CatalogMetadataLanguage,
 	CatalogMetadataLanguageOverrides,
 	CatalogShowAdvisoryAge,

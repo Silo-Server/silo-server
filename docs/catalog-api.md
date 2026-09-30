@@ -276,6 +276,21 @@ Invalid booleans return `422 validation_failed`. The parameter does not apply
 to single-season or episode operations. Clients can use the capability to
 select text-only season lists; callers that omit it keep their existing behavior.
 
+## Episode spoiler protection
+
+Two profile settings in the settings contract let a viewer hide episode details
+until they start an episode: `catalog.hide_unwatched_episode_images` blurs the
+episode still, and `catalog.hide_unwatched_episode_overviews` hides the episode
+description. Both default to off and roam with the profile.
+
+The server does not change catalog responses for these settings: every episode
+payload keeps its `still_url` and `overview`, so cached catalog data stays
+shared across profiles. Clients apply the settings. An episode counts as
+unwatched while its `user_data` is missing, or `played` is false and it is not
+in progress (`is_in_progress` false and no `position_seconds`). Series and
+season artwork and overviews are not affected. Detect support from the settings
+contract capabilities (`manifest_revision` 15 or later).
+
 ## Collection membership titles
 
 `GET /api/v2/collections/{id}/items` and

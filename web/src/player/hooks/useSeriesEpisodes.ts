@@ -57,6 +57,7 @@ export function useSeriesEpisodes(
     stillUrl: ep.still_url,
     stillThumbhash: ep.still_thumbhash,
     airDate: ep.air_date,
+    watchState: ep.user_data,
   }));
 
   const isLoading = seasonsLoading || currentLoading || (!!nextSeasonInfo && nextLoading);
