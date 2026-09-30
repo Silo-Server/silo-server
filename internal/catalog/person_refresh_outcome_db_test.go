@@ -95,6 +95,38 @@ func TestStartRefreshAttemptUnlessStartedSincePostgres(t *testing.T) {
 	}
 }
 
+// Two nodes starting a lookup for the same person at once: only one goes
+// ahead.
+func TestStartRefreshAttemptConcurrentStartsPostgres(t *testing.T) {
+	repo, pool := personRefreshTestRepo(t)
+	ctx := context.Background()
+	id := seedRefreshPerson(t, pool, "raced")
+	since := time.Now().Add(-time.Minute)
+
+	const nodes = 8
+	results := make(chan bool, nodes)
+	errs := make(chan error, nodes)
+	for range nodes {
+		go func() {
+			started, err := repo.StartRefreshAttemptUnlessStartedSince(ctx, id, since)
+			results <- started
+			errs <- err
+		}()
+	}
+	startedCount := 0
+	for range nodes {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+		if <-results {
+			startedCount++
+		}
+	}
+	if startedCount != 1 {
+		t.Fatalf("%d concurrent starts went ahead, want exactly 1", startedCount)
+	}
+}
+
 // Each outcome sets when the sweep looks the person up again (#1606).
 func TestPersonRefreshOutcomeSchedulesNextLookupPostgres(t *testing.T) {
 	repo, pool := personRefreshTestRepo(t)
