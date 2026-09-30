@@ -234,7 +234,9 @@ func TestFetchTraktPagesFailsAtPageCap(t *testing.T) {
 }
 
 func TestFetchTraktPagesFailsWhenTheListChangesMidRead(t *testing.T) {
+	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
 		// The list shrinks between page 1 and page 2, which shifts offsets.
 		switch r.URL.Query().Get("page") {
 		case "1":
@@ -249,18 +251,25 @@ func TestFetchTraktPagesFailsWhenTheListChangesMidRead(t *testing.T) {
 	}))
 	defer server.Close()
 
-	rows, err := fetchTraktPages[traktFavoriteMovie](context.Background(), NewProvider(server.Client(), server.URL),
+	provider := NewProvider(server.Client(), server.URL)
+	waits := recordSleeps(provider)
+	rows, err := fetchTraktPages[traktFavoriteMovie](context.Background(), provider,
 		watchsync.ServerConfig{}, watchsync.Connection{AccessToken: "t"}, "/sync/watchlist/movies", nil)
 	if err == nil || rows != nil {
 		t.Fatalf("rows=%v err=%v, want an error and no rows", rows, err)
+	}
+	// Each of the three attempts fails on page 2.
+	if requests != 6 || !reflect.DeepEqual(*waits, []time.Duration{time.Second, 2 * time.Second}) {
+		t.Fatalf("requests=%d waits=%v, want 6 requests and waits of 1s then 2s", requests, *waits)
 	}
 }
 
 func TestFetchTraktPagesFailsWhenAnEqualCountChangeShiftsPages(t *testing.T) {
 	// Each pass replaces a title while keeping the count equal, so every
 	// verification read must reject the shifted page even after restarting.
-	pass := 0
+	pass, requests := 0, 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
 		page := r.URL.Query().Get("page")
 		if page == "1" {
 			pass++
@@ -278,10 +287,16 @@ func TestFetchTraktPagesFailsWhenAnEqualCountChangeShiftsPages(t *testing.T) {
 	}))
 	defer server.Close()
 
-	rows, err := fetchTraktPages[traktFavoriteMovie](context.Background(), NewProvider(server.Client(), server.URL),
+	provider := NewProvider(server.Client(), server.URL)
+	waits := recordSleeps(provider)
+	rows, err := fetchTraktPages[traktFavoriteMovie](context.Background(), provider,
 		watchsync.ServerConfig{}, watchsync.Connection{AccessToken: "t"}, "/sync/watchlist/movies", nil)
 	if err == nil || rows != nil {
 		t.Fatalf("rows=%v err=%v, want an error and no rows", rows, err)
+	}
+	// Each of the three attempts reads two passes of two pages.
+	if requests != 12 || !reflect.DeepEqual(*waits, []time.Duration{time.Second, 2 * time.Second}) {
+		t.Fatalf("requests=%d waits=%v, want 12 requests and waits of 1s then 2s", requests, *waits)
 	}
 }
 
