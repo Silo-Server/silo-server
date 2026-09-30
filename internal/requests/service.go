@@ -916,6 +916,17 @@ func (s *Service) CreateRequest(ctx context.Context, viewer Viewer, input Create
 			year := detail.Year
 			normalized.Year = &year
 		}
+		// A caller without the display fields (a watchlist add keeps only
+		// its own snapshot) gets TMDB's; one that sent them keeps its own.
+		if normalized.Overview == "" {
+			normalized.Overview = strings.TrimSpace(detail.Overview)
+		}
+		if normalized.PosterPath == "" {
+			normalized.PosterPath = strings.TrimSpace(detail.PosterPath)
+		}
+		if normalized.BackdropPath == "" {
+			normalized.BackdropPath = strings.TrimSpace(detail.BackdropPath)
+		}
 	}
 	facts := s.routingFacts(ctx, detail)
 	if normalized.MediaType == MediaTypeSeries && !normalized.WholeSeries {

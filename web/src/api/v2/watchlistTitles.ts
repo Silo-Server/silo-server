@@ -26,30 +26,33 @@ export interface WatchlistTitleEntry extends Omit<
 
 /** The largest page the server serves. */
 const WATCHLIST_TITLES_PAGE_SIZE = 200;
-/**
- * Pages read before the list stops. The tab sorts and counts the whole list
- * on the client, so it reads every page; this bounds a runaway cursor.
- */
-const WATCHLIST_TITLES_MAX_PAGES = 25;
 
 function watchlistTitleFromV2(t: Schemas["WatchlistTitle"]): WatchlistTitle {
   return t as WatchlistTitle;
 }
 
-/** Every watchlist entry for titles the library doesn't have, newest first. */
+/**
+ * Every watchlist entry for titles the library doesn't have, newest first.
+ * The tab sorts and counts the whole list on the client, so this follows the
+ * cursor until the server has no more pages. A cursor the server repeats
+ * fails the read rather than looping or showing part of the list as all of it.
+ */
 export async function listWatchlistTitlesV2(signal?: AbortSignal): Promise<WatchlistTitle[]> {
   const out: WatchlistTitle[] = [];
+  const seen = new Set<string>();
   let cursor: string | undefined;
-  for (let page = 0; page < WATCHLIST_TITLES_MAX_PAGES; page++) {
+  for (;;) {
     const result = await v2("GET /api/v2/watchlist/titles", {
       query: { limit: WATCHLIST_TITLES_PAGE_SIZE, cursor },
       signal,
     });
     out.push(...result.items.map(watchlistTitleFromV2));
-    if (!result.page?.has_more || !result.page.next_cursor) break;
-    cursor = result.page.next_cursor;
+    const next = result.page?.has_more ? result.page.next_cursor : undefined;
+    if (!next) return out;
+    if (seen.has(next)) throw new Error("The watchlist titles list repeated a page cursor.");
+    seen.add(next);
+    cursor = next;
   }
-  return out;
 }
 
 /**
