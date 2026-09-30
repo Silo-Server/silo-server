@@ -417,6 +417,45 @@ describe("planHomeLayoutImport on the same server", () => {
     expect(plan.skippedSections).toEqual([]);
   });
 
+  it("drops admin-section configs with collections or profiles this profile can't use", () => {
+    const plan = planHomeLayoutImport(
+      layoutFile({
+        pages: [
+          {
+            scope: "home",
+            overrides: [
+              { section_id: "union", config: { filter_library_id: 9, filter_library_ids: [1] } },
+              { section_id: "lc-seen", config: { library_collection_id: "shared-lc" } },
+              {
+                section_id: "lc-unseen",
+                position: 1,
+                config: { library_collection_id: "hidden-lc" },
+              },
+              { section_id: "uc-unseen", position: 2, config: { user_collection_id: "theirs" } },
+              { section_id: "feed-sibling", config: { profile_id: "p-sibling" } },
+              {
+                section_id: "feed-stranger",
+                position: 3,
+                config: { profile_id: "p-other-account" },
+              },
+            ],
+          },
+        ],
+      }),
+      target(),
+      sequentialIds(),
+    );
+
+    expect(plan.pages[0]?.overrides).toEqual([
+      { section_id: "union", config: { filter_library_id: 9, filter_library_ids: [1] } },
+      { section_id: "lc-seen", config: { library_collection_id: "shared-lc" } },
+      { section_id: "lc-unseen", position: 1 },
+      { section_id: "uc-unseen", position: 2 },
+      { section_id: "feed-sibling", config: { profile_id: "p-sibling" } },
+      { section_id: "feed-stranger", position: 3 },
+    ]);
+  });
+
   it("trusts a saved section type the gallery doesn't list", () => {
     const plan = planHomeLayoutImport(
       layoutFile({
@@ -455,6 +494,11 @@ describe("planHomeLayoutImport on the same server", () => {
                 user_config: { library_ids: [9] },
               },
               { section_type: "recently_added", title: "Single", config: { filter_library_id: 9 } },
+              {
+                section_type: "recently_added",
+                title: "Union",
+                config: { filter_library_id: 9, filter_library_ids: [1] },
+              },
             ],
           },
         ],
@@ -469,6 +513,12 @@ describe("planHomeLayoutImport on the same server", () => {
         user_section_type: "hidden_gems",
         user_title: "Some",
         user_config: { library_ids: [1, 9] },
+      },
+      {
+        id: "new-2",
+        section_type: "recently_added",
+        title: "Union",
+        config: { filter_library_id: 9, filter_library_ids: [1] },
       },
     ]);
     expect(plan.skippedSections).toEqual([
