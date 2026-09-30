@@ -263,11 +263,14 @@ export const COLLECTION_FIELD_OPTIONS: CollectionFieldOption[] = [
 export function getCollectionSortOptions(
   includePersonalized: PersonalizedSorts = false,
   relevanceScope?: QuerySortRelevanceScope,
+  shownRatingSources?: ReadonlySet<string>,
 ): Array<{ value: QuerySort["field"]; label: string }> {
-  return getQuerySortOptions({ includePersonalized, relevanceScope }).map((option) => ({
-    value: option.value,
-    label: option.label,
-  }));
+  return getQuerySortOptions({ includePersonalized, relevanceScope, shownRatingSources }).map(
+    (option) => ({
+      value: option.value,
+      label: option.label,
+    }),
+  );
 }
 
 export const COLLECTION_SORT_OPTIONS: Array<{ value: QuerySort["field"]; label: string }> =

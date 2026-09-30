@@ -65,26 +65,33 @@ func (s Selection) Shows(source string) bool {
 	return ok
 }
 
-// Sources returns the shown sources among the given names, in display order:
-// IMDb and TMDB, then the declared sources in the order they were declared.
+// Shown returns the sources clients show, in display order: IMDb and TMDB,
+// then each declared source the selection turned on, in the order the plugins
+// declared them.
+func (s Selection) Shown() []models.RatingSourceDefinition {
+	var out []models.RatingSourceDefinition
+	for _, definition := range append(models.RatingSourceDefinitions(), s.declared...) {
+		if s.Shows(definition.Source) {
+			out = append(out, definition)
+		}
+	}
+	return out
+}
+
+// Sources returns the shown sources among the given names, in the order of
+// Shown.
 func (s Selection) Sources(names []string) []string {
 	present := make(map[string]struct{}, len(names))
 	for _, name := range names {
 		present[name] = struct{}{}
 	}
 	var out []string
-	for _, definition := range s.definitions() {
-		if _, ok := present[definition.Source]; ok && s.Shows(definition.Source) {
+	for _, definition := range s.Shown() {
+		if _, ok := present[definition.Source]; ok {
 			out = append(out, definition.Source)
 		}
 	}
 	return out
-}
-
-// definitions lists Silo's own sources and then the declared ones, in display
-// order.
-func (s Selection) definitions() []models.RatingSourceDefinition {
-	return append(models.RatingSourceDefinitions(), s.declared...)
 }
 
 // cacheTTL bounds how long a node serves a cached selection. Every item detail
@@ -285,9 +292,9 @@ func Build(item Item, sel Selection) []Rating {
 	}
 
 	var out []Rating
-	for _, definition := range sel.definitions() {
+	for _, definition := range sel.Shown() {
 		score, ok := scores[definition.Source]
-		if !ok || !sel.Shows(definition.Source) {
+		if !ok {
 			continue
 		}
 		out = append(out, Rating{
@@ -302,7 +309,8 @@ func Build(item Item, sel Selection) []Rating {
 
 // Format renders a 0-100 score on the source's own scale: a percentage of the
 // 0-100 score, one decimal place on scales up to 10, and a whole number
-// otherwise.
+// otherwise. Halves round away from zero (7.35 reads 7.4); the web's card
+// formatting in web/src/components/ratings/ratings.ts rounds the same way.
 func Format(score float64, definition models.RatingSourceDefinition) string {
 	value := score * definition.Scale / 100
 	switch {

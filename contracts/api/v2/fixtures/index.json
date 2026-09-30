@@ -6730,6 +6730,44 @@
       "body_file": "get_rating_ok.json"
     },
     {
+      "name": "get_ratings_capability_authentication_required",
+      "operation_id": "getRatingsCapability",
+      "scenario": "The ratings capability document without a credential.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/capabilities/ratings"
+      },
+      "expected_status": 401,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_ratings_capability_authentication_required.json"
+    },
+    {
+      "name": "get_ratings_capability_ok",
+      "operation_id": "getRatingsCapability",
+      "scenario": "The ratings capability document on a server that shows only IMDb and TMDB, the default.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/capabilities/ratings",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/RatingsCapability",
+      "body_file": "get_ratings_capability_ok.json"
+    },
+    {
       "name": "get_recommendation_section_key_required",
       "operation_id": "getRecommendationSection",
       "scenario": "A cluster section without its key: one errors[] entry at query.key.",

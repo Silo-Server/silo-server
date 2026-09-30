@@ -1725,7 +1725,8 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, themeSongsFixtureCases()...)
 	cases = append(cases, passwordResetFixtureCases()...)
 	cases = append(cases, adminRatingSourcesFixtureCases()...)
-	return append(cases, libraryMonitoringFixtureCases()...)
+	cases = append(cases, libraryMonitoringFixtureCases()...)
+	return append(cases, ratingsCapabilityFixtureCases()...)
 }
 
 // fixtureMultipartType is the multipart Content-Type of the avatar fixtures,

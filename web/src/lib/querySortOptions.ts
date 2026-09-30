@@ -45,11 +45,22 @@ export interface QuerySortOption {
    * Air Date is most meaningful when results are episodes).
    */
   preferredMediaScope?: ApplicableMediaScope;
+  /**
+   * The rating source this sort orders by, for a rating an administrator can
+   * hide. Offered only when that source is shown.
+   */
+  ratingSource?: string;
 }
 
 export interface QuerySortOptionsConfig {
   includePersonalized?: PersonalizedSorts;
   relevanceScope?: QuerySortRelevanceScope;
+  /**
+   * The rating sources the server shows (getRatingsCapability). When set,
+   * sorts by any other rating are left out, since the server ignores them.
+   * Unset offers every sort.
+   */
+  shownRatingSources?: ReadonlySet<string>;
 }
 
 type QuerySortOptionsInput = boolean | QuerySortOptionsConfig;
@@ -149,6 +160,7 @@ export const QUERY_SORT_OPTIONS: QuerySortOption[] = [
     defaultOrder: "desc",
     personalized: false,
     applicableMediaScopes: ALL_VIDEO_SCOPES,
+    ratingSource: "rt_critic",
   },
   {
     value: "rating_rt_audience",
@@ -156,6 +168,7 @@ export const QUERY_SORT_OPTIONS: QuerySortOption[] = [
     defaultOrder: "desc",
     personalized: false,
     applicableMediaScopes: ALL_VIDEO_SCOPES,
+    ratingSource: "rt_audience",
   },
   {
     value: "resolution",
@@ -252,14 +265,19 @@ function optionMatchesRelevanceScope(
 }
 
 export function getQuerySortOptions(input: QuerySortOptionsInput = false): QuerySortOption[] {
-  const { includePersonalized = false, relevanceScope } = normalizeQuerySortOptionsConfig(input);
+  const {
+    includePersonalized = false,
+    relevanceScope,
+    shownRatingSources,
+  } = normalizeQuerySortOptionsConfig(input);
 
   return QUERY_SORT_OPTIONS.filter(
     (option) =>
       (includePersonalized === true ||
         !option.personalized ||
         option.value === includePersonalized) &&
-      optionMatchesRelevanceScope(option, relevanceScope),
+      optionMatchesRelevanceScope(option, relevanceScope) &&
+      (!option.ratingSource || !shownRatingSources || shownRatingSources.has(option.ratingSource)),
   ).map((option) => {
     const ebookLabel =
       relevanceScope === "ebook" || relevanceScope === "manga"

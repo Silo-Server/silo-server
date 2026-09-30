@@ -356,8 +356,7 @@ Frozen v1 responses do not expose these fields.
 Every client shows a title's external ratings the same way: the v2 item detail
 carries `ratings`, the list to render, already chosen and formatted by the
 server. It is present on every v2 item detail, as an empty array when there is
-nothing to show; a detail without the member comes from an older server. Each
-entry has:
+nothing to show. Each entry has:
 
 - `source`: `imdb`, `tmdb`, or a name a metadata plugin declared (see "Rating
   sources" below).
@@ -386,12 +385,29 @@ numbers poster badges and browse sorting use; the other sources come from
 Cards follow the same choice: every v2 card leaves out `rating_rt_critic` and
 `rating_rt_audience` unless a plugin declares that source and the
 administrator turned it on, so poster
-badges show a Rotten Tomatoes score only where title pages do. The item
-detail keeps its stored `rating_*` values for metadata editors. Frozen v1
-responses are unchanged.
+badges show a Rotten Tomatoes score only where title pages do. Item detail
+does the same, and its `rating_sources` lists only the sources clients show.
+The exception is a viewer who may curate the item's metadata (an admin, or an
+account with the metadata curation permission): their item detail, and the
+detail `updateAdminItemMetadata` returns, keep every stored value for the
+metadata editor. Frozen v1 responses are unchanged.
+
+Browse follows the choice too. A v2 catalog browse sorted by
+`rating_rt_critic` or `rating_rt_audience` while that source is hidden orders
+as if no sort was given: the saved or default order, reported as
+`effective_sort`.
+
+`GET /api/v2/capabilities/ratings` (`getRatingsCapability`) is the feature
+check. It answers `state: available` on a server whose item detail carries
+`ratings`, and `sources` lists the sources title pages and cards show, in
+display order, each with its `source` and `name`. Clients use it to decide
+whether to render `ratings` and which rating sorts and badges to offer. A
+server without the operation predates `ratings`.
 
 A card-sized summary such as a home hero shows one rating, IMDb or, without an
-IMDb score, TMDB, as its mark and score.
+IMDb score, TMDB, as its mark and score. Cards carry raw `rating_*` numbers,
+so a client that formats one itself rounds halves away from zero, as the
+server's `display` does: a stored IMDb 7.35 reads `7.4`.
 
 ## Rating sources
 
@@ -408,9 +424,10 @@ pages show. Each entry has:
 Entries follow the order of `ratings`, at most one per source. A stored score
 of a source no enabled plugin declares, or one the administrator has not
 turned on, is left out, so a score a plugin reported before it stopped
-declaring its source is never served. The member is absent when no entry is
-left. It is detail-only: list and section cards do not carry it. A title page
-renders `ratings`.
+declaring its source is never served; a viewer who curates the item's
+metadata still gets every stored source (see "Ratings on title pages"). The
+member is absent when no entry is left. It is detail-only: list and section
+cards do not carry it. A title page renders `ratings`, not this list.
 
 The four `rating_imdb`, `rating_tmdb`, `rating_rt_critic` and
 `rating_rt_audience` members are unchanged, keep their own scales, and remain

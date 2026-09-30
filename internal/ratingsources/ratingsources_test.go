@@ -115,8 +115,15 @@ func TestBuildTreatsAZeroIMDbOrTMDBRowAsUnrated(t *testing.T) {
 	}
 }
 
+func TestBuildIgnoresUnknownSources(t *testing.T) {
+	item := Item{Sources: map[string]float64{"kinopoisk": 72}}
+	if got := Build(item, NewSelection("kinopoisk")); len(got) != 0 {
+		t.Fatalf("Build = %+v, want nothing for a source without a definition, even when the setting names it", got)
+	}
+}
+
 func TestFormat(t *testing.T) {
-	imdb := models.RatingSourceDefinitions()[0]
+	imdb, tmdb := models.RatingSourceDefinitions()[0], models.RatingSourceDefinitions()[1]
 	cases := []struct {
 		definition models.RatingSourceDefinition
 		score      float64
@@ -124,6 +131,9 @@ func TestFormat(t *testing.T) {
 	}{
 		{imdb, 82.5, "8.3"},
 		{imdb, 80, "8.0"},
+		// Halves round away from zero, as the web's card formatting does.
+		{imdb, 73.5, "7.4"},
+		{tmdb, 70.5, "7.1"},
 		{rtCritic, 0, "0%"},
 		{rtAudience, 99.6, "100%"},
 		{metacritic, 87.4, "87"},
@@ -185,6 +195,25 @@ func TestPolicyCachesAndKeepsLastGoodSelection(t *testing.T) {
 	settings.value = ""
 	if p.Selection(ctx).Shows("rt_critic") {
 		t.Fatal("a failed read was cached; the next read did not retry")
+	}
+
+	failing := NewPolicy(&stubSettings{err: errors.New("database down")}, declaring(rtCritic))
+	if sel := failing.Selection(ctx); !sel.Shows("imdb") || sel.Shows("rt_critic") {
+		t.Fatal("a failed first read must answer with the default")
+	}
+}
+
+func TestSelectionShownListsDefinedSourcesInDisplayOrder(t *testing.T) {
+	var got []string
+	sel := NewSelection("metacritic", "kinopoisk", "rt_critic").WithDeclared(declared(rtCritic, rtAudience, metacritic))
+	for _, definition := range sel.Shown() {
+		got = append(got, definition.Source)
+	}
+	// kinopoisk is turned on but no plugin declares it; the declared sources
+	// follow the order they were declared in.
+	want := []string{"imdb", "tmdb", "rt_critic", "metacritic"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Shown = %q, want %q", got, want)
 	}
 }
 

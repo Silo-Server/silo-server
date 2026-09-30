@@ -10,7 +10,8 @@ func TestNormalizeExtraRatingSourcesSetting(t *testing.T) {
 		"":                                   "",
 		" RT_Critic , rt_audience,rt_critic": "rt_critic,rt_audience",
 		"metacritic,,letterboxd,":            "metacritic,letterboxd",
-		// A plugin can declare a source Silo does not know yet.
+		// A well-formed name without a source definition is kept, though it
+		// shows nothing.
 		"kinopoisk": "kinopoisk",
 	}
 	for raw, want := range cases {

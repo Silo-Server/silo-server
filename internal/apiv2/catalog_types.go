@@ -37,8 +37,8 @@ type CatalogItem struct {
 	ShowStatus        string                    `json:"show_status,omitempty" doc:"Airing state of a series"`
 	RatingIMDB        *float64                  `json:"rating_imdb,omitempty"`
 	RatingTMDB        *float64                  `json:"rating_tmdb,omitempty"`
-	RatingRTCritic    *int                      `json:"rating_rt_critic,omitempty"`
-	RatingRTAudience  *int                      `json:"rating_rt_audience,omitempty"`
+	RatingRTCritic    *int                      `json:"rating_rt_critic,omitempty" doc:"Rotten Tomatoes critic score, 0-100. Absent unless an administrator shows rt_critic (see getRatingsCapability); a viewer who curates the item's metadata gets it on item detail regardless"`
+	RatingRTAudience  *int                      `json:"rating_rt_audience,omitempty" doc:"Rotten Tomatoes audience score, 0-100. Absent unless an administrator shows rt_audience (see getRatingsCapability); a viewer who curates the item's metadata gets it on item detail regardless"`
 	OriginalLanguage  string                    `json:"original_language,omitempty" example:"en"`
 	Overview          string                    `json:"overview,omitempty"`
 	ReleaseDate       *string                   `json:"release_date,omitempty" doc:"Calendar date, YYYY-MM-DD" example:"1995-12-15"`
@@ -200,8 +200,9 @@ func catalogItemOfListing(v handlers.CollectionItemView, sel ratingsources.Selec
 
 // withShownRatings drops the card ratings an administrator has not turned on,
 // so poster badges and every other card surface follow the same choice as
-// title pages. IMDb and TMDB are always shown. Item detail keeps its stored
-// values for metadata editors; its ratings list is what title pages show.
+// title pages. IMDb and TMDB are always shown. Item detail applies it too,
+// except for a viewer who curates the item's metadata (see
+// catalogItemDetailOf).
 func withShownRatings(item CatalogItem, sel ratingsources.Selection) CatalogItem {
 	if !sel.Shows(models.RatingSourceRTCritic) {
 		item.RatingRTCritic = nil
