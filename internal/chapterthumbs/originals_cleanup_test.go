@@ -72,7 +72,7 @@ func TestUploadChapterThumbnailStoresOnlyTheServedVariant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 	var data bytes.Buffer
 	if _, err := data.ReadFrom(rc); err != nil {
 		t.Fatal(err)
