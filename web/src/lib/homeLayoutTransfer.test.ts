@@ -69,6 +69,8 @@ function target(overrides: Partial<HomeLayoutImportTarget> = {}): HomeLayoutImpo
     ]),
     allowAdminOnlyRecipes: true,
     personalCollectionIds: new Set(["mine"]),
+    libraryCollectionIds: new Set(["shared-lc"]),
+    profileIds: new Set(["p-sibling"]),
     ...overrides,
   };
 }
@@ -310,6 +312,82 @@ describe("planHomeLayoutImport on the same server", () => {
     ]);
   });
 
+  it("checks collections and pinned profiles against the importing account", () => {
+    const plan = planHomeLayoutImport(
+      layoutFile({
+        pages: [
+          {
+            scope: "home",
+            overrides: [
+              {
+                user_section_type: "collection",
+                user_title: "Seen",
+                user_config: { library_collection_id: "shared-lc" },
+              },
+              {
+                user_section_type: "collection",
+                user_title: "Unseen",
+                user_config: { library_collection_id: "hidden-lc" },
+              },
+              {
+                user_section_type: "profile_activity_feed",
+                user_title: "Sibling",
+                user_config: { profile_id: "p-sibling" },
+              },
+              {
+                user_section_type: "profile_activity_feed",
+                user_title: "Stranger",
+                user_config: { profile_id: "p-other-account" },
+              },
+              {
+                user_section_type: "profile_activity_feed",
+                user_title: "Household",
+                user_config: { profile_id: "" },
+              },
+            ],
+          },
+        ],
+      }),
+      target(),
+      sequentialIds(),
+    );
+
+    expect(plan.pages[0]?.overrides.map((override) => override.user_title)).toEqual([
+      "Seen",
+      "Sibling",
+      "Household",
+    ]);
+    expect(plan.skippedSections).toEqual([
+      { page: "Home", title: "Unseen", reason: "collection" },
+      { page: "Home", title: "Stranger", reason: "profile" },
+    ]);
+  });
+
+  it("checks only the config the server uses for a section", () => {
+    const plan = planHomeLayoutImport(
+      layoutFile({
+        pages: [
+          {
+            scope: "home",
+            overrides: [
+              {
+                user_section_type: "hidden_gems",
+                user_title: "Current",
+                config: { filter_library_id: 9 },
+                user_config: { library_ids: [1] },
+              },
+            ],
+          },
+        ],
+      }),
+      target(),
+      sequentialIds(),
+    );
+
+    expect(plan.skippedSections).toEqual([]);
+    expect(plan.pages[0]?.overrides).toHaveLength(1);
+  });
+
   it("trusts a saved section type the gallery doesn't list", () => {
     const plan = planHomeLayoutImport(
       layoutFile({
@@ -440,6 +518,31 @@ describe("planHomeLayoutImport on another server", () => {
         label: "movies ",
         overrides: [{ id: "new-3", user_section_type: "hidden_gems" }],
       },
+    ]);
+  });
+
+  it("drops an unused config that can't be mapped", () => {
+    const plan = planHomeLayoutImport(
+      layoutFile({
+        pages: [
+          {
+            scope: "home",
+            overrides: [
+              {
+                user_section_type: "hidden_gems",
+                config: { filter_library_id: 2 },
+                user_config: { library_ids: [1] },
+              },
+            ],
+          },
+        ],
+      }),
+      otherServer,
+      sequentialIds(),
+    );
+
+    expect(plan.pages[0]?.overrides).toEqual([
+      { id: "new-1", user_section_type: "hidden_gems", user_config: { library_ids: [7] } },
     ]);
   });
 

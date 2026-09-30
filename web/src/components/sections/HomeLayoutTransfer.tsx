@@ -177,6 +177,31 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
       ),
     gcTime: 0,
   });
+  const libraryCollectionsQuery = useQuery({
+    queryKey: ["home-layout-import", "library-collection-ids"],
+    queryFn: async () => {
+      const tabs = await Promise.all(
+        libraries.map((library) =>
+          v2("GET /api/v2/library/{id}/collections", {
+            path: { id: String(library.id) },
+            profileContext: profileContext ?? undefined,
+          }),
+        ),
+      );
+      return new Set(tabs.flatMap((tab) => tab.collections.map((collection) => collection.id)));
+    },
+    gcTime: 0,
+  });
+  const profilesQuery = useQuery({
+    queryKey: ["home-layout-import", "account-profile-ids"],
+    queryFn: async () =>
+      new Set(
+        (
+          await v2("GET /api/v2/profiles", { profileContext: profileContext ?? undefined })
+        ).items.map((profile) => profile.id),
+      ),
+    gcTime: 0,
+  });
   // Shares the Home screen settings page's cache entry.
   const recipeCatalogQuery = useQuery({
     queryKey: ["recipe-catalog"],
@@ -200,12 +225,16 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
   const targetReady = Boolean(
     identityQuery.data &&
     collectionsQuery.data &&
+    libraryCollectionsQuery.data &&
+    profilesQuery.data &&
     recipeCatalog &&
     allowAdminOnlyRecipes !== undefined,
   );
   const targetError =
     identityQuery.isError ||
     collectionsQuery.isError ||
+    libraryCollectionsQuery.isError ||
+    profilesQuery.isError ||
     recipeCatalogQuery.isError ||
     flagsQuery.isError;
 
@@ -214,6 +243,8 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
       !parsed?.ok ||
       !identityQuery.data ||
       !collectionsQuery.data ||
+      !libraryCollectionsQuery.data ||
+      !profilesQuery.data ||
       !recipeCatalog ||
       allowAdminOnlyRecipes === undefined
     ) {
@@ -231,6 +262,8 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
         recipes,
         allowAdminOnlyRecipes,
         personalCollectionIds: collectionsQuery.data,
+        libraryCollectionIds: libraryCollectionsQuery.data,
+        profileIds: profilesQuery.data,
       },
       randomUUID,
     );
@@ -238,6 +271,8 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
     parsed,
     identityQuery.data,
     collectionsQuery.data,
+    libraryCollectionsQuery.data,
+    profilesQuery.data,
     recipeCatalog,
     libraries,
     allowAdminOnlyRecipes,

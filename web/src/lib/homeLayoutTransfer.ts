@@ -229,7 +229,7 @@ export const HOME_LAYOUT_SKIP_REASON_LABELS: Record<HomeLayoutSkipReason, string
   trakt: "Trakt-backed sections can't be added again",
   library: "Uses a library this profile doesn't have here",
   collection: "Uses a collection this profile can't see here",
-  profile: "Follows a profile from the other server",
+  profile: "Follows a profile outside this account",
 };
 
 export interface HomeLayoutImportTarget {
@@ -240,6 +240,10 @@ export interface HomeLayoutImportTarget {
   allowAdminOnlyRecipes: boolean;
   /** Personal collections the importing profile can see. */
   personalCollectionIds: ReadonlySet<string>;
+  /** Library collections the importing profile can see. */
+  libraryCollectionIds: ReadonlySet<string>;
+  /** The importing account's profiles. */
+  profileIds: ReadonlySet<string>;
 }
 
 export interface HomeLayoutPlannedPage {
@@ -376,14 +380,24 @@ function sectionSkipReason(
   // The server refuses any new override whose config names Trakt as its source.
   if (isTraktConfig(config)) return "trakt";
 
-  if (nonEmptyString(config.library_collection_id) && !sameServer) return "collection";
+  if (
+    nonEmptyString(config.library_collection_id) &&
+    (!sameServer || !target.libraryCollectionIds.has(config.library_collection_id))
+  ) {
+    return "collection";
+  }
   if (
     nonEmptyString(config.user_collection_id) &&
     (!sameServer || !target.personalCollectionIds.has(config.user_collection_id))
   ) {
     return "collection";
   }
-  if (recipeType === "profile_activity_feed" && nonEmptyString(config.profile_id) && !sameServer) {
+  // A pinned profile's history is only this account's to show.
+  if (
+    recipeType === "profile_activity_feed" &&
+    nonEmptyString(config.profile_id) &&
+    (!sameServer || !target.profileIds.has(config.profile_id))
+  ) {
     return "profile";
   }
   return null;
@@ -464,45 +478,48 @@ export function planHomeLayoutImport(
   return plan;
 }
 
-// Whether a profile-built section's library references work here. On the same
-// server the IDs stay as they are: the server already limits a section to the
-// libraries the profile can open, so a list needs only one of them and a
+// Whether a profile-built section's library references work here, read from
+// the config the server uses: user_config when present, else config. On the
+// same server the IDs stay as they are: the server already limits a section to
+// the libraries the profile can open, so a list needs only one of them and a
 // single ID must be one. Another server rewrites every ID through the map and
-// skips the section when one has no match.
+// skips the section when one has no match; the unused config is rewritten too,
+// or dropped when it can't be.
 function carryOverrideLibraries(
   write: SectionOverrideWrite,
   libraries: Map<number, HomeLayoutLibrary>,
   sameServer: boolean,
 ): boolean {
-  if (!sameServer) return remapOverrideLibraries(write, libraries);
-  for (const config of [write.config, write.user_config]) {
-    if (!config) continue;
-    for (const key of LIBRARY_ID_KEYS) {
-      const value = config[key];
-      if (isPositiveInteger(value) && !libraries.has(value)) return false;
-    }
-    for (const key of LIBRARY_ID_LIST_KEYS) {
-      const value = config[key];
-      if (!Array.isArray(value)) continue;
-      const ids = value.filter(isPositiveInteger);
-      if (ids.length > 0 && !ids.some((id) => libraries.has(id))) return false;
-    }
+  const used = write.user_config !== undefined ? "user_config" : "config";
+  const config = write[used];
+  if (!config) return true;
+  if (sameServer) return libraryRefsReachable(config, libraries);
+  const remapped = remapConfigLibraries(config, libraries);
+  if (!remapped) return false;
+  write[used] = remapped;
+  const unused = used === "user_config" ? "config" : "user_config";
+  const other = write[unused];
+  if (other) {
+    const otherRemapped = remapConfigLibraries(other, libraries);
+    if (otherRemapped) write[unused] = otherRemapped;
+    else delete write[unused];
   }
   return true;
 }
 
-// Rewrites both config members' library IDs in place; false when one of them
-// names a library that isn't here.
-function remapOverrideLibraries(
-  write: SectionOverrideWrite,
+function libraryRefsReachable(
+  config: Record<string, unknown>,
   libraries: Map<number, HomeLayoutLibrary>,
 ): boolean {
-  for (const key of ["config", "user_config"] as const) {
-    const config = write[key];
-    if (!config) continue;
-    const remapped = remapConfigLibraries(config, libraries);
-    if (!remapped) return false;
-    write[key] = remapped;
+  for (const key of LIBRARY_ID_KEYS) {
+    const value = config[key];
+    if (isPositiveInteger(value) && !libraries.has(value)) return false;
+  }
+  for (const key of LIBRARY_ID_LIST_KEYS) {
+    const value = config[key];
+    if (!Array.isArray(value)) continue;
+    const ids = value.filter(isPositiveInteger);
+    if (ids.length > 0 && !ids.some((id) => libraries.has(id))) return false;
   }
   return true;
 }
