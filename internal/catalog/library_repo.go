@@ -448,6 +448,26 @@ func (r *LibraryItemRepository) Delete(ctx context.Context, contentID string, fo
 // its surviving media_files rows and syncPresentLibraryState re-inserts the
 // membership from those rows.
 func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, folderID int, protectedPathPrefixes []string) (int, int, []string, error) {
+	return r.reconcileMemberships(ctx, folderID, nil, protectedPathPrefixes)
+}
+
+// ReconcileItemMemberships removes stale memberships and orphaned items only
+// for the supplied content IDs. File presence is checked across the whole
+// folder, so a version outside the scanned subtree preserves its membership.
+func (r *LibraryItemRepository) ReconcileItemMemberships(ctx context.Context, folderID int, contentIDs, protectedPathPrefixes []string) (int, int, []string, error) {
+	if len(contentIDs) == 0 {
+		return 0, 0, nil, nil
+	}
+	return r.reconcileMemberships(ctx, folderID, contentIDs, protectedPathPrefixes)
+}
+
+func (r *LibraryItemRepository) reconcileMemberships(ctx context.Context, folderID int, contentIDs, protectedPathPrefixes []string) (int, int, []string, error) {
+	args := []any{folderID}
+	itemPredicate := ""
+	if contentIDs != nil {
+		args = append(args, contentIDs)
+		itemPredicate = " AND mil.content_id = ANY($2::text[])"
+	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return 0, 0, nil, fmt.Errorf("beginning membership reconciliation transaction: %w", err)
@@ -460,7 +480,7 @@ func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, f
 	// series (no remaining chapters) are cleaned up separately by the manga scan.
 	rows, err := tx.Query(ctx, `
 		DELETE FROM media_item_libraries mil
-		WHERE mil.media_folder_id = $1
+		WHERE mil.media_folder_id = $1`+itemPredicate+`
 		  AND NOT EXISTS (
 			SELECT 1
 			FROM media_files mf
@@ -475,7 +495,7 @@ func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, f
 			  AND mi.type = 'manga'
 		  )
 		RETURNING mil.content_id
-	`, folderID)
+	`, args...)
 	if err != nil {
 		return 0, 0, nil, fmt.Errorf("deleting stale folder memberships: %w", err)
 	}
@@ -504,7 +524,7 @@ func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, f
 	if err != nil {
 		return 0, 0, nil, err
 	}
-	previouslyProtected, err := collectFolderFileOrphanIDs(ctx, tx, folderID)
+	previouslyProtected, err := collectFolderFileOrphanIDs(ctx, tx, folderID, contentIDs)
 	if err != nil {
 		return 0, 0, nil, err
 	}
@@ -583,17 +603,23 @@ func deleteOrphanedItemsAndImageDirs(ctx context.Context, tx pgx.Tx, orphanIDs [
 	return deletedContentIDs, imageDirs, nil
 }
 
-func collectFolderFileOrphanIDs(ctx context.Context, tx pgx.Tx, folderID int) ([]string, error) {
+func collectFolderFileOrphanIDs(ctx context.Context, tx pgx.Tx, folderID int, contentIDs []string) ([]string, error) {
+	args := []any{folderID}
+	itemPredicate := ""
+	if contentIDs != nil {
+		args = append(args, contentIDs)
+		itemPredicate = " AND mf.content_id = ANY($2::text[])"
+	}
 	rows, err := tx.Query(ctx, `
 		SELECT DISTINCT mf.content_id
 		FROM media_files mf
-		WHERE mf.media_folder_id = $1
+		WHERE mf.media_folder_id = $1`+itemPredicate+`
 		  AND mf.content_id IS NOT NULL
 		  AND mf.content_id <> ''
 		  AND NOT EXISTS (
 			SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mf.content_id
 		  )
-	`, folderID)
+	`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("finding previously protected folder orphans: %w", err)
 	}

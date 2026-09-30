@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/pathscope"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -15,6 +17,7 @@ import (
 type scanStateFile struct {
 	ID                     int
 	ContentID              string
+	EpisodeID              string
 	ExtraID                string
 	CanonicalRootPath      string
 	ObservedRootPath       string
@@ -54,7 +57,7 @@ type scanStateFile struct {
 	ExternalSubtitlePaths  []string
 }
 
-const scanStateColumns = `id, content_id, extra_id,
+const scanStateColumns = `id, content_id, episode_id, extra_id,
 	canonical_root_path, observed_root_path, content_group_key, group_key_version,
 	base_title, base_year, base_type, identity_confidence, identity_json,
 	file_path, file_size, file_modified_at, file_hash,
@@ -87,7 +90,7 @@ const scanStateColumns = `id, content_id, extra_id,
 
 func scanScanStateRow(row pgx.Row) (*scanStateFile, error) {
 	var state scanStateFile
-	var contentID *string
+	var contentID, episodeID *string
 	var extraID *string
 	var canonicalRootPath, observedRootPath, contentGroupKey, baseTitle, baseType *string
 	var groupKeyVersion, baseYear *int
@@ -107,6 +110,7 @@ func scanScanStateRow(row pgx.Row) (*scanStateFile, error) {
 	if err := row.Scan(
 		&state.ID,
 		&contentID,
+		&episodeID,
 		&extraID,
 		&canonicalRootPath,
 		&observedRootPath,
@@ -150,6 +154,9 @@ func scanScanStateRow(row pgx.Row) (*scanStateFile, error) {
 
 	if contentID != nil {
 		state.ContentID = *contentID
+	}
+	if episodeID != nil {
+		state.EpisodeID = *episodeID
 	}
 	if extraID != nil {
 		state.ExtraID = *extraID
@@ -267,11 +274,11 @@ func (r *FileRepository) GetScanStateByFolder(ctx context.Context, folderID int)
 // GetScanStateByFolderAndPathPrefix returns lightweight scan-state rows for a
 // folder subtree.
 func (r *FileRepository) GetScanStateByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string) ([]*scanStateFile, error) {
+	clauses, args := pathscope.RangeCoverageClauses("file_path", []string{pathPrefix}, 2)
 	query := `SELECT ` + scanStateColumns + ` FROM media_files
-		WHERE media_folder_id = $1
-		  AND (file_path = $2 OR file_path LIKE $3 ESCAPE '\')
+		WHERE media_folder_id = $1 AND (` + strings.Join(clauses, " OR ") + `)
 		ORDER BY file_path ASC`
-	rows, err := r.pool.Query(ctx, query, folderID, pathPrefix, pathPrefixLike(pathPrefix))
+	rows, err := r.pool.Query(ctx, query, append([]any{folderID}, args...)...)
 	if err != nil {
 		return nil, fmt.Errorf("querying scan state by folder and path prefix: %w", err)
 	}
@@ -286,6 +293,7 @@ func scanStateFromMediaFile(file *models.MediaFile) *scanStateFile {
 	return &scanStateFile{
 		ID:                     file.ID,
 		ContentID:              file.ContentID,
+		EpisodeID:              file.EpisodeID,
 		ExtraID:                file.ExtraID,
 		CanonicalRootPath:      file.CanonicalRootPath,
 		ObservedRootPath:       file.ObservedRootPath,

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,6 +22,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/naming"
+	"github.com/Silo-Server/silo-server/internal/pathscope"
 	"github.com/Silo-Server/silo-server/internal/rootcheck"
 	"github.com/Silo-Server/silo-server/internal/themesongs"
 )
@@ -1002,7 +1004,7 @@ func (s *Scanner) scanPaths(
 	result.Unchanged += extraStats.Unchanged
 	result.Errors += extraStats.Errors
 
-	if err := s.syncPresentLibraryState(ctx, folder.ID); err != nil {
+	if err := s.syncPresentPathState(ctx, folder.ID, reconcileRoots[0]); err != nil {
 		return nil, fmt.Errorf("syncing present library state for folder %d: %w", folder.ID, err)
 	}
 
@@ -1019,14 +1021,14 @@ func (s *Scanner) scanPaths(
 	// grace for this folder. Safe because the empty-root guard (above) returns
 	// early when 0 files are found on disk, so we only reach here when the
 	// root is populated.
-	removedMemberships, deletedItems, orphanedImageDirs, err := s.reconcileLibraryMemberships(ctx, folder.ID, protectedRoots)
+	removedMemberships, deletedItems, orphanedImageDirs, err := s.reconcileScopedLibraryMemberships(ctx, folder.ID, reconcileRoots[0], existingFiles, protectedRoots)
 	if err != nil {
 		return nil, fmt.Errorf("reconciling library membership for folder %d: %w", folder.ID, err)
 	}
 	result.MembershipsRemoved = removedMemberships
 	result.ItemsDeleted = deletedItems
 	if s.emptyTrashAfterScan {
-		trashed, err := s.fileRepo.DeleteMissingByFolder(ctx, folder.ID, s.fileRemovalGrace, protectedRoots)
+		trashed, err := s.fileRepo.DeleteMissingInScope(ctx, folder.ID, reconcileRoots[0], s.fileRemovalGrace, protectedRoots)
 		if err != nil {
 			return nil, fmt.Errorf("emptying trash for folder %d: %w", folder.ID, err)
 		}
@@ -1432,7 +1434,7 @@ func (s *Scanner) scanFolderByRoots(
 	// deleted once they pass the removal grace — by the very scan that
 	// noticed the outage.
 	protectedRoots := protectedScanRoots
-	removedMemberships, deletedItems, orphanedImageDirs, err := s.reconcileLibraryMemberships(ctx, folder.ID, protectedRoots)
+	removedMemberships, deletedItems, orphanedImageDirs, err := s.reconcileSyncedLibraryMemberships(ctx, folder.ID, protectedRoots)
 	if err != nil {
 		return nil, fmt.Errorf("reconciling library membership for folder %d: %w", folder.ID, err)
 	}
@@ -2278,7 +2280,7 @@ func compactScanRoots(paths []string) []string {
 // syncPresentLibraryState repairs the catalog memberships owned by every
 // present media file in a folder.
 func (s *Scanner) syncPresentLibraryState(ctx context.Context, folderID int) error {
-	return s.syncPresentState(ctx, folderID, nil)
+	return s.syncPresentState(ctx, folderID, "", nil)
 }
 
 // syncPresentFileState repairs the catalog memberships owned by one present
@@ -2289,23 +2291,21 @@ func (s *Scanner) syncPresentFileState(ctx context.Context, folderID int, filePa
 	if strings.TrimSpace(filePath) == "" {
 		return fmt.Errorf("syncing present file state: empty file path")
 	}
-	return s.syncPresentState(ctx, folderID, &filePath)
+	return s.syncPresentState(ctx, folderID, "\n\t\t  AND mf.file_path = $2", []any{filePath})
 }
 
-// syncPresentState is the single implementation behind both entry points. When
-// filePath is nil the repair covers every present file in the folder; when it
-// is set the exact same statements are narrowed to that one row.
-//
-// The path predicate is appended in Go rather than expressed as
-// "($2::text IS NULL OR mf.file_path = $2)" so the folder-wide plan is not
-// forced onto a filter the planner cannot use an index for.
-func (s *Scanner) syncPresentState(ctx context.Context, folderID int, filePath *string) error {
-	args := []any{folderID}
-	filePredicate := ""
-	if filePath != nil {
-		args = append(args, *filePath)
-		filePredicate = "\n\t\t  AND mf.file_path = $2"
-	}
+// syncPresentPathState repairs only the files at or beneath a scan's root.
+func (s *Scanner) syncPresentPathState(ctx context.Context, folderID int, pathPrefix string) error {
+	clauses, args := pathscope.RangeCoverageClauses("mf.file_path", []string{pathPrefix}, 2)
+	predicate := "\n\t\t  AND (" + strings.Join(clauses, " OR ") + ")"
+	return s.syncPresentState(ctx, folderID, predicate, args)
+}
+
+// syncPresentState shares the repair statements across folder, path and file
+// scans. Appending a concrete path predicate lets PostgreSQL use the folder/path
+// index instead of planning an optional filter over the whole library.
+func (s *Scanner) syncPresentState(ctx context.Context, folderID int, filePredicate string, scopeArgs []any) error {
+	args := append([]any{folderID}, scopeArgs...)
 
 	statements := []struct {
 		desc string
@@ -2370,6 +2370,11 @@ func (s *Scanner) syncPresentState(ctx context.Context, folderID int, filePath *
 			WHERE mf.media_folder_id = $1` + filePredicate + `
 			  AND mf.missing_since IS NULL
 			  AND mf.episode_id IS NOT NULL
+			  AND NOT EXISTS (
+				SELECT 1 FROM episode_libraries el
+				WHERE el.episode_id = mf.episode_id
+				  AND el.media_folder_id = mf.media_folder_id
+			  )
 		),
 		candidate AS (
 			SELECT target.episode_id,
@@ -2452,6 +2457,69 @@ func (s *Scanner) syncFolderScopedAudioLibraryState(ctx context.Context, folderI
 	}
 
 	return nil
+}
+
+// reconcileSyncedLibraryMemberships follows present-state repair. Memberships
+// were already restored there, so this pass only removes stale episode links.
+func (s *Scanner) reconcileSyncedLibraryMemberships(ctx context.Context, folderID int, protectedRoots []string) (int, int, []string, error) {
+	if s.episodeLibraryRepo != nil {
+		if _, err := s.episodeLibraryRepo.RemoveStaleFolderMemberships(ctx, folderID, nil); err != nil {
+			return 0, 0, nil, err
+		}
+	}
+	return s.libraryRepo.ReconcileFolderMembership(ctx, folderID, protectedRoots)
+}
+
+// reconcileScopedLibraryMemberships revisits only content touched by the scan.
+// Keep the previous links as well: processing can replace or clear them when a
+// file becomes an extra or its inferred identity changes.
+func (s *Scanner) reconcileScopedLibraryMemberships(ctx context.Context, folderID int, pathPrefix string, existingFiles []*scanStateFile, protectedRoots []string) (int, int, []string, error) {
+	contentIDs := make([]string, 0, len(existingFiles))
+	episodeIDs := make([]string, 0, len(existingFiles))
+	for _, file := range existingFiles {
+		if file.ContentID != "" {
+			contentIDs = append(contentIDs, file.ContentID)
+		}
+		if file.EpisodeID != "" {
+			episodeIDs = append(episodeIDs, file.EpisodeID)
+		}
+	}
+	clauses, args := pathscope.RangeCoverageClauses("file_path", []string{pathPrefix}, 2)
+	rows, err := s.fileRepo.Pool().Query(ctx, `
+		SELECT DISTINCT content_id, episode_id
+		FROM media_files
+		WHERE media_folder_id = $1 AND (`+strings.Join(clauses, " OR ")+`)
+	`, append([]any{folderID}, args...)...)
+	if err != nil {
+		return 0, 0, nil, fmt.Errorf("getting scoped membership targets: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var contentID, episodeID *string
+		if err := rows.Scan(&contentID, &episodeID); err != nil {
+			return 0, 0, nil, fmt.Errorf("reading scoped membership targets: %w", err)
+		}
+		if contentID != nil && *contentID != "" {
+			contentIDs = append(contentIDs, *contentID)
+		}
+		if episodeID != nil && *episodeID != "" {
+			episodeIDs = append(episodeIDs, *episodeID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, 0, nil, fmt.Errorf("iterating scoped membership targets: %w", err)
+	}
+	rows.Close()
+	slices.Sort(contentIDs)
+	contentIDs = slices.Compact(contentIDs)
+	slices.Sort(episodeIDs)
+	episodeIDs = slices.Compact(episodeIDs)
+	if s.episodeLibraryRepo != nil {
+		if _, err := s.episodeLibraryRepo.RemoveStaleFolderMemberships(ctx, folderID, episodeIDs); err != nil {
+			return 0, 0, nil, err
+		}
+	}
+	return s.libraryRepo.ReconcileItemMemberships(ctx, folderID, contentIDs, protectedRoots)
 }
 
 // reconcileLibraryMemberships removes memberships for content with no
