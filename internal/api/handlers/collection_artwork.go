@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -137,22 +138,14 @@ func uploadCollectionImageVariants(
 	prefix, collectionID, imageType string,
 	fileData []byte,
 ) (s3Path, thumbhashStr string, err error) {
-	if store == nil {
-		return "", "", fmt.Errorf("image upload requires configured S3 storage")
-	}
 	var widths []int
 	switch imageType {
 	case "poster":
-		widths = []int{500, 300}
+		widths = collectionPosterWidths
 	case "backdrop":
 		widths = []int{1280, 300}
 	default:
 		return "", "", fmt.Errorf("invalid image type: %s", imageType)
-	}
-
-	result, err := imageutil.GenerateVariants(fileData, widths)
-	if err != nil {
-		return "", "", fmt.Errorf("generating image variants: %w", err)
 	}
 
 	// Revision the key by content so replacement artwork lands on a new key,
@@ -161,7 +154,30 @@ func uploadCollectionImageVariants(
 	// imageType directory, so removeCollectionImageVariants still clears every
 	// one of them by that prefix.
 	basePath := collectionImageDir(prefix, collectionID, imageType)
-	revision := collectionImageRevision(fileData)
+	return putCollectionImageVariants(ctx, store, basePath, collectionImageRevision(fileData), widths, fileData)
+}
+
+// collectionPosterWidths are the resized variants stored beside an original
+// collection poster.
+var collectionPosterWidths = []int{500, 300}
+
+// putCollectionImageVariants generates the given resized variants of fileData
+// and uploads them, with the original, as basePath/{variant}.{revision}.{ext}.
+// It returns the original's key and a thumbhash of the w300 variant.
+func putCollectionImageVariants(
+	ctx context.Context,
+	store blobstore.Store,
+	basePath, revision string,
+	widths []int,
+	fileData []byte,
+) (s3Path, thumbhashStr string, err error) {
+	if store == nil {
+		return "", "", fmt.Errorf("image upload requires configured S3 storage")
+	}
+	result, err := imageutil.GenerateVariants(fileData, widths)
+	if err != nil {
+		return "", "", fmt.Errorf("generating image variants: %w", err)
+	}
 
 	var w300Data []byte
 	for _, v := range result.Variants {
@@ -199,6 +215,24 @@ func collectionImageRevision(data []byte) string {
 // of one collection image, without a trailing slash.
 func collectionImageDir(prefix, collectionID, imageType string) string {
 	return fmt.Sprintf("%s/%s/%s", prefix, collectionID, imageType)
+}
+
+// collectionCollageDir returns the directory holding a collection's generated
+// collages, without a trailing slash. Each collage is stored with its key as
+// the revision.
+func collectionCollageDir(prefix, collectionID string) string {
+	return collectionImageDir(prefix, collectionID, "collage")
+}
+
+// collectionPosterObjectKeys expands the original key of a stored collection
+// poster to the keys of every variant stored with it.
+func collectionPosterObjectKeys(originalPath string) []string {
+	keys := make([]string, 0, len(collectionPosterWidths)+1)
+	keys = append(keys, originalPath)
+	for _, width := range collectionPosterWidths {
+		keys = append(keys, artworkkey.Variant(originalPath, "w"+strconv.Itoa(width)))
+	}
+	return keys
 }
 
 // removeReplacedCollectionImageVersion deletes the variants of the revision

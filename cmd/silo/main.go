@@ -3444,6 +3444,9 @@ func main() {
 			}
 			compatDeps.SettingsRepo = settingsRepo
 			compatDeps.PersonRepo = personRepo
+			if deps.CollectionService != nil {
+				compatDeps.CollectionPosters = deps.CollectionService
+			}
 			if watchProviderService != nil {
 				compatDeps.WatchScrobbler = watchProviderService
 			}

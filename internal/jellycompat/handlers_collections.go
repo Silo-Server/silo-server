@@ -31,6 +31,32 @@ type collectionSource interface {
 	AnyVisibleInLibraries(ctx context.Context, libraryIDs []int) (bool, error)
 }
 
+// CollectionPosterResolver picks the poster a viewer sees for each server
+// collection (*catalog.LibraryCollectionService). A collection without an
+// uploaded or template poster shows a collage of the members that viewer can
+// access, so its poster differs by viewer.
+type CollectionPosterResolver interface {
+	CollectionPosters(ctx context.Context, collections []*models.LibraryCollection, access catalog.AccessFilter) map[string]catalog.CollectionPoster
+	CollectionCollage(ctx context.Context, collectionID, key string) (catalog.CollectionPoster, bool, error)
+}
+
+// viewerCollectionPosters returns each collection's poster for the session's
+// viewer, keyed by collection ID. Without a resolver or the viewer's access
+// only uploaded and template posters are returned, never another viewer's
+// collage.
+func viewerCollectionPosters(ctx context.Context, resolver CollectionPosterResolver, access func() catalog.AccessFilter, collections []*models.LibraryCollection) map[string]catalog.CollectionPoster {
+	if resolver != nil && access != nil {
+		return resolver.CollectionPosters(ctx, collections, access())
+	}
+	posters := make(map[string]catalog.CollectionPoster, len(collections))
+	for _, c := range collections {
+		if poster, ok := catalog.AssignedCollectionPoster(c); ok {
+			posters[c.ID] = poster
+		}
+	}
+	return posters
+}
+
 // collectionsViewID is the canonical Jellyfin "Collections" (boxsets)
 // CollectionFolder GUID. It is stable across all Jellyfin servers, so clients
 // recognise it as the box-set library; Silo reuses the same constant rather
@@ -192,22 +218,43 @@ func (h *ItemsHandler) loadVisibleCollection(ctx context.Context, session *Sessi
 	return collection, nil
 }
 
-// boxSetFromCollection maps a library collection to a Jellyfin BoxSet DTO.
-// Image tags are signed from the stable artwork key (like library views) so
-// they survive restarts and presign rotation; the in-memory image cache is
-// seeded as the warm path.
-func (h *ItemsHandler) boxSetFromCollection(ctx context.Context, c *models.LibraryCollection) baseItemDTO {
+// boxSetsFromCollections maps collections to BoxSet DTOs carrying the posters
+// the session's viewer sees.
+func (h *ItemsHandler) boxSetsFromCollections(ctx context.Context, session *Session, collections []*models.LibraryCollection) []baseItemDTO {
+	var access func() catalog.AccessFilter
+	if session != nil && h.accessFilter != nil {
+		access = func() catalog.AccessFilter { return h.resolveAccessFilter(ctx, session) }
+	}
+	posters := viewerCollectionPosters(ctx, h.collectionPosters, access, collections)
+	items := make([]baseItemDTO, 0, len(collections))
+	for _, c := range collections {
+		items = append(items, h.boxSetFromCollection(ctx, c, posters[c.ID]))
+	}
+	return items
+}
+
+// boxSetFromCollection maps a library collection to a Jellyfin BoxSet DTO
+// showing poster, the one its viewer sees. Image tags are signed from the
+// stable artwork key (like library views) so they survive restarts and presign
+// rotation. A collage's tag also names the collage, so an image request that
+// carries only the tag can find it.
+func (h *ItemsHandler) boxSetFromCollection(ctx context.Context, c *models.LibraryCollection, poster catalog.CollectionPoster) baseItemDTO {
 	routeID := h.codec.EncodeStringID(EncodedIDCollection, c.ID)
 	imgTags := map[string]string{}
-	if posterURL := h.presignCollectionPoster(ctx, c.PosterURL); posterURL != "" {
+	posterURL := h.presignCollectionPoster(ctx, poster.Path)
+	switch {
+	case posterURL != "" && poster.CollageKey != "":
+		// Not seeded into the shared image cache: the collage is this viewer's.
+		imgTags["Primary"] = collageImageTag(h.mapper.imageTagSigner, routeID, poster.CollageKey)
+	case posterURL != "":
 		if h.images != nil {
 			h.images.RememberSized(routeID, "Primary", posterURL, compatCardImageSize)
 		}
 		imgTags["Primary"] = h.mapper.imageTagSigner.Tag(
-			imageTagSeed(routeID, "Primary", compatCardImageSize, c.PosterURL, "", time.Time{}),
+			imageTagSeed(routeID, "Primary", compatCardImageSize, poster.Path, "", time.Time{}),
 			posterURL,
 		)
-	} else {
+	default:
 		// No stored poster: advertise a Primary tag anyway so clients request the
 		// generated gradient fallback instead of showing a blank card. The seed
 		// matches collectionImageTagSeed's generated branch.
@@ -279,7 +326,7 @@ func (h *ItemsHandler) boxSetsByIDs(ctx context.Context, session *Session, colle
 	if len(collectionIDs) == 0 || h.collections == nil {
 		return nil, nil
 	}
-	items := make([]baseItemDTO, 0, len(collectionIDs))
+	collections := make([]*models.LibraryCollection, 0, len(collectionIDs))
 	for _, id := range collectionIDs {
 		collection, err := h.loadVisibleCollection(ctx, session, id)
 		if err != nil {
@@ -288,9 +335,9 @@ func (h *ItemsHandler) boxSetsByIDs(ctx context.Context, session *Session, colle
 		if collection == nil {
 			continue
 		}
-		items = append(items, h.boxSetFromCollection(ctx, collection))
+		collections = append(collections, collection)
 	}
-	return items, nil
+	return h.boxSetsFromCollections(ctx, session, collections), nil
 }
 
 // handleBoxSetsList serves GET /Items with IncludeItemTypes=BoxSet by listing
@@ -377,10 +424,7 @@ func (h *ItemsHandler) handleBoxSetsList(w http.ResponseWriter, r *http.Request,
 	if query.countOnly {
 		page = nil
 	}
-	items := make([]baseItemDTO, 0, len(page))
-	for _, c := range page {
-		items = append(items, h.boxSetFromCollection(r.Context(), c))
-	}
+	items := h.boxSetsFromCollections(r.Context(), session, page)
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
 		TotalRecordCount: len(matched),
@@ -415,7 +459,7 @@ func (h *ItemsHandler) handleBoxSetItem(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, h.boxSetFromCollection(r.Context(), collection))
+	writeJSON(w, http.StatusOK, h.boxSetsFromCollections(r.Context(), session, []*models.LibraryCollection{collection})[0])
 }
 
 // HandleItemCollections serves GET /Items/{id}/Collections (Jellyfin 12.0+,
@@ -495,10 +539,7 @@ func (h *ItemsHandler) HandleItemCollections(w http.ResponseWriter, r *http.Requ
 		return matched[i].Title < matched[j].Title
 	})
 	page := slicePage(matched, startIndex, limit)
-	dtos := make([]baseItemDTO, 0, len(page))
-	for _, c := range page {
-		dtos = append(dtos, h.boxSetFromCollection(r.Context(), c))
-	}
+	dtos := h.boxSetsFromCollections(r.Context(), session, page)
 	applyItemsResponseOptions(dtos, parseItemsQuery(r, h.codec))
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            dtos,
