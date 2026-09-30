@@ -15,6 +15,11 @@ vi.mock("@/hooks/useBranding", () => ({
   useBranding: () => ({ storageAvailable: storageAvailableMock() }),
 }));
 
+vi.mock("@tanstack/react-query", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tanstack/react-query")>()),
+  useQueryClient: () => ({}),
+}));
+
 vi.mock("@/hooks/useSettingsForm", () => ({
   useSettingsForm: (...args: unknown[]) => useSettingsFormMock(...args),
 }));

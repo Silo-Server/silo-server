@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, RotateCcw } from "lucide-react";
 import { Link } from "react-router";
 
@@ -26,6 +27,7 @@ import {
   EXTRA_RATING_SOURCES_KEY,
   groupRatingSourcesByPlugin,
   parseRatingSources,
+  saveAndRefreshRatings,
   toggleRatingSource,
   undeclaredRatingSources,
 } from "./ratingSources";
@@ -108,6 +110,10 @@ export default function LibraryMetadataSettings() {
   const { data: ratingSourceCapabilities } = useAdminRatingSourceCapabilities();
   const pluginRatingSources = ratingSourceCapabilities?.plugin_declared_sources === true;
   const ratingSources = useAdminRatingSources(pluginRatingSources);
+  const queryClient = useQueryClient();
+
+  // A saved rating choice also refreshes cached title pages and cards.
+  const handleSave = () => saveAndRefreshRatings(form, queryClient);
   const detectionKindSettings = markerCapabilities?.detection_kind_settings === true;
   const anyDirty = (keys: string[]) => keys.some((key) => form.isDirty(key));
   const allRestart = (keys: string[]) => keys.every((key) => restartKeys.has(key));
@@ -621,7 +627,7 @@ export default function LibraryMetadataSettings() {
 
       <SaveBar
         dirtyCount={form.dirtyCount}
-        onSave={form.save}
+        onSave={handleSave}
         onDiscard={form.discard}
         isSaving={form.isSaving}
       />

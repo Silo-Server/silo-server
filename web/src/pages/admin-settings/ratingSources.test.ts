@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { QueryClient } from "@tanstack/react-query";
+import { describe, expect, it, vi } from "vitest";
 
 import {
+  EXTRA_RATING_SOURCES_KEY,
+  RATING_POLICY_SETTLE_MS,
+  saveAndRefreshRatings,
   groupRatingSourcesByPlugin,
   parseRatingSources,
   toggleRatingSource,
@@ -50,5 +54,34 @@ describe("rating source setting", () => {
     expect(
       undeclaredRatingSources(["rt_critic", "kinopoisk", "imdb", "kinopoisk"], sources),
     ).toEqual(["kinopoisk"]);
+  });
+
+  it("refreshes rating surfaces now and after the server cache expires when ratings change", async () => {
+    const queryClient = new QueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const scheduled: number[] = [];
+    const save = vi.fn(async () => {});
+
+    await saveAndRefreshRatings(
+      { isDirty: (key) => key === EXTRA_RATING_SOURCES_KEY, save },
+      queryClient,
+      (run, ms) => {
+        scheduled.push(ms);
+        run();
+      },
+    );
+
+    expect(save).toHaveBeenCalledOnce();
+    expect(scheduled).toEqual([RATING_POLICY_SETTLE_MS]);
+    expect(invalidate).toHaveBeenCalledTimes(2);
+  });
+
+  it("leaves cached surfaces alone when the rating choice did not change", async () => {
+    const queryClient = new QueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    await saveAndRefreshRatings({ isDirty: () => false, save: async () => {} }, queryClient, () => {
+      throw new Error("nothing to schedule");
+    });
+    expect(invalidate).not.toHaveBeenCalled();
   });
 });
