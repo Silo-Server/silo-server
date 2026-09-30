@@ -18028,10 +18028,12 @@
             "type": "number"
           },
           "rating_rt_audience": {
+            "description": "Rotten Tomatoes audience score, 0-100. Absent unless an administrator shows rt_audience (see getRatingsCapability); a viewer who curates the item's metadata gets it on item detail regardless",
             "format": "int64",
             "type": "integer"
           },
           "rating_rt_critic": {
+            "description": "Rotten Tomatoes critic score, 0-100. Absent unless an administrator shows rt_critic (see getRatingsCapability); a viewer who curates the item's metadata gets it on item detail regardless",
             "format": "int64",
             "type": "integer"
           },
@@ -18426,15 +18428,17 @@
             "type": "number"
           },
           "rating_rt_audience": {
+            "description": "Rotten Tomatoes audience score, 0-100. Absent unless an administrator shows rt_audience (see getRatingsCapability); a viewer who curates the item's metadata gets it on item detail regardless",
             "format": "int64",
             "type": "integer"
           },
           "rating_rt_critic": {
+            "description": "Rotten Tomatoes critic score, 0-100. Absent unless an administrator shows rt_critic (see getRatingsCapability); a viewer who curates the item's metadata gets it on item detail regardless",
             "format": "int64",
             "type": "integer"
           },
           "rating_sources": {
-            "description": "Per-source ratings on a 0-100 scale for movies and series, in display order; absent when no provider reported any. This is stored data: title pages show ratings, not this list.",
+            "description": "Per-source ratings on a 0-100 scale for movies and series, in display order; absent when there are none. Only the sources clients show, except for a viewer who curates the item's metadata, who gets every stored source. Title pages render ratings, not this list.",
             "items": {
               "$ref": "#/components/schemas/CatalogRatingSource"
             },
@@ -25227,10 +25231,12 @@
             "type": "number"
           },
           "rating_rt_audience": {
+            "description": "Rotten Tomatoes audience score, 0-100. Absent unless an administrator shows rt_audience (see getRatingsCapability); a viewer who curates the item's metadata gets it on item detail regardless",
             "format": "int64",
             "type": "integer"
           },
           "rating_rt_critic": {
+            "description": "Rotten Tomatoes critic score, 0-100. Absent unless an administrator shows rt_critic (see getRatingsCapability); a viewer who curates the item's metadata gets it on item detail regardless",
             "format": "int64",
             "type": "integer"
           },
@@ -36008,6 +36014,67 @@
         ],
         "type": "object"
       },
+      "RatingsCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "revision": {
+            "description": "Opaque revision of this document",
+            "type": "string"
+          },
+          "sources": {
+            "description": "The rating sources title pages and cards show, in display order: imdb and tmdb, then each source an administrator turned on. A card or detail carries rating_rt_critic or rating_rt_audience only when its source is listed. Empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/RatingsCapabilitySource"
+            },
+            "type": "array"
+          },
+          "state": {
+            "description": "Support and configuration state, not health",
+            "enum": [
+              "available",
+              "disabled",
+              "not_configured",
+              "unsupported"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "sources",
+          "revision",
+          "state",
+          "allowed"
+        ],
+        "type": "object"
+      },
+      "RatingsCapabilitySource": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "description": "The source's plain-text mark",
+            "examples": [
+              "IMDb"
+            ],
+            "type": "string"
+          },
+          "source": {
+            "description": "Rating source name, as in CatalogRating.source",
+            "examples": [
+              "imdb"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "name"
+        ],
+        "type": "object"
+      },
       "RawMatchBacklogEntry": {
         "additionalProperties": false,
         "properties": {
@@ -43954,10 +44021,12 @@
             "type": "number"
           },
           "rating_rt_audience": {
+            "description": "Rotten Tomatoes audience score, 0-100. Absent unless an administrator shows rt_audience (see getRatingsCapability); a viewer who curates the item's metadata gets it on item detail regardless",
             "format": "int64",
             "type": "integer"
           },
           "rating_rt_critic": {
+            "description": "Rotten Tomatoes critic score, 0-100. Absent unless an administrator shows rt_critic (see getRatingsCapability); a viewer who curates the item's metadata gets it on item detail regardless",
             "format": "int64",
             "type": "integer"
           },
@@ -44288,10 +44357,12 @@
             "type": "number"
           },
           "rating_rt_audience": {
+            "description": "Rotten Tomatoes audience score, 0-100. Absent unless an administrator shows rt_audience (see getRatingsCapability); a viewer who curates the item's metadata gets it on item detail regardless",
             "format": "int64",
             "type": "integer"
           },
           "rating_rt_critic": {
+            "description": "Rotten Tomatoes critic score, 0-100. Absent unless an administrator shows rt_critic (see getRatingsCapability); a viewer who curates the item's metadata gets it on item detail regardless",
             "format": "int64",
             "type": "integer"
           },
@@ -115478,6 +115549,207 @@
           "auth"
         ],
         "x-silo-class": "public",
+        "x-silo-conditional": true,
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/capabilities/ratings": {
+      "get": {
+        "operationId": "getRatingsCapability",
+        "parameters": [
+          {
+            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RatingsCapability"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current; no body.",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Whether item detail carries the ratings list, and the rating sources title pages and cards show.",
+        "tags": [
+          "catalog"
+        ],
+        "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
         "x-silo-service-backed": true
       }

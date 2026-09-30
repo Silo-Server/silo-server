@@ -399,6 +399,7 @@ GET /api/v2/capabilities/downloads	non-media
 GET /api/v2/capabilities/ebooks	non-media
 GET /api/v2/capabilities/metadata-ai	non-media
 GET /api/v2/capabilities/password-reset	non-media
+GET /api/v2/capabilities/ratings	non-media
 GET /api/v2/capabilities/trailers	non-media
 GET /api/v2/catalog	non-media
 GET /api/v2/catalog/audiobook-groups	non-media
@@ -1581,6 +1582,7 @@ GET /api/v2/capabilities/downloads	non-media
 GET /api/v2/capabilities/ebooks	non-media
 GET /api/v2/capabilities/metadata-ai	non-media
 GET /api/v2/capabilities/password-reset	non-media
+GET /api/v2/capabilities/ratings	non-media
 GET /api/v2/capabilities/trailers	non-media
 GET /api/v2/catalog	non-media
 GET /api/v2/catalog/audiobook-groups	non-media

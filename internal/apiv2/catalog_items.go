@@ -369,7 +369,7 @@ type CatalogItemDetail struct {
 	Versions                        []FileVersion                        `json:"versions" doc:"Empty, never null"`
 	PlaybackVariants                []PlaybackVariant                    `json:"playback_variants,omitempty"`
 	Videos                          []catalogpkg.ItemVideoInfo           `json:"videos,omitempty" doc:"Trailers and clips"`
-	RatingSources                   []CatalogRatingSource                `json:"rating_sources,omitempty" doc:"Per-source ratings on a 0-100 scale for movies and series, in display order; absent when no provider reported any. This is stored data: title pages show ratings, not this list."`
+	RatingSources                   []CatalogRatingSource                `json:"rating_sources,omitempty" doc:"Per-source ratings on a 0-100 scale for movies and series, in display order; absent when there are none. Only the sources clients show, except for a viewer who curates the item's metadata, who gets every stored source. Title pages render ratings, not this list."`
 	Ratings                         []CatalogRating                      `json:"ratings" doc:"The external ratings a title page shows, in display order: IMDb and TMDB, plus the sources an administrator turned on. Render every entry as its name and display text. Empty, never null"`
 	Extras                          []catalogpkg.ItemExtraInfo           `json:"extras,omitempty"`
 	FolderPaths                     []string                             `json:"folder_paths,omitempty" doc:"Absent for viewers without file-path visibility"`
@@ -420,6 +420,17 @@ func catalogRatingsOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) []C
 	out := make([]CatalogRating, 0, len(built))
 	for _, r := range built {
 		out = append(out, CatalogRating{Source: r.Source, Name: r.Name, Score: r.Score, Display: r.Display})
+	}
+	return out
+}
+
+// shownRatingSources keeps the per-source rows of the sources sel shows.
+func shownRatingSources(sources []catalogpkg.ItemRatingSourceInfo, sel ratingsources.Selection) []catalogpkg.ItemRatingSourceInfo {
+	var out []catalogpkg.ItemRatingSourceInfo
+	for _, source := range sources {
+		if sel.Shows(source.Source) {
+			out = append(out, source)
+		}
 	}
 	return out
 }
@@ -583,6 +594,7 @@ func registerCatalogItems(reg *Registry) {
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/series/{id}/seasons/{num}/episodes", "listSeasonEpisodes", "catalog",
 		"The episodes of one season of a series by number.")), reg.listSeasonEpisodes)
 	registerCatalogActions(reg)
+	registerRatingsCapability(reg)
 }
 
 // --- helpers ---
@@ -767,6 +779,24 @@ func (in *CatalogBrowseInput) catalogValues() (url.Values, *Problem) {
 	return v, nil
 }
 
+// ratingSortSources maps each sort field that orders by a rating an
+// administrator can hide to that rating's source.
+var ratingSortSources = map[string]string{
+	"rating_rt_critic":   models.RatingSourceRTCritic,
+	"rating_rt_audience": models.RatingSourceRTAudience,
+}
+
+// dropHiddenRatingSort removes an explicit sort by a rating clients are not
+// shown, so the browse orders as if no sort was asked for (the saved or
+// default order, reported as effective_sort) instead of ranking titles by a
+// score their cards leave out.
+func dropHiddenRatingSort(values url.Values, sel ratingsources.Selection) {
+	if source, ok := ratingSortSources[values.Get("sort")]; ok && !sel.Shows(source) {
+		values.Del("sort")
+		values.Del("order")
+	}
+}
+
 // catalogSortFields is the sort allowlist: every field the query executor
 // sorts by, personalized ones included, since the browse always has a
 // profile.
@@ -830,6 +860,8 @@ func (reg *Registry) listCatalogItems(ctx context.Context, cursors *Cursors, in 
 	if p != nil {
 		return nil, p
 	}
+	sel := reg.ratingSelection(ctx)
+	dropHiddenRatingSort(values, sel)
 	req, p := parseCatalogRequest(values)
 	if p != nil {
 		return nil, p
@@ -905,7 +937,6 @@ func (reg *Registry) listCatalogItems(ctx context.Context, cursors *Cursors, in 
 		}
 	}
 	items := make([]CatalogItem, 0, len(view.Items))
-	sel := reg.ratingSelection(ctx)
 	for _, item := range view.Items {
 		items = append(items, catalogItemOfListing(item, sel))
 	}
@@ -1254,11 +1285,11 @@ func playbackVariantsOf(vs []catalogpkg.PlaybackVariant) []PlaybackVariant {
 	return out
 }
 
-// catalogItemDetailOf renders the detail document; the card members come
-// from the same detail, so a detail never disagrees with its own card. The
-// detail service does not load keywords, the original language, or the
-// match status, so those card members are empty here as they are in v1.
-func catalogItemDetailOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) CatalogItemDetail {
+// catalogItemCardOf renders the card members of a detail, with every stored
+// rating. The detail service does not load keywords, the original language,
+// or the match status, so those card members are empty here as they are in
+// v1.
+func catalogItemCardOf(d *catalogpkg.ItemDetail) CatalogItem {
 	card := CatalogItem{
 		ContentID: d.ContentID, PlayContentID: d.PlayContentID, Type: d.Type, Title: d.Title,
 		SeriesID: d.SeriesID, SeriesTitle: d.SeriesTitle, SeasonNumber: d.SeasonNumber, EpisodeNumber: d.EpisodeNumber,
@@ -1276,13 +1307,28 @@ func catalogItemDetailOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) 
 	for _, f := range d.WorkFormats {
 		card.WorkFormats = append(card.WorkFormats, CatalogWorkFormat{Type: f.Type, ContentID: f.ContentID, LibraryID: idOfPositive(f.LibraryID)})
 	}
+	return card
+}
+
+// catalogItemDetailOf renders the detail document; the card members come
+// from the same detail, so a detail never disagrees with its own card. A
+// viewer who curates the item's metadata gets every stored rating, for the
+// metadata editor; everyone else gets only the ratings sel shows, as on
+// cards.
+func catalogItemDetailOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) CatalogItemDetail {
+	card := catalogItemCardOf(d)
+	ratingSources := d.RatingSources
+	if !d.ViewerCurates {
+		card = withShownRatings(card, sel)
+		ratingSources = shownRatingSources(ratingSources, sel)
+	}
 	out := CatalogItemDetail{
 		CatalogItem: card,
 		SortTitle:   d.SortTitle, OriginalTitle: d.OriginalTitle, Tagline: d.Tagline, PendingTranslationLanguage: d.PendingTranslationLanguage,
 		ImdbID: d.ImdbID, TmdbID: d.TmdbID, TvdbID: d.TvdbID, Cast: NonNil(d.Cast), Crew: NonNil(d.Crew), Countries: d.Countries, LockedFields: d.LockedFields,
 		FirstAirDate: d.FirstAirDate, AirTime: d.AirTime, AirTimezone: d.AirTimezone, SeasonCount: d.SeasonCount, EpisodeCount: d.EpisodeCount,
 		AirDate: d.AirDate, IsSpecials: d.IsSpecials, UserData: watchRollupOf(d.SeasonUserData), UserRating: d.UserRating,
-		Versions: fileVersionsOf(d.Versions), PlaybackVariants: playbackVariantsOf(d.PlaybackVariants), Videos: d.Videos, RatingSources: catalogRatingSourcesOf(d.RatingSources), Ratings: catalogRatingsOf(d, sel), Extras: d.Extras,
+		Versions: fileVersionsOf(d.Versions), PlaybackVariants: playbackVariantsOf(d.PlaybackVariants), Videos: d.Videos, RatingSources: catalogRatingSourcesOf(ratingSources), Ratings: catalogRatingsOf(d, sel), Extras: d.Extras,
 		FolderPaths: d.FolderPaths, Subtitles: NonNil(d.Subtitles), Intro: d.Intro, Credits: d.Credits, Recap: d.Recap, Preview: d.Preview,
 		EffectiveVersionResolution: d.EffectiveVersionResolution,
 		EffectiveVersionHDR:        d.EffectiveVersionHDR, EffectiveVersionCodecVideo: d.EffectiveVersionCodecVideo, EffectiveVersionEditionKey: d.EffectiveVersionEditionKey,

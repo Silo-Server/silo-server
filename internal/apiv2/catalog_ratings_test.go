@@ -1,6 +1,8 @@
 package apiv2
 
 import (
+	"context"
+	"net/http"
 	"reflect"
 	"testing"
 
@@ -29,9 +31,33 @@ func TestCatalogItemDetailShowsIMDbAndTMDBByDefault(t *testing.T) {
 	if !reflect.DeepEqual(out.Ratings, want) {
 		t.Fatalf("ratings = %+v\nwant %+v", out.Ratings, want)
 	}
-	// Detail keeps the stored values: metadata editors read and edit them.
-	if out.RatingRTCritic == nil || out.RatingRTAudience == nil {
-		t.Fatal("item detail dropped its stored Rotten Tomatoes values")
+}
+
+// A viewer who does not curate metadata gets only the ratings clients show,
+// on every member of the detail, so a client that reads rating_rt_critic or
+// rating_sources directly still follows the administrator's choice.
+func TestCatalogItemDetailHidesSourcesAnAdministratorHasNotTurnedOn(t *testing.T) {
+	out := catalogItemDetailOf(ratedDetail(), ratingsources.Selection{})
+	if out.RatingIMDB == nil || out.RatingRTCritic != nil || out.RatingRTAudience != nil || out.RatingSources != nil {
+		t.Fatalf("imdb=%v rt=%v audience=%v sources=%+v; want IMDb and TMDB only", out.RatingIMDB, out.RatingRTCritic, out.RatingRTAudience, out.RatingSources)
+	}
+
+	out = catalogItemDetailOf(ratedDetail(), ratingsources.NewSelection("metacritic"))
+	if len(out.RatingSources) != 1 || out.RatingSources[0].Source != "metacritic" || out.RatingRTCritic != nil {
+		t.Fatalf("with Metacritic on: rt=%v sources=%+v; want the Metacritic row only", out.RatingRTCritic, out.RatingSources)
+	}
+}
+
+// The metadata editor reads the detail, so a curator gets every stored rating.
+func TestCatalogItemDetailKeepsStoredRatingsForCurators(t *testing.T) {
+	d := ratedDetail()
+	d.ViewerCurates = true
+	out := catalogItemDetailOf(d, ratingsources.Selection{})
+	if out.RatingRTCritic == nil || out.RatingRTAudience == nil || len(out.RatingSources) != 1 {
+		t.Fatalf("rt=%v audience=%v sources=%+v; want every stored rating", out.RatingRTCritic, out.RatingRTAudience, out.RatingSources)
+	}
+	if len(out.Ratings) != 2 {
+		t.Fatalf("ratings = %+v; a curator's title page still shows only IMDb and TMDB", out.Ratings)
 	}
 }
 
@@ -51,7 +77,7 @@ func TestCatalogItemDetailAddsTurnedOnSources(t *testing.T) {
 func TestCatalogItemDetailRatingsAreNeverNull(t *testing.T) {
 	out := catalogItemDetailOf(&catalogpkg.ItemDetail{ContentID: "movie:x", Type: "movie"}, ratingsources.Selection{})
 	if out.Ratings == nil {
-		t.Fatal("ratings is nil; clients tell an older server apart by the field's absence")
+		t.Fatal("ratings is nil; the member is empty, never null")
 	}
 }
 
@@ -75,5 +101,47 @@ func TestCardsDropRatingsAnAdministratorHasNotTurnedOn(t *testing.T) {
 	card := catalogItemOfSection(section, shown)
 	if card.RatingRTCritic == nil || card.RatingRTAudience != nil {
 		t.Errorf("with RT critics on: rt=%v audience=%v; want the critic score only", card.RatingRTCritic, card.RatingRTAudience)
+	}
+}
+
+// ratingSettings answers catalog.extra_rating_sources with its value.
+type ratingSettings string
+
+func (s ratingSettings) Get(context.Context, string) (string, error) { return string(s), nil }
+
+// A browse sorted by a Rotten Tomatoes score the cards leave out would rank
+// titles by a hidden number, so it orders as if no sort was asked for.
+func TestListCatalogItemsIgnoresASortByAHiddenRating(t *testing.T) {
+	deps, fake := catalogDeps(t)
+	deps.RatingSources = ratingsources.NewPolicy(ratingSettings("rt_audience"))
+	h := newTestHandler(t, deps)
+
+	if rec := do(t, h, http.MethodGet, "/api/v2/catalog?sort=-rating_rt_critic", "", viewerHeaders()); rec.Code != http.StatusOK {
+		t.Fatal(rec.Body.String())
+	}
+	if fake.lastReq.Query.Sort.Field == "rating_rt_critic" {
+		t.Fatalf("seam sort = %+v; want the hidden critic score dropped", fake.lastReq.Query.Sort)
+	}
+
+	if rec := do(t, h, http.MethodGet, "/api/v2/catalog?sort=-rating_rt_audience", "", viewerHeaders()); rec.Code != http.StatusOK {
+		t.Fatal(rec.Body.String())
+	}
+	if got := fake.lastReq.Query.Sort; got.Field != "rating_rt_audience" || got.Order != "desc" {
+		t.Fatalf("seam sort = %+v; want the shown audience score kept", got)
+	}
+}
+
+func TestRatingsCapabilityListsTheShownSources(t *testing.T) {
+	deps, _ := catalogDeps(t)
+	deps.RatingSources = ratingsources.NewPolicy(ratingSettings("rt_critic"))
+	rec := do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/capabilities/ratings", "", viewerHeaders())
+	if rec.Code != http.StatusOK {
+		t.Fatal(rec.Body.String())
+	}
+	var body RatingsCapability
+	decodeJSON(t, rec.Body, &body)
+	want := []RatingsCapabilitySource{{Source: "imdb", Name: "IMDb"}, {Source: "tmdb", Name: "TMDB"}, {Source: "rt_critic", Name: "RT"}}
+	if body.State != StateAvailable || !reflect.DeepEqual(body.Sources, want) {
+		t.Fatalf("capability = %+v, want available with %+v", body, want)
 	}
 }

@@ -255,6 +255,7 @@ export const v2Operations = {
   "GET /api/v2/capabilities/ebooks": "getEbookCapability",
   "GET /api/v2/capabilities/metadata-ai": "getMetadataAICapability",
   "GET /api/v2/capabilities/password-reset": "getPasswordResetCapability",
+  "GET /api/v2/capabilities/ratings": "getRatingsCapability",
   "GET /api/v2/capabilities/trailers": "getTrailersCapability",
   "GET /api/v2/catalog": "listCatalogItems",
   "GET /api/v2/catalog/audiobook-groups": "listAudiobookGroups",

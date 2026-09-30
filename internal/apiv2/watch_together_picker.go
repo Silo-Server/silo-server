@@ -90,7 +90,7 @@ func watchTogetherPickerEntriesOf(rows []watchtogether.PickerViewEntry, sel rati
 		if row.Item == nil {
 			continue
 		}
-		entry := WatchTogetherPickerEntry{Item: withShownRatings(catalogItemDetailOf(row.Item, sel).CatalogItem, sel), Members: make([]WatchTogetherPickerMember, 0, len(row.Members))}
+		entry := WatchTogetherPickerEntry{Item: withShownRatings(catalogItemCardOf(row.Item), sel), Members: make([]WatchTogetherPickerMember, 0, len(row.Members))}
 		for _, m := range row.Members {
 			entry.Members = append(entry.Members, WatchTogetherPickerMember{UserID: IDFromInt(int64(m.UserID)), ProfileID: m.ProfileID, DisplayName: m.DisplayName, PositionSeconds: m.PositionSeconds, DurationSeconds: m.DurationSeconds})
 		}
