@@ -34,7 +34,7 @@ func NewSweepOrphanedMediaImagesTask(sweeper OrphanedMediaImagesSweeper) *SweepO
 func (t *SweepOrphanedMediaImagesTask) Key() string  { return "sweep_orphaned_media_images" }
 func (t *SweepOrphanedMediaImagesTask) Name() string { return "Sweep Orphaned Media Images" }
 func (t *SweepOrphanedMediaImagesTask) Description() string {
-	return "Finds stored chapter thumbnails whose media file no longer exists and schedules them for deletion."
+	return "Finds stored chapter thumbnails and seek previews that nothing references any more and schedules them for deletion."
 }
 func (t *SweepOrphanedMediaImagesTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategoryMetadata
