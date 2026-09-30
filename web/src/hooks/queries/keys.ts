@@ -498,6 +498,7 @@ export const adminKeys = {
   taskMetrics: (key: string) => ["admin", "tasks", key, "metrics"] as const,
   markerCapabilities: () => ["admin", "markerCapabilities"] as const,
   ratingSources: () => ["admin", "ratingSources"] as const,
+  ratingSourceCapabilities: () => ["admin", "ratingSourceCapabilities"] as const,
   markerProviders: () => ["admin", "markerProviders"] as const,
   markerProvider: (provider: string) => ["admin", "markerProviders", provider] as const,
   markerProviderValidation: (provider: string) =>

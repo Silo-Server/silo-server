@@ -2555,6 +2555,26 @@
       "body_file": "admin_provider_configuration_saved.json"
     },
     {
+      "name": "admin_rating_source_capabilities",
+      "operation_id": "getAdminRatingSourceCapabilities",
+      "scenario": "Rating source capabilities report plugin-declared sources.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/rating-sources/capabilities",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminRatingSourceCapabilities",
+      "body_file": "admin_rating_source_capabilities.json"
+    },
+    {
       "name": "admin_rating_sources",
       "operation_id": "listAdminRatingSources",
       "scenario": "Silo's own sources in display order, then a source a metadata plugin declared.",

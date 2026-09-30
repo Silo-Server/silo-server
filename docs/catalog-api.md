@@ -461,7 +461,9 @@ the same `id`, the first by installation order names and scales it. A declared
 source is stored like the others and is shown only after an administrator adds
 its `id` to `catalog.extra_rating_sources`; title pages list it after Silo's
 own sources. `GET /api/v2/admin/rating-sources` lists every source an
-administrator can show, with the plugin that declared it.
+administrator can show, with the plugin that declared it;
+`GET /api/v2/admin/rating-sources/capabilities` reports
+`plugin_declared_sources: true` on a server that has that list.
 
 Frozen v1 responses do not expose this member.
 

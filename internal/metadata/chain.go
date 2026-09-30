@@ -732,7 +732,7 @@ func ListEnabledMetadataCapabilities(ctx context.Context, pool *pgxpool.Pool) ([
 		 JOIN plugin_installations pi ON pi.id = pc.plugin_installation_id
 		 WHERE pc.capability_type = 'metadata_provider.v1'
 		   AND pi.enabled = true
-		 ORDER BY pc.plugin_installation_id`)
+		 ORDER BY pc.plugin_installation_id, pc.capability_id`)
 	if err != nil {
 		return nil, fmt.Errorf("listing enabled metadata capabilities: %w", err)
 	}
@@ -754,8 +754,8 @@ func ListEnabledMetadataCapabilities(ctx context.Context, pool *pgxpool.Pool) ([
 }
 
 // DeclaredRatingSources lists the rating sources the enabled metadata plugins
-// declare (rating_sources), in installation order. When two plugins declare
-// the same source, the first declaration names and scales it.
+// declare (rating_sources), in installation order and then by capability ID.
+// When two capabilities declare the same source, the first names and scales it.
 func DeclaredRatingSources(ctx context.Context, pool *pgxpool.Pool) ([]ratingsources.DeclaredSource, error) {
 	caps, err := ListEnabledMetadataCapabilities(ctx, pool)
 	if err != nil {

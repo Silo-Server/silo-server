@@ -10,7 +10,10 @@ import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAdminMarkerCapabilities } from "@/hooks/queries/admin/markers";
-import { useAdminRatingSources } from "@/hooks/queries/admin/ratingSources";
+import {
+  useAdminRatingSourceCapabilities,
+  useAdminRatingSources,
+} from "@/hooks/queries/admin/ratingSources";
 import {
   useCatalogSearchStatus,
   useCheckAdminSettingsConnection,
@@ -100,7 +103,11 @@ export default function LibraryMetadataSettings() {
   // An older API node saves the detection kind switches but ignores them, so
   // they are offered only where the server says it honors them.
   const { data: markerCapabilities } = useAdminMarkerCapabilities();
-  const ratingSources = useAdminRatingSources();
+  // An older API node has no rating source list, so the Ratings group shows
+  // only where the server says it has one.
+  const { data: ratingSourceCapabilities } = useAdminRatingSourceCapabilities();
+  const pluginRatingSources = ratingSourceCapabilities?.plugin_declared_sources === true;
+  const ratingSources = useAdminRatingSources(pluginRatingSources);
   const detectionKindSettings = markerCapabilities?.detection_kind_settings === true;
   const anyDirty = (keys: string[]) => keys.some((key) => form.isDirty(key));
   const allRestart = (keys: string[]) => keys.every((key) => restartKeys.has(key));
@@ -219,56 +226,60 @@ export default function LibraryMetadataSettings() {
           />
         </FieldGroup>
 
-        <FieldGroup
-          label="Ratings"
-          description="IMDb and TMDB scores always show. Metadata plugins can add other ratings; turn one on to show its scores on title pages and poster badges in every app. Check a rating's terms before you turn it on: some, such as Rotten Tomatoes, restrict how others may display their scores."
-          restartAll={allRestart(RATINGS_KEYS)}
-        >
-          {ratingSources.isError && (
-            <SettingFieldStatus tone="warn">Couldn't load the rating sources.</SettingFieldStatus>
-          )}
-          {ratingSources.isSuccess &&
-            ratingSourceGroups.length === 0 &&
-            undeclaredSources.length === 0 && (
-              <SettingFieldStatus tone="muted">No metadata plugin adds ratings.</SettingFieldStatus>
+        {pluginRatingSources && (
+          <FieldGroup
+            label="Ratings"
+            description="IMDb and TMDB scores always show. Metadata plugins can add other ratings; turn one on to show its scores on title pages and poster badges in every app. Check a rating's terms before you turn it on: some, such as Rotten Tomatoes, restrict how others may display their scores."
+            restartAll={allRestart(RATINGS_KEYS)}
+          >
+            {ratingSources.isError && (
+              <SettingFieldStatus tone="warn">Couldn't load the rating sources.</SettingFieldStatus>
             )}
-          {ratingSourceGroups.map(({ provider, sources }) => (
-            <div key={provider} role="group" aria-label={`From ${provider}`}>
-              <p className="text-muted-foreground pt-2 text-xs font-semibold">From {provider}</p>
-              {sources.map(({ source, label }) => (
-                <SettingField
-                  key={source}
-                  label={label}
-                  type="toggle"
-                  value={String(extraRatingSources.includes(source))}
-                  onChange={(value) => setRatingSource(source, value === "true")}
-                  restartRequired={restartKeys.has(EXTRA_RATING_SOURCES_KEY)}
-                />
-              ))}
-            </div>
-          ))}
-          {undeclaredSources.length > 0 && (
-            <div role="group" aria-label="Not added by an enabled plugin">
-              <p className="text-muted-foreground pt-2 text-xs font-semibold">
-                Not added by an enabled plugin
-              </p>
-              <p className="text-muted-foreground text-xs">
-                These show nothing until an enabled plugin adds them again. Turn them off so they do
-                not come back on their own.
-              </p>
-              {undeclaredSources.map((source) => (
-                <SettingField
-                  key={source}
-                  label={source}
-                  type="toggle"
-                  value={String(extraRatingSources.includes(source))}
-                  onChange={(value) => setRatingSource(source, value === "true")}
-                  restartRequired={restartKeys.has(EXTRA_RATING_SOURCES_KEY)}
-                />
-              ))}
-            </div>
-          )}
-        </FieldGroup>
+            {ratingSources.isSuccess &&
+              ratingSourceGroups.length === 0 &&
+              undeclaredSources.length === 0 && (
+                <SettingFieldStatus tone="muted">
+                  No metadata plugin adds ratings.
+                </SettingFieldStatus>
+              )}
+            {ratingSourceGroups.map(({ provider, sources }) => (
+              <div key={provider} role="group" aria-label={`From ${provider}`}>
+                <p className="text-muted-foreground pt-2 text-xs font-semibold">From {provider}</p>
+                {sources.map(({ source, label }) => (
+                  <SettingField
+                    key={source}
+                    label={label}
+                    type="toggle"
+                    value={String(extraRatingSources.includes(source))}
+                    onChange={(value) => setRatingSource(source, value === "true")}
+                    restartRequired={restartKeys.has(EXTRA_RATING_SOURCES_KEY)}
+                  />
+                ))}
+              </div>
+            ))}
+            {undeclaredSources.length > 0 && (
+              <div role="group" aria-label="Not added by an enabled plugin">
+                <p className="text-muted-foreground pt-2 text-xs font-semibold">
+                  Not added by an enabled plugin
+                </p>
+                <p className="text-muted-foreground text-xs">
+                  These show nothing until an enabled plugin adds them again. Turn them off so they
+                  do not come back on their own.
+                </p>
+                {undeclaredSources.map((source) => (
+                  <SettingField
+                    key={source}
+                    label={source}
+                    type="toggle"
+                    value={String(extraRatingSources.includes(source))}
+                    onChange={(value) => setRatingSource(source, value === "true")}
+                    restartRequired={restartKeys.has(EXTRA_RATING_SOURCES_KEY)}
+                  />
+                ))}
+              </div>
+            )}
+          </FieldGroup>
+        )}
 
         <FieldGroup
           label="Scanning"

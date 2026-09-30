@@ -179,6 +179,7 @@ export const v2Operations = {
   "GET /api/v2/admin/rate-limits/config": "getAdminRateLimitConfig",
   "GET /api/v2/admin/rate-limits/status": "getAdminRateLimitStatus",
   "GET /api/v2/admin/rating-sources": "listAdminRatingSources",
+  "GET /api/v2/admin/rating-sources/capabilities": "getAdminRatingSourceCapabilities",
   "GET /api/v2/admin/recommendations/status": "getAdminRecommendationsStatus",
   "GET /api/v2/admin/request-groups/{group_id}/limit": "getAdminRequestGroupLimit",
   "GET /api/v2/admin/request-integrations": "listRequestIntegrations",
