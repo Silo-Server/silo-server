@@ -311,9 +311,14 @@ function WatchPagePlayer({
     activePlaybackVersion?.trickplay_available === true,
   );
   const refetchTrickplay = trickplayQuery.refetch;
+  const lastTrickplayRefresh = useRef<{ fileId: number | null; at: number } | null>(null);
   const handleTrickplayError = useCallback(() => {
+    const now = Date.now();
+    const previous = lastTrickplayRefresh.current;
+    if (previous?.fileId === session.mediaFileId && now - previous.at < 60_000) return;
+    lastTrickplayRefresh.current = { fileId: session.mediaFileId, at: now };
     void refetchTrickplay();
-  }, [refetchTrickplay]);
+  }, [refetchTrickplay, session.mediaFileId]);
 
   const handleEnded = useCallback(() => {
     onEnded?.({
