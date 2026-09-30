@@ -624,28 +624,6 @@ export function mergeImportedPage(
 }
 
 /**
- * Admin sections the profile removed that its page view no longer lists, so
- * their source can't be read here. A saved removal of a legacy Trakt section
- * can't be undone, and one without a config looks like any other removal; an
- * import that the server refuses for it is retried with these kept removed.
- */
-export function unlistedRemovedSectionIds(
-  settings: { id: string; is_custom: boolean }[],
-  existing: SectionOverrideRead[],
-): Set<string> {
-  const listed = new Set(
-    settings.filter((section) => !section.is_custom).map((section) => section.id),
-  );
-  const ids = new Set<string>();
-  for (const override of existing) {
-    if (override.section_id && override.removed && !listed.has(override.section_id)) {
-      ids.add(override.section_id);
-    }
-  }
-  return ids;
-}
-
-/**
  * The legacy Trakt admin sections on a page, from the importing profile's
  * view of it and its saved overrides.
  */
@@ -673,18 +651,21 @@ export interface HomeLayoutPageApi {
 }
 
 /**
- * Saves one planned page over the profile's saved overrides. A refused save
- * writes nothing, so when the server refuses a same-server page and the
- * profile removed sections its page view can't describe, one of them may be
- * a legacy Trakt section it won't show again: the save is retried once with
- * those removals kept. `keptRemovals` reports that retry.
+ * Saves one planned page over the profile's saved overrides. The server
+ * refuses to change or drop a saved override that holds back a legacy Trakt
+ * admin section, and the client can't always tell which those are: a removed
+ * section isn't in the page view, and an older override can mask its source.
+ * A refused save writes nothing, so a refused same-server page is retried
+ * once with every saved admin-section override kept as it is; the file's
+ * changes then apply only to sections the profile hadn't changed.
+ * `keptSavedChanges` reports that retry.
  */
 export async function importPage(
   page: HomeLayoutPlannedPage,
   sameServer: boolean,
   api: HomeLayoutPageApi,
   newId: () => string,
-): Promise<{ keptRemovals: boolean }> {
+): Promise<{ keptSavedChanges: boolean }> {
   const [existing, view] = await Promise.all([
     api.listSaved(),
     sameServer ? api.listView() : Promise.resolve([]),
@@ -692,14 +673,20 @@ export async function importPage(
   const legacyTrakt = legacyTraktSectionIds(view, existing);
   try {
     await api.save(mergeImportedPage(page, existing, sameServer, legacyTrakt, newId));
-    return { keptRemovals: false };
+    return { keptSavedChanges: false };
   } catch (error) {
-    const unlisted = sameServer ? unlistedRemovedSectionIds(view, existing) : new Set<string>();
-    if (!(error instanceof V2ProblemError && error.status === 422) || unlisted.size === 0) {
+    const saved = existing.flatMap((override) =>
+      override.section_id ? [override.section_id] : [],
+    );
+    if (
+      !sameServer ||
+      !(error instanceof V2ProblemError && error.status === 422) ||
+      saved.length === 0
+    ) {
       throw error;
     }
-    const keep = new Set([...legacyTrakt, ...unlisted]);
+    const keep = new Set([...legacyTrakt, ...saved]);
     await api.save(mergeImportedPage(page, existing, sameServer, keep, newId));
-    return { keptRemovals: true };
+    return { keptSavedChanges: true };
   }
 }

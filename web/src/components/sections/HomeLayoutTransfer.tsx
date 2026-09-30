@@ -302,11 +302,11 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
     }
     setApplying(true);
     const failures: string[] = [];
-    const keptRemovals: string[] = [];
+    const keptSavedChanges: string[] = [];
     for (const page of plan.pages) {
       try {
         const query = pageQuery(page.scope, page.libraryId);
-        const { keptRemovals: kept } = await importPage(
+        const { keptSavedChanges: kept } = await importPage(
           page,
           plan.sameServer,
           {
@@ -323,7 +323,7 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
           },
           randomUUID,
         );
-        if (kept) keptRemovals.push(page.label);
+        if (kept) keptSavedChanges.push(page.label);
       } catch (error) {
         failures.push(`${page.label} (${problemMessage(error)})`);
       }
@@ -353,9 +353,9 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
     if (failures.length === 0) {
       toast.success(
         "Home layout imported",
-        keptRemovals.length > 0
+        keptSavedChanges.length > 0
           ? {
-              description: `Sections this profile had removed stay removed on: ${keptRemovals.join(", ")}.`,
+              description: `This profile's own changes to some sections were kept on: ${keptSavedChanges.join(", ")}.`,
             }
           : undefined,
       );
