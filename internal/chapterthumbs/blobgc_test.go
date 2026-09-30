@@ -75,6 +75,11 @@ func TestBlobNamespaceLiveDB(t *testing.T) {
 	if !live[livePrefix] || live[deadPrefix] {
 		t.Fatalf("live %v, want only %s", live, livePrefix)
 	}
+	deadKey := deadPrefix + "0/w300.webp"
+	live, err = ImageBlobNamespace(pool).Live(t.Context(), []string{deadKey})
+	if err != nil || live[deadKey] {
+		t.Fatalf("high-ID image liveness: %v, %v", live, err)
+	}
 }
 
 // TestReplacedImagesAreCollectedDB retires a chapter's 300 px image after a

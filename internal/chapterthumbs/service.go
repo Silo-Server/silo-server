@@ -61,6 +61,7 @@ type FileRepository interface {
 	// thumbnail for: none yet, or one whose path does not end in
 	// currentSuffix, made at another width.
 	ListMissingChapterThumbnails(ctx context.Context, limit int, currentSuffix string) ([]*models.MediaFile, error)
+	ListChapterThumbnailsAtOtherWidths(ctx context.Context, limit int, currentSuffix string, afterID int) ([]*models.MediaFile, bool, error)
 	UpdateChapterThumbnailState(
 		ctx context.Context,
 		fileID int,
@@ -148,6 +149,7 @@ type Service struct {
 
 	notifyNormal        chan struct{}
 	notifyPriority      chan struct{}
+	widthQueueSpace     chan struct{}
 	workerCount         int
 	priorityWorkerCount int
 	priorityBatchSize   int
@@ -237,6 +239,7 @@ func NewService(
 		hwDevice:            hwDevice,
 		notifyNormal:        make(chan struct{}, defaultQueueSize),
 		notifyPriority:      make(chan struct{}, defaultQueueSize),
+		widthQueueSpace:     make(chan struct{}, 1),
 		workerCount:         workerCount,
 		priorityWorkerCount: defaultPriorityWorkerCount,
 		priorityBatchSize:   defaultPriorityBatchSize,
@@ -277,6 +280,7 @@ func (s *Service) Start(ctx context.Context) {
 	for i := 0; i < s.priorityWorkerCount; i++ {
 		go s.worker(ctx, true)
 	}
+	go s.followPreviewWidth(ctx)
 }
 
 func (s *Service) QueueFileIDs(_ context.Context, fileIDs []int) {
@@ -1146,6 +1150,10 @@ func (s *Service) popQueuedLocked(priority bool) (ChapterThumbnailRequest, bool)
 		delete(queued, fileID)
 		s.inProgress[fileID] = struct{}{}
 		*queue = append((*queue)[:i], (*queue)[i+1:]...)
+		select {
+		case s.widthQueueSpace <- struct{}{}:
+		default:
+		}
 		return req, true
 	}
 
