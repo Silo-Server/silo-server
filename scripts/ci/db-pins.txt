@@ -60,6 +60,7 @@
 ./internal/sections TestOverlaySummariesOnlyDecodeWinner
 ./internal/sections TestOverlaySummariesRankingMatchesGo
 ./internal/sections TestOverlaySummariesRankedIndexPlan
+./migrations TestOverlayWinnerIndexesRetryAllowsWritesPostgres
 
 # Settings: one query per batched resolution, whatever its scopes and keys.
 ./internal/userstore/pgstore TestPostgresResolutionIssuesOneQuery

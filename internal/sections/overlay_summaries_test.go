@@ -320,8 +320,13 @@ func TestOverlaySummariesRankedIndexPlan(t *testing.T) {
 				if name, ok := node["Index Name"].(string); ok {
 					indexes[name] = true
 				}
-				if node["Node Type"] == "Sort" && node["Actual Rows"].(float64) > float64(len(ids)) {
-					t.Errorf("query sorts episode candidates instead of bounded winners: %v rows", node["Actual Rows"])
+				if node["Node Type"] == "Sort" {
+					rows, ok := node["Actual Rows"].(float64)
+					if !ok {
+						t.Errorf("Sort node has no numeric Actual Rows: %v", node["Actual Rows"])
+					} else if rows > float64(len(ids)) {
+						t.Errorf("query sorts episode candidates instead of bounded winners: %v rows", rows)
+					}
 				}
 				if children, ok := node["Plans"].([]any); ok {
 					for _, child := range children {

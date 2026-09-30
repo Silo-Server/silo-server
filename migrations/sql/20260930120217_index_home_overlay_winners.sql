@@ -5,26 +5,11 @@
 -- stop at the best accessible file instead of ranking every episode per card.
 -- These expressions must stay identical to internal/sections/overlay_summaries.go.
 -- The database plan test exercises the index definitions from this migration.
--- +goose StatementBegin
-DO $$
-DECLARE
-    index_name text;
-BEGIN
-    FOREACH index_name IN ARRAY ARRAY[
-        'idx_media_files_overlay_content', 'idx_media_files_overlay_episode'
-    ] LOOP
-        IF EXISTS (
-            SELECT 1 FROM pg_index i
-            JOIN pg_class c ON c.oid = i.indexrelid
-            JOIN pg_namespace n ON n.oid = c.relnamespace
-            WHERE n.nspname = 'public' AND c.relname = index_name AND NOT i.indisvalid
-        ) THEN
-            EXECUTE format('DROP INDEX public.%I', index_name);
-        END IF;
-    END LOOP;
-END;
-$$;
--- +goose StatementEnd
+-- A retry may encounter a completed first index and an invalid second index.
+-- Rebuild both with top-level concurrent drops so cleanup cannot queue an
+-- ACCESS EXCLUSIVE table lock behind an existing reader or writer.
+DROP INDEX CONCURRENTLY IF EXISTS public.idx_media_files_overlay_content;
+DROP INDEX CONCURRENTLY IF EXISTS public.idx_media_files_overlay_episode;
 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_media_files_overlay_content
 ON public.media_files (
