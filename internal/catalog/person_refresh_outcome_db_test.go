@@ -203,3 +203,54 @@ func TestFindRefreshCandidatesOrderPostgres(t *testing.T) {
 		t.Fatalf("limit 1 returned %v, %v", ids, err)
 	}
 }
+
+// Two outcomes recorded at once for the same person must both count. The
+// second write waits on the first's row lock, then must build its streak from
+// the row the first wrote, not from the statement's older snapshot.
+func TestRecordRefreshOutcomeConcurrentWritesBothCountPostgres(t *testing.T) {
+	repo, pool := personRefreshTestRepo(t)
+	ctx := context.Background()
+	id := seedRefreshPerson(t, pool, "concurrent")
+
+	holder, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback(ctx) }()
+	if _, err := holder.Exec(ctx, `SELECT id FROM people WHERE id = $1 FOR UPDATE`, id); err != nil {
+		t.Fatal(err)
+	}
+
+	errs := make(chan error, 2)
+	for range 2 {
+		go func() { errs <- repo.RecordRefreshOutcome(ctx, id, PersonRefreshFailed) }()
+	}
+	// Both writes must be waiting on the lock before it is released.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var waiting int
+		if err := pool.QueryRow(ctx, `
+			SELECT count(*) FROM pg_stat_activity
+			WHERE wait_event_type = 'Lock' AND query LIKE '%metadata_refresh_outcome = $2%'`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting >= 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("only %d outcome writes waiting on the row lock", waiting)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err := holder.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if state := readRefreshState(t, pool, id); state.failures != 2 {
+		t.Fatalf("failures after two concurrent failed outcomes = %d, want 2", state.failures)
+	}
+}

@@ -1100,27 +1100,20 @@ func (r *PersonRepository) RecordRefreshOutcome(ctx context.Context, id int64, o
 	default:
 		return fmt.Errorf("record person %d refresh outcome: unknown outcome %q", id, outcome)
 	}
+	// Every SET expression reads the row being updated, which Postgres
+	// re-reads after waiting on a concurrent writer's lock, so two outcomes
+	// recorded at once both count. The SET list sees the old column values.
 	tag, err := r.pool.Exec(ctx, `
-		UPDATE people p
+		UPDATE people
 		SET metadata_refresh_outcome = $2,
-			metadata_refresh_failures = s.streak,
+			metadata_refresh_failures = `+personRefreshStreak+`,
 			metadata_refresh_due_at = CASE
 				WHEN $2 = 'answered' THEN NOW() + make_interval(secs => $3)
-				WHEN $2 = 'not_found' AND s.streak >= $4 THEN NULL
+				WHEN $2 = 'not_found' AND `+personRefreshStreak+` >= $4 THEN NULL
 				WHEN $2 = 'not_found' THEN NOW() + make_interval(secs => $5)
-				ELSE NOW() + make_interval(secs => LEAST($6 * power(2, LEAST(s.streak - 1, 30)), $5))
+				ELSE NOW() + make_interval(secs => LEAST($6 * power(2, LEAST(`+personRefreshStreak+` - 1, 30)), $5))
 			END
-		FROM (
-			SELECT id,
-				CASE
-					WHEN $2 = 'answered' THEN 0
-					WHEN metadata_refresh_outcome IS DISTINCT FROM $2 THEN 1
-					ELSE metadata_refresh_failures + 1
-				END AS streak
-			FROM people
-			WHERE id = $1
-		) s
-		WHERE p.id = s.id`,
+		WHERE id = $1`,
 		id,
 		string(outcome),
 		PersonMetadataStaleAfter.Seconds(),
@@ -1136,6 +1129,14 @@ func (r *PersonRepository) RecordRefreshOutcome(ctx context.Context, id int64, o
 	}
 	return nil
 }
+
+// personRefreshStreak is the SQL for a person's streak after recording outcome
+// $2, computed from the row's current outcome and count.
+const personRefreshStreak = `(CASE
+	WHEN $2 = 'answered' THEN 0
+	WHEN metadata_refresh_outcome IS DISTINCT FROM $2 THEN 1
+	ELSE metadata_refresh_failures + 1
+END)`
 
 // Person metadata refresh policy. The sweep (FindRefreshCandidates) follows
 // each person's recorded outcome; a detail-page view (PersonRefreshDue) looks
