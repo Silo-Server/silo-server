@@ -11,7 +11,9 @@ import {
   buildPersonalCatalogHref,
   catalogSourceAllowsOverlay,
   parseCatalogSearchParams,
+  readCatalogRequestPage,
   sameCatalogDestination,
+  withCatalogRequestPage,
 } from "./catalogSearchParams";
 
 function params(search: string) {
@@ -372,5 +374,31 @@ describe("query-source default sort", () => {
     expect(buildCatalogApiSearchParams(state).toString()).toBe(
       "source=query&q=heat&sort=added_at&order=desc",
     );
+  });
+});
+
+describe("Request to add page in the search URL", () => {
+  it("reads the page, falling back to 1 for a missing or invalid value", () => {
+    expect(readCatalogRequestPage(params("source=query&q=dune&request_page=3"))).toBe(3);
+    expect(readCatalogRequestPage(params("source=query&q=dune"))).toBe(1);
+    expect(readCatalogRequestPage(params("source=query&q=dune&request_page=0"))).toBe(1);
+    expect(readCatalogRequestPage(params("source=query&q=dune&request_page=two"))).toBe(1);
+  });
+
+  it("writes later pages and leaves page 1 out of the URL", () => {
+    const search = params("source=query&q=dune&type=video");
+    expect(withCatalogRequestPage(search, 2).toString()).toBe(
+      "source=query&q=dune&type=video&request_page=2",
+    );
+    expect(withCatalogRequestPage(params("source=query&q=dune&request_page=4"), 1).toString()).toBe(
+      "source=query&q=dune",
+    );
+    expect(search.toString()).toBe("source=query&q=dune&type=video");
+  });
+
+  it("starts over when the query or the filters change", () => {
+    const state = parseCatalogSearchParams(params("source=query&q=dune&type=all&request_page=3"));
+    expect(buildCatalogQueryUpdateHref(state, "arrival")).not.toContain("request_page");
+    expect(buildCatalogFilterSearchParams(state).has("request_page")).toBe(false);
   });
 });

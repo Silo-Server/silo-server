@@ -3,6 +3,7 @@ package notifications
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/oklog/ulid/v2"
 )
@@ -23,6 +24,11 @@ type OperationalDispatch struct {
 // them, because the retry workers recover pending outbox rows — then realtime
 // and channel dispatch run post-commit. Returns nil when the delivery deduped
 // away (the partial unique indexes make operational notices idempotent).
+//
+// Targets are the recipient profile's on the recipient's account: profile ids
+// repeat across accounts (every account from before profiles has one named
+// "default"), and a request.fulfilled for one account's "default" profile must
+// not reach another account's devices or webhooks.
 func (s *System) DispatchOperational(ctx context.Context, delivery Delivery, opts OperationalDispatch) (*InsertedDelivery, error) {
 	if s == nil {
 		return nil, nil
@@ -49,7 +55,7 @@ func (s *System) DispatchOperational(ctx context.Context, delivery Delivery, opt
 		}
 		attempts := make([]DeliveryAttempt, 0, 2)
 		for _, hook := range hooksByProfile[delivery.ProfileID] {
-			if !opts.WebhookFilter(hook) {
+			if hook.UserID != delivery.UserID || !opts.WebhookFilter(hook) {
 				continue
 			}
 			attempts = append(attempts, DeliveryAttempt{
@@ -69,6 +75,9 @@ func (s *System) DispatchOperational(ctx context.Context, delivery Delivery, opt
 		}
 		attempts := make([]DeliveryAttempt, 0, 2)
 		for _, sub := range subsByProfile[delivery.ProfileID] {
+			if sub.UserID != delivery.UserID {
+				continue
+			}
 			attempts = append(attempts, DeliveryAttempt{
 				ID:                     ulid.Make().String(),
 				NotificationDeliveryID: row.ID,
@@ -85,7 +94,10 @@ func (s *System) DispatchOperational(ctx context.Context, delivery Delivery, opt
 			if err != nil {
 				return nil, err
 			}
-			attempts := newPushDeliveryAttempts(row.ID, devicesByProfile[delivery.ProfileID])
+			devices := slices.DeleteFunc(devicesByProfile[delivery.ProfileID], func(device PushDevice) bool {
+				return device.UserID != delivery.UserID
+			})
+			attempts := newPushDeliveryAttempts(row.ID, devices)
 			if err := s.pushDeviceRepo.EnqueuePushAttempts(ctx, tx, attempts); err != nil {
 				return nil, err
 			}

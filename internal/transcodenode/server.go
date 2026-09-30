@@ -923,6 +923,10 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid audio recipe", http.StatusBadRequest)
 		return
 	}
+	if req.PreparedTracksRequested() && !req.ValidPreparedTracks() {
+		http.Error(w, "invalid track recipe", http.StatusBadRequest)
+		return
+	}
 
 	cfg := s.watcher.Config()
 	if cfg == nil {
@@ -1041,6 +1045,9 @@ func expectedDownloadPrepareResult(req downloadprepare.Request, fileSize int64) 
 		result.ToneMapSourceRevisionFingerprint = req.ToneMapSourceRevision.Fingerprint()
 	}
 	if req.AudioRecipeRequested() && !req.StereoDownmixBoostRequested() {
+		return downloadprepare.Result{}, false
+	}
+	if req.PreparedTracksRequested() && !req.ValidPreparedTracks() {
 		return downloadprepare.Result{}, false
 	}
 	result.ExecutionFingerprint = req.ExecutionFingerprint()
@@ -1354,6 +1361,7 @@ func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HW
 			}
 		}
 	}
+	info.TransportFeatures = append(info.TransportFeatures, playback.TransportFeaturePreparedTracksV1)
 	info.CapabilityHash = playback.ComputeCapabilityHash(info)
 	return info, nil
 }

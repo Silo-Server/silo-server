@@ -119,6 +119,7 @@ import {
 } from "@/lib/datetime";
 
 import { formatDecisionLabel } from "./adminActivityPresentation";
+import { AccountRequestsPanel } from "./admin-users/AccountRequestsPanel";
 
 export default function AdminUserDetail() {
   useAuth();
@@ -433,11 +434,12 @@ function OverviewTab({ user }: { user: AdminUser }) {
               return lib ? lib.name : `#${id}`;
             })
             .join(", ");
-  const groupName =
+  const knownGroupName =
     user.access_group_id === null
-      ? "None"
-      : (accessGroups.find((group) => group.id === user.access_group_id)?.name ??
-        `#${user.access_group_id}`);
+      ? undefined
+      : accessGroups.find((group) => group.id === user.access_group_id)?.name;
+  const groupName =
+    user.access_group_id === null ? "None" : (knownGroupName ?? `#${user.access_group_id}`);
 
   // Effective values, annotated when the account overrides its group.
   const overridden = (isOverride: boolean) => (isOverride ? " (override)" : "");
@@ -445,18 +447,21 @@ function OverviewTab({ user }: { user: AdminUser }) {
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-      <div className="surface-panel overflow-hidden rounded-2xl border-0">
-        <div className="border-border border-b px-4 py-3">
-          <h3 className="text-sm font-medium">Account</h3>
+      <div className="flex min-w-0 flex-col gap-6">
+        <div className="surface-panel overflow-hidden rounded-2xl border-0">
+          <div className="border-border border-b px-4 py-3">
+            <h3 className="text-sm font-medium">Account</h3>
+          </div>
+          <div className="divide-border divide-y">
+            <DetailRow label="Username" value={user.username} />
+            <DetailRow label="Email" value={user.email} />
+            <DetailRow label="Role" value={accountRoleLabel(user)} />
+            <DetailRow label="Status" value={user.enabled ? "Active" : "Disabled"} />
+            <DetailRow label="Created" value={formatDate(user.created_at)} />
+            <DetailRow label="Updated" value={formatDate(user.updated_at)} />
+          </div>
         </div>
-        <div className="divide-border divide-y">
-          <DetailRow label="Username" value={user.username} />
-          <DetailRow label="Email" value={user.email} />
-          <DetailRow label="Role" value={accountRoleLabel(user)} />
-          <DetailRow label="Status" value={user.enabled ? "Active" : "Disabled"} />
-          <DetailRow label="Created" value={formatDate(user.created_at)} />
-          <DetailRow label="Updated" value={formatDate(user.updated_at)} />
-        </div>
+        <AccountRequestsPanel user={user} groupName={knownGroupName} />
       </div>
 
       <div className="surface-panel overflow-hidden rounded-2xl border-0">

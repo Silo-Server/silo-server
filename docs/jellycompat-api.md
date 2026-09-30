@@ -128,8 +128,11 @@ ISO 639-2 codes such as `eng` match the stored canonical codes.
 `/Shows/{id}/Episodes` accepts numeric `Season`, `SeasonId`, `StartItemId`,
 `StartIndex`, and `Limit`. As in Jellyfin 12.1, an explicit `SeasonId` selects
 its owning series and takes precedence over the path series and numeric season.
-Episode SQL queries default to 24 rows and cap each page at 1,000. Clients should
-page using `TotalRecordCount` and `StartIndex`.
+When `Limit` is omitted, episode listings on this route and series/season
+`/Items?ParentId=` requests use a 1,000-row page. Explicit limits retain their
+requested page size, subject to the 1,000-row cap; `Limit=0` requests only the
+count. Longer lists still require paging using `TotalRecordCount` and
+`StartIndex`. Other `/Items` browsing retains the 24-row default.
 
 `/Items?ParentId={boxSetId}` lists a collection's members (movies, series, and
 the episodes of episode-scoped smart collections) in collection order unless
@@ -137,6 +140,15 @@ the episodes of episode-scoped smart collections) in collection order unless
 `Path`, as they do when listed from their library. Episode-scoped smart
 collections honor `SortBy` over their own members; catalog and user-state
 filters on them are not supported yet and return no episodes.
+
+A BoxSet with an uploaded or template poster shows it to everyone. Otherwise
+its `Primary` image is a collage of the first members the viewer can access, so
+the image and its tag differ by viewer. A collage tag is 32 hex digits: the
+collage's key followed by its signature. `GET /Items/{boxSetId}/Images/Primary`
+accepts a signed collage tag without authentication and serves the collage the
+tag names. An untagged request authorized by its session gets that viewer's
+collage. When no collage is built yet, the BoxSet shows the generated title
+poster and the collage is built in the background for the next request.
 
 `Recursive=true` together with `Filters=IsNotFolder`, or with an
 `IncludeItemTypes` that names `Episode` but not `Series` or `Season`, returns the

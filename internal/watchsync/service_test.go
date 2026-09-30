@@ -69,6 +69,13 @@ type serviceFakeRepo struct {
 	// sync lock; ratingLocks records each lock taken, with whether it waited.
 	ratingLockBusy map[string]bool
 	ratingLocks    []string
+	// tokenRefreshMu gives the token refresh lock its one-holder-at-a-time
+	// behavior. onTokenRefreshWait runs as a caller starts waiting for the
+	// lock; beforeTokenRefresh stands in for another holder that finishes just
+	// before this caller acquires it.
+	tokenRefreshMu     sync.Mutex
+	onTokenRefreshWait func()
+	beforeTokenRefresh func()
 	// upsertRatingErr fails UpsertRatingSyncStates when set.
 	upsertRatingErr error
 }
@@ -142,6 +149,22 @@ func (r *serviceFakeRepo) GetConnection(
 ) (Connection, bool, error) {
 	conn, ok := r.connections[connectionKey(provider, userID, profileID)]
 	return cloneConnectionForTest(conn), ok, nil
+}
+
+func (r *serviceFakeRepo) UpdateConnectionTokens(ctx context.Context, expected, updated Connection) (Connection, error) {
+	current, ok, err := r.GetConnectionByID(ctx, expected.ID)
+	if err != nil {
+		return Connection{}, err
+	}
+	if !ok {
+		return Connection{}, ErrConnectionNotFound
+	}
+	if !connectionCredentialsMatch(current, expected) {
+		return Connection{}, ErrStaleConnection
+	}
+	current = connectionWithTokens(current, storedTokens(updated))
+	current.LastError = updated.LastError
+	return r.UpsertConnection(ctx, current)
 }
 
 func (r *serviceFakeRepo) DeferConnectionsForAccount(
@@ -588,6 +611,18 @@ func (r *serviceFakeRepo) WithRatingSyncLock(ctx context.Context, connectionID s
 	return true, fn(ctx)
 }
 
+func (r *serviceFakeRepo) WithTokenRefreshLock(ctx context.Context, _ string, fn func(context.Context) error) error {
+	if r.onTokenRefreshWait != nil {
+		r.onTokenRefreshWait()
+	}
+	r.tokenRefreshMu.Lock()
+	defer r.tokenRefreshMu.Unlock()
+	if r.beforeTokenRefresh != nil {
+		r.beforeTokenRefresh()
+	}
+	return fn(ctx)
+}
+
 func (r *serviceFakeRepo) DeleteRatingSyncStates(_ context.Context, connectionID, providerAccountID string, mediaItemIDs []string) error {
 	kept := r.ratingStates[:0]
 	for _, state := range r.ratingStates {
@@ -876,6 +911,11 @@ type authProviderStub struct {
 	refreshed     bool
 	refreshTokens TokenSet
 	refreshErr    error
+	beforeRefresh func(context.Context, Connection) error
+	// refreshEntered, when set, receives once RefreshToken is called, which
+	// then waits for refreshRelease: a refresh in flight at the provider.
+	refreshEntered chan<- struct{}
+	refreshRelease <-chan struct{}
 }
 
 func (p *authProviderStub) Key() string {
@@ -918,8 +958,17 @@ func (p *authProviderStub) PollDeviceAuth(
 	return TokenSet{AccessToken: testAccessToken, RefreshToken: testRefreshToken, TokenExpiresAt: &expires}, nil
 }
 
-func (p *authProviderStub) RefreshToken(context.Context, ServerConfig, Connection) (TokenSet, error) {
+func (p *authProviderStub) RefreshToken(ctx context.Context, _ ServerConfig, conn Connection) (TokenSet, error) {
+	if p.refreshEntered != nil {
+		p.refreshEntered <- struct{}{}
+		<-p.refreshRelease
+	}
 	p.refreshed = true
+	if p.beforeRefresh != nil {
+		if err := p.beforeRefresh(ctx, conn); err != nil {
+			return TokenSet{}, err
+		}
+	}
 	if p.refreshErr != nil {
 		return TokenSet{}, p.refreshErr
 	}
@@ -1010,6 +1059,8 @@ type watchedExporterStub struct {
 	exportErr    error
 	exportResult ExportResult
 	exported     *[]LocalPlay
+	remote       []RemotePlay
+	precision    time.Duration
 	key          string
 	source       userstore.WatchHistorySource
 }
@@ -1039,7 +1090,11 @@ func (p watchedExporterStub) Capabilities() Capabilities {
 }
 
 func (p watchedExporterStub) FetchHistory(context.Context, ServerConfig, Connection) ([]RemotePlay, error) {
-	return nil, nil
+	return p.remote, nil
+}
+
+func (p watchedExporterStub) HistoryTimePrecision() time.Duration {
+	return p.precision
 }
 
 func (p watchedExporterStub) ExportHistory(_ context.Context, _ ServerConfig, _ Connection, plays []LocalPlay) (ExportResult, error) {
@@ -1755,23 +1810,10 @@ func TestServiceSyncConnectionRejectsBlankAccessToken(t *testing.T) {
 }
 
 func TestServiceSyncConnectionRefreshesExpiredToken(t *testing.T) {
-	repo := newServiceFakeRepo()
 	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
 	expiresAt := now.Add(-time.Minute)
 	refreshedExpiresAt := now.Add(time.Hour)
-	provider := &authProviderStub{
-		refreshTokens: TokenSet{
-			AccessToken:    "new-access",
-			RefreshToken:   "new-refresh",
-			TokenExpiresAt: &refreshedExpiresAt,
-		},
-	}
-	reg := NewRegistry()
-	if err := reg.Register(provider); err != nil {
-		t.Fatalf("Register: %v", err)
-	}
-	service := NewService(repo, reg)
-	service.now = func() time.Time { return now }
+	key := connectionKey("trakt", 7, "profile-1")
 	conn := Connection{
 		ID:             "conn-1",
 		Provider:       "trakt",
@@ -1781,20 +1823,219 @@ func TestServiceSyncConnectionRefreshesExpiredToken(t *testing.T) {
 		RefreshToken:   testOldRefreshToken,
 		TokenExpiresAt: &expiresAt,
 	}
-	repo.connections[connectionKey("trakt", 7, "profile-1")] = conn
+	tests := []struct {
+		name string
+		// otherRefresher stores rotated tokens while the sync waits for the
+		// refresh lock. Trakt refresh tokens are single-use, so spending the
+		// old one again would be refused.
+		otherRefresher bool
+		wantRefresh    bool
+	}{
+		{name: "refreshes the expired token", wantRefresh: true},
+		{name: "uses tokens another refresher stored", otherRefresher: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newServiceFakeRepo()
+			provider := &authProviderStub{
+				refreshTokens: TokenSet{
+					AccessToken:    "new-access",
+					RefreshToken:   "new-refresh",
+					TokenExpiresAt: &refreshedExpiresAt,
+				},
+			}
+			if tt.otherRefresher {
+				provider.refreshErr = errors.New("refresh token already spent")
+				repo.beforeTokenRefresh = func() {
+					stored := repo.connections[key]
+					stored.AccessToken, stored.RefreshToken, stored.TokenExpiresAt = "new-access", "new-refresh", &refreshedExpiresAt
+					repo.connections[key] = stored
+				}
+			}
+			reg := NewRegistry()
+			if err := reg.Register(provider); err != nil {
+				t.Fatalf("Register: %v", err)
+			}
+			service := NewService(repo, reg)
+			service.now = func() time.Time { return now }
+			repo.connections[key] = conn
 
-	if err := service.SyncConnection(context.Background(), conn, "scheduled"); err != nil {
-		t.Fatalf("SyncConnection: %v", err)
+			if err := service.SyncConnection(context.Background(), conn, "scheduled"); err != nil {
+				t.Fatalf("SyncConnection: %v", err)
+			}
+			if provider.refreshed != tt.wantRefresh {
+				t.Fatalf("provider refreshed = %v, want %v", provider.refreshed, tt.wantRefresh)
+			}
+			updated := repo.connections[key]
+			if updated.AccessToken != "new-access" || updated.RefreshToken != "new-refresh" {
+				t.Fatalf("connection tokens = %q/%q, want refreshed tokens", updated.AccessToken, updated.RefreshToken)
+			}
+			if updated.TokenExpiresAt == nil || !updated.TokenExpiresAt.Equal(refreshedExpiresAt) {
+				t.Fatalf("token expiry = %v, want %v", updated.TokenExpiresAt, refreshedExpiresAt)
+			}
+		})
 	}
-	if !provider.refreshed {
-		t.Fatal("provider was not asked to refresh the expired token")
+}
+
+func TestServiceTokenRefreshPreservesConcurrentConnectionChanges(t *testing.T) {
+	for _, change := range []string{"disconnect", "reconnect", "account switch", "sync state"} {
+		t.Run(change, func(t *testing.T) {
+			repo := newServiceFakeRepo()
+			now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+			conn := Connection{
+				ID: "conn-1", Provider: "trakt", UserID: 7, ProfileID: "profile-1",
+				ProviderAccountID: "old-account", AccessToken: testOldAccessToken,
+				RefreshToken: testOldRefreshToken, TokenExpiresAt: new(now.Add(-time.Minute)),
+				ExportWatchedEnabled: true, ScrobbleEnabled: true,
+			}
+			key := connectionKey(conn.Provider, conn.UserID, conn.ProfileID)
+			repo.connections[key] = conn
+			provider := &authProviderStub{refreshTokens: TokenSet{
+				AccessToken: "new-access", RefreshToken: "new-refresh", TokenExpiresAt: new(now.Add(time.Hour)),
+			}}
+			registry := NewRegistry()
+			if err := registry.Register(provider); err != nil {
+				t.Fatal(err)
+			}
+			service := NewService(repo, registry)
+			service.now = func() time.Time { return now }
+			provider.beforeRefresh = func(ctx context.Context, _ Connection) error {
+				if change == "disconnect" {
+					return repo.DeleteConnection(ctx, conn.Provider, conn.UserID, conn.ProfileID)
+				}
+				current := repo.connections[key]
+				switch change {
+				case "reconnect", "account switch":
+					current.AccessToken, current.RefreshToken = "reconnected-access", "reconnected-refresh"
+					if change == "account switch" {
+						current.ProviderAccountID = "new-account"
+					}
+				case "sync state":
+					current.SyncCursors = map[string]string{"trakt.watched": "new-cursor"}
+					current.LastOutboundSyncAt = new(now)
+					current.ScrobbleEnabled = false
+				}
+				repo.connections[key] = current
+				return nil
+			}
+			_, err := service.AccessToken(t.Context(), conn.ID)
+			current, exists := repo.connections[key]
+			switch change {
+			case "disconnect":
+				if exists || !errors.Is(err, ErrConnectionNotFound) {
+					t.Fatalf("disconnected connection restored: exists=%v err=%v", exists, err)
+				}
+			case "reconnect", "account switch":
+				if !errors.Is(err, ErrStaleConnection) || current.AccessToken != "reconnected-access" {
+					t.Fatalf("reconnected credentials overwritten: access=%q err=%v", current.AccessToken, err)
+				}
+				if change == "account switch" && current.ProviderAccountID != "new-account" {
+					t.Fatal("account switch overwritten")
+				}
+			case "sync state":
+				if err != nil || current.AccessToken != "new-access" || current.SyncCursors["trakt.watched"] != "new-cursor" || current.LastOutboundSyncAt == nil || current.ScrobbleEnabled {
+					t.Fatalf("sync state lost during refresh: connection=%+v err=%v", current, err)
+				}
+			}
+		})
 	}
-	updated := repo.connections[connectionKey("trakt", 7, "profile-1")]
-	if updated.AccessToken != "new-access" || updated.RefreshToken != "new-refresh" {
-		t.Fatalf("connection tokens = %q/%q, want refreshed tokens", updated.AccessToken, updated.RefreshToken)
+}
+
+func TestServiceTokenRefreshReloadsAccountBinding(t *testing.T) {
+	repo := newServiceFakeRepo()
+	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	conn := Connection{
+		ID: "conn-1", Provider: "trakt", UserID: 7, ProfileID: "profile-1",
+		ProviderAccountID: "old-account", AccessToken: testOldAccessToken,
+		RefreshToken: testOldRefreshToken, TokenExpiresAt: new(now.Add(-time.Minute)),
 	}
-	if updated.TokenExpiresAt == nil || !updated.TokenExpiresAt.Equal(refreshedExpiresAt) {
-		t.Fatalf("token expiry = %v, want %v", updated.TokenExpiresAt, refreshedExpiresAt)
+	key := connectionKey(conn.Provider, conn.UserID, conn.ProfileID)
+	repo.connections[key] = conn
+	repo.beforeTokenRefresh = func() {
+		current := repo.connections[key]
+		current.ProviderAccountID = "new-account"
+		repo.connections[key] = current
+	}
+	provider := &authProviderStub{
+		refreshTokens: TokenSet{AccessToken: "new-access", RefreshToken: "new-refresh", TokenExpiresAt: new(now.Add(time.Hour))},
+		beforeRefresh: func(_ context.Context, current Connection) error {
+			if current.ProviderAccountID != "new-account" {
+				t.Fatalf("refresh received old account binding: %q", current.ProviderAccountID)
+			}
+			return nil
+		},
+	}
+	registry := NewRegistry()
+	if err := registry.Register(provider); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(repo, registry)
+	service.now = func() time.Time { return now }
+	if _, err := service.AccessToken(t.Context(), conn.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A disconnect waits for the refresh to finish before deleting its connection.
+func TestServiceDisconnectWaitsForAnInFlightTokenRefresh(t *testing.T) {
+	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
+	expiresAt := now.Add(-time.Minute)
+	refreshedExpiresAt := now.Add(time.Hour)
+	entered, release := make(chan struct{}), make(chan struct{})
+	provider := &authProviderStub{
+		refreshTokens:  TokenSet{AccessToken: "new-access", RefreshToken: "new-refresh", TokenExpiresAt: &refreshedExpiresAt},
+		refreshEntered: entered,
+		refreshRelease: release,
+	}
+	reg := NewRegistry()
+	if err := reg.Register(provider); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	repo := newServiceFakeRepo()
+	service := NewService(repo, reg)
+	service.now = func() time.Time { return now }
+	key := connectionKey("trakt", 7, "profile-1")
+	repo.connections[key] = Connection{
+		ID:             "conn-1",
+		Provider:       "trakt",
+		UserID:         7,
+		ProfileID:      "profile-1",
+		AccessToken:    testOldAccessToken,
+		RefreshToken:   testOldRefreshToken,
+		TokenExpiresAt: &expiresAt,
+	}
+	ctx := context.Background()
+
+	refreshDone := make(chan error, 1)
+	go func() {
+		_, err := service.AccessToken(ctx, "conn-1")
+		refreshDone <- err
+	}()
+	<-entered
+
+	deleteWaiting := make(chan struct{}, 1)
+	repo.onTokenRefreshWait = func() { deleteWaiting <- struct{}{} }
+	deleteDone := make(chan error, 1)
+	go func() { deleteDone <- service.DeleteConnection(ctx, 7, "profile-1", "trakt") }()
+	var deleteErr error
+	deleted := false
+	select {
+	case <-deleteWaiting:
+	case deleteErr = <-deleteDone:
+		deleted = true
+	}
+	close(release)
+	if err := <-refreshDone; err != nil {
+		t.Fatalf("AccessToken: %v", err)
+	}
+	if !deleted {
+		deleteErr = <-deleteDone
+	}
+	if deleteErr != nil {
+		t.Fatalf("DeleteConnection: %v", deleteErr)
+	}
+	if _, ok := repo.connections[key]; ok {
+		t.Fatal("the refresh recreated the disconnected connection")
 	}
 }
 
@@ -2251,6 +2492,74 @@ func TestServiceExportWatchedDrainsPendingBatches(t *testing.T) {
 		if export.Status != historyExportStatusSent {
 			t.Fatalf("history exports = %+v, want all sent", repo.historyExports)
 		}
+	}
+}
+
+// A provider that stores watch times to the minute (Trakt) returns :00 for a
+// local play that kept its seconds; one that keeps seconds must not match a
+// different time in the same minute.
+func TestServiceExportWatchedMatchesRemotePlaysAtProviderPrecision(t *testing.T) {
+	tests := []struct {
+		name         string
+		precision    time.Duration
+		wantMatched  bool
+		wantExported int
+	}{
+		{name: "provider stores minutes", precision: time.Minute, wantMatched: true},
+		{name: "provider stores seconds", wantExported: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, err := sql.Open("sqlite3", ":memory:")
+			if err != nil {
+				t.Fatalf("open sqlite: %v", err)
+			}
+			defer func() { _ = db.Close() }()
+			if err := userdb.InitSchema(db); err != nil {
+				t.Fatalf("InitSchema: %v", err)
+			}
+			if err := userdb.AddHistory(db, userstore.WatchHistoryEntry{
+				ID:              "history-1",
+				ProfileID:       "profile-1",
+				MediaItemID:     testMovieMediaID,
+				WatchedAt:       "2026-05-04T12:00:37Z",
+				DurationSeconds: 7200,
+				Completed:       true,
+				Source:          userstore.WatchHistorySourcePlayback,
+				Identity: userstore.WatchIdentity{
+					StableType:  "movie",
+					ProviderIDs: map[string]string{"tmdb": "603"},
+				},
+			}); err != nil {
+				t.Fatalf("AddHistory: %v", err)
+			}
+
+			var exported []LocalPlay
+			provider := watchedExporterStub{
+				exported:  &exported,
+				precision: tt.precision,
+				remote: []RemotePlay{{
+					ProviderItemKey: "tmdb:603",
+					WatchedAt:       time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
+				}},
+			}
+			repo := newServiceFakeRepo()
+			service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{
+				store: userdb.NewSQLiteUserStore(db),
+			})
+			result, err := service.ExportWatched(context.Background(), Connection{
+				ID:        "conn-1",
+				Provider:  "trakt",
+				UserID:    7,
+				ProfileID: "profile-1",
+			}, ServerConfig{}, provider)
+			if err != nil {
+				t.Fatalf("ExportWatched: %v", err)
+			}
+			if matched := result.RemotePresent == 1; matched != tt.wantMatched || len(exported) != tt.wantExported {
+				t.Fatalf("result = %+v, exported %d plays; want matched=%v and %d exported", result, len(exported), tt.wantMatched, tt.wantExported)
+			}
+		})
 	}
 }
 

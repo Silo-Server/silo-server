@@ -103,6 +103,8 @@ export const watchlistKeys = {
   all: ["watchlist"] as const,
   list: () => ["watchlist", "list"] as const,
   check: (itemId: string) => ["watchlist", "check", itemId] as const,
+  /** Watchlist entries for titles the library doesn't have yet. */
+  titles: () => ["watchlist", "titles"] as const,
 };
 
 export const historyKeys = {
@@ -126,8 +128,7 @@ export const requestKeys = {
   all: ["requests"] as const,
   status: () => ["requests", "status"] as const,
   discovery: () => ["requests", "discovery"] as const,
-  discoverySection: (section: string, page: number) =>
-    ["requests", "discovery", section, page] as const,
+  discoverySection: (section: string) => ["requests", "discovery", section] as const,
   discoverStudios: () => ["requests", "discover", "studios"] as const,
   discoverNetworks: () => ["requests", "discover", "networks"] as const,
   discoverGenres: () => ["requests", "discover", "genres"] as const,
@@ -136,12 +137,17 @@ export const requestKeys = {
     slug: string,
     mediaType: string | undefined,
     sort: string,
-    page: number,
-  ) => ["requests", "discover", "browse", kind, slug, mediaType ?? "", sort, page] as const,
+  ) => ["requests", "discover", "browse", kind, slug, mediaType ?? "", sort] as const,
   search: (mediaType: string, query: string, page: number, viewerKey: string) =>
     ["requests", "search", viewerKey, mediaType, query, page] as const,
   detail: (mediaType: string, tmdbID: number) => ["requests", "detail", mediaType, tmdbID] as const,
   mine: (params: Record<string, unknown>) => ["requests", "mine", params] as const,
+  one: (id: string) => ["requests", "one", id] as const,
+  // Prefixes for refreshing every params variant at once.
+  discoverBrowseAll: () => ["requests", "discover", "browse"] as const,
+  detailAll: () => ["requests", "detail"] as const,
+  mineAll: () => ["requests", "mine"] as const,
+  searchAll: () => ["requests", "search"] as const,
 };
 
 export const libraryCollectionKeys = {
@@ -401,10 +407,39 @@ export const adminKeys = {
   networkAccessStatus: (provider: string) =>
     ["admin", "networkAccess", "status", provider] as const,
   requestsRoot: () => ["admin", "requests"] as const,
-  requests: (params: Record<string, unknown>) => ["admin", "requests", params] as const,
+  // The queue, its view counts, and a request's history sit under
+  // requestsRoot, so every request action refreshes them.
+  requestQueueRoot: () => ["admin", "requests", "queue"] as const,
+  requestQueue: (params: Record<string, unknown>) =>
+    ["admin", "requests", "queue", params] as const,
+  requestCounts: () => ["admin", "requests", "counts"] as const,
+  requestEvents: (id: string) => ["admin", "requests", "events", id] as const,
   requestSettings: () => ["admin", "requests", "settings"] as const,
   requestIntegrations: () => ["admin", "requests", "integrations"] as const,
+  // The route and option keys sit outside requestsRoot on purpose: every request, server,
+  // and settings write invalidates that root. Only adding or deleting a server
+  // changes a route (it can set or clear Everything else), and those writes
+  // refresh the routes themselves; reading the routes is one GET per route; the
+  // options each call out to the server's Sonarr or Radarr.
+  requestRoutes: () => ["admin", "requestRoutes"] as const,
+  // Under requestRoutes: switching it changes the routes (Everything else can
+  // be filled in) and what a preview answers.
+  requestRouting: () => ["admin", "requestRoutes", "mode"] as const,
+  // Under requestRoutes, so saving a rule refreshes an open preview.
+  requestRoutePreviewRoot: () => ["admin", "requestRoutes", "preview"] as const,
+  requestRoutePreview: (mediaType: string, tmdbId: number, requesterUserId?: number) =>
+    ["admin", "requestRoutes", "preview", mediaType, tmdbId, requesterUserId ?? null] as const,
+  // Outside requestRoutes: a rule save changes nothing TMDB answers.
+  requestRouteTitles: (mediaType: string, q: string) =>
+    ["admin", "requestRouteTitles", mediaType, q] as const,
+  requestIntegrationOptionsRoot: () => ["admin", "requestIntegrationOptions"] as const,
+  requestIntegrationOptions: (integrationId: string) =>
+    ["admin", "requestIntegrationOptions", integrationId] as const,
   requestUserLimit: (userId: number) => ["admin", "requests", "users", userId, "limit"] as const,
+  // Scoped to the admin authority: the limit's validator names the profile
+  // that read it, so another profile's cached copy would fail its save.
+  requestGroupLimit: (groupId: number, scope: string) =>
+    ["admin", "requests", "groups", groupId, "limit", scope] as const,
   recommendationsStatus: () => ["admin", "recommendationsStatus"] as const,
   inviteCodes: () => ["admin", "inviteCodes"] as const,
   invitations: () => ["admin", "invitations"] as const,

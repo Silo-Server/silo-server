@@ -5,14 +5,16 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
 func TestGetCollectionPresetTrendingSendsHeadersAndDecodesMovies(t *testing.T) {
-	var gotAPIKey, gotVersion string
+	var gotAPIKey, gotVersion, gotUserAgent string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAPIKey = r.Header.Get("trakt-api-key")
 		gotVersion = r.Header.Get("trakt-api-version")
+		gotUserAgent = r.Header.Get("User-Agent")
 		if r.URL.Path != "/movies/trending" {
 			t.Fatalf("path = %s, want /movies/trending", r.URL.Path)
 		}
@@ -41,13 +43,21 @@ func TestGetCollectionPresetTrendingSendsHeadersAndDecodesMovies(t *testing.T) {
 	if gotAPIKey != "client-id" || gotVersion != "2" {
 		t.Fatalf("headers api=%q version=%q", gotAPIKey, gotVersion)
 	}
+	// Trakt may block requests without an identifying User-Agent.
+	if !strings.HasPrefix(gotUserAgent, "Silo/") {
+		t.Fatalf("User-Agent = %q, want Silo/<build>", gotUserAgent)
+	}
 	if len(results) != 1 || results[0].Title != "The Matrix" || results[0].TMDBID != 603 || results[0].IMDbID != "tt0133093" {
 		t.Fatalf("results = %+v", results)
 	}
 }
 
+// Recommendations take a limit of at most 100 and no page, so the preset asks
+// once instead of walking pages.
 func TestGetCollectionPresetRecommendedUsesBearerToken(t *testing.T) {
+	var queries []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queries = append(queries, r.URL.RawQuery)
 		if r.URL.Path != "/recommendations/shows" {
 			t.Fatalf("path = %s, want /recommendations/shows", r.URL.Path)
 		}
@@ -70,11 +80,14 @@ func TestGetCollectionPresetRecommendedUsesBearerToken(t *testing.T) {
 	client := NewClient("client-id", 1000)
 	client.SetBaseURL(server.URL)
 
-	results, err := client.GetCollectionPreset(context.Background(), "recommended", "tv", 1, "token")
+	results, err := client.GetCollectionPreset(context.Background(), "recommended", "tv", 250, "token")
 	if err != nil {
 		t.Fatalf("GetCollectionPreset: %v", err)
 	}
-	if len(results) != 1 || results[0].MediaType != "tv" || results[0].TVDBID != 280619 {
+	if len(queries) != 1 || queries[0] != "limit=100" {
+		t.Fatalf("queries = %q, want one request with limit=100", queries)
+	}
+	if len(results) != 1 || results[0].MediaType != "tv" || results[0].TVDBID != 280619 || results[0].Rank != 1 {
 		t.Fatalf("results = %+v", results)
 	}
 }

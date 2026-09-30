@@ -4,12 +4,16 @@ import { render } from "@testing-library/react";
 import CardOverlays from "./CardOverlays";
 import { formatLanguageWhenLoaded } from "@/lib/languageNamesLoader";
 import {
+  ATTENTION_ACCENT,
+  OVERLAY_POSITIONS,
   OVERLAY_PRESETS,
   OVERLAY_REGISTRY,
   PRESET_IDS,
   SAMPLE_MOVIE_DATA,
+  SAMPLE_REQUEST_DATA,
   SAMPLE_SHOW_DATA,
   buildDefaultPrefs,
+  type OverlayData,
   type CardOverlayPrefs,
   type OverlayId,
   type PresetId,
@@ -47,7 +51,11 @@ describe("CardOverlays", () => {
     await vi.waitFor(() => expect(formatLanguageWhenLoaded("en")).toBe("English"));
     for (const def of OVERLAY_REGISTRY) {
       const data =
-        def.id === "network" || def.id === "show_status" ? SAMPLE_SHOW_DATA : SAMPLE_MOVIE_DATA;
+        def.id === "network" || def.id === "show_status"
+          ? SAMPLE_SHOW_DATA
+          : def.id === "request_status"
+            ? SAMPLE_REQUEST_DATA
+            : SAMPLE_MOVIE_DATA;
       const expected = def.getValue(data);
       expect(expected, `sample data should exercise overlay ${def.id}`).toBeTruthy();
       const { container, unmount } = render(
@@ -421,6 +429,88 @@ describe("CardOverlays", () => {
     // Nothing inside the layer may re-enable hit testing.
     expect(container.querySelectorAll(".pointer-events-auto").length).toBe(0);
     expect(container.querySelector<HTMLElement>("span.inline-flex")?.style.pointerEvents).toBe("");
+  });
+
+  describe("request status", () => {
+    const attention: OverlayData = {
+      request_status: "Not found yet",
+      request_status_icon: "alert",
+      request_status_attention: true,
+    };
+
+    function badgeStyle(data: OverlayData, prefs: CardOverlayPrefs): string | null {
+      return (
+        render(<CardOverlays data={data} prefs={prefs} />)
+          .container.querySelector<HTMLElement>("[data-overlay-badge]")
+          ?.getAttribute("style") ?? null
+      );
+    }
+
+    it.each(PRESET_IDS)("renders the status in the %s preset, with its icon on request", (id) => {
+      const plain = render(
+        <CardOverlays data={SAMPLE_REQUEST_DATA} prefs={prefsWithOnly("request_status", id)} />,
+      ).container;
+      expect(badgeTexts(plain)).toEqual(["Downloading 43%"]);
+      expect(plain.querySelector("[data-overlay-badge] svg") !== null).toBe(
+        OVERLAY_PRESETS[id].preferIcon,
+      );
+
+      const prefs = prefsWithOnly("request_status", id);
+      prefs.items.request_status = { ...prefs.items.request_status, showIcon: true };
+      const withIcon = render(<CardOverlays data={SAMPLE_REQUEST_DATA} prefs={prefs} />).container;
+      expect(badgeTexts(withIcon)).toEqual(["Downloading 43%"]);
+      expect(withIcon.querySelector("[data-overlay-badge] svg")).not.toBeNull();
+    });
+
+    it.each(OVERLAY_POSITIONS)("renders in the %s corner", (position) => {
+      const prefs = prefsWithOnly("request_status");
+      prefs.items.request_status = { ...prefs.items.request_status, position };
+      const [edge, side] = position.split("-");
+      const { container } = render(<CardOverlays data={SAMPLE_REQUEST_DATA} prefs={prefs} />);
+      const stack = container.querySelector(
+        `[data-overlay-edge="${edge}"] > div.${side === "left" ? "items-start" : "items-end"}`,
+      );
+      expect(stack?.textContent).toBe("Downloading 43%");
+    });
+
+    it("renders nothing when the badge is off", () => {
+      const prefs = prefsWithOnly("request_status");
+      prefs.items.request_status = { ...prefs.items.request_status, enabled: false };
+      const { container } = render(<CardOverlays data={SAMPLE_REQUEST_DATA} prefs={prefs} />);
+      expect(badgeTexts(container)).toEqual([]);
+    });
+
+    it.each(PRESET_IDS)("colors a status that needs attention amber in the %s preset", (id) => {
+      const accented = prefsWithOnly("request_status", id);
+      accented.items.request_status = {
+        ...accented.items.request_status,
+        accentColor: ATTENTION_ACCENT,
+      };
+      const calm = { ...attention, request_status_attention: false };
+      expect(badgeStyle(attention, prefsWithOnly("request_status", id))).toBe(
+        badgeStyle(calm, accented),
+      );
+      expect(badgeStyle(calm, prefsWithOnly("request_status", id))).not.toBe(
+        badgeStyle(calm, accented),
+      );
+    });
+
+    it("lets the viewer's own accent win over the attention accent", () => {
+      const custom = prefsWithOnly("request_status", "square");
+      custom.items.request_status = { ...custom.items.request_status, accentColor: "#3b82f6" };
+      expect(badgeStyle(attention, custom)).toBe(
+        badgeStyle({ ...attention, request_status_attention: false }, custom),
+      );
+    });
+
+    it("lifts a bottom-row status above the download bar", () => {
+      const prefs = prefsWithOnly("request_status");
+      prefs.items.request_status = { ...prefs.items.request_status, position: "bottom-left" };
+      const lifted = render(
+        <CardOverlays data={SAMPLE_REQUEST_DATA} prefs={prefs} hasProgressBar />,
+      ).container.querySelector<HTMLElement>('[data-overlay-edge="bottom"]');
+      expect(bottomMarginClasses(lifted)).toEqual(["mb-2"]);
+    });
   });
 
   it("renders nothing when no enabled overlay has data", () => {

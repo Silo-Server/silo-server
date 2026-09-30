@@ -794,6 +794,9 @@ export interface BrowseItem {
   studios?: string[];
   networks?: string[];
   content_rating: string;
+  /** Display-only advisory age; see ItemDetail.advisory_age. */
+  advisory_age?: number | null;
+  advisory_source?: string;
   status: "pending" | "matched" | "unmatched" | "ambiguous";
   show_status?: string;
   rating_imdb: number | null;
@@ -1795,11 +1798,6 @@ export interface ImportUserTMDBListCollectionRequest extends UserImportSharedFie
   url: string;
 }
 
-export interface ImportUserTraktCollectionRequest extends UserImportSharedFields {
-  preset: ImportTraktCollectionRequest["preset"];
-  media_type: ImportTraktCollectionRequest["media_type"];
-}
-
 // A completed sync always has a non-empty status; the empty-string variant in
 // UserCollectionSyncStatus only appears on un-synced rows.
 export type UserCollectionSyncResultStatus = Exclude<UserCollectionSyncStatus, "">;
@@ -1824,6 +1822,16 @@ export type RequestSearchMediaType = RequestMediaType | "all";
 export type MediaRequestStatus = "pending" | "approved" | "queued" | "downloading" | "completed";
 export type MediaRequestOutcome = "active" | "declined" | "cancelled" | "failed";
 export type RequestAvailability = "missing" | "available";
+/** The one request state the server derives for users (v2 `state`). */
+export type RequestUserState =
+  | "pending"
+  | "approved"
+  | "processing"
+  | "partially_available"
+  | "available"
+  | "declined"
+  | "cancelled"
+  | "failed";
 export type RequestLimitMode = "inherit" | "custom" | "unlimited" | "blocked";
 export type RequestApprovalMode = "inherit" | "manual" | "auto" | "blocked";
 
@@ -1832,6 +1840,36 @@ export interface RequestState {
   requestable: boolean;
   reason?: string;
   request_id?: string;
+  /** The viewer is notified when the title becomes available: they requested or follow it. */
+  following?: boolean;
+  /** The viewing profile made the active request, so there is nothing to follow. */
+  requested_by_viewer?: boolean;
+  /** User-facing state of the active request. */
+  state?: RequestUserState;
+  /** How far the active request's downloads are. Only the title detail carries it. */
+  download?: RequestDownload;
+}
+
+/**
+ * How far a request's downloads are, while its download server reports them:
+ * for one server on a target, summed over its servers on a request.
+ */
+export interface RequestDownload {
+  /**
+   * queued, downloading, paused, stalled, importing or import_blocked. The
+   * server may add phases; read one this client does not know as downloading.
+   */
+  phase: string;
+  /** Rounded down; absent while the size is unknown. */
+  percent?: number;
+  bytes_total?: number;
+  bytes_left?: number;
+  /** Absent when the download server cannot tell. */
+  estimated_completion_at?: string;
+  /** Distinct downloads in flight; a season pack counts once. */
+  downloads: number;
+  /** When the server last heard from the download server. */
+  updated_at: string;
 }
 
 export interface RequestMediaResult {
@@ -1848,6 +1886,12 @@ export interface RequestMediaResult {
   availability: RequestAvailability;
   library_content_id?: string;
   request: RequestState;
+  /**
+   * The title is on the viewer's watchlist, as an entry for a title the
+   * library doesn't have or as its library item. Absent from servers without
+   * watchlist titles.
+   */
+  in_watchlist?: boolean;
 }
 
 export interface RequestMediaPage {
@@ -1894,14 +1938,47 @@ export interface RequestMediaDetail {
   director?: string;
   creators?: string[];
   recommendations?: RequestMediaResult[];
+  /** Series: the regular seasons with library availability and request coverage. */
+  seasons?: RequestMediaSeason[];
   availability: RequestAvailability;
   library_content_id?: string;
   request: RequestState;
+  /** The title is on the viewer's watchlist; see RequestMediaResult.in_watchlist. */
+  in_watchlist?: boolean;
+}
+
+/** One regular season of a series, as the request detail reports it. */
+export interface RequestMediaSeason {
+  season_number: number;
+  name?: string;
+  /** YYYY-MM-DD; absent until TMDB dates the season. */
+  air_date?: string;
+  /** Episodes TMDB lists for the season, aired or not. */
+  episode_count: number;
+  poster_path?: string;
+  /** Whether every aired episode is in the library. */
+  availability: "missing" | "partial" | "available";
+  /** The title's active request covers this season. */
+  requested: boolean;
+}
+
+/** How far one requested season is, once the series is in the library. */
+export interface RequestSeasonProgress {
+  season_number: number;
+  /** Aired episodes by the library's own metadata; 0 when it has no air dates yet. */
+  episodes_aired: number;
+  episodes_available: number;
 }
 
 export interface RequestDiscoverySection extends RequestMediaPage {
   key: string;
   title: string;
+  /**
+   * The page to ask for next when a rating-restricted viewer's page read
+   * several TMDB pages (page + 1 would repeat them). Absent when page + 1
+   * applies, or when a restricted viewer has reached the end.
+   */
+  next_page?: number;
 }
 
 export interface RequestDiscoveryResponse {
@@ -1954,24 +2031,31 @@ export interface CreateMediaRequestInput {
   overview?: string;
   poster_path?: string;
   backdrop_path?: string;
+  /** Series only: the seasons to request. Omitted: every aired season not yet in the library. */
+  seasons?: number[];
 }
 
+/** The download server details (integration_*, instance_name, route_name, external_*, last_error) reach admins only. */
 export interface RequestTarget {
   id: number;
   request_id: string;
   integration_id?: string;
   integration_kind?: string;
   instance_name?: string;
+  /** The routing rule that sent this target to its server, as named when it was sent. */
+  route_name?: string;
   quality: "1080p" | "2160p";
   is_anime: boolean;
   external_id?: string;
   external_status?: string;
   status: MediaRequestStatus | "failed";
   last_error?: string;
+  download?: RequestDownload;
   created_at: string;
   updated_at: string;
 }
 
+/** integration_kind, external_id, external_status and last_error reach admins only. */
 export interface MediaRequest {
   id: string;
   provider: string;
@@ -1986,15 +2070,30 @@ export interface MediaRequest {
   backdrop_path?: string;
   status: MediaRequestStatus;
   outcome: MediaRequestOutcome;
+  /** The one state to show users; derived by the server from status, outcome and library presence. */
+  state?: RequestUserState;
+  /** Why the request was declined or cancelled, when a reason was given. */
+  outcome_reason?: string;
   requested_by_user_id?: number;
   requested_by_profile_id?: string;
   is_anime?: boolean;
+  /** Series: the requested seasons; empty means the whole series. */
+  seasons?: number[];
+  /** Series season requests: each requested season's episodes, once the series is in the library. */
+  season_progress?: RequestSeasonProgress[];
   targets?: RequestTarget[];
+  /** Over every server of the request: the phase that needs the most attention, the latest estimate. */
+  download?: RequestDownload;
   integration_kind?: string;
   external_id?: string;
   external_status?: string;
   library_content_id?: string;
   last_error?: string;
+  /**
+   * What created the request: direct (the Request button) or watchlist
+   * (adding the title to a watchlist). The server may add values.
+   */
+  source?: string;
   created_at: string;
   updated_at: string;
   approved_at?: string;
@@ -2017,6 +2116,12 @@ export interface RequestSettings {
   global_window_days: number;
   global_auto_approval_enabled: boolean;
   force_dual_quality: boolean;
+  /**
+   * Adding a title the library doesn't have to a watchlist also requests it.
+   * Absent from servers that predate it; left out of an update, the stored
+   * value is kept.
+   */
+  watchlist_requests?: boolean;
   updated_at: string;
 }
 
@@ -2823,6 +2928,8 @@ export interface NotificationReasonFlags {
   title?: string;
   year?: number;
   reason?: string;
+  /** request.fulfilled sent to a profile that followed the title, not requested it. */
+  follower?: boolean;
 }
 
 export interface AppNotification {
@@ -4208,6 +4315,9 @@ export interface SectionItem {
   studios?: string[];
   networks?: string[];
   content_rating?: string;
+  /** Display-only advisory age; see ItemDetail.advisory_age. */
+  advisory_age?: number | null;
+  advisory_source?: string;
   status: "pending" | "matched" | "unmatched" | "ambiguous";
   show_status?: string;
   rating_imdb: number | null;

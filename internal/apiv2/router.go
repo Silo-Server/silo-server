@@ -346,6 +346,12 @@ type Dependencies struct {
 	// PersonalLists reads and edits a profile's favorites
 	// (*handlers.PersonalDataHandler).
 	PersonalLists PersonalListService
+	// WatchlistTitles keeps a profile's watchlist entries for titles the
+	// library doesn't have (*handlers.PersonalDataHandler).
+	WatchlistTitles WatchlistTitleService
+	// WatchlistRequests gates the watchlist title operations and applies
+	// watchlist requests (*requests.Service).
+	WatchlistRequests WatchlistRequestService
 	// Ratings reads and edits a profile's ratings (*handlers.RatingsHandler).
 	Ratings RatingService
 	// Recommendations answers the profile-scoped recommendation reads
@@ -1023,6 +1029,8 @@ type MediaRequestService interface {
 	BrowseStudio(ctx context.Context, viewer mediarequests.Viewer, slug, sort string, page int) (*mediarequests.DiscoverBrowseResponse, error)
 	BrowseNetwork(ctx context.Context, viewer mediarequests.Viewer, slug, sort string, page int) (*mediarequests.DiscoverBrowseResponse, error)
 	BrowseGenre(ctx context.Context, viewer mediarequests.Viewer, slug string, mediaType mediarequests.MediaType, sort string, page int) (*mediarequests.DiscoverBrowseResponse, error)
+	Follow(ctx context.Context, viewer mediarequests.Viewer, mediaType mediarequests.MediaType, tmdbID int) (mediarequests.RequestState, error)
+	Unfollow(ctx context.Context, viewer mediarequests.Viewer, mediaType mediarequests.MediaType, tmdbID int) error
 }
 
 // CatalogSettingsReader is the slice of the server settings store catalog

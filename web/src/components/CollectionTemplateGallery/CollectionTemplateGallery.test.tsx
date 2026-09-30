@@ -66,7 +66,15 @@ vi.mock("@/hooks/queries/profiles", () => ({
 
 vi.mock("@/hooks/queries/collectionSurfaceRefresh", () => ({
   invalidateAdminCollectionQueries: vi.fn(),
+  invalidateUserCollectionQueries: vi.fn(),
 }));
+
+vi.mock("@/hooks/queries/libraries", async () => {
+  const actual = await vi.importActual<typeof import("@/hooks/queries/libraries")>(
+    "@/hooks/queries/libraries",
+  );
+  return { ...actual, useUserLibraries: () => ({ data: [] }) };
+});
 
 const catalogResponse = {
   categories: [
@@ -481,6 +489,60 @@ describe("CollectionTemplateGallery", () => {
         expect.objectContaining({
           path: { bundle_id: "core_defaults" },
           body: expect.objectContaining({ library_ids: ["1"] }),
+        }),
+      );
+    });
+  });
+});
+
+// Personal mode lists what GET /collections/templates returns, which the server
+// limits to sources a personal collection can import (#1640).
+describe("CollectionTemplateGallery in user mode", () => {
+  const userCatalog = {
+    categories: [catalogResponse.categories[0], catalogResponse.categories[2]],
+  };
+
+  function renderUserGallery() {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={client}>
+        <CollectionTemplateGallery mode="user" open onOpenChange={() => {}} />
+      </QueryClientProvider>,
+    );
+  }
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    fetchMock.mockImplementation((path: string) => {
+      if (path === "GET /api/v2/collections/templates") return Promise.resolve(userCatalog);
+      if (path === "POST /api/v2/collections/import/tmdb") {
+        return Promise.resolve({ collection: { id: "personal-1" } });
+      }
+      throw new Error(`unexpected path: ${path}`);
+    });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("creates a personal collection from a TMDB template", async () => {
+    const user = userEvent.setup();
+    renderUserGallery();
+
+    await waitFor(() => {
+      expect(screen.getByText("Trending Movies This Week")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Core Defaults")).not.toBeInTheDocument();
+
+    await user.click(screen.getByText("Trending Movies This Week"));
+    await user.click(screen.getByRole("button", { name: /Create Collection/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "POST /api/v2/collections/import/tmdb",
+        expect.objectContaining({
+          body: expect.objectContaining({ preset: "trending", media_type: "movie" }),
         }),
       );
     });

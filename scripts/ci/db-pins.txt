@@ -42,12 +42,19 @@
 ./internal/catalog TestRatingsPageIndexDB
 ./internal/catalog TestLibraryCollectionContinuationDB
 
+# Collection artwork: tag reads refresh usage at most daily and keep active
+# variants out of retirement.
+./internal/catalog TestCollectionCollageReadsKeepActiveVariantsDB
+
 # Metadata refresh: season and episode writes cost the same number of
 # statements for 1 and 100 episodes; episode refresh debt the same for 1, 100
 # and 1000, with one DELETE per sync.
 ./internal/metadata TestPersistSeasonsAndEpisodes_QueryCountIsBounded
 ./internal/metadata TestRefreshSeriesEpisodeMetadataStateDebtQueries
 ./internal/metadata TestRefreshSeriesEpisodeMetadataStateRetainsFailureDuringIncompleteSync
+
+# Corrected matches preserve destination IDs and remove rejected source IDs.
+./internal/metadata TestManualRefresh_CorrectedNFOReanchorKeepsDestinationIDs
 
 # Home sections: one overlay summary row read per card.
 ./internal/sections TestOverlaySummariesOnlyDecodeWinner

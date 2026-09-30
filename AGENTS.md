@@ -115,6 +115,13 @@ disagrees with the code is wrong. Any committed doc must not contain local absol
 filesystem paths or transient worktree IDs — use repository-relative paths and wording like
 "Commands assume the repository root is the cwd." `make verify-local-paths` enforces this.
 
+**Docs audience.** Docs in this repo are for people and agents changing the code:
+architecture, invariants, API contracts, development setup. Guides for installing, configuring,
+operating, or troubleshooting Silo belong in the user manual (`siloserver.org`, see Multi-repo).
+Do not add operator or user guides here. The one exception is `docs/update-to-1.0.md`, a draft
+that moves to the manual when 1.0 ships. When a change affects the manual, follow "Update the
+user manual" in CONTRIBUTING.md.
+
 **Dev frontend against a remote backend.** Set `VITE_API_PROXY_TARGET` in `web/.env.local` before
 `make dev-frontend`; the frontend calls relative `/api` URLs that Vite proxies.
 

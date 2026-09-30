@@ -71,6 +71,13 @@ conversion before its frames feed the software encoder. An optional HEVC probe
 failure removes HEVC availability without invalidating successful AAC or H.264
 capability checks.
 
+A bitrate cap is a ceiling on every encoder. A capped VAAPI encode forces the
+VBR rate-control mode, or CBR where the assigned device offers only that, after
+a cached one-frame check on that device; FFmpeg's automatic mode could choose
+AVBR, which ignores the cap. When the device accepts neither mode, the encode
+uses libx264 or libx265 in the same way, keeping hardware tone mapping where
+the recipe uses it.
+
 The body is the v3 start request plus `installation_id`. `file_id` and
 `profile_id` are strings; `profile_id` must be the authenticated profile. Start
 is idempotent on `playback_attempt_id` plus a digest of the request: replaying

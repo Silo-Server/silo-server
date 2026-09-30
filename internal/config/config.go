@@ -342,6 +342,11 @@ type DownloadConfig struct {
 	ArtifactDir           string `yaml:"-"` // prepared-artifact output volume ("" = default under the transcode dir)
 	MaxConcurrentPrepares int    `yaml:"-"` // encode/remux worker-pool size (default 2)
 	ArtifactMaxBytes      int64  `yaml:"-"` // LRU eviction budget for prepared artifacts (0 = unlimited)
+
+	// Playback transcode switches that also govern converted downloads, read
+	// from their playback setting keys so both surfaces follow one toggle.
+	Allow4KTranscode  bool `yaml:"-"` // allow_4k_transcode: 4K sources may be converted
+	AllowHEVCEncoding bool `yaml:"-"` // playback.allow_hevc_encoding: HEVC output when the device decodes it
 }
 
 // PolicyConfig holds embedded policy engine settings.

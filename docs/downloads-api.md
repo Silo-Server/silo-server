@@ -59,11 +59,42 @@ Clients request a **quality preset**. The server records the concrete
 | Public quality | Meaning                                                                                                                                            |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `original`     | Prefer source quality. If device caps show the source cannot be delivered directly, the server may transparently prepare a compatibility artifact. |
-| `20mbps`       | Single-file transcode capped at about 20 Mbps.                                                                                                     |
-| `10mbps`       | Single-file transcode capped at about 10 Mbps.                                                                                                     |
-| `5mbps`        | Single-file transcode capped at about 5 Mbps.                                                                                                      |
-| `2mbps`        | Single-file transcode capped at about 2 Mbps.                                                                                                      |
-| `1mbps`        | Single-file transcode capped at about 1 Mbps.                                                                                                      |
+| `20mbps`       | Single-file transcode capped at 20 Mbps, up to 2160p.                                                                                              |
+| `10mbps`       | Single-file transcode capped at 10 Mbps, up to 1080p.                                                                                              |
+| `5mbps`        | Single-file transcode capped at 5 Mbps, up to 1080p (720p above 30 fps).                                                                           |
+| `2mbps`        | Single-file transcode capped at 2 Mbps, up to 720p (540p above 30 fps).                                                                            |
+| `1mbps`        | Single-file transcode capped at 1 Mbps, up to 480p.                                                                                                |
+
+Each bitrate preset is paired with a resolution. The server picks the largest
+resolution the bitrate encodes cleanly, then:
+
+- never enlarges the source, and fits it into the resolution's 16:9 box, so a
+  3840x1600 film at `10mbps` becomes 1920x800;
+- never encodes above the source's own bitrate;
+- steps the resolution down until the device's decoder can take it, using the
+  `video_decode` entries from `caps` when sent, otherwise `max_resolution`.
+  Each decoder is checked for size, frame rate, and its profile and H.264
+  level lists (a hardware decoder at the `platform_attested` tier is exempt
+  from those lists, as in playback). The decoder that reaches the largest
+  resolution is used, and the bitrate stays within its `max_bitrate_kbps` and
+  level. When no H.264 decoder meets every limit, the listed ones' sizes still
+  bound the output;
+- encodes HEVC instead of H.264 when the server's HEVC encoding setting is on
+  and `caps` attest an 8-bit HEVC decoder that reaches at least the same
+  resolution (HEVC also earns `1mbps` 540p instead of 480p);
+- answers `quality_unavailable` when strict `video_decode` entries list no
+  decoder for any codec the server may encode, or none that takes 480p;
+- converts a 4K source only when the server allows 4K transcoding, as streaming
+  does. Otherwise presets stop at 1080p and every preset of a 4K title answers
+  `quality_unavailable`.
+
+When a preset would leave the source unchanged — `caps` prove the device plays
+it, it is SDR, it already fits the preset's resolution, and its total bitrate is
+at or under the preset — the server serves the source instead of re-encoding
+it. The row keeps the requested `quality`; `effective_quality` is `original`.
+
+`quality_options` in the capability (§3) reports each preset's resolution for
+labels.
 
 `remux` is **not** a public quality preset. It is an internal delivery format used
 when `original` is requested but device caps show the source only needs container
@@ -72,7 +103,8 @@ or audio compatibility work. Rows expose both:
 - `quality`: what the client requested.
 - `effective_quality`: what the server actually delivered after compatibility fallback.
 - `delivery_format`: `original`, `remux`, or `transcode`.
-- `target_bitrate_kbps`: `0` for original/remux; bitrate cap for transcodes.
+- `target_bitrate_kbps`: `0` for original/remux; for a transcode, the video bitrate
+  cap it encodes to — the preset's, or less when the source itself is smaller.
 
 The ordered preset ladder is:
 
@@ -96,8 +128,27 @@ Yes, manifests include metadata needed to make the offline item feel native:
 - External and downloaded subtitle fetch URLs plus known subtitle file sizes.
 - Container, codecs, resolution, HDR, duration, selected audio track, and audio
   track inventory. For remux/transcode entries these describe the prepared
-  artifact the file endpoint actually delivers (single audio track, target
-  container/codecs), not the catalog source it was prepared from.
+  artifact the file endpoint actually delivers (target container/codecs), not
+  the catalog source it was prepared from.
+
+Prepared remux/transcode files keep every source audio track in source order,
+so `audio_tracks[].index` and `selected_audio_track_index` address positions
+in the delivered MP4. Transcodes encode each track to stereo AAC; remuxes copy
+tracks that share the primary track's codec (or are AAC/MP3) when MP4 can
+store that codec (AAC, MP3, AC-3, E-AC-3, ALAC) and encode the rest to stereo
+AAC. The server records the audio tracks when the file becomes ready, so a
+later rescan of a replaced source does not change `audio_tracks`; a
+`selected_audio_track_index` that no longer names the same-language track
+falls back to the file's default track. Embedded plain-text subtitles (SRT, WebVTT) are carried
+inside the MP4 as timed text, with their language, title, and forced flag.
+MP4 timed text would drop ASS/SSA styling, drawing commands, and overlapping
+events, and MP4 cannot store bitmap subtitles, so each embedded ASS/SSA track is
+listed in `subtitles[]` as an `ass` sidecar and each PGS track as a `sup`
+sidecar, with the track's `title` when it has one; DVD and DVB bitmap subtitles are not carried. MP4 marks the first
+embedded subtitle track as default, so clients choose subtitles from forced
+flags and viewer preference rather than that flag.
+Files prepared before this layout contain only the first audio track and no
+subtitles, and their manifests keep describing them that way.
 - Stable provider identity and integrity metadata for local validation/rescan recovery.
 
 The client still needs to fetch artwork/subtitle bytes once while online and cache
@@ -173,6 +224,14 @@ Response:
     "2mbps",
     "1mbps"
   ],
+  "quality_options": [
+    { "preset": "original" },
+    { "preset": "20mbps", "bitrate_kbps": 20000, "max_height": 2160 },
+    { "preset": "10mbps", "bitrate_kbps": 10000, "max_height": 1080 },
+    { "preset": "5mbps", "bitrate_kbps": 5000, "max_height": 1080 },
+    { "preset": "2mbps", "bitrate_kbps": 2000, "max_height": 720 },
+    { "preset": "1mbps", "bitrate_kbps": 1000, "max_height": 480 }
+  ],
   "transcode_enabled": true,
   "transcode_user_allowed": true,
   "season_download": true,
@@ -194,6 +253,7 @@ Response:
 | `enabled`                | Downloads feature is enabled on the server.                                       |
 | `download_allowed`       | This user may download at all.                                                    |
 | `quality_presets`        | Ordered quality values this user may request now. Only offer values in this list. |
+| `quality_options`        | One entry per `quality_presets` value, same order: `preset`, the video `bitrate_kbps` cap, and `max_height`, the tallest output that preset can produce on this server (for a label such as "10 Mbps · up to 1080p"). Both numbers are omitted for `original`. `max_height` already reflects the server's 4K and HEVC settings and the account's quality ceiling; the actual output can be smaller for a smaller or higher-frame-rate source or a device that decodes less. |
 | `transcode_enabled`      | Server-level transcode-to-file gate.                                              |
 | `transcode_user_allowed` | Per-user transcode-to-file permission.                                            |
 | `season_download`        | Per-season batch downloads are available.                                         |
@@ -238,7 +298,7 @@ Request body:
 | --------------- | ------ | ---------------------------------------------------------------------------- |
 | `content_id`    | string | Required. Movie or series content id.                                        |
 | `episode_id`    | string | Episode content id for an episode download.                                  |
-| `media_file_id` | string | Optional explicit media-file/version id, as a canonical positive decimal string. |
+| `media_file_id` | string | Optional explicit media-file/version id, as a canonical positive decimal string. Omitted: the server picks the version (see below). |
 | `quality`       | string | `original` by default, or one of `quality_presets`.                          |
 | `series`        | bool   | `true` means download every episode of `content_id` at original quality.     |
 | `season_number` | int    | With `series: true`, restrict to one season. `0` is the Specials season; negative values are rejected with `400`. Dispatch is on field presence: omit the field entirely for a whole-series download. |
@@ -247,6 +307,24 @@ Request body:
 | `expected_revision` | int | Managed single-item guard. `0` requires an absent entry; a positive value reuses, revives or replaces the entry named by `expected_download_id`. |
 | `expected_download_id` | string | The exact registry entry a positive `expected_revision` targets.      |
 | `expected_entries` | object | Up to 100 episode-ID to `{id, revision}` guards for a batch page.        |
+
+When a single download omits `media_file_id`, and for every episode of a
+series or season page or a series monitor, the server picks the version from
+the profile's watch history, in this order:
+
+1. The file the profile last played for that movie or episode.
+2. For an episode, the version closest to the series' most recent play within
+   the profile's latest 200 progress entries, matched on edition, then
+   resolution, HDR and video codec.
+3. The highest resolution; equal resolutions go to the lowest file id.
+
+Only versions the profile may play (library access and quality ceiling) are
+candidates. When none of an item's versions qualify, the server picks from all
+of them as above. The create, or the later file request, is then refused
+unless a `quality` preset brings the download under the ceiling.
+
+A client that shows a version to the user should send its `media_file_id`, so
+the download is the file the user saw.
 
 Capabilities mirror streaming playback caps:
 
@@ -544,16 +622,24 @@ manifest's `artwork_urls` point here. Fetch each available image once while onli
 and cache the bytes locally. Artwork and subtitle assets are whole-object,
 privately cached deliveries; they do not advertise byte ranges.
 
+When the artwork store fails, times out, or answers 429 or 5xx, the route returns
+`503 dependency_unavailable` with `Retry-After: 5`; retry the same request later.
+Other failures, such as `404 not_found`, won't succeed on a retry.
+
 ### 4.9 Subtitle proxy
 
 ```http
 GET /api/v2/downloads/{id}/subtitles/{ref}
 ```
 
-`ref` comes from `subtitles[].fetch_url` and encodes either `external:{index}` or
-`downloaded:{id}`; `X-Silo-Device-Id` is required. Invalid refs return
-`422 validation_failed`. Current content access is checked before asset delivery,
-and downloaded-subtitle ownership must match the entry's media file.
+`ref` comes from `subtitles[].fetch_url` and encodes `external:{index}`,
+`embedded:{ordinal}`, or `downloaded:{id}`; `X-Silo-Device-Id` is required.
+`embedded` refs name an embedded ASS/SSA or PGS track by subtitle ordinal and
+return the complete track, as an ASS script or a `.sup` elementary stream,
+extracted from the source file.
+Invalid refs return `422 validation_failed`. Current content access is checked
+before asset delivery, and downloaded-subtitle ownership must match the entry's
+media file.
 
 ### 4.10 Direct download
 
@@ -621,7 +707,7 @@ server version.
 | `quality`             | string | Requested public quality.                                              |
 | `effective_quality`   | string | Actual quality delivered after compatibility fallback.                 |
 | `delivery_format`     | string | `original`, `remux`, or `transcode`.                                   |
-| `target_bitrate_kbps` | int    | `0` for original/remux; bitrate cap for transcode.                     |
+| `target_bitrate_kbps` | int    | `0` for original/remux; the transcode's video bitrate cap (at most the preset's). |
 | `revision`            | int    | Increments when an existing managed row is replaced with a new target. |
 | `created_at`          | string | RFC3339.                                                               |
 | `completed_at`        | string | Present once completed.                                                |
@@ -1096,7 +1182,9 @@ has richer playback capability detection.
 Use `max_resolution` and `hdr` from actual device/display capability where known.
 For Apple TV 4K or modern HDR-capable devices, the client may advertise `4k` and
 `hdr: true`; older phones/tablets should stay conservative. These caps affect
-only server-side compatibility decisions and bitrate transcode targets.
+only server-side compatibility decisions and bitrate transcode targets: a
+preset's resolution steps down until the device decodes it, and a client that
+sends no `caps` gets the preset's full resolution.
 
 A client with real decoder facts can send `video_evidence` and `video_decode`
 alongside the flat lists. Note what that changes: detailed entries supersede the
@@ -1533,7 +1621,7 @@ unavailable or ineligible proxy targets fall back to existing local delivery.
 `GET /api/v2/downloads/{id}/artwork/{kind}` and
 `GET /api/v2/downloads/{id}/subtitles/{ref}` require the device header.
 Artwork kinds are poster, backdrop and logo; subtitle references retain the
-existing external:index and downloaded:id identity. Current content access is
+external:index, embedded:ordinal, and downloaded:id identity. Current content access is
 checked before asset delivery, and downloaded subtitle ownership must match the
 entry's media file. These two asset routes preserve whole-object delivery and
 private caching; they do not advertise byte ranges.

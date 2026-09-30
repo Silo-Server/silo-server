@@ -434,15 +434,12 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 	conditions = append(conditions, MangaChapterExclusionWhere("mi"))
 
 	if prefix := strings.TrimSpace(access.NamePrefix); prefix != "" {
-		// Dual-column OR matching browse.go and favorites_browse.go: items where
-		// a curated sort_title differs from title (e.g. title="The Office",
-		// sort_title="Office, The") would be silently lost on prefix="the" if we
-		// only checked the COALESCE'd sort-key expression. The first arm uses the
-		// scope-specific sort key; the second arm keeps literal title prefixes.
-		prefixSortExpr := builder.normalizedTitleExpr()
+		// Match only the scope-specific sort key that title sorting orders by,
+		// like sortTitlePrefixCondition in browse.go: title="The Office" with
+		// sort_title="Office, The" belongs under O, not also under T.
 		conditions = append(conditions, fmt.Sprintf(
-			"(%s LIKE $%d ESCAPE '\\' OR LOWER(mi.title) LIKE $%d ESCAPE '\\')",
-			prefixSortExpr, argIdx, argIdx,
+			"%s LIKE $%d ESCAPE '\\'",
+			builder.normalizedTitleExpr(), argIdx,
 		))
 		args = append(args, escapePrefixForLike(prefix)+"%")
 		argIdx++

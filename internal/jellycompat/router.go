@@ -115,6 +115,7 @@ func NewRouter(deps Dependencies) chi.Router {
 				WithEpisodeRepository(deps.EpisodeRepo).
 				WithSearchProvider(deps.CatalogSearchProvider)
 		}
+		itemsHandler.collectionPosters = deps.CollectionPosters
 		// Smart (live-query) collections derive membership at read time, so the
 		// BoxSet children path needs a query executor to resolve them.
 		itemsHandler.queryExecutor = &catalog.QueryExecutor{Pool: deps.DB}
@@ -199,6 +200,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	imagesHandler := NewImagesHandler(deps.ContentService, deps.IDCodec, deps.SessionStore, deps.ImageCache, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.FolderRepo, deps.SeasonRepo, deps.EpisodeRepo, deps.AccessFilterFn, deps.PosterPresigner, deps.PresignTTL, deps.JWTSecret, deps.HTTPClient)
 	imagesHandler.collections = itemsHandler.collections
 	imagesHandler.userCollections = itemsHandler.userCollections
+	imagesHandler.collectionPosters = itemsHandler.collectionPosters
 	imagesHandler.keyAuth = adminAPIKeyAuth
 	imagesHandler.frontendFS = deps.FrontendFS
 	displayPrefsHandler := NewDisplayPreferencesHandler(deps.UserStoreProvider)

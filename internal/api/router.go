@@ -23,6 +23,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
+	"github.com/Silo-Server/silo-server/internal/animeids"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/apiv2"
@@ -89,8 +90,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/themesongs"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/watchlist"
 	"github.com/Silo-Server/silo-server/internal/watchstate"
-	watchtrakt "github.com/Silo-Server/silo-server/internal/watchsync/providers/trakt"
 	"github.com/Silo-Server/silo-server/internal/watchtogether"
 	"github.com/Silo-Server/silo-server/internal/webhooksync"
 )
@@ -721,6 +722,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var catalogSearchService *catalog.CatalogSearchService
 	var webhookSyncHandler *handlers.WebhookSyncHandler
 	var requestHandler *handlers.RequestsHandler
+	// watchlistTitles is the one watchlist.Titles every surface shares: the
+	// v2 title operations, promotion on library watchlist reads, the title
+	// detail's repair observer and the profile purge.
+	var watchlistTitles *watchlist.Titles
 	var onboardingHandler *handlers.OnboardingHandler
 	// Declared here (assigned in the playback block below) so the onboarding
 	// gates closure can reference it before that block runs.
@@ -730,6 +735,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var ebookProgressStore *handlers.PGEbookReaderProgressStore
 	var ebookConfigStore *handlers.PGEbookReaderConfigStore
 	var ebookAnnotationStore *handlers.PGEbookReaderAnnotationStore
+	var watchlistRequestWithdrawer *mediarequests.Service
 	if deps.DB != nil {
 		ebookProgressStore = handlers.NewPGEbookReaderProgressStore(deps.DB)
 		ebookConfigStore = handlers.NewPGEbookReaderConfigStore(deps.DB)
@@ -858,27 +864,39 @@ func newChiRouter(deps Dependencies) chi.Router {
 				ebookReaderHandler.Conversion = conv
 			}
 		}
-		catalogResourceHandler = handlers.NewCatalogResourceHandler(itemsHandler)
-		catalogHandler = handlers.NewCatalogHandler(
-			catalog.NewCatalogResolver(browseRepo, itemRepo).
-				WithEpisodeRepository(episodeRepo).
-				WithUserStoreProvider(deps.UserStoreProvider).
-				WithSearchProvider(catalogSearchService.Provider()),
-			itemsHandler,
-		)
-		catalogHandler.SetWorkSummaryProvider(literaryRepo)
-
 		tmdbAPIKey := ""
 		if deps.Config != nil {
 			tmdbAPIKey = deps.Config.TMDBAPIKey
 		}
+		requestsTMDB := tmdb.NewClient(tmdbAPIKey, 40)
+		// deps.UserStoreProvider is the notification-wrapped provider, so a
+		// promoted series queues an interest recompute. The promotion effects
+		// are the personal data handler, wired once it exists.
+		watchlistTitles = watchlist.NewTitles(deps.DB, itemRepo, deps.UserStoreProvider, requestsTMDB, nil)
+
+		catalogResourceHandler = handlers.NewCatalogResourceHandler(itemsHandler)
+		catalogResourceHandler.SetWatchlistPromoter(watchlistTitles)
+		catalogHandler = handlers.NewCatalogHandler(
+			catalog.NewCatalogResolver(browseRepo, itemRepo).
+				WithEpisodeRepository(episodeRepo).
+				WithUserStoreProvider(deps.UserStoreProvider).
+				WithSearchProvider(catalogSearchService.Provider()).
+				WithWatchlistPromoter(watchlistTitles),
+			itemsHandler,
+		)
+		catalogHandler.SetWorkSummaryProvider(literaryRepo)
+
 		requestsRepo := mediarequests.NewRepository(deps.DB, deps.SecretCipher)
 		requestSvc := mediarequests.NewService(
 			requestsRepo,
-			tmdb.NewClient(tmdbAPIKey, 40),
+			requestsTMDB,
 			mediarequests.NewCatalogPresence(itemRepo, providerIDRepo),
 		)
+		requestSvc.SetTitleObserver(watchlistTitles)
+		watchlistRequestWithdrawer = requestSvc
+		requestSvc.SetWatchlistPreference(mediarequests.StoreWatchlistPreference{Stores: deps.UserStoreProvider})
 		AttachRequestRouter(requestSvc, deps.PluginService)
+		requestSvc.SetAnimeIndex(animeids.NewStore(deps.DB))
 		requestSvc.SetGroupPolicyProvider(accessGroupStore)
 		if userRepo != nil {
 			requestSvc.SetUserRepository(userRepo)
@@ -1002,6 +1020,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.DB != nil {
 			// Drops live in Postgres whichever store holds the profile.
 			profileHandler.DroppedSeriesPurger = catalog.NewDroppedSeriesRepo(deps.DB)
+			profileHandler.WatchlistTitlesPurger = watchlistTitles
+		}
+		if watchlistRequestWithdrawer != nil {
+			profileHandler.WatchlistRequestWithdrawer = watchlistRequestWithdrawer
 		}
 		profileHandler.ProfileTokens = profileTokenService
 		// Private S3 preserves existing avatar keys and presigned delivery. Local
@@ -1018,6 +1040,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		personalDataHandler.SetEpisodeRepo(episodeRepo)
 		personalDataHandler.SetSeasonRepo(seasonRepo)
+		if watchlistTitles != nil {
+			personalDataHandler.SetWatchlistTitles(watchlistTitles)
+			watchlistTitles.SetEffects(personalDataHandler)
+		}
 		personalDataHandler.EventsHub = deps.EventsHub
 		if dispatcher, ok := deps.WatchProviderService.(handlers.LocalListEventDispatcher); ok {
 			personalDataHandler.SetLocalListEventDispatcher(dispatcher)
@@ -1088,7 +1114,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		homeDismissalHandler = handlers.NewHomeDismissalHandler(deps.UserStoreProvider)
 		homeDismissalHandler.EventsHub = deps.EventsHub
 		if deps.DB != nil {
-			homeDismissalHandler.SetSeriesDrops(catalog.NewDroppedSeriesRepo(deps.DB), itemRepo)
+			homeDismissalHandler.SetSeriesDrops(notifications.TrackDroppedSeries(catalog.NewDroppedSeriesRepo(deps.DB), deps.Notifications), itemRepo)
 		}
 		if dispatcher, ok := deps.WatchProviderService.(handlers.LocalDroppedEventDispatcher); ok {
 			homeDismissalHandler.SetLocalDroppedEventDispatcher(dispatcher)
@@ -1435,6 +1461,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		adminHandler.RestartStatus = restartStatus
 		adminHandler.CatalogSearchStatus = catalogSearchService
 		adminHandler.DiagnosticsStore = diagnosticsStore
+		if watchlistTitles != nil && deps.DB != nil {
+			adminHandler.WatchlistTitlesSweeper = watchlistTitles
+		}
 		if settingsRepo != nil {
 			adminHandler.SettingsRepo = settingsRepo
 		}
@@ -1449,6 +1478,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if accessGroupStore != nil {
 		accessGroupHandler = handlers.NewAccessGroupHandler(accessGroupStore)
+		accessGroupHandler.OnUserSessionsRevoked = deps.OnUserSessionsRevoked
 	}
 	if deps.DB != nil {
 		jobRepo := adminjob.NewRepository(deps.DB)
@@ -1730,6 +1760,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		sectionBulkHandler = &handlers.SectionBulkHandler{Repo: sectionRepo}
 		sectionFetcher := sections.NewFetcher(deps.DB)
 		sectionFetcher.StoreProvider = deps.UserStoreProvider
+		if watchlistTitles != nil {
+			sectionFetcher.WatchlistPromoter = watchlistTitles
+		}
 		sectionFetcher.CollectionRepo = catalog.NewLibraryCollectionRepository(deps.DB)
 		sectionFetcher.NextUpRepo = catalog.NewNextUpRepository(deps.DB, deps.UserStoreProvider)
 		sectionFetcher.AudiobookNextRepo = catalog.NewAudiobookNextRepository(deps.DB)
@@ -1826,12 +1859,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 				settings: settingsRepo,
 			}
 		}
-		if libraryCollectionService.TraktTokenResolver == nil && deps.DB != nil && settingsRepo != nil {
+		if tokens, ok := deps.WatchProviderService.(watchProviderAccessTokens); ok && libraryCollectionService.TraktTokenResolver == nil && deps.DB != nil {
 			libraryCollectionService.TraktTokenResolver = &traktCollectionTokenResolver{
-				pool:     deps.DB,
-				settings: settingsRepo,
-				cipher:   deps.SecretCipher,
-				provider: watchtrakt.NewProvider(nil, ""),
+				pool:   deps.DB,
+				tokens: tokens,
 			}
 		}
 
@@ -1943,6 +1974,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.DB != nil {
 			recsFetcher := sections.NewFetcher(deps.DB)
 			recsFetcher.StoreProvider = deps.UserStoreProvider
+			if watchlistTitles != nil {
+				recsFetcher.WatchlistPromoter = watchlistTitles
+			}
 			recsFetcher.NextUpRepo = catalog.NewNextUpRepository(deps.DB, deps.UserStoreProvider)
 			recsFetcher.AudiobookNextRepo = catalog.NewAudiobookNextRepository(deps.DB)
 			recsHandler.Fetcher = recsFetcher
@@ -2004,6 +2038,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 				subtitleSource = subtitleManager
 			}
 			downloadSvc.SetOfflineDeps(detailSvc, subtitleSource, nil)
+		}
+		if streamHandler != nil {
+			downloadSvc.SetSubtitleCache(streamHandler.SubtitleCache)
 		}
 		if deps.MarkerPopulation != nil {
 			downloadSvc.SetMarkerPopulation(deps.MarkerPopulation)
@@ -2694,6 +2731,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.Requests = requestHandler.Service()
 		v2deps.RequestLifecycle = requestHandler.Service()
 		v2deps.AdminRequests = requestHandler.Service()
+		if watchlistRequests, ok := requestHandler.Service().(apiv2.WatchlistRequestService); ok && personalDataHandler != nil && watchlistTitles != nil {
+			v2deps.WatchlistTitles = personalDataHandler
+			v2deps.WatchlistRequests = watchlistRequests
+		}
 	}
 	if collectionHandler != nil {
 		v2deps.PersonalCollections = collectionHandler

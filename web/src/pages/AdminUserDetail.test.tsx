@@ -190,6 +190,15 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
   useAdminLibraries: () => ({ data: [] }),
 }));
 
+// The Requests section reads through react-query; its own test covers it.
+vi.mock("./admin-users/AccountRequestsPanel", () => ({
+  AccountRequestsPanel: ({ user, groupName }: { user: AdminUser; groupName?: string }) => (
+    <section aria-label="Requests">
+      Requests for {user.username} in {groupName ?? "no group"}
+    </section>
+  ),
+}));
+
 vi.mock("@/hooks/queries/admin/history", () => ({
   useAdminUserProfiles: () => ({ data: [], isLoading: false }),
   useAdminPlaybackHistory: () => ({ data: { entries: [] }, isLoading: false }),
@@ -777,6 +786,17 @@ describe("AdminUserDetail effective values", () => {
     renderUserDetail();
 
     expect(rowValue("Audio Transcodes")).toBe("Not allowed");
+  });
+
+  it("shows the Requests section with the account's group", () => {
+    mocks.user = { ...adminUser, access_group_id: 3 };
+    renderUserDetail();
+
+    expect(screen.getByRole("region", { name: "Requests" })).toHaveTextContent(
+      "Requests for taylor in Kids",
+    );
+    // The requests switch stays with the account's other effective values.
+    expect(rowValue("Media Requests")).toBe("Allowed");
   });
 });
 

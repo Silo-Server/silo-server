@@ -5,10 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -160,6 +164,126 @@ func TestManifestBuilderAssembles(t *testing.T) {
 	}
 }
 
+func preparedManifestFixture(artifact *Artifact) (*ManifestBuilder, *Download) {
+	audio := []models.AudioTrack{
+		{Codec: "truehd", Channels: 8, Language: "en", Layout: "7.1", Title: "TrueHD 7.1", Default: true},
+		{Codec: "ac3", Channels: 2, Language: "ja", EmbeddedTitle: "Commentary", Title: "Commentary"},
+	}
+	selected := 1
+	detail := &catalog.ItemDetail{Type: "movie", Title: "The Movie", Versions: []catalog.FileVersion{{
+		FileID: 99, Container: "mkv", CodecVideo: "hevc", CodecAudio: "truehd", Resolution: "2160p",
+		AudioTracks: audio, EffectiveAudioTrackIndex: &selected,
+	}}}
+	file := &models.MediaFile{
+		ID: 99, CodecAudio: "truehd", AudioTracks: audio,
+		ExternalSubtitles: []models.ExternalSubtitle{{Path: "/media/sub.en.srt", Language: "en", Format: "srt"}},
+		SubtitleTracks: []models.SubtitleTrack{
+			{Codec: "subrip", Language: "en"},
+			{Codec: "hdmv_pgs_subtitle", Language: "fr", Forced: true},
+			{Codec: "ass", Language: "ja", EmbeddedTitle: "Signs & Songs", HearingImpaired: true},
+		},
+	}
+	lookup := func(context.Context, string) (*Artifact, error) { return artifact, nil }
+	b := NewManifestBuilder(fakeManifestSource{detail: detail}, nil, fakeFileResolver{file: file}, lookup)
+	return b, &Download{ID: "dl1", ContentID: "c1", MediaFileID: 99, Format: FormatTranscode, ArtifactID: artifact.ID}
+}
+
+// TestManifestDescribesMultiTrackArtifact verifies a multi-track prepared file
+// is described by output position, with encoded tracks reporting their AAC
+// layout and PGS offered as a .sup sidecar the MP4 cannot store.
+func TestManifestDescribesMultiTrackArtifact(t *testing.T) {
+	b, dl := preparedManifestFixture(&Artifact{
+		ID: "a1", Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", Resolution: "1080p",
+		AudioTrackIndex: -1, TrackRecipeVersion: playback.PreparedTracksRecipeVersion,
+	})
+	m, err := b.Build(context.Background(), dl, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	// The viewer's catalog selection (the commentary track) survives because
+	// every source track is present at its source position.
+	if len(m.AudioTracks) != 2 || m.SelectedAudioTrackIndex == nil || *m.SelectedAudioTrackIndex != 1 {
+		t.Fatalf("audio tracks = %+v selected %v, want both tracks with output 1 selected", m.AudioTracks, m.SelectedAudioTrackIndex)
+	}
+	if !m.AudioTracks[0].Default {
+		t.Fatal("source default track lost its default flag")
+	}
+	for i, track := range m.AudioTracks {
+		if track.Index != i || track.Codec != "aac" || track.Channels != 2 || track.Layout != "stereo" {
+			t.Fatalf("audio track %d = %+v, want AAC stereo at output %d", i, track, i)
+		}
+	}
+	if m.AudioTracks[1].Language != "ja" || m.AudioTracks[1].Title != "Commentary" || m.AudioTracks[1].Default {
+		t.Fatalf("commentary track = %+v", m.AudioTracks[1])
+	}
+	if len(m.Subtitles) != 3 {
+		t.Fatalf("subtitles = %+v, want external sidecar plus PGS and ASS sidecars", m.Subtitles)
+	}
+	pgs := m.Subtitles[1]
+	if pgs.FetchURL != "/api/v2/downloads/dl1/subtitles/embedded:1" || pgs.Format != "sup" || pgs.Language != "fr" || !pgs.Forced || pgs.External {
+		t.Fatalf("PGS sidecar = %+v", pgs)
+	}
+	ass := m.Subtitles[2]
+	if ass.FetchURL != "/api/v2/downloads/dl1/subtitles/embedded:2" || ass.Format != "ass" || ass.Language != "ja" || ass.Title != "Signs & Songs" || !ass.HearingImpaired {
+		t.Fatalf("ASS sidecar = %+v", ass)
+	}
+}
+
+// TestManifestDescribesFrozenAudioAfterSourceReprobe verifies a ready
+// multi-track file keeps the audio inventory it was prepared with after the
+// source is replaced at the same path and re-probed.
+func TestManifestDescribesFrozenAudioAfterSourceReprobe(t *testing.T) {
+	prepared := []OfflineAudioTrack{
+		{Index: 0, Language: "en", Codec: "aac", Channels: 2, Layout: "stereo", Bitrate: 192, Default: true},
+		{Index: 1, Language: "ja", Codec: "aac", Channels: 2, Layout: "stereo", Bitrate: 192},
+	}
+	b, dl := preparedManifestFixture(&Artifact{
+		ID: "a1", Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", Resolution: "1080p",
+		AudioTrackIndex: -1, TrackRecipeVersion: playback.PreparedTracksRecipeVersion,
+		PreparedAudioTracks: prepared,
+	})
+	reprobed := []models.AudioTrack{
+		{Codec: "ac3", Channels: 6, Language: "ja", Default: true},
+		{Codec: "truehd", Channels: 8, Language: "en"},
+		{Codec: "dts", Channels: 6, Language: "fr"},
+	}
+	for _, selected := range []int{2, 0} {
+		b.detail.(fakeManifestSource).detail.Versions[0].AudioTracks = reprobed
+		b.detail.(fakeManifestSource).detail.Versions[0].EffectiveAudioTrackIndex = &selected
+		b.fileRepo.(fakeFileResolver).file.AudioTracks = reprobed
+		m, err := b.Build(context.Background(), dl, catalog.AccessFilter{})
+		if err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		if !reflect.DeepEqual(m.AudioTracks, prepared) {
+			t.Fatalf("audio tracks = %+v, want the frozen inventory %+v", m.AudioTracks, prepared)
+		}
+		// Neither the out-of-range position nor the position now holding a
+		// different language describes a delivered track the viewer chose.
+		if m.SelectedAudioTrackIndex == nil || *m.SelectedAudioTrackIndex != 0 {
+			t.Fatalf("selection %d: selected = %v, want the delivered default 0", selected, m.SelectedAudioTrackIndex)
+		}
+	}
+}
+
+// TestManifestDescribesLegacySingleTrackArtifact keeps already-prepared files
+// described as the one audio stream they contain, without PGS sidecars.
+func TestManifestDescribesLegacySingleTrackArtifact(t *testing.T) {
+	b, dl := preparedManifestFixture(&Artifact{
+		ID: "a1", Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", Resolution: "1080p", AudioTrackIndex: -1,
+	})
+	m, err := b.Build(context.Background(), dl, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(m.AudioTracks) != 1 || m.AudioTracks[0].Codec != "aac" || *m.SelectedAudioTrackIndex != 0 {
+		t.Fatalf("legacy audio tracks = %+v", m.AudioTracks)
+	}
+	if len(m.Subtitles) != 1 || m.Subtitles[0].FetchURL != "/api/v2/downloads/dl1/subtitles/external:0" {
+		t.Fatalf("legacy subtitles = %+v, want only the external sidecar", m.Subtitles)
+	}
+}
+
 func TestParseSubtitleRef(t *testing.T) {
 	cases := []struct {
 		ref       string
@@ -170,6 +294,7 @@ func TestParseSubtitleRef(t *testing.T) {
 		{"external:0", "external", 0, false},
 		{"external:12", "external", 12, false},
 		{"downloaded:7", "downloaded", 7, false},
+		{"embedded:3", "embedded", 3, false},
 		{"bogus", "", 0, true},
 		{"external:x", "", 0, true},
 		{"weird:1", "", 0, true},
@@ -189,4 +314,30 @@ func TestParseSubtitleRef(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestServeEmbeddedSubtitleOnlyServesSidecarTracks(t *testing.T) {
+	file := &models.MediaFile{
+		ID: 99, FilePath: t.TempDir() + "/missing.mkv",
+		SubtitleTracks: []models.SubtitleTrack{
+			{Codec: "subrip"},
+			{Codec: "hdmv_pgs_subtitle"},
+		},
+	}
+	s := &Service{fileRepo: fakeFileResolver{file: file}}
+	dl := &Download{ID: "dl1", MediaFileID: 99}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	for _, ordinal := range []int{-1, 0, 2} {
+		if err := s.serveEmbeddedSubtitle(httptest.NewRecorder(), req, dl, ordinal); !errors.Is(err, ErrAssetNotFound) {
+			t.Fatalf("ordinal %d err = %v, want ErrAssetNotFound", ordinal, err)
+		}
+	}
+	// A failed PGS extract after the shared cache committed its 200 must abort
+	// the response rather than end it as a complete track.
+	defer func() {
+		if rec := recover(); rec != http.ErrAbortHandler { //nolint:errorlint // sentinel compared by identity, as net/http does
+			t.Fatalf("failed committed extract recovered %v, want http.ErrAbortHandler", rec)
+		}
+	}()
+	_ = s.serveEmbeddedSubtitle(httptest.NewRecorder(), req, dl, 1)
 }

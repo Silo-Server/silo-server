@@ -265,8 +265,48 @@ with `SILO_DEBUG_LISTEN=127.0.0.1:6060`. It is disabled by default, binds before
 PostgreSQL connection, and never participates in readiness. Invalid addresses
 fail bootstrap; an occupied debug port reports an error while the workload
 continues. Migration and utility commands do not start the listener.
-[Profiling operations](../operations/profiling.md) describes capture limits,
-namespace access, private artifacts, cancellation and native profiling.
+`silo_debug_listener_available` and `silo_debug_listener_failures_total`
+distinguish an absent listener from a healthy one.
+
+The listener is an operational interface outside `/api/v2`. It exposes no native
+client operations and needs no Apple, Android, Jellyfin, or ABS client changes.
+The primary and compatibility listeners never serve Go profiles. A frontend SPA
+may answer an unknown profiling path with HTML, so tests and tools check response
+content rather than assuming an absent endpoint returns 404. Requests require
+GET, a literal loopback Host authority, and local browser-origin headers when
+present; responses carry `Cache-Control: no-store`. Loopback binding trusts every
+process in the network namespace; it does not isolate tenants sharing a host or
+pod.
+
+Captures are bounded per process:
+
+| Profile | Bound |
+| --- | --- |
+| `profile` (CPU) | Default 30 seconds; maximum 60 |
+| `heap`, `allocs`, `goroutine`, `threadcreate` | Immediate, or a delta of up to 60 seconds |
+| `block`, `mutex` | Disabled (HTTP 409) unless `SILO_DEBUG_BLOCK_RATE` (1,000,000–1,000,000,000 ns) or `SILO_DEBUG_MUTEX_FRACTION` (100–1,000,000) is set at startup |
+| `trace` | Default 1 second; maximum 5 |
+
+Only one capture runs per process, including snapshots and forced GC. Concurrent
+requests fail at once with HTTP 429 and increment
+`silo_debug_captures_busy_total`; there is no queue. Unknown, duplicate,
+malformed, or excessive parameters are rejected before profiling starts. Client
+disconnect and server shutdown cancel timed captures, though runtime GC or stack
+collection may finish first and the slot stays held until the handler exits.
+Duration limits bound neither stop-the-world pauses nor output size, which is why
+`scripts/silo-profile` caps output (128 MiB by default) and the request deadline
+(75 seconds), never overwrites an artifact, and marks a sidecar `valid: true`
+only after a complete response with the uninterrupted-capture trailer. The
+listener omits `cmdline`, `symbol`, generic expvar, and dynamically discovered
+profile names. Analyze a capture with the Go release and executable that
+produced it:
+
+```sh
+go tool pprof -top incident/silo incident/cpu.pprof
+go tool pprof -sample_index=inuse_space -top incident/silo incident/heap.pprof
+go tool pprof -diff_base=incident/before.pprof -top incident/silo incident/after.pprof
+go tool trace -http=127.0.0.1:8088 incident/runtime.trace
+```
 
 The native API exposes administrator summaries at
 `GET /api/v2/admin/system/resources` and capability discovery at
@@ -294,9 +334,67 @@ Use node-exporter, a container exporter, GPU vendor exporters and dependency
 exporters for device latency, network drops, host pressure, PostgreSQL locks/WAL,
 Redis evictions and object-store capacity. Silo measures the calls it owns.
 
+Go heap profiles describe sampled Go allocations only: not libvips or other
+native allocations, FFmpeg memory, plugin internals, filesystem cache, or GPU
+allocations. Completed-child metrics consume the owner's existing process exit
+state. `silo_subprocess_cpu_seconds_total` reports user and system CPU at
+completion, `silo_subprocess_exits_total` counts bounded workload and outcome
+categories, and `silo_subprocess_peak_rss_bytes` is a distribution of per-child
+maximum RSS, normalized to bytes and omitted on unsupported platforms.
+Instrumented owners are playback transcodes and restarts, progressive remux,
+scanner probes, plugin shutdown and failed startup, and media analysis and
+chapter thumbnail runs through `internal/mediasample` (workloads `analysis` and
+`thumbnail`). Other FFmpeg uses need their own owner instrumentation before
+claiming coverage. No second waiter or reaper is installed.
+
+### Node resource sampling
+
+`internal/nodemetrics` samples CPU, memory, disk, network and GPU in every
+serving process every five seconds and keeps only the current sample; trends and
+alerts belong to Prometheus. The sample feeds the admin Nodes page, each node's
+`/api/v1/health` and `/status`, `GET /api/v2/admin/system/resources`, and
+`streamapp_node_*` gauges. Proxy and transcode nodes serve `/metrics` on their
+application listener; the API process serves it only on `SILO_METRICS_LISTEN`.
+
+- **Paths stay private.** Disk series are labeled by role (`mount="scratch"`,
+  `mount="library-1"`), never by path, so an unauthenticated scrape cannot
+  enumerate media locations. A node's unauthenticated `/api/v1/health` withholds paths
+  on the same terms. Paths appear only in the admin resources response and a
+  node's bearer-authenticated `/status`.
+- **Probing is bounded.** Each process's sampler checks at most eight mounts:
+  the transcode scratch directory first, then library roots in order. The
+  process logs how many go unsampled. The cap is per process, not per host, so
+  co-located processes each probe their own set. Each mount costs a `statfs` per interval,
+  and one on an unresponsive network mount cannot be interrupted, so the cap
+  bounds probing as well as reporting. A mount that stops responding keeps its
+  last good numbers marked `stale` and never delays a health response; a path
+  the process cannot see reports `unavailable`, not an empty disk.
+- **GPU sources.** Intel (i915, xe) and AMD (amdgpu) busyness comes from DRM
+  fdinfo, which needs no privileges beyond `/dev/dri` and counts only Silo's own
+  FFmpeg processes. NVIDIA exposes no fdinfo, so `nvidia-smi` supplies
+  whole-GPU utilization, encoder and decoder utilization, and VRAM, including
+  other tenants; a missing or repeatedly failing binary reports
+  `source: unavailable`. Whole-GPU Intel sampling would need `intel_gpu_top`
+  with `CAP_PERFMON` and a permissive `kernel.perf_event_paranoid`, which a
+  default container should not get, so Intel `total_busy_pct` is absent rather
+  than zero. Every device reports its `source`.
+- **Container scope.** `/proc/stat` and `/proc/meminfo` describe the host, so
+  the sampler corrects both against the process's cgroup. Memory is the cgroup
+  limit and working set without page cache, the OOM basis. CPU is the cgroup's
+  usage against its own quota, and `cores` is that quota. `/proc/net/dev` is
+  already per network namespace.
+- **Nested LXC.** A Docker container inside an LXC container sees the physical
+  machine's `/proc` and no limit on its own cgroup, because the LXC's cap sits on
+  an ancestor cgroup outside its namespace. lxcfs virtualizes those files for
+  the LXC, so `docker-compose.yml` bind-mounts `/proc/meminfo`, `/proc/stat` and
+  `/proc/loadavg` under `/host/proc`. The sampler reads each `/host/proc` file
+  when present and falls back to its own `/proc` per file, with no setting. lxcfs
+  virtualizes `/proc/loadavg` only with loadavg accounting (`lxcfs -l`), which
+  Proxmox leaves off, so `load1` can still read the physical host's load.
+
 ## Instrumentation ownership
 
-[The workload catalog](../operations/workload-metrics.md) identifies each queue
+[The workload catalog](workload-metrics.md) identifies each queue
 and execution boundary. Attempt counters belong to the executing process and
 are summed across replicas. Shared database queue gauges are sampled by each API
 process and use `max by (cluster, queue, state)`, never a replica sum. Queue age
@@ -366,7 +464,7 @@ The counter's full label product is about 15,000 series. In practice a route
 answers a client with one or two status classes, so even a server that sees
 every client on every route stays near 4,400. All three families count toward
 the per-scrape sample limit in the
-[monitoring examples](../operations/monitoring.md).
+[example Prometheus configuration](../../deploy/observability/prometheus.yml).
 
 Latency for one client on one route lives on the trace. Each request opens a
 server span named `jellycompat <METHOD> <route>` with `http.request.method`,
@@ -451,14 +549,63 @@ process. These boundaries are recorded in the PR follow-up checklist.
 ## Deployment and retention
 
 The main application listener does not serve `/metrics`. Metrics are disabled unless
-the operator sets `SILO_METRICS_LISTEN` to an explicit address. The dedicated listener
+the operator sets `SILO_METRICS_LISTEN` to an explicit address; that setting applies
+to integrated and API processes. Proxy and transcode nodes serve `/metrics` on their
+own application listener. The dedicated listener
 is an unauthenticated operational endpoint, so bind it to an internal monitoring
 network or a loopback address and do not publish it through a public Service or
 ingress. Prometheus should scrape that listener directly. Do not publish the loopback
 profiler through container ports, a public Service, ingress or a native API proxy.
 
-[Monitoring operations](../operations/monitoring.md) includes scrape, dashboard,
-alert and failure-exercise examples. Prometheus owns metric retention; the OTLP
+`deploy/observability/` holds the example Prometheus configuration, alert rules
+with their tests, and a Grafana dashboard. Targets carry a `cluster` label and use
+`process_role` for the deployment role, because `role` already names
+database, cache and storage pools. Prometheus owns metric retention; the OTLP
 backend owns trace/log retention. Profiles remain private incident artifacts
 with deliberate deletion. Silo adds no time-series database or automatic profile
 upload. Dashmetrics retains its existing bounded summary behavior.
+
+### Validating observability changes
+
+Commands assume the repository root is the current directory. CI does not run
+them; run them when changing the examples or rules:
+
+```sh
+docker run --rm --entrypoint promtool -v "$PWD/deploy/observability:/etc/prometheus:ro" prom/prometheus:v3.5.0 check config /etc/prometheus/prometheus.yml
+docker run --rm --entrypoint promtool -v "$PWD/deploy/observability:/etc/prometheus:ro" -w /etc/prometheus prom/prometheus:v3.5.0 test rules silo.rules.test.yml
+```
+
+The rules tests exercise alert logic with synthetic series. Package tests cover
+Linux source parsing, unavailable states, dependency saturation, queue variants,
+capture lifecycle, profile parsing and metric privacy. They do not establish a
+production overhead bound, every GPU vendor's behavior, or Kubernetes
+forwarding support. For a change that could affect those, run these exercises on
+an isolated instance with synthetic media and its own database and cache, and
+record the source SHA, image digest, Go version, resource limits, and profiling
+and OTLP settings in private release evidence:
+
+1. Baseline request p50/p95/p99, throughput, CPU, RSS, allocations, scrape
+   bytes, duration and sample count, and stream stability. Measure metrics,
+   sampled traces, CPU profiles, execution traces and contention sampling
+   separately. Targets: at most 2% CPU or throughput and 5% p95 latency
+   regression.
+2. Capture CPU, heap, allocs, goroutine and trace profiles through the process
+   network namespace, then test a second concurrent capture, client
+   disconnect, duration overflow, an untrusted Host or Origin, and shutdown
+   mid-capture. The main and compatibility listeners must never return profile
+   data.
+3. Occupy the debug port before startup. Readiness must still succeed, with
+   debug availability zero and an explicit listener failure.
+4. Point OTLP at an unavailable collector and send more than a batch. Requests
+   must finish, memory must stay bounded, and exporter failures must be
+   visible.
+5. Exhaust a one-connection PostgreSQL or Redis pool in a test harness and
+   observe wait, timeout, cancellation and recovery without leaking queries,
+   keys or endpoints.
+6. Exercise cgroup throttling, unreadable procfs fixtures, stale disk probes,
+   long and delayed queues, and unavailable sources. Run deliberate OOM tests
+   only on disposable instances.
+7. Run integrated and worker processes under concurrent scan, image, browse,
+   direct stream, transcode and download load. Stop a worker mid-stream,
+   verify recovery, and confirm shared queue, host and GPU aggregation does not
+   double count replicas.

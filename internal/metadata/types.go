@@ -72,6 +72,12 @@ type ProcessRequest struct {
 	// metadata language actually re-fetches titles/overviews.
 	AdoptLanguage            bool
 	recordedStaleProviderIDs providerIDValueSet
+	// callerProviderIDs is ProviderIDs as the caller sent it, before
+	// prepareProcessRequest merges in the item's durable IDs.
+	callerProviderIDs map[string]string
+	// durableProviderIDs is the item's stored provider-ID rows as loaded,
+	// before any request IDs are merged with them.
+	durableProviderIDs map[string]string
 	// enrichmentOnly marks a bulk enrichment write: one enrichment provider's
 	// fields merged into an item that is already matched. See
 	// persistEnrichment for how it differs from a scheduled refresh.
@@ -84,6 +90,9 @@ type ProcessResult struct {
 	IsNew     bool // True if this was an initial match (new item created)
 	Updated   bool // True if any fields were changed
 	Decision  *MatchDecision
+	// Pinned reports that automatic matching skipped an item an admin split
+	// left unmatched on purpose. It is a completed outcome, not a failure.
+	Pinned bool
 }
 
 // MatchDecision is a bounded, persistence-safe explanation of an automatic
@@ -271,6 +280,10 @@ type MetadataResult struct {
 	// replacedProviderIDKeys forces an owning-provider consensus replacement to
 	// overwrite the corresponding stored provider-ID column during merge.
 	replacedProviderIDKeys map[string]struct{}
+	// rejectedIdentityProviderIDs holds the stored identity values an Identify
+	// or corrected NFO rejected. They are suppressed by value, so a re-anchor
+	// that merges into another item keeps that item's own IDs.
+	rejectedIdentityProviderIDs providerIDValueSet
 	// recordedStaleProviderIDs contains provider values known dead before this
 	// refresh and suppresses them when durable state is merged.
 	recordedStaleProviderIDs providerIDValueSet

@@ -89,7 +89,7 @@ services:
       # report this container's share instead of the whole machine's. Harmless
       # everywhere else: on bare metal or a VM they are the same files Silo would
       # read anyway. Each is used independently, so dropping one only reverts
-      # that reading. See docs/wiki/deployment/docker.md.
+      # that reading. See docs/architecture/observability.md#node-resource-sampling.
       - /proc/meminfo:/host/proc/meminfo:ro
       - /proc/stat:/host/proc/stat:ro
       - /proc/loadavg:/host/proc/loadavg:ro

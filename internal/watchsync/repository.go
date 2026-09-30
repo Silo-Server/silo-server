@@ -22,6 +22,7 @@ type Repository interface {
 	UpsertAuthSession(ctx context.Context, session DeviceAuthSession) (DeviceAuthSession, error)
 	GetAuthSession(ctx context.Context, id string) (DeviceAuthSession, error)
 	UpsertConnection(ctx context.Context, conn Connection) (Connection, error)
+	UpdateConnectionTokens(ctx context.Context, expected, updated Connection) (Connection, error)
 	GetConnection(ctx context.Context, provider string, userID int, profileID string) (Connection, bool, error)
 	GetConnectionByID(ctx context.Context, id string) (Connection, bool, error)
 	DeleteConnection(ctx context.Context, provider string, userID int, profileID string) error
@@ -54,6 +55,7 @@ type Repository interface {
 	ClearRatingSyncStates(ctx context.Context, connectionID, keepAccountID string) error
 	UpdateRatingCursors(ctx context.Context, connectionID, providerAccountID string, remove []string, set map[string]string) error
 	WithRatingSyncLock(ctx context.Context, connectionID string, wait bool, fn func(context.Context) error) (bool, error)
+	WithTokenRefreshLock(ctx context.Context, connectionID string, fn func(context.Context) error) error
 	ListDroppedEventConnections(ctx context.Context, userID int, profileID string) ([]Connection, error)
 	ListDroppedSyncStates(ctx context.Context, connectionID, providerAccountID string, seriesIDs []string) ([]DroppedSyncState, error)
 	UpsertDroppedSyncStates(ctx context.Context, states []DroppedSyncState) error
@@ -120,40 +122,59 @@ const listItemStateColumns = `
 type PostgresRepository struct {
 	pool   *pgxpool.Pool
 	cipher *secret.Cipher
-	// ratingLockSlots admits one caller per connection on this node to the
-	// rating sync lock, so waiters cannot pile up database sessions.
-	ratingLockSlots sync.Map
-	// ratingLockSessions caps the lock sessions this node holds at once
-	// across all connections; see ratingLockSessionLimit.
-	ratingLockSessionsOnce sync.Once
-	ratingLockSessions     chan struct{}
+	// ratingLock serializes a connection's rating reconciliation; see
+	// WithRatingSyncLock.
+	ratingLock connectionLock
+	// tokenRefreshLock serializes a connection's token refresh; see
+	// WithTokenRefreshLock.
+	tokenRefreshLock connectionLock
 }
 
-// maxRatingLockSessions bounds the database sessions one node opens for
-// rating sync locks, which sit outside the pool's own limit.
-const maxRatingLockSessions = 4
+// connectionLock is one class of cluster-wide advisory lock keyed by
+// connection. Each class keeps its own admission state, so holding a lock of
+// one class never waits on a slot or session of another.
+type connectionLock struct {
+	// class namespaces the advisory lock keys so classes cannot collide.
+	class int32
+	// name labels errors.
+	name string
+	// slots admits one caller per connection on this node, so waiters cannot
+	// pile up database sessions.
+	slots sync.Map
+	// sessions caps the lock sessions this node holds at once across all
+	// connections; see sessionLimit.
+	sessionsOnce sync.Once
+	sessions     chan struct{}
+}
 
-// ratingLockSessionLimit returns the semaphore of lock sessions, sized to at
-// most maxRatingLockSessions and never more than the pool's own size, so a
-// small deployment adds at most as many sessions as it configured.
-func (r *PostgresRepository) ratingLockSessionLimit() chan struct{} {
-	r.ratingLockSessionsOnce.Do(func() {
-		limit := min(maxRatingLockSessions, max(1, int(r.pool.Config().MaxConns)))
-		r.ratingLockSessions = make(chan struct{}, limit)
+// maxLockSessions bounds the database sessions one node opens for each lock
+// class, which sit outside the pool's own limit.
+const maxLockSessions = 4
+
+// sessionLimit returns the semaphore of lock sessions, sized to at most
+// maxLockSessions and never more than the pool's own size, so a small
+// deployment adds at most as many sessions per class as it configured.
+func (l *connectionLock) sessionLimit(pool *pgxpool.Pool) chan struct{} {
+	l.sessionsOnce.Do(func() {
+		limit := min(maxLockSessions, max(1, int(pool.Config().MaxConns)))
+		l.sessions = make(chan struct{}, limit)
 	})
-	return r.ratingLockSessions
+	return l.sessions
 }
 
 func NewPostgresRepository(pool *pgxpool.Pool, cipher *secret.Cipher) *PostgresRepository {
-	return &PostgresRepository{pool: pool, cipher: cipher}
+	r := &PostgresRepository{pool: pool, cipher: cipher}
+	r.ratingLock.class, r.ratingLock.name = ratingSyncLockClass, "rating sync"
+	r.tokenRefreshLock.class, r.tokenRefreshLock.name = tokenRefreshLockClass, "token refresh"
+	return r
 }
 
 // TokenAAD binds an access/refresh token ciphertext to its connection. It uses
 // the stable UNIQUE business key (provider, user_id, profile_id) rather than the
 // surrogate id, because UpsertConnection lets Postgres assign/keep the id (ON
 // CONFLICT), so the id is not known before the write — the tuple is, and it
-// identifies the row just as uniquely. Exported so the (raw-SQL) Trakt
-// collection-token resolver binds tokens identically.
+// identifies the row just as uniquely. The secret backfill builds the same
+// key for rows it encrypts.
 func TokenAAD(column, provider string, userID int, profileID string) string {
 	return secret.RowAAD("watch_provider_connections", column, provider+":"+strconv.Itoa(userID)+":"+profileID)
 }
@@ -876,9 +897,11 @@ func (r *PostgresRepository) DeleteRatingSyncStates(ctx context.Context, connect
 	return nil
 }
 
-// ratingSyncLockClass namespaces the advisory locks that serialize rating
-// reconciliation, so they cannot collide with other advisory locks.
-const ratingSyncLockClass = 0x57535254
+// Advisory lock classes, one per connectionLock.
+const (
+	ratingSyncLockClass   = 0x57535254
+	tokenRefreshLockClass = 0x57535446
+)
 
 // WithRatingSyncLock runs fn while holding a cluster-wide advisory lock for the
 // connection's rating reconciliation. Every node runs the scheduled sync, so
@@ -886,17 +909,31 @@ const ratingSyncLockClass = 0x57535254
 // agreed ratings describing an older state than the provider holds.
 //
 // With wait false it reports false when the lock is held elsewhere; with wait
-// true it blocks until the lock is free or ctx ends. The lock lives on its own
-// database session opened outside the pool, so holding it never takes a pool
-// connection that fn needs, even in a one-connection pool. On this node only
-// one caller per connection holds or waits for that session, and at most
-// ratingLockSessionLimit sessions are open at once. Closing the session
-// releases the lock, including when a node dies.
+// true it blocks until the lock is free or ctx ends.
 func (r *PostgresRepository) WithRatingSyncLock(ctx context.Context, connectionID string, wait bool, fn func(context.Context) error) (bool, error) {
-	slotValue, _ := r.ratingLockSlots.LoadOrStore(connectionID, make(chan struct{}, 1))
+	return r.withConnectionLock(ctx, &r.ratingLock, connectionID, wait, fn)
+}
+
+// WithTokenRefreshLock runs fn while holding a cluster-wide advisory lock for
+// the connection's token refresh, waiting until the lock is free or ctx ends.
+func (r *PostgresRepository) WithTokenRefreshLock(ctx context.Context, connectionID string, fn func(context.Context) error) error {
+	_, err := r.withConnectionLock(ctx, &r.tokenRefreshLock, connectionID, true, fn)
+	return err
+}
+
+// withConnectionLock runs fn while holding lock's advisory lock for
+// connectionID. With wait false it reports false when the lock is held
+// elsewhere; with wait true it blocks until the lock is free or ctx ends. The
+// lock lives on its own database session opened outside the pool, so holding
+// it never takes a pool connection that fn needs, even in a one-connection
+// pool. On this node only one caller per connection holds or waits for that
+// session, and at most maxLockSessions sessions per class are open at once.
+// Closing the session releases the lock, including when a node dies.
+func (r *PostgresRepository) withConnectionLock(ctx context.Context, lock *connectionLock, connectionID string, wait bool, fn func(context.Context) error) (bool, error) {
+	slotValue, _ := lock.slots.LoadOrStore(connectionID, make(chan struct{}, 1))
 	slot, ok := slotValue.(chan struct{})
 	if !ok {
-		return false, fmt.Errorf("rating sync lock slot has type %T", slotValue)
+		return false, fmt.Errorf("%s lock slot has type %T", lock.name, slotValue)
 	}
 	if wait {
 		select {
@@ -915,7 +952,7 @@ func (r *PostgresRepository) WithRatingSyncLock(ctx context.Context, connectionI
 
 	// A try that finds every session in use reports the lock as busy rather
 	// than waiting, so a scheduled sync moves on to its next connection.
-	sessions := r.ratingLockSessionLimit()
+	sessions := lock.sessionLimit(r.pool)
 	if wait {
 		select {
 		case sessions <- struct{}{}:
@@ -933,7 +970,7 @@ func (r *PostgresRepository) WithRatingSyncLock(ctx context.Context, connectionI
 
 	session, err := pgx.ConnectConfig(ctx, r.pool.Config().ConnConfig)
 	if err != nil {
-		return false, fmt.Errorf("open rating sync lock session: %w", err)
+		return false, fmt.Errorf("open %s lock session: %w", lock.name, err)
 	}
 	// Closing the session releases the lock, whatever state a canceled
 	// lock call left it in.
@@ -943,13 +980,13 @@ func (r *PostgresRepository) WithRatingSyncLock(ctx context.Context, connectionI
 		_ = session.Close(closeCtx)
 	}()
 	if wait {
-		if _, err := session.Exec(ctx, `SELECT pg_advisory_lock($1, hashtext($2))`, int32(ratingSyncLockClass), connectionID); err != nil {
-			return false, fmt.Errorf("wait for rating sync lock: %w", err)
+		if _, err := session.Exec(ctx, `SELECT pg_advisory_lock($1, hashtext($2))`, lock.class, connectionID); err != nil {
+			return false, fmt.Errorf("wait for %s lock: %w", lock.name, err)
 		}
 	} else {
 		var locked bool
-		if err := session.QueryRow(ctx, `SELECT pg_try_advisory_lock($1, hashtext($2))`, int32(ratingSyncLockClass), connectionID).Scan(&locked); err != nil {
-			return false, fmt.Errorf("try rating sync lock: %w", err)
+		if err := session.QueryRow(ctx, `SELECT pg_try_advisory_lock($1, hashtext($2))`, lock.class, connectionID).Scan(&locked); err != nil {
+			return false, fmt.Errorf("try %s lock: %w", lock.name, err)
 		}
 		if !locked {
 			return false, nil

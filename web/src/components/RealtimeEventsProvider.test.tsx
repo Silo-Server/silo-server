@@ -10,7 +10,13 @@ import { useRealtimeEvents } from "./realtimeEventsContext";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { act, cleanup, render, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { adminKeys, catalogKeys, libraryKeys, sectionKeys } from "@/hooks/queries/keys";
+import {
+  adminKeys,
+  catalogKeys,
+  libraryKeys,
+  requestKeys,
+  sectionKeys,
+} from "@/hooks/queries/keys";
 import type { ItemDetail, TaskInfo } from "@/api/types";
 import { invalidateCatalogState } from "./realtimeCatalogInvalidation";
 import { buildEventsUrl, RealtimeEventsProvider } from "./RealtimeEventsProvider";
@@ -838,5 +844,118 @@ describe("RealtimeEventsProvider", () => {
       user_data: { played: true },
       user_state: { played: true, is_favorite: true },
     });
+  });
+
+  it("refetches request state once per burst of request notifications, for any profile", async () => {
+    const queryClient = new QueryClient();
+    const refreshed = [
+      requestKeys.mine({ status: "all", outcome: "all", limit: 100, offset: 0 }),
+      requestKeys.detail("movie", 1),
+      requestKeys.discovery(),
+      requestKeys.discoverySection("trending_movies"),
+      requestKeys.discoverBrowse("genre", "drama", "movie", "popularity"),
+      requestKeys.search("all", "dune", 1, "profile-1"),
+    ];
+    const untouched = [requestKeys.status(), requestKeys.discoverStudios()];
+    for (const key of [...refreshed, ...untouched]) queryClient.setQueryData(key, {});
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const invalidations = (key: readonly unknown[]) =>
+      invalidate.mock.calls.filter(
+        ([filters]) => JSON.stringify(filters?.queryKey) === JSON.stringify(key),
+      ).length;
+    mockState.profile = { id: "profile-1", has_pin: false };
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RealtimeEventsProvider>
+          <div />
+        </RealtimeEventsProvider>
+      </QueryClientProvider>,
+    );
+
+    await act(async () => {});
+    const emit = (type: string, profileID: string, index = 0) =>
+      FakeWebSocket.instances[0]?.emitMessage({
+        type: "event",
+        channel: "notifications",
+        event: "notification.created",
+        data: { id: `${type}-${index}`, type, profile_id: profileID, created_at: "" },
+      });
+
+    await act(async () => {
+      emit("episode.available", "profile-1");
+    });
+    for (const key of refreshed) expect(invalidations(key)).toBe(0);
+
+    // A scan fulfils 30 requests at once, some for another profile.
+    await act(async () => {
+      for (let index = 0; index < 30; index++) {
+        emit(
+          index % 3 === 0 ? "request.approved" : "request.fulfilled",
+          index % 2 ? "profile-2" : "profile-1",
+          index,
+        );
+      }
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6_000);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6_000);
+    });
+
+    // One refetch right away and one catch-up for the rest of the burst.
+    for (const key of refreshed) {
+      expect(invalidations(key)).toBeGreaterThanOrEqual(1);
+      expect(invalidations(key)).toBeLessThanOrEqual(2);
+    }
+    for (const key of untouched) expect(invalidations(key)).toBe(0);
+    expect(invalidations(requestKeys.all)).toBe(0);
+  });
+
+  it("refetches request state when a reconnect snapshot holds request notifications", async () => {
+    const queryClient = new QueryClient();
+    const mine = requestKeys.mine({ status: "all", outcome: "all", limit: 100, offset: 0 });
+    const search = requestKeys.search("all", "dune", 1, "profile-1");
+    for (const key of [mine, search]) queryClient.setQueryData(key, {});
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const invalidations = (key: readonly unknown[]) =>
+      invalidate.mock.calls.filter(
+        ([filters]) => JSON.stringify(filters?.queryKey) === JSON.stringify(key),
+      ).length;
+    mockState.profile = { id: "profile-1", has_pin: false };
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RealtimeEventsProvider>
+          <div />
+        </RealtimeEventsProvider>
+      </QueryClientProvider>,
+    );
+
+    await act(async () => {});
+    const snapshot = (types: string[]) =>
+      FakeWebSocket.instances[0]?.emitMessage({
+        type: "snapshot",
+        channel: "notifications",
+        data: types.map((type, index) => ({
+          id: `${type}-${index}`,
+          type,
+          profile_id: "profile-1",
+          created_at: "",
+        })),
+      });
+
+    await act(async () => {
+      snapshot(["episode.available"]);
+    });
+    expect(invalidations(mine)).toBe(0);
+    expect(invalidations(search)).toBe(0);
+
+    await act(async () => {
+      snapshot(["episode.available", "request.approved"]);
+    });
+    expect(invalidations(mine)).toBe(1);
+    expect(invalidations(search)).toBe(1);
   });
 });

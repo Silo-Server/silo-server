@@ -27,6 +27,14 @@ Durable architecture and contracts live under `docs/architecture/`.
 Implementation plans and working notes belong in the issue or pull request, not
 in the repository.
 
+Documentation in this repository is for people and coding agents changing the
+code: architecture, invariants, API contracts, and development setup. Guides
+for installing, configuring, operating, or troubleshooting Silo belong in the
+[user manual](https://siloserver.org/docs), which lives in
+[Silo-Server/siloserver.org](https://github.com/Silo-Server/siloserver.org).
+This repository does not accept operator or user guides; open those pull
+requests against the website repository instead.
+
 Choose the repository that owns the behavior before implementation begins.
 This repository owns the backend, web app, native API, Jellyfin compatibility,
 and plugin host. Client-only work belongs in `silo-apple` or `silo-android`;
@@ -150,8 +158,9 @@ private infrastructure. Never claim a check passed or ran on a target it did not
 The user manual and feature pages on [siloserver.org](https://siloserver.org)
 live in a separate repository,
 [Silo-Server/siloserver.org](https://github.com/Silo-Server/siloserver.org),
-and nothing updates them automatically. When your change leaves the site wrong
-or incomplete, open an issue there.
+and nothing updates them automatically. To write or fix a guide, open a pull
+request there. When a code change here leaves the site wrong or incomplete,
+open an issue there.
 
 A change needs a docs issue when it:
 

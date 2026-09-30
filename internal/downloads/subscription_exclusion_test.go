@@ -688,7 +688,7 @@ func TestWatchedFilterFailsOpen(t *testing.T) {
 	store := &chunkedProgressStore{completed: map[string]bool{"ep-1": true}, err: errors.New("progress store down")}
 	svc := &Service{progressStores: chunkedProgressStores{store}, fileRepo: &monitorFileResolver{fileID: 1, seriesID: "series"}}
 	episodes := []*models.Episode{{ContentID: "ep-0"}, {ContentID: "ep-1"}, {ContentID: "ep-2"}}
-	items, err := svc.subscriptionEpisodeItems(t.Context(), &Subscription{UserID: 1, ProfileID: "profile", SeriesID: "series", Mode: SubModeAll, DeleteWatched: true}, episodes)
+	items, err := svc.subscriptionEpisodeItems(t.Context(), &Subscription{UserID: 1, ProfileID: "profile", SeriesID: "series", Mode: SubModeAll, DeleteWatched: true}, episodes, false, catalog.AccessFilter{})
 	if err != nil {
 		t.Fatalf("sync items with the progress store down: %v", err)
 	}

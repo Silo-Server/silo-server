@@ -12,13 +12,17 @@ import {
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router";
 import {
+  type LucideIcon,
   Heart,
   Plus,
   Check,
   Captions,
   Download,
+  ExternalLink,
   FolderPlus,
+  Inbox,
   Info,
+  Loader2,
   MoreVertical,
   Play,
   RefreshCw,
@@ -97,6 +101,34 @@ function DetailOverflowMenuItem({
   );
 }
 
+/** Drawn like the Play pill in each of its states: enabled, disabled, or in flight. */
+function PrimaryActionButton({ action }: { action: ActionBarPrimaryAction }) {
+  const inert = Boolean(action.disabled || action.pending);
+  const variant = action.variant ?? "default";
+  const Icon = action.pending ? Loader2 : action.icon;
+  const interactiveClass = inert
+    ? ""
+    : `${variant === "default" ? responsivePlayActionClass : responsivePrimaryActionClass} cursor-pointer shadow-md`;
+
+  return (
+    <Button
+      variant={variant}
+      onClick={action.onClick}
+      disabled={inert}
+      aria-busy={action.pending || undefined}
+      className={`${interactiveClass} relative h-11 gap-2.5 overflow-hidden rounded-full px-8 text-[15px] font-bold tracking-wide`}
+    >
+      {Icon && (
+        <Icon
+          aria-hidden="true"
+          className={`size-[18px] ${action.pending ? "animate-spin" : ""}`}
+        />
+      )}
+      {action.label}
+    </Button>
+  );
+}
+
 /** The Watch Together group in the overflow menu. */
 export interface ActionBarWatchTogether {
   onStartParty: () => void;
@@ -104,10 +136,48 @@ export interface ActionBarWatchTogether {
   liveRoom?: { code: string; onSuggest: () => void; onPlay?: () => void };
 }
 
+/**
+ * Takes the Play pill's place on a title that cannot be played here, such as
+ * one not in the library yet. A state the viewer cannot act on ("Requested",
+ * "In the library") is a disabled primary action rather than a badge.
+ */
+export interface ActionBarPrimaryAction {
+  label: string;
+  icon?: LucideIcon;
+  onClick?: () => void;
+  /** Shows a spinner and blocks the action while it is in flight. */
+  pending?: boolean;
+  disabled?: boolean;
+  /** Defaults to the Play pill's styling. */
+  variant?: "default" | "glass";
+}
+
+/** A labelled glass pill after the primary action. */
+export interface ActionBarSecondaryAction {
+  /** Stable key, since a toggle's label changes with its state. */
+  id: string;
+  label: string;
+  icon?: LucideIcon;
+  onClick: () => void;
+  pending?: boolean;
+  /** Set on a toggle, such as following a title. */
+  pressed?: boolean;
+}
+
+/** An external page for the title, such as IMDb or TMDB. */
+export interface ActionBarLink {
+  label: string;
+  href: string;
+}
+
 export interface ActionBarProps {
   compactMobile?: boolean;
   contentId?: string;
   watchTogether?: ActionBarWatchTogether;
+  /** Replaces the Play action. */
+  primaryAction?: ActionBarPrimaryAction;
+  secondaryActions?: ActionBarSecondaryAction[];
+  links?: ActionBarLink[];
   playHref?: string;
   playLabel?: string;
   playProgress?: number;
@@ -150,6 +220,8 @@ export interface ActionBarProps {
   onSelectVersion?: (version: FileVersion) => void;
   onDownload?: () => void;
   onSearchSubtitles?: () => void;
+  /** Opens the season picker to request seasons the library is missing. */
+  onRequestSeasons?: () => void;
   rating?: number | null;
   onRatingChange?: (rating: number | null) => void;
   qualityPreference?: string | null;
@@ -173,6 +245,9 @@ export default function ActionBar({
   compactMobile = false,
   contentId,
   watchTogether,
+  primaryAction,
+  secondaryActions,
+  links,
   playHref,
   playLabel = "Play",
   playProgress,
@@ -205,6 +280,7 @@ export default function ActionBar({
   onSelectVersion,
   onDownload,
   onSearchSubtitles,
+  onRequestSeasons,
   rating,
   onRatingChange,
   audioSelectionMode = "auto",
@@ -481,7 +557,7 @@ export default function ActionBar({
     items[nextIndex]?.focus({ preventScroll: true });
   };
   const hasOverflowActions = Boolean(
-    restartHref || onToggleWatchlist || onDownload || onSearchSubtitles,
+    restartHref || onToggleWatchlist || onDownload || onSearchSubtitles || onRequestSeasons,
   );
   const hasAdminActions = Boolean(isAdmin && (contentId || onRedetectMarkers));
   const hasMetadataActions = Boolean(
@@ -533,7 +609,9 @@ export default function ActionBar({
       {/* ── Primary actions ──────────────────────────────────── */}
       <div className="detail-primary-actions flex flex-wrap items-center gap-3">
         {/* ── Play button ────────────────────────────────────── */}
-        {playHref ? (
+        {primaryAction ? (
+          <PrimaryActionButton action={primaryAction} />
+        ) : playHref ? (
           showPlayChoiceDialog ? (
             <Button
               onClick={openPlayChoiceDialog}
@@ -571,6 +649,43 @@ export default function ActionBar({
             {playLabel}
           </Button>
         )}
+
+        {secondaryActions?.map((action) => {
+          const Icon = action.pending ? Loader2 : action.icon;
+          return (
+            <Button
+              key={action.id}
+              variant="glass"
+              onClick={action.onClick}
+              disabled={action.pending}
+              aria-busy={action.pending || undefined}
+              aria-pressed={action.pressed}
+              className={`${responsivePrimaryActionClass} h-11 rounded-full px-5 text-[14px] font-semibold enabled:cursor-pointer`}
+            >
+              {Icon && (
+                <Icon
+                  aria-hidden="true"
+                  className={`size-[18px] ${action.pending ? "animate-spin" : ""}`}
+                />
+              )}
+              {action.label}
+            </Button>
+          );
+        })}
+
+        {links?.map((link) => (
+          <Button
+            key={link.href}
+            asChild
+            variant="glass"
+            className={`${staticGlassActionClass} h-11 cursor-pointer rounded-full px-4 text-[13px] font-semibold tracking-wide`}
+          >
+            <a href={link.href} target="_blank" rel="noreferrer">
+              {link.label}
+              <ExternalLink aria-hidden="true" className="size-3.5 opacity-60" />
+            </a>
+          </Button>
+        ))}
 
         {/* ── Watched toggle ─────────────────────────────────── */}
         {watchedLabel && onToggleWatched && (
@@ -707,6 +822,12 @@ export default function ActionBar({
                 <DetailOverflowMenuItem closeMenu={closeOverflowMenu} onAction={onSearchSubtitles}>
                   <Captions className="size-4" />
                   Add Subtitles
+                </DetailOverflowMenuItem>
+              )}
+              {onRequestSeasons && (
+                <DetailOverflowMenuItem closeMenu={closeOverflowMenu} onAction={onRequestSeasons}>
+                  <Inbox className="size-4" />
+                  Request Seasons
                 </DetailOverflowMenuItem>
               )}
               {watchTogether && (

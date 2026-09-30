@@ -113,6 +113,9 @@ const (
 	// node that approves theme files as progressive AAC inputs.
 	TransportFeatureThemeAudioEgressV1    = "theme_audio_egress_v1"
 	TransportFeatureThemeAudioExecutionV1 = "theme_audio_execution_v1"
+	// A transcode node that executes the multi-track prepared-download layout
+	// (PreparedTracksRecipeVersion).
+	TransportFeaturePreparedTracksV1 = "prepared_tracks_v1"
 )
 
 // Degradation warning codes reported by playback plans.

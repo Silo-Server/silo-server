@@ -287,3 +287,130 @@ it("marks a show_when-gated field as nested when it is revealed", () => {
   );
   expect(container.querySelector('[data-nested="true"]')).not.toBeNull();
 });
+
+describe("SchemaForm host-owned fields", () => {
+  const hostDescriptor: PluginAdminForm = {
+    fields: [
+      {
+        key: "quality_profile_id",
+        label: "Quality profile",
+        control: "SELECT",
+        required: true,
+        secret: false,
+        multiline: false,
+        options: [{ value: "1", label: "HD-1080p" }],
+      },
+      {
+        key: "is_default",
+        label: "Default (HD/1080p)",
+        control: "SWITCH",
+        required: false,
+        secret: false,
+        multiline: false,
+      },
+      {
+        key: "anime_enabled",
+        label: "Enable anime overrides",
+        control: "SWITCH",
+        required: false,
+        secret: false,
+        multiline: false,
+      },
+      {
+        key: "anime_root_folder",
+        label: "Anime root folder",
+        control: "TEXT",
+        required: true,
+        secret: false,
+        multiline: false,
+      },
+    ],
+    sections: [
+      {
+        key: "library",
+        title: "Library",
+        collapsible: true,
+        collapsed_default: true,
+        field_keys: ["quality_profile_id", "is_default"],
+      },
+      {
+        key: "anime",
+        title: "Anime overrides",
+        collapsible: false,
+        collapsed_default: false,
+        field_keys: ["anime_enabled", "anime_root_folder"],
+      },
+    ],
+  };
+  const hidden = ["is_default", "anime_enabled", "anime_root_folder"];
+
+  it("hides host-owned keys and drops a section they leave empty", () => {
+    render(
+      <SchemaForm
+        descriptor={hostDescriptor}
+        values={{ quality_profile_id: "1", is_default: true }}
+        onChange={vi.fn()}
+        hiddenKeys={hidden}
+        expandSections
+      />,
+    );
+    expect(screen.queryByText("Default (HD/1080p)")).toBeNull();
+    expect(screen.queryByText("Anime overrides")).toBeNull();
+    expect(screen.queryByText("Anime root folder")).toBeNull();
+    expect(screen.getByText("Quality profile")).toBeTruthy();
+  });
+
+  it("keeps hidden values when a visible field changes", () => {
+    const onChange = vi.fn();
+    render(
+      <SchemaForm
+        descriptor={{
+          fields: [
+            {
+              key: "name",
+              label: "Name",
+              control: "TEXT",
+              required: false,
+              secret: false,
+              multiline: false,
+            },
+            hostDescriptor.fields[1]!,
+          ],
+        }}
+        values={{ name: "a", is_default: true }}
+        onChange={onChange}
+        hiddenKeys={hidden}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "b" } });
+    expect(onChange).toHaveBeenCalledWith({ name: "b", is_default: true });
+  });
+
+  it("leaves hidden required fields out of validation", () => {
+    const onValidityChange = vi.fn();
+    render(
+      <SchemaForm
+        descriptor={hostDescriptor}
+        values={{ quality_profile_id: "1", anime_enabled: true }}
+        onChange={vi.fn()}
+        onValidityChange={onValidityChange}
+        hiddenKeys={hidden}
+      />,
+    );
+    expect(onValidityChange).toHaveBeenLastCalledWith(true);
+  });
+
+  it("renders collapsible sections open and without a toggle when expanded", () => {
+    render(
+      <SchemaForm
+        descriptor={hostDescriptor}
+        values={{ quality_profile_id: "1" }}
+        onChange={vi.fn()}
+        hiddenKeys={hidden}
+        expandSections
+      />,
+    );
+    expect(screen.queryByText("Show")).toBeNull();
+    expect(screen.getByText("Quality profile")).toBeTruthy();
+  });
+});

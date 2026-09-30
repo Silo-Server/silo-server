@@ -335,7 +335,7 @@ func TestProcessPriorityRequestSelectsNearestChaptersAndRequeuesRemainder(t *tes
 		},
 		uploadChapterThumbnailFunc: func(_ context.Context, _ int, chapterIndex int, _ []byte) (string, string, error) {
 			uploaded = append(uploaded, chapterIndex)
-			return "chapter-images/42/original.webp", "thumbhash", nil
+			return "chapter-images/42/2/w300.webp", "thumbhash", nil
 		},
 	}
 

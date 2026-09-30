@@ -422,8 +422,20 @@ func detectInferMovieFolderEvidence(parentBase string, nameNoExt string, hasSeas
 	if hasSeasonStructure {
 		return false
 	}
-	if ParseFolderIDs(parentBase) != nil {
-		return true
+	// A TMDB or IMDb tag is movie evidence by itself. A TVDB-only tag isn't:
+	// Sonarr adds the show's TVDB ID to series folders, and TVDB lists series
+	// and movies alike (#1642). In such a folder an episode token in the file
+	// name decides, even in a release name that repeats the show's title and
+	// year ("Show.2024.S01E03.1080p"), unless the folder's own title is shaped
+	// like an episode code ("s01e03 (2020)"), which only a movie would carry.
+	// Otherwise the folder falls through to the title check below.
+	if hints := ParseFolderIDs(parentBase); hints != nil {
+		if hints.TmdbID != "" || hints.ImdbID != "" {
+			return true
+		}
+		if hasExplicitEpisodeToken(nameNoExt) && !hasExplicitEpisodeToken(stripInferProviderTags(parentBase)) {
+			return false
+		}
 	}
 	parentTitle, parentYear, trusted := parseInferFolderTitleYear(parentBase)
 	if parentTitle == "" || (!trusted && parentYear == 0) {

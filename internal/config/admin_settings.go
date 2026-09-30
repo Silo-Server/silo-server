@@ -78,6 +78,11 @@ const StorageTransitionTargetKey = "storage.transition.target"
 // same reason as the reconcile checkpoint.
 const ArtworkStorageSweepCheckpointKey = "artwork.storage_sweep_checkpoint"
 
+// ChapterThumbnailOriginalsCleanupKey is the machine-managed checkpoint for the
+// one-time cleanup of full-size chapter thumbnail originals, kept out of the
+// administrator settings API like the other storage checkpoints.
+const ChapterThumbnailOriginalsCleanupKey = "chapter_thumbnails.originals_cleanup_checkpoint"
+
 // MetadataImageWorkersSettingKey sizes the artwork encode pool. 0 means one
 // worker per CPU core, resolved when the task runs.
 const MetadataImageWorkersSettingKey = "metadata.image_workers"

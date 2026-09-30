@@ -2,6 +2,7 @@ import type { ComponentProps } from "react";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
+import { Plus } from "lucide-react";
 import type { FileVersion } from "@/api/types";
 import ActionBar from "./ActionBar";
 
@@ -224,4 +225,83 @@ it("moves through the menu with ArrowUp/ArrowDown instead of changing the rating
   } finally {
     rects.mockRestore();
   }
+});
+
+describe("ActionBar primary action", () => {
+  function renderWithPrimary(overrides: Partial<ActionBarProps>) {
+    return render(
+      <MemoryRouter>
+        <ActionBar {...overrides} />
+      </MemoryRouter>,
+    );
+  }
+
+  it("takes the Play pill's place and styling", () => {
+    const onClick = vi.fn();
+    renderWithPrimary({
+      playHref: "/watch/movie-1",
+      primaryAction: { label: "Request movie", icon: Plus, onClick },
+    });
+
+    expect(screen.queryByRole("button", { name: "Play" })).not.toBeInTheDocument();
+    const request = screen.getByRole("button", { name: "Request movie" });
+    expect(request).toBeEnabled();
+    expect(request).toHaveClass(
+      "h-11",
+      "rounded-full",
+      "px-8",
+      "text-[15px]",
+      "font-bold",
+      "cursor-pointer",
+      "hover:bg-primary",
+      "motion-safe:hover:scale-[1.02]",
+    );
+    fireEvent.click(request);
+    expect(onClick).toHaveBeenCalledOnce();
+  });
+
+  it("shows a status as a disabled primary action without the hover affordance", () => {
+    renderWithPrimary({ primaryAction: { label: "Requested", disabled: true } });
+
+    const status = screen.getByRole("button", { name: "Requested" });
+    expect(status).toBeDisabled();
+    expect(status).not.toHaveClass("cursor-pointer");
+    expect(status).not.toHaveClass("motion-safe:hover:scale-[1.02]");
+  });
+
+  it("blocks the action and marks it busy while it is pending", () => {
+    const onClick = vi.fn();
+    renderWithPrimary({
+      primaryAction: { label: "Request movie", icon: Plus, onClick, pending: true },
+    });
+
+    const request = screen.getByRole("button", { name: "Request movie" });
+    expect(request).toBeDisabled();
+    expect(request).toHaveAttribute("aria-busy", "true");
+    expect(request.querySelector("svg")).toHaveClass("animate-spin");
+  });
+
+  it("renders secondary glass actions and external links after the primary action", () => {
+    const onFollow = vi.fn();
+    renderWithPrimary({
+      primaryAction: { label: "Approved", disabled: true },
+      secondaryActions: [
+        { id: "follow", label: "Stop notifying me", onClick: onFollow, pressed: true },
+      ],
+      links: [{ label: "TMDB", href: "https://www.themoviedb.org/movie/603" }],
+    });
+
+    const follow = screen.getByRole("button", { name: "Stop notifying me" });
+    expect(follow).toHaveAttribute("aria-pressed", "true");
+    expect(follow).toHaveClass("glass-hover", "rounded-full", "h-11");
+    fireEvent.click(follow);
+    expect(onFollow).toHaveBeenCalledOnce();
+
+    const link = screen.getByRole("link", { name: "TMDB" });
+    expect(link).toHaveAttribute("href", "https://www.themoviedb.org/movie/603");
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noreferrer");
+    // Without library props there are no library actions, so no overflow menu.
+    expect(screen.queryByRole("button", { name: "More actions" })).not.toBeInTheDocument();
+  });
 });

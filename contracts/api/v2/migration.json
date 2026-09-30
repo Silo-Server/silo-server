@@ -36050,7 +36050,7 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "Retained as unversioned probe on api listener with public; no v2 JSON operation (owner decision 2026-09-07, Quick104): GET /api/v1/ready stays exactly as served today, outside the OpenAPI artifact and the /api/v1 tombstone; 200 {status:ok} when Postgres pings and S3 is unconfigured or its bucket answers, otherwise 503 {status:error, postgres, s3} with the booleans present only on failure. Orchestrator readiness probes stay pointed here (docs/continuum-to-silo-docker-migration.md). Contract: docs/architecture/api-contract.md."
+      "notes": "Retained as unversioned probe on api listener with public; no v2 JSON operation (owner decision 2026-09-07, Quick104): GET /api/v1/ready stays exactly as served today, outside the OpenAPI artifact and the /api/v1 tombstone; 200 {status:ok} when Postgres pings and S3 is unconfigured or its bucket answers, otherwise 503 {status:error, postgres, s3} with the booleans present only on failure. Orchestrator readiness probes stay pointed here. Contract: docs/architecture/api-contract.md."
     },
     {
       "listener": "api",

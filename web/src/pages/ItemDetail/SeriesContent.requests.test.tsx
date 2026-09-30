@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   /** Each distinct play button the page showed, in order. */
   playButtonStates: [] as string[],
   watchTogether: { value: null as Record<string, unknown> | null },
+  profile: { value: null as { id: string } | null },
 }));
 
 vi.mock("@/api/v2/request", async (importOriginal) => ({
@@ -27,7 +28,11 @@ vi.mock("@/hooks/useAuth", () => ({
   useOptionalAuth: () => ({ user: null, profile: null }),
 }));
 vi.mock("@/hooks/useCurrentProfile", () => ({
-  useCurrentProfile: () => ({ profile: null, hasSelectedProfile: false, isLoading: false }),
+  useCurrentProfile: () => ({
+    profile: mocks.profile.value,
+    hasSelectedProfile: Boolean(mocks.profile.value),
+    isLoading: false,
+  }),
 }));
 vi.mock("@/hooks/useIsActingAdmin", () => ({ useIsActingAdmin: () => false }));
 vi.mock("@/hooks/useOnViewTranslation", () => ({
@@ -68,6 +73,8 @@ interface Fixture {
   seriesPlayContentId: string;
   /** Media item IDs on the first page of GET /api/v2/progress. */
   progressPage: string[];
+  /** The series' TMDB ID, which lets the page offer to request seasons. */
+  tmdbId?: string;
 }
 
 const SERIES_ID = "series-1";
@@ -137,6 +144,7 @@ function installServer(fixture: Fixture) {
             play_content_id: fixture.seriesPlayContentId,
             season_count: seasonNumbers.length,
             user_data: rollup(allStates),
+            ...(fixture.tmdbId && { tmdb_id: fixture.tmdbId }),
           });
         }
         // Continue-watching entries: the owning series decides a match.
@@ -172,6 +180,8 @@ function installServer(fixture: Fixture) {
             completed: false,
           })),
         };
+      case "GET /api/v2/requests/status":
+        return { requests_enabled: true, allowed: true, missing_seasons_requestable: true };
       case "GET /api/v2/recommendations/similar/{item_id}":
         return { items: [] };
       case "GET /api/v2/settings/values/effective":
@@ -238,6 +248,7 @@ describe("series page request budget and play target", () => {
     mocks.actionBarProps.value = null;
     mocks.playButtonStates.length = 0;
     mocks.watchTogether.value = null;
+    mocks.profile.value = null;
   });
 
   afterEach(() => {
@@ -409,5 +420,24 @@ describe("series page request budget and play target", () => {
       `GET /api/v2/recommendations/similar/{item_id} ${SERIES_ID}`,
       "GET /api/v2/catalog/items/{id}/episodes season-1",
     ]);
+  });
+
+  it("offers to request seasons without loading the request detail", async () => {
+    mocks.profile.value = { id: "profile-1" };
+    installServer({
+      seasons: twoSeasonsInProgress,
+      seriesPlayContentId: "s2e2",
+      progressPage: ["s2e2"],
+      tmdbId: "95396",
+    });
+
+    await openSeriesPage();
+
+    // The request status is the shell's (cached there); the series' request
+    // detail waits until the dialog opens.
+    const log = requestLog();
+    expect(log.filter((request) => request === "GET /api/v2/requests/status")).toHaveLength(1);
+    expect(log.some((request) => request.startsWith("GET /api/v2/requests/detail"))).toBe(false);
+    expect(mocks.actionBarProps.value?.onRequestSeasons).toBeTypeOf("function");
   });
 });

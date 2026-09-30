@@ -16,7 +16,7 @@ import {
   useCreateAutoscanConnection,
   useTestAutoscanConnection,
 } from "@/hooks/queries/useAutoscan";
-import { useRequestIntegrations } from "@/hooks/queries/useRequests";
+import { useRequestIntegrations } from "@/hooks/queries/admin/requests";
 import type { RequestIntegration } from "@/api/types";
 
 export interface ConnectionOption {

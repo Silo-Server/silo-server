@@ -242,6 +242,37 @@ func TestParentEpisodesComposeFiltersBeforePage(t *testing.T) {
 	}
 }
 
+// Jellyfin returns a whole series when Limit is absent. Infuse lists every
+// episode of a show in one such request and builds its seasons from the
+// result, so the 24-item browse default hid later seasons (#1628).
+func TestParentEpisodesWithoutLimitReturnWholeSeries(t *testing.T) {
+	for _, tc := range []struct {
+		name, params string
+		wantLimit    int
+	}{
+		{name: "absent", params: "", wantLimit: catalog.MaxEpisodePageSize},
+		{name: "explicit", params: "&Limit=24", wantLimit: 24},
+	} {
+		for _, route := range []string{"items", "shows"} {
+			t.Run(route+"/"+tc.name, func(t *testing.T) {
+				codec := NewResourceIDCodec()
+				repo := &boundedEpisodeContractRepo{}
+				svc := &countingContentService{seasons: []upstreamSeason{{ContentID: "season2", SeasonNumber: 2, EpisodeCount: 20}}}
+				h := &ItemsHandler{catalogUserState: true, content: svc, episodeRepo: repo, codec: codec, mapper: newMapper(codec, &config.Config{}), userData: &mockUserDataService{}, images: NewImageCache(time.Hour, time.Now)}
+				seriesID := codec.EncodeStringID(EncodedIDItem, "series")
+				if route == "shows" {
+					performEpisodesRequest(t, h, "/Shows/"+seriesID+"/Episodes?excludeLocationTypes=Virtual"+tc.params, seriesID)
+				} else {
+					performItemsRequest(t, h, "/Items?ParentId="+seriesID+"&IncludeItemTypes=Episode"+tc.params)
+				}
+				if repo.filters.Limit != tc.wantLimit {
+					t.Fatalf("episode page limit = %d, want %d", repo.filters.Limit, tc.wantLimit)
+				}
+			})
+		}
+	}
+}
+
 func TestUpcomingAvailabilityOnSelectedPage(t *testing.T) {
 	for _, tc := range []struct {
 		name      string

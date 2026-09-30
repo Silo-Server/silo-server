@@ -62,6 +62,7 @@ import {
   buildUserCollectionCatalogHref,
 } from "@/pages/catalogSearchParams";
 import { buildLegacyAutoscanRedirectTarget } from "@/pages/autoscanSearchParams";
+import LegacyRequestDetailRedirect from "@/pages/LegacyRequestDetailRedirect";
 import { buildLegacyWebhookSyncRedirectTarget } from "@/lib/webhookSync";
 import { guardRedirectTarget } from "@/lib/authRedirect";
 import { toast } from "sonner";
@@ -95,7 +96,8 @@ const PlaybackSettings = lazy(() => import("@/pages/settings/PlaybackSettings"))
 const NotificationsSettings = lazy(() => import("@/pages/settings/NotificationsSettings"));
 const Requests = lazy(() => import("@/pages/Requests"));
 const RequestBrowse = lazy(() => import("@/pages/RequestBrowse"));
-const RequestDetail = lazy(() => import("@/pages/RequestDetail"));
+const RequestDiscoverSection = lazy(() => import("@/pages/RequestDiscoverSection"));
+const TitleDetail = lazy(() => import("@/pages/TitleDetail"));
 const AdminDashboard = lazy(() => import("@/pages/AdminDashboard"));
 const AdminActivity = lazy(() => import("@/pages/AdminActivity"));
 const AdminLogs = lazy(() => import("@/pages/AdminLogs"));
@@ -136,6 +138,7 @@ const TasteSeed = lazy(() => import("@/pages/TasteSeed"));
 const AccessibilitySettings = lazy(() => import("@/pages/settings/AccessibilitySettings"));
 const ProfilesSettings = lazy(() => import("@/pages/settings/ProfilesSettings"));
 const LibrarySettings = lazy(() => import("@/pages/settings/LibrarySettings"));
+const RequestsSettings = lazy(() => import("@/pages/settings/RequestsSettings"));
 const HistoryImportSettings = lazy(() => import("@/pages/settings/HistoryImportSettings"));
 const WebhookSyncSettings = lazy(() => import("@/pages/settings/WebhookSyncSettings"));
 const WatchProvidersSettings = lazy(() => import("@/pages/settings/WatchProvidersSettings"));
@@ -591,6 +594,7 @@ function AppRoutes() {
                   <Route path="home-screen" element={<HomeScreenSettings />} />
                   <Route path="card-overlays" element={<CardOverlaySettings />} />
                   <Route path="personalize" element={<PersonalizeSettings />} />
+                  <Route path="requests" element={<RequestsSettings />} />
                   <Route path="devices" element={<DeviceSettings />} />
                   <Route path="notifications" element={<NotificationsSettings />} />
                   <Route path="connect-apps" element={<ConnectAppsSettings />} />
@@ -649,9 +653,21 @@ function AppRoutes() {
                           />
                           <Route
                             path="/requests/:mediaType/:tmdbId"
+                            element={<LegacyRequestDetailRedirect />}
+                          />
+                          <Route
+                            path="/title/:mediaType/:tmdbId"
                             element={
                               <RequireRequestsEnabled>
-                                <RequestDetail />
+                                <TitleDetail />
+                              </RequireRequestsEnabled>
+                            }
+                          />
+                          <Route
+                            path="/requests/discover/:section"
+                            element={
+                              <RequireRequestsEnabled>
+                                <RequestDiscoverSection />
                               </RequireRequestsEnabled>
                             }
                           />

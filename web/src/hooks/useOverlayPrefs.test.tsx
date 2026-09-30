@@ -43,6 +43,8 @@ vi.mock("@/utils/storage", () => ({
 
 import { v2Problem } from "@/api/v2/problems.test-support";
 import { SETTING_KEYS } from "@/lib/settingsContract";
+import { buildDefaultPrefs, type CardOverlayPrefs } from "@/lib/overlays";
+import { settingsKeys } from "@/hooks/queries/keys";
 
 import { useOverlayPrefs } from "./useOverlayPrefs";
 import { useUpdateServerSettings } from "./queries/admin/settings";
@@ -283,6 +285,75 @@ describe("useOverlayPrefs", () => {
       },
       expect.objectContaining({ onError: expect.any(Function) }),
     );
+  });
+
+  // ui.card_overlays validation is all-or-nothing, so one overlay id the
+  // server's schema predates would fail every badge save on that server. With
+  // the revision unknown, an id the server already stored is still accepted.
+  it.each(
+    (
+      [
+        ["advisory_age", 13],
+        ["request_status", 15],
+      ] as const
+    ).flatMap(([id, since]) => [
+      {
+        id,
+        name: `a revision-${since - 1} server`,
+        revision: since - 1,
+        stored: false,
+        kept: false,
+      },
+      { id, name: `a revision-${since} server`, revision: since, stored: false, kept: true },
+      { id, name: "an unknown revision", revision: undefined, stored: false, kept: false },
+      {
+        id,
+        name: "an unknown revision with it stored",
+        revision: undefined,
+        stored: true,
+        kept: true,
+      },
+    ]),
+  )("writes $id only where it is accepted: $name", async (c) => {
+    mocks.profileId = "profile-1";
+    mocks.effective = c.stored
+      ? (effectiveOverlayValue({
+          version: 2,
+          preset: "classic",
+          order: [],
+          items: { [c.id]: { enabled: true, position: "bottom-right" } },
+        }).data as Record<string, { value: unknown }>)
+      : {};
+    mocks.v2.mockImplementation(async (operation: string) => {
+      if (operation === "GET /api/v2/settings/contract/capabilities") {
+        if (c.revision === undefined) throw new Error("capabilities unavailable");
+        return { api_version: 1, manifest_revision: c.revision, supports_batched_effective: true };
+      }
+      return { enabled: true };
+    });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client: queryClient }, children);
+    const { result } = renderHook(() => useOverlayPrefs(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+      expect(queryClient.getQueryState([...settingsKeys.all, "capabilities"])?.status).not.toBe(
+        "pending",
+      );
+    });
+    expect(result.current.isOverlaySupported(c.id)).toBe(c.kept);
+
+    const next = buildDefaultPrefs();
+    next.preset = "pill";
+    next.order = [c.id, "year"];
+    next.items[c.id] = { enabled: true, position: "bottom-right" };
+    act(() => result.current.setPrefs(next));
+
+    const written = mocks.setValue.mock.calls[0]![0].value as CardOverlayPrefs;
+    expect(c.id in written.items).toBe(c.kept);
+    expect(written.order).toEqual(c.kept ? [c.id, "year"] : ["year"]);
+    expect(written.items.year).toEqual(next.items.year);
   });
 
   it("refreshes the shared overlay configuration immediately after an admin save", async () => {

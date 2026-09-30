@@ -1539,8 +1539,40 @@ func TestBuildFFmpegArgs_NVENCH264UsesCudaPipeline(t *testing.T) {
 	if strings.Contains(joined, "-vf scale=-2:720") {
 		t.Fatalf("nvenc args must not use software scale on cuda frames: %s", joined)
 	}
-	if !strings.Contains(joined, "-b:v 2000k -maxrate 2000k -bufsize 4000k") {
+	if !strings.Contains(joined, "-b:v 1800k -maxrate 2000k -bufsize 4000k") {
 		t.Fatalf("nvenc args should include bitrate cap controls: %s", joined)
+	}
+}
+
+// A cap must be a ceiling on every hardware encoder: QSV selects CBR when
+// -b:v equals -maxrate, and VAAPI ignores -maxrate once -qp selects CQP.
+// VAAPI forces the capped mode detected on the device (FFmpeg's automatic
+// mode can pick AVBR, which does not honor -maxrate).
+func TestAppendVideoArgs_HardwareBitrateCapIsVBRCeiling(t *testing.T) {
+	for _, tc := range []struct {
+		hwAccel, codec, want string
+	}{
+		{"qsv", "h264", "-c:v h264_qsv -preset veryfast -b:v 4500k -maxrate 5000k -bufsize 10000k"},
+		{"qsv", "hevc", "-c:v hevc_qsv -preset veryfast -b:v 4500k -maxrate 5000k -bufsize 10000k"},
+		{"vaapi", "h264", "-c:v h264_vaapi -b:v 4500k -maxrate 5000k -bufsize 10000k"},
+		{"vaapi", "hevc", "-c:v hevc_vaapi -b:v 4500k -maxrate 5000k -bufsize 10000k"},
+		{"nvenc", "h264", "-c:v h264_nvenc -rc:v vbr -b:v 4500k -maxrate 5000k -bufsize 10000k"},
+		{"nvenc", "hevc", "-c:v hevc_nvenc -rc:v vbr -b:v 4500k -maxrate 5000k -bufsize 10000k"},
+	} {
+		joined := strings.Join(appendVideoArgs(nil, TranscodeOpts{HWAccel: tc.hwAccel, TargetCodecVideo: tc.codec, TargetBitrateKbps: 5000}), " ")
+		if joined != tc.want {
+			t.Errorf("%s/%s capped args = %q, want %q", tc.hwAccel, tc.codec, joined, tc.want)
+		}
+		if tc.hwAccel == "vaapi" {
+			detected := strings.Join(appendVideoArgs(nil, TranscodeOpts{HWAccel: tc.hwAccel, TargetCodecVideo: tc.codec, TargetBitrateKbps: 5000, vaapiRateControl: "VBR"}), " ")
+			if want := strings.Replace(tc.want, "_vaapi ", "_vaapi -rc_mode VBR ", 1); detected != want {
+				t.Errorf("%s/%s capped args with VBR detected = %q, want %q", tc.hwAccel, tc.codec, detected, want)
+			}
+		}
+		uncapped := strings.Join(appendVideoArgs(nil, TranscodeOpts{HWAccel: tc.hwAccel, TargetCodecVideo: tc.codec, vaapiRateControl: "VBR"}), " ")
+		if strings.Contains(uncapped, "-maxrate") || strings.Contains(uncapped, "-rc_mode") {
+			t.Errorf("%s/%s uncapped args must keep constant-quality mode: %q", tc.hwAccel, tc.codec, uncapped)
+		}
 	}
 }
 
@@ -2032,5 +2064,71 @@ func TestBuildFFmpegArgs_NVENCFullHardwareArgsUnchanged(t *testing.T) {
 				t.Fatalf("full-hardware NVENC should scale CUDA frames directly: %s", joined)
 			}
 		})
+	}
+}
+
+// Every backend scales to the same height for a ladder label or an exact
+// box-fit height, and leaves the source alone for anything else.
+func TestScaleFiltersShareTargetHeightParsing(t *testing.T) {
+	for _, tc := range []struct {
+		res    string
+		height string
+	}{
+		{"2160p", "2160"}, {"1080p", "1080"}, {"720p", "720"}, {"540p", "540"},
+		{"480p", "480"}, {"420p", "420"}, {"328p", "328"}, {"800p", "800"}, {" 1080P ", "1080"},
+		{"66p", "66"}, // a very wide source fitted into the 480p box
+	} {
+		if got, want := resolutionToScale(tc.res), "scale=-2:"+tc.height; got != want {
+			t.Errorf("resolutionToScale(%q) = %q, want %q", tc.res, got, want)
+		}
+		if got, want := vaapiScaleFilter(tc.res), "scale_vaapi=w=-2:h="+tc.height+":format=nv12"; got != want {
+			t.Errorf("vaapiScaleFilter(%q) = %q, want %q", tc.res, got, want)
+		}
+		if got, want := qsvScaleFilter(tc.res), "scale_vaapi=w=-2:h="+tc.height+":format=nv12,hwmap=derive_device=qsv,format=qsv"; got != want {
+			t.Errorf("qsvScaleFilter(%q) = %q, want %q", tc.res, got, want)
+		}
+		if got, want := nvencScaleFilter(tc.res), "scale_cuda=w=-2:h="+tc.height+":format=nv12"; got != want {
+			t.Errorf("nvencScaleFilter(%q) = %q, want %q", tc.res, got, want)
+		}
+		if w, h := videoToolboxScaleDimensions(tc.res); w != "-2" || h != tc.height {
+			t.Errorf("videoToolboxScaleDimensions(%q) = %s:%s, want -2:%s", tc.res, w, h, tc.height)
+		}
+	}
+	for _, res := range []string{"", "4k", "original", "817p", "8640p", "0p", "-2p", "p"} {
+		if got := resolutionToScale(res); got != "" {
+			t.Errorf("resolutionToScale(%q) = %q, want no scale", res, got)
+		}
+		if got := vaapiScaleFilter(res); got != "scale_vaapi=format=nv12" {
+			t.Errorf("vaapiScaleFilter(%q) = %q, want format-only", res, got)
+		}
+		if w, h := videoToolboxScaleDimensions(res); w != "iw" || h != "ih" {
+			t.Errorf("videoToolboxScaleDimensions(%q) = %s:%s, want iw:ih", res, w, h)
+		}
+	}
+}
+
+// The rate-control probe runs the ordinary VAAPI smoke encode in the capped
+// mode a transcode would request, and a detected mode is forced.
+func TestVAAPIRateControlSmokeArgsAndForcedMode(t *testing.T) {
+	joined := strings.Join(vaapiRateControlSmokeArgs("/dev/dri/renderD128", "hevc_vaapi", "CBR"), " ")
+	for _, want := range []string{"-c:v hevc_vaapi -rc_mode CBR -b:v 1800k -maxrate 2000k -f null -", "/dev/dri/renderD128"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("rate-control smoke args missing %q: %s", want, joined)
+		}
+	}
+	cbr := strings.Join(appendVideoArgs(nil, TranscodeOpts{HWAccel: "vaapi", TargetCodecVideo: "h264", TargetBitrateKbps: 5000, vaapiRateControl: "CBR"}), " ")
+	if cbr != "-c:v h264_vaapi -rc_mode CBR -b:v 4500k -maxrate 5000k -bufsize 10000k" {
+		t.Fatalf("CBR-only device args = %q", cbr)
+	}
+	if opts, err := resolveVAAPIRateControl(context.Background(), TranscodeOpts{HWAccel: "qsv", TargetBitrateKbps: 5000, vaapiRateControl: "VBR"}); err != nil || opts.vaapiRateControl != "" {
+		t.Fatalf("a non-VAAPI encode must not keep a VAAPI mode: %q %v", opts.vaapiRateControl, err)
+	}
+	if opts, err := resolveVAAPIRateControl(context.Background(), TranscodeOpts{HWAccel: "vaapi", vaapiRateControl: "VBR"}); err != nil || opts.vaapiRateControl != "" {
+		t.Fatalf("an uncapped VAAPI encode needs no mode: %q %v", opts.vaapiRateControl, err)
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := resolveVAAPIRateControl(canceled, TranscodeOpts{HWAccel: "vaapi", TargetCodecVideo: "h264", TargetBitrateKbps: 5000, FFmpegPath: "/nonexistent/ffmpeg"}); err == nil {
+		t.Fatal("a canceled start must stop instead of launching FFmpeg")
 	}
 }

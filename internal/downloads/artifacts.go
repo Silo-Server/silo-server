@@ -325,11 +325,14 @@ func (m *ArtifactManager) ensureResolved(ctx context.Context, file *models.Media
 		OutputPath:                 artifactOutputPath(m.artifactDir(), file.ID, format, hash),
 		MaxAttempts:                artifactMaxAttempts,
 	}
+	if playback.PreparedTracksAvailable(file) {
+		a.TrackRecipeVersion = playback.PreparedTracksRecipeVersion
+	}
 	request := downloadprepare.NewRequest(a.ID, m.buildOpts(file, a))
 	if request.StereoDownmixBoostRequested() {
 		a.AudioRecipeVersion = request.AudioRecipeVersion
 	}
-	if a.ToneMapMode != "" || a.AudioRecipeVersion != "" {
+	if artifactUsesExecutionFingerprint(a) {
 		a.ParamsHash = request.ExecutionFingerprint()
 		a.OutputPath = artifactOutputPath(m.artifactDir(), file.ID, format, a.ParamsHash)
 	}
@@ -368,7 +371,7 @@ func (m *ArtifactManager) ensureResolved(ctx context.Context, file *models.Media
 		case err != nil:
 			return nil, err
 		default:
-			row.Status = queuedArtifactStatus(row.ToneMapMode, row.AudioRecipeVersion)
+			row.Status = queuedArtifactStatus(row.ToneMapMode, row.AudioRecipeVersion, row.TrackRecipeVersion)
 		}
 		m.triggerDrain()
 		return row, nil
@@ -910,7 +913,9 @@ func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 		// remote-missing requeue can safely fall back to integrated preparation.
 		outputPath = a.OutputPath
 	}
-	applied, err := m.repo.MarkReady(ctx, a.ID, m.owner, outputPath, prepared.OriginNodeID, prepared.OriginNodeURL, prepared.OriginNodeGroup, prepared.OriginArtifactID, size)
+	// The fingerprint check above tied these bytes to file's current probe;
+	// freeze the audio inventory it describes with the ready transition.
+	applied, err := m.repo.MarkReady(ctx, a.ID, m.owner, outputPath, prepared.OriginNodeID, prepared.OriginNodeURL, prepared.OriginNodeGroup, prepared.OriginArtifactID, size, preparedAudioTracks(file, a))
 	if err != nil {
 		slog.ErrorContext(ctx, "marking artifact ready failed", "component", "downloads", "artifact_id", a.ID, "error", err)
 		m.cleanupRejectedPrepared(ctx, a.ID, prepared)
@@ -1089,6 +1094,14 @@ func (m *ArtifactManager) buildOpts(file *models.MediaFile, a *Artifact) playbac
 		slog.Warn("download artifact tone-map source revision is invalid", "component", "downloads", "artifact_id", a.ID, "source_revision_length", len(a.ToneMapSourceRevision))
 		sourceRevision = tonemap.SourceRevision{MediaFileID: -1}
 	}
+	// The multi-track layout carries each encoded track's channel count, so
+	// the single-track downmix recipe fields stay unset.
+	var preparedTracks *playback.PreparedTracks
+	sourceAudioChannels := preparedSourceAudioChannels(file, a.AudioTrackIndex, a.CodecAudio)
+	if a.TrackRecipeVersion != "" {
+		preparedTracks = playback.PlanPreparedTracks(file, a.CodecAudio, a.AudioTrackIndex)
+		sourceAudioChannels = 0
+	}
 	return playback.TranscodeOpts{
 		InputPath:                  file.FilePath,
 		SourceVideoCodec:           sourceVideoCodec,
@@ -1097,7 +1110,7 @@ func (m *ArtifactManager) buildOpts(file *models.MediaFile, a *Artifact) playbac
 		SoftwareVideoDecode:        playback.RequiresSoftwareVideoDecode(sourceVideoCodec, sourceVideoProfile, sourceVideoBitDepth),
 		TargetCodecVideo:           a.CodecVideo,
 		TargetCodecAudio:           a.CodecAudio,
-		TargetResolution:           a.Resolution,
+		TargetResolution:           playback.DownloadScaleResolution(file, a.Resolution),
 		TargetBitrateKbps:          a.TargetBitrateKbps,
 		ToneMapPolicy:              toneMapPolicy,
 		ToneMapMode:                a.ToneMapMode,
@@ -1110,8 +1123,9 @@ func (m *ArtifactManager) buildOpts(file *models.MediaFile, a *Artifact) playbac
 		ToneMapDVBLPresent:         a.ToneMapDVBLPresent,
 		ToneMapDVRPUPresent:        a.ToneMapDVRPUPresent,
 		AudioTrackIndex:            a.AudioTrackIndex,
-		SourceAudioChannels:        preparedSourceAudioChannels(file, a.AudioTrackIndex, a.CodecAudio),
+		SourceAudioChannels:        sourceAudioChannels,
 		SubtitleTrackIndex:         -1,
+		PreparedTracks:             preparedTracks,
 		FFmpegPath:                 cfg.Playback.FFmpegPath,
 		HWAccel:                    cfg.Playback.HWAccel,
 		HWDevice:                   cfg.Playback.HWDevice,

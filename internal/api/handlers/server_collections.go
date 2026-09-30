@@ -93,6 +93,7 @@ func (h *LibraryCollectionHandler) ListServerCollections(ctx context.Context, ac
 		}
 
 		collections, total := capServerCollections(collections)
+		collections = h.withViewerPosters(ctx, collections, access)
 
 		colls := make([]libraryTabCollection, 0, len(collections))
 		for _, c := range collections {

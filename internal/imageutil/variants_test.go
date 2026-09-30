@@ -51,3 +51,35 @@ func TestGenerateVariantsPreservesEncodes(t *testing.T) {
 		})
 	}
 }
+
+func TestEncodeWebPWidthMatchesVariantRung(t *testing.T) {
+	for _, size := range [][2]int{{1920, 1080}, {200, 120}} {
+		t.Run(fmt.Sprintf("%dx%d", size[0], size[1]), func(t *testing.T) {
+			data := largeTestJPEG(t, size[0], size[1])
+			variants, err := GenerateVariants(data, []int{300})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := EncodeWebPWidth(data, 300)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(got, variants.Variants[1].Data) {
+				t.Fatal("single-width encode differs from the w300 variant")
+			}
+			decoded, err := bimg.NewImage(got).Size()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := min(size[0], 300); decoded.Width != want {
+				t.Fatalf("width = %d, want %d", decoded.Width, want)
+			}
+		})
+	}
+}
+
+func TestEncodeWebPWidthRejectsGarbage(t *testing.T) {
+	if _, err := EncodeWebPWidth([]byte("not an image"), 300); err == nil {
+		t.Fatal("expected an error for invalid image data")
+	}
+}

@@ -234,4 +234,16 @@ describe("ActionBar watch together group", () => {
       expect(item.querySelector("svg")).toBeTruthy();
     }
   });
+
+  it("offers Request Seasons only with the prop", async () => {
+    const onRequestSeasons = vi.fn();
+    render(
+      <MemoryRouter>
+        <ActionBar contentId="series-1" onRequestSeasons={onRequestSeasons} />
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByTitle("More"));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Request Seasons" }));
+    expect(onRequestSeasons).toHaveBeenCalledTimes(1);
+  });
 });

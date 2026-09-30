@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"math/bits"
 	"net/http"
 	"slices"
 	"strconv"
@@ -23,9 +24,28 @@ import (
 // acting viewer.
 type RequestMediaState struct {
 	Status      string `json:"status,omitempty" doc:"Status of the active request, when one exists" example:"pending"`
+	State       string `json:"state,omitempty" doc:"User-facing state of the active request, when one exists: pending, approved or processing" example:"pending"`
 	Requestable bool   `json:"requestable" doc:"Whether the viewer may request this media now" example:"true"`
 	Reason      string `json:"reason,omitempty" doc:"Why the media is not requestable" example:"already_requested"`
 	RequestID   ID     `json:"request_id,omitempty" doc:"The active request, when one exists" example:"1834729"`
+	Following   bool   `json:"following" doc:"Whether the viewer will be notified when the media becomes available: they requested it or follow it" example:"false"`
+	// RequestedByViewer tells a client whether to offer a follow toggle.
+	RequestedByViewer bool `json:"requested_by_viewer" doc:"Whether the viewing profile made the active request, so there is nothing to follow" example:"false"`
+	// Download is filled on the title detail and the watchlist titles only:
+	// search and discovery do not load each result's targets.
+	Download *RequestDownload `json:"download,omitempty" doc:"How far the active request's downloads are, while its download server reports them. Only the title detail (getRequestMediaDetail) and the watchlist titles (listWatchlistTitles) carry it"`
+}
+
+// RequestDownload is how far downloads are, as the download server last
+// reported them.
+type RequestDownload struct {
+	Phase                 string   `json:"phase" doc:"queued, downloading, paused, stalled, importing or import_blocked. More values may be added: read an unknown one as downloading, without a percentage" example:"downloading"`
+	Percent               *int     `json:"percent,omitempty" minimum:"0" maximum:"100" doc:"How much has downloaded, rounded down; absent while the size is unknown" example:"43"`
+	BytesTotal            *int64   `json:"bytes_total,omitempty" minimum:"1" doc:"Size of the downloads in bytes; absent while unknown" example:"4294967296"`
+	BytesLeft             *int64   `json:"bytes_left,omitempty" minimum:"0" doc:"Bytes still to download; present whenever bytes_total is" example:"2448131358"`
+	EstimatedCompletionAt *Instant `json:"estimated_completion_at,omitempty" doc:"When the download server expects the downloads to finish; absent when it cannot tell" example:"2026-01-02T03:16:05.000Z"`
+	Downloads             int      `json:"downloads" minimum:"0" doc:"Distinct downloads in flight; a season pack counts once" example:"1"`
+	UpdatedAt             Instant  `json:"updated_at" doc:"When the server last heard from the download server. A client may hide figures older than about ten minutes" example:"2026-01-02T03:04:05.000Z"`
 }
 
 // RequestMediaResult is one discovery or search card.
@@ -43,6 +63,7 @@ type RequestMediaResult struct {
 	Availability     string            `json:"availability" doc:"missing or available in this server's catalog" example:"missing"`
 	LibraryContentID string            `json:"library_content_id,omitempty" doc:"The catalog item when the media is available" example:"movie:heat-1995"`
 	Request          RequestMediaState `json:"request"`
+	InWatchlist      bool              `json:"in_watchlist" doc:"Whether the title is on the viewing profile's watchlist, as a watchlist title or through its catalog item" example:"false"`
 }
 
 // RequestMediaCastMember is one cast credit on a detail document.
@@ -87,6 +108,26 @@ type RequestMediaDetail struct {
 	Availability        string                   `json:"availability" doc:"missing or available in this server's catalog" example:"missing"`
 	LibraryContentID    string                   `json:"library_content_id,omitempty" doc:"The catalog item when the media is available"`
 	Request             RequestMediaState        `json:"request"`
+	InWatchlist         bool                     `json:"in_watchlist" doc:"Whether the title is on the viewing profile's watchlist, as a watchlist title or through its catalog item" example:"false"`
+	Seasons             []RequestMediaSeason     `json:"seasons" doc:"Series: the regular seasons (specials excluded) with library availability and request coverage; empty for movies"`
+}
+
+// RequestMediaSeason is one season of a series on its detail document.
+type RequestMediaSeason struct {
+	SeasonNumber int    `json:"season_number" example:"2"`
+	Name         string `json:"name,omitempty" example:"Season 2"`
+	EpisodeCount int    `json:"episode_count" doc:"Episodes TMDB lists for the season, aired or not" example:"10"`
+	AirDate      string `json:"air_date,omitempty" doc:"Calendar date, YYYY-MM-DD" example:"2025-01-17"`
+	PosterPath   string `json:"poster_path,omitempty" doc:"TMDB image path"`
+	Availability string `json:"availability" enum:"missing,partial,available" doc:"Whether every aired episode is in the library" example:"partial"`
+	Requested    bool   `json:"requested" doc:"The title's active request covers this season"`
+}
+
+// RequestSeasonProgress is how far one requested season is.
+type RequestSeasonProgress struct {
+	SeasonNumber      int `json:"season_number" example:"2"`
+	EpisodesAired     int `json:"episodes_aired" doc:"Aired episodes by the library's own metadata; 0 when it has no air dates yet" example:"10"`
+	EpisodesAvailable int `json:"episodes_available" doc:"Episodes with a file in an enabled library" example:"4"`
 }
 
 // RequestMediaPage is one TMDB result page. Search and browse page by the
@@ -145,51 +186,61 @@ type DiscoverBrowsePage struct {
 }
 
 // RequestTarget is one fulfillment of a request against one integration
-// instance at one quality.
+// instance at one quality. The download server details are for admins only:
+// see mediaRequestOf.
 type RequestTarget struct {
 	ID              ID      `json:"id" example:"42"`
 	RequestID       ID      `json:"request_id" example:"1834729"`
-	IntegrationID   string  `json:"integration_id,omitempty"`
-	IntegrationKind string  `json:"integration_kind,omitempty" example:"radarr"`
-	InstanceName    string  `json:"instance_name,omitempty"`
+	IntegrationID   string  `json:"integration_id,omitempty" doc:"Admins only: the download server holding this target"`
+	IntegrationKind string  `json:"integration_kind,omitempty" doc:"Admins only: the download server's kind" example:"radarr"`
+	InstanceName    string  `json:"instance_name,omitempty" doc:"Admins only: the download server's name"`
 	Quality         string  `json:"quality" example:"1080p"`
 	IsAnime         bool    `json:"is_anime"`
-	ExternalID      string  `json:"external_id,omitempty" doc:"The integration's own identifier"`
-	ExternalStatus  string  `json:"external_status,omitempty"`
+	ExternalID      string  `json:"external_id,omitempty" doc:"Admins only: the integration's own identifier"`
+	ExternalStatus  string  `json:"external_status,omitempty" doc:"Admins only: the status as the download server reports it"`
 	Status          string  `json:"status" example:"queued"`
-	LastError       string  `json:"last_error,omitempty"`
+	LastError       string  `json:"last_error,omitempty" doc:"Admins only: why the download server failed this target"`
+	RouteName       string  `json:"route_name,omitempty" doc:"Admins only: the routing rule that sent this target to its server, as named when it was sent"`
 	CreatedAt       Instant `json:"created_at" example:"2026-01-02T03:04:05.000Z"`
 	UpdatedAt       Instant `json:"updated_at" example:"2026-01-02T03:04:05.000Z"`
+	// Download is set while the target's router plugin reports progress.
+	Download *RequestDownload `json:"download,omitempty" doc:"How far this target's downloads are, while its download server reports them"`
 }
 
 // MediaRequest is one media request.
 type MediaRequest struct {
-	ID                   ID              `json:"id" example:"1834729"`
-	Provider             string          `json:"provider" example:"tmdb"`
-	MediaType            string          `json:"media_type" doc:"movie or series" example:"movie"`
-	TMDBID               int             `json:"tmdb_id" doc:"TMDB identifier (external, not a Silo ID)" example:"949"`
-	TVDBID               *int            `json:"tvdb_id,omitempty" doc:"TVDB identifier (external, not a Silo ID)"`
-	IMDbID               string          `json:"imdb_id,omitempty" example:"tt0113277"`
-	Title                string          `json:"title" example:"Heat"`
-	Year                 *int            `json:"year,omitempty" example:"1995"`
-	Overview             string          `json:"overview,omitempty"`
-	PosterPath           string          `json:"poster_path,omitempty" doc:"TMDB image path"`
-	BackdropPath         string          `json:"backdrop_path,omitempty" doc:"TMDB image path"`
-	Status               string          `json:"status" doc:"pending, approved, queued, downloading, completed" example:"pending"`
-	Outcome              string          `json:"outcome" doc:"active, declined, cancelled, failed" example:"active"` //nolint:misspell // the store's spelling
-	RequestedByUserID    ID              `json:"requested_by_user_id,omitempty" example:"1"`
-	RequestedByProfileID ID              `json:"requested_by_profile_id,omitempty" example:"p-owner"`
-	IntegrationKind      string          `json:"integration_kind,omitempty" example:"radarr"`
-	IsAnime              bool            `json:"is_anime"`
-	Targets              []RequestTarget `json:"targets" doc:"Empty, never null"`
-	ExternalID           string          `json:"external_id,omitempty"`
-	ExternalStatus       string          `json:"external_status,omitempty"`
-	LibraryContentID     string          `json:"library_content_id,omitempty" doc:"The catalog item once the media is in the library"`
-	LastError            string          `json:"last_error,omitempty"`
-	CreatedAt            Instant         `json:"created_at" example:"2026-01-02T03:04:05.000Z"`
-	UpdatedAt            Instant         `json:"updated_at" example:"2026-01-02T03:04:05.000Z"`
-	ApprovedAt           *Instant        `json:"approved_at,omitempty"`
-	CompletedAt          *Instant        `json:"completed_at,omitempty"`
+	ID                   ID                      `json:"id" example:"1834729"`
+	Provider             string                  `json:"provider" example:"tmdb"`
+	MediaType            string                  `json:"media_type" doc:"movie or series" example:"movie"`
+	TMDBID               int                     `json:"tmdb_id" doc:"TMDB identifier (external, not a Silo ID)" example:"949"`
+	TVDBID               *int                    `json:"tvdb_id,omitempty" doc:"TVDB identifier (external, not a Silo ID)"`
+	IMDbID               string                  `json:"imdb_id,omitempty" example:"tt0113277"`
+	Title                string                  `json:"title" example:"Heat"`
+	Year                 *int                    `json:"year,omitempty" example:"1995"`
+	Overview             string                  `json:"overview,omitempty"`
+	PosterPath           string                  `json:"poster_path,omitempty" doc:"TMDB image path"`
+	BackdropPath         string                  `json:"backdrop_path,omitempty" doc:"TMDB image path"`
+	Status               string                  `json:"status" doc:"pending, approved, queued, downloading, completed" example:"pending"`
+	Outcome              string                  `json:"outcome" doc:"active, declined, cancelled, failed" example:"active"`                                                                                                                                                    //nolint:misspell // the store's spelling
+	State                string                  `json:"state" doc:"The one state to show a user: pending, approved, processing, partially_available (some requested seasons are in the library), available (in the library), declined, cancelled or failed" example:"pending"` //nolint:misspell // the store's spelling
+	Seasons              []int                   `json:"seasons" doc:"Series: the requested season numbers; empty means the whole series (requests made through v1 or before season requests)"`
+	SeasonProgress       []RequestSeasonProgress `json:"season_progress" doc:"Series season requests: each requested season's episodes, once the series is in the library; empty otherwise"`
+	OutcomeReason        string                  `json:"outcome_reason,omitempty" doc:"Why the request was declined or withdrawn, when a reason was given"`
+	Source               string                  `json:"source" doc:"What created the request: direct (the Request button or an API create) or watchlist (adding a title that is not in the library to a watchlist); more values may be added" example:"direct"`
+	RequestedByUserID    ID                      `json:"requested_by_user_id,omitempty" example:"1"`
+	RequestedByProfileID ID                      `json:"requested_by_profile_id,omitempty" example:"p-owner"`
+	IntegrationKind      string                  `json:"integration_kind,omitempty" doc:"Admins only: the download server's kind" example:"radarr"`
+	IsAnime              bool                    `json:"is_anime"`
+	Targets              []RequestTarget         `json:"targets" doc:"Empty, never null"`
+	ExternalID           string                  `json:"external_id,omitempty" doc:"Admins only: the integration's own identifier"`
+	ExternalStatus       string                  `json:"external_status,omitempty" doc:"Admins only: the status as the download server reports it"`
+	LibraryContentID     string                  `json:"library_content_id,omitempty" doc:"The catalog item once the media is in the library"`
+	LastError            string                  `json:"last_error,omitempty" doc:"Admins only: why the last submission to a download server failed. It can name servers and routing rules"`
+	CreatedAt            Instant                 `json:"created_at" example:"2026-01-02T03:04:05.000Z"`
+	UpdatedAt            Instant                 `json:"updated_at" example:"2026-01-02T03:04:05.000Z"`
+	ApprovedAt           *Instant                `json:"approved_at,omitempty"`
+	CompletedAt          *Instant                `json:"completed_at,omitempty"`
+	Download             *RequestDownload        `json:"download,omitempty" doc:"How far the request's downloads are over all its servers (1080p and 4K together), while any reports them: bytes summed, the phase that needs the most attention, the latest estimate, and the oldest report's time"`
 }
 
 // MediaRequestOutput is a single-request response.
@@ -214,6 +265,7 @@ type MediaRequestCreate struct {
 	Overview     string `json:"overview,omitempty"`
 	PosterPath   string `json:"poster_path,omitempty" doc:"TMDB image path"`
 	BackdropPath string `json:"backdrop_path,omitempty" doc:"TMDB image path"`
+	Seasons      []int  `json:"seasons,omitempty" maxItems:"200" doc:"Series only: the season numbers to request, starting at 1 (a season below 1 is refused). Omitted: every aired season not yet complete in the library" example:"[2,3]"`
 }
 
 // MediaRequestCreateInput is the createRequest request.
@@ -321,6 +373,8 @@ const (
 	opBrowseDiscoverGenre   = "browseDiscoverGenre"
 	opBrowseDiscoverNetwork = "browseDiscoverNetwork"
 	opBrowseDiscoverStudio  = "browseDiscoverStudio"
+	opFollowRequestMedia    = "followRequestMedia"
+	opUnfollowRequestMedia  = "unfollowRequestMedia"
 )
 
 const requestsTag = "requests"
@@ -331,6 +385,7 @@ var requestOperationIDs = []string{
 	opCreateRequest, opListMyRequests, opGetRequest, opSearchRequestMedia, opGetRequestMediaDetail,
 	opListDiscoverSections, opGetDiscoverSection, opListDiscoverGenres, opListDiscoverNetworks, opListDiscoverStudios,
 	opBrowseDiscoverGenre, opBrowseDiscoverNetwork, opBrowseDiscoverStudio,
+	opFollowRequestMedia, opUnfollowRequestMedia,
 }
 
 func registerRequests(reg *Registry) {
@@ -411,6 +466,19 @@ func registerRequests(reg *Registry) {
 			})
 		})
 
+	// Following is keyed by title: the viewer follows a title someone else
+	// already requested, without learning whose request it is.
+	follow := humaOp(http.MethodPut, Prefix+"/requests/follows/{media_type}/{tmdb_id}", opFollowRequestMedia, requestsTag,
+		"Get notified when a title that already has an active request becomes available.")
+	// 409 when the title has no active request (request it instead).
+	follow.Errors = []int{http.StatusNotFound, http.StatusConflict}
+	Register(reg, Operation{Operation: follow, Class: ClassProfileScoped, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}, reg.followRequestMedia)
+
+	unfollow := humaOp(http.MethodDelete, Prefix+"/requests/follows/{media_type}/{tmdb_id}", opUnfollowRequestMedia, requestsTag,
+		"Stop following a title.")
+	unfollow.DefaultStatus = http.StatusNoContent
+	Register(reg, Operation{Operation: unfollow, Class: ClassProfileScoped, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}, reg.unfollowRequestMedia)
+
 	get := humaOp(http.MethodGet, Prefix+"/requests/{id}", opGetRequest, requestsTag,
 		"Get one of the account's media requests.")
 	get.Errors = []int{http.StatusConflict}
@@ -453,11 +521,12 @@ func (reg *Registry) createRequest(ctx context.Context, in *MediaRequestCreateIn
 		Overview:     in.Body.Overview,
 		PosterPath:   in.Body.PosterPath,
 		BackdropPath: in.Body.BackdropPath,
+		Seasons:      in.Body.Seasons,
 	})
 	if err != nil {
 		return nil, requestProblem(err)
 	}
-	return &MediaRequestOutput{Body: mediaRequestOf(req)}, nil
+	return &MediaRequestOutput{Body: mediaRequestOf(req, viewer)}, nil
 }
 
 // listMyRequests pages by the last emitted creation time and unique request ID.
@@ -503,7 +572,7 @@ func (reg *Registry) listMyRequests(ctx context.Context, cursors *Cursors, in *M
 	}
 	items := make([]MediaRequest, 0, len(rows))
 	for _, r := range rows {
-		items = append(items, mediaRequestOf(r))
+		items = append(items, mediaRequestOf(r, viewer))
 	}
 	return &MediaRequestCollectionOutput{Body: MediaRequestCollection{Collection: Paginated(items, next)}}, nil
 }
@@ -518,7 +587,7 @@ func (reg *Registry) getRequest(ctx context.Context, in *MediaRequestGetInput) (
 	if err != nil {
 		return nil, requestProblem(err)
 	}
-	return &MediaRequestOutput{Body: mediaRequestOf(req)}, nil
+	return &MediaRequestOutput{Body: mediaRequestOf(req, viewer)}, nil
 }
 
 // searchRequestMedia is v1 GET /requests/search.
@@ -535,7 +604,9 @@ func (reg *Registry) searchRequestMedia(ctx context.Context, in *RequestMediaSea
 	if err != nil {
 		return nil, requestProblem(err)
 	}
-	return &RequestMediaPageOutput{Body: requestMediaPageOf(page)}, nil
+	out := requestMediaPageOf(page)
+	reg.markInWatchlist(ctx, watchlistMarksOf(out.Results))
+	return &RequestMediaPageOutput{Body: out}, nil
 }
 
 // getRequestMediaDetail is v1 GET /requests/detail/{media_type}/{tmdb_id}.
@@ -548,7 +619,38 @@ func (reg *Registry) getRequestMediaDetail(ctx context.Context, in *RequestMedia
 	if err != nil {
 		return nil, requestProblem(err)
 	}
-	return &RequestMediaDetailOutput{Body: requestMediaDetailOf(detail)}, nil
+	out := requestMediaDetailOf(detail)
+	marks := append(watchlistMarksOf(out.Recommendations), watchlistMark{mediaType: out.MediaType, tmdbID: out.TMDBID, itemID: out.LibraryContentID, in: &out.InWatchlist})
+	reg.markInWatchlist(ctx, marks)
+	return &RequestMediaDetailOutput{Body: out}, nil
+}
+
+// RequestMediaStateOutput is the followRequestMedia response.
+type RequestMediaStateOutput struct {
+	Body RequestMediaState
+}
+
+func (reg *Registry) followRequestMedia(ctx context.Context, in *RequestMediaDetailInput) (*RequestMediaStateOutput, error) {
+	svc, viewer, p := reg.requestViewer(ctx)
+	if p != nil {
+		return nil, p
+	}
+	state, err := svc.Follow(ctx, viewer, mediarequests.MediaType(in.MediaType), in.TMDBID)
+	if err != nil {
+		return nil, requestProblem(err)
+	}
+	return &RequestMediaStateOutput{Body: requestMediaStateOf(state)}, nil
+}
+
+func (reg *Registry) unfollowRequestMedia(ctx context.Context, in *RequestMediaDetailInput) (*struct{}, error) {
+	svc, viewer, p := reg.requestViewer(ctx)
+	if p != nil {
+		return nil, p
+	}
+	if err := svc.Unfollow(ctx, viewer, mediarequests.MediaType(in.MediaType), in.TMDBID); err != nil {
+		return nil, requestProblem(err)
+	}
+	return nil, nil
 }
 
 // listDiscoverSections is v1 GET /requests/discover.
@@ -562,9 +664,14 @@ func (reg *Registry) listDiscoverSections(ctx context.Context, _ *struct{}) (*Di
 		return nil, requestProblem(err)
 	}
 	items := make([]DiscoverSection, 0, len(sections))
+	var marks []watchlistMark
 	for i := range sections {
 		items = append(items, discoverSectionOf(&sections[i]))
 	}
+	for i := range items {
+		marks = append(marks, watchlistMarksOf(items[i].Results)...)
+	}
+	reg.markInWatchlist(ctx, marks)
 	return &DiscoverSectionCollectionOutput{Body: DiscoverSectionCollection{Collection: NewCollection(items)}}, nil
 }
 
@@ -578,7 +685,9 @@ func (reg *Registry) getDiscoverSection(ctx context.Context, in *DiscoverSection
 	if err != nil {
 		return nil, requestProblem(err)
 	}
-	return &DiscoverSectionOutput{Body: discoverSectionOf(section)}, nil
+	out := discoverSectionOf(section)
+	reg.markInWatchlist(ctx, watchlistMarksOf(out.Results))
+	return &DiscoverSectionOutput{Body: out}, nil
 }
 
 // listDiscoverBrands is v1 GET /requests/discover/{genres,networks,studios}.
@@ -623,7 +732,9 @@ func (reg *Registry) browseDiscoverBrand(ctx context.Context, in *DiscoverBrowse
 	if err != nil {
 		return nil, requestProblem(err)
 	}
-	return &DiscoverBrowsePageOutput{Body: discoverBrowsePageOf(resp)}, nil
+	out := discoverBrowsePageOf(resp)
+	reg.markInWatchlist(ctx, watchlistMarksOf(out.Results))
+	return &DiscoverBrowsePageOutput{Body: out}, nil
 }
 
 // browseDiscoverGenre is v1 GET /requests/discover/browse/genre/{slug}.
@@ -639,7 +750,9 @@ func (reg *Registry) browseDiscoverGenre(ctx context.Context, in *DiscoverGenreB
 	if err != nil {
 		return nil, requestProblem(err)
 	}
-	return &DiscoverBrowsePageOutput{Body: discoverBrowsePageOf(resp)}, nil
+	out := discoverBrowsePageOf(resp)
+	reg.markInWatchlist(ctx, watchlistMarksOf(out.Results))
+	return &DiscoverBrowsePageOutput{Body: out}, nil
 }
 
 // requireSlug refuses a blank slug before the service sees it (v1 trims and
@@ -688,6 +801,8 @@ func requestProblem(err error) *Problem {
 		return NewProblem(TypeConflict, "The media is already available in the library.")
 	case errors.Is(err, mediarequests.ErrAlreadyRequested):
 		return NewProblem(TypeConflict, "The media already has an active request.")
+	case errors.Is(err, mediarequests.ErrNotRequested):
+		return NewProblem(TypeConflict, "The media has no active request to follow; request it instead.")
 	case errors.Is(err, mediarequests.ErrForbidden):
 		return NewProblem(TypePermissionDenied, "Request access denied.")
 	case errors.Is(err, mediarequests.ErrNotFound):
@@ -695,12 +810,30 @@ func requestProblem(err error) *Problem {
 	case errors.Is(err, mediarequests.ErrInvalidState):
 		return NewProblem(TypeConflict, "The request is not in a state that allows this action.")
 	case errors.Is(err, mediarequests.ErrIntegrationUnreachable):
+		// Detail is a host-written sentence; the underlying cause stays out.
+		if unreachable, ok := errors.AsType[*mediarequests.IntegrationUnreachableError](err); ok && unreachable.Detail != "" {
+			return NewProblem(TypeDependencyUnavailable, unreachable.Detail)
+		}
 		return NewProblem(TypeDependencyUnavailable, "The request integration could not be reached.")
 	}
 	return NewProblem(TypeInternalError, "An unexpected error occurred.")
 }
 
-func mediaRequestOf(r *mediarequests.Request) MediaRequest {
+// requestSourceOf reads an unset source (a request built outside the store)
+// as a direct request.
+func requestSourceOf(s mediarequests.Source) mediarequests.Source {
+	if s == "" {
+		return mediarequests.SourceDirect
+	}
+	return s
+}
+
+// mediaRequestOf maps a request for the viewer. The download server details
+// (which server and routing rule took each target, the server's own ids and
+// raw statuses, and the submission and target errors, which can name servers
+// and routing rules) go to an admin only. A requester keeps each target's
+// quality, status and download progress.
+func mediaRequestOf(r *mediarequests.Request, viewer mediarequests.Viewer) MediaRequest {
 	out := MediaRequest{
 		ID:               ID(r.ID),
 		Provider:         r.Provider,
@@ -715,35 +848,80 @@ func mediaRequestOf(r *mediarequests.Request) MediaRequest {
 		BackdropPath:     r.BackdropPath,
 		Status:           string(r.Status),
 		Outcome:          string(r.Outcome),
-		IntegrationKind:  r.IntegrationKind,
+		State:            string(r.State()),
+		Seasons:          NonNil(r.Seasons),
+		SeasonProgress:   requestSeasonProgressOf(r.SeasonProgress),
+		OutcomeReason:    r.OutcomeReason,
+		Source:           string(requestSourceOf(r.Source)),
 		IsAnime:          r.IsAnime,
 		Targets:          make([]RequestTarget, 0, len(r.Targets)),
-		ExternalID:       r.ExternalID,
-		ExternalStatus:   r.ExternalStatus,
 		LibraryContentID: r.LibraryContentID,
-		LastError:        r.LastError,
 		CreatedAt:        NewInstant(r.CreatedAt),
 		UpdatedAt:        NewInstant(r.UpdatedAt),
 		ApprovedAt:       instantPtr(r.ApprovedAt),
 		CompletedAt:      instantPtr(r.CompletedAt),
+		Download:         requestDownloadOf(r.Download()),
+	}
+	if viewer.IsAdmin {
+		out.IntegrationKind, out.ExternalID, out.ExternalStatus, out.LastError = r.IntegrationKind, r.ExternalID, r.ExternalStatus, r.LastError
 	}
 	if r.RequestedByUserID != 0 {
 		out.RequestedByUserID = IDFromInt(int64(r.RequestedByUserID))
 	}
 	out.RequestedByProfileID = ID(r.RequestedByProfileID)
 	for _, t := range r.Targets {
-		out.Targets = append(out.Targets, RequestTarget{
-			ID: IDFromInt(t.ID), RequestID: ID(t.RequestID), IntegrationID: t.IntegrationID,
-			IntegrationKind: t.IntegrationKind, InstanceName: t.InstanceName, Quality: string(t.Quality),
-			IsAnime: t.IsAnime, ExternalID: t.ExternalID, ExternalStatus: t.ExternalStatus, Status: string(t.Status),
-			LastError: t.LastError, CreatedAt: NewInstant(t.CreatedAt), UpdatedAt: NewInstant(t.UpdatedAt),
-		})
+		target := RequestTarget{
+			ID: IDFromInt(t.ID), RequestID: ID(t.RequestID), Quality: string(t.Quality), IsAnime: t.IsAnime,
+			Status: string(t.Status), CreatedAt: NewInstant(t.CreatedAt), UpdatedAt: NewInstant(t.UpdatedAt),
+			Download: requestDownloadOf(t.Download),
+		}
+		if viewer.IsAdmin {
+			target.IntegrationID, target.IntegrationKind, target.InstanceName = t.IntegrationID, t.IntegrationKind, t.InstanceName
+			target.ExternalID, target.ExternalStatus, target.LastError, target.RouteName = t.ExternalID, t.ExternalStatus, t.LastError, t.RouteName
+		}
+		out.Targets = append(out.Targets, target)
+	}
+	return out
+}
+
+// requestDownloadOf maps download progress. The byte counts and percent are
+// left out while the size is unknown (a total of 0).
+func requestDownloadOf(d *mediarequests.DownloadProgress) *RequestDownload {
+	if d == nil {
+		return nil
+	}
+	out := &RequestDownload{
+		Phase:                 string(d.Phase),
+		EstimatedCompletionAt: instantPtr(d.EstimatedCompletion),
+		Downloads:             max(d.Downloads, 0),
+		UpdatedAt:             NewInstant(d.UpdatedAt),
+	}
+	if d.BytesTotal > 0 {
+		total, left := d.BytesTotal, min(max(d.BytesLeft, 0), d.BytesTotal)
+		percent := downloadPercent(total, left)
+		out.BytesTotal, out.BytesLeft, out.Percent = &total, &left, &percent
+	}
+	return out
+}
+
+// downloadPercent is floor((total-left)*100/total) for 0 <= left <= total and
+// total > 0. The product is taken in 128 bits, so no total can overflow it.
+func downloadPercent(total, left int64) int {
+	hi, lo := bits.Mul64(uint64(total-left), 100)
+	percent, _ := bits.Div64(hi, lo, uint64(total))
+	return int(percent)
+}
+
+func requestSeasonProgressOf(progress []mediarequests.SeasonProgress) []RequestSeasonProgress {
+	out := make([]RequestSeasonProgress, 0, len(progress))
+	for _, p := range progress {
+		out = append(out, RequestSeasonProgress{SeasonNumber: p.Season, EpisodesAired: p.Aired, EpisodesAvailable: p.Have})
 	}
 	return out
 }
 
 func requestMediaStateOf(s mediarequests.RequestState) RequestMediaState {
-	return RequestMediaState{Status: string(s.Status), Requestable: s.Requestable, Reason: s.Reason, RequestID: ID(s.RequestID)}
+	return RequestMediaState{Status: string(s.Status), Requestable: s.Requestable, Reason: s.Reason, RequestID: ID(s.RequestID), Following: s.Following, RequestedByViewer: s.RequestedByViewer, State: string(s.State), Download: requestDownloadOf(s.Download)}
 }
 
 func requestMediaResultsOf(results []mediarequests.MediaResult) []RequestMediaResult {
@@ -779,7 +957,19 @@ func requestMediaDetailOf(d *mediarequests.MediaDetail) RequestMediaDetail {
 		Networks: NonNil(d.Networks), Cast: cast, Director: d.Director, Creators: NonNil(d.Creators),
 		Recommendations: requestMediaResultsOf(d.Recommendations), Availability: string(d.Availability),
 		LibraryContentID: d.LibraryContentID, Request: requestMediaStateOf(d.Request),
+		Seasons: requestMediaSeasonsOf(d.Seasons),
 	}
+}
+
+func requestMediaSeasonsOf(seasons []mediarequests.RequestSeason) []RequestMediaSeason {
+	out := make([]RequestMediaSeason, 0, len(seasons))
+	for _, s := range seasons {
+		out = append(out, RequestMediaSeason{
+			SeasonNumber: s.Number, Name: s.Name, EpisodeCount: s.EpisodeCount, AirDate: s.AirDate,
+			PosterPath: s.PosterPath, Availability: string(s.Availability), Requested: s.Requested,
+		})
+	}
+	return out
 }
 
 func discoverSectionOf(s *mediarequests.DiscoverySection) DiscoverSection {

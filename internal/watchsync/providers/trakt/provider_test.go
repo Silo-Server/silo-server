@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -101,6 +102,10 @@ func TestStartDeviceAuthSendsTraktHeadersAndDecodesResponse(t *testing.T) {
 	if gotHeaders.Get("trakt-api-key") != "client-id" {
 		t.Fatalf("got trakt api key %q, want client-id", gotHeaders.Get("trakt-api-key"))
 	}
+	// Trakt may block requests without an identifying User-Agent.
+	if ua := gotHeaders.Get("User-Agent"); !strings.HasPrefix(ua, "Silo/") {
+		t.Fatalf("got User-Agent %q, want Silo/<build>", ua)
+	}
 	if gotBody["client_id"] != "client-id" {
 		t.Fatalf("got client_id %q, want client-id", gotBody["client_id"])
 	}
@@ -139,6 +144,74 @@ func TestStartDeviceAuthRejectsIncompleteResponse(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected incomplete response to be rejected")
+	}
+}
+
+// A token Trakt no longer accepts must reach the connection as an invalid
+// credential so the profile owner is asked to reconnect; an app-level refusal
+// must not, since reconnecting cannot fix the server's client ID.
+func TestTraktCredentialRejections(t *testing.T) {
+	cfg := watchsync.ServerConfig{ClientID: "client-id", ClientSecret: "client-secret"}
+	conn := watchsync.Connection{AccessToken: "access", RefreshToken: "refresh"}
+	tests := []struct {
+		name        string
+		status      int
+		body        string
+		call        func(*Provider) error
+		wantInvalid bool
+		wantDetail  string
+	}{
+		{
+			name:   "refresh token issued before Trakt's auth migration",
+			status: http.StatusBadRequest,
+			body:   `{"error":"invalid_grant","error_description":"session not found"}`,
+			call: func(p *Provider) error {
+				_, err := p.RefreshToken(context.Background(), cfg, conn)
+				return err
+			},
+			wantInvalid: true,
+			wantDetail:  "session not found",
+		},
+		{
+			name:   "revoked access token",
+			status: http.StatusUnauthorized,
+			call: func(p *Provider) error {
+				_, err := p.LookupAccount(context.Background(), cfg, conn)
+				return err
+			},
+			wantInvalid: true,
+			wantDetail:  "reconnect Trakt",
+		},
+		{
+			name:   "unapproved app",
+			status: http.StatusForbidden,
+			call: func(p *Provider) error {
+				_, err := p.LookupAccount(context.Background(), cfg, conn)
+				return err
+			},
+			wantDetail: "client ID",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+
+			err := tt.call(NewProvider(server.Client(), server.URL))
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if got := watchsync.IsInvalidCredentialError(err); got != tt.wantInvalid {
+				t.Fatalf("invalid credential = %v, want %v (err = %v)", got, tt.wantInvalid, err)
+			}
+			if !strings.Contains(err.Error(), tt.wantDetail) {
+				t.Fatalf("error %q does not mention %q", err, tt.wantDetail)
+			}
+		})
 	}
 }
 

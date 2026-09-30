@@ -787,7 +787,7 @@ func (r *Repository) ConfirmArtifactLink(ctx context.Context, d *Download) (*Dow
 		return nil, fmt.Errorf("checking linked artifact status: %w", err)
 	}
 	switch artifactStatus {
-	case "queued", "tone_map_queued", "audio_v2_queued", "running", "tone_map_running", "audio_v2_running":
+	case "queued", "tone_map_queued", "audio_v2_queued", "tracks_v1_queued", "running", "tone_map_running", "audio_v2_running", "tracks_v1_running":
 		if _, err := tx.Exec(ctx,
 			`UPDATE downloads SET status = 'preparing', bytes_sent = 0, completed_at = NULL,
 			     error_message = '', updated_at = now()
@@ -825,7 +825,7 @@ func (r *Repository) ReconcileLinkedDownloads(ctx context.Context) (ready []*Dow
 		     file_size = COALESCE((SELECT a.file_size FROM download_artifacts a WHERE a.id = downloads.artifact_id), file_size),
 		     updated_at = now()
 		 WHERE status = 'preparing' AND artifact_id IS NOT NULL
-		   AND artifact_id IN (SELECT id FROM download_artifacts WHERE status IN ('ready', 'tone_map_ready', 'audio_v2_ready'))
+		   AND artifact_id IN (SELECT id FROM download_artifacts WHERE status IN ('ready', 'tone_map_ready', 'audio_v2_ready', 'tracks_v1_ready'))
 		 RETURNING `+downloadColumns,
 	)
 	if err != nil {

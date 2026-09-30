@@ -54,6 +54,9 @@ type ImagesHandler struct {
 	// userCollections is optional; when set, personal-collection BoxSets resolve
 	// their artwork too, for their owner only.
 	userCollections userCollectionSource
+	// collectionPosters is optional; when set, BoxSet artwork includes each
+	// viewer's collage (see ItemsHandler.collectionPosters).
+	collectionPosters CollectionPosterResolver
 	// frontendFS is optional; when set, app-relative artwork references (bundled
 	// collection-template posters like "/images/collection-templates/x.jpg") are
 	// served straight from the embedded frontend assets. Without it those paths
@@ -398,7 +401,8 @@ func (h *ImagesHandler) resolveCatalogImageURL(ctx context.Context, contentID, i
 func collectionArtworkKey(c *models.LibraryCollection, imageType string) string {
 	switch imageType {
 	case "Primary":
-		return c.PosterURL
+		poster, _ := catalog.AssignedCollectionPoster(c)
+		return poster.Path
 	case "Backdrop":
 		return c.BackdropURL
 	}
@@ -426,7 +430,7 @@ func (h *ImagesHandler) presignCollectionArtwork(ctx context.Context, path strin
 func collectionImageTagSeed(routeID, imageType string, c *models.LibraryCollection) (string, bool) {
 	switch imageType {
 	case "Primary":
-		if key := strings.TrimSpace(c.PosterURL); key != "" {
+		if key := strings.TrimSpace(collectionArtworkKey(c, "Primary")); key != "" {
 			return imageTagSeed(routeID, "Primary", compatCardImageSize, key, "", time.Time{}), true
 		}
 		return imageTagSeed(routeID, "Primary", compatCardImageSize, generatedPosterSeed(c.Title), "", time.Time{}), true
@@ -441,8 +445,10 @@ func collectionImageTagSeed(routeID, imageType string, c *models.LibraryCollecti
 // serveCollectionImage serves BoxSet artwork. It authorizes via the signed tag
 // (a capability minted only for visible collections) or, when no tag is given,
 // via an authenticated session whose libraries include the collection. Stored
-// artwork is presigned/served as before; collections without a usable poster
-// fall back to a generated gradient poster captioned with the title.
+// artwork is presigned/served as before. A collage tag serves the collage it
+// names, and an untagged request the collage of the session's viewer; personal
+// collections have no collages. Collections without a usable poster fall back
+// to a generated gradient poster captioned with the title.
 func (h *ImagesHandler) serveCollectionImage(w http.ResponseWriter, r *http.Request, routeID, imageType, tag, collectionID string, personalRoute bool) {
 	collection, personal, err := h.loadImageCollection(r, routeID, imageType, tag, collectionID, personalRoute)
 	if err != nil {
@@ -454,6 +460,25 @@ func (h *ImagesHandler) serveCollectionImage(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if imageType == "Primary" && !personal {
+		if key, ok := verifiedCollageImageTag(h.imageTags, routeID, tag); ok {
+			// The tag was minted for a viewer this collage belongs to.
+			poster, found, err := h.collectionCollage(r.Context(), collectionID, key)
+			if err != nil {
+				writeCompatUpstreamError(w, err)
+				return
+			}
+			if found {
+				if imageURL := h.presignCollectionArtwork(r.Context(), poster.Path); imageURL != "" {
+					h.serveImageURL(w, r, imageURL)
+					return
+				}
+			}
+			h.serveGeneratedPoster(w, collection.Title)
+			return
+		}
+	}
+
 	seed, served := collectionImageTagSeed(routeID, imageType, collection)
 	if !served {
 		writeError(w, http.StatusNotFound, "NotFound", "Image not found")
@@ -461,11 +486,14 @@ func (h *ImagesHandler) serveCollectionImage(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Personal collections resolve only through their owner session or a valid
-	// signed capability; library collections still need their library visibility
-	// checked when no signed tag authorizes the fetch.
+	// signed capability, which loadImageCollection checked; library collections
+	// still need their library visibility checked when no signed tag authorizes
+	// the fetch.
 	authorized := personal || (tag != "" && h.imageTags != nil && h.imageTags.Equal(seed, "", tag))
+	var session *Session
 	if !authorized {
-		ok, err := h.collectionVisibleToRequest(r, collection)
+		session = h.requestSession(r)
+		ok, err := h.collectionVisibleToSession(r.Context(), session, collection)
 		if err != nil {
 			writeCompatUpstreamError(w, err)
 			return
@@ -495,7 +523,24 @@ func (h *ImagesHandler) serveCollectionImage(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusNotFound, "NotFound", "Image not found")
 		return
 	}
+	// An untagged request authorized by its session gets that viewer's collage.
+	// A request carrying the generated poster's tag keeps getting that poster.
+	if session != nil && h.collectionPosters != nil && h.accessFilter != nil {
+		access := withCompatAccessExclusions(h.accessFilter(r.Context(), session.StreamAppUserID, session.ProfileID))
+		poster := h.collectionPosters.CollectionPosters(r.Context(), []*models.LibraryCollection{collection}, access)[collection.ID]
+		if imageURL := h.presignCollectionArtwork(r.Context(), poster.Path); imageURL != "" {
+			h.serveImageURL(w, r, imageURL)
+			return
+		}
+	}
 	h.serveGeneratedPoster(w, collection.Title)
+}
+
+func (h *ImagesHandler) collectionCollage(ctx context.Context, collectionID, key string) (catalog.CollectionPoster, bool, error) {
+	if h.collectionPosters == nil {
+		return catalog.CollectionPoster{}, false, nil
+	}
+	return h.collectionPosters.CollectionCollage(ctx, collectionID, key)
 }
 
 // loadImageCollection resolves a BoxSet route ID for artwork: a library
@@ -560,15 +605,14 @@ func (h *ImagesHandler) requestSession(r *http.Request) *Session {
 	return session
 }
 
-// collectionVisibleToRequest reports whether the request's session may see the
+// collectionVisibleToSession reports whether the session may see the
 // collection. A missing session resolves to not-visible (anonymous image GETs
 // without a valid tag get a clean 404).
-func (h *ImagesHandler) collectionVisibleToRequest(r *http.Request, collection *models.LibraryCollection) (bool, error) {
-	session := h.requestSession(r)
+func (h *ImagesHandler) collectionVisibleToSession(ctx context.Context, session *Session, collection *models.LibraryCollection) (bool, error) {
 	if session == nil {
 		return false, nil
 	}
-	visible, err := visibleLibraryIDSet(r.Context(), h.content, session)
+	visible, err := visibleLibraryIDSet(ctx, h.content, session)
 	if err != nil {
 		return false, err
 	}

@@ -4,8 +4,10 @@ import {
   Building2,
   Calendar,
   Clock,
+  Download,
   Film,
   Globe,
+  Hourglass,
   Languages,
   LayoutTemplate,
   Monitor,
@@ -13,7 +15,9 @@ import {
   Shield,
   Star,
   Subtitles,
+  TriangleAlert,
   Tv,
+  Users,
   Volume2,
   type LucideIcon,
 } from "lucide-react";
@@ -38,6 +42,10 @@ const LUCIDE_ICONS: Partial<Record<OverlayIconId, LucideIcon>> = {
   volume: Volume2,
   calendar: Calendar,
   globe: Globe,
+  users: Users,
+  download: Download,
+  hourglass: Hourglass,
+  alert: TriangleAlert,
 };
 
 // Inline brand marks. Each is a tiny SVG component that fills currentColor so

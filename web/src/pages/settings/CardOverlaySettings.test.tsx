@@ -20,6 +20,7 @@ vi.mock("@/hooks/useOverlayPrefs", () => ({
     setQuickActionsEnabled: mocks.setQuickActionsEnabled,
     overlaysEnabled: mocks.overlaysEnabled,
     setOverlaysEnabled: mocks.setOverlaysEnabled,
+    isOverlaySupported: () => true,
     isLoading: false,
   }),
 }));

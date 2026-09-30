@@ -161,6 +161,24 @@ by the stored timestamp column so the existing profile/time indexes can serve th
 `added_at` fields remain UTC timestamps with millisecond precision. The frozen v1 list queries and their timestamp
 formatting are unchanged.
 
+## Watchlist titles outside the library
+
+The watchlist can also hold movies and series the library doesn't have, keyed by
+TMDB ID. They are not catalog items: `GET /api/v2/watchlist`, `GET /api/v2/catalog`
+with `source=watchlist`, smart filters and the home Watchlist row never return them.
+Read them with `GET /api/v2/watchlist/titles`, which pages by the same kind of opaque
+cursor over descending `added_at`, then descending title ID; add and remove them with
+`PUT` and `DELETE /api/v2/watchlist/titles/{media_type}/{tmdb_id}`. Check
+`watchlist_titles_supported` on `GET /api/v2/requests/status` first. It is false
+while requests are off, and the operations then answer `409 capability_disabled`.
+
+When such a title reaches the library, the next watchlist read moves it onto the
+library watchlist with its original `added_at`: the watchlist list and entry reads,
+a catalog query with `source=watchlist`, the home Watchlist row and an item's
+`user_state.in_watchlist`, as well as `GET /api/v2/watchlist/titles` itself. See
+[api-contract.md](architecture/api-contract.md#watchlist-titles) and
+[External watchlist titles](architecture/external-watchlist.md).
+
 ## Catalog query windows
 
 `POST /api/v2/catalog/query` is the structured-body form of `GET /api/v2/catalog`.
@@ -169,6 +187,12 @@ It accepts the browse source identifiers, `q`, `name_prefix`, `type`, rule
 `query_limit` for the complete result traversal. GET accepts the same rule groups
 as a JSON array in `groups` and expresses descending sort as `sort=-field`.
 Unknown rule fields and unsupported operators return `422`.
+
+`name_prefix` matches the start of the key title sorting uses: the sort title,
+or the title when no sort title is set. "The Hobbit" with sort title
+"Hobbit, The" matches `h`, not `t` or `the`. Jellyfin's `NameStartsWith`
+follows the same rule. The one exception is recently added TV, which also
+matches an episode's own title so episode cards can be found by name.
 
 Both operations return shared catalog cards, `page.next_cursor`, `page.has_more`,
 `total`, `total_exact`, and `window_cursor`. Send `next_cursor` unchanged for the

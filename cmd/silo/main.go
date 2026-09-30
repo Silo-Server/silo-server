@@ -38,6 +38,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
+	"github.com/Silo-Server/silo-server/internal/animeids"
 	"github.com/Silo-Server/silo-server/internal/api"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/apiv2"
@@ -78,13 +79,13 @@ import (
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/mdblist"
 	"github.com/Silo-Server/silo-server/internal/metadata"
+	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 
 	// Built-in metadata providers self-register into the metadata package's
 	// builtin registry on import; buildProviders resolves their seeded chain
 	// entries in-process (no gRPC).
 	_ "github.com/Silo-Server/silo-server/internal/metadata/nfo"
-	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
@@ -2377,7 +2378,7 @@ func main() {
 			WithWatchState(watchstate.NewService(userStoreProvider).WithStableIdentityResolver(historyIdentity)).
 			WithUserStoreProvider(userStoreProvider).
 			WithRatingStore(catalog.NewRatingsRepo(deps.DB), recommendations.NewRepo(deps.DB)).
-			WithDroppedStore(catalog.NewDroppedSeriesRepo(deps.DB))
+			WithDroppedStore(notifications.TrackDroppedSeries(catalog.NewDroppedSeriesRepo(deps.DB), notificationSystem))
 		backgroundInit = append(backgroundInit, func(ctx context.Context) {
 			if compatTerminalRecoveryReady != nil {
 				select {
@@ -2926,6 +2927,9 @@ func main() {
 			if sweeper := metadata.NewArtworkStorageSweeper(deps.DB, deps.Blobs.Assets); sweeper != nil {
 				taskMgr.Register(tasks.NewSweepArtworkStorageTask(sweeper, settingsRepo, identity))
 			}
+			if cleaner := chapterthumbs.NewOriginalsCleaner(deps.DB, deps.Blobs.Assets); cleaner != nil {
+				taskMgr.Register(tasks.NewCleanupChapterThumbnailOriginalsTask(cleaner, settingsRepo, identity))
+			}
 		}
 		if pluginAutoUpdater != nil {
 			taskMgr.Register(tasks.NewCheckPluginUpdatesTask(pluginAutoUpdater))
@@ -2936,14 +2940,17 @@ func main() {
 		if trendingRefresher != nil {
 			taskMgr.Register(tasks.NewRefreshTrendingDiscoverTask(trendingRefresher))
 		}
+		taskMgr.Register(tasks.NewRefreshAnimeIDsTask(animeids.NewRefresher(deps.DB)))
 		if userCollectionScheduler != nil {
 			taskMgr.Register(tasks.NewSyncUserCollectionsTask(userCollectionScheduler))
 		}
 		if watchProviderService != nil {
 			taskMgr.Register(tasks.NewSyncWatchProvidersTask(watchProviderService))
 		}
-		// The TMDB client lets a submission started here pick up a TVDB ID
-		// added on TMDB after the request was created.
+		// The reconcile pass routes requests, which reads TMDB for requests
+		// whose routing facts were never captured. The TMDB client also lets a
+		// submission started here pick up a TVDB ID added on TMDB after the
+		// request was created.
 		requestReconcileSvc := mediarequests.NewService(
 			mediarequests.NewRepository(deps.DB, deps.SecretCipher),
 			tmdb.NewClient(cfg.TMDBAPIKey, 40),
@@ -2952,6 +2959,7 @@ func main() {
 				catalog.NewProviderIDRepository(deps.DB),
 			),
 		)
+		requestReconcileSvc.SetAnimeIndex(animeids.NewStore(deps.DB))
 		requestReconcileSvc.SetRequesterIdentityResolver(plugins.RequesterIdentityFromLookup(plugins.NewPgUserIdentityLookup(deps.DB)))
 		if metadataService != nil {
 			requestReconcileSvc.SetTVDBIDResolver(metadataService)
@@ -2973,7 +2981,8 @@ func main() {
 		if notificationSystem != nil {
 			requestReconcileSvc.SetFulfillmentNotifier(notifications.NewRequestFulfillmentNotifier(notificationSystem))
 		}
-		taskMgr.Register(tasks.NewReconcileRequestsTask(requestReconcileSvc, 100))
+		taskMgr.Register(tasks.NewReconcileRequestsTask(requestReconcileSvc, 100, deps.DB))
+		taskMgr.Register(tasks.NewRefreshRequestDownloadsTask(requestReconcileSvc, 200, deps.DB))
 		if deps.FolderRepo != nil && deps.LibraryScanQueue != nil && pluginService != nil && pluginInstallationStore != nil {
 			autoscanRepo := autoscan.NewRepository(deps.DB, deps.SecretCipher)
 			if err := autoscanRepo.MarkInterruptedEvents(appCtx); err != nil {
@@ -3438,6 +3447,9 @@ func main() {
 			}
 			compatDeps.SettingsRepo = settingsRepo
 			compatDeps.PersonRepo = personRepo
+			if deps.CollectionService != nil {
+				compatDeps.CollectionPosters = deps.CollectionService
+			}
 			if watchProviderService != nil {
 				compatDeps.WatchScrobbler = watchProviderService
 			}

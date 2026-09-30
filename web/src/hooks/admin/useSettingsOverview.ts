@@ -24,6 +24,7 @@ export const ADMIN_SETTINGS_PAGE_IDS = [
   "library",
   "playback",
   "downloads",
+  "requests",
   "providers",
   "watch-sync",
   "ai",

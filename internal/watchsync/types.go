@@ -135,6 +135,13 @@ type singleBatchWatchedExporter interface {
 	ExportBatchSize() int
 }
 
+// historyPrecisionExporter is implemented by providers that store watch times
+// more coarsely than to the second. History matching truncates both sides to
+// that precision, so a local play keeps matching its stored copy.
+type historyPrecisionExporter interface {
+	HistoryTimePrecision() time.Duration
+}
+
 type UnwatchedExporter interface {
 	RemoveHistory(ctx context.Context, cfg ServerConfig, conn Connection, plays []LocalPlay) (ExportResult, error)
 }
