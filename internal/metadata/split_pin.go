@@ -11,11 +11,13 @@ import (
 // files it moves; for an unmatched target that override forces no provider
 // ID. Split Versions is the only writer of media_identity_overrides (the
 // library Root Override feature uses media_root_overrides), so a providerless
-// row there means an unmatched split; a new writer must keep that true. While such an item is still provisional and every one of its present
-// files sits under one of those overrides, automatic matching must leave it
-// alone: a provider tag in the folder name, or the source's title, would
-// otherwise match it straight back to the item it was split from. Identify
-// still works, and once the item is matched this no longer applies.
+// row there means an unmatched split; a new writer must keep that true.
+//
+// While such an item is still provisional and every one of its present files
+// sits under one of those overrides, automatic matching must leave it alone:
+// a provider tag in the folder name, or the source's title, would otherwise
+// match it straight back to the item it was split from. Identify still works,
+// and once the item is matched this no longer applies.
 func (s *MetadataService) pinnedUnmatchedBySplit(ctx context.Context, contentID string) (bool, error) {
 	contentID = strings.TrimSpace(contentID)
 	if s == nil || s.dbPool == nil || contentID == "" {
