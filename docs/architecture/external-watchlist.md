@@ -100,6 +100,11 @@ the v2 admin account delete), the admin handler runs the same sweep through
 `Titles.SweepOrphanTitles`. A sweep failure is logged and the next delete
 continues it.
 
+A profile delete also withdraws the requests the profile's watchlist made that
+nothing has been sent for yet (`WithdrawProfileWatchlistRequests`), as removing
+each title would. It needs no entries: a request names the profile that made
+it and its `source`. Requests already sent stay in the pipeline.
+
 Until the sweep runs, an orphan's snapshot is not kept current, so lookups by
 TMDB ID (`Titles.Find`, which the v2 add uses for its stored snapshot and
 rating check, and the TMDB detail observers) skip titles with no entries. An
@@ -275,9 +280,13 @@ kept. Promotion on library reads does not depend on that gate.
   first withdraws the watchlist's request under every TMDB ID the title has
   had, since a request keeps the ID it was made under. Only then does it remove
   the entry and, when one visible library item has the title, the library
-  watchlist entry. The order matters: removing the last entry deletes the title
-  and its former IDs, so a withdrawal that fails part way leaves the entry and
-  a retry still knows every ID. An absent entry succeeds with 204.
+  watchlist entry, and withdraws once more. The order matters: removing the
+  last entry deletes the title and its former IDs, so a withdrawal that fails
+  part way leaves the entry and a retry still knows every ID. The second
+  withdrawal, together with the add rechecking its entry after it requests and
+  withdrawing when the entry is gone, means an add and a delete of the same
+  title that overlap never leave a request without an entry, in any order. An
+  absent entry succeeds with 204.
 
 Both mutations are `non_retryable`, as the library watchlist mutations are.
 Discovery results and the title detail carry `in_watchlist`, hydrated with two

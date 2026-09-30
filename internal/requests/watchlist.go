@@ -376,6 +376,27 @@ func (s *Service) WithdrawWatchlistRequest(ctx context.Context, viewer Viewer, m
 	return s.store.UnfollowTitle(ctx, mediaType, tmdbID, viewer)
 }
 
+// WithdrawProfileWatchlistRequests cancels the requests a profile's watchlist
+// made that nothing has been sent for yet, for a profile being deleted. It
+// needs no watchlist entries, which the profile delete removes: a request
+// names the profile that made it. Requests already sent stay in the pipeline,
+// as they do when the profile removes a title.
+func (s *Service) WithdrawProfileWatchlistRequests(ctx context.Context, userID int, profileID string) error {
+	reqs, err := s.store.ListProfileWatchlistRequests(ctx, userID, profileID)
+	if err != nil {
+		return err
+	}
+	actor := Viewer{UserID: userID, ProfileID: profileID}
+	var errs []error
+	for _, req := range reqs {
+		if _, err := s.store.SetOutcome(ctx, req.ID, guardWithdrawable, OutcomeCancelled, actor, withdrawnFromWatchlist); err != nil &&
+			!errors.Is(err, ErrInvalidState) && !errors.Is(err, ErrNotFound) {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // WatchlistRequestStates returns the request state of each watchlist title for
 // the viewer, the way Discover hydrates a page, plus the download progress of
 // titles being downloaded from one read of the page's targets. It uses the

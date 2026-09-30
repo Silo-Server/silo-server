@@ -735,6 +735,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var ebookProgressStore *handlers.PGEbookReaderProgressStore
 	var ebookConfigStore *handlers.PGEbookReaderConfigStore
 	var ebookAnnotationStore *handlers.PGEbookReaderAnnotationStore
+	var watchlistRequestWithdrawer *mediarequests.Service
 	if deps.DB != nil {
 		ebookProgressStore = handlers.NewPGEbookReaderProgressStore(deps.DB)
 		ebookConfigStore = handlers.NewPGEbookReaderConfigStore(deps.DB)
@@ -892,6 +893,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			mediarequests.NewCatalogPresence(itemRepo, providerIDRepo),
 		)
 		requestSvc.SetTitleObserver(watchlistTitles)
+		watchlistRequestWithdrawer = requestSvc
 		requestSvc.SetWatchlistPreference(mediarequests.StoreWatchlistPreference{Stores: deps.UserStoreProvider})
 		AttachRequestRouter(requestSvc, deps.PluginService)
 		requestSvc.SetAnimeIndex(animeids.NewStore(deps.DB))
@@ -1019,6 +1021,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			// Drops live in Postgres whichever store holds the profile.
 			profileHandler.DroppedSeriesPurger = catalog.NewDroppedSeriesRepo(deps.DB)
 			profileHandler.WatchlistTitlesPurger = watchlistTitles
+		}
+		if watchlistRequestWithdrawer != nil {
+			profileHandler.WatchlistRequestWithdrawer = watchlistRequestWithdrawer
 		}
 		profileHandler.ProfileTokens = profileTokenService
 		// Private S3 preserves existing avatar keys and presigned delivery. Local

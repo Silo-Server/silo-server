@@ -226,6 +226,32 @@ func (r *Repository) ListActiveByTMDB(ctx context.Context, mediaType MediaType, 
 	return out, nil
 }
 
+func (r *Repository) ListProfileWatchlistRequests(ctx context.Context, userID int, profileID string) ([]*Request, error) {
+	rows, err := r.pool.Query(ctx, requestSelectSQL()+`
+		WHERE requested_by_user_id = $1
+		  AND requested_by_profile_id = $2
+		  AND source = 'watchlist'
+		  AND outcome = 'active'
+		  AND status <> 'completed'
+	`, userID, profileID)
+	if err != nil {
+		return nil, fmt.Errorf("list profile watchlist requests: %w", err)
+	}
+	defer rows.Close()
+	var out []*Request
+	for rows.Next() {
+		req, err := scanRequest(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, req)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate profile watchlist requests: %w", err)
+	}
+	return out, nil
+}
+
 // quotaLockNamespace partitions advisory locks so request-quota locks do not
 // collide with advisory locks held elsewhere in the database. The value is
 // arbitrary; what matters is that it is stable.

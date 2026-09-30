@@ -26,6 +26,11 @@ type fakeWatchlistTitles struct {
 	viewers []handlers.PersonalListViewer
 	added   []watchlist.Snapshot
 	removed []watchlist.TitleKey
+	// onList holds the titles the fake's adds put on the watchlist.
+	// removedConcurrently makes an add's entry vanish at once, as a delete
+	// of the same title running alongside it would.
+	onList              map[watchlist.TitleKey]bool
+	removedConcurrently bool
 }
 
 func (f *fakeWatchlistTitles) ListWatchlistTitlesPage(_ context.Context, viewer handlers.PersonalListViewer, after *watchlist.PageKey, limit int) ([]watchlist.Entry, error) {
@@ -53,6 +58,12 @@ func (f *fakeWatchlistTitles) FindWatchlistTitle(_ context.Context, mediaType st
 func (f *fakeWatchlistTitles) AddWatchlistTitle(_ context.Context, viewer handlers.PersonalListViewer, snap watchlist.Snapshot) (handlers.WatchlistTitleAdded, error) {
 	f.viewers = append(f.viewers, viewer)
 	f.added = append(f.added, snap)
+	if f.itemID == "" && !f.removedConcurrently {
+		if f.onList == nil {
+			f.onList = map[watchlist.TitleKey]bool{}
+		}
+		f.onList[watchlist.TitleKey{MediaType: snap.MediaType, TMDBID: snap.TMDBID}] = true
+	}
 	return handlers.WatchlistTitleAdded{ItemID: f.itemID, AddedAt: fixedTime()}, nil
 }
 
@@ -65,7 +76,7 @@ func (f *fakeWatchlistTitles) RemoveWatchlistTitle(_ context.Context, viewer han
 func (f *fakeWatchlistTitles) WatchlistMembership(_ context.Context, _ handlers.PersonalListViewer, keys []watchlist.TitleKey, _ []string) (map[watchlist.TitleKey]bool, map[string]bool, error) {
 	on := map[watchlist.TitleKey]bool{}
 	for _, k := range keys {
-		if f.known[k] != nil {
+		if f.known[k] != nil || f.onList[k] {
 			on[k] = true
 		}
 	}
@@ -269,13 +280,15 @@ func TestDeleteWatchlistTitleByFormerID(t *testing.T) {
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
-	if !slices.Equal(reqs.withdrawn, []int{100, 200}) || len(titles.removed) != 1 {
+	// Once before the removal and once after it.
+	if !slices.Equal(reqs.withdrawn, []int{100, 200, 100, 200}) || len(titles.removed) != 1 {
 		t.Fatalf("withdrawn = %v removed = %v", reqs.withdrawn, titles.removed)
 	}
-	// An absent entry succeeds and withdraws under the named ID only.
+	// An absent entry succeeds and withdraws under the named ID only (twice,
+	// around the removal).
 	reqs.withdrawn = nil
 	rec = do(t, h, http.MethodDelete, "/api/v2/watchlist/titles/series/5", "", viewerHeaders())
-	if rec.Code != http.StatusNoContent || !slices.Equal(reqs.withdrawn, []int{5}) {
+	if rec.Code != http.StatusNoContent || !slices.Equal(reqs.withdrawn, []int{5, 5}) {
 		t.Fatalf("%d %s withdrawn = %v", rec.Code, rec.Body.String(), reqs.withdrawn)
 	}
 }
@@ -368,7 +381,31 @@ func TestDeleteWatchlistTitleWithdrawsFormerIDsBeforeRemoving(t *testing.T) {
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
-	if !slices.Equal(reqs.withdrawn, []int{200, 100, 150}) || len(titles.removed) != 1 {
+	if !slices.Equal(reqs.withdrawn, []int{200, 100, 150, 200, 100, 150}) || len(titles.removed) != 1 {
 		t.Fatalf("withdrawn = %v removed = %v; want every ID withdrawn, then one removal", reqs.withdrawn, titles.removed)
+	}
+}
+
+// An add whose entry a concurrent delete took before the request landed
+// withdraws the request it just made, so no request outlives the entry.
+func TestAddWatchlistTitleWithdrawsWhenDeletedConcurrently(t *testing.T) {
+	titles := &fakeWatchlistTitles{removedConcurrently: true}
+	reqs := &fakeWatchlistRequests{details: map[int]*tmdb.MediaDetail{949: {MediaType: "movie", ID: 949, Title: "Heat", Year: 1995}}}
+	h := newTestHandler(t, watchlistTitlesDeps(titles, reqs))
+	rec := do(t, h, http.MethodPut, "/api/v2/watchlist/titles/movie/949", "", viewerHeaders())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if len(reqs.requested) != 1 || !slices.Equal(reqs.withdrawn, []int{949}) {
+		t.Fatalf("requested = %v withdrawn = %v; want the request withdrawn after the entry vanished", reqs.requested, reqs.withdrawn)
+	}
+
+	// With the entry still there, nothing is withdrawn.
+	titles.removedConcurrently, reqs.withdrawn, reqs.requested = false, nil, nil
+	if rec := do(t, h, http.MethodPut, "/api/v2/watchlist/titles/movie/949", "", viewerHeaders()); rec.Code != http.StatusOK {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if len(reqs.withdrawn) != 0 {
+		t.Fatalf("withdrawn = %v, want none", reqs.withdrawn)
 	}
 }

@@ -414,3 +414,37 @@ func TestWatchlistRequestsFollowTheTitleAcrossTMDBRepoints(t *testing.T) {
 		}
 	})
 }
+
+// Deleting a profile cancels the requests its watchlist made that nothing has
+// been sent for, and leaves direct, sent and other profiles' requests alone.
+func TestWithdrawProfileWatchlistRequests(t *testing.T) {
+	store := newFakeStore()
+	svc := newWatchlistTestService(store)
+	seed := func(id, profileID string, status Status, source Source) *Request {
+		req := &Request{
+			ID: id, MediaType: MediaTypeMovie, TMDBID: len(store.requests) + 1, Title: id,
+			Status: status, Outcome: OutcomeActive, Source: source,
+			RequestedByUserID: 1, RequestedByProfileID: profileID,
+		}
+		store.requests[id] = req
+		store.active[MediaTypeMovie][req.TMDBID] = req
+		return req
+	}
+	pending := seed("watchlist-pending", "kids", StatusPending, SourceWatchlist)
+	direct := seed("direct-pending", "kids", StatusPending, SourceDirect)
+	sent := seed("watchlist-sent", "kids", StatusApproved, SourceWatchlist)
+	store.targets = map[string][]Target{sent.ID: {{ID: 1, RequestID: sent.ID, Status: StatusQueued}}}
+	other := seed("other-profile", "parent", StatusPending, SourceWatchlist)
+
+	if err := svc.WithdrawProfileWatchlistRequests(context.Background(), 1, "kids"); err != nil {
+		t.Fatal(err)
+	}
+	if pending.Outcome != OutcomeCancelled {
+		t.Fatalf("watchlist request of the deleted profile = %s, want canceled", pending.Outcome)
+	}
+	for _, req := range []*Request{direct, sent, other} {
+		if req.Outcome != OutcomeActive {
+			t.Fatalf("request %s = %s, want left alone", req.ID, req.Outcome)
+		}
+	}
+}

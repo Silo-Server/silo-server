@@ -265,8 +265,29 @@ func (reg *Registry) addWatchlistTitle(ctx context.Context, in *WatchlistTitleIn
 			return nil, requestProblem(err)
 		}
 		state = states[mediarequests.WatchlistKey{MediaType: title.MediaType, TMDBID: title.TMDBID}]
-	} else if state, err = reg.deps.WatchlistRequests.RequestFromWatchlist(ctx, rv, title); err != nil {
-		return nil, requestProblem(err)
+	} else {
+		if state, err = reg.deps.WatchlistRequests.RequestFromWatchlist(ctx, rv, title); err != nil {
+			return nil, requestProblem(err)
+		}
+		// A delete of the same title can run between the save and the
+		// request: it withdraws, then removes the entry. Rechecking the entry
+		// after requesting, with the delete withdrawing again after its
+		// removal, leaves no request behind whichever way the two interleave.
+		key := watchlist.TitleKey{MediaType: snap.MediaType, TMDBID: snap.TMDBID}
+		on, _, err := reg.deps.WatchlistTitles.WatchlistMembership(ctx, viewer, []watchlist.TitleKey{key}, nil)
+		if err != nil {
+			return nil, serviceProblem(err)
+		}
+		if !on[key] {
+			if err := reg.withdrawWatchlistRequests(ctx, rv, snap.MediaType, append([]int{snap.TMDBID}, snap.FormerTMDBIDs...)); err != nil {
+				return nil, requestProblem(err)
+			}
+			states, err := reg.deps.WatchlistRequests.WatchlistRequestStates(ctx, rv, []mediarequests.WatchlistTitle{title})
+			if err != nil {
+				return nil, requestProblem(err)
+			}
+			state = states[mediarequests.WatchlistKey{MediaType: title.MediaType, TMDBID: title.TMDBID}]
+		}
 	}
 	return &WatchlistTitleEntryOutput{Body: WatchlistTitleEntry{
 		MediaType: snap.MediaType, TMDBID: snap.TMDBID, AddedAt: NewInstant(added.AddedAt),
@@ -308,10 +329,12 @@ func (reg *Registry) watchlistTitleSnapshot(ctx context.Context, rv mediarequest
 }
 
 // deleteWatchlistTitle withdraws the watchlist's request under every TMDB ID
-// the title has had, then removes the entries. A request keeps the ID it was
-// made under, and the withdrawal runs first because removing the last entry
-// drops the title and its former IDs with it: a failure part way leaves the
-// entry, so a retry still knows every ID.
+// the title has had, removes the entries, then withdraws once more. A request
+// keeps the ID it was made under. The first withdrawal runs before the
+// removal because removing the last entry drops the title and its former IDs:
+// a failure part way leaves the entry, so a retry still knows every ID. The
+// second catches a request an overlapping add of the same title made after
+// the first; the add rechecks its entry after requesting for the other order.
 func (reg *Registry) deleteWatchlistTitle(ctx context.Context, in *WatchlistTitleInput) (*struct{}, error) {
 	viewer, rv, _, p := reg.watchlistTitleViewer(ctx)
 	if p != nil {
@@ -323,21 +346,35 @@ func (reg *Registry) deleteWatchlistTitle(ctx context.Context, in *WatchlistTitl
 	}
 	ids := []int{in.TMDBID}
 	if known != nil {
-		for _, id := range append([]int{known.TMDBID}, known.FormerTMDBIDs...) {
-			if !slices.Contains(ids, id) {
-				ids = append(ids, id)
-			}
-		}
+		ids = append(ids, known.TMDBID)
+		ids = append(ids, known.FormerTMDBIDs...)
 	}
-	for _, id := range ids {
-		if err := reg.deps.WatchlistRequests.WithdrawWatchlistRequest(ctx, rv, mediarequests.MediaType(in.MediaType), id); err != nil {
-			return nil, requestProblem(err)
-		}
+	if err := reg.withdrawWatchlistRequests(ctx, rv, in.MediaType, ids); err != nil {
+		return nil, requestProblem(err)
 	}
 	if _, err := reg.deps.WatchlistTitles.RemoveWatchlistTitle(ctx, viewer, in.MediaType, in.TMDBID); err != nil {
 		return nil, serviceProblem(err)
 	}
+	if err := reg.withdrawWatchlistRequests(ctx, rv, in.MediaType, ids); err != nil {
+		return nil, requestProblem(err)
+	}
 	return nil, nil
+}
+
+// withdrawWatchlistRequests withdraws the viewer's watchlist request under
+// each distinct TMDB ID.
+func (reg *Registry) withdrawWatchlistRequests(ctx context.Context, rv mediarequests.Viewer, mediaType string, ids []int) error {
+	seen := make([]int, 0, len(ids))
+	for _, id := range ids {
+		if slices.Contains(seen, id) {
+			continue
+		}
+		seen = append(seen, id)
+		if err := reg.deps.WatchlistRequests.WithdrawWatchlistRequest(ctx, rv, mediarequests.MediaType(mediaType), id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // requestTitleOf is the requests service's view of a stored title.

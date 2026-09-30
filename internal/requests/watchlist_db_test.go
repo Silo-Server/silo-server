@@ -61,3 +61,36 @@ func TestWatchlistRequestsSettingDatabase(t *testing.T) {
 		t.Fatalf("after the v1 write: %+v, want requests enabled and watchlist requests still off", stored)
 	}
 }
+
+// A profile's watchlist requests are found by the profile that made them;
+// direct requests, other profiles' requests and closed requests are not.
+func TestListProfileWatchlistRequestsDatabase(t *testing.T) {
+	repo, _ := lifecycleTestRepository(t)
+	ctx := t.Context()
+	create := func(id string, tmdbID int, profileID string, source Source) {
+		t.Helper()
+		if _, err := repo.CreateRequest(ctx, CreateRequestRecord{
+			ID:        id,
+			Input:     CreateRequestInput{MediaType: MediaTypeMovie, TMDBID: tmdbID, Title: id, Source: source},
+			Status:    StatusPending,
+			Outcome:   OutcomeActive,
+			Requester: Viewer{UserID: 1, ProfileID: profileID},
+		}); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+	}
+	create("mine-watchlist", 201, "kids", SourceWatchlist)
+	create("mine-direct", 202, "kids", SourceDirect)
+	create("other-profile", 203, "parent", SourceWatchlist)
+	create("mine-canceled", 204, "kids", SourceWatchlist)
+	if _, err := repo.SetOutcome(ctx, "mine-canceled", guardWithdrawable, OutcomeCancelled, Viewer{UserID: 1, ProfileID: "kids"}, ""); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	got, err := repo.ListProfileWatchlistRequests(ctx, 1, "kids")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "mine-watchlist" {
+		t.Fatalf("got %d requests (%+v), want only mine-watchlist", len(got), got)
+	}
+}

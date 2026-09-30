@@ -2109,6 +2109,19 @@ func (f *fakeStore) ListActiveByTMDB(_ context.Context, mediaType MediaType, ids
 	return out, nil
 }
 
+func (f *fakeStore) ListProfileWatchlistRequests(_ context.Context, userID int, profileID string) ([]*Request, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []*Request
+	for _, req := range f.requests {
+		if req.RequestedByUserID == userID && req.RequestedByProfileID == profileID &&
+			req.Source == SourceWatchlist && req.Outcome == OutcomeActive && req.Status != StatusCompleted {
+			out = append(out, req)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeStore) CreateRequest(_ context.Context, input CreateRequestRecord) (*Request, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
