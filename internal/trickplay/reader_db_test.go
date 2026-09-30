@@ -62,3 +62,29 @@ func TestReaderSignsWholeManifestsDB(t *testing.T) {
 		t.Fatal("sheets in another store are available")
 	}
 }
+
+func TestReaderStopsServingOptedOutRunningFileDB(t *testing.T) {
+	f := newFixture(t)
+	folder := f.library(t, "movies", true)
+	fileID := f.file(t, folder, "opt-out")
+	f.reconcile(t)
+	f.generate(t, fileID, "server-a")
+	if _, err := f.repo.Regenerate(t.Context(), []int{fileID}); err != nil {
+		t.Fatal(err)
+	}
+	if job, err := f.repo.ClaimFile(t.Context(), fileID, "server-b", time.Hour); err != nil || job == nil {
+		t.Fatalf("claim: %+v %v", job, err)
+	}
+	f.exec(t, `UPDATE public.media_folders SET trickplay_enabled=false WHERE id=$1`, folder)
+	f.reconcile(t)
+	if row, ok := f.row(t, fileID); !ok || row.state != stateRunning {
+		t.Fatalf("running row removed: %+v %v", row, ok)
+	}
+	reader := NewReader(f.pool, identityStore(testStore), fakeURLs{})
+	if grids, err := reader.TrickplayGrids(t.Context(), []int{fileID}); err != nil || len(grids) != 0 {
+		t.Fatalf("opted-out grids: %+v %v", grids, err)
+	}
+	if _, ok, err := reader.SignedManifest(t.Context(), fileID); err != nil || ok {
+		t.Fatalf("opted-out manifest: %v %v", ok, err)
+	}
+}
