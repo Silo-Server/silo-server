@@ -13,6 +13,7 @@ type fakePersonRefreshRepo struct {
 	persons           map[int64]models.Person
 	refreshAttempts   []int64
 	refreshAttemptErr error
+	updateErr         error
 	outcomes          []catalog.PersonRefreshOutcome
 }
 
@@ -34,6 +35,9 @@ func (r *fakePersonRefreshRepo) Get(_ context.Context, id int64) (*models.Person
 }
 
 func (r *fakePersonRefreshRepo) Update(_ context.Context, person models.Person) error {
+	if r.updateErr != nil {
+		return r.updateErr
+	}
 	r.persons[person.ID] = person
 	return nil
 }

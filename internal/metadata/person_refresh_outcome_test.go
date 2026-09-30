@@ -64,6 +64,34 @@ func TestPersonRefreshRecordsOutcome(t *testing.T) {
 	}
 }
 
+// An answer that can't be stored records a failure, so the sweep backs off
+// instead of retrying it every time the attempt's lease runs out.
+func TestPersonRefreshRecordsFailureWhenAnswerCannotBeStored(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		detail    *PersonDetailResult
+		updateErr error
+	}{
+		{name: "unparseable birth date", detail: &PersonDetailResult{Name: "Person", BirthDate: "not a date"}},
+		{name: "update fails", detail: &PersonDetailResult{Name: "Person"}, updateErr: errors.New("connection reset")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newFakePersonRefreshRepo(models.Person{ID: 9, Name: "Person", TmdbID: "9"})
+			repo.updateErr = tc.updateErr
+			service := &PersonRefreshService{repo: repo}
+			_, err := service.refreshPersonWithProviders(context.Background(), 9, []Provider{
+				stubPersonProvider{slug: "tmdb", detail: tc.detail},
+			})
+			if err == nil {
+				t.Fatal("refresh succeeded, want an error")
+			}
+			if !slices.Equal(repo.outcomes, []catalog.PersonRefreshOutcome{catalog.PersonRefreshFailed}) {
+				t.Fatalf("recorded outcomes = %v, want [failed]", repo.outcomes)
+			}
+		})
+	}
+}
+
 // A refresh that ran out of time still records its failure, so the sweep backs
 // off instead of treating the person as never looked up.
 func TestPersonRefreshRecordsOutcomeAfterTimeout(t *testing.T) {

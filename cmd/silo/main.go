@@ -2130,10 +2130,9 @@ func main() {
 		deps.SkippedRootRepo = skippedRootRepo
 		deps.StaleIDRepo = staleIDRepo
 		deps.PersonRepo = personRepo
-		personRefreshQueue := worker.NewPersonRefreshWorker(
-			personRefreshService,
-			worker.DefaultPersonRefreshWorkerConfig(),
-		)
+		personRefreshConfig := worker.DefaultPersonRefreshWorkerConfig()
+		personRefreshConfig.ClaimLease = catalog.PersonRefreshAttemptLease
+		personRefreshQueue := worker.NewPersonRefreshWorker(personRefreshService, personRefreshConfig)
 		personRefreshQueue.SetRatePerMinute(cfg.Metadata.PersonRefreshPerMinute)
 		configWatcher.OnChange(func(_, updated *config.Config) {
 			personRefreshQueue.SetRatePerMinute(updated.Metadata.PersonRefreshPerMinute)

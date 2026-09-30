@@ -42,6 +42,10 @@ type PersonRefreshWorkerConfig struct {
 	Delay          time.Duration
 	BatchSize      int
 	RefreshTimeout time.Duration
+	// ClaimLease is how long a claim holds a person before another node may
+	// claim them (catalog.PersonRefreshAttemptLease). A batch stops starting
+	// lookups once less than RefreshTimeout is left on it.
+	ClaimLease time.Duration
 }
 
 func DefaultPersonRefreshWorkerConfig() PersonRefreshWorkerConfig {
@@ -50,6 +54,7 @@ func DefaultPersonRefreshWorkerConfig() PersonRefreshWorkerConfig {
 		Delay:          200 * time.Millisecond,
 		BatchSize:      100,
 		RefreshTimeout: 2 * time.Minute,
+		ClaimLease:     time.Hour,
 	}
 }
 
@@ -83,6 +88,9 @@ func NewPersonRefreshWorker(service PersonRefresher, config PersonRefreshWorkerC
 	}
 	if config.RefreshTimeout <= 0 {
 		config.RefreshTimeout = 2 * time.Minute
+	}
+	if config.ClaimLease <= 0 {
+		config.ClaimLease = time.Hour
 	}
 
 	w := &PersonRefreshWorker{
@@ -170,6 +178,11 @@ func (w *PersonRefreshWorker) drain() {
 // background batch. On-demand requests that arrive meanwhile run between its
 // lookups. It reports whether the batch was full, meaning more may be due.
 // While a provider's rate limit pauses background lookups it claims nothing.
+//
+// A lookup renews its person's lease when it starts, but claimed people it
+// hasn't reached yet are only held by the claim. When slow lookups use up the
+// claim's lease, the batch stops before another node could claim the rest;
+// they come back once their lease runs out.
 func (w *PersonRefreshWorker) processBatch() bool {
 	if w.service == nil {
 		return false
@@ -180,6 +193,7 @@ func (w *PersonRefreshWorker) processBatch() bool {
 	if w.paused() {
 		return false
 	}
+	lastStart := w.now().Add(w.config.ClaimLease - w.config.RefreshTimeout)
 	batch, err := w.service.ClaimCandidates(context.Background(), w.config.BatchSize)
 	if err != nil {
 		slog.Warn("person refresh worker: failed to claim candidates", "error", err)
@@ -194,6 +208,11 @@ func (w *PersonRefreshWorker) processBatch() bool {
 		if _, ran := done[id]; ran || w.isQueued(id) {
 			// Its on-demand lookup already ran, or is pending and will cover it.
 			continue
+		}
+		if w.now().After(lastStart) {
+			slog.Warn("person refresh worker: batch outlasted its claim; leaving the rest for later",
+				"remaining", len(batch)-index)
+			return true
 		}
 		if err := w.refresh(id); w.rateLimited(err) {
 			// The rest of the batch comes back when its claims' lease runs out.
