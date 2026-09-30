@@ -2,6 +2,7 @@ package chapterthumbs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -34,29 +35,44 @@ const (
 )
 
 // originalsCleanupAdvisoryLock serializes the cleanup across nodes, whose task
-// schedulers all fire it. Deletion is idempotent; the lock keeps two nodes
-// from walking and checkpointing the same listing at once.
+// schedulers all fire it. The holder reads, advances and writes the shared
+// checkpoint, so two nodes never interleave their passes.
 const originalsCleanupAdvisoryLock int64 = 0x53494C4F43485452 // "SILOCHTR"
 
 // OriginalsStore is the storage surface the cleanup needs.
 type OriginalsStore interface {
+	Stat(ctx context.Context, key string) (blobstore.ObjectInfo, error)
 	Delete(ctx context.Context, keys []string) (int, error)
 	List(ctx context.Context, prefix, cursor string, limit int) ([]blobstore.ObjectInfo, string, error)
 }
 
-// OriginalsCleanupStats summarizes one bounded cleanup run.
+// OriginalsCleanupStats summarizes cleanup work.
 type OriginalsCleanupStats struct {
-	Scanned    int `json:"scanned"`
-	Originals  int `json:"originals"`
-	Deleted    int `json:"deleted"`
+	Scanned   int `json:"scanned"`
+	Originals int `json:"originals"`
+	Deleted   int `json:"deleted"`
+	// Repointed counts originals a chapter row still referenced; the row was
+	// moved to the w300 image beside it before the original was deleted.
+	Repointed int `json:"repointed"`
+	// Referenced counts originals kept because a row references them and no
+	// w300 image exists to move the row to.
 	Referenced int `json:"referenced"`
 	TooNew     int `json:"too_new"`
 	// DeleteFailed counts originals a delete call did not remove.
-	DeleteFailed int    `json:"delete_failed"`
-	Pages        int    `json:"pages"`
-	Skipped      bool   `json:"skipped"`
-	Done         bool   `json:"done"`
-	NextToken    string `json:"next_token"`
+	DeleteFailed int `json:"delete_failed"`
+	Pages        int `json:"pages"`
+}
+
+// Add accumulates another page's counts.
+func (s *OriginalsCleanupStats) Add(o OriginalsCleanupStats) {
+	s.Scanned += o.Scanned
+	s.Originals += o.Originals
+	s.Deleted += o.Deleted
+	s.Repointed += o.Repointed
+	s.Referenced += o.Referenced
+	s.TooNew += o.TooNew
+	s.DeleteFailed += o.DeleteFailed
+	s.Pages += o.Pages
 }
 
 // OriginalsCleaner deletes the full-size chapter thumbnail originals that
@@ -68,6 +84,9 @@ type OriginalsCleaner struct {
 	// referenced returns the subset of keys some chapter row still holds as
 	// its thumbnail_path. Tests substitute it to run without a database.
 	referenced func(ctx context.Context, fileIDs []int, keys []string) (map[string]struct{}, error)
+	// repoint moves chapter rows holding any of keys to the w300 image beside
+	// each. Tests substitute it to run without a database.
+	repoint func(ctx context.Context, fileIDs []int, keys []string) error
 }
 
 // NewOriginalsCleaner returns nil when the cleanup cannot run.
@@ -77,6 +96,7 @@ func NewOriginalsCleaner(pool *pgxpool.Pool, store OriginalsStore) *OriginalsCle
 	}
 	c := &OriginalsCleaner{pool: pool, store: store, now: time.Now}
 	c.referenced = c.referencedOriginals
+	c.repoint = c.repointOriginals
 	return c
 }
 
@@ -105,9 +125,14 @@ func parseOriginalKey(key string) (int, bool) {
 	return fileID, true
 }
 
+// servedSibling is the w300 key stored beside a legacy original.
+func servedSibling(originalKey string) string {
+	return strings.TrimSuffix(originalKey, "original.webp") + "w300.webp"
+}
+
 // referencedOriginals returns the keys a chapter row still points at. After
-// the migration only a row saved by an earlier build mid-upgrade can; its
-// original is the one object serving that chapter, so it stays.
+// the migration, a row does only when a node on an earlier build saved it
+// during the upgrade.
 func (c *OriginalsCleaner) referencedOriginals(ctx context.Context, fileIDs []int, keys []string) (map[string]struct{}, error) {
 	out := make(map[string]struct{}, len(keys))
 	if len(keys) == 0 {
@@ -136,90 +161,148 @@ func (c *OriginalsCleaner) referencedOriginals(ctx context.Context, fileIDs []in
 	return out, nil
 }
 
-// Run walks chapter-images/ from token for at most maxPages pages, deleting
-// unreferenced original.webp objects older than the age floor. It returns the
-// token to resume from; Done means the listing reached its end.
-func (c *OriginalsCleaner) Run(ctx context.Context, token string, maxPages int) (OriginalsCleanupStats, error) {
-	stats := OriginalsCleanupStats{NextToken: token}
-	if maxPages < 1 {
-		maxPages = 1
+// repointOriginals is the migration's rewrite, limited to the given keys.
+func (c *OriginalsCleaner) repointOriginals(ctx context.Context, fileIDs []int, keys []string) error {
+	if len(keys) == 0 {
+		return nil
 	}
+	_, err := c.pool.Exec(ctx, `
+		UPDATE media_files
+		SET chapters = (
+		    SELECT jsonb_agg(
+		        CASE
+		            WHEN e->>'thumbnail_path' = ANY($2)
+		            THEN jsonb_set(e, '{thumbnail_path}',
+		                           to_jsonb(regexp_replace(e->>'thumbnail_path', '/original\.webp$', '/w300.webp')))
+		            ELSE e
+		        END
+		        ORDER BY ord
+		    )
+		    FROM jsonb_array_elements(chapters) WITH ORDINALITY AS t(e, ord)
+		)
+		WHERE id = ANY($1)
+		  AND jsonb_typeof(chapters) = 'array'
+		  AND EXISTS (
+		      SELECT 1 FROM jsonb_array_elements(chapters) e
+		      WHERE e->>'thumbnail_path' = ANY($2)
+		  )`, fileIDs, keys)
+	if err != nil {
+		return fmt.Errorf("chapter thumbnail cleanup: repoint rows: %w", err)
+	}
+	return nil
+}
 
-	if c.pool != nil {
-		lock, acquired, err := pglock.TryAcquire(ctx, c.pool, originalsCleanupAdvisoryLock)
-		if err != nil {
-			return stats, fmt.Errorf("chapter thumbnail cleanup: acquiring lock: %w", err)
-		}
-		if !acquired {
-			stats.Skipped = true
-			return stats, nil
-		}
-		defer func() {
-			if err := lock.Release(ctx); err != nil {
-				slog.WarnContext(ctx, "chapter thumbnail cleanup: releasing lock failed",
-					"component", "chapterthumbs", "error", err)
-			}
-		}()
+// Exclusive runs fn while holding the cluster-wide cleanup lock. It reports
+// false, without running fn, when another node holds the lock.
+func (c *OriginalsCleaner) Exclusive(ctx context.Context, fn func() error) (bool, error) {
+	if c.pool == nil {
+		return true, fn()
 	}
+	lock, acquired, err := pglock.TryAcquire(ctx, c.pool, originalsCleanupAdvisoryLock)
+	if err != nil {
+		return false, fmt.Errorf("chapter thumbnail cleanup: acquiring lock: %w", err)
+	}
+	if !acquired {
+		return false, nil
+	}
+	defer func() {
+		if err := lock.Release(ctx); err != nil {
+			slog.WarnContext(ctx, "chapter thumbnail cleanup: releasing lock failed",
+				"component", "chapterthumbs", "error", err)
+		}
+	}()
+	return true, fn()
+}
+
+// Page cleans one listing page of chapter-images/ starting after token. It
+// returns the token to continue from, empty at the end of the listing.
+//
+// Originals younger than the age floor are left alone. An original a chapter
+// row still references has its row moved to the w300 image beside it first,
+// and is kept only when that image is missing.
+func (c *OriginalsCleaner) Page(ctx context.Context, token string) (OriginalsCleanupStats, string, error) {
+	var stats OriginalsCleanupStats
+	infos, next, err := c.store.List(ctx, chapterImagesPrefix, token, originalsCleanupPageSize)
+	if err != nil {
+		return stats, token, fmt.Errorf("chapter thumbnail cleanup: list: %w", err)
+	}
+	stats.Pages = 1
 
 	cutoff := c.now().Add(-originalsCleanupMinAge)
-	for page := 0; page < maxPages; page++ {
-		infos, next, err := c.store.List(ctx, chapterImagesPrefix, stats.NextToken, originalsCleanupPageSize)
-		if err != nil {
-			return stats, fmt.Errorf("chapter thumbnail cleanup: list: %w", err)
+	var keys []string
+	var fileIDs []int
+	fileOf := make(map[string]int)
+	for _, info := range infos {
+		stats.Scanned++
+		fileID, ok := parseOriginalKey(info.Key)
+		if !ok {
+			continue
 		}
-		stats.Pages++
+		stats.Originals++
+		// A missing timestamp fails closed, as in the artwork sweep: it
+		// gives no way to tell a just-written object from an old one.
+		if info.ModTime.IsZero() || info.ModTime.After(cutoff) {
+			stats.TooNew++
+			continue
+		}
+		keys = append(keys, info.Key)
+		fileIDs = append(fileIDs, fileID)
+		fileOf[info.Key] = fileID
+	}
 
-		var keys []string
-		var fileIDs []int
-		for _, info := range infos {
-			stats.Scanned++
-			fileID, ok := parseOriginalKey(info.Key)
-			if !ok {
-				continue
-			}
-			stats.Originals++
-			// A missing timestamp fails closed, as in the artwork sweep: it
-			// gives no way to tell a just-written object from an old one.
-			if info.ModTime.IsZero() || info.ModTime.After(cutoff) {
-				stats.TooNew++
-				continue
-			}
-			keys = append(keys, info.Key)
-			fileIDs = append(fileIDs, fileID)
+	referenced, err := c.referenced(ctx, fileIDs, keys)
+	if err != nil {
+		return stats, token, err
+	}
+	var repointKeys []string
+	var repointIDs []int
+	for _, key := range keys {
+		if _, ok := referenced[key]; !ok {
+			continue
 		}
+		_, err := c.store.Stat(ctx, servedSibling(key))
+		switch {
+		case err == nil:
+			repointKeys = append(repointKeys, key)
+			repointIDs = append(repointIDs, fileOf[key])
+		case errors.Is(err, blobstore.ErrNotFound):
+			// Without the w300 image the original is the only picture
+			// this chapter has; keep it rather than break the row.
+		default:
+			return stats, token, fmt.Errorf("chapter thumbnail cleanup: stat %s: %w", servedSibling(key), err)
+		}
+	}
+	if err := c.repoint(ctx, repointIDs, repointKeys); err != nil {
+		return stats, token, err
+	}
+	repointed := make(map[string]struct{}, len(repointKeys))
+	for _, key := range repointKeys {
+		repointed[key] = struct{}{}
+	}
 
-		referenced, err := c.referenced(ctx, fileIDs, keys)
-		if err != nil {
-			return stats, err
-		}
-		doomed := make([]string, 0, len(keys))
-		for _, key := range keys {
-			if _, ok := referenced[key]; ok {
+	doomed := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if _, ok := referenced[key]; ok {
+			if _, moved := repointed[key]; !moved {
 				stats.Referenced++
 				continue
 			}
-			doomed = append(doomed, key)
+			stats.Repointed++
 		}
-		if len(doomed) > 0 {
-			deleted, err := c.store.Delete(ctx, doomed)
-			stats.Deleted += deleted
-			if err != nil {
-				return stats, fmt.Errorf("chapter thumbnail cleanup: delete: %w", err)
-			}
-			if deleted != len(doomed) {
-				// The objects stay unreferenced, so the next pass retries them.
-				stats.DeleteFailed += len(doomed) - deleted
-				slog.WarnContext(ctx, "chapter thumbnail cleanup: partial delete",
-					"component", "chapterthumbs", "requested", len(doomed), "deleted", deleted)
-			}
+		doomed = append(doomed, key)
+	}
+	if len(doomed) > 0 {
+		deleted, err := c.store.Delete(ctx, doomed)
+		stats.Deleted += deleted
+		if err != nil {
+			return stats, token, fmt.Errorf("chapter thumbnail cleanup: delete: %w", err)
 		}
-
-		stats.NextToken = next
-		if next == "" {
-			stats.Done = true
-			return stats, nil
+		if deleted != len(doomed) {
+			// The objects stay unreferenced, so the next pass retries them.
+			stats.DeleteFailed += len(doomed) - deleted
+			slog.WarnContext(ctx, "chapter thumbnail cleanup: partial delete",
+				"component", "chapterthumbs", "requested", len(doomed), "deleted", deleted)
 		}
 	}
-	return stats, nil
+	return stats, next, nil
 }

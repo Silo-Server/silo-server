@@ -17,13 +17,18 @@ import (
 // location may hold copied originals, so the cleanup runs again there.
 const ChapterThumbnailOriginalsCleanupKey = config.ChapterThumbnailOriginalsCleanupKey
 
-// chapterOriginalsPagesPerCall bounds one cleaner call, so the checkpoint
-// advances every chapterOriginalsPagesPerCall listing pages.
-const chapterOriginalsPagesPerCall = 50
+// chapterOriginalsGrace is how long the cleanup waits after it is first armed
+// on a storage location before deleting anything. A rolling upgrade finishes
+// well within it: until then a node on an earlier build can save a chapter row
+// that points back at an original, and deleting that original under it would
+// leave the row pointing at nothing. The wait is recorded in the checkpoint,
+// so restarts do not reset it.
+const chapterOriginalsGrace = time.Hour
 
 type chapterOriginalsCheckpoint struct {
-	Identity string `json:"identity"`
-	Token    string `json:"token,omitempty"`
+	Identity string    `json:"identity"`
+	ArmedAt  time.Time `json:"armed_at"`
+	Token    string    `json:"token,omitempty"`
 	// Deferred records that the current pass left originals behind (too new
 	// to delete yet, or a failed delete), so reaching the end starts another
 	// pass instead of finishing.
@@ -34,21 +39,24 @@ type chapterOriginalsCheckpoint struct {
 // ChapterThumbnailOriginalsCleaner is the cleanup surface. Satisfied by
 // *chapterthumbs.OriginalsCleaner; nil when storage is not configured.
 type ChapterThumbnailOriginalsCleaner interface {
-	Run(ctx context.Context, token string, maxPages int) (chapterthumbs.OriginalsCleanupStats, error)
+	Exclusive(ctx context.Context, fn func() error) (bool, error)
+	Page(ctx context.Context, token string) (chapterthumbs.OriginalsCleanupStats, string, error)
 }
 
 // CleanupChapterThumbnailOriginalsTask deletes the full-size chapter thumbnail
-// originals earlier builds stored beside the 300px image clients load. It runs
-// until one full pass over chapter-images/ leaves nothing behind, then records
-// that and stops running on its schedule.
+// originals earlier builds stored beside the 300px image clients load. Its
+// first run on a storage location only arms it; runs from an hour later on
+// delete, until one full pass over chapter-images/ leaves nothing behind. It
+// then records that and stops running on its schedule.
 type CleanupChapterThumbnailOriginalsTask struct {
 	cleaner  ChapterThumbnailOriginalsCleaner
 	settings ArtworkReconcileSettingsStore
 	identity string
+	now      func() time.Time
 }
 
 func NewCleanupChapterThumbnailOriginalsTask(cleaner ChapterThumbnailOriginalsCleaner, settings ArtworkReconcileSettingsStore, identity string) *CleanupChapterThumbnailOriginalsTask {
-	return &CleanupChapterThumbnailOriginalsTask{cleaner: cleaner, settings: settings, identity: identity}
+	return &CleanupChapterThumbnailOriginalsTask{cleaner: cleaner, settings: settings, identity: identity, now: time.Now}
 }
 
 func (t *CleanupChapterThumbnailOriginalsTask) Key() string {
@@ -66,8 +74,9 @@ func (t *CleanupChapterThumbnailOriginalsTask) Category() taskmanager.TaskCatego
 func (t *CleanupChapterThumbnailOriginalsTask) IsHidden() bool { return false }
 
 func (t *CleanupChapterThumbnailOriginalsTask) DefaultTriggers() []taskmanager.TriggerConfig {
-	// Startup reclaims the space on the first boot after the upgrade. The
-	// daily interval finishes what the age floor held back.
+	// Startup arms the cleanup on the first boot after the upgrade and, on a
+	// later boot, deletes. The daily interval covers servers that stay up and
+	// finishes what the age floor held back.
 	return []taskmanager.TriggerConfig{
 		{Type: taskmanager.TriggerTypeStartup},
 		{Type: taskmanager.TriggerTypeInterval, IntervalMs: int64((24 * time.Hour) / time.Millisecond)},
@@ -115,56 +124,66 @@ func (t *CleanupChapterThumbnailOriginalsTask) Execute(ctx context.Context, prog
 		return nil
 	}
 
-	cp := t.readCheckpoint(ctx)
-	if cp.Done {
-		cp = chapterOriginalsCheckpoint{Identity: t.identity}
-	}
 	var total chapterthumbs.OriginalsCleanupStats
-	progress.Report(0, "Deleting full-size chapter thumbnails")
-	for {
-		stats, err := t.cleaner.Run(ctx, cp.Token, chapterOriginalsPagesPerCall)
-		if stats.Skipped {
-			// Another node holds the lock and is mid-pass; writing this
-			// node's cursor back would drag its progress backwards.
-			progress.Report(100, "Another server is already cleaning up chapter thumbnails")
+	var summary string
+	// The checkpoint is read and written only while holding the lock, so two
+	// nodes never resume from, or overwrite, each other's position.
+	acquired, err := t.cleaner.Exclusive(ctx, func() error {
+		cp := t.readCheckpoint(ctx)
+		if cp.Done {
+			cp = chapterOriginalsCheckpoint{Identity: t.identity, ArmedAt: cp.ArmedAt}
+		}
+		now := t.now()
+		if cp.ArmedAt.IsZero() {
+			cp.ArmedAt = now
+			t.saveCheckpoint(ctx, cp)
+		}
+		if startAt := cp.ArmedAt.Add(chapterOriginalsGrace); now.Before(startAt) {
+			summary = fmt.Sprintf("Full-size chapter thumbnails will be deleted from %s, once servers on earlier versions have been upgraded",
+				startAt.UTC().Format(time.RFC3339))
 			return nil
 		}
-		total.Scanned += stats.Scanned
-		total.Originals += stats.Originals
-		total.Deleted += stats.Deleted
-		total.Referenced += stats.Referenced
-		total.TooNew += stats.TooNew
-		total.DeleteFailed += stats.DeleteFailed
-		total.Pages += stats.Pages
 
-		cp.Token = stats.NextToken
-		cp.Deferred = cp.Deferred || stats.TooNew > 0 || stats.DeleteFailed > 0
-		if err != nil {
-			t.saveCheckpoint(ctx, cp)
-			t.setResult(progress, total)
-			return fmt.Errorf("cleaning up chapter thumbnail originals: %w", err)
-		}
-		if stats.Done {
-			if cp.Deferred {
-				cp = chapterOriginalsCheckpoint{Identity: t.identity}
-			} else {
-				cp = chapterOriginalsCheckpoint{Identity: t.identity, Done: true}
+		progress.Report(0, "Deleting full-size chapter thumbnails")
+		for {
+			stats, next, err := t.cleaner.Page(ctx, cp.Token)
+			total.Add(stats)
+			cp.Deferred = cp.Deferred || stats.TooNew > 0 || stats.DeleteFailed > 0
+			if err != nil {
+				t.saveCheckpoint(ctx, cp)
+				return err
+			}
+			cp.Token = next
+			if next == "" {
+				done := !cp.Deferred
+				cp = chapterOriginalsCheckpoint{Identity: t.identity, ArmedAt: cp.ArmedAt, Done: done}
+				t.saveCheckpoint(ctx, cp)
+				break
 			}
 			t.saveCheckpoint(ctx, cp)
-			break
+			progress.Report(0, fmt.Sprintf("Deleted %d of %d full-size chapter thumbnails so far", total.Deleted, total.Originals))
 		}
-		t.saveCheckpoint(ctx, cp)
-		progress.Report(0, fmt.Sprintf("Deleted %d of %d full-size chapter thumbnails so far", total.Deleted, total.Originals))
-	}
-
+		if left := total.TooNew + total.DeleteFailed; left > 0 {
+			summary = fmt.Sprintf("Deleted %d full-size chapter thumbnails; %d are left for a later run", total.Deleted, left)
+		} else {
+			summary = fmt.Sprintf("Deleted %d full-size chapter thumbnails; none are left to delete", total.Deleted)
+		}
+		if total.Referenced > 0 {
+			// Only the original exists for these chapters; regenerating them
+			// replaces it.
+			summary += fmt.Sprintf(" (%d kept: their chapters have no 300px image)", total.Referenced)
+		}
+		return nil
+	})
 	t.setResult(progress, total)
-	left := total.TooNew + total.DeleteFailed
-	if left > 0 {
-		progress.Report(100, fmt.Sprintf(
-			"Deleted %d full-size chapter thumbnails; %d are left for the next run", total.Deleted, left))
+	if err != nil {
+		return fmt.Errorf("cleaning up chapter thumbnail originals: %w", err)
+	}
+	if !acquired {
+		progress.Report(100, "Another server is already cleaning up chapter thumbnails")
 		return nil
 	}
-	progress.Report(100, fmt.Sprintf("Deleted %d full-size chapter thumbnails; none are left to delete", total.Deleted))
+	progress.Report(100, summary)
 	return nil
 }
 
