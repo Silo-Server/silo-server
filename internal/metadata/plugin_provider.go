@@ -302,7 +302,7 @@ func (p *PluginProvider) GetMetadata(ctx context.Context, req MetadataRequest) (
 		ContentRating:        response.GetItem().GetContentRating(),
 		AdvisoryAge:          advisoryAge,
 		AdvisorySource:       advisorySource,
-		Ratings:              ratingsFromStruct(response.GetItem().GetRatings()),
+		Ratings:              ratingsFromStruct(response.GetItem().GetRatings(), p.declaredRatingSources),
 		RatingSources:        ratingSourcesFromStruct(response.GetItem().GetRatings(), p.Slug(), p.declaredRatingSources),
 		People:               peopleFromRecords(response.GetItem().GetPeople()),
 		Videos:               videosFromRecords(p.Slug(), response.GetItem().GetVideos()),
@@ -524,7 +524,7 @@ func (p *PluginProvider) GetEpisodes(ctx context.Context, req EpisodesRequest) (
 			Overview:      episode.GetOverview(),
 			AirDate:       episode.GetAirDate(),
 			Runtime:       int(episode.GetRuntime()),
-			Ratings:       ratingsFromStruct(episode.GetRatings()),
+			Ratings:       ratingsFromStruct(episode.GetRatings(), p.declaredRatingSources),
 			StillPath:     episode.GetStillPath(),
 		})
 	}
@@ -587,7 +587,12 @@ func stringMapFromStruct(value *structpb.Struct) map[string]string {
 	return result
 }
 
-func ratingsFromStruct(value *structpb.Struct) Ratings {
+// ratingsFromStruct reads the four flat ratings a plugin sends. IMDb and TMDB
+// are Silo's own and always kept. The Rotten Tomatoes scores are kept only
+// when the plugin declared rt_critic or rt_audience, the same rule
+// ratings.sources follows, so a plugin that does not declare them cannot fill
+// the columns another provider's declaration shows.
+func ratingsFromStruct(value *structpb.Struct, declared map[string]struct{}) Ratings {
 	var ratings Ratings
 	if value == nil {
 		return ratings
@@ -602,10 +607,14 @@ func ratingsFromStruct(value *structpb.Struct) Ratings {
 			ratings.IMDB = number
 		case "tmdb":
 			ratings.TMDB = number
-		case "rt_critic":
-			ratings.RTCritic = number
-		case "rt_audience":
-			ratings.RTAudience = number
+		case models.RatingSourceRTCritic:
+			if _, ok := declared[models.RatingSourceRTCritic]; ok {
+				ratings.RTCritic = number
+			}
+		case models.RatingSourceRTAudience:
+			if _, ok := declared[models.RatingSourceRTAudience]; ok {
+				ratings.RTAudience = number
+			}
 		}
 	}
 	return ratings

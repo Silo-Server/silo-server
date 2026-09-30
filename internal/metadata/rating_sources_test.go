@@ -62,7 +62,7 @@ func TestRatingSourcesFromStruct(t *testing.T) {
 	}
 
 	// The flat keys still map to the typed columns; "sources" is not one.
-	if flat := ratingsFromStruct(ratings); flat.IMDB != 8.1 || flat.TMDB != 0 {
+	if flat := ratingsFromStruct(ratings, declared); flat.IMDB != 8.1 || flat.TMDB != 0 {
 		t.Fatalf("ratingsFromStruct() = %+v, want only IMDB 8.1", flat)
 	}
 }
@@ -366,5 +366,25 @@ func TestIdentifyWithoutRatingSourcesClearsThem(t *testing.T) {
 	}
 	if got := repo.upserts[0]; !got.wholeSet || got.contentID != contentID || len(got.sources) != 0 {
 		t.Fatalf("write = %+v, want an empty Replace of %q", got, contentID)
+	}
+}
+
+// A plugin's flat Rotten Tomatoes scores fill the rating columns only when it
+// declared them; IMDb and TMDB are always kept.
+func TestRatingsFromStructGatesRottenTomatoesOnTheDeclaration(t *testing.T) {
+	ratings := &structpb.Struct{Fields: map[string]*structpb.Value{
+		"imdb":        structpb.NewNumberValue(8.1),
+		"tmdb":        structpb.NewNumberValue(7.6),
+		"rt_critic":   structpb.NewNumberValue(93),
+		"rt_audience": structpb.NewNumberValue(95),
+	}}
+
+	undeclared := ratingsFromStruct(ratings, nil)
+	if undeclared != (Ratings{IMDB: 8.1, TMDB: 7.6}) {
+		t.Fatalf("undeclared = %+v, want IMDb and TMDB only", undeclared)
+	}
+	declared := ratingsFromStruct(ratings, map[string]struct{}{models.RatingSourceRTCritic: {}})
+	if declared != (Ratings{IMDB: 8.1, TMDB: 7.6, RTCritic: 93}) {
+		t.Fatalf("with rt_critic declared = %+v, want the critic score kept and the audience score dropped", declared)
 	}
 }

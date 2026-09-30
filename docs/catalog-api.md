@@ -481,8 +481,9 @@ level or inside the SDK's `metadata` envelope:
 - `id`: the source name, matching `^[a-z][a-z0-9_]{0,31}$`, other than `imdb`
   and `tmdb`. `rt_critic` and `rt_audience` name the Rotten Tomatoes scores the
   plugin sends as the flat `rt_critic` and `rt_audience` ratings, which fill the
-  `rating_rt_*` members; declaring them lets title pages and poster badges show
-  those scores. They are always percentages: `scale` and `percent` are ignored.
+  `rating_rt_*` members. The server keeps those flat scores only from a plugin
+  that declares them, and declaring them lets title pages and poster badges
+  show them. They are always percentages: `scale` and `percent` are ignored.
 - `name`: the plain-text mark clients show next to the score, at most 24
   characters.
 - `label`: optional; the source's full name in the administrator's list, at
