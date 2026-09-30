@@ -11,6 +11,9 @@ import (
 
 type PersonRefresher interface {
 	RefreshPerson(ctx context.Context, id int64) (*models.Person, error)
+	// RefreshClaimedPerson refreshes a person claimed at claimedAt, unless a
+	// lookup started since (a person page on another node).
+	RefreshClaimedPerson(ctx context.Context, id int64, claimedAt time.Time) (*models.Person, error)
 	// ClaimCandidates claims up to limit people due for a background lookup,
 	// so API nodes sweeping at once never get the same person.
 	ClaimCandidates(ctx context.Context, limit int) ([]int64, error)
@@ -149,7 +152,8 @@ func (w *PersonRefreshWorker) processBatch() bool {
 
 	done := map[int64]struct{}{}
 	w.runManual(done)
-	lastStart := w.now().Add(w.config.ClaimLease - w.config.RefreshTimeout)
+	claimedAt := w.now()
+	lastStart := claimedAt.Add(w.config.ClaimLease - w.config.RefreshTimeout)
 	batch, err := w.service.ClaimCandidates(context.Background(), w.config.BatchSize)
 	if err != nil {
 		slog.Warn("person refresh worker: failed to claim candidates", "error", err)
@@ -170,7 +174,7 @@ func (w *PersonRefreshWorker) processBatch() bool {
 				"remaining", len(batch)-index)
 			return true
 		}
-		w.refresh(id)
+		w.refresh(id, claimedAt)
 
 		if w.config.Delay > 0 && index < len(batch)-1 {
 			select {
@@ -196,7 +200,7 @@ func (w *PersonRefreshWorker) runManual(done map[int64]struct{}) {
 		w.manualQueue = w.manualQueue[1:]
 		w.mu.Unlock()
 
-		w.refresh(id)
+		w.refresh(id, time.Time{})
 		done[id] = struct{}{}
 
 		w.mu.Lock()
@@ -205,10 +209,18 @@ func (w *PersonRefreshWorker) runManual(done map[int64]struct{}) {
 	}
 }
 
-func (w *PersonRefreshWorker) refresh(id int64) {
+// refresh looks id up: a background claim made at claimedAt, or an on-demand
+// request when claimedAt is zero.
+func (w *PersonRefreshWorker) refresh(id int64, claimedAt time.Time) {
 	ctx, cancel := context.WithTimeout(context.Background(), w.config.RefreshTimeout)
 	defer cancel()
-	if _, err := w.service.RefreshPerson(ctx, id); err != nil {
+	var err error
+	if claimedAt.IsZero() {
+		_, err = w.service.RefreshPerson(ctx, id)
+	} else {
+		_, err = w.service.RefreshClaimedPerson(ctx, id, claimedAt)
+	}
+	if err != nil {
 		slog.Warn("person refresh worker: refresh failed", "person_id", id, "error", err)
 	}
 }

@@ -84,6 +84,24 @@ func (s *PersonRefreshService) RefreshPerson(ctx context.Context, id int64) (*mo
 	return s.refreshPersonWithProviders(ctx, id, providers)
 }
 
+// RefreshClaimedPerson refreshes a person the sweep claimed at claimedAt. It
+// skips the lookup when another one started since, such as a person page
+// opened on another API node, so the providers aren't asked twice and the
+// outcome isn't counted twice. claimedAt comes from the API node's clock; a
+// small skew against the database only risks the duplicate lookup this
+// avoids.
+func (s *PersonRefreshService) RefreshClaimedPerson(ctx context.Context, id int64, claimedAt time.Time) (*models.Person, error) {
+	if s.repo == nil {
+		return nil, fmt.Errorf("person refresh repository is not configured")
+	}
+	person, err := s.repo.Get(ctx, id)
+	if err == nil && person != nil && person.MetadataRefreshAttemptedAt != nil &&
+		person.MetadataRefreshAttemptedAt.After(claimedAt) {
+		return person, nil
+	}
+	return s.RefreshPerson(ctx, id)
+}
+
 // ClaimCandidates claims people due for a background lookup; see
 // catalog.PersonRepository.ClaimRefreshCandidates.
 func (s *PersonRefreshService) ClaimCandidates(ctx context.Context, limit int) ([]int64, error) {
