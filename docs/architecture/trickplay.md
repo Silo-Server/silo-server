@@ -125,6 +125,28 @@ minutes, on one server at a time. A server also reconciles as soon as it
 reads a new width or interval (it rereads the settings every minute), so a
 settings change does not wait for the next pass.
 
+### Transcode nodes
+
+`playback.trickplay_execution` moves the decoding to transcode nodes:
+`local` (the default) decodes on the API server, `prefer_transcode_nodes`
+uses a node when one can take the run and decodes locally otherwise, and
+`transcode_nodes_only` gives the file back to the queue for a minute,
+without counting a failure, when no node can. The API server keeps the claim,
+the lease, and the uploads; a node only decodes and tiles
+(`POST /trickplay/extract`, see
+[worker protocol](worker-http-protocol.md)).
+
+- A node is eligible while it is enabled, healthy, and advertises the
+  `trickplay_extract_v1` transport feature, so older nodes are never sent
+  work. The API server tries eligible nodes in random order, so servers do
+  not all converge on one node.
+- A node takes one run at a time. `node_busy`, `node_unavailable`, a
+  refused request, or a connection that drops moves the run to the next
+  node; a sampling failure on a node is final for the attempt, and a
+  `permanent` one marks the file unusable, as it would locally.
+- The request carries a hardware attempt and a software attempt; a node
+  whose accelerator cannot decode drops the hardware attempt.
+
 ## Serving
 
 A manifest is served only while all of these hold:
