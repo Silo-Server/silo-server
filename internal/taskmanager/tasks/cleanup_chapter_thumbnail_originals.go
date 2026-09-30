@@ -18,11 +18,12 @@ import (
 const ChapterThumbnailOriginalsCleanupKey = config.ChapterThumbnailOriginalsCleanupKey
 
 // chapterOriginalsGrace is how long the cleanup waits after it is first armed
-// on a storage location before deleting anything. A rolling upgrade finishes
-// well within it: until then a node on an earlier build can save a chapter row
-// that points back at an original, and deleting that original under it would
-// leave the row pointing at nothing. The wait is recorded in the checkpoint,
-// so restarts do not reset it.
+// on a storage location before it walks storage. Until a rolling upgrade
+// finishes, a node on an earlier build still writes an original beside each new
+// thumbnail; the migration's trigger keeps chapter rows off those originals, so
+// deleting them is always safe, but a pass that ran before those nodes were
+// gone could miss the last ones and record itself done. The wait is recorded in
+// the checkpoint, so restarts do not reset it.
 const chapterOriginalsGrace = time.Hour
 
 type chapterOriginalsCheckpoint struct {
@@ -169,9 +170,7 @@ func (t *CleanupChapterThumbnailOriginalsTask) Execute(ctx context.Context, prog
 			summary = fmt.Sprintf("Deleted %d full-size chapter thumbnails; none are left to delete", total.Deleted)
 		}
 		if total.Referenced > 0 {
-			// Only the original exists for these chapters; regenerating them
-			// replaces it.
-			summary += fmt.Sprintf(" (%d kept: their chapters have no 300px image)", total.Referenced)
+			summary += fmt.Sprintf(" (%d kept: a chapter still references them)", total.Referenced)
 		}
 		return nil
 	})

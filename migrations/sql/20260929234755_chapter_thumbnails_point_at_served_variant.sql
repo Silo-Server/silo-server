@@ -2,36 +2,54 @@
 -- Chapter thumbnails used to be stored twice, as a full-size original.webp and
 -- a 300px w300.webp. thumbnail_path held the original, and every reader
 -- rewrote it to w300 before signing a URL. New thumbnails store only w300.webp
--- and thumbnail_path names it directly, so point existing rows at the w300
--- object they were already served from. Both objects were written before the
--- path was saved, so w300.webp exists wherever original.webp was recorded.
+-- and thumbnail_path names it directly.
 --
+-- This trigger keeps every chapter row on the w300 image: a thumbnail_path
+-- naming a legacy original is rewritten to the w300 object beside it, which
+-- earlier builds always wrote before saving the original's path. It also
+-- catches writes from a node still on an earlier build during a rolling
+-- upgrade, and from any copy of the chapters array loaded before this
+-- migration, so no row can point at an original again. That is what lets the
+-- originals cleanup task delete original.webp objects without stranding a row.
+-- +goose StatementBegin
+CREATE FUNCTION media_files_chapter_thumbnails_served_variant() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF jsonb_typeof(NEW.chapters) = 'array' THEN
+        NEW.chapters := (
+            SELECT jsonb_agg(
+                CASE
+                    WHEN e->>'thumbnail_path' ~ '^chapter-images/[0-9]+/[0-9]+/original\.webp$'
+                    THEN jsonb_set(e, '{thumbnail_path}',
+                                   to_jsonb(regexp_replace(e->>'thumbnail_path', '/original\.webp$', '/w300.webp')))
+                    ELSE e
+                END
+                ORDER BY ord
+            )
+            FROM jsonb_array_elements(NEW.chapters) WITH ORDINALITY AS t(e, ord)
+        );
+    END IF;
+    RETURN NEW;
+END;
+$$;
+-- +goose StatementEnd
+CREATE TRIGGER media_files_chapter_thumbnails_served_variant
+    BEFORE INSERT OR UPDATE OF chapters ON media_files
+    FOR EACH ROW
+    WHEN (NEW.chapters::text LIKE '%/original.webp%')
+    EXECUTE FUNCTION media_files_chapter_thumbnails_served_variant();
+
+-- Point existing rows at the w300 image by saving them through the trigger.
 -- The artwork reconciler checks thumbnail_path, so this also moves its check
--- onto the object clients actually load. The one-time cleanup task deletes the
--- orphaned original.webp objects only after this has run.
+-- onto the object clients actually load.
 UPDATE media_files
-SET chapters = (
-    SELECT jsonb_agg(
-        CASE
-            WHEN e->>'thumbnail_path' ~ '^chapter-images/[0-9]+/[0-9]+/original\.webp$'
-            THEN jsonb_set(e, '{thumbnail_path}',
-                           to_jsonb(regexp_replace(e->>'thumbnail_path', '/original\.webp$', '/w300.webp')))
-            ELSE e
-        END
-        ORDER BY ord
-    )
-    FROM jsonb_array_elements(chapters) WITH ORDINALITY AS t(e, ord)
-)
-WHERE jsonb_typeof(chapters) = 'array'
-  AND EXISTS (
-      SELECT 1
-      FROM jsonb_array_elements(chapters) e
-      WHERE e->>'thumbnail_path' ~ '^chapter-images/[0-9]+/[0-9]+/original\.webp$'
-  );
+SET chapters = chapters
+WHERE chapters::text LIKE '%/original.webp%';
 
 -- +goose Down
--- Intentionally empty. Earlier builds rewrite /original. to /w300. before
--- serving and leave a w300 path unchanged, so they read the new paths
--- correctly. Pointing rows back at original.webp would reference objects the
--- cleanup task may already have deleted.
-SELECT 1;
+-- The rewritten paths stay: earlier builds rewrite /original. to /w300. before
+-- serving and leave a w300 path unchanged, so they read them correctly, and
+-- pointing rows back at original.webp would reference objects the cleanup
+-- task may already have deleted.
+DROP TRIGGER media_files_chapter_thumbnails_served_variant ON media_files;
+DROP FUNCTION media_files_chapter_thumbnails_served_variant();

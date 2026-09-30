@@ -110,7 +110,7 @@ func TestParseOriginalKey(t *testing.T) {
 	}
 }
 
-func TestOriginalsCleanerDeletesOldOriginalsAndRepointsReferencedRows(t *testing.T) {
+func TestOriginalsCleanerDeletesOnlyOldUnreferencedOriginals(t *testing.T) {
 	root := t.TempDir()
 	store, err := blobstore.NewFilesystem(root)
 	if err != nil {
@@ -122,9 +122,7 @@ func TestOriginalsCleanerDeletesOldOriginalsAndRepointsReferencedRows(t *testing
 		"chapter-images/1/0/original.webp":   old,                 // deleted
 		"chapter-images/1/0/w300.webp":       old,                 // served thumbnail
 		"chapter-images/1/1/original.webp":   old,                 // deleted
-		"chapter-images/2/0/original.webp":   old,                 // referenced: row repointed, then deleted
-		"chapter-images/2/0/w300.webp":       old,                 // what the row is repointed to
-		"chapter-images/5/0/original.webp":   old,                 // referenced, no w300: kept
+		"chapter-images/2/0/original.webp":   old,                 // referenced by a row: kept
 		"chapter-images/3/0/original.webp":   now.Add(-time.Hour), // too new
 		"chapter-images/4/0/original.jpg":    old,                 // not a shape this code wrote
 		"tmdb/movies/1/poster/original.webp": old,                 // outside the namespace
@@ -140,27 +138,13 @@ func TestOriginalsCleanerDeletesOldOriginalsAndRepointsReferencedRows(t *testing
 
 	var lookedUpIDs []int
 	var lookedUpKeys []string
-	var repointedIDs []int
-	var repointedKeys []string
-	var deletedBeforeRepoint bool
 	cleaner := &OriginalsCleaner{
 		store: store,
 		now:   func() time.Time { return now },
 		referenced: func(_ context.Context, fileIDs []int, keys []string) (map[string]struct{}, error) {
 			lookedUpIDs = append(lookedUpIDs, fileIDs...)
 			lookedUpKeys = append(lookedUpKeys, keys...)
-			return map[string]struct{}{
-				"chapter-images/2/0/original.webp": {},
-				"chapter-images/5/0/original.webp": {},
-			}, nil
-		},
-		repoint: func(ctx context.Context, fileIDs []int, keys []string) error {
-			if _, err := store.Stat(ctx, "chapter-images/2/0/original.webp"); err != nil {
-				deletedBeforeRepoint = true
-			}
-			repointedIDs = append(repointedIDs, fileIDs...)
-			repointedKeys = append(repointedKeys, keys...)
-			return nil
+			return map[string]struct{}{"chapter-images/2/0/original.webp": {}}, nil
 		},
 	}
 
@@ -171,26 +155,19 @@ func TestOriginalsCleanerDeletesOldOriginalsAndRepointsReferencedRows(t *testing
 	if next != "" {
 		t.Fatalf("next = %q, want the end of the listing", next)
 	}
-	if stats.Originals != 5 || stats.Deleted != 3 || stats.Repointed != 1 || stats.Referenced != 1 || stats.TooNew != 1 || stats.DeleteFailed != 0 {
+	if stats.Originals != 4 || stats.Deleted != 2 || stats.Referenced != 1 || stats.TooNew != 1 || stats.DeleteFailed != 0 {
 		t.Fatalf("stats = %+v", stats)
 	}
-	wantLookup := []string{"chapter-images/1/0/original.webp", "chapter-images/1/1/original.webp", "chapter-images/2/0/original.webp", "chapter-images/5/0/original.webp"}
-	if !slices.Equal(lookedUpKeys, wantLookup) || !slices.Equal(lookedUpIDs, []int{1, 1, 2, 5}) {
+	wantLookup := []string{"chapter-images/1/0/original.webp", "chapter-images/1/1/original.webp", "chapter-images/2/0/original.webp"}
+	if !slices.Equal(lookedUpKeys, wantLookup) || !slices.Equal(lookedUpIDs, []int{1, 1, 2}) {
 		t.Fatalf("reference lookup = %v %v, want %v", lookedUpIDs, lookedUpKeys, wantLookup)
-	}
-	if !slices.Equal(repointedKeys, []string{"chapter-images/2/0/original.webp"}) || !slices.Equal(repointedIDs, []int{2}) {
-		t.Fatalf("repointed = %v %v, want file 2's original only", repointedIDs, repointedKeys)
-	}
-	if deletedBeforeRepoint {
-		t.Fatal("a referenced original was deleted before its row was repointed")
 	}
 
 	want := []string{
 		"chapter-images/1/0/w300.webp",
-		"chapter-images/2/0/w300.webp",
+		"chapter-images/2/0/original.webp",
 		"chapter-images/3/0/original.webp",
 		"chapter-images/4/0/original.jpg",
-		"chapter-images/5/0/original.webp",
 	}
 	if got := storedKeys(t, store); !slices.Equal(got, want) {
 		t.Fatalf("remaining chapter objects = %v, want %v", got, want)

@@ -14,11 +14,11 @@ import (
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 )
 
-// The reference check and repoint run against real chapter rows: a row an
-// earlier build saved back onto an original is moved to the w300 image beside
-// it before that original is deleted, a chapter with no w300 image keeps its
-// original, and w300 objects are never candidates.
-func TestOriginalsCleanerReferenceCheckPostgres(t *testing.T) {
+// Against a migrated database: a chapter row an earlier build saves back onto
+// its original is stored on the w300 image by the migration's trigger, so the
+// reference check finds nothing to keep, every original goes, and w300
+// objects are never candidates.
+func TestOriginalsCleanerAfterALegacyChapterWritePostgres(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
@@ -46,14 +46,13 @@ func TestOriginalsCleanerReferenceCheckPostgres(t *testing.T) {
 	}
 	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM media_files WHERE id = $1`, fileID) })
 
-	// Chapter 0 was migrated to w300. Chapters 1 and 2 were saved by an
-	// earlier build mid-upgrade and point at their originals; chapter 2 has no
-	// w300 image.
+	// Chapter 0 was migrated to w300. Chapter 1 is written the way an earlier
+	// build saves it, pointing at its original.
 	key := func(chapter int, name string) string {
 		return fmt.Sprintf("chapter-images/%d/%d/%s", fileID, chapter, name)
 	}
-	chapters := fmt.Sprintf(`[{"index": 0, "thumbnail_path": %q}, {"index": 1, "thumbnail_path": %q, "thumbnail_thumbhash": "h1"}, {"index": 2, "thumbnail_path": %q}]`,
-		key(0, "w300.webp"), key(1, "original.webp"), key(2, "original.webp"))
+	chapters := fmt.Sprintf(`[{"index": 0, "thumbnail_path": %q}, {"index": 1, "thumbnail_path": %q, "thumbnail_thumbhash": "h1"}]`,
+		key(0, "w300.webp"), key(1, "original.webp"))
 	if _, err := pool.Exec(ctx, `UPDATE media_files SET chapters = $2::jsonb WHERE id = $1`, fileID, chapters); err != nil {
 		t.Fatalf("seed chapters: %v", err)
 	}
@@ -64,7 +63,7 @@ func TestOriginalsCleanerReferenceCheckPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	old := time.Now().Add(-48 * time.Hour)
-	for _, k := range []string{key(0, "original.webp"), key(0, "w300.webp"), key(1, "original.webp"), key(1, "w300.webp"), key(2, "original.webp")} {
+	for _, k := range []string{key(0, "original.webp"), key(0, "w300.webp"), key(1, "original.webp"), key(1, "w300.webp")} {
 		if err := store.Put(ctx, k, []byte("x")); err != nil {
 			t.Fatal(err)
 		}
@@ -83,10 +82,10 @@ func TestOriginalsCleanerReferenceCheckPostgres(t *testing.T) {
 	if err != nil || !acquired {
 		t.Fatalf("Exclusive() = %v, %v", acquired, err)
 	}
-	if stats.Deleted != 2 || stats.Repointed != 1 || stats.Referenced != 1 {
-		t.Fatalf("stats = %+v, want two deleted, one repointed, one kept", stats)
+	if stats.Deleted != 2 || stats.Referenced != 0 {
+		t.Fatalf("stats = %+v, want both originals deleted", stats)
 	}
-	want := []string{key(0, "w300.webp"), key(1, "w300.webp"), key(2, "original.webp")}
+	want := []string{key(0, "w300.webp"), key(1, "w300.webp")}
 	if got := storedKeys(t, store); !slices.Equal(got, want) {
 		t.Fatalf("remaining objects = %v, want %v", got, want)
 	}
@@ -94,8 +93,8 @@ func TestOriginalsCleanerReferenceCheckPostgres(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT chapters::text FROM media_files WHERE id = $1`, fileID).Scan(&got); err != nil {
 		t.Fatal(err)
 	}
-	wantChapters := fmt.Sprintf(`[{"index": 0, "thumbnail_path": %q}, {"index": 1, "thumbnail_path": %q, "thumbnail_thumbhash": "h1"}, {"index": 2, "thumbnail_path": %q}]`,
-		key(0, "w300.webp"), key(1, "w300.webp"), key(2, "original.webp"))
+	wantChapters := fmt.Sprintf(`[{"index": 0, "thumbnail_path": %q}, {"index": 1, "thumbnail_path": %q, "thumbnail_thumbhash": "h1"}]`,
+		key(0, "w300.webp"), key(1, "w300.webp"))
 	if got != wantChapters {
 		t.Fatalf("chapters = %s, want %s", got, wantChapters)
 	}
