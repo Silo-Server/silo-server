@@ -113,7 +113,8 @@ type Item struct {
 func Build(item Item, sel Selection) []Rating {
 	scores := make(map[string]float64, len(item.Sources)+4)
 	for source, score := range item.Sources {
-		if score < 0 || score > 100 {
+		// Written so a NaN score, which fails every comparison, is dropped too.
+		if !(score >= 0 && score <= 100) {
 			continue
 		}
 		// IMDb and TMDB have no zero rating; a provider's 0 means "unrated",

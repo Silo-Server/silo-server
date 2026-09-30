@@ -3,6 +3,7 @@ package ratingsources
 import (
 	"context"
 	"errors"
+	"math"
 	"reflect"
 	"testing"
 
@@ -66,6 +67,13 @@ func TestBuildPrefersRatingColumnsOverSourceRows(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Build = %+v\nwant %+v", got, want)
+	}
+}
+
+func TestBuildDropsANaNSourceScore(t *testing.T) {
+	item := Item{Sources: map[string]float64{models.RatingSourceIMDB: math.NaN()}}
+	if got := Build(item, Selection{}); len(got) != 0 {
+		t.Fatalf("Build = %+v, want nothing for a NaN score", got)
 	}
 }
 
