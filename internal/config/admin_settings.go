@@ -71,20 +71,33 @@ var ratingSourceIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
 // ParseRatingSourceList splits a CatalogExtraRatingSourcesSettingKey value
 // into source names, dropping blanks, duplicates, and malformed names.
 func ParseRatingSourceList(raw string) []string {
-	var out []string
+	sources, _ := splitRatingSourceList(raw)
+	return sources
+}
+
+// splitRatingSourceList splits a comma-separated list of rating source names
+// into trimmed, lowercased, deduplicated names, skipping blanks. Malformed
+// names are left out; the first one is returned so a save can refuse it.
+func splitRatingSourceList(raw string) (sources []string, malformed string) {
 	seen := map[string]struct{}{}
 	for _, entry := range strings.Split(raw, ",") {
 		source := strings.ToLower(strings.TrimSpace(entry))
+		if source == "" {
+			continue
+		}
 		if !ratingSourceIDPattern.MatchString(source) {
+			if malformed == "" {
+				malformed = source
+			}
 			continue
 		}
 		if _, dup := seen[source]; dup {
 			continue
 		}
 		seen[source] = struct{}{}
-		out = append(out, source)
+		sources = append(sources, source)
 	}
-	return out
+	return sources, malformed
 }
 
 // Shared server-setting keys used by playback and prepared-download policy
@@ -823,26 +836,15 @@ func ValidateArtworkStorageSettings(effective map[string]string) error {
 
 // normalizeRatingSourceList canonicalizes a comma-separated list of rating
 // source names: trimmed, lowercased, and deduplicated. A name that is not a
-// well-formed source name is an error rather than silently dropped. Names
-// Silo does not know yet are kept, since a metadata plugin can declare them.
+// well-formed source name is an error rather than silently dropped. A
+// well-formed name without a source definition is kept but shows nothing (see
+// ratingsources.Build).
 func normalizeRatingSourceList(key, value string) (string, error) {
-	var out []string
-	seen := map[string]struct{}{}
-	for _, entry := range strings.Split(value, ",") {
-		source := strings.ToLower(strings.TrimSpace(entry))
-		if source == "" {
-			continue
-		}
-		if !ratingSourceIDPattern.MatchString(source) {
-			return "", fmt.Errorf("%s: %q is not a rating source name", key, source)
-		}
-		if _, dup := seen[source]; dup {
-			continue
-		}
-		seen[source] = struct{}{}
-		out = append(out, source)
+	sources, malformed := splitRatingSourceList(value)
+	if malformed != "" {
+		return "", fmt.Errorf("%s: %q is not a rating source name", key, malformed)
 	}
-	return strings.Join(out, ","), nil
+	return strings.Join(sources, ","), nil
 }
 
 func normalizeAdminEnum(key, value string, allowed ...string) (string, error) {

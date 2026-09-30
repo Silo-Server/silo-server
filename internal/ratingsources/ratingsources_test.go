@@ -5,7 +5,6 @@ import (
 	"errors"
 	"reflect"
 	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -89,7 +88,7 @@ func TestBuildTreatsAZeroIMDbOrTMDBRowAsUnrated(t *testing.T) {
 func TestBuildIgnoresUnknownSources(t *testing.T) {
 	item := Item{Sources: map[string]float64{"kinopoisk": 72}}
 	if got := Build(item, NewSelection("kinopoisk")); len(got) != 0 {
-		t.Fatalf("Build = %+v, want nothing for a source without a definition", got)
+		t.Fatalf("Build = %+v, want nothing for a source without a definition, even when the setting names it", got)
 	}
 }
 
@@ -108,6 +107,9 @@ func TestFormat(t *testing.T) {
 	}{
 		{"imdb", 82.5, "8.3"},
 		{"imdb", 80, "8.0"},
+		// Halves round away from zero, as the web's card formatting does.
+		{"imdb", 73.5, "7.4"},
+		{"tmdb", 70.5, "7.1"},
 		{"rt_critic", 0, "0%"},
 		{"rt_audience", 99.6, "100%"},
 		{"metacritic", 87.4, "87"},
@@ -135,11 +137,11 @@ func (s *stubSettings) Get(context.Context, string) (string, error) {
 	return s.value, s.err
 }
 
-func TestPolicyCachesAndKeepsLastGoodSelection(t *testing.T) {
+// The cache itself (TTL, last good value on a failed read, no cached
+// failure) is config.CachedSetting's and is tested there.
+func TestPolicyFollowsTheSettingAndCachesIt(t *testing.T) {
 	settings := &stubSettings{value: "rt_critic"}
-	now := time.Unix(0, 0)
 	p := NewPolicy(settings)
-	p.now = func() time.Time { return now }
 	ctx := context.Background()
 
 	if !p.Selection(ctx).Shows("rt_critic") || p.Selection(ctx).Shows("rt_audience") {
@@ -149,16 +151,20 @@ func TestPolicyCachesAndKeepsLastGoodSelection(t *testing.T) {
 		t.Fatalf("reads = %d, want one read served from cache", settings.reads)
 	}
 
-	now = now.Add(cacheTTL)
-	settings.err = errors.New("database down")
-	if !p.Selection(ctx).Shows("rt_critic") {
-		t.Fatal("a failed read dropped the administrator's selection")
+	failing := NewPolicy(&stubSettings{err: errors.New("database down")})
+	if sel := failing.Selection(ctx); !sel.Shows("imdb") || sel.Shows("rt_critic") {
+		t.Fatal("a failed first read must answer with the default")
 	}
+}
 
-	settings.err = nil
-	settings.value = ""
-	if p.Selection(ctx).Shows("rt_critic") {
-		t.Fatal("a failed read was cached; the next read did not retry")
+func TestSelectionShownListsDefinedSourcesInDisplayOrder(t *testing.T) {
+	var got []string
+	for _, definition := range NewSelection("metacritic", "kinopoisk", "rt_critic").Shown() {
+		got = append(got, definition.Source)
+	}
+	want := []string{"imdb", "tmdb", "rt_critic", "metacritic"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Shown = %q, want %q", got, want)
 	}
 }
 

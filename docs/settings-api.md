@@ -983,7 +983,8 @@ It is server-wide, applies without a restart, and never affects playback; see
 external rating sources clients show in addition to IMDb and TMDB, which always
 show: `rt_critic`, `rt_audience`, `metacritic`, `letterboxd`, and the other
 source names in "Rating sources" in [catalog-api.md](catalog-api.md). A name
-must match `^[a-z][a-z0-9_]{0,31}$`; names Silo does not know are kept. It is
+must match `^[a-z][a-z0-9_]{0,31}$`. A well-formed name that is not in that
+list is kept but shows nothing. It is
 server-wide and applies within seconds, without a restart; see "Ratings on
 title pages" in [catalog-api.md](catalog-api.md).
 

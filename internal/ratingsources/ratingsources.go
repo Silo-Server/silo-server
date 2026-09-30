@@ -11,7 +11,6 @@ import (
 	"context"
 	"math"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -42,54 +41,45 @@ func (s Selection) Shows(source string) bool {
 	return ok
 }
 
+// Shown returns the sources clients show, in display order: IMDb and TMDB,
+// then each source the selection turned on that has a definition.
+func (s Selection) Shown() []models.RatingSourceDefinition {
+	var out []models.RatingSourceDefinition
+	for _, definition := range models.RatingSourceDefinitions() {
+		if s.Shows(definition.Source) {
+			out = append(out, definition)
+		}
+	}
+	return out
+}
+
 // cacheTTL bounds how long a node serves a cached selection. Every item detail
 // and card list reads it, so it is not worth a database round trip per
 // request, while an administrator's change still reaches every node within
 // seconds.
 const cacheTTL = 10 * time.Second
 
-// Policy reads config.CatalogExtraRatingSourcesSettingKey and caches a
-// successful read for cacheTTL.
+// Policy reads config.CatalogExtraRatingSourcesSettingKey through a
+// config.CachedSetting: a successful read is cached for cacheTTL, and a failed
+// one answers with the selection last read successfully.
 type Policy struct {
-	settings config.SettingReader
-	now      func() time.Time
-
-	mu        sync.Mutex
-	selection Selection
-	expires   time.Time
+	setting *config.CachedSetting[Selection]
 }
 
 // NewPolicy binds the policy to a server settings reader. A nil reader, or a
 // nil policy, shows only the sources that are always shown.
 func NewPolicy(settings config.SettingReader) *Policy {
-	return &Policy{settings: settings, now: time.Now}
+	return &Policy{setting: config.NewCachedSetting(settings, config.CatalogExtraRatingSourcesSettingKey, cacheTTL, func(value string) Selection {
+		return NewSelection(config.ParseRatingSourceList(value)...)
+	})}
 }
 
-// Selection returns the sources to show. A read failure answers with the
-// selection last read successfully, or the default when none has been; the
-// failed read is not cached, so the next call retries.
+// Selection returns the sources to show.
 func (p *Policy) Selection(ctx context.Context) Selection {
-	if p == nil || p.settings == nil {
+	if p == nil {
 		return Selection{}
 	}
-	p.mu.Lock()
-	sel, fresh := p.selection, p.now().Before(p.expires)
-	p.mu.Unlock()
-	if fresh {
-		return sel
-	}
-
-	value, err := p.settings.Get(ctx, config.CatalogExtraRatingSourcesSettingKey)
-	if err != nil {
-		return sel
-	}
-	sel = NewSelection(config.ParseRatingSourceList(value)...)
-
-	p.mu.Lock()
-	p.selection = sel
-	p.expires = p.now().Add(cacheTTL)
-	p.mu.Unlock()
-	return sel
+	return p.setting.Get(ctx)
 }
 
 // Rating is one entry of the list clients render.
@@ -147,9 +137,9 @@ func Build(item Item, sel Selection) []Rating {
 	}
 
 	var out []Rating
-	for _, definition := range models.RatingSourceDefinitions() {
+	for _, definition := range sel.Shown() {
 		score, ok := scores[definition.Source]
-		if !ok || !sel.Shows(definition.Source) {
+		if !ok {
 			continue
 		}
 		out = append(out, Rating{
@@ -163,7 +153,9 @@ func Build(item Item, sel Selection) []Rating {
 }
 
 // Format renders a 0-100 score on the source's own scale: a percentage, one
-// decimal place on scales up to 10, and a whole number otherwise.
+// decimal place on scales up to 10, and a whole number otherwise. Halves round
+// away from zero (7.35 reads 7.4); the web's card formatting in
+// web/src/components/ratings/ratings.ts rounds the same way.
 func Format(score float64, definition models.RatingSourceDefinition) string {
 	value := score * definition.Scale / 100
 	switch {
