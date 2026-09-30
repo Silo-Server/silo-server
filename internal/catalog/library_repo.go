@@ -536,7 +536,14 @@ func (r *LibraryItemRepository) reconcileMemberships(ctx context.Context, folder
 	// protected-root pass. The latter no longer have a membership to return from
 	// the DELETE above, but their surviving media_files row still ties them to
 	// this folder so they can be reconsidered after the root recovers.
-	orphanIDs, err := collectOrphanIDs(ctx, tx, removedContentIDs)
+	// Relink cleanup considers every listed item: one an earlier relink kept
+	// because it still had files has no membership left to remove here, yet
+	// may just have lost its last file.
+	orphanCandidates := removedContentIDs
+	if onlyFileless {
+		orphanCandidates = contentIDs
+	}
+	orphanIDs, err := collectOrphanIDs(ctx, tx, orphanCandidates)
 	if err != nil {
 		return 0, 0, nil, err
 	}

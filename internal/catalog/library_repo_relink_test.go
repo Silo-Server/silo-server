@@ -28,7 +28,10 @@ func TestReconcileRelinkedItemsKeepsItemsThatStillHaveFiles(t *testing.T) {
 	suffix := time.Now().UnixNano()
 	id := func(name string) string { return fmt.Sprintf("relink-%s-%d", name, suffix) }
 	fileless, missingOnly, otherFolder, stillPresent, untouched := id("fileless"), id("missing"), id("other"), id("present"), id("untouched")
-	all := []string{fileless, missingOnly, otherFolder, stillPresent, untouched}
+	// An earlier relink already removed this item's membership and kept it
+	// for its remaining file; that file has now been relinked away too.
+	unlisted := id("unlisted")
+	all := []string{fileless, missingOnly, otherFolder, stillPresent, untouched, unlisted}
 
 	folders := make([]int, 2)
 	for i := range folders {
@@ -51,6 +54,9 @@ func TestReconcileRelinkedItemsKeepsItemsThatStillHaveFiles(t *testing.T) {
 			VALUES ($1, 'series', $1, 'unmatched', '{}'::text[], '', '', '')
 		`, contentID); err != nil {
 			t.Fatalf("seed item: %v", err)
+		}
+		if contentID == unlisted {
+			continue
 		}
 		if _, err := pool.Exec(ctx,
 			`INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, contentID, folder,
@@ -78,12 +84,12 @@ func TestReconcileRelinkedItemsKeepsItemsThatStillHaveFiles(t *testing.T) {
 	seedFile(untouched, folder, false)
 
 	repo := NewLibraryItemRepository(pool)
-	removed, deleted, _, err := repo.ReconcileRelinkedItems(ctx, folder, []string{fileless, missingOnly, otherFolder, stillPresent})
+	removed, deleted, _, err := repo.ReconcileRelinkedItems(ctx, folder, []string{fileless, missingOnly, otherFolder, stillPresent, unlisted})
 	if err != nil {
 		t.Fatalf("ReconcileRelinkedItems: %v", err)
 	}
-	if removed != 3 || deleted != 1 {
-		t.Fatalf("removed/deleted = %d/%d, want 3/1", removed, deleted)
+	if removed != 3 || deleted != 2 {
+		t.Fatalf("removed/deleted = %d/%d, want 3/2", removed, deleted)
 	}
 
 	state := func(contentID string) (item, membership bool) {
@@ -101,6 +107,7 @@ func TestReconcileRelinkedItemsKeepsItemsThatStillHaveFiles(t *testing.T) {
 		wantItem, wantInFolder bool
 	}{
 		{contentID: fileless, wantItem: false, wantInFolder: false},
+		{contentID: unlisted, wantItem: false, wantInFolder: false},
 		// A missing file may sit under an unreachable root; a scan decides.
 		{contentID: missingOnly, wantItem: true, wantInFolder: false},
 		{contentID: otherFolder, wantItem: true, wantInFolder: false},
