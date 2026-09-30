@@ -396,7 +396,8 @@ IMDb score, TMDB, as its mark and score.
 ## Rating sources
 
 The v2 item detail of a movie or series may carry `rating_sources`, a list of
-per-source ratings metadata providers reported. Each entry has:
+per-source ratings metadata providers reported, limited to the sources title
+pages show. Each entry has:
 
 - `source`: `imdb`, `tmdb`, or a name a metadata plugin declared (below).
   Ignore a name you do not recognize.
@@ -404,10 +405,12 @@ per-source ratings metadata providers reported. Each entry has:
 - `votes`: how many votes produced the score, omitted when the source does not
   report it.
 
-IMDb and TMDB come first, then the other sources by name, at most one entry
-per source. The member is absent when no provider reported a source. It is
-detail-only: list and section cards do not carry it. It is stored data; a
-title page renders `ratings`.
+Entries follow the order of `ratings`, at most one per source. A stored score
+of a source no enabled plugin declares, or one the administrator has not
+turned on, is left out, so a score a plugin reported before it stopped
+declaring its source is never served. The member is absent when no entry is
+left. It is detail-only: list and section cards do not carry it. A title page
+renders `ratings`.
 
 The four `rating_imdb`, `rating_tmdb`, `rating_rt_critic` and
 `rating_rt_audience` members are unchanged, keep their own scales, and remain
@@ -449,7 +452,8 @@ level or inside the SDK's `metadata` envelope:
   most 60 characters. `name` stands in when it is absent.
 - `scale`: the top of the source's own scale, above 0 and at most 100. The
   plugin still sends a 0-100 `score`; a `scale` of 10 shows 72 as `7.2`.
-- `percent`: optional; `true` shows the score as a percentage.
+- `percent`: optional; `true` shows the 0-100 score as a percentage, and the
+  scale is 100 whatever `scale` says, so `scale` may be left out.
 
 An entry that breaks a rule is dropped on its own, a repeated `id` keeps the
 first, and a capability keeps at most eight. When two enabled plugins declare

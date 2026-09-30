@@ -17249,7 +17249,7 @@ export interface components {
       rating_rt_audience?: number;
       /** Format: int64 */
       rating_rt_critic?: number;
-      /** @description Per-source ratings on a 0-100 scale for movies and series, in display order; absent when no provider reported any. This is stored data: title pages show ratings, not this list. */
+      /** @description Per-source ratings on a 0-100 scale for movies and series, limited to the sources title pages show and in the same order as ratings; absent when there are none. Title pages render ratings, not this list. */
       rating_sources?: components["schemas"]["CatalogRatingSource"][];
       /** Format: double */
       rating_tmdb?: number;

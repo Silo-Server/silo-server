@@ -4,6 +4,7 @@ import {
   groupRatingSourcesByPlugin,
   parseRatingSources,
   toggleRatingSource,
+  undeclaredRatingSources,
 } from "./ratingSources";
 
 describe("rating source setting", () => {
@@ -39,5 +40,15 @@ describe("rating source setting", () => {
       ["MDBList", ["rt_critic", "mdblist"]],
       ["Kinopoisk", ["kinopoisk"]],
     ]);
+  });
+
+  it("lists turned-on sources that no plugin declares", () => {
+    const sources = [
+      { source: "imdb", label: "IMDb", always_shown: true },
+      { source: "rt_critic", label: "RT", always_shown: false, provider: "MDBList" },
+    ];
+    expect(
+      undeclaredRatingSources(["rt_critic", "kinopoisk", "imdb", "kinopoisk"], sources),
+    ).toEqual(["kinopoisk"]);
   });
 });

@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -63,11 +65,38 @@ func (s Selection) Shows(source string) bool {
 	return ok
 }
 
+// Sources returns the shown sources among the given names, in display order:
+// IMDb and TMDB, then the declared sources in the order they were declared.
+func (s Selection) Sources(names []string) []string {
+	present := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		present[name] = struct{}{}
+	}
+	var out []string
+	for _, definition := range s.definitions() {
+		if _, ok := present[definition.Source]; ok && s.Shows(definition.Source) {
+			out = append(out, definition.Source)
+		}
+	}
+	return out
+}
+
+// definitions lists Silo's own sources and then the declared ones, in display
+// order.
+func (s Selection) definitions() []models.RatingSourceDefinition {
+	return append(models.RatingSourceDefinitions(), s.declared...)
+}
+
 // cacheTTL bounds how long a node serves a cached selection. Every item detail
 // and card list reads it, so it is not worth a database round trip per
 // request, while an administrator's change still reaches every node within
 // seconds.
 const cacheTTL = 10 * time.Second
+
+// refreshTimeout bounds one refresh of the cached selection. The refresh runs
+// detached from the request that started it, since every request waiting on
+// it shares the result.
+const refreshTimeout = 5 * time.Second
 
 // DeclaredSource is a rating source a metadata plugin declared.
 type DeclaredSource struct {
@@ -87,9 +116,14 @@ type Policy struct {
 	declared DeclaredFunc
 	now      func() time.Time
 
+	refresh singleflight.Group
+
 	mu        sync.Mutex
 	selection Selection
-	expires   time.Time
+	// haveDeclared is true once a read of the plugin declarations succeeded,
+	// so selection.declared holds real declarations.
+	haveDeclared bool
+	expires      time.Time
 }
 
 // NewPolicy binds the policy to a server settings reader and the lister of
@@ -99,9 +133,15 @@ func NewPolicy(settings config.SettingReader, declared DeclaredFunc) *Policy {
 	return &Policy{settings: settings, declared: declared, now: time.Now}
 }
 
-// Selection returns the sources to show. A failed settings read answers with
-// what was last read successfully, or the default when nothing has been, and
-// is not cached, so the next call retries.
+// Selection returns the sources to show. Once the cache expires, one read per
+// node refreshes it for every request that asks meanwhile.
+//
+// A failed settings read answers with what was last read successfully, or the
+// default when nothing has been, and is not cached, so the next call retries.
+// A failed read of the plugin declarations keeps the declarations last read
+// and is retried after cacheTTL like any other read; until one read succeeds,
+// the selection is not cached, so a node never caches an empty list of
+// declarations it could not read.
 func (p *Policy) Selection(ctx context.Context) Selection {
 	if p == nil || p.settings == nil {
 		return Selection{}
@@ -112,24 +152,40 @@ func (p *Policy) Selection(ctx context.Context) Selection {
 	if fresh {
 		return sel
 	}
+	result, _, _ := p.refresh.Do("selection", func() (any, error) {
+		return p.read(context.WithoutCancel(ctx)), nil
+	})
+	sel, _ = result.(Selection)
+	return sel
+}
+
+// read refreshes the cached selection and returns it.
+func (p *Policy) read(ctx context.Context) Selection {
+	ctx, cancel := context.WithTimeout(ctx, refreshTimeout)
+	defer cancel()
+
+	p.mu.Lock()
+	last, haveDeclared := p.selection, p.haveDeclared
+	p.mu.Unlock()
 
 	value, err := p.settings.Get(ctx, config.CatalogExtraRatingSourcesSettingKey)
 	if err != nil {
-		return sel
+		return last
 	}
-	// A failed read of the plugin declarations keeps the last list read, and
-	// is retried after cacheTTL like any other read.
-	declared := sel.declared
-	if p.declared != nil {
-		if sources, err := p.declared(ctx); err == nil {
-			declared = definitionsOf(sources)
-		}
+	declared := last.declared
+	if p.declared == nil {
+		haveDeclared = true
+	} else if sources, err := p.declared(ctx); err == nil {
+		declared, haveDeclared = definitionsOf(sources), true
 	}
-	sel = NewSelection(config.ParseRatingSourceList(value)...).WithDeclared(declared)
+	sel := NewSelection(config.ParseRatingSourceList(value)...).WithDeclared(declared)
 
 	p.mu.Lock()
 	p.selection = sel
-	p.expires = p.now().Add(cacheTTL)
+	p.haveDeclared = haveDeclared
+	if haveDeclared {
+		p.expires = p.now().Add(cacheTTL)
+	}
 	p.mu.Unlock()
 	return sel
 }
@@ -229,7 +285,7 @@ func Build(item Item, sel Selection) []Rating {
 	}
 
 	var out []Rating
-	for _, definition := range append(models.RatingSourceDefinitions(), sel.declared...) {
+	for _, definition := range sel.definitions() {
 		score, ok := scores[definition.Source]
 		if !ok || !sel.Shows(definition.Source) {
 			continue
@@ -244,13 +300,14 @@ func Build(item Item, sel Selection) []Rating {
 	return out
 }
 
-// Format renders a 0-100 score on the source's own scale: a percentage, one
-// decimal place on scales up to 10, and a whole number otherwise.
+// Format renders a 0-100 score on the source's own scale: a percentage of the
+// 0-100 score, one decimal place on scales up to 10, and a whole number
+// otherwise.
 func Format(score float64, definition models.RatingSourceDefinition) string {
 	value := score * definition.Scale / 100
 	switch {
 	case definition.Percent:
-		return strconv.Itoa(int(math.Round(value))) + "%"
+		return strconv.Itoa(int(math.Round(score))) + "%"
 	case definition.Scale <= 10:
 		return strconv.FormatFloat(math.Round(value*10)/10, 'f', 1, 64)
 	default:

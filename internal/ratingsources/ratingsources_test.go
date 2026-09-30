@@ -116,7 +116,7 @@ func TestBuildTreatsAZeroIMDbOrTMDBRowAsUnrated(t *testing.T) {
 }
 
 func TestFormat(t *testing.T) {
-	imdb, _ := models.LookupRatingSource(models.RatingSourceIMDB)
+	imdb := models.RatingSourceDefinitions()[0]
 	cases := []struct {
 		definition models.RatingSourceDefinition
 		score      float64
@@ -130,6 +130,8 @@ func TestFormat(t *testing.T) {
 		{letterboxd, 84, "4.2"},
 		{kinopoisk, 81, "8.1"},
 		{models.RatingSourceDefinition{Source: "stars", Scale: 4}, 87.5, "3.5"},
+		// A percentage is of the 0-100 score, whatever the scale says.
+		{models.RatingSourceDefinition{Source: "approval", Scale: 10, Percent: true}, 72, "72%"},
 	}
 	for _, tc := range cases {
 		if got := Format(tc.score, tc.definition); got != tc.want {
@@ -241,5 +243,57 @@ func TestPolicyKeepsLastDeclarationsWhenARereadFails(t *testing.T) {
 	fail = true
 	if !p.Selection(context.Background()).Shows("rt_critic") {
 		t.Fatal("a failed declaration read dropped a source the administrator turned on")
+	}
+}
+
+// A failed read of the plugin declarations before any succeeded is not
+// cached, so one failed lookup does not hide every plugin rating until the
+// cache expires.
+func TestPolicyRetriesDeclarationsNeverRead(t *testing.T) {
+	fail := true
+	reads := 0
+	p := NewPolicy(&stubSettings{value: "rt_critic"}, func(ctx context.Context) ([]DeclaredSource, error) {
+		reads++
+		if fail {
+			return nil, errors.New("pool exhausted")
+		}
+		return declaring(rtCritic)(ctx)
+	})
+	now := time.Unix(0, 0)
+	p.now = func() time.Time { return now }
+	if p.Selection(context.Background()).Shows("rt_critic") {
+		t.Fatal("rt_critic shows without a declaration read")
+	}
+	fail = false
+	if !p.Selection(context.Background()).Shows("rt_critic") {
+		t.Fatal("the failed first read was cached; the next call did not retry")
+	}
+	p.Selection(context.Background())
+	if reads != 2 {
+		t.Fatalf("declaration reads = %d, want 2: the successful read is cached", reads)
+	}
+}
+
+// The cache is shared by every request on the node, so a request that goes
+// away mid-read must not fail the read for the others.
+func TestPolicyReadIgnoresTheCallersCancellation(t *testing.T) {
+	p := NewPolicy(&stubSettings{value: "rt_critic"}, func(ctx context.Context) ([]DeclaredSource, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return declaring(rtCritic)(ctx)
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if !p.Selection(ctx).Shows("rt_critic") {
+		t.Fatal("a canceled request context failed the shared read")
+	}
+}
+
+func TestSelectionSourcesKeepsShownSourcesInDisplayOrder(t *testing.T) {
+	sel := NewSelection("kinopoisk", "rt_critic", "metacritic").WithDeclared(declared(rtCritic, kinopoisk))
+	got := sel.Sources([]string{"kinopoisk", "metacritic", "tmdb", "rt_critic", "letterboxd", "imdb"})
+	if want := []string{"imdb", "tmdb", "rt_critic", "kinopoisk"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Sources = %q, want %q", got, want)
 	}
 }

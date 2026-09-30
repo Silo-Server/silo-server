@@ -451,4 +451,12 @@ describe("LibraryMetadataSettings", () => {
     expect(labels).not.toContain("IMDb");
     expect(labels).not.toContain("TMDB");
   });
+
+  it("lists a turned-on rating that no enabled plugin adds, so it can be turned off", () => {
+    const page = text(render({ "catalog.extra_rating_sources": "rt_critic,letterboxd" }));
+
+    expect(page).toContain("Not added by an enabled plugin");
+    expect(page).toContain("letterboxd");
+    expect(page).not.toContain("No metadata plugin adds ratings.");
+  });
 });

@@ -369,7 +369,7 @@ type CatalogItemDetail struct {
 	Versions                        []FileVersion                        `json:"versions" doc:"Empty, never null"`
 	PlaybackVariants                []PlaybackVariant                    `json:"playback_variants,omitempty"`
 	Videos                          []catalogpkg.ItemVideoInfo           `json:"videos,omitempty" doc:"Trailers and clips"`
-	RatingSources                   []CatalogRatingSource                `json:"rating_sources,omitempty" doc:"Per-source ratings on a 0-100 scale for movies and series, in display order; absent when no provider reported any. This is stored data: title pages show ratings, not this list."`
+	RatingSources                   []CatalogRatingSource                `json:"rating_sources,omitempty" doc:"Per-source ratings on a 0-100 scale for movies and series, limited to the sources title pages show and in the same order as ratings; absent when there are none. Title pages render ratings, not this list."`
 	Ratings                         []CatalogRating                      `json:"ratings" doc:"The external ratings a title page shows, in display order: IMDb and TMDB, plus the sources an administrator turned on. Render every entry as its name and display text. Empty, never null"`
 	Extras                          []catalogpkg.ItemExtraInfo           `json:"extras,omitempty"`
 	FolderPaths                     []string                             `json:"folder_paths,omitempty" doc:"Absent for viewers without file-path visibility"`
@@ -424,12 +424,26 @@ func catalogRatingsOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) []C
 	return out
 }
 
-func catalogRatingSourcesOf(sources []catalogpkg.ItemRatingSourceInfo) []CatalogRatingSource {
+// catalogRatingSourcesOf returns the stored per-source rows of the sources sel
+// shows, in display order. A stored row of any other source, such as one a
+// plugin reported before it stopped declaring the source, is left out.
+func catalogRatingSourcesOf(sources []catalogpkg.ItemRatingSourceInfo, sel ratingsources.Selection) []CatalogRatingSource {
 	if len(sources) == 0 {
 		return nil
 	}
-	out := make([]CatalogRatingSource, 0, len(sources))
+	byName := make(map[string]catalogpkg.ItemRatingSourceInfo, len(sources))
+	names := make([]string, 0, len(sources))
 	for _, source := range sources {
+		byName[source.Source] = source
+		names = append(names, source.Source)
+	}
+	shown := sel.Sources(names)
+	if len(shown) == 0 {
+		return nil
+	}
+	out := make([]CatalogRatingSource, 0, len(shown))
+	for _, name := range shown {
+		source := byName[name]
 		out = append(out, CatalogRatingSource{Source: source.Source, Score: source.Score, Votes: source.Votes})
 	}
 	return out
@@ -1282,7 +1296,7 @@ func catalogItemDetailOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) 
 		ImdbID: d.ImdbID, TmdbID: d.TmdbID, TvdbID: d.TvdbID, Cast: NonNil(d.Cast), Crew: NonNil(d.Crew), Countries: d.Countries, LockedFields: d.LockedFields,
 		FirstAirDate: d.FirstAirDate, AirTime: d.AirTime, AirTimezone: d.AirTimezone, SeasonCount: d.SeasonCount, EpisodeCount: d.EpisodeCount,
 		AirDate: d.AirDate, IsSpecials: d.IsSpecials, UserData: watchRollupOf(d.SeasonUserData), UserRating: d.UserRating,
-		Versions: fileVersionsOf(d.Versions), PlaybackVariants: playbackVariantsOf(d.PlaybackVariants), Videos: d.Videos, RatingSources: catalogRatingSourcesOf(d.RatingSources), Ratings: catalogRatingsOf(d, sel), Extras: d.Extras,
+		Versions: fileVersionsOf(d.Versions), PlaybackVariants: playbackVariantsOf(d.PlaybackVariants), Videos: d.Videos, RatingSources: catalogRatingSourcesOf(d.RatingSources, sel), Ratings: catalogRatingsOf(d, sel), Extras: d.Extras,
 		FolderPaths: d.FolderPaths, Subtitles: NonNil(d.Subtitles), Intro: d.Intro, Credits: d.Credits, Recap: d.Recap, Preview: d.Preview,
 		EffectiveVersionResolution: d.EffectiveVersionResolution,
 		EffectiveVersionHDR:        d.EffectiveVersionHDR, EffectiveVersionCodecVideo: d.EffectiveVersionCodecVideo, EffectiveVersionEditionKey: d.EffectiveVersionEditionKey,

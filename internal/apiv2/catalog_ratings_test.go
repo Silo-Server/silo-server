@@ -84,3 +84,26 @@ func TestCardsDropRatingsAnAdministratorHasNotTurnedOn(t *testing.T) {
 		t.Errorf("with RT critics on: rt=%v audience=%v; want the critic score only", card.RatingRTCritic, card.RatingRTAudience)
 	}
 }
+
+// A stored row of a source no plugin declares any more, or one the
+// administrator has not turned on, stays out of rating_sources, and the rest
+// follow the order of ratings.
+func TestCatalogItemDetailRatingSourcesFollowTheSelection(t *testing.T) {
+	d := ratedDetail()
+	d.RatingSources = []catalogpkg.ItemRatingSourceInfo{
+		{Source: "letterboxd", Score: 84},
+		{Source: "metacritic", Score: 87},
+		{Source: "rt_critic", Score: 93},
+		{Source: "tmdb", Score: 82.5},
+	}
+	var got []string
+	for _, source := range catalogItemDetailOf(d, ratingsources.NewSelection("metacritic", "rt_critic", "letterboxd").WithDeclared(mdblistSources)).RatingSources {
+		got = append(got, source.Source)
+	}
+	if want := []string{"tmdb", "rt_critic", "metacritic"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("rating_sources = %q, want %q", got, want)
+	}
+	if out := catalogItemDetailOf(d, ratingsources.Selection{}); len(out.RatingSources) != 1 {
+		t.Fatalf("rating_sources = %+v, want TMDB only by default", out.RatingSources)
+	}
+}

@@ -2,7 +2,6 @@ package models
 
 import (
 	"regexp"
-	"strings"
 )
 
 // Silo's own rating sources are IMDb and TMDB, the two its title pages always
@@ -31,7 +30,7 @@ type RatingSourceDefinition struct {
 	// a Rotten Tomatoes 93%. Stored scores are on 0-100 and are shown on this
 	// scale.
 	Scale float64
-	// Percent shows the score as a percentage.
+	// Percent shows the score as a percentage; its Scale is 100.
 	Percent bool
 }
 
@@ -45,15 +44,6 @@ var ratingSourceDefinitions = []RatingSourceDefinition{
 // RatingSourceDefinitions returns Silo's own sources in display order.
 func RatingSourceDefinitions() []RatingSourceDefinition {
 	return append([]RatingSourceDefinition(nil), ratingSourceDefinitions...)
-}
-
-// LookupRatingSource returns the definition of one of Silo's own sources.
-func LookupRatingSource(source string) (RatingSourceDefinition, bool) {
-	rank, ok := ratingSourceRanks[source]
-	if !ok {
-		return RatingSourceDefinition{}, false
-	}
-	return ratingSourceDefinitions[rank], true
 }
 
 // ratingSourceIDPattern is the shape of every rating source name, Silo's own
@@ -86,16 +76,6 @@ var ratingSourceRanks = func() map[string]int {
 	}
 	return ranks
 }()
-
-// NormalizeRatingSource returns the canonical name of one of Silo's own
-// sources, or "" for any other name.
-func NormalizeRatingSource(raw string) string {
-	source := strings.ToLower(strings.TrimSpace(raw))
-	if _, ok := ratingSourceRanks[source]; !ok {
-		return ""
-	}
-	return source
-}
 
 // RatingSourceRank orders sources for display: Silo's own first, then every
 // other source.

@@ -631,14 +631,12 @@ func ratingSourcesFromStruct(value *structpb.Struct, provider string, declared m
 	}
 	result := make(map[string]RatingSource, len(sources.GetFields()))
 	for rawName, rawEntry := range sources.GetFields() {
-		name := models.NormalizeRatingSource(rawName)
-		if name == "" {
-			if _, ok := declared[strings.ToLower(strings.TrimSpace(rawName))]; ok {
-				name = strings.ToLower(strings.TrimSpace(rawName))
-			}
+		name := strings.ToLower(strings.TrimSpace(rawName))
+		if _, ok := declared[name]; !ok && !models.IsBuiltinRatingSource(name) {
+			continue
 		}
 		entry := rawEntry.GetStructValue()
-		if name == "" || entry == nil {
+		if entry == nil {
 			continue
 		}
 		scoreValue, ok := entry.GetFields()["score"].GetKind().(*structpb.Value_NumberValue)

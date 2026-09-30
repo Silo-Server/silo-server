@@ -40,3 +40,17 @@ export function groupRatingSourcesByPlugin<T extends RatingSourceEntry>(
   }
   return Array.from(groups, ([provider, entries]) => ({ provider, sources: entries }));
 }
+
+/**
+ * The sources the setting turns on that no listed source declares, such as
+ * one whose plugin was disabled, in setting order. They show nothing until a
+ * plugin declares them again, and are listed so an administrator can turn
+ * them off.
+ */
+export function undeclaredRatingSources(
+  turnedOn: readonly string[],
+  sources: readonly RatingSourceEntry[],
+): string[] {
+  const listed = new Set(sources.map((entry) => entry.source));
+  return Array.from(new Set(turnedOn)).filter((source) => !listed.has(source));
+}

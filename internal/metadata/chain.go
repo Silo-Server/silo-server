@@ -601,7 +601,8 @@ const maxRatingSourceLabelRunes = 60
 // scores stored in their own columns. name is the plain-text mark clients show
 // next to the score, label an optional longer name for the administrator's
 // list (name when absent), scale the top of the source's own scale (10 shows
-// a stored 72 as 7.2), and percent shows the score as a percentage. An entry
+// a stored 72 as 7.2), and percent shows the score as a percentage, which
+// makes the scale 100 whatever the entry says. An entry
 // that breaks any of these is dropped on its own; duplicates keep the first;
 // at most maxDeclaredRatingSources are kept. Declared sources stay hidden until
 // an administrator turns them on.
@@ -634,6 +635,9 @@ func extractRatingSources(metadataJSON []byte) []models.RatingSourceDefinition {
 		}
 		if name == "" || utf8.RuneCountInString(name) > maxRatingSourceNameRunes {
 			continue
+		}
+		if entry.Percent {
+			entry.Scale = 100
 		}
 		if math.IsNaN(entry.Scale) || entry.Scale <= 0 || entry.Scale > 100 {
 			continue

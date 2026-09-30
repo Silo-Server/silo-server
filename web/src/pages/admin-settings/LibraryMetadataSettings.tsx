@@ -24,6 +24,7 @@ import {
   groupRatingSourcesByPlugin,
   parseRatingSources,
   toggleRatingSource,
+  undeclaredRatingSources,
 } from "./ratingSources";
 import { SaveBar } from "./SaveBar";
 import { SearchStatusPanel } from "./SearchStatusPanel";
@@ -138,6 +139,22 @@ export default function LibraryMetadataSettings() {
 
   const extraRatingSources = parseRatingSources(form.getValue(EXTRA_RATING_SOURCES_KEY));
   const ratingSourceGroups = groupRatingSourcesByPlugin(ratingSources.data?.items ?? []);
+  // Listed from the saved value too, so a switch turned off stays on the page
+  // until the change is saved.
+  const undeclaredSources = ratingSources.isSuccess
+    ? undeclaredRatingSources(
+        [
+          ...parseRatingSources(form.getPersistedValue(EXTRA_RATING_SOURCES_KEY)),
+          ...extraRatingSources,
+        ],
+        ratingSources.data.items,
+      )
+    : [];
+  const setRatingSource = (source: string, on: boolean) =>
+    form.setValue(
+      EXTRA_RATING_SOURCES_KEY,
+      toggleRatingSource(form.getValue(EXTRA_RATING_SOURCES_KEY), source, on),
+    );
   const markerMode = form.getValue("markers.mode") || "both";
   const onlineMarkersEnabled = markerMode === "online" || markerMode === "both";
   const onlineMarkerStorage = form.getValue("markers.online_storage") || "stored";
@@ -210,9 +227,11 @@ export default function LibraryMetadataSettings() {
           {ratingSources.isError && (
             <SettingFieldStatus tone="warn">Couldn't load the rating sources.</SettingFieldStatus>
           )}
-          {ratingSources.isSuccess && ratingSourceGroups.length === 0 && (
-            <SettingFieldStatus tone="muted">No metadata plugin adds ratings.</SettingFieldStatus>
-          )}
+          {ratingSources.isSuccess &&
+            ratingSourceGroups.length === 0 &&
+            undeclaredSources.length === 0 && (
+              <SettingFieldStatus tone="muted">No metadata plugin adds ratings.</SettingFieldStatus>
+            )}
           {ratingSourceGroups.map(({ provider, sources }) => (
             <div key={provider} role="group" aria-label={`From ${provider}`}>
               <p className="text-muted-foreground pt-2 text-xs font-semibold">From {provider}</p>
@@ -222,21 +241,33 @@ export default function LibraryMetadataSettings() {
                   label={label}
                   type="toggle"
                   value={String(extraRatingSources.includes(source))}
-                  onChange={(value) =>
-                    form.setValue(
-                      EXTRA_RATING_SOURCES_KEY,
-                      toggleRatingSource(
-                        form.getValue(EXTRA_RATING_SOURCES_KEY),
-                        source,
-                        value === "true",
-                      ),
-                    )
-                  }
+                  onChange={(value) => setRatingSource(source, value === "true")}
                   restartRequired={restartKeys.has(EXTRA_RATING_SOURCES_KEY)}
                 />
               ))}
             </div>
           ))}
+          {undeclaredSources.length > 0 && (
+            <div role="group" aria-label="Not added by an enabled plugin">
+              <p className="text-muted-foreground pt-2 text-xs font-semibold">
+                Not added by an enabled plugin
+              </p>
+              <p className="text-muted-foreground text-xs">
+                These show nothing until an enabled plugin adds them again. Turn them off so they do
+                not come back on their own.
+              </p>
+              {undeclaredSources.map((source) => (
+                <SettingField
+                  key={source}
+                  label={source}
+                  type="toggle"
+                  value={String(extraRatingSources.includes(source))}
+                  onChange={(value) => setRatingSource(source, value === "true")}
+                  restartRequired={restartKeys.has(EXTRA_RATING_SOURCES_KEY)}
+                />
+              ))}
+            </div>
+          )}
         </FieldGroup>
 
         <FieldGroup
