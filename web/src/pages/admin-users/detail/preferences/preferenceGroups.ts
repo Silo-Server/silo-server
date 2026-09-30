@@ -158,11 +158,7 @@ export function groupPreferences(
         a.profileRank - b.profileRank ||
         a.key.localeCompare(b.key),
     )
-    .map(({ key, title, subtitle, entries: rows }) =>
-      subtitle === undefined
-        ? { key, title, entries: rows }
-        : { key, title, subtitle, entries: rows },
-    );
+    .map(({ key, title, subtitle, entries: rows }) => ({ key, title, subtitle, entries: rows }));
 }
 
 function matchesQuery(entry: AdminUserSettingEntry, query: string): boolean {

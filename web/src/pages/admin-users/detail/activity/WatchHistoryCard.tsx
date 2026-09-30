@@ -114,10 +114,10 @@ export function WatchHistoryCard({
   const live = useAdminUserLiveSessions(userId);
 
   const rows = useMemo(() => {
-    const now = (live.data ?? [])
+    const liveRows = (live.data ?? [])
       .filter((session) => !profileFilter || session.profile_id === profileFilter)
       .map(liveRow);
-    return [...now, ...(history.data ?? []).map(playRow)];
+    return [...liveRows, ...(history.data ?? []).map(playRow)];
   }, [live.data, history.data, profileFilter]);
 
   const period = PERIODS.find((p) => p.days === days) ?? PERIODS[1];
@@ -126,6 +126,12 @@ export function WatchHistoryCard({
   const historyLink =
     `/admin/history?user_id=${userId}` +
     (profileFilter ? `&profile_id=${encodeURIComponent(profileFilter)}` : "");
+  // With no rows yet: loading text, the empty state, or nothing beside the error.
+  const emptyMessage = history.isLoading
+    ? "Loading watch history..."
+    : history.isError
+      ? null
+      : "No plays in this period.";
 
   return (
     <DetailCard
@@ -188,23 +194,15 @@ export function WatchHistoryCard({
         </>
       }
     >
-      {history.isError ? (
+      {history.isError && (
         <div role="alert" className="flex items-center gap-3 px-5 py-4 text-sm">
           <span className="text-destructive">Couldn&apos;t load watch history.</span>
           <Button variant="outline" size="sm" onClick={() => history.refetch()}>
             Retry
           </Button>
         </div>
-      ) : null}
-      {history.isLoading && rows.length === 0 ? (
-        <p className="text-muted-foreground px-5 py-8 text-center text-sm">
-          Loading watch history...
-        </p>
-      ) : rows.length === 0 && !history.isError ? (
-        <p className="text-muted-foreground px-5 py-8 text-center text-sm">
-          No plays in this period.
-        </p>
-      ) : rows.length > 0 ? (
+      )}
+      {rows.length > 0 ? (
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
@@ -261,7 +259,11 @@ export function WatchHistoryCard({
             </TableBody>
           </Table>
         </div>
-      ) : null}
+      ) : (
+        emptyMessage && (
+          <p className="text-muted-foreground px-5 py-8 text-center text-sm">{emptyMessage}</p>
+        )
+      )}
     </DetailCard>
   );
 }

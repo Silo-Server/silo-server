@@ -75,6 +75,13 @@ function totalSize(rows: AdminUserDownload[]): number {
   return rows.reduce((sum, row) => sum + row.file_size, 0);
 }
 
+/** "S01E02 · Title", or whichever half is known. */
+function episodeLabel(episode: NonNullable<AdminUserDownload["episode"]>): string {
+  return [episodeCode(episode.season_number, episode.episode_number), episode.title]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 const sizeCell = "text-muted-foreground text-right tabular-nums";
 const mutedCell = "text-muted-foreground hidden sm:table-cell";
 
@@ -91,11 +98,7 @@ function GroupRows({ group, android }: { group: DownloadGroup; android: boolean 
 
   if (group.movie || group.episodes.length === 1) {
     const row = group.movie ?? group.episodes[0]!;
-    const code = row.episode
-      ? [episodeCode(row.episode.season_number, row.episode.episode_number), row.episode.title]
-          .filter(Boolean)
-          .join(" · ")
-      : "";
+    const code = row.episode ? episodeLabel(row.episode) : "";
     return (
       <TableRow>
         <TableCell className="pl-4 whitespace-normal sm:pl-5">
@@ -145,31 +148,21 @@ function GroupRows({ group, android }: { group: DownloadGroup; android: boolean 
         </TableCell>
       </TableRow>
       {open &&
-        group.episodes.map((row) => {
-          const label = row.episode
-            ? [
-                episodeCode(row.episode.season_number, row.episode.episode_number),
-                row.episode.title,
-              ]
-                .filter(Boolean)
-                .join(" · ")
-            : "Unknown episode";
-          return (
-            <TableRow key={row.id}>
-              <TableCell className="text-muted-foreground pl-10 whitespace-normal sm:pl-11">
-                {label}
-              </TableCell>
-              <TableCell className={mutedCell} />
-              <TableCell className={sizeCell}>{formatBytes(row.file_size)}</TableCell>
-              <TableCell>
-                <StatusBadge badge={downloadStatusBadge(row.status, android)} />
-              </TableCell>
-              <TableCell className={cn(mutedCell, "pr-4 sm:pr-5")}>
-                {formatShortDate(row.created_at)}
-              </TableCell>
-            </TableRow>
-          );
-        })}
+        group.episodes.map((row) => (
+          <TableRow key={row.id}>
+            <TableCell className="text-muted-foreground pl-10 whitespace-normal sm:pl-11">
+              {row.episode ? episodeLabel(row.episode) : "Unknown episode"}
+            </TableCell>
+            <TableCell className={mutedCell} />
+            <TableCell className={sizeCell}>{formatBytes(row.file_size)}</TableCell>
+            <TableCell>
+              <StatusBadge badge={downloadStatusBadge(row.status, android)} />
+            </TableCell>
+            <TableCell className={cn(mutedCell, "pr-4 sm:pr-5")}>
+              {formatShortDate(row.created_at)}
+            </TableCell>
+          </TableRow>
+        ))}
     </>
   );
 }
@@ -196,7 +189,7 @@ export function DeviceDownloadsCard({
 }) {
   const android = isAndroidPlatform(device?.device_platform);
   const groups = groupDeviceDownloads(rows, monitors);
-  const live = summaryRows.filter((row) => row.status !== "revoked");
+  const notRevoked = summaryRows.filter((row) => row.status !== "revoked");
   const onDevice = summaryRows.filter((row) => row.status === "completed").length;
   const inProgress = summaryRows.filter((row) => IN_PROGRESS_STATUSES.has(row.status)).length;
   const requested = summaryRows.filter(
@@ -206,14 +199,15 @@ export function DeviceDownloadsCard({
   const profiles = [
     ...new Set(summaryRows.map((row) => profileNames.get(row.profile_id) || row.profile_id)),
   ];
+  const profileMeta = profiles.length > 0 ? `profile ${profiles.join(", ")}` : "";
 
   const meta = device
     ? [
         platformLabel(device.device_platform),
-        profiles.length > 0 ? `profile ${profiles.join(", ")}` : "",
+        profileMeta,
         `last seen ${formatLastSeen(device.last_seen_at ?? device.last_updated)}`,
       ]
-    : [shortenId(deviceId), profiles.length > 0 ? `profile ${profiles.join(", ")}` : ""];
+    : [shortenId(deviceId), profileMeta];
   const totals = android
     ? [
         onDevice > 0 ? `${onDevice} on device` : "",
@@ -221,7 +215,7 @@ export function DeviceDownloadsCard({
         preparing > 0 ? `${preparing} preparing` : "",
       ]
     : [`${onDevice} on device`, `${inProgress} in progress`];
-  totals.push(formatBytes(totalSize(live)));
+  totals.push(formatBytes(totalSize(notRevoked)));
 
   return (
     <DetailCard

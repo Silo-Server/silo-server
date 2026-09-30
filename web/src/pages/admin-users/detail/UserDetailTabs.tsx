@@ -11,18 +11,23 @@ import {
   useAdminUserDownloadSummary,
   useAdminUserLiveSessions,
 } from "@/hooks/queries/admin/userActivity";
-
 import { cn } from "@/lib/utils";
 
 import { countCustomPolicyRows } from "./access/policySources";
 import type { UserDetailTab } from "./userDetailTabs";
 
-function Count({ children, label }: { children: ReactNode; label?: string }) {
-  return (
-    <span className="text-muted-foreground font-normal tabular-nums" aria-label={label}>
-      {children}
-    </span>
-  );
+function Count({ children }: { children: ReactNode }) {
+  return <span className="text-muted-foreground font-normal tabular-nums">{children}</span>;
+}
+
+/** Fades the strip's edges that have more tabs past them. */
+function edgeMask({ left, right }: { left: boolean; right: boolean }): string | undefined {
+  if (left && right) {
+    return "[mask-image:linear-gradient(to_right,transparent,black_2rem,black_calc(100%-2rem),transparent)]";
+  }
+  if (right) return "[mask-image:linear-gradient(to_right,black_calc(100%-2rem),transparent)]";
+  if (left) return "[mask-image:linear-gradient(to_right,transparent,black_2rem)]";
+  return undefined;
 }
 
 /**
@@ -120,16 +125,7 @@ export function UserDetailTabs({ user, active }: { user: AdminUser; active: User
     <div
       ref={scroller}
       onScroll={measure}
-      className={cn(
-        "border-border/70 -mx-1 overflow-x-auto border-b px-1",
-        edges.left && edges.right
-          ? "[mask-image:linear-gradient(to_right,transparent,black_2rem,black_calc(100%-2rem),transparent)]"
-          : edges.right
-            ? "[mask-image:linear-gradient(to_right,black_calc(100%-2rem),transparent)]"
-            : edges.left
-              ? "[mask-image:linear-gradient(to_right,transparent,black_2rem)]"
-              : undefined,
-      )}
+      className={cn("border-border/70 -mx-1 overflow-x-auto border-b px-1", edgeMask(edges))}
     >
       <TabsList
         variant="line"

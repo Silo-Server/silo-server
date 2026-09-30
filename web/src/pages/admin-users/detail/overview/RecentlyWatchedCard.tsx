@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 
 import type { AdminUser } from "@/api/types";
+import type { AdminUserPlay } from "@/api/v2/adminUserActivity";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAdminUserWatchHistory } from "@/hooks/queries/admin/userActivity";
@@ -8,6 +9,14 @@ import { useAdminUserWatchHistory } from "@/hooks/queries/admin/userActivity";
 import { episodeCode, formatDayTime, formatPlayMethod, watchedFraction } from "../format";
 import { userDetailTabSearch } from "../userDetailTabs";
 import { DetailCard, ListRow } from "../ui";
+
+function playTitle(play: AdminUserPlay): string {
+  if (play.series_title) {
+    const code = episodeCode(play.season_number, play.episode_number);
+    return code ? `${play.series_title} · ${code}` : play.series_title;
+  }
+  return play.media_title || "Unknown title";
+}
 
 /** The account's last four finished plays in the past 30 days. */
 export function RecentlyWatchedCard({ user }: { user: AdminUser }) {
@@ -41,19 +50,13 @@ export function RecentlyWatchedCard({ user }: { user: AdminUser }) {
         </p>
       ) : (
         plays.map((play) => {
-          const code = episodeCode(play.season_number, play.episode_number);
-          const title = play.series_title
-            ? code
-              ? `${play.series_title} · ${code}`
-              : play.series_title
-            : play.media_title || "Unknown title";
           const progress = play.completed
             ? "Finished"
             : `${Math.round(watchedFraction(play.watched_seconds, play.duration_seconds, false) * 100)}%`;
           return (
             <ListRow
               key={play.session_id}
-              title={title}
+              title={playTitle(play)}
               meta={[play.profile_name, formatPlayMethod(play.play_method), progress]
                 .filter(Boolean)
                 .join(" · ")}

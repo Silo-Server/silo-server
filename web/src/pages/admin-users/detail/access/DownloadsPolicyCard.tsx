@@ -24,6 +24,11 @@ interface DownloadsDraft {
   serverPrepared: RowDraft<boolean>;
 }
 
+const LABELS = {
+  download: "Offline downloads",
+  serverPrepared: "Server-prepared downloads",
+} as const;
+
 const SERVER_PREPARED_DESCRIPTION = "The server converts a smaller copy to download";
 
 function toDraft(user: AdminUser): DownloadsDraft {
@@ -31,6 +36,28 @@ function toDraft(user: AdminUser): DownloadsDraft {
     download: rowDraft(user.download_allowed),
     serverPrepared: rowDraft(user.download_transcode_allowed),
   };
+}
+
+function toBody(d: DownloadsDraft, base: AdminUser): UpdateUserRequest {
+  const body: UpdateUserRequest = {};
+  const download = rowOverride(d.download);
+  if (download !== undefined && rowChanged(d.download, base.download_allowed)) {
+    body.download_allowed = download;
+  }
+  const prepared = rowOverride(d.serverPrepared);
+  if (prepared !== undefined && rowChanged(d.serverPrepared, base.download_transcode_allowed)) {
+    body.download_transcode_allowed = prepared;
+  }
+  return body;
+}
+
+function changedRows(d: DownloadsDraft, base: DownloadsDraft): string[] {
+  const rows: string[] = [];
+  if (rowChanged(d.download, rowOverride(base.download) ?? null)) rows.push(LABELS.download);
+  if (rowChanged(d.serverPrepared, rowOverride(base.serverPrepared) ?? null)) {
+    rows.push(LABELS.serverPrepared);
+  }
+  return rows;
 }
 
 export function DownloadsPolicyCard({
@@ -43,32 +70,7 @@ export function DownloadsPolicyCard({
   hints,
 }: AccessCardProps) {
   const capabilities = useAdminUserCapabilities();
-  const draft = useAccountCardDraft({
-    id: "downloads",
-    editor,
-    toDraft,
-    toBody: (d: DownloadsDraft, base: AdminUser) => {
-      const body: UpdateUserRequest = {};
-      const download = rowOverride(d.download);
-      if (download !== undefined && rowChanged(d.download, base.download_allowed)) {
-        body.download_allowed = download;
-      }
-      const prepared = rowOverride(d.serverPrepared);
-      if (prepared !== undefined && rowChanged(d.serverPrepared, base.download_transcode_allowed)) {
-        body.download_transcode_allowed = prepared;
-      }
-      return body;
-    },
-    changedRows: (d: DownloadsDraft, base: DownloadsDraft) => {
-      const rows: string[] = [];
-      if (rowChanged(d.download, rowOverride(base.download) ?? null))
-        rows.push("Offline downloads");
-      if (rowChanged(d.serverPrepared, rowOverride(base.serverPrepared) ?? null)) {
-        rows.push("Server-prepared downloads");
-      }
-      return rows;
-    },
-  });
+  const draft = useAccountCardDraft({ id: "downloads", editor, toDraft, toBody, changedRows });
   const d = draft.draft;
   const base = draft.base ?? user;
 
@@ -90,7 +92,7 @@ export function DownloadsPolicyCard({
       {draft.editing && d ? (
         <>
           <ChoicePolicyEdit
-            label="Offline downloads"
+            label={LABELS.download}
             row={d.download}
             saved={base.download_allowed}
             inherited={hints.download_allowed}
@@ -98,7 +100,7 @@ export function DownloadsPolicyCard({
             onChange={(download) => draft.setDraft((prev) => ({ ...prev, download }))}
           />
           <ChoicePolicyEdit
-            label="Server-prepared downloads"
+            label={LABELS.serverPrepared}
             description={SERVER_PREPARED_DESCRIPTION}
             row={d.serverPrepared}
             saved={base.download_transcode_allowed}
@@ -110,13 +112,13 @@ export function DownloadsPolicyCard({
       ) : (
         <>
           <PolicyValueRow
-            label="Offline downloads"
+            label={LABELS.download}
             value={formatAllowed(user.effective_policy.download_allowed)}
             source={rowSource(user, "downloads", ctx)}
             base={inheritedValueText("downloads", hints, ctx, libraries)}
           />
           <PolicyValueRow
-            label="Server-prepared downloads"
+            label={LABELS.serverPrepared}
             description={SERVER_PREPARED_DESCRIPTION}
             value={formatAllowed(user.effective_policy.download_transcode_allowed)}
             source={rowSource(user, "serverPrepared", ctx)}

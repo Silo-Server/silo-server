@@ -169,13 +169,11 @@ function AdminUserDetailPage() {
       await updateUser.mutateAsync({ editor: fresh, body: { enabled } });
       toast.success(`${account.username} is ${enabled ? "enabled" : "disabled"}`);
     } catch (err) {
-      setActionError(
-        err instanceof V2ProblemError && err.status === 412
-          ? "The account changed. Try again."
-          : err instanceof Error
-            ? err.message
-            : "Could not change the account.",
-      );
+      if (err instanceof V2ProblemError && err.status === 412) {
+        setActionError("The account changed. Try again.");
+      } else {
+        setActionError(err instanceof Error ? err.message : "Could not change the account.");
+      }
     } finally {
       busy.current = false;
     }

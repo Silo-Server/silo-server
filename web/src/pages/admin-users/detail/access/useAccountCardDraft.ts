@@ -149,8 +149,9 @@ export function useAccountCardDraft<D>(opts: {
       return false;
     }
     const body = opts.toBody(draft, captured.user);
+    const hasBody = Object.keys(body).length > 0;
     const extra = opts.extra?.changed(draft) ? opts.extra : undefined;
-    if (Object.keys(body).length === 0 && !extra) {
+    if (!hasBody && !extra) {
       reset();
       end(opts.id);
       return true;
@@ -160,9 +161,7 @@ export function useAccountCardDraft<D>(opts: {
     setError("");
     try {
       if (extra) await extra.write(draft);
-      if (Object.keys(body).length > 0) {
-        await updateUser.mutateAsync({ editor: captured, body });
-      }
+      if (hasBody) await updateUser.mutateAsync({ editor: captured, body });
       reset();
       end(opts.id);
       toast.success("Saved");

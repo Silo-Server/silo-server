@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import { captureProfileRequestContext } from "@/api/client";
+import { captureProfileRequestContext, type ProfileRequestContextSnapshot } from "@/api/client";
 import { adminUserScope, captureAdminUserAuthority } from "@/api/v2/adminUsers";
 import {
   endedAfterFor,
@@ -34,75 +34,67 @@ function validUser(userId: number) {
   return Number.isSafeInteger(userId) && userId > 0;
 }
 
-export function useAdminUserLiveSessions(userId: number, enabled = true) {
+/** One account read under `[...base, name, userId, ...rest]`, never retried. */
+function useAccountQuery<T>(
+  [name, userId, ...rest]: [name: string, userId: number, ...rest: unknown[]],
+  read: (ctx: ProfileRequestContextSnapshot, signal: AbortSignal) => Promise<T>,
+  enabled: boolean,
+  timing: { staleTime: number; refetchInterval?: number } = { staleTime: ACTIVITY_STALE_TIME },
+) {
   const { context, base } = useActivityScope();
   return useQuery({
-    queryKey: [...base, "live-sessions", userId],
-    queryFn: ({ signal }) =>
-      listAdminUserLiveSessions(userId, context ?? captureAdminUserAuthority(), signal),
+    queryKey: [...base, name, userId, ...rest],
+    queryFn: ({ signal }) => read(context ?? captureAdminUserAuthority(), signal),
     enabled: enabled && context !== null && validUser(userId),
     retry: false,
-    staleTime: LIVE_REFRESH_INTERVAL,
-    refetchInterval: LIVE_REFRESH_INTERVAL,
+    ...timing,
   });
+}
+
+export function useAdminUserLiveSessions(userId: number, enabled = true) {
+  return useAccountQuery(
+    ["live-sessions", userId],
+    (ctx, signal) => listAdminUserLiveSessions(userId, ctx, signal),
+    enabled,
+    { staleTime: LIVE_REFRESH_INTERVAL, refetchInterval: LIVE_REFRESH_INTERVAL },
+  );
 }
 
 export function useAdminUserProfileActivity(userId: number) {
-  const { context, base } = useActivityScope();
-  return useQuery({
-    queryKey: [...base, "profile-activity", userId],
-    queryFn: ({ signal }) =>
-      listAdminUserProfileActivity(userId, context ?? captureAdminUserAuthority(), signal),
-    enabled: context !== null && validUser(userId),
-    retry: false,
-    staleTime: ACTIVITY_STALE_TIME,
-  });
+  return useAccountQuery(
+    ["profile-activity", userId],
+    (ctx, signal) => listAdminUserProfileActivity(userId, ctx, signal),
+    true,
+  );
 }
 
 export function useAdminUserDevices(userId: number, enabled = true) {
-  const { context, base } = useActivityScope();
-  return useQuery({
-    queryKey: [...base, "account-devices", userId],
-    queryFn: ({ signal }) =>
-      listAdminUserDevices(userId, context ?? captureAdminUserAuthority(), signal),
-    enabled: enabled && context !== null && validUser(userId),
-    retry: false,
-    staleTime: ACTIVITY_STALE_TIME,
-  });
+  return useAccountQuery(
+    ["account-devices", userId],
+    (ctx, signal) => listAdminUserDevices(userId, ctx, signal),
+    enabled,
+  );
 }
 
 export function useAdminUserWatchSummary(
   userId: number,
   opts: { days?: number; profileId?: string; enabled?: boolean } = {},
 ) {
-  const { context, base } = useActivityScope();
   const days = opts.days ?? 30;
   const profileId = opts.profileId || undefined;
-  return useQuery({
-    queryKey: [...base, "watch-summary", userId, days, profileId ?? ""],
-    queryFn: ({ signal }) =>
-      getAdminUserWatchSummary(
-        userId,
-        { days, profileId },
-        context ?? captureAdminUserAuthority(),
-        signal,
-      ),
-    enabled: (opts.enabled ?? true) && context !== null && validUser(userId),
-    retry: false,
-    staleTime: ACTIVITY_STALE_TIME,
-  });
+  return useAccountQuery(
+    ["watch-summary", userId, days, profileId ?? ""],
+    (ctx, signal) => getAdminUserWatchSummary(userId, { days, profileId }, ctx, signal),
+    opts.enabled ?? true,
+  );
 }
 
 export function useAdminUserRequestUsage(userId: number, enabled = true) {
-  const { context, base } = useActivityScope();
-  return useQuery({
-    queryKey: [...base, "request-usage", userId],
-    queryFn: ({ signal }) =>
-      getAdminRequestUsage(userId, context ?? captureAdminUserAuthority(), signal),
-    enabled: enabled && context !== null && validUser(userId),
-    retry: false,
-    staleTime: ACTIVITY_STALE_TIME,
-  });
+  return useAccountQuery(
+    ["request-usage", userId],
+    (ctx, signal) => getAdminRequestUsage(userId, ctx, signal),
+    enabled,
+  );
 }
 
 type PlayPageParam = { cursor?: string; endedAfter?: string } | undefined;
@@ -184,37 +176,25 @@ export function useAdminUserWatchHistory(opts: {
 }
 
 export function useAdminUserDownloadSummary(userId: number, enabled = true) {
-  const { context, base } = useActivityScope();
-  return useQuery({
-    queryKey: [...base, "download-summary", userId],
-    queryFn: ({ signal }) =>
-      getAdminUserDownloadSummary(userId, context ?? captureAdminUserAuthority(), signal),
-    enabled: enabled && context !== null && validUser(userId),
-    retry: false,
-    staleTime: ACTIVITY_STALE_TIME,
-  });
+  return useAccountQuery(
+    ["download-summary", userId],
+    (ctx, signal) => getAdminUserDownloadSummary(userId, ctx, signal),
+    enabled,
+  );
 }
 
 export function useAdminUserDownloads(userId: number, enabled = true) {
-  const { context, base } = useActivityScope();
-  return useQuery({
-    queryKey: [...base, "downloads", userId],
-    queryFn: ({ signal }) =>
-      listAllAdminUserDownloads(userId, context ?? captureAdminUserAuthority(), signal),
-    enabled: enabled && context !== null && validUser(userId),
-    retry: false,
-    staleTime: ACTIVITY_STALE_TIME,
-  });
+  return useAccountQuery(
+    ["downloads", userId],
+    (ctx, signal) => listAllAdminUserDownloads(userId, ctx, signal),
+    enabled,
+  );
 }
 
 export function useAdminUserDownloadSubscriptions(userId: number, enabled = true) {
-  const { context, base } = useActivityScope();
-  return useQuery({
-    queryKey: [...base, "download-subscriptions", userId],
-    queryFn: ({ signal }) =>
-      listAllAdminUserDownloadSubscriptions(userId, context ?? captureAdminUserAuthority(), signal),
-    enabled: enabled && context !== null && validUser(userId),
-    retry: false,
-    staleTime: ACTIVITY_STALE_TIME,
-  });
+  return useAccountQuery(
+    ["download-subscriptions", userId],
+    (ctx, signal) => listAllAdminUserDownloadSubscriptions(userId, ctx, signal),
+    enabled,
+  );
 }

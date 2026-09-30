@@ -44,8 +44,7 @@ export const IN_PROGRESS_STATUSES: ReadonlySet<string> = new Set([
 ]);
 
 function formatMbps(kbps: number): string {
-  const mbps = kbps / 1000;
-  return Number.isInteger(mbps) ? String(mbps) : mbps.toFixed(1).replace(/\.0$/, "");
+  return (kbps / 1000).toFixed(1).replace(/\.0$/, "");
 }
 
 /** "Original" for the source file; "10 Mbps · server-prepared" for a server-made copy. */

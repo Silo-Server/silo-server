@@ -76,25 +76,30 @@ export function EditableCard({
   const [reloading, setReloading] = useState(false);
   const count = state.changed.length;
 
-  const control = state.editing ? (
-    <Badge className="border-amber-500/30 bg-amber-500/10 text-amber-300">Editing</Badge>
-  ) : !manageable ? (
-    <span className="text-muted-foreground inline-flex items-center gap-1 text-xs">
-      <Lock aria-hidden="true" className="size-3" />
-      View only
-    </span>
-  ) : (
-    <Button
-      type="button"
-      variant="outline"
-      size="xs"
-      aria-label={`Edit ${title}`}
-      disabled={otherEditing || !available || !canEdit}
-      onClick={state.start}
-    >
-      Edit
-    </Button>
-  );
+  let control: ReactNode;
+  if (state.editing) {
+    control = <Badge className="border-amber-500/30 bg-amber-500/10 text-amber-300">Editing</Badge>;
+  } else if (!manageable) {
+    control = (
+      <span className="text-muted-foreground inline-flex items-center gap-1 text-xs">
+        <Lock aria-hidden="true" className="size-3" />
+        View only
+      </span>
+    );
+  } else {
+    control = (
+      <Button
+        type="button"
+        variant="outline"
+        size="xs"
+        aria-label={`Edit ${title}`}
+        disabled={otherEditing || !available || !canEdit}
+        onClick={state.start}
+      >
+        Edit
+      </Button>
+    );
+  }
 
   const footer = state.editing ? (
     <>

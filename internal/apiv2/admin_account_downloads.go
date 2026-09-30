@@ -222,12 +222,9 @@ func (reg *Registry) adminUserDownloadsPage(ctx context.Context, cursors *Cursor
 	return id, filter, after, scope, nil
 }
 
-// adminUserDownloadsNext encodes the cursor after the last row of a page
-// that had more rows than it returns.
-func adminUserDownloadsNext(cursors *Cursors, scope CursorScope, more bool, createdAt time.Time, id string) (string, *Problem) {
-	if !more {
-		return "", nil
-	}
+// adminUserDownloadsCursor encodes the cursor that resumes after a page's
+// last row.
+func adminUserDownloadsCursor(cursors *Cursors, scope CursorScope, createdAt time.Time, id string) (string, *Problem) {
 	next, err := cursors.Encode(scope, downloads.RegistryPosition{CreatedAt: createdAt, ID: id})
 	if err != nil {
 		return "", NewProblem(TypeInternalError, "Unable to encode cursor.")
@@ -251,20 +248,17 @@ func registerAdminAccountDownloads(reg *Registry) {
 		if err != nil {
 			return nil, downloadProblem(err)
 		}
-		more := len(rows) > in.Limit
-		if more {
+		next := ""
+		if len(rows) > in.Limit {
 			rows = rows[:in.Limit]
+			last := rows[len(rows)-1]
+			if next, p = adminUserDownloadsCursor(cursors, scope, last.CreatedAt, last.ID); p != nil {
+				return nil, p
+			}
 		}
 		items := make([]AdminUserDownload, 0, len(rows))
 		for _, row := range rows {
 			items = append(items, adminUserDownloadOf(row))
-		}
-		next := ""
-		if more {
-			last := rows[len(rows)-1]
-			if next, p = adminUserDownloadsNext(cursors, scope, more, last.CreatedAt, last.ID); p != nil {
-				return nil, p
-			}
 		}
 		return &AdminUserDownloadsOutput{Body: Paginated(items, next)}, nil
 	})
@@ -298,20 +292,17 @@ func registerAdminAccountDownloads(reg *Registry) {
 			}
 			return nil, downloadProblem(err)
 		}
-		more := len(rows) > in.Limit
-		if more {
+		next := ""
+		if len(rows) > in.Limit {
 			rows = rows[:in.Limit]
+			last := rows[len(rows)-1]
+			if next, p = adminUserDownloadsCursor(cursors, scope, last.CreatedAt, last.ID); p != nil {
+				return nil, p
+			}
 		}
 		items := make([]AdminUserDownloadSubscription, 0, len(rows))
 		for _, row := range rows {
 			items = append(items, adminUserDownloadSubscriptionOf(row))
-		}
-		next := ""
-		if more {
-			last := rows[len(rows)-1]
-			if next, p = adminUserDownloadsNext(cursors, scope, more, last.CreatedAt, last.ID); p != nil {
-				return nil, p
-			}
 		}
 		return &AdminUserDownloadSubscriptionsOutput{Body: Paginated(items, next)}, nil
 	})

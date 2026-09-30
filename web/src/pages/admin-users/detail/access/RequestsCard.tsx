@@ -54,7 +54,8 @@ import { useAccountCardDraft } from "./useAccountCardDraft";
 const ACCOUNT: RequestPolicySource = { kind: "account" };
 
 function requestSourceTag(source: RequestPolicySource): ValueSource {
-  return source.kind === "account" ? "custom" : source.kind === "group" ? "group" : "default";
+  if (source.kind === "account") return "custom";
+  return source.kind === "group" ? "group" : "default";
 }
 
 /** "50 per 7 days", "1 per day", or "Unlimited". */
@@ -163,8 +164,9 @@ export function RequestsCard({
     },
     changedRows: (d, base) => {
       const rows: string[] = [];
-      if (rowChanged(d.requests, rowOverride(base.requests) ?? null))
+      if (rowChanged(d.requests, rowOverride(base.requests) ?? null)) {
         rows.push("Can request media");
+      }
       // The limit compares with the record the edit holds, not the live query.
       if (d.limit && limitRecordDraft) {
         if (d.limit.approval !== limitRecordDraft.approval) rows.push("Approval");
@@ -181,11 +183,10 @@ export function RequestsCard({
       changed: (d) =>
         Boolean(d.limit && limitRecordDraft && requestLimitChanges(d.limit, limitRecordDraft) > 0),
       write: async (d) => {
-        const record = limitRecord;
-        if (!record || !d.limit) return;
+        if (!limitRecord || !d.limit) return;
         const saved = await updateLimit.mutateAsync({
           userId: user.id,
-          body: { ...record, ...requestLimitBody(d.limit) },
+          body: { ...limitRecord, ...requestLimitBody(d.limit) },
         });
         setLimitBase(saved);
       },
@@ -222,7 +223,6 @@ export function RequestsCard({
   const d = draft.draft;
   const limitErrors = d?.limit ? requestLimitErrors(d.limit) : {};
   const changed = new Set(draft.changed);
-  const loading = !request.loadFailed && (!terms || !server);
 
   async function resetLegacy() {
     const saved = request.saved;
@@ -313,15 +313,19 @@ export function RequestsCard({
     </div>
   ) : null;
 
-  const customSeed =
-    inherited && !inherited.quota.unlimited
-      ? { maxRequests: String(inherited.quota.max), windowDays: String(inherited.quota.days) }
-      : server
-        ? {
-            maxRequests: String(server.global_max_requests),
-            windowDays: String(server.global_window_days),
-          }
-        : { maxRequests: "", windowDays: "" };
+  // Custom starts from the inherited limit, else the server's global one.
+  let customSeed = { maxRequests: "", windowDays: "" };
+  if (inherited && !inherited.quota.unlimited) {
+    customSeed = {
+      maxRequests: String(inherited.quota.max),
+      windowDays: String(inherited.quota.days),
+    };
+  } else if (server) {
+    customSeed = {
+      maxRequests: String(server.global_max_requests),
+      windowDays: String(server.global_window_days),
+    };
+  }
 
   const used = usage.data && !usage.data.unlimited ? usage.data.used : undefined;
 
@@ -408,7 +412,7 @@ export function RequestsCard({
           />
           {loadError ??
             legacyNote ??
-            (loading || !terms ? (
+            (!terms ? (
               <div className="space-y-2 px-4 py-3 sm:px-5">
                 <Skeleton className="h-5 w-full" />
                 <Skeleton className="h-5 w-full" />

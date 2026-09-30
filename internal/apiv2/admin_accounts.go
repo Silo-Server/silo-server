@@ -350,11 +350,7 @@ func registerAdminAccounts(reg *Registry) {
 		}
 		items := make([]AdminAccountProfile, 0, len(rows))
 		for _, row := range rows {
-			item := AdminAccountProfile{ID: ID(row.ID), Name: row.Name}
-			if row.LastSeenAt != nil {
-				item.LastSeenAt = NullableInstant{Valid: true, Time: NewInstant(*row.LastSeenAt)}
-			}
-			items = append(items, item)
+			items = append(items, AdminAccountProfile{ID: ID(row.ID), Name: row.Name, LastSeenAt: nullableInstantOf(row.LastSeenAt)})
 		}
 		return &AdminAccountProfilesOutput{Body: Paginated(items, "")}, nil
 	})

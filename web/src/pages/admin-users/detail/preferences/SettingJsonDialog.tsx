@@ -11,7 +11,6 @@ export function SettingJsonDialog({
   value,
   description,
   saveLabel,
-  disabled = false,
   onValueChange,
   onCancel,
   onSave,
@@ -21,7 +20,6 @@ export function SettingJsonDialog({
   value: string;
   description: string;
   saveLabel: string;
-  disabled?: boolean;
   onValueChange: (value: string) => void;
   onCancel: () => void;
   onSave: () => void;
@@ -50,7 +48,7 @@ export function SettingJsonDialog({
             <Button variant="outline" size="sm" onClick={onCancel}>
               Cancel
             </Button>
-            <Button size="sm" disabled={disabled} onClick={onSave}>
+            <Button size="sm" onClick={onSave}>
               {saveLabel}
             </Button>
           </div>

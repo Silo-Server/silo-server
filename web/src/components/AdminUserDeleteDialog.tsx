@@ -39,8 +39,8 @@ export function AdminUserDeleteDialog({
   const [pending, setPending] = useState(false);
   const [typed, setTyped] = useState("");
   const busy = useRef(false);
-  const mutation = useDeleteUser();
-  const update = useUpdateUser();
+  const deleteUser = useDeleteUser();
+  const updateUser = useUpdateUser();
   const confirmId = useId();
   const username = editor.user.username;
   const confirmed = typed === username;
@@ -64,13 +64,13 @@ export function AdminUserDeleteDialog({
   function remove() {
     if (!confirmed) return;
     void run(async () => {
-      await mutation.mutateAsync(editor);
+      await deleteUser.mutateAsync(editor);
       onDeleted();
     }, "Could not delete user.");
   }
   function disable() {
     void run(async () => {
-      await update.mutateAsync({ editor, body: { enabled: false } });
+      await updateUser.mutateAsync({ editor, body: { enabled: false } });
       onDisabled?.();
     }, "Could not disable user.");
   }

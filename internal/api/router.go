@@ -2707,8 +2707,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.Requests = requestHandler.Service()
 		v2deps.RequestLifecycle = requestHandler.Service()
 		v2deps.AdminRequests = requestHandler.Service()
-		// *requests.Service implements the usage read (pinned below), so the
-		// assertion only fails for a test double.
+		// *requests.Service implements the usage read (pinned at the top of
+		// this file), so the assertion only fails for a test double.
 		if usage, ok := requestHandler.Service().(apiv2.AdminRequestUsageService); ok {
 			v2deps.AdminRequestUsage = usage
 		}

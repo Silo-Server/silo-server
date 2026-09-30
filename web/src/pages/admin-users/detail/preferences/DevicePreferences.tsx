@@ -275,7 +275,7 @@ export function DevicePreferences({ userId, tabs }: { userId: number; tabs: Reac
               key: jsonEditor.key,
               value: jsonValue,
             },
-            { onSuccess: () => closeJsonEditor() },
+            { onSuccess: closeJsonEditor },
           );
         }}
       />

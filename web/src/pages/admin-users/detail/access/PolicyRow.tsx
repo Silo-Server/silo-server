@@ -73,11 +73,8 @@ export function DefaultCustomSegment({
       }}
       className={cn(
         "rounded-md px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors disabled:opacity-50",
-        pressed
-          ? next
-            ? "bg-amber-500/15 text-amber-300"
-            : "bg-accent text-foreground"
-          : "text-muted-foreground hover:text-foreground",
+        !pressed && "text-muted-foreground hover:text-foreground",
+        pressed && (next ? "bg-amber-500/15 text-amber-300" : "bg-accent text-foreground"),
       )}
     >
       {text}
@@ -109,7 +106,7 @@ export function ChoicePolicyEdit<T extends string | boolean>({
   saved,
   inherited,
   options,
-  optionKey = String,
+  optionKey: key = String,
   onChange,
   disabled,
 }: {
@@ -126,7 +123,6 @@ export function ChoicePolicyEdit<T extends string | boolean>({
   onChange: (row: RowDraft<T>) => void;
   disabled?: boolean;
 }) {
-  const key = optionKey;
   const labelOf = (value: T | undefined) =>
     value === undefined ? undefined : options.find((option) => option.value === value)?.label;
   return (

@@ -111,21 +111,19 @@ export function AdminUserPasswordResetDialog({
   const passwordId = useId();
   const mustChangeId = useId();
 
-  function send(delivery: "email" | "link") {
+  async function send(delivery: "email" | "link") {
     if (busy.current) return;
     busy.current = true;
     setPending(true);
     setError("");
-    issue
-      .mutateAsync({ id: user.id, delivery })
-      .then(setResult)
-      .catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : "Could not create a reset link.");
-      })
-      .finally(() => {
-        busy.current = false;
-        setPending(false);
-      });
+    try {
+      setResult(await issue.mutateAsync({ id: user.id, delivery }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create a reset link.");
+    } finally {
+      busy.current = false;
+      setPending(false);
+    }
   }
 
   async function setTemporaryPassword() {
@@ -143,13 +141,11 @@ export function AdminUserPasswordResetDialog({
       setPassword("");
       setPasswordSet({ mustChange });
     } catch (err) {
-      setError(
-        err instanceof V2ProblemError && err.status === 412
-          ? "The account changed. Try again."
-          : err instanceof Error
-            ? err.message
-            : "Could not set the password.",
-      );
+      if (err instanceof V2ProblemError && err.status === 412) {
+        setError("The account changed. Try again.");
+      } else {
+        setError(err instanceof Error ? err.message : "Could not set the password.");
+      }
     } finally {
       busy.current = false;
       setPending(false);
@@ -172,16 +168,39 @@ export function AdminUserPasswordResetDialog({
   const resetURL = result?.reset_url;
   const passwordValid = password.length >= MIN_PASSWORD && password.length <= MAX_PASSWORD;
 
-  const primary =
-    method === "email"
-      ? { label: "Email link", disabled: !canEmail, run: () => send("email") }
-      : method === "link"
-        ? { label: "Create link", disabled: !canLink, run: () => send("link") }
-        : {
-            label: "Set password",
-            disabled: !passwordValid,
-            run: () => void setTemporaryPassword(),
-          };
+  const primary = {
+    email: { label: "Email link", disabled: !canEmail, run: () => void send("email") },
+    link: { label: "Create link", disabled: !canLink, run: () => void send("link") },
+    password: {
+      label: "Set password",
+      disabled: !passwordValid,
+      run: () => void setTemporaryPassword(),
+    },
+  }[method];
+
+  function emailHint(): string {
+    if (canEmail) return `Sent to ${user.email}. Works once and expires in 24 hours.`;
+    if (!user.enabled) return "Enable the account to send it a reset link.";
+    if (user.email === "") return "This account has no email address, so share a link instead.";
+    return "Set up email in Settings to send reset links.";
+  }
+
+  function linkHint(): ReactNode {
+    if (canLink) return "Copy it and send it yourself.";
+    if (!user.enabled) return "Enable the account to create a reset link.";
+    return (
+      <>
+        Set the Silo public URL to create reset links.{" "}
+        <Link
+          to="/admin/settings/general"
+          className="text-foreground inline-flex items-center gap-1 font-medium hover:underline"
+        >
+          General settings
+          <ArrowRight className="h-3 w-3" aria-hidden="true" />
+        </Link>
+      </>
+    );
+  }
 
   return (
     <Dialog
@@ -245,13 +264,7 @@ export function AdminUserPasswordResetDialog({
               title="Email a reset link"
               onSelect={setMethod}
             >
-              {canEmail
-                ? `Sent to ${user.email}. Works once and expires in 24 hours.`
-                : !user.enabled
-                  ? "Enable the account to send it a reset link."
-                  : user.email === ""
-                    ? "This account has no email address, so share a link instead."
-                    : "Set up email in Settings to send reset links."}
+              {emailHint()}
             </Option>
             <Option
               name={groupName}
@@ -261,22 +274,7 @@ export function AdminUserPasswordResetDialog({
               title="Create a link to share"
               onSelect={setMethod}
             >
-              {canLink ? (
-                "Copy it and send it yourself."
-              ) : !user.enabled ? (
-                "Enable the account to create a reset link."
-              ) : (
-                <>
-                  Set the Silo public URL to create reset links.{" "}
-                  <Link
-                    to="/admin/settings/general"
-                    className="text-foreground inline-flex items-center gap-1 font-medium hover:underline"
-                  >
-                    General settings
-                    <ArrowRight className="h-3 w-3" aria-hidden="true" />
-                  </Link>
-                </>
-              )}
+              {linkHint()}
             </Option>
             <Option
               name={groupName}

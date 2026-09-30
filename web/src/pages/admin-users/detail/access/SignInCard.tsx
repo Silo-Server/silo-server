@@ -18,7 +18,7 @@ import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
 
 import { KeyValueRow } from "../ui";
 import { EditableCard, type AccessCardProps } from "./EditableCard";
-import { accessGroupName, roleLabel } from "./policySources";
+import { accessGroupName, parseWholeNumber, roleLabel } from "./policySources";
 import { useAccountCardDraft } from "./useAccountCardDraft";
 
 interface SignInDraft {
@@ -38,13 +38,6 @@ function toDraft(user: AdminUser): SignInDraft {
     enabled: user.enabled,
     maxProfiles: String(user.max_profiles),
   };
-}
-
-function parseProfiles(text: string): number | null {
-  const trimmed = text.trim();
-  if (!/^\d+$/.test(trimmed)) return null;
-  const n = Number(trimmed);
-  return Number.isSafeInteger(n) && n >= 1 ? n : null;
 }
 
 function changedRows(draft: SignInDraft, base: SignInDraft): string[] {
@@ -67,7 +60,7 @@ function toBody(draft: SignInDraft, base: AdminUser): UpdateUserRequest {
     if (draft.role === "admin") body.access_group_id = null;
   }
   if (draft.enabled !== base.enabled) body.enabled = draft.enabled;
-  const profiles = parseProfiles(draft.maxProfiles);
+  const profiles = parseWholeNumber(draft.maxProfiles, 1);
   if (profiles !== null && profiles !== base.max_profiles) body.max_profiles = profiles;
   return body;
 }
@@ -75,7 +68,7 @@ function toBody(draft: SignInDraft, base: AdminUser): UpdateUserRequest {
 function validate(draft: SignInDraft): string | null {
   if (draft.username.trim() === "") return "Enter a username.";
   if (!isValidEmail(draft.email)) return INVALID_EMAIL_MESSAGE;
-  if (parseProfiles(draft.maxProfiles) === null) return "Allow at least 1 profile.";
+  if (parseWholeNumber(draft.maxProfiles, 1) === null) return "Allow at least 1 profile.";
   return null;
 }
 
@@ -105,6 +98,21 @@ export function SignInCard({ user, editor, manageable, available, groups }: Acce
   const adminRoleLocked = !viewerIsOwner && base.role !== "admin";
   const ownAccount = base.id === viewerId;
   const changed = new Set(draft.changed);
+
+  function roleDescription(): string {
+    if (ownAccount) return "You can't change your own role.";
+    if (adminRoleLocked) return "Only the server owner can grant the admin role.";
+    if (d?.role === "admin" && base.role !== "admin" && base.access_group_id !== null) {
+      return `Admins don't use access groups. Saving removes this account from ${accessGroupName(base.access_group_id, groups)}.`;
+    }
+    return "Only the server owner can grant admin";
+  }
+
+  function enabledDescription(): string | undefined {
+    if (base.is_owner) return "The server owner stays an enabled admin.";
+    if (ownAccount) return "You can't disable your own account.";
+    return undefined;
+  }
 
   return (
     <EditableCard
@@ -149,15 +157,7 @@ export function SignInCard({ user, editor, manageable, available, groups }: Acce
           />
           <KeyValueRow
             label={<Label htmlFor={roleId}>Role</Label>}
-            description={
-              ownAccount
-                ? "You can't change your own role."
-                : adminRoleLocked
-                  ? "Only the server owner can grant the admin role."
-                  : d.role === "admin" && base.role !== "admin" && base.access_group_id !== null
-                    ? `Admins don't use access groups. Saving removes this account from ${accessGroupName(base.access_group_id, groups)}.`
-                    : "Only the server owner can grant admin"
-            }
+            description={roleDescription()}
             changed={changed.has("Role")}
             value={
               <Select
@@ -188,13 +188,7 @@ export function SignInCard({ user, editor, manageable, available, groups }: Acce
           ) : null}
           <KeyValueRow
             label={<Label htmlFor={enabledId}>Can sign in</Label>}
-            description={
-              base.is_owner
-                ? "The server owner stays an enabled admin."
-                : ownAccount
-                  ? "You can't disable your own account."
-                  : undefined
-            }
+            description={enabledDescription()}
             changed={changed.has("Can sign in")}
             value={
               <Switch
@@ -218,7 +212,7 @@ export function SignInCard({ user, editor, manageable, available, groups }: Acce
                 step={1}
                 className="w-24"
                 value={d.maxProfiles}
-                aria-invalid={parseProfiles(d.maxProfiles) === null ? true : undefined}
+                aria-invalid={parseWholeNumber(d.maxProfiles, 1) === null ? true : undefined}
                 onChange={(event) =>
                   draft.setDraft((prev) => ({ ...prev, maxProfiles: event.target.value }))
                 }

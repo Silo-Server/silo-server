@@ -119,6 +119,11 @@ export function inheritedValueText(
   return value === undefined ? undefined : `${inheritPrefix(ctx)}: ${value}`;
 }
 
+/** The formatted value lower-cased for use after a prefix; undefined while unknown. */
+function lowered<T>(value: T | undefined, format: (value: T) => string): string | undefined {
+  return value === undefined ? undefined : lowerFirst(format(value));
+}
+
 /** The inherited value alone, lower-cased as it reads after a prefix. */
 function inheritedValue(
   row: PolicyRowKey,
@@ -134,43 +139,25 @@ function inheritedValue(
         ? lowerFirst(libraryListText(hints.library_ids, libraries))
         : libraryListText(hints.library_ids, libraries);
     case "maxQuality":
-      return hints.max_playback_quality === undefined
-        ? undefined
-        : lowerFirst(formatQuality(hints.max_playback_quality));
+      return lowered(hints.max_playback_quality, formatQuality);
     case "maxStreams":
-      return hints.max_streams === undefined
-        ? undefined
-        : lowerFirst(formatStreams(hints.max_streams));
+      return lowered(hints.max_streams, formatStreams);
     case "videoTranscoding":
       return hints.transcode_allowed === undefined || hints.max_transcodes === undefined
         ? undefined
         : inheritedVideoText(hints.transcode_allowed, hints.max_transcodes);
     case "audioTranscoding":
-      return hints.audio_transcode_allowed === undefined
-        ? undefined
-        : lowerFirst(formatAllowed(hints.audio_transcode_allowed));
+      return lowered(hints.audio_transcode_allowed, formatAllowed);
     case "remoteBitrate":
-      return hints.max_remote_stream_bitrate_kbps === undefined
-        ? undefined
-        : lowerFirst(formatBitrateCap(hints.max_remote_stream_bitrate_kbps));
+      return lowered(hints.max_remote_stream_bitrate_kbps, formatBitrateCap);
     case "localBitrate":
-      return hints.max_local_stream_bitrate_kbps === undefined
-        ? undefined
-        : lowerFirst(formatBitrateCap(hints.max_local_stream_bitrate_kbps));
+      return lowered(hints.max_local_stream_bitrate_kbps, formatBitrateCap);
     case "downloads":
-      return hints.download_allowed === undefined
-        ? undefined
-        : lowerFirst(formatAllowed(hints.download_allowed));
+      return lowered(hints.download_allowed, formatAllowed);
     case "serverPrepared":
-      return hints.download_transcode_allowed === undefined
-        ? undefined
-        : lowerFirst(formatAllowed(hints.download_transcode_allowed));
+      return lowered(hints.download_transcode_allowed, formatAllowed);
     case "requests":
-      return hints.requests_allowed === undefined
-        ? undefined
-        : hints.requests_allowed
-          ? "yes"
-          : "no";
+      return lowered(hints.requests_allowed, (allowed) => (allowed ? "yes" : "no"));
   }
 }
 
@@ -242,8 +229,8 @@ export function sameVideoTranscoding(
   b: VideoTranscoding | null,
 ): boolean {
   if (a === null || b === null) return a === b;
-  if (a.mode !== b.mode) return false;
-  return a.mode !== "limit" || a.max === (b as { max: number }).max;
+  if (a.mode === "limit" && b.mode === "limit") return a.max === b.max;
+  return a.mode === b.mode;
 }
 
 export function formatVideoTranscoding(v: VideoTranscoding): string {
@@ -282,10 +269,9 @@ export function permissionLock(
   if (user.role === "admin" || user.access_group_id === null) return { locked: false };
   const group = groups.find((candidate) => candidate.id === user.access_group_id);
   if (!group) return { locked: false };
-  if (group.allowed_permissions === null || group.allowed_permissions.includes(permission)) {
-    return { locked: false, groupName: group.name };
-  }
-  return { locked: true, groupName: group.name };
+  const locked =
+    group.allowed_permissions !== null && !group.allowed_permissions.includes(permission);
+  return { locked, groupName: group.name };
 }
 
 /**

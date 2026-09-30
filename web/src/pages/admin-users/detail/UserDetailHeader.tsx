@@ -35,9 +35,20 @@ export interface UserDetailHeaderProps {
   onDelete(): void;
 }
 
-function MetaItem({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
-  // `wide` items only fit from `sm` up.
-  return <span className={cn(wide && "hidden sm:inline")}>{children}</span>;
+/** Meta items marked `wide`, and the separator before them, only fit from `sm` up. */
+const WIDE_ONLY = "hidden sm:inline";
+
+/** Why "View as user" is off for a reachable account, most basic reason first. */
+function viewAsDisabledReason(
+  user: AdminUser,
+  ownAccount: boolean,
+  viewAsDisabled: boolean,
+): string | undefined {
+  if (!user.enabled) return "Enable the account first";
+  if (user.is_owner) return "The server owner can't be viewed as";
+  if (ownAccount) return "This is your own account";
+  if (viewAsDisabled) return "Only the server owner can view as another admin";
+  return undefined;
 }
 
 /**
@@ -93,17 +104,9 @@ export function UserDetailHeader({
   const canDelete = manageable && !user.is_owner && !ownAccount;
   const showReset = user.password_login && manageable;
   const hasMenu = transferable || canDisable || canEnable || canDelete;
-  const viewAsReason = !available
-    ? undefined
-    : !user.enabled
-      ? "Enable the account first"
-      : user.is_owner
-        ? "The server owner can't be viewed as"
-        : ownAccount
-          ? "This is your own account"
-          : viewAsDisabled
-            ? "Only the server owner can view as another admin"
-            : undefined;
+  const viewAsReason = available
+    ? viewAsDisabledReason(user, ownAccount, viewAsDisabled)
+    : undefined;
 
   return (
     <div className="space-y-5">
@@ -156,12 +159,12 @@ export function UserDetailHeader({
                   {index > 0 ? (
                     <span
                       aria-hidden="true"
-                      className={cn("text-muted-foreground/50", item.wide && "hidden sm:inline")}
+                      className={cn("text-muted-foreground/50", item.wide && WIDE_ONLY)}
                     >
                       ·
                     </span>
                   ) : null}
-                  <MetaItem wide={item.wide}>{item.node}</MetaItem>
+                  <span className={cn(item.wide && WIDE_ONLY)}>{item.node}</span>
                 </Fragment>
               ))}
             </p>

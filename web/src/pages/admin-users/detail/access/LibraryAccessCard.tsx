@@ -2,7 +2,13 @@ import { useId } from "react";
 import { Link } from "react-router";
 import { ArrowUpRight, Lock } from "lucide-react";
 
-import type { AccessGroup, AdminUser, Library, UpdateUserRequest } from "@/api/types";
+import type {
+  AccessGroup,
+  AdminUser,
+  Library,
+  RequestApprovalMode,
+  UpdateUserRequest,
+} from "@/api/types";
 import {
   effectiveAccessGroupID,
   policyInheritHints,
@@ -123,15 +129,16 @@ function rebase(d: LibraryDraft, oldBase: LibraryDraft, fresh: LibraryDraft): Li
   };
 }
 
+const APPROVAL_SUMMARY: Partial<Record<RequestApprovalMode, string>> = {
+  auto: "requests approved automatically",
+  manual: "requests need approval",
+};
+
 /** "Family: Movies, TV · 1080p · 2 streams · requests need approval". */
 function GroupSummary({ group, libraries }: { group: AccessGroup; libraries: Library[] }) {
   const limit = useRequestGroupLimit(group.id);
-  const approval =
-    limit.data?.approval_mode === "auto"
-      ? "requests approved automatically"
-      : limit.data?.approval_mode === "manual"
-        ? "requests need approval"
-        : undefined;
+  const mode = limit.data?.approval_mode;
+  const approval = mode === undefined ? undefined : APPROVAL_SUMMARY[mode];
   const parts = [
     libraryListText(group.library_ids, libraries),
     formatQuality(group.max_playback_quality),
@@ -171,10 +178,17 @@ export function LibraryAccessCard({
   const changed = new Set(draft.changed);
   const effective = user.effective_policy;
 
-  const description =
-    user.role === "admin"
-      ? "Admins don't use access groups. Unset values follow the server default."
-      : undefined;
+  const cardProps = {
+    id: "library",
+    description:
+      user.role === "admin"
+        ? "Admins don't use access groups. Unset values follow the server default."
+        : undefined,
+    manageable,
+    available,
+    canEdit: editor !== undefined,
+    state: draft,
+  } as const;
 
   if (draft.editing && d) {
     // Hints follow the group picked here; other cards see the change after it saves.
@@ -193,14 +207,7 @@ export function LibraryAccessCard({
     const allIds = libraries.map((library) => library.id);
 
     return (
-      <EditableCard
-        id="library"
-        description={description}
-        manageable={manageable}
-        available={available}
-        canEdit={editor !== undefined}
-        state={draft}
-      >
+      <EditableCard {...cardProps}>
         {!admin ? (
           <div
             data-changed={changed.has("Access group") ? "true" : undefined}
@@ -352,13 +359,12 @@ export function LibraryAccessCard({
           const switchId = `${groupSelectId}-${permission}`;
           // A locked switch shows what applies (off); an assignment the group
           // blocks is noted instead of reading as on.
-          const description = lock.locked
-            ? assigned
-              ? `Set on this account; has no effect under ${lock.groupName}`
-              : help
-            : lock.groupName
-              ? `The ${lock.groupName} group allows this`
-              : help;
+          let description: string = help;
+          if (lock.locked && assigned) {
+            description = `Set on this account; has no effect under ${lock.groupName}`;
+          } else if (!lock.locked && lock.groupName) {
+            description = `The ${lock.groupName} group allows this`;
+          }
           return (
             <KeyValueRow
               key={permission}
@@ -409,14 +415,7 @@ export function LibraryAccessCard({
   }
 
   return (
-    <EditableCard
-      id="library"
-      description={description}
-      manageable={manageable}
-      available={available}
-      canEdit={editor !== undefined}
-      state={draft}
-    >
+    <EditableCard {...cardProps}>
       {user.role !== "admin" ? (
         <KeyValueRow
           label="Access group"

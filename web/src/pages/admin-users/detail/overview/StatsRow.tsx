@@ -20,6 +20,11 @@ function ratio(n: number, max: number) {
   return max > 0 ? n / max : 0;
 }
 
+/** A count's total and bar against a limit; a limit of 0 means none, so neither shows. */
+function againstLimit(n: number, max: number) {
+  return max > 0 ? { total: max, progress: n / max } : {};
+}
+
 /** Live sessions the server classifies as a video transcode. */
 function countTranscodes(sessions: AdminSession[]): number {
   return sessions.filter((session) => classifyActivityMethod(session) === "transcode").length;
@@ -46,20 +51,17 @@ export function StatsRow({
   const effective = user.effective_policy;
 
   const tiles: ReactNode[] = [];
+  const liveMissing = live === undefined ? LOADING : FAILED;
 
-  if (live === undefined) {
-    tiles.push(<StatTile key="streams" label="Streams now" value={LOADING} />);
-  } else if (live === null) {
-    tiles.push(<StatTile key="streams" label="Streams now" value={FAILED} />);
+  if (!live) {
+    tiles.push(<StatTile key="streams" label="Streams now" value={liveMissing} />);
   } else {
-    const max = effective.max_streams;
     tiles.push(
       <StatTile
         key="streams"
         label="Streams now"
         value={live.length}
-        total={max > 0 ? max : undefined}
-        progress={max > 0 ? ratio(live.length, max) : undefined}
+        {...againstLimit(live.length, effective.max_streams)}
       />,
     );
   }
@@ -67,23 +69,15 @@ export function StatsRow({
   if (!effective.transcode_allowed) {
     tiles.push(<StatTile key="transcodes" label="Transcodes now" value="Off" />);
   } else if (!live) {
-    tiles.push(
-      <StatTile
-        key="transcodes"
-        label="Transcodes now"
-        value={live === undefined ? LOADING : FAILED}
-      />,
-    );
+    tiles.push(<StatTile key="transcodes" label="Transcodes now" value={liveMissing} />);
   } else {
     const n = countTranscodes(live);
-    const max = effective.max_transcodes;
     tiles.push(
       <StatTile
         key="transcodes"
         label="Transcodes now"
         value={n}
-        total={max > 0 ? max : undefined}
-        progress={max > 0 ? ratio(n, max) : undefined}
+        {...againstLimit(n, effective.max_transcodes)}
       />,
     );
   }

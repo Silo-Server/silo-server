@@ -154,10 +154,9 @@ func registerAdminAccountInsights(reg *Registry) {
 		if err != nil {
 			return nil, serviceProblem(err)
 		}
-		out := &AdminUserWatchSummaryOutput{Body: AdminUserWatchSummary{Days: in.Days, ProfileID: profile, Since: NewInstant(view.Since), Plays: view.Plays, CompletedPlays: view.CompletedPlays, WatchedSeconds: view.WatchedSeconds}}
-		if view.LastPlayedAt != nil {
-			out.Body.LastPlayedAt = NullableInstant{Valid: true, Time: NewInstant(*view.LastPlayedAt)}
-		}
-		return out, nil
+		return &AdminUserWatchSummaryOutput{Body: AdminUserWatchSummary{
+			Days: in.Days, ProfileID: profile, Since: NewInstant(view.Since), Plays: view.Plays, CompletedPlays: view.CompletedPlays,
+			WatchedSeconds: view.WatchedSeconds, LastPlayedAt: nullableInstantOf(view.LastPlayedAt),
+		}}, nil
 	})
 }

@@ -73,10 +73,7 @@ export function AccountPreferences({ userId, tabs }: { userId: number; tabs: Rea
   // Object-valued settings (pinned sidebar items, per-library overlays, the
   // custom theme) have no inline widget, so they open the raw JSON editor —
   // the same treatment the per-device view gives them.
-  const [jsonEditor, setJsonEditor] = useState<{
-    entry: AdminUserSettingEntry;
-    identity: AdminSettingIdentity;
-  } | null>(null);
+  const [jsonEditor, setJsonEditor] = useState<AdminUserSettingEntry | null>(null);
   const [jsonValue, setJsonValue] = useState("");
   const closeJsonEditor = () => {
     setJsonEditor(null);
@@ -105,10 +102,11 @@ export function AccountPreferences({ userId, tabs }: { userId: number; tabs: Rea
     // destroys it.
     const isJsonOnly = !definition || isStructuredSetting(definition);
     const identity = identityOf(entry);
+    const rowKey = rowKeyOf(entry);
     return (
       <div
-        key={rowKeyOf(entry)}
-        data-setting-row={rowKeyOf(entry)}
+        key={rowKey}
+        data-setting-row={rowKey}
         className="border-border/50 grid gap-3 border-t px-4 py-3.5 first:border-t-0 sm:px-5 md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
       >
         <div className="min-w-0 space-y-0.5">
@@ -121,7 +119,7 @@ export function AccountPreferences({ userId, tabs }: { userId: number; tabs: Rea
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2 md:justify-end">
-          {definition && !isJsonOnly ? (
+          {!isJsonOnly ? (
             <RegistrySettingControl
               definition={definition}
               value={entry.value}
@@ -136,7 +134,7 @@ export function AccountPreferences({ userId, tabs }: { userId: number; tabs: Rea
               size="sm"
               disabled={busy}
               onClick={() => {
-                setJsonEditor({ entry, identity });
+                setJsonEditor(entry);
                 setJsonValue(entry.value);
               }}
             >
@@ -195,7 +193,7 @@ export function AccountPreferences({ userId, tabs }: { userId: number; tabs: Rea
       </p>
 
       <SettingJsonDialog
-        settingKey={jsonEditor?.entry.key ?? null}
+        settingKey={jsonEditor?.key ?? null}
         value={jsonValue}
         description="Edit the raw value. This setting has no inline control, so saving replaces the stored value wholesale — clearing it entirely is what the Reset button does."
         saveLabel="Save value"
@@ -206,11 +204,11 @@ export function AccountPreferences({ userId, tabs }: { userId: number; tabs: Rea
           updateSetting.mutate(
             {
               userId,
-              key: jsonEditor.entry.key,
-              identity: jsonEditor.identity,
+              key: jsonEditor.key,
+              identity: identityOf(jsonEditor),
               value: jsonValue,
             },
-            { onSuccess: () => closeJsonEditor() },
+            { onSuccess: closeJsonEditor },
           );
         }}
       />

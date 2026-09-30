@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // Administrator reads of one account's managed device library. They only
@@ -66,6 +68,17 @@ func qualifiedColumns(columns, alias string) string {
 	return strings.Join(parts, ", ")
 }
 
+// joinedRow hands a row's leading columns to a base scanner (scanInto,
+// scanSubscriptionInto) and scans the trailing joined columns into extra.
+type joinedRow struct {
+	pgx.Row
+	extra []any
+}
+
+func (r joinedRow) Scan(dest ...any) error {
+	return r.Row.Scan(append(dest, r.extra...)...)
+}
+
 func adminPagePosition(after *RegistryPosition) (*time.Time, string) {
 	if after == nil {
 		return nil, ""
@@ -104,20 +117,10 @@ func (r *Repository) ListUserManagedPage(ctx context.Context, userID int, f Admi
 	out := make([]AdminDownloadRow, 0)
 	for rows.Next() {
 		var row AdminDownloadRow
-		var profileID, deviceID, episodeID, batchID, artifactID *string
-		if err := rows.Scan(
-			&row.ID, &row.UserID, &profileID, &deviceID, &row.MediaFileID, &row.ContentID, &episodeID, &batchID,
-			&row.Kind, &row.Status, &row.Format, &row.Quality, &row.EffectiveQuality, &row.TargetBitrateKbps, &row.Revision, &artifactID, &row.FileSize, &row.BytesSent, &row.ErrorMessage,
-			&row.CreatedAt, &row.UpdatedAt, &row.CompletedAt, &row.StatusEventAt,
-			&row.Title, &row.MediaType, &row.SeasonNumber, &row.EpisodeNumber, &row.EpisodeTitle,
-		); err != nil {
+		joined := joinedRow{rows, []any{&row.Title, &row.MediaType, &row.SeasonNumber, &row.EpisodeNumber, &row.EpisodeTitle}}
+		if err := scanInto(joined, &row.Download); err != nil {
 			return nil, fmt.Errorf("scanning account download: %w", err)
 		}
-		row.ProfileID = deref(profileID)
-		row.DeviceID = deref(deviceID)
-		row.EpisodeID = deref(episodeID)
-		row.BatchID = deref(batchID)
-		row.ArtifactID = deref(artifactID)
 		out = append(out, row)
 	}
 	return out, rows.Err()
@@ -193,20 +196,9 @@ func (r *SubscriptionRepository) ListUserPage(ctx context.Context, userID int, f
 	out := make([]AdminSubscriptionRow, 0)
 	for rows.Next() {
 		var row AdminSubscriptionRow
-		var seasons []int32
-		var target *int32
-		if err := rows.Scan(
-			&row.ID, &row.UserID, &row.ProfileID, &row.DeviceID, &row.SeriesID, &row.Mode,
-			&seasons, &target, &row.DeleteWatched, &row.MaxStorageBytes, &row.Active,
-			&row.CreatedAt, &row.UpdatedAt,
-			&row.SeriesTitle, &row.OnDevice, &row.InProgress, &row.RemovedEpisodes,
-		); err != nil {
+		joined := joinedRow{rows, []any{&row.SeriesTitle, &row.OnDevice, &row.InProgress, &row.RemovedEpisodes}}
+		if err := scanSubscriptionInto(joined, &row.Subscription); err != nil {
 			return nil, fmt.Errorf("scanning account subscription: %w", err)
-		}
-		row.SeasonNumbers = int32sToInts(seasons)
-		if target != nil {
-			t := int(*target)
-			row.TargetSeason = &t
 		}
 		out = append(out, row)
 	}

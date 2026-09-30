@@ -145,17 +145,11 @@ function text(row: Row, key: string, what: string): string {
   if (typeof value !== "string") invalid(what);
   return value;
 }
-function optionalText(row: Row, key: string, what: string): string {
-  const value = row[key];
-  if (value === undefined || value === null) return "";
-  if (typeof value !== "string") invalid(what);
-  return value;
-}
 function nullableText(row: Row, key: string, what: string): string | null {
-  const value = row[key];
-  if (value === undefined || value === null) return null;
-  if (typeof value !== "string") invalid(what);
-  return value;
+  return row[key] == null ? null : text(row, key, what);
+}
+function optionalText(row: Row, key: string, what: string): string {
+  return nullableText(row, key, what) ?? "";
 }
 function count(row: Row, key: string, what: string): number {
   const value = row[key];
@@ -163,10 +157,7 @@ function count(row: Row, key: string, what: string): number {
   return value;
 }
 function nullableCount(row: Row, key: string, what: string): number | null {
-  const value = row[key];
-  if (value === undefined || value === null) return null;
-  if (typeof value !== "number" || !Number.isFinite(value)) invalid(what);
-  return value;
+  return row[key] == null ? null : count(row, key, what);
 }
 function flag(row: Row, key: string, what: string): boolean {
   const value = row[key];
@@ -274,7 +265,7 @@ function downloadOf(value: unknown): AdminUserDownload {
   const what = "download";
   const row = record(value, what);
   let episode: AdminUserDownload["episode"] = null;
-  if (row.episode !== null && row.episode !== undefined) {
+  if (row.episode != null) {
     const raw = record(row.episode, what);
     episode = {
       season_number: count(raw, "season_number", what),
@@ -283,15 +274,14 @@ function downloadOf(value: unknown): AdminUserDownload {
     };
   }
   const episodeID = optionalText(row, "episode_id", what);
-  const batch =
-    row.batch_id === undefined || row.batch_id === null ? "" : id(row, "batch_id", what);
+  const batchID = row.batch_id == null ? "" : id(row, "batch_id", what);
   return {
     id: id(row, "id", what),
     profile_id: id(row, "profile_id", what),
     device_id: text(row, "device_id", what),
     content_id: text(row, "content_id", what),
     ...(episodeID ? { episode_id: episodeID } : {}),
-    ...(batch ? { batch_id: batch } : {}),
+    ...(batchID ? { batch_id: batchID } : {}),
     title: optionalText(row, "title", what),
     media_type: optionalText(row, "media_type", what),
     episode,
@@ -359,19 +349,50 @@ function sessionOf(value: unknown): AdminSession {
 // Reads.
 // ---------------------------------------------------------------------------
 
+/** Sends one request, refused before and after it if the admin authority changed. */
+async function asAdmin<T>(ctx: ProfileRequestContextSnapshot, request: () => Promise<T>) {
+  requireAdminUserAuthority(ctx);
+  const body = await request();
+  requireAdminUserAuthority(ctx);
+  return body;
+}
+
+/**
+ * Walks every page up to `maxPages`, projecting each item. Throws `tooMany`
+ * when the server still has more after the last allowed page.
+ */
+async function listAll<T>(
+  ctx: ProfileRequestContextSnapshot,
+  fetchPage: (cursor: string | undefined) => Promise<PageBody>,
+  opts: { what: string; maxPages: number; tooMany: string; project: (raw: unknown) => T },
+): Promise<T[]> {
+  const out: T[] = [];
+  const seen = new Set<string>();
+  let cursor: string | undefined;
+  for (let pageIndex = 0; pageIndex < opts.maxPages; pageIndex++) {
+    const body = await asAdmin(ctx, () => fetchPage(cursor));
+    const next = continuation(body, opts.what, seen);
+    out.push(...(body.items as unknown[]).map(opts.project));
+    if (next === null) return out;
+    seen.add(next);
+    cursor = next;
+  }
+  throw new Error(opts.tooMany);
+}
+
 /** Registered devices for the account, newest activity first (server order). */
 export async function listAdminUserDevices(
   userId: number,
   ctx: ProfileRequestContextSnapshot,
   signal?: AbortSignal,
 ): Promise<AdminUserDeviceRow[]> {
-  requireAdminUserAuthority(ctx);
-  const body = await v2("GET /api/v2/admin/users/{id}/devices", {
-    path: { id: String(userId) },
-    profileContext: ctx,
-    signal,
-  });
-  requireAdminUserAuthority(ctx);
+  const body = await asAdmin(ctx, () =>
+    v2("GET /api/v2/admin/users/{id}/devices", {
+      path: { id: String(userId) },
+      profileContext: ctx,
+      signal,
+    }),
+  );
   return completeItems(body as PageBody, "device").map(deviceOf);
 }
 
@@ -381,13 +402,13 @@ export async function listAdminUserProfileActivity(
   ctx: ProfileRequestContextSnapshot,
   signal?: AbortSignal,
 ): Promise<AdminUserProfileActivity[]> {
-  requireAdminUserAuthority(ctx);
-  const body = await v2("GET /api/v2/admin/users/{id}/profiles", {
-    path: { id: String(userId) },
-    profileContext: ctx,
-    signal,
-  });
-  requireAdminUserAuthority(ctx);
+  const body = await asAdmin(ctx, () =>
+    v2("GET /api/v2/admin/users/{id}/profiles", {
+      path: { id: String(userId) },
+      profileContext: ctx,
+      signal,
+    }),
+  );
   return completeItems(body as PageBody, "profile").map(profileActivityOf);
 }
 
@@ -397,14 +418,14 @@ export async function getAdminUserWatchSummary(
   ctx: ProfileRequestContextSnapshot,
   signal?: AbortSignal,
 ): Promise<AdminUserWatchSummary> {
-  requireAdminUserAuthority(ctx);
-  const body = await v2("GET /api/v2/admin/users/{id}/watch-summary", {
-    path: { id: String(userId) },
-    query: { days: q.days, ...(q.profileId ? { profile_id: q.profileId } : {}) },
-    profileContext: ctx,
-    signal,
-  });
-  requireAdminUserAuthority(ctx);
+  const body = await asAdmin(ctx, () =>
+    v2("GET /api/v2/admin/users/{id}/watch-summary", {
+      path: { id: String(userId) },
+      query: { days: q.days, ...(q.profileId ? { profile_id: q.profileId } : {}) },
+      profileContext: ctx,
+      signal,
+    }),
+  );
   const what = "watch summary";
   const row = record(body, what);
   return {
@@ -422,13 +443,13 @@ export async function getAdminRequestUsage(
   ctx: ProfileRequestContextSnapshot,
   signal?: AbortSignal,
 ): Promise<AdminRequestUsage> {
-  requireAdminUserAuthority(ctx);
-  const body = await v2("GET /api/v2/admin/request-users/{user_id}/usage", {
-    path: { user_id: String(userId) },
-    profileContext: ctx,
-    signal,
-  });
-  requireAdminUserAuthority(ctx);
+  const body = await asAdmin(ctx, () =>
+    v2("GET /api/v2/admin/request-users/{user_id}/usage", {
+      path: { user_id: String(userId) },
+      profileContext: ctx,
+      signal,
+    }),
+  );
   const what = "request usage";
   const row = record(body, what);
   return {
@@ -444,35 +465,26 @@ export async function getAdminRequestUsage(
   };
 }
 
-const LIVE_SESSION_PAGE_LIMIT = 10;
-
 /** Every live playback observation for the account (at most ten pages of 100). */
 export async function listAdminUserLiveSessions(
   userId: number,
   ctx: ProfileRequestContextSnapshot,
   signal?: AbortSignal,
 ): Promise<AdminSession[]> {
-  const rows = new Map<string, AdminSession>();
-  const seen = new Set<string>();
-  let cursor: string | undefined;
-  for (let pageIndex = 0; pageIndex < LIVE_SESSION_PAGE_LIMIT; pageIndex++) {
-    requireAdminUserAuthority(ctx);
-    const body = await v2("GET /api/v2/admin/sessions", {
+  const fetchPage = (cursor: string | undefined) =>
+    v2("GET /api/v2/admin/sessions", {
       query: { user_id: String(userId), limit: 100, cursor },
       profileContext: ctx,
       signal,
-    });
-    requireAdminUserAuthority(ctx);
-    const next = continuation(body as PageBody, "session", seen);
-    for (const raw of body.items as unknown[]) {
-      const session = sessionOf(raw);
-      rows.set(session.session_id, session);
-    }
-    if (next === null) return [...rows.values()];
-    seen.add(next);
-    cursor = next;
-  }
-  throw new Error("Too many live sessions to show. Reload the page.");
+    }) as Promise<PageBody>;
+  const sessions = await listAll(ctx, fetchPage, {
+    what: "session",
+    maxPages: 10,
+    tooMany: "Too many live sessions to show. Reload the page.",
+    project: sessionOf,
+  });
+  // A session seen on two pages keeps its first position and latest state.
+  return [...new Map(sessions.map((session) => [session.session_id, session])).values()];
 }
 
 /** The instant `days` days before `now`, as the RFC 3339 `ended_after` filter. */
@@ -497,45 +509,24 @@ export async function listAdminUserPlays(
   ctx: ProfileRequestContextSnapshot,
   signal?: AbortSignal,
 ): Promise<AdminUserPlayPage> {
-  requireAdminUserAuthority(ctx);
-  const body = await v2("GET /api/v2/admin/playback-history", {
-    query: {
-      user_id: String(q.userId),
-      ...(q.profileId ? { profile_id: q.profileId } : {}),
-      ended_after: q.endedAfter ?? endedAfterFor(q.days),
-      limit: q.limit,
-      ...(q.cursor ? { cursor: q.cursor } : {}),
-    },
-    profileContext: ctx,
-    signal,
-  });
-  requireAdminUserAuthority(ctx);
+  const body = await asAdmin(ctx, () =>
+    v2("GET /api/v2/admin/playback-history", {
+      query: {
+        user_id: String(q.userId),
+        ...(q.profileId ? { profile_id: q.profileId } : {}),
+        ended_after: q.endedAfter ?? endedAfterFor(q.days),
+        limit: q.limit,
+        ...(q.cursor ? { cursor: q.cursor } : {}),
+      },
+      profileContext: ctx,
+      signal,
+    }),
+  );
   const seen = new Set(q.cursor ? [q.cursor] : []);
   const next = continuation(body as PageBody, "watch history", seen);
   const items = (body.items as unknown[]).map(playOf);
   if (next !== null && items.length === 0) invalid("watch history");
   return { items, nextCursor: next };
-}
-
-async function listAll<T>(
-  ctx: ProfileRequestContextSnapshot,
-  fetchPage: (cursor: string | undefined) => Promise<PageBody>,
-  opts: { what: string; maxPages: number; tooMany: string; project: (raw: unknown) => T },
-): Promise<T[]> {
-  const out: T[] = [];
-  const seen = new Set<string>();
-  let cursor: string | undefined;
-  for (let pageIndex = 0; pageIndex < opts.maxPages; pageIndex++) {
-    requireAdminUserAuthority(ctx);
-    const body = await fetchPage(cursor);
-    requireAdminUserAuthority(ctx);
-    const next = continuation(body, opts.what, seen);
-    out.push(...(body.items as unknown[]).map(opts.project));
-    if (next === null) return out;
-    seen.add(next);
-    cursor = next;
-  }
-  throw new Error(opts.tooMany);
 }
 
 /** Every managed download row on the account's devices (≤ 25 pages of 200). */
@@ -564,13 +555,13 @@ export async function getAdminUserDownloadSummary(
   ctx: ProfileRequestContextSnapshot,
   signal?: AbortSignal,
 ): Promise<AdminUserDownloadSummary> {
-  requireAdminUserAuthority(ctx);
-  const body = await v2("GET /api/v2/admin/users/{id}/downloads/summary", {
-    path: { id: String(userId) },
-    profileContext: ctx,
-    signal,
-  });
-  requireAdminUserAuthority(ctx);
+  const body = await asAdmin(ctx, () =>
+    v2("GET /api/v2/admin/users/{id}/downloads/summary", {
+      path: { id: String(userId) },
+      profileContext: ctx,
+      signal,
+    }),
+  );
   const what = "download summary";
   const row = record(body, what);
   return {

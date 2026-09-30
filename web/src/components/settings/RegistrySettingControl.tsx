@@ -24,19 +24,6 @@ interface RegistrySettingControlProps {
 }
 
 /**
- * Renders one admin-facing setting control from the generated contract.
- *
- * The control shape, bounds, and option list all come from the manifest, so a
- * definition the server knows and this build does not is impossible to edit
- * with the wrong widget — the hand-written registry this used to read could
- * (and did) disagree with the server about a setting's type and range.
- *
- * Values are strings here on purpose: the admin surface edits the string form
- * and re-types on save through the contract (see
- * hooks/queries/admin/users.ts), which keeps this component free of the typed
- * JSON round trip.
- */
-/**
  * A select's entries. A numeric select with no enum members (the bandwidth
  * cap) offers the shared bitrate ladder plus the stored value, as the profile
  * and device settings screens do, rather than only an unset entry.
@@ -49,6 +36,19 @@ function selectOptions(definition: SettingDisplay, value: string) {
   return bitrateSelectChoices(definition, value, unsetLabel);
 }
 
+/**
+ * Renders one admin-facing setting control from the generated contract.
+ *
+ * The control shape, bounds, and option list all come from the manifest, so a
+ * definition the server knows and this build does not is impossible to edit
+ * with the wrong widget — the hand-written registry this used to read could
+ * (and did) disagree with the server about a setting's type and range.
+ *
+ * Values are strings here on purpose: the admin surface edits the string form
+ * and re-types on save through the contract (see
+ * hooks/queries/admin/users.ts), which keeps this component free of the typed
+ * JSON round trip.
+ */
 export function RegistrySettingControl({
   definition,
   value,

@@ -114,12 +114,12 @@ function videoChanged(v: VideoDraft, saved: VideoTranscoding | null): boolean {
 }
 
 function toDraft(user: AdminUser): PlaybackDraft {
+  // A custom row shows what applies now, which also covers an overridden
+  // count under an inherited switch.
   const video =
     videoTranscodingFromOverrides(user.transcode_allowed, user.max_transcodes) === null
       ? null
-      : // A custom row shows what applies now, which also covers an overridden
-        // count under an inherited switch.
-        videoTranscodingFromEffective(
+      : videoTranscodingFromEffective(
           user.effective_policy.transcode_allowed,
           user.effective_policy.max_transcodes,
         );
@@ -262,7 +262,7 @@ export function PlaybackCard({
                 // Custom starts from a real cap: the inherited one, or 20 Mbps
                 // when the default is no cap (Unlimited would change nothing).
                 [key]: on
-                  ? { custom: true, value: inherited ? inherited : CUSTOM_BITRATE_START_KBPS }
+                  ? { custom: true, value: inherited || CUSTOM_BITRATE_START_KBPS }
                   : { custom: false, value: null },
               }))
             }
@@ -379,7 +379,7 @@ export function PlaybackCard({
                 onCustomChange={(on) =>
                   setDraft((prev) => ({
                     ...prev,
-                    video: on ? videoDraft(videoDefault ?? null) : videoDraft(null),
+                    video: videoDraft(on ? (videoDefault ?? null) : null),
                   }))
                 }
               >

@@ -13,6 +13,7 @@ import {
   PERMISSION_METADATA_CURATION,
   hasAssignedPermission,
 } from "@/lib/permissions";
+import type { ResolvedRequestTerms } from "@/lib/requestAccess";
 import { formatStreamBitrateLimit } from "@/lib/streamBitrateLimit";
 
 import { useAccountRequestTerms } from "../access/RequestsCard";
@@ -22,6 +23,7 @@ import {
   inheritContextFor,
   libraryListText,
   videoTranscodingFromEffective,
+  type VideoTranscoding,
 } from "../access/policySources";
 import { userDetailTabSearch } from "../userDetailTabs";
 import { DetailCard, SourceTag } from "../ui";
@@ -57,6 +59,31 @@ function SummaryLine({
   );
 }
 
+function videoTranscodingText(video: VideoTranscoding): string {
+  switch (video.mode) {
+    case "off":
+      return "No video transcoding";
+    case "unlimited":
+      return "Unlimited video transcodes";
+    case "limit":
+      return `Up to ${plural(video.max, "video transcode", "video transcodes")}`;
+  }
+}
+
+/** The requests line: whether the account can request, and its quota and approval once known. */
+function requestsSummary(
+  canRequest: boolean,
+  terms: ResolvedRequestTerms | undefined,
+): { title: string; detail?: string } {
+  if (!canRequest) return { title: "Can't request media" };
+  if (!terms) return { title: "Requests" };
+  const detail = terms.autoApprove ? "Approved automatically" : "Needs approval";
+  const { quota } = terms;
+  if (quota.unlimited) return { title: "Unlimited requests", detail };
+  const window = quota.days === 1 ? "day" : `${quota.days} days`;
+  return { title: `${plural(quota.max, "request", "requests")} per ${window}`, detail };
+}
+
 const CUSTOM = (
   <span className="ml-1.5 inline-block align-middle">
     <SourceTag source="custom" />
@@ -71,7 +98,7 @@ export function AccessSummaryCard({ user }: { user: AdminUser }) {
   const accountDownloads = capabilities?.account_downloads === true;
   const downloads = useAdminUserDownloadSummary(user.id, accountDownloads);
   const groupName = groups.find((group) => group.id === user.access_group_id)?.name;
-  const requests = useAccountRequestTerms(user, groupName);
+  const { terms, server } = useAccountRequestTerms(user, groupName);
   const effective = user.effective_policy;
   const ctx = inheritContextFor(user, groups);
   const custom = countCustomPolicyRows(user);
@@ -79,16 +106,9 @@ export function AccessSummaryCard({ user }: { user: AdminUser }) {
 
   const marker = hasAssignedPermission(effective.permissions, PERMISSION_MARKER_EDIT);
   const curate = hasAssignedPermission(effective.permissions, PERMISSION_METADATA_CURATION);
-  const video = videoTranscodingFromEffective(
-    effective.transcode_allowed,
-    effective.max_transcodes,
+  const videoText = videoTranscodingText(
+    videoTranscodingFromEffective(effective.transcode_allowed, effective.max_transcodes),
   );
-  const videoText =
-    video.mode === "off"
-      ? "No video transcoding"
-      : video.mode === "unlimited"
-        ? "Unlimited video transcodes"
-        : `Up to ${plural(video.max, "video transcode", "video transcodes")}`;
   const videoCustom = user.transcode_allowed !== null || user.max_transcodes !== null;
   const remote = effective.max_remote_stream_bitrate_kbps;
 
@@ -103,15 +123,8 @@ export function AccessSummaryCard({ user }: { user: AdminUser }) {
       : []),
   ].join(" · ");
 
-  const { terms, server } = requests;
   const canRequest = effective.requests_allowed && server?.requests_enabled !== false;
-  const requestsTitle = !canRequest
-    ? "Can't request media"
-    : !terms
-      ? "Requests"
-      : terms.quota.unlimited
-        ? "Unlimited requests"
-        : `${plural(terms.quota.max, "request", "requests")} per ${terms.quota.days === 1 ? "day" : `${terms.quota.days} days`}`;
+  const requestsLine = requestsSummary(canRequest, terms);
 
   return (
     <DetailCard
@@ -157,17 +170,7 @@ export function AccessSummaryCard({ user }: { user: AdminUser }) {
         title={effective.download_allowed ? "Downloads allowed" : "Downloads not allowed"}
         detail={downloadsDetail}
       />
-      <SummaryLine
-        icon={<Mail />}
-        title={requestsTitle}
-        detail={
-          canRequest && terms
-            ? terms.autoApprove
-              ? "Approved automatically"
-              : "Needs approval"
-            : undefined
-        }
-      />
+      <SummaryLine icon={<Mail />} title={requestsLine.title} detail={requestsLine.detail} />
     </DetailCard>
   );
 }
