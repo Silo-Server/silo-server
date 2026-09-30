@@ -27,3 +27,8 @@ export function isEpisodeUnwatched(state: EpisodeWatchState | null | undefined):
  * The scale pushes the blur's soft edge outside the card's clipped frame.
  */
 export const SPOILER_IMAGE_CLASS = "scale-110 blur-xl";
+
+/** Older payloads leave provenance unknown; preserve their spoiler protection. */
+export function isEpisodeStill(provenance: boolean | undefined): boolean {
+  return provenance !== false;
+}

@@ -5,7 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useSeasons, useSeasonEpisodes } from "@/hooks/queries/episodes";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
-import { isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
+import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { cn } from "@/lib/utils";
 import type { EpisodeListItem, Season } from "@/api/types";
@@ -354,7 +354,11 @@ export function SeriesDrilldown({
                       >
                         <EpisodeStill
                           episode={episode}
-                          hidden={spoilerPrefs.hideImages && unwatched}
+                          hidden={
+                            spoilerPrefs.hideImages &&
+                            unwatched &&
+                            isEpisodeStill(episode.still_is_episode_still)
+                          }
                         />
                         <span className="min-w-0 flex-1">
                           {isNext && nextUp ? (

@@ -21,6 +21,7 @@ type CompatConnectInfoOutput struct {
 
 type ImageCapabilities struct {
 	Capability
+	EpisodeStillProvenance bool                       `json:"episode_still_provenance" doc:"Episode cards, details, and rows distinguish stills from series and season artwork"`
 	SeasonListArtworkParam string                     `json:"season_list_artwork_param" doc:"Season-list boolean query parameter; false omits poster URLs and thumbhashes"`
 	Param                  string                     `json:"param"`
 	Sizes                  []imagesize.Size           `json:"sizes"`
@@ -54,6 +55,7 @@ func registerOperationalDiscovery(reg *Registry) {
 				widths[key] = ImageSizeWidths(value)
 			}
 			return &ImageCapabilitiesOutput{Body: ImageCapabilities{
+				EpisodeStillProvenance: true,
 				SeasonListArtworkParam: view.SeasonListArtworkParam,
 				StorageBackend:         view.StorageBackend, Delivery: view.Delivery,
 				Capability: Capability{State: StateAvailable}, Param: view.Param, Sizes: view.Sizes, Widths: widths, OriginalMaxWidthPx: view.OriginalMaxWidthPx,

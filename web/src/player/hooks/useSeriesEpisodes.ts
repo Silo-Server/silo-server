@@ -55,6 +55,7 @@ export function useSeriesEpisodes(
     runtime: ep.runtime,
     overview: ep.overview,
     stillUrl: ep.still_url,
+    stillIsEpisodeStill: ep.still_is_episode_still,
     stillThumbhash: ep.still_thumbhash,
     airDate: ep.air_date,
     watchState: ep.user_data,

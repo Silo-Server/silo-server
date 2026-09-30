@@ -3,7 +3,7 @@ import { Play, ChevronLeft, ChevronRight } from "lucide-react";
 import type { EpisodeListItem } from "@/api/types";
 import { WatchedCheckIndicator } from "@/components/CardWatchedBadge";
 import { toEpisodeUserState } from "@/components/episodeUserState";
-import { isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
+import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { cn } from "@/lib/utils";
 import MediaItemMenu from "@/components/MediaItemMenu";
@@ -110,7 +110,10 @@ function EpisodeCarouselCard({
   const prefetchHandlers = useDwellPrefetch(onPrefetch);
   const thumbhashUrl = ep.still_thumbhash ? decodeThumbhash(ep.still_thumbhash) : "";
   const episodeTitle = ep.title || `Episode ${ep.episode_number}`;
-  const hideImage = hideImageIfUnwatched && isEpisodeUnwatched(ep.user_data);
+  const hideImage =
+    hideImageIfUnwatched &&
+    isEpisodeStill(ep.still_is_episode_still) &&
+    isEpisodeUnwatched(ep.user_data);
   const progress =
     !ep.user_data?.played &&
     (ep.user_data?.position_seconds ?? 0) > 0 &&

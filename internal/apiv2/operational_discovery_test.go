@@ -62,7 +62,7 @@ func TestOperationalDiscoveryImageLadderAndOptionalProfile(t *testing.T) {
 	if err := json.Unmarshal(legacy.Body.Bytes(), &want); err != nil {
 		t.Fatal(err)
 	}
-	if actual.SeasonListArtworkParam != want.SeasonListArtworkParam || actual.SeasonListArtworkParam != "include_artwork" || actual.State != StateAvailable || actual.Revision == "" || actual.Param != want.Param || actual.OriginalMaxWidthPx != want.OriginalMaxWidthPx || !reflect.DeepEqual(actual.Sizes, want.Sizes) || len(actual.Widths) != len(want.Widths) {
+	if !actual.EpisodeStillProvenance || actual.SeasonListArtworkParam != want.SeasonListArtworkParam || actual.SeasonListArtworkParam != "include_artwork" || actual.State != StateAvailable || actual.Revision == "" || actual.Param != want.Param || actual.OriginalMaxWidthPx != want.OriginalMaxWidthPx || !reflect.DeepEqual(actual.Sizes, want.Sizes) || len(actual.Widths) != len(want.Widths) {
 		t.Fatalf("v2=%+v legacy=%+v", actual, want)
 	}
 	for key, expected := range want.Widths {

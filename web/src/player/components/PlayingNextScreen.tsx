@@ -5,7 +5,7 @@ import type { EpisodeRef, PlaybackStartTrigger } from "../types";
 import type { ContinueWatchingItem } from "@/hooks/queries/progress";
 import { useAutoPlayNextSetting } from "@/hooks/queries/autoPlayNext";
 import { decodeThumbhash } from "@/lib/thumbhash";
-import { isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
+import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
 import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { cn } from "@/lib/utils";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
@@ -111,7 +111,8 @@ export function PlayingNextScreen({
   const episodeThumbhash = nextEpisode?.stillThumbhash;
   const blurPlaceholder = episodeThumbhash ? decodeThumbhash(episodeThumbhash) : undefined;
   const nextUnwatched = isEpisodeUnwatched(nextEpisode?.watchState);
-  const hideStill = spoilerPrefs.hideImages && nextUnwatched;
+  const hideStill =
+    spoilerPrefs.hideImages && nextUnwatched && isEpisodeStill(nextEpisode?.stillIsEpisodeStill);
   const hideOverview = spoilerPrefs.hideOverviews && nextUnwatched;
   const endOfSeriesHeading = seriesTitle ? `You've finished ${seriesTitle}` : "End of playback";
 

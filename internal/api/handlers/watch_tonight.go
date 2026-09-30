@@ -236,6 +236,10 @@ func (h *RecommendationsHandler) WatchTonight(ctx context.Context, userID int, p
 		// Fill in episode metadata from the enrichment step for items that came
 		// through the episodes table (CW/Next-Up episodes).
 		if epMeta, ok := enrichedEpMeta[m.scored.MediaItemID]; ok {
+			if epMeta.EpisodeStillPath != nil {
+				item.PosterIsEpisodeStill = new(*epMeta.EpisodeStillPath != "" && mi.PosterPath == *epMeta.EpisodeStillPath)
+				item.BackdropIsEpisodeStill = new(*epMeta.EpisodeStillPath != "" && mi.BackdropPath == *epMeta.EpisodeStillPath)
+			}
 			if epMeta.SeriesID != nil && item.SeriesID == "" {
 				item.SeriesID = *epMeta.SeriesID
 			}

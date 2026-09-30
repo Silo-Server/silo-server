@@ -338,6 +338,7 @@ export interface EpisodeRef {
   /** Optional display fields for post-roll / next-episode UI. */
   overview?: string;
   stillUrl?: string;
+  stillIsEpisodeStill?: boolean;
   stillThumbhash?: string;
   airDate?: string | null;
   /** The profile's watch state, for spoiler protection. */

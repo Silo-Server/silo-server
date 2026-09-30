@@ -12,7 +12,7 @@ import { usePrefetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useDwellPrefetch } from "@/hooks/useDwellPrefetch";
 import { useGridRowCap } from "@/hooks/useGridRowCap";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
-import { isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
+import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
 import { overlayDataFromEpisodeListItem, type CardOverlayPrefs } from "@/lib/overlays";
 import { cn } from "@/lib/utils";
 import { EpisodeGridSkeleton } from "./SectionSkeletons";
@@ -102,7 +102,8 @@ function SeasonEpisodeCard({
     (episode.user_data?.duration_seconds ?? 0) > 0;
   const episodeTitle = episode.title || `Episode ${episode.episode_number}`;
   const unwatched = isEpisodeUnwatched(episode.user_data);
-  const hideImage = spoilerPrefs.hideImages && unwatched;
+  const hideImage =
+    spoilerPrefs.hideImages && unwatched && isEpisodeStill(episode.still_is_episode_still);
   const hideOverview = spoilerPrefs.hideOverviews && unwatched;
 
   return (
