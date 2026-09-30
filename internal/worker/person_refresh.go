@@ -13,6 +13,9 @@ import (
 
 type PersonRefresher interface {
 	RefreshPerson(ctx context.Context, id int64) (*models.Person, error)
+	// RefreshClaimedPerson refreshes a person claimed at claimedAt, unless a
+	// lookup started since (a person page on another node).
+	RefreshClaimedPerson(ctx context.Context, id int64, claimedAt time.Time) (*models.Person, error)
 	// ClaimCandidates claims up to limit people due for a background lookup,
 	// so API nodes sweeping at once never get the same person.
 	ClaimCandidates(ctx context.Context, limit int) ([]int64, error)
@@ -196,7 +199,8 @@ func (w *PersonRefreshWorker) processBatch() bool {
 	if w.paused() {
 		return false
 	}
-	lastStart := w.now().Add(w.config.ClaimLease - w.config.RefreshTimeout)
+	claimedAt := w.now()
+	lastStart := claimedAt.Add(w.config.ClaimLease - w.config.RefreshTimeout)
 	limit := w.claimLimit()
 	batch, err := w.service.ClaimCandidates(context.Background(), limit)
 	if err != nil {
@@ -205,6 +209,9 @@ func (w *PersonRefreshWorker) processBatch() bool {
 	}
 
 	for index, id := range batch {
+		if !w.waitForNextLookup(id, done) {
+			return false
+		}
 		w.runManual(done)
 		if w.stopped() {
 			return false
@@ -213,16 +220,13 @@ func (w *PersonRefreshWorker) processBatch() bool {
 			// Its on-demand lookup already ran, or is pending and will cover it.
 			continue
 		}
-		if !w.waitForNextLookup() {
-			return false
-		}
 		if w.now().After(lastStart) {
 			slog.Warn("person refresh worker: batch outlasted its claim; leaving the rest for later",
 				"remaining", len(batch)-index)
 			return true
 		}
 		w.nextLookup = w.now().Add(time.Duration(w.delay.Load()))
-		if err := w.refresh(id); w.rateLimited(err) {
+		if err := w.refresh(id, claimedAt); w.rateLimited(err) {
 			// The rest of the batch comes back when its claims' lease runs out.
 			return false
 		}
@@ -242,18 +246,28 @@ func (w *PersonRefreshWorker) claimLimit() int {
 	return max(1, min(w.config.BatchSize, fits))
 }
 
-// waitForNextLookup waits until the rate allows the next background lookup.
-// It reports false if the worker stopped meanwhile.
-func (w *PersonRefreshWorker) waitForNextLookup() bool {
-	wait := w.nextLookup.Sub(w.now())
-	if wait <= 0 {
-		return true
-	}
-	select {
-	case <-time.After(wait):
-		return true
-	case <-w.stop:
-		return false
+// waitForNextLookup waits until the rate allows the next background lookup,
+// running on-demand requests that arrive meanwhile (recorded in done) so a
+// person page doesn't wait out a slow rate. It returns early once such a
+// request covers id, the next background lookup, and reports false if the
+// worker stopped.
+func (w *PersonRefreshWorker) waitForNextLookup(id int64, done map[int64]struct{}) bool {
+	for {
+		wait := w.nextLookup.Sub(w.now())
+		if wait <= 0 {
+			return true
+		}
+		select {
+		case <-time.After(wait):
+			return true
+		case <-w.wake:
+			w.runManual(done)
+			if _, ran := done[id]; ran {
+				return true
+			}
+		case <-w.stop:
+			return false
+		}
 	}
 }
 
@@ -302,7 +316,7 @@ func (w *PersonRefreshWorker) runManual(done map[int64]struct{}) {
 		w.manualQueue = w.manualQueue[1:]
 		w.mu.Unlock()
 
-		_ = w.refresh(id)
+		_ = w.refresh(id, time.Time{})
 		done[id] = struct{}{}
 
 		w.mu.Lock()
@@ -311,10 +325,17 @@ func (w *PersonRefreshWorker) runManual(done map[int64]struct{}) {
 	}
 }
 
-func (w *PersonRefreshWorker) refresh(id int64) error {
+// refresh looks id up: a background claim made at claimedAt, or an on-demand
+// request when claimedAt is zero.
+func (w *PersonRefreshWorker) refresh(id int64, claimedAt time.Time) error {
 	ctx, cancel := context.WithTimeout(context.Background(), w.config.RefreshTimeout)
 	defer cancel()
-	_, err := w.service.RefreshPerson(ctx, id)
+	var err error
+	if claimedAt.IsZero() {
+		_, err = w.service.RefreshPerson(ctx, id)
+	} else {
+		_, err = w.service.RefreshClaimedPerson(ctx, id, claimedAt)
+	}
 	if err != nil {
 		slog.Warn("person refresh worker: refresh failed", "person_id", id, "error", err)
 	}

@@ -20,6 +20,8 @@ type fakePersonRefresher struct {
 	refreshed []int64
 	onRefresh func(id int64)
 	errs      map[int64]error
+	// claimed records the claim time of each background lookup.
+	claimed map[int64]time.Time
 }
 
 func (f *fakePersonRefresher) ClaimCandidates(_ context.Context, _ int) ([]int64, error) {
@@ -46,6 +48,16 @@ func (f *fakePersonRefresher) RefreshPerson(_ context.Context, id int64) (*model
 		return nil, err
 	}
 	return &models.Person{ID: id}, nil
+}
+
+func (f *fakePersonRefresher) RefreshClaimedPerson(ctx context.Context, id int64, claimedAt time.Time) (*models.Person, error) {
+	f.mu.Lock()
+	if f.claimed == nil {
+		f.claimed = map[int64]time.Time{}
+	}
+	f.claimed[id] = claimedAt
+	f.mu.Unlock()
+	return f.RefreshPerson(ctx, id)
 }
 
 func newTestPersonRefreshWorker(service PersonRefresher) *PersonRefreshWorker {
@@ -88,6 +100,70 @@ func TestPersonRefreshWorkerStopsBatchWhenClaimLeaseRunsOut(t *testing.T) {
 	// after the claim's lease ran out.
 	if want := []int64{1, 2}; !slices.Equal(service.refreshed, want) {
 		t.Fatalf("refreshed %v, want %v", service.refreshed, want)
+	}
+}
+
+// Background lookups carry the claim time, so a person looked up since (a
+// person page on another node) is skipped; on-demand lookups don't.
+func TestPersonRefreshWorkerPassesClaimTimeToBackgroundLookups(t *testing.T) {
+	service := &fakePersonRefresher{batches: [][]int64{{1, 2}}}
+	w := newTestPersonRefreshWorker(service)
+	claimedAt := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	w.now = func() time.Time { return claimedAt }
+	w.Enqueue(9)
+
+	w.drain()
+
+	if want := []int64{9, 1, 2}; !slices.Equal(service.refreshed, want) {
+		t.Fatalf("refreshed %v, want %v", service.refreshed, want)
+	}
+	for _, id := range []int64{1, 2} {
+		if got := service.claimed[id]; !got.Equal(claimedAt) {
+			t.Fatalf("person %d claim time = %s, want %s", id, got, claimedAt)
+		}
+	}
+	if _, ok := service.claimed[9]; ok {
+		t.Fatal("on-demand lookup went through the claimed path")
+	}
+}
+
+// A person page opened while the worker waits out a slow rate runs right
+// away, and a claimed person it covers isn't looked up again after the wait.
+func TestPersonRefreshWorkerRunsOnDemandRequestsDuringRateWait(t *testing.T) {
+	service := &fakePersonRefresher{batches: [][]int64{{1, 2}}}
+	w := NewPersonRefreshWorker(service, PersonRefreshWorkerConfig{BatchSize: 2})
+	w.delay.Store(int64(time.Hour))
+	pageDone := make(chan struct{})
+	service.onRefresh = func(id int64) {
+		switch id {
+		case 1:
+			// Person 2's lookup now waits an hour; a page for them opens.
+			go w.Enqueue(2)
+		case 2:
+			close(pageDone)
+		}
+	}
+	finished := make(chan struct{})
+	go func() {
+		w.processBatch()
+		close(finished)
+	}()
+
+	select {
+	case <-pageDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the person-page request waited out the rate")
+	}
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the batch didn't finish after the page request covered its last person")
+	}
+	if want := []int64{1, 2}; !slices.Equal(service.refreshed, want) {
+		t.Fatalf("refreshed %v, want %v", service.refreshed, want)
+	}
+	if _, ok := service.claimed[2]; ok {
+		t.Fatal("person 2 was looked up again in the background")
 	}
 }
 

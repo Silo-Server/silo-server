@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -89,6 +90,31 @@ func TestPersonRefreshRecordsFailureWhenAnswerCannotBeStored(t *testing.T) {
 				t.Fatalf("recorded outcomes = %v, want [failed]", repo.outcomes)
 			}
 		})
+	}
+}
+
+// A claimed person whose lookup already started since the claim, such as from
+// a person page on another node, isn't looked up again.
+func TestRefreshClaimedPersonSkipsLookupStartedSinceClaim(t *testing.T) {
+	claimedAt := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	after := claimedAt.Add(time.Second)
+	repo := newFakePersonRefreshRepo(models.Person{ID: 10, Name: "Person", TmdbID: "10", MetadataRefreshAttemptedAt: &after})
+	service := &PersonRefreshService{repo: repo}
+
+	person, err := service.RefreshClaimedPerson(context.Background(), 10, claimedAt)
+	if err != nil || person == nil || person.ID != 10 {
+		t.Fatalf("RefreshClaimedPerson = %v, %v; want the stored person", person, err)
+	}
+	if len(repo.refreshAttempts) != 0 || len(repo.outcomes) != 0 {
+		t.Fatalf("looked up again: attempts %v, outcomes %v", repo.refreshAttempts, repo.outcomes)
+	}
+
+	// An attempt from before the claim doesn't count: the lookup goes ahead
+	// (and fails here, with no providers configured).
+	before := claimedAt.Add(-time.Hour)
+	repo.persons[10] = models.Person{ID: 10, Name: "Person", TmdbID: "10", MetadataRefreshAttemptedAt: &before}
+	if _, err := service.RefreshClaimedPerson(context.Background(), 10, claimedAt); err == nil {
+		t.Fatal("RefreshClaimedPerson skipped a lookup that was due")
 	}
 }
 
