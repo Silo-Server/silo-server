@@ -4074,6 +4074,62 @@ func (r *FileRepository) ListMissingChapterThumbnails(ctx context.Context, limit
 	return scanMediaFiles(rows)
 }
 
+// ListChapterThumbnailsAtOtherWidths pages existing chapter images by file ID
+// for the width-change backfill. Files with no image keep the regular missing
+// thumbnail schedule.
+func (r *FileRepository) ListChapterThumbnailsAtOtherWidths(ctx context.Context, limit int, currentSuffix string, afterID int) ([]*models.MediaFile, bool, error) {
+	rows, err := r.pool.Query(ctx, `SELECT `+mfFileColumns+` FROM media_files mf
+		JOIN media_folders folders ON folders.id = mf.media_folder_id
+		WHERE mf.id > $3
+		  AND mf.missing_since IS NULL
+		  AND folders.enabled = true
+		  AND folders.chapter_thumbnails_enabled = true
+		  AND (mf.chapter_thumbnail_retry_after IS NULL OR mf.chapter_thumbnail_retry_after <= NOW())
+		  AND EXISTS (
+			SELECT 1 FROM jsonb_array_elements(
+				CASE WHEN jsonb_typeof(mf.chapters) = 'array' THEN mf.chapters ELSE '[]'::jsonb END
+			) AS chapter
+			WHERE COALESCE(chapter->>'thumbnail_path', '') <> ''
+			  AND right(chapter->>'thumbnail_path', length($2)) <> $2
+			  AND (COALESCE(chapter->>'thumbnail_retry_after', '') = ''
+			       OR (chapter->>'thumbnail_retry_after')::timestamptz <= NOW())
+		  )
+		ORDER BY mf.id
+		LIMIT $1`, limit, currentSuffix, afterID)
+	if err != nil {
+		return nil, false, fmt.Errorf("querying chapter thumbnails at other widths: %w", err)
+	}
+	files, err := scanMediaFiles(rows)
+	rows.Close()
+	if err != nil {
+		return nil, false, err
+	}
+	if len(files) == limit {
+		return files, true, nil
+	}
+	// A final page also checks images waiting out a failure or still queued.
+	// Once none remain, the service can stop scanning until the width changes.
+	var pending bool
+	err = r.pool.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM media_files mf
+		JOIN media_folders folders ON folders.id = mf.media_folder_id
+		WHERE mf.missing_since IS NULL
+		  AND folders.enabled = true
+		  AND folders.chapter_thumbnails_enabled = true
+		  AND EXISTS (
+			SELECT 1 FROM jsonb_array_elements(
+				CASE WHEN jsonb_typeof(mf.chapters) = 'array' THEN mf.chapters ELSE '[]'::jsonb END
+			) AS chapter
+			WHERE COALESCE(chapter->>'thumbnail_path', '') <> ''
+			  AND right(chapter->>'thumbnail_path', length($1)) <> $1
+		  )
+	)`, currentSuffix).Scan(&pending)
+	if err != nil {
+		return nil, false, fmt.Errorf("checking remaining chapter thumbnail widths: %w", err)
+	}
+	return files, pending, nil
+}
+
 // nilIfEmpty returns nil if the string is empty, otherwise a pointer to it.
 func nilIfEmpty(s string) *string {
 	if s == "" {

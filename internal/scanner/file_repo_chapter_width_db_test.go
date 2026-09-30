@@ -52,6 +52,7 @@ func TestListMissingChapterThumbnailsFollowsTheWidth(t *testing.T) {
 	at300 := insert("at300", `"thumbnail_path":"chapter-images/1/0/w300.webp"`)
 	at320 := insert("at320", `"thumbnail_path":"chapter-images/2/0/w320.webp"`)
 	waiting := insert("waiting", `"thumbnail_path":"chapter-images/3/0/w300.webp","thumbnail_retry_after":"`+later+`"`)
+	missing := insert("missing", `"thumbnail_path":""`)
 
 	repo := NewFileRepository(pool)
 	listed := func(suffix string) []int {
@@ -74,5 +75,33 @@ func TestListMissingChapterThumbnailsFollowsTheWidth(t *testing.T) {
 	}
 	if got := listed("/w320.webp"); !slices.Equal(got, []int{at300}) {
 		t.Fatalf("at 320 px listed %v, want only %d", got, at300)
+	}
+	files, pending, err := repo.ListChapterThumbnailsAtOtherWidths(ctx, 100000, "/w320.webp", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var own []int
+	for _, file := range files {
+		if file.MediaFolderID == folderID {
+			own = append(own, file.ID)
+		}
+	}
+	if !slices.Equal(own, []int{at300}) {
+		t.Fatalf("width backfill listed %v, want %d; missing file %d keeps its regular schedule", own, at300, missing)
+	}
+	if !pending {
+		t.Fatal("width backfill forgot images waiting out a failure")
+	}
+	files, pending, err = repo.ListChapterThumbnailsAtOtherWidths(ctx, 100000, "/w320.webp", at300)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		if file.ID == at300 {
+			t.Fatalf("cursor repeated file %d", at300)
+		}
+	}
+	if !pending {
+		t.Fatal("last page did not keep the backfill pending")
 	}
 }

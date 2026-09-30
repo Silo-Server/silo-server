@@ -71,10 +71,10 @@ func canonicalNumber(s string, allowZero bool) bool {
 // referencedImages reports which keys a chapter of their file still points
 // at. A key whose file is gone is not referenced.
 func referencedImages(ctx context.Context, pool *pgxpool.Pool, keys []string) (map[string]bool, error) {
-	ids := make([]int, 0, len(keys))
+	ids := make([]int64, 0, len(keys))
 	for _, key := range keys {
 		if id, ok := imagesFileID(key); ok {
-			ids = append(ids, id)
+			ids = append(ids, int64(id))
 		}
 	}
 	rows, err := pool.Query(ctx, `
@@ -83,7 +83,7 @@ func referencedImages(ctx context.Context, pool *pgxpool.Pool, keys []string) (m
 		CROSS JOIN LATERAL jsonb_array_elements(
 			CASE WHEN jsonb_typeof(mf.chapters) = 'array' THEN mf.chapters ELSE '[]'::jsonb END
 		) AS chapter
-		WHERE mf.id = ANY($1::int[])
+		WHERE mf.id = ANY($1::bigint[])
 		  AND chapter->>'thumbnail_path' = ANY($2::text[])`, ids, keys)
 	if err != nil {
 		return nil, fmt.Errorf("look up chapter thumbnails: %w", err)

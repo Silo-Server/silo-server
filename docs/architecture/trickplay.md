@@ -125,6 +125,12 @@ minutes, on one server at a time. A server also reconciles as soon as it
 reads a new width or interval (it rereads the settings every minute), so a
 settings change does not wait for the next pass.
 
+Chapter thumbnails at another width enter their existing worker queue at
+startup and after a width change. A coordinator reads pages of 25 files by
+ID and waits when the normal queue already holds 25 requests. It checks
+pending replacements every minute, including images waiting out a failure,
+and stops scanning once every stored thumbnail has the current width.
+
 ### Transcode nodes
 
 `playback.trickplay_execution` moves the decoding to transcode nodes:

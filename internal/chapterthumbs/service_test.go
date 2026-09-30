@@ -174,6 +174,10 @@ func (r *testFileRepo) ListMissingChapterThumbnails(_ context.Context, _ int, cu
 	return nil, nil
 }
 
+func (r *testFileRepo) ListChapterThumbnailsAtOtherWidths(context.Context, int, string, int) ([]*models.MediaFile, bool, error) {
+	return nil, false, nil
+}
+
 func (r *testFileRepo) UpdateChapterThumbnailState(
 	_ context.Context,
 	fileID int,
