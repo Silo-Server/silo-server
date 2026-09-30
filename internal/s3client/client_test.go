@@ -764,3 +764,18 @@ func TestArtworkDeliveryScopeExcludesCredentials(t *testing.T) {
 		t.Fatal("delivery endpoint change did not change scope")
 	}
 }
+
+func TestSafeErrorCodeAllowsOnlyIdentifierCodes(t *testing.T) {
+	for code, want := range map[string]string{
+		"AccessDenied":                      "AccessDenied",
+		"Slow_Down-1.x":                     "Slow_Down-1.x",
+		"":                                  unrecognizedErrorCode,
+		"https://x/?X-Amz-Signature=SECRET": unrecognizedErrorCode,
+		"Access Denied token":               unrecognizedErrorCode,
+		strings.Repeat("A", 65):             unrecognizedErrorCode,
+	} {
+		if got := safeErrorCode(code); got != want {
+			t.Errorf("safeErrorCode(%q) = %q, want %q", code, got, want)
+		}
+	}
+}

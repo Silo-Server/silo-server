@@ -764,10 +764,10 @@ func (c *Client) deleteObjects(ctx context.Context, bucket string, keys []string
 				}
 				deleted--
 				slog.WarnContext(ctx, "s3 DeleteObjects: partial failure", "component", "s3client",
-					"key", aws.ToString(e.Key), "code", aws.ToString(e.Code))
+					"key", aws.ToString(e.Key), "code", safeErrorCode(aws.ToString(e.Code)))
 				// The backend's free-form message is omitted from both the log
 				// and the returned error: it may echo credentials or signed URLs.
-				recordFailure(fmt.Errorf("s3 DeleteObjects %s/%s: %s", bucket, aws.ToString(e.Key), aws.ToString(e.Code)))
+				recordFailure(fmt.Errorf("s3 DeleteObjects %s/%s: %s", bucket, aws.ToString(e.Key), safeErrorCode(aws.ToString(e.Code))))
 			}
 		}
 	}
@@ -781,10 +781,27 @@ func (c *Client) deleteObjects(ctx context.Context, bucket string, keys []string
 // s3ErrorCode returns the backend error code for err without its free-form
 // message, which may echo credentials or signed URLs.
 func s3ErrorCode(err error) string {
-	if apiErr, ok := errors.AsType[smithy.APIError](err); ok && apiErr.ErrorCode() != "" {
-		return apiErr.ErrorCode()
+	if apiErr, ok := errors.AsType[smithy.APIError](err); ok {
+		return safeErrorCode(apiErr.ErrorCode())
 	}
 	return "request failed"
+}
+
+// safeErrorCode returns code when it looks like an S3 error code (a short
+// identifier such as "AccessDenied") and a fixed placeholder otherwise. The code
+// comes from the backend, so an unexpected value is never logged or returned.
+const unrecognizedErrorCode = "unrecognized error code"
+
+func safeErrorCode(code string) string {
+	if code == "" || len(code) > 64 {
+		return unrecognizedErrorCode
+	}
+	for _, r := range code {
+		if !(r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-') {
+			return unrecognizedErrorCode
+		}
+	}
+	return code
 }
 
 // isBatchDeleteUnsupported reports whether a DeleteObjects error means the
