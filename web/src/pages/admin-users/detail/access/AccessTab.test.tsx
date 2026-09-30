@@ -349,6 +349,24 @@ describe("card editing", () => {
     expect(lastBody()).toEqual({ username: "My draft" });
   });
 
+  it("locks the card's inputs while a save is in flight", async () => {
+    const ui = userEvent.setup();
+    let finish!: () => void;
+    mocks.update.mockImplementationOnce(() => new Promise<void>((done) => (finish = done)));
+    mount();
+    const signIn = await edit(ui, "Sign-in & role");
+    const username = within(signIn).getByLabelText("Username");
+    await ui.clear(username);
+    await ui.type(username, "Saved name");
+    await ui.click(within(signIn).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(username).toBeDisabled());
+    expect(within(signIn).getByLabelText("Email")).toBeDisabled();
+    finish();
+    await waitFor(() => expect(within(signIn).queryByLabelText("Username")).toBeNull());
+    expect(lastBody()).toEqual({ username: "Saved name" });
+  });
+
   it("refuses an invalid email before saving", async () => {
     const ui = userEvent.setup();
     mount();

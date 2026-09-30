@@ -170,7 +170,10 @@ export function EditableCard({
       editing={state.editing}
       footer={footer}
     >
-      <div>{children}</div>
+      {/* A save resets the draft when it lands, so input made meanwhile would be lost. */}
+      <fieldset disabled={state.editing && state.saving} className="min-w-0">
+        {children}
+      </fieldset>
       {state.editing && state.error ? (
         <p role="alert" className="text-destructive px-4 pb-3 text-sm sm:px-5">
           {state.error}

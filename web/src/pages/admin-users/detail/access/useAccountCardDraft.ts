@@ -225,6 +225,9 @@ export function useAccountCardDraft<D>(opts: {
   }, [queryClient]);
 
   const setDraft = useCallback((change: (d: D) => D) => {
+    // A save resets the draft when it lands and a reload rebases it, so edits
+    // made while either is in flight are refused rather than silently dropped.
+    if (busy.current) return;
     setDraftState((prev) => (prev === undefined ? prev : change(prev)));
   }, []);
 
