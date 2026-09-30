@@ -27,8 +27,7 @@ import {
   HOME_LAYOUT_MAX_LENGTH,
   HOME_LAYOUT_SKIP_REASON_LABELS,
   buildHomeLayoutFile,
-  legacyTraktSectionIds,
-  mergeImportedPage,
+  importPage,
   parseHomeLayoutFile,
   planHomeLayoutImport,
   type HomeLayoutImportPlan,
@@ -269,27 +268,28 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
     }
     setApplying(true);
     const failures: string[] = [];
+    const keptRemovals: string[] = [];
     for (const page of plan.pages) {
       try {
         const query = pageQuery(page.scope, page.libraryId);
-        const [existing, settings] = await Promise.all([
-          v2("GET /api/v2/profile/sections", { query, profileContext }).then(
-            (result) => result.items,
-          ),
-          plan.sameServer
-            ? v2("GET /api/v2/profile/sections/settings", { query, profileContext }).then(
-                (result) => result.items,
-              )
-            : Promise.resolve([]),
-        ]);
-        const overrides = mergeImportedPage(
+        const { keptRemovals: kept } = await importPage(
           page,
-          existing,
           plan.sameServer,
-          legacyTraktSectionIds(settings, existing),
+          {
+            listSaved: () =>
+              v2("GET /api/v2/profile/sections", { query, profileContext }).then(
+                (result) => result.items,
+              ),
+            listView: () =>
+              v2("GET /api/v2/profile/sections/settings", { query, profileContext }).then(
+                (result) => result.items,
+              ),
+            save: (overrides) =>
+              v2("PUT /api/v2/profile/sections", { query, body: { overrides }, profileContext }),
+          },
           randomUUID,
         );
-        await v2("PUT /api/v2/profile/sections", { query, body: { overrides }, profileContext });
+        if (kept) keptRemovals.push(page.label);
       } catch (error) {
         failures.push(`${page.label} (${problemMessage(error)})`);
       }
@@ -309,7 +309,14 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
     await qc.invalidateQueries({ queryKey: sectionKeys.all });
     setApplying(false);
     if (failures.length === 0) {
-      toast.success("Home layout imported");
+      toast.success(
+        "Home layout imported",
+        keptRemovals.length > 0
+          ? {
+              description: `Sections this profile had removed stay removed on: ${keptRemovals.join(", ")}.`,
+            }
+          : undefined,
+      );
       onClose();
     } else {
       toast.error(`Some parts didn't import: ${failures.join("; ")}`);

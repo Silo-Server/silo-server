@@ -1,13 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { components } from "@/api/v2/schema";
+import { v2Problem } from "@/api/v2/problems.test-support";
 
 import {
   buildHomeLayoutFile,
+  importPage,
   legacyTraktSectionIds,
   mergeImportedPage,
   parseHomeLayoutFile,
   planHomeLayoutImport,
+  unlistedRemovedSectionIds,
   type HomeLayoutFile,
   type HomeLayoutImportTarget,
 } from "./homeLayoutTransfer";
@@ -286,7 +289,6 @@ describe("planHomeLayoutImport on the same server", () => {
               { user_section_type: "collection", user_config: { user_collection_id: "theirs" } },
               { section_type: "custom_filter", title: "Filtered" },
               { section_type: "genre", title: "Legacy genre" },
-              { section_type: "retired_recipe", title: "Old" },
               { user_section_type: "trending_discover", user_config: { source: "trakt" } },
               { user_section_type: "hidden_gems", removed: true },
             ],
@@ -304,8 +306,67 @@ describe("planHomeLayoutImport on the same server", () => {
       { page: "Home", title: "collection", reason: "collection" },
       { page: "Home", title: "Filtered", reason: "custom_disabled" },
       { page: "Home", title: "Legacy genre", reason: "custom_disabled" },
-      { page: "Home", title: "Old", reason: "unknown_recipe" },
       { page: "Home", title: "trending_discover", reason: "trakt" },
+    ]);
+  });
+
+  it("trusts a saved section type the gallery doesn't list", () => {
+    const plan = planHomeLayoutImport(
+      layoutFile({
+        pages: [
+          {
+            scope: "home",
+            overrides: [{ user_section_type: "award_winners", user_title: "Awards" }],
+          },
+        ],
+      }),
+      target(),
+      sequentialIds(),
+    );
+
+    expect(plan.skippedSections).toEqual([]);
+    expect(plan.pages[0]?.overrides).toEqual([
+      { id: "new-1", user_section_type: "award_winners", user_title: "Awards" },
+    ]);
+  });
+
+  it("skips sections limited to libraries this profile can't open", () => {
+    const plan = planHomeLayoutImport(
+      layoutFile({
+        pages: [
+          {
+            scope: "home",
+            overrides: [
+              {
+                user_section_type: "hidden_gems",
+                user_title: "Some",
+                user_config: { library_ids: [1, 9] },
+              },
+              {
+                user_section_type: "hidden_gems",
+                user_title: "None",
+                user_config: { library_ids: [9] },
+              },
+              { section_type: "recently_added", title: "Single", config: { filter_library_id: 9 } },
+            ],
+          },
+        ],
+      }),
+      target(),
+      sequentialIds(),
+    );
+
+    expect(plan.pages[0]?.overrides).toEqual([
+      {
+        id: "new-1",
+        user_section_type: "hidden_gems",
+        user_title: "Some",
+        user_config: { library_ids: [1, 9] },
+      },
+    ]);
+    expect(plan.skippedSections).toEqual([
+      { page: "Home", title: "None", reason: "library" },
+      { page: "Home", title: "Single", reason: "library" },
     ]);
   });
 });
@@ -379,6 +440,20 @@ describe("planHomeLayoutImport on another server", () => {
         label: "movies ",
         overrides: [{ id: "new-3", user_section_type: "hidden_gems" }],
       },
+    ]);
+  });
+
+  it("skips a section type this server doesn't list", () => {
+    const plan = planHomeLayoutImport(
+      layoutFile({
+        pages: [{ scope: "home", overrides: [{ section_type: "retired_recipe", title: "Old" }] }],
+      }),
+      otherServer,
+      sequentialIds(),
+    );
+
+    expect(plan.skippedSections).toEqual([
+      { page: "Home", title: "Old", reason: "unknown_recipe" },
     ]);
   });
 
@@ -520,6 +595,23 @@ describe("mergeImportedPage", () => {
   });
 });
 
+describe("unlistedRemovedSectionIds", () => {
+  it("finds removed admin sections the page view no longer lists", () => {
+    const settings = [
+      { id: "shown", is_custom: false },
+      { id: "custom", is_custom: true },
+    ];
+    const existing = [
+      stored({ id: "o1", section_id: "gone", removed: true }),
+      stored({ id: "o2", section_id: "shown", removed: true }),
+      stored({ id: "o3", section_id: "hidden", hidden: true }),
+      stored({ id: "o4", user_section_type: "hidden_gems", removed: true }),
+    ];
+
+    expect(unlistedRemovedSectionIds(settings, existing)).toEqual(new Set(["gone"]));
+  });
+});
+
 describe("legacyTraktSectionIds", () => {
   it("finds Trakt-sourced admin sections in the page view and saved overrides", () => {
     const settings = [
@@ -535,5 +627,67 @@ describe("legacyTraktSectionIds", () => {
     expect(legacyTraktSectionIds(settings, existing)).toEqual(
       new Set(["trending", "list", "removed-trakt"]),
     );
+  });
+});
+
+describe("importPage", () => {
+  const page = {
+    scope: "home" as const,
+    label: "Home",
+    overrides: [{ id: "new-custom", user_section_type: "hidden_gems" }],
+  };
+  const removedUnlisted = stored({ id: "saved-gone", section_id: "gone", removed: true });
+
+  function fakeApi(saveResults: unknown[]) {
+    const save = vi.fn(async () => {
+      const result = saveResults.shift();
+      if (result instanceof Error) throw result;
+      return result;
+    });
+    return {
+      listSaved: vi.fn(async () => [removedUnlisted]),
+      listView: vi.fn(async () => [{ id: "shown", is_custom: false }]),
+      save,
+    };
+  }
+
+  it("saves the merged page once when the server accepts it", async () => {
+    const api = fakeApi([undefined]);
+
+    await expect(importPage(page, true, api, sequentialIds())).resolves.toEqual({
+      keptRemovals: false,
+    });
+    expect(api.save).toHaveBeenCalledTimes(1);
+    expect(api.save).toHaveBeenCalledWith([{ id: "new-custom", user_section_type: "hidden_gems" }]);
+  });
+
+  it("retries a refused same-server save with unlisted removals kept", async () => {
+    const api = fakeApi([
+      v2Problem(422, "validation_failed", "The request did not pass validation; see errors."),
+      undefined,
+    ]);
+
+    await expect(importPage(page, true, api, sequentialIds())).resolves.toEqual({
+      keptRemovals: true,
+    });
+    expect(api.save).toHaveBeenCalledTimes(2);
+    expect(api.save).toHaveBeenLastCalledWith([
+      { id: "new-custom", user_section_type: "hidden_gems" },
+      { id: "saved-gone", section_id: "gone", removed: true },
+    ]);
+  });
+
+  it("doesn't retry other failures", async () => {
+    const refused = v2Problem(422, "validation_failed", "invalid");
+    const unavailable = v2Problem(503, "dependency_unavailable", "down");
+
+    const other = fakeApi([unavailable]);
+    await expect(importPage(page, true, other, sequentialIds())).rejects.toBe(unavailable);
+    expect(other.save).toHaveBeenCalledTimes(1);
+
+    const otherServer = fakeApi([refused]);
+    await expect(importPage(page, false, otherServer, sequentialIds())).rejects.toBe(refused);
+    expect(otherServer.save).toHaveBeenCalledTimes(1);
+    expect(otherServer.listView).not.toHaveBeenCalled();
   });
 });

@@ -1,3 +1,4 @@
+import { V2ProblemError } from "@/api/v2/request";
 import type { components } from "@/api/v2/schema";
 import { FILTER_SECTION_TYPES } from "@/lib/sectionTypes";
 
@@ -226,7 +227,7 @@ export const HOME_LAYOUT_SKIP_REASON_LABELS: Record<HomeLayoutSkipReason, string
   unknown_recipe: "This server doesn't offer this section type",
   custom_disabled: "This server doesn't let profiles build this section type",
   trakt: "Trakt-backed sections can't be added again",
-  library: "Uses a library that isn't on this server",
+  library: "Uses a library this profile doesn't have here",
   collection: "Uses a collection this profile can't see here",
   profile: "Follows a profile from the other server",
 };
@@ -364,7 +365,9 @@ function sectionSkipReason(
   const recipeType = override.user_section_type || override.section_type || "";
   const isFilterType = FILTER_SECTION_TYPES.has(recipeType);
   const recipe = target.recipes.get(recipeType);
-  if (!recipe && !isFilterType) return "unknown_recipe";
+  // The gallery omits hidden recipes the server still resolves (award_winners),
+  // so on the same server a saved row's type is trusted.
+  if (!recipe && !isFilterType && !sameServer) return "unknown_recipe";
   if ((recipe?.adminOnly || isFilterType) && !target.allowAdminOnlyRecipes) {
     return "custom_disabled";
   }
@@ -446,7 +449,7 @@ export function planHomeLayoutImport(
       const write: SectionOverrideWrite = { ...override };
       const reason =
         sectionSkipReason(override, target, sameServer) ??
-        (sameServer || remapOverrideLibraries(write, libraries) ? null : "library");
+        (carryOverrideLibraries(write, libraries, sameServer) ? null : "library");
       if (reason) {
         plan.skippedSections.push({ page: sourceLabel, title: sectionTitle(override), reason });
         continue;
@@ -459,6 +462,33 @@ export function planHomeLayoutImport(
   }
 
   return plan;
+}
+
+// Whether a profile-built section's library references work here. On the same
+// server the IDs stay as they are: the server already limits a section to the
+// libraries the profile can open, so a list needs only one of them and a
+// single ID must be one. Another server rewrites every ID through the map and
+// skips the section when one has no match.
+function carryOverrideLibraries(
+  write: SectionOverrideWrite,
+  libraries: Map<number, HomeLayoutLibrary>,
+  sameServer: boolean,
+): boolean {
+  if (!sameServer) return remapOverrideLibraries(write, libraries);
+  for (const config of [write.config, write.user_config]) {
+    if (!config) continue;
+    for (const key of LIBRARY_ID_KEYS) {
+      const value = config[key];
+      if (isPositiveInteger(value) && !libraries.has(value)) return false;
+    }
+    for (const key of LIBRARY_ID_LIST_KEYS) {
+      const value = config[key];
+      if (!Array.isArray(value)) continue;
+      const ids = value.filter(isPositiveInteger);
+      if (ids.length > 0 && !ids.some((id) => libraries.has(id))) return false;
+    }
+  }
+  return true;
 }
 
 // Rewrites both config members' library IDs in place; false when one of them
@@ -492,16 +522,16 @@ function keepExisting(override: SectionOverrideRead): SectionOverrideWrite {
  * On the same server the file describes the whole page and replaces what the
  * profile saved. A change to an admin section keeps the ID of the profile's
  * saved override for that section, or gets a new one, as the server's
- * section source policy expects of every override. Legacy Trakt admin
- * sections (`legacyTraktSectionIds`) can't be changed or shown again, so the
- * profile's saved override for one stays as it is; without one, only a
- * hide or remove carries over.
+ * section source policy expects of every override. For a section in
+ * `keepSavedSectionIds`, such as a legacy Trakt admin section, which can't
+ * be changed or shown again, the profile's saved override stays as it is;
+ * without one, only a hide or remove carries over.
  */
 export function mergeImportedPage(
   page: HomeLayoutPlannedPage,
   existing: SectionOverrideRead[],
   sameServer: boolean,
-  legacyTraktSectionIds: ReadonlySet<string>,
+  keepSavedSectionIds: ReadonlySet<string>,
   newId: () => string,
 ): SectionOverrideWrite[] {
   if (!sameServer) {
@@ -529,20 +559,42 @@ export function mergeImportedPage(
     if (imported.has(sectionId)) continue;
     imported.add(sectionId);
     const saved = existingBySection.get(sectionId);
-    if (legacyTraktSectionIds.has(sectionId)) {
+    if (keepSavedSectionIds.has(sectionId)) {
       if (saved) merged.push(keepExisting(saved));
       else if (override.hidden || override.removed) merged.push({ ...override, id: newId() });
       continue;
     }
     merged.push({ ...override, id: saved?.id || newId() });
   }
-  // Dropping the profile's hide of a legacy Trakt section would show it again.
+  // Dropping a saved hide of such a section would show it again.
   for (const [sectionId, saved] of existingBySection) {
-    if (!imported.has(sectionId) && legacyTraktSectionIds.has(sectionId)) {
+    if (!imported.has(sectionId) && keepSavedSectionIds.has(sectionId)) {
       merged.push(keepExisting(saved));
     }
   }
   return merged;
+}
+
+/**
+ * Admin sections the profile removed that its page view no longer lists, so
+ * their source can't be read here. A saved removal of a legacy Trakt section
+ * can't be undone, and one without a config looks like any other removal; an
+ * import that the server refuses for it is retried with these kept removed.
+ */
+export function unlistedRemovedSectionIds(
+  settings: { id: string; is_custom: boolean }[],
+  existing: SectionOverrideRead[],
+): Set<string> {
+  const listed = new Set(
+    settings.filter((section) => !section.is_custom).map((section) => section.id),
+  );
+  const ids = new Set<string>();
+  for (const override of existing) {
+    if (override.section_id && override.removed && !listed.has(override.section_id)) {
+      ids.add(override.section_id);
+    }
+  }
+  return ids;
 }
 
 /**
@@ -561,4 +613,45 @@ export function legacyTraktSectionIds(
     if (override.section_id && isTraktConfig(override.config)) ids.add(override.section_id);
   }
   return ids;
+}
+
+type PageViewSection = { id: string; is_custom: boolean; config?: Record<string, unknown> };
+
+/** The requests that import one page, bound to the importing profile. */
+export interface HomeLayoutPageApi {
+  listSaved(): Promise<SectionOverrideRead[]>;
+  listView(): Promise<PageViewSection[]>;
+  save(overrides: SectionOverrideWrite[]): Promise<unknown>;
+}
+
+/**
+ * Saves one planned page over the profile's saved overrides. A refused save
+ * writes nothing, so when the server refuses a same-server page and the
+ * profile removed sections its page view can't describe, one of them may be
+ * a legacy Trakt section it won't show again: the save is retried once with
+ * those removals kept. `keptRemovals` reports that retry.
+ */
+export async function importPage(
+  page: HomeLayoutPlannedPage,
+  sameServer: boolean,
+  api: HomeLayoutPageApi,
+  newId: () => string,
+): Promise<{ keptRemovals: boolean }> {
+  const [existing, view] = await Promise.all([
+    api.listSaved(),
+    sameServer ? api.listView() : Promise.resolve([]),
+  ]);
+  const legacyTrakt = legacyTraktSectionIds(view, existing);
+  try {
+    await api.save(mergeImportedPage(page, existing, sameServer, legacyTrakt, newId));
+    return { keptRemovals: false };
+  } catch (error) {
+    const unlisted = sameServer ? unlistedRemovedSectionIds(view, existing) : new Set<string>();
+    if (!(error instanceof V2ProblemError && error.status === 422) || unlisted.size === 0) {
+      throw error;
+    }
+    const keep = new Set([...legacyTrakt, ...unlisted]);
+    await api.save(mergeImportedPage(page, existing, sameServer, keep, newId));
+    return { keptRemovals: true };
+  }
 }
