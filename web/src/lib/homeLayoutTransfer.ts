@@ -219,19 +219,17 @@ export function parseHomeLayoutFile(text: string): HomeLayoutParseResult {
 }
 
 export interface HomeLayoutReferences {
-  libraryCollections: boolean;
   personalCollections: boolean;
   profiles: boolean;
 }
 
-/** Which kinds of server-side references the file's sections make. */
+/** Which kinds of account-scoped references the file's sections make. */
 export function fileReferences(file: HomeLayoutFile): HomeLayoutReferences {
-  const refs = { libraryCollections: false, personalCollections: false, profiles: false };
+  const refs = { personalCollections: false, profiles: false };
   for (const page of file.pages) {
     for (const override of page.overrides) {
       for (const config of [override.config, override.user_config]) {
         if (!config) continue;
-        if (nonEmptyString(config.library_collection_id)) refs.libraryCollections = true;
         if (nonEmptyString(config.user_collection_id)) refs.personalCollections = true;
         if (nonEmptyString(config.profile_id)) refs.profiles = true;
       }
@@ -265,8 +263,6 @@ export interface HomeLayoutImportTarget {
   allowAdminOnlyRecipes: boolean;
   /** Personal collections the importing profile can see. */
   personalCollectionIds: ReadonlySet<string>;
-  /** Library collections the importing profile can see. */
-  libraryCollectionIds: ReadonlySet<string>;
   /** The importing account's profiles. */
   profileIds: ReadonlySet<string>;
 }
@@ -415,10 +411,12 @@ function sectionSkipReason(
 
 /**
  * What in a section config the importing profile can't use on the same
- * server: a library filter with no library it can open, a collection it
- * can't see, or a pinned activity profile outside its account. The feed
- * reads a pinned profile's history by profile ID alone, so a profile from
- * another account would expose that account's viewing.
+ * server: a library filter with no library it can open, a personal
+ * collection it can't see, or a pinned activity profile outside its account.
+ * The feed reads a pinned profile's history by profile ID alone, so a profile
+ * from another account would expose that account's viewing. Library
+ * collections are left alone: sections resolve them by ID, including ones the
+ * Collections tab hides, so the client has no list to check them against.
  */
 function sameServerReferenceProblem(
   config: Record<string, unknown>,
@@ -426,12 +424,6 @@ function sameServerReferenceProblem(
   libraries: Map<number, HomeLayoutLibrary>,
 ): "library" | "collection" | "profile" | null {
   if (!libraryFiltersReachable(config, libraries)) return "library";
-  if (
-    nonEmptyString(config.library_collection_id) &&
-    !target.libraryCollectionIds.has(config.library_collection_id)
-  ) {
-    return "collection";
-  }
   if (
     nonEmptyString(config.user_collection_id) &&
     !target.personalCollectionIds.has(config.user_collection_id)
@@ -599,6 +591,9 @@ function keepExisting(override: SectionOverrideRead): SectionOverrideWrite {
  * `keepSavedSectionIds`, such as a legacy Trakt admin section, which can't
  * be changed or shown again, the profile's saved override stays as it is;
  * without one, only a hide or remove carries over.
+ *
+ * Either way, a saved profile-built Trakt section stays, since it can't be
+ * created again.
  */
 export function mergeImportedPage(
   page: HomeLayoutPlannedPage,
@@ -607,9 +602,17 @@ export function mergeImportedPage(
   keepSavedSectionIds: ReadonlySet<string>,
   newId: () => string,
 ): SectionOverrideWrite[] {
+  // A saved profile-built Trakt section can't be created again, so the
+  // profile keeps it instead of losing it to the replacement.
+  const savedTraktBuilt = existing
+    .filter(
+      (override) => !override.section_id && isTraktConfig(override.user_config ?? override.config),
+    )
+    .map(keepExisting);
   if (!sameServer) {
     return [
       ...existing.filter((override) => override.section_id).map(keepExisting),
+      ...savedTraktBuilt,
       ...page.overrides,
     ];
   }
@@ -645,7 +648,7 @@ export function mergeImportedPage(
       merged.push(keepExisting(saved));
     }
   }
-  return merged;
+  return [...merged, ...savedTraktBuilt];
 }
 
 /**
@@ -665,6 +668,9 @@ export function legacyTraktSectionIds(
   }
   return ids;
 }
+
+/** The most overrides one page's save accepts (SectionOverrideSet in the v2 contract). */
+export const HOME_LAYOUT_MAX_PAGE_OVERRIDES = 500;
 
 type PageViewSection = { id: string; is_custom: boolean; config?: Record<string, unknown> };
 
@@ -696,8 +702,17 @@ export async function importPage(
     sameServer ? api.listView() : Promise.resolve([]),
   ]);
   const legacyTrakt = legacyTraktSectionIds(view, existing);
+  const save = (keep: ReadonlySet<string>) => {
+    const overrides = mergeImportedPage(page, existing, sameServer, keep, newId);
+    if (overrides.length > HOME_LAYOUT_MAX_PAGE_OVERRIDES) {
+      throw new Error(
+        `this page would have more than ${HOME_LAYOUT_MAX_PAGE_OVERRIDES} saved section changes`,
+      );
+    }
+    return api.save(overrides);
+  };
   try {
-    await api.save(mergeImportedPage(page, existing, sameServer, legacyTrakt, newId));
+    await save(legacyTrakt);
     return { keptSavedChanges: false };
   } catch (error) {
     const saved = existing.flatMap((override) =>
@@ -710,8 +725,7 @@ export async function importPage(
     ) {
       throw error;
     }
-    const keep = new Set([...legacyTrakt, ...saved]);
-    await api.save(mergeImportedPage(page, existing, sameServer, keep, newId));
+    await save(new Set([...legacyTrakt, ...saved]));
     return { keptSavedChanges: true };
   }
 }

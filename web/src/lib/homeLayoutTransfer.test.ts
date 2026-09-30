@@ -70,7 +70,6 @@ function target(overrides: Partial<HomeLayoutImportTarget> = {}): HomeLayoutImpo
     ]),
     allowAdminOnlyRecipes: true,
     personalCollectionIds: new Set(["mine"]),
-    libraryCollectionIds: new Set(["shared-lc"]),
     profileIds: new Set(["p-sibling"]),
     ...overrides,
   };
@@ -313,7 +312,7 @@ describe("planHomeLayoutImport on the same server", () => {
     ]);
   });
 
-  it("checks collections and pinned profiles against the importing account", () => {
+  it("checks pinned profiles against the importing account and keeps library collections", () => {
     const plan = planHomeLayoutImport(
       layoutFile({
         pages: [
@@ -355,13 +354,11 @@ describe("planHomeLayoutImport on the same server", () => {
 
     expect(plan.pages[0]?.overrides.map((override) => override.user_title)).toEqual([
       "Seen",
+      "Unseen",
       "Sibling",
       "Household",
     ]);
-    expect(plan.skippedSections).toEqual([
-      { page: "Home", title: "Unseen", reason: "collection" },
-      { page: "Home", title: "Stranger", reason: "profile" },
-    ]);
+    expect(plan.skippedSections).toEqual([{ page: "Home", title: "Stranger", reason: "profile" }]);
   });
 
   it("checks only the config the server uses for a section", () => {
@@ -418,7 +415,7 @@ describe("planHomeLayoutImport on the same server", () => {
     expect(plan.skippedSections).toEqual([]);
   });
 
-  it("drops admin-section configs with collections or profiles this profile can't use", () => {
+  it("drops admin-section configs with personal collections or profiles this profile can't use", () => {
     const plan = planHomeLayoutImport(
       layoutFile({
         pages: [
@@ -450,7 +447,7 @@ describe("planHomeLayoutImport on the same server", () => {
     expect(plan.pages[0]?.overrides).toEqual([
       { section_id: "union", config: { filter_library_id: 9, filter_library_ids: [1] } },
       { section_id: "lc-seen", config: { library_collection_id: "shared-lc" } },
-      { section_id: "lc-unseen", position: 1 },
+      { section_id: "lc-unseen", position: 1, config: { library_collection_id: "hidden-lc" } },
       { section_id: "uc-unseen", position: 2 },
       { section_id: "feed-sibling", config: { profile_id: "p-sibling" } },
       { section_id: "feed-stranger", position: 3 },
@@ -760,6 +757,36 @@ describe("mergeImportedPage", () => {
     ]);
   });
 
+  it("keeps saved profile-built Trakt sections on either server", () => {
+    const page = {
+      scope: "home" as const,
+      label: "Home",
+      overrides: [{ id: "new-1", user_section_type: "hidden_gems" }],
+    };
+    const existing = [
+      stored({
+        id: "trakt-row",
+        user_section_type: "trending_discover",
+        user_config: { source: "trakt" },
+      }),
+      stored({ id: "plain-row", user_section_type: "hidden_gems", user_config: {} }),
+    ];
+    const kept = {
+      id: "trakt-row",
+      user_section_type: "trending_discover",
+      user_config: { source: "trakt" },
+    };
+
+    expect(mergeImportedPage(page, existing, true, noTrakt, sequentialIds())).toEqual([
+      { id: "new-1", user_section_type: "hidden_gems" },
+      kept,
+    ]);
+    expect(mergeImportedPage(page, existing, false, noTrakt, sequentialIds())).toEqual([
+      kept,
+      { id: "new-1", user_section_type: "hidden_gems" },
+    ]);
+  });
+
   it("keeps this server's section changes on another server", () => {
     const page = {
       scope: "home" as const,
@@ -784,7 +811,6 @@ describe("fileReferences", () => {
       layoutFile({ pages: [{ scope: "home", overrides: [override] }] });
 
     expect(fileReferences(file({ user_config: { library_collection_id: "lc" } }))).toEqual({
-      libraryCollections: true,
       personalCollections: false,
       profiles: false,
     });
@@ -792,9 +818,8 @@ describe("fileReferences", () => {
       fileReferences(
         file({ section_id: "a", config: { user_collection_id: "mine", profile_id: "p" } }),
       ),
-    ).toEqual({ libraryCollections: false, personalCollections: true, profiles: true });
+    ).toEqual({ personalCollections: true, profiles: true });
     expect(fileReferences(file({ user_config: { profile_id: "" } }))).toEqual({
-      libraryCollections: false,
       personalCollections: false,
       profiles: false,
     });
@@ -887,6 +912,23 @@ describe("importPage", () => {
       { id: "new-custom", user_section_type: "hidden_gems" },
       { id: "saved-mask", section_id: "masked", config: { source: "tmdb" } },
     ]);
+  });
+
+  it("refuses a page over the save endpoint's override limit", async () => {
+    const big = {
+      scope: "home" as const,
+      label: "Home",
+      overrides: Array.from({ length: 501 }, (_, index) => ({
+        id: `row-${index}`,
+        user_section_type: "hidden_gems",
+      })),
+    };
+    const api = fakeApi([]);
+
+    await expect(importPage(big, false, api, sequentialIds())).rejects.toThrow(
+      "more than 500 saved section changes",
+    );
+    expect(api.save).not.toHaveBeenCalled();
   });
 
   it("doesn't retry other failures", async () => {

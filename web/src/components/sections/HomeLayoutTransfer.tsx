@@ -38,12 +38,8 @@ import {
 
 const HOME_PREFERENCE_KEYS = [SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS] as const;
 const NO_IDS: ReadonlySet<string> = new Set();
-const NO_REFERENCES: HomeLayoutReferences = {
-  libraryCollections: false,
-  personalCollections: false,
-  profiles: false,
-};
-// Per-page and per-library reads run this many at a time.
+const NO_REFERENCES: HomeLayoutReferences = { personalCollections: false, profiles: false };
+// Page reads during export run this many at a time.
 const READ_BATCH = 4;
 
 async function readInBatches<T, R>(items: readonly T[], read: (item: T) => Promise<R>) {
@@ -96,6 +92,12 @@ export default function HomeLayoutTransfer() {
 
   async function handleExport() {
     if (!libraries) return;
+    if (homePreferences.isError) {
+      toast.error(
+        "Couldn't read this profile's Home preferences, so the export would be incomplete. Reload the page and try again.",
+      );
+      return;
+    }
     // Every read goes to the profile active now, even if it changes mid-export.
     const profileContext = captureProfileRequestContext();
     if (!profileContext) {
@@ -187,8 +189,9 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
     staleTime: Infinity,
   });
   const parsed = useMemo(() => (text.trim() ? parseHomeLayoutFile(text) : null), [text]);
-  // Collections and profiles are read only for a same-server file that names
-  // one; another server's references are skipped without looking them up.
+  // Personal collections and profiles are read only for a same-server file
+  // that names one; another server's references are skipped without looking
+  // them up.
   const sameServerFile =
     parsed?.ok &&
     identityQuery.data &&
@@ -210,17 +213,6 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
     enabled: refs.personalCollections,
     gcTime: 0,
   });
-  const libraryCollectionsQuery = useQuery({
-    queryKey: ["home-layout-import", "library-collection-ids"],
-    queryFn: async () => {
-      const tabs = await readInBatches(libraries, (library) =>
-        v2("GET /api/v2/library/{id}/collections", { path: { id: String(library.id) }, ...scoped }),
-      );
-      return new Set(tabs.flatMap((tab) => tab.collections.map((collection) => collection.id)));
-    },
-    enabled: refs.libraryCollections,
-    gcTime: 0,
-  });
   const profilesQuery = useQuery({
     queryKey: ["home-layout-import", "account-profile-ids"],
     queryFn: async () =>
@@ -229,7 +221,6 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
     gcTime: 0,
   });
   const personalCollectionIds = refs.personalCollections ? collectionsQuery.data : NO_IDS;
-  const libraryCollectionIds = refs.libraryCollections ? libraryCollectionsQuery.data : NO_IDS;
   const profileIds = refs.profiles ? profilesQuery.data : NO_IDS;
   // Shares the Home screen settings page's cache entry.
   const recipeCatalogQuery = useQuery({
@@ -253,7 +244,6 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
   const targetReady = Boolean(
     identityQuery.data &&
     personalCollectionIds &&
-    libraryCollectionIds &&
     profileIds &&
     recipeCatalog &&
     allowAdminOnlyRecipes !== undefined,
@@ -261,7 +251,6 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
   const targetError =
     identityQuery.isError ||
     (refs.personalCollections && collectionsQuery.isError) ||
-    (refs.libraryCollections && libraryCollectionsQuery.isError) ||
     (refs.profiles && profilesQuery.isError) ||
     recipeCatalogQuery.isError ||
     flagsQuery.isError;
@@ -271,7 +260,6 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
       !parsed?.ok ||
       !identityQuery.data ||
       !personalCollectionIds ||
-      !libraryCollectionIds ||
       !profileIds ||
       !recipeCatalog ||
       allowAdminOnlyRecipes === undefined
@@ -290,7 +278,6 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
         recipes,
         allowAdminOnlyRecipes,
         personalCollectionIds,
-        libraryCollectionIds,
         profileIds,
       },
       randomUUID,
@@ -299,7 +286,6 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
     parsed,
     identityQuery.data,
     personalCollectionIds,
-    libraryCollectionIds,
     profileIds,
     recipeCatalog,
     libraries,
