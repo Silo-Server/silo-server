@@ -6541,9 +6541,10 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	}
 
 	// Dedup 3: same observed TV root reuses the already-linked root-scoped item.
-	if res.Type == "series" {
-		res.Type = "series"
-		existingContentID, err := s.fileRepo.FindContentIDByObservedRootPath(ctx, folderID, observedRootPath, "series")
+	// A split-pinned root does the same for movies: its files already link to
+	// the split target, and a new version there belongs with them.
+	if res.Type == "series" || splitPinned {
+		existingContentID, err := s.fileRepo.FindContentIDByObservedRootPath(ctx, folderID, observedRootPath, res.Type)
 		if err != nil {
 			return nil, fmt.Errorf("finding existing item by observed root path: %w", err)
 		}

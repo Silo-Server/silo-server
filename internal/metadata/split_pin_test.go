@@ -103,7 +103,9 @@ func TestPinnedUnmatchedBySplit(t *testing.T) {
 
 // A new file under a split root must join the unmatched target already at
 // that root. The folder's provider tag and the source's root claim both point
-// back at the source, which would pull the whole root back with it.
+// back at the source, which would pull the whole root back with it. Movies have
+// no root-level reuse of their own, so without the pin a new version would mint
+// yet another item.
 func TestCreateOrFindSkeletonKeepsNewFileWithUnmatchedSplitTarget(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -116,82 +118,102 @@ func TestCreateOrFindSkeletonKeepsNewFileWithUnmatchedSplitTarget(t *testing.T) 
 	}
 	t.Cleanup(pool.Close)
 
-	nonce := time.Now().UnixNano() % 100_000_000
-	tvdbID := fmt.Sprintf("%d", 900_000_000+nonce)
-	libraryRoot := fmt.Sprintf("/split-skeleton-%d/tv", nonce)
-	root := libraryRoot + "/Show (2025) {tvdb-" + tvdbID + "}"
-	source, target := "series-tvdb-"+tvdbID, fmt.Sprintf("local-split-skeleton-%d", nonce)
-	var folderID int
-	if err := pool.QueryRow(ctx,
-		`INSERT INTO media_folders (type, name, enabled) VALUES ('series', $1, true) RETURNING id`,
-		fmt.Sprintf("Split skeleton %d", nonce),
-	).Scan(&folderID); err != nil {
-		t.Fatalf("seed folder: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{source, target})
-		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id = $1`, folderID)
-	})
-	exec := func(query string, args ...any) {
-		t.Helper()
-		if _, err := pool.Exec(ctx, query, args...); err != nil {
-			t.Fatalf("%s: %v", query, err)
-		}
-	}
-	exec(`INSERT INTO media_items (content_id, type, title, year, status, tvdb_id, genres, poster_path, backdrop_path, logo_path)
-		VALUES ($1, 'series', 'Show', 2025, 'matched', $2, '{}'::text[], '', '', ''),
-		       ($3, 'series', 'Show', 2025, 'unmatched', '', '{}'::text[], '', '', '')`, source, tvdbID, target)
-	exec(`INSERT INTO media_item_roots (media_folder_id, canonical_root_path, content_id) VALUES ($1, $2, $3)`, folderID, root, source)
-	exec(`INSERT INTO media_identity_overrides (media_folder_id, scope, root_path, forced_type, forced_title, forced_year)
-		VALUES ($1, 'root', $2, 'series', 'Show', 2025)`, folderID, root)
-	insertFile := func(name, contentID string, episode int) int {
-		t.Helper()
-		var id int
-		var link any
-		if contentID != "" {
-			link = contentID
-		}
-		if err := pool.QueryRow(ctx, `
-			INSERT INTO media_files (content_id, media_folder_id, file_path, observed_root_path, canonical_root_path,
-			                         base_type, base_title, base_year, season_number, episode_number, file_size)
-			VALUES ($1, $2, $3, $4, $4, 'series', 'Show', 2025, 1, $5, 1024)
-			RETURNING id
-		`, link, folderID, root+"/Season 01/"+name, root, episode).Scan(&id); err != nil {
-			t.Fatalf("seed file: %v", err)
-		}
-		return id
-	}
-	insertFile("Show (2025) - S01E01.mkv", target, 1)
-	newFileID := insertFile("Show (2025) - S01E02.mkv", "", 2)
+	for _, tc := range []struct {
+		itemType, folderType, provider, prefix string
+		episode                                bool
+	}{
+		{itemType: "series", folderType: "series", provider: "tvdb", prefix: "series-tvdb-", episode: true},
+		{itemType: "movie", folderType: "movies", provider: "tmdb", prefix: "movie-tmdb-"},
+	} {
+		t.Run(tc.itemType, func(t *testing.T) {
+			nonce := time.Now().UnixNano() % 100_000_000
+			providerID := fmt.Sprintf("%d", 900_000_000+nonce)
+			libraryRoot := fmt.Sprintf("/split-skeleton-%d/lib", nonce)
+			root := libraryRoot + "/Show (2025) {" + tc.provider + "-" + providerID + "}"
+			source, target := tc.prefix+providerID, fmt.Sprintf("local-split-skeleton-%d", nonce)
+			tmdbID, tvdbID := providerID, ""
+			if tc.provider == "tvdb" {
+				tmdbID, tvdbID = "", providerID
+			}
+			var folderID int
+			if err := pool.QueryRow(ctx,
+				`INSERT INTO media_folders (type, name, enabled) VALUES ($1, $2, true) RETURNING id`,
+				tc.folderType, fmt.Sprintf("Split skeleton %d", nonce),
+			).Scan(&folderID); err != nil {
+				t.Fatalf("seed folder: %v", err)
+			}
+			t.Cleanup(func() {
+				_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{source, target})
+				_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id = $1`, folderID)
+			})
+			exec := func(query string, args ...any) {
+				t.Helper()
+				if _, err := pool.Exec(ctx, query, args...); err != nil {
+					t.Fatalf("%s: %v", query, err)
+				}
+			}
+			exec(`INSERT INTO media_items (content_id, type, title, year, status, tmdb_id, tvdb_id, genres, poster_path, backdrop_path, logo_path)
+				VALUES ($1, $2, 'Show', 2025, 'matched', $3, $4, '{}'::text[], '', '', ''),
+				       ($5, $2, 'Show', 2025, 'unmatched', '', '', '{}'::text[], '', '', '')`,
+				source, tc.itemType, tmdbID, tvdbID, target)
+			exec(`INSERT INTO media_item_roots (media_folder_id, canonical_root_path, content_id) VALUES ($1, $2, $3)`, folderID, root, source)
+			exec(`INSERT INTO media_identity_overrides (media_folder_id, scope, root_path, forced_type, forced_title, forced_year)
+				VALUES ($1, 'root', $2, $3, 'Show', 2025)`, folderID, root, tc.itemType)
+			insertFile := func(name, contentID string, episode int) (int, string) {
+				t.Helper()
+				path := root + "/" + name
+				var id int
+				var link any
+				if contentID != "" {
+					link = contentID
+				}
+				if err := pool.QueryRow(ctx, `
+					INSERT INTO media_files (content_id, media_folder_id, file_path, observed_root_path, canonical_root_path,
+					                         base_type, base_title, base_year, season_number, episode_number, file_size)
+					VALUES ($1, $2, $3, $4, $4, $5, 'Show', 2025, $6, $7, 1024)
+					RETURNING id
+				`, link, folderID, path, root, tc.itemType, min(episode, 1), episode).Scan(&id); err != nil {
+					t.Fatalf("seed file: %v", err)
+				}
+				return id, path
+			}
+			firstName, newName, firstEpisode, newEpisode := "Show (2025) 1080p.mkv", "Show (2025) 2160p.mkv", 0, 0
+			if tc.episode {
+				firstName, newName, firstEpisode, newEpisode = "Season 01/Show (2025) - S01E01.mkv", "Season 01/Show (2025) - S01E02.mkv", 1, 2
+			}
+			insertFile(firstName, target, firstEpisode)
+			newFileID, newPath := insertFile(newName, "", newEpisode)
 
-	service := NewMetadataService(nil, nil, nil,
-		catalog.NewItemRepository(pool), catalog.NewProviderIDRepository(pool),
-		catalog.NewEpisodeRepository(pool), catalog.NewSeasonRepository(pool),
-		catalog.NewLibraryItemRepository(pool), catalog.NewFolderRepository(pool),
-		nil, scanner.NewFileRepository(pool), NewSkippedRootRepository(pool), nil, catalog.NewRootClaimRepository(pool))
-	skeleton, err := service.createOrFindSkeleton(ctx, &models.MediaFile{
-		ID:                newFileID,
-		MediaFolderID:     folderID,
-		FilePath:          root + "/Season 01/Show (2025) - S01E02.mkv",
-		ObservedRootPath:  root,
-		CanonicalRootPath: root,
-		BaseType:          "series",
-		BaseTitle:         "Show",
-		BaseYear:          2025,
-		SeasonNumber:      1,
-		EpisodeNumber:     2,
-	}, folderID, libraryRoot)
-	if err != nil {
-		t.Fatalf("createOrFindSkeleton: %v", err)
-	}
-	if skeleton == nil || skeleton.ContentID != target {
-		t.Fatalf("new file resolved to %+v, want the split target %s", skeleton, target)
-	}
-	var linked string
-	if err := pool.QueryRow(ctx, `SELECT content_id FROM media_files WHERE id = $1`, newFileID).Scan(&linked); err != nil {
-		t.Fatalf("read new file link: %v", err)
-	}
-	if linked != target {
-		t.Fatalf("new file linked to %s, want %s", linked, target)
+			service := NewMetadataService(nil, nil, nil,
+				catalog.NewItemRepository(pool), catalog.NewProviderIDRepository(pool),
+				catalog.NewEpisodeRepository(pool), catalog.NewSeasonRepository(pool),
+				catalog.NewLibraryItemRepository(pool), catalog.NewFolderRepository(pool),
+				nil, scanner.NewFileRepository(pool), NewSkippedRootRepository(pool), nil, catalog.NewRootClaimRepository(pool))
+			skeleton, err := service.createOrFindSkeleton(ctx, &models.MediaFile{
+				ID:                newFileID,
+				MediaFolderID:     folderID,
+				FilePath:          newPath,
+				ObservedRootPath:  root,
+				CanonicalRootPath: root,
+				BaseType:          tc.itemType,
+				BaseTitle:         "Show",
+				BaseYear:          2025,
+				SeasonNumber:      min(newEpisode, 1),
+				EpisodeNumber:     newEpisode,
+			}, folderID, libraryRoot)
+			if err != nil {
+				t.Fatalf("createOrFindSkeleton: %v", err)
+			}
+			if skeleton == nil || skeleton.ContentID != target {
+				t.Fatalf("new file resolved to %+v, want the split target %s", skeleton, target)
+			}
+			var linked string
+			if err := pool.QueryRow(ctx, `SELECT content_id FROM media_files WHERE id = $1`, newFileID).Scan(&linked); err != nil {
+				t.Fatalf("read new file link: %v", err)
+			}
+			if linked != target {
+				t.Fatalf("new file linked to %s, want %s", linked, target)
+			}
+		})
 	}
 }
