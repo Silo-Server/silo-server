@@ -96,7 +96,9 @@ function EpisodeStill({ episode, hidden }: { episode: EpisodeListItem; hidden: b
     <div
       className="media-card-image bg-surface hidden aspect-video w-28 shrink-0 @xl:block @3xl:w-36"
       style={
-        thumbhash ? { backgroundImage: `url(${thumbhash})`, backgroundSize: "cover" } : undefined
+        !hidden && thumbhash
+          ? { backgroundImage: `url(${thumbhash})`, backgroundSize: "cover" }
+          : undefined
       }
     >
       {episode.still_url ? (

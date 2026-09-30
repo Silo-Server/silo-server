@@ -305,7 +305,7 @@ The server does not change catalog responses for these settings: every episode
 payload keeps its image and overview, so cached catalog data stays shared across
 profiles. Clients apply the settings. An episode counts as unwatched while its
 `user_data` is missing, or `played` is false and it is not in progress
-(`is_in_progress` false and no positive `position_seconds`). Series and season
+(`is_in_progress` absent or false and no positive `position_seconds`). Series and season
 artwork and overviews are not affected. Detect support from the settings contract
 capabilities (`manifest_revision` 16 or later).
 

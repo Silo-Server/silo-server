@@ -149,7 +149,7 @@ function EpisodeCarouselCard({
                   : "border-border/30",
               )}
               style={
-                thumbhashUrl
+                !hideImage && thumbhashUrl
                   ? { backgroundImage: `url(${thumbhashUrl})`, backgroundSize: "cover" }
                   : undefined
               }
