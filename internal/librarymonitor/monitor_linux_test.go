@@ -695,31 +695,48 @@ func TestFailedBackendIsReplaced(t *testing.T) {
 	root := t.TempDir()
 	folders := &fakeFolders{}
 	folders.set(library(1, root))
-	var (
-		mu      sync.Mutex
-		created []*fakeBackend
-	)
-	_, _, _, status := fakeMonitor(t, folders, func(cfg *Config) {
+	backends := make(chan *fakeBackend, 4)
+	attempts := make(chan State, 16)
+	m, _, _, status := fakeMonitor(t, folders, func(cfg *Config) {
 		cfg.hooks.primary = func(BackendOptions) (Backend, error) {
 			b := newFakeBackend("inotify")
-			mu.Lock()
-			created = append(created, b)
-			mu.Unlock()
+			backends <- b
 			return b, nil
 		}
+		cfg.hooks.afterAttempt = func(_ string, state State) { attempts <- state }
 	})
 	waitStatus(t, status, "monitoring", onlyMonitoring(1))
-	mu.Lock()
-	first := created[0]
-	mu.Unlock()
+	first := <-backends
 	waitCall(t, first, "add "+root)
 
 	_ = first.Close() // the reader fails
-	waitStatus(t, status, "monitoring on a new backend", func(rows []LibraryStatus) bool {
-		mu.Lock()
-		defer mu.Unlock()
-		return onlyMonitoring(1)(rows) && len(created) == 2 && created[1].addCount(root) == 1
-	})
+	var second *fakeBackend
+	select {
+	case second = <-backends:
+	case <-time.After(waitTimeout):
+		t.Fatal("timed out waiting for a new backend")
+	}
+	waitCall(t, second, "add "+root)
+	// The root's row goes back to exactly what it was, so the status loop
+	// may have nothing new to report: read the rows once the attempt with
+	// the new backend has finished.
+	deadline := time.After(waitTimeout)
+	for {
+		select {
+		case <-attempts:
+		case <-deadline:
+			t.Fatal("timed out waiting for the root to be recorded with the new backend")
+		}
+		m.mu.Lock()
+		rows := m.statusRowsLocked()
+		m.mu.Unlock()
+		if onlyMonitoring(1)(rows) {
+			break
+		}
+	}
+	if len(backends) != 0 || second.addCount(root) != 1 {
+		t.Fatalf("created %d backends after the first and added the root %d times to the second, want 1 and 1", 1+len(backends), second.addCount(root))
+	}
 }
 
 // A rescan request for a library folder queues one library scan for its
