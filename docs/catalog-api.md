@@ -368,6 +368,8 @@ entry has:
   `4.2`.
 
 Clients render each entry as its mark followed by `display`, in list order.
+A phone-width layout shows at most the first three entries, so the row fits
+on one line; wider layouts show them all.
 Marks are plain text, never a source's logo artwork, with one exception: TMDB's
 approved logo may stand in for the `TMDB` mark, as TMDB's terms allow. Clients
 do not recompute the list from the `rating_*` members.
