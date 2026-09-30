@@ -91,10 +91,11 @@ func (a *Admin) ItemStatus(ctx context.Context, itemID string) ([]FileStatus, er
 		return nil, err
 	}
 	rows, err := a.pool.Query(ctx, `
-		SELECT mf.id, COALESCE(t.state, 'off'), COALESCE(t.failure_count, 0), COALESCE(t.last_error, ''),
+		SELECT mf.id, CASE WHEN f.trickplay_enabled THEN COALESCE(t.state, 'pending') ELSE 'off' END, COALESCE(t.failure_count, 0), COALESCE(t.last_error, ''),
 		       t.generated_at, COALESCE(t.thumbnail_count, 0), COALESCE(t.width, 0), COALESCE(t.interval_ms, 0),
 		       COALESCE(t.sheet_bytes, 0)
 		FROM public.media_files mf
+		JOIN public.media_folders f ON f.id = mf.media_folder_id
 		LEFT JOIN public.media_file_trickplay t ON t.media_file_id = mf.id
 		WHERE mf.id = ANY($1)
 		ORDER BY mf.id`, ids)
@@ -122,11 +123,15 @@ func (a *Admin) Regenerate(ctx context.Context, itemID string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	var tracked int
-	if err := a.pool.QueryRow(ctx, `SELECT count(*) FROM public.media_file_trickplay WHERE media_file_id = ANY($1)`, ids).Scan(&tracked); err != nil {
-		return 0, fmt.Errorf("count trickplay rows: %w", err)
+	// Eligibility follows the current library setting, including while a
+	// reconcile has not yet added or removed queue rows.
+	var enabled int
+	if err := a.pool.QueryRow(ctx, `SELECT count(*) FROM public.media_files mf
+		JOIN public.media_folders f ON f.id = mf.media_folder_id
+		WHERE mf.id = ANY($1) AND f.trickplay_enabled`, ids).Scan(&enabled); err != nil {
+		return 0, fmt.Errorf("count enabled trickplay files: %w", err)
 	}
-	if tracked == 0 {
+	if enabled == 0 {
 		return 0, ErrNotOptedIn
 	}
 	requeued, err := a.repo.Regenerate(ctx, ids)

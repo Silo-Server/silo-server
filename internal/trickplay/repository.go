@@ -587,10 +587,19 @@ func (r *Repository) Manifests(ctx context.Context, fileIDs []int, storeIdentity
 // alone; their current sheets keep serving until new ones publish.
 func (r *Repository) Regenerate(ctx context.Context, fileIDs []int) (int, error) {
 	tag, err := r.pool.Exec(ctx, `
-		UPDATE public.media_file_trickplay
-		SET state = 'pending', recipe_version = $2, available_at = '-infinity', failure_count = 0, last_error = '', updated_at = now()
-		WHERE media_file_id = ANY($1) AND state <> 'running' AND recipe_version <= $2`,
-		fileIDs, AlgorithmVersion)
+		INSERT INTO public.media_file_trickplay AS t (media_file_id, recipe_version, available_at)
+		SELECT mf.id, $2, '-infinity'
+		FROM public.media_files mf
+		JOIN public.media_folders f ON f.id = mf.media_folder_id
+		WHERE mf.id = ANY($1) AND f.trickplay_enabled AND f.enabled IS NOT FALSE
+		  AND lower(btrim(f.type)) = ANY($3::text[])
+		  AND mf.missing_since IS NULL AND mf.probe_updated_at IS NOT NULL AND mf.duration > 0
+		  AND jsonb_typeof(mf.video_tracks) = 'array' AND jsonb_array_length(mf.video_tracks) > 0
+		ON CONFLICT (media_file_id) DO UPDATE
+		SET state = 'pending', available_at = '-infinity', failure_count = 0, last_error = '',
+		    recipe_version = EXCLUDED.recipe_version, updated_at = now()
+		WHERE t.state <> 'running' AND t.recipe_version <= $2`,
+		fileIDs, AlgorithmVersion, videoLibraryTypes)
 	if err != nil {
 		return 0, fmt.Errorf("requeue trickplay: %w", err)
 	}

@@ -208,8 +208,9 @@ operations (`internal/trickplay/admin.go`):
 - `regenerateAdminItemTrickplay` requeues the item's rows ahead of the
   backlog and clears their backoff, including `unusable` rows. A row being
   generated is left to finish, and published sheets keep serving until the
-  new ones publish. It answers 409 `capability_disabled` when none of the
-  files has a row, which means the library is off. A replay after the work
+  new ones publish. It checks the current library setting and answers 409
+  `capability_disabled` when none of the files belongs to an opted-in
+  library. Eligible files not yet reconciled are queued by the same request. A replay after the work
   finishes makes the previews again, so it is non-retryable.
 - `listAdminTrickplayLibraries` counts each opted-in library's rows by state
   and sums its sheet bytes.
