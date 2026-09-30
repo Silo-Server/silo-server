@@ -47,10 +47,10 @@ func (c *CachedSetting[T]) Get(ctx context.Context) T {
 		return c.parse("")
 	}
 	c.mu.Lock()
-	value, read, fresh := c.value, c.read, c.now().Before(c.expires)
+	cached, fresh := c.value, c.now().Before(c.expires)
 	c.mu.Unlock()
 	if fresh {
-		return value
+		return cached
 	}
 
 	raw, err := c.settings.Get(ctx, c.key)
@@ -58,14 +58,14 @@ func (c *CachedSetting[T]) Get(ctx context.Context) T {
 		// Another caller may have read successfully while this read ran, so
 		// answer with what the cache holds now, not the earlier snapshot.
 		c.mu.Lock()
-		value, read = c.value, c.read
+		latest, read := c.value, c.read
 		c.mu.Unlock()
 		if read {
-			return value
+			return latest
 		}
 		return c.parse("")
 	}
-	value = c.parse(raw)
+	value := c.parse(raw)
 
 	c.mu.Lock()
 	c.value, c.read = value, true
