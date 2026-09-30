@@ -4126,7 +4126,7 @@ func (s *DetailService) buildVersionChapters(ctx context.Context, file *models.M
 			ThumbnailThumbhash: chapter.ThumbnailThumbhash,
 		}
 		if chapter.ThumbnailPath != "" {
-			ch.ThumbnailURL = s.PresignURL(ctx, strings.Replace(chapter.ThumbnailPath, "/original.", "/w300.", 1), "card")
+			ch.ThumbnailURL = s.PresignURL(ctx, chapter.ThumbnailPath, "card")
 		}
 		chapters = append(chapters, ch)
 	}

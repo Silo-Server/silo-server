@@ -1356,34 +1356,6 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     margin-inline: 0.25rem;
   }
 
-  /* Range-input thumb for the subtitle appearance panel's opacity slider.
-     Mirrors the seek bar's hover thumb so form controls feel native to the
-     player chrome rather than browser-default.                              */
-  .player-subtitle-opacity-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 14px;
-    height: 14px;
-    border-radius: 9999px;
-    background: #ffffff;
-    border: none;
-    box-shadow:
-      0 2px 8px rgb(0 0 0 / 0.5),
-      inset 0 0 0 1px rgb(0 0 0 / 0.12);
-    cursor: pointer;
-  }
-  .player-subtitle-opacity-slider::-moz-range-thumb {
-    width: 14px;
-    height: 14px;
-    border-radius: 9999px;
-    background: #ffffff;
-    border: none;
-    box-shadow:
-      0 2px 8px rgb(0 0 0 / 0.5),
-      inset 0 0 0 1px rgb(0 0 0 / 0.12);
-    cursor: pointer;
-  }
-
   /* ── Media Card ──────────────────────────────────────────── */
   /* Hover effect for poster/backdrop cards.
      Scale is applied to the image inside the overflow-hidden

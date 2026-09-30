@@ -3,9 +3,10 @@ import { RotateCcw } from "lucide-react";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { LanguageSelect } from "@/components/settings/LanguageSelect";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
+import { usePercentDraft } from "@/hooks/usePercentDraft";
 import {
   Select,
   SelectContent,
@@ -86,6 +87,49 @@ function ColorPalette({
           }}
         />
       ))}
+    </div>
+  );
+}
+
+/** A typed percentage value (1-100). A slider makes the low end — where a few
+ * percent is the difference between legible and invisible — fiddly to hit;
+ * typing the number directly doesn't have that problem. */
+function PercentInput({
+  value,
+  onChange,
+  min = 1,
+  disabled,
+  id,
+  descriptionId,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  min?: number;
+  disabled?: boolean;
+  id?: string;
+  descriptionId?: string;
+}) {
+  const { draft, setDraft, commit } = usePercentDraft(value, min, onChange);
+
+  return (
+    <div className="flex items-center gap-2">
+      <Input
+        id={id}
+        aria-describedby={descriptionId}
+        type="number"
+        inputMode="numeric"
+        min={min}
+        max={100}
+        disabled={disabled}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={(e) => commit(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+        }}
+        className="w-20 [appearance:textfield] text-right [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+      />
+      <span className="text-muted-foreground text-sm">%</span>
     </div>
   );
 }
@@ -403,6 +447,17 @@ export default function SubtitleAppearanceSettings() {
           )}
         </SettingRow>
 
+        <SettingRow label="Text opacity" description="How transparent the subtitle text itself is.">
+          {({ id, descriptionId }) => (
+            <PercentInput
+              id={id}
+              descriptionId={descriptionId}
+              value={settings.textOpacity}
+              onChange={(v) => update("textOpacity", v)}
+            />
+          )}
+        </SettingRow>
+
         <SettingRow label="Text outline">
           {({ id, descriptionId }) => (
             <Switch
@@ -459,23 +514,15 @@ export default function SubtitleAppearanceSettings() {
         </SettingRow>
 
         <SettingRow label="Background opacity" description="Only used for boxed subtitles.">
-          {({ descriptionId }) => (
-            <div className="flex w-full max-w-[240px] items-center gap-3">
-              <Slider
-                aria-describedby={descriptionId}
-                value={[settings.backgroundOpacity]}
-                min={0}
-                max={100}
-                step={5}
-                disabled={!isBoxStyle}
-                onValueChange={(values) =>
-                  update("backgroundOpacity", values[0] ?? settings.backgroundOpacity)
-                }
-              />
-              <span className="text-muted-foreground min-w-10 text-right text-xs font-medium">
-                {settings.backgroundOpacity}%
-              </span>
-            </div>
+          {({ id, descriptionId }) => (
+            <PercentInput
+              id={id}
+              descriptionId={descriptionId}
+              min={0}
+              disabled={!isBoxStyle}
+              value={settings.backgroundOpacity}
+              onChange={(v) => update("backgroundOpacity", v)}
+            />
           )}
         </SettingRow>
 

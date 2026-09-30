@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 13;
+export const SETTINGS_REVISION = 14;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -739,6 +739,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
       backgroundColor: "#000000",
       backgroundStyle: "box",
       backgroundOpacity: 75,
+      textOpacity: 100,
       textOutline: false,
       textOutlineColor: "#000000",
       position: "bottom",

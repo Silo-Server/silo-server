@@ -9,7 +9,7 @@
 package settingskeys
 
 // Revision is the manifest revision these bindings were generated from.
-const Revision = 13
+const Revision = 14
 
 // Setting keys, one constant per definition.
 const (
