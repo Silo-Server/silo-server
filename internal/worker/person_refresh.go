@@ -2,8 +2,10 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -16,11 +18,27 @@ type PersonRefresher interface {
 	ClaimCandidates(ctx context.Context, limit int) ([]int64, error)
 }
 
+// Background lookups pause when a provider rate limits: first for
+// personRefreshRateLimitBackoff, doubling on each further limit up to
+// personRefreshMaxRateLimitBackoff, or for as long as the provider asked if
+// that's longer. A lookup that isn't rate limited resets the backoff.
+const (
+	personRefreshRateLimitBackoff    = time.Minute
+	personRefreshMaxRateLimitBackoff = 15 * time.Minute
+)
+
+// rateLimitedLookup is implemented by the refresher's error for a lookup a
+// provider rate limited.
+type rateLimitedLookup interface {
+	RateLimitRetryAfter() time.Duration
+}
+
 type PersonRefreshWorkerConfig struct {
 	// Interval is how often an idle worker looks for due people. While a
 	// sweep keeps claiming full batches, the next batch starts right away.
 	Interval time.Duration
-	// Delay is the pause between background lookups.
+	// Delay is the pause between background lookups until SetRatePerMinute
+	// replaces it.
 	Delay          time.Duration
 	BatchSize      int
 	RefreshTimeout time.Duration
@@ -44,6 +62,13 @@ type PersonRefreshWorker struct {
 	queued      map[int64]struct{}
 	stop        chan struct{}
 	wake        chan struct{}
+
+	// delay is the pause between background lookups, in nanoseconds.
+	delay atomic.Int64
+	// backoff and pausedUntil hold the rate-limit pause, under mu.
+	backoff     time.Duration
+	pausedUntil time.Time
+	now         func() time.Time
 }
 
 func NewPersonRefreshWorker(service PersonRefresher, config PersonRefreshWorkerConfig) *PersonRefreshWorker {
@@ -60,13 +85,26 @@ func NewPersonRefreshWorker(service PersonRefresher, config PersonRefreshWorkerC
 		config.RefreshTimeout = 2 * time.Minute
 	}
 
-	return &PersonRefreshWorker{
+	w := &PersonRefreshWorker{
 		service: service,
 		config:  config,
 		queued:  make(map[int64]struct{}),
 		stop:    make(chan struct{}),
 		wake:    make(chan struct{}, 1),
+		now:     time.Now,
 	}
+	w.delay.Store(int64(config.Delay))
+	return w
+}
+
+// SetRatePerMinute caps background lookups at perMinute, the
+// metadata.person_refresh_per_minute setting. It applies from the next lookup
+// and ignores values below 1.
+func (w *PersonRefreshWorker) SetRatePerMinute(perMinute int) {
+	if perMinute < 1 {
+		return
+	}
+	w.delay.Store(int64(time.Minute / time.Duration(perMinute)))
 }
 
 // Enqueue asks for an on-demand lookup, such as for a person whose page was
@@ -85,6 +123,10 @@ func (w *PersonRefreshWorker) Enqueue(id int64) {
 	w.manualQueue = append(w.manualQueue, id)
 	w.mu.Unlock()
 
+	w.signalWake()
+}
+
+func (w *PersonRefreshWorker) signalWake() {
 	select {
 	case w.wake <- struct{}{}:
 	default:
@@ -127,6 +169,7 @@ func (w *PersonRefreshWorker) drain() {
 // processBatch runs the on-demand queue, then claims and refreshes one
 // background batch. On-demand requests that arrive meanwhile run between its
 // lookups. It reports whether the batch was full, meaning more may be due.
+// While a provider's rate limit pauses background lookups it claims nothing.
 func (w *PersonRefreshWorker) processBatch() bool {
 	if w.service == nil {
 		return false
@@ -134,6 +177,9 @@ func (w *PersonRefreshWorker) processBatch() bool {
 
 	done := map[int64]struct{}{}
 	w.runManual(done)
+	if w.paused() {
+		return false
+	}
 	batch, err := w.service.ClaimCandidates(context.Background(), w.config.BatchSize)
 	if err != nil {
 		slog.Warn("person refresh worker: failed to claim candidates", "error", err)
@@ -149,17 +195,52 @@ func (w *PersonRefreshWorker) processBatch() bool {
 			// Its on-demand lookup already ran, or is pending and will cover it.
 			continue
 		}
-		w.refresh(id)
+		if err := w.refresh(id); w.rateLimited(err) {
+			// The rest of the batch comes back when its claims' lease runs out.
+			return false
+		}
 
-		if w.config.Delay > 0 && index < len(batch)-1 {
+		if delay := time.Duration(w.delay.Load()); delay > 0 && index < len(batch)-1 {
 			select {
-			case <-time.After(w.config.Delay):
+			case <-time.After(delay):
 			case <-w.stop:
 				return false
 			}
 		}
 	}
 	return len(batch) >= w.config.BatchSize
+}
+
+// rateLimited pauses background lookups when err reports a provider rate
+// limit, and otherwise resets the backoff. It reports whether it paused.
+func (w *PersonRefreshWorker) rateLimited(err error) bool {
+	var limited rateLimitedLookup
+	if !errors.As(err, &limited) {
+		w.mu.Lock()
+		w.backoff = 0
+		w.mu.Unlock()
+		return false
+	}
+
+	w.mu.Lock()
+	if w.backoff == 0 {
+		w.backoff = personRefreshRateLimitBackoff
+	} else {
+		w.backoff = min(w.backoff*2, personRefreshMaxRateLimitBackoff)
+	}
+	wait := max(w.backoff, limited.RateLimitRetryAfter())
+	w.pausedUntil = w.now().Add(wait)
+	w.mu.Unlock()
+
+	slog.Warn("person refresh worker: provider rate limited; pausing background lookups", "pause", wait)
+	time.AfterFunc(wait, w.signalWake)
+	return true
+}
+
+func (w *PersonRefreshWorker) paused() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.now().Before(w.pausedUntil)
 }
 
 // runManual refreshes every on-demand request queued so far, recording each
@@ -175,7 +256,7 @@ func (w *PersonRefreshWorker) runManual(done map[int64]struct{}) {
 		w.manualQueue = w.manualQueue[1:]
 		w.mu.Unlock()
 
-		w.refresh(id)
+		_ = w.refresh(id)
 		done[id] = struct{}{}
 
 		w.mu.Lock()
@@ -184,12 +265,14 @@ func (w *PersonRefreshWorker) runManual(done map[int64]struct{}) {
 	}
 }
 
-func (w *PersonRefreshWorker) refresh(id int64) {
+func (w *PersonRefreshWorker) refresh(id int64) error {
 	ctx, cancel := context.WithTimeout(context.Background(), w.config.RefreshTimeout)
 	defer cancel()
-	if _, err := w.service.RefreshPerson(ctx, id); err != nil {
+	_, err := w.service.RefreshPerson(ctx, id)
+	if err != nil {
 		slog.Warn("person refresh worker: refresh failed", "person_id", id, "error", err)
 	}
+	return err
 }
 
 func (w *PersonRefreshWorker) isQueued(id int64) bool {

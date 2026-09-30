@@ -78,3 +78,28 @@ func TestPersonRefreshRecordsOutcomeAfterTimeout(t *testing.T) {
 		t.Fatalf("recorded outcomes = %v, want [failed]", repo.outcomes)
 	}
 }
+
+// A lookup no provider answered because one was rate limiting says so, so the
+// worker can back off; it still reads as ErrPersonMetadataNotFound (#1606).
+func TestPersonRefreshReportsRateLimit(t *testing.T) {
+	limited := erroringPersonProvider{slug: "tmdb", err: errors.New("tmdb: HTTP 429: too many requests")}
+
+	repo := newFakePersonRefreshRepo(models.Person{ID: 11, Name: "Limited", TmdbID: "11"})
+	service := &PersonRefreshService{repo: repo}
+	_, err := service.refreshPersonWithProviders(context.Background(), 11, []Provider{limited})
+	var rateLimited *PersonLookupRateLimitedError
+	if !errors.As(err, &rateLimited) || !errors.Is(err, ErrPersonMetadataNotFound) {
+		t.Fatalf("error = %v, want a PersonLookupRateLimitedError that is ErrPersonMetadataNotFound", err)
+	}
+	if !slices.Equal(repo.outcomes, []catalog.PersonRefreshOutcome{catalog.PersonRefreshFailed}) {
+		t.Fatalf("recorded outcomes = %v, want [failed]", repo.outcomes)
+	}
+
+	// Another provider's answer still makes the lookup a success.
+	repo = newFakePersonRefreshRepo(models.Person{ID: 12, Name: "Answered", TmdbID: "12"})
+	service = &PersonRefreshService{repo: repo}
+	answered := stubPersonProvider{slug: "tvdb", detail: &PersonDetailResult{Name: "Answered"}}
+	if _, err := service.refreshPersonWithProviders(context.Background(), 12, []Provider{limited, answered}); err != nil {
+		t.Fatalf("error = %v, want nil when another provider answered", err)
+	}
+}

@@ -21,6 +21,23 @@ var (
 	ErrPersonMetadataNotFound = errors.New("no person metadata found from any provider")
 )
 
+// PersonLookupRateLimitedError reports a lookup that no provider answered
+// because at least one was rate limiting. RetryAfter is the longest wait a
+// provider asked for, or zero. It unwraps to ErrPersonMetadataNotFound.
+type PersonLookupRateLimitedError struct {
+	RetryAfter time.Duration
+}
+
+func (e *PersonLookupRateLimitedError) Error() string {
+	return "person lookup rate limited by a provider"
+}
+
+func (e *PersonLookupRateLimitedError) Unwrap() error { return ErrPersonMetadataNotFound }
+
+// RateLimitRetryAfter lets callers outside this package back off without
+// importing it.
+func (e *PersonLookupRateLimitedError) RateLimitRetryAfter() time.Duration { return e.RetryAfter }
+
 type personRefreshRepo interface {
 	Get(ctx context.Context, id int64) (*models.Person, error)
 	Update(ctx context.Context, person models.Person) error
@@ -128,6 +145,7 @@ func (s *PersonRefreshService) refreshPersonWithProviders(
 	// error, a timeout, or no provider that supports person lookup says nothing
 	// about them.
 	consulted, failed := 0, false
+	rateLimited, retryAfter := false, time.Duration(0)
 
 	for _, provider := range providers {
 		personProvider, ok := provider.(PersonProvider)
@@ -146,6 +164,10 @@ func (s *PersonRefreshService) refreshPersonWithProviders(
 		if err != nil {
 			if !isProvider404(err) {
 				failed = true
+			}
+			if class, wait := ClassifyProviderError(err); class == ProviderErrorRateLimited {
+				rateLimited = true
+				retryAfter = max(retryAfter, wait)
 			}
 			slog.WarnContext(ctx, "person refresh: provider detail lookup failed", "component", "metadata",
 				"provider", provider.Slug(),
@@ -171,6 +193,9 @@ func (s *PersonRefreshService) refreshPersonWithProviders(
 			outcome = catalog.PersonRefreshFailed
 		}
 		s.recordRefreshOutcome(ctx, id, outcome)
+		if rateLimited {
+			return nil, &PersonLookupRateLimitedError{RetryAfter: retryAfter}
+		}
 		return nil, ErrPersonMetadataNotFound
 	}
 

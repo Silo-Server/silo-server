@@ -13,6 +13,7 @@ export const WORKER_SETTING_DEFAULTS: Readonly<Record<string, string>> = {
   "scanner.workers": "8",
   /** 0 means one encode per CPU core, resolved when the task runs. */
   "metadata.image_workers": "0",
+  "metadata.person_refresh_per_minute": "120",
   "matcher.workers": "8",
   "matcher.batch_size": "500",
 };
