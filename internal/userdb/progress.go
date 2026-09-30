@@ -543,6 +543,17 @@ func ListProgress(db *sql.DB, profileID string, status string, limit, offset int
 	return queryProgressRows(db, query, profileID, limit, offset)
 }
 
+// ListCompletedProgressSince returns completed rows updated after since,
+// newest first. updated_at is whole-second RFC 3339 UTC text, so text order is
+// time order.
+func ListCompletedProgressSince(db *sql.DB, profileID string, since time.Time, limit int) ([]WatchProgress, error) {
+	query := progressListSelect + progressStatusPredicate("completed") + `
+		  AND updated_at > ?
+		ORDER BY updated_at DESC
+		LIMIT ?`
+	return queryProgressRows(db, query, profileID, since.UTC().Format(time.RFC3339), limit)
+}
+
 // ListProgressPage pages by keyset over (updated_at DESC, media_item_id DESC).
 // updated_at is RFC 3339 UTC text at whole-second precision, so text order is
 // time order and the key string compares exactly. The comparison is spelled

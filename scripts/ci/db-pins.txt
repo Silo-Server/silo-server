@@ -39,6 +39,10 @@
 ./internal/catalog TestPlayableTargetResolverProfileStateAvailabilityAndAccess
 ./internal/catalog TestPlayableTargetsRankedMatchesGeneral
 
+# Continue Watching: only an in-progress episode sets how far back the
+# superseded walk reads the profile's completed rows.
+./internal/catalog TestSupersededCutoffIgnoresInProgressMoviesPostgres
+
 # Keyset pages: ratings and collection continuations read an index in page
 # order, with no Sort node.
 ./internal/catalog TestRatingsPageIndexDB

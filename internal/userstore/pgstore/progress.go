@@ -742,6 +742,18 @@ func (s *PostgresUserStore) ListProgress(ctx context.Context, profileID, status 
 	return s.queryProgressRows(ctx, query, s.userID, profileID, limit, offset)
 }
 
+// ListCompletedProgressSince compares on the raw column so
+// idx_uwp_profile_completed serves it as a range scan: a row's whole-second
+// updated_at is after since exactly when the column is at least the next
+// whole second.
+func (s *PostgresUserStore) ListCompletedProgressSince(ctx context.Context, profileID string, since time.Time, limit int) ([]userstore.WatchProgress, error) {
+	query := progressListSelect + progressStatusPredicate("completed") + `
+		  AND updated_at >= $3
+		ORDER BY updated_at DESC
+		LIMIT $4`
+	return s.queryProgressRows(ctx, query, s.userID, profileID, since.UTC().Truncate(time.Second).Add(time.Second), limit)
+}
+
 // ListProgressPage pages by keyset. The column keeps microseconds but the
 // WatchProgress.UpdatedAt string the key is built from is whole seconds
 // (timeToString), so both the sort and the comparison run on
