@@ -1072,6 +1072,25 @@ func (r *PersonRepository) MarkRefreshAttempt(ctx context.Context, id int64) err
 	return nil
 }
 
+// StartRefreshAttemptUnlessStartedSince records that a provider lookup is
+// starting, like MarkRefreshAttempt, unless another lookup for the person
+// started after since. The check and the stamp are one statement, so of two
+// API nodes starting a lookup for the same person after since, only one
+// proceeds. It reports whether this lookup should go ahead.
+func (r *PersonRepository) StartRefreshAttemptUnlessStartedSince(ctx context.Context, id int64, since time.Time) (bool, error) {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE people
+		SET metadata_refresh_attempted_at = NOW(),
+			metadata_refresh_due_at = NOW() + make_interval(secs => $2)
+		WHERE id = $1
+			AND (metadata_refresh_attempted_at IS NULL OR metadata_refresh_attempted_at <= $3)`,
+		id, PersonRefreshAttemptLease.Seconds(), since)
+	if err != nil {
+		return false, fmt.Errorf("start person %d refresh attempt: %w", id, err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 // PersonRefreshOutcome is what a provider lookup for a person found.
 type PersonRefreshOutcome string
 

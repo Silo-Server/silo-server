@@ -73,6 +73,28 @@ func requireDueIn(t *testing.T, label string, state refreshState, want time.Dura
 	}
 }
 
+// Only one lookup starts after a given time, so two API nodes can't both look
+// up the same person (#1606).
+func TestStartRefreshAttemptUnlessStartedSincePostgres(t *testing.T) {
+	repo, pool := personRefreshTestRepo(t)
+	ctx := context.Background()
+	id := seedRefreshPerson(t, pool, "gated")
+	since := time.Now().Add(-time.Minute)
+
+	started, err := repo.StartRefreshAttemptUnlessStartedSince(ctx, id, since)
+	if err != nil || !started {
+		t.Fatalf("first start = %v, %v; want it to go ahead", started, err)
+	}
+	requireDueIn(t, "attempt lease", readRefreshState(t, pool, id), PersonRefreshAttemptLease)
+	if started, err := repo.StartRefreshAttemptUnlessStartedSince(ctx, id, since); err != nil || started {
+		t.Fatalf("second start since the same time = %v, %v; want it skipped", started, err)
+	}
+	// A request made after the last lookup started goes ahead.
+	if started, err := repo.StartRefreshAttemptUnlessStartedSince(ctx, id, time.Now().Add(time.Minute)); err != nil || !started {
+		t.Fatalf("start after the last lookup = %v, %v; want it to go ahead", started, err)
+	}
+}
+
 // Each outcome sets when the sweep looks the person up again (#1606).
 func TestPersonRefreshOutcomeSchedulesNextLookupPostgres(t *testing.T) {
 	repo, pool := personRefreshTestRepo(t)

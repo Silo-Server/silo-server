@@ -42,6 +42,7 @@ type personRefreshRepo interface {
 	Get(ctx context.Context, id int64) (*models.Person, error)
 	Update(ctx context.Context, person models.Person) error
 	MarkRefreshAttempt(ctx context.Context, id int64) error
+	StartRefreshAttemptUnlessStartedSince(ctx context.Context, id int64, since time.Time) (bool, error)
 	RecordRefreshOutcome(ctx context.Context, id int64, outcome catalog.PersonRefreshOutcome) error
 	ClaimRefreshCandidates(ctx context.Context, limit int) ([]int64, error)
 }
@@ -101,22 +102,26 @@ func (s *PersonRefreshService) RefreshPerson(ctx context.Context, id int64) (*mo
 	return s.refreshPersonWithProviders(ctx, id, providers)
 }
 
-// RefreshClaimedPerson refreshes a person the sweep claimed at claimedAt. It
-// skips the lookup when another one started since, such as a person page
-// opened on another API node, so the providers aren't asked twice and the
-// outcome isn't counted twice. claimedAt comes from the API node's clock; a
-// small skew against the database only risks the duplicate lookup this
-// avoids.
-func (s *PersonRefreshService) RefreshClaimedPerson(ctx context.Context, id int64, claimedAt time.Time) (*models.Person, error) {
+// RefreshPersonUnlessStartedSince refreshes a person unless a lookup for them
+// started after since: the sweep's claim, or a person page's request. Another
+// API node may have looked them up meanwhile, and asking the providers twice
+// would also count the outcome twice. Starting the lookup is atomic (see
+// catalog.PersonRepository.StartRefreshAttemptUnlessStartedSince), so only
+// one node proceeds; a skipped call returns the stored person. since comes
+// from the API node's clock; a small skew against the database only risks the
+// duplicate lookup this avoids.
+func (s *PersonRefreshService) RefreshPersonUnlessStartedSince(ctx context.Context, id int64, since time.Time) (*models.Person, error) {
 	if s.repo == nil {
 		return nil, fmt.Errorf("person refresh repository is not configured")
 	}
-	person, err := s.repo.Get(ctx, id)
-	if err == nil && person != nil && person.MetadataRefreshAttemptedAt != nil &&
-		person.MetadataRefreshAttemptedAt.After(claimedAt) {
-		return person, nil
+	if s.pluginResolver == nil || s.pool == nil {
+		return nil, fmt.Errorf("person refresh providers are not configured")
 	}
-	return s.RefreshPerson(ctx, id)
+	providers, err := resolveEnabledProviders(ctx, s.pluginResolver, s.pool, nil)
+	if err != nil {
+		return nil, fmt.Errorf("resolve person providers: %w", err)
+	}
+	return s.refreshPersonSince(ctx, id, providers, since)
 }
 
 // ClaimCandidates claims people due for a background lookup; see
@@ -133,6 +138,17 @@ func (s *PersonRefreshService) refreshPersonWithProviders(
 	id int64,
 	providers []Provider,
 ) (*models.Person, error) {
+	return s.refreshPersonSince(ctx, id, providers, time.Time{})
+}
+
+// refreshPersonSince looks the person up, unless since is set and another
+// lookup started after it.
+func (s *PersonRefreshService) refreshPersonSince(
+	ctx context.Context,
+	id int64,
+	providers []Provider,
+	since time.Time,
+) (*models.Person, error) {
 	person, err := s.repo.Get(ctx, id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -146,7 +162,17 @@ func (s *PersonRefreshService) refreshPersonWithProviders(
 	// Record the attempt before any provider I/O so the backoff survives a
 	// crash mid-refresh. The write is bookkeeping, not a precondition: if it
 	// fails, the refresh still runs and only the backoff is lost.
-	if err := s.repo.MarkRefreshAttempt(ctx, id); err != nil {
+	if since.IsZero() {
+		err = s.repo.MarkRefreshAttempt(ctx, id)
+	} else {
+		var started bool
+		started, err = s.repo.StartRefreshAttemptUnlessStartedSince(ctx, id, since)
+		if err == nil && !started {
+			// Another lookup started after since and records its own outcome.
+			return person, nil
+		}
+	}
+	if err != nil {
 		slog.WarnContext(ctx, "person refresh: failed to record refresh attempt", "component", "metadata",
 			"person_id", id,
 			"error", err,
