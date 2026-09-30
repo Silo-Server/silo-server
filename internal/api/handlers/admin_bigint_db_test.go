@@ -46,6 +46,13 @@ func TestGetAdminAccountReportsLastActivity(t *testing.T) {
 	t.Cleanup(pool.Close)
 	const userID = 2_000_000_417
 	at := time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC)
+	// activity_log.user_id references users, so the account must exist.
+	if _, err := pool.Exec(t.Context(), `INSERT INTO users (id, username, email, password_hash, role, enabled) VALUES ($1, 'last-activity-417', 'last-activity-417@example.invalid', '', 'user', true)`, userID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, userID)
+	})
 	if _, err := pool.Exec(t.Context(), `INSERT INTO activity_log ("timestamp", client_ip, user_id, method, path) VALUES ($1, '192.0.2.1', $2, 'GET', '/'), ($3, '192.0.2.1', $2, 'GET', '/')`, at, userID, at.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
