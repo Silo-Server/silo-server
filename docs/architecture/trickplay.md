@@ -146,7 +146,8 @@ immutable, and signed sheet URLs stay stable for a day.
 Players read previews through the native API:
 
 - `getWatchState` marks each version `trickplay_available`, from one batched
-  query over the item's files (`catalog.TrickplayAvailability`). A failed
+  query over the item's files (`catalog.TrickplayAvailability`); batch detail
+  reads share a lookup over all files on the page. A failed
   lookup leaves every version without previews rather than failing the
   detail.
 - `GET /api/v2/watch/{id}/trickplay?file_id=` returns one file's manifest:
