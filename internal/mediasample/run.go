@@ -92,6 +92,10 @@ type Result struct {
 	Frames []FrameStats `json:"frames,omitempty"`
 	// Images holds the decoded images when the request asked for Images.
 	Images []Image `json:"images,omitempty"`
+	// Sheets holds the sprite sheets, in order, when the request asked for
+	// Sheets, and SheetFrames how their cells were filled.
+	Sheets      []Sheet     `json:"sheets,omitempty"`
+	SheetFrames SheetFrames `json:"sheet_frames,omitzero"`
 	// Decoder names the attempt that produced the result: "software", or
 	// "hardware:<accel>".
 	Decoder string `json:"decoder"`
@@ -126,9 +130,9 @@ func (r Runner) runAttempt(ctx context.Context, req Request, attempt Attempt, to
 	if attempt.Hardware {
 		decoder = "hardware:" + r.HWAccel
 	}
-	// A hardware attempt reserves its device, and an image attempt settles
-	// its filters, before its timeout starts, so neither eats into the
-	// decode's time.
+	// A hardware attempt reserves its device, and an image or sheet attempt
+	// settles its filters, before its timeout starts, so neither eats into
+	// the decode's time.
 	hw, release, failure := r.reserveHardware(attempt)
 	if failure != nil {
 		failure.Decoder = decoder
@@ -144,13 +148,22 @@ func (r Runner) runAttempt(ctx context.Context, req Request, attempt Attempt, to
 		}
 		imageArgs = args
 	}
+	var sheetsGraph string
+	if req.Sheets != nil {
+		graph, failure := r.prepareSheets(ctx, req, attempt, toneMap)
+		if failure != nil {
+			failure.Decoder = decoder
+			return Result{}, failure
+		}
+		sheetsGraph = graph
+	}
 	attemptCtx := ctx
 	if attempt.TimeoutSeconds > 0 {
 		var cancel context.CancelFunc
 		attemptCtx, cancel = context.WithTimeout(ctx, time.Duration(attempt.TimeoutSeconds*float64(time.Second)))
 		defer cancel()
 	}
-	run := attemptRun{runner: r, ctx: ctx, attemptCtx: attemptCtx, attempt: attempt, hw: hw, decoder: decoder}
+	run := attemptRun{runner: r, ctx: ctx, attemptCtx: attemptCtx, attempt: attempt, hw: hw, decoder: decoder, sheetsGraph: sheetsGraph}
 	switch {
 	case req.At != nil:
 		return run.image(req, imageArgs)
@@ -195,24 +208,34 @@ type attemptRun struct {
 	attempt    Attempt
 	hw         hardwareDecode
 	decoder    string
+	// sheetsGraph is the video chain of a Sheets request.
+	sheetsGraph string
 }
 
-// samples runs a Samples request. It probes the input first (see probe.go),
-// then reads it through a concat list when its container seeks to keyframes,
-// and otherwise as one keyframes-only window whose keyframes it picks the
-// samples from.
+// samples runs a Samples request. Unless it reads through, it probes the
+// input first (see probe.go), then reads it through a concat list when its
+// container seeks to keyframes. Otherwise it reads one keyframes-only window
+// and picks the samples from its keyframes.
 func (a attemptRun) samples(req Request) (Result, *AttemptError) {
-	header := &inputHeaderParser{}
-	if _, failure := a.exec(req, probeArgs(req.Input), nil, false, header.line); failure != nil {
-		return Result{}, failure
-	}
-	if header.info.seeksToKeyframes() {
-		return a.decode(req, header.info.StartSeconds)
+	if !req.Samples.ReadThrough {
+		header := &inputHeaderParser{}
+		if _, failure := a.exec(req, probeArgs(req.Input), nil, false, header.line); failure != nil {
+			return Result{}, failure
+		}
+		if header.info.seeksToKeyframes() {
+			if req.Sheets != nil {
+				return a.sheets(req, req.Samples.Seconds, header.info.StartSeconds)
+			}
+			return a.decode(req, header.info.StartSeconds)
+		}
 	}
 	window := sampledWindow(req.Samples.Seconds)
 	windowReq := req
 	windowReq.Samples = nil
 	windowReq.Window = &window
+	if req.Sheets != nil {
+		return a.sheets(windowReq, req.Samples.Seconds, 0)
+	}
 	result, failure := a.decode(windowReq, 0)
 	if failure != nil {
 		return Result{}, failure
@@ -261,19 +284,51 @@ func (a attemptRun) decode(req Request, inputStart float64) (Result, *AttemptErr
 	return result, nil
 }
 
+// sheets runs a Sheets request for the sample times, reading req's list
+// (with inpoints offset by inputStart) or window, and tiles the frames.
+func (a attemptRun) sheets(req Request, times []float64, inputStart float64) (Result, *AttemptError) {
+	args, stdinBytes, err := buildSheetsArgs(req, a.attempt, a.hw, inputStart, a.sheetsGraph)
+	if err != nil {
+		return Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonArgs, Err: err}
+	}
+	offset := 0.0
+	if req.Window != nil {
+		offset = req.Window.StartSeconds
+	}
+	assembler := newSheetAssembler(*req.Sheets, times, req.Samples != nil, offset)
+	if failure := a.execTo(req, args, stdinBytes, assembler, assembler.line); failure != nil {
+		return Result{}, failure
+	}
+	sheets, frames, failure := assembler.finish()
+	if failure != nil {
+		failure.Decoder = a.decoder
+		return Result{}, failure
+	}
+	return Result{Decoder: a.decoder, Sheets: sheets, SheetFrames: frames}, nil
+}
+
 // exec runs one ffmpeg process of the attempt with args, feeding it stdin
 // when that is not nil and routing its log to handlers. It returns the
 // process's stdout when captureStdout is set.
 func (a attemptRun) exec(req Request, args []string, stdinBytes []byte, captureStdout bool, handlers ...func(string)) (*bytes.Buffer, *AttemptError) {
-	var stdin io.Reader
-	if stdinBytes != nil {
-		stdin = bytes.NewReader(stdinBytes)
-	}
 	var stdout *bytes.Buffer
 	var stdoutWriter io.Writer
 	if captureStdout {
 		stdout = &bytes.Buffer{}
 		stdoutWriter = stdout
+	}
+	if failure := a.execTo(req, args, stdinBytes, stdoutWriter, handlers...); failure != nil {
+		return nil, failure
+	}
+	return stdout, nil
+}
+
+// execTo runs one ffmpeg process of the attempt as exec does, writing its
+// stdout to stdoutWriter, which may be nil.
+func (a attemptRun) execTo(req Request, args []string, stdinBytes []byte, stdoutWriter io.Writer, handlers ...func(string)) *AttemptError {
+	var stdin io.Reader
+	if stdinBytes != nil {
+		stdin = bytes.NewReader(stdinBytes)
 	}
 	router := newStderrRouter(handlers...)
 	stderr, waitStderr := router.start()
@@ -312,7 +367,7 @@ func (a attemptRun) exec(req Request, args []string, stdinBytes []byte, captureS
 		case !replaced && state == nil:
 			failure.Reason = ReasonStart
 		}
-		return nil, failure
+		return failure
 	}
-	return stdout, nil
+	return nil
 }

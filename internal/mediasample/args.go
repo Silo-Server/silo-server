@@ -98,17 +98,20 @@ func buildArgs(req Request, attempt Attempt, hw hardwareDecode, inputStart float
 	if req.Stats != nil {
 		args = append(args, "-t", duration,
 			"-map", "0:V:0", "-an", "-sn", "-dn",
-			"-vf", req.statsGraph(attempt, hw.Accel).filter,
+			videoFilterOption, req.statsGraph(attempt, hw.Accel).filter,
 			"-f", "null", "-")
 	}
 	return args, nil, nil
 }
 
 // hideBanner keeps ffmpeg from printing its build banner; logLevelOption
-// sets its log level.
+// sets its log level. videoFilterOption and pixelFormatOption set an
+// output's video filter chain and pixel format.
 const (
-	hideBanner     = "-hide_banner"
-	logLevelOption = "-loglevel"
+	hideBanner        = "-hide_banner"
+	logLevelOption    = "-loglevel"
+	videoFilterOption = "-vf"
+	pixelFormatOption = "-pix_fmt"
 )
 
 // quietArgs are the global options that open every sampling ffmpeg: no
@@ -132,9 +135,54 @@ func buildSamplesArgs(req Request, attempt Attempt, hw hardwareDecode, args []st
 	args = append(args, concatInputArgs...)
 	args = append(args, "-i", concatListInput,
 		"-map", "0:V:0", "-an", "-sn", "-dn",
-		"-vf", req.statsGraph(attempt, hw.Accel).filter,
+		videoFilterOption, req.statsGraph(attempt, hw.Accel).filter,
 		"-f", "null", "-")
 	return args, list, nil
+}
+
+// buildSheetsArgs builds the arguments of a Sheets request whose video chain
+// is graph (see buildSheetsGraph). A Samples request reads its list as
+// buildSamplesArgs does and returns the list for stdin; a Window request,
+// which a Samples request becomes for inputs the list cannot seek in, decodes
+// the window's keyframes. Either way the frames go to stdout raw, and hardware
+// attempts leave VideoToolbox frames in system memory, as images do.
+func buildSheetsArgs(req Request, attempt Attempt, hw hardwareDecode, inputStart float64, graph string) ([]string, []byte, error) {
+	if (req.Window == nil) == (req.Samples == nil) || req.Sheets == nil {
+		return nil, nil, errors.New("sheets need exactly one sampling mode")
+	}
+	var decode []string
+	if attempt.Hardware {
+		var err error
+		if decode, err = hardwareDecodeArgs(hw, false); err != nil {
+			return nil, nil, err
+		}
+	}
+	args := quietArgs(logLevel)
+	if req.Threads > 0 {
+		threads := strconv.Itoa(req.Threads)
+		args = append(args, "-threads", threads, "-filter_threads", threads)
+	}
+	if req.Samples != nil {
+		list, err := buildConcatListSpan(req.Input, req.Samples.Seconds, inputStart, sheetSampleSpanSeconds)
+		if err != nil {
+			return nil, nil, err
+		}
+		args = append(args, decode...)
+		args = append(args, concatInputArgs...)
+		args = append(args, "-i", concatListInput)
+		return append(args, sheetsOutputArgs(graph)...), list, nil
+	}
+	// The window's duration bounds the input, not the output: an output -t
+	// drops frames after the filters logged them, and the log would no
+	// longer count the frames on stdout.
+	args = append(args, "-skip_frame:v", "nokey")
+	args = append(args, decode...)
+	args = append(args,
+		"-ss", formatSeconds(req.Window.StartSeconds),
+		"-t", formatSeconds(req.Window.DurationSeconds),
+		"-i", req.Input,
+	)
+	return append(args, sheetsOutputArgs(graph)...), nil, nil
 }
 
 // formatSeconds prints seconds with at most millisecond precision and no
