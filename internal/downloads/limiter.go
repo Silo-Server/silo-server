@@ -38,9 +38,16 @@ func (l *QuantityLimiter) Reload(maxConcurrent, maxPerPeriod int, periodDuration
 	l.periodDuration = periodDuration
 }
 
-// Check verifies the user has not exceeded their download limits.
-// The batchSize parameter accounts for series batch downloads where
-// multiple records will be created at once.
+// Check verifies the user has not exceeded their download limits. batchSize
+// is the number of records the request creates: one, or every episode of a
+// series batch.
+//
+// The concurrent limit only needs one free slot, whatever the batch size. A
+// batch's episodes are downloaded one after another, so counting each against
+// the limit made a series with more episodes than the limit impossible to
+// download at all. Its queued records still count as active afterwards, so
+// the user can't start more until they finish. The period quota does count
+// the whole batch.
 func (l *QuantityLimiter) Check(ctx context.Context, userID int, batchSize int) error {
 	if l == nil {
 		return nil
@@ -57,7 +64,7 @@ func (l *QuantityLimiter) Check(ctx context.Context, userID int, batchSize int) 
 		if err != nil {
 			return err
 		}
-		if active+batchSize > maxConc {
+		if active+min(batchSize, 1) > maxConc {
 			return ErrConcurrentLimitReached
 		}
 	}
