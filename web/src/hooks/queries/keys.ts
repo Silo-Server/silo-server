@@ -103,6 +103,8 @@ export const watchlistKeys = {
   all: ["watchlist"] as const,
   list: () => ["watchlist", "list"] as const,
   check: (itemId: string) => ["watchlist", "check", itemId] as const,
+  /** Watchlist entries for titles the library doesn't have yet. */
+  titles: () => ["watchlist", "titles"] as const,
 };
 
 export const historyKeys = {

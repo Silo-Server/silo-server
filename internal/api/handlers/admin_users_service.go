@@ -288,6 +288,7 @@ func (h *AdminHandler) DeleteAdminAccount(ctx context.Context, id int, revision,
 	if h.OnUserSessionsRevoked != nil {
 		h.OnUserSessionsRevoked(ctx, id)
 	}
+	h.sweepWatchlistTitles(ctx, id)
 	h.invalidateStats(ctx, cache.ChannelAdmin, cache.EventAdminStatsInvalidated, strconv.Itoa(id))
 	return nil
 }

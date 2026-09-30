@@ -38,6 +38,7 @@ export type OverlayId =
   | "network"
   // ribbons (status / awards)
   | "show_status"
+  | "request_status"
   | "imdb_top_250"
   | "rt_certified_fresh";
 
@@ -72,6 +73,12 @@ export interface OverlayData {
   show_status?: string;
   imdb_top_250?: number | null;
   rt_certified_fresh?: boolean | null;
+  // request status: only titles outside the library carry these, so library
+  // cards never show the badge.
+  request_status?: string; // badge label: "Downloading 43%", "Out Dec 18"
+  request_status_icon?: OverlayIconId | null;
+  request_status_attention?: boolean; // TMDB lost the title; paints amber
+  request_download_percent?: number | null; // drives the card's download bar
 }
 
 // Per-overlay user configuration. accentColor and showIcon are optional
@@ -147,6 +154,9 @@ export interface OverlayDef {
   ratingSource?: string;
   getValue: (data: OverlayData) => string | null;
   getIcon?: (data: OverlayData) => OverlayIconId | null; // dynamic icon by data
+  // Accent by data, used when the viewer has not picked an accent for the
+  // badge; null falls back to defaultAccent.
+  getAccent?: (data: OverlayData) => string | null;
 }
 
 // Typed icon identifiers — every icon used anywhere must be in this union.
@@ -170,6 +180,9 @@ export type OverlayIconId =
   | "calendar"
   | "globe"
   | "users"
+  | "download"
+  | "hourglass"
+  | "alert"
   // brand marks (inline SVG)
   | "hdr10"
   | "hdr"

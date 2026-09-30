@@ -14,6 +14,9 @@ vi.mock("@/hooks/queries/useRequests", () => ({
   useCreateMediaRequest: () => ({ mutateAsync: mocks.mutate, isPending: false }),
 }));
 vi.mock("@/hooks/useDocumentTitle", () => ({ useDocumentTitle: () => {} }));
+vi.mock("@/hooks/useWatchlistTitleToggle", () => ({
+  useWatchlistTitleToggle: () => ({ enabled: false, toggle: vi.fn(), isPending: () => false }),
+}));
 
 import RequestBrowse from "./RequestBrowse";
 

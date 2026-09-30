@@ -799,6 +799,9 @@ GET /api/v2/watch/{id}	non-media
 DELETE /api/v2/watched/{id}	non-media
 POST /api/v2/watched/{id}	non-media
 GET /api/v2/watchlist	non-media
+GET /api/v2/watchlist/titles	non-media
+DELETE /api/v2/watchlist/titles/{media_type}/{tmdb_id}	non-media
+PUT /api/v2/watchlist/titles/{media_type}/{tmdb_id}	non-media
 DELETE /api/v2/watchlist/{item_id}	non-media
 GET /api/v2/watchlist/{item_id}	non-media
 PUT /api/v2/watchlist/{item_id}	non-media
@@ -1984,6 +1987,9 @@ GET /api/v2/watch/{id}	non-media
 DELETE /api/v2/watched/{id}	non-media
 POST /api/v2/watched/{id}	non-media
 GET /api/v2/watchlist	non-media
+GET /api/v2/watchlist/titles	non-media
+DELETE /api/v2/watchlist/titles/{media_type}/{tmdb_id}	non-media
+PUT /api/v2/watchlist/titles/{media_type}/{tmdb_id}	non-media
 DELETE /api/v2/watchlist/{item_id}	non-media
 GET /api/v2/watchlist/{item_id}	non-media
 PUT /api/v2/watchlist/{item_id}	non-media

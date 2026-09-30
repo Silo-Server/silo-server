@@ -284,7 +284,7 @@ func TestGetItemVersionsSkipsPresentationAndPlaybackSafety(t *testing.T) {
 func TestGetItemVersionsKeepsChapterImagesAndEmptyFiles(t *testing.T) {
 	f := newVersionsFixture(t)
 	file := f.files.files[f.ids["movie"]][0]
-	file.Chapters[0].ThumbnailPath = "chapters/movie/original.jpg"
+	file.Chapters[0].ThumbnailPath = "chapter-images/7/0/w300.webp"
 	file.ExternalSubtitles = []models.ExternalSubtitle{{Path: "/media/movie.fr.srt", Language: "fr", Format: "srt", Forced: true}}
 	detail, err := f.svc.GetItemDetail(t.Context(), f.ids["movie"], AccessFilter{})
 	if err != nil {
@@ -302,6 +302,10 @@ func TestGetItemVersionsKeepsChapterImagesAndEmptyFiles(t *testing.T) {
 	}
 	if f.images.calls.Load() != 1 {
 		t.Fatal("versions must still resolve the returned chapter thumbnail")
+	}
+	// thumbnail_path names the served object and is signed as stored.
+	if got, want := versions[0].Chapters[0].ThumbnailURL, "https://images.invalid/chapter-images/7/0/w300.webp"; got != want {
+		t.Fatalf("chapter thumbnail_url = %q, want %q", got, want)
 	}
 	f.files.files[f.ids["movie"]] = nil
 	versions, err = f.svc.GetItemVersions(t.Context(), f.ids["movie"], AccessFilter{})

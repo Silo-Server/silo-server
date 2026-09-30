@@ -635,24 +635,32 @@ func (r *fakeFileRepo) ListByObservedRootPath(_ context.Context, folderID int, o
 	return out, nil
 }
 
-func (r *fakeFileRepo) UpdateContentIDByObservedRootPath(_ context.Context, folderID int, observedRootPath, contentID string) (int, error) {
+func (r *fakeFileRepo) UpdateContentIDByObservedRootPath(_ context.Context, folderID int, observedRootPath, contentID string) (int, []string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	updated := 0
+	var replaced []string
 	for _, files := range r.groupFiles {
 		for _, file := range files {
 			if file == nil || file.MediaFolderID != folderID || file.ObservedRootPath != observedRootPath {
 				continue
 			}
-			if existing := r.contentIDs[file.ID]; existing == contentID {
+			existing, ok := r.contentIDs[file.ID]
+			if !ok {
+				existing = file.ContentID
+			}
+			if existing == contentID {
 				continue
+			}
+			if existing != "" && !slices.Contains(replaced, existing) {
+				replaced = append(replaced, existing)
 			}
 			r.contentIDs[file.ID] = contentID
 			updated++
 		}
 	}
 	r.rootContent[fmt.Sprintf("%d:%s", folderID, observedRootPath)] = contentID
-	return updated, nil
+	return updated, replaced, nil
 }
 
 // setRootContent pre-seeds a root path -> content_id mapping for testing.

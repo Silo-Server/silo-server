@@ -36,6 +36,13 @@ vi.mock("@/hooks/queries/useRequests", () => ({
   },
   useCancelMediaRequest: () => ({ mutate: mocks.cancel, isPending: false }),
   useToggleRequestFollow: () => ({ mutate: mocks.toggleFollow, isPending: false }),
+  useRequestFeatureStatus: () => ({ data: undefined }),
+}));
+vi.mock("@/hooks/queries/watchlistTitles", () => ({
+  useToggleWatchlistTitle: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+vi.mock("@/hooks/useWatchlistTitleToggle", () => ({
+  useWatchlistTitleToggle: () => ({ enabled: false, toggle: vi.fn(), isPending: () => false }),
 }));
 vi.mock("@/hooks/queries/catalogRead", () => ({
   useCatalogItemDetail: (id: string | undefined) => {

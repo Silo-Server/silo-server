@@ -2927,6 +2927,9 @@ func main() {
 			if sweeper := metadata.NewArtworkStorageSweeper(deps.DB, deps.Blobs.Assets); sweeper != nil {
 				taskMgr.Register(tasks.NewSweepArtworkStorageTask(sweeper, settingsRepo, identity))
 			}
+			if cleaner := chapterthumbs.NewOriginalsCleaner(deps.DB, deps.Blobs.Assets); cleaner != nil {
+				taskMgr.Register(tasks.NewCleanupChapterThumbnailOriginalsTask(cleaner, settingsRepo, identity))
+			}
 		}
 		if pluginAutoUpdater != nil {
 			taskMgr.Register(tasks.NewCheckPluginUpdatesTask(pluginAutoUpdater))
@@ -3444,6 +3447,9 @@ func main() {
 			}
 			compatDeps.SettingsRepo = settingsRepo
 			compatDeps.PersonRepo = personRepo
+			if deps.CollectionService != nil {
+				compatDeps.CollectionPosters = deps.CollectionService
+			}
 			if watchProviderService != nil {
 				compatDeps.WatchScrobbler = watchProviderService
 			}
