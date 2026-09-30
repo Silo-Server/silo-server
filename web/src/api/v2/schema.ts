@@ -10520,6 +10520,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/watch/{id}/trickplay": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get the seek-bar previews of one of an item's files. Versions whose trickplay_available is true have them. */
+    get: operations["getWatchTrickplay"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/watched/{id}": {
     parameters: {
       query?: never;
@@ -26796,6 +26813,8 @@ export interface components {
       /** @example 1080p */
       resolution: string;
       subtitle_tracks?: components["schemas"]["WatchSubtitleTrack"][];
+      /** @description Whether seek-bar previews are published for this file; read them with getWatchTrickplay */
+      trickplay_available: boolean;
       video_tracks?: components["schemas"]["WatchVideoTrack"][];
     };
     WatchlistCollection: {
@@ -27739,6 +27758,65 @@ export interface components {
        * @example 1995
        */
       year?: number;
+    };
+    WatchTrickplay: {
+      /**
+       * Format: date-time
+       * @description When the sheet URLs stop working; read the previews again for fresh ones
+       * @example 2026-01-02T03:04:05.000Z
+       */
+      expires_at: string;
+      /**
+       * @description Opaque identifier
+       * @example 42
+       */
+      file_id: string;
+      /**
+       * Format: int64
+       * @description Media time each thumbnail covers: thumbnail i shows what plays from i*interval_ms to (i+1)*interval_ms
+       * @example 10000
+       */
+      interval_ms: number;
+      /** @description Every sheet, in order. Sheet s holds thumbnails s*tile_columns*tile_rows onward, left to right and top to bottom; every sheet has the full grid, black after the last thumbnail */
+      sheets: components["schemas"]["WatchTrickplaySheet"][];
+      /**
+       * Format: int64
+       * @example 720
+       */
+      thumbnail_count: number;
+      /**
+       * Format: int64
+       * @description Pixels
+       * @example 126
+       */
+      thumbnail_height: number;
+      /**
+       * Format: int64
+       * @description Pixels
+       * @example 300
+       */
+      thumbnail_width: number;
+      /**
+       * Format: int64
+       * @description Thumbnails across a sheet
+       * @example 10
+       */
+      tile_columns: number;
+      /**
+       * Format: int64
+       * @description Thumbnails down a sheet
+       * @example 10
+       */
+      tile_rows: number;
+    };
+    WatchTrickplaySheet: {
+      /**
+       * Format: int64
+       * @example 0
+       */
+      index: number;
+      /** @description A JPEG image; the URL carries its own authorization */
+      url: string;
     };
     WatchUserData: {
       /**
@@ -121670,6 +121748,120 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["WatchDetail"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getWatchTrickplay: {
+    parameters: {
+      query: {
+        /** @description The file being played, one of the item's versions */
+        file_id: string;
+      };
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+        /** @description The stable device identifier used to resolve playback preferences */
+        "X-Silo-Device-Id"?: string;
+      };
+      path: {
+        /** @description A movie or episode */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WatchTrickplay"];
         };
       };
       /** @description Bad Request */

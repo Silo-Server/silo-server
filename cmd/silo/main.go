@@ -2783,6 +2783,7 @@ func main() {
 				trickplayService.Start(appCtx)
 				taskMgr.Register(tasks.NewQueueSeekPreviewsTask(trickplayService))
 				deps.Trickplay = trickplayService
+				deps.TrickplayReader = trickplay.NewReader(deps.DB, deps.Blobs.Assets, deps.ArtworkResolver)
 			}
 		}
 		catalogSearchIndexer := catalog.NewCatalogSearchIndexerFromSettings(deps.DB, settingsRepo, catalogSearchStartupSettings)

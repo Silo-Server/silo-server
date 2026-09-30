@@ -7247,6 +7247,48 @@
       "body_file": "get_watch_tonight_profile_header_required.json"
     },
     {
+      "name": "get_watch_trickplay_not_found",
+      "operation_id": "getWatchTrickplay",
+      "scenario": "A file the item does not list, or one without published previews: not found.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/watch/movie:heat-1995/trickplay?file_id=7",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_watch_trickplay_not_found.json"
+    },
+    {
+      "name": "get_watch_trickplay_ok",
+      "operation_id": "getWatchTrickplay",
+      "scenario": "The seek-bar previews of a movie's file: eleven sheets of 10x10 thumbnails, one every ten seconds, each sheet URL signed.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/watch/movie:heat-1995/trickplay?file_id=42",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/WatchTrickplay",
+      "body_file": "get_watch_trickplay_ok.json"
+    },
+    {
       "name": "get_watchlist_entry_authentication_required",
       "operation_id": "getWatchlistEntry",
       "scenario": "A watchlist read without a credential.",
