@@ -371,6 +371,17 @@ func (s *interestTrackingStore) AddToWatchlist(ctx context.Context, profileID, m
 	return err
 }
 
+// AddToWatchlistAt is the add that keeps an earlier added_at: watch-provider
+// and Plex imports, and promotion of a watchlisted title that has since
+// reached the library, all write through it.
+func (s *interestTrackingStore) AddToWatchlistAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error) {
+	inserted, err := s.UserStore.AddToWatchlistAt(ctx, profileID, mediaItemID, addedAt)
+	if err == nil && inserted {
+		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
+	}
+	return inserted, err
+}
+
 func (s *interestTrackingStore) RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) error {
 	err := s.UserStore.RemoveFromWatchlist(ctx, profileID, mediaItemID)
 	if err == nil {

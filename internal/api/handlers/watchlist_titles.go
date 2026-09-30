@@ -1,0 +1,237 @@
+package handlers
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"net/http"
+	"time"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/watchlist"
+	"github.com/Silo-Server/silo-server/internal/watchsync"
+)
+
+// Watchlist entries for titles the library doesn't have yet. The entries live
+// in watchlist.Titles; this handler adds the library-watchlist side: an added
+// title the library already has goes onto the library watchlist, promotion
+// runs ahead of library watchlist reads, and a promoted entry fires the same
+// effects as a manual add.
+
+var _ watchlist.Effects = (*PersonalDataHandler)(nil)
+
+// SetWatchlistTitles wires the service that keeps watchlist entries for
+// titles the library doesn't have. Without it the watchlist reads skip
+// promotion and the title operations answer 500.
+func (h *PersonalDataHandler) SetWatchlistTitles(titles *watchlist.Titles) {
+	h.watchlistTitles = titles
+}
+
+// WatchlistPromoted implements watchlist.Effects: an entry that moved onto the
+// library watchlist notifies the same listeners as a manual add.
+func (h *PersonalDataHandler) WatchlistPromoted(ctx context.Context, userID int, profileID, contentID string) {
+	h.dispatchLocalListEvent(ctx, watchsync.ListKindWatchlist, watchsync.ListChangeAdded, userID, profileID, contentID)
+	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, userID, profileID)
+	publishUserStateEvent(ctx, h.EventsHub, userID, profileID, contentID, "", "watchlist", userStateEventState{
+		InWatchlist: boolPtr(true),
+	})
+}
+
+// watchlistAccess is the viewer's access filter naming the viewer, as the
+// watchlist promotion hooks read it.
+func (v PersonalListViewer) watchlistAccess() catalog.AccessFilter {
+	access := v.Access
+	access.UserID, access.ProfileID = v.UserID, v.ProfileID
+	return access
+}
+
+func (v PersonalListViewer) watchlistViewer() watchlist.Viewer {
+	return watchlist.Viewer{UserID: v.UserID, ProfileID: v.ProfileID, Access: v.watchlistAccess()}
+}
+
+// promoteWatchlist moves the viewer's entries whose titles the library now
+// has onto the library watchlist before a library watchlist read. A failure
+// is logged and the read goes on.
+func (h *PersonalDataHandler) promoteWatchlist(ctx context.Context, viewer PersonalListViewer) {
+	if h.watchlistTitles != nil {
+		h.watchlistTitles.PromoteWatchlist(ctx, viewer.watchlistAccess())
+	}
+}
+
+func (h *PersonalDataHandler) promoteWatchlistItem(ctx context.Context, viewer PersonalListViewer, itemID string) {
+	if h.watchlistTitles != nil {
+		h.watchlistTitles.PromoteWatchlistItem(ctx, viewer.watchlistAccess(), itemID)
+	}
+}
+
+func (h *PersonalDataHandler) titlesOrError() (*watchlist.Titles, error) {
+	if h.watchlistTitles == nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Watchlist titles are not configured")
+	}
+	return h.watchlistTitles, nil
+}
+
+// ListWatchlistTitlesPage promotes the viewer's entries the library now has,
+// then answers at most limit of the remaining entries for titles the library
+// doesn't have, newest first, strictly after the key (nil = from the newest).
+func (h *PersonalDataHandler) ListWatchlistTitlesPage(ctx context.Context, viewer PersonalListViewer, after *watchlist.PageKey, limit int) ([]watchlist.Entry, error) {
+	titles, err := h.titlesOrError()
+	if err != nil {
+		return nil, err
+	}
+	h.promoteWatchlist(ctx, viewer)
+	entries, err := titles.ListPage(ctx, viewer.watchlistViewer(), after, limit)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list watchlist titles")
+	}
+	return entries, nil
+}
+
+// FindWatchlistTitle returns the title holding the TMDB ID, current or
+// former, or nil when no watchlist tracks it.
+func (h *PersonalDataHandler) FindWatchlistTitle(ctx context.Context, mediaType string, tmdbID int) (*watchlist.Title, error) {
+	titles, err := h.titlesOrError()
+	if err != nil {
+		return nil, err
+	}
+	title, err := titles.Find(ctx, mediaType, tmdbID)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to look up the watchlist title")
+	}
+	return title, nil
+}
+
+// WatchlistTitleAdded is where AddWatchlistTitle put a title: on the library
+// watchlist (ItemID set) or as an entry for a title the library doesn't have.
+type WatchlistTitleAdded struct {
+	ItemID  string
+	AddedAt time.Time
+}
+
+// AddWatchlistTitle puts a title on the viewer's watchlist. When exactly one
+// library item has the title and the viewer may see it, the item goes onto
+// the library watchlist through the normal add, with its effects; otherwise
+// the title is kept as an entry until the library has it. Adding a title
+// already there keeps its original added_at.
+func (h *PersonalDataHandler) AddWatchlistTitle(ctx context.Context, viewer PersonalListViewer, snap watchlist.Snapshot) (WatchlistTitleAdded, error) {
+	titles, err := h.titlesOrError()
+	if err != nil {
+		return WatchlistTitleAdded{}, err
+	}
+	itemID, err := h.accessibleLibraryItem(ctx, viewer, titles, snap.MediaType, snap.TMDBID, snap.IMDbID, snap.TVDBID)
+	if err != nil {
+		return WatchlistTitleAdded{}, err
+	}
+	if itemID != "" {
+		if err := h.AddToWatchlist(ctx, viewer, itemID); err != nil {
+			return WatchlistTitleAdded{}, err
+		}
+		entry, found, err := h.GetWatchlistEntry(ctx, viewer, itemID)
+		if err != nil {
+			return WatchlistTitleAdded{}, err
+		}
+		added := time.Now().UTC()
+		if found {
+			if parsed, err := time.Parse(time.RFC3339Nano, entry.AddedAt); err == nil {
+				added = parsed
+			}
+		}
+		// Not found: a concurrent remove won, and the add itself succeeded.
+		return WatchlistTitleAdded{ItemID: itemID, AddedAt: added}, nil
+	}
+	entry, _, err := titles.AddSnapshot(ctx, viewer.watchlistViewer(), snap, time.Now().UTC())
+	if err != nil {
+		return WatchlistTitleAdded{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to add to watchlist")
+	}
+	return WatchlistTitleAdded{AddedAt: entry.AddedAt}, nil
+}
+
+// RemoveWatchlistTitle takes the title holding the TMDB ID, current or
+// former, off the viewer's watchlist: the entry for it, and the library
+// watchlist entry of the one library item the viewer may see that has it.
+// It returns the title (nil when no watchlist tracks the ID). Removing a
+// title that is not on the watchlist succeeds.
+func (h *PersonalDataHandler) RemoveWatchlistTitle(ctx context.Context, viewer PersonalListViewer, mediaType string, tmdbID int) (*watchlist.Title, error) {
+	titles, err := h.titlesOrError()
+	if err != nil {
+		return nil, err
+	}
+	title, _, err := titles.Remove(ctx, viewer.watchlistViewer(), mediaType, tmdbID)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to remove from watchlist")
+	}
+	imdbID, tvdbID := "", 0
+	if title != nil {
+		imdbID, tvdbID = title.IMDbID, title.TVDBID
+	}
+	itemID, err := h.accessibleLibraryItem(ctx, viewer, titles, mediaType, tmdbID, imdbID, tvdbID)
+	if err != nil || itemID == "" {
+		return title, err
+	}
+	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	onList, err := store.GetWatchlistEntry(ctx, viewer.ProfileID, itemID)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to check watchlist")
+	}
+	if onList == nil {
+		// Nothing to remove, and no removal to export to a provider.
+		return title, nil
+	}
+	return title, h.RemoveFromWatchlist(ctx, viewer, itemID)
+}
+
+// accessibleLibraryItem returns the library item that has the title when
+// exactly one does and the viewer may see it, else "". Several matches are
+// left alone until the library merges them, as promotion leaves them.
+func (h *PersonalDataHandler) accessibleLibraryItem(ctx context.Context, viewer PersonalListViewer, titles *watchlist.Titles, mediaType string, tmdbID int, imdbID string, tvdbID int) (string, error) {
+	matches, err := titles.LibraryMatches(ctx, mediaType, tmdbID, imdbID, tvdbID)
+	if err != nil {
+		return "", apiError(http.StatusInternalServerError, "internal_error", "Failed to match the title to the library")
+	}
+	if len(matches) != 1 {
+		if len(matches) > 1 {
+			slog.InfoContext(ctx, "watchlist title matches several library items; keeping it as a title entry",
+				"component", "watchlist", "media_type", mediaType, "tmdb_id", tmdbID, "content_ids", matches)
+		}
+		return "", nil
+	}
+	if h.itemRepo != nil {
+		if err := h.itemRepo.EnsureAccessible(ctx, matches[0], viewer.watchlistAccess()); err != nil {
+			if errors.Is(err, catalog.ErrItemNotFound) {
+				return "", nil
+			}
+			return "", apiError(http.StatusInternalServerError, "internal_error", "Failed to check item access")
+		}
+	}
+	return matches[0], nil
+}
+
+// WatchlistMembership reports which titles and which library items are on
+// the viewer's watchlist: titles by any TMDB ID their entry has held, items
+// through the library watchlist. It makes two reads whatever the page size.
+func (h *PersonalDataHandler) WatchlistMembership(ctx context.Context, viewer PersonalListViewer, keys []watchlist.TitleKey, itemIDs []string) (map[watchlist.TitleKey]bool, map[string]bool, error) {
+	titles, err := h.titlesOrError()
+	if err != nil {
+		return nil, nil, err
+	}
+	onTitles := map[watchlist.TitleKey]bool{}
+	if len(keys) > 0 {
+		if onTitles, err = titles.OnWatchlist(ctx, viewer.watchlistViewer(), keys); err != nil {
+			return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to check watchlist titles")
+		}
+	}
+	onItems := map[string]bool{}
+	if len(itemIDs) > 0 {
+		store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
+		if err != nil {
+			return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+		}
+		if onItems, err = store.ListWatchlistByMediaItems(ctx, viewer.ProfileID, itemIDs); err != nil {
+			return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to check watchlist")
+		}
+	}
+	return onTitles, onItems, nil
+}

@@ -88,6 +88,8 @@ type Service struct {
 	tvdbResolver      TVDBIDResolver
 	notifier          FulfillmentNotifier
 	lifecycle         LifecycleNotifier
+	watchlistPref     WatchlistPreference
+	titleObserver     TitleObserver
 	Now               func() time.Time
 }
 
@@ -711,6 +713,8 @@ func (s *Service) GetDetail(ctx context.Context, viewer Viewer, mediaType MediaT
 	}
 
 	raw, err := s.tmdb.GetMediaDetail(ctx, string(mediaType), tmdbID)
+	// A watchlist title tracking this TMDB ID refreshes from the read.
+	s.observeDetail(ctx, mediaType, tmdbID, raw, err)
 	if err != nil {
 		return nil, err
 	}
@@ -1346,7 +1350,7 @@ func (s *Service) GetSettings(ctx context.Context, viewer Viewer) (Settings, err
 	return s.store.GetSettings(ctx)
 }
 
-func (s *Service) GetFeatureStatus(ctx context.Context, _ Viewer) (FeatureStatus, error) {
+func (s *Service) GetFeatureStatus(ctx context.Context, viewer Viewer) (FeatureStatus, error) {
 	settings, err := s.store.GetSettings(ctx)
 	if err != nil {
 		return FeatureStatus{}, err
@@ -1364,6 +1368,9 @@ func (s *Service) GetFeatureStatus(ctx context.Context, _ Viewer) (FeatureStatus
 		if status.MissingSeasonsRequestable, err = s.moreSeasonsRequestable(ctx); err != nil {
 			return FeatureStatus{}, err
 		}
+		// The account's own permission is left to the caller, which reads
+		// it for the request capability anyway.
+		status.WatchlistRequests = settings.WatchlistRequests && viewer.UserID != 0 && s.watchlistAutoRequest(ctx, viewer)
 	}
 	return status, nil
 }

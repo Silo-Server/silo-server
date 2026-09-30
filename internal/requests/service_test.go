@@ -1999,6 +1999,9 @@ type fakeStore struct {
 	groupLimits   map[int64]*GroupLimit
 	// userLimitReads counts policy resolutions (each reads the account's limit once).
 	userLimitReads int
+	// trackActive makes CreateRequest record the new request as the title's
+	// open one, the way ListActiveByTMDB reads the repository.
+	trackActive bool
 
 	setExternalIDsErr error
 
@@ -2136,10 +2139,14 @@ func (f *fakeStore) CreateRequest(_ context.Context, input CreateRequestRecord) 
 		Seasons:              input.Input.Seasons,
 		RequestedByUserID:    input.Requester.UserID,
 		RequestedByProfileID: input.Requester.ProfileID,
+		Source:               requestSource(input.Input.Source),
 		CreatedAt:            input.Now,
 		UpdatedAt:            input.Now,
 	}
 	f.requests[input.ID] = req
+	if f.trackActive && req.Outcome == OutcomeActive {
+		f.active[req.MediaType][req.TMDBID] = req
+	}
 	copy := *req
 	return &copy, nil
 }

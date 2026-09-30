@@ -42,10 +42,10 @@ func (r *Repository) GetSettings(ctx context.Context) (Settings, error) {
 	var s Settings
 	err := r.pool.QueryRow(ctx, `
 		SELECT requests_enabled, global_max_requests, global_window_days,
-		       global_auto_approval_enabled, force_dual_quality, updated_at, revision
+		       global_auto_approval_enabled, force_dual_quality, watchlist_requests, updated_at, revision
 		FROM request_settings
 		WHERE id = true
-	`).Scan(&s.RequestsEnabled, &s.GlobalMaxRequests, &s.GlobalWindowDays, &s.GlobalAutoApprovalEnabled, &s.ForceDualQuality, &s.UpdatedAt, &s.Revision)
+	`).Scan(&s.RequestsEnabled, &s.GlobalMaxRequests, &s.GlobalWindowDays, &s.GlobalAutoApprovalEnabled, &s.ForceDualQuality, &s.WatchlistRequests, &s.UpdatedAt, &s.Revision)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Settings{
@@ -53,6 +53,7 @@ func (r *Repository) GetSettings(ctx context.Context) (Settings, error) {
 				GlobalMaxRequests:         5,
 				GlobalWindowDays:          7,
 				GlobalAutoApprovalEnabled: false,
+				WatchlistRequests:         true,
 			}, nil
 		}
 		return Settings{}, fmt.Errorf("get request settings: %w", err)
@@ -60,11 +61,16 @@ func (r *Repository) GetSettings(ctx context.Context) (Settings, error) {
 	return s, nil
 }
 
+// UpdateSettings is the v1 settings write. The frozen v1 body does not carry
+// watchlist_requests, so the stored value is kept.
 func (r *Repository) UpdateSettings(ctx context.Context, settings Settings) (Settings, error) {
-	return r.updateSettings(ctx, r.pool, settings, -1)
+	return r.updateSettings(ctx, r.pool, settings, -1, nil)
 }
 
-func (r *Repository) updateSettings(ctx context.Context, exec requestExecutor, settings Settings, expected int64) (Settings, error) {
+// updateSettings writes the settings row when its revision still equals
+// expected (-1 skips the check). A nil watchlist keeps the stored
+// watchlist_requests value, true on a first write.
+func (r *Repository) updateSettings(ctx context.Context, exec requestExecutor, settings Settings, expected int64, watchlist *bool) (Settings, error) {
 	if settings.GlobalWindowDays <= 0 {
 		settings.GlobalWindowDays = 7
 	}
@@ -76,21 +82,22 @@ func (r *Repository) updateSettings(ctx context.Context, exec requestExecutor, s
 	err := exec.QueryRow(ctx, `
 		INSERT INTO request_settings (
 			id, requests_enabled, global_max_requests, global_window_days,
-			global_auto_approval_enabled, force_dual_quality, updated_at
+			global_auto_approval_enabled, force_dual_quality, watchlist_requests, updated_at
 		)
-		VALUES (true, $1, $2, $3, $4, $5, now())
+		VALUES (true, $1, $2, $3, $4, $5, COALESCE($7::boolean, true), now())
 		ON CONFLICT (id) DO UPDATE SET
 			requests_enabled = EXCLUDED.requests_enabled,
 			global_max_requests = EXCLUDED.global_max_requests,
 			global_window_days = EXCLUDED.global_window_days,
 			global_auto_approval_enabled = EXCLUDED.global_auto_approval_enabled,
 			force_dual_quality = EXCLUDED.force_dual_quality,
+			watchlist_requests = COALESCE($7::boolean, request_settings.watchlist_requests),
 			updated_at = now()
 		WHERE $6::bigint = -1 OR request_settings.revision = $6
 		RETURNING requests_enabled, global_max_requests, global_window_days,
-		          global_auto_approval_enabled, force_dual_quality, updated_at, revision
-	`, settings.RequestsEnabled, settings.GlobalMaxRequests, settings.GlobalWindowDays, settings.GlobalAutoApprovalEnabled, settings.ForceDualQuality, expected).
-		Scan(&s.RequestsEnabled, &s.GlobalMaxRequests, &s.GlobalWindowDays, &s.GlobalAutoApprovalEnabled, &s.ForceDualQuality, &s.UpdatedAt, &s.Revision)
+		          global_auto_approval_enabled, force_dual_quality, watchlist_requests, updated_at, revision
+	`, settings.RequestsEnabled, settings.GlobalMaxRequests, settings.GlobalWindowDays, settings.GlobalAutoApprovalEnabled, settings.ForceDualQuality, expected, watchlist).
+		Scan(&s.RequestsEnabled, &s.GlobalMaxRequests, &s.GlobalWindowDays, &s.GlobalAutoApprovalEnabled, &s.ForceDualQuality, &s.WatchlistRequests, &s.UpdatedAt, &s.Revision)
 	if err != nil {
 		return Settings{}, fmt.Errorf("update request settings: %w", err)
 	}
@@ -343,20 +350,20 @@ func (r *Repository) insertRequest(
 			id, provider, media_type, tmdb_id, tvdb_id, imdb_id, title, year,
 			overview, poster_path, backdrop_path, status, outcome,
 			requested_by_user_id, requested_by_profile_id, is_anime, created_at, updated_at, approved_at,
-			routing_facts, seasons
+			routing_facts, seasons, source
 		)
 		VALUES (
 			$1, 'tmdb', $2, $3, $4, $5, $6, $7,
 			$8, $9, $10, $11, $12,
 			$13, $14, $15, $16, $16, $17,
-			$18, $19
+			$18, $19, $20
 		)
 		RETURNING `+requestColumns(), input.ID, input.Input.MediaType, input.Input.TMDBID, tvdbID,
 		strings.TrimSpace(input.Input.IMDbID), strings.TrimSpace(input.Input.Title), year,
 		strings.TrimSpace(input.Input.Overview), strings.TrimSpace(input.Input.PosterPath),
 		strings.TrimSpace(input.Input.BackdropPath), status, outcome,
 		input.Requester.UserID, input.Requester.ProfileID, input.IsAnime, now, approvedAt,
-		facts, nonNilSeasons(input.Input.Seasons))
+		facts, nonNilSeasons(input.Input.Seasons), requestSource(input.Input.Source))
 	req, err := scanRequest(row)
 	if err != nil {
 		return nil, fmt.Errorf("insert request: %w", err)
@@ -1392,6 +1399,14 @@ func nonNilSeasons(seasons []int) []int {
 	return seasons
 }
 
+// requestSource stores an unset source as a direct request.
+func requestSource(source Source) Source {
+	if source == "" {
+		return SourceDirect
+	}
+	return source
+}
+
 func requestSelectSQL() string {
 	return "SELECT " + requestColumns() + " FROM media_requests "
 }
@@ -1401,7 +1416,7 @@ func requestColumns() string {
 	        overview, poster_path, backdrop_path, status, outcome,
 	        requested_by_user_id, requested_by_profile_id, is_anime,
 	        last_error, created_at, updated_at, approved_at, completed_at,
-	        submit_attempts, submit_lease_until, next_submit_at, outcome_reason, routing_facts, seasons`
+	        submit_attempts, submit_lease_until, next_submit_at, outcome_reason, routing_facts, seasons, source`
 }
 
 type requestScanner interface {
@@ -1441,6 +1456,7 @@ func scanRequest(row requestScanner) (*Request, error) {
 		&req.OutcomeReason,
 		&rawFacts,
 		&req.Seasons,
+		&req.Source,
 	); err != nil {
 		return nil, err
 	}

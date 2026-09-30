@@ -43,6 +43,12 @@ type ProfileHandler struct {
 	DroppedSeriesPurger interface {
 		PurgeProfile(ctx context.Context, userID int, profileID string) error
 	}
+	// WatchlistTitlesPurger removes a deleted profile's watchlist entries for
+	// titles outside the library, and the titles no profile keeps any more.
+	// They live in Postgres whichever store holds the profile.
+	WatchlistTitlesPurger interface {
+		PurgeProfile(ctx context.Context, userID int, profileID string) error
+	}
 	// EventsHub, when set, receives a user_settings.changed event for every
 	// canonical setting row a profile mutation syncs (see
 	// profiles_settings_sync.go). Nil (as in tests) simply skips publishing.
@@ -764,6 +770,13 @@ func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCom
 		defer cancel()
 		if purgeErr := h.DroppedSeriesPurger.PurgeProfile(purgeCtx, userID, profileID); purgeErr != nil {
 			slog.WarnContext(ctx, "profile dropped-series purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
+		}
+	}
+	if h.WatchlistTitlesPurger != nil {
+		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if purgeErr := h.WatchlistTitlesPurger.PurgeProfile(purgeCtx, userID, profileID); purgeErr != nil {
+			slog.WarnContext(ctx, "profile watchlist-title purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
 		}
 	}
 	return nil

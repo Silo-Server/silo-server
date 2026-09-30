@@ -14,6 +14,9 @@ vi.mock("@/hooks/queries/useRequests", () => ({
   useCreateMediaRequest: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 vi.mock("@/hooks/useDocumentTitle", () => ({ useDocumentTitle: () => {} }));
+vi.mock("@/hooks/useWatchlistTitleToggle", () => ({
+  useWatchlistTitleToggle: () => ({ enabled: false, toggle: vi.fn(), isPending: () => false }),
+}));
 
 import RequestDiscoverSection from "./RequestDiscoverSection";
 
