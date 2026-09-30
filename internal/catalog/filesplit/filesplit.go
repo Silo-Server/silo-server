@@ -133,6 +133,31 @@ func Move(ctx context.Context, tx pgx.Tx, opts Options) (*Result, error) {
 	`, opts.FromContentID, distinctFolderIDs(opts.Files)); err != nil {
 		return nil, fmt.Errorf("filesplit: removing stale source library membership: %w", err)
 	}
+	// Root claims keep their first owner, so a root the split emptied would
+	// still resolve new files there to the source. Hand those claims over.
+	if _, err := tx.Exec(ctx, `
+		UPDATE media_item_roots claim
+		SET content_id = $1, last_seen_at = NOW()
+		FROM (
+			SELECT DISTINCT media_folder_id, canonical_root_path
+			FROM media_files
+			WHERE id = ANY($3::bigint[])
+			  AND canonical_root_path <> ''
+		) moved
+		WHERE claim.media_folder_id = moved.media_folder_id
+		  AND claim.canonical_root_path = moved.canonical_root_path
+		  AND claim.content_id = $2
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM media_files remaining
+			WHERE remaining.media_folder_id = claim.media_folder_id
+			  AND remaining.canonical_root_path = claim.canonical_root_path
+			  AND remaining.content_id = $2
+			  AND remaining.missing_since IS NULL
+		  )
+	`, opts.ToContentID, opts.FromContentID, fileIDs); err != nil {
+		return nil, fmt.Errorf("filesplit: moving source root claims: %w", err)
+	}
 
 	derivedEpisodePairs := DeriveEpisodePairs(opts.ItemType, opts.Files, opts.ToContentID)
 	episodePairs, err := keepFullyMovedEpisodePairs(ctx, tx, derivedEpisodePairs)

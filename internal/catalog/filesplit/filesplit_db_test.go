@@ -87,27 +87,35 @@ func (fx *moveFixture) episode(t *testing.T, seriesID string, number, folderID i
 
 func (fx *moveFixture) file(t *testing.T, folderID int, contentID, episodeID string, episodeNumber int) File {
 	t.Helper()
-	path := fmt.Sprintf("/filesplit%s/%s/%d-%d.mkv", fx.suffix, contentID, folderID, time.Now().UnixNano())
+	return fx.fileAt(t, fmt.Sprintf("/filesplit%s/%s", fx.suffix, contentID), folderID, contentID, episodeID, episodeNumber)
+}
+
+func (fx *moveFixture) fileAt(t *testing.T, root string, folderID int, contentID, episodeID string, episodeNumber int) File {
+	t.Helper()
+	path := fmt.Sprintf("%s/%d-%d.mkv", root, folderID, time.Now().UnixNano())
 	var episode any
 	if episodeID != "" {
 		episode = episodeID
 	}
 	var id int
 	if err := fx.pool.QueryRow(t.Context(), `
-		INSERT INTO media_files (media_folder_id, file_path, file_size, content_id, episode_id, season_number, episode_number)
-		VALUES ($1, $2, 1024, $3, $4, 1, $5)
+		INSERT INTO media_files (media_folder_id, file_path, file_size, content_id, episode_id, season_number, episode_number,
+		                         canonical_root_path, observed_root_path)
+		VALUES ($1, $2, 1024, $3, $4, 1, $5, $6, $6)
 		RETURNING id
-	`, folderID, path, contentID, episode, episodeNumber).Scan(&id); err != nil {
+	`, folderID, path, contentID, episode, episodeNumber, root).Scan(&id); err != nil {
 		t.Fatalf("seed file: %v", err)
 	}
 	return File{
-		ID:            id,
-		ContentID:     contentID,
-		MediaFolderID: folderID,
-		FilePath:      path,
-		SeasonNumber:  1,
-		EpisodeNumber: episodeNumber,
-		EpisodeID:     episodeID,
+		ID:                id,
+		ContentID:         contentID,
+		MediaFolderID:     folderID,
+		FilePath:          path,
+		CanonicalRootPath: root,
+		ObservedRootPath:  root,
+		SeasonNumber:      1,
+		EpisodeNumber:     episodeNumber,
+		EpisodeID:         episodeID,
 	}
 }
 
@@ -188,5 +196,37 @@ func TestMoveRemovesSourceEpisodeMembershipsForUnmatchedTarget(t *testing.T) {
 	}
 	if !fx.exists(t, `SELECT 1 FROM media_item_libraries WHERE content_id = $1 AND media_folder_id = $2`, source, folder) {
 		t.Fatal("source series lost its membership while one of its files remains")
+	}
+}
+
+// Root claims keep their first owner. A root the split emptied must be handed
+// to the target, or new files there would resolve back to the source.
+func TestMoveHandsEmptiedRootClaimsToTarget(t *testing.T) {
+	fx := newMoveFixture(t)
+	folder := fx.folder(t, "movies")
+	source := fx.item(t, "claim-source", "movie", folder)
+	target := fx.item(t, "claim-target", "movie")
+	emptiedRoot := "/filesplit" + fx.suffix + "/emptied"
+	sharedRoot := "/filesplit" + fx.suffix + "/shared"
+	for _, root := range []string{emptiedRoot, sharedRoot} {
+		if _, err := fx.pool.Exec(t.Context(),
+			`INSERT INTO media_item_roots (media_folder_id, canonical_root_path, content_id) VALUES ($1, $2, $3)`,
+			folder, root, source,
+		); err != nil {
+			t.Fatalf("seed root claim: %v", err)
+		}
+	}
+	emptied := fx.fileAt(t, emptiedRoot, folder, source, "", 0)
+	sharedMoved := fx.fileAt(t, sharedRoot, folder, source, "", 0)
+	fx.fileAt(t, sharedRoot, folder, source, "", 0)
+
+	fx.move(t, source, target, "movie", emptied, sharedMoved)
+
+	claim := `SELECT 1 FROM media_item_roots WHERE media_folder_id = $1 AND canonical_root_path = $2 AND content_id = $3`
+	if !fx.exists(t, claim, folder, emptiedRoot, target) {
+		t.Fatal("target did not take over the claim on the root the split emptied")
+	}
+	if !fx.exists(t, claim, folder, sharedRoot, source) {
+		t.Fatal("source lost its claim on a root that still holds its file")
 	}
 }

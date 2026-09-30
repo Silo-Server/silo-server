@@ -1,0 +1,85 @@
+package metadata
+
+import (
+	"context"
+	"fmt"
+	"strings"
+)
+
+// pinnedUnmatchedBySplit reports whether an admin split deliberately left
+// contentID unmatched. Split Versions writes an identity override for the
+// files it moves; for an unmatched target that override forces no provider
+// ID. While such an item is still provisional and every one of its present
+// files sits under one of those overrides, automatic matching must leave it
+// alone: a provider tag in the folder name, or the source's title, would
+// otherwise match it straight back to the item it was split from. Identify
+// still works, and once the item is matched this no longer applies.
+func (s *MetadataService) pinnedUnmatchedBySplit(ctx context.Context, contentID string) (bool, error) {
+	contentID = strings.TrimSpace(contentID)
+	if s == nil || s.dbPool == nil || contentID == "" {
+		return false, nil
+	}
+	var pinned bool
+	if err := s.dbPool.QueryRow(ctx, `
+		WITH provisional AS (
+			SELECT content_id
+			FROM media_items
+			WHERE content_id = $1
+			  AND lower(trim(status)) IN ('pending', 'unmatched', 'ambiguous')
+		),
+		present AS (
+			SELECT mf.media_folder_id, mf.file_path, mf.observed_root_path
+			FROM media_files mf
+			JOIN provisional ON provisional.content_id = mf.content_id
+			WHERE mf.missing_since IS NULL
+		)
+		SELECT EXISTS (SELECT 1 FROM present)
+		   AND NOT EXISTS (
+			SELECT 1
+			FROM present
+			WHERE NOT EXISTS (
+				SELECT 1
+				FROM media_identity_overrides o
+				WHERE o.media_folder_id = present.media_folder_id
+				  AND o.forced_tmdb_id = ''
+				  AND o.forced_imdb_id = ''
+				  AND o.forced_tvdb_id = ''
+				  AND (
+					(o.scope = 'root' AND o.root_path = present.observed_root_path) OR
+					(o.scope = 'file' AND o.file_path = present.file_path)
+				  )
+			)
+		   )
+	`, contentID).Scan(&pinned); err != nil {
+		return false, fmt.Errorf("checking split identity pin for %s: %w", contentID, err)
+	}
+	return pinned, nil
+}
+
+// rootPinnedBySplit reports whether an unmatched split's identity override
+// covers filePath or its observed root. Such a root keeps its provider tag in
+// the folder name, and the source item can still hold its ownership claims, so
+// both would resolve new files there back to the item it was split from.
+func (s *MetadataService) rootPinnedBySplit(ctx context.Context, folderID int, observedRootPath, filePath string) (bool, error) {
+	if s == nil || s.dbPool == nil || folderID <= 0 {
+		return false, nil
+	}
+	var pinned bool
+	if err := s.dbPool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM media_identity_overrides o
+			WHERE o.media_folder_id = $1
+			  AND o.forced_tmdb_id = ''
+			  AND o.forced_imdb_id = ''
+			  AND o.forced_tvdb_id = ''
+			  AND (
+				(o.scope = 'root' AND o.root_path = $2 AND $2 <> '') OR
+				(o.scope = 'file' AND o.file_path = $3 AND $3 <> '')
+			  )
+		)
+	`, folderID, observedRootPath, filePath).Scan(&pinned); err != nil {
+		return false, fmt.Errorf("checking split identity pin for %s: %w", observedRootPath, err)
+	}
+	return pinned, nil
+}
