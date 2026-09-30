@@ -379,6 +379,21 @@ func (s *Titles) LibraryMatches(ctx context.Context, mediaType string, tmdbIDs [
 	return matches[0], nil
 }
 
+// accessibleItems keeps the catalog items the viewer may see, in order.
+func (s *Titles) accessibleItems(ctx context.Context, contentIDs []string, access catalog.AccessFilter) ([]string, error) {
+	out := make([]string, 0, len(contentIDs))
+	for _, id := range contentIDs {
+		if err := s.catalog.EnsureAccessible(ctx, id, access); err != nil {
+			if errors.Is(err, catalog.ErrItemNotFound) {
+				continue
+			}
+			return nil, fmt.Errorf("checking access to a watchlist title's library item: %w", err)
+		}
+		out = append(out, id)
+	}
+	return out, nil
+}
+
 // PromoteProfile moves every entry of the viewer whose title the library now
 // has onto the library watchlist, keeping its added_at. It returns the
 // content IDs this call put on the library watchlist, the ones it ran the
@@ -445,19 +460,22 @@ func (s *Titles) promote(ctx context.Context, v Viewer, addedAt map[int64]time.T
 	var promoted []string
 	var errs []error
 	for _, titleID := range titleIDs {
-		contentIDs := matches[titleID]
-		if len(contentIDs) != 1 {
+		// Only the copies this viewer may see count: duplicates in libraries
+		// the viewer can't open don't make the title ambiguous for them.
+		contentIDs, err := s.accessibleItems(ctx, matches[titleID], v.Access)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if len(contentIDs) == 0 {
+			continue
+		}
+		if len(contentIDs) > 1 {
 			slog.WarnContext(ctx, "watchlist title matches several library items; not promoting until they are merged",
 				"component", "watchlist", "title_id", titleID, "content_ids", contentIDs)
 			continue
 		}
 		contentID := contentIDs[0]
-		if err := s.catalog.EnsureAccessible(ctx, contentID, v.Access); err != nil {
-			if !errors.Is(err, catalog.ErrItemNotFound) {
-				errs = append(errs, fmt.Errorf("checking access to promoted item: %w", err))
-			}
-			continue
-		}
 		moved, newToUser, err := s.promoteOne(ctx, store, v, titleID, contentID, addedAt[titleID])
 		if err != nil {
 			errs = append(errs, err)

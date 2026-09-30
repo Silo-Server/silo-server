@@ -358,3 +358,36 @@ func TestTitlesKeepProviderIDsToOwnedAliases(t *testing.T) {
 		t.Fatalf("owner imdb %q tvdb %d changed", o.IMDbID, o.TVDBID)
 	}
 }
+
+// A duplicate copy in a library the viewer can't open doesn't make the title
+// ambiguous for that viewer: only the copies they may see count, so the entry
+// promotes onto the one they can see.
+func TestTitlesPromotionCountsOnlyAccessibleCopies(t *testing.T) {
+	f := newTitlesFixture(t)
+	ctx := t.Context()
+	snap := f.snap("movie", 850, "", 0)
+	f.add(t, "p1", snap, f.now.Add(-time.Hour))
+	visible := f.item(t, "visible", "movie", strconv.Itoa(snap.TMDBID), "")
+
+	var other int
+	if err := f.pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('mixed', $1, TRUE) RETURNING id`, f.prefix+"-other").Scan(&other); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = f.pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id = $1`, other) })
+	hidden := f.prefix + "-hidden"
+	if _, err := f.pool.Exec(ctx, `
+		INSERT INTO media_items (content_id, type, title, genres, tmdb_id) VALUES ($1, 'movie', $1, '{}'::text[], $2)`,
+		hidden, strconv.Itoa(snap.TMDBID)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, hidden, other); err != nil {
+		t.Fatal(err)
+	}
+
+	viewer := f.viewer("p1")
+	viewer.Access = catalog.AccessFilter{AllowedLibraryIDs: []int{f.folder}}
+	promoted, err := f.svc.PromoteProfile(ctx, viewer)
+	if err != nil || !slices.Equal(promoted, []string{visible}) {
+		t.Fatalf("PromoteProfile = %v %v, want the one copy the viewer can see (%s)", promoted, err, visible)
+	}
+}

@@ -226,27 +226,30 @@ func (h *PersonalDataHandler) accessibleLibraryItem(ctx context.Context, viewer 
 	if err != nil {
 		return "", apiError(http.StatusInternalServerError, "internal_error", "Failed to match the title to the library")
 	}
-	if len(matches) != 1 {
-		if len(matches) > 1 {
+	// Only the copies this viewer may see count: duplicates in libraries the
+	// viewer can't open don't make the title ambiguous for them.
+	visible := make([]string, 0, len(matches))
+	for _, id := range matches {
+		if h.itemRepo != nil {
+			if err := h.itemRepo.EnsureAccessible(ctx, id, viewer.watchlistAccess()); err != nil {
+				if errors.Is(err, catalog.ErrItemNotFound) {
+					continue
+				}
+				return "", apiError(http.StatusInternalServerError, "internal_error", "Failed to check item access")
+			}
+		}
+		visible = append(visible, id)
+	}
+	if len(visible) != 1 {
+		if len(visible) > 1 {
 			slog.InfoContext(ctx, "watchlist title matches several library items; keeping it as a title entry",
-				"component", "watchlist", "media_type", mediaType, "tmdb_ids", tmdbIDs, "content_ids", matches)
+				"component", "watchlist", "media_type", mediaType, "tmdb_ids", tmdbIDs, "content_ids", visible)
 		}
 		return "", nil
 	}
-	if h.itemRepo != nil {
-		if err := h.itemRepo.EnsureAccessible(ctx, matches[0], viewer.watchlistAccess()); err != nil {
-			if errors.Is(err, catalog.ErrItemNotFound) {
-				return "", nil
-			}
-			return "", apiError(http.StatusInternalServerError, "internal_error", "Failed to check item access")
-		}
-	}
-	return matches[0], nil
+	return visible[0], nil
 }
 
-// WatchlistMembership reports which titles and which library items are on
-// the viewer's watchlist: titles by any TMDB ID their entry has held, items
-// through the library watchlist. It makes two reads whatever the page size.
 // WatchlistTitleOff reports whether the title is off the viewer's watchlist
 // in both forms: no entry for it outside the library, and no library
 // watchlist entry for the one library item the viewer may see that has it.
@@ -281,6 +284,9 @@ func (h *PersonalDataHandler) WatchlistTitleOff(ctx context.Context, viewer Pers
 	return entry == nil, nil
 }
 
+// WatchlistMembership reports which titles and which library items are on
+// the viewer's watchlist: titles by any TMDB ID their entry has held, items
+// through the library watchlist. It makes two reads whatever the page size.
 func (h *PersonalDataHandler) WatchlistMembership(ctx context.Context, viewer PersonalListViewer, keys []watchlist.TitleKey, itemIDs []string) (map[watchlist.TitleKey]bool, map[string]bool, error) {
 	titles, err := h.titlesOrError()
 	if err != nil {
