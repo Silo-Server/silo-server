@@ -3008,27 +3008,9 @@ func (r *FileRepository) MarkMissing(ctx context.Context, id int, since time.Tim
 // protected roots preserves the historical folder-wide sweep exactly.
 // Returns the number of rows deleted.
 func (r *FileRepository) DeleteMissingByFolder(ctx context.Context, folderID int, gracePeriod time.Duration, protectedRoots []string) (int, error) {
-	return r.deleteMissing(ctx, folderID, "", gracePeriod, protectedRoots)
-}
-
-// DeleteMissingInScope applies the removal grace and root protection only to
-// files at or beneath the scanned path.
-func (r *FileRepository) DeleteMissingInScope(ctx context.Context, folderID int, pathPrefix string, gracePeriod time.Duration, protectedRoots []string) (int, error) {
-	if strings.TrimSpace(pathPrefix) == "" {
-		return 0, fmt.Errorf("deleting missing files in scope: empty path prefix")
-	}
-	return r.deleteMissing(ctx, folderID, pathPrefix, gracePeriod, protectedRoots)
-}
-
-func (r *FileRepository) deleteMissing(ctx context.Context, folderID int, pathPrefix string, gracePeriod time.Duration, protectedRoots []string) (int, error) {
 	cutoff := time.Now().UTC().Add(-gracePeriod)
 	query := "DELETE FROM media_files WHERE media_folder_id = $1 AND missing_since IS NOT NULL AND missing_since < $2"
 	args := []any{folderID, cutoff}
-	if pathPrefix != "" {
-		clauses, clauseArgs := pathscope.RangeCoverageClauses("file_path", []string{pathPrefix}, len(args)+1)
-		query += " AND (" + strings.Join(clauses, " OR ") + ")"
-		args = append(args, clauseArgs...)
-	}
 	if clauses, clauseArgs := rootCoverageClauses(protectedRoots, len(args)+1); len(clauses) > 0 {
 		query += " AND NOT (" + strings.Join(clauses, " OR ") + ")"
 		args = append(args, clauseArgs...)

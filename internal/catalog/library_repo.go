@@ -454,6 +454,7 @@ func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, f
 // ReconcileItemMemberships removes stale memberships and orphaned items only
 // for the supplied content IDs. File presence is checked across the whole
 // folder, so a version outside the scanned subtree preserves its membership.
+// An empty list removes nothing.
 func (r *LibraryItemRepository) ReconcileItemMemberships(ctx context.Context, folderID int, contentIDs, protectedPathPrefixes []string) (int, int, []string, error) {
 	if len(contentIDs) == 0 {
 		return 0, 0, nil, nil

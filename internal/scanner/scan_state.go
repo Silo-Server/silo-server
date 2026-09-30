@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -283,6 +285,45 @@ func (r *FileRepository) GetScanStateByFolderAndPathPrefix(ctx context.Context, 
 		return nil, fmt.Errorf("querying scan state by folder and path prefix: %w", err)
 	}
 	return scanScanStateRows(rows)
+}
+
+// ListMembershipTargets returns the distinct content and episode IDs linked to
+// files at or beneath pathPrefix in a folder. With includeMissing it also
+// returns the content IDs of every missing file in the folder, so orphan checks
+// can run before a folder-wide trash sweep deletes those rows.
+func (r *FileRepository) ListMembershipTargets(ctx context.Context, folderID int, pathPrefix string, includeMissing bool) ([]string, []string, error) {
+	clauses, args := pathscope.RangeCoverageClauses("file_path", []string{pathPrefix}, 2)
+	query := `SELECT content_id, episode_id FROM media_files
+		WHERE media_folder_id = $1 AND (` + strings.Join(clauses, " OR ") + `)`
+	if includeMissing {
+		query += `
+		UNION
+		SELECT content_id, NULL FROM media_files
+		WHERE media_folder_id = $1 AND missing_since IS NOT NULL`
+	}
+	rows, err := r.pool.Query(ctx, query, append([]any{folderID}, args...)...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("querying membership targets: %w", err)
+	}
+	defer rows.Close()
+	contentIDs := make(map[string]struct{})
+	episodeIDs := make(map[string]struct{})
+	for rows.Next() {
+		var contentID, episodeID *string
+		if err := rows.Scan(&contentID, &episodeID); err != nil {
+			return nil, nil, fmt.Errorf("scanning membership target: %w", err)
+		}
+		if contentID != nil && *contentID != "" {
+			contentIDs[*contentID] = struct{}{}
+		}
+		if episodeID != nil && *episodeID != "" {
+			episodeIDs[*episodeID] = struct{}{}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("iterating membership targets: %w", err)
+	}
+	return slices.Sorted(maps.Keys(contentIDs)), slices.Sorted(maps.Keys(episodeIDs)), nil
 }
 
 func scanStateFromMediaFile(file *models.MediaFile) *scanStateFile {

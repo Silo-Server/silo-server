@@ -754,21 +754,11 @@ func (s *Scanner) scanPaths(
 
 	result := &ScanResult{}
 
-	// Get existing files in this scan scope from the DB.
-	var (
-		existingFiles []*scanStateFile
-		err           error
-	)
-	if allowEmptyRootGuard {
-		existingFiles, err = s.fileRepo.GetScanStateByFolder(ctx, folder.ID)
-		if err != nil {
-			return nil, fmt.Errorf("getting existing files for folder %d: %w", folder.ID, err)
-		}
-	} else {
-		existingFiles, err = s.fileRepo.GetScanStateByFolderAndPathPrefix(ctx, folder.ID, reconcileRoots[0])
-		if err != nil {
-			return nil, fmt.Errorf("getting existing files for folder %d path %q: %w", folder.ID, reconcileRoots[0], err)
-		}
+	// Get existing files in this scan scope from the DB. Full library scans
+	// returned above, so this is always a single subtree.
+	existingFiles, err := s.fileRepo.GetScanStateByFolderAndPathPrefix(ctx, folder.ID, reconcileRoots[0])
+	if err != nil {
+		return nil, fmt.Errorf("getting existing files for folder %d path %q: %w", folder.ID, reconcileRoots[0], err)
 	}
 
 	// Build a set of existing file paths for quick lookup.
@@ -1017,18 +1007,21 @@ func (s *Scanner) scanPaths(
 	// protectedRoots was resolved above, before any reconciliation ran.
 	s.markMissingExcludingProtected(ctx, folder.ID, existingFiles, seenPaths, protectedRoots, result)
 
-	// Empty trash: delete files marked as missing for longer than the removal
-	// grace for this folder. Safe because the empty-root guard (above) returns
-	// early when 0 files are found on disk, so we only reach here when the
-	// root is populated.
-	removedMemberships, deletedItems, orphanedImageDirs, err := s.reconcileScopedLibraryMemberships(ctx, folder.ID, reconcileRoots[0], existingFiles, protectedRoots)
+	// Reconcile only the content this subtree's files link to, now or before
+	// processing. Present-state repair above was scoped the same way.
+	removedMemberships, deletedItems, orphanedImageDirs, err := s.reconcileScopedLibraryMemberships(
+		ctx, folder.ID, reconcileRoots[0], existingFiles, s.emptyTrashAfterScan, protectedRoots)
 	if err != nil {
 		return nil, fmt.Errorf("reconciling library membership for folder %d: %w", folder.ID, err)
 	}
 	result.MembershipsRemoved = removedMemberships
 	result.ItemsDeleted = deletedItems
+	// Empty trash across the whole folder, not just this subtree: a deleted
+	// directory is never scanned again, so its missing rows would otherwise
+	// wait for a full library scan. Protected roots are still exempt, and the
+	// reconcile above already checked the items of every missing row.
 	if s.emptyTrashAfterScan {
-		trashed, err := s.fileRepo.DeleteMissingInScope(ctx, folder.ID, reconcileRoots[0], s.fileRemovalGrace, protectedRoots)
+		trashed, err := s.fileRepo.DeleteMissingByFolder(ctx, folder.ID, s.fileRemovalGrace, protectedRoots)
 		if err != nil {
 			return nil, fmt.Errorf("emptying trash for folder %d: %w", folder.ID, err)
 		}
@@ -1434,7 +1427,7 @@ func (s *Scanner) scanFolderByRoots(
 	// deleted once they pass the removal grace — by the very scan that
 	// noticed the outage.
 	protectedRoots := protectedScanRoots
-	removedMemberships, deletedItems, orphanedImageDirs, err := s.reconcileSyncedLibraryMemberships(ctx, folder.ID, protectedRoots)
+	removedMemberships, deletedItems, orphanedImageDirs, err := s.reconcileLibraryMemberships(ctx, folder.ID, false, protectedRoots)
 	if err != nil {
 		return nil, fmt.Errorf("reconciling library membership for folder %d: %w", folder.ID, err)
 	}
@@ -2280,7 +2273,7 @@ func compactScanRoots(paths []string) []string {
 // syncPresentLibraryState repairs the catalog memberships owned by every
 // present media file in a folder.
 func (s *Scanner) syncPresentLibraryState(ctx context.Context, folderID int) error {
-	return s.syncPresentState(ctx, folderID, "", nil)
+	return s.syncPresentState(ctx, folderID, presentStateScope{})
 }
 
 // syncPresentFileState repairs the catalog memberships owned by one present
@@ -2291,20 +2284,43 @@ func (s *Scanner) syncPresentFileState(ctx context.Context, folderID int, filePa
 	if strings.TrimSpace(filePath) == "" {
 		return fmt.Errorf("syncing present file state: empty file path")
 	}
-	return s.syncPresentState(ctx, folderID, "\n\t\t  AND mf.file_path = $2", []any{filePath})
+	return s.syncPresentState(ctx, folderID, presentStateScope{filePath: filePath})
 }
 
 // syncPresentPathState repairs only the files at or beneath a scan's root.
 func (s *Scanner) syncPresentPathState(ctx context.Context, folderID int, pathPrefix string) error {
-	clauses, args := pathscope.RangeCoverageClauses("mf.file_path", []string{pathPrefix}, 2)
-	predicate := "\n\t\t  AND (" + strings.Join(clauses, " OR ") + ")"
-	return s.syncPresentState(ctx, folderID, predicate, args)
+	if strings.TrimSpace(pathPrefix) == "" {
+		return fmt.Errorf("syncing present path state: empty path prefix")
+	}
+	return s.syncPresentState(ctx, folderID, presentStateScope{pathPrefix: pathPrefix})
+}
+
+// presentStateScope narrows present-state repair to one file or one subtree.
+// The zero value covers the whole folder.
+type presentStateScope struct {
+	filePath   string
+	pathPrefix string
+}
+
+// predicate returns the SQL filter on mf.file_path and its arguments, numbered
+// from $2 because $1 is always the folder ID.
+func (scope presentStateScope) predicate() (string, []any) {
+	switch {
+	case scope.filePath != "":
+		return "\n\t\t  AND mf.file_path = $2", []any{scope.filePath}
+	case scope.pathPrefix != "":
+		clauses, args := pathscope.RangeCoverageClauses("mf.file_path", []string{scope.pathPrefix}, 2)
+		return "\n\t\t  AND (" + strings.Join(clauses, " OR ") + ")", args
+	default:
+		return "", nil
+	}
 }
 
 // syncPresentState shares the repair statements across folder, path and file
 // scans. Appending a concrete path predicate lets PostgreSQL use the folder/path
 // index instead of planning an optional filter over the whole library.
-func (s *Scanner) syncPresentState(ctx context.Context, folderID int, filePredicate string, scopeArgs []any) error {
+func (s *Scanner) syncPresentState(ctx context.Context, folderID int, scope presentStateScope) error {
+	filePredicate, scopeArgs := scope.predicate()
 	args := append([]any{folderID}, scopeArgs...)
 
 	statements := []struct {
@@ -2459,77 +2475,52 @@ func (s *Scanner) syncFolderScopedAudioLibraryState(ctx context.Context, folderI
 	return nil
 }
 
-// reconcileSyncedLibraryMemberships follows present-state repair. Memberships
-// were already restored there, so this pass only removes stale episode links.
-func (s *Scanner) reconcileSyncedLibraryMemberships(ctx context.Context, folderID int, protectedRoots []string) (int, int, []string, error) {
-	if s.episodeLibraryRepo != nil {
-		if _, err := s.episodeLibraryRepo.RemoveStaleFolderMemberships(ctx, folderID, nil); err != nil {
-			return 0, 0, nil, err
-		}
+// reconcileScopedLibraryMemberships revisits only content touched by a scoped
+// scan: the links its files had before processing (processing can replace or
+// clear them when a file becomes an extra or its inferred identity changes)
+// and the links they have now. Presence is still checked across the whole
+// folder, so a version outside the scope keeps its item available.
+//
+// Links changed outside the scanner are not visible here, so whatever
+// relinks a file must remove the memberships it leaves stale (filesplit.Move
+// does). trashFollows adds the items of every missing file in the folder, so
+// the folder-wide trash sweep that follows cannot delete the last file row of
+// an item without its orphan check having run.
+func (s *Scanner) reconcileScopedLibraryMemberships(ctx context.Context, folderID int, pathPrefix string, previous []*scanStateFile, trashFollows bool, protectedRoots []string) (int, int, []string, error) {
+	contentIDs, episodeIDs, err := s.fileRepo.ListMembershipTargets(ctx, folderID, pathPrefix, trashFollows)
+	if err != nil {
+		return 0, 0, nil, err
 	}
-	return s.libraryRepo.ReconcileFolderMembership(ctx, folderID, protectedRoots)
-}
-
-// reconcileScopedLibraryMemberships revisits only content touched by the scan.
-// Keep the previous links as well: processing can replace or clear them when a
-// file becomes an extra or its inferred identity changes.
-func (s *Scanner) reconcileScopedLibraryMemberships(ctx context.Context, folderID int, pathPrefix string, existingFiles []*scanStateFile, protectedRoots []string) (int, int, []string, error) {
-	contentIDs := make([]string, 0, len(existingFiles))
-	episodeIDs := make([]string, 0, len(existingFiles))
-	for _, file := range existingFiles {
-		if file.ContentID != "" {
-			contentIDs = append(contentIDs, file.ContentID)
-		}
-		if file.EpisodeID != "" {
+	contentIDs = append(contentIDs, collectScanStateContentIDs(previous)...)
+	for _, file := range previous {
+		if file != nil && file.EpisodeID != "" {
 			episodeIDs = append(episodeIDs, file.EpisodeID)
 		}
 	}
-	clauses, args := pathscope.RangeCoverageClauses("file_path", []string{pathPrefix}, 2)
-	rows, err := s.fileRepo.Pool().Query(ctx, `
-		SELECT DISTINCT content_id, episode_id
-		FROM media_files
-		WHERE media_folder_id = $1 AND (`+strings.Join(clauses, " OR ")+`)
-	`, append([]any{folderID}, args...)...)
-	if err != nil {
-		return 0, 0, nil, fmt.Errorf("getting scoped membership targets: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var contentID, episodeID *string
-		if err := rows.Scan(&contentID, &episodeID); err != nil {
-			return 0, 0, nil, fmt.Errorf("reading scoped membership targets: %w", err)
-		}
-		if contentID != nil && *contentID != "" {
-			contentIDs = append(contentIDs, *contentID)
-		}
-		if episodeID != nil && *episodeID != "" {
-			episodeIDs = append(episodeIDs, *episodeID)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return 0, 0, nil, fmt.Errorf("iterating scoped membership targets: %w", err)
-	}
-	rows.Close()
 	slices.Sort(contentIDs)
-	contentIDs = slices.Compact(contentIDs)
 	slices.Sort(episodeIDs)
-	episodeIDs = slices.Compact(episodeIDs)
 	if s.episodeLibraryRepo != nil {
-		if _, err := s.episodeLibraryRepo.RemoveStaleFolderMemberships(ctx, folderID, episodeIDs); err != nil {
+		if _, err := s.episodeLibraryRepo.RemoveStaleEpisodeMemberships(ctx, folderID, slices.Compact(episodeIDs)); err != nil {
 			return 0, 0, nil, err
 		}
 	}
-	return s.libraryRepo.ReconcileItemMemberships(ctx, folderID, contentIDs, protectedRoots)
+	return s.libraryRepo.ReconcileItemMemberships(ctx, folderID, slices.Compact(contentIDs), protectedRoots)
 }
 
 // reconcileLibraryMemberships removes memberships for content with no
 // remaining non-missing files in the folder and purges orphaned items.
+// restoreEpisodes also re-inserts episode memberships from present files;
+// pass false when syncPresentLibraryState already did that for this scan.
 // unreachableRoots exempts items whose files sit under a currently
 // unreachable library root from the orphan purge (membership removal still
 // happens so the items stay hidden); pass nil when every root is reachable.
-func (s *Scanner) reconcileLibraryMemberships(ctx context.Context, folderID int, unreachableRoots []string) (int, int, []string, error) {
+func (s *Scanner) reconcileLibraryMemberships(ctx context.Context, folderID int, restoreEpisodes bool, unreachableRoots []string) (int, int, []string, error) {
 	if s.episodeLibraryRepo != nil {
-		if _, err := s.episodeLibraryRepo.ReconcileFolderMembership(ctx, folderID); err != nil {
+		reconcileEpisodes := s.episodeLibraryRepo.RemoveStaleFolderMemberships
+		if restoreEpisodes {
+			reconcileEpisodes = s.episodeLibraryRepo.ReconcileFolderMembership
+		}
+		if _, err := reconcileEpisodes(ctx, folderID); err != nil {
 			return 0, 0, nil, err
 		}
 	}
@@ -2565,7 +2556,7 @@ func (s *Scanner) sweepMissingAndReconcile(ctx context.Context, folder *models.M
 		protectedRoots = append(protectedRoots, suspectRoots...)
 	}
 	var orphanedImageDirs []string
-	removedMemberships, deletedItems, orphanedImageDirs, err = s.reconcileLibraryMemberships(ctx, folder.ID, protectedRoots)
+	removedMemberships, deletedItems, orphanedImageDirs, err = s.reconcileLibraryMemberships(ctx, folder.ID, true, protectedRoots)
 	if err != nil {
 		return 0, 0, 0, fmt.Errorf("reconciling library membership for folder %d: %w", folder.ID, err)
 	}
@@ -2720,13 +2711,14 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		// The Upsert above already nulled this row's content/episode links as
 		// part of converting it into an extra. What still needs repair is the
 		// library membership: if this was the last primary file behind an
-		// item, the folder membership must go away too, which is what
-		// reconcileLibraryMemberships below does.
+		// item, the folder membership must go away too. Only the row's former
+		// links can have changed, so reconcile just those.
 		protectedRoots, err := s.protectedConfiguredRoots(ctx, folder)
 		if err != nil {
 			return err
 		}
-		if _, _, _, err := s.reconcileLibraryMemberships(ctx, folder.ID, protectedRoots); err != nil {
+		if _, _, _, err := s.reconcileScopedLibraryMemberships(
+			ctx, folder.ID, cleanFile, []*scanStateFile{existingByPath[filePath]}, false, protectedRoots); err != nil {
 			return fmt.Errorf("reconciling library membership after extra file scan: %w", err)
 		}
 		return nil
@@ -2746,7 +2738,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 			if protErr != nil {
 				return protErr
 			}
-			if _, _, _, reconcileErr := s.reconcileLibraryMemberships(ctx, folder.ID, protectedRoots); reconcileErr != nil {
+			if _, _, _, reconcileErr := s.reconcileLibraryMemberships(ctx, folder.ID, true, protectedRoots); reconcileErr != nil {
 				return fmt.Errorf("reconciling folder membership after clearing legacy links: %w", reconcileErr)
 			}
 		}

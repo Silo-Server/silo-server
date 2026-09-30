@@ -137,7 +137,7 @@ func TestScopedLibraryReconciliationKeepsOtherVersionsAndUnrelatedOrphans(t *tes
 				}
 			}
 
-			removed, deleted, _, err := scanner.reconcileScopedLibraryMemberships(ctx, fx.folderID, fx.targetPath, existing, protected)
+			removed, deleted, _, err := scanner.reconcileScopedLibraryMemberships(ctx, fx.folderID, fx.targetPath, existing, false, protected)
 			if err != nil {
 				t.Fatalf("reconcile scoped membership: %v", err)
 			}
@@ -165,7 +165,7 @@ func TestScopedLibraryReconciliationKeepsOtherVersionsAndUnrelatedOrphans(t *tes
 				t.Fatal("scoped reconciliation changed an unrelated orphan or its membership")
 			}
 			if mode == "protected root" {
-				removed, deleted, _, err = scanner.reconcileScopedLibraryMemberships(ctx, fx.folderID, fx.targetPath, existing, nil)
+				removed, deleted, _, err = scanner.reconcileScopedLibraryMemberships(ctx, fx.folderID, fx.targetPath, existing, false, nil)
 				if err != nil || removed != 0 || deleted != 1 {
 					t.Fatalf("after root recovery removed/deleted = %d/%d, err = %v, want 0/1", removed, deleted, err)
 				}
@@ -174,7 +174,11 @@ func TestScopedLibraryReconciliationKeepsOtherVersionsAndUnrelatedOrphans(t *tes
 	}
 }
 
-func TestScanSubtreeLeavesUnrelatedStateUntouched(t *testing.T) {
+// TestScanSubtreeScopesRepairButEmptiesFolderTrash checks the split a subtree
+// scan makes: membership repair stays inside the subtree, while the trash
+// sweep covers the whole folder so a deleted directory's rows are purged even
+// though that directory is never scanned again.
+func TestScanSubtreeScopesRepairButEmptiesFolderTrash(t *testing.T) {
 	ctx := t.Context()
 	fx := seedPresentStateFixture(ctx, t, "scan-subtree")
 	root := t.TempDir()
@@ -213,8 +217,11 @@ func TestScanSubtreeLeavesUnrelatedStateUntouched(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ScanSubtree: %v", err)
 	}
-	if result.MembershipsRemoved != 1 || result.ItemsDeleted != 1 || result.FilesDeleted != 1 {
-		t.Fatalf("subtree cleanup result = %+v, want one membership, item and file removed", result)
+	// The scoped series loses its membership and item. The unrelated missing
+	// row is past its (zero) grace, so the folder-wide sweep deletes it, and
+	// its item, which has no membership, is deleted as an orphan first.
+	if result.MembershipsRemoved != 1 || result.ItemsDeleted != 2 || result.FilesDeleted != 2 {
+		t.Fatalf("subtree cleanup result = %+v, want 1 membership, 2 items and 2 files removed", result)
 	}
 	var staleExists, orphanExists bool
 	var outsideLink *string
@@ -225,46 +232,87 @@ func TestScanSubtreeLeavesUnrelatedStateUntouched(t *testing.T) {
 	`, fx.folderID, stalePath, fx.unrelatedID, outside+"-dangling").Scan(&staleExists, &orphanExists, &outsideLink); err != nil {
 		t.Fatalf("read unrelated state: %v", err)
 	}
-	if !staleExists || !orphanExists || outsideLink == nil || *outsideLink != danglingID {
-		t.Fatalf("subtree cleanup changed unrelated rows: stale=%v orphan=%v link=%v", staleExists, orphanExists, outsideLink)
+	if staleExists || orphanExists {
+		t.Fatalf("folder trash left stale=%v orphan=%v", staleExists, orphanExists)
+	}
+	if outsideLink == nil || *outsideLink != danglingID {
+		t.Fatalf("subtree repair changed an unrelated dangling link: %v", outsideLink)
 	}
 	if fx.hasItemMembership(ctx, t, fx.unrelatedID) {
 		t.Fatal("subtree scan repaired an unrelated membership")
 	}
 }
 
-func TestDeleteMissingInScopeHonorsGraceAndProtectedPaths(t *testing.T) {
+func TestListMembershipTargetsAddsMissingItemsOnlyForTrash(t *testing.T) {
 	ctx := t.Context()
 	pool := newDeadRootTestPool(t)
-	folderID := seedDeadRootTestFolder(t, pool, "movies", "Scoped trash")
-	root := fmt.Sprintf("/scoped-trash-%d/movies_100%%", time.Now().UnixNano())
-	paths := []string{root + "/old.mkv", root + "/recent.mkv", root + "/offline/old.mkv", root + "2/old.mkv"}
-	old := time.Now().Add(-48 * time.Hour)
-	recent := time.Now().Add(-time.Hour)
-	for i, path := range paths {
-		missing := old
-		if i == 1 {
-			missing = recent
+	folderID := seedDeadRootTestFolder(t, pool, "series", "Membership targets")
+	suffix := fmt.Sprintf("-%d", time.Now().UnixNano())
+	root := "/targets" + suffix + "/shows_100%"
+	id := func(name string) string { return name + suffix }
+	names := []string{"in-scope", "in-scope-missing", "outside", "outside-missing"}
+	t.Cleanup(func() {
+		ids := make([]string, 0, len(names))
+		for _, name := range names {
+			ids = append(ids, id(name))
+		}
+		_, _ = pool.Exec(context.WithoutCancel(ctx), `DELETE FROM media_items WHERE content_id = ANY($1)`, ids)
+	})
+	for i, row := range []struct {
+		path    string
+		missing bool
+	}{
+		{path: root + "/a.mkv"},
+		{path: root + "/b.mkv", missing: true},
+		{path: root + "2/c.mkv"},
+		{path: root + "2/d.mkv", missing: true},
+	} {
+		seriesID, episodeID := id(names[i]), id(names[i]+"-ep")
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO media_items (content_id, type, title, status, genres, poster_path, backdrop_path, logo_path)
+			VALUES ($1, 'series', $1, 'matched', '{}'::text[], '', '', '')
+		`, seriesID); err != nil {
+			t.Fatalf("seed series: %v", err)
 		}
 		if _, err := pool.Exec(ctx, `
-			INSERT INTO media_files (media_folder_id, file_path, file_size, missing_since)
-			VALUES ($1, $2, 1024, $3)
-		`, folderID, path, missing); err != nil {
-			t.Fatalf("seed missing file: %v", err)
+			INSERT INTO episodes (content_id, series_id, season_number, episode_number, title, still_path)
+			VALUES ($1, $2, 1, 1, 'Episode', '')
+		`, episodeID, seriesID); err != nil {
+			t.Fatalf("seed episode: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO media_files (media_folder_id, file_path, file_size, content_id, episode_id, missing_since)
+			VALUES ($1, $2, 1024, $3, $4, CASE WHEN $5 THEN NOW() ELSE NULL END)
+		`, folderID, row.path, seriesID, episodeID, row.missing); err != nil {
+			t.Fatalf("seed file: %v", err)
 		}
 	}
-	removed, err := NewFileRepository(pool).DeleteMissingInScope(ctx, folderID, root, 24*time.Hour, []string{root + "/offline"})
-	if err != nil || removed != 1 {
-		t.Fatalf("scoped trash deleted %d, err = %v, want 1", removed, err)
-	}
-	var remaining []string
-	if err := pool.QueryRow(ctx, `
-		SELECT array_agg(file_path ORDER BY file_path) FROM media_files WHERE media_folder_id = $1
-	`, folderID).Scan(&remaining); err != nil {
-		t.Fatalf("read retained missing files: %v", err)
-	}
-	if len(remaining) != 3 {
-		t.Fatalf("remaining paths = %v, want recent, protected and out-of-scope rows", remaining)
+	repo := NewFileRepository(pool)
+	for _, tc := range []struct {
+		includeMissing bool
+		wantContent    []string
+		wantEpisodes   []string
+	}{
+		{
+			wantContent:  []string{id("in-scope"), id("in-scope-missing")},
+			wantEpisodes: []string{id("in-scope-ep"), id("in-scope-missing-ep")},
+		},
+		{
+			// Missing rows outside the scope contribute their item only: the
+			// trash sweep deletes rows, and orphan checks are per item.
+			includeMissing: true,
+			wantContent:    []string{id("in-scope"), id("in-scope-missing"), id("outside-missing")},
+			wantEpisodes:   []string{id("in-scope-ep"), id("in-scope-missing-ep")},
+		},
+	} {
+		contentIDs, episodeIDs, err := repo.ListMembershipTargets(ctx, folderID, root, tc.includeMissing)
+		if err != nil {
+			t.Fatalf("ListMembershipTargets(includeMissing=%v): %v", tc.includeMissing, err)
+		}
+		if !slices.Equal(contentIDs, tc.wantContent) || !slices.Equal(episodeIDs, tc.wantEpisodes) {
+			t.Fatalf("includeMissing=%v: content=%q episodes=%q, want %q %q",
+				tc.includeMissing, contentIDs, episodeIDs, tc.wantContent, tc.wantEpisodes)
+		}
 	}
 }
 
@@ -364,7 +412,7 @@ func TestScopedLibraryReconciliationCleansFormerIdentityAfterRelinking(t *testin
 	if err := scanner.syncPresentPathState(ctx, fx.folderID, fx.targetPath); err != nil {
 		t.Fatalf("repair current membership: %v", err)
 	}
-	removed, deleted, _, err := scanner.reconcileScopedLibraryMemberships(ctx, fx.folderID, fx.targetPath, existing, nil)
+	removed, deleted, _, err := scanner.reconcileScopedLibraryMemberships(ctx, fx.folderID, fx.targetPath, existing, false, nil)
 	if err != nil || removed != 1 || deleted != 1 {
 		t.Fatalf("relink cleanup removed/deleted = %d/%d, err = %v, want 1/1", removed, deleted, err)
 	}
@@ -387,7 +435,7 @@ func TestScopedLibraryReconciliationCleansFormerIdentityAfterRelinking(t *testin
 	`, fx.folderID, fx.targetPath); err != nil {
 		t.Fatalf("make current identity stale: %v", err)
 	}
-	removed, deleted, _, err = scanner.reconcileScopedLibraryMemberships(ctx, fx.folderID, fx.targetPath, existing, nil)
+	removed, deleted, _, err = scanner.reconcileScopedLibraryMemberships(ctx, fx.folderID, fx.targetPath, existing, false, nil)
 	if err != nil || removed != 1 || deleted != 1 {
 		t.Fatalf("current identity cleanup removed/deleted = %d/%d, err = %v, want 1/1", removed, deleted, err)
 	}
@@ -414,7 +462,7 @@ func TestScopedLibraryReconciliationWithNoIDsKeepsUnrelatedEpisodeState(t *testi
 	`, fx.folderID, fx.targetPath); err != nil {
 		t.Fatalf("make unrelated membership stale: %v", err)
 	}
-	removed, deleted, _, err := scanner.reconcileScopedLibraryMemberships(ctx, fx.folderID, fx.targetPath+"-absent", nil, nil)
+	removed, deleted, _, err := scanner.reconcileScopedLibraryMemberships(ctx, fx.folderID, fx.targetPath+"-absent", nil, false, nil)
 	if err != nil || removed != 0 || deleted != 0 {
 		t.Fatalf("empty scope removed/deleted = %d/%d, err = %v, want 0/0", removed, deleted, err)
 	}

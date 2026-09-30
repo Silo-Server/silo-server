@@ -24,16 +24,26 @@ func (r *EpisodeLibraryRepository) ReconcileFolderMembership(ctx context.Context
 	return r.reconcileFolderMembership(ctx, folderID, nil, true)
 }
 
-// RemoveStaleFolderMemberships removes memberships without repeating their
-// restoration. A nil episodeIDs slice checks the whole folder; a non-nil slice
-// limits removal to those episodes, including all of their file versions.
-func (r *EpisodeLibraryRepository) RemoveStaleFolderMemberships(ctx context.Context, folderID int, episodeIDs []string) (int, error) {
-	if episodeIDs != nil && len(episodeIDs) == 0 {
+// RemoveStaleFolderMemberships removes the folder's stale memberships without
+// restoring missing ones. Use it after present-state repair already restored
+// them.
+func (r *EpisodeLibraryRepository) RemoveStaleFolderMemberships(ctx context.Context, folderID int) (int, error) {
+	return r.reconcileFolderMembership(ctx, folderID, nil, false)
+}
+
+// RemoveStaleEpisodeMemberships removes stale memberships only for the listed
+// episodes. File presence is checked across the whole folder, so a version
+// outside a scanned subtree keeps its episode available. An empty list removes
+// nothing.
+func (r *EpisodeLibraryRepository) RemoveStaleEpisodeMemberships(ctx context.Context, folderID int, episodeIDs []string) (int, error) {
+	if len(episodeIDs) == 0 {
 		return 0, nil
 	}
 	return r.reconcileFolderMembership(ctx, folderID, episodeIDs, false)
 }
 
+// reconcileFolderMembership limits removal to episodeIDs when it is non-nil;
+// the exported methods decide which of the two a caller gets.
 func (r *EpisodeLibraryRepository) reconcileFolderMembership(ctx context.Context, folderID int, episodeIDs []string, restore bool) (int, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
