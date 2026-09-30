@@ -2782,6 +2782,7 @@ func main() {
 				trickplay.NewLocalExtractor(settingsRepo), deps.NodeID); trickplayService != nil {
 				trickplayService.Start(appCtx)
 				taskMgr.Register(tasks.NewQueueSeekPreviewsTask(trickplayService))
+				deps.Trickplay = trickplayService
 			}
 		}
 		catalogSearchIndexer := catalog.NewCatalogSearchIndexerFromSettings(deps.DB, settingsRepo, catalogSearchStartupSettings)

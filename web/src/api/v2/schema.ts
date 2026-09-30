@@ -20924,6 +20924,16 @@ export interface components {
        */
       trailer_kinds: string[];
       /**
+       * @description Generate seek-bar preview images for the library's video files
+       * @example false
+       */
+      trickplay_enabled: boolean;
+      /**
+       * @description Whether the server can produce seek-bar previews (public asset storage is configured)
+       * @example true
+       */
+      trickplay_supported: boolean;
+      /**
        * @description Library kind (movies, series, mixed, audiobooks, ebooks, podcasts, manga); free-form until the vocabulary is ratified (#135)
        * @example movies
        */
@@ -20944,6 +20954,11 @@ export interface components {
        * @enum {string}
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
+      /**
+       * @description This build supports the per-library trickplay_enabled setting, which generates seek-bar previews
+       * @example true
+       */
+      trickplay: boolean;
     };
     LibraryCollection: {
       /** @description The page's items; empty, never null */
@@ -21042,6 +21057,11 @@ export interface components {
        *     ]
        */
       trailer_kinds?: string[];
+      /**
+       * @description Generate seek-bar preview images; requires public asset storage
+       * @example false
+       */
+      trickplay_enabled?: boolean;
       /**
        * @description Library kind (movies, series, mixed, audiobooks, ebooks, podcasts, manga)
        * @example movies
@@ -21391,6 +21411,11 @@ export interface components {
        *     ]
        */
       trailer_kinds?: string[];
+      /**
+       * @description Generate seek-bar preview images; turning it off deletes the library's previews
+       * @example false
+       */
+      trickplay_enabled?: boolean;
       /** @example movies */
       type?: string;
     };

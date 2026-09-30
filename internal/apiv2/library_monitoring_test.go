@@ -221,10 +221,10 @@ func TestLibraryCapabilities(t *testing.T) {
 	}
 	var got map[string]any
 	decodeJSON(t, rec.Body, &got)
-	if got["realtime_monitoring"] != true || got["state"] != StateAvailable || got["allowed"] != true || got["revision"] == "" {
+	if got["realtime_monitoring"] != true || got["trickplay"] != true || got["state"] != StateAvailable || got["allowed"] != true || got["revision"] == "" {
 		t.Fatalf("body = %v", got)
 	}
-	if len(got) != 4 {
+	if len(got) != 5 {
 		t.Fatalf("unexpected members: %v", got)
 	}
 	etag := rec.Header().Get("ETag")
