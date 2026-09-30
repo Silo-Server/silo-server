@@ -72,15 +72,20 @@ func (h *PersonalDataHandler) titlesOrError() (*watchlist.Titles, error) {
 	return h.watchlistTitles, nil
 }
 
-// ListWatchlistTitlesPage promotes the viewer's entries the library now has,
-// then answers at most limit of the remaining entries for titles the library
-// doesn't have, newest first, strictly after the key (nil = from the newest).
+// ListWatchlistTitlesPage answers at most limit of the viewer's entries for
+// titles the library doesn't have, newest first, strictly after the key (nil
+// = from the newest). The first page (nil key) first promotes the entries the
+// library now has.
 func (h *PersonalDataHandler) ListWatchlistTitlesPage(ctx context.Context, viewer PersonalListViewer, after *watchlist.PageKey, limit int) ([]watchlist.Entry, error) {
 	titles, err := h.titlesOrError()
 	if err != nil {
 		return nil, err
 	}
-	h.promoteWatchlist(ctx, viewer)
+	// Promotion scans the whole profile, so a paged read runs it once, on
+	// the first page, rather than once per page.
+	if after == nil {
+		h.promoteWatchlist(ctx, viewer)
+	}
 	entries, err := titles.ListPage(ctx, viewer.watchlistViewer(), after, limit)
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list watchlist titles")

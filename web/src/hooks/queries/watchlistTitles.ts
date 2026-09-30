@@ -11,7 +11,11 @@ import {
 import { formatRequestReason } from "@/lib/mediaRequests";
 import { catalogKeys, requestKeys, watchlistKeys } from "./keys";
 import { scheduleMediaSurfaceInvalidation } from "./mediaSurfaceRefresh";
-import { invalidateRequestSurfaces, REQUESTS_STALE_TIME } from "./useRequests";
+import {
+  invalidateRequestSurfaces,
+  REQUEST_DOWNLOAD_REFETCH_INTERVAL,
+  REQUESTS_STALE_TIME,
+} from "./useRequests";
 
 /** Watchlist entries for titles the library doesn't have yet. */
 export function useWatchlistTitles(options: { enabled?: boolean } = {}) {
@@ -26,7 +30,18 @@ export function useWatchlistTitles(options: { enabled?: boolean } = {}) {
     },
     enabled: options.enabled ?? true,
     staleTime: REQUESTS_STALE_TIME,
+    refetchInterval: (query) => watchlistTitlesRefetchInterval(query.state.data),
   });
+}
+
+/**
+ * While a title downloads, the list refreshes on the interval the other
+ * request surfaces use, so its progress doesn't freeze.
+ */
+export function watchlistTitlesRefetchInterval(
+  titles: readonly WatchlistTitle[] | undefined,
+): number | false {
+  return titles?.some((t) => t.request.download) ? REQUEST_DOWNLOAD_REFETCH_INTERVAL : false;
 }
 
 /**

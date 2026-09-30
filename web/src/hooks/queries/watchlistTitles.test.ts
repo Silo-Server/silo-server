@@ -6,6 +6,7 @@ import {
   patchCachedInWatchlist,
   refreshAfterTitlesRead,
   watchlistAddToast,
+  watchlistTitlesRefetchInterval,
 } from "./watchlistTitles";
 
 vi.mock("./mediaSurfaceRefresh", async (importOriginal) => ({
@@ -143,5 +144,23 @@ describe("refreshAfterTitlesRead", () => {
   it("settles when the same titles come back", () => {
     refreshAfterTitlesRead(queryClient, [title(2)], [title(2), title(3)]);
     expect(scheduleMediaSurfaceInvalidation).not.toHaveBeenCalled();
+  });
+});
+
+describe("watchlistTitlesRefetchInterval", () => {
+  const title = (download?: object) =>
+    ({
+      media_type: "movie",
+      tmdb_id: 1,
+      request: { requestable: false, download },
+    }) as WatchlistTitle;
+
+  it("polls while a title downloads", () => {
+    expect(watchlistTitlesRefetchInterval([title(), title({ phase: "downloading" })])).toBe(30_000);
+  });
+
+  it("stays quiet otherwise", () => {
+    expect(watchlistTitlesRefetchInterval([title()])).toBe(false);
+    expect(watchlistTitlesRefetchInterval(undefined)).toBe(false);
   });
 });

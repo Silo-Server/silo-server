@@ -140,18 +140,20 @@ TVDB ID of one catalog item, used by `PromoteItem`.
 `Titles.PromoteProfile(viewer)` loads the profile's entries with their aliases
 (one index probe when there are none) and resolves them in one query.
 `Titles.PromoteItem(viewer, contentID)` does the same for the entries whose
-aliases match one catalog item's IDs. For each title that resolves to exactly
-one item:
+aliases match one catalog item's IDs. Every matched copy is checked against
+the viewer's access filter in one `EnsureAccessibleIDs` query, and only the
+copies the viewer may see count: a duplicate in a library the viewer can't
+open doesn't make the title ambiguous for them. A title with no visible copy
+stays external (library or rating limits); one with several waits until the
+catalog merges them. For each title with exactly one visible copy:
 
-1. `EnsureAccessible` with the viewer's access filter. An item the viewer
-   cannot see (library or rating limits) leaves the entry external.
-2. Lock the title and check the entry still exists (invariant 2).
-3. `AddToWatchlistAt(profileID, contentID, entry.added_at)` through the
+1. Lock the title and check the entry still exists (invariant 2).
+2. `AddToWatchlistAt(profileID, contentID, entry.added_at)` through the
    notification-wrapped user store, so a promoted series queues an interest
    recompute. When the row already exists, `GetWatchlistEntry` tells whether
    it is a half-done promotion (invariant 3).
-4. Delete the entry, and the title if it is now orphaned, then commit.
-5. If this call removed the entry and the library entry is new (invariant 3),
+3. Delete the entry, and the title if it is now orphaned, then commit.
+4. If this call removed the entry and the library entry is new (invariant 3),
    run `Effects.WatchlistPromoted`, implemented by
    `handlers.PersonalDataHandler`: the provider export event
    (`dispatchLocalListEvent`), the recommendations refresh
@@ -171,8 +173,8 @@ A failure is logged and the read continues; the next read retries.
 
 | Read | Call |
 |---|---|
-| `GET /api/v2/watchlist/titles` | `PromoteProfile`, then the list |
-| `GET /api/v2/watchlist` and v1 `GET /watchlist` (`PersonalDataHandler.ListWatchlistPage` / `ListWatchlist`) | `PromoteProfile` |
+| `GET /api/v2/watchlist/titles` | `PromoteProfile` on the first page only, then the list |
+| `GET /api/v2/watchlist` and v1 `GET /watchlist` (`PersonalDataHandler.ListWatchlistPage` / `ListWatchlist`) | `PromoteProfile` on the first page only (no cursor, offset 0) |
 | Catalog query with `source: "watchlist"` (`CatalogResolver.resolvePersonalSource`) | `PromoteProfile` |
 | Watchlist section in `internal/sections/fetcher.go` (home rows and the recommendations fetcher) | `PromoteProfile` |
 | Item detail `user_state.in_watchlist` (`CatalogResourceHandler.enrichViewerState`, movies and series) and `GET /api/v2/watchlist/{item_id}` | `PromoteItem` |

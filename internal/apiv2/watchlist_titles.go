@@ -27,10 +27,10 @@ import (
 // watchlist title operations use. Every method acts as the viewer's profile
 // and returns an *handlers.APIError on failure.
 type WatchlistTitleService interface {
-	// ListWatchlistTitlesPage moves the entries the library now has onto the
-	// library watchlist, then answers at most limit of the remaining entries
-	// ordered by (added_at DESC, title id DESC) strictly after the key (nil =
-	// from the newest).
+	// ListWatchlistTitlesPage answers at most limit of the entries ordered by
+	// (added_at DESC, title id DESC) strictly after the key (nil = from the
+	// newest). The first page first moves the entries the library now has
+	// onto the library watchlist.
 	ListWatchlistTitlesPage(ctx context.Context, viewer handlers.PersonalListViewer, after *watchlist.PageKey, limit int) ([]watchlist.Entry, error)
 	// FindWatchlistTitle answers the title holding the TMDB ID, current or
 	// former, or nil when no watchlist tracks it.

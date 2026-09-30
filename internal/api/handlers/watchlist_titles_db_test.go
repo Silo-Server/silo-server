@@ -213,3 +213,74 @@ func TestRemoveWatchlistTitleRetryKeepsFormerIDsDB(t *testing.T) {
 		t.Fatalf("title = %v %v, want gone after the retry", found, err)
 	}
 }
+
+// Promotion scans the whole profile, so a paged titles read runs it once, on
+// the first page: a later page leaves an arrived title where it is, and the
+// next first page moves it.
+func TestListWatchlistTitlesPagePromotesOnFirstPageOnlyDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	stamp := time.Now().UnixNano()
+	prefix := fmt.Sprintf("wlt-page-%d", stamp)
+	tmdbID := 1_700_000_000 + int(stamp/1000%100_000)
+	var userID, folder int
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`, prefix).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('movies', $1, TRUE) RETURNING id`, prefix).Scan(&folder); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM users WHERE id = $1`, userID)
+		_, _ = pool.Exec(bg, `DELETE FROM watchlist_titles WHERE tmdb_id = $1`, tmdbID)
+		_, _ = pool.Exec(bg, `DELETE FROM media_items WHERE content_id = $1`, prefix)
+		_, _ = pool.Exec(bg, `DELETE FROM media_folders WHERE id = $1`, folder)
+	})
+	provider := pgstore.NewPostgresProvider(pool)
+	store, err := provider.ForUser(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p1", Name: "p1"}); err != nil {
+		t.Fatal(err)
+	}
+	items := catalog.NewItemRepository(pool)
+	titles := watchlist.NewTitles(pool, items, provider, nil, nil)
+	h := NewPersonalDataHandler(provider, items)
+	h.SetWatchlistTitles(titles)
+	viewer := PersonalListViewer{UserID: userID, ProfileID: "p1"}
+	if _, _, err := titles.AddSnapshot(ctx, viewer.watchlistViewer(), watchlist.Snapshot{MediaType: "movie", TMDBID: tmdbID, Title: "Arriving"}, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_items (content_id, type, title, genres, tmdb_id) VALUES ($1, 'movie', $1, '{}'::text[], $2)`,
+		prefix, strconv.Itoa(tmdbID)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, prefix, folder); err != nil {
+		t.Fatal(err)
+	}
+
+	later := &watchlist.PageKey{AddedAt: time.Now().Add(time.Hour), TitleID: 1 << 62}
+	if _, err := h.ListWatchlistTitlesPage(ctx, viewer, later, 10); err != nil {
+		t.Fatal(err)
+	}
+	if onList, err := store.GetWatchlistEntry(ctx, "p1", prefix); err != nil || onList != nil {
+		t.Fatalf("a later page promoted the title: %v %v", onList, err)
+	}
+	if _, err := h.ListWatchlistTitlesPage(ctx, viewer, nil, 10); err != nil {
+		t.Fatal(err)
+	}
+	if onList, err := store.GetWatchlistEntry(ctx, "p1", prefix); err != nil || onList == nil {
+		t.Fatalf("the first page did not promote the title: %v %v", onList, err)
+	}
+}
