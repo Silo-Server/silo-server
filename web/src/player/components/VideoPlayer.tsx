@@ -41,6 +41,7 @@ import type {
 import { resolvePendingSeekTime } from "../utils/pendingSeek";
 import { resolveVersionAudioLanguage } from "../utils/effectiveAudioLanguage";
 import { HlsStartupGuard } from "../utils/hlsStartupGuard";
+import { NativeHlsStallWatchdog } from "../utils/nativeHlsStallWatchdog";
 import { isSafariBrowserV3, resolveHLSEngineV3 } from "../utils/hlsEngine";
 import { isFirefoxUserAgent } from "../utils/browser";
 import { normalizeSubtitleMode } from "../utils/subtitleMode";
@@ -1797,6 +1798,8 @@ export function VideoPlayer({
     let autoplayAttempts = 0;
     let autoplayRetryTimer: ReturnType<typeof setTimeout> | null = null;
     let nativeHLSMetadataHandler: (() => void) | null = null;
+    let stallWatchdogTimer: ReturnType<typeof setInterval> | null = null;
+    let stallRecoveryHandler: (() => void) | null = null;
 
     mediaRecoveryAttemptsRef.current = 0;
     setError(null);
@@ -1892,6 +1895,48 @@ export function VideoPlayer({
     video.addEventListener("loadeddata", attemptAutoplayWhenReady);
     video.addEventListener("canplay", attemptAutoplayWhenReady);
 
+    const clearStallRecovery = () => {
+      if (!stallRecoveryHandler) return;
+      video.removeEventListener("loadedmetadata", stallRecoveryHandler);
+      stallRecoveryHandler = null;
+    };
+
+    // Safari's native HLS can stop fetching segments mid-stream while still
+    // reporting that it plays (#1466). Reloading the same source and seeking
+    // back to the frozen position resumes it.
+    const recoverNativeStall = (position: number) => {
+      if (destroyed) return;
+      console.warn("[player] native HLS stopped advancing; reloading the stream", { position });
+      // Hold the seek bar at the frozen position while the reload resets it.
+      rememberPendingSeek(toMediaTime(position, timelineOffsetRef.current));
+      clearStallRecovery();
+      stallRecoveryHandler = () => {
+        stallRecoveryHandler = null;
+        if (destroyed) return;
+        video.currentTime = position;
+        video.play().catch(() => {
+          if (!destroyed) setPlaying(false);
+        });
+      };
+      video.addEventListener("loadedmetadata", stallRecoveryHandler, { once: true });
+      video.load();
+    };
+
+    const startNativeStallWatchdog = () => {
+      const watchdog = new NativeHlsStallWatchdog({
+        media: video,
+        atEnd: () => {
+          const end = backendDurationRef.current;
+          return end > 0 && toMediaTime(video.currentTime, timelineOffsetRef.current) >= end - 1;
+        },
+        onStall: recoverNativeStall,
+        onGiveUp: () => {
+          console.error("[player] native HLS kept stopping; leaving the stream as it is");
+        },
+      });
+      stallWatchdogTimer = setInterval(() => watchdog.check(), 1_000);
+    };
+
     const attachNativeHLS = () => {
       video.src = effectiveStreamUrl;
       nativeHLSMetadataHandler = () => {
@@ -1899,6 +1944,7 @@ export function VideoPlayer({
         attemptAutoplayWhenReady();
       };
       video.addEventListener("loadedmetadata", nativeHLSMetadataHandler, { once: true });
+      startNativeStallWatchdog();
     };
 
     async function init() {
@@ -2065,6 +2111,8 @@ export function VideoPlayer({
     return () => {
       destroyed = true;
       cleanupStartupListeners();
+      if (stallWatchdogTimer !== null) clearInterval(stallWatchdogTimer);
+      clearStallRecovery();
       if (hls) {
         hls.destroy();
         hlsRef.current = null;
@@ -2087,6 +2135,7 @@ export function VideoPlayer({
     planRevision,
     plannedBitrateKbps,
     plannedDynamicRange,
+    rememberPendingSeek,
     reportCurrentPlanFailure,
     shouldAutoPlay,
   ]);

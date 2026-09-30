@@ -2919,6 +2919,48 @@ describe("VideoPlayer native HLS timeline", () => {
     expect(subtitleTimeline.assOffsetSeconds).toBe(0);
   });
 
+  it("reloads native HLS that stops advancing while playing and resumes in place", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      const plan = fixturePlanV3({
+        delivery: "server_remux_hls",
+        stream: {
+          url: "/playback/transcode/session-1/master.m3u8",
+          protocol: "hls",
+          headers: {},
+          header_refresh: "none",
+        },
+      });
+      const { container } = renderPlayer({ plan, initialPosition: 0, duration: 1296.9 });
+      const video = container.querySelector("video");
+      if (!video) throw new Error("expected video element");
+      await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+      fireEvent.loadedMetadata(video);
+      const load = vi.mocked(HTMLMediaElement.prototype.load);
+      const play = vi.mocked(HTMLMediaElement.prototype.play);
+      load.mockClear();
+      play.mockClear();
+
+      // The frozen state from #1466: playing, HAVE_ENOUGH_DATA, nothing loading.
+      Object.defineProperty(video, "paused", { configurable: true, get: () => false });
+      Object.defineProperty(video, "readyState", { configurable: true, get: () => 4 });
+      Object.defineProperty(video, "networkState", { configurable: true, get: () => 1 });
+      video.currentTime = 304.14;
+
+      vi.advanceTimersByTime(5_000);
+      expect(load).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(5_000);
+      expect(load).toHaveBeenCalledOnce();
+
+      video.currentTime = 0;
+      fireEvent.loadedMetadata(video);
+      expect(video.currentTime).toBe(304.14);
+      expect(play).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("uses native HLS for Dolby Vision when hls.js is also available", async () => {
     hlsJS.supported = true;
     vi.stubGlobal("navigator", {
