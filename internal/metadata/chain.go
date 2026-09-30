@@ -733,7 +733,7 @@ func ListEnabledMetadataCapabilities(ctx context.Context, pool *pgxpool.Pool) ([
 	rows, err := pool.Query(ctx,
 		`SELECT pc.plugin_installation_id, pc.capability_id,
 		        COALESCE(pc.metadata->>'display_name', pc.capability_id),
-		        pc.metadata
+		        pc.metadata, pi.kind = 'builtin'
 		 FROM plugin_capabilities pc
 		 JOIN plugin_installations pi ON pi.id = pc.plugin_installation_id
 		 WHERE pc.capability_type = 'metadata_provider.v1'
@@ -748,12 +748,16 @@ func ListEnabledMetadataCapabilities(ctx context.Context, pool *pgxpool.Pool) ([
 	for rows.Next() {
 		var c CapabilityInfo
 		var metadataJSON []byte
-		if err := rows.Scan(&c.PluginInstallationID, &c.CapabilityID, &c.DisplayName, &metadataJSON); err != nil {
+		var builtin bool
+		if err := rows.Scan(&c.PluginInstallationID, &c.CapabilityID, &c.DisplayName, &metadataJSON, &builtin); err != nil {
 			return nil, fmt.Errorf("scanning capability: %w", err)
 		}
 		c.LookupProviderIDs = extractLookupProviderIDs(metadataJSON)
 		c.BulkLookupLimit = extractBulkLookupLimit(metadataJSON)
 		c.RatingSources = extractRatingSources(metadataJSON)
+		if builtin && len(c.RatingSources) == 0 {
+			c.RatingSources = builtinRatingSources(c.CapabilityID)
+		}
 		caps = append(caps, c)
 	}
 	return caps, rows.Err()
