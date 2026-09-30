@@ -23,6 +23,7 @@ const useSettingsFormMock = vi.fn();
 const useHWAccelDetectionMock = vi.fn();
 const useAdminNodesMock = vi.fn();
 const useAdminTrickplayLibrariesMock = vi.fn();
+const useLibraryCapabilitiesMock = vi.fn();
 
 vi.mock("@/hooks/useSettingsForm", () => ({
   useSettingsForm: (...args: unknown[]) => useSettingsFormMock(...args),
@@ -38,6 +39,10 @@ vi.mock("@/hooks/queries/admin/system", () => ({
 
 vi.mock("@/hooks/queries/admin/nodes", () => ({
   useAdminNodes: () => useAdminNodesMock(),
+}));
+
+vi.mock("@/hooks/queries/admin/libraries", () => ({
+  useLibraryCapabilities: () => useLibraryCapabilitiesMock(),
 }));
 
 vi.mock("@/hooks/queries/admin/trickplay", () => ({
@@ -94,13 +99,14 @@ const TONE_MAP_LABEL = "Software HDR tone mapping";
 
 beforeEach(() => {
   localStorage.clear();
+  useLibraryCapabilitiesMock.mockReturnValue({ data: { trickplay: true } });
   useSettingsFormMock.mockReset();
   useHWAccelDetectionMock.mockReset();
   useHWAccelDetectionMock.mockReturnValue({ data: undefined, isLoading: false });
   useAdminNodesMock.mockReset();
   useAdminNodesMock.mockReturnValue({ data: [transcodeNode()], isSuccess: true });
   useAdminTrickplayLibrariesMock.mockReset();
-  useAdminTrickplayLibrariesMock.mockReturnValue({ data: undefined });
+  useAdminTrickplayLibrariesMock.mockReturnValue({ data: undefined, isSuccess: false });
 });
 
 describe("PlaybackSettings layout", () => {
@@ -606,13 +612,18 @@ describe("seek preview settings", () => {
       { "playback.preview_image_width": "" },
     );
     useSettingsFormMock.mockReturnValue(form);
-    useAdminTrickplayLibrariesMock.mockReturnValue({ data: [library(40, 1), library(2)] });
+    useAdminTrickplayLibrariesMock.mockReturnValue({
+      data: [library(40, 1), library(2)],
+      isSuccess: true,
+    });
 
     render(<PlaybackSettings />);
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
     expect(form.save).not.toHaveBeenCalled();
-    expect(screen.getByText(/43 files' seek previews are made again/)).toBeTruthy();
+    expect(
+      screen.getByText(/^43 files' seek previews are made again with the new size or interval\./),
+    ).toBeTruthy();
     await userEvent.click(
       within(screen.getByRole("alertdialog")).getByRole("button", { name: "Save" }),
     );
@@ -627,9 +638,9 @@ describe("seek preview settings", () => {
       [library(5)],
     ],
     [
-      "no previews are published",
-      { "playback.preview_image_width": "320" },
-      ["playback.preview_image_width"],
+      "a new interval has no published previews to remake",
+      { "playback.trickplay_interval_seconds": "20" },
+      ["playback.trickplay_interval_seconds"],
       [],
     ],
     [
@@ -645,7 +656,7 @@ describe("seek preview settings", () => {
       "playback.trickplay_workers": "1",
     });
     useSettingsFormMock.mockReturnValue(form);
-    useAdminTrickplayLibrariesMock.mockReturnValue({ data: libraries });
+    useAdminTrickplayLibrariesMock.mockReturnValue({ data: libraries, isSuccess: true });
 
     render(<PlaybackSettings />);
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -653,4 +664,30 @@ describe("seek preview settings", () => {
     expect(form.save).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("alertdialog")).toBeNull();
   });
+});
+
+it("hides unsupported seek preview settings and leaves their keys out", () => {
+  expandAdvanced();
+  useLibraryCapabilitiesMock.mockReturnValue({ data: { trickplay: false } });
+  useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "none" }));
+  render(<PlaybackSettings />);
+  expect(screen.queryByLabelText("Seek preview interval")).toBeNull();
+  expect(screen.queryByLabelText("Seek preview width")).toBeNull();
+  expect(useSettingsFormMock.mock.calls[0]?.[0]?.keys).not.toContain("playback.trickplay_workers");
+});
+
+it.each(["loading", "failed"])("asks before changing the interval when status is %s", async () => {
+  useAdminTrickplayLibrariesMock.mockReturnValue({ data: undefined, isSuccess: false });
+  const form = makeForm(
+    { "playback.trickplay_interval_seconds": "20" },
+    ["playback.trickplay_interval_seconds"],
+    { "playback.trickplay_interval_seconds": "10" },
+  );
+  useSettingsFormMock.mockReturnValue(form);
+  render(<PlaybackSettings />);
+  await userEvent.click(screen.getByRole("button", { name: "Save" }));
+  expect(form.save).not.toHaveBeenCalled();
+  expect(screen.getByRole("alertdialog")).toHaveTextContent(
+    "Existing seek previews are made again",
+  );
 });

@@ -4,6 +4,7 @@ import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { useRestartKeys } from "@/hooks/useRestartKeys";
 import { useHWAccelDetection } from "@/hooks/queries/admin/system";
 import { useAdminNodes } from "@/hooks/queries/admin/nodes";
+import { useLibraryCapabilities } from "@/hooks/queries/admin/libraries";
 import { useAdminTrickplayLibraries } from "@/hooks/queries/admin/trickplay";
 import {
   AlertDialog,
@@ -238,7 +239,18 @@ function PreferredPathRow({ label, route }: { label: string; route: string }) {
 }
 
 export default function PlaybackSettings() {
-  const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
+  const supportsTrickplay = useLibraryCapabilities().data?.trickplay === true;
+  const keys = useMemo(
+    () =>
+      supportsTrickplay
+        ? KEYS
+        : KEYS.filter(
+            (key) =>
+              key !== "playback.preview_image_width" && !key.startsWith("playback.trickplay_"),
+          ),
+    [supportsTrickplay],
+  );
+  const form = useSettingsForm({ keys });
   const restartKeys = useRestartKeys();
   const hwAccel = form.getValue("playback.hw_accel");
   const hwDetection = useHWAccelDetection(hwAccel !== "none");
@@ -259,7 +271,7 @@ export default function PlaybackSettings() {
     form.getValue("playback.trickplay_execution") || IMAGE_EXECUTION_DEFAULT;
   // Previews published or being made now, which a width or interval change
   // makes again; a server without seek previews reports none.
-  const trickplayLibraries = useAdminTrickplayLibraries();
+  const trickplayLibraries = useAdminTrickplayLibraries({ enabled: supportsTrickplay });
   const previewsToRemake = (trickplayLibraries.data ?? []).reduce(
     (count, library) => count + library.ready + library.running,
     0,
@@ -271,7 +283,7 @@ export default function PlaybackSettings() {
   );
   const [confirmRemake, setConfirmRemake] = useState(false);
   const save = () => {
-    if (recipeChanged && previewsToRemake > 0) {
+    if (recipeChanged && (!trickplayLibraries.isSuccess || previewsToRemake > 0)) {
       setConfirmRemake(true);
       return;
     }
@@ -394,7 +406,11 @@ export default function PlaybackSettings() {
 
           <AdvancedSection
             id="playback.transcoding"
-            count={TRANSCODING_ADVANCED_KEYS.length - (showDevicePicker ? 0 : 1)}
+            count={
+              TRANSCODING_ADVANCED_KEYS.length -
+              (showDevicePicker ? 0 : 1) -
+              (supportsTrickplay ? 0 : 4)
+            }
             forceOpen={anyDirty(TRANSCODING_ADVANCED_KEYS)}
           >
             <PathSettingField
@@ -572,47 +588,51 @@ export default function PlaybackSettings() {
                 "playback.chapter_thumbnail_software_tone_map_enabled",
               )}
             />
-            <SettingField
-              label="Seek preview width"
-              type="number"
-              unit="px"
-              description="Width of the thumbnails players show while seeking, 160 to 640. Changing it makes every library's previews again; players keep the current ones until then."
-              value={form.getValue("playback.preview_image_width")}
-              onChange={(v) => form.setValue("playback.preview_image_width", v)}
-              restartRequired={restartKeys.has("playback.preview_image_width")}
-            />
-            <SettingField
-              label="Seek preview interval"
-              type="number"
-              unit="seconds"
-              description="Time between seek previews, 5 to 60. Changing it makes every library's previews again."
-              value={form.getValue("playback.trickplay_interval_seconds")}
-              onChange={(v) => form.setValue("playback.trickplay_interval_seconds", v)}
-              restartRequired={restartKeys.has("playback.trickplay_interval_seconds")}
-            />
-            <SettingField
-              label="Seek preview workers"
-              type="number"
-              description="How many files each server makes seek previews for at once. They run at low priority, so playback comes first."
-              value={form.getValue("playback.trickplay_workers")}
-              onChange={(v) => form.setValue("playback.trickplay_workers", v)}
-              restartRequired={restartKeys.has("playback.trickplay_workers")}
-            />
-            <SettingField
-              label="Generate seek previews on"
-              type="select"
-              options={imageExecutionOptions(trickplayExecution, transcodeNodeAvailable)}
-              status={
-                transcodeNodeAvailable ? undefined : (
-                  <SettingFieldStatus tone="warn">
-                    No transcode nodes are connected
-                  </SettingFieldStatus>
-                )
-              }
-              value={trickplayExecution}
-              onChange={(v) => form.setValue("playback.trickplay_execution", v)}
-              restartRequired={restartKeys.has("playback.trickplay_execution")}
-            />
+            {supportsTrickplay && (
+              <>
+                <SettingField
+                  label="Seek preview width"
+                  type="number"
+                  unit="px"
+                  description="Width of the thumbnails players show while seeking, 160 to 640. Changing it makes every library's previews again; players keep the current ones until then."
+                  value={form.getValue("playback.preview_image_width")}
+                  onChange={(v) => form.setValue("playback.preview_image_width", v)}
+                  restartRequired={restartKeys.has("playback.preview_image_width")}
+                />
+                <SettingField
+                  label="Seek preview interval"
+                  type="number"
+                  unit="seconds"
+                  description="Time between seek previews, 5 to 60. Changing it makes every library's previews again."
+                  value={form.getValue("playback.trickplay_interval_seconds")}
+                  onChange={(v) => form.setValue("playback.trickplay_interval_seconds", v)}
+                  restartRequired={restartKeys.has("playback.trickplay_interval_seconds")}
+                />
+                <SettingField
+                  label="Seek preview workers"
+                  type="number"
+                  description="How many files each server makes seek previews for at once. They run at low priority, so playback comes first."
+                  value={form.getValue("playback.trickplay_workers")}
+                  onChange={(v) => form.setValue("playback.trickplay_workers", v)}
+                  restartRequired={restartKeys.has("playback.trickplay_workers")}
+                />
+                <SettingField
+                  label="Generate seek previews on"
+                  type="select"
+                  options={imageExecutionOptions(trickplayExecution, transcodeNodeAvailable)}
+                  status={
+                    transcodeNodeAvailable ? undefined : (
+                      <SettingFieldStatus tone="warn">
+                        No transcode nodes are connected
+                      </SettingFieldStatus>
+                    )
+                  }
+                  value={trickplayExecution}
+                  onChange={(v) => form.setValue("playback.trickplay_execution", v)}
+                  restartRequired={restartKeys.has("playback.trickplay_execution")}
+                />
+              </>
+            )}
           </AdvancedSection>
         </FieldGroup>
 
@@ -726,10 +746,14 @@ export default function PlaybackSettings() {
           <AlertDialogHeader>
             <AlertDialogTitle>Make seek previews again?</AlertDialogTitle>
             <AlertDialogDescription>
-              {previewsToRemake === 1 ? "1 file's" : `${previewsToRemake} files'`} seek previews are
-              made again with the new size or interval. This runs in the background and can take a
-              long time on a large library; players keep the current previews until each file's new
-              ones are ready.
+              {!trickplayLibraries.isSuccess
+                ? "Existing"
+                : previewsToRemake === 1
+                  ? "1 file's"
+                  : `${previewsToRemake} files'`}{" "}
+              seek previews are made again with the new size or interval. This runs in the
+              background and can take a long time on a large library; players keep the current
+              previews until each file's new ones are ready.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
