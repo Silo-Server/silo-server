@@ -498,7 +498,8 @@ func (r *Repository) Manifests(ctx context.Context, fileIDs []int, storeIdentity
 		       t.thumbnail_count, t.sheet_count, COALESCE(t.bandwidth, 0)
 		FROM public.media_file_trickplay t
 		JOIN public.media_files mf ON mf.id = t.media_file_id
-		WHERE t.media_file_id = ANY($1) AND t.revision IS NOT NULL AND t.store_identity = $2
+        JOIN public.media_folders f ON f.id = mf.media_folder_id
+		WHERE f.trickplay_enabled AND t.media_file_id = ANY($1) AND t.revision IS NOT NULL AND t.store_identity = $2
 		  AND t.published_size IS NOT DISTINCT FROM mf.file_size
 		  AND (t.published_hash IS NULL OR mf.file_hash IS NULL OR t.published_hash = mf.file_hash)
 		  AND abs(COALESCE(t.published_duration, 0) - COALESCE(mf.duration, 0)) <= 2`,

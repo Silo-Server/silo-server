@@ -129,6 +129,7 @@ settings change does not wait for the next pass.
 
 A manifest is served only while all of these hold:
 
+- its library still has `trickplay_enabled` on;
 - the row has a published `revision`;
 - `store_identity` is the assets store's current identity;
 - the file is the one the sheets were made from: the same size, the same
