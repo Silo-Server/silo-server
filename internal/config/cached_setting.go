@@ -55,6 +55,11 @@ func (c *CachedSetting[T]) Get(ctx context.Context) T {
 
 	raw, err := c.settings.Get(ctx, c.key)
 	if err != nil {
+		// Another caller may have read successfully while this read ran, so
+		// answer with what the cache holds now, not the earlier snapshot.
+		c.mu.Lock()
+		value, read = c.value, c.read
+		c.mu.Unlock()
 		if read {
 			return value
 		}

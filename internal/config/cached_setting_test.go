@@ -24,3 +24,25 @@ func TestCachedSettingDefaultsBeforeASuccessfulRead(t *testing.T) {
 		t.Fatalf("nil setting = %q, want the zero value", got)
 	}
 }
+
+type hookSettingReader struct{ get func() (string, error) }
+
+func (h hookSettingReader) Get(context.Context, string) (string, error) { return h.get() }
+
+// A read that fails after another caller refreshed the cache answers with that
+// newer value, not the snapshot taken before either read.
+func TestCachedSettingFailedReadAnswersWithTheLatestCachedValue(t *testing.T) {
+	parse := func(value string) string { return value }
+	var c *CachedSetting[string]
+	c = NewCachedSetting[string](hookSettingReader{get: func() (string, error) {
+		// A concurrent caller's successful read lands while this one runs.
+		c.mu.Lock()
+		c.value, c.read = "fresh", true
+		c.mu.Unlock()
+		return "", errors.New("boom")
+	}}, "k", unratedContentCacheTTL, parse)
+
+	if got := c.Get(context.Background()); got != "fresh" {
+		t.Fatalf("Get = %q, want the value the concurrent read cached", got)
+	}
+}
