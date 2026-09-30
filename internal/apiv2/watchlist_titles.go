@@ -307,21 +307,23 @@ func (reg *Registry) watchlistTitleSnapshot(ctx context.Context, rv mediarequest
 	return snap, nil
 }
 
-// deleteWatchlistTitle removes the entries, then withdraws the watchlist's
-// request under every TMDB ID the title has had, since a request made before
-// TMDB repointed the title keeps the ID it was made under.
+// deleteWatchlistTitle withdraws the watchlist's request under every TMDB ID
+// the title has had, then removes the entries. A request keeps the ID it was
+// made under, and the withdrawal runs first because removing the last entry
+// drops the title and its former IDs with it: a failure part way leaves the
+// entry, so a retry still knows every ID.
 func (reg *Registry) deleteWatchlistTitle(ctx context.Context, in *WatchlistTitleInput) (*struct{}, error) {
 	viewer, rv, _, p := reg.watchlistTitleViewer(ctx)
 	if p != nil {
 		return nil, p
 	}
-	title, err := reg.deps.WatchlistTitles.RemoveWatchlistTitle(ctx, viewer, in.MediaType, in.TMDBID)
+	known, err := reg.deps.WatchlistTitles.FindWatchlistTitle(ctx, in.MediaType, in.TMDBID)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
 	ids := []int{in.TMDBID}
-	if title != nil {
-		for _, id := range append([]int{title.TMDBID}, title.FormerTMDBIDs...) {
+	if known != nil {
+		for _, id := range append([]int{known.TMDBID}, known.FormerTMDBIDs...) {
 			if !slices.Contains(ids, id) {
 				ids = append(ids, id)
 			}
@@ -331,6 +333,9 @@ func (reg *Registry) deleteWatchlistTitle(ctx context.Context, in *WatchlistTitl
 		if err := reg.deps.WatchlistRequests.WithdrawWatchlistRequest(ctx, rv, mediarequests.MediaType(in.MediaType), id); err != nil {
 			return nil, requestProblem(err)
 		}
+	}
+	if _, err := reg.deps.WatchlistTitles.RemoveWatchlistTitle(ctx, viewer, in.MediaType, in.TMDBID); err != nil {
+		return nil, serviceProblem(err)
 	}
 	return nil, nil
 }

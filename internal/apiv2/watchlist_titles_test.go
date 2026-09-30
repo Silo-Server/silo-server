@@ -2,6 +2,7 @@ package apiv2
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"slices"
 	"strings"
@@ -78,8 +79,9 @@ type fakeWatchlistRequests struct {
 	ceiling  string
 	details  map[int]*tmdb.MediaDetail
 
-	requested []mediarequests.WatchlistTitle
-	withdrawn []int
+	requested   []mediarequests.WatchlistTitle
+	withdrawn   []int
+	withdrawErr map[int]error
 }
 
 func (f *fakeWatchlistRequests) WatchlistCeiling(context.Context, mediarequests.Viewer) (string, error) {
@@ -104,7 +106,7 @@ func (f *fakeWatchlistRequests) RequestFromWatchlist(_ context.Context, _ mediar
 
 func (f *fakeWatchlistRequests) WithdrawWatchlistRequest(_ context.Context, _ mediarequests.Viewer, _ mediarequests.MediaType, tmdbID int) error {
 	f.withdrawn = append(f.withdrawn, tmdbID)
-	return nil
+	return f.withdrawErr[tmdbID]
 }
 
 func (f *fakeWatchlistRequests) WatchlistRequestStates(_ context.Context, _ mediarequests.Viewer, titles []mediarequests.WatchlistTitle) (map[mediarequests.WatchlistKey]mediarequests.RequestState, error) {
@@ -341,5 +343,32 @@ func TestSearchRequestMediaMarksWatchlist(t *testing.T) {
 	rec = do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/requests/search?q=heat", "", requestOwner)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"in_watchlist":true`) {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// The request withdrawal runs under every ID the title has had, before the
+// entry goes: removing the last entry drops the title's former IDs, so a
+// withdrawal that fails part way must leave the entry for a retry.
+func TestDeleteWatchlistTitleWithdrawsFormerIDsBeforeRemoving(t *testing.T) {
+	title := &watchlist.Title{ID: 1, MediaType: "movie", TMDBID: 200, FormerTMDBIDs: []int{100, 150}, Title: "Repointed"}
+	titles := &fakeWatchlistTitles{known: map[watchlist.TitleKey]*watchlist.Title{{MediaType: "movie", TMDBID: 200}: title}}
+	reqs := &fakeWatchlistRequests{withdrawErr: map[int]error{150: errors.New("request store unavailable")}}
+	h := newTestHandler(t, watchlistTitlesDeps(titles, reqs))
+
+	rec := do(t, h, http.MethodDelete, "/api/v2/watchlist/titles/movie/200", "", viewerHeaders())
+	if rec.Code == http.StatusNoContent {
+		t.Fatal("a failed withdrawal answered success")
+	}
+	if len(titles.removed) != 0 {
+		t.Fatalf("removed = %v, want the entry kept for a retry", titles.removed)
+	}
+
+	reqs.withdrawErr, reqs.withdrawn = nil, nil
+	rec = do(t, h, http.MethodDelete, "/api/v2/watchlist/titles/movie/200", "", viewerHeaders())
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if !slices.Equal(reqs.withdrawn, []int{200, 100, 150}) || len(titles.removed) != 1 {
+		t.Fatalf("withdrawn = %v removed = %v; want every ID withdrawn, then one removal", reqs.withdrawn, titles.removed)
 	}
 }

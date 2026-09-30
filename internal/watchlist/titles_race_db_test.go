@@ -289,3 +289,41 @@ func TestTitlesPromotionCompletesOnOneConnectionPool(t *testing.T) {
 		t.Fatalf("PromoteProfile = %v %v, want %s promoted without waiting on the pool", promoted, err, contentID)
 	}
 }
+
+// A library item known only by a TMDB ID the title has since lost is still
+// the title's copy: matching uses every TMDB ID the caller passes.
+func TestTitlesLibraryMatchesThroughFormerTMDBID(t *testing.T) {
+	f := newTitlesFixture(t)
+	former := f.id(820)
+	contentID := f.item(t, "former", "movie", strconv.Itoa(former), "")
+	current := f.id(821)
+	only, err := f.svc.LibraryMatches(t.Context(), "movie", []int{current}, "", 0)
+	if err != nil || len(only) != 0 {
+		t.Fatalf("current ID alone = %v %v, want no match", only, err)
+	}
+	all, err := f.svc.LibraryMatches(t.Context(), "movie", []int{current, former}, "", 0)
+	if err != nil || !slices.Equal(all, []string{contentID}) {
+		t.Fatalf("with the former ID = %v %v, want %s", all, err, contentID)
+	}
+}
+
+// On a one-connection pool the library write runs before the lock, so it
+// first checks the entry is still there: an entry a remove already took is
+// not written back onto the library watchlist.
+func TestTitlesOneConnectionPromotionSkipsRemovedEntry(t *testing.T) {
+	f := newTitlesFixture(t)
+	f.svc.addUnderLock = false
+	snap := f.snap("movie", 830, "", 0)
+	entry := f.add(t, "p1", snap, f.now.Add(-time.Hour))
+	contentID := f.item(t, "gone", "movie", strconv.Itoa(snap.TMDBID), "")
+	if _, _, err := f.svc.Remove(t.Context(), f.viewer("p1"), "movie", snap.TMDBID); err != nil {
+		t.Fatal(err)
+	}
+	moved, _, err := f.svc.promoteOne(t.Context(), f.store, f.viewer("p1"), entry.Title.ID, contentID, entry.AddedAt)
+	if err != nil || moved {
+		t.Fatalf("promoteOne = %v %v, want nothing moved", moved, err)
+	}
+	if _, ok := f.store.get("p1", contentID); ok {
+		t.Fatal("a removed entry was written onto the library watchlist")
+	}
+}

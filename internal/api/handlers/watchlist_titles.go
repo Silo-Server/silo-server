@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -118,7 +119,8 @@ func (h *PersonalDataHandler) AddWatchlistTitle(ctx context.Context, viewer Pers
 	if err != nil {
 		return WatchlistTitleAdded{}, err
 	}
-	itemID, err := h.accessibleLibraryItem(ctx, viewer, titles, snap.MediaType, snap.TMDBID, snap.IMDbID, snap.TVDBID)
+	tmdbIDs := append([]int{snap.TMDBID}, snap.FormerTMDBIDs...)
+	itemID, err := h.accessibleLibraryItem(ctx, viewer, titles, snap.MediaType, tmdbIDs, snap.IMDbID, snap.TVDBID)
 	if err != nil {
 		return WatchlistTitleAdded{}, err
 	}
@@ -160,11 +162,16 @@ func (h *PersonalDataHandler) RemoveWatchlistTitle(ctx context.Context, viewer P
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to remove from watchlist")
 	}
-	imdbID, tvdbID := "", 0
+	tmdbIDs, imdbID, tvdbID := []int{tmdbID}, "", 0
 	if title != nil {
 		imdbID, tvdbID = title.IMDbID, title.TVDBID
+		for _, id := range append([]int{title.TMDBID}, title.FormerTMDBIDs...) {
+			if !slices.Contains(tmdbIDs, id) {
+				tmdbIDs = append(tmdbIDs, id)
+			}
+		}
 	}
-	itemID, err := h.accessibleLibraryItem(ctx, viewer, titles, mediaType, tmdbID, imdbID, tvdbID)
+	itemID, err := h.accessibleLibraryItem(ctx, viewer, titles, mediaType, tmdbIDs, imdbID, tvdbID)
 	if err != nil || itemID == "" {
 		return title, err
 	}
@@ -186,15 +193,15 @@ func (h *PersonalDataHandler) RemoveWatchlistTitle(ctx context.Context, viewer P
 // accessibleLibraryItem returns the library item that has the title when
 // exactly one does and the viewer may see it, else "". Several matches are
 // left alone until the library merges them, as promotion leaves them.
-func (h *PersonalDataHandler) accessibleLibraryItem(ctx context.Context, viewer PersonalListViewer, titles *watchlist.Titles, mediaType string, tmdbID int, imdbID string, tvdbID int) (string, error) {
-	matches, err := titles.LibraryMatches(ctx, mediaType, tmdbID, imdbID, tvdbID)
+func (h *PersonalDataHandler) accessibleLibraryItem(ctx context.Context, viewer PersonalListViewer, titles *watchlist.Titles, mediaType string, tmdbIDs []int, imdbID string, tvdbID int) (string, error) {
+	matches, err := titles.LibraryMatches(ctx, mediaType, tmdbIDs, imdbID, tvdbID)
 	if err != nil {
 		return "", apiError(http.StatusInternalServerError, "internal_error", "Failed to match the title to the library")
 	}
 	if len(matches) != 1 {
 		if len(matches) > 1 {
 			slog.InfoContext(ctx, "watchlist title matches several library items; keeping it as a title entry",
-				"component", "watchlist", "media_type", mediaType, "tmdb_id", tmdbID, "content_ids", matches)
+				"component", "watchlist", "media_type", mediaType, "tmdb_ids", tmdbIDs, "content_ids", matches)
 		}
 		return "", nil
 	}

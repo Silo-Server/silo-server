@@ -340,6 +340,18 @@ func (r *titlesRepo) promoteEntry(ctx context.Context, userID int, profileID str
 	return removed, nil
 }
 
+// entryExists reports whether the profile still has an entry on the title.
+func (r *titlesRepo) entryExists(ctx context.Context, userID int, profileID string, titleID int64) (bool, error) {
+	var present bool
+	if err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM user_watchlist_titles
+			WHERE user_id = $1 AND profile_id = $2 AND title_id = $3)`, userID, profileID, titleID).Scan(&present); err != nil {
+		return false, fmt.Errorf("reading watchlist title entry: %w", err)
+	}
+	return present, nil
+}
+
 // deleteEntryLocked runs with the title row already locked.
 func deleteEntryLocked(ctx context.Context, tx pgx.Tx, userID int, profileID string, titleID int64) (bool, error) {
 	tag, err := tx.Exec(ctx, `

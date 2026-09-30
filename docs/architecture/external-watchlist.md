@@ -157,9 +157,9 @@ The library add in step 3 uses a second pool connection while the promotion's
 transaction holds one. Each node runs at most 4 such promotions at once, and at
 most half the pool's connections, so they cannot exhaust the pool. A pool of
 one connection (`database.max_connections: 1`) can't lend that second
-connection, so there the library add runs first and the title is locked
-afterwards; a remove racing that promotion can leave the item on the library
-watchlist.
+connection, so there the library add runs first, after a check that the entry
+still exists, and the title is locked afterwards. A remove landing between that
+check and the lock can still leave the item on the library watchlist.
 
 Promotion runs only in request-scoped reads, so a viewer is always available.
 A failure is logged and the read continues; the next read retries.
@@ -247,7 +247,9 @@ while it is still withdrawable and drops the profile's follows.
 A request keeps the TMDB ID it was made under; repair never rewrites
 `media_requests`. So every request lookup for a title (the add, the card's
 request state, the withdrawal) checks the title's current TMDB ID and each
-former one, and a follow goes under the request's own ID.
+former one, and a follow goes under the request's own ID. Matching a title to
+the library also uses every TMDB ID it has had, so a library copy known only by
+a replaced ID still counts.
 
 ## API
 
@@ -269,11 +271,13 @@ kept. Promotion on library reads does not depend on that gate.
   normal add and the response carries `item_id`. Otherwise the entry is saved
   and watchlist requests apply.
 - `DELETE /api/v2/watchlist/titles/{media_type}/{tmdb_id}`
-  (`deleteWatchlistTitle`): finds the title by a current or former TMDB ID,
-  removes the entry and, when one visible library item has the title, the
-  library watchlist entry. It then withdraws the watchlist's request under
-  every TMDB ID the title has had, since a request keeps the ID it was made
-  under. An absent entry succeeds with 204.
+  (`deleteWatchlistTitle`): finds the title by a current or former TMDB ID and
+  first withdraws the watchlist's request under every TMDB ID the title has
+  had, since a request keeps the ID it was made under. Only then does it remove
+  the entry and, when one visible library item has the title, the library
+  watchlist entry. The order matters: removing the last entry deletes the title
+  and its former IDs, so a withdrawal that fails part way leaves the entry and
+  a retry still knows every ID. An absent entry succeeds with 204.
 
 Both mutations are `non_retryable`, as the library watchlist mutations are.
 Discovery results and the title detail carry `in_watchlist`, hydrated with two

@@ -361,8 +361,11 @@ func (s *Titles) PurgeProfile(ctx context.Context, userID int, profileID string)
 // LibraryMatches returns every library item (enabled folders, same media
 // type) that carries or once carried any of the IDs. The add path uses it to
 // send a title the library already has to the library watchlist instead.
-func (s *Titles) LibraryMatches(ctx context.Context, mediaType string, tmdbID int, imdbID string, tvdbID int) ([]string, error) {
-	aliases := []catalog.ProviderAlias{{MediaType: mediaType, Provider: contentid.ProviderTMDB, ProviderID: strconv.Itoa(tmdbID)}}
+func (s *Titles) LibraryMatches(ctx context.Context, mediaType string, tmdbIDs []int, imdbID string, tvdbID int) ([]string, error) {
+	aliases := make([]catalog.ProviderAlias, 0, len(tmdbIDs)+2)
+	for _, id := range tmdbIDs {
+		aliases = append(aliases, catalog.ProviderAlias{MediaType: mediaType, Provider: contentid.ProviderTMDB, ProviderID: strconv.Itoa(id)})
+	}
 	if imdbID != "" {
 		aliases = append(aliases, catalog.ProviderAlias{MediaType: mediaType, Provider: contentid.ProviderIMDB, ProviderID: imdbID})
 	}
@@ -498,6 +501,11 @@ func (s *Titles) promoteOne(ctx context.Context, store promotionStore, v Viewer,
 		return nil
 	}
 	if !s.addUnderLock {
+		// Skip an entry a remove already took, so the window in which a
+		// remove can race the write shrinks to the moments before the lock.
+		if present, err := s.repo.entryExists(ctx, v.UserID, v.ProfileID, titleID); err != nil || !present {
+			return false, false, err
+		}
 		if err := addToLibrary(ctx); err != nil {
 			return false, false, err
 		}
