@@ -59,7 +59,9 @@ rolling upgrade never undo each other's work.
 ## Reconcile
 
 A reconcile pass, on any server, brings the queue in line with the catalog,
-each step bounded:
+each step bounded to 5,000 rows. Full batches continue immediately. A pass
+yields the cluster lock after four batches and schedules a continuation,
+so a large library drains without waiting for the next scheduled task:
 
 1. Reclaims expired leases, as above.
 2. Adds the probed video files (with a duration and a video stream) of
@@ -82,8 +84,10 @@ and runs each file at idle CPU and I/O priority:
   thumbnails) and `playback.trickplay_interval_seconds` (default 10, at least
   5). A width up to 320 gets a 10x10 grid; wider thumbnails get fewer tiles
   so a sheet stays at most 3200 pixels wide. JPEG quality is fixed at 80.
-- A tile's height follows the probed display aspect ratio, falling back to
-  the pixel dimensions, rounded to an even number.
+- A tile's height follows the display aspect ratio read from the execution
+  probe, including a 90-degree display matrix, rounded to an even number.
+  The manifest records the extractor's actual tile height; chunks with
+  different heights fail without publishing.
 - Thumbnail k is sampled at the middle of its interval,
   `k*interval + interval/2`, the last one a second inside the file, so it
   shows what plays in `[k*interval, (k+1)*interval)`.
@@ -99,9 +103,9 @@ and runs each file at idle CPU and I/O priority:
   (QSV, VAAPI, VideoToolbox), with a software attempt after a hardware
   failure. Attempt timeouts grow with the samples: two minutes plus half a
   second a sample on hardware, two seconds a sample in software.
-- A file this server cannot read (an offline mount) is given back for an
-  hour without counting a failure; `invalid_data` and `no_stream` mark it
-  unusable; any other failure counts and backs off.
+- A file selected for local extraction that this server cannot read
+  (an offline mount) is given back for an hour without counting a failure;
+  `invalid_data` and `no_stream` mark it unusable; any other failure counts and backs off.
 - ffmpeg runs are recorded under the `trickplay` subprocess workload.
 
 The Queue Seek Previews task runs a reconcile pass at startup and every 15

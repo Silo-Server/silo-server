@@ -3,6 +3,7 @@ package trickplay
 import (
 	"context"
 	"log/slog"
+	"os"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/mediasample"
@@ -57,6 +58,9 @@ func NewLocalExtractor(settings SettingsReader) *LocalExtractor {
 
 // Extract runs req on this server.
 func (e *LocalExtractor) Extract(ctx context.Context, _ *Job, req mediasample.Request) (mediasample.Result, error) {
+	if _, err := os.Stat(req.Input); err != nil {
+		return mediasample.Result{}, &inputError{err: err}
+	}
 	ffmpeg := playback.ResolveFFmpegPath(readSetting(ctx, e.settings, ffmpegPathSetting))
 	accel := readSetting(ctx, e.settings, hwAccelSetting)
 	if accel == "" {
