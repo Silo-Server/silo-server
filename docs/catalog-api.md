@@ -445,7 +445,7 @@ level or inside the SDK's `metadata` envelope:
   and `tmdb`. `rt_critic` and `rt_audience` name the Rotten Tomatoes scores the
   plugin sends as the flat `rt_critic` and `rt_audience` ratings, which fill the
   `rating_rt_*` members; declaring them lets title pages and poster badges show
-  those scores.
+  those scores. They are always percentages: `scale` and `percent` are ignored.
 - `name`: the plain-text mark clients show next to the score, at most 24
   characters.
 - `label`: optional; the source's full name in the administrator's list, at

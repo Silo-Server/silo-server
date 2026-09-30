@@ -37,6 +37,7 @@ func TestExtractRatingSources(t *testing.T) {
 		{"id": "fresh_meter", "name": "Fresh", "scale": 100, "percent": true},
 		{"id": "approval", "name": "Approval", "scale": 10, "percent": true},
 		{"id": "liked", "name": "Liked", "percent": true},
+		{"id": "rt_audience", "name": "RT Audience", "scale": 10},
 		{"id": "kinopoisk", "name": "Duplicate", "scale": 5},
 		{"id": "Letterboxd_Fans", "name": "Fans", "scale": 5},
 		{"id": "typed", "name": "Typed", "scale": "10"},
@@ -56,6 +57,7 @@ func TestExtractRatingSources(t *testing.T) {
 		{Source: "fresh_meter", Name: "Fresh", Label: "Fresh", Scale: 100, Percent: true},
 		{Source: "approval", Name: "Approval", Label: "Approval", Scale: 100, Percent: true},
 		{Source: "liked", Name: "Liked", Label: "Liked", Scale: 100, Percent: true},
+		{Source: "rt_audience", Name: "RT Audience", Label: "RT Audience", Scale: 100, Percent: true},
 		{Source: "letterboxd_fans", Name: "Fans", Label: "Fans", Scale: 5},
 	}
 	if !reflect.DeepEqual(got, want) {

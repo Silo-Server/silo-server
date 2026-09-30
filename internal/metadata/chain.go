@@ -602,7 +602,8 @@ const maxRatingSourceLabelRunes = 60
 // next to the score, label an optional longer name for the administrator's
 // list (name when absent), scale the top of the source's own scale (10 shows
 // a stored 72 as 7.2), and percent shows the score as a percentage, which
-// makes the scale 100 whatever the entry says. An entry
+// makes the scale 100 whatever the entry says. rt_critic and rt_audience are
+// always percentages. An entry
 // that breaks any of these is dropped on its own; duplicates keep the first;
 // at most maxDeclaredRatingSources are kept. Declared sources stay hidden until
 // an administrator turns them on.
@@ -635,6 +636,11 @@ func extractRatingSources(metadataJSON []byte) []models.RatingSourceDefinition {
 		}
 		if name == "" || utf8.RuneCountInString(name) > maxRatingSourceNameRunes {
 			continue
+		}
+		// Rotten Tomatoes scores fill the rating_rt_* columns, which hold a
+		// percentage that poster badges show as is.
+		if id == models.RatingSourceRTCritic || id == models.RatingSourceRTAudience {
+			entry.Percent = true
 		}
 		if entry.Percent {
 			entry.Scale = 100

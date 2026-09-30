@@ -229,7 +229,7 @@ export default function LibraryMetadataSettings() {
         {pluginRatingSources && (
           <FieldGroup
             label="Ratings"
-            description="IMDb and TMDB scores always show. Metadata plugins can add other ratings; turn one on to show its scores on title pages and poster badges in every app. Check a rating's terms before you turn it on: some, such as Rotten Tomatoes, restrict how others may display their scores."
+            description="IMDb and TMDB scores always show. Metadata plugins can add other ratings; turn one on to show its scores on title pages in every app. Rotten Tomatoes scores also show on poster badges. Check a rating's terms before you turn it on: some, such as Rotten Tomatoes, restrict how others may display their scores."
             restartAll={allRestart(RATINGS_KEYS)}
           >
             {ratingSources.isError && (
