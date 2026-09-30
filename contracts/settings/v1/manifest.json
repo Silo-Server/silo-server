@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 13,
+  "revision": 15,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -450,6 +450,7 @@
         "backgroundColor": "#000000",
         "backgroundStyle": "box",
         "backgroundOpacity": 75,
+        "textOpacity": 100,
         "textOutline": false,
         "textOutlineColor": "#000000",
         "position": "bottom"
@@ -458,7 +459,7 @@
       "label": "Subtitle appearance",
       "description": "How subtitles are drawn during playback.",
       "recommended_control": "panel",
-      "notes": "Renamed from the unprefixed legacy key \"subtitle_appearance\". Every other canonical key carries a domain prefix, and preserving accidental key names is an explicit non-goal of the design. The rename touches three URL paths in internal/api/router.go, the admin device-settings routes, and the key constant in every client, so it cannot land without them. Migration copies the account-level legacy fallback to every existing profile and leaves device overrides unchanged, rewriting the key on each row. Revision 6 changes the fallback background from shadow to a 75% opaque box, matching the previous intended web default and the current Apple fallback. Connected clients receive the complete effective default from the server; clients should adopt revision 6 so their local and sparse-object decoding fallbacks match it. Stored profile and device overrides remain authoritative."
+      "notes": "Renamed from the unprefixed legacy key \"subtitle_appearance\". Every other canonical key carries a domain prefix, and preserving accidental key names is an explicit non-goal of the design. The rename touches three URL paths in internal/api/router.go, the admin device-settings routes, and the key constant in every client, so it cannot land without them. Migration copies the account-level legacy fallback to every existing profile and leaves device overrides unchanged, rewriting the key on each row. Revision 6 changes the fallback background from shadow to a 75% opaque box, matching the previous intended web default and the current Apple fallback. Connected clients receive the complete effective default from the server; clients should adopt revision 6 so their local and sparse-object decoding fallbacks match it. Stored profile and device overrides remain authoritative. Revision 14 adds the optional textOpacity property (1-100, default 100) controlling the opacity of the subtitle text itself, independent of backgroundOpacity; a value stored without it resolves to fully opaque text, matching pre-14 rendering."
     },
     {
       "key": "playback.preferred_quality",
@@ -1074,7 +1075,7 @@
       "category": "appearance",
       "label": "Poster badges",
       "description": "Which badges appear on poster cards, and where.",
-      "notes": "Registered from the legacy unprefixed key card_overlays, which reached the server only through the unknown-key extension bag — stored as an arbitrary string with no validation. null means the user has expressed no preference, which is what lets the server-wide admin default in the overlay-config endpoint apply; writing a resolved-but-unchosen value would silently pin them. The server-wide default configuration stays in server_settings and is not a user setting. This key describes which badges to show, not whether to show them — that is ui.card_overlays_enabled. Revision 13 adds the advisory_age overlay id; a server below revision 13 rejects a value that contains it, so a client offers that badge only when manifest_revision is at least 13."
+      "notes": "Registered from the legacy unprefixed key card_overlays, which reached the server only through the unknown-key extension bag — stored as an arbitrary string with no validation. null means the user has expressed no preference, which is what lets the server-wide admin default in the overlay-config endpoint apply; writing a resolved-but-unchosen value would silently pin them. The server-wide default configuration stays in server_settings and is not a user setting. This key describes which badges to show, not whether to show them — that is ui.card_overlays_enabled. Revision 13 adds the advisory_age overlay id; a server below revision 13 rejects a value that contains it, so a client offers that badge only when manifest_revision is at least 13. Revision 15 adds the request_status overlay id (a watchlist title's request status on its poster) under the same rule: a client offers it only when manifest_revision is at least 15."
     },
     {
       "key": "ui.card_overlays_enabled",
@@ -1436,6 +1437,20 @@
       "description": "Show the Audiobooks section in navigation.",
       "recommended_control": "switch",
       "notes": "Contract-known local: an opt-in navigation surface, hidden by default, with existing Apple (AppNavPreferences.showAudiobooks) and Android parity. Android stores it locally at nav.show_audiobooks.local."
+    },
+    {
+      "key": "requests.watchlist_auto_request",
+      "introduced_in": 15,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": true,
+      "category": "requests",
+      "label": "Request titles I add to my watchlist",
+      "description": "When you add a title that is not in the library to your watchlist, also request it.",
+      "recommended_control": "switch",
+      "notes": "Profile scope because each household member decides whether their own watchlist adds become requests. It applies only while the server-wide watchlist_requests request setting is on and the profile may request at all; a client shows it only then (GET /api/v2/requests/status reports the effective value as watchlist_requests). Request limits, approval and routing apply exactly as for the Request button. Turning it off never cancels an existing request."
     }
   ]
 }

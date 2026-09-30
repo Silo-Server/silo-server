@@ -56,6 +56,11 @@ vi.mock("@/hooks/useCanRequest", () => ({
 
 vi.mock("@/hooks/queries/useRequests", () => ({
   useRequestSearch: (...args: unknown[]) => mockUseRequestSearch(...args),
+  useRequestFeatureStatus: () => ({ data: undefined }),
+}));
+
+vi.mock("@/hooks/queries/watchlistTitles", () => ({
+  useWatchlistTitles: () => ({ data: undefined, isLoading: false, isError: false }),
 }));
 
 vi.mock("@/components/RequestToAddSection", () => ({

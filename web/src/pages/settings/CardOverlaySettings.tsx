@@ -17,6 +17,7 @@ import {
   CATEGORY_GROUPS,
   getOverlayDef,
   isOverlaySuppressed,
+  OVERLAY_PREVIEW_VARIANTS,
   OVERLAY_REGISTRY,
   isOverlayOffered,
   OVERLAY_PRESETS,
@@ -293,6 +294,10 @@ export default function CardOverlaySettings() {
     isOverlaySupported,
   } = useOverlayPrefs();
   const [previewVariant, setPreviewVariant] = useState<OverlayPreviewVariant>("movie");
+  // The request sample only shows a badge this server lets the profile keep.
+  const previewVariants = isOverlaySupported("request_status")
+    ? OVERLAY_PREVIEW_VARIANTS
+    : OVERLAY_PREVIEW_VARIANTS.filter((variant) => variant !== "requested");
   const [confirmRestoreOpen, setConfirmRestoreOpen] = useState(false);
 
   const handleUpdate = (next: CardOverlayPrefs) => {
@@ -428,7 +433,11 @@ export default function CardOverlaySettings() {
         >
           <div className="flex flex-col items-center gap-4">
             <OverlayPreviewCard prefs={displayPrefs} variant={previewVariant} size="md" />
-            <OverlayPreviewVariantToggle value={previewVariant} onChange={setPreviewVariant} />
+            <OverlayPreviewVariantToggle
+              value={previewVariant}
+              onChange={setPreviewVariant}
+              variants={previewVariants}
+            />
           </div>
         </SettingsGroup>
 

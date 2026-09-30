@@ -29,7 +29,7 @@ root, where the key prefixes each caller already uses keep the namespaces apart:
 | `branding/…` | branding assets |
 | `collection-images/…` | collection artwork |
 | `library-posters/…` | library posters |
-| `chapter-images/…` | chapter thumbnails |
+| `chapter-images/…` | chapter thumbnails: one `{file_id}/{chapter_index}/w300.webp` per chapter, the key `thumbnail_path` holds |
 | `markers/…` | intro and credit markers |
 | `subtitles/…` | downloaded subtitles |
 | `diagnostics/…` | diagnostic bundles |

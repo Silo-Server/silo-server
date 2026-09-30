@@ -2,6 +2,7 @@ package playback
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -38,7 +39,7 @@ func TestChapterThumbnailNotifierTargetsMatchingSessions(t *testing.T) {
 		context.Background(),
 		100,
 		7,
-		"chapter-images/100/7/original.webp",
+		"chapter-images/100/7/w300.webp",
 		"thumbhash",
 	)
 
@@ -58,5 +59,13 @@ func TestChapterThumbnailNotifierTargetsMatchingSessions(t *testing.T) {
 	}
 	if event.Type != RealtimeMessageTypeEvent || event.Name != RealtimeEventChapterThumbnailReady {
 		t.Fatalf("event = %#v, want chapter thumbnail event", event)
+	}
+	var payload ChapterThumbnailReadyPayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	// thumbnail_path names the served object; the notifier signs it as is.
+	if want := "https://example.com/chapter-images/100/7/w300.webp"; payload.ThumbnailURL != want {
+		t.Fatalf("thumbnail_url = %q, want %q", payload.ThumbnailURL, want)
 	}
 }

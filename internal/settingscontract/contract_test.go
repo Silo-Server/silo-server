@@ -1036,7 +1036,7 @@ func TestObjectValuesValidateAgainstTheirSchema(t *testing.T) {
 
 	// A stored value is a sparse override merged over the default, and the
 	// current API already stores exactly these shapes — see the round trip in
-	// settings_device_test.go. Requiring all nine properties would make the
+	// settings_device_test.go. Requiring all ten properties would make the
 	// migration quarantine preferences users really set.
 	for name, partial := range map[string]string{
 		"one property":   `{"fontSize":"small"}`,
@@ -1046,6 +1046,31 @@ func TestObjectValuesValidateAgainstTheirSchema(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if err := def.ValueSchema.ValidateValue(json.RawMessage(partial), objSchemas); err != nil {
 				t.Fatalf("partial subtitle appearance %s rejected: %v", partial, err)
+			}
+		})
+	}
+
+	// textOpacity floors at 1, not 0: fully invisible text is not a state any
+	// client offers, and a stored 0 would read as "subtitles are broken".
+	for _, tc := range []struct {
+		value   string
+		wantErr bool
+	}{
+		{value: `{"textOpacity":1}`},
+		{value: `{"textOpacity":100}`},
+		{value: `{"fontColor":"#9ca3af","textOpacity":40}`},
+		{value: `{"textOpacity":0}`, wantErr: true},
+		{value: `{"textOpacity":101}`, wantErr: true},
+		{value: `{"textOpacity":50.5}`, wantErr: true},
+		{value: `{"textOpacity":"50"}`, wantErr: true},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			err := def.ValueSchema.ValidateValue(json.RawMessage(tc.value), objSchemas)
+			if tc.wantErr && err == nil {
+				t.Fatalf("%s accepted, want rejection", tc.value)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("%s rejected: %v", tc.value, err)
 			}
 		})
 	}

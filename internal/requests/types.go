@@ -12,6 +12,16 @@ const (
 	MediaTypeAll    MediaType = "all"
 )
 
+// Source is what created a request.
+type Source string
+
+const (
+	// SourceDirect is the Request button, or any API create.
+	SourceDirect Source = "direct"
+	// SourceWatchlist is a watchlist add of a title not in the library.
+	SourceWatchlist Source = "watchlist"
+)
+
 type Status string
 
 const (
@@ -189,13 +199,17 @@ type Viewer struct {
 }
 
 type Settings struct {
-	Revision                  int64     `json:"-"`
-	RequestsEnabled           bool      `json:"requests_enabled"`
-	GlobalMaxRequests         int       `json:"global_max_requests"`
-	GlobalWindowDays          int       `json:"global_window_days"`
-	GlobalAutoApprovalEnabled bool      `json:"global_auto_approval_enabled"`
-	ForceDualQuality          bool      `json:"force_dual_quality"`
-	UpdatedAt                 time.Time `json:"updated_at"`
+	Revision                  int64 `json:"-"`
+	RequestsEnabled           bool  `json:"requests_enabled"`
+	GlobalMaxRequests         int   `json:"global_max_requests"`
+	GlobalWindowDays          int   `json:"global_window_days"`
+	GlobalAutoApprovalEnabled bool  `json:"global_auto_approval_enabled"`
+	ForceDualQuality          bool  `json:"force_dual_quality"`
+	// WatchlistRequests lets adding a title that is not in the library to a
+	// watchlist request it too. v2 only; the frozen v1 shape does not carry
+	// it, and a v1 settings write keeps the stored value.
+	WatchlistRequests bool      `json:"-"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 type FeatureStatus struct {
@@ -208,6 +222,11 @@ type FeatureStatus struct {
 	// MissingSeasonsRequestable reports whether a series already in the
 	// library can be requested for its missing seasons (v2 only).
 	MissingSeasonsRequestable bool `json:"-"`
+	// WatchlistRequests reports that adding a title that is not in the
+	// library to the viewer's watchlist also requests it: the server and
+	// profile settings are on. The caller adds the account's permission
+	// (v2 only).
+	WatchlistRequests bool `json:"-"`
 }
 
 type UserLimit struct {
@@ -252,7 +271,9 @@ type Request struct {
 	RequesterUsername    string    `json:"-"`
 	// OutcomeReason is why the request was declined or withdrawn, when a
 	// reason was given. v2 only; the frozen v1 shape does not carry it.
-	OutcomeReason    string     `json:"-"`
+	OutcomeReason string `json:"-"`
+	// Source is what created the request. v2 only.
+	Source           Source     `json:"-"`
 	IntegrationKind  string     `json:"integration_kind,omitempty"`
 	IsAnime          bool       `json:"is_anime"`
 	Targets          []Target   `json:"targets,omitempty"`
@@ -502,6 +523,9 @@ type CreateRequestInput struct {
 	// series request asks for the whole series and is refused once the
 	// series is in the library.
 	WholeSeries bool `json:"-"`
+	// Source records what created the request; empty means SourceDirect.
+	// Set by the watchlist path, never read from a client body.
+	Source Source `json:"-"`
 }
 
 // RequestPageKey identifies the last emitted request in descending creation order.

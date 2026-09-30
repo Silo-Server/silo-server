@@ -350,6 +350,12 @@ type Dependencies struct {
 	// PersonalLists reads and edits a profile's favorites
 	// (*handlers.PersonalDataHandler).
 	PersonalLists PersonalListService
+	// WatchlistTitles keeps a profile's watchlist entries for titles the
+	// library doesn't have (*handlers.PersonalDataHandler).
+	WatchlistTitles WatchlistTitleService
+	// WatchlistRequests gates the watchlist title operations and applies
+	// watchlist requests (*requests.Service).
+	WatchlistRequests WatchlistRequestService
 	// Ratings reads and edits a profile's ratings (*handlers.RatingsHandler).
 	Ratings RatingService
 	// Recommendations answers the profile-scoped recommendation reads

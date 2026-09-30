@@ -299,6 +299,9 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 	for _, id := range []string{"listFavorites", "getFavorite", "addFavorite", "deleteFavorite", "listRatings", "getRating", "setRating", "deleteRating", "listWatchlist", "getWatchlistEntry", "addToWatchlist", "deleteWatchlistEntry"} {
 		profileToken[id] = true
 	}
+	for _, id := range watchlistTitleOperationIDs {
+		profileToken[id] = true
+	}
 	for _, id := range recommendationOperationIDs {
 		profileToken[id] = true
 	}

@@ -14,6 +14,7 @@ import { MoreLikeThisRow } from "@/components/RecommendationGrid";
 import RequestPosterCard from "@/components/RequestPosterCard";
 import { SeasonStatus } from "@/components/RequestSeasonsDialog";
 import { useCreateMediaRequest } from "@/hooks/queries/useRequests";
+import { useWatchlistTitleToggle } from "@/hooks/useWatchlistTitleToggle";
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import {
   formatRequestSeasonMeta,
@@ -138,6 +139,7 @@ function TitleSeasons({ seasons }: { seasons: RequestMediaSeason[] }) {
 /** "More Like This" for a TMDB title: request cards, each able to request its title. */
 function TitleRecommendations({ items }: { items: RequestMediaResult[] }) {
   const createRequest = useCreateMediaRequest();
+  const watchlist = useWatchlistTitleToggle();
   return (
     <MoreLikeThisRow
       items={items}
@@ -153,6 +155,8 @@ function TitleRecommendations({ items }: { items: RequestMediaResult[] }) {
             createRequest.variables?.tmdb_id === item.tmdb_id
           }
           onRequest={() => createRequest.mutate(requestInputFromMediaResult(item))}
+          onToggleWatchlist={watchlist.enabled ? () => watchlist.toggle(item) : undefined}
+          isWatchlistPending={watchlist.isPending(item)}
         />
       )}
     />

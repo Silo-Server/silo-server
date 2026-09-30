@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -851,35 +850,31 @@ func (s *Service) uploadChapterThumbnail(ctx context.Context, fileID, chapterInd
 		return s.uploadChapterThumbnailFunc(ctx, fileID, chapterIndex, frame)
 	}
 
-	result, err := imageutil.GenerateVariants(frame, []int{300})
+	data, err := imageutil.EncodeWebPWidth(frame, chapterThumbnailWidth)
 	if err != nil {
-		return "", "", fmt.Errorf("generate variants: %w", err)
+		return "", "", fmt.Errorf("encode thumbnail: %w", err)
 	}
-
-	var originalKey string
-	var w300Data []byte
-	for _, variant := range result.Variants {
-		key := filepath.ToSlash(fmt.Sprintf("chapter-images/%d/%d/%s%s", fileID, chapterIndex, variant.Key, result.Ext))
-		if err := s.store.Put(ctx, key, variant.Data); err != nil {
-			return "", "", fmt.Errorf("upload %s: %w", key, err)
-		}
-		if variant.Key == "original" {
-			originalKey = key
-		}
-		if variant.Key == "w300" {
-			w300Data = variant.Data
-		}
+	key := chapterThumbnailKey(fileID, chapterIndex)
+	if err := s.store.Put(ctx, key, data); err != nil {
+		return "", "", fmt.Errorf("upload %s: %w", key, err)
 	}
-
-	thumbhashSource := w300Data
-	if len(thumbhashSource) == 0 && len(result.Variants) > 0 {
-		thumbhashSource = result.Variants[0].Data
-	}
-	thumbhash, err := imageutil.Thumbhash(thumbhashSource)
+	thumbhash, err := imageutil.Thumbhash(data)
 	if err != nil {
 		return "", "", fmt.Errorf("thumbhash: %w", err)
 	}
-	return originalKey, thumbhash, nil
+	return key, thumbhash, nil
+}
+
+// chapterThumbnailWidth is the width of the one image stored per chapter. It
+// is the size every client is served: the web seek-bar preview and chapters
+// menu, and the thumbnail_url the native apps decode. No full-size original is
+// kept; a client that needs larger previews needs the chapters regenerated.
+const chapterThumbnailWidth = 300
+
+// chapterThumbnailKey is the object key a chapter's thumbnail is stored under,
+// and the value its thumbnail_path holds.
+func chapterThumbnailKey(fileID, chapterIndex int) string {
+	return fmt.Sprintf("%s%d/%d/w%d.webp", chapterImagesPrefix, fileID, chapterIndex, chapterThumbnailWidth)
 }
 
 func (s *Service) enqueue(req ChapterThumbnailRequest, priority bool) bool {
