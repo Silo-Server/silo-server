@@ -76,6 +76,7 @@ export function libraryCreateToV2(body: CreateLibraryRequest): V2Body<"POST /api
     ...(body.intro_detection_enabled === undefined
       ? {}
       : { intro_detection_enabled: body.intro_detection_enabled }),
+    ...(body.trickplay_enabled === undefined ? {} : { trickplay_enabled: body.trickplay_enabled }),
     ...(body.trailer_kinds === undefined ? {} : { trailer_kinds: body.trailer_kinds }),
     ...(body.realtime_monitoring === undefined
       ? {}

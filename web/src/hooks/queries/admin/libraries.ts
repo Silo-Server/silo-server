@@ -119,12 +119,17 @@ export function useLibraryRealtimeMonitoring() {
   });
 }
 
-/** Library feature detection; `realtime_monitoring` says the server offers the status above. */
-export function useLibraryCapabilities() {
+/**
+ * Library feature detection: `realtime_monitoring` says the server offers the
+ * status above, `trickplay` that it makes seek previews.
+ */
+export function useLibraryCapabilities(enabled = true) {
   return useQuery({
     queryKey: adminKeys.libraryCapabilities(),
     queryFn: ({ signal }) => v2("GET /api/v2/libraries/capabilities", { signal }),
     staleTime: Infinity,
+    retry: false,
+    enabled,
   });
 }
 
