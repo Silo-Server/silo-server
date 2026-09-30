@@ -71,6 +71,7 @@ func TestSheetsRequestValidation(t *testing.T) {
 func TestSheetsRequestRoundTripsThroughJSON(t *testing.T) {
 	req := sheetsRequest([]float64{5, 15}, 10, 10)
 	req.Samples.ReadThrough = true
+	req.Sheets.UseInputAspect = true
 	req.Sheets.ToneMap = &ToneMap{AllowSoftware: true}
 	req.Attempts = []Attempt{{Hardware: true, TimeoutSeconds: 60}, {}}
 	encoded, err := json.Marshal(req)

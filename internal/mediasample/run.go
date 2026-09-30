@@ -96,6 +96,9 @@ type Result struct {
 	// Sheets, and SheetFrames how their cells were filled.
 	Sheets      []Sheet     `json:"sheets,omitempty"`
 	SheetFrames SheetFrames `json:"sheet_frames,omitzero"`
+	// SheetTileHeight is the actual cell height, which UseInputAspect may
+	// change from the request after probing the input's display matrix.
+	SheetTileHeight int `json:"sheet_tile_height,omitzero"`
 	// Decoder names the attempt that produced the result: "software", or
 	// "hardware:<accel>".
 	Decoder string `json:"decoder"`
@@ -163,7 +166,7 @@ func (r Runner) runAttempt(ctx context.Context, req Request, attempt Attempt, to
 		attemptCtx, cancel = context.WithTimeout(ctx, time.Duration(attempt.TimeoutSeconds*float64(time.Second)))
 		defer cancel()
 	}
-	run := attemptRun{runner: r, ctx: ctx, attemptCtx: attemptCtx, attempt: attempt, hw: hw, decoder: decoder, sheetsGraph: sheetsGraph}
+	run := attemptRun{runner: r, ctx: ctx, attemptCtx: attemptCtx, attempt: attempt, hw: hw, decoder: decoder, sheetsGraph: sheetsGraph, toneMap: toneMap}
 	switch {
 	case req.At != nil:
 		return run.image(req, imageArgs)
@@ -210,6 +213,7 @@ type attemptRun struct {
 	decoder    string
 	// sheetsGraph is the video chain of a Sheets request.
 	sheetsGraph string
+	toneMap     *toneMapResolver
 }
 
 // samples runs a Samples request. Unless it reads through, it probes the
@@ -217,12 +221,25 @@ type attemptRun struct {
 // container seeks to keyframes. Otherwise it reads one keyframes-only window
 // and picks the samples from its keyframes.
 func (a attemptRun) samples(req Request) (Result, *AttemptError) {
-	if !req.Samples.ReadThrough {
+	if !req.Samples.ReadThrough || (req.Sheets != nil && req.Sheets.UseInputAspect) {
 		header := &inputHeaderParser{}
 		if _, failure := a.exec(req, probeArgs(req.Input), nil, false, header.line); failure != nil {
 			return Result{}, failure
 		}
-		if header.info.seeksToKeyframes() {
+		if req.Sheets != nil && req.Sheets.UseInputAspect {
+			out := req.Sheets.forDisplayAspect(header.info.displayAspect())
+			if err := out.validate(); err != nil {
+				return Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonArgs, Err: err}
+			}
+			req.Sheets = &out
+			graph, failure := a.runner.prepareSheets(a.attemptCtx, req, a.attempt, a.toneMap)
+			if failure != nil {
+				failure.Decoder = a.decoder
+				return Result{}, failure
+			}
+			a.sheetsGraph = graph
+		}
+		if !req.Samples.ReadThrough && header.info.seeksToKeyframes() {
 			if req.Sheets != nil {
 				return a.sheets(req, req.Samples.Seconds, header.info.StartSeconds)
 			}
@@ -304,7 +321,7 @@ func (a attemptRun) sheets(req Request, times []float64, inputStart float64) (Re
 		failure.Decoder = a.decoder
 		return Result{}, failure
 	}
-	return Result{Decoder: a.decoder, Sheets: sheets, SheetFrames: frames}, nil
+	return Result{Decoder: a.decoder, Sheets: sheets, SheetFrames: frames, SheetTileHeight: req.Sheets.TileHeight}, nil
 }
 
 // exec runs one ffmpeg process of the attempt with args, feeding it stdin

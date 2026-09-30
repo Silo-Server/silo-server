@@ -267,6 +267,12 @@ metadata=mode=add:key=sample:value=-1,metadata@sheets=print
 -fps_mode passthrough -pix_fmt yuv420p -f rawvideo pipe:1
 ```
 
+`Sheets.UseInputAspect` derives the height from the input header instead,
+including a 90-degree display matrix, and returns the actual cell height in
+`Result.SheetTileHeight`. This reuses the sampling probe; a `ReadThrough`
+request also probes when this option is set. Callers publishing manifests
+must use the returned height and reject chunks whose geometry differs.
+
 - HDR sources are scaled before they are tone mapped, so the software
   tone-map chain of [Images](#images) only handles thumbnail-sized frames,
   followed by `scale=out_range=full:out_color_matrix=bt601`. VAAPI and QSV

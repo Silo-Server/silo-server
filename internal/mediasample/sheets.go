@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -21,10 +22,21 @@ type SheetsOutput struct {
 	Rows       int `json:"rows"`
 	// Quality is the JPEG quality, 1 to 100.
 	Quality int `json:"quality"`
+	// UseInputAspect replaces TileHeight with the probed display height for
+	// TileWidth, including a 90-degree display matrix. Result reports the
+	// actual tile height. Without it the caller's exact dimensions apply.
+	UseInputAspect bool `json:"use_input_aspect,omitzero"`
 	// ToneMap converts an HDR source to SDR, after scaling, so software tone
 	// mapping only handles thumbnail-sized frames. Nil keeps the decoded
 	// colors.
 	ToneMap *ToneMap `json:"tone_map,omitempty"`
+}
+
+func (o SheetsOutput) forDisplayAspect(aspect float64) SheetsOutput {
+	if o.UseInputAspect && aspect > 0 && finite(aspect) {
+		o.TileHeight = min(max(2*int(math.Round(float64(o.TileWidth)/aspect/2)), minSheetTile), maxSheetTile)
+	}
+	return o
 }
 
 // Sheet is one sprite sheet.
