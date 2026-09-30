@@ -83,7 +83,8 @@ interface SectionOverrideIds {
  * leaves such a section showing, so a shown one without a saved override is
  * left out and keeps its admin position, unless the change is to that
  * section; the refusal then reaches the user instead of the change silently
- * not saving.
+ * not saving. Positions are only as close to the list order as that held
+ * position allows.
  */
 export function buildSectionOverrides(
   sections: SettingsSectionEntry[],
@@ -95,22 +96,28 @@ export function buildSectionOverrides(
   for (const override of savedOverrides) {
     if (override.section_id && override.id) savedIds.set(override.section_id, override.id);
   }
+  const leftOut = (s: SettingsSectionEntry) =>
+    !s.is_custom &&
+    !s.hidden &&
+    !savedIds.has(s.id) &&
+    s.id !== changedSectionId &&
+    isTraktConfig(s.config);
+  // A section left out keeps its admin position, so the others are numbered
+  // in list order around it and never on it: the server orders sections with
+  // equal positions arbitrarily.
+  const heldPositions = new Set(sections.filter(leftOut).map((s) => s.position));
   const overrides: SectionOverride[] = [];
-  sections.forEach((s, index) => {
-    const savedId = s.is_custom ? undefined : savedIds.get(s.id);
-    if (
-      !s.is_custom &&
-      !savedId &&
-      !s.hidden &&
-      s.id !== changedSectionId &&
-      isTraktConfig(s.config)
-    ) {
-      return;
+  let position = 0;
+  for (const s of sections) {
+    if (leftOut(s)) {
+      position = Math.max(position, s.position + 1);
+      continue;
     }
+    while (heldPositions.has(position)) position += 1;
     overrides.push({
       section_id: s.is_custom ? undefined : s.id,
-      id: s.is_custom ? s.id : (savedId ?? newId(s.id)),
-      position: index,
+      id: s.is_custom ? s.id : (savedIds.get(s.id) ?? newId(s.id)),
+      position: position++,
       hidden: s.hidden,
       title: s.title,
       featured: s.featured,
@@ -118,7 +125,7 @@ export function buildSectionOverrides(
       section_type: s.is_custom ? s.section_type : undefined,
       config: s.config,
     });
-  });
+  }
   for (const section of removedSystemSections) {
     overrides.push({
       section_id: section.id,

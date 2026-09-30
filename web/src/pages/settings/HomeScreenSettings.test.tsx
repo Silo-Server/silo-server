@@ -159,6 +159,32 @@ describe("HomeScreenSettings helpers", () => {
     expect(edited[0]).toMatchObject({ id: "new-trakt-shown", section_id: "trakt-shown" });
   });
 
+  it("numbers the other sections around a left-out section's admin position", () => {
+    const held = makeSection({ id: "trakt", position: 3, config: { source: "trakt" } });
+    const row = (id: string) => makeSection({ id });
+    const positions = (sections: SettingsSectionEntry[]) =>
+      buildSectionOverrides(sections, [], { newId: (id) => `new-${id}` }).map(
+        ({ section_id, position }) => [section_id, position],
+      );
+
+    // A row moved below the held section follows it.
+    expect(positions([row("a"), row("b"), held, row("moved"), row("c")])).toEqual([
+      ["a", 0],
+      ["b", 1],
+      ["moved", 4],
+      ["c", 5],
+    ]);
+    // With more rows above it than its position allows, it keeps its place and
+    // the rest follow it, never sharing its position.
+    expect(positions([row("moved"), row("a"), row("b"), row("c"), held, row("d")])).toEqual([
+      ["moved", 0],
+      ["a", 1],
+      ["b", 2],
+      ["c", 4],
+      ["d", 5],
+    ]);
+  });
+
   it("gives each admin section one new override ID per source", () => {
     const first = createOverrideIdSource();
     const id = first("admin-1");
