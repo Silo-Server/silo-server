@@ -11,11 +11,16 @@ import (
 
 type PersonRefresher interface {
 	RefreshPerson(ctx context.Context, id int64) (*models.Person, error)
-	FindCandidates(ctx context.Context, limit int) ([]int64, error)
+	// ClaimCandidates claims up to limit people due for a background lookup,
+	// so API nodes sweeping at once never get the same person.
+	ClaimCandidates(ctx context.Context, limit int) ([]int64, error)
 }
 
 type PersonRefreshWorkerConfig struct {
-	Interval       time.Duration
+	// Interval is how often an idle worker looks for due people. While a
+	// sweep keeps claiming full batches, the next batch starts right away.
+	Interval time.Duration
+	// Delay is the pause between background lookups.
 	Delay          time.Duration
 	BatchSize      int
 	RefreshTimeout time.Duration
@@ -64,6 +69,8 @@ func NewPersonRefreshWorker(service PersonRefresher, config PersonRefreshWorkerC
 	}
 }
 
+// Enqueue asks for an on-demand lookup, such as for a person whose page was
+// just opened. It runs before the rest of any background batch in progress.
 func (w *PersonRefreshWorker) Enqueue(id int64) {
 	if id <= 0 {
 		return
@@ -94,9 +101,9 @@ func (w *PersonRefreshWorker) Start() {
 			case <-w.stop:
 				return
 			case <-w.wake:
-				w.processBatch()
+				w.drain()
 			case <-ticker.C:
-				w.processBatch()
+				w.drain()
 			}
 		}
 	}()
@@ -106,77 +113,97 @@ func (w *PersonRefreshWorker) Stop() {
 	close(w.stop)
 }
 
-func (w *PersonRefreshWorker) processBatch() {
+// drain runs background batches back to back while each claims a full batch,
+// so a backlog is worked through continuously instead of one batch per
+// Interval. It returns once a batch comes up short or the worker stops.
+func (w *PersonRefreshWorker) drain() {
+	for w.processBatch() {
+		if w.stopped() {
+			return
+		}
+	}
+}
+
+// processBatch runs the on-demand queue, then claims and refreshes one
+// background batch. On-demand requests that arrive meanwhile run between its
+// lookups. It reports whether the batch was full, meaning more may be due.
+func (w *PersonRefreshWorker) processBatch() bool {
 	if w.service == nil {
-		return
+		return false
 	}
 
-	batch := w.collectBatch()
-	if len(batch) == 0 {
-		return
+	done := map[int64]struct{}{}
+	w.runManual(done)
+	batch, err := w.service.ClaimCandidates(context.Background(), w.config.BatchSize)
+	if err != nil {
+		slog.Warn("person refresh worker: failed to claim candidates", "error", err)
+		return false
 	}
 
 	for index, id := range batch {
-		ctx, cancel := context.WithTimeout(context.Background(), w.config.RefreshTimeout)
-		_, err := w.service.RefreshPerson(ctx, id)
-		cancel()
-		if err != nil {
-			slog.Warn("person refresh worker: refresh failed", "person_id", id, "error", err)
+		w.runManual(done)
+		if w.stopped() {
+			return false
 		}
-
-		w.mu.Lock()
-		delete(w.queued, id)
-		w.mu.Unlock()
+		if _, ran := done[id]; ran || w.isQueued(id) {
+			// Its on-demand lookup already ran, or is pending and will cover it.
+			continue
+		}
+		w.refresh(id)
 
 		if w.config.Delay > 0 && index < len(batch)-1 {
 			select {
 			case <-time.After(w.config.Delay):
 			case <-w.stop:
-				return
+				return false
 			}
 		}
 	}
+	return len(batch) >= w.config.BatchSize
 }
 
-func (w *PersonRefreshWorker) collectBatch() []int64 {
+// runManual refreshes every on-demand request queued so far, recording each
+// in done.
+func (w *PersonRefreshWorker) runManual(done map[int64]struct{}) {
+	for {
+		w.mu.Lock()
+		if len(w.manualQueue) == 0 {
+			w.mu.Unlock()
+			return
+		}
+		id := w.manualQueue[0]
+		w.manualQueue = w.manualQueue[1:]
+		w.mu.Unlock()
+
+		w.refresh(id)
+		done[id] = struct{}{}
+
+		w.mu.Lock()
+		delete(w.queued, id)
+		w.mu.Unlock()
+	}
+}
+
+func (w *PersonRefreshWorker) refresh(id int64) {
+	ctx, cancel := context.WithTimeout(context.Background(), w.config.RefreshTimeout)
+	defer cancel()
+	if _, err := w.service.RefreshPerson(ctx, id); err != nil {
+		slog.Warn("person refresh worker: refresh failed", "person_id", id, "error", err)
+	}
+}
+
+func (w *PersonRefreshWorker) isQueued(id int64) bool {
 	w.mu.Lock()
-	manualCount := min(w.config.BatchSize, len(w.manualQueue))
-	batch := append([]int64(nil), w.manualQueue[:manualCount]...)
-	w.manualQueue = append([]int64(nil), w.manualQueue[manualCount:]...)
-	queued := make(map[int64]struct{}, len(w.queued))
-	for id := range w.queued {
-		queued[id] = struct{}{}
-	}
-	w.mu.Unlock()
+	defer w.mu.Unlock()
+	_, ok := w.queued[id]
+	return ok
+}
 
-	if len(batch) >= w.config.BatchSize {
-		return batch
+func (w *PersonRefreshWorker) stopped() bool {
+	select {
+	case <-w.stop:
+		return true
+	default:
+		return false
 	}
-
-	candidates, err := w.service.FindCandidates(context.Background(), w.config.BatchSize-len(batch))
-	if err != nil {
-		slog.Warn("person refresh worker: failed to find candidates", "error", err)
-		return batch
-	}
-
-	seen := make(map[int64]struct{}, len(batch))
-	for _, id := range batch {
-		seen[id] = struct{}{}
-	}
-
-	for _, id := range candidates {
-		if _, exists := seen[id]; exists {
-			continue
-		}
-		if _, exists := queued[id]; exists {
-			continue
-		}
-		batch = append(batch, id)
-		seen[id] = struct{}{}
-		if len(batch) >= w.config.BatchSize {
-			break
-		}
-	}
-
-	return batch
 }

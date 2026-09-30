@@ -152,7 +152,7 @@ func TestPersonRefreshOutcomeSchedulesNextLookupPostgres(t *testing.T) {
 
 // The sweep takes people never looked up first, newest first, then people
 // whose next lookup is due, earliest first; people not yet due wait (#1606).
-func TestFindRefreshCandidatesOrderPostgres(t *testing.T) {
+func TestClaimRefreshCandidatesOrderPostgres(t *testing.T) {
 	repo, pool := personRefreshTestRepo(t)
 	ctx := context.Background()
 
@@ -176,7 +176,7 @@ func TestFindRefreshCandidatesOrderPostgres(t *testing.T) {
 		}
 	}
 
-	ids, err := repo.FindRefreshCandidates(ctx, 100_000)
+	ids, err := repo.ClaimRefreshCandidates(ctx, 100_000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,9 @@ func TestFindRefreshCandidatesOrderPostgres(t *testing.T) {
 		t.Errorf("a person not due (%d) or given up (%d) was a candidate", position(notDue), position(givenUp))
 	}
 
-	if ids, err := repo.FindRefreshCandidates(ctx, 1); err != nil || len(ids) != 1 {
+	// The claim above leased everyone due, so the limit needs a fresh person.
+	seedRefreshPerson(t, pool, "limit-one")
+	if ids, err := repo.ClaimRefreshCandidates(ctx, 1); err != nil || len(ids) != 1 {
 		t.Fatalf("limit 1 returned %v, %v", ids, err)
 	}
 }
@@ -252,5 +254,69 @@ func TestRecordRefreshOutcomeConcurrentWritesBothCountPostgres(t *testing.T) {
 	}
 	if state := readRefreshState(t, pool, id); state.failures != 2 {
 		t.Fatalf("failures after two concurrent failed outcomes = %d, want 2", state.failures)
+	}
+}
+
+// Nodes sweeping at once claim disjoint people, and a claim stamps the
+// attempt with a short lease so an abandoned claim comes back.
+func TestClaimRefreshCandidatesConcurrentClaimsAreDisjointPostgres(t *testing.T) {
+	repo, pool := personRefreshTestRepo(t)
+	ctx := context.Background()
+
+	seeded := map[int64]bool{}
+	for i := range 6 {
+		seeded[seedRefreshPerson(t, pool, fmt.Sprintf("claim-%d", i))] = true
+	}
+
+	type result struct {
+		ids []int64
+		err error
+	}
+	results := make(chan result, 2)
+	for range 2 {
+		go func() {
+			ids, err := repo.ClaimRefreshCandidates(ctx, 100_000)
+			results <- result{ids, err}
+		}()
+	}
+	claimedBy := map[int64]int{}
+	for range 2 {
+		r := <-results
+		if r.err != nil {
+			t.Fatal(r.err)
+		}
+		for _, id := range r.ids {
+			if seeded[id] {
+				claimedBy[id]++
+			}
+		}
+	}
+	for id := range seeded {
+		if claimedBy[id] != 1 {
+			t.Errorf("person %d claimed %d times, want exactly once", id, claimedBy[id])
+		}
+	}
+
+	for id := range seeded {
+		var attempted bool
+		state := readRefreshState(t, pool, id)
+		if err := pool.QueryRow(ctx, `SELECT metadata_refresh_attempted_at IS NOT NULL FROM people WHERE id = $1`, id).Scan(&attempted); err != nil {
+			t.Fatal(err)
+		}
+		if !attempted {
+			t.Fatalf("person %d: claim didn't stamp the attempt", id)
+		}
+		requireDueIn(t, "claim lease", state, PersonRefreshAttemptLease)
+	}
+
+	// Claimed people aren't due again until the lease runs out.
+	again, err := repo.ClaimRefreshCandidates(ctx, 100_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range again {
+		if seeded[id] {
+			t.Fatalf("person %d claimed again while leased", id)
+		}
 	}
 }

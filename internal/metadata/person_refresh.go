@@ -26,7 +26,7 @@ type personRefreshRepo interface {
 	Update(ctx context.Context, person models.Person) error
 	MarkRefreshAttempt(ctx context.Context, id int64) error
 	RecordRefreshOutcome(ctx context.Context, id int64, outcome catalog.PersonRefreshOutcome) error
-	FindRefreshCandidates(ctx context.Context, limit int) ([]int64, error)
+	ClaimRefreshCandidates(ctx context.Context, limit int) ([]int64, error)
 }
 
 type PersonRefreshService struct {
@@ -84,11 +84,13 @@ func (s *PersonRefreshService) RefreshPerson(ctx context.Context, id int64) (*mo
 	return s.refreshPersonWithProviders(ctx, id, providers)
 }
 
-func (s *PersonRefreshService) FindCandidates(ctx context.Context, limit int) ([]int64, error) {
+// ClaimCandidates claims people due for a background lookup; see
+// catalog.PersonRepository.ClaimRefreshCandidates.
+func (s *PersonRefreshService) ClaimCandidates(ctx context.Context, limit int) ([]int64, error) {
 	if s.repo == nil {
 		return nil, fmt.Errorf("person refresh repository is not configured")
 	}
-	return s.repo.FindRefreshCandidates(ctx, limit)
+	return s.repo.ClaimRefreshCandidates(ctx, limit)
 }
 
 func (s *PersonRefreshService) refreshPersonWithProviders(

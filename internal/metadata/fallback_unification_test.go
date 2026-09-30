@@ -38,7 +38,7 @@ func (r *fakePersonRefreshRepo) Update(_ context.Context, person models.Person) 
 	return nil
 }
 
-func (r *fakePersonRefreshRepo) FindRefreshCandidates(_ context.Context, _ int) ([]int64, error) {
+func (r *fakePersonRefreshRepo) ClaimRefreshCandidates(_ context.Context, _ int) ([]int64, error) {
 	return nil, nil
 }
 

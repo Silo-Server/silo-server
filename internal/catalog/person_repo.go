@@ -1,10 +1,12 @@
 package catalog
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -96,7 +98,7 @@ func (r *PersonRepository) FindOrCreate(ctx context.Context, p models.Person) (i
 // Anything that is not a cached key is still replaceable by a real image: an
 // empty column, the "-" no-photo sentinel, and a provider URL that never made
 // it through the cache. Keeping URLs replaceable is what stops a person with
-// no external id — FindRefreshCandidates skips them, so no refresh will ever
+// no external id — ClaimRefreshCandidates skips them, so no refresh will ever
 // revisit the row — from being stuck with a dead URL forever. The
 // LIKE '%://%' test for "not a cached key" is the same one the artwork GC
 // trigger and the image cache sweep use.
@@ -1138,7 +1140,7 @@ const personRefreshStreak = `(CASE
 	ELSE metadata_refresh_failures + 1
 END)`
 
-// Person metadata refresh policy. The sweep (FindRefreshCandidates) follows
+// Person metadata refresh policy. The sweep (ClaimRefreshCandidates) follows
 // each person's recorded outcome; a detail-page view (PersonRefreshDue) looks
 // a person up on demand at most once per PersonRefreshRetryAfter.
 const (
@@ -1168,7 +1170,7 @@ const (
 // PersonMetadataIncomplete reports whether a provider could still fill in
 // metadata Silo does not have. A photo_path of "-" is the "provider has no
 // photo" sentinel — an answer, not a gap — so it counts as complete, matching
-// the SQL predicate in FindRefreshCandidates.
+// the SQL predicate in ClaimRefreshCandidates.
 func PersonMetadataIncomplete(person models.Person) bool {
 	return person.Bio == "" || person.PhotoPath == "" || person.BirthDate == nil
 }
@@ -1177,7 +1179,7 @@ func PersonMetadataIncomplete(person models.Person) bool {
 // lookup: the person carries an external id, no lookup has been attempted
 // within PersonRefreshRetryAfter, and their metadata is either incomplete or
 // older than PersonMetadataStaleAfter. The background sweep does not use this
-// rule; it follows each person's recorded outcome (FindRefreshCandidates).
+// rule; it follows each person's recorded outcome (ClaimRefreshCandidates).
 func PersonRefreshDue(person models.Person, now time.Time) bool {
 	if person.TmdbID == "" && person.ImdbID == "" && person.TvdbID == "" {
 		return false
@@ -1190,25 +1192,32 @@ func PersonRefreshDue(person models.Person, now time.Time) bool {
 		person.UpdatedAt.Before(now.Add(-PersonMetadataStaleAfter))
 }
 
-// FindRefreshCandidates returns up to limit people due for a background
-// provider lookup: first people never looked up whose metadata is incomplete
-// or stale, newest first, so the cast of a new scan goes next; then people
-// whose recorded outcome made their next lookup due, earliest due first.
-func (r *PersonRepository) FindRefreshCandidates(ctx context.Context, limit int) ([]int64, error) {
+// ClaimRefreshCandidates claims up to limit people due for a background
+// provider lookup and returns them in lookup order: first people never looked
+// up whose metadata is incomplete or stale, newest first, so the cast of a new
+// scan goes next; then people whose recorded outcome made their next lookup
+// due, earliest due first.
+//
+// Claiming stamps the attempt and a PersonRefreshAttemptLease due time in the
+// same statement that selects the rows, skipping rows another node holds, so
+// API nodes sweeping at once never look up the same person. A claim the
+// lookup never completes expires with the lease and the person is due again.
+func (r *PersonRepository) ClaimRefreshCandidates(ctx context.Context, limit int) ([]int64, error) {
 	if limit <= 0 {
 		return []int64{}, nil
 	}
 
 	ids := make([]int64, 0, limit)
-	queries := []struct {
+	steps := []struct {
 		name string
-		sql  string
+		// pick selects id and a sort key (lower sorts first) for up to $1 rows.
+		pick string
 		args func(remaining int) []any
 	}{
 		{
 			name: "never looked up",
-			sql: `
-				SELECT id
+			pick: `
+				SELECT id, -id::double precision AS sort_key
 				FROM people
 				WHERE metadata_refresh_attempted_at IS NULL
 					AND (tmdb_id <> '' OR imdb_id <> '' OR tvdb_id <> '')
@@ -1216,47 +1225,71 @@ func (r *PersonRepository) FindRefreshCandidates(ctx context.Context, limit int)
 						COALESCE(bio, '') = ''
 						OR COALESCE(photo_path, '') = ''
 						OR birth_date IS NULL
-						OR updated_at < $2
+						OR updated_at < $3
 					)
 				ORDER BY id DESC
-				LIMIT $1`,
+				LIMIT $1
+				FOR UPDATE SKIP LOCKED`,
 			args: func(remaining int) []any {
-				return []any{remaining, time.Now().Add(-PersonMetadataStaleAfter)}
+				return []any{remaining, PersonRefreshAttemptLease.Seconds(), time.Now().Add(-PersonMetadataStaleAfter)}
 			},
 		},
 		{
 			name: "due again",
-			sql: `
-				SELECT id
+			pick: `
+				SELECT id, extract(epoch FROM metadata_refresh_due_at)::double precision AS sort_key
 				FROM people
 				WHERE metadata_refresh_due_at IS NOT NULL
 					AND metadata_refresh_due_at <= NOW()
 					AND (tmdb_id <> '' OR imdb_id <> '' OR tvdb_id <> '')
 				ORDER BY metadata_refresh_due_at, id
-				LIMIT $1`,
-			args: func(remaining int) []any { return []any{remaining} },
+				LIMIT $1
+				FOR UPDATE SKIP LOCKED`,
+			args: func(remaining int) []any { return []any{remaining, PersonRefreshAttemptLease.Seconds()} },
 		},
 	}
-	for _, query := range queries {
+	type claimed struct {
+		id      int64
+		sortKey float64
+	}
+	for _, step := range steps {
 		remaining := limit - len(ids)
 		if remaining <= 0 {
 			break
 		}
-		rows, err := r.pool.Query(ctx, query.sql, query.args(remaining)...)
+		rows, err := r.pool.Query(ctx, `
+			WITH picked AS (`+step.pick+`)
+			UPDATE people p
+			SET metadata_refresh_attempted_at = NOW(),
+				metadata_refresh_due_at = NOW() + make_interval(secs => $2)
+			FROM picked
+			WHERE p.id = picked.id
+			RETURNING p.id, picked.sort_key`, step.args(remaining)...)
 		if err != nil {
-			return nil, fmt.Errorf("query %s refresh candidates: %w", query.name, err)
+			return nil, fmt.Errorf("claim %s refresh candidates: %w", step.name, err)
 		}
+		var batch []claimed
 		for rows.Next() {
-			var id int64
-			if err := rows.Scan(&id); err != nil {
+			var c claimed
+			if err := rows.Scan(&c.id, &c.sortKey); err != nil {
 				rows.Close()
-				return nil, fmt.Errorf("scan %s refresh candidate: %w", query.name, err)
+				return nil, fmt.Errorf("scan %s refresh candidate: %w", step.name, err)
 			}
-			ids = append(ids, id)
+			batch = append(batch, c)
 		}
 		rows.Close()
 		if err := rows.Err(); err != nil {
-			return nil, fmt.Errorf("iterate %s refresh candidates: %w", query.name, err)
+			return nil, fmt.Errorf("iterate %s refresh candidates: %w", step.name, err)
+		}
+		// UPDATE ... RETURNING has no order of its own.
+		slices.SortFunc(batch, func(a, b claimed) int {
+			if c := cmp.Compare(a.sortKey, b.sortKey); c != 0 {
+				return c
+			}
+			return cmp.Compare(a.id, b.id)
+		})
+		for _, c := range batch {
+			ids = append(ids, c.id)
 		}
 	}
 	return ids, nil
