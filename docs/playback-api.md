@@ -26,7 +26,7 @@ and `allowed` is `true`; a server without playback wired answers
 `not_configured` with `allowed: false`. `installation_id` is the persisted
 server instance UUID that diagnostics also report. `protocol_versions` is
 `[3]`. `features` is the v3 server feature set plus `sequenced_progress_v1`,
-`fixed_media_file_v1`, and `marker_segments_v1`. When the room service and
+`fixed_media_file_v1`, `marker_segments_v1`, and `trickplay_v1`. When the room service and
 authenticated room socket are configured, it also includes
 `watch_party_source_fallback_v1` and `watch_party_coordinator_v1`.
 The coordinator capability covers shared room

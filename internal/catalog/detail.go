@@ -74,6 +74,23 @@ type ChapterThumbnailQueuer interface {
 	QueuePriorityFileAtPosition(ctx context.Context, fileID int, targetSeconds float64)
 }
 
+// TrickplayAvailability reports the servable seek-bar previews of files.
+type TrickplayAvailability interface {
+	TrickplayGrids(ctx context.Context, fileIDs []int) (map[int]TrickplayGrid, error)
+}
+
+// TrickplayGrid is how a file's published seek-bar previews are laid out:
+// ThumbnailCount thumbnails of Width by Height pixels, one per IntervalMS of
+// media time, TileColumns by TileRows to a sheet. Bandwidth is Jellyfin's
+// bits-per-second estimate for fetching them.
+type TrickplayGrid struct {
+	Width, Height         int
+	TileColumns, TileRows int
+	ThumbnailCount        int
+	IntervalMS            int
+	Bandwidth             int
+}
+
 // ImageResolver resolves image paths (potentially plugin-prefixed) to usable URLs.
 type ImageResolver interface {
 	// ResolveImageURL resolves a single image path. Plugin-prefixed paths (e.g.,
@@ -500,6 +517,10 @@ type FileVersion struct {
 	Recap                    *Marker                `json:"recap,omitempty"`
 	Preview                  *Marker                `json:"preview,omitempty"`
 	MarkerSegments           []models.MarkerSegment `json:"-"`
+	// Trickplay is the layout of the file's servable seek-bar previews, nil
+	// when it has none. The v2 watch and Jellyfin views carry it; the frozen
+	// v1 view does not.
+	Trickplay *TrickplayGrid `json:"-"`
 }
 
 // SetMarkers refreshes the marker projection without rebuilding file metadata.
@@ -757,6 +778,7 @@ type DetailService struct {
 	probeEnsurer      PlaybackProbeEnsurer
 	copySafetyRacer   CopySafetyRacer
 	chapterThumbs     ChapterThumbnailQueuer
+	trickplay         TrickplayAvailability
 
 	// resolver is built once on first use; see settingsResolver.
 	resolverOnce sync.Once
@@ -822,6 +844,33 @@ func (s *DetailService) SetCopySafetyRacer(racer CopySafetyRacer) {
 
 func (s *DetailService) SetChapterThumbnailQueuer(queuer ChapterThumbnailQueuer) {
 	s.chapterThumbs = queuer
+}
+
+// SetTrickplayAvailability wires in the seek-bar preview reader.
+func (s *DetailService) SetTrickplayAvailability(availability TrickplayAvailability) {
+	s.trickplay = availability
+}
+
+// markTrickplay sets Trickplay on versions. Previews are an enhancement, so
+// a failed lookup leaves every version without them.
+func (s *DetailService) markTrickplay(ctx context.Context, versions []FileVersion) {
+	if s.trickplay == nil || len(versions) == 0 {
+		return
+	}
+	ids := make([]int, len(versions))
+	for i, v := range versions {
+		ids[i] = v.FileID
+	}
+	grids, err := s.trickplay.TrickplayGrids(ctx, ids)
+	if err != nil {
+		slog.WarnContext(ctx, "trickplay lookup failed", "component", "catalog", "error", err)
+		return
+	}
+	for i := range versions {
+		if grid, ok := grids[versions[i].FileID]; ok {
+			versions[i].Trickplay = &grid
+		}
+	}
 }
 
 func (s *DetailService) SetFolderRepository(repo interface {
@@ -3823,6 +3872,7 @@ func (s *DetailService) buildPlaybackInfoWith(
 		subtitles = append(subtitles, sub)
 	}
 
+	s.markTrickplay(ctx, versions)
 	variants := buildPlaybackVariants(versions, filter.SelectedFileID)
 	selectedVersionExists := playbackVersionExists(versions, filter.SelectedFileID)
 	pick := func(field func(v FileVersion) *Marker, fallback *Marker) *Marker {

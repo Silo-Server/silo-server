@@ -141,6 +141,29 @@ in the assets store. The revision repeats in the file name so that
 `artworkkey.Revision` reads it: the artwork route then serves sheets as
 immutable, and signed sheet URLs stay stable for a day.
 
+## Reading previews
+
+Players read previews through the native API:
+
+- `getWatchState` marks each version `trickplay_available`, from one batched
+  query over the item's files (`catalog.TrickplayAvailability`). A failed
+  lookup leaves every version without previews rather than failing the
+  detail.
+- `GET /api/v2/watch/{id}/trickplay?file_id=` returns one file's manifest:
+  the interval in milliseconds, the thumbnail size, the grid, the thumbnail
+  count, one signed URL per sheet, and when those URLs expire. It serves only
+  a file among the versions the watch detail lists for the caller, so it
+  applies the same access rules. Every sheet is signed or the manifest is
+  withheld: clients cut thumbnails by index and cannot skip a sheet. Sheet
+  URLs come from the artwork URL resolver, so local storage signs
+  `/api/v2/artwork/...` URLs and S3 presigns direct ones; clients read the
+  manifest again after `expires_at`.
+- Playback capabilities advertise `trickplay_v1`.
+
+Thumbnail i shows `[i*interval_ms, (i+1)*interval_ms)`; it sits on sheet
+`i / (tile_columns*tile_rows)`, at column `i % tile_columns` and row
+`(i % (tile_columns*tile_rows)) / tile_columns` of that sheet.
+
 ## Deletion
 
 Sheets are deleted per revision through `blob_gc_queue` (see
