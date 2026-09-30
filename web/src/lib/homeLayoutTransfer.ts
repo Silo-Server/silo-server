@@ -453,8 +453,16 @@ export function planHomeLayoutImport(
 
     for (const override of page.overrides) {
       if (override.section_id) {
-        if (sameServer) planned.overrides.push({ ...override });
-        else plan.skippedServerSectionChanges += 1;
+        if (!sameServer) {
+          plan.skippedServerSectionChanges += 1;
+          continue;
+        }
+        const write: SectionOverrideWrite = { ...override };
+        // The editor saves an admin section's config with the profile's other
+        // changes. One limited to libraries the importing profile can't open
+        // is dropped, so the section falls back to the admin's own config.
+        if (write.config && !libraryRefsReachable(write.config, libraries)) delete write.config;
+        planned.overrides.push(write);
         continue;
       }
       // A removed profile-built section never renders; nothing to carry.

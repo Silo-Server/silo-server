@@ -388,6 +388,35 @@ describe("planHomeLayoutImport on the same server", () => {
     expect(plan.pages[0]?.overrides).toHaveLength(1);
   });
 
+  it("drops an admin section's config limited to libraries this profile can't open", () => {
+    const plan = planHomeLayoutImport(
+      layoutFile({
+        pages: [
+          {
+            scope: "home",
+            overrides: [
+              {
+                section_id: "admin-1",
+                position: 3,
+                hidden: true,
+                config: { filter_library_id: 9 },
+              },
+              { section_id: "admin-2", position: 4, config: { filter_library_ids: [1, 9] } },
+            ],
+          },
+        ],
+      }),
+      target(),
+      sequentialIds(),
+    );
+
+    expect(plan.pages[0]?.overrides).toEqual([
+      { section_id: "admin-1", position: 3, hidden: true },
+      { section_id: "admin-2", position: 4, config: { filter_library_ids: [1, 9] } },
+    ]);
+    expect(plan.skippedSections).toEqual([]);
+  });
+
   it("trusts a saved section type the gallery doesn't list", () => {
     const plan = planHomeLayoutImport(
       layoutFile({
