@@ -10,12 +10,12 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 )
 
@@ -159,7 +159,7 @@ func uploadCollectionImageVariants(
 
 // collectionPosterWidths are the resized variants stored beside an original
 // collection poster.
-var collectionPosterWidths = []int{500, 300}
+var collectionPosterWidths = catalog.CollectionPosterWidths
 
 // putCollectionImageVariants generates the given resized variants of fileData
 // and uploads them, with the original, as basePath/{variant}.{revision}.{ext}.
@@ -222,17 +222,6 @@ func collectionImageDir(prefix, collectionID, imageType string) string {
 // the revision.
 func collectionCollageDir(prefix, collectionID string) string {
 	return collectionImageDir(prefix, collectionID, "collage")
-}
-
-// collectionPosterObjectKeys expands the original key of a stored collection
-// poster to the keys of every variant stored with it.
-func collectionPosterObjectKeys(originalPath string) []string {
-	keys := make([]string, 0, len(collectionPosterWidths)+1)
-	keys = append(keys, originalPath)
-	for _, width := range collectionPosterWidths {
-		keys = append(keys, artworkkey.Variant(originalPath, "w"+strconv.Itoa(width)))
-	}
-	return keys
 }
 
 // removeReplacedCollectionImageVersion deletes the variants of the revision

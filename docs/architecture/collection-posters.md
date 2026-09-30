@@ -31,14 +31,17 @@ the same posters:
   that builds the same collage writes the same keys, so concurrent builds are harmless.
 - A read that finds no collage returns no poster (clients show their placeholder) and queues a
   background build. The build is deduplicated per node, bounded, and backs off after a failure.
-  A build lost with its node is retried by the next read. A source poster that fails to download
-  fails the build, so a collage is never stored without one of the posters its key names.
+  A build lost with its node is retried by the next read. A source poster that doesn't resolve or
+  download fails the build, so a collage is never stored without one of the posters its key names.
 - A sync, template bundle apply, or poster removal builds the unrestricted viewer's collage up
   front, so the common case is ready before anyone asks.
 - Listing a collection touches its collage's `last_used_at` at most daily. Building any collage of a collection
-  deletes that collection's collages unused for a week. Rows go with their collection
-  (`ON DELETE CASCADE`), and deleting a collection deletes its whole `collection-images/`
-  prefix.
+  retires that collection's collages unused for a week: one transaction deletes their rows and
+  queues their objects in `artwork_revision_gc_candidates`. Collages are never deleted from
+  storage directly. The collector waits out its grace period and skips a path that a row names
+  again, so a collage rebuilt under the same key keeps its objects. Rows go with their
+  collection (`ON DELETE CASCADE`), and deleting a collection deletes its whole
+  `collection-images/` prefix.
 - The artwork reconcile sweeps the table like other artwork surfaces. A cleared row reads as a
   missing collage and is rebuilt on the next read.
 

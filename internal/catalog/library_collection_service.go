@@ -103,15 +103,14 @@ type TraktAccessTokenResolver interface {
 	ResolveTraktAccessToken(ctx context.Context, profileID string) (string, error)
 }
 
-// CollageGenerator composes and stores collection collages.
+// CollageGenerator composes and stores collection collages. Stored collages
+// are deleted through the artwork revision collector, never directly.
 type CollageGenerator interface {
 	// ComposeCollectionCollage composes a poster from the source poster paths,
 	// in order, and stores it as the collection's collage key. It returns the
 	// stored poster path and its thumbhash, or collage.ErrNotEnoughImages when
 	// no source image is usable.
 	ComposeCollectionCollage(ctx context.Context, collectionID, key string, sources []string) (path, thumbhash string, err error)
-	// DeleteCollectionCollage deletes the objects of a stored collage.
-	DeleteCollectionCollage(ctx context.Context, collectionID, path string) error
 }
 
 var ErrLibraryCollectionSyncUnsupported = errors.New("smart collections cannot be synchronized")

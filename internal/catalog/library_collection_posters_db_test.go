@@ -16,12 +16,11 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-// fakeCollageGenerator records the collages it is asked to compose and delete
-// instead of fetching and storing images.
+// fakeCollageGenerator records the collages it is asked to compose instead of
+// fetching and storing images.
 type fakeCollageGenerator struct {
 	mu       sync.Mutex
 	composed map[string][]string
-	deleted  []string
 }
 
 func (g *fakeCollageGenerator) ComposeCollectionCollage(_ context.Context, collectionID, key string, sources []string) (string, string, error) {
@@ -32,13 +31,6 @@ func (g *fakeCollageGenerator) ComposeCollectionCollage(_ context.Context, colle
 	}
 	g.composed[key] = append([]string(nil), sources...)
 	return fmt.Sprintf("collection-images/%s/collage/original.%s.webp", collectionID, key), "th-" + key, nil
-}
-
-func (g *fakeCollageGenerator) DeleteCollectionCollage(_ context.Context, _ string, path string) error {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.deleted = append(g.deleted, path)
-	return nil
 }
 
 func (g *fakeCollageGenerator) sources(key string) []string {
@@ -190,9 +182,12 @@ func TestCollectionCollagesFollowTheViewerDB(t *testing.T) {
 		}
 	})
 
-	t.Run("building a collage deletes unused ones", func(t *testing.T) {
+	t.Run("building a collage retires unused ones to the artwork collector", func(t *testing.T) {
 		staleRef := CollectionCollageRef{CollectionID: collection.ID, Key: "0000000000000000"}
 		stalePath := fmt.Sprintf("collection-images/%s/collage/original.%s.webp", collection.ID, staleRef.Key)
+		t.Cleanup(func() {
+			_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path = $1`, stalePath)
+		})
 		if err := repo.SaveCollectionCollage(ctx, CollectionCollage{CollectionCollageRef: staleRef, Path: stalePath}); err != nil {
 			t.Fatalf("save stale collage: %v", err)
 		}
@@ -213,14 +208,20 @@ func TestCollectionCollagesFollowTheViewerDB(t *testing.T) {
 			t.Fatal("unused collage survived a build")
 		}
 		if _, ok := left[pgRef]; !ok {
-			t.Fatal("a collage in use was deleted")
+			t.Fatal("a collage in use was retired")
 		}
-		gen.mu.Lock()
-		deleted := slices.Clone(gen.deleted)
-		gen.mu.Unlock()
-		if !slices.Equal(deleted, []string{stalePath}) {
-			t.Fatalf("deleted objects = %v, want %v", deleted, []string{stalePath})
+		assertCollageQueuedForCollector(t, pool, stalePath)
+	})
+
+	t.Run("a collage whose collection is gone is queued for the collector", func(t *testing.T) {
+		orphan := fmt.Sprintf("collection-images/missing-%d/collage/original.k.webp", suffix)
+		t.Cleanup(func() {
+			_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path = $1`, orphan)
+		})
+		if err := repo.QueueCollectionCollageObjects(ctx, []string{orphan}); err != nil {
+			t.Fatalf("queue: %v", err)
 		}
+		assertCollageQueuedForCollector(t, pool, orphan)
 	})
 
 	t.Run("an uploaded poster is shown to everyone", func(t *testing.T) {
@@ -243,6 +244,24 @@ func TestCollectionCollagesFollowTheViewerDB(t *testing.T) {
 			t.Fatalf("err = %v, want ErrLibraryCollectionNotFound", err)
 		}
 	})
+}
+
+// assertCollageQueuedForCollector checks that the collage at path waits in
+// the artwork collector's queue with every object stored for it, after the
+// grace period.
+func assertCollageQueuedForCollector(t *testing.T, pool *pgxpool.Pool, path string) {
+	t.Helper()
+	var keys []string
+	var graced bool
+	if err := pool.QueryRow(context.Background(), `
+		SELECT object_keys, not_before > NOW() + interval '23 hours'
+		FROM artwork_revision_gc_candidates WHERE original_path = $1
+	`, path).Scan(&keys, &graced); err != nil {
+		t.Fatalf("collage %s is not queued for the collector: %v", path, err)
+	}
+	if !slices.Equal(keys, CollectionPosterObjectKeys(path)) || !graced {
+		t.Fatalf("queued keys = %v graced=%v, want %v after the grace period", keys, graced, CollectionPosterObjectKeys(path))
+	}
 }
 
 func seedCollagePosterLibrary(t *testing.T, pool *pgxpool.Pool, name string) int {

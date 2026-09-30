@@ -46,7 +46,7 @@ func (collageSourceResolver) ResolveImageURLs(context.Context, []string, string)
 	return map[string]string{}
 }
 
-func TestComposeCollectionCollageFailsWhenASourceDoesNotDownload(t *testing.T) {
+func TestComposeCollectionCollageFailsWithoutEverySource(t *testing.T) {
 	var poster bytes.Buffer
 	if err := png.Encode(&poster, image.NewNRGBA(image.Rect(0, 0, 20, 30))); err != nil {
 		t.Fatal(err)
@@ -74,24 +74,28 @@ func TestComposeCollectionCollageFailsWhenASourceDoesNotDownload(t *testing.T) {
 		t.Fatalf("a failed build stored %d objects", len(store.Objects))
 	}
 
-	// A source that doesn't resolve is left out on every node alike.
-	path, thumbhash, err := h.ComposeCollectionCollage(t.Context(), "c1", key, []string{server.URL + "/a.png", "plugin://unresolvable/poster.jpg", server.URL + "/b.png"})
+	// A source that doesn't resolve fails the build the same way.
+	if _, _, err := h.ComposeCollectionCollage(t.Context(), "c1", key, []string{server.URL + "/a.png", "plugin://unresolvable/poster.jpg"}); err == nil {
+		t.Fatal("a collage missing an unresolved source was built")
+	}
+	if len(store.Objects) != 0 {
+		t.Fatalf("a failed build stored %d objects", len(store.Objects))
+	}
+
+	path, thumbhash, err := h.ComposeCollectionCollage(t.Context(), "c1", key, []string{server.URL + "/a.png", server.URL + "/b.png"})
 	if err != nil {
 		t.Fatalf("compose: %v", err)
 	}
 	if path != "collection-images/c1/collage/original."+key+".webp" || thumbhash == "" {
 		t.Fatalf("stored %q with thumbhash %q", path, thumbhash)
 	}
-	for _, objectKey := range collectionPosterObjectKeys(path) {
+	keys := catalog.CollectionPosterObjectKeys(path)
+	if len(keys) != len(store.Objects) {
+		t.Fatalf("stored %d objects, want %v", len(store.Objects), keys)
+	}
+	for _, objectKey := range keys {
 		if _, ok := store.Objects[objectKey]; !ok {
-			t.Fatalf("object %s was not stored; have %d objects", objectKey, len(store.Objects))
+			t.Fatalf("object %s was not stored", objectKey)
 		}
-	}
-
-	if err := h.DeleteCollectionCollage(t.Context(), "c1", path); err != nil {
-		t.Fatalf("delete: %v", err)
-	}
-	if len(store.Objects) != 0 {
-		t.Fatalf("delete left %d objects", len(store.Objects))
 	}
 }

@@ -9,10 +9,14 @@ import (
 	"log/slog"
 	"runtime/debug"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/collage"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -38,7 +42,7 @@ const (
 
 	// A collage in use is touched at most this often, so reads rarely write.
 	collectionCollageTouchInterval = 24 * time.Hour
-	// A collage nobody has read for this long is deleted the next time a
+	// A collage nobody has read for this long is retired the next time a
 	// collage of the same collection is built.
 	collectionCollageUnusedAfter = 7 * 24 * time.Hour
 
@@ -216,31 +220,104 @@ func (r *LibraryCollectionRepository) SaveCollectionCollage(ctx context.Context,
 	return nil
 }
 
-// DeleteUnusedCollectionCollages deletes the collection's collages last
-// served before cutoff and returns them, so the caller can delete their
-// objects.
-func (r *LibraryCollectionRepository) DeleteUnusedCollectionCollages(ctx context.Context, collectionID string, cutoff time.Time) ([]CollectionCollage, error) {
-	rows, err := r.pool.Query(ctx, `
+// RetireUnusedCollectionCollages deletes the collection's collages last
+// served before cutoff and, in the same transaction, hands their objects to
+// the artwork revision collector. It returns how many it retired.
+func (r *LibraryCollectionRepository) RetireUnusedCollectionCollages(ctx context.Context, collectionID string, cutoff time.Time) (int, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("beginning collection collage retirement: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	rows, err := tx.Query(ctx, `
 		DELETE FROM library_collection_poster_variants
 		WHERE collection_id = $1 AND last_used_at < $2
-		RETURNING collection_id, variant_key, poster_path
+		RETURNING poster_path
 	`, collectionID, cutoff)
 	if err != nil {
-		return nil, fmt.Errorf("deleting unused collection collages: %w", err)
+		return 0, fmt.Errorf("deleting unused collection collages: %w", err)
 	}
-	defer rows.Close()
-	var deleted []CollectionCollage
+	var paths []string
 	for rows.Next() {
-		var c CollectionCollage
-		if err := rows.Scan(&c.CollectionID, &c.Key, &c.Path); err != nil {
-			return nil, fmt.Errorf("scanning deleted collection collage: %w", err)
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("scanning unused collection collage: %w", err)
 		}
-		deleted = append(deleted, c)
+		paths = append(paths, path)
 	}
+	rows.Close()
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating deleted collection collages: %w", err)
+		return 0, fmt.Errorf("iterating unused collection collages: %w", err)
 	}
-	return deleted, nil
+	if err := queueCollectionCollageObjects(ctx, tx, paths); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("committing collection collage retirement: %w", err)
+	}
+	return len(paths), nil
+}
+
+// QueueCollectionCollageObjects hands stored collage objects that no row
+// names to the artwork revision collector.
+func (r *LibraryCollectionRepository) QueueCollectionCollageObjects(ctx context.Context, paths []string) error {
+	return queueCollectionCollageObjects(ctx, r.pool, paths)
+}
+
+// queueCollectionCollageObjects queues collage objects for deletion the way
+// the artwork displacement trigger does. The collector deletes them after its
+// grace period only while no artwork surface names the path, and this table
+// is one. A collage rebuilt under the same key in the meantime therefore
+// keeps its objects, and one rebuilt after they were deleted has its row
+// cleared, so the next read builds it again.
+func queueCollectionCollageObjects(ctx context.Context, db interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}, paths []string) error {
+	for _, path := range paths {
+		keys := CollectionPosterObjectKeys(path)
+		if len(keys) == 0 {
+			continue
+		}
+		if _, err := db.Exec(ctx, `
+			INSERT INTO artwork_revision_gc_candidates (
+				original_path, image_type, object_keys, not_before, next_attempt_at
+			) VALUES ($1, 'poster', $2, NOW() + interval '24 hours', NOW() + interval '24 hours')
+			ON CONFLICT (original_path) DO UPDATE SET
+				object_keys = EXCLUDED.object_keys,
+				not_before = EXCLUDED.not_before,
+				next_attempt_at = EXCLUDED.next_attempt_at,
+				attempt_count = 0,
+				locked_at = NULL,
+				locked_by = '',
+				last_error = '',
+				updated_at = NOW()
+		`, path, keys); err != nil {
+			return fmt.Errorf("queueing collection collage objects: %w", err)
+		}
+	}
+	return nil
+}
+
+// CollectionPosterWidths are the resized variants stored beside every
+// original collection poster, uploaded or generated.
+var CollectionPosterWidths = []int{500, 300}
+
+// CollectionPosterObjectKeys expands a stored collection poster's original
+// key to every object stored with it. It returns nil for a path that is not a
+// stored original.
+func CollectionPosterObjectKeys(originalPath string) []string {
+	// Variant leaves a path that isn't an original key unchanged.
+	if originalPath == "" || strings.Contains(originalPath, "://") ||
+		artworkkey.Variant(originalPath, "w300") == originalPath {
+		return nil
+	}
+	keys := make([]string, 0, len(CollectionPosterWidths)+1)
+	keys = append(keys, originalPath)
+	for _, width := range CollectionPosterWidths {
+		keys = append(keys, artworkkey.Variant(originalPath, "w"+strconv.Itoa(width)))
+	}
+	return keys
 }
 
 func splitCollectionCollageRefs(refs []CollectionCollageRef) ([]string, []string) {
@@ -359,7 +436,7 @@ func (s *LibraryCollectionService) PrepareCollectionCollage(ctx context.Context,
 	return s.buildCollage(ctx, ref, src)
 }
 
-// buildCollage composes and stores one collage, then deletes the collection's
+// buildCollage composes and stores one collage, then retires the collection's
 // collages that went unused. Nodes that build the same collage at once write
 // the same objects, so the result doesn't depend on which one wins.
 func (s *LibraryCollectionService) buildCollage(ctx context.Context, ref CollectionCollageRef, sources []string) error {
@@ -372,22 +449,15 @@ func (s *LibraryCollectionService) buildCollage(ctx context.Context, ref Collect
 		if errors.Is(err, ErrLibraryCollectionNotFound) {
 			// The collection was deleted during the build. Its objects went
 			// with it, apart from the ones this build just wrote.
-			if delErr := s.CollageGen.DeleteCollectionCollage(ctx, ref.CollectionID, path); delErr != nil {
-				slog.WarnContext(ctx, "collage: failed to delete orphaned collage", "component", "catalog", "collection_id", ref.CollectionID, "error", delErr)
+			if queueErr := s.collections.QueueCollectionCollageObjects(ctx, []string{path}); queueErr != nil {
+				slog.WarnContext(ctx, "collage: failed to queue orphaned collage", "component", "catalog", "collection_id", ref.CollectionID, "error", queueErr)
 			}
 		}
 		return err
 	}
 
-	unused, err := s.collections.DeleteUnusedCollectionCollages(ctx, ref.CollectionID, time.Now().Add(-collectionCollageUnusedAfter))
-	if err != nil {
-		slog.WarnContext(ctx, "collage: failed to delete unused collages", "component", "catalog", "collection_id", ref.CollectionID, "error", err)
-		return nil
-	}
-	for _, old := range unused {
-		if err := s.CollageGen.DeleteCollectionCollage(ctx, old.CollectionID, old.Path); err != nil {
-			slog.WarnContext(ctx, "collage: failed to delete unused collage objects", "component", "catalog", "collection_id", old.CollectionID, "error", err)
-		}
+	if _, err := s.collections.RetireUnusedCollectionCollages(ctx, ref.CollectionID, time.Now().Add(-collectionCollageUnusedAfter)); err != nil {
+		slog.WarnContext(ctx, "collage: failed to retire unused collages", "component", "catalog", "collection_id", ref.CollectionID, "error", err)
 	}
 	return nil
 }

@@ -185,18 +185,15 @@ func (h *LibraryCollectionHandler) ComposeCollectionCollage(ctx context.Context,
 
 	slog.InfoContext(ctx, "collage: generating poster", "component", "api", "collection_id", collectionID, "item_poster_count", len(sources))
 
-	// Resolve poster paths to fetchable URLs. A source that doesn't resolve is
-	// left out, as every node resolves it the same way. A fetch that fails fails
-	// the build instead: the collage is stored under the key of all its
-	// sources, so it must not be stored without one of them. A later read
-	// retries it.
+	// Resolve poster paths to fetchable URLs. The collage is stored under the
+	// key of all its sources, so a source that doesn't resolve or download
+	// fails the build rather than being left out. A later read retries it.
 	resolved := h.detailSvc.PresignImageURLs(ctx, sources, "poster", "small")
 	imageData := make([][]byte, 0, len(sources))
 	for _, path := range sources {
 		url := resolved[path]
 		if url == "" {
-			slog.DebugContext(ctx, "collage: poster path did not resolve", "component", "api", "collection_id", collectionID, "path", path)
-			continue
+			return "", "", fmt.Errorf("collage source %q did not resolve", path)
 		}
 		data, err := h.fetchImageURL(ctx, url)
 		if err != nil {
@@ -224,18 +221,6 @@ func (h *LibraryCollectionHandler) ComposeCollectionCollage(ctx context.Context,
 
 	slog.InfoContext(ctx, "collage: poster generated successfully", "component", "api", "collection_id", collectionID, "s3_path", s3Path)
 	return s3Path, thumbhash, nil
-}
-
-// DeleteCollectionCollage implements catalog.CollageGenerator. A path outside
-// the collection's collage directory is left alone.
-func (h *LibraryCollectionHandler) DeleteCollectionCollage(ctx context.Context, collectionID, path string) error {
-	if h.ArtworkStore == nil || !isCollectionImageKeyIn(collectionCollageDir(adminCollectionImagePrefix, collectionID)+"/", path) {
-		return nil
-	}
-	if _, err := h.ArtworkStore.Delete(ctx, collectionPosterObjectKeys(path)); err != nil {
-		return fmt.Errorf("deleting collection collage: %w", err)
-	}
-	return nil
 }
 
 // fetchImageURL downloads an image from a resolved URL.
