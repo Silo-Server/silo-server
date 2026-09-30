@@ -355,3 +355,62 @@ func TestFeatureStatusReportsWatchlistRequests(t *testing.T) {
 		t.Fatal("watchlist requests on after the profile opted out")
 	}
 }
+
+// A request made under a TMDB ID that TMDB later replaced still belongs to the
+// title: the card shows it, a repeat add neither duplicates nor refollows it
+// under the new ID, and the viewer's own watchlist request is withdrawn
+// through the title's former ID.
+func TestWatchlistRequestsFollowTheTitleAcrossTMDBRepoints(t *testing.T) {
+	viewer := testViewer(1)
+	repointed := WatchlistTitle{MediaType: MediaTypeMovie, TMDBID: 5000, FormerTMDBIDs: []int{949}, Title: "Heat", Year: 1995}
+
+	t.Run("someone else's request under the old ID is followed", func(t *testing.T) {
+		store := newFakeStore()
+		activeRequestFor(store, 949)
+		svc := newWatchlistTestService(store)
+		state, err := svc.RequestFromWatchlist(context.Background(), viewer, repointed)
+		if err != nil {
+			t.Fatalf("RequestFromWatchlist: %v", err)
+		}
+		if len(store.created) != 0 {
+			t.Fatalf("created = %+v, want no duplicate under the new ID", store.created)
+		}
+		followed, _ := store.FollowedRequests(context.Background(), []string{"req-owner"}, viewer)
+		// Another account's request ID stays hidden; its status shows.
+		if !followed["req-owner"] || state.Status != StatusPending || !state.Following {
+			t.Fatalf("state = %+v, follows = %v; want the old-ID request followed and reported", state, followed)
+		}
+	})
+
+	t.Run("the viewer's own watchlist request under the old ID", func(t *testing.T) {
+		store := newFakeStore()
+		svc := newWatchlistTestService(store)
+		if _, err := svc.RequestFromWatchlist(context.Background(), viewer, heatTitle()); err != nil {
+			t.Fatalf("first add: %v", err)
+		}
+		req := store.active[MediaTypeMovie][949]
+		states, err := svc.WatchlistRequestStates(context.Background(), viewer, []WatchlistTitle{repointed})
+		if err != nil {
+			t.Fatalf("WatchlistRequestStates: %v", err)
+		}
+		state := states[WatchlistKey{MediaType: MediaTypeMovie, TMDBID: 5000}]
+		if state.RequestID != req.ID || !state.RequestedByViewer {
+			t.Fatalf("state = %+v, want the request made under the former ID", state)
+		}
+		if _, err := svc.RequestFromWatchlist(context.Background(), viewer, repointed); err != nil {
+			t.Fatalf("repeat add: %v", err)
+		}
+		if len(store.created) != 1 {
+			t.Fatalf("created %d requests, want 1", len(store.created))
+		}
+		// The API withdraws under every ID the title has had.
+		for _, id := range []int{5000, 949} {
+			if err := svc.WithdrawWatchlistRequest(context.Background(), viewer, MediaTypeMovie, id); err != nil {
+				t.Fatalf("WithdrawWatchlistRequest(%d): %v", id, err)
+			}
+		}
+		if req.Outcome != OutcomeCancelled {
+			t.Fatalf("request outcome = %s, want canceled", req.Outcome)
+		}
+	})
+}

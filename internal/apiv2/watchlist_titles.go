@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
@@ -307,8 +308,8 @@ func (reg *Registry) watchlistTitleSnapshot(ctx context.Context, rv mediarequest
 }
 
 // deleteWatchlistTitle removes the entries, then withdraws the watchlist's
-// request under both the ID the client named and the title's current one,
-// which differ once TMDB repointed the title.
+// request under every TMDB ID the title has had, since a request made before
+// TMDB repointed the title keeps the ID it was made under.
 func (reg *Registry) deleteWatchlistTitle(ctx context.Context, in *WatchlistTitleInput) (*struct{}, error) {
 	viewer, rv, _, p := reg.watchlistTitleViewer(ctx)
 	if p != nil {
@@ -319,8 +320,12 @@ func (reg *Registry) deleteWatchlistTitle(ctx context.Context, in *WatchlistTitl
 		return nil, serviceProblem(err)
 	}
 	ids := []int{in.TMDBID}
-	if title != nil && title.TMDBID != in.TMDBID {
-		ids = append(ids, title.TMDBID)
+	if title != nil {
+		for _, id := range append([]int{title.TMDBID}, title.FormerTMDBIDs...) {
+			if !slices.Contains(ids, id) {
+				ids = append(ids, id)
+			}
+		}
 	}
 	for _, id := range ids {
 		if err := reg.deps.WatchlistRequests.WithdrawWatchlistRequest(ctx, rv, mediarequests.MediaType(in.MediaType), id); err != nil {
@@ -334,7 +339,7 @@ func (reg *Registry) deleteWatchlistTitle(ctx context.Context, in *WatchlistTitl
 func requestTitleOf(s watchlist.Snapshot) mediarequests.WatchlistTitle {
 	return mediarequests.WatchlistTitle{
 		MediaType: mediarequests.MediaType(s.MediaType), TMDBID: s.TMDBID, IMDbID: s.IMDbID, TVDBID: s.TVDBID,
-		Title: s.Title, Year: s.Year, PosterPath: s.PosterPath,
+		Title: s.Title, Year: s.Year, PosterPath: s.PosterPath, FormerTMDBIDs: s.FormerTMDBIDs,
 	}
 }
 

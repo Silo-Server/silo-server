@@ -60,6 +60,9 @@ type Title struct {
 	NextCheckAt    time.Time
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	// FormerTMDBIDs are the TMDB IDs the title held before TMDB repointed
+	// it. Requests made under one of them still belong to the title.
+	FormerTMDBIDs []int
 }
 
 // Key returns the title's current TMDB identity.
@@ -79,6 +82,7 @@ func (t Title) Snapshot() Snapshot {
 		PosterPath:    t.PosterPath,
 		Certification: t.Certification,
 		VoteAverage:   t.VoteAverage,
+		FormerTMDBIDs: t.FormerTMDBIDs,
 	}
 }
 
@@ -118,6 +122,8 @@ type Snapshot struct {
 	PosterPath    string
 	Certification string
 	VoteAverage   *float64
+	// FormerTMDBIDs is filled from a stored title; a TMDB detail has none.
+	FormerTMDBIDs []int
 }
 
 // SnapshotFromDetail converts a TMDB movie or series detail. A title without

@@ -174,6 +174,25 @@ type WatchlistTitle struct {
 	PosterPath   string
 	BackdropPath string
 	Overview     string
+	// FormerTMDBIDs are IDs TMDB replaced; a request made under one of them
+	// is still the title's request.
+	FormerTMDBIDs []int
+}
+
+// tmdbIDs returns the title's current TMDB ID followed by its former ones.
+func (t WatchlistTitle) tmdbIDs() []int {
+	return append([]int{t.TMDBID}, t.FormerTMDBIDs...)
+}
+
+// requestOf returns the title's active request: the one under its current
+// TMDB ID, else one under a former ID.
+func (t WatchlistTitle) requestOf(active map[int]*Request) *Request {
+	for _, id := range t.tmdbIDs() {
+		if req := active[id]; req != nil {
+			return req
+		}
+	}
+	return nil
 }
 
 func (t WatchlistTitle) presenceCandidate() PresenceCandidate {
@@ -239,12 +258,12 @@ func (s *Service) RequestFromWatchlist(ctx context.Context, viewer Viewer, title
 // applyWatchlistRequest creates or follows the title's request and returns
 // the reason a refused request gives, if any.
 func (s *Service) applyWatchlistRequest(ctx context.Context, viewer Viewer, title WatchlistTitle) string {
-	active, err := s.store.ListActiveByTMDB(ctx, title.MediaType, []int{title.TMDBID})
+	active, err := s.store.ListActiveByTMDB(ctx, title.MediaType, title.tmdbIDs())
 	if err != nil {
 		s.logWatchlistRequest(ctx, "reading the title's request failed", viewer, title, err)
 		return ""
 	}
-	if req := active[title.TMDBID]; req != nil {
+	if req := title.requestOf(active); req != nil {
 		s.followFromWatchlist(ctx, viewer, title, req)
 		return ""
 	}
@@ -272,12 +291,12 @@ func (s *Service) applyWatchlistRequest(ctx context.Context, viewer Viewer, titl
 		return ""
 	case errors.Is(err, ErrAlreadyRequested):
 		// Another request landed between the read and the create.
-		active, err := s.store.ListActiveByTMDB(ctx, title.MediaType, []int{title.TMDBID})
+		active, err := s.store.ListActiveByTMDB(ctx, title.MediaType, title.tmdbIDs())
 		if err != nil {
 			s.logWatchlistRequest(ctx, "reading the title's request failed", viewer, title, err)
 			return ""
 		}
-		if req := active[title.TMDBID]; req != nil {
+		if req := title.requestOf(active); req != nil {
 			s.followFromWatchlist(ctx, viewer, title, req)
 		}
 		return ""
@@ -290,7 +309,9 @@ func (s *Service) followFromWatchlist(ctx context.Context, viewer Viewer, title 
 	if req.requestedBy(viewer) {
 		return
 	}
-	if _, err := s.Follow(ctx, viewer, title.MediaType, title.TMDBID); err != nil && !errors.Is(err, ErrNotRequested) {
+	// Follow under the request's own ID, which differs from the title's once
+	// TMDB repointed the title.
+	if _, err := s.Follow(ctx, viewer, title.MediaType, req.TMDBID); err != nil && !errors.Is(err, ErrNotRequested) {
 		s.logWatchlistRequest(ctx, "following the title's request failed", viewer, title, err)
 	}
 }
@@ -380,10 +401,10 @@ func (s *Service) WatchlistRequestStates(ctx context.Context, viewer Viewer, tit
 	}
 	downloading := map[string]WatchlistKey{}
 	for mediaType, group := range byType {
-		ids := make([]int, len(group))
+		ids := make([]int, 0, len(group))
 		candidates := make([]PresenceCandidate, len(group))
 		for i, t := range group {
-			ids[i] = t.TMDBID
+			ids = append(ids, t.tmdbIDs()...)
 			candidates[i] = t.presenceCandidate()
 		}
 		presence, err := s.lookupPresence(ctx, mediaType, candidates)
@@ -399,9 +420,9 @@ func (s *Service) WatchlistRequestStates(ctx context.Context, viewer Viewer, tit
 			return nil, err
 		}
 		for _, t := range group {
-			req := active[t.TMDBID]
+			req := t.requestOf(active)
 			state := requestStateFor(viewer, policy, presence[t.TMDBID].Available, req)
-			state.Following = req != nil && following[t.TMDBID]
+			state.Following = req != nil && following[req.TMDBID]
 			key := WatchlistKey{MediaType: mediaType, TMDBID: t.TMDBID}
 			out[key] = state
 			if req != nil && req.Outcome == OutcomeActive && (req.Status == StatusQueued || req.Status == StatusDownloading) {

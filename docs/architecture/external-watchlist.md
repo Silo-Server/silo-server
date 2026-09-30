@@ -240,6 +240,11 @@ failed request never loses the entry, and a repeated add is a no-op once either
 step has succeeded. Removing the title withdraws a request the watchlist made
 while it is still withdrawable and drops the profile's follows.
 
+A request keeps the TMDB ID it was made under; repair never rewrites
+`media_requests`. So every request lookup for a title (the add, the card's
+request state, the withdrawal) checks the title's current TMDB ID and each
+former one, and a follow goes under the request's own ID.
+
 ## API
 
 The three operations are on `/api/v2` and live on the requests surface: they
@@ -262,8 +267,9 @@ kept. Promotion on library reads does not depend on that gate.
 - `DELETE /api/v2/watchlist/titles/{media_type}/{tmdb_id}`
   (`deleteWatchlistTitle`): finds the title by a current or former TMDB ID,
   removes the entry and, when one visible library item has the title, the
-  library watchlist entry. It then withdraws the watchlist's request under both
-  the named and the current TMDB ID. An absent entry succeeds with 204.
+  library watchlist entry. It then withdraws the watchlist's request under
+  every TMDB ID the title has had, since a request keeps the ID it was made
+  under. An absent entry succeeds with 204.
 
 Both mutations are `non_retryable`, as the library watchlist mutations are.
 Discovery results and the title detail carry `in_watchlist`, hydrated with two
@@ -293,7 +299,7 @@ value.
 The settings contract added `request_status` to the card-overlays `overlayId`
 enum at manifest revision 15. A server below revision 15 rejects a stored value
 that contains it, so clients offer the badge only when `manifest_revision` is at
-least 14.
+least 15.
 
 ## Multi-node and failure behavior
 

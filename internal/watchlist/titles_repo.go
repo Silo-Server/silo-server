@@ -34,7 +34,10 @@ const maxAddAttempts = 3
 
 const titleColumns = `t.id, t.media_type, t.tmdb_id, t.imdb_id, coalesce(t.tvdb_id, 0), t.title, coalesce(t.year, 0),
 	t.release_date, t.poster_path, t.certification, t.vote_average::float8, t.state, t.not_found_count,
-	t.last_not_found_at, t.checked_at, t.next_check_at, t.created_at, t.updated_at`
+	t.last_not_found_at, t.checked_at, t.next_check_at, t.created_at, t.updated_at,
+	coalesce((SELECT array_agg(fa.provider_id::int ORDER BY fa.provider_id::int)
+	          FROM watchlist_title_aliases fa
+	          WHERE fa.title_id = t.id AND fa.provider = 'tmdb' AND fa.provider_id <> t.tmdb_id::text), '{}')`
 
 func scanTitle(row pgx.Row, extra ...any) (Title, error) {
 	var t Title
@@ -42,7 +45,7 @@ func scanTitle(row pgx.Row, extra ...any) (Title, error) {
 	dest := append([]any{
 		&t.ID, &t.MediaType, &t.TMDBID, &t.IMDbID, &t.TVDBID, &t.Title, &t.Year,
 		&t.ReleaseDate, &t.PosterPath, &t.Certification, &t.VoteAverage, &state, &t.NotFoundCount,
-		&t.LastNotFoundAt, &t.CheckedAt, &t.NextCheckAt, &t.CreatedAt, &t.UpdatedAt,
+		&t.LastNotFoundAt, &t.CheckedAt, &t.NextCheckAt, &t.CreatedAt, &t.UpdatedAt, &t.FormerTMDBIDs,
 	}, extra...)
 	if err := row.Scan(dest...); err != nil {
 		return Title{}, err
