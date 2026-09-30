@@ -338,14 +338,15 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
           body: { value: plan.hideWatchedItems },
           profileContext,
         });
-        await invalidateSettingValueQueries(
-          qc,
-          { scope: "profile" },
-          SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS,
-        );
       } catch (error) {
         failures.push(`Hide watched items (${problemMessage(error)})`);
       }
+      // Refresh after a failure too: a write that timed out may still have landed.
+      await invalidateSettingValueQueries(
+        qc,
+        { scope: "profile" },
+        SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS,
+      );
     }
     await qc.invalidateQueries({ queryKey: sectionKeys.all });
     setApplying(false);
