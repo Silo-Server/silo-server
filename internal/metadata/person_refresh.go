@@ -189,8 +189,12 @@ func (s *PersonRefreshService) refreshPersonWithProviders(
 	MergePersonDetail(&accumulator, &existingDetail, MergeReplaceUnlocked)
 	accumulator = existingDetail
 
+	// A provider answer that can't be stored records a failure, so a
+	// deterministic error (an unparseable date) backs off like any other
+	// failure instead of coming back every time the attempt's lease runs out.
 	refreshed, err := mergePersonIntoRecord(*person, accumulator)
 	if err != nil {
+		s.recordRefreshOutcome(ctx, id, catalog.PersonRefreshFailed)
 		return nil, err
 	}
 
@@ -200,6 +204,7 @@ func (s *PersonRefreshService) refreshPersonWithProviders(
 			// longer anything to refresh under this id.
 			return nil, ErrPersonNotFound
 		}
+		s.recordRefreshOutcome(ctx, id, catalog.PersonRefreshFailed)
 		return nil, fmt.Errorf("update person %d: %w", id, err)
 	}
 	s.recordRefreshOutcome(ctx, id, catalog.PersonRefreshAnswered)
