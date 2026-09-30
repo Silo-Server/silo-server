@@ -31,8 +31,9 @@ const traktExtendedProgress = "progress"
 // one POST/PUT/DELETE per second (AUTHED_API_POST_LIMIT) and 500 GETs per
 // five minutes (AUTHED_API_GET_LIMIT). Writes are paced to one per second.
 // Paged reads, which a large history can stretch to hundreds of pages (read
-// twice for consistency), are paced so any five-minute window stays inside the
-// GET budget: a burst of 50 covers ordinary accounts at full speed, and the
+// twice for consistency, with bounded restarts), are paced so any five-minute
+// window stays inside the GET budget: a burst of 50 covers ordinary accounts
+// at full speed, and the
 // refill keeps burst plus five minutes of refill under 500.
 const (
 	writeInterval = time.Second
@@ -324,7 +325,11 @@ const (
 	// traktMaxPages bounds a listing whose last page is never detected, such
 	// as a server that ignores page and sends no pagination headers.
 	traktMaxPages = 1000
+	// Restart an inconsistent listing twice before leaving it to the next sync.
+	traktReadAttempts = 3
 )
+
+var errTraktListingChanged = errors.New("changed while it was read")
 
 // fetchTraktPages loads every page of a paginated Trakt GET endpoint. Trakt
 // serves only a short first page when page and limit are omitted, so both are
@@ -335,7 +340,8 @@ const (
 // Offset pages shift when the list changes mid-read, which can skip or repeat
 // a row, and callers treat a skipped row as removed. A listing that spans
 // several pages is therefore read twice, and the read fails unless both
-// passes return the same rows; the next sync retries it.
+// passes return the same rows. Inconsistent reads restart from page one a
+// bounded number of times; other failures are returned immediately.
 func fetchTraktPages[T any](
 	ctx context.Context,
 	p *Provider,
@@ -344,28 +350,39 @@ func fetchTraktPages[T any](
 	path string,
 	query url.Values,
 ) ([]T, error) {
-	raw, pages, err := fetchTraktPass(ctx, p, cfg, conn, path, query)
-	if err != nil {
-		return nil, err
-	}
-	if pages > 1 {
-		again, _, err := fetchTraktPass(ctx, p, cfg, conn, path, query)
+	var lastErr error
+	for attempt := 0; attempt < traktReadAttempts; attempt++ {
+		raw, pages, err := fetchTraktPass(ctx, p, cfg, conn, path, query)
+		if err == nil && pages > 1 {
+			var again []json.RawMessage
+			again, _, err = fetchTraktPass(ctx, p, cfg, conn, path, query)
+			if err == nil && !slices.EqualFunc(raw, again, func(a, b json.RawMessage) bool { return bytes.Equal(a, b) }) {
+				err = fmt.Errorf("trakt %s %w", path, errTraktListingChanged)
+			}
+		}
 		if err != nil {
-			return nil, err
+			if !errors.Is(err, errTraktListingChanged) {
+				return nil, err
+			}
+			lastErr = err
+			if attempt+1 < traktReadAttempts {
+				if err := p.sleep(ctx, time.Duration(attempt+1)*time.Second); err != nil {
+					return nil, err
+				}
+			}
+			continue
 		}
-		if !slices.EqualFunc(raw, again, func(a, b json.RawMessage) bool { return bytes.Equal(a, b) }) {
-			return nil, fmt.Errorf("trakt %s changed while it was read", path)
+		rows := make([]T, 0, len(raw))
+		for _, item := range raw {
+			var row T
+			if err := json.Unmarshal(item, &row); err != nil {
+				return nil, fmt.Errorf("decode trakt response: %w", err)
+			}
+			rows = append(rows, row)
 		}
+		return rows, nil
 	}
-	rows := make([]T, 0, len(raw))
-	for _, item := range raw {
-		var row T
-		if err := json.Unmarshal(item, &row); err != nil {
-			return nil, fmt.Errorf("decode trakt response: %w", err)
-		}
-		rows = append(rows, row)
-	}
-	return rows, nil
+	return nil, lastErr
 }
 
 // pageLimiterKey identifies whose GET budget a paged read spends. Trakt counts
@@ -407,7 +424,7 @@ func fetchTraktPass(
 		}
 		if count, ok := positiveHeaderInt(header, "X-Pagination-Item-Count"); ok {
 			if itemCount != 0 && count != itemCount {
-				return nil, 0, fmt.Errorf("trakt %s changed while it was read (%d items, then %d)", path, itemCount, count)
+				return nil, 0, fmt.Errorf("trakt %s %w (%d items, then %d)", path, errTraktListingChanged, itemCount, count)
 			}
 			itemCount = count
 		}

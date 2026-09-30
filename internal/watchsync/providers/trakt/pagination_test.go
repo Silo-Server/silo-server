@@ -257,8 +257,8 @@ func TestFetchTraktPagesFailsWhenTheListChangesMidRead(t *testing.T) {
 }
 
 func TestFetchTraktPagesFailsWhenAnEqualCountChangeShiftsPages(t *testing.T) {
-	// Between the two passes one title was removed and another added, so the
-	// item count is unchanged but page 2 now holds a different title.
+	// Each pass replaces a title while keeping the count equal, so every
+	// verification read must reject the shifted page even after restarting.
 	pass := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		page := r.URL.Query().Get("page")
@@ -270,7 +270,7 @@ func TestFetchTraktPagesFailsWhenAnEqualCountChangeShiftsPages(t *testing.T) {
 		switch {
 		case page == "1":
 			writeTraktFixture(t, w, `[{"listed_at":"2026-01-01T00:00:00Z","movie":{"title":"A","ids":{"trakt":1,"tmdb":1}}}]`)
-		case pass == 1:
+		case pass%2 == 1:
 			writeTraktFixture(t, w, `[{"listed_at":"2026-01-01T00:00:00Z","movie":{"title":"B","ids":{"trakt":2,"tmdb":2}}}]`)
 		default:
 			writeTraktFixture(t, w, `[{"listed_at":"2026-01-01T00:00:00Z","movie":{"title":"C","ids":{"trakt":3,"tmdb":3}}}]`)
