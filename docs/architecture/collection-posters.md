@@ -36,13 +36,15 @@ the same posters:
 - A sync, template bundle apply, or poster removal builds the unrestricted viewer's collage up
   front, so the common case is ready before anyone asks.
 - Listing a collection or serving its collage through a Jellyfin image tag touches the
-  collage's `last_used_at` at most daily. Building any collage of a collection retires that
-  collection's collages unused for a week: one transaction deletes their rows and
-  queues their objects in `artwork_revision_gc_candidates`. Collages are never deleted from
-  storage directly. The collector waits out its grace period and skips a path that a row names
-  again, so a collage rebuilt under the same key keeps its objects. Rows go with their
-  collection (`ON DELETE CASCADE`), and deleting a collection deletes its whole
-  `collection-images/` prefix.
+  collage's `last_used_at` at most daily. Building any collage of a collection deletes that
+  collection's collages unused for a week. Rows also go with their collection
+  (`ON DELETE CASCADE`).
+- Collages are never deleted from storage directly. The table's delete trigger queues a deleted
+  row's objects in `artwork_revision_gc_candidates` in the same transaction
+  (`queue_collection_poster_objects`), and the artwork revision collector deletes them after its
+  grace period while no row names the path. Collage paths are deterministic, so a build first
+  withdraws its path from that queue, and it waits for a later read when a collector worker holds
+  the path. Deleting a collection also deletes its whole `collection-images/` prefix right away.
 - The artwork reconcile sweeps the table like other artwork surfaces. A cleared row reads as a
   missing collage and is rebuilt on the next read.
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"regexp"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -115,22 +114,5 @@ func TestCollageBuildQueueDedupesAndBacksOff(t *testing.T) {
 	}
 	if !q.claim(CollectionCollageRef{CollectionID: "c2", Key: "k"}, now) {
 		t.Fatal("an expired back-off did not make room")
-	}
-}
-
-func TestCollectionPosterObjectKeysExpandStoredOriginals(t *testing.T) {
-	got := CollectionPosterObjectKeys("collection-images/c1/collage/original.0123456789abcdef.webp")
-	want := []string{
-		"collection-images/c1/collage/original.0123456789abcdef.webp",
-		"collection-images/c1/collage/w500.0123456789abcdef.webp",
-		"collection-images/c1/collage/w300.0123456789abcdef.webp",
-	}
-	if !slices.Equal(got, want) {
-		t.Fatalf("keys = %v, want %v", got, want)
-	}
-	for _, notOriginal := range []string{"", "collection-images/c1/collage/w300.1.webp", "https://example.test/original.jpg", "/images/collection-templates/x.jpg"} {
-		if keys := CollectionPosterObjectKeys(notOriginal); keys != nil {
-			t.Fatalf("%q expanded to %v", notOriginal, keys)
-		}
 	}
 }

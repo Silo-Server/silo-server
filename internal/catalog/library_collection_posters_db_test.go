@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -23,6 +24,10 @@ type fakeCollageGenerator struct {
 	composed map[string][]string
 }
 
+func (g *fakeCollageGenerator) CollectionCollagePath(collectionID, key string) string {
+	return fmt.Sprintf("collection-images/%s/collage/original.%s.webp", collectionID, key)
+}
+
 func (g *fakeCollageGenerator) ComposeCollectionCollage(_ context.Context, collectionID, key string, sources []string) (string, string, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -30,7 +35,7 @@ func (g *fakeCollageGenerator) ComposeCollectionCollage(_ context.Context, colle
 		g.composed = map[string][]string{}
 	}
 	g.composed[key] = append([]string(nil), sources...)
-	return fmt.Sprintf("collection-images/%s/collage/original.%s.webp", collectionID, key), "th-" + key, nil
+	return g.CollectionCollagePath(collectionID, key), "th-" + key, nil
 }
 
 func (g *fakeCollageGenerator) sources(key string) []string {
@@ -323,6 +328,43 @@ func TestCollectionCollagesFollowTheViewerDB(t *testing.T) {
 		assertCollageQueuedForCollector(t, pool, orphan)
 	})
 
+	t.Run("rebuilding a collage withdraws it from the collector", func(t *testing.T) {
+		src := []string{"rebuilt/poster/original.webp"}
+		rebuiltRef := CollectionCollageRef{CollectionID: collection.ID, Key: CollectionCollageKey(src)}
+		rebuiltPath := gen.CollectionCollagePath(collection.ID, rebuiltRef.Key)
+		t.Cleanup(func() {
+			_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path = $1`, rebuiltPath)
+		})
+		// The collector holds the path: the build must not upload under it.
+		if err := repo.QueueCollectionCollageObjects(ctx, []string{rebuiltPath}); err != nil {
+			t.Fatalf("queue: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `UPDATE artwork_revision_gc_candidates SET locked_at = NOW(), locked_by = 'collector' WHERE original_path = $1`, rebuiltPath); err != nil {
+			t.Fatalf("lease: %v", err)
+		}
+		if err := svc.buildCollage(ctx, rebuiltRef, src); !errors.Is(err, ErrCollectionCollageBeingCollected) {
+			t.Fatalf("build while collected: err = %v, want ErrCollectionCollageBeingCollected", err)
+		}
+		if gen.sources(rebuiltRef.Key) != nil {
+			t.Fatal("a collage was composed while the collector held its path")
+		}
+		// Once released, the build withdraws the queued objects before
+		// uploading, so the collector can't delete them under the new row.
+		if _, err := pool.Exec(ctx, `UPDATE artwork_revision_gc_candidates SET locked_at = NULL, locked_by = '' WHERE original_path = $1`, rebuiltPath); err != nil {
+			t.Fatalf("release: %v", err)
+		}
+		if err := svc.buildCollage(ctx, rebuiltRef, src); err != nil {
+			t.Fatalf("build: %v", err)
+		}
+		var queued int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM artwork_revision_gc_candidates WHERE original_path = $1`, rebuiltPath).Scan(&queued); err != nil {
+			t.Fatalf("count queued: %v", err)
+		}
+		if queued != 0 {
+			t.Fatal("a rebuilt collage stayed queued for deletion")
+		}
+	})
+
 	t.Run("an uploaded poster is shown to everyone", func(t *testing.T) {
 		uploaded := *stored
 		uploaded.PosterURL = fmt.Sprintf("collection-images/%s/poster/original.abc.webp", collection.ID)
@@ -358,8 +400,12 @@ func assertCollageQueuedForCollector(t *testing.T, pool *pgxpool.Pool, path stri
 	`, path).Scan(&keys, &graced); err != nil {
 		t.Fatalf("collage %s is not queued for the collector: %v", path, err)
 	}
-	if !slices.Equal(keys, CollectionPosterObjectKeys(path)) || !graced {
-		t.Fatalf("queued keys = %v graced=%v, want %v after the grace period", keys, graced, CollectionPosterObjectKeys(path))
+	want := []string{path}
+	for _, width := range CollectionPosterWidths {
+		want = append(want, strings.Replace(path, "/original.", fmt.Sprintf("/w%d.", width), 1))
+	}
+	if !slices.Equal(keys, want) || !graced {
+		t.Fatalf("queued keys = %v graced=%v, want %v after the grace period", keys, graced, want)
 	}
 }
 
@@ -394,4 +440,44 @@ func waitForCollectionCollage(t *testing.T, repo *LibraryCollectionRepository, r
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// Deleting a collection cascades to its collages, and the delete trigger
+// queues their objects in the same transaction.
+func TestDeletingACollectionQueuesItsCollagesDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	suffix := time.Now().UnixNano()
+	libraryID := seedCollagePosterLibrary(t, pool, fmt.Sprintf("collage-delete-%d", suffix))
+	repo := NewLibraryCollectionRepository(pool)
+	collection, err := repo.Create(ctx, CreateLibraryCollectionInput{
+		LibraryIDs:     []int{libraryID},
+		Slug:           fmt.Sprintf("collage-delete-%d", suffix),
+		Title:          "Collage delete",
+		CollectionType: "manual",
+	})
+	if err != nil {
+		t.Fatalf("create collection: %v", err)
+	}
+	path := fmt.Sprintf("collection-images/%s/collage/original.3333333333333333.webp", collection.ID)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path = $1`, path)
+	})
+	ref := CollectionCollageRef{CollectionID: collection.ID, Key: "3333333333333333"}
+	if err := repo.SaveCollectionCollage(ctx, CollectionCollage{CollectionCollageRef: ref, Path: path}); err != nil {
+		t.Fatalf("save collage: %v", err)
+	}
+	if err := repo.Delete(ctx, collection.ID); err != nil {
+		t.Fatalf("delete collection: %v", err)
+	}
+	assertCollageQueuedForCollector(t, pool, path)
 }

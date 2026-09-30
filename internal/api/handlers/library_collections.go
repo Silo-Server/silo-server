@@ -26,6 +26,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -218,9 +219,17 @@ func (h *LibraryCollectionHandler) ComposeCollectionCollage(ctx context.Context,
 	if err != nil {
 		return "", "", fmt.Errorf("processing collage image: %w", err)
 	}
+	if want := h.CollectionCollagePath(collectionID, key); s3Path != want {
+		return "", "", fmt.Errorf("collage stored at %q, want %q", s3Path, want)
+	}
 
 	slog.InfoContext(ctx, "collage: poster generated successfully", "component", "api", "collection_id", collectionID, "s3_path", s3Path)
 	return s3Path, thumbhash, nil
+}
+
+// CollectionCollagePath implements catalog.CollageGenerator.
+func (h *LibraryCollectionHandler) CollectionCollagePath(collectionID, key string) string {
+	return artworkkey.Original(collectionCollageDir(adminCollectionImagePrefix, collectionID), key, ".webp")
 }
 
 // fetchImageURL downloads an image from a resolved URL.

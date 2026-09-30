@@ -86,10 +86,10 @@ func TestComposeCollectionCollageFailsWithoutEverySource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compose: %v", err)
 	}
-	if path != "collection-images/c1/collage/original."+key+".webp" || thumbhash == "" {
+	if path != "collection-images/c1/collage/original."+key+".webp" || path != h.CollectionCollagePath("c1", key) || thumbhash == "" {
 		t.Fatalf("stored %q with thumbhash %q", path, thumbhash)
 	}
-	keys := catalog.CollectionPosterObjectKeys(path)
+	keys := []string{path, "collection-images/c1/collage/w500." + key + ".webp", "collection-images/c1/collage/w300." + key + ".webp"}
 	if len(keys) != len(store.Objects) {
 		t.Fatalf("stored %d objects, want %v", len(store.Objects), keys)
 	}

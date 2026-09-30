@@ -106,6 +106,9 @@ type TraktAccessTokenResolver interface {
 // CollageGenerator composes and stores collection collages. Stored collages
 // are deleted through the artwork revision collector, never directly.
 type CollageGenerator interface {
+	// CollectionCollagePath returns the path ComposeCollectionCollage stores
+	// the collection's collage key under.
+	CollectionCollagePath(collectionID, key string) string
 	// ComposeCollectionCollage composes a poster from the source poster paths,
 	// in order, and stores it as the collection's collage key. It returns the
 	// stored poster path and its thumbhash, or collage.ErrNotEnoughImages when
