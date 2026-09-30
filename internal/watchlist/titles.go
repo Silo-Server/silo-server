@@ -182,7 +182,7 @@ type Effects interface {
 type TitleCatalog interface {
 	ResolveProviderAliases(ctx context.Context, aliases []catalog.ProviderAlias) (map[int64][]string, error)
 	ItemProviderAliases(ctx context.Context, contentID string) (string, []catalog.ProviderAlias, error)
-	EnsureAccessible(ctx context.Context, contentID string, filter catalog.AccessFilter) error
+	EnsureAccessibleIDs(ctx context.Context, contentIDs []string, filter catalog.AccessFilter) (map[string]bool, error)
 }
 
 // TitleTMDB is the slice of the TMDB client ID repair needs.
@@ -379,21 +379,6 @@ func (s *Titles) LibraryMatches(ctx context.Context, mediaType string, tmdbIDs [
 	return matches[0], nil
 }
 
-// accessibleItems keeps the catalog items the viewer may see, in order.
-func (s *Titles) accessibleItems(ctx context.Context, contentIDs []string, access catalog.AccessFilter) ([]string, error) {
-	out := make([]string, 0, len(contentIDs))
-	for _, id := range contentIDs {
-		if err := s.catalog.EnsureAccessible(ctx, id, access); err != nil {
-			if errors.Is(err, catalog.ErrItemNotFound) {
-				continue
-			}
-			return nil, fmt.Errorf("checking access to a watchlist title's library item: %w", err)
-		}
-		out = append(out, id)
-	}
-	return out, nil
-}
-
 // PromoteProfile moves every entry of the viewer whose title the library now
 // has onto the library watchlist, keeping its added_at. It returns the
 // content IDs this call put on the library watchlist, the ones it ran the
@@ -453,6 +438,20 @@ func (s *Titles) promote(ctx context.Context, v Viewer, addedAt map[int64]time.T
 	}
 	slices.Sort(titleIDs)
 
+	// One access check for every matched copy, rather than one per copy.
+	var candidates []string
+	for _, ids := range matches {
+		for _, id := range ids {
+			if !slices.Contains(candidates, id) {
+				candidates = append(candidates, id)
+			}
+		}
+	}
+	accessible, err := s.catalog.EnsureAccessibleIDs(ctx, candidates, v.Access)
+	if err != nil {
+		return nil, fmt.Errorf("checking access to watchlist titles' library items: %w", err)
+	}
+
 	store, err := s.storeFor(ctx, v.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("opening user store for watchlist promotion: %w", err)
@@ -462,10 +461,11 @@ func (s *Titles) promote(ctx context.Context, v Viewer, addedAt map[int64]time.T
 	for _, titleID := range titleIDs {
 		// Only the copies this viewer may see count: duplicates in libraries
 		// the viewer can't open don't make the title ambiguous for them.
-		contentIDs, err := s.accessibleItems(ctx, matches[titleID], v.Access)
-		if err != nil {
-			errs = append(errs, err)
-			continue
+		var contentIDs []string
+		for _, id := range matches[titleID] {
+			if accessible[id] {
+				contentIDs = append(contentIDs, id)
+			}
 		}
 		if len(contentIDs) == 0 {
 			continue
