@@ -4,6 +4,7 @@ import type { components } from "@/api/v2/schema";
 
 import {
   buildHomeLayoutFile,
+  legacyTraktSectionIds,
   mergeImportedPage,
   parseHomeLayoutFile,
   planHomeLayoutImport,
@@ -447,24 +448,92 @@ describe("planHomeLayoutImport on another server", () => {
 });
 
 describe("mergeImportedPage", () => {
-  const page = {
-    scope: "home" as const,
-    label: "Home",
-    overrides: [{ id: "new-1", user_section_type: "hidden_gems" }],
-  };
-  const existing = [
-    stored({ id: "keep", section_id: "admin-1", position: 3, hidden: true }),
-    stored({ id: "old-custom", user_section_type: "hidden_gems", is_user_added: true }),
-  ];
+  const noTrakt = new Set<string>();
 
-  it("replaces the whole page on the same server", () => {
-    expect(mergeImportedPage(page, existing, true)).toEqual(page.overrides);
+  it("replaces the whole page on the same server, reusing saved override IDs", () => {
+    const page = {
+      scope: "home" as const,
+      label: "Home",
+      overrides: [
+        { section_id: "admin-1", position: 0, hidden: true },
+        { section_id: "admin-2", position: 1 },
+        { section_id: "admin-2", position: 5 },
+        { id: "new-custom", user_section_type: "hidden_gems", position: 2 },
+      ],
+    };
+    const existing = [
+      stored({ id: "saved-1", section_id: "admin-1", position: 4 }),
+      stored({ id: "saved-3", section_id: "admin-3", removed: true }),
+      stored({ id: "old-custom", user_section_type: "hidden_gems", is_user_added: true }),
+    ];
+
+    expect(mergeImportedPage(page, existing, true, noTrakt, sequentialIds())).toEqual([
+      { id: "saved-1", section_id: "admin-1", position: 0, hidden: true },
+      { id: "new-1", section_id: "admin-2", position: 1 },
+      { id: "new-custom", user_section_type: "hidden_gems", position: 2 },
+    ]);
+  });
+
+  it("leaves legacy Trakt admin sections as the profile saved them", () => {
+    const trakt = new Set([
+      "trakt-saved",
+      "trakt-unsaved-hidden",
+      "trakt-unsaved-shown",
+      "trakt-omitted",
+    ]);
+    const page = {
+      scope: "home" as const,
+      label: "Home",
+      overrides: [
+        { section_id: "trakt-saved", position: 0 },
+        { section_id: "trakt-unsaved-hidden", hidden: true },
+        { section_id: "trakt-unsaved-shown", position: 3 },
+      ],
+    };
+    const existing = [
+      stored({ id: "saved-a", section_id: "trakt-saved", hidden: true }),
+      stored({ id: "saved-b", section_id: "trakt-omitted", removed: true }),
+    ];
+
+    expect(mergeImportedPage(page, existing, true, trakt, sequentialIds())).toEqual([
+      { id: "saved-a", section_id: "trakt-saved", hidden: true },
+      { id: "new-1", section_id: "trakt-unsaved-hidden", hidden: true },
+      { id: "saved-b", section_id: "trakt-omitted", removed: true },
+    ]);
   });
 
   it("keeps this server's section changes on another server", () => {
-    expect(mergeImportedPage(page, existing, false)).toEqual([
+    const page = {
+      scope: "home" as const,
+      label: "Home",
+      overrides: [{ id: "new-1", user_section_type: "hidden_gems" }],
+    };
+    const existing = [
+      stored({ id: "keep", section_id: "admin-1", position: 3, hidden: true }),
+      stored({ id: "old-custom", user_section_type: "hidden_gems", is_user_added: true }),
+    ];
+
+    expect(mergeImportedPage(page, existing, false, noTrakt, sequentialIds())).toEqual([
       { id: "keep", section_id: "admin-1", position: 3, hidden: true },
       { id: "new-1", user_section_type: "hidden_gems" },
     ]);
+  });
+});
+
+describe("legacyTraktSectionIds", () => {
+  it("finds Trakt-sourced admin sections in the page view and saved overrides", () => {
+    const settings = [
+      { id: "trending", is_custom: false, config: { source: "trakt", window: "week" } },
+      { id: "list", is_custom: false, config: { source_provider: "trakt" } },
+      { id: "tmdb", is_custom: false, config: { source: "tmdb" } },
+      { id: "custom", is_custom: true, config: { source: "trakt" } },
+    ];
+    const existing = [
+      stored({ id: "o1", section_id: "removed-trakt", config: { source: "trakt" } }),
+    ];
+
+    expect(legacyTraktSectionIds(settings, existing)).toEqual(
+      new Set(["trending", "list", "removed-trakt"]),
+    );
   });
 });

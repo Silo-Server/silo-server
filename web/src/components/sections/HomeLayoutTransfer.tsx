@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { captureProfileRequestContext, isCapturedProfileAuthorityActive } from "@/api/client";
 import { v2, V2ProblemError } from "@/api/v2/request";
 import { useAvailableUserLibraries } from "@/hooks/queries/libraries";
 import { sectionKeys } from "@/hooks/queries/keys";
@@ -26,6 +27,7 @@ import {
   HOME_LAYOUT_MAX_LENGTH,
   HOME_LAYOUT_SKIP_REASON_LABELS,
   buildHomeLayoutFile,
+  legacyTraktSectionIds,
   mergeImportedPage,
   parseHomeLayoutFile,
   planHomeLayoutImport,
@@ -78,6 +80,12 @@ export default function HomeLayoutTransfer() {
 
   async function handleExport() {
     if (!libraries) return;
+    // Every read goes to the profile active now, even if it changes mid-export.
+    const profileContext = captureProfileRequestContext();
+    if (!profileContext) {
+      toast.error("Choose a profile before exporting its home layout.");
+      return;
+    }
     setExporting(true);
     try {
       const identity = await v2("GET /api/v2/system/identity");
@@ -89,6 +97,7 @@ export default function HomeLayoutTransfer() {
         sources.map(async (source) => {
           const result = await v2("GET /api/v2/profile/sections", {
             query: pageQuery(source.scope, source.libraryId),
+            profileContext,
           });
           return { ...source, overrides: result.items };
         }),
@@ -148,6 +157,9 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState("");
   const [applying, setApplying] = useState(false);
+  // The profile this dialog imports into. Its reads and writes carry this
+  // authority, so a profile switch can't redirect an import in progress.
+  const [profileContext] = useState(captureProfileRequestContext);
 
   const identityQuery = useQuery({
     queryKey: ["home-layout-import", "server-identity"],
@@ -159,7 +171,11 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
   const collectionsQuery = useQuery({
     queryKey: ["home-layout-import", "personal-collection-ids"],
     queryFn: async () =>
-      new Set((await v2("GET /api/v2/collections")).items.map((collection) => collection.id)),
+      new Set(
+        (
+          await v2("GET /api/v2/collections", { profileContext: profileContext ?? undefined })
+        ).items.map((collection) => collection.id),
+      ),
     gcTime: 0,
   });
   // Shares the Home screen settings page's cache entry.
@@ -246,18 +262,34 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
 
   async function handleImport() {
     if (!plan || !hasChanges) return;
+    // The plan was checked against this profile's libraries and collections.
+    if (!profileContext || !isCapturedProfileAuthorityActive(profileContext)) {
+      toast.error("The active profile changed. Close this dialog and import again.");
+      return;
+    }
     setApplying(true);
     const failures: string[] = [];
     for (const page of plan.pages) {
       try {
         const query = pageQuery(page.scope, page.libraryId);
-        const existing = plan.sameServer
-          ? []
-          : (await v2("GET /api/v2/profile/sections", { query })).items;
-        await v2("PUT /api/v2/profile/sections", {
-          query,
-          body: { overrides: mergeImportedPage(page, existing, plan.sameServer) },
-        });
+        const [existing, settings] = await Promise.all([
+          v2("GET /api/v2/profile/sections", { query, profileContext }).then(
+            (result) => result.items,
+          ),
+          plan.sameServer
+            ? v2("GET /api/v2/profile/sections/settings", { query, profileContext }).then(
+                (result) => result.items,
+              )
+            : Promise.resolve([]),
+        ]);
+        const overrides = mergeImportedPage(
+          page,
+          existing,
+          plan.sameServer,
+          legacyTraktSectionIds(settings, existing),
+          randomUUID,
+        );
+        await v2("PUT /api/v2/profile/sections", { query, body: { overrides }, profileContext });
       } catch (error) {
         failures.push(`${page.label} (${problemMessage(error)})`);
       }
@@ -268,6 +300,7 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
           key: SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS,
           value: plan.hideWatchedItems,
           identity: { scope: "profile" },
+          profileContext,
         });
       } catch (error) {
         failures.push(`Hide watched items (${problemMessage(error)})`);

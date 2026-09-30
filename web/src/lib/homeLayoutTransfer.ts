@@ -342,6 +342,16 @@ function effectiveConfig(override: SectionOverrideWrite): Record<string, unknown
   return override.user_config ?? override.config ?? {};
 }
 
+/**
+ * Whether a section config names Trakt as its source, read the way the
+ * server's section source policy reads it. New Trakt-backed overrides are
+ * refused, and legacy Trakt admin sections can be hidden but never changed
+ * or shown again.
+ */
+export function isTraktConfig(config: Record<string, unknown> | undefined): boolean {
+  return config?.source === "trakt" || config?.source_provider === "trakt";
+}
+
 function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim() !== "";
 }
@@ -361,7 +371,7 @@ function sectionSkipReason(
 
   const config = effectiveConfig(override);
   // The server refuses any new override whose config names Trakt as its source.
-  if (config.source === "trakt" || config.source_provider === "trakt") return "trakt";
+  if (isTraktConfig(config)) return "trakt";
 
   if (nonEmptyString(config.library_collection_id) && !sameServer) return "collection";
   if (
@@ -467,24 +477,88 @@ function remapOverrideLibraries(
   return true;
 }
 
+function keepExisting(override: SectionOverrideRead): SectionOverrideWrite {
+  return { ...overrideToWrite(override), ...(override.id ? { id: override.id } : {}) };
+}
+
 /**
- * The override set to save for one imported page. On the same server the
- * file describes the whole page, so it replaces what the profile saved. On
- * another server the file says nothing about this server's own sections, so
- * the profile's saved changes to them stay and only its profile-built
+ * The override set to save for one imported page, given the importing
+ * profile's saved overrides for it.
+ *
+ * On another server the file says nothing about this server's own sections,
+ * so the profile's saved changes to them stay and only its profile-built
  * sections are replaced.
+ *
+ * On the same server the file describes the whole page and replaces what the
+ * profile saved. A change to an admin section keeps the ID of the profile's
+ * saved override for that section, or gets a new one, as the server's
+ * section source policy expects of every override. Legacy Trakt admin
+ * sections (`legacyTraktSectionIds`) can't be changed or shown again, so the
+ * profile's saved override for one stays as it is; without one, only a
+ * hide or remove carries over.
  */
 export function mergeImportedPage(
   page: HomeLayoutPlannedPage,
   existing: SectionOverrideRead[],
   sameServer: boolean,
+  legacyTraktSectionIds: ReadonlySet<string>,
+  newId: () => string,
 ): SectionOverrideWrite[] {
-  if (sameServer) return page.overrides;
-  const kept = existing
-    .filter((override) => override.section_id)
-    .map((override) => ({
-      ...overrideToWrite(override),
-      ...(override.id ? { id: override.id } : {}),
-    }));
-  return [...kept, ...page.overrides];
+  if (!sameServer) {
+    return [
+      ...existing.filter((override) => override.section_id).map(keepExisting),
+      ...page.overrides,
+    ];
+  }
+
+  const existingBySection = new Map<string, SectionOverrideRead>();
+  for (const override of existing) {
+    if (override.section_id && !existingBySection.has(override.section_id)) {
+      existingBySection.set(override.section_id, override);
+    }
+  }
+  const imported = new Set<string>();
+  const merged: SectionOverrideWrite[] = [];
+  for (const override of page.overrides) {
+    const sectionId = override.section_id;
+    if (!sectionId) {
+      merged.push(override);
+      continue;
+    }
+    // One override per section; a second would repeat the saved ID.
+    if (imported.has(sectionId)) continue;
+    imported.add(sectionId);
+    const saved = existingBySection.get(sectionId);
+    if (legacyTraktSectionIds.has(sectionId)) {
+      if (saved) merged.push(keepExisting(saved));
+      else if (override.hidden || override.removed) merged.push({ ...override, id: newId() });
+      continue;
+    }
+    merged.push({ ...override, id: saved?.id || newId() });
+  }
+  // Dropping the profile's hide of a legacy Trakt section would show it again.
+  for (const [sectionId, saved] of existingBySection) {
+    if (!imported.has(sectionId) && legacyTraktSectionIds.has(sectionId)) {
+      merged.push(keepExisting(saved));
+    }
+  }
+  return merged;
+}
+
+/**
+ * The legacy Trakt admin sections on a page, from the importing profile's
+ * view of it and its saved overrides.
+ */
+export function legacyTraktSectionIds(
+  settings: { id: string; is_custom: boolean; config?: Record<string, unknown> }[],
+  existing: SectionOverrideRead[],
+): Set<string> {
+  const ids = new Set<string>();
+  for (const section of settings) {
+    if (!section.is_custom && isTraktConfig(section.config)) ids.add(section.id);
+  }
+  for (const override of existing) {
+    if (override.section_id && isTraktConfig(override.config)) ids.add(override.section_id);
+  }
+  return ids;
 }

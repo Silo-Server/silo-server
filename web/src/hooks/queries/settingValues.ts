@@ -302,6 +302,7 @@ export function useSetSettingValue() {
       key,
       value,
       identity,
+      profileContext,
     }: {
       key: SettingKey;
       value: unknown;
@@ -313,11 +314,14 @@ export function useSetSettingValue() {
        * value. Ordinary callers should leave this enabled.
        */
       invalidateOnSettled?: boolean;
+      /** Send the write for this captured profile rather than the active one. */
+      profileContext?: ProfileRequestContextSnapshot;
     }) =>
       v2("PUT /api/v2/settings/values/{key}", {
         path: { key },
         query: identityQuery(identity),
         body: { value },
+        profileContext,
       }),
     onSuccess: (_data, variables) => {
       if (variables.invalidateOnSettled === false) return;
