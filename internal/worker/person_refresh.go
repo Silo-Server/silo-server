@@ -24,6 +24,10 @@ type PersonRefreshWorkerConfig struct {
 	Delay          time.Duration
 	BatchSize      int
 	RefreshTimeout time.Duration
+	// ClaimLease is how long a claim holds a person before another node may
+	// claim them (catalog.PersonRefreshAttemptLease). A batch stops starting
+	// lookups once less than RefreshTimeout is left on it.
+	ClaimLease time.Duration
 }
 
 func DefaultPersonRefreshWorkerConfig() PersonRefreshWorkerConfig {
@@ -32,6 +36,7 @@ func DefaultPersonRefreshWorkerConfig() PersonRefreshWorkerConfig {
 		Delay:          200 * time.Millisecond,
 		BatchSize:      100,
 		RefreshTimeout: 2 * time.Minute,
+		ClaimLease:     time.Hour,
 	}
 }
 
@@ -44,6 +49,7 @@ type PersonRefreshWorker struct {
 	queued      map[int64]struct{}
 	stop        chan struct{}
 	wake        chan struct{}
+	now         func() time.Time
 }
 
 func NewPersonRefreshWorker(service PersonRefresher, config PersonRefreshWorkerConfig) *PersonRefreshWorker {
@@ -59,6 +65,9 @@ func NewPersonRefreshWorker(service PersonRefresher, config PersonRefreshWorkerC
 	if config.RefreshTimeout <= 0 {
 		config.RefreshTimeout = 2 * time.Minute
 	}
+	if config.ClaimLease <= 0 {
+		config.ClaimLease = time.Hour
+	}
 
 	return &PersonRefreshWorker{
 		service: service,
@@ -66,6 +75,7 @@ func NewPersonRefreshWorker(service PersonRefresher, config PersonRefreshWorkerC
 		queued:  make(map[int64]struct{}),
 		stop:    make(chan struct{}),
 		wake:    make(chan struct{}, 1),
+		now:     time.Now,
 	}
 }
 
@@ -127,6 +137,11 @@ func (w *PersonRefreshWorker) drain() {
 // processBatch runs the on-demand queue, then claims and refreshes one
 // background batch. On-demand requests that arrive meanwhile run between its
 // lookups. It reports whether the batch was full, meaning more may be due.
+//
+// A lookup renews its person's lease when it starts, but claimed people it
+// hasn't reached yet are only held by the claim. When slow lookups use up the
+// claim's lease, the batch stops before another node could claim the rest;
+// they come back once their lease runs out.
 func (w *PersonRefreshWorker) processBatch() bool {
 	if w.service == nil {
 		return false
@@ -134,6 +149,7 @@ func (w *PersonRefreshWorker) processBatch() bool {
 
 	done := map[int64]struct{}{}
 	w.runManual(done)
+	lastStart := w.now().Add(w.config.ClaimLease - w.config.RefreshTimeout)
 	batch, err := w.service.ClaimCandidates(context.Background(), w.config.BatchSize)
 	if err != nil {
 		slog.Warn("person refresh worker: failed to claim candidates", "error", err)
@@ -148,6 +164,11 @@ func (w *PersonRefreshWorker) processBatch() bool {
 		if _, ran := done[id]; ran || w.isQueued(id) {
 			// Its on-demand lookup already ran, or is pending and will cover it.
 			continue
+		}
+		if w.now().After(lastStart) {
+			slog.Warn("person refresh worker: batch outlasted its claim; leaving the rest for later",
+				"remaining", len(batch)-index)
+			return true
 		}
 		w.refresh(id)
 

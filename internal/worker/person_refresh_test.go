@@ -5,6 +5,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -59,6 +60,29 @@ func TestPersonRefreshWorkerDrainsFullBatchesBackToBack(t *testing.T) {
 	// Two full batches, then the short one ends the drain without a fourth claim.
 	if service.claims != 3 {
 		t.Fatalf("claims = %d, want 3", service.claims)
+	}
+}
+
+// Slow lookups that use up the claim's lease stop the batch before another
+// node can claim the people it hasn't reached.
+func TestPersonRefreshWorkerStopsBatchWhenClaimLeaseRunsOut(t *testing.T) {
+	service := &fakePersonRefresher{batches: [][]int64{{1, 2, 3}}}
+	w := NewPersonRefreshWorker(service, PersonRefreshWorkerConfig{
+		BatchSize:      3,
+		RefreshTimeout: 2 * time.Minute,
+		ClaimLease:     time.Hour,
+	})
+	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	w.now = func() time.Time { return now }
+	service.onRefresh = func(int64) { now = now.Add(40 * time.Minute) }
+
+	if more := w.processBatch(); !more {
+		t.Fatal("processBatch() = false, want true so the sweep goes on")
+	}
+	// Person 2 starts 40 minutes in; person 3 would start 80 minutes in,
+	// after the claim's lease ran out.
+	if want := []int64{1, 2}; !slices.Equal(service.refreshed, want) {
+		t.Fatalf("refreshed %v, want %v", service.refreshed, want)
 	}
 }
 
