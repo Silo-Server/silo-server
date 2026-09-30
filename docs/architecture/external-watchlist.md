@@ -155,7 +155,11 @@ one item:
 
 The library add in step 3 uses a second pool connection while the promotion's
 transaction holds one. Each node runs at most 4 such promotions at once, and at
-most half the pool's connections, so they cannot exhaust the pool.
+most half the pool's connections, so they cannot exhaust the pool. A pool of
+one connection (`database.max_connections: 1`) can't lend that second
+connection, so there the library add runs first and the title is locked
+afterwards; a remove racing that promotion can leave the item on the library
+watchlist.
 
 Promotion runs only in request-scoped reads, so a viewer is always available.
 A failure is logged and the read continues; the next read retries.

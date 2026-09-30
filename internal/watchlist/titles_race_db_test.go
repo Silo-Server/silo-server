@@ -3,10 +3,15 @@ package watchlist
 import (
 	"context"
 	"fmt"
+	"os"
 	"slices"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
 // waitForLockWait blocks until a statement matching the pattern waits on a
@@ -241,5 +246,46 @@ func TestTitlesOrphansAfterUserDelete(t *testing.T) {
 	}
 	if f.title(t, reused.Title.ID) == nil {
 		t.Fatal("sweep deleted a title with an entry")
+	}
+}
+
+// A one-connection pool can't give the library watchlist write (which, in the
+// Postgres user store, takes its own connection) a second connection while
+// the title lock's transaction holds the first. Promotion writes first there
+// instead of waiting until the request times out.
+func TestTitlesPromotionCompletesOnOneConnectionPool(t *testing.T) {
+	f := newTitlesFixture(t)
+	cfg, err := pgxpool.ParseConfig(os.Getenv("SILO_TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.MaxConns = 1
+	single, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(single.Close)
+	svc := NewTitles(single, catalog.NewItemRepository(f.pool), nil, f.tmdb, f.effects)
+	svc.storeFor = func(context.Context, int) (promotionStore, error) { return f.store, nil }
+	svc.now = func() time.Time { return f.now }
+	if svc.addUnderLock {
+		t.Fatal("a one-connection pool must not hold the title lock across the library write")
+	}
+
+	snap := f.snap("movie", 810, "", 0)
+	f.add(t, "p1", snap, f.now.Add(-time.Hour))
+	contentID := f.item(t, "single", "movie", strconv.Itoa(snap.TMDBID), "")
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	f.store.beforeAdd = func() {
+		f.store.beforeAdd = nil
+		// Stands in for the Postgres user store's write on the same pool.
+		if _, err := single.Exec(ctx, `SELECT 1`); err != nil {
+			t.Errorf("library write could not get a connection: %v", err)
+		}
+	}
+	promoted, err := svc.PromoteProfile(ctx, f.viewer("p1"))
+	if err != nil || !slices.Equal(promoted, []string{contentID}) {
+		t.Fatalf("PromoteProfile = %v %v, want %s promoted without waiting on the pool", promoted, err, contentID)
 	}
 }

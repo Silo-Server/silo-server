@@ -244,6 +244,11 @@ type Titles struct {
 
 	checkSlots chan struct{}
 	checks     sync.WaitGroup
+	// addUnderLock runs the library watchlist write while the title lock is
+	// held. A one-connection pool can't, so it writes first and then locks;
+	// a remove racing that promotion can leave the item on the library
+	// watchlist.
+	addUnderLock bool
 	// promoteSlots bounds the promotions holding a transaction while they
 	// wait for a second connection, so they can never take the whole pool.
 	promoteSlots chan struct{}
@@ -261,10 +266,15 @@ func NewTitles(pool *pgxpool.Pool, items TitleCatalog, stores userstore.UserStor
 		checkSlots: make(chan struct{}, maxConcurrentChecks),
 	}
 	promotions := maxConcurrentPromotions
+	t.addUnderLock = true
 	if pool != nil {
 		// Each promotion holds up to two connections; half the pool leaves the
 		// rest for everything else.
-		promotions = min(maxConcurrentPromotions, max(1, int(pool.Config().MaxConns)/2))
+		maxConns := int(pool.Config().MaxConns)
+		promotions = min(maxConcurrentPromotions, max(1, maxConns/2))
+		// With one connection the library write could never get the second
+		// connection it needs while the lock's transaction holds the first.
+		t.addUnderLock = maxConns >= 2
 	}
 	t.promoteSlots = make(chan struct{}, promotions)
 	if stores != nil {
@@ -471,7 +481,7 @@ func (s *Titles) promoteOne(ctx context.Context, store promotionStore, v Viewer,
 		return false, false, ctx.Err()
 	}
 	defer func() { <-s.promoteSlots }()
-	moved, err = s.repo.promoteEntry(ctx, v.UserID, v.ProfileID, titleID, func(ctx context.Context) error {
+	addToLibrary := func(ctx context.Context) error {
 		inserted, err := store.AddToWatchlistAt(ctx, v.ProfileID, contentID, entryAddedAt)
 		if err != nil {
 			return fmt.Errorf("adding promoted watchlist item: %w", err)
@@ -486,7 +496,15 @@ func (s *Titles) promoteOne(ctx context.Context, store promotionStore, v Viewer,
 		}
 		newToUser = existing != nil && sameStoredTime(existing.AddedAt, entryAddedAt)
 		return nil
-	})
+	}
+	if !s.addUnderLock {
+		if err := addToLibrary(ctx); err != nil {
+			return false, false, err
+		}
+		moved, err = s.repo.promoteEntry(ctx, v.UserID, v.ProfileID, titleID, func(context.Context) error { return nil })
+		return moved, newToUser, err
+	}
+	moved, err = s.repo.promoteEntry(ctx, v.UserID, v.ProfileID, titleID, addToLibrary)
 	return moved, newToUser, err
 }
 
