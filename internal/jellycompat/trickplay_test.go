@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -187,5 +189,46 @@ func TestTrickplayRoutesSkipLoggingAndCompression(t *testing.T) {
 	}
 	if !skipCompatMediaCompression(httptest.NewRequest(http.MethodGet, "/Videos/abc/Trickplay/300/0.jpg", nil)) {
 		t.Fatal("trickplay sheets are compressed")
+	}
+}
+
+func TestPlayingFileUsesDurableSelectedSource(t *testing.T) {
+	now := time.Now()
+	original := PlaybackSession{ID: "play", CompatToken: "token", ItemID: "movie-1", UpstreamSessionID: "upstream", UpstreamMediaFileID: 43, UpdatedAt: now, ExpiresAt: now.Add(time.Hour)}
+	raw, err := json.Marshal(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored PlaybackSession
+	if err := json.Unmarshal(raw, &restored); err != nil {
+		t.Fatal(err)
+	}
+	store := NewPlaybackSessionStore(time.Hour, func() time.Time { return now })
+	store.PutNegotiated(restored)
+	// A fresh API process has durable compat state and no native session.
+	handler := &PlaybackHandler{playbackStore: store}
+	if got := handler.playingFile(t.Context(), &Session{Token: "token"}, "movie-1"); got != 43 {
+		t.Fatalf("selected file=%d want43", got)
+	}
+	if got := handler.playingFile(t.Context(), &Session{Token: "other-token"}, "movie-1"); got != 0 {
+		t.Fatalf("another token's file=%d", got)
+	}
+	if got := handler.playingFile(t.Context(), &Session{Token: "token"}, "movie-2"); got != 0 {
+		t.Fatalf("another item's file=%d", got)
+	}
+}
+
+func TestPlayingFileSurvivesAPIReplicaDB(t *testing.T) {
+	pool := newCompatTestPool(t)
+	id := fmt.Sprintf("trickplay-replica-%d", time.Now().UnixNano())
+	token := id + "-token"
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM jellycompat_playback_sessions WHERE id=$1`, id)
+	})
+	owner := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	owner.Put(PlaybackSession{ID: id, CompatToken: token, ItemID: "movie-1", UserID: "viewer", UpstreamSessionID: "native", UpstreamMediaFileID: 43})
+	replica := &PlaybackHandler{playbackStore: NewDurableCompatPlaybackStore(pool, time.Hour, nil)}
+	if got := replica.playingFile(t.Context(), &Session{Token: token}, "movie-1"); got != 43 {
+		t.Fatalf("fresh replica selected file=%d want43", got)
 	}
 }

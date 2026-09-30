@@ -241,7 +241,9 @@ playlist with the caller's token on each sheet URL. Both pick the version
 from `mediaSourceId`, else from a media-source id in the item position, else
 the version this token is playing for the item (Swiftfin and Findroid send
 no `mediaSourceId`), else the default version, and serve only versions the
-account can see. An index past the last sheet answers `404`.
+account can see. The selected playback file is persisted in compat session
+state, so previews follow that source across API replicas and restarts.
+An index past the last sheet answers `404`.
 
 The managed Jellyfin Web build opts into `SiloSeekReanchor=true` on
 `PlaybackInfo`. For a copied-video HLS source, the response echoes
