@@ -58,6 +58,12 @@ export function useWatchDetail(id: string | undefined, fileId?: number, libraryI
 /** Sheet URLs are refetched this long before they expire. */
 const TRICKPLAY_REFRESH_MARGIN_MS = 5 * 60 * 1000;
 
+function transientTrickplayError(error: unknown): boolean {
+  if (error instanceof V2ProblemError) return error.status >= 500;
+  if (error instanceof V2TransportError) return error.status === 0 || error.status >= 500;
+  return error instanceof TypeError;
+}
+
 export async function fetchWatchTrickplay(
   id: string,
   fileId: number,
@@ -85,8 +91,11 @@ export function useWatchTrickplay(
     queryFn: ({ signal }) => fetchWatchTrickplay(id!, fileId!, { signal }),
     enabled: !!id && !!fileId && available,
     staleTime: Infinity,
-    retry: false,
+    retry: (failures, error) => failures < 2 && transientTrickplayError(error),
     refetchInterval: (query) => {
+      if (query.state.status === "error") {
+        return transientTrickplayError(query.state.error) ? 60_000 : false;
+      }
       const expiresAt = query.state.data?.expiresAt;
       if (!expiresAt || !Number.isFinite(expiresAt)) return false;
       return Math.max(60_000, expiresAt - Date.now() - TRICKPLAY_REFRESH_MARGIN_MS);
