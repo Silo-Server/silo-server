@@ -61,7 +61,7 @@ func TestBlobNamespaceLiveDB(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM public.media_folders WHERE id = $1`, folderID)
 	})
 	livePrefix := chapterImagesPrefix + strconv.Itoa(fileID) + "/"
-	deadPrefix := chapterImagesPrefix + "1999999999/"
+	deadPrefix := chapterImagesPrefix + "2147483648/"
 	live, err := BlobNamespace(pool).Live(t.Context(), []string{livePrefix, deadPrefix})
 	if err != nil {
 		t.Fatal(err)
