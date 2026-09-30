@@ -1198,10 +1198,13 @@ func PersonRefreshDue(person models.Person, now time.Time) bool {
 // scan goes next; then people whose recorded outcome made their next lookup
 // due, earliest due first.
 //
-// Claiming stamps the attempt and a PersonRefreshAttemptLease due time in the
-// same statement that selects the rows, skipping rows another node holds, so
-// API nodes sweeping at once never look up the same person. A claim the
-// lookup never completes expires with the lease and the person is due again.
+// Claiming stamps a PersonRefreshAttemptLease due time in the same statement
+// that selects the rows, skipping rows another node holds, so API nodes
+// sweeping at once never look up the same person. A claim the lookup never
+// completes expires with the lease and the person is due again. The claim
+// leaves metadata_refresh_attempted_at alone: the lookup stamps it when it
+// starts, so a person claimed but not reached still gets a lookup when their
+// page is opened (PersonRefreshDue).
 func (r *PersonRepository) ClaimRefreshCandidates(ctx context.Context, limit int) ([]int64, error) {
 	if limit <= 0 {
 		return []int64{}, nil
@@ -1220,6 +1223,9 @@ func (r *PersonRepository) ClaimRefreshCandidates(ctx context.Context, limit int
 				SELECT id, -id::double precision AS sort_key
 				FROM people
 				WHERE metadata_refresh_attempted_at IS NULL
+					-- A claim not yet looked up has a due time and comes back
+					-- through the next step once its lease runs out.
+					AND metadata_refresh_due_at IS NULL
 					AND (tmdb_id <> '' OR imdb_id <> '' OR tvdb_id <> '')
 					AND (
 						COALESCE(bio, '') = ''
@@ -1260,8 +1266,7 @@ func (r *PersonRepository) ClaimRefreshCandidates(ctx context.Context, limit int
 		rows, err := r.pool.Query(ctx, `
 			WITH picked AS (`+step.pick+`)
 			UPDATE people p
-			SET metadata_refresh_attempted_at = NOW(),
-				metadata_refresh_due_at = NOW() + make_interval(secs => $2)
+			SET metadata_refresh_due_at = NOW() + make_interval(secs => $2)
 			FROM picked
 			WHERE p.id = picked.id
 			RETURNING p.id, picked.sort_key`, step.args(remaining)...)

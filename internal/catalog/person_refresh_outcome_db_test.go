@@ -303,8 +303,10 @@ func TestClaimRefreshCandidatesConcurrentClaimsAreDisjointPostgres(t *testing.T)
 		if err := pool.QueryRow(ctx, `SELECT metadata_refresh_attempted_at IS NOT NULL FROM people WHERE id = $1`, id).Scan(&attempted); err != nil {
 			t.Fatal(err)
 		}
-		if !attempted {
-			t.Fatalf("person %d: claim didn't stamp the attempt", id)
+		// The lookup stamps the attempt. Until then a person page still
+		// queues a lookup for someone claimed but not reached.
+		if attempted {
+			t.Fatalf("person %d: claim stamped the attempt", id)
 		}
 		requireDueIn(t, "claim lease", state, PersonRefreshAttemptLease)
 	}
@@ -318,5 +320,22 @@ func TestClaimRefreshCandidatesConcurrentClaimsAreDisjointPostgres(t *testing.T)
 		if seeded[id] {
 			t.Fatalf("person %d claimed again while leased", id)
 		}
+	}
+
+	// A claim that was never looked up comes back once its lease runs out.
+	var expired int64
+	for id := range seeded {
+		expired = id
+		break
+	}
+	if _, err := pool.Exec(ctx, `UPDATE people SET metadata_refresh_due_at = NOW() - interval '1 second' WHERE id = $1`, expired); err != nil {
+		t.Fatal(err)
+	}
+	again, err = repo.ClaimRefreshCandidates(ctx, 100_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(again, expired) {
+		t.Fatalf("person %d not claimed again after the lease ran out", expired)
 	}
 }
