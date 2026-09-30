@@ -94,7 +94,7 @@ func (r *Repository) claim(ctx context.Context, owner string, lease time.Duratio
 		WITH next AS (
 			SELECT media_file_id FROM public.media_file_trickplay
 			WHERE state = 'pending' AND available_at <= now() AND recipe_version <= $3
-			  AND ($4 = 0 OR media_file_id = $4)
+			  AND ($4::bigint = 0 OR media_file_id = $4)
 			ORDER BY available_at, media_file_id
 			LIMIT 1
 			FOR UPDATE SKIP LOCKED
@@ -102,7 +102,7 @@ func (r *Repository) claim(ctx context.Context, owner string, lease time.Duratio
 		UPDATE public.media_file_trickplay t
 		SET state = 'running', lease_owner = $1, lease_expires_at = now() + make_interval(secs => $2),
 		    work_revision = NULL, source_size = mf.file_size, source_hash = mf.file_hash,
-		    source_duration = mf.duration, updated_at = now()
+		    source_duration = mf.duration, recipe_version = $3, updated_at = now()
 		FROM next, public.media_files mf
 		WHERE t.media_file_id = next.media_file_id AND mf.id = t.media_file_id
 		RETURNING t.media_file_id, mf.file_path, mf.container, mf.codec_video, mf.duration, mf.hdr,
@@ -286,7 +286,7 @@ func (r *Repository) fenced(ctx context.Context, fileID int, owner string, apply
 	var row fencedRow
 	err = tx.QueryRow(ctx, `
 		SELECT revision, work_revision, failure_count FROM public.media_file_trickplay
-		WHERE media_file_id = $1 AND lease_owner = $2 AND state = 'running'
+		WHERE media_file_id = $1 AND lease_owner = $2 AND state = 'running' AND lease_expires_at > now()
 		FOR UPDATE`, fileID, owner).Scan(&row.revision, &row.workRevision, &row.failures)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
@@ -316,7 +316,7 @@ func queueRevision(ctx context.Context, tx pgx.Tx, fileID int, revision int64) e
 func cleanError(message string) string {
 	message = strings.ToValidUTF8(strings.ReplaceAll(message, "\x00", ""), "")
 	if len(message) > 1000 {
-		message = message[:1000]
+		message = strings.ToValidUTF8(message[:1000], "")
 	}
 	return message
 }

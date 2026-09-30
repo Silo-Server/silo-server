@@ -10,7 +10,7 @@ ALTER TABLE public.media_folders
 -- (revision and the sheet geometry). A regeneration keeps serving the
 -- published revision until the new one publishes.
 CREATE TABLE public.media_file_trickplay (
-    media_file_id integer PRIMARY KEY REFERENCES public.media_files(id) ON DELETE CASCADE,
+    media_file_id bigint PRIMARY KEY REFERENCES public.media_files(id) ON DELETE CASCADE,
     state text NOT NULL DEFAULT 'pending',
     available_at timestamptz NOT NULL DEFAULT now(),
     -- The newest generation algorithm that has touched the row. A server
