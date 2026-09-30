@@ -17,7 +17,7 @@ import { captureProfileRequestContext, isCapturedProfileAuthorityActive } from "
 import { v2, V2ProblemError } from "@/api/v2/request";
 import { useAvailableUserLibraries } from "@/hooks/queries/libraries";
 import { sectionKeys } from "@/hooks/queries/keys";
-import { useEffectiveSettings, useSetSettingValue } from "@/hooks/queries/settingValues";
+import { invalidateSettingValueQueries, useEffectiveSettings } from "@/hooks/queries/settingValues";
 import { useOptionalAuth } from "@/hooks/useAuth";
 import { fetchRecipeCatalog } from "@/lib/recipes";
 import { canAddAdminOnlyRecipes } from "@/lib/sectionTypes";
@@ -152,7 +152,6 @@ interface HomeLayoutImportDialogProps {
 
 function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogProps) {
   const qc = useQueryClient();
-  const saveSetting = useSetSettingValue();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState("");
   const [applying, setApplying] = useState(false);
@@ -331,12 +330,19 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
     }
     if (plan.hideWatchedItems !== undefined) {
       try {
-        await saveSetting.mutateAsync({
-          key: SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS,
-          value: plan.hideWatchedItems,
-          identity: { scope: "profile" },
+        // A direct request, not a mutation: the captured context holds tokens
+        // that mustn't sit in the mutation cache.
+        await v2("PUT /api/v2/settings/values/{key}", {
+          path: { key: SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS },
+          query: { scope: "profile" },
+          body: { value: plan.hideWatchedItems },
           profileContext,
         });
+        await invalidateSettingValueQueries(
+          qc,
+          { scope: "profile" },
+          SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS,
+        );
       } catch (error) {
         failures.push(`Hide watched items (${problemMessage(error)})`);
       }

@@ -275,7 +275,8 @@ function refreshHomeForSetting(queryClient: ReturnType<typeof useQueryClient>, k
     .then(() => bumpHomeRefreshSignal(queryClient));
 }
 
-function invalidateSettingValueQueries(
+/** Refreshes the reads a setting write changes, as useSetSettingValue does. */
+export function invalidateSettingValueQueries(
   queryClient: ReturnType<typeof useQueryClient>,
   identity: SettingIdentity,
   key: SettingKey,
@@ -302,7 +303,6 @@ export function useSetSettingValue() {
       key,
       value,
       identity,
-      profileContext,
     }: {
       key: SettingKey;
       value: unknown;
@@ -314,14 +314,11 @@ export function useSetSettingValue() {
        * value. Ordinary callers should leave this enabled.
        */
       invalidateOnSettled?: boolean;
-      /** Send the write for this captured profile rather than the active one. */
-      profileContext?: ProfileRequestContextSnapshot;
     }) =>
       v2("PUT /api/v2/settings/values/{key}", {
         path: { key },
         query: identityQuery(identity),
         body: { value },
-        profileContext,
       }),
     onSuccess: (_data, variables) => {
       if (variables.invalidateOnSettled === false) return;
