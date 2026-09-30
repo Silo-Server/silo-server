@@ -276,6 +276,90 @@
       "body_file": null
     },
     {
+      "name": "admin_account_devices",
+      "operation_id": "listAdminUserDevices",
+      "scenario": "An account's devices, most recently seen first; a device known only from saved settings has a null last_seen_at.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/users/7/devices",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/CollectionAdminUserDevice",
+      "body_file": "admin_account_devices.json"
+    },
+    {
+      "name": "admin_account_download_subscriptions",
+      "operation_id": "listAdminUserDownloadSubscriptions",
+      "scenario": "An account's series monitors with on-device, in-progress and removed episode counts.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/users/7/download-subscriptions",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/CollectionAdminUserDownloadSubscription",
+      "body_file": "admin_account_download_subscriptions.json"
+    },
+    {
+      "name": "admin_account_download_summary",
+      "operation_id": "getAdminUserDownloadSummary",
+      "scenario": "Totals of an account's managed device downloads and active series monitors.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/users/7/downloads/summary",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminUserDownloadSummary",
+      "body_file": "admin_account_download_summary.json"
+    },
+    {
+      "name": "admin_account_downloads",
+      "operation_id": "listAdminUserDownloads",
+      "scenario": "An account's managed device downloads, newest first: an episode row with its placement and a scoped cursor.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/users/7/downloads?limit=1",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/CollectionAdminUserDownload",
+      "body_file": "admin_account_downloads.json"
+    },
+    {
       "name": "admin_account_get",
       "operation_id": "getAdminUser",
       "scenario": "Administrator account and group management with synthetic records.",
@@ -463,6 +547,27 @@
       "response_media_type": null,
       "schema": null,
       "body_file": null
+    },
+    {
+      "name": "admin_account_watch_summary",
+      "operation_id": "getAdminUserWatchSummary",
+      "scenario": "Totals of an account's finalized plays over the last 30 days.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/users/7/watch-summary?days=30",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminUserWatchSummary",
+      "body_file": "admin_account_watch_summary.json"
     },
     {
       "name": "admin_android_push_test",
@@ -2759,6 +2864,27 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminRequestSettings",
       "body_file": "admin_request_settings_ok.json"
+    },
+    {
+      "name": "admin_request_user_usage",
+      "operation_id": "getAdminRequestUserUsage",
+      "scenario": "An account's effective request policy and quota use in the current window.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/request-users/7/usage",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminRequestUserUsage",
+      "body_file": "admin_request_user_usage.json"
     },
     {
       "name": "admin_requests_ok",

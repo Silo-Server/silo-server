@@ -1723,7 +1723,8 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, serverIdentityFixtureCases()...)
 	cases = append(cases, themeSongsFixtureCases()...)
 	cases = append(cases, passwordResetFixtureCases()...)
-	return append(cases, libraryMonitoringFixtureCases()...)
+	cases = append(cases, libraryMonitoringFixtureCases()...)
+	return append(cases, adminAccountInsightsFixtureCases()...)
 }
 
 // fixtureMultipartType is the multipart Content-Type of the avatar fixtures,
@@ -1851,6 +1852,7 @@ func fixtureDeps() Dependencies {
 	deps.AdminAccessGroups = fixtureAdminAccessGroups()
 	deps.AdminAccountSettings = &fakeAdminAccountSettings{}
 	deps.AdminAccountActivity = &fakeAdminAccountActivity{}
+	deps = withAdminAccountInsights(deps)
 	deps.HistoryImports = fixtureHistoryImports()
 	deps.WebhookSync = &fakeWebhookManagement{}
 	deps.Markers = &fakeMarkers{}

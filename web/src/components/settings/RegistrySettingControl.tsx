@@ -7,6 +7,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { SettingSlider } from "@/components/settings/SettingSlider";
+import { bitrateSelectChoices } from "@/lib/bitrateOptions";
 import { controlKindFor, optionsFor, type SettingDisplay } from "@/lib/settingsDisplay";
 
 const EMPTY_SELECT_VALUE = "__empty__";
@@ -35,6 +36,19 @@ interface RegistrySettingControlProps {
  * hooks/queries/admin/users.ts), which keeps this component free of the typed
  * JSON round trip.
  */
+/**
+ * A select's entries. A numeric select with no enum members (the bandwidth
+ * cap) offers the shared bitrate ladder plus the stored value, as the profile
+ * and device settings screens do, rather than only an unset entry.
+ */
+function selectOptions(definition: SettingDisplay, value: string) {
+  const options = optionsFor(definition);
+  const numeric = definition.type === "integer" || definition.type === "number";
+  if (!numeric || options.some((option) => option.value !== "")) return options;
+  const unsetLabel = definition.key === "playback.max_bitrate_kbps" ? "No limit" : "Unset";
+  return bitrateSelectChoices(definition, value, unsetLabel);
+}
+
 export function RegistrySettingControl({
   definition,
   value,
@@ -82,7 +96,7 @@ export function RegistrySettingControl({
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        {optionsFor(definition).map((option) => (
+        {selectOptions(definition, value).map((option) => (
           <SelectItem
             key={option.value || EMPTY_SELECT_VALUE}
             value={option.value === "" ? EMPTY_SELECT_VALUE : option.value}

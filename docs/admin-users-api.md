@@ -7,6 +7,9 @@ profile is not a server administrator.
 
 `GET /api/v2/admin/users/capabilities` reports account management, guarded
 configuration, transactional default-profile creation, and access-group support.
+It also reports the account projections below that depend on optional services:
+`account_devices`, `watch_summary`, `account_downloads` (the downloads list, summary
+and series monitors) and `request_usage`. A read whose flag is false answers 503.
 Unsupported services return a capability or dependency Problem Details response.
 The existing paginated account list remains at `GET /api/v2/admin/users`.
 
@@ -176,19 +179,73 @@ response replay; after an uncertain result, reload before starting another inten
 
 | Route below `/api/v2/admin` | Response |
 | --- | --- |
-| `GET /users/{id}/profiles` | Complete profile collection with string IDs and names |
+| `GET /users/{id}/profiles` | Complete profile collection with string IDs, names and `last_seen_at` |
 | `GET /users/{id}/api-keys` | Bounded metadata-only key collection; no stored credential |
-| `GET /users/{id}/ips` | Bounded IP history for one account |
+| `GET /users/{id}/ips` | Bounded IP history for one account, each address with its `location` |
 | `GET /ips?ip=...` | Bounded account history for one valid IP address |
 | `GET /users/{id}/settings/values` | Bounded setting-value collection and contract revision |
 | `PUT /users/{id}/settings/values/{key}` | Validated setting value |
 | `DELETE /users/{id}/settings/values/{key}` | 204 |
+| `GET /users/{id}/devices` | Complete device collection for one account (`listAdminUserDevices`) |
+| `GET /users/{id}/watch-summary` | Finalized play totals over recent days (`getAdminUserWatchSummary`) |
+| `GET /users/{id}/downloads` | Paginated managed device downloads (`listAdminUserDownloads`) |
+| `GET /users/{id}/downloads/summary` | Managed download totals (`getAdminUserDownloadSummary`) |
+| `GET /users/{id}/download-subscriptions` | Paginated series monitors (`listAdminUserDownloadSubscriptions`) |
+| `GET /request-users/{user_id}/usage` | Effective request policy and quota use (`getAdminRequestUserUsage`) |
+
+Every account projection answers 404 for an unknown account and 422 for a malformed
+identifier.
 
 Paginated reads accept `limit` (up to 200) and signed `cursor`; responses expose
 `items` and `page`. Cursors bind the actor/profile, target, filters, and page size.
 IP queries accept `days` from 1 to 365, defaulting to 30. Their cursor preserves a
 fixed observation window and deterministic last-seen ties. Newer events do not
 move earlier groups across that cursor. Addresses are returned without CIDR masks.
+Each address carries `location`, `local` or `remote`, classified from the address
+alone: private, loopback and link-local addresses are local, everything else is
+remote. Request logs do not record the network-access route, so a request that
+reached the server through a network-access provider from a private address reads
+as `local` here even though playback treats that path as remote.
+
+A profile's `last_seen_at` is the latest time any device registration reported the
+profile, and null when none has. The device collection lists every device the
+account's apps registered and every device that holds saved per-device settings,
+most recently seen first; `last_seen_at` is the latest registration (null for a
+device known only from saved settings), `last_updated` the latest of registration
+and saved-setting writes, and `override_count` the saved per-device settings across
+profiles. Each device lists its profiles with the same fields; `profile_name` is
+empty when the profile no longer exists.
+
+The watch summary accepts `days` from 1 to 365 (default 30) and an optional
+`profile_id`. It totals the finalized attempts that ended at or after `since` (now
+minus `days`): `plays`, `completed_plays`, `watched_seconds` and `last_played_at`
+(null when none). Those are the attempts `listAdminPlaybackHistory` lists with the
+same `user_id`, `profile_id` and `ended_after` set to `since`.
+
+The request usage read reports the account's effective request policy as the
+request service resolves it: `requests_enabled` (the server switch), `allowed`
+(false when the account's switch, group or approval mode blocks it), `unlimited`,
+`used`, `max_requests`, `window_days`, `window_start`, `remaining` and
+`auto_approve`. An unlimited account is not counted, so `used` is 0.
+
+### Account downloads
+
+The downloads list and summary cover managed device rows only; ephemeral web
+downloads have no device and are excluded. The list returns every status, newest
+first, filtered by `profile_id` and `device_id` when given. Each row names the
+catalog title and type of its `content_id` (the movie, or the series of an episode)
+and carries `episode` with season, number and title when `episode_id` resolves to a
+catalog episode, otherwise null. The summary counts non-revoked rows in `total`,
+`completed`, `in_progress` (preparing, ready or downloading), `failed`, and `devices`,
+sums their `file_size` in `total_bytes`, counts `revoked` rows separately, and counts
+active series monitors. The monitor list reports each monitor's options with
+`on_device` and `in_progress` counts for its own device and profile and
+`removed_episodes`, the episodes the user deleted from the monitored series.
+
+The server only records what the apps report. An app that never reports a status
+leaves its rows at `ready`, and fetching a file does not change that status. Rows
+for a device that was wiped or lost the app stay until the device is removed. These
+reads never change a download or monitor; there is no administrator mutation.
 
 Administrator settings use explicit target identity query parameters: `scope`,
 `profile_id`, `client_family`, `device_id`, `library_id`, and `series_id` as required

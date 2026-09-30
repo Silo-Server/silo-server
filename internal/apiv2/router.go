@@ -299,6 +299,16 @@ type Dependencies struct {
 	AdminAccessGroups    AdminAccessGroupService
 	// AdminPlaybackHistory pages the finalized playback log for administrators (*handlers.AdminHandler).
 	AdminPlaybackHistory AdminPlaybackHistoryService
+	// AdminAccountDevices lists one account's devices (*handlers.AdminHandler).
+	AdminAccountDevices AdminAccountDeviceService
+	// AdminWatchSummary totals one account's finalized plays (*handlers.AdminHandler).
+	AdminWatchSummary AdminWatchSummaryService
+	// AdminAccountDownloads reads one account's managed downloads and series
+	// monitors (*downloads.Service).
+	AdminAccountDownloads AdminAccountDownloadService
+	// AdminRequestUsage reports one account's request quota use
+	// (*requests.Service).
+	AdminRequestUsage AdminRequestUsageService
 	// SettingsContract answers the settings capability document
 	// (*handlers.SettingValuesHandler).
 	SettingsContract SettingsContractService

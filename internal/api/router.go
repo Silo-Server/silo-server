@@ -95,6 +95,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/webhooksync"
 )
 
+// The media request service answers the administrator request-usage read.
+var _ apiv2.AdminRequestUsageService = (*mediarequests.Service)(nil)
+
 // Dependencies holds all shared dependencies that handlers need.
 // ArtworkDelivery describes how clients read artwork. External is true only
 // when reads go through a separately configured public or token endpoint that
@@ -2219,6 +2222,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.DownloadSubscriptionMutations = downloadSvc
 		v2deps.DownloadSubscriptionSync = downloadSvc
 		v2deps.DownloadCreation = downloadSvc
+		v2deps.AdminAccountDownloads = downloadSvc
 	}
 	if ebookReaderHandler != nil {
 		v2deps.EbookProgress = ebookReaderHandler
@@ -2365,6 +2369,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminPlaybackHistory = adminHandler
 		v2deps.AdminAccounts = adminHandler
 		v2deps.AdminDevices = adminHandler
+		if adminHandler.AdminDevicesAvailable() {
+			v2deps.AdminAccountDevices = adminHandler
+		}
+		if deps.DB != nil {
+			v2deps.AdminWatchSummary = adminHandler
+		}
 		v2deps.AdminPlaybackSessions = adminHandler
 		if adminPlaybackControlHandler != nil {
 			v2deps.AdminPlaybackCommands = adminPlaybackControlHandler
@@ -2697,6 +2707,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.Requests = requestHandler.Service()
 		v2deps.RequestLifecycle = requestHandler.Service()
 		v2deps.AdminRequests = requestHandler.Service()
+		// *requests.Service implements the usage read (pinned below), so the
+		// assertion only fails for a test double.
+		if usage, ok := requestHandler.Service().(apiv2.AdminRequestUsageService); ok {
+			v2deps.AdminRequestUsage = usage
+		}
 	}
 	if collectionHandler != nil {
 		v2deps.PersonalCollections = collectionHandler
