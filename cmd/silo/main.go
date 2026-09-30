@@ -3491,6 +3491,9 @@ func main() {
 			if blobs := blobstore.NewByteStore(deps.Blobs.Assets); blobs != nil {
 				compatDeps.SubtitleBlobs = blobs
 			}
+			if deps.TrickplayReader != nil {
+				compatDeps.Trickplay = deps.TrickplayReader
+			}
 			compatDeps.PosterPresigner = jellycompat.NewResolverPosterPresigner(deps.ArtworkResolver)
 
 			if deps.FileRepo != nil {
