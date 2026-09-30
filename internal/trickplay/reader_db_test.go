@@ -110,4 +110,7 @@ func TestReaderStopsServingOptedOutRunningFileDB(t *testing.T) {
 	if _, ok, err := reader.SignedManifest(t.Context(), fileID); err != nil || ok {
 		t.Fatalf("opted-out manifest: %v %v", ok, err)
 	}
+	if _, _, ok, err := reader.OpenSheet(t.Context(), fileID, 300, 0); err != nil || ok {
+		t.Fatalf("opted-out sheet: %v %v", ok, err)
+	}
 }

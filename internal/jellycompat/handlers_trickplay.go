@@ -184,7 +184,7 @@ func (h *PlaybackHandler) playingFile(ctx context.Context, session *Session, con
 	lister, ok := h.playbackStore.(interface {
 		ListActiveForToken(context.Context, string) ([]PlaybackSession, error)
 	})
-	if !ok || h.sessionMgr == nil {
+	if !ok {
 		return 0
 	}
 	plays, err := lister.ListActiveForToken(ctx, session.Token)
@@ -197,11 +197,18 @@ func (h *PlaybackHandler) playingFile(ctx context.Context, session *Session, con
 		if play.ItemID != contentID || play.UpstreamSessionID == "" || (fileID != 0 && !play.UpdatedAt.After(latest.UpdatedAt)) {
 			continue
 		}
-		native, err := h.sessionMgr.GetSession(play.UpstreamSessionID)
-		if err != nil || native == nil || native.UserID != session.StreamAppUserID || native.ProfileID != session.ProfileID || native.MediaFileID == 0 {
-			continue
+		selected := play.UpstreamMediaFileID
+		// Existing negotiations written before this field was introduced can
+		// still resolve on their owning process.
+		if selected == 0 && h.sessionMgr != nil {
+			native, err := h.sessionMgr.GetSession(play.UpstreamSessionID)
+			if err == nil && native != nil && native.UserID == session.StreamAppUserID && native.ProfileID == session.ProfileID {
+				selected = native.MediaFileID
+			}
 		}
-		fileID, latest = native.MediaFileID, play
+		if selected != 0 {
+			fileID, latest = selected, play
+		}
 	}
 	return fileID
 }
