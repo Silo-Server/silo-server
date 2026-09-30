@@ -73,7 +73,9 @@ describe("rating source setting", () => {
 
     expect(save).toHaveBeenCalledOnce();
     expect(scheduled).toEqual([RATING_POLICY_SETTLE_MS]);
-    expect(invalidate).toHaveBeenCalledTimes(2);
+    // Rating surfaces and the admin source list, now and after the settle delay.
+    expect(invalidate).toHaveBeenCalledTimes(4);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["admin", "ratingSources"] });
   });
 
   it("leaves cached surfaces alone when the rating choice did not change", async () => {

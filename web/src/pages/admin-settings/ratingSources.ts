@@ -1,6 +1,11 @@
 import type { QueryClient } from "@tanstack/react-query";
 
-import { invalidateAllRatingSurfaceQueries } from "@/hooks/queries/ratingsSurfaceRefresh";
+import {
+  RATING_POLICY_SETTLE_MS,
+  refreshRatingChoice,
+} from "@/hooks/queries/ratingsSurfaceRefresh";
+
+export { RATING_POLICY_SETTLE_MS };
 
 export const EXTRA_RATING_SOURCES_KEY = "catalog.extra_rating_sources";
 
@@ -60,12 +65,6 @@ export function undeclaredRatingSources(
 }
 
 /**
- * How long after a save the rating surfaces refresh a second time: each API
- * node keeps its copy of the rating choice for up to 10 seconds.
- */
-export const RATING_POLICY_SETTLE_MS = 11_000;
-
-/**
  * Saves the settings form and, when the rating choice was among the changes,
  * refreshes every cached rating surface (title pages, cards, the ratings
  * capability) now and again once the server's cached copy has expired.
@@ -73,11 +72,9 @@ export const RATING_POLICY_SETTLE_MS = 11_000;
 export async function saveAndRefreshRatings(
   form: { isDirty: (key: string) => boolean; save: () => Promise<void> },
   queryClient: QueryClient,
-  schedule: (run: () => void, ms: number) => unknown = (run, ms) => window.setTimeout(run, ms),
+  schedule?: (run: () => void, ms: number) => unknown,
 ): Promise<void> {
   const ratingsChanged = form.isDirty(EXTRA_RATING_SOURCES_KEY);
   await form.save();
-  if (!ratingsChanged) return;
-  void invalidateAllRatingSurfaceQueries(queryClient);
-  schedule(() => void invalidateAllRatingSurfaceQueries(queryClient), RATING_POLICY_SETTLE_MS);
+  if (ratingsChanged) refreshRatingChoice(queryClient, schedule);
 }
