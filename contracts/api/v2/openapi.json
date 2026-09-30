@@ -198410,6 +198410,10 @@
           "sheet_frames": {
             "$ref": "#/x-silo-worker-protocols/schemas/mediasample_SheetFrames"
           },
+          "sheet_tile_height": {
+            "format": "int64",
+            "type": "integer"
+          },
           "sheets": {
             "items": {
               "$ref": "#/x-silo-worker-protocols/schemas/mediasample_Sheet"
@@ -198513,6 +198517,9 @@
           },
           "tone_map": {
             "$ref": "#/x-silo-worker-protocols/schemas/mediasample_ToneMap"
+          },
+          "use_input_aspect": {
+            "type": "boolean"
           }
         },
         "required": [
