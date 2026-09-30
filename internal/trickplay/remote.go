@@ -85,8 +85,8 @@ func (e *NodeExtractor) Extract(ctx context.Context, job *Job, req mediasample.R
 			return result, nil
 		}
 		failure, fromNode := errors.AsType[*ExtractError](err)
-		if fromNode && failure.Reason != NodeBusyReason && failure.Reason != NodeUnavailableReason {
-			// The node ran the request and it failed: another node would too.
+		if fromNode && failure.Permanent {
+			// Only an input-specific cause is shared by every node.
 			return mediasample.Result{}, err
 		}
 		if ctx.Err() != nil {
@@ -169,6 +169,11 @@ func (e *NodeExtractor) remote(ctx context.Context, node *nodepool.Node, secret 
 	var result mediasample.Result
 	if err := json.NewDecoder(limited).Decode(&result); err != nil {
 		return mediasample.Result{}, &ExtractError{Reason: NodeUnavailableReason, Message: "read the node's sheets: " + err.Error()}
+	}
+	if req.Sheets.UseInputAspect && result.SheetTileHeight <= 0 {
+		// An earlier worker can advertise the endpoint while ignoring the
+		// geometry option. Its answer cannot describe a reliable manifest.
+		return mediasample.Result{}, &ExtractError{Reason: NodeUnavailableReason, Message: "node did not report the decoded tile height"}
 	}
 	return result, nil
 }

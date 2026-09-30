@@ -55,7 +55,7 @@ func nodeRequest() mediasample.Request {
 }
 
 func TestNodeExtractorModes(t *testing.T) {
-	ok := mediasample.Result{Decoder: "hardware:vaapi", Sheets: []mediasample.Sheet{{Index: 0, Thumbnails: 1, JPEG: []byte("jpeg")}}}
+	ok := mediasample.Result{Decoder: "hardware:vaapi", SheetTileHeight: 284, Sheets: []mediasample.Sheet{{Index: 0, Thumbnails: 1, JPEG: []byte("jpeg")}}}
 	settings := func(mode string) fakeSettings {
 		return fakeSettings{ExecutionSetting: mode, jwtSecretSetting: "secret"}
 	}
@@ -74,7 +74,7 @@ func TestNodeExtractorModes(t *testing.T) {
 		free, freeCalls := fakeNode(t, http.StatusOK, ok)
 		local := &countingExtractor{}
 		result, err := NewNodeExtractor(local, fixedNodes{busy, free}, settings(ExecutionTranscodeNodesOnly)).Extract(t.Context(), nil, nodeRequest())
-		if err != nil || result.Decoder != "hardware:vaapi" || string(result.Sheets[0].JPEG) != "jpeg" || freeCalls.Load() != 1 || busyCalls.Load() > 1 || local.calls != 0 {
+		if err != nil || result.Decoder != "hardware:vaapi" || result.SheetTileHeight != 284 || string(result.Sheets[0].JPEG) != "jpeg" || freeCalls.Load() != 1 || busyCalls.Load() > 1 || local.calls != 0 {
 			t.Fatalf("%+v %v", result, err)
 		}
 	})
@@ -126,5 +126,30 @@ func TestMakesTrickplay(t *testing.T) {
 		if got := makesTrickplay([]byte(report)); got != want {
 			t.Errorf("%q: %t", report, got)
 		}
+	}
+}
+
+func TestNodeExtractorRetriesWorkersWithoutDisplayGeometry(t *testing.T) {
+	for _, mode := range []string{ExecutionPreferTranscodeNodes, ExecutionTranscodeNodesOnly} {
+		t.Run(mode, func(t *testing.T) {
+			node, calls := fakeNode(t, http.StatusOK, mediasample.Result{
+				Decoder: "software", Sheets: []mediasample.Sheet{{Index: 0, Thumbnails: 1, JPEG: []byte("old geometry")}},
+			})
+			local := &countingExtractor{}
+			req := nodeRequest()
+			req.Sheets.UseInputAspect = true
+			settings := fakeSettings{ExecutionSetting: mode, jwtSecretSetting: "secret"}
+			result, err := NewNodeExtractor(local, fixedNodes{node}, settings).Extract(t.Context(), nil, req)
+			if calls.Load() != 1 {
+				t.Fatalf("node calls %d", calls.Load())
+			}
+			if mode == ExecutionPreferTranscodeNodes {
+				if err != nil || result.Decoder != "local" || local.calls != 1 {
+					t.Fatalf("fallback = %+v, %v; local calls %d", result, err, local.calls)
+				}
+			} else if !errors.Is(err, errNoNode) || local.calls != 0 {
+				t.Fatalf("nodes only = %v; local calls %d", err, local.calls)
+			}
+		})
 	}
 }

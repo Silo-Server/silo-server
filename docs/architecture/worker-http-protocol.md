@@ -68,7 +68,9 @@ extraction can acquire the GPU admission gate. There is no native API alias.
 
 `POST /trickplay/extract` on the transcode listener takes a
 `mediasample.Request` whose only output is `Sheets` of `Samples`, and answers
-the run's `mediasample.Result` as JSON, sheets base64-encoded. It passes node
+the run's `mediasample.Result` as JSON, sheets base64-encoded. A request with
+`sheets.use_input_aspect` uses the execution probe's display geometry and
+returns its actual cell height as `sheet_tile_height`. It passes node
 bearer authentication and approved-input-path authority first, runs one
 request at a time (a second answers `503` with reason `node_busy`), runs at
 idle priority, and decodes on the node's own hardware: it drops hardware
@@ -79,6 +81,10 @@ the file itself). Nodes advertise the endpoint as the
 `trickplay_extract_v1` transport feature. It has no replay receipt and is
 classified `non_retryable`; the API server keeps the work's lease and moves
 it to another node or back to the queue.
+
+When display geometry is requested, a response without `sheet_tile_height`
+is treated as an unavailable worker. This lets an API server try another
+node or its configured local fallback while an earlier worker is updated.
 
 The extractor's 400, 422 and 503 failures use `RemoteExtractErrorResponse` JSON.
 Bearer refusal uses plain-text 401; input-path refusal can instead use plain-text

@@ -142,8 +142,11 @@ the lease, and the uploads; a node only decodes and tiles
   not all converge on one node.
 - A node takes one run at a time. `node_busy`, `node_unavailable`, a
   refused request, or a connection that drops moves the run to the next
-  node; a sampling failure on a node is final for the attempt, and a
-  `permanent` one marks the file unusable, as it would locally.
+  node. A transient sampling failure also tries another node, followed by
+  local extraction in `prefer_transcode_nodes` mode. Only a `permanent`
+  sampling failure marks the file unusable, as it would locally.
+- Remote extraction checks the media path on the node. It does not require
+  the API server's media mount to be readable.
 - The request carries a hardware attempt and a software attempt; a node
   whose accelerator cannot decode drops the hardware attempt.
 
