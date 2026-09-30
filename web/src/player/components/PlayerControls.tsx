@@ -32,6 +32,7 @@ import type {
   QualityOption,
   VideoFitMode,
 } from "../types";
+import type { PlayerTrickplay } from "../trickplay";
 import type { VersionInfo } from "./QualityMenu";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 import { useCoarsePointer } from "../hooks/useCoarsePointer";
@@ -52,6 +53,9 @@ interface PlayerControlsProps {
   // Seek bar markers
   chapters?: PlayerChapter[];
   regions?: MarkerRegionView[];
+  // Seek bar previews
+  trickplay?: PlayerTrickplay | null;
+  onTrickplayError?: () => void;
   // Marker editing
   editing?: boolean;
   activeEditKind?: MarkerKind | null;
@@ -124,6 +128,8 @@ export function PlayerControls({
   buffered,
   chapters,
   regions,
+  trickplay,
+  onTrickplayError,
   editing,
   activeEditKind,
   onRegionEdgeChange,
@@ -299,6 +305,8 @@ export function PlayerControls({
           buffered={buffered}
           chapters={chapters}
           regions={regions}
+          trickplay={trickplay}
+          onTrickplayError={onTrickplayError}
           editing={editing}
           activeEditKind={activeEditKind}
           onRegionEdgeChange={onRegionEdgeChange}

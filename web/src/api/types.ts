@@ -917,6 +917,8 @@ export interface FileVersion {
   recap?: TimeRange | null;
   preview?: TimeRange | null;
   marker_segments?: MarkerOccurrence[];
+  /** Seek-bar previews are published for this file (read them with getWatchTrickplay). */
+  trickplay_available?: boolean;
 }
 
 export interface PlaybackVariantPart {

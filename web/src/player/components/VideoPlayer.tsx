@@ -71,6 +71,7 @@ import type {
   SubtitleMode,
   VideoFitMode,
 } from "../types";
+import type { PlayerTrickplay } from "../trickplay";
 import type { FailureV3, PlanV3, SubtitleInventoryItemV3 } from "../protocol-v3";
 import {
   mediaDurationSeconds,
@@ -160,6 +161,10 @@ interface VideoPlayerProps {
   versions?: PlayerFileVersion[];
   activeFileId?: number | null;
   chapters?: PlayerChapter[];
+  /** Seek-bar previews of the file being played. */
+  trickplay?: PlayerTrickplay | null;
+  /** A preview sheet failed to load; read the previews again. */
+  onTrickplayError?: () => void;
   onSwitchVersion?: (fileId: number, currentPosition: number) => void;
   subtitleUrls: PlayerSubtitleInfo[];
   initialPosition: number;
@@ -335,6 +340,8 @@ export function VideoPlayer({
   versions = [],
   activeFileId,
   chapters = [],
+  trickplay = null,
+  onTrickplayError,
   onSwitchVersion,
   subtitleUrls,
   initialPosition,
@@ -3859,6 +3866,8 @@ export function VideoPlayer({
           duration={duration}
           buffered={buffered}
           chapters={chapters}
+          trickplay={trickplay}
+          onTrickplayError={onTrickplayError}
           regions={markerRegions}
           editing={markerEditor.editing}
           activeEditKind={markerEditor.activeKind}

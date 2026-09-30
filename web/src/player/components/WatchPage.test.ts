@@ -36,6 +36,7 @@ vi.mock("../context/PlayerConfigContext", () => ({
 }));
 vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ fetchQuery: vi.fn() }),
+  useQuery: () => ({ data: undefined, refetch: vi.fn() }),
 }));
 vi.mock("@/playback/watchPlaybackContext", () => ({
   useWatchPlaybackController: () => ({ startPlayback: startPlaybackMock }),
