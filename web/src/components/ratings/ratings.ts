@@ -13,12 +13,27 @@ function scoreOutOfTen(value: number | null | undefined): value is number {
   return value != null && Number.isFinite(value) && value > 0 && value <= 10;
 }
 
+/**
+ * A score out of 10, such as a card's `rating_imdb`, with one decimal place.
+ * Halves round away from zero (7.35 reads "7.4"), as the server's `display`
+ * does, so a card never reads differently from its title page. `toFixed`
+ * alone would round 7.35 down: its binary value is just under 7.35.
+ */
+export function formatOutOfTen(value: number): string {
+  return (Math.round(value * 10) / 10).toFixed(1);
+}
+
+/** A score out of 100, such as a card's `rating_rt_critic`, as a percentage. */
+export function formatPercent(value: number): string {
+  return `${Math.round(value)}%`;
+}
+
 function outOfTen(source: "imdb" | "tmdb", value: number): DisplayRating {
   return {
     source,
     name: source === "imdb" ? "IMDb" : "TMDB",
     score: value * 10,
-    display: (Math.round(value * 10) / 10).toFixed(1),
+    display: formatOutOfTen(value),
   };
 }
 

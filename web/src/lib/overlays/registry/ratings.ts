@@ -1,3 +1,5 @@
+import { formatOutOfTen, formatPercent } from "@/components/ratings/ratings";
+
 import type { OverlayDef } from "../types";
 
 // A rating badge carries its source's mark in the label ("IMDb 8.5", "RT
@@ -6,7 +8,7 @@ import type { OverlayDef } from "../types";
 // scores restrict their logos.
 function ratingLabel(mark: string, value: number | null | undefined, max: 10 | 100): string | null {
   if (value == null) return null;
-  return max === 100 ? `${mark} ${value}%` : `${mark} ${value.toFixed(1)}`;
+  return `${mark} ${max === 100 ? formatPercent(value) : formatOutOfTen(value)}`;
 }
 
 export const RATINGS_OVERLAYS: readonly OverlayDef[] = [

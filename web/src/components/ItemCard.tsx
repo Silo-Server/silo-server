@@ -14,6 +14,7 @@ import { overlayDataFromBrowseItem, type CardOverlayPrefs } from "@/lib/overlays
 import { buildEpisodeCardLabels } from "@/lib/episodeCardLabels";
 import { formatDate as formatPreferredDate } from "@/lib/datetime";
 import { formatBitrate } from "@/lib/mediaFormat";
+import { formatOutOfTen, formatPercent } from "@/components/ratings/ratings";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { buildItemHref } from "@/lib/mediaNavigation";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
@@ -52,11 +53,11 @@ function ratingLabel(mark: string, score: string | null) {
 }
 
 function outOfTen(value?: number | null) {
-  return value != null ? value.toFixed(1) : null;
+  return value != null ? formatOutOfTen(value) : null;
 }
 
 function percent(value?: number | null) {
-  return value != null ? `${value}%` : null;
+  return value != null ? formatPercent(value) : null;
 }
 
 function formatProgress(ratio?: number | null) {
