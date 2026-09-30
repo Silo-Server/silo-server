@@ -797,11 +797,22 @@ func safeErrorCode(code string) string {
 		return unrecognizedErrorCode
 	}
 	for _, r := range code {
-		if !(r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-') {
+		if !isErrorCodeRune(r) {
 			return unrecognizedErrorCode
 		}
 	}
 	return code
+}
+
+// isErrorCodeRune reports whether r may appear in an S3 error code.
+func isErrorCodeRune(r rune) bool {
+	switch {
+	case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+		return true
+	case r == '.', r == '_', r == '-':
+		return true
+	}
+	return false
 }
 
 // isBatchDeleteUnsupported reports whether a DeleteObjects error means the
