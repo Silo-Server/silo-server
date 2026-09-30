@@ -66,6 +66,20 @@ options keep their zero values and unknown JSON keys are ignored. The request
 must pass node bearer authentication and approved-input-path authority before
 extraction can acquire the GPU admission gate. There is no native API alias.
 
+`POST /trickplay/extract` on the transcode listener takes a
+`mediasample.Request` whose only output is `Sheets` of `Samples`, and answers
+the run's `mediasample.Result` as JSON, sheets base64-encoded. It passes node
+bearer authentication and approved-input-path authority first, runs one
+request at a time (a second answers `503` with reason `node_busy`), runs at
+idle priority, and decodes on the node's own hardware: it drops hardware
+attempts its accelerator cannot run and holds the GPU admission gate only
+when a hardware attempt remains. Failures use `trickplay.ExtractError` JSON;
+a `422` carries the sampling cause and whether it is `permanent` (a cause in
+the file itself). Nodes advertise the endpoint as the
+`trickplay_extract_v1` transport feature. It has no replay receipt and is
+classified `non_retryable`; the API server keeps the work's lease and moves
+it to another node or back to the queue.
+
 The extractor's 400, 422 and 503 failures use `RemoteExtractErrorResponse` JSON.
 Bearer refusal uses plain-text 401; input-path refusal can instead use plain-text
 400, and unavailable worker configuration or input authority uses plain-text 503.
