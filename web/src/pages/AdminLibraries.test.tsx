@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => ({
   useDeleteLibraryRootOverride: vi.fn(),
   useActiveScans: vi.fn(),
   useLibraryRealtimeMonitoring: vi.fn(),
+  useAdminTrickplayLibraries: vi.fn(),
 }));
 
 vi.mock("@/hooks/queries/admin/libraries", () => ({
@@ -82,6 +83,10 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
 
 vi.mock("@/hooks/queries/admin/plugins", () => ({
   useAdminPlugins: (...args: unknown[]) => mocks.useAdminPlugins(...args),
+}));
+
+vi.mock("@/hooks/queries/admin/trickplay", () => ({
+  useAdminTrickplayLibraries: (...args: unknown[]) => mocks.useAdminTrickplayLibraries(...args),
 }));
 
 vi.mock("@/hooks/queries/admin/scans", () => ({
@@ -261,6 +266,7 @@ describe("AdminLibraries", () => {
     mocks.useDeleteLibraryRootOverride.mockReturnValue(queryState);
     mocks.useActiveScans.mockReturnValue({ data: [], isLoading: false });
     mocks.useLibraryRealtimeMonitoring.mockReturnValue({ data: undefined });
+    mocks.useAdminTrickplayLibraries.mockReturnValue({ data: undefined });
   });
 
   it("uses scan language instead of metadata refresh language on the admin libraries page", () => {
@@ -346,6 +352,33 @@ describe("AdminLibraries", () => {
     });
 
     expect(renderPage()).not.toContain("Monitoring:");
+  });
+
+  it.each([
+    [
+      { pending: 12, running: 1, ready: 85, unusable: 2 },
+      "Previews 85%",
+      "85 ready · 12 waiting · 1 in progress · 2 failed · 1.7 GB",
+    ],
+    [{ pending: 0, running: 0, ready: 100, unusable: 0 }, "Previews ready", "100 ready · 1.7 GB"],
+  ])("shows seek-preview progress %#", (counts, label, detail) => {
+    mocks.useAdminTrickplayLibraries.mockReturnValue({
+      data: [{ library_id: "1", name: "Movies", sheet_bytes: 1_800_000_000, ...counts }],
+    });
+
+    const container = document.createElement("div");
+    container.innerHTML = renderPage();
+    const badge = Array.from(container.querySelectorAll('[data-slot="badge"]')).find((el) =>
+      el.textContent?.startsWith("Previews"),
+    );
+
+    expect(badge?.textContent).toContain(label);
+    expect(badge?.getAttribute("title")).toBe(`Seek previews: ${detail}`);
+  });
+
+  it("shows no seek-preview badge for a library that makes none", () => {
+    mocks.useAdminTrickplayLibraries.mockReturnValue({ data: [] });
+    expect(renderPage()).not.toContain("Previews");
   });
 
   it("offers confirmed cleanup for a suspect-empty dead-root warning", () => {

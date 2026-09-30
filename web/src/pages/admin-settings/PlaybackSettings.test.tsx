@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
@@ -22,6 +22,7 @@ if (!window.HTMLElement.prototype.scrollIntoView) {
 const useSettingsFormMock = vi.fn();
 const useHWAccelDetectionMock = vi.fn();
 const useAdminNodesMock = vi.fn();
+const useAdminTrickplayLibrariesMock = vi.fn();
 
 vi.mock("@/hooks/useSettingsForm", () => ({
   useSettingsForm: (...args: unknown[]) => useSettingsFormMock(...args),
@@ -39,16 +40,25 @@ vi.mock("@/hooks/queries/admin/nodes", () => ({
   useAdminNodes: () => useAdminNodesMock(),
 }));
 
+vi.mock("@/hooks/queries/admin/trickplay", () => ({
+  useAdminTrickplayLibraries: () => useAdminTrickplayLibrariesMock(),
+}));
+
 /** A transcode node the chapter-thumbnail extractor could reserve. */
 function transcodeNode(overrides: Record<string, unknown> = {}) {
   return { id: 1, name: "node-1", type: "transcode", enabled: true, healthy: true, ...overrides };
 }
 
-function makeForm(values: Record<string, string>, dirty: string[] = []) {
+function makeForm(
+  values: Record<string, string>,
+  dirty: string[] = [],
+  persisted: Record<string, string> = {},
+) {
   const dirtyKeys = new Set(dirty);
   return {
     isLoading: false,
     getValue: (key: string) => values[key] ?? "",
+    getPersistedValue: (key: string) => persisted[key] ?? values[key] ?? "",
     setValue: vi.fn(),
     isDirty: (key: string) => dirtyKeys.has(key),
     dirtyCount: dirtyKeys.size,
@@ -89,6 +99,8 @@ beforeEach(() => {
   useHWAccelDetectionMock.mockReturnValue({ data: undefined, isLoading: false });
   useAdminNodesMock.mockReset();
   useAdminNodesMock.mockReturnValue({ data: [transcodeNode()], isSuccess: true });
+  useAdminTrickplayLibrariesMock.mockReset();
+  useAdminTrickplayLibrariesMock.mockReturnValue({ data: undefined });
 });
 
 describe("PlaybackSettings layout", () => {
@@ -545,5 +557,100 @@ describe("HEVC encoding policy", () => {
     render(<PlaybackSettings />);
     fireEvent.click(screen.getByRole("switch", { name: "Allow HEVC encoding" }));
     expect(form.setValue).toHaveBeenCalledWith("playback.allow_hevc_encoding", "true");
+  });
+});
+
+describe("seek preview settings", () => {
+  const library = (ready: number, running = 0) => ({
+    library_id: "1",
+    name: "Movies",
+    pending: 0,
+    running,
+    ready,
+    unusable: 0,
+    sheet_bytes: 0,
+  });
+
+  it("manages the four seek preview keys under advanced", () => {
+    expandAdvanced();
+    useSettingsFormMock.mockReturnValue(
+      makeForm({
+        "playback.hw_accel": "none",
+        "playback.preview_image_width": "300",
+        "playback.trickplay_interval_seconds": "10",
+        "playback.trickplay_workers": "2",
+      }),
+    );
+
+    render(<PlaybackSettings />);
+    const keys: string[] = useSettingsFormMock.mock.calls[0]?.[0]?.keys ?? [];
+
+    for (const key of [
+      "playback.preview_image_width",
+      "playback.trickplay_interval_seconds",
+      "playback.trickplay_workers",
+      "playback.trickplay_execution",
+    ]) {
+      expect(keys).toContain(key);
+    }
+    expect(screen.getByLabelText("Seek preview width")).toHaveValue(300);
+    expect(screen.getByLabelText("Seek preview interval")).toHaveValue(10);
+    expect(screen.getByLabelText("Seek preview workers")).toHaveValue(2);
+    expect(screen.getByText("Generate seek previews on")).toBeTruthy();
+  });
+
+  it("asks before a new width remakes published previews", async () => {
+    const form = makeForm(
+      { "playback.hw_accel": "none", "playback.preview_image_width": "320" },
+      ["playback.preview_image_width"],
+      { "playback.preview_image_width": "" },
+    );
+    useSettingsFormMock.mockReturnValue(form);
+    useAdminTrickplayLibrariesMock.mockReturnValue({ data: [library(40, 1), library(2)] });
+
+    render(<PlaybackSettings />);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(form.save).not.toHaveBeenCalled();
+    expect(screen.getByText(/43 files' seek previews are made again/)).toBeTruthy();
+    await userEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Save" }),
+    );
+    expect(form.save).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [
+      "the interval returns to the default",
+      { "playback.trickplay_interval_seconds": "10" },
+      ["playback.trickplay_interval_seconds"],
+      [library(5)],
+    ],
+    [
+      "no previews are published",
+      { "playback.preview_image_width": "320" },
+      ["playback.preview_image_width"],
+      [],
+    ],
+    [
+      "only the worker count changes",
+      { "playback.trickplay_workers": "4" },
+      ["playback.trickplay_workers"],
+      [library(5)],
+    ],
+  ])("saves without asking when %s", async (_, values, dirty, libraries) => {
+    const form = makeForm({ "playback.hw_accel": "none", ...values }, dirty, {
+      "playback.trickplay_interval_seconds": "",
+      "playback.preview_image_width": "300",
+      "playback.trickplay_workers": "1",
+    });
+    useSettingsFormMock.mockReturnValue(form);
+    useAdminTrickplayLibrariesMock.mockReturnValue({ data: libraries });
+
+    render(<PlaybackSettings />);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(form.save).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 });

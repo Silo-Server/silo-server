@@ -52,6 +52,7 @@ const mocks = vi.hoisted(() => {
     useRedetectItemMarkers: vi.fn(),
     useRedetectEpisodeIntro: vi.fn(),
     useAdminMarkerCapabilities: vi.fn(),
+    useLibraryCapabilities: vi.fn(),
     useRefreshItemMetadata: vi.fn(),
     useWatchedStateMutation: vi.fn(),
     useRating: vi.fn(),
@@ -100,6 +101,10 @@ vi.mock("@/playback/watchPlaybackContext", () => ({
 vi.mock("@/hooks/queries/admin/markers", () => ({
   useAdminMarkerCapabilities: mocks.useAdminMarkerCapabilities,
   useMarkerDetectionKinds: () => undefined,
+}));
+
+vi.mock("@/hooks/queries/admin/libraries", () => ({
+  useLibraryCapabilities: mocks.useLibraryCapabilities,
 }));
 
 vi.mock("@/hooks/queries/items", () => ({
@@ -310,6 +315,7 @@ describe("EpisodeContent", () => {
       isPending: false,
     });
     mocks.useAdminMarkerCapabilities.mockReturnValue({ data: undefined });
+    mocks.useLibraryCapabilities.mockReturnValue({ data: undefined });
     mocks.useWatchedStateMutation.mockReturnValue({
       mutate: vi.fn(),
       isPending: false,
