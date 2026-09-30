@@ -39,6 +39,105 @@ func (g *fakeCollageGenerator) sources(key string) []string {
 	return g.composed[key]
 }
 
+func TestCollectionCollageReadsKeepActiveVariantsDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	suffix := time.Now().UnixNano()
+	libraryID := seedCollagePosterLibrary(t, pool, fmt.Sprintf("collage-usage-%d", suffix))
+	repo := NewLibraryCollectionRepository(pool)
+	collection, err := repo.Create(ctx, CreateLibraryCollectionInput{
+		LibraryIDs:     []int{libraryID},
+		Slug:           fmt.Sprintf("collage-usage-%d", suffix),
+		Title:          "Collage usage",
+		CollectionType: "manual",
+	})
+	if err != nil {
+		t.Fatalf("create collection: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Delete(context.Background(), collection.ID) })
+
+	active := CollectionCollage{
+		CollectionCollageRef: CollectionCollageRef{CollectionID: collection.ID, Key: "1111111111111111"},
+		Path:                 fmt.Sprintf("collection-images/%s/collage/original.1111111111111111.webp", collection.ID),
+		Thumbhash:            "active-thumbhash",
+	}
+	unused := CollectionCollage{
+		CollectionCollageRef: CollectionCollageRef{CollectionID: collection.ID, Key: "2222222222222222"},
+		Path:                 fmt.Sprintf("collection-images/%s/collage/original.2222222222222222.webp", collection.ID),
+	}
+	for _, c := range []CollectionCollage{active, unused} {
+		if err := repo.SaveCollectionCollage(ctx, c); err != nil {
+			t.Fatalf("save collage: %v", err)
+		}
+		t.Cleanup(func() {
+			_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path = $1`, c.Path)
+		})
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE library_collection_poster_variants SET last_used_at = NOW() - interval '8 days'
+		WHERE collection_id = $1
+	`, collection.ID); err != nil {
+		t.Fatalf("age collages: %v", err)
+	}
+
+	svc := NewLibraryCollectionService(repo, nil, nil, nil)
+	svc.CollageGen = &fakeCollageGenerator{}
+	// Jellyfin image-tag requests use this lookup without re-listing the collection.
+	readAt := time.Now()
+	poster, found, err := svc.CollectionCollage(ctx, collection.ID, active.Key)
+	if err != nil || !found {
+		t.Fatalf("read active collage: found=%v err=%v", found, err)
+	}
+	if poster.Path != active.Path || poster.Thumbhash != active.Thumbhash || poster.CollageKey != active.Key {
+		t.Fatalf("poster = %+v, want the active collage", poster)
+	}
+	stored, err := repo.GetCollectionCollages(ctx, []CollectionCollageRef{active.CollectionCollageRef})
+	if err != nil {
+		t.Fatalf("load active collage: %v", err)
+	}
+	touchedAt := stored[active.CollectionCollageRef].LastUsedAt
+	if touchedAt.Before(readAt) {
+		t.Fatalf("tagged read left last_used_at at %s, before the read at %s", touchedAt, readAt)
+	}
+
+	if _, found, err := svc.CollectionCollage(ctx, collection.ID, active.Key); err != nil || !found {
+		t.Fatalf("read active collage again: found=%v err=%v", found, err)
+	}
+	stored, err = repo.GetCollectionCollages(ctx, []CollectionCollageRef{active.CollectionCollageRef})
+	if err != nil {
+		t.Fatalf("reload active collage: %v", err)
+	}
+	if got := stored[active.CollectionCollageRef].LastUsedAt; !got.Equal(touchedAt) {
+		t.Fatalf("a second read within the touch interval changed last_used_at from %s to %s", touchedAt, got)
+	}
+
+	sources := []string{"new/poster/original.webp"}
+	newRef := CollectionCollageRef{CollectionID: collection.ID, Key: CollectionCollageKey(sources)}
+	if err := svc.buildCollage(ctx, newRef, sources); err != nil {
+		t.Fatalf("build another collage: %v", err)
+	}
+	stored, err = repo.GetCollectionCollages(ctx, []CollectionCollageRef{active.CollectionCollageRef, unused.CollectionCollageRef})
+	if err != nil {
+		t.Fatalf("load collages after retirement: %v", err)
+	}
+	if _, ok := stored[active.CollectionCollageRef]; !ok {
+		t.Fatal("a collage just served by its image tag was retired")
+	}
+	if _, ok := stored[unused.CollectionCollageRef]; ok {
+		t.Fatal("an unused collage survived retirement")
+	}
+	assertCollageQueuedForCollector(t, pool, unused.Path)
+}
+
 // TestCollectionCollagesFollowTheViewerDB covers #1618 end to end on the
 // database: each viewer's collage is built only from members that viewer can
 // access, the first read builds it in the background, and building one

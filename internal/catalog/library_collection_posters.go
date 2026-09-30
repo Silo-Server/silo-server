@@ -406,6 +406,11 @@ func (s *LibraryCollectionService) CollectionCollage(ctx context.Context, collec
 	if !ok || c.Path == "" {
 		return CollectionPoster{}, false, nil
 	}
+	if time.Since(c.LastUsedAt) > collectionCollageTouchInterval {
+		if err := s.collections.TouchCollectionCollages(ctx, []CollectionCollageRef{ref}); err != nil {
+			slog.DebugContext(ctx, "collage: failed to touch collection collages", "component", "catalog", "error", err)
+		}
+	}
 	return CollectionPoster{Path: c.Path, Thumbhash: c.Thumbhash, CollageKey: key}, true, nil
 }
 

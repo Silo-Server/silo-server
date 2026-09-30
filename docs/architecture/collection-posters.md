@@ -35,8 +35,9 @@ the same posters:
   download fails the build, so a collage is never stored without one of the posters its key names.
 - A sync, template bundle apply, or poster removal builds the unrestricted viewer's collage up
   front, so the common case is ready before anyone asks.
-- Listing a collection touches its collage's `last_used_at` at most daily. Building any collage of a collection
-  retires that collection's collages unused for a week: one transaction deletes their rows and
+- Listing a collection or serving its collage through a Jellyfin image tag touches the
+  collage's `last_used_at` at most daily. Building any collage of a collection retires that
+  collection's collages unused for a week: one transaction deletes their rows and
   queues their objects in `artwork_revision_gc_candidates`. Collages are never deleted from
   storage directly. The collector waits out its grace period and skips a path that a row names
   again, so a collage rebuilt under the same key keeps its objects. Rows go with their
