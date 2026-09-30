@@ -2961,6 +2961,48 @@ describe("VideoPlayer native HLS timeline", () => {
     }
   });
 
+  it("keeps a pause asked for while a stalled native HLS stream reloads", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      const plan = fixturePlanV3({
+        delivery: "server_remux_hls",
+        stream: {
+          url: "/playback/transcode/session-1/master.m3u8",
+          protocol: "hls",
+          headers: {},
+          header_refresh: "none",
+        },
+      });
+      const { container } = renderPlayer({ plan, initialPosition: 0, duration: 1296.9 });
+      const video = container.querySelector("video");
+      if (!video) throw new Error("expected video element");
+      await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+      fireEvent.loadedMetadata(video);
+      const load = vi.mocked(HTMLMediaElement.prototype.load);
+      const play = vi.mocked(HTMLMediaElement.prototype.play);
+      load.mockClear();
+      play.mockClear();
+
+      Object.defineProperty(video, "paused", { configurable: true, get: () => false });
+      Object.defineProperty(video, "readyState", { configurable: true, get: () => 4 });
+      Object.defineProperty(video, "networkState", { configurable: true, get: () => 1 });
+      video.currentTime = 304.14;
+      vi.advanceTimersByTime(10_000);
+      expect(load).toHaveBeenCalledOnce();
+
+      // A room or remote pause arrives while the stream reloads.
+      video.pause();
+      fireEvent.loadedMetadata(video);
+
+      expect(video.currentTime).toBe(304.14);
+      expect(play).not.toHaveBeenCalled();
+      // The element's own pause() is back once the reload settles.
+      expect(Object.prototype.hasOwnProperty.call(video, "pause")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("uses native HLS for Dolby Vision when hls.js is also available", async () => {
     hlsJS.supported = true;
     vi.stubGlobal("navigator", {

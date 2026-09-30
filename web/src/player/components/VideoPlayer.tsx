@@ -433,6 +433,10 @@ export function VideoPlayer({
   // element has not reached yet — including a reanchor still being replanned —
   // is the position playback is heading to, so the next skip starts there.
   const pendingSeekTimeRef = useRef<number | null>(null);
+  // True while a stalled native HLS stream reloads to resume playback. The
+  // reload pauses the element, so `video.paused` doesn't say whether the
+  // viewer is playing then.
+  const stallRecoveryPendingRef = useRef(false);
   useEffect(() => {
     pendingSeekTimeRef.current = pendingSeekTime;
   }, [pendingSeekTime]);
@@ -1899,6 +1903,9 @@ export function VideoPlayer({
       if (!stallRecoveryHandler) return;
       video.removeEventListener("loadedmetadata", stallRecoveryHandler);
       stallRecoveryHandler = null;
+      // Drops the pause() interceptor below, back to the prototype's.
+      delete (video as { pause?: unknown }).pause;
+      stallRecoveryPendingRef.current = false;
     };
 
     // Safari's native HLS can stop fetching segments mid-stream while still
@@ -1910,10 +1917,25 @@ export function VideoPlayer({
       // Hold the seek bar at the frozen position while the reload resets it.
       rememberPendingSeek(toMediaTime(position, timelineOffsetRef.current));
       clearStallRecovery();
+      // A pause asked for during the reload (the controls, a room or remote
+      // command, a subtitle translation) must stick. The reload has already
+      // paused the element, so those pause() calls change nothing and fire no
+      // event; note them here instead of resuming over them.
+      let pauseRequested = false;
+      const pause = HTMLMediaElement.prototype.pause;
+      video.pause = () => {
+        pauseRequested = true;
+        pause.call(video);
+      };
+      stallRecoveryPendingRef.current = true;
       stallRecoveryHandler = () => {
-        stallRecoveryHandler = null;
+        clearStallRecovery();
         if (destroyed) return;
         video.currentTime = position;
+        if (pauseRequested) {
+          setPlaying(false);
+          return;
+        }
         video.play().catch(() => {
           if (!destroyed) setPlaying(false);
         });
@@ -2805,7 +2827,10 @@ export function VideoPlayer({
       if (watchTogether.replacementReason) return;
       const video = videoRef.current;
       if (!video) return;
-      const shouldPlay = action === "toggle" ? video.paused : action === "play";
+      // During a stall reload the element is paused but the viewer is still
+      // playing, so a toggle pauses.
+      const paused = video.paused && !stallRecoveryPendingRef.current;
+      const shouldPlay = action === "toggle" ? paused : action === "play";
       if (
         watchTogetherRoomId &&
         !watchTogether.closedReason &&
