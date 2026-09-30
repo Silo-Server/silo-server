@@ -1923,6 +1923,7 @@ export function VideoPlayer({
     };
 
     const startNativeStallWatchdog = () => {
+      if (stallWatchdogTimer !== null) clearInterval(stallWatchdogTimer);
       const watchdog = new NativeHlsStallWatchdog({
         media: video,
         atEnd: () => {
