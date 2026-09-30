@@ -15,6 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 
 import { roleLabel } from "./access/policySources";
+import { useCardEditing } from "./cardEditing";
 import { formatAccountDate, formatLastSeen } from "./format";
 import { InitialAvatar } from "./ui";
 
@@ -102,6 +103,10 @@ export function UserDetailHeader({
   const canDisable = manageable && user.enabled && !user.is_owner && !ownAccount;
   const canEnable = manageable && !user.enabled;
   const canDelete = manageable && !user.is_owner && !ownAccount;
+  // Deleting navigates away, which the unsaved-changes guard would block with a
+  // prompt to save a draft for an account that no longer exists.
+  const { active: activeEdit } = useCardEditing();
+  const deleteBlocked = activeEdit !== null && activeEdit.changeCount > 0;
   const showReset = user.password_login && manageable;
   const hasMenu = transferable || canDisable || canEnable || canDelete;
   const viewAsReason = available
@@ -253,10 +258,15 @@ export function UserDetailHeader({
                     {transferable || canDisable || canEnable ? <DropdownMenuSeparator /> : null}
                     <DropdownMenuItem
                       variant="destructive"
-                      disabled={!available}
+                      disabled={!available || deleteBlocked}
                       onSelect={onDelete}
                     >
                       Delete account…
+                      {deleteBlocked ? (
+                        <span className="text-muted-foreground ml-auto text-xs">
+                          save or cancel edits first
+                        </span>
+                      ) : null}
                     </DropdownMenuItem>
                   </>
                 ) : null}

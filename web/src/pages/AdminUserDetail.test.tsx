@@ -662,6 +662,17 @@ describe("unsaved changes", () => {
     return playback;
   }
 
+  it("disables Delete until the card's changes are saved or cancelled", async () => {
+    const ui = userEvent.setup();
+    await dirtyPlayback(ui);
+    const menu = await openMenu(ui);
+    expect(within(menu).getByRole("menuitem", { name: /Delete account/ })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    expect(menu).toHaveTextContent("save or cancel edits first");
+  });
+
   it("asks before switching tabs, and Keep editing stays", async () => {
     const ui = userEvent.setup();
     const playback = await dirtyPlayback(ui);
