@@ -53,24 +53,4 @@ describe("ScoreRow", () => {
 
     expect(screen.queryByText(/votes/)).not.toBeInTheDocument();
   });
-
-  it("hides every rating after the third on phone widths", () => {
-    render(
-      <ScoreRow
-        ratings={[
-          { source: "imdb", name: "IMDb", score: 85, display: "8.5" },
-          { source: "tmdb", name: "TMDB", score: 83, display: "8.3" },
-          { source: "rt_critic", name: "RT", score: 93, display: "93%" },
-          { source: "rt_audience", name: "RT Audience", score: 95, display: "95%" },
-          { source: "metacritic", name: "Metacritic", score: 87, display: "87" },
-        ]}
-      />,
-    );
-
-    const entry = (text: string) =>
-      screen.getByText(text).closest("span.inline-flex")?.parentElement;
-    expect(entry("RT")).not.toHaveClass("max-sm:hidden");
-    expect(entry("RT Audience")).toHaveClass("max-sm:hidden");
-    expect(entry("Metacritic")).toHaveClass("max-sm:hidden");
-  });
 });

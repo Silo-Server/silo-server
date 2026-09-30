@@ -41,11 +41,23 @@ func TestBuildAddsSourcesAnAdministratorTurnedOn(t *testing.T) {
 		{Source: "imdb", Name: "IMDb", Score: 85, Display: "8.5"},
 		{Source: "rt_critic", Name: "RT", Score: 93, Display: "93%"},
 		{Source: "rt_audience", Name: "RT Audience", Score: 95, Display: "95%"},
-		{Source: "metacritic", Name: "Metacritic", Score: 87, Display: "87"},
-		{Source: "letterboxd", Name: "Letterboxd", Score: 84, Display: "4.2"},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Build = %+v\nwant %+v", got, want)
+		t.Fatalf("Build = %+v\nwant %+v (every client shows at most three)", got, want)
+	}
+}
+
+// A title page shows at most MaxTitleRatings ratings, the first ones in
+// display order, whatever the administrator turned on.
+func TestBuildShowsAtMostThree(t *testing.T) {
+	item := Item{IMDB: ptr(8.5), TMDB: ptr(8.25), RTCritic: ptr(93), RTAudience: ptr(95)}
+	got := Build(item, NewSelection("rt_critic", "rt_audience"))
+	var sources []string
+	for _, r := range got {
+		sources = append(sources, r.Source)
+	}
+	if want := []string{"imdb", "tmdb", "rt_critic"}; !reflect.DeepEqual(sources, want) {
+		t.Fatalf("sources = %q, want %q", sources, want)
 	}
 }
 
