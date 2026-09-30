@@ -8,6 +8,8 @@ import (
 	"math"
 	"strconv"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/config"
 )
 
 // AlgorithmVersion names how sheets are made. Bump it when a change must
@@ -17,9 +19,9 @@ const AlgorithmVersion = 1
 
 // Settings bounds and defaults. Width is shared with chapter thumbnails.
 const (
-	DefaultWidth           = 300
-	MinWidth               = 160
-	MaxWidth               = 640
+	DefaultWidth           = config.DefaultPreviewImageWidth
+	MinWidth               = config.MinPreviewImageWidth
+	MaxWidth               = config.MaxPreviewImageWidth
 	DefaultIntervalSeconds = 10
 	MinIntervalSeconds     = 5
 	MaxIntervalSeconds     = 60

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/database/pglock"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -23,7 +24,7 @@ import (
 const (
 	// WidthSetting is shared with chapter thumbnails: one preview image
 	// width for both.
-	WidthSetting     = "playback.preview_image_width"
+	WidthSetting     = config.PreviewImageWidthSettingKey
 	IntervalSetting  = "playback.trickplay_interval_seconds"
 	WorkersSetting   = "playback.trickplay_workers"
 	ExecutionSetting = "playback.trickplay_execution"

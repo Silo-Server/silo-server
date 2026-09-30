@@ -145,6 +145,7 @@ func TestQueuePriorityPromotesExistingFile(t *testing.T) {
 type testFileRepo struct {
 	file           *models.MediaFile
 	updateCalls    int
+	missingSuffix  string
 	failureUpdates []struct {
 		retryAfter   time.Time
 		failureCount int
@@ -168,7 +169,8 @@ func (r *testFileRepo) GetByID(_ context.Context, id int) (*models.MediaFile, er
 	return r.cloneFile(), nil
 }
 
-func (r *testFileRepo) ListMissingChapterThumbnails(context.Context, int) ([]*models.MediaFile, error) {
+func (r *testFileRepo) ListMissingChapterThumbnails(_ context.Context, _ int, currentSuffix string) ([]*models.MediaFile, error) {
+	r.missingSuffix = currentSuffix
 	return nil, nil
 }
 

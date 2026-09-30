@@ -4032,8 +4032,9 @@ func (r *FileRepository) FirstDurationsByEpisodeIDs(ctx context.Context, episode
 
 // ListMissingChapterThumbnails returns present media files in enabled,
 // opted-in libraries that either have no chapter probe data yet or still have
-// chapters missing thumbnail assets.
-func (r *FileRepository) ListMissingChapterThumbnails(ctx context.Context, limit int) ([]*models.MediaFile, error) {
+// chapters missing thumbnail assets. A thumbnail whose path does not end in
+// currentSuffix was made at another width and counts as missing.
+func (r *FileRepository) ListMissingChapterThumbnails(ctx context.Context, limit int, currentSuffix string) ([]*models.MediaFile, error) {
 	query := `SELECT ` + mfFileColumns + ` FROM media_files mf
 		JOIN media_folders folders ON folders.id = mf.media_folder_id
 		WHERE mf.missing_since IS NULL
@@ -4051,7 +4052,10 @@ func (r *FileRepository) ListMissingChapterThumbnails(ctx context.Context, limit
 				AND EXISTS (
 					SELECT 1
 					FROM jsonb_array_elements(mf.chapters) AS chapter
-					WHERE COALESCE(chapter->>'thumbnail_path', '') = ''
+					WHERE (
+						COALESCE(chapter->>'thumbnail_path', '') = ''
+						OR right(chapter->>'thumbnail_path', length($2)) <> $2
+					  )
 					  AND (
 						COALESCE(chapter->>'thumbnail_retry_after', '') = ''
 						OR (chapter->>'thumbnail_retry_after')::timestamptz <= NOW()
@@ -4061,7 +4065,7 @@ func (r *FileRepository) ListMissingChapterThumbnails(ctx context.Context, limit
 		  )
 		ORDER BY mf.probe_updated_at ASC NULLS FIRST, mf.id ASC
 		LIMIT $1`
-	rows, err := r.pool.Query(ctx, query, limit)
+	rows, err := r.pool.Query(ctx, query, limit, currentSuffix)
 	if err != nil {
 		return nil, fmt.Errorf("querying files missing chapter thumbnails: %w", err)
 	}
