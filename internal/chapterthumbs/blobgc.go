@@ -51,24 +51,24 @@ func imagesFileID(key string) (int, bool) {
 }
 
 func liveImagePrefixes(ctx context.Context, pool *pgxpool.Pool, prefixes []string) (map[string]bool, error) {
-	ids := make([]int, 0, len(prefixes))
+	ids := make([]int64, 0, len(prefixes))
 	for _, prefix := range prefixes {
 		if id, ok := imagesFileID(prefix); ok {
-			ids = append(ids, id)
+			ids = append(ids, int64(id))
 		}
 	}
-	rows, err := pool.Query(ctx, `SELECT id FROM public.media_files WHERE id = ANY($1::int[])`, ids)
+	rows, err := pool.Query(ctx, `SELECT id FROM public.media_files WHERE id = ANY($1::bigint[])`, ids)
 	if err != nil {
 		return nil, fmt.Errorf("look up media files: %w", err)
 	}
 	defer rows.Close()
 	live := map[string]bool{}
 	for rows.Next() {
-		var id int
+		var id int64
 		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		live[chapterImagesPrefix+strconv.Itoa(id)+"/"] = true
+		live[chapterImagesPrefix+strconv.FormatInt(id, 10)+"/"] = true
 	}
 	return live, rows.Err()
 }

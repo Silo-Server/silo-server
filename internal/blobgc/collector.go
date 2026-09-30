@@ -153,7 +153,7 @@ func (c *Collector) retry(ctx context.Context, tx pgx.Tx, prefix string, attempt
 	stats.Retried++
 	message := strings.ToValidUTF8(strings.ReplaceAll(cause.Error(), "\x00", ""), "")
 	if len(message) > 500 {
-		message = message[:500]
+		message = strings.ToValidUTF8(message[:500], "")
 	}
 	_, err := tx.Exec(ctx, `
 		UPDATE public.blob_gc_queue

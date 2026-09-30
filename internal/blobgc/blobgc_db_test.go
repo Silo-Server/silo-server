@@ -248,6 +248,22 @@ func TestCollectorsShareTheQueueDB(t *testing.T) {
 	}
 }
 
+func TestCollectorTruncatesMultibyteErrorsDB(t *testing.T) {
+	pool := testPool(t)
+	store := newFakeStore()
+	prefix := testPrefix(150)
+	queue(t, pool, prefix, -time.Minute)
+	store.deleteErr[prefix] = errors.New(strings.Repeat("x", 499) + "雪")
+	stats, err := NewCollector(pool, store, testNamespace(nil)).Collect(t.Context(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := queueRows(t, pool)[prefix]
+	if stats.Retried != 1 || row.attempts != 1 || row.due || row.lastError != strings.Repeat("x", 499) {
+		t.Fatalf("retry = %+v, row = %+v", stats, row)
+	}
+}
+
 func TestSweeperQueuesOldDeadPrefixesDB(t *testing.T) {
 	pool := testPool(t)
 	store := newFakeStore()
