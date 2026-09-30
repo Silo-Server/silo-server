@@ -215,6 +215,17 @@ export function parseHomeLayoutFile(text: string): HomeLayoutParseResult {
   };
 }
 
+/** Whether any section in the file names a library collection. */
+export function referencesLibraryCollections(file: HomeLayoutFile): boolean {
+  return file.pages.some((page) =>
+    page.overrides.some((override) =>
+      [override.config, override.user_config].some((config) =>
+        nonEmptyString(config?.library_collection_id),
+      ),
+    ),
+  );
+}
+
 export type HomeLayoutSkipReason =
   | "unknown_recipe"
   | "custom_disabled"

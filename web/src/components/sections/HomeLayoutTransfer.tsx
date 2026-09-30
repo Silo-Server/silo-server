@@ -30,11 +30,15 @@ import {
   importPage,
   parseHomeLayoutFile,
   planHomeLayoutImport,
+  referencesLibraryCollections,
   type HomeLayoutImportPlan,
   type HomeLayoutScope,
 } from "@/lib/homeLayoutTransfer";
 
 const HOME_PREFERENCE_KEYS = [SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS] as const;
+const NO_IDS: ReadonlySet<string> = new Set();
+// Library collection reads run this many at a time.
+const LIBRARY_COLLECTION_BATCH = 4;
 
 function pageQuery(scope: HomeLayoutScope, libraryId?: number) {
   return { scope, library_id: libraryId ? String(libraryId) : undefined };
@@ -176,21 +180,36 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
       ),
     gcTime: 0,
   });
+  const parsed = useMemo(() => (text.trim() ? parseHomeLayoutFile(text) : null), [text]);
+  // Library collections are read only for a same-server file that names one.
+  const needsLibraryCollections = Boolean(
+    parsed?.ok &&
+    identityQuery.data &&
+    parsed.file.server_id !== "" &&
+    parsed.file.server_id === identityQuery.data.server_id &&
+    referencesLibraryCollections(parsed.file),
+  );
   const libraryCollectionsQuery = useQuery({
     queryKey: ["home-layout-import", "library-collection-ids"],
     queryFn: async () => {
-      const tabs = await Promise.all(
-        libraries.map((library) =>
-          v2("GET /api/v2/library/{id}/collections", {
-            path: { id: String(library.id) },
-            profileContext: profileContext ?? undefined,
-          }),
-        ),
-      );
-      return new Set(tabs.flatMap((tab) => tab.collections.map((collection) => collection.id)));
+      const ids = new Set<string>();
+      for (let start = 0; start < libraries.length; start += LIBRARY_COLLECTION_BATCH) {
+        const tabs = await Promise.all(
+          libraries.slice(start, start + LIBRARY_COLLECTION_BATCH).map((library) =>
+            v2("GET /api/v2/library/{id}/collections", {
+              path: { id: String(library.id) },
+              profileContext: profileContext ?? undefined,
+            }),
+          ),
+        );
+        for (const tab of tabs) for (const collection of tab.collections) ids.add(collection.id);
+      }
+      return ids;
     },
+    enabled: needsLibraryCollections,
     gcTime: 0,
   });
+  const libraryCollectionIds = needsLibraryCollections ? libraryCollectionsQuery.data : NO_IDS;
   const profilesQuery = useQuery({
     queryKey: ["home-layout-import", "account-profile-ids"],
     queryFn: async () =>
@@ -220,11 +239,10 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
       ? canAddAdminOnlyRecipes(role, flagsQuery.data?.allow_profile_custom_sections)
       : undefined;
 
-  const parsed = useMemo(() => (text.trim() ? parseHomeLayoutFile(text) : null), [text]);
   const targetReady = Boolean(
     identityQuery.data &&
     collectionsQuery.data &&
-    libraryCollectionsQuery.data &&
+    libraryCollectionIds &&
     profilesQuery.data &&
     recipeCatalog &&
     allowAdminOnlyRecipes !== undefined,
@@ -232,7 +250,7 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
   const targetError =
     identityQuery.isError ||
     collectionsQuery.isError ||
-    libraryCollectionsQuery.isError ||
+    (needsLibraryCollections && libraryCollectionsQuery.isError) ||
     profilesQuery.isError ||
     recipeCatalogQuery.isError ||
     flagsQuery.isError;
@@ -242,7 +260,7 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
       !parsed?.ok ||
       !identityQuery.data ||
       !collectionsQuery.data ||
-      !libraryCollectionsQuery.data ||
+      !libraryCollectionIds ||
       !profilesQuery.data ||
       !recipeCatalog ||
       allowAdminOnlyRecipes === undefined
@@ -261,7 +279,7 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
         recipes,
         allowAdminOnlyRecipes,
         personalCollectionIds: collectionsQuery.data,
-        libraryCollectionIds: libraryCollectionsQuery.data,
+        libraryCollectionIds,
         profileIds: profilesQuery.data,
       },
       randomUUID,
@@ -270,7 +288,7 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
     parsed,
     identityQuery.data,
     collectionsQuery.data,
-    libraryCollectionsQuery.data,
+    libraryCollectionIds,
     profilesQuery.data,
     recipeCatalog,
     libraries,

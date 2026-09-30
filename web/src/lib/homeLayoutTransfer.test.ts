@@ -10,6 +10,7 @@ import {
   mergeImportedPage,
   parseHomeLayoutFile,
   planHomeLayoutImport,
+  referencesLibraryCollections,
   type HomeLayoutFile,
   type HomeLayoutImportTarget,
 } from "./homeLayoutTransfer";
@@ -773,6 +774,26 @@ describe("mergeImportedPage", () => {
       { id: "keep", section_id: "admin-1", position: 3, hidden: true },
       { id: "new-1", user_section_type: "hidden_gems" },
     ]);
+  });
+});
+
+describe("referencesLibraryCollections", () => {
+  it("finds a library collection in either config", () => {
+    const page = (override: HomeLayoutFile["pages"][number]["overrides"][number]) =>
+      layoutFile({ pages: [{ scope: "home", overrides: [override] }] });
+
+    expect(
+      referencesLibraryCollections(page({ user_config: { library_collection_id: "lc" } })),
+    ).toBe(true);
+    expect(
+      referencesLibraryCollections(
+        page({ section_id: "a", config: { library_collection_id: "lc" } }),
+      ),
+    ).toBe(true);
+    expect(
+      referencesLibraryCollections(page({ user_config: { user_collection_id: "mine" } })),
+    ).toBe(false);
+    expect(referencesLibraryCollections(layoutFile({}))).toBe(false);
   });
 });
 
