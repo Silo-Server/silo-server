@@ -143,19 +143,20 @@ func (s *PersonRefreshService) refreshPersonSince(
 		return nil, ErrPersonNotFound
 	}
 	// Record the attempt before any provider I/O so the backoff survives a
-	// crash mid-refresh. The write is bookkeeping, not a precondition: if it
-	// fails, the refresh still runs and only the backoff is lost.
-	if since.IsZero() {
-		err = s.repo.MarkRefreshAttempt(ctx, id)
-	} else {
-		var started bool
-		started, err = s.repo.StartRefreshAttemptUnlessStartedSince(ctx, id, since)
-		if err == nil && !started {
+	// crash mid-refresh. Unconditionally, the write is bookkeeping, not a
+	// precondition: if it fails, the refresh still runs and only the backoff
+	// is lost. With since set it decides which node looks the person up, so a
+	// failure skips the lookup; a claim comes back when its lease runs out.
+	if !since.IsZero() {
+		started, err := s.repo.StartRefreshAttemptUnlessStartedSince(ctx, id, since)
+		if err != nil {
+			return nil, err
+		}
+		if !started {
 			// Another lookup started after since and records its own outcome.
 			return person, nil
 		}
-	}
-	if err != nil {
+	} else if err := s.repo.MarkRefreshAttempt(ctx, id); err != nil {
 		slog.WarnContext(ctx, "person refresh: failed to record refresh attempt", "component", "metadata",
 			"person_id", id,
 			"error", err,

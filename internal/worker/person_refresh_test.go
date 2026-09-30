@@ -98,24 +98,24 @@ func TestPersonRefreshWorkerStopsBatchWhenClaimLeaseRunsOut(t *testing.T) {
 	}
 }
 
-// Lookups carry the time they were claimed or requested, so a person another
-// node started looking up since is skipped.
+// Background lookups carry the claim time and page requests the attempt the
+// page saw, so a person another node started looking up since is skipped.
 func TestPersonRefreshWorkerPassesClaimAndRequestTimes(t *testing.T) {
 	service := &fakePersonRefresher{batches: [][]int64{{1, 2}}}
 	w := newTestPersonRefreshWorker(service)
-	requestedAt := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
-	claimedAt := requestedAt.Add(time.Minute)
-	now := requestedAt
-	w.now = func() time.Time { return now }
-	w.Enqueue(9)
-	now = claimedAt
+	seen := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	claimedAt := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	w.now = func() time.Time { return claimedAt }
+	w.Enqueue(9, &seen)
+	w.Enqueue(8, nil)
 
 	w.drain()
 
-	if want := []int64{9, 1, 2}; !slices.Equal(service.refreshed, want) {
+	if want := []int64{9, 8, 1, 2}; !slices.Equal(service.refreshed, want) {
 		t.Fatalf("refreshed %v, want %v", service.refreshed, want)
 	}
-	for id, want := range map[int64]time.Time{9: requestedAt, 1: claimedAt, 2: claimedAt} {
+	// A page request is cut off at the attempt the page saw.
+	for id, want := range map[int64]time.Time{9: seen, 8: neverAttempted, 1: claimedAt, 2: claimedAt} {
 		if got := service.since[id]; !got.Equal(want) {
 			t.Fatalf("person %d since = %s, want %s", id, got, want)
 		}
@@ -128,7 +128,7 @@ func TestPersonRefreshWorkerRunsOnDemandRequestsBetweenBatchItems(t *testing.T) 
 	w := newTestPersonRefreshWorker(service)
 	service.onRefresh = func(id int64) {
 		if id == 1 {
-			w.Enqueue(99)
+			w.Enqueue(99, nil)
 		}
 	}
 
@@ -146,7 +146,7 @@ func TestPersonRefreshWorkerSkipsClaimedPersonQueuedOnDemand(t *testing.T) {
 	service.onRefresh = func(id int64) {
 		if id == 1 {
 			// Queued while the batch runs; it runs before 2 and covers it.
-			w.Enqueue(2)
+			w.Enqueue(2, nil)
 		}
 	}
 
