@@ -48,6 +48,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/audiobooks/podcastfeed"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/autoscan"
+	"github.com/Silo-Server/silo-server/internal/blobgc"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/branding"
 	"github.com/Silo-Server/silo-server/internal/cache"
@@ -2769,6 +2770,13 @@ func main() {
 			taskMgr.Register(tasks.NewCleanupArtworkRevisionsTask(
 				metadata.NewArtworkRevisionGarbageCollector(deps.DB, deps.Blobs.Assets),
 			))
+			mediaImages := []blobgc.Namespace{chapterthumbs.BlobNamespace(deps.DB)}
+			if collector := blobgc.NewCollector(deps.DB, deps.Blobs.Assets, mediaImages...); collector != nil {
+				taskMgr.Register(tasks.NewCleanupRemovedMediaImagesTask(collector))
+			}
+			if sweeper := blobgc.NewSweeper(deps.DB, deps.Blobs.Assets, mediaImages...); sweeper != nil {
+				taskMgr.Register(tasks.NewSweepOrphanedMediaImagesTask(sweeper))
+			}
 		}
 		catalogSearchIndexer := catalog.NewCatalogSearchIndexerFromSettings(deps.DB, settingsRepo, catalogSearchStartupSettings)
 		taskMgr.Register(tasks.NewSyncCatalogSearchIndexTask(catalogSearchIndexer))
