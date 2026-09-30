@@ -30,15 +30,29 @@ import {
   importPage,
   parseHomeLayoutFile,
   planHomeLayoutImport,
-  referencesLibraryCollections,
+  fileReferences,
   type HomeLayoutImportPlan,
+  type HomeLayoutReferences,
   type HomeLayoutScope,
 } from "@/lib/homeLayoutTransfer";
 
 const HOME_PREFERENCE_KEYS = [SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS] as const;
 const NO_IDS: ReadonlySet<string> = new Set();
-// Library collection reads run this many at a time.
-const LIBRARY_COLLECTION_BATCH = 4;
+const NO_REFERENCES: HomeLayoutReferences = {
+  libraryCollections: false,
+  personalCollections: false,
+  profiles: false,
+};
+// Per-page and per-library reads run this many at a time.
+const READ_BATCH = 4;
+
+async function readInBatches<T, R>(items: readonly T[], read: (item: T) => Promise<R>) {
+  const results: R[] = [];
+  for (let start = 0; start < items.length; start += READ_BATCH) {
+    results.push(...(await Promise.all(items.slice(start, start + READ_BATCH).map(read))));
+  }
+  return results;
+}
 
 function pageQuery(scope: HomeLayoutScope, libraryId?: number) {
   return { scope, library_id: libraryId ? String(libraryId) : undefined };
@@ -51,8 +65,7 @@ function problemMessage(error: unknown): string {
   return error instanceof Error ? error.message : "request failed";
 }
 
-function downloadJson(fileName: string, value: unknown) {
-  const blob = new Blob([`${JSON.stringify(value, null, 2)}\n`], { type: "application/json" });
+function downloadJson(fileName: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
@@ -96,15 +109,13 @@ export default function HomeLayoutTransfer() {
         { scope: "home" as const, libraryId: undefined },
         ...libraries.map((library) => ({ scope: "library" as const, libraryId: library.id })),
       ];
-      const pages = await Promise.all(
-        sources.map(async (source) => {
-          const result = await v2("GET /api/v2/profile/sections", {
-            query: pageQuery(source.scope, source.libraryId),
-            profileContext,
-          });
-          return { ...source, overrides: result.items };
-        }),
-      );
+      const pages = await readInBatches(sources, async (source) => {
+        const result = await v2("GET /api/v2/profile/sections", {
+          query: pageQuery(source.scope, source.libraryId),
+          profileContext,
+        });
+        return { ...source, overrides: result.items };
+      });
       const exportedAt = new Date();
       const file = buildHomeLayoutFile({
         serverId: identity.server_id,
@@ -113,7 +124,14 @@ export default function HomeLayoutTransfer() {
         hideWatchedItems,
         pages,
       });
-      downloadJson(`silo-home-layout-${exportedAt.toISOString().slice(0, 10)}.json`, file);
+      const blob = new Blob([`${JSON.stringify(file, null, 2)}\n`], { type: "application/json" });
+      if (blob.size > HOME_LAYOUT_MAX_LENGTH) {
+        toast.error(
+          "This home layout is too large to export. Remove some custom sections and try again.",
+        );
+        return;
+      }
+      downloadJson(`silo-home-layout-${exportedAt.toISOString().slice(0, 10)}.json`, blob);
       toast.success("Home layout exported");
     } catch (error) {
       toast.error(`Failed to export the home layout: ${problemMessage(error)}`);
@@ -168,58 +186,51 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
     queryFn: () => v2("GET /api/v2/system/identity"),
     staleTime: Infinity,
   });
-  // Fetched on every open, never from cache: the set belongs to the acting
-  // profile, and a cached one could outlive a profile switch.
-  const collectionsQuery = useQuery({
-    queryKey: ["home-layout-import", "personal-collection-ids"],
-    queryFn: async () =>
-      new Set(
-        (
-          await v2("GET /api/v2/collections", { profileContext: profileContext ?? undefined })
-        ).items.map((collection) => collection.id),
-      ),
-    gcTime: 0,
-  });
   const parsed = useMemo(() => (text.trim() ? parseHomeLayoutFile(text) : null), [text]);
-  // Library collections are read only for a same-server file that names one.
-  const needsLibraryCollections = Boolean(
+  // Collections and profiles are read only for a same-server file that names
+  // one; another server's references are skipped without looking them up.
+  const sameServerFile =
     parsed?.ok &&
     identityQuery.data &&
     parsed.file.server_id !== "" &&
-    parsed.file.server_id === identityQuery.data.server_id &&
-    referencesLibraryCollections(parsed.file),
+    parsed.file.server_id === identityQuery.data.server_id
+      ? parsed.file
+      : null;
+  const refs = useMemo(
+    () => (sameServerFile ? fileReferences(sameServerFile) : NO_REFERENCES),
+    [sameServerFile],
   );
+  const scoped = { profileContext: profileContext ?? undefined };
+  // These sets belong to the acting profile, so they are read fresh on each
+  // open and never reused from cache.
+  const collectionsQuery = useQuery({
+    queryKey: ["home-layout-import", "personal-collection-ids"],
+    queryFn: async () =>
+      new Set((await v2("GET /api/v2/collections", scoped)).items.map((item) => item.id)),
+    enabled: refs.personalCollections,
+    gcTime: 0,
+  });
   const libraryCollectionsQuery = useQuery({
     queryKey: ["home-layout-import", "library-collection-ids"],
     queryFn: async () => {
-      const ids = new Set<string>();
-      for (let start = 0; start < libraries.length; start += LIBRARY_COLLECTION_BATCH) {
-        const tabs = await Promise.all(
-          libraries.slice(start, start + LIBRARY_COLLECTION_BATCH).map((library) =>
-            v2("GET /api/v2/library/{id}/collections", {
-              path: { id: String(library.id) },
-              profileContext: profileContext ?? undefined,
-            }),
-          ),
-        );
-        for (const tab of tabs) for (const collection of tab.collections) ids.add(collection.id);
-      }
-      return ids;
+      const tabs = await readInBatches(libraries, (library) =>
+        v2("GET /api/v2/library/{id}/collections", { path: { id: String(library.id) }, ...scoped }),
+      );
+      return new Set(tabs.flatMap((tab) => tab.collections.map((collection) => collection.id)));
     },
-    enabled: needsLibraryCollections,
+    enabled: refs.libraryCollections,
     gcTime: 0,
   });
-  const libraryCollectionIds = needsLibraryCollections ? libraryCollectionsQuery.data : NO_IDS;
   const profilesQuery = useQuery({
     queryKey: ["home-layout-import", "account-profile-ids"],
     queryFn: async () =>
-      new Set(
-        (
-          await v2("GET /api/v2/profiles", { profileContext: profileContext ?? undefined })
-        ).items.map((profile) => profile.id),
-      ),
+      new Set((await v2("GET /api/v2/profiles", scoped)).items.map((item) => item.id)),
+    enabled: refs.profiles,
     gcTime: 0,
   });
+  const personalCollectionIds = refs.personalCollections ? collectionsQuery.data : NO_IDS;
+  const libraryCollectionIds = refs.libraryCollections ? libraryCollectionsQuery.data : NO_IDS;
+  const profileIds = refs.profiles ? profilesQuery.data : NO_IDS;
   // Shares the Home screen settings page's cache entry.
   const recipeCatalogQuery = useQuery({
     queryKey: ["recipe-catalog"],
@@ -241,17 +252,17 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
 
   const targetReady = Boolean(
     identityQuery.data &&
-    collectionsQuery.data &&
+    personalCollectionIds &&
     libraryCollectionIds &&
-    profilesQuery.data &&
+    profileIds &&
     recipeCatalog &&
     allowAdminOnlyRecipes !== undefined,
   );
   const targetError =
     identityQuery.isError ||
-    collectionsQuery.isError ||
-    (needsLibraryCollections && libraryCollectionsQuery.isError) ||
-    profilesQuery.isError ||
+    (refs.personalCollections && collectionsQuery.isError) ||
+    (refs.libraryCollections && libraryCollectionsQuery.isError) ||
+    (refs.profiles && profilesQuery.isError) ||
     recipeCatalogQuery.isError ||
     flagsQuery.isError;
 
@@ -259,9 +270,9 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
     if (
       !parsed?.ok ||
       !identityQuery.data ||
-      !collectionsQuery.data ||
+      !personalCollectionIds ||
       !libraryCollectionIds ||
-      !profilesQuery.data ||
+      !profileIds ||
       !recipeCatalog ||
       allowAdminOnlyRecipes === undefined
     ) {
@@ -278,18 +289,18 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
         libraries,
         recipes,
         allowAdminOnlyRecipes,
-        personalCollectionIds: collectionsQuery.data,
+        personalCollectionIds,
         libraryCollectionIds,
-        profileIds: profilesQuery.data,
+        profileIds,
       },
       randomUUID,
     );
   }, [
     parsed,
     identityQuery.data,
-    collectionsQuery.data,
+    personalCollectionIds,
     libraryCollectionIds,
-    profilesQuery.data,
+    profileIds,
     recipeCatalog,
     libraries,
     allowAdminOnlyRecipes,

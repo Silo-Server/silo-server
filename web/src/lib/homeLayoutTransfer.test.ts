@@ -10,7 +10,8 @@ import {
   mergeImportedPage,
   parseHomeLayoutFile,
   planHomeLayoutImport,
-  referencesLibraryCollections,
+  fileReferences,
+  HOME_LAYOUT_MAX_LENGTH,
   type HomeLayoutFile,
   type HomeLayoutImportTarget,
 } from "./homeLayoutTransfer";
@@ -164,7 +165,7 @@ describe("parseHomeLayoutFile", () => {
       ok: false,
       error: "This home layout export is incomplete or damaged.",
     });
-    expect(parseHomeLayoutFile(" ".repeat(1024 * 1024 + 1))).toEqual({
+    expect(parseHomeLayoutFile(" ".repeat(HOME_LAYOUT_MAX_LENGTH + 1))).toEqual({
       ok: false,
       error: "This file is too large to be a home layout export.",
     });
@@ -777,23 +778,26 @@ describe("mergeImportedPage", () => {
   });
 });
 
-describe("referencesLibraryCollections", () => {
-  it("finds a library collection in either config", () => {
-    const page = (override: HomeLayoutFile["pages"][number]["overrides"][number]) =>
+describe("fileReferences", () => {
+  it("reports which kinds of references the sections make, in either config", () => {
+    const file = (override: HomeLayoutFile["pages"][number]["overrides"][number]) =>
       layoutFile({ pages: [{ scope: "home", overrides: [override] }] });
 
+    expect(fileReferences(file({ user_config: { library_collection_id: "lc" } }))).toEqual({
+      libraryCollections: true,
+      personalCollections: false,
+      profiles: false,
+    });
     expect(
-      referencesLibraryCollections(page({ user_config: { library_collection_id: "lc" } })),
-    ).toBe(true);
-    expect(
-      referencesLibraryCollections(
-        page({ section_id: "a", config: { library_collection_id: "lc" } }),
+      fileReferences(
+        file({ section_id: "a", config: { user_collection_id: "mine", profile_id: "p" } }),
       ),
-    ).toBe(true);
-    expect(
-      referencesLibraryCollections(page({ user_config: { user_collection_id: "mine" } })),
-    ).toBe(false);
-    expect(referencesLibraryCollections(layoutFile({}))).toBe(false);
+    ).toEqual({ libraryCollections: false, personalCollections: true, profiles: true });
+    expect(fileReferences(file({ user_config: { profile_id: "" } }))).toEqual({
+      libraryCollections: false,
+      personalCollections: false,
+      profiles: false,
+    });
   });
 });
 

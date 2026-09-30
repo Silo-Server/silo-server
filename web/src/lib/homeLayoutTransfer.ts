@@ -18,8 +18,11 @@ export type SectionOverrideWrite = components["schemas"]["SectionOverrideWrite"]
 
 export const HOME_LAYOUT_FORMAT = "silo-home-layout";
 export const HOME_LAYOUT_VERSION = 1;
-/** Text longer than this is refused before parsing. */
-export const HOME_LAYOUT_MAX_LENGTH = 1024 * 1024;
+/**
+ * The largest export, in bytes. Export refuses to write a larger file and
+ * import refuses to read one, so every export can be imported.
+ */
+export const HOME_LAYOUT_MAX_LENGTH = 5 * 1024 * 1024;
 
 export type HomeLayoutScope = "home" | "library";
 
@@ -215,15 +218,26 @@ export function parseHomeLayoutFile(text: string): HomeLayoutParseResult {
   };
 }
 
-/** Whether any section in the file names a library collection. */
-export function referencesLibraryCollections(file: HomeLayoutFile): boolean {
-  return file.pages.some((page) =>
-    page.overrides.some((override) =>
-      [override.config, override.user_config].some((config) =>
-        nonEmptyString(config?.library_collection_id),
-      ),
-    ),
-  );
+export interface HomeLayoutReferences {
+  libraryCollections: boolean;
+  personalCollections: boolean;
+  profiles: boolean;
+}
+
+/** Which kinds of server-side references the file's sections make. */
+export function fileReferences(file: HomeLayoutFile): HomeLayoutReferences {
+  const refs = { libraryCollections: false, personalCollections: false, profiles: false };
+  for (const page of file.pages) {
+    for (const override of page.overrides) {
+      for (const config of [override.config, override.user_config]) {
+        if (!config) continue;
+        if (nonEmptyString(config.library_collection_id)) refs.libraryCollections = true;
+        if (nonEmptyString(config.user_collection_id)) refs.personalCollections = true;
+        if (nonEmptyString(config.profile_id)) refs.profiles = true;
+      }
+    }
+  }
+  return refs;
 }
 
 export type HomeLayoutSkipReason =
