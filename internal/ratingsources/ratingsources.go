@@ -108,7 +108,8 @@ const refreshTimeout = 5 * time.Second
 // DeclaredSource is a rating source a metadata plugin declared.
 type DeclaredSource struct {
 	models.RatingSourceDefinition
-	// Provider names the metadata provider that declared it.
+	// Provider names the metadata providers that declare it, such as
+	// "NFO Files and MDBList".
 	Provider string
 }
 
@@ -210,7 +211,7 @@ type Source struct {
 	models.RatingSourceDefinition
 	// AlwaysShown is true for IMDb and TMDB, which no setting hides.
 	AlwaysShown bool
-	// Provider names the metadata plugin that declared the source; empty for
+	// Provider names the metadata providers that declare the source; empty for
 	// Silo's own sources.
 	Provider string
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -765,24 +766,37 @@ func ListEnabledMetadataCapabilities(ctx context.Context, pool *pgxpool.Pool) ([
 
 // DeclaredRatingSources lists the rating sources the enabled metadata plugins
 // declare (rating_sources), in installation order and then by capability ID.
-// When two capabilities declare the same source, the first names and scales it.
+// When two capabilities declare the same source, the first names and scales it,
+// and Provider credits every provider that declares it.
 func DeclaredRatingSources(ctx context.Context, pool *pgxpool.Pool) ([]ratingsources.DeclaredSource, error) {
 	caps, err := ListEnabledMetadataCapabilities(ctx, pool)
 	if err != nil {
 		return nil, err
 	}
 	var out []ratingsources.DeclaredSource
-	seen := map[string]struct{}{}
+	providers := map[string][]string{}
 	for _, c := range caps {
 		for _, definition := range c.RatingSources {
-			if _, dup := seen[definition.Source]; dup {
-				continue
+			if _, dup := providers[definition.Source]; !dup {
+				out = append(out, ratingsources.DeclaredSource{RatingSourceDefinition: definition})
 			}
-			seen[definition.Source] = struct{}{}
-			out = append(out, ratingsources.DeclaredSource{RatingSourceDefinition: definition, Provider: c.DisplayName})
+			if !slices.Contains(providers[definition.Source], c.DisplayName) {
+				providers[definition.Source] = append(providers[definition.Source], c.DisplayName)
+			}
 		}
 	}
+	for i := range out {
+		out[i].Provider = joinNames(providers[out[i].Source])
+	}
 	return out, nil
+}
+
+// joinNames lists provider names for people: "A", "A and B", "A, B and C".
+func joinNames(names []string) string {
+	if len(names) < 2 {
+		return strings.Join(names, "")
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
 // resolveChainEntries builds Provider instances from explicit chain entries,

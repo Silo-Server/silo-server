@@ -14681,7 +14681,7 @@ export interface components {
        */
       name: string;
       /**
-       * @description The metadata plugin that declared the source; absent for Silo's own sources
+       * @description The metadata providers that declare the source, such as "NFO Files and MDBList"; absent for Silo's own sources
        * @example Kinopoisk
        */
       provider?: string;

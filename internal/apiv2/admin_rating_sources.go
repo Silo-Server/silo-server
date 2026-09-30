@@ -12,7 +12,7 @@ type AdminRatingSource struct {
 	Label       string `json:"label" doc:"The source's name in full" example:"Rotten Tomatoes critics"`
 	Name        string `json:"name" doc:"The plain-text mark clients show next to its score" example:"RT"`
 	AlwaysShown bool   `json:"always_shown" doc:"True for IMDb and TMDB, which always show; every other source shows only once catalog.extra_rating_sources lists it"`
-	Provider    string `json:"provider,omitempty" doc:"The metadata plugin that declared the source; absent for Silo's own sources" example:"Kinopoisk"`
+	Provider    string `json:"provider,omitempty" doc:"The metadata providers that declare the source, such as \"NFO Files and MDBList\"; absent for Silo's own sources" example:"Kinopoisk"`
 }
 
 // AdminRatingSourceCapabilities describes the rating source support in this
