@@ -156,6 +156,41 @@ func insertAliases(ctx context.Context, tx pgx.Tx, titleID int64, mediaType stri
 		ON CONFLICT DO NOTHING`, titleID, mediaType, providers, values); err != nil {
 		return fmt.Errorf("recording watchlist title aliases: %w", err)
 	}
+	return keepOwnedIDsLocked(ctx, tx, titleID)
+}
+
+// keepOwnedIDsLocked keeps the title's IMDb and TVDB fields to IDs it owns as
+// aliases. An ID another title already holds was skipped as an alias; left in
+// the field, library matching and request presence would read it and could
+// match the other title's copy. The field falls back to an ID of that
+// provider the title does own (the previous one, since aliases accumulate),
+// else it is emptied.
+func keepOwnedIDsLocked(ctx context.Context, tx pgx.Tx, titleID int64) error {
+	if _, err := tx.Exec(ctx, `
+		UPDATE watchlist_titles t
+		SET imdb_id = CASE
+		        WHEN t.imdb_id = '' OR EXISTS (
+		            SELECT 1 FROM watchlist_title_aliases a
+		            WHERE a.title_id = t.id AND a.provider = 'imdb' AND a.provider_id = t.imdb_id)
+		        THEN t.imdb_id
+		        ELSE coalesce((
+		            SELECT a.provider_id FROM watchlist_title_aliases a
+		            WHERE a.title_id = t.id AND a.provider = 'imdb'
+		            ORDER BY a.provider_id LIMIT 1), '')
+		    END,
+		    tvdb_id = CASE
+		        WHEN t.tvdb_id IS NULL OR EXISTS (
+		            SELECT 1 FROM watchlist_title_aliases a
+		            WHERE a.title_id = t.id AND a.provider = 'tvdb' AND a.provider_id = t.tvdb_id::text)
+		        THEN t.tvdb_id
+		        ELSE (
+		            SELECT a.provider_id::int FROM watchlist_title_aliases a
+		            WHERE a.title_id = t.id AND a.provider = 'tvdb'
+		            ORDER BY a.provider_id LIMIT 1)
+		    END
+		WHERE t.id = $1`, titleID); err != nil {
+		return fmt.Errorf("keeping watchlist title ids to its aliases: %w", err)
+	}
 	return nil
 }
 

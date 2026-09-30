@@ -327,3 +327,34 @@ func TestTitlesOneConnectionPromotionSkipsRemovedEntry(t *testing.T) {
 		t.Fatal("a removed entry was written onto the library watchlist")
 	}
 }
+
+// A provider ID another title already owns is never stored in a title's own
+// IMDb or TVDB field: library matching and request presence read those
+// fields, and would match the other title's copy. A new title leaves the
+// field empty; a refresh keeps the ID the title already owns.
+func TestTitlesKeepProviderIDsToOwnedAliases(t *testing.T) {
+	f := newTitlesFixture(t)
+	ctx := t.Context()
+	owner := f.add(t, "p1", f.snap("movie", 840, "tt84000001", 8400001), f.now)
+
+	// A new title reporting the owner's IDs keeps neither.
+	dup := f.add(t, "p1", f.snap("movie", 841, "tt84000001", 8400001), f.now)
+	got := f.title(t, dup.Title.ID)
+	if got.IMDbID != "" || got.TVDBID != 0 {
+		t.Fatalf("new title stored imdb %q tvdb %d that the other title owns", got.IMDbID, got.TVDBID)
+	}
+
+	// A title with its own IDs that a refresh reports as the owner's keeps its own.
+	own := f.add(t, "p1", f.snap("movie", 842, "tt84000042", 8400042), f.now)
+	if err := f.svc.repo.applyDetail(ctx, own.Title.ID, f.snap("movie", 842, "tt84000001", 8400001), f.now); err != nil {
+		t.Fatal(err)
+	}
+	got = f.title(t, own.Title.ID)
+	if got.IMDbID != "tt84000042" || got.TVDBID != 8400042 {
+		t.Fatalf("refreshed title imdb %q tvdb %d, want its own tt84000042 / 8400042", got.IMDbID, got.TVDBID)
+	}
+	// The owner is untouched.
+	if o := f.title(t, owner.Title.ID); o.IMDbID != "tt84000001" || o.TVDBID != 8400001 {
+		t.Fatalf("owner imdb %q tvdb %d changed", o.IMDbID, o.TVDBID)
+	}
+}
