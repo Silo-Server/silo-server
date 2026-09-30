@@ -67,7 +67,8 @@ type PersonRefreshWorker struct {
 
 	mu          sync.Mutex
 	manualQueue []int64
-	// queued holds when each pending on-demand request was made.
+	// queued holds each pending on-demand request's cutoff: the attempt the
+	// page saw (see Enqueue).
 	queued map[int64]time.Time
 	stop   chan struct{}
 	wake   chan struct{}
@@ -124,7 +125,9 @@ func (w *PersonRefreshWorker) SetRatePerMinute(perMinute int) {
 
 // Enqueue asks for an on-demand lookup, such as for a person whose page was
 // just opened. It runs before the rest of any background batch in progress.
-func (w *PersonRefreshWorker) Enqueue(id int64) {
+// lastAttempt is the person's metadata_refresh_attempted_at as the page read
+// it; the request is dropped if a lookup started after that.
+func (w *PersonRefreshWorker) Enqueue(id int64, lastAttempt *time.Time) {
 	if id <= 0 {
 		return
 	}
@@ -134,7 +137,7 @@ func (w *PersonRefreshWorker) Enqueue(id int64) {
 		w.mu.Unlock()
 		return
 	}
-	w.queued[id] = w.now()
+	w.queued[id] = requestCutoff(lastAttempt)
 	w.manualQueue = append(w.manualQueue, id)
 	w.mu.Unlock()
 
@@ -327,8 +330,22 @@ func (w *PersonRefreshWorker) runManual(done map[int64]struct{}) {
 	}
 }
 
-// refresh looks id up unless a lookup started after since, when it was claimed
-// or requested.
+// neverAttempted is the cutoff for a page that saw no attempt: any lookup
+// started since then makes the request redundant.
+var neverAttempted = time.Unix(0, 0).UTC()
+
+// requestCutoff is the since for an on-demand request whose page saw
+// lastAttempt as the person's latest lookup, so any lookup that started after
+// the page read the person, on any node, covers it.
+func requestCutoff(lastAttempt *time.Time) time.Time {
+	if lastAttempt == nil {
+		return neverAttempted
+	}
+	return *lastAttempt
+}
+
+// refresh looks id up unless a lookup started after since: the claim, or the
+// attempt the requesting page saw.
 func (w *PersonRefreshWorker) refresh(id int64, since time.Time) error {
 	ctx, cancel := context.WithTimeout(context.Background(), w.config.RefreshTimeout)
 	defer cancel()

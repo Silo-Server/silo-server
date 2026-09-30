@@ -122,6 +122,22 @@ func TestRefreshPersonSinceSkipsLookupStartedSince(t *testing.T) {
 	}
 }
 
+// When the gate can't be checked, the lookup doesn't go ahead: another node
+// may hold it.
+func TestRefreshPersonSinceSkipsLookupWhenGateFails(t *testing.T) {
+	repo := newFakePersonRefreshRepo(models.Person{ID: 11, Name: "Person", TmdbID: "11"})
+	repo.refreshAttemptErr = errors.New("connection reset")
+	service := &PersonRefreshService{repo: repo}
+	answered := stubPersonProvider{slug: "tmdb", detail: &PersonDetailResult{Name: "Answered"}}
+
+	if _, err := service.refreshPersonSince(context.Background(), 11, []Provider{answered}, time.Now()); err == nil {
+		t.Fatal("refreshPersonSince succeeded, want the gate error")
+	}
+	if len(repo.outcomes) != 0 {
+		t.Fatalf("recorded outcomes = %v, want none", repo.outcomes)
+	}
+}
+
 // A refresh that ran out of time still records its failure, so the sweep backs
 // off instead of treating the person as never looked up.
 func TestPersonRefreshRecordsOutcomeAfterTimeout(t *testing.T) {

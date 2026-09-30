@@ -58,8 +58,11 @@ func (r *fakePersonRefreshRepo) StartRefreshAttemptUnlessStartedSince(_ context.
 	if attempted := r.persons[id].MetadataRefreshAttemptedAt; attempted != nil && attempted.After(since) {
 		return false, nil
 	}
+	if r.refreshAttemptErr != nil {
+		return false, r.refreshAttemptErr
+	}
 	r.refreshAttempts = append(r.refreshAttempts, id)
-	return true, r.refreshAttemptErr
+	return true, nil
 }
 
 func (r *fakePersonRefreshRepo) RecordRefreshOutcome(_ context.Context, _ int64, outcome catalog.PersonRefreshOutcome) error {
