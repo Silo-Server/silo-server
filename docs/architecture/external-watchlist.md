@@ -279,9 +279,11 @@ kept. Promotion on library reads does not depend on that gate.
   (`deleteWatchlistTitle`): finds the title by a current or former TMDB ID and
   first withdraws the watchlist's request under every TMDB ID the title has
   had, since a request keeps the ID it was made under. Only then does it remove
-  the entry and, when one visible library item has the title, the library
-  watchlist entry, and withdraws once more if the title is still off the
-  watchlist. The order matters: removing the last entry deletes the title and
+  the library watchlist entry of the one visible library item that has the
+  title (matched by every ID while the entry still stands), then the entry, and
+  that library watchlist entry once more for a promotion that moved the entry
+  onto it in between. Last, it withdraws once more if the title is still off
+  the watchlist. The order matters: removing the last entry deletes the title and
   its former IDs, so a withdrawal that fails part way leaves the entry and a
   retry still knows every ID. The second withdrawal, together with the add
   rechecking after it requests and withdrawing when the title is off the

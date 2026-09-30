@@ -153,41 +153,69 @@ func (h *PersonalDataHandler) AddWatchlistTitle(ctx context.Context, viewer Pers
 // watchlist entry of the one library item the viewer may see that has it.
 // It returns the title (nil when no watchlist tracks the ID). Removing a
 // title that is not on the watchlist succeeds.
+//
+// The library entry goes first. Removing the last entry deletes the title and
+// its former IDs, and a library item may be known only by one of those, so
+// until the entry goes a retry still resolves the item by every ID. The
+// library entry is checked again after the entry goes, for a promotion that
+// moved the entry onto it in between.
 func (h *PersonalDataHandler) RemoveWatchlistTitle(ctx context.Context, viewer PersonalListViewer, mediaType string, tmdbID int) (*watchlist.Title, error) {
 	titles, err := h.titlesOrError()
 	if err != nil {
 		return nil, err
 	}
-	title, _, err := titles.Remove(ctx, viewer.watchlistViewer(), mediaType, tmdbID)
+	known, err := titles.Find(ctx, mediaType, tmdbID)
 	if err != nil {
-		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to remove from watchlist")
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to look up the watchlist title")
 	}
 	tmdbIDs, imdbID, tvdbID := []int{tmdbID}, "", 0
-	if title != nil {
-		imdbID, tvdbID = title.IMDbID, title.TVDBID
-		for _, id := range append([]int{title.TMDBID}, title.FormerTMDBIDs...) {
+	if known != nil {
+		imdbID, tvdbID = known.IMDbID, known.TVDBID
+		for _, id := range append([]int{known.TMDBID}, known.FormerTMDBIDs...) {
 			if !slices.Contains(tmdbIDs, id) {
 				tmdbIDs = append(tmdbIDs, id)
 			}
 		}
 	}
 	itemID, err := h.accessibleLibraryItem(ctx, viewer, titles, mediaType, tmdbIDs, imdbID, tvdbID)
-	if err != nil || itemID == "" {
-		return title, err
+	if err != nil {
+		return nil, err
+	}
+	if err := h.removeLibraryWatchlistItem(ctx, viewer, itemID); err != nil {
+		return nil, err
+	}
+	title, _, err := titles.Remove(ctx, viewer.watchlistViewer(), mediaType, tmdbID)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to remove from watchlist")
+	}
+	if err := h.removeLibraryWatchlistItem(ctx, viewer, itemID); err != nil {
+		return nil, err
+	}
+	if title == nil {
+		title = known
+	}
+	return title, nil
+}
+
+// removeLibraryWatchlistItem takes the item off the viewer's library
+// watchlist through the normal remove, when it is there. An absent item is
+// no removal, so nothing is exported to a provider.
+func (h *PersonalDataHandler) removeLibraryWatchlistItem(ctx context.Context, viewer PersonalListViewer, itemID string) error {
+	if itemID == "" {
+		return nil
 	}
 	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
 	if err != nil {
-		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
 	onList, err := store.GetWatchlistEntry(ctx, viewer.ProfileID, itemID)
 	if err != nil {
-		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to check watchlist")
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to check watchlist")
 	}
 	if onList == nil {
-		// Nothing to remove, and no removal to export to a provider.
-		return title, nil
+		return nil
 	}
-	return title, h.RemoveFromWatchlist(ctx, viewer, itemID)
+	return h.RemoveFromWatchlist(ctx, viewer, itemID)
 }
 
 // accessibleLibraryItem returns the library item that has the title when

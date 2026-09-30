@@ -5,6 +5,7 @@ import {
   addWatchlistTitleV2,
   deleteWatchlistTitleV2,
   listWatchlistTitlesV2,
+  type WatchlistTitle,
   type WatchlistTitleEntry,
 } from "@/api/v2/watchlistTitles";
 import { formatRequestReason } from "@/lib/mediaRequests";
@@ -14,12 +15,38 @@ import { invalidateRequestSurfaces, REQUESTS_STALE_TIME } from "./useRequests";
 
 /** Watchlist entries for titles the library doesn't have yet. */
 export function useWatchlistTitles(options: { enabled?: boolean } = {}) {
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: watchlistKeys.titles(),
-    queryFn: ({ signal }) => listWatchlistTitlesV2(signal),
+    queryFn: async ({ signal }) => {
+      const before = queryClient.getQueryData<WatchlistTitle[]>(watchlistKeys.titles());
+      const titles = await listWatchlistTitlesV2(signal);
+      refreshAfterTitlesRead(queryClient, before, titles);
+      return titles;
+    },
     enabled: options.enabled ?? true,
     staleTime: REQUESTS_STALE_TIME,
   });
+}
+
+/**
+ * Reading the titles moves the ones the library now has onto the library
+ * watchlist, server side, so the library tab's grid is refreshed after every
+ * read. When a title this tab showed is gone, the library surfaces that list
+ * the watchlist (the home row, item states) refresh too. That refresh reads
+ * the titles once more, which finds nothing else gone, so it settles.
+ */
+export function refreshAfterTitlesRead(
+  queryClient: QueryClient,
+  before: readonly WatchlistTitle[] | undefined,
+  after: readonly WatchlistTitle[],
+): void {
+  queryClient.invalidateQueries({ predicate: (query) => isWatchlistCatalogQuery(query.queryKey) });
+  if (!before) return;
+  const still = new Set(after.map((t) => `${t.media_type}-${t.tmdb_id}`));
+  if (before.some((t) => !still.has(`${t.media_type}-${t.tmdb_id}`))) {
+    scheduleMediaSurfaceInvalidation(queryClient);
+  }
 }
 
 export interface ToggleWatchlistTitleInput {
