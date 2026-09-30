@@ -1724,7 +1724,8 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, themeSongsFixtureCases()...)
 	cases = append(cases, passwordResetFixtureCases()...)
 	cases = append(cases, libraryMonitoringFixtureCases()...)
-	return append(cases, watchTrickplayFixtureCases()...)
+	cases = append(cases, watchTrickplayFixtureCases()...)
+	return append(cases, adminTrickplayFixtureCases()...)
 }
 
 // fixtureMultipartType is the multipart Content-Type of the avatar fixtures,
@@ -1823,6 +1824,7 @@ func fixtureDeps() Dependencies {
 	deps.History = newFakeHistory()
 	deps.Watch = &fakeWatch{}
 	deps.Trickplay = &fakeTrickplay{}
+	deps.AdminTrickplay = &fakeAdminTrickplay{}
 	deps.Recommendations = &fakeRecommendations{seedCandidates: 1, cardsHasMore: true}
 	deps.Requests = fixtureRequests()
 	deps.AdminRequests = fixtureAdminRequests()
