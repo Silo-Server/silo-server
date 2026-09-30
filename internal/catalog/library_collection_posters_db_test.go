@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -22,6 +23,7 @@ import (
 type fakeCollageGenerator struct {
 	mu       sync.Mutex
 	composed map[string][]string
+	fail     error
 }
 
 func (g *fakeCollageGenerator) CollectionCollagePath(collectionID, key string) string {
@@ -31,6 +33,9 @@ func (g *fakeCollageGenerator) CollectionCollagePath(collectionID, key string) s
 func (g *fakeCollageGenerator) ComposeCollectionCollage(_ context.Context, collectionID, key string, sources []string) (string, string, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if g.fail != nil {
+		return "", "", g.fail
+	}
 	if g.composed == nil {
 		g.composed = map[string][]string{}
 	}
@@ -317,27 +322,28 @@ func TestCollectionCollagesFollowTheViewerDB(t *testing.T) {
 		assertCollageQueuedForCollector(t, pool, stalePath)
 	})
 
-	t.Run("a collage whose collection is gone is queued for the collector", func(t *testing.T) {
-		orphan := fmt.Sprintf("collection-images/missing-%d/collage/original.k.webp", suffix)
+	t.Run("a build whose collection is gone leaves its objects to the collector", func(t *testing.T) {
+		missing := CollectionCollageRef{CollectionID: fmt.Sprintf("missing-%d", suffix), Key: "4444444444444444"}
+		orphan := gen.CollectionCollagePath(missing.CollectionID, missing.Key)
 		t.Cleanup(func() {
 			_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path = $1`, orphan)
 		})
-		if err := repo.QueueCollectionCollageObjects(ctx, []string{orphan}); err != nil {
-			t.Fatalf("queue: %v", err)
+		if err := svc.buildCollage(ctx, missing, []string{"orphan/poster/original.webp"}); !errors.Is(err, ErrLibraryCollectionNotFound) {
+			t.Fatalf("build: err = %v, want ErrLibraryCollectionNotFound", err)
 		}
 		assertCollageQueuedForCollector(t, pool, orphan)
 	})
 
-	t.Run("rebuilding a collage withdraws it from the collector", func(t *testing.T) {
+	t.Run("a build reserves its path until the row is saved", func(t *testing.T) {
 		src := []string{"rebuilt/poster/original.webp"}
 		rebuiltRef := CollectionCollageRef{CollectionID: collection.ID, Key: CollectionCollageKey(src)}
 		rebuiltPath := gen.CollectionCollagePath(collection.ID, rebuiltRef.Key)
 		t.Cleanup(func() {
 			_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path = $1`, rebuiltPath)
 		})
-		// The collector holds the path: the build must not upload under it.
-		if err := repo.QueueCollectionCollageObjects(ctx, []string{rebuiltPath}); err != nil {
-			t.Fatalf("queue: %v", err)
+		// A collector worker holds the path: the build must not upload under it.
+		if held, err := repo.ReserveCollectionCollagePath(ctx, rebuiltPath); err != nil || held {
+			t.Fatalf("reserve: held=%v err=%v", held, err)
 		}
 		if _, err := pool.Exec(ctx, `UPDATE artwork_revision_gc_candidates SET locked_at = NOW(), locked_by = 'collector' WHERE original_path = $1`, rebuiltPath); err != nil {
 			t.Fatalf("lease: %v", err)
@@ -348,11 +354,23 @@ func TestCollectionCollagesFollowTheViewerDB(t *testing.T) {
 		if gen.sources(rebuiltRef.Key) != nil {
 			t.Fatal("a collage was composed while the collector held its path")
 		}
-		// Once released, the build withdraws the queued objects before
-		// uploading, so the collector can't delete them under the new row.
-		if _, err := pool.Exec(ctx, `UPDATE artwork_revision_gc_candidates SET locked_at = NULL, locked_by = '' WHERE original_path = $1`, rebuiltPath); err != nil {
+		if _, err := pool.Exec(ctx, `UPDATE artwork_revision_gc_candidates SET locked_at = NULL, locked_by = '', not_before = NOW(), next_attempt_at = NOW() WHERE original_path = $1`, rebuiltPath); err != nil {
 			t.Fatalf("release: %v", err)
 		}
+
+		// A failed build leaves the path reserved, past the grace period, so
+		// the collector deletes whatever it uploaded.
+		gen.mu.Lock()
+		gen.fail = errors.New("upload failed")
+		gen.mu.Unlock()
+		if err := svc.buildCollage(ctx, rebuiltRef, src); err == nil {
+			t.Fatal("a failed compose reported success")
+		}
+		assertCollageQueuedForCollector(t, pool, rebuiltPath)
+
+		gen.mu.Lock()
+		gen.fail = nil
+		gen.mu.Unlock()
 		if err := svc.buildCollage(ctx, rebuiltRef, src); err != nil {
 			t.Fatalf("build: %v", err)
 		}
@@ -361,7 +379,15 @@ func TestCollectionCollagesFollowTheViewerDB(t *testing.T) {
 			t.Fatalf("count queued: %v", err)
 		}
 		if queued != 0 {
-			t.Fatal("a rebuilt collage stayed queued for deletion")
+			t.Fatal("a saved collage stayed queued for deletion")
+		}
+	})
+
+	t.Run("a collection listed from a query has no collage", func(t *testing.T) {
+		queried := *stored
+		queried.QueryDefinition = json.RawMessage(`{"match":"all","groups":[]}`)
+		if got, ok := svc.CollectionPosters(ctx, []*models.LibraryCollection{&queried}, unrestricted)[collection.ID]; ok {
+			t.Fatalf("poster = %+v, want none", got)
 		}
 	})
 

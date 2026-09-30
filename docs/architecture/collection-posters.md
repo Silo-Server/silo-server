@@ -13,11 +13,12 @@ design; it is never served.
 
 ## Generated posters
 
-A stored (non-smart) collection without an assigned poster shows a collage of its members'
+A collection without an assigned poster shows a collage of its members'
 posters. Each viewer sees the first four members it can access that have a poster, in
 collection order. Access uses the same predicates as the collection's member list
 (`itemAccessConditions`: library allow and deny lists, maturity limits, excluded media types),
-so a collage never shows a title the viewer's member list leaves out. Smart collections have no
+so a collage never shows a title the viewer's member list leaves out. A collection the catalog
+lists from a query (a smart collection, or any collection with a query definition) has no
 collage.
 
 Each distinct set of source posters is one stored collage, shared by every viewer that selects
@@ -43,8 +44,10 @@ the same posters:
   row's objects in `artwork_revision_gc_candidates` in the same transaction
   (`queue_collection_poster_objects`), and the artwork revision collector deletes them after its
   grace period while no row names the path. Collage paths are deterministic, so a build first
-  withdraws its path from that queue, and it waits for a later read when a collector worker holds
-  the path. Deleting a collection also deletes its whole `collection-images/` prefix right away.
+  reserves its path in that queue, past the build, and saving the row releases it in the same
+  transaction. A build that fails or dies anywhere in between leaves its objects to the
+  collector. A build waits for a later read while a collector worker holds its path. Deleting a
+  collection also deletes its whole `collection-images/` prefix right away.
 - The artwork reconcile sweeps the table like other artwork surfaces. A cleared row reads as a
   missing collage and is rebuilt on the next read.
 

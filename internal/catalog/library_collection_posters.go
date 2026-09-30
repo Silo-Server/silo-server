@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/Silo-Server/silo-server/internal/collage"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -74,6 +76,13 @@ type CollectionCollage struct {
 	Path       string
 	Thumbhash  string
 	LastUsedAt time.Time
+}
+
+// collectionUsesLiveQuery reports whether the catalog lists the collection's
+// members from its query rather than its stored items, as
+// resolveLibraryCollectionCursor decides. Such a collection has no collage.
+func collectionUsesLiveQuery(c *models.LibraryCollection) bool {
+	return IsLiveQueryType(c.CollectionType) || catalogCollectionUsesLiveQuery(c.QueryDefinition)
 }
 
 // CollectionCollageKey returns the key of the collage composed from sources,
@@ -200,9 +209,17 @@ func (r *LibraryCollectionRepository) TouchCollectionCollages(ctx context.Contex
 }
 
 // SaveCollectionCollage stores a built collage, replacing one with the same
-// key. It returns ErrLibraryCollectionNotFound when the collection is gone.
+// key, and in the same transaction releases the path's reservation in the
+// artwork revision collector's queue: the row now protects the objects. It
+// returns ErrLibraryCollectionNotFound when the collection is gone, leaving the
+// reservation for the collector.
 func (r *LibraryCollectionRepository) SaveCollectionCollage(ctx context.Context, c CollectionCollage) error {
-	tag, err := r.pool.Exec(ctx, `
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("beginning collection collage save: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	tag, err := tx.Exec(ctx, `
 		INSERT INTO library_collection_poster_variants (collection_id, variant_key, poster_path, poster_thumbhash)
 		SELECT $1, $2, $3, $4
 		WHERE EXISTS (SELECT 1 FROM library_collections WHERE id = $1)
@@ -216,6 +233,15 @@ func (r *LibraryCollectionRepository) SaveCollectionCollage(ctx context.Context,
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrLibraryCollectionNotFound
+	}
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM artwork_revision_gc_candidates
+		WHERE original_path = $1 AND locked_at IS NULL
+	`, c.Path); err != nil {
+		return fmt.Errorf("releasing collection collage reservation: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("committing collection collage save: %w", err)
 	}
 	return nil
 }
@@ -235,40 +261,39 @@ func (r *LibraryCollectionRepository) RetireUnusedCollectionCollages(ctx context
 	return int(tag.RowsAffected()), nil
 }
 
-// QueueCollectionCollageObjects hands stored collage objects that no row
-// names to the artwork revision collector.
-func (r *LibraryCollectionRepository) QueueCollectionCollageObjects(ctx context.Context, paths []string) error {
-	if _, err := r.pool.Exec(ctx, `
-		SELECT public.queue_collection_poster_objects(p) FROM unnest($1::text[]) AS p
-	`, paths); err != nil {
-		return fmt.Errorf("queueing collection collage objects: %w", err)
+// ReserveCollectionCollagePath queues a collage path in the artwork revision
+// collector before a collage is built under it, pushing any earlier entry past
+// the build. If the build fails or its node dies before SaveCollectionCollage,
+// the collector deletes whatever it uploaded; a saved row releases the
+// reservation. It reports held when a collector worker is processing the
+// path, since it may be deleting objects the build would upload; the build
+// must then wait for a later read.
+func (r *LibraryCollectionRepository) ReserveCollectionCollagePath(ctx context.Context, path string) (held bool, err error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("beginning collection collage reservation: %w", err)
 	}
-	return nil
-}
-
-// ReclaimCollectionCollagePath withdraws a collage path from the artwork
-// revision collector before a collage is built under it again. Collage paths
-// are deterministic, so without this the collector could delete the objects a
-// rebuild is uploading before the rebuild saves the row that protects them. It
-// reports held when a collector worker is processing the path; the build must
-// then wait for a later read.
-func (r *LibraryCollectionRepository) ReclaimCollectionCollagePath(ctx context.Context, path string) (held bool, err error) {
-	if err := r.pool.QueryRow(ctx, `
-		WITH candidate AS (
-			SELECT id, locked_at
-			FROM artwork_revision_gc_candidates
-			WHERE original_path = $1
-			FOR UPDATE
-		), withdrawn AS (
-			DELETE FROM artwork_revision_gc_candidates c
-			USING candidate
-			WHERE c.id = candidate.id AND candidate.locked_at IS NULL
-		)
-		SELECT COALESCE(bool_or(locked_at IS NOT NULL), FALSE) FROM candidate
-	`, path).Scan(&held); err != nil {
-		return false, fmt.Errorf("reclaiming collection collage path: %w", err)
+	defer func() { _ = tx.Rollback(ctx) }()
+	err = tx.QueryRow(ctx, `
+		SELECT locked_at IS NOT NULL
+		FROM artwork_revision_gc_candidates
+		WHERE original_path = $1
+		FOR UPDATE
+	`, path).Scan(&held)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+	case err != nil:
+		return false, fmt.Errorf("checking collection collage reservation: %w", err)
+	case held:
+		return true, nil
 	}
-	return held, nil
+	if _, err := tx.Exec(ctx, `SELECT public.queue_collection_poster_objects($1)`, path); err != nil {
+		return false, fmt.Errorf("reserving collection collage path: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("committing collection collage reservation: %w", err)
+	}
+	return false, nil
 }
 
 // CollectionPosterWidths are the resized variants stored beside every
@@ -291,8 +316,9 @@ func splitCollectionCollageRefs(refs []CollectionCollageRef) ([]string, []string
 // described by access, keyed by collection ID. An uploaded or template poster
 // is the same for every viewer. Otherwise the poster is the collage of the
 // first members the viewer can access. A collage not built yet is left out of
-// this answer and built in the background, so a later read finds it. Smart
-// collections have no collage. Collections with no poster are absent.
+// this answer and built in the background, so a later read finds it.
+// Collections listed from a query have no collage. Collections with no poster
+// are absent.
 func (s *LibraryCollectionService) CollectionPosters(ctx context.Context, collections []*models.LibraryCollection, access AccessFilter) map[string]CollectionPoster {
 	posters := make(map[string]CollectionPoster, len(collections))
 	var collageIDs []string
@@ -304,7 +330,7 @@ func (s *LibraryCollectionService) CollectionPosters(ctx context.Context, collec
 			posters[c.ID] = poster
 			continue
 		}
-		if !IsLiveQueryType(c.CollectionType) {
+		if !collectionUsesLiveQuery(c) {
 			collageIDs = append(collageIDs, c.ID)
 		}
 	}
@@ -400,9 +426,11 @@ func (s *LibraryCollectionService) PrepareCollectionCollage(ctx context.Context,
 
 // buildCollage composes and stores one collage, then retires the collection's
 // collages that went unused. Nodes that build the same collage at once write
-// the same objects, so the result doesn't depend on which one wins.
+// the same objects, so the result doesn't depend on which one wins. The path
+// stays reserved in the artwork revision collector until the row is saved, so
+// a failed build leaves nothing behind.
 func (s *LibraryCollectionService) buildCollage(ctx context.Context, ref CollectionCollageRef, sources []string) error {
-	held, err := s.collections.ReclaimCollectionCollagePath(ctx, s.CollageGen.CollectionCollagePath(ref.CollectionID, ref.Key))
+	held, err := s.collections.ReserveCollectionCollagePath(ctx, s.CollageGen.CollectionCollagePath(ref.CollectionID, ref.Key))
 	if err != nil {
 		return err
 	}
@@ -415,13 +443,6 @@ func (s *LibraryCollectionService) buildCollage(ctx context.Context, ref Collect
 	}
 	c := CollectionCollage{CollectionCollageRef: ref, Path: path, Thumbhash: thumbhash}
 	if err := s.collections.SaveCollectionCollage(ctx, c); err != nil {
-		if errors.Is(err, ErrLibraryCollectionNotFound) {
-			// The collection was deleted during the build. Its objects went
-			// with it, apart from the ones this build just wrote.
-			if queueErr := s.collections.QueueCollectionCollageObjects(ctx, []string{path}); queueErr != nil {
-				slog.WarnContext(ctx, "collage: failed to queue orphaned collage", "component", "catalog", "collection_id", ref.CollectionID, "error", queueErr)
-			}
-		}
 		return err
 	}
 

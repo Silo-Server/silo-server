@@ -1218,7 +1218,7 @@ func (s *LibraryCollectionService) MaybeGenerateCollage(ctx context.Context, col
 		slog.WarnContext(ctx, "collage: failed to load collection", "component", "catalog", "collection_id", collectionID, "error", err)
 		return
 	}
-	if _, assigned := AssignedCollectionPoster(collection); assigned || IsLiveQueryType(collection.CollectionType) {
+	if _, assigned := AssignedCollectionPoster(collection); assigned || collectionUsesLiveQuery(collection) {
 		return
 	}
 

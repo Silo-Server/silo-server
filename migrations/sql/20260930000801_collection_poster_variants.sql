@@ -18,8 +18,11 @@ CREATE TABLE public.library_collection_poster_variants (
 -- Queue a stored collection poster's objects for the artwork revision
 -- collector, as the artwork displacement trigger does for catalog artwork. The
 -- collector deletes them after the grace period only while no artwork surface
--- names the path. Collection posters are stored as original, w500 and w300
--- under one revision (catalog.CollectionPosterWidths); change both together.
+-- names the path. A path queued again starts over, including one whose objects
+-- the collector already deleted: a collage build reserves its path this way
+-- before uploading, so the objects are deleted again if the build fails.
+-- Collection posters are stored as original, w500 and w300 under one revision
+-- (catalog.CollectionPosterWidths); change both together.
 -- +goose StatementBegin
 CREATE FUNCTION public.queue_collection_poster_objects(p_path text)
 RETURNS void
@@ -47,6 +50,7 @@ AS $$
         locked_at = NULL,
         locked_by = '',
         last_error = '',
+        deleted_at = NULL,
         updated_at = NOW();
 $$;
 -- +goose StatementEnd
