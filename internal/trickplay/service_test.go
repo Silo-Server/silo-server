@@ -142,7 +142,6 @@ func (e *fakeExtractor) Extract(ctx context.Context, _ *Job, req mediasample.Req
 func testService(q *fakeQueue, store *fakeStore, extractor Extractor, settings fakeSettings) *Service {
 	s := newService(q, store, settings, extractor, "node-a")
 	s.logger = slog.New(slog.DiscardHandler)
-	s.statInput = func(string) error { return nil }
 	return s
 }
 
@@ -182,6 +181,35 @@ func TestGenerateChunksUploadsAndPublishes(t *testing.T) {
 	}
 }
 
+type geometryExtractor struct {
+	fakeExtractor
+	heights []int
+}
+
+func (e *geometryExtractor) Extract(ctx context.Context, job *Job, req mediasample.Request) (mediasample.Result, error) {
+	result, err := e.fakeExtractor.Extract(ctx, job, req)
+	if err == nil {
+		result.SheetTileHeight = e.heights[len(e.requests)-1]
+	}
+	return result, err
+}
+
+func TestGeneratePublishesDecodedGeometryAndRejectsMixedChunks(t *testing.T) {
+	for _, heights := range [][]int{{284, 284}, {284, 90}} {
+		q, store := newFakeQueue(), &fakeStore{}
+		extractor := &geometryExtractor{heights: heights}
+		s := testService(q, store, extractor, fakeSettings{WidthSetting: "160"})
+		published, err := s.generate(t.Context(), testJob(42, 18000))
+		if heights[0] != heights[1] {
+			if err == nil || len(q.published) != 0 {
+				t.Fatalf("mixed geometry published: %+v, %v", published, err)
+			}
+		} else if err != nil || published.Height != 284 || !extractor.requests[0].Sheets.UseInputAspect {
+			t.Fatalf("decoded geometry = %+v, %v", published, err)
+		}
+	}
+}
+
 func TestProcessOutcomes(t *testing.T) {
 	unreadable := errors.New("stat: no such file")
 	tests := map[string]struct {
@@ -197,8 +225,8 @@ func TestProcessOutcomes(t *testing.T) {
 		"storage": {func(_ *fakeQueue, st *fakeStore, _ *fakeExtractor, _ *Service) {
 			st.err = errors.New("s3 down")
 		}, &finishCall{Failed, 0}},
-		"unreadable input": {func(_ *fakeQueue, _ *fakeStore, _ *fakeExtractor, s *Service) {
-			s.statInput = func(string) error { return fmt.Errorf("%w: %w", unreadable, fs.ErrNotExist) }
+		"unreadable input": {func(_ *fakeQueue, _ *fakeStore, e *fakeExtractor, _ *Service) {
+			e.err = &inputError{err: fmt.Errorf("%w: %w", unreadable, fs.ErrNotExist)}
 		}, &finishCall{Released, releaseDelay}},
 		"no node": {func(_ *fakeQueue, _ *fakeStore, e *fakeExtractor, _ *Service) {
 			e.err = errNoNode
@@ -356,7 +384,6 @@ func TestProcessReleasesWhenSettingsAreUnreadable(t *testing.T) {
 	q, extractor := newFakeQueue(), &fakeExtractor{}
 	s := newService(q, &fakeStore{}, unreadableSettings{}, extractor, "node-a")
 	s.logger = slog.New(slog.DiscardHandler)
-	s.statInput = func(string) error { return nil }
 
 	s.process(t.Context(), testJob(8, 600))
 

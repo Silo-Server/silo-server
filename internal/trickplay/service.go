@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -57,6 +56,9 @@ const (
 	runThreads = 2
 	// reconcileBatch bounds each reconcile step.
 	reconcileBatch = 5000
+	// reconcilePassBatches yields the cluster lock after a bounded pass;
+	// a full final batch schedules another pass immediately.
+	reconcilePassBatches = 4
 	// releaseDelay is how long a file waits after this server gave it back
 	// through no fault of the file: its input unreadable here, or shutdown.
 	releaseDelay = time.Hour
@@ -109,10 +111,8 @@ type Service struct {
 	wake      chan struct{}
 	reconcile chan struct{}
 	now       func() time.Time
-	// statInput checks a job's input before any work, heartbeatEvery paces
-	// lease renewals, and settingsEvery paces rereading the settings; tests
-	// replace them.
-	statInput      func(path string) error
+	// heartbeatEvery paces lease renewals and settingsEvery paces rereading
+	// the settings; tests replace them.
 	heartbeatEvery time.Duration
 	settingsEvery  time.Duration
 }
@@ -140,7 +140,6 @@ func newService(q queue, store Store, settings SettingsReader, extractor Extract
 		wake:           make(chan struct{}, 1),
 		reconcile:      make(chan struct{}, 1),
 		now:            time.Now,
-		statInput:      func(path string) error { _, err := os.Stat(path); return err },
 		heartbeatEvery: heartbeatInterval,
 		settingsEvery:  idlePoll,
 	}
@@ -348,9 +347,6 @@ func (s *Service) heartbeat(ctx context.Context, fileID int, cancel context.Canc
 
 // generate makes, uploads, and publishes job's sheets.
 func (s *Service) generate(ctx context.Context, job *Job) (Published, error) {
-	if err := s.statInput(job.FilePath); err != nil {
-		return Published{}, &inputError{err: err}
-	}
 	recipe, err := s.Recipe(ctx)
 	if err != nil {
 		return Published{}, err
@@ -363,7 +359,7 @@ func (s *Service) generate(ctx context.Context, job *Job) (Published, error) {
 	}
 	columns, rows := recipe.Grid()
 	perSheet := columns * rows
-	sheets := &mediasample.SheetsOutput{TileWidth: recipe.Width, TileHeight: height, Columns: columns, Rows: rows, Quality: Quality}
+	sheets := &mediasample.SheetsOutput{TileWidth: recipe.Width, TileHeight: height, Columns: columns, Rows: rows, Quality: Quality, UseInputAspect: true}
 	if tonemap.NeedsToneMap(&models.MediaFile{HDR: job.HDR, VideoTracks: job.VideoTracks}) {
 		sheets.ToneMap = &mediasample.ToneMap{AllowSoftware: true}
 	}
@@ -382,6 +378,15 @@ func (s *Service) generate(ctx context.Context, job *Job) (Published, error) {
 		result, err := s.extractor.Extract(ctx, job, req)
 		if err != nil {
 			return Published{}, leaseAware(ctx, err)
+		}
+		actualHeight := height
+		if result.SheetTileHeight > 0 {
+			actualHeight = result.SheetTileHeight
+		}
+		if start == 0 {
+			published.Height = actualHeight
+		} else if actualHeight != published.Height {
+			return Published{}, fmt.Errorf("trickplay chunks have different tile heights: %d and %d", published.Height, actualHeight)
 		}
 		if revision == 0 {
 			rev, ok, err := s.queue.BeginUpload(ctx, job.FileID, s.owner)
@@ -484,16 +489,44 @@ func (s *Service) Reconcile(ctx context.Context) (ReconcileStats, bool, error) {
 	if !acquired {
 		return ReconcileStats{}, false, nil
 	}
-	defer func() { _ = lock.Release(context.WithoutCancel(ctx)) }()
+	more := false
+	defer func() {
+		_ = lock.Release(context.WithoutCancel(ctx))
+		if more && ctx.Err() == nil {
+			s.ReconcileSoon()
+		}
+	}()
 	recipe, err := s.Recipe(ctx)
 	if err != nil {
 		return ReconcileStats{}, true, err
 	}
-	stats, err := s.queue.Reconcile(ctx, recipe, s.store.Identity(), reconcileBatch)
-	if err == nil {
-		s.Kick()
-	}
+	stats, more, err := s.reconcileBatches(ctx, recipe)
 	return stats, true, err
+}
+
+// reconcileBatches drains bounded steps, waking workers after each batch.
+// A pass yields after reconcilePassBatches so other servers and settings
+// changes can take the lock before a continuation.
+func (s *Service) reconcileBatches(ctx context.Context, recipe Recipe) (ReconcileStats, bool, error) {
+	var total ReconcileStats
+	for range reconcilePassBatches {
+		if err := ctx.Err(); err != nil {
+			return total, false, err
+		}
+		stats, err := s.queue.Reconcile(ctx, recipe, s.store.Identity(), reconcileBatch)
+		total.Reclaimed += stats.Reclaimed
+		total.Added += stats.Added
+		total.Removed += stats.Removed
+		total.Stale += stats.Stale
+		if err != nil {
+			return total, false, err
+		}
+		s.Kick()
+		if stats.Reclaimed < reconcileBatch && stats.Added < reconcileBatch && stats.Removed < reconcileBatch && stats.Stale < reconcileBatch {
+			return total, false, nil
+		}
+	}
+	return total, true, nil
 }
 
 // intSetting reads an integer setting, falling back to def when it is unset
