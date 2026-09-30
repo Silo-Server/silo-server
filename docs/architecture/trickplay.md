@@ -71,6 +71,44 @@ each step bounded:
    from a different file. An `unusable` row is requeued when its file
    changes.
 
+## Generation
+
+Every API server runs a `trickplay.Service`. It claims files while it has a
+free worker slot (`playback.trickplay_workers`, default 1, applied live),
+and runs each file at idle CPU and I/O priority:
+
+- The recipe comes from the settings in force at claim time:
+  `playback.preview_image_width` (default 300, shared with chapter
+  thumbnails) and `playback.trickplay_interval_seconds` (default 10, at least
+  5). A width up to 320 gets a 10x10 grid; wider thumbnails get fewer tiles
+  so a sheet stays at most 3200 pixels wide. JPEG quality is fixed at 80.
+- A tile's height follows the probed display aspect ratio, falling back to
+  the pixel dimensions, rounded to an even number.
+- Thumbnail k is sampled at the middle of its interval,
+  `k*interval + interval/2`, the last one a second inside the file, so it
+  shows what plays in `[k*interval, (k+1)*interval)`.
+- One `mediasample` Sheets request covers at most 16 sheets; a longer file
+  takes several runs, which bounds each run's memory. Each run seeks to the
+  keyframe before each sample rather than reading the whole file
+  (`Samples`); see [media sampling](media-sampling.md#sheets). AVI files,
+  whose index seeks poorly, are read in one pass (`ReadThrough`), and
+  containers without a keyframe index (MPEG-TS) always are.
+- HDR and Dolby Vision sources are tone mapped (`tonemap.NeedsToneMap`),
+  after scaling, so software tone mapping is always allowed.
+- Hardware decode follows `playback.hw_accel` and `playback.hw_device`
+  (QSV, VAAPI, VideoToolbox), with a software attempt after a hardware
+  failure. Attempt timeouts grow with the samples: two minutes plus half a
+  second a sample on hardware, two seconds a sample in software.
+- A file this server cannot read (an offline mount) is given back for an
+  hour without counting a failure; `invalid_data` and `no_stream` mark it
+  unusable; any other failure counts and backs off.
+- ffmpeg runs are recorded under the `trickplay` subprocess workload.
+
+The Queue Seek Previews task runs a reconcile pass at startup and every 15
+minutes, on one server at a time. A server also reconciles as soon as it
+reads a new width or interval (it rereads the settings every minute), so a
+settings change does not wait for the next pass.
+
 ## Serving
 
 A manifest is served only while all of these hold:
