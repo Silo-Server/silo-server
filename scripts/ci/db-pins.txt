@@ -59,6 +59,7 @@
 # Home sections: one overlay summary row read per card.
 ./internal/sections TestOverlaySummariesOnlyDecodeWinner
 ./internal/sections TestOverlaySummariesRankingMatchesGo
+./internal/sections TestOverlaySummariesRankedIndexPlan
 
 # Settings: one query per batched resolution, whatever its scopes and keys.
 ./internal/userstore/pgstore TestPostgresResolutionIssuesOneQuery

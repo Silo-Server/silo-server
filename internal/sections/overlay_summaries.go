@@ -37,7 +37,8 @@ const overlaySummaryRangeRankSQL = `CASE
 // ListOverlaySummaries returns badges from each card's best accessible file.
 // A file can serve both its series and episode cards, so page composition does
 // not change the winner. Access filtering and ranking happen in PostgreSQL;
-// only the winners' wide track metadata is sent to Go for BuildSummary.
+// only the winners' wide track metadata is sent to Go for BuildSummary. The
+// active-file ranking indexes let each lookup stop at its first accessible file.
 // Each call reads committed files without a result cache, including changes
 // made by scanners or API servers in other processes.
 func (f *Fetcher) ListOverlaySummaries(ctx context.Context, contentIDs []string, filter catalog.AccessFilter) (map[string]*models.OverlaySummary, error) {
@@ -47,33 +48,42 @@ func (f *Fetcher) ListOverlaySummaries(ctx context.Context, contentIDs []string,
 	}
 
 	args := []any{contentIDs}
-	conditions := []string{
-		"(mf.content_id = ANY($1) OR mf.episode_id = ANY($1))",
-		"mf.missing_since IS NULL",
-		"g.group_key = ANY($1)",
-	}
+	conditions := []string{"mf.missing_since IS NULL"}
 	accessConditions, args := catalog.MediaFileAccessSQL("mf", filter, args)
 	conditions = append(conditions, accessConditions...)
 
-	// Filter through the existing content/episode indexes before expanding the
-	// requested groups. Sort narrow candidates, then fetch each winner's JSON.
+	// Find the best accessible file through each identity index, then compare
+	// those two candidates. Ranking every episode of every requested series
+	// makes a home page repeatedly decode thousands of video-track JSON values.
+	// Keep the original content/episode/file tie order in both branches and in
+	// the final comparison, including when one ID occurs in both identity columns.
 	query := fmt.Sprintf(`
 		WITH winners AS (
-			SELECT DISTINCT ON (group_key) group_key, id
-			FROM (
-				SELECT
-					g.group_key,
-					mf.id, mf.content_id, mf.episode_id,
-					%s AS resolution_rank,
-					%s AS range_rank
-				FROM media_files mf
-				CROSS JOIN LATERAL (VALUES (mf.content_id), (mf.episode_id)) AS g(group_key)
-				WHERE %s
-			) candidates
-			-- The final tiebreak repeats the legacy row order (content_id,
-			-- episode_id, id) rather than id alone, because overlays.BuildSummary keeps
-			-- the earliest file in the slice and that slice arrived in this order.
-			ORDER BY group_key, resolution_rank DESC, range_rank DESC, content_id ASC, episode_id ASC, id ASC
+			SELECT requested.group_key, best.id
+			FROM (SELECT DISTINCT unnest($1::text[]) AS group_key) requested
+			CROSS JOIN LATERAL (
+				SELECT candidates.id
+				FROM (
+					(SELECT mf.id, mf.content_id, mf.episode_id,
+						%[1]s AS resolution_rank, %[2]s AS range_rank
+					 FROM media_files mf
+					 WHERE mf.content_id = requested.group_key AND %[3]s
+					 ORDER BY resolution_rank DESC, range_rank DESC,
+						mf.episode_id ASC, mf.id ASC
+					 LIMIT 1)
+					UNION ALL
+					(SELECT mf.id, mf.content_id, mf.episode_id,
+						%[1]s AS resolution_rank, %[2]s AS range_rank
+					 FROM media_files mf
+					 WHERE mf.episode_id = requested.group_key AND %[3]s
+					 ORDER BY resolution_rank DESC, range_rank DESC,
+						mf.content_id ASC, mf.id ASC
+					 LIMIT 1)
+				) candidates
+				ORDER BY resolution_rank DESC, range_rank DESC,
+					content_id ASC, episode_id ASC, id ASC
+				LIMIT 1
+			) best
 		)
 		SELECT winners.group_key, mf.content_id, mf.episode_id, mf.file_path, mf.resolution, mf.codec_audio,
 			mf.audio_tracks, mf.hdr, mf.video_tracks, mf.codec_video, mf.audio_channels, mf.container,

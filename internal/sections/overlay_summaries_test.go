@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -17,11 +18,18 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/overlays"
+	"github.com/Silo-Server/silo-server/migrations"
 )
 
-type overlayQueryTrace struct{ rows atomic.Int64 }
+type overlayQueryTrace struct {
+	rows  atomic.Int64
+	query atomic.Pointer[pgx.TraceQueryStartData]
+}
 
-func (q *overlayQueryTrace) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryStartData) context.Context {
+func (q *overlayQueryTrace) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	if strings.Contains(data.SQL, "WITH winners AS") {
+		q.query.Store(&data)
+	}
 	return ctx
 }
 func (q *overlayQueryTrace) TraceQueryEnd(_ context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
@@ -55,7 +63,27 @@ func overlayTestPool(t testing.TB) (*pgxpool.Pool, *overlayQueryTrace) {
   );
   CREATE INDEX ON media_files(content_id);
   CREATE INDEX ON media_files(episode_id) WHERE episode_id IS NOT NULL;`)
-		return err
+		if err != nil {
+			return err
+		}
+		// Exercise the shipped expressions, ordering and predicates on this
+		// connection's temporary table. No persistent schema is modified.
+		migration, err := migrations.FS.ReadFile("sql/20260930120217_index_home_overlay_winners.sql")
+		if err != nil {
+			return err
+		}
+		indexes := regexp.MustCompile(`(?s)CREATE INDEX CONCURRENTLY IF NOT EXISTS .*?;`).FindAllString(string(migration), -1)
+		if len(indexes) != 2 {
+			return fmt.Errorf("expected two overlay ranking indexes, got %d", len(indexes))
+		}
+		for _, statement := range indexes {
+			statement = strings.Replace(statement, "CONCURRENTLY ", "", 1)
+			statement = strings.Replace(statement, "ON public.media_files", "ON media_files", 1)
+			if _, err := conn.Exec(ctx, statement); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
 	if err != nil {
@@ -206,6 +234,111 @@ func TestOverlaySummariesOnlyDecodeWinner(t *testing.T) {
 	}
 }
 
+func TestOverlaySummariesIdentityCollision(t *testing.T) {
+	pool, trace := overlayTestPool(t)
+	seedOverlayFiles(t, pool,
+		&models.MediaFile{ID: 1, ContentID: "shared", EpisodeID: "shared", Resolution: "1080p", CodecAudio: "aac"},
+		&models.MediaFile{ID: 2, ContentID: "shared", EpisodeID: "other", Resolution: "2160p", CodecAudio: "ac3"},
+		&models.MediaFile{ID: 3, ContentID: "earlier", EpisodeID: "shared", Resolution: "2160p", CodecAudio: "flac"},
+	)
+	got, err := (&Fetcher{pool: pool}).ListOverlaySummaries(t.Context(), []string{"shared", "shared"}, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got["shared"].Audio != "FLAC" || trace.rows.Load() != 1 {
+		t.Fatalf("identity collision or tie ordering selected the wrong winner: %+v", got)
+	}
+}
+
+func TestOverlaySummariesTrackChangesUpdateRank(t *testing.T) {
+	pool, _ := overlayTestPool(t)
+	seedOverlayFiles(t, pool,
+		&models.MediaFile{ID: 1, ContentID: "series", EpisodeID: "episode-a", Resolution: "1080p", CodecAudio: "aac"},
+		&models.MediaFile{ID: 2, ContentID: "series", EpisodeID: "episode-b", Resolution: "1080p", CodecAudio: "flac"},
+	)
+	fetcher := &Fetcher{pool: pool}
+	for _, step := range []struct{ sql, audio string }{
+		{`UPDATE media_files SET hdr = true WHERE id = 2`, "FLAC"},
+		{`UPDATE media_files SET video_tracks = '[{"dv_profile":8}]'::jsonb WHERE id = 1`, "AAC"},
+		{`UPDATE media_files SET video_tracks = NULL WHERE id = 1`, "FLAC"},
+		{`UPDATE media_files SET missing_since = now() WHERE id = 2`, "AAC"},
+		{`UPDATE media_files SET missing_since = NULL WHERE id = 2`, "FLAC"},
+	} {
+		if _, err := pool.Exec(t.Context(), step.sql); err != nil {
+			t.Fatal(err)
+		}
+		got, err := fetcher.ListOverlaySummaries(t.Context(), []string{"series"}, catalog.AccessFilter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got["series"] == nil || got["series"].Audio != step.audio {
+			t.Fatalf("stale badge after committed track change: got %+v, want %s", got, step.audio)
+		}
+	}
+}
+
+func TestOverlaySummariesRankedIndexPlan(t *testing.T) {
+	pool, trace := overlayTestPool(t)
+	_, err := pool.Exec(t.Context(), `INSERT INTO media_files
+  (id, content_id, episode_id, resolution, video_tracks)
+  SELECT n, 'series-'||((n-1)/6000), 'episode-'||n,
+   CASE WHEN n%5=0 THEN '2160p' ELSE '1080p' END,
+   '[{"video_range_type":"HDR10"}]'::jsonb
+  FROM generate_series(1,12000) n;
+  ANALYZE media_files;`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := []string{"series-0", "series-1", "episode-1", "episode-12000"}
+	for _, mode := range []string{"force_custom_plan", "force_generic_plan"} {
+		t.Run(mode, func(t *testing.T) {
+			if _, err := pool.Exec(t.Context(), "SET plan_cache_mode = "+mode); err != nil {
+				t.Fatal(err)
+			}
+			got, err := (&Fetcher{pool: pool}).ListOverlaySummaries(t.Context(), ids, catalog.AccessFilter{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != len(ids) {
+				t.Fatalf("got %d cards, want %d", len(got), len(ids))
+			}
+			query := trace.query.Load()
+			if query == nil {
+				t.Fatal("overlay query was not traced")
+			}
+			var raw []byte
+			if err := pool.QueryRow(t.Context(), "EXPLAIN (ANALYZE, FORMAT JSON) "+query.SQL, query.Args...).Scan(&raw); err != nil {
+				t.Fatal(err)
+			}
+			var plan []struct{ Plan map[string]any }
+			if err := json.Unmarshal(raw, &plan); err != nil {
+				t.Fatal(err)
+			}
+			indexes := map[string]bool{}
+			var visit func(map[string]any)
+			visit = func(node map[string]any) {
+				if name, ok := node["Index Name"].(string); ok {
+					indexes[name] = true
+				}
+				if node["Node Type"] == "Sort" && node["Actual Rows"].(float64) > float64(len(ids)) {
+					t.Errorf("query sorts episode candidates instead of bounded winners: %v rows", node["Actual Rows"])
+				}
+				if children, ok := node["Plans"].([]any); ok {
+					for _, child := range children {
+						visit(child.(map[string]any))
+					}
+				}
+			}
+			visit(plan[0].Plan)
+			for _, name := range []string{"idx_media_files_overlay_content", "idx_media_files_overlay_episode"} {
+				if !indexes[name] {
+					t.Errorf("query does not use %s", name)
+				}
+			}
+		})
+	}
+}
+
 // Compare complete summaries to the existing Go implementation instead of
 // maintaining a second expected ranking table or exporting ranks just for tests.
 func TestOverlaySummariesRankingMatchesGo(t *testing.T) {
@@ -253,22 +386,38 @@ func TestOverlaySummariesRankingMatchesGo(t *testing.T) {
 }
 
 func BenchmarkOverlaySummaries(b *testing.B) {
+	for _, workload := range []struct {
+		name            string
+		cards, episodes int
+	}{
+		{"300_cards_30_episodes", 300, 30},
+		{"200_cards_150_episodes", 200, 150},
+	} {
+		b.Run(workload.name, func(b *testing.B) {
+			benchmarkOverlaySummaries(b, workload.cards, workload.episodes)
+		})
+	}
+}
+
+func benchmarkOverlaySummaries(b *testing.B, cards, episodes int) {
 	pool, _ := overlayTestPool(b)
-	// 300 series, 30 episodes each; enough track metadata to exercise the wide
-	// projection cost without using a private library or cached badge results.
+	// Synthetic series with enough track metadata to exercise both ranking
+	// and projection costs. The same fixture is used for baseline comparisons.
 	_, err := pool.Exec(b.Context(), `INSERT INTO media_files
   (id,content_id,episode_id,resolution,video_tracks,audio_tracks,subtitle_tracks)
-  SELECT n,'series-'||((n-1)/30),'episode-'||n,
+  SELECT n,'series-'||((n-1)/$2::int),'episode-'||n,
    CASE WHEN n%5=0 THEN '2160p' ELSE '1080p' END,
    '[{"video_range_type":"HDR10"}]'::jsonb,
    jsonb_build_array(jsonb_build_object('codec','aac','title',repeat('track ',200))),
    jsonb_build_array(jsonb_build_object('language','eng','title',repeat('subtitle ',200)))
-  FROM generate_series(1,9000) n;
-  ANALYZE media_files;`)
+  FROM generate_series(1,$1::int) n`, cards*episodes, episodes)
 	if err != nil {
 		b.Fatal(err)
 	}
-	ids := make([]string, 300)
+	if _, err := pool.Exec(b.Context(), `ANALYZE media_files`); err != nil {
+		b.Fatal(err)
+	}
+	ids := make([]string, cards)
 	for i := range ids {
 		ids[i] = fmt.Sprintf("series-%d", i)
 	}
