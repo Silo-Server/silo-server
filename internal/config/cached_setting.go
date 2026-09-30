@@ -29,6 +29,10 @@ type CachedSetting[T any] struct {
 	value   T
 	read    bool
 	expires time.Time
+	// started counts reads begun; published is the latest one whose result
+	// was cached, so a slow read cannot overwrite a newer one's value.
+	started   uint64
+	published uint64
 }
 
 // NewCachedSetting binds a cached read of key to a settings reader. A nil
@@ -48,6 +52,10 @@ func (c *CachedSetting[T]) Get(ctx context.Context) T {
 	}
 	c.mu.Lock()
 	cached, fresh := c.value, c.now().Before(c.expires)
+	if !fresh {
+		c.started++
+	}
+	generation := c.started
 	c.mu.Unlock()
 	if fresh {
 		return cached
@@ -68,8 +76,12 @@ func (c *CachedSetting[T]) Get(ctx context.Context) T {
 	value := c.parse(raw)
 
 	c.mu.Lock()
-	c.value, c.read = value, true
+	defer c.mu.Unlock()
+	if generation < c.published {
+		// A read that started later already cached its answer.
+		return c.value
+	}
+	c.value, c.read, c.published = value, true, generation
 	c.expires = c.now().Add(c.ttl)
-	c.mu.Unlock()
 	return value
 }
