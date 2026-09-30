@@ -1087,11 +1087,13 @@ const (
 
 // RecordRefreshOutcome stores a lookup's outcome and when the sweep may look
 // the person up again. An answer is trusted for PersonMetadataStaleAfter.
-// Unanswered lookups count up: failures back off from
-// PersonRefreshFailureBackoff, doubling up to PersonRefreshRetryAfter, and a
-// person the providers do not know is retried every PersonRefreshRetryAfter
-// until PersonRefreshNotFoundAttempts consecutive unanswered lookups, then
-// only on demand.
+// metadata_refresh_failures counts consecutive lookups with the outcome just
+// recorded; an answer resets it to 0, and a different unanswered outcome
+// starts it again at 1. Failures back off from PersonRefreshFailureBackoff,
+// doubling up to PersonRefreshRetryAfter. A person the providers do not know
+// is retried every PersonRefreshRetryAfter until PersonRefreshNotFoundAttempts
+// not-found lookups in a row, then only on demand, so failures and
+// unavailable providers never use up that budget.
 func (r *PersonRepository) RecordRefreshOutcome(ctx context.Context, id int64, outcome PersonRefreshOutcome) error {
 	switch outcome {
 	case PersonRefreshAnswered, PersonRefreshNotFound, PersonRefreshFailed:
@@ -1099,16 +1101,26 @@ func (r *PersonRepository) RecordRefreshOutcome(ctx context.Context, id int64, o
 		return fmt.Errorf("record person %d refresh outcome: unknown outcome %q", id, outcome)
 	}
 	tag, err := r.pool.Exec(ctx, `
-		UPDATE people
+		UPDATE people p
 		SET metadata_refresh_outcome = $2,
-			metadata_refresh_failures = CASE WHEN $2 = 'answered' THEN 0 ELSE metadata_refresh_failures + 1 END,
+			metadata_refresh_failures = s.streak,
 			metadata_refresh_due_at = CASE
 				WHEN $2 = 'answered' THEN NOW() + make_interval(secs => $3)
-				WHEN $2 = 'not_found' AND metadata_refresh_failures + 1 >= $4 THEN NULL
+				WHEN $2 = 'not_found' AND s.streak >= $4 THEN NULL
 				WHEN $2 = 'not_found' THEN NOW() + make_interval(secs => $5)
-				ELSE NOW() + make_interval(secs => LEAST($6 * power(2, LEAST(metadata_refresh_failures, 30)), $5))
+				ELSE NOW() + make_interval(secs => LEAST($6 * power(2, LEAST(s.streak - 1, 30)), $5))
 			END
-		WHERE id = $1`,
+		FROM (
+			SELECT id,
+				CASE
+					WHEN $2 = 'answered' THEN 0
+					WHEN metadata_refresh_outcome IS DISTINCT FROM $2 THEN 1
+					ELSE metadata_refresh_failures + 1
+				END AS streak
+			FROM people
+			WHERE id = $1
+		) s
+		WHERE p.id = s.id`,
 		id,
 		string(outcome),
 		PersonMetadataStaleAfter.Seconds(),

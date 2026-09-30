@@ -30,6 +30,7 @@ func TestPersonRefreshRecordsOutcome(t *testing.T) {
 	answered := stubPersonProvider{slug: "tmdb", detail: &PersonDetailResult{Name: "Answered"}}
 	missing := erroringPersonProvider{slug: "tmdb", err: errors.New("tmdb: HTTP 404: not found")}
 	broken := erroringPersonProvider{slug: "tvdb", err: errors.New("tvdb: context deadline exceeded")}
+	unsupported := erroringPersonProvider{slug: "anidb", err: ErrPersonDetailUnsupported}
 
 	for _, tc := range []struct {
 		name      string
@@ -47,6 +48,10 @@ func TestPersonRefreshRecordsOutcome(t *testing.T) {
 		// No person provider enabled says nothing about the person, so they
 		// mustn't count toward giving up on them.
 		{name: "no person provider", providers: nil, want: catalog.PersonRefreshFailed},
+		// A metadata plugin without person lookup isn't a provider that
+		// looked the person up.
+		{name: "only unsupported providers", providers: []Provider{unsupported}, want: catalog.PersonRefreshFailed},
+		{name: "unsupported and 404", providers: []Provider{unsupported, missing}, want: catalog.PersonRefreshNotFound},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := newFakePersonRefreshRepo(models.Person{ID: 7, Name: "Person", TmdbID: "7"})

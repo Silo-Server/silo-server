@@ -123,7 +123,8 @@ func (s *PersonRefreshService) refreshPersonWithProviders(
 	hasMetadata := false
 	// consulted and failed decide the outcome of a lookup that found nothing:
 	// a 404 or an empty answer is the provider not knowing the person, while an
-	// error, a timeout, or no provider at all says nothing about them.
+	// error, a timeout, or no provider that supports person lookup says nothing
+	// about them.
 	consulted, failed := 0, false
 
 	for _, provider := range providers {
@@ -131,12 +132,15 @@ func (s *PersonRefreshService) refreshPersonWithProviders(
 		if !ok {
 			continue
 		}
-		consulted++
 
 		result, err := personProvider.GetPersonDetail(ctx, PersonDetailRequest{
 			ProviderIDs: accumulator.ProviderIDs,
 			Language:    "en",
 		})
+		if errors.Is(err, ErrPersonDetailUnsupported) {
+			continue
+		}
+		consulted++
 		if err != nil {
 			if !isProvider404(err) {
 				failed = true

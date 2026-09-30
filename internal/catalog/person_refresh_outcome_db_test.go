@@ -128,6 +128,23 @@ func TestPersonRefreshOutcomeSchedulesNextLookupPostgres(t *testing.T) {
 		t.Fatalf("not found after %d attempts: due in %s, want never", PersonRefreshNotFoundAttempts, *state.dueIn)
 	}
 
+	// Failures don't count toward giving up: only not-found lookups in a row do.
+	flaky := seedRefreshPerson(t, pool, "flaky")
+	for _, outcome := range []PersonRefreshOutcome{PersonRefreshFailed, PersonRefreshFailed, PersonRefreshNotFound} {
+		if err := repo.RecordRefreshOutcome(ctx, flaky, outcome); err != nil {
+			t.Fatal(err)
+		}
+	}
+	state = readRefreshState(t, pool, flaky)
+	if state.failures != 1 {
+		t.Fatalf("not-found streak after two failures = %d, want 1", state.failures)
+	}
+	requireDueIn(t, "not found after failures", state, PersonRefreshRetryAfter)
+	if err := repo.RecordRefreshOutcome(ctx, flaky, PersonRefreshFailed); err != nil {
+		t.Fatal(err)
+	}
+	requireDueIn(t, "failure after not found", readRefreshState(t, pool, flaky), PersonRefreshFailureBackoff)
+
 	if err := repo.RecordRefreshOutcome(ctx, answered, PersonRefreshOutcome("bogus")); err == nil {
 		t.Fatal("unknown outcome was accepted")
 	}
