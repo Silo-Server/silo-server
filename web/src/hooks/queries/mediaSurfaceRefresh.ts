@@ -207,41 +207,46 @@ function listedChildIds(data: unknown): string[] {
 // to that one ID would leave an open season grid, series watched totals or a
 // marked season's episodes stale.
 export function relatedItemIds(queryClient: QueryClient, itemId: string): Set<string> {
-  const queries = queryClient.getQueryCache().getAll();
-  const related = new Set([itemId]);
-
-  const ancestors = [itemId];
-  while (ancestors.length > 0) {
-    const child = ancestors.pop() as string;
-    for (const query of queries) {
-      const owner = listOwnerId(query.queryKey);
-      let parent: string | undefined;
-      if (owner && owner !== child && listedChildIds(query.state.data).includes(child)) {
-        parent = owner;
-      } else if (owner === child && isItemDetailQueryKey(query.queryKey, child)) {
-        const seriesId = (query.state.data as ItemDetail | undefined)?.series_id;
-        if (seriesId && seriesId !== child) parent = seriesId;
-      }
-      if (parent && !related.has(parent)) {
-        related.add(parent);
-        ancestors.push(parent);
-      }
+  // Index the cache's parent/child links in one pass, then walk them, so a
+  // series with many cached seasons and episodes costs one scan, not one per
+  // item.
+  const childrenOf = new Map<string, string[]>();
+  const parentsOf = new Map<string, string[]>();
+  const add = (edges: Map<string, string[]>, from: string, to: string) => {
+    const list = edges.get(from);
+    if (list) list.push(to);
+    else edges.set(from, [to]);
+  };
+  const link = (parent: string, child: string) => {
+    if (parent === child) return;
+    add(childrenOf, parent, child);
+    add(parentsOf, child, parent);
+  };
+  for (const query of queryClient.getQueryCache().getAll()) {
+    const owner = listOwnerId(query.queryKey);
+    if (!owner) continue;
+    for (const child of listedChildIds(query.state.data)) link(owner, child);
+    if (isItemDetailQueryKey(query.queryKey, owner)) {
+      const seriesId = (query.state.data as ItemDetail | undefined)?.series_id;
+      // A detail names its series; it isn't the series' listed child.
+      if (seriesId && seriesId !== owner) add(parentsOf, owner, seriesId);
     }
   }
 
-  const descendants = [itemId];
-  while (descendants.length > 0) {
-    const parent = descendants.pop() as string;
-    for (const query of queries) {
-      if (listOwnerId(query.queryKey) !== parent) continue;
-      for (const child of listedChildIds(query.state.data)) {
-        if (!related.has(child)) {
-          related.add(child);
-          descendants.push(child);
+  const related = new Set([itemId]);
+  const walk = (edges: Map<string, string[]>) => {
+    const pending = [itemId];
+    while (pending.length > 0) {
+      for (const next of edges.get(pending.pop() as string) ?? []) {
+        if (!related.has(next)) {
+          related.add(next);
+          pending.push(next);
         }
       }
     }
-  }
+  };
+  walk(parentsOf);
+  walk(childrenOf);
   return related;
 }
 
