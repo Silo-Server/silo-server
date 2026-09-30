@@ -154,6 +154,12 @@ type AdminHandler struct {
 	OnServerSettingUpdated       func(ctx context.Context, key, value string)
 	RestartStatus                *ServerRestartStatusTracker
 	CatalogSearchStatus          catalog.CatalogSearchStatusProvider
+	// WatchlistTitlesSweeper deletes watchlist titles no entry references.
+	// Deleting an account drops its entries through the users foreign key,
+	// which can leave such titles behind. Nil skips the sweep.
+	WatchlistTitlesSweeper interface {
+		SweepOrphanTitles(ctx context.Context) error
+	}
 	// logLevelCounts caches the 24h error/warning tallies served on
 	// /admin/server/status. The dashboard polls that route every 15s, and the
 	// counts are only ever read as a rough signal, so re-counting per request
@@ -1096,9 +1102,24 @@ func (h *AdminHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) 
 	if h.OnUserSessionsRevoked != nil {
 		h.OnUserSessionsRevoked(r.Context(), id)
 	}
+	h.sweepWatchlistTitles(r.Context(), id)
 	h.invalidateStats(r.Context(), cache.ChannelAdmin, cache.EventAdminStatsInvalidated, strconv.Itoa(id))
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// sweepWatchlistTitles removes the watchlist titles a deleted account's
+// entries were the last to reference. The account is already gone, so a
+// failure is logged and the next delete's sweep picks the titles up.
+func (h *AdminHandler) sweepWatchlistTitles(ctx context.Context, userID int) {
+	if h.WatchlistTitlesSweeper == nil {
+		return
+	}
+	sweepCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if err := h.WatchlistTitlesSweeper.SweepOrphanTitles(sweepCtx); err != nil {
+		slog.WarnContext(ctx, "watchlist title sweep failed after account delete", "component", "api", "user_id", userID, "error", err)
+	}
 }
 
 // HandleImpersonateUser handles POST /admin/users/{id}/impersonate.

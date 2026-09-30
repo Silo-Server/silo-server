@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -676,6 +677,68 @@ func TestHandleDeleteProfile_AllowsPrimaryToDeleteOther(t *testing.T) {
 	profile, err := store.GetProfile(context.Background(), "profile-2")
 	if err == nil && profile != nil {
 		t.Fatal("expected profile to be deleted")
+	}
+}
+
+type recordingProfilePurger struct {
+	calls []string
+}
+
+func (p *recordingProfilePurger) PurgeProfile(_ context.Context, userID int, profileID string) error {
+	p.calls = append(p.calls, fmt.Sprintf("%d/%s", userID, profileID))
+	return nil
+}
+
+func TestHandleDeleteProfile_PurgesWatchlistTitles(t *testing.T) {
+	store := newProfileTestStore(t)
+	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-2", Name: "Kids"}); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+	handler := NewProfileHandler(testUserStoreProvider{store: store})
+	purger := &recordingProfilePurger{}
+	handler.WatchlistTitlesPurger = purger
+
+	req := newAuthorizedProfileRequestWithRole(http.MethodDelete, "/profiles/profile-2", "", "user", "profile-1")
+	rr := httptest.NewRecorder()
+	handler.HandleDeleteProfile(rr, withProfileRouteParam(req, "id", "profile-2"))
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if len(purger.calls) != 1 || !strings.HasSuffix(purger.calls[0], "/profile-2") {
+		t.Fatalf("purge calls = %v, want one for profile-2", purger.calls)
+	}
+}
+
+type recordingWatchlistRequestWithdrawer struct {
+	calls []string
+}
+
+func (w *recordingWatchlistRequestWithdrawer) WithdrawProfileWatchlistRequests(_ context.Context, userID int, profileID string) error {
+	w.calls = append(w.calls, fmt.Sprintf("%d/%s", userID, profileID))
+	return nil
+}
+
+// A deleted profile's watchlist requests are withdrawn, as removing each title
+// would; the requests name the profile, so no watchlist entry is needed.
+func TestHandleDeleteProfile_WithdrawsWatchlistRequests(t *testing.T) {
+	store := newProfileTestStore(t)
+	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-2", Name: "Kids"}); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+	handler := NewProfileHandler(testUserStoreProvider{store: store})
+	withdrawer := &recordingWatchlistRequestWithdrawer{}
+	handler.WatchlistRequestWithdrawer = withdrawer
+
+	req := newAuthorizedProfileRequestWithRole(http.MethodDelete, "/profiles/profile-2", "", "user", "profile-1")
+	rr := httptest.NewRecorder()
+	handler.HandleDeleteProfile(rr, withProfileRouteParam(req, "id", "profile-2"))
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if len(withdrawer.calls) != 1 || !strings.HasSuffix(withdrawer.calls[0], "/profile-2") {
+		t.Fatalf("withdraw calls = %v, want one for profile-2", withdrawer.calls)
 	}
 }
 

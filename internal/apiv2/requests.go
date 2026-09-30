@@ -31,9 +31,9 @@ type RequestMediaState struct {
 	Following   bool   `json:"following" doc:"Whether the viewer will be notified when the media becomes available: they requested it or follow it" example:"false"`
 	// RequestedByViewer tells a client whether to offer a follow toggle.
 	RequestedByViewer bool `json:"requested_by_viewer" doc:"Whether the viewing profile made the active request, so there is nothing to follow" example:"false"`
-	// Download is filled on the title detail only: search and discovery do
-	// not load each result's targets.
-	Download *RequestDownload `json:"download,omitempty" doc:"How far the active request's downloads are, while its download server reports them. Only the title detail (getRequestMediaDetail) carries it"`
+	// Download is filled on the title detail and the watchlist titles only:
+	// search and discovery do not load each result's targets.
+	Download *RequestDownload `json:"download,omitempty" doc:"How far the active request's downloads are, while its download server reports them. Only the title detail (getRequestMediaDetail) and the watchlist titles (listWatchlistTitles) carry it"`
 }
 
 // RequestDownload is how far downloads are, as the download server last
@@ -63,6 +63,7 @@ type RequestMediaResult struct {
 	Availability     string            `json:"availability" doc:"missing or available in this server's catalog" example:"missing"`
 	LibraryContentID string            `json:"library_content_id,omitempty" doc:"The catalog item when the media is available" example:"movie:heat-1995"`
 	Request          RequestMediaState `json:"request"`
+	InWatchlist      bool              `json:"in_watchlist" doc:"Whether the title is on the viewing profile's watchlist, as a watchlist title or through its catalog item" example:"false"`
 }
 
 // RequestMediaCastMember is one cast credit on a detail document.
@@ -107,6 +108,7 @@ type RequestMediaDetail struct {
 	Availability        string                   `json:"availability" doc:"missing or available in this server's catalog" example:"missing"`
 	LibraryContentID    string                   `json:"library_content_id,omitempty" doc:"The catalog item when the media is available"`
 	Request             RequestMediaState        `json:"request"`
+	InWatchlist         bool                     `json:"in_watchlist" doc:"Whether the title is on the viewing profile's watchlist, as a watchlist title or through its catalog item" example:"false"`
 	Seasons             []RequestMediaSeason     `json:"seasons" doc:"Series: the regular seasons (specials excluded) with library availability and request coverage; empty for movies"`
 }
 
@@ -224,6 +226,7 @@ type MediaRequest struct {
 	Seasons              []int                   `json:"seasons" doc:"Series: the requested season numbers; empty means the whole series (requests made through v1 or before season requests)"`
 	SeasonProgress       []RequestSeasonProgress `json:"season_progress" doc:"Series season requests: each requested season's episodes, once the series is in the library; empty otherwise"`
 	OutcomeReason        string                  `json:"outcome_reason,omitempty" doc:"Why the request was declined or withdrawn, when a reason was given"`
+	Source               string                  `json:"source" doc:"What created the request: direct (the Request button or an API create) or watchlist (adding a title that is not in the library to a watchlist); more values may be added" example:"direct"`
 	RequestedByUserID    ID                      `json:"requested_by_user_id,omitempty" example:"1"`
 	RequestedByProfileID ID                      `json:"requested_by_profile_id,omitempty" example:"p-owner"`
 	IntegrationKind      string                  `json:"integration_kind,omitempty" doc:"Admins only: the download server's kind" example:"radarr"`
@@ -601,7 +604,9 @@ func (reg *Registry) searchRequestMedia(ctx context.Context, in *RequestMediaSea
 	if err != nil {
 		return nil, requestProblem(err)
 	}
-	return &RequestMediaPageOutput{Body: requestMediaPageOf(page)}, nil
+	out := requestMediaPageOf(page)
+	reg.markInWatchlist(ctx, watchlistMarksOf(out.Results))
+	return &RequestMediaPageOutput{Body: out}, nil
 }
 
 // getRequestMediaDetail is v1 GET /requests/detail/{media_type}/{tmdb_id}.
@@ -614,7 +619,10 @@ func (reg *Registry) getRequestMediaDetail(ctx context.Context, in *RequestMedia
 	if err != nil {
 		return nil, requestProblem(err)
 	}
-	return &RequestMediaDetailOutput{Body: requestMediaDetailOf(detail)}, nil
+	out := requestMediaDetailOf(detail)
+	marks := append(watchlistMarksOf(out.Recommendations), watchlistMark{mediaType: out.MediaType, tmdbID: out.TMDBID, itemID: out.LibraryContentID, in: &out.InWatchlist})
+	reg.markInWatchlist(ctx, marks)
+	return &RequestMediaDetailOutput{Body: out}, nil
 }
 
 // RequestMediaStateOutput is the followRequestMedia response.
@@ -656,9 +664,14 @@ func (reg *Registry) listDiscoverSections(ctx context.Context, _ *struct{}) (*Di
 		return nil, requestProblem(err)
 	}
 	items := make([]DiscoverSection, 0, len(sections))
+	var marks []watchlistMark
 	for i := range sections {
 		items = append(items, discoverSectionOf(&sections[i]))
 	}
+	for i := range items {
+		marks = append(marks, watchlistMarksOf(items[i].Results)...)
+	}
+	reg.markInWatchlist(ctx, marks)
 	return &DiscoverSectionCollectionOutput{Body: DiscoverSectionCollection{Collection: NewCollection(items)}}, nil
 }
 
@@ -672,7 +685,9 @@ func (reg *Registry) getDiscoverSection(ctx context.Context, in *DiscoverSection
 	if err != nil {
 		return nil, requestProblem(err)
 	}
-	return &DiscoverSectionOutput{Body: discoverSectionOf(section)}, nil
+	out := discoverSectionOf(section)
+	reg.markInWatchlist(ctx, watchlistMarksOf(out.Results))
+	return &DiscoverSectionOutput{Body: out}, nil
 }
 
 // listDiscoverBrands is v1 GET /requests/discover/{genres,networks,studios}.
@@ -717,7 +732,9 @@ func (reg *Registry) browseDiscoverBrand(ctx context.Context, in *DiscoverBrowse
 	if err != nil {
 		return nil, requestProblem(err)
 	}
-	return &DiscoverBrowsePageOutput{Body: discoverBrowsePageOf(resp)}, nil
+	out := discoverBrowsePageOf(resp)
+	reg.markInWatchlist(ctx, watchlistMarksOf(out.Results))
+	return &DiscoverBrowsePageOutput{Body: out}, nil
 }
 
 // browseDiscoverGenre is v1 GET /requests/discover/browse/genre/{slug}.
@@ -733,7 +750,9 @@ func (reg *Registry) browseDiscoverGenre(ctx context.Context, in *DiscoverGenreB
 	if err != nil {
 		return nil, requestProblem(err)
 	}
-	return &DiscoverBrowsePageOutput{Body: discoverBrowsePageOf(resp)}, nil
+	out := discoverBrowsePageOf(resp)
+	reg.markInWatchlist(ctx, watchlistMarksOf(out.Results))
+	return &DiscoverBrowsePageOutput{Body: out}, nil
 }
 
 // requireSlug refuses a blank slug before the service sees it (v1 trims and
@@ -800,6 +819,15 @@ func requestProblem(err error) *Problem {
 	return NewProblem(TypeInternalError, "An unexpected error occurred.")
 }
 
+// requestSourceOf reads an unset source (a request built outside the store)
+// as a direct request.
+func requestSourceOf(s mediarequests.Source) mediarequests.Source {
+	if s == "" {
+		return mediarequests.SourceDirect
+	}
+	return s
+}
+
 // mediaRequestOf maps a request for the viewer. The download server details
 // (which server and routing rule took each target, the server's own ids and
 // raw statuses, and the submission and target errors, which can name servers
@@ -824,6 +852,7 @@ func mediaRequestOf(r *mediarequests.Request, viewer mediarequests.Viewer) Media
 		Seasons:          NonNil(r.Seasons),
 		SeasonProgress:   requestSeasonProgressOf(r.SeasonProgress),
 		OutcomeReason:    r.OutcomeReason,
+		Source:           string(requestSourceOf(r.Source)),
 		IsAnime:          r.IsAnime,
 		Targets:          make([]RequestTarget, 0, len(r.Targets)),
 		LibraryContentID: r.LibraryContentID,

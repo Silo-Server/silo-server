@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Library, Loader2, Plus } from "lucide-react";
+import { Bookmark, BookmarkCheck, Library, Loader2, Plus } from "lucide-react";
 import type { MediaRequest, RequestMediaResult, RequestMediaType } from "@/api/types";
 import { cn } from "@/lib/utils";
 import {
@@ -22,6 +22,10 @@ import MediaCardArtwork, {
 import { RequestReasonBadge, RequestStatusBadge } from "@/components/RequestStatusBadge";
 import { Button } from "@/components/ui/button";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
+import {
+  mediaItemMenuIconClassName,
+  mediaItemMenuTriggerClassName,
+} from "@/components/mediaItemMenuTrigger";
 
 // The badge takes the top-right corner and truncates before it reaches the
 // Library chip on the left.
@@ -35,6 +39,13 @@ type DiscoverProps = {
   onRequest?: () => void;
   /** Shows the pending state on the hover Request action. Ignored when onRequest is omitted. */
   isSubmitting?: boolean;
+  /**
+   * Called when the hover watchlist action is clicked; it reads
+   * item.in_watchlist. Omit to suppress the action.
+   */
+  onToggleWatchlist?: () => void;
+  /** Disables the hover watchlist action while a change is in flight. */
+  isWatchlistPending?: boolean;
   /** When true, fills the parent (use inside grids). Default: the viewer's carousel card width. */
   fluid?: boolean;
 };
@@ -72,12 +83,21 @@ export default function RequestPosterCard(props: RequestPosterCardProps) {
       item={props.item}
       isSubmitting={props.isSubmitting}
       onRequest={props.onRequest}
+      onToggleWatchlist={props.onToggleWatchlist}
+      isWatchlistPending={props.isWatchlistPending}
       fluid={props.fluid}
     />
   );
 }
 
-function DiscoverCard({ item, isSubmitting, onRequest, fluid }: Omit<DiscoverProps, "variant">) {
+function DiscoverCard({
+  item,
+  isSubmitting,
+  onRequest,
+  onToggleWatchlist,
+  isWatchlistPending,
+  fluid,
+}: Omit<DiscoverProps, "variant">) {
   const requestable = item.request.requestable;
   const availableInLibrary = item.availability === "available" && !item.request.status;
   const state: RequestDisplayState | undefined = item.request.status
@@ -109,6 +129,16 @@ function DiscoverCard({ item, isSubmitting, onRequest, fluid }: Omit<DiscoverPro
             title={`${item.title} (${[formatMediaType(item.media_type), item.year].filter(Boolean).join(" · ")})`}
             pending={Boolean(isSubmitting)}
             onRequest={onRequest}
+          />
+        ) : null
+      }
+      cornerAction={
+        onToggleWatchlist ? (
+          <WatchlistAction
+            title={item.title}
+            inWatchlist={Boolean(item.in_watchlist)}
+            pending={Boolean(isWatchlistPending)}
+            onToggle={onToggleWatchlist}
           />
         ) : null
       }
@@ -197,6 +227,7 @@ function ExternalTitleCard({
   dim,
   badge,
   action,
+  cornerAction,
   children,
 }: {
   title: string;
@@ -211,6 +242,8 @@ function ExternalTitleCard({
   badge?: ReactNode;
   /** The hover action in the card's centre slot. */
   action?: ReactNode;
+  /** A hover action in the poster's bottom-right corner, where library cards keep their menu. */
+  cornerAction?: ReactNode;
   /** Request details below the caption. Shown whatever the caption setting; pass null for none. */
   children?: ReactNode;
 }) {
@@ -252,6 +285,11 @@ function ExternalTitleCard({
           </div>
         ) : null}
         {action}
+        {cornerAction ? (
+          <div className="absolute right-1.5 bottom-1.5 z-20 sm:right-2.5 sm:bottom-2.5">
+            {cornerAction}
+          </div>
+        ) : null}
       </div>
       {showCaption || children ? (
         <div className={MEDIA_CARD_CAPTION_CLASS}>
@@ -272,7 +310,8 @@ function ExternalTitleCard({
   );
 }
 
-function RequestAction({
+/** The centred hover Request action on a TMDB title's poster card. */
+export function RequestAction({
   title,
   pending,
   onRequest,
@@ -309,6 +348,48 @@ function RequestAction({
           Request
         </>
       )}
+    </button>
+  );
+}
+
+/** The hover watchlist toggle in a TMDB title's poster corner. */
+export function WatchlistAction({
+  title,
+  inWatchlist,
+  pending,
+  onToggle,
+}: {
+  title: string;
+  inWatchlist: boolean;
+  pending: boolean;
+  onToggle: () => void;
+}) {
+  const Icon = inWatchlist ? BookmarkCheck : Bookmark;
+  return (
+    <button
+      type="button"
+      disabled={pending}
+      aria-pressed={inWatchlist}
+      aria-label={
+        inWatchlist ? `Remove ${title} from your watchlist` : `Add ${title} to your watchlist`
+      }
+      title={inWatchlist ? "On Watchlist" : "Add to Watchlist"}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onToggle();
+      }}
+      className={cn(
+        mediaItemMenuTriggerClassName("poster"),
+        inWatchlist && "text-primary",
+        // Keep the pending state in view after the pointer leaves the card.
+        pending && "pointer-events-auto opacity-100",
+      )}
+    >
+      <Icon
+        className={cn(mediaItemMenuIconClassName("poster"), inWatchlist && "fill-primary/20")}
+        aria-hidden
+      />
     </button>
   );
 }

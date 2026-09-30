@@ -146,6 +146,9 @@ function RequestDetail({
                 {requestedAgo ? (
                   <span className="text-muted-foreground"> · {requestedAgo}</span>
                 ) : null}
+                {request.source === "watchlist" ? (
+                  <span className="text-muted-foreground"> · via watchlist</span>
+                ) : null}
               </Term>
               {request.approved_at ? (
                 <Term label="Approved">{formatDateTime(request.approved_at)}</Term>

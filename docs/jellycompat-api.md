@@ -141,6 +141,15 @@ the episodes of episode-scoped smart collections) in collection order unless
 collections honor `SortBy` over their own members; catalog and user-state
 filters on them are not supported yet and return no episodes.
 
+A BoxSet with an uploaded or template poster shows it to everyone. Otherwise
+its `Primary` image is a collage of the first members the viewer can access, so
+the image and its tag differ by viewer. A collage tag is 32 hex digits: the
+collage's key followed by its signature. `GET /Items/{boxSetId}/Images/Primary`
+accepts a signed collage tag without authentication and serves the collage the
+tag names. An untagged request authorized by its session gets that viewer's
+collage. When no collage is built yet, the BoxSet shows the generated title
+poster and the collage is built in the background for the next request.
+
 `Recursive=true` together with `Filters=IsNotFolder`, or with an
 `IncludeItemTypes` that names `Episode` but not `Series` or `Season`, returns the
 collection's playable leaves for Play all and Shuffle: movies and episodes, with

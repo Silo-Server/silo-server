@@ -28,6 +28,9 @@ vi.mock("@/hooks/queries/useRequests", () => {
     useCancelMediaRequest: () => ({ mutate: mocks.cancel, isPending: false, variables: undefined }),
   };
 });
+vi.mock("@/hooks/useWatchlistTitleToggle", () => ({
+  useWatchlistTitleToggle: () => ({ enabled: false, toggle: vi.fn(), isPending: () => false }),
+}));
 vi.mock("@/hooks/useDocumentTitle", () => ({ useDocumentTitle: () => {} }));
 vi.mock("@/components/BrandCarousel", () => ({ default: () => null }));
 // Embla needs layout APIs jsdom lacks; MediaCarousel.test covers the real row.

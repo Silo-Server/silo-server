@@ -38,7 +38,7 @@ type FileContentUpdater interface {
 	FindContentIDByGroupKey(ctx context.Context, folderID int, groupKeyVersion int, contentGroupKey, preferredType string) (string, error)
 	ListByGroupKey(ctx context.Context, folderID int, groupKeyVersion int, contentGroupKey string) ([]*models.MediaFile, error)
 	ListByObservedRootPath(ctx context.Context, folderID int, observedRootPath string) ([]*models.MediaFile, error)
-	UpdateContentIDByObservedRootPath(ctx context.Context, folderID int, observedRootPath, contentID string) (int, error)
+	UpdateContentIDByObservedRootPath(ctx context.Context, folderID int, observedRootPath, contentID string) (int, []string, error)
 }
 
 // EpisodeLinker extends FileContentUpdater with episode linking.
@@ -653,6 +653,16 @@ func (s *MetadataService) InvalidateChainCache() {
 func (s *MetadataService) Process(ctx context.Context, req ProcessRequest) (*ProcessResult, error) {
 	if s != nil && s.hooks.process != nil {
 		return s.hooks.process(ctx, req)
+	}
+
+	if req.Mode != ModeIdentify {
+		pinned, err := s.pinnedUnmatchedBySplit(ctx, req.ContentID)
+		if err != nil {
+			return nil, err
+		}
+		if pinned {
+			return &ProcessResult{ContentID: req.ContentID, Pinned: true}, nil
+		}
 	}
 
 	var err error
@@ -6403,6 +6413,17 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	if trustedIDs != nil {
 		effectiveExternalIDs = trustedIDs
 	}
+	// An admin split this root into an unmatched item. Its folder still carries
+	// the source's provider tag and the source may still hold the root or group
+	// claim, so resolve it only through the item its files already link to.
+	splitPinned, splitPinnedRoot, err := s.splitPinForFile(ctx, folderID, observedRootPath, file.FilePath)
+	if err != nil {
+		return nil, err
+	}
+	if splitPinned {
+		trustedIDs, folderIDs, effectiveExternalIDs = nil, nil, nil
+		res.TmdbID, res.ImdbID, res.TvdbID = "", "", ""
+	}
 	// A queued file can outlive the parser that assigned its group. Matching
 	// refreshed title/year hints under the old automatic group key would let a
 	// subsequent claim relink unrelated files. Let a scan rebuild that grouping
@@ -6445,7 +6466,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 		res.ItemStatus = "skipped"
 		return res, nil
 	}
-	if res.ItemStatus == "ambiguous" {
+	if res.ItemStatus == "ambiguous" && !splitPinned {
 		confirmedIDs, err := s.resolveMovieTitleAmbiguity(ctx, file, res, libraryRoots...)
 		if err != nil {
 			return nil, err
@@ -6456,7 +6477,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 			res.ItemStatus = "pending"
 		}
 	}
-	if effectiveExternalIDs == nil {
+	if effectiveExternalIDs == nil && !splitPinned {
 		// Record for admin diagnostics only — no longer bail out.
 		s.recordSkippedRoot(ctx, folderID, observedRootPath, skippedReasonMissingFolderIDs, file.FilePath)
 	}
@@ -6476,7 +6497,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 
 	// Dedup 1: confirmed content-group ownership always wins, including for
 	// movies. Provisional claims are intentionally ignored.
-	if contentGroupKey != "" && s.groupClaimRepo != nil {
+	if contentGroupKey != "" && s.groupClaimRepo != nil && !splitPinned {
 		claimedGroup, err := s.groupClaimRepo.Get(ctx, folderID, groupKeyVersion, contentGroupKey)
 		if err != nil {
 			return nil, fmt.Errorf("loading claimed content group: %w", err)
@@ -6499,7 +6520,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	}
 
 	// Dedup 2: confirmed root ownership also wins for both movies and series.
-	if contentRootPath != "" && s.rootClaimRepo != nil {
+	if contentRootPath != "" && s.rootClaimRepo != nil && !splitPinned {
 		claimedRoot, err := s.rootClaimRepo.Get(ctx, folderID, contentRootPath)
 		if err != nil {
 			return nil, fmt.Errorf("loading claimed root path: %w", err)
@@ -6520,9 +6541,10 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	}
 
 	// Dedup 3: same observed TV root reuses the already-linked root-scoped item.
-	if res.Type == "series" {
-		res.Type = "series"
-		existingContentID, err := s.fileRepo.FindContentIDByObservedRootPath(ctx, folderID, observedRootPath, "series")
+	// A root pinned whole by a split does the same for movies: its files all
+	// link to the split target, and a new version there belongs with them.
+	if res.Type == "series" || splitPinnedRoot {
+		existingContentID, err := s.fileRepo.FindContentIDByObservedRootPath(ctx, folderID, observedRootPath, res.Type)
 		if err != nil {
 			return nil, fmt.Errorf("finding existing item by observed root path: %w", err)
 		}

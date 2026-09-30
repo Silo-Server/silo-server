@@ -288,6 +288,45 @@ func TestInterestTrackingStoreQueuesMutationsOnBatchFallback(t *testing.T) {
 	}
 }
 
+// TestInterestTrackingStoreQueuesWatchlistAddAt covers the explicit-time add
+// that imports and watchlist-title promotion use: a new row queues an interest
+// recompute, and an add that changes nothing does not.
+func TestInterestTrackingStoreQueuesWatchlistAddAt(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := userdb.InitSchema(db); err != nil {
+		t.Fatalf("init schema: %v", err)
+	}
+	updater := &InterestUpdater{pending: map[interestMutation]int{}}
+	provider := WrapUserStoreProvider(preferenceTransactionTestProvider{store: userdb.NewSQLiteUserStore(db)}, &System{Interest: updater})
+	store, err := provider.ForUser(t.Context(), 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateProfile(t.Context(), userstore.Profile{ID: "p1", Name: "Test"}); err != nil {
+		t.Fatal(err)
+	}
+	addedAt := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	inserted, err := store.AddToWatchlistAt(t.Context(), "p1", "series-1", addedAt)
+	if err != nil || !inserted {
+		t.Fatalf("AddToWatchlistAt = %v, %v; want inserted", inserted, err)
+	}
+	key := interestMutation{userID: 7, profileID: "p1", itemID: "series-1"}
+	if _, queued := updater.pending[key]; !queued {
+		t.Fatal("watchlist add bypassed the interest hook")
+	}
+	clear(updater.pending)
+	if inserted, err := store.AddToWatchlistAt(t.Context(), "p1", "series-1", addedAt); err != nil || inserted {
+		t.Fatalf("repeat AddToWatchlistAt = %v, %v; want no insert", inserted, err)
+	}
+	if len(updater.pending) != 0 {
+		t.Fatalf("an add that inserted nothing queued %v", updater.pending)
+	}
+}
+
 // rollupCapableStore is a UserStore that also implements the series rollup,
 // standing in for the Postgres backend.
 type rollupCapableStore struct {

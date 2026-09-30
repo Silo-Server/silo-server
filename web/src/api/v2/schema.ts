@@ -10574,6 +10574,41 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/watchlist/titles": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the acting profile's watchlist entries for titles the library doesn't have, newest first. Entries whose title reached the library move to the library watchlist first; titles above the viewer's rating ceiling are omitted. */
+    get: operations["listWatchlistTitles"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/watchlist/titles/{media_type}/{tmdb_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /** Add a title to the acting profile's watchlist. A title the library has goes onto the library watchlist; otherwise it is kept by TMDB ID and, when watchlist requests apply, requested or followed. Automatic retries are unsafe because provider, refresh and request effects are not change-gated. */
+    put: operations["addWatchlistTitle"];
+    post?: never;
+    /** Remove a title from the acting profile's watchlist by its current or a former TMDB ID, from the library watchlist too, and withdraw the request the watchlist made for it while nothing has been sent. An absent entry succeeds, but automatic retries can repeat provider and refresh effects. */
+    delete: operations["deleteWatchlistTitle"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/webhook-sync/capabilities": {
     parameters: {
       query?: never;
@@ -15070,6 +15105,11 @@ export interface components {
       /** Format: int64 */
       global_window_days: number;
       requests_enabled: boolean;
+      /**
+       * @description Adding a title that is not in the library to a watchlist also requests it; absent on update keeps the stored value
+       * @example true
+       */
+      watchlist_requests?: boolean;
     };
     AdminRequestStandardDestination: {
       /** @description The media type's one server that is not marked 4K; absent when it has none */
@@ -19566,7 +19606,7 @@ export interface components {
     FeatureStatus: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
-      /** @description Whether the server reports download progress (download on requests, their targets, and the title detail's request state). Whether a given request has any depends on its download server's request plugin. */
+      /** @description Whether the server reports download progress (download on requests, their targets, the title detail's request state, and watchlist titles). Whether a given request has any depends on its download server's request plugin. */
       download_progress_supported: boolean;
       follow_supported: boolean;
       /** @description Whether a series already in the library can be requested for the seasons it is missing. False while a download server that takes series uses a request plugin that cannot fetch individual seasons, so such a series stays already_available. */
@@ -19581,6 +19621,10 @@ export interface components {
        * @enum {string}
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
+      /** @description Whether adding a title the library doesn't have to the watchlist also requests it (or follows its request) for this viewer: requests and watchlist requests are on for the server, the profile has not opted out, and the viewer may request. */
+      watchlist_requests: boolean;
+      /** @description Whether the server keeps watchlist entries for titles the library doesn't have: the /watchlist/titles operations, and in_watchlist on discovery results and the title detail. False while requests are disabled, when those operations answer 409 capability_disabled; the entries are kept. */
+      watchlist_titles_supported: boolean;
     };
     FileMarkers: {
       credits: components["schemas"]["MarkerSegment"];
@@ -21277,6 +21321,11 @@ export interface components {
       season_progress: components["schemas"]["RequestSeasonProgress"][];
       /** @description Series: the requested season numbers; empty means the whole series (requests made through v1 or before season requests) */
       seasons: number[];
+      /**
+       * @description What created the request: direct (the Request button or an API create) or watchlist (adding a title that is not in the library to a watchlist); more values may be added
+       * @example direct
+       */
+      source: string;
       /**
        * @description The one state to show a user: pending, approved, processing, partially_available (some requested seasons are in the library), available (in the library), declined, cancelled or failed
        * @example pending
@@ -24492,6 +24541,11 @@ export interface components {
       homepage?: string;
       /** @example tt0113277 */
       imdb_id?: string;
+      /**
+       * @description Whether the title is on the viewing profile's watchlist, as a watchlist title or through its catalog item
+       * @example false
+       */
+      in_watchlist: boolean;
       /** @description Calendar date, YYYY-MM-DD */
       last_air_date?: string;
       /** @description The catalog item when the media is available */
@@ -24583,6 +24637,11 @@ export interface components {
       /** @description TMDB image path */
       backdrop_path?: string;
       /**
+       * @description Whether the title is on the viewing profile's watchlist, as a watchlist title or through its catalog item
+       * @example false
+       */
+      in_watchlist: boolean;
+      /**
        * @description The catalog item when the media is available
        * @example movie:heat-1995
        */
@@ -24653,7 +24712,7 @@ export interface components {
       season_number: number;
     };
     RequestMediaState: {
-      /** @description How far the active request's downloads are, while its download server reports them. Only the title detail (getRequestMediaDetail) carries it */
+      /** @description How far the active request's downloads are, while its download server reports them. Only the title detail (getRequestMediaDetail) and the watchlist titles (listWatchlistTitles) carry it */
       download?: components["schemas"]["RequestDownload"];
       /**
        * @description Whether the viewer will be notified when the media becomes available: they requested it or follow it
@@ -26802,6 +26861,92 @@ export interface components {
        * @example movie:heat-1995
        */
       item_id: string;
+    };
+    WatchlistTitle: {
+      /**
+       * Format: date-time
+       * @description When the title joined the watchlist
+       * @example 2026-01-02T03:04:05.000Z
+       */
+      added_at: string;
+      /**
+       * @description US certification
+       * @example R
+       */
+      content_rating?: string;
+      /**
+       * @description movie or series
+       * @example movie
+       */
+      media_type: string;
+      /**
+       * @description TMDB image path
+       * @example /abc.jpg
+       */
+      poster_path?: string;
+      /**
+       * @description Calendar date, YYYY-MM-DD: the release date of a movie, the first air date of a series
+       * @example 1995-12-15
+       */
+      release_date?: string;
+      /** @description The title's request state for the viewer, with download progress while it downloads */
+      request: components["schemas"]["RequestMediaState"];
+      /**
+       * @description active, needs_review (TMDB deleted the ID and several titles could replace it) or removed (TMDB deleted the ID and nothing replaces it). More values may be added: read an unknown one as active
+       * @example active
+       */
+      status: string;
+      /** @example Heat */
+      title: string;
+      /**
+       * Format: int64
+       * @description The title's current TMDB identifier (external, not a Silo ID)
+       * @example 949
+       */
+      tmdb_id: number;
+      /**
+       * Format: double
+       * @description TMDB rating out of 10; absent while the title has no votes
+       * @example 7.9
+       */
+      vote_average?: number;
+      /**
+       * Format: int64
+       * @example 1995
+       */
+      year?: number;
+    };
+    WatchlistTitleCollection: {
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["WatchlistTitle"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
+    };
+    WatchlistTitleEntry: {
+      /**
+       * Format: date-time
+       * @description When the title joined the watchlist; adding it again keeps the first time
+       * @example 2026-01-02T03:04:05.000Z
+       */
+      added_at: string;
+      /**
+       * @description The catalog item, when the library has the title and the entry went to the library watchlist
+       * @example movie:heat-1995
+       */
+      item_id?: string;
+      /**
+       * @description movie or series
+       * @example movie
+       */
+      media_type: string;
+      /** @description The title's request state after the add, including why a watchlist request was refused */
+      request: components["schemas"]["RequestMediaState"];
+      /**
+       * Format: int64
+       * @description The title's current TMDB identifier (external, not a Silo ID)
+       * @example 949
+       */
+      tmdb_id: number;
     };
     WatchMarker: {
       /**
@@ -122354,6 +122499,364 @@ export interface operations {
       };
       /** @description Not Acceptable */
       406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listWatchlistTitles: {
+    parameters: {
+      query?: {
+        /** @description Opaque cursor from page.next_cursor */
+        cursor?: string;
+        /** @description Page size; default 50, maximum 200 */
+        limit?: number;
+      };
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WatchlistTitleCollection"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  addWatchlistTitle: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description The media type */
+        media_type: "movie" | "series";
+        /** @description TMDB identifier (external, not a Silo ID). A title's former TMDB ID still names it */
+        tmdb_id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WatchlistTitleEntry"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  deleteWatchlistTitle: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description The media type */
+        media_type: "movie" | "series";
+        /** @description TMDB identifier (external, not a Silo ID). A title's former TMDB ID still names it */
+        tmdb_id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

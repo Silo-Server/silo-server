@@ -154,6 +154,36 @@ describe("Requests settings: general", () => {
     ).toBeInTheDocument();
   });
 
+  it("saves the watchlist request switch, and hides it from a server without one", async () => {
+    serve({
+      handlers: {
+        "GET /api/v2/admin/request-settings": (options) =>
+          reply(options, { ...settings, watchlist_requests: true }, '"initial"'),
+        "PUT /api/v2/admin/request-settings": (options) =>
+          reply(options, { ...settings, watchlist_requests: false }, '"saved"'),
+      },
+    });
+    mount();
+    const toggle = await screen.findByRole("switch", {
+      name: "Request titles added to a watchlist",
+    });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(calls("PUT /api/v2/admin/request-settings")).toHaveLength(1));
+    expect(calls("PUT /api/v2/admin/request-settings")[0]).toMatchObject({
+      body: { watchlist_requests: false },
+    });
+    cleanup();
+
+    serve();
+    mount();
+    await screen.findByLabelText("Request limit");
+    expect(
+      screen.queryByRole("switch", { name: "Request titles added to a watchlist" }),
+    ).toBeNull();
+  });
+
   it("calls approval and the limit server-wide defaults that groups and accounts override", async () => {
     serve();
     mount();

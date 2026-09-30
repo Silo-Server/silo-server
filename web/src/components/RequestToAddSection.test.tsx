@@ -22,6 +22,10 @@ vi.mock("@/hooks/queries/useRequests", () => ({
   useCreateMediaRequest: () => mocks.useCreateMediaRequest(),
 }));
 
+vi.mock("@/hooks/useWatchlistTitleToggle", () => ({
+  useWatchlistTitleToggle: () => ({ enabled: false, toggle: vi.fn(), isPending: () => false }),
+}));
+
 vi.mock("@/hooks/useDebounce", () => ({
   useDebounce: <T,>(v: T) => mocks.useDebounce(v) ?? v,
 }));

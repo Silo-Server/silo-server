@@ -883,7 +883,7 @@ func (w *MatchWorker) processQueuedMovieFile(ctx context.Context, job models.Mov
 			)
 			w.logStatusUpdateFailure(ctx, skeleton.ContentID, "unmatched", "content_id", skeleton.ContentID, "file_id", file.ID, "path", file.FilePath)
 			return false
-		} else if result != nil && !result.Updated {
+		} else if result != nil && !result.Updated && !result.Pinned {
 			if updateErr := w.updateMovieFailure(ctx, file.ID, job.LeaseToken, result.Decision); updateErr != nil {
 				slog.WarnContext(ctx, "metadata: failed to update movie queue error", "component", "metadata",
 					"file_id", file.ID,
@@ -893,8 +893,11 @@ func (w *MatchWorker) processQueuedMovieFile(ctx context.Context, job models.Mov
 			}
 			w.logStatusUpdateFailure(ctx, skeleton.ContentID, "unmatched", "content_id", skeleton.ContentID, "file_id", file.ID, "path", file.FilePath)
 			return false
+		} else if result == nil || !result.Pinned {
+			// A pinned result is an unmatched split target: nothing matched or
+			// changed, and the job is complete.
+			w.publishCatalogItemChanged(ctx, file.MediaFolderID, resultContentID(result, skeleton.ContentID), "metadata_updated")
 		}
-		w.publishCatalogItemChanged(ctx, file.MediaFolderID, resultContentID(result, skeleton.ContentID), "metadata_updated")
 	}
 
 	if err := w.movieClaimer.Delete(ctx, file.ID, job.LeaseToken); err != nil {
@@ -1248,7 +1251,9 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 					}
 					return 0, nil
 				}
-				if result != nil && !result.Updated {
+				if result != nil && result.Pinned {
+					w.synthesizePinnedSeriesEpisodes(ctx, skeleton.ContentID)
+				} else if result != nil && !result.Updated {
 					if updateErr := w.updateSeriesFailure(ctx, job.MediaFolderID, job.ObservedRootPath, job.LeaseToken, result.Decision); updateErr != nil {
 						return 0, updateErr
 					}
@@ -1261,8 +1266,9 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 							"content_id", skeleton.ContentID, "error", fbErr)
 					}
 					return 0, nil
+				} else {
+					w.publishCatalogItemChanged(ctx, job.MediaFolderID, resultContentID(result, skeleton.ContentID), "metadata_updated")
 				}
-				w.publishCatalogItemChanged(ctx, job.MediaFolderID, resultContentID(result, skeleton.ContentID), "metadata_updated")
 			}
 			if err := w.service.ensureSeriesEpisodeLinks(ctx, representative.ContentID); err != nil {
 				if errors.Is(err, catalog.ErrItemNotFound) {
@@ -1307,11 +1313,21 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 		return 0, nil
 	}
 
-	if _, err := w.service.fileRepo.UpdateContentIDByObservedRootPath(ctx, job.MediaFolderID, job.ObservedRootPath, skeleton.ContentID); err != nil {
+	_, replacedContentIDs, err := w.service.fileRepo.UpdateContentIDByObservedRootPath(ctx, job.MediaFolderID, job.ObservedRootPath, skeleton.ContentID)
+	if err != nil {
 		if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, job.LeaseToken, truncateSeriesQueueError(err.Error())); updateErr != nil {
 			return 0, updateErr
 		}
 		return 0, fmt.Errorf("relinking series root %d/%s: %w", job.MediaFolderID, job.ObservedRootPath, err)
+	}
+	// The relink has committed, so a cleanup failure is logged rather than
+	// retried: the next full library scan removes the same memberships.
+	if err := w.service.reconcileRelinkedItems(ctx, job.MediaFolderID, replacedContentIDs); err != nil {
+		slog.WarnContext(ctx, "metadata: series root relink cleanup failed", "component", "metadata",
+			"folder_id", job.MediaFolderID,
+			"observed_root_path", job.ObservedRootPath,
+			"error", err,
+		)
 	}
 
 	needsInitialMatch := skeleton.IsNew || job.RerunRequested
@@ -1355,6 +1371,8 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 				)
 			}
 			return 0, nil
+		} else if result != nil && result.Pinned {
+			w.synthesizePinnedSeriesEpisodes(ctx, skeleton.ContentID)
 		} else if result != nil && !result.Updated {
 			if updateErr := w.updateSeriesFailure(ctx, job.MediaFolderID, job.ObservedRootPath, job.LeaseToken, result.Decision); updateErr != nil {
 				return 0, updateErr
@@ -1373,8 +1391,9 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 				)
 			}
 			return 0, nil
+		} else {
+			w.publishCatalogItemChanged(ctx, job.MediaFolderID, resultContentID(result, skeleton.ContentID), "metadata_updated")
 		}
-		w.publishCatalogItemChanged(ctx, job.MediaFolderID, resultContentID(result, skeleton.ContentID), "metadata_updated")
 	}
 
 	finalContentID, err := w.service.fileRepo.FindContentIDByObservedRootPath(ctx, job.MediaFolderID, job.ObservedRootPath, "series")
@@ -1417,6 +1436,16 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 		"file_count", len(groupFiles),
 	)
 	return len(groupFiles), nil
+}
+
+// synthesizePinnedSeriesEpisodes gives an unmatched split target the same
+// file-derived episodes an automatic match failure would, so its episodes stay
+// browsable while it waits for an admin to identify it.
+func (w *MatchWorker) synthesizePinnedSeriesEpisodes(ctx context.Context, contentID string) {
+	if err := w.service.SynthesizeFallbackEpisodes(ctx, contentID); err != nil {
+		slog.WarnContext(ctx, "metadata: fallback episode synthesis failed for unmatched split target", "component", "metadata",
+			"content_id", contentID, "error", err)
+	}
 }
 
 // A queue row can predate filename-based series grouping. Rechecking every

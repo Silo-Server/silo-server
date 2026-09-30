@@ -62,7 +62,7 @@ func (r *Repository) UpdateSettingsConditional(ctx context.Context, in Settings,
 	if err = lockRevision(ctx, tx, `SELECT revision FROM request_settings WHERE id=true FOR UPDATE`, nil, expected, true); err != nil {
 		return Settings{}, err
 	}
-	out, err := r.updateSettings(ctx, tx, in, expected)
+	out, err := r.updateSettings(ctx, tx, in, expected, &in.WatchlistRequests)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Settings{}, ErrStaleRevision
 	}
