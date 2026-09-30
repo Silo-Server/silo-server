@@ -298,11 +298,11 @@ func TestListMembershipTargetsAddsMissingItemsOnlyForTrash(t *testing.T) {
 			wantEpisodes: []string{id("in-scope-ep"), id("in-scope-missing-ep")},
 		},
 		{
-			// Missing rows outside the scope contribute their item only: the
-			// trash sweep deletes rows, and orphan checks are per item.
+			// Missing rows anywhere in the folder join, because the trash sweep
+			// that follows deletes them folder-wide.
 			includeMissing: true,
 			wantContent:    []string{id("in-scope"), id("in-scope-missing"), id("outside-missing")},
-			wantEpisodes:   []string{id("in-scope-ep"), id("in-scope-missing-ep")},
+			wantEpisodes:   []string{id("in-scope-ep"), id("in-scope-missing-ep"), id("outside-missing-ep")},
 		},
 	} {
 		contentIDs, episodeIDs, err := repo.ListMembershipTargets(ctx, folderID, root, tc.includeMissing)

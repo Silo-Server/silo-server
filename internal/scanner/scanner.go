@@ -2483,9 +2483,9 @@ func (s *Scanner) syncFolderScopedAudioLibraryState(ctx context.Context, folderI
 //
 // Links changed outside the scanner are not visible here, so whatever
 // relinks a file must remove the memberships it leaves stale (filesplit.Move
-// does). trashFollows adds the items of every missing file in the folder, so
-// the folder-wide trash sweep that follows cannot delete the last file row of
-// an item without its orphan check having run.
+// does). trashFollows adds the items and episodes of every missing file in the
+// folder, so the folder-wide trash sweep that follows cannot delete a file row
+// before its item's orphan check and its episode's membership check have run.
 func (s *Scanner) reconcileScopedLibraryMemberships(ctx context.Context, folderID int, pathPrefix string, previous []*scanStateFile, trashFollows bool, protectedRoots []string) (int, int, []string, error) {
 	contentIDs, episodeIDs, err := s.fileRepo.ListMembershipTargets(ctx, folderID, pathPrefix, trashFollows)
 	if err != nil {

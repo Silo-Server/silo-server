@@ -289,8 +289,8 @@ func (r *FileRepository) GetScanStateByFolderAndPathPrefix(ctx context.Context, 
 
 // ListMembershipTargets returns the distinct content and episode IDs linked to
 // files at or beneath pathPrefix in a folder. With includeMissing it also
-// returns the content IDs of every missing file in the folder, so orphan checks
-// can run before a folder-wide trash sweep deletes those rows.
+// returns the links of every missing file in the folder, so their membership
+// and orphan checks run before a folder-wide trash sweep deletes those rows.
 func (r *FileRepository) ListMembershipTargets(ctx context.Context, folderID int, pathPrefix string, includeMissing bool) ([]string, []string, error) {
 	clauses, args := pathscope.RangeCoverageClauses("file_path", []string{pathPrefix}, 2)
 	query := `SELECT content_id, episode_id FROM media_files
@@ -298,7 +298,7 @@ func (r *FileRepository) ListMembershipTargets(ctx context.Context, folderID int
 	if includeMissing {
 		query += `
 		UNION
-		SELECT content_id, NULL FROM media_files
+		SELECT content_id, episode_id FROM media_files
 		WHERE media_folder_id = $1 AND missing_since IS NOT NULL`
 	}
 	rows, err := r.pool.Query(ctx, query, append([]any{folderID}, args...)...)

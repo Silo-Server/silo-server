@@ -119,13 +119,16 @@ func TestCreateOrFindSkeletonKeepsNewFileWithUnmatchedSplitTarget(t *testing.T) 
 	t.Cleanup(pool.Close)
 
 	for _, tc := range []struct {
-		itemType, folderType, provider, prefix string
-		episode                                bool
+		name, itemType, folderType, provider, prefix string
+		episode, partial                             bool
 	}{
-		{itemType: "series", folderType: "series", provider: "tvdb", prefix: "series-tvdb-", episode: true},
-		{itemType: "movie", folderType: "movies", provider: "tmdb", prefix: "movie-tmdb-"},
+		{name: "series", itemType: "series", folderType: "series", provider: "tvdb", prefix: "series-tvdb-", episode: true},
+		{name: "movie", itemType: "movie", folderType: "movies", provider: "tmdb", prefix: "movie-tmdb-"},
+		// A partial split pins individual files; the root still holds the
+		// source's own version, so a pinned file must not be handed to it.
+		{name: "movie partial split", itemType: "movie", folderType: "movies", provider: "tmdb", prefix: "movie-tmdb-", partial: true},
 	} {
-		t.Run(tc.itemType, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			nonce := time.Now().UnixNano() % 100_000_000
 			providerID := fmt.Sprintf("%d", 900_000_000+nonce)
 			libraryRoot := fmt.Sprintf("/split-skeleton-%d/lib", nonce)
@@ -157,8 +160,10 @@ func TestCreateOrFindSkeletonKeepsNewFileWithUnmatchedSplitTarget(t *testing.T) 
 				       ($5, $2, 'Show', 2025, 'unmatched', '', '', '{}'::text[], '', '', '')`,
 				source, tc.itemType, tmdbID, tvdbID, target)
 			exec(`INSERT INTO media_item_roots (media_folder_id, canonical_root_path, content_id) VALUES ($1, $2, $3)`, folderID, root, source)
-			exec(`INSERT INTO media_identity_overrides (media_folder_id, scope, root_path, forced_type, forced_title, forced_year)
-				VALUES ($1, 'root', $2, $3, 'Show', 2025)`, folderID, root, tc.itemType)
+			if !tc.partial {
+				exec(`INSERT INTO media_identity_overrides (media_folder_id, scope, root_path, forced_type, forced_title, forced_year)
+					VALUES ($1, 'root', $2, $3, 'Show', 2025)`, folderID, root, tc.itemType)
+			}
 			insertFile := func(name, contentID string, episode int) (int, string) {
 				t.Helper()
 				path := root + "/" + name
@@ -181,8 +186,16 @@ func TestCreateOrFindSkeletonKeepsNewFileWithUnmatchedSplitTarget(t *testing.T) 
 			if tc.episode {
 				firstName, newName, firstEpisode, newEpisode = "Season 01/Show (2025) - S01E01.mkv", "Season 01/Show (2025) - S01E02.mkv", 1, 2
 			}
-			insertFile(firstName, target, firstEpisode)
+			firstLink := target
+			if tc.partial {
+				firstLink = source
+			}
+			insertFile(firstName, firstLink, firstEpisode)
 			newFileID, newPath := insertFile(newName, "", newEpisode)
+			if tc.partial {
+				exec(`INSERT INTO media_identity_overrides (media_folder_id, scope, file_path, forced_type, forced_title, forced_year)
+					VALUES ($1, 'file', $2, $3, 'Show', 2025)`, folderID, newPath, tc.itemType)
+			}
 
 			service := NewMetadataService(nil, nil, nil,
 				catalog.NewItemRepository(pool), catalog.NewProviderIDRepository(pool),
@@ -203,6 +216,15 @@ func TestCreateOrFindSkeletonKeepsNewFileWithUnmatchedSplitTarget(t *testing.T) 
 			}, folderID, libraryRoot)
 			if err != nil {
 				t.Fatalf("createOrFindSkeleton: %v", err)
+			}
+			if tc.partial {
+				if skeleton == nil || skeleton.ContentID == source {
+					t.Fatalf("file pinned by a partial split resolved to the source: %+v", skeleton)
+				}
+				t.Cleanup(func() {
+					_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, skeleton.ContentID)
+				})
+				return
 			}
 			if skeleton == nil || skeleton.ContentID != target {
 				t.Fatalf("new file resolved to %+v, want the split target %s", skeleton, target)

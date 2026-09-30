@@ -58,30 +58,33 @@ func (s *MetadataService) pinnedUnmatchedBySplit(ctx context.Context, contentID 
 	return pinned, nil
 }
 
-// rootPinnedBySplit reports whether an unmatched split's identity override
-// covers filePath or its observed root. Such a root keeps its provider tag in
-// the folder name, and the source item can still hold its ownership claims, so
-// both would resolve new files there back to the item it was split from.
-func (s *MetadataService) rootPinnedBySplit(ctx context.Context, folderID int, observedRootPath, filePath string) (bool, error) {
+// splitPinForFile reports whether an unmatched split's identity override
+// covers filePath, and whether that override covers its whole observed root.
+// Such a root keeps its provider tag in the folder name, and the source item
+// can still hold its ownership claims, so both would resolve new files there
+// back to the item it was split from. Only a root-wide pin means every file
+// at the root belongs to the split target; a file-scope pin comes from a
+// partial split whose root still holds the source's own files.
+func (s *MetadataService) splitPinForFile(ctx context.Context, folderID int, observedRootPath, filePath string) (pinned, rootWide bool, err error) {
 	if s == nil || s.dbPool == nil || folderID <= 0 {
-		return false, nil
+		return false, false, nil
 	}
-	var pinned bool
+	var fileScope bool
 	if err := s.dbPool.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1
-			FROM media_identity_overrides o
-			WHERE o.media_folder_id = $1
-			  AND o.forced_tmdb_id = ''
-			  AND o.forced_imdb_id = ''
-			  AND o.forced_tvdb_id = ''
-			  AND (
-				(o.scope = 'root' AND o.root_path = $2 AND $2 <> '') OR
-				(o.scope = 'file' AND o.file_path = $3 AND $3 <> '')
-			  )
-		)
-	`, folderID, observedRootPath, filePath).Scan(&pinned); err != nil {
-		return false, fmt.Errorf("checking split identity pin for %s: %w", observedRootPath, err)
+		SELECT
+			COALESCE(bool_or(o.scope = 'root'), false),
+			COALESCE(bool_or(o.scope = 'file'), false)
+		FROM media_identity_overrides o
+		WHERE o.media_folder_id = $1
+		  AND o.forced_tmdb_id = ''
+		  AND o.forced_imdb_id = ''
+		  AND o.forced_tvdb_id = ''
+		  AND (
+			(o.scope = 'root' AND o.root_path = $2 AND $2 <> '') OR
+			(o.scope = 'file' AND o.file_path = $3 AND $3 <> '')
+		  )
+	`, folderID, observedRootPath, filePath).Scan(&rootWide, &fileScope); err != nil {
+		return false, false, fmt.Errorf("checking split identity pin for %s: %w", observedRootPath, err)
 	}
-	return pinned, nil
+	return rootWide || fileScope, rootWide, nil
 }

@@ -6416,7 +6416,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	// An admin split this root into an unmatched item. Its folder still carries
 	// the source's provider tag and the source may still hold the root or group
 	// claim, so resolve it only through the item its files already link to.
-	splitPinned, err := s.rootPinnedBySplit(ctx, folderID, observedRootPath, file.FilePath)
+	splitPinned, splitPinnedRoot, err := s.splitPinForFile(ctx, folderID, observedRootPath, file.FilePath)
 	if err != nil {
 		return nil, err
 	}
@@ -6541,9 +6541,9 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	}
 
 	// Dedup 3: same observed TV root reuses the already-linked root-scoped item.
-	// A split-pinned root does the same for movies: its files already link to
-	// the split target, and a new version there belongs with them.
-	if res.Type == "series" || splitPinned {
+	// A root pinned whole by a split does the same for movies: its files all
+	// link to the split target, and a new version there belongs with them.
+	if res.Type == "series" || splitPinnedRoot {
 		existingContentID, err := s.fileRepo.FindContentIDByObservedRootPath(ctx, folderID, observedRootPath, res.Type)
 		if err != nil {
 			return nil, fmt.Errorf("finding existing item by observed root path: %w", err)
