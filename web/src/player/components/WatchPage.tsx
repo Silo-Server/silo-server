@@ -15,7 +15,7 @@ import {
   sendSubtitleChoiceRequest,
 } from "../utils/subtitleChoicePersistence";
 import { VideoPlayer } from "./VideoPlayer";
-import { fetchWatchDetail } from "@/hooks/queries/items";
+import { fetchWatchDetail, useWatchTrickplay } from "@/hooks/queries/items";
 import { itemKeys } from "@/hooks/queries/keys";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { useWatchTogetherRoomConnection } from "../hooks/useWatchTogetherRoomConnection";
@@ -305,6 +305,15 @@ function WatchPagePlayer({
     () => playbackVersions.find((version) => version.file_id === session.mediaFileId),
     [playbackVersions, session.mediaFileId],
   );
+  const trickplayQuery = useWatchTrickplay(
+    contentId,
+    session.mediaFileId ?? undefined,
+    activePlaybackVersion?.trickplay_available === true,
+  );
+  const refetchTrickplay = trickplayQuery.refetch;
+  const handleTrickplayError = useCallback(() => {
+    void refetchTrickplay();
+  }, [refetchTrickplay]);
 
   const handleEnded = useCallback(() => {
     onEnded?.({
@@ -609,6 +618,8 @@ function WatchPagePlayer({
       versions={playbackVersions}
       activeFileId={session.mediaFileId}
       chapters={activeChapters}
+      trickplay={trickplayQuery.data ?? null}
+      onTrickplayError={handleTrickplayError}
       onSwitchVersion={watchTogetherRoomId ? undefined : handleSwitchVersion}
       subtitleUrls={playableSubtitles}
       initialPosition={session.initialPosition}
