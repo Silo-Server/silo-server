@@ -19,6 +19,7 @@ import {
   cancelItemDetailQueries,
   getQueryKeyItemId,
   invalidateMediaSurfaceQueries,
+  relatedItemIds,
   removeItemFromHomeSectionCaches,
   scheduleMediaSurfaceInvalidation,
   setCachedItemDetail,
@@ -428,6 +429,74 @@ describe("invalidateMediaSurfaceQueries", () => {
     // refresh must not treat it as another item's query.
     expect(getQueryKeyItemId(ratingKeys.list())).toBeUndefined();
     expect(getQueryKeyItemId(ratingKeys.item("item-2"))).toBe("item-2");
+  });
+
+  it("refreshes an episode's season and series queries for its event", async () => {
+    const queryClient = new QueryClient();
+    const seasonEpisodesKey = catalogKeys.itemEpisodes("season-1");
+    const seasonsKey = catalogKeys.seriesSeasons("series-1");
+    const seriesDetailKey = catalogKeys.itemDetail("series-1", 7);
+    const episodeDetailKey = catalogKeys.itemDetail("episode-1");
+    const otherDetailKey = catalogKeys.itemDetail("item-2");
+    queryClient.setQueryData(seasonEpisodesKey, {
+      episodes: [{ content_id: "episode-1" }, { content_id: "episode-2" }],
+    });
+    queryClient.setQueryData(seasonsKey, { seasons: [{ content_id: "season-1" }] });
+    queryClient.setQueryData(seriesDetailKey, { content_id: "series-1" });
+    queryClient.setQueryData(episodeDetailKey, { content_id: "episode-1" });
+    queryClient.setQueryData(otherDetailKey, { content_id: "item-2" });
+
+    await invalidateMediaSurfaceQueries(queryClient, { itemId: "episode-1" });
+
+    expect(queryClient.getQueryState(seasonEpisodesKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(seriesDetailKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(episodeDetailKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherDetailKey)?.isInvalidated).toBe(false);
+  });
+
+  it("finds an episode's series from its cached detail", () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(catalogKeys.itemDetail("episode-1"), {
+      content_id: "episode-1",
+      series_id: "series-1",
+    });
+
+    expect(relatedItemIds(queryClient, "episode-1")).toEqual(new Set(["episode-1", "series-1"]));
+  });
+
+  it("refreshes a marked season's cached episode details", async () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(catalogKeys.itemEpisodes("season-1"), {
+      episodes: [{ content_id: "episode-1" }],
+    });
+    const episodeDetailKey = catalogKeys.itemDetail("episode-1");
+    const episodeWatchKey = itemKeys.watchDetail("episode-1");
+    const otherWatchKey = itemKeys.watchDetail("item-2");
+    queryClient.setQueryData(episodeDetailKey, { content_id: "episode-1" });
+    queryClient.setQueryData(episodeWatchKey, { content_id: "episode-1" });
+    queryClient.setQueryData(otherWatchKey, { content_id: "item-2" });
+
+    await invalidateMediaSurfaceQueries(queryClient, { itemId: "season-1" });
+
+    expect(queryClient.getQueryState(episodeDetailKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(episodeWatchKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherWatchKey)?.isInvalidated).toBe(false);
+  });
+
+  it("matches a watched item key in any library", async () => {
+    const queryClient = new QueryClient();
+    const libraryDetailKey = catalogKeys.itemDetail("series-1", 7);
+    const otherDetailKey = catalogKeys.itemDetail("item-2", 7);
+    queryClient.setQueryData(libraryDetailKey, { content_id: "series-1" });
+    queryClient.setQueryData(otherDetailKey, { content_id: "item-2" });
+
+    await invalidateMediaSurfaceQueries(queryClient, {
+      itemId: "episode-1",
+      watchedKeys: [catalogKeys.itemDetail("series-1")],
+    });
+
+    expect(queryClient.getQueryState(libraryDetailKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherDetailKey)?.isInvalidated).toBe(false);
   });
 
   it("still invalidates explicitly watched keys that belong to another item", async () => {

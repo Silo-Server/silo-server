@@ -176,9 +176,79 @@ export function getQueryKeyItemId(queryKey: readonly unknown[]): string | undefi
   return undefined;
 }
 
+// The item whose episodes or seasons a cached list query holds: an episode
+// list belongs to its season (or series), a season list to its series.
+function listOwnerId(queryKey: readonly unknown[]): string | undefined {
+  if (queryKey[0] === "catalog" && queryKey[1] === "series" && typeof queryKey[2] === "string") {
+    return queryKey[2];
+  }
+  return getQueryKeyItemId(queryKey);
+}
+
+function listedChildIds(data: unknown): string[] {
+  if (typeof data !== "object" || data === null) return [];
+  const ids: string[] = [];
+  for (const field of ["episodes", "seasons"] as const) {
+    const list = (data as Record<string, unknown>)[field];
+    if (!Array.isArray(list)) continue;
+    for (const entry of list) {
+      const id = (entry as { content_id?: unknown } | null)?.content_id;
+      if (typeof id === "string") ids.push(id);
+    }
+  }
+  return ids;
+}
+
+// relatedItemIds is itemId plus the items whose cached state derives from it,
+// as far as the cache shows: its parents (the series named by its detail, and
+// the season or series whose cached list holds it, and theirs) and its
+// children (the episodes or seasons its own cached lists hold, and theirs).
+// Realtime events and watched marks name only the item itself, so narrowing
+// to that one ID would leave an open season grid, series watched totals or a
+// marked season's episodes stale.
+export function relatedItemIds(queryClient: QueryClient, itemId: string): Set<string> {
+  const queries = queryClient.getQueryCache().getAll();
+  const related = new Set([itemId]);
+
+  const ancestors = [itemId];
+  while (ancestors.length > 0) {
+    const child = ancestors.pop() as string;
+    for (const query of queries) {
+      const owner = listOwnerId(query.queryKey);
+      let parent: string | undefined;
+      if (owner && owner !== child && listedChildIds(query.state.data).includes(child)) {
+        parent = owner;
+      } else if (owner === child && isItemDetailQueryKey(query.queryKey, child)) {
+        const seriesId = (query.state.data as ItemDetail | undefined)?.series_id;
+        if (seriesId && seriesId !== child) parent = seriesId;
+      }
+      if (parent && !related.has(parent)) {
+        related.add(parent);
+        ancestors.push(parent);
+      }
+    }
+  }
+
+  const descendants = [itemId];
+  while (descendants.length > 0) {
+    const parent = descendants.pop() as string;
+    for (const query of queries) {
+      if (listOwnerId(query.queryKey) !== parent) continue;
+      for (const child of listedChildIds(query.state.data)) {
+        if (!related.has(child)) {
+          related.add(child);
+          descendants.push(child);
+        }
+      }
+    }
+  }
+  return related;
+}
+
 function shouldInvalidateMediaSurfaceQuery(
   queryKey: readonly unknown[],
   options: InvalidateMediaSurfaceOptions,
+  relatedIds?: ReadonlySet<string>,
 ) {
   if (options.skipItemDetail && options.itemId && isItemDetailQueryKey(queryKey, options.itemId)) {
     return false;
@@ -186,9 +256,15 @@ function shouldInvalidateMediaSurfaceQuery(
 
   if (options.itemId) {
     const targetItemId = getQueryKeyItemId(queryKey);
-    // Keys a caller named in watchedKeys (a watched episode's season or
-    // series, say) belong to other item IDs by design; don't narrow them away.
-    if (targetItemId && targetItemId !== options.itemId && !isWatchedKey(queryKey, options)) {
+    // Keys for related items (see relatedItemIds) or named in watchedKeys (a
+    // watched episode's season or series, say) belong to other item IDs by
+    // design; don't narrow them away.
+    if (
+      targetItemId &&
+      targetItemId !== options.itemId &&
+      !relatedIds?.has(targetItemId) &&
+      !isWatchedKey(queryKey, options)
+    ) {
       return false;
     }
   }
@@ -216,8 +292,18 @@ function shouldInvalidateMediaSurfaceQuery(
 // isWatchedKey is a prefix match on purpose: everything under a watched key
 // (a watched season's or episode's detail variants) changes with it, so it is
 // exempt from the itemId narrowing too. Don't tighten it to an exact match.
+// An item key also matches a watched key for the same item in any library:
+// watched keys carry the "default" library segment, while an item opened
+// through its library caches under that library's ID.
 function isWatchedKey(queryKey: readonly unknown[], options: InvalidateMediaSurfaceOptions) {
-  return (options.watchedKeys ?? []).some((key) => queryKeyStartsWith(queryKey, key));
+  const targetItemId = getQueryKeyItemId(queryKey);
+  return (options.watchedKeys ?? []).some(
+    (key) =>
+      queryKeyStartsWith(queryKey, key) ||
+      (targetItemId !== undefined &&
+        getQueryKeyItemId(key) === targetItemId &&
+        queryKeyStartsWith(queryKey, key.slice(0, 2))),
+  );
 }
 
 export async function invalidateMediaSurfaceQueries(
@@ -228,8 +314,9 @@ export async function invalidateMediaSurfaceQueries(
   // `cancelRefetch: false` — reusing an in-flight request would let a response
   // that predates the mutation satisfy the invalidation and land in the cache
   // as fresh.
+  const relatedIds = options.itemId ? relatedItemIds(queryClient, options.itemId) : undefined;
   await queryClient.invalidateQueries({
-    predicate: (query) => shouldInvalidateMediaSurfaceQuery(query.queryKey, options),
+    predicate: (query) => shouldInvalidateMediaSurfaceQuery(query.queryKey, options, relatedIds),
   });
 }
 
