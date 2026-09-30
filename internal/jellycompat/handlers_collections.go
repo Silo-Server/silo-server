@@ -64,6 +64,16 @@ type compatCollection struct {
 // that a personal collection can hold but a BoxSet's children never list.
 var compatNonVideoMemberTypes = []string{"ebook", "manga"} //nolint:goconst // media_items.type values, named once here.
 
+// personalMemberAccess is the access filter for a personal BoxSet's members
+// and counts. BoxSet children list only video types, so it also leaves out the
+// other non-video types a personal collection can hold, not just the
+// audiobooks and podcasts every compat read excludes.
+func (h *ItemsHandler) personalMemberAccess(ctx context.Context, session *Session) catalog.AccessFilter {
+	access := h.resolveAccessFilter(ctx, session)
+	access.ExcludedMediaTypes = append(slices.Clone(access.ExcludedMediaTypes), compatNonVideoMemberTypes...)
+	return access
+}
+
 // newPersonalCompatCollection adapts a personal collection for the BoxSet
 // surface.
 func newPersonalCompatCollection(c usercollections.ServerVisibleCollection) *compatCollection {
@@ -87,12 +97,7 @@ func (h *ItemsHandler) withVisibleItemCounts(ctx context.Context, session *Sessi
 	if len(sources) == 0 {
 		return
 	}
-	// Children list only video types, so the count leaves out the other
-	// non-video types a personal collection can hold, not just the audiobooks
-	// and podcasts every compat read excludes.
-	access := h.resolveAccessFilter(ctx, session)
-	access.ExcludedMediaTypes = append(slices.Clone(access.ExcludedMediaTypes), compatNonVideoMemberTypes...)
-	counts := h.userCollections.CountVisible(ctx, session.StreamAppUserID, sources, access)
+	counts := h.userCollections.CountVisible(ctx, session.StreamAppUserID, sources, h.personalMemberAccess(ctx, session))
 	for _, c := range collections {
 		if n, ok := counts[c.ID]; ok && c.personal {
 			c.ItemCount = n
@@ -1282,25 +1287,8 @@ func (h *ItemsHandler) hydrateCollectionMembers(ctx context.Context, session *Se
 	return ordered, episodeTargets, nil
 }
 
-// compatVideoTypeGroup limits a personal collection query to the given video
-// types. It uses exact type rules: the catalog's episode scope can expand
-// collections or fall back to their top-level members instead of filtering
-// them. ok is false when no given type is a video type.
-//
-//nolint:goconst // Keep the catalog rule vocabulary beside its protocol translation.
-func compatVideoTypeGroup(itemTypes []string) (catalog.QueryGroup, bool) {
-	rules := make([]catalog.QueryRule, 0, len(itemTypes))
-	for _, itemType := range itemTypes {
-		if slices.Contains(compatVideoTypeList, itemType) {
-			rules = append(rules, catalog.QueryRule{Field: "type", Op: "is", Value: itemType})
-		}
-	}
-	return catalog.QueryGroup{Match: "any", Rules: rules}, len(rules) > 0
-}
-
 // personalLeavesLimit asks the resolver for a personal collection's whole
-// membership. Its ordered-member path loads every member before paging, so one
-// uncapped request costs no more than a page.
+// membership in one request: Play all expands and pages the leaves itself.
 const personalLeavesLimit = math.MaxInt32
 
 // handlePersonalBoxSetLeaves serves Play all and Shuffle for a personal
@@ -1314,12 +1302,10 @@ func (h *ItemsHandler) handlePersonalBoxSetLeaves(w http.ResponseWriter, r *http
 		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
 		return
 	}
-	access := h.resolveAccessFilter(ctx, session)
-	typeGroup, _ := compatVideoTypeGroup(compatVideoTypeList)
+	access := h.personalMemberAccess(ctx, session)
 	req := catalog.CatalogRequest{
 		Source:         catalog.CatalogSourceUserCollection,
 		CollectionID:   collection.ID,
-		Query:          catalog.QueryDefinition{Groups: []catalog.QueryGroup{typeGroup}},
 		Limit:          personalLeavesLimit,
 		UseSourceOrder: true,
 	}
@@ -1374,16 +1360,33 @@ func (h *ItemsHandler) handlePersonalBoxSetChildren(w http.ResponseWriter, r *ht
 			def.Sort = resolved
 		}
 	}
+	// Any rule makes the resolver load the whole membership before paging. A
+	// smart collection pages in SQL, where the access filter below leaves out
+	// non-video types, so it gets type rules only for a client type filter. A
+	// stored collection loads every member anyway, and its member reload does
+	// not apply the access filter's type exclusions, so it always gets them.
+	// Exact type rules: the catalog's episode scope can expand collections or
+	// fall back to their top-level members instead of filtering them.
 	itemTypes := query.itemTypes
 	if !query.hasItemTypeFilter {
-		itemTypes = compatVideoTypeList
+		itemTypes = nil
+		if !catalog.IsLiveQueryType(collection.CollectionType) {
+			itemTypes = compatVideoTypeList
+		}
 	}
-	typeGroup, ok := compatVideoTypeGroup(itemTypes)
-	if !ok {
-		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
-		return
+	if itemTypes != nil {
+		typeRules := make([]catalog.QueryRule, 0, len(itemTypes))
+		for _, itemType := range itemTypes {
+			if slices.Contains(compatVideoTypeList, itemType) {
+				typeRules = append(typeRules, catalog.QueryRule{Field: "type", Op: "is", Value: itemType})
+			}
+		}
+		if len(typeRules) == 0 {
+			writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
+			return
+		}
+		def.Groups = append(def.Groups, catalog.QueryGroup{Match: "any", Rules: typeRules})
 	}
-	def.Groups = append(def.Groups, typeGroup)
 	var rules []catalog.QueryRule
 	if query.genreName != "" {
 		rules = append(rules, catalog.QueryRule{Field: "genre", Op: "contains", Value: query.genreName})
@@ -1400,7 +1403,7 @@ func (h *ItemsHandler) handlePersonalBoxSetChildren(w http.ResponseWriter, r *ht
 	if len(rules) > 0 {
 		def.Groups = append(def.Groups, catalog.QueryGroup{Match: "all", Rules: rules})
 	}
-	access := h.resolveAccessFilter(r.Context(), session)
+	access := h.personalMemberAccess(r.Context(), session)
 	access.MaxContentRating = clampMaxContentRating(access.MaxContentRating, query.maxOfficialRating)
 	var browseOverlay *catalog.BrowseFilters
 	if len(query.genres) > 0 || len(query.years) > 0 || query.hasCompatBrowseFilters() ||

@@ -167,10 +167,14 @@ enough to show the Collections view. Their IDs derive from the collection ID,
 so they stay the same across restarts. Members, the display filter, and
 ordering come from the same catalog view as the native collection routes: a
 saved sort applies when the request sends no `SortBy`. `ChildCount` is the
-number of items that view shows the viewer. Play all and Shuffle work as for
-library collections and follow the collection's listed order. Artwork is served
-to the owner's session, or to a request that carries the signed image tag from
-the listing. Personal collections are not listed by
+number of items that view shows the viewer. Browse filters such as `Years`,
+`PersonIds`, and `AudioLanguages` apply to the members. On the episodes of an
+episode-scoped smart collection they work as in episode listings: `Years` is the
+air year and `PersonIds` matches the series' credits. Play all and Shuffle work as for library
+collections and follow the collection's listed order. A personal collection has
+no collage: it shows its own poster, or the generated title poster. Artwork is
+served to the owner's session, or to a request that carries the signed image
+tag from the listing. Personal collections are not listed by
 `GET /Items/{id}/Collections`.
 
 `EnableImages=false`, `EnableImageTypes`, `ImageTypeLimit`, and

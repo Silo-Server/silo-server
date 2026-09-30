@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -17,6 +18,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/oklog/ulid/v2"
 
 	"github.com/Silo-Server/silo-server/internal/audiobooks"
@@ -782,6 +785,43 @@ func TestHandleItems_PersonalBoxSetMediaTypeFilters(t *testing.T) {
 			}
 		})
 	}
+	// Jellyfin browse filters narrow an episode-scoped collection on the
+	// episode relation, before its page and total are taken. As in the compat
+	// episode listing, Years is the air year and PersonIds the series' credits.
+	if _, err := pool.Exec(ctx, `UPDATE episodes SET air_date = '2020-05-01' WHERE content_id = $1`, episodeID); err != nil {
+		t.Fatal(err)
+	}
+	uncredited := time.Now().UnixNano()
+	credited := uncredited + 1
+	if _, err := pool.Exec(ctx, `INSERT INTO people (id, name) VALUES ($1, $2), ($3, $4)`, uncredited, "Uncredited "+uuid.NewString(), credited, "Credited "+uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM people WHERE id = ANY($1)`, []int64{uncredited, credited}) })
+	if _, err := pool.Exec(ctx, `INSERT INTO item_people (id, content_id, person_id, kind) VALUES ($1, (SELECT series_id FROM episodes WHERE content_id = $2), $1, 1)`, credited, episodeID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM item_people WHERE id = $1`, credited) })
+	episodeRouteID := performItemsRequest(t, h, "/Items?ParentId="+parentID, session).Items[0].ID
+	for _, tc := range []struct {
+		name, query string
+		want        int
+	}{
+		{"matching year", "&Years=2020", 1},
+		{"other year", "&Years=1900", 0},
+		{"credited person", "&PersonIds=" + h.codec.EncodeIntID(EncodedIDPerson, credited), 1},
+		{"uncredited person", "&PersonIds=" + h.codec.EncodeIntID(EncodedIDPerson, uncredited), 0},
+		{"excluded episode", "&ExcludeItemIds=" + episodeRouteID, 0},
+		{"absent audio language", "&AudioLanguages=fi", 0},
+	} {
+		for _, sortQuery := range []string{"", "&SortBy=SortName"} {
+			t.Run("smart episodes "+tc.name+sortQuery, func(t *testing.T) {
+				result := performItemsRequest(t, h, "/Items?ParentId="+parentID+tc.query+sortQuery, session)
+				if len(result.Items) != tc.want || result.TotalRecordCount != tc.want {
+					t.Fatalf("got %d items of %d, want %d", len(result.Items), result.TotalRecordCount, tc.want)
+				}
+			})
+		}
+	}
 	for _, tc := range []struct {
 		name     string
 		backdrop string
@@ -1054,5 +1094,153 @@ func TestPersonalCollectionPosterSizeLimit(t *testing.T) {
 				t.Fatalf("body = %d bytes, want %d", rec.Body.Len(), tc.size)
 			}
 		})
+	}
+}
+
+// An unfiltered page of a personal smart BoxSet sends no type rules, so it
+// keeps paging in SQL; the non-video types stay out through the access filter.
+// A stored collection still gets the video type rules, because its member
+// reload does not apply that filter, and a client type filter always becomes
+// exact rules.
+func TestHandleItems_PersonalBoxSetTypeRules(t *testing.T) {
+	const smartID, storedID = "731d3da2-4f4b-4a71-8f2f-38e1d34775b0", "5b0f0f6e-2c1f-4a8e-9d38-3c4f5a6b7c8d"
+	smart := ownedUserCollection(smartID, "Smart")
+	smart.CollectionType = "smart"
+	resolver := &fakePersonalCollectionResolver{result: &catalog.CatalogResult{}}
+	h := newUserCollectionsTestHandler(&fakeCollectionSource{},
+		&fakeUserCollectionSource{rows: []fakeUserCollection{smart, ownedUserCollection(storedID, "Stored")}},
+		[]upstreamUserLibrary{{ID: 1, Name: "Movies", Type: "movies"}}, nil)
+	h.collectionResolver = resolver
+	codec := NewResourceIDCodec()
+	smartParent := codec.EncodeStringID(EncodedIDUserCollection, smartID)
+	storedParent := codec.EncodeStringID(EncodedIDUserCollection, storedID)
+	typeRules := func(types ...string) []catalog.QueryGroup {
+		rules := make([]catalog.QueryRule, 0, len(types))
+		for _, itemType := range types {
+			rules = append(rules, catalog.QueryRule{Field: "type", Op: "is", Value: itemType})
+		}
+		return []catalog.QueryGroup{{Match: "any", Rules: rules}}
+	}
+
+	for _, tc := range []struct {
+		name, path string
+		want       []catalog.QueryGroup
+	}{
+		{"smart page", "/Items?ParentId=" + smartParent + "&Limit=24", nil},
+		{"smart play all", "/Items?ParentId=" + smartParent + "&Filters=IsNotFolder&Recursive=true", nil},
+		{"stored page", "/Items?ParentId=" + storedParent + "&Limit=24", typeRules("movie", "series", "episode")},
+		{"smart type filter", "/Items?ParentId=" + smartParent + "&IncludeItemTypes=Movie", typeRules("movie")},
+		{"stored type filter", "/Items?ParentId=" + storedParent + "&IncludeItemTypes=Movie", typeRules("movie")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			performItemsRequest(t, h, tc.path)
+			if got := resolver.gotReq.Query.Groups; !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("type rules = %+v, want %+v", got, tc.want)
+			}
+			for _, excluded := range []string{"audiobook", "podcast", "ebook", "manga"} {
+				if !slices.Contains(resolver.gotAccess.ExcludedMediaTypes, excluded) {
+					t.Errorf("access does not exclude %s: %+v", excluded, resolver.gotAccess.ExcludedMediaTypes)
+				}
+			}
+		})
+	}
+}
+
+// rowCountTracer records how many rows the largest SELECT returned.
+type rowCountTracer struct{ largest atomic.Int64 }
+
+func (*rowCountTracer) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryStartData) context.Context {
+	return ctx
+}
+
+func (t *rowCountTracer) TraceQueryEnd(_ context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
+	if data.CommandTag.Select() {
+		for rows := data.CommandTag.RowsAffected(); ; {
+			current := t.largest.Load()
+			if rows <= current || t.largest.CompareAndSwap(current, rows) {
+				break
+			}
+		}
+	}
+}
+
+// TestPersonalSmartBoxSetPageStaysPagedDB pins that one page of a large
+// personal smart collection reads about a page of rows, not the whole
+// membership, as the native catalog route does.
+func TestPersonalSmartBoxSetPageStaysPagedDB(t *testing.T) {
+	const members, pageSize = 60, 5
+	base := newCompatTestPool(t)
+	ctx := context.Background()
+	config := base.Config().Copy()
+	tracer := &rowCountTracer{}
+	config.ConnConfig.Tracer = tracer
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+
+	suffix := uuid.NewString()
+	var userID, library int
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`, "boxset-page-"+suffix).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('movies', $1, true) RETURNING id`, "boxset-page-"+suffix).Scan(&library); err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, 0, members)
+	for i := range members {
+		id := fmt.Sprintf("boxset-page-%s-%03d", suffix, i)
+		ids = append(ids, id)
+		if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title) VALUES ($1, 'movie', $1)`, id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, id, library); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = base.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
+		_, _ = base.Exec(ctx, `DELETE FROM user_collection_revisions WHERE user_id = $1`, userID)
+		_, _ = base.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, ids)
+		_, _ = base.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, library)
+	})
+
+	provider := pgstore.NewPostgresProvider(pool)
+	store, err := provider.ForUser(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := &Session{StreamAppUserID: userID, ProfileID: uuid.NewString()}
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: session.ProfileID, Name: "Test profile"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
+		CreatorProfileID: session.ProfileID, Name: "Every movie", CollectionType: "smart",
+		QueryDefinition:   fmt.Sprintf(`{"media_scope":"movie","library_ids":[%d]}`, library),
+		AllowedProfileIDs: []string{session.ProfileID}, IncludeInServerCollections: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	h := newCollectionsTestHandler(&fakeCollectionSource{}, []upstreamUserLibrary{{ID: library, Name: "Movies", Type: "movies"}}, nil)
+	h.userCollections = usercollections.NewStore(pool)
+	h.collectionResolver = catalog.NewCatalogResolver(catalog.NewBrowseRepository(pool), catalog.NewItemRepository(pool)).
+		WithUserStoreProvider(provider)
+	h.accessFilter = func(_ context.Context, userID int, profileID string) catalog.AccessFilter {
+		return catalog.AccessFilter{UserID: userID, ProfileID: profileID, AllowedLibraryIDs: []int{library}}
+	}
+	listing := performItemsRequest(t, h, "/Items?IncludeItemTypes=BoxSet", session)
+	if len(listing.Items) != 1 {
+		t.Fatalf("expected the personal BoxSet, got %+v", listing.Items)
+	}
+
+	tracer.largest.Store(0)
+	page := performItemsRequest(t, h, "/Items?ParentId="+listing.Items[0].ID+"&Limit="+strconv.Itoa(pageSize), session)
+	if len(page.Items) != pageSize || page.TotalRecordCount != members {
+		t.Fatalf("page: %d items of %d, want %d of %d", len(page.Items), page.TotalRecordCount, pageSize, members)
+	}
+	if largest := tracer.largest.Load(); largest > 2*pageSize {
+		t.Fatalf("one page read a %d-row SELECT; want at most %d", largest, 2*pageSize)
 	}
 }

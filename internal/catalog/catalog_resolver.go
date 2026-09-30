@@ -2310,6 +2310,33 @@ func (r *CatalogResolver) fetchAccessibleEpisodeItemsByID(ctx context.Context, c
 	}
 
 	executor := r.queryExecutorForScope(filterDef.MediaScope, nil)
+	if req.PersonID > 0 || req.BrowseOverlay != nil {
+		// The Jellyfin browse filters apply to the episode relation here, in
+		// the same query, so they narrow the members before counting and paging.
+		// They read episodes as the compat episode listing does: Years is the
+		// air year and PersonIds matches the series' credits.
+		filters, earlyEmpty, err := catalogBrowseFilters(req, access)
+		if err != nil {
+			return nil, err
+		}
+		if earlyEmpty {
+			return []*models.MediaItem{}, nil
+		}
+		var conditions []string
+		var args []any
+		argIdx := 1
+		appendCompatBrowsePredicates(filters, &conditions, &args, &argIdx)
+		airYear := strings.NewReplacer("mi.year", "EXTRACT(YEAR FROM mi.episode_air_date)::int")
+		for i, condition := range conditions {
+			conditions[i] = airYear.Replace(condition)
+		}
+		if filters.PersonID > 0 {
+			conditions = append(conditions, fmt.Sprintf("EXISTS (SELECT 1 FROM episodes pe JOIN item_people ip ON ip.content_id = pe.series_id WHERE pe.content_id = mi.content_id AND ip.person_id = $%d)", argIdx))
+			args = append(args, filters.PersonID)
+		}
+		executor.SourceWhere = strings.Join(conditions, " AND ")
+		executor.SourceArgs = args
+	}
 	items, _, err := executor.Preview(ctx, filterDef, queryAccess, len(contentIDs))
 	if err != nil {
 		return nil, err
