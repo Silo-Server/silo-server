@@ -29,7 +29,7 @@ import RecipeConfigDrawer from "@/components/RecipeGallery/RecipeConfigDrawer";
 import type { AddPayload } from "@/components/RecipeGallery/RecipeConfigDrawer";
 import type { GalleryPreset, RecipeDefinition } from "@/lib/recipes";
 import { fetchRecipeCatalog } from "@/lib/recipes";
-import { canAddAdminOnlyRecipes } from "@/lib/sectionTypes";
+import { canAddAdminOnlyRecipes, isTraktConfig } from "@/lib/sectionTypes";
 import { randomUUID } from "@/lib/uuid";
 import { Plus } from "lucide-react";
 import {
@@ -66,14 +66,50 @@ interface RemovedSystemOverride {
   id: string;
 }
 
+interface SectionOverrideIds {
+  /** The profile's saved overrides for the page. */
+  savedOverrides?: SectionOverride[];
+  /** An ID for an admin section the profile has no saved override for. */
+  newId?: (sectionId: string) => string;
+  /** The section the change being saved is to, if it is to one section. */
+  changedSectionId?: string;
+}
+
+/**
+ * The override set to save for one page. A change to an admin section keeps
+ * the ID of the profile's saved override for that section, or gets one from
+ * `newId`: the server's section source policy refuses a legacy Trakt admin
+ * section's override without an ID. It also refuses a new override that
+ * leaves such a section showing, so a shown one without a saved override is
+ * left out and keeps its admin position, unless the change is to that
+ * section; the refusal then reaches the user instead of the change silently
+ * not saving.
+ */
 export function buildSectionOverrides(
   sections: SettingsSectionEntry[],
   removedSystemSections: RemovedSystemOverride[] = [],
+  { savedOverrides = [], newId = () => randomUUID(), changedSectionId }: SectionOverrideIds = {},
 ): SectionOverride[] {
-  return [
-    ...sections.map((s, index) => ({
+  // The server resolves the last saved override for a section.
+  const savedIds = new Map<string, string>();
+  for (const override of savedOverrides) {
+    if (override.section_id && override.id) savedIds.set(override.section_id, override.id);
+  }
+  const overrides: SectionOverride[] = [];
+  sections.forEach((s, index) => {
+    const savedId = s.is_custom ? undefined : savedIds.get(s.id);
+    if (
+      !s.is_custom &&
+      !savedId &&
+      !s.hidden &&
+      s.id !== changedSectionId &&
+      isTraktConfig(s.config)
+    ) {
+      return;
+    }
+    overrides.push({
       section_id: s.is_custom ? undefined : s.id,
-      id: s.is_custom ? s.id : undefined,
+      id: s.is_custom ? s.id : (savedId ?? newId(s.id)),
       position: index,
       hidden: s.hidden,
       title: s.title,
@@ -81,12 +117,30 @@ export function buildSectionOverrides(
       item_limit: s.item_limit,
       section_type: s.is_custom ? s.section_type : undefined,
       config: s.config,
-    })),
-    ...removedSystemSections.map((section) => ({
+    });
+  });
+  for (const section of removedSystemSections) {
+    overrides.push({
       section_id: section.id,
+      id: savedIds.get(section.id) ?? newId(section.id),
       removed: true,
-    })),
-  ];
+    });
+  }
+  return overrides;
+}
+
+/**
+ * Gives each admin section one new override ID and returns the same one on
+ * later calls, so a quick second save on a page reuses the IDs of the first
+ * before the saved overrides refetch.
+ */
+export function createOverrideIdSource(): (sectionId: string) => string {
+  const ids = new Map<string, string>();
+  return (sectionId) => {
+    const id = ids.get(sectionId) ?? randomUUID();
+    ids.set(sectionId, id);
+    return id;
+  };
 }
 
 export function applySectionDeletion(
@@ -243,6 +297,8 @@ export default function HomeScreenSettings() {
   const activeSelectionValue = scopeValue;
   const activeSelectionRef = useRef(activeSelectionValue);
   const latestSaveAttemptRef = useRef(0);
+  // New override IDs for admin sections on this page.
+  const newOverrideIdRef = useRef(createOverrideIdSource());
 
   // DnD state
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -291,6 +347,7 @@ export default function HomeScreenSettings() {
   function saveOverrides(
     sections: SettingsSectionEntry[],
     removedOverrides: RemovedSystemOverride[] = removedSystemSections,
+    changedSectionId?: string,
   ) {
     if (!canEditSections) {
       return;
@@ -299,7 +356,11 @@ export default function HomeScreenSettings() {
     const selectionValueAtSave = activeSelectionValue;
     const saveAttemptId = latestSaveAttemptRef.current + 1;
     latestSaveAttemptRef.current = saveAttemptId;
-    const overrides = buildSectionOverrides(sections, removedOverrides);
+    const overrides = buildSectionOverrides(sections, removedOverrides, {
+      savedOverrides: rawOverridesQuery.data?.overrides,
+      newId: newOverrideIdRef.current,
+      changedSectionId,
+    });
     saveMutation.mutate(
       {
         scope,
@@ -348,7 +409,7 @@ export default function HomeScreenSettings() {
     if (oldIndex === -1 || newIndex === -1) return;
     const next = arrayMove(orderedSections, oldIndex, newIndex);
     setOrderedSections(next);
-    saveOverrides(next);
+    saveOverrides(next, removedSystemSections, String(active.id));
   }
 
   function handleDragCancel() {
@@ -364,7 +425,7 @@ export default function HomeScreenSettings() {
     }
     const next = orderedSections.map((s) => (s.id === id ? { ...s, hidden: !s.hidden } : s));
     setOrderedSections(next);
-    saveOverrides(next);
+    saveOverrides(next, removedSystemSections, id);
   }
 
   function handleRequestDelete(section: SettingsSectionEntry) {
@@ -430,7 +491,7 @@ export default function HomeScreenSettings() {
       next = [...orderedSections, { ...updated, position: orderedSections.length }];
     }
     setOrderedSections(next);
-    saveOverrides(next);
+    saveOverrides(next, removedSystemSections, updated.id);
   }
 
   // Reset
@@ -442,6 +503,7 @@ export default function HomeScreenSettings() {
   }
 
   function handleScopeChange(value: string) {
+    newOverrideIdRef.current = createOverrideIdSource();
     setOrderedSections([]);
     setRemovedSystemSections([]);
     setActiveId(null);
@@ -498,7 +560,10 @@ export default function HomeScreenSettings() {
           setConfirmResetOpen(false);
           resetMutation.mutate(
             { scope, libraryId: libraryId ? String(libraryId) : undefined },
-            { onSuccess: () => toast.success("Sections reset to default") },
+            {
+              onSuccess: () => toast.success("Sections reset to default"),
+              onError: () => toast.error("Failed to reset section customizations"),
+            },
           );
         }}
       />

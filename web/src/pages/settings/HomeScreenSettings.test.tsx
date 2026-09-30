@@ -8,6 +8,7 @@ import {
   applySectionDeletion,
   canMutateSectionSettings,
   buildSectionOverrides,
+  createOverrideIdSource,
   buildProfileGallerySection,
   hydrateRemovedSystemSections,
   sectionSaveErrorMessage,
@@ -98,6 +99,73 @@ describe("HomeScreenSettings helpers", () => {
         removed: true,
       }),
     );
+  });
+
+  it("keeps saved override IDs on admin sections and gives the others new ones", () => {
+    const overrides = buildSectionOverrides(
+      [
+        makeSection({ id: "admin-1" }),
+        makeSection({ id: "admin-2" }),
+        makeSection({ id: "custom-1", is_custom: true }),
+      ],
+      [{ id: "admin-3" }, { id: "admin-4" }],
+      {
+        savedOverrides: [
+          { id: "stale", section_id: "admin-1" },
+          { id: "saved-1", section_id: "admin-1", position: 0 },
+          { id: "saved-3", section_id: "admin-3", removed: true },
+          { id: "custom-1", position: 1 },
+        ],
+        newId: (sectionId) => `new-${sectionId}`,
+      },
+    );
+
+    expect(overrides.map(({ id, section_id }) => ({ id, section_id }))).toEqual([
+      { id: "saved-1", section_id: "admin-1" },
+      { id: "new-admin-2", section_id: "admin-2" },
+      { id: "custom-1", section_id: undefined },
+      { id: "saved-3", section_id: "admin-3" },
+      { id: "new-admin-4", section_id: "admin-4" },
+    ]);
+  });
+
+  it("leaves out a shown legacy Trakt section without a saved override unless the change is to it", () => {
+    const trakt = { source: "trakt", list: "trending" };
+    const sections = [
+      makeSection({ id: "trakt-shown", config: trakt }),
+      makeSection({ id: "trakt-hidden", config: trakt, hidden: true }),
+      makeSection({ id: "trakt-saved", config: { source_provider: "trakt" } }),
+      makeSection({ id: "admin-1" }),
+    ];
+    const ids = {
+      savedOverrides: [{ id: "saved", section_id: "trakt-saved" }],
+      newId: (sectionId: string) => `new-${sectionId}`,
+    };
+    const overrides = buildSectionOverrides(sections, [{ id: "trakt-removed" }], {
+      ...ids,
+      changedSectionId: "admin-1",
+    });
+
+    expect(overrides.map(({ id, section_id }) => ({ id, section_id }))).toEqual([
+      { id: "new-trakt-hidden", section_id: "trakt-hidden" },
+      { id: "saved", section_id: "trakt-saved" },
+      { id: "new-admin-1", section_id: "admin-1" },
+      { id: "new-trakt-removed", section_id: "trakt-removed" },
+    ]);
+    expect(overrides.find((o) => o.section_id === "admin-1")?.position).toBe(3);
+
+    // An edit or move of the section itself is sent, so its refusal shows.
+    const edited = buildSectionOverrides(sections, [], { ...ids, changedSectionId: "trakt-shown" });
+    expect(edited[0]).toMatchObject({ id: "new-trakt-shown", section_id: "trakt-shown" });
+  });
+
+  it("gives each admin section one new override ID per source", () => {
+    const first = createOverrideIdSource();
+    const id = first("admin-1");
+
+    expect(first("admin-1")).toBe(id);
+    expect(first("admin-2")).not.toBe(id);
+    expect(createOverrideIdSource()("admin-1")).not.toBe(id);
   });
 
   it("removes a deleted custom section from visible rows without adding a removed override", () => {

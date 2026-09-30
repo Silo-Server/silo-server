@@ -705,7 +705,7 @@ describe("planHomeLayoutImport on another server", () => {
 describe("mergeImportedPage", () => {
   const noTrakt = new Set<string>();
 
-  it("replaces the whole page on the same server, reusing saved override IDs", () => {
+  it("replaces the whole page on the same server, reusing the saved override IDs the server resolves", () => {
     const page = {
       scope: "home" as const,
       label: "Home",
@@ -717,6 +717,7 @@ describe("mergeImportedPage", () => {
       ],
     };
     const existing = [
+      stored({ id: "stale-1", section_id: "admin-1", position: 7 }),
       stored({ id: "saved-1", section_id: "admin-1", position: 4 }),
       stored({ id: "saved-3", section_id: "admin-3", removed: true }),
       stored({ id: "old-custom", user_section_type: "hidden_gems", is_user_added: true }),

@@ -1,6 +1,6 @@
 import { V2ProblemError } from "@/api/v2/request";
 import type { components } from "@/api/v2/schema";
-import { FILTER_SECTION_TYPES } from "@/lib/sectionTypes";
+import { FILTER_SECTION_TYPES, isTraktConfig } from "@/lib/sectionTypes";
 
 // Home layout export and import: a profile's saved section overrides for the
 // home page and each library page, written to a JSON file that another
@@ -368,16 +368,6 @@ function effectiveConfig(override: SectionOverrideWrite): Record<string, unknown
   return override.user_config ?? override.config ?? {};
 }
 
-/**
- * Whether a section config names Trakt as its source, read the way the
- * server's section source policy reads it. New Trakt-backed overrides are
- * refused, and legacy Trakt admin sections can be hidden but never changed
- * or shown again.
- */
-export function isTraktConfig(config: Record<string, unknown> | undefined): boolean {
-  return config?.source === "trakt" || config?.source_provider === "trakt";
-}
-
 function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim() !== "";
 }
@@ -617,11 +607,10 @@ export function mergeImportedPage(
     ];
   }
 
+  // The server resolves the last saved override for a section.
   const existingBySection = new Map<string, SectionOverrideRead>();
   for (const override of existing) {
-    if (override.section_id && !existingBySection.has(override.section_id)) {
-      existingBySection.set(override.section_id, override);
-    }
+    if (override.section_id) existingBySection.set(override.section_id, override);
   }
   const imported = new Set<string>();
   const merged: SectionOverrideWrite[] = [];
