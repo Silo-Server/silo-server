@@ -1529,6 +1529,9 @@ func main() {
 			cfg.Playback.ChapterThumbnailWorkers,
 		)
 		if chapterThumbService != nil {
+			if queue := blobgc.NewQueue(deps.DB); queue != nil {
+				chapterThumbService.SetBlobQueue(queue)
+			}
 			chapterThumbService.Start(appCtx)
 			deps.ChapterThumbnailQueuer = chapterThumbService
 		}
@@ -2772,7 +2775,9 @@ func main() {
 				metadata.NewArtworkRevisionGarbageCollector(deps.DB, deps.Blobs.Assets),
 			))
 			mediaImages := []blobgc.Namespace{chapterthumbs.BlobNamespace(deps.DB), trickplay.BlobNamespace(deps.DB)}
-			if collector := blobgc.NewCollector(deps.DB, deps.Blobs.Assets, mediaImages...); collector != nil {
+			// Replaced chapter images are queued by key; the sweep lists by file.
+			collected := append([]blobgc.Namespace{chapterthumbs.ImageBlobNamespace(deps.DB)}, mediaImages...)
+			if collector := blobgc.NewCollector(deps.DB, deps.Blobs.Assets, collected...); collector != nil {
 				taskMgr.Register(tasks.NewCleanupRemovedMediaImagesTask(collector))
 			}
 			if sweeper := blobgc.NewSweeper(deps.DB, deps.Blobs.Assets, mediaImages...); sweeper != nil {

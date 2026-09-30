@@ -24,6 +24,82 @@ func BlobNamespace(pool *pgxpool.Pool) blobgc.Namespace {
 	}
 }
 
+// ImageBlobNamespace describes single chapter thumbnails to blobgc: an image
+// a newer one replaced, after a preview width change, is queued by its own
+// key and deleted once its file's chapters no longer reference it. It is for
+// the Collector only. The sweep lists by file (BlobNamespace): an image
+// replaced moments ago is old by its storage time, so a sweep could not give
+// it the grace its queue entry does.
+func ImageBlobNamespace(pool *pgxpool.Pool) blobgc.Namespace {
+	return blobgc.Namespace{
+		Root:  chapterImagesPrefix,
+		Group: imageKeyGroup,
+		Live: func(ctx context.Context, keys []string) (map[string]bool, error) {
+			return referencedImages(ctx, pool, keys)
+		},
+	}
+}
+
+// imageKeyGroup accepts a chapter thumbnail key,
+// chapter-images/{file_id}/{chapter_index}/w{width}.webp, as its own group.
+func imageKeyGroup(key string) (string, bool) {
+	if _, ok := imagesFileID(key); !ok {
+		return "", false
+	}
+	parts := strings.Split(strings.TrimPrefix(key, chapterImagesPrefix), "/")
+	if len(parts) != 3 || !canonicalNumber(parts[1], true) {
+		return "", false
+	}
+	width, ok := strings.CutSuffix(parts[2], ".webp")
+	if !ok {
+		return "", false
+	}
+	width, ok = strings.CutPrefix(width, "w")
+	if !ok || !canonicalNumber(width, false) {
+		return "", false
+	}
+	return key, true
+}
+
+// canonicalNumber reports whether s is a decimal number without leading
+// zeros; zero itself only when allowZero.
+func canonicalNumber(s string, allowZero bool) bool {
+	n, err := strconv.Atoi(s)
+	return err == nil && strconv.Itoa(n) == s && (n > 0 || (allowZero && n == 0))
+}
+
+// referencedImages reports which keys a chapter of their file still points
+// at. A key whose file is gone is not referenced.
+func referencedImages(ctx context.Context, pool *pgxpool.Pool, keys []string) (map[string]bool, error) {
+	ids := make([]int, 0, len(keys))
+	for _, key := range keys {
+		if id, ok := imagesFileID(key); ok {
+			ids = append(ids, id)
+		}
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT DISTINCT chapter->>'thumbnail_path'
+		FROM public.media_files mf
+		CROSS JOIN LATERAL jsonb_array_elements(
+			CASE WHEN jsonb_typeof(mf.chapters) = 'array' THEN mf.chapters ELSE '[]'::jsonb END
+		) AS chapter
+		WHERE mf.id = ANY($1::int[])
+		  AND chapter->>'thumbnail_path' = ANY($2::text[])`, ids, keys)
+	if err != nil {
+		return nil, fmt.Errorf("look up chapter thumbnails: %w", err)
+	}
+	defer rows.Close()
+	live := map[string]bool{}
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		live[key] = true
+	}
+	return live, rows.Err()
+}
+
 // imagesGroup returns the file prefix of a chapter thumbnail key.
 func imagesGroup(key string) (string, bool) {
 	id, ok := imagesFileID(key)

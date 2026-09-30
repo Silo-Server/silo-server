@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/blobstore"
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -56,7 +57,10 @@ var chapterThumbnailRetrySchedule = []time.Duration{
 
 type FileRepository interface {
 	GetByID(ctx context.Context, id int) (*models.MediaFile, error)
-	ListMissingChapterThumbnails(ctx context.Context, limit int) ([]*models.MediaFile, error)
+	// ListMissingChapterThumbnails lists files with a chapter to make a
+	// thumbnail for: none yet, or one whose path does not end in
+	// currentSuffix, made at another width.
+	ListMissingChapterThumbnails(ctx context.Context, limit int, currentSuffix string) ([]*models.MediaFile, error)
 	UpdateChapterThumbnailState(
 		ctx context.Context,
 		fileID int,
@@ -89,6 +93,18 @@ type SettingsReader interface {
 
 type ObjectStore = blobstore.Store
 
+// BlobQueue schedules the deletion of images a newer one replaced
+// (*blobgc.Queue).
+type BlobQueue interface {
+	Schedule(ctx context.Context, prefixes []string, delay time.Duration) error
+	Cancel(ctx context.Context, prefixes []string) error
+}
+
+// displacedImageGrace is how long an image a newer one replaced stays
+// stored: longer than a signed image URL lives, so a client that read the
+// old path keeps a working URL.
+const displacedImageGrace = 48 * time.Hour
+
 type ThumbnailNotifier interface {
 	ChapterThumbnailReady(ctx context.Context, fileID int, chapterIndex int, thumbnailPath string, thumbnailThumbhash string)
 }
@@ -105,6 +121,7 @@ type Service struct {
 	settings     SettingsReader
 	store        ObjectStore
 	notifier     ThumbnailNotifier
+	blobQueue    BlobQueue
 	ffmpegPath   string
 	// hwAccel and hwDevice hold the playback.hw_accel / playback.hw_device
 	// values captured when the service was built. They are only the fallback:
@@ -173,6 +190,15 @@ func (s *Service) SetNotifier(notifier ThumbnailNotifier) {
 		return
 	}
 	s.notifier = notifier
+}
+
+// SetBlobQueue lets the service retire the images a width change replaces.
+// Without one they stay stored until their file is deleted.
+func (s *Service) SetBlobQueue(queue BlobQueue) {
+	if s == nil {
+		return
+	}
+	s.blobQueue = queue
 }
 
 func NewService(
@@ -295,7 +321,11 @@ func (s *Service) BackfillMissing(ctx context.Context, limit int) (int, error) {
 		limit = defaultBatchLimit
 	}
 
-	files, err := s.fileRepo.ListMissingChapterThumbnails(ctx, limit)
+	width, err := s.previewImageWidth(ctx)
+	if err != nil {
+		return 0, err
+	}
+	files, err := s.fileRepo.ListMissingChapterThumbnails(ctx, limit, chapterThumbnailSuffix(width))
 	if err != nil {
 		return 0, err
 	}
@@ -387,6 +417,11 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 		return false, nil
 	}
 
+	width, err := s.previewImageWidth(ctx)
+	if err != nil {
+		return false, err
+	}
+
 	file, err = s.ensureChapters(ctx, file, now)
 	if err != nil || file == nil {
 		return false, err
@@ -410,7 +445,7 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 		return false, nil
 	}
 
-	selected := selectChapterCandidates(file.Chapters, req.TargetSeconds, priority, s.batchSize(priority), now)
+	selected := selectChapterCandidates(file.Chapters, req.TargetSeconds, priority, s.batchSize(priority), now, width)
 	if len(selected) == 0 {
 		slog.InfoContext(ctx,
 			"chapter thumbnail request skipped", "component", "chapterthumbs",
@@ -481,7 +516,7 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 			continue
 		}
 
-		path, thumbhash, err := s.uploadChapterThumbnail(ctx, updated.ID, chapter.Index, frame)
+		path, thumbhash, err := s.uploadChapterThumbnail(ctx, updated.ID, chapter.Index, frame, width)
 		if err != nil {
 			slog.WarnContext(ctx,
 				"chapter thumbnail upload failed", "component", "chapterthumbs",
@@ -532,6 +567,7 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 			updated = *persisted
 			updated.Chapters = append([]models.MediaChapter(nil), persisted.Chapters...)
 		}
+		s.retireDisplaced(ctx, file.Chapters, generated)
 		for _, ready := range generated {
 			if s.notifier == nil || ready.offset < 0 || ready.offset >= len(updated.Chapters) {
 				continue
@@ -547,7 +583,7 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 		}
 	}
 
-	requeue := hardFileFailure == nil && hasEligibleMissingChapter(updated.Chapters, now)
+	requeue := hardFileFailure == nil && hasEligibleMissingChapter(updated.Chapters, now, width)
 	slog.InfoContext(ctx,
 		"chapter thumbnail processing finished", "component", "chapterthumbs",
 		"file_id",
@@ -845,16 +881,23 @@ func (s *Service) reserveRemoteNode(ctx context.Context) (*nodepool.Node, func()
 	}, ""
 }
 
-func (s *Service) uploadChapterThumbnail(ctx context.Context, fileID, chapterIndex int, frame []byte) (string, string, error) {
+func (s *Service) uploadChapterThumbnail(ctx context.Context, fileID, chapterIndex int, frame []byte, width int) (string, string, error) {
 	if s.uploadChapterThumbnailFunc != nil {
 		return s.uploadChapterThumbnailFunc(ctx, fileID, chapterIndex, frame)
 	}
 
-	data, err := imageutil.EncodeWebPWidth(frame, chapterThumbnailWidth)
+	data, err := imageutil.EncodeWebPWidth(frame, width)
 	if err != nil {
 		return "", "", fmt.Errorf("encode thumbnail: %w", err)
 	}
-	key := chapterThumbnailKey(fileID, chapterIndex)
+	key := chapterThumbnailKey(fileID, chapterIndex, width)
+	// The key may be waiting for deletion from an earlier width change that
+	// this one undoes; take it off the queue before storing under it.
+	if s.blobQueue != nil {
+		if err := s.blobQueue.Cancel(ctx, []string{key}); err != nil {
+			return "", "", err
+		}
+	}
 	if err := s.store.Put(ctx, key, data); err != nil {
 		return "", "", fmt.Errorf("upload %s: %w", key, err)
 	}
@@ -865,16 +908,55 @@ func (s *Service) uploadChapterThumbnail(ctx context.Context, fileID, chapterInd
 	return key, thumbhash, nil
 }
 
-// chapterThumbnailWidth is the width of the one image stored per chapter. It
-// is the size every client is served: the web seek-bar preview and chapters
-// menu, and the thumbnail_url the native apps decode. No full-size original is
-// kept; a client that needs larger previews needs the chapters regenerated.
-const chapterThumbnailWidth = 300
+// previewImageWidth is the width of the one image stored per chapter: the
+// preview image width setting, shared with seek previews. It is the size
+// every client is served: the web seek-bar preview and chapters menu, and
+// the thumbnail_url the native apps decode. No full-size original is kept, so
+// a new width makes every chapter's thumbnail again, and the old image serves
+// until its replacement exists. A setting that cannot be read is an error:
+// going on with the default would remake every thumbnail made to another.
+func (s *Service) previewImageWidth(ctx context.Context) (int, error) {
+	if s.settings == nil {
+		return config.DefaultPreviewImageWidth, nil
+	}
+	value, err := s.settings.Get(ctx, config.PreviewImageWidthSettingKey)
+	if err != nil {
+		return 0, fmt.Errorf("read the preview image width: %w", err)
+	}
+	return config.PreviewImageWidth(value), nil
+}
 
 // chapterThumbnailKey is the object key a chapter's thumbnail is stored under,
 // and the value its thumbnail_path holds.
-func chapterThumbnailKey(fileID, chapterIndex int) string {
-	return fmt.Sprintf("%s%d/%d/w%d.webp", chapterImagesPrefix, fileID, chapterIndex, chapterThumbnailWidth)
+func chapterThumbnailKey(fileID, chapterIndex, width int) string {
+	return fmt.Sprintf("%s%d/%d/w%d.webp", chapterImagesPrefix, fileID, chapterIndex, width)
+}
+
+// chapterThumbnailSuffix ends the key of every thumbnail made at width.
+func chapterThumbnailSuffix(width int) string {
+	return fmt.Sprintf("/w%d.webp", width)
+}
+
+// retireDisplaced queues the images that generated replaced for deletion,
+// once the chapters naming their replacements are saved. A failure only
+// leaves the old images stored until their file is deleted.
+func (s *Service) retireDisplaced(ctx context.Context, before []models.MediaChapter, generated []generatedChapter) {
+	if s.blobQueue == nil {
+		return
+	}
+	var displaced []string
+	for _, ready := range generated {
+		if ready.offset < 0 || ready.offset >= len(before) {
+			continue
+		}
+		old := before[ready.offset].ThumbnailPath
+		if _, ok := imageKeyGroup(old); ok && old != ready.path {
+			displaced = append(displaced, old)
+		}
+	}
+	if err := s.blobQueue.Schedule(ctx, displaced, displacedImageGrace); err != nil {
+		slog.WarnContext(ctx, "chapter thumbnail cleanup not queued", "component", "chapterthumbs", "images", len(displaced), "error", err)
+	}
 }
 
 func (s *Service) enqueue(req ChapterThumbnailRequest, priority bool) bool {
@@ -1137,9 +1219,9 @@ func (s *Service) chapterThumbnailSoftwareToneMapEnabled(ctx context.Context) bo
 	return err == nil && strings.EqualFold(strings.TrimSpace(value), "true")
 }
 
-func hasEligibleMissingChapter(chapters []models.MediaChapter, now time.Time) bool {
+func hasEligibleMissingChapter(chapters []models.MediaChapter, now time.Time, width int) bool {
 	for _, chapter := range chapters {
-		if isChapterEligible(chapter, now) {
+		if isChapterEligible(chapter, now, width) {
 			return true
 		}
 	}
@@ -1152,6 +1234,7 @@ func selectChapterCandidates(
 	priority bool,
 	limit int,
 	now time.Time,
+	width int,
 ) []chapterCandidate {
 	if limit <= 0 {
 		return nil
@@ -1159,7 +1242,7 @@ func selectChapterCandidates(
 
 	candidates := make([]chapterCandidate, 0, len(chapters))
 	for offset, chapter := range chapters {
-		if !isChapterEligible(chapter, now) {
+		if !isChapterEligible(chapter, now, width) {
 			continue
 		}
 		candidate := chapterCandidate{offset: offset, chapter: chapter}
@@ -1198,8 +1281,10 @@ func selectChapterCandidates(
 	return candidates
 }
 
-func isChapterEligible(chapter models.MediaChapter, now time.Time) bool {
-	if chapter.ThumbnailPath != "" {
+// isChapterEligible reports whether a chapter needs a thumbnail made: it has
+// none, or has one made at another width, and is not waiting out a failure.
+func isChapterEligible(chapter models.MediaChapter, now time.Time, width int) bool {
+	if chapter.ThumbnailPath != "" && strings.HasSuffix(chapter.ThumbnailPath, chapterThumbnailSuffix(width)) {
 		return false
 	}
 	if chapter.ThumbnailRetryAfter != nil && chapter.ThumbnailRetryAfter.After(now) {
@@ -1230,8 +1315,8 @@ func recordChapterFailure(chapter *models.MediaChapter, now time.Time, reason st
 	}
 	failedAt := now
 	retryAfter := now.Add(nextChapterRetryDuration(*chapter))
-	chapter.ThumbnailPath = ""
-	chapter.ThumbnailThumbhash = ""
+	// A thumbnail made at another width keeps serving until one at this
+	// width replaces it.
 	chapter.ThumbnailFailedAt = &failedAt
 	chapter.ThumbnailRetryAfter = &retryAfter
 	chapter.ThumbnailLastError = failureDetail(reason, err)

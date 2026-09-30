@@ -29,7 +29,7 @@ root, where the key prefixes each caller already uses keep the namespaces apart:
 | `branding/…` | branding assets |
 | `collection-images/…` | collection artwork |
 | `library-posters/…` | library posters |
-| `chapter-images/…` | chapter thumbnails: one `{file_id}/{chapter_index}/w300.webp` per chapter, the key `thumbnail_path` holds |
+| `chapter-images/…` | chapter thumbnails: one `{file_id}/{chapter_index}/w{width}.webp` per chapter at `playback.preview_image_width`, the key `thumbnail_path` holds |
 | `markers/…` | intro and credit markers |
 | `subtitles/…` | downloaded subtitles |
 | `diagnostics/…` | diagnostic bundles |
@@ -63,6 +63,16 @@ row is gone and whose newest object is over a day old; it queues nothing
 when more than half the prefixes it sees look orphaned, the signature of a
 broken liveness check rather than of real orphans. `media_files` ids are
 never reused, so a file prefix is dead for good once its row is gone.
+
+A new `playback.preview_image_width` replaces each chapter's image with one
+at the new width while the file lives. The chapter service takes the new
+key off the queue before writing it (a width change undone within the grace
+would otherwise delete it), saves the chapter, and then queues the replaced
+key on its own, 48 hours out, longer than a signed URL lives. The constraint
+admits these single `chapter-images/<id>/<chapter>/w<width>.webp` keys too,
+and the collector deletes one only while no chapter of its file references
+it (`chapterthumbs.ImageBlobNamespace`). The sweep lists by file only: a
+replaced image's storage time says nothing about when it was replaced.
 
 Only the Assets store is wrapped to record the storage identity. When Operational
 shares it, a first write through any caller records it. A private S3 bucket stays

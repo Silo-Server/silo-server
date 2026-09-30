@@ -91,7 +91,7 @@ and runs each file at idle CPU and I/O priority:
 
 - The recipe comes from the settings in force at claim time:
   `playback.preview_image_width` (default 300, shared with chapter
-  thumbnails) and `playback.trickplay_interval_seconds` (default 10, at least
+  thumbnails, which a new width also remakes) and `playback.trickplay_interval_seconds` (default 10, at least
   5). A width up to 320 gets a 10x10 grid; wider thumbnails get fewer tiles
   so a sheet stays at most 3200 pixels wide. JPEG quality is fixed at 80.
 - A tile's height follows the display aspect ratio read from the execution
