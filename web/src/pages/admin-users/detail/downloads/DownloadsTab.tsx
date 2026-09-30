@@ -60,6 +60,14 @@ function matchesStatus(row: AdminUserDownload, filter: StatusFilter, android: bo
   }
 }
 
+/** What a capped list covers, or null when both lists loaded in full. */
+function partialListText(downloads?: boolean, monitors?: boolean): string | null {
+  if (downloads && monitors) return "the first 5,000 downloads and 2,000 monitored series";
+  if (downloads) return "the first 5,000 downloads";
+  if (monitors) return "the first 2,000 monitored series";
+  return null;
+}
+
 function Message({ children, role }: { children: ReactNode; role?: "alert" }) {
   return (
     <div
@@ -85,8 +93,9 @@ export function DownloadsTab({ user }: { user: AdminUser }) {
   const [profileFilter, setProfileFilter] = useState<string>(ALL);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
-  const rows = useMemo(() => downloads.data ?? [], [downloads.data]);
-  const monitorRows = useMemo(() => monitors.data ?? [], [monitors.data]);
+  const rows = useMemo(() => downloads.data?.items ?? [], [downloads.data]);
+  const monitorRows = useMemo(() => monitors.data?.items ?? [], [monitors.data]);
+  const partial = partialListText(downloads.data?.truncated, monitors.data?.truncated);
   const deviceById = useMemo(
     () => new Map<string, AdminUserDeviceRow>((devices.data ?? []).map((d) => [d.device_id, d])),
     [devices.data],
@@ -168,6 +177,15 @@ export function DownloadsTab({ user }: { user: AdminUser }) {
         )}
         <StatTile label="Monitored series" value={activeMonitors} detail="synced by the app" />
       </StatStrip>
+
+      {partial && (
+        <p
+          role="note"
+          className="border-border/60 bg-muted/30 rounded-lg border px-3 py-2 text-[13px] leading-relaxed"
+        >
+          The lists and counts here cover only {partial}; this account has more.
+        </p>
+      )}
 
       {rows.length > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-3">

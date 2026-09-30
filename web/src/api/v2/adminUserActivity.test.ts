@@ -249,8 +249,9 @@ it("walks every download page and refuses a repeated cursor", async () => {
       response({ items: [{ ...download, id: "12" }], page: { has_more: false } }),
     );
   vi.stubGlobal("fetch", fetch);
-  const rows = await listAllAdminUserDownloads(7, ctx());
+  const { items: rows, truncated } = await listAllAdminUserDownloads(7, ctx());
   expect(rows.map((row) => row.id)).toEqual(["11", "12"]);
+  expect(truncated).toBe(false);
   expect(url(fetch, 0).pathname).toBe("/api/v2/admin/users/7/downloads");
   expect(url(fetch, 0).searchParams.get("limit")).toBe("200");
   expect(url(fetch, 1).searchParams.get("cursor")).toBe("a");
@@ -269,12 +270,30 @@ it("walks every download page and refuses a repeated cursor", async () => {
   );
 });
 
+it("keeps the downloads it read when the account has more than the page cap", async () => {
+  let page = 0;
+  const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(async () => {
+    page += 1;
+    return response({
+      items: [{ ...download, id: String(page) }],
+      page: { has_more: true, next_cursor: `c${page}` },
+    });
+  });
+  vi.stubGlobal("fetch", fetch);
+  const { items, truncated } = await listAllAdminUserDownloads(7, ctx());
+  expect(truncated).toBe(true);
+  expect(items).toHaveLength(25);
+  expect(fetch).toHaveBeenCalledTimes(25);
+});
+
 it("keeps season numbers an array and maps monitors", async () => {
   const fetch = vi
     .fn<typeof globalThis.fetch>()
     .mockResolvedValue(response({ items: [subscription], page: done }));
   vi.stubGlobal("fetch", fetch);
-  const [row] = await listAllAdminUserDownloadSubscriptions(7, ctx());
+  const {
+    items: [row],
+  } = await listAllAdminUserDownloadSubscriptions(7, ctx());
   expect(url(fetch).pathname).toBe("/api/v2/admin/users/7/download-subscriptions");
   expect(row).toMatchObject({ season_numbers: [], target_season: null, removed_episodes: 2 });
 });

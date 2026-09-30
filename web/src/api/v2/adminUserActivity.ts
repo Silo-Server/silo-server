@@ -357,27 +357,41 @@ async function asAdmin<T>(ctx: ProfileRequestContextSnapshot, request: () => Pro
   return body;
 }
 
-/**
- * Walks every page up to `maxPages`, projecting each item. Throws `tooMany`
- * when the server still has more after the last allowed page.
- */
-async function listAll<T>(
+/** Rows read up to a page cap; `truncated` means the server had more. */
+export interface AdminUserList<T> {
+  items: T[];
+  truncated: boolean;
+}
+
+/** Walks pages up to `maxPages`, projecting each item, and keeps what it read. */
+async function listUpTo<T>(
   ctx: ProfileRequestContextSnapshot,
   fetchPage: (cursor: string | undefined) => Promise<PageBody>,
-  opts: { what: string; maxPages: number; tooMany: string; project: (raw: unknown) => T },
-): Promise<T[]> {
-  const out: T[] = [];
+  opts: { what: string; maxPages: number; project: (raw: unknown) => T },
+): Promise<AdminUserList<T>> {
+  const items: T[] = [];
   const seen = new Set<string>();
   let cursor: string | undefined;
   for (let pageIndex = 0; pageIndex < opts.maxPages; pageIndex++) {
     const body = await asAdmin(ctx, () => fetchPage(cursor));
     const next = continuation(body, opts.what, seen);
-    out.push(...(body.items as unknown[]).map(opts.project));
-    if (next === null) return out;
+    items.push(...(body.items as unknown[]).map(opts.project));
+    if (next === null) return { items, truncated: false };
     seen.add(next);
     cursor = next;
   }
-  throw new Error(opts.tooMany);
+  return { items, truncated: true };
+}
+
+/** Like listUpTo, but throws `tooMany` rather than returning a partial list. */
+async function listAll<T>(
+  ctx: ProfileRequestContextSnapshot,
+  fetchPage: (cursor: string | undefined) => Promise<PageBody>,
+  opts: { what: string; maxPages: number; tooMany: string; project: (raw: unknown) => T },
+): Promise<T[]> {
+  const { items, truncated } = await listUpTo(ctx, fetchPage, opts);
+  if (truncated) throw new Error(opts.tooMany);
+  return items;
 }
 
 /** Registered devices for the account, newest activity first (server order). */
@@ -529,12 +543,12 @@ export async function listAdminUserPlays(
   return { items, nextCursor: next };
 }
 
-/** Every managed download row on the account's devices (≤ 25 pages of 200). */
+/** Managed download rows on the account's devices, up to 25 pages of 200. */
 export function listAllAdminUserDownloads(
   userId: number,
   ctx: ProfileRequestContextSnapshot,
   signal?: AbortSignal,
-): Promise<AdminUserDownload[]> {
+): Promise<AdminUserList<AdminUserDownload>> {
   const fetchPage = (cursor: string | undefined) =>
     v2("GET /api/v2/admin/users/{id}/downloads", {
       path: { id: String(userId) },
@@ -542,12 +556,7 @@ export function listAllAdminUserDownloads(
       profileContext: ctx,
       signal,
     }) as Promise<PageBody>;
-  return listAll(ctx, fetchPage, {
-    what: "download",
-    maxPages: 25,
-    tooMany: "Too many downloads to show.",
-    project: downloadOf,
-  });
+  return listUpTo(ctx, fetchPage, { what: "download", maxPages: 25, project: downloadOf });
 }
 
 export async function getAdminUserDownloadSummary(
@@ -576,12 +585,12 @@ export async function getAdminUserDownloadSummary(
   };
 }
 
-/** Every series monitor the account's devices synced (≤ 10 pages of 200). */
+/** Series monitors the account's devices synced, up to 10 pages of 200. */
 export function listAllAdminUserDownloadSubscriptions(
   userId: number,
   ctx: ProfileRequestContextSnapshot,
   signal?: AbortSignal,
-): Promise<AdminUserDownloadSubscription[]> {
+): Promise<AdminUserList<AdminUserDownloadSubscription>> {
   const fetchPage = (cursor: string | undefined) =>
     v2("GET /api/v2/admin/users/{id}/download-subscriptions", {
       path: { id: String(userId) },
@@ -589,10 +598,9 @@ export function listAllAdminUserDownloadSubscriptions(
       profileContext: ctx,
       signal,
     }) as Promise<PageBody>;
-  return listAll(ctx, fetchPage, {
+  return listUpTo(ctx, fetchPage, {
     what: "series monitor",
     maxPages: 10,
-    tooMany: "Too many monitored series to show.",
     project: subscriptionOf,
   });
 }
