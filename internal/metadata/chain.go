@@ -586,18 +586,25 @@ const maxDeclaredRatingSources = 8
 // show next to its score.
 const maxRatingSourceNameRunes = 24
 
-// extractRatingSources parses a capability's rating_sources: rating sources of
-// its own, beyond Silo's built-in ones, that it reports under
-// ratings.sources. Each entry is {"id", "name", "scale", "percent"}:
+// maxRatingSourceLabelRunes caps a declared source's label, its full name in
+// the administrator's list; a longer one falls back to the name.
+const maxRatingSourceLabelRunes = 60
+
+// extractRatingSources parses a capability's rating_sources: the ratings it
+// reports under ratings.sources beyond Silo's own IMDb and TMDB. Each entry is
+// {"id", "name", "label", "scale", "percent"}:
 //
 //	"rating_sources": [{"id": "kinopoisk", "name": "Kinopoisk", "scale": 10}]
 //
 // id is a source name (see models.ValidRatingSourceID, compared lowercased)
-// that is not one of Silo's own, name is the plain-text mark clients show, scale is the top of
-// the source's own scale (10 shows a stored 72 as 7.2), and percent shows the
-// score as a percentage. An entry that breaks any of these is dropped on its
-// own; duplicates keep the first; at most maxDeclaredRatingSources are kept.
-// Declared sources stay hidden until an administrator turns them on.
+// other than imdb or tmdb; rt_critic and rt_audience name the Rotten Tomatoes
+// scores stored in their own columns. name is the plain-text mark clients show
+// next to the score, label an optional longer name for the administrator's
+// list (name when absent), scale the top of the source's own scale (10 shows
+// a stored 72 as 7.2), and percent shows the score as a percentage. An entry
+// that breaks any of these is dropped on its own; duplicates keep the first;
+// at most maxDeclaredRatingSources are kept. Declared sources stay hidden until
+// an administrator turns them on.
 func extractRatingSources(metadataJSON []byte) []models.RatingSourceDefinition {
 	raw, ok := capabilityMetadataField(metadataJSON, "rating_sources")
 	if !ok {
@@ -613,6 +620,7 @@ func extractRatingSources(metadataJSON []byte) []models.RatingSourceDefinition {
 		var entry struct {
 			ID      string  `json:"id"`
 			Name    string  `json:"name"`
+			Label   string  `json:"label"`
 			Scale   float64 `json:"scale"`
 			Percent bool    `json:"percent"`
 		}
@@ -634,7 +642,11 @@ func extractRatingSources(metadataJSON []byte) []models.RatingSourceDefinition {
 			continue
 		}
 		seen[id] = struct{}{}
-		out = append(out, models.RatingSourceDefinition{Source: id, Name: name, Label: name, Scale: entry.Scale, Percent: entry.Percent})
+		label := strings.TrimSpace(entry.Label)
+		if label == "" || utf8.RuneCountInString(label) > maxRatingSourceLabelRunes {
+			label = name
+		}
+		out = append(out, models.RatingSourceDefinition{Source: id, Name: name, Label: label, Scale: entry.Scale, Percent: entry.Percent})
 		if len(out) == maxDeclaredRatingSources {
 			break
 		}

@@ -19027,7 +19027,7 @@
             "type": "number"
           },
           "source": {
-            "description": "Rating source, such as imdb, tmdb, rt_critic or rt_audience. Clients may use it to pick a source's mark and should fall back to name for one they do not recognize.",
+            "description": "Rating source: imdb, tmdb, or a name a metadata plugin declared, such as rt_critic. Clients may use it to pick a source's mark and should fall back to name for one they do not recognize.",
             "examples": [
               "imdb"
             ],
@@ -19053,7 +19053,7 @@
             "type": "number"
           },
           "source": {
-            "description": "Rating source: imdb, tmdb, rt_critic, rt_audience, metacritic, metacritic_user, letterboxd, trakt, rogerebert, myanimelist, or mdblist. Clients should ignore names they do not recognize.",
+            "description": "Rating source: imdb, tmdb, or a name a metadata plugin declared, such as rt_critic. Clients should ignore names they do not recognize.",
             "type": "string"
           },
           "votes": {

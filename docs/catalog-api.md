@@ -359,10 +359,10 @@ server. It is present on every v2 item detail, as an empty array when there is
 nothing to show; a detail without the member comes from an older server. Each
 entry has:
 
-- `source`: `imdb`, `tmdb`, `rt_critic`, `rt_audience`, another source name
-  from the list below, or a name a metadata plugin declared.
-- `name`: the source's plain-text mark (`IMDb`, `TMDB`, `RT`, `RT Audience`,
-  `Metacritic`, ...).
+- `source`: `imdb`, `tmdb`, or a name a metadata plugin declared (see "Rating
+  sources" below).
+- `name`: the source's plain-text mark: `IMDb`, `TMDB`, or the name the plugin
+  declared, such as `RT`.
 - `score`: the rating on a 0-100 scale.
 - `display`: the score on the source's own scale, formatted: `8.5`, `93%`,
   `4.2`.
@@ -375,15 +375,17 @@ approved logo may stand in for the `TMDB` mark, as TMDB's terms allow. Clients
 do not recompute the list from the `rating_*` members.
 
 IMDb and TMDB are always in the list when the title has them. Every other
-source appears only after an administrator turns it on in the
-`catalog.extra_rating_sources` server setting, a comma-separated list of
-source names that is empty by default, because the owners of those scores
-restrict how others may display them. IMDb, TMDB and Rotten Tomatoes come from
-the `rating_*` members, the same numbers poster badges and browse sorting use;
-the other sources come from `rating_sources`.
+source is one an enabled metadata plugin declares, and appears only after an
+administrator turns it on in the `catalog.extra_rating_sources` server
+setting, a comma-separated list of source names that is empty by default,
+because the owners of those scores restrict how others may display them.
+IMDb, TMDB and Rotten Tomatoes come from the `rating_*` members, the same
+numbers poster badges and browse sorting use; the other sources come from
+`rating_sources`.
 
 Cards follow the same choice: every v2 card leaves out `rating_rt_critic` and
-`rating_rt_audience` unless the administrator turned that source on, so poster
+`rating_rt_audience` unless a plugin declares that source and the
+administrator turned it on, so poster
 badges show a Rotten Tomatoes score only where title pages do. The item
 detail keeps its stored `rating_*` values for metadata editors. Frozen v1
 responses are unchanged.
@@ -394,20 +396,18 @@ IMDb score, TMDB, as its mark and score.
 ## Rating sources
 
 The v2 item detail of a movie or series may carry `rating_sources`, a list of
-per-source ratings a metadata provider reported, such as the MDBList plugin's
-IMDb, Metacritic, Letterboxd and Roger Ebert scores. Each entry has:
+per-source ratings metadata providers reported. Each entry has:
 
-- `source`: one of `imdb`, `tmdb`, `rt_critic`, `rt_audience`, `metacritic`,
-  `metacritic_user`, `letterboxd`, `trakt`, `rogerebert`, `myanimelist` or
-  `mdblist` (MDBList's own aggregate). The list of sources can grow; ignore a
-  name you do not recognize.
+- `source`: `imdb`, `tmdb`, or a name a metadata plugin declared (below).
+  Ignore a name you do not recognize.
 - `score`: the rating on a 0-100 scale, whatever scale the source uses itself.
 - `votes`: how many votes produced the score, omitted when the source does not
   report it.
 
-Entries come in that fixed source order, at most one per source. The member is
-absent when no provider reported a source. It is detail-only: list and section
-cards do not carry it. It is stored data; a title page renders `ratings`.
+IMDb and TMDB come first, then the other sources by name, at most one entry
+per source. The member is absent when no provider reported a source. It is
+detail-only: list and section cards do not carry it. It is stored data; a
+title page renders `ratings`.
 
 The four `rating_imdb`, `rating_tmdb`, `rating_rt_critic` and
 `rating_rt_audience` members are unchanged, keep their own scales, and remain
@@ -422,22 +422,31 @@ new match reports replace the stored set, and a source it does not report is
 removed.
 
 Plugins send them under `ratings.sources` in a metadata item, as
-`{"<source>": {"score": 0-100, "votes": n}}`. The server drops a source name
-that is neither one of the names above nor one the plugin declared, or a score
-outside 0-100, and drops a vote count that is not a whole, non-negative number
-while keeping its score.
+`{"<source>": {"score": 0-100, "votes": n}}`. The server keeps `imdb`, `tmdb`
+and the sources the sending plugin declared, and drops any other name, a score
+outside 0-100, and a vote count that is not a whole, non-negative number while
+keeping its score.
 
-A metadata plugin adds a source of its own by declaring it in its capability's
-manifest metadata, at the top level or inside the SDK's `metadata` envelope:
+Silo itself names only IMDb and TMDB. Every other rating comes from a metadata
+plugin, which declares it in its capability's manifest metadata, at the top
+level or inside the SDK's `metadata` envelope:
 
 ```json
-"rating_sources": [{"id": "kinopoisk", "name": "Kinopoisk", "scale": 10}]
+"rating_sources": [
+  {"id": "rt_critic", "name": "RT", "label": "Rotten Tomatoes critics", "scale": 100, "percent": true},
+  {"id": "kinopoisk", "name": "Kinopoisk", "scale": 10}
+]
 ```
 
-- `id`: the source name, matching `^[a-z][a-z0-9_]{0,31}$` and not one of the
-  names above.
+- `id`: the source name, matching `^[a-z][a-z0-9_]{0,31}$`, other than `imdb`
+  and `tmdb`. `rt_critic` and `rt_audience` name the Rotten Tomatoes scores the
+  plugin sends as the flat `rt_critic` and `rt_audience` ratings, which fill the
+  `rating_rt_*` members; declaring them lets title pages and poster badges show
+  those scores.
 - `name`: the plain-text mark clients show next to the score, at most 24
   characters.
+- `label`: optional; the source's full name in the administrator's list, at
+  most 60 characters. `name` stands in when it is absent.
 - `scale`: the top of the source's own scale, above 0 and at most 100. The
   plugin still sends a 0-100 `score`; a `scale` of 10 shows 72 as `7.2`.
 - `percent`: optional; `true` shows the score as a percentage.

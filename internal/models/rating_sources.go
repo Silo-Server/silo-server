@@ -5,21 +5,17 @@ import (
 	"strings"
 )
 
-// Rating sources Silo stores per item in media_item_rating_sources. The names
-// are Silo's, matching the keys metadata plugins send under ratings.sources.
+// Silo's own rating sources are IMDb and TMDB, the two its title pages always
+// show. Every other source is declared by a metadata plugin (see
+// metadata.extractRatingSources), which names it and sets its scale.
 const (
-	RatingSourceIMDB           = "imdb"
-	RatingSourceTMDB           = "tmdb"
-	RatingSourceRTCritic       = "rt_critic"
-	RatingSourceRTAudience     = "rt_audience"
-	RatingSourceMetacritic     = "metacritic"
-	RatingSourceMetacriticUser = "metacritic_user"
-	RatingSourceTrakt          = "trakt"
-	RatingSourceLetterboxd     = "letterboxd"
-	RatingSourceRogerEbert     = "rogerebert"
-	RatingSourceMyAnimeList    = "myanimelist"
-	// RatingSourceMDBList is MDBList's own aggregate score for the title.
-	RatingSourceMDBList = "mdblist"
+	RatingSourceIMDB = "imdb"
+	RatingSourceTMDB = "tmdb"
+	// RatingSourceRTCritic and RatingSourceRTAudience name the Rotten Tomatoes
+	// scores stored in media_items.rating_rt_critic and rating_rt_audience. A
+	// plugin that fills those columns declares these ids to show them.
+	RatingSourceRTCritic   = "rt_critic"
+	RatingSourceRTAudience = "rt_audience"
 )
 
 // RatingSourceDefinition says how clients show one rating source.
@@ -39,28 +35,19 @@ type RatingSourceDefinition struct {
 	Percent bool
 }
 
-// ratingSourceDefinitions is the accepted vocabulary, in the order item
-// detail lists the sources.
+// ratingSourceDefinitions are Silo's own sources, in the order title pages
+// list them, before any source a plugin declares.
 var ratingSourceDefinitions = []RatingSourceDefinition{
 	{Source: RatingSourceIMDB, Name: "IMDb", Label: "IMDb", Scale: 10},
 	{Source: RatingSourceTMDB, Name: "TMDB", Label: "TMDB", Scale: 10},
-	{Source: RatingSourceRTCritic, Name: "RT", Label: "Rotten Tomatoes critics", Scale: 100, Percent: true},
-	{Source: RatingSourceRTAudience, Name: "RT Audience", Label: "Rotten Tomatoes audience", Scale: 100, Percent: true},
-	{Source: RatingSourceMetacritic, Name: "Metacritic", Label: "Metacritic", Scale: 100},
-	{Source: RatingSourceMetacriticUser, Name: "Metacritic Users", Label: "Metacritic users", Scale: 10},
-	{Source: RatingSourceLetterboxd, Name: "Letterboxd", Label: "Letterboxd", Scale: 5},
-	{Source: RatingSourceTrakt, Name: "Trakt", Label: "Trakt", Scale: 100, Percent: true},
-	{Source: RatingSourceRogerEbert, Name: "Roger Ebert", Label: "Roger Ebert", Scale: 4},
-	{Source: RatingSourceMyAnimeList, Name: "MyAnimeList", Label: "MyAnimeList", Scale: 10},
-	{Source: RatingSourceMDBList, Name: "MDBList", Label: "MDBList score", Scale: 100},
 }
 
-// RatingSourceDefinitions returns the built-in sources in display order.
+// RatingSourceDefinitions returns Silo's own sources in display order.
 func RatingSourceDefinitions() []RatingSourceDefinition {
 	return append([]RatingSourceDefinition(nil), ratingSourceDefinitions...)
 }
 
-// LookupRatingSource returns a built-in source's definition.
+// LookupRatingSource returns the definition of one of Silo's own sources.
 func LookupRatingSource(source string) (RatingSourceDefinition, bool) {
 	rank, ok := ratingSourceRanks[source]
 	if !ok {
@@ -69,8 +56,8 @@ func LookupRatingSource(source string) (RatingSourceDefinition, bool) {
 	return ratingSourceDefinitions[rank], true
 }
 
-// ratingSourceIDPattern is the shape of every rating source name: the
-// built-in names and any a metadata plugin declares.
+// ratingSourceIDPattern is the shape of every rating source name, Silo's own
+// and those metadata plugins declare.
 var ratingSourceIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
 
 // ValidRatingSourceID reports whether id is a well-formed rating source name.
@@ -78,16 +65,16 @@ func ValidRatingSourceID(id string) bool {
 	return ratingSourceIDPattern.MatchString(id)
 }
 
-// IsBuiltinRatingSource reports whether id is one of Silo's own source names,
-// which a plugin may report but not redefine.
+// IsBuiltinRatingSource reports whether id is one of Silo's own sources, which
+// a plugin may report but not redefine.
 func IsBuiltinRatingSource(id string) bool {
 	_, ok := ratingSourceRanks[id]
 	return ok
 }
 
 // RatingSourceAlwaysShown reports whether clients show a source whatever the
-// administrator chose: IMDb and TMDB. Every other source is shown only once an
-// administrator turns it on, because its owner's terms restrict display.
+// administrator chose: Silo's own, IMDb and TMDB. A plugin's source shows only
+// once an administrator turns it on.
 func RatingSourceAlwaysShown(source string) bool {
 	return source == RatingSourceIMDB || source == RatingSourceTMDB
 }
@@ -100,8 +87,8 @@ var ratingSourceRanks = func() map[string]int {
 	return ranks
 }()
 
-// NormalizeRatingSource returns the canonical name of a rating source, or ""
-// when Silo does not store that source.
+// NormalizeRatingSource returns the canonical name of one of Silo's own
+// sources, or "" for any other name.
 func NormalizeRatingSource(raw string) string {
 	source := strings.ToLower(strings.TrimSpace(raw))
 	if _, ok := ratingSourceRanks[source]; !ok {
@@ -110,7 +97,8 @@ func NormalizeRatingSource(raw string) string {
 	return source
 }
 
-// RatingSourceRank orders sources for display. Unknown sources sort last.
+// RatingSourceRank orders sources for display: Silo's own first, then every
+// other source.
 func RatingSourceRank(source string) int {
 	if rank, ok := ratingSourceRanks[source]; ok {
 		return rank

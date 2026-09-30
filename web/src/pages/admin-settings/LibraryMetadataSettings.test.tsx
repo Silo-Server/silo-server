@@ -34,11 +34,18 @@ vi.mock("@/hooks/queries/admin/markers", () => ({
 
 const ratingSourcesMock = vi.fn(() => ({
   isError: false,
+  isSuccess: true,
   data: {
     items: [
       { source: "imdb", label: "IMDb", name: "IMDb", always_shown: true },
       { source: "tmdb", label: "TMDB", name: "TMDB", always_shown: true },
-      { source: "rt_critic", label: "Rotten Tomatoes critics", name: "RT", always_shown: false },
+      {
+        source: "rt_critic",
+        label: "Rotten Tomatoes critics",
+        name: "RT",
+        always_shown: false,
+        provider: "MDBList",
+      },
       {
         source: "kinopoisk",
         label: "Kinopoisk",
@@ -430,13 +437,14 @@ describe("LibraryMetadataSettings", () => {
     expect(rendered).toContain("Keyword search stays available");
   });
 
-  it("offers every source the server lists except IMDb and TMDB, which always show", () => {
+  it("lists the ratings plugins declare, grouped by plugin, but not IMDb and TMDB", () => {
     const markup = render({ "catalog.extra_rating_sources": "kinopoisk" });
     const page = text(markup);
 
+    expect(page).toContain("From MDBList");
     expect(page).toContain("Rotten Tomatoes critics");
+    expect(page).toContain("From Kinopoisk Metadata");
     expect(page).toContain("Kinopoisk");
-    expect(page).toContain("From the Kinopoisk Metadata plugin.");
     const container = document.createElement("div");
     container.innerHTML = markup;
     const labels = Array.from(container.querySelectorAll("label")).map((l) => l.textContent);

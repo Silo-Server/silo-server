@@ -19,7 +19,12 @@ import { useRestartKeys } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { FieldGroup } from "./FieldGroup";
 import { MarkerTasksCard } from "./MarkerTasksCard";
-import { EXTRA_RATING_SOURCES_KEY, parseRatingSources, toggleRatingSource } from "./ratingSources";
+import {
+  EXTRA_RATING_SOURCES_KEY,
+  groupRatingSourcesByPlugin,
+  parseRatingSources,
+  toggleRatingSource,
+} from "./ratingSources";
 import { SaveBar } from "./SaveBar";
 import { SearchStatusPanel } from "./SearchStatusPanel";
 import { SettingField, SettingFieldStatus } from "./SettingField";
@@ -132,9 +137,7 @@ export default function LibraryMetadataSettings() {
   }
 
   const extraRatingSources = parseRatingSources(form.getValue(EXTRA_RATING_SOURCES_KEY));
-  const optionalRatingSources = (ratingSources.data?.items ?? []).filter(
-    (source) => !source.always_shown,
-  );
+  const ratingSourceGroups = groupRatingSourcesByPlugin(ratingSources.data?.items ?? []);
   const markerMode = form.getValue("markers.mode") || "both";
   const onlineMarkersEnabled = markerMode === "online" || markerMode === "both";
   const onlineMarkerStorage = form.getValue("markers.online_storage") || "stored";
@@ -201,31 +204,38 @@ export default function LibraryMetadataSettings() {
 
         <FieldGroup
           label="Ratings"
-          description="IMDb and TMDB scores always show. Turn on another source to show its scores on title pages and poster badges in every app; some, such as Rotten Tomatoes and Metacritic, restrict how others may display their scores. A source's scores appear only when a metadata provider such as MDBList reports them, and plugins can add sources of their own."
+          description="IMDb and TMDB scores always show. Metadata plugins can add other ratings; turn one on to show its scores on title pages and poster badges in every app. Check a rating's terms before you turn it on: some, such as Rotten Tomatoes, restrict how others may display their scores."
           restartAll={allRestart(RATINGS_KEYS)}
         >
           {ratingSources.isError && (
             <SettingFieldStatus tone="warn">Couldn't load the rating sources.</SettingFieldStatus>
           )}
-          {optionalRatingSources.map(({ source, label, provider }) => (
-            <SettingField
-              key={source}
-              label={label}
-              description={provider ? `From the ${provider} plugin.` : undefined}
-              type="toggle"
-              value={String(extraRatingSources.includes(source))}
-              onChange={(value) =>
-                form.setValue(
-                  EXTRA_RATING_SOURCES_KEY,
-                  toggleRatingSource(
-                    form.getValue(EXTRA_RATING_SOURCES_KEY),
-                    source,
-                    value === "true",
-                  ),
-                )
-              }
-              restartRequired={restartKeys.has(EXTRA_RATING_SOURCES_KEY)}
-            />
+          {ratingSources.isSuccess && ratingSourceGroups.length === 0 && (
+            <SettingFieldStatus tone="muted">No metadata plugin adds ratings.</SettingFieldStatus>
+          )}
+          {ratingSourceGroups.map(({ provider, sources }) => (
+            <div key={provider} role="group" aria-label={`From ${provider}`}>
+              <p className="text-muted-foreground pt-2 text-xs font-semibold">From {provider}</p>
+              {sources.map(({ source, label }) => (
+                <SettingField
+                  key={source}
+                  label={label}
+                  type="toggle"
+                  value={String(extraRatingSources.includes(source))}
+                  onChange={(value) =>
+                    form.setValue(
+                      EXTRA_RATING_SOURCES_KEY,
+                      toggleRatingSource(
+                        form.getValue(EXTRA_RATING_SOURCES_KEY),
+                        source,
+                        value === "true",
+                      ),
+                    )
+                  }
+                  restartRequired={restartKeys.has(EXTRA_RATING_SOURCES_KEY)}
+                />
+              ))}
+            </div>
           ))}
         </FieldGroup>
 

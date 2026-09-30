@@ -393,14 +393,14 @@ type CatalogItemDetail struct {
 
 // CatalogRatingSource is one source's rating of an item.
 type CatalogRatingSource struct {
-	Source string  `json:"source" doc:"Rating source: imdb, tmdb, rt_critic, rt_audience, metacritic, metacritic_user, letterboxd, trakt, rogerebert, myanimelist, or mdblist. Clients should ignore names they do not recognize."`
+	Source string  `json:"source" doc:"Rating source: imdb, tmdb, or a name a metadata plugin declared, such as rt_critic. Clients should ignore names they do not recognize."`
 	Score  float64 `json:"score" minimum:"0" maximum:"100" doc:"Score on a 0-100 scale"`
 	Votes  *int64  `json:"votes,omitempty" minimum:"0" doc:"Number of votes behind the score, when the source reports it"`
 }
 
 // CatalogRating is one external rating as a title page shows it.
 type CatalogRating struct {
-	Source  string  `json:"source" doc:"Rating source, such as imdb, tmdb, rt_critic or rt_audience. Clients may use it to pick a source's mark and should fall back to name for one they do not recognize." example:"imdb"`
+	Source  string  `json:"source" doc:"Rating source: imdb, tmdb, or a name a metadata plugin declared, such as rt_critic. Clients may use it to pick a source's mark and should fall back to name for one they do not recognize." example:"imdb"`
 	Name    string  `json:"name" doc:"The source's name as a plain-text mark, shown next to the score" example:"IMDb"`
 	Score   float64 `json:"score" minimum:"0" maximum:"100" doc:"Score on a 0-100 scale"`
 	Display string  `json:"display" doc:"The score on the source's own scale, formatted for display" example:"8.5"`

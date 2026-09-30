@@ -1,11 +1,12 @@
-// Package ratingsources decides which external ratings (IMDb, TMDB, Rotten
-// Tomatoes, ...) Silo shows and builds the list every client renders, so a
-// title page reads the same on the web, Apple, and Android.
+// Package ratingsources decides which external ratings Silo shows and builds
+// the list every client renders, so a title page reads the same on the web,
+// Apple, and Android.
 //
-// IMDb and TMDB are always shown. Every other source is shown only after an
-// administrator turns it on under config.CatalogExtraRatingSourcesSettingKey,
-// because the owners of those scores restrict how others may display them.
-// That includes sources a metadata plugin declares beyond Silo's own.
+// Silo's own sources, IMDb and TMDB, are always shown. Every other source is
+// one a metadata plugin declares, and is shown only after an administrator
+// turns it on under config.CatalogExtraRatingSourcesSettingKey: the owners of
+// those scores restrict how others may display them, so Silo leaves the choice
+// to the administrator and ships no list of its own.
 package ratingsources
 
 import (
@@ -23,14 +24,19 @@ import (
 // the ones that are always shown, and the definitions of the sources metadata
 // plugins declared. The zero value shows only IMDb and TMDB.
 type Selection struct {
-	extra    map[string]struct{}
-	declared []models.RatingSourceDefinition
+	extra      map[string]struct{}
+	declared   []models.RatingSourceDefinition
+	declaredID map[string]struct{}
 }
 
 // WithDeclared returns the selection with the given plugin-declared source
 // definitions, which Build lists after Silo's own sources when shown.
 func (s Selection) WithDeclared(declared []models.RatingSourceDefinition) Selection {
 	s.declared = declared
+	s.declaredID = make(map[string]struct{}, len(declared))
+	for _, definition := range declared {
+		s.declaredID[definition.Source] = struct{}{}
+	}
 	return s
 }
 
@@ -43,10 +49,15 @@ func NewSelection(extra ...string) Selection {
 	return sel
 }
 
-// Shows reports whether clients show ratings from source.
+// Shows reports whether clients show ratings from source: always for Silo's
+// own, and otherwise only for a source an enabled plugin declares and the
+// administrator turned on.
 func (s Selection) Shows(source string) bool {
 	if models.RatingSourceAlwaysShown(source) {
 		return true
+	}
+	if _, declared := s.declaredID[source]; !declared {
+		return false
 	}
 	_, ok := s.extra[source]
 	return ok
@@ -188,7 +199,8 @@ type Item struct {
 // IMDb, TMDB, and Rotten Tomatoes come from the rating columns, which are also
 // what poster badges, browse sorting, and filters read, so every surface shows
 // the same number. A per-source row fills in only when its column is empty.
-// Plugin-declared sources follow Silo's own, in the order they were declared.
+// Plugin-declared sources follow Silo's own, in the order they were declared;
+// Rotten Tomatoes shows only when a plugin declares rt_critic or rt_audience.
 // Values outside a source's scale are dropped rather than shown.
 func Build(item Item, sel Selection) []Rating {
 	scores := make(map[string]float64, len(item.Sources)+4)

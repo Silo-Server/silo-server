@@ -32,7 +32,8 @@ func TestRatingSourcesFromStructKeepsDeclaredSources(t *testing.T) {
 func TestExtractRatingSources(t *testing.T) {
 	metadataJSON := []byte(`{"metadata": {"rating_sources": [
 		{"id": "kinopoisk", "name": "Kinopoisk", "scale": 10},
-		{"id": "douban", "name": " Douban ", "scale": 10, "percent": false},
+		{"id": "rt_critic", "name": "RT", "label": "Rotten Tomatoes critics", "scale": 100, "percent": true},
+		{"id": "douban", "name": " Douban ", "label": "A label much too long to show in the administrator list of sources", "scale": 10, "percent": false},
 		{"id": "fresh_meter", "name": "Fresh", "scale": 100, "percent": true},
 		{"id": "kinopoisk", "name": "Duplicate", "scale": 5},
 		{"id": "Letterboxd_Fans", "name": "Fans", "scale": 5},
@@ -48,6 +49,7 @@ func TestExtractRatingSources(t *testing.T) {
 	got := extractRatingSources(metadataJSON)
 	want := []models.RatingSourceDefinition{
 		{Source: "kinopoisk", Name: "Kinopoisk", Label: "Kinopoisk", Scale: 10},
+		{Source: "rt_critic", Name: "RT", Label: "Rotten Tomatoes critics", Scale: 100, Percent: true},
 		{Source: "douban", Name: "Douban", Label: "Douban", Scale: 10},
 		{Source: "fresh_meter", Name: "Fresh", Label: "Fresh", Scale: 100, Percent: true},
 		{Source: "letterboxd_fans", Name: "Fans", Label: "Fans", Scale: 5},

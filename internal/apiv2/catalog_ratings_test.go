@@ -10,12 +10,19 @@ import (
 	"github.com/Silo-Server/silo-server/internal/ratingsources"
 )
 
+// mdblistSources are the sources the MDBList plugin declares.
+var mdblistSources = []models.RatingSourceDefinition{
+	{Source: "rt_critic", Name: "RT", Label: "Rotten Tomatoes critics", Scale: 100, Percent: true},
+	{Source: "rt_audience", Name: "RT Audience", Label: "Rotten Tomatoes audience", Scale: 100, Percent: true},
+	{Source: "metacritic", Name: "Metacritic", Label: "Metacritic", Scale: 100},
+}
+
 func ratedDetail() *catalogpkg.ItemDetail {
 	imdb, tmdb, critic, audience := 8.5, 8.25, 93, 95
 	return &catalogpkg.ItemDetail{
 		ContentID: "movie:back-to-the-future", Type: "movie", Title: "Back to the Future",
 		RatingIMDB: &imdb, RatingTMDB: &tmdb, RatingRTCritic: &critic, RatingRTAudience: &audience,
-		RatingSources: []catalogpkg.ItemRatingSourceInfo{{Source: models.RatingSourceMetacritic, Score: 87}},
+		RatingSources: []catalogpkg.ItemRatingSourceInfo{{Source: "metacritic", Score: 87}},
 	}
 }
 
@@ -36,7 +43,7 @@ func TestCatalogItemDetailShowsIMDbAndTMDBByDefault(t *testing.T) {
 }
 
 func TestCatalogItemDetailAddsTurnedOnSources(t *testing.T) {
-	out := catalogItemDetailOf(ratedDetail(), ratingsources.NewSelection("rt_critic", "metacritic"))
+	out := catalogItemDetailOf(ratedDetail(), ratingsources.NewSelection("rt_critic", "metacritic").WithDeclared(mdblistSources))
 
 	var got []string
 	for _, r := range out.Ratings {
@@ -71,7 +78,7 @@ func TestCardsDropRatingsAnAdministratorHasNotTurnedOn(t *testing.T) {
 		}
 	}
 
-	shown := ratingsources.NewSelection("rt_critic")
+	shown := ratingsources.NewSelection("rt_critic").WithDeclared(mdblistSources)
 	card := catalogItemOfSection(section, shown)
 	if card.RatingRTCritic == nil || card.RatingRTAudience != nil {
 		t.Errorf("with RT critics on: rt=%v audience=%v; want the critic score only", card.RatingRTCritic, card.RatingRTAudience)

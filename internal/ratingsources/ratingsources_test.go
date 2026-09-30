@@ -12,12 +12,25 @@ import (
 
 func ptr[T any](v T) *T { return &v }
 
+// Sources a metadata plugin such as MDBList would declare.
+var (
+	rtCritic   = models.RatingSourceDefinition{Source: "rt_critic", Name: "RT", Label: "Rotten Tomatoes critics", Scale: 100, Percent: true}
+	rtAudience = models.RatingSourceDefinition{Source: "rt_audience", Name: "RT Audience", Label: "Rotten Tomatoes audience", Scale: 100, Percent: true}
+	metacritic = models.RatingSourceDefinition{Source: "metacritic", Name: "Metacritic", Label: "Metacritic", Scale: 100}
+	letterboxd = models.RatingSourceDefinition{Source: "letterboxd", Name: "Letterboxd", Label: "Letterboxd", Scale: 5}
+	kinopoisk  = models.RatingSourceDefinition{Source: "kinopoisk", Name: "Kinopoisk", Label: "Kinopoisk", Scale: 10}
+)
+
+func declared(definitions ...models.RatingSourceDefinition) []models.RatingSourceDefinition {
+	return definitions
+}
+
 func TestBuildShowsIMDbAndTMDBByDefault(t *testing.T) {
 	item := Item{
 		IMDB: ptr(8.5), TMDB: ptr(8.25), RTCritic: ptr(93), RTAudience: ptr(95),
-		Sources: map[string]float64{models.RatingSourceMetacritic: 87},
+		Sources: map[string]float64{"metacritic": 87},
 	}
-	got := Build(item, Selection{})
+	got := Build(item, Selection{}.WithDeclared(declared(rtCritic, rtAudience, metacritic)))
 	want := []Rating{
 		{Source: "imdb", Name: "IMDb", Score: 85, Display: "8.5"},
 		{Source: "tmdb", Name: "TMDB", Score: 82.5, Display: "8.3"},
@@ -27,16 +40,18 @@ func TestBuildShowsIMDbAndTMDBByDefault(t *testing.T) {
 	}
 }
 
-func TestBuildAddsSourcesAnAdministratorTurnedOn(t *testing.T) {
+func TestBuildAddsDeclaredSourcesAnAdministratorTurnedOn(t *testing.T) {
 	item := Item{
 		IMDB: ptr(8.5), RTCritic: ptr(93), RTAudience: ptr(95),
 		Sources: map[string]float64{
-			models.RatingSourceLetterboxd: 84,
-			models.RatingSourceMetacritic: 87,
-			models.RatingSourceTrakt:      81,
+			"letterboxd": 84,
+			"metacritic": 87,
+			"trakt":      81,
 		},
 	}
-	got := Build(item, NewSelection("rt_critic", "rt_audience", "metacritic", "letterboxd"))
+	sel := NewSelection("rt_critic", "rt_audience", "metacritic", "letterboxd", "trakt").
+		WithDeclared(declared(rtCritic, rtAudience, metacritic, letterboxd))
+	got := Build(item, sel)
 	want := []Rating{
 		{Source: "imdb", Name: "IMDb", Score: 85, Display: "8.5"},
 		{Source: "rt_critic", Name: "RT", Score: 93, Display: "93%"},
@@ -45,7 +60,21 @@ func TestBuildAddsSourcesAnAdministratorTurnedOn(t *testing.T) {
 		{Source: "letterboxd", Name: "Letterboxd", Score: 84, Display: "4.2"},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Build = %+v\nwant %+v", got, want)
+		t.Fatalf("Build = %+v\nwant %+v (trakt has no declaration, so it stays hidden)", got, want)
+	}
+}
+
+// Silo names only IMDb and TMDB. A source the administrator turned on still
+// shows nothing unless an enabled plugin declares it, Rotten Tomatoes included.
+func TestBuildShowsNothingAPluginDoesNotDeclare(t *testing.T) {
+	item := Item{IMDB: ptr(8.5), RTCritic: ptr(93), Sources: map[string]float64{"kinopoisk": 72}}
+	sel := NewSelection("rt_critic", "kinopoisk")
+	if sel.Shows("rt_critic") {
+		t.Fatal("Rotten Tomatoes shows without a plugin declaring it")
+	}
+	got := Build(item, sel)
+	if len(got) != 1 || got[0].Source != "imdb" {
+		t.Fatalf("Build = %+v, want IMDb only", got)
 	}
 }
 
@@ -72,54 +101,39 @@ func TestBuildPrefersRatingColumnsOverSourceRows(t *testing.T) {
 
 func TestBuildDropsValuesOutsideTheSourceScale(t *testing.T) {
 	item := Item{IMDB: ptr(85.0), TMDB: ptr(0.0), RTCritic: ptr(130)}
-	if got := Build(item, NewSelection("rt_critic")); len(got) != 0 {
+	if got := Build(item, NewSelection("rt_critic").WithDeclared(declared(rtCritic))); len(got) != 0 {
 		t.Fatalf("Build = %+v, want nothing for out-of-scale values", got)
 	}
 }
 
 func TestBuildTreatsAZeroIMDbOrTMDBRowAsUnrated(t *testing.T) {
 	item := Item{Sources: map[string]float64{models.RatingSourceIMDB: 0, models.RatingSourceTMDB: 0, models.RatingSourceRTCritic: 0}}
-	got := Build(item, NewSelection("rt_critic"))
+	got := Build(item, NewSelection("rt_critic").WithDeclared(declared(rtCritic)))
 	want := []Rating{{Source: "rt_critic", Name: "RT", Score: 0, Display: "0%"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Build = %+v, want only the Rotten Tomatoes 0%%", got)
 	}
 }
 
-func TestBuildIgnoresUnknownSources(t *testing.T) {
-	item := Item{Sources: map[string]float64{"kinopoisk": 72}}
-	if got := Build(item, NewSelection("kinopoisk")); len(got) != 0 {
-		t.Fatalf("Build = %+v, want nothing for a source without a definition", got)
-	}
-}
-
 func TestFormat(t *testing.T) {
-	def := func(source string) models.RatingSourceDefinition {
-		d, ok := models.LookupRatingSource(source)
-		if !ok {
-			t.Fatalf("no definition for %s", source)
-		}
-		return d
-	}
+	imdb, _ := models.LookupRatingSource(models.RatingSourceIMDB)
 	cases := []struct {
-		source string
-		score  float64
-		want   string
+		definition models.RatingSourceDefinition
+		score      float64
+		want       string
 	}{
-		{"imdb", 82.5, "8.3"},
-		{"imdb", 80, "8.0"},
-		{"rt_critic", 0, "0%"},
-		{"rt_audience", 99.6, "100%"},
-		{"metacritic", 87.4, "87"},
-		{"metacritic_user", 81, "8.1"},
-		{"letterboxd", 84, "4.2"},
-		{"rogerebert", 87.5, "3.5"},
-		{"trakt", 80.6, "81%"},
-		{"mdblist", 77, "77"},
+		{imdb, 82.5, "8.3"},
+		{imdb, 80, "8.0"},
+		{rtCritic, 0, "0%"},
+		{rtAudience, 99.6, "100%"},
+		{metacritic, 87.4, "87"},
+		{letterboxd, 84, "4.2"},
+		{kinopoisk, 81, "8.1"},
+		{models.RatingSourceDefinition{Source: "stars", Scale: 4}, 87.5, "3.5"},
 	}
 	for _, tc := range cases {
-		if got := Format(tc.score, def(tc.source)); got != tc.want {
-			t.Errorf("Format(%v, %s) = %q, want %q", tc.score, tc.source, got, tc.want)
+		if got := Format(tc.score, tc.definition); got != tc.want {
+			t.Errorf("Format(%v, %s) = %q, want %q", tc.score, tc.definition.Source, got, tc.want)
 		}
 	}
 }
@@ -135,10 +149,20 @@ func (s *stubSettings) Get(context.Context, string) (string, error) {
 	return s.value, s.err
 }
 
+func declaring(definitions ...models.RatingSourceDefinition) DeclaredFunc {
+	return func(context.Context) ([]DeclaredSource, error) {
+		out := make([]DeclaredSource, 0, len(definitions))
+		for _, definition := range definitions {
+			out = append(out, DeclaredSource{RatingSourceDefinition: definition, Provider: "MDBList"})
+		}
+		return out, nil
+	}
+}
+
 func TestPolicyCachesAndKeepsLastGoodSelection(t *testing.T) {
 	settings := &stubSettings{value: "rt_critic"}
 	now := time.Unix(0, 0)
-	p := NewPolicy(settings, nil)
+	p := NewPolicy(settings, declaring(rtCritic, rtAudience))
 	p.now = func() time.Time { return now }
 	ctx := context.Background()
 
@@ -170,30 +194,8 @@ func TestSelectionAlwaysShowsIMDbAndTMDB(t *testing.T) {
 	}
 }
 
-func TestBuildListsDeclaredSourcesAfterSilosOwnOnceShown(t *testing.T) {
-	kinopoisk := models.RatingSourceDefinition{Source: "kinopoisk", Name: "Kinopoisk", Label: "Kinopoisk", Scale: 10}
-	item := Item{IMDB: ptr(8.5), Sources: map[string]float64{"kinopoisk": 72, "douban": 90}}
-
-	hidden := Build(item, NewSelection().WithDeclared([]models.RatingSourceDefinition{kinopoisk}))
-	if len(hidden) != 1 || hidden[0].Source != "imdb" {
-		t.Fatalf("Build = %+v, want IMDb only until an administrator shows the plugin's source", hidden)
-	}
-
-	got := Build(item, NewSelection("kinopoisk", "douban").WithDeclared([]models.RatingSourceDefinition{kinopoisk}))
-	want := []Rating{
-		{Source: "imdb", Name: "IMDb", Score: 85, Display: "8.5"},
-		{Source: "kinopoisk", Name: "Kinopoisk", Score: 72, Display: "7.2"},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Build = %+v\nwant %+v (douban has no declaration, so it stays hidden)", got, want)
-	}
-}
-
 func TestPolicyReadsDeclaredSources(t *testing.T) {
-	declared := func(context.Context) ([]DeclaredSource, error) {
-		return []DeclaredSource{{RatingSourceDefinition: models.RatingSourceDefinition{Source: "kinopoisk", Name: "Kinopoisk", Label: "Kinopoisk", Scale: 10}, Provider: "Kino"}}, nil
-	}
-	p := NewPolicy(&stubSettings{value: "kinopoisk"}, declared)
+	p := NewPolicy(&stubSettings{value: "kinopoisk"}, declaring(kinopoisk))
 
 	item := Item{Sources: map[string]float64{"kinopoisk": 72}}
 	if got := Build(item, p.Selection(context.Background())); len(got) != 1 || got[0].Display != "7.2" {
@@ -204,21 +206,40 @@ func TestPolicyReadsDeclaredSources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var ids []string
+	for _, s := range sources {
+		ids = append(ids, s.Source)
+	}
+	if want := []string{"imdb", "tmdb", "kinopoisk"}; !reflect.DeepEqual(ids, want) {
+		t.Fatalf("sources = %q, want %q: Silo lists only IMDb, TMDB and what plugins declare", ids, want)
+	}
 	last := sources[len(sources)-1]
-	if last.Source != "kinopoisk" || last.Provider != "Kino" || last.AlwaysShown {
+	if last.Provider != "MDBList" || last.AlwaysShown {
 		t.Fatalf("last source = %+v, want the plugin's declaration", last)
 	}
-	if !sources[0].AlwaysShown || sources[0].Source != "imdb" {
+	if !sources[0].AlwaysShown {
 		t.Fatalf("first source = %+v, want IMDb, always shown", sources[0])
 	}
 }
 
-// A failed read of the plugin declarations must not undo the administrator's
-// choice of Silo's own sources.
-func TestPolicyKeepsTheSettingWhenDeclarationsFail(t *testing.T) {
-	failing := func(context.Context) ([]DeclaredSource, error) { return nil, errors.New("pool exhausted") }
-	p := NewPolicy(&stubSettings{value: "rt_critic"}, failing)
+// A failed read of the plugin declarations keeps the declarations last read,
+// so a turned-on source does not blink off because one lookup failed.
+func TestPolicyKeepsLastDeclarationsWhenARereadFails(t *testing.T) {
+	now := time.Unix(0, 0)
+	fail := false
+	p := NewPolicy(&stubSettings{value: "rt_critic"}, func(ctx context.Context) ([]DeclaredSource, error) {
+		if fail {
+			return nil, errors.New("pool exhausted")
+		}
+		return declaring(rtCritic)(ctx)
+	})
+	p.now = func() time.Time { return now }
 	if !p.Selection(context.Background()).Shows("rt_critic") {
-		t.Fatal("a failed declaration read dropped Rotten Tomatoes the administrator turned on")
+		t.Fatal("rt_critic is declared and turned on")
+	}
+	now = now.Add(cacheTTL)
+	fail = true
+	if !p.Selection(context.Background()).Shows("rt_critic") {
+		t.Fatal("a failed declaration read dropped a source the administrator turned on")
 	}
 }

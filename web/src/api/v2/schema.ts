@@ -17478,7 +17478,7 @@ export interface components {
        */
       score: number;
       /**
-       * @description Rating source, such as imdb, tmdb, rt_critic or rt_audience. Clients may use it to pick a source's mark and should fall back to name for one they do not recognize.
+       * @description Rating source: imdb, tmdb, or a name a metadata plugin declared, such as rt_critic. Clients may use it to pick a source's mark and should fall back to name for one they do not recognize.
        * @example imdb
        */
       source: string;
@@ -17489,7 +17489,7 @@ export interface components {
        * @description Score on a 0-100 scale
        */
       score: number;
-      /** @description Rating source: imdb, tmdb, rt_critic, rt_audience, metacritic, metacritic_user, letterboxd, trakt, rogerebert, myanimelist, or mdblist. Clients should ignore names they do not recognize. */
+      /** @description Rating source: imdb, tmdb, or a name a metadata plugin declared, such as rt_critic. Clients should ignore names they do not recognize. */
       source: string;
       /**
        * Format: int64
