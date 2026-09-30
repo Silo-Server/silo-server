@@ -219,6 +219,40 @@ func (h *PersonalDataHandler) accessibleLibraryItem(ctx context.Context, viewer 
 // WatchlistMembership reports which titles and which library items are on
 // the viewer's watchlist: titles by any TMDB ID their entry has held, items
 // through the library watchlist. It makes two reads whatever the page size.
+// WatchlistTitleOff reports whether the title is off the viewer's watchlist
+// in both forms: no entry for it outside the library, and no library
+// watchlist entry for the one library item the viewer may see that has it.
+// A title the library received while it was on the watchlist was promoted,
+// not removed, so it still counts as on.
+func (h *PersonalDataHandler) WatchlistTitleOff(ctx context.Context, viewer PersonalListViewer, snap watchlist.Snapshot) (bool, error) {
+	titles, err := h.titlesOrError()
+	if err != nil {
+		return false, err
+	}
+	key := watchlist.TitleKey{MediaType: snap.MediaType, TMDBID: snap.TMDBID}
+	on, err := titles.OnWatchlist(ctx, viewer.watchlistViewer(), []watchlist.TitleKey{key})
+	if err != nil {
+		return false, apiError(http.StatusInternalServerError, "internal_error", "Failed to check watchlist titles")
+	}
+	if on[key] {
+		return false, nil
+	}
+	tmdbIDs := append([]int{snap.TMDBID}, snap.FormerTMDBIDs...)
+	itemID, err := h.accessibleLibraryItem(ctx, viewer, titles, snap.MediaType, tmdbIDs, snap.IMDbID, snap.TVDBID)
+	if err != nil || itemID == "" {
+		return itemID == "" && err == nil, err
+	}
+	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
+	if err != nil {
+		return false, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	entry, err := store.GetWatchlistEntry(ctx, viewer.ProfileID, itemID)
+	if err != nil {
+		return false, apiError(http.StatusInternalServerError, "internal_error", "Failed to check watchlist")
+	}
+	return entry == nil, nil
+}
+
 func (h *PersonalDataHandler) WatchlistMembership(ctx context.Context, viewer PersonalListViewer, keys []watchlist.TitleKey, itemIDs []string) (map[watchlist.TitleKey]bool, map[string]bool, error) {
 	titles, err := h.titlesOrError()
 	if err != nil {

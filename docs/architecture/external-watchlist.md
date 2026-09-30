@@ -280,13 +280,17 @@ kept. Promotion on library reads does not depend on that gate.
   first withdraws the watchlist's request under every TMDB ID the title has
   had, since a request keeps the ID it was made under. Only then does it remove
   the entry and, when one visible library item has the title, the library
-  watchlist entry, and withdraws once more. The order matters: removing the
-  last entry deletes the title and its former IDs, so a withdrawal that fails
-  part way leaves the entry and a retry still knows every ID. The second
-  withdrawal, together with the add rechecking its entry after it requests and
-  withdrawing when the entry is gone, means an add and a delete of the same
-  title that overlap never leave a request without an entry, in any order. An
-  absent entry succeeds with 204.
+  watchlist entry, and withdraws once more if the title is still off the
+  watchlist. The order matters: removing the last entry deletes the title and
+  its former IDs, so a withdrawal that fails part way leaves the entry and a
+  retry still knows every ID. The second withdrawal, together with the add
+  rechecking after it requests and withdrawing when the title is off the
+  watchlist, means an overlapping add and delete of the same title don't leave
+  a request without an entry. "Off the watchlist" (`WatchlistTitleOff`) means
+  both forms: no entry outside the library and no library watchlist entry for
+  its library copy. A title promotion moved while an add was requesting, or
+  one a re-add put back, is on the watchlist and keeps its request. An absent
+  entry succeeds with 204.
 
 Both mutations are `non_retryable`, as the library watchlist mutations are.
 Discovery results and the title detail carry `in_watchlist`, hydrated with two

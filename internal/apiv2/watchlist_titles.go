@@ -46,6 +46,10 @@ type WatchlistTitleService interface {
 	// WatchlistMembership answers which titles (by any TMDB ID they have
 	// held) and which library items are on the viewer's watchlist.
 	WatchlistMembership(ctx context.Context, viewer handlers.PersonalListViewer, keys []watchlist.TitleKey, itemIDs []string) (map[watchlist.TitleKey]bool, map[string]bool, error)
+	// WatchlistTitleOff answers whether the title is off the viewer's
+	// watchlist both as an entry and, once the library has it, as a library
+	// watchlist item.
+	WatchlistTitleOff(ctx context.Context, viewer handlers.PersonalListViewer, snap watchlist.Snapshot) (bool, error)
 }
 
 // WatchlistRequestService is the slice of *requests.Service the watchlist
@@ -273,12 +277,11 @@ func (reg *Registry) addWatchlistTitle(ctx context.Context, in *WatchlistTitleIn
 		// request: it withdraws, then removes the entry. Rechecking the entry
 		// after requesting, with the delete withdrawing again after its
 		// removal, leaves no request behind whichever way the two interleave.
-		key := watchlist.TitleKey{MediaType: snap.MediaType, TMDBID: snap.TMDBID}
-		on, _, err := reg.deps.WatchlistTitles.WatchlistMembership(ctx, viewer, []watchlist.TitleKey{key}, nil)
+		off, err := reg.deps.WatchlistTitles.WatchlistTitleOff(ctx, viewer, snap)
 		if err != nil {
 			return nil, serviceProblem(err)
 		}
-		if !on[key] {
+		if off {
 			if err := reg.withdrawWatchlistRequests(ctx, rv, snap.MediaType, append([]int{snap.TMDBID}, snap.FormerTMDBIDs...)); err != nil {
 				return nil, requestProblem(err)
 			}
@@ -329,12 +332,14 @@ func (reg *Registry) watchlistTitleSnapshot(ctx context.Context, rv mediarequest
 }
 
 // deleteWatchlistTitle withdraws the watchlist's request under every TMDB ID
-// the title has had, removes the entries, then withdraws once more. A request
-// keeps the ID it was made under. The first withdrawal runs before the
-// removal because removing the last entry drops the title and its former IDs:
-// a failure part way leaves the entry, so a retry still knows every ID. The
-// second catches a request an overlapping add of the same title made after
-// the first; the add rechecks its entry after requesting for the other order.
+// the title has had, removes the entries, then withdraws once more if the
+// title is still off the watchlist. A request keeps the ID it was made under.
+// The first withdrawal runs before the removal because removing the last
+// entry drops the title and its former IDs: a failure part way leaves the
+// entry, so a retry still knows every ID. The second catches a request an
+// overlapping add made after the first; it is skipped when a re-add already
+// put the title back, whose request is wanted. The add rechecks its own entry
+// after requesting for the other order.
 func (reg *Registry) deleteWatchlistTitle(ctx context.Context, in *WatchlistTitleInput) (*struct{}, error) {
 	viewer, rv, _, p := reg.watchlistTitleViewer(ctx)
 	if p != nil {
@@ -344,8 +349,10 @@ func (reg *Registry) deleteWatchlistTitle(ctx context.Context, in *WatchlistTitl
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
+	snap := watchlist.Snapshot{MediaType: in.MediaType, TMDBID: in.TMDBID}
 	ids := []int{in.TMDBID}
 	if known != nil {
+		snap = known.Snapshot()
 		ids = append(ids, known.TMDBID)
 		ids = append(ids, known.FormerTMDBIDs...)
 	}
@@ -355,8 +362,14 @@ func (reg *Registry) deleteWatchlistTitle(ctx context.Context, in *WatchlistTitl
 	if _, err := reg.deps.WatchlistTitles.RemoveWatchlistTitle(ctx, viewer, in.MediaType, in.TMDBID); err != nil {
 		return nil, serviceProblem(err)
 	}
-	if err := reg.withdrawWatchlistRequests(ctx, rv, in.MediaType, ids); err != nil {
-		return nil, requestProblem(err)
+	off, err := reg.deps.WatchlistTitles.WatchlistTitleOff(ctx, viewer, snap)
+	if err != nil {
+		return nil, serviceProblem(err)
+	}
+	if off {
+		if err := reg.withdrawWatchlistRequests(ctx, rv, in.MediaType, ids); err != nil {
+			return nil, requestProblem(err)
+		}
 	}
 	return nil, nil
 }

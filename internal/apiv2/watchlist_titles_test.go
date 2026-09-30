@@ -31,6 +31,9 @@ type fakeWatchlistTitles struct {
 	// of the same title running alongside it would.
 	onList              map[watchlist.TitleKey]bool
 	removedConcurrently bool
+	// readdedConcurrently makes a delete see the title back on the
+	// watchlist after its removal, as an add running alongside it would.
+	readdedConcurrently bool
 }
 
 func (f *fakeWatchlistTitles) ListWatchlistTitlesPage(_ context.Context, viewer handlers.PersonalListViewer, after *watchlist.PageKey, limit int) ([]watchlist.Entry, error) {
@@ -69,8 +72,18 @@ func (f *fakeWatchlistTitles) AddWatchlistTitle(_ context.Context, viewer handle
 
 func (f *fakeWatchlistTitles) RemoveWatchlistTitle(_ context.Context, viewer handlers.PersonalListViewer, mediaType string, tmdbID int) (*watchlist.Title, error) {
 	f.viewers = append(f.viewers, viewer)
-	f.removed = append(f.removed, watchlist.TitleKey{MediaType: mediaType, TMDBID: tmdbID})
-	return f.known[watchlist.TitleKey{MediaType: mediaType, TMDBID: tmdbID}], nil
+	key := watchlist.TitleKey{MediaType: mediaType, TMDBID: tmdbID}
+	f.removed = append(f.removed, key)
+	delete(f.onList, key)
+	return f.known[key], nil
+}
+
+func (f *fakeWatchlistTitles) WatchlistTitleOff(_ context.Context, _ handlers.PersonalListViewer, snap watchlist.Snapshot) (bool, error) {
+	key := watchlist.TitleKey{MediaType: snap.MediaType, TMDBID: snap.TMDBID}
+	if f.readdedConcurrently {
+		return false, nil
+	}
+	return !f.onList[key], nil
 }
 
 func (f *fakeWatchlistTitles) WatchlistMembership(_ context.Context, _ handlers.PersonalListViewer, keys []watchlist.TitleKey, _ []string) (map[watchlist.TitleKey]bool, map[string]bool, error) {
@@ -407,5 +420,23 @@ func TestAddWatchlistTitleWithdrawsWhenDeletedConcurrently(t *testing.T) {
 	}
 	if len(reqs.withdrawn) != 0 {
 		t.Fatalf("withdrawn = %v, want none", reqs.withdrawn)
+	}
+}
+
+// A delete whose title an overlapping add already put back keeps the re-add's
+// request: the second withdrawal runs only while the title is still off the
+// watchlist.
+func TestDeleteWatchlistTitleKeepsRequestOfConcurrentReadd(t *testing.T) {
+	titles := &fakeWatchlistTitles{readdedConcurrently: true, known: map[watchlist.TitleKey]*watchlist.Title{
+		{MediaType: "movie", TMDBID: 949}: {ID: 1, MediaType: "movie", TMDBID: 949, Title: "Heat"},
+	}}
+	reqs := &fakeWatchlistRequests{}
+	h := newTestHandler(t, watchlistTitlesDeps(titles, reqs))
+	rec := do(t, h, http.MethodDelete, "/api/v2/watchlist/titles/movie/949", "", viewerHeaders())
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if !slices.Equal(reqs.withdrawn, []int{949}) {
+		t.Fatalf("withdrawn = %v, want only the withdrawal before the removal", reqs.withdrawn)
 	}
 }
