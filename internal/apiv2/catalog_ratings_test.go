@@ -75,7 +75,7 @@ func TestCatalogItemDetailAddsTurnedOnSources(t *testing.T) {
 	for _, r := range out.Ratings {
 		got = append(got, r.Name+" "+r.Display)
 	}
-	want := []string{"IMDb 8.5", "TMDB 8.3", "RT 93%", "Metacritic 87"}
+	want := []string{"IMDb 8.5", "TMDB 8.3", "RT 93%"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ratings = %q, want %q", got, want)
 	}

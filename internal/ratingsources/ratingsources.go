@@ -257,7 +257,12 @@ type Item struct {
 	Sources    map[string]float64
 }
 
-// Build returns the ratings clients show for item, in display order.
+// MaxTitleRatings is how many ratings a title page shows at most, on every
+// client: the first ones in display order.
+const MaxTitleRatings = 3
+
+// Build returns the ratings clients show for item, in display order, at most
+// MaxTitleRatings of them.
 //
 // IMDb, TMDB, and Rotten Tomatoes come from the rating columns, which are also
 // what poster badges, browse sorting, and filters read, so every surface shows
@@ -304,6 +309,9 @@ func Build(item Item, sel Selection) []Rating {
 			Score:   score,
 			Display: Format(score, definition),
 		})
+		if len(out) == MaxTitleRatings {
+			break
+		}
 	}
 	return out
 }
