@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { isOverlayOffered } from "@/lib/overlays/registry";
 import { RATINGS_OVERLAYS } from "@/lib/overlays/registry/ratings";
 import type { OverlayData } from "@/lib/overlays/types";
 
@@ -25,5 +26,21 @@ describe("card rating formatting", () => {
     expect(primaryCardRating({ rating_imdb: 7.35 })?.display).toBe("7.4");
     const imdbBadge = RATINGS_OVERLAYS.find((overlay) => overlay.id === "rating_imdb");
     expect(imdbBadge?.getValue({ rating_imdb: 7.35 } as OverlayData)).toBe("IMDb 7.4");
+  });
+
+  it("offers a Rotten Tomatoes badge only while the server shows that source", () => {
+    const offered = (shown: string[]) =>
+      RATINGS_OVERLAYS.filter((overlay) => isOverlayOffered(overlay, new Set(shown))).map(
+        (overlay) => overlay.id,
+      );
+
+    expect(offered(["imdb", "tmdb"])).toEqual([
+      "rating_imdb",
+      "rating_tmdb",
+      "content_rating",
+      "advisory_age",
+    ]);
+    expect(offered(["imdb", "tmdb", "rt_audience"])).toContain("rating_rt_audience");
+    expect(offered(["imdb", "tmdb", "rt_audience"])).not.toContain("rating_rt");
   });
 });

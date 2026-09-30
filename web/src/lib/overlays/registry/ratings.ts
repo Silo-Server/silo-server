@@ -43,6 +43,7 @@ export const RATINGS_OVERLAYS: readonly OverlayDef[] = [
     defaultEnabled: false,
     defaultAccent: "#fa320a",
     iconCapable: false,
+    ratingSource: "rt_critic",
     getValue: (d) => ratingLabel("RT", d.rating_rt_critic, 100),
   },
   {
@@ -54,6 +55,7 @@ export const RATINGS_OVERLAYS: readonly OverlayDef[] = [
     defaultEnabled: false,
     defaultAccent: "#fa6400",
     iconCapable: false,
+    ratingSource: "rt_audience",
     getValue: (d) => ratingLabel("RT Audience", d.rating_rt_audience, 100),
   },
   {

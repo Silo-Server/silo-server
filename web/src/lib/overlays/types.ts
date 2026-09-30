@@ -142,6 +142,9 @@ export interface OverlayDef {
   // Settings manifest revision whose card-overlays schema first accepts this
   // id. Absent means every revision does.
   introducedInManifest?: number;
+  // The rating source a rating badge shows, for a rating an administrator can
+  // hide. Settings offer the badge only while getRatingsCapability lists it.
+  ratingSource?: string;
   getValue: (data: OverlayData) => string | null;
   getIcon?: (data: OverlayData) => OverlayIconId | null; // dynamic icon by data
 }

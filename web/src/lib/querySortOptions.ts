@@ -61,6 +61,11 @@ export interface QuerySortOptionsConfig {
    * Unset offers every sort.
    */
   shownRatingSources?: ReadonlySet<string>;
+  /**
+   * A sort already chosen stays offered even when its rating is hidden, so
+   * editing a saved collection does not silently change its order.
+   */
+  keepSortField?: string;
 }
 
 type QuerySortOptionsInput = boolean | QuerySortOptionsConfig;
@@ -269,6 +274,7 @@ export function getQuerySortOptions(input: QuerySortOptionsInput = false): Query
     includePersonalized = false,
     relevanceScope,
     shownRatingSources,
+    keepSortField,
   } = normalizeQuerySortOptionsConfig(input);
 
   return QUERY_SORT_OPTIONS.filter(
@@ -277,7 +283,10 @@ export function getQuerySortOptions(input: QuerySortOptionsInput = false): Query
         !option.personalized ||
         option.value === includePersonalized) &&
       optionMatchesRelevanceScope(option, relevanceScope) &&
-      (!option.ratingSource || !shownRatingSources || shownRatingSources.has(option.ratingSource)),
+      (!option.ratingSource ||
+        !shownRatingSources ||
+        shownRatingSources.has(option.ratingSource) ||
+        option.value === keepSortField),
   ).map((option) => {
     const ebookLabel =
       relevanceScope === "ebook" || relevanceScope === "manga"
