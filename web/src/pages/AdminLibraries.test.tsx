@@ -361,6 +361,16 @@ describe("AdminLibraries", () => {
       "85 ready · 12 waiting · 1 in progress · 2 failed · 1.7 GB",
     ],
     [{ pending: 0, running: 0, ready: 100, unusable: 0 }, "Previews ready", "100 ready · 1.7 GB"],
+    [
+      { pending: 0, running: 0, ready: 0, unusable: 12 },
+      "Previews 0%",
+      "0 ready · 12 failed · 1.7 GB",
+    ],
+    [
+      { pending: 0, running: 0, ready: 85, unusable: 15 },
+      "Previews 85%",
+      "85 ready · 15 failed · 1.7 GB",
+    ],
   ])("shows seek-preview progress %#", (counts, label, detail) => {
     mocks.useAdminTrickplayLibraries.mockReturnValue({
       data: [{ library_id: "1", name: "Movies", sheet_bytes: 1_800_000_000, ...counts }],
