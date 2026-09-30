@@ -1886,6 +1886,12 @@ export interface RequestMediaResult {
   availability: RequestAvailability;
   library_content_id?: string;
   request: RequestState;
+  /**
+   * The title is on the viewer's watchlist, as an entry for a title the
+   * library doesn't have or as its library item. Absent from servers without
+   * watchlist titles.
+   */
+  in_watchlist?: boolean;
 }
 
 export interface RequestMediaPage {
@@ -1937,6 +1943,8 @@ export interface RequestMediaDetail {
   availability: RequestAvailability;
   library_content_id?: string;
   request: RequestState;
+  /** The title is on the viewer's watchlist; see RequestMediaResult.in_watchlist. */
+  in_watchlist?: boolean;
 }
 
 /** One regular season of a series, as the request detail reports it. */
@@ -2081,6 +2089,11 @@ export interface MediaRequest {
   external_status?: string;
   library_content_id?: string;
   last_error?: string;
+  /**
+   * What created the request: direct (the Request button) or watchlist
+   * (adding the title to a watchlist). The server may add values.
+   */
+  source?: string;
   created_at: string;
   updated_at: string;
   approved_at?: string;
@@ -2103,6 +2116,12 @@ export interface RequestSettings {
   global_window_days: number;
   global_auto_approval_enabled: boolean;
   force_dual_quality: boolean;
+  /**
+   * Adding a title the library doesn't have to a watchlist also requests it.
+   * Absent from servers that predate it; left out of an update, the stored
+   * value is kept.
+   */
+  watchlist_requests?: boolean;
   updated_at: string;
 }
 

@@ -708,6 +708,7 @@ function QueueRow({
             {requestedAgo ? (
               <span title={formatDateTime(request.created_at)}> · {requestedAgo}</span>
             ) : null}
+            {request.source === "watchlist" ? <span> · via watchlist</span> : null}
           </p>
         </div>
         <RequestStateSummary request={request} />

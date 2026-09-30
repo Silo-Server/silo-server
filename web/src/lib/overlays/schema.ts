@@ -3,6 +3,7 @@ import { OVERLAY_MAP, OVERLAY_REGISTRY } from "./registry";
 import { OVERLAY_POSITIONS } from "./types";
 import type {
   CardOverlayPrefs,
+  OverlayData,
   OverlayId,
   OverlayItemConfig,
   OverlayPosition,
@@ -202,4 +203,17 @@ export function orderedOverlaysForPosition(prefs: CardOverlayPrefs, position: Ov
   if (prefs.order.length === 0) return enabled;
   const orderIndex = new Map<OverlayId, number>(prefs.order.map((id, i) => [id, i]));
   return [...enabled].sort((a, b) => (orderIndex.get(a.id) ?? 999) - (orderIndex.get(b.id) ?? 999));
+}
+
+// The download bar a card draws while a watchlist title downloads, as a
+// percentage, or null for no bar. The bar belongs to the request_status
+// badge: it shows only while overlays are on (prefs is null when they are
+// off) and the badge is enabled.
+export function requestDownloadBarPercent(
+  data: OverlayData,
+  prefs: CardOverlayPrefs | null | undefined,
+): number | null {
+  if (!prefs?.items.request_status?.enabled || !data.request_status) return null;
+  const percent = data.request_download_percent;
+  return percent == null ? null : Math.min(100, Math.max(0, percent));
 }

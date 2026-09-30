@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 14;
+export const SETTINGS_REVISION = 15;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -264,6 +264,8 @@ export const SETTING_KEYS = {
   PLAYER_VIDEO_SKIP_BACK_SECONDS: "player.video_skip_back_seconds",
   /** Video fast-forward interval */
   PLAYER_VIDEO_SKIP_FORWARD_SECONDS: "player.video_skip_forward_seconds",
+  /** Request titles I add to my watchlist */
+  REQUESTS_WATCHLIST_AUTO_REQUEST: "requests.watchlist_auto_request",
   /** Search scope */
   SEARCH_MEDIA_SCOPE: "search.media_scope",
   /** Match device caption settings */
@@ -1141,6 +1143,22 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
       { value: 60, label: "60 seconds", introducedIn: 9 },
       { value: 90, label: "90 seconds", introducedIn: 9 },
     ],
+  },
+  "requests.watchlist_auto_request": {
+    key: "requests.watchlist_auto_request",
+    type: "boolean",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 15,
+    scopes: ["profile"],
+    scopeIntroducedIn: [15],
+    resolutionOrder: ["profile", "default"],
+    defaultValue: true,
+    label: "Request titles I add to my watchlist",
+    description:
+      "When you add a title that is not in the library to your watchlist, also request it.",
+    category: "requests",
+    control: "switch",
   },
   "search.media_scope": {
     key: "search.media_scope",

@@ -3,6 +3,8 @@ import {
   Ban,
   Bell,
   BellOff,
+  Bookmark,
+  BookmarkCheck,
   CircleCheck,
   Clock,
   Hourglass,
@@ -20,10 +22,13 @@ import {
   useCreateMediaRequest,
   useMediaRequest,
   useMyMediaRequests,
+  useRequestFeatureStatus,
   useToggleRequestFollow,
 } from "@/hooks/queries/useRequests";
+import { useToggleWatchlistTitle } from "@/hooks/queries/watchlistTitles";
 import { useAuth } from "@/hooks/useAuth";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
 import {
   canCancelOwnRequest,
   formatRequestDisplayState,
@@ -32,6 +37,7 @@ import {
   requestInputFromMediaResult,
   type RequestDisplayState,
 } from "@/lib/mediaRequests";
+import { watchlistTitlesAvailable } from "@/lib/watchlistTitles";
 import ActionBar, {
   type ActionBarLink,
   type ActionBarPrimaryAction,
@@ -71,6 +77,8 @@ export default function RequestActionBar({ item, libraryHref }: RequestActionBar
   const createRequest = useCreateMediaRequest();
   const cancelRequest = useCancelMediaRequest();
   const toggleFollow = useToggleRequestFollow();
+  const toggleWatchlist = useToggleWatchlistTitle();
+  const featureStatus = useRequestFeatureStatus();
   const ownRequest = useOwnCancellableRequest(item);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [pickSeasons, setPickSeasons] = useState(false);
@@ -114,7 +122,35 @@ export default function RequestActionBar({ item, libraryHref }: RequestActionBar
     primaryAction = { label: formatRequestReason(item.request.reason), icon: Ban, disabled: true };
   }
 
+  const watchlistSupported = watchlistTitlesAvailable(featureStatus.data);
+  const inWatchlist = item.in_watchlist === true;
+  // The server requests a title added to the watchlist only while it has no
+  // request and the viewer may make one; say so before the add, not after.
+  const addAlsoRequests =
+    watchlistSupported &&
+    featureStatus.data?.watchlist_requests === true &&
+    !inWatchlist &&
+    !inLibrary &&
+    item.request.requestable;
+
   const secondaryActions: ActionBarSecondaryAction[] = [];
+  if (watchlistSupported) {
+    secondaryActions.push({
+      id: "watchlist",
+      label: inWatchlist ? "On Watchlist" : "Add to Watchlist",
+      icon: inWatchlist ? BookmarkCheck : Bookmark,
+      pressed: inWatchlist,
+      pending: toggleWatchlist.isPending,
+      onClick: () =>
+        toggleWatchlist.mutate({
+          mediaType: item.media_type,
+          tmdbID: item.tmdb_id,
+          title: item.title,
+          inWatchlist,
+          request: item.request,
+        }),
+    });
+  }
   if (ownRequest) {
     secondaryActions.push({
       id: "cancel",
@@ -152,6 +188,18 @@ export default function RequestActionBar({ item, libraryHref }: RequestActionBar
   return (
     <>
       <ActionBar primaryAction={primaryAction} secondaryActions={secondaryActions} links={links} />
+      {addAlsoRequests ? (
+        <p className="text-muted-foreground mt-2.5 text-xs">
+          Adding it to your watchlist also requests it. You can turn this off in{" "}
+          <ViewTransitionLink
+            to="/settings/requests"
+            className="hover:text-foreground underline underline-offset-2"
+          >
+            Settings › Requests
+          </ViewTransitionLink>
+          .
+        </p>
+      ) : null}
       {item.request.download ? (
         <RequestDownloadProgress download={item.request.download} className="mt-3 max-w-xs" />
       ) : null}

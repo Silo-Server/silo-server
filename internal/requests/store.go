@@ -12,6 +12,9 @@ type Store interface {
 	UpsertUserLimit(ctx context.Context, limit UserLimit) (*UserLimit, error)
 	CountUserRequestsSince(ctx context.Context, userID int, since time.Time) (int, error)
 	ListActiveByTMDB(ctx context.Context, mediaType MediaType, tmdbIDs []int) (map[int]*Request, error)
+	// ListProfileWatchlistRequests returns the active requests a profile's
+	// watchlist made.
+	ListProfileWatchlistRequests(ctx context.Context, userID int, profileID string) ([]*Request, error)
 	CreateRequest(ctx context.Context, input CreateRequestRecord) (*Request, error)
 	GetRequest(ctx context.Context, id string) (*Request, error)
 	// ListReconciliationCandidates returns in-flight requests (approved,

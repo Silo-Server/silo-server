@@ -91,6 +91,11 @@ type Fetcher struct {
 	// never calls the upstream provider.
 	TrendingSnapshots trendingSnapshotGetter
 
+	// WatchlistPromoter moves the profile's entries for titles the library
+	// now has onto the library watchlist before the watchlist section reads
+	// it. Nil skips promotion.
+	WatchlistPromoter catalog.WatchlistPromoter
+
 	candidateCacheMu sync.Mutex
 	candidateCache   *editorialCandidateCache
 	candidateGroup   singleflight.Group
@@ -1481,6 +1486,11 @@ func (f *Fetcher) fetchPersonalListSection(ctx context.Context, s ResolvedSectio
 	var listed []catalog.PersonalListEntry
 	switch s.SectionType {
 	case SectionWatchlist:
+		if f.WatchlistPromoter != nil {
+			promoteAccess := filter
+			promoteAccess.UserID, promoteAccess.ProfileID = userID, profileID
+			f.WatchlistPromoter.PromoteWatchlist(ctx, promoteAccess)
+		}
 		entries, err := store.ListWatchlist(ctx, profileID, personalListFetchLimit, 0)
 		if err != nil {
 			return nil, 0, fmt.Errorf("listing watchlist: %w", err)

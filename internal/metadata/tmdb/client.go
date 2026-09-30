@@ -1607,6 +1607,66 @@ func pickUSTVRating(cr *contentRatingsResponse) string {
 	return ""
 }
 
+// External ID sources accepted by FindByExternalID.
+const (
+	ExternalSourceIMDb = "imdb_id"
+	ExternalSourceTVDB = "tvdb_id"
+)
+
+// FindByExternalID looks a title up by another provider's ID through TMDB's
+// /find/{external_id} endpoint. source is ExternalSourceIMDb or
+// ExternalSourceTVDB. It returns every movie and series TMDB lists for the
+// ID, with Silo-facing media types ("movie", "series"); no result is an empty
+// slice, not an error. Results are not cached: callers use it to recover a
+// title whose TMDB ID stopped resolving, which is rare and wants a fresh
+// answer.
+func (c *Client) FindByExternalID(ctx context.Context, source, externalID string) ([]MediaResult, error) {
+	externalID = strings.TrimSpace(externalID)
+	if externalID == "" {
+		return nil, fmt.Errorf("tmdb: external id must not be empty")
+	}
+	switch source {
+	case ExternalSourceIMDb, ExternalSourceTVDB:
+	default:
+		return nil, fmt.Errorf("tmdb: invalid external source %q", source)
+	}
+	path := "/find/" + url.PathEscape(externalID) + "?external_source=" + url.QueryEscape(source)
+	var resp findResponse
+	if err := c.doGet(ctx, path, &resp); err != nil {
+		return nil, err
+	}
+	out := make([]MediaResult, 0, len(resp.MovieResults)+len(resp.TVResults))
+	for _, item := range resp.MovieResults {
+		out = append(out, MediaResult{
+			ID:           item.ID,
+			MediaType:    "movie",
+			Title:        item.Title,
+			Overview:     item.Overview,
+			PosterPath:   item.PosterPath,
+			BackdropPath: item.BackdropPath,
+			ReleaseDate:  item.ReleaseDate,
+			Year:         releaseYear(item.ReleaseDate),
+			Popularity:   item.Popularity,
+			VoteAverage:  item.VoteAverage,
+		})
+	}
+	for _, item := range resp.TVResults {
+		out = append(out, MediaResult{
+			ID:           item.ID,
+			MediaType:    "series",
+			Title:        item.Name,
+			Overview:     item.Overview,
+			PosterPath:   item.PosterPath,
+			BackdropPath: item.BackdropPath,
+			ReleaseDate:  item.FirstAirDate,
+			Year:         releaseYear(item.FirstAirDate),
+			Popularity:   item.Popularity,
+			VoteAverage:  item.VoteAverage,
+		})
+	}
+	return out, nil
+}
+
 func (c *Client) fetchExternalIDs(ctx context.Context, path string) (*ExternalIDs, error) {
 	var resp ExternalIDs
 	if err := c.doGet(ctx, path, &resp); err != nil {

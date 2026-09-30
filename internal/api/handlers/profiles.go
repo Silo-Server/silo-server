@@ -43,6 +43,17 @@ type ProfileHandler struct {
 	DroppedSeriesPurger interface {
 		PurgeProfile(ctx context.Context, userID int, profileID string) error
 	}
+	// WatchlistTitlesPurger removes a deleted profile's watchlist entries for
+	// titles outside the library, and the titles no profile keeps any more.
+	// They live in Postgres whichever store holds the profile.
+	WatchlistTitlesPurger interface {
+		PurgeProfile(ctx context.Context, userID int, profileID string) error
+	}
+	// WatchlistRequestWithdrawer cancels the unsent requests a deleted
+	// profile's watchlist made, as removing each title would.
+	WatchlistRequestWithdrawer interface {
+		WithdrawProfileWatchlistRequests(ctx context.Context, userID int, profileID string) error
+	}
 	// EventsHub, when set, receives a user_settings.changed event for every
 	// canonical setting row a profile mutation syncs (see
 	// profiles_settings_sync.go). Nil (as in tests) simply skips publishing.
@@ -747,6 +758,13 @@ func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCom
 	if err := store.DeleteProfile(ctx, profileID); err != nil {
 		return apiError(http.StatusNotFound, "not_found", "Profile not found")
 	}
+	if h.WatchlistRequestWithdrawer != nil {
+		withdrawCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if withdrawErr := h.WatchlistRequestWithdrawer.WithdrawProfileWatchlistRequests(withdrawCtx, userID, profileID); withdrawErr != nil {
+			slog.WarnContext(ctx, "profile watchlist request withdrawal failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", withdrawErr)
+		}
+	}
 	if isUploadedAvatarRef(profile.Avatar) {
 		if cleanupErr := deleteUploadedAvatarObjects(ctx, h.AvatarStore, userID, profileID); cleanupErr != nil {
 			slog.WarnContext(ctx, "profile avatar cleanup failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", cleanupErr)
@@ -764,6 +782,13 @@ func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCom
 		defer cancel()
 		if purgeErr := h.DroppedSeriesPurger.PurgeProfile(purgeCtx, userID, profileID); purgeErr != nil {
 			slog.WarnContext(ctx, "profile dropped-series purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
+		}
+	}
+	if h.WatchlistTitlesPurger != nil {
+		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if purgeErr := h.WatchlistTitlesPurger.PurgeProfile(purgeCtx, userID, profileID); purgeErr != nil {
+			slog.WarnContext(ctx, "profile watchlist-title purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
 		}
 	}
 	return nil

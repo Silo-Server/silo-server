@@ -80,6 +80,7 @@ export const v2Operations = {
   "DELETE /api/v2/watch-together/rooms/{room_id}/suggestions/{suggestion_id}/vote":
     "unvoteWatchTogetherSuggestion",
   "DELETE /api/v2/watched/{id}": "unmarkWatched",
+  "DELETE /api/v2/watchlist/titles/{media_type}/{tmdb_id}": "deleteWatchlistTitle",
   "DELETE /api/v2/watchlist/{item_id}": "deleteWatchlistEntry",
   "DELETE /api/v2/webhook-sync/connections/{id}": "deleteWebhookConnection",
   "GET /api/v2/account/me": "getCurrentUser",
@@ -459,6 +460,7 @@ export const v2Operations = {
   "GET /api/v2/watch-together/rooms/{room_id}/ws": "connectWatchTogetherSocket",
   "GET /api/v2/watch/{id}": "getWatchState",
   "GET /api/v2/watchlist": "listWatchlist",
+  "GET /api/v2/watchlist/titles": "listWatchlistTitles",
   "GET /api/v2/watchlist/{item_id}": "getWatchlistEntry",
   "GET /api/v2/webhook-sync/capabilities": "getWebhookReceiverCapabilities",
   "GET /api/v2/webhook-sync/connections": "listWebhookConnections",
@@ -809,6 +811,7 @@ export const v2Operations = {
   "PUT /api/v2/subtitle-prefs/{series_id}": "updateSubtitlePreference",
   "PUT /api/v2/watch-together/rooms/{room_id}/selection": "selectWatchTogetherRoomItem",
   "PUT /api/v2/watch-together/rooms/{room_id}/staged-selection": "stageWatchTogetherRoomItem",
+  "PUT /api/v2/watchlist/titles/{media_type}/{tmdb_id}": "addWatchlistTitle",
   "PUT /api/v2/watchlist/{item_id}": "addToWatchlist",
   "PUT /api/v2/webhook-sync/connections/{id}": "updateWebhookConnection",
   "PUT /api/v2/webhook-sync/connections/{id}/profile-mappings": "updateWebhookMappings",

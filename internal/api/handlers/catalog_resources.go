@@ -15,7 +15,21 @@ import (
 
 // CatalogResourceHandler serves canonical catalog resource read routes.
 type CatalogResourceHandler struct {
-	items *ItemsHandler
+	items             *ItemsHandler
+	watchlistPromoter WatchlistItemPromoter
+}
+
+// WatchlistItemPromoter moves the profile's watchlist entry for a title the
+// library did not have onto the library watchlist once the item carries the
+// title's IDs. *watchlist.Titles implements it; a failure is its to log.
+type WatchlistItemPromoter interface {
+	PromoteWatchlistItem(ctx context.Context, access catalog.AccessFilter, contentID string)
+}
+
+// SetWatchlistPromoter makes item detail promote the viewer's matching
+// watchlist entry before it reports user_state.in_watchlist.
+func (h *CatalogResourceHandler) SetWatchlistPromoter(p WatchlistItemPromoter) {
+	h.watchlistPromoter = p
 }
 
 // NewCatalogResourceHandler creates a new canonical catalog resource handler.
@@ -294,6 +308,11 @@ func (h *CatalogResourceHandler) enrichViewerState(ctx context.Context, v ItemVi
 	isFavorite, err := store.IsFavorite(ctx, profileID, detail.ContentID)
 	if err != nil {
 		return
+	}
+	if h.watchlistPromoter != nil && (detail.Type == "movie" || detail.Type == "series") {
+		promoteAccess := v.Access
+		promoteAccess.UserID, promoteAccess.ProfileID = apimw.GetUserID(ctx), profileID
+		h.watchlistPromoter.PromoteWatchlistItem(ctx, promoteAccess, detail.ContentID)
 	}
 	inWatchlist, err := store.InWatchlist(ctx, profileID, detail.ContentID)
 	if err != nil {
