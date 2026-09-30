@@ -47,6 +47,10 @@ func (h *SectionHandler) homeSections(ctx context.Context, viewer SectionViewer,
 	hideWatched := h.homeHidesWatchedItems(ctx)
 	withItems := h.fetcher.FetchAll(ctx, homeSectionsForFetch(resolved, hideWatched), nil, libraryIDs, userID, profileID, accessFilter)
 	fetchedAt := time.Now()
+	candidateCount := 0
+	for _, section := range withItems {
+		candidateCount += len(section.Items)
+	}
 	var userStates map[string]*itemUserStateResponse
 	if hideWatched {
 		// Filter before the cross-section diversity pass so a watched item
@@ -61,7 +65,9 @@ func (h *SectionHandler) homeSections(ctx context.Context, viewer SectionViewer,
 	} else {
 		withItems = dropEmptySections(withItems)
 	}
-	response := h.buildSectionsWithUserStates(ctx, withItems, nil, viewer.Access, viewer.Artwork(), userStates, viewer.IncludeCardAvailability)
+	filteredAt := time.Now()
+	var timings sectionBuildTimings
+	response := h.buildSectionsWithUserStates(ctx, withItems, nil, viewer.Access, viewer.Artwork(), userStates, viewer.IncludeCardAvailability, &timings)
 	itemCount := 0
 	for _, section := range withItems {
 		itemCount += len(section.Items)
@@ -71,14 +77,20 @@ func (h *SectionHandler) homeSections(ctx context.Context, viewer SectionViewer,
 	if elapsed >= 500*time.Millisecond {
 		level = slog.LevelWarn
 	}
-	slog.Log(ctx, level, "home sections timing",
+	// build_response_ms keeps its meaning (everything after fetch_all) so old
+	// and new lines compare; filter_ms and the per-lookup fields split it.
+	attrs := []any{
 		"total_ms", elapsed.Milliseconds(),
 		"resolve_ms", resolvedAt.Sub(start).Milliseconds(),
 		"next_up_ms", nextUpAt.Sub(resolvedAt).Milliseconds(),
 		"fetch_all_ms", fetchedAt.Sub(nextUpAt).Milliseconds(),
 		"build_response_ms", time.Since(fetchedAt).Milliseconds(),
+		"filter_ms", filteredAt.Sub(fetchedAt).Milliseconds(),
+		"hide_watched", hideWatched,
+		"candidate_count", candidateCount,
 		"section_count", len(withItems), "item_count", itemCount,
-	)
+	}
+	slog.Log(ctx, level, "home sections timing", append(attrs, timings.logAttrs()...)...)
 	return response, nil
 }
 
@@ -155,7 +167,7 @@ func (h *SectionHandler) homeSectionRow(ctx context.Context, s sections.Resolved
 			row.Items, hasMore = row.Items[:limit], true
 		}
 	}
-	built := h.buildSectionsWithUserStates(ctx, rows, nil, viewer.Access, viewer.Artwork(), userStates, viewer.IncludeCardAvailability).Sections
+	built := h.buildSectionsWithUserStates(ctx, rows, nil, viewer.Access, viewer.Artwork(), userStates, viewer.IncludeCardAvailability, nil).Sections
 	if len(built) == 0 {
 		return resolvedSectionResponse{
 			ID:          row.ID,

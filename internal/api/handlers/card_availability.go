@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/ctxerr"
@@ -172,14 +173,14 @@ type sectionAvailability struct {
 
 // startSectionAvailability counts the seasons of the rows' series cards on
 // wg, alongside the other card lookups, since those series are known before
-// the cards are assembled. It returns nil, and counts nothing, when the read
-// does not carry availability.
-func (h *SectionHandler) startSectionAvailability(ctx context.Context, wg *sync.WaitGroup, include bool, access catalog.AccessFilter, items []*models.MediaItem) *sectionAvailability {
+// the cards are assembled, and records how long that took in took. It returns
+// nil, and counts nothing, when the read does not carry availability.
+func (h *SectionHandler) startSectionAvailability(ctx context.Context, wg *sync.WaitGroup, took *time.Duration, include bool, access catalog.AccessFilter, items []*models.MediaItem) *sectionAvailability {
 	if !include {
 		return nil
 	}
 	lookup := &sectionAvailability{store: h.fetcher, access: access, counted: seriesItemIDs(items)}
-	goSectionLookup(ctx, wg, "availability", func() {
+	goSectionLookup(ctx, wg, "availability", took, func() {
 		lookup.counts = loadSeriesAvailability(ctx, lookup.store, lookup.access, lookup.counted)
 	})
 	return lookup
