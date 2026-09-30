@@ -17,7 +17,7 @@ export type {
   PresetId,
 } from "./types";
 
-export { OVERLAY_REGISTRY, OVERLAY_MAP, getOverlayDef } from "./registry";
+export { OVERLAY_REGISTRY, OVERLAY_MAP, getOverlayDef, isOverlayOffered } from "./registry";
 export { OVERLAY_POSITIONS, OVERLAY_CATEGORIES, WORDMARK_TEXT } from "./types";
 export {
   buildDefaultPrefs,

@@ -16,6 +16,16 @@ describe("getQuerySortOptions", () => {
     expect(fields()).toContain("rating_rt_critic");
   });
 
+  it("keeps a hidden rating sort that is already chosen", () => {
+    const fields = getQuerySortOptions({
+      shownRatingSources: new Set(["imdb", "tmdb"]),
+      keepSortField: "rating_rt_critic",
+    }).map((option) => option.value);
+
+    expect(fields).toContain("rating_rt_critic");
+    expect(fields).not.toContain("rating_rt_audience");
+  });
+
   it("allows ebook book-native sorts without enabling narrator", () => {
     const fields = getQuerySortOptions({ relevanceScope: "ebook" }).map((option) => option.value);
 

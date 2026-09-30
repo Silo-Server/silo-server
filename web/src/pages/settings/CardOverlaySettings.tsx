@@ -10,6 +10,7 @@ import {
 } from "@/components/overlays/OverlayPreviewCard";
 import { OverlayPreviewVariantToggle } from "@/components/overlays/OverlayPreviewVariantToggle";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
+import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
 import {
   ACCENT_PALETTE,
   buildDefaultPrefs,
@@ -17,6 +18,7 @@ import {
   getOverlayDef,
   isOverlaySuppressed,
   OVERLAY_REGISTRY,
+  isOverlayOffered,
   OVERLAY_PRESETS,
   POSITION_OPTIONS,
   PRESET_IDS,
@@ -274,6 +276,7 @@ function PresetPicker({ value, onChange }: PresetPickerProps) {
 }
 
 export default function CardOverlaySettings() {
+  const shownRatingSources = useShownRatingSources();
   const {
     prefs,
     setPrefs,
@@ -438,7 +441,10 @@ export default function CardOverlaySettings() {
           <TabsContent value="overlays" className="mt-4 space-y-6">
             {CATEGORY_GROUPS.map(({ category, title, description }) => {
               const overlays = OVERLAY_REGISTRY.filter(
-                (d) => d.category === category && isOverlaySupported(d.id),
+                (d) =>
+                  d.category === category &&
+                  isOverlaySupported(d.id) &&
+                  isOverlayOffered(d, shownRatingSources),
               );
               if (overlays.length === 0) return null;
               return (
