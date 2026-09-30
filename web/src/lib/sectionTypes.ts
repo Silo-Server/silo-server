@@ -32,6 +32,18 @@ export function fallbackSectionTypes(allowAdminOnly: boolean) {
 }
 
 /**
+ * Mirrors the save gate: the server refuses admin-only recipes from a
+ * non-admin account unless profiles may build custom sections. An unloaded
+ * flag counts as not allowed.
+ */
+export function canAddAdminOnlyRecipes(
+  role: string | undefined,
+  allowProfileCustomSections: boolean | undefined,
+): boolean {
+  return role === "admin" || allowProfileCustomSections === true;
+}
+
+/**
  * Drops admin-only recipes from the catalog a profile may pick from, so a
  * profile the server would refuse (403 custom_disabled) is not offered them.
  */

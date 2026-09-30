@@ -2,13 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import type { SettingsSectionEntry } from "@/api/types";
 import { V2ProblemError } from "@/api/v2/request";
+import { canAddAdminOnlyRecipes } from "@/lib/sectionTypes";
 
 import {
   applySectionDeletion,
   canMutateSectionSettings,
   buildSectionOverrides,
   buildProfileGallerySection,
-  canAddAdminOnlyRecipes,
   hydrateRemovedSystemSections,
   sectionSaveErrorMessage,
   shouldRestoreLatestSaveFailure,

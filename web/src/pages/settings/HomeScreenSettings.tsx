@@ -23,11 +23,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import SectionEditorDrawer from "@/components/sections/SectionEditorDrawer";
+import HomeLayoutTransfer from "@/components/sections/HomeLayoutTransfer";
 import RecipeGalleryModal from "@/components/RecipeGallery/RecipeGalleryModal";
 import RecipeConfigDrawer from "@/components/RecipeGallery/RecipeConfigDrawer";
 import type { AddPayload } from "@/components/RecipeGallery/RecipeConfigDrawer";
 import type { GalleryPreset, RecipeDefinition } from "@/lib/recipes";
 import { fetchRecipeCatalog } from "@/lib/recipes";
+import { canAddAdminOnlyRecipes } from "@/lib/sectionTypes";
 import { randomUUID } from "@/lib/uuid";
 import { Plus } from "lucide-react";
 import {
@@ -189,18 +191,6 @@ export function buildProfileGallerySection(
     position,
     config: payload.config,
   };
-}
-
-/**
- * Mirrors the save gate: the server refuses admin-only recipes from a
- * non-admin account unless profiles may build custom sections. An unloaded
- * flag counts as not allowed.
- */
-export function canAddAdminOnlyRecipes(
-  role: string | undefined,
-  allowProfileCustomSections: boolean | undefined,
-): boolean {
-  return role === "admin" || allowProfileCustomSections === true;
 }
 
 /**
@@ -647,6 +637,13 @@ export default function HomeScreenSettings() {
             ) : null}
           </DragOverlay>
         </DndContext>
+      </SettingsGroup>
+
+      <SettingsGroup
+        title="Export and import"
+        description="Save this profile's Home and library layouts to a file, or load one exported from another profile or server."
+      >
+        <HomeLayoutTransfer />
       </SettingsGroup>
 
       <SectionEditorDrawer
