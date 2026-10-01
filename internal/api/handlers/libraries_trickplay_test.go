@@ -63,3 +63,23 @@ func TestLibraryTrickplayRequiresArtworkStorage(t *testing.T) {
 		t.Fatalf("reconciled %d times", reconciler.calls)
 	}
 }
+
+// An update reconciles seek previews when it can change which files get
+// them, including enabling or disabling the library.
+func TestLibraryUpdateAffectsTrickplay(t *testing.T) {
+	yes, kind := true, "audiobooks"
+	for _, tt := range []struct {
+		name string
+		req  updateLibraryRequest
+		want bool
+	}{
+		{"setting", updateLibraryRequest{TrickplayEnabled: &yes}, true},
+		{"type", updateLibraryRequest{Type: &kind}, true},
+		{"enabled", updateLibraryRequest{Enabled: &yes}, true},
+		{"unrelated", updateLibraryRequest{IntroDetectionEnabled: &yes}, false},
+	} {
+		if got := tt.req.affectsTrickplay(); got != tt.want {
+			t.Errorf("%s: affectsTrickplay = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
