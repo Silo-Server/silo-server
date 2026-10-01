@@ -2,16 +2,21 @@ package playback
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
+	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/playback/keyframes"
 )
 
@@ -31,10 +36,34 @@ type copySegmentPlan struct {
 	keyframes []float64
 	// firstKey is each segment's first keyframe, as an index into keyframes.
 	firstKey []int
+	// inputStart is the source's start time, which FFmpeg's -start_at_zero
+	// subtracts from every timestamp. It is the earliest stream's start, so
+	// it can be before the first keyframe: audio that starts before the video.
+	inputStart float64
 }
 
 // loadKeyframeIndex reads a source's keyframe index; tests replace it.
 var loadKeyframeIndex = keyframes.Load
+
+// probeInputStart returns the start time FFmpeg reads for a source; tests
+// replace it. ffprobe opens the file with the same demuxer as FFmpeg, so its
+// format start_time is the value -start_at_zero subtracts.
+var probeInputStart = func(opts TranscodeOpts) (float64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	ffprobe := mediaprobe.FFprobePathFromFFmpeg(ResolveFFmpegPath(opts.FFmpegPath))
+	out, err := exec.CommandContext(ctx, ffprobe, "-v", "error",
+		"-show_entries", "format=start_time", "-of", "default=noprint_wrappers=1:nokey=1",
+		opts.InputPath).Output()
+	if err != nil {
+		return 0, fmt.Errorf("probe start time: %w", err)
+	}
+	start, err := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
+	if err != nil || math.IsNaN(start) || math.IsInf(start, 0) {
+		return 0, fmt.Errorf("probe start time: unreadable %q", strings.TrimSpace(string(out)))
+	}
+	return start, nil
+}
 
 // planCopySegments returns the segment plan for a session, or nil when the
 // session keeps FFmpeg's real playlist: the setting is off, the video isn't
@@ -74,7 +103,13 @@ func planCopySegments(opts TranscodeOpts) *copySegmentPlan {
 		return nil
 	}
 	durations := keyframes.SegmentDurations(starts, idx.VideoEnd)
-	return &copySegmentPlan{durations: durations, keyframes: idx.Keyframes, firstKey: firstKey}
+	inputStart, err := probeInputStart(opts)
+	if err != nil || inputStart > idx.Keyframes[0] {
+		// Without the start FFmpeg subtracts, its groups can't be placed.
+		log.Printf("playback: session %s: input start %.3fs (%v); using FFmpeg's playlist", opts.SessionID, inputStart, err)
+		return nil
+	}
+	return &copySegmentPlan{durations: durations, keyframes: idx.Keyframes, firstKey: firstKey, inputStart: inputStart}
 }
 
 // copyPlanRecordFile keeps a session's planning decision in its output
@@ -86,6 +121,8 @@ type copyPlanRecord struct {
 	Durations []float64 `json:"durations,omitempty"`
 	Keyframes []float64 `json:"keyframes,omitempty"`
 	FirstKey  []int     `json:"first_key,omitempty"`
+	// InputStart is required with a plan, so it isn't omitted when zero.
+	InputStart *float64 `json:"input_start,omitempty"`
 }
 
 // resolveCopyPlan returns the plan a session serves. The first start decides
@@ -115,6 +152,7 @@ func resolveCopyPlan(opts TranscodeOpts) *copySegmentPlan {
 	rec := copyPlanRecord{Planned: plan != nil}
 	if plan != nil {
 		rec.Durations, rec.Keyframes, rec.FirstKey = plan.durations, plan.keyframes, plan.firstKey
+		rec.InputStart = &plan.inputStart
 	}
 	data, err := json.Marshal(rec)
 	if err == nil {
@@ -134,7 +172,7 @@ func resolveCopyPlan(opts TranscodeOpts) *copySegmentPlan {
 
 // plan rebuilds a recorded plan, or nil if the record is inconsistent.
 func (r copyPlanRecord) plan() *copySegmentPlan {
-	if len(r.Durations) == 0 || len(r.FirstKey) != len(r.Durations) || len(r.Keyframes) == 0 {
+	if len(r.Durations) == 0 || len(r.FirstKey) != len(r.Durations) || len(r.Keyframes) == 0 || r.InputStart == nil {
 		return nil
 	}
 	for i, k := range r.FirstKey {
@@ -142,7 +180,7 @@ func (r copyPlanRecord) plan() *copySegmentPlan {
 			return nil
 		}
 	}
-	return &copySegmentPlan{durations: r.Durations, keyframes: r.Keyframes, firstKey: r.FirstKey}
+	return &copySegmentPlan{durations: r.Durations, keyframes: r.Keyframes, firstKey: r.FirstKey, inputStart: *r.InputStart}
 }
 
 // keyframeRange returns segment n's keyframes as [first, end) indices.

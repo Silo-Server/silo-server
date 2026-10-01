@@ -20,6 +20,19 @@ func stubKeyframeIndex(t *testing.T, idx keyframes.Index, err error) {
 	previous := loadKeyframeIndex
 	loadKeyframeIndex = func(string) (keyframes.Index, error) { return idx, err }
 	t.Cleanup(func() { loadKeyframeIndex = previous })
+	// The source starts with its first keyframe unless a test says otherwise.
+	start := 0.0
+	if len(idx.Keyframes) > 0 {
+		start = idx.Keyframes[0]
+	}
+	stubInputStart(t, start, nil)
+}
+
+func stubInputStart(t *testing.T, start float64, err error) {
+	t.Helper()
+	previous := probeInputStart
+	probeInputStart = func(TranscodeOpts) (float64, error) { return start, err }
+	t.Cleanup(func() { probeInputStart = previous })
 }
 
 func plannedOpts() TranscodeOpts {
@@ -92,6 +105,18 @@ func TestPlanCopySegmentsKeepsFFmpegPlaylist(t *testing.T) {
 
 	t.Run("unknown video end", func(t *testing.T) {
 		stubKeyframeIndex(t, keyframes.Index{Keyframes: []float64{0, 2, 4, 6, 8}}, nil)
+		if plan := planCopySegments(plannedOpts()); plan != nil {
+			t.Fatalf("plan = %v, want none", plan.durations)
+		}
+	})
+	t.Run("unknown input start", func(t *testing.T) {
+		stubInputStart(t, 0, errors.New("ffprobe failed"))
+		if plan := planCopySegments(plannedOpts()); plan != nil {
+			t.Fatalf("plan = %v, want none", plan.durations)
+		}
+	})
+	t.Run("input start after the first keyframe", func(t *testing.T) {
+		stubInputStart(t, 0.5, nil)
 		if plan := planCopySegments(plannedOpts()); plan != nil {
 			t.Fatalf("plan = %v, want none", plan.durations)
 		}
@@ -227,14 +252,19 @@ func TestResolveCopyPlanFollowsTheRecordedDecision(t *testing.T) {
 
 	planned := plannedOpts()
 	planned.OutputDir = t.TempDir()
+	// Audio starts before the video, so FFmpeg's zero is earlier than the
+	// first keyframe.
+	stubInputStart(t, -0.25, nil)
 	first := resolveCopyPlan(planned)
-	if first == nil {
-		t.Fatal("no plan with a verified index")
+	if first == nil || first.inputStart != -0.25 {
+		t.Fatalf("plan = %+v, want one starting at -0.25s", first)
 	}
 	// The record stands in for the index, which may not be loaded again.
 	stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrUnverified)
+	stubInputStart(t, 0, errors.New("ffprobe failed"))
 	again := resolveCopyPlan(planned)
-	if again == nil || !slices.Equal(again.durations, first.durations) || !slices.Equal(again.firstKey, first.firstKey) {
+	if again == nil || !slices.Equal(again.durations, first.durations) || !slices.Equal(again.firstKey, first.firstKey) ||
+		again.inputStart != first.inputStart {
 		t.Fatalf("rebuilt plan = %+v, want the recorded %+v", again, first)
 	}
 }
@@ -321,7 +351,16 @@ func TestPlannedCopySessionMatchesFFmpeg(t *testing.T) {
 		"-output_ts_offset", "7", shifted).CombinedOutput(); err != nil {
 		t.Fatalf("shift the test file: %v: %s", err, out)
 	}
-	for _, src := range []string{source, shifted} {
+	// The audio starts at zero and the video 2s later, so FFmpeg's zero is
+	// the audio's start, not the first keyframe. (A later video start would
+	// be past the session's 3s -analyzeduration, which leaves FFmpeg's own
+	// output with broken B-frame timing at the start.)
+	lateVideo := filepath.Join(dir, "late-video.mkv")
+	if out, err := exec.CommandContext(ctx, ffmpeg, "-v", "error", "-i", source, "-itsoffset", "2", "-i", source,
+		"-map", "1:v", "-map", "0:a", "-c", "copy", lateVideo).CombinedOutput(); err != nil {
+		t.Fatalf("delay the test file's video: %v: %s", err, out)
+	}
+	for _, src := range []string{source, shifted, lateVideo} {
 		t.Run(filepath.Base(src), func(t *testing.T) {
 			checkPlannedCopySession(t, ctx, ffmpeg, src)
 		})

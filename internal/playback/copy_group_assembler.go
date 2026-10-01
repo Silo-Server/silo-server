@@ -189,10 +189,11 @@ func (a *copyGroupAssembler) mapGroupLocked(run *copyGroupRun, path string, data
 	}
 	at := float64(pts) / float64(run.timescale)
 	keys := a.plan.keyframes
-	// FFmpeg's output starts at zero (-start_at_zero), while the keyframe
-	// times are the container's, which can start later. Measure both from
-	// the first keyframe, the earliest the output's zero can stand for.
-	at += keys[0]
+	// FFmpeg's output starts at zero (-start_at_zero): it subtracts the
+	// source's start time, while the keyframe times are the container's.
+	// The start is the earliest stream's, so it can be before the first
+	// keyframe.
+	at += a.plan.inputStart
 	if !run.anchored {
 		// The first group starts at the keyframe FFmpeg's seek landed on: the
 		// last keyframe at or before it, since the run's timestamps are the
