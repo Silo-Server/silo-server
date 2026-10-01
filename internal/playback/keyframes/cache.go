@@ -132,6 +132,9 @@ func startCheck(key cacheKey) bool {
 	if _, ok := indexCache.inFlight[key]; ok || len(indexCache.inFlight) >= maxQueuedChecks {
 		return false
 	}
+	if _, ok := indexCache.entries[key]; ok {
+		return false // a check finished meanwhile
+	}
 	indexCache.inFlight[key] = struct{}{}
 	return true
 }
@@ -156,15 +159,20 @@ func verifyInBackground(key cacheKey) {
 		return VerifyMatroska(f, info.Size())
 	}()
 
-	indexCache.Lock()
-	delete(indexCache.inFlight, key)
-	indexCache.Unlock()
 	if err != nil && transient(err) {
 		slog.Warn("keyframe index: check file", "component", "playback", "path", key.path, "error", err)
-		return // a later playback tries again
+		indexCache.Lock()
+		delete(indexCache.inFlight, key) // a later playback tries again
+		indexCache.Unlock()
+		return
 	}
 	idx, err = settle(idx, err)
-	store(key, idx, err)
+	// Publish the result and end the check together, so no Load sees
+	// neither and queues the file again.
+	indexCache.Lock()
+	storeLocked(key, idx, err)
+	delete(indexCache.inFlight, key)
+	indexCache.Unlock()
 }
 
 func cached(key cacheKey) (Index, error, bool) {
@@ -185,6 +193,10 @@ func cached(key cacheKey) (Index, error, bool) {
 func store(key cacheKey, idx Index, err error) {
 	indexCache.Lock()
 	defer indexCache.Unlock()
+	storeLocked(key, idx, err)
+}
+
+func storeLocked(key cacheKey, idx Index, err error) {
 	if el, ok := indexCache.entries[key]; ok {
 		entry, _ := el.Value.(*cacheEntry)
 		entry.index, entry.err = idx, err
