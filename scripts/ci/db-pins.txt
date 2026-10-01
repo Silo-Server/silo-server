@@ -110,3 +110,4 @@
 ./internal/trickplay TestStaleReconcileCannotDowngradeConcurrentUpgradeDB
 ./internal/trickplay TestOptOutReconcilePreservesConcurrentClaimDB
 ./internal/trickplay TestRegenerateFencesOlderWorkersDB
+./internal/trickplay TestReconcileUsesOneConnectionDB

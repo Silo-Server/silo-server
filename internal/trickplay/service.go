@@ -488,6 +488,11 @@ func (s *Service) Recipe(ctx context.Context) (Recipe, error) {
 // Reconcile runs one reconcile pass, unless another server is running one,
 // and wakes the workers.
 func (s *Service) Reconcile(ctx context.Context) (ReconcileStats, bool, error) {
+	// Settings may use the same pool. Read them before reserving its session.
+	recipe, err := s.Recipe(ctx)
+	if err != nil {
+		return ReconcileStats{}, false, err
+	}
 	lock, acquired, err := pglock.TryAcquire(ctx, s.pool, reconcileLock)
 	if err != nil {
 		return ReconcileStats{}, false, fmt.Errorf("take the trickplay reconcile lock: %w", err)
@@ -502,24 +507,28 @@ func (s *Service) Reconcile(ctx context.Context) (ReconcileStats, bool, error) {
 			s.ReconcileSoon()
 		}
 	}()
-	recipe, err := s.Recipe(ctx)
-	if err != nil {
-		return ReconcileStats{}, true, err
+	reconcile := s.queue.Reconcile
+	if repository, ok := s.queue.(*Repository); ok {
+		// Keep the SQL on the lock's session, including with a pool of one
+		// connection. Losing that session also stops the guarded work.
+		reconcile = func(ctx context.Context, recipe Recipe, storeIdentity string, batch int) (ReconcileStats, error) {
+			return repository.reconcile(ctx, lock.Conn().Exec, recipe, storeIdentity, batch)
+		}
 	}
-	stats, more, err := s.reconcileBatches(ctx, recipe)
+	stats, more, err := s.reconcileBatches(ctx, recipe, reconcile)
 	return stats, true, err
 }
 
 // reconcileBatches drains bounded steps, waking workers after each batch.
 // A pass yields after reconcilePassBatches so other servers and settings
 // changes can take the lock before a continuation.
-func (s *Service) reconcileBatches(ctx context.Context, recipe Recipe) (ReconcileStats, bool, error) {
+func (s *Service) reconcileBatches(ctx context.Context, recipe Recipe, reconcile func(context.Context, Recipe, string, int) (ReconcileStats, error)) (ReconcileStats, bool, error) {
 	var total ReconcileStats
 	for range reconcilePassBatches {
 		if err := ctx.Err(); err != nil {
 			return total, false, err
 		}
-		stats, err := s.queue.Reconcile(ctx, recipe, s.store.Identity(), reconcileBatch)
+		stats, err := reconcile(ctx, recipe, s.store.Identity(), reconcileBatch)
 		total.Reclaimed += stats.Reclaimed
 		total.Added += stats.Added
 		total.Removed += stats.Removed
