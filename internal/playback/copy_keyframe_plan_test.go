@@ -192,6 +192,11 @@ func TestPlannedCopySessionMatchesFFmpeg(t *testing.T) {
 		t.Skipf("ffmpeg can't make the test file (%v): %s", err, out)
 	}
 
+	// Planned sessions use a fully checked index; check it now rather than
+	// in the background.
+	if _, err := keyframes.LoadVerified(source); err != nil {
+		t.Fatal(err)
+	}
 	opts := TranscodeOpts{
 		InputPath:        source,
 		OutputDir:        filepath.Join(dir, "out"),

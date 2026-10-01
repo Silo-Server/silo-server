@@ -97,6 +97,18 @@ func TestReadMatroskaMatchesFFprobe(t *testing.T) {
 	}
 
 	got := readIndex(t, path).Keyframes
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyMatroska(f, info.Size()); err != nil {
+		t.Fatalf("FFmpeg's Cues failed the full check: %v", err)
+	}
 	if len(got) != len(want) {
 		t.Fatalf("keyframes = %v, ffprobe = %v", got, want)
 	}

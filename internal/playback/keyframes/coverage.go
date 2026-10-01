@@ -108,7 +108,8 @@ func clusterKeyframes(r io.ReaderAt, off, segEnd int64, video uint64) ([]uint64,
 		keys         []int64
 	)
 	at := off + headerLen
-	for n := 0; at < end && n < maxClusterChildren; n++ {
+	n := 0
+	for ; at < end && n < maxClusterChildren; n++ {
 		id, size, headerLen, err := readElementHeader(r, at)
 		if err != nil {
 			if isShortRead(err) {
@@ -148,6 +149,10 @@ func clusterKeyframes(r io.ReaderAt, off, segEnd int64, video uint64) ([]uint64,
 			}
 		}
 		at = data + size
+	}
+	if n == maxClusterChildren && at < end {
+		// Not every block was read, so the cluster can't vouch for the Cues.
+		return nil, 0, ErrIncompleteIndex
 	}
 	if !haveTicks {
 		return nil, 0, fmt.Errorf("cluster at %d has no timestamp", off)
@@ -207,4 +212,67 @@ func readBlockGroup(r io.ReaderAt, off, size int64) (track uint64, rel int64, ke
 		return 0, 0, false, nil
 	}
 	return track, rel, key, nil
+}
+
+// VerifyMatroska reads a Matroska file's index like ReadMatroska and then
+// checks it against every cluster: each video keyframe must have a cue, and
+// each video cue must be a keyframe. Only then does the index list exactly
+// the keyframes FFmpeg cuts at. It reads every block's header, which on a
+// large file can take as long as reading the file, so callers run it once per
+// file in the background (see Load).
+func VerifyMatroska(r io.ReaderAt, size int64) (Index, error) {
+	m, err := readMatroska(r, size)
+	if err != nil {
+		return Index{}, err
+	}
+	if err := verifyAllClusters(r, m); err != nil {
+		return Index{}, err
+	}
+	return m.Index, nil
+}
+
+func verifyAllClusters(r io.ReaderAt, m matroskaIndex) error {
+	cued := make(map[uint64]struct{}, len(m.points))
+	for _, p := range m.points {
+		cued[p.ticks] = struct{}{}
+	}
+	found := make(map[uint64]struct{}, len(cued))
+	for at := m.segStart; at < m.segEnd; {
+		id, size, headerLen, err := readElementHeader(r, at)
+		if err != nil {
+			if isShortRead(err) {
+				break
+			}
+			return err
+		}
+		if id == idCluster {
+			keys, next, err := clusterKeyframes(r, at, m.segEnd, m.video)
+			if err != nil {
+				return err
+			}
+			for _, k := range keys {
+				if _, ok := cued[k]; !ok {
+					return ErrIncompleteIndex
+				}
+				found[k] = struct{}{}
+			}
+			if next <= at {
+				return ErrIncompleteIndex
+			}
+			at = next
+			continue
+		}
+		if size == unknownSize {
+			// An unknown-size element other than a cluster can't be
+			// skipped, so the rest of the file can't be checked.
+			return ErrIncompleteIndex
+		}
+		at += headerLen + size
+	}
+	if len(found) != len(cued) {
+		// A cue on a frame that isn't a keyframe would put a planned
+		// boundary where FFmpeg can't cut.
+		return ErrIncompleteIndex
+	}
+	return nil
 }

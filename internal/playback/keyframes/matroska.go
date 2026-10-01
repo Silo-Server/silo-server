@@ -70,31 +70,46 @@ const (
 
 // ReadMatroska returns the keyframe index of a Matroska or WebM file from its
 // Cues element. It reads the header, the seek head, segment info, tracks and
-// cues, following the seek head to Cues stored after the clusters, and never
-// the clusters themselves.
+// cues, following the seek head to Cues stored after the clusters. As a quick
+// check it reads the block headers of a few clusters (checkCueCoverage);
+// VerifyMatroska checks them all.
 func ReadMatroska(r io.ReaderAt, size int64) (Index, error) {
+	m, err := readMatroska(r, size)
+	return m.Index, err
+}
+
+// matroskaIndex is an Index with what checking it against the clusters
+// needs (VerifyMatroska).
+type matroskaIndex struct {
+	Index
+	segStart, segEnd int64
+	video            uint64
+	points           []cuePoint
+}
+
+func readMatroska(r io.ReaderAt, size int64) (matroskaIndex, error) {
 	id, dataSize, headerLen, err := readElementHeader(r, 0)
 	if err != nil {
 		if isShortRead(err) {
 			// Empty, or not starting with an EBML element at all.
-			return Index{}, notMatroskaError{}
+			return matroskaIndex{}, notMatroskaError{}
 		}
-		return Index{}, fmt.Errorf("keyframes: read EBML header: %w", err)
+		return matroskaIndex{}, fmt.Errorf("keyframes: read EBML header: %w", err)
 	}
 	if id != idEBML {
-		return Index{}, notMatroskaError{}
+		return matroskaIndex{}, notMatroskaError{}
 	}
 	pos := headerLen + dataSize
 
 	id, segSize, headerLen, err := readElementHeader(r, pos)
 	if err != nil {
 		if isShortRead(err) {
-			return Index{}, notMatroskaError{}
+			return matroskaIndex{}, notMatroskaError{}
 		}
-		return Index{}, fmt.Errorf("keyframes: read segment: %w", err)
+		return matroskaIndex{}, fmt.Errorf("keyframes: read segment: %w", err)
 	}
 	if id != idSegment {
-		return Index{}, notMatroskaError{}
+		return matroskaIndex{}, notMatroskaError{}
 	}
 	segStart := pos + headerLen
 	segEnd := size
@@ -117,14 +132,14 @@ func ReadMatroska(r io.ReaderAt, size int64) (Index, error) {
 			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 				break
 			}
-			return Index{}, fmt.Errorf("keyframes: read element at %d: %w", at, err)
+			return matroskaIndex{}, fmt.Errorf("keyframes: read element at %d: %w", at, err)
 		}
 		dataAt := at + headerLen
 		switch id {
 		case idSeekHead:
 			data, err := readElementData(r, dataAt, dataSize, maxMetadataSize)
 			if err != nil {
-				return Index{}, err
+				return matroskaIndex{}, err
 			}
 			if p, ok := seekPosition(data, idCues); ok {
 				cuesAt = segStart + p
@@ -132,20 +147,20 @@ func ReadMatroska(r io.ReaderAt, size int64) (Index, error) {
 		case idInfo:
 			data, err := readElementData(r, dataAt, dataSize, maxMetadataSize)
 			if err != nil {
-				return Index{}, err
+				return matroskaIndex{}, err
 			}
 			timescale, duration = parseInfo(data)
 			haveInfo = true
 		case idTracks:
 			data, err := readElementData(r, dataAt, dataSize, maxMetadataSize)
 			if err != nil {
-				return Index{}, err
+				return matroskaIndex{}, err
 			}
 			video, haveTrack = firstVideoTrack(data)
 		case idCues:
 			cues, err = readElementData(r, dataAt, dataSize, maxCuesSize)
 			if err != nil {
-				return Index{}, err
+				return matroskaIndex{}, err
 			}
 		}
 		if cues != nil && haveInfo && haveTrack {
@@ -162,26 +177,26 @@ func ReadMatroska(r io.ReaderAt, size int64) (Index, error) {
 	if cues == nil && cuesAt >= 0 {
 		id, dataSize, headerLen, err := readElementHeader(r, cuesAt)
 		if err != nil {
-			return Index{}, fmt.Errorf("keyframes: read cues at %d: %w", cuesAt, err)
+			return matroskaIndex{}, fmt.Errorf("keyframes: read cues at %d: %w", cuesAt, err)
 		}
 		if id != idCues {
-			return Index{}, fmt.Errorf("keyframes: seek head points at element %#x, not Cues", id)
+			return matroskaIndex{}, fmt.Errorf("keyframes: seek head points at element %#x, not Cues", id)
 		}
 		cues, err = readElementData(r, cuesAt+headerLen, dataSize, maxCuesSize)
 		if err != nil {
-			return Index{}, err
+			return matroskaIndex{}, err
 		}
 	}
 	if cues == nil || !haveTrack {
-		return Index{}, ErrNoIndex
+		return matroskaIndex{}, ErrNoIndex
 	}
 
 	points := cuePoints(cues, video)
 	if len(points) == 0 {
-		return Index{}, ErrNoIndex
+		return matroskaIndex{}, ErrNoIndex
 	}
 	if err := checkCueCoverage(r, segStart, segEnd, video, points); err != nil {
-		return Index{}, err
+		return matroskaIndex{}, err
 	}
 	ticks := make([]uint64, len(points))
 	for i, p := range points {
@@ -198,7 +213,7 @@ func ReadMatroska(r io.ReaderAt, size int64) (Index, error) {
 	if duration > 0 {
 		idx.Duration = duration * float64(timescale) / 1e9
 	}
-	return idx, nil
+	return matroskaIndex{Index: idx, segStart: segStart, segEnd: segEnd, video: video, points: points}, nil
 }
 
 // readElementHeader reads an element's ID and data size at off, returning the

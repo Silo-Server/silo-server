@@ -246,3 +246,71 @@ func TestReadMatroskaRejectsOversizedCues(t *testing.T) {
 		t.Fatalf("err = %v, want a size error", err)
 	}
 }
+
+// manyClusters builds a file with ten clusters, each holding two video
+// keyframes, and Cues for all of them except dropTicks. The sampled check
+// reads clusters 0, 3, 6 and 9 and the ones after them; cluster 2 is only
+// read by the full check.
+func manyClusters(dropTicks uint64, extraCue uint64) []byte {
+	head := slices.Concat(info, tracks)
+	var clusters [][]byte
+	for c := range 10 {
+		base := uint64(c) * 4000
+		clusters = append(clusters, cluster(base, block(videoTrack, 0, true), block(videoTrack, 40, false), block(videoTrack, 2000, true)))
+	}
+	cuesFor := func(positions []uint64) []byte {
+		var points [][]byte
+		point := func(ticks, pos uint64) []byte {
+			return el(idCuePoint, uintEl(idCueTime, ticks),
+				el(idCueTrackPos, uintEl(idCueTrack, videoTrack), uintEl(idCueClusterPosition, pos)))
+		}
+		for c := range 10 {
+			for _, rel := range []uint64{0, 2000} {
+				if ticks := uint64(c)*4000 + rel; ticks != dropTicks {
+					points = append(points, point(ticks, positions[c]))
+				}
+			}
+		}
+		if extraCue != 0 {
+			points = append(points, point(extraCue, positions[extraCue/4000]))
+		}
+		return el(idCues, points...)
+	}
+	// The Cues come before the clusters; their length doesn't depend on the
+	// positions they hold.
+	positions := make([]uint64, 10)
+	pos := uint64(len(head) + len(cuesFor(positions)))
+	for c, cl := range clusters {
+		positions[c] = pos
+		pos += uint64(len(cl))
+	}
+	body := slices.Concat(head, cuesFor(positions), slices.Concat(clusters...))
+	return slices.Concat(ebmlHeader, el(idSegment, body))
+}
+
+func verify(f []byte) (Index, error) {
+	return VerifyMatroska(bytes.NewReader(f), int64(len(f)))
+}
+
+func TestVerifyMatroskaChecksEveryCluster(t *testing.T) {
+	complete := manyClusters(1<<62, 0)
+	if idx, err := verify(complete); err != nil || len(idx.Keyframes) != 20 {
+		t.Fatalf("complete cues: %d keyframes, %v; want 20 and no error", len(idx.Keyframes), err)
+	}
+
+	// A keyframe in cluster 2 without a cue gets past the sampled check but
+	// not the full one.
+	missing := manyClusters(2*4000+2000, 0)
+	if _, err := read(missing); err != nil {
+		t.Fatalf("sampled check: %v, want it to miss cluster 2", err)
+	}
+	if _, err := verify(missing); !errors.Is(err, ErrIncompleteIndex) {
+		t.Fatalf("full check err = %v, want ErrIncompleteIndex", err)
+	}
+
+	// A cue on a frame that isn't a keyframe would plan a boundary FFmpeg
+	// can't cut at.
+	if _, err := verify(manyClusters(1<<62, 2*4000+40)); !errors.Is(err, ErrIncompleteIndex) {
+		t.Fatalf("cue on a non-keyframe err = %v, want ErrIncompleteIndex", err)
+	}
+}

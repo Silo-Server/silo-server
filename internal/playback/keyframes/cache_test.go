@@ -19,7 +19,7 @@ func TestLoadCachesUntilTheFileChanges(t *testing.T) {
 	if err := os.Chtimes(path, stamp, stamp); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Load(path)
+	got, err := LoadVerified(path)
 	wantIndex(t, got, err)
 
 	// Same size and time with different bytes: still the cached index.
@@ -56,5 +56,29 @@ func TestLoadReportsOtherFilesAsUnindexed(t *testing.T) {
 	}
 	if _, err := Load(filepath.Join(t.TempDir(), "missing.mkv")); err == nil || errors.Is(err, ErrNoIndex) {
 		t.Fatalf("missing file err = %v, want a read error", err)
+	}
+}
+
+// The first Load starts the full check and doesn't use the index until it
+// passes.
+func TestLoadVerifiesInTheBackground(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "b.mkv")
+	if err := os.WriteFile(path, file(layout{}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); !errors.Is(err, ErrUnverified) || !errors.Is(err, ErrNoIndex) {
+		t.Fatalf("first Load err = %v, want ErrUnverified (an ErrNoIndex)", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		got, err := Load(path)
+		if !errors.Is(err, ErrUnverified) {
+			wantIndex(t, got, err)
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the background check didn't finish")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
