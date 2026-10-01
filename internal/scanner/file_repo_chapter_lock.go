@@ -130,6 +130,7 @@ func (r *FileRepository) TryLockChapterThumbnails(ctx context.Context, fileID in
 	}
 	originalApplicationName := conn.PgConn().ParameterStatus("application_name")
 	var acquired bool
+	var acquireFailed bool
 	closeSession := sync.OnceFunc(func() {
 		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
@@ -137,7 +138,7 @@ func (r *FileRepository) TryLockChapterThumbnails(ctx context.Context, fileID in
 		// advisory lock and restore its diagnostic name before returning it.
 		// Any failed cleanup discards the session, preventing a leaked lock.
 		var cleanupErr error
-		if pooled != nil && !conn.IsClosed() {
+		if pooled != nil && !acquireFailed && !conn.IsClosed() {
 			if acquired {
 				var unlocked bool
 				var restored string
@@ -150,7 +151,7 @@ func (r *FileRepository) TryLockChapterThumbnails(ctx context.Context, fileID in
 				_, cleanupErr = conn.Exec(closeCtx, `SELECT set_config('application_name', $1, false)`, originalApplicationName)
 			}
 		}
-		if pooled == nil || cleanupErr != nil || conn.IsClosed() {
+		if pooled == nil || acquireFailed || cleanupErr != nil || conn.IsClosed() {
 			if err := conn.Close(closeCtx); err != nil {
 				slog.WarnContext(ctx, "chapter thumbnail lock session could not be closed", "component", "chapterthumbs", "file_id", fileID, "error", err)
 			}
@@ -166,6 +167,9 @@ func (r *FileRepository) TryLockChapterThumbnails(ctx context.Context, fileID in
 	var applicationName string
 	if err := conn.QueryRow(connectCtx, `SELECT set_config('application_name', $2, false), pg_try_advisory_lock($1)`,
 		key, "silo-chapter-thumbnails:"+strconv.Itoa(fileID)).Scan(&applicationName, &acquired); err != nil {
+		// A failed result read cannot prove whether PostgreSQL took the lock.
+		// Discard its session rather than returning a possibly locked one.
+		acquireFailed = true
 		closeSession()
 		return ctx, nil, false, fmt.Errorf("take chapter lock: %w", err)
 	}
