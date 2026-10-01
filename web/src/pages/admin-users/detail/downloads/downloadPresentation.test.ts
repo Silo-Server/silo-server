@@ -77,6 +77,8 @@ describe("downloadStatusBadge", () => {
     ["downloading", false, "Downloading", "accent"],
     ["ready", false, "Waiting for device", "neutral"],
     ["ready", true, "Requested", "neutral"],
+    // Android never reports progress, so a downloading row is still a request.
+    ["downloading", true, "Requested", "neutral"],
     ["preparing", true, "Server preparing", "neutral"],
     ["failed", false, "Failed", "danger"],
     ["revoked", false, "Revoked", "warn"],
@@ -167,8 +169,8 @@ describe("groupDeviceDownloads", () => {
       label: "2 in progress",
       tone: "accent",
     });
-    // On Android a ready row is a request, so only the download is in progress.
-    expect(seriesGroupStatus(working[0]!, true).label).toBe("1 downloading");
+    // On Android neither row reports progress, so both are requests.
+    expect(seriesGroupStatus(working[0]!, true)).toEqual({ label: "Requested", tone: "neutral" });
     expect(seriesGroupStatus(mixed!, true).label).toBe("1 requested");
   });
 });

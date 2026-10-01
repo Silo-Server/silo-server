@@ -15,10 +15,15 @@ export function isAndroidPlatform(platform: string | undefined): boolean {
 /**
  * The Android app registers and deletes managed downloads but never reports
  * progress or completion, and serving the file records no transfer. A `ready`
- * row on Android therefore only says the phone asked for it: "Requested".
+ * or `downloading` row on Android therefore only says the phone asked for it.
  */
+function observedStatus(status: string, android: boolean): string {
+  return android && status === "downloading" ? "ready" : status;
+}
+
+/** On Android a ready or downloading row reads "Requested" (see observedStatus). */
 export function downloadStatusBadge(status: string, android: boolean): DownloadBadge {
-  switch (status) {
+  switch (observedStatus(status, android)) {
     case "completed":
       return { label: "On device", tone: "ok" };
     case "downloading":
@@ -161,8 +166,11 @@ export function seriesGroupSubtitle(group: DownloadGroup): string {
 export function seriesGroupStatus(group: DownloadGroup, android: boolean): DownloadBadge {
   const rows = group.movie ? [group.movie] : group.episodes;
   const counts = new Map<string, number>();
-  for (const row of rows) counts.set(row.status, (counts.get(row.status) ?? 0) + 1);
-  if (counts.size === 1) return downloadStatusBadge(rows[0]!.status, android);
+  for (const row of rows) {
+    const status = observedStatus(row.status, android);
+    counts.set(status, (counts.get(status) ?? 0) + 1);
+  }
+  if (counts.size === 1) return downloadStatusBadge([...counts.keys()][0]!, android);
   const n = (status: string) => counts.get(status) ?? 0;
   // On Android a ready row is only a request, not work in progress.
   const working = ["preparing", "downloading", ...(android ? [] : ["ready"])].filter(
