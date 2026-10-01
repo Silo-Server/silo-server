@@ -110,7 +110,10 @@ function route(url: URL): unknown {
             last_seen_at: iso(0.1),
             last_updated: iso(0.1),
             override_count: 2,
-            profiles: [],
+            profiles: [
+              { profile_id: "p2", profile_name: "Kids", override_count: 0, last_seen_at: iso(1) },
+              { profile_id: "p1", profile_name: "Main", override_count: 2, last_seen_at: iso(0.1) },
+            ],
           },
           {
             device_id: "dev-old",
@@ -295,7 +298,7 @@ describe("ActivityTab watch history", () => {
 });
 
 describe("ActivityTab devices and addresses", () => {
-  it("links saved settings to Preferences per device and hides older devices", async () => {
+  it("links saved settings to the device in Preferences and hides older devices", async () => {
     const u = userEvent.setup();
     renderTab();
     const devices = screen.getByRole("region", { name: "Devices" });
@@ -303,7 +306,7 @@ describe("ActivityTab devices and addresses", () => {
     expect(within(devices).queryByText("Old iPad")).not.toBeInTheDocument();
     expect(within(devices).getByRole("link", { name: "2 saved settings" })).toHaveAttribute(
       "href",
-      "/admin/users/7?tab=preferences&view=devices",
+      "/admin/users/7?tab=preferences&level=device.p1.dev-tv",
     );
     await u.click(within(devices).getByRole("button", { name: "Show all 2" }));
     expect(within(devices).getByText("Old iPad")).toBeInTheDocument();

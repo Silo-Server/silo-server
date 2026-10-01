@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { useAdminUserDevices } from "@/hooks/queries/admin/userActivity";
 
 import { formatLastSeen } from "../format";
+import { deviceLevelId } from "../preferences/levels";
 import { DetailCard, ListRow } from "../ui";
 import { userDetailTabSearch } from "../userDetailTabs";
 
@@ -23,6 +24,15 @@ function seenRecently(device: AdminUserDeviceRow, now = Date.now()): boolean {
   if (!at) return false;
   const time = Date.parse(at);
   return Number.isFinite(time) && now - time <= RECENT_DAYS * 86_400_000;
+}
+
+/** Preferences opened on this device for the first profile that saved settings on it. */
+function preferencesSearch(device: AdminUserDeviceRow): string {
+  const profile = device.profiles.find((row) => row.override_count > 0) ?? device.profiles[0];
+  return userDetailTabSearch(
+    "preferences",
+    profile ? { level: deviceLevelId(profile.profile_id, device.device_id) } : undefined,
+  );
 }
 
 export function DevicesCard({ userId }: { userId: number }) {
@@ -80,7 +90,7 @@ export function DevicesCard({ userId }: { userId: number }) {
                     <>
                       {" · "}
                       <Link
-                        to={{ search: userDetailTabSearch("preferences", { view: "devices" }) }}
+                        to={{ search: preferencesSearch(device) }}
                         className="hover:text-foreground underline-offset-2 hover:underline"
                       >
                         {device.override_count}{" "}

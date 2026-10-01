@@ -18,7 +18,7 @@ export function parseUserDetailTab(value: string | null | undefined): UserDetail
 
 /**
  * The search string that opens `tab`, with any extra params after it:
- * "?tab=downloads", "?tab=preferences&view=devices", and "" for a bare
+ * "?tab=downloads", "?tab=preferences&level=profile.p1", and "" for a bare
  * Overview. Overview writes no `tab` param, so its URL stays the plain one.
  */
 export function userDetailTabSearch(tab: UserDetailTab, extra?: Record<string, string>): string {

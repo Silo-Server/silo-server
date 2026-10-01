@@ -10,53 +10,46 @@ import { SETTING_KEYS } from "@/lib/settingsContract";
 import { PreferencesTab } from "./PreferencesTab";
 
 const mocks = vi.hoisted(() => ({
-  userSettings: [] as unknown[],
-  deviceSettings: [] as unknown[],
-  updateSettingMutate: vi.fn(),
-  deleteSettingMutate: vi.fn(),
-  updateDeviceMutate: vi.fn(),
-  deleteDeviceSettingMutate: vi.fn(),
-  deleteAllDeviceMutate: vi.fn(),
+  settings: [] as unknown[],
+  devices: [] as unknown[],
+  updateMutate: vi.fn(),
+  updateMutateAsync: vi.fn(),
+  deleteMutate: vi.fn(),
+  clearDeviceMutate: vi.fn(),
 }));
 
 vi.mock("@/hooks/queries/admin/users", () => ({
-  useAdminUserSettings: () => ({ data: mocks.userSettings, isLoading: false, isError: false }),
-  useAdminUserDeviceSettings: () => ({
-    data: mocks.deviceSettings,
-    isLoading: false,
-    isError: false,
-  }),
-  useAdminUserSettingCounts: () => ({
-    account: mocks.userSettings.length,
-    device: mocks.deviceSettings.length,
-    isLoading: false,
-    isError: false,
-  }),
-  useUpdateAdminUserSetting: () => ({ mutate: mocks.updateSettingMutate, isPending: false }),
-  useDeleteAdminUserSetting: () => ({ mutate: mocks.deleteSettingMutate, isPending: false }),
-  useUpdateAdminUserDeviceSetting: () => ({ mutate: mocks.updateDeviceMutate, isPending: false }),
-  useDeleteAdminUserDeviceSetting: () => ({
-    mutate: mocks.deleteDeviceSettingMutate,
+  useAdminUserSettings: () => ({ data: mocks.settings, isLoading: false, isError: false }),
+  useAdminUserCapabilities: () => ({ data: { account_devices: true } }),
+  useUpdateAdminUserSetting: () => ({
+    mutate: mocks.updateMutate,
+    mutateAsync: mocks.updateMutateAsync,
     isPending: false,
   }),
+  useDeleteAdminUserSetting: () => ({ mutate: mocks.deleteMutate, isPending: false }),
   useDeleteAllAdminUserDeviceSettingsForDevice: () => ({
-    mutate: mocks.deleteAllDeviceMutate,
+    mutate: mocks.clearDeviceMutate,
     isPending: false,
   }),
+}));
+vi.mock("@/hooks/queries/admin/userActivity", () => ({
+  useAdminUserDevices: () => ({ data: mocks.devices }),
 }));
 vi.mock("@/hooks/queries/admin/history", () => ({
   useAdminUserProfiles: () => ({
     data: [
-      { id: "profile-1", name: "Main" },
-      { id: "profile-2", name: "Kids" },
+      { id: "p1", name: "Main" },
+      { id: "p2", name: "Kids" },
     ],
   }),
 }));
 vi.mock("@/hooks/queries/admin/libraries", () => ({
-  useAdminLibraries: () => ({ data: [] }),
+  useAdminLibraries: () => ({ data: [{ id: 3, name: "TV Shows" }] }),
 }));
 
 const user = { id: 7, username: "taylor" } as AdminUser;
+const SUBTITLES = SETTING_KEYS.PLAYBACK_SUBTITLE_MODE;
+const RECAPS = SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP;
 
 class MockResizeObserver implements ResizeObserver {
   observe() {}
@@ -96,24 +89,59 @@ function renderTab(search = "?tab=preferences") {
   );
 }
 
-function card(title: string) {
-  const heading = screen.getByRole("heading", { name: title });
-  return heading.closest("section") as HTMLElement;
+function rail() {
+  return screen.getByRole("navigation", { name: "Setting levels" });
 }
+
+function levelCard(title: string) {
+  return screen.getByRole("heading", { name: title }).closest("section") as HTMLElement;
+}
+
+function railLevels(profile: string) {
+  return within(within(rail()).getByRole("group", { name: `Profile · ${profile}` }))
+    .getAllByRole("button")
+    .map((button) => button.textContent);
+}
+
+const shield = {
+  device_id: "dev-shield",
+  device_name: "Shield TV",
+  device_platform: "Android TV",
+  last_seen_at: "2026-09-25T10:00:00Z",
+  last_updated: null,
+  override_count: 1,
+  profiles: [
+    { profile_id: "p1", profile_name: "Main", override_count: 1, last_seen_at: null },
+    { profile_id: "p2", profile_name: "Kids", override_count: 0, last_seen_at: null },
+  ],
+};
 
 beforeEach(() => {
   vi.stubGlobal("ResizeObserver", MockResizeObserver);
   installPointerCaptureMocks();
-  mocks.userSettings = [];
-  mocks.deviceSettings = [];
-  for (const mock of [
-    mocks.updateSettingMutate,
-    mocks.deleteSettingMutate,
-    mocks.updateDeviceMutate,
-    mocks.deleteDeviceSettingMutate,
-    mocks.deleteAllDeviceMutate,
-  ])
-    mock.mockReset();
+  mocks.settings = [
+    { key: SUBTITLES, scope: "profile", profile_id: "p1", value: "off" },
+    { key: RECAPS, scope: "profile", profile_id: "p1", value: "true" },
+    {
+      key: RECAPS,
+      scope: "profile_device",
+      profile_id: "p1",
+      device_id: "dev-shield",
+      value: "false",
+    },
+    {
+      key: SUBTITLES,
+      scope: "profile_library",
+      profile_id: "p1",
+      library_id: 3,
+      value: "always",
+    },
+  ];
+  mocks.devices = [shield];
+  for (const mock of Object.values(mocks)) {
+    if (typeof mock === "function") mock.mockReset();
+  }
+  mocks.updateMutateAsync.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -121,213 +149,160 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("PreferencesTab account settings", () => {
-  const pins = JSON.stringify({ "1": [{ type: "collection", id: "42", label: "Pinned Horror" }] });
-
-  it("edits an object-valued setting through the JSON editor, not a select", async () => {
-    // Object-valued profile settings have no inline widget. An unguarded
-    // definition would fall through to RegistrySettingControl's select, which
-    // for a nullable object with no enum members renders a single "Unset" item
-    // whose only effect is to null the value and destroy the user's pins.
-    const u = userEvent.setup();
-    mocks.userSettings = [
-      { key: SETTING_KEYS.UI_SIDEBAR_PINS, scope: "profile", profile_id: "profile-1", value: pins },
-    ];
+describe("PreferencesTab levels", () => {
+  it("lists each profile's levels with counts, including a device with nothing set", () => {
     renderTab();
-
-    const main = card("Profile · Main");
-    expect(within(main).queryByRole("combobox")).not.toBeInTheDocument();
-    await u.click(within(main).getByRole("button", { name: "Edit JSON" }));
-
-    const editor = screen.getByRole("textbox", { name: "Raw value" });
-    expect(editor).toHaveValue(pins);
-
-    const edited = JSON.stringify({ "1": [{ type: "collection", id: "43" }] });
-    await u.clear(editor);
-    await u.type(editor, edited.replace(/[{[]/g, "$&$&"));
-    await u.click(screen.getByRole("button", { name: "Save value" }));
-
-    await waitFor(() => expect(mocks.updateSettingMutate).toHaveBeenCalled());
-    const call = mocks.updateSettingMutate.mock.calls[0]?.[0] as {
-      key: string;
-      value: string;
-      identity: { scope: string; profileId?: string };
-    };
-    expect(call.key).toBe(SETTING_KEYS.UI_SIDEBAR_PINS);
-    expect(call.identity).toMatchObject({ scope: "profile", profileId: "profile-1" });
-    expect(JSON.parse(call.value)).toEqual(JSON.parse(edited));
+    expect(railLevels("Main")).toEqual(["All devices2", "Shield TV1", "TV Shows library1"]);
+    // Kids stores nothing, but was seen on the Shield, so that device is listed.
+    expect(railLevels("Kids")).toEqual(["All devices0", "Shield TV0"]);
   });
 
-  it("still renders an inline control for a scalar setting", async () => {
+  it("opens the first profile by default and selects a level through the URL", async () => {
     const u = userEvent.setup();
-    mocks.userSettings = [
-      {
-        key: SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
-        scope: "profile",
-        profile_id: "profile-1",
-        value: "false",
-      },
-    ];
     renderTab();
+    expect(levelCard("All devices · Main")).toHaveTextContent(
+      "These apply on every device Main uses.",
+    );
 
-    expect(screen.queryByRole("button", { name: "Edit JSON" })).not.toBeInTheDocument();
-    const toggle = screen.getByRole("switch");
-    expect(toggle).not.toBeChecked();
-    await u.click(toggle);
+    const kids = within(rail()).getByRole("group", { name: "Profile · Kids" });
+    await u.click(within(kids).getByRole("button", { name: /Shield TV/ }));
+    expect(screen.getByTestId("search")).toHaveTextContent(
+      "?tab=preferences&level=device.p2.dev-shield",
+    );
+    expect(within(kids).getByRole("button", { name: /Shield TV/ })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    const card = levelCard("Shield TV · Kids");
+    expect(card).toHaveTextContent("Nothing changed on this device");
+    expect(card).toHaveTextContent("It uses Kids's settings everywhere.");
+    expect(
+      within(card).getByRole("button", { name: /Add a setting for this device/ }),
+    ).toBeVisible();
+  });
 
-    await waitFor(() => expect(mocks.updateSettingMutate).toHaveBeenCalled());
-    expect(mocks.updateSettingMutate.mock.calls[0]?.[0]).toMatchObject({
-      key: SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
-      value: "true",
+  it("says what each row replaces: the profile's value on a device, the default on a profile", () => {
+    renderTab("?tab=preferences&level=device.p1.dev-shield");
+    const device = levelCard("Shield TV · Main");
+    expect(device).toHaveTextContent(
+      "These replace Main's settings on this device only; everything else follows Main.",
+    );
+    expect(device).toHaveTextContent("Auto-skip recaps");
+    expect(device).toHaveTextContent("Replaces Main: Enabled");
+    expect(device).not.toHaveTextContent("Subtitles");
+    cleanup();
+
+    renderTab("?tab=preferences&level=profile.p1");
+    const profile = levelCard("All devices · Main");
+    expect(within(profile).getByText("Subtitles").parentElement).toHaveTextContent(
+      "Replaces app default: Auto",
+    );
+  });
+
+  it("adds a setting at the level's identity, starting from the value it replaces", async () => {
+    const u = userEvent.setup();
+    renderTab("?tab=preferences&level=device.p1.dev-shield");
+    const card = levelCard("Shield TV · Main");
+    await u.click(within(card).getByRole("button", { name: /Add a setting for this device/ }));
+
+    // Already stored on this device: listed, not selectable.
+    expect(screen.getByRole("checkbox", { name: /Auto-skip recaps/ })).toBeDisabled();
+    await u.type(screen.getByRole("searchbox", { name: "Search settings" }), "subtitles");
+    const subtitles = screen.getByRole("checkbox", { name: /^Subtitles/ });
+    expect(subtitles).toHaveTextContent("Main: Off");
+    await u.click(subtitles);
+    await u.click(screen.getByRole("button", { name: "Add setting" }));
+
+    await waitFor(() => expect(mocks.updateMutateAsync).toHaveBeenCalledTimes(1));
+    expect(mocks.updateMutateAsync).toHaveBeenCalledWith({
+      userId: 7,
+      key: SUBTITLES,
+      identity: { scope: "profile_device", profileId: "p1", deviceId: "dev-shield" },
+      value: "off",
     });
   });
 
-  it("keeps client family in profile-client grouping and mutation identity", async () => {
+  it("confirms removing a device value and deletes exactly that row", async () => {
     const u = userEvent.setup();
-    const value = JSON.stringify({ poster_size: "compact", caption: "title" });
-    mocks.userSettings = [
-      {
-        key: SETTING_KEYS.UI_CARD_PRESENTATION,
-        scope: "profile_client",
-        profile_id: "profile-1",
-        client_family: "tv",
-        value,
-      },
-      {
-        key: SETTING_KEYS.UI_CARD_PRESENTATION,
-        scope: "profile_client",
-        profile_id: "profile-1",
-        client_family: "web",
-        value,
-      },
-    ];
-    renderTab();
+    renderTab("?tab=preferences&level=device.p1.dev-shield");
+    await u.click(screen.getByRole("button", { name: "Remove Auto-skip recaps" }));
 
-    const tv = card("Profile · Main · TV apps");
-    expect(card("Profile · Main · Web apps")).toBeInTheDocument();
-    await u.click(within(tv).getByRole("button", { name: "Reset" }));
-    expect(mocks.deleteSettingMutate).toHaveBeenCalledWith({
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent("Use Main's value on Shield TV?");
+    expect(dialog).toHaveTextContent(
+      "Auto-skip recaps goes back to Main's setting, Enabled, on Shield TV. The change reaches the app the next time it syncs.",
+    );
+    await u.click(within(dialog).getByRole("button", { name: "Use Main's" }));
+    expect(mocks.deleteMutate).toHaveBeenCalledWith({
       userId: 7,
-      key: SETTING_KEYS.UI_CARD_PRESENTATION,
+      key: RECAPS,
       identity: {
-        scope: "profile_client",
-        profileId: "profile-1",
-        clientFamily: "tv",
+        scope: "profile_device",
+        profileId: "p1",
+        clientFamily: undefined,
+        deviceId: "dev-shield",
         libraryId: undefined,
         seriesId: undefined,
       },
     });
+  });
 
-    await u.click(within(tv).getByRole("button", { name: "Edit JSON" }));
-    await u.click(screen.getByRole("button", { name: "Save value" }));
-
-    await waitFor(() => expect(mocks.updateSettingMutate).toHaveBeenCalled());
-    expect(mocks.updateSettingMutate.mock.calls[0]?.[0]).toMatchObject({
-      key: SETTING_KEYS.UI_CARD_PRESENTATION,
-      identity: { scope: "profile_client", profileId: "profile-1", clientFamily: "tv" },
+  it("offers the app default when a profile value is removed", async () => {
+    const u = userEvent.setup();
+    renderTab("?tab=preferences&level=profile.p1");
+    await u.click(screen.getByRole("button", { name: "Remove Subtitles" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent("Go back to the app default?");
+    expect(dialog).toHaveTextContent("Subtitles goes back to the app default, Auto, for Main.");
+    await u.click(within(dialog).getByRole("button", { name: "Use app default" }));
+    expect(mocks.deleteMutate.mock.calls[0]?.[0]).toMatchObject({
+      key: SUBTITLES,
+      identity: { scope: "profile", profileId: "p1", deviceId: undefined },
     });
   });
 
-  it("groups by scope and narrows with search and the scope filter", async () => {
+  it("clears one profile's settings on a device", async () => {
     const u = userEvent.setup();
-    mocks.userSettings = [
-      { key: SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO, scope: "account", value: "true" },
-      {
-        key: SETTING_KEYS.UI_SIDEBAR_PINS,
-        scope: "profile",
-        profile_id: "profile-2",
-        value: "{}",
-      },
-    ];
-    renderTab();
-
-    expect(screen.getByRole("tab", { name: "Account & profiles · 2" })).toBeInTheDocument();
-    expect(card("Account-wide")).toHaveTextContent("Applies to every profile");
-    expect(card("Profile · Kids")).toBeInTheDocument();
-
-    await u.type(screen.getByRole("searchbox", { name: "Search settings" }), "sidebar_pins");
-    expect(screen.queryByRole("heading", { name: "Account-wide" })).not.toBeInTheDocument();
-    expect(card("Profile · Kids")).toBeInTheDocument();
-
-    await u.click(screen.getByRole("combobox", { name: "Scope" }));
-    await u.click(await screen.findByRole("option", { name: "Account-wide" }));
-    expect(screen.getByText("No settings match.")).toBeInTheDocument();
-
-    await u.clear(screen.getByRole("searchbox", { name: "Search settings" }));
-    expect(card("Account-wide")).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Profile · Kids" })).not.toBeInTheDocument();
-  });
-
-  it("switches to the per-device view through the URL", async () => {
-    const u = userEvent.setup();
-    renderTab();
-    await u.click(screen.getByRole("tab", { name: /Per device/ }));
-    expect(screen.getByTestId("search")).toHaveTextContent("?tab=preferences&view=devices");
-    expect(screen.getByText("No device overrides")).toBeInTheDocument();
-  });
-});
-
-describe("PreferencesTab per device", () => {
-  function deviceSetting(profileId: string, profileName: string, key: string, value = "true") {
-    return {
-      user_id: 7,
-      profile_id: profileId,
-      profile_name: profileName,
-      device_id: "a91f03c2-device",
-      device_name: "Apple TV 4K",
-      device_platform: "tvOS",
-      key,
-      value,
-      updated_at: "2026-09-27T10:00:00Z",
-    };
-  }
-
-  it("names the profile and device a reset clears", async () => {
-    const u = userEvent.setup();
-    mocks.deviceSettings = [
-      deviceSetting("profile-1", "Main", SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO),
-      deviceSetting("profile-2", "Kids", SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO),
-      deviceSetting("profile-2", "Kids", SETTING_KEYS.UI_SIDEBAR_PINS, "{}"),
-    ];
-    renderTab("?tab=preferences&view=devices");
-
-    expect(screen.getByText("1 device · 3 saved settings · 2 profiles")).toBeInTheDocument();
-    const device = card("Apple TV 4K");
-    await u.click(within(device).getByRole("tab", { name: "Kids" }));
-    await u.click(within(device).getByRole("button", { name: "Reset Kids on this device" }));
-
-    const dialog = await screen.findByRole("alertdialog");
-    expect(dialog).toHaveTextContent("Reset Kids on Apple TV 4K?");
-    expect(dialog).toHaveTextContent(
-      "Every setting Kids saved on this device is cleared. Playback falls back to account or default values.",
+    renderTab("?tab=preferences&level=device.p1.dev-shield");
+    const card = levelCard("Shield TV · Main");
+    expect(within(card).getByRole("link", { name: /Open device/ })).toHaveAttribute(
+      "href",
+      "/admin/devices/7/dev-shield",
     );
-    await u.click(within(dialog).getByRole("button", { name: "Reset" }));
-
-    expect(mocks.deleteAllDeviceMutate).toHaveBeenCalledWith({
+    await u.click(within(card).getByRole("button", { name: "Clear device settings" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent("Clear Main's settings on Shield TV?");
+    await u.click(within(dialog).getByRole("button", { name: "Clear settings" }));
+    expect(mocks.clearDeviceMutate).toHaveBeenCalledWith({
       userId: 7,
-      profileId: "profile-2",
-      deviceId: "a91f03c2-device",
-      keys: [SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO, SETTING_KEYS.UI_SIDEBAR_PINS],
+      profileId: "p1",
+      deviceId: "dev-shield",
+      keys: [RECAPS],
     });
   });
 
-  it("confirms before resetting one override", async () => {
+  it("edits a structured or unknown setting through the JSON editor", async () => {
     const u = userEvent.setup();
-    mocks.deviceSettings = [
-      deviceSetting("profile-1", "Main", SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO),
+    mocks.settings = [
+      { key: "future.setting", scope: "profile", profile_id: "p2", value: '{"a":1}' },
     ];
-    renderTab("?tab=preferences&view=devices");
-
-    const device = card("Apple TV 4K");
-    await u.click(within(device).getByRole("button", { name: "Reset" }));
-    const dialog = await screen.findByRole("alertdialog");
-    expect(dialog).toHaveTextContent("Reset this override?");
-    await u.click(within(dialog).getByRole("button", { name: "Reset override" }));
-    expect(mocks.deleteDeviceSettingMutate).toHaveBeenCalledWith({
-      userId: 7,
-      profileId: "profile-1",
-      deviceId: "a91f03c2-device",
-      key: SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
+    renderTab("?tab=preferences&level=profile.p2");
+    const card = levelCard("All devices · Kids");
+    expect(within(card).getByText("future.setting")).toBeInTheDocument();
+    expect(within(card).queryByRole("combobox")).not.toBeInTheDocument();
+    await u.click(within(card).getByRole("button", { name: "Edit JSON" }));
+    expect(screen.getByRole("textbox", { name: "Raw value" })).toHaveValue('{"a":1}');
+    await u.click(screen.getByRole("button", { name: "Save value" }));
+    expect(mocks.updateMutate.mock.calls[0]?.[0]).toMatchObject({
+      key: "future.setting",
+      identity: { scope: "profile", profileId: "p2" },
+      value: '{"a":1}',
     });
+  });
+
+  it("names the profile's value below a library", () => {
+    renderTab("?tab=preferences&level=library.p1.3");
+    const card = levelCard("TV Shows library · Main");
+    expect(card).toHaveTextContent("Replaces Main: Off");
   });
 });
