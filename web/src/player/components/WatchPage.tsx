@@ -305,10 +305,11 @@ function WatchPagePlayer({
     () => playbackVersions.find((version) => version.file_id === session.mediaFileId),
     [playbackVersions, session.mediaFileId],
   );
+  const trickplayAvailable = activePlaybackVersion?.trickplay_available === true;
   const trickplayQuery = useWatchTrickplay(
     contentId,
     session.mediaFileId ?? undefined,
-    activePlaybackVersion?.trickplay_available === true,
+    trickplayAvailable,
   );
   const refetchTrickplay = trickplayQuery.refetch;
   const lastTrickplayRefresh = useRef<{ fileId: number | null; at: number } | null>(null);
@@ -623,7 +624,7 @@ function WatchPagePlayer({
       versions={playbackVersions}
       activeFileId={session.mediaFileId}
       chapters={activeChapters}
-      trickplay={trickplayQuery.data ?? null}
+      trickplay={trickplayAvailable ? (trickplayQuery.data ?? null) : null}
       onTrickplayError={handleTrickplayError}
       onSwitchVersion={watchTogetherRoomId ? undefined : handleSwitchVersion}
       subtitleUrls={playableSubtitles}
