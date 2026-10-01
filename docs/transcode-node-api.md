@@ -28,3 +28,13 @@ transport at the requested source position.
 
 The throttle fields belong to the internal API-to-node contract. Apple and
 Android clients require no request or response changes.
+
+The start response also reports `hw_accel`, the backend retained for video
+decoding and tone mapping, and optional `encoder_hw_accel`, the actual video
+encoder backend. When a GPU can tone-map but cannot encode HEVC, `hw_accel`
+keeps that GPU backend while `encoder_hw_accel` is `none` for libx265 encoding.
+The same holds when a VAAPI device tone-maps a capped encode but offers neither
+VBR nor CBR rate control; libx264 or libx265 then encodes.
+Activity reporting uses `encoder_hw_accel`, falling back to `hw_accel` for
+older nodes that omit it. Stored recipe cards preserve both values; execution
+validates the encoder again when reconstructing a session.

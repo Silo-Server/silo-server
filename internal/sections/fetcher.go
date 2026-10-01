@@ -18,7 +18,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/overlays"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/sections/recipes"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -91,6 +90,11 @@ type Fetcher struct {
 	// Snapshots are produced out-of-band by TrendingRefresher, so the read path
 	// never calls the upstream provider.
 	TrendingSnapshots trendingSnapshotGetter
+
+	// WatchlistPromoter moves the profile's entries for titles the library
+	// now has onto the library watchlist before the watchlist section reads
+	// it. Nil skips promotion.
+	WatchlistPromoter catalog.WatchlistPromoter
 
 	candidateCacheMu sync.Mutex
 	candidateCache   *editorialCandidateCache
@@ -270,6 +274,12 @@ func (f *Fetcher) FetchOne(ctx context.Context, resolved ResolvedSection, librar
 		f.logSlowSectionFetch(resolved, libraryID, libraryIDs, result, time.Since(start), err)
 	}()
 
+	if resolved.SectionType == SectionBecauseYouWatched {
+		if reader, ok := f.RecommendationReader.(becauseWatchedSourceReader); ok {
+			result, err = f.fetchBecauseWatchedWithTitle(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter, reader)
+			return result, err
+		}
+	}
 	if resolved.SectionType == SectionContinueWatching {
 		result, err = f.fetchContinueWatchingSection(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter)
 		return result, err
@@ -433,7 +443,7 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 	// watch-progress store, so reading sections pull from that table and skip
 	// the next-up handling below.
 	if continueType == ContinueTypeReading {
-		orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, orderedItems, itemMeta, completedCache,
+		orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, catalog.DroppedSeriesSet{}, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, orderedItems, itemMeta, completedCache,
 			func(pageLimit, offset int) ([]userstore.WatchProgress, error) {
 				entries, err := f.listEbookContinueWatchingProgress(ctx, userID, profileID, pageLimit, offset)
 				if err != nil {
@@ -460,7 +470,8 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 		}, nil
 	}
 
-	orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, orderedItems, itemMeta, completedCache,
+	dropped := f.activeDroppedSeries(ctx, userID, profileID)
+	orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, dropped, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, orderedItems, itemMeta, completedCache,
 		func(pageLimit, offset int) ([]userstore.WatchProgress, error) {
 			entries, err := store.ListProgress(ctx, profileID, "in_progress", pageLimit, offset)
 			if err != nil {
@@ -511,7 +522,8 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 }
 
 // collectContinueProgressItems pages through in-progress entries from
-// listPage, drops dismissed entries, resolves the remainder to media items,
+// listPage, drops dismissed entries and episodes of dropped series, resolves
+// the remainder to media items,
 // and appends them to orderedItems until limit is reached, the source is
 // exhausted, or continueProgressMaxScanned entries have been scanned. Paging
 // past the requested limit matters because dismissal filtering and
@@ -522,6 +534,7 @@ func (f *Fetcher) collectContinueProgressItems(
 	store userstore.UserStore,
 	profileID string,
 	dismissals catalog.HomeDismissalIndex,
+	dropped catalog.DroppedSeriesSet,
 	continueType ContinueType,
 	libraryID *int,
 	libraryIDs []int,
@@ -554,6 +567,11 @@ func (f *Fetcher) collectContinueProgressItems(
 		}
 		rawProgressCount := len(progressEntries)
 		progressEntries = dismissals.FilterProgress(progressEntries)
+		if filtered, err := dropped.FilterProgress(ctx, progressEntries); err != nil {
+			slog.ErrorContext(ctx, "filtering dropped series from continue watching", "component", "sections", "profile_id", profileID, "error", err)
+		} else {
+			progressEntries = filtered
+		}
 
 		pageItems, pageMeta, err := f.fetchContinueProgressItems(ctx, store, profileID, progressEntries, continueType, libraryID, libraryIDs, filter, completedCache)
 		if err != nil {
@@ -990,6 +1008,23 @@ func (f *Fetcher) listContinueWatchingDismissals(ctx context.Context, store user
 	return catalog.NewHomeDismissalIndex(dismissals)
 }
 
+// activeDroppedSeries loads the profile's dropped series for filtering
+// Continue Watching. A failure leaves the section unfiltered, like dismissals.
+func (f *Fetcher) activeDroppedSeries(ctx context.Context, userID int, profileID string) catalog.DroppedSeriesSet {
+	dropped, err := f.progressFilter.ActiveDroppedSeries(ctx, userID, profileID)
+	if err != nil {
+		slog.ErrorContext(ctx, "listing dropped series", "component", "sections", "profile_id", profileID, "error", err)
+		return catalog.DroppedSeriesSet{}
+	}
+	return dropped
+}
+
+// FilterDroppedProgress removes in-progress entries whose series the profile
+// dropped, for surfaces that list progress outside the sections fetcher.
+func (f *Fetcher) FilterDroppedProgress(ctx context.Context, userID int, profileID string, entries []userstore.WatchProgress) ([]userstore.WatchProgress, error) {
+	return f.progressFilter.FilterDroppedProgress(ctx, userID, profileID, entries)
+}
+
 func (f *Fetcher) filterNextUpDismissals(ctx context.Context, userID int, profileID string, results []catalog.NextUpResult) []catalog.NextUpResult {
 	if len(results) == 0 || f.StoreProvider == nil || userID <= 0 || profileID == "" {
 		return results
@@ -1094,124 +1129,6 @@ func (f *Fetcher) FetchItemsByContentIDs(ctx context.Context, contentIDs []strin
 // (series title, season/episode numbers). Non-episode content IDs are silently ignored.
 func (f *Fetcher) FetchEpisodesByContentIDs(ctx context.Context, contentIDs []string, filter catalog.AccessFilter) ([]*models.MediaItem, map[string]SectionItemMeta, error) {
 	return f.fetchEpisodeTargetsByContentIDs(ctx, contentIDs, nil, nil, filter)
-}
-
-// ListOverlaySummaries batches file lookups for section cards and derives the
-// compact overlay summary per content ID.
-func (f *Fetcher) ListOverlaySummaries(ctx context.Context, contentIDs []string, filter catalog.AccessFilter) (map[string]*models.OverlaySummary, error) {
-	summaries := make(map[string]*models.OverlaySummary, len(contentIDs))
-	if len(contentIDs) == 0 {
-		return summaries, nil
-	}
-
-	rows, err := f.pool.Query(ctx, `
-		SELECT content_id, episode_id, file_path, resolution, codec_audio, audio_tracks, hdr, video_tracks,
-		       codec_video, audio_channels, container, subtitle_tracks, external_subtitles, edition_key
-		FROM media_files
-		WHERE (content_id = ANY($1) OR episode_id = ANY($1)) AND missing_since IS NULL
-		ORDER BY content_id ASC, episode_id ASC, id ASC
-	`, contentIDs)
-	if err != nil {
-		return nil, fmt.Errorf("querying overlay summaries: %w", err)
-	}
-	defer rows.Close()
-
-	requested := make(map[string]struct{}, len(contentIDs))
-	for _, contentID := range contentIDs {
-		requested[contentID] = struct{}{}
-	}
-
-	grouped := make(map[string][]*models.MediaFile, len(contentIDs))
-	for rows.Next() {
-		var contentID string
-		var episodeID *string
-		var filePath string
-		var resolution *string
-		var codecAudio *string
-		var audioTracksJSON []byte
-		var hdr bool
-		var videoTracksJSON []byte
-		var codecVideo *string
-		var audioChannels *int
-		var container *string
-		var subtitleTracksJSON []byte
-		var externalSubtitlesJSON []byte
-		var editionKey *string
-
-		if err := rows.Scan(
-			&contentID, &episodeID, &filePath, &resolution, &codecAudio, &audioTracksJSON, &hdr, &videoTracksJSON,
-			&codecVideo, &audioChannels, &container, &subtitleTracksJSON, &externalSubtitlesJSON, &editionKey,
-		); err != nil {
-			return nil, fmt.Errorf("scanning overlay summary row: %w", err)
-		}
-
-		file := &models.MediaFile{
-			ContentID: contentID,
-			FilePath:  filePath,
-			HDR:       hdr,
-		}
-		if episodeID != nil {
-			file.EpisodeID = *episodeID
-		}
-		if resolution != nil {
-			file.Resolution = *resolution
-		}
-		if codecAudio != nil {
-			file.CodecAudio = *codecAudio
-		}
-		if codecVideo != nil {
-			file.CodecVideo = *codecVideo
-		}
-		if audioChannels != nil {
-			file.AudioChannels = *audioChannels
-		}
-		if container != nil {
-			file.Container = *container
-		}
-		if editionKey != nil {
-			file.EditionKey = *editionKey
-		}
-		if len(audioTracksJSON) > 0 {
-			if err := json.Unmarshal(audioTracksJSON, &file.AudioTracks); err != nil {
-				return nil, fmt.Errorf("unmarshaling overlay audio tracks: %w", err)
-			}
-		}
-		if len(videoTracksJSON) > 0 {
-			if err := json.Unmarshal(videoTracksJSON, &file.VideoTracks); err != nil {
-				return nil, fmt.Errorf("unmarshaling overlay video tracks: %w", err)
-			}
-		}
-		if len(subtitleTracksJSON) > 0 {
-			if err := json.Unmarshal(subtitleTracksJSON, &file.SubtitleTracks); err != nil {
-				return nil, fmt.Errorf("unmarshaling overlay subtitle tracks: %w", err)
-			}
-		}
-		if len(externalSubtitlesJSON) > 0 {
-			if err := json.Unmarshal(externalSubtitlesJSON, &file.ExternalSubtitles); err != nil {
-				return nil, fmt.Errorf("unmarshaling overlay external subtitles: %w", err)
-			}
-		}
-
-		groupKey := contentID
-		if episodeID != nil {
-			if _, ok := requested[*episodeID]; ok {
-				groupKey = *episodeID
-			}
-		}
-		grouped[groupKey] = append(grouped[groupKey], file)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating overlay summary rows: %w", err)
-	}
-
-	for contentID, files := range grouped {
-		files = catalog.FilterMediaFilesByAccess(files, filter)
-		if summary := overlays.BuildSummary(files); summary != nil {
-			summaries[contentID] = summary
-		}
-	}
-
-	return summaries, nil
 }
 
 // userAgnosticSectionFetch is the signature shared by every fetch helper whose
@@ -1569,6 +1486,11 @@ func (f *Fetcher) fetchPersonalListSection(ctx context.Context, s ResolvedSectio
 	var listed []catalog.PersonalListEntry
 	switch s.SectionType {
 	case SectionWatchlist:
+		if f.WatchlistPromoter != nil {
+			promoteAccess := filter
+			promoteAccess.UserID, promoteAccess.ProfileID = userID, profileID
+			f.WatchlistPromoter.PromoteWatchlist(ctx, promoteAccess)
+		}
 		entries, err := store.ListWatchlist(ctx, profileID, personalListFetchLimit, 0)
 		if err != nil {
 			return nil, 0, fmt.Errorf("listing watchlist: %w", err)
@@ -2948,9 +2870,17 @@ func itemColumnsList(alias string) []string {
 		"studios", "networks", "countries", "release_date::text", "first_air_date", "last_air_date",
 		"show_status",
 		"matched_at", "status", "created_at", "updated_at",
+		"advisory_age", "advisory_source",
 	}
 	prefixed := make([]string, len(cols))
 	for i, c := range cols {
+		if c == "advisory_source" {
+			// Nullable in the table but a plain string on MediaItem. Aliased
+			// back to its own name so itemColumnsLatestMangaPoster can still
+			// match columns by name and the scan order is unchanged.
+			prefixed[i] = "COALESCE(" + alias + ".advisory_source, '') AS advisory_source"
+			continue
+		}
 		prefixed[i] = alias + "." + c
 	}
 	return prefixed
@@ -3017,6 +2947,7 @@ func scanMediaItems(rows pgx.Rows) ([]*models.MediaItem, error) {
 			&item.Studios, &item.Networks, &item.Countries, &item.ReleaseDate, &item.FirstAirDate, &item.LastAirDate,
 			&item.ShowStatus,
 			&item.MatchedAt, &item.Status, &item.CreatedAt, &item.UpdatedAt,
+			&item.AdvisoryAge, &item.AdvisorySource,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning item: %w", err)

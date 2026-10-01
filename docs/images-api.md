@@ -1,7 +1,12 @@
 # Images API
 
-Silo caches artwork at a fixed ladder of widths and returns a presigned URL for
-one of them. By default the server picks the width from context — card rows get
+> **API lifecycle:** this documents the stable `/api/v2` native contract, which locks with Silo
+> 1.0. The frozen alpha `/api/v1` surface carries the same artwork ladder through the pre-1.0
+> bridge window and is then retired. See
+> [the native API contract](architecture/api-contract.md).
+
+Silo caches artwork at a fixed ladder of widths and returns a URL for one of them.
+The URL is either a direct object-storage URL or a signed server route. By default the server picks the width from context — card rows get
 narrow images, hero areas get wide ones. A client that knows better can ask for a
 specific size instead.
 
@@ -13,13 +18,14 @@ Add `image_size` to a request. It applies to the whole response: every artwork
 URL in the body is resolved at that size, so a screen never mixes resolutions.
 
 ```http
-GET /api/v1/catalog?image_size=large
-GET /api/v1/catalog/items/{id}?image_size=small
-GET /api/v1/home/sections?image_size=medium
+GET /api/v2/catalog?image_size=large
+GET /api/v2/catalog/items/{id}?image_size=small
+GET /api/v2/home/sections?image_size=medium
 ```
 
-Accepted values are `small`, `medium`, `large`, and `original`. Anything else is
-`400 invalid_image_size` — a typo is a client bug, and quietly serving a default
+Accepted values are `small`, `medium`, `large`, and `original`. The enum is part of
+the contract, so anything else is rejected by request validation as
+`422 validation_failed` — a typo is a client bug, and quietly serving a default
 would hide it behind artwork that is merely the wrong resolution.
 
 Omitting the parameter keeps the per-context defaults exactly as they were, so no
@@ -31,7 +37,7 @@ The parameter is accepted on:
 - item detail and watch detail
 - seasons, a single season, and episodes
 - home and library sections, including single-section items
-- the personal lists: `/favorites`, `/watchlist`, and `/history`
+- the personal lists: `/api/v2/favorites`, `/api/v2/watchlist`, and `/api/v2/history`
 
 Other surfaces ignore it.
 
@@ -39,9 +45,9 @@ Within item detail this covers cast and crew headshots too: they follow the
 `profile` ladder, which has no wide rung, so `large` and `medium` land on the
 same 500px image.
 
-The `/people` endpoints do **not** take the parameter — their headshots are
+The `/api/v2/catalog/people` operations do **not** take the parameter — their headshots are
 always the 500px variant. Browsing a person's filmography does honor it, because
-that is `/api/v1/catalog?source=person` rather than a person endpoint.
+that is `GET /api/v2/catalog?source=person` rather than a person operation.
 
 On the personal lists the per-slot defaults are asymmetric — a 500px poster
 beside a 300px backdrop — so an explicit size changes both, not just the one that
@@ -71,15 +77,35 @@ closest image it has, so the widths above are indicative rather than exact.
 Do not hardcode this table. Read it from the capability endpoint: the ladder is
 allowed to change, and the endpoint is generated from it.
 
+The capability response also includes `storage_backend` (`local` or `s3`) and
+`delivery` (`server` or `direct`). Local artwork URLs are root-relative signed
+routes such as `/api/v2/artwork/{key}`. They return `404` for an invalid or
+expired signature, `503` for a storage failure, support `HEAD`, `Range`, and
+`ETag`, and enqueue repair for a missing revisioned cache object.
+
+Clients can cache image bytes by URL. A revisioned artwork URL, whose filename
+carries a content revision such as `w500.<revision>.webp`, stays the same for a
+UTC day on every server and is valid for at least the configured lifetime after
+it is handed out. S3 presigned URLs follow the same rule. Cloudflare token URLs
+change every quarter of the token lifetime and are valid for at least three
+quarters of it. Other artwork URLs change every 15 minutes or sooner. The path
+identifies the bytes and the query only authorizes, so a client may key its
+cache of revisioned artwork by path to keep entries across the daily change.
+
 ## Capability endpoint
 
 ```http
-GET /api/v1/images/capability
+GET /api/v2/images/capabilities
 ```
+
+`getImageCapabilities` returns an `ImageCapabilities` document. It supports
+`If-None-Match` and answers `304` when the caller's copy is current.
 
 ```json
 {
-  "schema_version": 1,
+  "revision": "1",
+  "state": "available",
+  "allowed": true,
   "param": "image_size",
   "season_list_artwork_param": "include_artwork",
   "sizes": ["small", "medium", "large", "original"],
@@ -94,8 +120,8 @@ GET /api/v1/images/capability
 }
 ```
 
-A `404` here means the server predates `image_size`. Keep using the server's
-defaults rather than sending a parameter it will ignore.
+Read `state` before sending `image_size`: anything other than `available` means the
+server will not honor the parameter, so keep using its per-context defaults.
 
 ## Publication and fallback
 
@@ -135,14 +161,16 @@ availability through network probes.
 
 ## Season selectors without artwork
 
-`GET /api/v1/catalog/series/{id}/seasons?include_artwork=false` skips poster URL
-preparation and omits poster thumbhashes. Season metadata, counts, and user data
-are unchanged. The default is `true`. Invalid boolean values return
-`400 invalid_include_artwork`.
+`GET /api/v2/catalog/series/{id}/seasons?include_artwork=false` (`listSeriesSeasons`)
+skips poster URL preparation and omits `poster_url` and `poster_thumbhash` from each
+season. Season metadata, counts, and user data are unchanged. The default is `true`.
+Invalid boolean values return `422 validation_failed`.
 
 The images capability response advertises this option as
 `"season_list_artwork_param": "include_artwork"`. tvOS uses it for text-only
-season selectors; clients that render season posters should keep the default.
+season selectors; clients that render season posters should keep the default. See
+the [season-list contract](catalog-api.md#season-list-artwork) for the full
+response semantics.
 
 ## Jellyfin compatibility
 
@@ -155,3 +183,13 @@ The shared cached-artwork resolver applies the same persisted availability
 selection to Jellyfin image URL resolution. Its protocol parameters and image
 response shapes are unchanged; image fetching remains independent of catalog
 metadata responses.
+
+## Bridge note
+
+The frozen alpha surface exposes the same ladder at `/api/v1/catalog`,
+`/api/v1/home/sections`, and the other v1 reads, and its capability document at
+`GET /api/v1/images/capability` (singular, with a numeric `schema_version` instead of
+`revision`/`state`). It rejects a bad size with `400 invalid_image_size` and a bad
+`include_artwork` with `400 invalid_include_artwork`. Those paths are frozen, and Silo
+1.0 answers the whole `/api/v1` namespace with `410 Gone` and the
+`client_upgrade_required` problem code. Build against `/api/v2`.

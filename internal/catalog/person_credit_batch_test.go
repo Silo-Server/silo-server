@@ -112,7 +112,7 @@ func TestPersonCreditPhotoBatchPreservesCredits(t *testing.T) {
 						if hash == "-" {
 							hash = ""
 						}
-						want[i] = PersonCredit{PersonID: person.ID, Name: person.Name, Kind: person.Kind, Character: person.Character, SortOrder: person.SortOrder, TmdbID: person.TmdbID, ImdbID: person.ImdbID, TvdbID: person.TvdbID, PlexGUID: person.PlexGUID, PhotoURL: photo, PhotoThumbhash: hash}
+						want[i] = PersonCredit{PersonID: person.ID, Name: person.Name, Kind: person.Kind, Character: person.Character, SortOrder: person.SortOrder, TmdbID: person.TmdbID, ImdbID: person.ImdbID, TvdbID: person.TvdbID, PlexGUID: person.PlexGUID, PhotoURL: photo, PhotoThumbhash: hash, PhotoPath: person.PhotoPath}
 					}
 					if !reflect.DeepEqual(got, want) {
 						t.Fatalf("credits = %#v, want %#v", got, want)

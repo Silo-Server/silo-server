@@ -2,10 +2,10 @@ package historyimport
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"log/slog"
 
-	"github.com/google/uuid"
+	"github.com/Silo-Server/silo-server/internal/netguard"
 )
 
 // AuthenticatePlex exchanges Plex username/password for an auth token via plex.tv.
@@ -39,6 +39,8 @@ func (s *Service) DiscoverExternalUsers(ctx context.Context, sourceID int) ([]Ex
 	if token == "" {
 		return nil, ErrNoAdminToken
 	}
+	// An admin configured this server, so it may be on the local network.
+	ctx = netguard.WithPrivateAccess(ctx)
 
 	switch source.SourceType {
 	case SourceTypeEmby:
@@ -54,24 +56,6 @@ func (s *Service) DiscoverExternalUsers(ctx context.Context, sourceID int) ([]Ex
 
 // CreateMapping persists a new (source user → Silo user + profile) mapping.
 func (s *Service) CreateMapping(ctx context.Context, input CreateMappingInput) (*UserMapping, error) {
-	if input.ExternalUserID == "" {
-		return nil, fmt.Errorf("external_user_id is required")
-	}
-	if input.SiloUserID == 0 {
-		return nil, fmt.Errorf("silo_user_id is required")
-	}
-	if input.SiloProfileID == "" {
-		return nil, fmt.Errorf("silo_profile_id is required")
-	}
-
-	exists, err := s.repo.ProfileExistsForUser(ctx, input.SiloUserID, input.SiloProfileID)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, ErrProfileNotFound
-	}
-
 	return s.repo.CreateMapping(ctx, input)
 }
 
@@ -82,15 +66,6 @@ func (s *Service) ListMappings(ctx context.Context, sourceID int) ([]UserMapping
 
 // UpdateMapping changes the Silo target of an existing mapping.
 func (s *Service) UpdateMapping(ctx context.Context, id int, input UpdateMappingInput) (*UserMapping, error) {
-	if input.SiloUserID != nil && input.SiloProfileID != nil {
-		exists, err := s.repo.ProfileExistsForUser(ctx, *input.SiloUserID, *input.SiloProfileID)
-		if err != nil {
-			return nil, err
-		}
-		if !exists {
-			return nil, ErrProfileNotFound
-		}
-	}
 	return s.repo.UpdateMapping(ctx, id, input)
 }
 
@@ -104,109 +79,54 @@ func (s *Service) GetMapping(ctx context.Context, id int) (*UserMapping, error) 
 	return s.repo.GetMappingByID(ctx, id)
 }
 
-// CreateAdminRun triggers an import for a single mapping using the source's admin token.
+const BulkRunAccepted = "accepted"
+
+// CreateAdminRun persists dispatch intent before notifying the local runner.
 func (s *Service) CreateAdminRun(ctx context.Context, mappingID int) (*Run, error) {
-	mapping, err := s.repo.GetMappingByID(ctx, mappingID)
+	run, err := s.repo.EnqueueAdminRun(ctx, mappingID)
 	if err != nil {
 		return nil, err
 	}
-
-	// Prevent duplicate active runs for the same mapping.
-	active, err := s.repo.HasActiveRunForMapping(ctx, mappingID)
-	if err != nil {
-		return nil, err
-	}
-	if active {
-		return nil, ErrActiveRunExists
-	}
-
-	source, token, err := s.repo.GetSourceWithAdminToken(ctx, mapping.SourceID)
-	if err != nil {
-		return nil, err
-	}
-	if token == "" {
-		return nil, ErrNoAdminToken
-	}
-	if !source.Enabled {
-		return nil, fmt.Errorf("source is disabled")
-	}
-
-	provider, err := s.buildAdminProvider(source, token, mapping.ExternalUserID)
-	if err != nil {
-		return nil, err
-	}
-
-	run := Run{
-		ID:               uuid.NewString(),
-		UserID:           mapping.SiloUserID,
-		ProfileID:        mapping.SiloProfileID,
-		SourceType:       source.SourceType,
-		ConnectionMode:   ConnectionModeAdminToken,
-		Status:           RunStatusQueued,
-		MappingID:        &mappingID,
-		Warnings:         []string{},
-		UnmatchedSamples: []UnmatchedSample{},
-	}
-	created, err := s.repo.CreateRun(ctx, run)
-	if err != nil {
-		return nil, err
-	}
-	s.notifyRun(created)
-
-	go s.executeRun(created, provider)
-	return created, nil
+	s.notifyRun(run)
+	s.wakeImportQueue()
+	return run, nil
 }
 
-// BulkCreateAdminRuns triggers imports for all eligible mappings on a source.
-// Mappings that already have an active run are skipped. Errors on individual
-// mappings are logged but do not abort the bulk operation.
+// BulkCreateAdminRuns reports every mapping in stable source order. The size
+// check precedes all admissions; active mappings are outcomes, not omissions.
 func (s *Service) BulkCreateAdminRuns(ctx context.Context, sourceID int) (*BulkRunResult, error) {
-	source, token, err := s.repo.GetSourceWithAdminToken(ctx, sourceID)
+	ids, err := s.repo.bulkMappingIDs(ctx, sourceID)
 	if err != nil {
 		return nil, err
 	}
-	if token == "" {
-		return nil, ErrNoAdminToken
-	}
-	if !source.Enabled {
-		return nil, fmt.Errorf("source is disabled")
-	}
-
-	mappings, err := s.repo.ListMappingsForBulkRun(ctx, sourceID)
-	if err != nil {
+	if _, err = s.repo.GetSourceByID(ctx, sourceID); err != nil {
 		return nil, err
 	}
-
-	result := &BulkRunResult{}
-	for _, mapping := range mappings {
-		mappingID := mapping.ID
-		provider, err := s.buildAdminProvider(source, token, mapping.ExternalUserID)
-		if err != nil {
-			slog.ErrorContext(ctx, "history import bulk: failed to build provider", "component", "historyimport", "mapping_id", mappingID, "error", err)
+	result := &BulkRunResult{Runs: []*Run{}, Outcomes: []BulkRunOutcome{}}
+	for _, id := range ids {
+		outcome := BulkRunOutcome{MappingID: id}
+		run, err := s.CreateAdminRun(ctx, id)
+		switch {
+		case err == nil:
+			outcome.Status = BulkRunAccepted
+			outcome.Run = run
+			result.Runs = append(result.Runs, run)
+		case errors.Is(err, ErrActiveRunExists):
+			outcome.Status = "active"
+			result.Skipped++
+			outcome.Run, _ = s.repo.activeRunForMapping(ctx, id)
+		default:
+			outcome.Status = "failed"
+			outcome.Error = "Import could not be queued. Review this mapping and source before starting a new run."
 			result.Errors++
-			continue
+			if errors.Is(err, ErrNoAdminToken) {
+				outcome.Error = "Source has no admin token configured."
+			}
+			if errors.Is(err, ErrMappingNotFound) {
+				outcome.Error = "Mapping no longer exists."
+			}
 		}
-
-		run := Run{
-			ID:               uuid.NewString(),
-			UserID:           mapping.SiloUserID,
-			ProfileID:        mapping.SiloProfileID,
-			SourceType:       source.SourceType,
-			ConnectionMode:   ConnectionModeAdminToken,
-			Status:           RunStatusQueued,
-			MappingID:        &mappingID,
-			Warnings:         []string{},
-			UnmatchedSamples: []UnmatchedSample{},
-		}
-		created, err := s.repo.CreateRun(ctx, run)
-		if err != nil {
-			slog.ErrorContext(ctx, "history import bulk: failed to create run", "component", "historyimport", "mapping_id", mappingID, "error", err)
-			result.Errors++
-			continue
-		}
-		s.notifyRun(created)
-		go s.executeRun(created, provider)
-		result.Runs = append(result.Runs, created)
+		result.Outcomes = append(result.Outcomes, outcome)
 	}
 	return result, nil
 }
@@ -232,7 +152,7 @@ func (s *Service) GetAdminRun(ctx context.Context, runID string) (*Run, error) {
 	return s.repo.GetRunByID(ctx, runID)
 }
 
-// CancelAdminRun marks a queued or running run as failed and signals any in-process goroutine.
+// CancelAdminRun persists cancellation and signals any in-process worker.
 func (s *Service) CancelAdminRun(ctx context.Context, runID string) error {
 	if err := s.repo.CancelRunIfActive(ctx, runID); err != nil {
 		return err

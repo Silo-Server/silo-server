@@ -1,0 +1,12 @@
+package apiv2
+
+func adminAPIKeyFixtureCases() []fixtureCase {
+	return []fixtureCase{
+		{name: "admin_api_key_canonical", operationID: "getAdminAPIKey", scenario: "Canonical API key metadata has a strong validator and contains no reusable credential.", method: "GET", path: "/api/v2/admin/api-keys/7", headers: actingRequestAdmin, status: 200, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/AdminAPIKey"},
+		{name: "admin_api_key_capabilities", operationID: "getAdminAPIKeyCapabilities", scenario: "An acting admin discovers guarded configuration, scopes, and supported rate tiers.", method: "GET", path: "/api/v2/admin/api-keys/capabilities", headers: actingRequestAdmin, status: 200, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminAPIKeyCapabilitiesOutputBody"},
+		{name: "admin_api_key_created", operationID: "createAdminAPIKey", scenario: "A synthetic creation response discloses the credential once and identifies the canonical metadata URL.", method: "POST", path: "/api/v2/admin/api-keys", body: `{"label":"Automation"}`, headers: actingRequestAdmin, status: 201, assertHeaders: []string{"Content-Type", "Cache-Control", "Location"}, schema: "#/components/schemas/AdminAPIKeyCreated"},
+		{name: "admin_api_key_precondition_required", operationID: "updateAdminAPIKeyTier", scenario: "An editor must supply its captured configuration tag before changing a key's tier.", method: "PUT", path: "/api/v2/admin/api-keys/7/tier", body: `{"rate_tier":"elevated"}`, headers: actingRequestAdmin, status: 428, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/Problem"},
+		{name: "admin_api_key_deleted", operationID: "deleteAdminAPIKey", scenario: "Explicit wildcard deletion succeeds without a body or validator.", method: "DELETE", path: "/api/v2/admin/api-keys/7", headers: with(actingRequestAdmin, "If-Match", "*"), status: 204, assertHeaders: []string{"Cache-Control"}},
+		{name: "admin_api_key_list", operationID: "listAdminAPIKeys", scenario: "A bounded metadata page carries usage decorations and an opaque continuation cursor without full credentials.", method: "GET", path: "/api/v2/admin/api-keys?limit=1", headers: actingRequestAdmin, status: 200, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/CollectionAdminAPIKeyListItem"},
+	}
+}

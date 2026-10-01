@@ -8,11 +8,32 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
+
+func TestSessionManager_CapturesStartNetwork(t *testing.T) {
+	sm := playback.NewSessionManager(0, 0)
+	ctx := clientip.SetContext(t.Context(), "192.168.1.8")
+	ctx = netaccess.WithPath(ctx, netaccess.Path{Provider: "tailscale"})
+	session, err := sm.StartSessionWithContext(ctx, 1, "profile", 42, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.ClientIP != "192.168.1.8" || session.RoutingNetworkProvider == nil || *session.RoutingNetworkProvider != "tailscale" || session.StreamLocation != "remote" {
+		t.Fatalf("start network = (%q, %v)", session.ClientIP, session.RoutingNetworkProvider)
+	}
+	if err := sm.SetStreamLocation(session.ID, "local"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := sm.GetSession(session.ID); err != nil || got.StreamLocation != "local" {
+		t.Fatalf("frozen stream location = %v, %v", got, err)
+	}
+}
 
 func TestSessionManager_StartStop(t *testing.T) {
 	sm := playback.NewSessionManager(5, 2)
@@ -74,6 +95,28 @@ func TestSessionManager_StartStop(t *testing.T) {
 	// ActiveCount should be 0.
 	if sm.ActiveCount(1) != 0 {
 		t.Errorf("ActiveCount after stop = %d, want 0", sm.ActiveCount(1))
+	}
+}
+
+func TestSessionManagerOutputFormatFollowsReplacement(t *testing.T) {
+	sm := playback.NewSessionManager(5, 2)
+	session, err := sm.StartSession(1, "profile", 100, playback.PlayRemux, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sm.SetOutputFormat(session.ID, "fmp4", "hls"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := sm.GetSession(session.ID)
+	if err != nil || got.OutputContainer != "fmp4" || got.OutputProtocol != "hls" {
+		t.Fatal("transport output format was not recorded")
+	}
+	if err := sm.UpdateStreamState(session.ID, playback.SessionStreamState{PlayMethod: playback.PlayDirect, TranscodeRouteSet: true}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = sm.GetSession(session.ID)
+	if got.OutputContainer != "" || got.OutputProtocol != "" {
+		t.Fatal("a replacement retained the previous container")
 	}
 }
 
@@ -766,17 +809,18 @@ func TestSessionReplacementAppliesAndRollsBackAtomically(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := manager.UpdateStreamState(session.ID, playback.SessionStreamState{
-		PlayMethod:           playback.PlayDirect,
-		BasePlayMethod:       playback.PlayDirect,
-		AudioTrackIndex:      0,
-		TranscodeRouteSet:    true,
-		SubtitleTrackIndex:   -1,
-		StreamBitrateKbps:    8_000,
-		SourceAudioChannels:  6,
-		TranscodeHWAccel:     "qsv",
-		ToneMapMode:          tonemap.ModeHardware,
-		TranscodeNodeURL:     "http://old-node",
-		TranscodeTransportID: "old-transport",
+		PlayMethod:             playback.PlayDirect,
+		BasePlayMethod:         playback.PlayDirect,
+		AudioTrackIndex:        0,
+		TranscodeRouteSet:      true,
+		SubtitleTrackIndex:     -1,
+		StreamBitrateKbps:      8_000,
+		SourceAudioChannels:    6,
+		TranscodeHWAccel:       "qsv",
+		ToneMapMode:            tonemap.ModeHardware,
+		TranscodeNodeURL:       "http://old-node",
+		TranscodeTransportID:   "old-transport",
+		RoutingNetworkProvider: new("tailscale"),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -784,18 +828,19 @@ func TestSessionReplacementAppliesAndRollsBackAtomically(t *testing.T) {
 	rollback, err := manager.ApplyReplacement(session.ID, playback.SessionReplacement{
 		EffectiveMediaFileID: 84,
 		StreamState: playback.SessionStreamState{
-			PlayMethod:           playback.PlayTranscode,
-			BasePlayMethod:       playback.PlayTranscode,
-			AudioTrackIndex:      2,
-			TranscodeAudio:       true,
-			TranscodeRouteSet:    true,
-			SubtitleTrackIndex:   1,
-			StreamBitrateKbps:    3_500,
-			SourceAudioChannels:  8,
-			TranscodeHWAccel:     "none",
-			ToneMapMode:          tonemap.ModeSoftware,
-			TranscodeNodeURL:     "http://new-node",
-			TranscodeTransportID: "new-transport",
+			PlayMethod:             playback.PlayTranscode,
+			BasePlayMethod:         playback.PlayTranscode,
+			AudioTrackIndex:        2,
+			TranscodeAudio:         true,
+			TranscodeRouteSet:      true,
+			SubtitleTrackIndex:     1,
+			StreamBitrateKbps:      3_500,
+			SourceAudioChannels:    8,
+			TranscodeHWAccel:       "none",
+			ToneMapMode:            tonemap.ModeSoftware,
+			TranscodeNodeURL:       "http://new-node",
+			TranscodeTransportID:   "new-transport",
+			RoutingNetworkProvider: new(""),
 		},
 		PositionSeconds: &position,
 		IsPaused:        true,
@@ -808,7 +853,7 @@ func TestSessionReplacementAppliesAndRollsBackAtomically(t *testing.T) {
 		t.Fatal(err)
 	}
 	if replaced.MediaFileID != 84 || replaced.PlayMethod != playback.PlayTranscode || replaced.AudioTrackIndex != 2 ||
-		replaced.SourceAudioChannels != 8 ||
+		replaced.SourceAudioChannels != 8 || replaced.RoutingNetworkProvider == nil || *replaced.RoutingNetworkProvider != "" ||
 		replaced.TranscodeNodeURL != "http://new-node" || replaced.TranscodeHWAccel != "none" || replaced.ToneMapMode != "software" || replaced.Position != position || !replaced.IsPaused {
 		t.Fatalf("replacement session = %#v", replaced)
 	}
@@ -820,7 +865,7 @@ func TestSessionReplacementAppliesAndRollsBackAtomically(t *testing.T) {
 		t.Fatal(err)
 	}
 	if restored.MediaFileID != 42 || restored.PlayMethod != playback.PlayDirect || restored.AudioTrackIndex != 0 ||
-		restored.SourceAudioChannels != 6 ||
+		restored.SourceAudioChannels != 6 || restored.RoutingNetworkProvider == nil || *restored.RoutingNetworkProvider != "tailscale" ||
 		restored.TranscodeNodeURL != "http://old-node" || restored.TranscodeTransportID != "old-transport" ||
 		restored.TranscodeHWAccel != "qsv" || restored.ToneMapMode != "hardware" ||
 		restored.Position != 0 || restored.IsPaused {

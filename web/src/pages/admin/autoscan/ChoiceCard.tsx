@@ -15,6 +15,8 @@ export function ChoiceCard({
   badge,
   selected,
   onSelect,
+  disabled,
+  describedBy,
 }: {
   title: string;
   description?: string;
@@ -23,15 +25,25 @@ export function ChoiceCard({
   badge?: string;
   selected: boolean;
   onSelect: () => void;
+  /**
+   * Unavailable: stays focusable, so a screen reader still reaches it and the
+   * reason `describedBy` names, but does nothing.
+   */
+  disabled?: boolean;
+  describedBy?: string;
 }) {
   return (
     <button
       type="button"
       aria-pressed={selected}
-      onClick={onSelect}
+      aria-disabled={disabled || undefined}
+      aria-describedby={describedBy}
+      onClick={disabled ? undefined : onSelect}
       className={cn(
-        "rounded-lg border p-3 text-left transition-colors",
-        selected ? "border-primary bg-accent" : "border-border hover:bg-accent/50",
+        "rounded-lg border p-3 text-left transition-colors aria-disabled:cursor-not-allowed aria-disabled:opacity-60",
+        selected
+          ? "border-primary bg-accent"
+          : "border-border [&:not([aria-disabled])]:hover:bg-accent/50",
       )}
     >
       <span className="flex flex-wrap items-center gap-1.5 text-sm font-medium">

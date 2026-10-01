@@ -1,0 +1,43 @@
+{
+  "revision": "1b7ba6e0dc9e801bc0d927cd7f3880cf5a232d1e970d18d1e9360fb680d440e4",
+  "state": "available",
+  "allowed": true,
+  "season_list_artwork_param": "include_artwork",
+  "param": "image_size",
+  "sizes": [
+    "small",
+    "medium",
+    "large",
+    "original"
+  ],
+  "widths": {
+    "backdrop": {
+      "small": 300,
+      "medium": 1920,
+      "large": 1920
+    },
+    "logo": {
+      "small": 500,
+      "medium": 500,
+      "large": 1280
+    },
+    "poster": {
+      "small": 300,
+      "medium": 500,
+      "large": 780
+    },
+    "profile": {
+      "small": 300,
+      "medium": 500,
+      "large": 500
+    },
+    "still": {
+      "small": 300,
+      "medium": 500,
+      "large": 780
+    }
+  },
+  "original_max_width_px": 1920,
+  "storage_backend": "local",
+  "delivery": "server"
+}

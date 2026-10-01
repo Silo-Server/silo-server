@@ -20,6 +20,7 @@ const (
 // the same show; RecentTVQuery.UniqueTargets can collapse them for keyed rows.
 type RecentTVTarget struct {
 	ContentID string
+	EventID   string
 	Type      string
 	AddedAt   time.Time
 	// PlayContentID is a profile-INDEPENDENT anchor hint: the episode this
@@ -44,6 +45,9 @@ type RecentTVQuery struct {
 	Offset        int
 	SkipTotal     bool
 	UniqueTargets bool // collapse repeated target content IDs, keeping the newest event
+	CursorPaging  bool
+	After         *QueryCursor
+	Seek          *int // explicit zero-based jump; ordinary continuation never uses OFFSET
 }
 
 // RecentTVRepository resolves scan-batched episode availability into episode
@@ -167,6 +171,29 @@ func (r *RecentTVRepository) List(ctx context.Context, q RecentTVQuery) ([]Recen
 		q.Offset = 0
 	}
 
+	if q.CursorPaging {
+		q.Offset = 0
+		if q.Seek != nil {
+			if *q.Seek < 0 || *q.Seek > 10000000 {
+				return nil, 0, false, fmt.Errorf("jump index must be between 0 and 10000000")
+			}
+			q.After = nil
+			if *q.Seek > 0 {
+				boundaryQuery := q
+				boundaryQuery.CursorPaging, boundaryQuery.Seek = false, nil
+				boundaryQuery.Limit, boundaryQuery.Offset = 1, *q.Seek-1
+				boundary, total, _, err := r.List(ctx, boundaryQuery)
+				if err != nil {
+					return nil, 0, false, err
+				}
+				if len(boundary) == 0 {
+					return []RecentTVTarget{}, total, false, nil
+				}
+				q.After = recentTVCursor(boundary[0], *q.Seek)
+			}
+		}
+	}
+
 	args := []any{sortedUniqueInts(q.LibraryIDs)}
 	argIdx := 2
 	// episodeRowConditions scope the shared available_episode_rows CTE and may
@@ -196,14 +223,14 @@ func (r *RecentTVRepository) List(ctx context.Context, q RecentTVQuery) ([]Recen
 	access.NamePrefix = ""
 	appendLibraryAccessConditions("si.content_id", access, &eventConditions, &args, &argIdx)
 	applyAccessFilter("si", AccessFilter{
-		MaxContentRating:   access.MaxContentRating,
+		MaturityLimits:     access.MaturityLimits,
 		ExcludedMediaTypes: access.ExcludedMediaTypes,
 	}, &eventConditions, &args, &argIdx)
 	appendAllowedContentCondition("si.content_id", access.AllowedContentIDs, &eventConditions, &args, &argIdx)
 
 	appendLibraryAccessConditions("mi.content_id", access, &seriesConditions, &args, &argIdx)
 	applyAccessFilter("mi", AccessFilter{
-		MaxContentRating:   access.MaxContentRating,
+		MaturityLimits:     access.MaturityLimits,
 		ExcludedMediaTypes: access.ExcludedMediaTypes,
 	}, &seriesConditions, &args, &argIdx)
 	appendAllowedContentCondition("mi.content_id", access.AllowedContentIDs, &seriesConditions, &args, &argIdx)
@@ -226,8 +253,20 @@ func (r *RecentTVRepository) List(ctx context.Context, q RecentTVQuery) ([]Recen
 		eventWhere = strings.Join(eventConditions, " AND ")
 	}
 
+	pageWhere := ""
+	if q.CursorPaging {
+		predicate, cursorArgs, err := cursorSeekSQL(recentTVCursorTerms(), q.After, argIdx)
+		if err != nil {
+			return nil, 0, false, err
+		}
+		if predicate != "" {
+			pageWhere = "WHERE " + predicate
+		}
+		args = append(args, cursorArgs...)
+		argIdx += len(cursorArgs)
+	}
 	fetchLimit := limit
-	if q.SkipTotal {
+	if q.SkipTotal || q.CursorPaging {
 		fetchLimit++
 	}
 	limitIdx := argIdx
@@ -250,15 +289,15 @@ func (r *RecentTVRepository) List(ctx context.Context, q RecentTVQuery) ([]Recen
 	// aggregation, so that path keeps the single-pass shape.
 	var sqlText string
 	if strings.TrimSpace(q.NamePrefix) == "" {
-		if q.UniqueTargets {
+		if q.UniqueTargets || q.CursorPaging {
 			totalsCTE := `,
 			totals AS (
-				SELECT COUNT(*)::int AS total_count FROM unique_target_keys
+				SELECT COUNT(*)::int AS total_count FROM selected_target_keys
 			)`
 			if q.SkipTotal {
 				totalsCTE = ""
 			}
-			sqlText = buildUniqueRecentTVNoPrefixQuery(
+			sqlText = buildRecentTVNoPrefixQuery(
 				strings.Join(episodeRowConditions, " AND "),
 				eventWhere,
 				strings.Join(seriesConditions, " AND "),
@@ -267,6 +306,8 @@ func (r *RecentTVRepository) List(ctx context.Context, q RecentTVQuery) ([]Recen
 				totalsCTE,
 				totalColumn,
 				fromClause,
+				q.UniqueTargets,
+				pageWhere,
 			)
 		} else {
 			totalsCTE := `,
@@ -453,10 +494,11 @@ func (r *RecentTVRepository) List(ctx context.Context, q RecentTVQuery) ([]Recen
 		page AS (
 			SELECT target_id, target_type, added_at, event_id, series_id, anchor_season_number, single_episode_id
 			FROM filtered
+			%s
 			ORDER BY added_at DESC, target_type ASC, target_id ASC, event_id ASC
 			LIMIT $%d OFFSET $%d
 		)
-		`, strings.Join(episodeRowConditions, " AND "), eventWhere, strings.Join(seriesConditions, " AND "), filteredSQL, totalsCTE, limitIdx, offsetIdx)
+		`, strings.Join(episodeRowConditions, " AND "), eventWhere, strings.Join(seriesConditions, " AND "), filteredSQL, totalsCTE, pageWhere, limitIdx, offsetIdx)
 		sqlText += buildRecentTVResultQuery(totalColumn, fromClause)
 	}
 
@@ -469,9 +511,9 @@ func (r *RecentTVRepository) List(ctx context.Context, q RecentTVQuery) ([]Recen
 	targets := make([]RecentTVTarget, 0, limit)
 	total := 0
 	for rows.Next() {
-		var contentID, targetType, playContentID *string
+		var contentID, targetType, playContentID, eventID *string
 		var addedAt *time.Time
-		scanArgs := []any{&contentID, &targetType, &addedAt, &playContentID}
+		scanArgs := []any{&contentID, &targetType, &addedAt, &playContentID, &eventID}
 		if !q.SkipTotal {
 			scanArgs = append(scanArgs, &total)
 		}
@@ -480,6 +522,9 @@ func (r *RecentTVRepository) List(ctx context.Context, q RecentTVQuery) ([]Recen
 		}
 		if contentID != nil && targetType != nil && addedAt != nil {
 			target := RecentTVTarget{ContentID: *contentID, Type: *targetType, AddedAt: *addedAt}
+			if eventID != nil {
+				target.EventID = *eventID
+			}
 			if playContentID != nil {
 				target.PlayContentID = *playContentID
 			}
@@ -489,21 +534,21 @@ func (r *RecentTVRepository) List(ctx context.Context, q RecentTVQuery) ([]Recen
 	if err := rows.Err(); err != nil {
 		return nil, 0, false, fmt.Errorf("iterating recently-added TV events: %w", err)
 	}
-	if q.SkipTotal {
+	if q.SkipTotal || q.CursorPaging {
 		hasMore := len(targets) > limit
 		if hasMore {
 			targets = targets[:limit]
 		}
-		return targets, 0, hasMore, nil
+		return targets, total, hasMore, nil
 	}
 	return targets, total, q.Offset+len(targets) < total, nil
 }
 
-// buildUniqueRecentTVNoPrefixQuery keeps the no-prefix path's expensive anchor
+// buildRecentTVNoPrefixQuery keeps the no-prefix path's expensive anchor
 // aggregation page-bounded while selecting and counting unique card targets.
 // MIN/MAX is enough to distinguish a one-episode scan event from a multi-
 // episode event even when one episode has availability rows in several folders.
-func buildUniqueRecentTVNoPrefixQuery(
+func buildRecentTVNoPrefixQuery(
 	episodeConditions string,
 	eventConditions string,
 	seriesConditions string,
@@ -512,7 +557,14 @@ func buildUniqueRecentTVNoPrefixQuery(
 	totalsCTE string,
 	totalColumn string,
 	fromClause string,
+	uniqueTargets bool,
+	pageWhere string,
 ) string {
+	selection := "SELECT target_id, target_type, added_at, event_id, series_id, scan_run_id FROM target_keys"
+	if uniqueTargets {
+		selection = `SELECT DISTINCT ON (target_id) target_id, target_type, added_at, event_id, series_id, scan_run_id
+		FROM target_keys ORDER BY target_id, added_at DESC, target_type ASC, event_id ASC`
+	}
 	return fmt.Sprintf(`
 	WITH raw_event_keys AS MATERIALIZED (
 		-- Keep this first pass narrow: target identity needs only scalar
@@ -558,15 +610,13 @@ func buildUniqueRecentTVNoPrefixQuery(
 		SELECT series_id, 'series'::text, added_at, ''::text, series_id, NULL::text
 		FROM series_without_episode_events
 	),
-	unique_target_keys AS MATERIALIZED (
-		SELECT DISTINCT ON (target_id)
-		       target_id, target_type, added_at, event_id, series_id, scan_run_id
-		FROM target_keys
-		ORDER BY target_id, added_at DESC, target_type ASC, event_id ASC
+	selected_target_keys AS MATERIALIZED (
+		%[7]s
 	)%[6]s,
 	page_keys AS MATERIALIZED (
 		SELECT target_id, target_type, added_at, event_id, series_id, scan_run_id
-		FROM unique_target_keys
+		FROM selected_target_keys
+		%[8]s
 		ORDER BY added_at DESC, target_type ASC, target_id ASC, event_id ASC
 		LIMIT $%[4]d OFFSET $%[5]d
 	),
@@ -590,7 +640,7 @@ func buildUniqueRecentTVNoPrefixQuery(
 			  AND %[1]s
 		) anchor ON true
 	)
-	`, episodeConditions, eventConditions, seriesConditions, limitIdx, offsetIdx, totalsCTE) + buildRecentTVResultQuery(totalColumn, fromClause)
+	`, episodeConditions, eventConditions, seriesConditions, limitIdx, offsetIdx, totalsCTE, selection, pageWhere) + buildRecentTVResultQuery(totalColumn, fromClause)
 }
 
 // buildRecentTVResultQuery renders the common result projection after each
@@ -598,7 +648,7 @@ func buildUniqueRecentTVNoPrefixQuery(
 func buildRecentTVResultQuery(totalColumn, fromClause string) string {
 	return fmt.Sprintf(`
 	SELECT page.target_id, page.target_type, page.added_at,
-	       COALESCE(page.single_episode_id, play_target.content_id) AS play_content_id%s
+	       COALESCE(page.single_episode_id, play_target.content_id) AS play_content_id, page.event_id%s
 	%s
 	-- Anchor hint only: profile-independent by design, so this page can be
 	-- shared through the process-global resolved-list cache. Playback quality
@@ -688,4 +738,24 @@ func subtractInts(values, denied []int) []int {
 		}
 	}
 	return result
+}
+
+// The tuple belongs to the final event relation, after grouping and optional
+// target deduplication. Scan-run NULL is normalized to the empty event ID.
+func recentTVCursorTerms() []queryCursorTerm {
+	return []queryCursorTerm{
+		{expression: defaultSortField, kind: cursorKindTimestamp, descending: true},
+		{expression: "target_type", kind: cursorKindText, nullsLast: true},
+		{expression: "target_id", kind: cursorKindText, nullsLast: true},
+		{expression: "event_id", kind: cursorKindText, nullsLast: true},
+	}
+}
+
+func recentTVCursor(target RecentTVTarget, consumed int) *QueryCursor {
+	return &QueryCursor{Consumed: consumed, Keys: []QueryCursorValue{
+		{Kind: "timestamp", Value: new(target.AddedAt.UTC().Format(time.RFC3339Nano))},
+		{Kind: cursorKindText, Value: new(target.Type)},
+		{Kind: cursorKindText, Value: new(target.ContentID)},
+		{Kind: cursorKindText, Value: new(target.EventID)},
+	}}
 }

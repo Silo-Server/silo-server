@@ -35,6 +35,8 @@ const GROUP_ORDER: DeviceSettingGroupId[] = ["picture", "sound", "subtitles", "e
 
 /** Keys whose group is not implied by their manifest category. */
 const EXPLICIT_GROUPS: Partial<Record<string, DeviceSettingGroupId>> = {
+  "ui.theme_music_enabled": "sound",
+  "ui.theme_music_loop": "sound",
   "playback.audio_language": "sound",
   "playback.subtitle_language": "subtitles",
   "playback.subtitle_mode": "subtitles",
@@ -65,8 +67,8 @@ const EXPLICIT_GROUPS: Partial<Record<string, DeviceSettingGroupId>> = {
 /**
  * Keys deliberately kept off this screen.
  *
- * `ui.*` device overrides exist in the contract but belong to the Appearance
- * screen, which already edits them at profile scope; showing them here would
+ * `ui.*` device overrides exist in the contract but belong to the Accessibility
+ * and Navigation & Cards screens, which already edit them at profile scope; showing them here would
  * give one setting two homes. `ui.library_page_state` is remembered browse
  * state rather than a preference — it has no control in the manifest at all.
  */

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 )
 
 var (
@@ -21,36 +20,12 @@ var (
 
 // SetSourceAdminToken stores an admin token for the given source.
 func (r *Repository) SetSourceAdminToken(ctx context.Context, sourceID int, token string) error {
-	encryptedToken, err := r.encryptSourceAdminToken(sourceID, token)
-	if err != nil {
-		return fmt.Errorf("encrypt admin token for source %d: %w", sourceID, err)
-	}
-	result, err := r.pool.Exec(ctx, `
-		UPDATE history_import_sources
-		SET admin_token = $2, updated_at = NOW()
-		WHERE id = $1`, sourceID, encryptedToken)
-	if err != nil {
-		return fmt.Errorf("setting admin token for source %d: %w", sourceID, err)
-	}
-	if result.RowsAffected() == 0 {
-		return ErrSourceNotFound
-	}
-	return nil
+	_, err := r.SetSourceAdminTokenConditional(ctx, sourceID, token, -1)
+	return err
 }
-
-// ClearSourceAdminToken removes the stored admin token from the given source.
 func (r *Repository) ClearSourceAdminToken(ctx context.Context, sourceID int) error {
-	result, err := r.pool.Exec(ctx, `
-		UPDATE history_import_sources
-		SET admin_token = NULL, updated_at = NOW()
-		WHERE id = $1`, sourceID)
-	if err != nil {
-		return fmt.Errorf("clearing admin token for source %d: %w", sourceID, err)
-	}
-	if result.RowsAffected() == 0 {
-		return ErrSourceNotFound
-	}
-	return nil
+	_, err := r.ClearSourceAdminTokenConditional(ctx, sourceID, -1)
+	return err
 }
 
 // GetSourceWithAdminToken returns the source and its admin token.
@@ -60,7 +35,7 @@ func (r *Repository) GetSourceWithAdminToken(ctx context.Context, sourceID int) 
 		SELECT id, name, source_type, base_url, COALESCE(system_id, ''), enabled, sort_order,
 		       (admin_token IS NOT NULL) AS has_admin_token,
 		       COALESCE(admin_token, ''),
-		       created_at, updated_at
+		       created_at, updated_at, revision
 		FROM history_import_sources
 		WHERE id = $1`, sourceID)
 
@@ -69,7 +44,7 @@ func (r *Repository) GetSourceWithAdminToken(ctx context.Context, sourceID int) 
 	err := row.Scan(
 		&s.ID, &s.Name, &s.SourceType, &s.BaseURL, &s.SystemID,
 		&s.Enabled, &s.SortOrder, &s.HasAdminToken, &adminToken,
-		&s.CreatedAt, &s.UpdatedAt,
+		&s.CreatedAt, &s.UpdatedAt, &s.Revision,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, "", ErrSourceNotFound
@@ -87,32 +62,14 @@ func (r *Repository) GetSourceWithAdminToken(ctx context.Context, sourceID int) 
 // --- Mapping CRUD ---
 
 func (r *Repository) CreateMapping(ctx context.Context, input CreateMappingInput) (*UserMapping, error) {
-	row := r.pool.QueryRow(ctx, `
-		INSERT INTO history_import_user_mappings
-			(source_id, external_user_id, external_user_name, silo_user_id, silo_profile_id)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, source_id, external_user_id, external_user_name,
-		          silo_user_id, silo_profile_id, last_imported_at,
-		          created_at, updated_at`,
-		input.SourceID, input.ExternalUserID, input.ExternalUserName,
-		input.SiloUserID, input.SiloProfileID,
-	)
-	m, err := scanMapping(row)
-	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return nil, ErrMappingDuplicate
-		}
-		return nil, fmt.Errorf("creating history import mapping: %w", err)
-	}
-	return enrichMapping(ctx, r, m)
+	return r.createMappingChecked(ctx, input)
 }
 
 func (r *Repository) ListMappingsForSource(ctx context.Context, sourceID int) ([]UserMapping, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT m.id, m.source_id, m.external_user_id, m.external_user_name,
 		       m.silo_user_id, m.silo_profile_id, m.last_imported_at,
-		       m.created_at, m.updated_at
+		       m.created_at, m.updated_at, m.revision
 		FROM history_import_user_mappings m
 		WHERE m.source_id = $1
 		ORDER BY m.external_user_name ASC, m.id ASC`, sourceID)
@@ -147,7 +104,7 @@ func (r *Repository) ListMappingsForBulkRun(ctx context.Context, sourceID int) (
 	rows, err := r.pool.Query(ctx, `
 		SELECT m.id, m.source_id, m.external_user_id, m.external_user_name,
 		       m.silo_user_id, m.silo_profile_id, m.last_imported_at,
-		       m.created_at, m.updated_at
+		       m.created_at, m.updated_at, m.revision
 		FROM history_import_user_mappings m
 		WHERE m.source_id = $1
 		  AND NOT EXISTS (
@@ -179,7 +136,7 @@ func (r *Repository) GetMappingByID(ctx context.Context, id int) (*UserMapping, 
 	row := r.pool.QueryRow(ctx, `
 		SELECT id, source_id, external_user_id, external_user_name,
 		       silo_user_id, silo_profile_id, last_imported_at,
-		       created_at, updated_at
+		       created_at, updated_at, revision
 		FROM history_import_user_mappings
 		WHERE id = $1`, id)
 	m, err := scanMapping(row)
@@ -193,32 +150,10 @@ func (r *Repository) GetMappingByID(ctx context.Context, id int) (*UserMapping, 
 }
 
 func (r *Repository) UpdateMapping(ctx context.Context, id int, input UpdateMappingInput) (*UserMapping, error) {
-	result, err := r.pool.Exec(ctx, `
-		UPDATE history_import_user_mappings
-		SET silo_user_id    = COALESCE($2, silo_user_id),
-		    silo_profile_id = COALESCE($3, silo_profile_id),
-		    updated_at           = NOW()
-		WHERE id = $1`,
-		id, input.SiloUserID, input.SiloProfileID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("updating mapping %d: %w", id, err)
-	}
-	if result.RowsAffected() == 0 {
-		return nil, ErrMappingNotFound
-	}
-	return r.GetMappingByID(ctx, id)
+	return r.UpdateMappingConditional(ctx, id, input, -1)
 }
-
 func (r *Repository) DeleteMapping(ctx context.Context, id int) error {
-	result, err := r.pool.Exec(ctx, `DELETE FROM history_import_user_mappings WHERE id = $1`, id)
-	if err != nil {
-		return fmt.Errorf("deleting mapping %d: %w", id, err)
-	}
-	if result.RowsAffected() == 0 {
-		return ErrMappingNotFound
-	}
-	return nil
+	return r.DeleteMappingConditional(ctx, id, -1)
 }
 
 // HasActiveRunForMapping reports whether a queued or running run already exists for the mapping.
@@ -273,11 +208,11 @@ func (r *Repository) ListAllRuns(ctx context.Context, sourceID *int, limit int) 
 			       r.mapping_id,
 			       r.fetched, r.matched, r.unmatched, r.progress_updated, r.history_created, r.watchlist_added, r.favorites_imported, r.skipped,
 			       r.warnings, r.unmatched_samples, COALESCE(r.error_message, ''),
-			       r.created_at, r.started_at, r.completed_at
+			       r.created_at, r.started_at, r.completed_at, r.cancel_requested_at IS NOT NULL
 			FROM history_import_runs r
 			LEFT JOIN history_import_user_mappings m ON r.mapping_id = m.id
-			WHERE m.source_id = $1
-			ORDER BY r.created_at DESC
+			WHERE COALESCE(r.dispatch_source_id,m.source_id) = $1
+			ORDER BY r.created_at DESC, r.id DESC
 			LIMIT $2`, *sourceID, limit)
 	} else {
 		rows, err = r.pool.Query(ctx, `
@@ -285,9 +220,9 @@ func (r *Repository) ListAllRuns(ctx context.Context, sourceID *int, limit int) 
 			       mapping_id,
 			       fetched, matched, unmatched, progress_updated, history_created, watchlist_added, favorites_imported, skipped,
 			       warnings, unmatched_samples, COALESCE(error_message, ''),
-			       created_at, started_at, completed_at
+			       created_at, started_at, completed_at, cancel_requested_at IS NOT NULL
 			FROM history_import_runs
-			ORDER BY created_at DESC
+			ORDER BY created_at DESC, id DESC
 			LIMIT $1`, limit)
 	}
 	if err != nil {
@@ -304,7 +239,7 @@ func (r *Repository) GetRunByID(ctx context.Context, runID string) (*Run, error)
 		       mapping_id,
 		       fetched, matched, unmatched, progress_updated, history_created, watchlist_added, favorites_imported, skipped,
 		       warnings, unmatched_samples, COALESCE(error_message, ''),
-		       created_at, started_at, completed_at
+		       created_at, started_at, completed_at, cancel_requested_at IS NOT NULL
 		FROM history_import_runs
 		WHERE id = $1`, runID)
 	run, err := scanAdminRun(row)
@@ -332,22 +267,22 @@ func (r *Repository) ListActiveRuns(ctx context.Context, sourceID *int) ([]Run, 
 			       r.mapping_id,
 			       r.fetched, r.matched, r.unmatched, r.progress_updated, r.history_created, r.watchlist_added, r.favorites_imported, r.skipped,
 			       r.warnings, r.unmatched_samples, COALESCE(r.error_message, ''),
-			       r.created_at, r.started_at, r.completed_at
+			       r.created_at, r.started_at, r.completed_at, r.cancel_requested_at IS NOT NULL
 			FROM history_import_runs r
 			LEFT JOIN history_import_user_mappings m ON r.mapping_id = m.id
-			WHERE m.source_id = $1
+			WHERE COALESCE(r.dispatch_source_id,m.source_id) = $1
 			  AND r.status IN ($2, $3)
-			ORDER BY r.created_at DESC`, *sourceID, RunStatusQueued, RunStatusRunning)
+			ORDER BY r.created_at DESC, r.id DESC`, *sourceID, RunStatusQueued, RunStatusRunning)
 	} else {
 		rows, err = r.pool.Query(ctx, `
 			SELECT id, user_id, profile_id, source_type, connection_mode, status,
 			       mapping_id,
 			       fetched, matched, unmatched, progress_updated, history_created, watchlist_added, favorites_imported, skipped,
 			       warnings, unmatched_samples, COALESCE(error_message, ''),
-			       created_at, started_at, completed_at
+			       created_at, started_at, completed_at, cancel_requested_at IS NOT NULL
 			FROM history_import_runs
 			WHERE status IN ($1, $2)
-			ORDER BY created_at DESC`, RunStatusQueued, RunStatusRunning)
+			ORDER BY created_at DESC, id DESC`, RunStatusQueued, RunStatusRunning)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("listing active history import runs: %w", err)
@@ -356,19 +291,33 @@ func (r *Repository) ListActiveRuns(ctx context.Context, sourceID *int) ([]Run, 
 	return scanAdminRuns(rows)
 }
 
-// CancelRunIfActive sets the run to failed status if it is currently queued or running.
+// CancelRunIfActive cancels queued work or durably requests worker acknowledgement.
 // Returns ErrRunNotFound if the run doesn't exist or is already in a terminal state.
 func (r *Repository) CancelRunIfActive(ctx context.Context, runID string) error {
-	result, err := r.pool.Exec(ctx, `
-		UPDATE history_import_runs
-		SET status        = 'cancelled',
-		    error_message = 'Cancelled by admin',
-		    completed_at  = NOW()
-		WHERE id = $1 AND status IN ('queued', 'running')`, runID)
+	result, err := r.pool.Exec(ctx, `UPDATE history_import_runs
+ SET cancel_requested_at=COALESCE(cancel_requested_at,now()),
+ status=CASE WHEN status='queued' THEN 'cancelled' ELSE status END,
+ completed_at=CASE WHEN status='queued' THEN now() ELSE completed_at END,
+ error_message=CASE WHEN status='queued' THEN 'Cancelled by admin' ELSE error_message END
+ WHERE id=$1 AND status IN ('queued','running')`, runID)
 	if err != nil {
-		return fmt.Errorf("cancelling run %s: %w", runID, err)
+		return err
 	}
 	if result.RowsAffected() == 0 {
+		var status string
+		err := r.pool.QueryRow(ctx, "SELECT status FROM history_import_runs WHERE id=$1", runID).Scan(&status)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrRunNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if status == RunStatusCancelled {
+			return nil
+		}
+		if status == RunStatusCompleted || status == RunStatusFailed {
+			return ErrRunNotCancelable
+		}
 		return ErrRunNotFound
 	}
 	return nil
@@ -386,7 +335,7 @@ func scanMapping(s mappingScanner) (*UserMapping, error) {
 	err := s.Scan(
 		&m.ID, &m.SourceID, &m.ExternalUserID, &m.ExternalUserName,
 		&m.SiloUserID, &m.SiloProfileID, &lastImportedAt,
-		&m.CreatedAt, &m.UpdatedAt,
+		&m.CreatedAt, &m.UpdatedAt, &m.Revision,
 	)
 	if err != nil {
 		return nil, err

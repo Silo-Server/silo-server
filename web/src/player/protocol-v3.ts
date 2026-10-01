@@ -298,6 +298,7 @@ export interface StartRequestV3 {
   profile_id: string;
   playback_attempt_id: string;
   quality_preference: string;
+  allow_alternate_versions?: boolean;
   subtitle_fidelity_preference: SubtitleFidelityV3;
   start_position?: number;
   progress_persistence?: ProgressPersistenceV3;

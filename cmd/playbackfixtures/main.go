@@ -333,7 +333,7 @@ func goldenDecisionForSource(file *models.MediaFile, request playback.StartReque
 	plan.SessionID = goldenSessionID
 	plan.ExpiresAt = goldenExpiresAt
 	plan.Stream.URL = "/stream/" + goldenSessionID
-	plan.Subtitle.Inventory = playback.ScopeSubtitleInventoryV3(goldenSessionID, file, plan.Subtitle.Inventory)
+	plan.Subtitle.Inventory = playback.ScopeSubtitleInventoryV3(goldenSessionID, file, plan.Subtitle.Inventory, request.ClientFeatures)
 
 	return playback.DecisionResponseV3{
 		ProtocolVersion: playback.ProtocolV3,

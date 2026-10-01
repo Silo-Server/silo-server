@@ -1,0 +1,10 @@
+{
+  "compiled_ok": false,
+  "errors": [
+    {
+      "row": 1,
+      "col": 1,
+      "message": "package expected"
+    }
+  ]
+}

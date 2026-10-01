@@ -15,6 +15,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/processmetrics"
 )
 
 // ErrPrimaryVideoNotFound reports that FFprobe completed successfully but did
@@ -70,6 +71,7 @@ func ProbeFile(ctx context.Context, ffprobePath string, filePath string) (*Probe
 	)
 
 	output, err := cmd.Output()
+	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, err, ctx.Err())
 	if err != nil {
 		return nil, fmt.Errorf("ffprobe failed for %s: %w", filePath, err)
 	}
@@ -181,15 +183,17 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 			track := AudioTrackInfo{
 				Title:         firstNonEmpty(s.Tags["title"], s.CodecLongName, strings.ToUpper(s.CodecName)),
 				EmbeddedTitle: s.Tags["title"],
-				Language:      lang.Canonical(s.Tags["language"]),
-				Codec:         s.CodecName,
-				Profile:       s.Profile,
-				Layout:        s.ChannelLayout,
-				Channels:      s.Channels,
-				Bitrate:       parseNumeric(s.BitRate) / 1000,
-				SampleRate:    parseNumeric(s.SampleRate),
-				BitDepth:      parseBitDepth(s),
-				Default:       s.Disposition.Default == 1,
+				// Preserve BCP 47 region and script subtags (for example pt-BR
+				// versus pt-PT) just as we do for subtitle tracks.
+				Language:   lang.CompatibleTag(s.Tags["language"]),
+				Codec:      s.CodecName,
+				Profile:    s.Profile,
+				Layout:     s.ChannelLayout,
+				Channels:   s.Channels,
+				Bitrate:    parseNumeric(s.BitRate) / 1000,
+				SampleRate: parseNumeric(s.SampleRate),
+				BitDepth:   parseBitDepth(s),
+				Default:    s.Disposition.Default == 1,
 			}
 			pd.AudioTracks = append(pd.AudioTracks, track)
 			if pd.CodecAudio == "" {
@@ -201,7 +205,7 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 				ContainerTrackID: canonicalContainerTrackID(string(s.ID)),
 				Index:            s.Index,
 				Codec:            s.CodecName,
-				Language:         lang.Canonical(s.Tags["language"]),
+				Language:         lang.CompatibleTag(s.Tags["language"]),
 				Title:            firstNonEmpty(s.Tags["title"], strings.ToUpper(s.CodecName)),
 				EmbeddedTitle:    s.Tags["title"],
 				Resolution:       subtitleResolutionLabel(s),
@@ -479,11 +483,14 @@ func probeVideoPacketDuration(
 		return 0, fmt.Errorf("opening ffprobe packet output: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
+		processmetrics.Record(processmetrics.Probe, nil, err, ctx.Err())
 		return 0, fmt.Errorf("starting ffprobe packet scan: %w", err)
 	}
 
 	duration := estimateVideoPacketDuration(stdout, frameRate)
-	if err := cmd.Wait(); err != nil {
+	waitErr := cmd.Wait()
+	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, waitErr, ctx.Err())
+	if err := waitErr; err != nil {
 		return 0, fmt.Errorf("ffprobe packet scan failed for %s: %w", filePath, err)
 	}
 	return duration, nil

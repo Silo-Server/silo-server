@@ -1212,7 +1212,7 @@ func TestVideoToolboxProbeSmokesBothEncodersInPortableBitrateMode(t *testing.T) 
 	// H.264 acceleration available on older Intel Macs as well.
 	for _, want := range []string{
 		"-c:v h264_videotoolbox -b:v 2000k -maxrate 2000k -bufsize 4000k",
-		"-vf format=p010le -c:v hevc_videotoolbox -b:v 2000k -maxrate 2000k -bufsize 4000k",
+		"-pix_fmt yuv420p -profile:v main -c:v hevc_videotoolbox -b:v 2000k -maxrate 2000k -bufsize 4000k",
 	} {
 		if !strings.Contains(string(log), want) {
 			t.Fatalf("probe log missing %q:\n%s", want, log)

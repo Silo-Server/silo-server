@@ -10,7 +10,6 @@ import (
 type matcherRepoStub struct {
 	episodeByExternal map[string][]mediaLookupRow
 	mediaByExternal   map[string][]mediaLookupRow
-	mediaByTitleYear  map[string][]mediaLookupRow
 	episodeBySeries   *Match
 	episodesBySeries  []Match
 
@@ -27,10 +26,6 @@ type matcherRepoStub struct {
 func (s *matcherRepoStub) MatchMediaByExternalID(_ context.Context, kind, column, value string) ([]mediaLookupRow, error) {
 	s.mediaByExternalCalls++
 	return s.mediaByExternal[fmt.Sprintf("%s:%s:%s", kind, column, value)], nil
-}
-
-func (s *matcherRepoStub) MatchMediaByTitleYear(_ context.Context, kind, title string, year int) ([]mediaLookupRow, error) {
-	return s.mediaByTitleYear[fmt.Sprintf("%s:%s:%d", kind, title, year)], nil
 }
 
 func (s *matcherRepoStub) MatchEpisodeByExternalID(_ context.Context, column, value string) ([]mediaLookupRow, error) {
@@ -256,5 +251,99 @@ func TestMatcherMatchSeries_PrefersTMDBForEmbyFavorite(t *testing.T) {
 	}
 	if match == nil || match.MediaItemID != "house-of-the-dragon" {
 		t.Fatalf("match = %+v, want TMDB-backed House of the Dragon", match)
+	}
+}
+
+func TestMatcherMatchMovieDoesNotFallBackToTitleAndYear(t *testing.T) {
+	t.Parallel()
+
+	repo := &matcherRepoStub{mediaByExternal: map[string][]mediaLookupRow{}}
+	match, reason, err := NewMatcher(repo).Match(context.Background(), Record{
+		Kind:   KindMovie,
+		Title:  "The Odyssey",
+		Year:   2026,
+		TMDBID: "986056",
+		IMDbID: "tt30057084",
+	})
+	if err != nil {
+		t.Fatalf("Match returned error: %v", err)
+	}
+	if match != nil {
+		t.Fatalf("match = %+v, want no match", match)
+	}
+	want := `no tmdb_id match for "986056"; no imdb_id match for "tt30057084"`
+	if reason != want {
+		t.Fatalf("reason = %q, want %q", reason, want)
+	}
+}
+
+func TestMatcherMatchMovieRequiresExternalID(t *testing.T) {
+	t.Parallel()
+
+	match, reason, err := NewMatcher(&matcherRepoStub{}).Match(context.Background(), Record{
+		Kind: KindMovie, Title: "The Odyssey", Year: 2026,
+	})
+	if err != nil {
+		t.Fatalf("Match returned error: %v", err)
+	}
+	if match != nil {
+		t.Fatalf("match = %+v, want no match", match)
+	}
+	if reason != missingProviderIDsReason {
+		t.Fatalf("reason = %q", reason)
+	}
+}
+
+func TestMatcherMatchSeriesRequiresExternalID(t *testing.T) {
+	t.Parallel()
+
+	match, reason, err := NewMatcher(&matcherRepoStub{}).Match(context.Background(), Record{
+		Kind: KindSeries, Title: "The Odyssey", Year: 2026,
+	})
+	if err != nil {
+		t.Fatalf("Match returned error: %v", err)
+	}
+	if match != nil {
+		t.Fatalf("match = %+v, want no match", match)
+	}
+	if reason != missingProviderIDsReason {
+		t.Fatalf("reason = %q", reason)
+	}
+}
+
+func TestMatcherMatchEpisodeRequiresEpisodeOrSeriesExternalID(t *testing.T) {
+	t.Parallel()
+
+	match, reason, err := NewMatcher(&matcherRepoStub{}).Match(context.Background(), Record{
+		Kind:          KindEpisode,
+		Title:         "Episode",
+		SeriesTitle:   "Series",
+		SeriesYear:    2026,
+		SeasonNumber:  1,
+		EpisodeNumber: 1,
+	})
+	if err != nil {
+		t.Fatalf("Match returned error: %v", err)
+	}
+	if match != nil {
+		t.Fatalf("match = %+v, want no match", match)
+	}
+	want := "series match failed: " + missingProviderIDsReason
+	if reason != want {
+		t.Fatalf("reason = %q, want %q", reason, want)
+	}
+}
+
+func TestMatcherMatchMovieUsesTVDBID(t *testing.T) {
+	t.Parallel()
+
+	repo := &matcherRepoStub{mediaByExternal: map[string][]mediaLookupRow{
+		"movie:tvdb_id:12345": {{ContentID: "movie-tvdb", Title: "Movie", Year: 2026}},
+	}}
+	match, reason, err := NewMatcher(repo).Match(context.Background(), Record{
+		Kind: KindMovie, TVDBID: "12345",
+	})
+	if err != nil || reason != "" || match == nil || match.MediaItemID != "movie-tvdb" {
+		t.Fatalf("match = %+v, reason = %q, err = %v", match, reason, err)
 	}
 }

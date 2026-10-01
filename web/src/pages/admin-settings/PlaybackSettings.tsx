@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Link } from "react-router";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { useRestartKeys } from "@/hooks/useRestartKeys";
-import { useHWAccelDetection, type HWAccelInfo } from "@/hooks/queries/admin/system";
+import { useHWAccelDetection } from "@/hooks/queries/admin/system";
 import { useAdminNodes } from "@/hooks/queries/admin/nodes";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
@@ -16,8 +16,10 @@ import { FieldGroup } from "./FieldGroup";
 import { DEFAULT_FFMPEG_PATH, DEFAULT_TRANSCODE_DIR } from "./settingsPathDefaults";
 import {
   CHAPTER_THUMBNAIL_EXECUTION_DEFAULT,
+  HW_ACCEL_OPTIONS,
   buildHWDeviceRows,
   chapterThumbnailExecutionOptions,
+  describeDetection,
   hasUsableTranscodeNode,
   nodeInventoriesDiverge,
   parseHWDeviceList,
@@ -28,6 +30,7 @@ import {
 // actually touches.
 const TRANSCODING_ESSENTIAL_KEYS = [
   "playback.transcode_enabled",
+  "playback.allow_hevc_encoding",
   "playback.hw_accel",
   "allow_4k_transcode",
 ];
@@ -312,9 +315,9 @@ export default function PlaybackSettings() {
           restartAll={allRestart([...TRANSCODING_ESSENTIAL_KEYS, ...TRANSCODING_ADVANCED_KEYS])}
         >
           <SettingField
-            label="Transcoding"
+            label="Video transcoding"
             type="toggle"
-            description="Off serves only files clients can already play."
+            description="Off never re-encodes video. Silo still repackages files and converts audio for devices that need it."
             value={form.getValue("playback.transcode_enabled")}
             onChange={(v) => form.setValue("playback.transcode_enabled", v)}
             restartRequired={restartKeys.has("playback.transcode_enabled")}
@@ -322,19 +325,19 @@ export default function PlaybackSettings() {
           <SettingField
             label="Hardware acceleration"
             type="select"
-            options={[
-              { value: "auto", label: "Auto" },
-              { value: "qsv", label: "Intel Quick Sync (QSV)" },
-              { value: "vaapi", label: "VA-API" },
-              { value: "nvenc", label: "NVIDIA NVENC" },
-              { value: "videotoolbox", label: "VideoToolbox (macOS)" },
-              { value: "none", label: "Software" },
-            ]}
-            description="Auto picks the best device this server can see."
+            options={HW_ACCEL_OPTIONS}
+            description="Auto picks the best device. If startup fails, it keeps GPU encoding with CPU decoding before falling back to software."
             status={hwAccelStatus}
             value={hwAccel}
             onChange={(v) => form.setValue("playback.hw_accel", v)}
             restartRequired={restartKeys.has("playback.hw_accel")}
+          />
+          <SettingField
+            label="Allow HEVC encoding"
+            type="toggle"
+            description="Use HEVC for clients that support HEVC over HLS. Other clients keep H.264."
+            value={form.getValue("playback.allow_hevc_encoding")}
+            onChange={(v) => form.setValue("playback.allow_hevc_encoding", v)}
           />
           <SettingField
             label="Allow 4K transcoding"
@@ -478,7 +481,7 @@ export default function PlaybackSettings() {
             <SettingField
               label="Chapter thumbnail workers"
               type="number"
-              description="Parallel extraction jobs per library scan."
+              description="How many files Silo extracts chapter thumbnails from at once. One more worker takes only titles that are playing, so they aren't stuck behind the queue."
               value={form.getValue("playback.chapter_thumbnail_workers")}
               onChange={(v) => form.setValue("playback.chapter_thumbnail_workers", v)}
               restartRequired={restartKeys.has("playback.chapter_thumbnail_workers")}
@@ -635,34 +638,4 @@ export default function PlaybackSettings() {
       />
     </div>
   );
-}
-
-function formatResolved(resolved: string): string {
-  switch (resolved) {
-    case "qsv":
-      return "Intel Quick Sync (QSV)";
-    case "vaapi":
-      return "VA-API";
-    case "nvenc":
-      return "NVIDIA NVENC";
-    case "videotoolbox":
-      return "VideoToolbox (macOS)";
-    case "none":
-      return "Software";
-    default:
-      return resolved;
-  }
-}
-
-/**
- * One-line detection result, e.g. "Detected VA-API on renderD128". Returns
- * undefined while nothing has been probed yet so the caller can show its own
- * "detecting" state instead of an empty phrase.
- */
-function describeDetection(detection: HWAccelInfo | undefined): string | undefined {
-  if (!detection) return undefined;
-  if (detection.resolved === "none") return "No supported graphics hardware found";
-  const device = detection.render_devices?.[0];
-  const onNode = detection.source === "transcode_node" ? " (transcode node)" : "";
-  return `Detected ${formatResolved(detection.resolved)}${device ? ` on ${device}` : ""}${onNode}`;
 }

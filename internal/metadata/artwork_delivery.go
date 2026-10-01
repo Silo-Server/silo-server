@@ -2,12 +2,15 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 )
 
 // ArtworkDeliveryStore reads publication manifests and reconciles delivery on
@@ -52,9 +55,11 @@ func (s *ArtworkDeliveryStore) ArtworkAvailability(ctx context.Context, paths []
 }
 
 type ArtworkDeliveryChecker interface {
-	ObjectExists(context.Context, string, string) (bool, error)
-	ObjectAvailable(context.Context, string, string) (bool, error)
-	Bucket() string
+	Stat(context.Context, string) (blobstore.ObjectInfo, error)
+}
+
+type artworkExternalAvailabilityChecker interface {
+	ObjectAvailable(context.Context, string) (bool, error)
 }
 
 type ArtworkDeliveryStats struct {
@@ -138,9 +143,15 @@ func (s *ArtworkDeliveryStore) verifyRevision(ctx context.Context, checker Artwo
 	var storageMissing bool
 	for _, key := range revision.keys {
 		probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		exists, err := checker.ObjectExists(probeCtx, checker.Bucket(), key)
+		_, err := checker.Stat(probeCtx, key)
+		exists := err == nil
+		if errors.Is(err, blobstore.ErrNotFound) {
+			err = nil
+		}
 		if err == nil && exists && s.external {
-			exists, err = checker.ObjectAvailable(probeCtx, checker.Bucket(), key)
+			if external, ok := checker.(artworkExternalAvailabilityChecker); ok {
+				exists, err = external.ObjectAvailable(probeCtx, key)
+			}
 		} else if err == nil && !exists {
 			storageMissing = true
 		}

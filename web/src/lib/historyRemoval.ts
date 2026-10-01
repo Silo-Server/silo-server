@@ -1,4 +1,9 @@
-import type { HistoryRemovalScope, HistoryRemovalTargetRequest, ItemDetail } from "@/api/types";
+import type { ItemDetail } from "@/api/types";
+import type { V2Body } from "@/api/v2/request";
+
+/** One target of the v2 history removal command, as the contract declares it. */
+export type HistoryRemovalTarget = V2Body<"POST /api/v2/history/remove">["targets"][number];
+export type HistoryRemovalScope = NonNullable<HistoryRemovalTarget["scope"]>;
 
 type HistoryRemovalMediaType = ItemDetail["type"];
 
@@ -11,7 +16,7 @@ export function historyRemovalScopeForMediaType(
 export function buildHistoryRemovalTarget(
   contentId: string,
   mediaType: HistoryRemovalMediaType,
-): HistoryRemovalTargetRequest {
+): HistoryRemovalTarget {
   return {
     content_id: contentId,
     scope: historyRemovalScopeForMediaType(mediaType),
@@ -25,7 +30,7 @@ export function historyRemovalLabelForMediaType(mediaType: HistoryRemovalMediaTy
 }
 
 export function historyRemovalDialogTitle(
-  targets: Array<Pick<HistoryRemovalTargetRequest, "scope">>,
+  targets: Array<Pick<HistoryRemovalTarget, "scope">>,
 ): string {
   if (targets.length > 1) {
     return "Remove selected watch data?";
@@ -34,7 +39,7 @@ export function historyRemovalDialogTitle(
 }
 
 export function historyRemovalDialogDescription(
-  targets: Array<Pick<HistoryRemovalTargetRequest, "scope">>,
+  targets: Array<Pick<HistoryRemovalTarget, "scope">>,
 ): string {
   if (targets.length > 1) {
     return `${targets.length} selected items will have their watch history, watched status, and resume progress cleared for this profile.`;

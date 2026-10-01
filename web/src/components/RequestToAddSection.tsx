@@ -1,39 +1,57 @@
-import { useState } from "react";
-import { Link } from "react-router";
-import { Film, Sparkles, Tv } from "lucide-react";
+import { useRef } from "react";
+import type { MouseEvent } from "react";
+import { Film, RefreshCw, Tv } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useCanRequest } from "@/hooks/useCanRequest";
-import { useCreateMediaRequest, useRequestSearch } from "@/hooks/queries/useRequests";
-import type { RequestMediaResult } from "@/api/types";
+import { useRequestSearch } from "@/hooks/queries/useRequests";
+import type { RequestMediaResult, RequestSearchMediaType } from "@/api/types";
 import {
+  formatMediaType,
+  formatRequestDisplayState,
   formatRequestReason,
-  formatRequestStatus,
-  requestInputFromMediaResult,
+  REQUEST_DIALOG_SUGGESTION_LIMIT,
+  requestDetailHref,
+  requestDisplayState,
+  requestSuggestions,
   tmdbImageURL,
+  tmdbPageCount,
 } from "@/lib/mediaRequests";
 import { cn } from "@/lib/utils";
-import RequestPosterCard from "./RequestPosterCard";
+import { EnterKeyHint } from "@/components/ui/kbd";
+import ViewTransitionLink from "./ViewTransitionLink";
+import { RequestStatusBadge } from "./RequestStatusBadge";
+import RequestResultsGrid, { RequestResultsPager } from "./RequestResultsGrid";
 
 function cardKey(item: Pick<RequestMediaResult, "media_type" | "tmdb_id">): string {
   return `${item.media_type}-${item.tmdb_id}`;
 }
 
-function nonRequestableLabel(item: RequestMediaResult): string {
-  if (item.request.status) {
-    return formatRequestStatus(item.request.status);
-  }
-  if (item.request.reason) {
-    return formatRequestReason(item.request.reason);
-  }
-  return "Blocked";
+function unavailableReasonLabel(item: RequestMediaResult): string {
+  return item.request.reason ? formatRequestReason(item.request.reason) : "Blocked";
 }
 
-const DIALOG_LIMIT = 4;
 const GRID_LIMIT = 20;
 const INTERACTIVE_SEARCH_GC_TIME_MS = 30_000;
 
-export type RequestToAddSectionProps = {
-  variant: "dialog" | "grid";
+/**
+ * Lets a host combobox (the ⌘K dialog) treat the dialog rows as options of its
+ * own: it owns the highlighted row and what picking a row does.
+ */
+export interface RequestSuggestionCombobox {
+  listboxId: string;
+  /** DOM id for the suggestion at this position, unique across the host's options. */
+  optionId: (index: number) => string;
+  /** Position of the highlighted suggestion, or -1 when none is highlighted. */
+  selectedIndex: number;
+  /** The pointer moved onto a suggestion. */
+  onSelect?: (index: number) => void;
+  onPick: (item: RequestMediaResult) => void;
+}
+
+type RequestToAddSectionCommonProps = {
   query: string;
+  /** The TMDB types to search, following the host's search scope. Default: movies and series. */
+  mediaType?: RequestSearchMediaType;
   /** True when the library search returned at least one hit. Drives header copy. */
   libraryHadHits: boolean;
   /**
@@ -43,44 +61,71 @@ export type RequestToAddSectionProps = {
   libraryResultsKnown?: boolean;
 };
 
-export function RequestToAddSection({
-  variant,
-  query,
-  libraryHadHits,
-  libraryResultsKnown = true,
-}: RequestToAddSectionProps) {
+export type RequestToAddSectionProps = RequestToAddSectionCommonProps &
+  (
+    | { variant: "dialog"; combobox?: RequestSuggestionCombobox }
+    | {
+        variant: "grid";
+        /**
+         * The TMDB results page to show. The host keeps it in navigation
+         * (Catalog uses the URL), so Back and a reload return to it, and
+         * starts over at 1 for another query or type.
+         */
+        page: number;
+        onPageChange: (page: number) => void;
+      }
+  );
+
+export function RequestToAddSection(props: RequestToAddSectionProps) {
+  const { variant, query, mediaType = "all", libraryHadHits, libraryResultsKnown = true } = props;
   const { discoveryEnabled } = useCanRequest();
-  const search = useRequestSearch("all", query, 1, {
+  const page = props.variant === "grid" ? props.page : 1;
+  const search = useRequestSearch(mediaType, query, page, {
     enabled: discoveryEnabled,
     requireProfile: true,
     staleTime: 5 * 60 * 1000,
     gcTime: INTERACTIVE_SEARCH_GC_TIME_MS,
     retry: false,
+    ...(variant === "grid" ? { keepPreviousPage: true } : {}),
   });
 
   if (!discoveryEnabled) return null;
-  if (search.isError && !search.data) return null;
+  // A failed first read hides the section; a failed later page keeps it, so
+  // the viewer can retry or go back instead of losing the results.
+  const failed = search.isError && !search.data;
+  if (failed && page === 1) return null;
 
-  const filtered = (search.data?.results ?? []).filter((item) => item.availability !== "available");
-  if (filtered.length === 0) return null;
+  const limit = variant === "dialog" ? REQUEST_DIALOG_SUGGESTION_LIMIT : GRID_LIMIT;
+  const visible = requestSuggestions(search.data?.results, limit);
+  const totalPages = tmdbPageCount(search.data?.total_pages);
+  // Any page can hold only library titles. The grid keeps such a page while
+  // TMDB has others, so its pager can reach them; the dialog has no pager.
+  const hasOtherPages = variant === "grid" && totalPages > 1;
+  if (visible.length === 0 && page === 1 && !hasOtherPages) return null;
 
-  const limit = variant === "dialog" ? DIALOG_LIMIT : GRID_LIMIT;
-  const visible = filtered.slice(0, limit);
-
-  if (variant === "dialog") {
+  if (props.variant === "dialog") {
     return (
       <DialogVariant
         items={visible}
         libraryHadHits={libraryHadHits}
         libraryResultsKnown={libraryResultsKnown}
+        combobox={props.combobox}
       />
     );
   }
   return (
     <GridVariant
+      query={query.trim()}
       items={visible}
       libraryHadHits={libraryHadHits}
       libraryResultsKnown={libraryResultsKnown}
+      page={page}
+      totalPages={totalPages}
+      isChangingPage={search.isPlaceholderData}
+      onPageChange={props.onPageChange}
+      pageError={
+        failed ? { onRetry: () => void search.refetch(), isRetrying: search.isFetching } : null
+      }
     />
   );
 }
@@ -106,13 +151,13 @@ function HeaderCopy({
   }
 
   if (!libraryResultsKnown) {
-    return <div className="px-3 pt-3 pb-1 text-[12px] text-amber-300/85">Discovery matches:</div>;
+    return (
+      <div className="text-muted-foreground px-3 pt-3 pb-1 text-[12px]">Discovery matches:</div>
+    );
   }
 
   return (
-    <div className="px-3 pt-3 pb-1 text-[12px] text-amber-300/85">
-      Not in your library, but you can request:
-    </div>
+    <div className="text-muted-foreground px-3 pt-3 pb-1 text-[12px]">Not in your library</div>
   );
 }
 
@@ -120,39 +165,92 @@ function DialogVariant({
   items,
   libraryHadHits,
   libraryResultsKnown,
+  combobox,
 }: {
   items: RequestMediaResult[];
   libraryHadHits: boolean;
   libraryResultsKnown: boolean;
+  combobox?: RequestSuggestionCombobox;
 }) {
   return (
-    <div className="border-t border-white/5 pt-1">
+    <div className="border-border/60 border-t pt-1">
       <HeaderCopy
         libraryHadHits={libraryHadHits}
         libraryResultsKnown={libraryResultsKnown}
         count={items.length}
       />
-      <ul className="px-1 py-1">
-        {items.map((item) => (
-          <li key={`${item.media_type}-${item.tmdb_id}`}>
-            <DialogRow item={item} />
-          </li>
+      <div
+        id={combobox?.listboxId}
+        role="listbox"
+        aria-label="Request suggestions"
+        className="px-1 py-1"
+      >
+        {items.map((item, index) => (
+          <DialogRow
+            key={cardKey(item)}
+            item={item}
+            optionId={combobox?.optionId(index)}
+            isSelected={combobox?.selectedIndex === index}
+            onSelect={combobox?.onSelect ? () => combobox.onSelect?.(index) : undefined}
+            onPick={combobox?.onPick}
+          />
         ))}
-      </ul>
+      </div>
     </div>
   );
 }
 
-function DialogRow({ item }: { item: RequestMediaResult }) {
+function DialogRow({
+  item,
+  optionId,
+  isSelected,
+  onSelect,
+  onPick,
+}: {
+  item: RequestMediaResult;
+  optionId?: string;
+  isSelected: boolean;
+  onSelect?: () => void;
+  onPick?: (item: RequestMediaResult) => void;
+}) {
   const poster = tmdbImageURL(item.poster_path);
   const Icon = item.media_type === "series" ? Tv : Film;
   const requestable = item.request.requestable;
-  const unavailableLabel = requestable ? null : nonRequestableLabel(item);
+  const state = item.request.status
+    ? requestDisplayState(item.request.status, undefined, item.request.state)
+    : undefined;
+  const reasonLabel = !state && !requestable ? unavailableReasonLabel(item) : null;
 
+  // A plain click goes through the host so it can close the dialog; modified
+  // clicks keep the link's own new-tab and new-window behavior.
+  function handleClick(event: MouseEvent<HTMLAnchorElement>) {
+    if (!onPick || event.button !== 0) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    onPick(item);
+  }
+
+  // Keyboard focus stays in the host's search input, which points at this row
+  // with aria-activedescendant, so the row is not a tab stop.
   return (
-    <Link
-      to={`/requests/${item.media_type}/${item.tmdb_id}`}
-      className="hover:bg-muted/80 flex w-full items-center gap-3 rounded-md px-3 py-2 text-left transition-colors"
+    <ViewTransitionLink
+      id={optionId}
+      role="option"
+      aria-selected={isSelected}
+      aria-label={[
+        item.title,
+        item.year ? String(item.year) : null,
+        formatMediaType(item.media_type),
+        state ? formatRequestDisplayState(state) : reasonLabel,
+      ]
+        .filter(Boolean)
+        .join(", ")}
+      data-selected={isSelected || undefined}
+      onMouseMove={isSelected ? undefined : onSelect}
+      tabIndex={-1}
+      to={requestDetailHref(item.media_type, item.tmdb_id)}
+      onClick={handleClick}
+      className="data-[selected]:bg-accent flex w-full items-center gap-3 rounded-md px-3 py-2 text-left transition-colors"
     >
       <div
         className={cn(
@@ -175,110 +273,98 @@ function DialogRow({ item }: { item: RequestMediaResult }) {
           {item.media_type === "series" ? "Series" : "Movie"}
         </div>
       </div>
-      {requestable ? (
-        <span className="rounded-full border border-amber-400/30 bg-amber-400/15 px-2 py-0.5 text-[9px] font-semibold tracking-[0.5px] text-amber-300 uppercase">
-          Request
+      {state ? (
+        <RequestStatusBadge state={state} className="shrink-0" />
+      ) : reasonLabel ? (
+        <span className="text-muted-foreground shrink-0 text-[11px]" title={reasonLabel}>
+          {reasonLabel}
         </span>
-      ) : (
-        <span
-          className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[9px] font-medium tracking-[0.5px] text-white/60 uppercase"
-          title={unavailableLabel ?? "Blocked"}
-        >
-          {unavailableLabel}
-        </span>
-      )}
-    </Link>
+      ) : null}
+      {isSelected && <EnterKeyHint />}
+    </ViewTransitionLink>
   );
 }
 
 function GridVariant({
+  query,
   items,
   libraryHadHits,
   libraryResultsKnown,
+  page,
+  totalPages,
+  isChangingPage,
+  onPageChange,
+  pageError,
 }: {
+  query: string;
   items: RequestMediaResult[];
   libraryHadHits: boolean;
   libraryResultsKnown: boolean;
+  page: number;
+  /** Readable pages; 0 while the page failed to load and the count is unknown. */
+  totalPages: number;
+  isChangingPage: boolean;
+  onPageChange: (page: number) => void;
+  /** Set when this (later) page failed to load. */
+  pageError: { onRetry: () => void; isRetrying: boolean } | null;
 }) {
-  const count = items.length;
-  const createRequest = useCreateMediaRequest();
-  // Track each in-flight card key independently; the shared `useMutation`
-  // observer overwrites its `variables` on every `mutate` call, so rapid
-  // clicks on different cards would otherwise trample each other's spinner.
-  const [pendingKeys, setPendingKeys] = useState<ReadonlySet<string>>(new Set());
-  const submitCard = (item: RequestMediaResult) => {
-    const key = cardKey(item);
-    setPendingKeys((prev) => {
-      const next = new Set(prev);
-      next.add(key);
-      return next;
-    });
-    createRequest.mutate(requestInputFromMediaResult(item), {
-      onSettled: () => {
-        setPendingKeys((prev) => {
-          if (!prev.has(key)) return prev;
-          const next = new Set(prev);
-          next.delete(key);
-          return next;
-        });
-      },
-    });
-  };
+  const sectionRef = useRef<HTMLElement>(null);
+
+  function changePage(next: number) {
+    onPageChange(next);
+    // The pager sits below the grid; bring the new page's first row into view.
+    const section = sectionRef.current;
+    if (section && section.getBoundingClientRect().top < 0) {
+      section.scrollIntoView?.({ block: "start", behavior: "smooth" });
+    }
+  }
+
+  // Laid out like the People section above it: a plain heading over the results.
   return (
-    <section
-      className={cn(
-        "relative overflow-hidden rounded-[28px] border border-amber-400/[0.14]",
-        "bg-[radial-gradient(120%_60%_at_50%_0%,rgba(245,158,11,0.07)_0%,rgba(245,158,11,0.015)_45%,transparent_75%)]",
-        "shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_28px_60px_-44px_rgba(0,0,0,0.7)]",
-        "px-4 pt-7 pb-7 sm:px-7 sm:pt-8",
-        libraryHadHits && "mt-12! sm:mt-16!",
-      )}
-    >
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-16 top-0 h-px bg-gradient-to-r from-transparent via-amber-300/45 to-transparent"
-      />
-
-      <header className="mb-7 flex flex-wrap items-end justify-between gap-x-5 gap-y-3">
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 text-amber-200/85">
-            <Sparkles className="h-3.5 w-3.5" strokeWidth={2.2} aria-hidden />
-            <span className="text-[10px] font-semibold tracking-[0.24em] uppercase">
-              {libraryHadHits
-                ? "Discover · Outside your library"
-                : libraryResultsKnown
-                  ? "Outside your library"
-                  : "Discovery"}
-            </span>
-          </div>
-          <h2 className="font-display text-foreground text-[clamp(1.25rem,1.6vw,1.55rem)] leading-tight font-semibold tracking-tight">
-            {libraryHadHits
-              ? "Request to Add"
-              : libraryResultsKnown
-                ? "Not in your library, but you can request"
-                : "More search matches"}
-          </h2>
-        </div>
-        <span className="inline-flex items-center gap-1.5 self-end rounded-full border border-amber-400/15 bg-amber-400/[0.06] px-2.5 py-1 text-[11px] font-medium tracking-wide text-amber-100/75 tabular-nums">
-          {count} {count === 1 ? "result" : "results"}
-        </span>
-      </header>
-
-      <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8">
-        {items.map((item) => {
-          const key = cardKey(item);
-          return (
-            <RequestPosterCard
-              key={key}
-              variant="discover"
-              item={item}
-              isSubmitting={pendingKeys.has(key)}
-              onRequest={() => submitCard(item)}
-              fluid
-            />
-          );
-        })}
+    <section ref={sectionRef} aria-label="Request to add" className="scroll-mt-4 space-y-3">
+      <div className="space-y-1">
+        <h2 className="text-lg font-semibold">Request to add</h2>
+        {libraryResultsKnown && !libraryHadHits ? (
+          <p className="text-muted-foreground text-sm">
+            Nothing in your library matches &ldquo;{query}&rdquo;.
+          </p>
+        ) : null}
       </div>
+      {pageError ? (
+        <div role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-2 py-6">
+          <p className="text-muted-foreground text-sm">Couldn&rsquo;t load page {page}.</p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={pageError.onRetry}
+            disabled={pageError.isRetrying}
+          >
+            <RefreshCw className="size-4" aria-hidden />
+            Retry
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => changePage(1)}>
+            Back to page 1
+          </Button>
+        </div>
+      ) : items.length > 0 ? (
+        <RequestResultsGrid
+          results={items}
+          className={cn("transition-opacity", isChangingPage && "opacity-60")}
+        />
+      ) : (
+        <p className="text-muted-foreground text-sm">
+          Every title on this page is already in your library.
+        </p>
+      )}
+      <RequestResultsPager
+        label="Request to add pages"
+        position={totalPages > 0 ? `Page ${page} of ${totalPages}` : `Page ${page}`}
+        hasPrevious={page > 1}
+        hasNext={page < totalPages}
+        onPrevious={() => changePage(page - 1)}
+        onNext={() => changePage(page + 1)}
+        disabled={isChangingPage}
+      />
     </section>
   );
 }

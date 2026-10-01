@@ -8,6 +8,8 @@ package catalog
 import (
 	"strings"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/access"
 )
 
 // ---------------------------------------------------------------------------
@@ -235,15 +237,15 @@ func TestUnplayedHighRated_ContentRatingFilter(t *testing.T) {
 		MinRating: 6.0,
 		UserID:    2,
 		ProfileID: "p",
-		Filter:    AccessFilter{MaxContentRating: "PG-13"},
+		Filter:    AccessFilter{MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}},
 	})
 
-	if !strings.Contains(query, "mi.content_rating = ANY(") {
-		t.Fatalf("expected content_rating = ANY filter, got:\n%s", query)
+	if !strings.Contains(query, "mi.content_rating_age IS NOT NULL AND mi.content_rating_age <= $") {
+		t.Fatalf("expected stored-age ceiling filter, got:\n%s", query)
 	}
-	// args: minRating, userID, profileID, then content rating slice (one arg).
+	// args: minRating, userID, profileID, then the ceiling age (one arg).
 	if len(args) != 4 {
-		t.Fatalf("expected exactly 4 args (minRating, userID, profileID, rating slice); got %d: %v", len(args), args)
+		t.Fatalf("expected exactly 4 args (minRating, userID, profileID, ceiling age); got %d: %v", len(args), args)
 	}
 }
 
@@ -440,11 +442,11 @@ func assertNoLibraryJoin(t *testing.T, query string) {
 
 func assertDenyOnlyRequiresLibraryMembership(t *testing.T, query string) {
 	t.Helper()
-	membershipPredicate := "EXISTS (SELECT 1 FROM media_item_libraries mil_scope_any WHERE mil_scope_any.content_id = mi.content_id)"
+	membershipPredicate := "EXISTS (SELECT 1 FROM media_item_libraries mil_scope_in WHERE mil_scope_in.content_id = mi.content_id)"
 	if !strings.Contains(query, membershipPredicate) {
 		t.Fatalf("deny-only library filters must require positive library membership, got:\n%s", query)
 	}
-	if strings.Contains(query, "mil_scope_any.media_folder_id") {
+	if strings.Contains(query, "mil_scope_in.media_folder_id") {
 		t.Fatalf("positive membership predicate should not bind a specific library, got:\n%s", query)
 	}
 }

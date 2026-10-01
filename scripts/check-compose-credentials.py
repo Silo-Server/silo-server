@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 COMPOSE_FILES = ("docker-compose.yml", "docker-compose.dev.yml")
 GUARD_MESSAGE = "POSTGRES_PASSWORD is required"
 
-# The external-service shape from docs/wiki/deployment/docker.md.
+# An external PostgreSQL and Redis override that removes the bundled services.
 EXTERNAL_OVERRIDE = """\
 services:
   postgres: !reset null

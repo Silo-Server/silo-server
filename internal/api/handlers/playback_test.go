@@ -239,6 +239,16 @@ func (r testPlaybackSettingsRepo) Get(_ context.Context, key string) (string, er
 	return r.values[key], nil
 }
 
+func (r testPlaybackSettingsRepo) GetMany(_ context.Context, keys ...string) (map[string]string, error) {
+	out := make(map[string]string, len(keys))
+	for _, key := range keys {
+		if value, ok := r.values[key]; ok {
+			out[key] = value
+		}
+	}
+	return out, nil
+}
+
 type allowAllPlaybackItemAccess struct{}
 
 func (allowAllPlaybackItemAccess) EnsureAccessible(
@@ -595,9 +605,12 @@ func writePlaybackTestFFmpegSleep(t *testing.T, sleepSeconds string) string {
 	t.Helper()
 
 	path := filepath.Join(t.TempDir(), "fake-ffmpeg.sh")
+	// A capped VAAPI start first runs one-frame rate-control smoke encodes
+	// into the null muxer; they succeed at once, as on a VBR-capable driver.
 	script := "#!/bin/sh\n" +
 		"last=\"\"\n" +
 		"for arg in \"$@\"; do last=\"$arg\"; done\n" +
+		"case \" $* \" in *\" -rc_mode \"*\" -f null - \"*) exit 0 ;; esac\n" +
 		"case \"$last\" in\n" +
 		"  *.m3u8) out=\"$(dirname \"$last\")\"; mkdir -p \"$out\"; " +
 		"printf x > \"$out/init.mp4\"; printf x > \"$out/seg_0.m4s\"; " +

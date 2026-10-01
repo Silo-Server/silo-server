@@ -74,6 +74,8 @@ func TestClassifyExtraPathSeriesLibrary(t *testing.T) {
 	paths := []string{
 		"/tv/Show/Season 01/Show S01E01.mkv",
 		"/tv/Show/Extras/Show S00E01 Special.mkv",
+		"/tv/Show/Extras/01 - Making Of.mkv",
+		"/tv/Show/Season 01/Trailers/E02 - Preview.mkv",
 		"/tv/Show/Trailers/season-preview.mkv",
 		"/tv/other/Flat Show/pilot.mkv",
 	}
@@ -83,6 +85,14 @@ func TestClassifyExtraPathSeriesLibrary(t *testing.T) {
 	// library maps to season 0, so it must NOT classify as an extra.
 	if _, ok := classifier.classify("/tv/Show/Extras/Show S00E01 Special.mkv"); ok {
 		t.Fatal("SxxExx file under Extras/ must remain a season-0 episode, not an extra")
+	}
+	for _, filePath := range []string{
+		"/tv/Show/Extras/01 - Making Of.mkv",
+		"/tv/Show/Season 01/Trailers/E02 - Preview.mkv",
+	} {
+		if _, ok := classifier.classify(filePath); !ok {
+			t.Errorf("numbered supplemental file should remain an extra: %s", filePath)
+		}
 	}
 	// A non-tokened file under a show-level supplemental dir IS an extra;
 	// the show folder owns it through its season-level episodes.

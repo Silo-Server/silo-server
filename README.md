@@ -19,7 +19,7 @@
 
 <p align="center">
   <a href="#quick-start">Quick start</a>
-  · <a href="docs/wiki/index.md">Documentation</a>
+  · <a href="https://siloserver.org/docs">Documentation</a>
   · <a href="docs/release-versioning.md">Builds &amp; releases</a>
   · <a href="https://discord.gg/siloserver">Discord</a>
   · <a href="#supporting-silo">Support Silo</a>
@@ -31,6 +31,16 @@
 > [!WARNING]
 > Silo is pre-release. APIs, configuration, and database migrations may change
 > before the first stable release. Back up your deployment before updating.
+
+## 1.0 release scope
+
+The [1.0 milestone](https://siloserver.org/milestone/1.0/) covers movies and
+series. Audiobooks, ebooks, and Audiobookshelf compatibility keep working as
+they do today and are labeled **beta**: they are outside the 1.0 support
+promise and will be replaced by a consolidated Books effort with no assigned
+release date. The broader capabilities below include those beta
+implementations, not a promise that every media type is supported in 1.0.
+Existing library data is preserved when upgrading.
 
 ## What Silo does
 
@@ -95,11 +105,10 @@ docker compose up -d
 
 Open <http://localhost:8090> and complete onboarding.
 
-The [Docker deployment guide](docs/wiki/deployment/docker.md) covers the
-`SECRET_KEY` backup requirement, storage paths, GPU acceleration, Meilisearch,
-external PostgreSQL and Redis, distributed roles, PostgreSQL tuning, backups,
-and updates. Migrating from Continuum? Use the
-[cutover guide](docs/continuum-to-silo-docker-migration.md).
+The [user manual](https://siloserver.org/docs) covers the rest, starting with
+[installation](https://siloserver.org/docs/install): backing up `SECRET_KEY`,
+storage, GPU acceleration, Meilisearch, external PostgreSQL and Redis,
+transcode nodes, PostgreSQL tuning, backups, and updates.
 
 ## Builds and releases
 
@@ -110,7 +119,7 @@ defines each tag and the SemVer contract.
 
 ## Documentation
 
-- [Documentation index](docs/wiki/index.md) — user and operator guides
+- [User manual](https://siloserver.org/docs) — installing, configuring, and running Silo
 - [Development guide](DEVELOPMENT.md) — source setup, builds, tests, migrations
 - [Settings API](docs/settings-api.md), [Downloads API](docs/downloads-api.md), and [Apple Push Display Token](docs/notifications-push-api.md) — client contracts
 
@@ -135,6 +144,15 @@ Silo is developed in spare time and funded out of pocket, and will stay free and
 open source. [GitHub Sponsors](https://github.com/sponsors/quick104) covers AI
 development tooling (Claude, Codex), push-notification relay infrastructure, and
 future project costs. Bug reports, code, and documentation help just as much.
+
+Code review is supported by [Macroscope](https://macroscope.com) through its
+open source program.
+
+<p>
+  <a href="https://macroscope.com">
+    <img alt="Sponsored by Macroscope" src="assets/macroscope-banner.png" width="400">
+  </a>
+</p>
 
 ## License and trademarks
 

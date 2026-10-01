@@ -45,6 +45,17 @@ vi.mock("@/api/client", () => ({
   api: (path: string, options?: unknown) => fetchMock(path, options),
 }));
 
+vi.mock("@/api/v2/request", async () => {
+  const actual = await vi.importActual<typeof import("@/api/v2/request")>("@/api/v2/request");
+  return {
+    ...actual,
+    v2: (operation: string, options?: unknown) =>
+      operation === "GET /api/v2/admin/collections/capabilities"
+        ? Promise.resolve({ artwork: true, imports: true, groups: true, item_reorder: true })
+        : fetchMock(operation, options),
+  };
+});
+
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
@@ -55,7 +66,15 @@ vi.mock("@/hooks/queries/profiles", () => ({
 
 vi.mock("@/hooks/queries/collectionSurfaceRefresh", () => ({
   invalidateAdminCollectionQueries: vi.fn(),
+  invalidateUserCollectionQueries: vi.fn(),
 }));
+
+vi.mock("@/hooks/queries/libraries", async () => {
+  const actual = await vi.importActual<typeof import("@/hooks/queries/libraries")>(
+    "@/hooks/queries/libraries",
+  );
+  return { ...actual, useUserLibraries: () => ({ data: [] }) };
+});
 
 const catalogResponse = {
   categories: [
@@ -89,6 +108,23 @@ const catalogResponse = {
           source: "trakt",
           media_kind: "tv",
           trakt: { preset: "popular", media_type: "tv" },
+        },
+      ],
+    },
+    {
+      category: "custom",
+      label: "Custom",
+      templates: [
+        {
+          id: "tmdb_list_custom",
+          title: "Custom TMDB List",
+          description: "Paste any public TMDB list URL to seed a synced collection.",
+          icon: "🎞️",
+          category: "custom",
+          source: "tmdb_list",
+          media_kind: "mixed",
+          default_limit: 100,
+          tmdb_list: { url: "" },
         },
       ],
     },
@@ -129,8 +165,10 @@ describe("CollectionTemplateGallery", () => {
   beforeEach(() => {
     fetchMock.mockReset();
     fetchMock.mockImplementation((path: string) => {
-      if (path === "/admin/collections/templates") return Promise.resolve(catalogResponse);
-      if (path === "/admin/collections/template-bundles") return Promise.resolve(bundlesResponse);
+      if (path === "GET /api/v2/admin/collections/templates")
+        return Promise.resolve(catalogResponse);
+      if (path === "GET /api/v2/admin/collections/template-bundles")
+        return Promise.resolve(bundlesResponse);
       throw new Error(`unexpected path: ${path}`);
     });
   });
@@ -201,10 +239,14 @@ describe("CollectionTemplateGallery", () => {
     });
 
     fetchMock.mockImplementation((path: string) => {
-      if (path === "/admin/collections/templates") return Promise.resolve(catalogResponse);
-      if (path === "/admin/collections/template-bundles") return Promise.resolve(bundlesResponse);
-      if (path === "/admin/collections/import/tmdb") {
-        return Promise.resolve({ collection: { id: "x" } });
+      if (path === "GET /api/v2/admin/collections/templates")
+        return Promise.resolve(catalogResponse);
+      if (path === "GET /api/v2/admin/collections/template-bundles")
+        return Promise.resolve(bundlesResponse);
+      if (path === "POST /api/v2/admin/collections/import/tmdb") {
+        return Promise.resolve({
+          collection: { id: "x", library_id: "1", library_ids: ["1"], query_definition: {} },
+        });
       }
       throw new Error(`unexpected path: ${path}`);
     });
@@ -213,7 +255,10 @@ describe("CollectionTemplateGallery", () => {
     await user.click(screen.getByRole("button", { name: /Create Collection/i }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/admin/collections/import/tmdb", expect.any(Object));
+      expect(fetchMock).toHaveBeenCalledWith(
+        "POST /api/v2/admin/collections/import/tmdb",
+        expect.any(Object),
+      );
     });
   });
 
@@ -226,9 +271,11 @@ describe("CollectionTemplateGallery", () => {
     });
 
     fetchMock.mockImplementation((path: string) => {
-      if (path === "/admin/collections/templates") return Promise.resolve(catalogResponse);
-      if (path === "/admin/collections/template-bundles") return Promise.resolve(bundlesResponse);
-      if (path === "/admin/collections/import/trakt") {
+      if (path === "GET /api/v2/admin/collections/templates")
+        return Promise.resolve(catalogResponse);
+      if (path === "GET /api/v2/admin/collections/template-bundles")
+        return Promise.resolve(bundlesResponse);
+      if (path === "POST /api/v2/admin/collections/import/trakt") {
         return Promise.resolve({ collection: { id: "y" } });
       }
       throw new Error(`unexpected path: ${path}`);
@@ -238,7 +285,56 @@ describe("CollectionTemplateGallery", () => {
     await user.click(screen.getByRole("button", { name: /Create Collection/i }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/admin/collections/import/trakt", expect.any(Object));
+      expect(fetchMock).toHaveBeenCalledWith(
+        "POST /api/v2/admin/collections/import/trakt",
+        expect.any(Object),
+      );
+    });
+  });
+
+  it("asks for a TMDB list URL and imports a Custom TMDB List template", async () => {
+    const user = userEvent.setup();
+    renderGallery();
+
+    await waitFor(() => {
+      expect(screen.getByText("Custom TMDB List")).toBeInTheDocument();
+    });
+
+    fetchMock.mockImplementation((path: string) => {
+      if (path === "GET /api/v2/admin/collections/templates")
+        return Promise.resolve(catalogResponse);
+      if (path === "GET /api/v2/admin/collections/template-bundles")
+        return Promise.resolve(bundlesResponse);
+      if (path === "POST /api/v2/admin/collections/import/tmdb-list") {
+        return Promise.resolve({ collection: { id: "z" } });
+      }
+      throw new Error(`unexpected path: ${path}`);
+    });
+
+    await user.click(screen.getByText("Custom TMDB List"));
+    const submit = screen.getByRole("button", { name: /Create Collection/i });
+    expect(submit).toBeDisabled();
+
+    const url = screen.getByLabelText("TMDB list URL");
+    await user.type(url, "https://www.themoviedb.org/movie/550");
+    expect(url).toHaveAttribute("aria-invalid", "true");
+    expect(submit).toBeDisabled();
+
+    await user.clear(url);
+    await user.type(url, "https://www.themoviedb.org/list/310-my-movie-list");
+    expect(url).not.toHaveAttribute("aria-invalid");
+    await user.click(submit);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "POST /api/v2/admin/collections/import/tmdb-list",
+        expect.objectContaining({
+          body: expect.objectContaining({
+            url: "https://www.themoviedb.org/list/310-my-movie-list",
+            library_ids: ["1"],
+          }),
+        }),
+      );
     });
   });
 
@@ -251,9 +347,11 @@ describe("CollectionTemplateGallery", () => {
     });
 
     fetchMock.mockImplementation((path: string) => {
-      if (path === "/admin/collections/templates") return Promise.resolve(catalogResponse);
-      if (path === "/admin/collections/template-bundles") return Promise.resolve(bundlesResponse);
-      if (path === "/admin/collections/template-bundles/core_defaults/apply") {
+      if (path === "GET /api/v2/admin/collections/templates")
+        return Promise.resolve(catalogResponse);
+      if (path === "GET /api/v2/admin/collections/template-bundles")
+        return Promise.resolve(bundlesResponse);
+      if (path === "POST /api/v2/admin/collections/template-bundles/{bundle_id}/apply") {
         return Promise.resolve({
           bundle_id: "core_defaults",
           dry_run: true,
@@ -261,13 +359,19 @@ describe("CollectionTemplateGallery", () => {
             {
               template_id: "tmdb_trending_movies_week",
               template_title: "Trending Movies This Week",
-              library_id: 1,
+              library_id: "1",
               library_name: "Movies",
               reason: "would_create",
             },
           ],
           skipped: [],
           failed: [],
+          deleted: [],
+          delete_skipped: [],
+          delete_failed: [],
+          sync_queued: [],
+          featured: [],
+          featured_failed: [],
         });
       }
       throw new Error(`unexpected path: ${path}`);
@@ -281,11 +385,11 @@ describe("CollectionTemplateGallery", () => {
       expect(screen.getByText(/Would create 1; skipped 0; failed 0/i)).toBeInTheDocument();
     });
     const applyCall = fetchMock.mock.calls.find(
-      ([path]) => path === "/admin/collections/template-bundles/core_defaults/apply",
+      ([path]) => path === "POST /api/v2/admin/collections/template-bundles/{bundle_id}/apply",
     );
-    expect(JSON.parse(String(applyCall?.[1]?.body))).toMatchObject({
+    expect(applyCall?.[1]?.body).toMatchObject({
       featured: {
-        home: { library_id: 1, template_id: "tmdb_trending_movies_week" },
+        home: { library_id: "1", template_id: "tmdb_trending_movies_week" },
         libraries: { "1": "tmdb_trending_movies_week" },
       },
     });
@@ -300,16 +404,18 @@ describe("CollectionTemplateGallery", () => {
     });
 
     fetchMock.mockImplementation((path: string) => {
-      if (path === "/admin/collections/templates") return Promise.resolve(catalogResponse);
-      if (path === "/admin/collections/template-bundles") return Promise.resolve(bundlesResponse);
-      if (path === "/admin/collections/template-bundles/core_defaults/apply") {
+      if (path === "GET /api/v2/admin/collections/templates")
+        return Promise.resolve(catalogResponse);
+      if (path === "GET /api/v2/admin/collections/template-bundles")
+        return Promise.resolve(bundlesResponse);
+      if (path === "POST /api/v2/admin/collections/template-bundles/{bundle_id}/apply") {
         return Promise.resolve({
           bundle_id: "core_defaults",
           dry_run: true,
           delete_existing: true,
           deleted: [
             {
-              library_id: 1,
+              library_id: "1",
               library_name: "Movies",
               collection_id: "lc_old",
               collection_title: "Old Movies",
@@ -321,6 +427,9 @@ describe("CollectionTemplateGallery", () => {
           created: [],
           skipped: [],
           failed: [],
+          sync_queued: [],
+          featured: [],
+          featured_failed: [],
         });
       }
       throw new Error(`unexpected path: ${path}`);
@@ -336,12 +445,12 @@ describe("CollectionTemplateGallery", () => {
       ).toBeInTheDocument();
     });
     const applyCall = fetchMock.mock.calls.find(
-      ([path]) => path === "/admin/collections/template-bundles/core_defaults/apply",
+      ([path]) => path === "POST /api/v2/admin/collections/template-bundles/{bundle_id}/apply",
     );
-    expect(JSON.parse(String(applyCall?.[1]?.body))).toMatchObject({
+    expect(applyCall?.[1]?.body).toMatchObject({
       dry_run: true,
       delete_existing: true,
-      library_ids: [1],
+      library_ids: ["1"],
     });
   });
 
@@ -354,13 +463,18 @@ describe("CollectionTemplateGallery", () => {
     });
 
     fetchMock.mockImplementation((path: string) => {
-      if (path === "/admin/collections/templates") return Promise.resolve(catalogResponse);
-      if (path === "/admin/collections/template-bundles") return Promise.resolve(bundlesResponse);
-      if (path === "/admin/collections/template-bundles/core_defaults/apply-job") {
+      if (path === "GET /api/v2/admin/collections/templates")
+        return Promise.resolve(catalogResponse);
+      if (path === "GET /api/v2/admin/collections/template-bundles")
+        return Promise.resolve(bundlesResponse);
+      if (path === "POST /api/v2/admin/collections/template-bundles/{bundle_id}/apply-job") {
         return Promise.resolve({
           id: "job-1",
-          job_type: "template_bundle_apply",
-          status: "queued",
+          kind: "template_bundle_apply",
+          state: "queued",
+          terminal: false,
+          cancelable: false,
+          created_at: "2026-09-05T00:00:00Z",
         });
       }
       throw new Error(`unexpected path: ${path}`);
@@ -371,10 +485,64 @@ describe("CollectionTemplateGallery", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/admin/collections/template-bundles/core_defaults/apply-job",
+        "POST /api/v2/admin/collections/template-bundles/{bundle_id}/apply-job",
         expect.objectContaining({
-          method: "POST",
-          body: expect.stringContaining('"library_ids":[1]'),
+          path: { bundle_id: "core_defaults" },
+          body: expect.objectContaining({ library_ids: ["1"] }),
+        }),
+      );
+    });
+  });
+});
+
+// Personal mode lists what GET /collections/templates returns, which the server
+// limits to sources a personal collection can import (#1640).
+describe("CollectionTemplateGallery in user mode", () => {
+  const userCatalog = {
+    categories: [catalogResponse.categories[0], catalogResponse.categories[2]],
+  };
+
+  function renderUserGallery() {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={client}>
+        <CollectionTemplateGallery mode="user" open onOpenChange={() => {}} />
+      </QueryClientProvider>,
+    );
+  }
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    fetchMock.mockImplementation((path: string) => {
+      if (path === "GET /api/v2/collections/templates") return Promise.resolve(userCatalog);
+      if (path === "POST /api/v2/collections/import/tmdb") {
+        return Promise.resolve({ collection: { id: "personal-1" } });
+      }
+      throw new Error(`unexpected path: ${path}`);
+    });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("creates a personal collection from a TMDB template", async () => {
+    const user = userEvent.setup();
+    renderUserGallery();
+
+    await waitFor(() => {
+      expect(screen.getByText("Trending Movies This Week")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Core Defaults")).not.toBeInTheDocument();
+
+    await user.click(screen.getByText("Trending Movies This Week"));
+    await user.click(screen.getByRole("button", { name: /Create Collection/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "POST /api/v2/collections/import/tmdb",
+        expect.objectContaining({
+          body: expect.objectContaining({ preset: "trending", media_type: "movie" }),
         }),
       );
     });

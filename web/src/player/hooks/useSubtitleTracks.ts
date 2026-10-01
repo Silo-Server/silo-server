@@ -35,7 +35,6 @@ const FETCH_RETRY_MAX_BACKOFF_MS = 60_000;
 interface SubtitleTrackCarryover {
   url: string | null;
   cues: ParsedCue[];
-  seen: Set<string>;
   coverageStart: number;
   windowEnd: number;
   atEOF: boolean;
@@ -129,8 +128,8 @@ export function useSubtitleTracks(
   // built against an already-stable stream). Changing this rebuilds the track
   // against the settled new stream, so selecting a text track in the same
   // action that restarts the transcode (turning off bitmap burn-in) still
-  // renders. The initial stream does not bump it, leaving session start on the
-  // existing activeUrl-driven build.
+  // renders. Initial media loading also bumps it because HLS can clear cues
+  // fetched before the first media metadata arrives.
   streamGeneration = 0,
   onLoadState?: (state: "idle" | "loading" | "ready" | "error") => void,
 ): string[] {
@@ -210,21 +209,22 @@ export function useSubtitleTracks(
     // URL is unchanged — i.e. this rebuild replaces a track orphaned by a
     // stream reload, not a track switch. Cue times were snapshotted in source
     // time and are re-derived against the current origin/delay here, so an
-    // origin change across the reload lands correctly. The carried dedup set
-    // is installed as-is (its keys are source-time based and stay valid).
+    // origin change across the reload lands correctly. Rebuild dedup keys for
+    // every restored cue, including cues newly visible after an origin change.
     const carried = carryoverRef.current;
     carryoverRef.current = null;
     const restored = carried && carried.url === activeUrl && !activeIsLive ? carried : null;
+    // HLS clears every native TextTrack when it attaches a new stream. Keep
+    // source cues independently so that cleanup after that clear can still
+    // restore the fetched window, rather than marking an empty track covered.
+    const sourceCues = new Map<string, ParsedCue>();
+    for (const cue of restored?.cues ?? []) {
+      sourceCues.set(`${cue.start}|${cue.end}|${cue.text}`, cue);
+    }
     if (restored) {
       const origin = appliedOriginRef.current;
       const delaySec = appliedDelayMsRef.current / 1000;
-      for (const cue of restored.cues) {
-        const startTime = Math.max(0, cue.start - origin + delaySec);
-        const endTime = cue.end - origin + delaySec;
-        if (endTime <= 0) continue;
-        track.addCue(new VTTCue(startTime, endTime, cue.text));
-      }
-      seenCueKeysRef.current = restored.seen;
+      addCuesToTrack(track, restored.cues, origin, delaySec, seenCueKeysRef.current);
     }
 
     let cancelled = false;
@@ -255,6 +255,8 @@ export function useSubtitleTracks(
     track.addEventListener("cuechange", handleCueChange);
 
     function clearCues() {
+      sourceCues.clear();
+      seenCueKeysRef.current.clear();
       const cues = track.cues;
       if (!cues) return;
       // Snapshot first: removeCue mutates the live list, and indexing into
@@ -262,7 +264,6 @@ export function useSubtitleTracks(
       for (const cue of Array.from(cues)) {
         track.removeCue(cue);
       }
-      seenCueKeysRef.current.clear();
     }
 
     function addParsedCues(newCues: ParsedCue[]) {
@@ -276,6 +277,9 @@ export function useSubtitleTracks(
       // rebase effect shifts everything to the new origin in one pass.
       // Any active user-facing sync delay gets baked in here so new cues
       // line up with existing ones.
+      for (const cue of newCues) {
+        if (cue.end > cue.start) sourceCues.set(`${cue.start}|${cue.end}|${cue.text}`, cue);
+      }
       const origin = appliedOriginRef.current;
       const delaySec = appliedDelayMsRef.current / 1000;
       addCuesToTrack(track, newCues, origin, delaySec, seenCueKeysRef.current);
@@ -468,23 +472,13 @@ export function useSubtitleTracks(
       videoEl.removeEventListener("seeking", maybeFetch);
       videoEl.removeEventListener("seeked", maybeFetch);
       track.removeEventListener("cuechange", handleCueChange);
-      // Snapshot loaded cues (converted back to source time) and coverage so
+      // Snapshot source cues and coverage independently of native tracks so
       // a rebuild against a reloaded <video> element can restore them without
-      // refetching. Copy the dedup set: clearCues below empties the shared one.
+      // refetching after the HLS controller has cleared the native cue list.
       {
-        const origin = appliedOriginRef.current;
-        const delaySec = appliedDelayMsRef.current / 1000;
         carryoverRef.current = {
           url: activeUrl,
-          cues: Array.from(track.cues ?? []).map((cue) => {
-            const vc = cue as VTTCue;
-            return {
-              start: vc.startTime + origin - delaySec,
-              end: vc.endTime + origin - delaySec,
-              text: vc.text,
-            };
-          }),
-          seen: new Set(seenCueKeysRef.current),
+          cues: Array.from(sourceCues.values()),
           coverageStart,
           windowEnd,
           atEOF,

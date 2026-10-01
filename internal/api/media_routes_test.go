@@ -21,6 +21,8 @@ import (
 
 var updateRouteManifest = flag.Bool("update-route-manifest", false, "update checked-in route manifest")
 
+var routeManifestPath = flag.String("route-manifest-path", "testdata/media_routes.txt", "route manifest fixture or isolated generation output")
+
 func TestMediaRouteManifest(t *testing.T) {
 	cfg, err := config.LoadFromDB(map[string]string{})
 	if err != nil {
@@ -32,13 +34,19 @@ func TestMediaRouteManifest(t *testing.T) {
 	}
 	t.Cleanup(pool.Close)
 	declareNativeMediaRoutes()
-	minimal := NewRouter(Dependencies{Config: cfg})
-	maximal := NewRouter(Dependencies{DB: pool, Config: cfg, FileRepo: scanner.NewFileRepository(pool), FolderRepo: catalog.NewFolderRepository(pool), SessionMgr: playback.NewSessionManager(0, 0)})
-	actual, err := streamtelemetry.BuildRouteManifest([]chi.Routes{minimal, maximal}, nativeMediaRoutes)
+	// NewRouter seals the router so no production caller can register on it;
+	// a test walks the tree through the unexported constructor instead.
+	snapshots := []map[string][]streamtelemetry.WalkedRoute{{}, {}}
+	observeV2 := func(index int) func([]streamtelemetry.WalkedRoute) {
+		return func(routes []streamtelemetry.WalkedRoute) { snapshots[index]["/api/v2/*"] = routes }
+	}
+	minimal := newChiRouter(Dependencies{Config: cfg, v2RouteSnapshot: observeV2(0)})
+	maximal := newChiRouter(Dependencies{DB: pool, Config: cfg, FileRepo: scanner.NewFileRepository(pool), FolderRepo: catalog.NewFolderRepository(pool), SessionMgr: playback.NewSessionManager(0, 0), v2RouteSnapshot: observeV2(1)})
+	actual, err := streamtelemetry.BuildRouteManifest([]chi.Routes{minimal, maximal}, nativeMediaRoutes, snapshots...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	const path = "testdata/media_routes.txt"
+	path := *routeManifestPath
 	if *updateRouteManifest {
 		if err := os.MkdirAll("testdata", 0o755); err != nil {
 			t.Fatal(err)

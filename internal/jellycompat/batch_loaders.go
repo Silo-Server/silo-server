@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -16,6 +17,9 @@ import (
 type compatEpisodeTarget struct {
 	Item         upstreamListItem
 	SeriesImages seriesImageSet
+	// SeasonImages carries only the season poster (ContentID, Poster*,
+	// UpdatedAt); it is empty when the loader has no season row.
+	SeasonImages seriesImageSet
 	SeasonID     string
 	SeasonName   string
 }
@@ -43,18 +47,36 @@ type episodeRepoForBatchLoader interface {
 	HasFilesByIDs(ctx context.Context, contentIDs []string) (map[string]bool, error)
 	ListBySeason(ctx context.Context, seriesID string, seasonNum int) ([]*models.Episode, error)
 	ListBySeries(ctx context.Context, seriesID string) ([]*models.Episode, error)
+	ListBySeriesIDs(ctx context.Context, seriesIDs []string) (map[string][]*models.Episode, error)
 	ListAdjacentInSeries(ctx context.Context, seriesID string, seasonNumber, episodeNumber int) ([]*models.Episode, error)
 }
 
 func (h *ItemsHandler) fetchCompatItemsByContentIDs(ctx context.Context, session *Session, contentIDs []string, libraryID *int) (map[string]upstreamListItem, error) {
+	listItems, err := h.loadCompatItemsByContentIDs(ctx, session, contentIDs, libraryID)
+	if err != nil {
+		return nil, err
+	}
+	presignCompatListItems(ctx, h.detailSvc, listItems)
+	fillListItemDurations(ctx, h.durationSrc, listItems)
+	result := make(map[string]upstreamListItem, len(listItems))
+	for _, listItem := range listItems {
+		result[listItem.ContentID] = listItem
+	}
+	return result, nil
+}
+
+// loadCompatItemsByContentIDs returns the access-filtered media_items rows for
+// contentIDs as list items, without presigned images or durations, for callers
+// that only need to know which members exist and what type they are.
+func (h *ItemsHandler) loadCompatItemsByContentIDs(ctx context.Context, session *Session, contentIDs []string, libraryID *int) ([]upstreamListItem, error) {
 	normalized := normalizeContentIDs(contentIDs)
 	if len(normalized) == 0 {
-		return map[string]upstreamListItem{}, nil
+		return nil, nil
 	}
 
 	pool := h.compatPool()
 	if pool == nil {
-		return h.fetchCompatItemsByContentIDsFallback(ctx, session, normalized, libraryID)
+		return h.loadCompatItemsByContentIDsFallback(ctx, session, normalized, libraryID)
 	}
 
 	access := h.resolveAccessFilter(ctx, session)
@@ -63,7 +85,7 @@ func (h *ItemsHandler) fetchCompatItemsByContentIDs(ctx context.Context, session
 	args := []any{normalized}
 	argIdx := 2
 	if !applyCompatLibraryAccess(&access, libraryID, "mi.content_id", &conditions, &args, &argIdx) {
-		return map[string]upstreamListItem{}, nil
+		return nil, nil
 	}
 	catalog.ApplySectionAccessFilter("mi", access, &conditions, &args, &argIdx)
 
@@ -87,25 +109,18 @@ func (h *ItemsHandler) fetchCompatItemsByContentIDs(ctx context.Context, session
 	for _, item := range items {
 		listItems = append(listItems, mediaItemToListItem(item))
 	}
-	presignCompatListItems(ctx, h.detailSvc, listItems)
-	fillListItemDurations(ctx, h.durationSrc, listItems)
-	result := make(map[string]upstreamListItem, len(listItems))
-	for _, listItem := range listItems {
-		result[listItem.ContentID] = listItem
-	}
-	return result, nil
+	return listItems, nil
 }
 
-func (h *ItemsHandler) fetchCompatItemsByContentIDsFallback(ctx context.Context, session *Session, contentIDs []string, libraryID *int) (map[string]upstreamListItem, error) {
-	result := make(map[string]upstreamListItem, len(contentIDs))
+func (h *ItemsHandler) loadCompatItemsByContentIDsFallback(ctx context.Context, session *Session, contentIDs []string, libraryID *int) ([]upstreamListItem, error) {
 	if h.itemRepo == nil {
-		return result, nil
+		return nil, nil
 	}
 
 	access := h.resolveAccessFilter(ctx, session)
 	if libraryID != nil && *libraryID > 0 {
 		if !narrowAccessToLibrary(&access, *libraryID) {
-			return result, nil
+			return nil, nil
 		}
 	}
 
@@ -117,12 +132,7 @@ func (h *ItemsHandler) fetchCompatItemsByContentIDsFallback(ctx context.Context,
 	for _, item := range items {
 		listItems = append(listItems, mediaItemToListItem(item))
 	}
-	presignCompatListItems(ctx, h.detailSvc, listItems)
-	fillListItemDurations(ctx, h.durationSrc, listItems)
-	for _, listItem := range listItems {
-		result[listItem.ContentID] = listItem
-	}
-	return result, nil
+	return listItems, nil
 }
 
 // narrowAccessToLibrary intersects the viewer's effective access policy with a
@@ -203,8 +213,14 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			e.updated_at,
 			e.season_number,
 			e.episode_number,
+			e.imdb_id,
+			e.tmdb_id,
+			e.tvdb_id,
 			COALESCE(e.season_id, ''),
 			COALESCE(se.title, ''),
+			COALESCE(se.poster_path, ''),
+			COALESCE(se.poster_thumbhash, ''),
+			COALESCE(se.updated_at, e.updated_at),
 			si.content_id,
 			si.title,
 			si.genres,
@@ -245,8 +261,14 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			updatedAt        time.Time
 			seasonNumber     int
 			episodeNumber    int
+			episodeImdbID    string
+			episodeTmdbID    string
+			episodeTvdbID    string
 			seasonID         string
 			seasonName       string
+			seasonPoster     string
+			seasonPosterTH   string
+			seasonUpdatedAt  time.Time
 			seriesID         string
 			seriesTitle      string
 			genres           []string
@@ -273,8 +295,14 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			&updatedAt,
 			&seasonNumber,
 			&episodeNumber,
+			&episodeImdbID,
+			&episodeTmdbID,
+			&episodeTvdbID,
 			&seasonID,
 			&seasonName,
+			&seasonPoster,
+			&seasonPosterTH,
+			&seasonUpdatedAt,
 			&seriesID,
 			&seriesTitle,
 			&genres,
@@ -316,6 +344,9 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			SeriesTitle:       seriesTitle,
 			SeasonNumber:      intPtr(seasonNumber),
 			EpisodeNumber:     intPtr(episodeNumber),
+			ImdbID:            episodeImdbID,
+			TmdbID:            episodeTmdbID,
+			TvdbID:            episodeTvdbID,
 			Runtime:           runtime,
 			HasMediaFiles:     &hasMediaFiles,
 		}
@@ -337,6 +368,17 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			},
 			SeasonID:   seasonID,
 			SeasonName: seasonName,
+		}
+		if seasonID != "" && seasonPoster != "" {
+			target := result[contentID]
+			target.SeasonImages = seriesImageSet{
+				ContentID:       seasonID,
+				PosterURL:       compatPresignImage(h.detailSvc, ctx, seasonPoster, "poster", compatCardImageSize),
+				PosterPath:      seasonPoster,
+				PosterThumbhash: seasonPosterTH,
+				UpdatedAt:       seasonUpdatedAt,
+			}
+			result[contentID] = target
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -442,6 +484,9 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDsFallback(ctx context
 			SeriesTitle:       series.Title,
 			SeasonNumber:      intPtr(episode.SeasonNumber),
 			EpisodeNumber:     intPtr(episode.EpisodeNumber),
+			ImdbID:            episode.ImdbID,
+			TmdbID:            episode.TmdbID,
+			TvdbID:            episode.TvdbID,
 			Runtime:           episode.Runtime,
 			HasMediaFiles:     boolPtr(hasFiles[episode.ContentID]),
 		}
@@ -484,6 +529,7 @@ func compatItemColumns(alias string) string {
 		"metadata_s3_path", "metadata_etag", "season_count",
 		"studios", "networks", "countries", "first_air_date", "last_air_date",
 		"matched_at", "status", "created_at", "updated_at",
+		"original_language",
 	}
 	prefixed := make([]string, len(cols))
 	for i, col := range cols {
@@ -505,6 +551,7 @@ func scanCompatMediaItems(rows pgx.Rows) ([]*models.MediaItem, error) {
 			&item.MetadataS3Path, &item.MetadataEtag, &item.SeasonCount,
 			&item.Studios, &item.Networks, &item.Countries, &item.FirstAirDate, &item.LastAirDate,
 			&item.MatchedAt, &item.Status, &item.CreatedAt, &item.UpdatedAt,
+			&item.OriginalLanguage,
 		); err != nil {
 			return nil, fmt.Errorf("scanning compat media item: %w", err)
 		}
@@ -534,4 +581,76 @@ func filterContentIDsForLibrary(ctx context.Context, checker libraryMembershipCh
 		}
 	}
 	return filtered, nil
+}
+
+// Jellyfin BaseItemDto.Type values whose versions are counted.
+const (
+	compatDTOTypeMovie   = "Movie"
+	compatDTOTypeEpisode = "Episode"
+)
+
+// applyListMediaSourceCounts replaces the list path's assumed single source
+// with the real number of accessible, present versions when the client asked
+// for MediaSourceCount (Jellyfin Web's multi-version badge on library grids).
+// It counts the same files the detail path lists as versions: a movie's files
+// by content_id, an episode's by episode_id. One grouped query per kind covers
+// the whole page; any failure keeps the list default.
+func (h *ItemsHandler) applyListMediaSourceCounts(ctx context.Context, session *Session, items []baseItemDTO, query itemsQuery) {
+	if len(items) == 0 || !query.requestedFields["mediasourcecount"] || h.codec == nil {
+		return
+	}
+	pool := h.compatPool()
+	if pool == nil {
+		return
+	}
+	byKind := map[string][]string{}
+	indexes := map[string][]int{}
+	for i, dto := range items {
+		var column string
+		switch dto.Type {
+		case compatDTOTypeMovie:
+			column = "content_id"
+		case compatDTOTypeEpisode:
+			column = "episode_id"
+		default:
+			continue
+		}
+		contentID, err := decodeItemID(h.codec, dto.ID)
+		if err != nil || contentID == "" {
+			continue
+		}
+		byKind[column] = append(byKind[column], contentID)
+		indexes[column+"\x00"+contentID] = append(indexes[column+"\x00"+contentID], i)
+	}
+	access := h.resolveAccessFilter(ctx, session)
+	for column, ids := range byKind {
+		args := []any{ids}
+		conditions, args := catalog.MediaFileAccessSQL("mf", access, args)
+		conditions = append([]string{"mf." + column + " = ANY($1)", "mf.missing_since IS NULL"}, conditions...)
+		rows, err := pool.Query(ctx, "SELECT mf."+column+", COUNT(*) FROM media_files mf WHERE "+strings.Join(conditions, " AND ")+" GROUP BY mf."+column, args...)
+		if err != nil {
+			slog.DebugContext(ctx, "jellycompat media source count failed", "component", "jellycompat", "error", err)
+			continue
+		}
+		counts := make(map[string]int, len(ids))
+		for rows.Next() {
+			var contentID string
+			var count int
+			if err := rows.Scan(&contentID, &count); err != nil {
+				break
+			}
+			counts[contentID] = count
+		}
+		rows.Close()
+		if rows.Err() != nil {
+			continue
+		}
+		// An item with no file the viewer may play leaves the count unset
+		// rather than keeping the mapper's single-source assumption.
+		for _, contentID := range ids {
+			for _, i := range indexes[column+"\x00"+contentID] {
+				items[i].MediaSourceCount = counts[contentID]
+			}
+		}
+	}
 }

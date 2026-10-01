@@ -100,6 +100,16 @@ func SeedDefaults(ctx context.Context, store SettingsStore) error {
 	return nil
 }
 
+// ServerInstanceID returns the existing installation identity without depending
+// on diagnostics being enabled. Atomic initialization is mandatory for callers
+// that bind durable cross-node state to this identity.
+func ServerInstanceID(ctx context.Context, store SettingsStore) (string, error) {
+	if _, ok := store.(conditionalSettingsStore); !ok {
+		return "", fmt.Errorf("installation identity requires atomic settings initialization")
+	}
+	return ensureServerInstanceID(ctx, store)
+}
+
 // ensureServerInstanceID returns the diagnostics server instance ID, generating
 // and persisting one when absent. Seeding is atomic when the store supports
 // insert-if-absent: concurrent nodes converge on the single winning value

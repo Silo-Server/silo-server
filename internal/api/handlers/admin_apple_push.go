@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"math"
 	"net/http"
 	"os"
 	"strconv"
@@ -126,57 +125,16 @@ func (h *AdminApplePushHandler) HandleRegisterRelay(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	relayURL, err := notifications.NormalizePushRelayURL(req.RelayURL, h.developmentRelayURL)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
 
-	settings := notifications.NewSettings(h.settings)
-	if h.system != nil && h.system.Settings != nil {
-		settings = h.system.Settings
-	}
-	current := notifications.LoadPushRelayCredential(r.Context(), settings)
-	var relayResp notifications.RelayCredentialResult
-	switch {
-	case current.APIKey == "", notifications.IsLegacyPushRelayKey(current.APIKey), current.ReregistrationRequired:
-		relayResp, err = notifications.RegisterRelayCredential(r.Context(), settings, h.client, relayURL)
-	default:
-		currentURL, urlErr := notifications.NormalizePushRelayURL(current.RelayURL, h.developmentRelayURL)
-		if urlErr != nil || currentURL != relayURL {
-			writeError(w, http.StatusConflict, "relay_origin_change_requires_reregistration", "Clear or re-register the relay credential before changing relay origins")
-			return
-		}
-		current.RelayURL = currentURL
-		relayResp, err = notifications.RotateRelayCredential(r.Context(), settings, h.client, current)
-	}
+	view, err := h.RegisterNotificationRelay(r.Context(), req.RelayURL)
 	if err != nil {
-		var relayErr notifications.RelayCredentialError
-		if current.APIKey != "" && !notifications.IsLegacyPushRelayKey(current.APIKey) &&
-			errors.As(err, &relayErr) && relayErr.Status == http.StatusUnauthorized {
-			if markErr := notifications.MarkRelayReregistrationRequired(r.Context(), settings, current); markErr != nil {
-				writeError(w, http.StatusInternalServerError, "settings_error", "Failed to save push relay credential status")
-				return
-			}
-			writeError(w, http.StatusConflict, "relay_reregistration_required", "The current relay capability was rejected; explicit re-registration is required")
-			return
-		}
-		status, code, message := mapRelayRegistrationError(err)
-		if errors.As(err, &relayErr) && relayErr.RetryAfter > 0 {
-			w.Header().Set("Retry-After", strconv.Itoa(max(1, int(math.Ceil(relayErr.RetryAfter.Seconds())))))
-		}
-		writeError(w, status, code, message)
+		writeNotificationRelayFailure(w, err)
 		return
 	}
-	credential := relayResp.Credential
 	writeJSON(w, http.StatusOK, adminPushRelayRegisterResponse{
-		RelayURL:         credential.RelayURL,
-		DeploymentID:     credential.DeploymentID,
-		KeyPrefix:        credential.KeyPrefix,
-		APIKeyConfigured: true,
-		RelayRequestID:   relayResp.RequestID,
-		APNsTopics:       relayResp.APNsTopics,
-		ExpiresAt:        credential.ExpiresAt.UTC().Format(time.RFC3339),
+		RelayURL: view.RelayURL, DeploymentID: view.DeploymentID, KeyPrefix: view.KeyPrefix,
+		APIKeyConfigured: true, RelayRequestID: view.RelayRequestID, APNsTopics: view.APNsTopics,
+		ExpiresAt: view.ExpiresAt.UTC().Format(time.RFC3339),
 	})
 }
 
@@ -189,15 +147,23 @@ func (h *AdminApplePushHandler) HandleClearRelay(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Settings store is not available")
 		return
 	}
-	settings := notifications.NewSettings(h.settings)
-	if h.system != nil && h.system.Settings != nil {
-		settings = h.system.Settings
-	}
-	if err := settings.UpdatePushRelayCredential(r.Context(), notifications.PushRelayCredential{}); err != nil {
-		writeError(w, http.StatusInternalServerError, "settings_error", "Failed to clear push relay credential")
+
+	if err := h.ClearNotificationRelay(r.Context()); err != nil {
+		writeNotificationRelayFailure(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func writeNotificationRelayFailure(w http.ResponseWriter, err error) {
+	if apiErr, ok := errors.AsType[*APIError](err); ok {
+		if apiErr.RetryAfter > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(apiErr.RetryAfter))
+		}
+		writeError(w, apiErr.Status, apiErr.Code, apiErr.Message)
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "internal_error", "Failed to register push relay")
 }
 
 func mapRelayRegistrationError(err error) (int, string, string) {

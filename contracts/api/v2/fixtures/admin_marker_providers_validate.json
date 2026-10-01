@@ -1,0 +1,12 @@
+{
+  "valid": true,
+  "stats": {
+    "total": 5,
+    "accepted": 4,
+    "pending": 0,
+    "rejected": 0,
+    "acceptance_rate": 0.8,
+    "current_streak": 0,
+    "best_streak": 0
+  }
+}

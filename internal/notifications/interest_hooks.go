@@ -3,9 +3,13 @@ package notifications
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -18,19 +22,46 @@ import (
 // and drift-free.
 //
 // Progress writes queue only on state *transitions* (a row appearing, the
-// in-progress flag flipping, completion crossing, rows being cleared):
-// progress sync ticks fire continuously during playback on a busy server, and
-// recomputing interest on every tick would be a pointless hot write path.
+// in-progress flag flipping, completion crossing, rows being cleared) and on
+// the first write of a new watch session: progress sync ticks fire
+// continuously during playback on a busy server, and recomputing interest on
+// every tick would be a pointless hot write path.
 func WrapUserStoreProvider(inner userstore.UserStoreProvider, system *System) userstore.UserStoreProvider {
 	if inner == nil || system == nil {
 		return inner
 	}
-	return &interestTrackingProvider{inner: inner, system: system}
+	tracked := &interestTrackingProvider{inner: inner, system: system}
+	if profiles, ok := inner.(transactionalProfileCreator); ok {
+		return &interestTrackingProviderWithProfileTransaction{interestTrackingProvider: tracked, transactionalProfileCreator: profiles}
+	}
+	return tracked
+}
+
+// Account creation probes this whole-provider capability before inserting its
+// default profile. Preserve it only when the selected backend can join that
+// PostgreSQL transaction; advertising it for SQLite would change its fallback.
+type transactionalProfileCreator interface {
+	CreateProfileInTransaction(context.Context, pgx.Tx, int, userstore.Profile) error
+}
+
+type interestTrackingProviderWithProfileTransaction struct {
+	*interestTrackingProvider
+	transactionalProfileCreator
 }
 
 type interestTrackingProvider struct {
 	inner  userstore.UserStoreProvider
 	system *System
+}
+
+// ListAllSectionOverrides preserves the optional account-wide enumeration
+// capability of the wrapped store.
+func (s *interestTrackingStore) ListAllSectionOverrides(ctx context.Context) ([]userstore.SectionOverride, error) {
+	enumerator, ok := s.UserStore.(userstore.SectionOverrideEnumerator)
+	if !ok {
+		return nil, errors.New("section override enumeration is not supported")
+	}
+	return enumerator.ListAllSectionOverrides(ctx)
 }
 
 func (p *interestTrackingProvider) ForUser(ctx context.Context, userID int) (userstore.UserStore, error) {
@@ -45,50 +76,51 @@ func (p *interestTrackingProvider) ForUser(ctx context.Context, userID int) (use
 	registry, hasDevices := store.(userstore.DeviceRegistry)
 	rollup, hasRollup := store.(userstore.SeriesEpisodeRollupStore)
 	completion, hasCompletion := store.(userstore.EpisodeParentCompletionStore)
+	var wrapped userstore.UserStore = tracked
 	switch {
 	case hasDevices && hasRollup && hasCompletion:
-		return &interestTrackingStoreWithDevicesRollupAndCompletion{
+		wrapped = &interestTrackingStoreWithDevicesRollupAndCompletion{
 			interestTrackingStoreWithDevicesAndRollup: &interestTrackingStoreWithDevicesAndRollup{
 				interestTrackingStore: tracked, DeviceRegistry: registry, SeriesEpisodeRollupStore: rollup,
 			},
 			EpisodeParentCompletionStore: completion,
-		}, nil
+		}
 	case hasDevices && hasCompletion:
-		return &interestTrackingStoreWithDevicesAndCompletion{
+		wrapped = &interestTrackingStoreWithDevicesAndCompletion{
 			interestTrackingStoreWithDevices: &interestTrackingStoreWithDevices{
 				interestTrackingStore: tracked, DeviceRegistry: registry,
 			},
 			EpisodeParentCompletionStore: completion,
-		}, nil
+		}
 	case hasRollup && hasCompletion:
-		return &interestTrackingStoreWithRollupAndCompletion{
+		wrapped = &interestTrackingStoreWithRollupAndCompletion{
 			interestTrackingStoreWithRollup: &interestTrackingStoreWithRollup{
 				interestTrackingStore: tracked, SeriesEpisodeRollupStore: rollup,
 			},
 			EpisodeParentCompletionStore: completion,
-		}, nil
+		}
 	case hasCompletion:
-		return &interestTrackingStoreWithCompletion{
+		wrapped = &interestTrackingStoreWithCompletion{
 			interestTrackingStore: tracked, EpisodeParentCompletionStore: completion,
-		}, nil
+		}
 	case hasDevices && hasRollup:
-		return &interestTrackingStoreWithDevicesAndRollup{
+		wrapped = &interestTrackingStoreWithDevicesAndRollup{
 			interestTrackingStore:    tracked,
 			DeviceRegistry:           registry,
 			SeriesEpisodeRollupStore: rollup,
-		}, nil
+		}
 	case hasDevices:
-		return &interestTrackingStoreWithDevices{
+		wrapped = &interestTrackingStoreWithDevices{
 			interestTrackingStore: tracked,
 			DeviceRegistry:        registry,
-		}, nil
+		}
 	case hasRollup:
-		return &interestTrackingStoreWithRollup{
+		wrapped = &interestTrackingStoreWithRollup{
 			interestTrackingStore:    tracked,
 			SeriesEpisodeRollupStore: rollup,
-		}, nil
+		}
 	}
-	return tracked, nil
+	return preserveDeviceSettings(wrapped, store), nil
 }
 
 func (p *interestTrackingProvider) Close() error {
@@ -100,6 +132,23 @@ type interestTrackingStore struct {
 	userID  int
 	system  *System
 	updater *InterestUpdater
+}
+
+// Onboarding progress is forwarded explicitly: the decorator intercepts no
+// onboarding write, and both backing stores (SQLite and Postgres) implement it.
+func (s *interestTrackingStore) ReadOnboardingProgress(ctx context.Context, profileID, tourID string) (*userstore.OnboardingProgress, error) {
+	progress, ok := s.UserStore.(userstore.OnboardingProgressStore)
+	if !ok {
+		return nil, errors.New("onboarding progress is unavailable on the backing store")
+	}
+	return progress.ReadOnboardingProgress(ctx, profileID, tourID)
+}
+func (s *interestTrackingStore) SaveOnboardingProgress(ctx context.Context, state userstore.OnboardingState, expected int64) (*userstore.OnboardingProgress, error) {
+	progress, ok := s.UserStore.(userstore.OnboardingProgressStore)
+	if !ok {
+		return nil, errors.New("onboarding progress is unavailable on the backing store")
+	}
+	return progress.SaveOnboardingProgress(ctx, state, expected)
 }
 
 type interestTrackingStoreWithDevices struct {
@@ -223,22 +272,44 @@ func (s *interestTrackingStore) WithSettingMutationTransaction(
 	return transactioner.WithSettingMutationTransaction(ctx, mutationID, fn)
 }
 
+// Preserve coherent preference reads when the store is wrapped for notifications.
+func (s *interestTrackingStore) WithPreferenceSettingsSnapshot(ctx context.Context, fn func(userstore.PreferenceSettingsReader) error) error {
+	reader, ok := s.UserStore.(userstore.PreferenceSettingsSnapshotter)
+	if !ok {
+		return fmt.Errorf("wrapped user store does not support preference snapshots")
+	}
+	return reader.WithPreferenceSettingsSnapshot(ctx, fn)
+}
+
 // progressState is the transition-relevant projection of a progress row.
 type progressState struct {
 	exists     bool
 	inProgress bool
 	completed  bool
+	// updatedAt is the stored row's stamp, zero when unknown. It is not part
+	// of the transition comparison.
+	updatedAt time.Time
 }
+
+// progressSessionGap separates watch sessions. A progress write that lands
+// more than this long after the stored row's stamp, by its own stamp or by
+// the clock, queues a recompute even without a state transition: resuming
+// playback, or a late import, lifts a Home removal (an active series drop,
+// or a Continue Watching dismissal held for the old progress stamp), while
+// playback ticks within one session stay free.
+const progressSessionGap = 10 * time.Minute
 
 func (s *interestTrackingStore) currentProgressState(ctx context.Context, profileID, mediaItemID string) progressState {
 	entry, err := s.GetProgress(ctx, profileID, mediaItemID)
 	if err != nil || entry == nil {
 		return progressState{}
 	}
+	updatedAt, _ := time.Parse(time.RFC3339, entry.UpdatedAt)
 	return progressState{
 		exists:     true,
 		inProgress: !entry.Completed && entry.PositionSeconds > 0,
 		completed:  entry.Completed,
+		updatedAt:  updatedAt,
 	}
 }
 
@@ -251,8 +322,17 @@ func progressStateFromValues(position, duration float64, thresholds userstore.Pr
 	}
 }
 
-func (s *interestTrackingStore) queueOnTransition(profileID, mediaItemID string, before, after progressState) {
-	if before != after {
+// queueOnTransition queues a recompute when a write changes the row's state,
+// when it starts a new watch session (see progressSessionGap), or when it is
+// the row's first write since the profile last changed Home on this node: a
+// resume right after a removal lifts it at once, before the removal's
+// deferred recompute runs. writtenAt is the stamp the write records.
+func (s *interestTrackingStore) queueOnTransition(profileID, mediaItemID string, before, after progressState, writtenAt time.Time) {
+	resumed := before.exists && !before.updatedAt.IsZero() &&
+		(writtenAt.Sub(before.updatedAt) > progressSessionGap || time.Since(before.updatedAt) > progressSessionGap ||
+			s.updater.changedHomeSince(s.userID, profileID, before.updatedAt))
+	before.updatedAt, after.updatedAt = time.Time{}, time.Time{}
+	if before != after || resumed {
 		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
 	}
 }
@@ -291,6 +371,17 @@ func (s *interestTrackingStore) AddToWatchlist(ctx context.Context, profileID, m
 	return err
 }
 
+// AddToWatchlistAt is the add that keeps an earlier added_at: watch-provider
+// and Plex imports, and promotion of a watchlisted title that has since
+// reached the library, all write through it.
+func (s *interestTrackingStore) AddToWatchlistAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error) {
+	inserted, err := s.UserStore.AddToWatchlistAt(ctx, profileID, mediaItemID, addedAt)
+	if err == nil && inserted {
+		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
+	}
+	return inserted, err
+}
+
 func (s *interestTrackingStore) RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) error {
 	err := s.UserStore.RemoveFromWatchlist(ctx, profileID, mediaItemID)
 	if err == nil {
@@ -299,13 +390,32 @@ func (s *interestTrackingStore) RemoveFromWatchlist(ctx context.Context, profile
 	return err
 }
 
-// --- Progress: queue on transitions only.
+// --- Home dismissals: a card removed from Continue Watching or Next Up stops
+// that surface's interest reason (see homeHides).
+
+func (s *interestTrackingStore) UpsertHomeDismissal(ctx context.Context, dismissal userstore.HomeItemDismissal) error {
+	err := s.UserStore.UpsertHomeDismissal(ctx, dismissal)
+	if err == nil {
+		s.updater.queueHomeChange(s.userID, dismissal.ProfileID, dismissal.MediaItemID)
+	}
+	return err
+}
+
+func (s *interestTrackingStore) DeleteHomeDismissal(ctx context.Context, profileID, surface, mediaItemID string) error {
+	err := s.UserStore.DeleteHomeDismissal(ctx, profileID, surface, mediaItemID)
+	if err == nil {
+		s.updater.queueHomeChange(s.userID, profileID, mediaItemID)
+	}
+	return err
+}
+
+// --- Progress: queue on transitions and new watch sessions only.
 
 func (s *interestTrackingStore) UpdateProgress(ctx context.Context, profileID, mediaItemID string, position, duration float64, thresholds userstore.ProgressThresholds) error {
 	before := s.currentProgressState(ctx, profileID, mediaItemID)
 	err := s.UserStore.UpdateProgress(ctx, profileID, mediaItemID, position, duration, thresholds)
 	if err == nil {
-		s.queueOnTransition(profileID, mediaItemID, before, progressStateFromValues(position, duration, thresholds))
+		s.queueOnTransition(profileID, mediaItemID, before, progressStateFromValues(position, duration, thresholds), time.Now())
 	}
 	return err
 }
@@ -314,27 +424,43 @@ func (s *interestTrackingStore) SetProgress(ctx context.Context, profileID, medi
 	before := s.currentProgressState(ctx, profileID, mediaItemID)
 	err := s.UserStore.SetProgress(ctx, profileID, mediaItemID, position, duration, thresholds)
 	if err == nil {
-		s.queueOnTransition(profileID, mediaItemID, before, progressStateFromValues(position, duration, thresholds))
+		s.queueOnTransition(profileID, mediaItemID, before, progressStateFromValues(position, duration, thresholds), time.Now())
 	}
 	return err
+}
+
+// timestampedAfter is the state a timestamped write leaves. Both stores keep
+// completion sticky on these writes, so a rewatch tick with completed=false
+// leaves a completed row completed.
+func timestampedAfter(before progressState, position float64, completed bool) progressState {
+	completed = completed || before.completed
+	return progressState{exists: true, inProgress: !completed && position > 0, completed: completed}
 }
 
 func (s *interestTrackingStore) SetProgressAt(ctx context.Context, profileID, mediaItemID string, position, duration float64, completed bool, updatedAt time.Time) error {
 	before := s.currentProgressState(ctx, profileID, mediaItemID)
 	err := s.UserStore.SetProgressAt(ctx, profileID, mediaItemID, position, duration, completed, updatedAt)
 	if err == nil {
-		after := progressState{exists: true, inProgress: !completed && position > 0, completed: completed}
-		s.queueOnTransition(profileID, mediaItemID, before, after)
+		s.queueOnTransition(profileID, mediaItemID, before, timestampedAfter(before, position, completed), updatedAt)
 	}
 	return err
+}
+
+func (s *interestTrackingStore) ListJellycompatProgressDates(ctx context.Context, profileID string, ids []string) (map[string]string, error) {
+	reader, ok := s.UserStore.(interface {
+		ListJellycompatProgressDates(context.Context, string, []string) (map[string]string, error)
+	})
+	if !ok {
+		return nil, nil
+	}
+	return reader.ListJellycompatProgressDates(ctx, profileID, ids)
 }
 
 func (s *interestTrackingStore) SetProgressIfNewer(ctx context.Context, profileID, mediaItemID string, position, duration float64, completed bool, updatedAt time.Time) (bool, error) {
 	before := s.currentProgressState(ctx, profileID, mediaItemID)
 	applied, err := s.UserStore.SetProgressIfNewer(ctx, profileID, mediaItemID, position, duration, completed, updatedAt)
 	if err == nil && applied {
-		after := progressState{exists: true, inProgress: !completed && position > 0, completed: completed}
-		s.queueOnTransition(profileID, mediaItemID, before, after)
+		s.queueOnTransition(profileID, mediaItemID, before, timestampedAfter(before, position, completed), updatedAt)
 	}
 	return applied, err
 }
@@ -343,7 +469,7 @@ func (s *interestTrackingStore) MarkWatched(ctx context.Context, profileID, medi
 	before := s.currentProgressState(ctx, profileID, mediaItemID)
 	err := s.UserStore.MarkWatched(ctx, profileID, mediaItemID, duration)
 	if err == nil {
-		s.queueOnTransition(profileID, mediaItemID, before, progressState{exists: true, completed: true})
+		s.queueOnTransition(profileID, mediaItemID, before, progressState{exists: true, completed: true}, time.Now())
 	}
 	return err
 }
@@ -506,4 +632,101 @@ func (s *interestTrackingStore) DeleteProfile(ctx context.Context, id string) er
 		}
 	}
 	return err
+}
+
+// Preserve the optional device settings capability without claiming support
+// on backends that cannot page or atomically clear devices. Keep the existing
+// concrete decorator so its other optional capabilities survive as well.
+func preserveDeviceSettings(wrapped, inner userstore.UserStore) userstore.UserStore {
+	devices, ok := inner.(userstore.DeviceSettingsStore)
+	if !ok {
+		return wrapped
+	}
+	switch w := wrapped.(type) {
+	case *interestTrackingStoreWithDevicesRollupAndCompletion:
+		return &struct {
+			*interestTrackingStoreWithDevicesRollupAndCompletion
+			userstore.DeviceSettingsStore
+		}{w, devices}
+	case *interestTrackingStoreWithDevicesAndCompletion:
+		return &struct {
+			*interestTrackingStoreWithDevicesAndCompletion
+			userstore.DeviceSettingsStore
+		}{w, devices}
+	case *interestTrackingStoreWithRollupAndCompletion:
+		return &struct {
+			*interestTrackingStoreWithRollupAndCompletion
+			userstore.DeviceSettingsStore
+		}{w, devices}
+	case *interestTrackingStoreWithCompletion:
+		return &struct {
+			*interestTrackingStoreWithCompletion
+			userstore.DeviceSettingsStore
+		}{w, devices}
+	case *interestTrackingStoreWithDevicesAndRollup:
+		return &struct {
+			*interestTrackingStoreWithDevicesAndRollup
+			userstore.DeviceSettingsStore
+		}{w, devices}
+	case *interestTrackingStoreWithDevices:
+		return &struct {
+			*interestTrackingStoreWithDevices
+			userstore.DeviceSettingsStore
+		}{w, devices}
+	case *interestTrackingStoreWithRollup:
+		return &struct {
+			*interestTrackingStoreWithRollup
+			userstore.DeviceSettingsStore
+		}{w, devices}
+	case *interestTrackingStore:
+		return &struct {
+			*interestTrackingStore
+			userstore.DeviceSettingsStore
+		}{w, devices}
+	default:
+		return wrapped
+	}
+}
+
+// The notification decorator preserves the provider's storage for every account.
+func (p *interestTrackingProvider) SupportsAtomicSectionProfileReset(pool *pgxpool.Pool) bool {
+	provider, ok := p.inner.(userstore.SectionProfileResetProvider)
+	return ok && provider.SupportsAtomicSectionProfileReset(pool)
+}
+
+func (s *interestTrackingStore) ListAdminSettingValuesPage(ctx context.Context, after userstore.SettingIdentity, limit int) ([]userstore.SettingValue, bool, error) {
+	pager, ok := s.UserStore.(userstore.AdminSettingValuePager)
+	if !ok {
+		return nil, false, fmt.Errorf("administrator setting pagination is unsupported")
+	}
+	return pager.ListAdminSettingValuesPage(ctx, after, limit)
+}
+
+// ApplyJellycompatProgress preserves the atomic leaf edit through the production
+// decorator and queues derived state only after its transaction commits.
+func (s *interestTrackingStore) ApplyJellycompatProgress(ctx context.Context, profileID string, edit userstore.JellycompatProgressEdit) error {
+	writer, ok := s.UserStore.(userstore.JellycompatProgressEditor)
+	if !ok {
+		return fmt.Errorf("atomic user progress updates unavailable")
+	}
+	if err := writer.ApplyJellycompatProgress(ctx, profileID, edit); err != nil {
+		return err
+	}
+	s.updater.QueueItemMutation(s.userID, profileID, edit.MediaItemID)
+	return nil
+}
+
+// ApplyJellycompatParent queues parent and child interest changes only after
+// their shared transaction commits.
+func (s *interestTrackingStore) ApplyJellycompatParent(ctx context.Context, profileID string, edit userstore.JellycompatParentEdit) error {
+	writer, ok := s.UserStore.(userstore.JellycompatParentEditor)
+	if !ok {
+		return fmt.Errorf("atomic parent user data updates unavailable")
+	}
+	if err := writer.ApplyJellycompatParent(ctx, profileID, edit); err != nil {
+		return err
+	}
+	s.queueTargetMutations(profileID, edit.Targets)
+	s.updater.QueueItemMutation(s.userID, profileID, edit.MediaItemID)
+	return nil
 }

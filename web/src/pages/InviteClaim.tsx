@@ -1,9 +1,14 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router";
-import { useQuery } from "@tanstack/react-query";
-import { api } from "@/api/client";
-import type { InvitationLookupResponse, LoginResponse } from "@/api/types";
+import { captureSessionIdentity, isSessionIdentityCurrent, getAccessToken } from "@/api/client";
+import {
+  acceptPublicInvitation,
+  lookupPublicInvitation,
+  type InvitationLookup,
+} from "@/api/v2/publicInvitations";
+import { sessionFromTokenPair } from "@/api/v2/account";
+import { V2ProblemError } from "@/api/v2/request";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { PasswordInput } from "@/components/PasswordInput";
@@ -16,33 +21,59 @@ import { buildInviteDeepLink, detectMobilePlatform } from "@/lib/appDeepLink";
 import { Smartphone } from "lucide-react";
 import { toast } from "sonner";
 
-/**
- * Public claim screen for an emailed invitation: /invite/:token.
- * Everything except the password was decided when the invite was sent, so
- * this screen asks for exactly one thing. On success the accept response is
- * a normal login payload — the user lands signed in, never at /login.
- */
 export default function InviteClaim() {
   const { token = "" } = useParams();
+  return <ClaimForm key={token} token={token} />;
+}
+
+function ClaimForm({ token }: { token: string }) {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  // Set right before completeLogin: the moment auth state lands, this
+  // Set alongside completeLogin: the moment auth state lands, this
   // component re-renders with a user — without the flag, the signed-in
   // redirect below would race our own navigate to /household-setup.
   const [accepted, setAccepted] = useState(false);
   const { user, loading, completeLogin } = useAuth();
   const navigate = useNavigate();
 
-  const lookup = useQuery({
-    queryKey: ["invitation", token],
-    queryFn: () => api<InvitationLookupResponse>(`/invitations/${token}`),
-    enabled: token !== "",
-    retry: false,
-    staleTime: Infinity,
-  });
+  const [lookup, setLookup] = useState<{
+    data?: InvitationLookup;
+    pending: boolean;
+    unavailable?: boolean;
+  }>({ pending: true });
+  const [reload, setReload] = useState(0);
+  const [recovery, setRecovery] = useState(false);
+  const [createdUsername, setCreatedUsername] = useState<string | null>(null);
+  const busy = useRef(false);
+  const lifetime = useRef<AbortController | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    lifetime.current = controller;
+    return () => controller.abort();
+  }, []);
+  useEffect(() => {
+    if (loading || user) return;
+    const controller = new AbortController();
+    const identity = captureSessionIdentity();
+    lookupPublicInvitation(token, controller.signal)
+      .then((data) => {
+        if (controller.signal.aborted || !isSessionIdentityCurrent(identity)) return;
+        setLookup({ data, pending: false });
+        setRecovery(false);
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted || !isSessionIdentityCurrent(identity)) return;
+        setLookup({
+          pending: false,
+          unavailable: error instanceof V2ProblemError && error.status === 404,
+        });
+      });
+    return () => controller.abort();
+  }, [token, reload, loading, user]);
 
-  if (loading || lookup.isPending) {
+  if (!loading && user && !accepted) return <Navigate to="/" replace />;
+  if (loading || lookup.pending) {
     return (
       <div className="auth-shell">
         <div className="border-primary h-8 w-8 animate-spin rounded-full border-b-2" />
@@ -50,27 +81,27 @@ export default function InviteClaim() {
     );
   }
 
-  // Already signed in — an invite link can't act on this session. Skipped
-  // when this very screen just created the session (accepted).
-  if (user && !accepted) {
-    return <Navigate to="/" replace />;
-  }
-
-  if (lookup.isError || !lookup.data) {
+  if (!lookup.data) {
     return (
       <div className="auth-shell">
         <AuthBackground />
         <Card className="auth-card glass panel-border w-full max-w-sm border-0">
           <CardHeader>
             <CardTitle className="text-3xl font-extrabold tracking-[-0.04em]">
-              Invitation expired
+              {lookup.unavailable ? "Invitation unavailable" : "Could not load invitation"}
             </CardTitle>
             <CardDescription className="mt-2 text-sm leading-6">
-              This invite link is no longer valid — it may have been used already, revoked, or
-              simply expired. Ask whoever invited you to send a fresh one.
+              {lookup.unavailable
+                ? "This link may have been used, revoked, or expired. Sign in if you already created your account, or ask for a fresh invitation."
+                : "The server could not confirm this invitation. Try loading it again."}
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {!lookup.unavailable && (
+              <Button className="mb-4 w-full" onClick={reloadLookup}>
+                Reload invitation
+              </Button>
+            )}
             <p className="text-muted-foreground text-center text-sm">
               Already have an account?{" "}
               <Link to="/login" className="text-foreground underline hover:no-underline">
@@ -94,32 +125,61 @@ export default function InviteClaim() {
   const appLink =
     platform === "android" ? buildInviteDeepLink(window.location.origin, token) : null;
 
+  function reloadLookup() {
+    if (busy.current) return;
+    setLookup({ pending: true });
+    setReload((value) => value + 1);
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (
+      busy.current ||
+      recovery ||
+      createdUsername ||
+      !invitation.acceptance_available ||
+      getAccessToken()
+    )
+      return;
     if (password !== confirmPassword) {
       toast.error("Passwords do not match");
       return;
     }
+    if ([...password].length < 8 || new TextEncoder().encode(password).length > 72) {
+      toast.error("Use at least 8 characters and no more than 72 UTF-8 bytes.");
+      return;
+    }
+    const controller = lifetime.current;
+    if (!controller || controller.signal.aborted) return;
+    const identity = captureSessionIdentity();
+    busy.current = true;
     setSubmitting(true);
     try {
-      const data = await api<LoginResponse>(`/invitations/${token}/accept`, {
-        method: "POST",
-        body: JSON.stringify({ password }),
-      });
-      setAccepted(true);
-      // A fresh account starts household setup fresh, even if a previous
-      // invitee finished theirs on this browser.
-      clearHouseholdSetupDone();
-      completeLogin(data);
-      if (!invitation.show_tour) {
-        // The onboarding gate honors this hint by recording a server-side
-        // skip once a profile is active, then clears it.
-        setTourSuppressed();
+      const data = await acceptPublicInvitation(token, password, controller.signal);
+      if (controller.signal.aborted || !isSessionIdentityCurrent(identity)) return;
+      if (data.login_status === "sign_in_required") {
+        setPassword("");
+        setConfirmPassword("");
+        setCreatedUsername(data.username);
+        return;
       }
+      if (!data.tokens) return; // Adapter rejects inconsistent outcomes.
+      const session = sessionFromTokenPair(data.tokens);
+      // No await between the expected-identity check and synchronous installation.
+      if (controller.signal.aborted || !isSessionIdentityCurrent(identity)) return;
+      completeLogin(session);
+      setAccepted(true);
+      setPassword("");
+      setConfirmPassword("");
+      clearHouseholdSetupDone();
+      if (!invitation.show_tour) setTourSuppressed();
       navigate("/household-setup", { replace: true });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not create your account");
-      setSubmitting(false);
+    } catch {
+      if (controller.signal.aborted || !isSessionIdentityCurrent(identity)) return;
+      setRecovery(true);
+    } finally {
+      busy.current = false;
+      if (!controller.signal.aborted) setSubmitting(false);
     }
   }
 
@@ -160,42 +220,78 @@ export default function InviteClaim() {
               </div>
             </div>
           )}
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="invite-email">Email</Label>
-              <Input id="invite-email" value={invitation.email} readOnly disabled />
+          {createdUsername ? (
+            <div role="status" className="space-y-4">
+              <p>
+                Your account was created. Sign in as {createdUsername} with the password you chose.
+              </p>
+              <Button asChild className="w-full">
+                <Link to="/login">Sign in</Link>
+              </Button>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="invite-password">Password</Label>
-              <p className="text-muted-foreground text-xs">At least 8 characters</p>
-              <PasswordInput
-                id="invite-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="new-password"
-                // On mobile, focusing here pops the keyboard over the
-                // open-in-app button — the primary action when it's shown.
-                autoFocus={!appLink}
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="invite-confirm-password">Confirm password</Label>
-              <PasswordInput
-                id="invite-confirm-password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                autoComplete="new-password"
-                required
-              />
-              {confirmPassword && password !== confirmPassword && (
-                <p className="text-destructive text-xs">Passwords do not match</p>
+          ) : (
+            <>
+              {!invitation.acceptance_available && (
+                <p role="alert" className="mb-4">
+                  This server cannot create the profile required by this invitation. Ask the
+                  administrator for help.
+                </p>
               )}
-            </div>
-            <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting ? "Creating account..." : "Create account"}
-            </Button>
-          </form>
+              {recovery && (
+                <div role="alert" className="mb-4 space-y-3">
+                  <p>
+                    We could not confirm the result. Your account may have been created. Try signing
+                    in, or reload this invitation before making another attempt.
+                  </p>
+                  <Button type="button" variant="outline" onClick={reloadLookup}>
+                    Reload invitation
+                  </Button>
+                </div>
+              )}
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="invite-email">Email</Label>
+                  <Input id="invite-email" value={invitation.email} readOnly disabled />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="invite-password">Password</Label>
+                  <p className="text-muted-foreground text-xs">At least 8 characters</p>
+                  <PasswordInput
+                    id="invite-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    disabled={submitting}
+                    autoComplete="new-password"
+                    // On mobile, focusing here pops the keyboard over the
+                    // open-in-app button — the primary action when it's shown.
+                    autoFocus={!appLink}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="invite-confirm-password">Confirm password</Label>
+                  <PasswordInput
+                    id="invite-confirm-password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    disabled={submitting}
+                    autoComplete="new-password"
+                    required
+                  />
+                  {confirmPassword && password !== confirmPassword && (
+                    <p className="text-destructive text-xs">Passwords do not match</p>
+                  )}
+                </div>
+                <Button
+                  type="submit"
+                  className="w-full"
+                  disabled={submitting || recovery || !invitation.acceptance_available}
+                >
+                  {submitting ? "Creating account..." : "Create account"}
+                </Button>
+              </form>
+            </>
+          )}
           <p className="text-muted-foreground mt-4 text-center text-sm">
             Already set this up?{" "}
             <Link to="/login" className="text-foreground underline hover:no-underline">

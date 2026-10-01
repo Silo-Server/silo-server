@@ -12,6 +12,9 @@ and resolutions of any independent or adversarial review. Use the fields in the
 [PR template](../.github/PULL_REQUEST_TEMPLATE.md) or
 [issue forms](../.github/ISSUE_TEMPLATE/). Use "n/a" when independent or adversarial
 review is not required. "No AI used" is a complete answer when true.
+Keep the review summary to a few sentences: what reviewed the change, what it
+checked, what it found, and what changed as a result. How the change was
+developed is not part of the review summary.
 
 ## Before submitting
 

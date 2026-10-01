@@ -17,6 +17,14 @@ const playerModule = vi.hoisted(() => {
   };
 });
 
+const profileMock = vi.hoisted(() => ({ id: "profile-1" as string | null }));
+vi.mock("@/hooks/useCurrentProfile", () => ({
+  useCurrentProfile: () => ({
+    profile: profileMock.id ? { id: profileMock.id, name: "Profile" } : null,
+    hasSelectedProfile: profileMock.id !== null,
+  }),
+}));
+
 vi.mock("./AudiobookPlayer", async () => {
   playerModule.requested();
   await playerModule.ready;
@@ -73,4 +81,27 @@ it("loads the player on demand, preserves the page while pending, and honors can
   expect(search).toHaveValue("My search");
   fireEvent.click(screen.getByRole("button", { name: "Close player" }));
   expect(screen.queryByLabelText("Audiobook player")).not.toBeInTheDocument();
+});
+
+it("stops the book when the selected profile changes", async () => {
+  profileMock.id = "profile-1";
+  const { rerender } = render(
+    <AudiobookPlaybackProvider>
+      <PlaybackControls />
+    </AudiobookPlaybackProvider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Start audiobook" }));
+  await act(async () => {
+    playerModule.resolve();
+    await playerModule.ready;
+  });
+  expect(await screen.findByLabelText("Audiobook player")).toBeTruthy();
+
+  profileMock.id = "profile-2";
+  rerender(
+    <AudiobookPlaybackProvider>
+      <PlaybackControls />
+    </AudiobookPlaybackProvider>,
+  );
+  await waitFor(() => expect(screen.queryByLabelText("Audiobook player")).toBeNull());
 });

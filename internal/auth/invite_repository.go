@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -181,17 +182,24 @@ func (r *InviteCodeRepository) Delete(ctx context.Context, id int) error {
 // ErrInviteCodeExhausted if use_count >= max_uses, or
 // ErrInviteCodeDisabled if the code is disabled.
 func (r *InviteCodeRepository) RedeemCode(ctx context.Context, code string) error {
+	return redeemCode(ctx, r.pool, code)
+}
+
+func redeemCode(ctx context.Context, db interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, code string) error {
 	query := `UPDATE invite_codes
 		SET use_count = use_count + 1, updated_at = NOW()
 		WHERE code = $1 AND enabled = true AND use_count < max_uses`
 
-	tag, err := r.pool.Exec(ctx, query, code)
+	tag, err := db.Exec(ctx, query, code)
 	if err != nil {
 		return fmt.Errorf("redeeming invite code: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		// Determine why: code doesn't exist, disabled, or exhausted.
-		ic, err := r.GetByCode(ctx, code)
+		ic, err := scanInviteCode(db.QueryRow(ctx, `SELECT `+inviteCodeColumns+` FROM invite_codes WHERE code = $1`, code))
 		if err != nil {
 			return ErrInviteCodeNotFound
 		}

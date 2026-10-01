@@ -15,6 +15,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -280,6 +281,66 @@ func TestNodeAwarePreparerRequiresAudioToAACV2ForSurroundDownmix(t *testing.T) {
 	}
 	if remote.request.SourceAudioChannels != 6 || prepared.OriginNodeID != 2 {
 		t.Fatalf("remote request = %#v prepared = %#v", remote.request, prepared)
+	}
+}
+
+func TestNodeAwarePreparerRequiresPreparedTracksNode(t *testing.T) {
+	capabilityNode := func(features ...string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{TransportFeatures: features})
+		}))
+	}
+	legacy := capabilityNode()
+	defer legacy.Close()
+	current := capabilityNode(playback.TransportFeaturePreparedTracksV1)
+	defer current.Close()
+
+	pool := nodepool.NewTranscodePool()
+	pool.SetNodes([]*nodepool.Node{
+		{ID: 1, URL: legacy.URL, Enabled: true, Healthy: true},
+		{ID: 2, URL: current.URL, Enabled: true, Healthy: true, ActiveJobs: 1},
+	})
+	local := &recordingEncodePreparer{}
+	remote := &recordingRemotePreparer{}
+	cfg := &config.Config{}
+	cfg.Auth.JWTSecret = "secret"
+	p := NewNodeAwarePreparer(local, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
+	p.remote = remote
+	file := &models.MediaFile{CodecAudio: "aac", AudioTracks: []models.AudioTrack{{Codec: "aac"}, {Codec: "ac3", Channels: 6}}}
+	opts := playback.TranscodeOpts{
+		InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac",
+		PreparedTracks: playback.PlanPreparedTracks(file, "aac", -1),
+	}
+	prepared, err := p.PrepareFile(context.Background(), "artifact-tracks", opts, "/local/artifact.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if local.calls != 0 || remote.nodeURL != current.URL || prepared.OriginNodeID != 2 {
+		t.Fatalf("local calls = %d, remote node = %q, want prepared-tracks node %q", local.calls, remote.nodeURL, current.URL)
+	}
+	if remote.request.TrackRecipeVersion != playback.PreparedTracksRecipeVersion || len(remote.request.PreparedTracks.Audio) != 2 {
+		t.Fatalf("remote request = %#v, want the multi-track layout", remote.request)
+	}
+}
+
+func TestRemotePrepareResultRequiresPreparedTracksAttestation(t *testing.T) {
+	file := &models.MediaFile{AudioTracks: []models.AudioTrack{{Codec: "aac"}, {Codec: "aac"}}}
+	request := downloadprepare.NewRequest("artifact-tracks", playback.TranscodeOpts{
+		TargetCodecAudio: "aac", PreparedTracks: playback.PlanPreparedTracks(file, "aac", -1),
+	})
+	// A node without the layout ignores it and attests its legacy recipe.
+	legacyRequest := request
+	legacyRequest.TrackRecipeVersion, legacyRequest.PreparedTracks = "", nil
+	legacy := downloadprepare.Result{ArtifactID: request.ArtifactID, FileSize: 55, ExecutionFingerprint: legacyRequest.ExecutionFingerprint()}
+	if remotePrepareResultMatches(legacy, request.ArtifactID, request) {
+		t.Fatal("multi-track request accepted a legacy single-track receipt")
+	}
+	if remotePrepareResultMatches(downloadprepare.Result{ArtifactID: request.ArtifactID, FileSize: 55}, request.ArtifactID, request) {
+		t.Fatal("multi-track request accepted an unattested result")
+	}
+	attested := downloadprepare.Result{ArtifactID: request.ArtifactID, FileSize: 55, ExecutionFingerprint: request.ExecutionFingerprint()}
+	if !remotePrepareResultMatches(attested, request.ArtifactID, request) {
+		t.Fatal("multi-track request rejected its exact execution receipt")
 	}
 }
 

@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
  * values so the player module never imports app-specific code.
  */
 export interface PlayerConfig {
-  /** Base URL for API calls, e.g. "/api/v1" */
+  /** Base URL for API calls, e.g. "/api/v2" */
   apiBaseUrl: string;
   /** Sync getter for the current JWT access token. */
   getAccessToken: () => string | null;

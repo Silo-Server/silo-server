@@ -7,25 +7,31 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/Silo-Server/silo-server/internal/activitylog"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/config"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
 const (
-	subtitleFormatASS = "ass"
-	subtitleFormatSSA = "ssa"
-	subtitleFormatSUP = "sup"
+	subtitleFormatASS  = "ass"
+	subtitleFormatSSA  = "ssa"
+	subtitleFormatSUP  = "sup"
+	subtitleFormatSRT  = "srt"
+	subtitleMIMESubRip = "application/x-subrip"
 )
 
 // FilePathResolver looks up a media file by its ID.
@@ -50,6 +56,14 @@ type StreamHandler struct {
 	// is the reconstruction descriptor for direct/remux after a restart. Empty
 	// disables token-based reconstruct (tests / minimal setups).
 	JWTSecret string
+	// StreamDeny is the shared session-deny marker (same instance as the
+	// PlaybackHandler's). A denied session is answered 410 and never
+	// reconstructed. Nil-safe: without Redis nothing is ever denied.
+	StreamDeny *playback.StreamDeny
+	// PlanStoreV3 is the shared attempt store (same instance as the
+	// PlaybackHandler's); an aborted session's attempt row is marked stopped
+	// through it. May be nil (tests / minimal setups).
+	PlanStoreV3 playback.PlanStoreV3
 	// PlaybackConfig returns the current playback config; read it through
 	// ffmpegPath(). May be nil (tests).
 	PlaybackConfig func() config.PlaybackConfig
@@ -64,8 +78,7 @@ type StreamHandler struct {
 	// (tests / minimal setups) — extraction then always streams uncached.
 	SubtitleCache *playback.SubtitleCache
 	SubtitleRepo  subtitles.Repository // optional; enables S3-sourced subtitles
-	S3Client      subtitles.S3Client   // optional; needed for fetching S3 subtitles
-	S3Bucket      string               // bucket for subtitle storage
+	SubtitleBlobs subtitles.BlobStore  // optional; backs downloaded subtitle reads
 }
 
 // ffmpegPath returns the currently configured ffmpeg binary path.
@@ -106,6 +119,10 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setPlaybackSessionLogContext(r, sessionID)
+	if h.StreamDeny.Denied(r.Context(), sessionID) {
+		writePlaybackSessionEnded(w)
+		return
+	}
 
 	// Look up the session, reconstructing it from the recipe card on a not-found
 	// miss (e.g. after a server restart) so a direct/remux stream resumes instead
@@ -146,6 +163,9 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !requireNativeSessionAPIEgressV3(w, session) {
+		return
+	}
+	if !requireOwningProfile(w, r, session) {
 		return
 	}
 
@@ -201,6 +221,11 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case playback.PlayRemux:
+		if setter, ok := h.sessionMgr.(interface {
+			SetOutputFormat(string, string, string) error
+		}); ok {
+			_ = setter.SetOutputFormat(sessionID, playback.OutputContainerFMP4, playback.OutputProtocolHTTP)
+		}
 		if err := h.sessionMgr.BeginTransport(sessionID); err == nil {
 			defer func() {
 				_ = h.sessionMgr.EndTransport(sessionID)
@@ -245,6 +270,38 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// loadSidecarSession resolves the session a subtitle or font request names.
+// It reconstructs from the signed stream reference after a restart or on a
+// replica that never served the media, and checks account and selected-profile
+// ownership before exposing a sidecar.
+func (h *StreamHandler) loadSidecarSession(ctx context.Context, reference, sessionID string, userID int) (*playback.Session, *streamtoken.Claims, error) {
+	card, claims := verifiedStreamCardFromToken(reference, sessionID, h.JWTSecret)
+	loadCard := card
+	if _, err := h.sessionMgr.GetSession(sessionID); err == nil {
+		loadCard = nil
+	} else if !errors.Is(err, playback.ErrSessionNotFound) {
+		loadCard = nil
+	}
+	session, status, _ := h.TM.LoadOrReconstructSessionDetail(ctx, h.sessionMgr.GetSession, sessionID, userID, loadCard)
+	switch status {
+	case playback.SessionMissing:
+		return nil, nil, apiError(http.StatusNotFound, playbackSessionNotFoundErrorCode, "Playback session not found")
+	case playback.SessionLoadFailed:
+		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to load playback session")
+	case playback.SessionForbidden:
+		return nil, nil, apiError(http.StatusForbidden, "forbidden", "Session belongs to another user")
+	case playback.SessionUnauthorized:
+		return nil, nil, apiError(http.StatusUnauthorized, "unauthorized", "Authentication required")
+	}
+	if session == nil {
+		return nil, nil, apiError(http.StatusNotFound, playbackSessionNotFoundErrorCode, "Playback session not found")
+	}
+	if profileID := apimw.GetProfileID(ctx); profileID != "" && session.ProfileID != "" && profileID != session.ProfileID {
+		return nil, nil, apiError(http.StatusForbidden, "forbidden", "Session belongs to another profile")
+	}
+	return session, claims, nil
+}
+
 // HandleSubtitle extracts a subtitle track from the media file associated with
 // a playback session and serves it as WebVTT or raw ASS depending on the
 // URL extension (e.g. /subtitles/2.ass or /subtitles/2.vtt).
@@ -261,6 +318,10 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setPlaybackSessionLogContext(r, sessionID)
+	if h.StreamDeny.Denied(r.Context(), sessionID) {
+		writePlaybackSessionEnded(w)
+		return
+	}
 
 	trackParam := chi.URLParam(r, "track")
 	trackIndex, requestedFormat, err := playback.ParseSubtitleTrackParam(trackParam)
@@ -269,17 +330,12 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, err := h.sessionMgr.GetSession(sessionID)
+	session, claims, err := h.loadSidecarSession(r.Context(), r.URL.Query().Get(streamTokenParam), sessionID, userID)
 	if err != nil {
-		writePlaybackSessionNotFound(w)
+		writeAPIError(w, err)
 		return
 	}
-
-	if session.UserID != userID {
-		writeError(w, http.StatusForbidden, "forbidden", "Session belongs to another user")
-		return
-	}
-	attachPlaybackSession(r.Context(), session, nil)
+	attachPlaybackSession(r.Context(), session, claims)
 
 	fileID, err := subtitleSourceFileID(r, session)
 	if err != nil {
@@ -317,7 +373,7 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "bad_request", "Invalid downloaded subtitle identity")
 			return
 		}
-		if h.SubtitleRepo == nil || h.S3Client == nil {
+		if h.SubtitleRepo == nil || h.SubtitleBlobs == nil {
 			writeError(w, http.StatusNotFound, "not_found", "Subtitle track not found")
 			return
 		}
@@ -336,7 +392,7 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if r.Method == http.MethodHead {
-			writeSubtitleRepresentationHead(w, requestedFormat)
+			writeSubtitleRepresentationHead(w, subtitleRepresentationFormat(requestedFormat, servesOriginalSubRip(r, string(downloaded.Format), requestedFormat)))
 			return
 		}
 		h.serveDownloadedSubtitle(w, r, *downloaded, requestedFormat)
@@ -351,11 +407,22 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if r.Method == http.MethodHead {
-			writeSubtitleRepresentationHead(w, requestedFormat)
+			writeSubtitleRepresentationHead(w, subtitleRepresentationFormat(requestedFormat, servesOriginalSubRip(r, sub.Format, requestedFormat)))
 			return
 		}
 
-		// Serve ASS/SSA external subtitles as raw data for client-side rendering.
+		// Serve ASS/SSA external subtitles as raw data for client-side
+		// rendering, and SRT the same way when the URL asks for .srt.
+		if servesOriginalSubRip(r, sub.Format, requestedFormat) {
+			data, err := playback.LoadExternalSubtitleRaw(sub.Path)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal_error",
+					"Failed to load external subtitle")
+				return
+			}
+			serveOriginalSubRip(w, data)
+			return
+		}
 		if playback.IsASS(sub.Format) && requestedFormat != "vtt" {
 			data, err := playback.LoadExternalSubtitleRaw(sub.Path)
 			if err != nil {
@@ -396,7 +463,8 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if r.Method == http.MethodHead && requestedFormat != subtitleFormatSUP {
-			writeSubtitleRepresentationHead(w, requestedFormat)
+			// Embedded text streams as WebVTT whatever the extension.
+			writeSubtitleRepresentationHead(w, subtitleRepresentationFormat(requestedFormat, false))
 			return
 		}
 
@@ -409,8 +477,8 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check downloaded subtitles (from S3).
-	if h.SubtitleRepo != nil && h.S3Client != nil {
+	// Check downloaded subtitles (from blob storage).
+	if h.SubtitleRepo != nil && h.SubtitleBlobs != nil {
 		downloaded, err := h.SubtitleRepo.ListDownloadedSubtitles(r.Context(), file.ID)
 		if err != nil {
 			// A DB failure here must not masquerade as "track not found":
@@ -429,7 +497,7 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 		downloadedIndex := embeddedIndex - len(file.SubtitleTracks)
 		if downloadedIndex >= 0 && downloadedIndex < len(downloaded) {
 			if r.Method == http.MethodHead {
-				writeSubtitleRepresentationHead(w, requestedFormat)
+				writeSubtitleRepresentationHead(w, subtitleRepresentationFormat(requestedFormat, servesOriginalSubRip(r, string(downloaded[downloadedIndex].Format), requestedFormat)))
 				return
 			}
 			h.serveDownloadedSubtitle(w, r, downloaded[downloadedIndex], requestedFormat)
@@ -446,13 +514,18 @@ func (h *StreamHandler) serveDownloadedSubtitle(w http.ResponseWriter, r *http.R
 			"Requested subtitle extension does not match the selected track")
 		return
 	}
-	data, err := h.S3Client.GetObject(r.Context(), h.S3Bucket, subtitle.S3Key)
+	data, err := h.SubtitleBlobs.Get(r.Context(), subtitle.S3Key)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "s3_error", "Failed to load subtitle from storage")
 		return
 	}
 
-	// Serve ASS/SSA downloaded subtitles as raw data.
+	// Serve ASS/SSA downloaded subtitles as raw data, and SRT the same way
+	// when the URL asks for .srt.
+	if servesOriginalSubRip(r, string(subtitle.Format), requestedFormat) {
+		serveOriginalSubRip(w, data)
+		return
+	}
 	if playback.IsASS(string(subtitle.Format)) && requestedFormat != "vtt" {
 		playback.ServeSubtitle(w, data, subtitleFormatASS)
 		return
@@ -495,10 +568,49 @@ func subtitleSidecarFormatSupported(codec, requestedFormat string, embeddedPGS b
 	return true
 }
 
+// servesOriginalSubRip reports whether a sidecar request is answered with the
+// original SRT bytes: only a SubRip track requested through /api/v2 as .srt
+// with original=1, which is the URL subrip_sidecar_v1 publishes. Every other
+// request for a SubRip track, including any on the frozen /api/v1 route, keeps
+// the historical WebVTT response.
+func servesOriginalSubRip(r *http.Request, codec, requestedFormat string) bool {
+	return playback.IsSubRip(codec) &&
+		strings.EqualFold(strings.TrimSpace(requestedFormat), subtitleFormatSRT) &&
+		r.URL.Query().Get(playback.SubtitleOriginalParamV3) == "1" &&
+		isNativeAPIV2(r.Context())
+}
+
+// serveOriginalSubRip writes stored SRT bytes as they are. SRT declares no
+// encoding, so the response claims UTF-8 only when the bytes are valid UTF-8;
+// a legacy-encoded file is labeled without a charset rather than mislabeled.
+func serveOriginalSubRip(w http.ResponseWriter, data []byte) {
+	contentType := subtitleMIMESubRip
+	if utf8.Valid(data) {
+		contentType += "; charset=utf-8"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	w.WriteHeader(http.StatusOK)
+	w.Write(data) //nolint:errcheck
+}
+
+// subtitleRepresentationFormat names the representation a GET would serve, so
+// a HEAD reports the same content type: a .srt request that is not answered
+// with the original SRT is answered with WebVTT.
+func subtitleRepresentationFormat(requestedFormat string, servesOriginalSRT bool) string {
+	if strings.EqualFold(strings.TrimSpace(requestedFormat), subtitleFormatSRT) && !servesOriginalSRT {
+		return "vtt"
+	}
+	return requestedFormat
+}
+
 func writeSubtitleRepresentationHead(w http.ResponseWriter, requestedFormat string) {
 	switch strings.ToLower(strings.TrimSpace(requestedFormat)) {
 	case subtitleFormatASS, subtitleFormatSSA:
 		w.Header().Set("Content-Type", "text/x-ssa; charset=utf-8")
+	case subtitleFormatSRT:
+		// HEAD does not read the stored bytes, so it cannot vouch for UTF-8.
+		w.Header().Set("Content-Type", subtitleMIMESubRip)
 	case subtitleFormatSUP:
 		w.Header().Set("Content-Type", "application/octet-stream")
 	default:
@@ -513,10 +625,14 @@ func writeSubtitleRepresentationHead(w http.ResponseWriter, requestedFormat stri
 // alternate file can silently serve a different language. Only the session's
 // requested or current effective file may be named by the authenticated URL.
 func subtitleSourceFileID(r *http.Request, session *playback.Session) (int, error) {
+	return subtitleSourceFile(r.URL.Query().Get("file_id"), session)
+}
+
+func subtitleSourceFile(raw string, session *playback.Session) (int, error) {
 	if session == nil {
 		return 0, errors.New("playback session is required")
 	}
-	raw := strings.TrimSpace(r.URL.Query().Get("file_id"))
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return session.MediaFileID, nil
 	}
@@ -530,97 +646,95 @@ func subtitleSourceFileID(r *http.Request, session *playback.Session) (int, erro
 	return fileID, nil
 }
 
-// HandleSubtitleFonts extracts embedded container font attachments for ASS/SSA
-// playback. The web player loads these bytes into JASSUB before creating the
-// renderer so libass can resolve script font names deterministically.
-func (h *StreamHandler) HandleSubtitleFonts(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
+// SubtitleFontRequest identifies the session and frozen subtitle inventory
+// selection. Query preserves repeated identity parameters so validation cannot
+// silently choose one of conflicting stream pins.
+type SubtitleFontRequest struct {
+	SessionID string
+	Track     string
+	Query     url.Values
+}
+
+// SubtitleFonts loads a bounded bundle of embedded ASS/SSA fonts. Both API
+// transports use this operation so reconstruction, deny markers and source-file
+// admission stay identical without invoking another transport's HTTP handler.
+func (h *StreamHandler) SubtitleFonts(ctx context.Context, in SubtitleFontRequest) ([]playback.SubtitleFontBundleItem, error) {
+	userID := apimw.GetUserID(ctx)
 	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
+		return nil, apiError(http.StatusUnauthorized, "unauthorized", "Authentication required")
 	}
-
-	sessionID := chi.URLParam(r, "session_id")
-	if sessionID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Session ID is required")
-		return
+	if in.SessionID == "" {
+		return nil, apiError(http.StatusBadRequest, "bad_request", "Session ID is required")
 	}
-	setPlaybackSessionLogContext(r, sessionID)
-
-	session, err := h.sessionMgr.GetSession(sessionID)
+	if lc := activitylog.GetPlaybackLogContext(ctx); lc != nil {
+		lc.PlaybackSessionID = in.SessionID
+	}
+	if h.StreamDeny.Denied(ctx, in.SessionID) {
+		return nil, apiError(http.StatusGone, playbackSessionEndedErrorCode, "Playback session has ended")
+	}
+	session, claims, err := h.loadSidecarSession(ctx, in.Query.Get(streamTokenParam), in.SessionID, userID)
 	if err != nil {
-		writePlaybackSessionNotFound(w)
-		return
+		return nil, err
 	}
-	if session.UserID != userID {
-		writeError(w, http.StatusForbidden, "forbidden", "Session belongs to another user")
-		return
-	}
-	attachPlaybackSession(r.Context(), session, nil)
+	attachPlaybackSession(ctx, session, claims)
 
-	fileID, err := subtitleSourceFileID(r, session)
+	fileID, err := subtitleSourceFile(in.Query.Get("file_id"), session)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
+		return nil, apiError(http.StatusBadRequest, "bad_request", err.Error())
 	}
-	file, err := h.fileResolver.GetByID(r.Context(), fileID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "Media file not found")
-		return
+	file, err := h.fileResolver.GetByID(ctx, fileID)
+	if err != nil || file == nil {
+		return nil, apiError(http.StatusNotFound, "not_found", "Media file not found")
 	}
-	if file == nil {
-		writeError(w, http.StatusNotFound, "not_found", "Media file not found")
-		return
-	}
-	if err := preflightPlaybackFile(r.Context(), file, h.MissingMarker, h.EventsHub); err != nil {
+	if err := preflightPlaybackFile(ctx, file, h.MissingMarker, h.EventsHub); err != nil {
 		if isPlaybackFileMissing(err) {
-			h.abortPlaybackSession(r.Context(), session)
+			h.abortPlaybackSession(ctx, session)
+			return nil, apiError(http.StatusNotFound, "not_found", "Source media file is missing")
 		}
-		writePlaybackFilePreflightError(w, err)
-		return
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access source media file")
 	}
 
-	trackParam := chi.URLParam(r, "track")
-	trackIndex, _, err := playback.ParseSubtitleTrackParam(trackParam)
+	trackIndex, _, err := playback.ParseSubtitleTrackParam(in.Track)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid subtitle track index")
-		return
+		return nil, apiError(http.StatusBadRequest, "bad_request", "Invalid subtitle track index")
 	}
-	trackIndex, err = subtitleRouteIndex(file, trackIndex, r.URL.Query())
+	trackIndex, err = subtitleRouteIndex(file, trackIndex, in.Query)
 	if err != nil {
 		if errors.Is(err, errSubtitleIdentityInvalid) {
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		} else {
-			writeError(w, http.StatusNotFound, "not_found", err.Error())
+			return nil, apiError(http.StatusBadRequest, "bad_request", err.Error())
 		}
-		return
+		return nil, apiError(http.StatusNotFound, "not_found", err.Error())
 	}
 
 	embeddedIndex := trackIndex - len(file.ExternalSubtitles)
 	if embeddedIndex < 0 || embeddedIndex >= len(file.SubtitleTracks) {
-		writeError(w, http.StatusNotFound, "not_found", "Embedded subtitle track not found")
-		return
+		return nil, apiError(http.StatusNotFound, "not_found", "Embedded subtitle track not found")
 	}
 	if !playback.IsASS(file.SubtitleTracks[embeddedIndex].Codec) {
-		writeError(w, http.StatusBadRequest, "bad_request", "Subtitle font bundles are only available for ASS/SSA tracks")
-		return
+		return nil, apiError(http.StatusBadRequest, "bad_request", "Subtitle font bundles are only available for ASS/SSA tracks")
 	}
-
-	fonts, err := playback.ExtractAttachedSubtitleFonts(r.Context(), file.FilePath, h.ffmpegPath())
+	fonts, err := playback.ExtractAttachedSubtitleFonts(ctx, file.FilePath, h.ffmpegPath())
 	if err != nil {
-		slog.WarnContext(r.Context(), "subtitle font extraction failed", "component", "api",
-			"file_id", file.ID,
-			"track", trackIndex,
-			"error", err,
-		)
-		writeError(w, http.StatusInternalServerError, "font_extract_failed", "Failed to extract subtitle fonts")
+		slog.WarnContext(ctx, "subtitle font extraction failed", "component", "api",
+			"file_id", file.ID, "track", trackIndex, "error", err)
+		return nil, apiError(http.StatusInternalServerError, "font_extract_failed", "Failed to extract subtitle fonts")
+	}
+	return playback.EncodeSubtitleFontBundle(fonts), nil
+}
+
+// HandleSubtitleFonts preserves the bridge API's array response.
+func (h *StreamHandler) HandleSubtitleFonts(w http.ResponseWriter, r *http.Request) {
+	fonts, err := h.SubtitleFonts(r.Context(), SubtitleFontRequest{
+		SessionID: chi.URLParam(r, "session_id"), Track: chi.URLParam(r, "track"), Query: r.URL.Query(),
+	})
+	if err != nil {
+		writeAPIError(w, err)
 		return
 	}
-
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Cache-Control", "no-store")
-	if err := json.NewEncoder(w).Encode(playback.EncodeSubtitleFontBundle(fonts)); err != nil {
+	if err := json.NewEncoder(w).Encode(fonts); err != nil {
 		slog.WarnContext(r.Context(), "subtitle font response encode failed", "component", "api", "error", err)
 	}
 }
@@ -660,6 +774,7 @@ func (h *StreamHandler) abortPlaybackSession(ctx context.Context, session *playb
 		return
 	}
 	h.finalizeSessionAbort(ctx, session, true, "stream_abort")
+	markAttemptStoppedServerSide(ctx, h.PlanStoreV3, h.StreamDeny, session.ID)
 }
 
 func (h *StreamHandler) handleTransportStartFailure(ctx context.Context, session *playback.Session, file *models.MediaFile, err error) {

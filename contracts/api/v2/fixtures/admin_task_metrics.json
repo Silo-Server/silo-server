@@ -1,0 +1,9 @@
+{
+  "total": 0,
+  "due": 0,
+  "leased": 0,
+  "reason_counts": [],
+  "attempt_buckets": [],
+  "due_samples": [],
+  "recent_errors": []
+}

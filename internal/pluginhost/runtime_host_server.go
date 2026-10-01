@@ -3,11 +3,16 @@ package pluginhost
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"github.com/hashicorp/go-hclog"
 	"golang.org/x/time/rate"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/Silo-Server/silo-server/internal/events"
 )
@@ -101,6 +106,62 @@ type RuntimeHostServer struct {
 	installedPlugins InstalledPluginLister
 	configSetter     GlobalConfigSetter
 	installationID   int
+
+	hostInfo      HostInfoFunc
+	instanceState InstanceStateStore
+	networkAccess NetworkAccessBroker
+	// ingressToken is the token issued to this process instance; pushes are
+	// accepted only while it is current.
+	ingressToken string
+	// provider is the network_access_provider.v1 slug from the plugin's
+	// manifest; empty for plugins that are not providers.
+	provider string
+	logger   hclog.Logger
+}
+
+// RuntimeHostOptions configures a RuntimeHostServer for one plugin instance.
+type RuntimeHostOptions struct {
+	Publisher          EventPublisher
+	Libraries          LibraryLister
+	Catalog            CatalogPresenceLookup
+	InstalledPlugins   InstalledPluginLister
+	GlobalConfigSetter GlobalConfigSetter
+	HostInfo           HostInfoFunc
+	InstanceState      InstanceStateStore
+	NetworkAccess      NetworkAccessBroker
+	Logger             hclog.Logger
+	// EventRatePerSec caps PublishEvent; <= 0 takes DefaultPublishEventRatePerSec.
+	EventRatePerSec int
+
+	PluginID       string
+	InstallationID int
+	// NetworkAccessProvider is the provider slug the manifest declares, or
+	// empty. Only providers may push network access status.
+	NetworkAccessProvider string
+	// IngressToken is the token issued to this process instance. Status
+	// pushes are accepted only while it is still the installation's current
+	// token.
+	IngressToken string
+}
+
+// NewRuntimeHostServerWithOptions builds the server the host binds for one
+// plugin instance.
+func NewRuntimeHostServerWithOptions(opts RuntimeHostOptions) *RuntimeHostServer {
+	s := NewRuntimeHostServerWithRate(opts.Publisher, opts.Libraries, opts.PluginID, opts.EventRatePerSec)
+	s.catalog = opts.Catalog
+	s.installedPlugins = opts.InstalledPlugins
+	s.configSetter = opts.GlobalConfigSetter
+	s.installationID = opts.InstallationID
+	s.hostInfo = opts.HostInfo
+	s.instanceState = opts.InstanceState
+	s.networkAccess = opts.NetworkAccess
+	s.provider = opts.NetworkAccessProvider
+	s.ingressToken = opts.IngressToken
+	s.logger = opts.Logger
+	if s.logger == nil {
+		s.logger = hclog.NewNullLogger()
+	}
+	return s
 }
 
 // NewRuntimeHostServer constructs a RuntimeHostServer bound to the given
@@ -331,4 +392,128 @@ func (s *RuntimeHostServer) CheckMediaPresence(ctx context.Context, req *pluginv
 		})
 	}
 	return resp, nil
+}
+
+// GetHostInfo reports the hosting process: public and loopback base URLs,
+// role, name, node id, the listeners a network access provider should expose
+// and, for providers, the ingress token issued for this process instance.
+func (s *RuntimeHostServer) GetHostInfo(ctx context.Context, _ *pluginv1.GetHostInfoRequest) (*pluginv1.GetHostInfoResponse, error) {
+	if s.hostInfo == nil {
+		return nil, status.Error(codes.Unimplemented, "host info is not configured")
+	}
+	info, err := s.hostInfo(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("host info: %w", err)
+	}
+	resp := &pluginv1.GetHostInfoResponse{
+		PublicBaseUrl: strings.TrimRight(info.PublicBaseURL, "/"),
+		HostRole:      info.Role,
+		HostName:      info.Name,
+		NodeId:        info.NodeID,
+	}
+	if resp.PublicBaseUrl != "" && info.PluginContentPrefix != "" && s.installationID > 0 {
+		resp.PluginProxyBaseUrl = resp.PublicBaseUrl + info.PluginContentPrefix + "/plugins/" + strconv.Itoa(s.installationID)
+	}
+	for _, listener := range info.Listeners {
+		if listener.Name == ListenerAPI && listener.Address != "" {
+			resp.InternalBaseUrl = "http://" + listener.Address
+		}
+		resp.Listeners = append(resp.Listeners, &pluginv1.HostListener{
+			Name:        listener.Name,
+			Address:     listener.Address,
+			DefaultPort: int32(listener.DefaultPort),
+		})
+	}
+	if s.provider != "" && s.networkAccess != nil && s.installationID > 0 {
+		if token, ok := s.networkAccess.IngressToken(s.installationID); ok {
+			resp.IngressToken = token
+		}
+	}
+	return resp, nil
+}
+
+// ReadInstanceState returns one key of the instance's private state. The
+// scope is fixed by the store the host configured for this process.
+func (s *RuntimeHostServer) ReadInstanceState(ctx context.Context, req *pluginv1.ReadInstanceStateRequest) (*pluginv1.ReadInstanceStateResponse, error) {
+	if err := ValidateInstanceStateKey(req.GetKey()); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	if s.instanceState == nil || s.installationID <= 0 {
+		return nil, status.Error(codes.FailedPrecondition, ErrInstanceStateUnavailable.Error())
+	}
+	value, found, err := s.instanceState.ReadInstanceState(ctx, s.installationID, req.GetKey())
+	if err != nil {
+		return nil, instanceStateError(err)
+	}
+	if !found {
+		return &pluginv1.ReadInstanceStateResponse{}, nil
+	}
+	return &pluginv1.ReadInstanceStateResponse{Value: value, Found: true}, nil
+}
+
+// WriteInstanceState stores one key of the instance's private state.
+func (s *RuntimeHostServer) WriteInstanceState(ctx context.Context, req *pluginv1.WriteInstanceStateRequest) (*pluginv1.WriteInstanceStateResponse, error) {
+	if err := ValidateInstanceStateKey(req.GetKey()); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	if len(req.GetValue()) > InstanceStateMaxValueBytes {
+		return nil, status.Error(codes.InvalidArgument, ErrInstanceStateValueTooLarge.Error())
+	}
+	if s.instanceState == nil || s.installationID <= 0 {
+		return nil, status.Error(codes.FailedPrecondition, ErrInstanceStateUnavailable.Error())
+	}
+	if err := s.instanceState.WriteInstanceState(ctx, s.installationID, req.GetKey(), req.GetValue()); err != nil {
+		return nil, instanceStateError(err)
+	}
+	return &pluginv1.WriteInstanceStateResponse{}, nil
+}
+
+func instanceStateError(err error) error {
+	switch {
+	case errors.Is(err, ErrInstanceStateKeyTooLong), errors.Is(err, ErrInstanceStateValueTooLarge):
+		return status.Error(codes.InvalidArgument, err.Error())
+	case errors.Is(err, ErrInstanceStateTooManyKeys):
+		return status.Error(codes.ResourceExhausted, err.Error())
+	case errors.Is(err, ErrInstanceStateUnavailable):
+		return status.Error(codes.FailedPrecondition, err.Error())
+	}
+	return fmt.Errorf("instance state: %w", err)
+}
+
+// ReportNetworkAccessStatus records a provider's status push in the host's
+// status cache. Only state transitions are logged; auth_url never is.
+func (s *RuntimeHostServer) ReportNetworkAccessStatus(_ context.Context, req *pluginv1.ReportNetworkAccessStatusRequest) (*pluginv1.ReportNetworkAccessStatusResponse, error) {
+	if s.provider == "" {
+		return nil, status.Error(codes.PermissionDenied, "plugin does not declare network_access_provider.v1")
+	}
+	if req.GetStatus() == nil {
+		return nil, status.Error(codes.InvalidArgument, "status is required")
+	}
+	if s.networkAccess == nil || s.installationID <= 0 {
+		// Config test-runs and hosts without netaccess wiring accept and drop
+		// the push so a provider does not fail on it.
+		return &pluginv1.ReportNetworkAccessStatusResponse{}, nil
+	}
+	entry := NetworkAccessStatusFromProto(s.installationID, s.provider, req.GetStatus())
+	previous, changed, accepted := s.networkAccess.ReportFor(s.installationID, s.ingressToken, entry)
+	if !accepted {
+		// This process's token was revoked while the push was in flight:
+		// the host already stopped or replaced it. Its status must not
+		// overwrite whatever the replacement reports.
+		s.logger.Debug("network access status from a revoked process instance dropped",
+			"plugin_id", s.pluginID, "installation_id", s.installationID, "provider", s.provider)
+		return &pluginv1.ReportNetworkAccessStatusResponse{}, nil
+	}
+	if changed {
+		s.logger.Info("network access provider state changed",
+			"plugin_id", s.pluginID,
+			"installation_id", s.installationID,
+			"provider", s.provider,
+			"from", previous.State,
+			"to", entry.State,
+			"origin", entry.Origin,
+			"error", entry.Error,
+		)
+	}
+	return &pluginv1.ReportNetworkAccessStatusResponse{}, nil
 }

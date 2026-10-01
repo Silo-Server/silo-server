@@ -1,0 +1,11 @@
+{
+  "candidates": [
+    {
+      "source_content_id": "ebook-1",
+      "target_content_id": "audio-1",
+      "score": 0.9,
+      "link_source": "metadata_match",
+      "evidence": {}
+    }
+  ]
+}

@@ -26,8 +26,9 @@ describe("AccountSettings", () => {
     mocks.toastSuccess.mockReset();
     mocks.useCapability.mockReset().mockReturnValue({
       data: {
-        schema_version: 1,
-        change_password: true,
+        revision: "1",
+        state: "available",
+        allowed: true,
         requires_current_password: true,
         minimum_password_length: 8,
         maximum_password_bytes: 72,
@@ -74,8 +75,9 @@ describe("AccountSettings", () => {
   it("does not render the form when the server denies the capability", () => {
     mocks.useCapability.mockReturnValue({
       data: {
-        schema_version: 1,
-        change_password: false,
+        revision: "1",
+        state: "available",
+        allowed: false,
         requires_current_password: true,
         minimum_password_length: 8,
         maximum_password_bytes: 72,

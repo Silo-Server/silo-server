@@ -35,17 +35,3 @@ func TestComposeInvitationEmailDefaultsInviter(t *testing.T) {
 		t.Errorf("subject = %q", content.Subject)
 	}
 }
-
-func TestExpiryPhrase(t *testing.T) {
-	now := time.Now()
-	for want, at := range map[string]time.Time{
-		"in 7 days":   now.Add(7 * 24 * time.Hour),
-		"in 1 hour":   now.Add(90 * time.Minute),
-		"in 36 hours": now.Add(36 * time.Hour),
-		"immediately": now.Add(-time.Minute),
-	} {
-		if got := expiryPhrase(at, now); got != want {
-			t.Errorf("expiryPhrase(%v) = %q, want %q", at.Sub(now), got, want)
-		}
-	}
-}

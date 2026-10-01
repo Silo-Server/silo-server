@@ -22,11 +22,17 @@ const (
 	ArtifactAudioV2Queued  = "audio_v2_queued"
 	ArtifactAudioV2Running = "audio_v2_running"
 	ArtifactAudioV2Ready   = "audio_v2_ready"
+	ArtifactTracksQueued   = "tracks_v1_queued"
+	ArtifactTracksRunning  = "tracks_v1_running"
+	ArtifactTracksReady    = "tracks_v1_ready"
 	ArtifactReady          = "ready"
 	ArtifactFailed         = "failed"
 )
 
-func queuedArtifactStatus(mode tonemap.Mode, audioRecipeVersion string) string {
+func queuedArtifactStatus(mode tonemap.Mode, audioRecipeVersion, trackRecipeVersion string) string {
+	if trackRecipeVersion != "" {
+		return ArtifactTracksQueued
+	}
 	if audioRecipeVersion != "" {
 		return ArtifactAudioV2Queued
 	}
@@ -37,7 +43,8 @@ func queuedArtifactStatus(mode tonemap.Mode, audioRecipeVersion string) string {
 }
 
 func artifactReady(artifact *Artifact) bool {
-	return artifact != nil && (artifact.Status == ArtifactReady || artifact.Status == ArtifactToneMapReady || artifact.Status == ArtifactAudioV2Ready)
+	return artifact != nil && (artifact.Status == ArtifactReady || artifact.Status == ArtifactToneMapReady ||
+		artifact.Status == ArtifactAudioV2Ready || artifact.Status == ArtifactTracksReady)
 }
 
 // ErrNoArtifactJob is returned by the queue when no claimable job exists.
@@ -54,6 +61,8 @@ type Artifact struct {
 	CodecVideo                 string
 	CodecAudio                 string
 	AudioRecipeVersion         string
+	TrackRecipeVersion         string              // playback.PreparedTracksRecipeVersion; empty = legacy single-audio layout
+	PreparedAudioTracks        []OfflineAudioTrack // multi-track audio inventory, frozen when the file became ready
 	Resolution                 string
 	AudioTrackIndex            int
 	TargetBitrateKbps          int
@@ -129,13 +138,14 @@ func paramsHashWithToneMapRevision(params paramsHashParams) string {
 }
 
 // artifactUsesExecutionFingerprint distinguishes source-sensitive recipes from
-// legacy parameter-only artifacts. AudioRecipeVersion is also the durable
-// queue discriminator that keeps a pre-v2 worker from claiming these bytes.
+// legacy parameter-only artifacts. AudioRecipeVersion and TrackRecipeVersion
+// are also the durable queue discriminators that keep an older worker from
+// claiming bytes it would encode differently.
 func artifactUsesExecutionFingerprint(a *Artifact) bool {
 	if a == nil {
 		return false
 	}
-	return a.ToneMapMode != "" || a.AudioRecipeVersion != ""
+	return a.ToneMapMode != "" || a.AudioRecipeVersion != "" || a.TrackRecipeVersion != ""
 }
 
 // effectiveArtifactDir resolves where prepared artifacts are written: the

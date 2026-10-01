@@ -586,6 +586,57 @@ func TestInjectNextUpAfterContiguousContinueRows(t *testing.T) {
 	}
 }
 
+func TestInjectNextUpMatchesContinueWatchingItemLimit(t *testing.T) {
+	watching := sections.ContinueTypeConfig(sections.ContinueTypeWatching)
+	listening := sections.ContinueTypeConfig(sections.ContinueTypeListening)
+	cases := []struct {
+		name string
+		in   []sections.ResolvedSection
+		want int
+	}{
+		{
+			name: "user limit on continue watching",
+			in: []sections.ResolvedSection{
+				{ID: "cw", SectionType: sections.SectionContinueWatching, Config: watching, ItemLimit: 35},
+			},
+			want: 35,
+		},
+		{
+			name: "continue listening limit is not inherited",
+			in: []sections.ResolvedSection{
+				{ID: "cl", SectionType: sections.SectionContinueWatching, Config: listening, ItemLimit: 50},
+			},
+			want: 20,
+		},
+		{
+			name: "unset limit keeps the default",
+			in: []sections.ResolvedSection{
+				{ID: "cw", SectionType: sections.SectionContinueWatching, Config: watching},
+			},
+			want: 20,
+		},
+		{
+			name: "no continue row",
+			in:   []sections.ResolvedSection{{ID: "recent", SectionType: sections.SectionRecentlyAdded, ItemLimit: 40}},
+			want: 20,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, section := range injectNextUpSection(tc.in) {
+				if section.ID != "system-next-up" {
+					continue
+				}
+				if section.ItemLimit != tc.want {
+					t.Fatalf("next-up item limit = %d, want %d", section.ItemLimit, tc.want)
+				}
+				return
+			}
+			t.Fatal("next-up section was not injected")
+		})
+	}
+}
+
 func TestDropEmptySeasonalSectionsRemovesOnlyEmptySeasonal(t *testing.T) {
 	in := []sections.SectionWithItems{
 		// empty seasonal — drop

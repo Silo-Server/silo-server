@@ -49,7 +49,7 @@ const defaultServiceName = "silo-server"
 
 // defaultSamplerRatio is the parent-based trace-id ratio applied when
 // OTEL_TRACES_SAMPLER_ARG is unset or unparseable.
-const defaultSamplerRatio = 1.0
+const defaultSamplerRatio = 0.01
 
 // Config is the fully-defaulted telemetry configuration parsed from the
 // environment. It is cheap to construct and safe to build even when telemetry
@@ -112,7 +112,7 @@ func LoadConfig(nodeID string) Config {
 	ratio := defaultSamplerRatio
 	if raw := strings.TrimSpace(os.Getenv("OTEL_TRACES_SAMPLER_ARG")); raw != "" {
 		// Accept only finite, non-negative values; clamp above 1 to 1.0 so a
-		// typo'd or +Inf arg means "sample everything" rather than silently
+		// typo above one means "sample everything" rather than silently
 		// falling through. NaN and -Inf fail the v >= 0 / IsInf checks.
 		if v, err := strconv.ParseFloat(raw, 64); err == nil && v >= 0 && !math.IsInf(v, 1) {
 			ratio = math.Min(v, 1.0)

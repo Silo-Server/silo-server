@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -435,6 +436,35 @@ func TestCanGenerateSyntheticManifestBoundsSegmentCount(t *testing.T) {
 	}
 	if CanGenerateSyntheticManifest(100_001, 2) {
 		t.Fatal("manifest above 50,000 segments should use the real playlist")
+	}
+}
+
+func TestHEVCTranscodeManifestAndProgressUseFMP4Segments(t *testing.T) {
+	dir := t.TempDir()
+	opts := TranscodeOpts{
+		OutputDir: dir, TargetCodecVideo: "hevc", TargetCodecAudio: "aac",
+		SourceVideoCodec: "av1", SegmentDuration: 2, TotalDuration: 8,
+	}
+	session := &TranscodeSession{outputDir: dir, opts: opts, running: true}
+	manifest := session.GenerateFullManifest("", "")
+	text := string(manifest)
+	for _, want := range []string{`#EXT-X-MAP:URI="init.mp4"`, "seg_00000.m4s", "seg_00003.m4s"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("HEVC manifest missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, ".ts") {
+		t.Fatalf("HEVC manifest exposed MPEG-TS segment: %s", text)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "stream.m3u8"), manifest, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "seg_00000.m4s"), []byte("segment"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	progress := session.SegmentProgress(time.Now())
+	if progress.ProducedCount != 1 || progress.ProducedHead != 0 {
+		t.Fatalf("HEVC segment progress = %#v, want one produced fMP4 segment", progress)
 	}
 }
 
@@ -1293,5 +1323,40 @@ func TestAppendManifestQueryParam_NonManifestUnchanged(t *testing.T) {
 	}
 	if got := AppendManifestQueryParam([]byte("#EXTM3U\nseg.ts\n"), "", "TOKEN"); !strings.Contains(string(got), "seg.ts\n") || strings.Contains(string(got), "seg.ts?") {
 		t.Fatalf("empty key should be a no-op, got:\n%s", got)
+	}
+}
+
+func TestSourceAlignedCopyStartHintSurvivesReload(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		requested, origin float64
+		segment           int
+	}{
+		{"forward", 900, 898.125, 449},
+		{"backward", 300, 298.125, 149},
+		{"origin at zero", 0.5, 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := TranscodeOpts{TargetCodecVideo: "copy", SegmentDuration: 2, TotalDuration: 3600, SeekSeconds: tc.requested, StreamOriginSeconds: tc.origin, CopySeekAnchorResolved: true, StartSegmentNumber: tc.segment}
+			raw := fmt.Sprintf("#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:3\n#EXT-X-MEDIA-SEQUENCE:%d\n#EXT-X-MAP:URI=\"init.mp4\"\n#EXTINF:2.700000,\nseg_%05d.m4s\n", tc.segment, tc.segment)
+			for reload := range 3 {
+				manifest := stabilizeCopyHLSRemountTimeline([]byte(raw), opts)
+				if !bytes.Contains(manifest, []byte("#EXT-X-START:TIME-OFFSET=0.001,")) {
+					t.Fatal("fixture lacks generation-relative start")
+				}
+				aligned, err := AlignRealManifestToSourceTimeline(manifest, opts, "gap.m4s")
+				if err != nil {
+					t.Fatal(err)
+				}
+				expected := fmt.Sprintf("#EXT-X-START:TIME-OFFSET=%.6f,PRECISE=YES", tc.requested)
+				if !bytes.Contains(aligned, []byte(expected)) || bytes.Count(aligned, []byte("#EXT-X-START:")) != 1 {
+					t.Fatalf("reload %d wrong source-time start:\n%s", reload, aligned)
+				}
+				if bytes.Contains(aligned, []byte("#EXT-X-START:TIME-OFFSET=0.001,")) {
+					t.Fatal("start still points into unavailable gap prefix")
+				}
+				raw += fmt.Sprintf("#EXTINF:1.700000,\nseg_%05d.m4s\n", tc.segment+reload+1)
+			}
+		})
 	}
 }

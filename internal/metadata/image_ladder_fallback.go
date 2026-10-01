@@ -59,7 +59,17 @@ func variantKey(key, variant string) string {
 
 // resolvePublishedLadderKeys performs one catalog lookup and local selection.
 // Neither cold caches nor missing manifests cause storage or delivery probes.
+// Without a reader (local storage, direct S3) every key resolves to itself:
+// publication is atomic there, and a key that is nevertheless missing gets a
+// 404 that enqueues repair rather than a silently demoted rung.
 func resolvePublishedLadderKeys(ctx context.Context, reader ArtworkAvailabilityReader, entries []resolveEntry) map[string]string {
+	if reader == nil {
+		resolved := make(map[string]string, len(entries))
+		for _, entry := range entries {
+			resolved[entry.originalPath] = entry.originalPath
+		}
+		return resolved
+	}
 	originals := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		if catalog.ImageTypeFromCachedPath(entry.originalPath) != "" {
@@ -67,7 +77,7 @@ func resolvePublishedLadderKeys(ctx context.Context, reader ArtworkAvailabilityR
 		}
 	}
 	var states map[string]ArtworkAvailability
-	if reader != nil && len(originals) > 0 {
+	if len(originals) > 0 {
 		var err error
 		states, err = reader.ArtworkAvailability(ctx, originals)
 		if err != nil {

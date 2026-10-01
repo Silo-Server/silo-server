@@ -1,6 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { api } from "@/api/client";
-import type { SystemResources } from "@/api/types";
+import {
+  captureProfileRequestContext,
+  isCapturedProfileAuthorityActive,
+  StaleApiRequestContextError,
+} from "@/api/client";
+import { v2 } from "@/api/v2/request";
 import { adminKeys } from "../keys";
 
 /**
@@ -35,6 +39,13 @@ export interface NodeHWAccel {
   error?: string;
 }
 
+export interface ToneMapCapability {
+  mode: string;
+  backend: string;
+  filter: string;
+  source_kinds: string[];
+}
+
 export interface HWAccelInfo {
   resolved: string;
   render_devices: string[];
@@ -42,6 +53,8 @@ export interface HWAccelInfo {
   intel_detected: boolean;
   source: "local" | "transcode_node";
   node_url?: string;
+  /** Validated tone-map executors on this server or its transcode nodes. */
+  tone_map_capabilities?: ToneMapCapability[];
   /** Per-node inventories when transcode nodes are registered. */
   nodes?: NodeHWAccel[];
 }
@@ -49,7 +62,10 @@ export interface HWAccelInfo {
 export function useBuildInfo() {
   return useQuery({
     queryKey: adminKeys.buildInfo(),
-    queryFn: () => api<BuildInfo>("/admin/system/build"),
+    queryFn: async (): Promise<BuildInfo> => {
+      const info = await v2("GET /api/v2/admin/system/build");
+      return { ...info, vcs_time: info.vcs_time ?? "" };
+    },
     staleTime: Number.POSITIVE_INFINITY,
     retry: false,
   });
@@ -61,9 +77,20 @@ export function useBuildInfo() {
  * same "not being sampled" state it uses for a non-Linux host.
  */
 export function useSystemResources(enabled = true) {
+  const capabilities = useQuery({
+    queryKey: [...adminKeys.systemResources(), "capabilities"],
+    queryFn: () => v2("GET /api/v2/admin/system/resources/capabilities"),
+    staleTime: 60_000,
+    retry: false,
+    enabled,
+  });
   return useQuery({
     queryKey: adminKeys.systemResources(),
-    queryFn: () => api<SystemResources>("/admin/system/resources"),
+    queryFn: () => v2("GET /api/v2/admin/system/resources"),
+    select: (data) =>
+      capabilities.data?.state === "available" && capabilities.data.instance_attribution
+        ? data
+        : { ...data, attribution: undefined },
     refetchInterval: SYSTEM_RESOURCES_REFRESH_MS,
     staleTime: SYSTEM_RESOURCES_REFRESH_MS,
     retry: false,
@@ -72,11 +99,30 @@ export function useSystemResources(enabled = true) {
 }
 
 export function useHWAccelDetection(enabled = true) {
+  const profileContext = captureProfileRequestContext();
   return useQuery({
-    queryKey: adminKeys.hwAccel(),
-    queryFn: () => api<HWAccelInfo>("/admin/system/hw-accel"),
+    queryKey: [
+      ...adminKeys.hwAccel(),
+      profileContext?.serverOrigin,
+      profileContext?.authContextVersion,
+      profileContext?.profileId,
+      profileContext?.profileTokenGeneration,
+    ],
+    queryFn: async (): Promise<HWAccelInfo> => {
+      if (!profileContext || !isCapturedProfileAuthorityActive(profileContext))
+        throw new StaleApiRequestContextError();
+      const result = await v2("GET /api/v2/admin/system/hw-accel", {
+        profileContext,
+        retryAuthentication: false,
+      });
+      if (!isCapturedProfileAuthorityActive(profileContext))
+        throw new StaleApiRequestContextError();
+      if (result.source !== "local" && result.source !== "transcode_node")
+        throw new Error("Unrecognized hardware inventory source.");
+      return { ...result, source: result.source };
+    },
     staleTime: 60_000,
     retry: false,
-    enabled,
+    enabled: enabled && profileContext !== null,
   });
 }

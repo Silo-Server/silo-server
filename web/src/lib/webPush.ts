@@ -1,4 +1,5 @@
-import { api } from "@/api/client";
+import { captureNotificationAuthority, requireNotificationAuthority } from "@/api/v2/notifications";
+import { v2 } from "@/api/v2/request";
 
 /**
  * Browser-side Web Push subscription helpers. The server's VAPID public key
@@ -31,12 +32,6 @@ function urlBase64ToUint8Array(base64: string): Uint8Array {
     output[i] = raw.charCodeAt(i);
   }
   return output;
-}
-
-async function pushRegistration(): Promise<ServiceWorkerRegistration> {
-  const registration = await navigator.serviceWorker.register("/sw.js");
-  await navigator.serviceWorker.ready;
-  return registration;
 }
 
 /** Returns the browser's current push subscription, if any. */
@@ -82,43 +77,63 @@ function describeDevice(): string {
  * subscription with the server for the active profile. Throws with a
  * user-presentable message on failure.
  */
-export async function enableWebPush(vapidPublicKey: string): Promise<void> {
+export async function enableWebPush(
+  vapidPublicKey: string,
+  context = captureNotificationAuthority(),
+): Promise<void> {
+  requireNotificationAuthority(context);
   if (webPushSupport() === "unsupported") {
     throw new Error("This browser does not support push notifications");
   }
   const permission = await Notification.requestPermission();
+  requireNotificationAuthority(context);
   if (permission !== "granted") {
     throw new Error("Notification permission was not granted");
   }
-  const registration = await pushRegistration();
+  const registration = await navigator.serviceWorker.register("/sw.js");
+  requireNotificationAuthority(context);
+  await navigator.serviceWorker.ready;
+  requireNotificationAuthority(context);
   const subscription = await registration.pushManager.subscribe({
     userVisibleOnly: true,
     applicationServerKey: urlBase64ToUint8Array(vapidPublicKey) as BufferSource,
   });
+  requireNotificationAuthority(context);
   const json = subscription.toJSON();
   if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) {
     throw new Error("The browser returned an incomplete push subscription");
   }
-  await api("/notifications/web-push/subscriptions", {
-    method: "POST",
-    body: JSON.stringify({
+  await v2("POST /api/v2/notifications/web-push/subscriptions", {
+    profileContext: context,
+    retryAuthentication: false,
+    body: {
       endpoint: json.endpoint,
       keys: { p256dh: json.keys.p256dh, auth: json.keys.auth },
       device_name: describeDevice(),
-    }),
+    },
   });
+  requireNotificationAuthority(context);
 }
 
 /** Unsubscribes this browser and removes the server-side registration. */
-export async function disableWebPush(): Promise<void> {
-  const subscription = await currentWebPushSubscription();
-  if (!subscription) {
-    return;
-  }
-  const endpoint = subscription.endpoint;
-  await subscription.unsubscribe();
-  await api("/notifications/web-push/unsubscribe", {
-    method: "POST",
-    body: JSON.stringify({ endpoint }),
+export async function disableWebPush(context = captureNotificationAuthority()): Promise<void> {
+  requireNotificationAuthority(context);
+  if (webPushSupport() === "unsupported") return;
+  const registration = await navigator.serviceWorker.getRegistration("/sw.js");
+  requireNotificationAuthority(context);
+  const subscription = await registration?.pushManager.getSubscription();
+  requireNotificationAuthority(context);
+  if (!subscription) return;
+  await v2("POST /api/v2/notifications/web-push/unsubscribe", {
+    body: { endpoint: subscription.endpoint },
+    profileContext: context,
+    retryAuthentication: false,
   });
+  requireNotificationAuthority(context);
+  const removed = await subscription.unsubscribe();
+  requireNotificationAuthority(context);
+  if (!removed)
+    throw new Error(
+      "Server registration removed, but the browser subscription could not be removed.",
+    );
 }

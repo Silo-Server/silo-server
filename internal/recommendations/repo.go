@@ -68,6 +68,16 @@ watched_activity AS (
 	  )
 )`, catalog.EbookFinishedProgressThresholdSQL)
 
+var recentCompletedItemIDsQuery = fmt.Sprintf(`
+	WITH %s
+	SELECT item_id
+	FROM   watched_activity
+	WHERE  user_id = $1 AND profile_id = $2 AND completed = true
+	GROUP  BY item_id
+	ORDER  BY MAX(updated_at) DESC, item_id ASC
+	LIMIT  $3
+`, watchedActivityCTE)
+
 var tasteSeedCandidateQuery = fmt.Sprintf(`
 			WITH %s,
 			watched_counts AS (
@@ -367,23 +377,7 @@ func (r *Repo) findTasteProfileCandidates(
 	}
 	catalog.ApplyLibraryAccessFilter("mi.content_id", filter, &conditions, &args, &argIdx)
 
-	if filter.MaxContentRating != "" {
-		allowedRatings := access.AllowedRatingsUpTo(filter.MaxContentRating)
-		if len(allowedRatings) == 0 {
-			return []ScoredItem{}, map[string][]string{}, nil
-		}
-
-		placeholders := make([]string, len(allowedRatings))
-		for i, rating := range allowedRatings {
-			placeholders[i] = fmt.Sprintf("$%d", argIdx)
-			args = append(args, rating)
-			argIdx++
-		}
-		conditions = append(conditions, fmt.Sprintf(
-			"mi.content_rating IN (%s)",
-			strings.Join(placeholders, ", "),
-		))
-	}
+	catalog.ApplyMaturityLimits("mi", filter, &conditions, &args, &argIdx)
 
 	query := fmt.Sprintf(`
 			WITH ann_candidates AS (
@@ -782,8 +776,12 @@ func (r *Repo) FindSimilarUsers(ctx context.Context, userID int, profileID strin
 	return users, nil
 }
 
+// compatiblePeerContentRatings lists the ceilings a peer profile may carry and
+// still be a safe taste neighbor. It compares ceiling strings to ceiling
+// strings — user_taste_profiles.max_content_rating, not an item's rating — so
+// no stored age applies; see access.CompatibleCeilings.
 func compatiblePeerContentRatings(maxContentRating string) []string {
-	allowed := access.AllowedRatingsUpTo(maxContentRating)
+	allowed := access.CompatibleCeilings(maxContentRating)
 	if len(allowed) == 0 {
 		return []string{}
 	}
@@ -791,23 +789,49 @@ func compatiblePeerContentRatings(maxContentRating string) []string {
 	return allowed
 }
 
+// Global cache rows are owned by no account and are stored with user_id NULL so
+// the users(id) foreign key does not reject them (see migration
+// 20260922130000_recommendation_cache_global_ownership). GlobalCacheUserID (0)
+// is the API-level sentinel; NULLIF maps it to NULL at the row, and the identity
+// index is NULLS NOT DISTINCT so a NULL-owned row still collides on upsert.
+const upsertRecommendationCacheQuery = `
+		INSERT INTO recommendation_cache
+			(user_id, profile_id, rec_type, source_item_id, items, expires_at, created_at)
+		VALUES (NULLIF($1, 0), $2, $3, $4, $5, $6::timestamptz, NOW())
+		ON CONFLICT (user_id, profile_id, rec_type, source_item_id) DO UPDATE
+			SET items      = EXCLUDED.items,
+			    expires_at = EXCLUDED.expires_at,
+			    created_at = NOW()
+`
+
+const getRecommendationCacheQuery = `
+		SELECT items
+		FROM   recommendation_cache
+		WHERE  profile_id     = $1
+		  AND  rec_type       = $2
+		  AND  source_item_id = $3
+		  AND  expires_at     > NOW()
+		  AND  `
+
+// recommendationCacheLookup builds the read for one cache row. Global rows are
+// matched with user_id IS NULL and account rows with user_id = $4; both keep
+// the identity index usable, which IS NOT DISTINCT FROM would not.
+func recommendationCacheLookup(userID int, profileID, recType, sourceItemID string) (string, []any) {
+	if userID == GlobalCacheUserID {
+		return getRecommendationCacheQuery + "user_id IS NULL", []any{profileID, recType, sourceItemID}
+	}
+	return getRecommendationCacheQuery + "user_id = $4", []any{profileID, recType, sourceItemID, userID}
+}
+
 // UpsertRecommendationCache stores or refreshes a precomputed recommendation
-// list for a user.
+// list for a user, or a global list when userID is GlobalCacheUserID.
 func (r *Repo) UpsertRecommendationCache(ctx context.Context, userID int, profileID, recType, sourceItemID string, items []ScoredItem, expiresAt string) error {
 	itemsJSON, err := json.Marshal(items)
 	if err != nil {
 		return fmt.Errorf("marshaling cached items: %w", err)
 	}
 
-	_, err = r.pool.Exec(ctx, `
-		INSERT INTO recommendation_cache
-			(user_id, profile_id, rec_type, source_item_id, items, expires_at, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6::timestamptz, NOW())
-		ON CONFLICT (user_id, profile_id, rec_type, source_item_id) DO UPDATE
-			SET items      = EXCLUDED.items,
-			    expires_at = EXCLUDED.expires_at,
-			    created_at = NOW()
-	`, userID, profileID, recType, sourceItemID, itemsJSON, expiresAt)
+	_, err = r.pool.Exec(ctx, upsertRecommendationCacheQuery, userID, profileID, recType, sourceItemID, itemsJSON, expiresAt)
 	if err != nil {
 		return fmt.Errorf("upsert recommendation cache: %w", err)
 	}
@@ -818,15 +842,8 @@ func (r *Repo) UpsertRecommendationCache(ctx context.Context, userID int, profil
 // yet expired. Returns nil, nil on cache miss or expiry.
 func (r *Repo) GetRecommendationCache(ctx context.Context, userID int, profileID, recType, sourceItemID string) ([]ScoredItem, error) {
 	var itemsJSON []byte
-	err := r.pool.QueryRow(ctx, `
-		SELECT items
-		FROM   recommendation_cache
-		WHERE  user_id        = $1
-		  AND  profile_id     = $2
-		  AND  rec_type       = $3
-		  AND  source_item_id = $4
-		  AND  expires_at     > NOW()
-	`, userID, profileID, recType, sourceItemID).Scan(&itemsJSON)
+	query, args := recommendationCacheLookup(userID, profileID, recType, sourceItemID)
+	err := r.pool.QueryRow(ctx, query, args...).Scan(&itemsJSON)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
@@ -841,17 +858,20 @@ func (r *Repo) GetRecommendationCache(ctx context.Context, userID int, profileID
 	return items, nil
 }
 
+// listCachedGenreSamplersQuery reads the global (user_id NULL) genre samplers.
+const listCachedGenreSamplersQuery = `
+		SELECT rec_type, items
+		FROM   recommendation_cache
+		WHERE  user_id IS NULL
+		  AND  profile_id = $1
+		  AND  rec_type LIKE $2
+		  AND  expires_at > NOW()`
+
 // ListCachedGenreSamplers returns all non-expired global genre sampler cache entries
 // as a map of genre name → scored items.
 func (r *Repo) ListCachedGenreSamplers(ctx context.Context) (map[string][]ScoredItem, error) {
-	rows, err := r.pool.Query(ctx, `
-		SELECT rec_type, items
-		FROM   recommendation_cache
-		WHERE  user_id    = $1
-		  AND  profile_id = $2
-		  AND  rec_type LIKE $3
-		  AND  expires_at > NOW()`,
-		GlobalCacheUserID, GlobalCacheProfileID, RecTypeGenreSamplerPrefix+"%")
+	rows, err := r.pool.Query(ctx, listCachedGenreSamplersQuery,
+		GlobalCacheProfileID, RecTypeGenreSamplerPrefix+"%")
 	if err != nil {
 		return nil, fmt.Errorf("list cached genre samplers: %w", err)
 	}
@@ -893,6 +913,16 @@ func (r *Repo) UpsertTasteClusters(ctx context.Context, userID int, profileID st
 		return fmt.Errorf("begin tx for taste clusters: %w", err)
 	}
 	defer tx.Rollback(ctx)
+
+	// Lock the replacement, including an empty cluster set, across server
+	// processes. DELETE alone cannot protect rows another refresh has not yet
+	// committed, so concurrent replacements can otherwise collide on INSERT.
+	_, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(
+		'recommendations:taste-clusters:' || $1::bigint::text || ':' || $2::text, 0))`,
+		userID, profileID)
+	if err != nil {
+		return fmt.Errorf("lock taste clusters: %w", err)
+	}
 
 	_, err = tx.Exec(ctx,
 		`DELETE FROM user_taste_clusters WHERE user_id = $1 AND profile_id = $2`,
@@ -1019,10 +1049,14 @@ func (r *Repo) CowatchPairCount(ctx context.Context) (int, error) {
 
 // --- Staleness Operations ---
 
-// MarkProfileStale sets stale_at = NOW() on a user's taste profile.
+// MarkProfileStale sets stale_at = NOW() on a user's taste profile. A profile
+// already waiting for a refresh (stale_at > updated_at) keeps its pending
+// mark, so a repeat mark writes nothing.
 func (r *Repo) MarkProfileStale(ctx context.Context, userID int, profileID string) error {
-	_, err := r.pool.Exec(ctx,
-		`UPDATE user_taste_profiles SET stale_at = NOW() WHERE user_id = $1 AND profile_id = $2`,
+	_, err := r.pool.Exec(ctx, `
+		UPDATE user_taste_profiles SET stale_at = NOW()
+		WHERE  user_id = $1 AND profile_id = $2
+		  AND  (stale_at IS NULL OR stale_at <= updated_at)`,
 		userID, profileID)
 	if err != nil {
 		return fmt.Errorf("mark profile stale: %w", err)
@@ -1585,15 +1619,7 @@ func (r *Repo) FilterAccessibleItemIDs(ctx context.Context, itemIDs []string, fi
 	}
 	catalog.ApplyLibraryAccessFilter("mi.content_id", filter, &conditions, &args, &argIdx)
 
-	if filter.MaxContentRating != "" {
-		allowedRatings := access.AllowedRatingsUpTo(filter.MaxContentRating)
-		if len(allowedRatings) == 0 {
-			return map[string]struct{}{}, nil
-		}
-		conditions = append(conditions, fmt.Sprintf("mi.content_rating = ANY($%d)", argIdx))
-		args = append(args, allowedRatings)
-		argIdx++
-	}
+	catalog.ApplyMaturityLimits("mi", filter, &conditions, &args, &argIdx)
 
 	rows, err := r.pool.Query(ctx, fmt.Sprintf(`
 		SELECT mi.content_id
@@ -1727,21 +1753,13 @@ func (r *Repo) GetWatchedItemIDSetFromStore(ctx context.Context, store userstore
 	return r.ResolveCanonicalItemIDSet(ctx, rawIDs)
 }
 
-// GetRecentCompletedItemIDs returns the most recently completed leaf item IDs for a profile.
+// GetRecentCompletedItemIDs returns the most recently completed canonical item IDs for a profile.
 func (r *Repo) GetRecentCompletedItemIDs(ctx context.Context, userID int, profileID string, limit int) ([]string, error) {
 	if limit <= 0 {
 		return []string{}, nil
 	}
 
-	query := fmt.Sprintf(`
-		WITH %s
-		SELECT leaf_item_id
-		FROM   watched_activity
-		WHERE  user_id = $1 AND profile_id = $2 AND completed = true
-		ORDER  BY updated_at DESC, leaf_item_id ASC
-		LIMIT  $3
-	`, watchedActivityCTE)
-	rows, err := r.pool.Query(ctx, query, userID, profileID, limit)
+	rows, err := r.pool.Query(ctx, recentCompletedItemIDsQuery, userID, profileID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("get recent completed item IDs: %w", err)
 	}
@@ -1797,14 +1815,17 @@ func excludeScoredItems(items []ScoredItem, excluded map[string]struct{}) []Scor
 	return filtered
 }
 
-// ResolveCanonicalItemIDSet maps episode IDs to their parent series IDs and
-// leaves movie/series IDs unchanged.
-func (r *Repo) ResolveCanonicalItemIDSet(ctx context.Context, itemIDs []string) (map[string]struct{}, error) {
+// ResolveCanonicalItemIDs maps each episode ID to its parent series ID and
+// maps every other ID to itself.
+func (r *Repo) ResolveCanonicalItemIDs(ctx context.Context, itemIDs []string) (map[string]string, error) {
+	resolved := make(map[string]string, len(itemIDs))
+	for _, itemID := range itemIDs {
+		resolved[itemID] = itemID
+	}
 	if len(itemIDs) == 0 {
-		return map[string]struct{}{}, nil
+		return resolved, nil
 	}
 
-	set := scoredItemIDSet(itemIDs)
 	rows, err := r.pool.Query(ctx, `
 		SELECT content_id, series_id
 		FROM episodes
@@ -1821,13 +1842,25 @@ func (r *Repo) ResolveCanonicalItemIDSet(ctx context.Context, itemIDs []string) 
 		if err := rows.Scan(&contentID, &seriesID); err != nil {
 			return nil, fmt.Errorf("scan canonical item ID: %w", err)
 		}
-		delete(set, contentID)
-		set[seriesID] = struct{}{}
+		resolved[contentID] = seriesID
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate canonical item IDs: %w", err)
 	}
+	return resolved, nil
+}
 
+// ResolveCanonicalItemIDSet maps episode IDs to their parent series IDs and
+// leaves movie/series IDs unchanged.
+func (r *Repo) ResolveCanonicalItemIDSet(ctx context.Context, itemIDs []string) (map[string]struct{}, error) {
+	resolved, err := r.ResolveCanonicalItemIDs(ctx, itemIDs)
+	if err != nil {
+		return nil, err
+	}
+	set := make(map[string]struct{}, len(resolved))
+	for _, itemID := range resolved {
+		set[itemID] = struct{}{}
+	}
 	return set, nil
 }
 

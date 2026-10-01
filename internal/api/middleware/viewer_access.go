@@ -30,7 +30,7 @@ func (m *ViewerAccessMiddleware) RequireViewerAccess(next http.Handler) http.Han
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims := GetClaims(r.Context())
 		if claims == nil {
-			writeUnauthorized(w, "Authentication required")
+			writeUnauthorized(w, "Authentication required", ReasonAuthenticationRequired)
 			return
 		}
 

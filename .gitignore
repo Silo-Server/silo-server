@@ -45,6 +45,7 @@ go.work.sum
 web/node_modules/
 .pnpm-store/
 web/dist/
+web/.bundle-manifest.json
 plugins/metadb/dist/
 web/*.tsbuildinfo
 

@@ -2,6 +2,8 @@ package recommendations
 
 import (
 	"context"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -100,6 +102,50 @@ func TestWatchedActivityCTEIncludesEbookReaderProgress(t *testing.T) {
 		if !strings.Contains(query, term) {
 			t.Fatalf("watched activity CTE missing %q: %s", term, query)
 		}
+	}
+}
+
+func TestRecentCompletedItemIDsQueryCanonicalizesBeforeLimit(t *testing.T) {
+	query := strings.Join(strings.Fields(recentCompletedItemIDsQuery), " ")
+
+	assertQueryTermsInOrder(t, query,
+		"SELECT item_id",
+		"FROM watched_activity",
+		"WHERE user_id = $1 AND profile_id = $2 AND completed = true",
+		"GROUP BY item_id",
+		"ORDER BY MAX(updated_at) DESC, item_id ASC",
+		"LIMIT $3",
+	)
+	if strings.Contains(query, "SELECT leaf_item_id") {
+		t.Fatalf("automatic anchors must not use episode leaf IDs: %s", query)
+	}
+}
+
+func TestResolveCanonicalItemIDsDefaultsToInputAndRollsEpisodesUp(t *testing.T) {
+	pool := newEngineTestPool(t)
+	ctx := context.Background()
+	prefix := "t612-anchor-"
+	seriesID := prefix + "series"
+	episodeID := prefix + "episode"
+	movieID := prefix + "movie"
+
+	cleanupRecoMediaItems(t, pool, prefix)
+	seedRecoMediaItem(t, pool, seriesID, "series", "matched")
+	seedRecoMediaItem(t, pool, movieID, "movie", "matched")
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO episodes (content_id, series_id, season_number, episode_number, title)
+		VALUES ($1, $2, 1, 1, 'Episode 1')
+	`, episodeID, seriesID); err != nil {
+		t.Fatalf("seed episode: %v", err)
+	}
+
+	got, err := NewRepo(pool).ResolveCanonicalItemIDs(ctx, []string{episodeID, movieID, "unknown-id"})
+	if err != nil {
+		t.Fatalf("ResolveCanonicalItemIDs: %v", err)
+	}
+	want := map[string]string{episodeID: seriesID, movieID: movieID, "unknown-id": "unknown-id"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("resolved IDs = %#v, want %#v", got, want)
 	}
 }
 
@@ -282,5 +328,95 @@ func assertQueryTermsInOrder(t *testing.T, query string, terms ...string) {
 			t.Fatalf("query term %q missing or out of order in query:\n%s", term, query)
 		}
 		searchFrom += idx + len(term)
+	}
+}
+
+func TestRecentCompletedItemIDsGroupsSeriesBeforeLimit(t *testing.T) {
+	pool := newEngineTestPool(t)
+	ctx := t.Context()
+	const prefix = "t612-recent-"
+	const profile = "66100000-0000-4000-8000-000000000001"
+	var userID int
+	if err := pool.QueryRow(ctx, `INSERT INTO users(username,role) VALUES($1,'user') RETURNING id`, prefix).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, userID) })
+	if _, err := pool.Exec(ctx, `INSERT INTO user_profiles(id,user_id,name) VALUES($1,$2,'anchor test')`, profile, userID); err != nil {
+		t.Fatal(err)
+	}
+	cleanupRecoMediaItems(t, pool, prefix)
+	seedRecoMediaItem(t, pool, prefix+"series", "series", "matched")
+	seedRecoMediaItem(t, pool, prefix+"movie-a", "movie", "matched")
+	seedRecoMediaItem(t, pool, prefix+"movie-b", "movie", "matched")
+	for i, id := range []string{prefix + "episode-1", prefix + "episode-2"} {
+		if _, err := pool.Exec(ctx, `INSERT INTO episodes(content_id,series_id,season_number,episode_number,title) VALUES($1,$2,1,$3,'Episode')`, id, prefix+"series", i+1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, id := range []string{prefix + "episode-1", prefix + "episode-2", prefix + "movie-b", prefix + "movie-a"} {
+		// The movies tie; the final order must use canonical ID ascending.
+		age := min(i, 2)
+		if _, err := pool.Exec(ctx, `INSERT INTO user_watch_progress(user_id,profile_id,media_item_id,completed,updated_at) VALUES($1,$2,$3,true,TIMESTAMPTZ '2026-08-10 12:00:00Z' - $4 * INTERVAL '1 second')`, userID, profile, id, age); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := NewRepo(pool).GetRecentCompletedItemIDs(ctx, userID, profile, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{prefix + "series", prefix + "movie-a", prefix + "movie-b"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("recent completed = %v, want %v", got, want)
+	}
+}
+
+func TestRecommendationCacheQueriesStoreGlobalRowsAsNull(t *testing.T) {
+	// GlobalCacheUserID is the sentinel the worker/reader pass for global
+	// (non-personalized) rows. It must reach the row as NULL so the users(id)
+	// foreign key added in 20260912231023_user_fk_integrity does not reject it
+	// (issue #1261): no users row has id 0, so a literal 0 fails with 23503.
+	if GlobalCacheUserID != 0 {
+		t.Fatalf("GlobalCacheUserID = %d, expected 0", GlobalCacheUserID)
+	}
+
+	upsert := strings.Join(strings.Fields(upsertRecommendationCacheQuery), " ")
+	// The sentinel is mapped to NULL, and the conflict target is the identity
+	// index (NULLS NOT DISTINCT) so a NULL-owned row still upserts in place.
+	for _, want := range []string{
+		"VALUES (NULLIF($1, 0), $2, $3, $4, $5, $6::timestamptz, NOW())",
+		"ON CONFLICT (user_id, profile_id, rec_type, source_item_id) DO UPDATE",
+	} {
+		if !strings.Contains(upsert, want) {
+			t.Fatalf("upsert query missing %q: %s", want, upsert)
+		}
+	}
+	if strings.Contains(upsert, "VALUES ($1,") {
+		t.Fatalf("upsert must not insert the raw sentinel into user_id: %s", upsert)
+	}
+
+	// Reads must match the stored NULL for global rows and keep an indexable
+	// predicate: IS NOT DISTINCT FROM forces a sequential scan.
+	for _, tc := range []struct {
+		name      string
+		userID    int
+		predicate string
+		args      []any
+	}{
+		{"global", GlobalCacheUserID, "AND user_id IS NULL", []any{"", RecTypePopular, ""}},
+		{"account", 7, "AND user_id = $4", []any{"", RecTypePopular, "", 7}},
+	} {
+		query, args := recommendationCacheLookup(tc.userID, "", RecTypePopular, "")
+		get := strings.Join(strings.Fields(query), " ")
+		if !strings.HasSuffix(get, tc.predicate) || strings.Contains(get, "DISTINCT") {
+			t.Fatalf("%s lookup has wrong owner predicate: %s", tc.name, get)
+		}
+		if fmt.Sprint(args) != fmt.Sprint(tc.args) {
+			t.Fatalf("%s lookup args = %v, want %v", tc.name, args, tc.args)
+		}
+	}
+
+	samplers := strings.Join(strings.Fields(listCachedGenreSamplersQuery), " ")
+	if !strings.Contains(samplers, "WHERE user_id IS NULL AND profile_id = $1") {
+		t.Fatalf("genre sampler query must read NULL-owned global rows: %s", samplers)
 	}
 }

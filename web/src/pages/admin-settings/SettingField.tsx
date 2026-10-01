@@ -29,6 +29,13 @@ interface SelectOption {
  */
 export const SETTINGS_CONTROL_WIDTH = "w-full sm:w-[var(--settings-control-w)]";
 
+/**
+ * Look of a button inside a settings row, with `variant="outline"`: the dark
+ * field and border the row's inputs and selects use, so it reads as a control
+ * on the card rather than blending into it.
+ */
+export const SETTINGS_BUTTON = "bg-background border-muted-foreground/25 hover:bg-accent";
+
 /** Width of a number control inside a settings row. See {@link SETTINGS_CONTROL_WIDTH}. */
 export const SETTINGS_NUMBER_WIDTH = "w-full sm:w-[var(--settings-control-w-num)]";
 
@@ -147,7 +154,11 @@ export function SettingFieldRow({
         ) : null}
         {status ? <div className="mt-1.5">{status}</div> : null}
       </div>
-      <div className="flex w-full items-center gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
+      {/* `sm:ml-auto` pins the control column to the row's right edge. The
+          label column stops growing at its max width, so without it a row
+          with a short label and a narrow control (a switch, a link button)
+          would leave its control wherever the label column ended. */}
+      <div className="flex w-full items-center gap-2 sm:ml-auto sm:w-auto sm:shrink-0 sm:justify-end">
         {/* Grows to fill the row on a stacked phone layout; content-sized and
             right-aligned from `sm` up, which is what puts every control on the
             shared edge. */}

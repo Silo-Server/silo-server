@@ -1,6 +1,12 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// The restart button's v2 hook needs a query client; these tests are about the
+// banner's own show/defer behaviour, so the hook is mocked idle.
+vi.mock("@/hooks/queries/admin/serverRestart", () => ({
+  useRequestServerRestart: () => ({ mutateAsync: vi.fn(), isPending: false }),
+}));
 
 import { RestartBanner } from "./RestartBanner";
 

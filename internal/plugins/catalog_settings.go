@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -83,11 +84,35 @@ func (s *RepositoryStore) GetCatalogSettings(ctx context.Context) (CatalogSettin
 }
 
 func (s *RepositoryStore) SetIncludeApprovedCommunity(ctx context.Context, include bool) (CatalogSettings, error) {
+	return s.SetIncludeApprovedCommunityConditional(ctx, include, nil)
+}
+
+var ErrCatalogSettingsChanged = errors.New("plugin catalog settings changed")
+
+type CatalogSettingsConflict struct{ Actual bool }
+
+func (*CatalogSettingsConflict) Error() string { return ErrCatalogSettingsChanged.Error() }
+func (*CatalogSettingsConflict) Unwrap() error { return ErrCatalogSettingsChanged }
+
+// SetIncludeApprovedCommunityConditional guards the singleton under the same
+// row lock used by bridge writes and managed-repository reconciliation. A nil
+// expectation explicitly permits replacing the current configuration.
+func (s *RepositoryStore) SetIncludeApprovedCommunityConditional(ctx context.Context, include bool, expected *bool) (CatalogSettings, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return CatalogSettings{}, fmt.Errorf("begin approved community plugin setting update: %w", err)
 	}
 	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `INSERT INTO server_settings (key,value) VALUES ($1,'false') ON CONFLICT (key) DO NOTHING`, IncludeApprovedCommunityPluginsSetting); err != nil {
+		return CatalogSettings{}, err
+	}
+	current, err := readIncludeApprovedCommunityForUpdate(ctx, tx)
+	if err != nil {
+		return CatalogSettings{}, err
+	}
+	if expected != nil && current != *expected {
+		return CatalogSettings{}, &CatalogSettingsConflict{Actual: current}
+	}
 
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO server_settings (key, value)

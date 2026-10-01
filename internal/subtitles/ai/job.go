@@ -66,8 +66,9 @@ type Job struct {
 	// Transient, set from the request and used only while the job runs (not
 	// persisted): the realtime session to stream live cues to, and the playhead
 	// position so translation starts where the viewer is watching.
-	SessionID     string  `json:"-"`
-	StartPosition float64 `json:"-"`
+	LiveNotifier  Notifier `json:"-"`
+	SessionID     string   `json:"-"`
+	StartPosition float64  `json:"-"`
 }
 
 // JobRequest is the input to Service.Enqueue.
@@ -82,6 +83,9 @@ type JobRequest struct {
 	// decides exemption policy (the household parent of an admin account
 	// manages the budget, so it is not bound by it); the service enforces.
 	QuotaExempt bool
+	// LiveNotifier is a transient, request-authorized notifier for this job.
+	// It is never persisted or attached to an existing deduplicated job.
+	LiveNotifier Notifier
 	// SessionID, when set, streams live cues to that playback session.
 	SessionID string
 	// StartPosition (seconds) makes translation start at the viewer's playhead.
