@@ -188,10 +188,15 @@ func (a *copyGroupAssembler) mapGroupLocked(run *copyGroupRun, path string, data
 	}
 	at := float64(pts) / float64(run.timescale)
 	keys := a.plan.keyframes
+	// FFmpeg's output starts at zero (-start_at_zero), while the keyframe
+	// times are the container's, which can start later. Measure both from
+	// the first keyframe, the earliest the output's zero can stand for.
+	at += keys[0]
 	if !run.anchored {
 		// The first group starts at the keyframe FFmpeg's seek landed on: the
 		// last keyframe at or before it, since the run's timestamps are the
-		// source's shifted later, never earlier (a B-frame delay, or none).
+		// source's shifted later, never earlier (a B-frame delay, the gap
+		// between the file's start and its first keyframe, or none).
 		i := sort.SearchFloat64s(keys, at+groupTimeTolerance) - 1
 		if i < 0 {
 			return fmt.Errorf("first group at %.3fs precedes every keyframe", at)

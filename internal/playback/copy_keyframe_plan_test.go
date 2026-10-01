@@ -207,7 +207,8 @@ func TestPlannedSegmentRecoveryTargetRestartsAtTheSegment(t *testing.T) {
 }
 
 // A planned session's segments must match its playlist, from the start and
-// after FFmpeg restarts in the middle of the stream.
+// after FFmpeg restarts in the middle of the stream, including for a source
+// whose timestamps start later than zero.
 func TestPlannedCopySessionMatchesFFmpeg(t *testing.T) {
 	if testing.Short() {
 		t.Skip("real FFmpeg integration test")
@@ -230,6 +231,20 @@ func TestPlannedCopySessionMatchesFFmpeg(t *testing.T) {
 	if err != nil {
 		t.Skipf("ffmpeg can't make the test file (%v): %s", err, out)
 	}
+	shifted := filepath.Join(dir, "shifted.mkv")
+	if out, err := exec.CommandContext(ctx, ffmpeg, "-v", "error", "-i", source, "-c", "copy",
+		"-output_ts_offset", "7", shifted).CombinedOutput(); err != nil {
+		t.Fatalf("shift the test file: %v: %s", err, out)
+	}
+	for _, src := range []string{source, shifted} {
+		t.Run(filepath.Base(src), func(t *testing.T) {
+			checkPlannedCopySession(t, ctx, ffmpeg, src)
+		})
+	}
+}
+
+func checkPlannedCopySession(t *testing.T, ctx context.Context, ffmpeg, source string) {
+	dir := t.TempDir()
 	// Planned sessions use a fully checked index; check it now rather than
 	// in the background.
 	if _, err := keyframes.LoadVerified(source); err != nil {
