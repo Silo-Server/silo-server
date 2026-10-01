@@ -2,8 +2,8 @@ package trickplay
 
 import (
 	"context"
+	"errors"
 	"log/slog"
-	"os"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/mediasample"
@@ -58,9 +58,6 @@ func NewLocalExtractor(settings SettingsReader) *LocalExtractor {
 
 // Extract runs req on this server.
 func (e *LocalExtractor) Extract(ctx context.Context, _ *Job, req mediasample.Request) (mediasample.Result, error) {
-	if _, err := os.Stat(req.Input); err != nil {
-		return mediasample.Result{}, &inputError{err: err}
-	}
 	ffmpeg := playback.ResolveFFmpegPath(readSetting(ctx, e.settings, ffmpegPathSetting))
 	accel := readSetting(ctx, e.settings, hwAccelSetting)
 	if accel == "" {
@@ -79,7 +76,19 @@ func (e *LocalExtractor) Extract(ctx context.Context, _ *Job, req mediasample.Re
 	if hardware {
 		runner.HWAccel, runner.HWDevice = resolved, device
 	}
-	return runner.Run(ctx, req)
+	result, err := runner.Run(ctx, req)
+	// Opening media stays in the subprocess, where the attempt timeout and
+	// caller cancellation apply to input opening too. Keep absent
+	// mounts and permissions as retryable input failures.
+	if failure, ok := errors.AsType[*mediasample.Error](err); ok && ctx.Err() == nil {
+		for _, attempt := range failure.Attempts {
+			message := strings.ToLower(attempt.StderrTail)
+			if strings.Contains(message, "no such file or directory") || strings.Contains(message, "permission denied") {
+				return result, &inputError{err: err}
+			}
+		}
+	}
+	return result, err
 }
 
 // fallback moves a failed hardware attempt on to software, logging the

@@ -51,6 +51,9 @@ const (
 	// maxChunkSheets bounds the sheets one ffmpeg run makes, which bounds
 	// the memory of a run and the size of a transcode node's answer.
 	maxChunkSheets = 16
+	// Bound decoded output as well as sheet count. The first sheet learns
+	// actual display geometry before batching subsequent sheets.
+	maxChunkPixels = 64 << 20
 	// runThreads caps each ffmpeg run's decoder and filter threads. Work
 	// runs at idle priority, so more parallelism comes from more workers.
 	runThreads = 2
@@ -365,8 +368,9 @@ func (s *Service) generate(ctx context.Context, job *Job) (Published, error) {
 	}
 	published := Published{Recipe: recipe, StoreIdentity: s.store.Identity(), Height: height, Count: len(times)}
 	var revision int64
-	for start := 0; start < len(times); start += perSheet * maxChunkSheets {
-		chunk := times[start:min(len(times), start+perSheet*maxChunkSheets)]
+	chunkSheets := 1
+	for start := 0; start < len(times); {
+		chunk := times[start:min(len(times), start+perSheet*chunkSheets)]
 		req := mediasample.Request{
 			Input:         job.FilePath,
 			Samples:       &mediasample.Samples{Seconds: chunk, ReadThrough: readThrough(job)},
@@ -388,6 +392,7 @@ func (s *Service) generate(ctx context.Context, job *Job) (Published, error) {
 		} else if actualHeight != published.Height {
 			return Published{}, fmt.Errorf("trickplay chunks have different tile heights: %d and %d", published.Height, actualHeight)
 		}
+		chunkSheets = max(1, min(maxChunkSheets, maxChunkPixels/(recipe.Width*actualHeight*perSheet)))
 		if revision == 0 {
 			rev, ok, err := s.queue.BeginUpload(ctx, job.FileID, job.LeaseToken)
 			if err != nil {
@@ -407,6 +412,7 @@ func (s *Service) generate(ctx context.Context, job *Job) (Published, error) {
 		}
 		published.Filled += result.SheetFrames.Filled
 		published.Decoder = result.Decoder
+		start += len(chunk)
 	}
 	ok, err := s.queue.Publish(ctx, job.FileID, job.LeaseToken, revision, published)
 	if err != nil {

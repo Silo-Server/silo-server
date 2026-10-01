@@ -91,7 +91,9 @@ and runs each file at idle CPU and I/O priority:
 - Thumbnail k is sampled at the middle of its interval,
   `k*interval + interval/2`, the last one a second inside the file, so it
   shows what plays in `[k*interval, (k+1)*interval)`.
-- One `mediasample` Sheets request covers at most 16 sheets; a longer file
+- The first `mediasample` Sheets request covers one sheet to learn actual
+  display geometry. Later requests cover at most 16 sheets and 64 million
+  pixels, keeping high-entropy JPEG responses within the bounded node limit; a longer file
   takes several runs, which bounds each run's memory. Each run seeks to the
   keyframe before each sample rather than reading the whole file
   (`Samples`); see [media sampling](media-sampling.md#sheets). AVI files,
