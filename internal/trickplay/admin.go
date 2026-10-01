@@ -9,8 +9,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const adminStateOff = "off"
-
 // ErrNotOptedIn reports that none of an item's files belongs to a library
 // with seek previews turned on.
 var ErrNotOptedIn = errors.New("seek previews are off for this item's library")
@@ -64,7 +62,7 @@ const itemFilesSQL = `
 	FROM public.episodes covered
 	JOIN public.episodes first ON first.series_id = covered.series_id AND first.season_number = covered.season_number
 	JOIN public.media_files mf ON mf.episode_id = first.content_id
-	WHERE covered.content_id = $1 AND mf.missing_since IS NULL
+	WHERE covered.content_id = $1
 	  AND mf.multi_episode_end > mf.multi_episode_start
 	  AND covered.episode_number BETWEEN mf.multi_episode_start AND mf.multi_episode_end`
 
@@ -128,7 +126,6 @@ func (a *Admin) ItemStatus(ctx context.Context, itemID string) ([]FileStatus, er
 			return nil, err
 		}
 		_, s.Servable = servable[s.FileID]
-		s.Servable = s.Servable && s.State != stateUnusable && s.State != adminStateOff
 		out = append(out, s)
 	}
 	return out, rows.Err()

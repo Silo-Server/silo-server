@@ -64,6 +64,43 @@ func TestAdminDB(t *testing.T) {
 	}
 }
 
+func TestAdminRetryKeepsPublishedPreviewsDB(t *testing.T) {
+	f := newFixture(t)
+	for _, retry := range []struct {
+		name    string
+		outcome Outcome
+		state   string
+	}{{"failed", Failed, statePending}, {"unusable", Unusable, stateUnusable}} {
+		t.Run(retry.name, func(t *testing.T) {
+			folder := f.library(t, "movies", true)
+			fileID := f.file(t, folder, retry.name)
+			contentID := fmt.Sprintf("movie:admin-retry-%d", fileID)
+			f.exec(t, `UPDATE public.media_files SET content_id=$1 WHERE id=$2`, contentID, fileID)
+			f.reconcile(t)
+			revision := f.generate(t, fileID, "server-a")
+			if _, err := f.repo.Regenerate(t.Context(), []int{fileID}); err != nil {
+				t.Fatal(err)
+			}
+			job, err := f.repo.ClaimFile(t.Context(), fileID, "server-b", time.Minute)
+			if err != nil || job == nil {
+				t.Fatalf("claim: %+v %v", job, err)
+			}
+			if finished, err := f.repo.Finish(t.Context(), fileID, job.LeaseToken, retry.outcome, "ffmpeg sampling failed (no_stream)", 0); err != nil || !finished {
+				t.Fatalf("finish: %v %v", finished, err)
+			}
+			reader := NewReader(f.pool, identityStore(testStore), fakeURLs{})
+			manifest, ok, err := reader.SignedManifest(t.Context(), fileID)
+			if err != nil || !ok || manifest.Revision != revision {
+				t.Fatalf("retained manifest: %+v %v %v", manifest, ok, err)
+			}
+			status, err := NewAdmin(f.pool, identityStore(testStore), nil).ItemStatus(t.Context(), contentID)
+			if err != nil || len(status) != 1 || status[0].State != retry.state || !status[0].Servable || status[0].Failures != 1 || status[0].LastError == "" {
+				t.Fatalf("retained publication status: %+v %v", status, err)
+			}
+		})
+	}
+}
+
 func TestAdminFollowsCurrentLibrarySettingDB(t *testing.T) {
 	f := newFixture(t)
 	folder := f.library(t, "movies", true)
@@ -147,6 +184,19 @@ func TestAdminResolvesMultiEpisodeFileDB(t *testing.T) {
 	}
 	if _, err := admin.ItemStatus(t.Context(), outside); !errors.Is(err, ErrItemNotFound) {
 		t.Fatalf("outside range: %v", err)
+	}
+	f.exec(t, `UPDATE public.media_files SET missing_since=now() WHERE id=$1`, fileID)
+	for _, episode := range []string{first, second} {
+		status, err := admin.ItemStatus(t.Context(), episode)
+		if err != nil || len(status) != 1 || status[0].FileID != fileID || status[0].State != stateUnusable || status[0].Servable {
+			t.Errorf("missing covered episode %s: %+v %v", episode, status, err)
+		}
+		if count, err := admin.Regenerate(t.Context(), episode); err != nil || count != 0 {
+			t.Errorf("missing covered episode regenerate %s: %d %v", episode, count, err)
+		}
+	}
+	if _, err := admin.ItemStatus(t.Context(), outside); !errors.Is(err, ErrItemNotFound) {
+		t.Fatalf("outside missing range: %v", err)
 	}
 }
 

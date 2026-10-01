@@ -124,6 +124,8 @@
 ./internal/trickplay TestAdminClassifiesIneligibleFilesDB
 ./internal/trickplay TestReaderSuppressesDisabledLibraryAvailabilityDB
 ./internal/trickplay TestOptOutReconcilePreservesConcurrentClaimDB
+./internal/trickplay TestAdminRetryKeepsPublishedPreviewsDB
+./internal/trickplay TestAdminResolvesMultiEpisodeFileDB
 ./internal/trickplay TestRegenerateFencesOlderWorkersDB
 ./internal/trickplay TestRevisionProtectionReusesCoveredExpiryDB
 ./internal/catalog TestEpisodeDetailsFallBackAfterBatchFileFailureDB
