@@ -29,7 +29,9 @@ def classify(paths):
             return all_jobs("unrecognized path")
         # These feed both generated Go artifacts and their Web bindings, or
         # change how validation runs. Keep the entire gate for them.
-        if (path.startswith((".github/", "scripts/", "contracts/", "tools/"))
+        # Schemas under docs include executable fixtures whose tests glob all
+        # extensions, so Markdown there must also retain validation.
+        if (path.startswith((".github/", "scripts/", "contracts/", "tools/", "docs/design/schemas/"))
                 or path.startswith(("internal/apiv2/", "internal/settingscontract/", "cmd/"))
                 or path in {"Makefile", "go.mod", "go.sum", "go.work", "go.work.sum"}
                 or path.startswith(".golangci")):

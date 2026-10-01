@@ -94,6 +94,8 @@ class GitSelectionTests(unittest.TestCase):
         cases = [
             ("README.md", False, False),
             ("docs/architecture/ci.md", False, False),
+            ("docs/design/diagnostics.md", False, False),
+            ("docs/design/schemas-other/notes.md", False, False),
             ("LICENSE", False, False),
             ("NOTICE", False, False),
             ("web/src/components/Toast.tsx", False, True),
@@ -162,6 +164,18 @@ class GitSelectionTests(unittest.TestCase):
                 self.repo.commit()
                 self.assert_groups(self.repo.plan(), True, True)
 
+    def test_markdown_inside_schema_inputs_is_not_skipped_as_documentation(self):
+        for path in (
+            "docs/design/schemas/README.md",
+            "docs/design/schemas/client-diagnostics/v1/fixtures/valid/notes.md",
+            "docs/design/schemas/client-diagnostics/v1/fixtures/invalid/notes.md",
+        ):
+            with self.subTest(path=path):
+                self.repo.base = self.repo.git("rev-parse", "HEAD")
+                self.repo.write(path)
+                self.repo.commit()
+                self.assert_groups(self.repo.plan(), True, True)
+
     def test_unknown_inputs_run_both_groups(self):
         for path in ("Dockerfile", "docker-compose.yml", ".env.example",
                      "docs/schema.json", "new-input/config.yaml"):
@@ -211,6 +225,8 @@ class GitSelectionTests(unittest.TestCase):
             ("web/public/images/collection-templates/retired.jpg", "web/public/images/ordinary.jpg", True, True),
             ("web/assets-source/ordinary.png", "web/assets-source/collection-templates/raw/new.png", True, True),
             ("web/public/vendor/pdfjs/standard_fonts/retired.ttf", "docs/font-retired.md", True, True),
+            ("docs/fixture-notes.md", "docs/design/schemas/client-diagnostics/v1/fixtures/valid/notes.md", True, True),
+            ("docs/design/schemas/client-diagnostics/v1/fixtures/valid/old-notes.md", "docs/retired-fixture-notes.md", True, True),
         ):
             with self.subTest(source=source, target=target):
                 self.repo.write(source, "same rename contents\n")
