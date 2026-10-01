@@ -68,6 +68,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/Silo-Server/silo-server/internal/progresssync"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
 	"github.com/Silo-Server/silo-server/internal/s3client"
@@ -95,6 +96,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/watchtogether"
 	"github.com/Silo-Server/silo-server/internal/webhooksync"
 )
+
+// The media request service answers the administrator request-usage read.
+var _ apiv2.AdminRequestUsageService = (*mediarequests.Service)(nil)
 
 // Dependencies holds all shared dependencies that handlers need.
 // ArtworkDelivery describes how clients read artwork. External is true only
@@ -2253,6 +2257,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.DownloadSubscriptionMutations = downloadSvc
 		v2deps.DownloadSubscriptionSync = downloadSvc
 		v2deps.DownloadCreation = downloadSvc
+		v2deps.AdminAccountDownloads = downloadSvc
 	}
 	if ebookReaderHandler != nil {
 		v2deps.EbookProgress = ebookReaderHandler
@@ -2399,6 +2404,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminPlaybackHistory = adminHandler
 		v2deps.AdminAccounts = adminHandler
 		v2deps.AdminDevices = adminHandler
+		if adminHandler.AdminDevicesAvailable() {
+			v2deps.AdminAccountDevices = adminHandler
+		}
+		if deps.DB != nil {
+			v2deps.AdminWatchSummary = adminHandler
+		}
 		v2deps.AdminPlaybackSessions = adminHandler
 		if adminPlaybackControlHandler != nil {
 			v2deps.AdminPlaybackCommands = adminPlaybackControlHandler
@@ -2734,6 +2745,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if watchlistRequests, ok := requestHandler.Service().(apiv2.WatchlistRequestService); ok && personalDataHandler != nil && watchlistTitles != nil {
 			v2deps.WatchlistTitles = personalDataHandler
 			v2deps.WatchlistRequests = watchlistRequests
+		}
+		// *requests.Service implements the usage read (pinned at the top of
+		// this file), so the assertion only fails for a test double.
+		if usage, ok := requestHandler.Service().(apiv2.AdminRequestUsageService); ok {
+			v2deps.AdminRequestUsage = usage
 		}
 	}
 	if collectionHandler != nil {
@@ -4951,6 +4967,13 @@ func v2Dependencies(
 	if settings != nil {
 		out.DemoSettings = settings
 		out.CatalogSettings = settings
+		var declared ratingsources.DeclaredFunc
+		if deps.DB != nil {
+			declared = func(ctx context.Context) ([]ratingsources.DeclaredSource, error) {
+				return metadata.DeclaredRatingSources(ctx, deps.DB)
+			}
+		}
+		out.RatingSources = ratingsources.NewPolicy(settings, declared)
 	}
 	if deps.RateLimitMW != nil {
 		out.RateLimit = deps.RateLimitMW.Handler

@@ -59,6 +59,10 @@ import { buildDefaultPrefs, serializeOverlayPrefs } from "@/lib/overlays";
 
 import AppearanceSettings from "./AppearanceSettings";
 
+vi.mock("@/hooks/queries/ratingsCapability", () => ({
+  useShownRatingSources: () => new Set(["imdb", "tmdb"]),
+}));
+
 const BUILT_IN_OVERLAY_DEFAULTS = serializeOverlayPrefs(buildDefaultPrefs());
 
 /** The built-in document with one badge flipped, so it is not already default. */

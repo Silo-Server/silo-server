@@ -15,6 +15,7 @@ import (
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/netguard"
 )
 
 // ImageService defines the image-related methods on MetadataService
@@ -370,7 +371,11 @@ func (h *AdminImageHandler) ApplyAdminItemImage(ctx context.Context, contentID s
 		}
 	}
 
-	result, err := h.imageSvc.ApplyItemImage(ctx, metadata.ApplyItemImageRequest{
+	// Only acting admins reach this call. Like the history-import sources an
+	// admin configures, the image an admin applies may be on the server's local
+	// network; netguard still refuses blocked addresses
+	// (docs/architecture/outbound-address-guard.md).
+	result, err := h.imageSvc.ApplyItemImage(netguard.WithPrivateAccess(ctx), metadata.ApplyItemImageRequest{
 		OriginalURL:   req.OriginalURL,
 		ProviderID:    providerID,
 		ContentType:   resolved.parentItem.Type,

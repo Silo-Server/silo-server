@@ -98,8 +98,8 @@ func beginDirectSubtreeScan(
 		// concurrent refresh, or a direct run still inside the stale window). Fall
 		// back to the pre-scan-run behavior and ingest without owning a run rather
 		// than failing the refresh. Files first seen here get a NULL
-		// first_seen_scan_run_id, which is the documented legacy provenance path
-		// (they render as series cards in Recently Added).
+		// first_seen_scan_run_id, the legacy provenance path; Recently Added
+		// groups by arrival time, so they render like any other arrival.
 		slog.InfoContext(ctx, "direct scan proceeding without scan-run provenance: scope already claimed",
 			"library_id", libraryID,
 			"path", path,

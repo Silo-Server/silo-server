@@ -15,6 +15,11 @@ vi.mock("@/hooks/useBranding", () => ({
   useBranding: () => ({ storageAvailable: storageAvailableMock() }),
 }));
 
+vi.mock("@tanstack/react-query", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tanstack/react-query")>()),
+  useQueryClient: () => ({}),
+}));
+
 vi.mock("@/hooks/useSettingsForm", () => ({
   useSettingsForm: (...args: unknown[]) => useSettingsFormMock(...args),
 }));
@@ -30,6 +35,40 @@ vi.mock("@/hooks/queries/admin/settings", () => ({
 
 vi.mock("@/hooks/queries/admin/markers", () => ({
   useAdminMarkerCapabilities: () => markerCapabilitiesMock(),
+}));
+
+const ratingSourcesMock = vi.fn(() => ({
+  isError: false,
+  isSuccess: true,
+  data: {
+    items: [
+      { source: "imdb", label: "IMDb", name: "IMDb", always_shown: true },
+      { source: "tmdb", label: "TMDB", name: "TMDB", always_shown: true },
+      {
+        source: "rt_critic",
+        label: "Rotten Tomatoes critics",
+        name: "RT",
+        always_shown: false,
+        provider: "MDBList",
+      },
+      {
+        source: "kinopoisk",
+        label: "Kinopoisk",
+        name: "Kinopoisk",
+        always_shown: false,
+        provider: "Kinopoisk Metadata",
+      },
+    ],
+  },
+}));
+
+const ratingSourceCapabilitiesMock = vi.fn(() => ({
+  data: { plugin_declared_sources: true } as { plugin_declared_sources: boolean } | undefined,
+}));
+
+vi.mock("@/hooks/queries/admin/ratingSources", () => ({
+  useAdminRatingSourceCapabilities: () => ratingSourceCapabilitiesMock(),
+  useAdminRatingSources: () => ratingSourcesMock(),
 }));
 
 vi.mock("@/hooks/queries/admin/tasks", () => ({
@@ -406,5 +445,36 @@ describe("LibraryMetadataSettings", () => {
     expect(rendered).toContain("Enabling this changes the index format");
     expect(rendered).toContain("rebuilds the index automatically");
     expect(rendered).toContain("Keyword search stays available");
+  });
+
+  it("lists the ratings plugins declare, grouped by plugin, but not IMDb and TMDB", () => {
+    const markup = render({ "catalog.extra_rating_sources": "kinopoisk" });
+    const page = text(markup);
+
+    expect(page).toContain("From MDBList");
+    expect(page).toContain("Rotten Tomatoes critics");
+    expect(page).toContain("From Kinopoisk Metadata");
+    expect(page).toContain("Kinopoisk");
+    const container = document.createElement("div");
+    container.innerHTML = markup;
+    const labels = Array.from(container.querySelectorAll("label")).map((l) => l.textContent);
+    expect(labels).not.toContain("IMDb");
+    expect(labels).not.toContain("TMDB");
+  });
+
+  it("lists a turned-on rating that no enabled plugin adds, so it can be turned off", () => {
+    const page = text(render({ "catalog.extra_rating_sources": "rt_critic,letterboxd" }));
+
+    expect(page).toContain("Not added by an enabled plugin");
+    expect(page).toContain("letterboxd");
+    expect(page).not.toContain("No metadata plugin adds ratings.");
+  });
+
+  it("leaves out the Ratings group on a server without rating source support", () => {
+    ratingSourceCapabilitiesMock.mockReturnValueOnce({ data: undefined });
+    const page = text(render({ "catalog.extra_rating_sources": "kinopoisk" }));
+
+    expect(page).not.toContain("Metadata plugins can add other ratings");
+    expect(page).not.toContain("From Kinopoisk Metadata");
   });
 });

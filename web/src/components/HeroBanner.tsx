@@ -11,6 +11,7 @@ import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiob
 import { parseWatchHref } from "@/pages/watchRouteHelpers";
 import { markPlaybackIntent } from "@/player/first-frame";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
+import { RatingEntry } from "@/components/ratings/RatingEntry";
 import { formatHeroMetadata } from "./heroMetadata";
 
 interface HeroBannerProps {
@@ -310,9 +311,13 @@ export default function HeroBanner({
             </h1>
             {metadata.length > 0 && (
               <div className="hero-meta-track mb-5 text-white/85">
-                {metadata.map((entry) => (
-                  <span key={entry.key}>{entry.label}</span>
-                ))}
+                {metadata.map((entry) =>
+                  entry.rating ? (
+                    <RatingEntry key={entry.key} rating={entry.rating} size="sm" />
+                  ) : (
+                    <span key={entry.key}>{entry.label}</span>
+                  ),
+                )}
               </div>
             )}
             {current.overview && (

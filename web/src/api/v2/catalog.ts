@@ -279,6 +279,7 @@ export function catalogItemDetailFromV2(item: CatalogItemDetailV2): ItemDetail {
     rating_tmdb: item.rating_tmdb ?? null,
     rating_rt_critic: item.rating_rt_critic ?? null,
     rating_rt_audience: item.rating_rt_audience ?? null,
+    ratings: item.ratings,
     imdb_id: item.imdb_id ?? "",
     tmdb_id: item.tmdb_id ?? "",
     tvdb_id: item.tvdb_id ?? "",
