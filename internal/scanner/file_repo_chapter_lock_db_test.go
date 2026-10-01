@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strconv"
 	"sync"
@@ -45,23 +46,18 @@ func TestChapterLockSessionsRespectPoolBudgetDB(t *testing.T) {
 				releases = append(releases, release)
 				names = append(names, "silo-chapter-thumbnails:"+strconv.Itoa(baseID+i))
 			}
-			_, overflowRelease, overflowAcquired, overflowErr := second.TryLockChapterThumbnails(ctx, baseID+limit)
-			if overflowRelease != nil {
-				overflowRelease()
-			}
-			if overflowErr != nil || overflowAcquired {
-				t.Fatalf("extra session exceeded the pool budget: acquired=%v err=%v", overflowAcquired, overflowErr)
-			}
-			// A second repository shares admission. A large worker setting cannot
-			// open more sessions while the budget is occupied.
+			// Waiting admission shares capacity across repositories without opening
+			// another session. Cancellation releases each waiting worker.
 			var workers sync.WaitGroup
 			for i := range 128 {
 				workers.Go(func() {
-					_, release, acquired, err := second.TryLockChapterThumbnails(ctx, baseID+limit+i)
+					waitCtx, waitCancel := context.WithTimeout(ctx, 50*time.Millisecond)
+					defer waitCancel()
+					_, release, acquired, err := second.TryLockChapterThumbnails(waitCtx, baseID+limit+i)
 					if release != nil {
 						release()
 					}
-					if err != nil || acquired {
+					if !errors.Is(err, context.DeadlineExceeded) || acquired {
 						t.Errorf("saturated admission: acquired=%v err=%v", acquired, err)
 					}
 				})
@@ -87,7 +83,7 @@ func TestChapterLockSessionsRespectPoolBudgetDB(t *testing.T) {
 				release()
 			}
 			chapterLockSessions.Lock()
-			_, retained := chapterLockSessions.active[pool]
+			_, retained := chapterLockSessions.budgets[pool]
 			chapterLockSessions.Unlock()
 			if retained {
 				t.Fatal("session registry retained the pool after all releases")

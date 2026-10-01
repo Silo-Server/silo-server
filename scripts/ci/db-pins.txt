@@ -122,6 +122,7 @@
 ./internal/scanner TestChapterLockSessionsRespectPoolBudgetDB
 ./internal/scanner TestChapterLockFailedConnectReleasesBudgetDB
 ./internal/scanner TestChapterLockSessionsSerializeDistinctPoolsDB
+./internal/chapterthumbs TestChapterBudgetRetainsQueuedUnprobedFileDB
 ./internal/trickplay TestRegenerateFencesOlderWorkersDB
 ./internal/trickplay TestRevisionProtectionReusesCoveredExpiryDB
 ./internal/catalog TestEpisodeDetailsFallBackAfterBatchFileFailureDB

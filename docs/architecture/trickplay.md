@@ -137,9 +137,9 @@ chapter-thumbnail opt-in joins the current-width backfill.
 Each chapter worker takes a database advisory lock for its file before
 reading chapters and holds it through extraction, upload, and save. Its
 session comes from the query pool, with a shared limit of one quarter of
-its connection budget (at least one and at most four). A saturated budget
-skips admission until a later coordinator scan, leaving room for ordinary
-queries. A one-connection query pool uses one capped separate lock session
+its connection budget (at least one and at most four). Workers wait for
+session capacity without opening a connection, retaining queued requests
+for files that do not have chapters yet. Cancellation stops that wait. A one-connection query pool uses one capped separate lock session
 so extraction can still query settings and library state. Chapter
 state commits use the lock session; a worker whose connection dies cannot
 save after another replica takes over. Encoded image hashes make output

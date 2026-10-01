@@ -15,30 +15,61 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Only active sessions retain their pool in the registry. Repositories sharing
-// a query pool also share its chapter session budget.
+// Active sessions and waiting workers retain their pool in the registry.
+// Repositories sharing a query pool also share its chapter session budget.
+type chapterLockBudget struct {
+	active  int
+	users   int
+	changed chan struct{}
+}
+
 var chapterLockSessions = struct {
 	sync.Mutex
-	active map[*pgxpool.Pool]int
-}{active: make(map[*pgxpool.Pool]int)}
+	budgets map[*pgxpool.Pool]*chapterLockBudget
+}{budgets: make(map[*pgxpool.Pool]*chapterLockBudget)}
 
-func tryReserveChapterLockSession(pool *pgxpool.Pool) (func(), bool) {
+func reserveChapterLockSession(ctx context.Context, pool *pgxpool.Pool) (func(), error) {
 	// Keep most query connections available even during a large backfill.
 	limit := min(4, max(1, int(pool.Config().MaxConns)/4))
 	chapterLockSessions.Lock()
-	defer chapterLockSessions.Unlock()
-	if chapterLockSessions.active[pool] >= limit {
-		return nil, false
+	budget := chapterLockSessions.budgets[pool]
+	if budget == nil {
+		budget = &chapterLockBudget{changed: make(chan struct{})}
+		chapterLockSessions.budgets[pool] = budget
 	}
-	chapterLockSessions.active[pool]++
-	return sync.OnceFunc(func() {
-		chapterLockSessions.Lock()
-		defer chapterLockSessions.Unlock()
-		chapterLockSessions.active[pool]--
-		if chapterLockSessions.active[pool] == 0 {
-			delete(chapterLockSessions.active, pool)
+	budget.users++
+	for {
+		if err := ctx.Err(); err != nil {
+			budget.users--
+			if budget.users == 0 {
+				delete(chapterLockSessions.budgets, pool)
+			}
+			chapterLockSessions.Unlock()
+			return nil, err
 		}
-	}), true
+		if budget.active < limit {
+			budget.active++
+			chapterLockSessions.Unlock()
+			return sync.OnceFunc(func() {
+				chapterLockSessions.Lock()
+				defer chapterLockSessions.Unlock()
+				budget.active--
+				budget.users--
+				close(budget.changed)
+				budget.changed = make(chan struct{})
+				if budget.users == 0 {
+					delete(chapterLockSessions.budgets, pool)
+				}
+			}), nil
+		}
+		changed := budget.changed
+		chapterLockSessions.Unlock()
+		select {
+		case <-ctx.Done():
+		case <-changed:
+		}
+		chapterLockSessions.Lock()
+	}
 }
 
 type chapterThumbnailLockKey struct{}
@@ -69,17 +100,16 @@ func (r *FileRepository) TryLockChapterThumbnails(ctx context.Context, fileID in
 	// sharing the key space of other per-file jobs.
 	digest := sha256.Sum256([]byte("silo-chapter-thumbnails:" + strconv.Itoa(fileID)))
 	key := int64(binary.BigEndian.Uint64(digest[:8]))
-	// Admission is nonblocking, just like the advisory lock. The coordinator
-	// rediscovers skipped files on its next scan.
-	releaseBudget, reserved := tryReserveChapterLockSession(r.pool)
-	if !reserved {
-		return ctx, nil, false, nil
+	// Keep the request with its worker while the session budget is saturated.
+	// Fresh files may not have chapters yet, so a width scan cannot retry them.
+	releaseBudget, err := reserveChapterLockSession(ctx, r.pool)
+	if err != nil {
+		return ctx, nil, false, fmt.Errorf("wait for chapter lock session: %w", err)
 	}
 	connectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	var conn *pgx.Conn
 	var pooled *pgxpool.Conn
-	var err error
 	if r.pool.Config().MaxConns == 1 {
 		// A one-connection query pool cannot lend a long-lived lock session:
 		// extraction also reads settings and folder state through that pool.

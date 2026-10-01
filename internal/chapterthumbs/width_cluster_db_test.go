@@ -208,6 +208,13 @@ func TestWidthBackfillSerializesReplicasPostgres(t *testing.T) {
 		}
 	}
 	first, second := newReplica(), newReplica()
+	// Replicas have separate query pools and independent admission budgets.
+	secondPool, err := pgxpool.NewWithConfig(ctx, cfg.Copy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(secondPool.Close)
+	second.fileRepo = scanner.NewFileRepository(secondPool)
 	done := make(chan error, 1)
 	go func() {
 		_, err := first.processRequest(ctx, ChapterThumbnailRequest{FileID: fileID}, false)
