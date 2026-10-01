@@ -7852,9 +7852,9 @@ func applyBestImages(item *models.MediaItem, images []RemoteImage, mode MergeMod
 	}
 	applyIfBetter(&item.PosterPath, bestByType[ImagePoster])
 	applyIfBetter(&item.BackdropPath, bestByType[ImageBackdrop])
-	if bestByType[ImageLogo].url == "" && mode == MergeReplaceUnlocked && !imagesLocked && itemHasRejectedTVDBLogo(item) {
-		// A user-triggered refresh must not preserve illustrated TVDB clear-art
-		// when no eligible wordmark replacement exists. A logo kept under the
+	if bestByType[ImageLogo].url == "" && mode == MergeReplaceUnlocked && !imagesLocked && itemHasClearArtLogo(item) {
+		// A user-triggered refresh must not preserve clear art stored as the
+		// logo when no wordmark replacement exists. A logo kept under the
 		// Images lock was chosen by an admin and stays.
 		item.LogoPath = ""
 		item.LogoSourcePath = ""
@@ -7863,30 +7863,28 @@ func applyBestImages(item *models.MediaItem, images []RemoteImage, mode MergeMod
 	}
 }
 
-// isWordmarkLogoCandidate limits remote logo selection to sources whose
-// provider contract represents logos as dedicated wordmarks. TVDB currently
-// reports illustrated clear-art (title plus characters or props) as ImageLogo,
-// and RemoteImage has no signal that can distinguish it from a clear logo.
-// Local sidecars stay authoritative; TMDB's dedicated logo collection is the
-// only supported remote wordmark source until providers expose a stronger kind.
+// isWordmarkLogoCandidate rejects clear art offered as a logo. Clear art is an
+// illustrated composite of the title with characters or props, not the title
+// wordmark a logo slot expects. TVDB plugins before v1.4.0 reported series
+// ClearArt as ImageLogo; TVDB serves ClearArt under a /clearart/ path and
+// ClearLogo under /clearlogo/, so the path identifies it for every plugin
+// version. Local sidecars stay authoritative.
 func isWordmarkLogoCandidate(img RemoteImage) bool {
 	if img.Type != ImageLogo || isLocalImageSourcePath(img.URL) {
 		return true
 	}
-	return strings.EqualFold(strings.TrimSpace(img.ProviderID), "tmdb")
+	return !isClearArtPath(img.URL)
 }
 
-func itemHasRejectedTVDBLogo(item *models.MediaItem) bool {
+func itemHasClearArtLogo(item *models.MediaItem) bool {
 	if item == nil {
 		return false
 	}
-	return isTVDBLogoPath(item.LogoSourcePath) || isTVDBLogoPath(item.LogoPath)
+	return isClearArtPath(item.LogoSourcePath) || isClearArtPath(item.LogoPath)
 }
 
-func isTVDBLogoPath(path string) bool {
-	path = strings.ToLower(strings.TrimSpace(path))
-	return strings.HasPrefix(path, "tvdb://") ||
-		(strings.HasPrefix(path, "tvdb/") && strings.Contains(path, "/logo/"))
+func isClearArtPath(path string) bool {
+	return strings.Contains(strings.ToLower(path), "/clearart/")
 }
 
 type itemArtworkField struct {
@@ -7922,10 +7920,10 @@ func keepStoredArtwork(item, existing *models.MediaItem) {
 
 func prepareItemImagesForQueue(item, existing *models.MediaItem) {
 	for _, field := range itemArtworkFields(item) {
-		// applyBestImages intentionally clears rejected TVDB clear-art on a
-		// manual refresh when no wordmark replacement exists. Do not let the
+		// applyBestImages intentionally clears a clear-art logo on a manual
+		// refresh when no wordmark replacement exists. Do not let the
 		// generic cached-art preservation path restore that rejected logo.
-		if field.imageType == ImageLogo && *field.path == "" && !artworkLocked(existing) && itemHasRejectedTVDBLogo(existing) {
+		if field.imageType == ImageLogo && *field.path == "" && !artworkLocked(existing) && itemHasClearArtLogo(existing) {
 			*field.source = ""
 			continue
 		}

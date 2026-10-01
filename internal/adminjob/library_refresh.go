@@ -118,8 +118,8 @@ func (l *PGLibraryRefreshItemLister) ListLibraryItems(ctx context.Context, libra
 			OR COALESCE(mi.poster_path, '') LIKE '%//poster/%'
 			OR COALESCE(mi.backdrop_path, '') LIKE '%//backdrop/%'
 			OR COALESCE(mi.logo_path, '') LIKE '%//logo/%'
-			OR LOWER(TRIM(COALESCE(mi.logo_source_path, ''))) LIKE 'tvdb://%'
-			OR LOWER(TRIM(COALESCE(mi.logo_path, ''))) LIKE 'tvdb/%/logo/%'
+			OR LOWER(COALESCE(mi.logo_source_path, '')) LIKE '%/clearart/%'
+			OR LOWER(COALESCE(mi.logo_path, '')) LIKE '%/clearart/%'
 			OR mi.refresh_failures > 0
 			OR mi.episode_metadata_incomplete = TRUE
 			OR (

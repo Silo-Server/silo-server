@@ -12,8 +12,9 @@ import (
 
 // TestQuickRefreshListsLanguageOrArtworkIncompleteItems covers the listing
 // half of issue #211 and the artwork completeness contract: quick-mode library
-// refresh must revisit a mismatched metadata language, a missing logo, or an
-// existing TVDB clear-art logo, while leaving an otherwise complete item alone.
+// refresh must revisit a mismatched metadata language, a missing logo, or a
+// clear-art logo, while leaving an otherwise complete item, including one with
+// a TVDB ClearLogo, alone.
 func TestQuickRefreshListsLanguageOrArtworkIncompleteItems(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -30,8 +31,9 @@ func TestQuickRefreshListsLanguageOrArtworkIncompleteItems(t *testing.T) {
 	mismatchID := fmt.Sprintf("lang-mismatch-%d", suffix)
 	matchedID := fmt.Sprintf("lang-matched-%d", suffix)
 	missingLogoID := fmt.Sprintf("logo-missing-%d", suffix)
-	tvdbLogoID := fmt.Sprintf("logo-tvdb-%d", suffix)
-	legacyTVDBLogoPathID := fmt.Sprintf("logo-tvdb-path-%d", suffix)
+	clearArtSourceID := fmt.Sprintf("logo-clearart-source-%d", suffix)
+	clearArtPathID := fmt.Sprintf("logo-clearart-path-%d", suffix)
+	clearLogoID := fmt.Sprintf("logo-tvdb-clearlogo-%d", suffix)
 
 	var folderID int
 	if err := pool.QueryRow(ctx, `
@@ -42,7 +44,7 @@ func TestQuickRefreshListsLanguageOrArtworkIncompleteItems(t *testing.T) {
 		t.Fatalf("seed folder: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{mismatchID, matchedID, missingLogoID, tvdbLogoID, legacyTVDBLogoPathID})
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{mismatchID, matchedID, missingLogoID, clearArtSourceID, clearArtPathID, clearLogoID})
 		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, folderID)
 	})
 
@@ -52,8 +54,9 @@ func TestQuickRefreshListsLanguageOrArtworkIncompleteItems(t *testing.T) {
 		{mismatchID, "zh", "/l.png", "tmdb://logo/mismatch.png"},
 		{matchedID, "da", "/l.png", "tmdb://logo/matched.png"},
 		{missingLogoID, "da", "", ""},
-		{tvdbLogoID, "da", "/l.png", "tvdb://artwork/illustrated.png"},
-		{legacyTVDBLogoPathID, "da", "tvdb/123/logo/clear-art.png", "tmdb://logo/legacy-path.png"},
+		{clearArtSourceID, "da", "tvdb/series/1/logo/a.webp", "tvdb://banners/v4/series/1/clearart/a.png"},
+		{clearArtPathID, "da", "https://artworks.thetvdb.com/banners/v4/series/2/clearart/b.png", ""},
+		{clearLogoID, "da", "tvdb/series/3/logo/c.webp", "tvdb://banners/v4/series/3/clearlogo/c.png"},
 	} {
 		if _, err := pool.Exec(ctx, `
 			INSERT INTO media_items (
@@ -79,7 +82,7 @@ func TestQuickRefreshListsLanguageOrArtworkIncompleteItems(t *testing.T) {
 		t.Fatalf("ListLibraryItems: %v", err)
 	}
 
-	var sawMismatch, sawMatched, sawMissingLogo, sawTVDBLogo, sawLegacyTVDBLogoPath bool
+	var sawMismatch, sawMatched, sawMissingLogo, sawClearArtSource, sawClearArtPath, sawClearLogo bool
 	for _, item := range items {
 		switch item.ContentID {
 		case mismatchID:
@@ -88,10 +91,12 @@ func TestQuickRefreshListsLanguageOrArtworkIncompleteItems(t *testing.T) {
 			sawMatched = true
 		case missingLogoID:
 			sawMissingLogo = true
-		case tvdbLogoID:
-			sawTVDBLogo = true
-		case legacyTVDBLogoPathID:
-			sawLegacyTVDBLogoPath = true
+		case clearArtSourceID:
+			sawClearArtSource = true
+		case clearArtPathID:
+			sawClearArtPath = true
+		case clearLogoID:
+			sawClearLogo = true
 		}
 	}
 	if !sawMismatch {
@@ -103,11 +108,14 @@ func TestQuickRefreshListsLanguageOrArtworkIncompleteItems(t *testing.T) {
 	if !sawMissingLogo {
 		t.Errorf("quick refresh must include an otherwise complete item whose logo is missing")
 	}
-	if !sawTVDBLogo {
-		t.Errorf("quick refresh must include an item whose existing logo came from TVDB clear-art")
+	if !sawClearArtSource {
+		t.Errorf("quick refresh must include an item whose cached logo came from clear art")
 	}
-	if !sawLegacyTVDBLogoPath {
-		t.Errorf("quick refresh must include an item whose legacy logo path identifies TVDB clear-art")
+	if !sawClearArtPath {
+		t.Errorf("quick refresh must include an item whose uncached logo path is clear art")
+	}
+	if sawClearLogo {
+		t.Errorf("quick refresh must not include a complete item whose logo is a TVDB ClearLogo")
 	}
 }
 
