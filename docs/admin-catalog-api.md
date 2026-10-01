@@ -418,7 +418,11 @@ messages. The web drains all pages under one captured authority and refuses
 repeated or invalid continuation rather than publishing a partial list.
 
 `POST /api/v2/admin/items/{id}/images/apply` accepts `original_url`, `type`, and
-optional `provider_id`. It preserves target validation before remote work,
+optional `provider_id`. An HTTP(S) `original_url` may name a public or
+local-network address; link-local, cloud metadata and other blocked addresses
+are refused (see
+[Outbound address guard](architecture/outbound-address-guard.md#artwork-downloads)).
+It preserves target validation before remote work,
 episode-to-still coercion, parent/season/episode cache identity, immutable upload,
 transactional catalog publication and orphan-GC scheduling after publication
 failure. Success returns the stored path, thumbhash and available revision/display

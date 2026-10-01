@@ -85,14 +85,16 @@ it. See [Notifications](notifications.md#trust-model-and-ssrf-guard).
 
 ## Artwork downloads
 
-Artwork a provider or plugin lists is downloaded from Public addresses only
-(`imagecache`). An image an admin applies through
-`POST /api/v2/admin/items/{id}/images/apply` (and its v1 counterpart) is
-trusted with the local network, like the import sources an admin configures:
-the handler marks the request with `netguard.WithPrivateAccess`, and the
-download uses the netguard transport, which still refuses Blocked addresses
-on every dial and redirect. Only acting admins reach that route, so this does
-not widen what any other account can make the server request.
+Artwork Silo downloads on its own (metadata refresh, image-cache jobs, person
+images) comes from Public addresses only (`imagecache`). An image an admin
+applies through `POST /api/v2/admin/items/{id}/images/apply` (and its v1
+counterpart) is trusted with the local network, like the import sources an
+admin configures. That covers a URL the admin typed and one picked from the
+provider list, since the server cannot tell them apart. The handler marks the
+request with `netguard.WithPrivateAccess`, and the download uses the netguard
+transport, which still refuses Blocked addresses on every dial and redirect.
+Only acting admins reach that route, so this does not widen what any other
+account can make the server request.
 
 ## Limits
 

@@ -485,7 +485,8 @@ func normalizeImageLanguage(language string) string {
 }
 
 // downloadImage fetches the image at the given URL, enforcing size, timeout,
-// and public-network limits.
+// and network limits: public addresses only, or the local network too when
+// ctx carries netguard.WithPrivateAccess.
 func (c *Cacher) downloadImage(ctx context.Context, rawURL string) ([]byte, error) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
