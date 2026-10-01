@@ -55,7 +55,16 @@ type FileStatus struct {
 
 // itemFilesSQL names an item's media files: a movie's or an episode's own
 // files, or every episode file of a series.
-const itemFilesSQL = `SELECT id FROM public.media_files WHERE content_id = $1 OR episode_id = $1`
+const itemFilesSQL = `
+	SELECT id FROM public.media_files WHERE content_id = $1 OR episode_id = $1
+	UNION
+	SELECT mf.id
+	FROM public.episodes covered
+	JOIN public.episodes first ON first.series_id = covered.series_id AND first.season_number = covered.season_number
+	JOIN public.media_files mf ON mf.episode_id = first.content_id
+	WHERE covered.content_id = $1 AND mf.missing_since IS NULL
+	  AND mf.multi_episode_end > mf.multi_episode_start
+	  AND covered.episode_number BETWEEN mf.multi_episode_start AND mf.multi_episode_end`
 
 func (a *Admin) itemFiles(ctx context.Context, itemID string) ([]int, error) {
 	rows, err := a.pool.Query(ctx, itemFilesSQL, itemID)
@@ -91,7 +100,7 @@ func (a *Admin) ItemStatus(ctx context.Context, itemID string) ([]FileStatus, er
 		return nil, err
 	}
 	rows, err := a.pool.Query(ctx, `
-		SELECT mf.id, CASE WHEN f.trickplay_enabled THEN COALESCE(t.state, 'pending') ELSE 'off' END, COALESCE(t.failure_count, 0), COALESCE(t.last_error, ''),
+		SELECT mf.id, CASE WHEN f.trickplay_enabled AND f.enabled IS NOT FALSE THEN COALESCE(t.state, 'pending') ELSE 'off' END, COALESCE(t.failure_count, 0), COALESCE(t.last_error, ''),
 		       t.generated_at, COALESCE(t.thumbnail_count, 0), COALESCE(t.width, 0), COALESCE(t.interval_ms, 0),
 		       COALESCE(t.sheet_bytes, 0)
 		FROM public.media_files mf
@@ -128,7 +137,7 @@ func (a *Admin) Regenerate(ctx context.Context, itemID string) (int, error) {
 	var enabled int
 	if err := a.pool.QueryRow(ctx, `SELECT count(*) FROM public.media_files mf
 		JOIN public.media_folders f ON f.id = mf.media_folder_id
-		WHERE mf.id = ANY($1) AND f.trickplay_enabled`, ids).Scan(&enabled); err != nil {
+		WHERE mf.id = ANY($1) AND f.trickplay_enabled AND f.enabled IS NOT FALSE`, ids).Scan(&enabled); err != nil {
 		return 0, fmt.Errorf("count enabled trickplay files: %w", err)
 	}
 	if enabled == 0 {
@@ -157,7 +166,10 @@ type LibraryStatus struct {
 func (a *Admin) LibraryStatuses(ctx context.Context) ([]LibraryStatus, error) {
 	rows, err := a.pool.Query(ctx, `
 		SELECT f.id, f.name,
-		       count(*) FILTER (WHERE t.state = 'pending'),
+		       count(*) FILTER (WHERE t.state = 'pending' OR (t.media_file_id IS NULL
+		           AND lower(btrim(f.type)) = ANY($1::text[])
+		           AND mf.missing_since IS NULL AND mf.probe_updated_at IS NOT NULL AND mf.duration > 0
+		           AND jsonb_typeof(mf.video_tracks) = 'array' AND jsonb_array_length(mf.video_tracks) > 0)),
 		       count(*) FILTER (WHERE t.state = 'running'),
 		       count(*) FILTER (WHERE t.state = 'ready'),
 		       count(*) FILTER (WHERE t.state = 'unusable'),
@@ -165,9 +177,9 @@ func (a *Admin) LibraryStatuses(ctx context.Context) ([]LibraryStatus, error) {
 		FROM public.media_folders f
 		LEFT JOIN public.media_files mf ON mf.media_folder_id = f.id
 		LEFT JOIN public.media_file_trickplay t ON t.media_file_id = mf.id
-		WHERE f.trickplay_enabled
+		WHERE f.trickplay_enabled AND f.enabled IS NOT FALSE
 		GROUP BY f.id, f.name
-		ORDER BY f.id`)
+		ORDER BY f.id`, videoLibraryTypes)
 	if err != nil {
 		return nil, fmt.Errorf("read trickplay library status: %w", err)
 	}

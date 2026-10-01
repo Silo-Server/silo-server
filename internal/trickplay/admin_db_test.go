@@ -1,6 +1,7 @@
 package trickplay
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -91,5 +92,88 @@ func TestAdminFollowsCurrentLibrarySettingDB(t *testing.T) {
 	status, err = admin.ItemStatus(t.Context(), contentID)
 	if err != nil || len(status) != 1 || status[0].State != "off" || status[0].Servable {
 		t.Fatalf("off status: %+v %v", status, err)
+	}
+}
+
+func TestAdminCountsUnreconciledEligibleFilesDB(t *testing.T) {
+	f := newFixture(t)
+	folder := f.library(t, "movies", true)
+	f.file(t, folder, "pending-one")
+	f.file(t, folder, "pending-two")
+	unprobed := f.file(t, folder, "unprobed")
+	f.exec(t, `UPDATE public.media_files SET probe_updated_at=NULL WHERE id=$1`, unprobed)
+	missing := f.file(t, folder, "missing")
+	f.exec(t, `UPDATE public.media_files SET missing_since=now() WHERE id=$1`, missing)
+	noVideo := f.file(t, folder, "no-video")
+	f.exec(t, `UPDATE public.media_files SET video_tracks='[]'::jsonb WHERE id=$1`, noVideo)
+	libraries, err := NewAdmin(f.pool, identityStore(testStore), nil).LibraryStatuses(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, library := range libraries {
+		if library.LibraryID == folder {
+			if library.Pending != 2 || library.Ready != 0 || library.Running != 0 || library.Unusable != 0 {
+				t.Fatalf("unreconciled library: %+v", library)
+			}
+			return
+		}
+	}
+	t.Fatal("opted-in library absent")
+}
+
+func TestAdminResolvesMultiEpisodeFileDB(t *testing.T) {
+	f := newFixture(t)
+	folder := f.library(t, "tv", true)
+	fileID := f.file(t, folder, "multi-episode")
+	seriesID := fmt.Sprintf("series:admin-range-%d", fileID)
+	f.exec(t, `INSERT INTO public.media_items(content_id,type,title,genres) VALUES($1,'series','Range test','{}')`, seriesID)
+	first, second, outside := seriesID+":e1", seriesID+":e2", seriesID+":e3"
+	for i, episode := range []string{first, second, outside} {
+		f.exec(t, `INSERT INTO public.episodes(content_id,series_id,season_number,episode_number,title) VALUES($1,$2,1,$3,'Episode')`, episode, seriesID, i+1)
+	}
+	t.Cleanup(func() {
+		if _, err := f.pool.Exec(context.WithoutCancel(t.Context()), `DELETE FROM public.media_items WHERE content_id=$1`, seriesID); err != nil {
+			t.Error(err)
+		}
+	})
+	f.exec(t, `UPDATE public.media_files SET content_id=$1,episode_id=$2,multi_episode_start=1,multi_episode_end=2 WHERE id=$3`, seriesID, first, fileID)
+	admin := NewAdmin(f.pool, identityStore(testStore), nil)
+	status, err := admin.ItemStatus(t.Context(), second)
+	if err != nil || len(status) != 1 || status[0].FileID != fileID {
+		t.Fatalf("covered episode: %+v %v", status, err)
+	}
+	if count, err := admin.Regenerate(t.Context(), second); err != nil || count != 1 {
+		t.Fatalf("covered episode regenerate: %d %v", count, err)
+	}
+	if _, err := admin.ItemStatus(t.Context(), outside); !errors.Is(err, ErrItemNotFound) {
+		t.Fatalf("outside range: %v", err)
+	}
+}
+
+func TestAdminTreatsDisabledLibraryAsOffDB(t *testing.T) {
+	f := newFixture(t)
+	folder := f.library(t, "movies", true)
+	fileID := f.file(t, folder, "disabled")
+	contentID := fmt.Sprintf("movie:admin-disabled-%d", fileID)
+	f.exec(t, `UPDATE public.media_files SET content_id=$1 WHERE id=$2`, contentID, fileID)
+	f.reconcile(t)
+	f.generate(t, fileID, "server-a")
+	f.exec(t, `UPDATE public.media_folders SET enabled=false WHERE id=$1`, folder)
+	admin := NewAdmin(f.pool, identityStore(testStore), nil)
+	status, err := admin.ItemStatus(t.Context(), contentID)
+	if err != nil || len(status) != 1 || status[0].State != "off" || status[0].Servable {
+		t.Errorf("disabled library status: %+v %v", status, err)
+	}
+	if _, err := admin.Regenerate(t.Context(), contentID); !errors.Is(err, ErrNotOptedIn) {
+		t.Errorf("disabled library regenerate: %v", err)
+	}
+	libraries, err := admin.LibraryStatuses(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, library := range libraries {
+		if library.LibraryID == folder {
+			t.Errorf("disabled library listed: %+v", library)
+		}
 	}
 }
