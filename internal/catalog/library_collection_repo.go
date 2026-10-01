@@ -153,9 +153,12 @@ func NewLibraryCollectionRepository(pool *pgxpool.Pool) *LibraryCollectionReposi
 	return &LibraryCollectionRepository{pool: pool}
 }
 
+// The lifecycle key is bound as bigint because callers pass Go ints. Casting
+// the parameter straight to text makes PostgreSQL describe it as text, which
+// pgx refuses to encode from an int in its default statement-cache mode.
 const (
 	libraryCollectionPosterAdvisoryLockSQL = `SELECT pg_advisory_xact_lock(hashtextextended('library_collection_poster:' || $1, 0))`
-	libraryCollectionLifecycleLockSQL      = `SELECT pg_advisory_xact_lock(hashtextextended('library_collection_lifecycle:' || $1::text, 0))`
+	libraryCollectionLifecycleLockSQL      = `SELECT pg_advisory_xact_lock(hashtextextended('library_collection_lifecycle:' || $1::bigint::text, 0))`
 )
 
 // Package variable only so the PostgreSQL integration test can use a short

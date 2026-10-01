@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -215,5 +216,61 @@ func TestLibraryCollectionLifecycleLockIDs(t *testing.T) {
 				t.Fatalf("lock IDs = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// PostgreSQL describes $1 by its first cast. In pgx's default statement-cache
+// mode an int argument must then encode as that type: bigint works, text does
+// not ("cannot find encode plan"), which broke every create and scope update.
+func TestLibraryCollectionLifecycleLockBindsIntegerParameter(t *testing.T) {
+	if !strings.Contains(libraryCollectionLifecycleLockSQL, "$1::bigint::text") {
+		t.Fatalf("lifecycle lock SQL must bind $1 as bigint before text: %s", libraryCollectionLifecycleLockSQL)
+	}
+	typeMap := pgtype.NewMap()
+	if _, err := typeMap.Encode(pgtype.Int8OID, pgtype.BinaryFormatCode, 42, nil); err != nil {
+		t.Fatalf("encode int lifecycle key as bigint: %v", err)
+	}
+	if _, err := typeMap.Encode(pgtype.TextOID, pgtype.TextFormatCode, 42, nil); err == nil {
+		t.Fatal("pgx unexpectedly encodes an int as text; the bigint bind is no longer the only safe form")
+	}
+}
+
+func TestLibraryCollectionLifecycleLockAcceptsIntegerKeys(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	// pgxpool.New keeps pgx's default statement-cache exec mode, which encodes
+	// arguments against the parameter types PostgreSQL describes.
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin transaction: %v", err)
+	}
+	t.Cleanup(func() { _ = tx.Rollback(ctx) })
+
+	// Create, Update and folder deletion all pass Go ints here.
+	if _, err := tx.Exec(ctx, libraryCollectionLifecycleLockSQL, 42); err != nil {
+		t.Fatalf("lifecycle lock with int key: %v", err)
+	}
+
+	var heldKey, wantKey int64
+	if err := tx.QueryRow(ctx, `SELECT hashtextextended('library_collection_lifecycle:42', 0)`).Scan(&wantKey); err != nil {
+		t.Fatalf("compute expected lock key: %v", err)
+	}
+	if err := tx.QueryRow(ctx, `
+		SELECT (classid::bigint << 32) | objid::bigint
+		FROM pg_locks
+		WHERE locktype = 'advisory' AND pid = pg_backend_pid() AND objsubid = 1`).Scan(&heldKey); err != nil {
+		t.Fatalf("read held advisory lock: %v", err)
+	}
+	if heldKey != wantKey {
+		t.Fatalf("held lifecycle lock key = %d, want %d for library 42", heldKey, wantKey)
 	}
 }
