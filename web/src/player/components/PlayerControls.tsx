@@ -84,6 +84,7 @@ interface PlayerControlsProps {
   // Quality
   qualityOptions: QualityOption[];
   activeQualityId: string;
+  deliveredBitrateKbps?: number;
   isTranscoding: boolean;
   qualityError: string | null;
   onQualitySelect: (id: string) => void;
@@ -152,6 +153,7 @@ export function PlayerControls({
   onAudioSelect,
   qualityOptions,
   activeQualityId,
+  deliveredBitrateKbps,
   isTranscoding,
   qualityError,
   onQualitySelect,
@@ -341,6 +343,7 @@ export function PlayerControls({
             <QualityMenu
               options={qualityOptions}
               activeId={activeQualityId}
+              deliveredBitrateKbps={deliveredBitrateKbps}
               isTranscoding={isTranscoding}
               error={qualityError}
               onSelect={onQualitySelect}
@@ -517,6 +520,7 @@ export function PlayerControls({
               <QualityMenu
                 options={qualityOptions}
                 activeId={activeQualityId}
+                deliveredBitrateKbps={deliveredBitrateKbps}
                 isTranscoding={isTranscoding}
                 error={qualityError}
                 onSelect={onQualitySelect}

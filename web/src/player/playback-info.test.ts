@@ -333,6 +333,24 @@ describe("qualityOptionsFromPlanV3", () => {
     expect(resolveActiveQualityOptionId(options, "2160p")).toBe("original");
     expect(resolveActiveQualityOptionId(options, "720p")).toBe("720p-medium");
     expect(lowerQualityOption(options, "1080p")?.id).toBe("1080p-high");
+    // A copy delivery reports the source bitrate.
+    expect(resolveActiveQualityOptionId(options, "1080p", 20_000)).toBe("original");
+  });
+
+  it("keeps the Medium rung when a bitrate cap transcodes a source that fits the resolution", () => {
+    const options = qualityOptionsFromPlanV3(
+      fixturePlanV3({
+        available_qualities: [
+          { label: "original", height: 1080, bitrate_kbps: 20_000, preserves_source: true },
+          { label: "1080p-high", height: 1080, bitrate_kbps: 10_000, preserves_source: false },
+          { label: "1080p-medium", height: 1080, bitrate_kbps: 6000, preserves_source: false },
+          { label: "1080p-low", height: 1080, bitrate_kbps: 3000, preserves_source: false },
+        ],
+      }),
+    );
+
+    expect(resolveActiveQualityOptionId(options, "1080p", 6000)).toBe("1080p-medium");
+    expect(lowerQualityOption(options, "1080p", 6000)?.id).toBe("1080p-low");
   });
 
   it("marks Original when a resolution cap already preserves the source", () => {

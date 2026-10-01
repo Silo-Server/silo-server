@@ -14,6 +14,8 @@ export interface VersionInfo {
 interface QualityMenuProps {
   options: QualityOption[];
   activeId: string;
+  /** The plan's delivered video bitrate, which shows when a cap reduced the source. */
+  deliveredBitrateKbps?: number;
   isTranscoding: boolean;
   error: string | null;
   onSelect: (id: string) => void;
@@ -25,6 +27,7 @@ interface QualityMenuProps {
 export function QualityMenu({
   options,
   activeId,
+  deliveredBitrateKbps,
   isTranscoding,
   error,
   onSelect,
@@ -99,7 +102,7 @@ export function QualityMenu({
 
   const menuLabel = showQuality ? "Quality" : "Version";
 
-  const resolvedActiveId = resolveActiveQualityOptionId(options, activeId);
+  const resolvedActiveId = resolveActiveQualityOptionId(options, activeId, deliveredBitrateKbps);
   const activeOption = options.find((option) => option.id === resolvedActiveId);
   let menuItemIndex = 0;
 

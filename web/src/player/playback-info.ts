@@ -193,11 +193,13 @@ export function qualityOptionsFromPlanV3(plan: PlanV3): QualityOption[] {
  * Resolves a stored resolution-only preference onto the explicit bitrate rung
  * that implements the same policy in the current plan. Plain 2160p/1080p/720p
  * preferences use the ladder's Medium bitrate; when that resolution cap is at
- * or above the source, the source-preserving Original rung is the active one.
+ * or above the source, the source-preserving Original rung is the active one,
+ * unless the plan's delivered bitrate shows a bitrate cap reduced it.
  */
 export function resolveActiveQualityOptionId(
   options: QualityOption[],
   preference: string,
+  deliveredBitrateKbps?: number,
 ): string | null {
   // A sole rung is effective regardless of the saved preference. Keep the
   // preference unchanged so it applies again when more qualities are available.
@@ -214,9 +216,13 @@ export function resolveActiveQualityOptionId(
   }
 
   // The planner preserves a source that fits the cap, even when the ladder
-  // also publishes same-height rungs below the source bitrate.
+  // also publishes same-height rungs below the source bitrate. A bitrate cap,
+  // the viewer's or the server's, still forces a transcode the ladder does
+  // not show; the delivered bitrate reveals it.
   const original = options.find((option) => option.isOriginal);
-  if (original && resolutionHeight(original.resolution) <= aliasHeight) {
+  const deliveredBelowSource =
+    isPositive(deliveredBitrateKbps) && deliveredBitrateKbps < (original?.bitrateKbps ?? 0);
+  if (original && !deliveredBelowSource && resolutionHeight(original.resolution) <= aliasHeight) {
     return original.id;
   }
   return options.find((option) => option.id === `${aliasHeight}p-medium`)?.id ?? null;
@@ -236,7 +242,7 @@ export function lowerQualityOption(
   const rungs = options
     .filter((option) => option.id !== "auto" && !option.isOriginal && option.bitrateKbps > 0)
     .sort((a, b) => b.bitrateKbps - a.bitrateKbps);
-  const activeId = resolveActiveQualityOptionId(options, preference);
+  const activeId = resolveActiveQualityOptionId(options, preference, deliveredBitrateKbps);
   const active = rungs.find((option) => option.id === activeId);
   const ceiling =
     active?.bitrateKbps ??

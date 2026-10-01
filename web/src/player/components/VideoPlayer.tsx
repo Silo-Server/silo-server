@@ -3888,6 +3888,7 @@ export function VideoPlayer({
           onAudioSelect={onAudioSelect}
           qualityOptions={qualityOptions}
           activeQualityId={activeQualityId}
+          deliveredBitrateKbps={plan.effective_recipe?.bitrate_kbps}
           isTranscoding={replanning}
           qualityError={replanError}
           onQualitySelect={handleQualitySelect}
