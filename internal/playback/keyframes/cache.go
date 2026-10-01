@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"sync"
@@ -15,9 +16,14 @@ import (
 // isn't used. It is reported as ErrNoIndex.
 var ErrUnverified = fmt.Errorf("%w: keyframe index not verified yet", ErrNoIndex)
 
-// maxCachedFiles bounds the process-wide index cache. An index is a few
-// kilobytes to a few hundred, one float per keyframe.
-const maxCachedFiles = 256
+const (
+	// maxCachedFiles bounds the process-wide result cache. An index is a few
+	// kilobytes to a few hundred, one float per keyframe.
+	maxCachedFiles = 256
+	// maxQueuedChecks bounds the full checks waiting or running. A file that
+	// finds the queue full is checked on a later playback.
+	maxQueuedChecks = 16
+)
 
 type cacheKey struct {
 	path    string
@@ -26,21 +32,22 @@ type cacheKey struct {
 }
 
 type cacheEntry struct {
-	key     cacheKey
-	index   Index
-	err     error
-	pending bool // the full check is running
+	key   cacheKey
+	index Index
+	err   error
 }
 
-// indexCache holds verified results, including files without a usable
-// index, so a later playback or a second viewer doesn't read the file again.
-// An entry is keyed by the file's size and modification time, so a replaced
-// file is read afresh.
+// indexCache holds checked results, including files without a usable index,
+// so a later playback or a second viewer doesn't read the file again. An
+// entry is keyed by the file's size and modification time, so a replaced file
+// is read afresh. Checks in progress are tracked apart from the results, so
+// evicting results never loses track of one.
 var indexCache = struct {
 	sync.Mutex
-	order   *list.List
-	entries map[cacheKey]*list.Element
-}{order: list.New(), entries: map[cacheKey]*list.Element{}}
+	order    *list.List
+	entries  map[cacheKey]*list.Element
+	inFlight map[cacheKey]struct{}
+}{order: list.New(), entries: map[cacheKey]*list.Element{}, inFlight: map[cacheKey]struct{}{}}
 
 // verifySlots runs one full check at a time: each reads every block header
 // of a file.
@@ -48,10 +55,10 @@ var verifySlots = make(chan struct{}, 1)
 
 // Load returns the keyframe index of the media file at path once it has been
 // checked against every cluster. The first call for a file runs the quick
-// check and, if it passes, starts the full check in the background and
+// check and, if it passes, queues the full check in the background and
 // returns ErrUnverified; calls after it finishes get the result from the
 // cache. A file without a usable index, including any that isn't Matroska or
-// WebM, gets ErrNoIndex.
+// WebM or is malformed, gets ErrNoIndex.
 func Load(path string) (Index, error) {
 	return load(path, false)
 }
@@ -74,48 +81,59 @@ func load(path string, wait bool) (Index, error) {
 	}
 	key := cacheKey{path: path, size: info.Size(), modTime: info.ModTime()}
 
-	if entry, ok := cached(key); ok {
-		if !entry.pending {
-			return entry.index, entry.err
-		}
-		if !wait {
-			return Index{}, ErrUnverified
-		}
+	if idx, err, ok := cached(key); ok && (!wait || !errors.Is(err, ErrUnverified)) {
+		return idx, err
 	}
 
 	if wait {
-		idx, err := stable(VerifyMatroska(f, info.Size()))
-		if err != nil && !errors.Is(err, ErrNoIndex) {
+		idx, err := VerifyMatroska(f, info.Size())
+		if err != nil && transient(err) {
 			return Index{}, err
 		}
-		store(key, idx, err, false)
+		idx, err = settle(idx, err)
+		store(key, idx, err)
 		return idx, err
 	}
 
-	idx, err := stable(ReadMatroska(f, info.Size()))
-	if err != nil {
-		if !errors.Is(err, ErrNoIndex) {
-			// A read failure says nothing lasting about the file.
+	if idx, err := ReadMatroska(f, info.Size()); err != nil {
+		if transient(err) {
 			return Index{}, err
 		}
-		store(key, idx, err, false)
+		idx, err = settle(idx, err)
+		store(key, idx, err)
 		return idx, err
 	}
-	if !store(key, Index{}, nil, true) {
-		// Another caller started the check meanwhile.
-		return Index{}, ErrUnverified
+	if startCheck(key) {
+		go verifyInBackground(key)
 	}
-	go verifyInBackground(key)
 	return Index{}, ErrUnverified
 }
 
-// stable maps a file that isn't Matroska to ErrNoIndex: a lasting fact about
-// the file, worth caching like a missing index.
-func stable(idx Index, err error) (Index, error) {
-	if errors.As(err, new(notMatroskaError)) {
-		return idx, ErrNoIndex
+// transient reports an error reading the file, which says nothing lasting
+// about it: a later playback tries again. Anything else describes the file.
+func transient(err error) bool {
+	return errors.As(err, new(*fs.PathError))
+}
+
+// settle turns a lasting failure into ErrNoIndex: the file isn't Matroska, is
+// malformed, or has no complete index.
+func settle(idx Index, err error) (Index, error) {
+	if err == nil || errors.Is(err, ErrNoIndex) {
+		return idx, err
 	}
-	return idx, err
+	return Index{}, fmt.Errorf("%w: %w", ErrNoIndex, err)
+}
+
+// startCheck records a full check for key, unless one is already queued or
+// the queue is full.
+func startCheck(key cacheKey) bool {
+	indexCache.Lock()
+	defer indexCache.Unlock()
+	if _, ok := indexCache.inFlight[key]; ok || len(indexCache.inFlight) >= maxQueuedChecks {
+		return false
+	}
+	indexCache.inFlight[key] = struct{}{}
+	return true
 }
 
 func verifyInBackground(key cacheKey) {
@@ -133,60 +151,52 @@ func verifyInBackground(key cacheKey) {
 			return Index{}, err
 		}
 		if info.Size() != key.size || !info.ModTime().Equal(key.modTime) {
-			return Index{}, errors.New("file changed during verification")
+			return Index{}, &fs.PathError{Op: "verify", Path: key.path, Err: errors.New("file changed during the check")}
 		}
-		return stable(VerifyMatroska(f, info.Size()))
+		return VerifyMatroska(f, info.Size())
 	}()
-	if err != nil && !errors.Is(err, ErrNoIndex) {
-		slog.Warn("keyframe index: verify file", "component", "playback", "path", key.path, "error", err)
-		forget(key) // a later playback tries again
-		return
+
+	indexCache.Lock()
+	delete(indexCache.inFlight, key)
+	indexCache.Unlock()
+	if err != nil && transient(err) {
+		slog.Warn("keyframe index: check file", "component", "playback", "path", key.path, "error", err)
+		return // a later playback tries again
 	}
-	store(key, idx, err, false)
+	idx, err = settle(idx, err)
+	store(key, idx, err)
 }
 
-func cached(key cacheKey) (cacheEntry, bool) {
+func cached(key cacheKey) (Index, error, bool) {
 	indexCache.Lock()
 	defer indexCache.Unlock()
+	if _, ok := indexCache.inFlight[key]; ok {
+		return Index{}, ErrUnverified, true
+	}
 	el, ok := indexCache.entries[key]
 	if !ok {
-		return cacheEntry{}, false
+		return Index{}, nil, false
 	}
 	indexCache.order.MoveToFront(el)
 	entry, _ := el.Value.(*cacheEntry)
-	return *entry, true
+	return entry.index, entry.err, true
 }
 
-// store records a result for key. A pending marker is only stored when no
-// entry exists; it reports whether it stored.
-func store(key cacheKey, idx Index, err error, pending bool) bool {
+func store(key cacheKey, idx Index, err error) {
 	indexCache.Lock()
 	defer indexCache.Unlock()
 	if el, ok := indexCache.entries[key]; ok {
-		if pending {
-			return false
-		}
 		entry, _ := el.Value.(*cacheEntry)
-		entry.index, entry.err, entry.pending = idx, err, false
+		entry.index, entry.err = idx, err
 		indexCache.order.MoveToFront(el)
-		return true
+		return
 	}
-	indexCache.entries[key] = indexCache.order.PushFront(&cacheEntry{key: key, index: idx, err: err, pending: pending})
+	indexCache.entries[key] = indexCache.order.PushFront(&cacheEntry{key: key, index: idx, err: err})
 	for indexCache.order.Len() > maxCachedFiles {
 		oldest := indexCache.order.Back()
 		indexCache.order.Remove(oldest)
 		if entry, ok := oldest.Value.(*cacheEntry); ok {
 			delete(indexCache.entries, entry.key)
 		}
-	}
-	return true
-}
-
-func forget(key cacheKey) {
-	indexCache.Lock()
-	defer indexCache.Unlock()
-	if el, ok := indexCache.entries[key]; ok {
-		indexCache.order.Remove(el)
-		delete(indexCache.entries, key)
 	}
 }

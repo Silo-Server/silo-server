@@ -1,6 +1,7 @@
 package keyframes
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -80,5 +81,36 @@ func TestLoadVerifiesInTheBackground(t *testing.T) {
 			t.Fatal("the background check didn't finish")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// A malformed file is a lasting fact, cached like a missing index, not
+// checked again on every playback.
+func TestLoadCachesMalformedFiles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "broken.mkv")
+	// Cues pointing at an element that isn't a cluster: with the Cues first,
+	// cluster B ends the file.
+	contents := file(layout{cuesFirst: true})
+	broken := slices.Clone(contents)
+	copy(broken[len(broken)-len(clusterB):], bytes.Repeat([]byte{0xEC}, 8)) // overwrite cluster B's header with Void
+	if err := os.WriteFile(path, broken, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stamp := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(path, stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadVerified(path); !errors.Is(err, ErrNoIndex) {
+		t.Fatalf("malformed file err = %v, want ErrNoIndex", err)
+	}
+	// Repaired in place with the same size and time: still the cached result.
+	if err := os.WriteFile(path, contents, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); !errors.Is(err, ErrNoIndex) || errors.Is(err, ErrUnverified) {
+		t.Fatalf("second load err = %v, want the cached ErrNoIndex", err)
 	}
 }
