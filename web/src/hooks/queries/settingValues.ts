@@ -275,7 +275,8 @@ function refreshHomeForSetting(queryClient: ReturnType<typeof useQueryClient>, k
     .then(() => bumpHomeRefreshSignal(queryClient));
 }
 
-function invalidateSettingValueQueries(
+/** Refreshes the reads a setting write changes, as useSetSettingValue does. */
+export function invalidateSettingValueQueries(
   queryClient: ReturnType<typeof useQueryClient>,
   identity: SettingIdentity,
   key: SettingKey,

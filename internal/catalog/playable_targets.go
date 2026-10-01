@@ -51,8 +51,8 @@ type PlayableTargetInput struct {
 
 // Key identifies this card in the map Resolve returns. It includes the anchor
 // hint because two cards can legitimately display the SAME item and still want
-// different targets — recently-added TV keeps one card per scan-run event, so a
-// series hit by two multi-episode runs appears twice with different anchors.
+// different targets — recently-added TV keeps one card per arrival event, so a
+// series with two multi-episode arrivals appears twice with different anchors.
 // Callers look a response row up with the key built from the same three fields.
 func (in PlayableTargetInput) Key() string {
 	return strings.ToLower(strings.TrimSpace(in.Type)) + "\x00" +

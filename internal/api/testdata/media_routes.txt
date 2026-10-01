@@ -275,6 +275,7 @@ GET /api/v2/admin/request-settings	non-media
 PUT /api/v2/admin/request-settings	non-media
 GET /api/v2/admin/request-users/{user_id}/limit	non-media
 PUT /api/v2/admin/request-users/{user_id}/limit	non-media
+GET /api/v2/admin/request-users/{user_id}/usage	non-media
 GET /api/v2/admin/requests	non-media
 GET /api/v2/admin/requests/capabilities	non-media
 GET /api/v2/admin/requests/counts	non-media
@@ -353,6 +354,10 @@ DELETE /api/v2/admin/users/{id}	non-media
 GET /api/v2/admin/users/{id}	non-media
 PUT /api/v2/admin/users/{id}	non-media
 GET /api/v2/admin/users/{id}/api-keys	non-media
+GET /api/v2/admin/users/{id}/devices	non-media
+GET /api/v2/admin/users/{id}/download-subscriptions	non-media
+GET /api/v2/admin/users/{id}/downloads	non-media
+GET /api/v2/admin/users/{id}/downloads/summary	non-media
 POST /api/v2/admin/users/{id}/impersonate	non-media
 GET /api/v2/admin/users/{id}/ips	non-media
 POST /api/v2/admin/users/{id}/password-reset	non-media
@@ -361,6 +366,7 @@ GET /api/v2/admin/users/{id}/settings/values	non-media
 DELETE /api/v2/admin/users/{id}/settings/values/{key}	non-media
 PUT /api/v2/admin/users/{id}/settings/values/{key}	non-media
 POST /api/v2/admin/users/{id}/transfer-ownership	non-media
+GET /api/v2/admin/users/{id}/watch-summary	non-media
 GET /api/v2/api-keys	non-media
 POST /api/v2/api-keys	non-media
 GET /api/v2/api-keys/scopes	non-media
@@ -1463,6 +1469,7 @@ GET /api/v2/admin/request-settings	non-media
 PUT /api/v2/admin/request-settings	non-media
 GET /api/v2/admin/request-users/{user_id}/limit	non-media
 PUT /api/v2/admin/request-users/{user_id}/limit	non-media
+GET /api/v2/admin/request-users/{user_id}/usage	non-media
 GET /api/v2/admin/requests	non-media
 GET /api/v2/admin/requests/capabilities	non-media
 GET /api/v2/admin/requests/counts	non-media
@@ -1541,6 +1548,10 @@ DELETE /api/v2/admin/users/{id}	non-media
 GET /api/v2/admin/users/{id}	non-media
 PUT /api/v2/admin/users/{id}	non-media
 GET /api/v2/admin/users/{id}/api-keys	non-media
+GET /api/v2/admin/users/{id}/devices	non-media
+GET /api/v2/admin/users/{id}/download-subscriptions	non-media
+GET /api/v2/admin/users/{id}/downloads	non-media
+GET /api/v2/admin/users/{id}/downloads/summary	non-media
 POST /api/v2/admin/users/{id}/impersonate	non-media
 GET /api/v2/admin/users/{id}/ips	non-media
 POST /api/v2/admin/users/{id}/password-reset	non-media
@@ -1549,6 +1560,7 @@ GET /api/v2/admin/users/{id}/settings/values	non-media
 DELETE /api/v2/admin/users/{id}/settings/values/{key}	non-media
 PUT /api/v2/admin/users/{id}/settings/values/{key}	non-media
 POST /api/v2/admin/users/{id}/transfer-ownership	non-media
+GET /api/v2/admin/users/{id}/watch-summary	non-media
 GET /api/v2/api-keys	non-media
 POST /api/v2/api-keys	non-media
 GET /api/v2/api-keys/scopes	non-media

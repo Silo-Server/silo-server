@@ -133,6 +133,16 @@ Each section response reads current committed file metadata. Badge summaries hav
 no result cache: a subsequent request sees file updates, removals, and library
 moves. Clients must fetch again to update their existing cards.
 
+Recently added TV groups a show's new episodes by arrival time. An episode
+first seen within 2 hours of the show's previous arrival joins that arrival's
+group, so a chain of imports stays one group even when it spans longer than 2
+hours. A group with one episode returns an `episode` card; a larger group
+returns the `series` card, ordered by its newest arrival. Grouping ignores
+how the files were scanned: one scan per imported episode, as arr webhooks
+produce, groups the same way as one library scan. On the home row, the
+section's `total_count` is a lower bound: it exceeds `item_limit` when more
+cards exist. The catalog view reports the exact count.
+
 Recently-added section membership is shared only within the same library and
 access scope. Scan-complete events are coalesced into invalidations at most once
 per 30 seconds; invalidation requests a refresh on the next read. While

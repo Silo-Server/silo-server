@@ -719,6 +719,12 @@ is created so the decision logs and `playback_route_events` observe it too.
 Nothing is validated against an enum either, so a client may introduce a new
 channel without a server change.
 
+The `/api/v2` playback operations also declare `X-Client-Name`,
+`X-Client-Version`, `X-Client-Build`, and `X-Client-Channel`. A request with a
+non-blank `X-Client-Name` takes its whole identity from that set; a request
+without one takes it from the `X-Silo-Client*` set above when `X-Silo-Client` is
+non-blank. The two sets are never mixed field by field.
+
 Protocol-v3 `POST /playback/start` accepts `client_playback_context.app_version`,
 `.app_build`, and `.app_channel` as a body-level fallback for clients that cannot
 set the headers on every request. The headers win field by field when both are

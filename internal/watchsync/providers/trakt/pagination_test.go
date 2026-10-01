@@ -234,7 +234,9 @@ func TestFetchTraktPagesFailsAtPageCap(t *testing.T) {
 }
 
 func TestFetchTraktPagesFailsWhenTheListChangesMidRead(t *testing.T) {
+	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
 		// The list shrinks between page 1 and page 2, which shifts offsets.
 		switch r.URL.Query().Get("page") {
 		case "1":
@@ -249,18 +251,25 @@ func TestFetchTraktPagesFailsWhenTheListChangesMidRead(t *testing.T) {
 	}))
 	defer server.Close()
 
-	rows, err := fetchTraktPages[traktFavoriteMovie](context.Background(), NewProvider(server.Client(), server.URL),
+	provider := NewProvider(server.Client(), server.URL)
+	waits := recordSleeps(provider)
+	rows, err := fetchTraktPages[traktFavoriteMovie](context.Background(), provider,
 		watchsync.ServerConfig{}, watchsync.Connection{AccessToken: "t"}, "/sync/watchlist/movies", nil)
 	if err == nil || rows != nil {
 		t.Fatalf("rows=%v err=%v, want an error and no rows", rows, err)
 	}
+	// Each of the three attempts fails on page 2.
+	if requests != 6 || !reflect.DeepEqual(*waits, []time.Duration{time.Second, 2 * time.Second}) {
+		t.Fatalf("requests=%d waits=%v, want 6 requests and waits of 1s then 2s", requests, *waits)
+	}
 }
 
 func TestFetchTraktPagesFailsWhenAnEqualCountChangeShiftsPages(t *testing.T) {
-	// Between the two passes one title was removed and another added, so the
-	// item count is unchanged but page 2 now holds a different title.
-	pass := 0
+	// Each pass replaces a title while keeping the count equal, so every
+	// verification read must reject the shifted page even after restarting.
+	pass, requests := 0, 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
 		page := r.URL.Query().Get("page")
 		if page == "1" {
 			pass++
@@ -270,7 +279,7 @@ func TestFetchTraktPagesFailsWhenAnEqualCountChangeShiftsPages(t *testing.T) {
 		switch {
 		case page == "1":
 			writeTraktFixture(t, w, `[{"listed_at":"2026-01-01T00:00:00Z","movie":{"title":"A","ids":{"trakt":1,"tmdb":1}}}]`)
-		case pass == 1:
+		case pass%2 == 1:
 			writeTraktFixture(t, w, `[{"listed_at":"2026-01-01T00:00:00Z","movie":{"title":"B","ids":{"trakt":2,"tmdb":2}}}]`)
 		default:
 			writeTraktFixture(t, w, `[{"listed_at":"2026-01-01T00:00:00Z","movie":{"title":"C","ids":{"trakt":3,"tmdb":3}}}]`)
@@ -278,10 +287,16 @@ func TestFetchTraktPagesFailsWhenAnEqualCountChangeShiftsPages(t *testing.T) {
 	}))
 	defer server.Close()
 
-	rows, err := fetchTraktPages[traktFavoriteMovie](context.Background(), NewProvider(server.Client(), server.URL),
+	provider := NewProvider(server.Client(), server.URL)
+	waits := recordSleeps(provider)
+	rows, err := fetchTraktPages[traktFavoriteMovie](context.Background(), provider,
 		watchsync.ServerConfig{}, watchsync.Connection{AccessToken: "t"}, "/sync/watchlist/movies", nil)
 	if err == nil || rows != nil {
 		t.Fatalf("rows=%v err=%v, want an error and no rows", rows, err)
+	}
+	// Each of the three attempts reads two passes of two pages.
+	if requests != 12 || !reflect.DeepEqual(*waits, []time.Duration{time.Second, 2 * time.Second}) {
+		t.Fatalf("requests=%d waits=%v, want 12 requests and waits of 1s then 2s", requests, *waits)
 	}
 }
 
