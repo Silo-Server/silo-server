@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -367,6 +368,11 @@ type ReconcileStats struct {
 // queued for deletion), and requeues rows whose sheets no longer match
 // their file, recipe, or storage. Each step handles at most batch rows.
 func (r *Repository) Reconcile(ctx context.Context, recipe Recipe, storeIdentity string, batch int) (ReconcileStats, error) {
+	return r.reconcile(ctx, r.pool.Exec, recipe, storeIdentity, batch)
+}
+
+// reconcile runs on the caller's session when an advisory lock guards the pass.
+func (r *Repository) reconcile(ctx context.Context, exec func(context.Context, string, ...any) (pgconn.CommandTag, error), recipe Recipe, storeIdentity string, batch int) (ReconcileStats, error) {
 	var stats ReconcileStats
 	steps := []struct {
 		count *int
@@ -379,7 +385,7 @@ func (r *Repository) Reconcile(ctx context.Context, recipe Recipe, storeIdentity
 		{&stats.Stale, staleSQL, []any{AlgorithmVersion, recipe.String(), storeIdentity, batch}},
 	}
 	for _, step := range steps {
-		tag, err := r.pool.Exec(ctx, step.sql, step.args...)
+		tag, err := exec(ctx, step.sql, step.args...)
 		if err != nil {
 			return stats, fmt.Errorf("reconcile trickplay: %w", err)
 		}

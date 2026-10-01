@@ -28,7 +28,7 @@ func TestReconcileDrainsFullBatches(t *testing.T) {
 		return ReconcileStats{Added: 501}, nil
 	}}
 	s := newService(q, &fakeStore{}, nil, &fakeExtractor{}, "server")
-	stats, more, err := s.reconcileBatches(t.Context(), testRecipe)
+	stats, more, err := s.reconcileBatches(t.Context(), testRecipe, q.Reconcile)
 	if err != nil || more || q.calls != 3 || stats.Added != 10501 {
 		t.Fatalf("stats=%+v more=%v calls=%d error=%v", stats, more, q.calls, err)
 	}
@@ -44,7 +44,7 @@ func TestReconcileYieldsAndRequestsContinuation(t *testing.T) {
 		return ReconcileStats{Removed: reconcileBatch}, nil
 	}}
 	s := newService(q, &fakeStore{}, nil, &fakeExtractor{}, "server")
-	stats, more, err := s.reconcileBatches(t.Context(), testRecipe)
+	stats, more, err := s.reconcileBatches(t.Context(), testRecipe, q.Reconcile)
 	if err != nil || !more || q.calls != reconcilePassBatches || stats.Removed != reconcileBatch*reconcilePassBatches {
 		t.Fatalf("stats=%+v more=%v calls=%d error=%v", stats, more, q.calls, err)
 	}
@@ -58,7 +58,7 @@ func TestReconcileStopsWhenCanceled(t *testing.T) {
 		return ReconcileStats{Stale: reconcileBatch}, nil
 	}}
 	s := newService(q, &fakeStore{}, nil, &fakeExtractor{}, "server")
-	stats, more, err := s.reconcileBatches(ctx, testRecipe)
+	stats, more, err := s.reconcileBatches(ctx, testRecipe, q.Reconcile)
 	if !errors.Is(err, context.Canceled) || more || q.calls != 1 || stats.Stale != reconcileBatch {
 		t.Fatalf("stats=%+v more=%v calls=%d error=%v", stats, more, q.calls, err)
 	}
