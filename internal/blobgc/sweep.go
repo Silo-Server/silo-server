@@ -48,13 +48,13 @@ const sweepAdvisoryLock int64 = 0x53494C4F42474353
 // Sweeper queues dead prefixes that nothing queued.
 type Sweeper struct {
 	pool       *pgxpool.Pool
-	store      Store
+	store      SweepStore
 	namespaces []Namespace
 	now        func() time.Time
 }
 
 // NewSweeper returns nil when there is no database or storage to sweep.
-func NewSweeper(pool *pgxpool.Pool, store Store, namespaces ...Namespace) *Sweeper {
+func NewSweeper(pool *pgxpool.Pool, store SweepStore, namespaces ...Namespace) *Sweeper {
 	if pool == nil || store == nil {
 		return nil
 	}
@@ -97,31 +97,51 @@ func (s *Sweeper) Sweep(ctx context.Context, maxPages int) (SweepStats, error) {
 	}
 	defer func() { _ = lock.Release(context.WithoutCancel(ctx)) }()
 
+	checkpoint, err := s.loadCheckpoint(ctx)
+	if err != nil {
+		return SweepStats{}, err
+	}
 	var stats SweepStats
 	for _, ns := range s.namespaces {
-		result, err := s.sweepNamespace(ctx, ns, maxPages)
+		result, next, err := s.sweepNamespace(ctx, ns, maxPages, checkpoint.Namespaces[ns.Root])
 		stats.Namespaces = append(stats.Namespaces, result)
 		if err != nil {
 			return stats, fmt.Errorf("sweep %s: %w", ns.Root, err)
+		}
+		if !result.StoppedOnAnomaly {
+			checkpoint.Namespaces[ns.Root] = next
+			if err := s.saveCheckpoint(ctx, checkpoint); err != nil {
+				return stats, err
+			}
 		}
 	}
 	return stats, nil
 }
 
-func (s *Sweeper) sweepNamespace(ctx context.Context, ns Namespace, maxPages int) (NamespaceSweep, error) {
+func (s *Sweeper) sweepNamespace(ctx context.Context, ns Namespace, maxPages int, saved namespaceCheckpoint) (NamespaceSweep, namespaceCheckpoint, error) {
 	stats := NamespaceSweep{Root: ns.Root}
 	// The newest object of each prefix: the listing is in key order, so a
 	// prefix's objects are adjacent, but a prefix may span pages.
 	newest := map[string]time.Time{}
-	cursor := ""
+	cursor := saved.Cursor
+	lastPrefix := saved.Prefix
+	if saved.Prefix != "" {
+		newest[saved.Prefix] = saved.Newest
+	}
+	maxPages = max(maxPages, 1)
+	var checkpoint namespaceCheckpoint
 	for page := 0; ; page++ {
 		if page == maxPages {
 			stats.Truncated = true
+			checkpoint = namespaceCheckpoint{Cursor: cursor, Prefix: lastPrefix, Newest: newest[lastPrefix]}
+			// The last prefix can continue on the next page with newer objects.
+			// Carry its age forward before deciding whether it is safe to queue.
+			delete(newest, lastPrefix)
 			break
 		}
 		objects, next, err := s.store.List(ctx, ns.Root, cursor, sweepPageSize)
 		if err != nil {
-			return stats, fmt.Errorf("list: %w", err)
+			return stats, namespaceCheckpoint{}, fmt.Errorf("list: %w", err)
 		}
 		for _, object := range objects {
 			stats.Objects++
@@ -130,6 +150,7 @@ func (s *Sweeper) sweepNamespace(ctx context.Context, ns Namespace, maxPages int
 				stats.Unrecognized++
 				continue
 			}
+			lastPrefix = prefix
 			if object.ModTime.After(newest[prefix]) || newest[prefix].IsZero() {
 				newest[prefix] = object.ModTime
 			}
@@ -142,18 +163,18 @@ func (s *Sweeper) sweepNamespace(ctx context.Context, ns Namespace, maxPages int
 	prefixes := slices.Sorted(maps.Keys(newest))
 	stats.Prefixes = len(prefixes)
 	if len(prefixes) == 0 {
-		return stats, nil
+		return stats, checkpoint, nil
 	}
 	live, scheduled := map[string]bool{}, map[string]bool{}
 	for batch := range slices.Chunk(prefixes, sweepBatchSize) {
 		batchLive, err := ns.Live(ctx, batch)
 		if err != nil {
-			return stats, fmt.Errorf("check liveness: %w", err)
+			return stats, namespaceCheckpoint{}, fmt.Errorf("check liveness: %w", err)
 		}
 		maps.Copy(live, batchLive)
 		batchQueued, err := s.queued(ctx, batch)
 		if err != nil {
-			return stats, err
+			return stats, namespaceCheckpoint{}, err
 		}
 		maps.Copy(scheduled, batchQueued)
 	}
@@ -173,20 +194,20 @@ func (s *Sweeper) sweepNamespace(ctx context.Context, ns Namespace, maxPages int
 	}
 	if len(prefixes) >= sweepAnomalyFloor && float64(len(dead)) > sweepAnomalyShare*float64(len(prefixes)) {
 		stats.StoppedOnAnomaly = true
-		return stats, nil
+		return stats, checkpoint, nil
 	}
 	if len(dead) == 0 {
-		return stats, nil
+		return stats, checkpoint, nil
 	}
 	tag, err := s.pool.Exec(ctx, `
 		INSERT INTO public.blob_gc_queue (prefix, not_before)
 		SELECT unnest($1::text[]), now()
 		ON CONFLICT (prefix) DO NOTHING`, dead)
 	if err != nil {
-		return stats, fmt.Errorf("queue dead prefixes: %w", err)
+		return stats, namespaceCheckpoint{}, fmt.Errorf("queue dead prefixes: %w", err)
 	}
 	stats.Queued = int(tag.RowsAffected())
-	return stats, nil
+	return stats, checkpoint, nil
 }
 
 // queued reports which of prefixes are already in the queue.

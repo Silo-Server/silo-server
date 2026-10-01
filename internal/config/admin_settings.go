@@ -78,6 +78,9 @@ const StorageTransitionTargetKey = "storage.transition.target"
 // same reason as the reconcile checkpoint.
 const ArtworkStorageSweepCheckpointKey = "artwork.storage_sweep_checkpoint"
 
+// MediaImageSweepCheckpointKey stores durable per-namespace listing progress.
+const MediaImageSweepCheckpointKey = "media_images.sweep_checkpoint"
+
 // ChapterThumbnailOriginalsCleanupKey is the machine-managed checkpoint for the
 // one-time cleanup of full-size chapter thumbnail originals, kept out of the
 // administrator settings API like the other storage checkpoints.
