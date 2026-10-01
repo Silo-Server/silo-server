@@ -115,9 +115,10 @@
 ./internal/trickplay TestRetiredTrickplayOutlivesIssuedURLsDB
 ./internal/trickplay TestReaderProtectsLatestSheetExpiryDB
 ./internal/trickplay TestReaderWithholdsRevisionDisplacedWhileSigningDB
+
+./internal/trickplay TestDisabledLibraryStopsServingAndRemovesPublishedWorkDB
 ./internal/trickplay TestStaleReconcileCannotDowngradeConcurrentUpgradeDB
 ./internal/api/handlers TestLibraryExplicitTrickplayUpdateAlwaysReconcilesPostgres
-
 ./internal/trickplay TestReaderRevalidatesServingWhileSigningDB
 ./internal/trickplay TestOptOutReconcilePreservesConcurrentClaimDB
 ./internal/trickplay TestReaderSuppressesDisabledLibraryAvailabilityDB
