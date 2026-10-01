@@ -85,6 +85,8 @@
 
 ./internal/trickplay TestServiceRecordsFailureWithClaimTokenDB
 ./internal/trickplay TestStaleReconcileCannotDowngradeConcurrentUpgradeDB
+
+./internal/api/handlers TestLibraryExplicitTrickplayUpdateAlwaysReconcilesPostgres
 ./internal/trickplay TestOptOutReconcilePreservesConcurrentClaimDB
 ./internal/trickplay TestRegenerateFencesOlderWorkersDB
 ./internal/trickplay TestReconcileUsesOneConnectionDB
