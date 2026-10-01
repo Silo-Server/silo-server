@@ -69,6 +69,14 @@ func (s *Server) handleTrickplayExtract(w http.ResponseWriter, r *http.Request) 
 	defer s.trickplay.busy.Unlock()
 	s.activeJobs.Add(1)
 	defer s.activeJobs.Add(-1)
+	// Backend resolution can smoke-encode after the shared probe cache is
+	// invalidated. Reserve admission before it starts and keep it through
+	// extraction, including a fallback to software.
+	if !s.gpu.beginWork() {
+		writeTrickplayError(w, http.StatusServiceUnavailable, trickplay.ExtractError{Reason: trickplay.NodeUnavailableReason, Message: "node is re-probing its hardware; retry shortly"})
+		return
+	}
+	defer s.gpu.endWork()
 
 	ffmpeg := playback.ResolveFFmpegPath(cfg.Playback.FFmpegPath)
 	accel := strings.TrimSpace(cfg.Playback.HWAccel)
@@ -83,15 +91,6 @@ func (s *Server) handleTrickplayExtract(w http.ResponseWriter, r *http.Request) 
 		runner.HWAccel, runner.HWDevice = resolved, device
 	} else {
 		req.Attempts = softwareAttempts(req.Attempts)
-	}
-	if usesHardware(req.Attempts) {
-		// A hardware run reserves a render device, so it takes the exclusion
-		// a transcode does and holds off a hardware re-probe until it ends.
-		if !s.gpu.beginWork() {
-			writeTrickplayError(w, http.StatusServiceUnavailable, trickplay.ExtractError{Reason: trickplay.NodeUnavailableReason, Message: "node is re-probing its hardware; retry shortly"})
-			return
-		}
-		defer s.gpu.endWork()
 	}
 	req.Background = true
 	result, err := runner.Run(r.Context(), req)
@@ -117,15 +116,6 @@ func softwareAttempts(attempts []mediasample.Attempt) []mediasample.Attempt {
 		software = append(software, mediasample.Attempt{TimeoutSeconds: attempts[len(attempts)-1].TimeoutSeconds})
 	}
 	return software
-}
-
-func usesHardware(attempts []mediasample.Attempt) bool {
-	for _, attempt := range attempts {
-		if attempt.Hardware {
-			return true
-		}
-	}
-	return false
 }
 
 func writeTrickplayError(w http.ResponseWriter, status int, failure trickplay.ExtractError) {
