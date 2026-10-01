@@ -13,7 +13,7 @@ func TestRevisionProtectionIsMonotonicAndFollowsTheRevisionDB(t *testing.T) {
 	expiresAt := time.Now().Add(96 * time.Hour).Truncate(time.Microsecond).Add(123 * time.Nanosecond)
 	wantExpiry := expiresAt.Truncate(time.Microsecond).Add(time.Microsecond)
 	for _, expiry := range []time.Time{expiresAt, expiresAt.Add(-24 * time.Hour)} {
-		if ok, err := f.repo.ProtectRevision(t.Context(), file, revision, expiry); err != nil || !ok {
+		if ok, err := f.repo.ProtectRevision(t.Context(), file, revision, expiry, testStore); err != nil || !ok {
 			t.Fatalf("protect: %v %v", ok, err)
 		}
 	}
@@ -28,7 +28,7 @@ func TestRevisionProtectionIsMonotonicAndFollowsTheRevisionDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.generate(t, file, "server")
-	if ok, err := f.repo.ProtectRevision(t.Context(), file, revision, expiresAt.Add(24*time.Hour)); err != nil || ok {
+	if ok, err := f.repo.ProtectRevision(t.Context(), file, revision, expiresAt.Add(24*time.Hour), testStore); err != nil || ok {
 		t.Fatalf("displaced revision protection accepted: %v %v", ok, err)
 	}
 	var newExpiry *time.Time
