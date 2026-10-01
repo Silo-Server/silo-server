@@ -56,6 +56,22 @@ func TestPlanCopySegments(t *testing.T) {
 	}
 }
 
+// A source whose timestamps start later than zero plans the same segments,
+// its duration counted from its first keyframe.
+func TestPlanCopySegmentsForALaterStart(t *testing.T) {
+	stubKeyframeIndex(t, keyframes.Index{Keyframes: []float64{7, 8, 9.6, 14.0, 14.4, 16.0}}, nil)
+	plan := planCopySegments(plannedOpts())
+	if plan == nil {
+		t.Fatal("no plan for a source starting at 7s")
+	}
+	want := []float64{2.6, 4.4, 0.4, 1.6, 1.0}
+	for i := range want {
+		if math.Abs(plan.durations[i]-want[i]) > 1e-9 {
+			t.Fatalf("durations = %v, want %v", plan.durations, want)
+		}
+	}
+}
+
 func TestPlanCopySegmentsKeepsFFmpegPlaylist(t *testing.T) {
 	stubKeyframeIndex(t, keyframes.Index{Keyframes: []float64{0, 2, 4, 6, 8}}, nil)
 	for name, change := range map[string]func(*TranscodeOpts){
