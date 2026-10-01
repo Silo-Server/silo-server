@@ -12,6 +12,10 @@
 # Add a pin in the same change that sets its budget. It must pass on a freshly
 # migrated database without skipping.
 
+# Seek preview jobs preserve bigint file IDs and reject expired completion leases.
+./internal/trickplay TestTrickplayQueuesBigintMediaFileIDsDB
+./internal/trickplay TestExpiredLeaseRejectsCompletionBeforeReconcileDB
+
 # Schema: every content_id-family foreign key cascades on update, so the online
 # re-id can rename an item whatever child rows it has (#933).
 ./migrations TestContentIDFamilyFKsCascadeOnUpdatePostgres
@@ -98,3 +102,10 @@
 ./internal/blobgc TestSweeperResumesAfterBoundedRunDB
 ./internal/blobgc TestSweeperDefersPrefixSpanningBoundedRunsDB
 ./internal/blobgc TestSweeperRestartsAfterStorageMoveDB
+
+./internal/trickplay TestSameOwnerReclaimRejectsPriorAttemptDB
+./internal/trickplay TestRevisionProtectionIsMonotonicAndFollowsTheRevisionDB
+
+./internal/trickplay TestStaleReconcileCannotDowngradeConcurrentUpgradeDB
+./internal/trickplay TestOptOutReconcilePreservesConcurrentClaimDB
+./internal/trickplay TestRegenerateFencesOlderWorkersDB

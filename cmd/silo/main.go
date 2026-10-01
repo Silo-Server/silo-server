@@ -121,6 +121,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"github.com/Silo-Server/silo-server/internal/themesongs"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
+	"github.com/Silo-Server/silo-server/internal/trickplay"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -2770,7 +2771,7 @@ func main() {
 			taskMgr.Register(tasks.NewCleanupArtworkRevisionsTask(
 				metadata.NewArtworkRevisionGarbageCollector(deps.DB, deps.Blobs.Assets),
 			))
-			mediaImages := []blobgc.Namespace{chapterthumbs.BlobNamespace(deps.DB)}
+			mediaImages := []blobgc.Namespace{chapterthumbs.BlobNamespace(deps.DB), trickplay.BlobNamespace(deps.DB)}
 			if collector := blobgc.NewCollector(deps.DB, deps.Blobs.Assets, mediaImages...); collector != nil {
 				taskMgr.Register(tasks.NewCleanupRemovedMediaImagesTask(collector))
 			}
