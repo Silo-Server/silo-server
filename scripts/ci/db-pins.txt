@@ -113,3 +113,7 @@
 ./internal/trickplay TestOptOutReconcilePreservesConcurrentClaimDB
 ./internal/trickplay TestRegenerateFencesOlderWorkersDB
 ./internal/trickplay TestReconcileUsesOneConnectionDB
+./internal/trickplay TestLibraryTypeChangeFencesWorkerProgressDB
+./internal/trickplay TestLibraryTypeChangeRetiresFinishedAndExpiredWorkDB
+./internal/trickplay TestIneligibleFilesCannotProgressAndCanFinishDB
+./internal/trickplay TestTypeChangeReconcilePreservesConcurrentClaimDB
