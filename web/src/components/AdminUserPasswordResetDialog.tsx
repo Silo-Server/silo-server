@@ -23,9 +23,17 @@ import {
 
 type ResetMethod = "email" | "link" | "password";
 
-/** The server's bounds for a password (auth.ValidatePassword). */
-const MIN_PASSWORD = 8;
-const MAX_PASSWORD = 72;
+/** The server's bounds for a password (auth.ValidateNewPassword). */
+const MIN_PASSWORD_CHARS = 8;
+const MAX_PASSWORD_BYTES = 72;
+
+/** Counts characters (code points) and UTF-8 bytes the way the server does. */
+function passwordFits(password: string): boolean {
+  return (
+    [...password].length >= MIN_PASSWORD_CHARS &&
+    new TextEncoder().encode(password).length <= MAX_PASSWORD_BYTES
+  );
+}
 
 function Option({
   name,
@@ -166,7 +174,7 @@ export function AdminUserPasswordResetDialog({
   const unconfirmed = result?.delivery === "email" && result.delivery_status !== "sent";
   const done = passwordSet !== null || (result !== null && !unconfirmed);
   const resetURL = result?.reset_url;
-  const passwordValid = password.length >= MIN_PASSWORD && password.length <= MAX_PASSWORD;
+  const passwordValid = passwordFits(password);
 
   const primary = {
     email: { label: "Email link", disabled: !canEmail, run: () => void send("email") },
@@ -293,14 +301,13 @@ export function AdminUserPasswordResetDialog({
                   id={passwordId}
                   type="password"
                   autoComplete="new-password"
-                  minLength={MIN_PASSWORD}
-                  maxLength={MAX_PASSWORD}
                   value={password}
                   disabled={method !== "password" || pending}
                   onChange={(event) => setPassword(event.target.value)}
                 />
                 <p className="text-muted-foreground text-xs">
-                  {MIN_PASSWORD} to {MAX_PASSWORD} characters.
+                  At least {MIN_PASSWORD_CHARS} characters and no more than {MAX_PASSWORD_BYTES}{" "}
+                  UTF-8 bytes.
                 </p>
                 <div className="flex items-center gap-2">
                   <input

@@ -128,6 +128,22 @@ it("points to General settings while no public URL is set", () => {
   );
 });
 
+it("measures a temporary password the way the server does", async () => {
+  const ui = userEvent.setup();
+  mount();
+  await ui.click(screen.getByRole("radio", { name: "Set a temporary password" }));
+  const setPassword = screen.getByRole("button", { name: "Set password" });
+  const input = screen.getByLabelText("Temporary password");
+  // Four emoji are eight UTF-16 units but only four characters.
+  fireEvent.change(input, { target: { value: "😀😀😀😀" } });
+  expect(setPassword).toBeDisabled();
+  // Twenty-five CJK characters are 75 UTF-8 bytes, over bcrypt's 72.
+  fireEvent.change(input, { target: { value: "密".repeat(25) } });
+  expect(setPassword).toBeDisabled();
+  fireEvent.change(input, { target: { value: "密".repeat(24) } });
+  expect(setPassword).toBeEnabled();
+});
+
 it("sets a temporary password the account must replace, with a fresh validator", async () => {
   const ui = userEvent.setup();
   mount();
