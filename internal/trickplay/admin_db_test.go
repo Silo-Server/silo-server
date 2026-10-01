@@ -158,6 +158,126 @@ func TestAdminCountsUnreconciledEligibleFilesDB(t *testing.T) {
 	t.Fatal("opted-in library absent")
 }
 
+func TestAdminReclassifiesTrackedIneligibleFilesDB(t *testing.T) {
+	for _, change := range []struct {
+		name string
+		sql  string
+	}{
+		{"missing", "missing_since=now()"},
+		{"unprobed", "probe_updated_at=NULL"},
+		{"zero-duration", "duration=0"},
+		{"audio-only", "video_tracks='[]'::jsonb"},
+	} {
+		for _, state := range []string{stateReady, statePending, stateRunning, stateUnusable} {
+			t.Run(change.name+"/"+state, func(t *testing.T) {
+				f := newFixture(t)
+				folder := f.library(t, "movies", true)
+				file := f.file(t, folder, "tracked")
+				content := fmt.Sprintf("movie:tracked-ineligible-%d", file)
+				f.exec(t, `UPDATE public.media_files SET content_id=$1 WHERE id=$2`, content, file)
+				f.reconcile(t)
+				revision := f.generate(t, file, "server-a")
+				if state != stateReady {
+					if count, err := f.repo.Regenerate(t.Context(), []int{file}); err != nil || count != 1 {
+						t.Fatalf("requeue publication: %d %v", count, err)
+					}
+					if state != statePending {
+						job, err := f.repo.ClaimFile(t.Context(), file, "server-b", time.Minute)
+						if err != nil || job == nil {
+							t.Fatalf("claim regeneration: %+v %v", job, err)
+						}
+						if state == stateUnusable {
+							if finished, err := f.repo.Finish(t.Context(), file, job.LeaseToken, Unusable, "no video stream", 0); err != nil || !finished {
+								t.Fatalf("finish regeneration: %v %v", finished, err)
+							}
+						}
+					}
+				}
+
+				// An ineligible file that was never tracked remains outside the
+				// aggregate, unlike a tracked file whose eligibility changes.
+				untracked := f.file(t, folder, "untracked")
+				f.exec(t, `UPDATE public.media_files SET `+change.sql+` WHERE id=$1`, untracked)
+				admin := NewAdmin(f.pool, identityStore(testStore), nil)
+				readLibrary := func() LibraryStatus {
+					t.Helper()
+					libraries, err := admin.LibraryStatuses(t.Context())
+					if err != nil {
+						t.Fatal(err)
+					}
+					for _, library := range libraries {
+						if library.LibraryID == folder {
+							return library
+						}
+					}
+					t.Fatal("opted-in library absent")
+					return LibraryStatus{}
+				}
+				before := readLibrary()
+				if before.Pending+before.Running+before.Ready+before.Unusable != 1 || before.SheetBytes != 620_000 {
+					t.Fatalf("eligible tracked publication: %+v", before)
+				}
+				if state == stateReady && before.Ready != 1 {
+					t.Fatalf("ready publication: %+v", before)
+				}
+				f.exec(t, `UPDATE public.media_files SET `+change.sql+` WHERE id=$1`, file)
+				assertCurrentStatus := func() {
+					t.Helper()
+					files, err := admin.ItemStatus(t.Context(), content)
+					if err != nil || len(files) != 1 || files[0].State != stateUnusable {
+						t.Fatalf("current ineligible item status: %+v %v", files, err)
+					}
+					library := readLibrary()
+					if library.Pending != 0 || library.Running != 0 || library.Ready != 0 || library.Unusable != 1 || library.SheetBytes != before.SheetBytes {
+						t.Fatalf("current ineligible library status: %+v; item status: %+v", library, files[0])
+					}
+				}
+				assertCurrentStatus()
+				if row, ok := f.row(t, file); !ok || row.state != state || row.revision == nil || *row.revision != revision {
+					t.Fatalf("status read altered persisted generation state: %+v %v", row, ok)
+				}
+				f.reconcile(t)
+				assertCurrentStatus()
+				if _, ok := f.row(t, untracked); ok {
+					t.Fatal("never-tracked ineligible file entered the queue")
+				}
+			})
+		}
+	}
+}
+
+func TestAdminRejectsUnsupportedLibraryTypesDB(t *testing.T) {
+	for _, libraryType := range []string{"audiobooks", " ebooks ", "podcasts", "unknown"} {
+		t.Run(libraryType, func(t *testing.T) {
+			f := newFixture(t)
+			folder := f.library(t, "movies", true)
+			file := f.file(t, folder, "changed-library-type")
+			content := fmt.Sprintf("movie:admin-library-type-%d", file)
+			f.exec(t, `UPDATE public.media_files SET content_id=$1 WHERE id=$2`, content, file)
+			f.reconcile(t)
+			f.generate(t, file, "server-a")
+			f.exec(t, `UPDATE public.media_folders SET type=$1 WHERE id=$2`, libraryType, folder)
+			admin := NewAdmin(f.pool, identityStore(testStore), nil)
+			files, err := admin.ItemStatus(t.Context(), content)
+			if err != nil || len(files) != 1 || files[0].State != "off" {
+				t.Errorf("unsupported library item status: %+v %v", files, err)
+			}
+			if _, err := admin.Regenerate(t.Context(), content); !errors.Is(err, ErrNotOptedIn) {
+				t.Errorf("unsupported library regenerate: %v", err)
+			}
+			libraries, err := admin.LibraryStatuses(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, library := range libraries {
+				if library.LibraryID == folder {
+					t.Errorf("unsupported library listed: %+v", library)
+				}
+			}
+		})
+	}
+}
+
 func TestAdminResolvesMultiEpisodeFileDB(t *testing.T) {
 	f := newFixture(t)
 	folder := f.library(t, "tv", true)

@@ -312,9 +312,10 @@ The arrays are complete lists, never null, without pagination.
 
 Each file reports `state`, `servable`, and `failures`, with optional
 `last_error`, `generated_at`, `thumbnail_count`, `thumbnail_width`, `interval_ms`,
-and `sheet_bytes`. `state` is `off` for a disabled library or one with previews
-turned off; `unusable` for an ineligible file or a permanent sampling failure;
-otherwise it reflects `pending`, `running`, or `ready`. An eligible file with
+and `sheet_bytes`. `state` is `off` for a disabled library, a library with an
+unsupported type, or one with previews turned off; `unusable` for an ineligible
+file or a permanent sampling failure; otherwise it reflects `pending`,
+`running`, or `ready`. An eligible file with
 no queue row yet reports `pending`. `servable` independently reports whether
 the current store has a published revision matching the file: previous sheets
 can remain available after a failed or unusable regeneration. Turning previews
@@ -332,16 +333,20 @@ administrator job resource or replay receipt. Repeating the request after work
 finishes queues another generation, so it is non-retryable; clients must disable
 automatic mutation retries and authentication replay.
 
-The library listing includes enabled libraries with previews turned on. Each
-entry contains `library_id`, `name`, `pending`, `running`, `ready`, `unusable`,
+The library listing includes enabled video libraries with previews turned on.
+Each entry contains `library_id`, `name`, `pending`, `running`, `ready`, `unusable`,
 and `sheet_bytes`. Pending counts include failure backoff and eligible files
-not yet reconciled into the queue. Storage sums the retained published sheets;
-queue state counts do not replace each file's `servable` value.
+not yet reconciled into the queue. A tracked file that becomes missing,
+unprobed, zero-duration, or audio-only counts as `unusable` regardless of its
+persisted queue state. Ineligible files that have never entered the queue do
+not contribute to these counts. Status reads do not alter queue rows. Storage
+sums the retained published sheets; generation counts do not replace each
+file's `servable` value.
 
 The item operations return `404` `not_found` when no associated media file
 exists. Regeneration returns `409` `capability_disabled` when none belongs to an
-enabled, opted-in library. All three return `503` `dependency_unavailable` when
-the service is unconfigured, and `500` `internal_error` on an unexpected service
+enabled, opted-in video library. All three return `503` `dependency_unavailable`
+when the service is unconfigured, and `500` `internal_error` on an unexpected service
 failure, using the common Problem response. Ordinary profiles receive `403`
 `permission_denied`; authentication failures use the common `401` problems.
 Web administration uses these operations. Apple, Android, and Jellyfin have

@@ -107,6 +107,8 @@
 ./internal/trickplay TestRevisionProtectionReusesCoveredExpiryDB
 ./internal/catalog TestEpisodeDetailsFallBackAfterBatchFileFailureDB
 ./internal/jellycompat TestTrickplayNegotiatedSourceSurvivesAPIReplicaDB
+./internal/trickplay TestAdminReclassifiesTrackedIneligibleFilesDB
+./internal/trickplay TestAdminRejectsUnsupportedLibraryTypesDB
 ./internal/trickplay TestReconcileUsesOneConnectionDB
 ./internal/trickplay TestLibraryTypeChangeFencesWorkerProgressDB
 ./internal/trickplay TestLibraryTypeChangeRetiresFinishedAndExpiredWorkDB
