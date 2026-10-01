@@ -272,3 +272,7 @@ pages. A prefix split across runs carries its newest object time and stays
 unqueued until the full prefix has been listed. Errors or an anomaly keep
 the prior checkpoint; finishing a namespace clears its cursor, and changing
 stores starts a new walk.
+
+Chapter replacement queues displaced image keys in the same database transaction
+as the chapter update, preserving any later issued URL expiry. This covers a
+worker exit before its idempotent retirement scheduling and chapter clears.

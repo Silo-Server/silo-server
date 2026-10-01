@@ -106,14 +106,16 @@
 # Artwork storage sweep: the GC-schedule lookup its anomaly guard consults must
 # count armed candidates only, never parked (live) ones.
 ./internal/metadata TestArtworkSweepScheduledOriginalsPostgres
+
 ./internal/trickplay TestStaleReconcileCannotDowngradeConcurrentUpgradeDB
 ./internal/api/handlers TestLibraryExplicitTrickplayUpdateAlwaysReconcilesPostgres
 ./internal/trickplay TestReaderRevalidatesServingWhileSigningDB
 ./internal/trickplay TestAdminClassifiesIneligibleFilesDB
+./migrations TestChapterReplacementAtomicallyQueuesImagesPostgres
 ./internal/trickplay TestReaderSuppressesDisabledLibraryAvailabilityDB
-./internal/trickplay TestOptOutReconcilePreservesConcurrentClaimDB
 ./internal/trickplay TestAdminRetryKeepsPublishedPreviewsDB
 ./internal/trickplay TestAdminResolvesMultiEpisodeFileDB
+./internal/trickplay TestOptOutReconcilePreservesConcurrentClaimDB
 ./internal/trickplay TestRegenerateFencesOlderWorkersDB
 ./internal/trickplay TestRevisionProtectionReusesCoveredExpiryDB
 ./internal/catalog TestEpisodeDetailsFallBackAfterBatchFileFailureDB
