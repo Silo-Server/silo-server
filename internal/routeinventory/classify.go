@@ -775,6 +775,10 @@ var authRules = []authRule{
 	{marker: "metadataItemAccess", class: authPermissionGated, trait: "metadata_curation", rank: 50},
 	{marker: "metadataCurationAccess", class: authPermissionGated, trait: "metadata_curation", rank: 50},
 	{marker: "RequireViewerAccess", class: authProfileScoped, trait: traitViewerAccess, rank: 40},
+	// Playback byte routes (router.go) authenticate with a session-bound stream
+	// capability or fall back to RequireAuth, then resolve the profile from the
+	// signed capability or through RequireViewerAccess on the fallback.
+	{marker: "RequireTransportViewerAccess", class: authProfileScoped, trait: traitViewerAccess, rank: 40},
 	{marker: "RequireProfile", class: authProfileScoped, trait: traitProfileReq, rank: 40},
 	// The Apple push display gate (internal/api/middleware/apple_push_display.go)
 	// requires auth on both credential paths and resolves a profile: ordinary
@@ -786,6 +790,7 @@ var authRules = []authRule{
 	{marker: markerApplePushDisplayAuth, class: authProfileScoped, trait: traitProfileReq, rank: 40},
 	{marker: markerDisplayMiddlewares, class: authProfileScoped, trait: traitProfileReq, rank: 40},
 	{marker: "RequireAuth", class: authAuthenticated, trait: traitAuthenticated, rank: 30},
+	{marker: "RequireTransportAuth", class: authAuthenticated, trait: traitAuthenticated, rank: 30},
 	{marker: "requireBearer", class: authNodeBearer, trait: "node_bearer", rank: 30},
 	{marker: "OptionalAuth", class: authOptional, trait: "optional_auth", rank: 20},
 }

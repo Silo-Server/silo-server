@@ -459,6 +459,12 @@ func TestClassifyAuthSpreadMiddlewareSlices(t *testing.T) {
 			wantTraits: []string{"authenticated", "profile_required", "rate_limited", "viewer_access"},
 		},
 		{
+			name:       "playback transport capability",
+			middleware: []string{"middleware.RequestID", "authMiddleware.RequireTransportAuth(streamSecret)", "deps.RateLimitMW.Handler [when deps.RateLimitMW != nil]", "viewerAccessMiddleware.RequireTransportViewerAccess [when viewerAccessMiddleware != nil]"},
+			wantClass:  "profile_scoped",
+			wantTraits: []string{"authenticated", "rate_limited", "viewer_access"},
+		},
+		{
 			name:       "apple push display gate",
 			middleware: []string{"deps.RateLimitMW.Handler", "authMiddleware.RequireApplePushDisplayAuth(standardDisplayAuth, postAuth)"},
 			wantClass:  "profile_scoped",
