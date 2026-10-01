@@ -256,7 +256,14 @@ func TestWidthBackfillSerializesReplicasPostgres(t *testing.T) {
 }
 
 func TestChapterLockSessionLossRejectsStaleSaveDB(t *testing.T) {
-	pool := chapterURLTestPool(t, nil)
+	for _, maxConns := range []int32{1, 2} {
+		t.Run(fmt.Sprint(maxConns), func(t *testing.T) { testChapterLockSessionLossRejectsStaleSave(t, maxConns) })
+	}
+}
+
+func testChapterLockSessionLossRejectsStaleSave(t *testing.T, maxConns int32) {
+	t.Helper()
+	pool := chapterReplicaTestPool(t, maxConns)
 	fileID, _ := chapterURLTestFile(t, pool)
 	var folderID int
 	if err := pool.QueryRow(t.Context(), `SELECT media_folder_id FROM media_files WHERE id=$1`, fileID).Scan(&folderID); err != nil {
@@ -293,6 +300,10 @@ func TestChapterLockSessionLossRejectsStaleSaveDB(t *testing.T) {
 		}
 	}
 	first, second := newReplica(true), newReplica(false)
+	// Replicas have separate local admission budgets. Terminating the first
+	// backend releases its database lock while its paused worker still holds
+	// that replica's one-session budget.
+	second.fileRepo = scanner.NewFileRepository(chapterReplicaTestPool(t, maxConns))
 	done := make(chan error, 1)
 	go func() {
 		_, err := first.processRequest(ctx, ChapterThumbnailRequest{FileID: fileID}, false)
@@ -328,4 +339,25 @@ func TestChapterLockSessionLossRejectsStaleSaveDB(t *testing.T) {
 	if err != nil || file.Chapters[0].ThumbnailThumbhash != "replacement" {
 		t.Fatalf("stale worker replaced completed chapters: file=%+v err=%v", file, err)
 	}
+}
+
+func chapterReplicaTestPool(t *testing.T, maxConns int32) *pgxpool.Pool {
+	t.Helper()
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Both one- and two-connection pools admit one chapter session. Keep the
+	// test independent of the CPU-derived pgxpool default used on CI runners.
+	cfg.MaxConns = maxConns
+	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	return pool
 }

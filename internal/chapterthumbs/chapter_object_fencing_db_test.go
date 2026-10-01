@@ -20,7 +20,14 @@ import (
 )
 
 func TestTerminatedChapterWorkerCannotReplaceCurrentBlobDB(t *testing.T) {
-	pool := chapterURLTestPool(t, nil)
+	for _, maxConns := range []int32{1, 2} {
+		t.Run(fmt.Sprint(maxConns), func(t *testing.T) { testTerminatedChapterWorkerCannotReplaceCurrentBlob(t, maxConns) })
+	}
+}
+
+func testTerminatedChapterWorkerCannotReplaceCurrentBlob(t *testing.T, maxConns int32) {
+	t.Helper()
+	pool := chapterReplicaTestPool(t, maxConns)
 	fileID, _ := chapterURLTestFile(t, pool)
 	var folderID int
 	if err := pool.QueryRow(t.Context(), `SELECT media_folder_id FROM media_files WHERE id=$1`, fileID).Scan(&folderID); err != nil {
@@ -73,6 +80,7 @@ func TestTerminatedChapterWorkerCannotReplaceCurrentBlobDB(t *testing.T) {
 		}
 	}
 	first, second := newReplica(true), newReplica(false)
+	second.fileRepo = scanner.NewFileRepository(chapterReplicaTestPool(t, maxConns))
 	done := make(chan error, 1)
 	go func() {
 		_, err := first.processRequest(ctx, ChapterThumbnailRequest{FileID: fileID}, false)
