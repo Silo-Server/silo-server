@@ -356,19 +356,45 @@ func (r *Repository) ProtectRevision(ctx context.Context, fileID int, revision i
 	if expiresAt.After(rounded) {
 		expiresAt = rounded.Add(time.Microsecond)
 	}
-	tag, err := r.pool.Exec(ctx, `
-		UPDATE public.media_file_trickplay t
-		SET published_expires_at = GREATEST(t.published_expires_at, $3::timestamptz)
-		FROM public.media_files mf JOIN public.media_folders f ON f.id = mf.media_folder_id
-		WHERE t.media_file_id = $1 AND t.revision = $2 AND mf.id = t.media_file_id
-		  AND f.trickplay_enabled AND f.enabled IS NOT FALSE AND t.store_identity = $4
-		  AND t.published_size IS NOT DISTINCT FROM mf.file_size
-		  AND (t.published_hash IS NULL OR mf.file_hash IS NULL OR t.published_hash = mf.file_hash)
-		  AND abs(COALESCE(t.published_duration, 0) - COALESCE(mf.duration, 0)) <= 2`, fileID, revision, expiresAt, storeIdentity)
+	// A covered revision needs only a snapshot read. Replacing or deleting it
+	// preserves this committed expiry in the retired revision's GC deadline.
+	// The update retains GREATEST: simultaneous first readers may both extend
+	// retention, and neither may shorten the other reader's issued URL lifetime.
+	var protected bool
+	err := r.pool.QueryRow(ctx, `
+		WITH covered AS (
+			SELECT t.media_file_id
+			FROM public.media_file_trickplay t
+			JOIN public.media_files mf ON mf.id = t.media_file_id
+			JOIN public.media_folders f ON f.id = mf.media_folder_id
+			WHERE t.media_file_id = $1 AND t.revision = $2 AND t.published_expires_at >= $3::timestamptz
+			  AND f.trickplay_enabled AND f.enabled IS NOT FALSE AND t.store_identity = $4
+			  AND lower(btrim(f.type)) = ANY($5::text[])
+			  AND mf.missing_since IS NULL AND mf.probe_updated_at IS NOT NULL AND mf.duration > 0
+			  AND jsonb_typeof(mf.video_tracks) = 'array' AND jsonb_array_length(mf.video_tracks) > 0
+			  AND t.published_size IS NOT DISTINCT FROM mf.file_size
+			  AND (t.published_hash IS NULL OR mf.file_hash IS NULL OR t.published_hash = mf.file_hash)
+			  AND abs(COALESCE(t.published_duration, 0) - COALESCE(mf.duration, 0)) <= 2
+		), extended AS (
+			UPDATE public.media_file_trickplay t
+			SET published_expires_at = GREATEST(t.published_expires_at, $3::timestamptz)
+			FROM public.media_files mf JOIN public.media_folders f ON f.id = mf.media_folder_id
+			WHERE t.media_file_id = $1 AND t.revision = $2 AND mf.id = t.media_file_id
+			  AND f.trickplay_enabled AND f.enabled IS NOT FALSE AND t.store_identity = $4
+			  AND lower(btrim(f.type)) = ANY($5::text[])
+			  AND mf.missing_since IS NULL AND mf.probe_updated_at IS NOT NULL AND mf.duration > 0
+			  AND jsonb_typeof(mf.video_tracks) = 'array' AND jsonb_array_length(mf.video_tracks) > 0
+			  AND t.published_size IS NOT DISTINCT FROM mf.file_size
+			  AND (t.published_hash IS NULL OR mf.file_hash IS NULL OR t.published_hash = mf.file_hash)
+			  AND abs(COALESCE(t.published_duration, 0) - COALESCE(mf.duration, 0)) <= 2
+			  AND NOT EXISTS (SELECT 1 FROM covered)
+			RETURNING t.media_file_id
+		)
+		SELECT EXISTS (SELECT 1 FROM covered) OR EXISTS (SELECT 1 FROM extended)`, fileID, revision, expiresAt, storeIdentity, videoLibraryTypes).Scan(&protected)
 	if err != nil {
 		return false, fmt.Errorf("protect issued trickplay URLs: %w", err)
 	}
-	return tag.RowsAffected() == 1, nil
+	return protected, nil
 }
 
 func cleanError(message string) string {
@@ -532,11 +558,15 @@ func (r *Repository) Manifests(ctx context.Context, fileIDs []int, storeIdentity
 		FROM public.media_file_trickplay t
 		JOIN public.media_files mf ON mf.id = t.media_file_id
         JOIN public.media_folders f ON f.id = mf.media_folder_id
-		WHERE f.trickplay_enabled AND t.media_file_id = ANY($1) AND t.revision IS NOT NULL AND t.store_identity = $2
+		WHERE f.trickplay_enabled AND f.enabled IS NOT FALSE
+		  AND lower(btrim(f.type)) = ANY($3::text[])
+		  AND mf.missing_since IS NULL AND mf.probe_updated_at IS NOT NULL AND mf.duration > 0
+		  AND jsonb_typeof(mf.video_tracks) = 'array' AND jsonb_array_length(mf.video_tracks) > 0
+		  AND t.media_file_id = ANY($1) AND t.revision IS NOT NULL AND t.store_identity = $2
 		  AND t.published_size IS NOT DISTINCT FROM mf.file_size
 		  AND (t.published_hash IS NULL OR mf.file_hash IS NULL OR t.published_hash = mf.file_hash)
 		  AND abs(COALESCE(t.published_duration, 0) - COALESCE(mf.duration, 0)) <= 2`,
-		fileIDs, storeIdentity)
+		fileIDs, storeIdentity, videoLibraryTypes)
 	if err != nil {
 		return nil, fmt.Errorf("read trickplay manifests: %w", err)
 	}

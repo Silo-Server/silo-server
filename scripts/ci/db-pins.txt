@@ -32,6 +32,10 @@
 # once per episode, on the Jellyfin season page path.
 ./internal/catalog TestGetEpisodeDetailsForSeriesResolvesPreferencesOncePerSeries
 
+# Seek previews: one availability lookup per item or episode page.
+./internal/catalog TestTrickplayAvailabilityBatchesItemDetails
+./internal/catalog TestTrickplayAvailabilityBatchesEpisodeDetails
+
 # Listings: COUNT queries only when a total is requested and cannot be derived
 # from the page.
 ./internal/catalog TestQueryExecutorTerminalPageTotals
@@ -107,13 +111,24 @@
 ./internal/trickplay TestRevisionProtectionIsMonotonicAndFollowsTheRevisionDB
 
 ./internal/trickplay TestServiceRecordsFailureWithClaimTokenDB
-./internal/trickplay TestStaleReconcileCannotDowngradeConcurrentUpgradeDB
 
+./internal/trickplay TestRetiredTrickplayOutlivesIssuedURLsDB
+./internal/trickplay TestReaderProtectsLatestSheetExpiryDB
+./internal/trickplay TestReaderWithholdsRevisionDisplacedWhileSigningDB
+./internal/trickplay TestStaleReconcileCannotDowngradeConcurrentUpgradeDB
 ./internal/api/handlers TestLibraryExplicitTrickplayUpdateAlwaysReconcilesPostgres
+
+./internal/trickplay TestReaderRevalidatesServingWhileSigningDB
 ./internal/trickplay TestOptOutReconcilePreservesConcurrentClaimDB
+./internal/trickplay TestReaderSuppressesDisabledLibraryAvailabilityDB
 ./internal/trickplay TestRegenerateFencesOlderWorkersDB
+./internal/trickplay TestRevisionProtectionReusesCoveredExpiryDB
+./internal/catalog TestEpisodeDetailsFallBackAfterBatchFileFailureDB
 ./internal/trickplay TestReconcileUsesOneConnectionDB
 ./internal/trickplay TestLibraryTypeChangeFencesWorkerProgressDB
 ./internal/trickplay TestLibraryTypeChangeRetiresFinishedAndExpiredWorkDB
 ./internal/trickplay TestIneligibleFilesCannotProgressAndCanFinishDB
 ./internal/trickplay TestTypeChangeReconcilePreservesConcurrentClaimDB
+./internal/trickplay TestLibraryTypeChangeSuppressesAndRetiresTrickplayDB
+./internal/trickplay TestNormalizedVideoLibraryTypesRemainEligibleDB
+./internal/trickplay TestCurrentFileEligibilitySuppressesTrickplayDB
