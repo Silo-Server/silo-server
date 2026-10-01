@@ -2,15 +2,23 @@ package trickplay
 
 import (
 	"context"
+	"io"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
+// identityStore is a store at an identity whose objects hold their own key.
 type identityStore string
 
 func (s identityStore) Identity() string { return string(s) }
+
+func (s identityStore) Get(_ context.Context, key string) (io.ReadCloser, blobstore.ObjectInfo, error) {
+	return io.NopCloser(strings.NewReader(key)), blobstore.ObjectInfo{Key: key}, nil
+}
 
 // fakeURLs signs every key but those in refuse, each expiring an hour apart.
 type fakeURLs struct{ refuse map[string]bool }
@@ -57,6 +65,21 @@ func TestReaderSignsWholeManifestsDB(t *testing.T) {
 	if _, ok, err := partial.SignedManifest(t.Context(), published); ok || err != nil {
 		t.Fatalf("partially signed manifest served: %t %v", ok, err)
 	}
+	// Sheets open by width and index, within the manifest.
+	body, etag, ok, err := reader.OpenSheet(t.Context(), published, 300, 3)
+	if err != nil || !ok {
+		t.Fatalf("open sheet: %t %v", ok, err)
+	}
+	data, _ := io.ReadAll(body)
+	_ = body.Close()
+	if string(data) != SheetKey(published, revision, 3) || etag == "" {
+		t.Fatalf("sheet %q etag %q", data, etag)
+	}
+	for _, tt := range []struct{ width, index int }{{320, 0}, {300, 4}, {300, -1}} {
+		if _, _, ok, _ := reader.OpenSheet(t.Context(), published, tt.width, tt.index); ok {
+			t.Errorf("sheet width %d index %d opened", tt.width, tt.index)
+		}
+	}
 	// Another store's reader sees nothing.
 	if grids, _ := NewReader(f.pool, identityStore("s3|other"), fakeURLs{}).TrickplayGrids(t.Context(), []int{published}); len(grids) != 0 {
 		t.Fatal("sheets in another store are available")
@@ -86,5 +109,8 @@ func TestReaderStopsServingOptedOutRunningFileDB(t *testing.T) {
 	}
 	if _, ok, err := reader.SignedManifest(t.Context(), fileID); err != nil || ok {
 		t.Fatalf("opted-out manifest: %v %v", ok, err)
+	}
+	if _, _, ok, err := reader.OpenSheet(t.Context(), fileID, 300, 0); err != nil || ok {
+		t.Fatalf("opted-out sheet: %v %v", ok, err)
 	}
 }
