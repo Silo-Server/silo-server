@@ -192602,6 +192602,87 @@
         }
       },
       {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/x-silo-worker-protocols/schemas/mediasample_Request"
+              }
+            }
+          },
+          "required": true
+        },
+        "description": "Make trickplay sprite sheets for a mediasample Sheets request of samples on an approved input path, one run at a time, at idle priority, on the node's own hardware. No durable replay receipt; the API server keeps the lease and retries elsewhere.",
+        "retry_safety": "non_retryable",
+        "listener": "transcode_node",
+        "method": "POST",
+        "path": "/trickplay/extract",
+        "handler": "(*internal/transcodenode.Server).handleTrickplayExtract",
+        "auth_class": "node_bearer",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/mediasample_Result"
+                }
+              }
+            },
+            "description": "The run's sheets"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/trickplay_ExtractError"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Invalid request or unapproved input path"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/trickplay_ExtractError"
+                }
+              }
+            },
+            "description": "Sampling failed; permanent names a cause in the file itself"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/trickplay_ExtractError"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Node busy with another trickplay run, re-probing, or unconfigured"
+          }
+        }
+      },
+      {
         "parameters": [
           {
             "in": "path",
@@ -198101,6 +198182,433 @@
         ],
         "type": "object"
       },
+      "mediasample_At": {
+        "additionalProperties": false,
+        "properties": {
+          "seconds": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "seconds"
+        ],
+        "type": "object"
+      },
+      "mediasample_Attempt": {
+        "additionalProperties": false,
+        "properties": {
+          "hardware": {
+            "type": "boolean"
+          },
+          "timeout_seconds": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "mediasample_AudioOutput": {
+        "additionalProperties": false,
+        "properties": {
+          "fingerprint": {
+            "type": "boolean"
+          },
+          "silence": {
+            "$ref": "#/x-silo-worker-protocols/schemas/mediasample_SilenceParams"
+          }
+        },
+        "type": "object"
+      },
+      "mediasample_FrameStats": {
+        "additionalProperties": false,
+        "properties": {
+          "pblack": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
+          "sat_avg": {
+            "format": "float",
+            "type": "number"
+          },
+          "sat_high": {
+            "format": "float",
+            "type": "number"
+          },
+          "sat_low": {
+            "format": "float",
+            "type": "number"
+          },
+          "sat_max": {
+            "format": "float",
+            "type": "number"
+          },
+          "seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "y_avg": {
+            "format": "float",
+            "type": "number"
+          },
+          "y_high": {
+            "format": "float",
+            "type": "number"
+          },
+          "y_low": {
+            "format": "float",
+            "type": "number"
+          },
+          "y_max": {
+            "format": "float",
+            "type": "number"
+          },
+          "y_min": {
+            "format": "float",
+            "type": "number"
+          }
+        },
+        "required": [
+          "seconds",
+          "y_min",
+          "y_low",
+          "y_avg",
+          "y_high",
+          "y_max",
+          "sat_low",
+          "sat_avg",
+          "sat_high",
+          "sat_max"
+        ],
+        "type": "object"
+      },
+      "mediasample_Image": {
+        "additionalProperties": false,
+        "properties": {
+          "jpeg": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
+          "seconds": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "seconds",
+          "jpeg"
+        ],
+        "type": "object"
+      },
+      "mediasample_ImageOutput": {
+        "additionalProperties": false,
+        "properties": {
+          "tone_map": {
+            "$ref": "#/x-silo-worker-protocols/schemas/mediasample_ToneMap"
+          },
+          "width": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "mediasample_Interval": {
+        "additionalProperties": false,
+        "properties": {
+          "end": {
+            "format": "double",
+            "type": "number"
+          },
+          "start": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "start",
+          "end"
+        ],
+        "type": "object"
+      },
+      "mediasample_Request": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "$ref": "#/x-silo-worker-protocols/schemas/mediasample_At"
+          },
+          "attempts": {
+            "items": {
+              "$ref": "#/x-silo-worker-protocols/schemas/mediasample_Attempt"
+            },
+            "type": "array"
+          },
+          "audio": {
+            "$ref": "#/x-silo-worker-protocols/schemas/mediasample_AudioOutput"
+          },
+          "background": {
+            "type": "boolean"
+          },
+          "images": {
+            "$ref": "#/x-silo-worker-protocols/schemas/mediasample_ImageOutput"
+          },
+          "input": {
+            "type": "string"
+          },
+          "samples": {
+            "$ref": "#/x-silo-worker-protocols/schemas/mediasample_Samples"
+          },
+          "sheets": {
+            "$ref": "#/x-silo-worker-protocols/schemas/mediasample_SheetsOutput"
+          },
+          "stats": {
+            "$ref": "#/x-silo-worker-protocols/schemas/mediasample_StatsOutput"
+          },
+          "threads": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "video_bit_depth": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "window": {
+            "$ref": "#/x-silo-worker-protocols/schemas/mediasample_Window"
+          }
+        },
+        "required": [
+          "input"
+        ],
+        "type": "object"
+      },
+      "mediasample_Result": {
+        "additionalProperties": false,
+        "properties": {
+          "decoder": {
+            "type": "string"
+          },
+          "fingerprint": {
+            "items": {
+              "format": "int32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "frames": {
+            "items": {
+              "$ref": "#/x-silo-worker-protocols/schemas/mediasample_FrameStats"
+            },
+            "type": "array"
+          },
+          "images": {
+            "items": {
+              "$ref": "#/x-silo-worker-protocols/schemas/mediasample_Image"
+            },
+            "type": "array"
+          },
+          "sheet_frames": {
+            "$ref": "#/x-silo-worker-protocols/schemas/mediasample_SheetFrames"
+          },
+          "sheet_tile_height": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "sheets": {
+            "items": {
+              "$ref": "#/x-silo-worker-protocols/schemas/mediasample_Sheet"
+            },
+            "type": "array"
+          },
+          "silences": {
+            "items": {
+              "$ref": "#/x-silo-worker-protocols/schemas/mediasample_Interval"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "decoder"
+        ],
+        "type": "object"
+      },
+      "mediasample_Samples": {
+        "additionalProperties": false,
+        "properties": {
+          "read_through": {
+            "type": "boolean"
+          },
+          "seconds": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "seconds"
+        ],
+        "type": "object"
+      },
+      "mediasample_Sheet": {
+        "additionalProperties": false,
+        "properties": {
+          "index": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "jpeg": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
+          "thumbnails": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "index",
+          "thumbnails",
+          "jpeg"
+        ],
+        "type": "object"
+      },
+      "mediasample_SheetFrames": {
+        "additionalProperties": false,
+        "properties": {
+          "decoded": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "filled": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "decoded",
+          "filled"
+        ],
+        "type": "object"
+      },
+      "mediasample_SheetsOutput": {
+        "additionalProperties": false,
+        "properties": {
+          "columns": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "quality": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "rows": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tile_height": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tile_width": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tone_map": {
+            "$ref": "#/x-silo-worker-protocols/schemas/mediasample_ToneMap"
+          },
+          "use_input_aspect": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "tile_width",
+          "tile_height",
+          "columns",
+          "rows",
+          "quality"
+        ],
+        "type": "object"
+      },
+      "mediasample_SilenceParams": {
+        "additionalProperties": false,
+        "properties": {
+          "min_seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "noise_db": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "noise_db",
+          "min_seconds"
+        ],
+        "type": "object"
+      },
+      "mediasample_StatsOutput": {
+        "additionalProperties": false,
+        "properties": {
+          "black_thresholds": {
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "crop_height": {
+            "format": "double",
+            "type": "number"
+          },
+          "crop_width": {
+            "format": "double",
+            "type": "number"
+          },
+          "width": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "crop_width",
+          "crop_height",
+          "width"
+        ],
+        "type": "object"
+      },
+      "mediasample_ToneMap": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_software": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "mediasample_Window": {
+        "additionalProperties": false,
+        "properties": {
+          "duration_seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "keyframes_only": {
+            "type": "boolean"
+          },
+          "start_seconds": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "start_seconds",
+          "duration_seconds"
+        ],
+        "type": "object"
+      },
       "netaccess_HostStatusReport": {
         "additionalProperties": false,
         "properties": {
@@ -199222,6 +199730,24 @@
         "required": [
           "session_id",
           "status"
+        ],
+        "type": "object"
+      },
+      "trickplay_ExtractError": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "permanent": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
         ],
         "type": "object"
       }

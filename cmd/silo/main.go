@@ -2778,8 +2778,8 @@ func main() {
 			if sweeper := blobgc.NewSweeper(deps.DB, deps.Blobs.Assets, mediaImages...); sweeper != nil {
 				taskMgr.Register(tasks.NewSweepOrphanedMediaImagesTask(sweeper))
 			}
-			if trickplayService := trickplay.NewService(deps.DB, deps.Blobs.Assets, settingsRepo,
-				trickplay.NewLocalExtractor(settingsRepo), deps.NodeID); trickplayService != nil {
+			trickplayExtractor := trickplay.NewNodeExtractor(trickplay.NewLocalExtractor(settingsRepo), deps.NodePlanner, settingsRepo)
+			if trickplayService := trickplay.NewService(deps.DB, deps.Blobs.Assets, settingsRepo, trickplayExtractor, deps.NodeID); trickplayService != nil {
 				trickplayService.Start(appCtx)
 				taskMgr.Register(tasks.NewQueueSeekPreviewsTask(trickplayService))
 				deps.Trickplay = trickplayService
