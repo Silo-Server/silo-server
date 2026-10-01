@@ -132,6 +132,30 @@ func TestTrickplaySheetRoute(t *testing.T) {
 	}
 }
 
+func TestTrickplayRouterDoesNotRequireSubtitles(t *testing.T) {
+	codec := NewResourceIDCodec()
+	store := NewSessionStore(time.Hour, time.Now)
+	if err := store.Put(Session{Token: "trickplay-router-test", StreamAppUserID: 1}); err != nil {
+		t.Fatal(err)
+	}
+	sheets := &fakeTrickplaySheets{files: map[int]bool{42: true}}
+	grid := testTrickplayGrid
+	router := NewRouter(Dependencies{
+		IDCodec: codec, SessionStore: store, Trickplay: sheets,
+		ContentService: &stubContentService{detail: &upstreamItemDetail{
+			ContentID: "movie-1", Versions: []catalog.FileVersion{{FileID: 42, Trickplay: &grid}},
+		}},
+	})
+	itemID := codec.EncodeStringID(EncodedIDItem, "movie-1")
+	req := httptest.NewRequest(http.MethodGet, "/Videos/"+itemID+"/Trickplay/300/0.jpg", nil)
+	req.Header.Set("X-Emby-Token", "trickplay-router-test")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || rec.Body.String() != "jpeg" {
+		t.Fatalf("independent trickplay dependency: %d %q", rec.Code, rec.Body.String())
+	}
+}
+
 func TestTrickplayPlaylistRoute(t *testing.T) {
 	router, codec := trickplayRouter(t, &fakeTrickplaySheets{files: map[int]bool{42: true}})
 	itemID := codec.EncodeStringID(EncodedIDItem, "movie-1")

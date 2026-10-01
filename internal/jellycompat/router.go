@@ -183,10 +183,10 @@ func NewRouter(deps Dependencies) chi.Router {
 	playbackHandler.SessionSyncer = deps.SessionSyncer
 	playbackHandler.WatchScrobbler = deps.WatchScrobbler
 	playbackHandler.StableIdentityResolver = deps.StableIdentityResolver
+	playbackHandler.Trickplay = deps.Trickplay
 	if subtitleRepo != nil {
 		playbackHandler.SubtitleRepo = subtitleRepo
 		playbackHandler.SubtitleBlobs = deps.SubtitleBlobs
-		playbackHandler.Trickplay = deps.Trickplay
 	}
 	imagesHandler := NewImagesHandler(deps.ContentService, deps.IDCodec, deps.SessionStore, deps.ImageCache, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.FolderRepo, deps.SeasonRepo, deps.EpisodeRepo, deps.AccessFilterFn, deps.PosterPresigner, deps.PresignTTL, deps.JWTSecret, deps.HTTPClient)
 	imagesHandler.collections = itemsHandler.collections
