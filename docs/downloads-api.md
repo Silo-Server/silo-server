@@ -123,7 +123,8 @@ Yes, manifests include metadata needed to make the offline item feel native:
 - Title, year, overview, runtime, content rating, genres.
 - Series, season, and episode context for episodes.
 - Poster/backdrop thumbhashes and authenticated artwork proxy URLs for poster,
-  backdrop, and logo when available.
+  backdrop, and logo when available. Episode manifests also carry the parent
+  series poster.
 - Chapters, intro/credits/recap/preview markers.
 - External and downloaded subtitle fetch URLs plus known subtitle file sizes.
 - Container, codecs, resolution, HDR, duration, selected audio track, and audio
@@ -617,7 +618,9 @@ whole batch in one request.
 GET /api/v2/downloads/{id}/artwork/{kind}
 ```
 
-`kind` is `poster`, `backdrop`, or `logo`, and `X-Silo-Device-Id` is required. The
+`kind` is `poster`, `backdrop`, `logo`, or `series_poster`, and
+`X-Silo-Device-Id` is required. `series_poster` exists only for episode entries and
+serves the parent series poster; access to the series is checked as well. The
 manifest's `artwork_urls` point here. Fetch each available image once while online
 and cache the bytes locally. Artwork and subtitle assets are whole-object,
 privately cached deliveries; they do not advertise byte ranges.
@@ -836,6 +839,11 @@ Notes:
 - Artwork and subtitle URLs are authenticated proxy paths on this server. Fetch
   them once while online and cache the bytes locally.
 - Thumbhash fields are inline placeholders for fast offline UI rendering.
+- For an episode, `poster` and `poster_thumbhash` are the episode still and
+  `backdrop` is the series backdrop. The series poster arrives separately as
+  `series_poster_thumbhash` and `artwork_urls.series_poster`, present only on
+  episode manifests; use it for series-level screens such as a downloaded
+  series' header.
 - `stable_identity` is for rescan recovery when a server-side `content_id` changes.
 - `integrity.expected_bytes` should match the local media file size after download.
 - `revision` should match the download row revision. If a row revision increases,
@@ -1620,7 +1628,7 @@ unavailable or ineligible proxy targets fall back to existing local delivery.
 
 `GET /api/v2/downloads/{id}/artwork/{kind}` and
 `GET /api/v2/downloads/{id}/subtitles/{ref}` require the device header.
-Artwork kinds are poster, backdrop and logo; subtitle references retain the
+Artwork kinds are poster, backdrop, logo and series_poster; subtitle references retain the
 external:index, embedded:ordinal, and downloaded:id identity. Current content access is
 checked before asset delivery, and downloaded subtitle ownership must match the
 entry's media file. These two asset routes preserve whole-object delivery and

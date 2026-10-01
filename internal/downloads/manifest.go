@@ -132,6 +132,11 @@ type OfflineManifest struct {
 		Backdrop string `json:"backdrop,omitempty"`
 		Logo     string `json:"logo,omitempty"`
 	} `json:"artwork_urls"`
+	// An episode's poster is its still, so episode manifests also name the
+	// parent series poster for series-level offline screens. Only the v2
+	// manifest carries these; the frozen v1 manifest omits them.
+	SeriesPosterThumbhash string `json:"-"`
+	SeriesPosterURL       string `json:"-"`
 
 	Container               string              `json:"container"`
 	CodecVideo              string              `json:"codec_video"`
@@ -251,6 +256,12 @@ func (b *ManifestBuilder) build(ctx context.Context, dl *Download, filter catalo
 	}
 	if detail.LogoURL != "" {
 		m.ArtworkURLs.Logo = artworkProxyURL(dl.ID, "logo")
+	}
+	if seriesDetail != nil {
+		m.SeriesPosterThumbhash = seriesDetail.PosterThumbhash
+		if seriesDetail.PosterURL != "" {
+			m.SeriesPosterURL = artworkProxyURL(dl.ID, "series_poster")
+		}
 	}
 
 	if v := pickVersion(detail, dl.MediaFileID); v != nil {

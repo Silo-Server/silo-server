@@ -57,6 +57,16 @@ func TestDownloadManifestProjectionAndBound(t *testing.T) {
 	if row.Subtitles[0].FetchURL != "/api/v2/downloads/entry/subtitles/external:0" {
 		t.Fatal("changed bridge manifest")
 	}
+	row.SeriesPosterThumbhash = "SERIES"
+	row.SeriesPosterURL = "/api/v2/downloads/entry/artwork/series_poster"
+	if out, err := downloadManifestOf(row); err != nil || out.SeriesPosterThumbhash != "SERIES" || out.ArtworkURLs.SeriesPoster != row.SeriesPosterURL {
+		t.Fatalf("series poster: %+v %v", out, err)
+	}
+	row.SeriesPosterURL = "https://unexpected.invalid/series.jpg"
+	if _, err := downloadManifestOf(row); err == nil {
+		t.Fatal("unexpected remote series poster propagated")
+	}
+	row = syntheticDownloadManifest()
 	row.Subtitles[0].FetchURL = "https://unexpected.invalid/subtitle"
 	if _, err := downloadManifestOf(row); err == nil {
 		t.Fatal("unexpected remote reference propagated")

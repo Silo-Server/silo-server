@@ -790,6 +790,11 @@ func (h *DownloadHandler) HandleArtwork(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	kind := chi.URLParam(r, "kind")
+	if kind == "series_poster" {
+		// A v2-only kind; the frozen v1 route answers it like any unknown kind.
+		h.writeAssetError(w, "artwork", id, downloads.ErrAssetNotFound)
+		return
+	}
 	if err := h.svc.ServeArtwork(r.Context(), w, r, userID, profileID, deviceID, id, kind, requestAccessFilter(r)); err != nil {
 		h.writeAssetError(w, "artwork", id, err)
 		return

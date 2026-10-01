@@ -113,7 +113,8 @@ func (s *Service) buildBatchManifestRows(ctx context.Context, rows []*Download, 
 
 // ServeArtwork streams poster/backdrop/logo bytes for a managed entry through
 // the image resolver (never a presigned redirect), re-checking per-profile
-// access via GetItemDetail before serving.
+// access via GetItemDetail before serving. series_poster serves an episode
+// entry's parent series poster.
 func (s *Service) ServeArtwork(ctx context.Context, w http.ResponseWriter, r *http.Request, userID int, profileID, deviceID, downloadID, kind string, filter catalog.AccessFilter) error {
 	dl, err := s.authorizeManagedAsset(ctx, userID, profileID, deviceID, downloadID)
 	if err != nil {
@@ -122,9 +123,24 @@ func (s *Service) ServeArtwork(ctx context.Context, w http.ResponseWriter, r *ht
 	if s.artworkSource == nil {
 		return ErrManifestUnavailable
 	}
-	detail, err := s.artworkSource.GetItemDetail(ctx, manifestContentID(dl), filter)
+	imageURL, err := s.artworkImageURL(ctx, dl, kind, filter)
 	if err != nil {
 		return err
+	}
+	err = s.streamArtwork(ctx, w, r, imageURL)
+	if errors.Is(err, ErrAssetUnavailable) {
+		logArtworkUnavailable(ctx, downloadID, kind, err)
+	}
+	return err
+}
+
+// artworkImageURL resolves one artwork kind of a managed entry to its image,
+// checking the profile's access to the entry (and, for series_poster, to the
+// parent series) through the catalog detail path.
+func (s *Service) artworkImageURL(ctx context.Context, dl *Download, kind string, filter catalog.AccessFilter) (string, error) {
+	detail, err := s.artworkSource.GetItemDetail(ctx, manifestContentID(dl), filter)
+	if err != nil {
+		return "", err
 	}
 	var imageURL string
 	switch kind {
@@ -134,17 +150,22 @@ func (s *Service) ServeArtwork(ctx context.Context, w http.ResponseWriter, r *ht
 		imageURL = detail.BackdropURL
 	case "logo":
 		imageURL = detail.LogoURL
+	case "series_poster":
+		if dl.EpisodeID == "" || detail.SeriesID == "" {
+			return "", ErrAssetNotFound
+		}
+		series, err := s.artworkSource.GetItemDetail(ctx, detail.SeriesID, filter)
+		if err != nil {
+			return "", err
+		}
+		imageURL = series.PosterURL
 	default:
-		return ErrAssetNotFound
+		return "", ErrAssetNotFound
 	}
 	if imageURL == "" {
-		return ErrAssetNotFound
+		return "", ErrAssetNotFound
 	}
-	err = s.streamArtwork(ctx, w, r, imageURL)
-	if errors.Is(err, ErrAssetUnavailable) {
-		logArtworkUnavailable(ctx, downloadID, kind, err)
-	}
-	return err
+	return imageURL, nil
 }
 
 // logArtworkUnavailable records a failing artwork store. The error itself can
