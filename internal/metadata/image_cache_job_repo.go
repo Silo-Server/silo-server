@@ -858,20 +858,25 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 
 func imageCacheDiscoveryQuery(cursor imageCacheDiscoveryCursor, limit int) (string, []any) {
 	sourceQuery, args := imageCacheDiscoverySourceQuery(cursor, limit)
+	// Every row in the bounded key page is returned, including rows that are not
+	// candidates, so the caller can advance past them. Only candidates probe the
+	// job table, and only candidates can be eligible.
 	query := strings.ReplaceAll(fmt.Sprintf(`
 		WITH source_page AS (
 			%s
 		), scanned AS (
 			SELECT c.*,
-			       (j.id IS NULL
-			        OR j.source_path IS DISTINCT FROM c.source_path
-			        OR j.status = 'succeeded'
-			        OR (j.status = 'failed' AND j.next_attempt_at <= NOW())) AS eligible
+			       (c.candidate
+			        AND (j.id IS NULL
+			             OR j.source_path IS DISTINCT FROM c.source_path
+			             OR j.status = 'succeeded'
+			             OR (j.status = 'failed' AND j.next_attempt_at <= NOW()))) AS eligible
 			FROM source_page c
 			LEFT JOIN LATERAL (
 				SELECT j.id, j.source_path, j.status, j.next_attempt_at
 				FROM metadata_image_cache_jobs j
-				WHERE j.target_type = c.target_type
+				WHERE c.candidate
+				  AND j.target_type = c.target_type
 				  AND j.target_content_id = c.target_content_id COLLATE "default"
 				  AND j.image_type = c.image_type
 				  AND j.target_language = c.target_language
@@ -888,12 +893,24 @@ func imageCacheDiscoveryQuery(cursor imageCacheDiscoveryCursor, limit int) (stri
 	return query, args
 }
 
+// imageCacheDiscoverySourceQuery bounds each surface to a page of its native
+// primary key before any artwork predicate or enrichment join. The key page is
+// a plain index range scan, so each page reads at most limit source rows no
+// matter how many rows are cached, already queued or parked. Predicates become
+// the candidate flag instead of a filter, and joins are LEFT JOINs, so a page
+// shorter than limit always means the surface is exhausted.
 func imageCacheDiscoverySourceQuery(cursor imageCacheDiscoveryCursor, limit int) (string, []any) {
-	providerFilter := func(column string) string {
-		return column + ` LIKE '%://%' AND lower(` + column + `) NOT LIKE ALL (@nonProviderSchemes)`
-	}
-	uncachedFilter := func(column string) string {
-		return `(` + column + ` LIKE '%://%' OR coalesce(` + column + `, '') = '')`
+	candidate := func(sourceColumn, pathColumn string, joined ...string) string {
+		parts := []string{
+			sourceColumn + ` LIKE '%://%'`,
+			`lower(` + sourceColumn + `) NOT LIKE ALL (@nonProviderSchemes)`,
+			`(` + pathColumn + ` LIKE '%://%' OR coalesce(` + pathColumn + `, '') = '')`,
+		}
+		for _, column := range joined {
+			parts = append(parts, column+` IS NOT NULL`)
+		}
+		return `COALESCE(` + strings.Join(parts, `
+			         AND `) + `, false) AS candidate`
 	}
 	imageTypes := [...]string{ImageCacheImagePoster, ImageCacheImageBackdrop, ImageCacheImageLogo}
 	sourceColumns := [...]string{"poster_source_path", "backdrop_source_path", "logo_source_path"}
@@ -909,17 +926,20 @@ func imageCacheDiscoverySourceQuery(cursor imageCacheDiscoveryCursor, limit int)
 		return fmt.Sprintf(`
 			SELECT '%s'::text AS image_type, 'item'::text AS target_type,
 			       mi.content_id AS target_content_id, ''::text AS target_language,
-			       mi.content_id AS series_id, mi.%s AS source_path, mi.type AS content_type,
+			       mi.content_id AS series_id, COALESCE(mi.%s, '') AS source_path,
+			       COALESCE(mi.type, '') AS content_type,
 			       NULL::integer AS season_number, NULL::integer AS episode_number,
 			       mi.tmdb_id, mi.tvdb_id, mi.imdb_id,
-			       mi.content_id AS cursor_key, ''::text AS cursor_subkey, 0::bigint AS cursor_number
-			FROM media_items mi
-			WHERE mi.content_id > $2
-			  AND %s
-			  AND %s
-			ORDER BY mi.content_id
-			LIMIT $1
-		`, imageType, sourceColumn, providerFilter("mi."+sourceColumn), uncachedFilter("mi."+pathColumn)), textArgs
+			       mi.content_id AS cursor_key, ''::text AS cursor_subkey, 0::bigint AS cursor_number,
+			       %s
+			FROM (
+				SELECT *
+				FROM media_items
+				WHERE content_id > $2
+				ORDER BY content_id
+				LIMIT $1
+			) mi
+		`, imageType, sourceColumn, candidate("mi."+sourceColumn, "mi."+pathColumn)), textArgs
 	case 3, 4, 5:
 		index := cursor.Surface - 3
 		imageType := imageTypes[index]
@@ -928,82 +948,97 @@ func imageCacheDiscoverySourceQuery(cursor imageCacheDiscoveryCursor, limit int)
 		return fmt.Sprintf(`
 			SELECT '%s'::text AS image_type, 'item_localization'::text AS target_type,
 			       loc.content_id AS target_content_id, loc.language AS target_language,
-			       loc.content_id AS series_id, loc.%s AS source_path, mi.type AS content_type,
+			       loc.content_id AS series_id, COALESCE(loc.%s, '') AS source_path,
+			       COALESCE(mi.type, '') AS content_type,
 			       NULL::integer AS season_number, NULL::integer AS episode_number,
 			       mi.tmdb_id, mi.tvdb_id, mi.imdb_id,
-			       loc.content_id AS cursor_key, loc.language AS cursor_subkey, 0::bigint AS cursor_number
-			FROM media_item_localizations loc
-			JOIN media_items mi ON mi.content_id = loc.content_id
-			WHERE (loc.content_id > $2 OR (loc.content_id = $2 AND loc.language > $3))
-			  AND %s
-			  AND %s
-			ORDER BY loc.content_id, loc.language
-			LIMIT $1
-		`, imageType, sourceColumn, providerFilter("loc."+sourceColumn), uncachedFilter("loc."+pathColumn)), localizedArgs
+			       loc.content_id AS cursor_key, loc.language AS cursor_subkey, 0::bigint AS cursor_number,
+			       %s
+			FROM (
+				SELECT *
+				FROM media_item_localizations
+				WHERE (content_id, language) > ($2, $3)
+				ORDER BY content_id, language
+				LIMIT $1
+			) loc
+			LEFT JOIN media_items mi ON mi.content_id = loc.content_id
+		`, imageType, sourceColumn, candidate("loc."+sourceColumn, "loc."+pathColumn, "mi.content_id")), localizedArgs
 	case 6:
 		return fmt.Sprintf(`
 			SELECT 'poster'::text AS image_type, 'season'::text AS target_type,
 			       s.content_id AS target_content_id, ''::text AS target_language,
-			       s.series_id, s.poster_source_path AS source_path, 'series'::text AS content_type,
+			       COALESCE(s.series_id, '') AS series_id, COALESCE(s.poster_source_path, '') AS source_path,
+			       'series'::text AS content_type,
 			       s.season_number, NULL::integer AS episode_number,
 			       mi.tmdb_id, mi.tvdb_id, mi.imdb_id,
-			       s.content_id AS cursor_key, ''::text AS cursor_subkey, 0::bigint AS cursor_number
-			FROM seasons s
-			JOIN media_items mi ON mi.content_id = s.series_id
-			WHERE s.content_id > $2
-			  AND %s
-			  AND %s
-			ORDER BY s.content_id
-			LIMIT $1
-		`, providerFilter("s.poster_source_path"), uncachedFilter("s.poster_path")), textArgs
+			       s.content_id AS cursor_key, ''::text AS cursor_subkey, 0::bigint AS cursor_number,
+			       %s
+			FROM (
+				SELECT *
+				FROM seasons
+				WHERE content_id > $2
+				ORDER BY content_id
+				LIMIT $1
+			) s
+			LEFT JOIN media_items mi ON mi.content_id = s.series_id
+		`, candidate("s.poster_source_path", "s.poster_path", "mi.content_id")), textArgs
 	case 7:
 		return fmt.Sprintf(`
 			SELECT 'poster'::text AS image_type, 'season_localization'::text AS target_type,
-			       s.content_id AS target_content_id, loc.language AS target_language,
-			       s.series_id, loc.poster_source_path AS source_path, 'series'::text AS content_type,
+			       loc.season_content_id AS target_content_id, loc.language AS target_language,
+			       COALESCE(s.series_id, '') AS series_id, COALESCE(loc.poster_source_path, '') AS source_path,
+			       'series'::text AS content_type,
 			       s.season_number, NULL::integer AS episode_number,
 			       mi.tmdb_id, mi.tvdb_id, mi.imdb_id,
-			       loc.season_content_id AS cursor_key, loc.language AS cursor_subkey, 0::bigint AS cursor_number
-			FROM season_localizations loc
-			JOIN seasons s ON s.content_id = loc.season_content_id
-			JOIN media_items mi ON mi.content_id = s.series_id
-			WHERE (loc.season_content_id > $2 OR (loc.season_content_id = $2 AND loc.language > $3))
-			  AND %s
-			  AND %s
-			ORDER BY loc.season_content_id, loc.language
-			LIMIT $1
-		`, providerFilter("loc.poster_source_path"), uncachedFilter("loc.poster_path")), localizedArgs
+			       loc.season_content_id AS cursor_key, loc.language AS cursor_subkey, 0::bigint AS cursor_number,
+			       %s
+			FROM (
+				SELECT *
+				FROM season_localizations
+				WHERE (season_content_id, language) > ($2, $3)
+				ORDER BY season_content_id, language
+				LIMIT $1
+			) loc
+			LEFT JOIN seasons s ON s.content_id = loc.season_content_id
+			LEFT JOIN media_items mi ON mi.content_id = s.series_id
+		`, candidate("loc.poster_source_path", "loc.poster_path", "s.content_id", "mi.content_id")), localizedArgs
 	case 8:
 		return fmt.Sprintf(`
 			SELECT 'still'::text AS image_type, 'episode'::text AS target_type,
 			       e.content_id AS target_content_id, ''::text AS target_language,
-			       e.series_id, e.still_source_path AS source_path, 'series'::text AS content_type,
+			       COALESCE(e.series_id, '') AS series_id, COALESCE(e.still_source_path, '') AS source_path,
+			       'series'::text AS content_type,
 			       e.season_number, e.episode_number,
 			       mi.tmdb_id, mi.tvdb_id, mi.imdb_id,
-			       e.content_id AS cursor_key, ''::text AS cursor_subkey, 0::bigint AS cursor_number
-			FROM episodes e
-			JOIN media_items mi ON mi.content_id = e.series_id
-			WHERE e.content_id > $2
-			  AND %s
-			  AND %s
-			ORDER BY e.content_id
-			LIMIT $1
-		`, providerFilter("e.still_source_path"), uncachedFilter("e.still_path")), textArgs
+			       e.content_id AS cursor_key, ''::text AS cursor_subkey, 0::bigint AS cursor_number,
+			       %s
+			FROM (
+				SELECT *
+				FROM episodes
+				WHERE content_id > $2
+				ORDER BY content_id
+				LIMIT $1
+			) e
+			LEFT JOIN media_items mi ON mi.content_id = e.series_id
+		`, candidate("e.still_source_path", "e.still_path", "mi.content_id")), textArgs
 	case 9:
 		return fmt.Sprintf(`
 			SELECT 'profile'::text AS image_type, 'person'::text AS target_type,
 			       p.id::text AS target_content_id, ''::text AS target_language,
-			       ''::text AS series_id, p.photo_source_path AS source_path, 'people'::text AS content_type,
+			       ''::text AS series_id, COALESCE(p.photo_source_path, '') AS source_path,
+			       'people'::text AS content_type,
 			       NULL::integer AS season_number, NULL::integer AS episode_number,
 			       p.tmdb_id, p.tvdb_id, p.imdb_id,
-			       ''::text AS cursor_key, ''::text AS cursor_subkey, p.id::bigint AS cursor_number
-			FROM people p
-			WHERE p.id > $2
-			  AND %s
-			  AND %s
-			ORDER BY p.id
-			LIMIT $1
-		`, providerFilter("p.photo_source_path"), uncachedFilter("p.photo_path")), []any{limit, cursor.NumericKey}
+			       ''::text AS cursor_key, ''::text AS cursor_subkey, p.id::bigint AS cursor_number,
+			       %s
+			FROM (
+				SELECT *
+				FROM people
+				WHERE id > $2
+				ORDER BY id
+				LIMIT $1
+			) p
+		`, candidate("p.photo_source_path", "p.photo_path")), []any{limit, cursor.NumericKey}
 	default:
 		return `SELECT NULL WHERE false`, []any{limit}
 	}
