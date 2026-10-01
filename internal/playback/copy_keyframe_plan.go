@@ -48,8 +48,8 @@ var loadKeyframeIndex = keyframes.Load
 // probeInputStart returns the start time FFmpeg reads for a source; tests
 // replace it. ffprobe opens the file with the same demuxer as FFmpeg, so its
 // format start_time is the value -start_at_zero subtracts.
-var probeInputStart = func(opts TranscodeOpts) (float64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+var probeInputStart = func(ctx context.Context, opts TranscodeOpts) (float64, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	ffprobe := mediaprobe.FFprobePathFromFFmpeg(ResolveFFmpegPath(opts.FFmpegPath))
 	out, err := exec.CommandContext(ctx, ffprobe, "-v", "error",
@@ -69,7 +69,7 @@ var probeInputStart = func(opts TranscodeOpts) (float64, error) {
 // session keeps FFmpeg's real playlist: the setting is off, the video isn't
 // copied into fMP4, the stream doesn't start at the beginning, or the source
 // has no complete keyframe index.
-func planCopySegments(opts TranscodeOpts) *copySegmentPlan {
+func planCopySegments(ctx context.Context, opts TranscodeOpts) *copySegmentPlan {
 	if !opts.KeyframePlaylist ||
 		!strings.EqualFold(opts.TargetCodecVideo, "copy") || !videoUsesFMP4(opts) ||
 		opts.SeekSeconds > 0 || opts.StartSegmentNumber > 0 ||
@@ -103,7 +103,7 @@ func planCopySegments(opts TranscodeOpts) *copySegmentPlan {
 		return nil
 	}
 	durations := keyframes.SegmentDurations(starts, idx.VideoEnd)
-	inputStart, err := probeInputStart(opts)
+	inputStart, err := probeInputStart(ctx, opts)
 	if err != nil || inputStart > idx.Keyframes[0] {
 		// Without the start FFmpeg subtracts, its groups can't be placed.
 		log.Printf("playback: session %s: input start %.3fs (%v); using FFmpeg's playlist", opts.SessionID, inputStart, err)
@@ -129,9 +129,9 @@ type copyPlanRecord struct {
 // and records the decision; a rebuilt session follows the record, so it
 // serves the playlist its player already has. Deciding afresh could differ:
 // a file's index that was still being checked may be verified by then.
-func resolveCopyPlan(opts TranscodeOpts) *copySegmentPlan {
+func resolveCopyPlan(ctx context.Context, opts TranscodeOpts) *copySegmentPlan {
 	if !opts.KeyframePlaylist || opts.OutputDir == "" {
-		return planCopySegments(opts)
+		return planCopySegments(ctx, opts)
 	}
 	path := filepath.Join(opts.OutputDir, copyPlanRecordFile)
 	if data, err := os.ReadFile(path); err == nil {
@@ -148,7 +148,12 @@ func resolveCopyPlan(opts TranscodeOpts) *copySegmentPlan {
 		return nil
 	}
 
-	plan := planCopySegments(opts)
+	plan := planCopySegments(ctx, opts)
+	if ctx.Err() != nil {
+		// The start was abandoned, possibly mid-probe; don't record a
+		// decision it didn't finish making.
+		return nil
+	}
 	rec := copyPlanRecord{Planned: plan != nil}
 	if plan != nil {
 		rec.Durations, rec.Keyframes, rec.FirstKey = plan.durations, plan.keyframes, plan.firstKey

@@ -422,7 +422,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		releaseHWDevice()
 		return nil, err
 	}
-	copyPlan := resolveCopyPlan(opts)
+	copyPlan := resolveCopyPlan(ctx, opts)
 	var copyGroups *copyGroupAssembler
 	if copyPlan != nil {
 		log.Printf("playback: session %s serves a %d-segment keyframe playlist", opts.SessionID, len(copyPlan.durations))

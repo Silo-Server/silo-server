@@ -31,7 +31,7 @@ func stubKeyframeIndex(t *testing.T, idx keyframes.Index, err error) {
 func stubInputStart(t *testing.T, start float64, err error) {
 	t.Helper()
 	previous := probeInputStart
-	probeInputStart = func(TranscodeOpts) (float64, error) { return start, err }
+	probeInputStart = func(context.Context, TranscodeOpts) (float64, error) { return start, err }
 	t.Cleanup(func() { probeInputStart = previous })
 }
 
@@ -52,7 +52,7 @@ func TestPlanCopySegments(t *testing.T) {
 	// video at 10s.
 	stubKeyframeIndex(t, keyframes.Index{Keyframes: []float64{0, 1, 2.6, 7.0, 7.4, 9.0}, Duration: 12, VideoEnd: 10}, nil)
 
-	plan := planCopySegments(plannedOpts())
+	plan := planCopySegments(t.Context(), plannedOpts())
 	if plan == nil {
 		t.Fatal("no plan for an eligible session")
 	}
@@ -72,7 +72,7 @@ func TestPlanCopySegments(t *testing.T) {
 // A source whose timestamps start later than zero plans the same segments.
 func TestPlanCopySegmentsForALaterStart(t *testing.T) {
 	stubKeyframeIndex(t, keyframes.Index{Keyframes: []float64{7, 8, 9.6, 14.0, 14.4, 16.0}, VideoEnd: 17}, nil)
-	plan := planCopySegments(plannedOpts())
+	plan := planCopySegments(t.Context(), plannedOpts())
 	if plan == nil {
 		t.Fatal("no plan for a source starting at 7s")
 	}
@@ -97,7 +97,7 @@ func TestPlanCopySegmentsKeepsFFmpegPlaylist(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			opts := plannedOpts()
 			change(&opts)
-			if plan := planCopySegments(opts); plan != nil {
+			if plan := planCopySegments(t.Context(), opts); plan != nil {
 				t.Fatalf("plan = %v, want none", plan.durations)
 			}
 		})
@@ -105,31 +105,31 @@ func TestPlanCopySegmentsKeepsFFmpegPlaylist(t *testing.T) {
 
 	t.Run("unknown video end", func(t *testing.T) {
 		stubKeyframeIndex(t, keyframes.Index{Keyframes: []float64{0, 2, 4, 6, 8}}, nil)
-		if plan := planCopySegments(plannedOpts()); plan != nil {
+		if plan := planCopySegments(t.Context(), plannedOpts()); plan != nil {
 			t.Fatalf("plan = %v, want none", plan.durations)
 		}
 	})
 	t.Run("unknown input start", func(t *testing.T) {
 		stubInputStart(t, 0, errors.New("ffprobe failed"))
-		if plan := planCopySegments(plannedOpts()); plan != nil {
+		if plan := planCopySegments(t.Context(), plannedOpts()); plan != nil {
 			t.Fatalf("plan = %v, want none", plan.durations)
 		}
 	})
 	t.Run("input start after the first keyframe", func(t *testing.T) {
 		stubInputStart(t, 0.5, nil)
-		if plan := planCopySegments(plannedOpts()); plan != nil {
+		if plan := planCopySegments(t.Context(), plannedOpts()); plan != nil {
 			t.Fatalf("plan = %v, want none", plan.durations)
 		}
 	})
 	t.Run("no index", func(t *testing.T) {
 		stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrNoIndex)
-		if plan := planCopySegments(plannedOpts()); plan != nil {
+		if plan := planCopySegments(t.Context(), plannedOpts()); plan != nil {
 			t.Fatalf("plan = %v, want none", plan.durations)
 		}
 	})
 	t.Run("unreadable source", func(t *testing.T) {
 		stubKeyframeIndex(t, keyframes.Index{}, errors.New("permission denied"))
-		if plan := planCopySegments(plannedOpts()); plan != nil {
+		if plan := planCopySegments(t.Context(), plannedOpts()); plan != nil {
 			t.Fatalf("plan = %v, want none", plan.durations)
 		}
 	})
@@ -242,12 +242,25 @@ func TestResolveCopyPlanFollowsTheRecordedDecision(t *testing.T) {
 	opts.OutputDir = t.TempDir()
 
 	stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrUnverified)
-	if plan := resolveCopyPlan(opts); plan != nil {
+	if plan := resolveCopyPlan(t.Context(), opts); plan != nil {
 		t.Fatal("planned while the index is being checked")
 	}
 	stubKeyframeIndex(t, keyframes.Index{Keyframes: []float64{0, 1, 2.6, 7.0, 7.4, 9.0}, VideoEnd: 10}, nil)
-	if plan := resolveCopyPlan(opts); plan != nil {
+	if plan := resolveCopyPlan(t.Context(), opts); plan != nil {
 		t.Fatal("a rebuilt session switched to a keyframe playlist")
+	}
+
+	// A start abandoned while planning records nothing, so the next start
+	// decides afresh.
+	retried := plannedOpts()
+	retried.OutputDir = t.TempDir()
+	abandoned, cancel := context.WithCancel(t.Context())
+	cancel()
+	if plan := resolveCopyPlan(abandoned, retried); plan != nil {
+		t.Fatal("planned for an abandoned start")
+	}
+	if plan := resolveCopyPlan(t.Context(), retried); plan == nil {
+		t.Fatal("the start after an abandoned one didn't plan")
 	}
 
 	planned := plannedOpts()
@@ -255,14 +268,14 @@ func TestResolveCopyPlanFollowsTheRecordedDecision(t *testing.T) {
 	// Audio starts before the video, so FFmpeg's zero is earlier than the
 	// first keyframe.
 	stubInputStart(t, -0.25, nil)
-	first := resolveCopyPlan(planned)
+	first := resolveCopyPlan(t.Context(), planned)
 	if first == nil || first.inputStart != -0.25 {
 		t.Fatalf("plan = %+v, want one starting at -0.25s", first)
 	}
 	// The record stands in for the index, which may not be loaded again.
 	stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrUnverified)
 	stubInputStart(t, 0, errors.New("ffprobe failed"))
-	again := resolveCopyPlan(planned)
+	again := resolveCopyPlan(t.Context(), planned)
 	if again == nil || !slices.Equal(again.durations, first.durations) || !slices.Equal(again.firstKey, first.firstKey) ||
 		again.inputStart != first.inputStart {
 		t.Fatalf("rebuilt plan = %+v, want the recorded %+v", again, first)
