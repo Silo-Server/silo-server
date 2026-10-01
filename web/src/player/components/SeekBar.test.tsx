@@ -168,3 +168,22 @@ it("falls back to the chapter thumbnail and reports a sheet that fails", async (
   expect(screen.queryByTestId("seek-preview-image")).toBeNull();
   expect(screen.getByAltText("Opening")).toBeTruthy();
 });
+
+it("restores a failed sheet when the same URL later loads", async () => {
+  sheetOutcomes.set(trickplay.sheets[0]!, "error");
+  const onTrickplayError = vi.fn();
+  renderSeekBar({ trickplay, chapters, onTrickplayError });
+  const slider = screen.getByRole("slider");
+  fireEvent.mouseMove(slider, { clientX: 250 });
+  await act(async () => {});
+  expect(screen.queryByTestId("seek-preview-image")).toBeNull();
+  expect(onTrickplayError).toHaveBeenCalledOnce();
+
+  // Moving to another sheet and back preloads the unchanged manifest URL.
+  sheetOutcomes.delete(trickplay.sheets[0]!);
+  fireEvent.mouseMove(slider, { clientX: 950 });
+  await screen.findByTestId("seek-preview-image");
+  fireEvent.mouseMove(slider, { clientX: 250 });
+  await act(async () => {});
+  expect(screen.getByTestId("seek-preview-image").style.backgroundImage).toContain("sheet-0.jpg");
+});
