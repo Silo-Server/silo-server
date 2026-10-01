@@ -107,3 +107,4 @@
 ./internal/trickplay TestRevisionProtectionIsMonotonicAndFollowsTheRevisionDB
 
 ./internal/trickplay TestStaleReconcileCannotDowngradeConcurrentUpgradeDB
+./internal/trickplay TestOptOutReconcilePreservesConcurrentClaimDB
