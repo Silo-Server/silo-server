@@ -441,7 +441,7 @@ const addSQL = `
 // expire first.
 const removeSQL = `
 	DELETE FROM public.media_file_trickplay t
-	WHERE t.media_file_id IN (
+	WHERE t.state <> 'running' AND t.media_file_id IN (
 		SELECT t2.media_file_id
 		FROM public.media_file_trickplay t2
 		JOIN public.media_files mf ON mf.id = t2.media_file_id
