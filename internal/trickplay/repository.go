@@ -584,15 +584,57 @@ func (r *Repository) Manifests(ctx context.Context, fileIDs []int, storeIdentity
 
 // Regenerate requeues fileIDs ahead of the backlog, clearing any backoff,
 // and returns how many rows it requeued. Rows being generated are left
-// alone; their current sheets keep serving until new ones publish.
+// alone; their current sheets keep serving until new ones publish. A row
+// whose lease expired (its worker died) is taken back first, as the
+// periodic reclaim would, so a regeneration does not wait for that pass.
 func (r *Repository) Regenerate(ctx context.Context, fileIDs []int) (int, error) {
-	tag, err := r.pool.Exec(ctx, `
-		UPDATE public.media_file_trickplay
-		SET state = 'pending', recipe_version = $2, available_at = '-infinity', failure_count = 0, last_error = '', updated_at = now()
-		WHERE media_file_id = ANY($1) AND state <> 'running' AND recipe_version <= $2`,
-		fileIDs, AlgorithmVersion)
+	tx, err := r.pool.Begin(ctx)
 	if err != nil {
+		return 0, fmt.Errorf("requeue trickplay: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if _, err := tx.Exec(ctx, regenerateReclaimSQL, fileIDs, abandonedGrace.Seconds()); err != nil {
+		return 0, fmt.Errorf("reclaim expired trickplay leases: %w", err)
+	}
+	tag, err := tx.Exec(ctx, `
+		INSERT INTO public.media_file_trickplay AS t (media_file_id, recipe_version, available_at)
+		SELECT mf.id, $2, '-infinity'
+		FROM public.media_files mf
+		JOIN public.media_folders f ON f.id = mf.media_folder_id
+		WHERE mf.id = ANY($1) AND f.trickplay_enabled AND f.enabled IS NOT FALSE
+		  AND lower(btrim(f.type)) = ANY($3::text[])
+		  AND mf.missing_since IS NULL AND mf.probe_updated_at IS NOT NULL AND mf.duration > 0
+		  AND jsonb_typeof(mf.video_tracks) = 'array' AND jsonb_array_length(mf.video_tracks) > 0
+		ON CONFLICT (media_file_id) DO UPDATE
+		SET state = 'pending', available_at = '-infinity', failure_count = 0, last_error = '',
+		    recipe_version = EXCLUDED.recipe_version, updated_at = now()
+		WHERE t.state <> 'running' AND t.recipe_version <= $2`,
+		fileIDs, AlgorithmVersion, videoLibraryTypes)
+	if err != nil {
+		return 0, fmt.Errorf("requeue trickplay: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return 0, fmt.Errorf("requeue trickplay: %w", err)
 	}
 	return int(tag.RowsAffected()), nil
 }
+
+// regenerateReclaimSQL takes back the expired leases of the given files
+// without counting a failure, since the regeneration clears the backoff
+// anyway, and queues any revision their work had started uploading.
+const regenerateReclaimSQL = `
+	WITH expired AS (
+		SELECT media_file_id, work_revision
+		FROM public.media_file_trickplay
+		WHERE media_file_id = ANY($1) AND state = 'running' AND lease_expires_at < now()
+		FOR UPDATE SKIP LOCKED
+	), queued AS (
+		INSERT INTO public.blob_gc_queue (prefix, not_before)
+		SELECT 'trickplay/' || media_file_id || '/' || work_revision || '/', now() + make_interval(secs => $2)
+		FROM expired WHERE work_revision IS NOT NULL
+		ON CONFLICT (prefix) DO NOTHING
+	)
+	UPDATE public.media_file_trickplay t
+	SET state = 'pending', lease_owner = NULL, lease_expires_at = NULL, work_revision = NULL, updated_at = now()
+	FROM expired
+	WHERE t.media_file_id = expired.media_file_id`

@@ -115,16 +115,23 @@
 ./internal/trickplay TestRetiredTrickplayOutlivesIssuedURLsDB
 ./internal/trickplay TestReaderProtectsLatestSheetExpiryDB
 ./internal/trickplay TestReaderWithholdsRevisionDisplacedWhileSigningDB
+
+./internal/trickplay TestDisabledLibraryStopsServingAndRemovesPublishedWorkDB
 ./internal/trickplay TestStaleReconcileCannotDowngradeConcurrentUpgradeDB
 ./internal/api/handlers TestLibraryExplicitTrickplayUpdateAlwaysReconcilesPostgres
-
 ./internal/trickplay TestReaderRevalidatesServingWhileSigningDB
-./internal/trickplay TestOptOutReconcilePreservesConcurrentClaimDB
+
+./internal/trickplay TestAdminClassifiesIneligibleFilesDB
 ./internal/trickplay TestReaderSuppressesDisabledLibraryAvailabilityDB
+./internal/trickplay TestOptOutReconcilePreservesConcurrentClaimDB
+./internal/trickplay TestAdminRetryKeepsPublishedPreviewsDB
+./internal/trickplay TestAdminResolvesMultiEpisodeFileDB
 ./internal/trickplay TestRegenerateFencesOlderWorkersDB
 ./internal/trickplay TestRevisionProtectionReusesCoveredExpiryDB
 ./internal/catalog TestEpisodeDetailsFallBackAfterBatchFileFailureDB
 ./internal/jellycompat TestTrickplayNegotiatedSourceSurvivesAPIReplicaDB
+./internal/trickplay TestAdminReclassifiesTrackedIneligibleFilesDB
+./internal/trickplay TestAdminRejectsUnsupportedLibraryTypesDB
 ./internal/trickplay TestReconcileUsesOneConnectionDB
 ./internal/trickplay TestLibraryTypeChangeFencesWorkerProgressDB
 ./internal/trickplay TestLibraryTypeChangeRetiresFinishedAndExpiredWorkDB

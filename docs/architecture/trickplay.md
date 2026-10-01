@@ -195,6 +195,28 @@ Thumbnail i shows `[i*interval_ms, (i+1)*interval_ms)`; it sits on sheet
 `i / (tile_columns*tile_rows)`, at column `i % tile_columns` and row
 `(i % (tile_columns*tile_rows)) / tile_columns` of that sheet.
 
+## Administration
+
+Administrators see and steer generation through three acting-admin
+operations (`internal/trickplay/admin.go`):
+
+- `getAdminItemTrickplay` reports each of an item's media files (a series
+  covers every episode file): its state, `off` when the library does not
+  generate previews, whether players are served previews now, the failure
+  count and last error, and the published sheets' size. Failures stay
+  visible here rather than only in logs.
+- `regenerateAdminItemTrickplay` requeues the item's rows ahead of the
+  backlog and clears their backoff, including `unusable` rows. A row being
+  generated is left to finish, and published sheets keep serving until the
+  new ones publish. It checks the current library setting and answers 409
+  `capability_disabled` when none of the files belongs to an opted-in
+  library. Eligible files not yet reconciled are queued by the same request. A replay after the work
+  finishes makes the previews again, so it is non-retryable.
+- `listAdminTrickplayLibraries` counts each enabled, opted-in video library's
+  generation states. Tracked files that become ineligible count as `unusable`;
+  ineligible files never added to the queue are excluded. Retained published
+  sheets still contribute to storage bytes.
+
 ## Deletion
 
 Sheets are deleted per revision through `blob_gc_queue` (see

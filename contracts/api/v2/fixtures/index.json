@@ -5390,6 +5390,26 @@
       "body_file": "get_admin_collection_template_job_completed.json"
     },
     {
+      "name": "get_admin_item_trickplay_ok",
+      "operation_id": "getAdminItemTrickplay",
+      "scenario": "An item's two files: one with published previews, one its library could not make previews of.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/items/movie:heat-1995/trickplay",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminItemTrickplay",
+      "body_file": "get_admin_item_trickplay_ok.json"
+    },
+    {
       "name": "get_admin_section_ok",
       "operation_id": "getAdminSection",
       "scenario": "The canonical administrator section editor returns its recipe configuration and a strong validator.",
@@ -7676,6 +7696,26 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminPlaybackHistoryCollection",
       "body_file": "list_admin_playback_history_ok.json"
+    },
+    {
+      "name": "list_admin_trickplay_libraries_ok",
+      "operation_id": "listAdminTrickplayLibraries",
+      "scenario": "One library generating previews, with its files' progress and storage.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/trickplay/libraries",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminTrickplayLibraries",
+      "body_file": "list_admin_trickplay_libraries_ok.json"
     },
     {
       "name": "list_admin_users_exact_identity",
@@ -11620,6 +11660,46 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "refresh_session_token_required.json"
+    },
+    {
+      "name": "regenerate_admin_item_trickplay_accepted",
+      "operation_id": "regenerateAdminItemTrickplay",
+      "scenario": "Both of the item's files queued ahead of the backlog.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/items/movie:heat-1995/trickplay/regenerate",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 202,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminTrickplayRegeneration",
+      "body_file": "regenerate_admin_item_trickplay_accepted.json"
+    },
+    {
+      "name": "regenerate_admin_item_trickplay_disabled",
+      "operation_id": "regenerateAdminItemTrickplay",
+      "scenario": "The item's library does not generate previews.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/items/movie:off/trickplay/regenerate",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 409,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "regenerate_admin_item_trickplay_disabled.json"
     },
     {
       "name": "rematch_stale_id_permission_denied",

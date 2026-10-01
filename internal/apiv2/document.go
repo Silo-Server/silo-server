@@ -722,6 +722,7 @@ func registerAll(reg *Registry) {
 	registerWatchlistTitles(reg)
 	registerWatch(reg)
 	registerWatchTrickplay(reg)
+	registerAdminTrickplay(reg)
 	registerOpenAPIDocument(reg)
 	registerAPIDocs(reg)
 }
