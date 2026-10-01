@@ -305,6 +305,9 @@ type SegmentRecoveryDecision struct {
 	Progress         SegmentProgress
 }
 
+// segmentReasonRestarting is the recovery reason while a restart is in flight.
+const segmentReasonRestarting = "transcode_restarting"
+
 // defaultSegmentDuration is the segment length when not specified. Short
 // segments (2s) allow the player to start quickly while still maintaining
 // efficient HTTP delivery. This matches the approach used by Plex.
@@ -2742,7 +2745,7 @@ func (s *TranscodeSession) SegmentRecoveryDecision(segNum int, now time.Time) Se
 		decision.Wait = true
 		decision.WaitTimeout = activeSegmentWait
 		decision.RestartOnTimeout = false
-		decision.Reason = "transcode_restarting"
+		decision.Reason = segmentReasonRestarting
 	case !progress.Running:
 		decision.Reason = "transcode_not_running"
 	case segNum < progress.StartSegmentNumber:

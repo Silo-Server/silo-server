@@ -52,7 +52,7 @@ func Load(path string) (Index, error) {
 	indexCache.Lock()
 	if el, ok := indexCache.entries[key]; ok {
 		indexCache.order.MoveToFront(el)
-		entry := el.Value.(*cacheEntry)
+		entry, _ := el.Value.(*cacheEntry)
 		indexCache.Unlock()
 		return entry.index, entry.err
 	}
@@ -77,7 +77,9 @@ func Load(path string) (Index, error) {
 		for indexCache.order.Len() > maxCachedFiles {
 			oldest := indexCache.order.Back()
 			indexCache.order.Remove(oldest)
-			delete(indexCache.entries, oldest.Value.(*cacheEntry).key)
+			if entry, ok := oldest.Value.(*cacheEntry); ok {
+				delete(indexCache.entries, entry.key)
+			}
 		}
 	}
 	return idx, err

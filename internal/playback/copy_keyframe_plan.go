@@ -84,7 +84,7 @@ func (s *TranscodeSession) plannedSegmentRecoveryDecision(segNum int, decision S
 		decision.Wait = true
 		decision.WaitTimeout = activeSegmentWait
 		decision.RestartOnTimeout = false
-		decision.Reason = "transcode_restarting"
+		decision.Reason = segmentReasonRestarting
 	case progress.Running && segNum > progress.ProducedHead:
 		s.mu.Lock()
 		if segNum > s.lastRequestedSegment {
@@ -108,8 +108,9 @@ func (s *TranscodeSession) plannedSegmentRecoveryDecision(segNum int, decision S
 func (p *copySegmentPlan) manifest(opts TranscodeOpts, segPrefix, rawQuery string) []byte {
 	queryDefinition, suffix, queryVersion := syntheticManifestQuery(len(p.durations), rawQuery)
 	segExt := hlsSegmentExtension(opts)
+	fmp4 := videoUsesFMP4(opts)
 	hlsVersion := 3
-	if segExt == ".m4s" {
+	if fmp4 {
 		hlsVersion = 7
 	}
 	hlsVersion = max(hlsVersion, queryVersion)
@@ -128,7 +129,7 @@ func (p *copySegmentPlan) manifest(opts TranscodeOpts, segPrefix, rawQuery strin
 	fmt.Fprintf(&buf, "#EXT-X-TARGETDURATION:%d\n", target)
 	buf.WriteString("#EXT-X-MEDIA-SEQUENCE:0\n")
 	buf.WriteString("#EXT-X-PLAYLIST-TYPE:VOD\n")
-	if segExt == ".m4s" {
+	if fmp4 {
 		fmt.Fprintf(&buf, "#EXT-X-MAP:URI=\"%sinit.mp4%s\"\n", segPrefix, suffix)
 	}
 	for i, d := range p.durations {
