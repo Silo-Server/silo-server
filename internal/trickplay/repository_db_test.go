@@ -142,6 +142,7 @@ func (f *fixture) generate(t *testing.T, fileID int, owner string) int64 {
 	if err != nil || job == nil {
 		t.Fatalf("claim %d: %v %v", fileID, job, err)
 	}
+	owner = job.LeaseToken
 	revision, ok, err := f.repo.BeginUpload(t.Context(), fileID, owner)
 	if err != nil || !ok {
 		t.Fatalf("begin upload: %v %t", err, ok)
@@ -204,7 +205,7 @@ func TestClaimPublishAndServeDB(t *testing.T) {
 	if ok, err := f.repo.Heartbeat(t.Context(), file, "server-b", time.Minute); err != nil || ok {
 		t.Fatal("another server renewed the lease")
 	}
-	revision, ok, err := f.repo.BeginUpload(t.Context(), file, "server-a")
+	revision, ok, err := f.repo.BeginUpload(t.Context(), file, job.LeaseToken)
 	if err != nil || !ok {
 		t.Fatalf("begin upload: %v %t", err, ok)
 	}
@@ -214,7 +215,7 @@ func TestClaimPublishAndServeDB(t *testing.T) {
 	if ok, _ := f.repo.Publish(t.Context(), file, "server-b", revision, Published{Recipe: testRecipe, StoreIdentity: testStore, Height: 168, Count: 360, SheetBytes: []int{1}}); ok {
 		t.Fatal("another server published")
 	}
-	if ok, err := f.repo.Publish(t.Context(), file, "server-a", revision, Published{
+	if ok, err := f.repo.Publish(t.Context(), file, job.LeaseToken, revision, Published{
 		Recipe: testRecipe, StoreIdentity: testStore, Height: 168, Count: 360, SheetBytes: []int{200_000, 180_000, 150_000, 90_000},
 	}); err != nil || !ok {
 		t.Fatalf("publish: %v %t", err, ok)
@@ -311,13 +312,14 @@ func TestExpiredLeaseIsReclaimedAsAFailureDB(t *testing.T) {
 	f := newFixture(t)
 	file := f.file(t, f.library(t, "movies", true), "crash")
 	f.reconcile(t)
-	if job, _ := f.repo.ClaimFile(t.Context(), file, "server-a", time.Minute); job == nil {
+	job, err := f.repo.ClaimFile(t.Context(), file, "server-a", time.Minute)
+	if err != nil || job == nil {
 		t.Fatal("claim")
 	}
-	revision, _, _ := f.repo.BeginUpload(t.Context(), file, "server-a")
+	revision, _, _ := f.repo.BeginUpload(t.Context(), file, job.LeaseToken)
 	// server-a dies: its lease runs out.
 	f.exec(t, `UPDATE public.media_file_trickplay SET lease_expires_at = now() - interval '1 second' WHERE media_file_id = $1`, file)
-	if ok, _ := f.repo.Heartbeat(t.Context(), file, "server-a", time.Minute); ok {
+	if ok, _ := f.repo.Heartbeat(t.Context(), file, job.LeaseToken, time.Minute); ok {
 		t.Fatal("an expired lease was renewed")
 	}
 	stats := f.reconcile(t)
@@ -331,7 +333,7 @@ func TestExpiredLeaseIsReclaimedAsAFailureDB(t *testing.T) {
 	if got := f.queued(t, file); !slices.Equal(got, []string{revisionPrefix(file, revision)}) {
 		t.Fatalf("queued %v, want the abandoned revision", got)
 	}
-	if ok, _ := f.repo.Publish(t.Context(), file, "server-a", revision, Published{Recipe: testRecipe, StoreIdentity: testStore, Height: 168, Count: 1, SheetBytes: []int{1}}); ok {
+	if ok, _ := f.repo.Publish(t.Context(), file, job.LeaseToken, revision, Published{Recipe: testRecipe, StoreIdentity: testStore, Height: 168, Count: 1, SheetBytes: []int{1}}); ok {
 		t.Fatal("the dead server published after losing its lease")
 	}
 }
@@ -351,10 +353,11 @@ func TestFinishOutcomesDB(t *testing.T) {
 		{unusable, Unusable, 0, rowState{state: stateUnusable, failures: 1, due: true, lastError: "boom"}},
 		{released, Released, time.Minute, rowState{state: statePending, failures: 0, lastError: "boom"}},
 	} {
-		if job, _ := f.repo.ClaimFile(t.Context(), tt.file, "server-a", time.Minute); job == nil {
+		job, err := f.repo.ClaimFile(t.Context(), tt.file, "server-a", time.Minute)
+		if err != nil || job == nil {
 			t.Fatal("claim")
 		}
-		if ok, err := f.repo.Finish(t.Context(), tt.file, "server-a", tt.outcome, "boom", tt.delay); err != nil || !ok {
+		if ok, err := f.repo.Finish(t.Context(), tt.file, job.LeaseToken, tt.outcome, "boom", tt.delay); err != nil || !ok {
 			t.Fatalf("finish: %v %t", err, ok)
 		}
 		row, _ := f.row(t, tt.file)
@@ -441,10 +444,11 @@ func TestBlobNamespaceLiveDB(t *testing.T) {
 	if _, err := f.repo.Regenerate(t.Context(), []int{file}); err != nil {
 		t.Fatal(err)
 	}
-	if job, _ := f.repo.ClaimFile(t.Context(), file, "server-b", time.Minute); job == nil {
+	job, err := f.repo.ClaimFile(t.Context(), file, "server-b", time.Minute)
+	if err != nil || job == nil {
 		t.Fatal("claim")
 	}
-	working, _, _ := f.repo.BeginUpload(t.Context(), file, "server-b")
+	working, _, _ := f.repo.BeginUpload(t.Context(), file, job.LeaseToken)
 	dead := newRevision()
 	ns := BlobNamespace(f.pool)
 	prefixes := []string{revisionPrefix(file, published), revisionPrefix(file, working), revisionPrefix(file, dead)}
