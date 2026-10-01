@@ -17,7 +17,7 @@ type widthPageRepo struct {
 	pages chan int
 }
 
-func (r *widthPageRepo) ListChapterThumbnailsAtOtherWidths(_ context.Context, limit int, _ string, afterID int) ([]*models.MediaFile, time.Time, error) {
+func (r *widthPageRepo) ListChapterThumbnailsAtOtherWidths(_ context.Context, limit int, _ string, afterID int, _ bool) ([]*models.MediaFile, time.Time, error) {
 	r.pages <- afterID
 	var files []*models.MediaFile
 	for id := afterID + 1; id <= min(r.files, afterID+limit); id++ {
@@ -45,7 +45,7 @@ func TestWidthBackfillPagesAndWaitsForWorkers(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { _, err := s.queueWidthBackfill(ctx, 320); done <- err }()
+	go func() { _, err := s.queueWidthBackfill(ctx, 320, false); done <- err }()
 	for _, want := range []int{0, defaultBatchLimit} {
 		select {
 		case got := <-repo.pages:
@@ -122,11 +122,11 @@ func TestWidthBackfillCancelsWhileQueueIsFull(t *testing.T) {
 
 func TestWidthBackfillStopsForChangedOrUnreadableWidth(t *testing.T) {
 	s := widthQueueService(&testFileRepo{})
-	if _, err := s.queueWidthBackfill(t.Context(), 300); !errors.Is(err, errPreviewWidthChanged) {
+	if _, err := s.queueWidthBackfill(t.Context(), 300, false); !errors.Is(err, errPreviewWidthChanged) {
 		t.Fatalf("changed width = %v", err)
 	}
 	s.settings = failingSettingsReader{}
-	if _, err := s.queueWidthBackfill(t.Context(), 320); err == nil {
+	if _, err := s.queueWidthBackfill(t.Context(), 320, false); err == nil {
 		t.Fatal("queued files with an unreadable width")
 	}
 }

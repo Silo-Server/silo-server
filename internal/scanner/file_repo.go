@@ -4076,11 +4076,22 @@ func (r *FileRepository) ListMissingChapterThumbnails(ctx context.Context, limit
 	return scanMediaFiles(rows)
 }
 
+// chapterHDRFileSQL matches files whose chapter frames need HDR tone
+// mapping, as tonemap.NeedsToneMap decides: flagged HDR or a Dolby Vision
+// video track.
+const chapterHDRFileSQL = `(mf.hdr OR EXISTS (
+	SELECT 1 FROM jsonb_array_elements(
+		CASE WHEN jsonb_typeof(mf.video_tracks) = 'array' THEN mf.video_tracks ELSE '[]'::jsonb END
+	) AS track
+	WHERE btrim(COALESCE(track->>'dolby_vision', '')) <> ''))`
+
 // ListChapterThumbnailsAtOtherWidths pages chapters without the current image
 // width by file ID. A zero retry time means complete; otherwise the final page
 // returns the earliest time any stale image can become retryable. Missing
 // images stay pending until an in-flight first extraction reaches this width.
-func (r *FileRepository) ListChapterThumbnailsAtOtherWidths(ctx context.Context, limit int, currentSuffix string, afterID int) ([]*models.MediaFile, time.Time, error) {
+// skipHDR leaves out files that need tone mapping, which chapter extraction
+// skips while the HDR policy is disabled.
+func (r *FileRepository) ListChapterThumbnailsAtOtherWidths(ctx context.Context, limit int, currentSuffix string, afterID int, skipHDR bool) ([]*models.MediaFile, time.Time, error) {
 	rows, err := r.pool.Query(ctx, `SELECT `+mfFileColumns+` FROM media_files mf
 		JOIN media_folders folders ON folders.id = mf.media_folder_id
 		WHERE mf.id > $3
@@ -4088,6 +4099,7 @@ func (r *FileRepository) ListChapterThumbnailsAtOtherWidths(ctx context.Context,
 		  AND folders.enabled = true
 		  AND folders.chapter_thumbnails_enabled = true
 		  AND (mf.chapter_thumbnail_retry_after IS NULL OR mf.chapter_thumbnail_retry_after <= NOW())
+		  AND NOT ($4::boolean AND `+chapterHDRFileSQL+`)
 		  AND EXISTS (
 			SELECT 1 FROM jsonb_array_elements(
 				CASE WHEN jsonb_typeof(mf.chapters) = 'array' THEN mf.chapters ELSE '[]'::jsonb END
@@ -4097,7 +4109,7 @@ func (r *FileRepository) ListChapterThumbnailsAtOtherWidths(ctx context.Context,
 			       OR (chapter->>'thumbnail_retry_after')::timestamptz <= NOW())
 		  )
 		ORDER BY mf.id
-		LIMIT $1`, limit, currentSuffix, afterID)
+		LIMIT $1`, limit, currentSuffix, afterID, skipHDR)
 	if err != nil {
 		return nil, time.Time{}, fmt.Errorf("querying chapter thumbnails at other widths: %w", err)
 	}
@@ -4127,7 +4139,8 @@ func (r *FileRepository) ListChapterThumbnailsAtOtherWidths(ctx context.Context,
 		WHERE mf.missing_since IS NULL
 		  AND folders.enabled = true
 		  AND folders.chapter_thumbnails_enabled = true
-		  AND right(COALESCE(chapter->>'thumbnail_path', ''), length($1)) <> $1`, currentSuffix).Scan(&nextRetry)
+		  AND NOT ($2::boolean AND `+chapterHDRFileSQL+`)
+		  AND right(COALESCE(chapter->>'thumbnail_path', ''), length($1)) <> $1`, currentSuffix, skipHDR).Scan(&nextRetry)
 	if err != nil {
 		return nil, time.Time{}, fmt.Errorf("checking remaining chapter thumbnail widths: %w", err)
 	}
