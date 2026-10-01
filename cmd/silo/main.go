@@ -2783,7 +2783,7 @@ func main() {
 				trickplayService.Start(appCtx)
 				taskMgr.Register(tasks.NewQueueSeekPreviewsTask(trickplayService))
 				deps.Trickplay = trickplayService
-				deps.TrickplayReader = trickplay.NewReader(deps.DB, deps.Blobs.Assets, deps.ArtworkResolver)
+				deps.TrickplayReader = trickplay.NewReader(deps.DB, deps.Blobs.Assets, trickplayURLResolver(&deps))
 			}
 		}
 		catalogSearchIndexer := catalog.NewCatalogSearchIndexerFromSettings(deps.DB, settingsRepo, catalogSearchStartupSettings)
@@ -3821,6 +3821,15 @@ func newS3ClientIfConfigured(cfg s3client.BucketConfig) *s3client.Client {
 		return nil
 	}
 	return s3client.NewClient(cfg)
+}
+
+func trickplayURLResolver(deps *api.Dependencies) artworkurl.Resolver {
+	if deps.ArtworkDelivery.External {
+		// An external read endpoint can lag behind the S3 write that published
+		// the manifest. The signed server route reads the storage API directly.
+		return artworkurl.NewServerResolver(deps.ArtworkSigner)
+	}
+	return deps.ArtworkResolver
 }
 
 // configureBlobStorage initializes blob storage only in processes that own the

@@ -54,6 +54,17 @@ Marker reads and watch detail can populate the selected file's markers after
 authorization. A provider error leaves the available markers readable.
 See [Marker API](markers-api.md) for reads, manual edits, and provenance.
 
+## Seek previews
+
+The `trickplay_v1` capability covers seek-preview manifests at
+`GET /api/v2/watch/{id}/trickplay?file_id=`. Clients fetch the sheet URLs the
+manifest returns and refresh the manifest after `expires_at`. Local storage
+and S3 with a separate public or token-authenticated delivery endpoint return
+signed `/api/v2/artwork/...` URLs; the server reads the storage API to avoid
+external delivery lag. Standard S3 delivery returns direct presigned URLs.
+See [trickplay](architecture/trickplay.md#serving) for access rules, sheet
+geometry, and revision retention.
+
 ## Start
 
 When `playback.allow_hevc_encoding` is enabled, video adaptation may encode

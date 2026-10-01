@@ -155,10 +155,13 @@ Players read previews through the native API:
   count, one signed URL per sheet, and when those URLs expire. It serves only
   a file among the versions the watch detail lists for the caller, so it
   applies the same access rules. Every sheet is signed or the manifest is
-  withheld: clients cut thumbnails by index and cannot skip a sheet. Sheet
-  URLs come from the artwork URL resolver, so local storage signs
-  `/api/v2/artwork/...` URLs and S3 presigns direct ones; clients read the
-  manifest again after `expires_at`.
+  withheld: clients cut thumbnails by index and cannot skip a sheet.
+  Local storage and S3 with a separate public or token-authenticated delivery
+  endpoint use signed `/api/v2/artwork/...` URLs. The server reads sheets from
+  the storage API, so delivery lag cannot hide newly published sheets.
+  Standard S3 delivery retains direct presigned URLs. Issued URLs protect the
+  revision through their latest expiry; clients read the manifest again after
+  `expires_at`.
 - Playback capabilities advertise `trickplay_v1`.
 
 Thumbnail i shows `[i*interval_ms, (i+1)*interval_ms)`; it sits on sheet

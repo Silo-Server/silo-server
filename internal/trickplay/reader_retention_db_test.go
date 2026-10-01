@@ -84,6 +84,7 @@ func TestRetiredTrickplayOutlivesIssuedURLsDB(t *testing.T) {
 		name     string
 		resolver artworkurl.Resolver
 	}{
+		{"server", artworkurl.NewServerResolver(artworkurl.NewSigner("fixture-signing-secret", metadataLifetime))},
 		{"s3", artworkurl.NewDirectResolver(s3Store, metadataLifetime)},
 		{"cloudflare token", artworkurl.NewDirectResolver(tokenStore, metadataLifetime)},
 	} {
