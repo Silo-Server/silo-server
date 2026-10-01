@@ -177,3 +177,17 @@ func TestAdminTreatsDisabledLibraryAsOffDB(t *testing.T) {
 		}
 	}
 }
+
+func TestAdminClassifiesIneligibleFilesDB(t *testing.T) {
+	f := newFixture(t)
+	for _, change := range []string{"missing_since=now()", "probe_updated_at=NULL", "duration=0", "video_tracks='[]'::jsonb"} {
+		folder := f.library(t, "movies", true)
+		file := f.file(t, folder, change)
+		content := fmt.Sprintf("movie:ineligible-%d", file)
+		f.exec(t, `UPDATE media_files SET content_id=$1, `+change+` WHERE id=$2`, content, file)
+		status, err := NewAdmin(f.pool, identityStore(testStore), nil).ItemStatus(t.Context(), content)
+		if err != nil || len(status) != 1 || status[0].State != stateUnusable {
+			t.Fatalf("%s: %+v %v", change, status, err)
+		}
+	}
+}
