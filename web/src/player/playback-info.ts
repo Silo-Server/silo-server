@@ -218,12 +218,13 @@ export function resolveActiveQualityOptionId(
   // The planner preserves a source that fits the cap, even when the ladder
   // also publishes same-height rungs below the source bitrate. A bitrate cap,
   // the viewer's or the server's, still forces a transcode the ladder does
-  // not show; the delivered bitrate reveals it.
+  // not show; the delivered bitrate reveals it. That transcode uses a Medium
+  // rung, the tallest the source allows: the ladder lists rungs tallest first.
   const original = options.find((option) => option.isOriginal);
-  const deliveredBelowSource =
-    isPositive(deliveredBitrateKbps) && deliveredBitrateKbps < (original?.bitrateKbps ?? 0);
-  if (original && !deliveredBelowSource && resolutionHeight(original.resolution) <= aliasHeight) {
-    return original.id;
+  if (original && resolutionHeight(original.resolution) <= aliasHeight) {
+    const capped = isPositive(deliveredBitrateKbps) && deliveredBitrateKbps < original.bitrateKbps;
+    if (!capped) return original.id;
+    return options.find((option) => option.id.endsWith("-medium"))?.id ?? null;
   }
   return options.find((option) => option.id === `${aliasHeight}p-medium`)?.id ?? null;
 }

@@ -350,6 +350,8 @@ describe("qualityOptionsFromPlanV3", () => {
     );
 
     expect(resolveActiveQualityOptionId(options, "1080p", 6000)).toBe("1080p-medium");
+    // A preference above the source has no rung at its own height.
+    expect(resolveActiveQualityOptionId(options, "2160p", 6000)).toBe("1080p-medium");
     expect(lowerQualityOption(options, "1080p", 6000)?.id).toBe("1080p-low");
   });
 
