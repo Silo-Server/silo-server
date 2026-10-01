@@ -33,6 +33,8 @@ type SectionWithItems struct {
 
 // SectionItemMeta carries optional per-item metadata for richer section UIs.
 type SectionItemMeta struct {
+	// Raw still path, before image sizing or signing; nil means unavailable metadata.
+	EpisodeStillPath  *string
 	SeriesID          *string
 	SeriesTitle       string
 	SeasonNumber      *int
@@ -2721,7 +2723,8 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 			COALESCE(NULLIF(e.still_path, ''), NULLIF(si.backdrop_path, ''), '') AS backdrop_path,
 			COALESCE(NULLIF(e.still_thumbhash, ''), NULLIF(si.backdrop_thumbhash, ''), '') AS backdrop_thumbhash,
 			si.logo_path,
-			si.status
+			si.status,
+			COALESCE(e.still_path, '')
 		FROM %s
 		WHERE %s
 	`, fromClause, strings.Join(conditions, " AND "))
@@ -2742,6 +2745,7 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 			episodeNumber int
 			seriesTitle   string
 			airDate       *time.Time
+			stillPath     string
 		)
 		item.Type = "episode"
 		err := rows.Scan(
@@ -2763,17 +2767,19 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 			&item.BackdropThumbhash,
 			&item.LogoPath,
 			&item.Status,
+			&stillPath,
 		)
 		if err != nil {
 			return nil, nil, fmt.Errorf("scanning episode section item: %w", err)
 		}
 		items = append(items, &item)
 		itemMeta[item.ContentID] = SectionItemMeta{
-			SeriesID:      &seriesID,
-			SeriesTitle:   seriesTitle,
-			SeasonNumber:  &seasonNumber,
-			EpisodeNumber: &episodeNumber,
-			Badges:        recentSeasonPremiereBadges(seasonNumber, episodeNumber, airDate),
+			EpisodeStillPath: new(stillPath),
+			SeriesID:         &seriesID,
+			SeriesTitle:      seriesTitle,
+			SeasonNumber:     &seasonNumber,
+			EpisodeNumber:    &episodeNumber,
+			Badges:           recentSeasonPremiereBadges(seasonNumber, episodeNumber, airDate),
 		}
 	}
 	if err := rows.Err(); err != nil {

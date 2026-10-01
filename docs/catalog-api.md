@@ -294,6 +294,34 @@ Invalid booleans return `422 validation_failed`. The parameter does not apply
 to single-season or episode operations. Clients can use the capability to
 select text-only season lists; callers that omit it keep their existing behavior.
 
+## Episode spoiler protection
+
+Two profile settings in the settings contract let a viewer hide episode details
+until they start an episode: `catalog.hide_unwatched_episode_images` blurs the
+episode still, and `catalog.hide_unwatched_episode_overviews` hides the episode
+description. Both default to off and roam with the profile.
+
+The server does not change catalog responses for these settings: every episode
+payload keeps its image and overview, so cached catalog data stays shared across
+profiles. Clients apply the settings. An episode counts as unwatched while its
+`user_data` is missing, or `played` is false and it is not in progress
+(`is_in_progress` absent or false and no positive `position_seconds`). Series and season
+artwork and overviews are not affected. Detect support from the settings contract
+capabilities (`manifest_revision` 16 or later).
+
+The v2 API reports image provenance after artwork fallback selection:
+`poster_is_episode_still` and `backdrop_is_episode_still` on catalog cards and
+details, and `still_is_episode_still` on episode rows. `true` identifies an episode
+still; `false` identifies other artwork (or no image). An absent field means the
+source is unknown, including responses from older servers. Protect unknown images
+conservatively when spoiler protection is enabled; older responses cannot guarantee
+that fallback series artwork remains visible. Select the provenance belonging to
+the URL actually displayed, including when falling back from a backdrop to a poster.
+
+`GET /api/v2/images/capabilities` advertises `episode_still_provenance: true`.
+Provenance does not depend on the viewer's spoiler preferences. The frozen v1
+response fields remain unchanged.
+
 ## Collection membership titles
 
 `GET /api/v2/collections/{id}/items` and

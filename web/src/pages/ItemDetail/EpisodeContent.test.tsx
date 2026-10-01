@@ -132,6 +132,12 @@ vi.mock("@/components/DownloadVersionPicker", () => ({
   default: () => <div />,
 }));
 
+const spoilerPrefs = vi.hoisted(() => ({ hideImages: false, hideOverviews: false }));
+
+vi.mock("@/hooks/useEpisodeSpoilerPrefs", () => ({
+  useEpisodeSpoilerPrefs: () => spoilerPrefs,
+}));
+
 vi.mock("./DetailHero", () => ({
   default: (
     props: { context?: ReactNode; actions?: ReactNode; metadata?: ReactNode } & Record<
@@ -431,6 +437,25 @@ describe("EpisodeContent", () => {
       overviewTranslating: true,
       onTranslateOverview: onTranslate,
     });
+  });
+
+  it("hides an unwatched episode's overview until the viewer reveals it", () => {
+    spoilerPrefs.hideOverviews = true;
+    try {
+      render(
+        <MemoryRouter initialEntries={["/item/episode-1"]}>
+          <EpisodeContent item={makeEpisodeItem({ user_data: { played: false } })} />
+        </MemoryRouter>,
+      );
+      expect(mocks.capturedDetailHeroProps.value?.overviewHidden).toBe(true);
+
+      act(() => {
+        (mocks.capturedDetailHeroProps.value?.onRevealOverview as () => void)();
+      });
+      expect(mocks.capturedDetailHeroProps.value?.overviewHidden).toBe(false);
+    } finally {
+      spoilerPrefs.hideOverviews = false;
+    }
   });
 
   it("shows all season episodes in the carousel, not just nearby ones", () => {

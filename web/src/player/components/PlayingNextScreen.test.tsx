@@ -25,6 +25,10 @@ vi.mock("@/hooks/queries/settingValues", async () => {
   };
 });
 
+vi.mock("@/hooks/useEpisodeSpoilerPrefs", () => ({
+  useEpisodeSpoilerPrefs: () => ({ hideImages: false, hideOverviews: false }),
+}));
+
 vi.mock("@/hooks/useDateTimeFormat", () => ({ useDateTimeFormat: () => undefined }));
 vi.mock("@/hooks/useCarouselEmbla", () => ({
   useCarouselEmbla: () => ({

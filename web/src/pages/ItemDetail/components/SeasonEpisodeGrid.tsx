@@ -6,12 +6,15 @@ import { toEpisodeUserState } from "@/components/episodeUserState";
 import MediaItemMenu from "@/components/MediaItemMenu";
 import CardOverlays from "@/components/overlays/CardOverlays";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
+import { useEpisodeSpoilerPrefs, type EpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { usePrefetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useDwellPrefetch } from "@/hooks/useDwellPrefetch";
 import { useGridRowCap } from "@/hooks/useGridRowCap";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
+import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
 import { overlayDataFromEpisodeListItem, type CardOverlayPrefs } from "@/lib/overlays";
+import { cn } from "@/lib/utils";
 import { EpisodeGridSkeleton } from "./SectionSkeletons";
 import type { EpisodeNavigationState } from "../itemDetailLayout";
 
@@ -38,6 +41,7 @@ export default function SeasonEpisodeGrid({
   episodeLinkState,
 }: SeasonEpisodeGridProps) {
   const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
+  const spoilerPrefs = useEpisodeSpoilerPrefs();
   const prefetchEpisodeDetail = usePrefetchCatalogItemDetail();
   const setGridRef = useGridRowCap<HTMLDivElement>(VISIBLE_EPISODE_ROWS, episodes.length);
 
@@ -67,6 +71,7 @@ export default function SeasonEpisodeGrid({
           episodeLinkState={episodeLinkState}
           overlayPrefs={overlayPrefs}
           quickActionMode={quickActionMode}
+          spoilerPrefs={spoilerPrefs}
           onPrefetch={() => prefetchEpisodeDetail(episode.content_id)}
         />
       ))}
@@ -79,12 +84,14 @@ function SeasonEpisodeCard({
   episodeLinkState,
   overlayPrefs,
   quickActionMode,
+  spoilerPrefs,
   onPrefetch,
 }: {
   episode: EpisodeListItem;
   episodeLinkState?: EpisodeNavigationState;
   overlayPrefs: CardOverlayPrefs | null;
   quickActionMode: CardQuickActionMode;
+  spoilerPrefs: EpisodeSpoilerPrefs;
   onPrefetch: () => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
@@ -94,6 +101,10 @@ function SeasonEpisodeCard({
     (episode.user_data?.position_seconds ?? 0) > 0 &&
     (episode.user_data?.duration_seconds ?? 0) > 0;
   const episodeTitle = episode.title || `Episode ${episode.episode_number}`;
+  const unwatched = isEpisodeUnwatched(episode.user_data);
+  const hideImage =
+    spoilerPrefs.hideImages && unwatched && isEpisodeStill(episode.still_is_episode_still);
+  const hideOverview = spoilerPrefs.hideOverviews && unwatched;
 
   return (
     <div ref={cardRef} className="group/card media-card media-card-longpress" {...prefetchHandlers}>
@@ -109,7 +120,10 @@ function SeasonEpisodeCard({
                 src={episode.still_url}
                 alt={episodeTitle}
                 decoding="async"
-                className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+                className={cn(
+                  "h-full w-full object-cover transition-transform duration-300",
+                  hideImage ? SPOILER_IMAGE_CLASS : "group-hover:scale-[1.03]",
+                )}
                 loading="lazy"
               />
             ) : (
@@ -181,7 +195,7 @@ function SeasonEpisodeCard({
               </span>
             )}
           </div>
-          {episode.overview && (
+          {episode.overview && !hideOverview && (
             <p className="text-muted-foreground line-clamp-2 text-xs leading-relaxed">
               {episode.overview}
             </p>

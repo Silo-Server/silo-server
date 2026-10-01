@@ -1,7 +1,8 @@
 {
-  "revision": "1b7ba6e0dc9e801bc0d927cd7f3880cf5a232d1e970d18d1e9360fb680d440e4",
+  "revision": "7d9cdfc989ebf949d76d1e3d8b9b8bb99f8b68c4082b535dbd665fc513bca3ec",
   "state": "available",
   "allowed": true,
+  "episode_still_provenance": true,
   "season_list_artwork_param": "include_artwork",
   "param": "image_size",
   "sizes": [

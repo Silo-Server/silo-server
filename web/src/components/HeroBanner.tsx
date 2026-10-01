@@ -11,6 +11,8 @@ import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiob
 import { parseWatchHref } from "@/pages/watchRouteHelpers";
 import { markPlaybackIntent } from "@/player/first-frame";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
+import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
+import { isEpisodeStill, isEpisodeUnwatched } from "@/lib/episodeSpoilers";
 import { formatHeroMetadata } from "./heroMetadata";
 
 interface HeroBannerProps {
@@ -62,18 +64,21 @@ const HeroBackdropSlide = memo(function HeroBackdropSlide({
   isActive,
   keepsMotion,
   shouldLoad,
+  hideImage,
 }: {
   slide: SectionItem;
   index: number;
   isActive: boolean;
   keepsMotion: boolean;
   shouldLoad: boolean;
+  hideImage: boolean;
 }) {
   const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
   // Keep the browser's loaded image visible while a refreshed URL is pending.
   // Distant slides retain their loaded source until they become a neighbor.
   const imageUrl = shouldLoad ? slide.backdrop_url : loadedUrl;
-  const thumbhash = slide.backdrop_thumbhash ? decodeThumbhash(slide.backdrop_thumbhash) : "";
+  const thumbhash =
+    !hideImage && slide.backdrop_thumbhash ? decodeThumbhash(slide.backdrop_thumbhash) : "";
 
   return (
     <div
@@ -103,8 +108,7 @@ const HeroBackdropSlide = memo(function HeroBackdropSlide({
             animation: keepsMotion
               ? KEN_BURNS_ANIMATIONS[index % KEN_BURNS_ANIMATIONS.length]
               : "none",
-            filter:
-              "brightness(var(--hero-backdrop-brightness, 0.78)) saturate(var(--hero-backdrop-saturate, 0.95))",
+            filter: `brightness(var(--hero-backdrop-brightness, 0.78)) saturate(var(--hero-backdrop-saturate, 0.95))${hideImage ? " blur(24px)" : ""}`,
           }}
           onLoad={() => setLoadedUrl(imageUrl)}
         />
@@ -145,6 +149,7 @@ export default function HeroBanner({
   reserveHeaderSpace = false,
   libraryId,
 }: HeroBannerProps) {
+  const spoilerPrefs = useEpisodeSpoilerPrefs();
   const slides = useMemo(() => items.slice(0, maxSlides), [items, maxSlides]);
   const [{ activeIndex, outgoingIndex }, setBackdropState] = useState({
     activeIndex: 0,
@@ -268,6 +273,15 @@ export default function HeroBanner({
         <HeroBackdropSlide
           key={slide.content_id ?? i}
           slide={slide}
+          hideImage={
+            spoilerPrefs.hideImages &&
+            slide.type === "episode" &&
+            isEpisodeStill(slide.backdrop_is_episode_still) &&
+            isEpisodeUnwatched({
+              played: slide.user_state?.played,
+              position_seconds: slide.position_seconds,
+            })
+          }
           index={i}
           isActive={i === activeIndex}
           keepsMotion={i === activeIndex || i === outgoingIndex}
@@ -315,11 +329,19 @@ export default function HeroBanner({
                 ))}
               </div>
             )}
-            {current.overview && (
-              <p className="text-foreground/72 mb-7 line-clamp-2 max-w-2xl text-sm leading-7 sm:line-clamp-none sm:text-base">
-                {current.overview}
-              </p>
-            )}
+            {current.overview &&
+              !(
+                spoilerPrefs.hideOverviews &&
+                current.type === "episode" &&
+                isEpisodeUnwatched({
+                  played: current.user_state?.played,
+                  position_seconds: current.position_seconds,
+                })
+              ) && (
+                <p className="text-foreground/72 mb-7 line-clamp-2 max-w-2xl text-sm leading-7 sm:line-clamp-none sm:text-base">
+                  {current.overview}
+                </p>
+              )}
             <div className="flex flex-wrap items-center gap-3">
               <Link
                 to={playHref}

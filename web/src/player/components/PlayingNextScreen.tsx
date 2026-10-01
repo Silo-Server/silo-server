@@ -5,6 +5,9 @@ import type { EpisodeRef, PlaybackStartTrigger } from "../types";
 import type { ContinueWatchingItem } from "@/hooks/queries/progress";
 import { useAutoPlayNextSetting } from "@/hooks/queries/autoPlayNext";
 import { decodeThumbhash } from "@/lib/thumbhash";
+import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
+import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
+import { cn } from "@/lib/utils";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
 import { preferredDateLocale } from "@/lib/datetime";
 import { useDateTimeFormat } from "@/hooks/useDateTimeFormat";
@@ -38,6 +41,7 @@ export function PlayingNextScreen({
   // Shared with Settings → Playback: both surfaces edit the same profile row,
   // so a choice made here is the one that screen shows and vice versa.
   const { enabled: autoplay, setEnabled: setAutoplay } = useAutoPlayNextSetting();
+  const spoilerPrefs = useEpisodeSpoilerPrefs();
 
   const toggleAutoplay = useCallback(() => {
     void setAutoplay(!autoplay);
@@ -106,6 +110,10 @@ export function PlayingNextScreen({
   const episodeStillUrl = nextEpisode?.stillUrl;
   const episodeThumbhash = nextEpisode?.stillThumbhash;
   const blurPlaceholder = episodeThumbhash ? decodeThumbhash(episodeThumbhash) : undefined;
+  const nextUnwatched = isEpisodeUnwatched(nextEpisode?.watchState);
+  const hideStill =
+    spoilerPrefs.hideImages && nextUnwatched && isEpisodeStill(nextEpisode?.stillIsEpisodeStill);
+  const hideOverview = spoilerPrefs.hideOverviews && nextUnwatched;
   const endOfSeriesHeading = seriesTitle ? `You've finished ${seriesTitle}` : "End of playback";
 
   return (
@@ -174,7 +182,7 @@ export function PlayingNextScreen({
                   <img
                     src={episodeStillUrl}
                     alt={nextEpisode.title}
-                    className="h-full w-full object-cover"
+                    className={cn("h-full w-full object-cover", hideStill && SPOILER_IMAGE_CLASS)}
                     style={
                       blurPlaceholder
                         ? { backgroundImage: `url(${blurPlaceholder})`, backgroundSize: "cover" }
@@ -219,7 +227,7 @@ export function PlayingNextScreen({
                     <span>{Math.round(nextEpisode.runtime / 60)} min</span>
                   )}
                 </div>
-                {nextEpisode.overview && (
+                {nextEpisode.overview && !hideOverview && (
                   <p className="mt-1 line-clamp-2 max-w-xl text-xs leading-relaxed text-white/50 sm:text-sm">
                     {nextEpisode.overview}
                   </p>
