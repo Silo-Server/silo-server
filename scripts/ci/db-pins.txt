@@ -97,6 +97,7 @@
 
 ./internal/trickplay TestReaderRevalidatesServingWhileSigningDB
 ./internal/trickplay TestOptOutReconcilePreservesConcurrentClaimDB
+./internal/trickplay TestReaderSuppressesDisabledLibraryAvailabilityDB
 ./internal/trickplay TestRegenerateFencesOlderWorkersDB
 ./internal/trickplay TestReconcileUsesOneConnectionDB
 ./internal/trickplay TestLibraryTypeChangeFencesWorkerProgressDB
