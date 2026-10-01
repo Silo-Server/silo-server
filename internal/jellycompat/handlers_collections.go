@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"math/rand/v2"
 	"net/http"
 	"slices"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/usercollections"
 )
 
 // collectionSource is the subset of *catalog.LibraryCollectionRepository the
@@ -29,6 +31,96 @@ type collectionSource interface {
 	ListItems(ctx context.Context, collectionID string) ([]*models.LibraryCollectionItem, error)
 	ListContainingItem(ctx context.Context, mediaItemID string) ([]*models.LibraryCollection, error)
 	AnyVisibleInLibraries(ctx context.Context, libraryIDs []int) (bool, error)
+}
+
+// userCollectionSource is the subset of *usercollections.Store the compat layer
+// relies on to expose the session owner's own personal collections — the ones
+// they opted into their server Collections — as Jellyfin BoxSets. Every method
+// takes the owning user and viewing profile: these rows are private, and the
+// store's ACL is the privacy boundary for normal browse reads; ImageCandidates
+// is used only behind a signed image capability check.
+type userCollectionSource interface {
+	List(ctx context.Context, userID int, profileID string, visibleLibraryIDs []int) ([]usercollections.ServerVisibleCollection, error)
+	Get(ctx context.Context, userID int, profileID, key string, visibleLibraryIDs []int) (*usercollections.ServerVisibleCollection, error)
+	AnyVisible(ctx context.Context, userID int, profileID string, visibleLibraryIDs []int) (bool, error)
+	ImageCandidates(ctx context.Context, key string) ([]usercollections.ServerVisibleCollection, error)
+	CountVisible(ctx context.Context, userID int, collections []usercollections.ServerVisibleCollection, access catalog.AccessFilter) map[string]int
+}
+
+// compatCollection is one collection on the BoxSet surface. Personal
+// collections are adapted to the library collection shape so artwork, DTO
+// mapping, search, sorting and paging stay on a single code path; only where
+// their members come from differs.
+type compatCollection struct {
+	*models.LibraryCollection
+	// personal marks a collection owned by the session user rather than the
+	// server, so its members come from user_personal_collection_items.
+	personal bool
+	// source is the personal collection row, kept for counting its items.
+	source *usercollections.ServerVisibleCollection
+}
+
+// compatNonVideoMemberTypes are the media types besides audiobook and podcast
+// that a personal collection can hold but a BoxSet's children never list.
+var compatNonVideoMemberTypes = []string{"ebook", "manga"} //nolint:goconst // media_items.type values, named once here.
+
+// personalMemberAccess is the access filter for a personal BoxSet's members
+// and counts. BoxSet children list only video types, so it also leaves out the
+// other non-video types a personal collection can hold, not just the
+// audiobooks and podcasts every compat read excludes.
+func (h *ItemsHandler) personalMemberAccess(ctx context.Context, session *Session) catalog.AccessFilter {
+	access := h.resolveAccessFilter(ctx, session)
+	access.ExcludedMediaTypes = append(slices.Clone(access.ExcludedMediaTypes), compatNonVideoMemberTypes...)
+	return access
+}
+
+// newPersonalCompatCollection adapts a personal collection for the BoxSet
+// surface.
+func newPersonalCompatCollection(c usercollections.ServerVisibleCollection) *compatCollection {
+	return &compatCollection{LibraryCollection: libraryCollectionFromUser(c), personal: true, source: &c}
+}
+
+// withVisibleItemCounts sets each personal collection's ItemCount to the
+// items it shows this viewer, the count the native collection routes report.
+// The stored item_count is written only by import syncs, so it stays only as
+// the fallback when a count cannot be read.
+func (h *ItemsHandler) withVisibleItemCounts(ctx context.Context, session *Session, collections []*compatCollection) {
+	if h.userCollections == nil {
+		return
+	}
+	var sources []usercollections.ServerVisibleCollection
+	for _, c := range collections {
+		if c.personal && c.source != nil {
+			sources = append(sources, *c.source)
+		}
+	}
+	if len(sources) == 0 {
+		return
+	}
+	counts := h.userCollections.CountVisible(ctx, session.StreamAppUserID, sources, h.personalMemberAccess(ctx, session))
+	for _, c := range collections {
+		if n, ok := counts[c.ID]; ok && c.personal {
+			c.ItemCount = n
+		}
+	}
+}
+
+// libraryCollectionFromUser adapts a personal collection to the library
+// collection shape. Personal collections carry no library binding — they
+// resolve against everything their owner can see — so LibraryID/LibraryIDs stay
+// empty and collectionVisible is not consulted for them; the store's ownership
+// and profile ACL already decided visibility, hence "visible".
+func libraryCollectionFromUser(c usercollections.ServerVisibleCollection) *models.LibraryCollection {
+	return &models.LibraryCollection{
+		ID:              c.ID,
+		Title:           c.Name,
+		Description:     c.Description,
+		CollectionType:  c.CollectionType,
+		ItemCount:       c.ItemCount,
+		Visibility:      catalog.LibraryCollectionVisibilityVisible,
+		PosterURL:       c.PosterPath,
+		PosterThumbhash: c.PosterThumbhash,
+	}
 }
 
 // CollectionPosterResolver picks the poster a viewer sees for each server
@@ -127,21 +219,32 @@ func (h *ItemsHandler) collectionsView() baseItemDTO {
 }
 
 // collectionsViewVisible reports whether the Collections view should appear in
-// the session's library list. It is shown only when at least one collection is
-// visible to the session, via an index-only EXISTS probe scoped to the
-// libraries the session can already see. A probe error fails closed (no tab)
-// rather than failing the whole /UserViews response.
-func (h *ItemsHandler) collectionsViewVisible(ctx context.Context, libraries []upstreamUserLibrary) bool {
-	if h.collections == nil {
-		return false
-	}
+// the session's library list. It is shown when at least one collection is
+// visible to the session — a library collection scoped to a library the session
+// can already see, or one of the session owner's own opted-in personal
+// collections — via index-only EXISTS probes. A probe error fails closed (no
+// tab) rather than failing the whole /UserViews response.
+func (h *ItemsHandler) collectionsViewVisible(ctx context.Context, session *Session, libraries []upstreamUserLibrary) bool {
 	ids := make([]int, 0, len(libraries))
 	for _, lib := range libraries {
 		ids = append(ids, lib.ID)
 	}
-	visible, err := h.collections.AnyVisibleInLibraries(ctx, ids)
+	if h.collections != nil {
+		visible, err := h.collections.AnyVisibleInLibraries(ctx, ids)
+		if err != nil {
+			slog.DebugContext(ctx, "jellycompat collections view existence check failed", "component", "jellycompat", "error", err)
+		} else if visible {
+			return true
+		}
+	}
+	if h.userCollections == nil {
+		return false
+	}
+	// Without this a user whose only collections are personal would never see
+	// the Collections tab, and so could never reach them.
+	visible, err := h.userCollections.AnyVisible(ctx, session.StreamAppUserID, session.ProfileID, ids)
 	if err != nil {
-		slog.DebugContext(ctx, "jellycompat collections view existence check failed", "component", "jellycompat", "error", err)
+		slog.DebugContext(ctx, "jellycompat user collections view existence check failed", "component", "jellycompat", "error", err)
 		return false
 	}
 	return visible
@@ -153,6 +256,10 @@ func (h *ItemsHandler) collectionsViewVisible(ctx context.Context, libraries []u
 type smartCollectionQueryExecutor interface {
 	Preview(ctx context.Context, def catalog.QueryDefinition, access catalog.AccessFilter, limit int) ([]*models.MediaItem, int, error)
 	PreviewPage(ctx context.Context, def catalog.QueryDefinition, access catalog.AccessFilter, limit, offset int, includeTotal bool) ([]*models.MediaItem, int, bool, error)
+}
+
+type personalCollectionCatalogResolver interface {
+	Resolve(ctx context.Context, req catalog.CatalogRequest, access catalog.AccessFilter) (*catalog.CatalogResult, error)
 }
 
 // visibleLibraryIDSet returns the set of library IDs the session may see on
@@ -174,6 +281,15 @@ func (h *ItemsHandler) visibleLibraryIDs(ctx context.Context, session *Session) 
 	return visibleLibraryIDSet(ctx, h.content, session)
 }
 
+func libraryIDSlice(ids map[int]struct{}) []int {
+	out := make([]int, 0, len(ids))
+	for id := range ids {
+		out = append(out, id)
+	}
+	sort.Ints(out)
+	return out
+}
+
 // collectionVisible reports whether any of the collection's libraries is
 // visible to the session. Collections scoped only to hidden or ABS-surface
 // libraries stay off the compat surface.
@@ -190,11 +306,41 @@ func collectionVisible(c *models.LibraryCollection, visible map[int]struct{}) bo
 	return false
 }
 
-// loadVisibleCollection fetches a collection and applies the compat
-// visibility rules. Returns (nil, nil) when the collection does not exist or
-// the session may not see it; infrastructure errors propagate so transient
-// failures don't masquerade as 404s.
-func (h *ItemsHandler) loadVisibleCollection(ctx context.Context, session *Session, collectionID string) (*models.LibraryCollection, error) {
+// loadVisibleCollection resolves a source-tagged BoxSet route ID to the
+// collection behind it, applying the compat visibility rules. Returns
+// (nil, nil) when the collection does not exist or the session may not see it —
+// the two are deliberately indistinguishable, which is what keeps another
+// user's personal collection private. Infrastructure errors propagate so
+// transient failures don't masquerade as 404s.
+func (h *ItemsHandler) loadVisibleCollection(ctx context.Context, session *Session, collectionID string, personalRoute bool) (*compatCollection, error) {
+	if !personalRoute {
+		collection, err := h.loadVisibleLibraryCollection(ctx, session, collectionID)
+		if err != nil || collection == nil {
+			return nil, err
+		}
+		return &compatCollection{LibraryCollection: collection}, nil
+	}
+	if h.userCollections == nil {
+		return nil, nil
+	}
+	visible, err := h.visibleLibraryIDs(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	personal, err := h.userCollections.Get(ctx, session.StreamAppUserID, session.ProfileID, collectionID, libraryIDSlice(visible))
+	if err != nil {
+		return nil, err
+	}
+	if personal == nil {
+		return nil, nil
+	}
+	return newPersonalCompatCollection(*personal), nil
+}
+
+// loadVisibleLibraryCollection fetches a library collection and applies the
+// compat visibility rules, returning (nil, nil) when it does not exist or the
+// session may not see it.
+func (h *ItemsHandler) loadVisibleLibraryCollection(ctx context.Context, session *Session, collectionID string) (*models.LibraryCollection, error) {
 	if h.collections == nil {
 		return nil, nil
 	}
@@ -219,27 +365,48 @@ func (h *ItemsHandler) loadVisibleCollection(ctx context.Context, session *Sessi
 }
 
 // boxSetsFromCollections maps collections to BoxSet DTOs carrying the posters
-// the session's viewer sees.
-func (h *ItemsHandler) boxSetsFromCollections(ctx context.Context, session *Session, collections []*models.LibraryCollection) []baseItemDTO {
-	var access func() catalog.AccessFilter
-	if session != nil && h.accessFilter != nil {
-		access = func() catalog.AccessFilter { return h.resolveAccessFilter(ctx, session) }
+// and item counts the session's viewer sees. Library collections without an
+// uploaded poster show that viewer's collage; personal collections show their
+// own poster and never enter the collage lookup, which knows only library
+// collections.
+func (h *ItemsHandler) boxSetsFromCollections(ctx context.Context, session *Session, collections []*compatCollection) []baseItemDTO {
+	h.withVisibleItemCounts(ctx, session, collections)
+	library := make([]*models.LibraryCollection, 0, len(collections))
+	for _, c := range collections {
+		if !c.personal {
+			library = append(library, c.LibraryCollection)
+		}
 	}
-	posters := viewerCollectionPosters(ctx, h.collectionPosters, access, collections)
+	var posters map[string]catalog.CollectionPoster
+	if len(library) > 0 {
+		var access func() catalog.AccessFilter
+		if session != nil && h.accessFilter != nil {
+			access = func() catalog.AccessFilter { return h.resolveAccessFilter(ctx, session) }
+		}
+		posters = viewerCollectionPosters(ctx, h.collectionPosters, access, library)
+	}
 	items := make([]baseItemDTO, 0, len(collections))
 	for _, c := range collections {
-		items = append(items, h.boxSetFromCollection(ctx, c, posters[c.ID]))
+		poster := posters[c.ID]
+		if c.personal {
+			poster, _ = catalog.AssignedCollectionPoster(c.LibraryCollection)
+		}
+		items = append(items, h.boxSetFromCollection(ctx, c, poster))
 	}
 	return items
 }
 
-// boxSetFromCollection maps a library collection to a Jellyfin BoxSet DTO
-// showing poster, the one its viewer sees. Image tags are signed from the
-// stable artwork key (like library views) so they survive restarts and presign
+// boxSetFromCollection maps a collection to a Jellyfin BoxSet DTO showing
+// poster, the one its viewer sees. Image tags are signed from the stable
+// artwork key (like library views) so they survive restarts and presign
 // rotation. A collage's tag also names the collage, so an image request that
 // carries only the tag can find it.
-func (h *ItemsHandler) boxSetFromCollection(ctx context.Context, c *models.LibraryCollection, poster catalog.CollectionPoster) baseItemDTO {
-	routeID := h.codec.EncodeStringID(EncodedIDCollection, c.ID)
+func (h *ItemsHandler) boxSetFromCollection(ctx context.Context, c *compatCollection, poster catalog.CollectionPoster) baseItemDTO {
+	kind := EncodedIDCollection
+	if c.personal {
+		kind = EncodedIDUserCollection
+	}
+	routeID := h.codec.EncodeStringID(kind, c.ID)
 	imgTags := map[string]string{}
 	posterURL := h.presignCollectionPoster(ctx, poster.Path)
 	switch {
@@ -247,7 +414,9 @@ func (h *ItemsHandler) boxSetFromCollection(ctx context.Context, c *models.Libra
 		// Not seeded into the shared image cache: the collage is this viewer's.
 		imgTags["Primary"] = collageImageTag(h.mapper.imageTagSigner, routeID, poster.CollageKey)
 	case posterURL != "":
-		if h.images != nil {
+		// Personal artwork resolves durably; never expose its untrusted URLs
+		// through the global legacy-tag cache, which bypasses that resolver.
+		if h.images != nil && !c.personal {
 			h.images.RememberSized(routeID, "Primary", posterURL, compatCardImageSize)
 		}
 		imgTags["Primary"] = h.mapper.imageTagSigner.Tag(
@@ -282,7 +451,7 @@ func (h *ItemsHandler) boxSetFromCollection(ctx context.Context, c *models.Libra
 		},
 	}
 	if backdropURL := h.presignCollectionPoster(ctx, c.BackdropURL); backdropURL != "" {
-		if h.images != nil {
+		if h.images != nil && !c.personal {
 			h.images.RememberSized(routeID, "Backdrop", backdropURL, compatCardImageSize)
 		}
 		dto.BackdropImageTags = []string{h.mapper.imageTagSigner.Tag(
@@ -322,20 +491,30 @@ func (h *ItemsHandler) presignCollectionPoster(ctx context.Context, path string)
 
 // boxSetsByIDs maps the given collection IDs to BoxSet DTOs, skipping any the
 // session may not see. Used by /Items?Ids= re-hydration.
-func (h *ItemsHandler) boxSetsByIDs(ctx context.Context, session *Session, collectionIDs []string) ([]baseItemDTO, error) {
-	if len(collectionIDs) == 0 || h.collections == nil {
+func (h *ItemsHandler) boxSetsByIDs(ctx context.Context, session *Session, collectionIDs, personalCollectionIDs []string) ([]baseItemDTO, error) {
+	if len(collectionIDs) == 0 && len(personalCollectionIDs) == 0 {
 		return nil, nil
 	}
-	collections := make([]*models.LibraryCollection, 0, len(collectionIDs))
+	type collectionRef struct {
+		id       string
+		personal bool
+	}
+	refs := make([]collectionRef, 0, len(collectionIDs)+len(personalCollectionIDs))
 	for _, id := range collectionIDs {
-		collection, err := h.loadVisibleCollection(ctx, session, id)
+		refs = append(refs, collectionRef{id: id})
+	}
+	for _, id := range personalCollectionIDs {
+		refs = append(refs, collectionRef{id: id, personal: true})
+	}
+	collections := make([]*compatCollection, 0, len(refs))
+	for _, ref := range refs {
+		collection, err := h.loadVisibleCollection(ctx, session, ref.id, ref.personal)
 		if err != nil {
 			return nil, err
 		}
-		if collection == nil {
-			continue
+		if collection != nil {
+			collections = append(collections, collection)
 		}
-		collections = append(collections, collection)
 	}
 	return h.boxSetsFromCollections(ctx, session, collections), nil
 }
@@ -345,7 +524,7 @@ func (h *ItemsHandler) boxSetsByIDs(ctx context.Context, session *Session, colle
 // Filtering, sorting, and paging happen on the lightweight collection rows;
 // DTOs (with artwork presigning) are built only for the returned page.
 func (h *ItemsHandler) handleBoxSetsList(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery) {
-	if h.collections == nil {
+	if h.collections == nil && h.userCollections == nil {
 		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
 		return
 	}
@@ -373,33 +552,49 @@ func (h *ItemsHandler) handleBoxSetsList(w http.ResponseWriter, r *http.Request,
 		libFilter = &query.parentLibraryID
 	}
 
-	collections, err := h.collections.ListAll(r.Context(), libFilter, catalog.ListLibraryCollectionsOptions{})
-	if err != nil {
-		writeCompatUpstreamError(w, err)
-		return
+	var collections []*models.LibraryCollection
+	if h.collections != nil {
+		var err error
+		collections, err = h.collections.ListAll(r.Context(), libFilter, catalog.ListLibraryCollectionsOptions{})
+		if err != nil {
+			writeCompatUpstreamError(w, err)
+			return
+		}
 	}
 
 	searchTerm := strings.ToLower(strings.TrimSpace(query.searchTerm))
 	namePrefix := strings.ToLower(query.namePrefix)
-	matched := make([]*models.LibraryCollection, 0, len(collections))
+	matched := make([]*compatCollection, 0, len(collections))
 	for _, c := range collections {
 		if !collectionVisible(c, visible) {
 			continue
 		}
-		title := strings.ToLower(c.Title)
-		if searchTerm != "" && !strings.Contains(title, searchTerm) {
+		if !collectionTitleMatches(c.Title, searchTerm, namePrefix, query.nameLessThan, query.nameStartsWithOrGreater) {
 			continue
 		}
-		if namePrefix != "" && !strings.HasPrefix(title, namePrefix) {
-			continue
+		matched = append(matched, &compatCollection{LibraryCollection: c})
+	}
+
+	// The session owner's own opted-in personal collections list alongside the
+	// server's. They carry no library binding, so collectionVisible does not
+	// apply — the store scoped them to this user, this profile and (when the
+	// request names one) this library.
+	if h.userCollections != nil {
+		visibleIDs := libraryIDSlice(visible)
+		if libFilter != nil {
+			visibleIDs = []int{*libFilter}
 		}
-		if query.nameLessThan != "" && title >= strings.ToLower(query.nameLessThan) {
-			continue
+		personal, err := h.userCollections.List(r.Context(), session.StreamAppUserID, session.ProfileID, visibleIDs)
+		if err != nil {
+			writeCompatUpstreamError(w, err)
+			return
 		}
-		if query.nameStartsWithOrGreater != "" && title < strings.ToLower(query.nameStartsWithOrGreater) {
-			continue
+		for _, c := range personal {
+			if !collectionTitleMatches(c.Name, searchTerm, namePrefix, query.nameLessThan, query.nameStartsWithOrGreater) {
+				continue
+			}
+			matched = append(matched, newPersonalCompatCollection(c))
 		}
-		matched = append(matched, c)
 	}
 
 	if query.sort == "sort_title" {
@@ -432,6 +627,21 @@ func (h *ItemsHandler) handleBoxSetsList(w http.ResponseWriter, r *http.Request,
 	})
 }
 
+// collectionTitleMatches applies the BoxSet listing's name filters.
+func collectionTitleMatches(title, searchTerm, namePrefix, nameLessThan, nameStartsWithOrGreater string) bool {
+	title = strings.ToLower(title)
+	if searchTerm != "" && !strings.Contains(title, searchTerm) {
+		return false
+	}
+	if namePrefix != "" && !strings.HasPrefix(title, namePrefix) {
+		return false
+	}
+	if nameLessThan != "" && title >= strings.ToLower(nameLessThan) {
+		return false
+	}
+	return nameStartsWithOrGreater == "" || title >= strings.ToLower(nameStartsWithOrGreater)
+}
+
 // slicePage returns the [startIndex, startIndex+limit) window of items;
 // limit <= 0 means no cap.
 func slicePage[T any](items []T, startIndex, limit int) []T {
@@ -449,8 +659,8 @@ func slicePage[T any](items []T, startIndex, limit int) []T {
 }
 
 // handleBoxSetItem serves GET /Items/{id} when the ID decodes as a collection.
-func (h *ItemsHandler) handleBoxSetItem(w http.ResponseWriter, r *http.Request, session *Session, collectionID string) {
-	collection, err := h.loadVisibleCollection(r.Context(), session, collectionID)
+func (h *ItemsHandler) handleBoxSetItem(w http.ResponseWriter, r *http.Request, session *Session, collectionID string, personalRoute bool) {
+	collection, err := h.loadVisibleCollection(r.Context(), session, collectionID, personalRoute)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
@@ -459,7 +669,7 @@ func (h *ItemsHandler) handleBoxSetItem(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, h.boxSetsFromCollections(r.Context(), session, []*models.LibraryCollection{collection})[0])
+	writeJSON(w, http.StatusOK, h.boxSetsFromCollections(r.Context(), session, []*compatCollection{collection})[0])
 }
 
 // HandleItemCollections serves GET /Items/{id}/Collections (Jellyfin 12.0+,
@@ -539,7 +749,11 @@ func (h *ItemsHandler) HandleItemCollections(w http.ResponseWriter, r *http.Requ
 		return matched[i].Title < matched[j].Title
 	})
 	page := slicePage(matched, startIndex, limit)
-	dtos := h.boxSetsFromCollections(r.Context(), session, page)
+	compat := make([]*compatCollection, 0, len(page))
+	for _, c := range page {
+		compat = append(compat, &compatCollection{LibraryCollection: c})
+	}
+	dtos := h.boxSetsFromCollections(r.Context(), session, compat)
 	applyItemsResponseOptions(dtos, parseItemsQuery(r, h.codec))
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            dtos,
@@ -555,7 +769,12 @@ func (h *ItemsHandler) HandleItemCollections(w http.ResponseWriter, r *http.Requ
 // browse path, except for episode-scoped smart collections, whose episodes
 // catalog browse cannot see.
 func (h *ItemsHandler) handleBoxSetChildren(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery) {
-	collection, err := h.loadVisibleCollection(r.Context(), session, query.parentCollectionID)
+	personalRoute := query.parentPersonalCollectionID != ""
+	collectionID := query.parentCollectionID
+	if personalRoute {
+		collectionID = query.parentPersonalCollectionID
+	}
+	collection, err := h.loadVisibleCollection(r.Context(), session, collectionID, personalRoute)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
@@ -564,21 +783,38 @@ func (h *ItemsHandler) handleBoxSetChildren(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
 		return
 	}
-	leafType, membersAreLeaves := smartCollectionLeafType(collection)
+	// Personal collections resolve entirely through the catalog resolver, which
+	// already owns their membership, display filter, sorting and paging. Without
+	// it they have no members to serve, the same way a nil collections source
+	// yields no library collections.
+	if collection.personal {
+		if h.collectionResolver == nil {
+			writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
+			return
+		}
+		if query.wantsCollectionLeaves() {
+			h.handlePersonalBoxSetLeaves(w, r, session, query, collection)
+			return
+		}
+		h.handlePersonalBoxSetChildren(w, r, session, query, collection)
+		return
+	}
+
+	leafType, membersAreLeaves := smartCollectionLeafType(collection.LibraryCollection)
 
 	// Play all / Shuffle asks for the collection's playable leaves. A smart
 	// collection scoped to movies or episodes already lists only leaves, so
 	// unless the client shuffles it pages in SQL like a plain listing.
 	if query.wantsCollectionLeaves() {
 		if !membersAreLeaves || (query.sortExplicit && query.sort == compatBrowseRandomSort) {
-			h.handleBoxSetLeaves(w, r, session, query, collection, leafType)
+			h.handleBoxSetLeaves(w, r, session, query, collection.LibraryCollection, leafType)
 			return
 		}
 		if !query.allowsItemType(leafType) || !query.allowsVideo() {
 			writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
 			return
 		}
-		h.writeSmartCollectionPage(w, r, session, query, collection)
+		h.writeSmartCollectionPage(w, r, session, query, collection.LibraryCollection)
 		return
 	}
 
@@ -591,11 +827,11 @@ func (h *ItemsHandler) handleBoxSetChildren(w http.ResponseWriter, r *http.Reque
 	// explicit-sort case falls through to the browse allowlist path below, which
 	// re-sorts the whole membership.
 	if catalog.IsLiveQueryType(collection.CollectionType) && !query.sortExplicit && !query.hasItemTypeFilter && !query.hasMemberFilters() {
-		h.writeSmartCollectionPage(w, r, session, query, collection)
+		h.writeSmartCollectionPage(w, r, session, query, collection.LibraryCollection)
 		return
 	}
 
-	contentIDs, err := h.collectionMemberIDs(r.Context(), session, collection)
+	contentIDs, err := h.collectionMemberIDs(r.Context(), session, collection.LibraryCollection)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
@@ -846,17 +1082,21 @@ func (h *ItemsHandler) handleBoxSetLeaves(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
+	h.writeCollectionLeavesPage(w, r, session, query, h.codec.EncodeStringID(EncodedIDCollection, collection.ID), leaves)
+}
+
+// writeCollectionLeavesPage writes one page of a collection's playable leaves,
+// shuffled first for SortBy=Random.
+func (h *ItemsHandler) writeCollectionLeavesPage(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery, routeID string, leaves []string) {
 	if query.sortExplicit && query.sort == compatBrowseRandomSort {
 		leaves = slices.Clone(leaves)
 		rand.Shuffle(len(leaves), func(i, j int) { leaves[i], leaves[j] = leaves[j], leaves[i] })
 	}
-
-	listItems, episodeTargets, err := h.hydrateCollectionMembers(ctx, session, slicePage(leaves, query.startIndex, query.limit), true)
+	listItems, episodeTargets, err := h.hydrateCollectionMembers(r.Context(), session, slicePage(leaves, query.startIndex, query.limit), true)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
 	}
-	routeID := h.codec.EncodeStringID(EncodedIDCollection, collection.ID)
 	h.writeCollectionItemsPage(w, r, session, query, routeID, listItems, episodeTargets, len(leaves))
 }
 
@@ -870,12 +1110,20 @@ func (h *ItemsHandler) expandCollectionLeaves(ctx context.Context, session *Sess
 	if err != nil {
 		return nil, err
 	}
+	return h.expandMemberLeaves(ctx, session, query, contentIDs, members)
+}
+
+// expandMemberLeaves turns members into playable leaf IDs in contentIDs
+// order: movies and episodes as they are, series as their visible episodes.
+// members carries each visible member's type; others are dropped.
+func (h *ItemsHandler) expandMemberLeaves(ctx context.Context, session *Session, query itemsQuery, contentIDs []string, members []upstreamListItem) ([]string, error) {
 	memberTypes := make(map[string]string, len(members))
 	for _, member := range members {
 		memberTypes[member.ContentID] = strings.ToLower(member.Type)
 	}
 	var seriesEpisodes map[string][]string
 	if query.allowsItemType(compatEpisodeType) {
+		var err error
 		if seriesEpisodes, err = h.collectionSeriesEpisodeIDs(ctx, session, members); err != nil {
 			return nil, err
 		}
@@ -1037,6 +1285,169 @@ func (h *ItemsHandler) hydrateCollectionMembers(ctx context.Context, session *Se
 		}
 	}
 	return ordered, episodeTargets, nil
+}
+
+// personalLeavesLimit asks the resolver for a personal collection's whole
+// membership in one request: Play all expands and pages the leaves itself.
+const personalLeavesLimit = math.MaxInt32
+
+// handlePersonalBoxSetLeaves serves Play all and Shuffle for a personal
+// collection, as handleBoxSetLeaves does for library collections. Members
+// come in the order the collection's listing shows them, including a saved
+// sort; movies and episodes play as they are and series expand to their
+// visible episodes.
+func (h *ItemsHandler) handlePersonalBoxSetLeaves(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery, collection *compatCollection) {
+	ctx := r.Context()
+	if !query.allowsVideo() {
+		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
+		return
+	}
+	access := h.personalMemberAccess(ctx, session)
+	req := catalog.CatalogRequest{
+		Source:         catalog.CatalogSourceUserCollection,
+		CollectionID:   collection.ID,
+		Limit:          personalLeavesLimit,
+		UseSourceOrder: true,
+	}
+	result, err := h.collectionResolver.Resolve(ctx, req, access)
+	if err != nil {
+		if errors.Is(err, catalog.ErrCatalogSourceNotFound) {
+			writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
+			return
+		}
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	// Expansion needs only each member's ID and type; the page's leaves are
+	// hydrated in full below.
+	members := make([]upstreamListItem, 0, len(result.Items))
+	for _, item := range result.Items {
+		members = append(members, upstreamListItem{ContentID: item.ContentID, Type: item.Type})
+	}
+	leaves, err := h.expandMemberLeaves(ctx, session, query, contentIDsFromListItems(members), members)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	h.writeCollectionLeavesPage(w, r, session, query, h.codec.EncodeStringID(EncodedIDUserCollection, collection.ID), leaves)
+}
+
+//nolint:goconst // Keep Jellyfin sort and filter vocabulary beside its protocol translation.
+func (h *ItemsHandler) handlePersonalBoxSetChildren(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery, collection *compatCollection) {
+	if (query.hasItemTypeFilter && len(query.itemTypes) == 0) ||
+		(query.mediaTypesExplicit && !query.mediaTypesSet["video"]) {
+		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
+		return
+	}
+	def := catalog.QueryDefinition{}
+	randomize := false
+	if query.sortExplicit {
+		sortField := query.sort
+		switch sortField {
+		case "sort_title":
+			sortField = "title"
+		case "created_at":
+			sortField = "added_at"
+		case "random":
+			randomize = true
+		}
+		if !randomize {
+			resolved, ok := catalog.NormalizeCollectionSort(sortField, query.order, true)
+			if !ok {
+				writeError(w, http.StatusBadRequest, "BadRequest", "Unsupported collection sort")
+				return
+			}
+			def.Sort = resolved
+		}
+	}
+	// Any rule makes the resolver load the whole membership before paging. A
+	// smart collection pages in SQL, where the access filter below leaves out
+	// non-video types, so it gets type rules only for a client type filter. A
+	// stored collection loads every member anyway, and its member reload does
+	// not apply the access filter's type exclusions, so it always gets them.
+	// Exact type rules: the catalog's episode scope can expand collections or
+	// fall back to their top-level members instead of filtering them.
+	itemTypes := query.itemTypes
+	if !query.hasItemTypeFilter {
+		itemTypes = nil
+		if !catalog.IsLiveQueryType(collection.CollectionType) {
+			itemTypes = compatVideoTypeList
+		}
+	}
+	if itemTypes != nil {
+		typeRules := make([]catalog.QueryRule, 0, len(itemTypes))
+		for _, itemType := range itemTypes {
+			if slices.Contains(compatVideoTypeList, itemType) {
+				typeRules = append(typeRules, catalog.QueryRule{Field: "type", Op: "is", Value: itemType})
+			}
+		}
+		if len(typeRules) == 0 {
+			writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
+			return
+		}
+		def.Groups = append(def.Groups, catalog.QueryGroup{Match: "any", Rules: typeRules})
+	}
+	var rules []catalog.QueryRule
+	if query.genreName != "" {
+		rules = append(rules, catalog.QueryRule{Field: "genre", Op: "contains", Value: query.genreName})
+	}
+	if query.isPlayed != nil {
+		rules = append(rules, catalog.QueryRule{Field: "watched", Op: "is", Value: *query.isPlayed})
+	}
+	if query.isFavorite {
+		rules = append(rules, catalog.QueryRule{Field: "favorited", Op: "is", Value: true})
+	}
+	if query.isResumable {
+		rules = append(rules, catalog.QueryRule{Field: "in_progress", Op: "is", Value: true})
+	}
+	if len(rules) > 0 {
+		def.Groups = append(def.Groups, catalog.QueryGroup{Match: "all", Rules: rules})
+	}
+	access := h.personalMemberAccess(r.Context(), session)
+	access.MaxContentRating = clampMaxContentRating(access.MaxContentRating, query.maxOfficialRating)
+	var browseOverlay *catalog.BrowseFilters
+	if len(query.genres) > 0 || len(query.years) > 0 || query.hasCompatBrowseFilters() ||
+		len(query.audioLanguages) > 0 || len(query.subtitleLanguages) > 0 {
+		browseOverlay = &catalog.BrowseFilters{
+			Genres:                  query.genres,
+			Years:                   query.years,
+			NameLessThan:            query.nameLessThan,
+			NameStartsWithOrGreater: query.nameStartsWithOrGreater,
+			ExcludeContentIDs:       query.excludeIDs,
+			Studios:                 query.studios,
+			OfficialRatings:         query.officialRatings,
+			MinCommunityRating:      query.minCommunityRating,
+			MinPremiereDate:         query.minPremiereDate,
+			MaxPremiereDate:         query.maxPremiereDate,
+			AudioLanguages:          query.audioLanguages,
+			SubtitleLanguages:       query.subtitleLanguages,
+		}
+	}
+	result, err := h.collectionResolver.Resolve(r.Context(), catalog.CatalogRequest{
+		Source:          catalog.CatalogSourceUserCollection,
+		CollectionID:    collection.ID,
+		PersonID:        query.personID,
+		BrowseOverlay:   browseOverlay,
+		NamePrefix:      query.namePrefix,
+		SearchQuery:     query.searchTerm,
+		Query:           def,
+		Limit:           query.limit,
+		Offset:          query.startIndex,
+		UseSourceOrder:  !query.sortExplicit || randomize,
+		RequireBackdrop: query.requireBackdrop,
+		Randomize:       randomize,
+	}, access)
+	if err != nil {
+		if errors.Is(err, catalog.ErrCatalogSourceNotFound) {
+			writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
+			return
+		}
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	listItems := h.compatListItemsFromModels(r.Context(), access, result.Items)
+	routeID := h.codec.EncodeStringID(EncodedIDUserCollection, collection.ID)
+	h.writeCollectionItemsPage(w, r, session, query, routeID, listItems, nil, result.Total)
 }
 
 // writeCollectionItemsPage hydrates user state for one page of collection

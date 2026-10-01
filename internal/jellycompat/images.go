@@ -192,7 +192,10 @@ func copyConditionalImageRequestHeaders(dst, src http.Header) {
 	}
 }
 
-func proxyImage(w http.ResponseWriter, resp *http.Response) {
+// proxyImage relays an upstream image response. A positive maxBytes reads the
+// whole body first, so an oversized or truncated image answers 502 instead of
+// a partial 200; zero streams the body.
+func proxyImage(w http.ResponseWriter, resp *http.Response, maxBytes int64) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotModified {
@@ -208,10 +211,28 @@ func proxyImage(w http.ResponseWriter, resp *http.Response) {
 		return
 	}
 
+	if maxBytes <= 0 {
+		copyImageProxyHeaders(w.Header(), resp.Header)
+		setCompatImageRouteNoStore(w.Header())
+		w.WriteHeader(resp.StatusCode)
+		_, _ = io.Copy(w, resp.Body)
+		return
+	}
+	if resp.ContentLength > maxBytes {
+		setCompatImageRouteNoStore(w.Header())
+		writeError(w, http.StatusBadGateway, "UpstreamError", "Failed to load image")
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
+	if err != nil || int64(len(body)) > maxBytes {
+		setCompatImageRouteNoStore(w.Header())
+		writeError(w, http.StatusBadGateway, "UpstreamError", "Failed to load image")
+		return
+	}
 	copyImageProxyHeaders(w.Header(), resp.Header)
 	setCompatImageRouteNoStore(w.Header())
 	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
+	_, _ = w.Write(body)
 }
 
 func copyImageProxyHeaders(dst, src http.Header) {

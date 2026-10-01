@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -292,6 +293,15 @@ func (h *CollectionHandler) ReorderCollectionGroups(ctx context.Context, userID 
 	return nil
 }
 
+// executorPool returns the executor's pool, or nil when the handler has no
+// executor.
+func executorPool(executor *catalog.QueryExecutor) *pgxpool.Pool {
+	if executor == nil {
+		return nil
+	}
+	return executor.Pool
+}
+
 // collectionViews renders stored collections with their posters presigned and
 // item_count set to the members the acting profile can see.
 func (h *CollectionHandler) collectionViews(ctx context.Context, store userstore.UserStore, userID int, collections []userstore.Collection) []PersonalCollectionView {
@@ -301,7 +311,7 @@ func (h *CollectionHandler) collectionViews(ctx context.Context, store userstore
 		for _, c := range collections {
 			sources = append(sources, catalog.PersonalCollectionDefinition{ID: c.ID, CollectionType: c.CollectionType, QueryDefinition: c.QueryDefinition, DisplayQueryDefinition: c.DisplayQueryDefinition})
 		}
-		counts = visiblePersonalCollectionCounts(ctx, h.Executor, userID, sources, AccessFilterFromContext(ctx, ""))
+		counts = catalog.CountVisiblePersonalCollections(ctx, executorPool(h.Executor), userID, sources, AccessFilterFromContext(ctx, ""))
 	}
 	views := make([]PersonalCollectionView, 0, len(collections))
 	for _, c := range collections {
