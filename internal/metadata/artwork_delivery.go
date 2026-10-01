@@ -21,9 +21,9 @@ type ArtworkDeliveryStore struct {
 	pool     *pgxpool.Pool
 	scope    string
 	external bool
-	// scopeSettled records that no verdict from another delivery scope is
-	// left to requeue. Changing the scope requires a restart.
-	scopeSettled atomic.Bool
+	// scopeSweptAt is when a sweep last found no verdict from another
+	// delivery scope left to requeue, in Unix nanoseconds.
+	scopeSweptAt atomic.Int64
 }
 
 func NewArtworkDeliveryStore(pool *pgxpool.Pool, scope string, external bool) *ArtworkDeliveryStore {
@@ -127,7 +127,10 @@ const (
 	artworkDeliveryRetryBase = 15 * time.Minute
 	artworkDeliveryRetryMax  = 24 * time.Hour
 	// Verdicts from another delivery scope are requeued in steps this large.
-	artworkDeliveryRescopeLimit = 10000
+	// A finished sweep repeats hourly: during a rolling restart, a replica
+	// still on the old configuration can record old-scope verdicts after it.
+	artworkDeliveryRescopeLimit    = 10000
+	artworkDeliveryRescopeInterval = time.Hour
 )
 
 // artworkDeliveryRecheckAfter schedules the next check after a verdict with
@@ -198,7 +201,7 @@ func (s *ArtworkDeliveryStore) Reconcile(ctx context.Context, checker ArtworkDel
 // configuration back to the pending lane. The reader already treats them as
 // unverified; without this they would wait for their old recheck time.
 func (s *ArtworkDeliveryStore) requeueOtherScopes(ctx context.Context) (int64, error) {
-	if s.scopeSettled.Load() {
+	if swept := s.scopeSweptAt.Load(); swept != 0 && time.Since(time.Unix(0, swept)) < artworkDeliveryRescopeInterval {
 		return 0, nil
 	}
 	tag, err := s.pool.Exec(ctx, `UPDATE artwork_revision_gc_candidates
@@ -211,7 +214,7 @@ func (s *ArtworkDeliveryStore) requeueOtherScopes(ctx context.Context) (int64, e
 		return 0, fmt.Errorf("requeue artwork delivery verdicts from another scope: %w", err)
 	}
 	if tag.RowsAffected() < artworkDeliveryRescopeLimit {
-		s.scopeSettled.Store(true)
+		s.scopeSweptAt.Store(time.Now().UnixNano())
 	}
 	return tag.RowsAffected(), nil
 }

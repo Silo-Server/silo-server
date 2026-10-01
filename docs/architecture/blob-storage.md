@@ -417,8 +417,10 @@ A complete verdict is rechecked after a week. An incomplete verdict or a probe
 error retries after 15 minutes, doubling per consecutive failure up to a day.
 A probe error keeps the previous verdict. A run keeps claiming batches for
 about a minute and stops early when every probe in a batch fails. After a
-restart, the verifier moves verdicts recorded under another delivery scope
-back to the pending lane. Each run saves its counts, including probe errors,
+restart, and hourly after that, the verifier moves verdicts recorded under
+another delivery scope back to the pending lane. The hourly sweep catches
+verdicts that replicas still on the old configuration record during a rolling
+restart. Each run saves its counts, including probe errors,
 the last error, and the overdue backlog, as the task's result data.
 
 Local URLs are root-relative, which is enough for clients of the API listener

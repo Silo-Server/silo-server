@@ -606,7 +606,25 @@ func TestArtworkDeliveryRequeuesVerdictsFromAnotherScope(t *testing.T) {
 	if state := states[original]; !state.Verified || len(state.Deliverable) != 2 {
 		t.Fatalf("verdict from another scope was not rechecked: %+v", state)
 	}
+	// A replica still on the old configuration records another old-scope
+	// verdict after the sweep. The next sweep, an interval later, finds it.
+	if _, err := pool.Exec(ctx, `UPDATE artwork_revision_gc_candidates
+        SET delivery_scope = 'delivery-old', delivery_next_check = NOW() + INTERVAL '7 days'
+        WHERE original_path = $1`, original); err != nil {
+		t.Fatal(err)
+	}
 	if stats, err = store.Reconcile(ctx, checker); err != nil || stats.Rescoped != 0 {
-		t.Fatalf("second run rescoped %d: %v", stats.Rescoped, err)
+		t.Fatalf("sweep repeated within its interval: rescoped %d: %v", stats.Rescoped, err)
+	}
+	store.scopeSweptAt.Store(time.Now().Add(-artworkDeliveryRescopeInterval).UnixNano())
+	if stats, err = store.Reconcile(ctx, checker); err != nil || stats.Rescoped < 1 {
+		t.Fatalf("later sweep missed an old-scope verdict: rescoped %d: %v", stats.Rescoped, err)
+	}
+	states, err = store.ArtworkAvailability(ctx, []string{original})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state := states[original]; !state.Verified {
+		t.Fatalf("old-scope verdict was not rechecked: %+v", state)
 	}
 }
