@@ -132,11 +132,15 @@ a settings change during extraction keeps a follow-up queued.
 A coordinator reads pages of 25 files by
 ID and waits when the normal queue already holds 25 requests. It checks
 pending replacements every minute, including images waiting out a failure,
-and stops scanning once every stored thumbnail has the current width.
+and rescans completed widths every minute so a newly enabled library or
+chapter-thumbnail opt-in joins the current-width backfill.
 Each chapter worker takes a database advisory lock for its file before
 reading chapters and holds it through extraction, upload, and save. Its
-session is outside the query pool, with at most one lock session per active
-worker, so generation also works with a one-connection query pool. Chapter
+session comes from the query pool, with a shared limit of one quarter of
+its connection budget (at least one and at most four). A saturated budget
+skips admission until a later coordinator scan, leaving room for ordinary
+queries. A one-connection query pool uses one capped separate lock session
+so extraction can still query settings and library state. Chapter
 state commits use the lock session; a worker whose connection dies cannot
 save after another replica takes over. Encoded image hashes make output
 keys immutable: different bytes use different chapter-index directories, so

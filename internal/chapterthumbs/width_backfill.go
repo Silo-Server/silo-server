@@ -12,19 +12,20 @@ const previewWidthPoll = time.Minute
 var errPreviewWidthChanged = errors.New("preview image width changed during backfill")
 
 // followPreviewWidth queues existing images at other widths on startup and
-// after a width change. Extraction stays with the configured workers.
+// after a width or library eligibility change. Extraction stays with the
+// configured workers, and each scan keeps at most one page in memory.
 func (s *Service) followPreviewWidth(ctx context.Context) {
-	ticker := time.NewTicker(previewWidthPoll)
-	defer ticker.Stop()
-	var queuedWidth int
+	s.followPreviewWidthTicks(ctx, time.Tick(previewWidthPoll))
+}
+
+func (s *Service) followPreviewWidthTicks(ctx context.Context, ticks <-chan time.Time) {
 	for ctx.Err() == nil {
 		width, err := s.previewImageWidth(ctx)
-		if err == nil && width != queuedWidth {
-			var pending bool
-			pending, err = s.queueWidthBackfill(ctx, width)
-			if err == nil && !pending {
-				queuedWidth = width
-			} else if errors.Is(err, errPreviewWidthChanged) {
+		if err == nil {
+			// A completed scan only covers the libraries eligible at that time.
+			// Recheck at the current width so a later enable or opt-in is seen.
+			_, err = s.queueWidthBackfill(ctx, width)
+			if errors.Is(err, errPreviewWidthChanged) {
 				continue
 			}
 		}
@@ -34,7 +35,7 @@ func (s *Service) followPreviewWidth(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-ticks:
 		}
 	}
 }

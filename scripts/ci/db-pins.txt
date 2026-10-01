@@ -21,6 +21,7 @@
 ./internal/trickplay TestRetiredTrickplayOutlivesIssuedURLsDB
 ./internal/trickplay TestReaderProtectsLatestSheetExpiryDB
 ./internal/trickplay TestReaderWithholdsRevisionDisplacedWhileSigningDB
+./internal/trickplay TestReaderSuppressesDisabledLibraryAvailabilityDB
 ./internal/trickplay TestDisabledLibraryStopsServingAndRemovesPublishedWorkDB
 
 # Media image sweeps resume bounded listings without losing partial prefixes.
@@ -134,11 +135,16 @@
 ./internal/api/handlers TestLibraryExplicitTrickplayUpdateAlwaysReconcilesPostgres
 ./internal/trickplay TestReaderRevalidatesServingWhileSigningDB
 ./internal/trickplay TestAdminClassifiesIneligibleFilesDB
-./migrations TestChapterReplacementAtomicallyQueuesImagesPostgres
-./internal/trickplay TestReaderSuppressesDisabledLibraryAvailabilityDB
 ./internal/trickplay TestAdminRetryKeepsPublishedPreviewsDB
 ./internal/trickplay TestAdminResolvesMultiEpisodeFileDB
+./migrations TestChapterReplacementAtomicallyQueuesImagesPostgres
+
 ./internal/trickplay TestOptOutReconcilePreservesConcurrentClaimDB
+
+./internal/chapterthumbs TestCompletedWidthScanRechecksLibraryEligibilityDB
+./internal/scanner TestChapterLockSessionsRespectPoolBudgetDB
+./internal/scanner TestChapterLockFailedConnectReleasesBudgetDB
+./internal/scanner TestChapterLockSessionsSerializeDistinctPoolsDB
 ./internal/trickplay TestRegenerateFencesOlderWorkersDB
 ./internal/trickplay TestRevisionProtectionReusesCoveredExpiryDB
 ./internal/catalog TestEpisodeDetailsFallBackAfterBatchFileFailureDB
