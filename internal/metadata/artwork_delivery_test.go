@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -626,5 +627,16 @@ func TestArtworkDeliveryRequeuesVerdictsFromAnotherScope(t *testing.T) {
 	}
 	if state := states[original]; !state.Verified {
 		t.Fatalf("old-scope verdict was not rechecked: %+v", state)
+	}
+}
+
+func TestArtworkDeliveryErrorTextRedactsURLQueries(t *testing.T) {
+	err := fmt.Errorf("probe: %w", errors.New(`Get "https://cdn.example/poster/w500.rev.webp?X-Amz-Signature=secret&token=abc": dial tcp: timeout`))
+	got := artworkDeliveryErrorText(err)
+	if strings.Contains(got, "secret") || strings.Contains(got, "token=") || !strings.Contains(got, "https://cdn.example/poster/w500.rev.webp?[redacted]") {
+		t.Fatalf("error text = %q", got)
+	}
+	if got := artworkDeliveryErrorText(errors.New(strings.Repeat("é", 400))); len(got) > 500 || !utf8.ValidString(got) {
+		t.Fatalf("long error text was not capped cleanly: %d bytes", len(got))
 	}
 }

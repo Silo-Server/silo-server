@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -251,7 +253,7 @@ func (s *ArtworkDeliveryStore) reconcileBatch(ctx context.Context, checker Artwo
 		case outcome.probeErr != nil:
 			stats.Errors++
 			if stats.LastError == "" {
-				stats.LastError = outcome.probeErr.Error()
+				stats.LastError = artworkDeliveryErrorText(outcome.probeErr)
 			}
 		case outcome.superseded:
 			stats.Superseded++
@@ -373,4 +375,18 @@ func (s *ArtworkDeliveryStore) deferRevision(ctx context.Context, lease string, 
 		return outcome, fmt.Errorf("defer artwork delivery check: %w", err)
 	}
 	return outcome, nil
+}
+
+var artworkDeliveryURLQuery = regexp.MustCompile(`(https?://[^\s"?]+)\?[^\s"]*`)
+
+// artworkDeliveryErrorText prepares a probe error for task history, which is
+// kept long after logs rotate. URL query strings can carry presigned or token
+// credentials, so they are dropped, and the text is capped.
+func artworkDeliveryErrorText(err error) string {
+	const limit = 500
+	text := artworkDeliveryURLQuery.ReplaceAllString(err.Error(), "$1?[redacted]")
+	if len(text) > limit {
+		text = strings.ToValidUTF8(text[:limit], "")
+	}
+	return text
 }
