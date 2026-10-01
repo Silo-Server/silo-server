@@ -334,25 +334,48 @@ describe("qualityOptionsFromPlanV3", () => {
     expect(resolveActiveQualityOptionId(options, "720p")).toBe("720p-medium");
     expect(lowerQualityOption(options, "1080p")?.id).toBe("1080p-high");
     // A copy delivery reports the source bitrate.
-    expect(resolveActiveQualityOptionId(options, "1080p", 20_000)).toBe("original");
+    expect(resolveActiveQualityOptionId(options, "1080p", { bitrate_kbps: 20_000 })).toBe(
+      "original",
+    );
   });
 
-  it("keeps the Medium rung when a bitrate cap transcodes a source that fits the resolution", () => {
+  it("marks the rung a bitrate cap transcodes a fitting source to", () => {
     const options = qualityOptionsFromPlanV3(
       fixturePlanV3({
         available_qualities: [
-          { label: "original", height: 1080, bitrate_kbps: 20_000, preserves_source: true },
-          { label: "1080p-high", height: 1080, bitrate_kbps: 10_000, preserves_source: false },
+          { label: "original", height: 1032, bitrate_kbps: 7948, preserves_source: true },
           { label: "1080p-medium", height: 1080, bitrate_kbps: 6000, preserves_source: false },
           { label: "1080p-low", height: 1080, bitrate_kbps: 3000, preserves_source: false },
+          { label: "720p-high", height: 720, bitrate_kbps: 4000, preserves_source: false },
+          { label: "720p-medium", height: 720, bitrate_kbps: 2000, preserves_source: false },
+          { label: "480p", height: 480, bitrate_kbps: 1500, preserves_source: false },
         ],
       }),
     );
+    const at720 = { width: 1280, height: 688, bitrate_kbps: 2000 };
 
-    expect(resolveActiveQualityOptionId(options, "1080p", 6000)).toBe("1080p-medium");
-    // A preference above the source has no rung at its own height.
-    expect(resolveActiveQualityOptionId(options, "2160p", 6000)).toBe("1080p-medium");
-    expect(lowerQualityOption(options, "1080p", 6000)?.id).toBe("1080p-low");
+    // A 6 Mbps cap on this 7.9 Mbps source drops the encode to the 720p class.
+    expect(resolveActiveQualityOptionId(options, "1080p", at720)).toBe("720p-medium");
+    expect(resolveActiveQualityOptionId(options, "2160p", at720)).toBe("720p-medium");
+    expect(lowerQualityOption(options, "1080p", at720)?.id).toBe("480p");
+    expect(
+      resolveActiveQualityOptionId(options, "2160p", {
+        width: 1920,
+        height: 1032,
+        bitrate_kbps: 6000,
+      }),
+    ).toBe("1080p-medium");
+    expect(
+      resolveActiveQualityOptionId(options, "1080p", {
+        width: 854,
+        height: 458,
+        bitrate_kbps: 1200,
+      }),
+    ).toBe("480p");
+    // Without the delivered frame, assume the preferred class.
+    expect(resolveActiveQualityOptionId(options, "1080p", { bitrate_kbps: 6000 })).toBe(
+      "1080p-medium",
+    );
   });
 
   it("marks Original when a resolution cap already preserves the source", () => {
@@ -413,8 +436,10 @@ describe("lowerQualityOption", () => {
   });
 
   it("steps down from what Auto or Original actually delivers", () => {
-    expect(lowerQualityOption(options, "auto", 6000)?.id).toBe("720p");
-    expect(lowerQualityOption(options, "original", 40_000)?.id).toBe("2160p-medium");
+    expect(lowerQualityOption(options, "auto", { bitrate_kbps: 6000 })?.id).toBe("720p");
+    expect(lowerQualityOption(options, "original", { bitrate_kbps: 40_000 })?.id).toBe(
+      "2160p-medium",
+    );
     // A copy delivery reports no bitrate; the top transcode rung is lower.
     expect(lowerQualityOption(options, "auto")?.id).toBe("2160p-medium");
   });

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Settings } from "lucide-react";
 import { resolveActiveQualityOptionId } from "../playback-info";
+import type { EffectiveRecipeV3 } from "../protocol-v3";
 import type { QualityOption } from "../types";
 import { PlayerMenuSurface } from "./PlayerMenuSurface";
 
@@ -14,8 +15,8 @@ export interface VersionInfo {
 interface QualityMenuProps {
   options: QualityOption[];
   activeId: string;
-  /** The plan's delivered video bitrate, which shows when a cap reduced the source. */
-  deliveredBitrateKbps?: number;
+  /** The plan's effective recipe, which shows when a bitrate cap reduced the source. */
+  deliveredRecipe?: EffectiveRecipeV3;
   isTranscoding: boolean;
   error: string | null;
   onSelect: (id: string) => void;
@@ -27,7 +28,7 @@ interface QualityMenuProps {
 export function QualityMenu({
   options,
   activeId,
-  deliveredBitrateKbps,
+  deliveredRecipe,
   isTranscoding,
   error,
   onSelect,
@@ -102,7 +103,7 @@ export function QualityMenu({
 
   const menuLabel = showQuality ? "Quality" : "Version";
 
-  const resolvedActiveId = resolveActiveQualityOptionId(options, activeId, deliveredBitrateKbps);
+  const resolvedActiveId = resolveActiveQualityOptionId(options, activeId, deliveredRecipe);
   const activeOption = options.find((option) => option.id === resolvedActiveId);
   let menuItemIndex = 0;
 
