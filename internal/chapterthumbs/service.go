@@ -69,7 +69,7 @@ type FileRepository interface {
 	// thumbnail for: none yet, or one whose path does not end in
 	// currentSuffix, made at another width.
 	ListMissingChapterThumbnails(ctx context.Context, limit int, currentSuffix string) ([]*models.MediaFile, error)
-	ListChapterThumbnailsAtOtherWidths(ctx context.Context, limit int, currentSuffix string, afterID int) ([]*models.MediaFile, time.Time, error)
+	ListChapterThumbnailsAtOtherWidths(ctx context.Context, limit int, currentSuffix string, afterID int, skipHDR bool) ([]*models.MediaFile, time.Time, error)
 	// ChapterThumbnailLibraryKey changes when the set of enabled libraries
 	// opted into chapter thumbnails changes, without reading media files.
 	ChapterThumbnailLibraryKey(context.Context) (string, error)

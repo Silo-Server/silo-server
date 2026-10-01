@@ -42,8 +42,8 @@ type observedWidthRepository struct {
 	scanCount atomic.Int32
 }
 
-func (r *observedWidthRepository) ListChapterThumbnailsAtOtherWidths(ctx context.Context, limit int, suffix string, afterID int) ([]*models.MediaFile, time.Time, error) {
-	files, pending, err := r.FileRepository.ListChapterThumbnailsAtOtherWidths(ctx, limit, suffix, afterID)
+func (r *observedWidthRepository) ListChapterThumbnailsAtOtherWidths(ctx context.Context, limit int, suffix string, afterID int, skipHDR bool) ([]*models.MediaFile, time.Time, error) {
+	files, pending, err := r.FileRepository.ListChapterThumbnailsAtOtherWidths(ctx, limit, suffix, afterID, skipHDR)
 	r.scanCount.Add(1)
 	select {
 	case r.scans <- struct{}{}:
