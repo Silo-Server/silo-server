@@ -87,7 +87,7 @@ func TestRetiredTrickplayOutlivesIssuedURLsDB(t *testing.T) {
 		{"s3", artworkurl.NewDirectResolver(s3Store, metadataLifetime)},
 		{"cloudflare token", artworkurl.NewDirectResolver(tokenStore, metadataLifetime)},
 	} {
-		for _, retirement := range []string{"regenerate", "opt-out", "delete"} {
+		for _, retirement := range []string{"regenerate", "opt-out", "type-change", "delete"} {
 			t.Run(delivery.name+"/"+retirement, func(t *testing.T) {
 				f := newFixture(t)
 				folder := f.library(t, "movies", true)
@@ -108,6 +108,9 @@ func TestRetiredTrickplayOutlivesIssuedURLsDB(t *testing.T) {
 				case "opt-out":
 					f.exec(t, `UPDATE public.media_folders SET trickplay_enabled = false WHERE id = $1`, folder)
 					f.reconcile(t)
+				case "type-change":
+					f.exec(t, `UPDATE public.media_folders SET type = 'audiobooks' WHERE id = $1`, folder)
+					f.reconcile(t)
 				case "delete":
 					f.exec(t, `DELETE FROM public.media_files WHERE id = $1`, file)
 				}
@@ -124,7 +127,7 @@ func TestRetiredTrickplayOutlivesIssuedURLsDB(t *testing.T) {
 }
 
 func TestReaderRevalidatesServingWhileSigningDB(t *testing.T) {
-	for _, change := range []string{"opt-out", "disabled", "file-changed", "store-changed"} {
+	for _, change := range []string{"opt-out", "disabled", "type-changed", "missing", "unprobed", "audio-only", "file-changed", "store-changed"} {
 		t.Run(change, func(t *testing.T) {
 			f := newFixture(t)
 			folder := f.library(t, "movies", true)
@@ -143,6 +146,14 @@ func TestReaderRevalidatesServingWhileSigningDB(t *testing.T) {
 					f.exec(t, `UPDATE media_folders SET trickplay_enabled=false WHERE id=$1`, folder)
 				case "disabled":
 					f.exec(t, `UPDATE media_folders SET enabled=false WHERE id=$1`, folder)
+				case "type-changed":
+					f.exec(t, `UPDATE media_folders SET type='audiobooks' WHERE id=$1`, folder)
+				case "missing":
+					f.exec(t, `UPDATE media_files SET missing_since=now() WHERE id=$1`, file)
+				case "unprobed":
+					f.exec(t, `UPDATE media_files SET probe_updated_at=NULL WHERE id=$1`, file)
+				case "audio-only":
+					f.exec(t, `UPDATE media_files SET video_tracks='[]' WHERE id=$1`, file)
 				case "file-changed":
 					f.exec(t, `UPDATE media_files SET file_size=file_size+1 WHERE id=$1`, file)
 				case "store-changed":
