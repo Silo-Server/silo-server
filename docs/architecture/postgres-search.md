@@ -37,7 +37,11 @@ stored representation.
 ## Ranking, counts, and continuation
 
 The relevance order is exact title, contiguous title, year hint, phrase rank,
-title prefix rank, overview rank, lower title, and content ID. Access filtering
+title prefix rank, overview rank, lower title, and content ID. A media title
+also counts as exact when it is the query followed by the item's own year, as
+providers title remakes and reboots ("Castle (2009)"); short whole-title
+admission accepts that form too. Episode titles have no year of their own and
+do not use this rule. Access filtering
 precedes results, and any accessible title or alias match suppresses the entire
 overview family. Overview matches must meet the existing rank floor. This gate
 applies to the complete family, including on later cursor pages.
