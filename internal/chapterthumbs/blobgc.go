@@ -41,13 +41,14 @@ func ImageBlobNamespace(pool *pgxpool.Pool) blobgc.Namespace {
 }
 
 // imageKeyGroup accepts a chapter thumbnail key,
-// chapter-images/{file_id}/{chapter_index}/w{width}.webp, as its own group.
+// chapter-images/{file_id}/{chapter_index}-{sha256}/w{width}.webp, as its own
+// group. Numeric chapter-index directories from older writes remain valid.
 func imageKeyGroup(key string) (string, bool) {
 	if _, ok := imagesFileID(key); !ok {
 		return "", false
 	}
 	parts := strings.Split(strings.TrimPrefix(key, chapterImagesPrefix), "/")
-	if len(parts) != 3 || !canonicalNumber(parts[1], true) {
+	if len(parts) != 3 || !chapterImageIndex(parts[1]) {
 		return "", false
 	}
 	width, ok := strings.CutSuffix(parts[2], ".webp")
@@ -60,6 +61,27 @@ func imageKeyGroup(key string) (string, bool) {
 	}
 	return key, true
 }
+
+func chapterImageIndex(value string) bool {
+	index, digest, hashed := strings.Cut(value, "-")
+	if !canonicalNumber(index, true) {
+		return false
+	}
+	if !hashed {
+		return true
+	}
+	if len(digest) != sha256HexLength {
+		return false
+	}
+	for _, c := range digest {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+const sha256HexLength = 64
 
 // canonicalNumber reports whether s is a decimal number without leading
 // zeros; zero itself only when allowZero.

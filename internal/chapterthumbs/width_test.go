@@ -13,7 +13,6 @@ import (
 )
 
 type fakeBlobQueue struct {
-	canceled  []string
 	scheduled []string
 	delay     time.Duration
 }
@@ -21,11 +20,6 @@ type fakeBlobQueue struct {
 func (q *fakeBlobQueue) Schedule(_ context.Context, prefixes []string, delay time.Duration) error {
 	q.scheduled = append(q.scheduled, prefixes...)
 	q.delay = delay
-	return nil
-}
-
-func (q *fakeBlobQueue) Cancel(_ context.Context, prefixes []string) error {
-	q.canceled = append(q.canceled, prefixes...)
 	return nil
 }
 
@@ -148,7 +142,12 @@ func TestBackfillListsFilesMissingTheCurrentWidth(t *testing.T) {
 
 func TestImageKeyGroup(t *testing.T) {
 	for key, want := range map[string]bool{
-		"chapter-images/42/0/w300.webp":     true,
+		"chapter-images/42/0/w300.webp": true,
+		"chapter-images/42/0-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/w300.webp":  true,
+		"chapter-images/42/0-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde/w300.webp":   false,
+		"chapter-images/42/0-0123456789ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef/w300.webp":  false,
+		"chapter-images/42/00-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/w300.webp": false,
+		"chapter-images/42/0-/w300.webp":    false,
 		"chapter-images/7/15/w640.webp":     true,
 		"chapter-images/42/0/original.webp": false,
 		"chapter-images/42/0/w0300.webp":    false,

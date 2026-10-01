@@ -1237,7 +1237,9 @@ func (r *FileRepository) UpdateChapterThumbnailState(
 		}
 	}
 
-	row := r.pool.QueryRow(ctx, `
+	// Commit through the session holding the chapter lock. If that session
+	// dies during extraction, its former owner cannot save after takeover.
+	row := r.chapterStateWriter(ctx, fileID).QueryRow(ctx, `
 		UPDATE media_files
 		SET chapters = $2,
 		    chapter_thumbnail_retry_after = CASE WHEN $3 THEN $4 ELSE chapter_thumbnail_retry_after END,
@@ -1271,7 +1273,7 @@ func (r *FileRepository) SetChapterThumbnailFailure(
 	if lastError != "" {
 		lastErrorPtr = &lastError
 	}
-	tag, err := r.pool.Exec(ctx, `
+	tag, err := r.chapterStateWriter(ctx, fileID).Exec(ctx, `
 		UPDATE media_files
 		SET chapter_thumbnail_retry_after = $2,
 		    chapter_thumbnail_failure_count = $3,
@@ -4074,9 +4076,9 @@ func (r *FileRepository) ListMissingChapterThumbnails(ctx context.Context, limit
 	return scanMediaFiles(rows)
 }
 
-// ListChapterThumbnailsAtOtherWidths pages existing chapter images by file ID
-// for the width-change backfill. Files with no image keep the regular missing
-// thumbnail schedule.
+// ListChapterThumbnailsAtOtherWidths pages chapters without the current image
+// width by file ID. Missing images remain pending so an in-flight first image
+// cannot complete at the old width after the coordinator stops scanning.
 func (r *FileRepository) ListChapterThumbnailsAtOtherWidths(ctx context.Context, limit int, currentSuffix string, afterID int) ([]*models.MediaFile, bool, error) {
 	rows, err := r.pool.Query(ctx, `SELECT `+mfFileColumns+` FROM media_files mf
 		JOIN media_folders folders ON folders.id = mf.media_folder_id
@@ -4089,8 +4091,7 @@ func (r *FileRepository) ListChapterThumbnailsAtOtherWidths(ctx context.Context,
 			SELECT 1 FROM jsonb_array_elements(
 				CASE WHEN jsonb_typeof(mf.chapters) = 'array' THEN mf.chapters ELSE '[]'::jsonb END
 			) AS chapter
-			WHERE COALESCE(chapter->>'thumbnail_path', '') <> ''
-			  AND right(chapter->>'thumbnail_path', length($2)) <> $2
+			WHERE right(COALESCE(chapter->>'thumbnail_path', ''), length($2)) <> $2
 			  AND (COALESCE(chapter->>'thumbnail_retry_after', '') = ''
 			       OR (chapter->>'thumbnail_retry_after')::timestamptz <= NOW())
 		  )
@@ -4107,7 +4108,8 @@ func (r *FileRepository) ListChapterThumbnailsAtOtherWidths(ctx context.Context,
 	if len(files) == limit {
 		return files, true, nil
 	}
-	// A final page also checks images waiting out a failure or still queued.
+	// A final page also checks missing images and images waiting out a failure
+	// or still queued.
 	// Once none remain, the service can stop scanning until the width changes.
 	var pending bool
 	err = r.pool.QueryRow(ctx, `SELECT EXISTS (
@@ -4120,8 +4122,7 @@ func (r *FileRepository) ListChapterThumbnailsAtOtherWidths(ctx context.Context,
 			SELECT 1 FROM jsonb_array_elements(
 				CASE WHEN jsonb_typeof(mf.chapters) = 'array' THEN mf.chapters ELSE '[]'::jsonb END
 			) AS chapter
-			WHERE COALESCE(chapter->>'thumbnail_path', '') <> ''
-			  AND right(chapter->>'thumbnail_path', length($1)) <> $1
+			WHERE right(COALESCE(chapter->>'thumbnail_path', ''), length($1)) <> $1
 		  )
 	)`, currentSuffix).Scan(&pending)
 	if err != nil {

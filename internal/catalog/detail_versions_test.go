@@ -327,6 +327,39 @@ func TestGetItemVersionsKeepsChapterImagesAndEmptyFiles(t *testing.T) {
 	}
 }
 
+func TestGetItemVersionsBatchesChapterImages(t *testing.T) {
+	f := newVersionsFixture(t)
+	file := f.files.files[f.ids["movie"]][0]
+	for _, count := range []int{1, 64} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			file.Chapters = make([]models.MediaChapter, count)
+			for i := range count {
+				file.Chapters[i] = models.MediaChapter{
+					Index: i, Title: fmt.Sprintf("Chapter %d", i), StartSeconds: float64(i * 10), EndSeconds: float64((i + 1) * 10),
+					Source: "embedded", ThumbnailPath: fmt.Sprintf("chapter-images/7/%d/w300.webp", i), ThumbnailThumbhash: "thumbhash",
+				}
+			}
+			f.images.calls.Store(0)
+			versions, err := f.svc.GetItemVersions(t.Context(), f.ids["movie"], AccessFilter{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if calls := f.images.calls.Load(); calls != 1 {
+				t.Fatalf("%d chapter images made %d resolver calls; want one batch", count, calls)
+			}
+			if len(versions) != 2 || len(versions[0].Chapters) != count {
+				t.Fatalf("chapter metadata missing: %+v", versions)
+			}
+			for i, chapter := range versions[0].Chapters {
+				input := file.Chapters[i]
+				if chapter.Index != input.Index || chapter.Title != input.Title || chapter.StartSeconds != input.StartSeconds || chapter.EndSeconds != input.EndSeconds || chapter.Source != input.Source || chapter.ThumbnailThumbhash != input.ThumbnailThumbhash || chapter.ThumbnailURL != "https://images.invalid/"+input.ThumbnailPath {
+					t.Fatalf("chapter %d metadata changed: %+v", i, chapter)
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkGetItemVersions(b *testing.B) {
 	f := newVersionsFixture(b)
 	for _, kind := range []string{"movie", "audiobook", "episode"} {
