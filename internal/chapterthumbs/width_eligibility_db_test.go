@@ -42,7 +42,7 @@ type observedWidthRepository struct {
 	scanCount atomic.Int32
 }
 
-func (r *observedWidthRepository) ListChapterThumbnailsAtOtherWidths(ctx context.Context, limit int, suffix string, afterID int) ([]*models.MediaFile, bool, error) {
+func (r *observedWidthRepository) ListChapterThumbnailsAtOtherWidths(ctx context.Context, limit int, suffix string, afterID int) ([]*models.MediaFile, time.Time, error) {
 	files, pending, err := r.FileRepository.ListChapterThumbnailsAtOtherWidths(ctx, limit, suffix, afterID)
 	r.scanCount.Add(1)
 	select {
@@ -157,10 +157,14 @@ func TestWidthBackfillDefersCatalogScansUntilRetryDB(t *testing.T) {
 		t.Run(cooldown, func(t *testing.T) {
 			pool := chapterWidthTestPool(t)
 			fileID, _ := chapterURLTestFile(t, pool)
-			deadline := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+			chapterDeadline := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+			deadline := chapterDeadline
+			if cooldown == "both" {
+				deadline = deadline.Add(time.Hour)
+			}
 			if cooldown != "file" {
 				if _, err := pool.Exec(t.Context(), `UPDATE media_files SET chapters=jsonb_set(chapters,
-					'{0,thumbnail_retry_after}',to_jsonb($2::text)) WHERE id=$1`, fileID, deadline.Format(time.RFC3339)); err != nil {
+					'{0,thumbnail_retry_after}',to_jsonb($2::text)) WHERE id=$1`, fileID, chapterDeadline.Format(time.RFC3339)); err != nil {
 					t.Fatal(err)
 				}
 			}

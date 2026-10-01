@@ -128,18 +128,41 @@ func (r *FileRepository) TryLockChapterThumbnails(ctx context.Context, fileID in
 		releaseBudget()
 		return ctx, nil, false, fmt.Errorf("connect chapter lock session: %w", err)
 	}
+	originalApplicationName := conn.PgConn().ParameterStatus("application_name")
+	var acquired bool
 	closeSession := sync.OnceFunc(func() {
 		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		if err := conn.Close(closeCtx); err != nil {
-			slog.WarnContext(ctx, "chapter thumbnail lock could not be released", "component", "chapterthumbs", "file_id", fileID, "error", err)
+		// Healthy pooled connections retain their physical session. Release the
+		// advisory lock and restore its diagnostic name before returning it.
+		// Any failed cleanup discards the session, preventing a leaked lock.
+		var cleanupErr error
+		if pooled != nil && !conn.IsClosed() {
+			if acquired {
+				var unlocked bool
+				var restored string
+				cleanupErr = conn.QueryRow(closeCtx, `SELECT pg_advisory_unlock($1), set_config('application_name', $2, false)`,
+					key, originalApplicationName).Scan(&unlocked, &restored)
+				if cleanupErr == nil && !unlocked {
+					cleanupErr = fmt.Errorf("chapter advisory lock was no longer held")
+				}
+			} else {
+				_, cleanupErr = conn.Exec(closeCtx, `SELECT set_config('application_name', $1, false)`, originalApplicationName)
+			}
+		}
+		if pooled == nil || cleanupErr != nil || conn.IsClosed() {
+			if err := conn.Close(closeCtx); err != nil {
+				slog.WarnContext(ctx, "chapter thumbnail lock session could not be closed", "component", "chapterthumbs", "file_id", fileID, "error", err)
+			}
+		}
+		if cleanupErr != nil {
+			slog.WarnContext(ctx, "chapter thumbnail lock cleanup failed", "component", "chapterthumbs", "file_id", fileID, "error", cleanupErr)
 		}
 		if pooled != nil {
 			pooled.Release()
 		}
 		releaseBudget()
 	})
-	var acquired bool
 	var applicationName string
 	if err := conn.QueryRow(connectCtx, `SELECT set_config('application_name', $2, false), pg_try_advisory_lock($1)`,
 		key, "silo-chapter-thumbnails:"+strconv.Itoa(fileID)).Scan(&applicationName, &acquired); err != nil {

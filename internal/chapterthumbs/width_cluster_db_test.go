@@ -97,7 +97,7 @@ func TestWidthChangeDuringFirstChapterExtractionDB(t *testing.T) {
 	}
 	settings.width.Store(320)
 	pending, err := service.queueWidthBackfill(ctx, 320)
-	if err != nil || !pending {
+	if err != nil || pending.IsZero() {
 		t.Fatalf("coordinator forgot the in-flight first image: pending=%v err=%v", pending, err)
 	}
 	if _, ok := service.queuedNormal[fileID]; !ok {
@@ -120,14 +120,14 @@ func TestWidthChangeDuringFirstChapterExtractionDB(t *testing.T) {
 	}
 	settings.fail.Store(false)
 	pending, err = service.queueWidthBackfill(ctx, 320)
-	if err != nil || !pending {
+	if err != nil || pending.IsZero() {
 		t.Fatalf("retry outage lost the width replacement: pending=%v err=%v", pending, err)
 	}
 	if requeue, err := service.processRequest(ctx, ChapterThumbnailRequest{FileID: fileID}, false); err != nil || requeue {
 		t.Fatalf("replacement: requeue=%v err=%v", requeue, err)
 	}
 	pending, err = service.queueWidthBackfill(ctx, 320)
-	if err != nil || pending {
+	if err != nil || !pending.IsZero() {
 		t.Fatalf("finished replacement remained pending: pending=%v err=%v", pending, err)
 	}
 }
