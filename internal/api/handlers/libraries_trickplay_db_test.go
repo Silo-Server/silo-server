@@ -43,4 +43,12 @@ func TestLibraryExplicitTrickplayUpdateAlwaysReconcilesPostgres(t *testing.T) {
 			t.Fatalf("explicit %v reconciled %d times, want %d", enabled, reconciler.calls, i+1)
 		}
 	}
+	for i, kind := range []string{"audiobooks", "movies"} {
+		if _, err := h.UpdateLibrary(t.Context(), folder, 0, LibraryUpdateRequest{Type: new(kind)}); err != nil {
+			t.Fatal(err)
+		}
+		if reconciler.calls != i+5 {
+			t.Errorf("type-only %s reconciled %d times, want %d", kind, reconciler.calls, i+5)
+		}
+	}
 }
