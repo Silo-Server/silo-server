@@ -59,7 +59,9 @@ rolling upgrade never undo each other's work.
 ## Reconcile
 
 A reconcile pass, on any server, brings the queue in line with the catalog,
-each step bounded:
+each step bounded to 5,000 rows. Full batches continue immediately. A pass
+yields the cluster lock after four batches and schedules a continuation,
+so a large library drains without waiting for the next scheduled task:
 
 1. Reclaims expired leases, as above.
 2. Adds the probed video files (with a duration and a video stream) of
@@ -70,6 +72,48 @@ each step bounded:
    algorithm, with other settings (`published_recipe`), in another store, or
    from a different file. An `unusable` row is requeued when its file
    changes.
+
+## Generation
+
+Every API server runs a `trickplay.Service`. It claims files while it has a
+free worker slot (`playback.trickplay_workers`, default 1, applied live),
+and runs each file at idle CPU and I/O priority:
+
+- The recipe comes from the settings in force at claim time:
+  `playback.preview_image_width` (default 300, shared with chapter
+  thumbnails) and `playback.trickplay_interval_seconds` (default 10, at least
+  5). A width up to 320 gets a 10x10 grid; wider thumbnails get fewer tiles
+  so a sheet stays at most 3200 pixels wide. JPEG quality is fixed at 80.
+- A tile's height follows the display aspect ratio read from the execution
+  probe, including a 90-degree display matrix, rounded to an even number.
+  The manifest records the extractor's actual tile height; chunks with
+  different heights fail without publishing.
+- Thumbnail k is sampled at the middle of its interval,
+  `k*interval + interval/2`, the last one a second inside the file, so it
+  shows what plays in `[k*interval, (k+1)*interval)`.
+- The first `mediasample` Sheets request covers one sheet to learn actual
+  display geometry. Later requests cover at most 16 sheets and 64 million
+  pixels, keeping high-entropy JPEG responses within the bounded node limit; a longer file
+  takes several runs, which bounds each run's memory. Each run seeks to the
+  keyframe before each sample rather than reading the whole file
+  (`Samples`); see [media sampling](media-sampling.md#sheets). AVI files,
+  whose index seeks poorly, are read in one pass (`ReadThrough`), and
+  containers without a keyframe index (MPEG-TS) always are.
+- HDR and Dolby Vision sources are tone mapped (`tonemap.NeedsToneMap`),
+  after scaling, so software tone mapping is always allowed.
+- Hardware decode follows `playback.hw_accel` and `playback.hw_device`
+  (QSV, VAAPI, VideoToolbox), with a software attempt after a hardware
+  failure. Attempt timeouts grow with the samples: two minutes plus half a
+  second a sample on hardware, two seconds a sample in software.
+- A file selected for local extraction that this server cannot read
+  (an offline mount) is given back for an hour without counting a failure;
+  `invalid_data` and `no_stream` mark it unusable; any other failure counts and backs off.
+- ffmpeg runs are recorded under the `trickplay` subprocess workload.
+
+The Queue Seek Previews task runs a reconcile pass at startup and every 15
+minutes, on one server at a time. A server also reconciles as soon as it
+reads a new width or interval (it rereads the settings every minute), so a
+settings change does not wait for the next pass.
 
 ## Serving
 

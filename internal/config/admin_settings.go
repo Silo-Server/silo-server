@@ -202,6 +202,10 @@ var adminSettingDefaults = map[string]string{
 	"playback.chapter_thumbnail_execution":           "local",
 	"playback.chapter_thumbnail_node_capacity":       "1",
 	"playback.chapter_thumbnail_hdr_policy":          "best_effort",
+	"playback.preview_image_width":                   "300",
+	"playback.trickplay_interval_seconds":            "10",
+	"playback.trickplay_workers":                     "1",
+	"playback.trickplay_execution":                   "local",
 	chapterThumbnailSoftwareToneMapKey:               "false",
 	PlaybackTranscodeHardwareToneMapSettingKey:       "false",
 	PlaybackTranscodeSoftwareToneMapSettingKey:       "false",
@@ -487,6 +491,19 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt(key, value, 1, 64)
 	case "playback.chapter_thumbnail_workers", "playback.chapter_thumbnail_node_capacity":
 		return normalizeAdminInt(key, value, 1, 1024)
+	case "playback.preview_image_width":
+		normalized, err := normalizeAdminInt(key, value, 160, 640)
+		if err != nil {
+			return "", err
+		}
+		if width, _ := strconv.Atoi(normalized); width%2 != 0 {
+			return "", fmt.Errorf("%s must be an even number of pixels", key)
+		}
+		return normalized, nil
+	case "playback.trickplay_interval_seconds":
+		return normalizeAdminInt(key, value, 5, 60)
+	case "playback.trickplay_workers":
+		return normalizeAdminInt(key, value, 1, 64)
 	case "playback.watched_threshold":
 		return normalizeAdminInt(key, value, 1, 100)
 	case "playback.min_resume_threshold":
@@ -603,7 +620,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminEnum(key, value,
 			string(PlaybackEgressPreferProxy), string(PlaybackEgressProxyOnly),
 			string(PlaybackEgressPreferAPI), string(PlaybackEgressAPIOnly))
-	case "playback.chapter_thumbnail_execution":
+	case "playback.chapter_thumbnail_execution", "playback.trickplay_execution":
 		return normalizeAdminEnum(key, value, "local", "prefer_transcode_nodes", "transcode_nodes_only")
 	case "playback.chapter_thumbnail_hdr_policy":
 		return normalizeAdminEnum(key, value, "disabled", "best_effort")
