@@ -85,7 +85,7 @@ func (r *Reader) SignedManifest(ctx context.Context, fileID int) (SignedManifest
 			latestExpiry = *url.ExpiresAt
 		}
 	}
-	protected, err := r.repo.ProtectRevision(ctx, fileID, manifest.Revision, latestExpiry)
+	protected, err := r.repo.ProtectRevision(ctx, fileID, manifest.Revision, latestExpiry, r.store.Identity())
 	if err != nil || !protected {
 		return SignedManifest{}, false, err
 	}
