@@ -322,8 +322,8 @@ func queueRevision(ctx context.Context, tx pgx.Tx, fileID int, revision int64, u
 
 // ProtectRevision keeps revision stored until the latest URL issued for it
 // expires. It reports false if publication or deletion replaced the row, so
-// a reader cannot return URLs for an old revision without protecting it.
-func (r *Repository) ProtectRevision(ctx context.Context, fileID int, revision int64, expiresAt time.Time) (bool, error) {
+// a reader cannot return URLs for a displaced or no longer servable revision.
+func (r *Repository) ProtectRevision(ctx context.Context, fileID int, revision int64, expiresAt time.Time, storeIdentity string) (bool, error) {
 	// PostgreSQL stores timestamps with microsecond precision. Round up so
 	// encoding cannot shorten the lifetime of an issued URL.
 	rounded := expiresAt.Truncate(time.Microsecond)
@@ -331,9 +331,14 @@ func (r *Repository) ProtectRevision(ctx context.Context, fileID int, revision i
 		expiresAt = rounded.Add(time.Microsecond)
 	}
 	tag, err := r.pool.Exec(ctx, `
-		UPDATE public.media_file_trickplay
-		SET published_expires_at = GREATEST(published_expires_at, $3::timestamptz)
-		WHERE media_file_id = $1 AND revision = $2`, fileID, revision, expiresAt)
+		UPDATE public.media_file_trickplay t
+		SET published_expires_at = GREATEST(t.published_expires_at, $3::timestamptz)
+		FROM public.media_files mf JOIN public.media_folders f ON f.id = mf.media_folder_id
+		WHERE t.media_file_id = $1 AND t.revision = $2 AND mf.id = t.media_file_id
+		  AND f.trickplay_enabled AND f.enabled IS NOT FALSE AND t.store_identity = $4
+		  AND t.published_size IS NOT DISTINCT FROM mf.file_size
+		  AND (t.published_hash IS NULL OR mf.file_hash IS NULL OR t.published_hash = mf.file_hash)
+		  AND abs(COALESCE(t.published_duration, 0) - COALESCE(mf.duration, 0)) <= 2`, fileID, revision, expiresAt, storeIdentity)
 	if err != nil {
 		return false, fmt.Errorf("protect issued trickplay URLs: %w", err)
 	}
@@ -456,6 +461,7 @@ const staleSQL = `
 	    recipe_version = $1, updated_at = now()
 	FROM public.media_files mf
 	WHERE mf.id = t.media_file_id
+	  AND t.state IN ('ready', 'unusable') AND t.recipe_version <= $1
 	  AND t.media_file_id IN (
 		SELECT t2.media_file_id
 		FROM public.media_file_trickplay t2

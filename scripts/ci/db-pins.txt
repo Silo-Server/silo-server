@@ -82,3 +82,5 @@
 
 ./internal/trickplay TestSameOwnerReclaimRejectsPriorAttemptDB
 ./internal/trickplay TestRevisionProtectionIsMonotonicAndFollowsTheRevisionDB
+
+./internal/trickplay TestStaleReconcileCannotDowngradeConcurrentUpgradeDB
