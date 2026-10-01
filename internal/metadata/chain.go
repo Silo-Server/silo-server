@@ -733,7 +733,7 @@ func declaredPriorityLevels(metadataJSON []byte) (map[string]float64, bool) {
 func ListEnabledMetadataCapabilities(ctx context.Context, pool *pgxpool.Pool) ([]CapabilityInfo, error) {
 	rows, err := pool.Query(ctx,
 		`SELECT pc.plugin_installation_id, pc.capability_id,
-		        COALESCE(pc.metadata->>'display_name', pc.capability_id),
+		        COALESCE(NULLIF(pc.metadata->>'display_name', ''), pc.capability_id),
 		        pc.metadata, pi.kind = 'builtin'
 		 FROM plugin_capabilities pc
 		 JOIN plugin_installations pi ON pi.id = pc.plugin_installation_id
@@ -912,7 +912,7 @@ func lookupCapabilityInfo(ctx context.Context, pool *pgxpool.Pool, installationI
 	}
 	var metadataJSON []byte
 	err := pool.QueryRow(ctx,
-		`SELECT COALESCE(metadata->>'display_name', $2), metadata
+		`SELECT COALESCE(NULLIF(metadata->>'display_name', ''), $2), metadata
 		 FROM plugin_capabilities
 		 WHERE plugin_installation_id = $1 AND capability_id = $2 AND capability_type = 'metadata_provider.v1'`,
 		installationID, capabilityID,
