@@ -20367,6 +20367,11 @@ export interface components {
        * @example true
        */
       trickplay: boolean;
+      /**
+       * @description Whether public asset storage is configured so seek previews can be enabled, including before the first library is created
+       * @example true
+       */
+      trickplay_supported: boolean;
     };
     LibraryCollection: {
       /** @description The page's items; empty, never null */

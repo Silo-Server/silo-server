@@ -26594,11 +26594,19 @@
               true
             ],
             "type": "boolean"
+          },
+          "trickplay_supported": {
+            "description": "Whether public asset storage is configured so seek previews can be enabled, including before the first library is created",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           }
         },
         "required": [
           "realtime_monitoring",
           "trickplay",
+          "trickplay_supported",
           "revision",
           "state",
           "allowed"
