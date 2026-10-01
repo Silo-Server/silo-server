@@ -4007,10 +4007,10 @@ export interface NodeDetectedBackend {
 
 /**
  * A node's stored hardware capability report — the body its /hw-capabilities
- * endpoint served. The payload also carries the node's transformation and
- * tone-map advertisements, which no admin surface reads yet.
+ * endpoint served, including its extraction and tone-map advertisements.
  */
 export interface NodeCapabilities {
+  transport_features?: string[];
   /** Backend that would actually be used: nvenc, qsv, vaapi, or none. */
   resolved?: string;
   render_devices?: string[] | null;

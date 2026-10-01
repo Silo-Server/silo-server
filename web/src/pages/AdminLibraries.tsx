@@ -13,6 +13,7 @@ import type {
 } from "@/api/types";
 import {
   useAdminLibraries,
+  useLibraryCapabilities,
   useCancelLibraryScans,
   useReorderLibraries,
   useSkippedLibraryRoots,
@@ -169,6 +170,7 @@ export default function AdminLibraries() {
   }
 
   const { data: libraries = [], isLoading } = useAdminLibraries();
+  const { data: libraryCapabilities } = useLibraryCapabilities();
   const { data: activeScans = [] } = useActiveScans();
   const { data: realtimeMonitoring } = useLibraryRealtimeMonitoring();
   const { data: trickplayLibraries } = useAdminTrickplayLibraries();
@@ -422,7 +424,11 @@ export default function AdminLibraries() {
               true
             }
             trickplaySupported={
-              editingLib?.trickplay_supported ?? libraries[0]?.trickplay_supported
+              editingLib?.trickplay_supported ??
+              libraries[0]?.trickplay_supported ??
+              (libraryCapabilities?.trickplay === true
+                ? libraryCapabilities.trickplay_supported
+                : undefined)
             }
           />
           <LibraryRefreshDialog

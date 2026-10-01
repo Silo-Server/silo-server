@@ -33,6 +33,7 @@ import {
   imageExecutionOptions,
   describeDetection,
   hasUsableTranscodeNode,
+  hasUsableTrickplayNode,
   nodeInventoriesDiverge,
   parseHWDeviceList,
   toggleHWDevice,
@@ -295,6 +296,7 @@ export default function PlaybackSettings() {
   // have: while the query is in flight or after it failed, leave every option
   // reachable rather than blocking a valid choice on a transient error.
   const transcodeNodeAvailable = !nodes.isSuccess || hasUsableTranscodeNode(nodes.data);
+  const trickplayNodeAvailable = !nodes.isSuccess || hasUsableTrickplayNode(nodes.data);
   const proxyNodeAvailable =
     !nodes.isSuccess ||
     (nodes.data ?? []).some((node) => node.type === "proxy" && node.enabled && node.healthy);
@@ -619,11 +621,11 @@ export default function PlaybackSettings() {
                 <SettingField
                   label="Generate seek previews on"
                   type="select"
-                  options={imageExecutionOptions(trickplayExecution, transcodeNodeAvailable)}
+                  options={imageExecutionOptions(trickplayExecution, trickplayNodeAvailable)}
                   status={
-                    transcodeNodeAvailable ? undefined : (
+                    trickplayNodeAvailable ? undefined : (
                       <SettingFieldStatus tone="warn">
-                        No transcode nodes are connected
+                        No connected transcode node supports seek previews
                       </SettingFieldStatus>
                     )
                   }

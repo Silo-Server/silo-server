@@ -90,6 +90,20 @@ export function hasUsableTranscodeNode(nodes: StreamNode[] | undefined): boolean
   return (nodes ?? []).some((node) => node.type === "transcode" && node.enabled && node.healthy);
 }
 
+/** True when a node can extract seek previews with its current capability snapshot. */
+export function hasUsableTrickplayNode(nodes: StreamNode[] | undefined): boolean {
+  return (nodes ?? []).some(
+    (node) =>
+      node.type === "transcode" &&
+      node.enabled &&
+      node.healthy &&
+      node.capabilities?.transport_features?.includes("trickplay_extract_v1") &&
+      (node.advertised_capabilities_hash === undefined ||
+        (node.advertised_capabilities_hash !== "" &&
+          node.advertised_capabilities_hash === node.capabilities_hash)),
+  );
+}
+
 export interface ImageExecutionOption {
   value: string;
   label: string;
