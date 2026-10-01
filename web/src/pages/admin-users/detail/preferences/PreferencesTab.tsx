@@ -1,7 +1,7 @@
 import { useSearchParams } from "react-router";
 
 import type { AdminUser } from "@/api/types";
-import { useAdminUserDeviceSettings, useAdminUserSettings } from "@/hooks/queries/admin/users";
+import { useAdminUserSettingCounts } from "@/hooks/queries/admin/users";
 
 import { SubTabs } from "../ui";
 import { userDetailTabSearch } from "../userDetailTabs";
@@ -18,9 +18,10 @@ function parseView(value: string | null): PreferencesView {
 export function PreferencesTab({ user }: { user: AdminUser }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const view = parseView(searchParams.get("view"));
-  const settings = useAdminUserSettings(user.id);
-  const deviceSettings = useAdminUserDeviceSettings(user.id);
-  const count = (loading: boolean, n: number) => (loading ? "" : ` · ${n}`);
+  // Counts come from this account's values alone; the device list that names
+  // each device loads only when Per device is open.
+  const counts = useAdminUserSettingCounts(user.id);
+  const count = (n: number) => (counts.isLoading ? "" : ` · ${n}`);
 
   const tabs = (
     <SubTabs<PreferencesView>
@@ -30,11 +31,11 @@ export function PreferencesTab({ user }: { user: AdminUser }) {
       items={[
         {
           value: "account",
-          label: `Account & profiles${count(settings.isLoading, settings.data.length)}`,
+          label: `Account & profiles${count(counts.account)}`,
         },
         {
           value: "devices",
-          label: `Per device${count(deviceSettings.isLoading, deviceSettings.data.length)}`,
+          label: `Per device${count(counts.device)}`,
         },
       ]}
     />

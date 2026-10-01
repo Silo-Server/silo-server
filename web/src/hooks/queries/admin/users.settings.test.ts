@@ -16,6 +16,7 @@ import { SETTING_KEYS } from "@/lib/settingsContract";
 import {
   useAdminDeviceOverrides,
   useAdminUserDeviceSettings,
+  useAdminUserSettingCounts,
   useAdminUserSettings,
   useDeleteAdminUserSetting,
   useDeleteAllAdminUserDeviceSettingsForDevice,
@@ -132,6 +133,22 @@ describe("admin canonical settings hooks", () => {
         updated_at: undefined,
       },
     ]);
+  });
+
+  it("counts account and device settings from the account's values alone", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      expect(String(input)).toBe("/api/v2/admin/users/7/settings/values?limit=200");
+      return jsonResponse(valuesResponse);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result } = renderHook(() => useAdminUserSettingCounts(7), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current).toMatchObject({ account: 2, device: 1, isError: false });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("derives device overrides from the same list, enriched with names", async () => {

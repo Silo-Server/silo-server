@@ -120,6 +120,7 @@ vi.mock("@/hooks/queries/admin/users", () => ({
   useIssuePasswordReset: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useAdminUserSettings: () => ({ data: [], isLoading: false, isError: false }),
   useAdminUserDeviceSettings: () => ({ data: [], isLoading: false, isError: false }),
+  useAdminUserSettingCounts: () => ({ account: 0, device: 0, isLoading: false, isError: false }),
 }));
 vi.mock("@/hooks/queries/admin/userActivity", () => ({
   useAdminUserLiveSessions: () => ({ data: mocks.live, isError: false }),

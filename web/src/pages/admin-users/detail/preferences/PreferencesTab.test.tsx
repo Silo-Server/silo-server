@@ -26,6 +26,12 @@ vi.mock("@/hooks/queries/admin/users", () => ({
     isLoading: false,
     isError: false,
   }),
+  useAdminUserSettingCounts: () => ({
+    account: mocks.userSettings.length,
+    device: mocks.deviceSettings.length,
+    isLoading: false,
+    isError: false,
+  }),
   useUpdateAdminUserSetting: () => ({ mutate: mocks.updateSettingMutate, isPending: false }),
   useDeleteAdminUserSetting: () => ({ mutate: mocks.deleteSettingMutate, isPending: false }),
   useUpdateAdminUserDeviceSetting: () => ({ mutate: mocks.updateDeviceMutate, isPending: false }),

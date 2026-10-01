@@ -254,6 +254,25 @@ export function useDeleteUser() {
  * Device overrides live in useAdminUserDeviceSettings, matching the old
  * two-endpoint split the UI is built around.
  */
+/**
+ * How many settings the account stores, split into account/profile scopes and
+ * per-device overrides. Reads only this account's values, unlike
+ * useAdminUserDeviceSettings, which also loads every device to name them.
+ */
+export function useAdminUserSettingCounts(userId: number) {
+  const values = useAdminUserSettingValues(userId);
+  return useMemo(() => {
+    const rows = values.data ?? [];
+    const device = rows.filter((row) => row.scope === "profile_device").length;
+    return {
+      account: rows.length - device,
+      device,
+      isLoading: values.isLoading,
+      isError: values.isError,
+    };
+  }, [values.data, values.isLoading, values.isError]);
+}
+
 export function useAdminUserSettings(userId: number) {
   const values = useAdminUserSettingValues(userId);
   const data = useMemo<AdminUserSettingEntry[]>(

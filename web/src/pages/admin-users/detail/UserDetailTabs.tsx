@@ -2,11 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 
 import type { AdminUser } from "@/api/types";
 import { TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  useAdminUserCapabilities,
-  useAdminUserDeviceSettings,
-  useAdminUserSettings,
-} from "@/hooks/queries/admin/users";
+import { useAdminUserCapabilities, useAdminUserSettingCounts } from "@/hooks/queries/admin/users";
 import {
   useAdminUserDownloadSummary,
   useAdminUserLiveSessions,
@@ -88,12 +84,11 @@ export function UserDetailTabs({ user, active }: { user: AdminUser; active: User
   const accountDownloads = capabilities?.account_downloads === true;
   const live = useAdminUserLiveSessions(user.id);
   const downloads = useAdminUserDownloadSummary(user.id, accountDownloads);
-  const settings = useAdminUserSettings(user.id);
-  const deviceSettings = useAdminUserDeviceSettings(user.id);
+  const settingCounts = useAdminUserSettingCounts(user.id);
   const custom = countCustomPolicyRows(user);
   const watching = (live.data?.length ?? 0) > 0;
-  const preferencesLoaded = !settings.isLoading && !settings.isError && !deviceSettings.isLoading;
-  const preferences = settings.data.length + (deviceSettings.data?.length ?? 0);
+  const preferencesLoaded = !settingCounts.isLoading && !settingCounts.isError;
+  const preferences = settingCounts.account + settingCounts.device;
 
   const tabs: Array<{ value: UserDetailTab; label: string; extra?: ReactNode }> = [
     { value: "overview", label: "Overview" },
