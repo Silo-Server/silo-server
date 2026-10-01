@@ -236,6 +236,7 @@ export const v2Operations = {
   "GET /api/v2/admin/unmatched": "listAdminUnmatchedFiles",
   "GET /api/v2/admin/users": "listAdminUsers",
   "GET /api/v2/admin/users/capabilities": "getAdminAccountCapabilities",
+  "GET /api/v2/admin/users/policy-defaults": "getAdminUserPolicyDefaults",
   "GET /api/v2/admin/users/{id}": "getAdminUser",
   "GET /api/v2/admin/users/{id}/api-keys": "listAdminUserAPIKeys",
   "GET /api/v2/admin/users/{id}/devices": "listAdminUserDevices",

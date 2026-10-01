@@ -350,6 +350,7 @@ GET /api/v2/admin/unmatched	non-media
 GET /api/v2/admin/users	non-media
 POST /api/v2/admin/users	non-media
 GET /api/v2/admin/users/capabilities	non-media
+GET /api/v2/admin/users/policy-defaults	non-media
 DELETE /api/v2/admin/users/{id}	non-media
 GET /api/v2/admin/users/{id}	non-media
 PUT /api/v2/admin/users/{id}	non-media
@@ -1544,6 +1545,7 @@ GET /api/v2/admin/unmatched	non-media
 GET /api/v2/admin/users	non-media
 POST /api/v2/admin/users	non-media
 GET /api/v2/admin/users/capabilities	non-media
+GET /api/v2/admin/users/policy-defaults	non-media
 DELETE /api/v2/admin/users/{id}	non-media
 GET /api/v2/admin/users/{id}	non-media
 PUT /api/v2/admin/users/{id}	non-media

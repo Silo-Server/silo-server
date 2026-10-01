@@ -13,6 +13,7 @@ import { PERMISSION_MARKER_EDIT, PERMISSION_METADATA_CURATION } from "@/lib/perm
 
 import { CardEditingProvider } from "../cardEditing";
 import { AccessTab } from "./AccessTab";
+import { POLICY_DEFAULTS } from "@/test/policyDefaults";
 
 const mocks = vi.hoisted(() => ({
   viewer: { id: 1 } as { id: number },
@@ -33,6 +34,7 @@ vi.mock("@/api/v2/adminUsers", async (importOriginal) => ({
   }),
 }));
 vi.mock("@/hooks/queries/admin/users", () => ({
+  useAdminPolicyDefaults: () => ({ data: POLICY_DEFAULTS }),
   useViewerIsOwner: () => mocks.viewerIsOwner,
   useAdminUserCapabilities: () => ({
     data: { available: true, account_downloads: true, request_usage: false },
@@ -664,6 +666,20 @@ describe("sources and inherited values", () => {
     await ui.click(
       within(segment(downloads, "Server-prepared downloads")).getByRole("button", {
         name: "Default · Not allowed",
+      }),
+    );
+    await ui.click(within(downloads).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mocks.update).toHaveBeenCalled());
+    expect(lastBody()).toEqual({ download_transcode_allowed: null });
+  });
+
+  it("offers an admin's full-access default from the server", async () => {
+    const ui = userEvent.setup();
+    mount({ ...USER, role: "admin", download_transcode_allowed: false });
+    const downloads = await edit(ui, "Downloads");
+    await ui.click(
+      within(segment(downloads, "Server-prepared downloads")).getByRole("button", {
+        name: "Default · Allowed",
       }),
     );
     await ui.click(within(downloads).getByRole("button", { name: "Save" }));

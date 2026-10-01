@@ -4866,6 +4866,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/users/policy-defaults": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The policy values an admin account, or a regular account without an access group, uses for fields it does not override. */
+    get: operations["getAdminUserPolicyDefaults"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/api-keys": {
     parameters: {
       query?: never;
@@ -11092,6 +11109,8 @@ export interface components {
       password_reset_email: boolean;
       /** @description Whether createAdminUserPasswordReset can return a link to share; needs the server's public URL */
       password_reset_link: boolean;
+      /** @description Whether getAdminUserPolicyDefaults reports the policy an admin or a regular account with no access group uses for fields it does not override */
+      policy_defaults: boolean;
       /** @description Whether getAdminRequestUserUsage can report an account's request quota use */
       request_usage: boolean;
       /** @description Opaque revision of this document */
@@ -16924,6 +16943,12 @@ export interface components {
       location: "local" | "remote";
       /** Format: int64 */
       request_count: number;
+    };
+    AdminUserPolicyDefaults: {
+      /** @description What an admin account's unset policy fields resolve to: full access. Admin accounts never belong to an access group */
+      admin: components["schemas"]["PolicyDefaults"];
+      /** @description What a regular account with no access group resolves its unset policy fields to */
+      ungrouped: components["schemas"]["PolicyDefaults"];
     };
     AdminUserWatchSummary: {
       /** Format: int64 */
@@ -24130,6 +24155,55 @@ export interface components {
        * @enum {string}
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
+    };
+    PolicyDefaults: {
+      /** @example true */
+      audio_transcode_allowed: boolean;
+      /** @example true */
+      download_allowed: boolean;
+      /** @example true */
+      download_transcode_allowed: boolean;
+      /**
+       * @description Libraries the account may see; null means every library, empty means none
+       * @example [
+       *       "1",
+       *       "2"
+       *     ]
+       */
+      library_ids: string[] | null;
+      /**
+       * Format: int64
+       * @description Local per-stream bitrate limit in kbps; 0 means unlimited
+       * @example 0
+       */
+      max_local_stream_bitrate_kbps: number;
+      /**
+       * @description Playback ceiling; empty means none
+       * @example
+       */
+      max_playback_quality: string;
+      /**
+       * Format: int64
+       * @description Remote per-stream bitrate limit in kbps; 0 means unlimited
+       * @example 0
+       */
+      max_remote_stream_bitrate_kbps: number;
+      /**
+       * Format: int64
+       * @description Concurrent stream limit; 0 means unlimited
+       * @example 0
+       */
+      max_streams: number;
+      /**
+       * Format: int64
+       * @description Concurrent transcode limit; 0 means unlimited
+       * @example 0
+       */
+      max_transcodes: number;
+      /** @example true */
+      requests_allowed: boolean;
+      /** @example true */
+      transcode_allowed: boolean;
     };
     PollDeviceLoginInputBody: {
       /**
@@ -73887,6 +73961,112 @@ export interface operations {
         headers: {
           /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
           ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminUserPolicyDefaults: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminUserPolicyDefaults"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
           [name: string]: unknown;
         };
         content: {

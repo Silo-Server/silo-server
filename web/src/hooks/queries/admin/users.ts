@@ -22,6 +22,7 @@ import {
   issueAdminPasswordReset,
   transferAdminUserOwnership,
   getAdminUserCapabilities,
+  getAdminUserPolicyDefaults,
   type AdminUserEditor,
 } from "@/api/v2/adminUsers";
 export { adminUserFromV2 } from "@/api/v2/adminUsers";
@@ -204,6 +205,17 @@ export function useAdminUserCapabilities() {
     enabled: context !== null,
     retry: false,
     staleTime: ADMIN_STALE_TIME,
+  });
+}
+// The values change only with a server upgrade.
+export function useAdminPolicyDefaults() {
+  const context = captureProfileRequestContext();
+  return useQuery({
+    queryKey: [...adminKeys.policyDefaults(), adminUserScope(context)],
+    queryFn: () => getAdminUserPolicyDefaults(context ?? captureAdminUserAuthority()),
+    enabled: context !== null,
+    retry: false,
+    staleTime: Infinity,
   });
 }
 export function useCreateUser() {

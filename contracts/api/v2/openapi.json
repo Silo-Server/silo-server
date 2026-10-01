@@ -788,6 +788,10 @@
             "description": "Whether createAdminUserPasswordReset can return a link to share; needs the server's public URL",
             "type": "boolean"
           },
+          "policy_defaults": {
+            "description": "Whether getAdminUserPolicyDefaults reports the policy an admin or a regular account with no access group uses for fields it does not override",
+            "type": "boolean"
+          },
           "request_usage": {
             "description": "Whether getAdminRequestUserUsage can report an account's request quota use",
             "type": "boolean"
@@ -824,6 +828,7 @@
           "watch_summary",
           "account_downloads",
           "request_usage",
+          "policy_defaults",
           "revision",
           "state",
           "allowed"
@@ -17070,6 +17075,24 @@
           "last_seen",
           "request_count",
           "location"
+        ],
+        "type": "object"
+      },
+      "AdminUserPolicyDefaults": {
+        "additionalProperties": false,
+        "properties": {
+          "admin": {
+            "$ref": "#/components/schemas/PolicyDefaults",
+            "description": "What an admin account's unset policy fields resolve to: full access. Admin accounts never belong to an access group"
+          },
+          "ungrouped": {
+            "$ref": "#/components/schemas/PolicyDefaults",
+            "description": "What a regular account with no access group resolves its unset policy fields to"
+          }
+        },
+        "required": [
+          "admin",
+          "ungrouped"
         ],
         "type": "object"
       },
@@ -35221,6 +35244,117 @@
           "revision",
           "state",
           "allowed"
+        ],
+        "type": "object"
+      },
+      "PolicyDefaults": {
+        "additionalProperties": false,
+        "properties": {
+          "audio_transcode_allowed": {
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "download_allowed": {
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "download_transcode_allowed": {
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "library_ids": {
+            "description": "Libraries the account may see; null means every library, empty means none",
+            "examples": [
+              [
+                "1",
+                "2"
+              ]
+            ],
+            "items": {
+              "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "max_local_stream_bitrate_kbps": {
+            "description": "Local per-stream bitrate limit in kbps; 0 means unlimited",
+            "examples": [
+              0
+            ],
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_playback_quality": {
+            "description": "Playback ceiling; empty means none",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "max_remote_stream_bitrate_kbps": {
+            "description": "Remote per-stream bitrate limit in kbps; 0 means unlimited",
+            "examples": [
+              0
+            ],
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_streams": {
+            "description": "Concurrent stream limit; 0 means unlimited",
+            "examples": [
+              0
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "max_transcodes": {
+            "description": "Concurrent transcode limit; 0 means unlimited",
+            "examples": [
+              0
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "requests_allowed": {
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "transcode_allowed": {
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "library_ids",
+          "max_playback_quality",
+          "max_streams",
+          "max_transcodes",
+          "max_remote_stream_bitrate_kbps",
+          "max_local_stream_bitrate_kbps",
+          "transcode_allowed",
+          "audio_transcode_allowed",
+          "download_allowed",
+          "download_transcode_allowed",
+          "requests_allowed"
         ],
         "type": "object"
       },
@@ -109214,6 +109348,147 @@
         "x-silo-class": "acting_admin",
         "x-silo-conditional": true,
         "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/users/policy-defaults": {
+      "get": {
+        "operationId": "getAdminUserPolicyDefaults",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserPolicyDefaults"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "The policy values an admin account, or a regular account without an access group, uses for fields it does not override.",
+        "tags": [
+          "admin-users"
+        ],
+        "x-silo-class": "acting_admin"
       }
     },
     "/api/v2/admin/users/{id}": {

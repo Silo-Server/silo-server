@@ -7,6 +7,7 @@ import {
 } from "@/components/UserPolicyFields";
 import { useAccessGroups } from "@/hooks/queries/admin/accessGroups";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
+import { useAdminPolicyDefaults } from "@/hooks/queries/admin/users";
 
 import { DownloadsPolicyCard } from "./DownloadsPolicyCard";
 import type { AccessCardProps } from "./EditableCard";
@@ -33,6 +34,7 @@ export function AccessTab({
 }) {
   const groups = useAccessGroups().data ?? [];
   const libraries = useAdminLibraries().data ?? [];
+  const defaults = useAdminPolicyDefaults().data;
   const groupId = effectiveAccessGroupID(user.role, user.access_group_id);
   const props: AccessCardProps = {
     user,
@@ -43,7 +45,10 @@ export function AccessTab({
     groups,
     libraries,
     ctx: inheritContextFor(user, groups),
-    hints: savedUserPolicyInheritHints(user, policyInheritHints(groupId, groups)),
+    hints: savedUserPolicyInheritHints(
+      user,
+      policyInheritHints(user.role, groupId, groups, defaults),
+    ),
   };
 
   return (

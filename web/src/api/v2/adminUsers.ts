@@ -1,5 +1,11 @@
 import type { ProfileRequestContextSnapshot } from "@/api/client";
-import type { AdminUser, CreateUserRequest, UpdateUserRequest } from "@/api/types";
+import type {
+  AdminPolicyDefaultLayer,
+  AdminPolicyDefaults,
+  AdminUser,
+  CreateUserRequest,
+  UpdateUserRequest,
+} from "@/api/types";
 import { v2, type V2Body, type V2Result } from "./request";
 import { sessionFromTokenPair } from "./account";
 import {
@@ -229,4 +235,24 @@ export async function getAdminUserCapabilities(profileContext = captureAdminUser
   const result = await v2("GET /api/v2/admin/users/capabilities", { profileContext });
   requireAdminUserAuthority(profileContext);
   return result;
+}
+
+type PolicyDefaultLayerV2 = V2Result<"GET /api/v2/admin/users/policy-defaults">["admin"];
+function policyDefaultLayer(layer: PolicyDefaultLayerV2): AdminPolicyDefaultLayer {
+  return {
+    ...layer,
+    library_ids: layer.library_ids === null ? null : layer.library_ids.map(numericID),
+  };
+}
+/** The server's built-in policy for admins and for regular accounts with no group. */
+export async function getAdminUserPolicyDefaults(
+  profileContext = captureAdminUserAuthority(),
+): Promise<AdminPolicyDefaults> {
+  requireAdminUserAuthority(profileContext);
+  const result = await v2("GET /api/v2/admin/users/policy-defaults", { profileContext });
+  requireAdminUserAuthority(profileContext);
+  return {
+    admin: policyDefaultLayer(result.admin),
+    ungrouped: policyDefaultLayer(result.ungrouped),
+  };
 }

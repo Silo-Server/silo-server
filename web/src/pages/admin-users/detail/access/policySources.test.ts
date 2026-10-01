@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AccessGroup, AdminUser, Library } from "@/api/types";
 import { policyInheritHints, savedUserPolicyInheritHints } from "@/components/UserPolicyFields";
+import { POLICY_DEFAULTS } from "@/test/policyDefaults";
 
 import {
   countCustomPolicyRows,
@@ -88,7 +89,10 @@ const LIBRARIES = [
 
 const grouped: AdminUser = { ...USER, access_group_id: 3 };
 const hintsFor = (user: AdminUser) =>
-  savedUserPolicyInheritHints(user, policyInheritHints(user.access_group_id, [FAMILY]));
+  savedUserPolicyInheritHints(
+    user,
+    policyInheritHints(user.role, user.access_group_id, [FAMILY], POLICY_DEFAULTS),
+  );
 
 describe("sources", () => {
   it("tags each row by where its value comes from", () => {
@@ -128,6 +132,28 @@ describe("inheritedValueText", () => {
     expect(inheritedValueText("libraries", hints, ctx, LIBRARIES)).toBe("Default: all libraries");
   });
 
+  it("words an admin's default as full access", () => {
+    const admin: AdminUser = { ...USER, role: "admin", download_transcode_allowed: false };
+    const ctx = inheritContextFor(admin, []);
+    expect(inheritedValueText("serverPrepared", hintsFor(admin), ctx, LIBRARIES)).toBe(
+      "Default: allowed",
+    );
+    expect(inheritedValueText("serverPrepared", hintsFor(USER), ctx, LIBRARIES)).toBe(
+      "Default: not allowed",
+    );
+  });
+
+  it("is unknown while the server defaults are not loaded", () => {
+    const admin: AdminUser = { ...USER, role: "admin", max_streams: 2 };
+    const hints = savedUserPolicyInheritHints(
+      admin,
+      policyInheritHints(admin.role, null, [], undefined),
+    );
+    expect(
+      inheritedValueText("maxStreams", hints, inheritContextFor(admin, []), LIBRARIES),
+    ).toBeUndefined();
+  });
+
   it("words the group's value, including under an override", () => {
     const user = {
       ...grouped,
@@ -155,7 +181,10 @@ describe("inheritedValueText", () => {
   it("is unknown while the group is not loaded", () => {
     const user = { ...USER, access_group_id: 9, max_streams: 3 };
     const ctx = inheritContextFor(user, [FAMILY]);
-    const hints = savedUserPolicyInheritHints(user, policyInheritHints(9, [FAMILY]));
+    const hints = savedUserPolicyInheritHints(
+      user,
+      policyInheritHints(user.role, 9, [FAMILY], POLICY_DEFAULTS),
+    );
     expect(inheritedValueText("maxStreams", hints, ctx, LIBRARIES)).toBeUndefined();
   });
 });

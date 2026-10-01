@@ -545,6 +545,7 @@ func registerAll(reg *Registry) {
 	registerAdminUsers(reg)
 	registerAdminPlaybackHistory(reg)
 	registerAdminAccounts(reg)
+	registerAdminPolicyDefaults(reg)
 	registerNotificationInbox(reg)
 	registerAdminNotificationPush(reg)
 	registerAdminNotificationDiscord(reg)

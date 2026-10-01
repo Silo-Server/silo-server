@@ -3370,6 +3370,27 @@
       "body_file": "admin_unmatched_files.json"
     },
     {
+      "name": "admin_user_policy_defaults",
+      "operation_id": "getAdminUserPolicyDefaults",
+      "scenario": "Administrator account and group management with synthetic records.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/users/policy-defaults",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminUserPolicyDefaults",
+      "body_file": "admin_user_policy_defaults.json"
+    },
+    {
       "name": "apple_push_registration_capability",
       "operation_id": "getApplePushRegistrationCapabilities",
       "scenario": "Local ordered Apple registration is unavailable when the service is absent; this does not describe provider delivery.",

@@ -7,8 +7,9 @@ import { formatStreamBitrateLimit } from "@/lib/streamBitrateLimit";
 /**
  * Where each Access & limits value comes from, and how the page words it.
  * An account's own override wins; otherwise a grouped non-admin account
- * inherits from its access group, and everyone else gets the server's fixed
- * no-group defaults (see `NO_GROUP_POLICY` in UserPolicyFields).
+ * inherits from its access group, and everyone else gets the server's
+ * built-in defaults: full access for an admin, the no-group defaults for a
+ * regular account (`useAdminPolicyDefaults`).
  */
 
 export type ValueSource = "default" | "group" | "custom";

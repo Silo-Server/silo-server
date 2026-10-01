@@ -2513,6 +2513,14 @@ export interface AdminUserEffectivePolicy {
   permissions: string[];
 }
 
+// The built-in layer an ungrouped account resolves its unset policy fields to
+// (GET /api/v2/admin/users/policy-defaults).
+export type AdminPolicyDefaultLayer = Omit<AdminUserEffectivePolicy, "permissions">;
+export interface AdminPolicyDefaults {
+  admin: AdminPolicyDefaultLayer;
+  ungrouped: AdminPolicyDefaultLayer;
+}
+
 export interface AdminUser {
   id: number;
   username: string;
