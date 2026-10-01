@@ -122,6 +122,9 @@ export const v2Operations = {
   "GET /api/v2/admin/diagnostics/reports": "listAdminDiagnosticReports",
   "GET /api/v2/admin/diagnostics/reports/{id}": "getAdminDiagnosticReport",
   "GET /api/v2/admin/diagnostics/reports/{id}/download": "downloadAdminDiagnosticReport",
+  "GET /api/v2/admin/downloads/preparations": "listAdminDownloadPreparations",
+  "GET /api/v2/admin/downloads/preparations/capabilities":
+    "getAdminDownloadPreparationCapabilities",
   "GET /api/v2/admin/files/{fileId}/contributions": "listAdminFileMarkerContributions",
   "GET /api/v2/admin/filesystem/browse": "browseAdminFilesystem",
   "GET /api/v2/admin/history-import-sources": "listAdminHistoryImportSources",

@@ -275,7 +275,7 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 	profileToken["getPolicyCapability"] = true
 	profileToken["getImageCapabilities"] = true
 	profileToken["listUserLibraries"] = true
-	for _, id := range []string{"listAdminDevices", "getAdminDevice", "getAdminDeviceCapabilities", "listAdminPlaybackSessions", "getAdminPlaybackSessionCapabilities", "listAdminNodeSessions", "getAdminPlaybackCommandCapabilities", "pauseAdminPlaybackSession", "resumeAdminPlaybackSession", "stopAdminPlaybackSession", "messageAdminPlaybackSession", "terminateAdminPlaybackSession"} {
+	for _, id := range []string{"listAdminDevices", "getAdminDevice", "getAdminDeviceCapabilities", "listAdminPlaybackSessions", "getAdminPlaybackSessionCapabilities", "listAdminDownloadPreparations", "getAdminDownloadPreparationCapabilities", "listAdminNodeSessions", "getAdminPlaybackCommandCapabilities", "pauseAdminPlaybackSession", "resumeAdminPlaybackSession", "stopAdminPlaybackSession", "messageAdminPlaybackSession", "terminateAdminPlaybackSession"} {
 		profileToken[id] = true
 	}
 	profileToken["getUserLibraryCapabilities"] = true

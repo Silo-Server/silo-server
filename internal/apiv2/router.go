@@ -122,6 +122,7 @@ type Dependencies struct {
 	ScanControls                    ScanControlService
 	AuthProviderIconPublic          AuthProviderIconPublic
 	AdminPlaybackSessions           AdminPlaybackSessionService
+	AdminDownloadPreparations       AdminDownloadPreparationService
 	AdminNodeSessions               AdminNodeSessionService
 	AdminPlaybackCommands           AdminPlaybackCommandService
 	AdminPlaybackTerminate          AdminPlaybackTerminateService

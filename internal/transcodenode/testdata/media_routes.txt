@@ -8,6 +8,7 @@ DELETE /downloads/artifacts/{artifact_id}	non-media
 GET /downloads/artifacts/{artifact_id}	media	transfer	internal_relay	false	true
 HEAD /downloads/artifacts/{artifact_id}	media	transfer	internal_relay	false	true
 POST /downloads/prepare	non-media
+GET /downloads/prepare/{artifact_id}/progress	non-media
 GET /hw-capabilities	non-media
 GET /metrics	non-media
 GET /remux/{session_id}	media	playback	internal_relay	false	true
@@ -28,6 +29,7 @@ DELETE /downloads/artifacts/{artifact_id}	non-media
 GET /downloads/artifacts/{artifact_id}	media	transfer	internal_relay	false	true
 HEAD /downloads/artifacts/{artifact_id}	media	transfer	internal_relay	false	true
 POST /downloads/prepare	non-media
+GET /downloads/prepare/{artifact_id}/progress	non-media
 GET /hw-capabilities	non-media
 GET /metrics	non-media
 GET /remux/{session_id}	media	playback	internal_relay	false	true

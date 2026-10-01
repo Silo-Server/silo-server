@@ -4689,6 +4689,476 @@
         ],
         "type": "object"
       },
+      "AdminDownloadPreparation": {
+        "additionalProperties": false,
+        "properties": {
+          "attempts": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "content_id": {
+            "description": "The movie, or the series an episode belongs to",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "episode_id": {
+            "type": "string"
+          },
+          "episode_name": {
+            "type": "string"
+          },
+          "episode_number": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "error": {
+            "description": "Last attempt's failure, when there was one",
+            "type": "string"
+          },
+          "failed_at": {
+            "description": "Present only when state is failed",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "remux",
+              "transcode"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "description": "Prepared artifact id; one job can serve many downloads",
+            "type": "string"
+          },
+          "log_session_id": {
+            "description": "playback_session_id under which this job's FFmpeg output appears in the operational logs, across every attempt",
+            "type": "string"
+          },
+          "max_attempts": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "media_file_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "media_title": {
+            "type": "string"
+          },
+          "media_type": {
+            "type": "string"
+          },
+          "next_retry_at": {
+            "description": "Present only when state is retrying",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "output": {
+            "$ref": "#/components/schemas/AdminDownloadPreparationOutput"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/AdminDownloadPreparationProgress",
+            "description": "Latest reading of a running attempt, written about every 5 seconds; absent until the first one"
+          },
+          "progress_unavailable": {
+            "description": "The running attempt's worker cannot report progress, so progress will stay absent",
+            "type": "boolean"
+          },
+          "queue_position": {
+            "description": "1-based position among queued jobs; present only when state is queued",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "requesters": {
+            "description": "Download rows waiting on this job, oldest first",
+            "items": {
+              "$ref": "#/components/schemas/AdminDownloadPreparationRequester"
+            },
+            "type": "array"
+          },
+          "season_number": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "series_name": {
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/AdminDownloadPreparationSource"
+          },
+          "started_at": {
+            "description": "When the current or last attempt started",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "state": {
+            "description": "running: an attempt is encoding. queued: waiting for a worker. retrying: an attempt failed and the job waits out its backoff (next_retry_at). failed: attempts are exhausted; listed for 24 hours after failing.",
+            "enum": [
+              "running",
+              "queued",
+              "retrying",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "worker": {
+            "$ref": "#/components/schemas/AdminDownloadPreparationWorker",
+            "description": "Where the current or last attempt ran; absent before a worker was chosen"
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "format",
+          "log_session_id",
+          "media_file_id",
+          "media_title",
+          "media_type",
+          "source",
+          "output",
+          "attempts",
+          "max_attempts",
+          "created_at",
+          "progress_unavailable",
+          "requesters"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadPreparationAudioTrack": {
+        "additionalProperties": false,
+        "properties": {
+          "channels": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "codec": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AdminDownloadPreparationCapabilitiesOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "failed_window_seconds": {
+            "description": "How long a failed job stays listed",
+            "format": "int64",
+            "type": "integer"
+          },
+          "live_progress": {
+            "description": "Running jobs report progress",
+            "type": "boolean"
+          },
+          "realtime_channel": {
+            "description": "Admin realtime channel carrying download_preparation.changed and download_preparation.progress",
+            "type": "string"
+          },
+          "revision": {
+            "description": "Opaque revision of this document",
+            "type": "string"
+          },
+          "state": {
+            "description": "Support and configuration state, not health",
+            "enum": [
+              "available",
+              "disabled",
+              "not_configured",
+              "unsupported"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "realtime_channel",
+          "failed_window_seconds",
+          "live_progress",
+          "revision",
+          "state",
+          "allowed"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadPreparationCounts": {
+        "additionalProperties": false,
+        "properties": {
+          "failed_recent": {
+            "description": "Jobs that failed in the last 24 hours",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "queued": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "retrying": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "running": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "running",
+          "queued",
+          "retrying",
+          "failed_recent"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadPreparationOutput": {
+        "additionalProperties": false,
+        "properties": {
+          "all_audio_tracks": {
+            "description": "Every source audio track is kept, in source order",
+            "type": "boolean"
+          },
+          "audio_codec": {
+            "description": "Target audio codec, or copy",
+            "type": "string"
+          },
+          "bitrate_kbps": {
+            "description": "Video bitrate cap of a transcode",
+            "format": "int64",
+            "type": "integer"
+          },
+          "container": {
+            "type": "string"
+          },
+          "resolution": {
+            "type": "string"
+          },
+          "tone_map_mode": {
+            "description": "Present when HDR is tone-mapped to SDR",
+            "type": "string"
+          },
+          "tone_map_source_kind": {
+            "type": "string"
+          },
+          "video_codec": {
+            "description": "Target video codec, or copy for a remux",
+            "type": "string"
+          }
+        },
+        "required": [
+          "container",
+          "video_codec",
+          "audio_codec",
+          "all_audio_tracks"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadPreparationProgress": {
+        "additionalProperties": false,
+        "properties": {
+          "duration_seconds": {
+            "description": "Length progress is measured against; 0 when unknown",
+            "format": "double",
+            "minimum": 0,
+            "type": "number"
+          },
+          "encoded_seconds": {
+            "description": "Output timeline written so far",
+            "format": "double",
+            "minimum": 0,
+            "type": "number"
+          },
+          "speed": {
+            "description": "Encode rate as a multiple of realtime; 0 when not reported yet",
+            "format": "double",
+            "minimum": 0,
+            "type": "number"
+          },
+          "updated_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "encoded_seconds",
+          "duration_seconds",
+          "speed",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadPreparationRequester": {
+        "additionalProperties": false,
+        "properties": {
+          "device_id": {
+            "description": "Absent for a one-off web download",
+            "type": "string"
+          },
+          "device_name": {
+            "type": "string"
+          },
+          "device_platform": {
+            "type": "string"
+          },
+          "profile_id": {
+            "type": "string"
+          },
+          "profile_name": {
+            "type": "string"
+          },
+          "status": {
+            "description": "The download row's status",
+            "type": "string"
+          },
+          "user_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "username",
+          "profile_id",
+          "status"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadPreparationSource": {
+        "additionalProperties": false,
+        "properties": {
+          "audio_tracks": {
+            "items": {
+              "$ref": "#/components/schemas/AdminDownloadPreparationAudioTrack"
+            },
+            "type": "array"
+          },
+          "bitrate_kbps": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "container": {
+            "type": "string"
+          },
+          "duration_seconds": {
+            "format": "double",
+            "minimum": 0,
+            "type": "number"
+          },
+          "file_size": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "hdr": {
+            "type": "boolean"
+          },
+          "resolution": {
+            "type": "string"
+          },
+          "video_codec": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "hdr",
+          "audio_tracks",
+          "file_size",
+          "duration_seconds"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadPreparationWorker": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "description": "server: an API server. node: a transcode node.",
+            "enum": [
+              "server",
+              "node"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "Node name, or the API server's node id, when the attempt started",
+            "type": "string"
+          },
+          "node_id": {
+            "description": "Transcode node id when kind is node",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadPreparationsOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/AdminDownloadPreparationCounts"
+          },
+          "items": {
+            "description": "Running jobs, then jobs waiting to retry, then the queue in claim order, then recent failures, newest first",
+            "items": {
+              "$ref": "#/components/schemas/AdminDownloadPreparation"
+            },
+            "maxItems": 500,
+            "type": "array"
+          }
+        },
+        "required": [
+          "counts",
+          "items"
+        ],
+        "type": "object"
+      },
       "AdminEmailTestInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -61377,6 +61847,362 @@
         "x-silo-class": "acting_admin",
         "x-silo-raw-protocol": "diagnostic-bundle",
         "x-silo-raw-reason": "The existing administrator consumer downloads a gzip archive; bytes must not pass through JSON encoding or response buffering.",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/downloads/preparations": {
+      "get": {
+        "operationId": "listAdminDownloadPreparations",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum items; counts always cover every listed job",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 200,
+              "description": "Maximum items; counts always cover every listed job",
+              "format": "int64",
+              "maximum": 500,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDownloadPreparationsOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read the offline-download preparation queue: running, queued and retrying jobs with live progress, and failures from the last 24 hours.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/downloads/preparations/capabilities": {
+      "get": {
+        "operationId": "getAdminDownloadPreparationCapabilities",
+        "parameters": [
+          {
+            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDownloadPreparationCapabilitiesOutputBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current; no body.",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Discover the admin view of offline-download preparation.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-conditional": true,
         "x-silo-service-backed": true
       }
     },
@@ -190554,6 +191380,57 @@
       {
         "parameters": [
           {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9_-]{1,128}$",
+              "type": "string"
+            }
+          }
+        ],
+        "description": "Read the in-memory progress of a prepare attempt running on this node. An id with no encode in flight answers running=false, never 404, so callers can treat 404 as a node that predates this operation. Readings are not durable and say nothing about a completed artifact.",
+        "listener": "transcode_node",
+        "method": "GET",
+        "path": "/downloads/prepare/{artifact_id}/progress",
+        "handler": "(*internal/transcodenode.Server).handleDownloadPrepareProgress",
+        "auth_class": "node_bearer",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/downloadprepare_Progress"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        }
+      },
+      {
+        "parameters": [
+          {
             "description": "Signed download authority, including local path or remote artifact and optional exact execution attestation.",
             "in": "path",
             "name": "token",
@@ -194829,6 +195706,40 @@
         ],
         "type": "object"
       },
+      "downloadprepare_Progress": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_id": {
+            "type": "string"
+          },
+          "duration_seconds": {
+            "format": "double",
+            "minimum": 0,
+            "type": "number"
+          },
+          "encoded_seconds": {
+            "format": "double",
+            "minimum": 0,
+            "type": "number"
+          },
+          "running": {
+            "type": "boolean"
+          },
+          "speed": {
+            "format": "double",
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "running",
+          "encoded_seconds",
+          "duration_seconds",
+          "speed"
+        ],
+        "type": "object"
+      },
       "downloadprepare_Request": {
         "additionalProperties": true,
         "properties": {
@@ -194844,6 +195755,9 @@
             "type": "integer"
           },
           "input_path": {
+            "type": "string"
+          },
+          "log_session_id": {
             "type": "string"
           },
           "prepared_tracks": {

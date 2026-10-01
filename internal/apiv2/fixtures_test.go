@@ -1706,6 +1706,8 @@ func fixtureCases() []fixtureCase {
 			method:   http.MethodGet, path: "/api/v2/catalog/series/series:severance/seasons?include_artwork=invalid", headers: viewer,
 			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: "list_admin_users_exact_identity", operationID: opListAdminUsers, method: http.MethodGet, path: Prefix + "/admin/users?identity=LAURA%40example.test", headers: bearer(adminToken), status: 200, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/AdminUserCollection", scenario: "An exact identity filter matches case-insensitively before account pagination."},
+		{name: "admin_download_preparation_capabilities", operationID: "getAdminDownloadPreparationCapabilities", method: "GET", path: Prefix + "/admin/downloads/preparations/capabilities", headers: bearer(adminToken), status: 200, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminDownloadPreparationCapabilitiesOutputBody", scenario: "Administrator discovery names the realtime channel and how long failed preparations stay listed."},
+		{name: "admin_download_preparations", operationID: "listAdminDownloadPreparations", method: "GET", path: Prefix + "/admin/downloads/preparations?limit=10", headers: bearer(adminToken), status: 200, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/AdminDownloadPreparationsOutputBody", scenario: "The preparation queue lists a running transcode with live progress, a queued remux, and a recent failure, with totals across every listed job."},
 		{name: "admin_playback_summary", operationID: "getAdminPlaybackSummary", method: "GET", path: Prefix + "/admin/sessions/summary?user_id=7&limit=1", headers: bearer(adminToken), status: 200, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/AdminPlaybackSummaryOutputBody", scenario: "A bounded account activity sample omits diagnostic identifiers and network metadata."},
 		{name: "admin_resource_capabilities", operationID: "getAdminResourceCapabilities", scenario: "Administrator discovery reports unavailable sampling when no sampler is configured.", method: "GET", path: Prefix + "/admin/system/resources/capabilities", headers: bearer(adminToken), status: 200, schema: "#/components/schemas/AdminResourceCapabilities", assertHeaders: []string{"Content-Type", "Cache-Control"}},
 		{name: "login_provider_null", operationID: "login",
@@ -1829,6 +1831,7 @@ func fixtureDeps() Dependencies {
 	deps.ThemeSongs = &fakeThemeSongs{}
 	deps.UserLibraries = new(fakeUserLibraries)
 	deps.AdminPlaybackSessions = new(fakeAdminPlaybackSessions)
+	deps.AdminDownloadPreparations = new(fakeAdminDownloadPreparations)
 	deps.AdminDevices = new(fakeAdminDevices)
 	deps.Invitations = fixtureInvitations()
 	deps.PasswordResets = fixturePasswordResets()

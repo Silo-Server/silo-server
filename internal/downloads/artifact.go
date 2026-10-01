@@ -92,6 +92,27 @@ type Artifact struct {
 	CreatedAt                  time.Time
 	CompletedAt                *time.Time
 	LastUsedAt                 time.Time
+	// Live state of the current attempt; a claim resets it.
+	StartedAt           *time.Time
+	WorkerKind          string // "", WorkerServer or WorkerNode
+	WorkerNodeID        *int
+	WorkerName          string
+	Progress            *ArtifactProgress
+	ProgressUnavailable bool
+}
+
+// Worker kinds recorded on an artifact attempt (download_artifacts.worker_kind).
+const (
+	WorkerServer = "server"
+	WorkerNode   = "node"
+)
+
+// ArtifactProgress is the last progress reading the lease owner persisted.
+type ArtifactProgress struct {
+	EncodedSeconds  float64
+	DurationSeconds float64
+	Speed           float64
+	UpdatedAt       time.Time
 }
 
 type paramsHashParams struct {

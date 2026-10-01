@@ -2912,7 +2912,9 @@ export type EventChannel =
   // useSettingValuesRealtime.
   | "user_settings"
   | "settings"
-  | "notifications";
+  | "notifications"
+  // Admin-only changes to the offline-download preparation queue.
+  | "download_preparations";
 
 export interface NotificationReasonFlags {
   // episode.available reasons

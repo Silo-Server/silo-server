@@ -1,4 +1,6 @@
 import { adminSessionsKey } from "@/api/v2/adminSessionsCache";
+import { adminDownloadPreparationsKey } from "@/api/v2/adminDownloadPreparations";
+import { makePreparation, makePreparationList } from "@/test/downloadPreparations";
 import {
   captureProfileRequestContext,
   setAccessToken,
@@ -525,6 +527,85 @@ describe("RealtimeEventsProvider", () => {
     view.unmount();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(load).toHaveBeenCalledTimes(3);
+  });
+
+  it("patches preparation progress in place and re-reads the list on other changes", async () => {
+    setProfileId("primary");
+    mockState.profile = { id: "primary", has_pin: false };
+    mockState.pathname = "/admin/activity";
+    const queryClient = new QueryClient();
+    const key = adminDownloadPreparationsKey(captureProfileRequestContext());
+    const initial = makePreparationList([makePreparation()]);
+    const load = vi.fn(async () => initial);
+    queryClient.setQueryData(key, initial);
+    function PreparationsObserver() {
+      useQuery({ queryKey: key, queryFn: load, staleTime: Infinity });
+      return null;
+    }
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RealtimeEventsProvider>
+          <PreparationsObserver />
+        </RealtimeEventsProvider>
+      </QueryClientProvider>,
+    );
+    await act(async () => {});
+    const socket = FakeWebSocket.instances[0]!;
+    const progress = {
+      encoded_seconds: 3000,
+      duration_seconds: 6000,
+      speed: 3,
+      updated_at: "2026-01-01T12:20:00.000Z",
+    };
+
+    await act(async () => {
+      socket.emitMessage({
+        type: "event",
+        channel: "download_preparations",
+        event: "download_preparation.progress",
+        data: { id: "art-1", progress },
+      });
+    });
+    expect(load).not.toHaveBeenCalled();
+    expect(queryClient.getQueryData<typeof initial>(key)?.items[0]?.progress).toEqual(progress);
+
+    // A job the list does not show yet, and a state change, both re-read it.
+    await act(async () => {
+      socket.emitMessage({
+        type: "event",
+        channel: "download_preparations",
+        event: "download_preparation.progress",
+        data: { id: "art-new", progress },
+      });
+    });
+    expect(load).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    await act(async () => {
+      socket.emitMessage({
+        type: "event",
+        channel: "download_preparations",
+        event: "download_preparation.changed",
+        data: { id: "art-1" },
+      });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(load).toHaveBeenCalledTimes(2);
+
+    // A (re)subscription snapshot carries no body and also re-reads.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    await act(async () => {
+      socket.emitMessage({ type: "snapshot", channel: "download_preparations", data: null });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
     });
     expect(load).toHaveBeenCalledTimes(3);
   });

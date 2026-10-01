@@ -1094,6 +1094,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/downloads/preparations": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read the offline-download preparation queue: running, queued and retrying jobs with live progress, and failures from the last 24 hours. */
+    get: operations["listAdminDownloadPreparations"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/downloads/preparations/capabilities": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Discover the admin view of offline-download preparation. */
+    get: operations["getAdminDownloadPreparationCapabilities"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/email/test": {
     parameters: {
       query?: never;
@@ -12355,6 +12389,204 @@ export interface components {
       unavailable?: boolean;
       /** Format: double */
       used_gb: number;
+    };
+    AdminDownloadPreparation: {
+      /** Format: int64 */
+      attempts: number;
+      /** @description The movie, or the series an episode belongs to */
+      content_id?: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      created_at: string;
+      episode_id?: string;
+      episode_name?: string;
+      /** Format: int64 */
+      episode_number?: number;
+      /** @description Last attempt's failure, when there was one */
+      error?: string;
+      /**
+       * Format: date-time
+       * @description Present only when state is failed
+       */
+      failed_at?: string;
+      /** @enum {string} */
+      format: "remux" | "transcode";
+      /** @description Prepared artifact id; one job can serve many downloads */
+      id: string;
+      /** @description playback_session_id under which this job's FFmpeg output appears in the operational logs, across every attempt */
+      log_session_id: string;
+      /** Format: int64 */
+      max_attempts: number;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      media_file_id: string;
+      media_title: string;
+      media_type: string;
+      /**
+       * Format: date-time
+       * @description Present only when state is retrying
+       */
+      next_retry_at?: string;
+      output: components["schemas"]["AdminDownloadPreparationOutput"];
+      /** @description Latest reading of a running attempt, written about every 5 seconds; absent until the first one */
+      progress?: components["schemas"]["AdminDownloadPreparationProgress"];
+      /** @description The running attempt's worker cannot report progress, so progress will stay absent */
+      progress_unavailable: boolean;
+      /**
+       * Format: int64
+       * @description 1-based position among queued jobs; present only when state is queued
+       */
+      queue_position?: number;
+      /** @description Download rows waiting on this job, oldest first */
+      requesters: components["schemas"]["AdminDownloadPreparationRequester"][];
+      /** Format: int64 */
+      season_number?: number;
+      series_name?: string;
+      source: components["schemas"]["AdminDownloadPreparationSource"];
+      /**
+       * Format: date-time
+       * @description When the current or last attempt started
+       */
+      started_at?: string;
+      /**
+       * @description running: an attempt is encoding. queued: waiting for a worker. retrying: an attempt failed and the job waits out its backoff (next_retry_at). failed: attempts are exhausted; listed for 24 hours after failing.
+       * @enum {string}
+       */
+      state: "running" | "queued" | "retrying" | "failed";
+      /** @description Where the current or last attempt ran; absent before a worker was chosen */
+      worker?: components["schemas"]["AdminDownloadPreparationWorker"];
+    };
+    AdminDownloadPreparationAudioTrack: {
+      /** Format: int64 */
+      channels?: number;
+      codec?: string;
+      language?: string;
+    };
+    AdminDownloadPreparationCapabilitiesOutputBody: {
+      /** @description Whether the current principal may use the capability */
+      allowed: boolean;
+      available: boolean;
+      /**
+       * Format: int64
+       * @description How long a failed job stays listed
+       */
+      failed_window_seconds: number;
+      /** @description Running jobs report progress */
+      live_progress: boolean;
+      /** @description Admin realtime channel carrying download_preparation.changed and download_preparation.progress */
+      realtime_channel: string;
+      /** @description Opaque revision of this document */
+      revision: string;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
+    };
+    AdminDownloadPreparationCounts: {
+      /**
+       * Format: int64
+       * @description Jobs that failed in the last 24 hours
+       */
+      failed_recent: number;
+      /** Format: int64 */
+      queued: number;
+      /** Format: int64 */
+      retrying: number;
+      /** Format: int64 */
+      running: number;
+    };
+    AdminDownloadPreparationOutput: {
+      /** @description Every source audio track is kept, in source order */
+      all_audio_tracks: boolean;
+      /** @description Target audio codec, or copy */
+      audio_codec: string;
+      /**
+       * Format: int64
+       * @description Video bitrate cap of a transcode
+       */
+      bitrate_kbps?: number;
+      container: string;
+      resolution?: string;
+      /** @description Present when HDR is tone-mapped to SDR */
+      tone_map_mode?: string;
+      tone_map_source_kind?: string;
+      /** @description Target video codec, or copy for a remux */
+      video_codec: string;
+    };
+    AdminDownloadPreparationProgress: {
+      /**
+       * Format: double
+       * @description Length progress is measured against; 0 when unknown
+       */
+      duration_seconds: number;
+      /**
+       * Format: double
+       * @description Output timeline written so far
+       */
+      encoded_seconds: number;
+      /**
+       * Format: double
+       * @description Encode rate as a multiple of realtime; 0 when not reported yet
+       */
+      speed: number;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      updated_at: string;
+    };
+    AdminDownloadPreparationRequester: {
+      /** @description Absent for a one-off web download */
+      device_id?: string;
+      device_name?: string;
+      device_platform?: string;
+      profile_id: string;
+      profile_name?: string;
+      /** @description The download row's status */
+      status: string;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      user_id: string;
+      username: string;
+    };
+    AdminDownloadPreparationSource: {
+      audio_tracks: components["schemas"]["AdminDownloadPreparationAudioTrack"][];
+      /** Format: int64 */
+      bitrate_kbps?: number;
+      container?: string;
+      /** Format: double */
+      duration_seconds: number;
+      /** Format: int64 */
+      file_size: number;
+      hdr: boolean;
+      resolution?: string;
+      video_codec?: string;
+    };
+    AdminDownloadPreparationsOutputBody: {
+      counts: components["schemas"]["AdminDownloadPreparationCounts"];
+      /** @description Running jobs, then jobs waiting to retry, then the queue in claim order, then recent failures, newest first */
+      items: components["schemas"]["AdminDownloadPreparation"][];
+    };
+    AdminDownloadPreparationWorker: {
+      /**
+       * @description server: an API server. node: a transcode node.
+       * @enum {string}
+       */
+      kind: "server" | "node";
+      /** @description Node name, or the API server's node id, when the attempt started */
+      name: string;
+      /**
+       * @description Transcode node id when kind is node
+       * @example 1
+       */
+      node_id?: string;
     };
     AdminEmailTestInputBody: {
       to: string;
@@ -39078,6 +39310,247 @@ export interface operations {
       /** @description Conflict */
       409: {
         headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listAdminDownloadPreparations: {
+    parameters: {
+      query?: {
+        /** @description Maximum items; counts always cover every listed job */
+        limit?: number;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminDownloadPreparationsOutputBody"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminDownloadPreparationCapabilities: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminDownloadPreparationCapabilitiesOutputBody"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {

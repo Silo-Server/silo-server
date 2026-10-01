@@ -1872,6 +1872,32 @@ disabled default on read failure; the write fails closed without an atomic store
 No first-party or internal writer is recorded, so no new UI or native flow is added.
 The bridge writer and profile section enforcement remain unchanged.
 
+### Offline-download preparation
+
+`GET /api/v2/admin/downloads/preparations` lists the server-side remux and
+transcode jobs that turn library files into offline downloads. Items come in
+this order: running jobs, jobs waiting to retry, the queue in claim order (with
+a 1-based `queue_position`), and jobs that failed in the last 24 hours, newest
+first. `limit` (1–500, default 200) caps the items; `counts` (`running`,
+`queued`, `retrying`, `failed_recent`) always covers every listed job, so a
+client can tell when items were cut. Each item carries its source and output
+recipe, the worker of the current or last attempt (`server` with the API node
+id, or `node` with the transcode node id and name), attempt counts, the last
+error, the latest `progress` reading (`encoded_seconds`, `duration_seconds`,
+`speed`, `updated_at`) of a running job, `progress_unavailable` when the worker
+cannot report progress, the `log_session_id` its FFmpeg output is logged under,
+and the download rows waiting on it with their account, profile, and device.
+
+`GET /api/v2/admin/downloads/preparations/capabilities` reports availability,
+the realtime channel (`download_preparations`), and the failure window in
+seconds. The admin-only channel publishes `download_preparation.changed`
+(`{id}`) when a job is queued, claimed, assigned a worker, finishes, fails, or is
+requeued, and when a user adds or removes a download waiting on it, and `download_preparation.progress` (`{id, progress}`) at most every
+five seconds per running job. The subscription snapshot is `null`; re-read the
+list after subscribing. See
+[preparation progress](downloads-api.md#preparation-progress-admin) for how the
+server records it.
+
 ### Sequenced administrator playback commands (v2)
 
 `POST /api/v2/admin/sessions/{session_id}/pause`, `/resume`, `/stop` and

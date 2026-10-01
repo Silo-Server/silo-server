@@ -597,9 +597,25 @@ func (s *Service) confirmArtifactLink(ctx context.Context, d *Download) *Downloa
 	confirmed, err := s.repo.ConfirmArtifactLink(ctx, d)
 	if err != nil {
 		slog.WarnContext(ctx, "confirming download artifact link failed", "component", "downloads", "download_id", d.ID, "artifact_id", d.ArtifactID, "error", err)
-		return d
+		confirmed = d
 	}
+	// A new download joining a job still being prepared changes that job's
+	// requester list; the job itself emits nothing when it is only reused.
+	s.notifyPreparationRequesters(ctx, confirmed)
 	return confirmed
+}
+
+// notifyPreparationRequesters tells admin listeners that the downloads waiting
+// on d's preparation job changed. Rows linked to a ready artifact are not in
+// the preparation list, so they need no event.
+func (s *Service) notifyPreparationRequesters(ctx context.Context, d *Download) {
+	if s.artifacts == nil || d == nil || d.ArtifactID == "" {
+		return
+	}
+	if d.Status != StatusPreparing && d.Status != StatusFailed {
+		return
+	}
+	s.artifacts.notifyPreparationChanged(ctx, d.ArtifactID)
 }
 
 // artifactRowStatus maps an ensured artifact to the download row status and
@@ -1158,7 +1174,14 @@ func (s *Service) Delete(ctx context.Context, userID int, profileID, deviceID, d
 		if profileID == "" {
 			return ErrProfileRequired
 		}
-		return s.repo.DeleteManaged(ctx, downloadID, userID, profileID, deviceID)
+		// Read first only to tell admin listeners which preparation lost a
+		// requester; DeleteManaged remains the authorization and the write.
+		before, _ := s.repo.GetByID(ctx, downloadID)
+		if err := s.repo.DeleteManaged(ctx, downloadID, userID, profileID, deviceID); err != nil {
+			return err
+		}
+		s.notifyPreparationRequesters(ctx, before)
+		return nil
 	}
 
 	dl, err := s.repo.GetByID(ctx, downloadID)
@@ -1170,10 +1193,14 @@ func (s *Service) Delete(ctx context.Context, userID int, profileID, deviceID, d
 	}
 	switch dl.Status {
 	case StatusQueued, StatusDownloading:
-		return s.repo.CancelByID(ctx, downloadID, userID)
+		err = s.repo.CancelByID(ctx, downloadID, userID)
 	default:
-		return s.repo.Delete(ctx, downloadID, userID)
+		err = s.repo.Delete(ctx, downloadID, userID)
 	}
+	if err == nil {
+		s.notifyPreparationRequesters(ctx, dl)
+	}
+	return err
 }
 
 func (s *Service) resolveBulkQuality(requested string, _ *PolicyUser, _ config.DownloadConfig) (QualityDecision, error) {

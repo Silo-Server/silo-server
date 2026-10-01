@@ -699,6 +699,7 @@ func registerAll(reg *Registry) {
 	registerPersonalAPIKeys(reg)
 	registerAdminDevices(reg)
 	registerAdminPlaybackSessions(reg)
+	registerAdminDownloadPreparations(reg)
 	registerAdminPlaybackCommands(reg)
 	registerAdminPlaybackTerminate(reg)
 	registerAdminNodeSessions(reg)

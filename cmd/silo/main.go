@@ -2850,6 +2850,22 @@ func main() {
 				},
 			)
 			artifactMgr.SetSettingsReader(settingsRepo)
+			artifactMgr.SetFFmpegLogSink(playback.NewSlogFFmpegLogSink(slog.Default(), deps.NodeID))
+			artifactMgr.SetPreparationNotifier(func(ctx context.Context, event downloads.PreparationEvent) {
+				if deps.EventsHub == nil {
+					return
+				}
+				payload := map[string]any{"id": event.ArtifactID}
+				if event.Progress != nil {
+					payload["progress"] = map[string]any{
+						"encoded_seconds":  event.Progress.EncodedSeconds,
+						"duration_seconds": event.Progress.DurationSeconds,
+						"speed":            event.Progress.Speed,
+						"updated_at":       event.Progress.UpdatedAt.UTC().Format("2006-01-02T15:04:05.000Z"),
+					}
+				}
+				_ = deps.EventsHub.PublishJSON(ctx, evt.ChannelDownloadPreparations, event.Name, payload, evt.PublishOptions{AdminOnly: true})
+			})
 			encodeTask := tasks.NewEncodeDownloadArtifactsTask(artifactMgr)
 			artifactMgr.SetKick(func() { _ = taskMgr.RunTask(appCtx, encodeTask.Key()) })
 			taskMgr.Register(encodeTask)

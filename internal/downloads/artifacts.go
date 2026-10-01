@@ -59,6 +59,9 @@ type playbackPreparer struct{}
 
 // PrepareFile produces one finalized local download artifact.
 func (playbackPreparer) PrepareFile(ctx context.Context, _ string, opts playback.TranscodeOpts, outputPath string) (PreparedArtifact, error) {
+	observer := prepareObserverFrom(ctx)
+	observer.prepareWorker(nil, "")
+	opts.PrepareProgressSink = observer
 	var err error
 	opts, err = playback.ResolveToneMapExecutor(ctx, opts)
 	if err != nil {
@@ -105,6 +108,8 @@ type ArtifactManager struct {
 
 	mu             sync.Mutex
 	kick           func()
+	prepNotify     PreparationNotifier
+	ffmpegLogs     playback.FFmpegLogSink
 	lastDiskSweep  time.Time
 	lastStaleSweep time.Time
 }
@@ -373,10 +378,12 @@ func (m *ArtifactManager) ensureResolved(ctx context.Context, file *models.Media
 		default:
 			row.Status = queuedArtifactStatus(row.ToneMapMode, row.AudioRecipeVersion, row.TrackRecipeVersion)
 		}
+		m.notifyPreparationChanged(ctx, row.ID)
 		m.triggerDrain()
 		return row, nil
 	}
 	if created {
+		m.notifyPreparationChanged(ctx, row.ID)
 		m.triggerDrain()
 	}
 	return row, nil
@@ -566,10 +573,13 @@ func (m *ArtifactManager) recover(ctx context.Context) {
 }
 
 func (m *ArtifactManager) recoverQueueState(ctx context.Context) {
-	if count, err := m.repo.ReclaimExpiredLeases(ctx); err != nil {
+	if reclaimed, err := m.repo.ReclaimExpiredLeases(ctx); err != nil {
 		slog.WarnContext(ctx, "download artifact lease reclaim failed", "component", "downloads", "error", err)
 	} else {
-		workmetrics.Recovered("downloads", int64(len(count)))
+		workmetrics.Recovered("downloads", int64(len(reclaimed)))
+		for _, rc := range reclaimed {
+			m.notifyPreparationChanged(ctx, rc.ID)
+		}
 	}
 
 	// Reconcile downloads stranded in 'preparing' against their artifact's
@@ -628,6 +638,7 @@ func (m *ArtifactManager) recoverReadyArtifacts(ctx context.Context) {
 					for _, download := range linked {
 						m.publish(ctx, download)
 					}
+					m.notifyPreparationChanged(ctx, a.ID)
 					slog.WarnContext(ctx, "download artifact output missing, re-queued", "component", "downloads", "artifact_id", a.ID, "path", a.OutputPath)
 				}
 			}
@@ -780,6 +791,7 @@ func (m *ArtifactManager) requeueRemoteArtifactWithFence(ctx context.Context, a 
 		for _, download := range linked {
 			m.publish(ctx, download)
 		}
+		m.notifyPreparationChanged(ctx, a.ID)
 		slog.WarnContext(ctx, "remote download artifact re-queued", "component", "downloads", "artifact_id", a.ID, "node", a.OriginNodeURL, "reason", reason)
 		if triggerDrain {
 			m.triggerDrain()
@@ -818,6 +830,7 @@ func (m *ArtifactManager) drain(ctx context.Context) error {
 			wg.Wait()
 			return err // includes context cancellation (pgx honors ctx)
 		}
+		m.notifyPreparationChanged(ctx, job.ID)
 		wg.Add(1)
 		go func(a *Artifact) {
 			defer wg.Done()
@@ -867,7 +880,9 @@ func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 	// the readiness fence can therefore queue its object for deletion without
 	// racing the replacement worker's output on the same node.
 	remoteAttemptID := a.ID + "-" + uuid.NewString()
-	prepared, err := m.preparer.PrepareFile(hbCtx, remoteAttemptID, opts, a.OutputPath)
+	observer := m.newAttemptObserver(a.ID)
+	go observer.run(hbCtx)
+	prepared, err := m.preparer.PrepareFile(withPrepareObserver(hbCtx, observer), remoteAttemptID, opts, a.OutputPath)
 	if err != nil {
 		if prepared.Remote() {
 			m.enqueueRemoteCleanup(ctx, a.ID, prepared, true)
@@ -927,6 +942,7 @@ func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 		return
 	}
 	observation.Finish("success")
+	m.notifyPreparationChanged(ctx, a.ID)
 	flipped, err := m.downloads.MarkLinkedDownloadsReady(ctx, a.ID, size)
 	if err != nil {
 		slog.ErrorContext(ctx, "flipping linked downloads ready failed", "component", "downloads", "artifact_id", a.ID, "error", err)
@@ -1024,6 +1040,7 @@ func (m *ArtifactManager) failJob(ctx context.Context, a *Artifact, msg string) 
 		// Lease lost; the current owner is responsible for the job's outcome.
 		return
 	}
+	m.notifyPreparationChanged(ctx, a.ID)
 	workmetrics.FinishContext(ctx, "error")
 	if terminal {
 		m.failLinkedDownloads(ctx, a.ID, msg)
@@ -1102,8 +1119,12 @@ func (m *ArtifactManager) buildOpts(file *models.MediaFile, a *Artifact) playbac
 		preparedTracks = playback.PlanPreparedTracks(file, a.CodecAudio, a.AudioTrackIndex)
 		sourceAudioChannels = 0
 	}
+	m.mu.Lock()
+	ffmpegLogs := m.ffmpegLogs
+	m.mu.Unlock()
 	return playback.TranscodeOpts{
 		InputPath:                  file.FilePath,
+		SessionID:                  playback.DownloadPrepareLogSessionID(a.ID),
 		SourceVideoCodec:           sourceVideoCodec,
 		SourceVideoProfile:         sourceVideoProfile,
 		SourceVideoBitDepth:        sourceVideoBitDepth,
@@ -1130,6 +1151,9 @@ func (m *ArtifactManager) buildOpts(file *models.MediaFile, a *Artifact) playbac
 		HWAccel:                    cfg.Playback.HWAccel,
 		HWDevice:                   cfg.Playback.HWDevice,
 		TotalDuration:              float64(file.Duration),
+		NodeType:                   "integrated",
+		ExecutionMode:              "download_prepare",
+		FFmpegLogSink:              ffmpegLogs,
 	}
 }
 

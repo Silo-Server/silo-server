@@ -1551,6 +1551,27 @@ artifacts are evicted LRU under a byte budget, but never while a managed row —
 including a completed one representing a device's local library — still
 references them.
 
+### Preparation progress (admin)
+
+The lease owner of a running prepare job records where it runs (`worker_kind`,
+`worker_node_id`, `worker_name`) and its FFmpeg progress on the `download_artifacts`
+row, so every API replica serves the same view. Local encodes read FFmpeg's
+`-progress` stream directly; node encodes are polled through the node's progress
+operation (see [the worker protocol](architecture/worker-http-protocol.md)) while the
+prepare request is open. Progress is written at most every five seconds and only
+while the writer still holds the lease; a claim resets it. A node that predates the
+progress operation marks the attempt `progress_unavailable`.
+
+Administrators read the queue at `GET /api/v2/admin/downloads/preparations`
+(running, queued, and retrying jobs plus failures from the last 24 hours, with
+totals that cover every listed job) and discover it at
+`GET /api/v2/admin/downloads/preparations/capabilities`. The admin-only realtime
+channel `download_preparations` carries `download_preparation.changed` (`{id}`;
+re-read the list) and `download_preparation.progress` (`{id, progress}`); its
+subscription snapshot is `null`. FFmpeg output for every attempt, on the API host
+or a node, is logged under the row's `log_session_id` (`download-prepare-<id>`) as
+`playback_session_id`. None of this changes the client-facing download contract.
+
 ### Progress sync ordering
 
 Progress rows carry two server-owned facets, deliberately split:

@@ -941,6 +941,45 @@
       "body_file": "admin_discord_test.json"
     },
     {
+      "name": "admin_download_preparation_capabilities",
+      "operation_id": "getAdminDownloadPreparationCapabilities",
+      "scenario": "Administrator discovery names the realtime channel and how long failed preparations stay listed.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/downloads/preparations/capabilities",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminDownloadPreparationCapabilitiesOutputBody",
+      "body_file": "admin_download_preparation_capabilities.json"
+    },
+    {
+      "name": "admin_download_preparations",
+      "operation_id": "listAdminDownloadPreparations",
+      "scenario": "The preparation queue lists a running transcode with live progress, a queued remux, and a recent failure, with totals across every listed job.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/downloads/preparations?limit=10",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminDownloadPreparationsOutputBody",
+      "body_file": "admin_download_preparations.json"
+    },
+    {
       "name": "admin_episode_intro_redetect",
       "operation_id": "redetectAdminEpisodeIntro",
       "scenario": "Intro re-detection preserves the same local execution service and eligibility checks.",

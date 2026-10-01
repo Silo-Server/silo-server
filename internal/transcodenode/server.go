@@ -264,6 +264,7 @@ type Server struct {
 	registeredNodeURL         func() (string, bool)
 	tracker                   sessionTracker
 	ffmpegSink                playback.FFmpegLogSink
+	prepareProgress           prepareProgressRegistry
 	inputPaths                InputPathAuthorizer
 	themeInputs               ThemeInputApprover
 	transcodeDir              string
@@ -890,6 +891,7 @@ func (s *Server) router() chi.Router {
 		r.Get("/hw-capabilities", s.handleHWCapabilities)
 		r.Post("/chapter-thumbnails/extract", s.handleChapterThumbnailExtract)
 		r.Post("/downloads/prepare", s.handleDownloadPrepare)
+		r.Get("/downloads/prepare/{artifact_id}/progress", s.handleDownloadPrepareProgress)
 		r.Head("/downloads/artifacts/{artifact_id}", observeNode(s.telemetry, http.MethodHead, "/downloads/artifacts/{artifact_id}", s.handleDownloadArtifact))
 		r.Get("/downloads/artifacts/{artifact_id}", observeNode(s.telemetry, http.MethodGet, "/downloads/artifacts/{artifact_id}", s.handleDownloadArtifact))
 		r.Delete("/downloads/artifacts/{artifact_id}", s.handleDeleteDownloadArtifact)
@@ -999,6 +1001,9 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 		defer finishTracking()
 	}
 
+	progress := s.prepareProgress.begin(req.ArtifactID, req.TotalDuration)
+	defer s.prepareProgress.end(req.ArtifactID, progress)
+	opts.PrepareProgressSink = progress
 	if err := playback.PrepareFile(jobCtx, opts, outputPath); err != nil {
 		if jobCtx.Err() == nil {
 			slog.ErrorContext(jobCtx, "prepare download artifact", "component", "transcodenode", "artifact_id", req.ArtifactID, "error", err)

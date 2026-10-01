@@ -2400,6 +2400,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminAccounts = adminHandler
 		v2deps.AdminDevices = adminHandler
 		v2deps.AdminPlaybackSessions = adminHandler
+		if deps.DB != nil && deps.ArtifactManager != nil {
+			v2deps.AdminDownloadPreparations = downloads.NewPreparationReader(deps.DB, profileNamesByUser(deps.UserStoreProvider))
+		}
 		if adminPlaybackControlHandler != nil {
 			v2deps.AdminPlaybackCommands = adminPlaybackControlHandler
 			v2deps.AdminPlaybackTerminate = adminPlaybackControlHandler
@@ -4960,4 +4963,29 @@ func v2Dependencies(
 		out.CursorSecret = []byte(deps.Config.Auth.JWTSecret)
 	}
 	return out
+}
+
+// profileNamesByUser resolves an account's profile names through its user
+// store; nil when there is no store provider.
+func profileNamesByUser(stores userstore.UserStoreProvider) downloads.ProfileNamesFunc {
+	if stores == nil {
+		return nil
+	}
+	return func(ctx context.Context, userID int) (map[string]string, error) {
+		store, err := stores.ForUser(ctx, userID)
+		if err != nil || store == nil {
+			return nil, err
+		}
+		profiles, err := store.ListProfiles(ctx)
+		if err != nil {
+			return nil, err
+		}
+		names := make(map[string]string, len(profiles))
+		for _, profile := range profiles {
+			if name := strings.TrimSpace(profile.Name); name != "" {
+				names[profile.ID] = name
+			}
+		}
+		return names, nil
+	}
 }

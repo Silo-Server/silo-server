@@ -41,6 +41,7 @@ import { loadStoredImpersonationAdminSession } from "@/lib/impersonationSession"
 import { Toaster } from "@/components/ui/sonner";
 import { RealtimeEventsProvider } from "@/components/RealtimeEventsProvider";
 import { useEventChannel } from "@/components/realtimeEventsContext";
+import { useAdminDownloadPreparationsRefresh } from "@/hooks/queries/admin/downloadPreparations";
 import { useSettingValuesRealtime } from "@/hooks/queries/settingValues";
 import Layout from "@/components/Layout";
 import Home from "@/pages/Home";
@@ -746,6 +747,8 @@ function AdminRealtimeEventChannels() {
   useEventChannel("tasks");
   useEventChannel("scans");
   useEventChannel("settings");
+  useEventChannel("download_preparations");
+  useAdminDownloadPreparationsRefresh();
   return null;
 }
 
