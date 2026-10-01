@@ -134,6 +134,8 @@ func TestEpisodeExactTierCursorAndPlanPostgres(t *testing.T) {
 		{name: "insufficient exact", query: "Limited", types: []string{"episode"}, filter: filter, exact: 1, general: 1},
 		{name: "missing exact", query: "Quartzrare", types: []string{"episode"}, filter: filter, exact: 1, general: 1},
 		{name: "missing family", query: "Absentunique", types: []string{"episode"}, filter: filter, exact: 1, general: 1},
+		{name: "exact short title", query: "St", types: []string{"episode"}, filter: filter, exact: 1, general: 1},
+		{name: "leading short title", query: "Star A", types: []string{"episode"}, filter: filter, exact: 1, general: 1},
 		{name: "phrase", query: `"Star"`, types: []string{"episode"}, filter: filter, general: 1},
 		{name: "year", query: "Star 2024", types: []string{"episode"}, filter: filter, general: 1},
 		{name: "mixed", query: "Star", filter: filter, general: 1},
@@ -267,7 +269,7 @@ func TestEpisodeExactTierCursorAndPlanPostgres(t *testing.T) {
 	// parameters: a valid bigint with no representable membership is empty.
 	highIDOptions := &searchCursorSQL{countArgs: []any{"Star", "star:*", "star", nil, ""}}
 	highIDSQL, highIDArgs := buildEpisodeExactTierSQL(parsed, AccessFilter{AllowedLibraryIDs: []int{3_000_000_000}}, highIDOptions,
-		[]string{"ece.search_title_vector @@ to_tsquery('simple', $2)"}, 3, 4, 5, 21)
+		&episodeSearchSource{}, searchTitleLookup{exactIdx: 3, titleLookupIdx: 3}, 4, 5, 21)
 	highIDRows, err := pool.Query(ctx, highIDSQL, highIDArgs...)
 	if err != nil {
 		t.Fatal(err)

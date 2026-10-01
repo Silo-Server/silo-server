@@ -19,7 +19,9 @@ cannot move an unfilled row behind the backfill's key boundary.
 Episode documents live in `episode_catalog_entries`, keyed by library and
 episode. Combined episode title/overview edits refresh the entry once.
 Overview-only edits update the overview vector directly. File and series facet
-refreshes reuse text documents when their inputs are unchanged. A moved file
+refreshes update an existing entry in place and reuse its text documents. An
+upsert would fire the BEFORE INSERT trigger, which rebuilds both documents before
+ON CONFLICT discards them, so only a new entry builds documents. A moved file
 refreshes both entry identities; an attribute edit within one identity refreshes
 it once. Re-ID, membership, and parent changes must keep the entry's documents
 and access fields current.
@@ -27,10 +29,10 @@ and access fields current.
 The stored media document migration adds nullable columns, installs maintenance
 before backfill, commits batches of 1,000 rows, then builds GIN indexes
 concurrently. Retrying skips populated documents and recovers invalid index
-builds. The predecessor expression indexes remain available to older server
-nodes during a rolling upgrade. Removing those indexes is a separate change
-that must account for every query that still uses them. A normalization change
-must update every stored representation.
+builds. It then drops the predecessor expression indexes, which no current
+query reads. A pre-upgrade binary that still issues expression queries gets the
+same results without them, only slower. A normalization change must update every
+stored representation.
 
 ## Ranking, counts, and continuation
 
@@ -77,8 +79,12 @@ equality is rechecked before LIMIT to handle hash collisions. The tier returns
 only when it fills the requested probe, including the has-more row. Otherwise,
 the general query runs in the same snapshot. Continuations check the complete
 ranking tuple before using the indexed tie boundary. FTS admission uses the
-constant normalized title vector. Correlated parent and policy checks keep the
-ordered index scan ahead of LIMIT; hydration looks up only the bounded page.
+constant normalized title vector; a leading short-title lookup instead runs as a
+row predicate beside the equality recheck. Correlated parent and policy checks
+keep the ordered index scan ahead of LIMIT; hydration looks up only the bounded
+page. The tier reuses the general query's parameter numbering, so it must
+reference every bound argument: PostgreSQL rejects an unreferenced parameter
+with SQLSTATE 42P18.
 
 Exact totals use unranked candidate identities with the same admission, access,
 overview gate, and overview floor. Work grouping retains scored counts because
@@ -100,10 +106,11 @@ Unicode whitespace rules.
 
 For a PostgreSQL progress store sharing the catalog pool and account, series
 and season play targets select the validated anchor, newest visible resumable
-episode, first unwatched episode, or first available episode in SQL. Availability,
-profile history hiding, library access, and quality limits apply to every branch.
-Resume ties preserve the second precision exposed by the generic PostgreSQL
-progress reader. First-episode selection compares indexed winners from each
+episode, first unwatched episode, or first available episode in SQL. The store
+supplies the visible-progress relation, so profile history hiding and the
+second-precision `updated_at` used for resume ties stay defined in `pgstore`.
+Availability, history hiding, library access, and quality limits apply to every
+branch. First-episode selection compares indexed winners from each
 scope, with regular seasons before specials. Completed-progress checks keep
 their unique-key lookup when statistics lag a bulk import, avoiding repeated
 scans of a materialized profile history. Other stores retain their own progress

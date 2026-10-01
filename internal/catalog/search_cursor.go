@@ -65,6 +65,21 @@ func searchFTSTerms() []queryCursorTerm {
 	return append(terms, queryCursorTerm{expression: searchLowerTitleExpression, kind: cursorKindText, nullsLast: true}, queryCursorTerm{expression: cursorContentIDColumn, kind: cursorKindText, nullsLast: true})
 }
 
+// searchCursorKeyColumns projects each searchFTSTerms key from the page CTE
+// as text, in the order cursorRows decodes them. The exact episode tier and the
+// general query share it so either one can continue the other's cursor.
+func searchCursorKeyColumns() string {
+	keys := ""
+	for _, term := range searchFTSTerms() {
+		expression := "page." + term.expression
+		if term.expression == searchLowerTitleExpression {
+			expression = "LOWER(page.title)"
+		}
+		keys += ", (" + expression + ")::text"
+	}
+	return keys
+}
+
 func (r *ItemRepository) searchCursorPage(ctx context.Context, query string, itemTypes []string, limit int, after *SearchCursor, filter AccessFilter, includeTotal bool, request ...SearchCursorOptions) (SearchCursorPage, error) {
 	if limit < 1 || limit > 200 {
 		return SearchCursorPage{}, fmt.Errorf("search page limit must be between 1 and 200")

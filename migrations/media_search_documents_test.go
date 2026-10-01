@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -39,7 +40,7 @@ func TestMediaSearchDocumentsMigrationPostgres(t *testing.T) {
 	exec("CREATE FUNCTION " + schema + ".normalize_search_text(text) RETURNS text LANGUAGE sql IMMUTABLE AS 'SELECT public.normalize_search_text($1)'")
 	exec("CREATE TABLE " + schema + ".media_items(content_id text PRIMARY KEY,title text,original_title text,sort_title text,overview text,revision int NOT NULL DEFAULT 0)")
 	exec("INSERT INTO " + schema + ".media_items SELECT lpad(i::text,5,'0'),'Café & Dune: Part Two',CASE WHEN i%2=0 THEN 'Dune Part 2' END,'Dune','A buried signal returns.',i FROM generate_series(1,2501) i")
-	// Preserve the older query indexes through a rolling server upgrade.
+	// Up replaces the predecessor expression indexes; Down restores them.
 	exec("CREATE INDEX idx_media_items_search_title_fields ON " + schema + ".media_items USING gin (to_tsvector('simple',title))")
 	exec("CREATE INDEX idx_media_items_search_overview ON " + schema + ".media_items USING gin (to_tsvector('english',overview))")
 	// Model an interrupted migration after nullable columns and a failed
@@ -73,6 +74,26 @@ func TestMediaSearchDocumentsMigrationPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	searchIndexes := func() []string {
+		t.Helper()
+		rows, err := db.QueryContext(t.Context(), `SELECT c.relname FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relname LIKE 'idx_media_items_%search%' AND i.indisvalid AND i.indisready ORDER BY c.relname`, schema)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var names []string
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				t.Fatal(err)
+			}
+			names = append(names, name)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return names
+	}
 	assertDocuments := func() {
 		t.Helper()
 		var equal, preserved int
@@ -88,9 +109,8 @@ func TestMediaSearchDocumentsMigrationPostgres(t *testing.T) {
 		if err != nil || equal != 2501 || preserved != 2501 {
 			t.Fatalf("backfill expression parity=%d original rows=%d want 2501: %v", equal, preserved, err)
 		}
-		var indexes int
-		if err := db.QueryRowContext(t.Context(), `SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relname LIKE 'idx_media_items_%search%' AND i.indisvalid AND i.indisready`, schema).Scan(&indexes); err != nil || indexes != 4 {
-			t.Fatalf("usable search indexes=%d want four including predecessor indexes: %v", indexes, err)
+		if got := searchIndexes(); !slices.Equal(got, []string{"idx_media_items_stored_search_overview", "idx_media_items_stored_search_title"}) {
+			t.Fatalf("usable search indexes=%v want only the stored-document indexes", got)
 		}
 	}
 	if _, err := provider.Up(t.Context()); err != nil {
@@ -134,6 +154,9 @@ func TestMediaSearchDocumentsMigrationPostgres(t *testing.T) {
 	var columns int
 	if err := db.QueryRowContext(t.Context(), `SELECT count(*) FROM information_schema.columns WHERE table_schema=$1 AND table_name='media_items' AND column_name IN ('original_title_normalized','sort_title_normalized','search_title_vector','search_overview_vector')`, schema).Scan(&columns); err != nil || columns != 0 {
 		t.Fatalf("rollback left stored search columns=%d: %v", columns, err)
+	}
+	if got := searchIndexes(); !slices.Equal(got, []string{"idx_media_items_search_overview", "idx_media_items_search_title_fields"}) {
+		t.Fatalf("rollback search indexes=%v want the predecessor expression indexes", got)
 	}
 	if _, err := provider.Up(t.Context()); err != nil {
 		t.Fatal(err)

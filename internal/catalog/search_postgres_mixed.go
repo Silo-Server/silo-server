@@ -78,6 +78,9 @@ const episodeSearchTitleVector = `ece.search_title_vector`
 
 const episodeSearchOverviewVector = `ece.search_overview_vector`
 
+// episodeSearchParentIsSeries checks the parent row joined as si.
+const episodeSearchParentIsSeries = `si.type = 'series'`
+
 const mediaSearchTitleVector = `mi.search_title_vector`
 
 const mediaSearchOverviewVector = `mi.search_overview_vector`
@@ -117,9 +120,8 @@ func (r *ItemRepository) buildMixedSearchCursorSQL(parsed parsedSearchQuery, ite
 	argIdx := 3
 	var titleBranches []string
 	var overviewBranches []string
-	exactShortTitle := useExactShortTitleSearch(parsed)
-	leadingShortTitle := useLeadingShortTitleSearch(parsed)
-	narrowTitleLookup := exactShortTitle || leadingShortTitle
+	lookup := searchTitleLookup{exactShort: useExactShortTitleSearch(parsed), leadingShort: useLeadingShortTitleSearch(parsed)}
+	narrowTitleLookup := lookup.exactShort || lookup.leadingShort
 
 	mediaConditions := []string{}
 	if includeMediaItems {
@@ -142,20 +144,14 @@ func (r *ItemRepository) buildMixedSearchCursorSQL(parsed parsedSearchQuery, ite
 		mediaConditions = append(mediaConditions, MangaChapterExclusionWhere("mi"))
 	}
 
-	fenceEpisodes := filter.AllowedLibraryIDs != nil || len(filter.DisabledLibraryIDs) > 0 ||
-		(cursor != nil && searchDefinitionNeedsPredicate(cursor.request.Definition))
-
-	episodeConditions := []string{}
+	var episodeLibraries, episodePolicy []string
 	if includeEpisodes {
-		episodeConditions = append(episodeConditions,
-			"si.type = 'series'",
-		)
-		appendEpisodeCatalogSearchAccess("ece", filter, &episodeConditions, &args, &argIdx)
+		appendEpisodeCatalogSearchAccess("ece", filter, &episodeLibraries, &episodePolicy, &args, &argIdx)
 		ApplyMaturityLimits("ece", AccessFilter{
 			MaturityLimits: filter.MaturityLimits,
-		}, &episodeConditions, &args, &argIdx)
+		}, &episodePolicy, &args, &argIdx)
 		if len(filter.ExcludedMediaTypes) > 0 {
-			episodeConditions = append(episodeConditions, fmt.Sprintf("NOT ('episode' = ANY($%d))", argIdx))
+			episodePolicy = append(episodePolicy, fmt.Sprintf("NOT ('episode' = ANY($%d))", argIdx))
 			args = append(args, filter.ExcludedMediaTypes)
 			argIdx++
 		}
@@ -165,7 +161,7 @@ func (r *ItemRepository) buildMixedSearchCursorSQL(parsed parsedSearchQuery, ite
 		r.appendSearchCursorDefinition(cursor, false, filter, &mediaConditions, &args, &argIdx)
 	}
 	if includeEpisodes {
-		r.appendSearchCursorDefinition(cursor, true, filter, &episodeConditions, &args, &argIdx)
+		r.appendSearchCursorDefinition(cursor, true, filter, &episodePolicy, &args, &argIdx)
 	}
 	if cursor != nil && cursor.err != nil {
 		return "", "", nil
@@ -173,9 +169,9 @@ func (r *ItemRepository) buildMixedSearchCursorSQL(parsed parsedSearchQuery, ite
 	exactIdx := argIdx
 	args = append(args, parsed.ExactTitleHint)
 	argIdx++
-	titleLookupIdx := exactIdx
-	if leadingShortTitle {
-		titleLookupIdx = argIdx
+	lookup.exactIdx, lookup.titleLookupIdx = exactIdx, exactIdx
+	if lookup.leadingShort {
+		lookup.titleLookupIdx = argIdx
 		args = append(args, parsed.NormalizedText)
 		argIdx++
 	}
@@ -192,33 +188,33 @@ func (r *ItemRepository) buildMixedSearchCursorSQL(parsed parsedSearchQuery, ite
 
 	var mediaTitleConditions, mediaOverviewConditions []string
 	if includeMediaItems {
-		mediaMatch := searchTitleMatchCondition(mediaSearchTitleVector)
-		if exactShortTitle {
-			mediaMatch = fmt.Sprintf("mi.title_normalized = $%d", exactIdx)
-		} else if leadingShortTitle {
-			mediaMatch = fmt.Sprintf("mi.title_normalized LIKE $%d || '%%'", titleLookupIdx)
-		}
 		// Index each source separately and deduplicate identity before policy
 		// and ranking. A runtime alias array inside OR forces generic prepared
 		// plans to recheck that array per row, making broad alias queries quadratic.
-		mediaMatch = "mi.content_id IN (SELECT title_mi.content_id FROM media_items title_mi WHERE " +
-			strings.ReplaceAll(mediaMatch, "mi.", "title_mi.") + " UNION SELECT alias_scores.content_id FROM alias_scores)"
+		mediaMatch := "mi.content_id IN (SELECT title_mi.content_id FROM media_items title_mi WHERE " +
+			lookup.condition("title_mi.title_normalized", "title_mi.search_title_vector") +
+			" UNION SELECT alias_scores.content_id FROM alias_scores)"
 		mediaTitleConditions = append([]string{mediaMatch}, mediaConditions...)
 		if !narrowTitleLookup {
 			mediaOverviewConditions = append([]string{searchOverviewMatchCondition(mediaSearchOverviewVector)}, mediaConditions...)
 		}
 	}
-	var episodeTitleConditions, episodeOverviewConditions []string
+	var episodeTitle, episodeOverview *episodeSearchSource
 	if includeEpisodes {
-		episodeMatch := searchTitleMatchCondition(episodeSearchTitleVector)
-		if exactShortTitle {
-			episodeMatch = fmt.Sprintf("ece.search_title_normalized = $%d", exactIdx)
-		} else if leadingShortTitle {
-			episodeMatch = fmt.Sprintf("ece.search_title_normalized LIKE $%d || '%%'", titleLookupIdx)
+		fenced := filter.AllowedLibraryIDs != nil || len(filter.DisabledLibraryIDs) > 0 ||
+			(cursor != nil && searchDefinitionNeedsPredicate(cursor.request.Definition))
+		// The primary key is (media_folder_id, episode_id). A single allowed
+		// library therefore yields each episode once without sorting its full
+		// relevance tuple for DISTINCT; broader scopes still need deduplication.
+		episodeTitle = &episodeSearchSource{
+			match:     lookup.condition("ece.search_title_normalized", episodeSearchTitleVector),
+			libraries: episodeLibraries, policy: episodePolicy, fenced: fenced,
+			distinct: len(filter.AllowedLibraryIDs) != 1,
 		}
-		episodeTitleConditions = append([]string{episodeMatch}, episodeConditions...)
 		if !narrowTitleLookup {
-			episodeOverviewConditions = append([]string{searchOverviewMatchCondition(episodeSearchOverviewVector)}, episodeConditions...)
+			overview := *episodeTitle
+			overview.match, overview.overview = searchOverviewMatchCondition(episodeSearchOverviewVector), true
+			episodeOverview = &overview
 		}
 	}
 
@@ -246,36 +242,16 @@ func (r *ItemRepository) buildMixedSearchCursorSQL(parsed parsedSearchQuery, ite
 			))
 		}
 	}
-	if includeEpisodes {
-		episodeNormalizedTitle := `ece.search_title_normalized`
-		// The primary key is (media_folder_id, episode_id). A single allowed
-		// library therefore yields each episode once without sorting its full
-		// relevance tuple for DISTINCT; broader scopes still need deduplication.
-		titleBranches = append(titleBranches, buildMixedSearchCandidateBranch(
-			"ece.episode_id", "'episode'::text", episodeSearchTitleExpr,
-			"ece.year",
-			episodeSearchTitleVector, episodeSearchOverviewVector,
-			[]string{episodeNormalizedTitle},
-			episodeSearchCandidateRelation(episodeTitleConditions, fenceEpisodes),
-			episodeSearchPolicyConditions(episodeTitleConditions, fenceEpisodes), exactIdx, yearIdx, phraseIdx,
-			nil, false, len(filter.AllowedLibraryIDs) != 1,
-		))
-		if !narrowTitleLookup {
-			overviewBranches = append(overviewBranches, buildMixedSearchCandidateBranch(
-				"ece.episode_id", "'episode'::text", episodeSearchTitleExpr,
-				"ece.year",
-				episodeSearchTitleVector, episodeSearchOverviewVector,
-				[]string{episodeNormalizedTitle},
-				episodeSearchCandidateRelation(episodeOverviewConditions, fenceEpisodes),
-				episodeSearchPolicyConditions(episodeOverviewConditions, fenceEpisodes), exactIdx, yearIdx, phraseIdx,
-				nil, true, len(filter.AllowedLibraryIDs) != 1,
-			))
-		}
+	if episodeTitle != nil {
+		titleBranches = append(titleBranches, episodeTitle.branch(exactIdx, yearIdx, phraseIdx))
+	}
+	if episodeOverview != nil {
+		overviewBranches = append(overviewBranches, episodeOverview.branch(exactIdx, yearIdx, phraseIdx))
 	}
 
 	innerCTEs := make([]string, 0, 2)
 	if includeMediaItems {
-		innerCTEs = append(innerCTEs, buildMixedSearchAliasScoresCTE(exactIdx, titleLookupIdx, exactShortTitle, leadingShortTitle))
+		innerCTEs = append(innerCTEs, buildMixedSearchAliasScoresCTE(lookup))
 	}
 	titleScoredBody := strings.Join(titleBranches, "\nUNION ALL\n")
 	var scoredBody string
@@ -378,15 +354,7 @@ func (r *ItemRepository) buildMixedSearchCursorSQL(parsed parsedSearchQuery, ite
 	) hydrated`, qualifiedItemColumns("hydrated_mi"), qualifiedItemColumns("mi"), episodeCatalogBaseRelation)
 
 	if cursor != nil {
-		for _, term := range searchFTSTerms() {
-			expression := term.expression
-			if expression == searchLowerTitleExpression {
-				expression = "LOWER(page.title)"
-			} else {
-				expression = "page." + expression
-			}
-			finalTotalColumn += ", (" + expression + ")::text"
-		}
+		finalTotalColumn += searchCursorKeyColumns()
 	}
 	dataSQL = scoredCTE + pageCTE + fmt.Sprintf(`
 		SELECT %s%s
@@ -395,13 +363,11 @@ func (r *ItemRepository) buildMixedSearchCursorSQL(parsed parsedSearchQuery, ite
 		ORDER BY %s`, qualifiedItemColumns("hydrated"), finalTotalColumn, hydratedRelation, mixedSearchOrder("page."))
 	countSQL = scoredCTE + fmt.Sprintf("\nSELECT COUNT(*)\n%s", countPostFilter)
 	if cursor == nil || !cursor.request.GroupByWork {
-		countSQL = buildMixedSearchCountSQL(mediaTitleConditions, episodeTitleConditions,
-			mediaOverviewConditions, episodeOverviewConditions, includeMediaItems, includeEpisodes,
-			len(filter.AllowedLibraryIDs) != 1, fenceEpisodes, exactIdx, titleLookupIdx, yearIdx, phraseIdx,
-			exactShortTitle, leadingShortTitle)
+		countSQL = buildMixedSearchCountSQL(mediaTitleConditions, mediaOverviewConditions, includeMediaItems,
+			episodeTitle, episodeOverview, lookup, yearIdx, phraseIdx)
 	}
-	if cursor != nil && includeEpisodes && !includeMediaItems {
-		cursor.exactSQL, cursor.exactArgs = buildEpisodeExactTierSQL(parsed, filter, cursor, episodeTitleConditions, exactIdx, yearIdx, phraseIdx, limit)
+	if cursor != nil && episodeTitle != nil && !includeMediaItems {
+		cursor.exactSQL, cursor.exactArgs = buildEpisodeExactTierSQL(parsed, filter, cursor, episodeTitle, lookup, yearIdx, phraseIdx, limit)
 	}
 	return dataSQL, countSQL, args
 }
@@ -442,61 +408,83 @@ func searchOverviewMatchCondition(overviewVector string) string {
 	return fmt.Sprintf(`(%s) @@ websearch_to_tsquery('english', $1)`, overviewVector)
 }
 
+// searchTitleLookup selects title admission for every search source: equality
+// for one short word, a leading-title lookup while the final word is short, and
+// word-prefix FTS otherwise. titleLookupIdx equals exactIdx unless leadingShort.
+type searchTitleLookup struct {
+	exactShort, leadingShort bool
+	exactIdx, titleLookupIdx int
+}
+
+func (l searchTitleLookup) condition(normalizedTitle, titleVector string) string {
+	switch {
+	case l.exactShort:
+		return fmt.Sprintf("%s = $%d", normalizedTitle, l.exactIdx)
+	case l.leadingShort:
+		return fmt.Sprintf("%s LIKE $%d || '%%'", normalizedTitle, l.titleLookupIdx)
+	}
+	return searchTitleMatchCondition(titleVector)
+}
+
+// episodeSearchSource keeps one episode family's predicates by role. Fenced
+// searches admit entries by match and library inside a planning boundary, then
+// check the parent and policy; unrestricted searches flatten all of them.
+type episodeSearchSource struct {
+	match     string   // title or overview admission over ece
+	overview  bool     // match reads ece.search_overview_vector
+	libraries []string // allowed-library admission; empty when unrestricted
+	policy    []string // membership, parent-library, maturity, type, and definition checks
+	fenced    bool
+	distinct  bool // entries can repeat an episode across allowed libraries
+}
+
 // Keep FTS admission ahead of parent policy joins. Otherwise PostgreSQL can
 // start at the allowed series and read every episode in those series, applying
 // a selective title match only as a filter. OFFSET 0 preserves this narrow
 // streaming relation as a planning boundary without materializing its rows.
 // Unrestricted queries keep a flattenable join so PostgreSQL can parallelize
 // admission and DISTINCT sorting for broad matches.
-func episodeSearchCandidateRelation(conditions []string, fenced bool) string {
-	if !fenced {
+func (s *episodeSearchSource) relation() string {
+	if !s.fenced {
 		return "episode_catalog_entries ece JOIN media_items si ON si.content_id = ece.series_id"
 	}
-	admission := []string{conditions[0]}
-	overviewColumn := ""
-	if strings.Contains(conditions[0], episodeSearchOverviewVector) {
-		overviewColumn = ", ece.search_overview_vector"
-	}
-	for _, condition := range conditions[1:] {
-		if strings.HasPrefix(condition, "ece.media_folder_id = ANY(") {
-			admission = append(admission, condition)
-		}
-	}
 	columns := `ece.episode_id, ece.series_id, ece.media_folder_id, ece.title, ece.year,
-		       ece.search_title_normalized, ece.search_title_vector` + overviewColumn + `,
-		       ece.content_rating_age, ece.advisory_age`
+		       ece.search_title_normalized, ece.search_title_vector`
+	if s.overview {
+		columns += ", ece.search_overview_vector"
+	}
+	columns += ", ece.content_rating_age, ece.advisory_age"
+	admission := append([]string{s.match}, s.libraries...)
 	return `(
 		SELECT ` + columns + `, si.content_id AS search_series_parent_id
 		FROM (
-		SELECT ece.episode_id, ece.series_id, ece.media_folder_id, ece.title, ece.year,
-		       ece.search_title_normalized, ece.search_title_vector` + overviewColumn + `,
-		       ece.content_rating_age, ece.advisory_age
+		SELECT ` + columns + `
 		FROM episode_catalog_entries ece WHERE ` + strings.Join(admission, " AND ") + ` OFFSET 0
 		) ece LEFT JOIN media_items si ON si.content_id = ece.series_id AND si.type = 'series'
 		OFFSET 0
 	) ece`
 }
 
-func episodeSearchPolicyConditions(conditions []string, fenced bool) []string {
-	if !fenced {
-		return conditions
+// conditions returns the WHERE predicates that accompany relation.
+func (s *episodeSearchSource) conditions() []string {
+	if !s.fenced {
+		conditions := append([]string{s.match, episodeSearchParentIsSeries}, s.libraries...)
+		return append(conditions, s.policy...)
 	}
-	policy := make([]string, 0, len(conditions)-1)
-	for _, condition := range conditions[1:] {
-		if condition == "si.type = 'series'" {
-			// Preserve the left join inside its planning boundary. Its output
-			// cardinality lets rare FTS terms probe a few parents while broad
-			// terms choose a spillable hash join before library semi-joins.
-			condition = "ece.search_series_parent_id IS NOT NULL"
-		}
-		if !strings.HasPrefix(condition, "ece.media_folder_id = ANY(") {
-			policy = append(policy, condition)
-		}
-	}
-	if len(policy) == 0 {
-		return []string{cursorTruePredicate}
-	}
-	return policy
+	// Preserve the left join inside its planning boundary. Its output
+	// cardinality lets rare FTS terms probe a few parents while broad
+	// terms choose a spillable hash join before library semi-joins.
+	return append([]string{"ece.search_series_parent_id IS NOT NULL"}, s.policy...)
+}
+
+func (s *episodeSearchSource) branch(exactIdx, yearIdx, phraseIdx int) string {
+	return buildMixedSearchCandidateBranch(
+		"ece.episode_id", "'episode'::text", episodeSearchTitleExpr, "ece.year",
+		episodeSearchTitleVector, episodeSearchOverviewVector,
+		[]string{"ece.search_title_normalized"},
+		s.relation(), s.conditions(), exactIdx, yearIdx, phraseIdx,
+		nil, s.overview, s.distinct,
+	)
 }
 
 // Counts need candidate identity, not relevance. Keep the same access and
@@ -504,16 +492,15 @@ func episodeSearchPolicyConditions(conditions []string, fenced bool) []string {
 // Grouped work counts retain the scored path because a definition's cap applies
 // before grouping and therefore depends on relevance order.
 func buildMixedSearchCountSQL(
-	mediaTitle, episodeTitle, mediaOverview, episodeOverview []string,
-	includeMedia, includeEpisodes, distinctEpisodes, fenceEpisodes bool,
-	exactIdx, titleLookupIdx, yearIdx, phraseIdx int,
-	exactShortTitle, leadingShortTitle bool,
+	mediaTitle, mediaOverview []string, includeMedia bool,
+	episodeTitle, episodeOverview *episodeSearchSource,
+	lookup searchTitleLookup, yearIdx, phraseIdx int,
 ) string {
-	ctes := []string{fmt.Sprintf(`search_parameters AS (SELECT $1::text, $2::text, $%d::text, $%d::int, $%d::text)`, exactIdx, yearIdx, phraseIdx)}
+	ctes := []string{fmt.Sprintf(`search_parameters AS (SELECT $1::text, $2::text, $%d::text, $%d::int, $%d::text)`, lookup.exactIdx, yearIdx, phraseIdx)}
 	if includeMedia {
 		ctes = append(ctes, `alias_scores AS MATERIALIZED (
 			SELECT DISTINCT mia.content_id FROM media_item_aliases mia
-			WHERE `+mixedSearchAliasMatchCondition(exactIdx, titleLookupIdx, exactShortTitle, leadingShortTitle)+`)`)
+			WHERE `+mixedSearchAliasMatchCondition(lookup)+`)`)
 	}
 	titles := []string{}
 	overviews := []string{}
@@ -523,15 +510,18 @@ func buildMixedSearchCountSQL(
 			overviews = append(overviews, "SELECT mi.content_id FROM media_items mi WHERE "+strings.Join(mediaOverview, " AND ")+fmt.Sprintf(" AND ts_rank_cd(%s, websearch_to_tsquery('english', $1)) >= %g", mediaSearchOverviewVector, overviewMatchFloor))
 		}
 	}
-	if includeEpisodes {
+	episodeCandidates := func(source *episodeSearchSource) string {
 		projection := "SELECT ece.episode_id AS content_id"
-		if distinctEpisodes {
+		if source.distinct {
 			projection = "SELECT DISTINCT ece.episode_id AS content_id"
 		}
-		titles = append(titles, projection+" FROM "+episodeSearchCandidateRelation(episodeTitle, fenceEpisodes)+" WHERE "+strings.Join(episodeSearchPolicyConditions(episodeTitle, fenceEpisodes), " AND "))
-		if len(episodeOverview) > 0 {
-			overviews = append(overviews, projection+" FROM "+episodeSearchCandidateRelation(episodeOverview, fenceEpisodes)+" WHERE "+strings.Join(episodeSearchPolicyConditions(episodeOverview, fenceEpisodes), " AND ")+fmt.Sprintf(" AND ts_rank_cd(%s, websearch_to_tsquery('english', $1)) >= %g", episodeSearchOverviewVector, overviewMatchFloor))
-		}
+		return projection + " FROM " + source.relation() + " WHERE " + strings.Join(source.conditions(), " AND ")
+	}
+	if episodeTitle != nil {
+		titles = append(titles, episodeCandidates(episodeTitle))
+	}
+	if episodeOverview != nil {
+		overviews = append(overviews, episodeCandidates(episodeOverview)+fmt.Sprintf(" AND ts_rank_cd(%s, websearch_to_tsquery('english', $1)) >= %g", episodeSearchOverviewVector, overviewMatchFloor))
 	}
 	ctes = append(ctes, "title_candidates AS MATERIALIZED ("+strings.Join(titles, " UNION ALL ")+")")
 	if len(overviews) == 0 {
@@ -546,14 +536,8 @@ func buildMixedSearchCountSQL(
 	return "WITH " + strings.Join(ctes, ",\n") + " SELECT COUNT(*) FROM candidates"
 }
 
-func mixedSearchAliasMatchCondition(exactIdx, titleLookupIdx int, exactShortTitle, leadingShortTitle bool) string {
-	if leadingShortTitle {
-		return fmt.Sprintf("mia.normalized_title LIKE $%d || '%%'", titleLookupIdx)
-	}
-	if exactShortTitle {
-		return fmt.Sprintf("mia.normalized_title = $%d", exactIdx)
-	}
-	return `$2 <> '' AND to_tsvector('simple', mia.normalized_title) @@ to_tsquery('simple', $2)`
+func mixedSearchAliasMatchCondition(lookup searchTitleLookup) string {
+	return lookup.condition("mia.normalized_title", "to_tsvector('simple', mia.normalized_title)")
 }
 
 // buildMixedSearchAliasScoresCTE performs one index-backed pass over aliases
@@ -563,10 +547,10 @@ func mixedSearchAliasMatchCondition(exactIdx, titleLookupIdx int, exactShortTitl
 // index once per media candidate when PostgreSQL failed to parameterize them.
 // On large alias catalogs that turned a selective search into millions of
 // index-entry visits and pushed the plan over the JIT threshold.
-func buildMixedSearchAliasScoresCTE(exactIdx, titleLookupIdx int, exactShortTitle, leadingShortTitle bool) string {
+func buildMixedSearchAliasScoresCTE(lookup searchTitleLookup) string {
 	weightedAliasVector := `setweight(to_tsvector('simple', mia.normalized_title), 'A')`
 	prefixQuery := `to_tsquery('simple', $2)`
-	matchCondition := mixedSearchAliasMatchCondition(exactIdx, titleLookupIdx, exactShortTitle, leadingShortTitle)
+	matchCondition := mixedSearchAliasMatchCondition(lookup)
 	return fmt.Sprintf(`alias_scores AS MATERIALIZED (
 		SELECT
 			mia.content_id,
@@ -577,7 +561,7 @@ func buildMixedSearchAliasScoresCTE(exactIdx, titleLookupIdx int, exactShortTitl
 		WHERE %s
 		GROUP BY mia.content_id
 	)`,
-		exactIdx, exactIdx,
+		lookup.exactIdx, lookup.exactIdx,
 		weightedAliasVector, prefixQuery,
 		matchCondition,
 	)
@@ -652,20 +636,22 @@ func buildMixedSearchCandidateBranch(
 // that an episode is available in one library, so the common unrestricted path
 // needs no per-candidate lookup into episode_libraries. DISTINCT in the episode
 // candidate branch collapses the uncommon episode linked to multiple folders.
+// The allowed-library predicate goes to libraries, which can admit entries
+// before the parent join; membership and parent checks go to policy.
 func appendEpisodeCatalogSearchAccess(
 	alias string,
 	filter AccessFilter,
-	conditions *[]string,
+	libraries, policy *[]string,
 	args *[]any,
 	argIdx *int,
 ) {
 	if filter.AllowedLibraryIDs != nil {
-		*conditions = append(*conditions, fmt.Sprintf("%s.media_folder_id = ANY($%d)", alias, *argIdx))
+		*libraries = append(*libraries, fmt.Sprintf("%s.media_folder_id = ANY($%d)", alias, *argIdx))
 		*args = append(*args, filter.AllowedLibraryIDs)
 		*argIdx++
 	}
 	if len(filter.DisabledLibraryIDs) > 0 {
-		*conditions = append(*conditions, fmt.Sprintf(
+		*policy = append(*policy, fmt.Sprintf(
 			"NOT EXISTS (SELECT 1 FROM episode_catalog_entries disabled_ece WHERE disabled_ece.episode_id = %s.episode_id AND disabled_ece.media_folder_id = ANY($%d))",
 			alias, *argIdx))
 		*args = append(*args, filter.DisabledLibraryIDs)
@@ -673,7 +659,7 @@ func appendEpisodeCatalogSearchAccess(
 	}
 	// The parent series can be library-restricted independently of its episode
 	// files, so retain that policy check even though availability is denormalized.
-	appendEpisodeParentLibraryAccess(alias+".series_id", filter, conditions, args, argIdx)
+	appendEpisodeParentLibraryAccess(alias+".series_id", filter, policy, args, argIdx)
 }
 
 func appendEpisodeLibrarySearchAccess(

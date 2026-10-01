@@ -17,8 +17,6 @@ type playableTargetBenchmarkProgressStore struct {
 	delegate   PlayableTargetProgressStore
 	queries    int
 	ids        int
-	pool       *pgxpool.Pool
-	userID     int
 	sqlWinners bool
 }
 
@@ -28,8 +26,12 @@ func (s *playableTargetBenchmarkProgressStore) ListProgressByMediaItems(ctx cont
 	return s.delegate.ListProgressByMediaItems(ctx, profile, ids)
 }
 
-func (s *playableTargetBenchmarkProgressStore) SupportsCatalogPlayableTargets(pool *pgxpool.Pool, userID int) bool {
-	return s.sqlWinners && pool == s.pool && userID == s.userID
+func (s *playableTargetBenchmarkProgressStore) CatalogProgressRelation(pool *pgxpool.Pool, userID int, profileID string, firstArg int) (string, []any, bool) {
+	store, ok := s.delegate.(catalogProgressRelationStore)
+	if !s.sqlWinners || !ok {
+		return "", nil, false
+	}
+	return store.CatalogProgressRelation(pool, userID, profileID, firstArg)
 }
 
 // This benchmark requires a disposable migrated database. It reports progress
@@ -145,7 +147,7 @@ func BenchmarkPlayableTargetReadQueries(b *testing.B) {
 				mode = "sql-winners"
 			}
 			b.Run(tc.name+"/"+mode, func(b *testing.B) {
-				store := &playableTargetBenchmarkProgressStore{delegate: delegate, pool: pool, userID: userID, sqlWinners: sqlWinners}
+				store := &playableTargetBenchmarkProgressStore{delegate: delegate, sqlWinners: sqlWinners}
 				query.ProgressStore = store
 				got, err := resolver.Resolve(b.Context(), query)
 				if err != nil || !reflect.DeepEqual(got, want) {

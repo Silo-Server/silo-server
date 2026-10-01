@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -50,9 +51,11 @@ func ListOverlaySummaries(ctx context.Context, pool *pgxpool.Pool, contentIDs []
 }
 
 // ListOverlaySummaries reads only each displayed item's winning file metadata.
+// A repository without a pool returns an error so callers use their file
+// projection rather than treating every card as having no badges.
 func (r *ItemRepository) ListOverlaySummaries(ctx context.Context, contentIDs []string, filter AccessFilter) (map[string]*models.OverlaySummary, error) {
 	if r == nil || r.pool == nil {
-		return map[string]*models.OverlaySummary{}, nil
+		return nil, errors.New("listing overlay summaries: item repository has no database pool")
 	}
 	return listOverlaySummaries(ctx, r.pool, contentIDs, filter, "id ASC")
 }

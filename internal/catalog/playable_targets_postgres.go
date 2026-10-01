@@ -4,26 +4,29 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// catalogProgressRelationStore is implemented by progress stores whose rows
+// share the catalog database. The store owns progress visibility (hidden
+// history, timestamp precision); catalog only joins the returned relation.
+type catalogProgressRelationStore interface {
+	CatalogProgressRelation(pool *pgxpool.Pool, userID int, profileID string, firstArg int) (string, []any, bool)
+}
 
 // resolvePostgresTargets checks an anchor directly, then tries the latest
 // resumable episode, first unwatched episode, and first available episode.
 // Each branch returns at most one ID. COALESCE stops after a winner, so a valid
 // anchor avoids reading the rest of a long-running series entirely.
-func (r *PlayableTargetResolver) resolvePostgresTargets(ctx context.Context, q PlayableTargetQuery, args []any, fileConditions, keysByOrd []string) (map[string]string, error) {
-	userArg, profileArg := len(args)+1, len(args)+2
-	args = append(args, q.UserID, q.ProfileID)
+func (r *PlayableTargetResolver) resolvePostgresTargets(ctx context.Context, args []any, fileConditions, keysByOrd []string, progress string) (map[string]string, error) {
 	fileSQL := strings.Join(fileConditions, " AND ")
 	completedSQL := fmt.Sprintf(`AND NOT EXISTS (
-		SELECT 1 FROM user_watch_progress progress
-		WHERE progress.user_id = $%d AND progress.profile_id = $%d
-		  AND progress.media_item_id = episode.content_id AND progress.completed
-		  AND NOT EXISTS (SELECT 1 FROM user_history_hidden_items hidden
-		      WHERE hidden.user_id = progress.user_id AND hidden.profile_id = progress.profile_id
-		        AND hidden.media_item_id = progress.media_item_id AND progress.updated_at <= hidden.hidden_before)
+		SELECT 1 FROM %s progress
+		WHERE progress.media_item_id = episode.content_id AND progress.completed
 		-- Keep the unique-key lookup when profile statistics lag a bulk import.
 		OFFSET 0
-	)`, userArg, profileArg)
+	)`, progress)
 	query := fmt.Sprintf(`
 		WITH requested AS (
 			SELECT content_id, media_type, series_id, season_number, preferred_content_id, ord
@@ -60,31 +63,25 @@ func (r *PlayableTargetResolver) resolvePostgresTargets(ctx context.Context, q P
 				   AND EXISTS (SELECT 1 FROM media_files mf WHERE mf.episode_id = episode.content_id AND %[1]s)
 				 LIMIT 1),
 				(SELECT episode.content_id
-				 FROM user_watch_progress progress
+				 FROM %[2]s progress
 				 JOIN episodes episode ON episode.content_id = progress.media_item_id
 				 JOIN target_scopes scope ON scope.ord = requested.ord AND episode.series_id = scope.series_id
 				   AND (scope.season_number IS NULL OR episode.season_number = scope.season_number)
-				 WHERE progress.user_id = $%[2]d AND progress.profile_id = $%[3]d
-				   AND progress.position_seconds > 0 AND NOT progress.completed
-				   AND NOT EXISTS (SELECT 1 FROM user_history_hidden_items hidden
-				       WHERE hidden.user_id = progress.user_id AND hidden.profile_id = progress.profile_id
-				         AND hidden.media_item_id = progress.media_item_id AND progress.updated_at <= hidden.hidden_before)
+				 WHERE progress.position_seconds > 0 AND NOT progress.completed
 				   AND EXISTS (SELECT 1 FROM media_files mf WHERE mf.episode_id = episode.content_id AND %[1]s)
-				 -- The generic PostgreSQL progress reader formats RFC3339 at
-				 -- second precision. Keep its episode-order tie at that precision.
-				 ORDER BY date_trunc('second', progress.updated_at) DESC,
+				 ORDER BY progress.updated_at DESC,
 				   CASE WHEN episode.season_number = 0 THEN 1 ELSE 0 END,
 				   episode.season_number, episode.episode_number, episode.content_id
 				 LIMIT 1),
-				%[4]s,
-				%[5]s
+				%[3]s,
+				%[4]s
 			) AS play_content_id
 			-- Prevent the outer null filter from inlining and evaluating all
 			-- winner subqueries a second time for the SELECT projection.
 			OFFSET 0
 		) target
 		WHERE target.play_content_id IS NOT NULL
-	`, fileSQL, userArg, profileArg, firstPlayableEpisodeSQL(fileSQL, completedSQL), firstPlayableEpisodeSQL(fileSQL, ""))
+	`, fileSQL, progress, firstPlayableEpisodeSQL(fileSQL, completedSQL), firstPlayableEpisodeSQL(fileSQL, ""))
 
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {

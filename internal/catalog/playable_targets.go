@@ -194,10 +194,11 @@ func (r *PlayableTargetResolver) Resolve(ctx context.Context, q PlayableTargetQu
 	// PostgreSQL progress lives beside the catalog, so the database can choose
 	// winners without returning every episode or issuing progress batches.
 	// Other stores retain the backend-neutral candidate path below.
-	if store, ok := q.ProgressStore.(interface {
-		SupportsCatalogPlayableTargets(*pgxpool.Pool, int) bool
-	}); ok && (slices.Contains(types, playableTypeSeries) || slices.Contains(types, playableTypeSeason)) && store.SupportsCatalogPlayableTargets(r.pool, q.UserID) {
-		return r.resolvePostgresTargets(ctx, q, args, fileConditions, keysByOrd)
+	if store, ok := q.ProgressStore.(catalogProgressRelationStore); ok &&
+		(slices.Contains(types, playableTypeSeries) || slices.Contains(types, playableTypeSeason)) {
+		if progress, progressArgs, ok := store.CatalogProgressRelation(r.pool, q.UserID, q.ProfileID, len(args)+1); ok {
+			return r.resolvePostgresTargets(ctx, append(args, progressArgs...), fileConditions, keysByOrd, progress)
+		}
 	}
 
 	query := fmt.Sprintf(`

@@ -1,9 +1,13 @@
 package catalog
 
 import (
+	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/access"
 )
 
 // TestSearchCursorSQLMatchesOffsetPlanShape pins the cursor (v2) search SQL to
@@ -157,5 +161,75 @@ func TestEpisodeSearchPlanningBoundaryFollowsPolicy(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// PostgreSQL rejects a statement whose bound parameter is never referenced
+// (SQLSTATE 42P18), because it cannot infer that parameter's type. The exact
+// episode tier reuses the general query's numbering, so it must keep every
+// copied argument referenced, including the leading short-title lookup.
+func TestSearchSQLReferencesEveryBoundArgument(t *testing.T) {
+	repo := &ItemRepository{}
+	value := func(s string) *string { return &s }
+	exactContinuation := &SearchCursor{Mode: searchCursorFTS, Keys: []QueryCursorValue{
+		{Kind: cursorKindNumber, Value: value("1")}, {Kind: cursorKindNumber, Value: value("1")},
+		{Kind: cursorKindNumber, Value: value("0")}, {Kind: cursorKindNumber, Value: value("0")},
+		{Kind: cursorKindNumber, Value: value("0.1")}, {Kind: cursorKindNumber, Value: value("0")},
+		{Kind: cursorKindText, Value: value("star a")}, {Kind: cursorKindText, Value: value("episode-1")},
+	}}
+	filters := map[string]AccessFilter{
+		"unrestricted": {},
+		"one library":  {AllowedLibraryIDs: []int{2}},
+		"one library with policy": {
+			AllowedLibraryIDs:  []int{2},
+			DisabledLibraryIDs: []int{3},
+			MaturityLimits:     access.MaturityLimits{MaxContentRating: "PG-13", MaxAdvisoryAge: 13},
+			ExcludedMediaTypes: []string{"audiobook"},
+		},
+		"two libraries": {AllowedLibraryIDs: []int{2, 3}},
+	}
+	exactTiers := 0
+	for _, query := range []string{"Star", "St", "Star A", "the o", `"Star" 2024`} {
+		for _, itemTypes := range [][]string{{"episode"}, nil, {"movie"}} {
+			for filterName, filter := range filters {
+				for _, after := range []*SearchCursor{nil, exactContinuation} {
+					name := fmt.Sprintf("%q/%v/%s/continued=%v", query, itemTypes, filterName, after != nil)
+					options := &searchCursorSQL{after: after}
+					dataSQL, countSQL, args := repo.buildMixedSearchCursorSQL(parseSearchQuery(query), itemTypes, 20, 0, filter, false, options)
+					if options.err != nil {
+						t.Fatalf("%s: %v", name, options.err)
+					}
+					assertEveryArgReferenced(t, name+" data", dataSQL, args)
+					assertEveryArgReferenced(t, name+" count", countSQL, options.countArgs)
+					if options.exactSQL != "" {
+						exactTiers++
+						assertEveryArgReferenced(t, name+" exact tier", options.exactSQL, options.exactArgs)
+					}
+				}
+			}
+		}
+	}
+	if exactTiers == 0 {
+		t.Fatal("no case built the exact episode tier")
+	}
+}
+
+func assertEveryArgReferenced(t *testing.T, name, sql string, args []any) {
+	t.Helper()
+	referenced := map[int]bool{}
+	for _, match := range regexp.MustCompile(`\$(\d+)`).FindAllStringSubmatch(sql, -1) {
+		index, err := strconv.Atoi(match[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if index > len(args) {
+			t.Errorf("%s: references $%d with %d bound arguments", name, index, len(args))
+		}
+		referenced[index] = true
+	}
+	for index := 1; index <= len(args); index++ {
+		if !referenced[index] {
+			t.Errorf("%s: binds $%d but never references it", name, index)
+		}
 	}
 }
