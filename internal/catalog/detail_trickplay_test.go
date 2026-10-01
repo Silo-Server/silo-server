@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -71,16 +72,60 @@ func TestTrickplayAvailabilityBatchesItemDetails(t *testing.T) {
 
 type trickplayEpisodeBatchFetcher struct {
 	*versionsFileFetcher
-	calls int
+	calls           int
+	individualCalls int
+	batchErr        error
+	failedEpisode   string
 }
 
 func (f *trickplayEpisodeBatchFetcher) ListByEpisodeIDs(_ context.Context, ids []string) (map[string][]*models.MediaFile, error) {
 	f.calls++
+	if f.batchErr != nil {
+		return nil, f.batchErr
+	}
 	out := make(map[string][]*models.MediaFile, len(ids))
 	for _, id := range ids {
 		out[id] = f.files[id]
 	}
 	return out, nil
+}
+
+func (f *trickplayEpisodeBatchFetcher) GetByEpisodeID(ctx context.Context, id string) ([]*models.MediaFile, error) {
+	f.individualCalls++
+	if id == f.failedEpisode {
+		return nil, errors.New("episode file lookup failed")
+	}
+	return f.versionsFileFetcher.GetByEpisodeID(ctx, id)
+}
+
+func TestEpisodeDetailsFallBackAfterBatchFileFailureDB(t *testing.T) {
+	f := newVersionsFixture(t)
+	failedEpisode := f.ids["episode"] + "-unreadable"
+	if _, err := f.pool.Exec(t.Context(), `INSERT INTO episodes(content_id,series_id,season_id,season_number,episode_number,title) VALUES($1,$2,$3,1,2,'Episode')`, failedEpisode, f.ids["series"], f.ids["season"]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(t.Context(), `INSERT INTO episode_libraries(episode_id,media_folder_id) VALUES($1,$2)`, failedEpisode, f.library); err != nil {
+		t.Fatal(err)
+	}
+	files := &trickplayEpisodeBatchFetcher{versionsFileFetcher: f.files, batchErr: errors.New("batch file lookup failed"), failedEpisode: failedEpisode}
+	f.svc.fileFetcher = files
+	counter := &trickplayLookupCounter{}
+	f.svc.SetTrickplayAvailability(counter)
+	details, err := f.svc.GetEpisodeDetailsForSeries(t.Context(), f.ids["series"], []string{f.ids["episode"], failedEpisode}, AccessFilter{})
+	if err != nil {
+		t.Fatalf("optional batch failure discarded the episode page: %v", err)
+	}
+	if len(details) != 1 || details[f.ids["episode"]] == nil || details[failedEpisode] != nil {
+		t.Fatalf("fallback details=%v", details)
+	}
+	if files.calls != 1 || files.individualCalls != 2 || counter.calls != 1 {
+		t.Fatalf("batch calls=%d individual calls=%d trickplay calls=%d", files.calls, files.individualCalls, counter.calls)
+	}
+	for _, version := range details[f.ids["episode"]].Versions {
+		if version.Trickplay == nil {
+			t.Fatal("fallback lost trickplay availability")
+		}
+	}
 }
 
 func TestTrickplayAvailabilityBatchesEpisodeDetails(t *testing.T) {

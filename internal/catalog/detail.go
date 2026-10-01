@@ -1763,14 +1763,15 @@ func (s *DetailService) GetEpisodeDetailsForSeries(
 		ListByEpisodeIDs(context.Context, []string) (map[string][]*models.MediaFile, error)
 	}); ok {
 		files, err := fetcher.ListByEpisodeIDs(ctx, episodeContentIDs)
-		if err != nil {
-			return nil, fmt.Errorf("fetching episode files: %w", err)
+		if err == nil {
+			if files == nil {
+				files = map[string][]*models.MediaFile{}
+			}
+			seriesCtx.filesByEpisode = files
+			seriesCtx.trickplay = s.prefetchTrickplay(ctx, files)
 		}
-		if files == nil {
-			files = map[string][]*models.MediaFile{}
-		}
-		seriesCtx.filesByEpisode = files
-		seriesCtx.trickplay = s.prefetchTrickplay(ctx, files)
+		// A failed optional batch leaves the per-episode reads in place. Their
+		// existing error handling skips only the detail that could not be built.
 	}
 	for _, contentID := range episodeContentIDs {
 		episode, err := s.episodeRepo.GetByID(ctx, contentID)
