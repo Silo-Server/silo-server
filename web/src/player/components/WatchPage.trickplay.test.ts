@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { itemKeys } from "@/hooks/queries/keys";
@@ -15,6 +15,15 @@ const toastErrorMock = vi.hoisted(() => vi.fn());
 const roomConnectionMock = vi.hoisted(() => vi.fn());
 const playbackCapabilitiesMock = vi.hoisted(() => vi.fn());
 const startPlaybackMock = vi.hoisted(() => vi.fn());
+const trickplayOverride = vi.hoisted(() => vi.fn());
+vi.mock("@/hooks/queries/items", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/hooks/queries/items")>();
+  return {
+    ...original,
+    useWatchTrickplay: (...args: Parameters<typeof original.useWatchTrickplay>) =>
+      trickplayOverride(...args) ?? original.useWatchTrickplay(...args),
+  };
+});
 vi.mock("../start-v2", () => ({ playbackCapabilitiesV2: playbackCapabilitiesMock }));
 
 vi.mock("../hooks/usePlaybackSession", () => ({
@@ -142,4 +151,45 @@ it("suppresses a cached seek-preview manifest when the active file becomes unava
   await waitFor(() => expect(videoPlayerMock.mock.calls.at(-1)?.[0].trickplay).toEqual(cached));
   view.unmount();
   client.clear();
+});
+
+it("defers a throttled sheet failure and cancels recovery when the file changes", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(1000);
+  const refetch = vi.fn().mockResolvedValue({});
+  trickplayOverride.mockReturnValue({ data: null, refetch });
+  roomConnectionMock.mockReturnValue({ room: null });
+  playbackSessionMock.mockReturnValue(playbackSession());
+  const client = new QueryClient();
+  const page = () =>
+    createElement(
+      QueryClientProvider,
+      { client },
+      createElement(WatchPage, {
+        ...watchPageProps,
+        versions: [{ ...version, trickplay_available: true }],
+      }),
+    );
+  const view = render(page());
+  try {
+    act(() => videoPlayerMock.mock.calls.at(-1)?.[0].onTrickplayError());
+    expect(refetch).toHaveBeenCalledTimes(1);
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    act(() => {
+      videoPlayerMock.mock.calls.at(-1)?.[0].onTrickplayError();
+      videoPlayerMock.mock.calls.at(-1)?.[0].onTrickplayError();
+    });
+    await act(() => vi.advanceTimersByTimeAsync(59_000));
+    expect(refetch).toHaveBeenCalledTimes(2);
+    act(() => videoPlayerMock.mock.calls.at(-1)?.[0].onTrickplayError());
+    playbackSessionMock.mockReturnValue(playbackSession({ mediaFileId: 8 }));
+    view.rerender(page());
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(refetch).toHaveBeenCalledTimes(2);
+  } finally {
+    view.unmount();
+    client.clear();
+    trickplayOverride.mockReset();
+    vi.useRealTimers();
+  }
 });
