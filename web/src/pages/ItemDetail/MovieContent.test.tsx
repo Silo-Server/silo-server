@@ -416,7 +416,9 @@ describe("MovieContent", () => {
   });
 
   it.each([
-    [{ role: "admin" }, { data: { trickplay: true } }, true],
+    [{ role: "admin" }, { data: { trickplay: true, trickplay_supported: true } }, true],
+    [{ role: "admin" }, { data: { trickplay: true, trickplay_supported: false } }, false],
+    [{ role: "admin" }, { data: { trickplay: true } }, false],
     [{ role: "admin" }, { data: { trickplay: false } }, false],
     [{ role: "admin" }, { data: undefined }, false],
   ])("offers seek-preview status to %o with capability %o: %s", (user, capability, offered) => {

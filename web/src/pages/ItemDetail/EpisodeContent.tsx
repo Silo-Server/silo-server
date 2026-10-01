@@ -76,7 +76,9 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
   // An API node without redetect-markers (rolling deploy, rollback) keeps the
   // older intro-only re-detection.
   const markerCapabilities = useAdminMarkerCapabilities(isAdmin);
-  const canManageTrickplay = useLibraryCapabilities(isAdmin).data?.trickplay === true;
+  const capabilities = useLibraryCapabilities(isAdmin).data;
+  const canManageTrickplay =
+    capabilities?.trickplay === true && capabilities.trickplay_supported === true;
   const canRedetectMarkers = markerCapabilities.data?.redetect_markers === true;
   const deleteSubtitlePreference = useDeleteSubtitlePreference();
   const setSubtitlePreference = useSetSubtitlePreference();

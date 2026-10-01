@@ -48,7 +48,9 @@ export default function SeriesContent({
   useAmbientColor(item.backdrop_thumbhash);
   const { user } = useAuth();
   const isAdmin = useIsActingAdmin();
-  const canManageTrickplay = useLibraryCapabilities(isAdmin).data?.trickplay === true;
+  const capabilities = useLibraryCapabilities(isAdmin).data;
+  const canManageTrickplay =
+    capabilities?.trickplay === true && capabilities.trickplay_supported === true;
   const { profile: currentProfile } = useCurrentProfile();
   const canCurateMetadata = canCurateMetadataForUser(user, currentProfile);
 

@@ -263,7 +263,9 @@ describe("SeriesContent", () => {
   });
 
   it.each([
-    [{ trickplay: true }, true],
+    [{ trickplay: true, trickplay_supported: true }, true],
+    [{ trickplay: true, trickplay_supported: false }, false],
+    [{ trickplay: true }, false],
     [{ trickplay: false }, false],
     [undefined, false],
   ])("offers series seek-preview administration with capability %o: %s", (data, offered) => {

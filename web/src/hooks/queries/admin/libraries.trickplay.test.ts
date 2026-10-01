@@ -10,7 +10,12 @@ vi.mock("@/api/v2/request", async (importOriginal) => ({
 import { adminKeys } from "../keys";
 import { useCreateLibrary, useUpdateLibrary } from "./libraries";
 
-it.each([true, false])("refreshes preview status after explicit updates to %s", async (enabled) => {
+it.each([
+  { trickplay_enabled: true },
+  { trickplay_enabled: false },
+  { enabled: true },
+  { enabled: false },
+])("refreshes preview status after explicit updates to %o", async (body) => {
   request.mockResolvedValue({ id: "1", name: "Fixture", type: "movies", paths: ["/fixture"] });
   const client = new QueryClient();
   const key = adminKeys.trickplayLibraries();
@@ -18,7 +23,7 @@ it.each([true, false])("refreshes preview status after explicit updates to %s", 
   const wrapper = ({ children }: { children: ReactNode }) =>
     createElement(QueryClientProvider, { client }, children);
   const view = renderHook(() => useUpdateLibrary(), { wrapper });
-  await act(() => view.result.current.mutateAsync({ id: 1, body: { trickplay_enabled: enabled } }));
+  await act(() => view.result.current.mutateAsync({ id: 1, body }));
   expect(client.getQueryState(key)?.isInvalidated).toBe(true);
   view.unmount();
   client.clear();

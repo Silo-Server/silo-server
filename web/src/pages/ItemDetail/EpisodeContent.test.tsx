@@ -294,6 +294,22 @@ function countOccurrences(markup: string, fragment: string): number {
 }
 
 describe("EpisodeContent", () => {
+  it.each([
+    [{ trickplay: true, trickplay_supported: true }, true],
+    [{ trickplay: true, trickplay_supported: false }, false],
+    [{ trickplay: true }, false],
+    [undefined, false],
+  ])("offers episode seek-preview administration with capability %o: %s", (data, offered) => {
+    mocks.useAuth.mockReturnValue({ user: { role: "admin" } });
+    mocks.useLibraryCapabilities.mockReturnValue({ data });
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <EpisodeContent item={makeEpisodeItem()} />
+      </MemoryRouter>,
+    );
+    expect(mocks.capturedActionBarProps.value?.canManageTrickplay).toBe(offered);
+  });
+
   beforeEach(() => {
     mocks.capturedActionBarProps.value = null;
     mocks.capturedDetailHeroProps.value = null;

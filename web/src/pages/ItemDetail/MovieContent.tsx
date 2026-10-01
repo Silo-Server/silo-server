@@ -71,7 +71,9 @@ export default function MovieContent({
   // Movies have no re-detect action on an API node without redetect-markers
   // or movie credits.
   const markerCapabilities = useAdminMarkerCapabilities(isAdmin);
-  const canManageTrickplay = useLibraryCapabilities(isAdmin).data?.trickplay === true;
+  const capabilities = useLibraryCapabilities(isAdmin).data;
+  const canManageTrickplay =
+    capabilities?.trickplay === true && capabilities.trickplay_supported === true;
   const canRedetectMovieCredits =
     markerCapabilities.data?.redetect_markers === true &&
     markerCapabilities.data?.movie_credits === true;

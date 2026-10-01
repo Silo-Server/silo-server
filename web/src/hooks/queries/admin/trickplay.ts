@@ -46,7 +46,7 @@ export function useRegenerateItemTrickplay() {
     onSuccess: ({ requeued }, itemId) => {
       toast.success(
         requeued === 0
-          ? "Seek previews are already being made"
+          ? "No seek previews were queued"
           : `Seek previews queued for ${requeued} ${requeued === 1 ? "file" : "files"}`,
       );
       void queryClient.invalidateQueries({ queryKey: adminKeys.itemTrickplay(itemId) });
