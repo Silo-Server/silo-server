@@ -398,7 +398,7 @@ export function useUpdateLibrary() {
     onSuccess: (_updated, { body }) => {
       toast.success("Library updated");
       queryClient.invalidateQueries({ queryKey: adminKeys.libraries() });
-      if (body.trickplay_enabled !== undefined) {
+      if (body.trickplay_enabled !== undefined || body.enabled !== undefined) {
         queryClient.invalidateQueries({ queryKey: adminKeys.trickplayLibraries() });
       }
     },
