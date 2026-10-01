@@ -79,3 +79,6 @@
 ./internal/blobgc TestSweeperResumesAfterBoundedRunDB
 ./internal/blobgc TestSweeperDefersPrefixSpanningBoundedRunsDB
 ./internal/blobgc TestSweeperRestartsAfterStorageMoveDB
+
+./internal/trickplay TestSameOwnerReclaimRejectsPriorAttemptDB
+./internal/trickplay TestRevisionProtectionIsMonotonicAndFollowsTheRevisionDB

@@ -31,8 +31,9 @@ Every server works the queue; the work per file is independent, so nothing
 serializes it across servers.
 
 - A claim takes the due `pending` row that has waited longest with
-  `FOR UPDATE SKIP LOCKED`, and leases it. It records the file's size, hash,
-  and duration at that moment (`source_*`).
+  `FOR UPDATE SKIP LOCKED`, and leases it with a fresh attempt token stored
+  in `lease_owner`. It records the file's size, hash, and duration at that
+  moment (`source_*`).
 - The worker renews its lease while it runs. A lease that runs out, because
   its server died or stalled, is reclaimed by the next reconcile on any
   server: the row returns to `pending` as a failure and backs off.
@@ -41,8 +42,10 @@ serializes it across servers.
   sequence values: they name storage prefixes served as immutable, so they
   must not repeat after a database restore.
 - Publishing and finishing are fenced on the lease: they lock the row and act
-  only while `lease_owner` still holds it in `running`. A worker that lost its
-  lease changes nothing.
+  only while that attempt token still holds it in `running`. Heartbeats and
+  uploads require the same token, so reclaiming a job on the same API server
+  cannot authorize an earlier attempt. A worker that lost its lease changes
+  nothing.
 - A failure backs off 15 minutes, 1 hour, 6 hours, 1 day, then a week. A
   permanent cause marks the row `unusable`. A cause that is the server's own
   (a shutdown, no transcode node to run on) returns the row without counting
@@ -93,9 +96,19 @@ Sheets are deleted per revision through `blob_gc_queue` (see
   uploading. Both happen in the transaction that changes the row.
 - A trigger queues the revisions of every deleted row, whether its library
   opted out or its media file was deleted (the cascade).
-- Displaced and abandoned revisions wait 48 hours, longer than a signed
-  sheet URL lives, so a viewer who read a manifest just before a
-  regeneration keeps working.
+- Displaced and abandoned revisions wait at least 48 hours. Before serving
+  a manifest, the reader protects its exact published revision until the
+  latest expiry of all signed sheets. Publication and deletion carry that
+  recorded expiry into the queue, so already issued URLs keep working
+  across regeneration, opt-out, deletion, and resolver setting changes. A
+  revision replaced while signing is withheld.
 - The collector deletes a revision only while no row publishes it and no
   running generation uploads under it; the orphan sweep catches revisions
   nothing queued.
+
+The orphan sweep persists each namespace's continuation cursor under the
+store identity, so a bounded run resumes rather than repeating the first
+pages. A prefix split across runs carries its newest object time and stays
+unqueued until the full prefix has been listed. Errors or an anomaly keep
+the prior checkpoint; finishing a namespace clears its cursor, and changing
+stores starts a new walk.

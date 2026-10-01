@@ -50,9 +50,8 @@ func backoffAfter(failures int) time.Duration {
 	return failureBackoff[min(max(failures, 1), len(failureBackoff))-1]
 }
 
-// abandonedGrace is how long an abandoned or displaced revision stays in
-// storage: longer than a signed sheet URL lives (a day plus its TTL), so a
-// viewer who fetched a manifest just before a regeneration keeps working.
+// abandonedGrace is the minimum time an abandoned or displaced revision
+// stays in storage. Issued URLs can extend a published revision's deadline.
 const abandonedGrace = 48 * time.Hour
 
 // videoLibraryTypes are the media_folders.type values of video libraries,
@@ -62,7 +61,10 @@ var videoLibraryTypes = []string{"movie", "movies", "series", "tv", "show", "tvs
 
 // Job is a claimed file: what a worker needs to generate its sheets.
 type Job struct {
-	FileID          int
+	FileID int
+	// LeaseToken identifies this attempt, including when the same server
+	// reclaims the file after an earlier attempt expires.
+	LeaseToken      string
 	FilePath        string
 	Container       string
 	Codec           string
@@ -74,7 +76,8 @@ type Job struct {
 }
 
 // Claim leases the next due file for owner, for a server at recipe version
-// AlgorithmVersion, or returns nil when none is due.
+// AlgorithmVersion, or returns nil when none is due. Mutations must use the
+// returned Job.LeaseToken, which changes on every claim.
 func (r *Repository) Claim(ctx context.Context, owner string, lease time.Duration) (*Job, error) {
 	return r.claim(ctx, owner, lease, 0)
 }
@@ -86,6 +89,7 @@ func (r *Repository) ClaimFile(ctx context.Context, fileID int, owner string, le
 
 func (r *Repository) claim(ctx context.Context, owner string, lease time.Duration, fileID int) (*Job, error) {
 	var job Job
+	leaseToken := owner + ":" + rand.Text()
 	var videoTracks []byte
 	var container, codec *string
 	var hdr *bool
@@ -106,9 +110,9 @@ func (r *Repository) claim(ctx context.Context, owner string, lease time.Duratio
 		FROM next, public.media_files mf
 		WHERE t.media_file_id = next.media_file_id AND mf.id = t.media_file_id
 		RETURNING t.media_file_id, mf.file_path, mf.container, mf.codec_video, mf.duration, mf.hdr,
-		          COALESCE(mf.video_tracks, '[]'::jsonb), t.failure_count`,
-		owner, lease.Seconds(), AlgorithmVersion, fileID,
-	).Scan(&job.FileID, &job.FilePath, &container, &codec, &duration, &hdr, &videoTracks, &job.Failures)
+		          COALESCE(mf.video_tracks, '[]'::jsonb), t.failure_count, t.lease_owner`,
+		leaseToken, lease.Seconds(), AlgorithmVersion, fileID,
+	).Scan(&job.FileID, &job.FilePath, &container, &codec, &duration, &hdr, &videoTracks, &job.Failures, &job.LeaseToken)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -131,30 +135,30 @@ func (r *Repository) claim(ctx context.Context, owner string, lease time.Duratio
 	return &job, nil
 }
 
-// Heartbeat renews owner's lease on fileID, and reports false when the lease
-// is lost.
-func (r *Repository) Heartbeat(ctx context.Context, fileID int, owner string, lease time.Duration) (bool, error) {
+// Heartbeat renews the claim identified by leaseToken, and reports false
+// when the lease is lost.
+func (r *Repository) Heartbeat(ctx context.Context, fileID int, leaseToken string, lease time.Duration) (bool, error) {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE public.media_file_trickplay
 		SET lease_expires_at = now() + make_interval(secs => $3), updated_at = now()
 		WHERE media_file_id = $1 AND lease_owner = $2 AND state = 'running' AND lease_expires_at > now()`,
-		fileID, owner, lease.Seconds())
+		fileID, leaseToken, lease.Seconds())
 	if err != nil {
 		return false, fmt.Errorf("renew trickplay lease: %w", err)
 	}
 	return tag.RowsAffected() == 1, nil
 }
 
-// BeginUpload picks the revision owner's generation of fileID uploads under,
+// BeginUpload picks the revision the claim's generation of fileID uploads under,
 // and reports false when the lease is lost. Until it publishes, the
 // revision is queued for deletion if the work is abandoned.
-func (r *Repository) BeginUpload(ctx context.Context, fileID int, owner string) (int64, bool, error) {
+func (r *Repository) BeginUpload(ctx context.Context, fileID int, leaseToken string) (int64, bool, error) {
 	revision := newRevision()
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE public.media_file_trickplay SET work_revision = $3, updated_at = now()
 		WHERE media_file_id = $1 AND lease_owner = $2 AND state = 'running' AND lease_expires_at > now()
 		  AND work_revision IS NULL`,
-		fileID, owner, revision)
+		fileID, leaseToken, revision)
 	if err != nil {
 		return 0, false, fmt.Errorf("start trickplay upload: %w", err)
 	}
@@ -185,16 +189,16 @@ type Published struct {
 	Filled        int
 }
 
-// Publish makes owner's uploaded revision of fileID the one served, and
+// Publish makes the claim's uploaded revision of fileID the one served, and
 // queues the revision it replaces for deletion. It reports false, changing
 // nothing, when the lease was lost.
-func (r *Repository) Publish(ctx context.Context, fileID int, owner string, revision int64, p Published) (bool, error) {
-	return r.fenced(ctx, fileID, owner, func(tx pgx.Tx, current fencedRow) (bool, error) {
+func (r *Repository) Publish(ctx context.Context, fileID int, leaseToken string, revision int64, p Published) (bool, error) {
+	return r.fenced(ctx, fileID, leaseToken, func(tx pgx.Tx, current fencedRow) (bool, error) {
 		if current.workRevision == nil || *current.workRevision != revision {
 			return false, nil
 		}
 		if current.revision != nil {
-			if err := queueRevision(ctx, tx, fileID, *current.revision); err != nil {
+			if err := queueRevision(ctx, tx, fileID, *current.revision, current.urlExpiresAt); err != nil {
 				return false, err
 			}
 		}
@@ -208,7 +212,7 @@ func (r *Repository) Publish(ctx context.Context, fileID int, owner string, revi
 			SET state = 'ready', lease_owner = NULL, lease_expires_at = NULL,
 			    revision = work_revision, work_revision = NULL, failure_count = 0, last_error = '',
 			    published_recipe = $2, published_size = source_size, published_hash = source_hash,
-			    published_duration = source_duration, store_identity = $3,
+			    published_duration = source_duration, published_expires_at = NULL, store_identity = $3,
 			    width = $4, height = $5, tile_columns = $6, tile_rows = $7, interval_ms = $8,
 			    thumbnail_count = $9, sheet_count = $10, bandwidth = $11, sheet_bytes = $12,
 			    decoder = $13, filled = $14, generated_at = now(), updated_at = now()
@@ -237,13 +241,13 @@ const (
 	Released
 )
 
-// Finish ends owner's claim on fileID without publishing, and queues any
+// Finish ends the claim on fileID without publishing, and queues any
 // revision it uploaded for deletion. delay applies to Released. It reports
 // false when the lease was lost.
-func (r *Repository) Finish(ctx context.Context, fileID int, owner string, outcome Outcome, cause string, delay time.Duration) (bool, error) {
-	return r.fenced(ctx, fileID, owner, func(tx pgx.Tx, current fencedRow) (bool, error) {
+func (r *Repository) Finish(ctx context.Context, fileID int, leaseToken string, outcome Outcome, cause string, delay time.Duration) (bool, error) {
+	return r.fenced(ctx, fileID, leaseToken, func(tx pgx.Tx, current fencedRow) (bool, error) {
 		if current.workRevision != nil {
-			if err := queueRevision(ctx, tx, fileID, *current.workRevision); err != nil {
+			if err := queueRevision(ctx, tx, fileID, *current.workRevision, nil); err != nil {
 				return false, err
 			}
 		}
@@ -268,16 +272,17 @@ func (r *Repository) Finish(ctx context.Context, fileID int, owner string, outco
 	})
 }
 
-// fencedRow is a row owner still leases.
+// fencedRow is a row the attempt still leases.
 type fencedRow struct {
 	revision     *int64
 	workRevision *int64
+	urlExpiresAt *time.Time
 	failures     int
 }
 
-// fenced runs apply in a transaction holding fileID's row, if owner still
-// leases it.
-func (r *Repository) fenced(ctx context.Context, fileID int, owner string, apply func(pgx.Tx, fencedRow) (bool, error)) (bool, error) {
+// fenced runs apply in a transaction holding fileID's row, if leaseToken
+// still identifies the current attempt.
+func (r *Repository) fenced(ctx context.Context, fileID int, leaseToken string, apply func(pgx.Tx, fencedRow) (bool, error)) (bool, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return false, fmt.Errorf("begin: %w", err)
@@ -285,9 +290,9 @@ func (r *Repository) fenced(ctx context.Context, fileID int, owner string, apply
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
 	var row fencedRow
 	err = tx.QueryRow(ctx, `
-		SELECT revision, work_revision, failure_count FROM public.media_file_trickplay
+		SELECT revision, work_revision, published_expires_at, failure_count FROM public.media_file_trickplay
 		WHERE media_file_id = $1 AND lease_owner = $2 AND state = 'running' AND lease_expires_at > now()
-		FOR UPDATE`, fileID, owner).Scan(&row.revision, &row.workRevision, &row.failures)
+		FOR UPDATE`, fileID, leaseToken).Scan(&row.revision, &row.workRevision, &row.urlExpiresAt, &row.failures)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -302,15 +307,37 @@ func (r *Repository) fenced(ctx context.Context, fileID int, owner string, apply
 }
 
 // queueRevision queues a revision's sheets for deletion after the grace.
-func queueRevision(ctx context.Context, tx pgx.Tx, fileID int, revision int64) error {
+func queueRevision(ctx context.Context, tx pgx.Tx, fileID int, revision int64, urlExpiresAt *time.Time) error {
 	_, err := tx.Exec(ctx, `
 		INSERT INTO public.blob_gc_queue (prefix, not_before)
-		VALUES ($1, now() + make_interval(secs => $2))
-		ON CONFLICT (prefix) DO NOTHING`, revisionPrefix(fileID, revision), abandonedGrace.Seconds())
+		VALUES ($1, GREATEST(now() + make_interval(secs => $2), $3::timestamptz))
+		ON CONFLICT (prefix) DO UPDATE
+		SET not_before = GREATEST(public.blob_gc_queue.not_before, EXCLUDED.not_before)`,
+		revisionPrefix(fileID, revision), abandonedGrace.Seconds(), urlExpiresAt)
 	if err != nil {
 		return fmt.Errorf("queue trickplay revision for deletion: %w", err)
 	}
 	return nil
+}
+
+// ProtectRevision keeps revision stored until the latest URL issued for it
+// expires. It reports false if publication or deletion replaced the row, so
+// a reader cannot return URLs for an old revision without protecting it.
+func (r *Repository) ProtectRevision(ctx context.Context, fileID int, revision int64, expiresAt time.Time) (bool, error) {
+	// PostgreSQL stores timestamps with microsecond precision. Round up so
+	// encoding cannot shorten the lifetime of an issued URL.
+	rounded := expiresAt.Truncate(time.Microsecond)
+	if expiresAt.After(rounded) {
+		expiresAt = rounded.Add(time.Microsecond)
+	}
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE public.media_file_trickplay
+		SET published_expires_at = GREATEST(published_expires_at, $3::timestamptz)
+		WHERE media_file_id = $1 AND revision = $2`, fileID, revision, expiresAt)
+	if err != nil {
+		return false, fmt.Errorf("protect issued trickplay URLs: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 func cleanError(message string) string {
