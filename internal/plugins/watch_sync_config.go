@@ -3,11 +3,13 @@ package plugins
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"github.com/jackc/pgx/v5"
 )
 
 // WatchSyncProviderConfig returns the installation's global configuration in
@@ -98,4 +100,63 @@ func watchSyncConfigString(value any) (string, error) {
 		return "", err
 	}
 	return string(encoded), nil
+}
+
+// InstalledFromSiloRepository reports whether an installation came from a
+// Silo-managed plugin repository, rather than from a repository an admin added
+// or from an uploaded archive.
+func (s *Service) InstalledFromSiloRepository(ctx context.Context, installation *Installation) (bool, error) {
+	if installation == nil || installation.RepositoryID == nil || s.repositories == nil {
+		return false, nil
+	}
+	repository, err := s.repositories.GetByID(ctx, *installation.RepositoryID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read plugin repository %d: %w", *installation.RepositoryID, err)
+	}
+	return repository.SourceKind == RepositorySourceSilo, nil
+}
+
+// SeedGlobalConfig saves value under key only when the installation has no
+// saved value for key yet, keeping just the fields the manifest declares for
+// that key. It reports whether it saved anything. Use it to carry settings
+// over from elsewhere without overwriting what an admin entered.
+func (s *Service) SeedGlobalConfig(ctx context.Context, installationID int, key string, value map[string]any) (bool, error) {
+	if s.configs == nil {
+		return false, nil
+	}
+	configs, err := s.configs.ListGlobalConfigs(ctx, installationID)
+	if err != nil {
+		return false, fmt.Errorf("list plugin config: %w", err)
+	}
+	for _, config := range configs {
+		if config != nil && config.Key == key && len(config.Value) > 0 {
+			return false, nil
+		}
+	}
+	manifest, err := s.manifestForInstallation(ctx, installationID, false)
+	if err != nil {
+		return false, err
+	}
+	publicFields, secretFields := GlobalConfigFieldSets(manifest, key)
+	declared := stringSet(append(publicFields, secretFields...))
+	seed := make(map[string]any, len(value))
+	for field, fieldValue := range value {
+		if _, ok := declared[field]; !ok {
+			continue
+		}
+		if text, isText := fieldValue.(string); isText && strings.TrimSpace(text) == "" {
+			continue
+		}
+		seed[field] = fieldValue
+	}
+	if len(seed) == 0 {
+		return false, nil
+	}
+	if err := s.SetGlobalConfig(ctx, installationID, key, seed); err != nil {
+		return false, err
+	}
+	return true, nil
 }

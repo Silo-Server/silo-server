@@ -313,7 +313,7 @@ func TestReloadWatchSyncPluginProvidersPreservesConnectionForm(t *testing.T) {
 
 	registry := watchsync.NewRegistry()
 	if err := reloadWatchSyncPluginProviders(
-		context.Background(), registry, staticWatchSyncCapabilityStore{capabilities: capabilities}, &plugins.Service{}, nil,
+		context.Background(), registry, staticWatchSyncCapabilityStore{capabilities: capabilities}, &plugins.Service{}, nil, nil,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +356,7 @@ func TestReloadWatchSyncPluginProvidersDropsStaleProvidersOnCapabilityReadFailur
 	}
 
 	if err := reloadWatchSyncPluginProviders(
-		context.Background(), registry, failingWatchSyncCapabilityStore{}, &plugins.Service{}, nil,
+		context.Background(), registry, failingWatchSyncCapabilityStore{}, &plugins.Service{}, nil, nil,
 	); err != nil {
 		t.Fatal(err)
 	}

@@ -123,6 +123,10 @@ type AutoUpdateService struct {
 	// here to keep that service's installation cache consistent with the
 	// version-specific InstallPath/Version this service writes.
 	onChange func(context.Context)
+
+	// requiredPlugins lists more plugins to install like the defaults, for as
+	// long as it keeps returning them. Optional; see SetRequiredPlugins.
+	requiredPlugins func(context.Context) ([]string, error)
 }
 
 // NewAutoUpdateService creates a new AutoUpdateService. onChange is optional and
@@ -150,6 +154,14 @@ func NewAutoUpdateService(
 		logger:        logger,
 		onChange:      onChange,
 	}
+}
+
+// SetRequiredPlugins adds a source of plugin IDs that startup installs from the
+// Silo repository the same way it installs the default plugins. Unlike the
+// defaults, the list can change: a plugin that is only needed to carry over
+// existing data drops off it once that has happened. Call it before Run.
+func (s *AutoUpdateService) SetRequiredPlugins(required func(context.Context) ([]string, error)) {
+	s.requiredPlugins = required
 }
 
 // Check runs a plugin update pass. It can be used by startup, scheduled tasks,
@@ -220,7 +232,7 @@ func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (
 
 	if opts.AutoInstallDefaults {
 		latestOfficial := latestCatalogEntriesForSource(entries, RepositorySourceSilo)
-		for _, pluginID := range defaultPluginIDs {
+		for _, pluginID := range s.pluginsToAutoInstall(ctx, &summary) {
 			if _, installed := installedPluginIDs[pluginID]; installed {
 				continue
 			}
@@ -321,14 +333,31 @@ func (s *AutoUpdateService) ensureManagedRepositoryRows(ctx context.Context) (in
 	return 1, nil
 }
 
-// handleNewPlugin auto-installs a plugin if it is in the default plugin list.
-func (s *AutoUpdateService) handleNewPlugin(ctx context.Context, pluginID string, entry CatalogEntry) (bool, error) {
-	if !slices.Contains(defaultPluginIDs, pluginID) {
-		return false, nil
+// pluginsToAutoInstall returns the default plugins followed by the required
+// ones. A failure to list the required plugins is recorded and leaves just
+// the defaults.
+func (s *AutoUpdateService) pluginsToAutoInstall(ctx context.Context, summary *AutoUpdateSummary) []string {
+	pluginIDs := slices.Clone(defaultPluginIDs)
+	if s.requiredPlugins == nil {
+		return pluginIDs
 	}
+	required, err := s.requiredPlugins(ctx)
+	if err != nil {
+		summary.recordFailure("list required plugins: %v", err)
+		return pluginIDs
+	}
+	for _, pluginID := range required {
+		if !slices.Contains(pluginIDs, pluginID) {
+			pluginIDs = append(pluginIDs, pluginID)
+		}
+	}
+	return pluginIDs
+}
 
+// handleNewPlugin installs a default or required plugin from its catalog entry.
+func (s *AutoUpdateService) handleNewPlugin(ctx context.Context, pluginID string, entry CatalogEntry) (bool, error) {
 	version := entry.Manifest.GetVersion()
-	s.logger.InfoContext(ctx, "auto-installing default plugin",
+	s.logger.InfoContext(ctx, "auto-installing plugin",
 		"plugin_id", pluginID,
 		"version", version,
 	)
