@@ -11,8 +11,8 @@ import (
 
 func TestLoadCachesUntilTheFileChanges(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "a.mkv")
-	file := slices.Concat(ebmlHeader, el(idSegment, info, tracks, cues, cluster))
-	if err := os.WriteFile(path, file, 0o644); err != nil {
+	contents := file(layout{})
+	if err := os.WriteFile(path, contents, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stamp := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -23,7 +23,7 @@ func TestLoadCachesUntilTheFileChanges(t *testing.T) {
 	wantIndex(t, got, err)
 
 	// Same size and time with different bytes: still the cached index.
-	damaged := slices.Clone(file)
+	damaged := slices.Clone(contents)
 	for i := range damaged[:8] {
 		damaged[i] = 0
 	}

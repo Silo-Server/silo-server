@@ -176,9 +176,16 @@ func ReadMatroska(r io.ReaderAt, size int64) (Index, error) {
 		return Index{}, ErrNoIndex
 	}
 
-	ticks := cueTimes(cues, video)
-	if len(ticks) == 0 {
+	points := cuePoints(cues, video)
+	if len(points) == 0 {
 		return Index{}, ErrNoIndex
+	}
+	if err := checkCueCoverage(r, segStart, segEnd, video, points); err != nil {
+		return Index{}, err
+	}
+	ticks := make([]uint64, len(points))
+	for i, p := range points {
+		ticks[i] = p.ticks
 	}
 	sort.Slice(ticks, func(i, j int) bool { return ticks[i] < ticks[j] })
 	idx := Index{Keyframes: make([]float64, 0, len(ticks))}
@@ -362,10 +369,12 @@ func firstVideoTrack(tracks []byte) (uint64, bool) {
 	return number, found
 }
 
-// cueTimes returns the CueTime of every cue point that indexes the video
-// track. Matroska muxers index video keyframes, so these are keyframe times.
-func cueTimes(cues []byte, video uint64) []uint64 {
-	var times []uint64
+// cuePoints returns every cue point that indexes the video track, with the
+// position of the cluster holding it (-1 when the cue doesn't say). Matroska
+// muxers index video keyframes, so the times are keyframe times; whether
+// every keyframe has one is checked separately (checkCueCoverage).
+func cuePoints(cues []byte, video uint64) []cuePoint {
+	var points []cuePoint
 	children(cues, func(id uint64, point []byte) {
 		if id != idCuePoint {
 			return
@@ -374,22 +383,33 @@ func cueTimes(cues []byte, video uint64) []uint64 {
 			t       uint64
 			hasTime bool
 			isVideo bool
+			cluster int64 = -1
 		)
 		children(point, func(id uint64, v []byte) {
 			switch id {
 			case idCueTime:
 				t, hasTime = readUint(v), true
 			case idCueTrackPos:
+				var (
+					track uint64
+					pos   int64 = -1
+				)
 				children(v, func(id uint64, v []byte) {
-					if id == idCueTrack && readUint(v) == video {
-						isVideo = true
+					switch id {
+					case idCueTrack:
+						track = readUint(v)
+					case idCueClusterPosition:
+						pos = int64(readUint(v))
 					}
 				})
+				if track == video {
+					isVideo, cluster = true, pos
+				}
 			}
 		})
 		if hasTime && isVideo {
-			times = append(times, t)
+			points = append(points, cuePoint{ticks: t, cluster: cluster})
 		}
 	})
-	return times
+	return points
 }

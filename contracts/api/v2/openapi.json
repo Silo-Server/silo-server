@@ -196064,6 +196064,9 @@
           "hw_accel": {
             "type": "string"
           },
+          "keyframe_playlist": {
+            "type": "boolean"
+          },
           "session_id": {
             "type": "string"
           },

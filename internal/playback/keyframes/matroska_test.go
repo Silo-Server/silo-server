@@ -9,8 +9,8 @@ import (
 	"testing"
 )
 
-// el encodes one EBML element with an 8-byte size, which every reader must
-// accept.
+// el encodes one EBML element with an 8-byte size, so an element's length
+// never depends on its values and cluster positions can be computed up front.
 func el(id uint64, parts ...[]byte) []byte {
 	data := bytes.Join(parts, nil)
 	var out []byte
@@ -42,26 +42,118 @@ func floatEl(id uint64, v float64) []byte {
 	return el(id, b[:])
 }
 
-func cuePoint(ticks, track uint64) []byte {
-	return el(idCuePoint, uintEl(idCueTime, ticks), el(idCueTrackPos, uintEl(idCueTrack, track)))
+const (
+	audioTrack = 1
+	videoTrack = 2
+)
+
+// block encodes a SimpleBlock at a timestamp relative to its cluster.
+func block(track uint64, rel int16, key bool) []byte {
+	var flags byte
+	if key {
+		flags = 0x80
+	}
+	var ts [2]byte
+	binary.BigEndian.PutUint16(ts[:], uint16(rel))
+	return el(idSimpleBlock, []byte{0x80 | byte(track)}, ts[:], []byte{flags}, bytes.Repeat([]byte{0xAA}, 16))
+}
+
+// groupBlock encodes a BlockGroup; a referencing block is not a keyframe.
+func groupBlock(track uint64, rel int16, references bool) []byte {
+	var ts [2]byte
+	binary.BigEndian.PutUint16(ts[:], uint16(rel))
+	parts := [][]byte{el(idBlock, []byte{0x80 | byte(track)}, ts[:], []byte{0}, bytes.Repeat([]byte{0xBB}, 16))}
+	if references {
+		parts = append(parts, uintEl(idReferenceBlock, 40))
+	}
+	return el(idBlockGroup, parts...)
+}
+
+func cluster(ticks uint64, blocks ...[]byte) []byte {
+	return el(idCluster, append([][]byte{uintEl(idClusterTimestamp, ticks)}, blocks...)...)
 }
 
 var (
 	ebmlHeader = el(idEBML, el(0x4282, []byte("matroska")))
 	info       = el(idInfo, uintEl(idTimestampScale, 1_000_000), floatEl(idDuration, 12_500))
 	tracks     = el(idTracks,
-		el(idTrackEntry, uintEl(idTrackNumber, 1), uintEl(idTrackType, 2)), // audio
-		el(idTrackEntry, uintEl(idTrackNumber, 2), uintEl(idTrackType, trackTypeVideo)),
+		el(idTrackEntry, uintEl(idTrackNumber, audioTrack), uintEl(idTrackType, 2)),
+		el(idTrackEntry, uintEl(idTrackNumber, videoTrack), uintEl(idTrackType, trackTypeVideo)),
 	)
-	cues = el(idCues,
-		cuePoint(4_218, 2),
-		cuePoint(0, 2),
-		cuePoint(3_000, 1), // audio track: not a video keyframe
-		cuePoint(2_216, 2),
-		cuePoint(2_216, 2), // duplicate
+	// Video keyframes at 0, 2.216s (a BlockGroup) and 4.218s; non-keyframes
+	// and audio between them.
+	clusterA = cluster(0,
+		block(videoTrack, 0, true),
+		block(audioTrack, 10, true),
+		block(videoTrack, 40, false),
+		groupBlock(videoTrack, 80, true),
+		groupBlock(videoTrack, 2216, false),
 	)
-	cluster = el(idCluster, uintEl(0xE7, 0), bytes.Repeat([]byte{0xAA}, 64))
+	clusterB = cluster(4218,
+		block(videoTrack, 0, true),
+		block(videoTrack, 40, false),
+	)
 )
+
+type layout struct {
+	cuesFirst   bool    // Cues before the clusters, found by the linear scan
+	unknownSize bool    // a live-style segment with no size
+	dropCue     *uint64 // a video keyframe left out of the Cues
+	noPositions bool
+}
+
+// file builds a Matroska file whose Cues index the fixture's keyframes, plus
+// an audio cue and a duplicate, pointing at the clusters that hold them.
+func file(l layout) []byte {
+	seekHead := func(pos uint64) []byte {
+		return el(idSeekHead, el(idSeek, uintEl(idSeekID, idCues), uintEl(idSeekPosition, pos)))
+	}
+	head := slices.Concat(seekHead(0), info, tracks)
+	cuesLen := len(cuesFor(l, 0, 0))
+	posA := uint64(len(head))
+	if l.cuesFirst {
+		posA += uint64(cuesLen)
+	}
+	posB := posA + uint64(len(clusterA))
+	cues := cuesFor(l, posA, posB)
+
+	var body []byte
+	if l.cuesFirst {
+		body = slices.Concat(seekHead(uint64(len(head))), info, tracks, cues, clusterA, clusterB)
+	} else {
+		body = slices.Concat(seekHead(posB+uint64(len(clusterB))), info, tracks, clusterA, clusterB, cues)
+	}
+	if l.unknownSize {
+		return slices.Concat(ebmlHeader, []byte{0x18, 0x53, 0x80, 0x67, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}, body)
+	}
+	return slices.Concat(ebmlHeader, el(idSegment, body))
+}
+
+func cuesFor(l layout, posA, posB uint64) []byte {
+	point := func(ticks, track, pos uint64) []byte {
+		if l.dropCue != nil && ticks == *l.dropCue && track == videoTrack {
+			return nil
+		}
+		trackPos := [][]byte{uintEl(idCueTrack, track)}
+		if !l.noPositions {
+			trackPos = append(trackPos, uintEl(idCueClusterPosition, pos))
+		}
+		return el(idCuePoint, uintEl(idCueTime, ticks), el(idCueTrackPos, trackPos...))
+	}
+	return el(idCues,
+		point(4218, videoTrack, posB),
+		point(0, videoTrack, posA),
+		point(10, audioTrack, posA), // audio: not a video keyframe
+		point(2216, videoTrack, posA),
+		point(2216, videoTrack, posA), // duplicate
+	)
+}
+
+func ptr[T any](v T) *T { return &v }
+
+func read(f []byte) (Index, error) {
+	return ReadMatroska(bytes.NewReader(f), int64(len(f)))
+}
 
 func wantIndex(t *testing.T, got Index, err error) {
 	t.Helper()
@@ -76,44 +168,46 @@ func wantIndex(t *testing.T, got Index, err error) {
 	}
 }
 
-func read(file []byte) (Index, error) {
-	return ReadMatroska(bytes.NewReader(file), int64(len(file)))
-}
-
 func TestReadMatroskaCuesBeforeClusters(t *testing.T) {
-	file := slices.Concat(ebmlHeader, el(idSegment, info, tracks, cues, cluster))
-	got, err := read(file)
+	got, err := read(file(layout{cuesFirst: true}))
 	wantIndex(t, got, err)
 }
 
 // Most muxers write the Cues after the clusters and point to them from the
 // seek head; the reader follows it instead of reading the clusters.
 func TestReadMatroskaCuesAfterClustersThroughSeekHead(t *testing.T) {
-	// The seek position is relative to the segment's data. The seek head's
-	// size doesn't depend on the position's value (8-byte integer), so build
-	// it once to measure, then with the real position.
-	seekHead := func(pos uint64) []byte {
-		return el(idSeekHead, el(idSeek, uintEl(idSeekID, idCues), uintEl(idSeekPosition, pos)))
-	}
-	before := len(seekHead(0)) + len(info) + len(tracks) + len(cluster)
-	segment := el(idSegment, seekHead(uint64(before)), info, tracks, cluster, cues)
-	got, err := read(slices.Concat(ebmlHeader, segment))
+	got, err := read(file(layout{}))
 	wantIndex(t, got, err)
 }
 
 func TestReadMatroskaUnknownSizeSegment(t *testing.T) {
-	segment := []byte{0x18, 0x53, 0x80, 0x67, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
-	file := bytes.Join([][]byte{ebmlHeader, segment, info, tracks, cues}, nil)
-	got, err := read(file)
+	got, err := read(file(layout{unknownSize: true}))
 	wantIndex(t, got, err)
 }
 
+// A plan built on Cues that skip keyframes would cut segments where FFmpeg
+// doesn't, so such a file has no usable index.
+func TestReadMatroskaRejectsCuesMissingKeyframes(t *testing.T) {
+	for name, l := range map[string]layout{
+		"keyframe without a cue (Block)":       {dropCue: ptr(uint64(2216))},
+		"keyframe without a cue (SimpleBlock)": {dropCue: ptr(uint64(4218)), cuesFirst: true},
+		"cues without cluster positions":       {noPositions: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := read(file(l))
+			if !errors.Is(err, ErrIncompleteIndex) || !errors.Is(err, ErrNoIndex) {
+				t.Fatalf("err = %v, want ErrIncompleteIndex (an ErrNoIndex)", err)
+			}
+		})
+	}
+}
+
 func TestReadMatroskaWithoutIndex(t *testing.T) {
+	audioOnlyTracks := el(idTracks, el(idTrackEntry, uintEl(idTrackNumber, audioTrack), uintEl(idTrackType, 2)))
 	for name, segment := range map[string][]byte{
-		"no cues":            el(idSegment, info, tracks, cluster),
-		"no video cue":       el(idSegment, info, tracks, el(idCues, cuePoint(0, 1))),
-		"no video track":     el(idSegment, info, el(idTracks, el(idTrackEntry, uintEl(idTrackNumber, 1), uintEl(idTrackType, 2))), cues),
-		"no tracks, no cues": el(idSegment, info, cluster),
+		"no cues":        el(idSegment, info, tracks, clusterA),
+		"no video cue":   el(idSegment, info, tracks, el(idCues, el(idCuePoint, uintEl(idCueTime, 0), el(idCueTrackPos, uintEl(idCueTrack, audioTrack))))),
+		"no video track": el(idSegment, info, audioOnlyTracks, clusterA),
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := read(slices.Concat(ebmlHeader, segment))
@@ -125,13 +219,13 @@ func TestReadMatroskaWithoutIndex(t *testing.T) {
 }
 
 func TestReadMatroskaRejectsOtherFiles(t *testing.T) {
-	for name, file := range map[string][]byte{
+	for name, f := range map[string][]byte{
 		"empty":     nil,
 		"mp4":       []byte("\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2"),
 		"truncated": ebmlHeader[:5],
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := read(file); err == nil {
+			if _, err := read(f); err == nil {
 				t.Fatal("read succeeded, want an error")
 			}
 		})
@@ -143,12 +237,12 @@ func TestReadMatroskaRejectsOtherFiles(t *testing.T) {
 func TestReadMatroskaRejectsOversizedCues(t *testing.T) {
 	huge := []byte{0x1C, 0x53, 0xBB, 0x6B, 0x01, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00}
 	// An unknown-size segment, so the reader reaches the Cues header.
-	file := bytes.Join([][]byte{
+	f := slices.Concat(
 		ebmlHeader,
-		{0x18, 0x53, 0x80, 0x67, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF},
+		[]byte{0x18, 0x53, 0x80, 0x67, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF},
 		info, tracks, huge,
-	}, nil)
-	if _, err := read(file); err == nil || errors.Is(err, ErrNoIndex) {
+	)
+	if _, err := read(f); err == nil || errors.Is(err, ErrNoIndex) {
 		t.Fatalf("err = %v, want a size error", err)
 	}
 }
