@@ -518,7 +518,7 @@ func (r *Repository) Manifests(ctx context.Context, fileIDs []int, storeIdentity
 func (r *Repository) Regenerate(ctx context.Context, fileIDs []int) (int, error) {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE public.media_file_trickplay
-		SET state = 'pending', available_at = '-infinity', failure_count = 0, last_error = '', updated_at = now()
+		SET state = 'pending', recipe_version = $2, available_at = '-infinity', failure_count = 0, last_error = '', updated_at = now()
 		WHERE media_file_id = ANY($1) AND state <> 'running' AND recipe_version <= $2`,
 		fileIDs, AlgorithmVersion)
 	if err != nil {
