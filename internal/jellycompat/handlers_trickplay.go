@@ -178,8 +178,8 @@ func (h *PlaybackHandler) trickplayVersion(w http.ResponseWriter, r *http.Reques
 	return catalog.FileVersion{}, false
 }
 
-// playingFile is the file this token most recently played for contentID, or
-// zero when it is playing none.
+// playingFile is the file this token most recently selected for contentID,
+// either during negotiation or playback, or zero when no source is selected.
 func (h *PlaybackHandler) playingFile(ctx context.Context, session *Session, contentID string) int {
 	lister, ok := h.playbackStore.(interface {
 		ListActiveForToken(context.Context, string) ([]PlaybackSession, error)
@@ -194,13 +194,18 @@ func (h *PlaybackHandler) playingFile(ctx context.Context, session *Session, con
 	fileID := 0
 	var latest PlaybackSession
 	for _, play := range plays {
-		if play.ItemID != contentID || play.UpstreamSessionID == "" || (fileID != 0 && !play.UpdatedAt.After(latest.UpdatedAt)) {
+		if play.ItemID != contentID || (fileID != 0 && !play.UpdatedAt.After(latest.UpdatedAt)) {
 			continue
 		}
 		selected := play.UpstreamMediaFileID
+		// A source-specific PlaybackInfo response already identifies the file
+		// before the first stream request creates an upstream session.
+		if selected == 0 && len(play.MediaSources) == 1 {
+			selected = play.MediaSources[0].FileID
+		}
 		// Existing negotiations written before this field was introduced can
 		// still resolve on their owning process.
-		if selected == 0 && h.sessionMgr != nil {
+		if selected == 0 && play.UpstreamSessionID != "" && h.sessionMgr != nil {
 			native, err := h.sessionMgr.GetSession(play.UpstreamSessionID)
 			if err == nil && native != nil && native.UserID == session.StreamAppUserID && native.ProfileID == session.ProfileID {
 				selected = native.MediaFileID
