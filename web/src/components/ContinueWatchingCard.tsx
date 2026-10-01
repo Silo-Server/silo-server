@@ -1,9 +1,9 @@
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { BookOpen, Play } from "lucide-react";
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { useLocation } from "react-router";
 import type { ItemDetail, SectionItem } from "@/api/types";
-import type { ProgressEntry } from "@/api/types";
+import type { ProgressListEntry } from "@/hooks/queries/progress";
 import MediaItemMenu from "@/components/MediaItemMenu";
 import CardOverlays from "@/components/overlays/CardOverlays";
 import { overlayDataFromSectionItem, type CardOverlayPrefs } from "@/lib/overlays";
@@ -14,11 +14,13 @@ import { parseWatchHref } from "@/pages/watchRouteHelpers";
 import { buildItemHref, buildMediaPlayHref, isVideoWatchHref } from "@/lib/mediaNavigation";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { carouselCardWidthClasses } from "@/lib/uiCustomization";
+import CardPlayOverlay from "@/components/CardPlayOverlay";
+import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 
 type ContinueWatchingCardProps = (
   | {
       detail: ItemDetail;
-      progress: ProgressEntry;
+      progress: ProgressListEntry;
       sectionItem?: never;
     }
   | {
@@ -28,6 +30,7 @@ type ContinueWatchingCardProps = (
     }
 ) & {
   overlayPrefs?: CardOverlayPrefs | null;
+  quickActionMode?: CardQuickActionMode;
   libraryId?: number;
   variant?: "wide" | "poster";
 };
@@ -36,9 +39,11 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
   const location = useLocation();
   const playbackController = useWatchPlaybackController();
   const { cardPresentation } = useUICustomization();
+  const cardRef = useRef<HTMLDivElement>(null);
   const card =
     "sectionItem" in props && props.sectionItem
       ? {
+          contentId: props.sectionItem.content_id,
           watchHref: buildMediaPlayHref({
             contentId: props.sectionItem.content_id,
             type: props.sectionItem.type,
@@ -60,6 +65,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
           type: props.sectionItem.type,
         }
       : {
+          contentId: props.detail.content_id,
           watchHref: buildMediaPlayHref({
             contentId: props.detail.content_id,
             type: props.detail.type,
@@ -110,6 +116,8 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
   const progressPercent =
     card.durationSeconds > 0 ? (card.positionSeconds / card.durationSeconds) * 100 : 0;
   const hasPartialProgress = progressPercent > 0 && progressPercent < 100;
+  // Drives both the bar itself and the overlay row's clearance above it.
+  const showProgressBar = !isNextUp && progressPercent > 0;
   const hasEpisodeMeta = card.seasonNumber != null && card.episodeNumber != null;
   // A manga chapter is an ebook item that carries its owning series; the card
   // presents the series (heading, links) since the chapter's own item detail
@@ -117,6 +125,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
   const isMangaChapter = card.type === "ebook" && !!card.seriesId && !!card.seriesTitle;
   const headingIsSeries = (hasEpisodeMeta && !!card.seriesTitle) || isMangaChapter;
   const heading = headingIsSeries ? card.seriesTitle : card.title;
+  const playTitle = heading ?? card.title ?? "item";
   // The heading shows the series title for episodes, so it should navigate to
   // the series page; everything else heads to the item's own page.
   const headingHref =
@@ -174,19 +183,23 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
       }
 
       event.preventDefault();
-      playbackController.startPlayback({
-        contentId: parsed.contentId,
-        fileId: parsed.fileId,
-        libraryId: parsed.libraryId,
-        restart: parsed.restart,
-        returnHref: `${location.pathname}${location.search}`,
-      });
+      playbackController.startPlayback(
+        {
+          contentId: parsed.contentId,
+          fileId: parsed.fileId,
+          libraryId: parsed.libraryId,
+          restart: parsed.restart,
+          returnHref: `${location.pathname}${location.search}`,
+        },
+        "viewer",
+      );
     },
     [card.watchHref, location.pathname, location.search, playbackController],
   );
 
   const variant = props.variant ?? "wide";
   const isPoster = variant === "poster";
+  const playableContentId = card.contentId ?? "";
   const containerWidth = isPoster
     ? carouselCardWidthClasses(cardPresentation.poster_size)
     : "w-[260px] shrink-0 sm:w-[315px]";
@@ -222,7 +235,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
   const imageSrc = imagePrimary || imageFallback;
 
   return (
-    <div className={`group/card ${containerWidth}`}>
+    <div ref={cardRef} className={`media-card-longpress group/card ${containerWidth}`}>
       <div className="group/media relative">
         <ViewTransitionLink to={detailHref} className="block">
           <div className={`media-card-image relative ${imageAspect} overflow-hidden rounded-xl`}>
@@ -232,6 +245,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
                 alt={heading}
                 className="h-full w-full object-cover transition-transform duration-300 group-hover/media:scale-105"
                 loading="lazy"
+                decoding="async"
               />
             ) : (
               <div className="text-muted-foreground bg-surface flex h-full w-full items-center justify-center text-sm">
@@ -244,17 +258,19 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
                 data={overlayDataFromSectionItem(props.sectionItem)}
                 prefs={props.overlayPrefs}
                 variant={variant}
+                hasProgressBar={showProgressBar}
               />
             )}
 
             {/* Hover dim behind the play button */}
-            <div className="absolute inset-0 bg-black/0 transition-colors duration-150 pointer-fine:group-hover/media:bg-black/30" />
+            <div className="media-card-hover-dim absolute inset-0 bg-black/0 transition-colors duration-150" />
 
-            {/* Progress bar */}
-            {!isNextUp && progressPercent > 0 && (
-              <div className="bg-background/40 absolute inset-x-0 bottom-0 h-[3px]">
+            {/* Progress bar — inset pill so a full bar doesn't read as a
+                stray edge along the artwork */}
+            {showProgressBar && (
+              <div className="absolute inset-x-2.5 bottom-2 h-[3px] overflow-hidden rounded-full bg-black/40">
                 <div
-                  className="h-full transition-all duration-300"
+                  className="h-full rounded-full transition-all duration-300"
                   style={{
                     width: `${Math.min(progressPercent, 100)}%`,
                     background: "var(--primary)",
@@ -264,18 +280,27 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
             )}
           </div>
         </ViewTransitionLink>
-        <ViewTransitionLink
-          to={card.watchHref}
-          onClick={handleWatchClick}
-          aria-label={`${card.type === "ebook" ? "Read" : "Play"} ${heading}`}
-          className="bg-primary text-primary-foreground absolute top-1/2 left-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full opacity-100 shadow-lg transition-all duration-200 hover:scale-110 hover:shadow-xl hover:brightness-110 active:scale-95 pointer-fine:pointer-events-none pointer-fine:opacity-0 pointer-fine:group-hover/media:pointer-events-auto pointer-fine:group-hover/media:opacity-100 pointer-fine:focus-visible:pointer-events-auto pointer-fine:focus-visible:opacity-100"
-        >
-          {card.type === "ebook" ? (
-            <BookOpen className="h-5 w-5" />
-          ) : (
-            <Play className="ml-0.5 h-5 w-5" fill="currentColor" />
-          )}
-        </ViewTransitionLink>
+        {isPoster && playableContentId && isVideoWatchHref(card.watchHref) ? (
+          <CardPlayOverlay
+            contentId={playableContentId}
+            title={playTitle}
+            type={card.type === "movie" ? "movie" : "episode"}
+            libraryId={props.libraryId}
+          />
+        ) : (
+          <ViewTransitionLink
+            to={card.watchHref}
+            onClick={handleWatchClick}
+            aria-label={`${card.type === "ebook" ? "Read" : "Play"} ${heading}`}
+            className="media-card-play-trigger bg-primary text-primary-foreground absolute top-1/2 left-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full shadow-lg transition-all duration-200 hover:scale-110 hover:shadow-xl hover:brightness-110 active:scale-95"
+          >
+            {card.type === "ebook" ? (
+              <BookOpen className="h-5 w-5" />
+            ) : (
+              <Play className="ml-0.5 h-5 w-5" fill="currentColor" />
+            )}
+          </ViewTransitionLink>
+        )}
         <MediaItemMenu
           contentId={
             "sectionItem" in props && props.sectionItem
@@ -287,11 +312,18 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
           }
           libraryId={props.libraryId}
           userState={
-            "sectionItem" in props && props.sectionItem ? props.sectionItem.user_state : undefined
+            "sectionItem" in props && props.sectionItem
+              ? props.sectionItem.user_state
+              : props.detail.user_state
           }
           variant={variant}
+          showWatchedShortcut
+          showFavoriteShortcut={false}
           dismissAction={dismissAction}
           hasPartialProgress={hasPartialProgress}
+          quickActionMode={props.quickActionMode ?? "none"}
+          longPressRef={cardRef}
+          itemTitle={heading}
         />
       </div>
 
@@ -312,29 +344,30 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
               {episodeMeta}
             </ViewTransitionLink>
           )}
-          {showMetadata && premiereBadge && (
-            <div className="mt-1">
-              <span
-                className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] leading-none font-semibold tracking-wide uppercase backdrop-blur-sm ${upcomingBadgeClass(
-                  premiereBadge,
-                )}`}
-              >
-                {upcomingBadgeLabel(premiereBadge)}
-              </span>
+          {showMetadata && (timeLeftLabel || premiereBadge) && (
+            <div className="flex items-center gap-1.5">
+              {timeLeftLabel &&
+                (timeLeftLabel === "\u00A0" ? (
+                  <div className="text-muted-foreground text-xs">{timeLeftLabel}</div>
+                ) : (
+                  <ViewTransitionLink
+                    to={isMangaChapter ? card.watchHref : card.itemHref}
+                    className="text-muted-foreground block w-fit truncate text-xs hover:underline"
+                  >
+                    {timeLeftLabel}
+                  </ViewTransitionLink>
+                ))}
+              {premiereBadge && (
+                <span
+                  className={`inline-flex shrink-0 rounded-full border px-2 py-0.5 text-[10px] leading-none font-semibold tracking-wide uppercase backdrop-blur-sm ${upcomingBadgeClass(
+                    premiereBadge,
+                  )}`}
+                >
+                  {upcomingBadgeLabel(premiereBadge)}
+                </span>
+              )}
             </div>
           )}
-          {showMetadata &&
-            timeLeftLabel &&
-            (timeLeftLabel === "\u00A0" ? (
-              <div className="text-muted-foreground text-xs">{timeLeftLabel}</div>
-            ) : (
-              <ViewTransitionLink
-                to={isMangaChapter ? card.watchHref : card.itemHref}
-                className="text-muted-foreground block w-fit text-xs hover:underline"
-              >
-                {timeLeftLabel}
-              </ViewTransitionLink>
-            ))}
         </div>
       ) : null}
     </div>

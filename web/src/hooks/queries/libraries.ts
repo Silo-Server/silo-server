@@ -1,6 +1,13 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "@/api/client";
+import {
+  captureProfileRequestContext,
+  captureSessionIdentity,
+  isCapturedProfileAuthorityActive,
+  isSessionIdentityCurrent,
+  StaleApiRequestContextError,
+} from "@/api/client";
+import { v2 } from "@/api/v2/request";
 import type { UserLibrary } from "@/api/types";
 import { useAuth } from "@/hooks/useAuth";
 import { SETTING_KEYS } from "@/lib/settingsContract";
@@ -67,10 +74,37 @@ export function filterVisibleLibraries(libraries: UserLibrary[], disabledLibrary
 
 export function useAvailableUserLibraries() {
   const { profile } = useAuth();
-
+  const identity = captureSessionIdentity();
+  const profileContext = captureProfileRequestContext();
+  const selectedProfile = profileContext?.profileId;
+  const requireAuthority = () => {
+    if (
+      !isSessionIdentityCurrent(identity) ||
+      captureProfileRequestContext()?.profileId !== selectedProfile ||
+      (profileContext && !isCapturedProfileAuthorityActive(profileContext))
+    ) {
+      throw new StaleApiRequestContextError();
+    }
+  };
   return useQuery({
-    queryKey: libraryKeys.user(profile?.id),
-    queryFn: () => api<UserLibrary[]>("/user/libraries"),
+    queryKey: [
+      ...libraryKeys.user(profile?.id),
+      identity.serverOrigin,
+      identity.authContextVersion,
+    ],
+    queryFn: async (): Promise<UserLibrary[]> => {
+      requireAuthority();
+      const result = await v2("GET /api/v2/user/libraries", {
+        profileContext: profileContext ?? undefined,
+      });
+      requireAuthority();
+      return result.items.map((library) => {
+        const id = Number(library.id);
+        if (!Number.isSafeInteger(id) || id <= 0)
+          throw new Error("Unsupported library identifier.");
+        return { ...library, id };
+      });
+    },
     staleTime: 5 * 60 * 1000,
   });
 }

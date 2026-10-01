@@ -43,12 +43,16 @@ func TestRestartRequired(t *testing.T) {
 		{"branding.server_name", false},
 		{"overlays.enabled", false},
 		{"markers.mode", false},
+		{"markers.detect_intros", false},
+		{"markers.detect_credits", false},
 		{"download.enabled", false},
 		{"download.transcode_enabled", false},
 		{"download.max_concurrent_prepares", false},
 		{"policy.editor_enabled", false},
 		{"allow_4k_transcode", false},
 		{"defaults.card_overlays", false},
+		// The real-time monitor applies the server switch through OnChange.
+		{"scanner.realtime_monitoring", false},
 		// Unknown keys default to live.
 		{"some.future_setting", false},
 	}
@@ -56,5 +60,38 @@ func TestRestartRequired(t *testing.T) {
 		if got := RestartRequired(tc.key); got != tc.want {
 			t.Errorf("RestartRequired(%q) = %v, want %v", tc.key, got, tc.want)
 		}
+	}
+}
+
+// The exported accessors feed the admin API, so they must agree with
+// RestartRequired, stay sorted, and hand out copies rather than the registry.
+func TestRestartRequiredAccessors(t *testing.T) {
+	keys := RestartRequiredKeys()
+	if len(keys) != len(restartRequiredKeys) {
+		t.Fatalf("RestartRequiredKeys() returned %d keys, want %d", len(keys), len(restartRequiredKeys))
+	}
+	for i, key := range keys {
+		if i > 0 && keys[i-1] >= key {
+			t.Fatalf("RestartRequiredKeys() is not sorted at %d: %v", i, keys)
+		}
+		if !RestartRequired(key) {
+			t.Errorf("RestartRequiredKeys() reported %q, which RestartRequired rejects", key)
+		}
+	}
+
+	prefixes := RestartRequiredPrefixes()
+	if len(prefixes) != len(restartRequiredPrefixes) {
+		t.Fatalf("RestartRequiredPrefixes() returned %d prefixes, want %d", len(prefixes), len(restartRequiredPrefixes))
+	}
+	for _, prefix := range prefixes {
+		if !RestartRequired(prefix + "anything") {
+			t.Errorf("RestartRequiredPrefixes() reported %q, which RestartRequired rejects", prefix)
+		}
+	}
+
+	// Mutating a returned slice must not corrupt the registry.
+	prefixes[0] = "mutated."
+	if RestartRequiredPrefixes()[0] == "mutated." {
+		t.Error("RestartRequiredPrefixes() exposes the package-level slice")
 	}
 }

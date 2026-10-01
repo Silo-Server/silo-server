@@ -9,11 +9,20 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/processmetrics"
+)
+
+const (
+	jellyfinFFmpegPath             = "/usr/lib/jellyfin-ffmpeg/ffmpeg"
+	homebrewFFmpegFullAppleSilicon = "/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg"
+	homebrewFFmpegFullIntel        = "/usr/local/opt/ffmpeg-full/bin/ffmpeg"
+	ffmpegExecutable               = ffmpegComponent
 )
 
 var (
@@ -28,14 +37,29 @@ var (
 // Resolved once at first call, then cached for the process lifetime.
 func ffmpegBinary() string {
 	ffmpegOnce.Do(func() {
-		const jellyfinPath = "/usr/lib/jellyfin-ffmpeg/ffmpeg"
-		if _, err := exec.LookPath(jellyfinPath); err == nil {
-			resolvedFFmpegPath = jellyfinPath
-			return
-		}
-		resolvedFFmpegPath = "ffmpeg"
+		resolvedFFmpegPath = discoverFFmpegPath(runtime.GOOS, exec.LookPath)
 	})
 	return resolvedFFmpegPath
+}
+
+func discoverFFmpegPath(goos string, lookPath func(string) (string, error)) string {
+	candidates := []string{jellyfinFFmpegPath}
+	if goos == darwinGOOS {
+		// Homebrew's regular FFmpeg omits libass and other filters Silo uses.
+		// Prefer the keg-only full build on both Apple Silicon and Intel Macs
+		// when it is installed; PATH remains the final portable fallback.
+		candidates = []string{
+			homebrewFFmpegFullAppleSilicon,
+			homebrewFFmpegFullIntel,
+			jellyfinFFmpegPath,
+		}
+	}
+	for _, candidate := range candidates {
+		if _, err := lookPath(candidate); err == nil {
+			return candidate
+		}
+	}
+	return ffmpegExecutable
 }
 
 // ResolveFFmpegPath returns the ffmpeg binary the playback pipeline executes
@@ -44,10 +68,27 @@ func ffmpegBinary() string {
 // probes must resolve through this same function so a feature advertised at
 // planning time is guaranteed present in the binary that later runs.
 func ResolveFFmpegPath(configured string) string {
-	if configured = strings.TrimSpace(configured); configured != "" {
-		return configured
+	return resolveFFmpegPath(configured, exec.LookPath, ffmpegBinary)
+}
+
+func resolveFFmpegPath(
+	configured string,
+	lookPath func(string) (string, error),
+	discover func() string,
+) string {
+	configured = strings.TrimSpace(configured)
+	if configured == "" {
+		return discover()
 	}
-	return ffmpegBinary()
+	// Older and container-oriented settings use Jellyfin's Linux-only path as
+	// the default. Treat that conventional default as discovery only when it is
+	// absent; genuinely custom invalid paths must still fail loudly.
+	if configured == jellyfinFFmpegPath {
+		if _, err := lookPath(configured); err != nil {
+			return discover()
+		}
+	}
+	return configured
 }
 
 // supportsDoviRPUFilter reports whether the given FFmpeg binary can strip
@@ -92,8 +133,11 @@ func remuxDVProfile(dvProfile int, canStripRPU bool) int {
 // codecs to a new container format without re-encoding.
 type RemuxSession struct {
 	cmd        *exec.Cmd
+	ctx        context.Context
 	cancel     context.CancelFunc
 	outputPipe io.ReadCloser
+	closeOnce  sync.Once
+	closeErr   error
 }
 
 // RemuxDVMode makes Profile 7 handling an explicit byte-level recipe choice.
@@ -119,10 +163,10 @@ const (
 // Apple-parity fallback for devices without a P7 decoder). Profile 8 RPUs
 // stay: the base layer is self-contained and DV clients can render it.
 func buildRemuxArgs(filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, tagSampleEntry, audioOnly bool) []string {
-	return buildRemuxArgsWithAudioV3(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, tagSampleEntry, audioOnly, 0, 0)
+	return buildRemuxArgsWithAudioV3(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, tagSampleEntry, audioOnly, 0, 0, 0)
 }
 
-func buildRemuxArgsWithAudioV3(filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, tagSampleEntry, audioOnly bool, targetAudioChannels, targetAudioBitrateKbps int) []string {
+func buildRemuxArgsWithAudioV3(filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, tagSampleEntry, audioOnly bool, sourceAudioChannels, targetAudioChannels, targetAudioBitrateKbps int) []string {
 	args := []string{
 		"-nostdin",
 		"-hide_banner",
@@ -190,15 +234,15 @@ func buildRemuxArgsWithAudioV3(filePath, outputFormat string, seekSeconds float6
 		// dvh1 — the sample entry Apple's HLS authoring spec calls for — so tag
 		// dvh1. FFmpeg refuses to write the dvvC configuration record box under
 		// either tag without -strict unofficial; dvh1 plus -strict unofficial is
-		// verified (7.1.4) to retain the full record. Media3 accepts both sample
-		// entries, so Android preserve consumers are unaffected. Only the
+		// verified (7.1.4, 8.1.3) to retain the full record. Media3 accepts both
+		// sample entries, so Android preserve consumers are unaffected. Only the
 		// explicit v3 preserve recipe opts in: legacy web/jellycompat consumers
 		// keep the pre-v3 hev1 labeling their demuxers accept.
 		args = append(args, "-tag:v", "dvh1", "-strict", "unofficial")
 	}
 
 	if transcodeAudio {
-		channels, bitrateKbps := resolvedAACOutputV3(targetAudioChannels, targetAudioBitrateKbps)
+		channels, bitrateKbps := ResolveAACOutputV3(targetAudioChannels, targetAudioBitrateKbps)
 		// Video copy + AAC encode is effectively single-threaded work.
 		// ffmpeg's default auto-threading spawns one filter thread per CPU
 		// core for the implicit downmix/resampler, all idle. Pin to one.
@@ -211,6 +255,7 @@ func buildRemuxArgsWithAudioV3(filePath, outputFormat string, seekSeconds float6
 			"-ac", strconv.Itoa(channels),
 			"-b:a", strconv.Itoa(bitrateKbps)+"k",
 		)
+		args = appendAACEncodeFilterArgs(args, sourceAudioChannels, "aac", targetAudioChannels, channels)
 	} else {
 		args = append(args, "-c", "copy")
 	}
@@ -244,10 +289,10 @@ func StartRemux(ctx context.Context, filePath, outputFormat string, seekSeconds 
 // v3 callers must pass the configured playback path so the strip capability
 // promised by the planner's probe holds for the binary that actually runs.
 func StartRemuxWithDVMode(ctx context.Context, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, mode RemuxDVMode, ffmpegPath string) (*RemuxSession, error) {
-	return startRemuxWithOptions(ctx, filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, mode, ffmpegPath, false, 0, 0)
+	return startRemuxWithOptions(ctx, filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, mode, ffmpegPath, false, 0, 0, 0)
 }
 
-func startRemuxWithOptions(ctx context.Context, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, mode RemuxDVMode, ffmpegPath string, audioOnly bool, targetAudioChannels, targetAudioBitrateKbps int) (*RemuxSession, error) {
+func startRemuxWithOptions(ctx context.Context, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, mode RemuxDVMode, ffmpegPath string, audioOnly bool, sourceAudioChannels, targetAudioChannels, targetAudioBitrateKbps int) (*RemuxSession, error) {
 	ctx, cancel := context.WithCancel(ctx)
 
 	bin := ResolveFFmpegPath(ffmpegPath)
@@ -302,7 +347,7 @@ func startRemuxWithOptions(ctx context.Context, filePath, outputFormat string, s
 		cancel()
 		return nil, fmt.Errorf("unknown remux Dolby Vision mode %q", mode)
 	}
-	args := buildRemuxArgsWithAudioV3(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, effectiveProfile, tagSampleEntry, audioOnly, targetAudioChannels, targetAudioBitrateKbps)
+	args := buildRemuxArgsWithAudioV3(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, effectiveProfile, tagSampleEntry, audioOnly, sourceAudioChannels, targetAudioChannels, targetAudioBitrateKbps)
 	cmd := exec.CommandContext(ctx, bin, args...)
 
 	stdout, err := cmd.StdoutPipe()
@@ -312,12 +357,14 @@ func startRemuxWithOptions(ctx context.Context, filePath, outputFormat string, s
 	}
 
 	if err := cmd.Start(); err != nil {
+		processmetrics.Record(processmetrics.Remux, nil, err, ctx.Err())
 		cancel()
 		return nil, fmt.Errorf("start ffmpeg: %w", err)
 	}
 
 	return &RemuxSession{
 		cmd:        cmd,
+		ctx:        ctx,
 		cancel:     cancel,
 		outputPipe: stdout,
 	}, nil
@@ -328,13 +375,37 @@ func (s *RemuxSession) Read(p []byte) (int, error) {
 	return s.outputPipe.Read(p)
 }
 
+// Abort kills the ffmpeg process without draining or reaping it.
+//
+// It exists for callers that are not the owner of the session: killing ffmpeg
+// closes the output pipe, which is what unblocks a copy loop parked in Read, and
+// the owner's deferred Close then does the draining and the wait. Close itself
+// cannot be used for that — it reads the pipe and calls cmd.Wait, neither of
+// which may run concurrently with the owner's Read.
+func (s *RemuxSession) Abort() {
+	if s == nil || s.cancel == nil {
+		return
+	}
+	s.cancel()
+}
+
 // Close stops the ffmpeg process and cleans up all resources.
 // It is safe to call Close multiple times.
 func (s *RemuxSession) Close() error {
-	s.cancel()
-	// Drain the pipe so cmd.Wait does not block.
-	_, _ = io.Copy(io.Discard, s.outputPipe)
-	return s.cmd.Wait()
+	s.closeOnce.Do(func() {
+		contextErr := s.ctx.Err()
+		s.cancel()
+		// The owner drains and waits exactly once, including repeated Close.
+		_, _ = io.Copy(io.Discard, s.outputPipe)
+		s.closeErr = s.cmd.Wait()
+		// Cleanup cancellation must not relabel an already completed FFmpeg
+		// failure. A process killed by this Close has a signal exit instead.
+		if contextErr == nil && s.closeErr != nil && s.cmd.ProcessState != nil && !s.cmd.ProcessState.Exited() {
+			contextErr = context.Canceled
+		}
+		processmetrics.Record(processmetrics.Remux, s.cmd.ProcessState, s.closeErr, contextErr)
+	})
+	return s.closeErr
 }
 
 // containerMIME maps output format names to MIME types for HTTP responses.
@@ -366,10 +437,19 @@ type RemuxServeOptions struct {
 	ContentType string
 	// AudioOnly permits the otherwise-mandatory video map to be absent.
 	AudioOnly bool
-	// TargetAudioChannels and TargetAudioBitrateKbps freeze the planned AAC
-	// output. Zero values retain the historical stereo 192 kbps behavior.
+	// SourceAudioChannels identifies a real surround-to-stereo conversion so an
+	// already-stereo source keeps its authored level. TargetAudioChannels and
+	// TargetAudioBitrateKbps freeze the planned AAC output. Zero target values
+	// retain the historical stereo 192 kbps behavior.
+	SourceAudioChannels    int
 	TargetAudioChannels    int
 	TargetAudioBitrateKbps int
+	// Abort ends the response early when it is closed. A progressive remux is
+	// one long response, so without it the only thing that can stop the stream
+	// is the client itself — a server-initiated session stop cannot withdraw a
+	// route the client is still being fed. Callers that serve a session pass
+	// SessionManager.WatchTransportStop's channel.
+	Abort <-chan struct{}
 }
 
 // RemuxContentType returns the override required for an audio-only fMP4.
@@ -401,7 +481,8 @@ func ServeRemuxWithOptions(w http.ResponseWriter, r *http.Request, filePath, out
 	mode, ffmpegPath := opts.DVMode, opts.FFmpegPath
 	// Remux output streams for the length of the title; roll the write
 	// deadline with progress instead of the server's absolute WriteTimeout.
-	w = httpstream.NewRollingDeadlineWriter(w)
+	streamWriter := httpstream.NewRollingDeadlineWriter(w)
+	w = streamWriter
 	// Check file exists before starting ffmpeg to return a proper 404.
 	// Headers must be written before streaming begins, so we can't detect
 	// ffmpeg errors after WriteHeader(200) has been sent.
@@ -414,12 +495,32 @@ func ServeRemuxWithOptions(w http.ResponseWriter, r *http.Request, filePath, out
 		return err
 	}
 
-	session, err := startRemuxWithOptions(r.Context(), filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, mode, ffmpegPath, opts.AudioOnly, opts.TargetAudioChannels, opts.TargetAudioBitrateKbps)
+	session, err := startRemuxWithOptions(r.Context(), filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, mode, ffmpegPath, opts.AudioOnly, opts.SourceAudioChannels, opts.TargetAudioChannels, opts.TargetAudioBitrateKbps)
 	if err != nil {
 		http.Error(w, "failed to start remux", http.StatusInternalServerError)
 		return err
 	}
 	defer session.Close()
+
+	if opts.Abort != nil {
+		// Deferred after session.Close, so it runs before it: the watcher is
+		// gone by the time the owner drains and reaps the process.
+		served := make(chan struct{})
+		watcherDone := make(chan struct{})
+		defer func() {
+			close(served)
+			<-watcherDone
+		}()
+		go func() {
+			defer close(watcherDone)
+			select {
+			case <-opts.Abort:
+				_ = streamWriter.Abort()
+				session.Abort()
+			case <-served:
+			}
+		}()
+	}
 
 	contentType := opts.ContentType
 	if contentType == "" {

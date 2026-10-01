@@ -1,10 +1,13 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { captureProfileRequestContext } from "@/api/client";
+import { adminSettingsKey } from "@/api/v2/adminSettingsSnapshot";
 import type { AdminSettingsConnectionCheckRequest } from "@/api/types";
 import {
   useAdminServerSettings,
   useUpdateServerSettings,
   useAdminSensitiveStatus,
 } from "@/hooks/queries/admin/settings";
+import { useReportUnsavedChanges } from "@/hooks/useUnsavedChanges";
 
 interface UseSettingsFormOptions {
   /** Setting keys this section manages */
@@ -12,15 +15,28 @@ interface UseSettingsFormOptions {
 }
 
 export function useSettingsForm({ keys }: UseSettingsFormOptions) {
-  const { data: settings, isLoading } = useAdminServerSettings();
+  const { data: settings, isLoading, isError: loadError } = useAdminServerSettings();
   const { data: sensitiveData, isError: sensitiveStatusError } = useAdminSensitiveStatus();
-  const updateSettings = useUpdateServerSettings();
+  const editBaseline = useRef<Record<string, string> | undefined>(undefined);
+  const updateSettings = useUpdateServerSettings(editBaseline.current ?? settings);
 
   const [localValues, setLocalValues] = useState<Record<string, string>>({});
   const [dirty, setDirty] = useState<Set<string>>(new Set());
   const [restartRequired, setRestartRequired] = useState(false);
   const editVersions = useRef(new Map<string, number>());
   const dirtyRef = useRef(dirty);
+  const context = captureProfileRequestContext();
+  const authority = JSON.stringify(context ? adminSettingsKey(context) : null);
+  const [draftAuthority, setDraftAuthority] = useState(authority);
+  if (draftAuthority !== authority) {
+    setDraftAuthority(authority);
+    setLocalValues({});
+    setDirty(new Set());
+    setRestartRequired(false);
+    editVersions.current.clear();
+    editBaseline.current = undefined;
+    dirtyRef.current = new Set();
+  }
   useEffect(() => {
     dirtyRef.current = dirty;
   }, [dirty]);
@@ -59,11 +75,17 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     [localValues, settings],
   );
 
-  const setValue = useCallback((key: string, value: string) => {
-    editVersions.current.set(key, (editVersions.current.get(key) ?? 0) + 1);
-    setLocalValues((prev) => ({ ...prev, [key]: value }));
-    setDirty((prev) => new Set(prev).add(key));
-  }, []);
+  const getPersistedValue = useCallback((key: string) => settings?.[key] ?? "", [settings]);
+
+  const setValue = useCallback(
+    (key: string, value: string) => {
+      if (!editBaseline.current) editBaseline.current = settings;
+      editVersions.current.set(key, (editVersions.current.get(key) ?? 0) + 1);
+      setLocalValues((prev) => ({ ...prev, [key]: value }));
+      setDirty((prev) => new Set(prev).add(key));
+    },
+    [settings],
+  );
 
   // Revert one staged field without disturbing other edits. This is also how
   // a redacted secret toggle can cancel a pending clear without needing the
@@ -82,9 +104,43 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
   );
 
   const dirtyCount = dirty.size;
+  useEffect(() => {
+    if (dirtyCount === 0) editBaseline.current = undefined;
+  }, [dirtyCount]);
   const dirtyKeys = useMemo(() => Array.from(dirty), [dirty]);
 
+  // In-app navigation is guarded by `UnsavedChangesGuard`, which blocks the
+  // router for as long as this registration is live. Reporting through a module
+  // store rather than owning the prompt keeps the hook usable where no guard is
+  // mounted (the setup wizard) and outside a router entirely.
+  useReportUnsavedChanges(dirtyCount > 0);
+
+  // Every admin settings tab stages edits and only writes them through the
+  // SaveBar, so closing or reloading the tab would silently drop them. One
+  // guard here covers all tabs, and it is the only thing the browser lets us
+  // intercept: a tab close or reload never reaches the router.
+  useEffect(() => {
+    if (dirtyCount === 0) return;
+    function warnOnUnload(event: BeforeUnloadEvent) {
+      event.preventDefault();
+      // Older browsers only show the prompt for a truthy returnValue; the text
+      // itself is ignored everywhere.
+      event.returnValue = "";
+    }
+    window.addEventListener("beforeunload", warnOnUnload);
+    return () => window.removeEventListener("beforeunload", warnOnUnload);
+  }, [dirtyCount]);
+
   const isDirty = useCallback((key: string) => dirty.has(key), [dirty]);
+
+  // A staged clear is a dirty empty value: the save batch writes "" and the
+  // server drops the stored value. This is what `SecretField`'s own clear
+  // affordance stages, and the one thing that distinguishes it from the
+  // "leave blank to keep the saved secret" default.
+  const isClearStaged = useCallback(
+    (key: string) => dirty.has(key) && getValue(key) === "",
+    [dirty, getValue],
+  );
 
   const buildConnectionCheckRequest = useCallback(
     (selectedKeys: string[] = keys): AdminSettingsConnectionCheckRequest => ({
@@ -96,40 +152,47 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     [dirty, keys, localValues, settings],
   );
 
-  const save = useCallback(async () => {
-    if (dirty.size === 0) return;
-    const submittedKeys = Array.from(dirty);
-    const values = Object.fromEntries(submittedKeys.map((key) => [key, localValues[key] ?? ""]));
-    const submittedVersions = new Map(
-      submittedKeys.map((key) => [key, editVersions.current.get(key) ?? 0]),
-    );
-    const result = await updateSettings.mutateAsync(values);
-    const settledKeys = submittedKeys.filter(
-      (key) => (editVersions.current.get(key) ?? 0) === submittedVersions.get(key),
-    );
-    setLocalValues((previous) => {
-      const next = { ...previous };
-      for (const key of settledKeys) {
-        // The server returns canonical non-secret values. Sensitive values are
-        // intentionally omitted, so erase those drafts after a successful save
-        // instead of retaining plaintext credentials in component state.
-        next[key] = result.values[key] ?? "";
+  const save = useCallback(
+    async (selectedKeys?: string[]) => {
+      const submittedKeys = Array.from(dirty).filter((key) => selectedKeys?.includes(key) ?? true);
+      if (submittedKeys.length === 0) return;
+      const values = Object.fromEntries(submittedKeys.map((key) => [key, localValues[key] ?? ""]));
+      const submittedVersions = new Map(
+        submittedKeys.map((key) => [key, editVersions.current.get(key) ?? 0]),
+      );
+      const result = await updateSettings.mutateAsync(values);
+      // An acknowledged save changes the validator even when newer local edits
+      // remain dirty. Reconcile only with a refresh matching that write's revision;
+      // background reads and failed writes never advance this draft baseline.
+      if (result.settingsSnapshot) editBaseline.current = result.settingsSnapshot;
+      const settledKeys = submittedKeys.filter(
+        (key) => (editVersions.current.get(key) ?? 0) === submittedVersions.get(key),
+      );
+      setLocalValues((previous) => {
+        const next = { ...previous };
+        for (const key of settledKeys) {
+          // The server returns canonical non-secret values. Sensitive values are
+          // intentionally omitted, so erase those drafts after a successful save
+          // instead of retaining plaintext credentials in component state.
+          next[key] = result.values[key] ?? "";
+        }
+        return next;
+      });
+      setDirty((current) => {
+        const next = new Set(current);
+        for (const key of settledKeys) {
+          next.delete(key);
+        }
+        return next;
+      });
+      // Once a restart-required batch was saved, keep the banner up until the
+      // server actually restarts.
+      if (result.restart_required) {
+        setRestartRequired(true);
       }
-      return next;
-    });
-    setDirty((current) => {
-      const next = new Set(current);
-      for (const key of settledKeys) {
-        next.delete(key);
-      }
-      return next;
-    });
-    // Once a restart-required batch was saved, keep the banner up until the
-    // server actually restarts.
-    if (result.restart_required) {
-      setRestartRequired(true);
-    }
-  }, [dirty, localValues, updateSettings]);
+    },
+    [dirty, localValues, updateSettings],
+  );
 
   const discard = useCallback(() => {
     if (!settings) return;
@@ -139,6 +202,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
       reset[key] = settings[key] ?? "";
     }
     setLocalValues((prev) => ({ ...prev, ...reset }));
+    editBaseline.current = undefined;
     setDirty(new Set());
   }, [settings, keys]);
 
@@ -147,12 +211,24 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
 
   return {
     isLoading,
+    /**
+     * True until the snapshot has either arrived or failed. Unlike `isLoading`
+     * this also covers a query that has not been allowed to start yet (no
+     * profile selected), so a form can hold its skeleton through that gap.
+     */
+    isPending: settings == null && !loadError,
+    /** True when the settings snapshot could not be read; values are unset. */
+    loadError,
+    /** True once the settings snapshot is available to read and save against. */
+    loaded: settings != null,
     getValue,
+    getPersistedValue,
     setValue,
     resetValue,
     dirtyCount,
     dirtyKeys,
     isDirty,
+    isClearStaged,
     save,
     discard,
     isSaving: updateSettings.isPending,

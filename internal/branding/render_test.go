@@ -38,7 +38,7 @@ func TestRenderIndexHTMLRewritesFaviconWhenSet(t *testing.T) {
 	in := []byte(indexFaviconLink + "</head>")
 	snap := Snapshot{ServerName: "X", assets: map[AssetKind]string{KindFavicon: "abc123.png"}}
 	out := string(RenderIndexHTML(in, snap))
-	if !strings.Contains(out, `href="/api/v1/branding/assets/favicon?v=abc123.png"`) {
+	if !strings.Contains(out, `href="/api/v2/branding/assets/favicon?v=abc123.png"`) {
 		t.Fatalf("favicon not rewritten: %q", out)
 	}
 }
@@ -64,6 +64,35 @@ func TestRenderIndexHTMLInjectsThemeColorOnlyWhenAccentSet(t *testing.T) {
 	}
 }
 
+func TestRenderIndexHTMLDoesNotStampADefaultTheme(t *testing.T) {
+	in := []byte(`<!doctype html><html lang="en" data-theme="midnight-cinema"><head></head></html>`)
+	out := string(RenderIndexHTML(in, newSnapshot("X")))
+	if strings.Contains(out, "data-default-theme") {
+		t.Fatalf("the shell has one theme and carries no default-theme attribute: %q", out)
+	}
+	if !strings.Contains(out, `<html lang="en" data-theme="midnight-cinema">`) {
+		t.Fatalf("static data-theme should be left alone: %q", out)
+	}
+}
+
+func TestRenderKeyIncludesWordmarkLight(t *testing.T) {
+	snap := newSnapshot("Acme")
+	baseline := snap.RenderKey()
+	snap.assets[KindWordmarkLight] = "wordmark-light.webp"
+	if got := snap.RenderKey(); got == baseline {
+		t.Fatal("RenderKey did not change when wordmark_light ref changed")
+	}
+}
+
+func TestRenderKeyIncludesMarkLight(t *testing.T) {
+	snap := newSnapshot("Acme")
+	baseline := snap.RenderKey()
+	snap.assets[KindMarkLight] = "mark-light.webp"
+	if got := snap.RenderKey(); got == baseline {
+		t.Fatal("RenderKey did not change when mark_light ref changed")
+	}
+}
+
 // TestRenderIndexHTMLAgainstRealShell guards against web/index.html drifting
 // away from the literals RenderIndexHTML depends on.
 func TestRenderIndexHTMLAgainstRealShell(t *testing.T) {
@@ -83,7 +112,7 @@ func TestRenderIndexHTMLAgainstRealShell(t *testing.T) {
 	if !strings.Contains(out, "<title>Acme</title>") {
 		t.Fatalf("title not replaced in real shell")
 	}
-	if !strings.Contains(out, "/api/v1/branding/assets/favicon?v=f00.png") {
+	if !strings.Contains(out, "/api/v2/branding/assets/favicon?v=f00.png") {
 		t.Fatalf("favicon not rewritten in real shell")
 	}
 }
@@ -120,7 +149,7 @@ func TestRenderManifestUsesCustomMark(t *testing.T) {
 	}
 	icons, _ := m["icons"].([]any)
 	first, _ := icons[0].(map[string]any)
-	if !strings.Contains(first["src"].(string), "/api/v1/branding/assets/mark?v=m1.webp") {
+	if !strings.Contains(first["src"].(string), "/api/v2/branding/assets/mark?v=m1.webp") {
 		t.Fatalf("expected custom mark icon URL, got %v", first["src"])
 	}
 }

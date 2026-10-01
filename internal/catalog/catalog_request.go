@@ -29,10 +29,20 @@ type CatalogRequest struct {
 	Query          QueryDefinition
 	Limit          int
 	Offset         int
+	CursorPaging   bool
+	GroupByWork    bool
+	After          *QueryCursor
+	Seek           *int
 	UseSourceOrder bool
 	SkipTotal      bool
 	// SnapshotAt freezes the result set to items created at or before this
 	// timestamp, preventing offset-based pagination drift when new items are
 	// added during a scan.  Nil means the server will generate a snapshot.
 	SnapshotAt *time.Time
+	// ResolvedSort freezes saved/default sort resolution the same way SnapshotAt
+	// freezes the result set. A caller that pages a single logical request
+	// (grouped browse) sets it from the first page's EffectiveSort so a
+	// preference edited mid-pagination cannot order later pages differently than
+	// the order already advertised to the client. Nil resolves normally.
+	ResolvedSort *QuerySort
 }

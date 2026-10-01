@@ -1,10 +1,12 @@
 import { MemoryRouter } from "react-router";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { SectionItem } from "@/api/types";
 
+import { buildWatchRouteRequest } from "@/pages/watchRouteHelpers";
+import { takePlaybackIntent } from "@/player/first-frame";
 import HeroBanner from "./HeroBanner";
 import { formatHeroMetadata } from "./heroMetadata";
 
@@ -168,6 +170,250 @@ describe("HeroBanner", () => {
   beforeEach(() => {
     playbackMocks.controller = null;
     playbackMocks.toggleActivePlayback.mockClear();
+    vi.stubGlobal("matchMedia", () => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("names the ken burns tokens literally so tailwind keeps them", () => {
+    // Tailwind drops a theme variable it cannot find referenced by name in the
+    // scanned source. Building the name from a template literal tree-shook the
+    // real values out of the bundle, leaving `var(--animate-ken-burns-a)` to
+    // resolve to nothing — the hero simply never animated. app.css still sets
+    // both to `none` under prefers-reduced-motion.
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <HeroBanner items={[movieSlide({ backdrop_url: "/backdrop.jpg" })]} />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain('src="/backdrop.jpg"');
+    expect(markup).toContain("var(--animate-ken-burns-a)");
+  });
+
+  it("keeps outgoing backdrop motion through its fade, then releases it", () => {
+    vi.useFakeTimers();
+    const { container, unmount } = render(
+      <MemoryRouter>
+        <HeroBanner
+          items={[
+            movieSlide({ content_id: "movie-1", backdrop_url: "/first.jpg" }),
+            movieSlide({ content_id: "movie-2", title: "Second", backdrop_url: "/second.jpg" }),
+          ]}
+        />
+      </MemoryRouter>,
+    );
+    const images = Array.from(container.querySelectorAll("img"));
+
+    expect(images[0]?.style.animation).toBe("var(--animate-ken-burns-a)");
+    expect(images[0]).toHaveClass("will-change-transform");
+    expect(images[1]?.style.animation).toBe("none");
+    expect(images[1]).not.toHaveClass("will-change-transform");
+
+    act(() => screen.getByRole("button", { name: "Next slide" }).click());
+
+    expect(images[0]?.style.animation).toBe("var(--animate-ken-burns-a)");
+    expect(images[0]).not.toHaveClass("will-change-transform");
+    expect(images[1]?.style.animation).toBe("var(--animate-ken-burns-b)");
+    expect(images[1]).toHaveClass("will-change-transform");
+
+    act(() => vi.advanceTimersByTime(999));
+    expect(images[0]?.style.animation).toBe("var(--animate-ken-burns-a)");
+
+    act(() => vi.advanceTimersByTime(1));
+    expect(images[0]?.style.animation).toBe("none");
+    expect(images[0]).not.toHaveClass("will-change-transform");
+    expect(images.filter((image) => image.style.animation !== "none")).toHaveLength(1);
+
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("starts only the active and two adjacent backdrop requests, including wraparound", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <HeroBanner
+          items={Array.from({ length: 10 }, (_, index) =>
+            movieSlide({ content_id: `movie-${index}`, backdrop_url: `/movie-${index}.jpg` }),
+          )}
+        />
+      </MemoryRouter>,
+    );
+    const images = Array.from(container.querySelectorAll("img"));
+
+    expect(images.map((image) => image.getAttribute("src"))).toEqual([
+      "/movie-0.jpg",
+      "/movie-1.jpg",
+      "/movie-9.jpg",
+    ]);
+    expect(images[0]).toHaveAttribute("fetchpriority", "high");
+    expect(images.slice(1).every((image) => image.getAttribute("fetchpriority") === "low")).toBe(
+      true,
+    );
+  });
+
+  it("loads neighbors on next and previous navigation and preserves loaded backdrops", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <HeroBanner
+          items={Array.from({ length: 10 }, (_, index) =>
+            movieSlide({ content_id: `movie-${index}`, backdrop_url: `/movie-${index}.jpg` }),
+          )}
+        />
+      </MemoryRouter>,
+    );
+    const loadedNeighbor = container.querySelector('img[src="/movie-9.jpg"]')!;
+    fireEvent.load(loadedNeighbor);
+    const sources = () =>
+      Array.from(container.querySelectorAll("img"), (image) => image.getAttribute("src"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Next slide" }));
+    expect(sources()).toEqual(["/movie-0.jpg", "/movie-1.jpg", "/movie-2.jpg", "/movie-9.jpg"]);
+    expect(container.querySelector('img[src="/movie-9.jpg"]')).toBe(loadedNeighbor);
+    expect(container.querySelector('img[fetchpriority="high"]')).toHaveAttribute(
+      "src",
+      "/movie-1.jpg",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Previous slide" }));
+    fireEvent.click(screen.getByRole("button", { name: "Previous slide" }));
+    expect(sources()).toEqual(["/movie-0.jpg", "/movie-8.jpg", "/movie-9.jpg"]);
+    expect(container.querySelector('img[fetchpriority="high"]')).toHaveAttribute(
+      "src",
+      "/movie-9.jpg",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Next slide" }));
+    expect(sources()).toEqual(["/movie-0.jpg", "/movie-1.jpg", "/movie-9.jpg"]);
+  });
+
+  it.each([0, 1])("keeps loaded slide %i visible while its URL refreshes", (index) => {
+    const slides = Array.from({ length: 10 }, (_, index) =>
+      movieSlide({ content_id: `movie-${index}`, backdrop_url: `/movie-${index}.jpg` }),
+    );
+    const { container, rerender } = render(
+      <MemoryRouter>
+        <HeroBanner items={slides} />
+      </MemoryRouter>,
+    );
+    const image = container.querySelector(`img[src="/movie-${index}.jpg"]`)!;
+    expect(image).toHaveClass("opacity-0");
+    fireEvent.load(image);
+    expect(image).toHaveClass("opacity-100");
+
+    rerender(
+      <MemoryRouter>
+        <HeroBanner
+          items={slides.map((slide, slideIndex) =>
+            slideIndex === index ? { ...slide, backdrop_url: "/refreshed.jpg" } : slide,
+          )}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(container.querySelector('img[src="/refreshed.jpg"]')).toBe(image);
+    expect(image).toHaveClass("opacity-100");
+    fireEvent.load(image);
+    expect(image).toHaveClass("opacity-100");
+    expect(container.querySelectorAll("img")).toHaveLength(3);
+  });
+
+  it("does not eagerly load a replacement URL on a distant loaded slide", () => {
+    const slides = Array.from({ length: 10 }, (_, index) =>
+      movieSlide({ content_id: `movie-${index}`, backdrop_url: `/movie-${index}.jpg` }),
+    );
+    const { container, rerender } = render(
+      <MemoryRouter>
+        <HeroBanner items={slides} />
+      </MemoryRouter>,
+    );
+    const image = container.querySelector('img[src="/movie-9.jpg"]')!;
+    fireEvent.load(image);
+    fireEvent.click(screen.getByRole("button", { name: "Next slide" }));
+    rerender(
+      <MemoryRouter>
+        <HeroBanner
+          items={slides.map((slide, index) =>
+            index === 9 ? { ...slide, backdrop_url: "/replacement.jpg" } : slide,
+          )}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(container.querySelector('img[src="/replacement.jpg"]')).toBeNull();
+    expect(container.querySelector('img[src="/movie-9.jpg"]')).toBe(image);
+    fireEvent.click(screen.getByRole("button", { name: "Previous slide" }));
+    const replacement = container.querySelector('img[src="/replacement.jpg"]');
+    expect(replacement).toBe(image);
+    expect(replacement).toHaveClass("opacity-100");
+    fireEvent.load(replacement!);
+    expect(replacement).toHaveClass("opacity-100");
+    fireEvent.click(screen.getByRole("button", { name: "Next slide" }));
+    expect(container.querySelector('img[src="/replacement.jpg"]')).toBe(image);
+  });
+
+  it("does not retain outgoing backdrop motion for reduced motion", () => {
+    vi.stubGlobal("matchMedia", () => ({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    const { container } = render(
+      <MemoryRouter>
+        <HeroBanner
+          items={[
+            movieSlide({ content_id: "movie-1", backdrop_url: "/first.jpg" }),
+            movieSlide({ content_id: "movie-2", title: "Second", backdrop_url: "/second.jpg" }),
+          ]}
+        />
+      </MemoryRouter>,
+    );
+    const images = Array.from(container.querySelectorAll("img"));
+
+    act(() => screen.getByRole("button", { name: "Next slide" }).click());
+
+    expect(images[0]?.style.animation).toBe("none");
+    expect(images[0]).not.toHaveClass("will-change-transform");
+    expect(images[1]).toHaveClass("will-change-transform");
+  });
+
+  it("bounds rapid handoffs to one active and one outgoing backdrop", () => {
+    vi.useFakeTimers();
+    const { container } = render(
+      <MemoryRouter>
+        <HeroBanner
+          items={Array.from({ length: 12 }, (_, index) =>
+            movieSlide({
+              content_id: `movie-${index + 1}`,
+              title: `Movie ${index + 1}`,
+              backdrop_url: `/movie-${index + 1}.jpg`,
+            }),
+          )}
+        />
+      </MemoryRouter>,
+    );
+    const next = screen.getByRole("button", { name: "Next slide" });
+
+    for (let cycle = 0; cycle < 24; cycle++) {
+      act(() => next.click());
+      const images = Array.from(container.querySelectorAll<HTMLImageElement>(".home-hero img"));
+      expect(images.filter((image) => image.style.animation !== "none")).toHaveLength(2);
+      expect(container.querySelectorAll(".home-hero img.will-change-transform")).toHaveLength(1);
+    }
+
+    act(() => vi.advanceTimersByTime(1000));
+    expect(
+      Array.from(container.querySelectorAll<HTMLImageElement>(".home-hero img")).filter(
+        (image) => image.style.animation !== "none",
+      ),
+    ).toHaveLength(1);
   });
 
   it("does not render the desktop spotlighting card", () => {
@@ -433,6 +679,37 @@ describe("HeroBanner", () => {
     );
 
     expect(markup).toContain("Listen Again");
+  });
+
+  it("starts the first-frame clock under the request key the watch route rebuilds", async () => {
+    render(
+      <MemoryRouter>
+        <HeroBanner libraryId={7} items={[movieSlide()]} />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(screen.getByRole("link", { name: "Play" }));
+
+    const routeRequest = buildWatchRouteRequest("movie-1", new URLSearchParams("libraryId=7"));
+    expect(takePlaybackIntent(routeRequest.requestKey)).toEqual(expect.any(Number));
+  });
+
+  it("leaves the first-frame clock alone when the Play link opens another tab", () => {
+    render(
+      <MemoryRouter>
+        <HeroBanner libraryId={7} items={[movieSlide()]} />
+      </MemoryRouter>,
+    );
+    const play = screen.getByRole("link", { name: "Play" });
+    // The navigation itself is not under test; keep jsdom from following it.
+    play.addEventListener("click", (event) => event.preventDefault());
+
+    fireEvent.click(play, { ctrlKey: true });
+    fireEvent.click(play, { metaKey: true });
+    fireEvent.click(play, { button: 1 });
+
+    const routeRequest = buildWatchRouteRequest("movie-1", new URLSearchParams("libraryId=7"));
+    expect(takePlaybackIntent(routeRequest.requestKey)).toBeNull();
   });
 
   it("pauses the active audiobook from the hero without navigating", async () => {

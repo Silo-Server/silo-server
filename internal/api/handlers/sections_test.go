@@ -3,9 +3,11 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sort"
 	"testing"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/sections"
+	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -87,6 +90,37 @@ func TestSectionBackdropPathUsesExpectedVariants(t *testing.T) {
 	}
 }
 
+func TestWriteSectionDeleteErrorDistinguishesMissingSectionsFromRepositoryFailures(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+	}{
+		{
+			name:       "missing section",
+			err:        fmt.Errorf("loading section: %w", sections.ErrSectionNotFound),
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "repository failure",
+			err:        fmt.Errorf("database unavailable"),
+			wantStatus: http.StatusInternalServerError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+
+			writeSectionDeleteError(recorder, tt.err)
+
+			if recorder.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body = %s", recorder.Code, tt.wantStatus, recorder.Body.String())
+			}
+		})
+	}
+}
+
 func TestBuildSectionsResponseEnrichesEpisodeMetadata(t *testing.T) {
 	seasonNumber := 1
 	episodeNumber := 1
@@ -115,7 +149,7 @@ func TestBuildSectionsResponseEnrichesEpisodeMetadata(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/sections", nil)
-	resp := h.buildSectionsResponse(req, withItems)
+	resp := h.buildSectionsResponse(req, withItems, nil)
 
 	if fetcher.calls != 1 {
 		t.Fatalf("episode metadata fetch calls = %d, want 1", fetcher.calls)
@@ -129,6 +163,216 @@ func TestBuildSectionsResponseEnrichesEpisodeMetadata(t *testing.T) {
 	}
 	if item.EpisodeNumber == nil || *item.EpisodeNumber != 1 {
 		t.Fatalf("episode number = %v, want 1", item.EpisodeNumber)
+	}
+}
+
+func TestBuildSectionsResponseSupportsMixedEpisodeAndSeriesRecentItems(t *testing.T) {
+	seasonNumber := 3
+	episodeNumber := 7
+	seriesID := "series-running"
+	fetcher := &stubSectionEpisodeFetcher{meta: map[string]sections.SectionItemMeta{
+		"episode-new": {
+			SeriesID:      &seriesID,
+			SeriesTitle:   "Running Show",
+			SeasonNumber:  &seasonNumber,
+			EpisodeNumber: &episodeNumber,
+		},
+	}}
+	// Each card's own hint is profile-independent, so it reaches the response
+	// only after the resolver validates it.
+	resolver := &stubSectionPlayableTargetResolver{targets: map[string]string{
+		playTargetKey("episode", "episode-new", "episode-new"):         "episode-new",
+		playTargetKey("series", "series-batch", "episode-batch-first"): "episode-batch-first",
+	}}
+	h := &SectionHandler{episodeFetcher: fetcher, playableTargets: resolver}
+	withItems := []sections.SectionWithItems{{
+		ResolvedSection: sections.ResolvedSection{ID: "tv-recent", SectionType: sections.SectionRecentlyAdded, Title: "Recently Added in TV Shows"},
+		Items: []*models.MediaItem{
+			{ContentID: "episode-new", Type: "episode", Title: "A New Arrival", Status: "matched", PlayContentID: "episode-new"},
+			{ContentID: "series-batch", Type: "series", Title: "Batch Show", Status: "matched", PlayContentID: "episode-batch-first"},
+		},
+	}}
+
+	resp := h.buildSectionsResponse(httptest.NewRequest(http.MethodGet, "/sections", nil), withItems, nil)
+	if len(resp.Sections) != 1 || len(resp.Sections[0].Items) != 2 {
+		t.Fatalf("response shape = %#v", resp)
+	}
+	hints := make(map[string]string, len(resolver.query.Items))
+	for _, input := range resolver.query.Items {
+		hints[input.ContentID] = input.PreferredContentID
+	}
+	if hints["series-batch"] != "episode-batch-first" || hints["episode-new"] != "episode-new" {
+		t.Fatalf("resolver hints = %v, want the items' own play targets", hints)
+	}
+	episodeItem := resp.Sections[0].Items[0]
+	if episodeItem.Type != "episode" || episodeItem.SeriesTitle != "Running Show" || episodeItem.SeasonNumber == nil || *episodeItem.SeasonNumber != 3 || episodeItem.EpisodeNumber == nil || *episodeItem.EpisodeNumber != 7 {
+		t.Fatalf("episode response = %#v", episodeItem)
+	}
+	if episodeItem.PlayContentID != "episode-new" {
+		t.Fatalf("episode play content id = %q, want episode-new", episodeItem.PlayContentID)
+	}
+	seriesItem := resp.Sections[0].Items[1]
+	if seriesItem.Type != "series" || seriesItem.Title != "Batch Show" || seriesItem.SeasonNumber != nil || seriesItem.EpisodeNumber != nil {
+		t.Fatalf("series response = %#v", seriesItem)
+	}
+	if seriesItem.PlayContentID != "episode-batch-first" {
+		t.Fatalf("series play content id = %q, want episode-batch-first", seriesItem.PlayContentID)
+	}
+}
+
+// newSectionTestUserStore builds an empty in-memory user store; the section
+// tests only need a usable store instance, not seeded rows.
+func newSectionTestUserStore(t *testing.T) userstore.UserStore {
+	t.Helper()
+
+	db, err := sql.Open("sqlite3", "file:"+t.Name()+"?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = db.Close() })
+	if err := userdb.InitSchema(db); err != nil {
+		t.Fatalf("init schema: %v", err)
+	}
+	return userdb.NewSQLiteUserStore(db)
+}
+
+type stubSectionPlayableTargetResolver struct {
+	query   catalog.PlayableTargetQuery
+	targets map[string]string
+}
+
+// playTargetKey mirrors how the handlers look a resolved target up, so a stub
+// can key its answers exactly the way the real resolver does.
+func playTargetKey(mediaType, contentID, preferredContentID string) string {
+	return catalog.PlayableTargetInput{
+		Type:               mediaType,
+		ContentID:          contentID,
+		PreferredContentID: preferredContentID,
+	}.Key()
+}
+
+func (s *stubSectionPlayableTargetResolver) ResolvePlayableTargets(_ context.Context, query catalog.PlayableTargetQuery) (map[string]string, error) {
+	s.query = query
+	return s.targets, nil
+}
+
+// Section rails must resolve play targets with the same profile progress and
+// library scope the catalog endpoints use, so the same series card resumes at
+// the same episode on both surfaces.
+func TestBuildSectionsResponseScopesPlayTargetsToLibraryAndProgress(t *testing.T) {
+	resolver := &stubSectionPlayableTargetResolver{targets: map[string]string{
+		playTargetKey("series", "series-1", ""): "episode-s03e06",
+	}}
+	store := newSectionTestUserStore(t)
+	h := &SectionHandler{
+		playableTargets: resolver,
+		StoreProvider:   testUserStoreProvider{store: store},
+	}
+	withItems := []sections.SectionWithItems{{
+		ResolvedSection: sections.ResolvedSection{ID: "recent", SectionType: sections.SectionRecentlyAdded, Title: "Recently Added"},
+		Items: []*models.MediaItem{
+			{ContentID: "series-1", Type: "series", Title: "Long Runner", Status: "matched"},
+		},
+	}}
+
+	req := httptest.NewRequest(http.MethodGet, "/library/7/sections", nil)
+	ctx := apimw.SetClaims(req.Context(), &auth.Claims{Role: "user", UserID: 42})
+	ctx = apimw.SetProfileID(ctx, "p1")
+	req = req.WithContext(ctx)
+
+	libraryID := 7
+	resp := h.buildSectionsResponse(req, withItems, &libraryID)
+
+	if got := resolver.query.LibraryIDs; len(got) != 1 || got[0] != 7 {
+		t.Fatalf("library IDs = %v, want [7]", got)
+	}
+	if resolver.query.ProgressStore == nil {
+		t.Fatal("progress store = nil, want the request's user store")
+	}
+	if got := resp.Sections[0].Items[0].PlayContentID; got != "episode-s03e06" {
+		t.Fatalf("play content id = %q, want episode-s03e06", got)
+	}
+}
+
+// Section responses keep the first occurrence of a content ID within each row.
+// A later row may still contain the same item because cross-section overlap is
+// a separate, recipe-controlled behavior.
+func TestBuildSectionsResponseDeduplicatesItemsWithinEachSection(t *testing.T) {
+	resolver := &stubSectionPlayableTargetResolver{targets: map[string]string{
+		playTargetKey("series", "series-1", "episode-s02e05"): "episode-s02e05",
+	}}
+	h := &SectionHandler{playableTargets: resolver}
+	withItems := []sections.SectionWithItems{
+		{
+			ResolvedSection: sections.ResolvedSection{ID: "recent", SectionType: sections.SectionRecentlyAdded, Title: "Recently Added", ItemLimit: 3},
+			Items: []*models.MediaItem{
+				nil,
+				{ContentID: "series-1", Type: "series", Title: "Long Runner", Status: "matched", PlayContentID: "episode-s02e05"},
+				{ContentID: "", Type: "movie", Title: "Invalid", Status: "matched"},
+				{ContentID: "movie-2", Type: "movie", Title: "Second", Status: "matched"},
+				{ContentID: "series-1", Type: "series", Title: "Long Runner", Status: "matched", PlayContentID: "episode-s01e01"},
+				{ContentID: "movie-3", Type: "movie", Title: "Third", Status: "matched"},
+			},
+			TotalCount: 6,
+		},
+		{
+			ResolvedSection: sections.ResolvedSection{ID: "featured", SectionType: sections.SectionRecentlyReleased, Title: "Featured"},
+			Items: []*models.MediaItem{
+				{ContentID: "series-1", Type: "series", Title: "Long Runner", Status: "matched", PlayContentID: "episode-s02e05"},
+				{ContentID: "series-1", Type: "series", Title: "Long Runner", Status: "matched", PlayContentID: "episode-s01e01"},
+			},
+			TotalCount: 10,
+		},
+	}
+
+	resp := h.buildSectionsResponse(httptest.NewRequest(http.MethodGet, "/sections", nil), withItems, nil)
+	if len(resp.Sections) != 2 {
+		t.Fatalf("sections = %d, want 2", len(resp.Sections))
+	}
+	items := resp.Sections[0].Items
+	if len(items) != 3 {
+		t.Fatalf("first section items = %d, want 3", len(items))
+	}
+	if got := []string{items[0].ContentID, items[1].ContentID, items[2].ContentID}; !reflect.DeepEqual(got, []string{"series-1", "movie-2", "movie-3"}) {
+		t.Fatalf("first section IDs = %v, want [series-1 movie-2 movie-3]", got)
+	}
+	if items[0].PlayContentID != "episode-s02e05" {
+		t.Fatalf("first occurrence play content id = %q, want episode-s02e05", items[0].PlayContentID)
+	}
+	if resp.Sections[0].TotalCount != 3 {
+		t.Fatalf("first section total count = %d, want 3", resp.Sections[0].TotalCount)
+	}
+	if got := resp.Sections[1].Items; len(got) != 1 || got[0].ContentID != "series-1" {
+		t.Fatalf("second section items = %#v, want cross-section series-1", got)
+	}
+	if resp.Sections[1].TotalCount != 10 {
+		t.Fatalf("second section full total count = %d, want 10", resp.Sections[1].TotalCount)
+	}
+}
+
+// Home rails are not library-scoped: nothing may re-derive a library from the
+// request path.
+func TestBuildSectionsResponseLeavesHomePlayTargetsUnscoped(t *testing.T) {
+	resolver := &stubSectionPlayableTargetResolver{targets: map[string]string{}}
+	h := &SectionHandler{playableTargets: resolver}
+	withItems := []sections.SectionWithItems{{
+		ResolvedSection: sections.ResolvedSection{ID: "recent", SectionType: sections.SectionRecentlyAdded, Title: "Recently Added"},
+		Items:           []*models.MediaItem{{ContentID: "series-1", Type: "series", Title: "Long Runner", Status: "matched"}},
+	}}
+
+	req := httptest.NewRequest(http.MethodGet, "/home/sections", nil)
+	ctx := apimw.SetClaims(req.Context(), &auth.Claims{Role: "user", UserID: 42})
+	ctx = apimw.SetProfileID(ctx, "p1")
+	req = req.WithContext(ctx)
+
+	h.buildSectionsResponse(req, withItems, nil)
+
+	if got := resolver.query.LibraryIDs; got != nil {
+		t.Fatalf("library IDs = %v, want nil", got)
+	}
+	if resolver.query.ProgressStore != nil {
+		t.Fatal("progress store non-nil without a store provider")
 	}
 }
 
@@ -165,7 +409,7 @@ func TestBuildSectionsResponseKeepsExistingEpisodeMeta(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/sections", nil)
-	resp := h.buildSectionsResponse(req, withItems)
+	resp := h.buildSectionsResponse(req, withItems, nil)
 
 	if fetcher.calls != 0 {
 		t.Fatalf("episode metadata fetch calls = %d, want 0", fetcher.calls)
@@ -255,7 +499,7 @@ func TestBuildSectionsResponseBatchResolvesImageURLs(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/sections", nil)
-	resp := h.buildSectionsResponse(req, withItems)
+	resp := h.buildSectionsResponse(req, withItems, nil)
 
 	if resolver.batchCalls != 1 {
 		t.Fatalf("batch calls = %d, want 1", resolver.batchCalls)
@@ -339,6 +583,57 @@ func TestInjectNextUpAfterContiguousContinueRows(t *testing.T) {
 		if gotIDs[i] != wantIDs[i] {
 			t.Fatalf("section ids = %v, want %v", gotIDs, wantIDs)
 		}
+	}
+}
+
+func TestInjectNextUpMatchesContinueWatchingItemLimit(t *testing.T) {
+	watching := sections.ContinueTypeConfig(sections.ContinueTypeWatching)
+	listening := sections.ContinueTypeConfig(sections.ContinueTypeListening)
+	cases := []struct {
+		name string
+		in   []sections.ResolvedSection
+		want int
+	}{
+		{
+			name: "user limit on continue watching",
+			in: []sections.ResolvedSection{
+				{ID: "cw", SectionType: sections.SectionContinueWatching, Config: watching, ItemLimit: 35},
+			},
+			want: 35,
+		},
+		{
+			name: "continue listening limit is not inherited",
+			in: []sections.ResolvedSection{
+				{ID: "cl", SectionType: sections.SectionContinueWatching, Config: listening, ItemLimit: 50},
+			},
+			want: 20,
+		},
+		{
+			name: "unset limit keeps the default",
+			in: []sections.ResolvedSection{
+				{ID: "cw", SectionType: sections.SectionContinueWatching, Config: watching},
+			},
+			want: 20,
+		},
+		{
+			name: "no continue row",
+			in:   []sections.ResolvedSection{{ID: "recent", SectionType: sections.SectionRecentlyAdded, ItemLimit: 40}},
+			want: 20,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, section := range injectNextUpSection(tc.in) {
+				if section.ID != "system-next-up" {
+					continue
+				}
+				if section.ItemLimit != tc.want {
+					t.Fatalf("next-up item limit = %d, want %d", section.ItemLimit, tc.want)
+				}
+				return
+			}
+			t.Fatal("next-up section was not injected")
+		})
 	}
 }
 

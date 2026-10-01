@@ -41,6 +41,11 @@ export function pendingServerSubtitleSelection(
   activeRequiresBurnIn: boolean,
 ): number | null | undefined {
   const planBurnsIn = planMode === "burn_in";
-  if (planSelectedIndex === activeIndex && planBurnsIn === activeRequiresBurnIn) return undefined;
+  // A selected track in an already burn-in plan is authoritative even when
+  // the inventory also exposes a sidecar artifact. Re-requesting that same
+  // ordinal cannot improve the route; it only reloads the identical stream.
+  if (planSelectedIndex === activeIndex && (planBurnsIn || !activeRequiresBurnIn)) {
+    return undefined;
+  }
   return activeIndex;
 }

@@ -27,9 +27,13 @@ type EntryRow struct {
 }
 
 type ListOptions struct {
-	From              *time.Time
-	To                *time.Time
+	From *time.Time
+	To   *time.Time
+	// Level filters on a single level. Levels filters on any of several and
+	// wins when both are set; Level stays for callers that only ever ask for
+	// one.
 	Level             string
+	Levels            []string
 	Component         string
 	NodeID            string
 	RequestID         string
@@ -55,84 +59,10 @@ func NewRepo(pool *pgxpool.Pool) *Repo {
 }
 
 func (r *Repo) List(ctx context.Context, opts ListOptions) (ListResult, error) {
-	limit := opts.Limit
-	if limit <= 0 || limit > 200 {
-		limit = 100
+	query, args, limit, err := buildListQuery(opts)
+	if err != nil {
+		return ListResult{}, err
 	}
-
-	conditions := []string{"1=1"}
-	args := make([]any, 0, 12)
-	argIdx := 1
-
-	if opts.From != nil {
-		conditions = append(conditions, fmt.Sprintf("timestamp >= $%d", argIdx))
-		args = append(args, *opts.From)
-		argIdx++
-	}
-	if opts.To != nil {
-		conditions = append(conditions, fmt.Sprintf("timestamp <= $%d", argIdx))
-		args = append(args, *opts.To)
-		argIdx++
-	}
-	if opts.Level != "" {
-		conditions = append(conditions, fmt.Sprintf("level = $%d", argIdx))
-		args = append(args, strings.ToLower(opts.Level))
-		argIdx++
-	}
-	if opts.Component != "" {
-		conditions = append(conditions, fmt.Sprintf("component = $%d", argIdx))
-		args = append(args, opts.Component)
-		argIdx++
-	}
-	if opts.NodeID != "" {
-		conditions = append(conditions, fmt.Sprintf("node_id = $%d", argIdx))
-		args = append(args, opts.NodeID)
-		argIdx++
-	}
-	if opts.RequestID != "" {
-		conditions = append(conditions, fmt.Sprintf("request_id = $%d", argIdx))
-		args = append(args, opts.RequestID)
-		argIdx++
-	}
-	if opts.UserID != nil {
-		conditions = append(conditions, fmt.Sprintf("user_id = $%d", argIdx))
-		args = append(args, *opts.UserID)
-		argIdx++
-	}
-	if opts.SessionID != "" {
-		conditions = append(conditions, fmt.Sprintf("session_id = $%d", argIdx))
-		args = append(args, opts.SessionID)
-		argIdx++
-	}
-	if opts.PlaybackSessionID != "" {
-		conditions = append(conditions, fmt.Sprintf("playback_session_id = $%d", argIdx))
-		args = append(args, opts.PlaybackSessionID)
-		argIdx++
-	}
-	if opts.Query != "" {
-		conditions = append(conditions, fmt.Sprintf("message ILIKE $%d", argIdx))
-		args = append(args, "%"+opts.Query+"%")
-		argIdx++
-	}
-	if opts.Cursor != "" {
-		cursorTs, cursorID, err := decodeCursor(opts.Cursor)
-		if err != nil {
-			return ListResult{}, err
-		}
-		conditions = append(conditions, fmt.Sprintf("(timestamp, id) < ($%d, $%d)", argIdx, argIdx+1))
-		args = append(args, cursorTs, cursorID)
-		argIdx += 2
-	}
-
-	query := fmt.Sprintf(`
-		SELECT id, timestamp, level, component, message, COALESCE(request_id, ''), user_id, COALESCE(session_id, ''), COALESCE(playback_session_id, ''),
-		       COALESCE(client_ip::text, ''), COALESCE(node_id, ''), attrs
-		FROM operational_logs
-		WHERE %s
-		ORDER BY timestamp DESC, id DESC
-		LIMIT $%d
-	`, strings.Join(conditions, " AND "), argIdx)
-	args = append(args, limit+1)
 
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -179,6 +109,121 @@ func (r *Repo) List(ctx context.Context, opts ListOptions) (ListResult, error) {
 	}
 	result.Entries = entries
 	return result, nil
+}
+
+// NormalizeLevels lowercases, trims and de-duplicates a level filter, dropping
+// empty entries. It returns nil when nothing usable is left so callers can test
+// the result for "no level filter".
+func NormalizeLevels(levels []string) []string {
+	if len(levels) == 0 {
+		return nil
+	}
+	normalized := make([]string, 0, len(levels))
+	seen := make(map[string]struct{}, len(levels))
+	for _, level := range levels {
+		level = strings.ToLower(strings.TrimSpace(level))
+		if level == "" {
+			continue
+		}
+		if _, ok := seen[level]; ok {
+			continue
+		}
+		seen[level] = struct{}{}
+		normalized = append(normalized, level)
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
+}
+
+// buildListQuery renders the filtered query and its arguments. It is separate
+// from List so the predicate assembly can be tested without a database.
+func buildListQuery(opts ListOptions) (string, []any, int, error) {
+	limit := opts.Limit
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+
+	conditions := []string{"1=1"}
+	args := make([]any, 0, 12)
+	argIdx := 1
+
+	if opts.From != nil {
+		conditions = append(conditions, fmt.Sprintf("timestamp >= $%d", argIdx))
+		args = append(args, *opts.From)
+		argIdx++
+	}
+	if opts.To != nil {
+		conditions = append(conditions, fmt.Sprintf("timestamp <= $%d", argIdx))
+		args = append(args, *opts.To)
+		argIdx++
+	}
+	if levels := NormalizeLevels(opts.Levels); len(levels) > 0 {
+		conditions = append(conditions, fmt.Sprintf("level = ANY($%d)", argIdx))
+		args = append(args, levels)
+		argIdx++
+	} else if opts.Level != "" {
+		conditions = append(conditions, fmt.Sprintf("level = $%d", argIdx))
+		args = append(args, strings.ToLower(opts.Level))
+		argIdx++
+	}
+	if opts.Component != "" {
+		conditions = append(conditions, fmt.Sprintf("component = $%d", argIdx))
+		args = append(args, opts.Component)
+		argIdx++
+	}
+	if opts.NodeID != "" {
+		conditions = append(conditions, fmt.Sprintf("node_id = $%d", argIdx))
+		args = append(args, opts.NodeID)
+		argIdx++
+	}
+	if opts.RequestID != "" {
+		conditions = append(conditions, fmt.Sprintf("request_id = $%d", argIdx))
+		args = append(args, opts.RequestID)
+		argIdx++
+	}
+	if opts.UserID != nil {
+		conditions = append(conditions, fmt.Sprintf("user_id = $%d", argIdx))
+		args = append(args, *opts.UserID)
+		argIdx++
+	}
+	if opts.SessionID != "" {
+		conditions = append(conditions, fmt.Sprintf("session_id = $%d", argIdx))
+		args = append(args, opts.SessionID)
+		argIdx++
+	}
+	if opts.PlaybackSessionID != "" {
+		conditions = append(conditions, fmt.Sprintf("playback_session_id = $%d", argIdx))
+		args = append(args, opts.PlaybackSessionID)
+		argIdx++
+	}
+	if opts.Query != "" {
+		conditions = append(conditions, fmt.Sprintf("message ILIKE $%d", argIdx))
+		args = append(args, "%"+opts.Query+"%")
+		argIdx++
+	}
+	if opts.Cursor != "" {
+		cursorTs, cursorID, err := decodeCursor(opts.Cursor)
+		if err != nil {
+			return "", nil, 0, err
+		}
+		conditions = append(conditions, fmt.Sprintf("(timestamp, id) < ($%d, $%d)", argIdx, argIdx+1))
+		args = append(args, cursorTs, cursorID)
+		argIdx += 2
+	}
+
+	query := fmt.Sprintf(`
+		SELECT id, timestamp, level, component, message, COALESCE(request_id, ''), user_id, COALESCE(session_id, ''), COALESCE(playback_session_id, ''),
+		       COALESCE(client_ip::text, ''), COALESCE(node_id, ''), attrs
+		FROM operational_logs
+		WHERE %s
+		ORDER BY timestamp DESC, id DESC
+		LIMIT $%d
+	`, strings.Join(conditions, " AND "), argIdx)
+	args = append(args, limit+1)
+
+	return query, args, limit, nil
 }
 
 func encodeCursor(ts time.Time, id int64) string {

@@ -6,6 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   useAuth: vi.fn(),
+  requestStatus: vi.fn(),
+}));
+
+vi.mock("@/hooks/queries/useRequests", () => ({
+  useRequestFeatureStatus: () => mocks.requestStatus(),
 }));
 
 vi.mock("@/hooks/useAuth", () => ({
@@ -25,6 +30,7 @@ describe("SettingsLayout", () => {
     mocks.useAuth.mockReturnValue({
       user: { role: "admin" },
     });
+    mocks.requestStatus.mockReturnValue({ data: { requests_enabled: true } });
   });
 
   afterEach(() => {
@@ -90,6 +96,21 @@ describe("SettingsLayout", () => {
     expect(markup.match(/2xl:grid-cols-4/g)).toHaveLength(5);
     expect(markup.match(/lg:h-28/g)).toHaveLength(17);
     expect(markup).not.toContain("max-w-5xl");
+  });
+
+  it("lists Requests only while the server has requests on", () => {
+    const renderIndex = () =>
+      renderToStaticMarkup(
+        <MemoryRouter initialEntries={["/settings"]}>
+          <SettingsLayout />
+        </MemoryRouter>,
+      );
+
+    expect(renderIndex()).toContain('href="/settings/requests"');
+    mocks.requestStatus.mockReturnValue({ data: { requests_enabled: false } });
+    expect(renderIndex()).not.toContain('href="/settings/requests"');
+    mocks.requestStatus.mockReturnValue({ data: undefined });
+    expect(renderIndex()).not.toContain('href="/settings/requests"');
   });
 
   it("keeps each settings section in exactly one group", () => {
@@ -161,6 +182,7 @@ describe("SettingsLayout", () => {
 
     expect(markup).not.toContain("/settings/profiles");
     expect(markup).not.toContain(">Profiles<");
+    expect(markup).not.toContain("/settings/account");
   });
 
   it("shows the profiles section for non-admin users on their primary profile", () => {
@@ -177,6 +199,7 @@ describe("SettingsLayout", () => {
 
     expect(markup).toContain("/settings/profiles");
     expect(markup).toContain(">Profiles<");
+    expect(markup).toContain("/settings/account");
   });
 
   it("filters personal settings sections from the search box", async () => {
@@ -220,6 +243,19 @@ describe("SettingsLayout", () => {
 
     const searchBox = screen.getByRole("searchbox", { name: "Search settings" });
     fireEvent.keyDown(document, { key: "k", metaKey: true });
+
+    expect(searchBox).toHaveFocus();
+  });
+
+  it("focuses personal settings search with Ctrl+K", () => {
+    render(
+      <MemoryRouter initialEntries={["/settings"]}>
+        <SettingsLayout />
+      </MemoryRouter>,
+    );
+
+    const searchBox = screen.getByRole("searchbox", { name: "Search settings" });
+    fireEvent.keyDown(document, { key: "k", ctrlKey: true });
 
     expect(searchBox).toHaveFocus();
   });

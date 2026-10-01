@@ -12,7 +12,8 @@ const mocks = vi.hoisted(() => ({
       category: "metadata",
       state: "running",
       progress: 0,
-      progress_message: "Processed 1,000 images across 1 batch",
+      manual_only: false,
+      execution_scope: "process",
       triggers: [],
     },
   ] as TaskInfo[],
@@ -22,7 +23,7 @@ vi.mock("@/hooks/queries/admin/stats", () => ({
   useAdminSessions: () => ({ data: [] }),
 }));
 vi.mock("@/hooks/queries/admin/tasks", () => ({
-  useTasks: () => ({ data: mocks.tasks }),
+  useTasksIncludingHidden: () => ({ data: mocks.tasks }),
 }));
 vi.mock("@/hooks/queries/admin/scans", () => ({
   useActiveScans: () => ({ data: [] }),
@@ -47,7 +48,10 @@ describe("ServerActivity task progress", () => {
     fireEvent.click(screen.getByRole("button", { name: "Server activity: 1 active" }));
 
     expect(screen.getByText("Running")).toBeInTheDocument();
-    expect(screen.getByText("Processed 1,000 images across 1 batch")).toBeInTheDocument();
     expect(screen.queryByText("0%")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Cache Metadata Images" })).toHaveAttribute(
+      "href",
+      "/admin/tasks/cache_metadata_images",
+    );
   });
 });

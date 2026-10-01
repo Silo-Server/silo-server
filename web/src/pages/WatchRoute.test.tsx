@@ -335,4 +335,125 @@ describe("buildWatchPageProps", () => {
       },
     });
   });
+
+  it.each([
+    "pgs",
+    "pgssub",
+    "hdmv_pgs_subtitle",
+    "dvd_subtitle",
+    "dvdsub",
+    "vobsub",
+    "dvb_subtitle",
+    "dvbsub",
+  ])("omits a selected %s bitmap track from the initial playback request", (codec) => {
+    const props = buildWatchPageProps({
+      request: createWatchRouteRequest({
+        contentId: "movie-1",
+        fileId: 42,
+        prePlaySubtitleMode: "explicit",
+        prePlaySubtitleSelection: {
+          source: "embedded",
+          language: "en",
+          codec,
+          label: "English PGS",
+          track_index: 4,
+        },
+      }),
+      item: makeWatchDetail({
+        versions: [
+          {
+            file_id: 42,
+            resolution: "2160p",
+            codec_video: "hevc",
+            codec_audio: "truehd",
+            hdr: true,
+            container: "mkv",
+            file_size: 1,
+            duration: 120,
+            bitrate: 25_000,
+            effective_audio_track_index: 0,
+            effective_audio_language: "en",
+            subtitle_tracks: [
+              {
+                index: 4,
+                language: "en",
+                codec,
+                title: "English PGS",
+              },
+            ],
+          },
+        ],
+        subtitles: [
+          {
+            source: "embedded",
+            language: "en",
+            codec,
+            forced: false,
+            title: "English PGS",
+          },
+        ],
+      }),
+      currentProfile: profile,
+    });
+
+    // Bitmap burn-in rides the normal start request, while its separate marker
+    // enables the subtitle-free fallback if that start is refused.
+    expect(props.initialSubtitleTrackIndexByFileId).toEqual({ 42: 0 });
+    expect(props.initialBitmapSubtitleTrackIndexByFileId).toEqual({ 42: 0 });
+  });
+
+  it("passes a selected text subtitle ordinal into the initial playback request", () => {
+    const props = buildWatchPageProps({
+      request: createWatchRouteRequest({
+        contentId: "movie-1",
+        fileId: 42,
+        prePlaySubtitleMode: "explicit",
+        prePlaySubtitleSelection: {
+          source: "embedded",
+          language: "en",
+          codec: "subrip",
+          label: "English",
+          track_index: 3,
+        },
+      }),
+      item: makeWatchDetail({
+        versions: [
+          {
+            file_id: 42,
+            resolution: "1080p",
+            codec_video: "h264",
+            codec_audio: "aac",
+            hdr: false,
+            container: "mkv",
+            file_size: 1,
+            duration: 120,
+            bitrate: 8_000,
+            effective_audio_track_index: 0,
+            effective_audio_language: "ja",
+            subtitle_tracks: [
+              {
+                index: 3,
+                language: "en",
+                codec: "subrip",
+                title: "English",
+              },
+            ],
+          },
+        ],
+        subtitles: [
+          {
+            source: "embedded",
+            language: "en",
+            codec: "subrip",
+            forced: false,
+            title: "English",
+          },
+        ],
+      }),
+      currentProfile: profile,
+    });
+
+    expect(props.initialSubtitleTrackIndexByFileId).toEqual({ 42: 0 });
+    expect(props.initialBitmapSubtitleTrackIndexByFileId).toEqual({});
+  });
 });

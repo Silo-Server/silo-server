@@ -6,6 +6,7 @@ import { useItemEpisodes } from "@/hooks/queries/episodes";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import EpisodeRow from "@/components/EpisodeRow";
+import CardPlayOverlay from "@/components/CardPlayOverlay";
 
 interface SeasonAccordionProps {
   seasons: Season[];
@@ -41,18 +42,27 @@ export default function SeasonAccordion({ seasons }: SeasonAccordionProps) {
 
       {/* Season metadata (poster + title) */}
       <div className="flex items-start justify-between gap-4">
-        <ViewTransitionLink
-          to={`/item/${current.content_id}`}
-          className="flex min-w-0 items-center gap-3"
-        >
+        <div className="flex min-w-0 items-center gap-3">
           {current.poster_url && (
-            <img
-              src={current.poster_url}
-              alt={currentTitle}
-              className="h-14 w-10 rounded-md object-cover"
-            />
+            <div className="group/media relative h-14 w-10 shrink-0">
+              <ViewTransitionLink to={`/item/${current.content_id}`}>
+                <img
+                  src={current.poster_url}
+                  alt={currentTitle}
+                  className="h-14 w-10 rounded-md object-cover"
+                />
+              </ViewTransitionLink>
+              {current.play_content_id ? (
+                <CardPlayOverlay
+                  contentId={current.play_content_id}
+                  title={currentTitle}
+                  type="episode"
+                  size="compact"
+                />
+              ) : null}
+            </div>
           )}
-          <div className="min-w-0">
+          <ViewTransitionLink to={`/item/${current.content_id}`} className="min-w-0">
             <div className="text-sm font-medium">{currentTitle}</div>
             {current.air_date && (
               <div className="text-muted-foreground text-xs">{current.air_date}</div>
@@ -71,8 +81,8 @@ export default function SeasonAccordion({ seasons }: SeasonAccordionProps) {
                 )}
               </div>
             )}
-          </div>
-        </ViewTransitionLink>
+          </ViewTransitionLink>
+        </div>
       </div>
 
       {/* Season pill tabs */}

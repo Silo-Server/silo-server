@@ -28,6 +28,10 @@ func NewEpisodeRepository(pool *pgxpool.Pool) *EpisodeRepository {
 	return &EpisodeRepository{pool: pool}
 }
 
+// MaxEpisodePageSize is the most episodes one BrowseEpisodes or
+// ListUpcoming page returns.
+const MaxEpisodePageSize = 1000
+
 // episodeColumns is the list of columns returned by all SELECT queries on episodes.
 const episodeColumns = `content_id, series_id, season_id, season_number, episode_number,
 	title, default_metadata_language, overview, air_date, runtime,
@@ -376,13 +380,37 @@ func (r *EpisodeRepository) Upsert(ctx context.Context, ep *models.Episode) erro
 	return nil
 }
 
-// BulkUpsert inserts or updates multiple episodes for a single series in two
-// round-trips: one to clear stale external IDs, one for the multi-row upsert.
-// Stored content IDs are written back to each Episode struct.
+// BulkUpsert inserts or updates multiple episodes for a single series. The
+// stale-ID clear, multi-row upsert, and denormalized air-date update share one
+// transaction so callers can safely fall back to single-row writes if any step
+// fails. Stored content IDs are written back to each Episode struct.
 func (r *EpisodeRepository) BulkUpsert(ctx context.Context, seriesID string, episodes []*models.Episode) error {
 	if len(episodes) == 0 {
 		return nil
 	}
+	for i, ep := range episodes {
+		if ep == nil {
+			return fmt.Errorf("bulk upserting episodes: episode %d is nil", i)
+		}
+		if ep.SeriesID != seriesID {
+			return fmt.Errorf("bulk upserting episodes: episode %d belongs to series %q, want %q", i, ep.SeriesID, seriesID)
+		}
+		if !FitsPostgresInteger(ep.SeasonNumber) || !FitsPostgresInteger(ep.EpisodeNumber) {
+			return fmt.Errorf("bulk upserting episodes: episode %d number %d/%d is outside PostgreSQL integer range",
+				i, ep.SeasonNumber, ep.EpisodeNumber)
+		}
+		if !FitsPostgresInteger(ep.Runtime) {
+			return fmt.Errorf("bulk upserting episodes: episode %d runtime %d is outside PostgreSQL integer range", i, ep.Runtime)
+		}
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin bulk episode upsert: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
 
 	// Collect external IDs and their owning (season_number, episode_number)
 	// pairs for the batch stale-ID clear.
@@ -427,7 +455,7 @@ func (r *EpisodeRepository) BulkUpsert(ctx context.Context, seriesID string, epi
 				OR (tmdb_id <> '' AND tmdb_id = ANY($3::text[]))
 				OR (tvdb_id <> '' AND tvdb_id = ANY($4::text[]))
 			  )`
-		if _, err := r.pool.Exec(ctx, clearQuery,
+		if _, err := tx.Exec(ctx, clearQuery,
 			seriesID, imdbIDs, tmdbIDs, tvdbIDs, ownerSNs, ownerENs,
 		); err != nil {
 			return fmt.Errorf("bulk clearing stale episode external IDs: %w", err)
@@ -521,7 +549,7 @@ func (r *EpisodeRepository) BulkUpsert(ctx context.Context, seriesID string, epi
 			updated_at = NOW()
 		RETURNING content_id, season_number, episode_number`
 
-	rows, err := r.pool.Query(ctx, query,
+	rows, err := tx.Query(ctx, query,
 		contentIDs, epSeriesIDs, seasonIDs, seasonNums, episodeNums,
 		titles, defaultMetadataLanguages, overviews, airDates, runtimes,
 		ratingsIMDB, ratingsTMDB,
@@ -532,7 +560,6 @@ func (r *EpisodeRepository) BulkUpsert(ctx context.Context, seriesID string, epi
 	if err != nil {
 		return fmt.Errorf("bulk upserting episodes: %w", err)
 	}
-	defer rows.Close()
 
 	// Build a map to write back content IDs by (season_number, episode_number).
 	type epKey struct {
@@ -543,10 +570,12 @@ func (r *EpisodeRepository) BulkUpsert(ctx context.Context, seriesID string, epi
 		var cid string
 		var sn, en int32
 		if err := rows.Scan(&cid, &sn, &en); err != nil {
+			rows.Close()
 			return fmt.Errorf("scanning bulk upsert episode result: %w", err)
 		}
 		returnedIDs[epKey{sn, en}] = cid
 	}
+	rows.Close()
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterating bulk upsert episode results: %w", err)
 	}
@@ -561,8 +590,11 @@ func (r *EpisodeRepository) BulkUpsert(ctx context.Context, seriesID string, epi
 	// series (audit 2026-05-01 §2.1 hot path #1). BulkUpsert is called for
 	// a single series, but the SQL uses ANY($1::text[]) to be future-proof
 	// for multi-series scanner batches.
-	if _, err := r.pool.Exec(ctx, batchUpdateSeriesLastAirDateSQL, []string{seriesID}); err != nil {
+	if _, err := tx.Exec(ctx, batchUpdateSeriesLastAirDateSQL, []string{seriesID}); err != nil {
 		return fmt.Errorf("batch update last_air_date_at: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit bulk episode upsert: %w", err)
 	}
 
 	return nil
@@ -653,6 +685,39 @@ func (r *EpisodeRepository) GetByIDs(ctx context.Context, contentIDs []string) (
 	return scanEpisodes(rows)
 }
 
+// ListBySeriesAndNumbers returns the requested episode rows for one series in a
+// single query. It intentionally does not apply episodeAvailabilityPredicate:
+// metadata persistence must see provider-only episodes before library links
+// exist so it can preserve their identity and merge state.
+func (r *EpisodeRepository) ListBySeriesAndNumbers(
+	ctx context.Context,
+	seriesID string,
+	seasonNumbers []int32,
+	episodeNumbers []int32,
+) ([]*models.Episode, error) {
+	if len(seasonNumbers) != len(episodeNumbers) {
+		return nil, fmt.Errorf("listing episodes by series and numbers: season and episode number counts differ")
+	}
+	if len(seasonNumbers) == 0 {
+		return nil, nil
+	}
+	query := `SELECT ` + episodeColumns + `
+		FROM episodes
+		JOIN unnest($2::int[], $3::int[]) AS requested(requested_season_number, requested_episode_number)
+		  ON episodes.season_number = requested.requested_season_number
+		 AND episodes.episode_number = requested.requested_episode_number
+		WHERE series_id = $1
+		ORDER BY season_number ASC, episode_number ASC`
+
+	rows, err := r.pool.Query(ctx, query, seriesID, seasonNumbers, episodeNumbers)
+	if err != nil {
+		return nil, fmt.Errorf("listing episodes by series and numbers: %w", err)
+	}
+	defer rows.Close()
+
+	return scanEpisodes(rows)
+}
+
 // HasFilesByIDs reports which of the given episodes are backed by at least one
 // live (non-missing) media file. Episodes absent from the result map have no
 // file — e.g. provider-metadata-only entries for unaired episodes.
@@ -723,6 +788,43 @@ func (r *EpisodeRepository) ListBySeriesIDs(ctx context.Context, seriesIDs []str
 		result[episode.SeriesID] = append(result[episode.SeriesID], episode)
 	}
 	return result, nil
+}
+
+// ListIDsBySeriesIDs returns the available episode IDs used to determine
+// whether a series is completed, without loading episode metadata.
+func (r *EpisodeRepository) ListIDsBySeriesIDs(ctx context.Context, seriesIDs []string) (map[string][]string, error) {
+	return r.listIDsByParent(ctx, "series_id", seriesIDs)
+}
+
+// ListIDsBySeasonIDs is the season counterpart of ListIDsBySeriesIDs.
+func (r *EpisodeRepository) ListIDsBySeasonIDs(ctx context.Context, seasonIDs []string) (map[string][]string, error) {
+	return r.listIDsByParent(ctx, "season_id", seasonIDs)
+}
+
+func (r *EpisodeRepository) listIDsByParent(ctx context.Context, parentColumn string, parentIDs []string) (map[string][]string, error) {
+	result := make(map[string][]string, len(parentIDs))
+	if len(parentIDs) == 0 {
+		return result, nil
+	}
+
+	// parentColumn comes only from the two fixed-column wrappers above.
+	// Completion is order-independent; preserve the same availability rule
+	// as ListBySeriesIDs and ListBySeasonIDs, including missing-file rows.
+	query := fmt.Sprintf(`SELECT content_id, %s FROM episodes
+		WHERE %s = ANY($1) AND %s`, parentColumn, parentColumn, episodeAvailabilityPredicate)
+	rows, err := r.pool.Query(ctx, query, parentIDs)
+	if err != nil {
+		return nil, fmt.Errorf("listing episode ids by %s: %w", parentColumn, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var contentID, parentID string
+		if err := rows.Scan(&contentID, &parentID); err != nil {
+			return nil, fmt.Errorf("scanning episode ids by %s: %w", parentColumn, err)
+		}
+		result[parentID] = append(result[parentID], contentID)
+	}
+	return result, rows.Err()
 }
 
 // buildListBySeriesGroupedBySeasonQuery returns the SQL and bound args used by
@@ -995,4 +1097,145 @@ func (r *EpisodeRepository) UpdateStillIfSourceMatches(ctx context.Context, cont
 		return false, fmt.Errorf("updating episode cached still: %w", err)
 	}
 	return tag.RowsAffected() > 0, nil
+}
+
+// ListUpcoming returns episodes premiered since the supplied UTC boundary,
+// including future metadata without a local file, within the viewer's scope.
+func (r *EpisodeRepository) ListUpcoming(ctx context.Context, since time.Time, seriesID, seasonID string, libraryID, limit, offset int, filter AccessFilter, includeTotal bool) ([]*models.Episode, int, error) {
+	conditions := []string{"mi.content_id = episodes.series_id", "mi.type = 'series'"}
+	args := []any{since}
+	index := 2
+	appendLibraryAccessConditions("mi.content_id", filter, &conditions, &args, &index)
+	applyAccessFilter("mi", filter, &conditions, &args, &index)
+	if libraryID > 0 {
+		conditions = append(conditions, fmt.Sprintf("EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id AND mil.media_folder_id = $%d)", index))
+		args = append(args, libraryID)
+		index++
+	}
+	where := "air_date >= $1 AND EXISTS (SELECT 1 FROM media_items mi WHERE " + strings.Join(conditions, " AND ") + ")"
+	if seriesID != "" {
+		where += fmt.Sprintf(" AND series_id = $%d", index)
+		args = append(args, seriesID)
+		index++
+	}
+	if seasonID != "" {
+		where += fmt.Sprintf(" AND season_id = $%d", index)
+		args = append(args, seasonID)
+		index++
+	}
+	var total int
+	if includeTotal {
+		if err := r.pool.QueryRow(ctx, "SELECT COUNT(*) FROM episodes WHERE "+where, args...).Scan(&total); err != nil {
+			return nil, 0, err
+		}
+	}
+	args = append(args, min(max(limit, 0), MaxEpisodePageSize), max(offset, 0))
+	rows, err := r.pool.Query(ctx, "SELECT "+episodeColumns+" FROM episodes WHERE "+where+fmt.Sprintf(" ORDER BY air_date, LOWER(title), content_id LIMIT $%d OFFSET $%d", index, index+1), args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	episodes, err := scanEpisodes(rows)
+	return episodes, total, err
+}
+
+// BrowseEpisodes applies catalog and profile predicates before counting and
+// paging, so a long series only hydrates the selected page.
+func (r *EpisodeRepository) BrowseEpisodes(ctx context.Context, seriesID, seasonID string, seasonNumber *int, startItemID string, filters BrowseFilters, access AccessFilter, includeTotal bool) ([]*models.Episode, int, error) {
+	conditions := []string{"e.series_id = $1", "EXISTS (SELECT 1 FROM episode_libraries el WHERE el.episode_id=e.content_id)"}
+	args := []any{seriesID}
+	index := 2
+	appendLibraryAccessConditions("s.content_id", access, &conditions, &args, &index)
+	applyAccessFilter("s", access, &conditions, &args, &index)
+	if seasonID != "" {
+		conditions = append(conditions, fmt.Sprintf("e.season_id = $%d", index))
+		args = append(args, seasonID)
+		index++
+	} else if seasonNumber != nil {
+		conditions = append(conditions, fmt.Sprintf("e.season_number = $%d", index))
+		args = append(args, *seasonNumber)
+		index++
+	}
+	extra := []string{}
+	filters.Type = browseTypeEpisode
+	// Language predicates count only the episode files this viewer may play.
+	filters.LibraryIDs, filters.DisabledLibraryIDs, filters.MaxPlaybackQuality = access.AllowedLibraryIDs, access.DisabledLibraryIDs, access.MaxPlaybackQuality
+	appendCompatBrowsePredicates(filters, &extra, &args, &index)
+	rewrite := strings.NewReplacer("mi.content_id", "e.content_id", "mi.genres", "s.genres", "mi.year", "EXTRACT(YEAR FROM e.air_date)::int", "mi.title", "e.title")
+	for _, condition := range extra {
+		conditions = append(conditions, rewrite.Replace(condition))
+	}
+	if filters.Genre != "" {
+		conditions = append(conditions, fmt.Sprintf("s.genres @> ARRAY[$%d]::text[]", index))
+		args = append(args, filters.Genre)
+		index++
+	}
+	if filters.PersonID > 0 {
+		conditions = append(conditions, fmt.Sprintf("EXISTS (SELECT 1 FROM item_people ip WHERE ip.content_id=s.content_id AND ip.person_id=$%d)", index))
+		args = append(args, filters.PersonID)
+		index++
+	}
+	if filters.NamePrefix != "" {
+		conditions = append(conditions, fmt.Sprintf("LOWER(e.title) LIKE $%d ESCAPE '\\'", index))
+		args = append(args, likePrefixPattern(filters.NamePrefix))
+		index++
+	}
+	if filters.RequireBackdrop {
+		conditions = append(conditions, "COALESCE(s.backdrop_path,'') <> ''")
+	}
+	order := "e.season_number, e.episode_number, e.content_id"
+	switch filters.Sort {
+	case BrowseSortTitle:
+		order = "LOWER(e.title), e.content_id"
+	case BrowseSortReleaseDate:
+		order = "e.air_date, e.content_id"
+	case BrowseSortCreatedAt:
+		order = "e.created_at, e.content_id"
+	}
+	if filters.Order == BrowseOrderDescending {
+		order = strings.ReplaceAll(order, ",", " DESC,") + " DESC"
+	}
+	if startItemID != "" {
+		// StartItemId uses the natural episode queue. Other sorting still orders the
+		// surviving queue normally; absent IDs produce an empty page.
+		conditions = append(conditions, fmt.Sprintf("(e.season_number,e.episode_number) >= (SELECT start.season_number,start.episode_number FROM episodes start WHERE start.content_id=$%d AND start.series_id=e.series_id)", index))
+		args = append(args, startItemID)
+		index++
+	}
+	from := " FROM episodes e JOIN media_items s ON s.content_id=e.series_id WHERE " + strings.Join(conditions, " AND ")
+	var total int
+	if includeTotal {
+		if err := r.pool.QueryRow(ctx, "SELECT COUNT(*)"+from, args...).Scan(&total); err != nil {
+			return nil, 0, err
+		}
+	}
+	args = append(args, min(max(filters.Limit, 0), MaxEpisodePageSize), max(filters.Offset, 0))
+	pageOrder := strings.ReplaceAll(order, "e.", "episode_page.")
+	query := "SELECT " + episodeColumns + " FROM (SELECT e.*" + from + fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", order, index, index+1) + ") episode_page" + " ORDER BY " + pageOrder
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	episodes, err := scanEpisodes(rows)
+	return episodes, total, err
+}
+
+// ListAvailableIDsBySeriesPage pages the same episode set used by completion
+// rollups without loading metadata or all episodes into memory.
+func (r *EpisodeRepository) ListAvailableIDsBySeriesPage(ctx context.Context, seriesID string, limit, offset int) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `SELECT content_id FROM episodes WHERE series_id=$1 AND `+episodeAvailabilityPredicate+` ORDER BY content_id LIMIT $2 OFFSET $3`, seriesID, min(max(limit, 1), 1000), max(offset, 0))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

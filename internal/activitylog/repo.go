@@ -274,3 +274,66 @@ func decodeCursor(cursor string) (time.Time, int64, error) {
 	}
 	return time.Unix(0, nanos).UTC(), id, nil
 }
+
+// IPPagePosition resumes a bounded aggregate view at a fixed observation window.
+type IPPagePosition struct {
+	Until    time.Time
+	LastSeen time.Time
+	IP       string
+	UserID   int
+}
+
+func (r *Repo) UserIPsPage(ctx context.Context, userID, days, limit int, pos IPPagePosition) ([]UserIPEntry, bool, error) {
+	limit = max(1, min(limit, 200))
+	rows, err := r.pool.Query(ctx, `SELECT host(client_ip),min(timestamp),max(timestamp),count(*) FROM activity_log WHERE user_id=$1 AND timestamp>$2::timestamptz-make_interval(days=>$3) AND timestamp<=$2 GROUP BY client_ip HAVING ($4::timestamptz IS NULL OR (max(timestamp),host(client_ip))<($4,$5)) ORDER BY max(timestamp) DESC,host(client_ip) DESC LIMIT $6`, userID, pos.Until, days, optionalIPPageTime(pos.LastSeen), pos.IP, limit+1)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+	result := make([]UserIPEntry, 0, limit+1)
+	for rows.Next() {
+		var row UserIPEntry
+		if err := rows.Scan(&row.ClientIP, &row.FirstSeen, &row.LastSeen, &row.RequestCount); err != nil {
+			return nil, false, err
+		}
+		result = append(result, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	more := len(result) > limit
+	if more {
+		result = result[:limit]
+	}
+	return result, more, nil
+}
+func (r *Repo) IPUsersPage(ctx context.Context, ip string, days, limit int, pos IPPagePosition) ([]IPUserEntry, bool, error) {
+	limit = max(1, min(limit, 200))
+	rows, err := r.pool.Query(ctx, `SELECT a.user_id,COALESCE(u.username,''),min(a.timestamp),max(a.timestamp),count(*) FROM activity_log a LEFT JOIN users u ON u.id=a.user_id WHERE a.client_ip=$1::inet AND a.timestamp>$2::timestamptz-make_interval(days=>$3) AND a.timestamp<=$2 AND a.user_id IS NOT NULL GROUP BY a.user_id,u.username HAVING ($4::timestamptz IS NULL OR (max(a.timestamp),a.user_id)<($4,$5)) ORDER BY max(a.timestamp) DESC,a.user_id DESC LIMIT $6`, ip, pos.Until, days, optionalIPPageTime(pos.LastSeen), pos.UserID, limit+1)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+	result := make([]IPUserEntry, 0, limit+1)
+	for rows.Next() {
+		var row IPUserEntry
+		if err := rows.Scan(&row.UserID, &row.Username, &row.FirstSeen, &row.LastSeen, &row.RequestCount); err != nil {
+			return nil, false, err
+		}
+		result = append(result, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	more := len(result) > limit
+	if more {
+		result = result[:limit]
+	}
+	return result, more, nil
+}
+func optionalIPPageTime(value time.Time) *time.Time {
+	if value.IsZero() {
+		return nil
+	}
+	return &value
+}

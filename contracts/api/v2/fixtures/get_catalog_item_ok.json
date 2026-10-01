@@ -1,0 +1,81 @@
+{
+  "themes": {
+    "owner_id": "movie:heat-1995",
+    "items": [
+      {
+        "id": "7",
+        "title": "Opening",
+        "duration_seconds": 60,
+        "container": "mp3"
+      }
+    ]
+  },
+  "content_id": "movie:heat-1995",
+  "type": "movie",
+  "title": "Heat",
+  "year": 1995,
+  "genres": [
+    "Crime"
+  ],
+  "keywords": [],
+  "status": "",
+  "overlay_summary": {
+    "resolution": "4K"
+  },
+  "user_state": {
+    "played": true,
+    "is_favorite": true,
+    "in_watchlist": false
+  },
+  "work_formats": [
+    {
+      "type": "ebook",
+      "content_id": "ebook:heat",
+      "library_id": "2"
+    }
+  ],
+  "tagline": "A Los Angeles crime saga",
+  "cast": [
+    {
+      "name": "Al Pacino",
+      "character": "Vincent Hanna",
+      "order": 0,
+      "person_id": "7"
+    }
+  ],
+  "crew": [],
+  "user_data": {
+    "watched_count": 1,
+    "unplayed_count": 0,
+    "in_progress_count": 0,
+    "played": true,
+    "last_file_id": "120"
+  },
+  "versions": [
+    {
+      "file_id": "120",
+      "file_path": "/media/movies/Heat.mkv",
+      "resolution": "2160p",
+      "codec_video": "",
+      "codec_audio": "",
+      "hdr": false,
+      "container": "",
+      "file_size": 0,
+      "duration": 0,
+      "bitrate": 0,
+      "added_at": "2026-01-02T03:04:05.678Z"
+    }
+  ],
+  "rating_sources": [
+    {
+      "source": "imdb",
+      "score": 83,
+      "votes": 673852
+    },
+    {
+      "source": "mdblist",
+      "score": 86
+    }
+  ],
+  "subtitles": []
+}

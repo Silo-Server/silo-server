@@ -3,10 +3,12 @@ import {
   buildPlaybackInfoSections,
   formatProtocol,
   formatStreamType,
+  lowerQualityOption,
   qualityOptionsFromPlanV3,
+  resolveActiveQualityOptionId,
 } from "./playback-info";
 import { fixturePlanV3 } from "./protocol-v3.fixtures";
-import type { PlayerFileVersion } from "./types";
+import type { PlayerFileVersion, QualityOption } from "./types";
 
 function makeVersion(overrides: Partial<PlayerFileVersion> = {}): PlayerFileVersion {
   return {
@@ -259,13 +261,24 @@ describe("qualityOptionsFromPlanV3", () => {
       fixturePlanV3({
         available_qualities: [
           { label: "original", height: 2160, bitrate_kbps: 22500, preserves_source: true },
-          { label: "1080p", height: 1080, bitrate_kbps: 6000, preserves_source: false },
+          {
+            label: "1080p-medium",
+            display_name: "1080p Medium",
+            height: 1080,
+            bitrate_kbps: 6000,
+            preserves_source: false,
+          },
           { label: "480p", height: 480, bitrate_kbps: 1500, preserves_source: false },
         ],
       }),
     );
 
-    expect(options.map((option) => option.id)).toEqual(["auto", "original", "1080p", "480p"]);
+    expect(options.map((option) => option.id)).toEqual([
+      "auto",
+      "original",
+      "1080p-medium",
+      "480p",
+    ]);
     expect(options[1]).toMatchObject({
       id: "original",
       label: "Original",
@@ -275,11 +288,48 @@ describe("qualityOptionsFromPlanV3", () => {
       isOriginal: true,
     });
     expect(options[2]).toMatchObject({
-      id: "1080p",
-      label: "1080p",
+      id: "1080p-medium",
+      label: "1080p Medium",
       sublabel: "6 Mbps",
       isOriginal: false,
     });
+  });
+
+  it("maps stored resolution preferences onto their equivalent visible rung", () => {
+    const options = qualityOptionsFromPlanV3(
+      fixturePlanV3({
+        available_qualities: [
+          { label: "original", height: 2160, bitrate_kbps: 22_500, preserves_source: true },
+          {
+            label: "1080p-medium",
+            display_name: "1080p Medium",
+            height: 1080,
+            bitrate_kbps: 6000,
+            preserves_source: false,
+          },
+        ],
+      }),
+    );
+
+    expect(resolveActiveQualityOptionId(options, "1080p")).toBe("1080p-medium");
+    expect(resolveActiveQualityOptionId(options, "FHD")).toBe("1080p-medium");
+  });
+
+  it("marks Original when a resolution cap already preserves the source", () => {
+    const options: QualityOption[] = [
+      {
+        id: "original",
+        label: "Original",
+        sublabel: "8 Mbps",
+        resolution: "720p",
+        bitrateKbps: 8000,
+        isOriginal: true,
+      },
+    ];
+
+    expect(resolveActiveQualityOptionId(options, "1080p")).toBe("original");
+    expect(resolveActiveQualityOptionId(options, "auto")).toBe("original");
+    expect(resolveActiveQualityOptionId(options, "480p")).toBe("original");
   });
 
   it("offers no auto entry when the plan publishes a single rung", () => {
@@ -301,5 +351,31 @@ describe("qualityOptionsFromPlanV3", () => {
         isOriginal: true,
       },
     ]);
+  });
+});
+
+describe("lowerQualityOption", () => {
+  const options = qualityOptionsFromPlanV3(
+    fixturePlanV3({
+      available_qualities: [
+        { label: "original", height: 2160, bitrate_kbps: 40_000, preserves_source: true },
+        { label: "2160p-medium", height: 2160, bitrate_kbps: 20_000, preserves_source: false },
+        { label: "1080p-medium", height: 1080, bitrate_kbps: 6000, preserves_source: false },
+        { label: "720p", height: 720, bitrate_kbps: 3000, preserves_source: false },
+      ],
+    }),
+  );
+
+  it("steps down one rung from an explicit choice", () => {
+    expect(lowerQualityOption(options, "1080p-medium")?.id).toBe("720p");
+    expect(lowerQualityOption(options, "1080p")?.id).toBe("720p");
+    expect(lowerQualityOption(options, "720p")).toBeNull();
+  });
+
+  it("steps down from what Auto or Original actually delivers", () => {
+    expect(lowerQualityOption(options, "auto", 6000)?.id).toBe("720p");
+    expect(lowerQualityOption(options, "original", 40_000)?.id).toBe("2160p-medium");
+    // A copy delivery reports no bitrate; the top transcode rung is lower.
+    expect(lowerQualityOption(options, "auto")?.id).toBe("2160p-medium");
   });
 });

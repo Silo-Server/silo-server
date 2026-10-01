@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   buildHWDeviceRows,
+  chapterThumbnailExecutionOptions,
+  describeDetection,
+  hasHardwareToneMapCapability,
+  hasUsableTranscodeNode,
   nodeInventoriesDiverge,
   parseHWDeviceList,
   toggleHWDevice,
@@ -145,6 +149,111 @@ describe("nodeInventoriesDiverge", () => {
           { node_url: "http://b", render_devices: [DETECTED[0]] },
         ],
       } as never),
+    ).toBe(true);
+  });
+});
+
+function node(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 1,
+    name: "node-1",
+    type: "transcode",
+    enabled: true,
+    healthy: true,
+    ...overrides,
+  } as never;
+}
+
+describe("hasUsableTranscodeNode", () => {
+  it("is false without any node list", () => {
+    expect(hasUsableTranscodeNode(undefined)).toBe(false);
+    expect(hasUsableTranscodeNode([])).toBe(false);
+  });
+
+  it("requires a transcode node that is both enabled and healthy", () => {
+    expect(hasUsableTranscodeNode([node({ enabled: false })])).toBe(false);
+    expect(hasUsableTranscodeNode([node({ healthy: false })])).toBe(false);
+    expect(hasUsableTranscodeNode([node({ type: "streaming" })])).toBe(false);
+    expect(hasUsableTranscodeNode([node({ healthy: false }), node({ id: 2 })])).toBe(true);
+  });
+});
+
+describe("chapterThumbnailExecutionOptions", () => {
+  const disabledValues = (current: string, available: boolean) =>
+    chapterThumbnailExecutionOptions(current, available)
+      .filter((option) => option.disabled)
+      .map((option) => option.value);
+
+  it("enables everything while a transcode node is available", () => {
+    expect(disabledValues("local", true)).toEqual([]);
+  });
+
+  it("disables the node-backed modes when no node can take the work", () => {
+    expect(disabledValues("local", false)).toEqual([
+      "prefer_transcode_nodes",
+      "transcode_nodes_only",
+    ]);
+  });
+
+  it("keeps a saved node-backed mode selectable so it can be changed", () => {
+    expect(disabledValues("transcode_nodes_only", false)).toEqual(["prefer_transcode_nodes"]);
+    expect(disabledValues("prefer_transcode_nodes", false)).toEqual(["transcode_nodes_only"]);
+  });
+
+  it("never disables local extraction", () => {
+    expect(disabledValues("transcode_nodes_only", false)).not.toContain("local");
+  });
+});
+
+describe("describeDetection", () => {
+  it("returns nothing before a probe has answered", () => {
+    expect(describeDetection(undefined)).toBeUndefined();
+  });
+
+  it("names the backend, first device, and node source", () => {
+    expect(
+      describeDetection({
+        resolved: "vaapi",
+        render_devices: ["/dev/dri/renderD128"],
+        intel_detected: true,
+        source: "transcode_node",
+      }),
+    ).toBe("Detected VA-API on /dev/dri/renderD128 (transcode node)");
+    expect(
+      describeDetection({
+        resolved: "none",
+        render_devices: [],
+        intel_detected: false,
+        source: "local",
+      }),
+    ).toBe("No supported graphics hardware found");
+  });
+});
+
+describe("hasHardwareToneMapCapability", () => {
+  it("is true only when a validated hardware tone mapper is listed", () => {
+    expect(hasHardwareToneMapCapability(undefined)).toBe(false);
+    expect(
+      hasHardwareToneMapCapability({
+        resolved: "nvenc",
+        render_devices: [],
+        intel_detected: false,
+        source: "local",
+        tone_map_capabilities: [
+          { mode: "software", backend: "software", filter: "zscale", source_kinds: ["hdr10"] },
+        ],
+      }),
+    ).toBe(false);
+    expect(
+      hasHardwareToneMapCapability({
+        resolved: "nvenc",
+        render_devices: [],
+        intel_detected: false,
+        source: "local",
+        tone_map_capabilities: [
+          { mode: "hardware", backend: "cuda", filter: "tonemap_cuda", source_kinds: ["hdr10"] },
+        ],
+      }),
     ).toBe(true);
   });
 });

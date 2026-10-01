@@ -46,30 +46,45 @@ func TestChapterCaptureTime(t *testing.T) {
 }
 
 func TestBuildFrameExtractArgs(t *testing.T) {
-	t.Run("qsv uses hardware flags when render device exists", func(t *testing.T) {
-		args, err := buildFrameExtractArgs("/media/movie.mkv", 42.5, "qsv", "/dev/dri/renderD128", false)
+	firstAttemptArgs := func(t *testing.T, hwAccel string) []string {
+		t.Helper()
+		var args []string
+		_, _, err := ExtractFrame(context.Background(), FrameExtractOptions{
+			InputPath:   "/media/movie.mkv",
+			SeekSeconds: 42.5,
+			HWAccel:     hwAccel,
+			HWDevice:    "/dev/dri/renderD128",
+			RunFunc: func(_ context.Context, _ string, got []string) ([]byte, error) {
+				if args == nil {
+					args = append([]string(nil), got...)
+				}
+				return []byte("frame"), nil
+			},
+		})
 		if err != nil {
-			t.Fatalf("buildFrameExtractArgs() error = %v", err)
+			t.Fatalf("ExtractFrame() error = %v", err)
 		}
+		return args
+	}
+
+	t.Run("qsv uses hardware flags when render device exists", func(t *testing.T) {
+		args := firstAttemptArgs(t, "qsv")
 		if !slices.Contains(args, "-init_hw_device") || !slices.Contains(args, "qsv=qs@va") {
 			t.Fatalf("qsv args missing hardware setup: %#v", args)
 		}
 	})
 
 	t.Run("vaapi uses hardware flags when render device exists", func(t *testing.T) {
-		args, err := buildFrameExtractArgs("/media/movie.mkv", 42.5, "vaapi", "/dev/dri/renderD128", false)
-		if err != nil {
-			t.Fatalf("buildFrameExtractArgs() error = %v", err)
-		}
+		args := firstAttemptArgs(t, "vaapi")
 		if !slices.Contains(args, "-hwaccel") || !slices.Contains(args, "vaapi") {
 			t.Fatalf("vaapi args missing hardware setup: %#v", args)
 		}
 	})
 
 	t.Run("unsupported hw accel does not masquerade as hardware extraction", func(t *testing.T) {
-		_, err := buildFrameExtractArgs("/media/movie.mkv", 42.5, "nvenc", "/dev/dri/renderD128", false)
-		if err == nil || !strings.Contains(err.Error(), "does not support") {
-			t.Fatalf("buildFrameExtractArgs() error = %v, want unsupported accelerator error", err)
+		args := firstAttemptArgs(t, "nvenc")
+		if slices.Contains(args, "-hwaccel") || slices.Contains(args, "-init_hw_device") {
+			t.Fatalf("nvenc args use hardware setup: %#v", args)
 		}
 	})
 }
@@ -221,7 +236,7 @@ type testProbeEnsurer struct {
 	err  error
 }
 
-func (e testProbeEnsurer) Ensure(context.Context, *models.MediaFile) (*models.MediaFile, error) {
+func (e testProbeEnsurer) EnsureProbeOnly(context.Context, *models.MediaFile) (*models.MediaFile, error) {
 	if e.err != nil {
 		return nil, e.err
 	}
@@ -320,7 +335,7 @@ func TestProcessPriorityRequestSelectsNearestChaptersAndRequeuesRemainder(t *tes
 		},
 		uploadChapterThumbnailFunc: func(_ context.Context, _ int, chapterIndex int, _ []byte) (string, string, error) {
 			uploaded = append(uploaded, chapterIndex)
-			return "chapter-images/42/original.webp", "thumbhash", nil
+			return "chapter-images/42/2/w300.webp", "thumbhash", nil
 		},
 	}
 
@@ -872,5 +887,66 @@ func TestExtractFrameResolvesMultiDeviceListToOneDevice(t *testing.T) {
 	}
 	if !strings.Contains(joined, "/dev/dri/renderD888") {
 		t.Fatalf("ffmpeg args missing a resolved device:\n%s", joined)
+	}
+}
+
+// failingSettingsReader stands in for a settings repo that cannot answer, so
+// the fallback path can be told apart from a configured-empty value.
+type failingSettingsReader struct{}
+
+func (failingSettingsReader) Get(_ context.Context, _ string) (string, error) {
+	return "", errors.New("settings unavailable")
+}
+
+// TestResolveHWConfigFollowsLiveSettings is the regression guard for the
+// restart-required conversion: hardware acceleration is read from the settings
+// repo per extraction, so an admin changing playback.hw_accel or
+// playback.hw_device does not have to restart the server for chapter
+// thumbnails to follow.
+func TestResolveHWConfigFollowsLiveSettings(t *testing.T) {
+	values := map[string]string{
+		"playback.hw_accel":  "vaapi",
+		"playback.hw_device": "/dev/dri/renderD128",
+	}
+	service := &Service{
+		// Deliberately different from the settings rows: the boot values must
+		// not win over the live configuration.
+		hwAccel:  "none",
+		hwDevice: "/dev/dri/renderD200",
+		settings: testSettingsReader{values: values},
+	}
+
+	accel, device := service.resolveHWConfig(context.Background())
+	if accel != "vaapi" || device != "/dev/dri/renderD128" {
+		t.Fatalf("resolveHWConfig() = (%q, %q), want (vaapi, /dev/dri/renderD128)", accel, device)
+	}
+
+	values["playback.hw_accel"] = "qsv"
+	values["playback.hw_device"] = "/dev/dri/renderD129"
+
+	accel, device = service.resolveHWConfig(context.Background())
+	if accel != "qsv" || device != "/dev/dri/renderD129" {
+		t.Fatalf("resolveHWConfig() after settings change = (%q, %q), want (qsv, /dev/dri/renderD129)", accel, device)
+	}
+
+	// An emptied device row means "auto-detect", not "keep the previous one".
+	values["playback.hw_device"] = ""
+	if _, device = service.resolveHWConfig(context.Background()); device != "" {
+		t.Fatalf("resolveHWConfig() device after clearing = %q, want empty", device)
+	}
+}
+
+// TestResolveHWConfigFallsBackWhenSettingsUnavailable keeps a database blip
+// from silently switching extraction off the configured accelerator.
+func TestResolveHWConfigFallsBackWhenSettingsUnavailable(t *testing.T) {
+	service := &Service{
+		hwAccel:  "vaapi",
+		hwDevice: "/dev/dri/renderD128",
+		settings: failingSettingsReader{},
+	}
+
+	accel, device := service.resolveHWConfig(context.Background())
+	if accel != "vaapi" || device != "/dev/dri/renderD128" {
+		t.Fatalf("resolveHWConfig() = (%q, %q), want the boot values", accel, device)
 	}
 }

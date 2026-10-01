@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { QueryDefinition } from "@/api/types";
 
 import {
   buildCatalogApiSearchParams,
@@ -10,7 +11,9 @@ import {
   buildPersonalCatalogHref,
   catalogSourceAllowsOverlay,
   parseCatalogSearchParams,
+  readCatalogRequestPage,
   sameCatalogDestination,
+  withCatalogRequestPage,
 } from "./catalogSearchParams";
 
 function params(search: string) {
@@ -91,7 +94,7 @@ describe("parseCatalogSearchParams", () => {
     expect(state.query_definition.sort).toEqual({ field: "title", order: "asc" });
   });
 
-  it("defaults the watchlist to source order until a sort is chosen", () => {
+  it("defaults personal saved lists to source order until a sort is chosen", () => {
     expect(parseCatalogSearchParams(params("source=watchlist")).uses_source_order).toBe(true);
     expect(parseCatalogSearchParams(params("source=watchlist&sort=title")).uses_source_order).toBe(
       false,
@@ -100,9 +103,11 @@ describe("parseCatalogSearchParams", () => {
       parseCatalogSearchParams(params("source=watchlist&sort=added_at&order=desc"))
         .uses_source_order,
     ).toBe(false);
-    // Other personal sources keep their existing behavior.
-    expect(parseCatalogSearchParams(params("source=favorites")).uses_source_order).toBe(false);
-    expect(parseCatalogSearchParams(params("source=history")).uses_source_order).toBe(false);
+    expect(parseCatalogSearchParams(params("source=favorites")).uses_source_order).toBe(true);
+    expect(parseCatalogSearchParams(params("source=history")).uses_source_order).toBe(true);
+    expect(parseCatalogSearchParams(params("source=history&sort=title")).uses_source_order).toBe(
+      false,
+    );
   });
 
   it("normalizes legacy sort aliases in catalog URLs", () => {
@@ -226,31 +231,40 @@ describe("buildCatalogHref", () => {
     ).toBe("source=query&library_id=2&sort=added_at&order=desc");
   });
 
-  it("omits the sort for watchlist source order but keeps an explicit Date Added", () => {
-    const sourceOrdered = buildCatalogApiSearchParams({
-      source: "watchlist",
-      uses_source_order: true,
-      query_definition: {
-        library_ids: [],
-        match: "all",
-        groups: [],
-        sort: { field: "added_at", order: "desc" },
-      },
-    });
-    expect(sourceOrdered.toString()).toBe("source=watchlist");
+  it.each(["watchlist", "favorites"] as const)(
+    "omits the sort for %s source order but keeps an explicit Date Added",
+    (source) => {
+      const sourceOrdered = buildCatalogApiSearchParams({
+        source,
+        uses_source_order: true,
+        query_definition: {
+          library_ids: [],
+          match: "all",
+          groups: [],
+          sort: { field: "added_at", order: "desc" },
+        },
+      });
+      expect(sourceOrdered.toString()).toBe(`source=${source}`);
 
-    const explicitAddedAt = buildCatalogApiSearchParams({
-      source: "watchlist",
-      uses_source_order: false,
-      query_definition: {
-        library_ids: [],
-        match: "all",
-        groups: [],
-        sort: { field: "added_at", order: "desc" },
-      },
-    });
-    expect(explicitAddedAt.toString()).toBe("source=watchlist&sort=added_at&order=desc");
-  });
+      const explicitAddedAt = buildCatalogApiSearchParams({
+        source,
+        uses_source_order: false,
+        query_definition: {
+          library_ids: [],
+          match: "all",
+          groups: [],
+          sort: { field: "added_at", order: "desc" },
+        },
+      });
+      expect(explicitAddedAt.toString()).toBe(`source=${source}&sort=added_at&order=desc`);
+
+      // The explicit pick must survive a URL round-trip, or the saved browse
+      // preference is written back as source order instead.
+      const reparsed = parseCatalogSearchParams(new URLSearchParams(explicitAddedAt.toString()));
+      expect(reparsed.uses_source_order).toBe(false);
+      expect(reparsed.query_definition.sort).toEqual({ field: "added_at", order: "desc" });
+    },
+  );
 
   it("does not leak a server-derived collection sort into an unrelated filter update", () => {
     const built = buildCatalogFilterSearchParams({
@@ -320,5 +334,71 @@ describe("buildCatalogHref", () => {
 
   it("builds canonical person catalog URLs from raw route ids", () => {
     expect(buildPersonCatalogHref("117290402172239876")).toBe("/person/117290402172239876");
+    // Person IDs are opaque strings in the contract.
+    expect(buildPersonCatalogHref("a/b?c")).toBe("/person/a%2Fb%3Fc");
+  });
+});
+
+describe("query-source default sort", () => {
+  const addedAt: QueryDefinition = {
+    library_ids: [],
+    match: "all",
+    groups: [],
+    sort: { field: "added_at", order: "desc" },
+  };
+
+  it("sends the smart collection preview ordering even without a library filter", () => {
+    const built = buildCatalogApiSearchParams({
+      source: "query",
+      query_definition: addedAt,
+      explicit_sort: true,
+    });
+    expect(built.get("sort")).toBe("added_at");
+    expect(built.get("order")).toBe("desc");
+  });
+
+  it("leaves text search ordering to the server when no sort was chosen", () => {
+    const state = parseCatalogSearchParams(params("source=query&q=heat"));
+    expect(state.explicit_sort).toBe(false);
+    expect(buildCatalogApiSearchParams(state).toString()).toBe("source=query&q=heat");
+    expect(
+      buildCatalogApiSearchParams({ source: "query", q: "heat", query_definition: addedAt }).has(
+        "sort",
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps a sort read from the URL", () => {
+    const state = parseCatalogSearchParams(params("source=query&q=heat&sort=added_at&order=desc"));
+    expect(state.explicit_sort).toBe(true);
+    expect(buildCatalogApiSearchParams(state).toString()).toBe(
+      "source=query&q=heat&sort=added_at&order=desc",
+    );
+  });
+});
+
+describe("Request to add page in the search URL", () => {
+  it("reads the page, falling back to 1 for a missing or invalid value", () => {
+    expect(readCatalogRequestPage(params("source=query&q=dune&request_page=3"))).toBe(3);
+    expect(readCatalogRequestPage(params("source=query&q=dune"))).toBe(1);
+    expect(readCatalogRequestPage(params("source=query&q=dune&request_page=0"))).toBe(1);
+    expect(readCatalogRequestPage(params("source=query&q=dune&request_page=two"))).toBe(1);
+  });
+
+  it("writes later pages and leaves page 1 out of the URL", () => {
+    const search = params("source=query&q=dune&type=video");
+    expect(withCatalogRequestPage(search, 2).toString()).toBe(
+      "source=query&q=dune&type=video&request_page=2",
+    );
+    expect(withCatalogRequestPage(params("source=query&q=dune&request_page=4"), 1).toString()).toBe(
+      "source=query&q=dune",
+    );
+    expect(search.toString()).toBe("source=query&q=dune&type=video");
+  });
+
+  it("starts over when the query or the filters change", () => {
+    const state = parseCatalogSearchParams(params("source=query&q=dune&type=all&request_page=3"));
+    expect(buildCatalogQueryUpdateHref(state, "arrival")).not.toContain("request_page");
+    expect(buildCatalogFilterSearchParams(state).has("request_page")).toBe(false);
   });
 });

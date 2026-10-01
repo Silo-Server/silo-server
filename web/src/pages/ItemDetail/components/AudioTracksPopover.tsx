@@ -1,14 +1,14 @@
 import { Check, ChevronDown, Volume2 } from "lucide-react";
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 
 import type { FileVersion } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { getLanguageName } from "@/player/utils/languageNames";
 import { formatChannels, mapAudioLabel } from "@/lib/mediaFormat";
 import { audioTitle, compactAudioMeta } from "./versionFormatUtils";
 import { formatAudioTrackSummary, resolveAudioTrackSelection } from "./prePlaySelection";
+import DetailPopover from "./DetailPopover";
 
 interface AudioTracksPopoverProps {
   version: FileVersion | null;
@@ -69,7 +69,7 @@ function AudioOptionRow({
   );
 }
 
-export default function AudioTracksPopover({
+function AudioTracksPopover({
   version,
   selectionMode = "auto",
   explicitTrackIndex = null,
@@ -89,8 +89,9 @@ export default function AudioTracksPopover({
   const autoSummary = formatAudioTrackSummary(autoTrack);
 
   return (
-    <Popover>
-      <PopoverTrigger asChild>
+    <DetailPopover
+      contentClassName="w-80 p-1.5"
+      trigger={
         <Button
           variant="glass"
           className="h-8 max-w-full min-w-0 shrink gap-1.5 rounded-full px-3 text-xs font-medium"
@@ -106,66 +107,67 @@ export default function AudioTracksPopover({
           </span>
           <ChevronDown className="text-muted-foreground size-3" />
         </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-80 p-1.5">
-        <div className="space-y-0.5">
-          {isInteractive && (
-            <AudioOptionRow
-              active={selectionMode === "auto"}
-              title="Auto"
-              description={autoSummary}
-              onSelect={onResetSelection}
-            />
-          )}
-          {tracks.map((track, index) => {
-            const codec = track.codec ? mapAudioLabel(track.codec) : "";
-            const channels = formatChannels(track.channels);
-            const language = getLanguageName(track.language ?? "");
-            const fallbackTitle = audioTitle(track);
-            const title = language || fallbackTitle;
-            const embeddedTitle = track.title?.trim() || track.embedded_title?.trim() || "";
-            const meta = [
-              embeddedTitle && embeddedTitle !== title ? embeddedTitle : "",
-              compactAudioMeta(track),
-            ]
-              .filter(Boolean)
-              .join(" \u00B7 ");
+      }
+    >
+      <div className="space-y-0.5">
+        {isInteractive && (
+          <AudioOptionRow
+            active={selectionMode === "auto"}
+            title="Auto"
+            description={autoSummary}
+            onSelect={onResetSelection}
+          />
+        )}
+        {tracks.map((track, index) => {
+          const codec = track.codec ? mapAudioLabel(track.codec) : "";
+          const channels = formatChannels(track.channels);
+          const language = getLanguageName(track.language ?? "");
+          const fallbackTitle = audioTitle(track);
+          const title = language || fallbackTitle;
+          const embeddedTitle = track.title?.trim() || track.embedded_title?.trim() || "";
+          const meta = [
+            embeddedTitle && embeddedTitle !== title ? embeddedTitle : "",
+            compactAudioMeta(track),
+          ]
+            .filter(Boolean)
+            .join(" \u00B7 ");
 
-            return (
-              <AudioOptionRow
-                key={`${track.language}-${track.codec}-${index}`}
-                active={
-                  isInteractive
-                    ? selectionMode === "explicit" && explicitTrackIndex === index
-                    : Boolean(track.default)
-                }
-                title={title}
-                description={meta}
-                onSelect={onSelectTrack ? () => onSelectTrack(index) : undefined}
-                badges={
-                  <>
-                    {codec && (
-                      <Badge variant="secondary" className="px-1.5 py-0 text-[10px] uppercase">
-                        {codec}
-                      </Badge>
-                    )}
-                    {channels && (
-                      <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
-                        {channels}
-                      </Badge>
-                    )}
-                    {track.default && (
-                      <Badge variant="outline" className="px-1.5 py-0 text-[10px] uppercase">
-                        Default
-                      </Badge>
-                    )}
-                  </>
-                }
-              />
-            );
-          })}
-        </div>
-      </PopoverContent>
-    </Popover>
+          return (
+            <AudioOptionRow
+              key={`${track.language}-${track.codec}-${index}`}
+              active={
+                isInteractive
+                  ? selectionMode === "explicit" && explicitTrackIndex === index
+                  : Boolean(track.default)
+              }
+              title={title}
+              description={meta}
+              onSelect={onSelectTrack ? () => onSelectTrack(index) : undefined}
+              badges={
+                <>
+                  {codec && (
+                    <Badge variant="secondary" className="px-1.5 py-0 text-[10px] uppercase">
+                      {codec}
+                    </Badge>
+                  )}
+                  {channels && (
+                    <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
+                      {channels}
+                    </Badge>
+                  )}
+                  {track.default && (
+                    <Badge variant="outline" className="px-1.5 py-0 text-[10px] uppercase">
+                      Default
+                    </Badge>
+                  )}
+                </>
+              }
+            />
+          );
+        })}
+      </div>
+    </DetailPopover>
   );
 }
+
+export default memo(AudioTracksPopover);

@@ -30,6 +30,9 @@ const episodeCatalogSelectBody = `(
 		COALESCE(si.year, EXTRACT(YEAR FROM e.air_date)::integer, 0) AS year,
 		COALESCE(si.genres, '{}'::text[]) AS genres,
 		COALESCE(si.content_rating, '') AS content_rating,
+		si.content_rating_age,
+		si.advisory_age,
+		COALESCE(si.advisory_source, '') AS advisory_source,
 		COALESCE(NULLIF(e.runtime, 0), COALESCE(si.runtime, 0)) AS runtime,
 		COALESCE(e.overview, '') AS overview,
 		''::text AS tagline,
@@ -79,20 +82,14 @@ const episodeCatalogSelectBody = `(
 	  AND si.type = 'series'
 ) mi`
 
-// episodeCatalogSeriesParentGuard mirrors the load-bearing `si.type = 'series'`
-// predicate in episodeCatalogSelectBody, but expressed against an entry-scan row
-// (ece.episode_id) instead of the hydration join. episode_catalog_entries rows
-// can reference episodes parented to non-series media_items (e.g. podcast
-// episodes), which hydration silently drops. Applying this same constraint to
-// the page and count scans keeps them aligned with hydration so pages never
-// under-fill and TotalRecordCount never counts rows that can't hydrate. It binds
-// no parameters, so it can be appended to any whereParts list without touching
-// the argument index.
+// episodeCatalogSeriesParentGuard keeps entry pages and totals restricted to
+// TV episodes, matching the hydration query. Membership and episode triggers
+// maintain ece.series_id in the same transaction, including reparenting, so
+// checking the parent directly avoids another episode lookup for every entry.
 const episodeCatalogSeriesParentGuard = `EXISTS (
 		SELECT 1
-		FROM episodes e
-		JOIN media_items si ON si.content_id = e.series_id
-		WHERE e.content_id = ece.episode_id
+		FROM media_items si
+		WHERE si.content_id = ece.series_id
 		  AND si.type = 'series'
 	)`
 
@@ -124,39 +121,42 @@ func episodeCatalogBaseRelationForLibraries(
 		return episodeCatalogBaseRelation, nil, false
 	}
 
-	libraryConditions := []string{
-		"el.episode_id = e.content_id",
-	}
+	var libraryPredicates []string
 	args := make([]any, 0, len(allowedLibraryIDs)+len(disabledLibraryIDs))
 
 	if len(allowedLibraryIDs) > 0 {
-		libraryConditions = append(
-			libraryConditions,
-			fmt.Sprintf("el.media_folder_id = ANY($%d)", argIdx),
-		)
+		libraryPredicates = append(libraryPredicates, fmt.Sprintf(`EXISTS (
+		SELECT 1
+		FROM episode_libraries el_scope_in
+		WHERE el_scope_in.episode_id = e.content_id
+		  AND el_scope_in.media_folder_id = ANY($%d)
+	)`, argIdx))
 		args = append(args, allowedLibraryIDs)
 		argIdx++
+	} else if len(disabledLibraryIDs) > 0 {
+		libraryPredicates = append(libraryPredicates, episodeCatalogActiveLibraryExists)
 	}
 
 	if len(disabledLibraryIDs) > 0 {
-		libraryConditions = append(
-			libraryConditions,
-			fmt.Sprintf("NOT (el.media_folder_id = ANY($%d))", argIdx),
-		)
+		libraryPredicates = append(libraryPredicates, fmt.Sprintf(`NOT EXISTS (
+		SELECT 1
+		FROM episode_libraries el_scope_out
+		WHERE el_scope_out.episode_id = e.content_id
+		  AND el_scope_out.media_folder_id = ANY($%d)
+	)`, argIdx))
 		args = append(args, disabledLibraryIDs)
 		argIdx++
 	}
 
+	parentAccess := AccessFilter{DisabledLibraryIDs: disabledLibraryIDs}
+	if len(allowedLibraryIDs) > 0 {
+		parentAccess.AllowedLibraryIDs = allowedLibraryIDs
+	}
+	appendLibraryAccessConditions("e.series_id", parentAccess, &libraryPredicates, &args, &argIdx)
+
 	relation := fmt.Sprintf(
 		episodeCatalogSelectBody,
-		fmt.Sprintf(
-			`EXISTS (
-		SELECT 1
-		FROM episode_libraries el
-		WHERE %s
-	)`,
-			strings.Join(libraryConditions, "\n\t\t  AND "),
-		),
+		strings.Join(libraryPredicates, "\n\tAND "),
 	)
 	return relation, args, true
 }

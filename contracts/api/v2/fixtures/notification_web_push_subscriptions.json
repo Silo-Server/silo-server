@@ -1,0 +1,23 @@
+{
+  "items": [
+    {
+      "id": "01",
+      "endpoint": "https://push.example.test/1",
+      "enabled": false,
+      "created_at": "2026-01-02T03:04:05.678Z",
+      "last_success_at": null,
+      "last_failure_at": null
+    },
+    {
+      "id": "02",
+      "endpoint": "https://push.example.test/2",
+      "enabled": false,
+      "created_at": "2026-01-02T03:04:05.678Z",
+      "last_success_at": null,
+      "last_failure_at": null
+    }
+  ],
+  "page": {
+    "has_more": false
+  }
+}

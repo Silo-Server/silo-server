@@ -1,42 +1,58 @@
+import { fetchAdminItemOrderSnapshot } from "@/api/adminCollections";
+import { useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/api/client";
+import {
+  isCapturedProfileAuthorityActive,
+  isProfileRequestContextCurrent,
+  type ProfileRequestContextSnapshot,
+} from "@/api/client";
 import type {
   Collection,
   CollectionCapabilitiesResponse,
   CollectionGroup,
-  CollectionItem,
   CollectionSortConfig,
   CollectionsListResponse,
   CreateCollectionRequest,
-  ServerCollectionsResponse,
   UpdateCollectionRequest,
 } from "@/api/types";
+import { v2, V2ProblemError } from "@/api/v2/request";
+import {
+  fetchCollectionEditSnapshot,
+  fetchItemOrderSnapshot,
+  requiredETag,
+  collectionsFromV2,
+  collectionCreateToV2,
+  collectionUpdateToV2,
+  saveCollectionPoster,
+  serverCollectionsFromV2,
+} from "@/api/personalCollections";
 import { catalogKeys, collectionKeys } from "./keys";
 import { toast } from "sonner";
-import { invalidateUserCollectionQueries } from "./collectionSurfaceRefresh";
+import {
+  invalidateUserCollectionQueries,
+  invalidateAdminCollectionQueries,
+} from "./collectionSurfaceRefresh";
 
 // Single fetcher for /collections — both useCollections and useCollectionGroups
 // share the cache so the page makes one network round-trip.
 function fetchCollectionsList(): Promise<CollectionsListResponse> {
-  return api<CollectionsListResponse>("/collections").then((d) => ({
-    collections: d.collections ?? [],
-    groups: d.groups ?? [],
-  }));
+  return v2("GET /api/v2/collections").then(collectionsFromV2);
 }
 
-function buildUserCollectionPayload(
-  data: Record<string, unknown>,
-  poster?: File | null,
-): FormData | string {
-  if (!poster) {
-    return JSON.stringify(data);
+export function useCollectionEditSnapshot(id?: string) {
+  return useQuery({
+    queryKey: ["collections", "edit", id],
+    queryFn: () => fetchCollectionEditSnapshot(id!),
+    enabled: !!id,
+  });
+}
+
+function collectionMutationMessage(error: unknown, fallback: string) {
+  if (error instanceof V2ProblemError && error.status === 412) {
+    return "This collection changed while you were editing. Reload it and review your changes before saving again.";
   }
-  const formData = new FormData();
-  formData.append("data", JSON.stringify(data));
-  formData.append("poster", poster);
-  return formData;
+  return error instanceof Error ? error.message : fallback;
 }
-
 export function useCollections() {
   return useQuery({
     queryKey: collectionKeys.list(),
@@ -56,7 +72,12 @@ export function useCollectionGroups() {
 export function useCollectionCapabilities() {
   return useQuery({
     queryKey: ["collections", "capabilities"],
-    queryFn: () => api<CollectionCapabilitiesResponse>("/collections/capabilities"),
+    queryFn: () =>
+      v2("GET /api/v2/collections/capabilities").then((value) => ({
+        ...value,
+        display_filter_presets:
+          value.display_filter_presets as CollectionCapabilitiesResponse["display_filter_presets"],
+      })),
     staleTime: Number.POSITIVE_INFINITY,
   });
 }
@@ -68,35 +89,65 @@ export function useCollectionCapabilities() {
 export function useServerCollections() {
   return useQuery({
     queryKey: collectionKeys.server(),
-    queryFn: () =>
-      api<ServerCollectionsResponse>("/collections/server").then((d) => d.libraries ?? []),
+    queryFn: () => v2("GET /api/v2/collections/server").then(serverCollectionsFromV2),
   });
 }
 
-export function useCollectionItems(collectionId: string) {
+export function useCollectionItems(
+  collectionId: string,
+  cursor = "",
+  source: "user" | "library" = "user",
+) {
   return useQuery({
-    queryKey: collectionKeys.items(collectionId),
+    queryKey:
+      source === "user"
+        ? [...collectionKeys.items(collectionId), "page", cursor]
+        : ["libraryCollections", "items", collectionId, "page", cursor],
     queryFn: () =>
-      api<{ items: CollectionItem[] }>(`/collections/${collectionId}/items`).then(
-        (d) => d.items ?? [],
+      v2(
+        source === "user"
+          ? "GET /api/v2/collections/{id}/items"
+          : "GET /api/v2/admin/collections/{id}/items",
+        {
+          path: { id: collectionId },
+          query: { limit: 200, ...(cursor ? { cursor } : {}) },
+        },
       ),
+    // Keep only the visible edit window; old pages are inexpensive to refetch.
+    gcTime: 0,
+  });
+}
+
+export function useCollectionItemOrderSnapshot(
+  id: string,
+  enabled = true,
+  source: "user" | "library" = "user",
+) {
+  return useQuery({
+    queryKey: [source === "user" ? "collections" : "libraryCollections", "items", id, "order"],
+    queryFn: () =>
+      source === "user" ? fetchItemOrderSnapshot(id) : fetchAdminItemOrderSnapshot(id),
+    enabled,
   });
 }
 
 export function useCreateCollection() {
   const queryClient = useQueryClient();
   return useMutation({
+    retry: false,
     mutationFn: ({ body, poster }: { body: CreateCollectionRequest; poster?: File | null }) =>
-      api("/collections", {
-        method: "POST",
-        body: buildUserCollectionPayload(body as unknown as Record<string, unknown>, poster),
-      }),
-    onSuccess: () => {
+      v2("POST /api/v2/collections", { body: collectionCreateToV2(body) }).then((collection) =>
+        saveCollectionPoster(collection, poster),
+      ),
+    onSuccess: ({ posterError }) => {
       toast.success("Collection created");
+      if (posterError) toast.error(`Collection saved, but poster upload failed: ${posterError}`);
       return invalidateUserCollectionQueries(queryClient);
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to save");
+      toast.error(collectionMutationMessage(err, "Failed to save"));
+      if (err instanceof V2ProblemError && err.status === 412)
+        void invalidateUserCollectionQueries(queryClient);
     },
   });
 }
@@ -104,25 +155,32 @@ export function useCreateCollection() {
 export function useUpdateCollection() {
   const queryClient = useQueryClient();
   return useMutation({
+    retry: false,
     mutationFn: ({
       id,
       body,
       poster,
+      etag,
     }: {
       id: string;
+      etag: string;
       body: UpdateCollectionRequest;
       poster?: File | null;
     }) =>
-      api(`/collections/${id}`, {
-        method: "PUT",
-        body: buildUserCollectionPayload(body as unknown as Record<string, unknown>, poster),
-      }),
-    onSuccess: (_data, { id }) => {
+      v2("PATCH /api/v2/collections/{id}", {
+        path: { id },
+        headers: { "If-Match": requiredETag(etag) },
+        body: collectionUpdateToV2(body),
+      }).then((collection) => saveCollectionPoster(collection, poster, body.poster_source_url)),
+    onSuccess: ({ posterError }, { id }) => {
       toast.success("Collection updated");
+      if (posterError) toast.error(`Collection saved, but poster upload failed: ${posterError}`);
       return invalidateUserCollectionQueries(queryClient, id);
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to save");
+      toast.error(collectionMutationMessage(err, "Failed to save"));
+      if (err instanceof V2ProblemError && err.status === 412)
+        void invalidateUserCollectionQueries(queryClient);
     },
   });
 }
@@ -130,13 +188,20 @@ export function useUpdateCollection() {
 export function useDeleteCollection() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api(`/collections/${id}`, { method: "DELETE" }),
-    onSuccess: (_data, id) => {
+    retry: false,
+    mutationFn: ({ id, etag }: { id: string; etag: string }) =>
+      v2("DELETE /api/v2/collections/{id}", {
+        path: { id },
+        headers: { "If-Match": requiredETag(etag) },
+      }),
+    onSuccess: (_data, { id }) => {
       toast.success("Collection deleted");
       return invalidateUserCollectionQueries(queryClient, id);
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to delete");
+      toast.error(collectionMutationMessage(err, "Failed to delete"));
+      if (err instanceof V2ProblemError && err.status === 412)
+        void invalidateUserCollectionQueries(queryClient);
     },
   });
 }
@@ -149,6 +214,7 @@ export function useDeleteCollection() {
 export function useAddItemToCollection() {
   const queryClient = useQueryClient();
   return useMutation({
+    retry: false,
     mutationFn: ({
       collectionId,
       mediaItemId,
@@ -160,13 +226,14 @@ export function useAddItemToCollection() {
       source: "user" | "library";
       position?: number;
     }) => {
-      const path =
-        source === "user"
-          ? `/collections/${collectionId}/items/${mediaItemId}`
-          : `/admin/collections/${collectionId}/items/${mediaItemId}`;
-      return api<void>(path, {
-        method: "PUT",
-        body: JSON.stringify({ position: position ?? 0 }),
+      if (source === "user")
+        return v2("PUT /api/v2/collections/{id}/items/{item_id}", {
+          path: { id: collectionId, item_id: mediaItemId },
+          body: { position: position ?? 0 },
+        });
+      return v2("PUT /api/v2/admin/collections/{id}/items/{item_id}", {
+        path: { id: collectionId, item_id: mediaItemId },
+        body: { position: position ?? 0 },
       });
     },
     onSuccess: (_data, vars) => {
@@ -174,10 +241,7 @@ export function useAddItemToCollection() {
       if (vars.source === "user") {
         return invalidateUserCollectionQueries(queryClient, vars.collectionId);
       }
-      // Library collection: invalidate its items query.
-      queryClient.invalidateQueries({
-        queryKey: ["libraryCollections", "items", vars.collectionId],
-      });
+      return invalidateAdminCollectionQueries(queryClient);
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to add to collection");
@@ -185,12 +249,23 @@ export function useAddItemToCollection() {
   });
 }
 
-export function useRemoveCollectionItem(collectionId: string) {
+export function useRemoveCollectionItem(collectionId: string, source: "user" | "library" = "user") {
   const queryClient = useQueryClient();
   return useMutation({
+    retry: false,
     mutationFn: (mediaItemId: string) =>
-      api<void>(`/collections/${collectionId}/items/${mediaItemId}`, { method: "DELETE" }),
-    onSuccess: () => invalidateUserCollectionQueries(queryClient, collectionId),
+      v2(
+        source === "user"
+          ? "DELETE /api/v2/collections/{id}/items/{item_id}"
+          : "DELETE /api/v2/admin/collections/{id}/items/{item_id}",
+        {
+          path: { id: collectionId, item_id: mediaItemId },
+        },
+      ),
+    onSuccess: () =>
+      source === "user"
+        ? invalidateUserCollectionQueries(queryClient, collectionId)
+        : invalidateAdminCollectionQueries(queryClient),
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to remove item");
     },
@@ -209,19 +284,21 @@ function reorderByIds<T>(items: T[], getId: (item: T) => string, orderedIds: str
 
 export interface ReorderCollectionsArgs {
   orderedIds: string[];
+  etag: string;
   groupId?: string | null;
 }
 
 export function useReorderCollections() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ orderedIds, groupId }: ReorderCollectionsArgs) =>
-      api<void>("/collections/order", {
-        method: "PUT",
-        body: JSON.stringify({
+    retry: false,
+    mutationFn: ({ orderedIds, groupId, etag }: ReorderCollectionsArgs) =>
+      v2("PUT /api/v2/collections/order", {
+        headers: { "If-Match": requiredETag(etag) },
+        body: {
           ordered_ids: orderedIds,
           ...(groupId !== undefined ? { group_id: groupId } : {}),
-        }),
+        },
       }),
     onMutate: async ({ orderedIds, groupId }) => {
       await queryClient.cancelQueries({ queryKey: collectionKeys.list() });
@@ -254,7 +331,9 @@ export function useReorderCollections() {
     },
     onError: (err, _vars, ctx) => {
       if (ctx?.snapshot) queryClient.setQueryData(collectionKeys.list(), ctx.snapshot);
-      toast.error(err instanceof Error ? err.message : "Failed to reorder");
+      toast.error(collectionMutationMessage(err, "Failed to reorder"));
+      if (err instanceof V2ProblemError && err.status === 412)
+        void invalidateUserCollectionQueries(queryClient);
     },
     onSettled: () => invalidateUserCollectionQueries(queryClient),
   });
@@ -263,10 +342,10 @@ export function useReorderCollections() {
 export function useCreateCollectionGroup() {
   const queryClient = useQueryClient();
   return useMutation({
+    retry: false,
     mutationFn: ({ name, slug }: { name: string; slug?: string }) =>
-      api<CollectionGroup>("/collections/groups", {
-        method: "POST",
-        body: JSON.stringify({ name, slug }),
+      v2("POST /api/v2/collections/groups", {
+        body: { name, slug },
       }),
     onSuccess: () => invalidateUserCollectionQueries(queryClient),
     onError: (err) => {
@@ -278,14 +357,18 @@ export function useCreateCollectionGroup() {
 export function useUpdateCollectionGroup() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, name }: { id: string; name: string }) =>
-      api<CollectionGroup>(`/collections/groups/${encodeURIComponent(id)}`, {
-        method: "PUT",
-        body: JSON.stringify({ name }),
+    retry: false,
+    mutationFn: ({ id, name, etag }: { id: string; name: string; etag: string }) =>
+      v2("PATCH /api/v2/collections/groups/{id}", {
+        headers: { "If-Match": requiredETag(etag) },
+        path: { id },
+        body: { name },
       }),
     onSuccess: () => invalidateUserCollectionQueries(queryClient),
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to rename group");
+      toast.error(collectionMutationMessage(err, "Failed to rename group"));
+      if (err instanceof V2ProblemError && err.status === 412)
+        void invalidateUserCollectionQueries(queryClient);
     },
   });
 }
@@ -293,11 +376,17 @@ export function useUpdateCollectionGroup() {
 export function useDeleteCollectionGroup() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      api<void>(`/collections/groups/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    retry: false,
+    mutationFn: ({ id, etag }: { id: string; etag: string }) =>
+      v2("DELETE /api/v2/collections/groups/{id}", {
+        path: { id },
+        headers: { "If-Match": requiredETag(etag) },
+      }),
     onSuccess: () => invalidateUserCollectionQueries(queryClient),
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to delete group");
+      toast.error(collectionMutationMessage(err, "Failed to delete group"));
+      if (err instanceof V2ProblemError && err.status === 412)
+        void invalidateUserCollectionQueries(queryClient);
     },
   });
 }
@@ -305,12 +394,13 @@ export function useDeleteCollectionGroup() {
 export function useReorderCollectionGroups() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (orderedIds: string[]) =>
-      api<void>("/collections/groups/order", {
-        method: "PUT",
-        body: JSON.stringify({ ordered_ids: orderedIds }),
+    retry: false,
+    mutationFn: ({ orderedIds, etag }: { orderedIds: string[]; etag: string }) =>
+      v2("PUT /api/v2/collections/groups/order", {
+        headers: { "If-Match": requiredETag(etag) },
+        body: { ordered_ids: orderedIds },
       }),
-    onMutate: async (orderedIds) => {
+    onMutate: async ({ orderedIds }) => {
       await queryClient.cancelQueries({ queryKey: collectionKeys.list() });
       const snapshot = queryClient.getQueryData<CollectionsListResponse>(collectionKeys.list());
       if (snapshot) {
@@ -326,47 +416,52 @@ export function useReorderCollectionGroups() {
     },
     onError: (err, _vars, ctx) => {
       if (ctx?.snapshot) queryClient.setQueryData(collectionKeys.list(), ctx.snapshot);
-      toast.error(err instanceof Error ? err.message : "Failed to reorder groups");
+      toast.error(collectionMutationMessage(err, "Failed to reorder groups"));
+      if (err instanceof V2ProblemError && err.status === 412)
+        void invalidateUserCollectionQueries(queryClient);
     },
     onSettled: () => invalidateUserCollectionQueries(queryClient),
   });
 }
 
-export function useReorderCollectionItems(collectionId: string) {
+export function useReorderCollectionItems(
+  collectionId: string,
+  source: "user" | "library" = "user",
+) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (orderedIds: string[]) =>
-      api<void>(`/collections/${collectionId}/items/order`, {
-        method: "PUT",
-        body: JSON.stringify({ ordered_ids: orderedIds }),
-      }),
-    onMutate: async (orderedIds) => {
-      const key = collectionKeys.items(collectionId);
-      await queryClient.cancelQueries({ queryKey: key });
-      const snapshot = queryClient.getQueryData<CollectionItem[]>(key);
-      if (snapshot) {
-        queryClient.setQueryData(
-          key,
-          reorderByIds(snapshot, (item) => item.media_item_id, orderedIds),
-        );
-      }
-      return { snapshot };
+    retry: false,
+    mutationFn: ({ orderedIds, etag }: { orderedIds: string[]; etag: string }) =>
+      v2(
+        source === "user"
+          ? "PUT /api/v2/collections/{id}/items/order"
+          : "PUT /api/v2/admin/collections/{id}/items/order",
+        {
+          headers: { "If-Match": requiredETag(etag) },
+          path: { id: collectionId },
+          body: { ordered_ids: orderedIds },
+        },
+      ),
+    onError: (err) => {
+      toast.error(collectionMutationMessage(err, "Failed to reorder items"));
+      if (source === "user" && err instanceof V2ProblemError && err.status === 412)
+        void invalidateUserCollectionQueries(queryClient);
     },
-    onError: (err, _vars, ctx) => {
-      if (ctx?.snapshot) {
-        queryClient.setQueryData(collectionKeys.items(collectionId), ctx.snapshot);
-      }
-      toast.error(err instanceof Error ? err.message : "Failed to reorder items");
-    },
-    onSettled: () => invalidateUserCollectionQueries(queryClient, collectionId),
+    onSettled: () =>
+      source === "user"
+        ? invalidateUserCollectionQueries(queryClient, collectionId)
+        : invalidateAdminCollectionQueries(queryClient),
   });
 }
 
 export function useDeleteUserCollectionImage() {
   const queryClient = useQueryClient();
   return useMutation({
+    retry: false,
     mutationFn: ({ id }: { id: string; type: "poster" }) =>
-      api<void>(`/collections/${id}/image?type=poster`, { method: "DELETE" }).then(() => id),
+      v2("DELETE /api/v2/collections/{id}/image", { path: { id }, query: { type: "poster" } }).then(
+        () => id,
+      ),
     onSuccess: (id) => {
       toast.success("Poster removed");
       return invalidateUserCollectionQueries(queryClient, id);
@@ -377,37 +472,74 @@ export function useDeleteUserCollectionImage() {
   });
 }
 
+export interface SetCollectionSortPreferenceInput {
+  collection_kind: "library" | "user" | "watchlist" | "favorites";
+  collection_id?: string;
+  field: string;
+  order: NonNullable<CollectionSortConfig["order"]> | "";
+  /** Profile authority captured when the viewer picked this sort. */
+  profileAuth: ProfileRequestContextSnapshot;
+}
+
+// One serialized write chain per query client. A TanStack mutation would order
+// these just as well, but its variables — which carry the access and PIN tokens
+// on the profile snapshot — stay in the mutation cache after the write settles,
+// and the snapshot contract in api/client.ts forbids that. A private promise
+// chain keeps the ordering without ever putting credentials in cached state.
+const sortPreferenceWriteQueues = new WeakMap<object, { tail: Promise<unknown> }>();
+
+function sortPreferenceWriteQueue(queryClient: object) {
+  let queue = sortPreferenceWriteQueues.get(queryClient);
+  if (!queue) {
+    queue = { tail: Promise.resolve() };
+    sortPreferenceWriteQueues.set(queryClient, queue);
+  }
+  return queue;
+}
+
 /**
- * Persists the sort a viewer picked while browsing a collection, so the choice
- * survives leaving and re-entering it. Sending an empty field pins the viewer
- * to the collection's own source order — distinct from clearing the preference,
- * which returns them to whatever default the collection's creator configured.
+ * Persists the sort a viewer picked while browsing a collection, watchlist, or
+ * favorites. Sending an empty field pins the viewer to source order — distinct
+ * from clearing a collection preference, which restores its configured default.
+ *
+ * Writes are serialized so an earlier, slower request cannot land after a later
+ * choice and overwrite the preference the viewer actually selected last.
  *
  * Failures are deliberately silent: the sort is already applied to the current
  * view through the URL, and a toast for a preference that will be re-sent on
  * the next change would be noise.
+ *
+ * The write carries the profile authority captured when the viewer picked the
+ * sort. These preferences are profile-scoped and the writes are queued, so one
+ * that executed under whatever profile happened to be active on send could
+ * otherwise land on a household member who never chose it.
  */
 export function useSetCollectionSortPreference() {
   const queryClient = useQueryClient();
-  return useMutation({
-    // TanStack Query runs mutations sharing a scope serially. This prevents an
-    // earlier, slower request from completing after a later choice and
-    // overwriting the preference the viewer actually selected last.
-    scope: { id: "collection-sort-preference" },
-    mutationFn: (body: {
-      collection_kind: "library" | "user";
-      collection_id: string;
-      field: string;
-      order: NonNullable<CollectionSortConfig["order"]> | "";
-    }) =>
-      api("/collections/sort-preference", {
-        method: "PUT",
-        body: JSON.stringify(body),
-      }),
-    onSuccess: () => {
-      // The next visit resolves through the server, so drop cached catalog
-      // pages that were built against the previous effective sort.
-      queryClient.invalidateQueries({ queryKey: catalogKeys.all });
+  return useCallback(
+    ({ profileAuth, ...body }: SetCollectionSortPreferenceInput): Promise<void> => {
+      const queue = sortPreferenceWriteQueue(queryClient);
+      queue.tail = queue.tail
+        .catch(() => undefined)
+        .then(async () => {
+          if (!isProfileRequestContextCurrent(profileAuth)) return;
+          try {
+            await v2("PUT /api/v2/collections/sort-preference", {
+              profileContext: profileAuth,
+              body,
+            });
+          } catch {
+            return;
+          }
+          // The next visit resolves through the server, so drop cached catalog
+          // pages built against the previous effective sort. Skip it when the
+          // viewer has since switched profiles: those pages belong to someone
+          // else, and refetching them would cancel their in-flight first load.
+          if (!isCapturedProfileAuthorityActive(profileAuth)) return;
+          queryClient.invalidateQueries({ queryKey: catalogKeys.all });
+        });
+      return queue.tail as Promise<void>;
     },
-  });
+    [queryClient],
+  );
 }

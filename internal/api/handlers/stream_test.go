@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,7 +17,9 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -29,6 +32,15 @@ type errStreamFileResolver struct {
 	err error
 }
 
+type countingStreamFileResolver struct {
+	calls int
+}
+
+func (r *countingStreamFileResolver) GetByID(context.Context, int) (*models.MediaFile, error) {
+	r.calls++
+	return nil, errors.New("file lookup must not run")
+}
+
 func (r errStreamFileResolver) GetByID(context.Context, int) (*models.MediaFile, error) {
 	return nil, r.err
 }
@@ -38,6 +50,93 @@ func (m *hookedSessionManager) BeginTransport(sessionID string) error {
 		m.beginTransportHook()
 	}
 	return m.SessionManager.BeginTransport(sessionID)
+}
+
+func TestHandleStreamRejectsCommittedProxyEgressBeforeFileLookup(t *testing.T) {
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		t.Run(method, func(t *testing.T) {
+			manager := playback.NewSessionManager(0, 0)
+			manager.RegisterReconstructed(&playback.Session{
+				ID: "proxy-stream", UserID: 1, MediaFileID: 42, PlayMethod: playback.PlayDirect,
+				RoutingWorkload: string(noderouting.WorkloadDirectPlay), RoutingExecution: string(noderouting.ExecutionNone),
+				RoutingEgress: string(noderouting.EgressProxy),
+			})
+			resolver := &countingStreamFileResolver{}
+			handler := NewStreamHandler(manager, resolver)
+			recorder := httptest.NewRecorder()
+			handler.HandleStream(recorder, playbackTestRequest(method, "/api/v1/stream/proxy-stream", nil, map[string]string{"session_id": "proxy-stream"}))
+
+			if recorder.Code != http.StatusServiceUnavailable || !strings.Contains(recorder.Body.String(), `"error":"routing_policy_unsatisfied"`) {
+				t.Fatalf("response = %d %s, want proxy-egress refusal", recorder.Code, recorder.Body.String())
+			}
+			if resolver.calls != 0 {
+				t.Fatalf("file resolver calls = %d, want 0", resolver.calls)
+			}
+		})
+	}
+}
+
+func TestHandleStreamRejectsProxyRecipeBeforeSessionReconstruction(t *testing.T) {
+	const secret = "test-secret"
+	card := playback.NewDirectRecipeCard("lost-proxy-stream", 1, "profile-1", 42)
+	card.RoutingWorkload = string(noderouting.WorkloadDirectPlay)
+	card.RoutingExecution = string(noderouting.ExecutionNone)
+	card.RoutingEgress = string(noderouting.EgressProxy)
+	token, err := streamtoken.Sign(card.ToClaims(), secret, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	manager := playback.NewSessionManager(0, 0)
+	resolver := &countingStreamFileResolver{}
+	handler := NewStreamHandler(manager, resolver)
+	handler.JWTSecret = secret
+	recorder := httptest.NewRecorder()
+	handler.HandleStream(recorder, playbackTestRequest(
+		http.MethodGet, "/api/v1/stream/lost-proxy-stream?st="+token, nil,
+		map[string]string{"session_id": "lost-proxy-stream"},
+	))
+
+	if recorder.Code != http.StatusServiceUnavailable || !strings.Contains(recorder.Body.String(), `"error":"routing_policy_unsatisfied"`) {
+		t.Fatalf("response = %d %s, want proxy-egress refusal", recorder.Code, recorder.Body.String())
+	}
+	if resolver.calls != 0 {
+		t.Fatalf("file resolver calls = %d, want 0", resolver.calls)
+	}
+	if _, err := manager.GetSession(card.SessionID); !errors.Is(err, playback.ErrSessionNotFound) {
+		t.Fatalf("proxy recipe reconstructed a native session: %v", err)
+	}
+}
+
+func TestHandleStreamLiveAPIRouteOverridesStaleProxyRecipe(t *testing.T) {
+	const secret = "test-secret"
+	filePath := writePlaybackTestMediaFile(t, "movie.mp4")
+	manager := playback.NewSessionManager(0, 0)
+	manager.RegisterReconstructed(&playback.Session{
+		ID: "replanned-stream", UserID: 1, MediaFileID: 42, PlayMethod: playback.PlayDirect,
+		RoutingWorkload: string(noderouting.WorkloadDirectPlay), RoutingExecution: string(noderouting.ExecutionNone),
+		RoutingEgress: string(noderouting.EgressAPI),
+	})
+	stale := playback.NewDirectRecipeCard("replanned-stream", 1, "profile-1", 42)
+	stale.RoutingWorkload = string(noderouting.WorkloadDirectPlay)
+	stale.RoutingExecution = string(noderouting.ExecutionNone)
+	stale.RoutingEgress = string(noderouting.EgressProxy)
+	token, err := streamtoken.Sign(stale.ToClaims(), secret, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	handler := NewStreamHandler(manager, testPlaybackFileResolver{file: &models.MediaFile{ID: 42, FilePath: filePath}})
+	handler.JWTSecret = secret
+	recorder := httptest.NewRecorder()
+	handler.HandleStream(recorder, playbackTestRequest(
+		http.MethodGet, "/api/v1/stream/replanned-stream?st="+token, nil,
+		map[string]string{"session_id": "replanned-stream"},
+	))
+
+	if recorder.Code != http.StatusOK || recorder.Body.String() != "video" {
+		t.Fatalf("response = %d %q, want live API route", recorder.Code, recorder.Body.String())
+	}
 }
 
 func TestHandleStream_PausedSessionResumesWithDelayedRangeRequest(t *testing.T) {
@@ -294,8 +393,7 @@ func TestHandleSubtitle_ListDownloadedSubtitlesErrorReturns500(t *testing.T) {
 
 	handler := NewStreamHandler(baseMgr, testPlaybackFileResolver{file: file})
 	handler.SubtitleRepo = &handlerMockSubtitleRepo{listErr: errors.New("db unavailable")}
-	handler.S3Client = newMockS3ClientForHandler()
-	handler.S3Bucket = "test-bucket"
+	handler.SubtitleBlobs = newMockBlobStoreForHandler()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/stream/"+session.ID+"/subtitles/0.vtt", nil)
 	req = req.WithContext(newAuthorizedPlaybackContext())
@@ -338,11 +436,10 @@ func TestHandleSubtitleUsesBoundDownloadedIdentityAfterInventoryReorder(t *testi
 	}
 	handler := NewStreamHandler(baseMgr, testPlaybackFileResolver{file: file})
 	handler.SubtitleRepo = repo
-	handler.S3Client = subtitleContentS3Client{objects: map[string][]byte{
+	handler.SubtitleBlobs = subtitleContentBlobStore{objects: map[string][]byte{
 		"selected-71.vtt": []byte("WEBVTT\n\n00:00.000 --> 00:01.000\nselected-71\n"),
 		"other-72.vtt":    []byte("WEBVTT\n\n00:00.000 --> 00:01.000\nother-72\n"),
 	}}
-	handler.S3Bucket = "test-bucket"
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/stream/"+session.ID+"/subtitles/0.vtt?file_id=42&downloaded_subtitle_id=71", nil)
 	req = req.WithContext(newAuthorizedPlaybackContext())
@@ -358,15 +455,51 @@ func TestHandleSubtitleUsesBoundDownloadedIdentityAfterInventoryReorder(t *testi
 	}
 }
 
-type subtitleContentS3Client struct {
+// A downloaded SRT answers the published .srt?original=1 URL with its stored
+// bytes on both GET and HEAD, whether the URL pins the row or uses the ordinal.
+func TestHandleSubtitleServesDownloadedSRTOriginalOnRequest(t *testing.T) {
+	const stored = "1\n00:00:01,000 --> 00:00:02,000\n{\\an8}Top\n"
+	file := &models.MediaFile{ID: 42, ContentID: "movie-1", FilePath: "/tmp/movie.mkv", Duration: 3600}
+	baseMgr := playback.NewSessionManager(0, 0)
+	session, err := baseMgr.StartSession(1, "profile-1", 42, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	repo := newMockSubtitleRepoForHandler()
+	row := subtitles.DownloadedSubtitle{ID: 71, MediaFileID: 42, Format: subtitles.FormatSRT, S3Key: "ai-71.srt"}
+	repo.subtitles[71] = &row
+	repo.list = []subtitles.DownloadedSubtitle{row}
+	handler := NewStreamHandler(baseMgr, testPlaybackFileResolver{file: file})
+	handler.SubtitleRepo = repo
+	handler.SubtitleBlobs = subtitleContentBlobStore{objects: map[string][]byte{"ai-71.srt": []byte(stored)}}
+
+	for _, query := range []string{"file_id=42&original=1&downloaded_subtitle_id=71", "file_id=42&original=1"} {
+		for _, method := range []string{http.MethodGet, http.MethodHead} {
+			req := httptest.NewRequest(method, "/api/v2/stream/"+session.ID+"/subtitles/0.srt?"+query, nil)
+			req = req.WithContext(WithNativeAPIV2(newAuthorizedPlaybackContext()))
+			routeCtx := chi.NewRouteContext()
+			routeCtx.URLParams.Add("session_id", session.ID)
+			routeCtx.URLParams.Add("track", "0.srt")
+			req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+			rr := httptest.NewRecorder()
+			handler.HandleSubtitle(rr, req)
+			if rr.Code != http.StatusOK || !strings.HasPrefix(rr.Header().Get("Content-Type"), "application/x-subrip") ||
+				(method == http.MethodGet && rr.Body.String() != stored) {
+				t.Fatalf("%s ?%s = %d %q %q", method, query, rr.Code, rr.Header().Get("Content-Type"), rr.Body.String())
+			}
+		}
+	}
+}
+
+type subtitleContentBlobStore struct {
 	objects map[string][]byte
 }
 
-func (subtitleContentS3Client) PutObject(context.Context, string, string, []byte) error { return nil }
-func (c subtitleContentS3Client) GetObject(_ context.Context, _, key string) ([]byte, error) {
+func (subtitleContentBlobStore) Put(context.Context, string, []byte) error { return nil }
+func (c subtitleContentBlobStore) Get(_ context.Context, key string) ([]byte, error) {
 	return append([]byte(nil), c.objects[key]...), nil
 }
-func (subtitleContentS3Client) DeleteObject(context.Context, string, string) error { return nil }
+func (subtitleContentBlobStore) Delete(context.Context, string) error { return nil }
 
 func TestHandleSubtitle_NilMediaFileReturns404(t *testing.T) {
 	baseMgr := playback.NewSessionManager(0, 0)
@@ -538,6 +671,33 @@ func TestHandleSubtitle_ExternalTextHEADDoesNotLoadTheArtifact(t *testing.T) {
 	}
 }
 
+func TestHandleSubtitleAllowsAPIAuxiliaryResourceForProxyRoutedSession(t *testing.T) {
+	file := &models.MediaFile{
+		ID:                42,
+		ContentID:         "movie-1",
+		FilePath:          "/missing/movie.mkv",
+		ExternalSubtitles: []models.ExternalSubtitle{{Path: "/missing/movie.en.srt", Language: "eng", Format: "srt"}},
+	}
+	manager := playback.NewSessionManager(0, 0)
+	manager.RegisterReconstructed(&playback.Session{
+		ID: "proxy-subtitle", UserID: 1, MediaFileID: file.ID, PlayMethod: playback.PlayDirect,
+		RoutingWorkload: string(noderouting.WorkloadDirectPlay), RoutingExecution: string(noderouting.ExecutionNone),
+		RoutingEgress: string(noderouting.EgressProxy),
+	})
+	handler := NewStreamHandler(manager, testPlaybackFileResolver{file: file})
+	recorder := httptest.NewRecorder()
+	handler.HandleSubtitle(recorder, playbackTestRequest(
+		http.MethodHead,
+		"/api/v1/stream/proxy-subtitle/subtitles/0.vtt",
+		nil,
+		map[string]string{"session_id": "proxy-subtitle", "track": "0.vtt"},
+	))
+
+	if recorder.Code != http.StatusOK || recorder.Body.Len() != 0 || !strings.HasPrefix(recorder.Header().Get("Content-Type"), "text/vtt") {
+		t.Fatalf("HEAD status=%d type=%q body=%q", recorder.Code, recorder.Header().Get("Content-Type"), recorder.Body.String())
+	}
+}
+
 func TestHandleSubtitle_EmbeddedPGSSupportsCachedHEADAndRange(t *testing.T) {
 	file := &models.MediaFile{
 		ID:        42,
@@ -644,5 +804,70 @@ func TestHandleTransportStartFailure_KeepsSessionForNonMissingError(t *testing.T
 	}
 	if syncer.calls != 0 {
 		t.Fatalf("sync calls = %d, want 0", syncer.calls)
+	}
+}
+
+func TestSubtitleDefaultRequestReturnsWholeTrack(t *testing.T) {
+	for _, query := range []string{"", "?file_id=42", "?duration=invalid", "?position=NaN", "?position=+Inf"} {
+		req := httptest.NewRequest(http.MethodGet, "/subtitles/0.vtt"+query, nil)
+		if got := subtitleSeekPosition(req); got != 0 {
+			t.Errorf("query %q seek = %v, want full track from zero", query, got)
+		}
+		if got := subtitleWindowDuration(req); got != 0 {
+			t.Errorf("query %q duration = %v, want complete track", query, got)
+		}
+	}
+}
+
+func TestSubtitleExplicitWindow(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/subtitles/0.vtt?position=1200&duration=600", nil)
+	if got := subtitleSeekPosition(req); got != 1200 {
+		t.Fatalf("seek = %v", got)
+	}
+	if got := subtitleWindowDuration(req); got != 600 {
+		t.Fatalf("duration = %v", got)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/subtitles/0.vtt?duration=600", nil)
+	if got := subtitleSeekPosition(req); got != 0 {
+		t.Fatalf("duration-only seek = %v, want zero", got)
+	}
+}
+
+func TestEmbeddedSubtitleExtractionFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name, script string
+		status       int
+		interrupted  bool
+	}{
+		{"before_output", "exit 1", http.StatusInternalServerError, false},
+		{"after_output", "printf 'WEBVTT\\n\\n00:00:01.000 --> 00:00:02.000\\nPartial\\n\\n'; exit 1", http.StatusOK, true},
+		{"complete", "printf 'WEBVTT\\n\\n00:20:01.000 --> 00:20:02.000\\nComplete\\n\\n'", http.StatusOK, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
+			if err := os.WriteFile(ffmpeg, []byte("#!/bin/sh\n"+tc.script+"\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			handler := NewStreamHandler(nil, nil)
+			handler.PlaybackConfig = func() config.PlaybackConfig { return config.PlaybackConfig{FFmpegPath: ffmpeg} }
+			file := &models.MediaFile{ID: 42, FilePath: "/synthetic/media.mkv", SubtitleTracks: []models.SubtitleTrack{{Codec: "subrip"}}}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { handler.streamEmbeddedSubtitle(w, r, file, 0, "vtt") }))
+			defer server.Close()
+			response, err := server.Client().Get(server.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = response.Body.Close() }()
+			_, err = io.ReadAll(response.Body)
+			if response.StatusCode != tc.status {
+				t.Fatalf("status=%d, want %d", response.StatusCode, tc.status)
+			}
+			if tc.interrupted && err == nil {
+				t.Fatal("failed extraction ended with successful EOF")
+			}
+			if !tc.interrupted && err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

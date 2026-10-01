@@ -1,26 +1,22 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/api/client";
 import type { ItemDetail } from "@/api/types";
+import { v2 } from "@/api/v2/request";
 import { invalidateRatingSurfaceQueries } from "./ratingsSurfaceRefresh";
-import { updateCatalogItemDetail } from "./mediaSurfaceRefresh";
+import {
+  cancelItemDetailQueries,
+  isItemDetailQueryKey,
+  updateCatalogItemDetail,
+} from "./mediaSurfaceRefresh";
 
 export function useSetRating(itemId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (rating: number) =>
-      api(`/ratings/${itemId}`, {
-        method: "PUT",
-        body: JSON.stringify({ rating }),
-      }),
+      v2("PUT /api/v2/ratings/{item_id}", { path: { item_id: itemId }, body: { rating } }),
     onMutate: async (rating: number) => {
-      await queryClient.cancelQueries({ queryKey: ["catalog", "items", itemId, "detail"] });
+      await cancelItemDetailQueries(queryClient, itemId);
       const previous = queryClient.getQueriesData<ItemDetail>({
-        predicate: (query) =>
-          Array.isArray(query.queryKey) &&
-          query.queryKey[0] === "catalog" &&
-          query.queryKey[1] === "items" &&
-          query.queryKey[2] === itemId &&
-          query.queryKey[3] === "detail",
+        predicate: (query) => isItemDetailQueryKey(query.queryKey, itemId),
       });
       updateCatalogItemDetail(queryClient, itemId, (detail) => ({
         ...detail,
@@ -42,16 +38,11 @@ export function useSetRating(itemId: string) {
 export function useDeleteRating(itemId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => api(`/ratings/${itemId}`, { method: "DELETE" }),
+    mutationFn: () => v2("DELETE /api/v2/ratings/{item_id}", { path: { item_id: itemId } }),
     onMutate: async () => {
-      await queryClient.cancelQueries({ queryKey: ["catalog", "items", itemId, "detail"] });
+      await cancelItemDetailQueries(queryClient, itemId);
       const previous = queryClient.getQueriesData<ItemDetail>({
-        predicate: (query) =>
-          Array.isArray(query.queryKey) &&
-          query.queryKey[0] === "catalog" &&
-          query.queryKey[1] === "items" &&
-          query.queryKey[2] === itemId &&
-          query.queryKey[3] === "detail",
+        predicate: (query) => isItemDetailQueryKey(query.queryKey, itemId),
       });
       updateCatalogItemDetail(queryClient, itemId, (detail) => ({
         ...detail,

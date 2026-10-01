@@ -1,0 +1,27 @@
+{
+  "protocol_version": 3,
+  "client_features": [],
+  "file_id": ${SILO_BENCH_FILE_ID},
+  "profile_id": "${SILO_BENCH_PROFILE_ID}",
+  "playback_attempt_id": "bench-attempt-${SILO_BENCH_ATTEMPT_ID}",
+  "quality_preference": "auto",
+  "subtitle_fidelity_preference": "compatible",
+  "metered": false,
+  "client_capabilities": {
+    "video_evidence": "declared",
+    "audio_evidence": "declared",
+    "codecs_video": ["h264", "hevc"],
+    "codecs_video_hardware": ["h264", "hevc"],
+    "codecs_audio": ["aac", "eac3"],
+    "containers": ["mp4", "fmp4"],
+    "max_resolution": "1080p",
+    "hdr": false
+  },
+  "client_playback_context": {
+    "protocol_version": 3,
+    "form_factor": "phone",
+    "app_version": "bench",
+    "device": { "platform": "ios", "model": "bench" },
+    "output": {}
+  }
+}

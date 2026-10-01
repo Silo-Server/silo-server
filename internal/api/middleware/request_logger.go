@@ -3,6 +3,7 @@ package middleware
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -14,12 +15,13 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/httpstream"
 )
 
 func RequestLogger(nodeID string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			for _, prefix := range []string{"/api/v1/health", "/api/v1/ready", "/api/v1/admin/logs"} {
+			for _, prefix := range []string{"/api/v1/health", "/api/v1/ready", "/api/v1/admin/logs", APIv2Prefix} {
 				if strings.HasPrefix(r.URL.Path, prefix) {
 					next.ServeHTTP(w, r)
 					return
@@ -93,6 +95,13 @@ func (w *requestStatusWriter) Write(b []byte) (int, error) {
 		w.wroteHeader = true
 	}
 	return w.ResponseWriter.Write(b)
+}
+
+func (w *requestStatusWriter) ReadFrom(src io.Reader) (int64, error) {
+	if !w.wroteHeader {
+		w.status, w.wroteHeader = http.StatusOK, true
+	}
+	return httpstream.ForwardReadFrom(w.ResponseWriter, w, src, 0, nil)
 }
 
 func (w *requestStatusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {

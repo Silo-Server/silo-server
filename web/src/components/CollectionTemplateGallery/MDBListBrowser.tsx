@@ -28,8 +28,8 @@ export function MDBListBrowser({ onPick }: Props) {
       <div className="border-border bg-muted/30 rounded-md border border-dashed px-3 py-2 text-xs">
         <p className="text-muted-foreground">
           MDBList list search isn&rsquo;t available — an admin needs to add an MDBList API key under{" "}
-          <span className="font-medium">Settings → Integrations</span>. You can still paste a list
-          URL below.
+          <span className="font-medium">Settings → Subtitles &amp; Metadata</span>. You can still
+          paste a list URL below.
         </p>
       </div>
     );

@@ -6,7 +6,9 @@ import {
   buildPlaybackRealtimeResult,
   parsePlaybackRealtimeMessage,
   parsePlaybackRealtimeCommand,
+  readPlanInvalidatedPayload,
   SUPPORTED_PLAYBACK_COMMANDS,
+  VIDEO_PLAYBACK_COMMANDS,
 } from "./realtime-protocol";
 
 describe("realtime protocol", () => {
@@ -31,6 +33,49 @@ describe("realtime protocol", () => {
       deadline_ms: undefined,
       payload: { message: "Restarting soon" },
     });
+  });
+
+  it("parses a plan invalidation command and its payload", () => {
+    const command = parsePlaybackRealtimeCommand(
+      JSON.stringify({
+        type: "command",
+        command_id: "cmd-9",
+        session_id: "session-1",
+        name: "plan_invalidated",
+        deadline_ms: 8_000,
+        payload: { reason: "video_copy_unsafe", plan_id: "plan:0123456789abcdef" },
+      }),
+    );
+
+    expect(command).toMatchObject({
+      type: "command",
+      command_id: "cmd-9",
+      name: "plan_invalidated",
+      deadline_ms: 8_000,
+    });
+    expect(readPlanInvalidatedPayload(command?.payload)).toEqual({
+      reason: "video_copy_unsafe",
+      plan_id: "plan:0123456789abcdef",
+    });
+  });
+
+  it("rejects a plan invalidation payload missing the invalidated plan", () => {
+    // Without the plan id the client cannot tell whether the plan it is playing
+    // is the one that was invalidated, so acting on it is never correct.
+    expect(readPlanInvalidatedPayload({ reason: "video_copy_unsafe" })).toBeNull();
+    expect(readPlanInvalidatedPayload({ reason: "", plan_id: "plan:1" })).toBeNull();
+    expect(readPlanInvalidatedPayload({ reason: "video_copy_unsafe", plan_id: 42 })).toBeNull();
+    expect(readPlanInvalidatedPayload(undefined)).toBeNull();
+  });
+
+  // The audiobook surface shares this module and cannot replan off an
+  // invalidated plan, so only the video command set announces it.
+  it("announces plan invalidation only for the video surface", () => {
+    expect(SUPPORTED_PLAYBACK_COMMANDS).not.toContain("plan_invalidated");
+    expect(VIDEO_PLAYBACK_COMMANDS).toContain("plan_invalidated");
+    expect(
+      buildPlaybackRealtimeHello("session-1", VIDEO_PLAYBACK_COMMANDS).capabilities.commands,
+    ).toContain("plan_invalidated");
   });
 
   it("rejects unknown commands", () => {

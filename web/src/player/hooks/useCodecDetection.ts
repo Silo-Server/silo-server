@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { detectHLSSupport, type WebCapabilityProbe } from "../client-context-v3";
+import { isFirefoxUserAgent } from "../utils/browser";
 
 /** Maps our codec names to the MIME declarations browsers expose for them. */
 const VIDEO_CODEC_MAP: Record<string, string> = {
@@ -116,6 +117,22 @@ export async function probeHDR10PlaybackSupport(): Promise<boolean> {
   }
 }
 
+let initialHDR10Probe: Promise<boolean> | null = null;
+
+/**
+ * Starts the expensive Media Capabilities query once for the lifetime of the
+ * app. The shell calls this before playback is requested so opening a video
+ * does not have to wait several seconds for the browser's first decoder probe.
+ */
+export function prewarmCodecDetection(): Promise<boolean> {
+  initialHDR10Probe ??= probeHDR10PlaybackSupport();
+  return initialHDR10Probe;
+}
+
+export function resetCodecDetectionForTests(): void {
+  initialHDR10Probe = null;
+}
+
 function testMediaType(mime: string): boolean {
   if (typeof MediaSource !== "undefined") {
     try {
@@ -160,10 +177,19 @@ function testMediaElementType(mime: string): boolean {
 export function probeWebCapabilities(): WebCapabilityProbe {
   const codecsVideo: string[] = [];
   const codecsAudio: string[] = [];
+  const progressiveCodecsAudio: string[] = [];
   const containers: string[] = [];
+  const isFirefox =
+    typeof navigator !== "undefined" && isFirefoxUserAgent(navigator.userAgent ?? "");
 
   // Test containers.
   for (const [name, mimeTypes] of Object.entries(CONTAINER_MAP)) {
+    // Firefox 145+ reports native Matroska support, but its demuxer still
+    // requires the complete resource before starting common audio+video MKVs
+    // (Mozilla bug 2000420). Advertising that container turns direct play into
+    // a full-file download. Keep the codec claims so the planner can select a
+    // codec-copy remux instead.
+    if (name === "mkv" && isFirefox) continue;
     if (mimeTypes.some(testMediaType)) {
       containers.push(name);
     }
@@ -180,6 +206,13 @@ export function probeWebCapabilities(): WebCapabilityProbe {
   for (const [name, mimeTypes] of Object.entries(AUDIO_CODEC_MAP)) {
     if (mimeTypes.some(testMediaType)) {
       codecsAudio.push(name);
+    }
+    if (
+      mimeTypes
+        .filter((mime) => mime.startsWith("audio/mp4") || mime.startsWith("video/mp4"))
+        .some(testMediaType)
+    ) {
+      progressiveCodecsAudio.push(name);
     }
   }
 
@@ -236,16 +269,19 @@ export function probeWebCapabilities(): WebCapabilityProbe {
       };
     }),
   };
+  const hlsSupport = detectHLSSupport();
 
   return {
     containers,
     codecsVideo,
     progressiveCodecsVideo,
     codecsAudio,
+    progressiveCodecsAudio,
     maxResolution,
     hdr,
     hdrDetails,
-    hls: detectHLSSupport(),
+    hls: hlsSupport.supported,
+    nativeHLS: hlsSupport.native,
   };
 }
 
@@ -254,54 +290,69 @@ export function probeWebCapabilities(): WebCapabilityProbe {
  * Moving a window between SDR and HDR displays can change the media-query
  * result without remounting the player, so refresh when either query changes.
  */
-export function useCodecDetection(): WebCapabilityProbe {
-  const [capabilities, setCapabilities] = useState(probeWebCapabilities);
+export interface SettledWebCapabilityProbe extends WebCapabilityProbe {
+  /** Whether asynchronous format probes have joined the synchronous evidence. */
+  settled: boolean;
+}
+
+export function useCodecDetection(): SettledWebCapabilityProbe {
+  const [capabilities, setCapabilities] = useState<SettledWebCapabilityProbe>(() => ({
+    ...probeWebCapabilities(),
+    settled: false,
+  }));
 
   useEffect(() => {
-    if (typeof matchMedia === "undefined") return;
     let disposed = false;
     let probeGeneration = 0;
-    const queries = [
-      matchMedia("(dynamic-range: high)"),
-      matchMedia("(video-dynamic-range: high)"),
-    ];
-    const refresh = () => {
+    const queries =
+      typeof matchMedia === "undefined"
+        ? []
+        : [matchMedia("(dynamic-range: high)"), matchMedia("(video-dynamic-range: high)")];
+    const refresh = (hdr10Probe: Promise<boolean>) => {
       const generation = ++probeGeneration;
       const next = probeWebCapabilities();
-      setCapabilities(next);
+      setCapabilities({ ...next, settled: false });
 
-      void probeHDR10PlaybackSupport().then((hdr10) => {
-        if (disposed || generation !== probeGeneration || !hdr10) return;
+      void hdr10Probe.then((hdr10) => {
+        if (disposed || generation !== probeGeneration) return;
         setCapabilities((current) => ({
           ...current,
+          settled: true,
           // The exact HDR10 query proves the HEVC Main10 base codec for the
           // progressive MP4 route even when the separate generic HEVC probe was
           // rejected. Keep that evidence scoped away from original and HLS.
-          progressiveCodecsVideo: current.progressiveCodecsVideo.includes("hevc")
-            ? current.progressiveCodecsVideo
-            : [...current.progressiveCodecsVideo, "hevc"],
+          progressiveCodecsVideo:
+            !hdr10 || current.progressiveCodecsVideo.includes("hevc")
+              ? current.progressiveCodecsVideo
+              : [...current.progressiveCodecsVideo, "hevc"],
           hdrDetails: {
             ...current.hdrDetails,
-            hdr10: true,
-            hdr10_max_width: 3840,
-            hdr10_max_height: 2160,
-            hdr10_max_frame_rate: 24,
-            hdr10_max_bitrate_kbps: 80_000,
+            ...(hdr10
+              ? {
+                  hdr10: true,
+                  hdr10_max_width: 3840,
+                  hdr10_max_height: 2160,
+                  hdr10_max_frame_rate: 24,
+                  hdr10_max_bitrate_kbps: 80_000,
+                }
+              : {}),
           },
         }));
       });
     };
-    refresh();
+    refresh(prewarmCodecDetection());
+    const refreshForOutputChange = () => refresh(probeHDR10PlaybackSupport());
     for (const query of queries) {
-      if (typeof query.addEventListener === "function") query.addEventListener("change", refresh);
-      else query.addListener?.(refresh);
+      if (typeof query.addEventListener === "function")
+        query.addEventListener("change", refreshForOutputChange);
+      else query.addListener?.(refreshForOutputChange);
     }
     return () => {
       disposed = true;
       for (const query of queries) {
         if (typeof query.removeEventListener === "function")
-          query.removeEventListener("change", refresh);
-        else query.removeListener?.(refresh);
+          query.removeEventListener("change", refreshForOutputChange);
+        else query.removeListener?.(refreshForOutputChange);
       }
     };
   }, []);

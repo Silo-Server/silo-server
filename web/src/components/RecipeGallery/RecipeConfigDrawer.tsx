@@ -1,6 +1,6 @@
 import { useState } from "react";
 import BulkApplyDialog from "./BulkApplyDialog";
-import RecipeParamFields from "./RecipeParamFields";
+import RecipeParamFields, { type RecipeParamFieldsProps } from "./RecipeParamFields";
 import type { RecipeDefinition, GalleryPreset } from "@/lib/recipes";
 
 export interface AddPayload {
@@ -15,6 +15,11 @@ export interface AddPayload {
 }
 
 interface Props {
+  libraryCollectionsOnly?: boolean;
+  /** The section is created on a library page; see RecipeParamFieldsProps. */
+  libraryScoped?: boolean;
+  /** Libraries the library picker offers; see RecipeParamFieldsProps. */
+  libraries?: RecipeParamFieldsProps["libraries"];
   def: RecipeDefinition;
   preset: GalleryPreset;
   /** Close the drawer without saving. Used by the bottom Cancel button. */
@@ -37,6 +42,9 @@ export default function RecipeConfigDrawer({
   onAdd,
   showBulkApply = true,
   showEnabled = true,
+  libraryCollectionsOnly = false,
+  libraryScoped = false,
+  libraries,
 }: Props) {
   const [title, setTitle] = useState(preset.display_name);
   const [params, setParams] = useState<Record<string, unknown>>({ ...preset.default_params });
@@ -114,7 +122,14 @@ export default function RecipeConfigDrawer({
       </div>
 
       <div className="mt-4">
-        <RecipeParamFields def={def} params={params} onChange={setParams} />
+        <RecipeParamFields
+          def={def}
+          params={params}
+          onChange={setParams}
+          libraryCollectionsOnly={libraryCollectionsOnly}
+          libraryScoped={libraryScoped}
+          libraries={libraries}
+        />
       </div>
 
       {collectionMissing ? (

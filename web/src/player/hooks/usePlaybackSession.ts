@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
-import { playerFetch } from "../player-fetch";
+import { startPlaybackV2 } from "../start-v2";
+import { hasSequencedProgress, stopSequencedSession } from "../session-mutations";
 import { describePlanTerminal, describePlaybackTransportError } from "../playback-errors";
 import { useCodecDetection } from "./useCodecDetection";
 import {
@@ -10,7 +11,10 @@ import {
   detectBandwidthEstimateKbpsV3,
   detectMeteredV3,
 } from "../client-context-v3";
-import { reportRouteEventV3 } from "../route-events-v3";
+import { buildRouteEventV3 } from "../route-events-v3";
+import { reportSessionRouteEventV2 } from "../route-events-v2";
+import { replanV2 } from "../lifecycle-v2";
+import { takePlaybackIntent } from "../first-frame";
 import { buildPlayerStreamUrl } from "../stream-url";
 import { randomUUID } from "@/lib/uuid";
 import {
@@ -28,6 +32,7 @@ import {
   buildReplanRequestV3,
   buildStartRequestV3,
   routeEventPlanIdentityV3,
+  VIDEO_CLIENT_FEATURES_V3,
   type ReplanOptions,
 } from "../playback-session-wire-v3";
 import type {
@@ -63,7 +68,10 @@ interface PlaybackSessionState {
   replacing: boolean;
   replanning: boolean;
   errorTitle: string | null;
+  errorReason?: string | null;
   error: string | null;
+  initialSubtitleErrorTitle: string | null;
+  initialSubtitleError: string | null;
 }
 
 interface PlaybackSessionErrorState {
@@ -87,14 +95,29 @@ export interface UsePlaybackSessionResult extends PlaybackSessionState {
   changeQuality: (label: string, currentPosition: number) => void;
   /** `failure_recovery` replan after the client could not play the plan. */
   recoverFromFailure: (failure: FailureV3, currentPosition: number) => void;
-  /** `seek_reanchor` replan when the target lies outside the seekable window. */
-  reanchorSeek: (positionSeconds: number) => void;
+  /**
+   * `failure_recovery` replan for a plan the *server* invalidated over the
+   * realtime `plan_invalidated` command. Resolves to whether a replacement plan
+   * is now playing; the caller reports that back as the command's result.
+   */
+  invalidatePlan: (planId: string, reason: string, currentPosition: number) => Promise<boolean>;
+  /**
+   * `seek_reanchor` replan when the target lies outside the seekable window.
+   * Resolves with whether a plan at the new position was adopted.
+   */
+  reanchorSeek: (positionSeconds: number) => Promise<boolean>;
   /** Re-reads the subtitle inventory by replanning with the selection unchanged. */
   refreshSubtitles: (currentPosition: number) => void;
   /** Folds a realtime-delivered inventory entry in without a server round trip. */
   applySubtitleTrack: (track: SubtitleInventoryItemV3) => void;
   /** Keeps transport state current for output-capability replans. */
   updatePlaybackState: (positionSeconds: number, playing: boolean) => void;
+  /**
+   * Called when a transport shows its first frame. Reports `first_frame` once
+   * per playback attempt, with `first_frame_ms` measured from the viewer's
+   * request when one timed it; later transports of the attempt are ignored.
+   */
+  reportFirstFrame: () => void;
   /** Reports a playback route event as a diagnostic. Never affects playback. */
   reportEvent: (
     event: RouteEventNameV3,
@@ -187,7 +210,10 @@ function planToSessionState(
     replacing: false,
     replanning: false,
     errorTitle: null,
+    errorReason: null,
     error: null,
+    initialSubtitleErrorTitle: null,
+    initialSubtitleError: null,
   };
 }
 
@@ -251,9 +277,13 @@ export function usePlaybackSession(
   maxBitrateKbps?: number | null,
   resumeHints?: ResumeHints,
   explicitAudioTrackIndex?: number | null,
+  initialSubtitleTrackIndexByFileId?: Record<number, number>,
+  initialBitmapSubtitleTrackIndexByFileId?: Record<number, number>,
+  allowAlternateVersions = true,
 ): UsePlaybackSessionResult {
   const config = usePlayerConfig();
   const probe = useCodecDetection();
+  const capabilitiesSettled = probe.settled;
   const clientCapabilities = useMemo(() => buildClientCapabilitiesV3(probe), [probe]);
   const clientPlaybackContext = useMemo(() => buildClientPlaybackContextV3(probe), [probe]);
   const capabilityRequestKey = useMemo(
@@ -278,7 +308,10 @@ export function usePlaybackSession(
     replacing: false,
     replanning: false,
     errorTitle: null,
+    errorReason: null,
     error: null,
+    initialSubtitleErrorTitle: null,
+    initialSubtitleError: null,
   });
 
   const sessionIdRef = useRef<string | null>(null);
@@ -292,6 +325,8 @@ export function usePlaybackSession(
   const startIntentRef = useRef({
     position: initialPosition,
     forceStartPosition: forceInitialPosition,
+    // When the viewer asked for this request, for its first_frame_ms.
+    intentAt: null as number | null,
   });
   const hasAdoptedPlanRef = useRef(false);
   const awaitingInitialPlayerPositionRef = useRef(false);
@@ -309,6 +344,31 @@ export function usePlaybackSession(
   const attemptedPlanKeysRef = useRef<string[]>([]);
   const attemptCountRef = useRef(1);
   const replanInFlightRef = useRef(false);
+  // The attempt whose first frame is still to be reported. `intentAt` is the
+  // `performance.now()` of the viewer's request that started it, or null when
+  // nothing timed it; the event is still sent, just without a duration.
+  const firstFrameRef = useRef<{
+    attemptId: string;
+    intentAt: number | null;
+    reported: boolean;
+  } | null>(null);
+  // Adoptions in flight, counted per load sequence: a start or a replan whose
+  // decision has not been applied yet. The server commits a replacement plan —
+  // and starts the copy-safety scan behind it — before the client can read the
+  // response, so a `plan_invalidated` command can name a plan this client is
+  // still adopting. Waiters registered here are woken once their own sequence
+  // has nothing in flight, which lets an invalidation decide against the plan
+  // that actually won.
+  //
+  // The key is what makes the wait bounded. A superseded request — a version
+  // switch abandoned mid-flight, a start whose `fetch` never settles — is not a
+  // candidate to own the session any more, so waiting for it decides nothing
+  // and is worse than not waiting: the server's invalidation deadline is 8s,
+  // and a session that misses it is stopped outright. Only the sequence that
+  // currently owns the session can still change what the invalidation should
+  // decide against, so only it is waited on.
+  const adoptionsInFlightRef = useRef(new Map<number, number>());
+  const adoptionWaitersRef = useRef<Array<{ loadSequence: number; resolve: () => void }>>([]);
   const pendingReplanRef = useRef<{
     options: ReplanOptions;
     loadSequence: number;
@@ -325,6 +385,54 @@ export function usePlaybackSession(
     stateRef.current = state;
   }, [state]);
 
+  const beginAdoption = useCallback((loadSequence: number) => {
+    const inFlight = adoptionsInFlightRef.current;
+    inFlight.set(loadSequence, (inFlight.get(loadSequence) ?? 0) + 1);
+  }, []);
+
+  /**
+   * Counts one in-flight adoption out of its load sequence.
+   *
+   * A sequence's waiters are woken only when nothing is left in flight for it:
+   * a queued replan is dispatched from its predecessor's `finally` before the
+   * predecessor is counted out, so the count tracks the whole chain rather than
+   * one request.
+   */
+  const endAdoption = useCallback((loadSequence: number) => {
+    const inFlight = adoptionsInFlightRef.current;
+    const remaining = (inFlight.get(loadSequence) ?? 0) - 1;
+    if (remaining > 0) {
+      inFlight.set(loadSequence, remaining);
+      return;
+    }
+    inFlight.delete(loadSequence);
+    const waiters = adoptionWaitersRef.current;
+    if (waiters.length === 0) return;
+    const settled = waiters.filter((waiter) => !inFlight.has(waiter.loadSequence));
+    if (settled.length === 0) return;
+    adoptionWaitersRef.current = waiters.filter((waiter) => inFlight.has(waiter.loadSequence));
+    for (const waiter of settled) waiter.resolve();
+  }, []);
+
+  /**
+   * Resolves once the sequence that currently owns the session has no start or
+   * replan in flight, or null when it has none — callers act synchronously in
+   * the common case rather than deferring a turn.
+   *
+   * A request from a superseded sequence is deliberately not waited for. It can
+   * no longer install a plan (every path re-checks the sequence before adopting
+   * one), so it has nothing left to say about what an invalidation should
+   * decide against, and a hung one would otherwise hold the wait open past the
+   * server's deadline and cost the live session its stream.
+   */
+  const awaitAdoptionSettled = useCallback((): Promise<void> | null => {
+    const loadSequence = loadSequenceRef.current;
+    if (!adoptionsInFlightRef.current.has(loadSequence)) return null;
+    return new Promise<void>((resolve) => {
+      adoptionWaitersRef.current.push({ loadSequence, resolve });
+    });
+  }, []);
+
   const reportEvent = useCallback(
     (
       event: RouteEventNameV3,
@@ -337,12 +445,17 @@ export function usePlaybackSession(
       const attemptId = playbackAttemptIdRef.current;
       if (!attemptId) return;
       const plan = planRef.current;
-      void reportRouteEventV3(config, {
+      const input = {
         event,
         playbackAttemptId: attemptId,
         ...routeEventPlanIdentityV3(plan, sessionIdRef.current, planAttemptIdRef.current),
         ...extra,
-      });
+      };
+      const sessionId = sessionIdRef.current;
+      if (sessionId && hasSequencedProgress(sessionId)) {
+        void reportSessionRouteEventV2(config, sessionId, buildRouteEventV3(input));
+      }
+      // A terminal start never produced a session; there is nothing to report it against.
     },
     [config],
   );
@@ -352,7 +465,10 @@ export function usePlaybackSession(
    * Returns whether a plan was adopted.
    */
   const adoptDecision = useCallback(
-    (decision: DecisionResponseV3): boolean => {
+    (
+      decision: DecisionResponseV3,
+      initialSubtitleFailure?: PlaybackSessionErrorState | null,
+    ): boolean => {
       serverFeaturesRef.current = decision.server_features;
       const plan = decision.playback_plan;
       if (!plan) {
@@ -369,6 +485,7 @@ export function usePlaybackSession(
           replacing: false,
           replanning: false,
           errorTitle: failure.title,
+          errorReason: decision.terminal?.reason ?? null,
           error: failure.message,
         }));
         return false;
@@ -391,8 +508,8 @@ export function usePlaybackSession(
         awaitingInitialPlayerPositionRef.current = plan.timeline.source_start_seconds > 0;
       }
 
-      setState(
-        planToSessionState(
+      setState((current) => ({
+        ...planToSessionState(
           plan,
           sessionId ?? null,
           playbackAttemptIdRef.current ?? "",
@@ -401,7 +518,15 @@ export function usePlaybackSession(
           playbackPlayingRef.current,
           config,
         ),
-      );
+        initialSubtitleErrorTitle:
+          initialSubtitleFailure === undefined
+            ? current.initialSubtitleErrorTitle
+            : (initialSubtitleFailure?.title ?? null),
+        initialSubtitleError:
+          initialSubtitleFailure === undefined
+            ? current.initialSubtitleError
+            : (initialSubtitleFailure?.message ?? null),
+      }));
       reportEvent("plan_selected");
       return true;
     },
@@ -414,15 +539,19 @@ export function usePlaybackSession(
       position: number,
       forceStartPosition: boolean,
       playbackAttemptId: string,
+      subtitleTrackIndex: number | undefined,
     ): Promise<DecisionResponseV3> => {
       const body = buildStartRequestV3({
+        extraClientFeatures: VIDEO_CLIENT_FEATURES_V3,
         fileId: targetFileId,
         profileId: config.getProfileId() ?? "",
         playbackAttemptId,
         qualityPreference: qualityRef.current,
+        allowAlternateVersions,
         position,
         forceStartPosition,
         explicitAudioTrackIndex,
+        subtitleTrackIndex,
         metered: detectMeteredV3(),
         bandwidthEstimateKbps: detectBandwidthEstimateKbpsV3(),
         bandwidthCapKbps: maxBitrateKbps,
@@ -430,19 +559,21 @@ export function usePlaybackSession(
         clientPlaybackContext,
       });
 
-      return playerFetch<DecisionResponseV3>(config, "/playback/start", {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
+      return await startPlaybackV2(config, body);
     },
-    [clientCapabilities, clientPlaybackContext, config, explicitAudioTrackIndex, maxBitrateKbps],
+    [
+      allowAlternateVersions,
+      clientCapabilities,
+      clientPlaybackContext,
+      config,
+      explicitAudioTrackIndex,
+      maxBitrateKbps,
+    ],
   );
 
   const stopSession = useCallback(
     async (sessionId: string) => {
-      await playerFetch(config, `/playback/${sessionId}`, {
-        method: "DELETE",
-      });
+      await stopSequencedSession(config, sessionId);
     },
     [config],
   );
@@ -505,6 +636,7 @@ export function usePlaybackSession(
       allowPreserveExistingSessionOnError,
       replacementErrorMessage,
       initialErrorMessage,
+      intentAt,
     }: {
       preferredFileId?: number;
       position: number;
@@ -512,6 +644,8 @@ export function usePlaybackSession(
       allowPreserveExistingSessionOnError: boolean;
       replacementErrorMessage: string;
       initialErrorMessage: string;
+      /** When the viewer asked for this start, for its first_frame_ms. */
+      intentAt: number | null;
     }) => {
       const previousState = stateRef.current;
       const previousSessionId = sessionIdRef.current;
@@ -535,11 +669,14 @@ export function usePlaybackSession(
         loading: !hasExistingSession,
         replacing: hasExistingSession,
         errorTitle: hasExistingSession ? current.errorTitle : null,
+        errorReason: null,
         error: hasExistingSession ? current.error : null,
+        initialSubtitleErrorTitle: hasExistingSession ? current.initialSubtitleErrorTitle : null,
+        initialSubtitleError: hasExistingSession ? current.initialSubtitleError : null,
       }));
 
       // A start begins a new attempt chain: fresh attempt id, empty loop guard.
-      const playbackAttemptId = randomUUID();
+      let playbackAttemptId = randomUUID();
       playbackAttemptIdRef.current = playbackAttemptId;
       attemptedPlanKeysRef.current = [];
       attemptCountRef.current = 1;
@@ -572,6 +709,7 @@ export function usePlaybackSession(
         }));
       };
 
+      beginAdoption(loadSequence);
       try {
         const selectedFileId = selectFileId(preferredFileId);
         if (!selectedFileId) {
@@ -583,6 +721,7 @@ export function usePlaybackSession(
           position,
           forceStartPosition,
           playbackAttemptId,
+          initialSubtitleTrackIndexByFileId?.[selectedFileId],
         );
 
         if (loadSequence !== loadSequenceRef.current) {
@@ -595,7 +734,56 @@ export function usePlaybackSession(
           return;
         }
 
-        const adopted = adoptDecision(decision);
+        let decisionToAdopt = decision;
+        let initialSubtitleFailure: PlaybackSessionErrorState | null = null;
+        const bitmapSubtitleTrackIndex = initialBitmapSubtitleTrackIndexByFileId?.[selectedFileId];
+        if (!decision.playback_plan && bitmapSubtitleTrackIndex !== undefined) {
+          initialSubtitleFailure = describeDecisionWithoutPlan(decision);
+          if (decision.session_id) {
+            void stopSession(decision.session_id).catch(() => {
+              // Best effort cleanup for the refused subtitle-bearing start.
+            });
+          }
+
+          // A fresh attempt id avoids colliding with start idempotency: the
+          // retry intentionally changes the request by dropping the bitmap
+          // subtitle that made the first plan impossible.
+          const fallbackPlaybackAttemptId = randomUUID();
+          playbackAttemptId = fallbackPlaybackAttemptId;
+          playbackAttemptIdRef.current = fallbackPlaybackAttemptId;
+          decisionToAdopt = await requestStart(
+            selectedFileId,
+            position,
+            forceStartPosition,
+            fallbackPlaybackAttemptId,
+            undefined,
+          );
+          if (!decisionToAdopt.playback_plan) {
+            initialSubtitleFailure = null;
+          }
+        }
+
+        if (loadSequence !== loadSequenceRef.current) {
+          const staleSessionId =
+            decisionToAdopt.playback_plan?.session_id ??
+            decisionToAdopt.session_id ??
+            decision.playback_plan?.session_id ??
+            decision.session_id;
+          if (staleSessionId) {
+            await stopSession(staleSessionId).catch(() => {
+              // Best effort cleanup for a superseded start/replan chain.
+            });
+          }
+          return;
+        }
+
+        const adopted = adoptDecision(decisionToAdopt, initialSubtitleFailure);
+        if (adopted) {
+          // A start opens a new attempt. Its first frame is still to come:
+          // whatever the player shows until the new transport loads belongs to
+          // the attempt it replaced.
+          firstFrameRef.current = { attemptId: playbackAttemptId, intentAt, reported: false };
+        }
         if (!adopted && hasExistingSession && allowPreserveExistingSessionOnError) {
           restorePreviousAttempt();
           setState((current) => ({
@@ -603,6 +791,7 @@ export function usePlaybackSession(
             loading: false,
             replacing: false,
             errorTitle: previousState.errorTitle,
+            errorReason: previousState.errorReason,
             error: previousState.error,
           }));
           return;
@@ -634,12 +823,24 @@ export function usePlaybackSession(
 
         const nextError = describePlaybackSessionError(err, initialErrorMessage);
         retirePreviousSession(nextError);
+      } finally {
+        endAdoption(loadSequence);
       }
     },
-    [adoptDecision, requestStart, selectFileId, stopSession],
+    [
+      adoptDecision,
+      beginAdoption,
+      endAdoption,
+      initialBitmapSubtitleTrackIndexByFileId,
+      initialSubtitleTrackIndexByFileId,
+      requestStart,
+      selectFileId,
+      stopSession,
+    ],
   );
 
   useEffect(() => {
+    if (!capabilitiesSettled) return;
     if (activeRequestKeyRef.current === requestKey) {
       return;
     }
@@ -647,9 +848,11 @@ export function usePlaybackSession(
     activeCapabilityRequestKeyRef.current = capabilityRequestKey;
     qualityRef.current = qualityPreference?.trim() || "auto";
     playbackPositionRef.current = initialPosition;
+    const intentAt = takePlaybackIntent(requestKey);
     startIntentRef.current = {
       position: initialPosition,
       forceStartPosition: forceInitialPosition,
+      intentAt,
     };
     hasAdoptedPlanRef.current = false;
     awaitingInitialPlayerPositionRef.current = false;
@@ -663,9 +866,11 @@ export function usePlaybackSession(
       allowPreserveExistingSessionOnError: false,
       replacementErrorMessage: "Failed to replace playback request",
       initialErrorMessage: "Failed to start playback",
+      intentAt,
     });
   }, [
     capabilityRequestKey,
+    capabilitiesSettled,
     fileId,
     forceInitialPosition,
     initialPosition,
@@ -677,26 +882,15 @@ export function usePlaybackSession(
   // Clean up session on unmount.
   useEffect(() => {
     return () => {
+      // A start can finish after unmount, before it has published a session ID.
+      // Let that reply take the stale-start path and stop its own session
+      // instead of adopting it into an abandoned player.
+      loadSequenceRef.current += 1;
       const sid = sessionIdRef.current;
       if (!sid) return;
-
-      const token = config.getAccessToken();
-      const profileId = config.getProfileId();
-      const url = `${config.apiBaseUrl}/playback/${sid}`;
-
-      const headers: Record<string, string> = {};
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-      if (profileId) headers["X-Profile-Id"] = profileId;
-      const profileToken = config.getProfileToken?.();
-      if (profileToken) headers["X-Profile-Token"] = profileToken;
-
-      // sendBeacon doesn't support DELETE, so use fetch with keepalive.
-      fetch(url, {
-        method: "DELETE",
-        headers,
-        keepalive: true,
-      }).catch(() => {
-        // Best effort — if fetch fails, session will time out server-side.
+      // sendBeacon doesn't support DELETE, so the stop uses fetch keepalive.
+      void stopSequencedSession(config, sid, true).catch(() => {
+        // Best effort: the session expires server-side.
       });
     };
   }, [config]);
@@ -793,6 +987,7 @@ export function usePlaybackSession(
 
       const body = buildReplanRequestV3({
         ...options,
+        extraClientFeatures: VIDEO_CLIENT_FEATURES_V3,
         plan,
         playbackAttemptId,
         replanRequestId: randomUUID(),
@@ -809,19 +1004,17 @@ export function usePlaybackSession(
 
       const loadSequence = loadSequenceRef.current;
       replanInFlightRef.current = true;
+      beginAdoption(loadSequence);
       setState((current) => ({
         ...current,
         replanning: true,
         errorTitle: null,
+        errorReason: null,
         error: null,
       }));
 
       try {
-        const decision = await playerFetch<DecisionResponseV3>(
-          config,
-          `/playback/${sessionId}/replan`,
-          { method: "POST", body: JSON.stringify(body) },
-        );
+        const decision = await replanV2(config, sessionId, body);
 
         // A version switch or a fresh start that landed while this was in
         // flight owns the session now; this plan is already superseded.
@@ -835,7 +1028,13 @@ export function usePlaybackSession(
           attemptCountRef.current = 1;
         }
 
-        const adopted = adoptDecision(decision);
+        // Keep a refused-start subtitle pinned off across unrelated replans.
+        // A successful explicit subtitle choice is the one action that clears
+        // the marker and lets the new server-selected track take ownership.
+        const adopted = adoptDecision(
+          decision,
+          options.operation === "track_change" && options.subtitle !== undefined ? null : undefined,
+        );
         if (!adopted && retireSessionOnRefusal) {
           const pending = pendingReplanRef.current;
           const pendingCanValidateOutput =
@@ -868,6 +1067,7 @@ export function usePlaybackSession(
           ...current,
           replanning: false,
           errorTitle: nextError.title,
+          errorReason: null,
           error: nextError.message,
         }));
         return false;
@@ -896,13 +1096,18 @@ export function usePlaybackSession(
         } else {
           pendingReplan?.resolve(false);
         }
+        // Last: a queued replan dispatched just above has already counted
+        // itself in, so waiters are not woken between the two links of a chain.
+        endAdoption(loadSequence);
       }
     },
     [
       adoptDecision,
+      beginAdoption,
       clientCapabilities,
       clientPlaybackContext,
       config,
+      endAdoption,
       maxBitrateKbps,
       retireActiveSession,
     ],
@@ -910,6 +1115,7 @@ export function usePlaybackSession(
   issueReplanRef.current = replan;
 
   useEffect(() => {
+    if (!capabilitiesSettled) return;
     if (
       activeRequestKeyRef.current !== requestKey ||
       activeCapabilityRequestKeyRef.current === capabilityRequestKey
@@ -930,6 +1136,10 @@ export function usePlaybackSession(
         allowPreserveExistingSessionOnError: false,
         replacementErrorMessage: "Failed to refresh playback output",
         initialErrorMessage: "Failed to refresh playback output",
+        // Before any plan was adopted, the viewer is still waiting on the
+        // Play they pressed, so the replacement start keeps its clock. After
+        // one, video has been shown and nobody pressed Play for this start.
+        intentAt: resumeFromAdoptedPlan ? null : startIntent.intentAt,
       });
       return;
     }
@@ -945,7 +1155,15 @@ export function usePlaybackSession(
       },
       true,
     );
-  }, [capabilityRequestKey, fileId, loadSession, replan, requestKey, retireActiveSession]);
+  }, [
+    capabilityRequestKey,
+    capabilitiesSettled,
+    fileId,
+    loadSession,
+    replan,
+    requestKey,
+    retireActiveSession,
+  ]);
 
   const switchAudioTrack = useCallback(
     (index: number, currentPosition: number) => {
@@ -1008,12 +1226,52 @@ export function usePlaybackSession(
     [replan, reportEvent],
   );
 
+  /**
+   * Replans off a plan the server invalidated mid-playback.
+   *
+   * This is an ordinary `failure_recovery`, deliberately: that operation is
+   * what folds the current plan's attempt key into `attempted_plan_keys`, so
+   * the route the server just disqualified is excluded from the replacement
+   * plan without the client reasoning about deliveries at all. The plan
+   * revision the adopted plan bumps rebuilds the transport and restores the
+   * position, exactly as it does after a client-detected failure.
+   *
+   * A start or replan already in flight is waited out first. The server commits
+   * a replacement plan and starts the copy-safety scan behind it *before* the
+   * response reaches the client, so an invalidation can name a plan this client
+   * has not adopted yet. Deciding against the plan currently on screen would
+   * complete the command as a no-op and then let the pending response install
+   * the very route the server just withdrew.
+   */
+  const invalidatePlan = useCallback(
+    async (planId: string, reason: string, currentPosition: number): Promise<boolean> => {
+      const settling = awaitAdoptionSettled();
+      if (settling) await settling;
+      const plan = planRef.current;
+      if (!plan) return false;
+      // The command names the plan the server invalidated. Once the client has
+      // moved past it there is nothing to recover from, and replanning anyway
+      // would evict a route the server never complained about. That stays true
+      // for a plan id this client has never seen: it is a verdict for a route
+      // that has already been replaced, not a reason to tear the session down.
+      if (plan.plan_id !== planId) return true;
+      const classification = reason.trim().slice(0, 64) || "plan_invalidated";
+      reportEvent("plan_invalidated", { fallbackReason: classification });
+      return replan({
+        operation: "failure_recovery",
+        positionSeconds: currentPosition,
+        failure: { classification, message: "The server invalidated this plan." },
+      });
+    },
+    [awaitAdoptionSettled, replan, reportEvent],
+  );
+
   const reanchorSeek = useCallback(
-    (positionSeconds: number) => {
+    (positionSeconds: number): Promise<boolean> => {
       playbackPositionRef.current = positionSeconds;
       awaitingInitialPlayerPositionRef.current = false;
       reportEvent("seek_reanchor_requested");
-      void replan({ operation: "seek_reanchor", positionSeconds });
+      return replan({ operation: "seek_reanchor", positionSeconds });
     },
     [replan, reportEvent],
   );
@@ -1077,11 +1335,29 @@ export function usePlaybackSession(
     }
   }, []);
 
+  const reportFirstFrame = useCallback(() => {
+    const attempt = firstFrameRef.current;
+    // Until a start's plan is adopted, the attempt id has already moved on and
+    // the frame on screen belongs to the attempt being replaced.
+    if (!attempt || attempt.reported || attempt.attemptId !== playbackAttemptIdRef.current) return;
+    attempt.reported = true;
+    reportEvent(
+      "first_frame",
+      attempt.intentAt === null
+        ? undefined
+        : { diagnostics: { first_frame_ms: Math.round(performance.now() - attempt.intentAt) } },
+    );
+  }, [reportEvent]);
+
   const switchVersion = useCallback(
     (newFileId: number, currentPosition: number) => {
+      if (!allowAlternateVersions) return;
       if (switchingRef.current) return;
       if (newFileId === stateRef.current.mediaFileId) return;
       switchingRef.current = true;
+      // The viewer picked the version in the player: the new attempt's first
+      // frame is timed from here.
+      const intentAt = performance.now();
 
       (async () => {
         try {
@@ -1095,13 +1371,14 @@ export function usePlaybackSession(
             allowPreserveExistingSessionOnError: false,
             replacementErrorMessage: "Failed to switch playback version",
             initialErrorMessage: "Failed to switch version",
+            intentAt,
           });
         } finally {
           switchingRef.current = false;
         }
       })();
     },
-    [loadSession],
+    [allowAlternateVersions, loadSession],
   );
 
   return {
@@ -1111,10 +1388,12 @@ export function usePlaybackSession(
     changeSubtitleTrack,
     changeQuality,
     recoverFromFailure,
+    invalidatePlan,
     reanchorSeek,
     refreshSubtitles,
     applySubtitleTrack,
     updatePlaybackState,
+    reportFirstFrame,
     reportEvent,
   };
 }

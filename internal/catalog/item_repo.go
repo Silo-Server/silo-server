@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/pathscope"
@@ -133,6 +135,17 @@ func (r *ItemRepository) GetPosterPath(ctx context.Context, contentID string) (s
 // incidental one-mention hits that flooded results before.
 const overviewMatchFloor = 0.15
 
+// A catalog search is interactive work. Bound the complete PostgreSQL FTS +
+// fuzzy path independently of client cancellation so a pathological query can
+// never consume a connection and CPU for minutes after the user has moved on.
+const postgresSearchTimeout = 3 * time.Second
+
+// A timed-out fuzzy query leaves its transaction needing a rollback, but the
+// request context is already unusable at that point. Give cleanup its own
+// short bound so the pool can reuse the connection instead of discarding it;
+// this is cleanup-only and cannot extend the search response deadline.
+const postgresSearchRollbackTimeout = time.Second
+
 // fuzzyFallbackThreshold is the FTS result count below which SearchPage reaches
 // for the trigram fuzzy fallback (buildFuzzySearchSQL). At or above it the FTS
 // result set is considered rich enough that a "did you mean" pass would only add
@@ -147,6 +160,19 @@ const fuzzyFallbackThreshold = 5
 // to paginate hundreds of low-similarity typo matches; when the true match count
 // exceeds this, the overflow is logged and the total is reported as inexact.
 const fuzzyMaxResults = 50
+
+// fuzzyRerankMaxAliasesPerItem bounds the only extra metadata the in-process
+// typo reranker may read. Candidate rows are already capped by fuzzyMaxResults,
+// so this makes its worst case 50 items / 200 relevant aliases regardless of
+// total library size.
+const fuzzyRerankMaxAliasesPerItem = 4
+
+const (
+	fuzzyRerankMaxQueryTokens = 16
+	fuzzyRerankMaxTitleTokens = 64
+	fuzzyRerankMaxTokenRunes  = 64
+	fuzzyRerankMaxTitleBytes  = 1024
+)
 
 // trgmWordSimilarityThreshold pins pg_trgm.strict_word_similarity_threshold
 // for the fuzzy query via SET LOCAL. The <<% operator's selectivity is
@@ -171,6 +197,13 @@ const fuzzyAugmentSimilarityFloor = 0.45
 // item queries. Shared by itemColumns, qualifiedItemColumns, and
 // qualifiedListItemColumns so the select lists can never drift from each
 // other or from scanItem.
+// Advisory column names, shared by every select list and scan-order check in
+// this package so a rename cannot drift between them.
+const (
+	advisoryAgeColumn    = "advisory_age"
+	advisorySourceColumn = "advisory_source"
+)
+
 var itemColumnNames = []string{
 	"content_id", "type", "title", "sort_title", "default_metadata_language", "original_title", "year", "genres",
 	"content_rating", "runtime", "overview", "tagline",
@@ -182,12 +215,14 @@ var itemColumnNames = []string{
 	"show_status",
 	"matched_at", "last_refreshed", "refresh_failures",
 	"episode_metadata_incomplete", "episode_metadata_last_checked_at", "locked_fields", "status", "created_at", "updated_at",
+	advisoryAgeColumn, advisorySourceColumn,
 }
 
 // nullableStringItemColumns are media_items columns that may hold NULL but
 // scan into plain (non-pointer) string fields on models.MediaItem, so select
 // lists coalesce them to ”.
 var nullableStringItemColumns = map[string]bool{
+	advisorySourceColumn:   true,
 	"poster_path":          true,
 	"poster_source_path":   true,
 	"poster_thumbhash":     true,
@@ -307,6 +342,8 @@ func scanItem(row pgx.Row) (*models.MediaItem, error) {
 		&item.Status,
 		&item.CreatedAt,
 		&item.UpdatedAt,
+		&item.AdvisoryAge,
+		&item.AdvisorySource,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -373,6 +410,8 @@ func listItemScanDests(item *models.MediaItem) []any {
 		&item.Status,
 		&item.CreatedAt,
 		&item.UpdatedAt,
+		&item.AdvisoryAge,
+		&item.AdvisorySource,
 	}
 }
 
@@ -467,9 +506,40 @@ func (r *ItemRepository) UpsertTx(ctx context.Context, tx pgx.Tx, item *models.M
 	return r.upsert(ctx, tx, item)
 }
 
+// InsertIfAbsent inserts a new media item and leaves an existing row with the
+// same content_id untouched. It reports whether this call inserted the row, so
+// concurrent creators of a deterministic content_id can tell the winner apart
+// without overwriting metadata another writer already stored.
+func (r *ItemRepository) InsertIfAbsent(ctx context.Context, item *models.MediaItem) (bool, error) {
+	if r.searchIndexEvents.disabledByActiveProvider() {
+		return r.writeItem(ctx, r.pool, item, false)
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("begin media item insert tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	inserted, err := r.writeItem(ctx, tx, item, false)
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit media item insert tx: %w", err)
+	}
+	return inserted, nil
+}
+
 func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *models.MediaItem) error {
+	_, err := r.writeItem(ctx, execer, item, true)
+	return err
+}
+
+// writeItem inserts item and, when update is set, overwrites every mutable
+// field of an existing row. It reports whether a row was written.
+func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item *models.MediaItem, update bool) (bool, error) {
 	if item.ContentID == "" {
-		return fmt.Errorf("refusing to upsert media item with empty content_id")
+		return false, fmt.Errorf("refusing to write media item with empty content_id")
 	}
 	studios := nonNilStringSlice(item.Studios)
 	networks := nonNilStringSlice(item.Networks)
@@ -486,7 +556,9 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 			studios, networks, countries, keywords, original_language, release_date, first_air_date, last_air_date, air_time, air_timezone,
 			show_status,
 			matched_at, last_refreshed, refresh_failures,
-			episode_metadata_incomplete, episode_metadata_last_checked_at, status
+			episode_metadata_incomplete, episode_metadata_last_checked_at, status,
+			content_rating_age,
+			advisory_age, advisory_source
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8,
 			$9, $10, $11, $12,
@@ -497,8 +569,14 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 			$31, $32, $33, $34, $35, $36, $37, $38, $39, $40,
 			$41,
 			$42, $43, $44,
-			$45, $46, $47
-		)
+			$45, $46, $47,
+			$48,
+			$49, $50
+		)`
+	conflict := `
+		ON CONFLICT (content_id) DO NOTHING`
+	if update {
+		conflict = `
 		ON CONFLICT (content_id) DO UPDATE SET
 			type = EXCLUDED.type,
 			title = EXCLUDED.title,
@@ -546,9 +624,18 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 			episode_metadata_incomplete = EXCLUDED.episode_metadata_incomplete,
 			episode_metadata_last_checked_at = EXCLUDED.episode_metadata_last_checked_at,
 			status = EXCLUDED.status,
+			content_rating_age = EXCLUDED.content_rating_age,
+			advisory_age = EXCLUDED.advisory_age,
+			advisory_source = EXCLUDED.advisory_source,
 			updated_at = NOW()`
+	}
 
-	_, err := execer.Exec(ctx, query,
+	// The stored age is derived here, never in SQL: access.Normalize is the one
+	// ladder, and content_rating stays the verbatim provider string.
+	contentRatingAge := access.StoredRating(item.ContentRating)
+	advisoryAge, advisorySource := models.AdvisoryColumns(item.Type, item.AdvisoryAge, item.AdvisorySource)
+
+	tag, err := execer.Exec(ctx, query+conflict,
 		item.ContentID,
 		item.Type,
 		item.Title,
@@ -596,16 +683,22 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 		item.EpisodeMetadataIncomplete,
 		item.EpisodeMetadataLastCheckedAt,
 		item.Status,
+		contentRatingAge,
+		advisoryAge,
+		advisorySource,
 	)
 	if err != nil {
-		return fmt.Errorf("upserting media item: %w", err)
+		return false, fmt.Errorf("writing media item: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return false, nil
 	}
 
 	if err := r.searchIndexEvents.EnqueueUpsert(ctx, execer, item.ContentID); err != nil {
-		return fmt.Errorf("enqueueing catalog search upsert: %w", err)
+		return false, fmt.Errorf("enqueueing catalog search upsert: %w", err)
 	}
 
-	return nil
+	return true, nil
 }
 
 func nonNilStringSlice(values []string) []string {
@@ -619,6 +712,12 @@ func nonNilStringSlice(values []string) []string {
 func (r *ItemRepository) GetByID(ctx context.Context, contentID string) (*models.MediaItem, error) {
 	query := `SELECT ` + itemColumns + ` FROM media_items WHERE content_id = $1`
 	return scanItem(r.pool.QueryRow(ctx, query, contentID))
+}
+
+// GetByIDTx retrieves a media item within the caller's transaction.
+func (r *ItemRepository) GetByIDTx(ctx context.Context, tx pgx.Tx, contentID string) (*models.MediaItem, error) {
+	query := `SELECT ` + itemColumns + ` FROM media_items WHERE content_id = $1`
+	return scanItem(tx.QueryRow(ctx, query, contentID))
 }
 
 // GetByIDs retrieves multiple media items by their content IDs.
@@ -691,15 +790,66 @@ func (r *ItemRepository) buildGetByIDsWithAccessSQL(contentIDs []string, access 
 	args := []any{contentIDs}
 	argIdx := 2
 
-	var conditions []string
-	appendLibraryAccessConditions("mi.content_id", access, &conditions, &args, &argIdx)
-	applyAccessFilter("mi", AccessFilter{MaxContentRating: access.MaxContentRating, ExcludedMediaTypes: access.ExcludedMediaTypes}, &conditions, &args, &argIdx)
-	for _, c := range conditions {
+	for _, c := range itemAccessConditions(access, &args, &argIdx) {
 		sql += "\n            AND " + c
 	}
 
 	sql += " ORDER BY mi.content_id ASC"
 	return sql, args
+}
+
+// itemAccessConditions are the predicates over media_items mi that decide
+// whether the viewer may see an item addressed by ID: library access, the
+// maturity limits, and excluded media types.
+func itemAccessConditions(access AccessFilter, args *[]any, argIdx *int) []string {
+	var conditions []string
+	appendLibraryAccessConditions("mi.content_id", access, &conditions, args, argIdx)
+	applyAccessFilter("mi", AccessFilter{MaturityLimits: access.MaturityLimits, ExcludedMediaTypes: access.ExcludedMediaTypes}, &conditions, args, argIdx)
+	return conditions
+}
+
+// CountVisiblePersonalCollectionMembers counts, per collection, the members of
+// the account's hand-picked or imported personal collections that the viewer
+// can see, as their catalog view counts them. It ignores smart definitions and
+// display filters; CountPersonalCollections handles those collections.
+// Collections with no visible members are absent from the result. It reads the
+// Postgres user store's membership table, so callers must not use it for
+// collections kept elsewhere.
+func (r *ItemRepository) CountVisiblePersonalCollectionMembers(ctx context.Context, userID int, collectionIDs []string, access AccessFilter) (map[string]int, error) {
+	counts := make(map[string]int, len(collectionIDs))
+	if len(collectionIDs) == 0 || (access.AllowedLibraryIDs != nil && len(access.AllowedLibraryIDs) == 0) {
+		return counts, nil
+	}
+	sql, args := buildCountVisiblePersonalCollectionMembersSQL(userID, collectionIDs, access)
+	rows, err := r.pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("counting visible personal collection members: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, fmt.Errorf("scanning personal collection member count: %w", err)
+		}
+		counts[id] = n
+	}
+	return counts, rows.Err()
+}
+
+func buildCountVisiblePersonalCollectionMembersSQL(userID int, collectionIDs []string, access AccessFilter) (string, []any) {
+	sql := `SELECT upci.collection_id, COUNT(*)
+            FROM user_personal_collection_items upci
+            JOIN media_items mi ON mi.content_id = upci.media_item_id
+            WHERE upci.user_id = $1 AND upci.collection_id = ANY($2) AND upci.sub_item_id = ''`
+	args := []any{userID, collectionIDs}
+	argIdx := 3
+	for _, c := range itemAccessConditions(access, &args, &argIdx) {
+		sql += "\n            AND " + c
+	}
+	// The catalog view never lists manga chapters as items.
+	sql += "\n            AND " + MangaChapterExclusionWhere("mi")
+	return sql + "\n            GROUP BY upci.collection_id", args
 }
 
 // GetOriginalLanguage returns the original_language for a media item by content ID.
@@ -920,6 +1070,8 @@ func (r *ItemRepository) SearchPage(
 	if filter.AllowedLibraryIDs != nil && len(filter.AllowedLibraryIDs) == 0 {
 		return []*models.MediaItem{}, 0, false, includeTotal, nil
 	}
+	ctx, cancel := context.WithTimeout(ctx, postgresSearchTimeout)
+	defer cancel()
 
 	parsed := parseSearchQuery(query)
 
@@ -1039,6 +1191,14 @@ func (r *ItemRepository) searchWithFuzzyFallback(
 	if !includeTotal && limit-len(ftsBlock) < fuzzyLimit {
 		fuzzyLimit = limit - len(ftsBlock)
 	}
+	// An exact normalized title is already the strongest possible correction.
+	// The sparse FTS block is complete here, and it already includes related
+	// prefix/title matches, so a second trigram scan can only add latency and
+	// noisy near-matches. Misspellings and alias-only hits still take the fuzzy
+	// path because their hydrated title does not equal the query.
+	if searchBlockHasExactTitle(ftsBlock, parsed.ExactTitleHint) {
+		fuzzyLimit = 0
+	}
 	minSimilarity := 0.0
 	if len(ftsBlock) > 0 {
 		minSimilarity = fuzzyAugmentSimilarityFloor
@@ -1049,7 +1209,7 @@ func (r *ItemRepository) searchWithFuzzyFallback(
 		fuzzySQL, _, fuzzyArgs := r.buildFuzzySearchFromParsed(parsed, itemTypes, fuzzyLimit+1, 0, filter, false, contentIDsFromMediaItems(ftsBlock), minSimilarity)
 		if fuzzySQL != "" {
 			var err error
-			fuzzyBlock, fuzzyTruncated, err = r.execFuzzyBlock(ctx, fuzzySQL, fuzzyArgs, fuzzyLimit)
+			fuzzyBlock, fuzzyTruncated, err = r.execFuzzyBlock(ctx, searchTextFromParsed(parsed), fuzzySQL, fuzzyArgs, fuzzyLimit)
 			if err != nil {
 				return nil, 0, false, includeTotal, err
 			}
@@ -1092,17 +1252,33 @@ func (r *ItemRepository) searchWithFuzzyFallback(
 	return page, total, hi < total, !fuzzyTruncated, nil
 }
 
+func searchBlockHasExactTitle(items []*models.MediaItem, normalizedTitle string) bool {
+	if normalizedTitle == "" {
+		return false
+	}
+	for _, item := range items {
+		if item != nil && normalizeTitleForComparison(item.Title) == normalizedTitle {
+			return true
+		}
+	}
+	return false
+}
+
 // execFuzzyBlock runs the fuzzy data query inside a transaction that pins
 // pg_trgm.strict_word_similarity_threshold, so the <<% operator's selectivity
 // cannot drift with cluster configuration (its 0.6 server default would reject
 // ordinary typos outright). The query was built with LIMIT fuzzyLimit+1; the
 // extra row only signals truncation and is trimmed from the returned block.
-func (r *ItemRepository) execFuzzyBlock(ctx context.Context, dataSQL string, args []any, fuzzyLimit int) ([]*models.MediaItem, bool, error) {
+func (r *ItemRepository) execFuzzyBlock(ctx context.Context, searchText, dataSQL string, args []any, fuzzyLimit int) ([]*models.MediaItem, bool, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, false, fmt.Errorf("beginning fuzzy search tx: %w", err)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer func() {
+		rollbackCtx, cancel := context.WithTimeout(context.Background(), postgresSearchRollbackTimeout)
+		defer cancel()
+		_ = tx.Rollback(rollbackCtx)
+	}()
 
 	if _, err := tx.Exec(ctx, fmt.Sprintf("SET LOCAL pg_trgm.strict_word_similarity_threshold = %g", trgmWordSimilarityThreshold)); err != nil {
 		return nil, false, fmt.Errorf("pinning trigram word-similarity threshold: %w", err)
@@ -1111,10 +1287,274 @@ func (r *ItemRepository) execFuzzyBlock(ctx context.Context, dataSQL string, arg
 	if err != nil {
 		return nil, false, err
 	}
+	if len(block) > 1 {
+		aliases, err := loadFuzzyRerankAliases(ctx, tx, searchText, block)
+		if err != nil {
+			return nil, false, err
+		}
+		if err := rerankFuzzyItems(ctx, searchText, block, aliases); err != nil {
+			return nil, false, err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, false, fmt.Errorf("committing fuzzy search tx: %w", err)
 	}
 	return block, truncated, nil
+}
+
+// loadFuzzyRerankAliases reads only aliases that passed the same indexed
+// strict-word predicate as the fuzzy candidate query. ROW_NUMBER applies the
+// cap per content ID; an item with pathological alias history cannot inflate
+// the in-process relevance workload.
+func loadFuzzyRerankAliases(ctx context.Context, q searchQuerier, searchText string, items []*models.MediaItem) (map[string][]string, error) {
+	contentIDs := contentIDsFromMediaItems(items)
+	if len(contentIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := q.Query(ctx, `
+		WITH matched AS (
+			SELECT
+				mia.content_id,
+				mia.normalized_title,
+				ROW_NUMBER() OVER (
+					PARTITION BY mia.content_id
+					ORDER BY
+						0.65 * similarity(public.normalize_search_text($2), mia.normalized_title)
+							+ 0.35 * strict_word_similarity(public.normalize_search_text($2), mia.normalized_title) DESC,
+						mia.normalized_title ASC
+				) AS alias_rank
+			FROM media_item_aliases mia
+			WHERE mia.content_id = ANY($1)
+			  AND public.normalize_search_text($2) <<% mia.normalized_title
+		)
+		SELECT content_id, normalized_title
+		FROM matched
+		WHERE alias_rank <= $3`, contentIDs, searchText, fuzzyRerankMaxAliasesPerItem)
+	if err != nil {
+		return nil, fmt.Errorf("loading bounded fuzzy aliases: %w", err)
+	}
+	defer rows.Close()
+
+	aliases := make(map[string][]string, len(contentIDs))
+	for rows.Next() {
+		var contentID, normalizedTitle string
+		if err := rows.Scan(&contentID, &normalizedTitle); err != nil {
+			return nil, fmt.Errorf("scanning fuzzy alias: %w", err)
+		}
+		aliases[contentID] = append(aliases[contentID], normalizedTitle)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating fuzzy aliases: %w", err)
+	}
+	return aliases, nil
+}
+
+type fuzzyTitleScore struct {
+	exact         bool
+	contiguous    bool
+	matchedTokens int
+	editDistance  int
+	extraTokens   int
+}
+
+type fuzzyRankedItem struct {
+	item  *models.MediaItem
+	score fuzzyTitleScore
+	order int
+}
+
+// rerankFuzzyItems is a deliberately tiny relevance layer over PostgreSQL's
+// indexed candidate set, not another search index. Its edit limits mirror the
+// auto-fuzziness policy used by Bleve (Apache-2.0): 0 edits for <=2 characters,
+// 1 for 3-5, and at most 2 for longer tokens. PostgreSQL still decides which
+// rows are candidates; this only prevents one strongly matching word from
+// outranking a phrase whose every token is a plausible typo correction.
+func rerankFuzzyItems(ctx context.Context, searchText string, items []*models.MediaItem, aliases map[string][]string) error {
+	query := normalizeTitleForComparison(searchText)
+	queryTokens, ok := boundedFuzzyTokens(query, fuzzyRerankMaxQueryTokens)
+	if !ok || len(queryTokens) == 0 || len(items) < 2 {
+		return nil
+	}
+
+	ranked := make([]fuzzyRankedItem, 0, len(items))
+	for i, item := range items {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		var variants []string
+		if item != nil {
+			variants = append(variants, aliases[item.ContentID]...)
+		}
+		if item != nil && len(item.Title) <= fuzzyRerankMaxTitleBytes {
+			variants = append(variants, item.Title)
+		}
+		score := fuzzyTitleScore{editDistance: int(^uint(0) >> 1), extraTokens: int(^uint(0) >> 1)}
+		for _, variant := range variants {
+			candidate := scoreFuzzyTitleVariant(query, queryTokens, variant)
+			if fuzzyTitleScoreBetter(candidate, score) {
+				score = candidate
+			}
+		}
+		ranked = append(ranked, fuzzyRankedItem{item: item, score: score, order: i})
+	}
+
+	sort.SliceStable(ranked, func(i, j int) bool {
+		if fuzzyTitleScoreBetter(ranked[i].score, ranked[j].score) {
+			return true
+		}
+		if fuzzyTitleScoreBetter(ranked[j].score, ranked[i].score) {
+			return false
+		}
+		return ranked[i].order < ranked[j].order
+	})
+	for i := range ranked {
+		items[i] = ranked[i].item
+	}
+	return nil
+}
+
+func scoreFuzzyTitleVariant(query string, queryTokens [][]rune, rawTitle string) fuzzyTitleScore {
+	title := normalizeTitleForComparison(rawTitle)
+	titleTokens, ok := boundedFuzzyTokens(title, fuzzyRerankMaxTitleTokens)
+	if !ok || len(titleTokens) == 0 {
+		return fuzzyTitleScore{editDistance: int(^uint(0) >> 1), extraTokens: int(^uint(0) >> 1)}
+	}
+	score := fuzzyTitleScore{
+		exact:       title == query,
+		contiguous:  strings.Contains(title, query),
+		extraTokens: absInt(len(titleTokens) - len(queryTokens)),
+	}
+	for _, queryToken := range queryTokens {
+		maxEdits := fuzzyAutoMaxEdits(len(queryToken))
+		best := maxEdits + 1
+		for _, titleToken := range titleTokens {
+			distance := boundedLevenshteinRunes(queryToken, titleToken, maxEdits)
+			if distance < best {
+				best = distance
+			}
+		}
+		if best <= maxEdits {
+			score.matchedTokens++
+		}
+		score.editDistance += best
+	}
+	return score
+}
+
+func fuzzyTitleScoreBetter(a, b fuzzyTitleScore) bool {
+	if a.exact != b.exact {
+		return a.exact
+	}
+	if a.matchedTokens != b.matchedTokens {
+		return a.matchedTokens > b.matchedTokens
+	}
+	if a.contiguous != b.contiguous {
+		return a.contiguous
+	}
+	if a.editDistance != b.editDistance {
+		return a.editDistance < b.editDistance
+	}
+	return a.extraTokens < b.extraTokens
+}
+
+func boundedFuzzyTokens(normalized string, maxTokens int) ([][]rune, bool) {
+	fields := strings.Fields(normalized)
+	if len(fields) > maxTokens {
+		return nil, false
+	}
+	tokens := make([][]rune, 0, len(fields))
+	for _, field := range fields {
+		runes := []rune(field)
+		if len(runes) > fuzzyRerankMaxTokenRunes {
+			return nil, false
+		}
+		tokens = append(tokens, runes)
+	}
+	return tokens, true
+}
+
+func fuzzyAutoMaxEdits(tokenRunes int) int {
+	switch {
+	case tokenRunes <= 2:
+		return 0
+	case tokenRunes <= 5:
+		return 1
+	default:
+		return 2
+	}
+}
+
+// boundedLevenshteinRunes computes only the small edit bands used by typo
+// search. Rows that cannot finish within maxEdits return maxEdits+1 early, so
+// CPU and scratch memory are bounded by short title-token lengths.
+func boundedLevenshteinRunes(a, b []rune, maxEdits int) int {
+	if absInt(len(a)-len(b)) > maxEdits {
+		return maxEdits + 1
+	}
+	if len(a) == 0 {
+		if len(b) <= maxEdits {
+			return len(b)
+		}
+		return maxEdits + 1
+	}
+	if len(b) == 0 {
+		if len(a) <= maxEdits {
+			return len(a)
+		}
+		return maxEdits + 1
+	}
+	if len(a) > len(b) {
+		a, b = b, a
+	}
+
+	previous := make([]int, len(a)+1)
+	current := make([]int, len(a)+1)
+	for i := range previous {
+		previous[i] = i
+	}
+	for row, right := range b {
+		current[0] = row + 1
+		rowMin := current[0]
+		for col, left := range a {
+			cost := 0
+			if left != right {
+				cost = 1
+			}
+			current[col+1] = minInt(
+				previous[col+1]+1,
+				current[col]+1,
+				previous[col]+cost,
+			)
+			if current[col+1] < rowMin {
+				rowMin = current[col+1]
+			}
+		}
+		if rowMin > maxEdits {
+			return maxEdits + 1
+		}
+		previous, current = current, previous
+	}
+	if previous[len(a)] > maxEdits {
+		return maxEdits + 1
+	}
+	return previous[len(a)]
+}
+
+func minInt(values ...int) int {
+	minimum := values[0]
+	for _, value := range values[1:] {
+		if value < minimum {
+			minimum = value
+		}
+	}
+	return minimum
+}
+
+func absInt(value int) int {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
 
 // searchQuerier is the subset of pgxpool.Pool / pgx.Tx that execSearchBlock
@@ -1203,6 +1643,7 @@ func (r *ItemRepository) execSearchBlock(ctx context.Context, q searchQuerier, d
 //	$2               titlePrefixTsQuery (always)
 //	itemType placeholders, allowed/disabled libraries, MaxContentRating
 //	parsed.ExactTitleHint
+//	parsed.NormalizedText (leading-short title lookups only)
 //	parsed.Year (or NULL)
 //	parsed.Phrase
 //	limit, offset
@@ -1270,7 +1711,7 @@ func appendSearchScopeFilters(itemTypes []string, filter AccessFilter, condition
 	// needs no JOIN.
 	appendLibraryAccessConditions("mi.content_id", filter, conditions, args, argIdx)
 
-	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating, ExcludedMediaTypes: filter.ExcludedMediaTypes}, conditions, args, argIdx)
+	applyAccessFilter("mi", AccessFilter{MaturityLimits: filter.MaturityLimits, ExcludedMediaTypes: filter.ExcludedMediaTypes}, conditions, args, argIdx)
 
 	// Manga chapters (type='ebook' rows linked into a manga series) are internal
 	// sub-units and must never surface as standalone search results.
@@ -1282,7 +1723,7 @@ func appendSearchScopeFilters(itemTypes []string, filter AccessFilter, condition
 // SearchPage only when the FTS query is sparse. Unlike buildSearchSQLWithTotal,
 // the sole match predicate is the pg_trgm strict-word-similarity operator
 // (<<%) against the indexed title_normalized generated column (migration 105's
-// gin_trgm_ops index serves it), and the ranking signals are
+// gin_trgm_ops index serves it), and the ranking signal blends
 // strict_word_similarity()/similarity() on that same column. Crucially it
 // never references the title tsvectors, so the low-similarity rows the
 // operator can surface never pay a per-row tsvector rebuild — that rebuild
@@ -1312,6 +1753,9 @@ func (r *ItemRepository) buildFuzzySearchSQL(query string, itemTypes []string, l
 // buildFuzzySearchFromParsed is the fuzzy query builder proper; the string-taking
 // wrapper above parses first. SearchPage parses once and calls this directly.
 func (r *ItemRepository) buildFuzzySearchFromParsed(parsed parsedSearchQuery, itemTypes []string, limit, offset int, filter AccessFilter, includeTotal bool, excludeContentIDs []string, minSimilarity float64) (dataSQL, countSQL string, args []any) {
+	return r.buildFuzzySearchCursorSQL(parsed, itemTypes, limit, offset, filter, includeTotal, excludeContentIDs, minSimilarity, nil)
+}
+func (r *ItemRepository) buildFuzzySearchCursorSQL(parsed parsedSearchQuery, itemTypes []string, limit, offset int, filter AccessFilter, includeTotal bool, excludeContentIDs []string, minSimilarity float64, cursor *searchCursorSQL) (dataSQL, countSQL string, args []any) {
 	searchText := searchTextFromParsed(parsed)
 	if searchText == "" {
 		return "", "", nil
@@ -1326,31 +1770,28 @@ func (r *ItemRepository) buildFuzzySearchFromParsed(parsed parsedSearchQuery, it
 	// word-boundary extent of the title instead, and at equal thresholds it is
 	// a strict superset of % (the whole string is itself a valid extent). The
 	// same gin_trgm_ops index serves both operators.
-	// The alias arm is a scalar array subquery (InitPlan) for the same reason
-	// as the FTS builder's alias arms: `= ANY(param)` keeps the outer OR a
-	// BitmapOr over the two gin_trgm_ops indexes, where an `IN (subquery)` arm
-	// would force a seq scan evaluating <<% against every media_items row.
-	conditions := []string{`(
-		public.normalize_search_text($1) <<% mi.title_normalized OR
-		mi.content_id = ANY(COALESCE((
-			SELECT array_agg(DISTINCT mia.content_id) FROM media_item_aliases mia
-			WHERE public.normalize_search_text($1) <<% mia.normalized_title
-		), '{}'::text[]))
-	)`}
+	// Title and alias candidates are independent indexed arms. They are unioned
+	// by content_id before media_items is hydrated. Do not correlate alias
+	// scoring back to each media row: PostgreSQL can turn that shape into a full
+	// alias-index filter for every candidate (observed cost >112k and a real
+	// 3-second timeout for "Gane of Throns"). This shape scans each trigram GIN
+	// index once and scores only the rows it returned.
+	var conditions []string
 	if minSimilarity > 0 {
 		// The floor is whole-title similarity, NOT word similarity: augmenting
 		// a query that already has hits must only admit near-identical titles,
 		// and word similarity rates embedded prefix words far too high (see
 		// fuzzyAugmentSimilarityFloor).
-		conditions = append(conditions, fmt.Sprintf(`GREATEST(
-			similarity(public.normalize_search_text($1), mi.title_normalized),
-			COALESCE((SELECT MAX(similarity(public.normalize_search_text($1), mia.normalized_title)) FROM media_item_aliases mia WHERE mia.content_id = mi.content_id), 0)
-		) >= $%d`, argIdx))
+		conditions = append(conditions, fmt.Sprintf("cs.fuzzy_full_rank >= $%d", argIdx))
 		args = append(args, minSimilarity)
 		argIdx++
 	}
 
 	fromClause := appendSearchScopeFilters(itemTypes, filter, &conditions, &args, &argIdx)
+	r.appendSearchCursorDefinition(cursor, false, filter, &conditions, &args, &argIdx)
+	if cursor != nil && cursor.err != nil {
+		return "", "", nil
+	}
 
 	if len(excludeContentIDs) > 0 {
 		conditions = append(conditions, fmt.Sprintf("NOT (mi.content_id = ANY($%d))", argIdx))
@@ -1358,39 +1799,68 @@ func (r *ItemRepository) buildFuzzySearchFromParsed(parsed parsedSearchQuery, it
 		argIdx++
 	}
 
-	whereClause := "WHERE " + strings.Join(conditions, " AND ")
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = "WHERE " + strings.Join(conditions, " AND ")
+	}
 
-	// GROUP BY is required so the MAX(similarity(...)) ranking aggregate is legal,
-	// mirroring buildSearchSQLWithTotal; COUNT(*) OVER () then counts distinct
-	// content_ids. qualifiedItemColumns aliases the coalesced columns so the outer
-	// SELECT can re-reference them; GROUP BY uses the raw refs.
+	// candidate_scores has exactly one row per content_id, so hydration needs no
+	// wide GROUP BY over all media columns. COUNT(*) OVER () therefore counts
+	// distinct visible items directly.
 	qualifiedCols := qualifiedItemColumns("mi")
-	groupByCols := qualifiedItemColumnRefs("mi")
-	// fuzzy_rank orders by how well the query matches SOME word extent of the
-	// title; fuzzy_full_rank tie-breaks by whole-title closeness so "The
-	// Avengers" sorts above "Avengers: Endgame" for the typo "avegners". Both
-	// are computed only over the matched candidate set.
+	// Candidate recall uses strict word similarity so a typo can still reach a
+	// long title. Ranking cannot use that score alone: a single matching word
+	// can otherwise outrank the intended phrase (for example "Gane of Throns"
+	// used to rank "Justice League: Throne of Atlantis" above "Game of
+	// Thrones"). Blend mostly whole-title closeness with enough word similarity
+	// to keep long-title typo recovery useful (for example "Hary Poter" still
+	// prefers a Harry Potter title over "Miss Potter"). The whole-title score
+	// remains the deterministic first tie-break. Both signals are computed only
+	// over the indexed candidate set, never the full catalog.
 	scoredCTE := fmt.Sprintf(`
-		WITH scored AS (
+		WITH alias_candidates AS MATERIALIZED (
+			SELECT
+				mia.content_id,
+				MAX(
+					0.65 * similarity(public.normalize_search_text($1), mia.normalized_title)
+						+ 0.35 * strict_word_similarity(public.normalize_search_text($1), mia.normalized_title)
+				) AS fuzzy_rank,
+				MAX(similarity(public.normalize_search_text($1), mia.normalized_title)) AS fuzzy_full_rank
+			FROM media_item_aliases mia
+			WHERE public.normalize_search_text($1) <<%% mia.normalized_title
+			GROUP BY mia.content_id
+		), candidates AS (
+			SELECT
+				mi.content_id,
+				0.65 * similarity(public.normalize_search_text($1), mi.title_normalized)
+					+ 0.35 * strict_word_similarity(public.normalize_search_text($1), mi.title_normalized) AS fuzzy_rank,
+				similarity(public.normalize_search_text($1), mi.title_normalized) AS fuzzy_full_rank
+			FROM media_items mi
+			WHERE public.normalize_search_text($1) <<%% mi.title_normalized
+			UNION ALL
+			SELECT content_id, fuzzy_rank, fuzzy_full_rank
+			FROM alias_candidates
+		), candidate_scores AS (
+			SELECT content_id, MAX(fuzzy_rank) AS fuzzy_rank, MAX(fuzzy_full_rank) AS fuzzy_full_rank
+			FROM candidates
+			GROUP BY content_id
+		), scored AS (
 			SELECT
 				%s,
-				MAX(GREATEST(
-					strict_word_similarity(public.normalize_search_text($1), mi.title_normalized),
-					COALESCE((SELECT MAX(strict_word_similarity(public.normalize_search_text($1), mia.normalized_title)) FROM media_item_aliases mia WHERE mia.content_id = mi.content_id), 0)
-				)) AS fuzzy_rank,
-				MAX(GREATEST(
-					similarity(public.normalize_search_text($1), mi.title_normalized),
-					COALESCE((SELECT MAX(similarity(public.normalize_search_text($1), mia.normalized_title)) FROM media_item_aliases mia WHERE mia.content_id = mi.content_id), 0)
-				)) AS fuzzy_full_rank
+				cs.fuzzy_rank,
+				cs.fuzzy_full_rank
 			FROM %s
+			JOIN candidate_scores cs ON cs.content_id = mi.content_id
 			%s
-			GROUP BY %s
 		)
-	`, qualifiedCols, fromClause, whereClause, groupByCols)
+	`, qualifiedCols, fromClause, whereClause)
 
 	totalColumn := ""
 	if includeTotal {
 		totalColumn = ", COUNT(*) OVER () AS total_count"
+	}
+	if cursor != nil {
+		totalColumn += ", fuzzy_rank::text, fuzzy_full_rank::text, LOWER(title)::text, content_id::text"
 	}
 	dataSQL = scoredCTE + fmt.Sprintf(`
 		SELECT %s%s
@@ -1495,7 +1965,7 @@ func buildEnsureAccessibleSQL(contentID string, filter AccessFilter) (string, []
 	argIdx++
 
 	appendLibraryAccessConditions("mi.content_id", filter, &conditions, &args, &argIdx)
-	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating, ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, &args, &argIdx)
+	applyAccessFilter("mi", AccessFilter{MaturityLimits: filter.MaturityLimits, ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, &args, &argIdx)
 
 	return fmt.Sprintf("SELECT 1 FROM media_items mi WHERE %s LIMIT 1", strings.Join(conditions, " AND ")), args
 }
@@ -1544,7 +2014,7 @@ func buildEnsureAccessibleIDsSQL(contentIDs []string, filter AccessFilter) (stri
 	argIdx++
 
 	appendLibraryAccessConditions("mi.content_id", filter, &conditions, &args, &argIdx)
-	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating, ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, &args, &argIdx)
+	applyAccessFilter("mi", AccessFilter{MaturityLimits: filter.MaturityLimits, ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, &args, &argIdx)
 
 	return fmt.Sprintf("SELECT mi.content_id FROM media_items mi WHERE %s", strings.Join(conditions, " AND ")), args
 }
@@ -1760,6 +2230,14 @@ func (r *ItemRepository) UpdateMetadataTx(ctx context.Context, tx pgx.Tx, conten
 	addString("overview", upd.Overview)
 	addString("tagline", upd.Tagline)
 	addString("content_rating", upd.ContentRating)
+	if upd.ContentRating != nil {
+		// content_rating_age is derived, so an edit that changes the rating
+		// string has to rewrite it in the same statement; leaving the old age
+		// behind would keep filtering by the previous certification.
+		setClauses = append(setClauses, fmt.Sprintf("content_rating_age = $%d", argIdx))
+		args = append(args, access.StoredRating(*upd.ContentRating))
+		argIdx++
+	}
 	addInt("year", upd.Year)
 	addInt("runtime", upd.Runtime)
 	addFloat("rating_imdb", upd.RatingIMDB)

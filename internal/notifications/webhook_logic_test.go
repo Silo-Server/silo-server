@@ -298,6 +298,33 @@ func TestDiscordPosterURLModes(t *testing.T) {
 	if got := system("server", nil).discordPosterURL(ctx, cachedKey, ""); got != "" {
 		t.Fatalf("server mode without resolver must render no image, got %q", got)
 	}
+	// Local artwork storage signs root-relative URLs; Discord fetches from
+	// outside, so they are anchored to server.public_url or dropped.
+	local := &System{
+		Settings: NewSettings(mapSettingReader{SettingDiscordPosterMode: "server", "server.public_url": "https://silo.example/"}),
+		images:   relativePresigner{},
+	}
+	if got := local.discordPosterURL(ctx, cachedKey, ""); got != "https://silo.example/api/v2/artwork/"+cachedKey+"?exp=1&sig=abc" {
+		t.Fatalf("local artwork must be anchored to the public URL, got %q", got)
+	}
+	unpublished := &System{
+		Settings: NewSettings(mapSettingReader{SettingDiscordPosterMode: "server"}),
+		images:   relativePresigner{},
+	}
+	if got := unpublished.discordPosterURL(ctx, cachedKey, ""); got != "" {
+		t.Fatalf("relative artwork without a public URL must render no image, got %q", got)
+	}
+	unpublished.SetPublicURL("https://fallback.example")
+	if got := unpublished.discordPosterURL(ctx, cachedKey, ""); got != "https://fallback.example/api/v2/artwork/"+cachedKey+"?exp=1&sig=abc" {
+		t.Fatalf("configured fallback public URL not applied, got %q", got)
+	}
+}
+
+// relativePresigner fakes local artwork delivery: signed root-relative URLs.
+type relativePresigner struct{}
+
+func (relativePresigner) PresignImageURL(_ context.Context, path, _, _ string) string {
+	return "/api/v2/artwork/" + path + "?exp=1&sig=abc"
 }
 
 func requestFulfilledTestRow() DeliveryRow {
@@ -482,6 +509,33 @@ func TestGenericWebhookPayloadRequestDeclined(t *testing.T) {
 	if body.Request == nil || body.Request.ID != "01REQ" || body.Request.Title != "Dune" ||
 		body.Request.Year != 2021 || body.Request.Reason != "Already available in 4K" {
 		t.Fatalf("unexpected request block: %+v", body.Request)
+	}
+}
+
+func TestRequestApprovedPreservesPosterPath(t *testing.T) {
+	row := DeliveryRow{
+		Delivery: Delivery{
+			ID:        "01APPROVED",
+			ProfileID: "profile-1",
+			Type:      DeliveryTypeRequestApproved,
+			ReasonFlags: []byte(`{"request_id":"01REQ","tmdb_id":3683,"media_type":"movie",` +
+				`"title":"The Silence of the Lambs","year":1991,"poster_path":"/2nkPrhf4YIyMFelfe4zdOnGRYz5.jpg"}`),
+			CreatedAt: time.Date(2026, 8, 17, 17, 48, 49, 0, time.UTC),
+		},
+	}
+	payload := PayloadForRow(row)
+	if payload.PosterPath != "/2nkPrhf4YIyMFelfe4zdOnGRYz5.jpg" {
+		t.Fatalf("PayloadForRow PosterPath = %q, want /2nkPrhf4YIyMFelfe4zdOnGRYz5.jpg", payload.PosterPath)
+	}
+
+	sys := &System{images: fakePresigner{}}
+	sysPayload := sys.PayloadForRow(t.Context(), row)
+	if sysPayload.PosterPath != "/2nkPrhf4YIyMFelfe4zdOnGRYz5.jpg" {
+		t.Fatalf("System.PayloadForRow PosterPath = %q, want /2nkPrhf4YIyMFelfe4zdOnGRYz5.jpg", sysPayload.PosterPath)
+	}
+	wantURL := "https://image.tmdb.org/t/p/w500/2nkPrhf4YIyMFelfe4zdOnGRYz5.jpg"
+	if sysPayload.PosterURL != wantURL {
+		t.Fatalf("System.PayloadForRow PosterURL = %q, want %q", sysPayload.PosterURL, wantURL)
 	}
 }
 

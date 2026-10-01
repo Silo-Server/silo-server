@@ -26,6 +26,7 @@ const FIELD_RATING = 6;
 const FIELD_TAGS = 8;
 const FIELD_RUNTIME = 7;
 const FIELD_CONTENT_RATING = 9;
+const FIELD_IMAGES = 10;
 const FIELD_AIR_SCHEDULE = 11;
 const FIELD_RELEASE_DATES = 13;
 
@@ -121,9 +122,10 @@ function initFormState(item: ItemDetail) {
 export default function EditMetadataDialog({ item, open, onOpenChange }: EditMetadataDialogProps) {
   const [activeSection, setActiveSection] = useState<Section>("general");
   const [form, setForm] = useState(() => initFormState(item));
-  const [lockedFields, setLockedFields] = useState<Set<number>>(
-    () => new Set(item.locked_fields ?? []),
-  );
+  // Keep only local changes to locks. Image selection updates the item while
+  // this dialog is open, so a snapshot of the original locks can go stale.
+  const [lockOverrides, setLockOverrides] = useState<Map<number, boolean>>(() => new Map());
+  const [imageApplyPending, setImageApplyPending] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   const updateMutation = useUpdateItemMetadata(item.content_id);
@@ -139,29 +141,40 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
     : "general";
 
   const originalForm = useMemo(() => initFormState(item), [item]);
+  const lockedFields = useMemo(() => {
+    const fields = new Set(item.locked_fields ?? []);
+    for (const [field, locked] of lockOverrides) {
+      if (locked) fields.add(field);
+      else fields.delete(field);
+    }
+    return fields;
+  }, [item.locked_fields, lockOverrides]);
 
   const setField = useCallback(
     (field: string, value: unknown) => {
       setForm((prev) => ({ ...prev, [field]: value }));
       if (isLockable && field in FIELD_LOCK_MAP) {
         const lockField = FIELD_LOCK_MAP[field] as number;
-        setLockedFields((prev) => new Set(prev).add(lockField));
+        setLockOverrides((prev) => new Map(prev).set(lockField, true));
       }
     },
     [isLockable],
   );
 
-  const toggleLock = useCallback((metadataField: number) => {
-    setLockedFields((prev) => {
-      const next = new Set(prev);
-      if (next.has(metadataField)) {
-        next.delete(metadataField);
-      } else {
-        next.add(metadataField);
-      }
-      return next;
-    });
-  }, []);
+  const toggleLock = useCallback(
+    (metadataField: number) => {
+      setLockOverrides((prev) =>
+        new Map(prev).set(metadataField, !lockedFields.has(metadataField)),
+      );
+    },
+    [lockedFields],
+  );
+
+  const handleImageApplied = useCallback(() => {
+    if (isLockable) {
+      setLockOverrides((prev) => new Map(prev).set(FIELD_IMAGES, true));
+    }
+  }, [isLockable]);
 
   const lockedCount = lockedFields.size;
 
@@ -213,7 +226,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
     if (form.episode_number !== originalForm.episode_number)
       data.episode_number = form.episode_number;
 
-    if (isLockable) {
+    if (isLockable && lockOverrides.size > 0) {
       const originalLocked = new Set(item.locked_fields ?? []);
       const currentLocked = Array.from(lockedFields).sort();
       const originalSorted = Array.from(originalLocked).sort();
@@ -272,9 +285,12 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-5xl gap-0 overflow-hidden p-0 sm:max-w-5xl" showCloseButton>
+        <DialogContent
+          className="flex max-w-5xl flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl"
+          showCloseButton
+        >
           {/* Header */}
-          <DialogHeader className="border-border/10 flex-row items-center justify-between border-b px-5 py-4">
+          <DialogHeader className="border-border/10 shrink-0 flex-row items-center justify-between border-b px-5 py-4">
             <div className="flex items-center gap-2.5">
               <DialogTitle className="text-[15px] font-semibold">Edit Metadata</DialogTitle>
               <span className="bg-muted/50 text-muted-foreground rounded px-2 py-0.5 text-[11px]">
@@ -289,7 +305,10 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
             )}
           </DialogHeader>
 
-          <div className="flex flex-col sm:flex-row" style={{ height: "min(70vh, 580px)" }}>
+          <div
+            className="flex min-h-0 flex-1 flex-col sm:flex-row"
+            style={{ height: "min(70vh, 580px)" }}
+          >
             {/* Sidebar — horizontal tabs on mobile, vertical on sm+ */}
             <nav className="border-border/10 flex flex-shrink-0 overflow-x-auto border-b bg-black/10 sm:w-[160px] sm:flex-col sm:overflow-x-visible sm:border-r sm:border-b-0 sm:py-2">
               {visibleSections.map((section) => (
@@ -310,7 +329,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
             </nav>
 
             {/* Content */}
-            <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
+            <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
               {effectiveActiveSection === "general" && (
                 <div className="space-y-4">
                   <FieldRow label="Title" lockIcon={renderLockIcon("title")}>
@@ -654,14 +673,19 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
                     effectiveActiveSection === "images" ? "flex h-full flex-col" : "hidden"
                   }
                 >
-                  <ImageSelectorTab item={item} enabled={effectiveActiveSection === "images"} />
+                  <ImageSelectorTab
+                    item={item}
+                    enabled={effectiveActiveSection === "images"}
+                    onImageApplied={handleImageApplied}
+                    onApplyPendingChange={setImageApplyPending}
+                  />
                 </div>
               )}
             </div>
           </div>
 
           {/* Footer */}
-          <div className="border-border/10 flex flex-col-reverse gap-2 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:py-3.5">
+          <div className="border-border/10 flex shrink-0 flex-col-reverse gap-2 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:py-3.5">
             <div>
               {isLockable && (
                 <Button
@@ -686,7 +710,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
               <Button
                 size="sm"
                 onClick={handleSave}
-                disabled={updateMutation.isPending}
+                disabled={updateMutation.isPending || imageApplyPending}
                 className="max-sm:flex-1"
               >
                 {updateMutation.isPending ? "Saving..." : "Save Changes"}

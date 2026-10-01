@@ -1,3 +1,4 @@
+export type PersonalizedSorts = boolean | "date_viewed";
 export type QuerySortOrder = "asc" | "desc";
 export type QuerySortRelevanceScope =
   | "movie"
@@ -47,7 +48,7 @@ export interface QuerySortOption {
 }
 
 export interface QuerySortOptionsConfig {
-  includePersonalized?: boolean;
+  includePersonalized?: PersonalizedSorts;
   relevanceScope?: QuerySortRelevanceScope;
 }
 
@@ -255,7 +256,9 @@ export function getQuerySortOptions(input: QuerySortOptionsInput = false): Query
 
   return QUERY_SORT_OPTIONS.filter(
     (option) =>
-      (includePersonalized || !option.personalized) &&
+      (includePersonalized === true ||
+        !option.personalized ||
+        option.value === includePersonalized) &&
       optionMatchesRelevanceScope(option, relevanceScope),
   ).map((option) => {
     const ebookLabel =

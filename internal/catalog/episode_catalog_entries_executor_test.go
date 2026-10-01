@@ -5,6 +5,36 @@ import (
 	"testing"
 )
 
+func TestApplyEpisodeCatalogAccessFilterRejectsAnyDisabledMembership(t *testing.T) {
+	var whereParts []string
+	var args []any
+	argIdx := 2
+	applyEpisodeCatalogAccessFilter(
+		AccessFilter{DisabledLibraryIDs: []int{9}},
+		&whereParts,
+		&args,
+		&argIdx,
+	)
+
+	where := strings.Join(whereParts, " AND ")
+	if !strings.Contains(where, "EXISTS (SELECT 1 FROM episode_libraries el_scope_any") {
+		t.Fatalf("optimized episode catalog path must require current episode membership, got %s", where)
+	}
+	if !strings.Contains(where, "NOT EXISTS (SELECT 1 FROM episode_libraries el_scope_out") {
+		t.Fatalf("optimized episode catalog path must reject any disabled membership, got %s", where)
+	}
+	if !strings.Contains(where, "el_scope_out.media_folder_id = ANY($2)") {
+		t.Fatalf("disabled libraries must bind at $2, got %s", where)
+	}
+	assertEpisodeParentDisabledAccess(t, where, "ece.series_id")
+	if strings.Contains(where, "SELECT e_parent.series_id") {
+		t.Fatalf("read-model path must use ece.series_id without an episode lookup, got %s", where)
+	}
+	if len(args) != 2 || argIdx != 4 {
+		t.Fatalf("args = %v, argIdx = %d; want episode and series disabled-list args and 4", args, argIdx)
+	}
+}
+
 func TestEpisodeCatalogEntryOrderByUsesReadModelColumns(t *testing.T) {
 	tests := []struct {
 		name string

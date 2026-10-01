@@ -64,16 +64,20 @@ func setSubtitlePreference(
 }
 
 func (s *PostgresUserStore) GetSubtitlePreference(ctx context.Context, profileID, seriesID string) (*userstore.SubtitlePreference, error) {
+	return getSubtitlePreference(ctx, s.pool, s.userID, profileID, seriesID)
+}
+
+func getSubtitlePreference(ctx context.Context, exec preferenceSettingsExecutor, userID int, profileID, seriesID string) (*userstore.SubtitlePreference, error) {
 	var pref userstore.SubtitlePreference
 	var showForcedSubtitles pgtype.Bool
 	var updatedAt time.Time
 	var signatureJSON []byte
-	err := s.pool.QueryRow(ctx, `
+	err := exec.QueryRow(ctx, `
 		SELECT profile_id, series_id, subtitle_language, subtitle_track_index,
 		       external_subtitle_path, subtitle_mode, subtitle_track_signature, show_forced_subtitles, updated_at
 		FROM user_subtitle_preferences
 		WHERE user_id = $1 AND profile_id = $2 AND series_id = $3`,
-		s.userID, profileID, seriesID,
+		userID, profileID, seriesID,
 	).Scan(
 		&pref.ProfileID,
 		&pref.SeriesID,

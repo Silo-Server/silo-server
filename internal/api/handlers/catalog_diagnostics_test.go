@@ -1,7 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -106,8 +109,9 @@ func TestWriteCatalogResponse_NoProviderOmitsDiagnostics(t *testing.T) {
 	}
 }
 
-func TestWriteCatalogResponse_GroupedByWorkOmitsDiagnostics(t *testing.T) {
-	// group=work builds a fresh CatalogResult with an empty Provider.
+func TestWriteCatalogResponse_GroupedByWorkPreservesExactCount(t *testing.T) {
+	// SQL grouping can count representatives exactly. The response preserves
+	// that result and omits diagnostics when no search provider was used.
 	body := decodeCatalogResponse(t, &catalog.CatalogResult{
 		Total:      2,
 		TotalExact: true,
@@ -116,8 +120,53 @@ func TestWriteCatalogResponse_GroupedByWorkOmitsDiagnostics(t *testing.T) {
 	if _, ok := body["search_diagnostics"]; ok {
 		t.Fatalf("grouped response should omit search_diagnostics: %v", body)
 	}
-	// Grouped responses force total_exact false regardless of result.TotalExact.
-	if body["total_exact"].(bool) != false {
-		t.Fatalf("grouped total_exact = %v, want false", body["total_exact"])
+	if body["total_exact"].(bool) != true {
+		t.Fatalf("grouped total_exact = %v, want true", body["total_exact"])
+	}
+}
+
+func TestHandleCatalogSearchContextError_DeadlineReturnsRetryableTimeout(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/catalog?source=query&q=slow", nil)
+	handleCatalogResolveError(rec, req, errors.Join(errors.New("search failed"), context.DeadlineExceeded), false)
+	if rec.Code != http.StatusGatewayTimeout {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusGatewayTimeout, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode timeout body: %v; body=%s", err, rec.Body.String())
+	}
+	if body["error"] != "search_timeout" {
+		t.Fatalf("error = %v, want search_timeout; body=%v", body["error"], body)
+	}
+}
+
+func TestHandleCatalogSearchContextError_CanceledRequestWritesNothing(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/catalog?source=query&q=replaced", nil)
+	handleCatalogResolveError(rec, req, context.Canceled, false)
+	if rec.Body.Len() != 0 {
+		t.Fatalf("canceled request wrote a response body: %q", rec.Body.String())
+	}
+}
+
+func TestHandleCatalogResolveError_GroupedDeadlineReturnsRetryableTimeout(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/catalog?source=query&q=slow&group=work", nil)
+	handleCatalogResolveError(
+		rec,
+		req,
+		errors.Join(errors.New("grouped search failed"), context.DeadlineExceeded),
+		true,
+	)
+	if rec.Code != http.StatusGatewayTimeout {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusGatewayTimeout, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode grouped timeout body: %v; body=%s", err, rec.Body.String())
+	}
+	if body["error"] != "search_timeout" {
+		t.Fatalf("error = %v, want search_timeout; body=%v", body["error"], body)
 	}
 }

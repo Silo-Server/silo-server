@@ -1,0 +1,18 @@
+{
+  "revision": "72b97f9f308e640e5c580c89edd7df6d9a75aac8263cb28b0f5a7b47c9f87889",
+  "state": "available",
+  "allowed": true,
+  "guarded_annotations": false,
+  "reader_files": false,
+  "guarded_config": false,
+  "ordered_progress": true,
+  "kindle_conversion": false,
+  "source_formats": [
+    "mobi",
+    "azw",
+    "azw3"
+  ],
+  "served_format": "epub",
+  "header": "X-Silo-Ebook-Conversion",
+  "header_failed_value": "failed"
+}

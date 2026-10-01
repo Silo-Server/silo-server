@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,14 +21,142 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
+	"github.com/Silo-Server/silo-server/internal/streamtoken"
+	"github.com/Silo-Server/silo-server/internal/tonemap"
+	"github.com/Silo-Server/silo-server/internal/transcodenode"
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
+
+func TestWritePlaybackToneMapExecutionError(t *testing.T) {
+	for _, tt := range []struct {
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{tonemap.ErrSourceRevisionChanged, http.StatusUnprocessableEntity, transcodenode.ToneMapSourceRevisionChangedCode},
+		{tonemap.ErrSourcePreflightRejected, http.StatusUnprocessableEntity, transcodenode.ToneMapSourcePreflightRejectedCode},
+		{playback.ErrToneMapSourceValidationUnavailable, http.StatusServiceUnavailable, transcodenode.ToneMapSourceValidationUnavailableCode},
+	} {
+		rr := httptest.NewRecorder()
+		if !writePlaybackToneMapExecutionError(rr, tt.err) {
+			t.Fatalf("error %v was not handled", tt.err)
+		}
+		if rr.Code != tt.wantStatus || rr.Header().Get(transcodenode.ToneMapExecutionErrorHeader) != tt.wantCode {
+			t.Fatalf("response = %d/%q, want %d/%q", rr.Code, rr.Header().Get(transcodenode.ToneMapExecutionErrorHeader), tt.wantStatus, tt.wantCode)
+		}
+	}
+}
+
+func TestRequireNativeAPIEgressV3(t *testing.T) {
+	for _, test := range []struct {
+		name                        string
+		workload, execution, egress string
+		want                        int
+	}{
+		{name: "legacy", want: http.StatusOK},
+		{name: "api", workload: string(noderouting.WorkloadRemux), execution: string(noderouting.ExecutionAPI), egress: string(noderouting.EgressAPI), want: http.StatusOK},
+		{name: "proxy", workload: string(noderouting.WorkloadRemux), execution: string(noderouting.ExecutionProxy), egress: string(noderouting.EgressProxy), want: http.StatusServiceUnavailable},
+		{name: "partial", workload: string(noderouting.WorkloadRemux), egress: string(noderouting.EgressAPI), want: http.StatusConflict},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			allowed := requireNativeAPIEgressV3(recorder, test.workload, test.execution, test.egress)
+			if test.want == http.StatusOK {
+				if !allowed {
+					t.Fatalf("route was rejected: %d %s", recorder.Code, recorder.Body.String())
+				}
+				return
+			}
+			if allowed || recorder.Code != test.want {
+				t.Fatalf("allowed = %t, response = %d %s, want %d", allowed, recorder.Code, recorder.Body.String(), test.want)
+			}
+		})
+	}
+}
+
+func TestNativeTranscodeHandlersRejectCommittedProxyEgress(t *testing.T) {
+	manager := playback.NewSessionManager(0, 0)
+	manager.RegisterReconstructed(&playback.Session{
+		ID: "proxy-hls", UserID: 1, PlayMethod: playback.PlayTranscode,
+		RoutingWorkload: string(noderouting.WorkloadVideoTranscode), RoutingExecution: string(noderouting.ExecutionTranscode),
+		RoutingEgress: string(noderouting.EgressProxy), TranscodeNodeURL: "http://worker.invalid",
+	})
+	handler := NewPlaybackHandler(manager)
+	for _, test := range []struct {
+		name   string
+		path   string
+		params map[string]string
+		handle func(http.ResponseWriter, *http.Request)
+	}{
+		{name: "manifest", path: "/api/v1/playback/transcode/proxy-hls/master.m3u8", params: map[string]string{"session_id": "proxy-hls"}, handle: handler.HandleGetTranscodeManifest},
+		{name: "segment", path: "/api/v1/playback/transcode/proxy-hls/segment/seg_0.m4s", params: map[string]string{"session_id": "proxy-hls", "name": "seg_0.m4s"}, handle: handler.HandleGetTranscodeSegment},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			test.handle(recorder, playbackTestRequest(http.MethodGet, test.path, nil, test.params))
+			if recorder.Code != http.StatusServiceUnavailable || !strings.Contains(recorder.Body.String(), `"error":"routing_policy_unsatisfied"`) {
+				t.Fatalf("response = %d %s, want proxy-egress refusal", recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+}
+
+func TestNativeTranscodeHandlersRejectProxyRecipeBeforeReconstruction(t *testing.T) {
+	const secret = "test-secret"
+	for _, test := range []struct {
+		name   string
+		path   string
+		params map[string]string
+		handle func(*PlaybackHandler, http.ResponseWriter, *http.Request)
+	}{
+		{
+			name: "manifest", path: "/api/v1/playback/transcode/lost-proxy-hls/master.m3u8",
+			params: map[string]string{"session_id": "lost-proxy-hls"},
+			handle: func(handler *PlaybackHandler, w http.ResponseWriter, r *http.Request) {
+				handler.HandleGetTranscodeManifest(w, r)
+			},
+		},
+		{
+			name: "segment", path: "/api/v1/playback/transcode/lost-proxy-hls/segment/seg_00001.m4s",
+			params: map[string]string{"session_id": "lost-proxy-hls", "name": "seg_00001.m4s"},
+			handle: func(handler *PlaybackHandler, w http.ResponseWriter, r *http.Request) {
+				handler.HandleGetTranscodeSegment(w, r)
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			card := playback.RecipeCard{
+				SessionID: "lost-proxy-hls", UserID: 1, MediaFileID: 42, PlayMethod: playback.PlayTranscode,
+				RoutingWorkload: string(noderouting.WorkloadVideoTranscode), RoutingExecution: string(noderouting.ExecutionTranscode),
+				RoutingEgress: string(noderouting.EgressProxy),
+			}
+			token, err := streamtoken.Sign(card.ToClaims(), secret, time.Hour)
+			if err != nil {
+				t.Fatal(err)
+			}
+			manager := playback.NewSessionManager(0, 0)
+			handler := NewPlaybackHandler(manager)
+			handler.JWTSecret = secret
+			recorder := httptest.NewRecorder()
+			test.handle(handler, recorder, playbackTestRequest(http.MethodGet, test.path+"?st="+token, nil, test.params))
+
+			if recorder.Code != http.StatusServiceUnavailable || !strings.Contains(recorder.Body.String(), `"error":"routing_policy_unsatisfied"`) {
+				t.Fatalf("response = %d %s, want proxy-egress refusal", recorder.Code, recorder.Body.String())
+			}
+			if _, err := manager.GetSession(card.SessionID); !errors.Is(err, playback.ErrSessionNotFound) {
+				t.Fatalf("proxy recipe reconstructed a native session: %v", err)
+			}
+		})
+	}
+}
 
 type testUserStoreProvider struct {
 	store userstore.UserStore
@@ -110,6 +239,16 @@ func (r testPlaybackSettingsRepo) Get(_ context.Context, key string) (string, er
 	return r.values[key], nil
 }
 
+func (r testPlaybackSettingsRepo) GetMany(_ context.Context, keys ...string) (map[string]string, error) {
+	out := make(map[string]string, len(keys))
+	for _, key := range keys {
+		if value, ok := r.values[key]; ok {
+			out[key] = value
+		}
+	}
+	return out, nil
+}
+
 type allowAllPlaybackItemAccess struct{}
 
 func (allowAllPlaybackItemAccess) EnsureAccessible(
@@ -185,6 +324,10 @@ func (failingSessionManager) BeginTransport(string) error { return nil }
 
 func (failingSessionManager) EndTransport(string) error { return nil }
 
+func (failingSessionManager) WatchTransportStop(string) (<-chan struct{}, func()) {
+	return nil, func() {}
+}
+
 func (failingSessionManager) SetRemoteTransport(string, bool) error { return nil }
 
 func (failingSessionManager) SetEffectiveMediaFileID(string, int) error { return nil }
@@ -242,6 +385,175 @@ func newAuthorizedPlaybackContext() context.Context {
 	return apimw.SetProfileID(ctx, "profile-1")
 }
 
+func TestHeaderAuthenticatedMediaEnforcesHLSOwnerOnEveryRequest(t *testing.T) {
+	manager := playback.NewSessionManager(0, 0)
+	manager.RegisterReconstructed(&playback.Session{
+		ID:                        "secure-hls-session",
+		UserID:                    1,
+		PlayMethod:                playback.PlayTranscode,
+		RequireMediaAuthorization: true,
+	})
+	manager.RegisterReconstructed(&playback.Session{
+		ID:         "legacy-hls-session",
+		UserID:     1,
+		PlayMethod: playback.PlayTranscode,
+	})
+	handler := NewPlaybackHandler(manager)
+
+	type endpoint struct {
+		name   string
+		handle func(http.ResponseWriter, *http.Request)
+		path   func(string) string
+		params func(string) map[string]string
+	}
+	endpoints := []endpoint{
+		{
+			name:   "manifest",
+			handle: handler.HandleGetTranscodeManifest,
+			path: func(id string) string {
+				return "/api/v1/playback/transcode/" + id + "/master.m3u8"
+			},
+			params: func(id string) map[string]string { return map[string]string{"session_id": id} },
+		},
+		{
+			name:   "segment",
+			handle: handler.HandleGetTranscodeSegment,
+			path: func(id string) string {
+				return "/api/v1/playback/transcode/" + id + "/segment/seg_00001.m4s"
+			},
+			params: func(id string) map[string]string {
+				return map[string]string{"session_id": id, "name": "seg_00001.m4s"}
+			},
+		},
+	}
+
+	request := func(endpoint endpoint, sessionID string, userID int) *http.Request {
+		req := httptest.NewRequest(http.MethodGet, endpoint.path(sessionID), nil)
+		if userID != 0 {
+			ctx := apimw.SetClaims(req.Context(), &auth.Claims{
+				UserID: userID, Role: "user", TokenType: auth.TokenTypeAccess,
+			})
+			req = req.WithContext(ctx)
+		}
+		routeCtx := chi.NewRouteContext()
+		for key, value := range endpoint.params(sessionID) {
+			routeCtx.URLParams.Add(key, value)
+		}
+		return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+	}
+
+	for _, endpoint := range endpoints {
+		t.Run(endpoint.name, func(t *testing.T) {
+			for _, test := range []struct {
+				name      string
+				sessionID string
+				userID    int
+				want      int
+			}{
+				{name: "secure missing auth", sessionID: "secure-hls-session", want: http.StatusUnauthorized},
+				{name: "secure wrong owner", sessionID: "secure-hls-session", userID: 2, want: http.StatusForbidden},
+				// The media process is intentionally absent in this unit fixture;
+				// reaching 404 proves the authenticated owner passed the gate.
+				{name: "secure owner accepted", sessionID: "secure-hls-session", userID: 1, want: http.StatusNotFound},
+				// Legacy UUID-bearer behavior remains unchanged.
+				{name: "legacy missing auth accepted", sessionID: "legacy-hls-session", want: http.StatusNotFound},
+			} {
+				t.Run(test.name, func(t *testing.T) {
+					rr := httptest.NewRecorder()
+					endpoint.handle(rr, request(endpoint, test.sessionID, test.userID))
+					if rr.Code != test.want {
+						t.Fatalf("status = %d body=%s, want %d", rr.Code, rr.Body.String(), test.want)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestGetTranscodeSegment_CopyMPEGTSRecoveryUsesResolvedManifestNumberWithoutLookaheadDelay(t *testing.T) {
+	outputDir := t.TempDir()
+	ffmpegPath := filepath.Join(outputDir, "ffmpeg")
+	launchMarker := filepath.Join(outputDir, "launched")
+	manifest := "#EXTM3U\\n#EXT-X-VERSION:3\\n#EXT-X-TARGETDURATION:3\\n#EXT-X-MEDIA-SEQUENCE:9\\n#EXTINF:2.669000,\\nseg_00009.ts\\n#EXTINF:1.669000,\\nseg_00010.ts\\n#EXTINF:1.668000,\\nseg_00011.ts\\n"
+	ffmpeg := `#!/bin/sh
+for arg in "$@"; do
+  if [ "$arg" = "framecrc" ]; then
+    printf '%s\n' '#tb 0: 1/1000'
+    printf '%s\n' '0, 18000, 18000, 41, 1024, 0x12345678'
+    exit 0
+  fi
+done
+printf '%b' '` + manifest + `' > '` + filepath.Join(outputDir, "stream.m3u8") + `'
+if [ ! -e '` + launchMarker + `' ]; then
+  : > '` + launchMarker + `'
+  printf ahead > '` + filepath.Join(outputDir, "seg_00011.ts") + `'
+else
+  printf recovered > '` + filepath.Join(outputDir, "seg_00010.ts") + `'
+  printf ahead > '` + filepath.Join(outputDir, "seg_00011.ts") + `'
+fi
+exec sleep 30
+`
+	if err := os.WriteFile(ffmpegPath, []byte(ffmpeg), 0o755); err != nil {
+		t.Fatalf("write fake ffmpeg: %v", err)
+	}
+
+	const sessionID = "copy-recovery-session"
+	transcodeSession, err := playback.StartTranscode(context.Background(), playback.TranscodeOpts{
+		SessionID:              sessionID,
+		InputPath:              "/media/movie.mkv",
+		OutputDir:              outputDir,
+		FFmpegPath:             ffmpegPath,
+		SeekSeconds:            18.261,
+		StreamOriginSeconds:    18,
+		CopySeekAnchorResolved: true,
+		TargetCodecVideo:       "copy",
+		TargetCodecAudio:       "copy",
+		CopyVideoMPEGTS:        true,
+		SegmentDuration:        2,
+		StartSegmentNumber:     9,
+	})
+	if err != nil {
+		t.Fatalf("StartTranscode: %v", err)
+	}
+	t.Cleanup(func() { _ = transcodeSession.Close() })
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, statErr := os.Stat(filepath.Join(outputDir, "seg_00011.ts")); statErr == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("initial fake transcode did not become observable")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	sessions := playback.NewSessionManager(0, 0)
+	sessions.RegisterReconstructed(&playback.Session{ID: sessionID, UserID: 1, PlayMethod: playback.PlayTranscode})
+	handler := NewPlaybackHandler(sessions)
+	handler.TranscodeManager().RegisterTranscodeSession(sessionID, transcodeSession)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/playback/transcode/"+sessionID+"/segment/seg_00010.ts", nil)
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("session_id", sessionID)
+	routeCtx.URLParams.Add("name", "seg_00010.ts")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+	rr := httptest.NewRecorder()
+	started := time.Now()
+	handler.HandleGetTranscodeSegment(rr, req)
+	elapsed := time.Since(started)
+
+	if rr.Code != http.StatusOK || rr.Body.String() != "recovered" {
+		t.Fatalf("segment response = %d %q, want 200 recovered", rr.Code, rr.Body.String())
+	}
+	if elapsed >= time.Second {
+		t.Fatalf("MPEG-TS recovery took %v, want no wait for a nonexistent fMP4 lookahead", elapsed)
+	}
+	opts := transcodeSession.Opts()
+	if opts.StartSegmentNumber != 9 || !opts.CopySeekAnchorResolved || math.Abs(opts.StreamOriginSeconds-18) > 0.0001 {
+		t.Fatalf("recovery opts = %+v, want start=9 origin=18 resolved=true", opts)
+	}
+}
+
 func withPlaybackRouteParam(req *http.Request, key, value string) *http.Request {
 	routeCtx := chi.NewRouteContext()
 	routeCtx.URLParams.Add(key, value)
@@ -252,13 +564,53 @@ func writePlaybackTestFFmpeg(t *testing.T) string {
 	return writePlaybackTestFFmpegSleep(t, "30")
 }
 
+func writePlaybackToneMapFFprobe(t *testing.T, ffmpegPath string, track models.VideoTrack) {
+	t.Helper()
+	stream := map[string]any{
+		"index": 0, "codec_name": track.Codec, "codec_type": "video", "profile": track.Profile,
+		"level": track.Level, "width": track.Width, "height": track.Height, "avg_frame_rate": track.FrameRate,
+		"pix_fmt": track.PixelFormat, "bits_per_raw_sample": track.BitDepth, "color_range": track.ColorRange,
+		"color_primaries": track.ColorPrimaries, "color_transfer": track.ColorTransfer, "color_space": track.ColorSpace,
+	}
+	if track.DVConfigPresent {
+		sideData := map[string]any{
+			"side_data_type": "DOVI configuration record", "dv_profile": track.DVProfile, "dv_level": track.DVLevel,
+			"bl_present_flag": playbackTestBoolInt(track.DVBLPresent), "rpu_present_flag": playbackTestBoolInt(track.DVRPUPresent),
+			"el_present_flag": playbackTestBoolInt(track.DVELPresent),
+		}
+		if track.DVBLCompatIDPresent {
+			sideData["dv_bl_signal_compatibility_id"] = track.DVBLCompatID
+		}
+		stream["side_data_list"] = []any{sideData}
+	}
+	output, err := json.Marshal(map[string]any{"streams": []any{stream}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := mediaprobe.FFprobePathFromFFmpeg(ffmpegPath)
+	script := "#!/bin/sh\nprintf '%s' '" + strings.ReplaceAll(string(output), "'", "'\\''") + "'\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func playbackTestBoolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
 func writePlaybackTestFFmpegSleep(t *testing.T, sleepSeconds string) string {
 	t.Helper()
 
 	path := filepath.Join(t.TempDir(), "fake-ffmpeg.sh")
+	// A capped VAAPI start first runs one-frame rate-control smoke encodes
+	// into the null muxer; they succeed at once, as on a VBR-capable driver.
 	script := "#!/bin/sh\n" +
 		"last=\"\"\n" +
 		"for arg in \"$@\"; do last=\"$arg\"; done\n" +
+		"case \" $* \" in *\" -rc_mode \"*\" -f null - \"*) exit 0 ;; esac\n" +
 		"case \"$last\" in\n" +
 		"  *.m3u8) out=\"$(dirname \"$last\")\"; mkdir -p \"$out\"; " +
 		"printf x > \"$out/init.mp4\"; printf x > \"$out/seg_0.m4s\"; " +
@@ -327,6 +679,32 @@ func playbackTestConfig(ffmpegPath, transcodeDir string) func() config.PlaybackC
 			TranscodeDir:     transcodeDir,
 			TranscodeEnabled: true,
 		}
+	}
+}
+
+func requireWorkerRoutingV3(handler *PlaybackHandler) {
+	previous := handler.PlaybackConfig
+	handler.PlaybackConfig = func() config.PlaybackConfig {
+		var cfg config.PlaybackConfig
+		if previous != nil {
+			cfg = previous()
+		}
+		cfg.Routing = config.DefaultPlaybackRoutingPolicy()
+		cfg.Routing.RemuxExecution = config.PlaybackExecutionWorkerOnly
+		cfg.Routing.VideoTranscodeExecution = config.PlaybackExecutionWorkerOnly
+		return cfg
+	}
+}
+
+func useDefaultRoutingV3(handler *PlaybackHandler) {
+	previous := handler.PlaybackConfig
+	handler.PlaybackConfig = func() config.PlaybackConfig {
+		var cfg config.PlaybackConfig
+		if previous != nil {
+			cfg = previous()
+		}
+		cfg.Routing = config.DefaultPlaybackRoutingPolicy()
+		return cfg
 	}
 }
 
@@ -491,6 +869,11 @@ func TestHandleStartPlaybackV3_PersistsSeriesPlaybackPreferenceForEpisodes(t *te
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
 	}
+	var response playback.DecisionResponseV3
+	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode start response: %v", err)
+	}
+	handler.waitForPlaybackStartSideEffectsV3(context.Background(), response.SessionID)
 
 	pref, err := store.GetSeriesPlaybackPreference(context.Background(), "profile-1", "series-1")
 	if err != nil {
@@ -998,6 +1381,68 @@ func TestFindAlternateFile_DoesNotCrossEdition(t *testing.T) {
 	}
 	if alternate.ID != 3 {
 		t.Fatalf("alternate.ID = %d, want 3", alternate.ID)
+	}
+}
+
+func TestFindAlternateFile_PrefersNon4KAcrossLabelsAndDimensions(t *testing.T) {
+	source := &models.MediaFile{
+		ID:         1,
+		ContentID:  "movie-1",
+		Resolution: "2160p",
+		HDR:        true,
+		Bitrate:    30_000_000,
+	}
+
+	handler := &PlaybackHandler{
+		FileVersionFetcher: testPlaybackFileVersionFetcher{
+			byContent: map[string][]*models.MediaFile{
+				"movie-1": {
+					source,
+					{ID: 6, ContentID: "movie-1", Resolution: "8K", Bitrate: 40_000_000},
+					{ID: 2, ContentID: "movie-1", Resolution: "4K", Bitrate: 28_000_000},
+					{ID: 3, ContentID: "movie-1", Resolution: " uhd ", Bitrate: 26_000_000},
+					{ID: 4, ContentID: "movie-1", Resolution: "1080p", Bitrate: 24_000_000, VideoTracks: []models.VideoTrack{{Width: 3840, Height: 1626}}},
+					{ID: 5, ContentID: "movie-1", Resolution: "1080p", Bitrate: 12_000_000, VideoTracks: []models.VideoTrack{{Width: 1920, Height: 1080}}},
+				},
+			},
+		},
+	}
+
+	alternate, err := handler.findAlternateFile(context.Background(), source)
+	if err != nil {
+		t.Fatalf("findAlternateFile: %v", err)
+	}
+	if alternate == nil {
+		t.Fatal("expected alternate file")
+	}
+	if alternate.ID != 5 {
+		t.Fatalf("alternate.ID = %d (resolution %q), want 5", alternate.ID, alternate.Resolution)
+	}
+}
+
+func TestFindAlternateFile_Returns4KVersionWhenItIsTheOnlyAlternate(t *testing.T) {
+	source := &models.MediaFile{ID: 1, ContentID: "movie-1", Resolution: "2160p", Bitrate: 30_000_000}
+
+	handler := &PlaybackHandler{
+		FileVersionFetcher: testPlaybackFileVersionFetcher{
+			byContent: map[string][]*models.MediaFile{
+				"movie-1": {
+					source,
+					{ID: 2, ContentID: "movie-1", Resolution: "uhd", Bitrate: 26_000_000},
+				},
+			},
+		},
+	}
+
+	alternate, err := handler.findAlternateFile(context.Background(), source)
+	if err != nil {
+		t.Fatalf("findAlternateFile: %v", err)
+	}
+	if alternate == nil {
+		t.Fatal("expected 4K alternate to reach the planner")
+	}
+	if alternate.ID != 2 {
+		t.Fatalf("alternate.ID = %d, want 2", alternate.ID)
 	}
 }
 

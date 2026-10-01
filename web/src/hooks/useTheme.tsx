@@ -1,15 +1,11 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import type { ReactNode } from "react";
-import type { ThemeId } from "@/lib/themes";
 import { useEffectiveSettings } from "@/hooks/queries/settingValues";
 import { useProfileDefaultWriter } from "@/hooks/queries/profileDefaults";
 import { SETTING_KEYS } from "@/lib/settingsContract";
-import { useBranding } from "@/hooks/useBranding";
 import { appearanceCache, storage } from "@/utils/storage";
 import type { StorageKey } from "@/utils/storage";
 import {
-  getInitialTheme,
-  isValidTheme,
   parseHighContrast,
   parseTextScale,
   parseTextWeight,
@@ -17,11 +13,13 @@ import {
 } from "@/hooks/themePreferences";
 import type { TextScale, TextWeight } from "@/hooks/themePreferences";
 
+/**
+ * The per-profile readability preferences. The colour theme is not one of
+ * them: Silo paints a single base theme (Cinema Dark, the static
+ * html[data-theme] in index.html), and only the admin customizes it,
+ * server-wide.
+ */
 interface ThemeContextValue {
-  theme: ThemeId;
-  setTheme: (theme: ThemeId) => void;
-  previewTheme: (theme: ThemeId) => void;
-  resetPreviewTheme: () => void;
   textScale: TextScale;
   setTextScale: (value: TextScale) => void;
   textWeight: TextWeight;
@@ -33,11 +31,10 @@ interface ThemeContextValue {
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 /**
- * The four appearance keys this provider needs, fetched in one batched
+ * The three appearance keys this provider needs, fetched in one batched
  * effective read rather than a query per key.
  */
 const APPEARANCE_KEYS = [
-  SETTING_KEYS.UI_THEME,
   SETTING_KEYS.UI_TEXT_SCALE,
   SETTING_KEYS.UI_TEXT_WEIGHT,
   SETTING_KEYS.UI_HIGH_CONTRAST,
@@ -54,10 +51,6 @@ const APPEARANCE_KEYS = [
  * migrated override would shadow every later choice with no affordance to
  * remove it, and the control would snap straight back.
  */
-
-function applyThemeToDOM(theme: ThemeId): void {
-  document.documentElement.setAttribute("data-theme", theme);
-}
 
 function applyTextScaleToDOM(scale: TextScale): void {
   document.documentElement.setAttribute("data-text-scale", scale);
@@ -76,12 +69,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   // bootstrapping, nobody is signed in, or no profile is selected yet, which
   // still trusts the cache so the app paints in the last look this device used.
   const cacheOwner = useAppearanceCacheOwner();
-  const loadApiTheme = cacheOwner !== null;
+  const loadApi = cacheOwner !== null;
 
-  const [themePreference, setThemePreference] = useState<ThemeId>(() =>
-    getInitialTheme(cacheOwner),
-  );
-  const [previewThemeState, setPreviewThemeState] = useState<ThemeId | null>(null);
   const [textScalePreference, setTextScalePreference] = useState<TextScale>(() =>
     parseTextScale(appearanceCache.get(storage.KEYS.UI_TEXT_SCALE, cacheOwner)),
   );
@@ -105,7 +94,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [seededOwner, setSeededOwner] = useState(cacheOwner);
   if (seededOwner !== cacheOwner) {
     setSeededOwner(cacheOwner);
-    setThemePreference(getInitialTheme(cacheOwner));
     setTextScalePreference(
       parseTextScale(appearanceCache.get(storage.KEYS.UI_TEXT_SCALE, cacheOwner)),
     );
@@ -118,23 +106,21 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }
 
   // Load persisted settings from the canonical effective endpoint, one batched
-  // read for all four appearance keys. The server resolves the profile_device
+  // read for all three appearance keys. The server resolves the profile_device
   // override over the profile value, so this needs no per-scope reads.
   //
   // A source of "default" means the profile has stored no choice of its own;
-  // that must stay distinguishable from an explicit choice so the admin default
-  // and the local warm start keep their layering, so those values are dropped
-  // here rather than treated as the profile's preference.
+  // that must stay distinguishable from an explicit choice so the local warm
+  // start keeps its layering, so those values are dropped here rather than
+  // treated as the profile's preference.
   const { data: effectiveSettings } = useEffectiveSettings({
     keys: APPEARANCE_KEYS,
-    enabled: loadApiTheme,
+    enabled: loadApi,
   });
   const storedValue = (key: (typeof APPEARANCE_KEYS)[number]): unknown => {
     const setting = effectiveSettings?.[key];
     return setting !== undefined && setting.source !== "default" ? setting.value : undefined;
   };
-  const rawApiTheme = storedValue(SETTING_KEYS.UI_THEME);
-  const apiTheme = typeof rawApiTheme === "string" ? rawApiTheme : undefined;
   const rawApiTextScale = storedValue(SETTING_KEYS.UI_TEXT_SCALE);
   const apiTextScale = typeof rawApiTextScale === "string" ? rawApiTextScale : undefined;
   const rawApiTextWeight = storedValue(SETTING_KEYS.UI_TEXT_WEIGHT);
@@ -143,40 +129,28 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const apiHighContrast = typeof rawApiHighContrast === "boolean" ? rawApiHighContrast : undefined;
   const { save: saveProfileDefault } = useProfileDefaultWriter(effectiveSettings);
 
-  // Admin-set server default theme applies only when the user has expressed no
-  // preference of their own (no stored local choice and no profile ui.theme).
-  // A profile's explicit choice always wins, preserving the per-profile
-  // layering.
-  const { defaultTheme: adminDefaultTheme } = useBranding();
-  const localTheme = themePreference;
-  const localTextScale = textScalePreference;
-  const localTextWeight = textWeightPreference;
-  const localHighContrast = highContrastPreference;
-  const hasStoredThemeChoice = appearanceCache.get(storage.KEYS.THEME, cacheOwner) != null;
-  const fallbackTheme: ThemeId =
-    !hasStoredThemeChoice && isValidTheme(adminDefaultTheme) ? adminDefaultTheme : localTheme;
-
   // The server's value is this profile's own stored choice, so it wins outright
-  // whenever it is present and valid. It is deliberately not compared against
-  // the local cache: the effect below mirrors the server's value into that very
-  // cache, so any such comparison stops holding after the first render and the
-  // theme silently reverts to the default on the second.
-  const theme = loadApiTheme && isValidTheme(apiTheme) ? apiTheme : fallbackTheme;
-  const textScale = loadApiTheme ? parseTextScale(apiTextScale ?? localTextScale) : localTextScale;
-  const textWeight = loadApiTheme
-    ? parseTextWeight(apiTextWeight ?? localTextWeight)
-    : localTextWeight;
-  const highContrast = loadApiTheme ? (apiHighContrast ?? localHighContrast) : localHighContrast;
+  // whenever it is present. It is deliberately not compared against the local
+  // cache: the effect below mirrors the server's value into that very cache,
+  // so any such comparison stops holding after the first render.
+  const textScale = loadApi
+    ? parseTextScale(apiTextScale ?? textScalePreference)
+    : textScalePreference;
+  const textWeight = loadApi
+    ? parseTextWeight(apiTextWeight ?? textWeightPreference)
+    : textWeightPreference;
+  const highContrast = loadApi
+    ? (apiHighContrast ?? highContrastPreference)
+    : highContrastPreference;
 
   // Mirror the server's values into this identity's namespace so the next cold
   // start paints them before the settings request resolves. Without this the
   // cache would only ever hold choices made on this device, and a user who
-  // picked their theme elsewhere would flash the default on every load.
+  // chose elsewhere would flash the default on every load.
   //
   // Only keys the profile actually has a stored preference for are mirrored:
-  // the absence of a cached theme is what lets the admin default apply, so
-  // writing a resolved-but-unchosen value here would silently pin them to
-  // whatever the default happened to be the first time they loaded the app.
+  // writing a resolved-but-unchosen value here would silently pin the profile
+  // to whatever the default happened to be the first time it loaded the app.
   // The mirror runs both ways. A key the server answered for but has no stored
   // value at — source "default" — is a key this profile has no preference for,
   // whether it never chose one or another client just deleted it. Its cached
@@ -188,7 +162,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   // a good warm start on any partial read. Only this owner's namespace is
   // touched; another identity's warm start is not ours to clear.
   useEffect(() => {
-    if (!loadApiTheme || effectiveSettings === undefined) return;
+    if (!loadApi || effectiveSettings === undefined) return;
     const mirror = (
       key: (typeof APPEARANCE_KEYS)[number],
       cacheKey: StorageKey,
@@ -203,11 +177,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       return true;
     };
     const cleared = {
-      theme: mirror(
-        SETTING_KEYS.UI_THEME,
-        storage.KEYS.THEME,
-        isValidTheme(apiTheme) ? apiTheme : undefined,
-      ),
       textScale: mirror(SETTING_KEYS.UI_TEXT_SCALE, storage.KEYS.UI_TEXT_SCALE, apiTextScale),
       textWeight: mirror(SETTING_KEYS.UI_TEXT_WEIGHT, storage.KEYS.UI_TEXT_WEIGHT, apiTextWeight),
       highContrast: mirror(
@@ -225,20 +194,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     if (cleared.textScale) setTextScalePreference(parseTextScale(undefined));
     if (cleared.textWeight) setTextWeightPreference(parseTextWeight(undefined));
     if (cleared.highContrast) setHighContrastPreference(parseHighContrast(undefined));
-    if (cleared.theme) setThemePreference(getInitialTheme(cacheOwner));
-  }, [
-    loadApiTheme,
-    effectiveSettings,
-    apiTheme,
-    apiTextScale,
-    apiTextWeight,
-    apiHighContrast,
-    cacheOwner,
-  ]);
-
-  useEffect(() => {
-    applyThemeToDOM(previewThemeState ?? theme);
-  }, [previewThemeState, theme]);
+  }, [loadApi, effectiveSettings, apiTextScale, apiTextWeight, apiHighContrast, cacheOwner]);
 
   useEffect(() => {
     applyTextScaleToDOM(textScale);
@@ -251,25 +207,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     applyHighContrastToDOM(highContrast);
   }, [highContrast]);
-
-  const setTheme = useCallback(
-    (newTheme: ThemeId) => {
-      setPreviewThemeState(null);
-      setThemePreference(newTheme);
-      applyThemeToDOM(newTheme);
-      appearanceCache.set(storage.KEYS.THEME, newTheme, cacheOwner);
-      void saveProfileDefault(SETTING_KEYS.UI_THEME, newTheme);
-    },
-    [saveProfileDefault, cacheOwner],
-  );
-
-  const previewTheme = useCallback((newTheme: ThemeId) => {
-    setPreviewThemeState(newTheme);
-  }, []);
-
-  const resetPreviewTheme = useCallback(() => {
-    setPreviewThemeState(null);
-  }, []);
 
   const setTextScale = useCallback(
     (value: TextScale) => {
@@ -304,10 +241,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   return (
     <ThemeContext
       value={{
-        theme,
-        setTheme,
-        previewTheme,
-        resetPreviewTheme,
         textScale,
         setTextScale,
         textWeight,

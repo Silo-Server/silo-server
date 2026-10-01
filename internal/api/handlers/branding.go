@@ -26,13 +26,19 @@ func NewBrandingHandler(svc *branding.Service) *BrandingHandler {
 // historical {server_name, login_subtitle} shape — new fields are additive per
 // the v1 API rules. Asset URLs are stable, cache-bustable paths (empty when no
 // custom asset is set).
+//
+// default_theme and the light logo URLs are retired from the web client and
+// from /api/v2, but this frozen v1 response keeps reporting whatever is stored
+// until v1 retires.
 type brandingResponse struct {
 	ServerName       string `json:"server_name"`
 	LoginSubtitle    string `json:"login_subtitle"`
 	AccentColor      string `json:"accent_color,omitempty"`
 	DefaultTheme     string `json:"default_theme,omitempty"`
 	WordmarkURL      string `json:"wordmark_url,omitempty"`
+	WordmarkLightURL string `json:"wordmark_light_url,omitempty"`
 	MarkURL          string `json:"mark_url,omitempty"`
+	MarkLightURL     string `json:"mark_light_url,omitempty"`
 	FaviconURL       string `json:"favicon_url,omitempty"`
 	LoginBgURL       string `json:"login_bg_url,omitempty"`
 	StorageAvailable bool   `json:"storage_available"`
@@ -49,10 +55,12 @@ func (h *BrandingHandler) HandleGetBranding(w http.ResponseWriter, r *http.Reque
 		AccentColor:      snap.AccentColor,
 		DefaultTheme:     snap.DefaultTheme,
 		WordmarkURL:      snap.AssetURL(branding.KindWordmark),
+		WordmarkLightURL: snap.AssetURL(branding.KindWordmarkLight),
 		MarkURL:          snap.AssetURL(branding.KindMark),
+		MarkLightURL:     snap.AssetURL(branding.KindMarkLight),
 		FaviconURL:       snap.AssetURL(branding.KindFavicon),
 		LoginBgURL:       snap.AssetURL(branding.KindLoginBg),
-		StorageAvailable: h.svc.HasStorage(),
+		StorageAvailable: h.svc != nil && h.svc.HasStorage(),
 	})
 }
 
@@ -105,7 +113,7 @@ func (h *BrandingHandler) HandleUploadAsset(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if !h.svc.HasStorage() {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Asset upload storage (S3) is not configured")
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Asset upload storage is not configured")
 		return
 	}
 
@@ -136,11 +144,11 @@ func (h *BrandingHandler) HandleUploadAsset(w http.ResponseWriter, r *http.Reque
 	case errors.Is(err, branding.ErrUnsupportedImage):
 		writeError(w, http.StatusBadRequest, "bad_request", "Unsupported image type; use PNG, JPEG, WebP (or PNG/ICO/SVG for favicon)")
 		return
-	case errors.Is(err, branding.ErrStorageUnavailable):
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Asset upload storage (S3) is not configured")
-		return
 	case errors.Is(err, branding.ErrInvalidKind):
 		writeError(w, http.StatusBadRequest, "bad_request", "Unknown branding asset")
+		return
+	case errors.Is(err, branding.ErrStorageUnavailable):
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Asset storage is not configured")
 		return
 	case err != nil:
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store asset")

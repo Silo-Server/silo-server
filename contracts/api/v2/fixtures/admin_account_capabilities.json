@@ -1,0 +1,13 @@
+{
+  "revision": "b472da14087930daffcb6b19354fcead719d1e96b41bc06973a342c3e7d0e500",
+  "state": "available",
+  "allowed": true,
+  "available": true,
+  "guarded_configuration": true,
+  "default_profile": true,
+  "exact_identity_filter": true,
+  "access_groups": true,
+  "password_reset_link": true,
+  "password_reset_email": true,
+  "ownership_transfer": true
+}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"strings"
 	"time"
 )
 
@@ -14,16 +13,13 @@ type chapterThumbnailSessionLookup interface {
 	GetSessionsByMediaFileID(fileID int) []*Session
 }
 
-type chapterThumbnailURLPresigner interface {
-	PresignGetURL(ctx context.Context, bucket, key string, expiry time.Duration) (string, error)
-	Bucket() string
-}
+type ChapterThumbnailURLResolver func(context.Context, string, time.Duration) (string, error)
 
 // ChapterThumbnailNotifier publishes live chapter thumbnail updates to active playback sessions.
 type ChapterThumbnailNotifier struct {
 	sessions chapterThumbnailSessionLookup
 	hub      *RealtimeHub
-	presign  chapterThumbnailURLPresigner
+	presign  ChapterThumbnailURLResolver
 	ttl      time.Duration
 }
 
@@ -31,7 +27,7 @@ type ChapterThumbnailNotifier struct {
 func NewChapterThumbnailNotifier(
 	sessions chapterThumbnailSessionLookup,
 	hub *RealtimeHub,
-	presign chapterThumbnailURLPresigner,
+	presign ChapterThumbnailURLResolver,
 	ttl time.Duration,
 ) *ChapterThumbnailNotifier {
 	if sessions == nil || hub == nil || presign == nil {
@@ -60,12 +56,7 @@ func (n *ChapterThumbnailNotifier) ChapterThumbnailReady(
 		return
 	}
 
-	thumbnailURL, err := n.presign.PresignGetURL(
-		ctx,
-		n.presign.Bucket(),
-		strings.Replace(thumbnailPath, "/original.", "/w300.", 1),
-		n.ttl,
-	)
+	thumbnailURL, err := n.presign(ctx, thumbnailPath, n.ttl)
 	if err != nil {
 		slog.WarnContext(ctx,
 			"failed to presign chapter thumbnail for realtime event", "component", "playback",

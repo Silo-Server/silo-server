@@ -2,7 +2,7 @@ import { createContext, useEffect } from "react";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import { api } from "@/api/client";
+import { v2 } from "@/api/v2/request";
 import { themeKeys } from "@/hooks/queries/keys";
 import { setAppDocumentTitle } from "@/lib/documentTitle";
 
@@ -14,7 +14,6 @@ interface BrandingApiResponse {
   server_name?: string;
   login_subtitle?: string;
   accent_color?: string;
-  default_theme?: string;
   wordmark_url?: string;
   mark_url?: string;
   favicon_url?: string;
@@ -27,8 +26,6 @@ export interface BrandingContextValue {
   loginSubtitle: string;
   /** Brand accent color (hex), or null when unset. */
   accentColor: string | null;
-  /** Admin-selected default theme id, or null when unset. */
-  defaultTheme: string | null;
   /** Custom asset URLs (stable, cache-busted) or null to use bundled defaults. */
   wordmarkUrl: string | null;
   markUrl: string | null;
@@ -42,7 +39,6 @@ const DEFAULT_BRANDING: BrandingContextValue = {
   serverName: DEFAULT_SERVER_NAME,
   loginSubtitle: DEFAULT_LOGIN_SUBTITLE,
   accentColor: null,
-  defaultTheme: null,
   wordmarkUrl: null,
   markUrl: null,
   faviconUrl: null,
@@ -59,7 +55,6 @@ function mapResponse(data: BrandingApiResponse | undefined): BrandingContextValu
     serverName: data?.server_name || DEFAULT_SERVER_NAME,
     loginSubtitle: data?.login_subtitle || DEFAULT_LOGIN_SUBTITLE,
     accentColor: data?.accent_color || null,
-    defaultTheme: data?.default_theme || null,
     wordmarkUrl: data?.wordmark_url || null,
     markUrl: data?.mark_url || null,
     faviconUrl: data?.favicon_url || null,
@@ -93,7 +88,7 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
   // the error state.
   const { data } = useQuery({
     queryKey: themeKeys.branding(),
-    queryFn: () => api<BrandingApiResponse>("/theme/branding"),
+    queryFn: () => v2("GET /api/v2/theme/branding"),
     staleTime: 5 * 60_000,
   });
 

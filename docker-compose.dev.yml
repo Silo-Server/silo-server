@@ -121,6 +121,7 @@ services:
       - silo-dev-go-build:/root/.cache/go-build
       - silo-dev-go-mod:/go/pkg/mod
       - silo-dev-plugins:/var/lib/silo/plugins
+      - silo-dev-artwork:/var/lib/silo/artwork
       - silo-dev-compat:/var/lib/silo/compat
       - silo-dev-transcode:/tmp/silo-transcode
       - ${MEDIA_ROOT:-/tmp/silo-dev-media}:${MEDIA_CONTAINER_ROOT:-/mnt/media}:ro
@@ -172,6 +173,7 @@ volumes:
   silo-dev-go-build:
   silo-dev-go-mod:
   silo-dev-plugins:
+  silo-dev-artwork:
   silo-dev-pnpm-store:
   silo-dev-postgres:
   silo-dev-redis:

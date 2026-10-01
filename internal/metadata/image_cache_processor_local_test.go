@@ -57,7 +57,7 @@ type fakePrefixDeleter struct {
 	prefixes []string
 }
 
-func (f *fakePrefixDeleter) DeletePrefix(_ context.Context, _ string, prefix string) (int, error) {
+func (f *fakePrefixDeleter) DeletePrefix(_ context.Context, prefix string) (int, error) {
 	f.prefixes = append(f.prefixes, prefix)
 	return 1, nil
 }

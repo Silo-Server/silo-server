@@ -12,8 +12,11 @@ vi.mock("@/hooks/queries/recommendations", () => ({
   useDiscover: (...args: unknown[]) => mockUseDiscover(...args),
 }));
 
+const documentTitles = vi.hoisted(() => [] as string[]);
 vi.mock("@/hooks/useDocumentTitle", () => ({
-  useDocumentTitle: () => undefined,
+  useDocumentTitle: (title: string) => {
+    documentTitles.push(title);
+  },
 }));
 
 vi.mock("@/components/MediaCarousel", () => ({
@@ -73,7 +76,10 @@ describe("Recommendations", () => {
     const markup = renderPage();
 
     expect(markup).toContain('data-slot="skeleton"');
-    expect(markup).toContain("Recommendations");
+    // The viewer-facing name matches the native apps.
+    expect(markup).toContain("For You");
+    expect(markup).not.toContain(">Recommendations<");
+    expect(documentTitles.at(-1)).toBe("For You");
   });
 
   it("renders empty state when discover returns no rows", () => {

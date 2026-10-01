@@ -301,6 +301,372 @@ func TestPersistSeasonsAndEpisodes_ManualRefreshReplacesNonEmptyButPreservesBlan
 	}
 }
 
+func TestPersistSeasonsAndEpisodes_UsesBoundedBulkCalls(t *testing.T) {
+	const seriesID = "series-bulk-persist"
+
+	service, _, seasonRepo, episodeRepo := newSeasonEpisodeServiceForTest(seriesID)
+	episodes := make([]EpisodeResult, 20)
+	for i := range episodes {
+		episodes[i] = EpisodeResult{
+			SeasonNumber:  3,
+			EpisodeNumber: i + 1,
+			Title:         "Episode",
+		}
+	}
+
+	service.persistSeasonsAndEpisodes(
+		context.Background(),
+		&models.MediaItem{ContentID: seriesID, Type: "series"},
+		nil,
+		"en",
+		"en",
+		[]SeasonResult{
+			{SeasonNumber: 1, Title: "Season 1"},
+			{SeasonNumber: 2, Title: "Season 2"},
+		},
+		episodes,
+		MergeFillEmpty,
+	)
+
+	if got := seasonRepo.ListCalls(); got != 1 {
+		t.Fatalf("season prefetch calls = %d, want 1", got)
+	}
+	if got := episodeRepo.ListByNumbersCalls(); got != 1 {
+		t.Fatalf("targeted episode prefetch calls = %d, want 1", got)
+	}
+	if got := seasonRepo.RequestedNumbers(); got != 3 {
+		t.Fatalf("targeted season prefetch keys = %d, want 3", got)
+	}
+	if got := episodeRepo.RequestedPairs(); got != len(episodes) {
+		t.Fatalf("targeted episode prefetch keys = %d, want %d", got, len(episodes))
+	}
+	if got := seasonRepo.BulkUpsertCalls(); got != 2 {
+		t.Fatalf("season bulk upserts = %d, want 2 (explicit and implicit phases)", got)
+	}
+	if got := episodeRepo.BulkUpsertCalls(); got != 1 {
+		t.Fatalf("episode bulk upserts = %d, want 1", got)
+	}
+	if got := seasonRepo.GetByNumberCalls(); got != 0 {
+		t.Fatalf("season point reads = %d, want 0", got)
+	}
+	if got := episodeRepo.GetByNumberCalls(); got != 0 {
+		t.Fatalf("episode point reads = %d, want 0", got)
+	}
+	if got := seasonRepo.UpsertCalls(); got != 0 {
+		t.Fatalf("season single-row upserts = %d, want 0", got)
+	}
+	if got := episodeRepo.UpsertCalls(); got != 0 {
+		t.Fatalf("episode single-row upserts = %d, want 0", got)
+	}
+	if got := episodeRepo.ListBySeriesCalls(); got != 1 {
+		t.Fatalf("availability-filtered completeness reads = %d, want 1", got)
+	}
+	if got := len(episodeRepo.listBySeries(seriesID)); got != len(episodes) {
+		t.Fatalf("persisted episodes = %d, want %d", got, len(episodes))
+	}
+}
+
+func TestPersistSeasonsAndEpisodes_LocalizedRefreshUsesBoundedBulkCalls(t *testing.T) {
+	const seriesID = "series-localized-bulk-persist"
+
+	service, _, _, _ := newSeasonEpisodeServiceForTest(seriesID)
+	seasonLocalizations := newFakeSeasonLocalizationRepo()
+	episodeLocalizations := newFakeEpisodeLocalizationRepo()
+	service.seasonLocalizationRepo = seasonLocalizations
+	service.episodeLocalizationRepo = episodeLocalizations
+
+	episodes := make([]EpisodeResult, 20)
+	for i := range episodes {
+		episodes[i] = EpisodeResult{
+			SeasonNumber:  1,
+			EpisodeNumber: i + 1,
+			Title:         "Localized episode",
+		}
+	}
+	service.persistSeasonsAndEpisodes(
+		context.Background(),
+		&models.MediaItem{ContentID: seriesID, Type: "series"},
+		nil,
+		"en",
+		"fr",
+		[]SeasonResult{
+			{SeasonNumber: 1, Title: "Saison 1"},
+			{SeasonNumber: 2, Title: "Saison 2"},
+		},
+		episodes,
+		MergeFillEmpty,
+	)
+
+	if seasonLocalizations.bulkGetCalls != 1 || seasonLocalizations.bulkUpsertCalls != 1 {
+		t.Fatalf("season localization batch calls = get:%d upsert:%d, want 1/1",
+			seasonLocalizations.bulkGetCalls, seasonLocalizations.bulkUpsertCalls)
+	}
+	if seasonLocalizations.getCalls != 0 || seasonLocalizations.upsertCalls != 0 {
+		t.Fatalf("season localization point calls = get:%d upsert:%d, want 0/0",
+			seasonLocalizations.getCalls, seasonLocalizations.upsertCalls)
+	}
+	if episodeLocalizations.bulkGetCalls != 1 || episodeLocalizations.bulkUpsertCalls != 1 {
+		t.Fatalf("episode localization batch calls = get:%d upsert:%d, want 1/1",
+			episodeLocalizations.bulkGetCalls, episodeLocalizations.bulkUpsertCalls)
+	}
+	if episodeLocalizations.getCalls != 0 || episodeLocalizations.upsertCalls != 0 {
+		t.Fatalf("episode localization point calls = get:%d upsert:%d, want 0/0",
+			episodeLocalizations.getCalls, episodeLocalizations.upsertCalls)
+	}
+	if got := len(seasonLocalizations.localizations); got != 2 {
+		t.Fatalf("persisted season localizations = %d, want 2", got)
+	}
+	if got := len(episodeLocalizations.localizations); got != len(episodes) {
+		t.Fatalf("persisted episode localizations = %d, want %d", got, len(episodes))
+	}
+}
+
+func TestPersistSeasonsAndEpisodes_LocalizationBatchFailuresUsePointFallbacks(t *testing.T) {
+	const seriesID = "series-localization-bulk-fallback"
+
+	service, _, _, _ := newSeasonEpisodeServiceForTest(seriesID)
+	seasonLocalizations := newFakeSeasonLocalizationRepo()
+	episodeLocalizations := newFakeEpisodeLocalizationRepo()
+	seasonLocalizations.bulkGetErr = errors.New("season localization batch read unavailable")
+	seasonLocalizations.bulkUpsertErr = errors.New("season localization batch write unavailable")
+	episodeLocalizations.bulkGetErr = errors.New("episode localization batch read unavailable")
+	episodeLocalizations.bulkUpsertErr = errors.New("episode localization batch write unavailable")
+	service.seasonLocalizationRepo = seasonLocalizations
+	service.episodeLocalizationRepo = episodeLocalizations
+
+	service.persistSeasonsAndEpisodes(
+		context.Background(),
+		&models.MediaItem{ContentID: seriesID, Type: "series"},
+		nil,
+		"en",
+		"fr",
+		[]SeasonResult{
+			{SeasonNumber: 1, Title: "Saison 1"},
+			{SeasonNumber: 2, Title: "Saison 2"},
+		},
+		[]EpisodeResult{
+			{SeasonNumber: 1, EpisodeNumber: 1, Title: "Episode 1"},
+			{SeasonNumber: 1, EpisodeNumber: 2, Title: "Episode 2"},
+		},
+		MergeFillEmpty,
+	)
+
+	if seasonLocalizations.getCalls != 2 || seasonLocalizations.upsertCalls != 2 {
+		t.Fatalf("season localization fallback calls = get:%d upsert:%d, want 2/2",
+			seasonLocalizations.getCalls, seasonLocalizations.upsertCalls)
+	}
+	if episodeLocalizations.getCalls != 2 || episodeLocalizations.upsertCalls != 2 {
+		t.Fatalf("episode localization fallback calls = get:%d upsert:%d, want 2/2",
+			episodeLocalizations.getCalls, episodeLocalizations.upsertCalls)
+	}
+	if got := len(seasonLocalizations.localizations); got != 2 {
+		t.Fatalf("season localization fallback persisted %d rows, want 2", got)
+	}
+	if got := len(episodeLocalizations.localizations); got != 2 {
+		t.Fatalf("episode localization fallback persisted %d rows, want 2", got)
+	}
+}
+
+func TestPersistSeasonsAndEpisodes_BulkFailurePreservesPartialProgress(t *testing.T) {
+	const seriesID = "series-bulk-fallback"
+
+	service, _, seasonRepo, episodeRepo := newSeasonEpisodeServiceForTest(seriesID)
+	enqueuer := &recordingImageCacheJobEnqueuer{}
+	service.SetAutoCacheImages(true)
+	service.SetImageCacheJobEnqueuer(enqueuer)
+	seasonRepo.bulkUpsertErr = errors.New("season bulk unavailable")
+	seasonRepo.upsertErrors[seasonKey(seriesID, 1)] = errors.New("season 1 rejected")
+	episodeRepo.bulkUpsertErr = errors.New("episode bulk unavailable")
+	episodeRepo.upsertErrors[episodeKey(seriesID, 2, 1)] = errors.New("episode 1 rejected")
+
+	service.persistSeasonsAndEpisodes(
+		context.Background(),
+		&models.MediaItem{ContentID: seriesID, Type: "series"},
+		map[string]string{"tvdb": "series-123"},
+		"en",
+		"en",
+		[]SeasonResult{
+			{SeasonNumber: 1, Title: "Season 1", PosterPath: "tvdb://season-1.jpg"},
+			{SeasonNumber: 2, Title: "Season 2", PosterPath: "tvdb://season-2.jpg"},
+			{SeasonNumber: 3, Title: "Season 3", PosterPath: "tvdb://season-3.jpg"},
+		},
+		[]EpisodeResult{
+			{SeasonNumber: 2, EpisodeNumber: 1, Title: "Episode 1", StillPath: "tvdb://episode-1.jpg"},
+			{SeasonNumber: 2, EpisodeNumber: 2, Title: "Episode 2", StillPath: "tvdb://episode-2.jpg"},
+		},
+		MergeFillEmpty,
+	)
+
+	if got := seasonRepo.BulkUpsertCalls(); got != 1 {
+		t.Fatalf("season bulk upserts = %d, want 1", got)
+	}
+	if got := seasonRepo.UpsertCalls(); got != 3 {
+		t.Fatalf("season fallback upserts = %d, want 3", got)
+	}
+	if got := episodeRepo.BulkUpsertCalls(); got != 1 {
+		t.Fatalf("episode bulk upserts = %d, want 1", got)
+	}
+	if got := episodeRepo.UpsertCalls(); got != 2 {
+		t.Fatalf("episode fallback upserts = %d, want 2", got)
+	}
+	if seasonRepo.seasons[seasonKey(seriesID, 1)] != nil {
+		t.Fatal("failed season was persisted")
+	}
+	if seasonRepo.seasons[seasonKey(seriesID, 2)] == nil || seasonRepo.seasons[seasonKey(seriesID, 3)] == nil {
+		t.Fatal("successful seasons did not persist after bulk fallback")
+	}
+	if episodeRepo.episodes[episodeKey(seriesID, 2, 1)] != nil {
+		t.Fatal("failed episode was persisted")
+	}
+	if episodeRepo.episodes[episodeKey(seriesID, 2, 2)] == nil {
+		t.Fatal("successful episode did not persist after bulk fallback")
+	}
+
+	queuedSources := make(map[string]bool, len(enqueuer.inputs))
+	for _, input := range enqueuer.inputs {
+		queuedSources[input.SourcePath] = true
+	}
+	for _, source := range []string{"tvdb://season-2.jpg", "tvdb://season-3.jpg", "tvdb://episode-2.jpg"} {
+		if !queuedSources[source] {
+			t.Errorf("successful source %q was not queued", source)
+		}
+	}
+	for _, source := range []string{"tvdb://season-1.jpg", "tvdb://episode-1.jpg"} {
+		if queuedSources[source] {
+			t.Errorf("failed source %q was queued", source)
+		}
+	}
+	if got := len(enqueuer.inputs); got != 3 {
+		t.Fatalf("queued image jobs = %d, want 3", got)
+	}
+}
+
+func TestPersistSeasonsAndEpisodes_PrefetchFailureUsesPointReadFallback(t *testing.T) {
+	const seriesID = "series-prefetch-fallback"
+
+	service, _, seasonRepo, episodeRepo := newSeasonEpisodeServiceForTest(seriesID)
+	seasonRepo.listErr = errors.New("season list unavailable")
+	episodeRepo.listByNumbersErr = errors.New("episode list unavailable")
+	seasonRepo.seasons[seasonKey(seriesID, 1)] = &models.Season{
+		ContentID:       "existing-season",
+		SeriesID:        seriesID,
+		SeasonNumber:    1,
+		Title:           "Existing Season",
+		Overview:        "Existing season overview",
+		MetadataSource:  "provider",
+		PosterThumbhash: "existing-season-thumb",
+	}
+	episodeRepo.episodes[episodeKey(seriesID, 1, 1)] = &models.Episode{
+		ContentID:      "existing-episode",
+		SeriesID:       seriesID,
+		SeasonID:       "existing-season",
+		SeasonNumber:   1,
+		EpisodeNumber:  1,
+		Title:          "Existing Episode",
+		Overview:       "Existing episode overview",
+		MetadataSource: "provider",
+	}
+
+	service.persistSeasonsAndEpisodes(
+		context.Background(),
+		&models.MediaItem{ContentID: seriesID, Type: "series"},
+		nil,
+		"en",
+		"en",
+		[]SeasonResult{{SeasonNumber: 1, Title: "Provider Season"}},
+		[]EpisodeResult{{SeasonNumber: 1, EpisodeNumber: 1, Title: "Provider Episode"}},
+		MergeFillEmpty,
+	)
+
+	if got := seasonRepo.GetByNumberCalls(); got != 1 {
+		t.Fatalf("season point-read fallbacks = %d, want 1", got)
+	}
+	if got := episodeRepo.GetByNumberCalls(); got != 1 {
+		t.Fatalf("episode point-read fallbacks = %d, want 1", got)
+	}
+	if got := seasonRepo.seasons[seasonKey(seriesID, 1)].Title; got != "Existing Season" {
+		t.Fatalf("season title = %q, want existing title preserved", got)
+	}
+	if got := episodeRepo.episodes[episodeKey(seriesID, 1, 1)].Title; got != "Existing Episode" {
+		t.Fatalf("episode title = %q, want existing title preserved", got)
+	}
+}
+
+func TestPersistSeasonsAndEpisodes_OutOfRangeKeysAvoidBatchPrefetch(t *testing.T) {
+	overflow64 := int64(1) << 31
+	overflow := int(overflow64)
+	if int64(overflow) != overflow64 {
+		t.Skip("int cannot represent a value outside PostgreSQL integer range")
+	}
+
+	const seriesID = "series-out-of-range-prefetch"
+	service, _, seasonRepo, episodeRepo := newSeasonEpisodeServiceForTest(seriesID)
+	service.persistSeasonsAndEpisodes(
+		context.Background(),
+		&models.MediaItem{ContentID: seriesID, Type: "series"},
+		nil,
+		"en",
+		"en",
+		[]SeasonResult{{SeasonNumber: overflow, Title: "Invalid season"}},
+		[]EpisodeResult{{SeasonNumber: 1, EpisodeNumber: overflow, Title: "Invalid episode"}},
+		MergeFillEmpty,
+	)
+
+	if got := seasonRepo.ListCalls(); got != 0 {
+		t.Fatalf("season batch prefetch calls = %d, want 0 for an out-of-range key", got)
+	}
+	if got := episodeRepo.ListByNumbersCalls(); got != 0 {
+		t.Fatalf("episode batch prefetch calls = %d, want 0 for an out-of-range key", got)
+	}
+	if got := seasonRepo.GetByNumberCalls(); got == 0 {
+		t.Fatal("season point-read fallback was not used")
+	}
+	if got := episodeRepo.GetByNumberCalls(); got == 0 {
+		t.Fatal("episode point-read fallback was not used")
+	}
+}
+
+func TestPersistSeasonsAndEpisodes_DuplicateNaturalKeysKeepSequentialSemantics(t *testing.T) {
+	const seriesID = "series-duplicate-persist"
+
+	service, _, seasonRepo, episodeRepo := newSeasonEpisodeServiceForTest(seriesID)
+	service.persistSeasonsAndEpisodes(
+		context.Background(),
+		&models.MediaItem{ContentID: seriesID, Type: "series"},
+		nil,
+		"en",
+		"en",
+		[]SeasonResult{
+			{SeasonNumber: 1, Title: "First season title"},
+			{SeasonNumber: 1, Title: "Second season title"},
+		},
+		[]EpisodeResult{
+			{SeasonNumber: 1, EpisodeNumber: 1, Title: "First episode title"},
+			{SeasonNumber: 1, EpisodeNumber: 1, Title: "Second episode title"},
+		},
+		MergeReplaceUnlocked,
+	)
+
+	if got := seasonRepo.BulkUpsertCalls(); got != 0 {
+		t.Fatalf("season bulk upserts = %d, want 0 for duplicate keys", got)
+	}
+	if got := episodeRepo.BulkUpsertCalls(); got != 0 {
+		t.Fatalf("episode bulk upserts = %d, want 0 for duplicate keys", got)
+	}
+	if got := seasonRepo.GetByNumberCalls(); got != 2 {
+		t.Fatalf("season sequential reads = %d, want 2", got)
+	}
+	if got := episodeRepo.GetByNumberCalls(); got != 2 {
+		t.Fatalf("episode sequential reads = %d, want 2", got)
+	}
+	if got := seasonRepo.seasons[seasonKey(seriesID, 1)].Title; got != "Second season title" {
+		t.Fatalf("season title = %q, want last sequential write", got)
+	}
+	if got := episodeRepo.episodes[episodeKey(seriesID, 1, 1)].Title; got != "Second episode title" {
+		t.Fatalf("episode title = %q, want last sequential write", got)
+	}
+}
+
 func TestBuildItemLocalizationRecord_PreservesExistingWhenRefreshIsBlank(t *testing.T) {
 	existing := &models.MediaItemLocalization{
 		ContentID:         "series-1",

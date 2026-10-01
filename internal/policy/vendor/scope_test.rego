@@ -14,6 +14,7 @@ base_input := {
 	"disabled_library_ids": [],
 	"profile_present": false,
 	"profile_max_content_rating": "",
+	"profile_max_advisory_age": 0,
 	"profile_max_playback_quality": "",
 	"profile_library_restricted": false,
 	"profile_allowed_library_ids": [],
@@ -33,6 +34,7 @@ test_no_profile_unrestricted if {
 	got.allowed_library_ids == []
 	got.disabled_library_ids == []
 	got.max_content_rating == ""
+	got.max_advisory_age == 0
 	got.max_playback_quality == ""
 	got.policy_revision == 11
 	got.profile_verified
@@ -129,7 +131,10 @@ test_tightening_override_applies if {
 	not got.unrestricted
 	got.allowed_library_ids == [2]
 	got.disabled_library_ids == []
-	got.max_content_rating == "PG"
+	# The ceiling is reported unreduced in both fields: only Go can rank one
+	# rating against another, so the caller resolves the stricter of the two.
+	got.max_content_rating == ""
+	got.max_content_rating_override == "PG"
 	got.max_playback_quality == "1080p"
 	not got.profile_verified
 }
@@ -158,4 +163,56 @@ test_widening_override_has_no_effect if {
 		with input as restricted_input
 		with data.silo_custom.scope.override as widening_override
 	got == base
+}
+
+test_profile_advisory_age_limit if {
+	got := decision with input as object.union(base_input, {
+		"profile_id": "prof-1",
+		"profile_present": true,
+		"profile_max_advisory_age": 12,
+	})
+	got.max_advisory_age == 12
+}
+
+# A limit on an absent profile never applies, and an input predating the field
+# reads as no limit.
+test_profile_advisory_age_needs_a_profile if {
+	got := decision with input as object.union(base_input, {"profile_max_advisory_age": 12})
+	got.max_advisory_age == 0
+	legacy := decision with input as object.remove(object.union(base_input, {"profile_present": true}), {"profile_max_advisory_age"})
+	legacy.max_advisory_age == 0
+}
+
+advisory_override(age) := {"max_advisory_age": age}
+
+advisory_input := object.union(base_input, {
+	"profile_id": "prof-1",
+	"profile_present": true,
+	"profile_max_advisory_age": 12,
+})
+
+# An override reduces the advisory-age limit directly: the lower limit wins,
+# a higher or absent one changes nothing, and an unusable one fails closed.
+test_advisory_age_override_only_tightens if {
+	lower := decision with input as advisory_input with data.silo_custom.scope.override as advisory_override(9)
+	lower.max_advisory_age == 9
+	fractional := decision with input as advisory_input with data.silo_custom.scope.override as advisory_override(9.7)
+	fractional.max_advisory_age == 9
+	higher := decision with input as advisory_input with data.silo_custom.scope.override as advisory_override(16)
+	higher.max_advisory_age == 12
+	zero := decision with input as advisory_input with data.silo_custom.scope.override as advisory_override(0)
+	zero.max_advisory_age == 12
+	null_override := decision with input as advisory_input with data.silo_custom.scope.override as advisory_override(null)
+	null_override.max_advisory_age == 12
+	absent := decision with input as advisory_input with data.silo_custom.scope.override as tightening_override
+	absent.max_advisory_age == 12
+	for_unlimited := decision with input as base_input with data.silo_custom.scope.override as advisory_override(10)
+	for_unlimited.max_advisory_age == 10
+}
+
+test_unusable_advisory_age_override_fails_closed if {
+	every value in ["13", -3, 0.5, true] {
+		got := decision with input as advisory_input with data.silo_custom.scope.override as advisory_override(value)
+		got.max_advisory_age == 1
+	}
 }

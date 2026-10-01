@@ -9,147 +9,48 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/redis/go-redis/v9"
 
 	"github.com/Silo-Server/silo-server/internal/logstream"
 )
 
-var popBatchScript = redis.NewScript(`
-local key = KEYS[1]
-local count = tonumber(ARGV[1])
-local items = redis.call('LRANGE', key, 0, count - 1)
-if #items > 0 then
-    redis.call('LTRIM', key, count, -1)
-end
-return items
-`)
-
+// Consumer batch-inserts one node's operational log entries into Postgres and
+// fans them out to the admin live tail.
 type Consumer struct {
-	pool       *pgxpool.Pool
-	redis      *redis.Client
-	batchSize  int
-	interval   time.Duration
-	maxRetries int
-	streamHub  *logstream.Hub
+	pool      *pgxpool.Pool
+	batchSize int
+	interval  time.Duration
+	streamHub *logstream.Hub
 }
 
-func NewConsumer(pool *pgxpool.Pool, redisClient *redis.Client, streamHub *logstream.Hub) *Consumer {
+func NewConsumer(pool *pgxpool.Pool, streamHub *logstream.Hub) *Consumer {
 	return &Consumer{
-		pool:       pool,
-		redis:      redisClient,
-		batchSize:  100,
-		interval:   2 * time.Second,
-		maxRetries: 3,
-		streamHub:  streamHub,
+		pool:      pool,
+		batchSize: 100,
+		interval:  2 * time.Second,
+		streamHub: streamHub,
 	}
 }
 
-func (c *Consumer) RunRedis(ctx context.Context) {
-	ticker := time.NewTicker(c.interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			c.drainRedis(context.Background())
-			return
-		case <-ticker.C:
-			c.drainRedis(ctx)
-		}
-	}
-}
-
-func (c *Consumer) drainRedis(ctx context.Context) {
-	for {
-		entries, err := c.popRedisBatch(ctx)
-		if err != nil {
-			slog.WarnContext(ctx, "opslog: Redis pop error", "component", "opslog", "error", err)
-			return
-		}
-		if len(entries) == 0 {
-			return
-		}
-		if err := c.insertBatchWithRetry(ctx, entries); err != nil {
-			slog.ErrorContext(ctx, "opslog: batch insert failed after retries, dropping batch", "component", "opslog", "error", err, "count", len(entries))
-		}
-	}
-}
-
-func (c *Consumer) popRedisBatch(ctx context.Context) ([]Entry, error) {
-	result, err := popBatchScript.Run(ctx, c.redis, []string{redisKey}, c.batchSize).StringSlice()
-	if err != nil {
-		if err == redis.Nil {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("pop batch script: %w", err)
-	}
-
-	entries := make([]Entry, 0, len(result))
-	for _, raw := range result {
-		var entry Entry
-		if err := json.Unmarshal([]byte(raw), &entry); err != nil {
-			slog.WarnContext(ctx, "opslog: skipping malformed entry", "component", "opslog", "error", err)
-			continue
-		}
-		entries = append(entries, entry)
-	}
-	return entries, nil
-}
-
-func (c *Consumer) insertBatchWithRetry(ctx context.Context, entries []Entry) error {
-	var lastErr error
-	for attempt := 0; attempt < c.maxRetries; attempt++ {
-		if err := c.insertBatch(ctx, entries); err != nil {
-			lastErr = err
-			slog.WarnContext(ctx, "opslog: batch insert attempt failed", "component", "opslog", "attempt", attempt+1, "error", err)
-			time.Sleep(time.Duration(attempt+1) * time.Second)
-			continue
-		}
-		return nil
-	}
-	return lastErr
-}
-
-func (c *Consumer) RunMemory(ctx context.Context, ch <-chan Entry) {
-	ticker := time.NewTicker(c.interval)
-	defer ticker.Stop()
-
-	var batch []Entry
-
-	for {
-		select {
-		case <-ctx.Done():
-			if len(batch) > 0 {
-				if err := c.insertBatch(context.Background(), batch); err != nil {
-					slog.WarnContext(ctx, "opslog batch insert failed", "component", "opslog", "entries", len(batch), "error", err)
-				}
-			}
-			return
-		case entry, ok := <-ch:
-			if !ok {
-				if len(batch) > 0 {
-					if err := c.insertBatch(context.Background(), batch); err != nil {
-						slog.WarnContext(ctx, "opslog batch insert failed", "component", "opslog", "entries", len(batch), "error", err)
-					}
-				}
+// Run persists entries from ch until ctx ends, then flushes what is already
+// buffered; see logstream.Drain for retries and drops. The consumer's own
+// records reach stderr and OTLP but are not captured: a warning about a failed
+// batch must not queue another entry behind it.
+func (c *Consumer) Run(ctx context.Context, ch <-chan Entry) {
+	logstream.Drain[Entry]{
+		Stream:   logstream.StreamApp,
+		Size:     c.batchSize,
+		Interval: c.interval,
+		Insert:   c.insertBatch,
+		Failed: func(ctx context.Context, f logstream.InsertFailure) {
+			if f.RetryIn > 0 {
+				slog.WarnContext(ctx, "opslog batch insert failed; retrying", "component", "opslog",
+					"entries", f.Entries, "attempt", f.Attempt, "retry_in", f.RetryIn, "error", f.Err)
 				return
 			}
-			batch = append(batch, entry)
-			if len(batch) >= c.batchSize {
-				if err := c.insertBatch(ctx, batch); err != nil {
-					slog.WarnContext(ctx, "opslog batch insert failed", "component", "opslog", "entries", len(batch), "error", err)
-				}
-				batch = batch[:0]
-			}
-		case <-ticker.C:
-			if len(batch) > 0 {
-				if err := c.insertBatch(ctx, batch); err != nil {
-					slog.WarnContext(ctx, "opslog batch insert failed", "component", "opslog", "entries", len(batch), "error", err)
-				}
-				batch = batch[:0]
-			}
-		}
-	}
+			slog.ErrorContext(ctx, "opslog batch insert failed; entries dropped", "component", "opslog",
+				"entries", f.Entries, "attempt", f.Attempt, "error", f.Err)
+		},
+	}.Run(withoutCapture(ctx), ch)
 }
 
 func (c *Consumer) insertBatch(ctx context.Context, entries []Entry) error {
@@ -172,7 +73,11 @@ func (c *Consumer) insertBatch(ctx context.Context, entries []Entry) error {
 		if err != nil {
 			attrsJSON = []byte(`{}`)
 		}
-		args = append(args, e.Timestamp, e.Level, e.Component, e.Message, e.RequestID, e.UserID, e.SessionID, e.PlaybackSessionID, e.ClientIP, e.NodeID, string(attrsJSON))
+		// Messages and attrs carry paths, headers and file names.
+		args = append(args, e.Timestamp, logstream.SafeText(e.Level), logstream.SafeText(e.Component),
+			logstream.SafeText(e.Message), logstream.SafeText(e.RequestID), e.UserID, logstream.SafeText(e.SessionID),
+			logstream.SafeText(e.PlaybackSessionID), logstream.SafeText(e.ClientIP), logstream.SafeText(e.NodeID),
+			string(logstream.SafeJSON(attrsJSON)))
 	}
 	b.WriteString(" RETURNING id, timestamp, level, component, message, COALESCE(request_id, ''), user_id, COALESCE(session_id, ''), COALESCE(playback_session_id, ''), COALESCE(client_ip::text, ''), COALESCE(node_id, ''), attrs")
 
@@ -213,10 +118,8 @@ func (c *Consumer) insertBatch(ctx context.Context, entries []Entry) error {
 		return fmt.Errorf("iterate inserted operational log rows: %w", err)
 	}
 
-	for _, entry := range inserted {
-		if err := c.streamHub.PublishAppend(ctx, logstream.StreamApp, entry); err != nil {
-			slog.WarnContext(ctx, "opslog: failed to publish log stream append", "component", "opslog", "error", err, "id", entry.ID)
-		}
+	if failed, err := logstream.PublishAppends(c.streamHub, logstream.StreamApp, inserted); failed > 0 {
+		slog.WarnContext(ctx, "opslog: failed to publish log stream appends", "component", "opslog", "error", err, "failed", failed, "entries", len(inserted))
 	}
 
 	return nil

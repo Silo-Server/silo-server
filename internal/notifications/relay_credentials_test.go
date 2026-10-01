@@ -176,14 +176,70 @@ func TestPushSenderMigratesOnlyLegacyRelayKeys(t *testing.T) {
 		t.Fatalf("credential = %+v, registrations = %d, err = %v", credential, registrations, err)
 	}
 
-	store.values[SettingPushRelayAPIKey] = "revoked.modern.capability"
-	store.values[SettingPushRelayReregister] = "true"
-	sender.settings.Invalidate(SettingPushRelayAPIKey, SettingPushRelayReregister)
-	if _, err := sender.prepareRelayCredential(context.Background()); err == nil {
-		t.Fatal("revoked modern capability silently re-registered")
+	// A modern capability is never replaced merely because it is modern.
+	credential, err = sender.prepareRelayCredential(context.Background())
+	if err != nil || credential.APIKey != "modern.capability" || registrations != 1 {
+		t.Fatalf("second prepare = %+v, registrations = %d, err = %v", credential, registrations, err)
 	}
-	if registrations != 1 {
-		t.Fatalf("registrations after modern revocation = %d", registrations)
+}
+
+func TestPushSenderHealsCredentialParkedByOlderServer(t *testing.T) {
+	// Older servers kept a rejected capability stored and set the marker.
+	store := &atomicRelaySettings{lockedRelaySettings: lockedRelaySettings{values: map[string]string{
+		SettingPushRelayURL:          DefaultPushRelayURL,
+		SettingPushRelayDeploymentID: "deployment-rejected",
+		SettingPushRelayAPIKey:       "rejected.capability",
+		SettingPushRelayReregister:   "true",
+	}}}
+	registrations := 0
+	sender := newPushSender(nil, nil, nil, NewSettings(store))
+	sender.client = &http.Client{Transport: relayRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != relayRegisterPath {
+			t.Fatalf("relay path = %s, want register", req.URL.Path)
+		}
+		registrations++
+		return relayResponse(http.StatusOK, credentialJSON("deployment-fresh", "fresh.capability", time.Now().Add(30*24*time.Hour))), nil
+	})}
+
+	credential, err := sender.prepareRelayCredential(context.Background())
+	if err != nil || credential.APIKey != "fresh.capability" || registrations != 1 {
+		t.Fatalf("credential = %+v, registrations = %d, err = %v", credential, registrations, err)
+	}
+	if store.values[SettingPushRelayReregister] != "false" || store.values[SettingPushRelayDeploymentID] != "deployment-fresh" {
+		t.Fatalf("stored state = %#v", store.values)
+	}
+}
+
+func TestReplaceRejectedRelayCredentialYieldsToConcurrentWriters(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		landed  map[string]string
+		wantKey string
+	}{
+		{name: "another replica replaced it", landed: map[string]string{SettingPushRelayAPIKey: "winner.capability"}, wantKey: "winner.capability"},
+		{name: "administrator cleared it", landed: map[string]string{SettingPushRelayAPIKey: "", SettingPushRelayReregister: "true"}, wantKey: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &atomicRelaySettings{lockedRelaySettings: lockedRelaySettings{values: map[string]string{
+				SettingPushRelayAPIKey: "rejected.capability",
+			}}}
+			store.beforeWrite = func(values map[string]string) {
+				for key, value := range tc.landed {
+					values[key] = value
+				}
+			}
+			client := &http.Client{Transport: relayRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+				return relayResponse(http.StatusOK, credentialJSON("deployment-loser", "loser.capability", time.Now().Add(24*time.Hour))), nil
+			})}
+
+			result, replaced, err := replaceRejectedRelayCredential(context.Background(), NewSettings(store), client, DefaultPushRelayURL, "rejected.capability")
+			if err != nil || replaced || result.Credential.APIKey != tc.wantKey {
+				t.Fatalf("replaced = %v, credential = %+v, err = %v", replaced, result.Credential, err)
+			}
+			if got := store.values[SettingPushRelayAPIKey]; got != tc.wantKey {
+				t.Fatalf("stored key = %q, want %q", got, tc.wantKey)
+			}
+		})
 	}
 }
 
@@ -194,5 +250,108 @@ func TestNormalizePushRelayURLRequiresAllowlistedOrigin(t *testing.T) {
 	}
 	if _, err := NormalizePushRelayURL("https://attacker.example", staging); err == nil {
 		t.Fatal("arbitrary relay origin accepted")
+	}
+}
+
+// atomicRelaySettings is a settings store with UpdateAtomic, so
+// RegisterRelayCredentialIfAbsent takes its compare-and-set path.
+type atomicRelaySettings struct {
+	lockedRelaySettings
+	// beforeWrite runs inside UpdateAtomic before the snapshot is read, to
+	// simulate another writer landing during the relay round trip.
+	beforeWrite func(values map[string]string)
+}
+
+func (s *atomicRelaySettings) UpdateAtomic(_ context.Context, update func(current map[string]string) (map[string]string, error)) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.beforeWrite != nil {
+		s.beforeWrite(s.values)
+	}
+	writes, err := update(s.values)
+	if err != nil {
+		return err
+	}
+	for key, value := range writes {
+		s.values[key] = value
+	}
+	return nil
+}
+
+func TestRegisterRelayCredentialIfAbsentYieldsToConcurrentWinner(t *testing.T) {
+	store := &atomicRelaySettings{lockedRelaySettings: lockedRelaySettings{values: map[string]string{}}}
+	store.beforeWrite = func(values map[string]string) {
+		values[SettingPushRelayURL] = "https://other.relay.test"
+		values[SettingPushRelayDeploymentID] = "deployment-winner"
+		values[SettingPushRelayAPIKey] = "winner.capability"
+	}
+	client := &http.Client{Transport: relayRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return relayResponse(http.StatusOK, credentialJSON("deployment-loser", "loser.capability", time.Now().Add(24*time.Hour))), nil
+	})}
+
+	result, registered, err := RegisterRelayCredentialIfAbsent(context.Background(), NewSettings(store), client, DefaultPushRelayURL, false)
+	if err != nil || registered {
+		t.Fatalf("registered = %v, err = %v", registered, err)
+	}
+	if result.Credential.APIKey != "winner.capability" || result.Credential.RelayURL != "https://other.relay.test" {
+		t.Fatalf("returned credential = %+v, want the stored winner", result.Credential)
+	}
+	if got := store.values[SettingPushRelayAPIKey]; got != "winner.capability" {
+		t.Fatalf("stored key = %q, loser overwrote the winner", got)
+	}
+}
+
+func TestRegisterRelayCredentialIfAbsentPersistsWhenEmpty(t *testing.T) {
+	store := &atomicRelaySettings{lockedRelaySettings: lockedRelaySettings{values: map[string]string{}}}
+	client := &http.Client{Transport: relayRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return relayResponse(http.StatusOK, credentialJSON("deployment-first", "first.capability", time.Now().Add(24*time.Hour))), nil
+	})}
+
+	result, registered, err := RegisterRelayCredentialIfAbsent(context.Background(), NewSettings(store), client, DefaultPushRelayURL, false)
+	if err != nil || !registered || result.Credential.APIKey != "first.capability" {
+		t.Fatalf("registered = %v, credential = %+v, err = %v", registered, result.Credential, err)
+	}
+	if got := store.values[SettingPushRelayAPIKey]; got != "first.capability" {
+		t.Fatalf("stored key = %q", got)
+	}
+}
+
+func TestRegisterRelayCredentialIfAbsentYieldsToConcurrentClear(t *testing.T) {
+	store := &atomicRelaySettings{lockedRelaySettings: lockedRelaySettings{values: map[string]string{}}}
+	store.beforeWrite = func(values map[string]string) {
+		values[SettingPushRelayAPIKey] = ""
+		values[SettingPushRelayReregister] = "true"
+	}
+	client := &http.Client{Transport: relayRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return relayResponse(http.StatusOK, credentialJSON("deployment-late", "late.capability", time.Now().Add(24*time.Hour))), nil
+	})}
+
+	result, registered, err := RegisterRelayCredentialIfAbsent(context.Background(), NewSettings(store), client, DefaultPushRelayURL, false)
+	if err != nil || registered {
+		t.Fatalf("registered = %v, err = %v", registered, err)
+	}
+	if !result.Credential.ReregistrationRequired || result.Credential.APIKey != "" {
+		t.Fatalf("returned credential = %+v, want the cleared state", result.Credential)
+	}
+	if got := store.values[SettingPushRelayAPIKey]; got != "" {
+		t.Fatalf("stored key = %q, in-flight registration overwrote the clear", got)
+	}
+}
+
+func TestConditionalRelayWritesRequireAtomicSettings(t *testing.T) {
+	store := &lockedRelaySettings{values: map[string]string{SettingPushRelayAPIKey: "rejected.capability"}}
+	settings := NewSettings(store)
+	client := &http.Client{Transport: relayRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return relayResponse(http.StatusOK, credentialJSON("deployment-fresh", "fresh.capability", time.Now().Add(24*time.Hour))), nil
+	})}
+
+	if _, _, err := replaceRejectedRelayCredential(context.Background(), settings, client, DefaultPushRelayURL, "rejected.capability"); !errors.Is(err, errRelaySettingsNotAtomic) {
+		t.Fatalf("replace err = %v", err)
+	}
+	if _, _, err := parkRelayCredential(context.Background(), settings, PushRelayCredential{APIKey: "rejected.capability"}); !errors.Is(err, errRelaySettingsNotAtomic) {
+		t.Fatalf("park err = %v", err)
+	}
+	if got := store.values[SettingPushRelayAPIKey]; got != "rejected.capability" {
+		t.Fatalf("stored key = %q, a non-atomic store was written", got)
 	}
 }

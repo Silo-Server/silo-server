@@ -15,6 +15,7 @@ import {
 import { usePageActivity } from "@/hooks/usePageActivity";
 import { cn } from "@/lib/utils";
 import type { TaskCategory, TaskInfo, TriggerConfig } from "@/api/types";
+import { describeTrigger } from "@/lib/taskTrigger";
 import { formatRelativeTime } from "@/lib/date";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
 import { clampTaskProgress, formatTaskProgress } from "@/lib/taskProgress";
@@ -66,57 +67,9 @@ function formatDuration(ms: number): string {
   return `${hours}h ${remainMinutes}m`;
 }
 
-function numberFromResultData(data: Record<string, unknown> | undefined, key: string) {
-  const value = data?.[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function formatTaskResultSummary(task: TaskInfo): string | null {
-  const resultData = task.last_execution?.result_data;
-  if (!resultData || task.key !== "refresh_trending_discover") {
-    return null;
-  }
-
-  const combos = numberFromResultData(resultData, "combos");
-  const refreshed = numberFromResultData(resultData, "refreshed");
-  const empty = numberFromResultData(resultData, "empty");
-  const failed = numberFromResultData(resultData, "failed");
-  if (combos == null || refreshed == null || empty == null || failed == null) {
-    return null;
-  }
-
-  if (combos === 0) {
-    return "No enabled Trending Discover sections";
-  }
-
-  return `${refreshed} refreshed, ${empty} empty, ${failed} failed`;
-}
-
-function describeTrigger(t: TriggerConfig): string {
-  switch (t.type) {
-    case "interval": {
-      const ms = t.interval_ms ?? 0;
-      if (ms >= 86_400_000) return `Every ${Math.round(ms / 86_400_000)}d`;
-      if (ms >= 3_600_000) return `Every ${Math.round(ms / 3_600_000)}h`;
-      if (ms >= 60_000) return `Every ${Math.round(ms / 60_000)}m`;
-      return `Every ${Math.round(ms / 1000)}s`;
-    }
-    case "daily":
-      return `Daily at ${t.time_of_day ?? "00:00"}`;
-    case "weekly": {
-      const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-      return `${days[t.day_of_week ?? 0]} at ${t.time_of_day ?? "00:00"}`;
-    }
-    case "startup":
-      return "On startup";
-    default:
-      return t.type;
-  }
-}
-
 function describeSchedule(triggers: TriggerConfig[]): string | null {
   if (triggers.length === 0) return null;
-  return triggers.map(describeTrigger).join(", ");
+  return triggers.map((trigger) => describeTrigger(trigger, "short")).join(", ");
 }
 
 function isOverdue(dateStr: string, now: number): boolean {
@@ -202,7 +155,6 @@ function TaskRow({
 
   const isRunning = task.state === "running" || task.state === "cancelling";
   const isShowingRunFeedback = isRunning || isRunFeedbackVisible;
-  const resultSummary = formatTaskResultSummary(task);
 
   const handleRunTask = async () => {
     runFeedbackStartedAtRef.current = Date.now();
@@ -237,7 +189,9 @@ function TaskRow({
           {task.state === "idle" && (
             <>
               {describeSchedule(task.triggers) && <span>{describeSchedule(task.triggers)}</span>}
-              {!describeSchedule(task.triggers) && <span>No schedule</span>}
+              {!describeSchedule(task.triggers) && (
+                <span>{task.manual_only ? "Manual only" : "No schedule"}</span>
+              )}
               {task.last_execution && (
                 <span className="ml-2">
                   · Last run:{" "}
@@ -246,7 +200,6 @@ function TaskRow({
                   {typeof task.last_execution.duration_ms === "number"
                     ? ` · Duration: ${formatDuration(task.last_execution.duration_ms)}`
                     : ""}
-                  {resultSummary ? ` · Result: ${resultSummary}` : ""}
                 </span>
               )}
               {!task.last_execution && !describeSchedule(task.triggers) && (
@@ -277,7 +230,7 @@ function TaskRow({
             </div>
             <div className="text-muted-foreground flex items-center justify-between gap-3 text-xs">
               <p className="min-w-0 truncate">
-                {task.state === "cancelling" ? "Cancelling..." : task.progress_message || "Running"}
+                {task.state === "cancelling" ? "Cancelling..." : "Running"}
               </p>
               {task.state !== "cancelling" && task.progress > 0 && (
                 <span className="shrink-0 font-medium tabular-nums">
@@ -345,11 +298,20 @@ export default function AdminTasks() {
   const { data: tasks, isLoading } = useTasks();
   const { data: refreshMetrics } = useTaskMetrics("refresh_metadata");
 
-  const grouped = CATEGORY_ORDER.map((cat) => ({
-    category: cat,
-    label: CATEGORY_LABELS[cat],
-    tasks: (tasks ?? []).filter((t) => t.category === cat),
-  })).filter((g) => g.tasks.length > 0);
+  const scheduledTasks = (tasks ?? []).filter((t) => !t.manual_only);
+  const grouped: { id: string; label: string; description?: string; tasks: TaskInfo[] }[] = [
+    ...CATEGORY_ORDER.map((cat) => ({
+      id: cat,
+      label: CATEGORY_LABELS[cat],
+      tasks: scheduledTasks.filter((t) => t.category === cat),
+    })),
+    {
+      id: "on-demand",
+      label: "On demand",
+      description: "These never run on a schedule. Use them for repairs and one-off maintenance.",
+      tasks: (tasks ?? []).filter((t) => t.manual_only),
+    },
+  ].filter((g) => g.tasks.length > 0);
 
   return (
     <div className="page-shell space-y-6 py-4 sm:py-6">
@@ -358,7 +320,8 @@ export default function AdminTasks() {
           <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Scheduled Tasks</h1>
           <p className="page-subtitle text-sm sm:text-base">
             View and manage background tasks. You can trigger tasks manually or adjust their
-            schedules, including whether a task runs on server startup.
+            schedules, including whether a task runs on server startup. Internal workers that need
+            no attention run automatically and are not listed.
           </p>
         </div>
       </div>
@@ -366,10 +329,15 @@ export default function AdminTasks() {
       {isLoading && <p className="text-muted-foreground text-sm">Loading tasks...</p>}
 
       {grouped.map((group) => (
-        <div key={group.category} className="space-y-3">
-          <h2 className="text-muted-foreground text-xs font-medium tracking-[0.24em] uppercase">
-            {group.label}
-          </h2>
+        <div key={group.id} className="space-y-3">
+          <div className="space-y-1">
+            <h2 className="text-muted-foreground text-xs font-medium tracking-[0.24em] uppercase">
+              {group.label}
+            </h2>
+            {group.description && (
+              <p className="text-muted-foreground text-xs">{group.description}</p>
+            )}
+          </div>
           <div className="surface-panel overflow-hidden rounded-2xl border-0">
             {group.tasks.map((task) => (
               <TaskRow

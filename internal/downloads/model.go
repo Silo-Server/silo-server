@@ -78,7 +78,10 @@ var (
 	ErrManifestUnavailable    = errors.New("offline manifest is not available")
 	ErrInvalidSubtitleRef     = errors.New("invalid subtitle reference")
 	ErrAssetNotFound          = errors.New("download asset not found")
-	ErrFormatUnavailable      = errors.New("requested download format is not available")
+	// ErrAssetUnavailable means the store behind an offline asset failed or
+	// could not be reached. The asset may exist; the client should retry.
+	ErrAssetUnavailable  = errors.New("download asset is temporarily unavailable")
+	ErrFormatUnavailable = errors.New("requested download format is not available")
 	// ErrResponseCommitted reports a transfer failure after response headers
 	// were written. Handlers must not append an API error body, while service
 	// lifecycle code must still treat the transfer as incomplete.
@@ -89,6 +92,12 @@ var (
 	// ErrQualityUnavailable means the requested quality is valid and permitted in
 	// principle but cannot be fulfilled by the current server wiring.
 	ErrQualityUnavailable = errors.New("requested download quality is not available")
+	// ErrCapacityUnavailable means compatible artifact executors exist, but none
+	// currently has reservable capacity. Callers may retry the same request.
+	ErrCapacityUnavailable = errors.New("download preparation capacity is unavailable")
+	// ErrCapabilityUnavailable means executor discovery failed transiently, so
+	// callers may retry without changing the requested quality or policy.
+	ErrCapabilityUnavailable = errors.New("download preparation capability is unavailable")
 	// ErrBulkQualityUnavailable keeps season/series batches original-only until
 	// batch artifact UX and storage reporting are explicit.
 	ErrBulkQualityUnavailable = errors.New("bulk quality downloads are not available")
@@ -132,6 +141,7 @@ type Download struct {
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	CompletedAt       *time.Time
+	StatusEventAt     *time.Time // timestamp of the last accepted client status event
 }
 
 // SkippedDownload explains why a bulk series/season request did not create a

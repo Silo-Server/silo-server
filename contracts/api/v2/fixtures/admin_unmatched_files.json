@@ -1,0 +1,15 @@
+{
+  "items": [
+    {
+      "id": "42",
+      "media_folder_id": "7",
+      "file_path": "fixture.mkv",
+      "file_size": 100,
+      "container": "mkv"
+    }
+  ],
+  "page": {
+    "next_cursor": "eyJ2IjoxLCJwIjo0Mn0.kK_il9P-g8OTcWSLsyJ94GE0IfxJhYky3AfC33v63q8",
+    "has_more": true
+  }
+}

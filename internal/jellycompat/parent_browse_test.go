@@ -2,7 +2,6 @@ package jellycompat
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http/httptest"
 	"net/url"
@@ -11,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -22,7 +22,7 @@ func (f *fakeSeasonByIDRepo) GetByID(_ context.Context, id string) (*models.Seas
 	if s, ok := f.seasons[id]; ok {
 		return s, nil
 	}
-	return nil, errors.New("season not found")
+	return nil, catalog.ErrSeasonNotFound
 }
 
 // fakeSeasonEpisodeRepo implements episodeRepoForBatchLoader, serving episodes by
@@ -55,6 +55,18 @@ func (f *fakeSeasonEpisodeRepo) HasFilesByIDs(context.Context, []string) (map[st
 
 func (f *fakeSeasonEpisodeRepo) ListBySeason(_ context.Context, seriesID string, seasonNum int) ([]*models.Episode, error) {
 	return f.bySeason[episodeBySeasonKey(seriesID, seasonNum)], nil
+}
+
+func (f *fakeSeasonEpisodeRepo) ListBySeriesIDs(ctx context.Context, seriesIDs []string) (map[string][]*models.Episode, error) {
+	out := make(map[string][]*models.Episode, len(seriesIDs))
+	for _, seriesID := range seriesIDs {
+		episodes, err := f.ListBySeries(ctx, seriesID)
+		if err != nil {
+			return nil, err
+		}
+		out[seriesID] = episodes
+	}
+	return out, nil
 }
 
 func (f *fakeSeasonEpisodeRepo) ListBySeries(_ context.Context, seriesID string) ([]*models.Episode, error) {

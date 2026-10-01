@@ -3,7 +3,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { SidebarPin, SidebarPins } from "@/api/types";
 import { captureProfileRequestContext, isProfileRequestContextCurrent } from "@/api/client";
 import { storage } from "@/utils/storage";
-import { randomUUID } from "@/lib/uuid";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import {
   effectiveSettingsQueryKey,
@@ -227,7 +226,6 @@ interface SidebarPinsOptimisticMutation {
   optimisticDocument: ShortcutDocument;
   item: ShortcutTarget;
   present: boolean;
-  mutationId: string;
   revision: number;
 }
 
@@ -257,7 +255,6 @@ export function createSidebarPinsOptimisticMutation({
     optimisticDocument,
     item,
     present,
-    mutationId: randomUUID(),
     revision,
   };
 }
@@ -386,7 +383,6 @@ export function useToggleSidebarPin() {
           return setShortcutPresence.mutateAsync({
             item: mutation.item,
             present: mutation.present,
-            mutationId: mutation.mutationId,
             profileAuth,
             invalidateOnSettled: false,
           });

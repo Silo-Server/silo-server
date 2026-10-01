@@ -13,6 +13,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -21,69 +22,90 @@ import (
 // method for the active stream; component-level behavior is exposed separately
 // via video_decision and audio_decision.
 type playbackSessionRow struct {
-	SessionID                string    `json:"session_id"`
-	UserID                   int       `json:"user_id"`
-	Username                 string    `json:"username"`
-	ProfileID                string    `json:"profile_id"`
-	ProfileName              string    `json:"profile_name,omitempty"`
-	MediaFileID              int       `json:"media_file_id"`
-	RequestedMediaFileID     int       `json:"requested_media_file_id"`
-	ContentID                string    `json:"content_id,omitempty"`
-	MediaTitle               string    `json:"media_title"`
-	MediaType                string    `json:"media_type"`
-	SeriesName               string    `json:"series_name,omitempty"`
-	EpisodeName              string    `json:"episode_name,omitempty"`
-	SeasonNumber             *int      `json:"season_number,omitempty"`
-	EpisodeNumber            *int      `json:"episode_number,omitempty"`
-	PosterURL                string    `json:"poster_url,omitempty"`
-	PlayMethod               string    `json:"play_method"`
-	ReportingNode            string    `json:"reporting_node"`
-	NodeDisplayName          string    `json:"node_display_name,omitempty"`
-	FileDuration             *int      `json:"file_duration"`
-	StartedAt                time.Time `json:"started_at"`
-	UpdatedAt                time.Time `json:"updated_at"`
-	PositionSeconds          float64   `json:"position_seconds"`
-	IsPaused                 bool      `json:"is_paused"`
-	HasPlaybackControl       bool      `json:"has_playback_control"`
-	ClientIP                 string    `json:"client_ip,omitempty"`
-	ClientName               string    `json:"client_name,omitempty"`
-	ClientVersion            string    `json:"client_version,omitempty"`
-	ClientBuild              string    `json:"client_build,omitempty"`
-	ClientChannel            string    `json:"client_channel,omitempty"`
-	ClientLabel              string    `json:"client_label,omitempty"`
-	ClientLabelFull          string    `json:"client_label_full,omitempty"`
-	ClientUserAgent          string    `json:"client_user_agent,omitempty"`
-	AudioTrackIndex          int       `json:"audio_track_index"`
-	TranscodeAudio           bool      `json:"transcode_audio"`
-	StreamBitrateKbps        *int      `json:"stream_bitrate_kbps"`
-	TranscodeNodeURL         string    `json:"-"`
-	TargetResolution         string    `json:"target_resolution,omitempty"`
-	TargetVideoCodec         string    `json:"target_video_codec,omitempty"`
-	TargetAudioCodec         string    `json:"target_audio_codec,omitempty"`
-	TargetBitrateKbps        *int      `json:"target_bitrate_kbps"`
-	TranscodeHWAccel         string    `json:"transcode_hw_accel,omitempty"`
-	SourceContainer          string    `json:"source_container,omitempty"`
-	SourceBitrateKbps        *int      `json:"source_bitrate_kbps"`
-	SourceVideoCodec         string    `json:"source_video_codec,omitempty"`
-	SourceVideoResolution    string    `json:"source_video_resolution,omitempty"`
-	SourceAudioCodec         string    `json:"source_audio_codec,omitempty"`
-	SourceAudioChannels      *int      `json:"source_audio_channels"`
-	SourceAudioLanguage      string    `json:"source_audio_language,omitempty"`
-	SourceAudioTitle         string    `json:"source_audio_title,omitempty"`
-	SourceAudioLayout        string    `json:"source_audio_layout,omitempty"`
-	RequestedVideoCodec      string    `json:"requested_video_codec,omitempty"`
-	RequestedVideoResolution string    `json:"requested_video_resolution,omitempty"`
-	VideoDecision            string    `json:"video_decision,omitempty"`
-	AudioDecision            string    `json:"audio_decision,omitempty"`
-	EffectivePlayMethod      string    `json:"effective_play_method,omitempty"`
-	IsJellyfinClient         bool      `json:"is_jellyfin_client,omitempty"`
-	CompatOrigin             bool      `json:"-"`
+	SessionID            string    `json:"session_id"`
+	UserID               int       `json:"user_id"`
+	Username             string    `json:"username"`
+	ProfileID            string    `json:"profile_id"`
+	ProfileName          string    `json:"profile_name,omitempty"`
+	MediaFileID          int       `json:"media_file_id"`
+	RequestedMediaFileID int       `json:"requested_media_file_id"`
+	ContentID            string    `json:"content_id,omitempty"`
+	MediaTitle           string    `json:"media_title"`
+	MediaType            string    `json:"media_type"`
+	SeriesName           string    `json:"series_name,omitempty"`
+	EpisodeName          string    `json:"episode_name,omitempty"`
+	SeasonNumber         *int      `json:"season_number,omitempty"`
+	EpisodeNumber        *int      `json:"episode_number,omitempty"`
+	PosterURL            string    `json:"poster_url,omitempty"`
+	PlayMethod           string    `json:"play_method"`
+	ReportingNode        string    `json:"reporting_node"`
+	NodeDisplayName      string    `json:"node_display_name,omitempty"`
+	FileDuration         *int      `json:"file_duration"`
+	StartedAt            time.Time `json:"started_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
+	PositionSeconds      float64   `json:"position_seconds"`
+	IsPaused             bool      `json:"is_paused"`
+	HasPlaybackControl   bool      `json:"has_playback_control"`
+	ClientIP             string    `json:"client_ip,omitempty"`
+	StreamLocation       string    `json:"-"`
+	ClientName           string    `json:"client_name,omitempty"`
+	ClientVersion        string    `json:"client_version,omitempty"`
+	ClientBuild          string    `json:"client_build,omitempty"`
+	ClientChannel        string    `json:"client_channel,omitempty"`
+	ClientLabel          string    `json:"client_label,omitempty"`
+	ClientLabelFull      string    `json:"client_label_full,omitempty"`
+	ClientUserAgent      string    `json:"client_user_agent,omitempty"`
+	AudioTrackIndex      int       `json:"audio_track_index"`
+	TranscodeAudio       bool      `json:"transcode_audio"`
+	StreamBitrateKbps    *int      `json:"stream_bitrate_kbps"`
+	TranscodeNodeURL     string    `json:"-"`
+	TargetResolution     string    `json:"target_resolution,omitempty"`
+	TargetVideoCodec     string    `json:"target_video_codec,omitempty"`
+	// OutputContainer and OutputProtocol are the serving transport's reported
+	// format. They are native-only: the frozen bridge payload omits them.
+	OutputContainer  string `json:"-"`
+	OutputProtocol   string `json:"-"`
+	TargetAudioCodec string `json:"target_audio_codec,omitempty"`
+	// TargetAudioChannels is the channel count the transcode actually encodes.
+	// Absent when the reporting node did not know it — clients must then show
+	// the target codec with no channel layout rather than reusing
+	// SourceAudioChannels, which is what made a 7.1 source downmixed to AAC 5.1
+	// read as "AAC 7.1".
+	TargetAudioChannels      *int    `json:"target_audio_channels,omitempty"`
+	TargetBitrateKbps        *int    `json:"target_bitrate_kbps"`
+	TranscodeHWAccel         string  `json:"transcode_hw_accel,omitempty"`
+	ToneMapMode              string  `json:"tone_map_mode,omitempty"`
+	SourceContainer          string  `json:"source_container,omitempty"`
+	SourceBitrateKbps        *int    `json:"source_bitrate_kbps"`
+	SourceVideoCodec         string  `json:"source_video_codec,omitempty"`
+	SourceVideoResolution    string  `json:"source_video_resolution,omitempty"`
+	SourceAudioCodec         string  `json:"source_audio_codec,omitempty"`
+	SourceAudioChannels      *int    `json:"source_audio_channels"`
+	SourceAudioLanguage      string  `json:"source_audio_language,omitempty"`
+	SourceAudioTitle         string  `json:"source_audio_title,omitempty"`
+	SourceAudioLayout        string  `json:"source_audio_layout,omitempty"`
+	RequestedVideoCodec      string  `json:"requested_video_codec,omitempty"`
+	RequestedVideoResolution string  `json:"requested_video_resolution,omitempty"`
+	VideoDecision            string  `json:"video_decision,omitempty"`
+	AudioDecision            string  `json:"audio_decision,omitempty"`
+	EffectivePlayMethod      string  `json:"effective_play_method,omitempty"`
+	IsJellyfinClient         bool    `json:"is_jellyfin_client,omitempty"`
+	RoutingNetworkProvider   *string `json:"-"`
+	RoutingWorkload          string  `json:"routing_workload,omitempty"`
+	RoutingExecution         string  `json:"routing_execution,omitempty"`
+	RoutingExecutionNodeID   *int    `json:"routing_execution_node_id,omitempty"`
+	RoutingExecutionNodeName string  `json:"routing_execution_node_name,omitempty"`
+	RoutingEgress            string  `json:"routing_egress,omitempty"`
+	RoutingEgressNodeID      *int    `json:"routing_egress_node_id,omitempty"`
+	RoutingEgressNodeName    string  `json:"routing_egress_node_name,omitempty"`
+	CompatOrigin             bool    `json:"-"`
 }
 
 // playbackSessionsCapabilitiesResponse advertises the additive fields of the
 // live admin session payload so independently deployed clients (Android,
-// Apple) can feature-detect them. Both fields are omitempty on the wire, so
-// absence on a row is otherwise indistinguishable from an older server.
+// Apple) can feature-detect them. The advertised fields are omitempty on the
+// wire, so absence on a row is otherwise indistinguishable from an older
+// server.
 type playbackSessionsCapabilitiesResponse struct {
 	// EffectivePlayMethod reports that rows carry effective_play_method.
 	EffectivePlayMethod bool `json:"effective_play_method"`
@@ -92,23 +114,68 @@ type playbackSessionsCapabilitiesResponse struct {
 	EffectivePlayMethodValues []string `json:"effective_play_method_values"`
 	// IsJellyfinClient reports that rows carry is_jellyfin_client.
 	IsJellyfinClient bool `json:"is_jellyfin_client"`
+	// TranscodeHWAccel reports that rows carry the confirmed transcode executor.
+	TranscodeHWAccel bool `json:"transcode_hw_accel"`
+	// ToneMapMode reports that rows carry the confirmed tone-map executor.
+	ToneMapMode bool `json:"tone_map_mode"`
+	// ToneMapModeValues is the closed vocabulary for recognized tone-map modes.
+	ToneMapModeValues []string `json:"tone_map_mode_values"`
 	// ClientBuild reports that rows carry client_build (and the exact-version
 	// client_label_full derived from it).
 	ClientBuild bool `json:"client_build"`
 	// ClientChannel reports that rows carry client_channel.
 	ClientChannel bool `json:"client_channel"`
+	// TargetAudioChannels reports that rows carry target_audio_channels;
+	// absent on a row then means the reporting node did not know the encoded
+	// layout.
+	TargetAudioChannels bool `json:"target_audio_channels"`
+	// NodeRouting reports that rows may carry workload/execution/egress route
+	// assignment fields when the active session has resolved them.
+	NodeRouting bool `json:"node_routing"`
 }
 
 // HandleGetSessionsCapabilities exposes additive feature support for the live
 // admin session payload (GET /admin/sessions/capabilities).
 func (h *AdminHandler) HandleGetSessionsCapabilities(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, playbackSessionsCapabilitiesResponse{
+	writeJSON(w, http.StatusOK, AdminPlaybackSessionFeatures())
+}
+
+// AdminPlaybackSessionFeatures is shared by the frozen bridge and native projection.
+func AdminPlaybackSessionFeatures() playbackSessionsCapabilitiesResponse {
+	return playbackSessionsCapabilitiesResponse{
 		EffectivePlayMethod:       true,
 		EffectivePlayMethodValues: []string{"direct", "remux", "transcode", "audio"},
 		IsJellyfinClient:          true,
+		TranscodeHWAccel:          true,
+		ToneMapMode:               true,
+		ToneMapModeValues:         []string{"hardware", "software"},
 		ClientBuild:               true,
 		ClientChannel:             true,
-	})
+		TargetAudioChannels:       true,
+		NodeRouting:               true,
+	}
+}
+
+type playbackRoutingCapabilitiesResponse struct {
+	Features             []string `json:"features"`
+	Workloads            []string `json:"workloads"`
+	ExecutionPreferences []string `json:"execution_preferences"`
+	EgressPreferences    []string `json:"egress_preferences"`
+}
+
+// HandleGetPlaybackRoutingCapabilities exposes the stable enum vocabulary
+// used by the atomic admin settings API.
+func (h *AdminHandler) HandleGetPlaybackRoutingCapabilities(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, AdminPlaybackRoutingCapabilities())
+}
+
+func AdminPlaybackRoutingCapabilities() playbackRoutingCapabilitiesResponse {
+	return playbackRoutingCapabilitiesResponse{
+		Features:             []string{"playback_node_routing_v1"},
+		Workloads:            []string{"direct_play", "remux", "video_transcode"},
+		ExecutionPreferences: []string{"prefer_worker", "prefer_transcode", "worker_only", "prefer_api", "api_only"},
+		EgressPreferences:    []string{"prefer_proxy", "proxy_only", "prefer_api", "api_only"},
+	}
 }
 
 // PlaybackSessionsQuery scopes live session listing.
@@ -118,7 +185,7 @@ type PlaybackSessionsQuery struct {
 }
 
 type playbackSessionsReader interface {
-	Load(ctx context.Context, r *http.Request, query PlaybackSessionsQuery) ([]playbackSessionRow, error)
+	Load(ctx context.Context, query PlaybackSessionsQuery) ([]playbackSessionRow, error)
 }
 
 func resolvePlaybackSessionsLoader(
@@ -155,17 +222,50 @@ func NewPlaybackSessionsLoader(
 	}
 }
 
+// Load returns the playback sessions visible to the current request.
 func (l *PlaybackSessionsLoader) Load(
 	ctx context.Context,
-	r *http.Request,
 	query PlaybackSessionsQuery,
 ) ([]playbackSessionRow, error) {
+	rows, _, err := l.load(ctx, query, "", 0, false)
+	return rows, err
+}
+
+// MaxSessionPageLimit guards the bounded loaders against an unbounded page
+// request. It matches both the API-wide maximum page size and the frozen
+// bridge's newest-200 snapshot, so the largest page a caller may ask for never
+// costs more observation work than Load already does on every v1 request.
+const MaxSessionPageLimit = 200
+
+// LoadPage bounds native observation work in SQL. The extra row identifies
+// continuation; Load retains the frozen bridge's newest-200 behavior.
+func (l *PlaybackSessionsLoader) LoadPage(ctx context.Context, query PlaybackSessionsQuery, after string, limit int) ([]AdminPlaybackSessionView, error) {
+	if limit < 1 || limit > MaxSessionPageLimit {
+		return nil, fmt.Errorf("session page limit must be between 1 and %d", MaxSessionPageLimit)
+	}
+	rows, _, err := l.load(ctx, query, after, limit, false)
+	return rows, err
+}
+
+// LoadSummary counts the filtered observations in the same snapshot as its bounded sample.
+func (l *PlaybackSessionsLoader) LoadSummary(ctx context.Context, query PlaybackSessionsQuery, limit int) ([]AdminPlaybackSessionView, int, error) {
+	if limit < 1 || limit > MaxSessionPageLimit {
+		return nil, 0, fmt.Errorf("session summary limit must be between 1 and %d", MaxSessionPageLimit)
+	}
+	return l.load(ctx, query, "", limit, true)
+}
+
+func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSessionsQuery, after string, limit int, summary bool) ([]playbackSessionRow, int, error) {
 	if l == nil || l.pool == nil {
-		return nil, errors.New("database not configured")
+		return nil, 0, errors.New("database not configured")
 	}
 
+	totalColumn := "0"
+	if summary {
+		totalColumn = "count(*) OVER ()"
+	}
 	sql := `
-		SELECT
+		SELECT ` + totalColumn + `,
 			s.session_id,
 			s.user_id,
 			COALESCE(u.username, ''),
@@ -202,8 +302,10 @@ func (l *PlaybackSessionsLoader) Load(
 			COALESCE(s.target_resolution, ''),
 			COALESCE(s.target_video_codec, ''),
 			COALESCE(s.target_audio_codec, ''),
+			s.target_audio_channels,
 			s.target_bitrate_kbps,
 			COALESCE(s.transcode_hw_accel, ''),
+			COALESCE(s.tone_map_mode, ''),
 			COALESCE(mf.container, ''),
 			mf.bitrate,
 			COALESCE(mf.codec_video, ''),
@@ -213,7 +315,18 @@ func (l *PlaybackSessionsLoader) Load(
 			COALESCE(mf.audio_tracks::text, '[]'),
 			COALESCE(requested_mf.codec_video, ''),
 			COALESCE(requested_mf.resolution, ''),
-			COALESCE(s.compat_origin, FALSE)
+			COALESCE(s.compat_origin, FALSE),
+			COALESCE(s.routing_workload, ''),
+			COALESCE(s.routing_execution, ''),
+			s.routing_execution_node_id,
+			COALESCE(execution_node.name, ''),
+			COALESCE(s.routing_egress, ''),
+			s.routing_egress_node_id,
+			COALESCE(egress_node.name, ''),
+			s.routing_network_provider,
+			COALESCE(s.output_container, ''),
+			COALESCE(s.output_protocol, ''),
+			COALESCE(s.stream_location, '')
 		 FROM playback_sessions_sync s
 		 LEFT JOIN users u ON u.id = s.user_id
 		 LEFT JOIN media_files mf ON mf.id = s.media_file_id
@@ -221,31 +334,56 @@ func (l *PlaybackSessionsLoader) Load(
 		 LEFT JOIN media_items mi ON mi.content_id = mf.content_id
 		 LEFT JOIN episodes e ON e.content_id = mf.episode_id
 		 LEFT JOIN media_items series_mi ON series_mi.content_id = e.series_id
-		 LEFT JOIN stream_nodes remote_node ON remote_node.url = s.transcode_node_url`
+		 LEFT JOIN stream_nodes remote_node ON remote_node.url = s.transcode_node_url
+		 LEFT JOIN stream_nodes execution_node ON execution_node.id = s.routing_execution_node_id
+		 LEFT JOIN stream_nodes egress_node ON egress_node.id = s.routing_egress_node_id`
 
 	var args []any
+	var predicates []string
 	if query.UserID > 0 {
-		sql += " WHERE s.user_id = $1"
 		args = append(args, query.UserID)
+		predicates = append(predicates, "s.user_id = $1")
 	}
-	sql += " ORDER BY s.started_at DESC LIMIT 200"
+	if limit > 0 && !summary {
+		args = append(args, after)
+		predicates = append(predicates, fmt.Sprintf("s.session_id > $%d", len(args)))
+	}
+	if len(predicates) > 0 {
+		sql += " WHERE " + strings.Join(predicates, " AND ")
+	}
+	if limit > 0 {
+		if summary {
+			sql += " ORDER BY s.started_at DESC, s.session_id ASC"
+			args = append(args, limit)
+		} else {
+			// Immutable identity keeps pagination stable while observations update.
+			sql += " ORDER BY s.session_id ASC"
+			args = append(args, limit+1)
+		}
+		sql += fmt.Sprintf(" LIMIT $%d", len(args))
+	} else {
+		sql += " ORDER BY COALESCE(s.started_at, s.updated_at) DESC LIMIT 200"
+	}
 
 	rows, err := l.pool.Query(ctx, sql, args...)
 	if err != nil {
-		return nil, fmt.Errorf("querying playback sessions: %w", err)
+		return nil, 0, fmt.Errorf("querying playback sessions: %w", err)
 	}
 	defer rows.Close()
 
 	sessions := make([]playbackSessionRow, 0)
+	var total int
 	for rows.Next() {
 		var s playbackSessionRow
 		var posterPath string
 		var streamBitrateKbps *int
+		var targetAudioChannels *int
 		var targetBitrateKbps *int
 		var sourceBitrateKbps *int
 		var sourceAudioChannels *int
 		var audioTracksJSON []byte
 		if err := rows.Scan(
+			&total,
 			&s.SessionID, &s.UserID, &s.Username, &s.ProfileID, &s.MediaFileID, &s.RequestedMediaFileID, &s.ContentID,
 			&s.MediaTitle, &s.MediaType, &s.SeriesName, &s.EpisodeName, &s.SeasonNumber, &s.EpisodeNumber,
 			&posterPath,
@@ -253,15 +391,21 @@ func (l *PlaybackSessionsLoader) Load(
 			&s.PositionSeconds, &s.IsPaused, &s.HasPlaybackControl, &s.ClientIP, &s.ClientName, &s.ClientVersion,
 			&s.ClientBuild, &s.ClientChannel,
 			&s.ClientUserAgent, &s.AudioTrackIndex, &s.TranscodeAudio, &streamBitrateKbps,
-			&s.TranscodeNodeURL, &s.TargetResolution, &s.TargetVideoCodec, &s.TargetAudioCodec, &targetBitrateKbps,
-			&s.TranscodeHWAccel, &s.SourceContainer, &sourceBitrateKbps, &s.SourceVideoCodec, &s.SourceVideoResolution,
+			&s.TranscodeNodeURL, &s.TargetResolution, &s.TargetVideoCodec, &s.TargetAudioCodec,
+			&targetAudioChannels, &targetBitrateKbps,
+			&s.TranscodeHWAccel, &s.ToneMapMode, &s.SourceContainer, &sourceBitrateKbps, &s.SourceVideoCodec, &s.SourceVideoResolution,
 			&s.SourceAudioCodec, &sourceAudioChannels, &audioTracksJSON, &s.RequestedVideoCodec, &s.RequestedVideoResolution,
-			&s.CompatOrigin,
+			&s.CompatOrigin, &s.RoutingWorkload, &s.RoutingExecution, &s.RoutingExecutionNodeID,
+			&s.RoutingExecutionNodeName, &s.RoutingEgress, &s.RoutingEgressNodeID, &s.RoutingEgressNodeName, &s.RoutingNetworkProvider,
+			&s.OutputContainer, &s.OutputProtocol, &s.StreamLocation,
 		); err != nil {
-			return nil, fmt.Errorf("scanning playback session: %w", err)
+			return nil, 0, fmt.Errorf("scanning playback session: %w", err)
 		}
-		s.PosterURL = l.presignPosterURL(r, posterPath)
+		if !summary {
+			s.PosterURL = l.presignPosterURL(ctx, posterPath)
+		}
 		s.StreamBitrateKbps = streamBitrateKbps
+		s.TargetAudioChannels = targetAudioChannels
 		s.TargetBitrateKbps = targetBitrateKbps
 		s.SourceBitrateKbps = sourceBitrateKbps
 		s.SourceAudioChannels = sourceAudioChannels
@@ -277,16 +421,18 @@ func (l *PlaybackSessionsLoader) Load(
 		sessions = append(sessions, s)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	l.populateProfileNames(ctx, sessions)
+	if !summary {
+		l.populateProfileNames(ctx, sessions)
+	}
 
-	return sessions, nil
+	return sessions, total, nil
 }
 
-func (l *PlaybackSessionsLoader) presignPosterURL(r *http.Request, path string) string {
+func (l *PlaybackSessionsLoader) presignPosterURL(ctx context.Context, path string) string {
 	if l != nil && l.DetailSvc != nil {
-		return l.DetailSvc.PresignURL(r.Context(), cardThumbnailPath(path), "card")
+		return l.DetailSvc.PresignURL(ctx, cardThumbnailPath(path), "card")
 	}
 	return ""
 }
@@ -298,6 +444,10 @@ func enrichPlaybackSessionRow(row *playbackSessionRow, audioTracksJSON []byte) {
 
 	row.VideoDecision, row.AudioDecision = sessionComponentDecision(row.PlayMethod, row.TranscodeAudio, row.TargetVideoCodec)
 	row.EffectivePlayMethod = effectivePlayMethod(row.VideoDecision, row.AudioDecision)
+	if row.PlayMethod == string(playback.PlayDirect) {
+		row.OutputContainer = row.SourceContainer
+		row.OutputProtocol = playback.OutputProtocolHTTP
+	}
 	row.IsJellyfinClient = row.CompatOrigin || isJellyfinEcosystemClient(row.ClientName, row.ClientUserAgent)
 
 	var audioTracks []models.AudioTrack
@@ -392,7 +542,7 @@ func sessionComponentDecision(playMethod string, transcodeAudio bool, targetVide
 // and an audio-only re-encode reports "remux" — the decisions carry what
 // actually costs CPU.
 //   - video re-encoded        -> "transcode"
-//   - only audio re-encoded   -> "audio"
+//   - only audio re-encoded   -> "audio" (the native API reports "direct_stream")
 //   - streams only repackaged -> "remux"
 //   - nothing touched         -> "direct"
 //
@@ -738,4 +888,28 @@ func (l *PlaybackSessionsLoader) populateProfileNames(ctx context.Context, sessi
 		}
 		sessions[i].ProfileName = names[sessions[i].ProfileID]
 	}
+}
+
+// AdminPlaybackSessionView is the shared enriched diagnostic read model. It does
+// not grant authority to control or terminate the observed session.
+type AdminPlaybackSessionView = playbackSessionRow
+
+func (h *AdminHandler) AdminPlaybackSessionsAvailable() bool {
+	return h != nil && (h.SessionsLoader != nil || h.pool != nil)
+}
+
+func (h *AdminHandler) ReadAdminPlaybackSessions(ctx context.Context, query PlaybackSessionsQuery, after string, limit int) ([]AdminPlaybackSessionView, error) {
+	loader, err := resolvePlaybackSessionsLoader(h.SessionsLoader, h.pool, h.storeProv, h.DetailSvc)
+	if err != nil {
+		return nil, err
+	}
+	return loader.LoadPage(ctx, query, after, limit)
+}
+
+func (h *AdminHandler) ReadAdminPlaybackSummary(ctx context.Context, query PlaybackSessionsQuery, limit int) ([]AdminPlaybackSessionView, int, error) {
+	loader, err := resolvePlaybackSessionsLoader(h.SessionsLoader, h.pool, h.storeProv, h.DetailSvc)
+	if err != nil {
+		return nil, 0, err
+	}
+	return loader.LoadSummary(ctx, query, limit)
 }
