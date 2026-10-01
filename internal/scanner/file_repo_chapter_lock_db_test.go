@@ -172,3 +172,77 @@ func TestChapterLockSessionsSerializeDistinctPoolsDB(t *testing.T) {
 	}
 	secondRelease()
 }
+
+func TestChapterLockReusesHealthySessionsDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	newReplica := func() (*FileRepository, *pgxpool.Pool) {
+		t.Helper()
+		cfg, err := pgxpool.ParseConfig(dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.MaxConns, cfg.MinConns = 2, 0
+		pool, err := pgxpool.NewWithConfig(ctx, cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(pool.Close)
+		return NewFileRepository(pool), pool
+	}
+	first, pool := newReplica()
+	second, contendedPool := newReplica()
+	fileID := int(time.Now().UnixNano())
+	var firstPID int
+	for i := range 5 {
+		lockCtx, release, acquired, err := first.TryLockChapterThumbnails(ctx, fileID)
+		if err != nil || !acquired {
+			t.Fatalf("acquire %d: acquired=%v err=%v", i, acquired, err)
+		}
+		t.Cleanup(release)
+		var pid int
+		if err := first.chapterStateWriter(lockCtx, fileID).QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			firstPID = pid
+		} else if pid != firstPID {
+			t.Fatalf("healthy extraction reconnected: PID=%d, first=%d", pid, firstPID)
+		}
+		for range 5 {
+			_, failedRelease, gotLock, err := second.TryLockChapterThumbnails(ctx, fileID)
+			if failedRelease != nil {
+				failedRelease()
+			}
+			if err != nil || gotLock {
+				t.Fatalf("contended attempt: acquired=%v err=%v", gotLock, err)
+			}
+		}
+		if got := contendedPool.Stat().NewConnsCount(); got != 1 {
+			t.Fatalf("healthy contention created %d physical connections, want 1", got)
+		}
+		release()
+		if pool.Stat().AcquiredConns() != 0 || contendedPool.Stat().AcquiredConns() != 0 {
+			t.Fatal("release retained a pooled connection")
+		}
+		var name string
+		if err := pool.QueryRow(ctx, `SELECT pg_backend_pid(), current_setting('application_name')`).Scan(&pid, &name); err != nil {
+			t.Fatal(err)
+		}
+		if pid != firstPID || name == "silo-chapter-thumbnails:"+strconv.Itoa(fileID) {
+			t.Fatalf("released connection: PID=%d name=%q, want original PID and application name", pid, name)
+		}
+	}
+	if got := pool.Stat().NewConnsCount(); got != 1 {
+		t.Fatalf("healthy releases created %d physical connections, want 1", got)
+	}
+	_, release, acquired, err := second.TryLockChapterThumbnails(ctx, fileID)
+	if err != nil || !acquired {
+		t.Fatalf("release did not unlock for the other replica: acquired=%v err=%v", acquired, err)
+	}
+	release()
+}
