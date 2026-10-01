@@ -105,6 +105,12 @@ func load(path string, wait bool) (Index, error) {
 	}
 	if startCheck(key) {
 		go verifyInBackground(key)
+		return Index{}, ErrUnverified
+	}
+	// Not queued: a check may have finished since the lookup above, so
+	// return its result rather than ErrUnverified.
+	if idx, err, ok := cached(key); ok {
+		return idx, err
 	}
 	return Index{}, ErrUnverified
 }
