@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestHandleCreateLibrary_RejectsChapterThumbnailsWithoutS3(t *testing.T) {
+func TestHandleCreateLibrary_RejectsChapterThumbnailsWithoutArtworkStorage(t *testing.T) {
 	handler := &LibraryHandler{}
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -26,12 +26,12 @@ func TestHandleCreateLibrary_RejectsChapterThumbnailsWithoutS3(t *testing.T) {
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadRequest)
 	}
-	if body := rr.Body.String(); !strings.Contains(body, "Chapter thumbnails require configured public asset S3 storage") {
+	if body := rr.Body.String(); !strings.Contains(body, "Chapter thumbnails require configured artwork storage") {
 		t.Fatalf("unexpected body: %s", body)
 	}
 }
 
-func TestHandleUpdateLibrary_RejectsChapterThumbnailsWithoutS3(t *testing.T) {
+func TestHandleUpdateLibrary_RejectsChapterThumbnailsWithoutArtworkStorage(t *testing.T) {
 	handler := &LibraryHandler{}
 	req := httptest.NewRequest(
 		http.MethodPut,
@@ -46,7 +46,7 @@ func TestHandleUpdateLibrary_RejectsChapterThumbnailsWithoutS3(t *testing.T) {
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadRequest)
 	}
-	if body := rr.Body.String(); !strings.Contains(body, "Chapter thumbnails require configured public asset S3 storage") {
+	if body := rr.Body.String(); !strings.Contains(body, "Chapter thumbnails require configured artwork storage") {
 		t.Fatalf("unexpected body: %s", body)
 	}
 }

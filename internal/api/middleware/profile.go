@@ -16,6 +16,7 @@ func RequireProfile(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		profileID := r.Header.Get("X-Profile-Id")
 		if profileID == "" {
+			recordDenialReason(w, ReasonProfileHeaderRequired)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
 			_ = json.NewEncoder(w).Encode(errorResponse{

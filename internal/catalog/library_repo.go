@@ -229,8 +229,9 @@ func (r *LibraryItemRepository) GetItemsInFolders(ctx context.Context, contentID
 //     library restriction is set, so a rating-only viewer is gated on rating
 //     alone).
 //
-// A non-nil but empty allowedFolderIDs, or a maxContentRating that permits no
-// ratings, means nothing is accessible. ExcludedMediaTypes is intentionally
+// A non-nil but empty allowedFolderIDs, or a content-rating ceiling that
+// permits no ratings, means nothing is accessible. limits carries the viewer's
+// maturity limits (access.Scope.MaturityLimits); every one of them applies. ExcludedMediaTypes is intentionally
 // omitted: the viewer access.Scope does not carry it and the native request
 // path never sets it (only the jellycompat layer populates it), so it is a
 // no-op here.
@@ -238,7 +239,18 @@ func (r *LibraryItemRepository) GetItemsInFolders(ctx context.Context, contentID
 // The emitted SQL is built by buildFilterAccessibleContentIDsSQL so its shape
 // (placeholder numbering, the parent-series join for episodes, the optional
 // rating predicate) is unit-testable without a database.
-func (r *LibraryItemRepository) FilterAccessibleContentIDs(ctx context.Context, contentIDs []string, allowedFolderIDs, disabledFolderIDs []int, maxContentRating string) (map[string]bool, error) {
+func (r *LibraryItemRepository) FilterAccessibleContentIDs(ctx context.Context, contentIDs []string, allowedFolderIDs, disabledFolderIDs []int, limits access.MaturityLimits) (map[string]bool, error) {
+	return filterAccessibleContentIDs(ctx, r.pool, contentIDs, allowedFolderIDs, disabledFolderIDs, limits)
+}
+
+// FilterAccessibleContentIDsInTransaction uses the same catalog visibility query
+// as ordinary reads, in the caller's consistent snapshot.
+func FilterAccessibleContentIDsInTransaction(ctx context.Context, tx pgx.Tx, contentIDs []string, allowedFolderIDs, disabledFolderIDs []int, limits access.MaturityLimits) (map[string]bool, error) {
+	return filterAccessibleContentIDs(ctx, tx, contentIDs, allowedFolderIDs, disabledFolderIDs, limits)
+}
+func filterAccessibleContentIDs(ctx context.Context, db interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}, contentIDs []string, allowedFolderIDs, disabledFolderIDs []int, limits access.MaturityLimits) (map[string]bool, error) {
 	result := make(map[string]bool, len(contentIDs))
 	if len(contentIDs) == 0 {
 		return result, nil
@@ -248,18 +260,21 @@ func (r *LibraryItemRepository) FilterAccessibleContentIDs(ctx context.Context, 
 		return result, nil
 	}
 
-	var allowedRatings []string
-	if maxContentRating != "" {
-		allowedRatings = access.AllowedRatingsUpTo(maxContentRating)
-		if len(allowedRatings) == 0 {
-			// Ceiling permits no ratings → nothing is accessible.
+	// access.HasCeiling, not a trimmed emptiness test, so this agrees with
+	// ApplyMaturityLimits: a stored " " is a set ceiling that resolves to
+	// nothing, and it must block here too. These callers are the progress list
+	// and sync paths, so treating it as absent would let a viewer read and
+	// write progress for titles the catalog hides from them.
+	if access.HasCeiling(limits.MaxContentRating) {
+		if _, ok := access.AgeForCeiling(limits.MaxContentRating); !ok {
+			// Ceiling names no usable age → nothing is accessible.
 			return result, nil
 		}
 	}
 
-	query, args := buildFilterAccessibleContentIDsSQL(contentIDs, allowedFolderIDs, disabledFolderIDs, allowedRatings)
+	query, args := buildFilterAccessibleContentIDsSQL(contentIDs, allowedFolderIDs, disabledFolderIDs, limits)
 
-	rows, err := r.pool.Query(ctx, query, args...)
+	rows, err := db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("filtering accessible content ids: %w", err)
 	}
@@ -280,18 +295,17 @@ func (r *LibraryItemRepository) FilterAccessibleContentIDs(ctx context.Context, 
 
 // buildFilterAccessibleContentIDsSQL builds the membership/rating query used by
 // FilterAccessibleContentIDs. It is a pure function (no DB access) so the query
-// shape can be unit-tested. allowedRatings must already be resolved via
-// access.AllowedRatingsUpTo (nil/empty means no rating ceiling); the caller
-// handles the "permits nothing" early-outs.
+// shape can be unit-tested. The maturity predicates come from
+// ApplyMaturityLimits; the caller handles the "permits nothing" early-outs.
 //
 // The structure mirrors ItemRepository.EnsureAccessible: select FROM the owning
 // media_items row, gate library membership through the shared per-item
 // EXISTS / NOT EXISTS predicates (libraryAccessConditions), and resolve
 // episodes through their parent series so an episode is gated on
 // EnsureAccessible(series_id)-equivalent membership.
-func buildFilterAccessibleContentIDsSQL(contentIDs []string, allowedFolderIDs, disabledFolderIDs []int, allowedRatings []string) (string, []any) {
+func buildFilterAccessibleContentIDsSQL(contentIDs []string, allowedFolderIDs, disabledFolderIDs []int, limits access.MaturityLimits) (string, []any) {
 	args := []any{contentIDs}
-	var allowedIdx, disabledIdx, ratingIdx int
+	var allowedIdx, disabledIdx int
 	if allowedFolderIDs != nil {
 		args = append(args, allowedFolderIDs)
 		allowedIdx = len(args)
@@ -300,10 +314,12 @@ func buildFilterAccessibleContentIDsSQL(contentIDs []string, allowedFolderIDs, d
 		args = append(args, disabledFolderIDs)
 		disabledIdx = len(args)
 	}
-	if len(allowedRatings) > 0 {
-		args = append(args, allowedRatings)
-		ratingIdx = len(args)
-	}
+	// Both branches alias the gating media_items row as "mi" (the item itself,
+	// or the episode's parent series), so one set of maturity predicates and
+	// placeholders serves both.
+	var maturityConds []string
+	argIdx := len(args) + 1
+	ApplyMaturityLimits("mi", AccessFilter{MaturityLimits: limits}, &maturityConds, &args, &argIdx)
 
 	// Item branch gates the media item directly; episode branch resolves the
 	// parent series and gates on it (mirroring EnsureAccessible(series_id)).
@@ -315,11 +331,8 @@ func buildFilterAccessibleContentIDsSQL(contentIDs []string, allowedFolderIDs, d
 
 	itemConds = append(itemConds, libraryAccessConditions("mi.content_id", allowedIdx, disabledIdx)...)
 	episodeConds = append(episodeConds, libraryAccessConditions("e.series_id", allowedIdx, disabledIdx)...)
-	if ratingIdx > 0 {
-		rc := fmt.Sprintf("mi.content_rating = ANY($%d)", ratingIdx)
-		itemConds = append(itemConds, rc)
-		episodeConds = append(episodeConds, rc)
-	}
+	itemConds = append(itemConds, maturityConds...)
+	episodeConds = append(episodeConds, maturityConds...)
 
 	query := fmt.Sprintf(`
 		SELECT req.content_id
@@ -435,6 +448,42 @@ func (r *LibraryItemRepository) Delete(ctx context.Context, contentID string, fo
 // its surviving media_files rows and syncPresentLibraryState re-inserts the
 // membership from those rows.
 func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, folderID int, protectedPathPrefixes []string) (int, int, []string, error) {
+	return r.reconcileMemberships(ctx, folderID, nil, protectedPathPrefixes, false)
+}
+
+// ReconcileItemMemberships removes stale memberships and orphaned items only
+// for the supplied content IDs. File presence is checked across the whole
+// folder, so a version outside the scanned subtree preserves its membership.
+// An empty list removes nothing.
+func (r *LibraryItemRepository) ReconcileItemMemberships(ctx context.Context, folderID int, contentIDs, protectedPathPrefixes []string) (int, int, []string, error) {
+	if len(contentIDs) == 0 {
+		return 0, 0, nil, nil
+	}
+	return r.reconcileMemberships(ctx, folderID, contentIDs, protectedPathPrefixes, false)
+}
+
+// ReconcileRelinkedItems cleans up after code outside the scanner relinks
+// files away from the listed items. It removes their memberships in the folder
+// when no present file there still links to them, and deletes those left with
+// no membership and no file rows at all. An item that still has file rows is
+// kept: those files may sit under an unreachable root, which only a scan can
+// tell, and the scan's orphan check covers them. An empty list removes nothing.
+func (r *LibraryItemRepository) ReconcileRelinkedItems(ctx context.Context, folderID int, contentIDs []string) (int, int, []string, error) {
+	if len(contentIDs) == 0 {
+		return 0, 0, nil, nil
+	}
+	return r.reconcileMemberships(ctx, folderID, contentIDs, nil, true)
+}
+
+// reconcileMemberships limits removal to contentIDs when it is non-nil. With
+// onlyFileless, orphans that still have file rows are left for a scan.
+func (r *LibraryItemRepository) reconcileMemberships(ctx context.Context, folderID int, contentIDs, protectedPathPrefixes []string, onlyFileless bool) (int, int, []string, error) {
+	args := []any{folderID}
+	itemPredicate := ""
+	if contentIDs != nil {
+		args = append(args, contentIDs)
+		itemPredicate = " AND mil.content_id = ANY($2::text[])"
+	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return 0, 0, nil, fmt.Errorf("beginning membership reconciliation transaction: %w", err)
@@ -447,7 +496,7 @@ func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, f
 	// series (no remaining chapters) are cleaned up separately by the manga scan.
 	rows, err := tx.Query(ctx, `
 		DELETE FROM media_item_libraries mil
-		WHERE mil.media_folder_id = $1
+		WHERE mil.media_folder_id = $1`+itemPredicate+`
 		  AND NOT EXISTS (
 			SELECT 1
 			FROM media_files mf
@@ -462,7 +511,7 @@ func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, f
 			  AND mi.type = 'manga'
 		  )
 		RETURNING mil.content_id
-	`, folderID)
+	`, args...)
 	if err != nil {
 		return 0, 0, nil, fmt.Errorf("deleting stale folder memberships: %w", err)
 	}
@@ -487,15 +536,29 @@ func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, f
 	// protected-root pass. The latter no longer have a membership to return from
 	// the DELETE above, but their surviving media_files row still ties them to
 	// this folder so they can be reconsidered after the root recovers.
-	orphanIDs, err := collectOrphanIDs(ctx, tx, removedContentIDs)
+	// Relink cleanup considers every listed item: one an earlier relink kept
+	// because it still had files has no membership left to remove here, yet
+	// may just have lost its last file.
+	orphanCandidates := removedContentIDs
+	if onlyFileless {
+		orphanCandidates = contentIDs
+	}
+	orphanIDs, err := collectOrphanIDs(ctx, tx, orphanCandidates)
 	if err != nil {
 		return 0, 0, nil, err
 	}
-	previouslyProtected, err := collectFolderFileOrphanIDs(ctx, tx, folderID)
-	if err != nil {
-		return 0, 0, nil, err
+	if onlyFileless {
+		orphanIDs, err = excludeOrphansWithFiles(ctx, tx, orphanIDs)
+		if err != nil {
+			return 0, 0, nil, err
+		}
+	} else {
+		previouslyProtected, err := collectFolderFileOrphanIDs(ctx, tx, folderID, contentIDs)
+		if err != nil {
+			return 0, 0, nil, err
+		}
+		orphanIDs = appendUniqueStrings(orphanIDs, previouslyProtected...)
 	}
-	orphanIDs = appendUniqueStrings(orphanIDs, previouslyProtected...)
 	if len(orphanIDs) > 0 {
 
 		// Exempt orphans whose files sit under an unreachable root: the files
@@ -507,31 +570,11 @@ func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, f
 			}
 		}
 
-		// Collect image paths before deletion.
 		if len(orphanIDs) > 0 {
-			orphanedImageDirs, err = collectImageDirs(ctx, tx, orphanIDs)
+			var deletedContentIDs []string
+			deletedContentIDs, orphanedImageDirs, err = deleteOrphanedItemsAndImageDirs(ctx, tx, orphanIDs)
 			if err != nil {
 				return 0, 0, nil, err
-			}
-		}
-
-		if len(orphanIDs) > 0 {
-			rows, err := tx.Query(ctx, `
-				DELETE FROM media_items mi
-				WHERE mi.content_id = ANY($1)
-				  AND NOT EXISTS (
-					SELECT 1
-					FROM media_item_libraries mil
-					WHERE mil.content_id = mi.content_id
-				  )
-				RETURNING mi.content_id
-			`, orphanIDs)
-			if err != nil {
-				return 0, 0, nil, fmt.Errorf("deleting orphaned media items after folder reconciliation: %w", err)
-			}
-			deletedContentIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
-			if err != nil {
-				return 0, 0, nil, fmt.Errorf("collecting deleted orphaned media item IDs: %w", err)
 			}
 			deletedItems = len(deletedContentIDs)
 			if err := EnqueueSearchIndexDeletes(ctx, tx, deletedContentIDs); err != nil {
@@ -547,17 +590,66 @@ func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, f
 	return len(removedContentIDs), deletedItems, orphanedImageDirs, nil
 }
 
-func collectFolderFileOrphanIDs(ctx context.Context, tx pgx.Tx, folderID int) ([]string, error) {
+// deleteOrphanedItemsAndImageDirs deletes the orphanIDs that still have no
+// library membership and returns the IDs it deleted, plus the artwork
+// directories that no surviving row references any more.
+//
+// The directories are filtered after the DELETE, against the IDs it actually
+// removed. orphanIDs was read earlier in the transaction, and a concurrent scan
+// can link one of those items to a library before the DELETE runs; the guarded
+// DELETE then keeps it. Filtering before the DELETE would have treated that
+// item as gone and reported its directories as unreferenced, so the caller
+// would delete artwork a surviving item still uses. The raw paths are read
+// first because the deleted rows are gone afterwards.
+func deleteOrphanedItemsAndImageDirs(ctx context.Context, tx pgx.Tx, orphanIDs []string) ([]string, []string, error) {
+	rawImageDirs, err := collectRawImageDirs(ctx, tx, orphanIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	rows, err := tx.Query(ctx, `
+		DELETE FROM media_items mi
+		WHERE mi.content_id = ANY($1)
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM media_item_libraries mil
+			WHERE mil.content_id = mi.content_id
+		  )
+		RETURNING mi.content_id
+	`, orphanIDs)
+	if err != nil {
+		return nil, nil, fmt.Errorf("deleting orphaned media items after folder reconciliation: %w", err)
+	}
+	deletedContentIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, nil, fmt.Errorf("collecting deleted orphaned media item IDs: %w", err)
+	}
+	if len(deletedContentIDs) == 0 || len(rawImageDirs) == 0 {
+		return deletedContentIDs, nil, nil
+	}
+	imageDirs, err := filterUnreferencedImageDirs(ctx, tx, rawImageDirs, deletedContentIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	return deletedContentIDs, imageDirs, nil
+}
+
+func collectFolderFileOrphanIDs(ctx context.Context, tx pgx.Tx, folderID int, contentIDs []string) ([]string, error) {
+	args := []any{folderID}
+	itemPredicate := ""
+	if contentIDs != nil {
+		args = append(args, contentIDs)
+		itemPredicate = " AND mf.content_id = ANY($2::text[])"
+	}
 	rows, err := tx.Query(ctx, `
 		SELECT DISTINCT mf.content_id
 		FROM media_files mf
-		WHERE mf.media_folder_id = $1
+		WHERE mf.media_folder_id = $1`+itemPredicate+`
 		  AND mf.content_id IS NOT NULL
 		  AND mf.content_id <> ''
 		  AND NOT EXISTS (
 			SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mf.content_id
 		  )
-	`, folderID)
+	`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("finding previously protected folder orphans: %w", err)
 	}
@@ -565,6 +657,25 @@ func collectFolderFileOrphanIDs(ctx context.Context, tx pgx.Tx, folderID int) ([
 	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
 	if err != nil {
 		return nil, fmt.Errorf("collecting previously protected folder orphans: %w", err)
+	}
+	return ids, nil
+}
+
+// excludeOrphansWithFiles returns the orphanIDs no media_files row links to.
+func excludeOrphansWithFiles(ctx context.Context, tx pgx.Tx, orphanIDs []string) ([]string, error) {
+	if len(orphanIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT cid FROM unnest($1::text[]) AS cid
+		WHERE NOT EXISTS (SELECT 1 FROM media_files mf WHERE mf.content_id = cid)
+	`, orphanIDs)
+	if err != nil {
+		return nil, fmt.Errorf("filtering orphans that still have files: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("collecting fileless orphans: %w", err)
 	}
 	return ids, nil
 }

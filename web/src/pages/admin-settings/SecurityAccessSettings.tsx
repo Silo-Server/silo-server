@@ -1,3 +1,4 @@
+import { TriangleAlert } from "lucide-react";
 import { useId, useMemo, useState } from "react";
 
 import type {
@@ -33,12 +34,14 @@ import {
   SettingFieldStatus,
 } from "./SettingField";
 
-// Sign-in lifetimes and proxy trust go through the batched settings endpoint.
-// Rate limits do not: they live behind /admin/rate-limits/config and the batch
-// endpoint rejects those keys, so this page drives two writers behind one save
-// bar rather than showing the admin two different Save buttons.
+// Sign-in lifetimes, proxy trust, and local media server access go through the
+// batched settings endpoint. Rate limits do not: they live behind
+// /admin/rate-limits/config and the batch endpoint rejects those keys, so this
+// page drives two writers behind one save bar rather than showing the admin two
+// different Save buttons.
 const SESSION_KEYS = ["auth.access_token_expiry", "auth.refresh_token_expiry"];
-const NETWORK_KEYS = ["clientip.trusted_proxies"];
+const LOCAL_MEDIA_SERVERS_KEY = "media_servers.allow_private_destinations";
+const NETWORK_KEYS = ["clientip.trusted_proxies", LOCAL_MEDIA_SERVERS_KEY];
 const KEYS = [...SESSION_KEYS, ...NETWORK_KEYS];
 
 const DEFAULT_TIER: RateLimitTierConfig = {
@@ -174,6 +177,7 @@ export default function SecurityAccessSettings() {
   const updateConfig = useUpdateRateLimitConfig();
 
   const trustedProxiesManaged = form.sensitiveManagedByEnv.includes("clientip.trusted_proxies");
+  const localMediaServersAllowed = form.getValue(LOCAL_MEDIA_SERVERS_KEY) === "true";
 
   // The save endpoint rejects the Redis backend unless Redis is configured, so
   // mirror that rule on the option itself. The server stays the source of
@@ -220,7 +224,13 @@ export default function SecurityAccessSettings() {
 
   // Keyed on the hydrated snapshot so a refetch that actually changes the saved
   // config wins over a stale draft instead of silently resurrecting it.
-  const hydratedKey = JSON.stringify(hydratedConfig);
+  const hydratedKey = JSON.stringify([
+    hydratedConfig,
+    serverConfig?.etag,
+    serverConfig?.profileContext?.serverOrigin,
+    serverConfig?.profileContext?.authContextVersion,
+    serverConfig?.profileContext?.profileId,
+  ]);
   const [configState, setConfigState] = useState<{ key: string; config: RateLimitConfig }>({
     key: hydratedKey,
     config: hydratedConfig,
@@ -264,7 +274,7 @@ export default function SecurityAccessSettings() {
     });
   }
 
-  const rateLimitsDirty = JSON.stringify(config) !== hydratedKey;
+  const rateLimitsDirty = JSON.stringify(config) !== JSON.stringify(hydratedConfig);
   // The rate-limit draft lives outside useSettingsForm, so it has to announce
   // itself to the unsaved-changes registry on its own — otherwise the
   // navigation guard and the reload prompt only know about the batched keys.
@@ -285,14 +295,22 @@ export default function SecurityAccessSettings() {
    *
    * A failed writer keeps its own staged edits (neither mutation clears them on
    * error) and toasts the server's message, so the admin can fix the cause and
-   * hit Save again. The batch failing skips the rate-limit PUT for the same
+   * hit Save again. The batch failing skips the rate-limit PATCH for the same
    * reason it goes first: the settings it would be validated against are not
    * the ones on screen.
    */
   async function handleSave() {
+    const intent =
+      rateLimitsDirty && serverConfig
+        ? {
+            config: structuredClone(config),
+            etag: serverConfig.etag,
+            profileContext: serverConfig.profileContext,
+          }
+        : null;
     try {
       if (form.dirtyCount > 0) await form.save();
-      if (rateLimitsDirty) await updateConfig.mutateAsync(config);
+      if (intent) await updateConfig.mutateAsync(intent);
     } catch {
       // Both mutations already surface the failure as a toast; swallowing here
       // only stops it becoming an unhandled rejection out of the save bar.
@@ -360,6 +378,23 @@ export default function SecurityAccessSettings() {
             disabled={trustedProxiesManaged}
             restartRequired={restartKeys.has("clientip.trusted_proxies")}
           />
+          <SettingField
+            label="Local servers for every account"
+            description="Lets every account import history from, and sync with, Plex, Emby, and Jellyfin servers at local network addresses such as 192.168.x.x or localhost. Admins always can."
+            type="toggle"
+            value={form.getValue(LOCAL_MEDIA_SERVERS_KEY)}
+            onChange={(v) => form.setValue(LOCAL_MEDIA_SERVERS_KEY, v)}
+            restartRequired={restartKeys.has(LOCAL_MEDIA_SERVERS_KEY)}
+          />
+          {localMediaServersAllowed && (
+            <div className="flex items-start gap-2 py-3 text-xs text-amber-500">
+              <TriangleAlert className="mt-0.5 h-4 w-4 flex-shrink-0" />
+              <p>
+                Anyone who can sign in can make this server send requests to devices on its local
+                network. Turn this on only if you trust every account on this server.
+              </p>
+            </div>
+          )}
         </FieldGroup>
 
         <FieldGroup label="Rate limiting">

@@ -68,10 +68,31 @@ test_download_rejects_content_rating if {
 	got := decision with input as object.union(base_input, {
 		"content_rating": "R",
 		"max_content_rating": "PG-13",
+		"content_rating_within_ceiling": false,
 	})
 	not got.allowed
 	got.reason == "content rating exceeded"
 	got.reason_code == "content_rating_exceeded"
+}
+
+# A ceiling with no derived flag means an evaluator forgot to derive it; the
+# gate denies rather than reading the omission as "no ceiling".
+test_download_rejects_content_rating_when_flag_is_missing if {
+	got := decision with input as object.union(base_input, {
+		"content_rating": "R",
+		"max_content_rating": "PG-13",
+	})
+	not got.allowed
+	got.reason_code == "content_rating_exceeded"
+}
+
+# No ceiling asserted stays allowed, flag or no flag.
+test_download_allows_when_no_ceiling_is_set if {
+	got := decision with input as object.union(base_input, {
+		"content_rating": "R",
+		"max_content_rating": "",
+	})
+	got.allowed
 }
 
 test_download_transcode_allowed if {

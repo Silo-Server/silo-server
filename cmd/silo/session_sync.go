@@ -5,6 +5,20 @@ import (
 	"github.com/Silo-Server/silo-server/internal/worker"
 )
 
+// buildLiveSessionSyncs builds the live admin snapshot for a node. A play the
+// client reported stopped without an ID that could end it stays out of the
+// snapshot, while its session keeps its pause state and idle grace (#1454).
+func buildLiveSessionSyncs(sessions []*playback.Session, reportingNode string) []worker.SessionSync {
+	syncs := make([]worker.SessionSync, 0, len(sessions))
+	for _, s := range sessions {
+		if s == nil || s.StopReported {
+			continue
+		}
+		syncs = append(syncs, buildLiveSessionSync(s, reportingNode))
+	}
+	return syncs
+}
+
 // buildLiveSessionSync converts an in-memory playback session into the shared
 // live admin session snapshot. For live admin views, play_method tracks the
 // current transport method rather than the preserved semantic/base method used
@@ -23,6 +37,7 @@ func buildLiveSessionSync(s *playback.Session, reportingNode string) worker.Sess
 		PlayMethod:              string(s.PlayMethod),
 		ReportingNode:           reportingNode,
 		ClientIP:                s.ClientIP,
+		StreamLocation:          s.StreamLocation,
 		ClientName:              s.ClientName,
 		ClientVersion:           s.ClientVersion,
 		ClientBuild:             s.ClientBuild,
@@ -34,11 +49,14 @@ func buildLiveSessionSync(s *playback.Session, reportingNode string) worker.Sess
 		TranscodeNodeURL:        s.TranscodeNodeURL,
 		TargetResolution:        s.TargetResolution,
 		TargetVideoCodec:        s.TargetVideoCodec,
+		OutputContainer:         s.OutputContainer,
+		OutputProtocol:          s.OutputProtocol,
 		TargetAudioCodec:        s.TargetAudioCodec,
 		TargetAudioChannels:     s.TargetAudioChannels,
 		TargetBitrateKbps:       s.TargetBitrateKbps,
 		TranscodeHWAccel:        s.TranscodeHWAccel,
 		ToneMapMode:             string(s.ToneMapMode),
+		RoutingNetworkProvider:  s.RoutingNetworkProvider,
 		RoutingWorkload:         s.RoutingWorkload,
 		RoutingExecution:        s.RoutingExecution,
 		RoutingExecutionNodeID:  s.RoutingExecutionNodeID,

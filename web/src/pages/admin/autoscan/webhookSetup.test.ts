@@ -1,3 +1,4 @@
+import { autoscanWebhookURL } from "./webhookURL";
 import { describe, expect, it } from "vitest";
 
 import type { Library } from "@/api/types";
@@ -231,5 +232,29 @@ describe("hasUsableMapping", () => {
         newMapping("/mnt/media/tv", "/downloads/tv"),
       ]),
     ).toBe(true);
+  });
+});
+
+describe("v2 autoscan callback projection", () => {
+  it.each([
+    [
+      "/api/v1/autoscan/webhooks/existing-token",
+      "https://ui.example.test/api/v2/autoscan/webhooks/existing-token",
+    ],
+    [
+      "https://server.example.test/silo/api/v1/autoscan/webhooks/existing-token",
+      "https://server.example.test/silo/api/v2/autoscan/webhooks/existing-token",
+    ],
+    [
+      "https://server.example.test/api/v2/autoscan/webhooks/existing-token",
+      "https://server.example.test/api/v2/autoscan/webhooks/existing-token",
+    ],
+    [
+      "/api/v1/autoscan/webhooks/token%2Bvalue?deployment=one",
+      "https://ui.example.test/api/v2/autoscan/webhooks/token%2Bvalue?deployment=one",
+    ],
+    ["/api/v1/unrelated/existing-token", "https://ui.example.test/api/v1/unrelated/existing-token"],
+  ])("preserves host, prefix and secret for %s", (input, expected) => {
+    expect(autoscanWebhookURL(input, "https://ui.example.test")).toBe(expected);
   });
 });

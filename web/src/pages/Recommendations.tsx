@@ -1,5 +1,5 @@
 import { useDiscover, useTasteProfile } from "@/hooks/queries/recommendations";
-import type { DiscoverRow } from "@/api/types";
+import type { DiscoverRow } from "@/api/v2/recommendations";
 import MediaCarousel from "@/components/MediaCarousel";
 import SectionItemCard from "@/components/SectionItemCard";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
@@ -146,7 +146,9 @@ function DiscoverSkeletons({ posterWidthClasses }: { posterWidthClasses: string 
 }
 
 export default function Recommendations() {
-  useDocumentTitle("Recommendations");
+  // The viewer-facing name, as on the native apps; admin and setup screens
+  // keep "Recommendations" for the server feature.
+  useDocumentTitle("For You");
 
   const tasteProfileQuery = useTasteProfile();
   const { data, isLoading, isError, refetch } = useDiscover();
@@ -163,7 +165,7 @@ export default function Recommendations() {
         <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-foreground text-2xl font-bold tracking-tight sm:text-3xl">
-              Recommendations
+              For You
             </h1>
             <p className="text-muted-foreground mt-1 text-sm">
               Personalized picks based on your viewing history and ratings.

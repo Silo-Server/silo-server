@@ -14,7 +14,7 @@ import (
 // settingMutationConnExecutor pins every statement to one database/sql
 // connection. SQLite cannot request BEGIN IMMEDIATE through sql.Tx without a
 // DSN-wide policy, so this adapter lets the mutation transaction acquire its
-// write reservation before it reads the receipt.
+// write reservation before it reads a receipt or preference merge inputs.
 type settingMutationConnExecutor struct {
 	ctx  context.Context
 	conn *sql.Conn
@@ -63,8 +63,17 @@ func (s *SQLiteUserStore) WithSettingMutationTransaction(
 	ctx context.Context,
 	mutationID string,
 	fn func(userstore.SettingMutationWriter) error,
-) (err error) {
-	_ = mutationID // serialization here is per-database, not per-mutation id
+) error {
+	_ = mutationID // serialization is per-database, not per-mutation id
+	return s.withImmediateSettingsTransaction(ctx, func(exec preferenceSettingsExecutor) error {
+		return fn(&sqliteSettingMutationWriter{exec: exec})
+	})
+}
+
+// Reserve the SQLite writer before either canonical or preference callbacks
+// read their merge inputs; a deferred read transaction cannot safely upgrade
+// while another writer has changed the snapshot.
+func (s *SQLiteUserStore) withImmediateSettingsTransaction(ctx context.Context, fn func(preferenceSettingsExecutor) error) error {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("opening setting mutation connection: %w", err)
@@ -90,7 +99,7 @@ func (s *SQLiteUserStore) WithSettingMutationTransaction(
 		}
 	}()
 
-	if err := fn(&sqliteSettingMutationWriter{exec: exec}); err != nil {
+	if err := fn(exec); err != nil {
 		return err
 	}
 	if _, err := exec.ExecContext(ctx, "COMMIT"); err != nil {

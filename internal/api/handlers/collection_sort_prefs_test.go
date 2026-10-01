@@ -124,7 +124,7 @@ func TestCollectionSortPreferenceEndpoints(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 		}
-		var resp collectionSortPreferenceResponse
+		var resp CollectionSortPreferenceResponse
 		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 			t.Fatalf("decode: %v", err)
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -249,7 +250,8 @@ func TestRecordNodeRoutingAssignmentPersistsChildRouteBinding(t *testing.T) {
 	store.Put(PlaybackSession{ID: "play-1", CompatToken: "compat-token"})
 	handler := &PlaybackHandler{playbackStore: store}
 	want := playback.NodeRoutingAssignment{
-		Workload: string(noderouting.WorkloadVideoTranscode), Execution: string(noderouting.ExecutionTranscode),
+		NetworkProvider: new(""),
+		Workload:        string(noderouting.WorkloadVideoTranscode), Execution: string(noderouting.ExecutionTranscode),
 		ExecutionNodeID: 2, ExecutionNodeURL: "http://worker-1",
 		Egress: string(noderouting.EgressAPI),
 	}
@@ -258,7 +260,7 @@ func TestRecordNodeRoutingAssignmentPersistsChildRouteBinding(t *testing.T) {
 		t.Fatalf("record route: %v", err)
 	}
 	stored, ok := store.Get("play-1")
-	if !ok || stored.RoutingAssignment == nil || *stored.RoutingAssignment != want {
+	if !ok || stored.RoutingAssignment == nil || !reflect.DeepEqual(*stored.RoutingAssignment, want) {
 		t.Fatalf("stored route = %#v, want %#v", stored.RoutingAssignment, want)
 	}
 }

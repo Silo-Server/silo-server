@@ -27,16 +27,18 @@ type RecipeCard struct {
 	TranscodeNodeURL     string    `json:"transcode_node_url,omitempty"`
 	TranscodeTransportID string    `json:"transcode_transport_id,omitempty"`
 	OriginalStartedAt    time.Time `json:"original_started_at,omitempty"`
+	StreamLocation       string    `json:"stream_location,omitempty"`
 	// Routing fields freeze the committed media-serving boundary so a token or
 	// stored card cannot lose a proxy-only assignment when it reconstructs a
 	// session on another process. Stable execution and egress identities bind
 	// the artifact to the nodes whose capacity the planner reserved; internal
 	// URLs stay out of the portable recipe.
-	RoutingWorkload        string `json:"routing_workload,omitempty"`
-	RoutingExecution       string `json:"routing_execution,omitempty"`
-	RoutingExecutionNodeID int    `json:"routing_execution_node_id,omitzero"`
-	RoutingEgress          string `json:"routing_egress,omitempty"`
-	RoutingEgressNodeID    int    `json:"routing_egress_node_id,omitempty"`
+	RoutingNetworkProvider *string `json:"routing_network_provider,omitempty"`
+	RoutingWorkload        string  `json:"routing_workload,omitempty"`
+	RoutingExecution       string  `json:"routing_execution,omitempty"`
+	RoutingExecutionNodeID int     `json:"routing_execution_node_id,omitzero"`
+	RoutingEgress          string  `json:"routing_egress,omitempty"`
+	RoutingEgressNodeID    int     `json:"routing_egress_node_id,omitempty"`
 
 	// PlayMethod discriminates which serve path reconstructs this session
 	// (direct / remux / transcode). Empty decodes as PlayTranscode for
@@ -103,6 +105,7 @@ type RecipeCard struct {
 	SegmentDuration            int                    `json:"segment_duration"`
 	StartSegmentNumber         int                    `json:"start_segment_number"`
 	HWAccel                    string                 `json:"hw_accel,omitempty"`
+	EncoderHWAccel             string                 `json:"encoder_hw_accel,omitempty"`
 	HWDevice                   string                 `json:"hw_device,omitempty"`
 	SubtitleTrackIndex         int                    `json:"subtitle_track_index"`
 	SubtitleBurnIn             bool                   `json:"subtitle_burn_in,omitempty"`
@@ -111,11 +114,21 @@ type RecipeCard struct {
 	TargetBitrateKbps          int                    `json:"target_bitrate_kbps,omitempty"`
 	TotalDuration              float64                `json:"total_duration"`
 	FastStart                  bool                   `json:"fast_start,omitempty"`
+	ThrottleSeconds            int                    `json:"throttle_seconds,omitempty"`
 }
 
 const playMethodCopyFMP4V1 PlayMethod = streamtoken.PlayMethodCopyFMP4Transcode
 
 var ErrCopyFMP4RecipeVersionMismatch = errors.New("copy-fmp4 recipe version mismatch")
+
+// EffectiveEncoderHWAccel preserves older cards that recorded only one
+// backend, while new cards distinguish CPU encoding from GPU tone mapping.
+func (c RecipeCard) EffectiveEncoderHWAccel() string {
+	if c.EncoderHWAccel != "" {
+		return c.EncoderHWAccel
+	}
+	return c.HWAccel
+}
 
 // IsTranscodeRecipe reports whether a card is a legacy/current transcode or a
 // versioned copy-fMP4 transcode. The versioned method is deliberately distinct
@@ -196,6 +209,7 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 		SegmentDuration:            opts.SegmentDuration,
 		StartSegmentNumber:         opts.StartSegmentNumber,
 		HWAccel:                    opts.HWAccel,
+		EncoderHWAccel:             opts.EffectiveEncoderHWAccel(),
 		HWDevice:                   opts.HWDevice,
 		SubtitleTrackIndex:         opts.SubtitleTrackIndex,
 		SubtitleBurnIn:             opts.SubtitleBurnIn,
@@ -204,6 +218,7 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 		TargetBitrateKbps:          opts.TargetBitrateKbps,
 		TotalDuration:              opts.TotalDuration,
 		FastStart:                  opts.FastStart,
+		ThrottleSeconds:            opts.ThrottleSeconds,
 	}
 }
 
@@ -297,6 +312,7 @@ func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLo
 		StartSegmentNumber:         c.StartSegmentNumber,
 		FFmpegPath:                 ffmpegPath,
 		HWAccel:                    c.HWAccel,
+		EncoderHWAccel:             c.EncoderHWAccel,
 		HWDevice:                   c.HWDevice,
 		SubtitleTrackIndex:         c.SubtitleTrackIndex,
 		SubtitleBurnIn:             c.SubtitleBurnIn,
@@ -305,6 +321,7 @@ func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLo
 		TargetBitrateKbps:          c.TargetBitrateKbps,
 		TotalDuration:              c.TotalDuration,
 		FastStart:                  c.FastStart,
+		ThrottleSeconds:            c.ThrottleSeconds,
 		NodeType:                   "integrated",
 		ExecutionMode:              "integrated",
 		FFmpegLogSink:              logSink,
@@ -356,6 +373,8 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		RemuxDVMode:            string(c.RemuxDVMode),
 		TranscodeNode:          c.TranscodeNodeURL,
 		TranscodeTransportID:   c.TranscodeTransportID,
+		RoutingNetworkProvider: c.RoutingNetworkProvider,
+		StreamLocation:         c.StreamLocation,
 		RoutingWorkload:        c.RoutingWorkload,
 		RoutingExecution:       c.RoutingExecution,
 		RoutingExecutionNodeID: c.RoutingExecutionNodeID,
@@ -403,6 +422,7 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		TargetBitrateKbps:          c.TargetBitrateKbps,
 		TotalDuration:              c.TotalDuration,
 		FastStart:                  c.FastStart,
+		ThrottleSeconds:            c.ThrottleSeconds,
 		TargetCodecAudio:           c.TargetCodecAudio,
 		TargetAudioChannels:        targetAudioChannels,
 		TargetAudioBitrateKbps:     c.TargetAudioBitrateKbps,
@@ -443,6 +463,8 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		MediaFileID:                c.MediaFileID,
 		TranscodeNodeURL:           c.TranscodeNode,
 		TranscodeTransportID:       c.TranscodeTransportID,
+		RoutingNetworkProvider:     c.RoutingNetworkProvider,
+		StreamLocation:             c.StreamLocation,
 		RoutingWorkload:            c.RoutingWorkload,
 		RoutingExecution:           c.RoutingExecution,
 		RoutingExecutionNodeID:     c.RoutingExecutionNodeID,
@@ -491,6 +513,7 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		TargetBitrateKbps:          c.TargetBitrateKbps,
 		TotalDuration:              c.TotalDuration,
 		FastStart:                  c.FastStart,
+		ThrottleSeconds:            c.ThrottleSeconds,
 	}
 	if c.OriginalStartedAtUnixNano != 0 {
 		card.OriginalStartedAt = time.Unix(0, c.OriginalStartedAtUnixNano).UTC()

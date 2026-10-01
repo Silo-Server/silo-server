@@ -144,58 +144,9 @@ func (s *ServerChannelService) Update(ctx context.Context, id string, input Serv
 	if ch == nil {
 		return nil, ErrServerChannelNotFound
 	}
-	wasDelivering := ch.Enabled && ch.DisabledReason == nil
-
-	if input.Name != nil {
-		name, err := validateChannelName(*input.Name, ErrServerChannelInvalid)
-		if err != nil {
-			return nil, err
-		}
-		ch.Name = name
-	}
-	resetDispatch := false
-	if input.URL != nil {
-		rawURL := strings.TrimSpace(*input.URL)
-		host, err := ValidateWebhookURL(rawURL, s.settings.WebhooksAllowPrivateDestinations(ctx))
-		if err != nil {
-			return nil, fmt.Errorf("%w: %s", ErrServerChannelInvalid, err.Error())
-		}
-		if err := validateReplacementURL(ch.Type, rawURL, ErrServerChannelInvalid); err != nil {
-			return nil, err
-		}
-		ch.URLCiphertext, err = s.cipher.Encrypt(rawURL, serverChannelURLAAD(ch.ID))
-		if err != nil {
-			return nil, fmt.Errorf("encrypt server channel url: %w", err)
-		}
-		ch.URLHost = host
-		resetDispatch = true
-	}
-	if input.Enabled != nil {
-		ch.Enabled = *input.Enabled
-	}
-	if input.NotifyNewMovies != nil {
-		ch.NotifyNewMovies = *input.NotifyNewMovies
-	}
-	if input.NotifyNewEpisodes != nil {
-		ch.NotifyNewEpisodes = *input.NotifyNewEpisodes
-	}
-	if input.NotifyNewAudiobooks != nil {
-		ch.NotifyNewAudiobooks = *input.NotifyNewAudiobooks
-	}
-	if input.NotifyNewEbooks != nil {
-		ch.NotifyNewEbooks = *input.NotifyNewEbooks
-	}
-	if input.NotifyRequestSubmitted != nil {
-		ch.NotifyRequestSubmitted = *input.NotifyRequestSubmitted
-	}
-	if input.NotifyRequestApproved != nil {
-		ch.NotifyRequestApproved = *input.NotifyRequestApproved
-	}
-	if input.NotifyRequestDeclined != nil {
-		ch.NotifyRequestDeclined = *input.NotifyRequestDeclined
-	}
-	if input.NotifyRequestFulfilled != nil {
-		ch.NotifyRequestFulfilled = *input.NotifyRequestFulfilled
+	resetDispatch, err := s.applyChannelInput(ctx, ch, input)
+	if err != nil {
+		return nil, err
 	}
 
 	if err := s.repo.Update(ctx, *ch); err != nil {
@@ -208,8 +159,7 @@ func (s *ServerChannelService) Update(ctx context.Context, id string, input Serv
 	// Reset after the update commits: an enable transition (off→on or
 	// auto-disabled→re-enabled) or a replacement URL clears the streak and
 	// moves the watermark to now.
-	nowDelivering := ch.Enabled
-	if resetDispatch || (nowDelivering && !wasDelivering) {
+	if resetDispatch {
 		if err := s.repo.ResetDispatchState(ctx, ch.ID); err != nil {
 			return nil, err
 		}
@@ -302,4 +252,101 @@ func capitalize(s string) string {
 		return s
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+func (s *ServerChannelService) ListPage(ctx context.Context, limit int, after *Cursor) ([]ServerChannel, error) {
+	return s.repo.ListPage(ctx, limit, after)
+}
+
+// RotateSecretV2 writes only the secret, preserving current channel configuration.
+func (s *ServerChannelService) RotateSecretV2(ctx context.Context, id string) (string, error) {
+	ch, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if ch == nil {
+		return "", ErrServerChannelNotFound
+	}
+	if ch.Type != WebhookTypeGeneric {
+		return "", fmt.Errorf("%w: only generic channels have signing secrets", ErrServerChannelInvalid)
+	}
+	signingSecret, err := newSigningSecret()
+	if err != nil {
+		return "", err
+	}
+	ciphertext, err := s.cipher.Encrypt(signingSecret, serverChannelSecretAAD(ch.ID))
+	if err != nil {
+		return "", fmt.Errorf("encrypt signing secret: %w", err)
+	}
+	if err := s.repo.ReplaceSigningSecret(ctx, id, ciphertext); err != nil {
+		return "", err
+	}
+	return signingSecret, nil
+}
+
+// applyChannelInput shares the existing bridge validation and reset conditions.
+func (s *ServerChannelService) applyChannelInput(ctx context.Context, ch *ServerChannel, input ServerChannelInput) (bool, error) {
+	wasDelivering := ch.Enabled && ch.DisabledReason == nil
+
+	if input.Name != nil {
+		name, err := validateChannelName(*input.Name, ErrServerChannelInvalid)
+		if err != nil {
+			return false, err
+		}
+		ch.Name = name
+	}
+	resetDispatch := false
+	if input.URL != nil {
+		rawURL := strings.TrimSpace(*input.URL)
+		host, err := ValidateWebhookURL(rawURL, s.settings.WebhooksAllowPrivateDestinations(ctx))
+		if err != nil {
+			return false, fmt.Errorf("%w: %s", ErrServerChannelInvalid, err.Error())
+		}
+		if err := validateReplacementURL(ch.Type, rawURL, ErrServerChannelInvalid); err != nil {
+			return false, err
+		}
+		ch.URLCiphertext, err = s.cipher.Encrypt(rawURL, serverChannelURLAAD(ch.ID))
+		if err != nil {
+			return false, fmt.Errorf("encrypt server channel url: %w", err)
+		}
+		ch.URLHost = host
+		resetDispatch = true
+	}
+	if input.Enabled != nil {
+		ch.Enabled = *input.Enabled
+	}
+	if input.NotifyNewMovies != nil {
+		ch.NotifyNewMovies = *input.NotifyNewMovies
+	}
+	if input.NotifyNewEpisodes != nil {
+		ch.NotifyNewEpisodes = *input.NotifyNewEpisodes
+	}
+	if input.NotifyNewAudiobooks != nil {
+		ch.NotifyNewAudiobooks = *input.NotifyNewAudiobooks
+	}
+	if input.NotifyNewEbooks != nil {
+		ch.NotifyNewEbooks = *input.NotifyNewEbooks
+	}
+	if input.NotifyRequestSubmitted != nil {
+		ch.NotifyRequestSubmitted = *input.NotifyRequestSubmitted
+	}
+	if input.NotifyRequestApproved != nil {
+		ch.NotifyRequestApproved = *input.NotifyRequestApproved
+	}
+	if input.NotifyRequestDeclined != nil {
+		ch.NotifyRequestDeclined = *input.NotifyRequestDeclined
+	}
+	if input.NotifyRequestFulfilled != nil {
+		ch.NotifyRequestFulfilled = *input.NotifyRequestFulfilled
+	}
+
+	return resetDispatch || (ch.Enabled && !wasDelivering), nil
+}
+
+func (s *ServerChannelService) UpdateV2(ctx context.Context, id string, input ServerChannelInput) (*ServerChannel, error) {
+	row, err := s.repo.UpdateConfiguration(ctx, id, func(ch *ServerChannel) (bool, error) { return s.applyChannelInput(ctx, ch, input) })
+	if errors.Is(err, ErrServerChannelNameTaken) {
+		return nil, fmt.Errorf("%w: %s", ErrServerChannelInvalid, err.Error())
+	}
+	return row, err
 }

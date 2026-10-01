@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"sort"
+
+	"github.com/redis/go-redis/v9"
 )
 
 type CatalogSearchService struct {
@@ -13,6 +15,15 @@ type CatalogSearchService struct {
 	state    *SearchIndexEventRepository
 	itemRepo *ItemRepository
 	coverage *semanticCoverageTracker
+}
+
+// WithSearchSessionStore supplies shared continuation storage to the v2
+// Meilisearch path. Legacy reads do not create ranking sessions.
+func (s *CatalogSearchService) WithSearchSessionStore(client redis.UniversalClient) *CatalogSearchService {
+	if s != nil && s.meili != nil && client != nil {
+		s.meili.sessions = &searchSessionStore{client: client}
+	}
+	return s
 }
 
 func NewCatalogSearchService(

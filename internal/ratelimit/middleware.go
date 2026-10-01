@@ -18,6 +18,7 @@ import (
 
 // Middleware manages rate limiting config, limiters, and the HTTP handler.
 type Middleware struct {
+	reloadMu sync.Mutex // serializes reading and applying reload snapshots
 	mu       sync.RWMutex
 	cfg      Config
 	perKey   RateLimiter
@@ -73,6 +74,8 @@ func (mw *Middleware) Init(ctx context.Context) error {
 
 // Reload re-reads config from server_settings and clears in-memory state.
 func (mw *Middleware) Reload(ctx context.Context) error {
+	mw.reloadMu.Lock()
+	defer mw.reloadMu.Unlock()
 	cfg, err := LoadConfig(ctx, mw.store)
 	if err != nil {
 		return err

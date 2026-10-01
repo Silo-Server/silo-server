@@ -30,12 +30,6 @@ type DeleteLibraryResult struct {
 	orphanedImageDirs []string
 }
 
-// S3PrefixDeleter can delete all objects under a prefix.
-type S3PrefixDeleter interface {
-	DeletePrefix(ctx context.Context, bucket, prefix string) (int, error)
-	Bucket() string
-}
-
 type deleteLibraryExecutor interface {
 	Execute(ctx context.Context, req DeleteLibraryRequest, progress func(current, total int, message string)) (*DeleteLibraryResult, error)
 }

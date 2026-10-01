@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { CheckCircle2, Pencil, Plus, Trash2, XCircle } from "lucide-react";
+import { Link } from "react-router";
 import type {
   AutoscanConnection,
   AutoscanConnectionInput,
@@ -52,7 +53,7 @@ import {
   useTestAutoscanConnection,
   useUpdateAutoscanConnection,
 } from "@/hooks/queries/useAutoscan";
-import { useRequestIntegrations } from "@/hooks/queries/useRequests";
+import { useRequestIntegrations } from "@/hooks/queries/admin/requests";
 
 // ---------------------------------------------------------------------------
 // Dialog mode types
@@ -119,8 +120,22 @@ export default function ConnectionsPanel() {
   const testConnection = useTestAutoscanConnection();
 
   const [dialog, setDialog] = useState<DialogState>(BLANK_DIALOG);
+  const activeDialog = useRef<DialogState | null>(dialog);
+  useLayoutEffect(() => {
+    activeDialog.current = dialog;
+    return () => {
+      activeDialog.current = null;
+    };
+  }, [dialog]);
   const [deleteTarget, setDeleteTarget] = useState<AutoscanConnection | null>(null);
-  const [testResult, setTestResult] = useState<AutoscanConnectionTestResult | null>(null);
+  const [testOutcome, setTestOutcome] = useState<{
+    scope: DialogState;
+    result: AutoscanConnectionTestResult;
+  } | null>(null);
+  const testResult = testOutcome?.scope === dialog ? testOutcome.result : null;
+  function setTestResult(result: AutoscanConnectionTestResult | null) {
+    setTestOutcome(result ? { scope: dialog, result } : null);
+  }
 
   const arrIntegrations = (requestIntegrations.data ?? []).filter(isArrKind);
 
@@ -245,9 +260,20 @@ export default function ConnectionsPanel() {
     }
 
     if (dialog.editing) {
-      updateConnection.mutate({ id: dialog.editing.id, body }, { onSuccess: closeDialog });
+      updateConnection.mutate(
+        { id: dialog.editing.id, body },
+        {
+          onSuccess: () => {
+            if (activeDialog.current === dialog) closeDialog();
+          },
+        },
+      );
     } else {
-      createConnection.mutate(body, { onSuccess: closeDialog });
+      createConnection.mutate(body, {
+        onSuccess: () => {
+          if (activeDialog.current === dialog) closeDialog();
+        },
+      });
     }
   }
 
@@ -376,12 +402,19 @@ export default function ConnectionsPanel() {
             {/* Reuse mode */}
             {dialog.mode === "reuse" && (
               <div className="space-y-1.5">
-                <Label>Requests integration</Label>
+                <Label>Request server</Label>
                 {requestIntegrations.isLoading ? (
-                  <p className="text-muted-foreground text-sm">Loading integrations…</p>
+                  <p className="text-muted-foreground text-sm">Loading servers…</p>
                 ) : arrIntegrations.length === 0 ? (
                   <p className="text-muted-foreground text-sm">
-                    No Sonarr/Radarr integrations found. Add one in the Requests page first.
+                    No Sonarr or Radarr servers yet. Add one under{" "}
+                    <Link
+                      to="/admin/settings/requests"
+                      className="text-foreground underline underline-offset-2"
+                    >
+                      Settings › Requests
+                    </Link>{" "}
+                    first, or enter credentials manually.
                   </p>
                 ) : (
                   <Select
@@ -392,7 +425,7 @@ export default function ConnectionsPanel() {
                     }}
                   >
                     <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select an integration…" />
+                      <SelectValue placeholder="Select a server…" />
                     </SelectTrigger>
                     <SelectContent>
                       {arrIntegrations.map((integration) => (
@@ -527,8 +560,8 @@ export default function ConnectionsPanel() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete connection?</AlertDialogTitle>
             <AlertDialogDescription>
-              &ldquo;{deleteTarget?.name}&rdquo; will be removed. Any scan sources bound to it will
-              lose their connection and will need to be reconfigured.
+              &ldquo;{deleteTarget?.name}&rdquo; will be removed. Deletion is blocked while scan
+              sources reference this connection. Reconfigure those sources first.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

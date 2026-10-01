@@ -6,6 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   useAuth: vi.fn(),
+  requestStatus: vi.fn(),
+}));
+
+vi.mock("@/hooks/queries/useRequests", () => ({
+  useRequestFeatureStatus: () => mocks.requestStatus(),
 }));
 
 vi.mock("@/hooks/useAuth", () => ({
@@ -25,6 +30,7 @@ describe("SettingsLayout", () => {
     mocks.useAuth.mockReturnValue({
       user: { role: "admin" },
     });
+    mocks.requestStatus.mockReturnValue({ data: { requests_enabled: true } });
   });
 
   afterEach(() => {
@@ -85,11 +91,26 @@ describe("SettingsLayout", () => {
       </MemoryRouter>,
     );
 
-    // Five groups, eighteen sections — every card the same height so no group
+    // Five groups, seventeen sections — every card the same height so no group
     // is visually ranked above another.
     expect(markup.match(/2xl:grid-cols-4/g)).toHaveLength(5);
-    expect(markup.match(/lg:h-28/g)).toHaveLength(18);
+    expect(markup.match(/lg:h-28/g)).toHaveLength(17);
     expect(markup).not.toContain("max-w-5xl");
+  });
+
+  it("lists Requests only while the server has requests on", () => {
+    const renderIndex = () =>
+      renderToStaticMarkup(
+        <MemoryRouter initialEntries={["/settings"]}>
+          <SettingsLayout />
+        </MemoryRouter>,
+      );
+
+    expect(renderIndex()).toContain('href="/settings/requests"');
+    mocks.requestStatus.mockReturnValue({ data: { requests_enabled: false } });
+    expect(renderIndex()).not.toContain('href="/settings/requests"');
+    mocks.requestStatus.mockReturnValue({ data: undefined });
+    expect(renderIndex()).not.toContain('href="/settings/requests"');
   });
 
   it("keeps each settings section in exactly one group", () => {

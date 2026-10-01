@@ -133,6 +133,7 @@ describe("PlaybackSettings layout", () => {
     const keys: string[] = useSettingsFormMock.mock.calls[0]?.[0]?.keys ?? [];
 
     expect(keys).toContain("playback.transcode_enabled");
+    expect(keys).toContain("playback.allow_hevc_encoding");
     expect(keys).toContain("playback.routing.video_transcode_egress");
     expect(keys).toContain("playback.watched_threshold");
     expect(keys.some((key) => key.startsWith("download."))).toBe(false);
@@ -534,5 +535,15 @@ describe("PlaybackSettings divergent node inventories", () => {
 
     expect(markup).not.toContain("set per-node overrides on the");
     expect(markup).not.toContain('href="/admin/nodes"');
+  });
+});
+
+describe("HEVC encoding policy", () => {
+  it("saves the HEVC switch through the playback settings form", () => {
+    const form = makeForm({ "playback.hw_accel": "none", "playback.allow_hevc_encoding": "false" });
+    useSettingsFormMock.mockReturnValue(form);
+    render(<PlaybackSettings />);
+    fireEvent.click(screen.getByRole("switch", { name: "Allow HEVC encoding" }));
+    expect(form.setValue).toHaveBeenCalledWith("playback.allow_hevc_encoding", "true");
   });
 });

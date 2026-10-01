@@ -1,0 +1,66 @@
+{
+  "items": [
+    {
+      "download_id": "entry",
+      "content_id": "movie",
+      "type": "",
+      "revision": 2,
+      "quality": "original",
+      "effective_quality": "original",
+      "delivery_format": "original",
+      "target_bitrate_kbps": 0,
+      "media_file_id": "42",
+      "file_size": 1024,
+      "title": "Synthetic film",
+      "artwork_urls": {
+        "poster": "/api/v2/downloads/entry/artwork/poster"
+      },
+      "container": "",
+      "codec_video": "",
+      "codec_audio": "",
+      "resolution": "",
+      "hdr": false,
+      "duration_seconds": 0,
+      "chapters": [
+        {
+          "index": 0,
+          "title": "Chapter",
+          "start_seconds": 0,
+          "end_seconds": 30
+        }
+      ],
+      "marker_segments": [],
+      "subtitles": [
+        {
+          "language": "en",
+          "format": "vtt",
+          "forced": false,
+          "hearing_impaired": false,
+          "external": false,
+          "fetch_url": "/api/v2/downloads/entry/subtitles/external:0"
+        }
+      ],
+      "stable_identity": {
+        "stable_type": "movie",
+        "provider_ids": {
+          "tmdb": "42"
+        }
+      },
+      "integrity": {
+        "expected_bytes": 0,
+        "metadata_etag": ""
+      },
+      "manifest_version": 3,
+      "generated_at": "2026-01-02T03:04:05.000Z"
+    }
+  ],
+  "skipped": [
+    {
+      "download_id": "revoked",
+      "reason": "revoked"
+    }
+  ],
+  "page": {
+    "has_more": false
+  }
+}

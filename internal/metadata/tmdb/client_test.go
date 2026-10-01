@@ -2,9 +2,14 @@ package tmdb
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"slices"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -276,6 +281,42 @@ func TestGetExternalIDsCachesSuccess(t *testing.T) {
 	}
 	if first.IMDbID != "tt123" || first.TVDBID != 456 || second.IMDbID != "tt123" || second.TVDBID != 456 {
 		t.Fatalf("external IDs = first %+v second %+v", first, second)
+	}
+}
+
+func TestRefreshExternalIDsBypassesCache(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := calls.Add(1)
+		if r.URL.Path != "/tv/77/external_ids" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if n == 1 {
+			_, _ = w.Write([]byte(`{"imdb_id":"tt77"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"imdb_id":"tt77","tvdb_id":456}`))
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", 1000)
+	client.SetBaseURL(server.URL)
+
+	if _, err := client.GetExternalIDs(context.Background(), "tv", 77); err != nil {
+		t.Fatalf("GetExternalIDs returned error: %v", err)
+	}
+	refreshed, err := client.RefreshExternalIDs(context.Background(), "tv", 77)
+	if err != nil {
+		t.Fatalf("RefreshExternalIDs returned error: %v", err)
+	}
+	if calls.Load() != 2 || refreshed.TVDBID != 456 {
+		t.Fatalf("upstream calls = %d, refreshed = %+v; want a second fetch with the new TVDB ID", calls.Load(), refreshed)
+	}
+	cached, err := client.GetExternalIDs(context.Background(), "tv", 77)
+	if err != nil || cached.TVDBID != 456 || calls.Load() != 2 {
+		t.Fatalf("GetExternalIDs after refresh = %+v, %v (calls %d); want the refreshed value from cache", cached, err, calls.Load())
 	}
 }
 
@@ -1136,5 +1177,452 @@ func TestGetCertificationSingleflightsConcurrentCallers(t *testing.T) {
 	}
 	if got := calls.Load(); got != 1 {
 		t.Fatalf("upstream calls = %d, want 1 (singleflight)", got)
+	}
+}
+
+func TestDetailCarriesRoutingIdentifiers(t *testing.T) {
+	var movie movieDetailResponse
+	if err := json.Unmarshal([]byte(`{
+		"id": 129, "title": "Spirited Away", "release_date": "2001-07-20", "original_language": "ja",
+		"origin_country": ["JP"],
+		"genres": [{"id": 16, "name": "Animation"}, {"id": 14, "name": "Fantasy"}],
+		"production_companies": [{"id": 10342, "name": "Studio Ghibli"}],
+		"keywords": {"keywords": [{"id": 210024, "name": "anime"}]}
+	}`), &movie); err != nil {
+		t.Fatal(err)
+	}
+	m := normalizeMovieDetail(&movie)
+	if !slices.Equal(m.GenreIDs, []int{16, 14}) || !slices.Equal(m.CompanyIDs, []int{10342}) ||
+		!slices.Equal(m.OriginCountries, []string{"JP"}) || m.OriginalLanguage != "ja" || m.Year != 2001 {
+		t.Fatalf("movie = %+v", m)
+	}
+
+	var tv tvDetailResponse
+	if err := json.Unmarshal([]byte(`{
+		"id": 95396, "name": "Severance", "first_air_date": "2022-02-17", "original_language": "en",
+		"origin_country": ["US"],
+		"genres": [{"id": 18, "name": "Drama"}],
+		"networks": [{"id": 2552, "name": "Apple TV+"}]
+	}`), &tv); err != nil {
+		t.Fatal(err)
+	}
+	s := normalizeTVDetail(&tv)
+	if !slices.Equal(s.GenreIDs, []int{18}) || !slices.Equal(s.NetworkIDs, []int{2552}) ||
+		!slices.Equal(s.OriginCountries, []string{"US"}) || s.Year != 2022 {
+		t.Fatalf("series = %+v", s)
+	}
+}
+
+func TestNotFoundWrapsErrNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"status_message":"The resource you requested could not be found."}`))
+	}))
+	defer srv.Close()
+	client := NewClient("key", 40)
+	client.baseURL = srv.URL
+	_, err := client.GetMediaDetail(context.Background(), "movie", 1)
+	if !errors.Is(err, ErrNotFound) || !strings.Contains(err.Error(), "HTTP 404") {
+		t.Fatalf("err = %v, want ErrNotFound with the HTTP detail", err)
+	}
+}
+
+func TestGetCertificationsListsEveryCountry(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/movie/129/release_dates":
+			_, _ = w.Write([]byte(`{"results":[
+				{"iso_3166_1":"JP","release_dates":[{"certification":"G","type":3},{"certification":"","type":4},{"certification":"G","type":5}]},
+				{"iso_3166_1":"de","release_dates":[{"certification":"6","type":3}]}
+			]}`))
+		case "/tv/209867/content_ratings":
+			_, _ = w.Write([]byte(`{"results":[{"iso_3166_1":"JP","rating":"PG12"},{"iso_3166_1":"KR","rating":""}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client := NewClient("test-key", 1000)
+	client.SetBaseURL(server.URL)
+
+	movie, err := client.GetCertifications(context.Background(), "movie", 129)
+	if err != nil || len(movie) != 2 || len(movie["JP"]) != 1 || movie["JP"][0] != "G" || movie["DE"][0] != "6" {
+		t.Fatalf("movie certifications = %v, %v", movie, err)
+	}
+	series, err := client.GetCertifications(context.Background(), "series", 209867)
+	if err != nil || len(series) != 1 || series["JP"][0] != "PG12" {
+		t.Fatalf("series certifications = %v, %v", series, err)
+	}
+	// Cached like GetCertification.
+	before := calls
+	if _, err := client.GetCertifications(context.Background(), "movie", 129); err != nil || calls != before {
+		t.Fatalf("second read made %d calls, err %v", calls-before, err)
+	}
+	// The detail carries the same map.
+	if got := movieCertifications(&releaseDatesResponse{Results: []releaseDatesCountryEntry{{ISO3166: "fr", ReleaseDates: []releaseDateEntry{{Certification: "U"}}}}}); got["FR"][0] != "U" {
+		t.Fatalf("detail certifications = %v", got)
+	}
+}
+
+func TestUSCertificationFromMatchesGetCertification(t *testing.T) {
+	movie := map[string][]string{"US": {"NR", "PG", "R"}, "JP": {"G"}}
+	if got := USCertificationFrom("movie", movie); got != "R" {
+		t.Fatalf("movie = %q, want the strictest, R", got)
+	}
+	if got := USCertificationFrom("series", map[string][]string{"US": {"TV-14", "TV-MA"}}); got != "TV-14" {
+		t.Fatalf("series = %q, want the first", got)
+	}
+	if got := USCertificationFrom("movie", map[string][]string{"JP": {"G"}}); got != "" {
+		t.Fatalf("no US entry = %q", got)
+	}
+}
+
+func TestGetListPagesMixedEntriesInListOrder(t *testing.T) {
+	var pages []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/list/310" {
+			http.NotFound(w, r)
+			return
+		}
+		page := r.URL.Query().Get("page")
+		pages = append(pages, page)
+		w.Header().Set("Content-Type", "application/json")
+		switch page {
+		case "1":
+			_, _ = w.Write([]byte(`{"id":310,"page":1,"total_pages":2,"items":[
+				{"id":10096,"media_type":"movie","title":"13 Going on 30"},
+				{"id":1399,"media_type":"tv","name":"Game of Thrones"},
+				{"id":287,"media_type":"person","name":"Brad Pitt"}
+			]}`))
+		case "2":
+			_, _ = w.Write([]byte(`{"id":310,"page":2,"total_pages":2,"items":[
+				{"id":550,"media_type":"movie","title":"Fight Club"}
+			]}`))
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", 1000)
+	client.SetBaseURL(server.URL)
+
+	got, err := client.GetList(context.Background(), 310, 0)
+	if err != nil {
+		t.Fatalf("GetList: %v", err)
+	}
+	want := []CollectionResult{
+		{ID: 10096, MediaType: "movie", Title: "13 Going on 30"},
+		{ID: 1399, MediaType: "tv", Title: "Game of Thrones"},
+		{ID: 550, MediaType: "movie", Title: "Fight Club"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("GetList = %#v, want %#v", got, want)
+	}
+	if !reflect.DeepEqual(pages, []string{"1", "2"}) {
+		t.Fatalf("requested pages = %v, want [1 2]", pages)
+	}
+
+	pages = nil
+	got, err = client.GetList(context.Background(), 310, 2)
+	if err != nil {
+		t.Fatalf("GetList(limit=2): %v", err)
+	}
+	if len(got) != 2 || !reflect.DeepEqual(pages, []string{"1"}) {
+		t.Fatalf("GetList(limit=2) = %d entries from pages %v, want 2 entries from page 1", len(got), pages)
+	}
+}
+
+func TestGetListRejectsNonPositiveID(t *testing.T) {
+	client := NewClient("test-key", 1000)
+	if _, err := client.GetList(context.Background(), 0, 10); err == nil {
+		t.Fatal("GetList(0) succeeded, want error")
+	}
+}
+
+// A title page polls its detail while a request downloads, and several people
+// may have it open: they share one fetch for the cache's TTL, each with a copy
+// of its own. A failure is not cached.
+func TestGetMediaDetailIsCachedBriefly(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/movie/129":
+			_, _ = w.Write([]byte(`{"id": 129, "title": "Spirited Away", "genres": [{"id": 16, "name": "Animation"}],
+				"recommendations": {"results": [{"id": 4935, "title": "Howl's Moving Castle"}]}}`))
+		case "/tv/95396":
+			_, _ = w.Write([]byte(`{"id": 95396, "name": "Severance"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	client := NewClient("key", 40)
+	defer client.Close()
+	client.SetBaseURL(server.URL)
+	ctx := context.Background()
+
+	first, err := client.GetMediaDetail(ctx, "movie", 129)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.Genres[0], first.Recommendations[0].Title = "changed", "changed"
+	second, err := client.GetMediaDetail(ctx, "movie", 129)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("upstream calls = %d, want 1 while the detail is cached", calls.Load())
+	}
+	if second.Genres[0] != "Animation" || second.Recommendations[0].Title != "Howl's Moving Castle" {
+		t.Fatalf("second detail = %+v; a caller's change reached the cache", second)
+	}
+
+	// "series" and "tv" name the same title.
+	for _, mediaType := range []string{"series", "tv"} {
+		if detail, err := client.GetMediaDetail(ctx, mediaType, 95396); err != nil || detail.Title != "Severance" {
+			t.Fatalf("GetMediaDetail(%s) = %+v, %v", mediaType, detail, err)
+		}
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("upstream calls = %d, want 2", calls.Load())
+	}
+
+	for range 2 {
+		if _, err := client.GetMediaDetail(ctx, "movie", 404); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("err = %v, want ErrNotFound", err)
+		}
+	}
+	if calls.Load() != 4 {
+		t.Fatalf("upstream calls = %d, want each failure fetched again", calls.Load())
+	}
+}
+
+// blockedDetailServer answers /movie/129 once release is closed. started is
+// closed when the first request arrives; calls counts every request.
+func blockedDetailServer(t *testing.T) (client *Client, started <-chan struct{}, release func(), calls *atomic.Int32) {
+	t.Helper()
+	startedCh := make(chan struct{})
+	releaseCh := make(chan struct{})
+	var startOnce, releaseOnce sync.Once
+	calls = new(atomic.Int32)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		startOnce.Do(func() { close(startedCh) })
+		<-releaseCh
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id": 129, "title": "Spirited Away"}`))
+	}))
+	release = func() { releaseOnce.Do(func() { close(releaseCh) }) }
+	client = NewClient("key", 1000)
+	client.SetBaseURL(server.URL)
+	t.Cleanup(func() {
+		release()
+		server.Close()
+		client.Close()
+	})
+	return client, startedCh, release, calls
+}
+
+// waitingCtx closes waiting the first time its caller selects on Done. A
+// follower does that only once it has joined the in-flight fetch.
+type waitingCtx struct {
+	context.Context
+	once    sync.Once
+	waiting chan struct{}
+}
+
+func newWaitingCtx(parent context.Context) *waitingCtx {
+	return &waitingCtx{Context: parent, waiting: make(chan struct{})}
+}
+
+func (c *waitingCtx) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.waiting) })
+	return c.Context.Done()
+}
+
+type detailResult struct {
+	detail *MediaDetail
+	err    error
+}
+
+func getMediaDetailAsync(ctx context.Context, client *Client) <-chan detailResult {
+	out := make(chan detailResult, 1)
+	go func() {
+		detail, err := client.GetMediaDetail(ctx, "movie", 129)
+		out <- detailResult{detail, err}
+	}()
+	return out
+}
+
+func awaitDetail(t *testing.T, who string, ch <-chan detailResult) detailResult {
+	t.Helper()
+	select {
+	case result := <-ch:
+		return result
+	case <-time.After(5 * time.Second):
+		t.Fatalf("%s is still blocked on the shared detail fetch", who)
+		return detailResult{}
+	}
+}
+
+// The caller that starts a shared detail fetch may disconnect; everyone else
+// waiting on the same title still gets it.
+func TestGetMediaDetailSurvivesLeaderCancellation(t *testing.T) {
+	client, started, release, calls := blockedDetailServer(t)
+
+	leaderCtx, cancelLeader := context.WithCancel(context.Background())
+	defer cancelLeader()
+	leader := getMediaDetailAsync(leaderCtx, client)
+	<-started
+
+	followerCtx := newWaitingCtx(context.Background())
+	follower := getMediaDetailAsync(followerCtx, client)
+	select {
+	case <-followerCtx.waiting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("follower never waited on its own context")
+	}
+
+	cancelLeader()
+	if got := awaitDetail(t, "canceled leader", leader); !errors.Is(got.err, context.Canceled) {
+		t.Fatalf("leader err = %v, want context.Canceled", got.err)
+	}
+	release()
+	got := awaitDetail(t, "follower", follower)
+	if got.err != nil || got.detail.Title != "Spirited Away" {
+		t.Fatalf("follower = %+v, %v; want the detail after the leader canceled", got.detail, got.err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("upstream calls = %d, want 1 shared fetch", calls.Load())
+	}
+}
+
+// A waiting caller that disconnects stops waiting at once, and the shared
+// fetch still completes for the caller that started it.
+func TestGetMediaDetailFollowerStopsWaitingOnCancel(t *testing.T) {
+	client, started, release, calls := blockedDetailServer(t)
+
+	leader := getMediaDetailAsync(context.Background(), client)
+	<-started
+
+	followerCtx, cancelFollower := context.WithCancel(context.Background())
+	defer cancelFollower()
+	waiting := newWaitingCtx(followerCtx)
+	follower := getMediaDetailAsync(waiting, client)
+	select {
+	case <-waiting.waiting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("follower never waited on its own context")
+	}
+
+	cancelFollower()
+	if got := awaitDetail(t, "canceled follower", follower); !errors.Is(got.err, context.Canceled) {
+		t.Fatalf("follower err = %v, want context.Canceled", got.err)
+	}
+	release()
+	got := awaitDetail(t, "leader", leader)
+	if got.err != nil || got.detail.Title != "Spirited Away" {
+		t.Fatalf("leader = %+v, %v; want the detail after the follower canceled", got.detail, got.err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("upstream calls = %d, want 1 shared fetch", calls.Load())
+	}
+}
+
+// Every slice and map a detail holds is copied, so no caller shares one with
+// the cache; a field added later is caught here.
+func TestCloneMediaDetailCopiesEveryReference(t *testing.T) {
+	var detail MediaDetail
+	v := reflect.ValueOf(&detail).Elem()
+	for i := range v.NumField() {
+		field := v.Field(i)
+		switch field.Kind() {
+		case reflect.Slice:
+			field.Set(reflect.MakeSlice(field.Type(), 1, 1))
+		case reflect.Map:
+			m := reflect.MakeMap(field.Type())
+			m.SetMapIndex(reflect.New(field.Type().Key()).Elem(), reflect.MakeSlice(field.Type().Elem(), 1, 1))
+			field.Set(m)
+		case reflect.Pointer, reflect.Interface, reflect.Chan, reflect.Func:
+			t.Fatalf("MediaDetail.%s is a %s; teach cloneMediaDetail to copy it", v.Type().Field(i).Name, field.Kind())
+		}
+	}
+	cloned := reflect.ValueOf(cloneMediaDetail(&detail)).Elem()
+	for i := range v.NumField() {
+		name := v.Type().Field(i).Name
+		switch v.Field(i).Kind() {
+		case reflect.Slice:
+			if cloned.Field(i).Pointer() == v.Field(i).Pointer() {
+				t.Errorf("MediaDetail.%s shares its backing array with the cached detail", name)
+			}
+		case reflect.Map:
+			if cloned.Field(i).Pointer() == v.Field(i).Pointer() {
+				t.Errorf("MediaDetail.%s shares its map with the cached detail", name)
+			}
+			for _, key := range v.Field(i).MapKeys() {
+				if cloned.Field(i).MapIndex(key).Pointer() == v.Field(i).MapIndex(key).Pointer() {
+					t.Errorf("MediaDetail.%s[%v] shares its slice with the cached detail", name, key)
+				}
+			}
+		}
+	}
+}
+
+func TestFindByExternalID(t *testing.T) {
+	var gotPath, gotSource string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotSource = r.URL.Query().Get("external_source")
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/find/tt0137523":
+			_, _ = w.Write([]byte(`{"movie_results":[{"id":550,"title":"Fight Club","release_date":"1999-10-15","poster_path":"/p.jpg"}],"tv_results":[{"id":77,"name":"Fight Club TV","first_air_date":"2001-01-01"}],"person_results":[{"id":1}]}`))
+		case "/find/81189":
+			_, _ = w.Write([]byte(`{"movie_results":[],"tv_results":[]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"status_code":34,"status_message":"The resource you requested could not be found."}`))
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", 1000)
+	defer client.Close()
+	client.SetBaseURL(server.URL)
+
+	results, err := client.FindByExternalID(t.Context(), ExternalSourceIMDb, "tt0137523")
+	if err != nil {
+		t.Fatalf("FindByExternalID: %v", err)
+	}
+	if gotPath != "/find/tt0137523" || gotSource != "imdb_id" {
+		t.Fatalf("request = %s source %q", gotPath, gotSource)
+	}
+	want := []MediaResult{
+		{ID: 550, MediaType: "movie", Title: "Fight Club", ReleaseDate: "1999-10-15", Year: 1999, PosterPath: "/p.jpg"},
+		{ID: 77, MediaType: "series", Title: "Fight Club TV", ReleaseDate: "2001-01-01", Year: 2001},
+	}
+	if !reflect.DeepEqual(results, want) {
+		t.Fatalf("results = %+v, want %+v", results, want)
+	}
+
+	empty, err := client.FindByExternalID(t.Context(), ExternalSourceTVDB, "81189")
+	if err != nil || len(empty) != 0 || gotSource != "tvdb_id" {
+		t.Fatalf("empty find = %+v, %v (source %q)", empty, err, gotSource)
+	}
+
+	if _, err := client.FindByExternalID(t.Context(), ExternalSourceIMDb, "tt-missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("404 error = %v, want ErrNotFound", err)
+	}
+	if _, err := client.FindByExternalID(t.Context(), "facebook_id", "x"); err == nil {
+		t.Fatal("unsupported source should fail before any request")
+	}
+	if _, err := client.FindByExternalID(t.Context(), ExternalSourceIMDb, " "); err == nil {
+		t.Fatal("empty id should fail before any request")
 	}
 }

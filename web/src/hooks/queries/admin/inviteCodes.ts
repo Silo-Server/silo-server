@@ -1,7 +1,6 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/api/client";
+import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { v2, type V2Result } from "@/api/v2/request";
 import type {
-  InviteCode,
   CreateInviteCodeRequest,
   UpdateInviteCodeRequest,
   TopUpInviteCodeRequest,
@@ -9,23 +8,30 @@ import type {
 import { adminKeys } from "../keys";
 import { toast } from "sonner";
 
+export type InviteCode = V2Result<"GET /api/v2/admin/invite-codes">["items"][number];
+
 const ADMIN_STALE_TIME = 30_000;
 
 export function useAdminInviteCodes() {
-  return useQuery({
+  const query = useInfiniteQuery({
     queryKey: adminKeys.inviteCodes(),
-    queryFn: () => api<InviteCode[]>("/admin/invite-codes").then((d) => d ?? []),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
+      v2("GET /api/v2/admin/invite-codes", { query: { limit: 50, cursor: pageParam } }),
+    getNextPageParam: (page) => (page.page?.has_more ? page.page.next_cursor : undefined),
     staleTime: ADMIN_STALE_TIME,
   });
+  return { ...query, data: query.data?.pages.flatMap((page) => page.items) };
 }
 
 export function useCreateInviteCode() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: CreateInviteCodeRequest) =>
-      api<InviteCode>("/admin/invite-codes", {
-        method: "POST",
-        body: JSON.stringify(body),
+    retry: false,
+    mutationFn: (body: CreateInviteCodeRequest & { code: string }) =>
+      v2("POST /api/v2/admin/invite-codes", {
+        body,
+        retryAuthentication: false,
       }),
     onSuccess: () => {
       toast.success("Invite code created");
@@ -40,11 +46,9 @@ export function useCreateInviteCode() {
 export function useUpdateInviteCode() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, body }: { id: number; body: UpdateInviteCodeRequest }) =>
-      api(`/admin/invite-codes/${id}`, {
-        method: "PUT",
-        body: JSON.stringify(body),
-      }),
+    retry: false,
+    mutationFn: ({ id, body }: { id: string; body: UpdateInviteCodeRequest }) =>
+      v2("PUT /api/v2/admin/invite-codes/{id}", { path: { id }, body, retryAuthentication: false }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: adminKeys.inviteCodes() });
     },
@@ -57,17 +61,23 @@ export function useUpdateInviteCode() {
 export function useTopUpInviteCode() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, body }: { id: number; body: TopUpInviteCodeRequest }) =>
-      api<InviteCode>(`/admin/invite-codes/${id}/top-up`, {
-        method: "POST",
-        body: JSON.stringify(body),
+    retry: false,
+    mutationFn: ({ id, body }: { id: string; body: TopUpInviteCodeRequest }) =>
+      v2("POST /api/v2/admin/invite-codes/{id}/top-up", {
+        path: { id },
+        body,
+        retryAuthentication: false,
       }),
     onSuccess: () => {
       toast.success("Invite code topped up");
       queryClient.invalidateQueries({ queryKey: adminKeys.inviteCodes() });
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to top up invite code");
+      toast.error(
+        "Check the code’s current maximum uses before retrying the top-up. " +
+          (err instanceof Error ? err.message : "The result could not be confirmed."),
+      );
+      void queryClient.invalidateQueries({ queryKey: adminKeys.inviteCodes() });
     },
   });
 }
@@ -75,7 +85,9 @@ export function useTopUpInviteCode() {
 export function useDeleteInviteCode() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: number) => api(`/admin/invite-codes/${id}`, { method: "DELETE" }),
+    retry: false,
+    mutationFn: (id: string) =>
+      v2("DELETE /api/v2/admin/invite-codes/{id}", { path: { id }, retryAuthentication: false }),
     onSuccess: () => {
       toast.success("Invite code deleted");
       queryClient.invalidateQueries({ queryKey: adminKeys.inviteCodes() });

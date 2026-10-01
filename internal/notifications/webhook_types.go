@@ -40,6 +40,7 @@ const schemeHTTPS = "https"
 // Webhook is a profile-scoped outbound destination. URL and signing secret
 // are stored as enc:v1: envelopes and never leave the server.
 type Webhook struct {
+	Revision                int64
 	ID                      string
 	UserID                  int
 	ProfileID               string

@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useLayoutEffect, useRef, useState } from "react";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import type { BrowseItem } from "@/api/types";
 import ItemCard from "./ItemCard";
@@ -66,7 +66,24 @@ export default function ItemGrid(props: ItemGridProps) {
     layoutKey: cardPresentation.poster_size,
   });
   const [anchorEl, setAnchorEl] = useState<HTMLDivElement | null>(null);
-  const { columnCount, rowHeight } = layout;
+  const { columnCount, rowHeight: estimatedRowHeight } = layout;
+  // The estimate adds a fixed caption height, but the rendered caption depends
+  // on line heights, an episode line and the text scale, so it runs taller.
+  // Rows reserved at the estimate then spilled past the page bottom (#1613).
+  // The grid now pins every CSS row to the pitch the virtualizer reserves, and
+  // that pitch grows to fit the tallest card rendered, so reserved and drawn
+  // heights match exactly, row for row. A measurement only holds for the
+  // layout it was taken under; a poster size, caption or column change
+  // produces a new estimate and a fresh measurement.
+  const [measured, setMeasured] = useState<{
+    estimate: number;
+    rowHeight: number;
+    gap: number;
+  } | null>(null);
+  const rowHeight =
+    measured?.estimate === estimatedRowHeight ? measured.rowHeight : estimatedRowHeight;
+  const rowGap = measured?.estimate === estimatedRowHeight ? measured.gap : gridGap;
+  const scrollAnchorRef = useRef<{ index: number; offset: number } | null>(null);
   const scrollMargin = anchorEl ? anchorEl.getBoundingClientRect().top + window.scrollY : 0;
 
   // Use the full totalItems for virtualizer height so the scrollbar reflects
@@ -84,15 +101,75 @@ export default function ItemGrid(props: ItemGridProps) {
 
   // The estimate function closes over rowHeight. Explicitly invalidate the
   // cached measurements when a poster/caption preset changes that height.
-  useEffect(() => {
+  useLayoutEffect(() => {
     virtualizer.measure();
+    const anchor = scrollAnchorRef.current;
+    if (anchor) {
+      scrollAnchorRef.current = null;
+      virtualizer.scrollToOffset(
+        virtualizer.options.scrollMargin + anchor.index * rowHeight + anchor.offset,
+        { behavior: "instant" },
+      );
+    }
   }, [rowHeight, virtualizer]);
 
   const virtualRows = virtualizer.getVirtualItems();
 
+  const showsItems = !loading && totalItems > 0;
+  // Static grids rebuild `pages` each render; key on the data behind it.
+  const content = hasStaticItems(props) ? props.items : props.pages;
   // Report visible item range to parent for page fetching
   const firstRow = virtualRows[0]?.index ?? 0;
   const lastRow = virtualRows[virtualRows.length - 1]?.index ?? 0;
+  // Measure each rendered card's natural height (its content, not the grid
+  // cell stretched to the pinned row) when the rendered range or content
+  // changes, not after every commit. The pitch only grows within a layout, so
+  // it can't be pulled back and forth by which cards are on screen.
+  useLayoutEffect(() => {
+    const grid = containerRef.current;
+    if (!showsItems || !grid) return;
+    let tallest = 0;
+    for (const cell of Array.from(grid.children)) {
+      const card = cell.firstElementChild;
+      if (card instanceof HTMLElement) tallest = Math.max(tallest, card.offsetHeight);
+    }
+    if (tallest <= 0) return;
+    // offsetHeight ignores transforms (cards scale on hover), which keeps a
+    // hovered card from inflating the pitch, but it rounds to whole pixels;
+    // one extra pixel covers a fractional card height.
+    // Tailwind gaps use rem, so larger text also scales the rendered gap.
+    const cssGap = Number.parseFloat(getComputedStyle(grid).rowGap);
+    const renderedGap = Number.isFinite(cssGap) ? cssGap : gridGap;
+    const pitch = tallest + 1 + renderedGap;
+    if (pitch > rowHeight || renderedGap !== rowGap) {
+      // Growing every row also moves the content above the viewport. Keep
+      // the first visible row at its current offset instead of jumping back
+      // to earlier items when a taller card or a loaded page enters overscan.
+      const anchor = virtualizer
+        .getVirtualItems()
+        .find((row) => row.start <= window.scrollY && row.end > window.scrollY);
+      scrollAnchorRef.current =
+        pitch > rowHeight && anchor
+          ? { index: anchor.index, offset: window.scrollY - anchor.start }
+          : null;
+      setMeasured({
+        estimate: estimatedRowHeight,
+        rowHeight: Math.max(rowHeight, pitch),
+        gap: renderedGap,
+      });
+    }
+  }, [
+    showsItems,
+    firstRow,
+    lastRow,
+    content,
+    estimatedRowHeight,
+    rowHeight,
+    rowGap,
+    gridGap,
+    containerRef,
+    virtualizer,
+  ]);
 
   useEffect(() => {
     const start = firstRow * columnCount;
@@ -125,9 +202,14 @@ export default function ItemGrid(props: ItemGridProps) {
       ) : (
         <div
           style={{
-            height: virtualizer.getTotalSize(),
+            // Commit the new extent before restoring the scroll anchor, so
+            // the browser can scroll to it even near the end of the list.
+            height: rowCount * rowHeight,
             position: "relative",
             overflow: "visible",
+            // The virtualizer owns anchoring; browser anchoring would apply
+            // a second adjustment when the rendered range changes.
+            overflowAnchor: "none",
           }}
         >
           <div
@@ -140,6 +222,8 @@ export default function ItemGrid(props: ItemGridProps) {
               left: 0,
               right: 0,
               overflow: "visible",
+              // Every row is exactly the pitch the virtualizer reserves.
+              gridAutoRows: `${Math.max(rowHeight - rowGap, 0)}px`,
               transform: `translateY(${(virtualRows[0]?.start ?? 0) - scrollMargin}px)`,
             }}
           >

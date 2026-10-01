@@ -8,11 +8,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -108,6 +110,38 @@ func TestHandleVideoStream_UppercaseStaticServesFile(t *testing.T) {
 	}
 	if got := rec.Body.String(); got != body {
 		t.Errorf("expected file content %q; got %q", body, got)
+	}
+}
+
+func TestStaticPlaybackSelectsCompliantVersionUnderServerCap(t *testing.T) {
+	h, item, _ := newStaticDirectPlayHandler(t)
+	h.ScopeResolver = &stubScopeResolver{scope: access.Scope{MaxRemoteStreamBitrateKbps: 4_000}}
+	detail := h.content.(*stubContentService).detail
+	detail.Versions[0].Bitrate = 8_000
+	second := detail.Versions[0]
+	second.FileID = 43
+	second.Bitrate = 3_000
+	detail.Versions = append(detail.Versions, second)
+	session := &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}
+
+	firstID := h.codec.EncodeIntID(EncodedIDMediaSource, 42)
+	if _, _, err := h.createStaticPlaySession(t.Context(), session, item, firstID, "", ""); !errors.Is(err, errServerBitrateDirectUnavailable) {
+		t.Fatalf("explicit over-limit source: err=%v", err)
+	}
+
+	playSession, source, err := h.createStaticPlaySession(t.Context(), session, item, "", "", "")
+	if err != nil || source == nil || source.FileID != 43 {
+		t.Fatalf("unqualified static source=%+v err=%v", source, err)
+	}
+	for _, mediaSourceID := range []string{"", item} {
+		r := httptest.NewRequest("GET", "/Videos/"+item+"/stream?Static=true", nil)
+		_, reused, err := h.resolvePlaybackRoute(r, session, item, mediaSourceID)
+		if err != nil || reused == nil || reused.FileID != 43 {
+			t.Fatalf("reused static source for %q=%+v err=%v", mediaSourceID, reused, err)
+		}
+	}
+	if playSession.MediaSources[0].FileID != 42 {
+		t.Fatal("source order changed in the stored session")
 	}
 }
 
@@ -499,6 +533,68 @@ func TestHandleVideoStreamStaticKeepsDistinctDevicesWithoutClientPlayID(t *testi
 	}
 	if got := handler.sessionMgr.(*testCompatSessionManager).startCalls; got != 2 {
 		t.Fatalf("started %d upstream sessions for two devices, want 2", got)
+	}
+}
+
+// Two devices stream one item without a PlaySessionId. A request that names
+// its device reaches its own play; one that does not cannot be told apart.
+func TestHandleVideoStreamStaticIDLessDevicesStayScoped(t *testing.T) {
+	handler, routeID, _ := newStaticDirectPlayHandler(t)
+	for _, deviceID := range []string{"device-a", "device-b"} {
+		if response := serveStaticStream(handler, routeID, "static=true&DeviceId="+deviceID); response.Code != 200 {
+			t.Fatalf("static play failed: %d", response.Code)
+		}
+	}
+	if response := serveStaticStream(handler, routeID, "static=true"); response.Code != 404 {
+		t.Fatalf("ambiguous ID-less request status = %d, want 404", response.Code)
+	}
+	mgr := handler.sessionMgr.(*testCompatSessionManager)
+	for _, tc := range []struct {
+		header string
+		want   int
+	}{
+		{"", 0},
+		{`MediaBrowser DeviceId="device-b"`, 1},
+	} {
+		before := mgr.progressCalls
+		req := httptest.NewRequest("POST", "/Sessions/Playing/Progress", strings.NewReader(`{"ItemId":"`+routeID+`","PositionTicks":600000000}`))
+		if tc.header != "" {
+			req.Header.Set("X-Emby-Authorization", tc.header)
+		}
+		req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}))
+		rec := httptest.NewRecorder()
+		handler.HandleSessionPlayingProgress(rec, req)
+		if got := mgr.progressCalls - before; got != tc.want {
+			t.Fatalf("device %q reached %d plays, want %d", tc.header, got, tc.want)
+		}
+	}
+}
+
+func TestUnidentifiedPlaybackSkipsOtherDevices(t *testing.T) {
+	store := NewPlaybackSessionStore(time.Hour, nil)
+	base := PlaybackSession{
+		CompatToken: "token", RouteItemID: "route", ExpiresAt: time.Now().Add(time.Hour),
+		MediaSources: []PlaybackMediaSource{{ID: "source", FileID: 42}},
+	}
+	for _, device := range []string{"device-a", "device-b"} {
+		s := base
+		s.ID, s.ClientDeviceID, s.UpstreamSessionID = "play-"+device, device, "native-"+device
+		store.Put(s)
+	}
+	for device, want := range map[string]string{"device-a": "play-device-a", "device-b": "play-device-b", "device-c": ""} {
+		got, err := store.FindUnidentifiedPlayback("token", "route", "", device)
+		if err != nil || (got == nil) != (want == "") || (got != nil && got.ID != want) {
+			t.Fatalf("device %s resolved %v, %v; want %q", device, got, err, want)
+		}
+	}
+	if _, err := store.FindUnidentifiedPlayback("token", "route", "", ""); !errors.Is(err, errUnidentifiedPlaybackAmbiguous) {
+		t.Fatalf("request without a device guessed a play: %v", err)
+	}
+	unscoped := base
+	unscoped.ID, unscoped.UpstreamSessionID = "play-unscoped", "native-unscoped"
+	store.Put(unscoped)
+	if _, err := store.FindUnidentifiedPlayback("token", "route", "", "device-a"); !errors.Is(err, errUnidentifiedPlaybackAmbiguous) {
+		t.Fatalf("a play with no recorded device was excluded: %v", err)
 	}
 }
 

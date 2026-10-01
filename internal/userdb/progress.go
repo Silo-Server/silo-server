@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -17,9 +18,8 @@ type WatchProgress = userstore.WatchProgress
 // WatchHistoryEntry is an alias for the canonical type in userstore.
 type WatchHistoryEntry = userstore.WatchHistoryEntry
 
-// UpdateProgress uses the forward-only guard - position only moves forward.
-// The position is only updated if the new value is greater than the existing one.
-// The completed flag is set to true when position/duration exceeds the watched threshold.
+// UpdateProgress stores the latest resume position, including backward seeks.
+// Completion is a watched latch, and completing clears the resume position.
 func UpdateProgress(db *sql.DB, profileID, mediaItemID string, position, duration float64, thresholds userstore.ProgressThresholds) error {
 	position, completed, skip := userstore.ResolveProgressState(position, duration, thresholds)
 	if skip {
@@ -58,10 +58,14 @@ func UpdateProgress(db *sql.DB, profileID, mediaItemID string, position, duratio
 	return nil
 }
 
-// SetProgress bypasses the forward-only guard (for rewatches/explicit seek)
-// after the min-resume threshold. The completed flag stays a one-way watched
+// SetProgress stores the latest position after the min-resume threshold.
+// The completed flag stays a one-way watched
 // latch: only ClearProgress/ClearProgressBatch (mark unwatched) release it.
 func SetProgress(db *sql.DB, profileID, mediaItemID string, position, duration float64, thresholds userstore.ProgressThresholds) error {
+	return setPlaybackProgress(db, profileID, mediaItemID, position, duration, thresholds)
+}
+
+func setPlaybackProgress(db preferenceSettingsExecutor, profileID, mediaItemID string, position, duration float64, thresholds userstore.ProgressThresholds) error {
 	position, completed, skip := userstore.ResolveProgressState(position, duration, thresholds)
 	if skip {
 		return nil
@@ -211,6 +215,12 @@ const markWatchedBatchProgressSQL = `
 			completed = 1,
 			updated_at = excluded.updated_at,
 			event_at = excluded.updated_at
+ WHERE NOT watch_progress.completed OR EXISTS (
+  SELECT 1 FROM hidden_history_items hhi
+  WHERE hhi.profile_id = watch_progress.profile_id AND hhi.media_item_id = watch_progress.media_item_id
+  AND watch_progress.updated_at <= hhi.hidden_before
+ )
+ RETURNING media_item_id
 	`
 
 // addVisibleHistorySQL inserts one history row at a watermark-adjusted
@@ -226,8 +236,8 @@ const addVisibleHistorySQL = `
 		RETURNING watched_at
 	`
 
-// MarkWatchedBatch marks every target watched and records its history entry
-// inside a single transaction, so a canceled series mark rolls back to
+// MarkWatchedBatch skips already-completed visible targets atomically with
+// the progress write and records history only for changed targets, so a canceled series mark rolls back to
 // "nothing marked" rather than stranding a partial subset. SQLite round-trips
 // are local and cheap, so this reuses the same per-row statements as the
 // single-item path and buys atomicity rather than fewer queries.
@@ -252,8 +262,20 @@ func MarkWatchedBatch(
 	}
 	defer tx.Rollback() //nolint:errcheck // rollback after commit is a no-op
 
+	written, err := markWatchedBatchTx(ctx, tx, profileID, targets, entries)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit mark watched batch: %w", err)
+	}
+	return written, nil
+}
+
+func markWatchedBatchTx(ctx context.Context, tx *sql.Tx, profileID string, targets []userstore.MarkWatchedTarget, entries []userstore.WatchHistoryEntry) ([]userstore.WatchHistoryEntry, error) {
 	now := nowUTC()
 	seen := make(map[string]struct{}, len(targets))
+	marked := make(map[string]bool, len(targets))
 	for _, target := range targets {
 		mediaItemID := strings.TrimSpace(target.MediaItemID)
 		if mediaItemID == "" {
@@ -267,16 +289,29 @@ func MarkWatchedBatch(
 		if duration < 0 {
 			duration = 0
 		}
-		if _, err := tx.ExecContext(ctx, markWatchedBatchProgressSQL,
+		var markedID string
+		err := tx.QueryRowContext(ctx, markWatchedBatchProgressSQL,
 			profileID, mediaItemID, duration, now, now, profileID, mediaItemID,
-		); err != nil {
+		).Scan(&markedID)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
 			return nil, fmt.Errorf("marking watched batch: %w", err)
+		}
+		marked[markedID] = true
+		if target.EventAt != nil {
+			// Keep the explicit date separate from updated_at stamping, within this
+			// same transaction. This also preserves a repeated historical date.
+			if _, err := tx.ExecContext(ctx, "UPDATE watch_progress SET event_at = ? WHERE profile_id = ? AND media_item_id = ?", target.EventAt.UTC().Format(time.RFC3339Nano), profileID, mediaItemID); err != nil {
+				return nil, fmt.Errorf("setting batch progress date: %w", err)
+			}
 		}
 	}
 
 	written := make([]userstore.WatchHistoryEntry, 0, len(entries))
 	for _, entry := range entries {
-		if strings.TrimSpace(entry.MediaItemID) == "" {
+		if !marked[strings.TrimSpace(entry.MediaItemID)] {
 			continue
 		}
 		if entry.ID == "" {
@@ -302,9 +337,6 @@ func MarkWatchedBatch(
 		written = append(written, entry)
 	}
 
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit mark watched batch: %w", err)
-	}
 	return written, nil
 }
 
@@ -421,7 +453,12 @@ func ClearProgressBatch(db *sql.DB, profileID string, mediaItemIDs []string, upd
 
 // UpdateProgressHints writes version hint columns for an existing progress row.
 func UpdateProgressHints(db *sql.DB, profileID, mediaItemID string, hints userstore.VersionHints) error {
-	_, err := db.Exec(`
+	_, err := updatePlaybackProgressHints(db, profileID, mediaItemID, hints)
+	return err
+}
+
+func updatePlaybackProgressHints(db preferenceSettingsExecutor, profileID, mediaItemID string, hints userstore.VersionHints) (bool, error) {
+	result, err := db.Exec(`
 		UPDATE watch_progress
 		SET last_file_id = ?, last_resolution = ?, last_hdr = ?, last_codec_video = ?, last_edition_key = ?
 		WHERE profile_id = ? AND media_item_id = ?`,
@@ -429,9 +466,10 @@ func UpdateProgressHints(db *sql.DB, profileID, mediaItemID string, hints userst
 		profileID, mediaItemID,
 	)
 	if err != nil {
-		return fmt.Errorf("updating progress hints: %w", err)
+		return false, fmt.Errorf("updating progress hints: %w", err)
 	}
-	return nil
+	affected, err := result.RowsAffected()
+	return affected > 0, err
 }
 
 // GetProgress returns progress for a specific item, or nil if not found.
@@ -464,69 +502,68 @@ func GetProgress(db *sql.DB, profileID, mediaItemID string) (*WatchProgress, err
 	return &wp, nil
 }
 
-// ListProgress returns paginated progress entries, filterable by status.
-// Valid status values: "in_progress", "completed", "all" (or empty string for all).
-func ListProgress(db *sql.DB, profileID string, status string, limit, offset int) ([]WatchProgress, error) {
-	var query string
-	var args []any
+// progressListSelect is the projection, profile scope (first ? = profile_id),
+// and hidden-item exclusion every status listing shares; callers append the
+// status predicate, any window predicate, ORDER BY, and LIMIT.
+const progressListSelect = `
+		SELECT profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at,
+		       last_file_id, last_resolution, last_hdr, last_codec_video, last_edition_key
+		FROM watch_progress
+		WHERE profile_id = ?
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM hidden_history_items hhi
+			WHERE hhi.profile_id = watch_progress.profile_id
+			  AND hhi.media_item_id = watch_progress.media_item_id
+			  AND watch_progress.updated_at <= hhi.hidden_before
+		  )`
 
+// progressStatusPredicate is the `AND ...` clause for a status filter; empty
+// for "all" or "".
+func progressStatusPredicate(status string) string {
 	switch status {
 	case "in_progress":
 		// position_seconds > 0 (not completed = 0): completed rows hold
 		// position 0, so a rewatch of a watched item has completed = 1 with
 		// a live resume point and belongs in Continue Watching.
-		query = `
-			SELECT profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at,
-			       last_file_id, last_resolution, last_hdr, last_codec_video, last_edition_key
-			FROM watch_progress
-			WHERE profile_id = ? AND position_seconds > 0
-			  AND NOT EXISTS (
-				SELECT 1
-				FROM hidden_history_items hhi
-				WHERE hhi.profile_id = watch_progress.profile_id
-				  AND hhi.media_item_id = watch_progress.media_item_id
-				  AND watch_progress.updated_at <= hhi.hidden_before
-			  )
-			ORDER BY updated_at DESC
-			LIMIT ? OFFSET ?
-		`
-		args = []any{profileID, limit, offset}
+		return " AND position_seconds > 0"
 	case "completed":
-		query = `
-			SELECT profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at,
-			       last_file_id, last_resolution, last_hdr, last_codec_video, last_edition_key
-			FROM watch_progress
-			WHERE profile_id = ? AND completed = 1
-			  AND NOT EXISTS (
-				SELECT 1
-				FROM hidden_history_items hhi
-				WHERE hhi.profile_id = watch_progress.profile_id
-				  AND hhi.media_item_id = watch_progress.media_item_id
-				  AND watch_progress.updated_at <= hhi.hidden_before
-			  )
-			ORDER BY updated_at DESC
-			LIMIT ? OFFSET ?
-		`
-		args = []any{profileID, limit, offset}
-	default: // "all" or ""
-		query = `
-			SELECT profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at,
-			       last_file_id, last_resolution, last_hdr, last_codec_video, last_edition_key
-			FROM watch_progress
-			WHERE profile_id = ?
-			  AND NOT EXISTS (
-				SELECT 1
-				FROM hidden_history_items hhi
-				WHERE hhi.profile_id = watch_progress.profile_id
-				  AND hhi.media_item_id = watch_progress.media_item_id
-				  AND watch_progress.updated_at <= hhi.hidden_before
-			  )
-			ORDER BY updated_at DESC
-			LIMIT ? OFFSET ?
-		`
-		args = []any{profileID, limit, offset}
+		return " AND completed = 1"
+	default:
+		return ""
 	}
+}
 
+// ListProgress returns paginated progress entries, filterable by status.
+// Valid status values: "in_progress", "completed", "all" (or empty string for all).
+func ListProgress(db *sql.DB, profileID string, status string, limit, offset int) ([]WatchProgress, error) {
+	query := progressListSelect + progressStatusPredicate(status) + `
+		ORDER BY updated_at DESC
+		LIMIT ? OFFSET ?`
+	return queryProgressRows(db, query, profileID, limit, offset)
+}
+
+// ListProgressPage pages by keyset over (updated_at DESC, media_item_id DESC).
+// updated_at is RFC 3339 UTC text at whole-second precision, so text order is
+// time order and the key string compares exactly. The comparison is spelled
+// out rather than written as a row value so it does not depend on the linked
+// SQLite supporting row values.
+func ListProgressPage(db *sql.DB, profileID string, status string, after *userstore.ProgressKey, limit int) ([]WatchProgress, error) {
+	args := []any{profileID}
+	query := progressListSelect + progressStatusPredicate(status)
+	if after != nil {
+		query += `
+		  AND (updated_at < ? OR (updated_at = ? AND media_item_id < ?))`
+		args = append(args, after.UpdatedAt, after.UpdatedAt, after.MediaItemID)
+	}
+	args = append(args, limit)
+	query += `
+		ORDER BY updated_at DESC, media_item_id DESC
+		LIMIT ?`
+	return queryProgressRows(db, query, args...)
+}
+
+func queryProgressRows(db *sql.DB, query string, args ...any) ([]WatchProgress, error) {
 	rows, err := db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing progress: %w", err)
@@ -693,6 +730,12 @@ func AddHistory(db *sql.DB, entry WatchHistoryEntry) error {
 }
 
 func AddVisibleHistory(db *sql.DB, entry WatchHistoryEntry) (WatchHistoryEntry, error) {
+	return addVisibleHistory(context.Background(), db, entry)
+}
+
+func addVisibleHistory(ctx context.Context, db interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, entry WatchHistoryEntry) (WatchHistoryEntry, error) {
 	if entry.ID == "" {
 		entry.ID = generateUUID()
 	}
@@ -706,7 +749,7 @@ func AddVisibleHistory(db *sql.DB, entry WatchHistoryEntry) (WatchHistoryEntry, 
 	if err != nil {
 		return entry, fmt.Errorf("marshaling watch identity: %w", err)
 	}
-	if err := db.QueryRow(addVisibleHistorySQL,
+	if err := db.QueryRowContext(ctx, addVisibleHistorySQL,
 		entry.ID, entry.ProfileID, entry.MediaItemID, entry.WatchedAt, entry.WatchedAt,
 		entry.DurationSeconds, entry.Completed, entry.Source, string(identityJSON),
 		entry.ProfileID, entry.MediaItemID,
@@ -717,41 +760,45 @@ func AddVisibleHistory(db *sql.DB, entry WatchHistoryEntry) (WatchHistoryEntry, 
 }
 
 func AddHistoryIfMissing(db *sql.DB, entry WatchHistoryEntry) (bool, error) {
+	if entry.ID == "" {
+		entry.ID = generateUUID()
+	}
 	if entry.WatchedAt == "" {
 		entry.WatchedAt = nowUTC()
 	}
-	suppressed, err := historyIsHidden(db, entry.ProfileID, entry.MediaItemID, entry.WatchedAt)
+	if entry.Source == "" {
+		entry.Source = userstore.WatchHistorySourceLegacy
+	}
+	identityJSON, err := json.Marshal(entry.Identity)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("marshaling watch identity: %w", err)
 	}
-	if suppressed {
-		return false, nil
+	// One SQLite write statement holds the writer lock for the visibility
+	// check, duplicate check, and insert, including across pooled connections.
+	result, err := db.Exec(`
+
+        INSERT INTO watch_history (id, profile_id, media_item_id, watched_at, duration_seconds, completed, source, watch_identity)
+        SELECT ?, ?, ?, ?, ?, ?, ?, ?
+        WHERE NOT EXISTS (
+            SELECT 1 FROM hidden_history_items
+            WHERE profile_id = ? AND media_item_id = ? AND hidden_before >= ?
+        ) AND NOT EXISTS (
+            SELECT 1 FROM watch_history
+            WHERE profile_id = ? AND media_item_id = ? AND watched_at = ?
+        )`,
+		entry.ID, entry.ProfileID, entry.MediaItemID, entry.WatchedAt, entry.DurationSeconds, entry.Completed, entry.Source, string(identityJSON),
+		entry.ProfileID, entry.MediaItemID, entry.WatchedAt, entry.ProfileID, entry.MediaItemID, entry.WatchedAt)
+	if err != nil {
+		return false, fmt.Errorf("adding missing history: %w", err)
 	}
-	var exists bool
-	if err := db.QueryRow(
-		`SELECT EXISTS(
-			SELECT 1
-			FROM watch_history
-			WHERE profile_id = ? AND media_item_id = ? AND watched_at = ?
-		)`,
-		entry.ProfileID,
-		entry.MediaItemID,
-		entry.WatchedAt,
-	).Scan(&exists); err != nil {
-		return false, fmt.Errorf("checking history row existence: %w", err)
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("count imported history: %w", err)
 	}
-	if exists {
-		return false, nil
-	}
-	if err := AddHistory(db, entry); err != nil {
-		return false, err
-	}
-	return true, nil
+	return rows > 0, nil
 }
 
-// ListHistory returns paginated watch history entries ordered by most recent first.
-func ListHistory(db *sql.DB, profileID string, limit, offset int) ([]WatchHistoryEntry, error) {
-	query := `
+const historyListSelect = `
 		SELECT h.id, h.profile_id, h.media_item_id, h.watched_at, h.duration_seconds, h.completed, h.source, h.watch_identity
 		FROM watch_history h
 		WHERE h.profile_id = ?
@@ -761,11 +808,39 @@ func ListHistory(db *sql.DB, profileID string, limit, offset int) ([]WatchHistor
 			WHERE hhi.profile_id = h.profile_id
 			  AND hhi.media_item_id = h.media_item_id
 			  AND h.watched_at <= hhi.hidden_before
-		  )
+		  )`
+
+// ListHistory returns paginated watch history entries ordered by most recent first.
+func ListHistory(db *sql.DB, profileID string, limit, offset int) ([]WatchHistoryEntry, error) {
+	query := historyListSelect + `
 		ORDER BY watched_at DESC
 		LIMIT ? OFFSET ?
 	`
-	rows, err := db.Query(query, profileID, limit, offset)
+	return queryHistoryRows(db, query, profileID, limit, offset)
+}
+
+// ListHistoryPage pages by keyset over (watched_at DESC, id DESC). watched_at
+// is RFC 3339 UTC text at whole-second precision, so text order is time order
+// and the key string compares exactly; the comparison is spelled out rather
+// than written as a row value so it does not depend on the linked SQLite
+// supporting row values.
+func ListHistoryPage(db *sql.DB, profileID string, after *userstore.HistoryKey, limit int) ([]WatchHistoryEntry, error) {
+	args := []any{profileID}
+	query := historyListSelect
+	if after != nil {
+		query += `
+		  AND (h.watched_at < ? OR (h.watched_at = ? AND h.id < ?))`
+		args = append(args, after.WatchedAt, after.WatchedAt, after.ID)
+	}
+	args = append(args, limit)
+	query += `
+		ORDER BY h.watched_at DESC, h.id DESC
+		LIMIT ?`
+	return queryHistoryRows(db, query, args...)
+}
+
+func queryHistoryRows(db *sql.DB, query string, args ...any) ([]WatchHistoryEntry, error) {
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing history: %w", err)
 	}
@@ -934,6 +1009,17 @@ func RemoveHistoryItems(db *sql.DB, profileID string, mediaItemIDs []string, rem
 	}
 	defer tx.Rollback()
 
+	if err := removeHistoryItems(context.Background(), tx, profileID, mediaItemIDs, removedAt); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit remove history items: %w", err)
+	}
+	return nil
+}
+
+func removeHistoryItems(ctx context.Context, tx *sql.Tx, profileID string, mediaItemIDs []string, removedAt time.Time) error {
 	removedAtText := removedAt.UTC().Format(time.RFC3339)
 	targetValues := make([]string, len(mediaItemIDs))
 	watermarkArgs := make([]any, 0, len(mediaItemIDs)+5)
@@ -942,7 +1028,7 @@ func RemoveHistoryItems(db *sql.DB, profileID string, mediaItemIDs []string, rem
 		watermarkArgs = append(watermarkArgs, mediaItemID)
 	}
 	watermarkArgs = append(watermarkArgs, removedAtText, removedAtText, profileID, profileID, removedAtText)
-	if _, err := tx.Exec(`
+	if _, err := tx.ExecContext(ctx, `
 		WITH target(media_item_id) AS (
 			VALUES `+strings.Join(targetValues, ",")+`
 		),
@@ -982,7 +1068,7 @@ func RemoveHistoryItems(db *sql.DB, profileID string, mediaItemIDs []string, rem
 		placeholders[i] = "?"
 		args = append(args, mediaItemID)
 	}
-	if _, err := tx.Exec(`
+	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM watch_history
 		WHERE profile_id = ?
 		  AND media_item_id IN (`+strings.Join(placeholders, ",")+`)
@@ -999,7 +1085,7 @@ func RemoveHistoryItems(db *sql.DB, profileID string, mediaItemIDs []string, rem
 	progressArgs := make([]any, 0, len(mediaItemIDs)+1)
 	progressArgs = append(progressArgs, profileID)
 	progressArgs = append(progressArgs, args[1:1+len(mediaItemIDs)]...)
-	if _, err := tx.Exec(`
+	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM watch_progress
 		WHERE profile_id = ?
 		  AND media_item_id IN (`+strings.Join(placeholders, ",")+`)
@@ -1007,9 +1093,6 @@ func RemoveHistoryItems(db *sql.DB, profileID string, mediaItemIDs []string, rem
 		return fmt.Errorf("deleting removed progress rows: %w", err)
 	}
 
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit remove history items: %w", err)
-	}
 	return nil
 }
 

@@ -58,7 +58,9 @@ func MigrationContext(ctx context.Context) (context.Context, context.CancelFunc)
 	return context.WithCancel(ctx)
 }
 
-// RunMigrations applies all pending Goose migrations from fsys/dir.
+// RunMigrations applies all pending Goose migrations from fsys/dir, one at a
+// time, logging each migration's start and finish and a heartbeat while a long
+// one runs, so a slow startup is visibly working rather than silent.
 func RunMigrations(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS, dir string) error {
 	provider, err := newMigrationProvider(pool, fsys, dir)
 	if err != nil {
@@ -66,10 +68,7 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS, dir stri
 	}
 	defer provider.Close()
 
-	if _, err := provider.Up(ctx); err != nil {
-		return fmt.Errorf("running goose migrations: %w", err)
-	}
-	return nil
+	return applyMigrationsLogged(ctx, provider, slog.Default(), migrationHeartbeatInterval)
 }
 
 // MigrateDownTo rolls back every migration newer than version, newest first.
@@ -90,9 +89,39 @@ func MigrateDownTo(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS, dir stri
 	}
 	defer func() { _ = provider.Close() }()
 
-	if _, err := provider.DownTo(ctx, version); err != nil {
+	logger := slog.Default()
+	// Log and start the heartbeat before Status: it takes the migration lock,
+	// and waiting on another primary's lock must not be silent.
+	logger.InfoContext(ctx, "rolling back database migrations", "to_version", version)
+	started := time.Now()
+	stop := startMigrationHeartbeat(migrationHeartbeatInterval, func(elapsed string) {
+		logger.InfoContext(ctx, "database migration rollback still running",
+			"to_version", version, "elapsed", elapsed)
+	})
+	defer stop()
+	// goose's DownTo rolls every migration back before it returns, so progress
+	// can't name the migration running at the moment. Log the applied
+	// migrations newer than the target instead, so a long rollback shows what
+	// it may cover.
+	if statuses, statusErr := provider.Status(ctx); statusErr != nil {
+		logger.WarnContext(ctx, "could not list the migrations to roll back", "to_version", version, "error", statusErr)
+	} else {
+		candidates := migrationRollbackCandidates(statuses, version)
+		logger.InfoContext(ctx, "database migration rollback candidates",
+			"to_version", version,
+			"count", len(candidates),
+			"candidates", migrationNames(candidates))
+	}
+	results, err := provider.DownTo(ctx, version)
+	stop()
+	rolledBack := logMigrationRollbackResults(ctx, logger, version, results, err)
+	if err != nil {
 		return fmt.Errorf("rolling back goose migrations to %d: %w", version, err)
 	}
+	logger.InfoContext(ctx, "database migration rollback finished",
+		"to_version", version,
+		"rolled_back", rolledBack,
+		"duration", roundMigrationDuration(time.Since(started)))
 	return nil
 }
 
@@ -156,14 +185,17 @@ func newMigrationProvider(pool *pgxpool.Pool, fsys fs.FS, dir string) (*goose.Pr
 		goose.WithTableName(gooseVersionTable),
 		goose.WithAllowOutofOrder(true),
 		goose.WithSessionLocker(&legacyBootstrapLocker{delegate: locker}),
-		// These are Go rather than SQL because their conversion rules are
-		// shared with the per-user SQLite backend: the settings backfill
+		// These are Go rather than SQL because their conversion rules live
+		// in Go packages shared with other write paths: the settings backfill
 		// validates every value against the contract and re-encodes it as
-		// typed JSON, and the displayprefs move parses the legacy jellycompat
-		// keys — neither expressible in SQL without duplicating those rules.
+		// typed JSON, the displayprefs move parses the legacy jellycompat
+		// keys, and the subtitle language backfill applies the scanner's
+		// lang.CompatibleTag — none expressible in SQL without duplicating
+		// those rules.
 		goose.WithGoMigrations(
 			settingsBackfillMigration(),
 			displayPrefsMoveMigration(),
+			subtitleLanguageBackfillMigration(),
 		),
 	)
 	if err != nil {

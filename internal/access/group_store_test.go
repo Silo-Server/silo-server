@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -432,4 +433,77 @@ func accessPolicyRevisionForUser(t *testing.T, ctx context.Context, pool *pgxpoo
 		t.Fatalf("load access_policy_revision for user %d: %v", userID, err)
 	}
 	return revision
+}
+
+func TestGroupStoreDeleteMovingMembersDB(t *testing.T) {
+	ctx, pool, store, suffix := newGroupStoreDBTest(t)
+	seedID := defaultAccessGroupSeedID(t, ctx, pool)
+	t.Cleanup(func() {
+		restoreDefaultAccessGroup(t, ctx, pool, seedID)
+	})
+
+	group := createTestGroup(t, ctx, store, suffix, "delete-moving")
+	first := insertAccessGroupTestUser(t, ctx, pool, suffix, &group.ID, 1)
+	second := insertAccessGroupTestUser(t, ctx, pool, suffix, &group.ID, 2)
+	revisions := map[int]int64{}
+	for _, id := range []int{first, second} {
+		var revision int64
+		if err := pool.QueryRow(ctx, `SELECT access_policy_revision FROM users WHERE id = $1`, id).Scan(&revision); err != nil {
+			t.Fatalf("load revision: %v", err)
+		}
+		revisions[id] = revision
+	}
+
+	// A failing callback rolls the whole delete back.
+	boom := errors.New("revoke failed")
+	if _, err := store.DeleteMovingMembers(ctx, group.ID, GroupPrecondition{Any: true}, func(context.Context, pgx.Tx, []int) error {
+		return boom
+	}); !errors.Is(err, boom) {
+		t.Fatalf("DeleteMovingMembers(failing callback) error = %v, want %v", err, boom)
+	}
+	if _, err := store.Get(ctx, group.ID); err != nil {
+		t.Fatalf("group gone after a rolled-back delete: %v", err)
+	}
+
+	var seen []int
+	moved, err := store.DeleteMovingMembers(ctx, group.ID, GroupPrecondition{Any: true}, func(_ context.Context, tx pgx.Tx, userIDs []int) error {
+		seen = append(seen, userIDs...)
+		// The callback runs inside the delete's transaction, after the move.
+		var groupID int64
+		if err := tx.QueryRow(ctx, `SELECT access_group_id FROM users WHERE id = $1`, userIDs[0]).Scan(&groupID); err != nil {
+			return err
+		}
+		if groupID != seedID {
+			return fmt.Errorf("callback saw group %d, want the default %d", groupID, seedID)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("DeleteMovingMembers() error: %v", err)
+	}
+	slices.Sort(moved)
+	slices.Sort(seen)
+	want := []int{first, second}
+	slices.Sort(want)
+	if !slices.Equal(moved, want) || !slices.Equal(seen, want) {
+		t.Fatalf("moved=%v callback=%v, want %v", moved, seen, want)
+	}
+	for _, id := range want {
+		var (
+			groupID  *int64
+			revision int64
+		)
+		if err := pool.QueryRow(ctx, `SELECT access_group_id, access_policy_revision FROM users WHERE id = $1`, id).Scan(&groupID, &revision); err != nil {
+			t.Fatalf("load moved member: %v", err)
+		}
+		if groupID == nil || *groupID != seedID {
+			t.Fatalf("member %d group = %v, want the default group %d", id, groupID, seedID)
+		}
+		if revision != revisions[id]+1 {
+			t.Fatalf("member %d access_policy_revision = %d, want %d", id, revision, revisions[id]+1)
+		}
+	}
+	if _, err := store.Get(ctx, group.ID); !errors.Is(err, ErrGroupNotFound) {
+		t.Fatalf("Get(deleted group) error = %v, want ErrGroupNotFound", err)
+	}
 }

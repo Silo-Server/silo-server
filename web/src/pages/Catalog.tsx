@@ -1,23 +1,39 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { CheckSquare, RefreshCw, Search, Trash2, X } from "lucide-react";
 
 import { captureProfileRequestContext } from "@/api/client";
 import type { BrowseItem } from "@/api/types";
+import { isNotFoundProblem } from "@/api/v2/request";
 import ItemGrid from "@/components/ItemGrid";
+import PageUnavailable from "@/components/PageUnavailable";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
+import CastCarousel from "@/components/CastCarousel";
 import { RequestToAddSection } from "@/components/RequestToAddSection";
 import { Button } from "@/components/ui/button";
 import CatalogFiltersPanel from "@/components/catalog/CatalogFiltersPanel";
 import SearchScopeChips from "@/components/catalog/SearchScopeChips";
 import { useCatalogWindow } from "@/hooks/queries/catalog";
+import { usePersonSearch } from "@/hooks/queries/personSearch";
 import { useSetCollectionSortPreference } from "@/hooks/queries/collections";
 import { querySortToSelectValue } from "@/lib/collectionSortConfig";
 import { useSearchMediaScope, type SearchMediaScope } from "@/hooks/useSearchMediaScope";
 import { useRemoveHistory } from "@/hooks/queries/history";
-import { useRequestSearch } from "@/hooks/queries/useRequests";
+import { useRequestFeatureStatus, useRequestSearch } from "@/hooks/queries/useRequests";
+import { useWatchlistTitles } from "@/hooks/queries/watchlistTitles";
+import WatchlistTabs, { WatchlistTabPanel } from "@/components/watchlist/WatchlistTabs";
+import WatchlistTitlesTab from "@/components/watchlist/WatchlistTitlesTab";
+import {
+  parseWatchlistTab,
+  WATCHLIST_NOT_IN_LIBRARY_TAB,
+  watchlistTitleNeedsAttention,
+  watchlistTitlesAvailable,
+  type WatchlistTab,
+} from "@/lib/watchlistTitles";
 import { useCanRequest } from "@/hooks/useCanRequest";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { requestSearchTypeForScope } from "@/lib/mediaRequests";
 import SearchBar from "@/components/SearchBar";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
@@ -31,6 +47,8 @@ import {
   buildCatalogQueryUpdateHref,
   catalogSourceAllowsOverlay,
   parseCatalogSearchParams,
+  readCatalogRequestPage,
+  withCatalogRequestPage,
 } from "./catalogSearchParams";
 import type { CatalogSearchState } from "./catalogSearchParams";
 
@@ -55,28 +73,33 @@ function defaultCatalogSubtitle(source: string): string {
 export default function Catalog() {
   const [searchParams, setSearchParams] = useSearchParams();
   const state = useMemo(() => parseCatalogSearchParams(searchParams), [searchParams]);
-  const emptySearchTitle =
-    state.source === "query" && !state.q ? "Search" : defaultCatalogTitle(state.source, state.q);
+  const isEmptySearch = state.source === "query" && !state.q && !state.library_id;
 
-  useDocumentTitle(emptySearchTitle);
-
-  if (state.source === "query" && !state.q) {
-    return (
-      <section className="page-shell flex min-h-[calc(100dvh-10rem)] flex-col items-center justify-center py-16 text-center">
-        <div className="text-muted-foreground mb-6">
-          <Search className="h-10 w-10" strokeWidth={1.5} />
-        </div>
-        <h1 className="page-title mb-4">Search</h1>
-        <p className="page-subtitle mb-8 max-w-xl text-sm sm:text-base">
-          Find films, series, performances, and rediscover things you forgot you saved.
-        </p>
-        <SearchBar autoFocus prominent />
-      </section>
-    );
+  // Each view owns its tab title. A title set here too would run after the
+  // results' own on mount and replace it whenever the results were cached.
+  if (isEmptySearch) {
+    return <EmptySearch />;
   }
 
   return (
     <CatalogResults searchParams={searchParams} setSearchParams={setSearchParams} state={state} />
+  );
+}
+
+function EmptySearch() {
+  useDocumentTitle("Search");
+
+  return (
+    <section className="page-shell flex min-h-[calc(100dvh-10rem)] flex-col items-center justify-center py-16 text-center">
+      <div className="text-muted-foreground mb-6">
+        <Search className="h-10 w-10" strokeWidth={1.5} />
+      </div>
+      <h1 className="page-title mb-4">Search</h1>
+      <p className="page-subtitle mb-8 max-w-xl text-sm sm:text-base">
+        Find films, series, performances, and rediscover things you forgot you saved.
+      </p>
+      <SearchBar autoFocus prominent />
+    </section>
   );
 }
 
@@ -90,7 +113,9 @@ function CatalogResults({
   state: ReturnType<typeof parseCatalogSearchParams>;
 }) {
   const limit = 60;
-  const searchKey = searchParams.toString();
+  // Paging the Request to add grid is not a new search: it keeps the library
+  // results' loaded range and selection.
+  const searchKey = withCatalogRequestPage(searchParams, 1).toString();
   const [visibleRangeState, setVisibleRangeState] = useState<{
     key: string;
     range: [number, number];
@@ -146,19 +171,52 @@ function CatalogResults({
   );
 
   const mediaScope = effectiveState.query_definition.media_scope;
+  const peopleQuery = usePersonSearch(state.q ?? "", 20, isQuerySource, mediaScope);
+  const people = peopleQuery.data ?? [];
   const activeChipScope: SearchMediaScope =
     mediaScope === "audiobook" ? "audiobook" : mediaScope ? "video" : "all";
   const handleChipScopeChange = useCallback(
     (scope: SearchMediaScope) => {
       setPreferredScope(scope);
-      const next = new URLSearchParams(searchParams);
+      // Another scope searches other TMDB types, so its grid starts at page 1.
+      const next = withCatalogRequestPage(searchParams, 1);
       next.set("type", scope);
       setSearchParams(next);
     },
     [searchParams, setPreferredScope, setSearchParams],
   );
 
-  const showExactResultCount = state.source !== "section" && !isQuerySource;
+  // The watchlist splits into the library grid and the titles the library
+  // doesn't have yet, once the server keeps watchlist entries for those.
+  const isWatchlistSource = state.source === "watchlist";
+  const requestFeatureStatus = useRequestFeatureStatus({ enabled: isWatchlistSource });
+  const showWatchlistTabs =
+    isWatchlistSource && watchlistTitlesAvailable(requestFeatureStatus.data);
+  const watchlistTitles = useWatchlistTitles({ enabled: showWatchlistTabs });
+  const watchlistTabsId = useId();
+  const watchlistTab: WatchlistTab = showWatchlistTabs
+    ? parseWatchlistTab(searchParams.get("tab"))
+    : "library";
+  const showingWatchlistTitles = watchlistTab === WATCHLIST_NOT_IN_LIBRARY_TAB;
+  const watchlistNeedsAttention = useMemo(
+    () => (watchlistTitles.data ?? []).some(watchlistTitleNeedsAttention),
+    [watchlistTitles.data],
+  );
+  const setWatchlistTab = useCallback(
+    (tab: WatchlistTab) => {
+      const next = new URLSearchParams(searchParams);
+      if (tab === WATCHLIST_NOT_IN_LIBRARY_TAB) {
+        next.set("tab", tab);
+      } else {
+        next.delete("tab");
+      }
+      setSearchParams(next);
+    },
+    [searchParams, setSearchParams],
+  );
+
+  const showExactResultCount =
+    state.source !== "section" && !isQuerySource && !showingWatchlistTitles;
   const catalogQuery = useCatalogWindow(effectiveState, {
     limit,
     visibleRange,
@@ -229,19 +287,25 @@ function CatalogResults({
   // Add a short TMDB debounce on top of SearchBar's input debounce so the
   // TMDB plugin isn't hit at the same cadence as the local library query.
   const tmdbDebouncedQ = useDebounce(state.q ?? "", REQUEST_SEARCH_DEBOUNCE_MS);
-  const tmdbQuery = useRequestSearch("all", tmdbDebouncedQ, 1, {
-    enabled: canRequest.discoveryEnabled && isQuerySource,
+  // TMDB follows the search scope: movies, series, or both; nothing for books.
+  const requestSearchType = requestSearchTypeForScope(mediaScope);
+  const tmdbQuery = useRequestSearch(requestSearchType ?? "all", tmdbDebouncedQ, 1, {
+    enabled: canRequest.discoveryEnabled && isQuerySource && requestSearchType !== null,
     requireProfile: true,
     staleTime: 5 * 60 * 1000,
     gcTime: INTERACTIVE_SEARCH_GC_TIME_MS,
     retry: false,
   });
-  const tmdbMissingCount =
-    tmdbQuery.data?.results?.filter((result) => result.availability !== "available").length ?? 0;
+  // A disabled query still reads its cache, so a book scope counts nothing.
+  const tmdbMissingCount = requestSearchType
+    ? (tmdbQuery.data?.results?.filter((result) => result.availability !== "available").length ?? 0)
+    : 0;
   const libraryResultsKnown =
     !catalogQuery.isLoading && !catalogQuery.isPlaceholderData && !catalogQuery.isError;
   const libraryHasResults = libraryResultsKnown && (catalogQuery.data?.totalItems ?? 0) > 0;
   const libraryEmpty = libraryResultsKnown && !libraryHasResults;
+  const showPeopleSection =
+    isQuerySource && (peopleQuery.isLoading || peopleQuery.isError || people.length > 0);
   // When the library is empty and the request section will (or might) render,
   // hide ItemGrid entirely. The previous approach pinned ItemGrid's `loading`
   // prop to true, which renders 24 skeleton tiles forever above the section.
@@ -275,8 +339,12 @@ function CatalogResults({
     () => selectedHistoryItems.map((item) => buildHistoryRemovalTarget(item.content_id, item.type)),
     [selectedHistoryItems],
   );
-  const title =
-    catalogQuery.data?.title ?? state.title ?? defaultCatalogTitle(state.source, state.q);
+  // A collection the viewer cannot reach answers 404, the same for a deleted
+  // collection and one they were never shown, so the page says neither.
+  const collectionUnavailable = isCollectionSource && isNotFoundProblem(catalogQuery.sourceError);
+  const title = collectionUnavailable
+    ? "Not found"
+    : (catalogQuery.data?.title ?? state.title ?? defaultCatalogTitle(state.source, state.q));
 
   useDocumentTitle(title);
 
@@ -305,6 +373,21 @@ function CatalogResults({
   const resultNoun =
     state.source === "query" ? "in library" : `result${totalItems === 1 ? "" : "s"}`;
 
+  if (collectionUnavailable) {
+    return (
+      <PageUnavailable
+        title="This collection isn't available"
+        description="It may have been deleted, or you may not have access to it."
+      >
+        <Button asChild variant="outline">
+          <ViewTransitionLink to="/collections" up>
+            All collections
+          </ViewTransitionLink>
+        </Button>
+      </PageUnavailable>
+    );
+  }
+
   return (
     <div className="page-shell space-y-6 py-4 sm:py-6">
       <header className="page-header">
@@ -332,135 +415,202 @@ function CatalogResults({
         </div>
       </header>
 
-      {state.source === "query" ? (
-        <div className="flex flex-col items-center gap-3">
-          <SearchBar
-            prominent
-            initialQuery={state.q ?? ""}
-            autoFocus
-            buildSearchHref={buildSearchHref}
-          />
-          <SearchScopeChips activeScope={activeChipScope} onScopeChange={handleChipScopeChange} />
-        </div>
+      {showWatchlistTabs ? (
+        <WatchlistTabs
+          idBase={watchlistTabsId}
+          value={watchlistTab}
+          onValueChange={setWatchlistTab}
+          count={watchlistTitles.data?.length}
+          attention={watchlistNeedsAttention}
+        />
       ) : null}
 
-      <CatalogFiltersPanel
-        state={sortedState}
-        onStateChange={(nextState) => {
-          const sortChanged =
-            nextState.uses_source_order !== sortedState.uses_source_order ||
-            querySortToSelectValue(nextState.query_definition.sort) !==
-              querySortToSelectValue(sortedState.query_definition.sort);
-          const stateForNavigation = sortChanged
-            ? { ...nextState, sort_from_server: false }
-            : nextState;
-          rememberCollectionSort(stateForNavigation);
-          const nextSearchParams = buildCatalogFilterSearchParams(stateForNavigation);
-          if (nextSearchParams.toString() !== searchParams.toString()) {
-            setSearchParams(nextSearchParams);
-          }
-        }}
-        allowLibrarySelection={!isCollectionSource}
-        allowPersonalizedFilters={allowPersonalizedOverlayControls}
-        allowPersonalizedSorts={allowPersonalizedOverlayControls}
-      />
+      {showingWatchlistTitles ? (
+        <WatchlistTabPanel idBase={watchlistTabsId} value={WATCHLIST_NOT_IN_LIBRARY_TAB}>
+          <WatchlistTitlesTab
+            titles={watchlistTitles.data}
+            isLoading={watchlistTitles.isLoading}
+            isError={watchlistTitles.isError}
+            onRetry={() => void watchlistTitles.refetch()}
+            watchlistRequests={requestFeatureStatus.data?.watchlist_requests === true}
+          />
+        </WatchlistTabPanel>
+      ) : (
+        <WatchlistTabPanel idBase={watchlistTabsId} value="library" tabs={showWatchlistTabs}>
+          {state.source === "query" ? (
+            <div className="flex flex-col items-center gap-3">
+              <SearchBar
+                prominent
+                initialQuery={state.q ?? ""}
+                autoFocus
+                buildSearchHref={buildSearchHref}
+              />
+              <SearchScopeChips
+                activeScope={activeChipScope}
+                onScopeChange={handleChipScopeChange}
+              />
+            </div>
+          ) : null}
 
-      {isHistorySource && (
-        <section className="surface-panel flex flex-col gap-3 rounded-2xl border-0 p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="space-y-1">
-            <p className="text-sm font-semibold">Watch History</p>
-            <p className="text-muted-foreground text-xs sm:text-sm">
-              Removing items clears watch history, watched status, and resume progress for this
-              profile.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {!selectionMode ? (
-              <Button variant="outline" size="sm" onClick={() => setSelectionMode(true)}>
-                <CheckSquare className="size-4" />
-                Select
+          <CatalogFiltersPanel
+            state={sortedState}
+            onStateChange={(nextState) => {
+              const sortChanged =
+                nextState.uses_source_order !== sortedState.uses_source_order ||
+                querySortToSelectValue(nextState.query_definition.sort) !==
+                  querySortToSelectValue(sortedState.query_definition.sort);
+              const stateForNavigation = sortChanged
+                ? { ...nextState, sort_from_server: false, explicit_sort: true }
+                : nextState;
+              rememberCollectionSort(stateForNavigation);
+              const nextSearchParams = buildCatalogFilterSearchParams(stateForNavigation);
+              if (nextSearchParams.toString() !== searchParams.toString()) {
+                setSearchParams(nextSearchParams);
+              }
+            }}
+            allowLibrarySelection={!isCollectionSource}
+            allowPersonalizedFilters={allowPersonalizedOverlayControls}
+            allowPersonalizedSorts={
+              isHistorySource
+                ? "date_viewed"
+                : state.source === "favorites" || state.source === "watchlist"
+                  ? false
+                  : allowPersonalizedOverlayControls
+            }
+          />
+
+          {isHistorySource && (
+            <section className="surface-panel flex flex-col gap-3 rounded-2xl border-0 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="space-y-1">
+                <p className="text-sm font-semibold">Watch History</p>
+                <p className="text-muted-foreground text-xs sm:text-sm">
+                  Removing items clears watch history, watched status, and resume progress for this
+                  profile.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {!selectionMode ? (
+                  <Button variant="outline" size="sm" onClick={() => setSelectionMode(true)}>
+                    <CheckSquare className="size-4" />
+                    Select
+                  </Button>
+                ) : (
+                  <>
+                    <span className="text-muted-foreground text-sm">
+                      {selectedIds.size} selected
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        setSelectedIds(new Set(loadedHistoryItems.map((item) => item.content_id)))
+                      }
+                    >
+                      Select Loaded
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>
+                      Clear
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      disabled={selectedHistoryTargets.length === 0}
+                      onClick={() => setRemoveConfirmOpen(true)}
+                    >
+                      <Trash2 className="size-4" />
+                      Remove Selected
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setSelectionMode(false);
+                        setSelectedIds(new Set());
+                      }}
+                    >
+                      <X className="size-4" />
+                      Done
+                    </Button>
+                  </>
+                )}
+              </div>
+            </section>
+          )}
+
+          {showPeopleSection ? (
+            <section aria-label="People" className="space-y-3">
+              <h2 className="text-lg font-semibold">People</h2>
+              {peopleQuery.isError ? (
+                <div role="alert" className="space-y-2">
+                  <p className="text-muted-foreground text-sm">Could not load people results.</p>
+                  <Button variant="outline" size="sm" onClick={() => void peopleQuery.refetch()}>
+                    <RefreshCw className="size-4" />
+                    Retry people search
+                  </Button>
+                </div>
+              ) : peopleQuery.isLoading ? (
+                <p role="status" className="text-muted-foreground text-sm">
+                  Searching people...
+                </p>
+              ) : (
+                <CastCarousel
+                  cast={people.map((person, index) => ({
+                    person_id: person.id,
+                    name: person.name,
+                    photo_url: person.photo_url,
+                    character: "",
+                    order: index,
+                  }))}
+                />
+              )}
+            </section>
+          ) : null}
+
+          {catalogQuery.isError ? (
+            <div
+              className="search-paint-surface flex flex-col items-center justify-center gap-3 rounded-2xl border px-4 py-16 text-center"
+              role="alert"
+            >
+              <p className="font-medium">
+                {isQuerySource
+                  ? "Could not load search results."
+                  : "Could not load catalog results."}
+              </p>
+              <p className="text-muted-foreground max-w-md text-sm">
+                {isQuerySource
+                  ? "The search request failed. Please retry."
+                  : "The catalog request failed. Please retry."}
+              </p>
+              <Button variant="outline" size="sm" onClick={() => void catalogQuery.refetch()}>
+                <RefreshCw className="size-4" />
+                {isQuerySource ? "Retry search" : "Retry catalog"}
               </Button>
-            ) : (
-              <>
-                <span className="text-muted-foreground text-sm">{selectedIds.size} selected</span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    setSelectedIds(new Set(loadedHistoryItems.map((item) => item.content_id)))
-                  }
-                >
-                  Select Loaded
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>
-                  Clear
-                </Button>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  disabled={selectedHistoryTargets.length === 0}
-                  onClick={() => setRemoveConfirmOpen(true)}
-                >
-                  <Trash2 className="size-4" />
-                  Remove Selected
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setSelectionMode(false);
-                    setSelectedIds(new Set());
-                  }}
-                >
-                  <X className="size-4" />
-                  Done
-                </Button>
-              </>
-            )}
-          </div>
-        </section>
+            </div>
+          ) : tmdbMayRescueLibrary || (libraryEmpty && showPeopleSection) ? null : (
+            <ItemGrid
+              totalItems={catalogQuery.data?.totalItems ?? 0}
+              pages={catalogQuery.data?.pages ?? new Map()}
+              pageSize={limit}
+              loading={catalogQuery.isLoading}
+              onVisibleRangeChange={handleVisibleRangeChange}
+              narrowPosterActions={state.source === "favorites" || state.source === "watchlist"}
+              selectionMode={isHistorySource && selectionMode}
+              selectedIds={selectedIds}
+              onToggleSelect={toggleHistorySelection}
+            />
+          )}
+        </WatchlistTabPanel>
       )}
 
-      {catalogQuery.isError ? (
-        <div
-          className="search-paint-surface flex flex-col items-center justify-center gap-3 rounded-2xl border px-4 py-16 text-center"
-          role="alert"
-        >
-          <p className="font-medium">
-            {isQuerySource
-              ? "Search stopped before it could finish."
-              : "Catalog stopped before it could finish."}
-          </p>
-          <p className="text-muted-foreground max-w-md text-sm">
-            {isQuerySource
-              ? "The server ended the lookup so it could not keep using CPU in the background. Try a more specific title or retry once."
-              : "The server could not load every requested result. Retry the catalog once."}
-          </p>
-          <Button variant="outline" size="sm" onClick={() => void catalogQuery.refetch()}>
-            <RefreshCw className="size-4" />
-            {isQuerySource ? "Retry search" : "Retry catalog"}
-          </Button>
-        </div>
-      ) : tmdbMayRescueLibrary ? null : (
-        <ItemGrid
-          totalItems={catalogQuery.data?.totalItems ?? 0}
-          pages={catalogQuery.data?.pages ?? new Map()}
-          pageSize={limit}
-          loading={catalogQuery.isLoading}
-          onVisibleRangeChange={handleVisibleRangeChange}
-          narrowPosterActions={state.source === "favorites" || state.source === "watchlist"}
-          selectionMode={isHistorySource && selectionMode}
-          selectedIds={selectedIds}
-          onToggleSelect={toggleHistorySelection}
-        />
-      )}
-
-      {isQuerySource && canRequest.discoveryEnabled ? (
+      {isQuerySource && canRequest.discoveryEnabled && requestSearchType ? (
         <RequestToAddSection
           variant="grid"
           query={tmdbDebouncedQ}
+          mediaType={requestSearchType}
           libraryHadHits={libraryHasResults}
           libraryResultsKnown={libraryResultsKnown}
+          page={readCatalogRequestPage(searchParams)}
+          onPageChange={(page) => setSearchParams(withCatalogRequestPage(searchParams, page))}
         />
       ) : null}
 

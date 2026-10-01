@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"os/exec"
-	"regexp"
-	"sort"
-	"strconv"
+
+	"github.com/Silo-Server/silo-server/internal/mediasample"
 )
 
 type boundaryRefiner interface {
@@ -17,16 +15,6 @@ type boundaryRefiner interface {
 type SilenceBoundaryRefiner struct {
 	config Config
 }
-
-type silenceInterval struct {
-	Start float64
-	End   float64
-}
-
-var (
-	silenceStartPattern = regexp.MustCompile(`silence_start:\s*([0-9]+(?:\.[0-9]+)?)`)
-	silenceEndPattern   = regexp.MustCompile(`silence_end:\s*([0-9]+(?:\.[0-9]+)?)`)
-)
 
 func NewSilenceBoundaryRefiner(config Config) *SilenceBoundaryRefiner {
 	return &SilenceBoundaryRefiner{config: config.normalized()}
@@ -50,27 +38,20 @@ func (r *SilenceBoundaryRefiner) RefineChapterEnd(ctx context.Context, candidate
 		return segment, false, nil
 	}
 
-	args := []string{
-		"-hide_banner",
-		"-nostdin",
-		"-loglevel", "info",
-		"-ss", formatSeconds(windowStart),
-		"-i", candidate.FilePath,
-		"-t", formatSeconds(windowEnd - windowStart),
-		"-vn",
-		"-sn",
-		"-dn",
-		"-af", fmt.Sprintf("silencedetect=noise=%ddB:duration=%s", *cfg.SilenceNoiseThresholdDB, formatSeconds(cfg.SilenceMinimumDurationSeconds)),
-		"-f", "null",
-		"-",
-	}
-	output, err := exec.CommandContext(ctx, cfg.FFmpegPath, args...).CombinedOutput()
+	result, err := analysisRunner(cfg).Run(ctx, mediasample.Request{
+		Input:  candidate.FilePath,
+		Window: &mediasample.Window{StartSeconds: windowStart, DurationSeconds: windowEnd - windowStart},
+		Audio: &mediasample.AudioOutput{Silence: &mediasample.SilenceParams{
+			NoiseDB:    *cfg.SilenceNoiseThresholdDB,
+			MinSeconds: cfg.SilenceMinimumDurationSeconds,
+		}},
+		Background: backgroundAnalysis(ctx),
+	})
 	if err != nil {
 		return segment, false, fmt.Errorf("detecting intro boundary silence for file %d: %w", candidate.FileID, err)
 	}
 
-	intervals := parseSilenceDetectOutput(output, windowStart)
-	for _, interval := range intervals {
+	for _, interval := range result.Silences {
 		if interval.Start < segment.End {
 			continue
 		}
@@ -91,37 +72,4 @@ func (r *SilenceBoundaryRefiner) RefineChapterEnd(ctx context.Context, candidate
 	}
 
 	return segment, false, nil
-}
-
-func parseSilenceDetectOutput(output []byte, windowStart float64) []silenceInterval {
-	matches := silenceStartPattern.FindAllSubmatch(output, -1)
-	if len(matches) == 0 {
-		return nil
-	}
-
-	intervals := make([]silenceInterval, 0, len(matches))
-	for _, match := range matches {
-		start, err := strconv.ParseFloat(string(match[1]), 64)
-		if err != nil {
-			continue
-		}
-		intervals = append(intervals, silenceInterval{Start: windowStart + start})
-	}
-
-	endMatches := silenceEndPattern.FindAllSubmatch(output, -1)
-	for i, match := range endMatches {
-		if i >= len(intervals) {
-			break
-		}
-		end, err := strconv.ParseFloat(string(match[1]), 64)
-		if err != nil {
-			continue
-		}
-		intervals[i].End = windowStart + end
-	}
-
-	sort.Slice(intervals, func(i, j int) bool {
-		return intervals[i].Start < intervals[j].Start
-	})
-	return intervals
 }

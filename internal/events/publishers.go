@@ -84,11 +84,13 @@ func (o *HistoryImportObserver) RunUpdated(run historyimport.Run) {
 	}
 	o.mu.Unlock()
 
+	// Stored warnings and failures can carry upstream responses; subscribers
+	// get the same fixed summaries the run endpoints return.
 	_ = o.Hub.PublishJSON(
 		context.Background(),
 		ChannelHistoryImport,
 		eventName,
-		run,
+		historyimport.PublicRun(run),
 		PublishOptions{UserID: run.UserID, ProfileID: run.ProfileID},
 	)
 }

@@ -168,7 +168,7 @@ func appendCompatImageProxyTags(codec *ResourceIDCodec, value any) bool {
 				changed = appendCompatImageProxyTagsInBlurHashes(child) || changed
 			case "BackdropImageTags", "ParentBackdropImageTags":
 				changed = appendCompatImageProxyTagsInSlice(child) || changed
-			case "PrimaryImageTag", "SeriesPrimaryImageTag", "ParentThumbImageTag", "BackdropImageTag", "ImageTag":
+			case "PrimaryImageTag", "SeriesPrimaryImageTag", "ParentPrimaryImageTag", "ParentThumbImageTag", "BackdropImageTag", "ImageTag":
 				if tag, ok := child.(string); ok && tag != "" {
 					typed[key] = compatImageProxyTag(tag)
 					changed = true

@@ -36,7 +36,8 @@ type Snapshot struct {
 	System *SystemStats `json:"system,omitempty"`
 	// GPU is one entry per GPU this process can say anything about, omitted when
 	// there are none.
-	GPU []GPUStats `json:"gpu,omitempty"`
+	GPU         []GPUStats           `json:"gpu,omitempty"`
+	Attribution *ResourceAttribution `json:"attribution,omitempty"`
 }
 
 // SystemStats is the host resource sample.

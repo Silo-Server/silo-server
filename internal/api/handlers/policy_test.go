@@ -36,7 +36,7 @@ func TestPolicyCapabilityShape(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	var response policyCapabilityResponse
+	var response PolicyCapabilityView
 	decodePolicyHandlerResponse(t, rec, &response)
 	if !response.Enabled || !response.EditorAvailable {
 		t.Fatalf("capability = %#v, want enabled editor", response)
@@ -438,11 +438,19 @@ func resetPolicyHandlerTables(t *testing.T, ctx context.Context, pool *pgxpool.P
 	// policy_document_versions.created_by_user_id references users(id); the
 	// claims injected by newPolicyHandlerRequest use UserID 42, so that row
 	// must exist.
-	if _, err := pool.Exec(ctx, `
+	inserted, err := pool.Exec(ctx, `
 		INSERT INTO public.users (id, username, role, enabled)
 		VALUES (42, 'policy-handler-test-admin', 'admin', true)
-		ON CONFLICT (id) DO NOTHING`); err != nil {
+		ON CONFLICT (id) DO NOTHING`)
+	if err != nil {
 		t.Fatalf("seed policy test user: %v", err)
+	}
+	if inserted.RowsAffected() == 1 {
+		t.Cleanup(func() {
+			if _, err := pool.Exec(context.Background(), `DELETE FROM public.users WHERE id = 42 AND username = 'policy-handler-test-admin'`); err != nil {
+				t.Errorf("delete policy test user: %v", err)
+			}
+		})
 	}
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO public.policy_generation (id, generation)

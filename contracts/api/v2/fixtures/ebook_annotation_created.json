@@ -1,0 +1,14 @@
+{
+  "id": "intent",
+  "content_id": "book",
+  "kind": "note",
+  "location": "chapter1",
+  "selected_text": "",
+  "note": "saved",
+  "style": "",
+  "color": "",
+  "metadata": {},
+  "created_at": "2026-01-02T03:04:05.000Z",
+  "updated_at": "2026-01-02T03:04:05.000Z",
+  "etag": "\"5b30ca301a0f31e18c42a70cf917b50cd01fd2f9380820d4014f311d19763863\""
+}

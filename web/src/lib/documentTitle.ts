@@ -27,12 +27,12 @@ export function setAppDocumentTitle(name: string) {
 
 const SETTINGS_TITLES: Record<string, string> = {
   account: "Account Settings",
-  appearance: "Appearance Settings",
   interface: "Navigation & Card Settings",
   accessibility: "Accessibility Settings",
   playback: "Playback Settings",
   profiles: "Profile Settings",
   libraries: "Library Settings",
+  requests: "Request Settings",
   "history-import": "History Import Settings",
   "plex-webhooks": "Webhook Sync Settings",
   "webhook-sync": "Webhook Sync Settings",
@@ -107,6 +107,10 @@ export function resolveAdminDocumentTitle(pathname: string): string {
 
   if (adminSegment === "users" && nestedSegment) {
     return "Admin User";
+  }
+
+  if (adminSegment === "plugins" && nestedSegment) {
+    return "Admin Plugin";
   }
 
   return ADMIN_TITLES[adminSegment] ?? "Admin";

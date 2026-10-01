@@ -10,9 +10,7 @@ import {
   Cloud,
   Subtitles,
   LayoutDashboard,
-  Palette,
   Eye,
-  Wand2,
   Layers,
   Users,
   Server,
@@ -21,6 +19,7 @@ import {
   MonitorSmartphone,
   PanelTop,
   KeyRound,
+  Bookmark,
 } from "lucide-react";
 // Sparkles is used by the Personalization nav entry below.
 import type { LucideIcon } from "lucide-react";
@@ -29,6 +28,7 @@ import { SideNavItem, SideNavSection } from "@/components/SideNav";
 import { SettingsOverviewNav } from "@/components/settings/SettingsOverviewNav";
 import { SettingsSearchInput } from "@/components/settings/SettingsSearchInput";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { useRequestFeatureStatus } from "@/hooks/queries/useRequests";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
@@ -47,6 +47,8 @@ interface NavItem {
   keywords?: readonly string[];
   settings?: readonly { label: string; description?: string; keywords?: readonly string[] }[];
   primaryOrAdmin?: boolean;
+  /** Listed only while the server has requests turned on. */
+  requiresRequests?: boolean;
 }
 
 interface NavSection {
@@ -88,6 +90,14 @@ const NAV_SECTIONS: NavSection[] = [
           "auto play",
           "next up",
           "preview",
+          "rewind",
+          "fast forward",
+          "fast-forward",
+          "skip",
+          "seek",
+          "seek controls",
+          "skip interval",
+          "audiobook skip",
         ],
         settings: settingIndex(
           "Preferred quality",
@@ -100,6 +110,10 @@ const NAV_SECTIONS: NavSection[] = [
           "Start next at preview",
           "Auto-play next episode",
           "Next up episodes",
+          "Seek controls",
+          "Rewind interval",
+          "Fast-forward interval",
+          "Use this browser's audiobook intervals",
         ),
       },
       {
@@ -169,32 +183,6 @@ const NAV_SECTIONS: NavSection[] = [
     label: "Appearance",
     items: [
       {
-        path: "appearance",
-        label: "Appearance",
-        icon: Palette,
-        description: "Theme, interface tone, and date and time formats.",
-        keywords: [
-          "theme",
-          "profile theme",
-          "dark",
-          "light",
-          "custom theme",
-          "date format",
-          "time format",
-          "clock",
-          "24-hour",
-          "12-hour",
-        ],
-        settings: settingIndex(
-          "Theme",
-          "Date & time",
-          "Date format",
-          "Time format",
-          "Current selection",
-          "Reset to Cinema Dark",
-        ),
-      },
-      {
         path: "interface",
         label: "Navigation & Cards",
         icon: PanelTop,
@@ -242,17 +230,29 @@ const NAV_SECTIONS: NavSection[] = [
         path: "accessibility",
         label: "Accessibility",
         icon: Eye,
-        description: "Text size, weight, and contrast for easier reading.",
-        keywords: ["contrast", "readability", "motion", "transparency", "text"],
-        settings: settingIndex("Text size", "Text weight", "Contrast", "High Contrast", "Preview"),
-      },
-      {
-        path: "theme-editor",
-        label: "Theme Editor",
-        icon: Wand2,
-        description: "Fine-tune theme colors and add your own CSS.",
-        keywords: ["design tokens", "token overrides", "custom css", "community themes"],
-        settings: settingIndex("Preview", "Token Overrides", "Custom CSS", "Community Themes"),
+        description: "Text size, weight, contrast, and date and time formats.",
+        keywords: [
+          "contrast",
+          "readability",
+          "motion",
+          "transparency",
+          "text",
+          "date format",
+          "time format",
+          "clock",
+          "24-hour",
+          "12-hour",
+        ],
+        settings: settingIndex(
+          "Text size",
+          "Text weight",
+          "Contrast",
+          "High Contrast",
+          "Preview",
+          "Date & time",
+          "Date format",
+          "Time format",
+        ),
       },
     ],
   },
@@ -282,6 +282,15 @@ const NAV_SECTIONS: NavSection[] = [
         description: "Re-tune the taste profile behind your recommendations.",
         keywords: ["taste profile", "recommendations", "ratings", "likes", "dislikes"],
         settings: settingIndex("Refine your taste profile", "Taste profile", "Recommendations"),
+      },
+      {
+        path: "requests",
+        label: "Requests",
+        icon: Bookmark,
+        description: "Whether adding to your watchlist also requests the title.",
+        keywords: ["watchlist", "request", "discover", "auto request"],
+        settings: settingIndex("Request titles I add to my watchlist"),
+        requiresRequests: true,
       },
       {
         path: "libraries",
@@ -510,6 +519,7 @@ export default function SettingsLayout() {
   const segments = location.pathname.split("/");
   const activeSegment = segments[2] || null;
   const canManageProfiles = actingAdmin || profile?.is_primary === true;
+  const requestsEnabled = useRequestFeatureStatus().data?.requests_enabled === true;
   // Most settings pages are a single column of rows and read best measured.
   // A page that is itself two panes needs the room, so it opts out.
   const wideSetting = activeSegment ? WIDE_SETTINGS_PAGES.has(activeSegment) : false;
@@ -518,9 +528,13 @@ export default function SettingsLayout() {
     () =>
       NAV_SECTIONS.map((section) => ({
         ...section,
-        items: section.items.filter((item) => !item.primaryOrAdmin || canManageProfiles),
+        items: section.items.filter(
+          (item) =>
+            (!item.primaryOrAdmin || canManageProfiles) &&
+            (!item.requiresRequests || requestsEnabled),
+        ),
       })).filter((section) => section.items.length > 0),
-    [canManageProfiles],
+    [canManageProfiles, requestsEnabled],
   );
 
   const filteredSections = useMemo(

@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { MAX_CSS_SIZE } from "@/lib/themeExport";
+import { MAX_CSS_SIZE } from "@/lib/themeTokens";
 
 interface RawCssEditorProps {
   value: string;
@@ -17,7 +17,7 @@ export function RawCssEditor({ value, onChange }: RawCssEditorProps) {
       <div className="space-y-1">
         <p className="text-muted-foreground text-[13px] leading-relaxed">
           Write custom CSS that is injected after all theme variables. Target any selector — your
-          overrides apply on top of the active theme. Use{" "}
+          overrides apply on top of Cinema Dark for everyone. Use{" "}
           <code className="bg-muted rounded px-1 py-0.5 text-xs">:root</code> to override CSS custom
           properties directly.
         </p>
@@ -40,9 +40,7 @@ export function RawCssEditor({ value, onChange }: RawCssEditorProps) {
       />
 
       <div className="flex items-center justify-between">
-        <p className="text-muted-foreground text-[11px]">
-          Preview updates as you type. Saved automatically after you pause.
-        </p>
+        <p className="text-muted-foreground text-[11px]">Applies to everyone once you save.</p>
         <span
           className={cn(
             "font-mono text-[11px]",

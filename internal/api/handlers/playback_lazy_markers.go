@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/intromarkers"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
-	"github.com/Silo-Server/silo-server/internal/scanner"
 )
 
 const playbackLazyMarkerTimeout = 10 * time.Minute
@@ -19,15 +19,15 @@ type PlaybackIntroEligibilityChecker interface {
 	IsFileInEnabledLibrary(ctx context.Context, fileID int) (bool, error)
 }
 
-type PlaybackMarkerUpdateNotifier interface {
-	MarkersUpdated(ctx context.Context, file *models.MediaFile)
+// PlaybackEpisodeAnalyzer runs local marker analysis for a played episode,
+// or for the credits of a played movie.
+type PlaybackEpisodeAnalyzer interface {
+	AnalyzeEpisodeForPlayback(ctx context.Context, episodeID string, kinds intromarkers.EpisodeMarkerKinds) (intromarkers.RunSummary, error)
+	AnalyzeMovieFile(ctx context.Context, fileID int) (intromarkers.RunSummary, error)
 }
 
-// PlaybackMarkerUpserter narrows scanner.FileRepository down to just the
-// marker write path so tests can supply a fake without dragging in the
-// full repository.
-type PlaybackMarkerUpserter interface {
-	UpsertMarkers(ctx context.Context, fileID int, update scanner.MarkerUpdate) (bool, error)
+type PlaybackMarkerUpdateNotifier interface {
+	MarkersUpdated(ctx context.Context, file *models.MediaFile)
 }
 
 func (h *PlaybackHandler) maybeQueueLazyPlaybackMarkers(
@@ -59,9 +59,6 @@ func (h *PlaybackHandler) maybeQueueLazyPlaybackMarkers(
 			"error", err)
 		return
 	}
-	if strings.ToLower(strings.TrimSpace(lazy)) != "true" {
-		return
-	}
 
 	rawMode, err := h.SettingsRepo.Get(ctx, markers.SettingMode)
 	if err != nil {
@@ -73,6 +70,12 @@ func (h *PlaybackHandler) maybeQueueLazyPlaybackMarkers(
 		return
 	}
 	mode := markers.NormalizeMode(rawMode)
+	lazyEnabled := strings.EqualFold(strings.TrimSpace(lazy), "true")
+	if !lazyEnabled {
+		if !onlineMarkersOnDemand(ctx, h.SettingsRepo) || (mode != markers.ModeOnline && mode != markers.ModeBoth) {
+			return
+		}
+	}
 	if mode == markers.ModeOff {
 		slog.DebugContext(ctx, "playback lazy markers: skipped; marker mode is off", "component", "api",
 			"session_id", session.ID,
@@ -82,11 +85,8 @@ func (h *PlaybackHandler) maybeQueueLazyPlaybackMarkers(
 	}
 
 	hasOnline := h.hasOnlineMarkerProviders()
-	shouldRunLocal := markers.ShouldRunLocal(mode)
+	shouldRunLocal := lazyEnabled && markers.ShouldRunLocal(mode)
 	shouldRunOnline := (mode == markers.ModeOnline || mode == markers.ModeBoth) && hasOnline
-	if shouldRunOnline && hasOnlineSourcedMarkers(file) {
-		shouldRunOnline = false
-	}
 
 	if shouldRunOnline {
 		// Online providers work for any enabled library (movies and series alike).
@@ -103,9 +103,26 @@ func (h *PlaybackHandler) maybeQueueLazyPlaybackMarkers(
 		}
 	}
 
+	// localKinds is what local analysis may look for: an episode's intros
+	// and credits and a movie's credits, less the kinds turned off
+	// server-wide.
+	var localKinds intromarkers.EpisodeMarkerKinds
 	if shouldRunLocal {
-		// Local chromaprint is only meaningful for series libraries that
-		// opted in to expensive fingerprinting and requires an analyzer.
+		enabled, err := intromarkers.EnabledMarkerKinds(ctx, h.SettingsRepo)
+		if err != nil {
+			slog.WarnContext(ctx, "playback lazy markers: load detection kinds failed", "component", "api",
+				"session_id", session.ID,
+				"file_id", file.ID,
+				"episode_id", file.EpisodeID,
+				"error", err)
+		}
+		localKinds = intromarkers.EpisodeMarkerKinds{Intro: isEpisode, Credits: true}.And(enabled)
+		shouldRunLocal = err == nil && localKinds.Any()
+	}
+
+	if shouldRunLocal {
+		// Local analysis runs only in libraries that opted in to it, and
+		// needs an analyzer.
 		ok, err := h.IntroRepository.IntroDetectionEligibleForPlayback(ctx, file.ID)
 		if err != nil {
 			slog.WarnContext(ctx, "playback lazy markers: local eligibility check failed", "component", "api",
@@ -116,11 +133,14 @@ func (h *PlaybackHandler) maybeQueueLazyPlaybackMarkers(
 				"error", err)
 			shouldRunLocal = false
 		}
-		if !ok || h.IntroAnalyzer == nil || !isEpisode {
+		if !ok || h.IntroAnalyzer == nil {
 			shouldRunLocal = false
 		}
 	}
 
+	if !shouldRunLocal {
+		localKinds = intromarkers.EpisodeMarkerKinds{}
+	}
 	if !shouldRunOnline && !shouldRunLocal {
 		slog.DebugContext(ctx, "playback lazy markers: skipped; no eligible detection path", "component", "api",
 			"session_id", session.ID,
@@ -142,16 +162,21 @@ func (h *PlaybackHandler) maybeQueueLazyPlaybackMarkers(
 		"episode_id", file.EpisodeID,
 		"mode", mode,
 		"run_online", shouldRunOnline,
-		"run_local", shouldRunLocal)
-	go h.runLazyPlaybackMarkers(sessionID, &fileSnapshot, mode, shouldRunOnline, shouldRunLocal)
+		"run_local", shouldRunLocal,
+		"local_intro", localKinds.Intro,
+		"local_credits", localKinds.Credits)
+	go h.runLazyPlaybackMarkers(sessionID, &fileSnapshot, mode, shouldRunOnline, localKinds)
 }
 
+// runLazyPlaybackMarkers looks the file's markers up online when runOnline is
+// set, then runs local analysis for the kinds of localKinds the file still
+// lacks. An empty localKinds runs no local analysis.
 func (h *PlaybackHandler) runLazyPlaybackMarkers(
 	sessionID string,
 	file *models.MediaFile,
 	mode markers.Mode,
 	runOnline bool,
-	runLocal bool,
+	localKinds intromarkers.EpisodeMarkerKinds,
 ) {
 	if file == nil {
 		return
@@ -164,6 +189,10 @@ func (h *PlaybackHandler) runLazyPlaybackMarkers(
 	}
 	ctx, cancel := context.WithTimeout(base, playbackLazyMarkerTimeout)
 	defer cancel()
+	isEpisode := strings.TrimSpace(file.EpisodeID) != ""
+	localMissing := func(file *models.MediaFile) intromarkers.EpisodeMarkerKinds {
+		return missingLocalMarkers(file, isEpisode).And(localKinds)
+	}
 
 	slog.Info("playback lazy markers: started",
 		"session_id", sessionID,
@@ -171,20 +200,27 @@ func (h *PlaybackHandler) runLazyPlaybackMarkers(
 		"episode_id", file.EpisodeID,
 		"mode", mode)
 
+	// overlay is the on-demand online lookup players were sent. Its provider
+	// markers are never saved, so each reload of the stored row below gets
+	// them laid back over; otherwise the next update would clear a marker the
+	// player already shows, and local analysis would be asked for it.
+	var overlay *models.MediaFile
 	if runOnline {
-		wrote, err := h.fetchOnlineMarkersForPlayback(ctx, file)
+		onDemand := onlineMarkersOnDemand(ctx, h.SettingsRepo)
+		effective, overlaid, err := h.MarkerPopulation.Populate(ctx, file)
 		if err != nil {
-			slog.Warn("playback lazy markers: online fetch failed",
-				"session_id", sessionID,
-				"file_id", file.ID,
-				"episode_id", file.EpisodeID,
-				"mode", mode,
-				"error", err)
+			slog.WarnContext(ctx, "playback marker lookup failed", "file_id", file.ID, "error", err)
 		}
-		if wrote {
-			if refreshed := h.reloadPlaybackMarkerFile(ctx, file.ID); hasAnyMarker(refreshed) {
-				h.notifyPlaybackMarkers(ctx, sessionID, refreshed, mode)
-				if !runLocal || hasLocalDetectionMarkers(refreshed) {
+		if effective != nil {
+			file = effective
+			// In on-demand mode Populate reports an overlay it applied; in
+			// stored mode it saved its result, which the reloads read back.
+			if onDemand && overlaid {
+				overlay = effective
+			}
+			if hasAnyMarker(file) {
+				h.notifyPlaybackMarkers(ctx, sessionID, file, mode)
+				if !localMissing(file).Any() {
 					return
 				}
 			}
@@ -193,20 +229,32 @@ func (h *PlaybackHandler) runLazyPlaybackMarkers(
 
 	// A concurrent session may have populated markers since we queued; check
 	// before falling through to the (expensive) local analyzer.
-	if refreshed := h.reloadPlaybackMarkerFile(ctx, file.ID); hasAnyMarker(refreshed) {
-		h.notifyPlaybackMarkers(ctx, sessionID, refreshed, mode)
-		if !runLocal || hasLocalDetectionMarkers(refreshed) {
-			return
+	if refreshed := markers.OverlayOnline(h.reloadPlaybackMarkerFile(ctx, file.ID), overlay); refreshed != nil {
+		file = refreshed
+		if hasAnyMarker(refreshed) {
+			h.notifyPlaybackMarkers(ctx, sessionID, refreshed, mode)
+			if !localMissing(refreshed).Any() {
+				return
+			}
 		}
 	}
 
-	if runLocal {
+	if kinds := localMissing(file); kinds.Any() {
 		slog.Info("playback lazy markers: local analyzer started",
 			"session_id", sessionID,
 			"file_id", file.ID,
 			"episode_id", file.EpisodeID,
-			"mode", mode)
-		summary, err := h.IntroAnalyzer.AnalyzeEpisode(ctx, file.EpisodeID)
+			"mode", mode,
+			"intro", kinds.Intro,
+			"credits", kinds.Credits)
+		// A viewer is waiting: take the ffmpeg slot reserved for playback.
+		var summary intromarkers.RunSummary
+		var err error
+		if isEpisode {
+			summary, err = h.IntroAnalyzer.AnalyzeEpisodeForPlayback(intromarkers.WithPlaybackPriority(ctx), file.EpisodeID, kinds)
+		} else {
+			summary, err = h.IntroAnalyzer.AnalyzeMovieFile(intromarkers.WithPlaybackPriority(ctx), file.ID)
+		}
 		if err != nil {
 			slog.Warn("playback lazy markers: local analyzer failed",
 				"session_id", sessionID,
@@ -227,68 +275,38 @@ func (h *PlaybackHandler) runLazyPlaybackMarkers(
 			"chromaprint_markers_written", summary.ChromaprintMarkersWritten,
 			"fingerprint_cache_hits", summary.FingerprintCacheHits,
 			"fingerprints_computed", summary.FingerprintsComputed,
+			"credits_chapter_markers_written", summary.CreditsChapterMarkersWritten,
+			"credits_audio_markers_written", summary.CreditsAudioMarkersWritten,
+			"credits_audio_video_markers_written", summary.CreditsAudioVideoMarkersWritten,
+			"credits_video_markers_written", summary.CreditsVideoMarkersWritten,
+			"movie_credits_markers_written", summary.MovieCreditsMarkersWritten,
+			"credits_fingerprints_computed", summary.CreditsFingerprintsComputed,
+			"credits_tail_scans_computed", summary.CreditsTailScansComputed,
 			"errors", len(summary.Errors))
 
-		if refreshed := h.reloadPlaybackMarkerFile(ctx, file.ID); hasAnyMarker(refreshed) {
+		if refreshed := markers.OverlayOnline(h.reloadPlaybackMarkerFile(ctx, file.ID), overlay); hasAnyMarker(refreshed) {
 			h.notifyPlaybackMarkers(ctx, sessionID, refreshed, mode)
 		}
 	}
 }
 
 func (h *PlaybackHandler) hasOnlineMarkerProviders() bool {
-	return h != nil && h.MarkerRegistry != nil && len(h.MarkerRegistry.Providers()) > 0
+	return h != nil && h.MarkerPopulation != nil && h.MarkerRegistry != nil && len(h.MarkerRegistry.Providers()) > 0
 }
 
-// fetchOnlineMarkersForPlayback resolves external IDs for the given file,
-// asks the marker registry for the first hit, and persists the result via
-// the scanner upserter. Returns true when at least one segment was
-// actually written to storage.
-func (h *PlaybackHandler) fetchOnlineMarkersForPlayback(ctx context.Context, file *models.MediaFile) (bool, error) {
-	if h == nil || file == nil || !h.hasOnlineMarkerProviders() {
-		return false, nil
+// onlineMarkersOnDemand reports whether online markers are looked up for each
+// playback or refresh and never saved. A setting that cannot be read counts as
+// stored, which leaves the stored row as the whole answer.
+func onlineMarkersOnDemand(ctx context.Context, settings MarkerSettingsReader) bool {
+	if settings == nil {
+		return false
 	}
-	if h.MarkerResolver == nil || h.MarkerUpserter == nil {
-		slog.DebugContext(ctx, "playback lazy markers: online fetch skipped; resolver or upserter missing", "component", "api",
-			"file_id", file.ID)
-		return false, nil
-	}
-
-	ids, err := h.MarkerResolver.ResolveForFile(ctx, file)
+	raw, err := settings.Get(ctx, markers.SettingOnlineStorage)
 	if err != nil {
-		return false, err
+		return false
 	}
-	if !ids.HasAnyID() {
-		slog.DebugContext(ctx, "playback lazy markers: online fetch skipped; no external IDs available", "component", "api",
-			"file_id", file.ID,
-			"episode_id", file.EpisodeID,
-			"content_id", file.ContentID)
-		return false, nil
-	}
-
-	req := markers.Request{
-		Kind:          ids.Kind,
-		ExternalIDs:   ids.AsRequestMap(),
-		SeasonNumber:  ids.SeasonNumber,
-		EpisodeNumber: ids.EpisodeNumber,
-		Duration:      time.Duration(file.Duration) * time.Second,
-	}
-	result, ok, err := h.MarkerRegistry.FetchMerged(ctx, req)
-	if err != nil {
-		return false, err
-	}
-	if !ok || len(result.Markers) == 0 {
-		return false, nil
-	}
-
-	payload := markers.BuildUpdatePayload(result)
-	if !payload.HasAnySegment() {
-		return false, nil
-	}
-	wrote, err := h.MarkerUpserter.UpsertMarkers(ctx, file.ID, markerUpdateFromPayload(payload))
-	if err != nil {
-		return false, err
-	}
-	return wrote, nil
+	storage, err := markers.ParseOnlineStorage(raw)
+	return err == nil && storage == markers.OnlineStorageOnDemand
 }
 
 func (h *PlaybackHandler) reloadPlaybackMarkerFile(ctx context.Context, fileID int) *models.MediaFile {
@@ -320,33 +338,6 @@ func (h *PlaybackHandler) notifyPlaybackMarkers(
 		"mode", mode)
 }
 
-// hasOnlineSourcedMarkers reports whether the file already has at least one
-// marker written by a non-local source. We short-circuit lazy online fetch
-// in that case to avoid refetching every playback start — TheIntroDB often
-// returns only intro+credits and never recap/preview for a given episode, so
-// requiring all four kinds before skipping would loop forever on partial data.
-// Markers from the scanner/s3 path remain refetchable since online sources
-// outrank them.
-func hasOnlineSourcedMarkers(file *models.MediaFile) bool {
-	if file == nil {
-		return false
-	}
-	isOnlineSource := func(source *string) bool {
-		if source == nil {
-			return false
-		}
-		switch *source {
-		case models.MarkerSourceOnline, models.MarkerSourcePlugin, models.MarkerSourceManual:
-			return true
-		}
-		return false
-	}
-	return isOnlineSource(file.IntroMarkersSource) ||
-		isOnlineSource(file.CreditsMarkersSource) ||
-		isOnlineSource(file.RecapMarkersSource) ||
-		isOnlineSource(file.PreviewMarkersSource)
-}
-
 // hasAnyMarker reports whether the file has at least one populated marker
 // segment. Used to decide whether to emit a markers_updated event.
 func hasAnyMarker(file *models.MediaFile) bool {
@@ -359,45 +350,16 @@ func hasAnyMarker(file *models.MediaFile) bool {
 		(file.PreviewStart != nil && file.PreviewEnd != nil)
 }
 
-func hasLocalDetectionMarkers(file *models.MediaFile) bool {
+// missingLocalMarkers returns the marker kinds local analysis could still
+// fill for the file. Local analysis finds intros and credits in episodes and
+// only credits in movies, so an episode with an intro from any source still
+// needs it for credits, and only for credits.
+func missingLocalMarkers(file *models.MediaFile, isEpisode bool) intromarkers.EpisodeMarkerKinds {
 	if file == nil {
-		return false
+		return intromarkers.EpisodeMarkerKinds{Intro: isEpisode, Credits: true}
 	}
-	return (file.IntroStart != nil && file.IntroEnd != nil) ||
-		(file.CreditsStart != nil && file.CreditsEnd != nil)
-}
-
-// markerUpdateFromPayload adapts the generic markers.MarkerUpdatePayload to
-// the scanner.MarkerUpdate shape consumed by FileRepository.UpsertMarkers.
-// Kept narrow on purpose — the packages it bridges should not need to import
-// each other.
-func markerUpdateFromPayload(p markers.MarkerUpdatePayload) scanner.MarkerUpdate {
-	return scanner.MarkerUpdate{
-		IntroStart:        p.Intro.Start,
-		IntroEnd:          p.Intro.End,
-		CreditsStart:      p.Credits.Start,
-		CreditsEnd:        p.Credits.End,
-		RecapStart:        p.Recap.Start,
-		RecapEnd:          p.Recap.End,
-		PreviewStart:      p.Preview.Start,
-		PreviewEnd:        p.Preview.End,
-		MarkersSource:     p.SummarySource(),
-		MarkersConfidence: p.SummaryConfidence(),
-		IntroProvenance:   segmentProvenance(p.Intro),
-		CreditsProvenance: segmentProvenance(p.Credits),
-		RecapProvenance:   segmentProvenance(p.Recap),
-		PreviewProvenance: segmentProvenance(p.Preview),
-	}
-}
-
-func segmentProvenance(s markers.SegmentPayload) *scanner.SegmentProvenance {
-	if !s.Present() {
-		return nil
-	}
-	return &scanner.SegmentProvenance{
-		Source:     s.Source,
-		Provider:   s.Provider,
-		Confidence: s.Confidence,
-		Algorithm:  s.Algorithm,
+	return intromarkers.EpisodeMarkerKinds{
+		Intro:   isEpisode && (file.IntroStart == nil || file.IntroEnd == nil),
+		Credits: file.CreditsStart == nil || file.CreditsEnd == nil,
 	}
 }

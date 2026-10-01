@@ -39,13 +39,17 @@ func BuildNotificationDisplay(row DeliveryRow) NotificationDisplay {
 			display.URL = "/item/" + *row.EpisodeID
 		}
 	case DeliveryTypeRequestFulfilled:
+		flags := parseRequestFlags(row.ReasonFlags)
 		display.Category = "request_fulfilled"
 		display.Title = "Your request is now available"
+		display.Body = "Your media request has arrived in the library."
+		if flags.Follower {
+			display.Title = followedTitleAvailable
+			display.Body = "A title you asked to hear about has arrived in the library."
+		}
 		if row.SeriesTitle != "" {
 			display.Title = row.SeriesTitle + " is now available"
 		}
-		display.Body = "Your media request has arrived in the library."
-		flags := parseRequestFlags(row.ReasonFlags)
 		if flags.RequestID != "" {
 			display.ThreadID = "request:" + flags.RequestID
 		} else if row.SeriesID != nil && *row.SeriesID != "" {
@@ -119,8 +123,7 @@ func episodeDisplayCode(row DeliveryRow) string {
 	return ""
 }
 
-// displayBodyMaxLen bounds free-text notification bodies; matches the varchar
-// caps used elsewhere in the delivery pipeline.
+// displayBodyMaxLen bounds free-text notification bodies.
 const displayBodyMaxLen = 240
 
 func truncateDisplayText(s string, max int) string {

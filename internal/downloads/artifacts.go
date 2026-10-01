@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/workmetrics"
+
 	"github.com/google/uuid"
 
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -192,8 +194,9 @@ func (m *ArtifactManager) SetSettingsReader(settings SettingsReader) {
 
 // ReportRemoteArtifactMissing fences a proxy-observed 404 against the signed
 // database-row and node locator, then atomically requeues the artifact and its
-// linked downloads. Stale tokens are harmless: the exact-locator transition
-// only applies while the complete locator still owns the ready row.
+// linked downloads (or retires it when no download can use it). Stale tokens
+// are harmless: the exact-locator transition only applies while the complete
+// locator still owns the ready row.
 func (m *ArtifactManager) ReportRemoteArtifactMissing(ctx context.Context, artifactID, originNodeURL, originArtifactID string) error {
 	if m == nil || m.repo == nil || strings.TrimSpace(artifactID) == "" ||
 		strings.TrimSpace(originNodeURL) == "" || !downloadprepare.ValidArtifactID(originArtifactID) {
@@ -209,16 +212,8 @@ func (m *ArtifactManager) ReportRemoteArtifactMissing(ctx context.Context, artif
 	if !artifactReady(artifact) || artifact.OriginNodeURL != originNodeURL || artifact.OriginArtifactID != originArtifactID {
 		return nil
 	}
-	linked, applied, err := m.repo.RequeueRemoteExactLocator(ctx, artifact)
-	if err != nil || !applied {
-		return err
-	}
-	for _, download := range linked {
-		m.publish(ctx, download)
-	}
-	slog.WarnContext(ctx, "remote download artifact re-queued", "component", "downloads", "artifact_id", artifact.ID, "node", artifact.OriginNodeURL, "reason", "proxy observed remote output missing")
-	m.triggerDrain()
-	return nil
+	_, err = m.requeueRemoteArtifactExactNow(ctx, artifact, "proxy observed remote output missing")
+	return err
 }
 
 // SetKick wires a low-latency drain trigger (e.g. taskmanager RunTask) invoked
@@ -244,7 +239,7 @@ func (m *ArtifactManager) Ready(ctx context.Context, id string) (*Artifact, erro
 			if !errors.Is(err, ErrArtifactOriginRemoved) {
 				return nil, err
 			}
-			if m.requeueRemoteArtifact(ctx, a, "origin node removed") {
+			if m.requeueRemoteArtifact(ctx, a, "origin node removed") == artifactRequeued {
 				return nil, fmt.Errorf("artifact origin was removed and preparation was requeued: %w", ErrDownloadNotActive)
 			}
 			return nil, fmt.Errorf("artifact origin was removed: %w", errors.Join(ErrDownloadNotActive, err))
@@ -330,11 +325,14 @@ func (m *ArtifactManager) ensureResolved(ctx context.Context, file *models.Media
 		OutputPath:                 artifactOutputPath(m.artifactDir(), file.ID, format, hash),
 		MaxAttempts:                artifactMaxAttempts,
 	}
+	if playback.PreparedTracksAvailable(file) {
+		a.TrackRecipeVersion = playback.PreparedTracksRecipeVersion
+	}
 	request := downloadprepare.NewRequest(a.ID, m.buildOpts(file, a))
 	if request.StereoDownmixBoostRequested() {
 		a.AudioRecipeVersion = request.AudioRecipeVersion
 	}
-	if a.ToneMapMode != "" || a.AudioRecipeVersion != "" {
+	if artifactUsesExecutionFingerprint(a) {
 		a.ParamsHash = request.ExecutionFingerprint()
 		a.OutputPath = artifactOutputPath(m.artifactDir(), file.ID, format, a.ParamsHash)
 	}
@@ -343,8 +341,20 @@ func (m *ArtifactManager) ensureResolved(ctx context.Context, file *models.Media
 		return nil, err
 	}
 	if artifactReady(row) {
-		_ = m.repo.TouchLastUsed(ctx, row.ID)
-		return row, nil
+		// Refreshing last_used_at keeps missing-output recovery from retiring
+		// the row while the caller links its download. If recovery retired or
+		// requeued it after EnsureQueued read it, re-ensure so the download
+		// links to a live job.
+		touched, err := m.repo.TouchReady(ctx, row.ID)
+		if err != nil {
+			return nil, err
+		}
+		if touched {
+			return row, nil
+		}
+		if row, created, err = m.repo.EnsureQueued(ctx, a); err != nil {
+			return nil, err
+		}
 	}
 	// A terminally-failed dedup row would otherwise strand every new download
 	// linked to it in 'preparing' forever (no drain is triggered for an existing
@@ -361,7 +371,7 @@ func (m *ArtifactManager) ensureResolved(ctx context.Context, file *models.Media
 		case err != nil:
 			return nil, err
 		default:
-			row.Status = queuedArtifactStatus(row.ToneMapMode, row.AudioRecipeVersion)
+			row.Status = queuedArtifactStatus(row.ToneMapMode, row.AudioRecipeVersion, row.TrackRecipeVersion)
 		}
 		m.triggerDrain()
 		return row, nil
@@ -556,8 +566,10 @@ func (m *ArtifactManager) recover(ctx context.Context) {
 }
 
 func (m *ArtifactManager) recoverQueueState(ctx context.Context) {
-	if _, err := m.repo.ReclaimExpiredLeases(ctx); err != nil {
+	if count, err := m.repo.ReclaimExpiredLeases(ctx); err != nil {
 		slog.WarnContext(ctx, "download artifact lease reclaim failed", "component", "downloads", "error", err)
+	} else {
+		workmetrics.Recovered("downloads", int64(len(count)))
 	}
 
 	// Reconcile downloads stranded in 'preparing' against their artifact's
@@ -600,9 +612,23 @@ func (m *ArtifactManager) recoverReadyArtifacts(ctx context.Context) {
 		}
 		if a.OutputPath != "" {
 			if _, statErr := os.Stat(a.OutputPath); statErr != nil {
-				slog.WarnContext(ctx, "download artifact output missing, re-queuing", "component", "downloads", "artifact_id", a.ID, "path", a.OutputPath)
-				if err := m.repo.Requeue(ctx, a.ID); err != nil {
-					slog.WarnContext(ctx, "re-queue artifact failed", "component", "downloads", "artifact_id", a.ID, "error", err)
+				// Only a definite miss is recoverable. A transient error (EACCES,
+				// EIO, a stale mount) must not retire a row whose file still
+				// exists: cleanup walks rows, so that file would never be removed.
+				if !errors.Is(statErr, os.ErrNotExist) {
+					slog.WarnContext(ctx, "checking download artifact output failed", "component", "downloads", "artifact_id", a.ID, "path", a.OutputPath, "error", statErr)
+					continue
+				}
+				switch linked, result, err := m.repo.RecoverMissing(ctx, a.ID, missingArtifactRetireGrace); {
+				case err != nil:
+					slog.WarnContext(ctx, "recovering missing download artifact failed", "component", "downloads", "artifact_id", a.ID, "error", err)
+				case result == artifactRetired:
+					slog.InfoContext(ctx, "download artifact output missing and unused, retired", "component", "downloads", "artifact_id", a.ID, "path", a.OutputPath)
+				case result == artifactRequeued:
+					for _, download := range linked {
+						m.publish(ctx, download)
+					}
+					slog.WarnContext(ctx, "download artifact output missing, re-queued", "component", "downloads", "artifact_id", a.ID, "path", a.OutputPath)
 				}
 			}
 		}
@@ -676,18 +702,20 @@ func (m *ArtifactManager) probeRemoteArtifactGroup(ctx context.Context, lifecycl
 // quarantined. If deletion fails, the transaction's orphan row retains the
 // exact locator for the regular retrying cleanup pass.
 func (m *ArtifactManager) requeueWrongSizedRemoteArtifact(ctx context.Context, lifecycle remoteArtifactLifecycle, a *Artifact) {
-	applied, err := m.requeueRemoteArtifactWithFence(ctx, a, "remote output size mismatch", false, false)
+	result, err := m.requeueRemoteArtifactWithFence(ctx, a, "remote output size mismatch", false, false)
 	if err != nil {
 		slog.WarnContext(ctx, "re-queue remote artifact failed", "component", "downloads", "artifact_id", a.ID, "error", err)
 		return
 	}
-	if !applied {
+	if result == artifactUnchanged {
 		return
 	}
 	if err := lifecycle.DeleteArtifact(ctx, a); err != nil {
 		slog.WarnContext(ctx, "deleting rejected remote artifact failed", "component", "downloads", "artifact_id", a.ID, "node", a.OriginNodeURL, "error", err)
 	}
-	m.triggerDrain()
+	if result == artifactRequeued {
+		m.triggerDrain()
+	}
 }
 
 func (m *ArtifactManager) resolveRemoteArtifact(ctx context.Context, lifecycle remoteArtifactLifecycle, artifact *Artifact) error {
@@ -708,53 +736,56 @@ func (m *ArtifactManager) resolveRemoteArtifact(ctx context.Context, lifecycle r
 	return nil
 }
 
-func (m *ArtifactManager) requeueRemoteArtifact(ctx context.Context, a *Artifact, reason string) bool {
-	applied, err := m.requeueRemoteArtifactNow(ctx, a, reason)
+func (m *ArtifactManager) requeueRemoteArtifact(ctx context.Context, a *Artifact, reason string) artifactRecovery {
+	result, err := m.requeueRemoteArtifactNow(ctx, a, reason)
 	if err != nil {
 		slog.WarnContext(ctx, "re-queue remote artifact failed", "component", "downloads", "artifact_id", a.ID, "error", err)
-		return false
+		return artifactUnchanged
 	}
-	return applied
+	return result
 }
 
 // requeueRemoteArtifactNow synchronously fences a stale remote locator, resets
 // every linked download, and schedules the abandoned node-local file for
-// cleanup. Request paths use the returned error so a failed state transition is
+// cleanup. An artifact no active download can use is retired instead of
+// rebuilt. Request paths use the returned error so a failed state transition is
 // never disguised as an ordinary missing catalog item.
-func (m *ArtifactManager) requeueRemoteArtifactNow(ctx context.Context, a *Artifact, reason string) (bool, error) {
+func (m *ArtifactManager) requeueRemoteArtifactNow(ctx context.Context, a *Artifact, reason string) (artifactRecovery, error) {
 	return m.requeueRemoteArtifactWithFence(ctx, a, reason, false, true)
 }
 
-func (m *ArtifactManager) requeueRemoteArtifactExactNow(ctx context.Context, a *Artifact, reason string) (bool, error) {
+func (m *ArtifactManager) requeueRemoteArtifactExactNow(ctx context.Context, a *Artifact, reason string) (artifactRecovery, error) {
 	return m.requeueRemoteArtifactWithFence(ctx, a, reason, true, true)
 }
 
-func (m *ArtifactManager) requeueRemoteArtifactWithFence(ctx context.Context, a *Artifact, reason string, exactURL, triggerDrain bool) (bool, error) {
+func (m *ArtifactManager) requeueRemoteArtifactWithFence(ctx context.Context, a *Artifact, reason string, exactURL, triggerDrain bool) (artifactRecovery, error) {
 	if m == nil || m.repo == nil || a == nil || a.ID == "" || a.OriginNodeID <= 0 || a.OriginArtifactID == "" {
-		return false, errors.New("remote artifact locator unavailable for requeue")
+		return artifactUnchanged, errors.New("remote artifact locator unavailable for requeue")
 	}
 	var linked []*Download
-	var applied bool
+	var result artifactRecovery
 	var err error
 	if exactURL {
-		linked, applied, err = m.repo.RequeueRemoteExactLocator(ctx, a)
+		linked, result, err = m.repo.RequeueRemoteExactLocator(ctx, a)
 	} else {
-		linked, applied, err = m.repo.RequeueRemote(ctx, a)
+		linked, result, err = m.repo.RequeueRemote(ctx, a)
 	}
 	if err != nil {
-		return false, err
+		return artifactUnchanged, err
 	}
-	if !applied {
-		return false, nil
+	switch result {
+	case artifactRetired:
+		slog.InfoContext(ctx, "unused remote download artifact retired", "component", "downloads", "artifact_id", a.ID, "node", a.OriginNodeURL, "reason", reason)
+	case artifactRequeued:
+		for _, download := range linked {
+			m.publish(ctx, download)
+		}
+		slog.WarnContext(ctx, "remote download artifact re-queued", "component", "downloads", "artifact_id", a.ID, "node", a.OriginNodeURL, "reason", reason)
+		if triggerDrain {
+			m.triggerDrain()
+		}
 	}
-	for _, download := range linked {
-		m.publish(ctx, download)
-	}
-	slog.WarnContext(ctx, "remote download artifact re-queued", "component", "downloads", "artifact_id", a.ID, "node", a.OriginNodeURL, "reason", reason)
-	if triggerDrain {
-		m.triggerDrain()
-	}
-	return true, nil
+	return result, nil
 }
 
 // drain claims and encodes jobs through a bounded worker pool until the queue is
@@ -801,6 +832,9 @@ func (m *ArtifactManager) drain(ctx context.Context) error {
 // encodeOne runs one claimed job to completion, extending its lease via a
 // heartbeat, and links/notifies the dependent download rows on the outcome.
 func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
+	ctx, observation := workmetrics.Start(ctx, "downloads", a.CreatedAt)
+	defer workmetrics.Profile(ctx)()
+	defer observation.Finish("unknown")
 	hbCtx, cancelHB := context.WithCancel(ctx)
 	defer cancelHB()
 	// heartbeatLoop cancels hbCtx if the lease is lost; PrepareFile runs on hbCtx
@@ -879,7 +913,9 @@ func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 		// remote-missing requeue can safely fall back to integrated preparation.
 		outputPath = a.OutputPath
 	}
-	applied, err := m.repo.MarkReady(ctx, a.ID, m.owner, outputPath, prepared.OriginNodeID, prepared.OriginNodeURL, prepared.OriginNodeGroup, prepared.OriginArtifactID, size)
+	// The fingerprint check above tied these bytes to file's current probe;
+	// freeze the audio inventory it describes with the ready transition.
+	applied, err := m.repo.MarkReady(ctx, a.ID, m.owner, outputPath, prepared.OriginNodeID, prepared.OriginNodeURL, prepared.OriginNodeGroup, prepared.OriginArtifactID, size, preparedAudioTracks(file, a))
 	if err != nil {
 		slog.ErrorContext(ctx, "marking artifact ready failed", "component", "downloads", "artifact_id", a.ID, "error", err)
 		m.cleanupRejectedPrepared(ctx, a.ID, prepared)
@@ -890,6 +926,7 @@ func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 		m.enqueueRemoteCleanup(ctx, a.ID, prepared, true)
 		return
 	}
+	observation.Finish("success")
 	flipped, err := m.downloads.MarkLinkedDownloadsReady(ctx, a.ID, size)
 	if err != nil {
 		slog.ErrorContext(ctx, "flipping linked downloads ready failed", "component", "downloads", "artifact_id", a.ID, "error", err)
@@ -987,6 +1024,7 @@ func (m *ArtifactManager) failJob(ctx context.Context, a *Artifact, msg string) 
 		// Lease lost; the current owner is responsible for the job's outcome.
 		return
 	}
+	workmetrics.FinishContext(ctx, "error")
 	if terminal {
 		m.failLinkedDownloads(ctx, a.ID, msg)
 	} else {
@@ -1056,6 +1094,14 @@ func (m *ArtifactManager) buildOpts(file *models.MediaFile, a *Artifact) playbac
 		slog.Warn("download artifact tone-map source revision is invalid", "component", "downloads", "artifact_id", a.ID, "source_revision_length", len(a.ToneMapSourceRevision))
 		sourceRevision = tonemap.SourceRevision{MediaFileID: -1}
 	}
+	// The multi-track layout carries each encoded track's channel count, so
+	// the single-track downmix recipe fields stay unset.
+	var preparedTracks *playback.PreparedTracks
+	sourceAudioChannels := preparedSourceAudioChannels(file, a.AudioTrackIndex, a.CodecAudio)
+	if a.TrackRecipeVersion != "" {
+		preparedTracks = playback.PlanPreparedTracks(file, a.CodecAudio, a.AudioTrackIndex)
+		sourceAudioChannels = 0
+	}
 	return playback.TranscodeOpts{
 		InputPath:                  file.FilePath,
 		SourceVideoCodec:           sourceVideoCodec,
@@ -1064,7 +1110,7 @@ func (m *ArtifactManager) buildOpts(file *models.MediaFile, a *Artifact) playbac
 		SoftwareVideoDecode:        playback.RequiresSoftwareVideoDecode(sourceVideoCodec, sourceVideoProfile, sourceVideoBitDepth),
 		TargetCodecVideo:           a.CodecVideo,
 		TargetCodecAudio:           a.CodecAudio,
-		TargetResolution:           a.Resolution,
+		TargetResolution:           playback.DownloadScaleResolution(file, a.Resolution),
 		TargetBitrateKbps:          a.TargetBitrateKbps,
 		ToneMapPolicy:              toneMapPolicy,
 		ToneMapMode:                a.ToneMapMode,
@@ -1077,8 +1123,9 @@ func (m *ArtifactManager) buildOpts(file *models.MediaFile, a *Artifact) playbac
 		ToneMapDVBLPresent:         a.ToneMapDVBLPresent,
 		ToneMapDVRPUPresent:        a.ToneMapDVRPUPresent,
 		AudioTrackIndex:            a.AudioTrackIndex,
-		SourceAudioChannels:        preparedSourceAudioChannels(file, a.AudioTrackIndex, a.CodecAudio),
+		SourceAudioChannels:        sourceAudioChannels,
 		SubtitleTrackIndex:         -1,
+		PreparedTracks:             preparedTracks,
 		FFmpegPath:                 cfg.Playback.FFmpegPath,
 		HWAccel:                    cfg.Playback.HWAccel,
 		HWDevice:                   cfg.Playback.HWDevice,

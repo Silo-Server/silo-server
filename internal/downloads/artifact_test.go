@@ -206,6 +206,43 @@ func TestPreparedAudioBoostFreezesSelectedSourceChannelsInExecutionFingerprint(t
 	}
 }
 
+func TestPreparedTracksFreezeStreamLayoutInExecutionFingerprint(t *testing.T) {
+	manager := &ArtifactManager{}
+	file := &models.MediaFile{
+		ID: 42, FilePath: "/media/movie.mkv", Duration: 3600, CodecAudio: "ac3",
+		AudioTracks:    []models.AudioTrack{{Codec: "ac3", Channels: 6}, {Codec: "aac", Channels: 2, Language: "ja"}},
+		SubtitleTracks: []models.SubtitleTrack{{Codec: "subrip", Language: "en"}},
+	}
+	artifact := &Artifact{
+		ID: "artifact-tracks", MediaFileID: file.ID, Format: "transcode",
+		Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", AudioTrackIndex: -1,
+		TrackRecipeVersion: playback.PreparedTracksRecipeVersion,
+	}
+	opts := manager.buildOpts(file, artifact)
+	if opts.PreparedTracks == nil || len(opts.PreparedTracks.Audio) != 2 || len(opts.PreparedTracks.Subtitles) != 1 {
+		t.Fatalf("PreparedTracks = %+v, want every audio track and the text subtitle", opts.PreparedTracks)
+	}
+	if opts.SourceAudioChannels != 0 {
+		t.Fatalf("SourceAudioChannels = %d, want the per-track layout to own downmix facts", opts.SourceAudioChannels)
+	}
+	artifact.ParamsHash = downloadprepare.NewRequest(artifact.ID, opts).ExecutionFingerprint()
+	if !artifactUsesExecutionFingerprint(artifact) || !artifactExecutionFingerprintMatches(artifact, opts) {
+		t.Fatal("track recipe was not protected by its execution fingerprint")
+	}
+	// A rescan that changes the source track list must not reuse the frozen file.
+	rescanned := *file
+	rescanned.AudioTracks = append(rescanned.AudioTracks, models.AudioTrack{Codec: "aac", Channels: 2})
+	if artifactExecutionFingerprintMatches(artifact, manager.buildOpts(&rescanned, artifact)) {
+		t.Fatal("changed source tracks reused the frozen multi-track artifact")
+	}
+
+	legacy := *artifact
+	legacy.TrackRecipeVersion = ""
+	if opts := manager.buildOpts(file, &legacy); opts.PreparedTracks != nil {
+		t.Fatalf("legacy artifact gained a multi-track layout: %+v", opts.PreparedTracks)
+	}
+}
+
 func TestPreparedSourceAudioChannelsRequiresAACSurroundToDefaultStereo(t *testing.T) {
 	file := &models.MediaFile{AudioTracks: []models.AudioTrack{{Channels: 2}, {Channels: 6}}}
 	for _, test := range []struct {

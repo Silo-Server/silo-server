@@ -102,7 +102,7 @@ func (m *Maintainer) process(ctx context.Context, userID int, profileID string, 
 		return err
 	}
 	for _, item := range items {
-		if item == nil || item.Type != "movie" {
+		if item == nil || item.Type != mediaTypeMovie {
 			continue
 		}
 		if err := m.removeFromWatchlist(ctx, store, userID, profileID, item); err != nil {

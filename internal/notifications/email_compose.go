@@ -159,6 +159,9 @@ func requestLine(row DeliveryRow) string {
 		if title != "" {
 			return title + " is now available"
 		}
+		if flags.Follower {
+			return followedTitleAvailable
+		}
 		return "Your media request is now available"
 	}
 }
