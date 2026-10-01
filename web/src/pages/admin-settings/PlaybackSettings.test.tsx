@@ -696,13 +696,13 @@ describe("seek preview settings", () => {
     ]) {
       expect(keys).toContain(key);
     }
-    expect(screen.getByLabelText("Seek preview width")).toHaveValue(300);
+    expect(screen.getByLabelText("Preview image width")).toHaveValue(300);
     expect(screen.getByLabelText("Seek preview interval")).toHaveValue(10);
     expect(screen.getByLabelText("Seek preview workers")).toHaveValue(2);
     expect(screen.getByText("Generate seek previews on")).toBeTruthy();
   });
 
-  it("asks before a new width remakes published previews", async () => {
+  it("asks before a new width remakes chapter thumbnails and published previews", async () => {
     const form = makeForm(
       { "playback.hw_accel": "none", "playback.preview_image_width": "320" },
       ["playback.preview_image_width"],
@@ -719,12 +719,32 @@ describe("seek preview settings", () => {
 
     expect(form.save).not.toHaveBeenCalled();
     expect(
-      screen.getByText(/^43 files' seek previews are made again with the new size or interval\./),
+      screen.getByText(
+        /^Every chapter thumbnail and 43 files' seek previews are made again at the new width\./,
+      ),
     ).toBeTruthy();
     await userEvent.click(
       within(screen.getByRole("alertdialog")).getByRole("button", { name: "Save" }),
     );
     expect(form.save).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks before a new width even with no seek previews, for chapter thumbnails", async () => {
+    const form = makeForm(
+      { "playback.hw_accel": "none", "playback.preview_image_width": "320" },
+      ["playback.preview_image_width"],
+      { "playback.preview_image_width": "300" },
+    );
+    useSettingsFormMock.mockReturnValue(form);
+    useAdminTrickplayLibrariesMock.mockReturnValue({ data: [], isSuccess: true });
+
+    render(<PlaybackSettings />);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(form.save).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(/^Every chapter thumbnail is made again at the new width\./),
+    ).toBeTruthy();
   });
 
   it.each([
@@ -769,7 +789,7 @@ it("hides unsupported seek preview settings and leaves their keys out", () => {
   useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "none" }));
   render(<PlaybackSettings />);
   expect(screen.queryByLabelText("Seek preview interval")).toBeNull();
-  expect(screen.queryByLabelText("Seek preview width")).toBeNull();
+  expect(screen.queryByLabelText("Preview image width")).toBeNull();
   expect(useSettingsFormMock.mock.calls[0]?.[0]?.keys).not.toContain("playback.trickplay_workers");
 });
 

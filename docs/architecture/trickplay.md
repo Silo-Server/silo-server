@@ -91,7 +91,7 @@ and runs each file at idle CPU and I/O priority:
 
 - The recipe comes from the settings in force at claim time:
   `playback.preview_image_width` (default 300, shared with chapter
-  thumbnails) and `playback.trickplay_interval_seconds` (default 10, at least
+  thumbnails, which a new width also remakes) and `playback.trickplay_interval_seconds` (default 10, at least
   5). A width up to 320 gets a 10x10 grid; wider thumbnails get fewer tiles
   so a sheet stays at most 3200 pixels wide. JPEG quality is fixed at 80.
 - A tile's height follows the display aspect ratio read from the execution
@@ -124,6 +124,48 @@ The Queue Seek Previews task runs a reconcile pass at startup and every 15
 minutes, on one server at a time. A server also reconciles as soon as it
 reads a new width or interval (it rereads the settings every minute), so a
 settings change does not wait for the next pass.
+
+Chapter thumbnails without the current width enter their existing worker
+queue at startup and after a width change. Missing first images stay pending
+while extraction runs, and workers recheck the live width after saving, so
+a settings change during extraction keeps a follow-up queued.
+A coordinator reads pages of 25 files by
+ID and waits when the normal queue already holds 25 requests. It checks
+queued and running replacements every minute. When all remaining images are
+cooling down, it defers catalog scans until the earliest retry deadline;
+both file and chapter deadlines apply. During that wait and after completion,
+it polls only the eligible library IDs in `media_folders`;
+a changed width or library set starts another backfill. This picks up a newly
+enabled library or chapter-thumbnail opt-in without rescanning every file's
+chapters while settings are stable.
+Each chapter worker takes a database advisory lock for its file before
+reading chapters and holds it through extraction, upload, and save. Its
+session comes from the query pool, with a shared limit of one quarter of
+its connection budget (at least one and at most four). Workers wait for
+session capacity without opening a connection, retaining queued requests
+for files that do not have chapters yet. Cancellation stops that wait. A one-connection query pool uses one capped separate lock session
+so extraction can still query settings and library state. Chapter
+locks explicitly unlock and return healthy borrowed sessions to the pool,
+restoring their diagnostic application name. Broken sessions and the capped
+separate session are closed. Chapter state commits use the lock session; a worker whose connection dies cannot
+save after another replica takes over. Encoded image hashes make output
+keys immutable: different bytes use different chapter-index directories, so
+an upload that finishes after lock loss cannot overwrite the replacement.
+Legacy numeric chapter-index paths remain readable.
+Normal requests on another replica skip that file while the lock is held.
+Playback priority requests retain their target in the local queue and retry
+after a one-second delay, letting workers serve other files in the meantime.
+A newer target replaces the retained target. The next admitted request
+rereads chapter state. The coordinator retries any replacements left
+pending. Images replaced at another width stay stored for at least 48 hours and
+until every issued URL expires. The chapter URL resolver records actual
+expiry in the deletion queue before returning a URL. It holds file row
+locks against chapter updates and deletion, verifies the exact image is
+still referenced, and withholds stale URLs. File deletion carries the latest
+child image deadline to the parent prefix, including displaced widths.
+Protection survives replica setting differences and server restarts. Reusing
+a width postpones its queued deletion before writing and keeps any longer
+issued expiry; the upsert waits for an active collector to finish.
 
 ### Transcode nodes
 
@@ -243,3 +285,7 @@ pages. A prefix split across runs carries its newest object time and stays
 unqueued until the full prefix has been listed. Errors or an anomaly keep
 the prior checkpoint; finishing a namespace clears its cursor, and changing
 stores starts a new walk.
+
+Chapter replacement queues displaced image keys in the same database transaction
+as the chapter update, preserving any later issued URL expiry. This covers a
+worker exit before its idempotent retirement scheduling and chapter clears.

@@ -130,6 +130,29 @@ const ChapterThumbnailOriginalsCleanupKey = "chapter_thumbnails.originals_cleanu
 // worker per CPU core, resolved when the task runs.
 const MetadataImageWorkersSettingKey = "metadata.image_workers"
 
+// PreviewImageWidthSettingKey is the width of the preview images the server
+// makes from video: chapter thumbnails and the thumbnails of seek-preview
+// sheets. Changing it makes both again.
+const PreviewImageWidthSettingKey = "playback.preview_image_width"
+
+// Bounds of PreviewImageWidthSettingKey, in pixels. Widths are even.
+const (
+	DefaultPreviewImageWidth = 300
+	MinPreviewImageWidth     = 160
+	MaxPreviewImageWidth     = 640
+)
+
+// PreviewImageWidth reads a stored PreviewImageWidthSettingKey value: an
+// unset or unparsable value is the default, and any other is brought within
+// bounds and made even, as validation would have required.
+func PreviewImageWidth(value string) int {
+	width, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return DefaultPreviewImageWidth
+	}
+	return min(max(width, MinPreviewImageWidth), MaxPreviewImageWidth) &^ 1
+}
+
 // MarkersDetectionWorkersSettingKey sizes local intro detection: how many
 // seasons are analyzed at once and how many ffmpeg processes read audio.
 const MarkersDetectionWorkersSettingKey = "markers.detection_workers"
@@ -491,8 +514,8 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt(key, value, 1, 64)
 	case "playback.chapter_thumbnail_workers", "playback.chapter_thumbnail_node_capacity":
 		return normalizeAdminInt(key, value, 1, 1024)
-	case "playback.preview_image_width":
-		normalized, err := normalizeAdminInt(key, value, 160, 640)
+	case PreviewImageWidthSettingKey:
+		normalized, err := normalizeAdminInt(key, value, MinPreviewImageWidth, MaxPreviewImageWidth)
 		if err != nil {
 			return "", err
 		}

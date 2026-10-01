@@ -67,12 +67,29 @@ const TRANSCODING_ADVANCED_KEYS = [
   "playback.trickplay_execution",
 ];
 
-// Seek previews are made to these; changing one makes every published preview
-// again. The defaults are the server's, for a row that was never set.
-const TRICKPLAY_RECIPE_DEFAULTS: Record<string, string> = {
-  "playback.preview_image_width": "300",
-  "playback.trickplay_interval_seconds": "10",
+// A new preview image width makes every chapter thumbnail and seek preview
+// again; a new interval, every seek preview. The defaults are the server's,
+// for a row that was never set.
+const PREVIEW_WIDTH_KEY = "playback.preview_image_width";
+const TRICKPLAY_INTERVAL_KEY = "playback.trickplay_interval_seconds";
+const REMAKE_DEFAULTS: Record<string, string> = {
+  [PREVIEW_WIDTH_KEY]: "300",
+  [TRICKPLAY_INTERVAL_KEY]: "10",
 };
+
+/** What saving a new width or interval makes again, for the confirmation. */
+function remakeDescription(widthChanged: boolean, previews: number | null): string {
+  const files = previews === null ? "existing" : previews === 1 ? "1 file's" : `${previews} files'`;
+  const what = !widthChanged
+    ? previews === null
+      ? "Existing seek previews are"
+      : `${files} seek previews are`
+    : previews === null || previews > 0
+      ? `Every chapter thumbnail and ${files} seek previews are`
+      : "Every chapter thumbnail is";
+  const how = widthChanged ? "at the new width" : "with the new interval";
+  return `${what} made again ${how}. This runs in the background and can take a long time on a large library; players keep the current images until each is replaced.`;
+}
 
 const executionOptions = [
   { value: "prefer_worker", label: "Prefer any worker" },
@@ -245,10 +262,7 @@ export default function PlaybackSettings() {
     () =>
       supportsTrickplay
         ? KEYS
-        : KEYS.filter(
-            (key) =>
-              key !== "playback.preview_image_width" && !key.startsWith("playback.trickplay_"),
-          ),
+        : KEYS.filter((key) => key !== PREVIEW_WIDTH_KEY && !key.startsWith("playback.trickplay_")),
     [supportsTrickplay],
   );
   const form = useSettingsForm({ keys });
@@ -277,14 +291,17 @@ export default function PlaybackSettings() {
     (count, library) => count + library.ready + library.running + library.pending,
     0,
   );
-  const recipeChanged = Object.entries(TRICKPLAY_RECIPE_DEFAULTS).some(
-    ([key, fallback]) =>
-      form.isDirty(key) &&
-      (form.getValue(key) || fallback) !== (form.getPersistedValue(key) || fallback),
-  );
+  const changed = (key: string) =>
+    form.isDirty(key) &&
+    (form.getValue(key) || REMAKE_DEFAULTS[key]) !==
+      (form.getPersistedValue(key) || REMAKE_DEFAULTS[key]);
+  const widthChanged = changed(PREVIEW_WIDTH_KEY);
+  const asksToRemake =
+    widthChanged ||
+    (changed(TRICKPLAY_INTERVAL_KEY) && (!trickplayLibraries.isSuccess || previewsToRemake > 0));
   const [confirmRemake, setConfirmRemake] = useState(false);
   const save = () => {
-    if (recipeChanged && (!trickplayLibraries.isSuccess || previewsToRemake > 0)) {
+    if (asksToRemake) {
       setConfirmRemake(true);
       return;
     }
@@ -593,10 +610,10 @@ export default function PlaybackSettings() {
             {supportsTrickplay && (
               <>
                 <SettingField
-                  label="Seek preview width"
+                  label="Preview image width"
                   type="number"
                   unit="px"
-                  description="Width of the thumbnails players show while seeking, 160 to 640. Changing it makes every library's previews again; players keep the current ones until then."
+                  description="Width of chapter thumbnails and of the thumbnails players show while seeking, 160 to 640. Changing it makes them all again; players keep the current ones until each is replaced."
                   value={form.getValue("playback.preview_image_width")}
                   onChange={(v) => form.setValue("playback.preview_image_width", v)}
                   restartRequired={restartKeys.has("playback.preview_image_width")}
@@ -746,16 +763,14 @@ export default function PlaybackSettings() {
       <AlertDialog open={confirmRemake} onOpenChange={setConfirmRemake}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Make seek previews again?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {widthChanged ? "Make preview images again?" : "Make seek previews again?"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              {!trickplayLibraries.isSuccess
-                ? "Existing"
-                : previewsToRemake === 1
-                  ? "1 file's"
-                  : `${previewsToRemake} files'`}{" "}
-              seek previews are made again with the new size or interval. This runs in the
-              background and can take a long time on a large library; players keep the current
-              previews until each file's new ones are ready.
+              {remakeDescription(
+                widthChanged,
+                trickplayLibraries.isSuccess ? previewsToRemake : null,
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
