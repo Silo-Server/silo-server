@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -188,6 +189,15 @@ func (r *PlayableTargetResolver) Resolve(ctx context.Context, q PlayableTargetQu
 			fileConditions = append(fileConditions, fmt.Sprintf("NOT (mf.media_folder_id = ANY($%d))", argIdx))
 			args = append(args, q.Access.DisabledLibraryIDs)
 		}
+	}
+
+	// PostgreSQL progress lives beside the catalog, so the database can choose
+	// winners without returning every episode or issuing progress batches.
+	// Other stores retain the backend-neutral candidate path below.
+	if store, ok := q.ProgressStore.(interface {
+		SupportsCatalogPlayableTargets(*pgxpool.Pool, int) bool
+	}); ok && (slices.Contains(types, playableTypeSeries) || slices.Contains(types, playableTypeSeason)) && store.SupportsCatalogPlayableTargets(r.pool, q.UserID) {
+		return r.resolvePostgresTargets(ctx, q, args, fileConditions, keysByOrd)
 	}
 
 	query := fmt.Sprintf(`

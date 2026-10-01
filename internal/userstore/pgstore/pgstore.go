@@ -27,6 +27,13 @@ func newStore(pool *pgxpool.Pool, userID int) *PostgresUserStore {
 	return &PostgresUserStore{pool: pool, userID: userID}
 }
 
+// SupportsCatalogPlayableTargets allows catalog to select profile-aware
+// playback targets in SQL only when both repositories share this account's
+// database. Separate databases and other progress backends use their own reads.
+func (s *PostgresUserStore) SupportsCatalogPlayableTargets(pool *pgxpool.Pool, userID int) bool {
+	return s != nil && pool != nil && s.pool == pool && s.userID == userID
+}
+
 func generateUUID() string {
 	return uuid.New().String()
 }

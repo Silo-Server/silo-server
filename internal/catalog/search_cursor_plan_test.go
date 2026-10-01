@@ -30,7 +30,7 @@ func TestSearchCursorSQLMatchesOffsetPlanShape(t *testing.T) {
 			if options.err != nil {
 				t.Fatal(options.err)
 			}
-			if definitionPredicate.MatchString(v2SQL) {
+			if definitionPredicate.MatchString(strings.ReplaceAll(v2SQL, "content_id IN (SELECT title_mi.content_id", "indexed title candidate")) {
 				t.Fatal("cursor search re-scans the library through a definition predicate although the definition has no rules")
 			}
 			if strings.Contains(v2SQL, "sort_added") {
@@ -60,7 +60,7 @@ func TestSearchCursorSQLMatchesOffsetPlanShape(t *testing.T) {
 	if options.err != nil {
 		t.Fatal(options.err)
 	}
-	if !definitionPredicate.MatchString(ruledSQL) {
+	if !definitionPredicate.MatchString(strings.ReplaceAll(ruledSQL, "content_id IN (SELECT title_mi.content_id", "indexed title candidate")) {
 		t.Fatal("a definition with rules lost its candidate predicate")
 	}
 
@@ -131,5 +131,31 @@ func equalArg(a, b any) bool {
 		return true
 	default:
 		return a == b
+	}
+}
+
+// Unrestricted broad matches need a flattenable join so PostgreSQL can use
+// parallel admission and DISTINCT sorting. Library policy retains the boundary
+// that prevents rare terms from scanning all episodes under admitted parents.
+func TestEpisodeSearchPlanningBoundaryFollowsPolicy(t *testing.T) {
+	repo := &ItemRepository{}
+	for _, tc := range []struct {
+		name   string
+		filter AccessFilter
+		fenced bool
+	}{
+		{name: "unrestricted"},
+		{name: "allowed", filter: AccessFilter{AllowedLibraryIDs: []int{2}}, fenced: true},
+		{name: "deny all", filter: AccessFilter{AllowedLibraryIDs: []int{}}, fenced: true},
+		{name: "disabled", filter: AccessFilter{DisabledLibraryIDs: []int{2}}, fenced: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dataSQL, countSQL, _ := repo.buildMixedSearchSQLFromParsed(parseSearchQuery("signal"), []string{"episode"}, 20, 0, tc.filter, true)
+			for _, query := range []string{dataSQL, countSQL} {
+				if got := strings.Contains(query, "search_series_parent_id"); got != tc.fenced {
+					t.Fatalf("parent planning boundary = %v, want %v", got, tc.fenced)
+				}
+			}
+		})
 	}
 }

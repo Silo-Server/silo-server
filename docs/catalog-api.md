@@ -177,11 +177,15 @@ follows the same rule. The one exception is recently added TV, which also
 matches an episode's own title so episode cards can be found by name.
 
 Both operations return shared catalog cards, `page.next_cursor`, `page.has_more`,
-`total`, `total_exact`, and `window_cursor`. Send `next_cursor` unchanged for the
-next page. A virtualized client can retain `window_cursor` and send it with
-`seek`, a zero-based result position, to request a distant window or return to
-position zero. A seek locates one SQL ordering boundary; it can scan the sorted
-prefix and does not have constant cost. The complete browse request has a
+`total`, `total_exact`, and `window_cursor`. Send `next_cursor` unchanged as
+`cursor`, without `seek`, for an adjacent page. This reuses the ordering boundary
+already returned by the previous page. A virtualized client can retain
+`window_cursor` and send it with `seek`, a zero-based result position, to request
+a distant window or return to position zero. Use this path when the preceding
+page's continuation is unavailable; independent distant windows can load in
+parallel without fetching intermediate pages. A seek locates an additional SQL
+ordering boundary; it can scan the sorted prefix and does not have constant cost.
+The complete browse request has a
 10-second deadline and honors client cancellation. Keep only visible and
 overscan pages active, and cancel requests when the query changes.
 

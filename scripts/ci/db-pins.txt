@@ -33,9 +33,28 @@
 ./internal/catalog TestQueryExecutorTerminalPageTotals
 ./internal/catalog TestJellycompatPredicatesPostgres
 
+# PostgreSQL search: stored documents preserve ranking and cursor tuples;
+# sparse first pages reuse one FTS probe, and trigger work stays bounded.
+./migrations TestMediaSearchDocumentsMigrationPostgres
+./migrations TestEpisodeSearchRefreshMigrationPostgres
+./migrations TestEpisodeExactSearchIndexMigrationPostgres
+./internal/catalog TestMediaSearchDocumentsPostgres
+./internal/catalog TestSearchOptimizedAccuracyPostgres
+./internal/catalog TestSearchSparseProbeReusePostgres
+./internal/catalog TestSearchUsesCustomPlansPostgres
+./internal/catalog TestSearchCursorPostgres
+./internal/catalog TestSearchCursorMixedAndGroupsPostgres
+./internal/catalog TestEpisodeSearchPostgresAndDocumentSource
+./internal/catalog TestEpisodeSearchOverviewVectorRefreshesOnOverviewUpdate
+./internal/catalog TestEpisodeSearchRefreshWorkPostgres
+./internal/catalog TestEpisodeExactTierCursorAndPlanPostgres
+
 # Card play targets: leaf cards and a validated anchor hint resolve without a
 # watch-progress query.
 ./internal/catalog TestPlayableTargetResolverProfileStateAvailabilityAndAccess
+./internal/catalog TestPlayableTargetResolverResumesDeepInsideLongSeries
+./internal/catalog TestPlayableTargetResolverStaleCompletedProgressPlan
+./internal/catalog TestCatalogOverlaySummariesPreserveLegacyWinners
 
 # Keyset pages: ratings and collection continuations read an index in page
 # order, with no Sort node.
