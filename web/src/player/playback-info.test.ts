@@ -315,6 +315,26 @@ describe("qualityOptionsFromPlanV3", () => {
     expect(resolveActiveQualityOptionId(options, "FHD")).toBe("1080p-medium");
   });
 
+  it("marks Original when the source fits the resolution cap alongside same-height rungs", () => {
+    // A 1080p source above the Medium bitrate publishes 1080p High/Medium/Low,
+    // but the planner preserves the source for a plain 1080p cap.
+    const options = qualityOptionsFromPlanV3(
+      fixturePlanV3({
+        available_qualities: [
+          { label: "original", height: 1080, bitrate_kbps: 20_000, preserves_source: true },
+          { label: "1080p-high", height: 1080, bitrate_kbps: 10_000, preserves_source: false },
+          { label: "1080p-medium", height: 1080, bitrate_kbps: 6000, preserves_source: false },
+          { label: "720p-medium", height: 720, bitrate_kbps: 2000, preserves_source: false },
+        ],
+      }),
+    );
+
+    expect(resolveActiveQualityOptionId(options, "1080p")).toBe("original");
+    expect(resolveActiveQualityOptionId(options, "2160p")).toBe("original");
+    expect(resolveActiveQualityOptionId(options, "720p")).toBe("720p-medium");
+    expect(lowerQualityOption(options, "1080p")?.id).toBe("1080p-high");
+  });
+
   it("marks Original when a resolution cap already preserves the source", () => {
     const options: QualityOption[] = [
       {

@@ -213,14 +213,13 @@ export function resolveActiveQualityOptionId(
     return originalAlias ? (options.find((option) => option.isOriginal)?.id ?? null) : null;
   }
 
-  const medium = options.find((option) => option.id === `${aliasHeight}p-medium`);
-  if (medium) return medium.id;
-
+  // The planner preserves a source that fits the cap, even when the ladder
+  // also publishes same-height rungs below the source bitrate.
   const original = options.find((option) => option.isOriginal);
   if (original && resolutionHeight(original.resolution) <= aliasHeight) {
     return original.id;
   }
-  return null;
+  return options.find((option) => option.id === `${aliasHeight}p-medium`)?.id ?? null;
 }
 
 /**
