@@ -5,8 +5,17 @@ import { MemoryRouter } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver;
+
 const mocks = vi.hoisted(() => ({
   useAdminLibraries: vi.fn(),
+  useLibraryCapabilities: vi.fn(),
+  useLibraryProviderDefaults: vi.fn(),
   useLibraryRefreshJobs: vi.fn(),
   useSkippedLibraryRoots: vi.fn(),
   useStaleMediaIDs: vi.fn(),
@@ -42,6 +51,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/hooks/queries/admin/libraries", () => ({
   useAdminLibraries: (...args: unknown[]) => mocks.useAdminLibraries(...args),
+  useLibraryCapabilities: (...args: unknown[]) => mocks.useLibraryCapabilities(...args),
+  useLibraryProviderDefaults: (...args: unknown[]) => mocks.useLibraryProviderDefaults(...args),
   useLibraryRefreshJobs: (...args: unknown[]) => mocks.useLibraryRefreshJobs(...args),
   useSkippedLibraryRoots: (...args: unknown[]) => mocks.useSkippedLibraryRoots(...args),
   useStaleMediaIDs: (...args: unknown[]) => mocks.useStaleMediaIDs(...args),
@@ -204,6 +215,8 @@ describe("AdminLibraries", () => {
       ],
       isLoading: false,
     });
+    mocks.useLibraryCapabilities.mockReturnValue({ data: undefined });
+    mocks.useLibraryProviderDefaults.mockReturnValue({ data: { levels: {} }, isLoading: false });
     mocks.useCheckLibraryMount.mockReturnValue(queryState);
     mocks.useLibraryRefreshJobs.mockReturnValue({
       data: [],
@@ -268,6 +281,32 @@ describe("AdminLibraries", () => {
     mocks.useLibraryRealtimeMonitoring.mockReturnValue({ data: undefined });
     mocks.useAdminTrickplayLibraries.mockReturnValue({ data: undefined });
   });
+
+  it.each([
+    { supported: true, visible: true, enabled: true },
+    { supported: false, visible: true, enabled: false },
+    { supported: undefined, visible: false, enabled: false },
+  ])(
+    "uses capability storage status for first-library seek previews ($supported)",
+    async ({ supported, visible, enabled }) => {
+      mocks.useAdminLibraries.mockReturnValue({ data: [], isLoading: false });
+      mocks.useLibraryCapabilities.mockReturnValue({
+        data: { trickplay: true, trickplay_supported: supported },
+      });
+      renderInteractivePage();
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: /Add Library/ }));
+      await user.click(screen.getByRole("tab", { name: "Advanced" }));
+      const previewSwitch = screen.queryByRole("switch", { name: "Generate seek previews" });
+      if (visible) {
+        expect(previewSwitch).toBeInTheDocument();
+        if (enabled) expect(previewSwitch).toBeEnabled();
+        else expect(previewSwitch).toBeDisabled();
+      } else {
+        expect(previewSwitch).not.toBeInTheDocument();
+      }
+    },
+  );
 
   it("uses scan language instead of metadata refresh language on the admin libraries page", () => {
     const markup = renderPage();

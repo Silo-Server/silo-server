@@ -502,6 +502,82 @@ describe("PlaybackSettings chapter thumbnail execution", () => {
   });
 });
 
+describe("PlaybackSettings seek-preview node capability", () => {
+  beforeEach(expandAdvanced);
+
+  it.each([
+    [{ capabilities: undefined }, true],
+    [{ capabilities: { transport_features: ["chapter_extract_v1"] } }, true],
+    [{ capabilities: { transport_features: ["trickplay_extract_v1"] } }, false],
+    [
+      {
+        capabilities: { transport_features: ["trickplay_extract_v1"] },
+        advertised_capabilities_hash: "",
+        capabilities_hash: "snapshot",
+      },
+      true,
+    ],
+    [
+      {
+        capabilities: { transport_features: ["trickplay_extract_v1"] },
+        advertised_capabilities_hash: "new-snapshot",
+        capabilities_hash: "old-snapshot",
+      },
+      true,
+    ],
+    [
+      {
+        capabilities: { transport_features: ["trickplay_extract_v1"] },
+        advertised_capabilities_hash: "snapshot",
+      },
+      true,
+    ],
+    [
+      {
+        capabilities: { transport_features: ["trickplay_extract_v1"] },
+        advertised_capabilities_hash: "snapshot",
+        capabilities_hash: "snapshot",
+      },
+      false,
+    ],
+  ])("gates node execution for node snapshot %o", async (overrides, disabled) => {
+    useAdminNodesMock.mockReturnValue({ data: [transcodeNode(overrides)], isSuccess: true });
+    useSettingsFormMock.mockReturnValue(makeForm({ "playback.trickplay_execution": "local" }));
+    render(<PlaybackSettings />);
+    await userEvent.click(screen.getByRole("combobox", { name: "Generate seek previews on" }));
+    const option = screen.getByRole("option", { name: "Transcode nodes only" });
+    expect(option.getAttribute("aria-disabled") === "true").toBe(disabled);
+  });
+
+  it.each([
+    ["prefer_transcode_nodes", "Transcode nodes when available", "Transcode nodes only"],
+    ["transcode_nodes_only", "Transcode nodes only", "Transcode nodes when available"],
+  ])("keeps saved %s editable while the node snapshot is stale", async (mode, saved, other) => {
+    useAdminNodesMock.mockReturnValue({
+      data: [
+        transcodeNode({
+          capabilities: { transport_features: ["trickplay_extract_v1"] },
+          advertised_capabilities_hash: "new-snapshot",
+          capabilities_hash: "old-snapshot",
+        }),
+      ],
+      isSuccess: true,
+    });
+    useSettingsFormMock.mockReturnValue(makeForm({ "playback.trickplay_execution": mode }));
+    render(<PlaybackSettings />);
+    await userEvent.click(screen.getByRole("combobox", { name: "Generate seek previews on" }));
+    expect(screen.getByRole("option", { name: saved })).not.toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    expect(screen.getByRole("option", { name: other })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("option", { name: "This server" })).not.toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  });
+});
+
 describe("PlaybackSettings divergent node inventories", () => {
   // The device picker lives behind the advanced disclosure this page grew.
   beforeEach(expandAdvanced);
