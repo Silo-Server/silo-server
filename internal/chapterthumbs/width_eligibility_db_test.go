@@ -151,3 +151,71 @@ func TestCompletedWidthScanRechecksLibraryEligibilityDB(t *testing.T) {
 		})
 	}
 }
+
+func TestWidthBackfillDefersCatalogScansUntilRetryDB(t *testing.T) {
+	for _, cooldown := range []string{"chapter", "file", "both"} {
+		t.Run(cooldown, func(t *testing.T) {
+			pool := chapterWidthTestPool(t)
+			fileID, _ := chapterURLTestFile(t, pool)
+			deadline := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+			if cooldown != "file" {
+				if _, err := pool.Exec(t.Context(), `UPDATE media_files SET chapters=jsonb_set(chapters,
+					'{0,thumbnail_retry_after}',to_jsonb($2::text)) WHERE id=$1`, fileID, deadline.Format(time.RFC3339)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if cooldown != "chapter" {
+				if _, err := pool.Exec(t.Context(), `UPDATE media_files SET chapter_thumbnail_retry_after=$2 WHERE id=$1`, fileID, deadline); err != nil {
+					t.Fatal(err)
+				}
+			}
+			repo := &observedWidthRepository{FileRepository: scanner.NewFileRepository(pool), scans: make(chan struct{}, 16), checks: make(chan struct{}, 16)}
+			service := widthQueueService(repo)
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			ticks := make(chan time.Time)
+			done := make(chan struct{})
+			go func() { defer close(done); service.followPreviewWidthTicks(ctx, ticks) }()
+			t.Cleanup(func() { cancel(); <-done })
+			select {
+			case <-repo.scans:
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			for range 3 {
+				select {
+				case <-repo.checks:
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				}
+				select {
+				case ticks <- deadline.Add(-time.Minute):
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				}
+			}
+			if scans := repo.scanCount.Load(); scans != 1 {
+				t.Fatalf("cooling-down image caused %d catalog scans before retry, want startup only", scans)
+			}
+			if _, err := pool.Exec(ctx, `UPDATE media_files SET chapter_thumbnail_retry_after=NULL,
+				chapters=chapters #- '{0,thumbnail_retry_after}' WHERE id=$1`, fileID); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case ticks <- deadline:
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			select {
+			case <-service.notifyNormal:
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			service.mu.Lock()
+			_, queued := service.queuedNormal[fileID]
+			service.mu.Unlock()
+			if !queued {
+				t.Fatal("retry deadline did not resume the width backfill")
+			}
+		})
+	}
+}
