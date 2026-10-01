@@ -22,6 +22,12 @@ type ServerConfig struct {
 	LogQuiet  string `yaml:"log_quiet"`
 }
 
+// MinDatabaseMaxConnections is the smallest supported primary pool size.
+// Collection poster mutations pin one pooled connection for an advisory lock
+// while issuing their protected queries through the same pool, so a
+// single-connection pool cannot serve them.
+const MinDatabaseMaxConnections = 2
+
 // DatabaseConfig holds the primary PostgreSQL connection settings.
 type DatabaseConfig struct {
 	URL            string `yaml:"url"`

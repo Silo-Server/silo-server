@@ -67,6 +67,7 @@ export default function DatabaseSettings() {
           <SettingField
             label="Max Connections"
             type="number"
+            hint="Minimum 2. Collection poster changes hold one connection while running queries on another."
             value={form.getValue("database.max_connections")}
             onChange={(v) => form.setValue("database.max_connections", v)}
           />

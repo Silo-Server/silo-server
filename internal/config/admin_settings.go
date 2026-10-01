@@ -291,7 +291,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminBool(key, value)
 
 	case "database.max_connections":
-		return normalizeAdminInt(key, value, 1, 10000)
+		return normalizeAdminInt(key, value, MinDatabaseMaxConnections, 10000)
 	case "userdb.pool_max_open":
 		return normalizeAdminInt(key, value, 1, 100000)
 	case "scanner.workers", "matcher.workers":

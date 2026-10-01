@@ -215,6 +215,7 @@ func TestNormalizeAdminSettingRejectsInvalidValues(t *testing.T) {
 		value string
 	}{
 		{key: "database.max_connections", value: "0"},
+		{key: "database.max_connections", value: "1"},
 		{key: "metadata.cache_images", value: "maybe"},
 		{key: chapterThumbnailSoftwareToneMapKey, value: "maybe"},
 		{key: "auth.access_token_expiry", value: "forever"},
