@@ -26,6 +26,8 @@ export interface CardExtraWrite<D> {
    * account fields are rebased.
    */
   reload: () => Promise<((draft: D) => D) | void>;
+  /** Names what the write saved, for a save that fails after it ("Request limit"). */
+  savedLabel?: string;
 }
 
 /** Structural equality for draft values: plain objects, arrays and primitives. */
@@ -159,16 +161,29 @@ export function useAccountCardDraft<D>(opts: {
     busy.current = true;
     setSaving(true);
     setError("");
+    // The extra write lands first; if the account PUT then fails, say so
+    // instead of reporting the whole save as failed.
+    let extraSaved = false;
     try {
-      if (extra) await extra.write(draft);
+      if (extra) {
+        await extra.write(draft);
+        extraSaved = true;
+      }
       if (hasBody) await updateUser.mutateAsync({ editor: captured, body });
       reset();
       end(opts.id);
       toast.success("Saved");
       return true;
     } catch (err) {
-      if (isConflict(err)) setConflict(true);
-      else setError(err instanceof Error ? err.message : "Could not save this account.");
+      const partly = extraSaved ? `${opts.extra?.savedLabel ?? "Part of this card"} saved. ` : "";
+      if (isConflict(err)) {
+        setConflict(true);
+        if (partly)
+          setError(`${partly}The account change wasn't, because another admin changed it.`);
+      } else {
+        const reason = err instanceof Error ? err.message : "Could not save this account.";
+        setError(partly ? `${partly}The account change wasn't: ${reason}` : reason);
+      }
       return false;
     } finally {
       busy.current = false;

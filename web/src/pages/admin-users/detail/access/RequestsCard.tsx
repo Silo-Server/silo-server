@@ -180,6 +180,7 @@ export function RequestsCard({
         ? "Fix the request limit before saving."
         : null,
     extra: {
+      savedLabel: "Request approval and limit",
       changed: (d) =>
         Boolean(d.limit && limitRecordDraft && requestLimitChanges(d.limit, limitRecordDraft) > 0),
       write: async (d) => {
