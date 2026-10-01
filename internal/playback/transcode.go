@@ -108,7 +108,12 @@ type TranscodeOpts struct {
 	vaapiRateControl string
 	// preparedFileEncode marks a single-file download encode. Nothing waits on
 	// it in real time, so it trades encode speed for quality; HLS never sets it.
-	preparedFileEncode         bool
+	preparedFileEncode bool
+	// copyGroupPrefix is set for a keyframe-planned session's FFmpeg run: it
+	// cuts at every keyframe into <prefix>NNNNNN.m4s groups the session
+	// joins into the planned segments (copy_group_assembler.go). Derived per
+	// run, never frozen into a recipe.
+	copyGroupPrefix            string
 	ToneMapPolicy              tonemap.Policy
 	ToneMapMode                tonemap.Mode
 	ToneMapSourceKind          tonemap.SourceKind
@@ -258,6 +263,9 @@ type TranscodeSession struct {
 	// copyPlan is the planned segment list served instead of FFmpeg's
 	// playlist, or nil. It is fixed when the session starts.
 	copyPlan *copySegmentPlan
+	// copyGroups joins FFmpeg's keyframe groups into the planned segments;
+	// set with copyPlan.
+	copyGroups *copyGroupAssembler
 }
 
 // NewTranscodeSessionForTest exposes only the output directory needed by tests
@@ -415,8 +423,11 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		return nil, err
 	}
 	copyPlan := planCopySegments(opts)
+	var copyGroups *copyGroupAssembler
 	if copyPlan != nil {
 		log.Printf("playback: session %s serves a %d-segment keyframe playlist", opts.SessionID, len(copyPlan.durations))
+		copyGroups = newCopyGroupAssembler(opts.OutputDir, copyPlan)
+		opts.copyGroupPrefix = copyGroups.startRun(opts.StartSegmentNumber, audioRecipeKey(opts))
 	}
 
 	// The synchronous source guard above is bounded by the caller's startup
@@ -437,6 +448,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		segmentIncarnation:   uuid.NewString(),
 		hwWorkloadDevice:     hwWorkloadDevice,
 		copyPlan:             copyPlan,
+		copyGroups:           copyGroups,
 	}
 
 	args := buildFFmpegArgs(opts)
@@ -479,6 +491,9 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	// Monitor ffmpeg in background. The process-specific reservation is released
 	// before done closes, so waiters can safely launch a replacement process.
 	go s.monitorFFmpeg(ctx, cmd, s.done, releaseHWDevice)
+	if s.copyGroups != nil {
+		go s.copyGroups.watch(s.done)
+	}
 
 	return s, nil
 }
@@ -862,16 +877,27 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 		segmentPattern = filepath.Join(opts.OutputDir, "seg_%05d.ts")
 	}
 	manifestPath := filepath.Join(opts.OutputDir, "stream.m3u8")
+	hlsTime := fmt.Sprintf("%d", opts.SegmentDuration)
+	// Bound real playlists as well as synthetic ones. Segment files remain on
+	// disk because delete_segments is not enabled, while the manifest itself
+	// cannot grow without limit during multi-day sessions.
+	hlsListSize := strconv.Itoa(maxSyntheticManifestSegments)
+	if opts.copyGroupPrefix != "" {
+		// A keyframe-planned run: a tiny target cuts at every keyframe, one
+		// group per file, and nothing reads FFmpeg's playlist, so it stays
+		// short instead of being rewritten whole after every group.
+		segmentPattern = filepath.Join(opts.OutputDir, opts.copyGroupPrefix+"%06d.m4s")
+		manifestPath = filepath.Join(opts.OutputDir, copyGroupPlaylist)
+		hlsTime = "0.001"
+		hlsListSize = "5"
+	}
 
 	args = append(args,
 		"-max_muxing_queue_size", "2048",
 		"-max_delay", "5000000",
 		"-f", "hls",
-		"-hls_time", fmt.Sprintf("%d", opts.SegmentDuration),
-		// Bound real playlists as well as synthetic ones. Segment files remain on
-		// disk because delete_segments is not enabled, while the manifest itself
-		// cannot grow without limit during multi-day sessions.
-		"-hls_list_size", strconv.Itoa(maxSyntheticManifestSegments),
+		"-hls_time", hlsTime,
+		"-hls_list_size", hlsListSize,
 		"-hls_segment_type", segmentType,
 		// Write segments to temp files first so the player never fetches a
 		// partially-written segment during a quality switch.
@@ -886,7 +912,7 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 	if videoUsesFMP4 {
 		args = append(args, "-hls_segment_options", "movflags=+frag_discont")
 	}
-	if opts.StartSegmentNumber > 0 {
+	if opts.StartSegmentNumber > 0 && opts.copyGroupPrefix == "" {
 		args = append(args, "-start_number", fmt.Sprintf("%d", opts.StartSegmentNumber))
 	}
 	args = append(args, manifestPath)
@@ -2013,6 +2039,9 @@ func (s *TranscodeSession) GetManifest() ([]byte, error) {
 // output. The check compares file identity rather than timestamps, so a
 // filesystem whose clock differs from this host's cannot hide fresh output.
 func (s *TranscodeSession) getManifest(currentGeneration bool) ([]byte, error) {
+	if s.copyGroups != nil {
+		return s.plannedManifestWhenReady()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -2670,6 +2699,9 @@ func staleProducedWindow(segmentDuration int) time.Duration {
 // SegmentProgress reports the highest manifest-referenced segment that exists
 // on disk with data. This is the produced media source of truth.
 func (s *TranscodeSession) SegmentProgress(time.Time) SegmentProgress {
+	if s.copyGroups != nil {
+		return s.plannedSegmentProgress()
+	}
 	s.mu.Lock()
 	opts := s.opts
 	progress := SegmentProgress{
@@ -3204,12 +3236,13 @@ func (s *TranscodeSession) restart(
 		<-done
 	}
 
-	// A planned stream's segments only match its playlist when FFmpeg cuts
-	// them from the beginning, so it always restarts there. The requested
-	// segment stays the throttler's target, so FFmpeg runs on to reach it.
+	// A planned stream restarts at the requested segment: its groups match
+	// the plan wherever FFmpeg starts. The seek aims before the segment's
+	// first keyframe, so the run covers all of it whatever caller asked.
 	requestedSegment := startSegment
 	if s.copyPlan != nil {
-		seekSeconds, startSegment, streamOriginSeconds, copySeekAnchorResolved = 0, 0, 0, true
+		seekSeconds = s.copyPlan.restartSeekSeconds(startSegment)
+		streamOriginSeconds, copySeekAnchorResolved = 0, true
 	}
 
 	s.mu.Lock()
@@ -3254,7 +3287,11 @@ func (s *TranscodeSession) restart(
 	// Old segments are only reusable when this generation emits the same recipe
 	// as the previous one; otherwise they, and the manifest describing them,
 	// have to go before the replacement process starts.
-	if s.cleanStaleOutputForRestart(previousOpts, opts, startSegment) {
+	if s.copyGroups != nil {
+		// Segments already assembled belong to the plan, not to a run, so
+		// they stay; only the previous run's groups go.
+		opts.copyGroupPrefix = s.copyGroups.startRun(startSegment, audioRecipeKey(opts))
+	} else if s.cleanStaleOutputForRestart(previousOpts, opts, startSegment) {
 		log.Printf("playback: cleaned stale transcode output at/after segment %d before restart (video %q -> %q)",
 			startSegment, previousOpts.TargetCodecVideo, opts.TargetCodecVideo)
 	}
@@ -3332,6 +3369,9 @@ func (s *TranscodeSession) restart(
 	close(flight.done)
 
 	go s.monitorFFmpeg(ctx, cmd, s.done, releaseHWDevice)
+	if s.copyGroups != nil {
+		go s.copyGroups.watch(s.done)
+	}
 
 	if hook != nil {
 		hook(ctx)
@@ -3702,8 +3742,12 @@ type SegmentRecoveryTarget struct {
 // URI-to-source-time mapping across a missing-segment restart.
 func (s *TranscodeSession) ResolveSegmentRecoveryTarget(ctx context.Context, segNum int) (SegmentRecoveryTarget, bool, error) {
 	if s.copyPlan != nil {
-		// restart regenerates a planned stream from the beginning.
-		return SegmentRecoveryTarget{StartSegmentNumber: segNum, CopySeekAnchorResolved: true}, true, nil
+		// A planned stream restarts at the segment itself; see restart.
+		return SegmentRecoveryTarget{
+			SeekSeconds:            s.copyPlan.restartSeekSeconds(segNum),
+			StartSegmentNumber:     segNum,
+			CopySeekAnchorResolved: true,
+		}, true, nil
 	}
 	seekSeconds, ok, err := s.RestartSeekTarget(segNum)
 	if err != nil || !ok {

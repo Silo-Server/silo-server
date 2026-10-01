@@ -455,7 +455,7 @@ export default function PlaybackSettings() {
             <SettingField
               label="Complete playlists for copied video"
               type="toggle"
-              description="Experimental. When Silo copies a file's video, list every segment from the start, using the file's keyframes, instead of a playlist that grows as Silo copies. Stops Safari freezing partway through. A seek ahead of what Silo has copied waits for it to get there."
+              description="Experimental. When Silo copies an MKV's video, list every segment from the start, using the file's keyframes, instead of a playlist that grows as Silo copies. Stops Safari freezing partway through. Silo checks each file's keyframes in the background the first time it's played, so that first playback still uses the growing playlist."
               value={form.getValue("playback.copy_keyframe_playlist") || "false"}
               onChange={(v) => form.setValue("playback.copy_keyframe_playlist", v)}
               restartRequired={restartKeys.has("playback.copy_keyframe_playlist")}

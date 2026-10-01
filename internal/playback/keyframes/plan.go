@@ -11,14 +11,28 @@ package keyframes
 // behind, and the following keyframes each start a segment until they catch
 // up, as FFmpeg's muxer does.
 func PlanSegments(keyframes []float64, segmentSeconds float64) []float64 {
+	indices := PlanSegmentIndices(keyframes, segmentSeconds)
+	starts := make([]float64, len(indices))
+	for i, k := range indices {
+		starts[i] = keyframes[k]
+	}
+	if len(starts) == 0 {
+		return nil
+	}
+	return starts
+}
+
+// PlanSegmentIndices is PlanSegments returning each segment's first keyframe
+// as an index into keyframes.
+func PlanSegmentIndices(keyframes []float64, segmentSeconds float64) []int {
 	if len(keyframes) == 0 || segmentSeconds <= 0 {
 		return nil
 	}
-	starts := []float64{keyframes[0]}
+	starts := []int{0}
 	target := keyframes[0] + segmentSeconds
-	for _, k := range keyframes[1:] {
+	for i, k := range keyframes[1:] {
 		if k >= target {
-			starts = append(starts, k)
+			starts = append(starts, i+1)
 			target += segmentSeconds
 		}
 	}

@@ -59,9 +59,7 @@ const (
 
 // PlaybackKeyframePlaylistSettingKey serves copy-remux HLS as one complete
 // playlist planned from the source's keyframes, instead of FFmpeg's growing
-// one (#1466). It is off while restarts in the middle of such a stream are
-// still being built; a planned stream that has to restart starts again from
-// the beginning.
+// one (#1466). It is off by default until it has been tried across players.
 const PlaybackKeyframePlaylistSettingKey = "playback.copy_keyframe_playlist"
 
 // CatalogExtraRatingSourcesSettingKey lists, comma-separated, the rating
