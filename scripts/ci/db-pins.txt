@@ -111,8 +111,11 @@
 ./internal/trickplay TestRevisionProtectionIsMonotonicAndFollowsTheRevisionDB
 
 ./internal/trickplay TestServiceRecordsFailureWithClaimTokenDB
-./internal/trickplay TestStaleReconcileCannotDowngradeConcurrentUpgradeDB
 
+./internal/trickplay TestRetiredTrickplayOutlivesIssuedURLsDB
+./internal/trickplay TestReaderProtectsLatestSheetExpiryDB
+./internal/trickplay TestReaderWithholdsRevisionDisplacedWhileSigningDB
+./internal/trickplay TestStaleReconcileCannotDowngradeConcurrentUpgradeDB
 ./internal/api/handlers TestLibraryExplicitTrickplayUpdateAlwaysReconcilesPostgres
 ./internal/trickplay TestOptOutReconcilePreservesConcurrentClaimDB
 ./internal/trickplay TestRegenerateFencesOlderWorkersDB

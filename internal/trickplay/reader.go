@@ -70,6 +70,7 @@ func (r *Reader) SignedManifest(ctx context.Context, fileID int) (SignedManifest
 	}
 	resolved := r.urls.ResolveURLs(ctx, keys)
 	signed := SignedManifest{Manifest: manifest, SheetURLs: make([]string, len(keys))}
+	var latestExpiry time.Time
 	for i, key := range keys {
 		url, ok := resolved[key]
 		if !ok || url.URL == "" {
@@ -80,6 +81,13 @@ func (r *Reader) SignedManifest(ctx context.Context, fileID int) (SignedManifest
 		if url.ExpiresAt != nil && (signed.ExpiresAt.IsZero() || url.ExpiresAt.Before(signed.ExpiresAt)) {
 			signed.ExpiresAt = *url.ExpiresAt
 		}
+		if url.ExpiresAt != nil && url.ExpiresAt.After(latestExpiry) {
+			latestExpiry = *url.ExpiresAt
+		}
+	}
+	protected, err := r.repo.ProtectRevision(ctx, fileID, manifest.Revision, latestExpiry)
+	if err != nil || !protected {
+		return SignedManifest{}, false, err
 	}
 	return signed, true, nil
 }
