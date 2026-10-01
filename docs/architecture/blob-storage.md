@@ -54,7 +54,7 @@ Images generated from a media file (chapter thumbnails, under
 `chapter-images/<media_files.id>/`) are deleted with their file
 (`internal/blobgc`). A trigger on `media_files` deletes, whichever path
 deletes the row, queues the file's prefix in `blob_gc_queue` a day out; a
-check constraint admits only `chapter-images/<id>/` prefixes. The Clean
+check constraint admits the supported file, image, and trickplay prefixes. The Clean
 Removed Media Images task deletes due prefixes whose namespace reports them
 unreferenced, and dequeues one only after storage lists it empty, since an
 S3 batch delete can fail per key without failing the call. The weekly Sweep
@@ -64,15 +64,21 @@ when more than half the prefixes it sees look orphaned, the signature of a
 broken liveness check rather than of real orphans. `media_files` ids are
 never reused, so a file prefix is dead for good once its row is gone.
 
-A new `playback.preview_image_width` replaces each chapter's image with one
-at the new width while the file lives. The chapter service takes the new
-key off the queue before writing it (a width change undone within the grace
-would otherwise delete it), saves the chapter, and then queues the replaced
-key on its own, 48 hours out, longer than a signed URL lives. The constraint
-admits these single `chapter-images/<id>/<chapter>/w<width>.webp` keys too,
-and the collector deletes one only while no chapter of its file references
-it (`chapterthumbs.ImageBlobNamespace`). The sweep lists by file only: a
-replaced image's storage time says nothing about when it was replaced.
+`playback.preview_image_width` replaces chapter images while their file lives.
+New keys include the encoded WebP's SHA-256:
+`chapter-images/<id>/<chapter>-<sha256>/w<width>.webp`; legacy numeric
+chapter directories remain valid. Uploads postpone an existing queue entry
+before writing, wait for an active collector, and preserve later deadlines.
+A database trigger queues displaced keys in the same transaction as the
+chapter update, at least 48 hours after replacement. The service also schedules
+retirement idempotently. URL resolution records each exact key's actual expiry
+before returning it, and retirement never shortens that protection. File deletion
+carries the latest child deadline into the file-prefix entry.
+
+The queue constraint admits both single-image key forms as well as file and
+trickplay revision prefixes. The collector deletes a chapter image only when
+no chapter of its file references it (`chapterthumbs.ImageBlobNamespace`). The
+sweep lists by file: an image's storage time does not show when it was replaced.
 
 Only the Assets store is wrapped to record the storage identity. When Operational
 shares it, a first write through any caller records it. A private S3 bucket stays
