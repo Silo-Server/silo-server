@@ -78,8 +78,11 @@ func (c Capabilities) Require(req Request) error {
 	if req.Audio != nil && req.Audio.Silence != nil && !c.HasFilter("silencedetect") {
 		return unsupportedError("ffmpeg does not list the silencedetect filter")
 	}
-	if req.Samples != nil && !c.concatSamples {
+	if req.Samples != nil && !req.Samples.ReadThrough && !c.concatSamples {
 		return unsupportedError("ffmpeg cannot read a sampled input list (concat demuxer with file_packet_meta, file and pipe protocols)")
+	}
+	if req.Sheets != nil && !c.HasFilter(filterMetadata) {
+		return unsupportedError("ffmpeg does not list the metadata filter")
 	}
 	if req.Stats != nil {
 		for _, filter := range statsFilters {
