@@ -1724,6 +1724,7 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, themeSongsFixtureCases()...)
 	cases = append(cases, passwordResetFixtureCases()...)
 	cases = append(cases, libraryMonitoringFixtureCases()...)
+	cases = append(cases, adminAccountInsightsFixtureCases()...)
 	return append(cases, ratingsCapabilityFixtureCases()...)
 }
 
@@ -1852,6 +1853,7 @@ func fixtureDeps() Dependencies {
 	deps.AdminAccessGroups = fixtureAdminAccessGroups()
 	deps.AdminAccountSettings = &fakeAdminAccountSettings{}
 	deps.AdminAccountActivity = &fakeAdminAccountActivity{}
+	deps = withAdminAccountInsights(deps)
 	deps.HistoryImports = fixtureHistoryImports()
 	deps.WebhookSync = &fakeWebhookManagement{}
 	deps.Markers = &fakeMarkers{}

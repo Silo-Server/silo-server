@@ -832,7 +832,7 @@ func (h *ItemsHandler) listPlayableTargets(ctx context.Context, v ItemViewer, it
 // playableTargetInputForItem builds the resolver input for one displayed card.
 // Response rows find their own target with playableTargetKeyForItem, which
 // keys off the same fields — including the anchor hint, so a series that
-// appears on two recently-added scan-run event cards resolves each card
+// appears on two recently-added arrival event cards resolves each card
 // separately instead of both taking the first card's answer.
 func playableTargetInputForItem(item *models.MediaItem) catalog.PlayableTargetInput {
 	return catalog.PlayableTargetInput{

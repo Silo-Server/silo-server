@@ -3494,6 +3494,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/request-users/{user_id}/usage": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Report an account's effective request policy and quota use. */
+    get: operations["getAdminRequestUserUsage"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/requests": {
     parameters: {
       query?: never;
@@ -4584,6 +4601,80 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/users/{id}/devices": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List an account's devices.
+     * @description Every device the account's apps registered and every device holding saved per-device settings, most recently seen first. The collection is bounded by the account's devices and is not paginated.
+     */
+    get: operations["listAdminUserDevices"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/users/{id}/download-subscriptions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List an account's series download monitors. */
+    get: operations["listAdminUserDownloadSubscriptions"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/users/{id}/downloads": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List an account's managed device downloads.
+     * @description Every managed (device) download row of the account in every status, newest first. Ephemeral web downloads are not listed. A row the app never reported on stays ready.
+     */
+    get: operations["listAdminUserDownloads"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/users/{id}/downloads/summary": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Total an account's managed device downloads. */
+    get: operations["getAdminUserDownloadSummary"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/users/{id}/impersonate": {
     parameters: {
       query?: never;
@@ -4701,6 +4792,23 @@ export interface paths {
      * @description Only the server Owner may call this, from a signed-in session: an API key or an impersonation session is refused with 403, like any caller that is not the Owner. The previous Owner stays an admin.
      */
     post: operations["transferAdminUserOwnership"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/users/{id}/watch-summary": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Total an account's finalized plays over recent days. */
+    get: operations["getAdminUserWatchSummary"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -10934,6 +11042,10 @@ export interface components {
     };
     AdminAccountCapabilitiesOutputBody: {
       access_groups: boolean;
+      /** @description Whether listAdminUserDevices can list an account's registered devices */
+      account_devices: boolean;
+      /** @description Whether listAdminUserDownloads, getAdminUserDownloadSummary and listAdminUserDownloadSubscriptions are available */
+      account_downloads: boolean;
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
       available: boolean;
@@ -10946,6 +11058,8 @@ export interface components {
       password_reset_email: boolean;
       /** @description Whether createAdminUserPasswordReset can return a link to share; needs the server's public URL */
       password_reset_link: boolean;
+      /** @description Whether getAdminRequestUserUsage can report an account's request quota use */
+      request_usage: boolean;
       /** @description Opaque revision of this document */
       revision: string;
       /**
@@ -10953,6 +11067,8 @@ export interface components {
        * @enum {string}
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
+      /** @description Whether getAdminUserWatchSummary can total an account's finalized plays */
+      watch_summary: boolean;
     };
     AdminAccountCreateBody: {
       /**
@@ -11001,6 +11117,11 @@ export interface components {
        * @example 1
        */
       id: string;
+      /**
+       * Format: date-time
+       * @description Latest time any device reported this profile; null when no device has
+       */
+      last_seen_at: string | null;
       name: string;
     };
     AdminAccountSettingsOutputBody: {
@@ -13750,6 +13871,11 @@ export interface components {
        */
       ended_at: string;
       /**
+       * Format: int64
+       * @description Episode number; null when not an episode
+       */
+      episode_number: number | null;
+      /**
        * @description Opaque identifier
        * @example 1
        */
@@ -13764,6 +13890,13 @@ export interface components {
       profile_id: string;
       /** @description Profile display name at the time of playback; the profile id when none was recorded */
       profile_name: string;
+      /**
+       * Format: int64
+       * @description Episode season; null when not an episode
+       */
+      season_number: number | null;
+      /** @description Series title for an episode; empty otherwise */
+      series_title: string;
       /** @description Playback session identifier; unique per attempt */
       session_id: string;
       /**
@@ -15151,6 +15284,33 @@ export interface components {
       /** Format: int64 */
       window_days: number | null;
     };
+    AdminRequestUserUsage: {
+      /** @description Whether this account may request now (not blocked by its switch, group, or an old block) */
+      allowed: boolean;
+      auto_approve: boolean;
+      /**
+       * Format: int64
+       * @description Quota; meaningless when unlimited
+       */
+      max_requests: number;
+      /** Format: int64 */
+      remaining: number;
+      /** @description Server-wide requests switch */
+      requests_enabled: boolean;
+      unlimited: boolean;
+      /**
+       * Format: int64
+       * @description Requests in the window; 0 when unlimited (not counted)
+       */
+      used: number;
+      /** Format: int64 */
+      window_days: number;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      window_start: string;
+    };
     AdminResourceAttribution: {
       cgroup_cpu?: components["schemas"]["AdminCgroupCPUStats"];
       cgroup_memory?: components["schemas"]["AdminCgroupMemoryStats"];
@@ -16473,6 +16633,207 @@ export interface components {
       /** @description Cursor state; absent for bounded unpaginated collections */
       page?: components["schemas"]["PageInfo"];
     };
+    AdminUserDevice: {
+      device_id: string;
+      device_name: string;
+      device_platform: string;
+      /**
+       * Format: date-time
+       * @description Latest registration by the app; null when the device is known only from saved settings
+       */
+      last_seen_at: string | null;
+      /**
+       * Format: date-time
+       * @description Latest of registration and saved-setting writes
+       */
+      last_updated: string | null;
+      /**
+       * Format: int64
+       * @description Saved per-device settings across profiles
+       */
+      override_count: number;
+      profiles: components["schemas"]["AdminUserDeviceProfile"][];
+    };
+    AdminUserDeviceProfile: {
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision, or null
+       */
+      last_seen_at: string | null;
+      /** Format: int64 */
+      override_count: number;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      profile_id: string;
+      /** @description Empty when the profile no longer exists */
+      profile_name: string;
+    };
+    AdminUserDownload: {
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      batch_id?: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision, or null
+       */
+      completed_at: string | null;
+      /** @description Movie, or the series for an episode */
+      content_id: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      created_at: string;
+      delivery_format: string;
+      device_id: string;
+      effective_quality: string;
+      /** @description Null unless episode_id resolves to a catalog episode */
+      episode: {
+        /** Format: int64 */
+        episode_number: number;
+        /** Format: int64 */
+        season_number: number;
+        /** @description Empty when unknown */
+        title: string;
+      } | null;
+      episode_id?: string;
+      /** Format: int64 */
+      file_size: number;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      id: string;
+      /** @description Catalog type of content_id (movie, series, …); empty when unknown */
+      media_type: string;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      profile_id: string;
+      quality: string;
+      /** @description preparing, ready, downloading, completed, failed or revoked. More values may be added */
+      status: string;
+      /**
+       * Format: date-time
+       * @description Latest accepted client status report; null when the app never reported
+       */
+      status_event_at: string | null;
+      /** Format: int64 */
+      target_bitrate_kbps: number;
+      /** @description Catalog title of content_id; empty when the item left the catalog */
+      title: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      updated_at: string;
+    };
+    AdminUserDownloadEpisode: {
+      /** Format: int64 */
+      episode_number: number;
+      /** Format: int64 */
+      season_number: number;
+      /** @description Empty when unknown */
+      title: string;
+    };
+    AdminUserDownloadSubscription: {
+      active: boolean;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      created_at: string;
+      delete_watched: boolean;
+      device_id: string;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      id: string;
+      /**
+       * Format: int64
+       * @description preparing, ready or downloading rows for the series
+       */
+      in_progress: number;
+      /**
+       * Format: int64
+       * @description 0 means no limit
+       */
+      max_storage_bytes: number;
+      /** @description all, future, latest_season or specific_seasons. More values may be added */
+      mode: string;
+      /**
+       * Format: int64
+       * @description This device and profile's completed rows for the series
+       */
+      on_device: number;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      profile_id: string;
+      /**
+       * Format: int64
+       * @description Episodes the user deleted from the monitored series (download_subscription_exclusions)
+       */
+      removed_episodes: number;
+      /** @description Monitored seasons for specific_seasons; empty otherwise */
+      season_numbers: number[];
+      series_id: string;
+      /** @description Empty when the series left the catalog */
+      series_title: string;
+      /**
+       * Format: int64
+       * @description First kept season for latest_season
+       */
+      target_season: number | null;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      updated_at: string;
+    };
+    AdminUserDownloadSummary: {
+      /**
+       * Format: int64
+       * @description Rows the app reported as completed
+       */
+      completed: number;
+      /**
+       * Format: int64
+       * @description Distinct devices with a non-revoked row
+       */
+      devices: number;
+      /** Format: int64 */
+      failed: number;
+      /**
+       * Format: int64
+       * @description preparing, ready or downloading
+       */
+      in_progress: number;
+      /**
+       * Format: int64
+       * @description Active series monitors
+       */
+      monitored_series: number;
+      /** Format: int64 */
+      revoked: number;
+      /**
+       * Format: int64
+       * @description Managed rows that are not revoked
+       */
+      total: number;
+      /**
+       * Format: int64
+       * @description file_size summed over non-revoked rows
+       */
+      total_bytes: number;
+    };
     AdminUserIP: {
       client_ip: string;
       /**
@@ -16485,8 +16846,41 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       last_seen: string;
+      /**
+       * @description Address class: private, loopback and link-local addresses are local, everything else remote. Request logs do not record the network-access route, so a provider path from a private address reads as local here.
+       * @enum {string}
+       */
+      location: "local" | "remote";
       /** Format: int64 */
       request_count: number;
+    };
+    AdminUserWatchSummary: {
+      /** Format: int64 */
+      completed_plays: number;
+      /**
+       * Format: int64
+       * @example 30
+       */
+      days: number;
+      /**
+       * Format: date-time
+       * @description Latest ended_at in the window; null when none
+       */
+      last_played_at: string | null;
+      /**
+       * Format: int64
+       * @description Finalized playback attempts that ended in the window
+       */
+      plays: number;
+      /** @description Echoes the profile filter; absent for the whole account */
+      profile_id?: string;
+      /**
+       * Format: date-time
+       * @description Start of the window: now minus days
+       */
+      since: string;
+      /** Format: double */
+      watched_seconds: number;
     };
     AndroidPushRegistrationBody: {
       device_id: string;
@@ -17865,6 +18259,24 @@ export interface components {
     CollectionAdminUnmatchedFile: {
       /** @description The page's items; empty, never null */
       items: components["schemas"]["AdminUnmatchedFile"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
+    };
+    CollectionAdminUserDevice: {
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["AdminUserDevice"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
+    };
+    CollectionAdminUserDownload: {
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["AdminUserDownload"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
+    };
+    CollectionAdminUserDownloadSubscription: {
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["AdminUserDownloadSubscription"][];
       /** @description Cursor state; absent for bounded unpaginated collections */
       page?: components["schemas"]["PageInfo"];
     };
@@ -52561,6 +52973,8 @@ export interface operations {
         completed?: "all" | "true" | "false";
         /** @description Opaque cursor from page.next_cursor */
         cursor?: string;
+        /** @description Only attempts that ended at or after this instant */
+        ended_after?: string;
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
         /** @description Only attempts of this catalog item */
@@ -61495,6 +61909,115 @@ export interface operations {
       };
       /** @description Precondition Required */
       428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminRequestUserUsage: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Opaque identifier */
+        user_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminRequestUserUsage"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
         headers: {
           [name: string]: unknown;
         };
@@ -71406,6 +71929,464 @@ export interface operations {
       };
     };
   };
+  listAdminUserDevices: {
+    parameters: {
+      query?: never;
+      header?: {
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Opaque identifier */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionAdminUserDevice"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listAdminUserDownloadSubscriptions: {
+    parameters: {
+      query?: {
+        /** @description Opaque cursor from page.next_cursor */
+        cursor?: string;
+        /** @description Only rows of this device */
+        device_id?: string;
+        /** @description Page size; default 50, maximum 200 */
+        limit?: number;
+        /** @description Only rows of this household profile */
+        profile_id?: string;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Opaque identifier */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionAdminUserDownloadSubscription"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listAdminUserDownloads: {
+    parameters: {
+      query?: {
+        /** @description Opaque cursor from page.next_cursor */
+        cursor?: string;
+        /** @description Only rows of this device */
+        device_id?: string;
+        /** @description Page size; default 50, maximum 200 */
+        limit?: number;
+        /** @description Only rows of this household profile */
+        profile_id?: string;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Opaque identifier */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionAdminUserDownload"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminUserDownloadSummary: {
+    parameters: {
+      query?: never;
+      header?: {
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Opaque identifier */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminUserDownloadSummary"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   impersonateAdminUser: {
     parameters: {
       query?: never;
@@ -72305,6 +73286,120 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminUserWatchSummary: {
+    parameters: {
+      query?: {
+        /** @description Window length in days, ending now */
+        days?: number;
+        /** @description Only attempts by this household profile */
+        profile_id?: string;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Opaque identifier */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminUserWatchSummary"];
+        };
       };
       /** @description Bad Request */
       400: {
