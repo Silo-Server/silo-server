@@ -3,7 +3,6 @@ package scanner
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -86,9 +85,7 @@ func TestProbePrimaryVideoTrackRejectsMalformedJSON(t *testing.T) {
 
 func TestProbePrimaryVideoTrackHonorsCallerTimeout(t *testing.T) {
 	ffprobe := filepath.Join(t.TempDir(), "ffprobe")
-	if err := os.WriteFile(ffprobe, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeFakeTool(t, ffprobe, "#!/bin/sh\nexec sleep 30\n")
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 	_, err := ProbePrimaryVideoTrack(ctx, ffprobe, "movie.mkv")
@@ -101,8 +98,6 @@ func writePrimaryVideoFFprobe(t *testing.T, output string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "ffprobe")
 	script := "#!/bin/sh\nprintf '%s' '" + output + "'\n"
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeFakeTool(t, path, script)
 	return path
 }

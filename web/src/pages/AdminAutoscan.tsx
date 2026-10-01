@@ -1,3 +1,8 @@
+import {
+  captureProfileRequestContext,
+  isCapturedProfileAuthorityActive,
+  type ProfileRequestContextSnapshot,
+} from "@/api/client";
 import { useState } from "react";
 import { useSearchParams } from "react-router";
 import { ChevronDown, ChevronRight, Play } from "lucide-react";
@@ -16,29 +21,7 @@ import {
 import ConnectionsPanel from "@/pages/admin/autoscan/ConnectionsPanel";
 import ActivityPanel from "@/pages/admin/autoscan/ActivityPanel";
 import SourcesPanel from "@/pages/admin/autoscan/SourcesPanel";
-
-// ---------------------------------------------------------------------------
-// Tab routing helpers
-// ---------------------------------------------------------------------------
-
-const AUTOSCAN_TABS = ["sources", "activity"] as const;
-type AutoscanTab = (typeof AUTOSCAN_TABS)[number];
-
-/**
- * Connections and settings used to be peer tabs, which read as "set these up
- * first" — most operators never needed either. They now live in an Advanced
- * section on the Sources view, so their old deep links land on Sources with
- * that section already open rather than 404-ing into a missing tab.
- */
-const LEGACY_ADVANCED_TABS = new Set(["connections", "settings"]);
-
-function normalizeTab(value: string | null): AutoscanTab {
-  return AUTOSCAN_TABS.includes(value as AutoscanTab) ? (value as AutoscanTab) : "sources";
-}
-
-function isLegacyAdvancedTab(value: string | null): boolean {
-  return value !== null && LEGACY_ADVANCED_TABS.has(value);
-}
+import { isLegacyAdvancedTab, normalizeTab } from "@/pages/autoscanSearchParams";
 
 // ---------------------------------------------------------------------------
 // Settings tab
@@ -46,34 +29,49 @@ function isLegacyAdvancedTab(value: string | null): boolean {
 
 function SettingsTab() {
   const settings = useAutoscanSettings();
+  const readAuthority = captureProfileRequestContext();
   const updateSettings = useUpdateAutoscanSettings();
 
-  // Local form state — initialised from server data; reflected immediately on
-  // every mutation so the UI stays responsive without waiting for refetch.
-  const [form, setForm] = useState<AutoscanSettings | null>(null);
-
-  // Merge server data into local form on first load (and after invalidation).
-  const serverData = settings.data;
-  const effective: AutoscanSettings = form ??
-    serverData ?? { enabled: false, default_poll_interval_seconds: 300, debounce_seconds: 10 };
-
+  const [form, setForm] = useState<{
+    value: AutoscanSettings;
+    authority: ProfileRequestContextSnapshot;
+  } | null>(null);
+  const activeForm = form && isCapturedProfileAuthorityActive(form.authority) ? form : null;
+  const effective = activeForm?.value ?? settings.data;
   function patch(delta: Partial<AutoscanSettings>) {
-    setForm((prev) => ({
-      ...(prev ?? effective),
-      ...delta,
-    }));
+    const authority = captureProfileRequestContext();
+    if (
+      !authority ||
+      !effective ||
+      !readAuthority ||
+      !isCapturedProfileAuthorityActive(readAuthority)
+    )
+      return;
+    setForm({ value: { ...effective, ...delta }, authority });
   }
-
-  function save(override?: Partial<AutoscanSettings>) {
-    const body: AutoscanSettings = { ...effective, ...override };
-    updateSettings.mutate(body, {
-      onSuccess: () => setForm(null), // reset to server truth after save
-    });
+  function save() {
+    if (
+      !effective ||
+      updateSettings.isPending ||
+      !settings.data ||
+      !readAuthority ||
+      !isCapturedProfileAuthorityActive(readAuthority) ||
+      (activeForm && !isCapturedProfileAuthorityActive(activeForm.authority))
+    )
+      return;
+    const captured = activeForm;
+    updateSettings.mutate(
+      { ...effective },
+      { onSuccess: () => setForm((current) => (current === captured ? null : current)) },
+    );
   }
 
   if (settings.isLoading) {
     return <p className="text-muted-foreground py-4 text-sm">Loading settings…</p>;
   }
+
+  if (!effective || settings.isError)
+    return <p role="alert">Autoscan settings could not be loaded. Reload before editing.</p>;
 
   return (
     <div className="max-w-lg space-y-6">
@@ -90,7 +88,6 @@ function SettingsTab() {
             onChange={(e) =>
               patch({ default_poll_interval_seconds: Number(e.target.value) || 300 })
             }
-            onBlur={() => save()}
           />
           <span className="text-muted-foreground text-sm">sec</span>
         </div>
@@ -110,7 +107,6 @@ function SettingsTab() {
             min={0}
             value={effective.debounce_seconds}
             onChange={(e) => patch({ debounce_seconds: Number(e.target.value) || 0 })}
-            onBlur={() => save()}
           />
           <span className="text-muted-foreground text-sm">sec</span>
         </div>
@@ -118,6 +114,9 @@ function SettingsTab() {
           Coalesces rapid change events before triggering a scan.
         </p>
       </div>
+      <Button onClick={save} disabled={!activeForm || updateSettings.isPending}>
+        Save settings
+      </Button>
     </div>
   );
 }
@@ -126,12 +125,23 @@ function SettingsTab() {
 // Page
 // ---------------------------------------------------------------------------
 
-export default function AdminAutoscan() {
+interface AdminAutoscanProps {
+  /**
+   * Rendered inside the Libraries page rather than as its own route. The
+   * heading drops to an h2 and the Sources/Activity selection moves to `view`,
+   * because `tab` already names the Libraries tab that hosts this panel.
+   */
+  embedded?: boolean;
+}
+
+export default function AdminAutoscan({ embedded = false }: AdminAutoscanProps = {}) {
   const [searchParams, setSearchParams] = useSearchParams();
-  const requestedTab = searchParams.get("tab");
+  const tabParam = embedded ? "view" : "tab";
+  const requestedTab = searchParams.get(tabParam);
   const activeTab = normalizeTab(requestedTab);
   const trigger = useTriggerAutoscan();
   const settings = useAutoscanSettings();
+  const readAuthority = captureProfileRequestContext();
   const updateSettings = useUpdateAutoscanSettings();
 
   // Open Advanced automatically when arriving from an old connections/settings
@@ -141,16 +151,17 @@ export default function AdminAutoscan() {
   const enabled = settings.data?.enabled ?? false;
 
   function toggleEnabled(checked: boolean) {
-    if (!settings.data) return;
+    if (!settings.data || !readAuthority || !isCapturedProfileAuthorityActive(readAuthority))
+      return;
     updateSettings.mutate({ ...settings.data, enabled: checked });
   }
 
   function setActiveTab(value: string) {
     const next = new URLSearchParams(searchParams);
     if (value === "sources") {
-      next.delete("tab");
+      next.delete(tabParam);
     } else {
-      next.set("tab", value);
+      next.set(tabParam, value);
     }
     setSearchParams(next, { replace: true });
   }
@@ -160,9 +171,13 @@ export default function AdminAutoscan() {
       <div className="page-header">
         <div className="space-y-2">
           <div className="flex items-center gap-2.5">
-            <h1 className="text-3xl font-semibold tracking-normal text-balance sm:text-4xl">
-              Autoscan
-            </h1>
+            {embedded ? (
+              <h2 className="text-xl font-semibold tracking-tight">Autoscan</h2>
+            ) : (
+              <h1 className="text-3xl font-semibold tracking-normal text-balance sm:text-4xl">
+                Autoscan
+              </h1>
+            )}
             {settings.data &&
               (enabled ? (
                 <Badge variant="secondary">Enabled</Badge>

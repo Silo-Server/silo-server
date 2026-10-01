@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 
-import { api } from "@/api/client";
 import type { CatalogFiltersResponse, CatalogResponse } from "@/api/types";
+import { catalogFiltersFromV2, catalogItemFromV2 } from "@/api/v2/catalog";
+import { v2, type V2Body, type V2Query, type V2Result } from "@/api/v2/request";
 import type { CatalogParams } from "@/hooks/queries/keys";
 import { catalogKeys } from "@/hooks/queries/keys";
 import { createEmptyQueryDefinition, type CatalogSource } from "@/api/types";
@@ -11,6 +12,12 @@ import {
   catalogSourceAllowsOverlay,
   type CatalogSearchState,
 } from "@/pages/catalogSearchParams";
+
+// Search-as-you-type creates a distinct query key for every settled input.
+// Keep enough history for a quick correction/backspace without retaining ten
+// minutes of poster-heavy responses, and never automatically replay a timed
+// out interactive search against PostgreSQL.
+const INTERACTIVE_SEARCH_GC_TIME_MS = 30_000;
 
 function catalogParamsForKey(
   state: CatalogSearchState,
@@ -28,40 +35,39 @@ function catalogParamsForKey(
     person_id: state.person_id,
     type: state.type_override ?? state.query_definition.media_scope,
     uses_source_order: state.uses_source_order,
-    query_fingerprint: JSON.stringify(state.query_definition),
+    query_fingerprint: JSON.stringify([state.query_definition, state.sort_from_server]),
     include_total: includeTotal,
     limit,
   };
 }
 
-function buildCatalogUrl(
-  state: CatalogSearchState,
-  limit: number,
-  offset: number,
-  includeTotal: boolean,
-  snapshot?: string,
-): string {
+const MAX_CATALOG_SEEK = 10_000_000;
+
+type CatalogScopeQuery = V2Query<"GET /api/v2/catalog/filters">;
+
+/**
+ * The scope a facet document is computed over: the same source and ids the
+ * browse sends, minus the overlay (search text, sort, rule groups) that the
+ * facet endpoints ignore. Derived from the browse parameters so the two stay
+ * in step.
+ */
+function catalogScopeQuery(state: CatalogSearchState): CatalogScopeQuery {
   const params = buildCatalogApiSearchParams(state);
-  params.set("limit", String(limit));
-  params.set("offset", String(offset));
-  if (!includeTotal) {
-    params.set("include_total", "false");
-  }
-  if (snapshot) {
-    params.set("snapshot", snapshot);
-  }
-  return `/catalog?${params.toString()}`;
+  const source = params.get("source") as CatalogScopeQuery["source"];
+  const scope = params.get("scope") as CatalogScopeQuery["scope"];
+  return {
+    source: source ?? undefined,
+    scope: scope ?? undefined,
+    section_id: params.get("section_id") ?? undefined,
+    library_id: params.get("library_id") ?? undefined,
+    collection_id: params.get("collection_id") ?? undefined,
+    person_id: params.get("person_id") ?? undefined,
+    type: params.get("type") ?? undefined,
+  };
 }
 
-function buildCatalogFiltersUrlWithOptions(
-  state: CatalogSearchState,
-  options: { includeTechnical?: boolean } = {},
-): string {
-  const params = buildCatalogApiSearchParams(state);
-  if (options.includeTechnical === false) {
-    params.set("include_technical", "false");
-  }
-  return `/catalog/filters?${params.toString()}`;
+export interface CatalogPage extends CatalogResponse {
+  search_diagnostics?: V2Result<"POST /api/v2/catalog/query">["search_diagnostics"];
 }
 
 export async function fetchCatalogPage(
@@ -71,22 +77,62 @@ export async function fetchCatalogPage(
   options?: RequestInit,
   includeTotal = true,
   snapshot?: string,
-): Promise<CatalogResponse> {
-  return api<CatalogResponse>(
-    buildCatalogUrl(state, limit, offset, includeTotal, snapshot),
-    options,
-  );
+): Promise<CatalogPage> {
+  if (!Number.isInteger(offset) || offset < 0 || offset > MAX_CATALOG_SEEK) {
+    throw new RangeError("Narrow your filters or search to browse beyond this result window.");
+  }
+  const params = buildCatalogApiSearchParams(state);
+  const overlay = catalogSourceAllowsOverlay(state.source);
+  const body: V2Body<"POST /api/v2/catalog/query"> = {
+    ...catalogScopeQuery(state),
+    match: overlay ? state.query_definition.match : undefined,
+    groups: overlay ? state.query_definition.groups : undefined,
+    sort: params.get("sort") ?? undefined,
+    order: (params.get("order") as "asc" | "desc" | null) ?? undefined,
+    q: params.get("q") ?? undefined,
+    query_limit: params.has("query_limit") ? Number(params.get("query_limit")) : undefined,
+    limit,
+    skip_total: includeTotal ? undefined : true,
+    cursor: snapshot,
+    seek: offset > 0 || snapshot !== undefined ? offset : undefined,
+  };
+  const result = await v2("POST /api/v2/catalog/query", {
+    body,
+    signal: options?.signal ?? undefined,
+  });
+  return {
+    items: result.items.map(catalogItemFromV2),
+    total: result.total,
+    total_exact: result.total_exact,
+    search_diagnostics: result.search_diagnostics,
+    has_more: result.page?.has_more ?? false,
+    snapshot: result.window_cursor,
+    title: state.title,
+    effective_sort: result.effective_sort
+      ? {
+          ...result.effective_sort,
+          field: result.effective_sort.field as NonNullable<
+            CatalogResponse["effective_sort"]
+          >["field"],
+          order: result.effective_sort.order as "asc" | "desc",
+        }
+      : undefined,
+  };
 }
 
 export async function fetchCatalogFilters(
   state: CatalogSearchState,
-  options?: RequestInit,
+  options?: Pick<RequestInit, "signal">,
   requestOptions: { includeTechnical?: boolean } = {},
 ): Promise<CatalogFiltersResponse> {
-  return api<CatalogFiltersResponse>(
-    buildCatalogFiltersUrlWithOptions(state, requestOptions),
-    options,
-  );
+  const filters = await v2("GET /api/v2/catalog/filters", {
+    query: {
+      ...catalogScopeQuery(state),
+      skip_technical: requestOptions.includeTechnical === false ? true : undefined,
+    },
+    signal: options?.signal ?? undefined,
+  });
+  return catalogFiltersFromV2(filters);
 }
 
 export type CatalogFacetName =
@@ -110,13 +156,12 @@ export async function fetchCatalogFacetSearch(
   facet: CatalogFacetName,
   prefix: string,
   limit: number,
-  options?: RequestInit,
+  options?: Pick<RequestInit, "signal">,
 ): Promise<CatalogFacetSearchResponse> {
-  const params = buildCatalogApiSearchParams(state);
-  params.set("facet", facet);
-  params.set("q", prefix);
-  params.set("limit", String(limit));
-  return api<CatalogFacetSearchResponse>(`/catalog/filters/search?${params.toString()}`, options);
+  return v2("GET /api/v2/catalog/filters/search", {
+    query: { ...catalogScopeQuery(state), facet, q: prefix, limit },
+    signal: options?.signal ?? undefined,
+  });
 }
 
 export function createCatalogSearchState(
@@ -142,12 +187,15 @@ export function useCatalogWindow(
   const limit = options.limit ?? 60;
   const includeTotal = options.includeTotal ?? true;
   const enabled = options.enabled ?? true;
+  const isInteractiveSearch = state.source === "query" && Boolean(state.q);
   const page0Params = catalogParamsForKey(state, limit, includeTotal);
   const remainingPageParams = catalogParamsForKey(state, limit, false);
   const visibleRange = options.visibleRange ?? [0, limit - 1];
   const bufferPages = state.source === "query" && state.q ? 0 : 1;
-  const startPage = Math.max(0, Math.floor(visibleRange[0] / limit) - bufferPages);
-  const endPage = Math.floor(visibleRange[1] / limit) + bufferPages;
+  const visibleStartPage = Math.max(0, Math.floor(visibleRange[0] / limit));
+  const visibleEndPage = Math.floor(visibleRange[1] / limit);
+  const startPage = Math.max(0, visibleStartPage - bufferPages);
+  const endPage = visibleEndPage + bufferPages;
 
   // Fetch page 0 separately so its snapshot timestamp is available
   // synchronously for subsequent page queries, preventing duplicate items
@@ -157,21 +205,30 @@ export function useCatalogWindow(
     queryFn: ({ signal }: { signal: AbortSignal }) =>
       fetchCatalogPage(state, limit, 0, { signal }, includeTotal),
     staleTime: 10 * 60 * 1000,
+    ...(isInteractiveSearch
+      ? { gcTime: INTERACTIVE_SEARCH_GC_TIME_MS, retry: false as const }
+      : {}),
     enabled,
+    placeholderData: isInteractiveSearch ? (previousData) => previousData : undefined,
   });
 
   const snapshot = page0Result.data?.snapshot;
-  const canFetchRemainingPages = enabled && page0Result.data !== undefined;
+  const canFetchRemainingPages =
+    enabled && page0Result.data !== undefined && !page0Result.isPlaceholderData;
 
+  const lastKnownPage =
+    page0Result.data?.total_exact === true
+      ? Math.max(0, Math.ceil(page0Result.data.total / limit) - 1)
+      : undefined;
   const remainingPageIndices = useMemo(() => {
     const indices = new Set<number>();
-    for (let page = startPage; page <= endPage; page++) {
+    for (let page = startPage; page <= Math.min(endPage, lastKnownPage ?? endPage); page++) {
       if (page > 0) {
         indices.add(page);
       }
     }
     return Array.from(indices).sort((a, b) => a - b);
-  }, [endPage, startPage]);
+  }, [endPage, startPage, lastKnownPage]);
 
   const remainingResults = useQueries({
     queries: remainingPageIndices.map((pageIndex) => {
@@ -186,6 +243,9 @@ export function useCatalogWindow(
         queryFn: ({ signal }: { signal: AbortSignal }) =>
           fetchCatalogPage(state, limit, offset, { signal }, false, snapshot),
         staleTime: 10 * 60 * 1000,
+        ...(isInteractiveSearch
+          ? { gcTime: INTERACTIVE_SEARCH_GC_TIME_MS, retry: false as const }
+          : {}),
         enabled: canFetchRemainingPages,
       };
     }),
@@ -193,6 +253,16 @@ export function useCatalogWindow(
 
   const title = page0Result.data?.title ?? state.title;
   const isLoading = page0Result.isLoading;
+  const failedVisibleResults = remainingResults.filter((result, queryIndex) => {
+    const pageIndex = remainingPageIndices[queryIndex];
+    return (
+      pageIndex !== undefined &&
+      pageIndex >= visibleStartPage &&
+      pageIndex <= visibleEndPage &&
+      result.isError
+    );
+  });
+  const remainingError = failedVisibleResults[0]?.error;
 
   const pageResults = useMemo(() => {
     const map = new Map<number, CatalogResponse>();
@@ -226,7 +296,7 @@ export function useCatalogWindow(
     collection_id: state.collection_id,
     person_id: state.person_id,
     type: state.type_override ?? state.query_definition.media_scope,
-    query_fingerprint: JSON.stringify(state.query_definition),
+    query_fingerprint: JSON.stringify([state.query_definition, state.sort_from_server]),
     limit,
   });
 
@@ -316,6 +386,21 @@ export function useCatalogWindow(
       effectiveSort: page0Result.data?.effective_sort,
     },
     isLoading,
+    isError: page0Result.isError || failedVisibleResults.length > 0,
+    isPlaceholderData: page0Result.isPlaceholderData,
+    error: page0Result.error ?? remainingError,
+    // Only the first page speaks for the source itself; a later page failing
+    // says nothing about whether the collection or section exists.
+    sourceError: page0Result.error,
+    refetch: async () => {
+      // Page 0 owns the snapshot and total, so refresh it together with every
+      // failed visible page. Retrying only page 0 leaves a timed-out later page
+      // missing from the grid and immediately recreates the same partial view.
+      await Promise.all([
+        page0Result.refetch(),
+        ...failedVisibleResults.map((result) => result.refetch()),
+      ]);
+    },
   };
 }
 

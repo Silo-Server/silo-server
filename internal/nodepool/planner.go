@@ -1,13 +1,11 @@
 package nodepool
 
 import (
-	"context"
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
-
-	"github.com/Silo-Server/silo-server/internal/config"
 )
 
 // Plan is the result of a node selection for one playback session.
@@ -15,6 +13,25 @@ import (
 type Plan struct {
 	TranscodeNode *Node
 	ProxyNode     *Node
+}
+
+// RouteRequest describes the exact node topology a higher-level routing
+// decision needs. Nodepool does not infer playback workload or fallback: it
+// reserves only the requested transcode and proxy halves.
+type RouteRequest struct {
+	SessionID            string
+	CurrentTranscodeURL  string
+	EstimatedBitrateKbps int
+	NeedsTranscode       bool
+	NeedsProxy           bool
+	TranscodeEligible    func(*Node) bool
+	ProxyEligible        func(*Node) bool
+}
+
+// RoutePlanner selects and provisionally reserves exactly the nodes requested
+// by one legal playback route shape.
+type RoutePlanner interface {
+	PlanRoute(request RouteRequest) Plan
 }
 
 // SessionPlanner selects transcode and proxy nodes for playback sessions.
@@ -28,7 +45,7 @@ type SessionPlanner interface {
 // have no predictable bitrate, so implementations must not admit them onto a
 // proxy with a configured bandwidth cap.
 type DownloadPlanner interface {
-	PlanDownload(sessionID string, preferredGroup ...string) Plan
+	PlanDownloadWith(sessionID string, eligible func(*Node) bool, preferredGroup ...string) Plan
 	ReleaseSession(sessionID string)
 }
 
@@ -85,16 +102,31 @@ type Planner struct {
 	rr       map[string]int          // per-group round-robin cursor; "" = global
 	reserved map[string]*reservation // keyed by playback session ID
 	now      func() time.Time        // overridable for tests
+	// scratchPressed latches, by node id, which nodes were under scratch
+	// pressure the last time a transcode selection looked. It exists only to
+	// make the operator warning fire once per transition into pressure: the
+	// eligibility path runs on every session start and every quality switch, so
+	// logging there unlatched would produce a line per playback event for as
+	// long as a disk stays full. Guarded by mu, which every selection path
+	// already holds. Entries are pruned as nodes leave the pool.
+	scratchPressed map[int]bool
+	// scratchGuardDropped latches whether the last transcode selection had to
+	// ignore the scratch guard because every eligible candidate was pressured.
+	// Latched for the same reason as scratchPressed, and separately from it
+	// because a cluster reaches "no headroom anywhere" on its own schedule.
+	// Guarded by mu.
+	scratchGuardDropped bool
 }
 
 // NewPlanner creates a planner over the given pools.
 func NewPlanner(proxies *ProxyPool, transcodes *TranscodePool) *Planner {
 	return &Planner{
-		proxies:    proxies,
-		transcodes: transcodes,
-		rr:         make(map[string]int),
-		reserved:   make(map[string]*reservation),
-		now:        time.Now,
+		proxies:        proxies,
+		transcodes:     transcodes,
+		rr:             make(map[string]int),
+		reserved:       make(map[string]*reservation),
+		now:            time.Now,
+		scratchPressed: make(map[int]bool),
 	}
 }
 
@@ -125,6 +157,37 @@ func (p *Planner) TranscodeNode(nodeID int) (*Node, bool) {
 	return nil, false
 }
 
+// TranscodeNodeByURL returns the pooled record for a transcode node URL. It
+// gives a dispatch path that node's own acceleration override, from the URL it
+// is about to send a job to. Enabled or not: a caller holding the URL has
+// already selected it.
+func (p *Planner) TranscodeNodeByURL(nodeURL string) (*Node, bool) {
+	if p == nil || p.transcodes == nil || nodeURL == "" {
+		return nil, false
+	}
+	node := p.transcodes.FindByURL(normalizeNodeURL(nodeURL))
+	if node == nil {
+		return nil, false
+	}
+	return node, true
+}
+
+// ProxyNodeByURL returns the pooled record for a proxy node URL, under the
+// same contract as TranscodeNodeByURL. Capability-budget pricing needs it:
+// a proxy's stored report and overrides say how long its own cold probe may
+// take, and a caller that can only resolve transcode nodes prices every proxy
+// from the cluster policy instead.
+func (p *Planner) ProxyNodeByURL(nodeURL string) (*Node, bool) {
+	if p == nil || p.proxies == nil || nodeURL == "" {
+		return nil, false
+	}
+	node := p.proxies.FindByURL(normalizeNodeURL(nodeURL))
+	if node == nil {
+		return nil, false
+	}
+	return node, true
+}
+
 // TranscodeNodeHealthy reports whether the pooled transcode node serving a URL
 // is currently healthy and enabled. Remote-start adoption gates its redirect
 // on this: a recipe another API server published is only trustworthy while
@@ -142,6 +205,13 @@ func (p *Planner) TranscodeNodeHealthy(nodeURL string) bool {
 // transfer rate, so capped proxies are excluded instead of being oversubscribed
 // during the egress meter's convergence window.
 func (p *Planner) PlanDownload(sessionID string, preferredGroup ...string) Plan {
+	return p.PlanDownloadWith(sessionID, nil, preferredGroup...)
+}
+
+// PlanDownloadWith restricts selection to eligible proxies before applying
+// group preferences and reserving capacity. The predicate runs under the
+// planner lock and must be cheap and non-blocking; nil accepts every proxy.
+func (p *Planner) PlanDownloadWith(sessionID string, eligible func(*Node) bool, preferredGroup ...string) Plan {
 	if p == nil || p.proxies == nil || sessionID == "" {
 		return Plan{}
 	}
@@ -158,6 +228,9 @@ func (p *Planner) PlanDownload(sessionID string, preferredGroup ...string) Plan 
 	}
 	var candidates, fallback []*Node
 	for _, node := range p.proxies.Nodes() {
+		if node != nil && eligible != nil && !eligible(node) {
+			continue
+		}
 		if node == nil || !node.Enabled || !node.Healthy || !p.underCap(node, now) {
 			continue
 		}
@@ -201,22 +274,21 @@ func (p *Planner) PlanSessionWith(sessionID, currentTranscodeURL string, needsTr
 	// Drop this session's own reservation before computing loads so a
 	// re-plan doesn't count the session against its current node.
 	delete(p.reserved, sessionID)
-
 	if estBitrateKbps < 0 {
 		estBitrateKbps = 0
 	}
 	proxies := p.proxies.Nodes()
-	transcodes := p.transcodes.Nodes()
-	// Group health is computed over the full pool before any narrowing:
-	// eligibility restricts what may be selected, not co-location semantics.
-	groupHealthy := groupHealth(proxies, transcodes)
+	pooledTranscodes := p.transcodes.Nodes()
+	transcodes := pooledTranscodes
+	groupHealthy := groupHealth(proxies, pooledTranscodes)
 
 	var plan Plan
 	if needsTranscode {
 		if eligible != nil {
 			transcodes = filterNodes(transcodes, eligible)
 		}
-		plan.TranscodeNode = p.pickTranscode(transcodes, proxies, groupHealthy, currentTranscodeURL, estBitrateKbps, now)
+		plan.TranscodeNode = p.pickTranscode(transcodes, pooledTranscodes, proxies, groupHealthy,
+			currentTranscodeURL, estBitrateKbps, now)
 		if plan.TranscodeNode != nil {
 			plan.ProxyNode = p.pickProxy(proxies, groupHealthy, plan.TranscodeNode.Group, estBitrateKbps, now)
 		}
@@ -230,7 +302,6 @@ func (p *Planner) PlanSessionWith(sessionID, currentTranscodeURL string, needsTr
 		}
 		plan.ProxyNode = p.pickProxy(proxies, groupHealthy, nil, estBitrateKbps, now)
 	}
-
 	if plan.TranscodeNode != nil || plan.ProxyNode != nil {
 		res := &reservation{createdAt: now}
 		if plan.TranscodeNode != nil {
@@ -245,14 +316,11 @@ func (p *Planner) PlanSessionWith(sessionID, currentTranscodeURL string, needsTr
 	return plan
 }
 
-// PlanTranscodeSessionWithLocalEgress selects and reserves only a transcode
-// node. The API server remains the client-facing media endpoint and relays the
-// selected node's manifest and segments, so no proxy node is needed or charged
-// against its job/bandwidth budget. This is intentionally separate from
-// PlanSessionWith: its normal grouped-node policy assumes the client talks to a
-// selected proxy directly.
-func (p *Planner) PlanTranscodeSessionWithLocalEgress(sessionID, currentTranscodeURL string, eligible func(*Node) bool) Plan {
-	if p == nil || p.transcodes == nil || sessionID == "" {
+// PlanRoute selects and reserves the exact route requested. Group health is
+// scoped to the pools the route uses: a transcode+API route is independent of
+// proxy health, while a transcode+proxy route preserves strict co-location.
+func (p *Planner) PlanRoute(request RouteRequest) Plan {
+	if p == nil {
 		return Plan{}
 	}
 	p.mu.Lock()
@@ -260,19 +328,78 @@ func (p *Planner) PlanTranscodeSessionWithLocalEgress(sessionID, currentTranscod
 
 	now := p.now()
 	p.pruneReservations(now)
-	delete(p.reserved, sessionID)
+	// Drop this session's own reservation before computing loads so a
+	// re-plan doesn't count the session against its current node.
+	delete(p.reserved, request.SessionID)
 
-	transcodes := p.transcodes.Nodes()
-	groupHealthy := groupHealth(nil, transcodes)
-	if eligible != nil {
-		transcodes = filterNodes(transcodes, eligible)
+	if request.EstimatedBitrateKbps < 0 {
+		request.EstimatedBitrateKbps = 0
 	}
-	node := p.pickLocalEgressTranscode(transcodes, groupHealthy, currentTranscodeURL, now)
-	if node == nil {
-		return Plan{}
+	var proxies, pooledTranscodes []*Node
+	if request.NeedsProxy && p.proxies != nil {
+		proxies = p.proxies.Nodes()
 	}
-	p.reserved[sessionID] = &reservation{transcodeURL: node.URL, createdAt: now}
-	return Plan{TranscodeNode: node}
+	if request.NeedsTranscode && p.transcodes != nil {
+		pooledTranscodes = p.transcodes.Nodes()
+	}
+	transcodes := pooledTranscodes
+	// Group health is computed over the full pool before any narrowing:
+	// eligibility restricts what may be selected, not co-location semantics.
+	// Shared-GPU load is summed over the same full pool, for the same reason.
+	groupHealthy := groupHealth(proxies, pooledTranscodes)
+
+	var plan Plan
+	if request.TranscodeEligible != nil {
+		transcodes = filterNodes(transcodes, request.TranscodeEligible)
+	}
+	if request.ProxyEligible != nil {
+		proxies = filterNodes(proxies, request.ProxyEligible)
+	}
+	switch {
+	case request.NeedsTranscode && request.NeedsProxy:
+		plan.TranscodeNode = p.pickTranscode(transcodes, pooledTranscodes, proxies, groupHealthy,
+			request.CurrentTranscodeURL, request.EstimatedBitrateKbps, now)
+		if plan.TranscodeNode != nil {
+			plan.ProxyNode = p.pickProxy(proxies, groupHealthy, plan.TranscodeNode.Group,
+				request.EstimatedBitrateKbps, now)
+			if plan.ProxyNode == nil {
+				plan.TranscodeNode = nil
+			}
+		}
+	case request.NeedsTranscode:
+		plan.TranscodeNode = p.pickLocalEgressTranscode(transcodes, pooledTranscodes, groupHealthy,
+			request.CurrentTranscodeURL, now)
+	case request.NeedsProxy:
+		plan.ProxyNode = p.pickProxy(proxies, groupHealthy, nil, request.EstimatedBitrateKbps, now)
+	}
+
+	if plan.TranscodeNode != nil || plan.ProxyNode != nil {
+		res := &reservation{createdAt: now}
+		if plan.TranscodeNode != nil {
+			res.transcodeURL = plan.TranscodeNode.URL
+		}
+		if plan.ProxyNode != nil {
+			res.proxyURL = plan.ProxyNode.URL
+			res.kbps = request.EstimatedBitrateKbps
+		}
+		p.reserved[request.SessionID] = res
+	}
+	return plan
+}
+
+// PlanTranscodeSessionWithLocalEgress selects and reserves only a transcode
+// node. The API server remains the client-facing media endpoint and relays the
+// selected node's manifest and segments, so no proxy node is needed or charged
+// against its job/bandwidth budget. This is intentionally separate from
+// PlanSessionWith: its normal grouped-node policy assumes the client talks to a
+// selected proxy directly.
+func (p *Planner) PlanTranscodeSessionWithLocalEgress(sessionID, currentTranscodeURL string, eligible func(*Node) bool) Plan {
+	return p.PlanRoute(RouteRequest{
+		SessionID:           sessionID,
+		CurrentTranscodeURL: currentTranscodeURL,
+		NeedsTranscode:      true,
+		TranscodeEligible:   eligible,
+	})
 }
 
 // filterNodes returns the nodes accepted by keep, preserving pool order so
@@ -449,8 +576,13 @@ func groupHealth(proxies, transcodes []*Node) map[string]bool {
 // the session on currentURL unless a candidate has at least two fewer jobs
 // (the historical soft-affinity rule). Shared by pickTranscode and
 // pickLocalEgressTranscode, which differ only in their eligibility predicate.
-func (p *Planner) pickNode(nodes []*Node, currentURL string, now time.Time, eligible func(*Node) bool) *Node {
+//
+// tieBreak, when non-nil, scores candidates that are level on effective jobs;
+// the lower score wins. It never overrides the job count or the affinity rule,
+// so a caller that passes nil gets exactly the historical selection.
+func (p *Planner) pickNode(nodes []*Node, currentURL string, now time.Time, eligible func(*Node) bool, tieBreak func(*Node) int) *Node {
 	var best, current *Node
+	bestJobs := 0
 	for _, n := range nodes {
 		if !eligible(n) {
 			continue
@@ -458,7 +590,11 @@ func (p *Planner) pickNode(nodes []*Node, currentURL string, now time.Time, elig
 		if n.URL == currentURL {
 			current = n
 		}
-		if best == nil || p.effectiveJobs(n, now) < p.effectiveJobs(best, now) {
+		jobs := p.effectiveJobs(n, now)
+		switch {
+		case best == nil, jobs < bestJobs:
+			best, bestJobs = n, jobs
+		case jobs == bestJobs && tieBreak != nil && tieBreak(n) < tieBreak(best):
 			best = n
 		}
 	}
@@ -473,11 +609,202 @@ func (p *Planner) pickNode(nodes []*Node, currentURL string, now time.Time, elig
 
 // pickTranscode returns the eligible transcode node with the fewest effective
 // jobs, keeping the session on currentURL unless a candidate has at least two
-// fewer jobs (the historical soft-affinity rule).
-func (p *Planner) pickTranscode(transcodes, proxies []*Node, groupHealthy map[string]bool, currentURL string, estKbps int, now time.Time) *Node {
-	return p.pickNode(transcodes, currentURL, now, func(n *Node) bool {
+// fewer jobs (the historical soft-affinity rule). Candidates level on job count
+// are separated by the load on the physical GPU behind them: two pooled nodes
+// can be two containers on one card, and spreading jobs across node records
+// that share silicon does not spread the work.
+//
+// pool is the full transcode pool the candidates were drawn from; shared-GPU
+// load is summed over all of it, since a job on a node this plan may not select
+// still occupies the same GPU.
+func (p *Planner) pickTranscode(transcodes, pool, proxies []*Node, groupHealthy map[string]bool, currentURL string, estKbps int, now time.Time) *Node {
+	return p.pickWithScratchGuard(transcodes, pool, currentURL, now, func(n *Node) bool {
 		return p.transcodeEligible(n, proxies, groupHealthy, estKbps, now)
-	})
+	}, p.physicalGPULoadScore(pool, now))
+}
+
+// pickWithScratchGuard is pickNode with the scratch-pressure exclusion applied
+// as a *soft* filter: a node whose transcode scratch volume is at or past
+// scratchPressureFillPercent is skipped, unless skipping leaves no candidate at
+// all, in which case the guard is ignored and the ordinary pick stands.
+//
+// Soft is the whole point. The guard's job is to steer sessions away from a node
+// that will die mid-stream while a healthy sibling exists; it is not a license
+// to refuse playback. A cluster whose scratch volumes have all filled — one shared
+// NFS export, a retention setting that is too generous everywhere — would
+// otherwise go from degraded to dark on a threshold nobody chose for that
+// purpose. Degraded service beats no service, and the WARN below is what tells
+// an operator which it is.
+//
+// pool is the full transcode pool the candidates were drawn from; it scopes the
+// warning latch, which tracks disks rather than the narrowed candidate set.
+//
+// Callers must hold mu.
+func (p *Planner) pickWithScratchGuard(nodes, pool []*Node, currentURL string, now time.Time, eligible func(*Node) bool, tieBreak func(*Node) int) *Node {
+	excluded := false
+	guarded := func(n *Node) bool {
+		if !eligible(n) {
+			return false
+		}
+		if scratchPressured(n) {
+			excluded = true
+			return false
+		}
+		return true
+	}
+	picked := p.pickNode(nodes, currentURL, now, guarded, tieBreak)
+	guardDropped := false
+	if picked == nil && excluded {
+		// Without an exclusion the unguarded pick would return the same nil:
+		// nothing was eligible in the first place.
+		picked = p.pickNode(nodes, currentURL, now, eligible, tieBreak)
+		guardDropped = picked != nil
+	}
+	// Logged after the fallback decides, because what an operator needs to know
+	// is whether the pressured node was actually kept out of selection.
+	p.noteScratchPressure(pool, guardDropped)
+	return picked
+}
+
+// noteScratchPressure logs each pooled node's transition into and out of
+// scratch pressure exactly once, and separately latches the cluster-wide state
+// where the guard had to give way.
+//
+// guardDropped reports that this pick found every eligible candidate pressured
+// and admitted one anyway. It has to reach the log, because the two states the
+// guard can be in are opposites for an operator: "sessions are being steered
+// away from this disk" is a warning, while "sessions are landing on a disk that
+// is about to fail mid-stream because nothing else is eligible" is an outage in
+// progress. One invariant message asserting an exclusion cannot say which, and
+// the pressure latch alone would keep asserting the exclusion long after the
+// fallback started ignoring it.
+//
+// There is no context to log against: selection is synchronous inside
+// PlanSession and friends, which take no ctx because they are called from
+// several request paths and from reservation code that has none. The latch,
+// not a context, is what keeps this out of the hot path's log volume — the
+// eligibility check runs on every session start and every quality switch.
+//
+// Callers must hold mu.
+func (p *Planner) noteScratchPressure(pool []*Node, guardDropped bool) {
+	seen := make(map[int]struct{}, len(pool))
+	for _, n := range pool {
+		if n == nil {
+			continue
+		}
+		seen[n.ID] = struct{}{}
+		pressured := scratchPressured(n)
+		if pressured == p.scratchPressed[n.ID] {
+			continue
+		}
+		if pressured {
+			pct, _ := scratchDiskFillPercent(n)
+			attrs := []any{
+				"component", "nodepool", "id", n.ID, "name", n.Name, "url", n.URL,
+				"scratch_fill_pct", pct, "threshold_pct", scratchPressureFillPercent,
+				"scratch_guard_dropped", guardDropped,
+			}
+			if guardDropped {
+				slog.Warn("transcode node scratch volume nearly full, still selected because no eligible node has scratch headroom", attrs...)
+			} else {
+				slog.Warn("transcode node scratch volume nearly full, excluded from selection", attrs...)
+			}
+			p.scratchPressed[n.ID] = true
+			continue
+		}
+		slog.Info("transcode node scratch volume recovered", "component", "nodepool",
+			"id", n.ID, "name", n.Name, "url", n.URL)
+		delete(p.scratchPressed, n.ID)
+	}
+	// A node that left the pool must not keep a latch entry: it would suppress
+	// the warning if the same id came back still full.
+	for id := range p.scratchPressed {
+		if _, ok := seen[id]; !ok {
+			delete(p.scratchPressed, id)
+		}
+	}
+	p.noteScratchGuardDropped(guardDropped)
+}
+
+// noteScratchGuardDropped reports the transition into and out of the state where
+// the scratch guard has nothing left to steer towards.
+//
+// It is latched separately from the per-node pressure warnings because the two
+// move independently: a cluster can cross into "no headroom anywhere" long after
+// its nodes' pressure transitions were logged, and without this the operator's
+// only signal would be an exclusion message written before the exclusion stopped
+// happening.
+//
+// Callers must hold mu.
+func (p *Planner) noteScratchGuardDropped(dropped bool) {
+	if dropped == p.scratchGuardDropped {
+		return
+	}
+	p.scratchGuardDropped = dropped
+	if dropped {
+		slog.Warn("transcode scratch guard ignored: every eligible node is over the scratch threshold",
+			"component", "nodepool", "threshold_pct", scratchPressureFillPercent)
+		return
+	}
+	slog.Info("transcode scratch guard back in force: an eligible node has scratch headroom again",
+		"component", "nodepool")
+}
+
+// physicalGPULoadScore precomputes, once per pick, the total effective jobs
+// running on each pooled node's physical GPU group: itself plus every pooled
+// node sharing at least one GPU identity with it, healthy or not, because a job
+// occupies a card regardless of whether the node running it may take another. A
+// node with no derived identities is a group of one.
+//
+// Pools only hold enabled nodes, so a node disabled while its transcodes are
+// still running leaves the pool and stops counting against its group — the same
+// blind spot the primary least-jobs rule already has, since there is no drain
+// state between enabled and gone.
+//
+// Job counts only. Live GPU utilization is a richer signal but a much worse
+// tie-breaker: it lags a newly admitted job by a sampling interval, so a burst
+// of starts would all see the same idle card.
+func (p *Planner) physicalGPULoadScore(pool []*Node, now time.Time) func(*Node) int {
+	jobs := make(map[*Node]int, len(pool))
+	byKey := make(map[string][]*Node)
+	for _, n := range pool {
+		if n == nil {
+			continue
+		}
+		jobs[n] = p.effectiveJobs(n, now)
+		for _, key := range n.PhysicalGPUKeys {
+			byKey[key] = append(byKey[key], n)
+		}
+	}
+
+	loads := make(map[*Node]int, len(pool))
+	for _, n := range pool {
+		if n == nil {
+			continue
+		}
+		total := jobs[n]
+		counted := map[*Node]struct{}{n: {}}
+		for _, key := range n.PhysicalGPUKeys {
+			for _, peer := range byKey[key] {
+				// A peer sharing several keys with n must only be counted once.
+				if _, seen := counted[peer]; seen {
+					continue
+				}
+				counted[peer] = struct{}{}
+				total += jobs[peer]
+			}
+		}
+		loads[n] = total
+	}
+
+	return func(n *Node) int {
+		if load, ok := loads[n]; ok {
+			return load
+		}
+		// A candidate the pool snapshot does not contain (a concurrent pool
+		// swap) scores as its own load, which is the no-sharing answer.
+		return p.effectiveJobs(n, now)
+	}
 }
 
 // pickLocalEgressTranscode applies the transcode half of normal session
@@ -486,10 +813,10 @@ func (p *Planner) pickTranscode(transcodes, proxies []*Node, groupHealthy map[st
 // suppress an otherwise healthy transcode executor. Passing nil proxies to
 // transcodeEligible reduces it to exactly that: healthy, enabled, under cap,
 // and group-healthy, with no proxy partner required.
-func (p *Planner) pickLocalEgressTranscode(transcodes []*Node, groupHealthy map[string]bool, currentURL string, now time.Time) *Node {
-	return p.pickNode(transcodes, currentURL, now, func(n *Node) bool {
+func (p *Planner) pickLocalEgressTranscode(transcodes, pool []*Node, groupHealthy map[string]bool, currentURL string, now time.Time) *Node {
+	return p.pickWithScratchGuard(transcodes, pool, currentURL, now, func(n *Node) bool {
 		return p.transcodeEligible(n, nil, groupHealthy, 0, now)
-	})
+	}, p.physicalGPULoadScore(pool, now))
 }
 
 // transcodeEligible reports whether a transcode node may take a new session:
@@ -497,6 +824,12 @@ func (p *Planner) pickLocalEgressTranscode(transcodes []*Node, groupHealthy map[
 // its whole group healthy and — when the group contains proxies — at least
 // one of them with job and bandwidth headroom (a group's capacity is bounded
 // by its proxies).
+//
+// Scratch-volume pressure is deliberately *not* checked here. It is a soft
+// exclusion applied by pickWithScratchGuard, which can drop it when it would
+// empty the candidate set; a hard predicate could not. Callers that use this
+// directly (ReserveTranscodeWorkWith's non-streaming reservations) intentionally
+// keep the historical behavior.
 func (p *Planner) transcodeEligible(n *Node, proxies []*Node, groupHealthy map[string]bool, estKbps int, now time.Time) bool {
 	if !n.Healthy || !n.Enabled || !p.underCap(n, now) {
 		return false
@@ -630,18 +963,4 @@ func (p *Planner) pruneReservations(now time.Time) {
 			delete(p.reserved, id)
 		}
 	}
-}
-
-// LocalTranscodeFallbackAllowed reports whether the API server may transcode
-// locally when no eligible transcode node exists, based on the
-// playback.local_transcode_fallback setting. Defaults to allowed so
-// deployments without the setting keep the historical behavior.
-func LocalTranscodeFallbackAllowed(ctx context.Context, settings interface {
-	Get(ctx context.Context, key string) (string, error)
-}) bool {
-	if settings == nil {
-		return true
-	}
-	v, _ := settings.Get(ctx, config.PlaybackLocalTranscodeFallbackSettingKey)
-	return v != "false"
 }

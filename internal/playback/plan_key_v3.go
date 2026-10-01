@@ -34,6 +34,8 @@ func DeterministicPlanIDV3(attemptID string, requestedFileID, effectiveFileID in
 		string(plan.Subtitle.Mode),
 		strings.Join(transformations, ","),
 	}
+	parts = appendEmbeddedSubtitleIdentityV3(parts, plan.Subtitle.Embedded)
+	parts = appendVideoSampleEntryIdentityV3(parts, plan.EffectiveRecipe.VideoSampleEntry)
 	parts = appendQuirkIdentityV3(parts, plan)
 	parts = append(parts, PlanRecipeVersionV3)
 	sum := sha256.Sum256([]byte(strings.Join(parts, "|")))
@@ -63,6 +65,8 @@ func PlanAttemptKeyV3(plan PlanV3, outputContextID string, localMutations []stri
 		string(plan.Subtitle.Mode),
 		strings.Join(transformations, ","),
 	}
+	parts = appendEmbeddedSubtitleIdentityV3(parts, plan.Subtitle.Embedded)
+	parts = appendVideoSampleEntryIdentityV3(parts, plan.EffectiveRecipe.VideoSampleEntry)
 	parts = appendQuirkIdentityV3(parts, plan)
 	parts = append(parts,
 		outputContextID,
@@ -72,6 +76,13 @@ func PlanAttemptKeyV3(plan PlanV3, outputContextID string, localMutations []stri
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(canonical))
 	return fmt.Sprintf("v3:%016x", h.Sum64())
+}
+
+func appendVideoSampleEntryIdentityV3(parts []string, sampleEntry string) []string {
+	if sampleEntry = strings.ToLower(strings.TrimSpace(sampleEntry)); sampleEntry != "" {
+		return append(parts, "sample_entry="+sampleEntry)
+	}
+	return parts
 }
 
 func appendQuirkIdentityV3(parts []string, plan PlanV3) []string {
@@ -100,4 +111,11 @@ func trackIdentityValueV3(v *TrackIdentityV3) string {
 		return ""
 	}
 	return v.ID + ":" + optionalIntV3(v.Index)
+}
+
+func appendEmbeddedSubtitleIdentityV3(parts []string, embedded *EmbeddedSubtitleV3) []string {
+	if embedded == nil {
+		return parts
+	}
+	return append(parts, "embedded_subtitle="+strconv.Itoa(embedded.StreamIndex)+":"+embedded.ContainerTrackID)
 }

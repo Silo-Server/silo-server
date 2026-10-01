@@ -15,7 +15,7 @@ import (
 // and the mismatch only surfaces as a failed stream.
 func TestProxyAdvertisesTransformationCapabilities(t *testing.T) {
 	const secret = "capability-secret"
-	server := newDownloadProxyServer(t, secret)
+	server := newCapabilityProxyServer(t, secret)
 
 	request := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil)
 	request.Header.Set("Authorization", "Bearer "+secret)
@@ -39,7 +39,7 @@ func TestProxyAdvertisesTransformationCapabilities(t *testing.T) {
 }
 
 func TestProxyCapabilitiesRequireBearer(t *testing.T) {
-	server := newDownloadProxyServer(t, "capability-secret")
+	server := newCapabilityProxyServer(t, "capability-secret")
 
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil))

@@ -1,0 +1,17 @@
+{
+  "history": [
+    {
+      "id": "9007199254740993",
+      "media_file_id": "42",
+      "segment": "intro",
+      "action": "clear",
+      "before": {
+        "start_seconds": 1.5,
+        "end_seconds": 10
+      },
+      "user_id": "7",
+      "api_key_id": "9007199254740995",
+      "created_at": "2026-01-02T02:04:05.000Z"
+    }
+  ]
+}

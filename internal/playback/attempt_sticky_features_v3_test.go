@@ -67,10 +67,10 @@ func TestPinAttemptStickyFeaturesV3(t *testing.T) {
 	}
 }
 
-// Every sticky feature must be one the server actually advertises, or a client
-// could never negotiate it in the first place.
+// Every sticky feature must be one the server actually advertises on some
+// surface, or a client could never negotiate it in the first place.
 func TestAttemptStickyFeaturesV3AreAdvertised(t *testing.T) {
-	advertised := ServerFeaturesV3()
+	advertised := NativeServerFeaturesV3()
 	for _, feature := range AttemptStickyFeaturesV3() {
 		if !HasFeatureV3(advertised, feature) {
 			t.Fatalf("attempt-sticky feature %q is not advertised by the server", feature)

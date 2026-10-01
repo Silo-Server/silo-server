@@ -35,6 +35,17 @@ func TestLoadFromDBMetadataPresignExpiryRejectsInvalidDuration(t *testing.T) {
 	}
 }
 
+func TestLoadFromDBRejectsInvalidSegmentRetention(t *testing.T) {
+	for _, value := range []string{"-1", "119", "86401"} {
+		t.Run(value, func(t *testing.T) {
+			_, err := LoadFromDB(map[string]string{playbackSegmentRetentionSettingKey: value})
+			if err == nil || !strings.Contains(err.Error(), playbackSegmentRetentionSettingKey) {
+				t.Fatalf("LoadFromDB() error = %v, want retention bounds error", err)
+			}
+		})
+	}
+}
+
 func TestLoadFromDBDownloadArtifactDirRequiresAbsolutePath(t *testing.T) {
 	cfg, err := LoadFromDB(map[string]string{downloadArtifactDirSettingKey: "/mnt/silo-downloads"})
 	if err != nil {
@@ -90,6 +101,32 @@ func TestLoadFromDBPolicyEditorEnabledDefaultsFalse(t *testing.T) {
 		t.Fatal("LoadFromDB() error = nil, want invalid bool error")
 	}
 	if !strings.Contains(err.Error(), "policy.editor_enabled") {
+		t.Fatalf("LoadFromDB() error = %v, want key name", err)
+	}
+}
+
+func TestLoadFromDBScannerRealtimeMonitoringDefaultsTrue(t *testing.T) {
+	cfg, err := LoadFromDB(map[string]string{})
+	if err != nil {
+		t.Fatalf("LoadFromDB() returned error: %v", err)
+	}
+	if !cfg.Scanner.RealtimeMonitoring {
+		t.Fatal("Scanner.RealtimeMonitoring = false, want default true")
+	}
+
+	cfg, err = LoadFromDB(map[string]string{"scanner.realtime_monitoring": "false"})
+	if err != nil {
+		t.Fatalf("LoadFromDB() returned error: %v", err)
+	}
+	if cfg.Scanner.RealtimeMonitoring {
+		t.Fatal("Scanner.RealtimeMonitoring = true, want configured false")
+	}
+
+	_, err = LoadFromDB(map[string]string{"scanner.realtime_monitoring": "maybe"})
+	if err == nil {
+		t.Fatal("LoadFromDB() error = nil, want invalid bool error")
+	}
+	if !strings.Contains(err.Error(), "scanner.realtime_monitoring") {
 		t.Fatalf("LoadFromDB() error = %v, want key name", err)
 	}
 }
@@ -198,6 +235,33 @@ func TestYAMLToSettingsMapJellyfinCompatEnabledDefaultsToLegacyListener(t *testi
 	}
 	if got := m["jellyfin_compat.listen"]; got == "" {
 		t.Fatal("jellyfin_compat.listen is empty, want default listener")
+	}
+}
+
+func TestYAMLToSettingsMapPreservesExplicitlyDisabledSegmentRetention(t *testing.T) {
+	m := yamlSettingsMapFromString(t, `
+playback:
+  segment_retention_seconds: 0
+`)
+	if got := m[playbackSegmentRetentionSettingKey]; got != "0" {
+		t.Fatalf("segment retention = %q, want explicit disable", got)
+	}
+}
+
+func TestYAMLToSettingsMapScannerRealtimeMonitoring(t *testing.T) {
+	m := yamlSettingsMapFromString(t, `server:
+  mode: integrated
+`)
+	if got := m["scanner.realtime_monitoring"]; got != "true" {
+		t.Fatalf("scanner.realtime_monitoring = %q, want default true", got)
+	}
+
+	m = yamlSettingsMapFromString(t, `
+scanner:
+  realtime_monitoring: false
+`)
+	if got := m["scanner.realtime_monitoring"]; got != "false" {
+		t.Fatalf("scanner.realtime_monitoring = %q, want explicit false", got)
 	}
 }
 

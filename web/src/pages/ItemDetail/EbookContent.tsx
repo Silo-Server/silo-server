@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { BookOpen, Check, Download } from "lucide-react";
-import { Link } from "react-router";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
 import type { FileVersion, ItemDetail } from "@/api/types";
 import DownloadVersionPicker from "@/components/DownloadVersionPicker";
 import MediaLocations from "@/components/MediaLocations";
@@ -75,9 +75,11 @@ function genreHref(genre: string, libraryId?: number): string {
 export default function EbookContent({
   item,
   libraryId,
+  showAdvisoryAge,
 }: {
   item: ItemDetail & { type: "ebook" };
   libraryId?: number;
+  showAdvisoryAge?: boolean;
 }) {
   useAmbientColor(item.poster_thumbhash);
   const { user } = useAuth();
@@ -122,6 +124,8 @@ export default function EbookContent({
           <MetadataBadges
             year={year || undefined}
             contentRating={item.content_rating || undefined}
+            advisoryAge={showAdvisoryAge ? (item.advisory_age ?? undefined) : undefined}
+            advisorySource={item.advisory_source || undefined}
           />
         }
         scoreRow={
@@ -149,7 +153,7 @@ export default function EbookContent({
                 asChild
                 className="h-11 gap-2.5 rounded-full px-6 text-[15px] font-bold tracking-wide shadow-md"
               >
-                <Link to={readerHref}>
+                <ViewTransitionLink to={readerHref}>
                   <BookOpen className="size-[18px]" />
                   {hasSavedProgress ? "Continue" : "Read"}
                   {progressLabel && (
@@ -157,7 +161,7 @@ export default function EbookContent({
                       {progressLabel}
                     </span>
                   )}
-                </Link>
+                </ViewTransitionLink>
               </Button>
             )}
             {canDownload && (
@@ -185,7 +189,7 @@ export default function EbookContent({
         }
       />
 
-      <div className="page-shell space-y-12 py-10 sm:space-y-14">
+      <div className="page-shell detail-supporting-content space-y-12 py-10 sm:space-y-14">
         {item.ebook?.series && item.ebook.series.entries.length > 0 && (
           <RelatedRail
             heading={item.ebook.series.name ? `In ${item.ebook.series.name}` : "In this series"}

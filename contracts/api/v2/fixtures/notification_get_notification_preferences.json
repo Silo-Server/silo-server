@@ -1,0 +1,8 @@
+{
+  "profile_id": "p-owner",
+  "enabled": true,
+  "notify_favorites": true,
+  "notify_watchlist": true,
+  "notify_continue_watching": true,
+  "notify_next_up": true
+}

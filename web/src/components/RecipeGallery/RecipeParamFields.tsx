@@ -10,16 +10,50 @@ import { catalogKeys, itemKeys } from "@/hooks/queries/keys";
 import { useDebounce } from "@/hooks/useDebounce";
 import type { BrowseItem } from "@/api/types";
 import type { RecipeDefinition } from "@/lib/recipes";
+import {
+  LIBRARY_FILTER_SECTION_TYPES,
+  sectionLibraryFilterIds,
+  withSectionLibraryFilterIds,
+} from "@/lib/sectionLibraryFilter";
 
 export interface RecipeParamFieldsProps {
+  libraryCollectionsOnly?: boolean;
+  /**
+   * The section lives on a library page, whose library always overrides a
+   * config library filter, so the library picker is hidden.
+   */
+  libraryScoped?: boolean;
+  /**
+   * Libraries the library picker offers. Defaults to the current profile's
+   * libraries; the admin editor passes every library on the server.
+   */
+  libraries?: Array<{ id: number; name: string; type?: string }>;
   def: RecipeDefinition;
   params: Record<string, unknown>;
   onChange: (next: Record<string, unknown>) => void;
 }
 
-export default function RecipeParamFields({ def, params, onChange }: RecipeParamFieldsProps) {
+export default function RecipeParamFields({
+  def,
+  params,
+  onChange,
+  libraryCollectionsOnly = false,
+  libraryScoped = false,
+  libraries,
+}: RecipeParamFieldsProps) {
+  if (LIBRARY_FILTER_SECTION_TYPES.has(def.type)) {
+    return libraryScoped ? null : (
+      <LibraryFilterParamField params={params} onChange={onChange} libraries={libraries} />
+    );
+  }
   if (def.type === "collection") {
-    return <CollectionParamField params={params} onChange={onChange} />;
+    return (
+      <CollectionParamField
+        params={params}
+        onChange={onChange}
+        libraryCollectionsOnly={libraryCollectionsOnly}
+      />
+    );
   }
   if (def.type === "continue_watching") {
     return <ContinueTypeParamField params={params} onChange={onChange} />;
@@ -249,6 +283,27 @@ function PersonalListFilterFields({ params, onChange }: ParamFieldProps) {
         </select>
       </label>
     </div>
+  );
+}
+
+// LibraryFilterParamField limits a Recently Added or Recently Released row to
+// chosen libraries, e.g. a home row for one TV library.
+function LibraryFilterParamField({
+  params,
+  onChange,
+  libraries: libraryOptions,
+}: ParamFieldProps & Pick<RecipeParamFieldsProps, "libraries">) {
+  const { data: profileLibraries } = useAvailableUserLibraries();
+  const libraries = libraryOptions ?? profileLibraries;
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs text-white/70">Libraries</span>
+      <LibraryMultiSelect
+        libraries={libraries ?? []}
+        value={sectionLibraryFilterIds(params)}
+        onChange={(next) => onChange(withSectionLibraryFilterIds(params, next))}
+      />
+    </label>
   );
 }
 
@@ -613,8 +668,15 @@ function CuratedItemsParamField({ params, onChange }: ParamFieldProps) {
   );
 }
 
-function CollectionParamField({ params, onChange }: ParamFieldProps) {
-  const { collections, isLoading } = useAllUserCollections();
+function CollectionParamField({
+  params,
+  onChange,
+  libraryCollectionsOnly,
+}: ParamFieldProps & { libraryCollectionsOnly: boolean }) {
+  const { collections: allCollections, isLoading } = useAllUserCollections();
+  const collections = libraryCollectionsOnly
+    ? allCollections.filter((collection) => collection.source === "library")
+    : allCollections;
   const libraryID = (params.library_collection_id as string) ?? "";
   const userID = (params.user_collection_id as string) ?? "";
   const value = userID || libraryID;

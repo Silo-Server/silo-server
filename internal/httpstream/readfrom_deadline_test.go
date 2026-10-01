@@ -8,21 +8,22 @@ import (
 	"time"
 )
 
-// pacedReader delivers src in fixed-size pieces with a pause between each, so a
-// transfer takes a predictable wall-clock time regardless of socket buffering.
-// It models a slow disk or a rate-limited upstream, which is what makes a single
+// pacedReader delivers src at a fixed byte rate, so a transfer takes a
+// predictable wall-clock time regardless of the caller's read-buffer size. It
+// models a slow disk or a rate-limited upstream, which is what makes a single
 // zero-copy slice long-lived.
 type pacedReader struct {
 	remaining int64
 	piece     int64
 	pause     time.Duration
+	started   time.Time
+	delivered int64
 }
 
 func (r *pacedReader) Read(p []byte) (int, error) {
 	if r.remaining <= 0 {
 		return 0, io.EOF
 	}
-	time.Sleep(r.pause)
 	n := r.piece
 	if n > int64(len(p)) {
 		n = int64(len(p))
@@ -30,6 +31,15 @@ func (r *pacedReader) Read(p []byte) (int, error) {
 	if n > r.remaining {
 		n = r.remaining
 	}
+	// ReaderFrom implementations choose their own buffer size. Scale the pause
+	// to the bytes actually returned instead of assuming every call accepts a
+	// full piece; otherwise a smaller platform buffer silently slows the reader
+	// and consumes the deadline margin this test is meant to control.
+	if r.started.IsZero() {
+		r.started = time.Now()
+	}
+	r.delivered += n
+	time.Sleep(time.Until(r.started.Add(time.Duration(r.delivered) * r.pause / time.Duration(r.piece))))
 	r.remaining -= n
 	return int(n), nil
 }
@@ -55,10 +65,11 @@ func sliceDuration() time.Duration {
 // despite making continuous progress.
 func TestReadFromRollsDeadlineBetweenSlices(t *testing.T) {
 	slice := sliceDuration()
-	// Window comfortably exceeds one slice but is far shorter than the whole
-	// transfer, so only per-slice bumping can carry it to completion.
-	window := slice * 3
-	total := readFromChunk * 3
+	// Leave enough headroom for scheduler jitter while keeping the whole
+	// transfer longer than the window, so only per-slice bumping can carry it to
+	// completion.
+	window := slice * 6
+	total := readFromChunk * 8
 
 	done := make(chan error, 1)
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -96,8 +107,8 @@ func TestReadFromRollsDeadlineBetweenSlices(t *testing.T) {
 // stay reproducible so nobody restores a large slice without noticing.
 func TestOversizedReadFromSliceIsReaped(t *testing.T) {
 	slice := sliceDuration()
-	window := slice * 3
-	oversized := readFromChunk * 8 // one slice ≈ 8x slice duration >> window
+	window := slice * 6
+	oversized := readFromChunk * 12 // one slice ≈ 12x slice duration >> window
 
 	done := make(chan error, 1)
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -159,8 +170,8 @@ func TestReadFromChunkAllowsSlowClients(t *testing.T) {
 // sustaining the documented floor rate was reaped despite never stalling.
 func TestReadFromRollsDeadlineUnderProductionStep(t *testing.T) {
 	slice := sliceDuration()
-	window := slice * 3
-	total := readFromChunk * 3
+	window := slice * 6
+	total := readFromChunk * 8
 
 	done := make(chan error, 1)
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -197,7 +208,7 @@ func TestReadFromRollsDeadlineUnderProductionStep(t *testing.T) {
 // spend that wait against the window set at construction.
 func TestReadFromBumpsBeforeTheFirstSlice(t *testing.T) {
 	slice := sliceDuration()
-	window := slice * 3
+	window := slice * 6
 	total := readFromChunk
 
 	done := make(chan error, 1)

@@ -73,10 +73,20 @@ func (t *ArtworkRevisionTracker) TrackArtworkRevision(ctx context.Context, origi
 	// exact manifest: the objects exist again once the cacher finishes.
 	_, err := t.pool.Exec(ctx, `
 		INSERT INTO artwork_revision_gc_candidates (
-			original_path, image_type, object_keys, not_before, next_attempt_at
-		) VALUES ($1, $2, $3, $4, $4)
+			original_path, image_type, object_keys, published_keys, not_before, next_attempt_at
+		) VALUES ($1, $2, $3, $3, $4, $4)
 		ON CONFLICT (original_path) DO UPDATE SET
 			object_keys = EXCLUDED.object_keys,
+            published_keys = CASE
+                WHEN cardinality(EXCLUDED.object_keys) > 0 THEN EXCLUDED.object_keys
+                WHEN artwork_revision_gc_candidates.deleted_at IS NOT NULL THEN '{}'::text[]
+                ELSE coalesce(artwork_revision_gc_candidates.published_keys, '{}'::text[]) END,
+            delivery_next_check = NOW(),
+            delivery_lease = '',
+            delivery_keys = CASE WHEN artwork_revision_gc_candidates.deleted_at IS NOT NULL
+                THEN '{}'::text[] ELSE artwork_revision_gc_candidates.delivery_keys END,
+            delivery_checked_at = CASE WHEN artwork_revision_gc_candidates.deleted_at IS NOT NULL
+                THEN NULL ELSE artwork_revision_gc_candidates.delivery_checked_at END,
 			image_type = CASE
 				WHEN artwork_revision_gc_candidates.image_type = '' THEN EXCLUDED.image_type
 				ELSE artwork_revision_gc_candidates.image_type

@@ -6,10 +6,11 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
@@ -38,6 +39,11 @@ var (
 // Metrics is an HTTP middleware that records request count and duration.
 func Metrics(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, APIv2Prefix) {
+			// The v2 listener records itself with operation-ID labels.
+			next.ServeHTTP(w, r)
+			return
+		}
 		start := time.Now()
 
 		// Wrap response writer to capture status code.
@@ -46,10 +52,14 @@ func Metrics(next http.Handler) http.Handler {
 		next.ServeHTTP(wrapped, r)
 
 		duration := time.Since(start).Seconds()
-		path := sanitizePath(r.URL.Path)
+		path := "unmatched"
+		if route := chi.RouteContext(r.Context()); route != nil && route.RoutePattern() != "" {
+			path = route.RoutePattern()
+		}
+		method := metricMethod(r.Method)
 
-		httpRequestsTotal.WithLabelValues(r.Method, path, strconv.Itoa(wrapped.status)).Inc()
-		httpRequestDuration.WithLabelValues(r.Method, path).Observe(duration)
+		httpRequestsTotal.WithLabelValues(method, path, strconv.Itoa(wrapped.status)).Inc()
+		httpRequestDuration.WithLabelValues(method, path).Observe(duration)
 	})
 }
 
@@ -106,20 +116,12 @@ func (w *statusWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
 }
 
-var (
-	uuidRegex    = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
-	numericRegex = regexp.MustCompile(`/\d+(/|$)`)
-)
-
-// sanitizePath normalizes URL paths to avoid high-cardinality labels.
-// Replaces dynamic segments (UUIDs, numeric IDs) with placeholders.
-func sanitizePath(path string) string {
-	path = uuidRegex.ReplaceAllString(path, "{id}")
-	path = numericRegex.ReplaceAllStringFunc(path, func(m string) string {
-		if m[len(m)-1] == '/' {
-			return "/{id}/"
-		}
-		return "/{id}"
-	})
-	return path
+// metricMethod prevents arbitrary HTTP tokens from allocating metric series.
+func metricMethod(method string) string {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions, http.MethodConnect, http.MethodTrace:
+		return method
+	default:
+		return "other"
+	}
 }

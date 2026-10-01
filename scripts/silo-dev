@@ -54,7 +54,7 @@ token() {
 	body=$(SILO_ADMIN_USER="$SILO_ADMIN_USER" SILO_ADMIN_PASSWORD="$SILO_ADMIN_PASSWORD" \
 		python3 -c 'import json,os;print(json.dumps({"username":os.environ["SILO_ADMIN_USER"],"password":os.environ["SILO_ADMIN_PASSWORD"]}))')
 
-	curl -fsS -X POST "$SILO_URL/api/v1/auth/login" \
+	curl -fsS -X POST "$SILO_URL/api/v2/auth/login" \
 		-H 'Content-Type: application/json' \
 		--data-binary "$body" |
 		python3 -c 'import json,sys;print(json.load(sys.stdin)["access_token"])'
@@ -71,7 +71,7 @@ usage: scripts/silo-dev <command> [args]
   logs [args...]         compose logs for the Silo service (default: --tail 200)
   psql <sql>             run one SQL statement against the Silo database
   token                  print an access token for SILO_ADMIN_USER
-  api <path> [curl...]   authenticated request against the API, e.g. api /api/v1/health
+  api <path> [curl...]   authenticated request as the admin's primary profile, e.g. api /api/v2/catalog
 
 Settings come from .silo-dev.env (see .silo-dev.env.example). With SILO_SSH
 empty, host commands run locally.
@@ -106,6 +106,7 @@ doctor)
 	need_env_file
 	status=0
 	printf 'api      '
+	# /api/v1/health is a retained operational probe, not part of the frozen v1 contract.
 	if curl -fsS --max-time 10 "$SILO_URL/api/v1/health" >/dev/null 2>&1; then
 		printf 'ok (%s)\n' "$SILO_URL"
 	else
@@ -174,10 +175,31 @@ token)
 	;;
 
 api)
-	[[ $# -gt 0 ]] || die 'api needs a path, e.g. /api/v1/health'
+	[[ $# -gt 0 ]] || die 'api needs a path, e.g. /api/v2/libraries'
 	path=$1
 	shift
-	curl -fsS -H "Authorization: Bearer $(token)" "$SILO_URL$path" "$@"
+	# Profile-scoped v2 reads (catalog, home, notifications, ...) need the
+	# primary profile; resolve it once so the helper works for either kind.
+	local_token=$(token)
+	profile_id=$(curl -fsS -H "Authorization: Bearer $local_token" "$SILO_URL/api/v2/profiles" |
+		python3 -c 'import json,sys
+items=json.load(sys.stdin).get("items",[])
+print(next((p["id"] for p in items if p.get("is_primary")), items[0]["id"] if items else ""))' 2>/dev/null || true)
+	if [[ -z $profile_id ]]; then
+		curl -fsS -H "Authorization: Bearer $local_token" "$SILO_URL$path" "$@"
+		exit
+	fi
+	# A PIN-locked primary profile also needs X-Profile-Token; mint one from
+	# SILO_ADMIN_PROFILE_PIN when it is configured.
+	profile_headers=(-H "X-Profile-Id: $profile_id")
+	if [[ -n "${SILO_ADMIN_PROFILE_PIN:-}" ]]; then
+		pin_body=$(SILO_ADMIN_PROFILE_PIN="$SILO_ADMIN_PROFILE_PIN" python3 -c 'import json,os;print(json.dumps({"pin":os.environ["SILO_ADMIN_PROFILE_PIN"]}))')
+		profile_token=$(curl -fsS -X POST "$SILO_URL/api/v2/profiles/$profile_id/verify-pin" \
+			-H "Authorization: Bearer $local_token" -H 'Content-Type: application/json' --data-binary "$pin_body" |
+			python3 -c 'import json,sys;print(json.load(sys.stdin).get("profile_token",""))' 2>/dev/null || true)
+		[[ -n $profile_token ]] && profile_headers+=(-H "X-Profile-Token: $profile_token")
+	fi
+	curl -fsS -H "Authorization: Bearer $local_token" "${profile_headers[@]}" "$SILO_URL$path" "$@"
 	;;
 
 *)

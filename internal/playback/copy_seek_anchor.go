@@ -3,7 +3,6 @@ package playback
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 	"os/exec"
@@ -24,16 +23,6 @@ var (
 	copySeekProbeSlots = make(chan struct{}, maxConcurrentCopySeekProbes)
 )
 
-type copySeekProbePacket struct {
-	PTSSeconds string `json:"pts_time"`
-	DTSSeconds string `json:"dts_time"`
-	Flags      string `json:"flags"`
-}
-
-type copySeekProbeOutput struct {
-	Packets []copySeekProbePacket `json:"packets"`
-}
-
 type copySeekAnchor struct {
 	seconds float64
 	segment int
@@ -45,10 +34,12 @@ type copySeekAnchor struct {
 // so callers need both timestamps: requestedSeekSeconds remains the -ss input,
 // while the returned anchor defines the stream's real timeline origin.
 //
-// The tiny read interval is intentional. ffprobe asks the demuxer to seek to
-// requestedSeekSeconds, which lands on the same preceding key packet FFmpeg
-// uses, then emits only the packets at that seek point instead of scanning the
-// media from the beginning.
+// The one-packet framecrc output is intentional. ffprobe read intervals discard
+// Matroska pre-roll at an exact keyframe boundary, while FFmpeg stream copy
+// emits that preceding packet. Running FFmpeg with the transport's real seek
+// and timestamp policy observes the packet the HLS muxer will actually receive
+// without decoding or writing media output. start_at_zero matches the transport
+// and makes the returned origin relative to the source start, not raw input PTS.
 func ResolveCopySeekAnchor(
 	ctx context.Context,
 	ffmpegPath string,
@@ -66,8 +57,9 @@ func ResolveCopySeekAnchor(
 		segmentDuration = DefaultSegmentDuration
 	}
 
+	resolvedFFmpegPath := ResolveFFmpegPath(ffmpegPath)
 	key := strings.Join([]string{
-		ffprobePathFromFFmpeg(ffmpegPath),
+		resolvedFFmpegPath,
 		inputPath,
 		strconv.FormatFloat(requestedSeekSeconds, 'f', 6, 64),
 		strconv.Itoa(segmentDuration),
@@ -81,7 +73,7 @@ func ResolveCopySeekAnchor(
 		case <-probeCtx.Done():
 			return copySeekAnchor{}, probeCtx.Err()
 		}
-		seconds, segment, err := resolveCopySeekAnchor(probeCtx, ffmpegPath, inputPath, requestedSeekSeconds, segmentDuration)
+		seconds, segment, err := resolveCopySeekAnchor(probeCtx, resolvedFFmpegPath, inputPath, requestedSeekSeconds, segmentDuration)
 		return copySeekAnchor{seconds: seconds, segment: segment}, err
 	})
 
@@ -105,16 +97,23 @@ func resolveCopySeekAnchor(
 	segmentDuration int,
 ) (float64, int, error) {
 
-	interval := strconv.FormatFloat(requestedSeekSeconds, 'f', 6, 64) + "%+0.001"
-	cmd := exec.CommandContext(ctx, ffprobePathFromFFmpeg(ffmpegPath),
+	cmd := exec.CommandContext(ctx, ffmpegPath,
 		"-v", "error",
+		"-fflags", "+genpts+fastseek",
+		"-analyzeduration", "3000000",
+		"-probesize", "5000000",
+		"-ss", fmt.Sprintf("%.3f", requestedSeekSeconds),
+		"-i", inputPath,
 		// Match the remux transport's 0:V:0 map. Uppercase V excludes attached
 		// pictures, thumbnails, and cover art from the video stream ordinal.
-		"-select_streams", "V:0",
-		"-read_intervals", interval,
-		"-show_entries", "packet=pts_time,dts_time,flags",
-		"-of", "json",
-		inputPath,
+		"-map", "0:V:0",
+		"-c:v", "copy",
+		"-copyts",
+		"-start_at_zero",
+		"-avoid_negative_ts", "disabled",
+		"-frames:v", "1",
+		"-f", "framecrc",
+		"-",
 	)
 	var stdout bytes.Buffer
 	stderr := newBoundedTailBuffer(stderrTailMaxBytes)
@@ -122,24 +121,36 @@ func resolveCopySeekAnchor(
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
 		if tail := truncateStderr(stderr.String()); tail != "" {
-			return 0, 0, fmt.Errorf("resolve copy seek anchor: ffprobe failed: %w (stderr: %s)", err, tail)
+			return 0, 0, fmt.Errorf("resolve copy seek anchor: ffmpeg failed: %w (stderr: %s)", err, tail)
 		}
-		return 0, 0, fmt.Errorf("resolve copy seek anchor: ffprobe failed: %w", err)
+		return 0, 0, fmt.Errorf("resolve copy seek anchor: ffmpeg failed: %w", err)
 	}
 
-	var output copySeekProbeOutput
-	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
-		return 0, 0, fmt.Errorf("resolve copy seek anchor: decode ffprobe output: %w", err)
-	}
-	for _, packet := range output.Packets {
-		if !strings.Contains(packet.Flags, "K") {
+	timeBaseNumerator, timeBaseDenominator := int64(0), int64(0)
+	for line := range bytes.SplitSeq(stdout.Bytes(), []byte("\n")) {
+		trimmed := strings.TrimSpace(string(line))
+		if strings.HasPrefix(trimmed, "#tb 0:") {
+			parts := strings.Split(strings.TrimSpace(strings.TrimPrefix(trimmed, "#tb 0:")), "/")
+			if len(parts) != 2 {
+				continue
+			}
+			timeBaseNumerator, _ = strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)
+			timeBaseDenominator, _ = strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
 			continue
 		}
-		timestamp := packet.PTSSeconds
-		if timestamp == "" || strings.EqualFold(timestamp, "N/A") {
-			timestamp = packet.DTSSeconds
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") || timeBaseNumerator <= 0 || timeBaseDenominator <= 0 {
+			continue
 		}
-		anchor, err := strconv.ParseFloat(timestamp, 64)
+		fields := strings.Split(trimmed, ",")
+		if len(fields) < 3 || strings.TrimSpace(fields[0]) != "0" {
+			continue
+		}
+		timestamp := strings.TrimSpace(fields[2])
+		if timestamp == "" || strings.EqualFold(timestamp, "N/A") {
+			timestamp = strings.TrimSpace(fields[1])
+		}
+		timestampTicks, err := strconv.ParseInt(timestamp, 10, 64)
+		anchor := float64(timestampTicks) * float64(timeBaseNumerator) / float64(timeBaseDenominator)
 		if err != nil || math.IsNaN(anchor) || math.IsInf(anchor, 0) {
 			continue
 		}
@@ -147,5 +158,5 @@ func resolveCopySeekAnchor(
 		return anchor, int(anchor / float64(segmentDuration)), nil
 	}
 
-	return 0, 0, fmt.Errorf("resolve copy seek anchor: ffprobe returned no key packet")
+	return 0, 0, fmt.Errorf("resolve copy seek anchor: ffmpeg returned no video packet timestamp")
 }

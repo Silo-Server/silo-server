@@ -1,6 +1,8 @@
 package playback
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -25,6 +27,18 @@ type RecipeCard struct {
 	TranscodeNodeURL     string    `json:"transcode_node_url,omitempty"`
 	TranscodeTransportID string    `json:"transcode_transport_id,omitempty"`
 	OriginalStartedAt    time.Time `json:"original_started_at,omitempty"`
+	StreamLocation       string    `json:"stream_location,omitempty"`
+	// Routing fields freeze the committed media-serving boundary so a token or
+	// stored card cannot lose a proxy-only assignment when it reconstructs a
+	// session on another process. Stable execution and egress identities bind
+	// the artifact to the nodes whose capacity the planner reserved; internal
+	// URLs stay out of the portable recipe.
+	RoutingNetworkProvider *string `json:"routing_network_provider,omitempty"`
+	RoutingWorkload        string  `json:"routing_workload,omitempty"`
+	RoutingExecution       string  `json:"routing_execution,omitempty"`
+	RoutingExecutionNodeID int     `json:"routing_execution_node_id,omitzero"`
+	RoutingEgress          string  `json:"routing_egress,omitempty"`
+	RoutingEgressNodeID    int     `json:"routing_egress_node_id,omitempty"`
 
 	// PlayMethod discriminates which serve path reconstructs this session
 	// (direct / remux / transcode). Empty decodes as PlayTranscode for
@@ -70,6 +84,7 @@ type RecipeCard struct {
 	ToneMapSourceKind          tonemap.SourceKind     `json:"tone_map_source_kind,omitempty"`
 	ToneMapFilter              string                 `json:"tone_map_filter,omitempty"`
 	ToneMapRecipeVersion       string                 `json:"tone_map_recipe_version,omitempty"`
+	CopyFMP4RecipeVersion      string                 `json:"copy_fmp4_recipe_version,omitempty"`
 	ToneMapPreflightRequired   bool                   `json:"tone_map_preflight_required,omitempty"`
 	ToneMapSourceRevision      tonemap.SourceRevision `json:"tone_map_source_revision,omitzero"`
 	ToneMapDVConfigPresent     bool                   `json:"tone_map_dv_config_present,omitempty"`
@@ -78,6 +93,7 @@ type RecipeCard struct {
 	ToneMapDVRPUPresent        bool                   `json:"tone_map_dv_rpu_present,omitempty"`
 	VideoBitstreamFilter       string                 `json:"video_bitstream_filter,omitempty"`
 	VideoSampleEntry           string                 `json:"video_sample_entry,omitempty"`
+	CopyVideoMPEGTS            bool                   `json:"copy_video_mpegts,omitempty"`
 	SeekSeconds                float64                `json:"seek_seconds"`
 	StreamOriginSeconds        float64                `json:"stream_origin_seconds,omitempty"`
 	CopySeekAnchorResolved     bool                   `json:"copy_seek_anchor_resolved,omitempty"`
@@ -89,6 +105,7 @@ type RecipeCard struct {
 	SegmentDuration            int                    `json:"segment_duration"`
 	StartSegmentNumber         int                    `json:"start_segment_number"`
 	HWAccel                    string                 `json:"hw_accel,omitempty"`
+	EncoderHWAccel             string                 `json:"encoder_hw_accel,omitempty"`
 	HWDevice                   string                 `json:"hw_device,omitempty"`
 	SubtitleTrackIndex         int                    `json:"subtitle_track_index"`
 	SubtitleBurnIn             bool                   `json:"subtitle_burn_in,omitempty"`
@@ -97,6 +114,44 @@ type RecipeCard struct {
 	TargetBitrateKbps          int                    `json:"target_bitrate_kbps,omitempty"`
 	TotalDuration              float64                `json:"total_duration"`
 	FastStart                  bool                   `json:"fast_start,omitempty"`
+	ThrottleSeconds            int                    `json:"throttle_seconds,omitempty"`
+}
+
+const playMethodCopyFMP4V1 PlayMethod = streamtoken.PlayMethodCopyFMP4Transcode
+
+var ErrCopyFMP4RecipeVersionMismatch = errors.New("copy-fmp4 recipe version mismatch")
+
+// EffectiveEncoderHWAccel preserves older cards that recorded only one
+// backend, while new cards distinguish CPU encoding from GPU tone mapping.
+func (c RecipeCard) EffectiveEncoderHWAccel() string {
+	if c.EncoderHWAccel != "" {
+		return c.EncoderHWAccel
+	}
+	return c.HWAccel
+}
+
+// IsTranscodeRecipe reports whether a card is a legacy/current transcode or a
+// versioned copy-fMP4 transcode. The versioned method is deliberately distinct
+// so binaries predating it reject the card instead of reconstructing old bytes.
+func (c RecipeCard) IsTranscodeRecipe() bool {
+	return c.PlayMethod == "" || c.PlayMethod == PlayTranscode || c.PlayMethod == playMethodCopyFMP4V1
+}
+
+// ValidateCopyFMP4RecipeCard rejects an old copy card under the current
+// byte-affecting FFmpeg recipe and rejects malformed attempts to attach the
+// marker to another recipe. Identity-only node-hop cards may carry the marker
+// with no target codec; the complete recipe is then loaded from the store.
+func ValidateCopyFMP4RecipeCard(c RecipeCard) error {
+	copyTarget := strings.EqualFold(strings.TrimSpace(c.TargetCodecVideo), "copy")
+	marked := c.PlayMethod == playMethodCopyFMP4V1
+	versioned := c.CopyFMP4RecipeVersion != ""
+	if copyTarget || marked || versioned {
+		if !marked || c.CopyFMP4RecipeVersion != CopyFMP4RecipeVersion || (!copyTarget && c.TargetCodecVideo != "") {
+			return fmt.Errorf("%w: method=%q target_codec=%q recipe_version=%q",
+				ErrCopyFMP4RecipeVersionMismatch, c.PlayMethod, c.TargetCodecVideo, c.CopyFMP4RecipeVersion)
+		}
+	}
+	return nil
 }
 
 // NewRecipeCard builds a RecipeCard from the durable identity fields plus the
@@ -106,6 +161,12 @@ type RecipeCard struct {
 // operator's config change applies to reconstructed sessions too.
 func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeURL string, opts TranscodeOpts) RecipeCard {
 	opts = resolveSoftwareVideoDecode(opts)
+	playMethod := PlayTranscode
+	copyFMP4RecipeVersion := ""
+	if strings.EqualFold(strings.TrimSpace(opts.TargetCodecVideo), "copy") {
+		playMethod = playMethodCopyFMP4V1
+		copyFMP4RecipeVersion = CopyFMP4RecipeVersion
+	}
 	return RecipeCard{
 		SessionID:                  opts.SessionID,
 		UserID:                     userID,
@@ -113,7 +174,8 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 		MediaFileID:                mediaFileID,
 		TranscodeNodeURL:           transcodeNodeURL,
 		TranscodeTransportID:       opts.TranscodeTransportID,
-		PlayMethod:                 PlayTranscode,
+		PlayMethod:                 playMethod,
+		CopyFMP4RecipeVersion:      copyFMP4RecipeVersion,
 		TranscodeAudio:             TranscodesAudio(opts.TargetCodecAudio),
 		InputPath:                  opts.InputPath,
 		OutputSubdir:               opts.OutputSubdir,
@@ -135,6 +197,7 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 		ToneMapDVRPUPresent:        opts.ToneMapDVRPUPresent,
 		VideoBitstreamFilter:       opts.VideoBitstreamFilter,
 		VideoSampleEntry:           opts.VideoSampleEntry,
+		CopyVideoMPEGTS:            opts.CopyVideoMPEGTS,
 		SeekSeconds:                opts.SeekSeconds,
 		StreamOriginSeconds:        opts.StreamOriginSeconds,
 		CopySeekAnchorResolved:     opts.CopySeekAnchorResolved,
@@ -146,6 +209,7 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 		SegmentDuration:            opts.SegmentDuration,
 		StartSegmentNumber:         opts.StartSegmentNumber,
 		HWAccel:                    opts.HWAccel,
+		EncoderHWAccel:             opts.EffectiveEncoderHWAccel(),
 		HWDevice:                   opts.HWDevice,
 		SubtitleTrackIndex:         opts.SubtitleTrackIndex,
 		SubtitleBurnIn:             opts.SubtitleBurnIn,
@@ -154,6 +218,7 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 		TargetBitrateKbps:          opts.TargetBitrateKbps,
 		TotalDuration:              opts.TotalDuration,
 		FastStart:                  opts.FastStart,
+		ThrottleSeconds:            opts.ThrottleSeconds,
 	}
 }
 
@@ -225,6 +290,7 @@ func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLo
 		ToneMapSourceKind:          c.ToneMapSourceKind,
 		ToneMapFilter:              c.ToneMapFilter,
 		ToneMapRecipeVersion:       c.ToneMapRecipeVersion,
+		CopyFMP4RecipeVersion:      c.CopyFMP4RecipeVersion,
 		ToneMapPreflightRequired:   c.ToneMapPreflightRequired,
 		ToneMapSourceRevision:      c.ToneMapSourceRevision,
 		ToneMapDVConfigPresent:     c.ToneMapDVConfigPresent,
@@ -233,6 +299,7 @@ func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLo
 		ToneMapDVRPUPresent:        c.ToneMapDVRPUPresent,
 		VideoBitstreamFilter:       c.VideoBitstreamFilter,
 		VideoSampleEntry:           c.VideoSampleEntry,
+		CopyVideoMPEGTS:            c.CopyVideoMPEGTS,
 		SeekSeconds:                c.SeekSeconds,
 		StreamOriginSeconds:        c.StreamOriginSeconds,
 		CopySeekAnchorResolved:     c.CopySeekAnchorResolved,
@@ -245,6 +312,7 @@ func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLo
 		StartSegmentNumber:         c.StartSegmentNumber,
 		FFmpegPath:                 ffmpegPath,
 		HWAccel:                    c.HWAccel,
+		EncoderHWAccel:             c.EncoderHWAccel,
 		HWDevice:                   c.HWDevice,
 		SubtitleTrackIndex:         c.SubtitleTrackIndex,
 		SubtitleBurnIn:             c.SubtitleBurnIn,
@@ -253,6 +321,7 @@ func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLo
 		TargetBitrateKbps:          c.TargetBitrateKbps,
 		TotalDuration:              c.TotalDuration,
 		FastStart:                  c.FastStart,
+		ThrottleSeconds:            c.ThrottleSeconds,
 		NodeType:                   "integrated",
 		ExecutionMode:              "integrated",
 		FFmpegLogSink:              logSink,
@@ -294,22 +363,29 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		playMethod = streamtoken.PlayMethodToneMapTranscode
 	}
 	return streamtoken.Claims{
-		SessionID:            c.SessionID,
-		MediaPath:            c.InputPath,
-		OutputSubdir:         c.OutputSubdir,
-		DVProfile:            c.DVProfile,
-		AudioOnly:            c.AudioOnly,
-		PlayMethod:           playMethod,
-		TranscodeAudio:       c.TranscodeAudio,
-		RemuxDVMode:          string(c.RemuxDVMode),
-		TranscodeNode:        c.TranscodeNodeURL,
-		TranscodeTransportID: c.TranscodeTransportID,
-		TargetCodec:          c.TargetCodecVideo,
-		TargetRes:            c.TargetResolution,
-		AudioTrackIndex:      c.AudioTrackIndex,
-		UserID:               c.UserID,
-		ProfileID:            c.ProfileID,
-		MediaFileID:          c.MediaFileID,
+		SessionID:              c.SessionID,
+		MediaPath:              c.InputPath,
+		OutputSubdir:           c.OutputSubdir,
+		DVProfile:              c.DVProfile,
+		AudioOnly:              c.AudioOnly,
+		PlayMethod:             playMethod,
+		TranscodeAudio:         c.TranscodeAudio,
+		RemuxDVMode:            string(c.RemuxDVMode),
+		TranscodeNode:          c.TranscodeNodeURL,
+		TranscodeTransportID:   c.TranscodeTransportID,
+		RoutingNetworkProvider: c.RoutingNetworkProvider,
+		StreamLocation:         c.StreamLocation,
+		RoutingWorkload:        c.RoutingWorkload,
+		RoutingExecution:       c.RoutingExecution,
+		RoutingExecutionNodeID: c.RoutingExecutionNodeID,
+		RoutingEgress:          c.RoutingEgress,
+		RoutingEgressNodeID:    c.RoutingEgressNodeID,
+		TargetCodec:            c.TargetCodecVideo,
+		TargetRes:              c.TargetResolution,
+		AudioTrackIndex:        c.AudioTrackIndex,
+		UserID:                 c.UserID,
+		ProfileID:              c.ProfileID,
+		MediaFileID:            c.MediaFileID,
 		OriginalStartedAtUnixNano: func() int64 {
 			if c.OriginalStartedAt.IsZero() {
 				return 0
@@ -325,6 +401,7 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		ToneMapMode:                string(c.ToneMapMode),
 		ToneMapSourceKind:          string(c.ToneMapSourceKind),
 		ToneMapRecipeVersion:       c.ToneMapRecipeVersion,
+		CopyFMP4RecipeVersion:      c.CopyFMP4RecipeVersion,
 		ToneMapPreflightRequired:   c.ToneMapPreflightRequired,
 		ToneMapSourceRevision:      c.ToneMapSourceRevision.Encode(),
 		ToneMapDVConfigPresent:     c.ToneMapDVConfigPresent,
@@ -333,6 +410,7 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		ToneMapDVRPUPresent:        c.ToneMapDVRPUPresent,
 		VideoBitstreamFilter:       c.VideoBitstreamFilter,
 		VideoSampleEntry:           c.VideoSampleEntry,
+		CopyVideoMPEGTS:            c.CopyVideoMPEGTS,
 		SeekSeconds:                c.SeekSeconds,
 		StreamOriginSeconds:        c.StreamOriginSeconds,
 		CopySeekAnchorResolved:     c.CopySeekAnchorResolved,
@@ -344,6 +422,7 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		TargetBitrateKbps:          c.TargetBitrateKbps,
 		TotalDuration:              c.TotalDuration,
 		FastStart:                  c.FastStart,
+		ThrottleSeconds:            c.ThrottleSeconds,
 		TargetCodecAudio:           c.TargetCodecAudio,
 		TargetAudioChannels:        targetAudioChannels,
 		TargetAudioBitrateKbps:     c.TargetAudioBitrateKbps,
@@ -365,6 +444,8 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		method = PlayTranscode
 	case streamtoken.PlayMethodAudioDownmixRemux:
 		method = PlayRemux
+	case streamtoken.PlayMethodCopyFMP4Transcode:
+		method = playMethodCopyFMP4V1
 	}
 	if method == "" {
 		method = PlayTranscode
@@ -382,6 +463,13 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		MediaFileID:                c.MediaFileID,
 		TranscodeNodeURL:           c.TranscodeNode,
 		TranscodeTransportID:       c.TranscodeTransportID,
+		RoutingNetworkProvider:     c.RoutingNetworkProvider,
+		StreamLocation:             c.StreamLocation,
+		RoutingWorkload:            c.RoutingWorkload,
+		RoutingExecution:           c.RoutingExecution,
+		RoutingExecutionNodeID:     c.RoutingExecutionNodeID,
+		RoutingEgress:              c.RoutingEgress,
+		RoutingEgressNodeID:        c.RoutingEgressNodeID,
 		PlayMethod:                 method,
 		TranscodeAudio:             c.TranscodeAudio,
 		RemuxDVMode:                RemuxDVMode(c.RemuxDVMode),
@@ -398,6 +486,7 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		ToneMapMode:                tonemap.Mode(c.ToneMapMode),
 		ToneMapSourceKind:          tonemap.SourceKind(c.ToneMapSourceKind),
 		ToneMapRecipeVersion:       c.ToneMapRecipeVersion,
+		CopyFMP4RecipeVersion:      c.CopyFMP4RecipeVersion,
 		ToneMapPreflightRequired:   c.ToneMapPreflightRequired,
 		ToneMapSourceRevision:      sourceRevision,
 		ToneMapDVConfigPresent:     c.ToneMapDVConfigPresent,
@@ -406,6 +495,7 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		ToneMapDVRPUPresent:        c.ToneMapDVRPUPresent,
 		VideoBitstreamFilter:       c.VideoBitstreamFilter,
 		VideoSampleEntry:           c.VideoSampleEntry,
+		CopyVideoMPEGTS:            c.CopyVideoMPEGTS,
 		SeekSeconds:                c.SeekSeconds,
 		StreamOriginSeconds:        c.StreamOriginSeconds,
 		CopySeekAnchorResolved:     c.CopySeekAnchorResolved,
@@ -423,6 +513,7 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		TargetBitrateKbps:          c.TargetBitrateKbps,
 		TotalDuration:              c.TotalDuration,
 		FastStart:                  c.FastStart,
+		ThrottleSeconds:            c.ThrottleSeconds,
 	}
 	if c.OriginalStartedAtUnixNano != 0 {
 		card.OriginalStartedAt = time.Unix(0, c.OriginalStartedAtUnixNano).UTC()

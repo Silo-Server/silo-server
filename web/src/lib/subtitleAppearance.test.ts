@@ -7,6 +7,7 @@ import {
   computeSubtitlePositionStyle,
   computeSubtitleStyles,
   DEFAULT_SUBTITLE_APPEARANCE,
+  parseSubtitleAppearance,
   SUBTITLE_REFERENCE_HEIGHT,
 } from "./subtitleAppearance";
 
@@ -34,6 +35,10 @@ describe("computeSubtitleFontScale", () => {
     expect(computeSubtitleFontScale(1920, 1080, 2.35)).toBeCloseTo(1.5);
   });
 
+  it("scales against the visible viewport in Fill mode", () => {
+    expect(computeSubtitleFontScale(3440, 1440, 16 / 9, "cover")).toBe(2);
+  });
+
   it("falls back to 1 before measurements are available", () => {
     expect(computeSubtitleFontScale(0, 0, 16 / 9)).toBe(1);
     expect(computeSubtitleFontScale(1920, 1080, 0)).toBe(1);
@@ -56,6 +61,11 @@ describe("computeSubtitlePositionStyle", () => {
     expect(computeSubtitlePositionStyle("lower-third", 1000, 2000, 16 / 9)).toEqual({
       bottom: "786.25px",
     });
+  });
+
+  it("anchors Lower Third to the visible viewport in Fill mode", () => {
+    const style = computeSubtitlePositionStyle("lower-third", 3440, 1440, 16 / 9, "cover");
+    expect(Number.parseFloat(style.bottom as string)).toBeCloseTo(172.8);
   });
 });
 
@@ -89,5 +99,33 @@ describe("computeSubtitleStyles", () => {
     const scaled = computeSubtitleStyles(DEFAULT_SUBTITLE_APPEARANCE, 2);
     expect(unscaled.cueStyle.fontSize).toBe("32px");
     expect(scaled.cueStyle.fontSize).toBe("64px");
+  });
+});
+
+describe("text opacity", () => {
+  it("renders the font color at the text opacity, independent of the background", () => {
+    const styles = computeSubtitleStyles({
+      ...DEFAULT_SUBTITLE_APPEARANCE,
+      fontColor: "#9ca3af",
+      textOpacity: 30,
+    });
+    expect(styles.cueStyle.color).toBe("rgba(156, 163, 175, 0.3)");
+    expect(styles.cueStyle.backgroundColor).toBe(
+      computeSubtitleStyles(DEFAULT_SUBTITLE_APPEARANCE).cueStyle.backgroundColor,
+    );
+  });
+
+  it("keeps the default fully opaque", () => {
+    expect(computeSubtitleStyles(DEFAULT_SUBTITLE_APPEARANCE).cueStyle.color).toBe(
+      "rgba(255, 255, 255, 1)",
+    );
+  });
+
+  it("reads a stored value and falls back to 100 for a missing or out-of-contract one", () => {
+    expect(parseSubtitleAppearance({ textOpacity: 40 }).textOpacity).toBe(40);
+    expect(parseSubtitleAppearance({ fontColor: "#9ca3af" }).textOpacity).toBe(100);
+    for (const bad of [0, 101, 50.5, "50", null]) {
+      expect(parseSubtitleAppearance({ textOpacity: bad }).textOpacity).toBe(100);
+    }
   });
 });

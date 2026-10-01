@@ -3,12 +3,208 @@ package playback
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
+
+func TestForwardRestartPreservesConfiguredBackBuffer(t *testing.T) {
+	truePath, err := exec.LookPath("true")
+	if err != nil {
+		t.Skipf("`true` not found in PATH: %v", err)
+	}
+
+	dir := t.TempDir()
+	old := time.Now().Add(-time.Minute)
+	for _, segment := range []int{3, 40, 64, 65, 69, 70, 100} {
+		name := filepath.Join(dir, segmentFilename(segment, TranscodeOpts{}))
+		if err := os.WriteFile(name, []byte("segment"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(name, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	session := &TranscodeSession{
+		outputDir:            dir,
+		lastRequestedSegment: 70,
+		lastCompletedSegment: 70,
+		lastPruneFloor:       -1,
+		opts: TranscodeOpts{
+			OutputDir:               dir,
+			TargetCodecVideo:        "h264",
+			SegmentDuration:         4,
+			SegmentRetentionSeconds: 20,
+			StartSegmentNumber:      0,
+			FFmpegPath:              truePath,
+		},
+	}
+
+	if err := session.Restart(context.Background(), 400, 100); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+	// Restart itself has no downstream-completion proof for the replacement
+	// generation, so it must not unlink even old files synchronously.
+	for _, segment := range []int{3, 40, 64, 65, 69, 70, 100} {
+		path := filepath.Join(dir, segmentFilename(segment, TranscodeOpts{}))
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("segment %d was removed during restart: %v", segment, err)
+		}
+	}
+
+	// Once the replacement generation has produced a complete back buffer,
+	// the preserved range must become eligible again rather than leaking one
+	// full window after every forward seek.
+	session.ReportSegmentDownloaded(105)
+	waitForPrunerFileMissing(t, filepath.Join(dir, segmentFilename(70, TranscodeOpts{})))
+	for _, segment := range []int{3, 40, 64, 65, 69, 70} {
+		path := filepath.Join(dir, segmentFilename(segment, TranscodeOpts{}))
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("expired pre-restart segment %d survived completed-download pruning: %v", segment, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, segmentFilename(100, TranscodeOpts{}))); err != nil {
+		t.Fatalf("replacement startup segment was removed: %v", err)
+	}
+}
+
+func TestNonForwardRestartKeepsPreservedRangePrunable(t *testing.T) {
+	truePath, err := exec.LookPath("true")
+	if err != nil {
+		t.Skipf("`true` not found in PATH: %v", err)
+	}
+
+	dir := t.TempDir()
+	old := time.Now().Add(-time.Minute)
+	for _, segment := range []int{3, 40, 64, 65, 70} {
+		name := filepath.Join(dir, segmentFilename(segment, TranscodeOpts{}))
+		if err := os.WriteFile(name, []byte("segment"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(name, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	session := &TranscodeSession{
+		outputDir:            dir,
+		lastRequestedSegment: 70,
+		lastCompletedSegment: 70,
+		lastPruneFloor:       40,
+		opts: TranscodeOpts{
+			OutputDir:               dir,
+			TargetCodecVideo:        "h264",
+			SegmentDuration:         4,
+			SegmentRetentionSeconds: 20,
+			StartSegmentNumber:      0,
+			FFmpegPath:              truePath,
+		},
+	}
+
+	// Audio switches commonly restart from the reported playback position,
+	// which can trail the player's completed-download high-water mark.
+	session.SetAudioTrackIndex(1)
+	if err := session.Restart(context.Background(), 260, 65); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+	session.mu.Lock()
+	pruneFloor := session.lastPruneFloor
+	pruneBeforeStart := session.pruneBeforeStart
+	session.mu.Unlock()
+	if pruneFloor != 40 || !pruneBeforeStart {
+		t.Fatalf("restart prune state = floor %d, pre-start %t; want floor 40, pre-start true", pruneFloor, pruneBeforeStart)
+	}
+
+	session.ReportSegmentDownloaded(70)
+	waitForPrunerFileMissing(t, filepath.Join(dir, segmentFilename(64, TranscodeOpts{})))
+	for _, segment := range []int{3, 40, 64} {
+		path := filepath.Join(dir, segmentFilename(segment, TranscodeOpts{}))
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("expired pre-restart segment %d survived completed-download pruning: %v", segment, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, segmentFilename(65, TranscodeOpts{}))); err != nil {
+		t.Fatalf("replacement startup segment was removed: %v", err)
+	}
+}
+
+func TestForwardRestartWithoutCompletedDownloadPreservesFreshFiles(t *testing.T) {
+	truePath, err := exec.LookPath("true")
+	if err != nil {
+		t.Skipf("`true` not found in PATH: %v", err)
+	}
+
+	dir := t.TempDir()
+	for _, segment := range []int{3, 40, 70} {
+		if err := os.WriteFile(filepath.Join(dir, segmentFilename(segment, TranscodeOpts{})), []byte("segment"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	session := &TranscodeSession{
+		outputDir:            dir,
+		lastRequestedSegment: 70,
+		lastCompletedSegment: -1,
+		lastPruneFloor:       -1,
+		opts: TranscodeOpts{
+			OutputDir:               dir,
+			TargetCodecVideo:        "h264",
+			SegmentDuration:         4,
+			SegmentRetentionSeconds: 20,
+			StartSegmentNumber:      0,
+			FFmpegPath:              truePath,
+		},
+	}
+
+	if err := session.Restart(context.Background(), 400, 100); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	for _, segment := range []int{3, 40, 70} {
+		if _, err := os.Stat(filepath.Join(dir, segmentFilename(segment, TranscodeOpts{}))); err != nil {
+			t.Errorf("fresh segment %d was removed without a completed download: %v", segment, err)
+		}
+	}
+}
+
+func TestForwardRestartKeepsSegmentsWhenRetentionDisabled(t *testing.T) {
+	truePath, err := exec.LookPath("true")
+	if err != nil {
+		t.Skipf("`true` not found in PATH: %v", err)
+	}
+
+	dir := t.TempDir()
+	for _, segment := range []int{3, 40, 70} {
+		name := filepath.Join(dir, segmentFilename(segment, TranscodeOpts{}))
+		if err := os.WriteFile(name, []byte("segment"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	session := &TranscodeSession{
+		outputDir:            dir,
+		lastRequestedSegment: 70,
+		lastCompletedSegment: 70,
+		opts: TranscodeOpts{
+			OutputDir:          dir,
+			TargetCodecVideo:   "h264",
+			SegmentDuration:    4,
+			StartSegmentNumber: 0,
+			FFmpegPath:         truePath,
+		},
+	}
+
+	if err := session.Restart(context.Background(), 400, 100); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+	for _, segment := range []int{3, 40, 70} {
+		path := filepath.Join(dir, segmentFilename(segment, TranscodeOpts{}))
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("disabled retention removed segment %d: %v", segment, err)
+		}
+	}
+}
 
 // TestSegmentRecoveryDecisionWaitsWhileRestarting covers half of issue #243's
 // seek-freeze: while a restart is already in flight, a concurrent segment

@@ -3,6 +3,7 @@ package playback
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -78,28 +79,37 @@ func TestProbeTransformationRegistryV3AdvertisesVideoToH264RecipeVersion2(t *tes
 	t.Fatal("video_to_h264 was not advertised")
 }
 
-func TestProbeTransformationRegistryV3RequiresVersion2AudioFilterGraph(t *testing.T) {
+func TestProbeTransformationRegistryV3RequiresBothVersion4AudioFilterGraphs(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		rejectFilter string
+	}{
+		{name: "timestamp normalization", rejectFilter: aacTimestampNormalizeFilterV3},
+		{name: "surround downmix", rejectFilter: stereoDownmixBoostFilterV3},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
+			script := fmt.Sprintf("#!/bin/sh\ncase \"$2\" in\n-bsfs) : ;;\n-encoders) echo ' A....D aac AAC' ;;\nesac\ncase \" $* \" in\n*\" -af %s \"*) exit 1 ;;\nesac\n", test.rejectFilter)
+			if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			registry, err := ProbeTransformationRegistryWithToneMapV3Result(context.Background(), ffmpeg, nil)
+			if err != nil {
+				t.Fatalf("unsupported graph should be a cacheable capability result: %v", err)
+			}
+			if registry.Available(TransformationAudioToAACV3) {
+				t.Fatalf("audio_to_aac advertised when %s was rejected", test.name)
+			}
+		})
+	}
+
 	ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
-	// Model an older FFmpeg that lists both filters but rejects one of the v2
-	// graph options (notably out_chlayout or alimiter latency compensation).
-	script := "#!/bin/sh\ncase \"$2\" in\n-bsfs) : ;;\n-encoders) echo ' A....D aac AAC' ;;\n-filters) echo ' ... aresample A->A'; echo ' T.C alimiter A->A' ;;\nesac\ncase \" $* \" in\n*\" -f lavfi \"*) exit 1 ;;\nesac\n"
+	script := "#!/bin/sh\ncase \"$2\" in\n-bsfs) : ;;\n-encoders) echo ' A....D aac AAC' ;;\nesac\n"
 	if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-
-	registry, err := ProbeTransformationRegistryWithToneMapV3Result(context.Background(), ffmpeg, nil)
-	if err != nil {
-		t.Fatalf("unsupported graph should be a cacheable capability result: %v", err)
-	}
-	if registry.Available(TransformationAudioToAACV3) {
-		t.Fatal("audio_to_aac advertised when the exact version 2 graph was rejected")
-	}
-
-	script = "#!/bin/sh\ncase \"$2\" in\n-bsfs) : ;;\n-encoders) echo ' A....D aac AAC' ;;\n-filters) echo ' ... aresample A->A'; echo ' T.C alimiter A->A' ;;\nesac\n"
-	if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	registry = ProbeTransformationRegistryV3(context.Background(), ffmpeg)
+	registry := ProbeTransformationRegistryV3(context.Background(), ffmpeg)
 	for _, transformation := range registry.Advertised() {
 		if transformation.Name == TransformationAudioToAACV3 {
 			if transformation.RecipeVersion != TransformationAudioToAACRecipeVersionV3 {
@@ -108,5 +118,5 @@ func TestProbeTransformationRegistryV3RequiresVersion2AudioFilterGraph(t *testin
 			return
 		}
 	}
-	t.Fatal("audio_to_aac was not advertised with the complete version 2 toolchain")
+	t.Fatal("audio_to_aac was not advertised with the complete version 4 toolchain")
 }

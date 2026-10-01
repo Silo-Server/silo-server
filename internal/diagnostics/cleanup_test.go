@@ -180,6 +180,37 @@ func TestCleanupReportsDeletesUnmatchedObjects(t *testing.T) {
 	}
 }
 
+// On a local backend with no private bucket, diagnostics shares a root with
+// artwork, whose first key segment is an unvalidated provider slug. A metadata
+// plugin named "diagnostics" must not have its artwork swept as orphans.
+func TestCleanupReportsOnlyDeletesBundleShapedOrphans(t *testing.T) {
+	ops := []string{}
+	repo := &fakeCleanupRepo{live: map[string]ReportState{}, ops: &ops}
+	store := &fakeCleanupStore{
+		bucket: "local",
+		list: []string{
+			"diagnostics/movie/42/poster/original.r1.jpg",
+			"diagnostics/7/notes.txt",
+			"diagnostics/seven/orphan.tar.gz",
+			"diagnostics/07/orphan.tar.gz",
+			"diagnostics/7/.tar.gz",
+			"diagnostics/7/orphan.tar.gz",
+		},
+		ops: &ops,
+	}
+
+	result, err := CleanupReports(context.Background(), repo, store, Settings{
+		RetentionDays:   30,
+		MaxBytesPerUser: DefaultMaxBytesPerUser,
+	}, CleanupOptions{Logger: slog.New(slog.DiscardHandler)})
+	if err != nil {
+		t.Fatalf("CleanupReports: %v", err)
+	}
+	if want := []string{"diagnostics/7/orphan.tar.gz"}; !sameStrings(store.deleted, want) || result.OrphanObjectsDeleted != 1 {
+		t.Fatalf("deleted objects = %v (count %d), want %v", store.deleted, result.OrphanObjectsDeleted, want)
+	}
+}
+
 func testCleanupReport(id string, userID int, state ReportState, blobKey string) Report {
 	report := Report{ID: id, UserID: userID, State: state}
 	if blobKey != "" {

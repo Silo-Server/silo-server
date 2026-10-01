@@ -62,6 +62,7 @@ describe("ContinueWatchingCard", () => {
               backdrop_thumbhash: "",
               logo_url: "",
             }}
+            quickActionMode="both"
           />
         </MemoryRouter>
       </QueryClientProvider>,
@@ -105,6 +106,7 @@ describe("ContinueWatchingCard", () => {
                 in_watchlist: false,
               },
             }}
+            quickActionMode="both"
           />
         </MemoryRouter>
       </QueryClientProvider>,
@@ -142,6 +144,7 @@ describe("ContinueWatchingCard", () => {
               backdrop_thumbhash: "",
               logo_url: "",
             }}
+            quickActionMode="both"
           />
         </MemoryRouter>
       </QueryClientProvider>,
@@ -181,6 +184,7 @@ describe("ContinueWatchingCard", () => {
                 in_watchlist: false,
               },
             }}
+            quickActionMode="both"
           />
         </MemoryRouter>
       </QueryClientProvider>,
@@ -217,6 +221,7 @@ describe("ContinueWatchingCard", () => {
               logo_url: "",
             }}
             libraryId={12}
+            quickActionMode="both"
           />
         </MemoryRouter>
       </QueryClientProvider>,
@@ -287,6 +292,7 @@ describe("ContinueWatchingCard", () => {
               completed: false,
               updated_at: "2026-03-07T00:00:00Z",
             }}
+            quickActionMode="both"
           />
         </MemoryRouter>
       </QueryClientProvider>,
@@ -330,6 +336,7 @@ describe("ContinueWatchingCard", () => {
               backdrop_thumbhash: "",
               logo_url: "",
             }}
+            quickActionMode="both"
           />
         </MemoryRouter>
       </QueryClientProvider>,
@@ -371,6 +378,7 @@ describe("ContinueWatchingCard", () => {
               logo_url: "",
             }}
             libraryId={7}
+            quickActionMode="both"
           />
         </MemoryRouter>
       </QueryClientProvider>,

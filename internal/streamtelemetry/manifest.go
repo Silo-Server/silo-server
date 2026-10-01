@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 
@@ -53,9 +54,15 @@ func FormatManifest(routes []WalkedRoute, media []MediaRoute) string {
 // BuildRouteManifest walks minimal and maximal fixture routers, renders the
 // complete declared-or-non-media classification, and verifies that their union
 // covers every declared media route.
-func BuildRouteManifest(routers []chi.Routes, media []MediaRoute) (string, error) {
+// Delegated snapshots, when supplied, correspond one-for-one to the fixture
+// routers. Each snapshot is accepted only beneath its walked wildcard mount,
+// with matching HTTP method coverage. No declaration creates an observed route.
+func BuildRouteManifest(routers []chi.Routes, media []MediaRoute, delegated ...map[string][]WalkedRoute) (string, error) {
 	if len(routers) != 2 {
 		return "", errors.New("route manifest requires minimal and maximal fixtures")
+	}
+	if len(delegated) != 0 && len(delegated) != len(routers) {
+		return "", errors.New("delegated route snapshots must match fixtures")
 	}
 	seen := make(map[string]struct{})
 	var b strings.Builder
@@ -63,6 +70,34 @@ func BuildRouteManifest(routers []chi.Routes, media []MediaRoute) (string, error
 		routes, err := WalkRoutes(router)
 		if err != nil {
 			return "", err
+		}
+		if len(delegated) != 0 {
+			parent := slices.Clone(routes)
+			for mount, children := range delegated[index] {
+				if !strings.HasSuffix(mount, "/*") {
+					return "", fmt.Errorf("invalid delegation mount: %s", mount)
+				}
+				if !slices.ContainsFunc(parent, func(route WalkedRoute) bool { return route.Pattern == mount }) {
+					return "", fmt.Errorf("delegation mount was not walked: %s", mount)
+				}
+				for _, child := range children {
+					if !strings.HasPrefix(child.Pattern, strings.TrimSuffix(mount, "*")) {
+						return "", fmt.Errorf("delegated route escapes mount: %s %s", child.Method, child.Pattern)
+					}
+					if !slices.ContainsFunc(parent, func(route WalkedRoute) bool {
+						return route.Pattern == mount && (route.Method == "*" || route.Method == child.Method)
+					}) {
+						return "", fmt.Errorf("delegated method was not mounted: %s %s", child.Method, mount)
+					}
+					routes = append(routes, child)
+				}
+			}
+			sort.Slice(routes, func(i, j int) bool {
+				if routes[i].Pattern == routes[j].Pattern {
+					return routes[i].Method < routes[j].Method
+				}
+				return routes[i].Pattern < routes[j].Pattern
+			})
 		}
 		fmt.Fprintf(&b, "# fixture %d\n", index+1)
 		b.WriteString(FormatManifest(routes, media))

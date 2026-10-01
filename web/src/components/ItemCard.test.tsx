@@ -1,3 +1,4 @@
+import { fireEvent, render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router";
@@ -12,6 +13,12 @@ vi.mock("@/components/MediaItemMenu", () => ({
     mocks.mediaItemMenu(props);
     return null;
   },
+}));
+
+vi.mock("@/components/CardPlayOverlay", () => ({
+  default: ({ contentId, title }: { contentId: string; title: string }) => (
+    <a href={`/watch/${contentId}`} aria-label={`Play ${title}`} />
+  ),
 }));
 
 vi.mock("@/lib/thumbhash", () => ({
@@ -90,6 +97,17 @@ describe("ItemCard SortMeta", () => {
 
     expect(mocks.mediaItemMenu).toHaveBeenCalledWith(
       expect.objectContaining({ narrowPosterActions: true }),
+    );
+  });
+
+  it("passes the resolved profile quick-action mode to the menu", () => {
+    renderCard({
+      item: { ...baseItem, content_id: "movie-1", type: "movie" },
+      quickActionMode: "favorites",
+    });
+
+    expect(mocks.mediaItemMenu).toHaveBeenCalledWith(
+      expect.objectContaining({ quickActionMode: "favorites" }),
     );
   });
 
@@ -221,8 +239,10 @@ describe("ItemCard SortMeta", () => {
       item: {
         ...baseItem,
         content_id: "episode-1",
+        play_content_id: "episode-1",
         type: "episode",
         title: "Long, Long Time",
+        series_id: "series-1",
         series_title: "The Last of Us",
         season_number: 1,
         episode_number: 3,
@@ -230,6 +250,18 @@ describe("ItemCard SortMeta", () => {
     });
 
     expect(markup).toContain("S01E03");
+    expect(markup).toContain('href="/item/series-1"');
+    expect(markup).toContain('href="/item/episode-1"');
+    expect(markup).toContain('href="/watch/episode-1"');
+  });
+
+  it("hides direct play while selection mode is active", () => {
+    const markup = renderCard({
+      selectionMode: true,
+      item: { ...baseItem, play_content_id: "episode-1" },
+    });
+
+    expect(markup).not.toContain('href="/watch/episode-1"');
   });
 
   it("renders a volumes-only manga count chip", () => {
@@ -374,5 +406,29 @@ describe("ItemCard SortMeta", () => {
     expect(markup).toContain("The Last of Us");
     expect(markup).toContain("S01E01");
     expect(markup).toContain("When You&#x27;re Lost in the Darkness");
+  });
+});
+
+describe("ItemCard poster loading", () => {
+  const rev = "3f9a".repeat(16);
+  const signed = (exp: number, sig: string) =>
+    `/api/v2/artwork/tmdb/tv/100088/poster/w300.${rev}.webp?exp=${exp}&sig=${sig}`;
+  const card = (posterUrl: string) => (
+    <MemoryRouter>
+      <ItemCard item={{ ...baseItem, poster_url: posterUrl }} />
+    </MemoryRouter>
+  );
+
+  it("keeps the poster visible across a re-sign and hides it if that request fails", () => {
+    const { rerender } = render(card(signed(1758621600, "aaaa")));
+    const poster = screen.getByRole("img", { name: "The Last of Us" });
+    fireEvent.load(poster);
+
+    rerender(card(signed(1758622500, "bbbb")));
+    expect(screen.getByRole("img", { name: "The Last of Us" })).toBe(poster);
+    expect(poster).toHaveClass("opacity-100");
+
+    fireEvent.error(poster);
+    expect(poster).toHaveClass("opacity-0");
   });
 });

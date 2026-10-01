@@ -70,4 +70,16 @@ export const RATINGS_OVERLAYS: readonly OverlayDef[] = [
     iconCapable: true,
     getValue: (d) => d.content_rating ?? null,
   },
+  {
+    id: "advisory_age",
+    category: "ratings",
+    label: "Advisory Age",
+    description: "Recommended minimum viewer age, such as Common Sense Media's 13+",
+    defaultPosition: "bottom-right",
+    defaultEnabled: false,
+    iconId: "users",
+    iconCapable: true,
+    introducedInManifest: 13,
+    getValue: (d) => (d.advisory_age != null && d.advisory_age > 0 ? `${d.advisory_age}+` : null),
+  },
 ];

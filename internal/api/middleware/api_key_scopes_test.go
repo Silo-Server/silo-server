@@ -31,6 +31,29 @@ func TestAPIKeyScopesAllow(t *testing.T) {
 		{"users update", users, http.MethodPut, "/api/v1/admin/users/42", true},
 		{"users delete", users, http.MethodDelete, "/api/v1/admin/users/42", true},
 		{"users profiles", users, http.MethodGet, "/api/v1/admin/users/42/profiles", true},
+		{"users v2 list", users, http.MethodGet, "/api/v2/admin/users", true},
+		{"users exact identity lookup", users, http.MethodGet, "/api/v2/admin/users?identity=admin%40example.test", true},
+		{"summary read", []string{auth.ScopeAdminSessionsSummaryRead}, http.MethodGet, "/api/v2/admin/sessions/summary?user_id=42&limit=5", true},
+		{"summary capabilities", []string{auth.ScopeAdminSessionsSummaryRead}, http.MethodGet, "/api/v2/admin/sessions/capabilities", true},
+		{"summary denies diagnostics", []string{auth.ScopeAdminSessionsSummaryRead}, http.MethodGet, "/api/v2/admin/sessions", false},
+		{"summary denies control", []string{auth.ScopeAdminSessionsSummaryRead}, http.MethodDelete, "/api/v2/admin/sessions/session-a", false},
+		{"summary denies account editing", []string{auth.ScopeAdminSessionsSummaryRead}, http.MethodPut, "/api/v2/admin/users/42", false},
+		{"library discovery", []string{auth.ScopeLibrariesRead}, http.MethodGet, "/api/v2/user/libraries", true},
+		{"library capabilities", []string{auth.ScopeLibrariesRead}, http.MethodGet, "/api/v2/user/libraries/capabilities", true},
+		{"library denies storage metadata", []string{auth.ScopeLibrariesRead}, http.MethodGet, "/api/v2/libraries", false},
+		{"library denies management", []string{auth.ScopeLibrariesRead}, http.MethodPost, "/api/v2/libraries", false},
+		{"library denies playback", []string{auth.ScopeLibrariesRead}, http.MethodPost, "/api/v2/playback/start", false},
+		{"users v2 create", users, http.MethodPost, "/api/v2/admin/users", true},
+		{"users v2 update", users, http.MethodPut, "/api/v2/admin/users/42", true},
+		{"users v2 delete", users, http.MethodDelete, "/api/v2/admin/users/42", true},
+		{"users v2 profiles", users, http.MethodGet, "/api/v2/admin/users/42/profiles", true},
+		{"users v2 denies impersonation", users, http.MethodPost, "/api/v2/admin/users/42/impersonate", false},
+		{"users v2 denies settings", users, http.MethodPut, "/api/v2/admin/users/42/settings/values/key", false},
+		{"users v2 denies keys", users, http.MethodGet, "/api/v2/admin/users/42/api-keys", false},
+		{"users v2 denies IP history", users, http.MethodGet, "/api/v2/admin/users/42/ips", false},
+		{"groups v2 read", groups, http.MethodGet, "/api/v2/admin/access-groups/3", true},
+		{"groups v2 denies write", groups, http.MethodPut, "/api/v2/admin/access-groups/3", false},
+		{"users scope denies v2 profile update", users, http.MethodPatch, "/api/v2/profiles/1", false},
 
 		{"users scope denies impersonate", users, http.MethodPost, "/api/v1/admin/users/42/impersonate", false},
 		{"users scope denies settings values", users, http.MethodGet, "/api/v1/admin/users/42/settings/values", false},
@@ -53,6 +76,7 @@ func TestAPIKeyScopesAllow(t *testing.T) {
 		{"groups scope denies update", groups, http.MethodPut, "/api/v1/admin/access-groups/3", false},
 		{"groups scope denies delete", groups, http.MethodDelete, "/api/v1/admin/access-groups/3", false},
 		{"groups scope denies users", groups, http.MethodGet, "/api/v1/admin/users", false},
+		{"groups scope denies v2 users", groups, http.MethodGet, "/api/v2/admin/users", false},
 
 		{"combined scopes union", both, http.MethodGet, "/api/v1/admin/access-groups", true},
 		{"combined scopes still deny elsewhere", both, http.MethodPut, "/api/v1/admin/settings", false},
@@ -124,5 +148,26 @@ func TestRequireAuthEnforcesAPIKeyScopes(t *testing.T) {
 	handler.ServeHTTP(rec, denied)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("out-of-scope route: status = %d, want 403", rec.Code)
+	}
+}
+
+func TestAPIKeyScopesCannotManageV2Credentials(t *testing.T) {
+	for _, route := range []struct{ method, path string }{
+		{http.MethodGet, "/api/v2/admin/api-keys/capabilities"},
+		{http.MethodGet, "/api/v2/admin/api-keys"},
+		{http.MethodGet, "/api/v2/admin/api-keys/1"},
+		{http.MethodPost, "/api/v2/admin/api-keys"},
+		{http.MethodPut, "/api/v2/admin/api-keys/1/tier"},
+		{http.MethodDelete, "/api/v2/admin/api-keys/1"},
+	} {
+		t.Run(route.method+route.path, func(t *testing.T) {
+			request := httptest.NewRequest(route.method, route.path, nil)
+			if apiKeyScopesAllow(auth.ValidAPIKeyScopes(), request) {
+				t.Fatal("scoped key can escape its allowlist through key management")
+			}
+			if !apiKeyScopesAllow(nil, request) {
+				t.Fatal("unscoped key lost its existing account-level access")
+			}
+		})
 	}
 }

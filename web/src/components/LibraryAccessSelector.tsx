@@ -8,8 +8,9 @@ interface LibraryAccessSelectorProps {
   value: number[] | null;
   onChange: (value: number[] | null) => void;
   // Label for the null state. Groups and invitations use the default "All
-  // libraries"; the per-user policy form passes "Inherit from group", where
-  // null means the group's library scope applies.
+  // libraries"; the per-user policy form names where the account's default
+  // scope comes from ("Inherit from group", "Admin default", ...), since null
+  // there means that default applies.
   allLabel?: string;
   // Optional helper line shown while value is null (e.g. what the inherited
   // scope currently resolves to).

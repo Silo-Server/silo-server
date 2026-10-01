@@ -1,6 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import EpisodeCarousel from "./EpisodeCarousel";
@@ -10,6 +9,10 @@ const prefetchEpisodeDetail = vi.hoisted(() => vi.fn());
 
 vi.mock("@/hooks/queries/catalogRead", () => ({
   usePrefetchCatalogItemDetail: () => prefetchEpisodeDetail,
+}));
+
+vi.mock("@/hooks/useOverlayPrefs", () => ({
+  useOverlayPrefs: () => ({ quickActionMode: "watched" }),
 }));
 
 vi.mock("@/components/MediaItemMenu", () => ({
@@ -36,32 +39,47 @@ describe("EpisodeCarousel", () => {
     prefetchEpisodeDetail.mockClear();
   });
 
-  it("prefetches episode details when a card shows navigation intent", async () => {
-    render(
-      <MemoryRouter>
-        <EpisodeCarousel
-          currentEpisodeNumber={2}
-          episodes={[
-            {
-              content_id: "ep-1",
-              season_number: 1,
-              episode_number: 1,
-              title: "Pilot",
-              overview: "",
-              air_date: null,
-              runtime: 42,
-              still_url: "",
-              still_thumbhash: "",
-              files: [],
-            },
-          ]}
-        />
-      </MemoryRouter>,
-    );
+  it("prefetches only after a card shows sustained navigation intent", () => {
+    // A pointer sweeping the rail crosses every card; prefetching each one it
+    // passes would start cache work for the whole season. Intent is a dwell.
+    vi.useFakeTimers();
+    try {
+      render(
+        <MemoryRouter>
+          <EpisodeCarousel
+            currentEpisodeNumber={2}
+            episodes={[
+              {
+                content_id: "ep-1",
+                season_number: 1,
+                episode_number: 1,
+                title: "Pilot",
+                overview: "",
+                air_date: null,
+                runtime: 42,
+                still_url: "",
+                still_thumbhash: "",
+                files: [],
+              },
+            ]}
+          />
+        </MemoryRouter>,
+      );
 
-    await userEvent.hover(screen.getAllByRole("link", { name: /Pilot/ })[0]!);
+      const card = screen.getAllByRole("link", { name: /Pilot/ })[0]!.closest("div.group\\/card")!;
 
-    expect(prefetchEpisodeDetail).toHaveBeenCalledWith("ep-1");
+      fireEvent.mouseEnter(card);
+      act(() => vi.advanceTimersByTime(100));
+      fireEvent.mouseLeave(card);
+      act(() => vi.advanceTimersByTime(200));
+      expect(prefetchEpisodeDetail).not.toHaveBeenCalled();
+
+      fireEvent.mouseEnter(card);
+      act(() => vi.advanceTimersByTime(140));
+      expect(prefetchEpisodeDetail).toHaveBeenCalledWith("ep-1");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("passes partial-progress restart eligibility to episode menus", () => {
@@ -206,6 +224,7 @@ describe("EpisodeCarousel", () => {
       showCollectionActions: false,
       showWatchedShortcut: true,
       hasPartialProgress: false,
+      quickActionMode: "watched",
     });
     expect(capturedMenuProps[1]).toMatchObject({
       contentId: "ep-2",
@@ -216,6 +235,7 @@ describe("EpisodeCarousel", () => {
       },
       showWatchedShortcut: true,
       hasPartialProgress: true,
+      quickActionMode: "watched",
     });
   });
 });

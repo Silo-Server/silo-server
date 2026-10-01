@@ -1,0 +1,490 @@
+[
+  {
+    "id": "setup.status_headers",
+    "category": "status_headers",
+    "description": "The refusal is a JSON error envelope.",
+    "principal": {
+      "class": "public"
+    },
+    "request": {
+      "path": "/api/v1/auth/setup",
+      "body": {
+        "username": "fixture-owner",
+        "email": "fixture-owner@silo.example.test",
+        "password": "fixture-owner-password",
+        "create_default_profile": true,
+        "default_profile_name": "Owner"
+      }
+    },
+    "expect": {
+      "status": 401,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "op": "equals",
+          "value": "application/json"
+        }
+      ],
+      "body": [
+        {
+          "pointer": "",
+          "op": "keys_equal",
+          "value": [
+            "error",
+            "message"
+          ]
+        },
+        {
+          "pointer": "/error",
+          "op": "type",
+          "value": "string"
+        },
+        {
+          "pointer": "/message",
+          "op": "type",
+          "value": "string"
+        }
+      ]
+    },
+    "requires": [
+      "database"
+    ],
+    "v2_expectation": null
+  },
+  {
+    "id": "setup.field_shape",
+    "category": "field_presence_nullability",
+    "description": "The refusal envelope has exactly error and message.",
+    "principal": {
+      "class": "public"
+    },
+    "request": {
+      "path": "/api/v1/auth/setup",
+      "body": {
+        "username": "fixture-owner",
+        "email": "fixture-owner@silo.example.test",
+        "password": "fixture-owner-password",
+        "create_default_profile": true,
+        "default_profile_name": "Owner"
+      }
+    },
+    "expect": {
+      "status": 401,
+      "body": [
+        {
+          "pointer": "",
+          "op": "keys_equal",
+          "value": [
+            "error",
+            "message"
+          ]
+        }
+      ]
+    },
+    "requires": [
+      "database"
+    ],
+    "v2_expectation": null
+  },
+  {
+    "id": "setup.data_meaning",
+    "category": "data_meaning",
+    "description": "Setup is only possible on an empty users table; the fixture household is never empty so a success cannot be observed here.",
+    "principal": {
+      "class": "public"
+    },
+    "request": {
+      "path": "/api/v1/auth/setup",
+      "body": {
+        "username": "fixture-owner",
+        "email": "fixture-owner@silo.example.test",
+        "password": "fixture-owner-password",
+        "create_default_profile": true,
+        "default_profile_name": "Owner"
+      }
+    },
+    "expect": {
+      "status": 401,
+      "body": [
+        {
+          "pointer": "/error",
+          "op": "equals",
+          "value": "setup_complete"
+        }
+      ]
+    },
+    "requires": [
+      "database"
+    ],
+    "notes": "The 201 success path (login response shape with create_default_profile) is untestable against the seeded household; covered by unit tests in internal/auth. Section PR must add an empty-database scenario.",
+    "v2_expectation": null
+  },
+  {
+    "id": "setup.already_complete.r1",
+    "category": "authorization",
+    "description": "Once any user exists, setup is refused with 401 setup_complete even for valid input.",
+    "principal": {
+      "class": "public"
+    },
+    "request": {
+      "path": "/api/v1/auth/setup",
+      "body": {
+        "username": "fixture-owner",
+        "email": "fixture-owner@silo.example.test",
+        "password": "fixture-owner-password",
+        "create_default_profile": true,
+        "default_profile_name": "Owner"
+      }
+    },
+    "expect": {
+      "status": 401,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "op": "equals",
+          "value": "application/json"
+        }
+      ],
+      "body": [
+        {
+          "pointer": "/error",
+          "op": "equals",
+          "value": "setup_complete"
+        },
+        {
+          "pointer": "",
+          "op": "keys_equal",
+          "value": [
+            "error",
+            "message"
+          ]
+        },
+        {
+          "pointer": "/error",
+          "op": "type",
+          "value": "string"
+        },
+        {
+          "pointer": "/message",
+          "op": "type",
+          "value": "string"
+        },
+        {
+          "pointer": "/message",
+          "op": "equals",
+          "value": "Initial setup has already been completed"
+        }
+      ]
+    },
+    "requires": [
+      "database"
+    ],
+    "notes": "Refusal is 401 (not 403/409) although no credential is involved; flagged for the section PR.",
+    "v2_expectation": null
+  },
+  {
+    "id": "setup.missing_fields.r1",
+    "category": "error",
+    "description": "Username, email, and password are all required (normalized before the check).",
+    "principal": {
+      "class": "public"
+    },
+    "request": {
+      "path": "/api/v1/auth/setup",
+      "body": {
+        "username": "  ",
+        "email": "",
+        "password": ""
+      }
+    },
+    "expect": {
+      "status": 400,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "op": "equals",
+          "value": "application/json"
+        }
+      ],
+      "body": [
+        {
+          "pointer": "/error",
+          "op": "equals",
+          "value": "bad_request"
+        },
+        {
+          "pointer": "",
+          "op": "keys_equal",
+          "value": [
+            "error",
+            "message"
+          ]
+        },
+        {
+          "pointer": "/error",
+          "op": "type",
+          "value": "string"
+        },
+        {
+          "pointer": "/message",
+          "op": "type",
+          "value": "string"
+        },
+        {
+          "pointer": "/message",
+          "op": "equals",
+          "value": "Username, email, and password are required"
+        }
+      ]
+    },
+    "v2_expectation": null
+  },
+  {
+    "id": "setup.malformed_json.r1",
+    "category": "error",
+    "description": "A non-JSON body is 400 bad_request.",
+    "principal": {
+      "class": "public"
+    },
+    "request": {
+      "path": "/api/v1/auth/setup",
+      "raw_body": "[]x"
+    },
+    "expect": {
+      "status": 400,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "op": "equals",
+          "value": "application/json"
+        }
+      ],
+      "body": [
+        {
+          "pointer": "/error",
+          "op": "equals",
+          "value": "bad_request"
+        },
+        {
+          "pointer": "",
+          "op": "keys_equal",
+          "value": [
+            "error",
+            "message"
+          ]
+        },
+        {
+          "pointer": "/error",
+          "op": "type",
+          "value": "string"
+        },
+        {
+          "pointer": "/message",
+          "op": "type",
+          "value": "string"
+        },
+        {
+          "pointer": "/message",
+          "op": "equals",
+          "value": "Invalid request body"
+        }
+      ]
+    },
+    "v2_expectation": null
+  },
+  {
+    "id": "setup.status_headers.r1",
+    "category": "status_headers",
+    "description": "The refusal is a JSON error envelope.",
+    "principal": {
+      "class": "public"
+    },
+    "request": {
+      "path": "/api/v1/auth/setup",
+      "body": {
+        "username": "fixture-owner",
+        "email": "fixture-owner@silo.example.test",
+        "password": "fixture-owner-password",
+        "create_default_profile": true,
+        "default_profile_name": "Owner"
+      }
+    },
+    "expect": {
+      "status": 401,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "op": "equals",
+          "value": "application/json"
+        }
+      ],
+      "body": [
+        {
+          "pointer": "",
+          "op": "keys_equal",
+          "value": [
+            "error",
+            "message"
+          ]
+        },
+        {
+          "pointer": "/error",
+          "op": "type",
+          "value": "string"
+        },
+        {
+          "pointer": "/message",
+          "op": "type",
+          "value": "string"
+        }
+      ]
+    },
+    "requires": [
+      "database"
+    ],
+    "v2_expectation": null
+  },
+  {
+    "id": "setup.field_shape.r1",
+    "category": "field_presence_nullability",
+    "description": "The refusal envelope has exactly error and message.",
+    "principal": {
+      "class": "public"
+    },
+    "request": {
+      "path": "/api/v1/auth/setup",
+      "body": {
+        "username": "fixture-owner",
+        "email": "fixture-owner@silo.example.test",
+        "password": "fixture-owner-password",
+        "create_default_profile": true,
+        "default_profile_name": "Owner"
+      }
+    },
+    "expect": {
+      "status": 401,
+      "body": [
+        {
+          "pointer": "",
+          "op": "keys_equal",
+          "value": [
+            "error",
+            "message"
+          ]
+        }
+      ]
+    },
+    "requires": [
+      "database"
+    ],
+    "v2_expectation": null
+  },
+  {
+    "id": "setup.data_meaning.r1",
+    "category": "data_meaning",
+    "description": "Setup is only possible on an empty users table; the fixture household is never empty so a success cannot be observed here.",
+    "principal": {
+      "class": "public"
+    },
+    "request": {
+      "path": "/api/v1/auth/setup",
+      "body": {
+        "username": "fixture-owner",
+        "email": "fixture-owner@silo.example.test",
+        "password": "fixture-owner-password",
+        "create_default_profile": true,
+        "default_profile_name": "Owner"
+      }
+    },
+    "expect": {
+      "status": 401,
+      "body": [
+        {
+          "pointer": "/error",
+          "op": "equals",
+          "value": "setup_complete"
+        }
+      ]
+    },
+    "requires": [
+      "database"
+    ],
+    "notes": "The 201 success path (login response shape with create_default_profile) is untestable against the seeded household; covered by unit tests in internal/auth. Section PR must add an empty-database scenario.",
+    "v2_expectation": null
+  },
+  {
+    "id": "setup.rate_limited.r1",
+    "category": "status_headers",
+    "description": "The rate-limited registration variant answers 429 with Retry-After once the per-IP setup burst (6) is spent.",
+    "principal": {
+      "class": "public"
+    },
+    "request": {
+      "path": "/api/v1/auth/setup",
+      "repeat": 7,
+      "body": {
+        "username": "fixture-owner",
+        "email": "fixture-owner@silo.example.test",
+        "password": "fixture-owner-password",
+        "create_default_profile": true,
+        "default_profile_name": "Owner"
+      }
+    },
+    "expect": {
+      "status": 429,
+      "headers": [
+        {
+          "name": "Retry-After",
+          "op": "matches",
+          "value": "^[0-9]+$"
+        },
+        {
+          "name": "X-RateLimit-Remaining",
+          "op": "equals",
+          "value": "0"
+        },
+        {
+          "name": "X-RateLimit-Limit",
+          "op": "exists"
+        },
+        {
+          "name": "X-RateLimit-Reset",
+          "op": "matches",
+          "value": "^[0-9]+$"
+        },
+        {
+          "name": "Content-Type",
+          "op": "equals",
+          "value": "application/json"
+        }
+      ],
+      "body": [
+        {
+          "pointer": "/error",
+          "op": "equals",
+          "value": "rate_limit_exceeded"
+        },
+        {
+          "pointer": "/retry_after",
+          "op": "type",
+          "value": "integer"
+        },
+        {
+          "pointer": "",
+          "op": "keys_equal",
+          "value": [
+            "error",
+            "message",
+            "retry_after"
+          ]
+        }
+      ]
+    },
+    "requires": [
+      "rate_limiter"
+    ],
+    "fresh_state": true,
+    "notes": "The 429 body has a third key (retry_after) unlike every other error envelope; flagged for the section PR.",
+    "v2_expectation": null
+  }
+]

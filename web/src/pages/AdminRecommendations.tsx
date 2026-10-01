@@ -479,7 +479,7 @@ export default function AdminRecommendations() {
     );
 
   const sensitiveConfigured = sensitiveData?.configured ?? [];
-  const serverSettings = settings ?? {};
+  const serverSettings: Record<string, string> = settings ?? {};
   const embeddingLock = parseRecommendationEmbeddingLock(
     serverSettings["recommendations.embedding_lock"],
   );
@@ -624,7 +624,8 @@ export default function AdminRecommendations() {
                     />
                   ))}
                   {section.title === EMBEDDING_SECTION_TITLE ? (
-                    <div className="py-3">
+                    // ConnectionCheckAction brings its own row padding.
+                    <div>
                       <ConnectionCheckAction
                         onClick={() => handleCheckConnection(serverSettings)}
                         result={connectionResult}

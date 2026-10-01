@@ -157,6 +157,10 @@ func (r *countingEpisodeRepo) ListBySeries(context.Context, string) ([]*models.E
 	return nil, errors.New("ListBySeries not used in fallback test")
 }
 
+func (r *countingEpisodeRepo) ListBySeriesIDs(context.Context, []string) (map[string][]*models.Episode, error) {
+	return nil, errors.New("ListBySeriesIDs not used in fallback test")
+}
+
 func (r *countingEpisodeRepo) ListAdjacentInSeries(context.Context, string, int, int) ([]*models.Episode, error) {
 	return nil, errors.New("ListAdjacentInSeries not used in fallback test")
 }
@@ -212,14 +216,14 @@ func TestFetchCompatItemsByContentIDsFallback_UsesBatchedAccessQuery(t *testing.
 		// No accessFilter resolver: resolveAccessFilter returns a zero filter.
 	}
 
-	got, err := h.fetchCompatItemsByContentIDsFallback(
+	got, err := h.fetchCompatItemsByContentIDs(
 		context.Background(),
 		&Session{},
 		[]string{"a", "b"},
 		nil,
 	)
 	if err != nil {
-		t.Fatalf("fetchCompatItemsByContentIDsFallback returned error: %v", err)
+		t.Fatalf("fetchCompatItemsByContentIDs returned error: %v", err)
 	}
 	if len(got) != 2 {
 		t.Fatalf("expected 2 items in result; got %d (%v)", len(got), got)
@@ -248,13 +252,13 @@ func TestFetchCompatItemsByContentIDsFallback_NarrowsAccessToLibraryArg(t *testi
 	h := &ItemsHandler{itemRepo: repo}
 	libraryID := 7
 
-	if _, err := h.fetchCompatItemsByContentIDsFallback(
+	if _, err := h.fetchCompatItemsByContentIDs(
 		context.Background(),
 		&Session{},
 		[]string{"a"},
 		&libraryID,
 	); err != nil {
-		t.Fatalf("fetchCompatItemsByContentIDsFallback returned error: %v", err)
+		t.Fatalf("fetchCompatItemsByContentIDs returned error: %v", err)
 	}
 	if repo.getByIDsWithAccessCalls != 1 {
 		t.Fatalf("expected exactly 1 GetByIDsWithAccess call; got %d", repo.getByIDsWithAccessCalls)
@@ -278,14 +282,14 @@ func TestFetchCompatItemsByContentIDsFallback_LibraryOutsideAllowlistShortCircui
 	}
 	disallowed := 99
 
-	got, err := h.fetchCompatItemsByContentIDsFallback(
+	got, err := h.fetchCompatItemsByContentIDs(
 		context.Background(),
 		&Session{},
 		[]string{"a"},
 		&disallowed,
 	)
 	if err != nil {
-		t.Fatalf("fetchCompatItemsByContentIDsFallback returned error: %v", err)
+		t.Fatalf("fetchCompatItemsByContentIDs returned error: %v", err)
 	}
 	if len(got) != 0 {
 		t.Errorf("expected empty result when libraryID is outside the access allowlist; got %v", got)
@@ -312,14 +316,14 @@ func TestFetchCompatItemsByContentIDsFallback_BatchesPresign(t *testing.T) {
 	}
 	h := &ItemsHandler{itemRepo: repo, detailSvc: detailSvc}
 
-	got, err := h.fetchCompatItemsByContentIDsFallback(
+	got, err := h.fetchCompatItemsByContentIDs(
 		context.Background(),
 		&Session{},
 		[]string{"a", "b", "c"},
 		nil,
 	)
 	if err != nil {
-		t.Fatalf("fetchCompatItemsByContentIDsFallback returned error: %v", err)
+		t.Fatalf("fetchCompatItemsByContentIDs returned error: %v", err)
 	}
 	if len(got) != 3 {
 		t.Fatalf("expected 3 items in result; got %d", len(got))

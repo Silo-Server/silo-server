@@ -41,12 +41,12 @@ func TestGetLeafUserDataUsesEbookReaderProgress(t *testing.T) {
 	ctx = apimw.SetProfileID(ctx, "profile-1")
 	req = req.WithContext(ctx)
 
-	progress := handler.getLeafUserData(req, "ebook-progress", "ebook")
+	progress := handler.getLeafUserData(req.Context(), handler.viewerOrDeny(req), "ebook-progress", "ebook")
 	if progress == nil || progress.Played || !progress.IsInProgress || progress.PositionSeconds != 0.42 || progress.DurationSeconds != 1 {
 		t.Fatalf("partial ebook user data = %#v", progress)
 	}
 
-	complete := handler.getLeafUserData(req, "ebook-complete", "ebook")
+	complete := handler.getLeafUserData(req.Context(), handler.viewerOrDeny(req), "ebook-complete", "ebook")
 	if complete == nil || !complete.Played || complete.IsInProgress {
 		t.Fatalf("completed ebook user data = %#v", complete)
 	}
@@ -67,7 +67,7 @@ func TestGetLeafUserDataReturnsAudiobookProgress(t *testing.T) {
 	ctx = apimw.SetProfileID(ctx, "profile-1")
 	req = req.WithContext(ctx)
 
-	progress := handler.getLeafUserData(req, "audiobook-1", "audiobook")
+	progress := handler.getLeafUserData(req.Context(), handler.viewerOrDeny(req), "audiobook-1", "audiobook")
 	if progress == nil {
 		t.Fatal("audiobook user data = nil, want saved progress")
 	}
@@ -82,7 +82,7 @@ func TestGetLeafUserDataUsesCompletedHistoryWhenProgressMissing(t *testing.T) {
 	handler := &ItemsHandler{storeProvider: testUserStoreProvider{store: store}}
 	req := authorizedUserDataRequest()
 
-	userData := handler.getLeafUserData(req, "movie-history-only", "movie")
+	userData := handler.getLeafUserData(req.Context(), handler.viewerOrDeny(req), "movie-history-only", "movie")
 	if userData == nil {
 		t.Fatal("movie user data = nil, want history-backed watched state")
 	}
@@ -111,7 +111,7 @@ func TestGetLeafUserDataPreservesResumeWhenCompletedHistoryExists(t *testing.T) 
 	handler := &ItemsHandler{storeProvider: testUserStoreProvider{store: store}}
 	req := authorizedUserDataRequest()
 
-	userData := handler.getLeafUserData(req, "movie-rewatch", "movie")
+	userData := handler.getLeafUserData(req.Context(), handler.viewerOrDeny(req), "movie-rewatch", "movie")
 	if userData == nil {
 		t.Fatal("movie user data = nil, want progress-backed user data")
 	}
@@ -137,7 +137,7 @@ func TestGetAggregateUserDataReturnsNilWhenProgressBatchFails(t *testing.T) {
 		episodes[i] = &models.Episode{ContentID: "episode-" + strconv.Itoa(i+1)}
 	}
 
-	if userData := handler.getAggregateUserData(req, episodes); userData != nil {
+	if userData := handler.getAggregateUserData(req.Context(), handler.viewerOrDeny(req), episodes); userData != nil {
 		t.Fatalf("getAggregateUserData() = %#v, want nil after batch failure", userData)
 	}
 	if store.calls != 2 {
@@ -162,7 +162,7 @@ func TestGetAggregateUserDataCountsCompletedHistory(t *testing.T) {
 	handler := &ItemsHandler{storeProvider: testUserStoreProvider{store: store}}
 	req := authorizedUserDataRequest()
 
-	userData := handler.getAggregateUserData(req, []*models.Episode{
+	userData := handler.getAggregateUserData(req.Context(), handler.viewerOrDeny(req), []*models.Episode{
 		{ContentID: "episode-progress-complete"},
 		{ContentID: "episode-history-complete"},
 		{ContentID: "episode-unplayed"},

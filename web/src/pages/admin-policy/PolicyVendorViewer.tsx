@@ -1,6 +1,6 @@
 import { ChevronRight } from "lucide-react";
 
-import type { PolicyVendorModule } from "@/api/types";
+import type { PolicyVendorModule } from "@/api/adminPolicy";
 import { RegoEditor } from "@/components/policy/RegoEditor";
 import {
   Accordion,

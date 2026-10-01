@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -659,10 +658,12 @@ func newManifestToneMapFailoverHandler(
 		SettingsRepo: stubSettingsReader{values: map[string]string{
 			config.PlaybackTranscodeHardwareToneMapSettingKey: "true",
 			config.PlaybackTranscodeSoftwareToneMapSettingKey: "true",
-			config.PlaybackLocalTranscodeFallbackSettingKey:   strconv.FormatBool(localFallback),
 		}},
 		JWTSecret: "test-secret",
 		tm:        playback.NewTranscodeManager(),
+	}
+	if !localFallback {
+		requireCompatWorkerRouting(handler)
 	}
 	return handler, planner, sessionMgr, store, source
 }

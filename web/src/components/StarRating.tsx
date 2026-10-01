@@ -1,27 +1,17 @@
-import { useState, useCallback } from "react";
+import { memo, useCallback } from "react";
 import { Star } from "lucide-react";
 
 interface StarRatingProps {
   value: number | null;
   onChange: (rating: number | null) => void;
   size?: number;
+  /** When false, ArrowUp/ArrowDown are left to an enclosing menu's navigation. */
+  verticalArrows?: boolean;
 }
 
 const STAR_COUNT = 5;
 
-export default function StarRating({ value, onChange, size = 20 }: StarRatingProps) {
-  const [hoverValue, setHoverValue] = useState<number | null>(null);
-
-  const displayValue = hoverValue ?? value;
-
-  function handleMouseEnter(star: number) {
-    setHoverValue(star);
-  }
-
-  function handleMouseLeave() {
-    setHoverValue(null);
-  }
-
+function StarRating({ value, onChange, size = 20, verticalArrows = true }: StarRatingProps) {
   function handleClick(star: number) {
     if (star === value) {
       onChange(null);
@@ -33,18 +23,21 @@ export default function StarRating({ value, onChange, size = 20 }: StarRatingPro
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       let newValue: number | null = null;
-      if (e.key === "ArrowRight" || e.key === "ArrowUp") {
+      if (e.key === "ArrowRight" || (verticalArrows && e.key === "ArrowUp")) {
         e.preventDefault();
         newValue = Math.min((value ?? 0) + 1, STAR_COUNT);
-      } else if (e.key === "ArrowLeft" || e.key === "ArrowDown") {
+      } else if (e.key === "ArrowLeft" || (verticalArrows && e.key === "ArrowDown")) {
         e.preventDefault();
         newValue = Math.max((value ?? 2) - 1, 1);
       }
       if (newValue !== null) {
         onChange(newValue);
+        e.currentTarget
+          .querySelector<HTMLButtonElement>(`[data-rating="${newValue}"]`)
+          ?.focus({ preventScroll: true });
       }
     },
-    [value, onChange],
+    [value, onChange, verticalArrows],
   );
 
   const tabbableStar = value ?? 1;
@@ -53,13 +46,12 @@ export default function StarRating({ value, onChange, size = 20 }: StarRatingPro
     <div
       role="radiogroup"
       aria-label="Rating"
-      className="glass-subtle flex items-center gap-0.5 rounded-full px-2.5 py-2"
-      onMouseLeave={handleMouseLeave}
+      className="star-rating flex items-center gap-0.5 rounded-full px-2.5 py-2"
       onKeyDown={handleKeyDown}
     >
       {Array.from({ length: STAR_COUNT }, (_, i) => {
         const star = i + 1;
-        const filled = displayValue !== null && star <= displayValue;
+        const filled = value !== null && star <= value;
         return (
           <button
             key={star}
@@ -68,20 +60,17 @@ export default function StarRating({ value, onChange, size = 20 }: StarRatingPro
             aria-label={`${star} star${star !== 1 ? "s" : ""}`}
             aria-checked={value === star}
             tabIndex={star === tabbableStar ? 0 : -1}
-            className={`transform-gpu cursor-pointer border-none bg-transparent p-0.5 leading-none transition-[color,scale] duration-100 ease-out motion-safe:hover:scale-110 motion-reduce:transition-none ${filled ? "text-yellow-400" : "text-muted-foreground/50"}`}
-            onMouseEnter={() => handleMouseEnter(star)}
+            data-filled={filled}
+            data-rating={star}
+            className="star-rating-star focus-visible:ring-ring cursor-pointer rounded-sm border-none bg-transparent p-0.5 leading-none outline-none focus-visible:ring-2"
             onClick={() => handleClick(star)}
           >
-            <Star
-              size={size}
-              fill="currentColor"
-              fillOpacity={filled ? 1 : 0}
-              strokeWidth={1.5}
-              className="transition-[fill-opacity] duration-100 ease-out motion-reduce:transition-none"
-            />
+            <Star size={size} fill="none" strokeWidth={1.5} />
           </button>
         );
       })}
     </div>
   );
 }
+
+export default memo(StarRating);

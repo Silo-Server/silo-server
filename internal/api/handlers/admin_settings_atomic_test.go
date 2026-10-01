@@ -159,6 +159,77 @@ func TestAdminSettingsAtomicUpdateSerializesCrossFieldValidation(t *testing.T) {
 	}
 }
 
+func TestAdminSingleRoutingUpdatesSerializeCrossFieldValidation(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		executionKey string
+		egressKey    string
+	}{
+		{
+			name:         "remux",
+			executionKey: config.PlaybackRoutingRemuxExecutionSettingKey,
+			egressKey:    config.PlaybackRoutingRemuxEgressSettingKey,
+		},
+		{
+			name:         "video transcode",
+			executionKey: config.PlaybackRoutingVideoTranscodeExecutionSettingKey,
+			egressKey:    config.PlaybackRoutingVideoTranscodeEgressSettingKey,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := newSerializedSettingsStore(map[string]string{})
+			handler := &AdminHandler{SettingsRepo: store}
+			start := make(chan struct{})
+			responses := make(chan *httptest.ResponseRecorder, 2)
+
+			run := func(key, value string) {
+				<-start
+				request := httptest.NewRequest(
+					http.MethodPut,
+					"/admin/settings/"+key,
+					strings.NewReader(`{"value":"`+value+`"}`),
+				)
+				request = withChiParam(request, "key", key)
+				recorder := httptest.NewRecorder()
+				handler.HandleUpdateSetting(recorder, request)
+				responses <- recorder
+			}
+			go run(test.executionKey, string(config.PlaybackExecutionAPIOnly))
+			go run(test.egressKey, string(config.PlaybackEgressProxyOnly))
+			close(start)
+
+			first := <-responses
+			second := <-responses
+			okCount := 0
+			badRequestCount := 0
+			for _, response := range []*httptest.ResponseRecorder{first, second} {
+				switch response.Code {
+				case http.StatusOK:
+					okCount++
+				case http.StatusBadRequest:
+					badRequestCount++
+				default:
+					t.Fatalf("unexpected status = %d body=%s", response.Code, response.Body.String())
+				}
+			}
+			if okCount != 1 || badRequestCount != 1 {
+				t.Fatalf("statuses = [%d, %d], want one 200 and one 400", first.Code, second.Code)
+			}
+
+			current, err := store.GetAll(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := config.LoadFromDB(current); err != nil {
+				t.Fatalf("serialized routing settings are restart-invalid: %v; values=%#v", err, current)
+			}
+			if store.atomicCalls != 2 || store.maxActive != 1 {
+				t.Fatalf("atomic calls=%d max active=%d, want 2 and 1", store.atomicCalls, store.maxActive)
+			}
+		})
+	}
+}
+
 func TestAdminLegacySingleUpdateUsesAtomicSettingsBoundary(t *testing.T) {
 	store := newSerializedSettingsStore(map[string]string{})
 	handler := &AdminHandler{SettingsRepo: store}

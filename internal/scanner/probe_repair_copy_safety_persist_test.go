@@ -32,9 +32,7 @@ func fakeFFmpeg(t *testing.T, stdoutPayload string, delay time.Duration) (string
 		sleep = fmt.Sprintf("sleep %.2f\n", delay.Seconds())
 	}
 	script := fmt.Sprintf("#!/bin/sh\necho run >> %q\n%sprintf '%s'\n", logPath, sleep, stdoutPayload)
-	if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake ffmpeg: %v", err)
-	}
+	writeFakeTool(t, ffmpegPath, script)
 	return ffmpegPath, func() int { return countFFmpegRuns(t, logPath) }
 }
 
@@ -51,9 +49,7 @@ func fakeFFmpegGated(t *testing.T, stdoutPayload string) (ffmpegPath string, run
 	// The invocation is logged before the gate so the log is the signal that
 	// this process has started, not that it has finished.
 	script := fmt.Sprintf("#!/bin/sh\necho run >> %q\nwhile [ ! -f %q ]; do sleep 0.01; done\nprintf '%s'\n", logPath, releasePath, stdoutPayload)
-	if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
-		t.Fatalf("write gated fake ffmpeg: %v", err)
-	}
+	writeFakeTool(t, ffmpegPath, script)
 	runs = func() int { return countFFmpegRuns(t, logPath) }
 	release = func() {
 		if err := os.WriteFile(releasePath, nil, 0o644); err != nil {

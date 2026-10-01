@@ -16,7 +16,8 @@ type TrendingDiscoverRefresher interface {
 }
 
 // RefreshTrendingDiscoverTask refreshes the persisted external-trending
-// snapshots used by trending_discover home sections.
+// snapshots used by trending_discover home sections and the calendar's
+// Trending preset.
 type RefreshTrendingDiscoverTask struct {
 	refresher TrendingDiscoverRefresher
 }
@@ -29,14 +30,14 @@ func NewRefreshTrendingDiscoverTask(refresher TrendingDiscoverRefresher) *Refres
 func (t *RefreshTrendingDiscoverTask) Key() string  { return "refresh_trending_discover" }
 func (t *RefreshTrendingDiscoverTask) Name() string { return "Refresh Trending Discover" }
 func (t *RefreshTrendingDiscoverTask) Description() string {
-	return "Refreshes the persisted external trending list (TMDB/Trakt) for the Trending Discover home section"
+	return "Refreshes the persisted external trending lists (TMDB/Trakt) for Trending Discover home sections and the calendar's Trending view"
 }
 
 func (t *RefreshTrendingDiscoverTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategoryLibrary
 }
 
-func (t *RefreshTrendingDiscoverTask) IsHidden() bool { return false }
+func (t *RefreshTrendingDiscoverTask) IsHidden() bool { return true }
 
 func (t *RefreshTrendingDiscoverTask) DefaultTriggers() []taskmanager.TriggerConfig {
 	return []taskmanager.TriggerConfig{
@@ -52,12 +53,14 @@ func (t *RefreshTrendingDiscoverTask) Execute(ctx context.Context, progress task
 		return errors.New("trending discover refresh: refresher not configured")
 	}
 
+	// RunOnce can return a summary alongside an error: a failed section
+	// listing still refreshes the calendar feed.
 	resultData, err := t.refresher.RunOnce(ctx)
-	if err != nil {
-		return fmt.Errorf("trending discover refresh: %w", err)
-	}
 	if resultData != nil {
 		progress.SetResultData(resultData)
+	}
+	if err != nil {
+		return fmt.Errorf("trending discover refresh: %w", err)
 	}
 
 	progress.Report(100, "Trending discover refresh complete")

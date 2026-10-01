@@ -28,7 +28,7 @@ func TestScopeAccessFilterMapsScope(t *testing.T) {
 			ProfileID:                 "profile-1",
 			AllowedLibraryIDs:         []int{2, 19},
 			LibrariesRestricted:       true,
-			MaxContentRating:          "PG-13",
+			MaturityLimits:            access.MaturityLimits{MaxContentRating: "PG-13", AllowUnratedContent: true, MaxAdvisoryAge: 10},
 			MaxPlaybackQuality:        "1080p",
 			PreferredMetadataLanguage: "fr",
 			MetadataLanguageOverrides: map[string]string{
@@ -48,8 +48,10 @@ func TestScopeAccessFilterMapsScope(t *testing.T) {
 	if !reflect.DeepEqual(filter.AllowedLibraryIDs, []int{2, 19}) {
 		t.Fatalf("AllowedLibraryIDs = %v, want [2 19]", filter.AllowedLibraryIDs)
 	}
-	if filter.MaxContentRating != "PG-13" {
-		t.Fatalf("MaxContentRating = %q, want PG-13", filter.MaxContentRating)
+	// Every maturity limit reaches the Jellyfin surface, so a compat client
+	// cannot see titles the native API hides from the same profile.
+	if want := (access.MaturityLimits{MaxContentRating: "PG-13", AllowUnratedContent: true, MaxAdvisoryAge: 10}); filter.MaturityLimits != want {
+		t.Fatalf("MaturityLimits = %+v, want %+v", filter.MaturityLimits, want)
 	}
 	if filter.MaxPlaybackQuality != "1080p" {
 		t.Fatalf("MaxPlaybackQuality = %q, want 1080p", filter.MaxPlaybackQuality)

@@ -1,14 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/api/client";
+import {
+  listWebhookConnections,
+  createWebhookConnection,
+  updateWebhookConnection,
+  deleteWebhookConnection,
+  rotateWebhookConnection,
+  getWebhookMappings,
+  updateWebhookMappings,
+  listWebhookEvents,
+} from "@/api/v2/webhookSync";
 import type {
   CreateWebhookSyncConnectionRequest,
-  CreateWebhookSyncConnectionResponse,
-  RotateWebhookSyncWebhookResponse,
   UpdateWebhookSyncConnectionRequest,
   UpdateWebhookSyncProfileMappingsRequest,
-  WebhookSyncConnection,
-  WebhookSyncEventLog,
-  WebhookSyncProfileMappingsResponse,
 } from "@/api/types";
 import { webhookSyncKeys } from "./keys";
 import { toast } from "sonner";
@@ -16,7 +20,7 @@ import { toast } from "sonner";
 export function useWebhookSyncConnections() {
   return useQuery({
     queryKey: webhookSyncKeys.connections(),
-    queryFn: () => api<WebhookSyncConnection[]>("/webhook-sync/connections").then((d) => d ?? []),
+    queryFn: () => listWebhookConnections(),
     staleTime: 15_000,
   });
 }
@@ -24,11 +28,8 @@ export function useWebhookSyncConnections() {
 export function useCreateWebhookSyncConnection() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: CreateWebhookSyncConnectionRequest) =>
-      api<CreateWebhookSyncConnectionResponse>("/webhook-sync/connections", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
+    retry: false,
+    mutationFn: (body: CreateWebhookSyncConnectionRequest) => createWebhookConnection(body),
     onSuccess: (result) => {
       toast.success("Webhook connection created");
       queryClient.invalidateQueries({ queryKey: webhookSyncKeys.connections() });
@@ -45,17 +46,14 @@ export function useCreateWebhookSyncConnection() {
 export function useUpdateWebhookSyncConnection() {
   const queryClient = useQueryClient();
   return useMutation({
+    retry: false,
     mutationFn: ({
       connectionId,
       body,
     }: {
       connectionId: string;
       body: UpdateWebhookSyncConnectionRequest;
-    }) =>
-      api<WebhookSyncConnection>(`/webhook-sync/connections/${connectionId}`, {
-        method: "PUT",
-        body: JSON.stringify(body),
-      }),
+    }) => updateWebhookConnection(connectionId, body),
     onSuccess: (_, variables) => {
       toast.success("Webhook connection updated");
       queryClient.invalidateQueries({ queryKey: webhookSyncKeys.connections() });
@@ -72,10 +70,8 @@ export function useUpdateWebhookSyncConnection() {
 export function useDeleteWebhookSyncConnection() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (connectionId: string) =>
-      api(`/webhook-sync/connections/${connectionId}`, {
-        method: "DELETE",
-      }),
+    retry: false,
+    mutationFn: (connectionId: string) => deleteWebhookConnection(connectionId),
     onSuccess: () => {
       toast.success("Webhook connection deleted");
       queryClient.invalidateQueries({ queryKey: webhookSyncKeys.connections() });
@@ -89,13 +85,8 @@ export function useDeleteWebhookSyncConnection() {
 export function useRotateWebhookSyncWebhook() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (connectionId: string) =>
-      api<RotateWebhookSyncWebhookResponse>(
-        `/webhook-sync/connections/${connectionId}/webhook/rotate`,
-        {
-          method: "POST",
-        },
-      ),
+    retry: false,
+    mutationFn: (connectionId: string) => rotateWebhookConnection(connectionId),
     onSuccess: (_, connectionId) => {
       toast.success("Webhook URL rotated");
       queryClient.invalidateQueries({ queryKey: webhookSyncKeys.connections() });
@@ -110,14 +101,7 @@ export function useRotateWebhookSyncWebhook() {
 export function useWebhookSyncProfileMappings(connectionId?: string) {
   return useQuery({
     queryKey: webhookSyncKeys.profileMappings(connectionId),
-    queryFn: () =>
-      api<WebhookSyncProfileMappingsResponse>(
-        `/webhook-sync/connections/${connectionId}/profile-mappings`,
-      ).then((d) => ({
-        mappings: d?.mappings ?? [],
-        discovered_users: d?.discovered_users ?? [],
-        account_discovery_available: d?.account_discovery_available ?? false,
-      })),
+    queryFn: () => getWebhookMappings(connectionId!),
     enabled: !!connectionId,
     staleTime: 10_000,
   });
@@ -126,10 +110,7 @@ export function useWebhookSyncProfileMappings(connectionId?: string) {
 export function useWebhookSyncEvents(connectionId?: string) {
   return useQuery({
     queryKey: webhookSyncKeys.events(connectionId),
-    queryFn: () =>
-      api<WebhookSyncEventLog[]>(`/webhook-sync/connections/${connectionId}/events?limit=200`).then(
-        (d) => d ?? [],
-      ),
+    queryFn: () => listWebhookEvents(connectionId!),
     enabled: !!connectionId,
     staleTime: 5_000,
     refetchInterval: connectionId ? 15_000 : false,
@@ -139,17 +120,14 @@ export function useWebhookSyncEvents(connectionId?: string) {
 export function useUpdateWebhookSyncProfileMappings() {
   const queryClient = useQueryClient();
   return useMutation({
+    retry: false,
     mutationFn: ({
       connectionId,
       body,
     }: {
       connectionId: string;
       body: UpdateWebhookSyncProfileMappingsRequest;
-    }) =>
-      api(`/webhook-sync/connections/${connectionId}/profile-mappings`, {
-        method: "PUT",
-        body: JSON.stringify(body),
-      }),
+    }) => updateWebhookMappings(connectionId, body),
     onSuccess: (_, variables) => {
       toast.success("Profile mappings saved");
       queryClient.invalidateQueries({

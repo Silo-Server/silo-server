@@ -1,6 +1,8 @@
 import {
+  lazy,
   type ReactNode,
   type RefObject,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -21,19 +23,23 @@ import {
 } from "lucide-react";
 import { useLocation } from "react-router";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
+import { useFinePointer } from "@/hooks/useFinePointer";
 import type { ItemDetail, MediaItemUserState } from "@/api/types";
 import { useOptionalAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useRefreshItemMetadata, useWatchedStateMutation } from "@/hooks/queries/items";
-import { type DismissHomeItemVariables, useDismissHomeItem } from "@/hooks/queries/homeDismissals";
+import {
+  type DismissHomeItemVariables,
+  dismissalDropsShow,
+  useDismissHomeItem,
+} from "@/hooks/queries/homeDismissals";
 import { useToggleFavorite } from "@/hooks/queries/favorites";
 import { useToggleWatchlist } from "@/hooks/queries/watchlist";
 import { getWatchedActionLabel } from "@/pages/ItemDetail/watchedState";
-import EditMetadataDialog from "@/components/EditMetadataDialog";
+import { LocalErrorBoundary } from "@/components/LocalErrorBoundary";
 import MangaFilesDialog from "@/components/MangaFilesDialog";
-import MatchItemDialog from "@/components/MatchItemDialog";
 import RefreshMetadataDialog from "@/components/RefreshMetadataDialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -69,8 +75,37 @@ import {
 } from "@/components/mediaItemMenuTrigger";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { MediaActionIcon } from "@/components/mediaActionIcons";
+import {
+  showsFavoriteQuickAction,
+  showsWatchedQuickAction,
+  type CardQuickActionMode,
+} from "@/lib/cardQuickActions";
+
+// Edit Metadata and Match Item are curator tools, yet every media card carries
+// this menu, so the dialogs load on demand instead of with the launch bundle.
+// Opening a menu that offers them starts the download.
+const importEditMetadataDialog = () => import("@/components/EditMetadataDialog");
+const importMatchItemDialog = () => import("@/components/MatchItemDialog");
+const EditMetadataDialog = lazy(importEditMetadataDialog);
+const MatchItemDialog = lazy(importMatchItemDialog);
+
+function prefetchMetadataDialogs() {
+  // Nothing to report here: the dialog host imports them again when it
+  // renders, and its error boundary shows a failure.
+  importEditMetadataDialog().catch(() => undefined);
+  importMatchItemDialog().catch(() => undefined);
+}
 
 type MediaItemType = ItemDetail["type"];
+
+function useHasFinePointer() {
+  // Reads the observed pointer, not the media query: Chromium on some Windows
+  // machines with a touchscreen reports no fine pointer while a mouse is in
+  // use, which withheld these shortcuts from the very devices this gate is
+  // meant to serve. The `true` fallback preserves the established quick
+  // actions in SSR, tests, and browsers where init has not run.
+  return useFinePointer(true);
+}
 
 type MediaItemMenuEntry =
   | {
@@ -118,6 +153,8 @@ interface MediaItemMenuProps {
   showWatchedShortcut?: boolean;
   /** Uses smaller poster controls on narrow catalog cards. */
   narrowPosterActions?: boolean;
+  /** Which watched/favorite shortcuts appear outside the overflow menu. */
+  quickActionMode?: CardQuickActionMode;
   /** Card root whose long press opens the touch action sheet. */
   longPressRef?: RefObject<HTMLElement | null>;
   /** Heading for the touch action sheet. */
@@ -590,6 +627,67 @@ function WatchedQuickActionButton({
 
 type MetadataAction = "edit" | "match";
 
+/** What the status dialog stands in for: the item fetch or the dialog's own chunk. */
+type MetadataActionPending = "details" | "dialog";
+
+const PENDING_TEXT: Record<MetadataActionPending, { loading: string; failed: string }> = {
+  details: {
+    loading: "Loading the latest item details…",
+    failed: "The item details could not be loaded.",
+  },
+  dialog: {
+    loading: "Loading the dialog…",
+    failed: "The dialog could not be loaded.",
+  },
+};
+
+function MetadataActionStatusDialog({
+  action,
+  pending,
+  loading,
+  error,
+  retryLabel = "Try Again",
+  onRetry,
+  onClose,
+}: {
+  action: MetadataAction;
+  pending: MetadataActionPending;
+  loading: boolean;
+  error?: unknown;
+  retryLabel?: string;
+  onRetry?: () => void;
+  onClose: () => void;
+}) {
+  const actionLabel = action === "edit" ? "Edit Metadata" : "Match Item";
+  const text = PENDING_TEXT[pending];
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>{actionLabel}</DialogTitle>
+          <DialogDescription>{loading ? text.loading : text.failed}</DialogDescription>
+        </DialogHeader>
+        {loading ? (
+          <div className="text-muted-foreground flex items-center gap-2 text-sm">
+            <LoaderCircle className="size-4 animate-spin" />
+            Loading…
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-muted-foreground text-sm">
+              {error instanceof Error ? error.message : "Please try again."}
+            </p>
+            <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+              {retryLabel}
+            </Button>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function MetadataActionDialogHost({
   action,
   contentId,
@@ -610,47 +708,56 @@ export function MetadataActionDialogHost({
   } = useCatalogItemDetail(contentId, libraryId);
 
   if (item) {
-    return action === "edit" ? (
-      <EditMetadataDialog item={item} open onOpenChange={(open) => !open && onClose()} />
-    ) : (
-      <MatchItemDialog
-        key={item.content_id}
-        item={libraryId === undefined ? item : { ...item, library_id: libraryId }}
-        open
-        onOpenChange={(open) => !open && onClose()}
-      />
+    return (
+      <LocalErrorBoundary
+        fallback={(dialogError) => (
+          // Browsers remember a failed module import for the life of the page,
+          // so importing the chunk again cannot succeed; a reload can.
+          <MetadataActionStatusDialog
+            action={action}
+            pending="dialog"
+            loading={false}
+            error={dialogError}
+            retryLabel="Reload Page"
+            onRetry={() => window.location.reload()}
+            onClose={onClose}
+          />
+        )}
+      >
+        <Suspense
+          fallback={
+            <MetadataActionStatusDialog
+              action={action}
+              pending="dialog"
+              loading
+              onClose={onClose}
+            />
+          }
+        >
+          {action === "edit" ? (
+            <EditMetadataDialog item={item} open onOpenChange={(open) => !open && onClose()} />
+          ) : (
+            <MatchItemDialog
+              key={item.content_id}
+              item={libraryId === undefined ? item : { ...item, library_id: libraryId }}
+              open
+              onOpenChange={(open) => !open && onClose()}
+            />
+          )}
+        </Suspense>
+      </LocalErrorBoundary>
     );
   }
 
-  const actionLabel = action === "edit" ? "Edit Metadata" : "Match Item";
-  const loading = isLoading || isFetching;
-
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader>
-          <DialogTitle>{actionLabel}</DialogTitle>
-          <DialogDescription>
-            {loading ? "Loading the latest item details…" : "The item details could not be loaded."}
-          </DialogDescription>
-        </DialogHeader>
-        {loading ? (
-          <div className="text-muted-foreground flex items-center gap-2 text-sm">
-            <LoaderCircle className="size-4 animate-spin" />
-            Loading…
-          </div>
-        ) : (
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-muted-foreground text-sm">
-              {error instanceof Error ? error.message : "Please try again."}
-            </p>
-            <Button type="button" variant="outline" size="sm" onClick={() => void refetch()}>
-              Try Again
-            </Button>
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
+    <MetadataActionStatusDialog
+      action={action}
+      pending="details"
+      loading={isLoading || isFetching}
+      error={error}
+      onRetry={() => void refetch()}
+      onClose={onClose}
+    />
   );
 }
 
@@ -666,6 +773,7 @@ export default function MediaItemMenu({
   hasPartialProgress = false,
   showWatchedShortcut = false,
   narrowPosterActions = false,
+  quickActionMode = "none",
   longPressRef,
   itemTitle,
 }: MediaItemMenuProps) {
@@ -678,12 +786,19 @@ export default function MediaItemMenu({
   const isAdmin = useIsActingAdmin();
   const canCurateMetadata = profileIsResolved && canCurateMetadataForUser(user, currentProfile);
   const { cardPresentation } = useUICustomization();
+  const hasFinePointer = useHasFinePointer();
   const [currentUserState, setCurrentUserState] = useState(userState);
   const lastSyncedUserStateRef = useRef(userState);
   const [refreshDialogOpen, setRefreshDialogOpen] = useState(false);
   const [filesDialogOpen, setFilesDialogOpen] = useState(false);
   const [metadataAction, setMetadataAction] = useState<MetadataAction | null>(null);
   const [actionSheetOpen, setActionSheetOpen] = useState(false);
+  // A card that has never opened one of these surfaces mounts nothing — a home
+  // page holds hundreds of cards. Once opened, the overlay stays mounted so
+  // closing runs its exit animation and restores focus instead of vanishing.
+  const [actionSheetMounted, setActionSheetMounted] = useState(false);
+  const [refreshDialogMounted, setRefreshDialogMounted] = useState(false);
+  const [filesDialogMounted, setFilesDialogMounted] = useState(false);
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
   const lastMenuInteractionRef = useRef<"keyboard" | "pointer" | null>(null);
   const pointerClosedMenuRef = useRef(false);
@@ -711,15 +826,17 @@ export default function MediaItemMenu({
   const refreshMetadataMutation = useRefreshItemMetadata();
   const dismissHomeItemMutation = useDismissHomeItem();
   const dismissLabel =
-    dismissAction?.surface === "continue_watching"
-      ? mediaType === "audiobook"
-        ? "Remove from Continue Listening"
-        : mediaType === "ebook"
-          ? "Remove from Continue Reading"
-          : "Remove from Continue Watching"
-      : dismissAction?.surface === "next_up"
-        ? "Remove from Next Up"
-        : undefined;
+    dismissAction && dismissalDropsShow(dismissAction.mediaType ?? mediaType)
+      ? "Drop show"
+      : dismissAction?.surface === "continue_watching"
+        ? mediaType === "audiobook"
+          ? "Remove from Continue Listening"
+          : mediaType === "ebook"
+            ? "Remove from Continue Reading"
+            : "Remove from Continue Watching"
+        : dismissAction?.surface === "next_up"
+          ? "Remove from Next Up"
+          : undefined;
   const currentHref = useMemo(
     () => `${location.pathname}${location.search}`,
     [location.pathname, location.search],
@@ -734,13 +851,23 @@ export default function MediaItemMenu({
     showCollectionActions,
     dismissLabel,
   });
+  const offersMetadataDialogs = model.some(
+    (entry) =>
+      entry.kind === "action" && (entry.key === "editMetadata" || entry.key === "matchItem"),
+  );
   useLongPress(longPressRef, {
-    onLongPress: () => setActionSheetOpen(true),
+    onLongPress: () => {
+      if (offersMetadataDialogs) prefetchMetadataDialogs();
+      setActionSheetMounted(true);
+      setActionSheetOpen(true);
+    },
     enabled: model.length > 0,
   });
   const showPosterFavorite =
+    hasFinePointer &&
     variant === "poster" &&
     showFavoriteShortcut &&
+    showsFavoriteQuickAction(quickActionMode) &&
     model.some((entry) => entry.kind === "action" && entry.key === "toggleFavorite");
   const hasWatchedAction = model.some(
     (entry) => entry.kind === "action" && entry.key === "toggleWatched",
@@ -748,7 +875,10 @@ export default function MediaItemMenu({
   const rootPosterSupportsWatchedShortcut =
     variant === "poster" && (mediaType === "movie" || mediaType === "series");
   const showWatchedQuickAction =
-    hasWatchedAction && (rootPosterSupportsWatchedShortcut || showWatchedShortcut);
+    hasFinePointer &&
+    showsWatchedQuickAction(quickActionMode) &&
+    hasWatchedAction &&
+    (rootPosterSupportsWatchedShortcut || showWatchedShortcut);
   const posterActionDensity: PosterActionDensity =
     variant === "poster" && narrowPosterActions
       ? "narrow"
@@ -802,11 +932,14 @@ export default function MediaItemMenu({
           navigate(buildMediaPlayHref({ contentId, type: mediaType, libraryId, restart: true }));
           return;
         }
-        playbackController.startPlayback({
-          contentId,
-          restart: true,
-          returnHref: currentHref,
-        });
+        playbackController.startPlayback(
+          {
+            contentId,
+            restart: true,
+            returnHref: currentHref,
+          },
+          "viewer",
+        );
         return;
       }
       case "toggleWatched": {
@@ -826,6 +959,7 @@ export default function MediaItemMenu({
         return;
       }
       case "viewDetails": {
+        setFilesDialogMounted(true);
         setFilesDialogOpen(true);
         return;
       }
@@ -839,6 +973,7 @@ export default function MediaItemMenu({
         return;
       }
       case "refreshMetadata": {
+        setRefreshDialogMounted(true);
         setRefreshDialogOpen(true);
         return;
       }
@@ -922,6 +1057,7 @@ export default function MediaItemMenu({
             modal={false}
             onOpenChange={(open) => {
               if (open) {
+                if (offersMetadataDialogs) prefetchMetadataDialogs();
                 pointerClosedMenuRef.current = false;
                 lastMenuInteractionRef.current = null;
                 return;
@@ -995,25 +1131,29 @@ export default function MediaItemMenu({
           </DropdownMenu>
         )}
       </div>
-      <MediaItemActionSheet
-        open={actionSheetOpen}
-        onOpenChange={setActionSheetOpen}
-        title={itemTitle}
-        entries={model}
-        userState={currentUserState}
-        isPending={isPending}
-        isRefreshing={refreshMetadataMutation.isPending}
-        onSelectAction={(actionKey) => {
-          setActionSheetOpen(false);
-          void handleAction(actionKey);
-        }}
-      />
-      <RefreshMetadataDialog
-        open={refreshDialogOpen}
-        onOpenChange={setRefreshDialogOpen}
-        onConfirm={handleRefreshConfirm}
-        isPending={refreshMetadataMutation.isPending}
-      />
+      {actionSheetMounted && (
+        <MediaItemActionSheet
+          open={actionSheetOpen}
+          onOpenChange={setActionSheetOpen}
+          title={itemTitle}
+          entries={model}
+          userState={currentUserState}
+          isPending={isPending}
+          isRefreshing={refreshMetadataMutation.isPending}
+          onSelectAction={(actionKey) => {
+            setActionSheetOpen(false);
+            void handleAction(actionKey);
+          }}
+        />
+      )}
+      {refreshDialogMounted && (
+        <RefreshMetadataDialog
+          open={refreshDialogOpen}
+          onOpenChange={setRefreshDialogOpen}
+          onConfirm={handleRefreshConfirm}
+          isPending={refreshMetadataMutation.isPending}
+        />
+      )}
       {metadataAction && (
         <MetadataActionDialogHost
           action={metadataAction}
@@ -1022,7 +1162,7 @@ export default function MediaItemMenu({
           onClose={() => setMetadataAction(null)}
         />
       )}
-      {mediaType === "manga" && (
+      {mediaType === "manga" && filesDialogMounted && (
         <MangaFilesDialog
           contentId={contentId}
           open={filesDialogOpen}

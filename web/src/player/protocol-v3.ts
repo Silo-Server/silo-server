@@ -227,6 +227,13 @@ export interface OutputContextV3 {
 }
 
 export interface DeliverySubtitleCapabilitiesV3 {
+  native_embedded?: Array<{
+    container: string;
+    codecs: string[];
+    track_identity: "ffmpeg_stream_index" | "container_track_id";
+    ass_styling: boolean;
+    font_attachments: boolean;
+  }>;
   embedded_text: boolean;
   sidecar_text: boolean;
   ass_styling: boolean;
@@ -291,6 +298,7 @@ export interface StartRequestV3 {
   profile_id: string;
   playback_attempt_id: string;
   quality_preference: string;
+  allow_alternate_versions?: boolean;
   subtitle_fidelity_preference: SubtitleFidelityV3;
   start_position?: number;
   progress_persistence?: ProgressPersistenceV3;
@@ -490,6 +498,7 @@ export interface SubtitleInventoryItemV3 {
 }
 
 export interface SubtitleDecisionV3 {
+  embedded?: { stream_index: number; container_track_id?: string };
   mode: SubtitleModeV3;
   track_id?: string;
   artifact?: SubtitleArtifactV3;

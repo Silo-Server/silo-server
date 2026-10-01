@@ -66,13 +66,13 @@ export default function MediaInfoDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl overflow-hidden sm:max-w-2xl">
+      <DialogContent className="flex max-w-2xl flex-col overflow-hidden sm:max-w-2xl">
         <DialogHeader className="min-w-0">
           <DialogTitle>Media Info</DialogTitle>
           <DialogDescription className="truncate">{title}</DialogDescription>
         </DialogHeader>
 
-        <div className="-mr-1 max-h-[65vh] min-w-0 overflow-x-hidden overflow-y-auto pr-1">
+        <div className="overlay-scroll min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto pr-1">
           {onlyVersion ? (
             <VersionSpecSheet sections={buildMediaSpecSections(onlyVersion)} />
           ) : (

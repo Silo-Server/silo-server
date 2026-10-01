@@ -1,11 +1,11 @@
+import { policyApplyMessage, policyMutationMessage, type PolicySnapshot } from "@/api/adminPolicy";
+import { PolicyRevisionReview } from "./PolicyRevisionReview";
 import { RotateCcw } from "lucide-react";
 import { useMemo, useState } from "react";
-import { toast } from "sonner";
 
 import { RegoEditor } from "@/components/policy/RegoEditor";
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -27,19 +27,25 @@ import {
   useActivatePolicyVersion,
   usePolicyVersion,
   usePolicyVersions,
+  usePolicyDocument,
 } from "@/hooks/queries/admin/policy";
 
 import { formatPolicyDate, messageFromError } from "./policyPageUtils";
 
 interface PolicyVersionHistoryProps {
-  documentId: number;
-  activeVersionId?: number;
+  documentId: string;
+  activeVersionId?: string;
 }
 
 export function PolicyVersionHistory({ documentId, activeVersionId }: PolicyVersionHistoryProps) {
-  const { data: versions, isLoading } = usePolicyVersions(documentId);
-  const [selectedVersionId, setSelectedVersionId] = useState<number | undefined>(undefined);
-  const [rollbackVersionId, setRollbackVersionId] = useState<number | undefined>(undefined);
+  const history = usePolicyVersions(documentId);
+  const { data: versions, isLoading } = history;
+  const canonical = usePolicyDocument(documentId);
+  const [captured, setCaptured] = useState<PolicySnapshot>();
+  const [message, setMessage] = useState("");
+  const [needsReview, setNeedsReview] = useState(false);
+  const [selectedVersionId, setSelectedVersionId] = useState<string | undefined>(undefined);
+  const [rollbackVersionId, setRollbackVersionId] = useState<string | undefined>(undefined);
   const selectedVersion = usePolicyVersion(documentId, selectedVersionId);
   const activate = useActivatePolicyVersion();
 
@@ -57,18 +63,30 @@ export function PolicyVersionHistory({ documentId, activeVersionId }: PolicyVers
   );
 
   async function confirmRollback() {
-    if (!rollbackVersionId) return;
+    if (!rollbackVersionId || !captured || needsReview) return;
     try {
-      await activate.mutateAsync({ documentId, version: rollbackVersionId });
-      toast.success("Policy version activated");
+      const result = await activate.mutateAsync({
+        documentId,
+        version: rollbackVersionId,
+        etag: captured.etag,
+      });
+      setMessage(policyApplyMessage(result));
       setRollbackVersionId(undefined);
     } catch (error) {
-      toast.error(messageFromError(error, "Failed to activate policy version"));
+      setNeedsReview(true);
+      setMessage(policyMutationMessage(error, "Unable to activate policy version."));
     }
   }
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4">
+      {message && <p role="status">{message}</p>}
+      {history.error && (
+        <div role="alert">
+          <p>{messageFromError(history.error, "Unable to load version history.")}</p>
+          <Button onClick={() => void history.restart()}>Restart version history</Button>
+        </div>
+      )}
       <div className="surface-panel-subtle overflow-hidden rounded-2xl">
         <Table>
           <TableHeader>
@@ -118,7 +136,7 @@ export function PolicyVersionHistory({ documentId, activeVersionId }: PolicyVers
                     v{version.version_number}
                     {isActive && (
                       <Badge variant="secondary" className="ml-2">
-                        Live
+                        Active
                       </Badge>
                     )}
                   </TableCell>
@@ -139,14 +157,19 @@ export function PolicyVersionHistory({ documentId, activeVersionId }: PolicyVers
                       type="button"
                       size="sm"
                       variant="outline"
-                      disabled={isActive || !version.compiled_ok}
+                      disabled={
+                        isActive || !version.compiled_ok || !canonical.data || activate.isPending
+                      }
                       onClick={(event) => {
                         event.stopPropagation();
                         setRollbackVersionId(version.id);
+                        setCaptured(canonical.data);
+                        setNeedsReview(false);
+                        setMessage("");
                       }}
                     >
                       <RotateCcw className="size-4" />
-                      Make live
+                      Activate version
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -156,6 +179,11 @@ export function PolicyVersionHistory({ documentId, activeVersionId }: PolicyVers
         </Table>
       </div>
 
+      {history.hasNextPage && (
+        <Button onClick={() => void history.fetchNextPage()} disabled={history.isFetchingNextPage}>
+          Load older versions
+        </Button>
+      )}
       {sourceVersion?.source !== undefined && (
         <div className="space-y-2">
           <h3 className="text-sm font-semibold">Selected Source</h3>
@@ -169,19 +197,31 @@ export function PolicyVersionHistory({ documentId, activeVersionId }: PolicyVers
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>
-              Make v{rollbackVersion?.version_number} the live policy?
-            </AlertDialogTitle>
+            <AlertDialogTitle>Activate saved v{rollbackVersion?.version_number}?</AlertDialogTitle>
             <AlertDialogDescription>
-              New requests start using it immediately, on every server node. The version it replaces
-              stays in this history.
+              This saves the selected active version for {captured?.name}. Servers reload
+              independently. The previous version remains in history.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {needsReview && <p role="alert">{message}</p>}
+          {needsReview && (
+            <PolicyRevisionReview
+              documentId={documentId}
+              disabled={activate.isPending}
+              onAdopt={(snapshot) => {
+                setCaptured(snapshot);
+                setNeedsReview(false);
+              }}
+            />
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmRollback} disabled={activate.isPending}>
+            <Button
+              onClick={() => void confirmRollback()}
+              disabled={activate.isPending || needsReview}
+            >
               Activate
-            </AlertDialogAction>
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -1,0 +1,12 @@
+{
+  "id": "3",
+  "document_id": "1",
+  "version_number": 2,
+  "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "compiled_ok": false,
+  "compile_error": "Invalid policy source",
+  "created_by_user_id": null,
+  "comment": "",
+  "created_at": "2026-01-02T03:04:05.678Z",
+  "source": "invalid"
+}

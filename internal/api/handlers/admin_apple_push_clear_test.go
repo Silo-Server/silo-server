@@ -46,9 +46,9 @@ func TestAdminApplePushHandlerClearsRelayCredentialAtomically(t *testing.T) {
 			t.Fatalf("%s = %q, want empty", key, settings.values[key])
 		}
 	}
-	if settings.values[notifications.SettingPushRelayReregister] != "false" {
+	if settings.values[notifications.SettingPushRelayReregister] != "true" {
 		t.Fatalf(
-			"reregistration marker = %q, want false",
+			"reregistration marker = %q, want true (cleared state parks first-use registration)",
 			settings.values[notifications.SettingPushRelayReregister],
 		)
 	}

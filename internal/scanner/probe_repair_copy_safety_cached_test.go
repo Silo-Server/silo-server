@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -211,5 +212,47 @@ func TestVideoCopySafetyUnknownIgnoresAudioOnlyFiles(t *testing.T) {
 	file := &models.MediaFile{ID: 7, CodecAudio: "flac"}
 	if file.VideoCopySafetyUnknown() {
 		t.Fatal("VideoCopySafetyUnknown() = true for an audio-only file, want false")
+	}
+}
+
+// SetFFmpegPath is what makes playback.ffmpeg_path take effect without a
+// server restart: the ensurer is built with the path captured at boot, and a
+// later config change has to reach both the probe and the copy-safety scan.
+func TestSetFFmpegPathOverridesBootPaths(t *testing.T) {
+	ensurer := NewPlaybackProbeEnsurer(nil, "boot-ffprobe", "boot-ffmpeg", time.Second)
+
+	if got := ensurer.binaries(); got.ffmpegPath != "boot-ffmpeg" || got.ffprobePath != "boot-ffprobe" {
+		t.Fatalf("binaries() before reload = %+v, want the boot pair", got)
+	}
+
+	ensurer.SetFFmpegPath("/opt/jellyfin-ffmpeg/ffmpeg")
+
+	got := ensurer.binaries()
+	if got.ffmpegPath != "/opt/jellyfin-ffmpeg/ffmpeg" {
+		t.Fatalf("binaries().ffmpegPath = %q, want the reloaded path", got.ffmpegPath)
+	}
+	if want := filepath.Join("/opt/jellyfin-ffmpeg", "ffprobe"); got.ffprobePath != want {
+		t.Fatalf("binaries().ffprobePath = %q, want %q derived from the reloaded ffmpeg", got.ffprobePath, want)
+	}
+}
+
+// A reload that blanks the FFmpeg path disables the copy-safety scan, the same
+// as booting without one — the verdict stays unknown instead of being guessed.
+func TestSetFFmpegPathEmptyDisablesCopySafetyScan(t *testing.T) {
+	ffmpegPath, _ := fakeFFmpeg(t, conflictingPPSAnnexB, 0)
+	ensurer := NewPlaybackProbeEnsurer(nil, "ffprobe", ffmpegPath, time.Second)
+	file := copySafetyTestFile(time.Date(2026, time.March, 4, 5, 6, 7, 0, time.UTC))
+
+	if !ensurer.NeedsCopySafetyScan(file) {
+		t.Fatal("NeedsCopySafetyScan() = false with a configured ffmpeg, want true")
+	}
+
+	ensurer.SetFFmpegPath("")
+
+	if ensurer.NeedsCopySafetyScan(file) {
+		t.Fatal("NeedsCopySafetyScan() = true after the path was cleared, want false")
+	}
+	if _, _, err := ensurer.ScanCopySafety(context.Background(), file); !errors.Is(err, errCopySafetyScanUnavailable) {
+		t.Fatalf("ScanCopySafety() error = %v, want errCopySafetyScanUnavailable", err)
 	}
 }

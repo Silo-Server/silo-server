@@ -99,6 +99,15 @@ func TestAudioV2PlaybackPathsAreNotCapturedByLegacyRouter(t *testing.T) {
 		{http.MethodGet, "/Videos/item-1/audio-v2/master.m3u8"},
 		{http.MethodGet, "/Videos/item-1/audio-v2/hls/play-v2/stream.m3u8"},
 		{http.MethodGet, "/Videos/item-1/audio-v2/hls/play-v2/seg_00001.ts"},
+		{http.MethodGet, "/Videos/item-1/remux-v1/master.m3u8"},
+		{http.MethodGet, "/Videos/item-1/remux-v1/hls/play-v2/stream.m3u8"},
+		{http.MethodGet, "/Videos/item-1/remux-v1/hls/play-v2/seg_00001.m4s"},
+		{http.MethodGet, "/Videos/item-1/remux-ts-v1/master.m3u8"},
+		{http.MethodGet, "/Videos/item-1/remux-ts-v1/hls/play-v2/stream.m3u8"},
+		{http.MethodGet, "/Videos/item-1/remux-ts-v1/hls/play-v2/seg_00001.ts"},
+		{http.MethodGet, "/Videos/item-1/remux-dv-v1/master.m3u8"},
+		{http.MethodGet, "/Videos/item-1/remux-dv-v1/hls/play-v2/stream.m3u8"},
+		{http.MethodGet, "/Videos/item-1/remux-dv-v1/hls/play-v2/seg_00001.m4s"},
 	}
 	for _, request := range requests {
 		recorder := httptest.NewRecorder()

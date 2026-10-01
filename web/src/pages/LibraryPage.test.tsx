@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   rememberEnabled: true,
   savedSearch: "tab=library" as string | undefined,
   saveLibrarySearch: vi.fn<(libraryId: number, search: string) => Promise<void>>(),
+  renderOnlyActiveTab: false,
+  recommendedMounts: 0,
 }));
 
 vi.mock("@/hooks/queries/libraries", () => ({
@@ -55,18 +57,43 @@ vi.mock("@/components/LibraryHeader", () => ({
   default: () => <div>Library header</div>,
 }));
 
-vi.mock("@/components/ui/tabs", () => ({
-  Tabs: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  TabsContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-}));
+vi.mock("@/components/ui/tabs", async () => {
+  const { createContext, useContext } = await import("react");
+  const ActiveTabContext = createContext<string | undefined>(undefined);
+  return {
+    Tabs: ({ value, children }: { value: string; children: ReactNode }) => (
+      <ActiveTabContext.Provider value={value}>{children}</ActiveTabContext.Provider>
+    ),
+    TabsContent: ({ value, children }: { value: string; children: ReactNode }) => {
+      const activeTab = useContext(ActiveTabContext);
+      // Radix only mounts the active panel. Most tests here need to reach into
+      // several panels at once, so that behavior is opt-in per test.
+      if (mocks.renderOnlyActiveTab && activeTab !== value) {
+        return null;
+      }
+      return <div>{children}</div>;
+    },
+  };
+});
 
-vi.mock("./LibraryRecommended", () => ({
-  default: ({ onHeroStateChange }: { onHeroStateChange: (rendered: boolean) => void }) => (
-    <button type="button" onClick={() => onHeroStateChange(true)}>
-      Show hero
-    </button>
-  ),
-}));
+vi.mock("./LibraryRecommended", async () => {
+  const { useEffect } = await import("react");
+  function LibraryRecommendedMock({
+    onHeroStateChange,
+  }: {
+    onHeroStateChange: (rendered: boolean) => void;
+  }) {
+    useEffect(() => {
+      mocks.recommendedMounts += 1;
+    }, []);
+    return (
+      <button type="button" onClick={() => onHeroStateChange(true)}>
+        Show hero
+      </button>
+    );
+  }
+  return { default: LibraryRecommendedMock };
+});
 
 vi.mock("./LibraryBrowse", () => ({
   default: () => <div>Library browse</div>,
@@ -102,8 +129,27 @@ describe("LibraryPage saved state", () => {
     mocks.ownerKey = "profile-1";
     mocks.rememberEnabled = true;
     mocks.savedSearch = "tab=library";
+    mocks.renderOnlyActiveTab = false;
+    mocks.recommendedMounts = 0;
     mocks.saveLibrarySearch.mockReset();
     mocks.saveLibrarySearch.mockResolvedValue();
+  });
+
+  it("never mounts the Recommended tab when saved state lands on the Library tab", async () => {
+    mocks.renderOnlyActiveTab = true;
+    mocks.savedSearch = "tab=library&sort=year&order=desc";
+
+    renderPage("/libraries/7");
+
+    await waitFor(() =>
+      expect(screen.getByTestId("location-search")).toHaveTextContent(
+        "?tab=library&sort=year&order=desc",
+      ),
+    );
+    expect(screen.getByText("Library browse")).toBeInTheDocument();
+    // The hydration effect must not drop the skeleton before the rewritten URL
+    // lands, or Recommended mounts for a frame and fires its section queries.
+    expect(mocks.recommendedMounts).toBe(0);
   });
 
   it("submits one save while the cached value remains stale across unrelated rerenders", async () => {

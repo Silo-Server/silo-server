@@ -53,6 +53,11 @@ func PayloadForRow(row DeliveryRow) DeliveryRowPayload {
 	if len(reasonFlags) == 0 {
 		reasonFlags = json.RawMessage("{}")
 	}
+	posterPath := row.PosterPath
+	if posterPath == "" && isRequestLifecycleType(row.Type) {
+		flags := parseRequestFlags(row.ReasonFlags)
+		posterPath = flags.PosterPath
+	}
 	return DeliveryRowPayload{
 		ID:              row.ID,
 		Type:            row.Type,
@@ -64,7 +69,7 @@ func PayloadForRow(row DeliveryRow) DeliveryRowPayload {
 		EpisodeTitle:    row.EpisodeTitle,
 		SeasonNumber:    row.SeasonNumber,
 		EpisodeNumber:   row.EpisodeNumber,
-		PosterPath:      row.PosterPath,
+		PosterPath:      posterPath,
 		PosterThumbhash: row.PosterThumbhash,
 		ReasonFlags:     reasonFlags,
 		CreatedAt:       row.CreatedAt,

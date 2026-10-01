@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Library, PageSectionConfig } from "@/api/types";
 import {
   useAdminSections,
+  useAdminSectionCapabilities,
   useBulkCreateSections,
   useCreateSection,
   useUpdateSection,
   useDeleteSection,
+  useDeleteSections,
   useReorderSections,
   useRestoreDefaultSections,
 } from "@/hooks/queries/sections";
@@ -18,6 +20,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useAdminCollections, useImportTraktCollection } from "@/hooks/queries/admin/collections";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -37,10 +40,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, RotateCcw } from "lucide-react";
-import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { Loader2, Plus, RotateCcw, Trash2 } from "lucide-react";
+
 import { toast } from "sonner";
-import { buildSectionReorderEntries } from "./adminSectionOrder";
+import {
+  fetchAdminSectionSnapshot,
+  fetchAdminSectionDeleteTargets,
+  fetchAdminSectionOrderSnapshot,
+} from "@/api/adminSections";
+import { V2ProblemError } from "@/api/v2/request";
 import SectionEditorDrawer from "@/components/sections/SectionEditorDrawer";
 import {
   SectionDragOverlay,
@@ -60,6 +68,12 @@ import type { DragStartEvent, DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import type { LibraryCollection } from "@/api/types";
+import {
+  createAdminSectionCreation,
+  runAdminSectionCreation,
+  type AdminSectionCreation,
+} from "@/lib/adminSectionCreation";
+import { updateCheckboxSelection } from "@/lib/checkboxSelection";
 
 function formatCollectionOptionLabel(
   collection: { title: string; library_id: number },
@@ -70,16 +84,19 @@ function formatCollectionOptionLabel(
 }
 
 function LibraryPicker({
+  disabled,
   libraries,
   value,
   onChange,
 }: {
+  disabled: boolean;
   libraries: Library[];
   value: number | null;
   onChange: (libraryId: number) => void;
 }) {
   return (
     <Select
+      disabled={disabled}
       value={value ? String(value) : undefined}
       onValueChange={(next) => onChange(Number(next))}
     >
@@ -164,7 +181,34 @@ export default function AdminSections() {
   const librariesList = useMemo(() => librariesData ?? [], [librariesData]);
   const [selectedLibraryId, setSelectedLibraryId] = useState<number | null>(null);
   const activeLibraryId = scope === "library" ? selectedLibraryId : null;
-  const { data, isLoading } = useAdminSections(scope, activeLibraryId ?? undefined);
+  const {
+    data,
+    isLoading,
+    isError,
+    error: listError,
+    refetch,
+  } = useAdminSections(scope, activeLibraryId ?? undefined);
+  const { data: capabilities } = useAdminSectionCapabilities();
+  const [snapshotLoading, setSnapshotLoading] = useState(false);
+  const snapshotRequest = useRef(0);
+  const [editingETag, setEditingETag] = useState<string | null>(null);
+  const [editConflict, setEditConflict] = useState(false);
+  const [orderConflict, setOrderConflict] = useState(false);
+  const [deleteETag, setDeleteETag] = useState<string | null>(null);
+  const [deleteConflict, setDeleteConflict] = useState(false);
+  const [deleteTargets, setDeleteTargets] = useState<
+    Awaited<ReturnType<typeof fetchAdminSectionDeleteTargets>>
+  >([]);
+  const [restoreSnapshot, setRestoreSnapshot] = useState<Awaited<
+    ReturnType<typeof fetchAdminSectionOrderSnapshot>
+  > | null>(null);
+  const [restoreConflict, setRestoreConflict] = useState(false);
+  const dragSnapshot = useRef<{
+    sections: PageSectionConfig[];
+    etag: string;
+    scope: string;
+    library_id?: number;
+  } | null>(null);
   const { data: collectionsData = [] } = useAdminCollections();
   const { data: recipeCatalog } = useQuery({
     queryKey: ["recipe-catalog"],
@@ -182,7 +226,12 @@ export default function AdminSections() {
   const [orderedSections, setOrderedSections] = useState<PageSectionConfig[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [confirmDeleteSection, setConfirmDeleteSection] = useState<PageSectionConfig | null>(null);
+  const [confirmDeleteSelected, setConfirmDeleteSelected] = useState(false);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  const [selectedSectionIds, setSelectedSectionIds] = useState<Set<string>>(new Set());
+  const selectionAnchorRef = useRef<string | null>(null);
   const deleteMutation = useDeleteSection();
+  const deleteSectionsMutation = useDeleteSections();
   const reorderMutation = useReorderSections();
   const restoreDefaultsMutation = useRestoreDefaultSections();
   const [confirmRestoreOpen, setConfirmRestoreOpen] = useState(false);
@@ -197,11 +246,39 @@ export default function AdminSections() {
   const createMutation = useCreateSection();
   const bulkCreateMutation = useBulkCreateSections();
   const updateMutation = useUpdateSection();
+  const [creation, setCreation] = useState<{ state: AdminSectionCreation; scope: string } | null>(
+    null,
+  );
+  const [creationRunning, setCreationRunning] = useState(false);
+  const creationRunningRef = useRef(false);
+
+  const creationUnresolved = Boolean(
+    creation?.state.targets.some((target) => target.status !== "complete"),
+  );
 
   const sections = useMemo(() => data?.sections ?? [], [data?.sections]);
+  const orderedSectionIds = useMemo(
+    () => orderedSections.map((section) => section.id),
+    [orderedSections],
+  );
+  const selectedSections = useMemo(
+    () => orderedSections.filter((section) => selectedSectionIds.has(section.id)),
+    [orderedSections, selectedSectionIds],
+  );
   const isHomeScope = scope === "home";
-  const canManageLibrarySections = librariesList.length > 0 && selectedLibraryId !== null;
-  const canDrag = !reorderMutation.isPending && (isHomeScope || canManageLibrarySections);
+  const canManageCurrentScope =
+    !isError &&
+    Boolean(capabilities?.available) &&
+    (isHomeScope || (librariesList.length > 0 && selectedLibraryId !== null));
+  const canDrag =
+    activeId !== null ||
+    (!orderConflict &&
+      !reorderMutation.isPending &&
+      !snapshotLoading &&
+      canManageCurrentScope &&
+      Boolean(data?.etag) &&
+      orderedSections.length <= 10000 &&
+      data?.ordered_ids.join("\0") === orderedSectionIds.join("\0"));
 
   useEffect(() => {
     if (librariesList.length === 0) {
@@ -223,46 +300,194 @@ export default function AdminSections() {
   );
 
   useEffect(() => {
-    setOrderedSections(sections);
-  }, [sections]);
+    if (!dragSnapshot.current && !orderConflict && !reorderMutation.isPending)
+      setOrderedSections(sections);
+  }, [sections, orderConflict, reorderMutation.isPending]);
+
+  useEffect(() => {
+    const clearSelection = (event: KeyboardEvent) => {
+      if (
+        event.key === "Escape" &&
+        confirmDeleteSection === null &&
+        !confirmDeleteSelected &&
+        !confirmDeleteAll
+      ) {
+        setSelectedSectionIds(new Set());
+        selectionAnchorRef.current = null;
+      }
+    };
+    window.addEventListener("keydown", clearSelection);
+    return () => window.removeEventListener("keydown", clearSelection);
+  }, [confirmDeleteAll, confirmDeleteSection, confirmDeleteSelected]);
+
+  function clearSectionSelection() {
+    setSelectedSectionIds(new Set());
+    selectionAnchorRef.current = null;
+  }
+
+  function handleScopeChange(nextScope: string) {
+    if (reorderMutation.isPending || nextScope === scope) return;
+    setOrderedSections([]);
+    snapshotRequest.current++;
+    dragSnapshot.current = null;
+    setActiveId(null);
+    setOrderConflict(false);
+    clearSectionSelection();
+    setScope(nextScope);
+  }
+
+  function handleLibraryChange(libraryId: number) {
+    if (reorderMutation.isPending || libraryId === selectedLibraryId) return;
+    setOrderedSections([]);
+    snapshotRequest.current++;
+    dragSnapshot.current = null;
+    setActiveId(null);
+    setOrderConflict(false);
+    clearSectionSelection();
+    setSelectedLibraryId(libraryId);
+  }
+
+  function updateSectionSelection(sectionId: string, checked: boolean, extendRange: boolean) {
+    const anchorId = extendRange && selectedSectionIds.size > 0 ? selectionAnchorRef.current : null;
+    setSelectedSectionIds((previous) =>
+      updateCheckboxSelection(
+        previous,
+        orderedSectionIds,
+        anchorId,
+        sectionId,
+        checked,
+        extendRange,
+      ),
+    );
+    if (anchorId === null || !orderedSectionIds.includes(anchorId)) {
+      selectionAnchorRef.current = sectionId;
+    }
+  }
+
+  async function prepareSnapshot(action: () => Promise<void>) {
+    setSnapshotLoading(true);
+    try {
+      await action();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not load current sections");
+    } finally {
+      setSnapshotLoading(false);
+    }
+  }
 
   function handleDelete(section: PageSectionConfig) {
-    setConfirmDeleteSection(section);
+    const request = ++snapshotRequest.current;
+    void prepareSnapshot(async () => {
+      const snapshot = await fetchAdminSectionSnapshot(section.id);
+      if (request !== snapshotRequest.current) return;
+      setConfirmDeleteSection(snapshot.section);
+      setDeleteETag(snapshot.etag);
+      setDeleteConflict(false);
+    });
   }
 
   function handleEdit(section: PageSectionConfig) {
-    setEditingSection(section);
-    setDialogOpen(true);
+    const request = ++snapshotRequest.current;
+    void prepareSnapshot(async () => {
+      const snapshot = await fetchAdminSectionSnapshot(section.id);
+      if (request !== snapshotRequest.current) return;
+      setEditingSection(snapshot.section);
+      setEditingETag(snapshot.etag);
+      setEditConflict(false);
+      setDialogOpen(true);
+    });
+  }
+
+  function prepareBulkDelete(all: boolean) {
+    const ids = (all ? orderedSections : selectedSections).map((section) => section.id);
+    if (ids.length > 100) {
+      toast.error("Select at most 100 sections per deletion.");
+      return;
+    }
+    const request = ++snapshotRequest.current;
+    void prepareSnapshot(async () => {
+      const targets = await fetchAdminSectionDeleteTargets(ids);
+      if (request !== snapshotRequest.current) return;
+      setDeleteTargets(targets);
+      setConfirmDeleteAll(all);
+      setConfirmDeleteSelected(!all);
+    });
+  }
+
+  function openRestore() {
+    const request = ++snapshotRequest.current;
+    void prepareSnapshot(async () => {
+      const snapshot = await fetchAdminSectionOrderSnapshot(scope, activeLibraryId ?? undefined);
+      if (request !== snapshotRequest.current) return;
+      setRestoreSnapshot(snapshot);
+      setRestoreConflict(false);
+      setConfirmRestoreOpen(true);
+    });
   }
 
   function handleDragStart(event: DragStartEvent) {
+    if (!canDrag || !data?.etag) return;
+    dragSnapshot.current = {
+      sections: orderedSections,
+      etag: data.etag,
+      scope,
+      library_id: activeLibraryId ?? undefined,
+    };
     setActiveId(event.active.id as string);
   }
 
   function handleDragEnd(event: DragEndEvent) {
+    const snapshot = dragSnapshot.current;
+    dragSnapshot.current = null;
     setActiveId(null);
-
     const { active, over } = event;
-    if (!over || active.id === over.id) return;
-
-    const oldIndex = orderedSections.findIndex((s) => s.id === active.id);
-    const newIndex = orderedSections.findIndex((s) => s.id === over.id);
+    if (!snapshot || !over || active.id === over.id) {
+      setOrderedSections(sections);
+      return;
+    }
+    const oldIndex = snapshot.sections.findIndex((s) => s.id === active.id);
+    const newIndex = snapshot.sections.findIndex((s) => s.id === over.id);
     if (oldIndex === -1 || newIndex === -1) return;
-
-    const nextSections = arrayMove(orderedSections, oldIndex, newIndex);
+    const nextSections = arrayMove(snapshot.sections, oldIndex, newIndex);
     setOrderedSections(nextSections);
-    reorderMutation.mutate(buildSectionReorderEntries(nextSections), {
-      onError: () => {
-        setOrderedSections(sections);
+    reorderMutation.mutate(
+      {
+        scope: snapshot.scope,
+        library_id: snapshot.library_id,
+        etag: snapshot.etag,
+        ordered_ids: nextSections.map((s) => s.id),
       },
-    });
+      {
+        onError: (error) => {
+          setOrderConflict(true);
+          toast.error(error instanceof Error ? error.message : "Could not reorder sections");
+        },
+      },
+    );
   }
 
   function handleDragCancel() {
+    dragSnapshot.current = null;
     setActiveId(null);
+    setOrderedSections(sections);
   }
 
   const activeSection = activeId ? (orderedSections.find((s) => s.id === activeId) ?? null) : null;
+  const selectedLibraryName = librariesList.find((library) => library.id === activeLibraryId)?.name;
+  const sectionScopeLabel = isHomeScope ? "home" : `${selectedLibraryName ?? "library"} library`;
+  const sectionDeletionNotice =
+    "Silo will also try to remove section-managed collections that are no longer referenced. This action cannot be undone.";
+  const deleteProgressLabel = `Deleting ${deleteSectionsMutation.progress?.completed ?? 0} of ${deleteSectionsMutation.progress?.total ?? deleteTargets.length} sections`;
+
+  function handleDeleteCapturedSections() {
+    deleteSectionsMutation.mutate(deleteTargets, {
+      onSuccess: (result) => {
+        setSelectedSectionIds(new Set(result.failedIds));
+        setConfirmDeleteAll(false);
+        setConfirmDeleteSelected(false);
+      },
+    });
+  }
 
   function normalizeLibraryIDs(ids: number[] | undefined): number[] {
     if (!ids || ids.length === 0) return [];
@@ -301,6 +526,47 @@ export default function AdminSections() {
     return imported.collection;
   }
 
+  async function runTraktCreation(state: AdminSectionCreation, targetScope: string) {
+    if (creationRunningRef.current) return;
+    creationRunningRef.current = true;
+    setCreationRunning(true);
+    setCreation({ state, scope: targetScope });
+    try {
+      const result = await runAdminSectionCreation(state, {
+        resolveCollection: async (payload, libraryID) => {
+          const recipe = getTraktRecipeConfig(payload.config);
+          if (!recipe) throw new Error("This recipe no longer identifies a Trakt list");
+          return (await ensureTraktSectionCollection(payload, recipe, libraryID)).id;
+        },
+        createSection: async (payload, libraryID, collectionID) => {
+          const created = await createMutation.mutateAsync({
+            scope: targetScope,
+            ...(targetScope === "library" ? { library_id: libraryID } : {}),
+            section_type: payload.section_type,
+            title: payload.title,
+            item_limit: payload.item_limit,
+            featured: payload.featured,
+            enabled: payload.enabled,
+            config: { ...payload.config, library_collection_id: collectionID },
+          });
+          return created.id;
+        },
+        onProgress: (next) => setCreation({ state: next, scope: targetScope }),
+      });
+      const completed = result.targets.filter((target) => target.status === "complete").length;
+      if (completed === result.targets.length)
+        toast.success(`Created ${completed} section${completed === 1 ? "" : "s"}`);
+      else
+        toast.warning(
+          `Created ${completed} of ${result.targets.length} sections. Review the remaining targets below.`,
+        );
+      setCreation({ state: result, scope: targetScope });
+    } finally {
+      creationRunningRef.current = false;
+      setCreationRunning(false);
+    }
+  }
+
   async function createBulkSectionsFromGallery(
     payload: AddPayload,
     libraryIDs: number[],
@@ -314,20 +580,7 @@ export default function AdminSections() {
     const selectedCollectionID =
       typeof config.library_collection_id === "string" ? config.library_collection_id.trim() : "";
     if (traktRecipe && selectedCollectionID === "") {
-      for (const libraryID of libraryIDs) {
-        const collection = await ensureTraktSectionCollection(payload, traktRecipe, libraryID);
-        await createMutation.mutateAsync({
-          scope: "library",
-          library_id: libraryID,
-          section_type: payload.section_type,
-          title: payload.title,
-          item_limit: payload.item_limit,
-          featured: payload.featured,
-          enabled: payload.enabled,
-          config: { ...config, library_collection_id: collection.id },
-        });
-      }
-      toast.success(`Created ${libraryIDs.length} section${libraryIDs.length === 1 ? "" : "s"}`);
+      await runTraktCreation(createAdminSectionCreation(payload, libraryIDs), "library");
       return;
     }
 
@@ -351,7 +604,7 @@ export default function AdminSections() {
       return;
     }
 
-    let config = payload.config;
+    const config = payload.config;
     const traktRecipe = getTraktRecipeConfig(config);
     const selectedCollectionID =
       typeof config.library_collection_id === "string" ? config.library_collection_id.trim() : "";
@@ -361,8 +614,8 @@ export default function AdminSections() {
       if (!targetLibraryID) {
         throw new Error("Choose a library before adding this Trakt section");
       }
-      const collection = await ensureTraktSectionCollection(payload, traktRecipe, targetLibraryID);
-      config = { ...config, library_collection_id: collection.id };
+      await runTraktCreation(createAdminSectionCreation(payload, [targetLibraryID]), scope);
+      return;
     }
 
     const data: Partial<PageSectionConfig> = {
@@ -381,26 +634,124 @@ export default function AdminSections() {
   if (isLoading) return <div className="p-4">Loading sections...</div>;
 
   return (
-    <div className="space-y-6">
-      <ConfirmDialog
+    <div
+      className="space-y-6"
+      aria-busy={deleteSectionsMutation.isPending}
+      inert={deleteSectionsMutation.isPending ? true : undefined}
+    >
+      <Dialog
         open={confirmDeleteSection !== null}
         onOpenChange={(open) => {
-          if (!open) setConfirmDeleteSection(null);
+          if (!open && !deleteMutation.isPending) {
+            snapshotRequest.current++;
+            setConfirmDeleteSection(null);
+          }
         }}
-        title="Delete section"
-        description={`Delete section "${confirmDeleteSection?.title}"? This action cannot be undone.`}
-        confirmLabel="Delete"
-        variant="destructive"
-        onConfirm={() => {
-          if (confirmDeleteSection) deleteMutation.mutate(confirmDeleteSection.id);
-          setConfirmDeleteSection(null);
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete section</DialogTitle>
+          </DialogHeader>
+          <p>
+            Delete section "{confirmDeleteSection?.title}"? {sectionDeletionNotice}
+          </p>
+          {deleteConflict && (
+            <p role="alert">This section changed. Reload it before confirming deletion.</p>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              disabled={deleteMutation.isPending}
+              onClick={() => {
+                snapshotRequest.current++;
+                setConfirmDeleteSection(null);
+              }}
+            >
+              Cancel
+            </Button>
+            {deleteConflict ? (
+              <Button
+                disabled={snapshotLoading}
+                onClick={() => {
+                  if (confirmDeleteSection) handleDelete(confirmDeleteSection);
+                }}
+              >
+                Reload section
+              </Button>
+            ) : (
+              <Button
+                variant="destructive"
+                disabled={deleteMutation.isPending || !deleteETag}
+                onClick={() => {
+                  if (!confirmDeleteSection || !deleteETag) return;
+                  deleteMutation.mutate(
+                    { id: confirmDeleteSection.id, etag: deleteETag },
+                    {
+                      onSuccess: () => setConfirmDeleteSection(null),
+                      onError: (error) => {
+                        setDeleteConflict(error instanceof V2ProblemError && error.status === 412);
+                        toast.error(
+                          error instanceof Error ? error.message : "Could not delete section",
+                        );
+                      },
+                    },
+                  );
+                }}
+              >
+                Delete
+              </Button>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={confirmDeleteSelected || confirmDeleteAll}
+        onOpenChange={(open) => {
+          if (!open && !deleteSectionsMutation.isPending) {
+            setConfirmDeleteSelected(false);
+            setConfirmDeleteAll(false);
+          }
         }}
-      />
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {confirmDeleteAll ? "Delete all sections" : "Delete selected sections"}
+            </DialogTitle>
+          </DialogHeader>
+          <p>
+            Delete {deleteTargets.length} captured sections? {sectionDeletionNotice}
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              disabled={deleteSectionsMutation.isPending}
+              onClick={() => {
+                setConfirmDeleteSelected(false);
+                setConfirmDeleteAll(false);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deleteSectionsMutation.isPending}
+              onClick={handleDeleteCapturedSections}
+            >
+              Delete {deleteTargets.length} sections
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog
         open={confirmRestoreOpen}
         onOpenChange={(open) => {
+          if (restoreDefaultsMutation.isPending) return;
           setConfirmRestoreOpen(open);
-          if (!open) setResetProfiles(false);
+          if (!open) {
+            snapshotRequest.current++;
+            setResetProfiles(false);
+          }
         }}
       >
         <DialogContent>
@@ -409,13 +760,14 @@ export default function AdminSections() {
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-muted-foreground text-sm">
-              This will replace all {scope === "home" ? "home" : "library"} sections with the
-              defaults. Any custom sections will be removed.
+              This will replace all {restoreSnapshot?.scope === "home" ? "home" : "library"}{" "}
+              sections with the defaults. Any custom sections will be removed.
             </p>
             <div className="flex items-center gap-2">
               <Switch
                 id="resetProfiles"
                 size="sm"
+                disabled={!capabilities?.reset_profiles || restoreDefaultsMutation.isPending}
                 checked={resetProfiles}
                 onCheckedChange={(checked) => setResetProfiles(checked === true)}
               />
@@ -423,10 +775,27 @@ export default function AdminSections() {
                 Also reset all user customizations for this scope
               </Label>
             </div>
+            {restoreConflict && (
+              <p role="alert">
+                Sections changed. Reload the current scope before restoring defaults.
+              </p>
+            )}
+            {!capabilities?.reset_profiles && (
+              <p className="text-muted-foreground text-sm">
+                Resetting user customizations is unavailable on this server.
+              </p>
+            )}
             <div className="flex justify-end gap-2">
+              {restoreConflict && (
+                <Button disabled={snapshotLoading} onClick={openRestore}>
+                  Reload sections
+                </Button>
+              )}
               <Button
                 variant="outline"
+                disabled={restoreDefaultsMutation.isPending}
                 onClick={() => {
+                  snapshotRequest.current++;
                   setConfirmRestoreOpen(false);
                   setResetProfiles(false);
                 }}
@@ -435,13 +804,16 @@ export default function AdminSections() {
               </Button>
               <Button
                 variant="destructive"
-                disabled={restoreDefaultsMutation.isPending}
+                disabled={restoreDefaultsMutation.isPending || restoreConflict || !restoreSnapshot}
                 onClick={() => {
                   restoreDefaultsMutation.mutate(
                     {
-                      scope,
-                      ...(activeLibraryId != null ? { library_id: activeLibraryId } : {}),
-                      reset_profiles: resetProfiles,
+                      scope: restoreSnapshot!.scope,
+                      ...(restoreSnapshot!.library_id != null
+                        ? { library_id: Number(restoreSnapshot!.library_id) }
+                        : {}),
+                      etag: restoreSnapshot!.etag,
+                      reset_profiles: Boolean(capabilities?.reset_profiles && resetProfiles),
                     },
                     {
                       onSuccess: () => {
@@ -449,7 +821,8 @@ export default function AdminSections() {
                         setConfirmRestoreOpen(false);
                         setResetProfiles(false);
                       },
-                      onError: () => {
+                      onError: (error) => {
+                        setRestoreConflict(error instanceof V2ProblemError && error.status === 412);
                         toast.error("Failed to restore defaults");
                       },
                     },
@@ -466,42 +839,150 @@ export default function AdminSections() {
         <div className="space-y-3">
           <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Sections</h1>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             size="sm"
             variant="outline"
             disabled={
-              (!isHomeScope && !canManageLibrarySections) || restoreDefaultsMutation.isPending
+              !canManageCurrentScope || snapshotLoading || restoreDefaultsMutation.isPending
             }
-            onClick={() => setConfirmRestoreOpen(true)}
+            onClick={openRestore}
           >
             <RotateCcw className="mr-1 h-4 w-4" /> Restore Defaults
           </Button>
           <Button
             size="sm"
             variant="outline"
-            disabled={!isHomeScope && !canManageLibrarySections}
+            disabled={
+              !canManageCurrentScope || snapshotLoading || creationRunning || creationUnresolved
+            }
             onClick={() => setGalleryOpen(true)}
           >
             <Plus className="mr-1 h-4 w-4" /> Add from Gallery
           </Button>
           <Button
             size="sm"
-            disabled={!isHomeScope && !canManageLibrarySections}
+            disabled={
+              !canManageCurrentScope || snapshotLoading || creationRunning || creationUnresolved
+            }
             onClick={() => {
               setEditingSection(null);
+              setEditingETag(null);
+              setEditConflict(false);
               setDialogOpen(true);
             }}
           >
             <Plus className="mr-1 h-4 w-4" /> Add Section
           </Button>
+          {selectedSections.length > 0 ? (
+            <>
+              <Badge variant="secondary">{selectedSections.length} selected</Badge>
+              <Button size="sm" variant="ghost" onClick={clearSectionSelection}>
+                Clear
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={
+                  snapshotLoading ||
+                  selectedSections.length > 100 ||
+                  deleteSectionsMutation.isPending ||
+                  !canManageCurrentScope
+                }
+                onClick={() => prepareBulkDelete(false)}
+              >
+                <Trash2 data-icon="inline-start" /> Delete Selected
+              </Button>
+            </>
+          ) : null}
+          {orderedSections.length > 0 ? (
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={
+                snapshotLoading ||
+                orderedSections.length > 100 ||
+                deleteSectionsMutation.isPending ||
+                restoreDefaultsMutation.isPending ||
+                !canManageCurrentScope
+              }
+              onClick={() => prepareBulkDelete(true)}
+            >
+              {deleteSectionsMutation.isPending ? (
+                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="mr-1 h-4 w-4" />
+              )}
+              {deleteSectionsMutation.isPending ? `${deleteProgressLabel}…` : "Delete All"}
+            </Button>
+          ) : null}
         </div>
       </div>
 
-      <Tabs value={scope} onValueChange={setScope}>
+      {isError && (
+        <div role="alert">
+          <p>{listError instanceof Error ? listError.message : "Could not load sections."}</p>
+          <Button onClick={() => void refetch()}>Reload sections</Button>
+        </div>
+      )}
+      {creation && (
+        <div className="surface-panel space-y-2 rounded-xl p-4" role="status">
+          <p>
+            {creation.state.targets.filter((target) => target.status === "complete").length} of{" "}
+            {creation.state.targets.length} sections created for "{creation.state.payload.title}".
+          </p>
+          {creation.state.targets.map((target) => (
+            <p key={target.libraryID}>
+              {librariesList.find((library) => library.id === target.libraryID)?.name ??
+                `Library ${target.libraryID}`}
+              : {target.status === "complete" ? "Created" : target.status.replace(/_/g, " ")}
+              {target.collectionID ? ` · Collection ${target.collectionID}` : ""}
+              {target.error ? ` · ${target.error}` : ""}
+            </p>
+          ))}
+          {creation.state.targets.some(
+            (target) => target.status === "import_unknown" || target.status === "section_unknown",
+          ) && (
+            <p role="alert">
+              A creation response was not confirmed. Review Collections and Sections before creating
+              that target again; it will not be retried automatically.
+            </p>
+          )}
+          {creation.state.targets.some(
+            (target) => target.status === "section_failed" || target.status === "pending",
+          ) && (
+            <Button
+              disabled={creationRunning}
+              onClick={() => void runTraktCreation(creation.state, creation.scope)}
+            >
+              Retry remaining sections
+            </Button>
+          )}
+          {!creationRunning && creationUnresolved && (
+            <Button variant="outline" onClick={() => setCreation(null)}>
+              Finish review and clear tracking
+            </Button>
+          )}
+          {!creationRunning &&
+            creation.state.targets.every((target) => target.status === "complete") && (
+              <Button variant="ghost" onClick={() => setCreation(null)}>
+                Dismiss
+              </Button>
+            )}
+        </div>
+      )}
+      {(orderedSections.length > 100 || selectedSections.length > 100) && (
+        <p role="status">Select up to 100 sections per deletion. </p>
+      )}
+      {snapshotLoading && <p role="status">Loading current section details…</p>}
+      <Tabs value={scope} onValueChange={handleScopeChange}>
         <TabsList>
-          <TabsTrigger value="home">Home</TabsTrigger>
-          <TabsTrigger value="library">Library</TabsTrigger>
+          <TabsTrigger value="home" disabled={reorderMutation.isPending}>
+            Home
+          </TabsTrigger>
+          <TabsTrigger value="library" disabled={reorderMutation.isPending}>
+            Library
+          </TabsTrigger>
         </TabsList>
       </Tabs>
 
@@ -510,9 +991,10 @@ export default function AdminSections() {
           <Label>Library</Label>
           {librariesList.length > 0 ? (
             <LibraryPicker
+              disabled={reorderMutation.isPending}
               libraries={librariesList}
               value={selectedLibraryId}
-              onChange={setSelectedLibraryId}
+              onChange={handleLibraryChange}
             />
           ) : (
             <p className="text-muted-foreground text-sm">
@@ -522,6 +1004,21 @@ export default function AdminSections() {
         </div>
       )}
 
+      {orderConflict && (
+        <p role="alert">
+          Sections changed.{" "}
+          <Button
+            variant="outline"
+            onClick={() =>
+              void refetch().then((result) => {
+                if (!result.isError) setOrderConflict(false);
+              })
+            }
+          >
+            Reload order
+          </Button>
+        </p>
+      )}
       {canDrag && (
         <p className="text-muted-foreground text-sm">
           Drag and drop sections to change their order.
@@ -529,7 +1026,7 @@ export default function AdminSections() {
       )}
 
       <DndContext
-        sensors={canDrag ? sensors : []}
+        sensors={sensors}
         collisionDetection={closestCenter}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
@@ -539,6 +1036,9 @@ export default function AdminSections() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10">
+                  <span className="sr-only">Select</span>
+                </TableHead>
                 <TableHead className="w-8"></TableHead>
                 <TableHead>Title</TableHead>
                 <TableHead>Type</TableHead>
@@ -561,13 +1061,18 @@ export default function AdminSections() {
                     libraries={librariesList}
                     collectionLabels={collectionLabels}
                     catalog={recipeCatalog}
+                    selected={selectedSectionIds.has(section.id)}
+                    selectionLabel={`Select ${section.title} ${sectionScopeLabel} section`}
+                    onSelectionChange={(checked, extendRange) =>
+                      updateSectionSelection(section.id, checked, extendRange)
+                    }
                     onEdit={() => handleEdit(section)}
                     onDelete={() => handleDelete(section)}
                   />
                 ))}
-                {orderedSections.length === 0 && (
+                {!isError && orderedSections.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-muted-foreground py-8 text-center">
+                    <TableCell colSpan={8} className="text-muted-foreground py-8 text-center">
                       No sections configured for {scope} scope.
                     </TableCell>
                   </TableRow>
@@ -591,11 +1096,18 @@ export default function AdminSections() {
         open={dialogOpen}
         onOpenChange={(open) => {
           setDialogOpen(open);
-          if (!open) setEditingSection(null);
+          if (!open) {
+            snapshotRequest.current++;
+            setEditingSection(null);
+          }
         }}
         section={editingSection}
-        scope={scope}
-        currentLibraryId={activeLibraryId}
+        conflict={editConflict}
+        onReload={() => {
+          if (editingSection) handleEdit(editingSection);
+        }}
+        scope={editingSection?.scope ?? scope}
+        currentLibraryId={editingSection ? editingSection.library_id : activeLibraryId}
         libraries={librariesList}
         recipeCatalog={recipeCatalog}
         isSubmitting={
@@ -604,13 +1116,14 @@ export default function AdminSections() {
         onSave={(section) => {
           if (section.id) {
             updateMutation.mutate(
-              { id: section.id, ...section },
+              { ...section, id: section.id, etag: editingETag! },
               {
                 onSuccess: () => {
                   setDialogOpen(false);
                   setEditingSection(null);
                 },
                 onError: (error) => {
+                  setEditConflict(error instanceof V2ProblemError && error.status === 412);
                   toast.error(error instanceof Error ? error.message : "Failed to update section");
                 },
               },
@@ -641,6 +1154,9 @@ export default function AdminSections() {
       {pickedRecipe && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
           <RecipeConfigDrawer
+            libraryCollectionsOnly
+            libraryScoped={scope === "library"}
+            libraries={librariesList}
             def={pickedRecipe.def}
             preset={pickedRecipe.preset}
             onCancel={() => setPickedRecipe(null)}

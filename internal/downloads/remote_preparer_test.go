@@ -15,6 +15,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -280,6 +281,66 @@ func TestNodeAwarePreparerRequiresAudioToAACV2ForSurroundDownmix(t *testing.T) {
 	}
 	if remote.request.SourceAudioChannels != 6 || prepared.OriginNodeID != 2 {
 		t.Fatalf("remote request = %#v prepared = %#v", remote.request, prepared)
+	}
+}
+
+func TestNodeAwarePreparerRequiresPreparedTracksNode(t *testing.T) {
+	capabilityNode := func(features ...string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{TransportFeatures: features})
+		}))
+	}
+	legacy := capabilityNode()
+	defer legacy.Close()
+	current := capabilityNode(playback.TransportFeaturePreparedTracksV1)
+	defer current.Close()
+
+	pool := nodepool.NewTranscodePool()
+	pool.SetNodes([]*nodepool.Node{
+		{ID: 1, URL: legacy.URL, Enabled: true, Healthy: true},
+		{ID: 2, URL: current.URL, Enabled: true, Healthy: true, ActiveJobs: 1},
+	})
+	local := &recordingEncodePreparer{}
+	remote := &recordingRemotePreparer{}
+	cfg := &config.Config{}
+	cfg.Auth.JWTSecret = "secret"
+	p := NewNodeAwarePreparer(local, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
+	p.remote = remote
+	file := &models.MediaFile{CodecAudio: "aac", AudioTracks: []models.AudioTrack{{Codec: "aac"}, {Codec: "ac3", Channels: 6}}}
+	opts := playback.TranscodeOpts{
+		InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac",
+		PreparedTracks: playback.PlanPreparedTracks(file, "aac", -1),
+	}
+	prepared, err := p.PrepareFile(context.Background(), "artifact-tracks", opts, "/local/artifact.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if local.calls != 0 || remote.nodeURL != current.URL || prepared.OriginNodeID != 2 {
+		t.Fatalf("local calls = %d, remote node = %q, want prepared-tracks node %q", local.calls, remote.nodeURL, current.URL)
+	}
+	if remote.request.TrackRecipeVersion != playback.PreparedTracksRecipeVersion || len(remote.request.PreparedTracks.Audio) != 2 {
+		t.Fatalf("remote request = %#v, want the multi-track layout", remote.request)
+	}
+}
+
+func TestRemotePrepareResultRequiresPreparedTracksAttestation(t *testing.T) {
+	file := &models.MediaFile{AudioTracks: []models.AudioTrack{{Codec: "aac"}, {Codec: "aac"}}}
+	request := downloadprepare.NewRequest("artifact-tracks", playback.TranscodeOpts{
+		TargetCodecAudio: "aac", PreparedTracks: playback.PlanPreparedTracks(file, "aac", -1),
+	})
+	// A node without the layout ignores it and attests its legacy recipe.
+	legacyRequest := request
+	legacyRequest.TrackRecipeVersion, legacyRequest.PreparedTracks = "", nil
+	legacy := downloadprepare.Result{ArtifactID: request.ArtifactID, FileSize: 55, ExecutionFingerprint: legacyRequest.ExecutionFingerprint()}
+	if remotePrepareResultMatches(legacy, request.ArtifactID, request) {
+		t.Fatal("multi-track request accepted a legacy single-track receipt")
+	}
+	if remotePrepareResultMatches(downloadprepare.Result{ArtifactID: request.ArtifactID, FileSize: 55}, request.ArtifactID, request) {
+		t.Fatal("multi-track request accepted an unattested result")
+	}
+	attested := downloadprepare.Result{ArtifactID: request.ArtifactID, FileSize: 55, ExecutionFingerprint: request.ExecutionFingerprint()}
+	if !remotePrepareResultMatches(attested, request.ArtifactID, request) {
+		t.Fatal("multi-track request rejected its exact execution receipt")
 	}
 }
 
@@ -571,7 +632,7 @@ func TestNodeAwarePreparerHonorsDisabledLocalFallback(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Auth.JWTSecret = "secret"
 	p := NewNodeAwarePreparer(local, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
-	p.SetSettingsReader(staticDownloadSettings{config.PlaybackLocalTranscodeFallbackSettingKey: "false"})
+	p.SetSettingsReader(staticDownloadSettings{config.DownloadLocalTranscodeFallbackSettingKey: "false"})
 
 	if _, err := p.PrepareFile(context.Background(), "artifact-no-fallback", playback.TranscodeOpts{}, "/artifacts/job.mp4"); err == nil {
 		t.Fatal("expected unavailable-node error with local fallback disabled")
@@ -759,7 +820,7 @@ func TestNodeAwarePreparerUsesTargetNodeProbeBudget(t *testing.T) {
 	preparer := NewNodeAwarePreparer(nil, nil, func() *config.Config { return cfg })
 	preparer.probeClient = &http.Client{Transport: transport}
 
-	if got, want := preparer.remoteToneMapProbeTimeout(remote.URL), tonemap.ProbeRequestTimeout(tonemap.BackendQSV, "/central/device"); got != want {
+	if got, want := preparer.remoteToneMapProbeTimeout(remote.URL), playback.CapabilityRequestTimeout(tonemap.BackendQSV, "/central/device"); got != want {
 		t.Fatalf("unknown-node probe timeout = %s, want configured probe budget %s", got, want)
 	}
 	if _, err := preparer.toneMapCapabilitiesForNode(context.Background(), remote.URL); err != nil {
@@ -808,7 +869,14 @@ func TestNormalizeRemoteToneMapProbeTimeout(t *testing.T) {
 		{name: "missing", want: 5 * time.Second},
 		{name: "too small", millis: time.Second.Milliseconds(), want: 5 * time.Second},
 		{name: "node specific", millis: (161 * time.Second).Milliseconds(), want: 161 * time.Second},
-		{name: "too large", millis: (10 * time.Minute).Milliseconds(), want: 5 * time.Minute},
+		{
+			// The ceiling is derived from the probe formula, not picked, so the
+			// expectation is too — a round number was already below what a
+			// nine-device node legitimately advertises.
+			name:   "too large",
+			millis: (24 * time.Hour).Milliseconds(),
+			want:   playback.MaxCapabilityRequestTimeout(),
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if got := normalizeRemoteToneMapProbeTimeout(test.millis); got != test.want {
@@ -826,7 +894,7 @@ func TestNodeAwarePreparerCapabilityFailurePreservesNodeProbeBudget(t *testing.T
 		expiresAt:           time.Now().Add(-time.Second),
 	}
 
-	preparer.cacheToneMapCapabilityFailure(nodeURL, context.DeadlineExceeded)
+	preparer.cacheToneMapCapabilityFailure(nodeURL, preparer.capabilityInvalidationsFor(nodeURL), context.DeadlineExceeded)
 
 	if got, want := preparer.remoteToneMapProbeTimeout(nodeURL), 161*time.Second; got != want {
 		t.Fatalf("probe timeout after transient failure = %s, want preserved node budget %s", got, want)
@@ -836,7 +904,7 @@ func TestNodeAwarePreparerCapabilityFailurePreservesNodeProbeBudget(t *testing.T
 func TestNodeAwarePreparerDerivesProbeBudgetWithoutCachedAdvertisement(t *testing.T) {
 	preparer := NewNodeAwarePreparer(nil, nil, nil)
 
-	if got, want := preparer.remoteToneMapProbeTimeout("https://node.example"), tonemap.ProbeRequestTimeout("", ""); got != want {
+	if got, want := preparer.remoteToneMapProbeTimeout("https://node.example"), playback.CapabilityRequestTimeout("", ""); got != want {
 		t.Fatalf("uncached probe timeout = %s, want derived budget %s", got, want)
 	}
 }
@@ -1018,5 +1086,253 @@ func TestNodeAwarePreparerDoesNotFallBackWhenRecoveryProbeIsIndeterminate(t *tes
 	}
 	if local.calls != 0 {
 		t.Fatalf("local calls = %d, want 0", local.calls)
+	}
+}
+
+// nodeLookupPlanner is a planner that can resolve a node by URL, as the real
+// one does. It reserves nothing: these tests only price probes.
+type nodeLookupPlanner struct {
+	node *nodepool.Node
+}
+
+func (p *nodeLookupPlanner) ReserveTranscodeWork(string) (*nodepool.Node, func()) {
+	return nil, func() {}
+}
+
+func (p *nodeLookupPlanner) TranscodeNode(int) (*nodepool.Node, bool) { return nil, false }
+
+func (p *nodeLookupPlanner) TranscodeNodeByURL(nodeURL string) (*nodepool.Node, bool) {
+	if p.node == nil || p.node.URL != nodeURL {
+		return nil, false
+	}
+	return p.node, true
+}
+
+// The cluster setting describes the cluster. A node overridden onto four render
+// devices walks four of them cold, and pricing that walk at the cluster's single
+// device cancels it partway — which drops the node from the capability map and
+// sends the download local, or fails it where local fallback is off.
+func TestNodeAwarePreparerColdProbeBudgetFollowsTheNodeOverride(t *testing.T) {
+	const nodeURL = "https://node.example"
+	devices := "/dev/dri/renderD128,/dev/dri/renderD129,/dev/dri/renderD130,/dev/dri/renderD131"
+	backend := tonemap.BackendQSV
+	planner := &nodeLookupPlanner{node: &nodepool.Node{
+		ID: 1, URL: nodeURL, HWAccelOverride: &backend, HWDeviceOverride: &devices,
+	}}
+	cfg := &config.Config{}
+	cfg.Playback.HWAccel = tonemap.BackendQSV
+	cfg.Playback.HWDevice = "/dev/dri/renderD128"
+	preparer := NewNodeAwarePreparer(nil, planner, func() *config.Config { return cfg })
+
+	want := playback.CapabilityRequestTimeout(backend, devices)
+	if got := preparer.remoteToneMapProbeTimeout(nodeURL); got != want {
+		t.Fatalf("cold probe timeout = %s, want the node's four-device budget %s", got, want)
+	}
+	if cluster := playback.CapabilityRequestTimeout(cfg.Playback.HWAccel, cfg.Playback.HWDevice); want <= cluster {
+		t.Fatalf("fixture is inert: the override budget %s must exceed the cluster's %s", want, cluster)
+	}
+}
+
+// What the node last advertised is its own measurement of its own matrix, and it
+// survives an API restart because it is stored with the report — so where it
+// exceeds what this replica can price, it is the answer.
+func TestNodeAwarePreparerColdProbeBudgetTakesTheStoredAdvertisement(t *testing.T) {
+	const nodeURL = "https://node.example"
+	planner := &nodeLookupPlanner{node: &nodepool.Node{
+		ID: 1, URL: nodeURL,
+		Capabilities: json.RawMessage(`{"resolved":"qsv","probe_request_timeout_ms":161000}`),
+	}}
+	cfg := &config.Config{}
+	preparer := NewNodeAwarePreparer(nil, planner, func() *config.Config { return cfg })
+
+	if got, want := preparer.remoteToneMapProbeTimeout(nodeURL), 161*time.Second; got != want {
+		t.Fatalf("cold probe timeout = %s, want the advertised %s", got, want)
+	}
+}
+
+// A budget learned before an operator widened the node's device set describes
+// the node as it was. Keeping it would cancel every cold retry at the old
+// one-device deadline — and a budget is only ever learned from a read that
+// completes, so nothing would replace it.
+func TestNodeAwarePreparerRepricesALearnedBudgetAfterTheDeviceSetGrows(t *testing.T) {
+	const nodeURL = "https://node.example"
+	devices := "/dev/dri/renderD128,/dev/dri/renderD129,/dev/dri/renderD130,/dev/dri/renderD131"
+	backend := tonemap.BackendQSV
+	planner := &nodeLookupPlanner{node: &nodepool.Node{
+		ID: 1, URL: nodeURL, HWAccelOverride: &backend, HWDeviceOverride: &devices,
+	}}
+	cfg := &config.Config{}
+	cfg.Playback.HWAccel = tonemap.BackendQSV
+	cfg.Playback.HWDevice = "/dev/dri/renderD128"
+	preparer := NewNodeAwarePreparer(nil, planner, func() *config.Config { return cfg })
+	// What the node advertised while it was still on one device.
+	learned := playback.CapabilityRequestTimeout(backend, "/dev/dri/renderD128")
+	preparer.capabilities[nodeURL] = remoteToneMapCapabilities{
+		probeRequestTimeout: learned,
+		expiresAt:           time.Now().Add(-time.Second),
+	}
+
+	want := playback.CapabilityRequestTimeout(backend, devices)
+	if got := preparer.remoteToneMapProbeTimeout(nodeURL); got != want {
+		t.Fatalf("probe timeout after the override grew = %s, want the four-device %s", got, want)
+	}
+	if want <= learned {
+		t.Fatalf("fixture is inert: the four-device budget %s must exceed the learned %s", want, learned)
+	}
+}
+
+// The other direction: a node whose own measurement exceeds what this replica
+// can price for it keeps that measurement. An API replica has none of the node's
+// cards, so its pricing is a floor rather than the truth.
+func TestNodeAwarePreparerKeepsALearnedBudgetLargerThanThePolicyPrice(t *testing.T) {
+	const nodeURL = "https://node.example"
+	planner := &nodeLookupPlanner{node: &nodepool.Node{ID: 1, URL: nodeURL}}
+	cfg := &config.Config{}
+	preparer := NewNodeAwarePreparer(nil, planner, func() *config.Config { return cfg })
+	learned := playback.MaxCapabilityRequestTimeout()
+	preparer.capabilities[nodeURL] = remoteToneMapCapabilities{
+		probeRequestTimeout: learned,
+		expiresAt:           time.Now().Add(-time.Second),
+	}
+
+	if got := preparer.remoteToneMapProbeTimeout(nodeURL); got != learned {
+		t.Fatalf("probe timeout = %s, want the node's own larger measurement %s", got, learned)
+	}
+}
+
+// A policy edit or a capability-hash change makes this cache wrong the moment it
+// lands. Left for its TTL, a download planned from it selects the node for a
+// tone-map executor it no longer has, and the reconfigured worker rejects the
+// recipe or the download falls back locally for no reason.
+func TestNodeAwarePreparerInvalidateNodeCapabilitiesDropsTheInventory(t *testing.T) {
+	const nodeURL = "https://node.example"
+	preparer := NewNodeAwarePreparer(nil, nil, nil)
+	preparer.capabilities[nodeURL] = remoteToneMapCapabilities{
+		capabilities:        tonemap.Capabilities{{Mode: tonemap.ModeHardware, Backend: tonemap.BackendQSV}},
+		probeRequestTimeout: 161 * time.Second,
+		expiresAt:           time.Now().Add(time.Minute),
+	}
+
+	// The stored URL carries a trailing slash the pools have already dropped; it
+	// still has to reach the entry planning reads.
+	preparer.InvalidateNodeCapabilities(nodeURL + "/")
+
+	entry := preparer.capabilities[nodeURL]
+	if len(entry.capabilities) != 0 || !entry.expiresAt.IsZero() {
+		t.Fatalf("inventory survived the invalidation: %+v", entry)
+	}
+	// The budget describes how long the node takes to answer, which a policy
+	// change does not alter — and the read this invalidation triggers is the
+	// cold one that most needs the real number.
+	if entry.probeRequestTimeout != 161*time.Second {
+		t.Fatalf("probe budget = %s, want the learned 161s preserved", entry.probeRequestTimeout)
+	}
+}
+
+// A policy edit invalidates while planning is already asking the node. The
+// answer in flight describes the node before the edit, so installing it would
+// restore the pre-edit inventory for a full TTL — and downloads would keep
+// selecting a tone-map executor the reconfigured worker no longer has.
+func TestNodeAwarePreparerDoesNotCacheAnOvertakenCapabilityFetch(t *testing.T) {
+	var hits atomic.Int32
+	invalidated := make(chan struct{})
+	released := make(chan struct{})
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if hits.Add(1) == 1 {
+			// The edit lands while this request is still open.
+			close(invalidated)
+			<-released
+		}
+		_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{
+			ToneMapCapabilities: tonemap.Capabilities{{
+				Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware,
+				Filter: tonemap.SoftwareFilterBT2390, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
+			}},
+		})
+	}))
+	defer remote.Close()
+	cfg := &config.Config{}
+	cfg.Auth.JWTSecret = "secret"
+	preparer := NewNodeAwarePreparer(nil, nil, func() *config.Config { return cfg })
+
+	fetched := make(chan error, 1)
+	go func() {
+		_, err := preparer.toneMapCapabilitiesForNode(context.Background(), remote.URL)
+		fetched <- err
+	}()
+	<-invalidated
+	preparer.InvalidateNodeCapabilities(remote.URL)
+	close(released)
+	if err := <-fetched; err != nil {
+		t.Fatalf("the caller waiting on the fetch got an error: %v", err)
+	}
+
+	// Nothing durable was written, so the next planning pass asks the node again
+	// rather than reading the overtaken answer.
+	key := nodepool.NormalizeNodeURL(remote.URL)
+	preparer.capabilityMu.Lock()
+	entry, cached := preparer.capabilities[key]
+	preparer.capabilityMu.Unlock()
+	if cached && len(entry.capabilities) > 0 {
+		t.Fatalf("an overtaken fetch repopulated the cache: %+v", entry)
+	}
+	if _, err := preparer.toneMapCapabilitiesForNode(context.Background(), remote.URL); err != nil {
+		t.Fatalf("second lookup: %v", err)
+	}
+	if hits.Load() != 2 {
+		t.Fatalf("node was asked %d times, want a second read after the invalidation", hits.Load())
+	}
+}
+
+// A negative entry does not merely go stale, it takes the node out of planning
+// for its TTL. A fetch failing because the node was mid-reload — exactly what a
+// policy edit causes — would otherwise keep downloads off the node that edit had
+// just reconfigured, after the change that would have fixed it already landed.
+func TestNodeAwarePreparerDoesNotCacheAnOvertakenCapabilityFailure(t *testing.T) {
+	var hits atomic.Int32
+	invalidated := make(chan struct{})
+	released := make(chan struct{})
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if hits.Add(1) == 1 {
+			close(invalidated)
+			<-released
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{
+			ToneMapCapabilities: tonemap.Capabilities{{
+				Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware,
+				Filter: tonemap.SoftwareFilterBT2390, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
+			}},
+		})
+	}))
+	defer remote.Close()
+	cfg := &config.Config{}
+	cfg.Auth.JWTSecret = "secret"
+	preparer := NewNodeAwarePreparer(nil, nil, func() *config.Config { return cfg })
+
+	failed := make(chan error, 1)
+	go func() {
+		_, err := preparer.toneMapCapabilitiesForNode(context.Background(), remote.URL)
+		failed <- err
+	}()
+	<-invalidated
+	preparer.InvalidateNodeCapabilities(remote.URL)
+	close(released)
+	if err := <-failed; err == nil {
+		t.Fatal("the node answered 503 and the caller saw no error")
+	}
+
+	// The reconfigured node is asked again rather than sitting behind a negative
+	// entry the invalidation should have outranked.
+	capabilities, err := preparer.toneMapCapabilitiesForNode(context.Background(), remote.URL)
+	if err != nil {
+		t.Fatalf("second lookup: %v", err)
+	}
+	if len(capabilities) != 1 {
+		t.Fatalf("capabilities = %#v, want the reconfigured node's answer", capabilities)
+	}
+	if hits.Load() != 2 {
+		t.Fatalf("node was asked %d times, want a second read after the invalidation", hits.Load())
 	}
 }

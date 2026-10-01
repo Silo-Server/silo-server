@@ -1,8 +1,9 @@
 import { useDiscover, useTasteProfile } from "@/hooks/queries/recommendations";
-import type { DiscoverRow } from "@/api/types";
+import type { DiscoverRow } from "@/api/v2/recommendations";
 import MediaCarousel from "@/components/MediaCarousel";
 import SectionItemCard from "@/components/SectionItemCard";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sparkles, RefreshCw } from "lucide-react";
 import { useUICustomization } from "@/hooks/useUICustomization";
@@ -145,10 +146,13 @@ function DiscoverSkeletons({ posterWidthClasses }: { posterWidthClasses: string 
 }
 
 export default function Recommendations() {
-  useDocumentTitle("Recommendations");
+  // The viewer-facing name, as on the native apps; admin and setup screens
+  // keep "Recommendations" for the server feature.
+  useDocumentTitle("For You");
 
   const tasteProfileQuery = useTasteProfile();
   const { data, isLoading, isError, refetch } = useDiscover();
+  const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
   const { cardPresentation } = useUICustomization();
   const posterWidthClasses = carouselCardWidthClasses(cardPresentation.poster_size);
 
@@ -161,7 +165,7 @@ export default function Recommendations() {
         <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-foreground text-2xl font-bold tracking-tight sm:text-3xl">
-              Recommendations
+              For You
             </h1>
             <p className="text-muted-foreground mt-1 text-sm">
               Personalized picks based on your viewing history and ratings.
@@ -190,7 +194,11 @@ export default function Recommendations() {
           >
             {row.items.map((item) => (
               <div key={item.content_id} className={posterWidthClasses} role="listitem">
-                <SectionItemCard item={item} />
+                <SectionItemCard
+                  item={item}
+                  overlayPrefs={overlayPrefs}
+                  quickActionMode={quickActionMode}
+                />
               </div>
             ))}
           </MediaCarousel>

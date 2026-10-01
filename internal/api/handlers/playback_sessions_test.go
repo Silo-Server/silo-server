@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"unicode"
@@ -11,6 +12,30 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
+
+// BenchmarkActivitySessionEnrichment measures reporting work only. It does not
+// include transport startup, media I/O, database latency, or client rendering.
+func BenchmarkActivitySessionEnrichment(b *testing.B) {
+	for _, method := range []string{"direct", "remux", "direct_stream", "transcode"} {
+		b.Run(method, func(b *testing.B) {
+			input := playbackSessionRow{PlayMethod: method, SourceContainer: "mkv", SourceVideoCodec: "hevc", SourceVideoResolution: "2160p", SourceAudioCodec: "truehd"}
+			if method == "direct_stream" {
+				input.PlayMethod, input.TranscodeAudio, input.TargetAudioCodec = "remux", true, "aac"
+			}
+			if method == "transcode" {
+				input.TargetVideoCodec = "h264"
+			}
+			b.ReportAllocs()
+			for b.Loop() {
+				row := input
+				enrichPlaybackSessionRow(&row, nil)
+				if row.EffectivePlayMethod == "" {
+					b.Fatal("known route became unknown")
+				}
+			}
+		})
+	}
+}
 
 func TestSessionComponentDecisionLabelsCopiedAudioDuringHLSAsRemux(t *testing.T) {
 	videoDecision, audioDecision := sessionComponentDecision("transcode", false, "copy")
@@ -20,6 +45,28 @@ func TestSessionComponentDecisionLabelsCopiedAudioDuringHLSAsRemux(t *testing.T)
 	}
 	if audioDecision != "remux" {
 		t.Fatalf("audioDecision = %q, want remux", audioDecision)
+	}
+}
+
+func TestActivityOutputFormatIsIndependentOfSessionScope(t *testing.T) {
+	row := playbackSessionRow{PlayMethod: "remux", TranscodeAudio: true, SourceContainer: "mkv", OutputContainer: "fmp4", OutputProtocol: "hls"}
+	enrichPlaybackSessionRow(&row, nil)
+	if row.EffectivePlayMethod != "audio" || row.OutputContainer != "fmp4" || row.OutputProtocol != "hls" {
+		t.Fatal("output format changed the session classification")
+	}
+	// The frozen bridge payload keeps its alpha shape; only the native API
+	// exposes the output format.
+	body, err := json.Marshal(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "output_container") || strings.Contains(string(body), "output_protocol") {
+		t.Fatalf("bridge payload gained output fields: %s", body)
+	}
+	row.PlayMethod = "direct"
+	enrichPlaybackSessionRow(&row, nil)
+	if row.OutputContainer != "mkv" || row.OutputProtocol != "http" {
+		t.Fatal("direct play must report the original file's container")
 	}
 }
 
@@ -71,8 +118,12 @@ func TestSessionsCapabilitiesAdvertisesActivityFields(t *testing.T) {
 		t.Fatalf("decode capabilities: %v", err)
 	}
 	if !resp.EffectivePlayMethod || !resp.IsJellyfinClient || !resp.TranscodeHWAccel || !resp.ToneMapMode ||
-		!resp.ClientBuild || !resp.ClientChannel || !resp.TargetAudioChannels {
+		!resp.ClientBuild || !resp.ClientChannel || !resp.TargetAudioChannels || !resp.NodeRouting {
 		t.Fatalf("capabilities must advertise every additive field: %+v", resp)
+	}
+	// The frozen v1 rows never serialize stream_location; only v2 advertises it.
+	if strings.Contains(rr.Body.String(), "stream_location") {
+		t.Fatalf("v1 capabilities advertise a field v1 rows omit: %s", rr.Body.String())
 	}
 	want := []string{"direct", "remux", "transcode", "audio"}
 	if len(resp.EffectivePlayMethodValues) != len(want) {
@@ -85,6 +136,28 @@ func TestSessionsCapabilitiesAdvertisesActivityFields(t *testing.T) {
 	}
 	if got, wantToneMap := resp.ToneMapModeValues, []string{"hardware", "software"}; len(got) != len(wantToneMap) || got[0] != wantToneMap[0] || got[1] != wantToneMap[1] {
 		t.Fatalf("tone-map vocabulary = %v, want %v", got, wantToneMap)
+	}
+}
+
+func TestPlaybackRoutingCapabilitiesAdvertisePolicyVocabulary(t *testing.T) {
+	rr := httptest.NewRecorder()
+	(&AdminHandler{}).HandleGetPlaybackRoutingCapabilities(rr,
+		httptest.NewRequest(http.MethodGet, "/admin/playback-routing/capabilities", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d", rr.Code)
+	}
+	var response playbackRoutingCapabilitiesResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Features) != 1 || response.Features[0] != "playback_node_routing_v1" {
+		t.Fatalf("features = %v", response.Features)
+	}
+	if len(response.Workloads) != 3 || len(response.ExecutionPreferences) != 5 || len(response.EgressPreferences) != 4 {
+		t.Fatalf("capabilities = %+v", response)
+	}
+	if !slices.Contains(response.ExecutionPreferences, "prefer_transcode") {
+		t.Fatalf("execution preferences = %v, want prefer_transcode", response.ExecutionPreferences)
 	}
 }
 

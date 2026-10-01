@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { randomUUID } from "@/lib/uuid";
 import type { FormEvent } from "react";
-import type { InviteCode } from "@/api/types";
+import type { InviteCode } from "@/hooks/queries/admin/inviteCodes";
 import {
   useAdminInviteCodes,
   useCreateInviteCode,
@@ -8,13 +9,12 @@ import {
   useTopUpInviteCode,
   useDeleteInviteCode,
 } from "@/hooks/queries/admin/inviteCodes";
-import { useAdminServerSettings, useUpdateServerSetting } from "@/hooks/queries/admin/settings";
+import { useAdminServerSettings } from "@/hooks/queries/admin/settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -31,32 +31,29 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Copy, Plus, PlusCircle, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowRight, Copy, Plus, PlusCircle, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { formatDate } from "@/lib/datetime";
+import { Link } from "react-router";
 
 export default function InviteCodesTab() {
-  const { data: codes = [], isLoading } = useAdminInviteCodes();
-  const { data: settings } = useAdminServerSettings();
-  const updateSetting = useUpdateServerSetting();
+  const {
+    data: codes = [],
+    isLoading,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+    isError,
+    refetch,
+  } = useAdminInviteCodes();
+  const { data: serverSettings } = useAdminServerSettings();
+  const signupsEnabled = serverSettings?.["signup.enabled"] === "true";
   const updateCode = useUpdateInviteCode();
   const deleteCode = useDeleteInviteCode();
   const [createOpen, setCreateOpen] = useState(false);
   const [topUpCode, setTopUpCode] = useState<InviteCode | null>(null);
   const [confirmDeleteCode, setConfirmDeleteCode] = useState<InviteCode | null>(null);
-
-  const signupEnabled = settings?.["signup.enabled"] === "true";
-
-  function handleToggleSignup(enabled: boolean) {
-    updateSetting.mutate(
-      { key: "signup.enabled", value: enabled ? "true" : "false" },
-      {
-        onSuccess: () =>
-          toast.success(enabled ? "Public signups enabled" : "Public signups disabled"),
-      },
-    );
-  }
 
   function handleToggleCode(code: InviteCode) {
     updateCode.mutate({ id: code.id, body: { enabled: !code.enabled } });
@@ -124,25 +121,40 @@ export default function InviteCodesTab() {
         </Dialog>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Public Signups</CardTitle>
-          <CardDescription>
-            When enabled, users with a valid invite code can create their own accounts.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-3">
-            <Switch
-              checked={signupEnabled}
-              onCheckedChange={handleToggleSignup}
-              disabled={updateSetting.isPending}
-            />
-            <Label>{signupEnabled ? "Enabled" : "Disabled"}</Label>
+      {serverSettings !== undefined &&
+        (signupsEnabled ? (
+          <p className="text-muted-foreground text-sm">
+            Codes only work while public signups are on.{" "}
+            <Link
+              to="/admin/settings/general"
+              className="text-foreground inline-flex items-center gap-1 font-medium hover:underline"
+            >
+              Public signups setting
+              <ArrowRight className="h-3 w-3" aria-hidden="true" />
+            </Link>
+          </p>
+        ) : (
+          <div className="flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+            <p className="text-[13px] leading-relaxed">
+              <span className="font-medium text-amber-500">Public signups are off</span> — these
+              codes won't work until you enable them.{" "}
+              <Link
+                to="/admin/settings/general"
+                className="text-foreground inline-flex items-center gap-1 font-medium hover:underline"
+              >
+                Public signups setting
+                <ArrowRight className="h-3 w-3" aria-hidden="true" />
+              </Link>
+            </p>
           </div>
-        </CardContent>
-      </Card>
+        ))}
 
+      {isError && (
+        <div role="alert">
+          Unable to load invite codes. <Button onClick={() => void refetch()}>Retry</Button>
+        </div>
+      )}
       <Table>
         <TableHeader>
           <TableRow>
@@ -224,12 +236,17 @@ export default function InviteCodesTab() {
           ))}
         </TableBody>
       </Table>
+      {hasNextPage && (
+        <Button disabled={isFetchingNextPage} onClick={() => void fetchNextPage()}>
+          Load more
+        </Button>
+      )}
     </div>
   );
 }
 
 function CreateInviteCodeForm({ onClose }: { onClose: () => void }) {
-  const [code, setCode] = useState("");
+  const [code, setCode] = useState(() => randomUUID().replace(/-/g, "").slice(0, 16).toUpperCase());
   const [label, setLabel] = useState("");
   const [maxUses, setMaxUses] = useState("10");
   const createMutation = useCreateInviteCode();
@@ -241,18 +258,16 @@ function CreateInviteCodeForm({ onClose }: { onClose: () => void }) {
       toast.error("Max uses must be a positive number");
       return;
     }
-    createMutation.mutate(
-      { code: code || undefined, label, max_uses: max },
-      { onSuccess: onClose },
-    );
+    createMutation.mutate({ code, label, max_uses: max }, { onSuccess: onClose });
   }
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="space-y-2">
-        <Label>Code (optional, auto-generated if empty)</Label>
+        <Label>Code</Label>
         <Input
           value={code}
+          required
           onChange={(e) => setCode(e.target.value.toUpperCase())}
           placeholder="e.g. BETA2026"
         />

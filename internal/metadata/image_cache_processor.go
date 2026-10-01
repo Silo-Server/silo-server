@@ -34,11 +34,21 @@ const (
 	imageCacheDiscoveryBatchSize = 1000
 	// Waiting for a background worker to release a job polls with backoff and
 	// gives up after immediateImageCacheIdleTimeout without progress. The
-	// worker's own lease runs for imageCacheLeaseDuration, and its pod can die
+	// worker's own lease runs for ImageCacheLeaseDuration, and its pod can die
 	// while holding it, so an interactive refresh must not wait that long.
 	immediateImageCacheMinPoll     = 100 * time.Millisecond
 	immediateImageCacheMaxPoll     = 2 * time.Second
 	immediateImageCacheIdleTimeout = 30 * time.Second
+
+	// ImageCacheJobTimeout bounds one job end to end: source check, download
+	// (which also has its own 30-second cap in imagecache), variant encode, and
+	// uploads. Only the download had a deadline before; a hung upload or encode
+	// could hold a job past its claim lease, letting another worker reclaim and
+	// duplicate it. Two minutes is generous for the slowest realistic job, and
+	// worker/claim-page sizing (internal/taskmanager/tasks) relies on it to
+	// prove a claimed page always drains inside ImageCacheLeaseDuration. A job
+	// that hits it is marked failed and retried on the normal backoff.
+	ImageCacheJobTimeout = 2 * time.Minute
 )
 
 // ErrTargetArtworkPending reports that some of a refreshed target's artwork was
@@ -101,8 +111,7 @@ type LibraryRootResolver interface {
 // ImagePrefixDeleter deletes cached image objects under a key prefix; used to
 // sweep the previous hashed local/ prefix after a successful re-cache.
 type ImagePrefixDeleter interface {
-	DeletePrefix(ctx context.Context, bucket, prefix string) (int, error)
-	Bucket() string
+	DeletePrefix(context.Context, string) (int, error)
 }
 
 type SeasonArtworkUpdater interface {
@@ -434,7 +443,9 @@ loop:
 		go func(job *models.MetadataImageCacheJob) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			result := p.processOne(ctx, job)
+			jobCtx, cancelJob := context.WithTimeout(ctx, ImageCacheJobTimeout)
+			result := p.processOne(jobCtx, job)
+			cancelJob()
 			mu.Lock()
 			switch result.outcome {
 			case "succeeded":
@@ -963,7 +974,7 @@ func (p *ImageCacheProcessor) deleteStaleLocalPrefix(ctx context.Context, previo
 	if strings.HasPrefix(cachedPath, prefix) {
 		return
 	}
-	if _, err := p.prefixDeleter.DeletePrefix(ctx, p.prefixDeleter.Bucket(), prefix); err != nil {
+	if _, err := p.prefixDeleter.DeletePrefix(ctx, prefix); err != nil {
 		p.logger.WarnContext(ctx, "metadata image cache: failed to delete stale local image prefix", "prefix", prefix, "error", err)
 	}
 }

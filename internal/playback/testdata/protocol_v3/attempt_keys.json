@@ -1,10 +1,10 @@
 [
   {
     "name": "hls_burn_in_sorted_transformations_and_pcm_mutations",
-    "server_plan_attempt_key": "v3:27ee8bdc3ff5b1d7",
-    "replan_echo": "v3:27ee8bdc3ff5b1d7",
+    "server_plan_attempt_key": "v3:a1531ef7c1bd7f75",
+    "replan_echo": "v3:a1531ef7c1bd7f75",
     "attempted_plan_keys": [
-      "v3:27ee8bdc3ff5b1d7"
+      "v3:a1531ef7c1bd7f75"
     ],
     "expected_server_action": "reject_already_attempted_plan"
   },

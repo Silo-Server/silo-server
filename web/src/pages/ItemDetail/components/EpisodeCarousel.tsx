@@ -1,5 +1,4 @@
 import { useEffect, useRef } from "react";
-import { Link } from "react-router";
 import { Play, ChevronLeft, ChevronRight } from "lucide-react";
 import type { EpisodeListItem } from "@/api/types";
 import { WatchedCheckIndicator } from "@/components/CardWatchedBadge";
@@ -7,9 +6,13 @@ import { toEpisodeUserState } from "@/components/episodeUserState";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { cn } from "@/lib/utils";
 import MediaItemMenu from "@/components/MediaItemMenu";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
 import type { EpisodeNavigationState } from "../itemDetailLayout";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
 import { usePrefetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
+import { useDwellPrefetch } from "@/hooks/useDwellPrefetch";
+import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
+import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 
 interface EpisodeCarouselProps {
   episodes: EpisodeListItem[];
@@ -26,6 +29,7 @@ export default function EpisodeCarousel({
     (episode) => episode.episode_number === currentEpisodeNumber,
   );
   const prefetchEpisodeDetail = usePrefetchCatalogItemDetail();
+  const { quickActionMode } = useOverlayPrefs();
   const { emblaApi, emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } =
     useCarouselEmbla({
       options: {
@@ -61,6 +65,7 @@ export default function EpisodeCarousel({
                 ep={ep}
                 isCurrent={ep.episode_number === currentEpisodeNumber}
                 episodeLinkState={episodeLinkState}
+                quickActionMode={quickActionMode}
                 onPrefetch={() => prefetchEpisodeDetail(ep.content_id)}
               />
             ))}
@@ -86,14 +91,17 @@ function EpisodeCarouselCard({
   ep,
   isCurrent,
   episodeLinkState,
+  quickActionMode,
   onPrefetch,
 }: {
   ep: EpisodeListItem;
   isCurrent: boolean;
   episodeLinkState?: EpisodeNavigationState;
+  quickActionMode: CardQuickActionMode;
   onPrefetch: () => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
+  const prefetchHandlers = useDwellPrefetch(onPrefetch);
   const thumbhashUrl = ep.still_thumbhash ? decodeThumbhash(ep.still_thumbhash) : "";
   const episodeTitle = ep.title || `Episode ${ep.episode_number}`;
   const progress =
@@ -114,12 +122,10 @@ function EpisodeCarouselCard({
       <div
         ref={cardRef}
         className="media-card-longpress group/card w-[240px]"
-        onMouseEnter={onPrefetch}
-        onFocus={onPrefetch}
-        onTouchStart={onPrefetch}
+        {...prefetchHandlers}
       >
         <div className="relative">
-          <Link
+          <ViewTransitionLink
             to={`/item/${ep.content_id}`}
             state={episodeLinkState}
             aria-current={isCurrent ? "page" : undefined}
@@ -144,6 +150,7 @@ function EpisodeCarouselCard({
                   alt={episodeTitle}
                   className="h-full w-full object-cover"
                   loading="lazy"
+                  decoding="async"
                 />
               ) : (
                 <div className="bg-accent/30 flex h-full w-full items-center justify-center">
@@ -168,7 +175,7 @@ function EpisodeCarouselCard({
                 </div>
               )}
             </div>
-          </Link>
+          </ViewTransitionLink>
           <MediaItemMenu
             contentId={ep.content_id}
             mediaType="episode"
@@ -177,11 +184,12 @@ function EpisodeCarouselCard({
             showCollectionActions={false}
             showWatchedShortcut
             hasPartialProgress={progress != null}
+            quickActionMode={quickActionMode}
             longPressRef={cardRef}
             itemTitle={episodeTitle}
           />
         </div>
-        <Link
+        <ViewTransitionLink
           to={`/item/${ep.content_id}`}
           state={episodeLinkState}
           aria-current={isCurrent ? "page" : undefined}
@@ -198,7 +206,7 @@ function EpisodeCarouselCard({
             {episodeTitle}
           </p>
           {ep.runtime > 0 && <p className="text-muted-foreground/70 text-xs">{ep.runtime}m</p>}
-        </Link>
+        </ViewTransitionLink>
       </div>
     </li>
   );

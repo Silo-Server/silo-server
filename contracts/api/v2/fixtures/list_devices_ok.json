@@ -1,0 +1,27 @@
+{
+  "items": [
+    {
+      "device_id": "d-1",
+      "device_name": "",
+      "device_platform": "",
+      "last_seen_at": "2026-01-02T03:04:05.123Z",
+      "profile_id": "p-owner",
+      "profile_name": "Viewer",
+      "is_current_device": false,
+      "changed_count": 1
+    },
+    {
+      "device_id": "d-2",
+      "device_name": "",
+      "device_platform": "",
+      "last_seen_at": "2026-01-02T03:04:05.123Z",
+      "profile_id": "p-owner",
+      "profile_name": "",
+      "is_current_device": false,
+      "changed_count": 0
+    }
+  ],
+  "page": {
+    "has_more": false
+  }
+}

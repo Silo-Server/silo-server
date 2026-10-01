@@ -1,8 +1,9 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  api: vi.fn(),
+  v2: vi.fn(),
   useQueries: vi.fn(),
   useQuery: vi.fn(),
 }));
@@ -13,8 +14,8 @@ vi.mock("@tanstack/react-query", () => ({
   useQuery: (...args: unknown[]) => mocks.useQuery(...args),
 }));
 
-vi.mock("@/api/client", () => ({
-  api: (...args: unknown[]) => mocks.api(...args),
+vi.mock("@/api/v2/request", () => ({
+  v2: (...args: unknown[]) => mocks.v2(...args),
 }));
 
 import type { CatalogResponse } from "@/api/types";
@@ -45,9 +46,73 @@ function makePage(offset: number, limit = 60): CatalogResponse {
 
 describe("useCatalogWindow", () => {
   beforeEach(() => {
-    mocks.api.mockReset();
+    mocks.v2.mockReset();
     mocks.useQueries.mockReset();
     mocks.useQuery.mockReset();
+  });
+
+  it("requests only the visible distant window and one buffer on each side", () => {
+    const state = createCatalogSearchState("favorites");
+    mocks.useQuery.mockReturnValue({
+      data: { ...makePage(0), total: 100000, snapshot: "opaque-window" },
+      isLoading: false,
+    });
+    mocks.useQueries.mockImplementation(({ queries }) => queries.map(() => ({ isLoading: true })));
+
+    renderHook(() => useCatalogWindow(state, { visibleRange: [60000, 60059] }));
+
+    const queries = mocks.useQueries.mock.calls[0]?.[0].queries;
+    expect(
+      queries.map(
+        (query: { queryKey: [string, string, { offset: number }] }) => query.queryKey[2].offset,
+      ),
+    ).toEqual([59940, 60000, 60060]);
+    expect(
+      queries.every(
+        (query: { queryKey: [string, string, { snapshot: string }] }) =>
+          query.queryKey[2].snapshot === "opaque-window",
+      ),
+    ).toBe(true);
+  });
+
+  it("does not overscan beyond the exact result count", () => {
+    mocks.useQuery.mockReturnValue({
+      data: { ...makePage(0), total: 125, total_exact: true, snapshot: "opaque-window" },
+      isLoading: false,
+    });
+    mocks.useQueries.mockImplementation(({ queries }) => queries.map(() => ({ isLoading: true })));
+    renderHook(() =>
+      useCatalogWindow(createCatalogSearchState("favorites"), { visibleRange: [120, 124] }),
+    );
+    const queries = mocks.useQueries.mock.calls[0]?.[0].queries;
+    expect(
+      queries.map(
+        (query: { queryKey: [string, string, { offset: number }] }) => query.queryKey[2].offset,
+      ),
+    ).toEqual([60, 120]);
+  });
+
+  it("separates filter edits and server-resolved sort from cached explicit-sort windows", () => {
+    const state = createCatalogSearchState("favorites");
+    mocks.useQuery.mockReturnValue({ data: undefined, isLoading: true });
+    mocks.useQueries.mockReturnValue([]);
+    const { rerender } = renderHook(({ current }) => useCatalogWindow(current), {
+      initialProps: { current: state },
+    });
+    const initialKey = mocks.useQuery.mock.calls.at(-1)?.[0].queryKey;
+    rerender({ current: { ...state, sort_from_server: true } });
+    const serverSortKey = mocks.useQuery.mock.calls.at(-1)?.[0].queryKey;
+    expect(serverSortKey).not.toEqual(initialKey);
+    rerender({
+      current: {
+        ...state,
+        query_definition: {
+          ...state.query_definition,
+          groups: [{ match: "all", rules: [{ field: "year", op: "gte", value: 2000 }] }],
+        },
+      },
+    });
+    expect(mocks.useQuery.mock.calls.at(-1)?.[0].queryKey).not.toEqual(initialKey);
   });
 
   it("does not assign stale placeholder data to newly visible page indices", () => {
@@ -105,6 +170,119 @@ describe("useCatalogWindow", () => {
 
     expect(markup).toContain('data-page6="missing"');
     expect(markup).toContain('data-page7="missing"');
+  });
+
+  it("keeps the previous search grid mounted while page 0 is replacing", () => {
+    const state = createCatalogSearchState("query", { q: "heater" });
+    const limit = 60;
+    let page0Query:
+      | {
+          placeholderData?: (previous: CatalogResponse) => CatalogResponse;
+          gcTime?: number;
+          retry?: boolean;
+        }
+      | undefined;
+    let pageQueries: Array<{ enabled?: boolean; gcTime?: number; retry?: boolean }> | undefined;
+
+    mocks.useQuery.mockImplementation((query) => {
+      page0Query = query;
+      return {
+        data: makePage(0, limit),
+        isLoading: true,
+        isPlaceholderData: true,
+      };
+    });
+    mocks.useQueries.mockImplementation(({ queries }) => {
+      pageQueries = queries;
+      return queries.map(() => ({ data: undefined, isLoading: false }));
+    });
+
+    function Harness() {
+      useCatalogWindow(state, { limit, visibleRange: [60, 119] });
+      return null;
+    }
+
+    renderToStaticMarkup(<Harness />);
+
+    const previous = makePage(0, limit);
+    expect(page0Query?.placeholderData?.(previous)).toBe(previous);
+    expect(page0Query).toMatchObject({ gcTime: 30_000, retry: false });
+    expect(pageQueries?.every((query) => query.enabled === false)).toBe(true);
+    expect(pageQueries?.every((query) => query.gcTime === 30_000 && query.retry === false)).toBe(
+      true,
+    );
+  });
+
+  it("surfaces and retries a failed visible follow-on page", async () => {
+    const state = createCatalogSearchState("query", { q: "star" });
+    const limit = 60;
+    const pageError = new Error("search_timeout");
+    const page0Refetch = vi.fn().mockResolvedValue(undefined);
+    const failedPageRefetch = vi.fn().mockResolvedValue(undefined);
+
+    mocks.useQuery.mockReturnValue({
+      data: { ...makePage(0, limit), snapshot: "2026-01-01T00:00:00Z" },
+      isLoading: false,
+      isError: false,
+      isPlaceholderData: false,
+      error: null,
+      refetch: page0Refetch,
+    });
+    mocks.useQueries.mockReturnValue([
+      {
+        data: undefined,
+        isLoading: false,
+        isError: true,
+        error: pageError,
+        refetch: failedPageRefetch,
+      },
+    ]);
+
+    const { result } = renderHook(() =>
+      useCatalogWindow(state, { limit, visibleRange: [60, 119] }),
+    );
+    expect(result.current.isError).toBe(true);
+    expect(result.current.error).toBe(pageError);
+
+    await result.current.refetch();
+    expect(page0Refetch).toHaveBeenCalledOnce();
+    expect(failedPageRefetch).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a successful visible page when only its off-screen buffer fails", async () => {
+    const state = createCatalogSearchState("favorites");
+    const limit = 60;
+    const page0Refetch = vi.fn().mockResolvedValue(undefined);
+    const failedBufferRefetch = vi.fn().mockResolvedValue(undefined);
+
+    mocks.useQuery.mockReturnValue({
+      data: { ...makePage(0, limit), snapshot: "2026-01-01T00:00:00Z" },
+      isLoading: false,
+      isError: false,
+      isPlaceholderData: false,
+      error: null,
+      refetch: page0Refetch,
+    });
+    mocks.useQueries.mockReturnValue([
+      {
+        data: undefined,
+        isLoading: false,
+        isError: true,
+        error: new Error("buffer failed"),
+        refetch: failedBufferRefetch,
+      },
+    ]);
+
+    const { result } = renderHook(() =>
+      useCatalogWindow(state, { limit, visibleRange: [0, limit - 1] }),
+    );
+    expect(result.current.data.pages.get(0)).toHaveLength(limit);
+    expect(result.current.isError).toBe(false);
+    expect(result.current.error).toBeUndefined();
+
+    await result.current.refetch();
+    expect(page0Refetch).toHaveBeenCalledOnce();
+    expect(failedBufferRefetch).not.toHaveBeenCalled();
   });
 
   it("estimates window size from has_more when total is omitted", () => {
@@ -256,7 +434,9 @@ describe("useCatalogWindow", () => {
       pageQueries = queries;
       return [{ data: page2Data, isLoading: false }];
     });
-    mocks.api.mockResolvedValueOnce(page0Data).mockResolvedValueOnce(page2Data);
+    mocks.v2
+      .mockResolvedValueOnce({ ...page0Data, window_cursor: page0Data.snapshot })
+      .mockResolvedValueOnce({ ...page2Data, window_cursor: page2Data.snapshot });
 
     renderToStaticMarkup(<Harness />);
 
@@ -275,11 +455,14 @@ describe("useCatalogWindow", () => {
     await page0Query?.queryFn({ signal });
     await pageQueries?.[0]?.queryFn({ signal });
 
-    const page0Url = mocks.api.mock.calls[0]?.[0];
-    const page2Url = mocks.api.mock.calls[1]?.[0];
-    expect(page0Url).toContain("/catalog?");
-    expect(page0Url).not.toContain("include_total=false");
-    expect(page2Url).toContain("include_total=false");
-    expect(page2Url).toContain("snapshot=2026-01-01T00%3A00%3A00Z");
+    expect(mocks.v2.mock.calls[0]?.[0]).toBe("POST /api/v2/catalog/query");
+    expect(mocks.v2.mock.calls[0]?.[1]).toMatchObject({
+      body: { limit, skip_total: undefined, seek: undefined },
+      signal,
+    });
+    expect(mocks.v2.mock.calls[1]?.[1]).toMatchObject({
+      body: { limit, skip_total: true, seek: 120, cursor: page0Data.snapshot },
+      signal,
+    });
   });
 });

@@ -1,3 +1,5 @@
+import { setAccessToken, captureProfileRequestContext } from "@/api/client";
+import { readAdminSettings } from "@/api/v2/adminSettingsSnapshot";
 import { createElement, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
@@ -5,24 +7,44 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   api: vi.fn(),
+  v2: vi.fn(),
   setValue: vi.fn(),
+  clearValue: vi.fn(),
+  effective: undefined as Record<string, { value: unknown }> | undefined,
+  profileId: null as string | null,
 }));
 
-vi.mock("@/api/client", () => ({
-  api: mocks.api,
-}));
+vi.mock("@/api/client", async () => {
+  const actual = await vi.importActual<typeof import("@/api/client")>("@/api/client");
+  return { ...actual, api: mocks.api };
+});
 
-vi.mock("@/hooks/queries/settingValues", () => ({
-  useEffectiveSettings: () => ({ data: undefined, isLoading: false }),
+vi.mock("@/api/v2/request", async () => {
+  const actual = await vi.importActual<typeof import("@/api/v2/request")>("@/api/v2/request");
+  return { ...actual, v2: mocks.v2 };
+});
+
+// Keep the real query-key builder and error taxonomy so the hook's optimistic
+// cache writes are exercised against the actual key shape; only the two hooks
+// that reach the network are replaced.
+vi.mock("@/hooks/queries/settingValues", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/settingValues")>()),
+  useEffectiveSettings: () => ({ data: mocks.effective, isLoading: false }),
   useSetSettingValue: () => ({ mutate: mocks.setValue }),
+  useClearSettingValue: () => ({ mutateAsync: mocks.clearValue, isPending: false }),
 }));
 
 vi.mock("@/utils/storage", () => ({
   storage: {
     KEYS: { PROFILE_ID: "profile_id" },
-    get: () => null,
+    get: () => mocks.profileId,
   },
 }));
+
+import { v2Problem } from "@/api/v2/problems.test-support";
+import { SETTING_KEYS } from "@/lib/settingsContract";
+import { buildDefaultPrefs, type CardOverlayPrefs } from "@/lib/overlays";
+import { settingsKeys } from "@/hooks/queries/keys";
 
 import { useOverlayPrefs } from "./useOverlayPrefs";
 import { useUpdateServerSettings } from "./queries/admin/settings";
@@ -36,23 +58,302 @@ function createWrapper() {
   };
 }
 
+function effectiveOverlayValue(value: unknown) {
+  return {
+    data: {
+      [SETTING_KEYS.UI_CARD_OVERLAYS]: {
+        key: SETTING_KEYS.UI_CARD_OVERLAYS,
+        value,
+        source: value == null ? "default" : "profile",
+      },
+    } as unknown,
+    isLoading: false,
+  };
+}
+
 describe("useOverlayPrefs", () => {
   beforeEach(() => {
     mocks.api.mockReset();
+    mocks.v2.mockReset();
     mocks.setValue.mockReset();
+    mocks.clearValue.mockReset();
+    mocks.effective = undefined;
+    mocks.profileId = null;
   });
 
   afterEach(cleanup);
 
   it("reads the server-wide overlay configuration without bypassing the shared query cache", async () => {
-    mocks.api.mockResolvedValue({ enabled: true });
+    mocks.v2.mockResolvedValue({ enabled: true });
     const { result } = renderHook(() => useOverlayPrefs(), { wrapper: createWrapper() });
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    expect(mocks.api).toHaveBeenCalledWith("/settings/overlay-config");
-    expect(result.current.enabled).toBe(true);
+    expect(mocks.v2).toHaveBeenCalledWith("GET /api/v2/settings/overlay-config");
+    expect(result.current.overlaysEnabled).toBe(true);
+    expect(result.current.prefs).not.toBeNull();
+    expect(result.current).not.toHaveProperty("enabled");
+    expect(result.current.quickActionsEnabled).toBe(false);
+    expect(result.current).not.toHaveProperty("quickActionsGloballyEnabled");
+    expect(result.current.quickActionPreference).toBe("both");
+    expect(result.current.quickActionMode).toBe("none");
     expect(result.current).not.toHaveProperty("watchedIndicatorStyle");
+  });
+
+  it("uses disabled and mode values from the admin defaults for an unset profile", async () => {
+    mocks.v2.mockResolvedValue({
+      enabled: true,
+      quick_actions_enabled: false,
+      quick_actions_default: "favorites",
+    });
+    const { result } = renderHook(() => useOverlayPrefs(), { wrapper: createWrapper() });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.quickActionsEnabled).toBe(false);
+    expect(result.current.quickActionPreference).toBe("favorites");
+    expect(result.current.quickActionMode).toBe("none");
+  });
+
+  it("inherits an enabled admin default for a profile that has not chosen", async () => {
+    mocks.profileId = "profile-1";
+    mocks.effective = {};
+    mocks.v2.mockResolvedValue({
+      enabled: true,
+      quick_actions_enabled: true,
+      quick_actions_default: "favorites",
+    });
+    const { result } = renderHook(() => useOverlayPrefs(), { wrapper: createWrapper() });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.quickActionsEnabled).toBe(true);
+    expect(result.current.quickActionMode).toBe("favorites");
+  });
+
+  it("lets a profile opt in to quick actions while the admin default is off", async () => {
+    mocks.profileId = "profile-1";
+    mocks.effective = {
+      "ui.card_quick_actions": { value: "watched" },
+      "ui.card_quick_actions_enabled": { value: true },
+    };
+    mocks.v2.mockResolvedValue({
+      enabled: true,
+      quick_actions_enabled: false,
+      quick_actions_default: "favorites",
+    });
+    const { result } = renderHook(() => useOverlayPrefs(), { wrapper: createWrapper() });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.quickActionsEnabled).toBe(true);
+    expect(result.current.quickActionPreference).toBe("watched");
+    expect(result.current.quickActionMode).toBe("watched");
+
+    act(() => result.current.setQuickActionsEnabled(false));
+    act(() => result.current.setQuickActionMode("both"));
+    expect(mocks.setValue).toHaveBeenCalledWith(
+      {
+        key: "ui.card_quick_actions_enabled",
+        value: false,
+        identity: { scope: "profile" },
+      },
+      expect.objectContaining({ onError: expect.any(Function) }),
+    );
+    expect(mocks.setValue).toHaveBeenCalledWith(
+      {
+        key: "ui.card_quick_actions",
+        value: "both",
+        identity: { scope: "profile" },
+      },
+      expect.objectContaining({ onError: expect.any(Function) }),
+    );
+  });
+
+  it("lets a profile opt out of quick actions while the admin default is on", async () => {
+    mocks.profileId = "profile-1";
+    mocks.effective = {
+      "ui.card_quick_actions": { value: "watched" },
+      "ui.card_quick_actions_enabled": { value: false },
+    };
+    mocks.v2.mockResolvedValue({
+      enabled: true,
+      quick_actions_enabled: true,
+      quick_actions_default: "favorites",
+    });
+    const { result } = renderHook(() => useOverlayPrefs(), { wrapper: createWrapper() });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.quickActionsEnabled).toBe(false);
+    expect(result.current.quickActionPreference).toBe("watched");
+    expect(result.current.quickActionMode).toBe("none");
+
+    act(() => result.current.setQuickActionsEnabled(true));
+    act(() => result.current.setQuickActionMode("both"));
+    expect(mocks.setValue).toHaveBeenCalledWith(
+      {
+        key: "ui.card_quick_actions_enabled",
+        value: true,
+        identity: { scope: "profile" },
+      },
+      expect.objectContaining({ onError: expect.any(Function) }),
+    );
+    expect(mocks.setValue).toHaveBeenCalledWith(
+      {
+        key: "ui.card_quick_actions",
+        value: "both",
+        identity: { scope: "profile" },
+      },
+      expect.objectContaining({ onError: expect.any(Function) }),
+    );
+  });
+
+  it("inherits a disabled overlay default for a profile that has not chosen", async () => {
+    mocks.profileId = "profile-1";
+    mocks.effective = {};
+    mocks.v2.mockResolvedValue({ enabled: false });
+    const { result } = renderHook(() => useOverlayPrefs(), { wrapper: createWrapper() });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.overlaysEnabled).toBe(false);
+    expect(result.current.prefs).toBeNull();
+  });
+
+  it("lets a profile opt in to overlays while the server default is off", async () => {
+    mocks.profileId = "profile-1";
+    mocks.effective = { "ui.card_overlays_enabled": { value: true } };
+    mocks.v2.mockResolvedValue({ enabled: false });
+    const { result } = renderHook(() => useOverlayPrefs(), { wrapper: createWrapper() });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.overlaysEnabled).toBe(true);
+    expect(result.current.prefs).not.toBeNull();
+
+    act(() => result.current.setOverlaysEnabled(false));
+    expect(mocks.setValue).toHaveBeenCalledWith(
+      {
+        key: "ui.card_overlays_enabled",
+        value: false,
+        identity: { scope: "profile" },
+      },
+      expect.objectContaining({ onError: expect.any(Function) }),
+    );
+  });
+
+  it("lets a profile opt out of overlays while the server default is on", async () => {
+    mocks.profileId = "profile-1";
+    mocks.effective = { "ui.card_overlays_enabled": { value: false } };
+    mocks.v2.mockResolvedValue({ enabled: true });
+    const { result } = renderHook(() => useOverlayPrefs(), { wrapper: createWrapper() });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.overlaysEnabled).toBe(false);
+    expect(result.current.prefs).toBeNull();
+
+    act(() => result.current.setOverlaysEnabled(false));
+    expect(mocks.setValue).not.toHaveBeenCalled();
+
+    act(() => result.current.setOverlaysEnabled(true));
+    expect(mocks.setValue).toHaveBeenCalledWith(
+      {
+        key: "ui.card_overlays_enabled",
+        value: true,
+        identity: { scope: "profile" },
+      },
+      expect.objectContaining({ onError: expect.any(Function) }),
+    );
+  });
+
+  it("writes an overlay opt-in for a profile that has expressed no preference", async () => {
+    mocks.profileId = "profile-1";
+    mocks.effective = {};
+    mocks.v2.mockResolvedValue({ enabled: false });
+    const { result } = renderHook(() => useOverlayPrefs(), { wrapper: createWrapper() });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    act(() => result.current.setOverlaysEnabled(true));
+    expect(mocks.setValue).toHaveBeenCalledWith(
+      {
+        key: "ui.card_overlays_enabled",
+        value: true,
+        identity: { scope: "profile" },
+      },
+      expect.objectContaining({ onError: expect.any(Function) }),
+    );
+  });
+
+  // ui.card_overlays validation is all-or-nothing, so one overlay id the
+  // server's schema predates would fail every badge save on that server. With
+  // the revision unknown, an id the server already stored is still accepted.
+  it.each(
+    (
+      [
+        ["advisory_age", 13],
+        ["request_status", 15],
+      ] as const
+    ).flatMap(([id, since]) => [
+      {
+        id,
+        name: `a revision-${since - 1} server`,
+        revision: since - 1,
+        stored: false,
+        kept: false,
+      },
+      { id, name: `a revision-${since} server`, revision: since, stored: false, kept: true },
+      { id, name: "an unknown revision", revision: undefined, stored: false, kept: false },
+      {
+        id,
+        name: "an unknown revision with it stored",
+        revision: undefined,
+        stored: true,
+        kept: true,
+      },
+    ]),
+  )("writes $id only where it is accepted: $name", async (c) => {
+    mocks.profileId = "profile-1";
+    mocks.effective = c.stored
+      ? (effectiveOverlayValue({
+          version: 2,
+          preset: "classic",
+          order: [],
+          items: { [c.id]: { enabled: true, position: "bottom-right" } },
+        }).data as Record<string, { value: unknown }>)
+      : {};
+    mocks.v2.mockImplementation(async (operation: string) => {
+      if (operation === "GET /api/v2/settings/contract/capabilities") {
+        if (c.revision === undefined) throw new Error("capabilities unavailable");
+        return { api_version: 1, manifest_revision: c.revision, supports_batched_effective: true };
+      }
+      return { enabled: true };
+    });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client: queryClient }, children);
+    const { result } = renderHook(() => useOverlayPrefs(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+      expect(queryClient.getQueryState([...settingsKeys.all, "capabilities"])?.status).not.toBe(
+        "pending",
+      );
+    });
+    expect(result.current.isOverlaySupported(c.id)).toBe(c.kept);
+
+    const next = buildDefaultPrefs();
+    next.preset = "pill";
+    next.order = [c.id, "year"];
+    next.items[c.id] = { enabled: true, position: "bottom-right" };
+    act(() => result.current.setPrefs(next));
+
+    const written = mocks.setValue.mock.calls[0]![0].value as CardOverlayPrefs;
+    expect(c.id in written.items).toBe(c.kept);
+    expect(written.order).toEqual(c.kept ? [c.id, "year"] : ["year"]);
+    expect(written.items.year).toEqual(next.items.year);
   });
 
   it("refreshes the shared overlay configuration immediately after an admin save", async () => {
@@ -60,17 +361,118 @@ describe("useOverlayPrefs", () => {
       defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
     });
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
-    mocks.api.mockResolvedValue({});
+    mocks.profileId = "admin-profile";
+    setAccessToken("synthetic-admin");
+    const values = { "defaults.card_quick_actions": "both" };
+    mocks.v2.mockImplementation(async (operation, options) => {
+      options?.onResponse?.(new Response(null, { headers: { ETag: '"settings-1"' } }));
+      if (operation === "GET /api/v2/admin/settings/effective") return values;
+      if (operation === "PUT /api/v2/admin/settings")
+        return { updated: ["defaults.card_quick_actions"], restart_required: false };
+      throw new Error(`Unexpected operation: ${operation}`);
+    });
+    const displayed = await readAdminSettings(captureProfileRequestContext()!);
     const wrapper = ({ children }: { children: ReactNode }) =>
       createElement(QueryClientProvider, { client: queryClient }, children);
-    const { result } = renderHook(() => useUpdateServerSettings(), { wrapper });
+    const { result } = renderHook(() => useUpdateServerSettings(displayed), { wrapper });
 
     await act(async () => {
-      await result.current.mutateAsync({ "defaults.card_overlays": "{}" });
+      await result.current.mutateAsync({ "defaults.card_quick_actions": "favorites" });
     });
 
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["settings", "overlay-config"],
+    });
+  });
+
+  it("prefers a stored profile document over the admin defaults", async () => {
+    mocks.profileId = "profile-1";
+    mocks.v2.mockResolvedValue({
+      enabled: true,
+      defaults: JSON.stringify({ version: 2, preset: "vibrant", order: [], items: {} }),
+    });
+    mocks.effective = effectiveOverlayValue({
+      version: 2,
+      preset: "minimal",
+      order: [],
+      items: {},
+    }).data as Record<string, { value: unknown }>;
+
+    const { result } = renderHook(() => useOverlayPrefs(), { wrapper: createWrapper() });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.hasOverride).toBe(true);
+    expect(result.current.prefs?.preset).toBe("minimal");
+  });
+
+  // A snapshot of today's server values would pin the profile to them; only
+  // deleting the stored document keeps it tracking later admin changes.
+  it("deletes the profile document so the profile follows the server defaults again", async () => {
+    mocks.profileId = "profile-1";
+    mocks.v2.mockResolvedValue({
+      enabled: true,
+      defaults: JSON.stringify({ version: 2, preset: "vibrant", order: [], items: {} }),
+    });
+    mocks.effective = effectiveOverlayValue({
+      version: 2,
+      preset: "minimal",
+      order: [],
+      items: {},
+    }).data as Record<string, { value: unknown }>;
+    mocks.clearValue.mockResolvedValue(undefined);
+
+    const { result, rerender } = renderHook(() => useOverlayPrefs(), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.resetPrefs();
+    });
+
+    expect(mocks.clearValue).toHaveBeenCalledWith({
+      key: SETTING_KEYS.UI_CARD_OVERLAYS,
+      identity: { scope: "profile" },
+    });
+
+    // The effective read now resolves to the contract default (null), which is
+    // exactly what lets the admin document apply.
+    mocks.effective = effectiveOverlayValue(null).data as Record<string, { value: unknown }>;
+    rerender();
+
+    expect(result.current.hasOverride).toBe(false);
+    expect(result.current.prefs?.preset).toBe("vibrant");
+  });
+
+  it("treats a 404 from the canonical delete as already inheriting", async () => {
+    mocks.profileId = "profile-1";
+    mocks.v2.mockResolvedValue({ enabled: true });
+    mocks.effective = effectiveOverlayValue(null).data as Record<string, { value: unknown }>;
+    mocks.clearValue.mockRejectedValue(v2Problem(404, "not_found", "no stored value"));
+
+    const { result } = renderHook(() => useOverlayPrefs(), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await expect(result.current.resetPrefs()).resolves.toBeUndefined();
+    });
+  });
+
+  it("surfaces a failed delete instead of pretending the reset landed", async () => {
+    mocks.profileId = "profile-1";
+    mocks.v2.mockResolvedValue({ enabled: true });
+    mocks.effective = effectiveOverlayValue({
+      version: 2,
+      preset: "minimal",
+      order: [],
+      items: {},
+    }).data as Record<string, { value: unknown }>;
+    mocks.clearValue.mockRejectedValue(v2Problem(500, "server_error", "boom"));
+
+    const { result } = renderHook(() => useOverlayPrefs(), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await expect(result.current.resetPrefs()).rejects.toThrow("boom");
     });
   });
 });

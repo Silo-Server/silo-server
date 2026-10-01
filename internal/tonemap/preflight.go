@@ -239,7 +239,7 @@ func sourcePreflightKey(ctx context.Context, request SourcePreflightRequest, run
 // ffmpegVersionForPreflight coalesces version lookups and invalidates cached
 // output when the resolved binary's identity changes.
 func ffmpegVersionForPreflight(ctx context.Context, ffmpegPath string, run CommandRunner) ([]byte, error) {
-	resolved, cacheKey, cacheable := ffmpegBinaryCacheKey(ffmpegPath)
+	resolved, cacheKey, cacheable := FFmpegBinaryIdentity(ffmpegPath)
 	if !cacheable {
 		return runBounded(ctx, run, ffmpegPath, "-version")
 	}
@@ -286,9 +286,13 @@ func ffmpegVersionForPreflight(ctx context.Context, ffmpegPath string, run Comma
 	}
 }
 
-// ffmpegBinaryCacheKey resolves a regular FFmpeg binary and derives an identity
-// that changes when the executable is replaced in place.
-func ffmpegBinaryCacheKey(ffmpegPath string) (string, string, bool) {
+// FFmpegBinaryIdentity resolves a regular FFmpeg binary and derives an identity
+// that changes when the executable is replaced in place. It returns the
+// resolved path, the identity, and whether the binary resolved to a regular
+// file; when it did not, the path is returned unchanged and the identity is
+// empty. Other per-binary caches, such as mediasample's capability inventory,
+// key on the same identity.
+func FFmpegBinaryIdentity(ffmpegPath string) (resolved, identity string, ok bool) {
 	resolved, err := exec.LookPath(strings.TrimSpace(ffmpegPath))
 	if err != nil {
 		return ffmpegPath, "", false
@@ -441,7 +445,8 @@ func sourceConversionPreflightArgs(request SourcePreflightRequest, position floa
 			if device == "" {
 				device = defaultDRIRenderDevice
 			}
-			args = append(args, "-init_hw_device", qsvVAAPIInitDevice(device), "-init_hw_device", "qsv=qs@va", "-init_hw_device", "opencl=ocl@va", "-filter_hw_device", "va")
+			args = append(args, QSVInitDeviceArgs(device)...)
+			args = append(args, "-init_hw_device", "opencl=ocl@va", "-filter_hw_device", "va")
 			if !request.SoftwareVideoDecode {
 				args = append(args, "-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi")
 			}
@@ -449,7 +454,8 @@ func sourceConversionPreflightArgs(request SourcePreflightRequest, position floa
 			if device == "" {
 				device = defaultDRIRenderDevice
 			}
-			args = append(args, "-init_hw_device", "vaapi=va:"+device, "-filter_hw_device", "va")
+			args = append(args, VAAPIInitDeviceArgs("va", device)...)
+			args = append(args, "-filter_hw_device", "va")
 			if !request.SoftwareVideoDecode {
 				args = append(args, "-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi")
 			}
@@ -458,15 +464,22 @@ func sourceConversionPreflightArgs(request SourcePreflightRequest, position floa
 				device = "0"
 			}
 			args = append(args, "-init_hw_device", "cuda=cu:"+device, "-filter_hw_device", "cu", "-hwaccel", "cuda", "-hwaccel_output_format", "cuda")
+		case BackendVideoToolbox:
+			if request.SoftwareVideoDecode {
+				args = append(args, "-init_hw_device", "videotoolbox=vt", "-filter_hw_device", "vt")
+			} else {
+				args = append(args, "-hwaccel", BackendVideoToolbox, "-hwaccel_output_format", "videotoolbox_vld")
+			}
 		}
 	}
 	args = append(args, "-ss", strconv.FormatFloat(position, 'f', 3, 64), "-i", request.InputPath, "-map", "0:v:0", "-frames:v", "1", "-an", "-sn", "-dn", "-map_metadata", "-1", "-map_chapters", "-1")
 	filter := sourceConversionPreflightFilter(request)
 	args = append(args, "-vf", filter, "-c:v", sourcePreflightEncoder(request), "-color_range", "tv", "-color_primaries", colorBT709, "-color_trc", colorBT709)
-	// Hardware filters already stamp the BT.709 matrix on their output. Asking
-	// FFmpeg to apply -colorspace at the mux boundary can insert an unsupported
-	// software conversion between hardware frames and the hardware encoder.
-	if request.Mode == ModeSoftware {
+	// VAAPI/QSV/CUDA filters stamp the BT.709 matrix on hardware frames; an
+	// explicit mux-boundary colorspace can insert an unsupported conversion.
+	// VideoToolbox has downloaded an NV12 frame and needs the explicit matrix
+	// because its encoder otherwise preserves the source BT.2020 matrix.
+	if request.Mode == ModeSoftware || request.Backend == BackendVideoToolbox {
 		args = append(args, "-colorspace", colorBT709)
 	}
 	if outputPath == "" {
@@ -480,6 +493,13 @@ func sourceConversionPreflightArgs(request SourcePreflightRequest, position floa
 func sourceConversionPreflightFilter(request SourcePreflightRequest) string {
 	if request.Mode == ModeSoftware {
 		return SoftwareFilter(request.Kind, request.Filter)
+	}
+	if request.Backend == BackendVideoToolbox {
+		filter := ""
+		if request.SoftwareVideoDecode {
+			filter = VideoToolboxUploadFilter(request.Kind, request.SourceBitDepth) + ","
+		}
+		return filter + VideoToolboxFilter("iw", "ih") + "," + VideoToolboxDownloadFilter(request.SourceBitDepth) + "," + HDRMetadataRemovalFilter()
 	}
 	if request.Backend == BackendNVENC {
 		if IsSDRSource(request.Kind) {

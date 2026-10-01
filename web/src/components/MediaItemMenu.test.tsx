@@ -1,5 +1,4 @@
 import { act, useRef } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
@@ -59,7 +58,8 @@ vi.mock("@/hooks/useUICustomization", () => ({
   useUICustomization: () => ({ cardPresentation: { poster_size: mocks.posterSize } }),
 }));
 
-vi.mock("@/hooks/queries/homeDismissals", () => ({
+vi.mock("@/hooks/queries/homeDismissals", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/homeDismissals")>()),
   useDismissHomeItem: () => ({ isPending: false, mutateAsync: vi.fn() }),
 }));
 
@@ -345,10 +345,10 @@ describe("MediaItemMenu metadata dialogs", () => {
     year: 2023,
   } as ItemDetail;
 
-  it("loads the exact item detail and passes it to Edit Metadata", () => {
+  it("loads the exact item detail and passes it to Edit Metadata", async () => {
     mocks.useCatalogItemDetail.mockReturnValue({ data: detail });
 
-    const markup = renderToStaticMarkup(
+    render(
       <MetadataActionDialogHost
         action="edit"
         contentId="series-1"
@@ -357,15 +357,15 @@ describe("MediaItemMenu metadata dialogs", () => {
       />,
     );
 
+    expect(await screen.findByText("Edit Silo")).toBeInTheDocument();
     expect(mocks.useCatalogItemDetail).toHaveBeenCalledWith("series-1", 12);
     expect(mocks.editItem).toHaveBeenCalledWith(detail);
-    expect(markup).toContain("Edit Silo");
   });
 
-  it("passes the full item and library context to Match Item", () => {
+  it("passes the full item and library context to Match Item", async () => {
     mocks.useCatalogItemDetail.mockReturnValue({ data: detail });
 
-    const markup = renderToStaticMarkup(
+    render(
       <MetadataActionDialogHost
         action="match"
         contentId="series-1"
@@ -374,9 +374,9 @@ describe("MediaItemMenu metadata dialogs", () => {
       />,
     );
 
+    expect(await screen.findByText("Match Silo")).toBeInTheDocument();
     expect(mocks.useCatalogItemDetail).toHaveBeenCalledWith("series-1", 12);
     expect(mocks.matchItem).toHaveBeenCalledWith({ ...detail, library_id: 12 });
-    expect(markup).toContain("Match Silo");
   });
 });
 
@@ -389,6 +389,7 @@ describe("MediaItemMenu trigger visibility", () => {
     expect(className).not.toContain("opacity-");
     expect(className).not.toContain("group-hover");
     expect(className).not.toContain("group-focus-within");
+    expect(className).not.toContain("backdrop-blur");
     expect(className).toContain("focus-visible:ring-2");
     expect(className).toContain("size-6");
     expect(className).toContain("sm:size-8");
@@ -402,6 +403,7 @@ describe("MediaItemMenu trigger visibility", () => {
           mediaType="movie"
           userState={{ played: false, is_favorite: false, in_watchlist: false }}
           variant="poster"
+          quickActionMode="both"
         />
       </MemoryRouter>,
     );
@@ -426,6 +428,7 @@ describe("MediaItemMenu trigger visibility", () => {
           mediaType="movie"
           userState={{ played: false, is_favorite: false, in_watchlist: false }}
           variant="poster"
+          quickActionMode="both"
         />
       </MemoryRouter>,
     );
@@ -450,6 +453,7 @@ describe("MediaItemMenu trigger visibility", () => {
           mediaType="movie"
           userState={{ played: false, is_favorite: false, in_watchlist: false }}
           variant="poster"
+          quickActionMode="both"
         />
       </MemoryRouter>,
     );
@@ -475,6 +479,7 @@ describe("MediaItemMenu trigger visibility", () => {
           mediaType="movie"
           userState={{ played: false, is_favorite: false, in_watchlist: false }}
           variant="poster"
+          quickActionMode="both"
         />
       </MemoryRouter>,
     );
@@ -495,6 +500,7 @@ describe("MediaItemMenu trigger visibility", () => {
           mediaType="movie"
           userState={{ played: false, is_favorite: false, in_watchlist: false }}
           variant="poster"
+          quickActionMode="both"
         />
       </MemoryRouter>,
     );
@@ -525,6 +531,7 @@ describe("MediaItemMenu trigger visibility", () => {
           mediaType="movie"
           userState={{ played: false, is_favorite: false, in_watchlist: false }}
           variant="poster"
+          quickActionMode="both"
         />
       </MemoryRouter>,
     );
@@ -563,6 +570,7 @@ describe("MediaItemMenu trigger visibility", () => {
           mediaType="movie"
           userState={{ played: false, is_favorite: false, in_watchlist: false }}
           variant="poster"
+          quickActionMode="both"
         />
       </MemoryRouter>,
     );
@@ -584,6 +592,7 @@ describe("MediaItemMenu trigger visibility", () => {
           mediaType="movie"
           userState={{ played: false, is_favorite: false, in_watchlist: false }}
           variant="poster"
+          quickActionMode="both"
         />
       </MemoryRouter>,
     );
@@ -608,6 +617,7 @@ describe("MediaItemMenu trigger visibility", () => {
           mediaType="movie"
           userState={{ played: false, is_favorite: false, in_watchlist: false }}
           variant="wide"
+          quickActionMode="both"
         />
       </MemoryRouter>,
     );
@@ -622,6 +632,7 @@ describe("MediaItemMenu trigger visibility", () => {
           userState={{ played: false, is_favorite: false, in_watchlist: false }}
           variant="wide"
           showWatchedShortcut
+          quickActionMode="both"
         />
       </MemoryRouter>,
     );
@@ -635,6 +646,7 @@ describe("MediaItemMenu trigger visibility", () => {
           userState={{ played: false, is_favorite: false, in_watchlist: false }}
           variant="poster"
           narrowPosterActions
+          quickActionMode="both"
         />
       </MemoryRouter>,
     );
@@ -658,6 +670,7 @@ describe("MediaItemMenu trigger visibility", () => {
           mediaType="movie"
           userState={{ played: false, is_favorite: false, in_watchlist: false }}
           variant="poster"
+          quickActionMode="both"
         />
       </MemoryRouter>,
     );
@@ -672,6 +685,7 @@ describe("MediaItemMenu trigger visibility", () => {
           mediaType="episode"
           userState={{ played: false, is_favorite: false, in_watchlist: false }}
           variant="poster"
+          quickActionMode="both"
         />
       </MemoryRouter>,
     );
@@ -686,11 +700,40 @@ describe("MediaItemMenu trigger visibility", () => {
           userState={{ played: false, is_favorite: false, in_watchlist: false }}
           variant="poster"
           showWatchedShortcut
+          quickActionMode="both"
         />
       </MemoryRouter>,
     );
 
     expect(screen.getByRole("button", { name: "Mark Watched" })).toBeTruthy();
+  });
+
+  it("shows only the quick actions selected by the resolved profile mode", () => {
+    const userState = { played: false, is_favorite: false, in_watchlist: false };
+    const renderMenu = (quickActionMode: "favorites" | "watched" | "none") => (
+      <MemoryRouter>
+        <MediaItemMenu
+          contentId="movie-1"
+          mediaType="movie"
+          userState={userState}
+          variant="poster"
+          quickActionMode={quickActionMode}
+        />
+      </MemoryRouter>
+    );
+    const { rerender } = render(renderMenu("favorites"));
+
+    expect(screen.getByRole("button", { name: "Add to favorites" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Mark Watched" })).toBeNull();
+
+    rerender(renderMenu("watched"));
+    expect(screen.queryByRole("button", { name: "Add to favorites" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Mark Watched" })).toBeTruthy();
+
+    rerender(renderMenu("none"));
+    expect(screen.queryByRole("button", { name: "Add to favorites" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Mark Watched" })).toBeNull();
+    expect(screen.getByRole("button", { name: "More actions" })).toBeTruthy();
   });
 
   it("uses matching action icons and sizes the menu to its longest entry", async () => {
@@ -703,6 +746,7 @@ describe("MediaItemMenu trigger visibility", () => {
           userState={{ played: true, is_favorite: true, in_watchlist: false }}
           variant="poster"
           dismissAction={{ itemId: "movie-1", surface: "continue_watching" }}
+          quickActionMode="both"
         />
       </MemoryRouter>,
     );
@@ -741,6 +785,7 @@ describe("MediaItemMenu trigger visibility", () => {
           mediaType="movie"
           userState={{ played: false, is_favorite: false, in_watchlist: false }}
           variant="poster"
+          quickActionMode="both"
         />
       </MemoryRouter>,
     );
@@ -767,6 +812,7 @@ describe("MediaItemMenu trigger visibility", () => {
           mediaType="movie"
           userState={{ played: false, is_favorite: false, in_watchlist: false }}
           variant="poster"
+          quickActionMode="both"
         />
       </MemoryRouter>,
     );
@@ -790,6 +836,7 @@ describe("MediaItemMenu trigger visibility", () => {
           mediaType="movie"
           userState={{ played: false, is_favorite: false, in_watchlist: false }}
           variant="poster"
+          quickActionMode="both"
         />
       </MemoryRouter>,
     );
@@ -821,6 +868,7 @@ describe("MediaItemMenu trigger visibility", () => {
           variant="wide"
           showCollectionActions={false}
           showWatchedShortcut
+          quickActionMode="both"
         />
       </MemoryRouter>
     );
@@ -844,6 +892,7 @@ describe("MediaItemMenu trigger visibility", () => {
           mediaType="movie"
           userState={{ played: false, is_favorite: false, in_watchlist: false }}
           variant="poster"
+          quickActionMode="both"
         />
       </MemoryRouter>,
     );
@@ -875,6 +924,7 @@ describe("MediaItemMenu trigger visibility", () => {
           mediaType="movie"
           userState={{ played: false, is_favorite: false, in_watchlist: false }}
           variant="poster"
+          quickActionMode="both"
         />
       </MemoryRouter>,
     );
@@ -896,6 +946,7 @@ describe("MediaItemMenu trigger visibility", () => {
           mediaType="movie"
           userState={{ played: false, is_favorite: false, in_watchlist: false }}
           variant="poster"
+          quickActionMode="both"
         />
       </MemoryRouter>,
     );
@@ -917,6 +968,7 @@ describe("MediaItemMenu trigger visibility", () => {
           mediaType="movie"
           userState={{ played: false, is_favorite: true, in_watchlist: false }}
           variant="poster"
+          quickActionMode="both"
         />
       </MemoryRouter>,
     );
@@ -939,6 +991,7 @@ describe("MediaItemMenu trigger visibility", () => {
           mediaType="movie"
           userState={{ played: false, is_favorite: true, in_watchlist: false }}
           variant="poster"
+          quickActionMode="both"
         />
       </MemoryRouter>,
     );
@@ -963,6 +1016,7 @@ describe("MediaItemMenu trigger visibility", () => {
           mediaType="movie"
           userState={{ played: false, is_favorite: false, in_watchlist: false }}
           variant="poster"
+          quickActionMode="both"
         />
       </MemoryRouter>,
     );
@@ -982,6 +1036,7 @@ describe("MediaItemMenu trigger visibility", () => {
           mediaType="movie"
           userState={{ played: false, is_favorite: false, in_watchlist: false }}
           variant="wide"
+          quickActionMode="both"
         />
       </MemoryRouter>,
     );
@@ -996,6 +1051,7 @@ describe("MediaItemMenu trigger visibility", () => {
           userState={{ played: false, is_favorite: false, in_watchlist: false }}
           variant="poster"
           showCollectionActions={false}
+          quickActionMode="both"
         />
       </MemoryRouter>,
     );
@@ -1012,6 +1068,7 @@ describe("MediaItemMenu trigger visibility", () => {
           userState={{ played: false, is_favorite: false, in_watchlist: false }}
           variant="poster"
           showFavoriteShortcut={false}
+          quickActionMode="both"
         />
       </MemoryRouter>,
     );
@@ -1041,6 +1098,7 @@ describe("MediaItemMenu long-press action sheet", () => {
             variant="poster"
             longPressRef={cardRef}
             itemTitle="Apex"
+            quickActionMode="both"
           />
         </div>
       </MemoryRouter>
@@ -1068,6 +1126,7 @@ describe("MediaItemMenu long-press action sheet", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    document.documentElement.removeAttribute("data-fine-pointer");
   });
 
   it("opens the sheet with the full action set after a touch hold", () => {
@@ -1144,5 +1203,25 @@ describe("MediaItemMenu long-press action sheet", () => {
 
     expect(mocks.toggleWatched).toHaveBeenCalledWith(true);
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("keeps long press while omitting desktop-only shortcut trees on coarse-pointer devices", () => {
+    // A coarse-pointer device is now declared by the published capability
+    // rather than by the media query: the component follows the pointer that
+    // was actually observed, because the query is unreliable on hybrids.
+    document.documentElement.setAttribute("data-fine-pointer", "false");
+
+    render(<LongPressCard />);
+
+    expect(screen.queryByRole("button", { name: "Mark Watched" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add to favorites" })).toBeNull();
+    expect(screen.getByRole("button", { name: "More actions" })).toBeTruthy();
+
+    pressCard();
+    holdPastLongPress();
+
+    expect(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Mark Watched" }),
+    ).toBeTruthy();
   });
 });

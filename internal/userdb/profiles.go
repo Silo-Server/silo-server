@@ -60,13 +60,15 @@ func createProfile(exec preferenceSettingsExecutor, p Profile) error {
 
 	_, err := exec.Exec(`
 		INSERT INTO profiles (
-			id, name, avatar, pin_hash, is_child, is_primary, max_content_rating,
+			id, name, avatar, pin_hash, is_child, is_primary, max_content_rating, max_advisory_age,
+			require_advisory_age,
 			quality_preference, language, subtitle_language, subtitle_mode,
 			auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview,
 			show_forced_subtitles,
 			library_restrictions_enabled, max_playback_quality, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.ID, p.Name, p.Avatar, p.PINHash, p.IsChild, p.IsPrimary, p.MaxContentRating,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, NULLIF(?, 0), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, p.Name, p.Avatar, p.PINHash, p.IsChild, p.IsPrimary, p.MaxContentRating, p.MaxAdvisoryAge,
+		p.RequireAdvisoryAge,
 		p.QualityPreference, p.Language, p.SubtitleLanguage, p.SubtitleMode,
 		p.AutoSkipIntro, p.AutoSkipCredits, p.AutoSkipRecap, p.AutoPlayNextPreview,
 		p.ShowForcedSubtitles, p.LibraryRestrictionsEnabled,
@@ -86,13 +88,15 @@ func createProfile(exec preferenceSettingsExecutor, p Profile) error {
 func GetProfile(db *sql.DB, id string) (*Profile, error) {
 	var p Profile
 	err := db.QueryRow(`
-		SELECT id, name, avatar, pin_hash, is_child, is_primary, max_content_rating,
+		SELECT id, name, avatar, pin_hash, is_child, is_primary, max_content_rating, COALESCE(max_advisory_age, 0),
+		       require_advisory_age,
 		       quality_preference, language, subtitle_language, subtitle_mode,
 		       auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview, show_forced_subtitles,
 		       library_restrictions_enabled, max_playback_quality, created_at, updated_at
 		FROM profiles WHERE id = ?`, id,
 	).Scan(
-		&p.ID, &p.Name, &p.Avatar, &p.PINHash, &p.IsChild, &p.IsPrimary, &p.MaxContentRating,
+		&p.ID, &p.Name, &p.Avatar, &p.PINHash, &p.IsChild, &p.IsPrimary, &p.MaxContentRating, &p.MaxAdvisoryAge,
+		&p.RequireAdvisoryAge,
 		&p.QualityPreference, &p.Language, &p.SubtitleLanguage, &p.SubtitleMode,
 		&p.AutoSkipIntro, &p.AutoSkipCredits, &p.AutoSkipRecap, &p.AutoPlayNextPreview, &p.ShowForcedSubtitles,
 		&p.LibraryRestrictionsEnabled, &p.MaxPlaybackQuality, &p.CreatedAt, &p.UpdatedAt,
@@ -113,7 +117,8 @@ func GetProfile(db *sql.DB, id string) (*Profile, error) {
 // ListProfiles returns all profiles ordered by creation time.
 func ListProfiles(db *sql.DB) ([]Profile, error) {
 	rows, err := db.Query(`
-		SELECT id, name, avatar, pin_hash, is_child, is_primary, max_content_rating,
+		SELECT id, name, avatar, pin_hash, is_child, is_primary, max_content_rating, COALESCE(max_advisory_age, 0),
+		       require_advisory_age,
 		       quality_preference, language, subtitle_language, subtitle_mode,
 		       auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview, show_forced_subtitles,
 		       library_restrictions_enabled, max_playback_quality, created_at, updated_at
@@ -127,7 +132,8 @@ func ListProfiles(db *sql.DB) ([]Profile, error) {
 	for rows.Next() {
 		var p Profile
 		if err := rows.Scan(
-			&p.ID, &p.Name, &p.Avatar, &p.PINHash, &p.IsChild, &p.IsPrimary, &p.MaxContentRating,
+			&p.ID, &p.Name, &p.Avatar, &p.PINHash, &p.IsChild, &p.IsPrimary, &p.MaxContentRating, &p.MaxAdvisoryAge,
+			&p.RequireAdvisoryAge,
 			&p.QualityPreference, &p.Language, &p.SubtitleLanguage, &p.SubtitleMode,
 			&p.AutoSkipIntro, &p.AutoSkipCredits, &p.AutoSkipRecap, &p.AutoPlayNextPreview, &p.ShowForcedSubtitles,
 			&p.LibraryRestrictionsEnabled, &p.MaxPlaybackQuality, &p.CreatedAt, &p.UpdatedAt,
@@ -194,6 +200,15 @@ func updateProfile(exec preferenceSettingsExecutor, id string, u UpdateProfileIn
 	if u.MaxContentRating != nil {
 		setClauses = append(setClauses, "max_content_rating = ?")
 		args = append(args, *u.MaxContentRating)
+	}
+	if u.MaxAdvisoryAge != nil {
+		// 0 clears the limit; the column stores "no limit" as NULL.
+		setClauses = append(setClauses, "max_advisory_age = NULLIF(?, 0)")
+		args = append(args, *u.MaxAdvisoryAge)
+	}
+	if u.RequireAdvisoryAge != nil {
+		setClauses = append(setClauses, "require_advisory_age = ?")
+		args = append(args, *u.RequireAdvisoryAge)
 	}
 	if u.QualityPreference != nil {
 		setClauses = append(setClauses, "quality_preference = ?")

@@ -42,7 +42,7 @@ func (t *ClientDiagnosticsCleanupTask) Description() string {
 func (t *ClientDiagnosticsCleanupTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategorySystem
 }
-func (t *ClientDiagnosticsCleanupTask) IsHidden() bool { return false }
+func (t *ClientDiagnosticsCleanupTask) IsHidden() bool { return true }
 
 func (t *ClientDiagnosticsCleanupTask) DefaultTriggers() []taskmanager.TriggerConfig {
 	// DefaultTriggers runs on the startup path, so bound the settings read rather

@@ -148,7 +148,7 @@ func TestRequestExecutionFingerprintBindsRecipeButNotArtifactHandle(t *testing.T
 		t.Fatal("byte-affecting software decode did not change execution fingerprint")
 	}
 	changed = base
-	changed.AudioRecipeVersion = "3"
+	changed.AudioRecipeVersion = base.AudioRecipeVersion + "-changed"
 	if got := changed.ExecutionFingerprint(); got == want {
 		t.Fatal("byte-affecting audio recipe version did not change execution fingerprint")
 	}
