@@ -101,7 +101,8 @@ func (a *Admin) ItemStatus(ctx context.Context, itemID string) ([]FileStatus, er
 	}
 	rows, err := a.pool.Query(ctx, `
 		SELECT mf.id, CASE
-		       WHEN NOT f.trickplay_enabled OR f.enabled IS FALSE THEN 'off'
+		       WHEN NOT f.trickplay_enabled OR f.enabled IS FALSE
+		         OR lower(btrim(f.type)) <> ALL($2::text[]) THEN 'off'
 		       WHEN lower(btrim(f.type)) = ANY($2::text[])
 		         AND mf.missing_since IS NULL AND mf.probe_updated_at IS NOT NULL AND mf.duration > 0
 		         AND jsonb_typeof(mf.video_tracks) = 'array' AND jsonb_array_length(mf.video_tracks) > 0
@@ -143,7 +144,8 @@ func (a *Admin) Regenerate(ctx context.Context, itemID string) (int, error) {
 	var enabled int
 	if err := a.pool.QueryRow(ctx, `SELECT count(*) FROM public.media_files mf
 		JOIN public.media_folders f ON f.id = mf.media_folder_id
-		WHERE mf.id = ANY($1) AND f.trickplay_enabled AND f.enabled IS NOT FALSE`, ids).Scan(&enabled); err != nil {
+		WHERE mf.id = ANY($1) AND f.trickplay_enabled AND f.enabled IS NOT FALSE
+		  AND lower(btrim(f.type)) = ANY($2::text[])`, ids, videoLibraryTypes).Scan(&enabled); err != nil {
 		return 0, fmt.Errorf("count enabled trickplay files: %w", err)
 	}
 	if enabled == 0 {
@@ -171,21 +173,27 @@ type LibraryStatus struct {
 // files' counts by state and the bytes its sheets take.
 func (a *Admin) LibraryStatuses(ctx context.Context) ([]LibraryStatus, error) {
 	rows, err := a.pool.Query(ctx, `
-		SELECT f.id, f.name,
-		       count(*) FILTER (WHERE t.state = 'pending' OR (t.media_file_id IS NULL
-		           AND lower(btrim(f.type)) = ANY($1::text[])
-		           AND mf.missing_since IS NULL AND mf.probe_updated_at IS NOT NULL AND mf.duration > 0
-		           AND jsonb_typeof(mf.video_tracks) = 'array' AND jsonb_array_length(mf.video_tracks) > 0)),
-		       count(*) FILTER (WHERE t.state = 'running'),
-		       count(*) FILTER (WHERE t.state = 'ready'),
-		       count(*) FILTER (WHERE t.state = 'unusable'),
-		       COALESCE(sum(t.sheet_bytes), 0)::bigint
-		FROM public.media_folders f
-		LEFT JOIN public.media_files mf ON mf.media_folder_id = f.id
-		LEFT JOIN public.media_file_trickplay t ON t.media_file_id = mf.id
-		WHERE f.trickplay_enabled AND f.enabled IS NOT FALSE
-		GROUP BY f.id, f.name
-		ORDER BY f.id`, videoLibraryTypes)
+		WITH files AS (
+			SELECT f.id AS library_id, f.name, t.sheet_bytes,
+			       CASE WHEN mf.missing_since IS NULL AND mf.probe_updated_at IS NOT NULL AND mf.duration > 0
+			              AND jsonb_typeof(mf.video_tracks) = 'array' AND jsonb_array_length(mf.video_tracks) > 0
+			            THEN COALESCE(t.state, 'pending')
+			            WHEN t.media_file_id IS NOT NULL THEN 'unusable' END AS state
+			FROM public.media_folders f
+			LEFT JOIN public.media_files mf ON mf.media_folder_id = f.id
+			LEFT JOIN public.media_file_trickplay t ON t.media_file_id = mf.id
+			WHERE f.trickplay_enabled AND f.enabled IS NOT FALSE
+			  AND lower(btrim(f.type)) = ANY($1::text[])
+		)
+		SELECT library_id, name,
+		       count(*) FILTER (WHERE state = 'pending'),
+		       count(*) FILTER (WHERE state = 'running'),
+		       count(*) FILTER (WHERE state = 'ready'),
+		       count(*) FILTER (WHERE state = 'unusable'),
+		       COALESCE(sum(sheet_bytes), 0)::bigint
+		FROM files
+		GROUP BY library_id, name
+		ORDER BY library_id`, videoLibraryTypes)
 	if err != nil {
 		return nil, fmt.Errorf("read trickplay library status: %w", err)
 	}

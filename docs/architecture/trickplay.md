@@ -212,8 +212,10 @@ operations (`internal/trickplay/admin.go`):
   `capability_disabled` when none of the files belongs to an opted-in
   library. Eligible files not yet reconciled are queued by the same request. A replay after the work
   finishes makes the previews again, so it is non-retryable.
-- `listAdminTrickplayLibraries` counts each opted-in library's rows by state
-  and sums its sheet bytes.
+- `listAdminTrickplayLibraries` counts each enabled, opted-in video library's
+  generation states. Tracked files that become ineligible count as `unusable`;
+  ineligible files never added to the queue are excluded. Retained published
+  sheets still contribute to storage bytes.
 
 ## Deletion
 
