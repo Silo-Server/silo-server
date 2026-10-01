@@ -4090,7 +4090,7 @@ func (r *FileRepository) ListChapterThumbnailsAtOtherWidths(ctx context.Context,
 	}
 	// A final page also checks missing images and images waiting out a failure
 	// or still queued.
-	// Once none remain, the service can stop scanning until the width changes.
+	// The service repeats completed scans to pick up library eligibility changes.
 	var pending bool
 	err = r.pool.QueryRow(ctx, `SELECT EXISTS (
 		SELECT 1 FROM media_files mf

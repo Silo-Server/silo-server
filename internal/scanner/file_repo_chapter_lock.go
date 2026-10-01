@@ -12,7 +12,34 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// Only active sessions retain their pool in the registry. Repositories sharing
+// a query pool also share its chapter session budget.
+var chapterLockSessions = struct {
+	sync.Mutex
+	active map[*pgxpool.Pool]int
+}{active: make(map[*pgxpool.Pool]int)}
+
+func tryReserveChapterLockSession(pool *pgxpool.Pool) (func(), bool) {
+	// Keep most query connections available even during a large backfill.
+	limit := min(4, max(1, int(pool.Config().MaxConns)/4))
+	chapterLockSessions.Lock()
+	defer chapterLockSessions.Unlock()
+	if chapterLockSessions.active[pool] >= limit {
+		return nil, false
+	}
+	chapterLockSessions.active[pool]++
+	return sync.OnceFunc(func() {
+		chapterLockSessions.Lock()
+		defer chapterLockSessions.Unlock()
+		chapterLockSessions.active[pool]--
+		if chapterLockSessions.active[pool] == 0 {
+			delete(chapterLockSessions.active, pool)
+		}
+	}), true
+}
 
 type chapterThumbnailLockKey struct{}
 
@@ -42,15 +69,33 @@ func (r *FileRepository) TryLockChapterThumbnails(ctx context.Context, fileID in
 	// sharing the key space of other per-file jobs.
 	digest := sha256.Sum256([]byte("silo-chapter-thumbnails:" + strconv.Itoa(fileID)))
 	key := int64(binary.BigEndian.Uint64(digest[:8]))
-	// A session lock must outlive the reads and writes made during extraction.
-	// Keep it outside the data pool so even a one-connection pool can run them.
-	// There is at most one such session per active chapter worker.
+	// Admission is nonblocking, just like the advisory lock. The coordinator
+	// rediscovers skipped files on its next scan.
+	releaseBudget, reserved := tryReserveChapterLockSession(r.pool)
+	if !reserved {
+		return ctx, nil, false, nil
+	}
 	connectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	connConfig := r.pool.Config().ConnConfig.Copy()
-	connConfig.RuntimeParams["application_name"] = "silo-chapter-thumbnails:" + strconv.Itoa(fileID)
-	conn, err := pgx.ConnectConfig(connectCtx, connConfig)
+	var conn *pgx.Conn
+	var pooled *pgxpool.Conn
+	var err error
+	if r.pool.Config().MaxConns == 1 {
+		// A one-connection query pool cannot lend a long-lived lock session:
+		// extraction also reads settings and folder state through that pool.
+		// Its exceptional separate session is capped at one per query pool.
+		connConfig := r.pool.Config().ConnConfig.Copy()
+		conn, err = pgx.ConnectConfig(connectCtx, connConfig)
+	} else {
+		// Count lock sessions inside database.max_connections. Admission leaves
+		// room for ordinary queries and uses the same budget across repositories.
+		pooled, err = r.pool.Acquire(connectCtx)
+		if err == nil {
+			conn = pooled.Conn()
+		}
+	}
 	if err != nil {
+		releaseBudget()
 		return ctx, nil, false, fmt.Errorf("connect chapter lock session: %w", err)
 	}
 	closeSession := sync.OnceFunc(func() {
@@ -59,9 +104,15 @@ func (r *FileRepository) TryLockChapterThumbnails(ctx context.Context, fileID in
 		if err := conn.Close(closeCtx); err != nil {
 			slog.WarnContext(ctx, "chapter thumbnail lock could not be released", "component", "chapterthumbs", "file_id", fileID, "error", err)
 		}
+		if pooled != nil {
+			pooled.Release()
+		}
+		releaseBudget()
 	})
 	var acquired bool
-	if err := conn.QueryRow(connectCtx, `SELECT pg_try_advisory_lock($1)`, key).Scan(&acquired); err != nil {
+	var applicationName string
+	if err := conn.QueryRow(connectCtx, `SELECT set_config('application_name', $2, false), pg_try_advisory_lock($1)`,
+		key, "silo-chapter-thumbnails:"+strconv.Itoa(fileID)).Scan(&applicationName, &acquired); err != nil {
 		closeSession()
 		return ctx, nil, false, fmt.Errorf("take chapter lock: %w", err)
 	}
