@@ -224,7 +224,7 @@ func (h *LibraryHandler) UpdateLibrary(ctx context.Context, id, userID int, req 
 		return LibraryView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to update library")
 	}
 	h.pokeRealtimeMonitor()
-	if req.TrickplayEnabled != nil && *req.TrickplayEnabled != oldFolder.TrickplayEnabled {
+	if req.TrickplayEnabled != nil {
 		h.reconcileTrickplay()
 	}
 
