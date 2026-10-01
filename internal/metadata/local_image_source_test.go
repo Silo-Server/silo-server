@@ -463,3 +463,69 @@ func TestIsStableProviderImageFailureLocalClasses(t *testing.T) {
 		t.Error("transient local read errors must keep the normal backoff")
 	}
 }
+
+func TestMergeAndPersistLockedImagesKeepPendingArtworkSources(t *testing.T) {
+	h := newTestHarness()
+	ctx := context.Background()
+	const posterSource = "file:///media/tv/Show/poster.jpg"
+	const backdropSource = "https://images.example/backdrop.jpg"
+
+	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
+		ContentID:               "series-locked-art",
+		Type:                    "series",
+		Title:                   "Example Show",
+		Year:                    2024,
+		Status:                  "matched",
+		DefaultMetadataLanguage: "en",
+		PosterSourcePath:        posterSource,
+		BackdropSourcePath:      backdropSource,
+		LogoPath:                "artwork/series-locked-art/logo.png",
+		LogoSourcePath:          "tmdb://logo.png",
+		LockedFields:            []int{int(FieldImages)},
+		Studios:                 []string{},
+		Networks:                []string{},
+		Countries:               []string{},
+		Genres:                  []string{},
+	}); err != nil {
+		t.Fatalf("upsert existing item: %v", err)
+	}
+	providerRepo := newFakeProviderIDRepo()
+	providerRepo.set("series-locked-art", &models.MediaItemProviderID{
+		ContentID:  "series-locked-art",
+		ItemType:   "series",
+		Provider:   "custom",
+		ProviderID: "series-123",
+	})
+	h.service.providerIDRepo = providerRepo
+
+	_, err := h.service.mergeAndPersist(ctx, ProcessRequest{
+		ContentID: "series-locked-art",
+		Mode:      ModeManualRefresh,
+		Language:  "en",
+	}, &MetadataResult{
+		HasMetadata: true,
+		Title:       "Example Show",
+		Year:        2024,
+		ProviderIDs: map[string]string{"custom": "series-123"},
+	}, []RemoteImage{
+		{URL: posterSource, Type: ImagePoster},
+		{URL: "https://images.example/other-poster.jpg", Type: ImagePoster, Rating: 9},
+	}, nil, nil, "series")
+	if err != nil {
+		t.Fatalf("mergeAndPersist: %v", err)
+	}
+
+	got, err := h.itemRepo.GetByID(ctx, "series-locked-art")
+	if err != nil {
+		t.Fatalf("load item: %v", err)
+	}
+	if got.PosterPath != "" || got.PosterSourcePath != posterSource {
+		t.Fatalf("poster = path %q source %q, want pending local source preserved", got.PosterPath, got.PosterSourcePath)
+	}
+	if got.BackdropPath != "" || got.BackdropSourcePath != backdropSource {
+		t.Fatalf("backdrop = path %q source %q, want pending remote source preserved", got.BackdropPath, got.BackdropSourcePath)
+	}
+	if got.LogoPath != "artwork/series-locked-art/logo.png" || got.LogoSourcePath != "tmdb://logo.png" {
+		t.Fatalf("logo = path %q source %q, want cached logo unchanged", got.LogoPath, got.LogoSourcePath)
+	}
+}

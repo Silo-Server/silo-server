@@ -2339,9 +2339,11 @@ func (s *MetadataService) mergeAndPersist(
 	item.RefreshFailures = 0
 	item.Status = "matched"
 
-	// Apply best images.
+	// Apply best images. Locked artwork keeps the stored path, source and
+	// thumbhash verbatim, including a source whose cache job is still pending.
+	imagesLocked := existingItem != nil && isFieldLocked(locked, FieldImages)
 	if isCanonicalWrite {
-		if !isFieldLocked(locked, FieldImages) {
+		if !imagesLocked {
 			applyBestImages(item, images, mergeMode, req.Language)
 		}
 		item.PosterThumbhash = mergedImageThumbhash(
@@ -2359,7 +2361,11 @@ func (s *MetadataService) mergeAndPersist(
 	}
 
 	if isCanonicalWrite {
-		prepareItemImagesForQueue(item, existingItem)
+		if imagesLocked {
+			keepExistingItemArtwork(item, existingItem)
+		} else {
+			prepareItemImagesForQueue(item, existingItem)
+		}
 	}
 
 	if isNew && contentID == "" {
@@ -7349,6 +7355,21 @@ func itemArtworkFields(item *models.MediaItem) []itemArtworkField {
 	}
 }
 
+// keepExistingItemArtwork copies every stored artwork column from existing.
+// A locked item may still have a pending *_source_path with an empty served
+// path; the generic preservation rules would treat that as no artwork and
+// clear the source before its cache job can publish.
+func keepExistingItemArtwork(item, existing *models.MediaItem) {
+	existingFields := itemArtworkFields(existing)
+	for i, field := range itemArtworkFields(item) {
+		*field.path = *existingFields[i].path
+		*field.source = *existingFields[i].source
+		if field.thumbhash != nil {
+			*field.thumbhash = *existingFields[i].thumbhash
+		}
+	}
+}
+
 func prepareItemImagesForQueue(item, existing *models.MediaItem) {
 	for _, field := range itemArtworkFields(item) {
 		// applyBestImages intentionally clears rejected TVDB clear-art on a
@@ -7690,8 +7711,13 @@ func (s *MetadataService) FetchSeasonImages(ctx context.Context, providerIDs map
 	var exactImages []RemoteImage
 	var specialsFallback []RemoteImage
 	providerErrors := make(map[string]string)
-	seen := make(map[string]struct{})
-	appendPoster := func(target *[]RemoteImage, image RemoteImage) bool {
+	// Exact and fallback results are deduplicated separately so a show poster
+	// from an earlier provider cannot shadow the same URL confirmed as exact
+	// season art by a later provider. Fallbacks that duplicate an exact result
+	// are dropped once every provider has answered.
+	exactSeen := make(map[string]struct{})
+	fallbackSeen := make(map[string]struct{})
+	appendPoster := func(target *[]RemoteImage, seen map[string]struct{}, image RemoteImage) bool {
 		if image.Type != ImagePoster || strings.TrimSpace(image.URL) == "" {
 			return false
 		}
@@ -7726,7 +7752,7 @@ func (s *MetadataService) FetchSeasonImages(ctx context.Context, providerIDs map
 					if strings.TrimSpace(image.ProviderID) == "" {
 						image.ProviderID = p.Slug()
 					}
-					if appendPoster(&exactImages, image) {
+					if appendPoster(&exactImages, exactSeen, image) {
 						exactFound = true
 					}
 				}
@@ -7752,7 +7778,7 @@ func (s *MetadataService) FetchSeasonImages(ctx context.Context, providerIDs map
 							continue
 						}
 						n := seasonNumber
-						appendPoster(&exactImages, RemoteImage{
+						appendPoster(&exactImages, exactSeen, RemoteImage{
 							ProviderID:   p.Slug(),
 							URL:          season.PosterPath,
 							Type:         ImagePoster,
@@ -7783,14 +7809,21 @@ func (s *MetadataService) FetchSeasonImages(ctx context.Context, providerIDs map
 				if strings.TrimSpace(image.ProviderID) == "" {
 					image.ProviderID = p.Slug()
 				}
-				appendPoster(&specialsFallback, image)
+				appendPoster(&specialsFallback, fallbackSeen, image)
 			}
 		}
 	}
 
+	fallbacks := specialsFallback[:0]
+	for _, image := range specialsFallback {
+		if _, exact := exactSeen[image.URL]; !exact {
+			fallbacks = append(fallbacks, image)
+		}
+	}
+
 	sort.SliceStable(exactImages, func(i, j int) bool { return exactImages[i].Rating > exactImages[j].Rating })
-	sort.SliceStable(specialsFallback, func(i, j int) bool { return specialsFallback[i].Rating > specialsFallback[j].Rating })
-	return append(exactImages, specialsFallback...), providerErrors, nil
+	sort.SliceStable(fallbacks, func(i, j int) bool { return fallbacks[i].Rating > fallbacks[j].Rating })
+	return append(exactImages, fallbacks...), providerErrors, nil
 }
 
 // ApplyItemImage downloads a single image, caches it to S3, and returns

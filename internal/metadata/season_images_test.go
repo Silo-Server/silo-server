@@ -132,6 +132,45 @@ func TestFetchSeasonImagesListsSpecialsBeforeShowFallbacks(t *testing.T) {
 	}
 }
 
+func TestFetchSeasonImagesPrefersLaterExactSpecialsOverEarlierShowFallback(t *testing.T) {
+	specials := 0
+	legacy := &seasonImageProvider{
+		slug: "legacy",
+		itemImages: []RemoteImage{
+			{URL: "shared://specials.jpg", Type: ImagePoster, Rating: 1},
+			{URL: "legacy://show.jpg", Type: ImagePoster, Rating: 10},
+		},
+	}
+	scoped := &seasonImageProvider{
+		slug: "scoped",
+		seasonGalleries: map[int][]RemoteImage{0: {
+			{URL: "shared://specials.jpg", Type: ImagePoster, Rating: 8, SeasonNumber: &specials},
+		}},
+	}
+	service := &MetadataService{chainCache: map[string]chainCacheEntry{
+		"11:season": {providers: []Provider{legacy, scoped}, expiresAt: time.Now().Add(time.Hour)},
+	}}
+
+	images, _, err := service.FetchSeasonImages(context.Background(), map[string]string{"legacy": "1"}, "en", 11, 0)
+	if err != nil {
+		t.Fatalf("FetchSeasonImages() error = %v", err)
+	}
+	if len(images) != 2 {
+		t.Fatalf("images = %#v, want exact Specials poster then one show fallback", images)
+	}
+	first := images[0]
+	if first.URL != "shared://specials.jpg" || first.ProviderID != "scoped" || first.Rating != 8 ||
+		first.SeasonNumber == nil || *first.SeasonNumber != 0 {
+		t.Fatalf("images[0] = %#v, want scoped exact Specials record", first)
+	}
+	if images[1].URL != "legacy://show.jpg" {
+		t.Fatalf("images[1] = %#v, want remaining show fallback", images[1])
+	}
+	if len(scoped.seasonRequests) != 0 {
+		t.Fatalf("scoped GetSeasons calls = %d, want none once its exact result is accepted", len(scoped.seasonRequests))
+	}
+}
+
 func TestFetchSeasonImagesUsesPrimaryCompatibilityFallback(t *testing.T) {
 	provider := &seasonImageProvider{
 		slug:       "legacy",
