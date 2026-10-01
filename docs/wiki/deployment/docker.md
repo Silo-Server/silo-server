@@ -61,15 +61,23 @@ printf '\nPOSTGRES_PASSWORD=%s\nSECRET_KEY=%s\n' \
   "$(openssl rand -hex 24)" "$(openssl rand -base64 48)" >> .env
 ```
 
-Both `docker-compose.yml` and `docker-compose.dev.yml` require a non-empty
-`POSTGRES_PASSWORD`. Compose rejects a missing or empty value before starting
-containers. Copying `.env.example` alone does not configure a password.
+The bundled PostgreSQL service in `docker-compose.yml` and
+`docker-compose.dev.yml` requires a non-empty `POSTGRES_PASSWORD`. Without one,
+the database container exits with `POSTGRES_PASSWORD is required` and Silo
+does not start. Copying `.env.example` alone does not configure a password.
 
 For an existing database, set `POSTGRES_PASSWORD` to its current password before
 using the updated Compose files. Changing `.env` does not change the password
 stored in PostgreSQL. Coordinate password rotation with the database role and
 all clients that use it; generating a new value only in `.env` breaks their
 connections.
+
+Write an existing password in single quotes, for example
+`POSTGRES_PASSWORD='current-password'`, so Compose does not expand a `$` in it.
+Compose cannot read a single quote inside a single-quoted value. The bundled
+stacks also insert the password into Silo's database URL without encoding it,
+so it may contain only letters, digits, `-`, `.`, `_` and `~`. The generated
+hexadecimal password meets both limits.
 
 Set the host path to your media:
 
@@ -361,6 +369,22 @@ does all of the following:
 - omits the bundled PostgreSQL and Redis services from the deployed project
 - preserves the media, plugin, compatibility, transcode, and catalog mounts
 - preserves the same `SECRET_KEY` across every Silo role
+
+For example, this override removes both bundled services and uses its own
+connection URLs. It does not need `POSTGRES_PASSWORD`:
+
+```yaml
+services:
+  postgres: !reset null
+  redis: !reset null
+  silo:
+    depends_on: !reset {}
+    environment:
+      DATABASE_URL: postgres://silo:${EXTERNAL_DB_PASSWORD:?Set EXTERNAL_DB_PASSWORD}@db.example.com:5432/silo?sslmode=require
+      REDIS_URL: redis://cache.example.com:6379
+```
+
+Percent-encode reserved characters in a password placed in `DATABASE_URL`.
 
 Validate the merged configuration before starting it:
 
