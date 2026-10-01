@@ -8,6 +8,16 @@ them. `internal/trickplay` owns the queue, the manifests, and the storage
 lifecycle; `internal/mediasample` decodes and tiles the frames (see
 [media sampling](media-sampling.md#sheets)).
 
+## Library setting
+
+A library opts in through `trickplay_enabled` on the v2 library resources
+(`createLibrary`, `updateLibrary`); `trickplay_supported` reports whether the
+server can generate them (an assets store is configured), and
+`GET /api/v2/libraries/capabilities` reports `trickplay: true`. The frozen
+v1 library bodies neither read nor write it. Turning it on or off runs a
+reconcile pass right away on the server that handled the change; turning it
+off deletes the library's previews.
+
 ## The row
 
 `media_file_trickplay` holds one row per media file of an opted-in library.
@@ -119,6 +129,7 @@ settings change does not wait for the next pass.
 
 A manifest is served only while all of these hold:
 
+- its library still has `trickplay_enabled` on;
 - the row has a published `revision`;
 - `store_identity` is the assets store's current identity;
 - the file is the one the sheets were made from: the same size, the same

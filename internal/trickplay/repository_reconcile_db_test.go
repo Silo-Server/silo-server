@@ -32,7 +32,7 @@ func TestStaleReconcileCannotDowngradeConcurrentUpgradeDB(t *testing.T) {
 	pid := worker.Conn().PgConn().PID()
 	done := make(chan error, 1)
 	go func() {
-		_, err := worker.Exec(t.Context(), staleSQL, AlgorithmVersion, "different recipe", testStore, 100)
+		_, err := worker.Exec(t.Context(), staleSQL, AlgorithmVersion, "different recipe", testStore, 100, videoLibraryTypes)
 		done <- err
 	}()
 	deadline := time.NewTimer(5 * time.Second)
@@ -66,6 +66,15 @@ func TestStaleReconcileCannotDowngradeConcurrentUpgradeDB(t *testing.T) {
 }
 
 func TestOptOutReconcilePreservesConcurrentClaimDB(t *testing.T) {
+	testLibraryRetirementPreservesConcurrentClaimDB(t, `UPDATE media_folders SET trickplay_enabled=false WHERE id=$1`)
+}
+
+func TestTypeChangeReconcilePreservesConcurrentClaimDB(t *testing.T) {
+	testLibraryRetirementPreservesConcurrentClaimDB(t, `UPDATE media_folders SET type='audiobooks' WHERE id=$1`)
+}
+
+func testLibraryRetirementPreservesConcurrentClaimDB(t *testing.T, change string) {
+	t.Helper()
 	f := newFixture(t)
 	folder := f.library(t, "movies", true)
 	file := f.file(t, folder, "optout-claim")
@@ -80,11 +89,11 @@ func TestOptOutReconcilePreservesConcurrentClaimDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
-	// Hold the claim's transition uncommitted while opt-out sees pending.
+	// Hold the claim's transition uncommitted while retirement sees pending.
 	if _, err := tx.Exec(t.Context(), `UPDATE media_file_trickplay SET state='running', lease_owner='concurrent-claim', lease_expires_at=now()+interval '5 minutes' WHERE media_file_id=$1`, file); err != nil {
 		t.Fatal(err)
 	}
-	f.exec(t, `UPDATE media_folders SET trickplay_enabled=false WHERE id=$1`, folder)
+	f.exec(t, change, folder)
 	worker, err := f.pool.Acquire(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +101,7 @@ func TestOptOutReconcilePreservesConcurrentClaimDB(t *testing.T) {
 	defer worker.Release()
 	pid := worker.Conn().PgConn().PID()
 	done := make(chan error, 1)
-	go func() { _, err := worker.Exec(t.Context(), removeSQL, 100); done <- err }()
+	go func() { _, err := worker.Exec(t.Context(), removeSQL, 100, videoLibraryTypes); done <- err }()
 	deadline := time.NewTimer(5 * time.Second)
 	defer deadline.Stop()
 	tick := time.NewTicker(10 * time.Millisecond)

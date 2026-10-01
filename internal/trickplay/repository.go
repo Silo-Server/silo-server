@@ -97,22 +97,30 @@ func (r *Repository) claim(ctx context.Context, owner string, lease time.Duratio
 	var duration *int
 	err := r.pool.QueryRow(ctx, `
 		WITH next AS (
-			SELECT media_file_id FROM public.media_file_trickplay
-			WHERE state = 'pending' AND available_at <= now() AND recipe_version <= $3
-			  AND ($4::bigint = 0 OR media_file_id = $4)
-			ORDER BY available_at, media_file_id
+			SELECT t.media_file_id FROM public.media_file_trickplay t
+			JOIN public.media_files mf ON mf.id = t.media_file_id
+			JOIN public.media_folders f ON f.id = mf.media_folder_id
+			WHERE t.state = 'pending' AND t.available_at <= now() AND t.recipe_version <= $3
+			  AND ($4::bigint = 0 OR t.media_file_id = $4)
+			  AND f.trickplay_enabled AND f.enabled IS NOT FALSE AND lower(btrim(f.type)) = ANY($5::text[])
+			  AND mf.missing_since IS NULL AND mf.probe_updated_at IS NOT NULL AND mf.duration > 0
+			  AND jsonb_typeof(mf.video_tracks) = 'array' AND jsonb_array_length(mf.video_tracks) > 0
+			ORDER BY t.available_at, t.media_file_id
 			LIMIT 1
-			FOR UPDATE SKIP LOCKED
+			FOR UPDATE OF t SKIP LOCKED
 		)
 		UPDATE public.media_file_trickplay t
 		SET state = 'running', lease_owner = $1, lease_expires_at = now() + make_interval(secs => $2),
 		    work_revision = NULL, source_size = mf.file_size, source_hash = mf.file_hash,
 		    source_duration = mf.duration, recipe_version = $3, updated_at = now()
-		FROM next, public.media_files mf
+		FROM next, public.media_files mf JOIN public.media_folders f ON f.id = mf.media_folder_id
 		WHERE t.media_file_id = next.media_file_id AND mf.id = t.media_file_id
+		  AND f.trickplay_enabled AND f.enabled IS NOT FALSE AND lower(btrim(f.type)) = ANY($5::text[])
+		  AND mf.missing_since IS NULL AND mf.probe_updated_at IS NOT NULL AND mf.duration > 0
+		  AND jsonb_typeof(mf.video_tracks) = 'array' AND jsonb_array_length(mf.video_tracks) > 0
 		RETURNING t.media_file_id, mf.file_path, mf.container, mf.codec_video, mf.duration, mf.hdr,
 		          COALESCE(mf.video_tracks, '[]'::jsonb), t.failure_count, t.lease_owner`,
-		leaseToken, lease.Seconds(), AlgorithmVersion, fileID,
+		leaseToken, lease.Seconds(), AlgorithmVersion, fileID, videoLibraryTypes,
 	).Scan(&job.FileID, &job.FilePath, &container, &codec, &duration, &hdr, &videoTracks, &job.Failures, &job.LeaseToken)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -137,13 +145,18 @@ func (r *Repository) claim(ctx context.Context, owner string, lease time.Duratio
 }
 
 // Heartbeat renews the claim identified by leaseToken, and reports false
-// when the lease is lost.
+// when the lease is lost or the file is no longer eligible.
 func (r *Repository) Heartbeat(ctx context.Context, fileID int, leaseToken string, lease time.Duration) (bool, error) {
 	tag, err := r.pool.Exec(ctx, `
-		UPDATE public.media_file_trickplay
+		UPDATE public.media_file_trickplay t
 		SET lease_expires_at = now() + make_interval(secs => $3), updated_at = now()
-		WHERE media_file_id = $1 AND lease_owner = $2 AND state = 'running' AND lease_expires_at > now()`,
-		fileID, leaseToken, lease.Seconds())
+		FROM public.media_files mf JOIN public.media_folders f ON f.id = mf.media_folder_id
+		WHERE t.media_file_id = $1 AND t.lease_owner = $2 AND t.state = 'running' AND t.lease_expires_at > now()
+		  AND mf.id = t.media_file_id AND f.trickplay_enabled AND f.enabled IS NOT FALSE
+		  AND lower(btrim(f.type)) = ANY($4::text[])
+		  AND mf.missing_since IS NULL AND mf.probe_updated_at IS NOT NULL AND mf.duration > 0
+		  AND jsonb_typeof(mf.video_tracks) = 'array' AND jsonb_array_length(mf.video_tracks) > 0`,
+		fileID, leaseToken, lease.Seconds(), videoLibraryTypes)
 	if err != nil {
 		return false, fmt.Errorf("renew trickplay lease: %w", err)
 	}
@@ -151,15 +164,19 @@ func (r *Repository) Heartbeat(ctx context.Context, fileID int, leaseToken strin
 }
 
 // BeginUpload picks the revision the claim's generation of fileID uploads under,
-// and reports false when the lease is lost. Until it publishes, the
-// revision is queued for deletion if the work is abandoned.
+// and reports false when the lease is lost or the file is no longer eligible.
+// Until it publishes, the revision is queued for deletion if the work is abandoned.
 func (r *Repository) BeginUpload(ctx context.Context, fileID int, leaseToken string) (int64, bool, error) {
 	revision := newRevision()
 	tag, err := r.pool.Exec(ctx, `
-		UPDATE public.media_file_trickplay SET work_revision = $3, updated_at = now()
-		WHERE media_file_id = $1 AND lease_owner = $2 AND state = 'running' AND lease_expires_at > now()
-		  AND work_revision IS NULL`,
-		fileID, leaseToken, revision)
+		UPDATE public.media_file_trickplay t SET work_revision = $3, updated_at = now()
+		FROM public.media_files mf JOIN public.media_folders f ON f.id = mf.media_folder_id
+		WHERE t.media_file_id = $1 AND t.lease_owner = $2 AND t.state = 'running' AND t.lease_expires_at > now()
+		  AND t.work_revision IS NULL AND mf.id = t.media_file_id
+		  AND f.trickplay_enabled AND f.enabled IS NOT FALSE AND lower(btrim(f.type)) = ANY($4::text[])
+		  AND mf.missing_since IS NULL AND mf.probe_updated_at IS NOT NULL AND mf.duration > 0
+		  AND jsonb_typeof(mf.video_tracks) = 'array' AND jsonb_array_length(mf.video_tracks) > 0`,
+		fileID, leaseToken, revision, videoLibraryTypes)
 	if err != nil {
 		return 0, false, fmt.Errorf("start trickplay upload: %w", err)
 	}
@@ -192,10 +209,10 @@ type Published struct {
 
 // Publish makes the claim's uploaded revision of fileID the one served, and
 // queues the revision it replaces for deletion. It reports false, changing
-// nothing, when the lease was lost.
+// nothing, when the lease was lost or the file is no longer eligible.
 func (r *Repository) Publish(ctx context.Context, fileID int, leaseToken string, revision int64, p Published) (bool, error) {
 	return r.fenced(ctx, fileID, leaseToken, func(tx pgx.Tx, current fencedRow) (bool, error) {
-		if current.workRevision == nil || *current.workRevision != revision {
+		if !current.eligible || current.workRevision == nil || *current.workRevision != revision {
 			return false, nil
 		}
 		if current.revision != nil {
@@ -244,7 +261,8 @@ const (
 
 // Finish ends the claim on fileID without publishing, and queues any
 // revision it uploaded for deletion. delay applies to Released. It reports
-// false when the lease was lost.
+// false when the lease was lost. A file that is no longer eligible can still
+// finish so its abandoned upload is retired promptly.
 func (r *Repository) Finish(ctx context.Context, fileID int, leaseToken string, outcome Outcome, cause string, delay time.Duration) (bool, error) {
 	return r.fenced(ctx, fileID, leaseToken, func(tx pgx.Tx, current fencedRow) (bool, error) {
 		if current.workRevision != nil {
@@ -279,6 +297,7 @@ type fencedRow struct {
 	workRevision *int64
 	urlExpiresAt *time.Time
 	failures     int
+	eligible     bool
 }
 
 // fenced runs apply in a transaction holding fileID's row, if leaseToken
@@ -291,9 +310,15 @@ func (r *Repository) fenced(ctx context.Context, fileID int, leaseToken string, 
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
 	var row fencedRow
 	err = tx.QueryRow(ctx, `
-		SELECT revision, work_revision, published_expires_at, failure_count FROM public.media_file_trickplay
-		WHERE media_file_id = $1 AND lease_owner = $2 AND state = 'running' AND lease_expires_at > now()
-		FOR UPDATE`, fileID, leaseToken).Scan(&row.revision, &row.workRevision, &row.urlExpiresAt, &row.failures)
+		SELECT t.revision, t.work_revision, t.published_expires_at, t.failure_count,
+		       COALESCE(f.trickplay_enabled AND f.enabled IS NOT FALSE AND lower(btrim(f.type)) = ANY($3::text[])
+		       AND mf.missing_since IS NULL AND mf.probe_updated_at IS NOT NULL AND mf.duration > 0
+		       AND jsonb_typeof(mf.video_tracks) = 'array' AND jsonb_array_length(mf.video_tracks) > 0, false)
+		FROM public.media_file_trickplay t
+		JOIN public.media_files mf ON mf.id = t.media_file_id
+		JOIN public.media_folders f ON f.id = mf.media_folder_id
+		WHERE t.media_file_id = $1 AND t.lease_owner = $2 AND t.state = 'running' AND t.lease_expires_at > now()
+		FOR UPDATE OF t`, fileID, leaseToken, videoLibraryTypes).Scan(&row.revision, &row.workRevision, &row.urlExpiresAt, &row.failures, &row.eligible)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -364,8 +389,8 @@ type ReconcileStats struct {
 
 // Reconcile brings the queue in line with the libraries, files, settings,
 // and storage: it reclaims leases that ran out, adds files of opted-in
-// libraries, removes rows of libraries that opted out (their sheets are
-// queued for deletion), and requeues rows whose sheets no longer match
+// libraries, removes rows of libraries that opted out or became ineligible
+// (their sheets are queued for deletion), and requeues rows whose sheets no longer match
 // their file, recipe, or storage. Each step handles at most batch rows.
 func (r *Repository) Reconcile(ctx context.Context, recipe Recipe, storeIdentity string, batch int) (ReconcileStats, error) {
 	return r.reconcile(ctx, r.pool.Exec, recipe, storeIdentity, batch)
@@ -381,8 +406,8 @@ func (r *Repository) reconcile(ctx context.Context, exec func(context.Context, s
 	}{
 		{&stats.Reclaimed, reclaimSQL, []any{backoffSeconds(), abandonedGrace.Seconds(), batch}},
 		{&stats.Added, addSQL, []any{AlgorithmVersion, videoLibraryTypes, batch}},
-		{&stats.Removed, removeSQL, []any{batch}},
-		{&stats.Stale, staleSQL, []any{AlgorithmVersion, recipe.String(), storeIdentity, batch}},
+		{&stats.Removed, removeSQL, []any{batch, videoLibraryTypes}},
+		{&stats.Stale, staleSQL, []any{AlgorithmVersion, recipe.String(), storeIdentity, batch, videoLibraryTypes}},
 	}
 	for _, step := range steps {
 		tag, err := exec(ctx, step.sql, step.args...)
@@ -442,9 +467,9 @@ const addSQL = `
 	LIMIT $3
 	ON CONFLICT (media_file_id) DO NOTHING`
 
-// removeSQL deletes the rows of libraries that opted out; the delete
-// trigger queues their sheets. Rows being generated are left to finish or
-// expire first.
+// removeSQL deletes the rows of libraries that opted out, are disabled, or
+// no longer have a supported video type. The delete trigger queues their
+// sheets. Rows being generated are left to finish or expire first.
 const removeSQL = `
 	DELETE FROM public.media_file_trickplay t
 	WHERE t.state <> 'running' AND t.media_file_id IN (
@@ -452,7 +477,8 @@ const removeSQL = `
 		FROM public.media_file_trickplay t2
 		JOIN public.media_files mf ON mf.id = t2.media_file_id
 		JOIN public.media_folders f ON f.id = mf.media_folder_id
-		WHERE NOT f.trickplay_enabled AND t2.state <> 'running'
+		WHERE (NOT f.trickplay_enabled OR f.enabled IS FALSE OR NOT (lower(btrim(f.type)) = ANY($2::text[])))
+		  AND t2.state <> 'running'
 		LIMIT $1
 	)`
 
@@ -465,14 +491,21 @@ const staleSQL = `
 	UPDATE public.media_file_trickplay t
 	SET state = 'pending', available_at = now(), failure_count = 0, last_error = '',
 	    recipe_version = $1, updated_at = now()
-	FROM public.media_files mf
+	FROM public.media_files mf JOIN public.media_folders f ON f.id = mf.media_folder_id
 	WHERE mf.id = t.media_file_id
+	  AND f.trickplay_enabled AND f.enabled IS NOT FALSE AND lower(btrim(f.type)) = ANY($5::text[])
+	  AND mf.missing_since IS NULL AND mf.probe_updated_at IS NOT NULL AND mf.duration > 0
+	  AND jsonb_typeof(mf.video_tracks) = 'array' AND jsonb_array_length(mf.video_tracks) > 0
 	  AND t.state IN ('ready', 'unusable') AND t.recipe_version <= $1
 	  AND t.media_file_id IN (
 		SELECT t2.media_file_id
 		FROM public.media_file_trickplay t2
 		JOIN public.media_files mf2 ON mf2.id = t2.media_file_id
+		JOIN public.media_folders f2 ON f2.id = mf2.media_folder_id
 		WHERE t2.state IN ('ready', 'unusable') AND t2.recipe_version <= $1
+		  AND f2.trickplay_enabled AND f2.enabled IS NOT FALSE AND lower(btrim(f2.type)) = ANY($5::text[])
+		  AND mf2.missing_since IS NULL AND mf2.probe_updated_at IS NOT NULL AND mf2.duration > 0
+		  AND jsonb_typeof(mf2.video_tracks) = 'array' AND jsonb_array_length(mf2.video_tracks) > 0
 		  AND (
 			t2.recipe_version < $1
 			OR (t2.state = 'ready' AND (t2.published_recipe IS DISTINCT FROM $2 OR t2.store_identity IS DISTINCT FROM $3
@@ -498,7 +531,8 @@ func (r *Repository) Manifests(ctx context.Context, fileIDs []int, storeIdentity
 		       t.thumbnail_count, t.sheet_count, COALESCE(t.bandwidth, 0)
 		FROM public.media_file_trickplay t
 		JOIN public.media_files mf ON mf.id = t.media_file_id
-		WHERE t.media_file_id = ANY($1) AND t.revision IS NOT NULL AND t.store_identity = $2
+        JOIN public.media_folders f ON f.id = mf.media_folder_id
+		WHERE f.trickplay_enabled AND t.media_file_id = ANY($1) AND t.revision IS NOT NULL AND t.store_identity = $2
 		  AND t.published_size IS NOT DISTINCT FROM mf.file_size
 		  AND (t.published_hash IS NULL OR mf.file_hash IS NULL OR t.published_hash = mf.file_hash)
 		  AND abs(COALESCE(t.published_duration, 0) - COALESCE(mf.duration, 0)) <= 2`,

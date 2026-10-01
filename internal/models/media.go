@@ -24,6 +24,9 @@ type MediaFolder struct {
 	AutoTranslateMetadata    bool   // AI-translate descriptions when providers lack this language
 	ChapterThumbnailsEnabled bool
 	IntroDetectionEnabled    bool
+	// TrickplayEnabled generates seek-bar previews for the library's video
+	// files (internal/trickplay). Off by default.
+	TrickplayEnabled bool
 	// RealtimeMonitoring is the library's real-time monitoring switch. It
 	// takes effect only while the server-wide scanner.realtime_monitoring
 	// setting is on and the library is enabled.
