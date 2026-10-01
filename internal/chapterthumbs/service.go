@@ -2,6 +2,7 @@ package chapterthumbs
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"log/slog"
 	"math"
@@ -56,6 +57,9 @@ var chapterThumbnailRetrySchedule = []time.Duration{
 }
 
 type FileRepository interface {
+	// Take this guard before reading a file, and hold it until extraction
+	// results are saved, so replicas cannot process stale chapters together.
+	TryLockChapterThumbnails(context.Context, int) (lockCtx context.Context, release func(), acquired bool, err error)
 	GetByID(ctx context.Context, id int) (*models.MediaFile, error)
 	// ListMissingChapterThumbnails lists files with a chapter to make a
 	// thumbnail for: none yet, or one whose path does not end in
@@ -98,12 +102,10 @@ type ObjectStore = blobstore.Store
 // (*blobgc.Queue).
 type BlobQueue interface {
 	Schedule(ctx context.Context, prefixes []string, delay time.Duration) error
-	Cancel(ctx context.Context, prefixes []string) error
 }
 
-// displacedImageGrace is how long an image a newer one replaced stays
-// stored: longer than a signed image URL lives, so a client that read the
-// old path keeps a working URL.
+// displacedImageGrace is the minimum time a replaced image stays stored.
+// The queue keeps any later expiry recorded by the chapter URL resolver.
 const displacedImageGrace = 48 * time.Hour
 
 type ThumbnailNotifier interface {
@@ -375,6 +377,15 @@ func (s *Service) worker(ctx context.Context, priorityOnly bool) {
 }
 
 func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailRequest, priority bool) (bool, error) {
+	lockCtx, release, acquired, err := s.fileRepo.TryLockChapterThumbnails(ctx, req.FileID)
+	if err != nil {
+		return false, fmt.Errorf("lock chapter thumbnail extraction: %w", err)
+	}
+	if !acquired {
+		return false, nil
+	}
+	defer release()
+	ctx = lockCtx
 	file, err := s.fileRepo.GetByID(ctx, req.FileID)
 	if err != nil || file == nil {
 		if err == nil {
@@ -587,7 +598,14 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 		}
 	}
 
-	requeue := hardFileFailure == nil && hasEligibleMissingChapter(updated.Chapters, now, width)
+	// A first image may have been absent when the width coordinator scanned
+	// during extraction. Check the live width after saving; the coordinator
+	// also keeps missing images pending if this settings read fails.
+	currentWidth, widthErr := s.previewImageWidth(ctx)
+	if widthErr != nil {
+		return false, widthErr
+	}
+	requeue := hardFileFailure == nil && hasEligibleMissingChapter(updated.Chapters, now, currentWidth)
 	slog.InfoContext(ctx,
 		"chapter thumbnail processing finished", "component", "chapterthumbs",
 		"file_id",
@@ -894,11 +912,16 @@ func (s *Service) uploadChapterThumbnail(ctx context.Context, fileID, chapterInd
 	if err != nil {
 		return "", "", fmt.Errorf("encode thumbnail: %w", err)
 	}
-	key := chapterThumbnailKey(fileID, chapterIndex, width)
-	// The key may be waiting for deletion from an earlier width change that
-	// this one undoes; take it off the queue before storing under it.
+	// Immutable output keys also fence storage: a worker whose lock session
+	// dies may finish an outstanding upload, but different stale bytes cannot
+	// overwrite the image a replacement worker published.
+	digest := sha256.Sum256(data)
+	key := fmt.Sprintf("%s%d/%d-%x/w%d.webp", chapterImagesPrefix, fileID, chapterIndex, digest, width)
+	// Defer queued deletion before reusing a width, waiting for a collector
+	// that already holds the row. Keep any longer issued URL expiry: removing
+	// that protection would let file deletion collect the image too early.
 	if s.blobQueue != nil {
-		if err := s.blobQueue.Cancel(ctx, []string{key}); err != nil {
+		if err := s.blobQueue.Schedule(ctx, []string{key}, displacedImageGrace); err != nil {
 			return "", "", err
 		}
 	}
@@ -930,8 +953,8 @@ func (s *Service) previewImageWidth(ctx context.Context) (int, error) {
 	return config.PreviewImageWidth(value), nil
 }
 
-// chapterThumbnailKey is the object key a chapter's thumbnail is stored under,
-// and the value its thumbnail_path holds.
+// chapterThumbnailKey is the legacy numeric chapter-directory key. Existing
+// references remain supported alongside new immutable image keys.
 func chapterThumbnailKey(fileID, chapterIndex, width int) string {
 	return fmt.Sprintf("%s%d/%d/w%d.webp", chapterImagesPrefix, fileID, chapterIndex, width)
 }

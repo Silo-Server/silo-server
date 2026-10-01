@@ -125,11 +125,34 @@ minutes, on one server at a time. A server also reconciles as soon as it
 reads a new width or interval (it rereads the settings every minute), so a
 settings change does not wait for the next pass.
 
-Chapter thumbnails at another width enter their existing worker queue at
-startup and after a width change. A coordinator reads pages of 25 files by
+Chapter thumbnails without the current width enter their existing worker
+queue at startup and after a width change. Missing first images stay pending
+while extraction runs, and workers recheck the live width after saving, so
+a settings change during extraction keeps a follow-up queued.
+A coordinator reads pages of 25 files by
 ID and waits when the normal queue already holds 25 requests. It checks
 pending replacements every minute, including images waiting out a failure,
 and stops scanning once every stored thumbnail has the current width.
+Each chapter worker takes a database advisory lock for its file before
+reading chapters and holds it through extraction, upload, and save. Its
+session is outside the query pool, with at most one lock session per active
+worker, so generation also works with a one-connection query pool. Chapter
+state commits use the lock session; a worker whose connection dies cannot
+save after another replica takes over. Encoded image hashes make output
+keys immutable: different bytes use different chapter-index directories, so
+an upload that finishes after lock loss cannot overwrite the replacement.
+Legacy numeric chapter-index paths remain readable.
+Another replica skips that file while the lock is held; its next request
+reads the completed images. The coordinator retries any replacements left
+pending. Images replaced at another width stay stored for at least 48 hours and
+until every issued URL expires. The chapter URL resolver records actual
+expiry in the deletion queue before returning a URL. It holds file row
+locks against chapter updates and deletion, verifies the exact image is
+still referenced, and withholds stale URLs. File deletion carries the latest
+child image deadline to the parent prefix, including displaced widths.
+Protection survives replica setting differences and server restarts. Reusing
+a width postpones its queued deletion before writing and keeps any longer
+issued expiry; the upsert waits for an active collector to finish.
 
 ### Transcode nodes
 

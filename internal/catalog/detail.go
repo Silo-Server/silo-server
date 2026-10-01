@@ -4224,6 +4224,13 @@ func (s *DetailService) buildVersionChapters(ctx context.Context, file *models.M
 		return []VersionChapter{}
 	}
 
+	paths := make([]string, 0, len(file.Chapters))
+	for _, chapter := range file.Chapters {
+		if chapter.ThumbnailPath != "" {
+			paths = append(paths, chapter.ThumbnailPath)
+		}
+	}
+	resolved := s.PresignURLsWithExpiry(ctx, paths, "card")
 	chapters := make([]VersionChapter, 0, len(file.Chapters))
 	for _, chapter := range file.Chapters {
 		ch := VersionChapter{
@@ -4235,7 +4242,7 @@ func (s *DetailService) buildVersionChapters(ctx context.Context, file *models.M
 			ThumbnailThumbhash: chapter.ThumbnailThumbhash,
 		}
 		if chapter.ThumbnailPath != "" {
-			ch.ThumbnailURL = s.PresignURL(ctx, chapter.ThumbnailPath, "card")
+			ch.ThumbnailURL = resolved[chapter.ThumbnailPath].URL
 		}
 		chapters = append(chapters, ch)
 	}

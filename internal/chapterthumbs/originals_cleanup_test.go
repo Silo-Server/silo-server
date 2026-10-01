@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -59,12 +60,13 @@ func TestUploadChapterThumbnailStoresOnlyTheServedVariant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if key != "chapter-images/42/3/w320.webp" {
-		t.Fatalf("thumbnail_path = %q, want the w320 object", key)
+	if _, valid := imageKeyGroup(key); !valid || !strings.HasPrefix(key, "chapter-images/42/3-") || !strings.HasSuffix(key, "/w320.webp") {
+		t.Fatalf("thumbnail_path = %q, want an immutable w320 object", key)
 	}
-	// An earlier width change may have queued this key for deletion.
-	if !slices.Equal(queue.canceled, []string{key}) {
-		t.Fatalf("canceled %v, want the key taken off the deletion queue", queue.canceled)
+	// An earlier width change may have queued this key for deletion. Defer
+	// collection before reusing it while preserving existing URL protection.
+	if !slices.Equal(queue.scheduled, []string{key}) || queue.delay != displacedImageGrace {
+		t.Fatalf("scheduled %v after %v, want the reused key protected", queue.scheduled, queue.delay)
 	}
 	if thumbhash == "" {
 		t.Fatal("thumbhash is empty")

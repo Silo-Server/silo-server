@@ -86,8 +86,8 @@ func TestListMissingChapterThumbnailsFollowsTheWidth(t *testing.T) {
 			own = append(own, file.ID)
 		}
 	}
-	if !slices.Equal(own, []int{at300}) {
-		t.Fatalf("width backfill listed %v, want %d; missing file %d keeps its regular schedule", own, at300, missing)
+	if !slices.Equal(own, []int{at300, missing}) {
+		t.Fatalf("width backfill listed %v, want %d and missing file %d", own, at300, missing)
 	}
 	if !pending {
 		t.Fatal("width backfill forgot images waiting out a failure")

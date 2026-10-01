@@ -3868,6 +3868,7 @@ func configureBlobStorage(ctx context.Context, mode string, cfg *config.Config, 
 			External: deps.S3Public.UsesExternalDelivery(),
 		}
 	}
+	deps.ArtworkResolver = chapterthumbs.NewURLResolver(deps.DB, deps.ArtworkResolver)
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := store.Probe(probeCtx); err != nil {
