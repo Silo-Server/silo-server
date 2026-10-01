@@ -254,7 +254,7 @@ describe("cards", () => {
     expect(rows.map((node) => node.closest("div.flex")?.textContent)).toEqual([
       expect.stringMatching(/^MMainWatching now$/),
       expect.stringMatching(/^KKids.+ago$|^KKids\d/),
-      "GGuestNever used",
+      "GGuestNo device activity",
     ]);
   });
 

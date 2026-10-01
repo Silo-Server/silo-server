@@ -49,7 +49,9 @@ export function ProfilesCard({
                 ? "Watching now"
                 : profile.last_seen_at
                   ? formatLastSeen(profile.last_seen_at)
-                  : "Never used"
+                  : // Only device registrations are read here, and a failed read
+                    // also comes back empty, so this can't claim "never used".
+                    "No device activity"
             }
           />
         ))
