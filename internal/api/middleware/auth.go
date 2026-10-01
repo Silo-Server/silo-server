@@ -219,7 +219,8 @@ func validTransportStreamClaims(claims *streamtoken.Claims, sessionID string) bo
 		string(playback.PlayTranscode),
 		streamtoken.PlayMethodToneMapTranscode,
 		streamtoken.PlayMethodAudioDownmixTranscode,
-		streamtoken.PlayMethodAudioDownmixRemux:
+		streamtoken.PlayMethodAudioDownmixRemux,
+		streamtoken.PlayMethodCopyFMP4Transcode:
 		return true
 	default:
 		return false

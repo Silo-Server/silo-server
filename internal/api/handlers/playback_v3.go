@@ -270,11 +270,29 @@ func (h *PlaybackHandler) sessionCapabilityHeadersV3(mode mediaAuthModeV3, card 
 	return map[string]string{streamtoken.Header: token}
 }
 
+type plannerMediaAuthModeKeyV3 struct{}
+
+// withPlannerMediaAuthModeV3 lets route planning see the same media auth mode
+// transport preparation will use. Without it the planner derives the mode from
+// client features alone and can offer a proxy route to a session-capability
+// client whose transport is pinned to this origin.
+func withPlannerMediaAuthModeV3(ctx context.Context, mode mediaAuthModeV3) context.Context {
+	return context.WithValue(ctx, plannerMediaAuthModeKeyV3{}, mode)
+}
+
+func plannerMediaAuthModeFromContextV3(ctx context.Context) (mediaAuthModeV3, bool) {
+	mode, ok := ctx.Value(plannerMediaAuthModeKeyV3{}).(mediaAuthModeV3)
+	return mode, ok
+}
+
 func applyPreparedTransportToPlanV3(plan *playback.PlanV3, transport preparedTransportV3) {
 	if plan == nil {
 		return
 	}
 	plan.Stream.URL = transport.url
+	if len(transport.headers) == 0 {
+		return
+	}
 	// Candidate plans are by-value copies of the attempt's current plan, so
 	// they share its header map. Write into a private copy so an uncommitted
 	// replan cannot replace the stored plan's capability.
@@ -1318,7 +1336,10 @@ func retryIncompletePlaybackSettingsV3(result playback.PlannerResultV3, settings
 }
 
 func (h *PlaybackHandler) planPlaybackWithCapabilitiesV3(ctx context.Context, input playback.PlannerInputV3) (playback.PlannerResultV3, error) {
-	mode := headerAuthenticatedMediaV3(input.Request.ClientFeatures)
+	mode, ok := plannerMediaAuthModeFromContextV3(ctx)
+	if !ok {
+		mode = headerAuthenticatedMediaV3(input.Request.ClientFeatures)
+	}
 	proxyAllowed := !mode.headerAuth && h.JWTSecret != "" || mode.proxyEgress && h.proxyEgressOriginsAvailableV3()
 	snapshot := &hlsPlanningSnapshotV3{
 		handler: h, ctx: ctx, settings: input.Settings, localRegistry: input.Registry, proxyAllowed: proxyAllowed,
@@ -1781,6 +1802,7 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	if effectiveFile.PresentationPartTotal > 1 && effectiveFile.PresentationPartIndex > 0 {
 		alternateBase = effectiveFile
 	}
+	r = r.WithContext(withPlannerMediaAuthModeV3(r.Context(), mediaAuthModeForStartV3(req, playbackClientInfoForStartV3(r, req.ClientPlaybackContext).Build)))
 	result, toneMapCapabilityErr := h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{
 		Request: req, RequestedFile: requestedFile, EffectiveFile: effectiveFile,
 		ServerBitrateCapKbps: serverBitrateCapV3(r.Context()),
@@ -4835,6 +4857,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 	}()
 	start := record.NormalizedRequest
+	r = r.WithContext(withPlannerMediaAuthModeV3(r.Context(), mediaAuthModeForReplanV3(start, record.CurrentPlan)))
 	operation := req.EffectiveOperation()
 	seekReanchor := operation == playback.ReplanOperationSeekReanchorV3
 	seekFailureRecovery := operation == playback.ReplanOperationSeekFailureRecoveryV3

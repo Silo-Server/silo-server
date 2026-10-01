@@ -116,3 +116,37 @@ func TestApplyPreparedTransportToPlanV3DoesNotRewritePreviousPlanCapability(t *t
 		t.Fatalf("previous plan capability = %q after an uncommitted seek", got)
 	}
 }
+
+func TestPlannerMediaAuthModeMatchesSessionCapabilityTransport(t *testing.T) {
+	req := playback.StartRequestV3{ClientFeatures: []string{
+		playback.FeatureHeaderAuthenticatedMediaV3,
+		playback.FeatureAuthorizedMediaOriginsV3,
+		playback.FeatureDeviceQuirksV3,
+	}}
+	req.ClientPlaybackContext.Device.Platform = "tvos"
+	if featureOnly := headerAuthenticatedMediaV3(req.ClientFeatures); !featureOnly.proxyEgress {
+		t.Fatalf("feature-only mode = %#v, want proxy egress", featureOnly)
+	}
+	start := mediaAuthModeForStartV3(req, "31")
+	if !start.sessionHeaderCapability || start.proxyEgress {
+		t.Fatalf("build 31 start mode = %#v", start)
+	}
+
+	// The planner must see the transport's mode, not the feature-only default,
+	// or it can choose a proxy route the pinned transport will refuse.
+	if _, ok := plannerMediaAuthModeFromContextV3(context.Background()); ok {
+		t.Fatal("planner mode present without being set")
+	}
+	planned, ok := plannerMediaAuthModeFromContextV3(withPlannerMediaAuthModeV3(context.Background(), start))
+	if !ok || planned != start {
+		t.Fatalf("planner mode = %#v, ok = %v, want %#v", planned, ok, start)
+	}
+}
+
+func TestApplyPreparedTransportToPlanV3LeavesHeadersUntouchedWithoutCapability(t *testing.T) {
+	plan := &playback.PlanV3{}
+	applyPreparedTransportToPlanV3(plan, preparedTransportV3{url: "/stream/playback-1"})
+	if plan.Stream.URL != "/stream/playback-1" || plan.Stream.Headers != nil {
+		t.Fatalf("stream = %#v", plan.Stream)
+	}
+}

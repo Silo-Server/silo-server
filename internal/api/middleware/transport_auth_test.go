@@ -109,6 +109,7 @@ func TestRequireTransportAuthAcceptsVersionedPlaybackRecipes(t *testing.T) {
 		streamtoken.PlayMethodToneMapTranscode,
 		streamtoken.PlayMethodAudioDownmixTranscode,
 		streamtoken.PlayMethodAudioDownmixRemux,
+		streamtoken.PlayMethodCopyFMP4Transcode,
 	} {
 		t.Run(playMethod, func(t *testing.T) {
 			validator := &transportAuthTokenValidator{err: errors.New("expired access token")}
@@ -218,6 +219,10 @@ func TestRequireTransportAuthRejectsInvalidCapabilityAndFallsBack(t *testing.T) 
 		{
 			name:  "download capability",
 			token: signTransportAuthToken(t, secret, "playback-1", 7, 42, streamtoken.PlayMethodDownload, time.Hour),
+		},
+		{
+			name:  "theme song capability",
+			token: signTransportAuthToken(t, secret, "playback-1", 7, 42, streamtoken.PlayMethodThemeDirect, time.Hour),
 		},
 		{
 			name:  "expired capability",
