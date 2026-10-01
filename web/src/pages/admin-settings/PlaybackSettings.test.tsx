@@ -136,6 +136,7 @@ describe("PlaybackSettings layout", () => {
     expect(keys).toContain("playback.allow_hevc_encoding");
     expect(keys).toContain("playback.routing.video_transcode_egress");
     expect(keys).toContain("playback.watched_threshold");
+    expect(keys).toContain("playback.copy_keyframe_playlist");
     expect(keys.some((key) => key.startsWith("download."))).toBe(false);
     // Hidden tier: still saved and readable through the API, no UI.
     expect(keys).not.toContain("playback.chapter_thumbnail_node_capacity");

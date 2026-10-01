@@ -116,6 +116,10 @@ type PlaybackMediaSource struct {
 	// clients whose Dolby Vision decoder requires MPEG-TS.
 	HLSRemux       bool
 	HLSRemuxMPEGTS bool
+	// KeyframePlaylist records, for the life of the play session, that an
+	// HLS copy stream is served from a keyframe-planned playlist
+	// (playback.copy_keyframe_playlist when the session started).
+	KeyframePlaylist bool
 	// DOVIVariant marks a copy remux of Dolby Vision without a compatible base
 	// layer (HEVC profile 5, AV1 profile 10) for a client whose device profile
 	// explicitly lists DOVI. As in Jellyfin 12, the fMP4 master playlist then

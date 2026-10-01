@@ -1419,6 +1419,7 @@ func (h *PlaybackHandler) buildProxyRedirectURL(
 		claims.PlayMethod = streamtoken.PlayMethodCopyFMP4Transcode
 		claims.CopyFMP4RecipeVersion = playback.CopyFMP4RecipeVersion
 		claims.CopyVideoMPEGTS = source.HLSRemuxMPEGTS
+		claims.KeyframePlaylist = source.KeyframePlaylist
 	}
 	if compatSession != nil {
 		claims.UserID = compatSession.StreamAppUserID
@@ -1716,6 +1717,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		reqBody.TargetCodecVideo = compatCopyCodec
 		reqBody.VideoSampleEntry, reqBody.VideoBitstreamFilter = compatCopyVideoRecipe(source, file.PrimaryDVProfile())
 		reqBody.CopyVideoMPEGTS = source.HLSRemuxMPEGTS
+		reqBody.KeyframePlaylist = source.KeyframePlaylist
 		reqBody.CopyFMP4RecipeVersion = playback.CopyFMP4RecipeVersion
 	}
 	if !compatHLSTranscodesAudio(source) {
@@ -1921,6 +1923,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		VideoSampleEntry:       reqBody.VideoSampleEntry,
 		VideoBitstreamFilter:   reqBody.VideoBitstreamFilter,
 		CopyVideoMPEGTS:        reqBody.CopyVideoMPEGTS,
+		KeyframePlaylist:       reqBody.KeyframePlaylist,
 		SegmentDuration:        reqBody.SegmentDuration,
 		AudioTrackIndex:        reqBody.AudioTrackIndex,
 		SourceAudioChannels:    reqBody.SourceAudioChannels,
@@ -2268,6 +2271,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		source.HLSRemuxMPEGTS = compatWebOSDVMPEGTS(r.UserAgent(), source)
+		source.KeyframePlaylist = h.PlaybackConfig != nil && h.PlaybackConfig().KeyframePlaylist
 		applyCompatSubtitleDelivery(&source, profile, req.AlwaysBurnInSubtitleWhenTranscoding)
 		applyCompatDownloadedSubtitleDelivery(&source, profile, downloaded)
 		if source.SupportsTranscoding && !compatHLSCopiesVideo(source) && compatVersionRequiresToneMap(version) {

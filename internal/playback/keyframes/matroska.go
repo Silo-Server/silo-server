@@ -16,6 +16,16 @@ import (
 // for its video track.
 var ErrNoIndex = errors.New("keyframes: no keyframe index")
 
+// notMatroskaError reports a file that isn't Matroska or WebM: a stable fact
+// about the file, unlike a read failure.
+type notMatroskaError struct{}
+
+func (notMatroskaError) Error() string { return "keyframes: not a Matroska file" }
+
+func isShortRead(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
+}
+
 // Index is a file's video keyframe times, in seconds on the container's
 // timeline, ascending and without duplicates.
 type Index struct {
@@ -65,19 +75,26 @@ const (
 func ReadMatroska(r io.ReaderAt, size int64) (Index, error) {
 	id, dataSize, headerLen, err := readElementHeader(r, 0)
 	if err != nil {
+		if isShortRead(err) {
+			// Empty, or not starting with an EBML element at all.
+			return Index{}, notMatroskaError{}
+		}
 		return Index{}, fmt.Errorf("keyframes: read EBML header: %w", err)
 	}
 	if id != idEBML {
-		return Index{}, fmt.Errorf("keyframes: not a Matroska file")
+		return Index{}, notMatroskaError{}
 	}
 	pos := headerLen + dataSize
 
 	id, segSize, headerLen, err := readElementHeader(r, pos)
 	if err != nil {
+		if isShortRead(err) {
+			return Index{}, notMatroskaError{}
+		}
 		return Index{}, fmt.Errorf("keyframes: read segment: %w", err)
 	}
 	if id != idSegment {
-		return Index{}, fmt.Errorf("keyframes: missing segment")
+		return Index{}, notMatroskaError{}
 	}
 	segStart := pos + headerLen
 	segEnd := size
