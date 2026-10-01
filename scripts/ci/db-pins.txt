@@ -117,6 +117,8 @@
 ./internal/trickplay TestReaderWithholdsRevisionDisplacedWhileSigningDB
 ./internal/trickplay TestStaleReconcileCannotDowngradeConcurrentUpgradeDB
 ./internal/api/handlers TestLibraryExplicitTrickplayUpdateAlwaysReconcilesPostgres
+
+./internal/trickplay TestReaderRevalidatesServingWhileSigningDB
 ./internal/trickplay TestOptOutReconcilePreservesConcurrentClaimDB
 ./internal/trickplay TestRegenerateFencesOlderWorkersDB
 ./internal/trickplay TestReconcileUsesOneConnectionDB

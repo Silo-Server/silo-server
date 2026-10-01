@@ -122,3 +122,36 @@ func TestRetiredTrickplayOutlivesIssuedURLsDB(t *testing.T) {
 		}
 	}
 }
+
+func TestReaderRevalidatesServingWhileSigningDB(t *testing.T) {
+	for _, change := range []string{"opt-out", "disabled", "file-changed", "store-changed"} {
+		t.Run(change, func(t *testing.T) {
+			f := newFixture(t)
+			folder := f.library(t, "movies", true)
+			file := f.file(t, folder, change)
+			f.reconcile(t)
+			f.generate(t, file, "server")
+			if _, err := f.repo.Regenerate(t.Context(), []int{file}); err != nil {
+				t.Fatal(err)
+			}
+			if job, err := f.repo.ClaimFile(t.Context(), file, "replacement", time.Hour); err != nil || job == nil {
+				t.Fatalf("claim: %v %v", job, err)
+			}
+			urls := retentionURLs{base: time.Now().Add(72 * time.Hour), before: func() {
+				switch change {
+				case "opt-out":
+					f.exec(t, `UPDATE media_folders SET trickplay_enabled=false WHERE id=$1`, folder)
+				case "disabled":
+					f.exec(t, `UPDATE media_folders SET enabled=false WHERE id=$1`, folder)
+				case "file-changed":
+					f.exec(t, `UPDATE media_files SET file_size=file_size+1 WHERE id=$1`, file)
+				case "store-changed":
+					f.exec(t, `UPDATE media_file_trickplay SET store_identity='other' WHERE media_file_id=$1`, file)
+				}
+			}}
+			if signed, ok, err := NewReader(f.pool, identityStore(testStore), urls).SignedManifest(t.Context(), file); err != nil || ok {
+				t.Fatalf("stale manifest returned: %+v %v %v", signed, ok, err)
+			}
+		})
+	}
+}
