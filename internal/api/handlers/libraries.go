@@ -242,6 +242,13 @@ type updateLibraryRequest struct {
 	TrickplayEnabled *bool `json:"-"`
 }
 
+// affectsTrickplay reports whether the update can change which of the
+// library's files get seek previews: the setting itself, the library type,
+// or whether the library is enabled.
+func (r updateLibraryRequest) affectsTrickplay() bool {
+	return r.TrickplayEnabled != nil || r.Type != nil || r.Enabled != nil
+}
+
 // scanRequest represents the JSON body for POST /scan.
 type scanRequest struct {
 	LibraryID *int   `json:"library_id,omitempty"`
