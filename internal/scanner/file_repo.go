@@ -4090,7 +4090,7 @@ func (r *FileRepository) ListChapterThumbnailsAtOtherWidths(ctx context.Context,
 	}
 	// A final page also checks missing images and images waiting out a failure
 	// or still queued.
-	// The service repeats completed scans to pick up library eligibility changes.
+	// The service repeats scans until this work is complete.
 	var pending bool
 	err = r.pool.QueryRow(ctx, `SELECT EXISTS (
 		SELECT 1 FROM media_files mf
@@ -4109,6 +4109,19 @@ func (r *FileRepository) ListChapterThumbnailsAtOtherWidths(ctx context.Context,
 		return nil, false, fmt.Errorf("checking remaining chapter thumbnail widths: %w", err)
 	}
 	return files, pending, nil
+}
+
+// ChapterThumbnailLibraryKey fingerprints only the eligible library IDs. Once
+// a width backfill completes, polling this small table avoids expanding every
+// media file's chapter JSON while still noticing library enable and opt-in edits.
+func (r *FileRepository) ChapterThumbnailLibraryKey(ctx context.Context) (string, error) {
+	var key string
+	err := r.pool.QueryRow(ctx, `SELECT md5(COALESCE(string_agg(id::text, ',' ORDER BY id), ''))
+		FROM media_folders WHERE enabled AND chapter_thumbnails_enabled`).Scan(&key)
+	if err != nil {
+		return "", fmt.Errorf("checking chapter thumbnail library eligibility: %w", err)
+	}
+	return key, nil
 }
 
 // nilIfEmpty returns nil if the string is empty, otherwise a pointer to it.

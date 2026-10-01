@@ -31,6 +31,7 @@ func widthQueueService(repo FileRepository) *Service {
 		fileRepo:        repo,
 		settings:        testSettingsReader{values: map[string]string{config.PreviewImageWidthSettingKey: "320"}},
 		notifyNormal:    make(chan struct{}, 1),
+		notifyPriority:  make(chan struct{}, 1),
 		widthQueueSpace: make(chan struct{}, 1),
 		queuedNormal:    map[int]ChapterThumbnailRequest{},
 		queuedPriority:  map[int]ChapterThumbnailRequest{},

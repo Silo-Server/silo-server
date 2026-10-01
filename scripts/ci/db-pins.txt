@@ -16,7 +16,9 @@
 ./internal/trickplay TestTrickplayQueuesBigintMediaFileIDsDB
 ./internal/trickplay TestExpiredLeaseRejectsCompletionBeforeReconcileDB
 ./internal/trickplay TestSameOwnerReclaimRejectsPriorAttemptDB
+./internal/trickplay TestRegenerateFencesOlderWorkersDB
 ./internal/trickplay TestRevisionProtectionIsMonotonicAndFollowsTheRevisionDB
+./internal/trickplay TestRevisionProtectionReusesCoveredExpiryDB
 ./internal/trickplay TestServiceRecordsFailureWithClaimTokenDB
 ./internal/trickplay TestRetiredTrickplayOutlivesIssuedURLsDB
 ./internal/trickplay TestReaderProtectsLatestSheetExpiryDB
@@ -63,6 +65,8 @@
 # Seek previews: one availability lookup per item or episode page.
 ./internal/catalog TestTrickplayAvailabilityBatchesItemDetails
 ./internal/catalog TestTrickplayAvailabilityBatchesEpisodeDetails
+./internal/catalog TestEpisodeDetailsFallBackAfterBatchFileFailureDB
+./internal/jellycompat TestTrickplayNegotiatedSourceSurvivesAPIReplicaDB
 
 # Listings: COUNT queries only when a total is requested and cannot be derived
 # from the page.
@@ -112,28 +116,32 @@
 ./internal/api/handlers TestLibraryExplicitTrickplayUpdateAlwaysReconcilesPostgres
 ./internal/trickplay TestReaderRevalidatesServingWhileSigningDB
 ./internal/trickplay TestAdminClassifiesIneligibleFilesDB
+./internal/trickplay TestAdminReclassifiesTrackedIneligibleFilesDB
+./internal/trickplay TestAdminRejectsUnsupportedLibraryTypesDB
 ./internal/trickplay TestAdminRetryKeepsPublishedPreviewsDB
 ./internal/trickplay TestAdminResolvesMultiEpisodeFileDB
 ./migrations TestChapterReplacementAtomicallyQueuesImagesPostgres
 
 ./internal/trickplay TestOptOutReconcilePreservesConcurrentClaimDB
+./internal/trickplay TestReconcileUsesOneConnectionDB
 
 ./internal/chapterthumbs TestCompletedWidthScanRechecksLibraryEligibilityDB
+./internal/chapterthumbs TestPriorityChapterRequestSurvivesReplicaContentionDB
 ./internal/scanner TestChapterLockSessionsRespectPoolBudgetDB
 ./internal/scanner TestChapterLockFailedConnectReleasesBudgetDB
 ./internal/scanner TestChapterLockSessionsSerializeDistinctPoolsDB
 ./internal/chapterthumbs TestChapterBudgetRetainsQueuedUnprobedFileDB
-./internal/trickplay TestRegenerateFencesOlderWorkersDB
-./internal/trickplay TestRevisionProtectionReusesCoveredExpiryDB
-./internal/catalog TestEpisodeDetailsFallBackAfterBatchFileFailureDB
-./internal/jellycompat TestTrickplayNegotiatedSourceSurvivesAPIReplicaDB
-./internal/trickplay TestAdminReclassifiesTrackedIneligibleFilesDB
-./internal/trickplay TestAdminRejectsUnsupportedLibraryTypesDB
-./internal/trickplay TestReconcileUsesOneConnectionDB
+
+./internal/chapterthumbs TestWidthBackfillDefersCatalogScansUntilRetryDB
+./internal/scanner TestChapterLockReusesHealthySessionsDB
+# Seek preview workers stop after a library or file becomes ineligible.
 ./internal/trickplay TestLibraryTypeChangeFencesWorkerProgressDB
 ./internal/trickplay TestLibraryTypeChangeRetiresFinishedAndExpiredWorkDB
 ./internal/trickplay TestIneligibleFilesCannotProgressAndCanFinishDB
 ./internal/trickplay TestTypeChangeReconcilePreservesConcurrentClaimDB
+
+# Seek preview discovery follows current eligibility and retains issued URLs.
 ./internal/trickplay TestLibraryTypeChangeSuppressesAndRetiresTrickplayDB
 ./internal/trickplay TestNormalizedVideoLibraryTypesRemainEligibleDB
 ./internal/trickplay TestCurrentFileEligibilitySuppressesTrickplayDB
+./internal/scanner TestChapterLockDiscardsUndecodableAcquisitionDB

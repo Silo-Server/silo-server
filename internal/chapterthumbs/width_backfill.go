@@ -19,14 +19,24 @@ func (s *Service) followPreviewWidth(ctx context.Context) {
 }
 
 func (s *Service) followPreviewWidthTicks(ctx context.Context, ticks <-chan time.Time) {
+	completedWidth := 0
+	completedLibraries := ""
 	for ctx.Err() == nil {
 		width, err := s.previewImageWidth(ctx)
 		if err == nil {
-			// A completed scan only covers the libraries eligible at that time.
-			// Recheck at the current width so a later enable or opt-in is seen.
-			_, err = s.queueWidthBackfill(ctx, width)
-			if errors.Is(err, errPreviewWidthChanged) {
-				continue
+			var libraries string
+			libraries, err = s.fileRepo.ChapterThumbnailLibraryKey(ctx)
+			if err == nil && (width != completedWidth || libraries != completedLibraries) {
+				var pending bool
+				pending, err = s.queueWidthBackfill(ctx, width)
+				if errors.Is(err, errPreviewWidthChanged) {
+					continue
+				}
+				if err == nil && !pending {
+					// The key was read before scanning. A library enabled during
+					// the scan changes it and triggers another pass next time.
+					completedWidth, completedLibraries = width, libraries
+				}
 			}
 		}
 		if err != nil && ctx.Err() == nil {

@@ -3,6 +3,7 @@ package chapterthumbs
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -29,6 +30,7 @@ const (
 	defaultBatchLimit          = 25
 	defaultPriorityBatchSize   = 3
 	defaultNormalBatchSize     = 8
+	chapterLockRetryDelay      = time.Second
 	hwExtractTimeoutSDR        = 8 * time.Second
 	hwExtractTimeoutHDR        = 20 * time.Second
 	cpuExtractTimeoutSDR       = 10 * time.Second
@@ -56,6 +58,8 @@ var chapterThumbnailRetrySchedule = []time.Duration{
 	24 * time.Hour,
 }
 
+var errChapterThumbnailLockBusy = errors.New("chapter thumbnail extraction is already running on another replica")
+
 type FileRepository interface {
 	// Take this guard before reading a file, and hold it until extraction
 	// results are saved, so replicas cannot process stale chapters together.
@@ -66,6 +70,9 @@ type FileRepository interface {
 	// currentSuffix, made at another width.
 	ListMissingChapterThumbnails(ctx context.Context, limit int, currentSuffix string) ([]*models.MediaFile, error)
 	ListChapterThumbnailsAtOtherWidths(ctx context.Context, limit int, currentSuffix string, afterID int) ([]*models.MediaFile, bool, error)
+	// ChapterThumbnailLibraryKey changes when the set of enabled libraries
+	// opted into chapter thumbnails changes, without reading media files.
+	ChapterThumbnailLibraryKey(context.Context) (string, error)
 	UpdateChapterThumbnailState(
 		ctx context.Context,
 		fileID int,
@@ -115,6 +122,8 @@ type ThumbnailNotifier interface {
 type ChapterThumbnailRequest struct {
 	FileID        int
 	TargetSeconds *float64
+	// Set by dequeue so an ordinary worker preserves playback priority.
+	priority bool
 }
 
 type Service struct {
@@ -162,6 +171,7 @@ type Service struct {
 	normalQueue    []int
 	queuedPriority map[int]ChapterThumbnailRequest
 	queuedNormal   map[int]ChapterThumbnailRequest
+	priorityRetry  map[int]time.Time
 	inProgress     map[int]struct{}
 
 	transcodePool      *nodepool.TranscodePool
@@ -359,8 +369,10 @@ func (s *Service) worker(ctx context.Context, priorityOnly bool) {
 		if !ok {
 			return
 		}
-		requeueNormal, err := s.processRequest(ctx, req, priorityOnly)
-		if err != nil {
+		requeueNormal, err := s.processRequest(ctx, req, req.priority)
+		if errors.Is(err, errChapterThumbnailLockBusy) {
+			s.retryPriorityRequest(req)
+		} else if err != nil {
 			slog.WarnContext(ctx, "chapter thumbnail generation failed", "component", "chapterthumbs", "file_id", req.FileID, "error", err)
 		}
 		notifyPriority, notifyNormal := s.finishProcessing(req.FileID)
@@ -382,6 +394,9 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 		return false, fmt.Errorf("lock chapter thumbnail extraction: %w", err)
 	}
 	if !acquired {
+		if priority {
+			return false, errChapterThumbnailLockBusy
+		}
 		return false, nil
 	}
 	defer release()
@@ -1058,6 +1073,40 @@ func mergeRequest(existing ChapterThumbnailRequest, incoming ChapterThumbnailReq
 	return existing
 }
 
+// retryPriorityRequest retains a contended playback request while workers can
+// serve other files. A newer queued target takes precedence over this attempt.
+func (s *Service) retryPriorityRequest(req ChapterThumbnailRequest) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if existing, ok := s.queuedPriority[req.FileID]; ok {
+		req = mergeRequest(req, existing)
+	} else {
+		delete(s.queuedNormal, req.FileID)
+		s.priorityQueue = append(s.priorityQueue, req.FileID)
+	}
+	s.queuedPriority[req.FileID] = req
+	if s.priorityRetry == nil {
+		s.priorityRetry = make(map[int]time.Time)
+	}
+	s.priorityRetry[req.FileID] = time.Now().Add(chapterLockRetryDelay)
+}
+
+func (s *Service) nextPriorityRetryLocked() <-chan time.Time {
+	var earliest time.Time
+	for fileID, retryAfter := range s.priorityRetry {
+		if _, busy := s.inProgress[fileID]; busy {
+			continue
+		}
+		if _, queued := s.queuedPriority[fileID]; queued && (earliest.IsZero() || retryAfter.Before(earliest)) {
+			earliest = retryAfter
+		}
+	}
+	if earliest.IsZero() {
+		return nil
+	}
+	return time.After(max(time.Until(earliest), 0))
+}
+
 func (s *Service) notifyNormalWorker() {
 	select {
 	case s.notifyNormal <- struct{}{}:
@@ -1125,6 +1174,7 @@ func (s *Service) nextRequest(ctx context.Context, priorityOnly bool) (ChapterTh
 				return req, true
 			}
 		}
+		retry := s.nextPriorityRetryLocked()
 		s.mu.Unlock()
 
 		if priorityOnly {
@@ -1132,6 +1182,7 @@ func (s *Service) nextRequest(ctx context.Context, priorityOnly bool) (ChapterTh
 			case <-ctx.Done():
 				return ChapterThumbnailRequest{}, false
 			case <-s.notifyPriority:
+			case <-retry:
 			}
 			continue
 		}
@@ -1141,6 +1192,7 @@ func (s *Service) nextRequest(ctx context.Context, priorityOnly bool) (ChapterTh
 			return ChapterThumbnailRequest{}, false
 		case <-s.notifyPriority:
 		case <-s.notifyNormal:
+		case <-retry:
 		}
 	}
 }
@@ -1170,6 +1222,11 @@ func (s *Service) popQueuedLocked(priority bool) (ChapterThumbnailRequest, bool)
 		if _, busy := s.inProgress[fileID]; busy {
 			continue
 		}
+		if priority && time.Now().Before(s.priorityRetry[fileID]) {
+			continue
+		}
+		req.priority = priority
+		delete(s.priorityRetry, fileID)
 		delete(queued, fileID)
 		s.inProgress[fileID] = struct{}{}
 		*queue = append((*queue)[:i], (*queue)[i+1:]...)
