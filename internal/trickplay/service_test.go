@@ -467,3 +467,80 @@ func TestNewWidthReconcilesRightAway(t *testing.T) {
 		t.Fatal("a new width did not reconcile")
 	}
 }
+
+// TestRequestedReconcileRetriesAfterLockContention keeps a requested pass
+// that another server's lock skipped: the server tries again.
+func TestRequestedReconcileRetriesAfterLockContention(t *testing.T) {
+	s := newService(newFakeQueue(), &fakeStore{}, fakeSettings{}, &fakeExtractor{}, "node-a")
+	s.reconcileRetry = 5 * time.Millisecond
+	passes := make(chan bool, 4)
+	calls := 0
+	s.reconcilePass = func(context.Context) (ReconcileStats, bool, error) {
+		// The first pass finds the lock taken.
+		calls++
+		ran := calls > 1
+		passes <- ran
+		return ReconcileStats{}, ran, nil
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.reconcileOnRequest(ctx)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+	s.ReconcileSoon()
+	for _, want := range []bool{false, true} {
+		select {
+		case ran := <-passes:
+			if ran != want {
+				t.Fatalf("pass ran=%v, want %v", ran, want)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("a pass skipped by lock contention was not retried")
+		}
+	}
+}
+
+// settingExtractor changes a setting while a run is in progress.
+type settingExtractor struct {
+	fakeExtractor
+	settings *lockedSettings
+}
+
+func (e *settingExtractor) Extract(ctx context.Context, job *Job, req mediasample.Request) (mediasample.Result, error) {
+	e.settings.set(WidthSetting, "320")
+	return e.fakeExtractor.Extract(ctx, job, req)
+}
+
+// TestPublishAtOldRecipeRequestsReconcile requeues sheets made to settings
+// that changed while the run held its lease, since that run's reconcile
+// skipped the row.
+func TestPublishAtOldRecipeRequestsReconcile(t *testing.T) {
+	settings := &lockedSettings{values: map[string]string{WidthSetting: "300"}}
+	q := newFakeQueue()
+	s := newService(q, &fakeStore{}, settings, &settingExtractor{settings: settings}, "node-a")
+	s.logger = slog.New(slog.DiscardHandler)
+
+	s.process(t.Context(), testJob(9, 600))
+
+	if q.published[9].Recipe.Width != 300 {
+		t.Fatalf("published %+v, want the recipe in force at the start", q.published[9].Recipe)
+	}
+	select {
+	case <-s.reconcile:
+	default:
+		t.Fatal("publishing an outdated recipe did not request a reconcile")
+	}
+
+	// Unchanged settings request nothing.
+	s.process(t.Context(), testJob(10, 600))
+	select {
+	case <-s.reconcile:
+		t.Fatal("a current recipe requested a reconcile")
+	default:
+	}
+}

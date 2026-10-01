@@ -48,6 +48,9 @@ const (
 	// idlePoll is how often an idle server looks for work it was not told
 	// about; Kick wakes it sooner.
 	idlePoll = time.Minute
+	// reconcileRetryDelay spaces another attempt at a requested reconcile
+	// that another server's lock or an error skipped.
+	reconcileRetryDelay = 30 * time.Second
 	// maxChunkSheets bounds the sheets one ffmpeg run makes, which bounds
 	// the memory of a run and the size of a transcode node's answer.
 	maxChunkSheets = 16
@@ -114,10 +117,14 @@ type Service struct {
 	wake      chan struct{}
 	reconcile chan struct{}
 	now       func() time.Time
-	// heartbeatEvery paces lease renewals and settingsEvery paces rereading
-	// the settings; tests replace them.
+	// heartbeatEvery paces lease renewals, settingsEvery paces rereading
+	// the settings, and reconcileRetry paces another attempt at a requested
+	// pass that another server's lock or an error skipped; tests replace
+	// them, and reconcilePass.
 	heartbeatEvery time.Duration
 	settingsEvery  time.Duration
+	reconcileRetry time.Duration
+	reconcilePass  func(ctx context.Context) (ReconcileStats, bool, error)
 }
 
 // NewService returns a service that claims work as nodeID. It returns nil
@@ -132,7 +139,7 @@ func NewService(pool *pgxpool.Pool, store Store, settings SettingsReader, extrac
 }
 
 func newService(q queue, store Store, settings SettingsReader, extractor Extractor, nodeID string) *Service {
-	return &Service{
+	s := &Service{
 		queue:          q,
 		store:          store,
 		settings:       settings,
@@ -145,7 +152,10 @@ func newService(q queue, store Store, settings SettingsReader, extractor Extract
 		now:            time.Now,
 		heartbeatEvery: heartbeatInterval,
 		settingsEvery:  idlePoll,
+		reconcileRetry: reconcileRetryDelay,
 	}
+	s.reconcilePass = s.Reconcile
+	return s
 }
 
 // leaseOwner names this process in leases: the node, and a token that is
@@ -187,9 +197,22 @@ func (s *Service) reconcileOnRequest(ctx context.Context) {
 			return
 		case <-s.reconcile:
 		}
-		if _, _, err := s.Reconcile(ctx); err != nil && ctx.Err() == nil {
+		_, ran, err := s.reconcilePass(ctx)
+		if err != nil && ctx.Err() == nil {
 			s.logger.WarnContext(ctx, "trickplay reconcile failed", "error", err)
 		}
+		if ran && err == nil {
+			continue
+		}
+		// Another server held the lock or the pass failed. A settings change
+		// is noticed once per server, so try again rather than leave the
+		// old recipe in place until the periodic pass.
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(s.reconcileRetry):
+		}
+		s.ReconcileSoon()
 	}
 }
 
@@ -273,6 +296,12 @@ func (s *Service) process(ctx context.Context, job *Job) {
 	if err == nil {
 		log.InfoContext(ctx, "trickplay sheets published", "thumbnails", published.Count, "sheets", len(published.SheetBytes),
 			"decoder", published.Decoder, "filled", published.Filled)
+		// A reconcile run while this job held its lease skipped the row, so
+		// sheets made to settings that changed meanwhile are requeued now
+		// rather than at the periodic pass.
+		if current, err := s.Recipe(recordCtx); err == nil && current != published.Recipe {
+			s.ReconcileSoon()
+		}
 		return
 	}
 	outcome, delay := s.classify(ctx, err)
