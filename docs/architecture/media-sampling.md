@@ -136,7 +136,11 @@ keep `-loglevel warning`.
 An attempt with `Hardware` set decodes the request's video on the runner's
 `HWAccel` (`hwdecode.go`). `HWAccel` is a backend the caller resolved with
 `playback.ResolveHWAccelWithFFmpegContext` from `playback.hw_accel` and
-`playback.hw_device`, never `auto`. Only QSV, VAAPI, and VideoToolbox decode
+`playback.hw_device`, never `auto`. A consumer that samples repeatedly keeps a
+`HardwareResolver` (`hwresolver.go`), which caches the resolved backend per
+configured pair until the playback probe cache is invalidated, and asks again
+after `HardwareRetryInterval` when `auto` resolved to no hardware; credits
+detection uses one. Only QSV, VAAPI, and VideoToolbox decode
 here (`SupportsHardwareDecode`); NVENC does not. A hardware attempt needs a
 video output (`Images` or `Stats`). Audio in the same run always decodes in
 software.
