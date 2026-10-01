@@ -74,8 +74,10 @@ returns its actual cell height as `sheet_tile_height`. It passes node
 bearer authentication and approved-input-path authority first, runs one
 request at a time (a second answers `503` with reason `node_busy`), runs at
 idle priority, and decodes on the node's own hardware: it drops hardware
-attempts its accelerator cannot run and holds the GPU admission gate only
-when a hardware attempt remains. Failures use `trickplay.ExtractError` JSON;
+attempts its accelerator cannot run. It takes the GPU admission gate before
+resolving the hardware backend, which can run probes, and holds it for the
+whole run, software attempts included, so an admin re-probe is refused until
+the run ends. Failures use `trickplay.ExtractError` JSON;
 a `422` carries the sampling cause and whether it is `permanent` (a cause in
 the file itself). Nodes advertise the endpoint as the
 `trickplay_extract_v1` transport feature. It has no replay receipt and is
