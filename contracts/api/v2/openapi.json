@@ -195925,6 +195925,9 @@
           "input_path": {
             "type": "string"
           },
+          "keyframe_playlist": {
+            "type": "boolean"
+          },
           "require_ready": {
             "type": "boolean"
           },
