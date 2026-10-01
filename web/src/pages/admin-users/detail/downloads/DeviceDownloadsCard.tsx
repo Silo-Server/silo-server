@@ -231,12 +231,15 @@ export function DeviceDownloadsCard({
           <span className="text-muted-foreground hidden text-xs tabular-nums sm:inline">
             {totals.filter(Boolean).join(" · ")}
           </span>
-          <Button variant="outline" size="sm" asChild>
-            <Link to={`/admin/devices/${userId}/${encodeURIComponent(deviceId)}`}>
-              Open device
-              <ArrowUpRight className="h-3 w-3" />
-            </Link>
-          </Button>
+          {/* A device no longer registered or holding settings has no detail page. */}
+          {device ? (
+            <Button variant="outline" size="sm" asChild>
+              <Link to={`/admin/devices/${userId}/${encodeURIComponent(deviceId)}`}>
+                Open device
+                <ArrowUpRight className="h-3 w-3" />
+              </Link>
+            </Button>
+          ) : null}
         </>
       }
     >

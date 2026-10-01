@@ -221,6 +221,18 @@ describe("DownloadsTab", () => {
     expect(within(iphone).queryByText("S03E02 · Next")).not.toBeInTheDocument();
   });
 
+  it("has no device link for a download whose device is gone", async () => {
+    downloads.push(row("9", { title: "Orphan", device_id: "gone-device" }));
+    try {
+      renderTab();
+      const heading = await screen.findByRole("heading", { name: "Unknown device" });
+      const card = heading.closest("section")!;
+      expect(within(card).queryByRole("link", { name: /Open device/ })).not.toBeInTheDocument();
+    } finally {
+      downloads.pop();
+    }
+  });
+
   it("counts stats separately for Android and lists monitored series", async () => {
     renderTab();
     await screen.findByRole("heading", { name: "iPhone 17" });
