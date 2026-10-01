@@ -6,6 +6,12 @@ interface SaveBarProps {
   onSave: () => void;
   onDiscard: () => void;
   isSaving: boolean;
+  saveLabel?: string;
+  /**
+   * False while nothing staged can be saved as it stands, e.g. every edit is
+   * waiting on a reload after another admin's change. Discard stays available.
+   */
+  canSave?: boolean;
 }
 
 function plural(count: number, word: string) {
@@ -19,7 +25,14 @@ function plural(count: number, word: string) {
  * prompt is `RestartBanner`, rendered once by the admin shell at the top of
  * every admin page.
  */
-export function SaveBar({ dirtyCount, onSave, onDiscard, isSaving }: SaveBarProps) {
+export function SaveBar({
+  dirtyCount,
+  onSave,
+  onDiscard,
+  isSaving,
+  saveLabel = "Save",
+  canSave = true,
+}: SaveBarProps) {
   if (dirtyCount <= 0) return null;
 
   return (
@@ -51,11 +64,11 @@ export function SaveBar({ dirtyCount, onSave, onDiscard, isSaving }: SaveBarProp
             </Button>
             <Button
               size="sm"
-              onClick={onSave}
-              disabled={isSaving}
+              onClick={() => onSave()}
+              disabled={isSaving || !canSave}
               className="rounded-full bg-[var(--settings-accent)] text-[#15151a] hover:bg-[var(--settings-accent)] hover:brightness-110"
             >
-              {isSaving ? "Saving..." : "Save"}
+              {isSaving ? "Saving..." : saveLabel}
             </Button>
           </span>
         </div>

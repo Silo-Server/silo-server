@@ -10,7 +10,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 type LibraryCollectionGroupHandler struct {
@@ -53,27 +52,12 @@ func (h *LibraryCollectionGroupHandler) HandleListGroups(w http.ResponseWriter, 
 	if !ok {
 		return
 	}
-	groups, err := h.groupRepo.ListByLibrary(r.Context(), libraryID)
+	view, err := h.ListAdminCollectionGroups(r.Context(), libraryID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load groups")
+		writeAPIError(w, err)
 		return
 	}
-	if groups == nil {
-		groups = []models.LibraryCollectionGroup{}
-	}
-
-	ungroupedSortOrder := 9999
-	if h.groupRepo != nil {
-		var err error
-		if ungroupedSortOrder, err = h.groupRepo.GetUngroupedSortOrder(r.Context(), libraryID); err != nil {
-			ungroupedSortOrder = 9999
-		}
-	}
-
-	writeJSON(w, http.StatusOK, listGroupsResponse{
-		Groups:             toLibraryCollectionGroupResponses(groups),
-		UngroupedSortOrder: ungroupedSortOrder,
-	})
+	writeJSON(w, http.StatusOK, view)
 }
 
 func (h *LibraryCollectionGroupHandler) HandleCreateGroup(w http.ResponseWriter, r *http.Request) {
@@ -86,27 +70,12 @@ func (h *LibraryCollectionGroupHandler) HandleCreateGroup(w http.ResponseWriter,
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid JSON body")
 		return
 	}
-	if req.Name == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "name required")
-		return
-	}
-	in := catalog.CreateLibraryCollectionGroupInput{
-		LibraryID: libraryID,
-		Name:      req.Name,
-		Kind:      models.GroupKindRegular,
-	}
-	if req.Slug != nil {
-		in.Slug = *req.Slug
-	}
-	if req.DefaultSortMode != nil {
-		in.DefaultSortMode = models.GroupSortMode(*req.DefaultSortMode)
-	}
-	g, err := h.groupRepo.Create(r.Context(), in)
+	view, err := h.CreateAdminCollectionGroup(r.Context(), libraryID, req)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create group")
+		writeAPIError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, toLibraryCollectionGroupResponse(*g))
+	writeJSON(w, http.StatusCreated, view)
 }
 
 func (h *LibraryCollectionGroupHandler) HandleUpdateGroup(w http.ResponseWriter, r *http.Request) {
@@ -120,21 +89,12 @@ func (h *LibraryCollectionGroupHandler) HandleUpdateGroup(w http.ResponseWriter,
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid JSON body")
 		return
 	}
-	in := catalog.UpdateLibraryCollectionGroupInput{Name: req.Name, Slug: req.Slug}
-	if req.DefaultSortMode != nil {
-		mode := models.GroupSortMode(*req.DefaultSortMode)
-		in.DefaultSortMode = &mode
-	}
-	g, err := h.groupRepo.Update(r.Context(), id, in)
+	view, err := h.UpdateAdminCollectionGroup(r.Context(), id, req)
 	if err != nil {
-		if errors.Is(err, catalog.ErrLibraryCollectionGroupNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Group not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update group")
+		writeAPIError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, toLibraryCollectionGroupResponse(*g))
+	writeJSON(w, http.StatusOK, view)
 }
 
 func (h *LibraryCollectionGroupHandler) HandleDeleteGroup(w http.ResponseWriter, r *http.Request) {
@@ -143,12 +103,8 @@ func (h *LibraryCollectionGroupHandler) HandleDeleteGroup(w http.ResponseWriter,
 		writeError(w, http.StatusBadRequest, "bad_request", "id required")
 		return
 	}
-	if err := h.groupRepo.Delete(r.Context(), id); err != nil {
-		if errors.Is(err, catalog.ErrLibraryCollectionGroupNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Group not found")
-			return
-		}
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+	if err := h.DeleteAdminCollectionGroup(r.Context(), id); err != nil {
+		writeAPIError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

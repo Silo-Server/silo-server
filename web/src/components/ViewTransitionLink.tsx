@@ -1,8 +1,8 @@
 import { forwardRef } from "react";
-import { createPath, Link, useResolvedPath } from "react-router";
+import { createPath, Link, useLocation, useResolvedPath } from "react-router";
 import type { LinkProps } from "react-router";
 import { useSidebarItemNavigation } from "@/components/sidebarItemNavigationContext";
-import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
+import { shouldUseRouteViewTransition, useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { markNavigationDirection } from "@/lib/navigationHistory";
 
 type ViewTransitionLinkProps = LinkProps &
@@ -24,6 +24,7 @@ const ViewTransitionLink = forwardRef<HTMLAnchorElement, ViewTransitionLinkProps
   function ViewTransitionLink({ to, replace, state, up = false, onClick, children, ...rest }, ref) {
     const beginSidebarItemNavigation = useSidebarItemNavigation();
     const navigate = useViewTransitionNavigate();
+    const location = useLocation();
     const resolvedPath = useResolvedPath(to);
 
     return (
@@ -63,7 +64,18 @@ const ViewTransitionLink = forwardRef<HTMLAnchorElement, ViewTransitionLinkProps
             replace,
             state,
           });
-          if (intercepted) event.preventDefault();
+          if (intercepted) {
+            event.preventDefault();
+            return;
+          }
+
+          // React Router's <Link> needs the decision before its own click
+          // handler runs. Route the small set of snapshot-free navigations
+          // through the same imperative chokepoint used everywhere else.
+          if (!shouldUseRouteViewTransition(location.pathname, resolvedPath.pathname)) {
+            event.preventDefault();
+            navigate(resolvedPath, { replace, state, viewTransition: false });
+          }
         }}
         viewTransition
         {...rest}

@@ -56,6 +56,16 @@ describe("AdminSectionCommandDialog", () => {
     expect(screen.getByRole("option", { name: /Dashboard/ })).toBeInTheDocument();
   });
 
+  it("opens and focuses admin search with Ctrl+K", async () => {
+    renderDialog();
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    const searchBox = await screen.findByRole("searchbox", { name: "Search admin sections" });
+
+    await waitFor(() => expect(searchBox).toHaveFocus());
+    expect(screen.getByRole("option", { name: /Dashboard/ })).toBeInTheDocument();
+  });
+
   it("searches all admin section groups", async () => {
     renderDialog();
 
@@ -108,7 +118,7 @@ describe("AdminSectionCommandDialog", () => {
     await userEvent.type(searchBox, "arrproxy");
     await userEvent.click(screen.getByRole("option", { name: /ArrProxy/ }));
 
-    expect(mocks.navigateToPluginRoute).toHaveBeenCalledWith("/api/v1/plugins/7/");
+    expect(mocks.navigateToPluginRoute).toHaveBeenCalledWith("/api/v2/plugin-content/plugins/7/");
     expect(screen.queryByRole("searchbox", { name: "Search admin sections" })).toBeNull();
   });
 

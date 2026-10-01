@@ -34,6 +34,29 @@ func TestEffectiveAdminSettingsUsesRuntimeDefaults(t *testing.T) {
 	}
 }
 
+func TestEffectiveAdminSettingsMarkerDefaultsPreserveExplicitModes(t *testing.T) {
+	for _, mode := range []string{"", "off", "local", "online", "both"} {
+		t.Run("mode_"+mode, func(t *testing.T) {
+			effective := EffectiveAdminSettings(map[string]string{"markers.mode": mode})
+			want := mode
+			if want == "" {
+				want = "both"
+			}
+			if got := effective["markers.mode"]; got != want {
+				t.Fatalf("markers.mode = %q, want %q", got, want)
+			}
+			if got := effective["markers.online_storage"]; got != "stored" {
+				t.Fatalf("markers.online_storage = %q, want stored", got)
+			}
+			for _, key := range []string{"markers.detect_intros", "markers.detect_credits"} {
+				if got := effective[key]; got != "true" {
+					t.Fatalf("%s = %q, want true", key, got)
+				}
+			}
+		})
+	}
+}
+
 func TestEffectiveAdminSettingsUsesLegacyS3FallbacksBeforeDefaults(t *testing.T) {
 	effective := EffectiveAdminSettings(map[string]string{
 		"s3.operational_path_style": "false",
@@ -241,9 +264,11 @@ func TestNormalizeAdminSettingRejectsInvalidValues(t *testing.T) {
 		{key: "theme.catalog_url", value: "http://raw.githubusercontent.com/Silo-Server/silo-themes/main/catalog.json"},
 		{key: "theme.catalog_url", value: "https://example.com/catalog.json"},
 		{key: "redis.url", value: "not-a-url"},
+		{key: "playback.segment_retention_seconds", value: "119"},
 		{key: "scanner.max_concurrent_libraries", value: "0"},
 		{key: "scanner.max_concurrent_scoped", value: "-1"},
 		{key: "scanner.empty_trash_after_scan", value: "sometimes"},
+		{key: "scanner.realtime_monitoring", value: "sometimes"},
 		{key: "scanner.file_removal_grace", value: "a while"},
 		{key: "matcher.enable_tv_series_root_queue", value: "yes please"},
 		{key: "matcher.enable_tv_series_group_queue", value: "yes please"},
@@ -258,6 +283,20 @@ func TestNormalizeAdminSettingRejectsInvalidValues(t *testing.T) {
 		t.Run(tc.key, func(t *testing.T) {
 			if _, err := NormalizeAdminSetting(tc.key, tc.value); err == nil {
 				t.Fatalf("NormalizeAdminSetting(%q, %q) returned nil error", tc.key, tc.value)
+			}
+		})
+	}
+}
+
+func TestNormalizeAdminSettingAcceptsSegmentRetentionBounds(t *testing.T) {
+	for _, value := range []string{"0", "120", "86400"} {
+		t.Run(value, func(t *testing.T) {
+			got, err := NormalizeAdminSetting("playback.segment_retention_seconds", value)
+			if err != nil {
+				t.Fatalf("NormalizeAdminSetting: %v", err)
+			}
+			if got != value {
+				t.Fatalf("normalized retention = %q, want %q", got, value)
 			}
 		})
 	}
@@ -283,6 +322,81 @@ func TestNormalizeAdminSettingAcceptsVideoToolbox(t *testing.T) {
 	}
 	if got != "videotoolbox" {
 		t.Fatalf("normalized hardware acceleration = %q, want videotoolbox", got)
+	}
+}
+
+func TestNormalizeAdminSettingAcceptsPlaybackRoutingEnums(t *testing.T) {
+	tests := map[string]string{
+		PlaybackRoutingRemuxExecutionSettingKey:          "prefer_transcode",
+		PlaybackRoutingVideoTranscodeExecutionSettingKey: "prefer_api",
+		PlaybackRoutingDirectPlayEgressSettingKey:        "proxy_only",
+		PlaybackRoutingRemuxEgressSettingKey:             "api_only",
+		PlaybackRoutingVideoTranscodeEgressSettingKey:    "prefer_proxy",
+	}
+	for key, value := range tests {
+		got, err := NormalizeAdminSetting(key, "  "+value+"  ")
+		if err != nil {
+			t.Fatalf("NormalizeAdminSetting(%q): %v", key, err)
+		}
+		if got != value {
+			t.Fatalf("NormalizeAdminSetting(%q) = %q, want %q", key, got, value)
+		}
+	}
+	if _, err := NormalizeAdminSetting(PlaybackRoutingRemuxExecutionSettingKey, "sometimes_worker"); err == nil {
+		t.Fatal("invalid execution preference was accepted")
+	}
+	if _, err := NormalizeAdminSetting(PlaybackRoutingRemuxEgressSettingKey, "worker"); err == nil {
+		t.Fatal("invalid egress preference was accepted")
+	}
+}
+
+func TestPlaybackRoutingDefaultsPreferTranscodeExecutionAndProxyEgress(t *testing.T) {
+	cfg, err := LoadFromDB(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := PlaybackRoutingPolicy{
+		DirectPlayEgress:        PlaybackEgressPreferProxy,
+		RemuxExecution:          PlaybackExecutionPreferTranscode,
+		RemuxEgress:             PlaybackEgressPreferProxy,
+		VideoTranscodeExecution: PlaybackExecutionPreferTranscode,
+		VideoTranscodeEgress:    PlaybackEgressPreferProxy,
+	}
+	if cfg.Playback.Routing != want {
+		t.Fatalf("routing = %#v, want %#v", cfg.Playback.Routing, want)
+	}
+	if defaults := DefaultPlaybackRoutingPolicy(); defaults != want {
+		t.Fatalf("runtime defaults = %#v, want %#v", defaults, want)
+	}
+}
+
+func TestValidateAdminSettingsRejectsImpossibleHardPlaybackRoute(t *testing.T) {
+	values := map[string]string{
+		PlaybackRoutingRemuxExecutionSettingKey: "api_only",
+		PlaybackRoutingRemuxEgressSettingKey:    "proxy_only",
+	}
+	if err := ValidateAdminSettings(values); err == nil {
+		t.Fatal("API-only remux with proxy-only egress was accepted")
+	}
+	values = map[string]string{
+		PlaybackRoutingVideoTranscodeExecutionSettingKey: "api_only",
+		PlaybackRoutingVideoTranscodeEgressSettingKey:    "proxy_only",
+	}
+	if err := ValidateAdminSettings(values); err == nil {
+		t.Fatal("API-only video transcode with proxy-only egress was accepted")
+	}
+}
+
+func TestLoadFromDBRejectsInvalidStoredPlaybackRoutingEnums(t *testing.T) {
+	for key, value := range map[string]string{
+		PlaybackRoutingRemuxExecutionSettingKey:   "sometimes_worker",
+		PlaybackRoutingDirectPlayEgressSettingKey: "worker",
+	} {
+		t.Run(key, func(t *testing.T) {
+			if _, err := LoadFromDB(map[string]string{key: value}); err == nil {
+				t.Fatalf("LoadFromDB() accepted %s=%q", key, value)
+			}
+		})
 	}
 }
 
@@ -372,12 +486,13 @@ func TestHiddenTierDefaultsAreExposed(t *testing.T) {
 		"recommendations.embedding_provider":     "ollama",
 		"recommendations.embeddings_job_timeout": "24h",
 		"policy.editor_enabled":                  "false",
-		"policy.eval_timeout_ms":                 "25",
+		"policy.eval_timeout_ms":                 "100",
 		"subtitle_ai.live_asr_chunk_seconds":     "30",
 		"scanner.max_concurrent_libraries":       "1",
 		"scanner.max_concurrent_scoped":          "2",
 		"scanner.file_removal_grace":             "24h",
 		"scanner.empty_trash_after_scan":         "true",
+		"scanner.realtime_monitoring":            "true",
 		"matcher.enable_tv_series_root_queue":    "true",
 		"matcher.enable_tv_series_group_queue":   "false",
 		"opslog.capture_level":                   "info",
@@ -390,5 +505,20 @@ func TestHiddenTierDefaultsAreExposed(t *testing.T) {
 		if _, err := NormalizeAdminSetting(key, value); err != nil {
 			t.Errorf("default for %q is rejected by NormalizeAdminSetting: %v", key, err)
 		}
+	}
+}
+
+func TestHEVCEncodingSettingDefaultAndValidation(t *testing.T) {
+	if got := EffectiveAdminSettings(nil)[PlaybackAllowHEVCEncodingSettingKey]; got != "false" {
+		t.Fatalf("HEVC default=%q", got)
+	}
+	for _, raw := range []string{"true", "false"} {
+		got, err := NormalizeAdminSetting(PlaybackAllowHEVCEncodingSettingKey, raw)
+		if err != nil || got != raw {
+			t.Fatalf("normalize %q: %q %v", raw, got, err)
+		}
+	}
+	if _, err := NormalizeAdminSetting(PlaybackAllowHEVCEncodingSettingKey, "invalid"); err == nil {
+		t.Fatal("invalid HEVC boolean accepted")
 	}
 }

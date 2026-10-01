@@ -10,8 +10,12 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/streamtoken"
+	"github.com/Silo-Server/silo-server/internal/transcodenode"
 )
 
 // The negotiated mode's whole promise is that nothing the client can see
@@ -76,9 +80,14 @@ func TestPlaybackURLBuildersRefuseTokensForMediaAuthorizedSessions(t *testing.T)
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-stream-signing-secret"
 	file := v3HandlerFixtureFile(t)
-	proxy := &nodepool.Node{URL: "http://proxy.example"}
+	proxy := &nodepool.Node{ID: 71, URL: "http://proxy.example"}
 
-	secure := &playback.Session{ID: "session-secure", UserID: 7, ProfileID: "profile-1", MediaFileID: file.ID, PlayMethod: playback.PlayDirect, RequireMediaAuthorization: true}
+	secure := &playback.Session{
+		ID: "session-secure", UserID: 7, ProfileID: "profile-1", MediaFileID: file.ID,
+		PlayMethod: playback.PlayDirect, RequireMediaAuthorization: true,
+		RoutingWorkload: string(noderouting.WorkloadDirectPlay), RoutingExecution: string(noderouting.ExecutionNone),
+		RoutingEgress: string(noderouting.EgressProxy),
+	}
 	legacy := *secure
 	legacy.ID = "session-legacy"
 	legacy.RequireMediaAuthorization = false
@@ -90,19 +99,31 @@ func TestPlaybackURLBuildersRefuseTokensForMediaAuthorizedSessions(t *testing.T)
 		t.Fatalf("legacy stream URL = %q, want a restart token", got)
 	}
 
-	if got, servedByProxy := handler.identityStreamURLV3(secure, file, proxy); servedByProxy || got != "/stream/session-secure" {
+	if got, servedByProxy := handler.identityStreamURLV3(secure, file, proxy, netaccess.Path{}); servedByProxy || got != "/stream/session-secure" {
 		t.Fatalf("secure identity URL = %q (proxy %v), want the API-local route", got, servedByProxy)
 	}
-	if got, servedByProxy := handler.identityStreamURLV3(&legacy, file, proxy); !servedByProxy || !strings.HasPrefix(got, proxy.URL) {
+	if got, servedByProxy := handler.identityStreamURLV3(&legacy, file, proxy, netaccess.Path{}); !servedByProxy || !strings.HasPrefix(got, proxy.URL) {
 		t.Fatalf("legacy identity URL = %q (proxy %v), want the signed proxy route", got, servedByProxy)
 	}
 
 	card := playback.NewRecipeCard(secure.UserID, secure.ProfileID, file.ID, "", playback.TranscodeOpts{SessionID: secure.ID, InputPath: file.FilePath})
-	if got := handler.buildProxyManifestURL(card, proxy, true); got != "/playback/transcode/session-secure/master.m3u8" {
+	card.RoutingWorkload = string(noderouting.WorkloadVideoTranscode)
+	card.RoutingExecution = string(noderouting.ExecutionTranscode)
+	card.RoutingEgress = string(noderouting.EgressProxy)
+	if got := handler.buildProxyManifestURL(card, proxy, true, netaccess.Path{}); got != "/playback/transcode/session-secure/master.m3u8" {
 		t.Fatalf("secure manifest URL = %q, want the tokenless API-local manifest", got)
 	}
-	if got := handler.buildProxyManifestURL(card, proxy, false); !strings.HasPrefix(got, proxy.URL+"/stream/transcode/") {
-		t.Fatalf("legacy manifest URL = %q, want the signed proxy manifest", got)
+	legacyManifestURL := handler.buildProxyManifestURL(card, proxy, false, netaccess.Path{})
+	if !strings.HasPrefix(legacyManifestURL, proxy.URL+"/stream/transcode/") {
+		t.Fatalf("legacy manifest URL = %q, want the signed proxy manifest", legacyManifestURL)
+	}
+	manifestToken := strings.TrimSuffix(strings.TrimPrefix(legacyManifestURL, proxy.URL+"/stream/transcode/"), "/master.m3u8")
+	manifestClaims, err := streamtoken.Verify(manifestToken, handler.JWTSecret)
+	if err != nil {
+		t.Fatalf("verify proxy manifest token: %v", err)
+	}
+	if manifestClaims.RoutingEgressNodeID != 71 {
+		t.Fatalf("manifest token egress node ID = %d, want 71", manifestClaims.RoutingEgressNodeID)
 	}
 	if token := handler.signSessionToken(card, true); token != "" {
 		t.Fatalf("signer minted a token for a media-authorized session: %q", token)
@@ -116,20 +137,25 @@ func TestPlaybackURLBuildersRefuseTokensForMediaAuthorizedSessions(t *testing.T)
 	// must never fall back to minting the credential the mode removed.
 	grants := &recordingRecipeCardStoreV3{}
 	handler.ProxyGrantStore = grants
-	got, servedByProxy, _ := handler.identityGrantStreamURLV3(context.Background(), secure, file, proxy)
+	got, servedByProxy, _ := handler.identityGrantStreamURLV3(context.Background(), secure, file, proxy, netaccess.Path{})
 	if !servedByProxy || got != proxy.URL+"/stream/v3/session-secure" {
 		t.Fatalf("origins identity URL = %q (proxy %v), want the credential-free proxy route", got, servedByProxy)
 	}
 	assertNoPlaybackCredentialV3(t, got)
-	if _, ok := grants.cards["session-secure"]; !ok {
+	if grant, ok := grants.cards["session-secure"]; !ok {
 		t.Fatal("origins identity URL was published without a grant behind it")
+	} else if grant.RoutingEgressNodeID != 71 {
+		t.Fatalf("identity grant egress node ID = %d, want 71", grant.RoutingEgressNodeID)
 	}
 
-	got, servedByProxy, _ = handler.grantManifestURLV3(context.Background(), card, proxy)
+	got, servedByProxy, _ = handler.grantManifestURLV3(context.Background(), card, proxy, netaccess.Path{})
 	if !servedByProxy || got != proxy.URL+"/stream/v3/session-secure/master.m3u8" {
 		t.Fatalf("origins manifest URL = %q (proxy %v), want the credential-free proxy manifest", got, servedByProxy)
 	}
 	assertNoPlaybackCredentialV3(t, got)
+	if grant := grants.cards["session-secure"]; grant.RoutingEgressNodeID != 71 {
+		t.Fatalf("manifest grant egress node ID = %d, want 71", grant.RoutingEgressNodeID)
+	}
 }
 
 // escalationFixtureV3 plans a progressive remux that must convert audio, which
@@ -141,16 +167,53 @@ func escalationFixtureV3(t *testing.T, hlsCapable bool) (*PlaybackHandler, playb
 	file.CodecAudio = "eac3"
 	file.AudioTracks = []models.AudioTrack{{Codec: "eac3", Channels: 6, Layout: "5.1", Default: true}}
 
+	handler, input, result := progressiveRemuxFixtureV3(t, file, hlsCapable)
+	if !planRequiresServerTransformationsV3(result.Plan) {
+		t.Fatalf("fixture plan carries no server transformation: %#v", result.Plan.Transformations)
+	}
+	return handler, input, result
+}
+
+// copyOnlyEscalationFixtureV3 plans the lightest remux there is: the codecs are
+// already playable and only the container has to change, so the plan carries no
+// transformation at all. remux_execution=worker_only refuses it on the API
+// exactly as it refuses a converting one, so it needs the same escalation.
+func copyOnlyEscalationFixtureV3(t *testing.T) (*PlaybackHandler, playback.PlannerInputV3, playback.PlannerResultV3) {
+	t.Helper()
+	file := v3HandlerFixtureFile(t)
+	file.Container = "mkv"
+	file.FilePath = writePlaybackTestMediaFile(t, "movie.mkv")
+
+	handler, input, result := progressiveRemuxFixtureV3(t, file, true)
+	if planRequiresServerTransformationsV3(result.Plan) {
+		t.Fatalf("fixture plan is not copy-only: %#v", result.Plan.Transformations)
+	}
+	return handler, input, result
+}
+
+// progressiveRemuxFixtureV3 builds the worker-only handler and the planner input
+// both escalation fixtures share, and asserts the source plans a progressive
+// remux before any escalation runs.
+func progressiveRemuxFixtureV3(t *testing.T, file *models.MediaFile, hlsCapable bool) (*PlaybackHandler, playback.PlannerInputV3, playback.PlannerResultV3) {
+	t.Helper()
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{
-		"allow_4k_transcode":                "true",
-		"playback.local_transcode_fallback": "false",
+		"allow_4k_transcode": "true",
 	}}
+	requireWorkerRoutingV3(handler)
 	registry := playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
 		{Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, Available: true},
 		{Name: playback.TransformationVideoToH264V3, RecipeVersion: playback.TransformationVideoToH264RecipeVersionV3, Available: true},
 	})
 	presetLocalRegistryV3(handler, registry)
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, playback.HWAccelInfo{Transformations: []playback.TransformationV3{{
+			Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3,
+			RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3,
+		}}})
+	}))
+	t.Cleanup(worker.Close)
+	handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{TranscodeNode: &nodepool.Node{URL: worker.URL}}}
 
 	request := v3HandlerStartRequest()
 	request.QualityPreference = "auto"
@@ -168,10 +231,7 @@ func escalationFixtureV3(t *testing.T, hlsCapable bool) (*PlaybackHandler, playb
 	}
 	result := playback.PlanPlaybackV3(input)
 	if result.Terminal != nil || result.Plan == nil || result.Plan.Delivery != playback.DeliveryRemuxProgressiveV3 {
-		t.Fatalf("fixture planned %#v, want a progressive remux", result)
-	}
-	if !planRequiresServerTransformationsV3(result.Plan) {
-		t.Fatalf("fixture plan carries no server transformation: %#v", result.Plan.Transformations)
+		t.Fatalf("fixture planned %s, want a progressive remux", playback.ExplainPlannerResultV3(result))
 	}
 	return handler, input, result
 }
@@ -190,6 +250,58 @@ func TestEscalateRefusedProgressiveRemuxV3PlansHLSForCapableClients(t *testing.T
 	}
 }
 
+// worker_only refuses every API remux, including a container-only copy that
+// converts nothing. Escalation therefore cannot key on how heavy the recipe is:
+// the copy-only remux has no progressive route either, and must reach the same
+// HLS delivery a pooled transcode node serves instead of hard-failing while the
+// heavier remux plays.
+func TestEscalateRefusedProgressiveRemuxV3EscalatesCopyOnlyRemuxes(t *testing.T) {
+	handler, input, result := copyOnlyEscalationFixtureV3(t)
+	escalated, transportErr := handler.escalateRefusedProgressiveRemuxV3(context.Background(), mediaAuthModeV3{headerAuth: true}, func() playback.PlannerInputV3 { return input }, result)
+	if transportErr != nil {
+		t.Fatalf("escalation error = %#v", transportErr)
+	}
+	if escalated.Terminal != nil || escalated.Plan == nil || escalated.Plan.Delivery != playback.DeliveryRemuxHLSV3 {
+		t.Fatalf("escalated result = %s, want %q", playback.ExplainPlannerResultV3(escalated), playback.DeliveryRemuxHLSV3)
+	}
+
+	// The escalation is only worth anything if the delivery it picked actually
+	// runs somewhere: prove a pooled transcode node ends up executing it.
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/hw-capabilities":
+			writeJSON(w, http.StatusOK, playback.HWAccelInfo{})
+		case r.Method == http.MethodPost && r.URL.Path == "/transcode/start":
+			var start transcodenode.TranscodeStartRequest
+			if err := json.NewDecoder(r.Body).Decode(&start); err != nil {
+				t.Errorf("decode remote start: %v", err)
+			}
+			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{
+				SessionID: start.SessionID, Status: "started", CopyFMP4RecipeVersion: start.CopyFMP4RecipeVersion,
+			})
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer node.Close()
+	handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{TranscodeNode: &nodepool.Node{ID: 9, URL: node.URL}}}
+
+	transport, transportErr := handler.prepareTransportV3(
+		httptest.NewRequest(http.MethodPost, "/", nil),
+		&playback.Session{ID: "session-copy-only-escalated", UserID: 7, ProfileID: "profile-1"},
+		input.EffectiveFile,
+		escalated,
+		mediaAuthModeV3{headerAuth: true})
+	if transportErr != nil {
+		t.Fatalf("prepare escalated transport: %#v", transportErr)
+	}
+	defer transport.rollback()
+
+	if transport.routingExecution != noderouting.ExecutionTranscode || transport.routingExecutorURL != node.URL {
+		t.Fatalf("escalated execution = %q on %q, want the pooled transcode node %q", transport.routingExecution, transport.routingExecutorURL, node.URL)
+	}
+}
+
 // A progressive-only client has no alternative delivery, so the refusal is
 // final: a retryable error would make it retry a route no retry can satisfy.
 func TestEscalateRefusedProgressiveRemuxV3IsTerminalForProgressiveOnlyClients(t *testing.T) {
@@ -202,6 +314,7 @@ func TestEscalateRefusedProgressiveRemuxV3IsTerminalForProgressiveOnlyClients(t 
 
 func TestEscalateRefusedProgressiveRemuxV3LeavesExecutableRoutesAlone(t *testing.T) {
 	handler, input, result := escalationFixtureV3(t, true)
+	useDefaultRoutingV3(handler)
 	planned := 0
 	plannerInput := func() playback.PlannerInputV3 {
 		planned++
@@ -210,7 +323,6 @@ func TestEscalateRefusedProgressiveRemuxV3LeavesExecutableRoutesAlone(t *testing
 	if escalated, transportErr := handler.escalateRefusedProgressiveRemuxV3(context.Background(), mediaAuthModeV3{}, plannerInput, result); transportErr != nil || escalated.Plan.Delivery != playback.DeliveryRemuxProgressiveV3 {
 		t.Fatalf("legacy attempt was escalated: %#v %#v", escalated.Plan, transportErr)
 	}
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"playback.local_transcode_fallback": "true"}}
 	if escalated, transportErr := handler.escalateRefusedProgressiveRemuxV3(context.Background(), mediaAuthModeV3{headerAuth: true}, plannerInput, result); transportErr != nil || escalated.Plan.Delivery != playback.DeliveryRemuxProgressiveV3 {
 		t.Fatalf("locally executable remux was escalated: %#v %#v", escalated.Plan, transportErr)
 	}
@@ -315,15 +427,15 @@ func TestProxyURLBuildersUseThePublicURLWhenSet(t *testing.T) {
 	proxy := &nodepool.Node{URL: "http://10.0.0.9:8083", PublicURL: &public}
 
 	session := &playback.Session{ID: "session-public", UserID: 7, ProfileID: "profile-1", MediaFileID: file.ID, PlayMethod: playback.PlayDirect}
-	if got, servedByProxy := handler.identityStreamURLV3(session, file, proxy); !servedByProxy || !strings.HasPrefix(got, public+"/stream/direct/") {
+	if got, servedByProxy := handler.identityStreamURLV3(session, file, proxy, netaccess.Path{}); !servedByProxy || !strings.HasPrefix(got, public+"/stream/direct/") {
 		t.Fatalf("identity URL = %q (proxy %v), want the public origin", got, servedByProxy)
 	}
 
 	card := playback.NewRecipeCard(session.UserID, session.ProfileID, file.ID, "", playback.TranscodeOpts{SessionID: session.ID, InputPath: file.FilePath})
-	if got := handler.buildProxyManifestURL(card, proxy, false); !strings.HasPrefix(got, public+"/stream/transcode/") {
+	if got := handler.buildProxyManifestURL(card, proxy, false, netaccess.Path{}); !strings.HasPrefix(got, public+"/stream/transcode/") {
 		t.Fatalf("manifest URL = %q, want the public origin", got)
 	}
-	if strings.Contains(handler.buildProxyManifestURL(card, proxy, false), "10.0.0.9") {
+	if strings.Contains(handler.buildProxyManifestURL(card, proxy, false, netaccess.Path{}), "10.0.0.9") {
 		t.Fatalf("manifest URL leaked the backend address")
 	}
 }

@@ -8,6 +8,12 @@ import (
 )
 
 var jellycompatMediaRoutes = []streamtelemetry.MediaRoute{
+	compatRoute(http.MethodGet, "/Audio/{itemId}/stream", streamtelemetry.ClassTransfer, false),
+	compatRoute(http.MethodHead, "/Audio/{itemId}/stream", streamtelemetry.ClassTransfer, false),
+	compatRoute(http.MethodGet, "/Audio/{itemId}/stream.{container}", streamtelemetry.ClassTransfer, false),
+	compatRoute(http.MethodHead, "/Audio/{itemId}/stream.{container}", streamtelemetry.ClassTransfer, false),
+	compatRoute(http.MethodGet, "/Audio/{itemId}/universal", streamtelemetry.ClassTransfer, false),
+	compatRoute(http.MethodHead, "/Audio/{itemId}/universal", streamtelemetry.ClassTransfer, false),
 	compatRoute(http.MethodGet, "/Playback/BitrateTest", streamtelemetry.ClassTransfer, false),
 	compatRoute(http.MethodGet, "/Items/{id}/Download", streamtelemetry.ClassTransfer, false),
 	compatRoute(http.MethodHead, "/Items/{id}/Download", streamtelemetry.ClassTransfer, false),
@@ -25,8 +31,21 @@ var jellycompatMediaRoutes = []streamtelemetry.MediaRoute{
 	compatRoute(http.MethodGet, "/Videos/{id}/audio-v2/master.m3u8", streamtelemetry.ClassManifest, true),
 	compatRoute(http.MethodGet, "/Videos/{id}/audio-v2/hls/{playlistId}/stream.m3u8", streamtelemetry.ClassManifest, true),
 	compatRoute(http.MethodGet, "/Videos/{id}/audio-v2/hls/{playlistId}/{segmentId}.{segmentContainer}", streamtelemetry.ClassPlayback, true),
+	compatRoute(http.MethodGet, "/Videos/{id}/hevc-v1/master.m3u8", streamtelemetry.ClassManifest, true),
+	compatRoute(http.MethodGet, "/Videos/{id}/hevc-v1/hls/{playlistId}/stream.m3u8", streamtelemetry.ClassManifest, true),
+	compatRoute(http.MethodGet, "/Videos/{id}/hevc-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", streamtelemetry.ClassPlayback, true),
+	compatRoute(http.MethodGet, "/Videos/{id}/remux-v1/master.m3u8", streamtelemetry.ClassManifest, true),
+	compatRoute(http.MethodGet, "/Videos/{id}/remux-v1/hls/{playlistId}/stream.m3u8", streamtelemetry.ClassManifest, true),
+	compatRoute(http.MethodGet, "/Videos/{id}/remux-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", streamtelemetry.ClassPlayback, true),
+	compatRoute(http.MethodGet, "/Videos/{id}/remux-ts-v1/master.m3u8", streamtelemetry.ClassManifest, true),
+	compatRoute(http.MethodGet, "/Videos/{id}/remux-ts-v1/hls/{playlistId}/stream.m3u8", streamtelemetry.ClassManifest, true),
+	compatRoute(http.MethodGet, "/Videos/{id}/remux-ts-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", streamtelemetry.ClassPlayback, true),
+	compatRoute(http.MethodGet, "/Videos/{id}/remux-dv-v1/master.m3u8", streamtelemetry.ClassManifest, true),
+	compatRoute(http.MethodGet, "/Videos/{id}/remux-dv-v1/hls/{playlistId}/stream.m3u8", streamtelemetry.ClassManifest, true),
+	compatRoute(http.MethodGet, "/Videos/{id}/remux-dv-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", streamtelemetry.ClassPlayback, true),
+	compatRoute(http.MethodGet, "/Videos/{id}/{routeMediaSourceId}/Attachments/{routeIndex}", streamtelemetry.ClassPlayback, true),
 	compatRoute(http.MethodGet, "/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}", streamtelemetry.ClassPlayback, true),
-	compatRoute(http.MethodGet, "/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeDeliveryIndex}/stream.{routeFormat}", streamtelemetry.ClassPlayback, true),
+	compatRoute(http.MethodGet, "/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeStartPositionTicks}/stream.{routeFormat}", streamtelemetry.ClassPlayback, true),
 }
 
 func compatRoute(method, pattern string, class streamtelemetry.Class, capRelevant bool) streamtelemetry.MediaRoute {

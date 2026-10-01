@@ -37,6 +37,7 @@ type SourceMode string
 const (
 	SourceModeMDBList     SourceMode = "mdblist_json"
 	SourceModeTMDBPreset  SourceMode = "tmdb_preset"
+	SourceModeTMDBList    SourceMode = "tmdb_list"
 	SourceModeTraktPreset SourceMode = "trakt_preset"
 )
 
@@ -92,6 +93,8 @@ func (c SourceConfig) DisplayURL() string {
 			return fmt.Sprintf("tmdb://%s/%s/%s", c.Preset, c.MediaType, c.TimeWindow)
 		}
 		return fmt.Sprintf("tmdb://%s/%s", c.Preset, c.MediaType)
+	case SourceModeTMDBList:
+		return c.URL
 	case SourceModeTraktPreset:
 		if c.Preset == "recommended" {
 			return fmt.Sprintf("trakt://%s/%s/%s", c.Preset, c.MediaType, c.ProfileID)

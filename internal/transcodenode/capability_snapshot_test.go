@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -75,6 +76,7 @@ func TestHealthPublishesStoredCapabilityHashWithoutProbing(t *testing.T) {
 // otherwise the API would refetch a report it already has.
 func TestHWCapabilitiesPublishesCapabilityHash(t *testing.T) {
 	server := newTestServer(t)
+	server.nodeRowID = func() (int, bool) { return 42, true }
 
 	request := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil)
 	request.Header.Set("Authorization", "Bearer "+testSecret)
@@ -94,6 +96,9 @@ func TestHWCapabilitiesPublishesCapabilityHash(t *testing.T) {
 	if info.CapabilityHash == "" {
 		t.Fatal("served capability report carries no capability_hash")
 	}
+	if !slices.Contains(info.TransportFeatures, playback.TransportFeatureProgressiveRemuxExecutionV1) {
+		t.Fatalf("transport features = %v, want progressive remux execution", info.TransportFeatures)
+	}
 	// The hash must describe this payload, not some earlier one.
 	served := info
 	served.CapabilityHash = ""
@@ -102,6 +107,29 @@ func TestHWCapabilitiesPublishesCapabilityHash(t *testing.T) {
 	}
 	if got := decodeHealth(t, server).CapabilitiesHash; got != info.CapabilityHash {
 		t.Fatalf("health capabilities_hash = %q, want the just-served %q", got, info.CapabilityHash)
+	}
+}
+
+func TestHWCapabilitiesWithholdsProgressiveRemuxWithoutNodeIdentity(t *testing.T) {
+	server := newTestServer(t)
+
+	request := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil)
+	request.Header.Set("Authorization", "Bearer "+testSecret)
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, request)
+
+	if recorder.Code == http.StatusServiceUnavailable {
+		t.Skip("this host's ffmpeg cannot answer a capability probe")
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var info playback.HWAccelInfo
+	if err := json.Unmarshal(recorder.Body.Bytes(), &info); err != nil {
+		t.Fatalf("decode capabilities: %v", err)
+	}
+	if slices.Contains(info.TransportFeatures, playback.TransportFeatureProgressiveRemuxExecutionV1) {
+		t.Fatalf("transport features = %v, want progressive remux withheld without a resolved node row", info.TransportFeatures)
 	}
 }
 

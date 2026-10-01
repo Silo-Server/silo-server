@@ -4,6 +4,34 @@ import type { NavigateOptions, To } from "react-router";
 
 import { markNavigationDirection } from "@/lib/navigationHistory";
 
+const DESKTOP_SIDEBAR_QUERY = "(min-width: 64rem)";
+
+function isItemRoute(pathname: string): boolean {
+  return pathname.startsWith("/item/");
+}
+
+function isHomeItemBoundary(currentPathname: string, targetPathname: string): boolean {
+  return (
+    (currentPathname === "/" && isItemRoute(targetPathname)) ||
+    (isItemRoute(currentPathname) && targetPathname === "/")
+  );
+}
+
+/**
+ * Home and item detail have very different scroll heights. On desktop only,
+ * their existing live sidebar/main transforms carry the boundary without also
+ * rasterizing and scaling a full-height page snapshot. Every other route keeps
+ * its existing View Transition behavior unchanged.
+ */
+export function shouldUseRouteViewTransition(
+  currentPathname: string,
+  targetPathname: string,
+): boolean {
+  if (!isHomeItemBoundary(currentPathname, targetPathname)) return true;
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return true;
+  return !window.matchMedia(DESKTOP_SIDEBAR_QUERY).matches;
+}
+
 export interface ViewTransitionNavigateOptions extends NavigateOptions {
   /**
    * The destination is an ancestor of where we are now, not a new place: play
@@ -17,7 +45,7 @@ export interface ViewTransitionNavigateOptions extends NavigateOptions {
 }
 
 /**
- * The app's imperative navigation chokepoint: opts every navigation into React
+ * The app's imperative navigation chokepoint: opts navigations into React
  * Router's view transitions and stamps the direction `main-content` should move
  * in before the router opens the transition.
  *
@@ -51,13 +79,18 @@ export function useViewTransitionNavigate() {
         return;
       }
 
-      const { up = false, ...navigateOptions } = options ?? {};
+      const {
+        up = false,
+        viewTransition: requestedViewTransition = true,
+        ...navigateOptions
+      } = options ?? {};
       const current = locationRef.current;
       // React Router resolves a relative `to` against the matched route rather
       // than the raw pathname. Every href this app navigates with is absolute,
       // where the two agree; a relative `to` could disagree and turn a push
       // into a replace, so callers pass absolute paths.
-      const target = createPath(resolvePath(to, current.pathname));
+      const resolvedTarget = resolvePath(to, current.pathname);
+      const target = createPath(resolvedTarget);
       // React Router gives `<Link>` the same-URL guard for free; the imperative
       // path gets nothing, and a second identical entry makes the browser's
       // back button look broken.
@@ -67,7 +100,10 @@ export function useViewTransitionNavigate() {
       // normal push either way, so every caller keeps its own entry semantics
       // and every NavigateOptions field is forwarded on both paths.
       markNavigationDirection(up ? "back" : "forward");
-      navigate(to, { ...navigateOptions, replace, viewTransition: true });
+      const viewTransition =
+        requestedViewTransition &&
+        shouldUseRouteViewTransition(current.pathname, resolvedTarget.pathname);
+      navigate(to, { ...navigateOptions, replace, viewTransition });
     },
     [navigate],
   );

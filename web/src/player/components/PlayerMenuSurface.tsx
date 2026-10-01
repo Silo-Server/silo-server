@@ -1,4 +1,4 @@
-import { useEffect, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { useCoarsePointer } from "../hooks/useCoarsePointer";
 
 interface PlayerMenuSurfaceProps {
@@ -6,6 +6,12 @@ interface PlayerMenuSurfaceProps {
   className: string;
   onClose: () => void;
   onKeyDown?: (event: KeyboardEvent<HTMLDivElement>) => void;
+  /**
+   * The menu's trigger wrapper. A pointer press outside it closes the menu.
+   * Focus-based dismissal alone is not enough: Safari does not focus buttons
+   * on click, so the trigger never blurs.
+   */
+  anchorRef?: RefObject<HTMLElement | null>;
 }
 
 export function PlayerMenuSurface({
@@ -13,21 +19,36 @@ export function PlayerMenuSurface({
   className,
   onClose,
   onKeyDown,
+  anchorRef,
 }: PlayerMenuSurfaceProps) {
   const isCoarsePointer = useCoarsePointer();
 
   useEffect(() => {
-    if (!isCoarsePointer) return;
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isCoarsePointer, onClose]);
+  }, [onClose]);
+
+  // Coarse pointers get a full-screen backdrop button instead.
+  useEffect(() => {
+    if (isCoarsePointer || !anchorRef) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!anchorRef.current?.contains(event.target as Node)) onClose();
+    };
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    return () => document.removeEventListener("pointerdown", handlePointerDown, true);
+  }, [anchorRef, isCoarsePointer, onClose]);
 
   if (!isCoarsePointer) {
     return (
-      <div role="menu" className={className} onKeyDown={onKeyDown}>
+      <div
+        role="menu"
+        className={`player-menu-surface ${className}`}
+        onKeyDown={onKeyDown}
+        onClick={(event) => event.stopPropagation()}
+      >
         {children}
       </div>
     );

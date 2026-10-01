@@ -47,40 +47,60 @@ func NewServerControlHandler(
 
 // HandleRestart handles POST /admin/server/restart.
 func (h *ServerControlHandler) HandleRestart(w http.ResponseWriter, r *http.Request) {
-	if h == nil || h.requestRestart == nil {
-		writeError(w, http.StatusServiceUnavailable, "service_unavailable", "Server restart is unavailable")
-		return
-	}
-
 	var req serverRestartRequest
 	if err := decodeOptionalJSONBody(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-
-	notifiedSessions := h.notifyPlaybackSessions(req)
-
-	if err := h.requestRestart(context.Background()); err != nil {
-		if errors.Is(err, ErrServerRestartAlreadyRequested) {
-			h.restartStatus.MarkRestartRequested()
-			writeJSON(w, http.StatusAccepted, serverRestartResponse{
-				Status:           "already_requested",
-				Message:          "Server restart is already in progress.",
-				NotifiedSessions: notifiedSessions,
-			})
+	result, err := h.RequestAdminServerRestart(r.Context(), req)
+	if err != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) {
+			writeError(w, apiErr.Status, apiErr.Code, apiErr.Message)
 			return
 		}
-		slog.ErrorContext(r.Context(), "server restart request failed", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to request server restart")
 		return
 	}
+	writeJSON(w, http.StatusAccepted, result)
+}
 
+// AdminServerRestartRequest carries the optional notice shown to playback
+// sessions before this process shuts down.
+type AdminServerRestartRequest = serverRestartRequest
+
+// AdminServerRestartResult is the accepted restart request. Status is
+// restart_requested on the first accepted request and already_requested when
+// this process is already shutting down; both are 202.
+type AdminServerRestartResult = serverRestartResponse
+
+// RequestAdminServerRestart notifies playback sessions, then asks THIS process
+// to shut down gracefully. It is process-local: a cluster peer is not
+// restarted, and a repeat while the shutdown is pending converges on
+// already_requested rather than starting anything new (coalescing).
+func (h *ServerControlHandler) RequestAdminServerRestart(ctx context.Context, req AdminServerRestartRequest) (AdminServerRestartResult, error) {
+	if h == nil || h.requestRestart == nil {
+		return AdminServerRestartResult{}, apiError(http.StatusServiceUnavailable, "service_unavailable", "Server restart is unavailable")
+	}
+	notifiedSessions := h.notifyPlaybackSessions(req)
+	if err := h.requestRestart(context.Background()); err != nil {
+		if errors.Is(err, ErrServerRestartAlreadyRequested) {
+			h.restartStatus.MarkRestartRequested()
+			return AdminServerRestartResult{
+				Status:           "already_requested",
+				Message:          "Server restart is already in progress.",
+				NotifiedSessions: notifiedSessions,
+			}, nil
+		}
+		slog.ErrorContext(ctx, "server restart request failed", "component", "api", "error", err)
+		return AdminServerRestartResult{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to request server restart")
+	}
 	h.restartStatus.MarkRestartRequested()
-	writeJSON(w, http.StatusAccepted, serverRestartResponse{
+	return AdminServerRestartResult{
 		Status:           "restart_requested",
 		Message:          "Server restart requested. The process will shut down gracefully.",
 		NotifiedSessions: notifiedSessions,
-	})
+	}, nil
 }
 
 func (h *ServerControlHandler) notifyPlaybackSessions(req serverRestartRequest) int {

@@ -47,6 +47,28 @@ func TestAllow4KVideoTranscode(t *testing.T) {
 	}
 }
 
+func TestAllowHEVCVideoEncoding(t *testing.T) {
+	tests := []struct {
+		name string
+		repo SettingsReader
+		want bool
+	}{
+		{name: "nil repo defaults to deny", repo: nil},
+		{name: "unset defaults to deny", repo: stubSettingsReader{}},
+		{name: "read error defaults to deny", repo: stubSettingsReader{err: errors.New("read failed")}},
+		{name: "explicit false denies", repo: stubSettingsReader{values: map[string]string{config.PlaybackAllowHEVCEncodingSettingKey: "false"}}},
+		{name: "case-insensitive true allows", repo: stubSettingsReader{values: map[string]string{config.PlaybackAllowHEVCEncodingSettingKey: " TRUE "}}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := &PlaybackHandler{SettingsRepo: tt.repo}
+			if got := h.allowHEVCVideoEncoding(context.Background()); got != tt.want {
+				t.Errorf("allowHEVCVideoEncoding() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestToneMapPolicyResultPreservesStoreFailure(t *testing.T) {
 	handler := &PlaybackHandler{SettingsRepo: stubSettingsReader{err: context.DeadlineExceeded}}
 	_, err := handler.toneMapPolicyResult(context.Background())
@@ -89,7 +111,7 @@ func TestCompatVideoToolboxToneMapBitrateKbps(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := compatVideoToolboxToneMapBitrateKbps(test.version, test.recipe); got != test.want {
+			if got := compatVideoToolboxToneMapBitrateKbps(test.version, test.recipe, 0); got != test.want {
 				t.Fatalf("compatVideoToolboxToneMapBitrateKbps() = %d, want %d", got, test.want)
 			}
 		})
@@ -149,6 +171,8 @@ func TestBuildPlaybackSource4KVideoTranscodeGate(t *testing.T) {
 			{Type: "Video", Container: "mp4", VideoCodec: "h264,hevc", AudioCodec: "aac"},
 		},
 	}
+	hevcTSOnly := hevcNoEac3
+	hevcTSOnly.TranscodingProfiles = []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: "ts", VideoCodec: "h264", AudioCodec: "aac"}}
 
 	tests := []struct {
 		name               string
@@ -179,6 +203,12 @@ func TestBuildPlaybackSource4KVideoTranscodeGate(t *testing.T) {
 			allow4K:            false,
 			wantTranscoding:    true,
 			wantTranscodeAudio: true,
+		},
+		{
+			name:    "4K explicit TS-only profile cannot authorize fMP4 copy",
+			version: version4K,
+			profile: hevcTSOnly,
+			allow4K: false,
 		},
 		{
 			name:            "non-4K video transcode unaffected",
@@ -331,5 +361,16 @@ func TestStartRemoteTranscode4KGuard(t *testing.T) {
 	}
 	if err := h.startRemoteTranscode(context.Background(), "play", "session", source, nil, 0, "http://node"); !errors.Is(err, errTranscode4KDisallowed) {
 		t.Errorf("startRemoteTranscode() error = %v, want errTranscode4KDisallowed", err)
+	}
+}
+
+func TestVideoToolboxAutomaticBitratePreservesClientCeiling(t *testing.T) {
+	version := catalog.FileVersion{Resolution: "1080p"}
+	recipe := compatToneMapRecipe{mode: tonemap.ModeHardware, hwAccel: tonemap.BackendVideoToolbox}
+	if got := compatVideoToolboxToneMapBitrateKbps(version, recipe, 0); got <= 0 {
+		t.Fatal("fixture did not select automatic VideoToolbox bitrate")
+	}
+	if got := compatVideoToolboxToneMapBitrateKbps(version, recipe, 1708); got != 0 {
+		t.Fatalf("automatic bitrate %d overrides explicit client ceiling", got)
 	}
 }

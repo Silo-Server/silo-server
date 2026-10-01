@@ -196,6 +196,11 @@ func YAMLToSettingsMap(path string) (map[string]string, error) {
 	}
 	setIfNonEmpty(m, "scanner.file_removal_grace", raw.Scanner.FileRemovalGrace)
 	m["scanner.empty_trash_after_scan"] = strconv.FormatBool(raw.Scanner.EmptyTrashAfterScan)
+	m["scanner.realtime_monitoring"] = strconv.FormatBool(raw.Scanner.RealtimeMonitoring)
+
+	// Artwork
+	setIfNonEmpty(m, "artwork.storage_backend", raw.Artwork.StorageBackend)
+	setIfNonEmpty(m, "artwork.local_path", raw.Artwork.LocalPath)
 
 	// Matcher
 	if raw.Matcher.Workers != 0 {
@@ -209,6 +214,7 @@ func YAMLToSettingsMap(path string) (map[string]string, error) {
 	// Playback
 	setIfNonEmpty(m, "playback.ffmpeg_path", raw.Playback.FFmpegPath)
 	setIfNonEmpty(m, playbackTranscodeDirSettingKey, raw.Playback.TranscodeDir)
+	m[playbackSegmentRetentionSettingKey] = strconv.Itoa(raw.Playback.SegmentRetentionSeconds)
 	setIfNonEmpty(m, "playback.hw_accel", raw.Playback.HWAccel)
 	if raw.Playback.ChapterThumbnailWorkers != 0 {
 		m["playback.chapter_thumbnail_workers"] = strconv.Itoa(raw.Playback.ChapterThumbnailWorkers)

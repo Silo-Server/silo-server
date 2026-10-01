@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -406,6 +407,113 @@ func TestAdminUpdateSettingsRejectsWholeBatchBeforeWrite(t *testing.T) {
 	}
 	if settings.values["branding.server_name"] != "Silo" {
 		t.Fatalf("valid sibling value was partially persisted: %#v", settings.values)
+	}
+}
+
+func TestAdminUpdateSettingsValidatesRoutingAgainstStoredPeer(t *testing.T) {
+	settings := &fakeServerSettingsStore{values: map[string]string{
+		config.PlaybackRoutingRemuxEgressSettingKey: string(config.PlaybackEgressProxyOnly),
+	}}
+	handler := &AdminHandler{SettingsRepo: settings}
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/admin/settings",
+		strings.NewReader(`{"values":{"playback.routing.remux_execution":"api_only"}}`),
+	)
+	rec := httptest.NewRecorder()
+
+	handler.HandleUpdateSettings(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	if settings.setManyCalls != 0 {
+		t.Fatalf("SetMany calls = %d, want 0", settings.setManyCalls)
+	}
+	if _, exists := settings.values[config.PlaybackRoutingRemuxExecutionSettingKey]; exists {
+		t.Fatalf("invalid routing setting was persisted: %#v", settings.values)
+	}
+}
+
+func TestAdminUpdateSettingValidatesRoutingAgainstStoredPeer(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		storedKey string
+		stored    string
+		key       string
+		value     string
+	}{
+		{
+			name: "remux execution against proxy-only egress", storedKey: config.PlaybackRoutingRemuxEgressSettingKey,
+			stored: string(config.PlaybackEgressProxyOnly), key: config.PlaybackRoutingRemuxExecutionSettingKey,
+			value: string(config.PlaybackExecutionAPIOnly),
+		},
+		{
+			name: "remux egress against API-only execution", storedKey: config.PlaybackRoutingRemuxExecutionSettingKey,
+			stored: string(config.PlaybackExecutionAPIOnly), key: config.PlaybackRoutingRemuxEgressSettingKey,
+			value: string(config.PlaybackEgressProxyOnly),
+		},
+		{
+			name: "video execution against proxy-only egress", storedKey: config.PlaybackRoutingVideoTranscodeEgressSettingKey,
+			stored: string(config.PlaybackEgressProxyOnly), key: config.PlaybackRoutingVideoTranscodeExecutionSettingKey,
+			value: string(config.PlaybackExecutionAPIOnly),
+		},
+		{
+			name: "video egress against API-only execution", storedKey: config.PlaybackRoutingVideoTranscodeExecutionSettingKey,
+			stored: string(config.PlaybackExecutionAPIOnly), key: config.PlaybackRoutingVideoTranscodeEgressSettingKey,
+			value: string(config.PlaybackEgressProxyOnly),
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			settings := &fakeServerSettingsStore{values: map[string]string{test.storedKey: test.stored}}
+			handler := &AdminHandler{SettingsRepo: settings}
+			request := httptest.NewRequest(
+				http.MethodPut,
+				"/admin/settings/"+test.key,
+				strings.NewReader(`{"value":"`+test.value+`"}`),
+			)
+			request = withChiParam(request, "key", test.key)
+			recorder := httptest.NewRecorder()
+
+			handler.HandleUpdateSetting(recorder, request)
+
+			if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), `"error":"invalid_settings"`) {
+				t.Fatalf("response = %d %s, want invalid-settings rejection", recorder.Code, recorder.Body.String())
+			}
+			if settings.atomicCalls != 1 || settings.setManyCalls != 0 {
+				t.Fatalf("atomic calls=%d writes=%d, want 1 and 0", settings.atomicCalls, settings.setManyCalls)
+			}
+			if _, exists := settings.values[test.key]; exists {
+				t.Fatalf("invalid routing setting was persisted: %#v", settings.values)
+			}
+			if _, err := config.LoadFromDB(settings.values); err != nil {
+				t.Fatalf("rejected write left restart-invalid settings: %v", err)
+			}
+		})
+	}
+}
+
+func TestAdminUpdateSettingCanRepairLegacyInvalidRoutingPair(t *testing.T) {
+	settings := &fakeServerSettingsStore{values: map[string]string{
+		config.PlaybackRoutingRemuxExecutionSettingKey: string(config.PlaybackExecutionAPIOnly),
+		config.PlaybackRoutingRemuxEgressSettingKey:    string(config.PlaybackEgressProxyOnly),
+	}}
+	handler := &AdminHandler{SettingsRepo: settings}
+	request := httptest.NewRequest(
+		http.MethodPut,
+		"/admin/settings/"+config.PlaybackRoutingRemuxExecutionSettingKey,
+		strings.NewReader(`{"value":"worker_only"}`),
+	)
+	request = withChiParam(request, "key", config.PlaybackRoutingRemuxExecutionSettingKey)
+	recorder := httptest.NewRecorder()
+
+	handler.HandleUpdateSetting(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("response = %d %s, want repair accepted", recorder.Code, recorder.Body.String())
+	}
+	if _, err := config.LoadFromDB(settings.values); err != nil {
+		t.Fatalf("repaired settings are restart-invalid: %v", err)
 	}
 }
 
@@ -1025,7 +1133,7 @@ func (f *fakeAISettingsCheckClient) Transcribe(
 	if f.transcribe != nil {
 		return f.transcribe(ctx, req)
 	}
-	return &llm.Transcription{}, nil
+	return &llm.Transcription{Segments: []llm.TranscriptionSegment{{Start: 0, End: 1, Text: "Subtitle test."}}}, nil
 }
 
 func TestHandleCheckSettingsConnectionAIChatDoesNotSendStoredKeyToDraftEndpoint(t *testing.T) {
@@ -1144,9 +1252,13 @@ func TestHandleCheckSettingsConnectionAITranscriptionUsesDedicatedASR(t *testing
 	newAdminAISettingsCheckClient = func(cfg llm.Config) aiSettingsCheckClient {
 		captured = cfg
 		return &fakeAISettingsCheckClient{
-			transcribe: func(_ context.Context, req llm.TranscribeRequest) (*llm.Transcription, error) {
+			transcribe: func(ctx context.Context, req llm.TranscribeRequest) (*llm.Transcription, error) {
 				request = req
-				return &llm.Transcription{}, nil
+				deadline, ok := ctx.Deadline()
+				if !ok || time.Until(deadline) < req.Timeout || time.Until(deadline) > 80*time.Second {
+					t.Fatal("outer check deadline does not cover the transcription request")
+				}
+				return &llm.Transcription{Segments: []llm.TranscriptionSegment{{Start: 0, End: 1, Text: "Subtitle test."}}}, nil
 			},
 		}
 	}
@@ -1186,7 +1298,7 @@ func TestHandleCheckSettingsConnectionAITranscriptionUsesDedicatedASR(t *testing
 		captured.ASRModel != "whisper-model" {
 		t.Fatalf("captured ASR config = %+v", captured)
 	}
-	if len(request.Audio) == 0 || request.Filename == "" || request.Timeout <= 0 {
+	if len(request.Audio) == 0 || request.Filename == "" || request.Timeout <= 60*time.Second || request.Timeout > 75*time.Second {
 		t.Fatalf("transcription probe request = %+v, want bounded WAV probe", request)
 	}
 }
@@ -1596,6 +1708,7 @@ func TestAdminUpdateSettingNormalizesAIEndpointAndModelValues(t *testing.T) {
 		{key: "ai.base_url", value: "  https://text.example.test/v1  ", want: "https://text.example.test/v1"},
 		{key: "ai.chat_model", value: "  chat-model  ", want: "chat-model"},
 		{key: "ai.asr_base_url", value: "  https://speech.example.test  ", want: "https://speech.example.test"},
+		{key: "ai.asr_base_url", value: "  https://openrouter.ai/api/v1  ", want: "https://openrouter.ai/api/v1"},
 		{key: "ai.asr_model", value: "  whisper-model  ", want: "whisper-model"},
 	} {
 		t.Run(tc.key, func(t *testing.T) {
@@ -1814,6 +1927,52 @@ func TestAdminGetSettingReportsRestartRequired(t *testing.T) {
 			// omitempty must keep the flag off the wire for live keys.
 			if seen := strings.Contains(rec.Body.String(), "restart_required"); seen != tc.wantRestartSeen {
 				t.Fatalf("restart_required present = %v, want %v; body=%s", seen, tc.wantRestartSeen, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestAdminBatchAllowsOpenRouterASR(t *testing.T) {
+	settings := &fakeServerSettingsStore{}
+	handler := &AdminHandler{SettingsRepo: settings}
+	rec := httptest.NewRecorder()
+	handler.HandleUpdateSettings(rec, httptest.NewRequest(http.MethodPut, "/admin/settings", strings.NewReader(`{"values":{"ai.asr_base_url":"https://openrouter.ai/api/v1","ai.asr_model":"openai/whisper-large-v3","subtitle_ai.transcribe_enabled":"true"}}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body = %s", rec.Code, rec.Body.String())
+	}
+	if settings.values["ai.asr_base_url"] != "https://openrouter.ai/api/v1" || settings.values["subtitle_ai.transcribe_enabled"] != "true" {
+		t.Fatalf("settings not saved: %+v", settings.values)
+	}
+}
+
+func TestAITranscriptionConnectionRequiresTimestampedSpeech(t *testing.T) {
+	originalFactory := newAdminAISettingsCheckClient
+	t.Cleanup(func() { newAdminAISettingsCheckClient = originalFactory })
+	for _, tc := range []struct {
+		name   string
+		result *llm.Transcription
+		want   bool
+	}{
+		{name: "nil response"},
+		{name: "empty segments", result: &llm.Transcription{}},
+		{name: "blank text", result: &llm.Transcription{Segments: []llm.TranscriptionSegment{{Start: 0, End: 1, Text: " "}}}},
+		{name: "no timestamps", result: &llm.Transcription{Segments: []llm.TranscriptionSegment{{Text: "Test"}}}},
+		{name: "timestamped speech", result: &llm.Transcription{Segments: []llm.TranscriptionSegment{{Start: 0, End: 1, Text: "Test"}}}, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			newAdminAISettingsCheckClient = func(llm.Config) aiSettingsCheckClient {
+				return &fakeAISettingsCheckClient{transcribe: func(_ context.Context, req llm.TranscribeRequest) (*llm.Transcription, error) {
+					if !bytes.Equal(req.Audio[:4], []byte("RIFF")) || len(bytes.Trim(req.Audio[44:], "\x00")) == 0 {
+						t.Fatal("connection probe must contain audio, not silence")
+					}
+					return tc.result, nil
+				}}
+			}
+			cfg := &config.Config{}
+			cfg.AI.BaseURL = "https://openrouter.ai/api/v1"
+			cfg.AI.ASRModel = "openai/whisper-large-v3"
+			if got := checkAITranscriptionConnection(t.Context(), cfg); got.Success != tc.want {
+				t.Fatalf("connection result = %+v, want success = %v", got, tc.want)
 			}
 		})
 	}

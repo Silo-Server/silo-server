@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -498,6 +499,37 @@ func TestTranscribeIncrementalFallsBackToStartWhenSeekedPassProducesNoAudio(t *t
 	}
 	if len(client.requests) != 1 || client.requests[0].Filename != "head.wav" {
 		t.Fatalf("ASR requests = %#v, want only fallback chunk", client.requests)
+	}
+}
+
+func TestTranscribeIncrementalDoesNotRestartAtBeginningAfterProviderFailure(t *testing.T) {
+	client := &fakeASRClient{err: context.DeadlineExceeded}
+	var starts []float64
+	tr := &WhisperTranscriber{
+		client: client,
+		incrementalExtract: func(_ context.Context, _ string, _ int, dir, _ string, startSec float64, _ int,
+			onSegment func(playback.AudioChunk) error) error {
+			starts = append(starts, startSec)
+			path := filepath.Join(dir, "speech.wav")
+			if err := os.WriteFile(path, []byte("RIFF"), 0o600); err != nil {
+				return err
+			}
+			return onSegment(playback.AudioChunk{Path: path, Start: startSec})
+		},
+		probeOffset: func(context.Context, string, int, string) float64 { return 0 },
+	}
+	tr.SetExtraction("", 30)
+	_, _, err := tr.Transcribe(t.Context(), TranscribeJobRequest{
+		FilePath:        "/synthetic.mkv",
+		StartPosition:   125,
+		DurationSeconds: 600,
+		Incremental:     true,
+	}, nil)
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "at 120.000s") {
+		t.Fatalf("error = %v, want original provider failure at the playhead chunk", err)
+	}
+	if len(starts) != 1 || starts[0] != 120 || len(client.requests) != 1 {
+		t.Fatalf("pass starts = %v, ASR calls = %d; provider failure must not restart extraction", starts, len(client.requests))
 	}
 }
 

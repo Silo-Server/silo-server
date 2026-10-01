@@ -16,49 +16,45 @@ import (
 func TestResolveCopySeekAnchorUsesKeyPacketTimestamp(t *testing.T) {
 	dir := t.TempDir()
 	ffmpegPath := filepath.Join(dir, "ffmpeg")
-	ffprobePath := filepath.Join(dir, "ffprobe")
-	argsPath := filepath.Join(dir, "ffprobe-args")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatalf("write fake ffmpeg: %v", err)
-	}
+	argsPath := filepath.Join(dir, "ffmpeg-args")
 	probe := `#!/bin/sh
 printf '%s\n' "$@" > "` + argsPath + `"
-printf '%s' '{"packets":[{"pts_time":"N/A","dts_time":"14.500000","flags":"K__"}]}'
+printf '%s\n' '#tb 0: 1/1000'
+printf '%s\n' '0,      14500,      14750,       41,   178989, 0xd16e41c4'
 `
-	if err := os.WriteFile(ffprobePath, []byte(probe), 0o755); err != nil {
-		t.Fatalf("write fake ffprobe: %v", err)
+	if err := os.WriteFile(ffmpegPath, []byte(probe), 0o755); err != nil {
+		t.Fatalf("write fake ffmpeg: %v", err)
 	}
 
 	anchor, segment, err := ResolveCopySeekAnchor(context.Background(), ffmpegPath, "/media/movie.mkv", 18.261, 2)
 	if err != nil {
 		t.Fatalf("ResolveCopySeekAnchor: %v", err)
 	}
-	if anchor != 14.5 || segment != 7 {
-		t.Fatalf("resolved anchor = %v, segment = %d; want 14.5, 7", anchor, segment)
+	if anchor != 14.75 || segment != 7 {
+		t.Fatalf("resolved anchor = %v, segment = %d; want 14.75, 7", anchor, segment)
 	}
 	args, err := os.ReadFile(argsPath)
 	if err != nil {
-		t.Fatalf("read ffprobe args: %v", err)
+		t.Fatalf("read ffmpeg args: %v", err)
 	}
-	if !strings.Contains(string(args), "-select_streams\nV:0\n") {
-		t.Fatalf("ffprobe did not select the remux video stream:\n%s", args)
+	for _, want := range []string{"-fflags\n+genpts+fastseek\n", "-analyzeduration\n3000000\n", "-probesize\n5000000\n", "-ss\n18.261\n", "-map\n0:V:0\n", "-c:v\ncopy\n", "-copyts\n", "-avoid_negative_ts\ndisabled\n", "-frames:v\n1\n", "-f\nframecrc\n"} {
+		if !strings.Contains(string(args), want) {
+			t.Fatalf("ffmpeg args missing %q:\n%s", want, args)
+		}
 	}
 }
 
 func TestResolveCopySeekAnchorCoalescesMatchingConcurrentProbes(t *testing.T) {
 	dir := t.TempDir()
 	ffmpegPath := filepath.Join(dir, "ffmpeg")
-	ffprobePath := filepath.Join(dir, "ffprobe")
 	countPath := filepath.Join(dir, "probe-count")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatalf("write fake ffmpeg: %v", err)
-	}
 	probe := "#!/bin/sh\n" +
 		"printf x >> \"" + countPath + "\"\n" +
 		"sleep 0.1\n" +
-		"printf '%s' '{\"packets\":[{\"pts_time\":\"16.000000\",\"flags\":\"K__\"}]}'\n"
-	if err := os.WriteFile(ffprobePath, []byte(probe), 0o755); err != nil {
-		t.Fatalf("write fake ffprobe: %v", err)
+		"printf '%s\\n' '#tb 0: 1/1000'\n" +
+		"printf '%s\\n' '0,      15833,      16000,       41,   178989, 0xd16e41c4'\n"
+	if err := os.WriteFile(ffmpegPath, []byte(probe), 0o755); err != nil {
+		t.Fatalf("write fake ffmpeg: %v", err)
 	}
 
 	start := make(chan struct{})
@@ -88,7 +84,7 @@ func TestResolveCopySeekAnchorCoalescesMatchingConcurrentProbes(t *testing.T) {
 		t.Fatalf("read probe count: %v", err)
 	}
 	if string(count) != "x" {
-		t.Fatalf("ffprobe executions = %d, want 1", len(count))
+		t.Fatalf("ffmpeg probe executions = %d, want 1", len(count))
 	}
 }
 
@@ -123,7 +119,7 @@ func TestResolveCopySeekAnchorMatchesRealLongGOPHEVC(t *testing.T) {
 		t.Fatalf("generate long-GOP HEVC fixture: %v\n%s", err, output)
 	}
 
-	probeCtx, cancelProbe := context.WithTimeout(context.Background(), 5*time.Second)
+	probeCtx, cancelProbe := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancelProbe()
 	anchor, segment, err := ResolveCopySeekAnchor(probeCtx, ffmpegPath, sourcePath, 18.261, 2)
 	if err != nil {
@@ -131,6 +127,34 @@ func TestResolveCopySeekAnchorMatchesRealLongGOPHEVC(t *testing.T) {
 	}
 	if math.Abs(anchor-10) > 0.001 || segment != 5 {
 		t.Fatalf("resolved anchor = %v, segment = %d; want 10, 5", anchor, segment)
+	}
+
+	// An exact keyframe seek is the recovery boundary that regressed in #839:
+	// Matroska emits the preceding keyframe while MP4 starts at the requested
+	// keyframe. The resolver must model FFmpeg's real copy path for both.
+	exactMKVAnchor, exactMKVSegment, err := ResolveCopySeekAnchor(probeCtx, ffmpegPath, sourcePath, 10, 2)
+	if err != nil {
+		t.Fatalf("ResolveCopySeekAnchor exact MKV keyframe: %v", err)
+	}
+	if math.Abs(exactMKVAnchor) > 0.001 || exactMKVSegment != 0 {
+		t.Fatalf("exact MKV anchor = %v, segment = %d; want 0, 0", exactMKVAnchor, exactMKVSegment)
+	}
+
+	mp4Path := filepath.Join(t.TempDir(), "long-gop-hevc.mp4")
+	remux := exec.Command(ffmpegPath,
+		"-hide_banner", "-loglevel", "error",
+		"-i", sourcePath,
+		"-map", "0:V:0", "-c:v", "copy", "-an", "-y", mp4Path,
+	)
+	if output, err := remux.CombinedOutput(); err != nil {
+		t.Fatalf("remux long-GOP HEVC fixture to MP4: %v\n%s", err, output)
+	}
+	exactMP4Anchor, exactMP4Segment, err := ResolveCopySeekAnchor(probeCtx, ffmpegPath, mp4Path, 10, 2)
+	if err != nil {
+		t.Fatalf("ResolveCopySeekAnchor exact MP4 keyframe: %v", err)
+	}
+	if math.Abs(exactMP4Anchor-10) > 0.001 || exactMP4Segment != 5 {
+		t.Fatalf("exact MP4 anchor = %v, segment = %d; want 10, 5", exactMP4Anchor, exactMP4Segment)
 	}
 
 	outputDir := filepath.Join(t.TempDir(), "hls")

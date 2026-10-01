@@ -115,24 +115,15 @@ const TRANSCRIPTION_PRESETS = [
     baseUrl: "https://api.openai.com",
     model: "whisper-1",
   },
+  {
+    id: "openrouter",
+    label: "OpenRouter",
+    description:
+      "Whisper Large V3 Turbo with timestamps. Requires an OpenRouter API key. Test the model before enabling transcription.",
+    baseUrl: "https://openrouter.ai/api/v1",
+    model: "openai/whisper-large-v3-turbo",
+  },
 ] as const;
-
-const CHAT_ONLY_GATEWAY_HOSTS = ["openrouter.ai"];
-
-function isChatOnlyGateway(rawURL: string): boolean {
-  const trimmed = rawURL.trim();
-  if (!trimmed) return false;
-  try {
-    const host = new URL(
-      trimmed.includes("://") ? trimmed : `https://${trimmed}`,
-    ).hostname.toLowerCase();
-    return CHAT_ONLY_GATEWAY_HOSTS.some(
-      (gateway) => host === gateway || host.endsWith(`.${gateway}`),
-    );
-  } catch {
-    return false;
-  }
-}
 
 function hostLabel(rawURL: string): string {
   const trimmed = rawURL.trim();
@@ -384,9 +375,7 @@ function SpeechModelTile({
   apiKeyConfigured,
   apiKeyCleared,
   usesTextEndpoint,
-  compatible,
   ready,
-  checkable,
   dirty,
   restartKeys,
   onChange,
@@ -405,9 +394,7 @@ function SpeechModelTile({
   apiKeyConfigured: boolean;
   apiKeyCleared: boolean;
   usesTextEndpoint: boolean;
-  compatible: boolean;
   ready: boolean;
-  checkable: boolean;
   dirty: boolean;
   restartKeys: RestartKeyMatcher;
   onChange: (key: string, value: string) => void;
@@ -421,18 +408,16 @@ function SpeechModelTile({
   onCollapse: () => void;
 }) {
   const failed = test != null && !test.ok;
-  const statePill = !compatible
-    ? "Cannot transcribe"
-    : test?.ok
-      ? "Verified"
-      : usesTextEndpoint
-        ? "Shared endpoint"
-        : ready
-          ? "Configured"
-          : undefined;
+  const statePill = test?.ok
+    ? "Verified"
+    : usesTextEndpoint
+      ? "Shared endpoint"
+      : ready
+        ? "Configured"
+        : undefined;
   const state: ProviderTileState = expanded
     ? "editing"
-    : !compatible || failed
+    : failed
       ? "error"
       : ready && !usesTextEndpoint
         ? "connected"
@@ -448,13 +433,11 @@ function SpeechModelTile({
       meta={
         expanded
           ? undefined
-          : !compatible
-            ? "This endpoint only serves chat completions."
-            : failed
-              ? test.message
-              : asrBaseURL.trim() !== ""
-                ? `${asrModel} · ${hostLabel(asrBaseURL)}`
-                : undefined
+          : failed
+            ? test.message
+            : asrBaseURL.trim() !== ""
+              ? `${asrModel} · ${hostLabel(asrBaseURL)}`
+              : undefined
       }
       expanded={expanded}
       primaryAction={{ label: ready ? "Manage" : "Connect", onClick: onExpand }}
@@ -525,7 +508,7 @@ function SpeechModelTile({
         pendingLabel="Testing speech-to-text..."
         onTest={onTest}
         isTesting={isTesting}
-        testDisabled={!checkable}
+        testDisabled={!ready}
         onCollapse={onCollapse}
         canCollapse={!dirty}
         test={test}
@@ -580,10 +563,8 @@ export default function AISettings() {
   const asrModel = value("ai.asr_model", "whisper-1");
   const textReady = textBaseURL.trim() !== "" && chatModel.trim() !== "";
   const speechUsesTextEndpoint = asrBaseURL.trim() === "";
-  const speechCheckable =
+  const speechReady =
     (asrBaseURL.trim() !== "" || textBaseURL.trim() !== "") && asrModel.trim() !== "";
-  const speechCompatible = !isChatOnlyGateway(speechUsesTextEndpoint ? textBaseURL : asrBaseURL);
-  const speechReady = speechCheckable && speechCompatible;
   const subtitleTranslateEnabled = value("subtitle_ai.enabled", "false") === "true";
   const transcribeEnabled = value("subtitle_ai.transcribe_enabled", "false") === "true";
   const descriptionEnabled = value("metadata_ai.enabled", "false") === "true";
@@ -733,9 +714,7 @@ export default function AISettings() {
               apiKeyConfigured={form.sensitiveConfigured.includes("ai.asr_api_key")}
               apiKeyCleared={form.isClearStaged("ai.asr_api_key")}
               usesTextEndpoint={speechUsesTextEndpoint}
-              compatible={speechCompatible}
               ready={speechReady}
-              checkable={speechCheckable}
               dirty={speechDirty}
               restartKeys={restartKeys}
               onChange={setValue}

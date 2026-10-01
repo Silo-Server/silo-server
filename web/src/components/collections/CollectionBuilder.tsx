@@ -69,6 +69,7 @@ export interface CollectionBuilderProps {
   profiles?: Array<{ id: string; name: string }>;
   isPending?: boolean;
   readOnly?: boolean;
+  lockCollectionType?: boolean;
   allowLibrarySelection?: boolean;
   allowAccessControls?: boolean;
   creatorProfileId?: string | null;
@@ -123,6 +124,7 @@ export default function CollectionBuilder({
   profiles = [],
   isPending = false,
   readOnly = false,
+  lockCollectionType = false,
   allowLibrarySelection = true,
   allowAccessControls = false,
   creatorProfileId,
@@ -197,7 +199,7 @@ export default function CollectionBuilder({
                       : value.query_definition,
                 })
               }
-              disabled={readOnly}
+              disabled={readOnly || lockCollectionType}
             >
               <SelectTrigger>
                 <SelectValue />

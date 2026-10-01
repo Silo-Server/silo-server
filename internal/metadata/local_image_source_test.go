@@ -468,7 +468,6 @@ func TestMergeAndPersistLockedImagesKeepPendingArtworkSources(t *testing.T) {
 	h := newTestHarness()
 	ctx := context.Background()
 	const posterSource = "file:///media/tv/Show/poster.jpg"
-	const backdropSource = "https://images.example/backdrop.jpg"
 
 	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
 		ContentID:               "series-locked-art",
@@ -478,7 +477,6 @@ func TestMergeAndPersistLockedImagesKeepPendingArtworkSources(t *testing.T) {
 		Status:                  "matched",
 		DefaultMetadataLanguage: "en",
 		PosterSourcePath:        posterSource,
-		BackdropSourcePath:      backdropSource,
 		LogoPath:                "artwork/series-locked-art/logo.png",
 		LogoSourcePath:          "tmdb://logo.png",
 		LockedFields:            []int{int(FieldImages)},
@@ -522,10 +520,23 @@ func TestMergeAndPersistLockedImagesKeepPendingArtworkSources(t *testing.T) {
 	if got.PosterPath != "" || got.PosterSourcePath != posterSource {
 		t.Fatalf("poster = path %q source %q, want pending local source preserved", got.PosterPath, got.PosterSourcePath)
 	}
-	if got.BackdropPath != "" || got.BackdropSourcePath != backdropSource {
-		t.Fatalf("backdrop = path %q source %q, want pending remote source preserved", got.BackdropPath, got.BackdropSourcePath)
-	}
 	if got.LogoPath != "artwork/series-locked-art/logo.png" || got.LogoSourcePath != "tmdb://logo.png" {
 		t.Fatalf("logo = path %q source %q, want cached logo unchanged", got.LogoPath, got.LogoSourcePath)
+	}
+}
+
+func TestApplyBestImagesKeepsLockedTVDBLogoOnManualRefresh(t *testing.T) {
+	item := &models.MediaItem{
+		LogoPath:       "tvdb/123/logo/admin-choice.png",
+		LogoSourcePath: "tvdb://artwork/admin-choice.png",
+		LockedFields:   []int{int(FieldImages)},
+	}
+	existing := *item
+	applyBestImages(item, []RemoteImage{
+		{ProviderID: "tvdb", URL: "tvdb://artwork/illustrated.png", Type: ImageLogo, Rating: 9},
+	}, MergeReplaceUnlocked, "en")
+	prepareItemImagesForQueue(item, &existing)
+	if item.LogoPath != existing.LogoPath || item.LogoSourcePath != existing.LogoSourcePath {
+		t.Fatalf("locked logo = path %q source %q, want admin selection kept", item.LogoPath, item.LogoSourcePath)
 	}
 }

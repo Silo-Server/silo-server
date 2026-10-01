@@ -23,6 +23,7 @@ afterEach(() => {
   resetNavigationHistory();
   window.history.replaceState(null, "");
   delete document.documentElement.dataset.navigationDirection;
+  vi.unstubAllGlobals();
 });
 
 describe("ViewTransitionLink sidebar navigation", () => {
@@ -150,6 +151,24 @@ describe("ViewTransitionLink sidebar navigation", () => {
 
     fireEvent.click(screen.getByRole("link", { name: "Movie" }));
 
+    expect(screen.getByRole("status", { name: "location" })).toHaveTextContent("/item/movie-1");
+  });
+
+  it("routes a desktop item boundary through the snapshot-free chokepoint", () => {
+    const matchMedia = vi.fn((query: string) => ({
+      matches: query === "(min-width: 64rem)",
+    }));
+    vi.stubGlobal("matchMedia", matchMedia);
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <ViewTransitionLink to="/item/movie-1">Movie</ViewTransitionLink>
+        <LocationOutput />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "Movie" }));
+
+    expect(matchMedia).toHaveBeenCalledWith("(min-width: 64rem)");
     expect(screen.getByRole("status", { name: "location" })).toHaveTextContent("/item/movie-1");
   });
 });

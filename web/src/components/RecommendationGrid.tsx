@@ -1,21 +1,25 @@
+import type { ReactNode } from "react";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
+import MediaCarousel from "@/components/MediaCarousel";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useUICustomization } from "@/hooks/useUICustomization";
-import { cardGridClasses } from "@/lib/uiCustomization";
+import { carouselCardWidthClasses } from "@/lib/uiCustomization";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
 
+const MAX_MORE_LIKE_THIS_ITEMS = 12;
+
 interface RecommendationGridProps {
-  items: Array<{ media_item_id: string }>;
+  items: Array<{ content_id: string }>;
   maxItems?: number;
 }
 
 interface RecommendationItemCardProps {
   itemId: string;
+  showCaption: boolean;
 }
 
-function RecommendationItemCard({ itemId }: RecommendationItemCardProps) {
+function RecommendationItemCard({ itemId, showCaption }: RecommendationItemCardProps) {
   const { data: item } = useCatalogItemDetail(itemId);
-  const { cardPresentation } = useUICustomization();
   if (!item) {
     return <div className="bg-surface aspect-[2/3] animate-pulse rounded-lg" />;
   }
@@ -47,7 +51,7 @@ function RecommendationItemCard({ itemId }: RecommendationItemCardProps) {
           />
         ) : null}
       </div>
-      {cardPresentation.caption !== "artwork" ? (
+      {showCaption ? (
         <ViewTransitionLink
           to={`/item/${encodeURIComponent(itemId)}`}
           className="mt-1.5 block truncate text-sm font-medium hover:underline"
@@ -59,13 +63,49 @@ function RecommendationItemCard({ itemId }: RecommendationItemCardProps) {
   );
 }
 
-export default function RecommendationGrid({ items, maxItems = 12 }: RecommendationGridProps) {
+interface MoreLikeThisRowProps<T> {
+  items: T[];
+  itemKey: (item: T) => string;
+  renderItem: (item: T, showCaption: boolean) => ReactNode;
+  maxItems?: number;
+}
+
+/**
+ * The "More Like This" rail on detail pages: poster-width slides inside the
+ * page shell, sized by the viewer's card settings. Library items and titles
+ * known only from TMDB supply their own cards.
+ */
+export function MoreLikeThisRow<T>({
+  items,
+  itemKey,
+  renderItem,
+  maxItems = MAX_MORE_LIKE_THIS_ITEMS,
+}: MoreLikeThisRowProps<T>) {
   const { cardPresentation } = useUICustomization();
+  const itemLimit = Math.max(0, Math.min(maxItems, MAX_MORE_LIKE_THIS_ITEMS));
+  const posterWidthClasses = carouselCardWidthClasses(cardPresentation.poster_size);
+  const showCaption = cardPresentation.caption !== "artwork";
+
   return (
-    <div className={cardGridClasses(cardPresentation.poster_size)}>
-      {items.slice(0, maxItems).map((si) => (
-        <RecommendationItemCard key={si.media_item_id} itemId={si.media_item_id} />
+    <MediaCarousel title="More Like This" edgePadding={false}>
+      {items.slice(0, itemLimit).map((item) => (
+        <div key={itemKey(item)} className={posterWidthClasses}>
+          {renderItem(item, showCaption)}
+        </div>
       ))}
-    </div>
+    </MediaCarousel>
+  );
+}
+
+export default function RecommendationGrid({ items, maxItems = 12 }: RecommendationGridProps) {
+  return (
+    <MoreLikeThisRow
+      items={items}
+      maxItems={maxItems}
+      itemKey={(item) => item.content_id}
+      renderItem={(item, showCaption) => (
+        <RecommendationItemCard itemId={item.content_id} showCaption={showCaption} />
+      )}
+    />
   );
 }

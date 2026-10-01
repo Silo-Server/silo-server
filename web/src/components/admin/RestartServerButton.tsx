@@ -1,7 +1,7 @@
 import { useState, type ComponentProps } from "react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { api } from "@/api/client";
+import { useRequestServerRestart } from "@/hooks/queries/admin/serverRestart";
 import { RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
@@ -19,15 +19,20 @@ export function RestartServerButton({
   className,
 }: RestartServerButtonProps = {}) {
   const [showConfirm, setShowConfirm] = useState(false);
+  const restart = useRequestServerRestart();
 
   async function handleRestart() {
-    try {
-      await api("/admin/server/restart", { method: "POST" });
-      toast.success("Server is restarting...");
-    } catch {
-      toast.error("Could not restart server. Please restart manually.");
-    }
     setShowConfirm(false);
+    try {
+      const result = await restart.mutateAsync();
+      toast.success(
+        result.status === "already_requested"
+          ? "Server restart is already in progress."
+          : "Server is restarting...",
+      );
+    } catch {
+      toast.error("Could not confirm the restart. Check server status or restart manually.");
+    }
   }
 
   return (
@@ -37,6 +42,7 @@ export function RestartServerButton({
         size={size}
         className={className}
         onClick={() => setShowConfirm(true)}
+        disabled={restart.isPending}
       >
         <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
         {label}

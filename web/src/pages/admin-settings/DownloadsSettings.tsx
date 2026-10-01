@@ -35,6 +35,7 @@ const PER_USER_ADVANCED_KEYS = [
 const GLOBAL_ADVANCED_KEYS = [
   "download.server_bandwidth_mbps",
   "download.transcode_enabled",
+  "download.local_transcode_fallback",
   "download.artifact_dir",
   "download.max_concurrent_prepares",
   "download.artifact_max_bytes",
@@ -138,6 +139,14 @@ export default function DownloadsSettings() {
               value={form.getValue("download.transcode_enabled")}
               onChange={(v) => form.setValue("download.transcode_enabled", v)}
               restartRequired={restartKeys.has("download.transcode_enabled")}
+            />
+            <SettingField
+              label="Prepare locally when workers are unavailable"
+              type="toggle"
+              description="This is separate from live playback routing."
+              value={form.getValue("download.local_transcode_fallback") || "true"}
+              onChange={(v) => form.setValue("download.local_transcode_fallback", v)}
+              restartRequired={restartKeys.has("download.local_transcode_fallback")}
             />
             <PathSettingField
               label="Prepared file directory"

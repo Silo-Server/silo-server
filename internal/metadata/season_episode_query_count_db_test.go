@@ -166,7 +166,7 @@ func TestPersistSeasonsAndEpisodes_QueryCountIsBounded(t *testing.T) {
 				seasonLocalizationRepo := catalog.NewSeasonLocalizationRepository(pool)
 				episodeLocalizationRepo := catalog.NewEpisodeLocalizationRepository(pool)
 				existingSeason := &models.Season{
-					ContentID:      fmt.Sprintf("query-count-%s-season-%d", testCase.name, episodeCount),
+					ContentID:      seriesID + "-season",
 					SeriesID:       seriesID,
 					SeasonNumber:   1,
 					Title:          "Existing Season",
@@ -176,7 +176,7 @@ func TestPersistSeasonsAndEpisodes_QueryCountIsBounded(t *testing.T) {
 					t.Fatalf("seed unlinked episode season: %v", err)
 				}
 				existingEpisode := &models.Episode{
-					ContentID:      fmt.Sprintf("query-count-%s-episode-%d", testCase.name, episodeCount),
+					ContentID:      seriesID + "-episode",
 					SeriesID:       seriesID,
 					SeasonID:       existingSeason.ContentID,
 					SeasonNumber:   1,
@@ -222,7 +222,6 @@ func TestPersistSeasonsAndEpisodes_QueryCountIsBounded(t *testing.T) {
 					seasons,
 					episodes,
 					MergeFillEmpty,
-					false,
 				)
 				queryCount := tracer.count()
 				queryCounts = append(queryCounts, queryCount)
@@ -380,7 +379,6 @@ func TestPersistSeasonsAndEpisodes_NonCanonicalRefreshPreservesBaseAndLocalizati
 			Overview:      "Nouveau resume episode fournisseur",
 		}},
 		MergeReplaceUnlocked,
-		false,
 	)
 
 	storedSeason, err := seasonRepo.GetBySeriesAndNumber(ctx, seriesID, 1)

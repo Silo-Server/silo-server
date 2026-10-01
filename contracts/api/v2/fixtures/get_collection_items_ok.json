@@ -1,0 +1,13 @@
+{
+  "items": [
+    {
+      "collection_id": "c1",
+      "media_item_id": "movie:heat-1995",
+      "position": 0,
+      "added_at": "2026-01-02T03:04:05.000Z"
+    }
+  ],
+  "page": {
+    "has_more": false
+  }
+}

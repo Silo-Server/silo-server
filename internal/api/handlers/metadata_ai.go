@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -59,16 +58,17 @@ func NewMetadataAIHandler(service *translation.Service) *MetadataAIHandler {
 // show or hide their entry points.
 // GET /api/v1/metadata/ai/status
 func (h *MetadataAIHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
+	view := h.Status()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"enabled": h.service.Enabled(),
-		"on_view": h.service.OnViewMode(),
+		metadataAIStatusEnabledKey: view.Enabled,
+		"on_view":                  view.OnView,
 	})
 }
 
 // WriteMetadataAIDisabledStatus answers the status probe with a clean negative
 // when no metadata AI handler is wired.
 func WriteMetadataAIDisabledStatus(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"enabled": false, "on_view": "off"})
+	writeJSON(w, http.StatusOK, map[string]any{metadataAIStatusEnabledKey: false, "on_view": metadataAIOnViewOff})
 }
 
 type translateDescriptionRequest struct {
@@ -102,49 +102,19 @@ func (h *MetadataAIHandler) HandleTranslateOnView(w http.ResponseWriter, r *http
 	filter := catalog.AccessFilter{
 		AllowedLibraryIDs:  scope.AllowedLibraryIDs,
 		DisabledLibraryIDs: scope.DisabledLibraryIDs,
-		MaxContentRating:   scope.MaxContentRating,
+		MaturityLimits:     scope.MaturityLimits,
 		UserID:             scope.UserID,
 		ProfileID:          scope.ProfileID,
 	}
-	target, err := h.resolveTranslationTarget(r.Context(), contentID)
-	if err != nil {
-		if errors.Is(err, catalog.ErrItemNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Item not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to authorize item")
-		return
-	}
-	if err := h.ItemAccess.EnsureAccessible(r.Context(), target.accessContentID, filter); err != nil {
-		if errors.Is(err, catalog.ErrItemNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Item not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to authorize item")
-		return
-	}
-
 	var requestedBy *int
 	if userID := apimw.GetUserID(r.Context()); userID != 0 {
 		requestedBy = &userID
 	}
-
-	job, err := h.service.RequestOnView(r.Context(), target.kind, contentID, req.TargetLanguage, requestedBy)
+	job, err := h.TranslateOnView(r.Context(), filter, contentID, req.TargetLanguage, requestedBy)
 	if err != nil {
-		switch {
-		case errors.Is(err, translation.ErrNotConfigured):
-			writeError(w, http.StatusServiceUnavailable, "not_configured",
-				"On-view translation is not enabled on this server")
-		case errors.Is(err, translation.ErrInvalidRequest):
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		default:
-			slog.ErrorContext(r.Context(), "failed to request on-view translation", "component", "api",
-				"content_id", contentID, "error", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to start translation")
-		}
+		writeAPIError(w, err)
 		return
 	}
-
 	writeJSON(w, http.StatusAccepted, map[string]any{"job": job})
 }
 
@@ -193,7 +163,7 @@ func (h *MetadataAIHandler) resolveTranslationTarget(ctx context.Context, conten
 	return metadataAITarget{}, catalog.ErrItemNotFound
 }
 
-type translateMetadataRequest struct {
+type TranslateMetadataRequest struct {
 	TargetLanguage  string `json:"target_language"`
 	IncludeChildren *bool  `json:"include_children"` // default true
 	Force           bool   `json:"force"`
@@ -203,54 +173,14 @@ type translateMetadataRequest struct {
 // POST /api/v1/admin/items/{id}/metadata-translation
 func (h *MetadataAIHandler) HandleTranslate(w http.ResponseWriter, r *http.Request) {
 	contentID := chi.URLParam(r, "id")
-	var req translateMetadataRequest
+	var req TranslateMetadataRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
 		return
 	}
-	if req.TargetLanguage == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "target_language is required")
-		return
-	}
-	target, err := h.resolveTranslationTarget(r.Context(), contentID)
+	job, err := h.TranslateAdminMetadata(r.Context(), contentID, req, apimw.GetUserID(r.Context()))
 	if err != nil {
-		if errors.Is(err, catalog.ErrItemNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Item not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve item")
-		return
-	}
-	includeChildren := target.kind == translation.TargetItem
-	if req.IncludeChildren != nil {
-		includeChildren = *req.IncludeChildren && target.kind == translation.TargetItem
-	}
-
-	var requestedBy *int
-	if userID := apimw.GetUserID(r.Context()); userID != 0 {
-		requestedBy = &userID
-	}
-
-	job, err := h.service.Enqueue(r.Context(), translation.JobRequest{
-		TargetKind:      target.kind,
-		ContentID:       contentID,
-		TargetLanguage:  req.TargetLanguage,
-		IncludeChildren: includeChildren,
-		Force:           req.Force,
-		RequestedBy:     requestedBy,
-	})
-	if err != nil {
-		switch {
-		case errors.Is(err, translation.ErrNotConfigured):
-			writeError(w, http.StatusServiceUnavailable, "not_configured",
-				"Metadata AI translation is not configured on this server")
-		case errors.Is(err, translation.ErrInvalidRequest):
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		default:
-			slog.ErrorContext(r.Context(), "failed to enqueue metadata translation", "component", "api",
-				"content_id", contentID, "error", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to start translation")
-		}
+		writeAPIError(w, err)
 		return
 	}
 
@@ -261,11 +191,12 @@ func (h *MetadataAIHandler) HandleTranslate(w http.ResponseWriter, r *http.Reque
 // editor polls this for progress.
 // GET /api/v1/admin/items/{id}/metadata-translation/jobs
 func (h *MetadataAIHandler) HandleListJobs(w http.ResponseWriter, r *http.Request) {
-	jobs, err := h.service.ListJobs(r.Context(), chi.URLParam(r, "id"))
+	jobs, err := h.ListAdminMetadataTranslationJobs(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "list_error", "Failed to list jobs")
+		writeAPIError(w, err)
 		return
 	}
+
 	writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
 }
 
@@ -277,23 +208,10 @@ func (h *MetadataAIHandler) HandleCancelJob(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "invalid_id", "Invalid job ID")
 		return
 	}
-	job, err := h.service.GetJob(r.Context(), jobID)
-	if err != nil {
-		if errors.Is(err, translation.ErrJobNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Job not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load job")
+	if err := h.CancelAdminMetadataTranslation(r.Context(), chi.URLParam(r, "id"), jobID); err != nil {
+		writeAPIError(w, err)
 		return
 	}
-	// The curation guard authorized {id}; the job must belong to it.
-	if job.ContentID != chi.URLParam(r, "id") {
-		writeError(w, http.StatusNotFound, "not_found", "Job not found")
-		return
-	}
-	if err := h.service.Cancel(r.Context(), jobID); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to cancel job")
-		return
-	}
+
 	w.WriteHeader(http.StatusNoContent)
 }

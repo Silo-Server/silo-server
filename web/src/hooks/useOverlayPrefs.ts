@@ -1,19 +1,30 @@
 import { useMemo, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, ApiClientError } from "@/api/client";
+import { v2 } from "@/api/v2/request";
 import {
   effectiveSettingsQueryKey,
   isDefinitiveSettingMutationRejection,
+  isSettingValueMissing,
   useClearSettingValue,
   useEffectiveSettings,
   useSetSettingValue,
+  useSettingsCapabilities,
   type EffectiveSettingsMap,
 } from "@/hooks/queries/settingValues";
 import type { SettingIdentity } from "@/hooks/queries/settingValues";
-import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
+import { SETTING_KEYS, SETTINGS_API_VERSION, type SettingKey } from "@/lib/settingsContract";
 import { settingsKeys } from "@/hooks/queries/keys";
 import { storage } from "@/utils/storage";
-import { parseOverlayPrefs, serializeOverlayPrefs, type CardOverlayPrefs } from "@/lib/overlays";
+import {
+  isOverlaySupportedBy,
+  overlayPrefsForServer,
+  parseOverlayPrefs,
+  serializeOverlayPrefs,
+  storedOverlayIds,
+  type CardOverlayPrefs,
+  type OverlayId,
+  type OverlayServerSupport,
+} from "@/lib/overlays";
 import {
   normalizeCardQuickActionMode,
   type EnabledCardQuickActionMode,
@@ -29,13 +40,6 @@ const OVERLAY_KEYS = [
   SETTING_KEYS.UI_CARD_QUICK_ACTIONS_ENABLED,
 ] as const;
 
-interface OverlayConfig {
-  enabled: boolean;
-  defaults?: string;
-  quick_actions_enabled?: boolean;
-  quick_actions_default?: string;
-}
-
 // Overlay booleans are inherit-with-override, not a policy gate: the server
 // setting is only the default for profiles that have not chosen, and an
 // explicit profile choice wins in either direction.
@@ -49,7 +53,7 @@ function inheritBoolean(userValue: unknown, serverDefault: boolean): boolean {
 function useOverlayConfig() {
   return useQuery({
     queryKey: settingsKeys.overlayConfig(),
-    queryFn: () => api<OverlayConfig>("/settings/overlay-config"),
+    queryFn: () => v2("GET /api/v2/settings/overlay-config"),
     staleTime: 60_000,
   });
 }
@@ -64,6 +68,9 @@ export function useOverlayPrefs() {
     enabled: hasProfile,
   });
   const { data: config, isLoading: configLoading } = useOverlayConfig();
+  const { data: capabilities } = useSettingsCapabilities({ enabled: hasProfile });
+  const manifestRevision =
+    capabilities?.api_version === SETTINGS_API_VERSION ? capabilities.manifest_revision : undefined;
   const { mutate: setSettingValue } = useSetSettingValue();
   const clearValue = useClearSettingValue();
   const queryClient = useQueryClient();
@@ -106,6 +113,10 @@ export function useOverlayPrefs() {
   // The contract default is null — "no preference expressed" — which is what
   // lets the server-wide admin default apply; a stored value wins outright.
   const userValue = effective?.[SETTING_KEYS.UI_CARD_OVERLAYS]?.value ?? null;
+  const serverSupport = useMemo<OverlayServerSupport>(
+    () => ({ manifestRevision, storedIds: storedOverlayIds(userValue) }),
+    [manifestRevision, userValue],
+  );
   const overlaysEnabledUserValue = effective?.[SETTING_KEYS.UI_CARD_OVERLAYS_ENABLED]?.value;
   const quickActionUserValue = effective?.[SETTING_KEYS.UI_CARD_QUICK_ACTIONS]?.value ?? null;
   const quickActionsEnabledUserValue =
@@ -130,18 +141,28 @@ export function useOverlayPrefs() {
 
   const setPrefs = useCallback(
     (next: CardOverlayPrefs) => {
+      // The server rejects the whole document over one overlay id it does not
+      // accept, so those ids never reach it.
+      const storable = overlayPrefsForServer(next, serverSupport);
       // Avoid a network round-trip and downstream re-render cascade when
       // the user toggles a control to its current value. Comparison goes
       // through the parser so key ordering in the stored JSON is irrelevant.
       if (
         userValue != null &&
-        serializeOverlayPrefs(parseOverlayPrefs(userValue)) === serializeOverlayPrefs(next)
+        serializeOverlayPrefs(
+          overlayPrefsForServer(parseOverlayPrefs(userValue), serverSupport),
+        ) === serializeOverlayPrefs(storable)
       ) {
         return;
       }
-      setProfileValue(SETTING_KEYS.UI_CARD_OVERLAYS, next);
+      setProfileValue(SETTING_KEYS.UI_CARD_OVERLAYS, storable);
     },
-    [userValue, setProfileValue],
+    [serverSupport, userValue, setProfileValue],
+  );
+
+  const isOverlaySupported = useCallback(
+    (id: OverlayId) => isOverlaySupportedBy(id, serverSupport),
+    [serverSupport],
   );
 
   const setOverlaysEnabled = useCallback(
@@ -173,7 +194,7 @@ export function useOverlayPrefs() {
         } catch (error) {
           // A missing scoped value already means this part of the preference
           // is inheriting from the server default.
-          if (!(error instanceof ApiClientError && error.status === 404)) throw error;
+          if (!isSettingValueMissing(error)) throw error;
         }
       }),
     );
@@ -189,6 +210,7 @@ export function useOverlayPrefs() {
   return {
     prefs: overlaysEnabled && !isLoading ? prefs : null,
     setPrefs,
+    isOverlaySupported,
     overlaysEnabled,
     setOverlaysEnabled,
     quickActionMode:

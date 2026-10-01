@@ -26,6 +26,10 @@ export interface CatalogSearchState {
   // True when the UI is displaying a collection sort resolved by the server,
   // rather than an explicit sort read from the URL or chosen by the viewer.
   sort_from_server?: boolean;
+  // True when the sort was read from the URL or chosen by the viewer. Without
+  // it the client default sort is a placeholder and a query-source request
+  // leaves ordering to the server (relevance for text search).
+  explicit_sort?: boolean;
   query_definition: QueryDefinition;
 }
 
@@ -74,7 +78,12 @@ function isCollectionSource(source: CatalogSource): boolean {
 // field. The watchlist's stored order can mirror a watch provider's list
 // order (e.g. MDBList) via sort_index; favorites use their entry order.
 export function catalogSourceSupportsSourceOrder(source: CatalogSource): boolean {
-  return isCollectionSource(source) || source === "watchlist" || source === "favorites";
+  return (
+    isCollectionSource(source) ||
+    source === "watchlist" ||
+    source === "favorites" ||
+    source === "history"
+  );
 }
 
 export function catalogSourceAllowsOverlay(source: CatalogSource): boolean {
@@ -175,6 +184,7 @@ export function parseCatalogSearchParams(searchParams: URLSearchParams): Catalog
     limit: queryLimit,
   });
   baseState.uses_source_order = catalogSourceSupportsSourceOrder(source) && !hasExplicitSort;
+  baseState.explicit_sort = hasExplicitSort;
 
   return baseState;
 }
@@ -232,12 +242,36 @@ export function buildCatalogQueryUpdateHref(state: CatalogSearchState, q: string
   return `/catalog?${params.toString()}`;
 }
 
+/**
+ * The search URL parameter holding the Request to add grid's page, so Back,
+ * a reload, and a shared link return to it. Filter and query changes build
+ * fresh params without it, which starts the grid over.
+ */
+export const CATALOG_REQUEST_PAGE_PARAM = "request_page";
+
+/** The Request to add page a search URL asks for; 1 when absent or invalid. */
+export function readCatalogRequestPage(searchParams: URLSearchParams): number {
+  return parsePositiveInt(searchParams.get(CATALOG_REQUEST_PAGE_PARAM)) ?? 1;
+}
+
+/** A copy of the params that shows the Request to add grid at this page. */
+export function withCatalogRequestPage(
+  searchParams: URLSearchParams,
+  page: number,
+): URLSearchParams {
+  const next = new URLSearchParams(searchParams);
+  if (page > 1) {
+    next.set(CATALOG_REQUEST_PAGE_PARAM, String(page));
+  } else {
+    next.delete(CATALOG_REQUEST_PAGE_PARAM);
+  }
+  return next;
+}
+
 export function buildQueryCatalogHref(q?: string): string {
-  return buildCatalogHref({
-    source: "query",
-    q,
-    query_definition: createEmptyQueryDefinition(),
-  });
+  const params = new URLSearchParams({ source: "query" });
+  if (q) params.set("q", q);
+  return `/catalog?${params.toString()}`;
 }
 
 export function buildPersonalCatalogHref(source: "favorites" | "watchlist" | "history"): string {
@@ -249,7 +283,7 @@ export function buildPersonalCatalogHref(source: "favorites" | "watchlist" | "hi
 }
 
 export function buildPersonCatalogHref(personId: string): string {
-  return `/person/${personId}`;
+  return `/person/${encodeURIComponent(personId)}`;
 }
 
 export function buildSectionCatalogHref(destination: SectionCatalogDestination): string {
@@ -391,7 +425,10 @@ export function buildCatalogApiSearchParams(state: CatalogSearchState): URLSearc
     !state.sort_from_server &&
     state.query_definition.sort.field &&
     (state.query_definition.sort.field !== "added_at" ||
-      (state.source === "query" && effectiveLibraryID != null) ||
+      // A library browse defaults to Date Added; an unscoped query only sends
+      // it when the viewer or an editor chose it, so text search keeps the
+      // server's relevance ranking.
+      (state.source === "query" && (effectiveLibraryID != null || state.explicit_sort)) ||
       // These sources default to source order, so an explicit Date Added pick
       // must be sent to distinguish it (the server maps it to list added-at).
       // Dropping it would round-trip back through parse as source order and

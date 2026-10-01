@@ -2,8 +2,11 @@ package tonemap
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -15,6 +18,91 @@ import (
 	"time"
 )
 
+// TestDecodeProbeFixtureCoversPascalNVDECMinimum prevents the embedded decoder
+// sample from regressing below the minimum frame size accepted by Pascal NVDEC.
+func TestDecodeProbeFixtureCoversPascalNVDECMinimum(t *testing.T) {
+	ffprobePath, err := exec.LookPath("ffprobe")
+	if err != nil {
+		t.Skip("ffprobe is not installed")
+	}
+	fixturePath, cleanup, err := writeDecodeProbeFixture()
+	if err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	defer cleanup()
+
+	output, err := exec.Command(
+		ffprobePath,
+		"-v", "error",
+		"-select_streams", "v:0",
+		"-show_entries", "stream=width,height,pix_fmt",
+		"-of", "json",
+		fixturePath,
+	).CombinedOutput()
+	if err != nil {
+		t.Fatalf("probe fixture: %v: %s", err, output)
+	}
+	var result struct {
+		Streams []struct {
+			Width  int    `json:"width"`
+			Height int    `json:"height"`
+			PixFmt string `json:"pix_fmt"`
+		} `json:"streams"`
+	}
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatalf("decode fixture metadata: %v: %s", err, output)
+	}
+	if len(result.Streams) != 1 {
+		t.Fatalf("fixture streams = %d, want 1", len(result.Streams))
+	}
+	const pascalNVDECMinimumDimension = 144
+	stream := result.Streams[0]
+	if stream.Width < pascalNVDECMinimumDimension || stream.Height < pascalNVDECMinimumDimension {
+		t.Fatalf("fixture dimensions = %dx%d, must be at least %dx%d for Pascal NVDEC", stream.Width, stream.Height, pascalNVDECMinimumDimension, pascalNVDECMinimumDimension)
+	}
+	if stream.PixFmt != "yuv420p10le" {
+		t.Fatalf("fixture pixel format = %q, want yuv420p10le", stream.PixFmt)
+	}
+}
+
+// TestDecodeProbeFixtureIsMain10 pins the fixture's HEVC profile by reading
+// the SPS profile_tier_level directly, so it holds without ffprobe. Intel
+// VAAPI/QSV decoders accept general_profile_idc 2 (Main 10) and refuse 4
+// (Rext); a Rext fixture makes every hardware tone-map smoke fail while the
+// software smoke, which decodes Rext, still passes.
+func TestDecodeProbeFixtureIsMain10(t *testing.T) {
+	data, err := base64.StdEncoding.DecodeString(decodeProbeFixtureBase64)
+	if err != nil {
+		t.Fatalf("decode fixture: %v", err)
+	}
+	const (
+		nalSPS         = 33
+		hevcMain10IDC  = 2
+		nalHeaderBytes = 2
+		spsPrefixBytes = 1 // sps_video_parameter_set_id, max_sub_layers_minus1, temporal_id_nesting
+	)
+	for i := 0; i+3 < len(data); i++ {
+		if data[i] != 0 || data[i+1] != 0 || data[i+2] != 1 {
+			continue
+		}
+		header := i + 3
+		if (data[header]>>1)&0x3f != nalSPS {
+			continue
+		}
+		ptl := header + nalHeaderBytes + spsPrefixBytes
+		if ptl >= len(data) {
+			t.Fatal("fixture SPS is truncated")
+		}
+		if got := data[ptl] & 0x1f; got != hevcMain10IDC {
+			t.Fatalf("fixture general_profile_idc = %d, want %d (Main 10)", got, hevcMain10IDC)
+		}
+		return
+	}
+	t.Fatal("fixture has no SPS NAL unit")
+}
+
+// TestHardwareSmokeFilterNVENCPreservesSourceBitDepth verifies that the CUDA
+// fallback graph downloads SDR base layers using their actual source bit depth.
 func TestHardwareSmokeFilterNVENCPreservesSourceBitDepth(t *testing.T) {
 	for _, test := range []struct {
 		name     string
@@ -77,26 +165,28 @@ func TestVideoToolboxListingGateRequiresCompletePipeline(t *testing.T) {
 // TestProbeTotalTimeoutCoversBoundedCommandMatrix verifies the deadline covers every possible probe command.
 func TestProbeTotalTimeoutCoversBoundedCommandMatrix(t *testing.T) {
 	tests := []struct {
-		name    string
-		backend string
-		device  string
-		count   int
+		name     string
+		backend  string
+		device   string
+		expected time.Duration
 	}{
-		{name: "software", backend: BackendSoftware, count: 7},
-		{name: "one hardware device", backend: BackendQSV, device: "/dev/dri/renderD128", count: 12},
-		{name: "two hardware devices", backend: BackendVAAPI, device: "/dev/dri/renderD128,/dev/dri/renderD129", count: 17},
-		{name: "VideoToolbox", backend: BackendVideoToolbox, count: 12},
+		{name: "software", backend: BackendSoftware, expected: 36 * time.Second},
+		{name: "one QSV device", backend: BackendQSV, device: "/dev/dri/renderD128", expected: 61 * time.Second},
+		{name: "two VAAPI devices", backend: BackendVAAPI, device: "/dev/dri/renderD128,/dev/dri/renderD129", expected: 86 * time.Second},
+		{name: "one NVENC device", backend: BackendNVENC, device: "0", expected: 186 * time.Second},
+		{name: "VideoToolbox", backend: BackendVideoToolbox, expected: 61 * time.Second},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			want := time.Duration(tt.count)*probeCommandTimeout + probeTimeoutSlack
-			if got := ProbeTotalTimeout(tt.backend, tt.device); got != want {
-				t.Fatalf("ProbeTotalTimeout() = %s, want %s", got, want)
+			if got := ProbeTotalTimeout(tt.backend, tt.device); got != tt.expected {
+				t.Fatalf("ProbeTotalTimeout() = %s, want %s", got, tt.expected)
 			}
 		})
 	}
 }
 
+// TestProbeEndpointTimeoutCoversDetectionAndProbeBudgets verifies that endpoint
+// and transport budgets include their complete backend-specific probe matrix.
 func TestProbeEndpointTimeoutCoversDetectionAndProbeBudgets(t *testing.T) {
 	if got, want := ProbeEndpointTimeout(BackendQSV, "/dev/dri/renderD128"), 106*time.Second; got != want {
 		t.Fatalf("ProbeEndpointTimeout() = %s, want %s", got, want)
@@ -107,11 +197,30 @@ func TestProbeEndpointTimeoutCoversDetectionAndProbeBudgets(t *testing.T) {
 	if got, want := ProbeRequestTimeout(BackendQSV, "/dev/dri/renderD128"), 111*time.Second; got != want {
 		t.Fatalf("ProbeRequestTimeout() = %s, want %s", got, want)
 	}
+	if got, want := ProbeEndpointTimeout(BackendNVENC, "0"), 231*time.Second; got != want {
+		t.Fatalf("ProbeEndpointTimeout(NVENC) = %s, want %s", got, want)
+	}
+	if got, want := ProbeRequestTimeout(BackendNVENC, "0"), 236*time.Second; got != want {
+		t.Fatalf("ProbeRequestTimeout(NVENC) = %s, want %s", got, want)
+	}
 	// The slack has to outlast a full hardware detection walk plus the
 	// transformation registry probe, or a node answers 503 while its own
 	// detection is still running.
 	if probeEndpointSlack < 30*time.Second+3*3*time.Second {
 		t.Fatalf("probeEndpointSlack = %s, too small for detection and registry probes", probeEndpointSlack)
+	}
+}
+
+// TestHardwareProbeCommandTimeoutExtendsOnlyNVENC prevents cold-start headroom
+// from silently widening the existing limits for other probe backends.
+func TestHardwareProbeCommandTimeoutExtendsOnlyNVENC(t *testing.T) {
+	if got := hardwareProbeCommandTimeout(BackendNVENC); got != nvencProbeCommandTimeout {
+		t.Fatalf("NVENC command timeout = %s, want %s", got, nvencProbeCommandTimeout)
+	}
+	for _, backend := range []string{BackendQSV, BackendVAAPI, BackendVideoToolbox, BackendSoftware, ""} {
+		if got := hardwareProbeCommandTimeout(backend); got != probeCommandTimeout {
+			t.Fatalf("%q command timeout = %s, want %s", backend, got, probeCommandTimeout)
+		}
 	}
 }
 
@@ -493,9 +602,11 @@ func TestProbeDevicesCapsTheConfiguredSet(t *testing.T) {
 
 	// The budget a node advertises for that capped set is therefore never above
 	// what its callers allow — which is the property the cap exists for.
-	if advertised, ceiling := ProbeRequestTimeout(BackendQSV, strings.Join(configured, ",")),
-		MaxProbeRequestTimeout(); advertised > ceiling {
-		t.Fatalf("advertised %v exceeds the %v callers allow", advertised, ceiling)
+	for _, backend := range []string{BackendQSV, BackendVAAPI, BackendNVENC, BackendVideoToolbox} {
+		if advertised, ceiling := ProbeRequestTimeout(backend, strings.Join(configured, ",")),
+			MaxProbeRequestTimeout(); advertised > ceiling {
+			t.Fatalf("%s advertised %v exceeds the %v callers allow", backend, advertised, ceiling)
+		}
 	}
 
 	// A set inside the cap is untouched.

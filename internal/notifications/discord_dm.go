@@ -133,6 +133,10 @@ func (c *discordChannel) send(ctx context.Context, tx pgx.Tx, userID int, _ stri
 
 	if c.posterURL != nil {
 		for i := range rows {
+			if rows[i].PosterPath == "" && isRequestLifecycleType(rows[i].Type) {
+				flags := parseRequestFlags(rows[i].ReasonFlags)
+				rows[i].PosterPath = flags.PosterPath
+			}
 			rows[i].PosterURL = c.posterURL(ctx, rows[i].PosterPath, rows[i].PosterSourcePath)
 		}
 	}

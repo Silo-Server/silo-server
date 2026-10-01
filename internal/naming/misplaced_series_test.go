@@ -14,6 +14,7 @@ func TestIsMisplacedSeriesFile(t *testing.T) {
 		{"specials dir", `/mnt/unionfs/movies/anime/Some Show/Specials/Some Show S00E02 - OVA.mkv`, true},
 		{"extras dir", `/mnt/unionfs/movies/anime/Some Show/Extras/Some Show S00E03 - Bonus.mkv`, true},
 		{"lowercase season", `/x/movies/Show/season 2/Show s02e05.mkv`, true},
+		{"dotted separator", `/mnt/unionfs/movies/anime-dub/Bleach Supercuts/Season 01/Bleach.Supercuts.s01.e01.mkv`, true},
 
 		// Legit movies whose release filenames merely contain an SxxExx substring
 		// but sit in a proper "Title (Year)/" folder — must NOT be flagged.

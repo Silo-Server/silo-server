@@ -56,6 +56,38 @@ describe("navigation view-transition CSS", () => {
     expect(css).toContain("transform: translateX(calc(-1 * var(--nav-slide-shift)))");
   });
 
+  it("matches Home item entry and return timing without changing other routes", () => {
+    expect(css).toMatch(/--duration-sidebar-collapse:\s*300ms;/);
+    expect(css).toMatch(/--duration-sidebar-entry:\s*340ms;/);
+    expect(css).toMatch(/--duration-sidebar-return:\s*340ms;/);
+    expect(css).toMatch(
+      /html\[data-home-item-entry="true"\] \{\s*--duration-sidebar-collapse: var\(--duration-sidebar-entry\);/,
+    );
+    expect(css).toMatch(
+      /html\[data-navigation-direction="back"\]\[data-home-item-return="true"\] \{\s*--duration-sidebar-collapse: var\(--duration-sidebar-return\);/,
+    );
+    expect(css).not.toMatch(
+      /html\[data-navigation-direction="back"\]\[data-home-route="true"\][^{]*\{[^}]*--duration-sidebar-return/,
+    );
+    expect(reducedMotionBlock()).toMatch(/--duration-sidebar-entry:\s*0ms;/);
+    expect(reducedMotionBlock()).toMatch(/--duration-sidebar-return:\s*0ms;/);
+  });
+
+  it("uses solid Home item landmarks and settles only the bounded hero content", () => {
+    expect(css).toMatch(
+      /\.home-item-transition-block \{\s*background: var\(--surface\);\s*border-color: var\(--border\);/,
+    );
+    expect(css).toMatch(
+      /html\[data-home-item-entry="true"\] \.detail-hero-primary-content \{\s*animation: var\(--duration-normal\) var\(--ease-out\) both home-item-detail-reveal;/,
+    );
+    expect(css).not.toMatch(
+      /html\[data-home-item-entry="true"\] \.detail-hero-primary-content[^}]*blur/,
+    );
+    expect(reducedMotionBlock()).toMatch(
+      /\.detail-hero-primary-content \{\s*animation: none !important;/,
+    );
+  });
+
   it("runs both halves of the cross-fade on identical timing", () => {
     // The pseudo-elements default to `mix-blend-mode: plus-lighter`, which only
     // cross-fades cleanly while the two opacities sum to 1. Different easing

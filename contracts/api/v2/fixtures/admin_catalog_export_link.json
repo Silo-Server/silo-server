@@ -1,0 +1,5 @@
+{
+  "job_id": "catalog-job",
+  "url": "https://example.invalid/download",
+  "expires_at": "2026-01-09T03:04:05.678Z"
+}

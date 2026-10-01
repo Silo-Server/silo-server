@@ -8,6 +8,7 @@ import { getWatchedActionLabel } from "../watchedState";
 import ActionBar, { type ActionBarProps } from "./ActionBar";
 
 type UserActionProps =
+  | "isWatched"
   | "watchedLabel"
   | "onToggleWatched"
   | "isUpdatingWatched"
@@ -63,6 +64,7 @@ export default function MediaUserActionBar({ item, ...props }: MediaUserActionBa
     <ActionBar
       {...props}
       watchedLabel={getWatchedActionLabel(item)}
+      isWatched={item.user_data?.played ?? false}
       onToggleWatched={handleToggleWatched}
       isUpdatingWatched={isUpdatingWatched}
       onToggleFavorite={handleToggleFavorite}

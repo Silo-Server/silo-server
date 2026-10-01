@@ -30,6 +30,7 @@ describe("PageBack", () => {
     resetNavigationHistory();
     window.history.replaceState(null, "");
     delete document.documentElement.dataset.navigationDirection;
+    vi.unstubAllGlobals();
   });
 
   it("renders a button with the default 'Go back' aria-label", () => {
@@ -63,6 +64,24 @@ describe("PageBack", () => {
 
     expect(mocks.navigate).toHaveBeenCalledTimes(1);
     expect(mocks.navigate).toHaveBeenCalledWith("/", { replace: false, viewTransition: true });
+  });
+
+  it("uses the snapshot-free fallback when leaving an item on desktop", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query === "(min-width: 64rem)",
+    }));
+    render(
+      <MemoryRouter initialEntries={["/item/movie-1"]}>
+        <PageBack />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Go back" }));
+
+    expect(mocks.navigate).toHaveBeenCalledWith("/", {
+      replace: false,
+      viewTransition: false,
+    });
   });
 
   it("uses browser history when a router history entry is available", async () => {

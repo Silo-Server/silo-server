@@ -15,6 +15,8 @@ interface MediaCarouselProps {
   skeletonCount?: number;
   skeletonAspect?: string;
   onViewAll?: () => void;
+  /** Renders "Explore all" as a link to this page. Takes precedence over onViewAll. */
+  viewAllHref?: string;
   /** Optional actions rendered next to the title (e.g. pin button) */
   headerActions?: ReactNode;
   /**
@@ -25,6 +27,11 @@ interface MediaCarouselProps {
    * box instead of picking up a second layer of padding.
    */
   edgePadding?: boolean;
+  /**
+   * Compact rows for dense hosts such as pickers and dialogs: a small
+   * uppercase eyebrow title, tighter header spacing, and no page-level gap.
+   */
+  compact?: boolean;
 }
 
 export default function MediaCarousel({
@@ -35,9 +42,13 @@ export default function MediaCarousel({
   skeletonCount = 7,
   skeletonAspect = "aspect-[2/3]",
   onViewAll,
+  viewAllHref,
   headerActions,
   edgePadding = true,
+  compact = false,
 }: MediaCarouselProps) {
+  const viewAllClass =
+    "text-muted-foreground hover:text-primary text-[12px] font-semibold tracking-[0.16em] uppercase transition-all active:scale-[0.98]";
   const { emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } = useCarouselEmbla();
   const { cardPresentation } = useUICustomization();
   // Page-edge padding is opt-out so the carousel can also be embedded in an
@@ -45,6 +56,11 @@ export default function MediaCarousel({
   const headerPadX = edgePadding ? " px-4 sm:px-6 lg:px-10 xl:px-12" : "";
   const viewportPadX = edgePadding ? " pr-4 sm:pr-6 lg:pr-10 xl:pr-12" : "";
   const containerPadX = edgePadding ? " pl-4 sm:pl-6 lg:pl-10 xl:pl-12" : "";
+  const titleClass = compact
+    ? "text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase"
+    : "text-foreground text-xl font-semibold tracking-tight";
+  const headerGap = compact ? "mb-2" : "mb-5";
+  const slideGap = compact ? "gap-3" : "gap-4 lg:gap-5";
   const slideChildren = loading
     ? Array.from({ length: skeletonCount }).map((_, i) => (
         <div key={i} className="w-[130px] sm:w-[150px] lg:w-[178px]">
@@ -64,11 +80,11 @@ export default function MediaCarousel({
         } as CSSProperties
       }
     >
-      <div className={`mb-5 flex items-end justify-between gap-4${headerPadX}`}>
+      <div className={`${headerGap} flex items-end justify-between gap-4${headerPadX}`}>
         <div className="flex items-center gap-2">
           {titleHref ? (
             <Link to={titleHref} className="group/title hover:text-primary transition-colors">
-              <h2 className="text-foreground text-xl font-semibold tracking-tight">
+              <h2 className={titleClass}>
                 {title}
                 <span className="text-muted-foreground group-hover/title:text-primary ml-2 text-sm transition-colors">
                   View
@@ -76,18 +92,23 @@ export default function MediaCarousel({
               </h2>
             </Link>
           ) : (
-            <h2 className="text-foreground text-xl font-semibold tracking-tight">{title}</h2>
+            <h2 className={titleClass}>{title}</h2>
           )}
           {headerActions}
         </div>
-        {onViewAll && (
-          <button
-            onClick={onViewAll}
-            className="text-muted-foreground hover:text-primary text-[12px] font-semibold tracking-[0.16em] uppercase transition-all active:scale-[0.98]"
+        {viewAllHref ? (
+          <Link
+            to={viewAllHref}
+            aria-label={`Explore all ${title}`}
+            className={`${viewAllClass} shrink-0`}
           >
             Explore all
+          </Link>
+        ) : onViewAll ? (
+          <button onClick={onViewAll} className={viewAllClass}>
+            Explore all
           </button>
-        )}
+        ) : null}
       </div>
 
       <div className="relative">
@@ -123,7 +144,7 @@ export default function MediaCarousel({
         >
           <ul
             role="list"
-            className={`embla__container flex cursor-grab list-none gap-4 lg:gap-5${containerPadX}`}
+            className={`embla__container flex cursor-grab list-none ${slideGap}${containerPadX}`}
           >
             {slideChildren.map((child, index) => (
               <li key={index} className="embla__slide shrink-0">

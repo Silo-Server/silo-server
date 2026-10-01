@@ -1,3 +1,4 @@
+import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -6,6 +7,7 @@ import { createElement } from "react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { captureAccessGroupAuthority } from "@/api/v2/accessGroups";
 import type { AccessGroup } from "@/api/types";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
 
@@ -28,6 +30,8 @@ const group: AccessGroup = {
   audio_transcode_allowed: true,
   max_streams: 0,
   max_transcodes: 0,
+  max_remote_stream_bitrate_kbps: 0,
+  max_local_stream_bitrate_kbps: 0,
   allowed_permissions: null,
   requests_allowed: true,
   is_default: false,
@@ -55,6 +59,9 @@ function requestBody(init: RequestInit | undefined) {
 describe("access group admin hooks", () => {
   beforeEach(() => {
     installPolicyStorageMocks();
+    setAccessToken("account");
+    setProfileId("owner");
+    setProfileToken(null);
   });
 
   afterEach(() => {
@@ -65,9 +72,9 @@ describe("access group admin hooks", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof fetch>(async (input, init) => {
-        expect(String(input)).toBe("/api/v1/admin/access-groups");
+        expect(String(input)).toBe("/api/v2/admin/access-groups?limit=200");
         expect(init?.method ?? "GET").toBe("GET");
-        return jsonResponse([group]);
+        return jsonResponse({ items: [{ ...group, id: "11" }], page: { has_more: false } });
       }),
     );
 
@@ -80,14 +87,14 @@ describe("access group admin hooks", () => {
 
   it("posts create requests with nullable access fields", async () => {
     const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
-      expect(String(input)).toBe("/api/v1/admin/access-groups");
+      expect(String(input)).toBe("/api/v2/admin/access-groups");
       expect(init?.method).toBe("POST");
       expect(requestBody(init)).toMatchObject({
         name: "Kids",
         library_ids: null,
         allowed_permissions: null,
       });
-      return jsonResponse({ ...group, id: 12, name: "Kids" }, 201);
+      return jsonResponse({ ...group, id: "12", name: "Kids" }, 201);
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -95,9 +102,8 @@ describe("access group admin hooks", () => {
 
     await act(async () => {
       await result.current.mutateAsync({
-        name: "Kids",
-        library_ids: null,
-        allowed_permissions: null,
+        body: { name: "Kids", library_ids: null, allowed_permissions: null },
+        profileContext: captureAccessGroupAuthority(),
       });
     });
 
@@ -106,13 +112,21 @@ describe("access group admin hooks", () => {
 
   it("puts update requests to the access group detail endpoint", async () => {
     const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
-      expect(String(input)).toBe("/api/v1/admin/access-groups/11");
+      expect(String(input)).toBe("/api/v2/admin/access-groups/11");
       expect(init?.method).toBe("PUT");
       expect(requestBody(init)).toMatchObject({
         description: "Pinned libraries",
-        library_ids: [1, 2],
+        library_ids: ["1", "2"],
       });
-      return jsonResponse({ ...group, description: "Pinned libraries", library_ids: [1, 2] });
+      return new Response(
+        JSON.stringify({
+          ...group,
+          id: "11",
+          description: "Pinned libraries",
+          library_ids: ["1", "2"],
+        }),
+        { headers: { "Content-Type": "application/json", ETag: '"saved"' } },
+      );
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -120,7 +134,7 @@ describe("access group admin hooks", () => {
 
     await act(async () => {
       await result.current.mutateAsync({
-        id: 11,
+        editor: { group, etag: '"old"', profileContext: captureAccessGroupAuthority() },
         body: {
           description: "Pinned libraries",
           library_ids: [1, 2],
@@ -133,7 +147,7 @@ describe("access group admin hooks", () => {
 
   it("deletes access groups by id", async () => {
     const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
-      expect(String(input)).toBe("/api/v1/admin/access-groups/11");
+      expect(String(input)).toBe("/api/v2/admin/access-groups/11");
       expect(init?.method).toBe("DELETE");
       return new Response(null, { status: 204 });
     });
@@ -142,7 +156,11 @@ describe("access group admin hooks", () => {
     const { result } = renderHook(() => useDeleteAccessGroup(), { wrapper: createWrapper() });
 
     await act(async () => {
-      await result.current.mutateAsync(11);
+      await result.current.mutateAsync({
+        group,
+        etag: '"old"',
+        profileContext: captureAccessGroupAuthority(),
+      });
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);

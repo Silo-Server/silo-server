@@ -4,19 +4,16 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  api: vi.fn(),
+  v2: vi.fn(),
 }));
 
-vi.mock("@/api/client", () => ({
-  api: mocks.api,
+vi.mock("@/api/v2/request", () => ({
+  v2: mocks.v2,
 }));
 
+import { setAccessToken, setRefreshToken, setProfileId, setProfileToken } from "@/api/client";
 import { adminKeys } from "../keys";
 import {
-  adminDownloadsStatsPath,
-  adminPlaybackActivityPath,
-  adminTimeseriesPath,
-  adminTopActivityPath,
   normalizeDownloadsTopLimit,
   normalizeInsightHours,
   normalizeTopActivityDays,
@@ -76,17 +73,6 @@ describe("dashboard insight windows", () => {
     expect(normalizeDownloadsTopLimit(input)).toBe(expected);
   });
 
-  it("builds request paths from the clamped window", () => {
-    expect(adminTimeseriesPath(24)).toBe("/admin/stats/timeseries?hours=24");
-    expect(adminTimeseriesPath(1)).toBe("/admin/stats/timeseries?hours=1");
-    expect(adminTimeseriesPath(9_999)).toBe("/admin/stats/timeseries?hours=744");
-    expect(adminPlaybackActivityPath(24)).toBe("/admin/stats/playback-activity?hours=24");
-    expect(adminTopActivityPath(7)).toBe("/admin/stats/top-activity?days=7");
-    expect(adminTopActivityPath(0)).toBe("/admin/stats/top-activity?days=1");
-    expect(adminDownloadsStatsPath(10)).toBe("/admin/stats/downloads?limit=10");
-    expect(adminDownloadsStatsPath(99)).toBe("/admin/stats/downloads?limit=25");
-  });
-
   it("keys every window under the prefix the dashboard refresh invalidates", () => {
     const roots = [
       [adminKeys.dashboardTimeseriesRoot(), adminKeys.dashboardTimeseries(24)],
@@ -102,8 +88,12 @@ describe("dashboard insight windows", () => {
 
 describe("dashboard insight hooks", () => {
   beforeEach(() => {
-    mocks.api.mockReset();
-    mocks.api.mockResolvedValue({});
+    setAccessToken("test-admin");
+    setRefreshToken(null);
+    setProfileId("profile-a");
+    setProfileToken(null);
+    mocks.v2.mockReset();
+    mocks.v2.mockResolvedValue({});
   });
 
   it("requests the timeseries window it was asked for and caches it by window", async () => {
@@ -113,7 +103,10 @@ describe("dashboard insight hooks", () => {
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(mocks.api).toHaveBeenCalledWith("/admin/stats/timeseries?hours=1");
+    expect(mocks.v2).toHaveBeenCalledWith("GET /api/v2/admin/stats/timeseries", {
+      profileContext: expect.any(Object),
+      query: { hours: 1 },
+    });
     expect(queryClient.getQueryData(adminKeys.dashboardTimeseries(1))).toEqual({});
     expect(queryClient.getQueryData(adminKeys.dashboardTimeseries(24))).toBeUndefined();
   });
@@ -125,7 +118,10 @@ describe("dashboard insight hooks", () => {
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(mocks.api).toHaveBeenCalledWith("/admin/stats/playback-activity?hours=24");
+    expect(mocks.v2).toHaveBeenCalledWith("GET /api/v2/admin/stats/playback-activity", {
+      profileContext: expect.any(Object),
+      query: { hours: 24 },
+    });
     expect(queryClient.getQueryData(adminKeys.playbackActivity(24))).toEqual({});
   });
 
@@ -136,7 +132,10 @@ describe("dashboard insight hooks", () => {
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(mocks.api).toHaveBeenCalledWith("/admin/stats/top-activity?days=7");
+    expect(mocks.v2).toHaveBeenCalledWith("GET /api/v2/admin/stats/top-activity", {
+      profileContext: expect.any(Object),
+      query: { days: 7 },
+    });
     expect(queryClient.getQueryData(adminKeys.topActivity(7))).toEqual({});
   });
 
@@ -147,7 +146,10 @@ describe("dashboard insight hooks", () => {
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(mocks.api).toHaveBeenCalledWith("/admin/stats/downloads?limit=10");
+    expect(mocks.v2).toHaveBeenCalledWith("GET /api/v2/admin/stats/downloads", {
+      profileContext: expect.any(Object),
+      query: { limit: 10 },
+    });
     expect(queryClient.getQueryData(adminKeys.downloadsStats(10))).toEqual({});
   });
 

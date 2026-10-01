@@ -43,12 +43,13 @@ func NewProviderIDRepository(pool *pgxpool.Pool) *ProviderIDRepository {
 // The numeric prefix IS the id, so compare on that. Anything without one is not
 // a TMDB id and is left to fail the comparison as before.
 func sameTMDBID(stored, want string) bool {
-	return normalizeTMDBID(stored) == normalizeTMDBID(want)
+	return NormalizeTMDBID(stored) == NormalizeTMDBID(want)
 }
 
-// normalizeTMDBID reduces "1931-some-slug" to "1931" and leaves anything that
-// does not start with digits untouched.
-func normalizeTMDBID(value string) string {
+// NormalizeTMDBID reduces "1931-some-slug" to "1931" and leaves anything that
+// does not start with digits untouched. Exported because every surface that
+// hands a stored TMDB id to a client has to strip the slug first.
+func NormalizeTMDBID(value string) string {
 	trimmed := strings.TrimSpace(value)
 	end := 0
 	for end < len(trimmed) && trimmed[end] >= '0' && trimmed[end] <= '9' {

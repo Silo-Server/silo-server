@@ -72,7 +72,6 @@ func TestPersistSeasonsAndEpisodesPersistsSourceBeforeEnqueue(t *testing.T) {
 			StillThumbhash: "provider-thumb",
 		}},
 		MergeFillEmpty,
-		false,
 	)
 
 	season := seasonRepo.seasons[seasonKey(seriesID, 1)]

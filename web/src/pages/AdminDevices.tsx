@@ -39,6 +39,7 @@ import {
 } from "@/components/admin/deviceOverrides";
 import { ALL_DEVICE_SETTING_KEYS } from "@/lib/settingsDisplay";
 import { SETTING_KEYS } from "@/lib/settingsContract";
+import { SEARCH_SHORTCUT_LABEL } from "@/lib/keyboardShortcut";
 import { AdminSubtitleAppearanceDialog } from "@/components/admin/AdminSubtitleAppearanceDialog";
 import { cn } from "@/lib/utils";
 
@@ -357,7 +358,7 @@ export default function AdminDevices() {
             Inspect, tune, and reset per-profile playback overrides across the fleet. Filter by
             user, platform, or override pattern. Press{" "}
             <kbd className="bg-surface/70 border-border/70 text-foreground/80 inline-flex items-center rounded border px-1.5 py-0.5 font-mono text-[10.5px]">
-              ⌘K
+              {SEARCH_SHORTCUT_LABEL}
             </kbd>{" "}
             to jump to another admin page.
           </p>

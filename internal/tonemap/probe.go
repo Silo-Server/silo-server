@@ -20,8 +20,13 @@ import (
 
 const (
 	probeCommandTimeout = 5 * time.Second
-	probeNegativeTTL    = 15 * time.Second
-	probeTimeoutSlack   = time.Second
+	// An NVENC smoke test initializes the NVIDIA driver, decoder, CUDA tone-map
+	// filter, and encoder in a fresh FFmpeg process. Older cards can take longer
+	// than the ordinary command budget on the first CUDA use even when the same
+	// pipeline is fully supported once initialized.
+	nvencProbeCommandTimeout = 30 * time.Second
+	probeNegativeTTL         = 15 * time.Second
+	probeTimeoutSlack        = time.Second
 	// probeEndpointSlack covers what a capability endpoint spends around the
 	// tone-map matrix itself: one bounded hardware detection walk (30s in
 	// playback.hwAccelWalkTimeout), the transformation registry's three 3s
@@ -32,13 +37,24 @@ const (
 	probeRequestSlack  = 5 * time.Second
 )
 
-// One deterministic 64x64 Main 10 HEVC frame. Keeping the compressed fixture
+// One deterministic 256x256 HEVC Main 10 frame. Keeping the compressed fixture
 // in the binary lets production probes exercise the real decoder without
 // depending on a media mount or generating source files with an encoder whose
-// availability is itself under test.
+// availability is itself under test. The dimensions deliberately exceed the
+// 144x144 minimum reported by Pascal-generation NVIDIA NVDEC; a 64x64 fixture
+// produced a false negative on otherwise capable GPUs such as the GeForce GTX
+// 1050 Ti.
+//
+// The SPS must signal general_profile_idc 2 (Main 10). The 256x256 fixture
+// that replaced the 64x64 one was encoded as profile_idc 4 (Rext, format
+// range extensions) even though its pixel format was yuv420p10le, and every
+// Intel VAAPI/QSV hardware decoder refused it with "No support for codec hevc
+// profile 4", so no Intel node advertised hardware tone mapping. Software
+// decoding accepts Rext and hid the regression from the software smoke.
+// TestDecodeProbeFixtureIsMain10 pins the profile.
 const decodeProbeFixtureBitDepth = 10
 
-const decodeProbeFixtureBase64 = "AAAAAUABDAH//wIgAAADAJAAAAMAAAMAHpWUCQAAAAFCAQECIAAAAwCQAAADAAADAB6gIIEE2WVlSkwvAWgIAAADAAgAAAMACEAAAAABRAHAc8CJAAABKAGsTtcff/U+nK/q+A=="
+const decodeProbeFixtureBase64 = "AAAAAUABDAH//wIgAAADALAAAAMAAAMAPAjAkAAAAAFCAQECIAAAAwCwAAADAAADADygCAgEBNiAjuRZFL/y5/E/rAWoEBAQBAAAAAFEAcBy8FMkAAAAAU4BBTJHVkrcXExDP5TvxRE80UOoAQAAAwABAwAAAwABAgADX/8LAAADAAADAAErEAwDkSsBDf////+AAAAAASgBrxAgmwzKq+iGPv/9kz4R2XADPFSQkYVLvPxAuVCAAuhvgvlhUQRRzuAARkAHHgAADpgAAAMAATcAAAMADvgAAAMAY0A="
 
 // CommandRunner executes a bounded external command and returns its combined
 // output. Tests inject it to model individual FFmpeg capabilities and failures.
@@ -163,7 +179,7 @@ func probeWithRunner(
 // the driver facts for every configured hardware device.
 func probeCacheKey(generation uint64, ffmpegPath, hardwareBackend, hardwareDevice string) string {
 	binaryIdentity := strings.TrimSpace(ffmpegPath)
-	if _, cacheKey, cacheable := ffmpegBinaryCacheKey(binaryIdentity); cacheable {
+	if _, cacheKey, cacheable := FFmpegBinaryIdentity(binaryIdentity); cacheable {
 		binaryIdentity = cacheKey
 	}
 	backend := strings.ToLower(strings.TrimSpace(hardwareBackend))
@@ -272,13 +288,14 @@ func capabilityCoversAllSourceKinds(capabilities Capabilities, mode Mode, backen
 // ProbeTotalTimeout budgets one bounded deadline for every listing and smoke
 // command the selected backend and device set can execute.
 func ProbeTotalTimeout(hardwareBackend, hardwareDevice string) time.Duration {
-	commandCount := 2 + len(AllSourceKinds())
+	total := time.Duration(2+len(AllSourceKinds())) * probeCommandTimeout
 	backend := strings.ToLower(strings.TrimSpace(hardwareBackend))
 	switch backend {
 	case BackendQSV, BackendVAAPI, BackendNVENC, BackendVideoToolbox:
-		commandCount += len(AllSourceKinds()) * len(probeDevices(hardwareDevice, backend))
+		hardwareCommandCount := len(AllSourceKinds()) * len(probeDevices(hardwareDevice, backend))
+		total += time.Duration(hardwareCommandCount) * hardwareProbeCommandTimeout(backend)
 	}
-	return time.Duration(commandCount)*probeCommandTimeout + probeTimeoutSlack
+	return total + probeTimeoutSlack
 }
 
 // ProbeEndpointTimeout includes auto-backend discovery and response overhead
@@ -316,7 +333,7 @@ func MaxProbeRequestTimeout() time.Duration {
 	for i := range MaxProbedDevices {
 		devices = append(devices, defaultDRIRenderDevice+strconv.Itoa(i))
 	}
-	return ProbeRequestTimeout(BackendQSV, strings.Join(devices, ","))
+	return ProbeRequestTimeout(BackendNVENC, strings.Join(devices, ","))
 }
 
 // ProbeRequestTimeout gives a remote caller additional transport and response
@@ -352,7 +369,7 @@ func ProbeWithRunner(
 		softwareFilter = selected
 	}
 	if softwareFilter != "" && hasToken(encoders, "libx264") {
-		kinds := smokeSourceKinds(ctx, run, ffmpegPath, func(kind SourceKind) []string {
+		kinds := smokeSourceKinds(ctx, run, ffmpegPath, probeCommandTimeout, func(kind SourceKind) []string {
 			return softwareSmokeArgs(fixturePath, kind, softwareFilter)
 		})
 		if len(kinds) > 0 {
@@ -376,7 +393,7 @@ func hardwareSmokeSourceKinds(ctx context.Context, run CommandRunner, ffmpegPath
 	devices := probeDevices(hardwareDevice, backend)
 	validated := AllSourceKinds()
 	for _, device := range devices {
-		supported := smokeSourceKinds(ctx, run, ffmpegPath, func(kind SourceKind) []string {
+		supported := smokeSourceKinds(ctx, run, ffmpegPath, hardwareProbeCommandTimeout(backend), func(kind SourceKind) []string {
 			return hardwareSmokeArgs(fixturePath, backend, device, kind)
 		})
 		validated = intersectSourceKinds(validated, supported)
@@ -385,6 +402,15 @@ func hardwareSmokeSourceKinds(ctx context.Context, run CommandRunner, ffmpegPath
 		}
 	}
 	return validated
+}
+
+// hardwareProbeCommandTimeout allows CUDA and NVENC to finish cold driver
+// initialization without widening the command deadline for other backends.
+func hardwareProbeCommandTimeout(backend string) time.Duration {
+	if strings.EqualFold(strings.TrimSpace(backend), BackendNVENC) {
+		return nvencProbeCommandTimeout
+	}
+	return probeCommandTimeout
 }
 
 // probeDevices parses the configured device list and supplies the backend's
@@ -467,7 +493,13 @@ func runCommand(ctx context.Context, name string, args ...string) ([]byte, error
 // runBounded applies the per-command probe deadline within the caller's total
 // deadline.
 func runBounded(ctx context.Context, run CommandRunner, name string, args ...string) ([]byte, error) {
-	commandCtx, cancel := context.WithTimeout(ctx, probeCommandTimeout)
+	return runBoundedWithTimeout(ctx, probeCommandTimeout, run, name, args...)
+}
+
+// runBoundedWithTimeout executes one probe command under the supplied backend-
+// specific deadline while retaining the caller's total probe deadline.
+func runBoundedWithTimeout(ctx context.Context, timeout time.Duration, run CommandRunner, name string, args ...string) ([]byte, error) {
+	commandCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	return run(commandCtx, name, args...)
 }
@@ -500,11 +532,12 @@ func smokeSourceKinds(
 	ctx context.Context,
 	run CommandRunner,
 	ffmpegPath string,
+	commandTimeout time.Duration,
 	argsFor func(SourceKind) []string,
 ) []SourceKind {
 	kinds := make([]SourceKind, 0, len(AllSourceKinds()))
 	for _, kind := range AllSourceKinds() {
-		if _, err := runBounded(ctx, run, ffmpegPath, argsFor(kind)...); err == nil {
+		if _, err := runBoundedWithTimeout(ctx, commandTimeout, run, ffmpegPath, argsFor(kind)...); err == nil {
 			kinds = append(kinds, kind)
 		}
 	}

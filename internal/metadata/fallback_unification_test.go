@@ -199,7 +199,6 @@ func TestPersistSeasonsAndEpisodes_ScheduledRefreshPreservesExistingAndBackfills
 			ProviderIDs:   map[string]string{"tmdb": "tmdb-ep-1"},
 		}},
 		MergeFillEmpty,
-		false,
 	)
 
 	season := seasonRepo.seasons[seasonKey(seriesID, 1)]
@@ -274,7 +273,6 @@ func TestPersistSeasonsAndEpisodes_ManualRefreshReplacesNonEmptyButPreservesBlan
 			StillPath:     "",
 		}},
 		MergeReplaceUnlocked,
-		false,
 	)
 
 	season := seasonRepo.seasons[seasonKey(seriesID, 1)]
@@ -326,7 +324,7 @@ func TestPersistSeasonsAndEpisodes_ImageLockPreservesSelectedSeasonPoster(t *tes
 
 	service.persistSeasonsAndEpisodes(
 		ctx,
-		&models.MediaItem{ContentID: seriesID, Type: "series"},
+		&models.MediaItem{ContentID: seriesID, Type: "series", LockedFields: []int{int(FieldImages)}},
 		map[string]string{"tmdb": "123"},
 		"en",
 		"en",
@@ -336,7 +334,6 @@ func TestPersistSeasonsAndEpisodes_ImageLockPreservesSelectedSeasonPoster(t *tes
 		},
 		nil,
 		MergeReplaceUnlocked,
-		true,
 	)
 
 	selected := seasonRepo.seasons[seasonKey(seriesID, 1)]
@@ -379,7 +376,6 @@ func TestPersistSeasonsAndEpisodes_UsesBoundedBulkCalls(t *testing.T) {
 		},
 		episodes,
 		MergeFillEmpty,
-		false,
 	)
 
 	if got := seasonRepo.ListCalls(); got != 1 {
@@ -449,7 +445,6 @@ func TestPersistSeasonsAndEpisodes_LocalizedRefreshUsesBoundedBulkCalls(t *testi
 		},
 		episodes,
 		MergeFillEmpty,
-		false,
 	)
 
 	if seasonLocalizations.bulkGetCalls != 1 || seasonLocalizations.bulkUpsertCalls != 1 {
@@ -504,7 +499,6 @@ func TestPersistSeasonsAndEpisodes_LocalizationBatchFailuresUsePointFallbacks(t 
 			{SeasonNumber: 1, EpisodeNumber: 2, Title: "Episode 2"},
 		},
 		MergeFillEmpty,
-		false,
 	)
 
 	if seasonLocalizations.getCalls != 2 || seasonLocalizations.upsertCalls != 2 {
@@ -551,7 +545,6 @@ func TestPersistSeasonsAndEpisodes_BulkFailurePreservesPartialProgress(t *testin
 			{SeasonNumber: 2, EpisodeNumber: 2, Title: "Episode 2", StillPath: "tvdb://episode-2.jpg"},
 		},
 		MergeFillEmpty,
-		false,
 	)
 
 	if got := seasonRepo.BulkUpsertCalls(); got != 1 {
@@ -633,7 +626,6 @@ func TestPersistSeasonsAndEpisodes_PrefetchFailureUsesPointReadFallback(t *testi
 		[]SeasonResult{{SeasonNumber: 1, Title: "Provider Season"}},
 		[]EpisodeResult{{SeasonNumber: 1, EpisodeNumber: 1, Title: "Provider Episode"}},
 		MergeFillEmpty,
-		false,
 	)
 
 	if got := seasonRepo.GetByNumberCalls(); got != 1 {
@@ -668,7 +660,6 @@ func TestPersistSeasonsAndEpisodes_OutOfRangeKeysAvoidBatchPrefetch(t *testing.T
 		[]SeasonResult{{SeasonNumber: overflow, Title: "Invalid season"}},
 		[]EpisodeResult{{SeasonNumber: 1, EpisodeNumber: overflow, Title: "Invalid episode"}},
 		MergeFillEmpty,
-		false,
 	)
 
 	if got := seasonRepo.ListCalls(); got != 0 {
@@ -704,7 +695,6 @@ func TestPersistSeasonsAndEpisodes_DuplicateNaturalKeysKeepSequentialSemantics(t
 			{SeasonNumber: 1, EpisodeNumber: 1, Title: "Second episode title"},
 		},
 		MergeReplaceUnlocked,
-		false,
 	)
 
 	if got := seasonRepo.BulkUpsertCalls(); got != 0 {

@@ -106,6 +106,8 @@ func publicArtworkURL(path string) string {
 		return "https://artworks.thetvdb.com/" + strings.TrimPrefix(path, "tvdb://")
 	case strings.HasPrefix(path, "http://"), strings.HasPrefix(path, "https://"):
 		return path
+	case strings.HasPrefix(path, "/"):
+		return tmdbRawImageURL(path)
 	default:
 		return ""
 	}

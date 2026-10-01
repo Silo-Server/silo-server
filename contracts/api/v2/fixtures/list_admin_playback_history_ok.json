@@ -1,0 +1,25 @@
+{
+  "items": [
+    {
+      "session_id": "sess-9007199254740993",
+      "user_id": "9007199254740993",
+      "username": "laura",
+      "profile_id": "p-owner",
+      "profile_name": "Laura",
+      "media_item_id": "movie-1",
+      "media_file_id": "42",
+      "media_title": "Synthetic Movie",
+      "media_type": "movie",
+      "play_method": "direct_play",
+      "started_at": "2026-01-02T02:04:05.678Z",
+      "ended_at": "2026-01-02T03:04:05.678Z",
+      "watched_seconds": 3600,
+      "duration_seconds": 5400.5,
+      "completed": true
+    }
+  ],
+  "page": {
+    "next_cursor": "eyJ2IjoxLCJwIjp7ImVuZGVkX2F0IjoiMjAyNi0wMS0wMlQwMzowNDowNS42NzgxMjM0NTZaIiwic2Vzc2lvbl9pZCI6InNlc3MtOTAwNzE5OTI1NDc0MDk5MyJ9fQ.Snmr7MP1iyHGqtH934rD1sASaQj7ZehkS40eOMLtc2Y",
+    "has_more": true
+  }
+}

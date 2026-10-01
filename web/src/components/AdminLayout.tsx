@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { Outlet, useLocation } from "react-router";
 import AdminSidebar from "@/components/AdminSidebar";
 import { AdminSectionCommandDialog } from "@/components/AdminSectionCommandDialog";
@@ -18,7 +18,7 @@ import { usePolicyCapability } from "@/hooks/queries/admin/policy";
 import { useAdminServerStatus } from "@/hooks/queries/admin/settings";
 import { buildAdminCommandNavSections } from "@/lib/adminNavigation";
 import { resolveAdminDocumentTitle } from "@/lib/documentTitle";
-import { searchShortcutLabel } from "@/lib/keyboardShortcut";
+import { SEARCH_SHORTCUT_LABEL } from "@/lib/keyboardShortcut";
 import { cn } from "@/lib/utils";
 import { Menu, Search, X } from "lucide-react";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
@@ -55,6 +55,20 @@ export default function AdminLayout() {
     documentTitle === "Admin" ? "Dashboard" : documentTitle.replace(/^Admin /, "");
 
   useDocumentTitle(documentTitle);
+
+  // Publish this shell on the document root, as Layout does with
+  // `data-app-shell`. Out-of-tree chrome (the audiobook MiniBar, which stays
+  // mounted across admin navigation) sets its left edge from
+  // `--app-sidebar-offset`, and app.css resolves that to this shell's fixed
+  // 240px sidebar only while the attribute is present; otherwise the bar
+  // would start at 0px and paint over the bottom of the admin navigation.
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    root.dataset.adminShell = "true";
+    return () => {
+      delete root.dataset.adminShell;
+    };
+  }, []);
 
   useEffect(() => {
     const desktopMedia = window.matchMedia(ADMIN_DESKTOP_MEDIA_QUERY);
@@ -153,23 +167,24 @@ export default function AdminLayout() {
         <ServerActivity />
       </div>
 
+      {/* `lg:pt-16` starts the content below the fixed Search/activity
+          controls (top-5, h-9 → they end 3.5rem down). With less, a page
+          header's right-aligned buttons sit underneath them until the capped
+          content column pulls away from the viewport's right edge. */}
       <main
         id="main-content"
         tabIndex={-1}
-        className={`relative z-10 min-h-screen min-w-0 px-4 py-4 sm:px-6 lg:ml-[240px] lg:px-8 lg:py-8 xl:px-10 ${
+        className={`relative z-10 min-h-screen min-w-0 px-4 py-4 sm:px-6 lg:ml-[240px] lg:px-8 lg:pt-16 lg:pb-8 xl:px-10 ${
           hasBackgroundBar ? "pb-32 sm:pb-36" : ""
         }`}
       >
         <div className="admin-shell">
           {/* Above the routed page and inside the content column, so every
               admin page carries the prompt and none of them can be covered by
-              it. `lg:mt-7` clears the fixed Search/activity controls in the
-              top-right corner (top-5, h-9 → they end 3.5rem down), which would
-              otherwise float over the banner's buttons. */}
+              it. */}
           <RestartBanner
             restartRequired={serverStatus?.restart_required}
             restartSignal={serverStatus?.restart_mark_count}
-            className="lg:mt-7"
           />
           <Outlet />
         </div>
@@ -187,16 +202,12 @@ function AdminSearchButton({
   className?: string;
   showShortcut?: boolean;
 }) {
-  // Advertised, not hardcoded: the dialog opens on either modifier, so the hint
-  // has to name the one this keyboard actually has.
-  const shortcut = searchShortcutLabel();
-
   return (
     <button
       type="button"
       onClick={onClick}
       aria-label="Search admin sections"
-      title={`Search admin sections (${shortcut})`}
+      title={`Search admin sections (${SEARCH_SHORTCUT_LABEL})`}
       className={cn(
         "text-muted-foreground hover:text-foreground hover:bg-accent/60 focus-visible:ring-ring/60 border-border/70 bg-surface/70 flex h-9 items-center justify-center gap-2 rounded-xl border px-2.5 transition-colors focus-visible:ring-[3px] focus-visible:outline-none",
         className,
@@ -207,7 +218,7 @@ function AdminSearchButton({
         <>
           <span className="hidden text-[13px] font-medium xl:inline">Search</span>
           <kbd className="border-border/70 pointer-events-none rounded border px-1.5 py-0.5 font-mono text-[10px] whitespace-nowrap select-none">
-            {shortcut}
+            {SEARCH_SHORTCUT_LABEL}
           </kbd>
         </>
       ) : null}

@@ -559,7 +559,7 @@ func TestBandwidthReservationsCountDuringBridge(t *testing.T) {
 	// Unlike job reservations, bandwidth bridges ignore health freshness —
 	// a report right after admission would not reflect the streams yet.
 	newer := f.now.Add(5 * time.Second)
-	f.proxies.ApplyHealth(1, f.proxies.Nodes()[0].URL, true, 0, 0, "", nil, newer)
+	f.proxies.ApplyHealth(1, f.proxies.Nodes()[0].URL, true, 0, 0, "", nil, nil, newer)
 	f.now = f.now.Add(10 * time.Second)
 	if got := f.planner.PlanSession("s4", "", false, 4_000).ProxyNode; got != nil {
 		t.Fatalf("stream should still be rejected during bridge window, got %+v", got)
@@ -569,7 +569,7 @@ func TestBandwidthReservationsCountDuringBridge(t *testing.T) {
 	// meter now reports 8 Mbps, so one more 4 Mbps stream still won't fit,
 	// but a 2 Mbps one will.
 	f.now = f.now.Add(bandwidthBridgeAge)
-	f.proxies.ApplyHealth(1, f.proxies.Nodes()[0].URL, true, 0, 8_000, "", nil, f.now)
+	f.proxies.ApplyHealth(1, f.proxies.Nodes()[0].URL, true, 0, 8_000, "", nil, nil, f.now)
 	if got := f.planner.PlanSession("s5", "", false, 4_000).ProxyNode; got != nil {
 		t.Fatalf("4 Mbps stream should not fit at 8/10 Mbps, got %+v", got)
 	}
@@ -621,7 +621,7 @@ func TestUnknownBitrateAdmittedBelowCap(t *testing.T) {
 		t.Fatal("unknown-bitrate stream should be admitted below cap")
 	}
 
-	f.proxies.ApplyHealth(1, f.proxies.Nodes()[0].URL, true, 0, 10_000, "", nil, f.now)
+	f.proxies.ApplyHealth(1, f.proxies.Nodes()[0].URL, true, 0, 10_000, "", nil, nil, f.now)
 	if got := f.planner.PlanSession("s2", "", false, 0).ProxyNode; got != nil {
 		t.Fatalf("unknown-bitrate stream should be rejected at cap, got %+v", got)
 	}
@@ -768,6 +768,86 @@ func TestPlanSessionWithReturnsNoProxyWhenNoneAreCapable(t *testing.T) {
 	// An empty plan must not leave a reservation pinning capacity.
 	if _, reserved := planner.reserved["session-none"]; reserved {
 		t.Fatal("an unsatisfiable plan left a reservation behind")
+	}
+}
+
+func TestPlanRouteReservesExactlyRequestedTopology(t *testing.T) {
+	group := "rack-a"
+	proxies := NewProxyPool()
+	proxies.SetNodes([]*Node{{ID: 1, URL: "http://proxy", Group: &group, Enabled: true, Healthy: true}})
+	transcodes := NewTranscodePool()
+	transcodes.SetNodes([]*Node{{ID: 2, URL: "http://transcode", Group: &group, Enabled: true, Healthy: true}})
+	planner := NewPlanner(proxies, transcodes)
+
+	tests := []struct {
+		name          string
+		request       RouteRequest
+		wantTranscode bool
+		wantProxy     bool
+	}{
+		{"neither", RouteRequest{SessionID: "none"}, false, false},
+		{"proxy", RouteRequest{SessionID: "proxy", NeedsProxy: true}, false, true},
+		{"transcode", RouteRequest{SessionID: "transcode", NeedsTranscode: true}, true, false},
+		{"both", RouteRequest{SessionID: "both", NeedsTranscode: true, NeedsProxy: true}, true, true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			plan := planner.PlanRoute(test.request)
+			if (plan.TranscodeNode != nil) != test.wantTranscode || (plan.ProxyNode != nil) != test.wantProxy {
+				t.Fatalf("plan = %#v, want transcode=%t proxy=%t", plan, test.wantTranscode, test.wantProxy)
+			}
+			reservation, reserved := planner.reserved[test.request.SessionID]
+			if !test.wantTranscode && !test.wantProxy {
+				if reserved {
+					t.Fatalf("neither route left reservation %#v", reservation)
+				}
+				return
+			}
+			if !reserved || (reservation.transcodeURL != "") != test.wantTranscode || (reservation.proxyURL != "") != test.wantProxy {
+				t.Fatalf("reservation = %#v, want exact route halves", reservation)
+			}
+		})
+	}
+}
+
+func TestPlanRouteTranscodeAPIIgnoresUnhealthyProxyGroupMember(t *testing.T) {
+	group := "rack-a"
+	proxies := NewProxyPool()
+	proxies.SetNodes([]*Node{{ID: 1, URL: "http://proxy", Group: &group, Enabled: true, Healthy: false}})
+	transcodes := NewTranscodePool()
+	transcodes.SetNodes([]*Node{{ID: 2, URL: "http://transcode", Group: &group, Enabled: true, Healthy: true}})
+	planner := NewPlanner(proxies, transcodes)
+
+	localEgress := planner.PlanRoute(RouteRequest{SessionID: "api-egress", NeedsTranscode: true})
+	if localEgress.TranscodeNode == nil || localEgress.ProxyNode != nil {
+		t.Fatalf("transcode+API plan = %#v, want healthy worker without proxy", localEgress)
+	}
+	proxyEgress := planner.PlanRoute(RouteRequest{SessionID: "proxy-egress", NeedsTranscode: true, NeedsProxy: true})
+	if proxyEgress.TranscodeNode != nil || proxyEgress.ProxyNode != nil {
+		t.Fatalf("transcode+proxy plan = %#v, want unavailable grouped route", proxyEgress)
+	}
+}
+
+func TestPlanRouteUsesIndependentCapabilityPredicates(t *testing.T) {
+	proxies := NewProxyPool()
+	proxies.SetNodes([]*Node{
+		{ID: 1, URL: "http://proxy-old", Enabled: true, Healthy: true},
+		{ID: 2, URL: "http://proxy-new", Enabled: true, Healthy: true},
+	})
+	transcodes := NewTranscodePool()
+	transcodes.SetNodes([]*Node{
+		{ID: 3, URL: "http://transcode-old", Enabled: true, Healthy: true},
+		{ID: 4, URL: "http://transcode-new", Enabled: true, Healthy: true},
+	})
+	planner := NewPlanner(proxies, transcodes)
+	plan := planner.PlanRoute(RouteRequest{
+		SessionID: "capable", NeedsTranscode: true, NeedsProxy: true,
+		TranscodeEligible: func(node *Node) bool { return node.URL == "http://transcode-new" },
+		ProxyEligible:     func(node *Node) bool { return node.URL == "http://proxy-new" },
+	})
+	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://transcode-new" ||
+		plan.ProxyNode == nil || plan.ProxyNode.URL != "http://proxy-new" {
+		t.Fatalf("plan = %#v, want independently capable nodes", plan)
 	}
 }
 

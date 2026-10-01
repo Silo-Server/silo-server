@@ -68,6 +68,7 @@ describe("DownloadsSettings layout", () => {
       "download.period_duration",
       "download.server_bandwidth_mbps",
       "download.transcode_enabled",
+      "download.local_transcode_fallback",
       "download.artifact_dir",
       "download.max_concurrent_prepares",
       "download.artifact_max_bytes",
@@ -80,7 +81,7 @@ describe("DownloadsSettings layout", () => {
     expect(screen.getByRole("switch", { name: /Allow downloads/i })).toBeInTheDocument();
     expect(screen.getByLabelText("Per-user bandwidth")).toBeInTheDocument();
     expect(screen.queryByLabelText("Server bandwidth")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Advanced · 8 settings" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Advanced · 9 settings" })).toHaveAttribute(
       "aria-expanded",
       "false",
     );

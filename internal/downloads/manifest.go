@@ -5,18 +5,26 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
 // manifestVersion is bumped whenever the OfflineManifest DTO shape changes.
 const manifestVersion = 2
 
-const apiDownloadsPrefix = "/api/v1/downloads/"
+const preparedAudioLayoutStereo = "stereo"
+
+// apiDownloadsPrefix is the namespace every offline asset reference is minted
+// under. Manifests are stored and handed to clients verbatim, so the reference
+// has to stay resolvable after the /api/v1 tombstone; the v2 projection only
+// validates the prefix it finds here.
+const apiDownloadsPrefix = "/api/v2/downloads/"
 
 // ManifestSource assembles catalog detail for a content id. GetItemDetail
 // enforces per-profile content/library access via its filter, which doubles as
@@ -50,6 +58,7 @@ type OfflineChapter struct {
 // authenticated proxy endpoint, never a presigned URL.
 type OfflineSubtitle struct {
 	Language        string `json:"language"`
+	Title           string `json:"title,omitempty"`
 	Format          string `json:"format"`
 	Forced          bool   `json:"forced"`
 	HearingImpaired bool   `json:"hearing_impaired"`
@@ -133,11 +142,12 @@ type OfflineManifest struct {
 	SelectedAudioTrackIndex *int                `json:"selected_audio_track_index,omitempty"`
 	AudioTracks             []OfflineAudioTrack `json:"audio_tracks,omitempty"`
 
-	Chapters []OfflineChapter `json:"chapters,omitempty"`
-	Intro    *Marker          `json:"intro,omitempty"`
-	Credits  *Marker          `json:"credits,omitempty"`
-	Recap    *Marker          `json:"recap,omitempty"`
-	Preview  *Marker          `json:"preview,omitempty"`
+	Chapters       []OfflineChapter       `json:"chapters,omitempty"`
+	Intro          *Marker                `json:"intro,omitempty"`
+	Credits        *Marker                `json:"credits,omitempty"`
+	Recap          *Marker                `json:"recap,omitempty"`
+	Preview        *Marker                `json:"preview,omitempty"`
+	MarkerSegments []models.MarkerSegment `json:"-"`
 
 	Subtitles []OfflineSubtitle `json:"subtitles"`
 
@@ -151,12 +161,17 @@ type OfflineManifest struct {
 // ManifestBuilder assembles an OfflineManifest from the catalog detail path and
 // the download's subtitle assets, stripping every presigned URL.
 type ManifestBuilder struct {
-	detail   ManifestSource
-	subs     SubtitleSource
-	fileRepo FileResolver
+	detail           ManifestSource
+	subs             SubtitleSource
+	fileRepo         FileResolver
+	MarkerPopulation MarkerPopulationService
 	// artifact resolves a download's linked prepared artifact so artifact-backed
 	// manifests can describe the delivered file instead of the catalog source.
 	artifact func(ctx context.Context, id string) (*Artifact, error)
+}
+
+type MarkerPopulationService interface {
+	Populate(context.Context, *models.MediaFile) (*models.MediaFile, bool, error)
 }
 
 // NewManifestBuilder constructs a ManifestBuilder. artifact may be nil when no
@@ -169,13 +184,13 @@ func NewManifestBuilder(detail ManifestSource, subs SubtitleSource, fileRepo Fil
 // requesting profile's content access (GetItemDetail returns
 // catalog.ErrItemNotFound when denied).
 func (b *ManifestBuilder) Build(ctx context.Context, dl *Download, filter catalog.AccessFilter) (*OfflineManifest, error) {
-	return b.build(ctx, dl, filter, nil)
+	return b.build(ctx, dl, filter, nil, true)
 }
 
 // build is Build with an optional per-batch series-detail cache: a season
 // batch shares one series, so the batch endpoint resolves its detail once
 // instead of once per episode.
-func (b *ManifestBuilder) build(ctx context.Context, dl *Download, filter catalog.AccessFilter, seriesCache map[string]*catalog.ItemDetail) (*OfflineManifest, error) {
+func (b *ManifestBuilder) build(ctx context.Context, dl *Download, filter catalog.AccessFilter, seriesCache map[string]*catalog.ItemDetail, populateMarkers bool) (*OfflineManifest, error) {
 	detail, err := b.detail.GetItemDetail(ctx, manifestContentID(dl), filter)
 	if err != nil {
 		return nil, err
@@ -239,6 +254,25 @@ func (b *ManifestBuilder) build(ctx context.Context, dl *Download, filter catalo
 	}
 
 	if v := pickVersion(detail, dl.MediaFileID); v != nil {
+		if v.FileID == dl.MediaFileID {
+			selected := *v
+			if file != nil && file.ID == dl.MediaFileID {
+				if populateMarkers && b.MarkerPopulation != nil {
+					lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+					populated, _, lookupErr := b.MarkerPopulation.Populate(lookupCtx, file)
+					cancel()
+					if lookupErr != nil {
+						slog.WarnContext(ctx, "download marker lookup failed", "file_id", file.ID, "error", lookupErr)
+					}
+					if populated != nil {
+						file = populated
+					}
+				}
+				selected.SetMarkers(file)
+				m.Intro, m.Credits, m.Recap, m.Preview = toMarker(selected.Intro), toMarker(selected.Credits), toMarker(selected.Recap), toMarker(selected.Preview)
+			}
+			m.MarkerSegments = selected.EffectiveMarkerSegments()
+		}
 		m.Container = v.Container
 		m.CodecVideo = v.CodecVideo
 		m.CodecAudio = v.CodecAudio
@@ -252,19 +286,21 @@ func (b *ManifestBuilder) build(ctx context.Context, dl *Download, filter catalo
 
 	// Remux/transcode entries deliver the prepared artifact, not the catalog
 	// source: describe that file so the client picks the right decoder/tracks.
+	var prepared *Artifact
 	if dl.Format != FormatOriginal && dl.ArtifactID != "" && b.artifact != nil {
 		if a, err := b.artifact(ctx, dl.ArtifactID); err == nil && a != nil {
-			applyArtifactParams(m, a)
+			prepared = a
+			applyArtifactParams(m, a, file)
 		}
 	}
 
-	m.Subtitles = b.buildSubtitles(ctx, dl, file)
+	m.Subtitles = b.buildSubtitles(ctx, dl, file, prepared)
 	return m, nil
 }
 
 // applyArtifactParams overwrites the source file's media parameters with the
 // prepared artifact's target parameters. "copy" targets keep the source value.
-func applyArtifactParams(m *OfflineManifest, a *Artifact) {
+func applyArtifactParams(m *OfflineManifest, a *Artifact, file *models.MediaFile) {
 	if a.Container != "" {
 		m.Container = a.Container
 	}
@@ -277,8 +313,12 @@ func applyArtifactParams(m *OfflineManifest, a *Artifact) {
 	if a.Resolution != "" {
 		m.Resolution = a.Resolution
 	}
-	// A prepared file contains exactly one audio stream — the track the encode
-	// selected (playback.PrepareFile maps a single audio track).
+	if a.TrackRecipeVersion != "" {
+		applyPreparedAudioTracks(m, a, file)
+		return
+	}
+	// A legacy prepared file contains exactly one audio stream — the track the
+	// encode selected (playback.PrepareFile mapped a single audio track).
 	if len(m.AudioTracks) > 0 {
 		idx := a.AudioTrackIndex
 		if idx < 0 || idx >= len(m.AudioTracks) {
@@ -296,11 +336,64 @@ func applyArtifactParams(m *OfflineManifest, a *Artifact) {
 	}
 }
 
-// buildSubtitles enumerates external (sidecar) + downloaded (S3) subtitle assets
-// for the download's media file (already loaded by build — no re-fetch).
-// Embedded tracks live inside the downloaded video file and need no separate
-// fetch.
-func (b *ManifestBuilder) buildSubtitles(ctx context.Context, dl *Download, file *models.MediaFile) []OfflineSubtitle {
+// applyPreparedAudioTracks describes a multi-track prepared file from the
+// audio inventory frozen when it became ready, falling back to the current
+// source probe for an artifact that is not ready yet. Output positions equal
+// the prepared source's positions, so the viewer's catalog selection stays
+// valid unless the source has since changed at that position.
+func applyPreparedAudioTracks(m *OfflineManifest, a *Artifact, file *models.MediaFile) {
+	tracks := a.PreparedAudioTracks
+	if len(tracks) == 0 {
+		tracks = preparedAudioTracks(file, a)
+	}
+	if len(tracks) == 0 {
+		return
+	}
+	m.AudioTracks = tracks
+	fileDefault := 0
+	for i, track := range tracks {
+		if track.Default {
+			fileDefault = i
+			break
+		}
+	}
+	m.CodecAudio = tracks[fileDefault].Codec
+	if selected := m.SelectedAudioTrackIndex; selected != nil && *selected >= 0 && *selected < len(tracks) &&
+		file != nil && *selected < len(file.AudioTracks) && file.AudioTracks[*selected].Language == tracks[*selected].Language {
+		return
+	}
+	m.SelectedAudioTrackIndex = &fileDefault
+}
+
+// preparedAudioTracks describes the audio streams a multi-track prepared file
+// built from file contains: every source track in source order, with encoded
+// tracks reporting the AAC output layout.
+func preparedAudioTracks(file *models.MediaFile, a *Artifact) []OfflineAudioTrack {
+	if file == nil || a == nil || a.TrackRecipeVersion == "" {
+		return nil
+	}
+	plan := playback.PlanPreparedTracks(file, a.CodecAudio, a.AudioTrackIndex)
+	tracks := toOfflineAudioTracks(file.AudioTracks)
+	channels, bitrateKbps := playback.ResolveAACOutputV3(0, 0)
+	for i, track := range plan.Audio {
+		tracks[i].Default = track.Default
+		if track.Codec == playback.PreparedAudioAAC {
+			tracks[i].Codec = playback.PreparedAudioAAC
+			tracks[i].Channels = channels
+			tracks[i].Layout = preparedAudioLayoutStereo
+			tracks[i].Bitrate = bitrateKbps
+		}
+	}
+	return tracks
+}
+
+// buildSubtitles enumerates external (sidecar), embedded sidecar, and
+// downloaded (S3) subtitle assets for the download's media file (already
+// loaded by build — no re-fetch). Other embedded tracks live inside the
+// downloaded video file and need no separate fetch. A multi-track prepared MP4
+// carries plain-text subtitles as timed text; ASS/SSA and PGS tracks are
+// offered as .ass/.sup sidecars extracted from the source instead.
+func (b *ManifestBuilder) buildSubtitles(ctx context.Context, dl *Download, file *models.MediaFile, prepared *Artifact) []OfflineSubtitle {
 	out := []OfflineSubtitle{}
 
 	if file != nil {
@@ -311,6 +404,7 @@ func (b *ManifestBuilder) buildSubtitles(ctx context.Context, dl *Download, file
 			}
 			out = append(out, OfflineSubtitle{
 				Language:        ext.Language,
+				Title:           ext.Title,
 				Format:          ext.Format,
 				Forced:          ext.Forced,
 				HearingImpaired: ext.HearingImpaired,
@@ -318,6 +412,22 @@ func (b *ManifestBuilder) buildSubtitles(ctx context.Context, dl *Download, file
 				FetchURL:        subtitleProxyURL(dl.ID, fmt.Sprintf("external:%d", i)),
 				FileSize:        size,
 			})
+		}
+		if prepared != nil && prepared.TrackRecipeVersion != "" {
+			for i, track := range file.SubtitleTracks {
+				format := playback.PreparedSubtitleSidecarFormat(track.Codec)
+				if track.External || format == "" {
+					continue
+				}
+				out = append(out, OfflineSubtitle{
+					Language:        track.Language,
+					Title:           track.EmbeddedTitle,
+					Format:          format,
+					Forced:          track.Forced,
+					HearingImpaired: track.HearingImpaired,
+					FetchURL:        subtitleProxyURL(dl.ID, fmt.Sprintf("%s:%d", subtitleRefEmbedded, i)),
+				})
+			}
 		}
 	}
 

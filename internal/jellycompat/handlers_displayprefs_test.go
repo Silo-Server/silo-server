@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 func TestDefaultDisplayPreferencesIncludesRequiredImageDimensions(t *testing.T) {
@@ -29,6 +31,47 @@ func TestDefaultDisplayPreferencesIncludesRequiredImageDimensions(t *testing.T) 
 	}
 	if _, ok := raw["PrimaryImageWidth"]; !ok {
 		t.Fatal("PrimaryImageWidth missing from display preferences JSON")
+	}
+}
+
+func TestDisplayPreferencesPreserveLegacyPrimaryCustomization(t *testing.T) {
+	store := newJellycompatUserStore(t)
+	if err := store.CreateProfile(t.Context(), userstore.Profile{ID: "secondary", Name: "Secondary"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetJellycompatDisplayPrefs(t.Context(), "usersettings", "emby", `{"SortBy":"DateCreated","CustomPrefs":{"homesection0":"resume"}}`); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewDisplayPreferencesHandler(compatTestUserStoreProvider{store: store})
+	read := func(profileID string) displayPreferencesDTO {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/DisplayPreferences/usersettings?client=emby", nil)
+		route := chi.NewRouteContext()
+		route.URLParams.Add("displayPreferencesId", "usersettings")
+		ctx := context.WithValue(req.Context(), chi.RouteCtxKey, route)
+		ctx = context.WithValue(ctx, compatSessionKey, &Session{StreamAppUserID: 1, ProfileID: profileID})
+		rec := httptest.NewRecorder()
+		handler.HandleGetDisplayPreferences(rec, req.WithContext(ctx))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("read status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		var dto displayPreferencesDTO
+		if err := json.Unmarshal(rec.Body.Bytes(), &dto); err != nil {
+			t.Fatal(err)
+		}
+		return dto
+	}
+	if got := read("profile-1"); got.SortBy != "DateCreated" || got.CustomPrefs["homesection0"] != "resume" {
+		t.Fatalf("legacy customization lost: %+v", got)
+	}
+	if got := read("secondary"); got.SortBy == "DateCreated" {
+		t.Fatal("legacy account preferences leaked to another profile")
+	}
+	if err := store.SetJellycompatDisplayPrefs(t.Context(), profilePreferencesID("profile-1", "usersettings"), "emby", `{"SortBy":"ProductionYear"}`); err != nil {
+		t.Fatal(err)
+	}
+	if got := read("profile-1"); got.SortBy != "ProductionYear" {
+		t.Fatalf("scoped customization overwritten: %+v", got)
 	}
 }
 
@@ -58,7 +101,7 @@ func TestDisplayPreferencesRoundTripUsesDedicatedTable(t *testing.T) {
 	}
 
 	// The blob lands in the dedicated table under (id, client)...
-	stored, err := store.GetJellycompatDisplayPrefs(context.Background(), "usersettings", "emby")
+	stored, err := store.GetJellycompatDisplayPrefs(t.Context(), profilePreferencesID("profile-1", "usersettings"), "emby")
 	if err != nil || stored == "" {
 		t.Fatalf("dedicated table holds (%q, %v), want the stored blob", stored, err)
 	}
@@ -101,5 +144,69 @@ func TestDisplayPreferencesRoundTripUsesDedicatedTable(t *testing.T) {
 	}
 	if other.SortBy == "DateCreated" {
 		t.Fatal("another client's read returned the emby document")
+	}
+}
+
+func TestNormalizeSavedCustomPrefsJellyfin12(t *testing.T) {
+	prefs := map[string]string{
+		"skipForwardLength": "",
+		"landing-abc":       "",
+		"Landing-def":       "suggestions",
+		"homesection0":      "resume",
+	}
+	normalizeSavedCustomPrefs(prefs)
+	if prefs["skipForwardLength"] != "15000" || prefs["skipBackLength"] != "15000" {
+		t.Fatalf("skip lengths = %q/%q, want 15000/15000", prefs["skipForwardLength"], prefs["skipBackLength"])
+	}
+	if _, ok := prefs["landing-abc"]; ok {
+		t.Fatal("empty landing preference must be dropped")
+	}
+	if prefs["Landing-def"] != "suggestions" || prefs["homesection0"] != "resume" {
+		t.Fatalf("other preferences changed: %v", prefs)
+	}
+
+	kept := map[string]string{"skipForwardLength": "30000", "skipBackLength": "5000"}
+	normalizeSavedCustomPrefs(kept)
+	if kept["skipForwardLength"] != "30000" || kept["skipBackLength"] != "5000" {
+		t.Fatalf("explicit skip lengths overwritten: %v", kept)
+	}
+}
+
+// Jellyfin Web posts the whole usersettings document back. Reads must carry
+// Jellyfin's 10 s/30 s skip defaults so an unrelated save keeps them instead
+// of storing the 15 s write fallback.
+func TestDisplayPreferencesReadThenSaveKeepsSkipDefaults(t *testing.T) {
+	store := newJellycompatUserStore(t)
+	handler := NewDisplayPreferencesHandler(compatTestUserStoreProvider{store: store})
+	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
+
+	rec := httptest.NewRecorder()
+	handler.HandleGetDisplayPreferences(rec, viewerRequest("GET", "/?client=emby", "", "displayPreferencesId", "usersettings", session))
+	var dto displayPreferencesDTO
+	if err := json.NewDecoder(rec.Body).Decode(&dto); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if dto.CustomPrefs["skipBackLength"] != "10000" || dto.CustomPrefs["skipForwardLength"] != "30000" {
+		t.Fatalf("read defaults = %v", dto.CustomPrefs)
+	}
+
+	dto.CustomPrefs["appTheme"] = "dark"
+	body, err := json.Marshal(dto)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec = httptest.NewRecorder()
+	handler.HandleUpdateDisplayPreferences(rec, viewerRequest("POST", "/?client=emby", string(body), "displayPreferencesId", "usersettings", session))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("update status = %d %s", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	handler.HandleGetDisplayPreferences(rec, viewerRequest("GET", "/?client=emby", "", "displayPreferencesId", "usersettings", session))
+	dto = displayPreferencesDTO{}
+	if err := json.NewDecoder(rec.Body).Decode(&dto); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if dto.CustomPrefs["skipBackLength"] != "10000" || dto.CustomPrefs["skipForwardLength"] != "30000" || dto.CustomPrefs["appTheme"] != "dark" {
+		t.Fatalf("round trip = %v", dto.CustomPrefs)
 	}
 }

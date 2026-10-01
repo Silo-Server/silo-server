@@ -229,7 +229,7 @@ func TestComposeNotificationEmailProfileAndUnsubscribe(t *testing.T) {
 	opts := emailComposeOptions{
 		BaseURL:        "https://silo.example.com",
 		ProfileName:    "Emma & <Kids>",
-		UnsubscribeURL: "https://silo.example.com/api/v1/notifications/email/unsubscribe?token=tok",
+		UnsubscribeURL: "https://silo.example.com/api/v2/notifications/email/unsubscribe?token=tok",
 	}
 	content := composeNotificationEmail(EmailModePerEpisode, rows, opts)
 	if !strings.Contains(content.Subject, "(for Emma & <Kids>)") {
@@ -238,7 +238,7 @@ func TestComposeNotificationEmailProfileAndUnsubscribe(t *testing.T) {
 	if strings.Contains(content.HTML, "<Kids>") {
 		t.Fatalf("profile name not escaped in HTML:\n%s", content.HTML)
 	}
-	if !strings.Contains(content.HTML, `href="https://silo.example.com/api/v1/notifications/email/unsubscribe?token=tok"`) {
+	if !strings.Contains(content.HTML, `href="https://silo.example.com/api/v2/notifications/email/unsubscribe?token=tok"`) {
 		t.Fatalf("unsubscribe link missing from HTML:\n%s", content.HTML)
 	}
 	if !strings.Contains(content.Text, "To stop these emails, open: "+opts.UnsubscribeURL) {
@@ -252,8 +252,8 @@ func TestComposeNotificationEmailProfileAndUnsubscribe(t *testing.T) {
 }
 
 func TestComposeVerificationEmail(t *testing.T) {
-	content := composeVerificationEmail(`<b>Emma</b>`, "https://silo.example.com/api/v1/notifications/email/verify?token=tok")
-	if !strings.Contains(content.Text, "https://silo.example.com/api/v1/notifications/email/verify?token=tok") {
+	content := composeVerificationEmail(`<b>Emma</b>`, "https://silo.example.com/api/v2/notifications/email/verify?token=tok")
+	if !strings.Contains(content.Text, "https://silo.example.com/api/v2/notifications/email/verify?token=tok") {
 		t.Fatalf("verify link missing from text:\n%s", content.Text)
 	}
 	if strings.Contains(content.HTML, "<b>Emma</b>") {
@@ -285,7 +285,7 @@ func TestEmailUnsubscribeURL(t *testing.T) {
 	if got := emailUnsubscribeURL("https://x", ""); got != "" {
 		t.Fatalf("URL built without a token: %q", got)
 	}
-	want := "https://x/api/v1/notifications/email/unsubscribe?token=tok"
+	want := "https://x/api/v2/notifications/email/unsubscribe?token=tok"
 	if got := emailUnsubscribeURL("https://x", "tok"); got != want {
 		t.Fatalf("unexpected unsubscribe URL %q", got)
 	}

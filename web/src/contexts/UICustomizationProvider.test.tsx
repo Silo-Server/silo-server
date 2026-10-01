@@ -18,21 +18,21 @@ vi.mock("@/hooks/queries/settingValues", () => ({
     capabilities:
       | {
           api_version: number;
-          revision: number;
+          manifest_revision: number;
           supports_batched_effective?: boolean;
           supports_idempotent_writes?: boolean;
         }
       | undefined,
   ) =>
     capabilities?.api_version === 1 &&
-    capabilities.revision >= 5 &&
+    capabilities.manifest_revision >= 5 &&
     capabilities.supports_batched_effective === true &&
     capabilities.supports_idempotent_writes === true,
   settingsCapabilitiesSupportAtomicShortcuts: (
     capabilities:
       | {
           api_version: number;
-          revision: number;
+          manifest_revision: number;
           supports_batched_effective?: boolean;
           supports_idempotent_writes?: boolean;
           supports_atomic_shortcuts?: boolean;
@@ -40,7 +40,7 @@ vi.mock("@/hooks/queries/settingValues", () => ({
       | undefined,
   ) =>
     capabilities?.api_version === 1 &&
-    capabilities.revision >= 5 &&
+    capabilities.manifest_revision >= 5 &&
     capabilities.supports_batched_effective === true &&
     capabilities.supports_idempotent_writes === true &&
     capabilities.supports_atomic_shortcuts === true,
@@ -81,7 +81,7 @@ describe("UICustomizationProvider capability gating", () => {
     mocks.useSettingsCapabilities.mockReturnValue({
       data: {
         api_version: 1,
-        revision: 4,
+        manifest_revision: 4,
         contract_etag: "revision-four",
         supports_batched_effective: true,
         supports_idempotent_writes: true,
@@ -117,7 +117,7 @@ describe("UICustomizationProvider capability gating", () => {
     mocks.useSettingsCapabilities.mockReturnValue({
       data: {
         api_version: 1,
-        revision: 5,
+        manifest_revision: 5,
         contract_etag: "revision-five",
         supports_batched_effective: true,
         supports_idempotent_writes: true,
@@ -145,7 +145,7 @@ describe("UICustomizationProvider capability gating", () => {
     mocks.useSettingsCapabilities.mockReturnValue({
       data: {
         api_version: 1,
-        revision: 5,
+        manifest_revision: 5,
         contract_etag: "revision-five-incomplete",
         supports_idempotent_writes: true,
         supports_atomic_shortcuts: true,
@@ -173,7 +173,7 @@ describe("UICustomizationProvider capability gating", () => {
     mocks.useSettingsCapabilities.mockReturnValue({
       data: {
         api_version: 1,
-        revision: 5,
+        manifest_revision: 5,
         contract_etag: "revision-five-atomic",
         supports_batched_effective: true,
         supports_idempotent_writes: true,
@@ -206,7 +206,7 @@ describe("UICustomizationProvider capability gating", () => {
     mocks.useSettingsCapabilities.mockReturnValue({
       data: {
         api_version: 1,
-        revision: 5,
+        manifest_revision: 5,
         contract_etag: "revision-five",
         supports_batched_effective: true,
         supports_idempotent_writes: true,

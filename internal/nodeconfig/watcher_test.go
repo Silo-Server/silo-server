@@ -11,6 +11,32 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 )
 
+func TestWatcherNodeRowID(t *testing.T) {
+	var nilWatcher *Watcher
+	if id, ok := nilWatcher.NodeRowID(); ok || id != 0 {
+		t.Fatalf("nil watcher NodeRowID = (%d, %t), want (0, false)", id, ok)
+	}
+
+	w := &Watcher{}
+	if id, ok := w.NodeRowID(); ok || id != 0 {
+		t.Fatalf("unresolved NodeRowID = (%d, %t), want (0, false)", id, ok)
+	}
+	w.rememberNodeRegistration(11, "https://registered-node.example")
+	if id, ok := w.NodeRowID(); !ok || id != 11 {
+		t.Fatalf("resolved NodeRowID = (%d, %t), want (11, true)", id, ok)
+	}
+	if registeredURL, ok := w.NodeRegisteredURL(); !ok || registeredURL != "https://registered-node.example" {
+		t.Fatalf("resolved NodeRegisteredURL = (%q, %t)", registeredURL, ok)
+	}
+	w.forgetNodeRowID()
+	if id, ok := w.NodeRowID(); ok || id != 0 {
+		t.Fatalf("forgotten NodeRowID = (%d, %t), want (0, false)", id, ok)
+	}
+	if registeredURL, ok := w.NodeRegisteredURL(); ok || registeredURL != "" {
+		t.Fatalf("forgotten NodeRegisteredURL = (%q, %t), want empty and false", registeredURL, ok)
+	}
+}
+
 func newTestWatcher(t *testing.T, bootstrap BootstrapOverrides) *Watcher {
 	t.Helper()
 	return NewWatcher(nil, nil, nil, bootstrap)

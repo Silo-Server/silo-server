@@ -3,6 +3,7 @@ package metadata
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -59,7 +60,11 @@ type PluginProvider struct {
 	installationID int
 	capabilityID   string
 	displayName    string
-	clientFactory  pluginMetadataClientFactory
+	// lookupProviderIDs are the provider-ID keys the capability declared it can
+	// look an item up by (lookup_provider_ids). GetMetadata runs when the item
+	// carries any of them, even without an ID of the provider's own.
+	lookupProviderIDs []string
+	clientFactory     pluginMetadataClientFactory
 }
 
 func NewPluginProvider(settings map[string]string, resolver pluginMetadataResolver) (*PluginProvider, error) {
@@ -114,10 +119,12 @@ func NewPluginProviderWithClientFactory(
 
 // NewPluginProviderFromCapability constructs a PluginProvider directly from
 // plugin capability data, without going through a settings map or registry.
+// lookupProviderIDs is the capability's declared lookup_provider_ids, or nil.
 func NewPluginProviderFromCapability(
 	installationID int,
 	capabilityID string,
 	displayName string,
+	lookupProviderIDs []string,
 	resolver pluginMetadataResolver,
 ) (*PluginProvider, error) {
 	if resolver == nil {
@@ -127,10 +134,11 @@ func NewPluginProviderFromCapability(
 		displayName = capabilityID
 	}
 	return &PluginProvider{
-		installationID: installationID,
-		capabilityID:   capabilityID,
-		displayName:    displayName,
-		clientFactory:  resolver.MetadataProviderClient,
+		installationID:    installationID,
+		capabilityID:      capabilityID,
+		displayName:       displayName,
+		lookupProviderIDs: lookupProviderIDs,
+		clientFactory:     resolver.MetadataProviderClient,
 	}, nil
 }
 
@@ -218,9 +226,14 @@ func (p *PluginProvider) Search(ctx context.Context, query SearchQuery) ([]Searc
 	return results, nil
 }
 
+// GetMetadata fetches the item from the plugin. It runs when the item carries
+// the provider's own ID, or, for an enrichment-only provider that never assigns
+// one, any of the provider-ID keys it declared in lookup_provider_ids. In the
+// second case ProviderId is empty and the plugin reads the IDs it needs from
+// ProviderIds.
 func (p *PluginProvider) GetMetadata(ctx context.Context, req MetadataRequest) (*MetadataResult, error) {
 	providerID := req.ProviderIDs[p.capabilityID]
-	if providerID == "" {
+	if providerID == "" && !p.hasLookupProviderID(req.ProviderIDs) {
 		return nil, nil
 	}
 
@@ -248,6 +261,11 @@ func (p *PluginProvider) GetMetadata(ctx context.Context, req MetadataRequest) (
 		return nil, nil
 	}
 
+	advisoryAge, advisorySource := advisoryFromPluginMetadata(response.GetItem().GetMetadata())
+	if !models.AdvisoryAgeApplies(req.ContentType) {
+		advisoryAge, advisorySource = 0, ""
+	}
+
 	return &MetadataResult{
 		HasMetadata:          true,
 		ProviderIDs:          mergePluginProviderIDs(p.capabilityID, response.GetItem().GetProviderId(), response.GetItem().GetProviderIds()),
@@ -269,7 +287,10 @@ func (p *PluginProvider) GetMetadata(ctx context.Context, req MetadataRequest) (
 		Countries:            append([]string(nil), response.GetItem().GetCountries()...),
 		OriginalLanguage:     response.GetItem().GetOriginalLanguage(),
 		ContentRating:        response.GetItem().GetContentRating(),
+		AdvisoryAge:          advisoryAge,
+		AdvisorySource:       advisorySource,
 		Ratings:              ratingsFromStruct(response.GetItem().GetRatings()),
+		RatingSources:        ratingSourcesFromStruct(response.GetItem().GetRatings(), p.Slug()),
 		People:               peopleFromRecords(response.GetItem().GetPeople()),
 		Videos:               videosFromRecords(p.Slug(), response.GetItem().GetVideos()),
 		PosterPath:           response.GetItem().GetPosterPath(),
@@ -284,6 +305,17 @@ func (p *PluginProvider) GetMetadata(ctx context.Context, req MetadataRequest) (
 		AirTime:              response.GetItem().GetAirTime(),
 		ReleaseDate:          response.GetItem().GetReleaseDate(),
 	}, nil
+}
+
+// hasLookupProviderID reports whether ids holds a non-empty value for any of
+// the provider's declared lookup keys.
+func (p *PluginProvider) hasLookupProviderID(ids map[string]string) bool {
+	for _, key := range p.lookupProviderIDs {
+		if ids[key] != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func titleAliasesFromPlugin(aliases []*pluginv1.TitleAlias, provider string) []TitleAlias {
@@ -574,6 +606,126 @@ func ratingsFromStruct(value *structpb.Struct) Ratings {
 		}
 	}
 	return ratings
+}
+
+// maxExactVotes is the largest vote count a structpb number (a float64) holds
+// exactly. Anything above it cannot be a count a provider really measured.
+const maxExactVotes = 1 << 53
+
+// ratingSourcesFromStruct reads the per-source ratings a plugin sends under
+// ratings.sources: {"imdb": {"score": 81, "votes": 673852}, ...}, with score on
+// a 0-100 scale and votes omitted when unknown.
+//
+// The Struct is the plugin's word, so each entry is validated on its own and a
+// bad one is dropped without affecting the rest: an unknown source name, a
+// score that is missing, non-finite or outside 0-100 drops the source, and a
+// negative, fractional or non-numeric vote count drops only the count.
+func ratingSourcesFromStruct(value *structpb.Struct, provider string) map[string]RatingSource {
+	sources := value.GetFields()["sources"].GetStructValue()
+	if sources == nil {
+		return nil
+	}
+	result := make(map[string]RatingSource, len(sources.GetFields()))
+	for rawName, rawEntry := range sources.GetFields() {
+		name := models.NormalizeRatingSource(rawName)
+		entry := rawEntry.GetStructValue()
+		if name == "" || entry == nil {
+			continue
+		}
+		scoreValue, ok := entry.GetFields()["score"].GetKind().(*structpb.Value_NumberValue)
+		if !ok {
+			continue
+		}
+		score := scoreValue.NumberValue
+		if math.IsNaN(score) || math.IsInf(score, 0) || score < 0 || score > 100 {
+			continue
+		}
+		result[name] = RatingSource{
+			Score:    score,
+			Votes:    ratingSourceVotes(entry.GetFields()["votes"]),
+			Provider: provider,
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// ratingSourceVotes returns a reported vote count, or 0 (unknown) when the
+// value is absent or is not a whole, non-negative number.
+func ratingSourceVotes(value *structpb.Value) int64 {
+	number, ok := value.GetKind().(*structpb.Value_NumberValue)
+	if !ok {
+		return 0
+	}
+	votes := number.NumberValue
+	if math.IsNaN(votes) || votes < 0 || votes > maxExactVotes || votes != math.Trunc(votes) {
+		return 0
+	}
+	return int64(votes)
+}
+
+// Advisory sources Silo stores, mirroring the names the MDBList plugin emits.
+const (
+	// AdvisorySourceCommonSense marks an age MDBList attributed to Common
+	// Sense Media via its "commonsense" flag.
+	AdvisorySourceCommonSense = "commonsense"
+	// AdvisorySourceMDBList marks an age MDBList derived itself.
+	AdvisorySourceMDBList = "mdblist"
+)
+
+// advisoryAgeSources are the only values accepted into MediaItem.AdvisorySource.
+//
+// A plugin controls this Struct completely, and the string ends up rendered on
+// item detail, so the host picks from a fixed vocabulary rather than storing
+// whatever arrived. Both values come from the MDBList plugin, which reports
+// "commonsense" when the response's commonsense flag marks the age as Common
+// Sense Media's and "mdblist" when MDBList derived it itself.
+var advisoryAgeSources = map[string]string{
+	AdvisorySourceCommonSense: AdvisorySourceCommonSense,
+	AdvisorySourceMDBList:     AdvisorySourceMDBList,
+}
+
+// maxAdvisoryAge bounds a reported advisory age. Advisory services top out at
+// 18; anything above 21 is junk, the same cutoff access.Normalize applies to a
+// bare numeric certification.
+const maxAdvisoryAge = 21
+
+// advisoryFromPluginMetadata reads an advisory age out of the
+// free-form plugin metadata Struct. MetadataItem has no typed advisory fields
+// yet, so plugins carry the pair under these two keys; typed proto fields
+// remain a later additive option.
+//
+// The input is a plugin's word, so it is treated as hostile: structpb numbers
+// arrive as float64 and a fractional, negative, or out-of-range age is dropped
+// rather than rounded. The age and the source are all-or-nothing, because an
+// age Silo cannot attribute is an anonymous number shown to a parent choosing
+// what a child may watch.
+func advisoryFromPluginMetadata(value *structpb.Struct) (int, string) {
+	if value == nil {
+		return 0, ""
+	}
+	fields := value.AsMap()
+
+	rawSource, ok := fields["advisory_source"].(string)
+	if !ok {
+		return 0, ""
+	}
+	source, ok := advisoryAgeSources[strings.ToLower(strings.TrimSpace(rawSource))]
+	if !ok {
+		return 0, ""
+	}
+
+	number, ok := fields["advisory_age"].(float64)
+	if !ok {
+		return 0, ""
+	}
+	age := int(number)
+	if float64(age) != number || age <= 0 || age > maxAdvisoryAge {
+		return 0, ""
+	}
+	return age, source
 }
 
 func keywordsFromPluginMetadata(value *structpb.Struct) []string {

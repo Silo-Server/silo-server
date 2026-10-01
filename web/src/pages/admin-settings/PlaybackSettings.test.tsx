@@ -101,7 +101,7 @@ describe("PlaybackSettings layout", () => {
       return labelId ? (container.querySelector(`[id="${labelId}"]`)?.textContent ?? "") : "";
     });
 
-    expect(headings).toEqual(["Transcoding", "Watch behavior"]);
+    expect(headings).toEqual(["Transcoding", "Node routing", "Watch behavior"]);
   });
 
   it("opens with the title alone: no breadcrumb, lede, or status strip", () => {
@@ -133,6 +133,8 @@ describe("PlaybackSettings layout", () => {
     const keys: string[] = useSettingsFormMock.mock.calls[0]?.[0]?.keys ?? [];
 
     expect(keys).toContain("playback.transcode_enabled");
+    expect(keys).toContain("playback.allow_hevc_encoding");
+    expect(keys).toContain("playback.routing.video_transcode_egress");
     expect(keys).toContain("playback.watched_threshold");
     expect(keys.some((key) => key.startsWith("download."))).toBe(false);
     // Hidden tier: still saved and readable through the API, no UI.
@@ -166,6 +168,85 @@ describe("PlaybackSettings layout", () => {
     const badges = container.querySelectorAll("[aria-label='Takes effect after a server restart']");
 
     expect(badges).toHaveLength(1);
+  });
+});
+
+describe("PlaybackSettings node routing", () => {
+  const defaultRouting = {
+    "playback.routing.direct_play_egress": "prefer_proxy",
+    "playback.routing.remux_execution": "prefer_transcode",
+    "playback.routing.remux_egress": "prefer_proxy",
+    "playback.routing.video_transcode_execution": "prefer_transcode",
+    "playback.routing.video_transcode_egress": "prefer_proxy",
+  };
+
+  it("stages every primitive setting when a preset is selected", async () => {
+    const form = makeForm({ "playback.hw_accel": "none", ...defaultRouting });
+    useSettingsFormMock.mockReturnValue(form);
+
+    render(<PlaybackSettings />);
+    await userEvent.click(screen.getByRole("button", { name: "GPU offload" }));
+
+    expect(form.setValue.mock.calls).toEqual([
+      ["playback.routing.direct_play_egress", "prefer_api"],
+      ["playback.routing.remux_execution", "prefer_api"],
+      ["playback.routing.remux_egress", "prefer_api"],
+      ["playback.routing.video_transcode_execution", "prefer_worker"],
+      ["playback.routing.video_transcode_egress", "prefer_proxy"],
+    ]);
+    expect(form.save).not.toHaveBeenCalled();
+  });
+
+  it("labels the built-in routing policy as Silo Defaults", () => {
+    useSettingsFormMock.mockReturnValue(
+      makeForm({ "playback.hw_accel": "none", ...defaultRouting }),
+    );
+
+    render(<PlaybackSettings />);
+
+    expect(screen.getByRole("button", { name: "Silo Defaults" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Standard cluster" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Custom")).not.toBeInTheDocument();
+  });
+
+  it("offers a transcode-node preference and explains what a worker is", async () => {
+    useSettingsFormMock.mockReturnValue(
+      makeForm({
+        "playback.hw_accel": "none",
+        ...defaultRouting,
+      }),
+    );
+
+    render(<PlaybackSettings />);
+
+    const remuxExecution = screen.getByRole("combobox", { name: "Remux execution" });
+    expect(remuxExecution).toHaveTextContent("Prefer transcode node");
+    await userEvent.click(remuxExecution);
+    expect(await screen.findByRole("option", { name: "Prefer any worker" })).toBeVisible();
+    expect(screen.getByRole("option", { name: "Prefer transcode node" })).toBeVisible();
+    expect(screen.getByText(/A worker can be a proxy/)).toBeVisible();
+    expect(screen.getByText(/Transcode node → any worker → API/)).toBeVisible();
+    expect(screen.getByText(/Video transcode workers are transcode nodes/)).toBeVisible();
+  });
+
+  it("warns when hard routes lack nodes or universal client-origin support", () => {
+    useAdminNodesMock.mockReturnValue({
+      data: [transcodeNode({ healthy: false })],
+      isSuccess: true,
+    });
+    useSettingsFormMock.mockReturnValue(
+      makeForm({
+        "playback.hw_accel": "none",
+        ...defaultRouting,
+        "playback.routing.direct_play_egress": "proxy_only",
+        "playback.routing.remux_execution": "worker_only",
+      }),
+    );
+
+    const text = parse(renderToStaticMarkup(<PlaybackSettings />)).textContent ?? "";
+
+    expect(text).toContain("no healthy supporting node");
+    expect(text).toContain("requires every native client to support authorized media origins");
   });
 });
 
@@ -454,5 +535,15 @@ describe("PlaybackSettings divergent node inventories", () => {
 
     expect(markup).not.toContain("set per-node overrides on the");
     expect(markup).not.toContain('href="/admin/nodes"');
+  });
+});
+
+describe("HEVC encoding policy", () => {
+  it("saves the HEVC switch through the playback settings form", () => {
+    const form = makeForm({ "playback.hw_accel": "none", "playback.allow_hevc_encoding": "false" });
+    useSettingsFormMock.mockReturnValue(form);
+    render(<PlaybackSettings />);
+    fireEvent.click(screen.getByRole("switch", { name: "Allow HEVC encoding" }));
+    expect(form.setValue).toHaveBeenCalledWith("playback.allow_hevc_encoding", "true");
   });
 });

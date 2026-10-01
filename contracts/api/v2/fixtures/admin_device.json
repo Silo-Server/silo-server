@@ -1,0 +1,31 @@
+{
+  "user_id": "2",
+  "username": "",
+  "email": "",
+  "device_id": "screen/one",
+  "device_name": "",
+  "device_platform": "",
+  "override_count": 0,
+  "profile_count": 0,
+  "profiles": [
+    {
+      "profile_id": "child",
+      "profile_name": "Child",
+      "override_count": 1,
+      "last_updated": "2026-09-01T01:02:03.000Z"
+    }
+  ],
+  "last_updated": null,
+  "settings": [
+    {
+      "user_id": "2",
+      "profile_id": "child",
+      "device_id": "",
+      "device_name": "",
+      "device_platform": "",
+      "key": "legacy",
+      "value": "true",
+      "updated_at": "2026-09-01T01:02:03.000Z"
+    }
+  ]
+}

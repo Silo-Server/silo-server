@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -17,6 +18,11 @@ const (
 	AudiobookGroupByAuthor   AudiobookGroupBy = "author"
 	AudiobookGroupByNarrator AudiobookGroupBy = "narrator"
 	AudiobookGroupBySeries   AudiobookGroupBy = "series"
+)
+
+const (
+	audiobookGroupSortCount    = "count"
+	audiobookGroupSortDuration = "duration"
 )
 
 // ParseAudiobookGroupBy validates a group_by request parameter.
@@ -40,15 +46,25 @@ type AudiobookGroupsQuery struct {
 	SearchPrefix string
 	IncludeTotal bool
 	// Sort is one of "name" (default), "count", "duration".
-	Sort   string
-	Limit  int
-	Offset int
+	Sort         string
+	Limit        int
+	Offset       int
+	CursorPaging bool
+	After        *AudiobookGroupCursor
+}
+
+// AudiobookGroupCursor is a live aggregate tuple. GroupKey is the exact SQL
+// LOWER(BTRIM) identity, not a display name normalized in Go.
+type AudiobookGroupCursor struct {
+	GroupKey string `json:"group_key"`
+	Value    int64  `json:"value"`
 }
 
 // AudiobookGroupsResult is the paged grouped browse response before API image
 // URL resolution.
 type AudiobookGroupsResult struct {
 	Groups     []AudiobookGroup
+	Next       *AudiobookGroupCursor
 	Total      int
 	HasMore    bool
 	TotalExact bool
@@ -58,6 +74,7 @@ type AudiobookGroupsResult struct {
 // with aggregate stats over the audiobooks visible to the viewer.
 type AudiobookGroup struct {
 	Name                 string
+	GroupKey             string
 	ItemCount            int
 	TotalDurationSeconds int64
 	InProgressCount      int
@@ -69,6 +86,8 @@ type AudiobookGroup struct {
 
 type audiobookGroupsSQLPlan struct {
 	SQL          string
+	CountSQL     string
+	CountArgs    []any
 	Args         []any
 	Limit        int
 	FetchLimit   int
@@ -79,10 +98,6 @@ type audiobookGroupsSQLPlan struct {
 // audiobookGroupsPageCap bounds externally-requested pages.
 const audiobookGroupsPageCap = 500
 
-// audiobookGroupsFullCap preserves the full-list path used by the legacy
-// short-lived cache; the endpoint now uses true paged queries instead.
-const audiobookGroupsFullCap = 50000
-
 // ListAudiobookGroups returns grouped browse rows for an audiobook library.
 // Groups are aggregated per person name (authors/narrators) or per series
 // name, matching the case-insensitive semantics of the corresponding catalog
@@ -91,21 +106,6 @@ const audiobookGroupsFullCap = 50000
 // filter.UserID / filter.ProfileID.
 func ListAudiobookGroups(ctx context.Context, pool *pgxpool.Pool, q AudiobookGroupsQuery, filter AccessFilter) (AudiobookGroupsResult, error) {
 	return listAudiobookGroupsWithLimit(ctx, pool, q, filter, audiobookGroupsPageCap)
-}
-
-// listAllAudiobookGroups fetches a complete grouped list for the older cache
-// helper. New callers should prefer ListAudiobookGroups so each page can avoid
-// recomputing exact totals and poster stacks for groups outside the page.
-func listAllAudiobookGroups(ctx context.Context, pool *pgxpool.Pool, q AudiobookGroupsQuery, filter AccessFilter) ([]AudiobookGroup, int, error) {
-	full := q
-	full.Limit = audiobookGroupsFullCap
-	full.Offset = 0
-	full.IncludeTotal = true
-	result, err := listAudiobookGroupsWithLimit(ctx, pool, full, filter, audiobookGroupsFullCap)
-	if err != nil {
-		return nil, 0, err
-	}
-	return result.Groups, result.Total, nil
 }
 
 func listAudiobookGroupsWithLimit(ctx context.Context, pool *pgxpool.Pool, q AudiobookGroupsQuery, filter AccessFilter, maxLimit int) (AudiobookGroupsResult, error) {
@@ -121,7 +121,20 @@ func listAudiobookGroupsWithLimit(ctx context.Context, pool *pgxpool.Pool, q Aud
 		return AudiobookGroupsResult{Groups: []AudiobookGroup{}, TotalExact: plan.IncludeTotal}, nil
 	}
 
-	rows, err := pool.Query(ctx, plan.SQL, plan.Args...)
+	var queryer interface {
+		Query(context.Context, string, ...any) (pgx.Rows, error)
+		QueryRow(context.Context, string, ...any) pgx.Row
+	} = pool
+	var tx pgx.Tx
+	if q.CursorPaging {
+		tx, err = pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+		if err != nil {
+			return AudiobookGroupsResult{}, err
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		queryer = tx
+	}
+	rows, err := queryer.Query(ctx, plan.SQL, plan.Args...)
 	if err != nil {
 		return AudiobookGroupsResult{}, fmt.Errorf("querying audiobook groups: %w", err)
 	}
@@ -132,13 +145,17 @@ func listAudiobookGroupsWithLimit(ctx context.Context, pool *pgxpool.Pool, q Aud
 	for rows.Next() {
 		var g AudiobookGroup
 		var posterPaths []string
+		dest := []any{&g.Name, &g.ItemCount, &g.TotalDurationSeconds, &g.InProgressCount, &g.FinishedCount, &posterPaths}
 		if plan.IncludeTotal {
-			if err := rows.Scan(&g.Name, &g.ItemCount, &g.TotalDurationSeconds, &g.InProgressCount, &g.FinishedCount, &posterPaths, &total); err != nil {
-				return AudiobookGroupsResult{}, fmt.Errorf("scanning audiobook group: %w", err)
-			}
-		} else if err := rows.Scan(&g.Name, &g.ItemCount, &g.TotalDurationSeconds, &g.InProgressCount, &g.FinishedCount, &posterPaths); err != nil {
+			dest = append(dest, &total)
+		}
+		if q.CursorPaging {
+			dest = append(dest, &g.GroupKey)
+		}
+		if err := rows.Scan(dest...); err != nil {
 			return AudiobookGroupsResult{}, fmt.Errorf("scanning audiobook group: %w", err)
 		}
+
 		if posterPaths == nil {
 			posterPaths = []string{}
 		}
@@ -149,8 +166,39 @@ func listAudiobookGroupsWithLimit(ctx context.Context, pool *pgxpool.Pool, q Aud
 		return AudiobookGroupsResult{}, fmt.Errorf("iterating audiobook groups: %w", err)
 	}
 
+	rows.Close()
+	if q.CursorPaging && plan.IncludeTotal && len(groups) == 0 {
+		if err := queryer.QueryRow(ctx, plan.CountSQL, plan.CountArgs...).Scan(&total); err != nil {
+			return AudiobookGroupsResult{}, fmt.Errorf("counting empty audiobook group page: %w", err)
+		}
+	}
+	if tx != nil {
+		if err := tx.Commit(ctx); err != nil {
+			return AudiobookGroupsResult{}, err
+		}
+	}
 	hasMore := false
-	if plan.IncludeTotal {
+	var next *AudiobookGroupCursor
+	if q.CursorPaging {
+		hasMore = len(groups) > plan.Limit
+		if hasMore {
+			groups = groups[:plan.Limit]
+			last := groups[len(groups)-1]
+			next = &AudiobookGroupCursor{GroupKey: last.GroupKey}
+			switch strings.ToLower(strings.TrimSpace(q.Sort)) {
+			case audiobookGroupSortCount:
+				next.Value = int64(last.ItemCount)
+			case audiobookGroupSortDuration:
+				next.Value = last.TotalDurationSeconds
+			}
+		}
+		if !plan.IncludeTotal {
+			total = len(groups)
+			if hasMore {
+				total++
+			}
+		}
+	} else if plan.IncludeTotal {
 		hasMore = plan.Offset+len(groups) < total
 	} else if len(groups) > plan.Limit {
 		hasMore = true
@@ -162,6 +210,7 @@ func listAudiobookGroupsWithLimit(ctx context.Context, pool *pgxpool.Pool, q Aud
 
 	return AudiobookGroupsResult{
 		Groups:     groups,
+		Next:       next,
 		Total:      total,
 		HasMore:    hasMore,
 		TotalExact: plan.IncludeTotal,
@@ -189,7 +238,7 @@ func buildAudiobookGroupsSQLWithLimit(q AudiobookGroupsQuery, filter AccessFilte
 	}
 	offset := max(q.Offset, 0)
 	fetchLimit := limit
-	if !q.IncludeTotal {
+	if !q.IncludeTotal || q.CursorPaging {
 		fetchLimit++
 	}
 
@@ -254,14 +303,40 @@ func buildAudiobookGroupsSQLWithLimit(q AudiobookGroupsQuery, filter AccessFilte
 	switch strings.ToLower(strings.TrimSpace(q.Sort)) {
 	case "", "name":
 		orderClause = "LOWER(name)"
-	case "count":
+	case audiobookGroupSortCount:
 		orderClause = "item_count DESC, LOWER(name)"
-	case "duration":
+	case audiobookGroupSortDuration:
 		orderClause = "total_duration_seconds DESC, LOWER(name)"
 	default:
 		return audiobookGroupsSQLPlan{}, fmt.Errorf("audiobook groups: unsupported sort %q", q.Sort)
 	}
 
+	countArgs := append([]any(nil), args...)
+	seekClause := ""
+	if q.CursorPaging {
+		orderClause = "group_key"
+		sortColumn := ""
+		switch strings.ToLower(strings.TrimSpace(q.Sort)) {
+		case audiobookGroupSortCount:
+			sortColumn = "item_count"
+		case audiobookGroupSortDuration:
+			sortColumn = "total_duration_seconds"
+		}
+		if sortColumn != "" {
+			orderClause = sortColumn + " DESC, group_key"
+		}
+		if q.After != nil {
+			if sortColumn == "" {
+				seekClause = fmt.Sprintf("WHERE group_key > $%d", argIdx)
+				args = append(args, q.After.GroupKey)
+				argIdx++
+			} else {
+				seekClause = fmt.Sprintf("WHERE (%s < $%d OR (%s = $%d AND group_key > $%d))", sortColumn, argIdx, sortColumn, argIdx, argIdx+1)
+				args = append(args, q.After.Value, q.After.GroupKey)
+				argIdx += 2
+			}
+		}
+	}
 	totalSelect := ""
 	totalColumn := ""
 	if q.IncludeTotal {
@@ -269,7 +344,16 @@ func buildAudiobookGroupsSQLWithLimit(q AudiobookGroupsQuery, filter AccessFilte
 		totalColumn = ", pg.total_groups"
 	}
 
-	query := fmt.Sprintf(`
+	pageClause := fmt.Sprintf("LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
+	pageArgs := []any{fetchLimit, offset}
+	keyColumn := ""
+	if q.CursorPaging {
+		pageClause = fmt.Sprintf("LIMIT $%d", argIdx)
+		pageArgs = []any{fetchLimit}
+		keyColumn = ", pg.group_key"
+	}
+
+	base := fmt.Sprintf(`
 		WITH books AS (
 			SELECT
 				mi.content_id,
@@ -299,7 +383,10 @@ func buildAudiobookGroupsSQLWithLimit(q AudiobookGroupsQuery, filter AccessFilte
 			      AND uwp.profile_id = %s
 			%s
 			GROUP BY %s
-		),
+		)`, strings.Join(conditions, " AND "), groupExpr, nameExpr, joinClause, userArg, profileArg, groupWhereClause, groupExpr)
+	countSQL := base + " SELECT COUNT(*)::int FROM grouped"
+	query := base + fmt.Sprintf(`,
+        counted_groups AS (SELECT grouped.*%s FROM grouped),
 		paged_groups AS (
 			SELECT
 				group_key,
@@ -308,9 +395,10 @@ func buildAudiobookGroupsSQLWithLimit(q AudiobookGroupsQuery, filter AccessFilte
 				total_duration_seconds,
 				in_progress_count,
 				finished_count%s
-			FROM grouped
+			FROM counted_groups
+            %s
 			ORDER BY %s
-			LIMIT $%d OFFSET $%d
+            %s
 		)
 		SELECT
 			pg.name,
@@ -318,7 +406,7 @@ func buildAudiobookGroupsSQLWithLimit(q AudiobookGroupsQuery, filter AccessFilte
 			pg.total_duration_seconds,
 			pg.in_progress_count,
 			pg.finished_count,
-			COALESCE(posters.poster_paths, '{}'::text[]) AS poster_paths%s
+			COALESCE(posters.poster_paths, '{}'::text[]) AS poster_paths%s%s
 		FROM paged_groups pg
 		LEFT JOIN LATERAL (
 			SELECT ARRAY(
@@ -332,15 +420,14 @@ func buildAudiobookGroupsSQLWithLimit(q AudiobookGroupsQuery, filter AccessFilte
 			) AS poster_paths
 		) posters ON TRUE
 		ORDER BY %s`,
-		strings.Join(conditions, " AND "),
-		groupExpr, nameExpr, joinClause, userArg, profileArg, groupWhereClause, groupExpr,
-		totalSelect, orderClause, argIdx, argIdx+1,
-		totalColumn, joinClause, groupExpr, posterOrder, orderClause,
+		totalSelect, strings.ReplaceAll(totalColumn, "pg.", ""), seekClause, orderClause, pageClause,
+		totalColumn, keyColumn, joinClause, groupExpr, posterOrder, orderClause,
 	)
-	args = append(args, fetchLimit, offset)
+	args = append(args, pageArgs...)
 
 	return audiobookGroupsSQLPlan{
-		SQL:          query,
+		SQL:      query,
+		CountSQL: countSQL, CountArgs: countArgs,
 		Args:         args,
 		Limit:        limit,
 		FetchLimit:   fetchLimit,

@@ -59,6 +59,7 @@ afterEach(() => {
   resetNavigationHistory();
   window.history.replaceState(null, "");
   delete document.documentElement.dataset.navigationDirection;
+  vi.unstubAllGlobals();
 });
 
 describe("useViewTransitionNavigate", () => {
@@ -135,6 +136,50 @@ describe("useViewTransitionNavigate", () => {
 
     expect(mocks.navigate).toHaveBeenCalledWith("/item/series", {
       state: { from: "crumb" },
+      replace: false,
+      viewTransition: true,
+    });
+  });
+
+  it.each([
+    ["enters", "/", "/item/movie-1"],
+    ["leaves", "/item/movie-1", "/"],
+  ])("skips the root snapshot when desktop navigation %s an item route", async (_label, at, to) => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query === "(min-width: 64rem)",
+    }));
+    render(<Harness to={to} at={at} />);
+    await go();
+
+    expect(mocks.navigate).toHaveBeenCalledWith(to, {
+      replace: false,
+      viewTransition: false,
+    });
+  });
+
+  it("keeps mobile item navigation on the viewport transition", async () => {
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    render(<Harness to="/item/movie-1" at="/" />);
+    await go();
+
+    expect(mocks.navigate).toHaveBeenCalledWith("/item/movie-1", {
+      replace: false,
+      viewTransition: true,
+    });
+  });
+
+  it.each([
+    ["item to item", "/item/series-1", "/item/episode-1"],
+    ["library to item", "/library/1", "/item/movie-1"],
+    ["item to library", "/item/movie-1", "/library/1"],
+  ])("keeps %s navigation on its existing transition", async (_label, at, to) => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query === "(min-width: 64rem)",
+    }));
+    render(<Harness to={to} at={at} />);
+    await go();
+
+    expect(mocks.navigate).toHaveBeenCalledWith(to, {
       replace: false,
       viewTransition: true,
     });

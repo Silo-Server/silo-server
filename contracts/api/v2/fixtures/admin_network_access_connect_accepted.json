@@ -1,0 +1,21 @@
+{
+  "provider": "stub",
+  "hosts": [
+    {
+      "host": {
+        "id": "api",
+        "role": "api",
+        "name": "Living Room"
+      },
+      "state": "awaiting_authorization",
+      "hostname": "silo.overlay.example.test",
+      "origin": "https://silo.overlay.example.test",
+      "addresses": [
+        "127.0.0.1"
+      ],
+      "auth_url": "https://login.example.test/a/abc",
+      "provider_version": "stub 0.1.0",
+      "updated_at": "2026-01-02T03:04:05.678Z"
+    }
+  ]
+}

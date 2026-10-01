@@ -149,16 +149,36 @@ describe("AISettings", () => {
     expect(screen.getByDisplayValue("legacy-chat-model")).toBeInTheDocument();
   });
 
-  it("flags a chat-only endpoint as unable to transcribe", () => {
-    values["ai.base_url"] = "https://openrouter.ai/api";
+  it.each(["shared", "dedicated"])(
+    "allows an OpenRouter %s speech endpoint to be tested and enabled",
+    async (endpoint) => {
+      const user = userEvent.setup();
+      values[endpoint === "shared" ? "ai.base_url" : "ai.asr_base_url"] =
+        "https://openrouter.ai/api/v1";
+      values["ai.asr_model"] = "openai/whisper-large-v3-turbo";
+      mocks.checkConnection.mockResolvedValue({
+        success: true,
+        message: "Timestamped speech received.",
+      });
 
+      render(<AISettings />);
+      expect(screen.queryByText("Cannot transcribe")).not.toBeInTheDocument();
+      expect(screen.getByRole("switch", { name: "Create subtitles from audio" })).toBeEnabled();
+      const tile = await openTile(user, "Speech-to-text");
+      await user.click(within(tile).getByRole("button", { name: "Test speech-to-text" }));
+      expect(mocks.checkConnection).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "ai_transcription" }),
+      );
+    },
+  );
+
+  it("applies the OpenRouter transcription preset", async () => {
+    const user = userEvent.setup();
     render(<AISettings />);
-
-    expect(screen.getByText("Cannot transcribe")).toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "Speech-to-text" })).toHaveAttribute(
-      "data-state",
-      "error",
-    );
+    await openTile(user, "Speech-to-text");
+    await user.click(screen.getByRole("button", { name: "OpenRouter" }));
+    expect(mocks.setValue).toHaveBeenCalledWith("ai.asr_base_url", "https://openrouter.ai/api/v1");
+    expect(mocks.setValue).toHaveBeenCalledWith("ai.asr_model", "openai/whisper-large-v3-turbo");
   });
 
   it("applies a speech-to-text preset", async () => {
@@ -224,8 +244,8 @@ describe("AISettings", () => {
   });
 
   it("blocks turning on a feature whose model cannot serve it", () => {
-    // A chat-only endpoint cannot transcribe, so speech-to-text is not ready.
-    values["ai.base_url"] = "https://openrouter.ai/api";
+    // Whitespace leaves the speech model unconfigured.
+    values["ai.asr_model"] = " ";
 
     render(<AISettings />);
 
@@ -233,7 +253,7 @@ describe("AISettings", () => {
   });
 
   it("still lets an enabled feature be turned off after its model degrades", () => {
-    values["ai.base_url"] = "https://openrouter.ai/api";
+    values["ai.asr_model"] = " ";
     values["subtitle_ai.transcribe_enabled"] = "true";
 
     render(<AISettings />);
@@ -250,11 +270,11 @@ describe("AISettings", () => {
   });
 
   it("names the missing model when a feature cannot run", () => {
-    values["ai.base_url"] = "https://openrouter.ai/api";
+    values["ai.asr_model"] = " ";
 
     render(<AISettings />);
 
-    // A chat-only endpoint cannot transcribe, so the speech feature is unmet.
+    // The speech feature needs a configured model.
     expect(screen.getByText("Needs speech-to-text")).toBeInTheDocument();
   });
 

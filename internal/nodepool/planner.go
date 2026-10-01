@@ -1,14 +1,11 @@
 package nodepool
 
 import (
-	"context"
 	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
-
-	"github.com/Silo-Server/silo-server/internal/config"
 )
 
 // Plan is the result of a node selection for one playback session.
@@ -16,6 +13,25 @@ import (
 type Plan struct {
 	TranscodeNode *Node
 	ProxyNode     *Node
+}
+
+// RouteRequest describes the exact node topology a higher-level routing
+// decision needs. Nodepool does not infer playback workload or fallback: it
+// reserves only the requested transcode and proxy halves.
+type RouteRequest struct {
+	SessionID            string
+	CurrentTranscodeURL  string
+	EstimatedBitrateKbps int
+	NeedsTranscode       bool
+	NeedsProxy           bool
+	TranscodeEligible    func(*Node) bool
+	ProxyEligible        func(*Node) bool
+}
+
+// RoutePlanner selects and provisionally reserves exactly the nodes requested
+// by one legal playback route shape.
+type RoutePlanner interface {
+	PlanRoute(request RouteRequest) Plan
 }
 
 // SessionPlanner selects transcode and proxy nodes for playback sessions.
@@ -29,7 +45,7 @@ type SessionPlanner interface {
 // have no predictable bitrate, so implementations must not admit them onto a
 // proxy with a configured bandwidth cap.
 type DownloadPlanner interface {
-	PlanDownload(sessionID string, preferredGroup ...string) Plan
+	PlanDownloadWith(sessionID string, eligible func(*Node) bool, preferredGroup ...string) Plan
 	ReleaseSession(sessionID string)
 }
 
@@ -189,6 +205,13 @@ func (p *Planner) TranscodeNodeHealthy(nodeURL string) bool {
 // transfer rate, so capped proxies are excluded instead of being oversubscribed
 // during the egress meter's convergence window.
 func (p *Planner) PlanDownload(sessionID string, preferredGroup ...string) Plan {
+	return p.PlanDownloadWith(sessionID, nil, preferredGroup...)
+}
+
+// PlanDownloadWith restricts selection to eligible proxies before applying
+// group preferences and reserving capacity. The predicate runs under the
+// planner lock and must be cheap and non-blocking; nil accepts every proxy.
+func (p *Planner) PlanDownloadWith(sessionID string, eligible func(*Node) bool, preferredGroup ...string) Plan {
 	if p == nil || p.proxies == nil || sessionID == "" {
 		return Plan{}
 	}
@@ -205,6 +228,9 @@ func (p *Planner) PlanDownload(sessionID string, preferredGroup ...string) Plan 
 	}
 	var candidates, fallback []*Node
 	for _, node := range p.proxies.Nodes() {
+		if node != nil && eligible != nil && !eligible(node) {
+			continue
+		}
 		if node == nil || !node.Enabled || !node.Healthy || !p.underCap(node, now) {
 			continue
 		}
@@ -248,16 +274,12 @@ func (p *Planner) PlanSessionWith(sessionID, currentTranscodeURL string, needsTr
 	// Drop this session's own reservation before computing loads so a
 	// re-plan doesn't count the session against its current node.
 	delete(p.reserved, sessionID)
-
 	if estBitrateKbps < 0 {
 		estBitrateKbps = 0
 	}
 	proxies := p.proxies.Nodes()
 	pooledTranscodes := p.transcodes.Nodes()
 	transcodes := pooledTranscodes
-	// Group health is computed over the full pool before any narrowing:
-	// eligibility restricts what may be selected, not co-location semantics.
-	// Shared-GPU load is summed over the same full pool, for the same reason.
 	groupHealthy := groupHealth(proxies, pooledTranscodes)
 
 	var plan Plan
@@ -265,7 +287,8 @@ func (p *Planner) PlanSessionWith(sessionID, currentTranscodeURL string, needsTr
 		if eligible != nil {
 			transcodes = filterNodes(transcodes, eligible)
 		}
-		plan.TranscodeNode = p.pickTranscode(transcodes, pooledTranscodes, proxies, groupHealthy, currentTranscodeURL, estBitrateKbps, now)
+		plan.TranscodeNode = p.pickTranscode(transcodes, pooledTranscodes, proxies, groupHealthy,
+			currentTranscodeURL, estBitrateKbps, now)
 		if plan.TranscodeNode != nil {
 			plan.ProxyNode = p.pickProxy(proxies, groupHealthy, plan.TranscodeNode.Group, estBitrateKbps, now)
 		}
@@ -279,7 +302,6 @@ func (p *Planner) PlanSessionWith(sessionID, currentTranscodeURL string, needsTr
 		}
 		plan.ProxyNode = p.pickProxy(proxies, groupHealthy, nil, estBitrateKbps, now)
 	}
-
 	if plan.TranscodeNode != nil || plan.ProxyNode != nil {
 		res := &reservation{createdAt: now}
 		if plan.TranscodeNode != nil {
@@ -294,14 +316,11 @@ func (p *Planner) PlanSessionWith(sessionID, currentTranscodeURL string, needsTr
 	return plan
 }
 
-// PlanTranscodeSessionWithLocalEgress selects and reserves only a transcode
-// node. The API server remains the client-facing media endpoint and relays the
-// selected node's manifest and segments, so no proxy node is needed or charged
-// against its job/bandwidth budget. This is intentionally separate from
-// PlanSessionWith: its normal grouped-node policy assumes the client talks to a
-// selected proxy directly.
-func (p *Planner) PlanTranscodeSessionWithLocalEgress(sessionID, currentTranscodeURL string, eligible func(*Node) bool) Plan {
-	if p == nil || p.transcodes == nil || sessionID == "" {
+// PlanRoute selects and reserves the exact route requested. Group health is
+// scoped to the pools the route uses: a transcode+API route is independent of
+// proxy health, while a transcode+proxy route preserves strict co-location.
+func (p *Planner) PlanRoute(request RouteRequest) Plan {
+	if p == nil {
 		return Plan{}
 	}
 	p.mu.Lock()
@@ -309,20 +328,78 @@ func (p *Planner) PlanTranscodeSessionWithLocalEgress(sessionID, currentTranscod
 
 	now := p.now()
 	p.pruneReservations(now)
-	delete(p.reserved, sessionID)
+	// Drop this session's own reservation before computing loads so a
+	// re-plan doesn't count the session against its current node.
+	delete(p.reserved, request.SessionID)
 
-	pooledTranscodes := p.transcodes.Nodes()
+	if request.EstimatedBitrateKbps < 0 {
+		request.EstimatedBitrateKbps = 0
+	}
+	var proxies, pooledTranscodes []*Node
+	if request.NeedsProxy && p.proxies != nil {
+		proxies = p.proxies.Nodes()
+	}
+	if request.NeedsTranscode && p.transcodes != nil {
+		pooledTranscodes = p.transcodes.Nodes()
+	}
 	transcodes := pooledTranscodes
-	groupHealthy := groupHealth(nil, pooledTranscodes)
-	if eligible != nil {
-		transcodes = filterNodes(transcodes, eligible)
+	// Group health is computed over the full pool before any narrowing:
+	// eligibility restricts what may be selected, not co-location semantics.
+	// Shared-GPU load is summed over the same full pool, for the same reason.
+	groupHealthy := groupHealth(proxies, pooledTranscodes)
+
+	var plan Plan
+	if request.TranscodeEligible != nil {
+		transcodes = filterNodes(transcodes, request.TranscodeEligible)
 	}
-	node := p.pickLocalEgressTranscode(transcodes, pooledTranscodes, groupHealthy, currentTranscodeURL, now)
-	if node == nil {
-		return Plan{}
+	if request.ProxyEligible != nil {
+		proxies = filterNodes(proxies, request.ProxyEligible)
 	}
-	p.reserved[sessionID] = &reservation{transcodeURL: node.URL, createdAt: now}
-	return Plan{TranscodeNode: node}
+	switch {
+	case request.NeedsTranscode && request.NeedsProxy:
+		plan.TranscodeNode = p.pickTranscode(transcodes, pooledTranscodes, proxies, groupHealthy,
+			request.CurrentTranscodeURL, request.EstimatedBitrateKbps, now)
+		if plan.TranscodeNode != nil {
+			plan.ProxyNode = p.pickProxy(proxies, groupHealthy, plan.TranscodeNode.Group,
+				request.EstimatedBitrateKbps, now)
+			if plan.ProxyNode == nil {
+				plan.TranscodeNode = nil
+			}
+		}
+	case request.NeedsTranscode:
+		plan.TranscodeNode = p.pickLocalEgressTranscode(transcodes, pooledTranscodes, groupHealthy,
+			request.CurrentTranscodeURL, now)
+	case request.NeedsProxy:
+		plan.ProxyNode = p.pickProxy(proxies, groupHealthy, nil, request.EstimatedBitrateKbps, now)
+	}
+
+	if plan.TranscodeNode != nil || plan.ProxyNode != nil {
+		res := &reservation{createdAt: now}
+		if plan.TranscodeNode != nil {
+			res.transcodeURL = plan.TranscodeNode.URL
+		}
+		if plan.ProxyNode != nil {
+			res.proxyURL = plan.ProxyNode.URL
+			res.kbps = request.EstimatedBitrateKbps
+		}
+		p.reserved[request.SessionID] = res
+	}
+	return plan
+}
+
+// PlanTranscodeSessionWithLocalEgress selects and reserves only a transcode
+// node. The API server remains the client-facing media endpoint and relays the
+// selected node's manifest and segments, so no proxy node is needed or charged
+// against its job/bandwidth budget. This is intentionally separate from
+// PlanSessionWith: its normal grouped-node policy assumes the client talks to a
+// selected proxy directly.
+func (p *Planner) PlanTranscodeSessionWithLocalEgress(sessionID, currentTranscodeURL string, eligible func(*Node) bool) Plan {
+	return p.PlanRoute(RouteRequest{
+		SessionID:           sessionID,
+		CurrentTranscodeURL: currentTranscodeURL,
+		NeedsTranscode:      true,
+		TranscodeEligible:   eligible,
+	})
 }
 
 // filterNodes returns the nodes accepted by keep, preserving pool order so
@@ -886,18 +963,4 @@ func (p *Planner) pruneReservations(now time.Time) {
 			delete(p.reserved, id)
 		}
 	}
-}
-
-// LocalTranscodeFallbackAllowed reports whether the API server may transcode
-// locally when no eligible transcode node exists, based on the
-// playback.local_transcode_fallback setting. Defaults to allowed so
-// deployments without the setting keep the historical behavior.
-func LocalTranscodeFallbackAllowed(ctx context.Context, settings interface {
-	Get(ctx context.Context, key string) (string, error)
-}) bool {
-	if settings == nil {
-		return true
-	}
-	v, _ := settings.Get(ctx, config.PlaybackLocalTranscodeFallbackSettingKey)
-	return v != "false"
 }

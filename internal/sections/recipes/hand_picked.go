@@ -3,7 +3,6 @@ package recipes
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"time"
 )
 
@@ -38,17 +37,6 @@ func (collectionRecipe) Validate(raw json.RawMessage) error {
 	return nil
 }
 func (collectionRecipe) Definition() RecipeDefinition {
-	traktVariants := []struct {
-		preset, mediaType, keySuffix, label, icon, description string
-	}{
-		{"trending", "movie", "movies", "Trakt Trending Movies", "📈", "Show a synced Trakt trending movies collection."},
-		{"trending", "tv", "shows", "Trakt Trending Shows", "📈", "Show a synced Trakt trending shows collection."},
-		{"popular", "movie", "movies", "Trakt Popular Movies", "⭐", "Show a synced Trakt popular movies collection."},
-		{"popular", "tv", "shows", "Trakt Popular Shows", "⭐", "Show a synced Trakt popular shows collection."},
-		{"recommended", "movie", "movies", "Trakt Recommended Movies", "🎯", "Show a synced Trakt recommendations collection for a connected profile."},
-		{"recommended", "tv", "shows", "Trakt Recommended Shows", "🎯", "Show a synced Trakt recommendations collection for a connected profile."},
-	}
-
 	presets := []GalleryPreset{
 		{
 			Key:              "collection_pick",
@@ -57,19 +45,6 @@ func (collectionRecipe) Definition() RecipeDefinition {
 			DescriptionShort: "Show items from a library or curated collection.",
 			DefaultParams:    json.RawMessage(`{"library_collection_id":""}`),
 		},
-	}
-	for _, v := range traktVariants {
-		params := fmt.Sprintf(
-			`{"library_collection_id":"","source_provider":"trakt","source_preset":%q,"media_type":%q}`,
-			v.preset, v.mediaType,
-		)
-		presets = append(presets, GalleryPreset{
-			Key:              fmt.Sprintf("trakt_%s_%s", v.preset, v.keySuffix),
-			DisplayName:      v.label,
-			Icon:             v.icon,
-			DescriptionShort: v.description,
-			DefaultParams:    json.RawMessage(params),
-		})
 	}
 
 	return RecipeDefinition{

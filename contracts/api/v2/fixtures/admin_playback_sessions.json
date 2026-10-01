@@ -1,0 +1,63 @@
+{
+  "items": [
+    {
+      "session_id": "a",
+      "user_id": "7",
+      "username": "",
+      "profile_id": "primary",
+      "media_file_id": "44",
+      "requested_media_file_id": "44",
+      "media_title": "",
+      "media_type": "",
+      "play_method": "",
+      "reporting_node": "",
+      "file_duration": null,
+      "started_at": "2026-01-02T02:04:05.123Z",
+      "updated_at": "2026-01-02T02:04:05.123Z",
+      "position_seconds": 0,
+      "is_paused": false,
+      "has_playback_control": false,
+      "client_ip": "127.0.0.1",
+      "stream_location": "local",
+      "audio_track_index": 0,
+      "transcode_audio": false,
+      "stream_bitrate_kbps": null,
+      "target_bitrate_kbps": null,
+      "source_bitrate_kbps": null,
+      "source_audio_channels": null
+    },
+    {
+      "session_id": "b",
+      "user_id": "7",
+      "username": "",
+      "profile_id": "child",
+      "media_file_id": "42",
+      "requested_media_file_id": "41",
+      "media_title": "",
+      "media_type": "",
+      "play_method": "",
+      "reporting_node": "",
+      "file_duration": null,
+      "started_at": "2026-01-02T02:04:05.123Z",
+      "updated_at": "2026-01-02T02:04:05.123Z",
+      "position_seconds": 0,
+      "is_paused": false,
+      "has_playback_control": true,
+      "stream_location": "remote",
+      "audio_track_index": 0,
+      "transcode_audio": false,
+      "stream_bitrate_kbps": null,
+      "target_audio_channels": 2,
+      "target_bitrate_kbps": null,
+      "source_bitrate_kbps": null,
+      "source_audio_channels": 8,
+      "effective_play_method": "transcode",
+      "is_jellyfin_client": true,
+      "routing_network_provider": "tailscale",
+      "routing_execution_node_id": "9"
+    }
+  ],
+  "page": {
+    "has_more": false
+  }
+}
