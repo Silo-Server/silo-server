@@ -275,9 +275,12 @@ func applyPreparedTransportToPlanV3(plan *playback.PlanV3, transport preparedTra
 		return
 	}
 	plan.Stream.URL = transport.url
-	if plan.Stream.Headers == nil {
-		plan.Stream.Headers = map[string]string{}
-	}
+	// Candidate plans are by-value copies of the attempt's current plan, so
+	// they share its header map. Write into a private copy so an uncommitted
+	// replan cannot replace the stored plan's capability.
+	headers := make(map[string]string, len(plan.Stream.Headers)+len(transport.headers))
+	maps.Copy(headers, plan.Stream.Headers)
+	plan.Stream.Headers = headers
 	for name, value := range transport.headers {
 		plan.Stream.Headers[name] = value
 	}
