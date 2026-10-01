@@ -257,7 +257,7 @@ func (s *Service) process(ctx context.Context, job *Job) {
 	heartbeatDone := make(chan struct{})
 	go func() {
 		defer close(heartbeatDone)
-		s.heartbeat(workCtx, job.FileID, cancel)
+		s.heartbeat(workCtx, job, cancel)
 	}()
 	published, err := s.generate(workCtx, job)
 	cancel(nil)
@@ -277,7 +277,7 @@ func (s *Service) process(ctx context.Context, job *Job) {
 		log.InfoContext(ctx, "trickplay generation abandoned", "reason", err)
 		return
 	}
-	if _, finishErr := s.queue.Finish(recordCtx, job.FileID, s.owner, outcome, err.Error(), delay); finishErr != nil {
+	if _, finishErr := s.queue.Finish(recordCtx, job.FileID, job.LeaseToken, outcome, err.Error(), delay); finishErr != nil {
 		log.WarnContext(ctx, "record trickplay outcome failed", "error", finishErr)
 	}
 	level := slog.LevelWarn
@@ -321,7 +321,7 @@ var errNoNode = errors.New("no transcode node can make trickplay sheets")
 // heartbeat renews the lease until ctx ends, and cancels the work with
 // errLeaseLost once the lease is gone: when a renewal is refused, or when
 // renewals have failed for as long as the lease lasts.
-func (s *Service) heartbeat(ctx context.Context, fileID int, cancel context.CancelCauseFunc) {
+func (s *Service) heartbeat(ctx context.Context, job *Job, cancel context.CancelCauseFunc) {
 	ticker := time.NewTicker(s.heartbeatEvery)
 	defer ticker.Stop()
 	renewed := s.now()
@@ -331,7 +331,7 @@ func (s *Service) heartbeat(ctx context.Context, fileID int, cancel context.Canc
 			return
 		case <-ticker.C:
 		}
-		ok, err := s.queue.Heartbeat(ctx, fileID, s.owner, leaseDuration)
+		ok, err := s.queue.Heartbeat(ctx, job.FileID, job.LeaseToken, leaseDuration)
 		switch {
 		case err == nil && !ok:
 			cancel(errLeaseLost)
@@ -389,7 +389,7 @@ func (s *Service) generate(ctx context.Context, job *Job) (Published, error) {
 			return Published{}, fmt.Errorf("trickplay chunks have different tile heights: %d and %d", published.Height, actualHeight)
 		}
 		if revision == 0 {
-			rev, ok, err := s.queue.BeginUpload(ctx, job.FileID, s.owner)
+			rev, ok, err := s.queue.BeginUpload(ctx, job.FileID, job.LeaseToken)
 			if err != nil {
 				return Published{}, leaseAware(ctx, err)
 			}
@@ -408,7 +408,7 @@ func (s *Service) generate(ctx context.Context, job *Job) (Published, error) {
 		published.Filled += result.SheetFrames.Filled
 		published.Decoder = result.Decoder
 	}
-	ok, err := s.queue.Publish(ctx, job.FileID, s.owner, revision, published)
+	ok, err := s.queue.Publish(ctx, job.FileID, job.LeaseToken, revision, published)
 	if err != nil {
 		return Published{}, leaseAware(ctx, err)
 	}
