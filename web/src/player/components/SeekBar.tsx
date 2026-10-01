@@ -180,8 +180,11 @@ export function SeekBar({
       setSheetState((current) => {
         const base =
           current.source === trickplay ? current : { ...NO_SHEET_STATE, source: trickplay };
-        if (base[kind].has(url)) return base;
-        return { ...base, [kind]: new Set(base[kind]).add(url) };
+        const opposite = kind === "loaded" ? "failed" : "loaded";
+        if (base[kind].has(url) && !base[opposite].has(url)) return base;
+        const cleared = new Set(base[opposite]);
+        cleared.delete(url);
+        return { ...base, [kind]: new Set(base[kind]).add(url), [opposite]: cleared };
       });
     const images: HTMLImageElement[] = [];
     for (const url of trickplay.sheets.slice(candidateSheet, candidateSheet + 2)) {
