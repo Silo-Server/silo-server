@@ -11,6 +11,8 @@ import sys
 
 GO_JOBS = ("go-lint", "go-verify", "go-test", "go-integration", "go-db-pins")
 WEB_JOBS = ("web", "web-test")
+# Run on every event regardless of what the diff touched.
+ALWAYS_JOBS = ("repo-checks",)
 SHA = re.compile(r"[0-9a-fA-F]{40}\Z")
 
 
@@ -98,6 +100,10 @@ def check_results(needs):
     selection = needs.get("select", {})
     if selection.get("result") != "success":
         errors.append("job selection did not succeed")
+    for job in ALWAYS_JOBS:
+        result = needs.get(job, {}).get("result")
+        if result != "success":
+            errors.append(job + " ended with " + str(result))
     outputs = selection.get("outputs", {})
     for group, jobs in (("go", GO_JOBS), ("web", WEB_JOBS)):
         selected = outputs.get(group)

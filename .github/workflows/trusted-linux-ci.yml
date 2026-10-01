@@ -26,7 +26,15 @@ env:
 
 jobs:
   # Selection runs on a hosted runner and uses trusted tools from main, even
-  # when a PR checks out an older or modified copy of those tools.
+  # when a PR checks out an older or modified copy of those tools. Every
+  # private-runner job waits for it, so it does nothing else.
+  #
+  # The tools come from a sparse checkout of this workflow's own commit on
+  # main rather than `uses: Silo-Server/silo-server/...@main`, which downloads
+  # a tarball of the whole repository (about 290 MB) and took 15-20 s per job.
+  # Pinning to job.workflow_sha gives every run, including a re-run, tools
+  # from the same commit as its job list. The checkout holds no Go files,
+  # which gofmt in go-lint would otherwise see.
   select:
     name: Select CI jobs
     runs-on: ubuntu-latest
@@ -34,16 +42,44 @@ jobs:
       go: ${{ steps.plan.outputs.go }}
       web: ${{ steps.plan.outputs.web }}
     steps:
+      # The plan compares trees, so it needs the full history but not the
+      # file contents.
       - name: Checkout
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          filter: blob:none
+          sparse-checkout: .github/actions
+          persist-credentials: false
+      - name: Check out the CI tools from main
+        uses: actions/checkout@v5
+        with:
+          repository: Silo-Server/silo-server
+          ref: ${{ job.workflow_sha || 'refs/heads/main' }}
+          path: .ci-tools
+          fetch-depth: 1
+          filter: blob:none
+          sparse-checkout: |
+            /.github/actions/ci-tools/
+            /scripts/lint-changed.sh
+          sparse-checkout-cone-mode: false
           persist-credentials: false
       - name: Select jobs from the complete PR diff
         id: plan
-        uses: Silo-Server/silo-server/.github/actions/ci-tools@main
+        uses: ./.ci-tools/.github/actions/ci-tools
         with:
           operation: plan
+
+  # These gate every run but do not feed job selection, so they run beside
+  # it instead of delaying the private-runner jobs.
+  repo-checks:
+    name: Repository checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - name: Test CI helper changes
         run: |
           if [ -f .github/actions/ci-tools/test_select_jobs.py ]; then
@@ -70,6 +106,22 @@ jobs:
           # golangci-lint needs the merge base to tell this branch's lines from
           # the ones it inherited.
           fetch-depth: 0
+          persist-credentials: false
+
+      # After the PR checkout, which would otherwise clean it away, and
+      # before any PR code runs.
+      - name: Check out the CI tools from main
+        uses: actions/checkout@v5
+        with:
+          repository: Silo-Server/silo-server
+          ref: ${{ job.workflow_sha || 'refs/heads/main' }}
+          path: .ci-tools
+          fetch-depth: 1
+          filter: blob:none
+          sparse-checkout: |
+            /.github/actions/ci-tools/
+            /scripts/lint-changed.sh
+          sparse-checkout-cone-mode: false
           persist-credentials: false
 
       - name: Set up Go
@@ -141,7 +193,7 @@ jobs:
           BASE_REF: ${{ github.event_name == 'push' && github.event.before || github.event_name == 'pull_request' && github.event.pull_request.base.sha || format('origin/{0}', github.event.repository.default_branch) }}
           LINT_CHANGED_CI: '1'
           LINT_CHANGED_BASE_MODE: ${{ github.event_name == 'push' && 'revision' || 'merge-base' }}
-        uses: Silo-Server/silo-server/.github/actions/ci-tools@main
+        uses: ./.ci-tools/.github/actions/ci-tools
         with:
           operation: lint
 
@@ -504,11 +556,24 @@ jobs:
   result:
     name: CI result
     if: always()
-    needs: [select, go-lint, go-verify, go-test, go-integration, go-db-pins, web, web-test]
+    needs: [select, repo-checks, go-lint, go-verify, go-test, go-integration, go-db-pins, web, web-test]
     runs-on: ubuntu-latest
     steps:
+      - name: Check out the CI tools from main
+        uses: actions/checkout@v5
+        with:
+          repository: Silo-Server/silo-server
+          ref: ${{ job.workflow_sha || 'refs/heads/main' }}
+          path: .ci-tools
+          fetch-depth: 1
+          filter: blob:none
+          sparse-checkout: |
+            /.github/actions/ci-tools/
+            /scripts/lint-changed.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - name: Require every selected job to pass
-        uses: Silo-Server/silo-server/.github/actions/ci-tools@main
+        uses: ./.ci-tools/.github/actions/ci-tools
         env:
           CI_JOB_RESULTS: ${{ toJSON(needs) }}
         with:

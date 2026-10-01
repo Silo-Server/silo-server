@@ -355,6 +355,36 @@ class GitSelectionTests(unittest.TestCase):
         with working_directory(shallow):
             self.assert_groups(selector.plan("pull_request", event), True, True)
 
+    def test_blobless_checkout_selects_from_trees_without_fetching_blobs(self):
+        # CI checks out full history with --filter=blob:none to keep this job
+        # fast. A delete and a similar add would need both blobs if the diff
+        # ever looked for renames.
+        text = "shared documentation text\n" * 20
+        self.repo.write("docs/old.md", text)
+        base = self.repo.commit()
+        (self.repo.path / "docs/old.md").unlink()
+        self.repo.write("docs/new.md", text + "one more line\n")
+        self.repo.commit()
+        blobs = [self.repo.git("rev-parse", base + ":docs/old.md"),
+                 self.repo.git("rev-parse", "HEAD:docs/new.md")]
+        self.repo.git("config", "uploadpack.allowFilter", "true")
+        event = self.repo.event(count=2)
+        event["pull_request"]["base"]["sha"] = base
+        blobless = Path(self.temporary.name) / "blobless"
+        subprocess.run(
+            ["git", "clone", "-q", "--filter=blob:none", "--no-checkout",
+             self.repo.path.as_uri(), str(blobless)],
+            check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        with working_directory(blobless):
+            self.assert_groups(selector.plan("pull_request", event), False, False)
+        missing = subprocess.run(
+            ["git", "rev-list", "--objects", "--all", "--missing=print"], cwd=blobless,
+            check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        ).stdout.decode().splitlines()
+        for blob in blobs:
+            self.assertIn("?" + blob, missing)
+
     def test_push_force_push_and_manual_validation_always_run_everything(self):
         self.repo.write("docs/ci.md")
         self.repo.commit()
@@ -388,6 +418,8 @@ class GitSelectionTests(unittest.TestCase):
 class AggregateResultTests(unittest.TestCase):
     def results(self, go="true", web="true"):
         needs = {"select": {"result": "success", "outputs": {"go": go, "web": web}}}
+        for job in selector.ALWAYS_JOBS:
+            needs[job] = {"result": "success"}
         for group, jobs in ((go, selector.GO_JOBS), (web, selector.WEB_JOBS)):
             for job in jobs:
                 needs[job] = {"result": "success" if group == "true" else "skipped"}
@@ -454,6 +486,19 @@ class AggregateResultTests(unittest.TestCase):
         for selected in ("true", "false"):
             for job in selector.GO_JOBS + selector.WEB_JOBS:
                 with self.subTest(selected=selected, job=job):
+                    needs = self.results(selected, selected)
+                    del needs[job]
+                    self.assertTrue(selector.check_results(needs))
+
+    def test_always_required_jobs_block_whatever_was_selected(self):
+        for selected in ("true", "false"):
+            for job in selector.ALWAYS_JOBS:
+                for result in ("failure", "cancelled", "skipped", "timed_out", None):
+                    with self.subTest(selected=selected, job=job, result=result):
+                        needs = self.results(selected, selected)
+                        needs[job]["result"] = result
+                        self.assertTrue(selector.check_results(needs))
+                with self.subTest(selected=selected, job=job, result="missing"):
                     needs = self.results(selected, selected)
                     del needs[job]
                     self.assertTrue(selector.check_results(needs))
