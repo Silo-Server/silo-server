@@ -134,9 +134,15 @@ function SettingRow({
             <span className="text-muted-foreground max-w-[14rem] truncate font-mono text-xs">
               {formatSettingValue(entry.key, entry.value)}
             </span>
-            <Button variant="outline" size="sm" disabled={busy} onClick={onEditJson}>
-              Edit JSON
-            </Button>
+            {/* Without a definition the save can't keep the value's JSON type,
+                so a key from a newer server is shown but not edited here. */}
+            {definition ? (
+              <Button variant="outline" size="sm" disabled={busy} onClick={onEditJson}>
+                Edit JSON
+              </Button>
+            ) : (
+              <span className="text-muted-foreground text-xs">View only</span>
+            )}
           </>
         ) : (
           <RegistrySettingControl
@@ -160,11 +166,14 @@ export function LevelSettings({
   userId,
   level,
   profileEntries,
+  profileAllEntries,
 }: {
   userId: number;
   level: PreferenceLevel;
   /** The owning profile's own (All devices) settings, for "Replaces Main: …". */
   profileEntries: readonly AdminUserSettingEntry[];
+  /** Every scope the profile stores; see replacedValue. */
+  profileAllEntries: readonly AdminUserSettingEntry[];
 }) {
   const updateSetting = useUpdateAdminUserSetting();
   const deleteSetting = useDeleteAdminUserSetting();
@@ -179,13 +188,18 @@ export function LevelSettings({
   };
 
   const busy = updateSetting.isPending || deleteSetting.isPending || clearDevice.isPending;
-  const addable = useMemo(() => addableSettings(level, profileEntries), [level, profileEntries]);
+  const addable = useMemo(
+    () => addableSettings(level, profileEntries, profileAllEntries),
+    [level, profileEntries, profileAllEntries],
+  );
   const canAdd = addable.length > 0;
   const addLabel = `Add a setting for this ${levelNoun(level)}`;
-  const replacedFor = (key: string) => replacedValue(level, key, profileEntries);
+  const replacedFor = (key: string) => replacedValue(level, key, profileEntries, profileAllEntries);
 
   const add = async (keys: string[]) => {
-    for (const key of keys) {
+    // A retry after a partial failure must not overwrite what already landed.
+    const stored = new Set(level.entries.map((entry) => entry.key));
+    for (const key of keys.filter((k) => !stored.has(k))) {
       // Start from the value it replaces, so nothing changes until edited.
       await updateSetting.mutateAsync({
         userId,

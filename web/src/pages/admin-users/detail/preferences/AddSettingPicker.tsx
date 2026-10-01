@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -44,6 +44,17 @@ export function AddSettingPicker({
       }))
       .filter((group) => group.settings.length > 0);
   }, [categories, query]);
+
+  // After a partial failure, settings that did land turn "set here" once the
+  // list refreshes; drop them from the selection so a retry adds only the rest.
+  useEffect(() => {
+    const stored = new Set(
+      categories.flatMap((group) => group.settings.filter((s) => s.setHere).map((s) => s.key)),
+    );
+    setChosen((current) =>
+      current.some((key) => stored.has(key)) ? current.filter((key) => !stored.has(key)) : current,
+    );
+  }, [categories]);
 
   const reset = () => {
     setQuery("");

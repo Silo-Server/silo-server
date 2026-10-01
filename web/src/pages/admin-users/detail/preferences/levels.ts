@@ -298,50 +298,16 @@ export function identityOf(entry: AdminUserSettingEntry): AdminSettingIdentity {
 export interface ReplacedValue {
   /** The profile name when the profile stores the value, else null (app default). */
   profileName: string | null;
+  /**
+   * Set when an app-family, device, or library setting can come between this
+   * level and the value named here, so on some devices it replaces that
+   * instead. The page can't tell which: the server doesn't infer a device's
+   * app family, and a library or series level spans devices.
+   */
+  orVaries?: "app family" | "device" | "library";
   /** Display form, or null when this build has no definition to name a default. */
   display: string | null;
   raw: string;
-}
-
-export function replacedValue(
-  level: PreferenceLevel,
-  key: string,
-  profileEntries: readonly AdminUserSettingEntry[],
-): ReplacedValue {
-  if (level.kind !== "profile" && level.kind !== "account") {
-    const stored = profileEntries.find((entry) => entry.key === key);
-    if (stored) {
-      return {
-        profileName: level.profileName,
-        display: formatSettingValue(key, stored.value),
-        raw: stored.value,
-      };
-    }
-  }
-  const definition = getSettingDefinition(key);
-  if (!definition) return { profileName: null, display: null, raw: "" };
-  const raw = defaultValueToString(definition);
-  // A structured default (a menu layout, a remembered view) has no short form.
-  if (definition.type === "object") return { profileName: null, display: null, raw };
-  return { profileName: null, display: formatSettingValue(key, raw), raw };
-}
-
-/** "Replaces Main: English", "Replaces app default: Off". */
-export function replacesText(replaced: ReplacedValue): string {
-  if (replaced.profileName !== null) {
-    return `Replaces ${replaced.profileName}: ${replaced.display ?? replaced.raw}`;
-  }
-  return replaced.display === null
-    ? "Replaces the app default"
-    : `Replaces app default: ${replaced.display}`;
-}
-
-/** The short form the add picker shows: "Main: English", "App default: Off". */
-export function replacedShort(replaced: ReplacedValue): string {
-  if (replaced.profileName !== null) {
-    return `${replaced.profileName}: ${replaced.display ?? replaced.raw}`;
-  }
-  return replaced.display === null ? "App default" : `App default: ${replaced.display}`;
 }
 
 const LEVEL_SCOPE: Record<LevelKind, AdminSettingScope> = {
@@ -352,6 +318,85 @@ const LEVEL_SCOPE: Record<LevelKind, AdminSettingScope> = {
   library: "profile_library",
   series: "profile_series",
 };
+
+const VARYING_SCOPES: Partial<Record<string, NonNullable<ReplacedValue["orVaries"]>>> = {
+  profile_client: "app family",
+  profile_device: "device",
+  profile_library: "library",
+};
+
+/**
+ * Walks the setting's resolution order below this level's scope: the first
+ * layer the page can name (the profile's own value, else the app default) is
+ * what the level replaces. A context-dependent layer on the way that holds a
+ * value for this key marks the result as varying.
+ */
+export function replacedValue(
+  level: PreferenceLevel,
+  key: string,
+  profileEntries: readonly AdminUserSettingEntry[],
+  profileAllEntries: readonly AdminUserSettingEntry[] = profileEntries,
+): ReplacedValue {
+  const order = (SETTING_DEFINITIONS as Record<string, { resolutionOrder: readonly string[] }>)[key]
+    ?.resolutionOrder ?? ["profile", "default"];
+  const at = order.indexOf(LEVEL_SCOPE[level.kind]);
+  const below = at >= 0 ? order.slice(at + 1) : ["profile", "default"];
+  let orVaries: ReplacedValue["orVaries"];
+  for (const scope of below) {
+    if (scope === "profile" && level.kind !== "profile" && level.kind !== "account") {
+      const stored = profileEntries.find((entry) => entry.key === key);
+      if (stored) {
+        return {
+          profileName: level.profileName,
+          display: formatSettingValue(key, stored.value),
+          raw: stored.value,
+          ...(orVaries ? { orVaries } : {}),
+        };
+      }
+    }
+    const varies = VARYING_SCOPES[scope];
+    if (
+      varies &&
+      !orVaries &&
+      profileAllEntries.some((entry) => entry.key === key && entry.scope === scope)
+    ) {
+      orVaries = varies;
+    }
+    if (scope === "default") break;
+  }
+  const definition = getSettingDefinition(key);
+  if (!definition) return { profileName: null, display: null, raw: "" };
+  const raw = defaultValueToString(definition);
+  const extra = orVaries ? { orVaries } : {};
+  // A structured default (a menu layout, a remembered view) has no short form.
+  if (definition.type === "object") return { profileName: null, display: null, raw, ...extra };
+  return { profileName: null, display: formatSettingValue(key, raw), raw, ...extra };
+}
+
+function variesSuffix(replaced: ReplacedValue): string {
+  return replaced.orVaries ? `, or a ${replaced.orVaries} setting where one applies` : "";
+}
+
+/** "Replaces Main: English", "Replaces app default: Off". */
+export function replacesText(replaced: ReplacedValue): string {
+  const base =
+    replaced.profileName !== null
+      ? `Replaces ${replaced.profileName}: ${replaced.display ?? replaced.raw}`
+      : replaced.display === null
+        ? "Replaces the app default"
+        : `Replaces app default: ${replaced.display}`;
+  return base + variesSuffix(replaced);
+}
+
+/** The short form the add picker shows: "Main: English", "App default: Off". */
+export function replacedShort(replaced: ReplacedValue): string {
+  if (replaced.profileName !== null) {
+    const named = `${replaced.profileName}: ${replaced.display ?? replaced.raw}`;
+    return replaced.orVaries ? `${named} or per ${replaced.orVaries}` : named;
+  }
+  const base = replaced.display === null ? "App default" : `App default: ${replaced.display}`;
+  return replaced.orVaries ? `${base} or per ${replaced.orVaries}` : base;
+}
 
 export interface AddableSetting {
   key: string;
@@ -375,6 +420,7 @@ export interface AddableCategory {
 export function addableSettings(
   level: PreferenceLevel,
   profileEntries: readonly AdminUserSettingEntry[],
+  profileAllEntries: readonly AdminUserSettingEntry[] = profileEntries,
 ): AddableCategory[] {
   const scope = LEVEL_SCOPE[level.kind];
   const stored = new Set(level.entries.map((entry) => entry.key));
@@ -396,7 +442,7 @@ export function addableSettings(
       description: definition.description,
       category,
       setHere: stored.has(key),
-      replaced: replacedValue(level, key, profileEntries),
+      replaced: replacedValue(level, key, profileEntries, profileAllEntries),
     });
     categories.set(category, list);
   }

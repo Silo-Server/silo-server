@@ -281,23 +281,34 @@ describe("PreferencesTab levels", () => {
     });
   });
 
-  it("edits a structured or unknown setting through the JSON editor", async () => {
+  it("edits a structured setting through the JSON editor", async () => {
     const u = userEvent.setup();
+    mocks.settings = [
+      { key: "ui.sidebar_pins", scope: "profile", profile_id: "p2", value: '["home"]' },
+    ];
+    renderTab("?tab=preferences&level=profile.p2");
+    const card = levelCard("All devices · Kids");
+    expect(within(card).queryByRole("combobox")).not.toBeInTheDocument();
+    await u.click(within(card).getByRole("button", { name: "Edit JSON" }));
+    expect(screen.getByRole("textbox", { name: "Raw value" })).toHaveValue('["home"]');
+    await u.click(screen.getByRole("button", { name: "Save value" }));
+    expect(mocks.updateMutate.mock.calls[0]?.[0]).toMatchObject({
+      key: "ui.sidebar_pins",
+      identity: { scope: "profile", profileId: "p2" },
+      value: '["home"]',
+    });
+  });
+
+  it("shows a setting this version doesn't know without an editor", () => {
     mocks.settings = [
       { key: "future.setting", scope: "profile", profile_id: "p2", value: '{"a":1}' },
     ];
     renderTab("?tab=preferences&level=profile.p2");
     const card = levelCard("All devices · Kids");
     expect(within(card).getByText("future.setting")).toBeInTheDocument();
-    expect(within(card).queryByRole("combobox")).not.toBeInTheDocument();
-    await u.click(within(card).getByRole("button", { name: "Edit JSON" }));
-    expect(screen.getByRole("textbox", { name: "Raw value" })).toHaveValue('{"a":1}');
-    await u.click(screen.getByRole("button", { name: "Save value" }));
-    expect(mocks.updateMutate.mock.calls[0]?.[0]).toMatchObject({
-      key: "future.setting",
-      identity: { scope: "profile", profileId: "p2" },
-      value: '{"a":1}',
-    });
+    expect(within(card).getByText("View only")).toBeInTheDocument();
+    expect(within(card).queryByRole("button", { name: "Edit JSON" })).not.toBeInTheDocument();
+    expect(within(card).getByRole("button", { name: "Remove future.setting" })).toBeEnabled();
   });
 
   it("names the profile's value below a library", () => {

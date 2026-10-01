@@ -157,6 +157,38 @@ describe("replaced values", () => {
     );
   });
 
+  it("says when an app-family, device, or library value can come in between", () => {
+    const [main] = build();
+    const [profile, shield, , library, series] = main!.levels;
+    const all = main!.levels.flatMap((level) => level.entries);
+    // A library sits above devices, and Shield stores its own subtitle mode.
+    expect(
+      replacesText(
+        replacedValue(library!, SETTING_KEYS.PLAYBACK_SUBTITLE_MODE, profile!.entries, all),
+      ),
+    ).toBe("Replaces Main: Off, or a device setting where one applies");
+    // A series sits above libraries; the first such layer is named.
+    expect(
+      replacedValue(series!, SETTING_KEYS.PLAYBACK_SUBTITLE_MODE, profile!.entries, all).orVaries,
+    ).toBe("library");
+    // A device level resolves before app families, which the page can't map.
+    const family: AdminUserSettingEntry = {
+      key: SETTING_KEYS.UI_CARD_PRESENTATION,
+      scope: "profile_client",
+      profile_id: "p1",
+      client_family: "tv",
+      value: "{}",
+    };
+    const withFamily = replacedValue(shield!, SETTING_KEYS.UI_CARD_PRESENTATION, profile!.entries, [
+      ...all,
+      family,
+    ]);
+    expect(withFamily.orVaries).toBe("app family");
+    expect(
+      replacedValue(shield!, SETTING_KEYS.UI_CARD_PRESENTATION, profile!.entries, all).orVaries,
+    ).toBeUndefined();
+  });
+
   it("offers only settings the level's scope allows, marking ones already set", () => {
     const [main] = build();
     const [profile, shield, , library] = main!.levels;

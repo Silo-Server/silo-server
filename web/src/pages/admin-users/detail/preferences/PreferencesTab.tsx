@@ -65,7 +65,7 @@ export function PreferencesTab({ user }: { user: AdminUser }) {
       }),
     [settings.data, profiles.data, devices.data, libraries.data],
   );
-  const levels = groups.flatMap((group) => group.levels);
+  const levels = useMemo(() => groups.flatMap((group) => group.levels), [groups]);
   const requested = searchParams.get("level");
   const selected =
     levels.find((level) => level.id === requested) ??
@@ -75,6 +75,16 @@ export function PreferencesTab({ user }: { user: AdminUser }) {
   const profileEntries =
     levels.find((level) => level.kind === "profile" && level.profileId === selected?.profileId)
       ?.entries ?? [];
+  // Every scope this profile stores, for "Replaces …" to see app-family,
+  // device, and library values that can come between a level and the profile.
+  const selectedProfileId = selected?.profileId;
+  const profileAllEntries = useMemo(
+    () =>
+      levels
+        .filter((level) => level.profileId === selectedProfileId)
+        .flatMap((level) => level.entries),
+    [levels, selectedProfileId],
+  );
 
   if (settings.isLoading) {
     return <p className="text-muted-foreground py-8 text-center text-sm">Loading settings...</p>;
@@ -160,6 +170,7 @@ export function PreferencesTab({ user }: { user: AdminUser }) {
         userId={user.id}
         level={selected}
         profileEntries={profileEntries}
+        profileAllEntries={profileAllEntries}
       />
     </div>
   );
