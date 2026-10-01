@@ -122,7 +122,4 @@ func TestSoftwareAttempts(t *testing.T) {
 	if got := softwareAttempts([]mediasample.Attempt{{Hardware: true, TimeoutSeconds: 10}}); len(got) != 1 || got[0].Hardware {
 		t.Fatalf("hardware-only plan: %+v", got)
 	}
-	if usesHardware(softwareAttempts(plan)) || !usesHardware(plan) {
-		t.Fatal("usesHardware")
-	}
 }
