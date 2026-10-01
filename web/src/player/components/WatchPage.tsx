@@ -321,13 +321,21 @@ function WatchPagePlayer({
       trickplayRefreshTimer.current = null;
     };
   }, [session.mediaFileId, trickplayAvailable]);
+  useEffect(() => {
+    // The query owns retry and polling delays after a manifest request fails.
+    if (trickplayQuery.isError && trickplayRefreshTimer.current !== null) {
+      clearTimeout(trickplayRefreshTimer.current);
+      trickplayRefreshTimer.current = null;
+    }
+  }, [trickplayQuery.isError]);
   const handleTrickplayError = useCallback(() => {
+    if (trickplayQuery.isError) return;
     const now = Date.now();
     const previous = lastTrickplayRefresh.current;
     const refresh = () => {
       trickplayRefreshTimer.current = null;
       lastTrickplayRefresh.current = { fileId: session.mediaFileId, at: Date.now() };
-      void refetchTrickplay();
+      void refetchTrickplay({ cancelRefetch: false });
     };
     if (previous?.fileId === session.mediaFileId && now - previous.at < 60_000) {
       if (trickplayRefreshTimer.current === null) {
@@ -337,7 +345,7 @@ function WatchPagePlayer({
     }
     if (trickplayRefreshTimer.current !== null) clearTimeout(trickplayRefreshTimer.current);
     refresh();
-  }, [refetchTrickplay, session.mediaFileId]);
+  }, [refetchTrickplay, session.mediaFileId, trickplayQuery.isError]);
 
   const handleEnded = useCallback(() => {
     onEnded?.({
@@ -643,6 +651,7 @@ function WatchPagePlayer({
       activeFileId={session.mediaFileId}
       chapters={activeChapters}
       trickplay={trickplayAvailable ? (trickplayQuery.data ?? null) : null}
+      trickplayUpdatedAt={trickplayQuery.dataUpdatedAt}
       onTrickplayError={handleTrickplayError}
       onSwitchVersion={watchTogetherRoomId ? undefined : handleSwitchVersion}
       subtitleUrls={playableSubtitles}

@@ -163,6 +163,7 @@ interface VideoPlayerProps {
   chapters?: PlayerChapter[];
   /** Seek-bar previews of the file being played. */
   trickplay?: PlayerTrickplay | null;
+  trickplayUpdatedAt?: number;
   /** A preview sheet failed to load; read the previews again. */
   onTrickplayError?: () => void;
   onSwitchVersion?: (fileId: number, currentPosition: number) => void;
@@ -341,6 +342,7 @@ export function VideoPlayer({
   activeFileId,
   chapters = [],
   trickplay = null,
+  trickplayUpdatedAt,
   onTrickplayError,
   onSwitchVersion,
   subtitleUrls,
@@ -3867,6 +3869,7 @@ export function VideoPlayer({
           buffered={buffered}
           chapters={chapters}
           trickplay={trickplay}
+          trickplayUpdatedAt={trickplayUpdatedAt}
           onTrickplayError={onTrickplayError}
           regions={markerRegions}
           editing={markerEditor.editing}

@@ -34,7 +34,7 @@ it("recovers a transient initial manifest failure without a focus event", async 
   vi.useFakeTimers();
   request.mockRejectedValueOnce(new TypeError("network unavailable")).mockResolvedValue(manifest);
   const view = setup();
-  await act(() => vi.advanceTimersByTimeAsync(20));
+  await act(() => vi.advanceTimersByTimeAsync(3_100));
   expect(request).toHaveBeenCalledTimes(2);
   expect(view.result.current.data?.count).toBe(100);
   view.unmount();
@@ -44,7 +44,7 @@ it("bounds immediate retries then polls for recovery", async () => {
   vi.useFakeTimers();
   request.mockRejectedValue(new TypeError("network unavailable"));
   const view = setup();
-  await act(() => vi.advanceTimersByTimeAsync(20));
+  await act(() => vi.advanceTimersByTimeAsync(3_100));
   expect(request).toHaveBeenCalledTimes(3);
   request.mockResolvedValue(manifest);
   await act(() => vi.advanceTimersByTimeAsync(60000));
@@ -69,4 +69,65 @@ it("stops requesting a manifest that is no longer available", async () => {
   expect(request).toHaveBeenCalledTimes(1);
   view.unmount();
   view.client.clear();
+});
+
+it("waits for Retry-After before retrying a rate-limited manifest", async () => {
+  vi.useFakeTimers();
+  request
+    .mockRejectedValueOnce(
+      new V2ProblemError(
+        "getWatchTrickplay",
+        {
+          type: "https://example.com/rate_limited",
+          title: "Rate limited",
+          status: 429,
+          detail: "Try later",
+          instance: "/api/v2/watch/movie/trickplay",
+        },
+        10,
+      ),
+    )
+    .mockResolvedValue(manifest);
+  const view = setup();
+  try {
+    await act(() => vi.advanceTimersByTimeAsync(9_999));
+    expect(request).toHaveBeenCalledTimes(1);
+    await act(() => vi.advanceTimersByTimeAsync(20));
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(view.result.current.data?.count).toBe(100);
+  } finally {
+    view.unmount();
+    view.client.clear();
+  }
+});
+
+it("polls a rate-limited manifest after bounded retries and honors a long Retry-After", async () => {
+  vi.useFakeTimers();
+  request.mockRejectedValue(
+    new V2ProblemError(
+      "getWatchTrickplay",
+      {
+        type: "https://example.com/rate_limited",
+        title: "Rate limited",
+        status: 429,
+        detail: "Try later",
+        instance: "/api/v2/watch/movie/trickplay",
+      },
+      90,
+    ),
+  );
+  const view = setup();
+  try {
+    await act(() => vi.advanceTimersByTimeAsync(180_010));
+    expect(request).toHaveBeenCalledTimes(3);
+    request.mockResolvedValue(manifest);
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(request).toHaveBeenCalledTimes(3);
+    await act(() => vi.advanceTimersByTimeAsync(30_000));
+    expect(request).toHaveBeenCalledTimes(4);
+    expect(view.result.current.data?.count).toBe(100);
+  } finally {
+    view.unmount();
+    view.client.clear();
+  }
 });
