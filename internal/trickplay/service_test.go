@@ -155,17 +155,17 @@ func TestGenerateChunksUploadsAndPublishes(t *testing.T) {
 	store := &fakeStore{}
 	extractor := &fakeExtractor{}
 	s := testService(q, store, extractor, fakeSettings{IntervalSetting: "10"})
-	// 5 h at 10 s: 1800 thumbnails, 18 sheets, two runs of at most 16 sheets.
+	// 5 h at 10 s: one geometry sheet, then batches of at most 16 sheets.
 	job := testJob(42, 18000)
 	job.HDR = true
 	s.process(t.Context(), job)
 
-	if len(extractor.requests) != 2 || len(extractor.requests[0].Samples.Seconds) != 1600 || len(extractor.requests[1].Samples.Seconds) != 200 {
+	if len(extractor.requests) != 3 || len(extractor.requests[0].Samples.Seconds) != 100 || len(extractor.requests[1].Samples.Seconds) != 1600 || len(extractor.requests[2].Samples.Seconds) != 100 {
 		t.Fatalf("requests of %d and %d samples", len(extractor.requests[0].Samples.Seconds), len(extractor.requests[len(extractor.requests)-1].Samples.Seconds))
 	}
 	first := extractor.requests[0]
 	if first.Sheets.TileWidth != 300 || first.Sheets.TileHeight != 126 || first.Sheets.Columns != 10 || first.Sheets.ToneMap == nil ||
-		!first.Background || first.VideoBitDepth != 10 || first.Samples.Seconds[0] != 5 || extractor.requests[1].Samples.Seconds[0] != 16005 {
+		!first.Background || first.VideoBitDepth != 10 || first.Samples.Seconds[0] != 5 || extractor.requests[1].Samples.Seconds[0] != 1005 {
 		t.Fatalf("request %+v %+v", first.Sheets, first.Samples.Seconds[:2])
 	}
 	if len(store.keys) != 18 || store.keys[0] != "trickplay/42/7001/0.7001.jpg" || store.keys[17] != "trickplay/42/7001/17.7001.jpg" {
@@ -189,7 +189,7 @@ type geometryExtractor struct {
 func (e *geometryExtractor) Extract(ctx context.Context, job *Job, req mediasample.Request) (mediasample.Result, error) {
 	result, err := e.fakeExtractor.Extract(ctx, job, req)
 	if err == nil {
-		result.SheetTileHeight = e.heights[len(e.requests)-1]
+		result.SheetTileHeight = e.heights[min(len(e.requests)-1, len(e.heights)-1)]
 	}
 	return result, err
 }
