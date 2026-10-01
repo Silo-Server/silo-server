@@ -50,6 +50,20 @@ Diagnostics orphan cleanup deletes only keys shaped exactly like a bundle,
 `diagnostics/<user id>/<report id>.tar.gz`, so artwork from a provider slugged
 `diagnostics` is never swept.
 
+Images generated from a media file (chapter thumbnails, under
+`chapter-images/<media_files.id>/`) are deleted with their file
+(`internal/blobgc`). A trigger on `media_files` deletes, whichever path
+deletes the row, queues the file's prefix in `blob_gc_queue` a day out; a
+check constraint admits only `chapter-images/<id>/` prefixes. The Clean
+Removed Media Images task deletes due prefixes whose namespace reports them
+unreferenced, and dequeues one only after storage lists it empty, since an
+S3 batch delete can fail per key without failing the call. The weekly Sweep
+Orphaned Media Images task lists each namespace and queues prefixes whose
+row is gone and whose newest object is over a day old; it queues nothing
+when more than half the prefixes it sees look orphaned, the signature of a
+broken liveness check rather than of real orphans. `media_files` ids are
+never reused, so a file prefix is dead for good once its row is gone.
+
 Only the Assets store is wrapped to record the storage identity. When Operational
 shares it, a first write through any caller records it. A private S3 bucket stays
 outside that wrapper so its identity cannot become the catalog's assets location.

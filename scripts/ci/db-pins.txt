@@ -94,3 +94,7 @@
 # Artwork storage sweep: the GC-schedule lookup its anomaly guard consults must
 # count armed candidates only, never parked (live) ones.
 ./internal/metadata TestArtworkSweepScheduledOriginalsPostgres
+
+./internal/blobgc TestSweeperResumesAfterBoundedRunDB
+./internal/blobgc TestSweeperDefersPrefixSpanningBoundedRunsDB
+./internal/blobgc TestSweeperRestartsAfterStorageMoveDB
