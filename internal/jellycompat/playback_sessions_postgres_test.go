@@ -261,73 +261,7 @@ func TestDurableCompatPlaybackStoreStaticReservationAcrossInstances(t *testing.T
 	}
 }
 
-func TestDurableLegacyStaticDuplicatesAcrossInstances(t *testing.T) {
-	pool := newCompatTestPool(t)
-	ctx := context.Background()
-	token := fmt.Sprintf("legacy-static-%d", time.Now().UnixNano())
-	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE compat_token=$1`, token)
-	})
-	first, second := legacyStaticPair(token, time.Now())
-	// Both negotiations offered two editions; the active native sessions
-	// prove that both actually selected the second one.
-	first.UpstreamSessionID, second.UpstreamSessionID = token+"-native-first", token+"-native-second"
-	first.MediaSources = append(first.MediaSources, PlaybackMediaSource{ID: "second-edition", FileID: 43})
-	second.MediaSources = append(second.MediaSources, PlaybackMediaSource{ID: "second-edition", FileID: 43})
-	if _, err := pool.Exec(ctx, `INSERT INTO playback_sessions_sync(session_id,media_file_id) VALUES($1,43),($2,43)`, first.UpstreamSessionID, second.UpstreamSessionID); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM playback_sessions_sync WHERE session_id=ANY($1::text[])`, []string{first.UpstreamSessionID, second.UpstreamSessionID})
-	})
-	seed := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	seed.Put(first)
-	seed.Put(second)
-	const requests = 12
-	results := make(chan error, requests)
-	start := make(chan struct{})
-	for range requests {
-		go func() {
-			<-start
-			store := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-			got, err := store.ResolveClientPlaySessionID(token, "client-play")
-			if err == nil && (got == nil || got.ID != first.ID || got.UpstreamSessionID != first.UpstreamSessionID) {
-				err = errors.New("wrong canonical playback")
-			}
-			results <- err
-		}()
-	}
-	close(start)
-	for range requests {
-		if err := <-results; err != nil {
-			t.Error(err)
-		}
-	}
-	if t.Failed() {
-		return
-	}
-	var total, active int
-	if err := pool.QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE COALESCE((data->>'Terminal')::boolean,false)=false) FROM jellycompat_playback_sessions WHERE compat_token=$1`, token).Scan(&total, &active); err != nil {
-		t.Fatal(err)
-	}
-	if total != 2 || active != 1 {
-		t.Fatalf("records total=%d active=%d, want 2 and 1", total, active)
-	}
-	fresh := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	if _, ok := fresh.Get(second.ID); ok {
-		t.Fatal("fresh instance revived the duplicate")
-	}
-	if _, ok := fresh.GetFinalizable(second.ID, token); ok {
-		t.Fatal("duplicate became finalizable after restart")
-	}
-	fresh.Delete(first.ID)
-	fresh = NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	if _, err := fresh.ResolveClientPlaySessionID(token, "client-play"); !errors.Is(err, ErrSessionNotFound) {
-		t.Fatalf("duplicate revived after canonical stop: %v", err)
-	}
-}
-
-func TestDurableLegacyStaticDuplicatesFailureDoesNotChangeCache(t *testing.T) {
+func TestDurableLegacyStaticDuplicatesReturnStorageFailure(t *testing.T) {
 	pool := newCompatTestPool(t)
 	pool.Close()
 	store := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
@@ -338,11 +272,56 @@ func TestDurableLegacyStaticDuplicatesFailureDoesNotChangeCache(t *testing.T) {
 		t.Fatal("storage failure was not returned")
 	}
 	if _, ok := store.mem.Get(second.ID); !ok {
-		t.Fatal("failed durable repair changed the local routing map")
+		t.Fatal("failed lookup changed the local routing map")
 	}
 }
 
-func TestDurableLegacyStaticDuplicatesDeviceRecoveryWithoutNativeSnapshot(t *testing.T) {
+func TestDurableLegacyStaticDuplicatesStayAmbiguousAcrossInstances(t *testing.T) {
+	pool := newCompatTestPool(t)
+	ctx := context.Background()
+	token := fmt.Sprintf("legacy-static-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE compat_token=$1`, token)
+	})
+	first, second := legacyStaticPair(token, time.Now())
+	seed := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	seed.Put(first)
+	seed.Put(second)
+	const requests = 8
+	results := make(chan error, requests)
+	for range requests {
+		go func() {
+			store := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+			_, err := store.ResolveClientPlaySessionID(token, "client-play")
+			if !errors.Is(err, ErrSessionNotFound) {
+				err = fmt.Errorf("ambiguous legacy alias resolved: %v", err)
+			} else {
+				err = nil
+			}
+			results <- err
+		}()
+	}
+	for range requests {
+		if err := <-results; err != nil {
+			t.Error(err)
+		}
+	}
+	var active int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM jellycompat_playback_sessions WHERE compat_token=$1 AND COALESCE((data->>'Terminal')::boolean,false)=false`, token).Scan(&active); err != nil {
+		t.Fatal(err)
+	}
+	if active != 2 {
+		t.Fatalf("active legacy rows = %d, want both left untouched", active)
+	}
+	fresh := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	for _, old := range []PlaybackSession{first, second} {
+		if _, ok := fresh.GetFinalizable(old.ID, token); !ok {
+			t.Fatalf("legacy row %s can no longer be finalised", old.ID)
+		}
+	}
+}
+
+func TestDurableLegacyStaticDuplicatesDoNotBlockDeviceRecovery(t *testing.T) {
 	pool := newCompatTestPool(t)
 	ctx := context.Background()
 	token := fmt.Sprintf("device-recovery-%d", time.Now().UnixNano())
@@ -350,7 +329,6 @@ func TestDurableLegacyStaticDuplicatesDeviceRecoveryWithoutNativeSnapshot(t *tes
 		_, _ = pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE compat_token=$1`, token)
 	})
 	first, second := legacyStaticPair(token, time.Now())
-	first.ClientDeviceID, second.ClientDeviceID = "", ""
 	first.MediaSources = append(first.MediaSources, PlaybackMediaSource{ID: "other", FileID: 43})
 	second.MediaSources = append(second.MediaSources, PlaybackMediaSource{ID: "other", FileID: 43})
 	current := first

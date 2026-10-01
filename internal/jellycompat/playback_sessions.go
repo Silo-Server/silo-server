@@ -49,10 +49,7 @@ type PlaybackSession struct {
 	// Terminal hides a play session from stream and progress routing after
 	// ActiveEncodings cleanup while retaining the authenticated mapping long
 	// enough for a later Stopped report to publish its authoritative position.
-	Terminal bool
-	// SupersededBy retains a legacy duplicate's canonical mapping without
-	// inventing a playback-stop event or allowing the duplicate to revive.
-	SupersededBy          string
+	Terminal              bool
 	TerminalAuthoritative bool
 	TerminalFallbackSent  bool
 	TerminalClaimUntil    time.Time
@@ -397,7 +394,7 @@ func (s *PlaybackSessionStore) StageTerminal(
 	defer s.mu.Unlock()
 
 	session, ok := s.sessions[id]
-	if !ok || session.CompatToken != compatToken || session.SupersededBy != "" {
+	if !ok || session.CompatToken != compatToken {
 		return nil, ErrSessionNotFound
 	}
 	if !session.ExpiresAt.After(s.now()) {
@@ -541,7 +538,7 @@ func (s *PlaybackSessionStore) GetFinalizable(id, compatToken string) (*Playback
 	defer s.mu.Unlock()
 
 	session, ok := s.sessions[id]
-	if !ok || session.CompatToken != compatToken || session.SupersededBy != "" {
+	if !ok || session.CompatToken != compatToken {
 		return nil, false
 	}
 	if !session.ExpiresAt.After(s.now()) {
@@ -579,7 +576,6 @@ func (s *PlaybackSessionStore) Update(id string, fn func(*PlaybackSession) error
 // PlaySessionId across plays makes the alias ambiguous, and the caller should
 // fall back to route matching instead of binding an arbitrary session.
 func (s *PlaybackSessionStore) FindByClientPlaySessionID(compatToken, clientPlaySessionID string) (*PlaybackSession, bool) {
-	s.reconcileLegacyStaticDuplicates(compatToken, clientPlaySessionID)
 	return s.findByClientPlaySessionID(compatToken, clientPlaySessionID, "", "", false)
 }
 
@@ -589,7 +585,6 @@ func (s *PlaybackSessionStore) FindByClientPlaySessionID(compatToken, clientPlay
 func (s *PlaybackSessionStore) FindFinalizableByClientPlaySessionID(
 	compatToken, clientPlaySessionID, routeItemID, mediaSourceID string,
 ) (*PlaybackSession, bool) {
-	s.reconcileLegacyStaticDuplicates(compatToken, clientPlaySessionID)
 	return s.findByClientPlaySessionID(
 		compatToken, clientPlaySessionID, routeItemID, mediaSourceID, true,
 	)
@@ -618,7 +613,7 @@ func (s *PlaybackSessionStore) findDeviceClientPlaySessionID(
 	now := s.now()
 	var match *PlaybackSession
 	for _, session := range s.sessions {
-		if !session.ExpiresAt.After(now) || session.SupersededBy != "" || (!includeTerminal && session.Terminal) {
+		if !session.ExpiresAt.After(now) || (!includeTerminal && session.Terminal) {
 			continue
 		}
 		if session.CompatToken != compatToken {
@@ -687,7 +682,7 @@ func (s *PlaybackSessionStore) findByRoute(
 	var matchedSession *PlaybackSession
 	var matchedSource *PlaybackMediaSource
 	for _, session := range s.sessions {
-		if !session.ExpiresAt.After(now) || session.SupersededBy != "" || (!includeTerminal && session.Terminal) {
+		if !session.ExpiresAt.After(now) || (!includeTerminal && session.Terminal) {
 			continue
 		}
 		if compatToken != "" && session.CompatToken != compatToken {

@@ -571,9 +571,6 @@ func (d *DurableCompatPlaybackStore) stageTerminalDB(
 	if err := json.Unmarshal(raw, &session); err != nil {
 		return nil, err
 	}
-	if session.SupersededBy != "" {
-		return nil, ErrSessionNotFound
-	}
 	if !session.TerminalAuthoritative || authoritative {
 		eventCopy := event
 		session.TerminalScrobbleEvent = &eventCopy

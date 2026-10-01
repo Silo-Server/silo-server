@@ -89,7 +89,7 @@ func TestHandlePlaybackReport_DeviceAliasIgnoresUnresolvedLegacyRecords(t *testi
 			}
 			first, second := legacyStaticPair("token-1", time.Now())
 			for _, old := range []PlaybackSession{first, second} {
-				old.ClientDeviceID, old.RouteItemID = "", routeID
+				old.RouteItemID = routeID
 				old.MediaSources = []PlaybackMediaSource{{ID: sourceID, FileID: 42}, {ID: "another-edition", FileID: 43}}
 				handler.playbackStore.Put(old)
 			}
