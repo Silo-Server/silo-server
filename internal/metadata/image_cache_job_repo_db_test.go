@@ -179,10 +179,10 @@ func TestImageCacheDiscoveryQueriesExplain(t *testing.T) {
 }
 
 // TestImageCacheLocalizedDiscoveryPagesBoundedSourceRows seeds a populated
-// localisation catalogue and walks it the way the processor does. Every page
+// localization catalog and walks it the way the processor does. Every page
 // must read one bounded slice of native keys, so a backfill whose candidates
 // are all queued or parked still finishes in rows/limit cheap pages instead of
-// rescanning the remaining catalogue on every page.
+// rescanning the remaining catalog on every page.
 func TestImageCacheLocalizedDiscoveryPagesBoundedSourceRows(t *testing.T) {
 	pool := imageCacheQueueTestPool(t)
 	ctx := context.Background()
@@ -263,7 +263,7 @@ func TestImageCacheLocalizedDiscoveryPagesBoundedSourceRows(t *testing.T) {
 				t.Fatalf("cursor did not advance: %+v -> %+v", cursor, page.Next)
 			}
 			if page.Scanned < limit {
-				t.Fatalf("page %d ended the surface with %d rows before the seeded catalogue was exhausted", result.pages, page.Scanned)
+				t.Fatalf("page %d ended the surface with %d rows before the seeded catalog was exhausted", result.pages, page.Scanned)
 			}
 			cursor = page.Next
 			if result.pages > rows {
@@ -312,13 +312,13 @@ func TestImageCacheLocalizedDiscoveryPagesBoundedSourceRows(t *testing.T) {
 		t.Fatalf("idle sweep re-queued %d parked jobs", got)
 	}
 
-	// Rows read: from a cursor in the middle of the catalogue, the localisation
+	// Rows read: from a cursor in the middle of the catalog, the localization
 	// scan must stop after one page of keys rather than read the remainder.
 	mid := imageCacheDiscoveryCursor{Surface: 3, Key: prefix + "00500", Subkey: "de"}
 	query, args := imageCacheDiscoveryQuery(mid, limit)
 	var planJSON []byte
 	if err := pool.QueryRow(ctx, "EXPLAIN (ANALYZE, FORMAT JSON) "+query, args...).Scan(&planJSON); err != nil {
-		t.Fatalf("explain analyze mid-catalogue page: %v", err)
+		t.Fatalf("explain analyze mid-catalog page: %v", err)
 	}
 	var plans []struct {
 		Plan map[string]any `json:"Plan"`
@@ -338,9 +338,9 @@ func TestImageCacheLocalizedDiscoveryPagesBoundedSourceRows(t *testing.T) {
 		}
 	}
 	visit(plans[0].Plan)
-	t.Logf("mid-catalogue page read %.0f localization rows", localizationRows)
+	t.Logf("mid-catalog page read %.0f localization rows", localizationRows)
 	if localizationRows == 0 || localizationRows > limit {
-		t.Fatalf("mid-catalogue page read %.0f localization rows, want 1..%d:\n%s", localizationRows, limit, planJSON)
+		t.Fatalf("mid-catalog page read %.0f localization rows, want 1..%d:\n%s", localizationRows, limit, planJSON)
 	}
 }
 

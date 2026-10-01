@@ -1372,7 +1372,7 @@ func (r *ImageCacheJobRepository) HasLadderBackfillRemaining(ctx context.Context
 
 // enqueueArtworkRepair finds the catalog targets whose stored path is one of a
 // small set of confirmed missing cached revisions. Repair looks up specific
-// paths, so it keeps the whole-catalogue statement instead of the source-keyed
+// paths, so it keeps the whole-catalog statement instead of the source-keyed
 // pages that EnqueueExistingProviderArtwork walks for a manual backfill.
 func (r *ImageCacheJobRepository) enqueueArtworkRepair(ctx context.Context, limit int, repairPaths []string) (int, error) {
 	if r == nil || r.pool == nil || limit <= 0 {
