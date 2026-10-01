@@ -10,7 +10,7 @@ export function libraryTrickplayProgress(library: AdminTrickplayLibrary) {
 /** The badge's short text: "Previews 84%" while working, "Previews ready" once done. */
 export function libraryTrickplayLabel(library: AdminTrickplayLibrary): string {
   const { total, ready, done } = libraryTrickplayProgress(library);
-  if (done && library.unusable === 0) return "Previews ready";
+  if (total > 0 && done && library.unusable === 0) return "Previews ready";
   return `Previews ${total === 0 ? 0 : Math.floor((ready * 100) / total)}%`;
 }
 

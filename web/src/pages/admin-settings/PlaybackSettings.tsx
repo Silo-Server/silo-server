@@ -270,11 +270,11 @@ export default function PlaybackSettings() {
   const nodes = useAdminNodes();
   const trickplayExecution =
     form.getValue("playback.trickplay_execution") || IMAGE_EXECUTION_DEFAULT;
-  // Previews published or being made now, which a width or interval change
-  // makes again; a server without seek previews reports none.
+  // Pending replacements can retain a publication. Include them when asking
+  // before a width or interval change; a server without previews reports none.
   const trickplayLibraries = useAdminTrickplayLibraries({ enabled: supportsTrickplay });
   const previewsToRemake = (trickplayLibraries.data ?? []).reduce(
-    (count, library) => count + library.ready + library.running,
+    (count, library) => count + library.ready + library.running + library.pending,
     0,
   );
   const recipeChanged = Object.entries(TRICKPLAY_RECIPE_DEFAULTS).some(

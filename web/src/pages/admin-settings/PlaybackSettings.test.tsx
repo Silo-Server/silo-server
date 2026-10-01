@@ -653,6 +653,27 @@ describe("seek preview settings", () => {
     sheet_bytes: 0,
   });
 
+  it("asks before changing the interval while published previews are pending replacement", async () => {
+    const form = makeForm(
+      { "playback.hw_accel": "none", "playback.trickplay_interval_seconds": "20" },
+      ["playback.trickplay_interval_seconds"],
+      { "playback.trickplay_interval_seconds": "10" },
+    );
+    useSettingsFormMock.mockReturnValue(form);
+    useAdminTrickplayLibrariesMock.mockReturnValue({
+      data: [{ ...library(0), pending: 3, sheet_bytes: 1000 }],
+      isSuccess: true,
+    });
+    render(<PlaybackSettings />);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(form.save).not.toHaveBeenCalled();
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
+    await userEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Save" }),
+    );
+    expect(form.save).toHaveBeenCalledOnce();
+  });
+
   it("manages the four seek preview keys under advanced", () => {
     expandAdvanced();
     useSettingsFormMock.mockReturnValue(

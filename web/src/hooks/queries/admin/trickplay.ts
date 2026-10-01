@@ -34,6 +34,10 @@ export function useAdminItemTrickplay(itemId: string, { enabled = true } = {}) {
       ),
     enabled: enabled && itemId !== "",
     retry: false,
+    refetchInterval: (query) =>
+      query.state.data?.some((file) => file.state === "pending" || file.state === "running")
+        ? 5_000
+        : false,
   });
 }
 
