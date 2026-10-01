@@ -832,7 +832,7 @@ func (h *ItemsHandler) listPlayableTargets(ctx context.Context, v ItemViewer, it
 // playableTargetInputForItem builds the resolver input for one displayed card.
 // Response rows find their own target with playableTargetKeyForItem, which
 // keys off the same fields — including the anchor hint, so a series that
-// appears on two recently-added scan-run event cards resolves each card
+// appears on two recently-added arrival event cards resolves each card
 // separately instead of both taking the first card's answer.
 func playableTargetInputForItem(item *models.MediaItem) catalog.PlayableTargetInput {
 	return catalog.PlayableTargetInput{
@@ -1314,8 +1314,21 @@ func (h *ItemsHandler) episodeImageFallbacks(ctx context.Context, episodes []*mo
 
 func (h *ItemsHandler) listOverlaySummaries(ctx context.Context, items []*models.MediaItem, filter catalog.AccessFilter) map[string]*models.OverlaySummary {
 	summaries := make(map[string]*models.OverlaySummary, len(items))
-	if h.fileRepo == nil || len(items) == 0 {
+	if len(items) == 0 {
 		return summaries
+	}
+	if h.itemRepo != nil {
+		ids := make([]string, 0, len(items))
+		for _, item := range items {
+			if item != nil && item.ContentID != "" {
+				ids = append(ids, item.ContentID)
+			}
+		}
+		summaries, err := h.itemRepo.ListOverlaySummaries(ctx, ids, filter)
+		if err == nil {
+			return summaries
+		}
+		slog.WarnContext(ctx, "listing poster overlay summaries", "component", "api", "error", err)
 	}
 
 	groupedFiles := h.listBrowseItemOverlayFiles(ctx, items, filter)

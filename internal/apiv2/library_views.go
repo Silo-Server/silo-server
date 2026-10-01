@@ -7,6 +7,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 )
 
@@ -264,10 +265,10 @@ func sectionLayoutOf(view handlers.SectionLayoutView) SectionLayout {
 	return out
 }
 
-func sectionOf(v handlers.SectionView) Section {
+func sectionOf(v handlers.SectionView, sel ratingsources.Selection) Section {
 	items := make([]CatalogItem, 0, len(v.Items))
 	for _, item := range v.Items {
-		items = append(items, catalogItemOfSection(item))
+		items = append(items, catalogItemOfSection(item, sel))
 	}
 	return Section{ID: v.ID, SectionType: v.SectionType, Title: v.Title, Featured: v.Featured, ItemLimit: v.ItemLimit, TotalCount: v.TotalCount, IsCustom: v.IsCustom, Customized: v.Customized, Items: items}
 }
@@ -289,8 +290,9 @@ func (reg *Registry) listLibrarySections(ctx context.Context, in *LibrarySection
 		return nil, serviceProblem(err)
 	}
 	out := SectionCollection{Sections: make([]Section, 0, len(view.Sections))}
+	sel := reg.ratingSelection(ctx)
 	for _, s := range view.Sections {
-		out.Sections = append(out.Sections, sectionOf(s))
+		out.Sections = append(out.Sections, sectionOf(s, sel))
 	}
 	return &SectionCollectionOutput{Body: out}, nil
 }
@@ -311,7 +313,7 @@ func (reg *Registry) getLibrarySectionItems(ctx context.Context, in *LibrarySect
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	return &SectionOutput{Body: sectionOf(view)}, nil
+	return &SectionOutput{Body: sectionOf(view, reg.ratingSelection(ctx))}, nil
 }
 
 func instantOfStamp(s string) *Instant {

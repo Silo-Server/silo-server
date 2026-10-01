@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/models"
 	redisv9 "github.com/redis/go-redis/v9"
 	"github.com/robfig/cron/v3"
 )
@@ -62,6 +63,45 @@ const (
 // still being built; a planned stream that has to restart starts again from
 // the beginning.
 const PlaybackKeyframePlaylistSettingKey = "playback.copy_keyframe_playlist"
+
+// CatalogExtraRatingSourcesSettingKey lists, comma-separated, the rating
+// sources clients show in addition to IMDb and TMDB, which are always shown:
+// sources metadata plugins declare, such as rt_critic. Empty, the
+// default, shows only IMDb and TMDB, because the owners of the other scores
+// restrict how others may display them. See internal/ratingsources.
+const CatalogExtraRatingSourcesSettingKey = "catalog.extra_rating_sources"
+
+// ParseRatingSourceList splits a CatalogExtraRatingSourcesSettingKey value
+// into source names, dropping blanks, duplicates, and malformed names.
+func ParseRatingSourceList(raw string) []string {
+	sources, _ := splitRatingSourceList(raw)
+	return sources
+}
+
+// splitRatingSourceList splits a comma-separated list of rating source names
+// into trimmed, lowercased, deduplicated names, skipping blanks. Malformed
+// names are left out; the first one is returned so a save can refuse it.
+func splitRatingSourceList(raw string) (sources []string, malformed string) {
+	seen := map[string]struct{}{}
+	for _, entry := range strings.Split(raw, ",") {
+		source := strings.ToLower(strings.TrimSpace(entry))
+		if source == "" {
+			continue
+		}
+		if !models.ValidRatingSourceID(source) {
+			if malformed == "" {
+				malformed = source
+			}
+			continue
+		}
+		if _, dup := seen[source]; dup {
+			continue
+		}
+		seen[source] = struct{}{}
+		sources = append(sources, source)
+	}
+	return sources, malformed
+}
 
 // Shared server-setting keys used by playback and prepared-download policy
 // readers. Keep them here with the effective admin-setting defaults.
@@ -171,6 +211,7 @@ var adminSettingDefaults = map[string]string{
 	PlaybackTranscodeSoftwareToneMapSettingKey:       "false",
 	CatalogScopeVersionsToLibrarySettingKey:          "false",
 	AccessUnratedContentSettingKey:                   AccessUnratedContentHide,
+	CatalogExtraRatingSourcesSettingKey:              "",
 	"playback.watched_threshold":                     "90",
 	"playback.min_resume_threshold":                  "5",
 	Allow4KTranscodeSettingKey:                       "false",
@@ -426,6 +467,9 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 
 	case AccessUnratedContentSettingKey:
 		return normalizeAdminEnum(key, value, AccessUnratedContentHide, AccessUnratedContentAllow)
+
+	case CatalogExtraRatingSourcesSettingKey:
+		return normalizeRatingSourceList(key, value)
 
 	case "artwork.storage_backend":
 		return normalizeAdminEnum(key, value, "auto", "local", "s3")
@@ -799,6 +843,19 @@ func ValidateArtworkStorageSettings(effective map[string]string) error {
 		return fmt.Errorf("artwork.storage_backend s3 requires s3.public_bucket")
 	}
 	return nil
+}
+
+// normalizeRatingSourceList canonicalizes a comma-separated list of rating
+// source names: trimmed, lowercased, and deduplicated. A name that is not a
+// well-formed source name is an error rather than silently dropped. A
+// well-formed name no enabled plugin declares is kept but shows nothing (see
+// ratingsources.Build).
+func normalizeRatingSourceList(key, value string) (string, error) {
+	sources, malformed := splitRatingSourceList(value)
+	if malformed != "" {
+		return "", fmt.Errorf("%s: %q is not a rating source name", key, malformed)
+	}
+	return strings.Join(sources, ","), nil
 }
 
 func normalizeAdminEnum(key, value string, allowed ...string) (string, error) {

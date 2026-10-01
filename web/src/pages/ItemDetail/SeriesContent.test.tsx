@@ -146,6 +146,7 @@ function makeSeriesItem(
     rating_tmdb: null,
     rating_rt_critic: null,
     rating_rt_audience: null,
+    ratings: [],
     imdb_id: "",
     tmdb_id: "",
     tvdb_id: "",
@@ -213,6 +214,25 @@ describe("SeriesContent", () => {
       expect(markup.includes('role="region" aria-label="Seasons and episodes"')).toBe(isLoading);
     },
   );
+
+  it.each([
+    ["season rail", [makeSeason(), makeSeason({ content_id: "season-2", season_number: 2 })], true],
+    ["single-season episode grid", [makeSeason()], false],
+  ])("marks only the season rail as content-sized navigation (%s)", (_, seasons, isRail) => {
+    mocks.useSeasons.mockReturnValue({ data: { seasons } });
+    const markup = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter>
+          <SeriesContent item={makeSeriesItem()} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(markup).toContain(
+      isRail
+        ? 'class="page-shell series-detail-navigation series-detail-rail"'
+        : 'class="page-shell series-detail-navigation"',
+    );
+  });
 
   it("passes rating state and change handler to ActionBar", () => {
     renderToStaticMarkup(

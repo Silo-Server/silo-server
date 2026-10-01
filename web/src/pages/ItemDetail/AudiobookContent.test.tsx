@@ -58,6 +58,7 @@ function bookWithProgress(seconds: number): ItemDetail & { type: "audiobook" } {
     rating_tmdb: null,
     rating_rt_critic: null,
     rating_rt_audience: null,
+    ratings: [],
     imdb_id: "",
     tmdb_id: "",
     tvdb_id: "",

@@ -84,13 +84,14 @@ func (reg *Registry) previewAdminSection(ctx context.Context, in *AdminSectionPr
 		return nil, adminSectionError(err)
 	}
 	out := AdminSectionPreviewResult{Collection: NewCollection([]CatalogItem{}), TotalCount: value.TotalCount}
+	sel := reg.ratingSelection(ctx)
 	for _, item := range value.Items {
 		if item == nil {
 			continue
 		}
 		// Preview models carry internal artwork storage keys, not public URLs.
 		// Expose the stable catalog card fields, without serializing storage state.
-		out.Items = append(out.Items, CatalogItem{ContentID: item.ContentID, Type: item.Type, Title: item.Title, PlayContentID: item.PlayContentID, Year: item.Year, Runtime: item.Runtime, Genres: NonNil(item.Genres), Keywords: NonNil(item.Keywords), Studios: item.Studios, Networks: item.Networks, ContentRating: item.ContentRating, AdvisoryAge: item.AdvisoryAge, AdvisorySource: item.AdvisorySource, Status: item.Status, ShowStatus: item.ShowStatus, RatingIMDB: item.RatingIMDB, RatingTMDB: item.RatingTMDB, RatingRTCritic: item.RatingRTCritic, RatingRTAudience: item.RatingRTAudience, OriginalLanguage: item.OriginalLanguage, Overview: item.Overview, ReleaseDate: item.ReleaseDate, LastAirDate: item.LastAirDate, PosterThumbhash: item.PosterThumbhash, BackdropThumbhash: item.BackdropThumbhash})
+		out.Items = append(out.Items, withShownRatings(CatalogItem{ContentID: item.ContentID, Type: item.Type, Title: item.Title, PlayContentID: item.PlayContentID, Year: item.Year, Runtime: item.Runtime, Genres: NonNil(item.Genres), Keywords: NonNil(item.Keywords), Studios: item.Studios, Networks: item.Networks, ContentRating: item.ContentRating, AdvisoryAge: item.AdvisoryAge, AdvisorySource: item.AdvisorySource, Status: item.Status, ShowStatus: item.ShowStatus, RatingIMDB: item.RatingIMDB, RatingTMDB: item.RatingTMDB, RatingRTCritic: item.RatingRTCritic, RatingRTAudience: item.RatingRTAudience, OriginalLanguage: item.OriginalLanguage, Overview: item.Overview, ReleaseDate: item.ReleaseDate, LastAirDate: item.LastAirDate, PosterThumbhash: item.PosterThumbhash, BackdropThumbhash: item.BackdropThumbhash}, sel))
 	}
 	return &AdminSectionPreviewOutput{Body: out}, nil
 }

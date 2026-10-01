@@ -1583,7 +1583,7 @@ type searchQuerier interface {
 // independently of the caller's page size and to hand the fuzzy fallback the
 // complete block without a second FTS query.
 func (r *ItemRepository) execSearchBlock(ctx context.Context, q searchQuerier, dataSQL, countSQL string, args []any, limit, offset int, includeTotal bool) ([]*models.MediaItem, int, bool, []*models.MediaItem, error) {
-	rows, err := q.Query(ctx, dataSQL, args...)
+	rows, err := q.Query(ctx, dataSQL, searchPlanArgs(args)...)
 	if err != nil {
 		return nil, 0, false, nil, fmt.Errorf("searching media items: %w", err)
 	}
@@ -1614,7 +1614,7 @@ func (r *ItemRepository) execSearchBlock(ctx context.Context, q searchQuerier, d
 	if len(items) == 0 && offset > 0 {
 		// Drop the trailing limit/offset args from the data query.
 		countArgs := args[:len(args)-2]
-		if err := q.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
+		if err := q.QueryRow(ctx, countSQL, searchPlanArgs(countArgs)...).Scan(&total); err != nil {
 			return nil, 0, false, nil, fmt.Errorf("count fallback for empty search page: %w", err)
 		}
 		hasMore = total > offset+len(items)

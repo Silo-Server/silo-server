@@ -25,6 +25,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/librarymonitor"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/Silo-Server/silo-server/internal/routeinventory"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -1723,7 +1724,10 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, serverIdentityFixtureCases()...)
 	cases = append(cases, themeSongsFixtureCases()...)
 	cases = append(cases, passwordResetFixtureCases()...)
-	return append(cases, libraryMonitoringFixtureCases()...)
+	cases = append(cases, adminRatingSourcesFixtureCases()...)
+	cases = append(cases, libraryMonitoringFixtureCases()...)
+	cases = append(cases, adminAccountInsightsFixtureCases()...)
+	return append(cases, ratingsCapabilityFixtureCases()...)
 }
 
 // fixtureMultipartType is the multipart Content-Type of the avatar fixtures,
@@ -1797,6 +1801,9 @@ func fixtureDeps() Dependencies {
 	deps.AdminCatalogSearch = &fakeAdminCatalogTransfer{}
 	deps.AdminLiteraryWorks = &fakeAdminLiterary{}
 	deps.AdminRecommendations = &fakeAdminRecommendations{}
+	deps.RatingSources = ratingsources.NewPolicy(fixtureRatingSettings{}, func(context.Context) ([]ratingsources.DeclaredSource, error) {
+		return []ratingsources.DeclaredSource{{RatingSourceDefinition: models.RatingSourceDefinition{Source: "kinopoisk", Name: "Kinopoisk", Label: "Kinopoisk", Scale: 10}, Provider: "Kinopoisk"}}, nil
+	})
 	deps.AdminPeople = &fakeAdminPeople{}
 	deps.AdminMetadataTranslation = &fakeAdminTranslation{}
 	deps.AdminItemMetadata = &fakeAdminItemMetadata{}
@@ -1851,6 +1858,7 @@ func fixtureDeps() Dependencies {
 	deps.AdminAccessGroups = fixtureAdminAccessGroups()
 	deps.AdminAccountSettings = &fakeAdminAccountSettings{}
 	deps.AdminAccountActivity = &fakeAdminAccountActivity{}
+	deps = withAdminAccountInsights(deps)
 	deps.HistoryImports = fixtureHistoryImports()
 	deps.WebhookSync = &fakeWebhookManagement{}
 	deps.Markers = &fakeMarkers{}

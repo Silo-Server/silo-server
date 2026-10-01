@@ -3,9 +3,11 @@ package handlers
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
@@ -15,6 +17,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 type adminAccountRepository interface {
@@ -26,7 +29,13 @@ type AdminAccountView struct {
 	Revision      int64
 	GroupRevision int64
 }
-type AdminProfileView struct{ ID, Name string }
+
+// AdminProfileView is one household profile on an account. LastSeenAt is the
+// latest time any device registration reported the profile; nil when none has.
+type AdminProfileView struct {
+	ID, Name   string
+	LastSeenAt *time.Time
+}
 
 func (h *AdminHandler) AdminAccountCapabilities() (bool, bool) {
 	_, ok := h.userRepo.(adminAccountRepository)
@@ -45,7 +54,15 @@ func (h *AdminHandler) GetAdminAccount(ctx context.Context, id int) (AdminAccoun
 	if err != nil {
 		return AdminAccountView{}, err
 	}
-	return AdminAccountView{User: toAdminUserResponse(snapshot.User, group), Revision: snapshot.Revision, GroupRevision: groupRevision}, nil
+	view := toAdminUserResponse(snapshot.User, group)
+	// Last activity is a hint on the account, as on v1 GET /admin/users/{id};
+	// a failed lookup leaves it unknown rather than failing the read.
+	lastActive, err := h.loadUserLastActiveAt(ctx, []int{snapshot.User.ID})
+	if err != nil {
+		slog.WarnContext(ctx, "failed to load admin user last activity", "component", "api", "user_id", snapshot.User.ID, "error", err)
+	}
+	applyLastActiveAt(&view, lastActive)
+	return AdminAccountView{User: view, Revision: snapshot.Revision, GroupRevision: groupRevision}, nil
 }
 func (h *AdminHandler) adminAccountGroup(ctx context.Context, user *models.User) (*access.GroupPolicy, int64, error) {
 	if user.Role == roleAdmin || user.AccessGroupID == nil {
@@ -345,9 +362,39 @@ func (h *AdminHandler) ListAdminAccountProfiles(ctx context.Context, id int) ([]
 	if err != nil {
 		return nil, err
 	}
+	// Last use is a hint on the profile list; a device registry failure
+	// leaves it unknown rather than failing the list.
+	devices, err := listRegisteredDevices(ctx, store)
+	if err != nil {
+		slog.WarnContext(ctx, "admin profile last-seen lookup failed", "component", "api", "user_id", id, "error", err)
+		devices = nil
+	}
+	lastSeen := profileLastSeen(devices)
 	result := make([]AdminProfileView, 0, len(rows))
 	for _, row := range rows {
-		result = append(result, AdminProfileView{ID: row.ID, Name: strings.TrimSpace(row.Name)})
+		view := AdminProfileView{ID: row.ID, Name: strings.TrimSpace(row.Name)}
+		if at, ok := lastSeen[row.ID]; ok {
+			view.LastSeenAt = &at
+		}
+		result = append(result, view)
 	}
 	return result, nil
+}
+
+// profileLastSeen is the latest device registration time per profile. A
+// registration whose timestamp does not parse as RFC 3339 is skipped rather
+// than guessed at.
+func profileLastSeen(devices []userstore.DeviceEntry) map[string]time.Time {
+	out := make(map[string]time.Time)
+	for _, device := range devices {
+		profileID := strings.TrimSpace(device.ProfileID)
+		at, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(device.LastSeenAt))
+		if profileID == "" || err != nil {
+			continue
+		}
+		if current, ok := out[profileID]; !ok || at.After(current) {
+			out[profileID] = at
+		}
+	}
+	return out
 }

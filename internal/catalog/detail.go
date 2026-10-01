@@ -255,6 +255,13 @@ type ItemDetail struct {
 	// /api/v1 is frozen; apiv2 emits them as rating_sources.
 	RatingSources []ItemRatingSourceInfo `json:"-"`
 
+	// ViewerCurates is true when the viewer may curate this item's metadata
+	// (admins and accounts with metadata curation), the same check that
+	// shows them file paths. apiv2 gives them every stored rating for the
+	// metadata editor and everyone else only the ratings clients show. Not
+	// part of any JSON contract.
+	ViewerCurates bool `json:"-"`
+
 	// Local extras (scanner-discovered trailers, featurettes, deleted
 	// scenes, ...) playable via their own content_id through /watch.
 	Extras []ItemExtraInfo `json:"extras,omitempty"`

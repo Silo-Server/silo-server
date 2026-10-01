@@ -719,6 +719,12 @@ is created so the decision logs and `playback_route_events` observe it too.
 Nothing is validated against an enum either, so a client may introduce a new
 channel without a server change.
 
+The `/api/v2` playback operations also declare `X-Client-Name`,
+`X-Client-Version`, `X-Client-Build`, and `X-Client-Channel`. A request with a
+non-blank `X-Client-Name` takes its whole identity from that set; a request
+without one takes it from the `X-Silo-Client*` set above when `X-Silo-Client` is
+non-blank. The two sets are never mixed field by field.
+
 Protocol-v3 `POST /playback/start` accepts `client_playback_context.app_version`,
 `.app_build`, and `.app_channel` as a body-level fallback for clients that cannot
 set the headers on every request. The headers win field by field when both are
@@ -978,6 +984,15 @@ requires a public S3 bucket because local artwork storage is available.
 catalog read return only the versions stored in the `library_id` it was given.
 It is server-wide, applies without a restart, and never affects playback; see
 "Library-scoped version lists" in [catalog-api.md](catalog-api.md).
+
+`catalog.extra_rating_sources` (default empty) lists, comma-separated, the
+external rating sources clients show in addition to IMDb and TMDB, which always
+show. The sources are the ones metadata plugins declare (see "Rating sources"
+in [catalog-api.md](catalog-api.md)); `GET /api/v2/admin/rating-sources` lists
+them. A name must match `^[a-z][a-z0-9_]{0,31}$`; a name no enabled plugin
+declares is kept but shows nothing. It is
+server-wide and applies within seconds, without a restart; see "Ratings on
+title pages" in [catalog-api.md](catalog-api.md).
 
 `scanner.realtime_monitoring` (default `true`) is the server-wide real-time
 monitoring switch: Silo scans library folders automatically when their files
