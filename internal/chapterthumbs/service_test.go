@@ -182,6 +182,10 @@ func (r *testFileRepo) ListChapterThumbnailsAtOtherWidths(context.Context, int, 
 	return nil, false, nil
 }
 
+func (r *testFileRepo) ChapterThumbnailLibraryKey(context.Context) (string, error) {
+	return "test-libraries", nil
+}
+
 func (r *testFileRepo) UpdateChapterThumbnailState(
 	_ context.Context,
 	fileID int,

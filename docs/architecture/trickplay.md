@@ -131,9 +131,11 @@ while extraction runs, and workers recheck the live width after saving, so
 a settings change during extraction keeps a follow-up queued.
 A coordinator reads pages of 25 files by
 ID and waits when the normal queue already holds 25 requests. It checks
-pending replacements every minute, including images waiting out a failure,
-and rescans completed widths every minute so a newly enabled library or
-chapter-thumbnail opt-in joins the current-width backfill.
+pending replacements every minute, including images waiting out a failure.
+After completion it polls only the eligible library IDs in `media_folders`;
+a changed width or library set starts another backfill. This picks up a newly
+enabled library or chapter-thumbnail opt-in without rescanning every file's
+chapters while settings are stable.
 Each chapter worker takes a database advisory lock for its file before
 reading chapters and holds it through extraction, upload, and save. Its
 session comes from the query pool, with a shared limit of one quarter of
@@ -146,8 +148,11 @@ save after another replica takes over. Encoded image hashes make output
 keys immutable: different bytes use different chapter-index directories, so
 an upload that finishes after lock loss cannot overwrite the replacement.
 Legacy numeric chapter-index paths remain readable.
-Another replica skips that file while the lock is held; its next request
-reads the completed images. The coordinator retries any replacements left
+Normal requests on another replica skip that file while the lock is held.
+Playback priority requests retain their target in the local queue and retry
+after a one-second delay, letting workers serve other files in the meantime.
+A newer target replaces the retained target. The next admitted request
+rereads chapter state. The coordinator retries any replacements left
 pending. Images replaced at another width stay stored for at least 48 hours and
 until every issued URL expires. The chapter URL resolver records actual
 expiry in the deletion queue before returning a URL. It holds file row
