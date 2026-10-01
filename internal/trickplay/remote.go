@@ -33,9 +33,9 @@ const (
 	// remoteOverhead covers the transfer and the node's own start on top of
 	// a request's attempt timeouts.
 	remoteOverhead = 30 * time.Second
-	// maxRemoteResultBytes bounds a node's answer: at most maxChunkSheets
-	// sheets of JPEG, base64-encoded.
-	maxRemoteResultBytes = 256 << 20
+	// Generation caps chunks at 64 million pixels, including the initial
+	// geometry sample. This also fits the base64 form of uncompressible JPEGs.
+	maxRemoteResultBytes = 512 << 20
 )
 
 // ExtractError is a node's failure to make sheets. Permanent names a cause in
