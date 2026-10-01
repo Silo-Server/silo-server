@@ -335,6 +335,31 @@ it("reads live sessions for one account and projects numeric ids", async () => {
   expect(sessions[0]).toMatchObject({ session_id: "live-1", user_id: 7, media_file_id: 3 });
 });
 
+it("keeps the live sessions it read past the page cap", async () => {
+  let page = 0;
+  const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(async () => {
+    page += 1;
+    return response({
+      items: [
+        {
+          session_id: `live-${page}`,
+          user_id: "7",
+          media_file_id: "3",
+          requested_media_file_id: "3",
+          profile_id: "p1",
+          media_title: "Hello",
+          play_method: "direct",
+        },
+      ],
+      page: { has_more: true, next_cursor: `c${page}` },
+    });
+  });
+  vi.stubGlobal("fetch", fetch);
+  const sessions = await listAdminUserLiveSessions(7, ctx());
+  expect(sessions).toHaveLength(10);
+  expect(fetch).toHaveBeenCalledTimes(10);
+});
+
 it("refuses to deliver a read after the admin authority changed", async () => {
   const captured = ctx();
   const fetch = vi.fn<typeof globalThis.fetch>(async () => {

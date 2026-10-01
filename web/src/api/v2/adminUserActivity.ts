@@ -383,17 +383,6 @@ async function listUpTo<T>(
   return { items, truncated: true };
 }
 
-/** Like listUpTo, but throws `tooMany` rather than returning a partial list. */
-async function listAll<T>(
-  ctx: ProfileRequestContextSnapshot,
-  fetchPage: (cursor: string | undefined) => Promise<PageBody>,
-  opts: { what: string; maxPages: number; tooMany: string; project: (raw: unknown) => T },
-): Promise<T[]> {
-  const { items, truncated } = await listUpTo(ctx, fetchPage, opts);
-  if (truncated) throw new Error(opts.tooMany);
-  return items;
-}
-
 /** Registered devices for the account, newest activity first (server order). */
 export async function listAdminUserDevices(
   userId: number,
@@ -479,7 +468,11 @@ export async function getAdminRequestUsage(
   };
 }
 
-/** Every live playback observation for the account (at most ten pages of 100). */
+/**
+ * Live playback observations for the account, up to ten pages of 100. Past
+ * that the rows read so far are kept: 1,000 concurrent sessions is already far
+ * beyond any stream limit, and a partial list beats an empty Overview.
+ */
 export async function listAdminUserLiveSessions(
   userId: number,
   ctx: ProfileRequestContextSnapshot,
@@ -491,10 +484,9 @@ export async function listAdminUserLiveSessions(
       profileContext: ctx,
       signal,
     }) as Promise<PageBody>;
-  const sessions = await listAll(ctx, fetchPage, {
+  const { items: sessions } = await listUpTo(ctx, fetchPage, {
     what: "session",
     maxPages: 10,
-    tooMany: "Too many live sessions to show. Reload the page.",
     project: sessionOf,
   });
   // A session seen on two pages keeps its first position and latest state.
