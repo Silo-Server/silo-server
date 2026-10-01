@@ -19,23 +19,31 @@ func (s *Service) followPreviewWidth(ctx context.Context) {
 }
 
 func (s *Service) followPreviewWidthTicks(ctx context.Context, ticks <-chan time.Time) {
-	completedWidth := 0
-	completedLibraries := ""
+	scannedWidth := 0
+	scannedLibraries := ""
+	var nextRetry time.Time
+	now := time.Now()
 	for ctx.Err() == nil {
 		width, err := s.previewImageWidth(ctx)
 		if err == nil {
 			var libraries string
 			libraries, err = s.fileRepo.ChapterThumbnailLibraryKey(ctx)
-			if err == nil && (width != completedWidth || libraries != completedLibraries) {
-				var pending bool
-				pending, err = s.queueWidthBackfill(ctx, width)
+			if err == nil && (width != scannedWidth || libraries != scannedLibraries || (!nextRetry.IsZero() && !now.Before(nextRetry))) {
+				var retry time.Time
+				retry, err = s.queueWidthBackfill(ctx, width)
 				if errors.Is(err, errPreviewWidthChanged) {
 					continue
 				}
-				if err == nil && !pending {
+				if err == nil {
 					// The key was read before scanning. A library enabled during
 					// the scan changes it and triggers another pass next time.
-					completedWidth, completedLibraries = width, libraries
+					scannedWidth, scannedLibraries = width, libraries
+					nextRetry = retry
+					// Work that is eligible now may still be queued or running.
+					// Check its completion on the normal minute cadence.
+					if !nextRetry.IsZero() && nextRetry.Before(now.Add(previewWidthPoll)) {
+						nextRetry = now.Add(previewWidthPoll)
+					}
 				}
 			}
 		}
@@ -45,7 +53,7 @@ func (s *Service) followPreviewWidthTicks(ctx context.Context, ticks <-chan time
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticks:
+		case now = <-ticks:
 		}
 	}
 }
@@ -53,34 +61,34 @@ func (s *Service) followPreviewWidthTicks(ctx context.Context, ticks <-chan time
 // queueWidthBackfill advances by ID so a queued or cooling-down file cannot
 // keep later files out of a page. It holds at most one page and only adds
 // requests while the normal queue is below the batch limit.
-func (s *Service) queueWidthBackfill(ctx context.Context, width int) (bool, error) {
+func (s *Service) queueWidthBackfill(ctx context.Context, width int) (time.Time, error) {
 	afterID := 0
 	for {
 		if err := ctx.Err(); err != nil {
-			return false, err
+			return time.Time{}, err
 		}
 		current, err := s.previewImageWidth(ctx)
 		if err != nil {
-			return false, err
+			return time.Time{}, err
 		}
 		if current != width {
-			return false, errPreviewWidthChanged
+			return time.Time{}, errPreviewWidthChanged
 		}
-		files, pending, err := s.fileRepo.ListChapterThumbnailsAtOtherWidths(ctx, defaultBatchLimit, chapterThumbnailSuffix(width), afterID)
+		files, nextRetry, err := s.fileRepo.ListChapterThumbnailsAtOtherWidths(ctx, defaultBatchLimit, chapterThumbnailSuffix(width), afterID)
 		if err != nil {
-			return false, err
+			return time.Time{}, err
 		}
 		for _, file := range files {
 			if file == nil {
 				continue
 			}
 			if err := s.queueWidthFile(ctx, file.ID, width); err != nil {
-				return false, err
+				return time.Time{}, err
 			}
 			afterID = file.ID
 		}
 		if len(files) < defaultBatchLimit {
-			return pending, nil
+			return nextRetry, nil
 		}
 	}
 }

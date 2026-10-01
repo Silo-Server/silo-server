@@ -17,13 +17,13 @@ type widthPageRepo struct {
 	pages chan int
 }
 
-func (r *widthPageRepo) ListChapterThumbnailsAtOtherWidths(_ context.Context, limit int, _ string, afterID int) ([]*models.MediaFile, bool, error) {
+func (r *widthPageRepo) ListChapterThumbnailsAtOtherWidths(_ context.Context, limit int, _ string, afterID int) ([]*models.MediaFile, time.Time, error) {
 	r.pages <- afterID
 	var files []*models.MediaFile
 	for id := afterID + 1; id <= min(r.files, afterID+limit); id++ {
 		files = append(files, &models.MediaFile{ID: id})
 	}
-	return files, true, nil
+	return files, time.Now(), nil
 }
 
 func widthQueueService(repo FileRepository) *Service {

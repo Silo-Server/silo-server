@@ -4057,9 +4057,10 @@ func (r *FileRepository) ListMissingChapterThumbnails(ctx context.Context, limit
 }
 
 // ListChapterThumbnailsAtOtherWidths pages chapters without the current image
-// width by file ID. Missing images remain pending so an in-flight first image
-// cannot complete at the old width after the coordinator stops scanning.
-func (r *FileRepository) ListChapterThumbnailsAtOtherWidths(ctx context.Context, limit int, currentSuffix string, afterID int) ([]*models.MediaFile, bool, error) {
+// width by file ID. A zero retry time means complete; otherwise the final page
+// returns the earliest time any stale image can become retryable. Missing
+// images stay pending until an in-flight first extraction reaches this width.
+func (r *FileRepository) ListChapterThumbnailsAtOtherWidths(ctx context.Context, limit int, currentSuffix string, afterID int) ([]*models.MediaFile, time.Time, error) {
 	rows, err := r.pool.Query(ctx, `SELECT `+mfFileColumns+` FROM media_files mf
 		JOIN media_folders folders ON folders.id = mf.media_folder_id
 		WHERE mf.id > $3
@@ -4078,37 +4079,40 @@ func (r *FileRepository) ListChapterThumbnailsAtOtherWidths(ctx context.Context,
 		ORDER BY mf.id
 		LIMIT $1`, limit, currentSuffix, afterID)
 	if err != nil {
-		return nil, false, fmt.Errorf("querying chapter thumbnails at other widths: %w", err)
+		return nil, time.Time{}, fmt.Errorf("querying chapter thumbnails at other widths: %w", err)
 	}
 	files, err := scanMediaFiles(rows)
 	rows.Close()
 	if err != nil {
-		return nil, false, err
+		return nil, time.Time{}, err
 	}
 	if len(files) == limit {
-		return files, true, nil
+		return files, time.Now(), nil
 	}
-	// A final page also checks missing images and images waiting out a failure
-	// or still queued.
-	// The service repeats scans until this work is complete.
-	var pending bool
-	err = r.pool.QueryRow(ctx, `SELECT EXISTS (
-		SELECT 1 FROM media_files mf
+	// File and chapter cooldowns both apply, so each stale image becomes
+	// eligible at their later deadline. The earliest such deadline schedules
+	// the next scan without repeatedly expanding JSON during the cooldown.
+	var nextRetry *time.Time
+	err = r.pool.QueryRow(ctx, `SELECT min(GREATEST(
+		COALESCE(mf.chapter_thumbnail_retry_after, NOW()),
+		COALESCE(NULLIF(chapter->>'thumbnail_retry_after', '')::timestamptz, NOW())
+	))
+		FROM media_files mf
 		JOIN media_folders folders ON folders.id = mf.media_folder_id
+		CROSS JOIN LATERAL jsonb_array_elements(
+			CASE WHEN jsonb_typeof(mf.chapters) = 'array' THEN mf.chapters ELSE '[]'::jsonb END
+		) AS chapter
 		WHERE mf.missing_since IS NULL
 		  AND folders.enabled = true
 		  AND folders.chapter_thumbnails_enabled = true
-		  AND EXISTS (
-			SELECT 1 FROM jsonb_array_elements(
-				CASE WHEN jsonb_typeof(mf.chapters) = 'array' THEN mf.chapters ELSE '[]'::jsonb END
-			) AS chapter
-			WHERE right(COALESCE(chapter->>'thumbnail_path', ''), length($1)) <> $1
-		  )
-	)`, currentSuffix).Scan(&pending)
+		  AND right(COALESCE(chapter->>'thumbnail_path', ''), length($1)) <> $1`, currentSuffix).Scan(&nextRetry)
 	if err != nil {
-		return nil, false, fmt.Errorf("checking remaining chapter thumbnail widths: %w", err)
+		return nil, time.Time{}, fmt.Errorf("checking remaining chapter thumbnail widths: %w", err)
 	}
-	return files, pending, nil
+	if nextRetry == nil {
+		return files, time.Time{}, nil
+	}
+	return files, *nextRetry, nil
 }
 
 // ChapterThumbnailLibraryKey fingerprints only the eligible library IDs. Once

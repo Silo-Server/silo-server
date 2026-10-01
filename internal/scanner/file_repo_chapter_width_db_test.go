@@ -89,7 +89,7 @@ func TestListMissingChapterThumbnailsFollowsTheWidth(t *testing.T) {
 	if !slices.Equal(own, []int{at300, missing}) {
 		t.Fatalf("width backfill listed %v, want %d and missing file %d", own, at300, missing)
 	}
-	if !pending {
+	if pending.IsZero() {
 		t.Fatal("width backfill forgot images waiting out a failure")
 	}
 	files, pending, err = repo.ListChapterThumbnailsAtOtherWidths(ctx, 100000, "/w320.webp", at300)
@@ -101,7 +101,7 @@ func TestListMissingChapterThumbnailsFollowsTheWidth(t *testing.T) {
 			t.Fatalf("cursor repeated file %d", at300)
 		}
 	}
-	if !pending {
+	if pending.IsZero() {
 		t.Fatal("last page did not keep the backfill pending")
 	}
 }

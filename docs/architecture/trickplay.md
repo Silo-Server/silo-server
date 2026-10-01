@@ -131,8 +131,10 @@ while extraction runs, and workers recheck the live width after saving, so
 a settings change during extraction keeps a follow-up queued.
 A coordinator reads pages of 25 files by
 ID and waits when the normal queue already holds 25 requests. It checks
-pending replacements every minute, including images waiting out a failure.
-After completion it polls only the eligible library IDs in `media_folders`;
+queued and running replacements every minute. When all remaining images are
+cooling down, it defers catalog scans until the earliest retry deadline;
+both file and chapter deadlines apply. During that wait and after completion,
+it polls only the eligible library IDs in `media_folders`;
 a changed width or library set starts another backfill. This picks up a newly
 enabled library or chapter-thumbnail opt-in without rescanning every file's
 chapters while settings are stable.
@@ -143,7 +145,9 @@ its connection budget (at least one and at most four). Workers wait for
 session capacity without opening a connection, retaining queued requests
 for files that do not have chapters yet. Cancellation stops that wait. A one-connection query pool uses one capped separate lock session
 so extraction can still query settings and library state. Chapter
-state commits use the lock session; a worker whose connection dies cannot
+locks explicitly unlock and return healthy borrowed sessions to the pool,
+restoring their diagnostic application name. Broken sessions and the capped
+separate session are closed. Chapter state commits use the lock session; a worker whose connection dies cannot
 save after another replica takes over. Encoded image hashes make output
 keys immutable: different bytes use different chapter-index directories, so
 an upload that finishes after lock loss cannot overwrite the replacement.
