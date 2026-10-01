@@ -230,8 +230,23 @@ export function resolveActiveQualityOptionId(
   // preferred one, or a lower one a bitrate cap chose. The delivered frame
   // names the class; without it, assume the preferred one.
   const classHeight = ladderClassHeight(delivered?.width, delivered?.height) ?? aliasHeight;
-  const rungId = classHeight === 480 ? "480p" : `${classHeight}p-medium`;
+  const rungId = classMediumRungId(classHeight);
   return options.find((option) => option.id === rungId)?.id ?? null;
+}
+
+/**
+ * The menu rung that encodes at a ladder class's Medium bitrate. The 540p
+ * class, which a low bitrate cap can choose, has no menu rung.
+ */
+function classMediumRungId(classHeight: number): string | null {
+  switch (classHeight) {
+    case 480:
+      return "480p";
+    case 540:
+      return null;
+    default:
+      return `${classHeight}p-medium`;
+  }
 }
 
 /**
@@ -277,17 +292,27 @@ function qualityPreferenceHeight(preference: string): number | null {
   }
 }
 
+// The server's bitrate ladder classes (bitrateLadder), smallest first.
+const LADDER_CLASS_BOXES = [
+  { width: 854, height: 480 },
+  { width: 960, height: 540 },
+  { width: 1280, height: 720 },
+  { width: 1920, height: 1080 },
+  { width: 3840, height: 2160 },
+] as const;
+
 /**
- * The ladder class an encoded frame belongs to, with the bounds the server
- * uses to class a source (sourceLadderHeightV3): a 1280x688 encode is 720p and
- * a 1920x800 scope encode is 1080p.
+ * The ladder class an encoded frame belongs to: the smallest class box that
+ * holds it, as the server's ladderClassForSize decides. A 1280x688 encode is
+ * 720p and a 1920x800 scope encode is 1080p.
  */
 function ladderClassHeight(width?: number, height?: number): number | null {
-  if (!isPositive(width) || !isPositive(height)) return null;
-  if (width <= 854 && height <= 480) return 480;
-  if (width <= 1280 && height <= 962) return 720;
-  if (width <= 2560 && height <= 1440) return 1080;
-  return 2160;
+  if (!isPositive(height)) return null;
+  const box = LADDER_CLASS_BOXES.find(
+    (candidate) => height <= candidate.height && (!isPositive(width) || width <= candidate.width),
+  );
+  // A frame larger than every box is in the largest class.
+  return box?.height ?? 2160;
 }
 
 function resolutionHeight(resolution: string): number {

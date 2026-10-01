@@ -372,6 +372,14 @@ describe("qualityOptionsFromPlanV3", () => {
         bitrate_kbps: 1200,
       }),
     ).toBe("480p");
+    // The 540p class a low cap can choose has no menu rung, and stepping down
+    // from it must still lower the bitrate.
+    const at540 = { width: 960, height: 516, bitrate_kbps: 1300 };
+    expect(resolveActiveQualityOptionId(options, "1080p", at540)).toBeNull();
+    expect(lowerQualityOption(options, "1080p", at540)).toBeNull();
+    expect(
+      lowerQualityOption(options, "1080p", { width: 960, height: 516, bitrate_kbps: 1800 })?.id,
+    ).toBe("480p");
     // Without the delivered frame, assume the preferred class.
     expect(resolveActiveQualityOptionId(options, "1080p", { bitrate_kbps: 6000 })).toBe(
       "1080p-medium",
