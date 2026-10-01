@@ -1192,7 +1192,7 @@ func TestMediaAuthModeForStartV3AppliesOnlyToAffectedAppleClient(t *testing.T) {
 			if test.mutate != nil {
 				test.mutate(&req)
 			}
-			got := mediaAuthModeForStartV3(req, test.resolvedBuild)
+			got := mediaAuthModeForStartV3(context.Background(), req, test.resolvedBuild)
 			if !got.headerAuth {
 				t.Fatal("header-authenticated media contract was disabled")
 			}
@@ -1210,7 +1210,7 @@ func TestMediaAuthModeForReplanV3PreservesSessionCapability(t *testing.T) {
 	req := playback.StartRequestV3{ClientFeatures: []string{playback.FeatureDeviceQuirksV3}}
 	currentPlan := playback.PlanV3{Stream: playback.StreamV3{Headers: map[string]string{streamtoken.Header: "session-capability"}}}
 
-	mode := mediaAuthModeForReplanV3(req, currentPlan)
+	mode := mediaAuthModeForReplanV3(context.Background(), req, currentPlan)
 	if !mode.headerAuth || !mode.sessionHeaderCapability || mode.proxyEgress {
 		t.Fatalf("replan media auth mode = %#v", mode)
 	}

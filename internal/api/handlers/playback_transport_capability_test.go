@@ -127,7 +127,7 @@ func TestPlannerMediaAuthModeMatchesSessionCapabilityTransport(t *testing.T) {
 	if featureOnly := headerAuthenticatedMediaV3(req.ClientFeatures); !featureOnly.proxyEgress {
 		t.Fatalf("feature-only mode = %#v, want proxy egress", featureOnly)
 	}
-	start := mediaAuthModeForStartV3(req, "31")
+	start := mediaAuthModeForStartV3(context.Background(), req, "31")
 	if !start.sessionHeaderCapability || start.proxyEgress {
 		t.Fatalf("build 31 start mode = %#v", start)
 	}
@@ -148,5 +148,27 @@ func TestApplyPreparedTransportToPlanV3LeavesHeadersUntouchedWithoutCapability(t
 	applyPreparedTransportToPlanV3(plan, preparedTransportV3{url: "/stream/playback-1"})
 	if plan.Stream.URL != "/stream/playback-1" || plan.Stream.Headers != nil {
 		t.Fatalf("stream = %#v", plan.Stream)
+	}
+}
+
+func TestSessionCapabilityIsNotMintedForNativeAPIV2(t *testing.T) {
+	req := playback.StartRequestV3{ClientFeatures: []string{
+		playback.FeatureHeaderAuthenticatedMediaV3,
+		playback.FeatureAuthorizedMediaOriginsV3,
+		playback.FeatureDeviceQuirksV3,
+	}}
+	req.ClientPlaybackContext.Device.Platform = "ios"
+	v2 := WithNativeAPIV2(context.Background())
+
+	// v2 media URLs authenticate with the account token alone, so a v2 start
+	// keeps the ordinary feature-derived mode.
+	if got, want := mediaAuthModeForStartV3(v2, req, "31"), headerAuthenticatedMediaV3(req.ClientFeatures); got != want {
+		t.Fatalf("v2 start mode = %#v, want %#v", got, want)
+	}
+
+	currentPlan := playback.PlanV3{Stream: playback.StreamV3{Headers: map[string]string{streamtoken.Header: "session-capability"}}}
+	replan := mediaAuthModeForReplanV3(v2, req, currentPlan)
+	if !replan.headerAuth || replan.proxyEgress || replan.sessionHeaderCapability {
+		t.Fatalf("v2 replan mode = %#v, want header auth pinned without a new capability", replan)
 	}
 }

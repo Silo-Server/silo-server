@@ -230,14 +230,21 @@ func headerAuthenticatedMediaV3(clientFeatures []string) mediaAuthModeV3 {
 // and begin receiving 401s while buffered playback continues. A session-bound
 // header capability preserves the selected playback route and is accepted
 // before any stale Authorization header.
-func mediaAuthModeForStartV3(req playback.StartRequestV3, resolvedClientBuild string) mediaAuthModeV3 {
+//
+// The capability is accepted only on the v1 playback media routes. A start
+// through /api/v2 is projected onto v2 media URLs, which authenticate with the
+// account token alone, so it never receives one.
+func mediaAuthModeForStartV3(ctx context.Context, req playback.StartRequestV3, resolvedClientBuild string) mediaAuthModeV3 {
 	mode := headerAuthenticatedMediaV3(req.ClientFeatures)
-	ctx := req.ClientPlaybackContext
-	platform := strings.ToLower(strings.TrimSpace(ctx.Device.Platform))
+	if isNativeAPIV2(ctx) {
+		return mode
+	}
+	clientContext := req.ClientPlaybackContext
+	platform := strings.ToLower(strings.TrimSpace(clientContext.Device.Platform))
 	isApplePlatform := platform == applePlatformIOSV3 || platform == applePlatformTVOSV3 || platform == applePlatformMacOSV3
 	clientBuild := strings.TrimSpace(resolvedClientBuild)
 	if clientBuild == "" {
-		clientBuild = strings.TrimSpace(ctx.AppBuild)
+		clientBuild = strings.TrimSpace(clientContext.AppBuild)
 	}
 	if mode.headerAuth &&
 		playback.HasFeatureV3(req.ClientFeatures, playback.FeatureDeviceQuirksV3) &&
@@ -249,12 +256,15 @@ func mediaAuthModeForStartV3(req playback.StartRequestV3, resolvedClientBuild st
 	return mode
 }
 
-func mediaAuthModeForReplanV3(req playback.StartRequestV3, currentPlan playback.PlanV3) mediaAuthModeV3 {
+func mediaAuthModeForReplanV3(ctx context.Context, req playback.StartRequestV3, currentPlan playback.PlanV3) mediaAuthModeV3 {
 	mode := headerAuthenticatedMediaV3(req.ClientFeatures)
 	if currentPlan.Stream.Headers[streamtoken.Header] != "" {
+		// Header authentication stays pinned on every surface so a replan can
+		// never downgrade to a credential-bearing URL; only a v1 replan mints a
+		// fresh capability for the v1 media routes that accept it.
 		mode.headerAuth = true
 		mode.proxyEgress = false
-		mode.sessionHeaderCapability = true
+		mode.sessionHeaderCapability = !isNativeAPIV2(ctx)
 	}
 	return mode
 }
@@ -1802,7 +1812,7 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	if effectiveFile.PresentationPartTotal > 1 && effectiveFile.PresentationPartIndex > 0 {
 		alternateBase = effectiveFile
 	}
-	r = r.WithContext(withPlannerMediaAuthModeV3(r.Context(), mediaAuthModeForStartV3(req, playbackClientInfoForStartV3(r, req.ClientPlaybackContext).Build)))
+	r = r.WithContext(withPlannerMediaAuthModeV3(r.Context(), mediaAuthModeForStartV3(r.Context(), req, playbackClientInfoForStartV3(r, req.ClientPlaybackContext).Build)))
 	result, toneMapCapabilityErr := h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{
 		Request: req, RequestedFile: requestedFile, EffectiveFile: effectiveFile,
 		ServerBitrateCapKbps: serverBitrateCapV3(r.Context()),
@@ -1891,7 +1901,7 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	}
 	// A refused progressive remux is escalated before the decision is logged or
 	// a session is opened, so the logged route is the one that will actually run.
-	escalated, escalateErr := h.escalateRefusedProgressiveRemuxV3(r.Context(), mediaAuthModeForStartV3(req, clientInfo.Build),
+	escalated, escalateErr := h.escalateRefusedProgressiveRemuxV3(r.Context(), mediaAuthModeForStartV3(r.Context(), req, clientInfo.Build),
 		func() playback.PlannerInputV3 {
 			return h.plannerInputV3(r.Context(), req, requestedFile, effectiveFile, audioIndex, nil)
 		}, result)
@@ -2043,7 +2053,7 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 	if result.Plan == nil {
 		return playback.DecisionResponseV3{}, &transportErrorV3{reason: "internal_error", message: "The server produced no playback plan."}
 	}
-	mode := mediaAuthModeForStartV3(req, clientInfo.Build)
+	mode := mediaAuthModeForStartV3(r.Context(), req, clientInfo.Build)
 	ctx := playback.WithClientInfo(r.Context(), clientInfo)
 	session, err := h.sessionMgr.StartSessionWithFilesContext(ctx, userID, profileID, effectiveFile.ID, requestedFile.ID, result.PlayMethod, result.TranscodeAudio)
 	if err != nil {
@@ -4857,7 +4867,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 	}()
 	start := record.NormalizedRequest
-	r = r.WithContext(withPlannerMediaAuthModeV3(r.Context(), mediaAuthModeForReplanV3(start, record.CurrentPlan)))
+	r = r.WithContext(withPlannerMediaAuthModeV3(r.Context(), mediaAuthModeForReplanV3(r.Context(), start, record.CurrentPlan)))
 	operation := req.EffectiveOperation()
 	seekReanchor := operation == playback.ReplanOperationSeekReanchorV3
 	seekFailureRecovery := operation == playback.ReplanOperationSeekFailureRecoveryV3
@@ -5183,7 +5193,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	// Media authentication is attempt-sticky (pinned in HandleReplanPlaybackV3),
 	// so this mode always equals the one the attempt started under: a reused
 	// transport cannot change the session's media security contract.
-	mode := mediaAuthModeForReplanV3(start, record.CurrentPlan)
+	mode := mediaAuthModeForReplanV3(r.Context(), start, record.CurrentPlan)
 	if !seekReanchor {
 		// A freshly planned replan can land on the same refused progressive
 		// remux a start would have; escalate it identically. A seek reanchor
