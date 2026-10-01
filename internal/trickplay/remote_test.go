@@ -15,7 +15,9 @@ import (
 
 type fixedNodes []*nodepool.Node
 
-func (n fixedNodes) Nodes() []*nodepool.Node { return n }
+func (n fixedNodes) ReserveTranscodeWorkWith(workID string, eligible func(*nodepool.Node) bool) (*nodepool.Node, func()) {
+	return plannerForNodes(n...).ReserveTranscodeWorkWith(workID, eligible)
+}
 
 var trickplayCapabilities = []byte(`{"transport_features":["prepared_tracks_v1","trickplay_extract_v1"]}`)
 

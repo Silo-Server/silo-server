@@ -67,6 +67,8 @@ func (s *Server) handleTrickplayExtract(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	defer s.trickplay.busy.Unlock()
+	s.activeJobs.Add(1)
+	defer s.activeJobs.Add(-1)
 
 	ffmpeg := playback.ResolveFFmpegPath(cfg.Playback.FFmpegPath)
 	accel := strings.TrimSpace(cfg.Playback.HWAccel)

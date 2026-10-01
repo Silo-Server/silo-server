@@ -138,8 +138,10 @@ the lease, and the uploads; a node only decodes and tiles
 
 - A node is eligible while it is enabled, healthy, and advertises the
   `trickplay_extract_v1` transport feature, so older nodes are never sent
-  work. The API server tries eligible nodes in random order, so servers do
-  not all converge on one node.
+  work. The API server reserves capacity through the node planner shared
+  with playback and downloads and chooses among nodes by available capacity
+  and load. Those provisional reservations belong to one API process; a node's
+  reported load accounts for work accepted from other replicas.
 - A node takes one run at a time. `node_busy`, `node_unavailable`, a
   refused request, or a connection that drops moves the run to the next
   node. A transient sampling failure also tries another node, followed by

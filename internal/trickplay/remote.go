@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"math/rand/v2"
 	"net/http"
 	"slices"
 	"strings"
@@ -57,30 +56,49 @@ func (e *ExtractError) Error() string {
 // work back to the queue instead.
 type NodeExtractor struct {
 	local    Extractor
-	nodes    interface{ Nodes() []*nodepool.Node }
+	planner  NodeWorkPlanner
 	settings SettingsReader
 	client   *http.Client
 	logger   *slog.Logger
 }
 
-// NewNodeExtractor returns an extractor that runs on nodes from pool, or on
-// local.
-func NewNodeExtractor(local Extractor, pool interface{ Nodes() []*nodepool.Node }, settings SettingsReader) *NodeExtractor {
-	return &NodeExtractor{local: local, nodes: pool, settings: settings, client: &http.Client{}, logger: slog.Default().With("component", "trickplay")}
+// NodeWorkPlanner reserves transcode capacity shared with playback and
+// prepared downloads. The caller releases it when the remote request ends.
+type NodeWorkPlanner interface {
+	ReserveTranscodeWorkWith(string, func(*nodepool.Node) bool) (*nodepool.Node, func())
+}
+
+// NewNodeExtractor returns an extractor that reserves nodes through planner,
+// or runs locally when the execution setting permits it.
+func NewNodeExtractor(local Extractor, planner NodeWorkPlanner, settings SettingsReader) *NodeExtractor {
+	return &NodeExtractor{local: local, planner: planner, settings: settings, client: &http.Client{}, logger: slog.Default().With("component", "trickplay")}
 }
 
 // Extract runs req where the execution setting says.
 func (e *NodeExtractor) Extract(ctx context.Context, job *Job, req mediasample.Request) (mediasample.Result, error) {
-	mode := readSetting(ctx, e.settings, ExecutionSetting)
+	mode := ""
+	if e.settings != nil {
+		value, err := e.settings.Get(ctx, ExecutionSetting)
+		if err != nil {
+			return mediasample.Result{}, fmt.Errorf("%w: %s: %w", errSettingsUnreadable, ExecutionSetting, err)
+		}
+		mode = strings.TrimSpace(value)
+	}
 	if mode != ExecutionPreferTranscodeNodes && mode != ExecutionTranscodeNodesOnly {
 		return e.local.Extract(ctx, job, req)
 	}
 	secret := readSetting(ctx, e.settings, jwtSecretSetting)
-	for _, node := range e.eligible() {
-		if secret == "" {
+	tried := make(map[string]bool)
+	for secret != "" && e.planner != nil {
+		node, release := e.planner.ReserveTranscodeWorkWith("trickplay", func(candidate *nodepool.Node) bool {
+			return trickplayNodeEligible(candidate) && !tried[candidate.URL]
+		})
+		if node == nil {
 			break
 		}
+		tried[node.URL] = true
 		result, err := e.remote(ctx, node, secret, req)
+		release()
 		if err == nil {
 			return result, nil
 		}
@@ -100,20 +118,14 @@ func (e *NodeExtractor) Extract(ctx context.Context, job *Job, req mediasample.R
 	return mediasample.Result{}, errNoNode
 }
 
-// eligible is the enabled, healthy nodes that make trickplay sheets, in
-// random order, so the API servers do not all pick the same one.
-func (e *NodeExtractor) eligible() []*nodepool.Node {
-	if e.nodes == nil {
-		return nil
+// trickplayNodeEligible checks the node's current capability report. The
+// planner applies the capacity and provisional reservation checks.
+func trickplayNodeEligible(node *nodepool.Node) bool {
+	if node == nil || !node.Enabled || !node.Healthy || !makesTrickplay(node.Capabilities) {
+		return false
 	}
-	var out []*nodepool.Node
-	for _, node := range e.nodes.Nodes() {
-		if node != nil && node.Enabled && node.Healthy && makesTrickplay(node.Capabilities) {
-			out = append(out, node)
-		}
-	}
-	rand.Shuffle(len(out), func(i, j int) { out[i], out[j] = out[j], out[i] })
-	return out
+	advertised := node.AdvertisedCapabilitiesHash
+	return advertised == nil || (*advertised != "" && node.CapabilitiesHash != nil && *advertised == *node.CapabilitiesHash)
 }
 
 // makesTrickplay reports whether a node's capability report advertises the
