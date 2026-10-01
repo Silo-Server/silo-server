@@ -482,7 +482,7 @@ func TestDurableLegacyStaticDuplicatesStayAmbiguousAcrossInstances(t *testing.T)
 			store := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
 			_, err := store.ResolveClientPlaySessionID(token, "client-play")
 			if !errors.Is(err, ErrSessionNotFound) {
-				err = fmt.Errorf("ambiguous legacy alias resolved: %v", err)
+				err = fmt.Errorf("ambiguous legacy alias resolved: %w", err)
 			} else {
 				err = nil
 			}
@@ -504,7 +504,7 @@ func TestDurableLegacyStaticDuplicatesStayAmbiguousAcrossInstances(t *testing.T)
 	fresh := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
 	for _, old := range []PlaybackSession{first, second} {
 		if _, ok := fresh.GetFinalizable(old.ID, token); !ok {
-			t.Fatalf("legacy row %s can no longer be finalised", old.ID)
+			t.Fatalf("legacy row %s can no longer accept its final stop report", old.ID)
 		}
 	}
 }

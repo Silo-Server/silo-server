@@ -427,7 +427,7 @@ func TestLegacyStaticDuplicatesStayAmbiguous(t *testing.T) {
 			t.Fatalf("legacy row %s was ended", old.ID)
 		}
 		if _, ok := store.GetFinalizable(old.ID, "token"); !ok {
-			t.Fatalf("legacy row %s can no longer be finalised", old.ID)
+			t.Fatalf("legacy row %s can no longer accept its final stop report", old.ID)
 		}
 	}
 }
