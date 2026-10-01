@@ -365,6 +365,8 @@ export const adminKeys = {
   libraries: () => ["admin", "libraries"] as const,
   libraryRealtimeMonitoring: () => ["admin", "libraries", "realtimeMonitoring"] as const,
   libraryCapabilities: () => ["admin", "libraries", "capabilities"] as const,
+  trickplayLibraries: () => ["admin", "trickplay", "libraries"] as const,
+  itemTrickplay: (itemId: string) => ["admin", "trickplay", "items", itemId] as const,
   libraryRoots: (libraryId?: number, state?: string, search?: string) =>
     ["admin", "libraries", "roots", libraryId ?? "all", state ?? "all", search ?? ""] as const,
   libraryMatchQueueStatuses: () => ["admin", "libraries", "metadataMatchQueue"] as const,

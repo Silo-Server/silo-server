@@ -1,9 +1,21 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { useRestartKeys } from "@/hooks/useRestartKeys";
 import { useHWAccelDetection } from "@/hooks/queries/admin/system";
 import { useAdminNodes } from "@/hooks/queries/admin/nodes";
+import { useLibraryCapabilities } from "@/hooks/queries/admin/libraries";
+import { useAdminTrickplayLibraries } from "@/hooks/queries/admin/trickplay";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { AdvancedSection } from "@/components/settings/AdvancedSection";
@@ -15,12 +27,13 @@ import { SaveBar } from "./SaveBar";
 import { FieldGroup } from "./FieldGroup";
 import { DEFAULT_FFMPEG_PATH, DEFAULT_TRANSCODE_DIR } from "./settingsPathDefaults";
 import {
-  CHAPTER_THUMBNAIL_EXECUTION_DEFAULT,
+  IMAGE_EXECUTION_DEFAULT,
   HW_ACCEL_OPTIONS,
   buildHWDeviceRows,
-  chapterThumbnailExecutionOptions,
+  imageExecutionOptions,
   describeDetection,
   hasUsableTranscodeNode,
+  hasUsableTrickplayNode,
   nodeInventoriesDiverge,
   parseHWDeviceList,
   toggleHWDevice,
@@ -48,7 +61,18 @@ const TRANSCODING_ADVANCED_KEYS = [
   "playback.chapter_thumbnail_execution",
   "playback.chapter_thumbnail_hdr_policy",
   "playback.chapter_thumbnail_software_tone_map_enabled",
+  "playback.preview_image_width",
+  "playback.trickplay_interval_seconds",
+  "playback.trickplay_workers",
+  "playback.trickplay_execution",
 ];
+
+// Seek previews are made to these; changing one makes every published preview
+// again. The defaults are the server's, for a row that was never set.
+const TRICKPLAY_RECIPE_DEFAULTS: Record<string, string> = {
+  "playback.preview_image_width": "300",
+  "playback.trickplay_interval_seconds": "10",
+};
 
 const executionOptions = [
   { value: "prefer_worker", label: "Prefer any worker" },
@@ -216,7 +240,18 @@ function PreferredPathRow({ label, route }: { label: string; route: string }) {
 }
 
 export default function PlaybackSettings() {
-  const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
+  const supportsTrickplay = useLibraryCapabilities().data?.trickplay === true;
+  const keys = useMemo(
+    () =>
+      supportsTrickplay
+        ? KEYS
+        : KEYS.filter(
+            (key) =>
+              key !== "playback.preview_image_width" && !key.startsWith("playback.trickplay_"),
+          ),
+    [supportsTrickplay],
+  );
+  const form = useSettingsForm({ keys });
   const restartKeys = useRestartKeys();
   const hwAccel = form.getValue("playback.hw_accel");
   const hwDetection = useHWAccelDetection(hwAccel !== "none");
@@ -233,12 +268,35 @@ export default function PlaybackSettings() {
   const showDevicePicker = hwAccel !== "none" && !isNvenc && deviceRows.length > 0;
 
   const nodes = useAdminNodes();
+  const trickplayExecution =
+    form.getValue("playback.trickplay_execution") || IMAGE_EXECUTION_DEFAULT;
+  // Pending replacements can retain a publication. Include them when asking
+  // before a width or interval change; a server without previews reports none.
+  const trickplayLibraries = useAdminTrickplayLibraries({ enabled: supportsTrickplay });
+  const previewsToRemake = (trickplayLibraries.data ?? []).reduce(
+    (count, library) => count + library.ready + library.running + library.pending,
+    0,
+  );
+  const recipeChanged = Object.entries(TRICKPLAY_RECIPE_DEFAULTS).some(
+    ([key, fallback]) =>
+      form.isDirty(key) &&
+      (form.getValue(key) || fallback) !== (form.getPersistedValue(key) || fallback),
+  );
+  const [confirmRemake, setConfirmRemake] = useState(false);
+  const save = () => {
+    if (recipeChanged && (!trickplayLibraries.isSuccess || previewsToRemake > 0)) {
+      setConfirmRemake(true);
+      return;
+    }
+    void form.save();
+  };
   const chapterExecution =
-    form.getValue("playback.chapter_thumbnail_execution") || CHAPTER_THUMBNAIL_EXECUTION_DEFAULT;
+    form.getValue("playback.chapter_thumbnail_execution") || IMAGE_EXECUTION_DEFAULT;
   // Gate the node-backed extraction modes only on a node list we actually
   // have: while the query is in flight or after it failed, leave every option
   // reachable rather than blocking a valid choice on a transient error.
   const transcodeNodeAvailable = !nodes.isSuccess || hasUsableTranscodeNode(nodes.data);
+  const trickplayNodeAvailable = !nodes.isSuccess || hasUsableTrickplayNode(nodes.data);
   const proxyNodeAvailable =
     !nodes.isSuccess ||
     (nodes.data ?? []).some((node) => node.type === "proxy" && node.enabled && node.healthy);
@@ -350,7 +408,11 @@ export default function PlaybackSettings() {
 
           <AdvancedSection
             id="playback.transcoding"
-            count={TRANSCODING_ADVANCED_KEYS.length - (showDevicePicker ? 0 : 1)}
+            count={
+              TRANSCODING_ADVANCED_KEYS.length -
+              (showDevicePicker ? 0 : 1) -
+              (supportsTrickplay ? 0 : 4)
+            }
             forceOpen={anyDirty(TRANSCODING_ADVANCED_KEYS)}
           >
             <PathSettingField
@@ -489,7 +551,7 @@ export default function PlaybackSettings() {
             <SettingField
               label="Generate chapter thumbnails on"
               type="select"
-              options={chapterThumbnailExecutionOptions(chapterExecution, transcodeNodeAvailable)}
+              options={imageExecutionOptions(chapterExecution, transcodeNodeAvailable)}
               status={
                 transcodeNodeAvailable ? undefined : (
                   <SettingFieldStatus tone="warn">
@@ -528,6 +590,51 @@ export default function PlaybackSettings() {
                 "playback.chapter_thumbnail_software_tone_map_enabled",
               )}
             />
+            {supportsTrickplay && (
+              <>
+                <SettingField
+                  label="Seek preview width"
+                  type="number"
+                  unit="px"
+                  description="Width of the thumbnails players show while seeking, 160 to 640. Changing it makes every library's previews again; players keep the current ones until then."
+                  value={form.getValue("playback.preview_image_width")}
+                  onChange={(v) => form.setValue("playback.preview_image_width", v)}
+                  restartRequired={restartKeys.has("playback.preview_image_width")}
+                />
+                <SettingField
+                  label="Seek preview interval"
+                  type="number"
+                  unit="seconds"
+                  description="Time between seek previews, 5 to 60. Changing it makes every library's previews again."
+                  value={form.getValue("playback.trickplay_interval_seconds")}
+                  onChange={(v) => form.setValue("playback.trickplay_interval_seconds", v)}
+                  restartRequired={restartKeys.has("playback.trickplay_interval_seconds")}
+                />
+                <SettingField
+                  label="Seek preview workers"
+                  type="number"
+                  description="How many files each server makes seek previews for at once. They run at low priority, so playback comes first."
+                  value={form.getValue("playback.trickplay_workers")}
+                  onChange={(v) => form.setValue("playback.trickplay_workers", v)}
+                  restartRequired={restartKeys.has("playback.trickplay_workers")}
+                />
+                <SettingField
+                  label="Generate seek previews on"
+                  type="select"
+                  options={imageExecutionOptions(trickplayExecution, trickplayNodeAvailable)}
+                  status={
+                    trickplayNodeAvailable ? undefined : (
+                      <SettingFieldStatus tone="warn">
+                        No connected transcode node supports seek previews
+                      </SettingFieldStatus>
+                    )
+                  }
+                  value={trickplayExecution}
+                  onChange={(v) => form.setValue("playback.trickplay_execution", v)}
+                  restartRequired={restartKeys.has("playback.trickplay_execution")}
+                />
+              </>
+            )}
           </AdvancedSection>
         </FieldGroup>
 
@@ -632,10 +739,31 @@ export default function PlaybackSettings() {
 
       <SaveBar
         dirtyCount={form.dirtyCount}
-        onSave={form.save}
+        onSave={save}
         onDiscard={form.discard}
         isSaving={form.isSaving}
       />
+      <AlertDialog open={confirmRemake} onOpenChange={setConfirmRemake}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Make seek previews again?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {!trickplayLibraries.isSuccess
+                ? "Existing"
+                : previewsToRemake === 1
+                  ? "1 file's"
+                  : `${previewsToRemake} files'`}{" "}
+              seek previews are made again with the new size or interval. This runs in the
+              background and can take a long time on a large library; players keep the current
+              previews until each file's new ones are ready.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void form.save()}>Save</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

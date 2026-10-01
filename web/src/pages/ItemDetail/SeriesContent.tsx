@@ -4,6 +4,7 @@ import type { ItemDetail } from "@/api/types";
 import { useRefreshItemMetadata } from "@/hooks/queries/items";
 import { useSimilarItems } from "@/hooks/queries/recommendations";
 import { useItemEpisodes, useSeasons } from "@/hooks/queries/episodes";
+import { useLibraryCapabilities } from "@/hooks/queries/admin/libraries";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
@@ -47,6 +48,9 @@ export default function SeriesContent({
   useAmbientColor(item.backdrop_thumbhash);
   const { user } = useAuth();
   const isAdmin = useIsActingAdmin();
+  const capabilities = useLibraryCapabilities(isAdmin).data;
+  const canManageTrickplay =
+    capabilities?.trickplay === true && capabilities.trickplay_supported === true;
   const { profile: currentProfile } = useCurrentProfile();
   const canCurateMetadata = canCurateMetadataForUser(user, currentProfile);
 
@@ -163,6 +167,7 @@ export default function SeriesContent({
                 }
                 isRefreshing={refreshMetadataMutation.isPending}
                 isAdmin={isAdmin}
+                canManageTrickplay={canManageTrickplay}
                 canCurateMetadata={canCurateMetadata}
                 onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
                 onMatchItem={canCurateMetadata ? () => setMatchOpen(true) : undefined}

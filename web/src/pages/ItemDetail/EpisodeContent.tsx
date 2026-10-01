@@ -15,6 +15,7 @@ import {
   useRefreshItemMetadata,
 } from "@/hooks/queries/items";
 import { useAdminMarkerCapabilities } from "@/hooks/queries/admin/markers";
+import { useLibraryCapabilities } from "@/hooks/queries/admin/libraries";
 import CastCarousel from "@/components/CastCarousel";
 import CrewList from "@/components/CrewList";
 import DownloadVersionPicker from "@/components/DownloadVersionPicker";
@@ -75,6 +76,9 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
   // An API node without redetect-markers (rolling deploy, rollback) keeps the
   // older intro-only re-detection.
   const markerCapabilities = useAdminMarkerCapabilities(isAdmin);
+  const capabilities = useLibraryCapabilities(isAdmin).data;
+  const canManageTrickplay =
+    capabilities?.trickplay === true && capabilities.trickplay_supported === true;
   const canRedetectMarkers = markerCapabilities.data?.redetect_markers === true;
   const deleteSubtitlePreference = useDeleteSubtitlePreference();
   const setSubtitlePreference = useSetSubtitlePreference();
@@ -381,6 +385,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
               isAdmin={isAdmin}
               canCurateMetadata={canCurateMetadata}
               canEditMarkers={canEditMarkers}
+              canManageTrickplay={canManageTrickplay}
               onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
               onShowMediaInfo={
                 canCurateMetadata && (item.versions?.length ?? 0) > 0
