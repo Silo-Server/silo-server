@@ -305,8 +305,10 @@ func TestChapterLockSessionLossRejectsStaleSaveDB(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
+	// Wait for backend exit, rather than only sending the termination signal,
+	// so the replacement sees the released advisory lock.
 	var terminated bool
-	if err := pool.QueryRow(ctx, `SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+	if err := pool.QueryRow(ctx, `SELECT pg_terminate_backend(pid, 5000) FROM pg_stat_activity
 		WHERE application_name=$1`, fmt.Sprintf("silo-chapter-thumbnails:%d", fileID)).Scan(&terminated); err != nil || !terminated {
 		t.Fatalf("terminate held chapter session: %v, %v", terminated, err)
 	}
