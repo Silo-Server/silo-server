@@ -403,11 +403,18 @@ func TestProcessReleasesWhenSettingsAreUnreadable(t *testing.T) {
 type lockedSettings struct {
 	mu     sync.Mutex
 	values map[string]string
+	reads  chan string
 }
 
 func (l *lockedSettings) Get(_ context.Context, key string) (string, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.reads != nil {
+		select {
+		case l.reads <- key:
+		default:
+		}
+	}
 	return l.values[key], nil
 }
 
@@ -420,7 +427,7 @@ func (l *lockedSettings) set(key, value string) {
 // TestNewWidthReconcilesRightAway reconciles once the width changes, not at
 // the first reading and not while it stays the same.
 func TestNewWidthReconcilesRightAway(t *testing.T) {
-	settings := &lockedSettings{values: map[string]string{WidthSetting: "300"}}
+	settings := &lockedSettings{values: map[string]string{WidthSetting: "300"}, reads: make(chan string, 32)}
 	s := newService(newFakeQueue(), &fakeStore{}, settings, &fakeExtractor{}, "node-a")
 	s.settingsEvery = 5 * time.Millisecond
 	ctx, cancel := context.WithCancel(t.Context())
@@ -434,10 +441,24 @@ func TestNewWidthReconcilesRightAway(t *testing.T) {
 		<-done
 	}()
 
+	// A second width read proves the first recipe became the baseline.
+	reads := 0
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	for reads < 2 {
+		select {
+		case key := <-settings.reads:
+			if key == WidthSetting {
+				reads++
+			}
+		case <-deadline.C:
+			t.Fatal("initial recipe was not read")
+		}
+	}
 	select {
 	case <-s.reconcile:
 		t.Fatal("reconciled without a settings change")
-	case <-time.After(50 * time.Millisecond):
+	default:
 	}
 	settings.set(WidthSetting, "320")
 	select {
