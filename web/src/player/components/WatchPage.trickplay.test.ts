@@ -1,4 +1,4 @@
-import { act, render, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { itemKeys } from "@/hooks/queries/keys";
@@ -8,6 +8,9 @@ import { fixturePlanV3 } from "../protocol-v3.fixtures";
 import type { UsePlaybackSessionResult } from "../hooks/usePlaybackSession";
 import type { PlayerFileVersion, WatchPageProps } from "../types";
 import { WatchPage } from "./WatchPage";
+import { SeekBar } from "./SeekBar";
+import { trickplayFromV2 } from "@/api/v2/trickplay";
+import manifest from "../../../../contracts/api/v2/fixtures/get_watch_trickplay_ok.json";
 
 const playbackSessionMock = vi.hoisted(() => vi.fn());
 const videoPlayerMock = vi.hoisted(() => vi.fn());
@@ -16,6 +19,7 @@ const roomConnectionMock = vi.hoisted(() => vi.fn());
 const playbackCapabilitiesMock = vi.hoisted(() => vi.fn());
 const startPlaybackMock = vi.hoisted(() => vi.fn());
 const trickplayOverride = vi.hoisted(() => vi.fn());
+const showSeekBar = vi.hoisted(() => ({ value: false }));
 vi.mock("@/hooks/queries/items", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/hooks/queries/items")>();
   return {
@@ -30,9 +34,17 @@ vi.mock("../hooks/usePlaybackSession", () => ({
   usePlaybackSession: playbackSessionMock,
 }));
 vi.mock("./VideoPlayer", () => ({
-  VideoPlayer: (props: unknown) => {
+  VideoPlayer: (props: Parameters<typeof SeekBar>[0]) => {
     videoPlayerMock(props);
-    return "Mounted video player";
+    return showSeekBar.value
+      ? createElement(SeekBar, {
+          ...props,
+          currentTime: 0,
+          duration: 3600,
+          buffered: null,
+          onSeek: () => {},
+        })
+      : "Mounted video player";
   },
 }));
 const playerConfig = {
@@ -190,6 +202,157 @@ it("defers a throttled sheet failure and cancels recovery when the file changes"
     view.unmount();
     client.clear();
     trickplayOverride.mockReset();
+    vi.useRealTimers();
+  }
+});
+
+it("reloads a failed sheet after an identical manifest refetch without moving the pointer", async () => {
+  let fails = true;
+  const requests: string[] = [];
+  vi.stubGlobal(
+    "Image",
+    class {
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      set src(url: string) {
+        requests.push(url);
+        queueMicrotask(() => (fails ? this.onerror : this.onload)?.());
+      }
+    },
+  );
+  const raw = {
+    ...manifest,
+    expires_at: new Date(Date.now() + 3600_000).toISOString(),
+    sheets: [manifest.sheets[0]!],
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async () =>
+        new Response(JSON.stringify(raw), { headers: { "Content-Type": "application/json" } }),
+    ),
+  );
+  roomConnectionMock.mockReturnValue({ room: null });
+  playbackSessionMock.mockReturnValue(playbackSession());
+  showSeekBar.value = true;
+  const client = new QueryClient();
+  const key = itemKeys.watchTrickplay(watchPageProps.contentId, version.file_id);
+  client.setQueryData(key, trickplayFromV2(raw), { updatedAt: Date.now() - 1000 });
+  const cached = client.getQueryData(key);
+  const view = render(
+    createElement(
+      QueryClientProvider,
+      { client },
+      createElement(WatchPage, {
+        ...watchPageProps,
+        versions: [{ ...version, trickplay_available: true }],
+      }),
+    ),
+  );
+  try {
+    const slider = screen.getByRole("slider");
+    slider.getBoundingClientRect = () =>
+      ({ left: 0, width: 1000, top: 0, height: 10, right: 1000, bottom: 10 }) as DOMRect;
+    fireEvent.mouseMove(slider, { clientX: 100 });
+    await waitFor(() => expect(requests.length).toBeGreaterThan(0));
+    await waitFor(() => expect(videoPlayerMock.mock.calls.at(-1)?.[0].trickplay).toBeTruthy());
+    // The query shares the same manifest object after successful refresh.
+    await waitFor(() => expect(client.getQueryState(key)?.fetchStatus).toBe("idle"));
+    expect(client.getQueryData(key)).toBe(cached);
+    expect(screen.queryByTestId("seek-preview-image")).toBeNull();
+    fails = false;
+    // This is the scheduled recovery path: refetch the same wire manifest.
+    await act(async () => {
+      await client.refetchQueries({ queryKey: key });
+    });
+    expect(client.getQueryData(key)).toBe(cached);
+    expect(await screen.findByTestId("seek-preview-image")).toBeTruthy();
+  } finally {
+    view.unmount();
+    client.clear();
+    showSeekBar.value = false;
+    vi.unstubAllGlobals();
+  }
+});
+
+it("keeps sheet recovery inside the manifest Retry-After delay", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(1000);
+  vi.stubGlobal(
+    "Image",
+    class {
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      set src(_url: string) {
+        queueMicrotask(() => this.onerror?.());
+      }
+    },
+  );
+  const raw = {
+    ...manifest,
+    expires_at: new Date(Date.now() + 3600_000).toISOString(),
+  };
+  const request = vi.fn(
+    async () =>
+      new Response(
+        JSON.stringify({
+          type: "https://siloserver.org/problems/rate_limited",
+          title: "Rate limited",
+          status: 429,
+          detail: "Try later",
+          instance: "/api/v2/watch/content-1/trickplay",
+        }),
+        {
+          status: 429,
+          headers: { "Content-Type": "application/problem+json", "Retry-After": "90" },
+        },
+      ),
+  );
+  vi.stubGlobal("fetch", request);
+  roomConnectionMock.mockReturnValue({ room: null });
+  playbackSessionMock.mockReturnValue(playbackSession());
+  showSeekBar.value = true;
+  const client = new QueryClient();
+  const key = itemKeys.watchTrickplay(watchPageProps.contentId, version.file_id);
+  client.setQueryData(key, trickplayFromV2(raw));
+  const view = render(
+    createElement(
+      QueryClientProvider,
+      { client },
+      createElement(WatchPage, {
+        ...watchPageProps,
+        versions: [{ ...version, trickplay_available: true }],
+      }),
+    ),
+  );
+  try {
+    const slider = screen.getByRole("slider");
+    slider.getBoundingClientRect = () =>
+      ({ left: 0, width: 1000, top: 0, height: 10, right: 1000, bottom: 10 }) as DOMRect;
+    fireEvent.mouseMove(slider, { clientX: 100 });
+    await act(() => vi.advanceTimersByTimeAsync(20));
+    expect(request).toHaveBeenCalledTimes(1);
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(request).toHaveBeenCalledTimes(1);
+    await act(() => vi.advanceTimersByTimeAsync(30_000));
+    expect(request).toHaveBeenCalledTimes(2);
+    // More failed sheets can leave a recovery timer pending when retries end.
+    await act(() => vi.advanceTimersByTimeAsync(50_000));
+    fireEvent.mouseMove(slider, { clientX: 900 });
+    await act(() => vi.advanceTimersByTimeAsync(40_000));
+    expect(request).toHaveBeenCalledTimes(3);
+    expect(client.getQueryState(key)?.status).toBe("error");
+    // Another failed sheet after the retries must leave recovery to polling.
+    fireEvent.mouseMove(slider, { clientX: 500 });
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(request).toHaveBeenCalledTimes(3);
+    await act(() => vi.advanceTimersByTimeAsync(30_000));
+    expect(request).toHaveBeenCalledTimes(4);
+  } finally {
+    view.unmount();
+    client.clear();
+    showSeekBar.value = false;
+    vi.unstubAllGlobals();
     vi.useRealTimers();
   }
 });

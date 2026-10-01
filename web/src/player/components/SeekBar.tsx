@@ -20,6 +20,8 @@ interface SeekBarProps {
   onSkip: { back: () => void; forward: () => void };
   /** Seek-bar previews of the file being played, when it has them. */
   trickplay?: PlayerTrickplay | null;
+  /** Successful manifest refreshes retry sheets even when URLs stay unchanged. */
+  trickplayUpdatedAt?: number;
   /** A preview sheet failed to load, as when its URL expired. */
   onTrickplayError?: () => void;
 }
@@ -112,6 +114,7 @@ export function SeekBar({
   onSeek,
   onSkip,
   trickplay = null,
+  trickplayUpdatedAt,
   onTrickplayError,
 }: SeekBarProps) {
   const barRef = useRef<HTMLDivElement>(null);
@@ -203,7 +206,7 @@ export function SeekBar({
         image.onerror = null;
       }
     };
-  }, [trickplay, candidateSheet, onTrickplayError]);
+  }, [trickplay, trickplayUpdatedAt, candidateSheet, onTrickplayError]);
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {

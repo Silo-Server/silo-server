@@ -55,6 +55,7 @@ interface PlayerControlsProps {
   regions?: MarkerRegionView[];
   // Seek bar previews
   trickplay?: PlayerTrickplay | null;
+  trickplayUpdatedAt?: number;
   onTrickplayError?: () => void;
   // Marker editing
   editing?: boolean;
@@ -129,6 +130,7 @@ export function PlayerControls({
   chapters,
   regions,
   trickplay,
+  trickplayUpdatedAt,
   onTrickplayError,
   editing,
   activeEditKind,
@@ -306,6 +308,7 @@ export function PlayerControls({
           chapters={chapters}
           regions={regions}
           trickplay={trickplay}
+          trickplayUpdatedAt={trickplayUpdatedAt}
           onTrickplayError={onTrickplayError}
           editing={editing}
           activeEditKind={activeEditKind}
