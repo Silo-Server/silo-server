@@ -9,6 +9,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+const adminStateOff = "off"
+
 // ErrNotOptedIn reports that none of an item's files belongs to a library
 // with seek previews turned on.
 var ErrNotOptedIn = errors.New("seek previews are off for this item's library")
@@ -100,14 +102,20 @@ func (a *Admin) ItemStatus(ctx context.Context, itemID string) ([]FileStatus, er
 		return nil, err
 	}
 	rows, err := a.pool.Query(ctx, `
-		SELECT mf.id, CASE WHEN f.trickplay_enabled AND f.enabled IS NOT FALSE THEN COALESCE(t.state, 'pending') ELSE 'off' END, COALESCE(t.failure_count, 0), COALESCE(t.last_error, ''),
+		SELECT mf.id, CASE
+		       WHEN NOT f.trickplay_enabled OR f.enabled IS FALSE THEN 'off'
+		       WHEN lower(btrim(f.type)) = ANY($2::text[])
+		         AND mf.missing_since IS NULL AND mf.probe_updated_at IS NOT NULL AND mf.duration > 0
+		         AND jsonb_typeof(mf.video_tracks) = 'array' AND jsonb_array_length(mf.video_tracks) > 0
+		       THEN COALESCE(t.state, 'pending') ELSE 'unusable' END,
+		       COALESCE(t.failure_count, 0), COALESCE(t.last_error, ''),
 		       t.generated_at, COALESCE(t.thumbnail_count, 0), COALESCE(t.width, 0), COALESCE(t.interval_ms, 0),
 		       COALESCE(t.sheet_bytes, 0)
 		FROM public.media_files mf
 		JOIN public.media_folders f ON f.id = mf.media_folder_id
 		LEFT JOIN public.media_file_trickplay t ON t.media_file_id = mf.id
 		WHERE mf.id = ANY($1)
-		ORDER BY mf.id`, ids)
+		ORDER BY mf.id`, ids, videoLibraryTypes)
 	if err != nil {
 		return nil, fmt.Errorf("read trickplay status: %w", err)
 	}
@@ -120,6 +128,7 @@ func (a *Admin) ItemStatus(ctx context.Context, itemID string) ([]FileStatus, er
 			return nil, err
 		}
 		_, s.Servable = servable[s.FileID]
+		s.Servable = s.Servable && s.State != stateUnusable && s.State != adminStateOff
 		out = append(out, s)
 	}
 	return out, rows.Err()
