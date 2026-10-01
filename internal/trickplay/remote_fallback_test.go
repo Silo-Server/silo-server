@@ -3,6 +3,7 @@ package trickplay
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"path/filepath"
 	"testing"
@@ -90,7 +91,12 @@ func TestRemoteGenerationDoesNotRequireAPIMediaMount(t *testing.T) {
 func TestLocalExtractorReportsUnreadableInput(t *testing.T) {
 	req := nodeRequest()
 	req.Input = filepath.Join(t.TempDir(), "missing.mkv")
-	_, err := NewLocalExtractor(nil).Extract(t.Context(), nil, req)
+	extractor := NewLocalExtractor(fakeSettings{hwAccelSetting: "none"})
+	extractor.exec = func(_ context.Context, _ string, _ []string, _ io.Reader, _, stderr io.Writer) error {
+		_, _ = io.WriteString(stderr, "No such file or directory\n")
+		return errors.New("exit status 1")
+	}
+	_, err := extractor.Extract(t.Context(), nil, req)
 	if _, ok := errors.AsType[*inputError](err); !ok {
 		t.Fatalf("error=%v, want inputError", err)
 	}
