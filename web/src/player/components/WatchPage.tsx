@@ -313,12 +313,30 @@ function WatchPagePlayer({
   );
   const refetchTrickplay = trickplayQuery.refetch;
   const lastTrickplayRefresh = useRef<{ fileId: number | null; at: number } | null>(null);
+  const trickplayRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    lastTrickplayRefresh.current = null;
+    return () => {
+      if (trickplayRefreshTimer.current !== null) clearTimeout(trickplayRefreshTimer.current);
+      trickplayRefreshTimer.current = null;
+    };
+  }, [session.mediaFileId, trickplayAvailable]);
   const handleTrickplayError = useCallback(() => {
     const now = Date.now();
     const previous = lastTrickplayRefresh.current;
-    if (previous?.fileId === session.mediaFileId && now - previous.at < 60_000) return;
-    lastTrickplayRefresh.current = { fileId: session.mediaFileId, at: now };
-    void refetchTrickplay();
+    const refresh = () => {
+      trickplayRefreshTimer.current = null;
+      lastTrickplayRefresh.current = { fileId: session.mediaFileId, at: Date.now() };
+      void refetchTrickplay();
+    };
+    if (previous?.fileId === session.mediaFileId && now - previous.at < 60_000) {
+      if (trickplayRefreshTimer.current === null) {
+        trickplayRefreshTimer.current = setTimeout(refresh, 60_000 - (now - previous.at));
+      }
+      return;
+    }
+    if (trickplayRefreshTimer.current !== null) clearTimeout(trickplayRefreshTimer.current);
+    refresh();
   }, [refetchTrickplay, session.mediaFileId]);
 
   const handleEnded = useCallback(() => {
