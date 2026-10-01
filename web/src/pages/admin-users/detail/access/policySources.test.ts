@@ -5,6 +5,7 @@ import { policyInheritHints, savedUserPolicyInheritHints } from "@/components/Us
 
 import {
   countCustomPolicyRows,
+  countCustomRequestTerms,
   formatBitrateCap,
   formatStreams,
   formatVideoTranscoding,
@@ -156,6 +157,29 @@ describe("inheritedValueText", () => {
     const ctx = inheritContextFor(user, [FAMILY]);
     const hints = savedUserPolicyInheritHints(user, policyInheritHints(9, [FAMILY]));
     expect(inheritedValueText("maxStreams", hints, ctx, LIBRARIES)).toBeUndefined();
+  });
+});
+
+describe("countCustomRequestTerms", () => {
+  it("counts the request limit and approval the account sets itself", () => {
+    const quota = { unlimited: false as const, max: 5, days: 7 };
+    expect(countCustomRequestTerms(undefined)).toBe(0);
+    expect(
+      countCustomRequestTerms({
+        quota,
+        quotaSource: { kind: "account" },
+        autoApprove: true,
+        approvalSource: { kind: "group", name: "Family" },
+      }),
+    ).toBe(1);
+    expect(
+      countCustomRequestTerms({
+        quota,
+        quotaSource: { kind: "account" },
+        autoApprove: false,
+        approvalSource: { kind: "account" },
+      }),
+    ).toBe(2);
   });
 });
 

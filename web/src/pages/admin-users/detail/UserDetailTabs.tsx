@@ -9,7 +9,8 @@ import {
 } from "@/hooks/queries/admin/userActivity";
 import { cn } from "@/lib/utils";
 
-import { countCustomPolicyRows } from "./access/policySources";
+import { countCustomPolicyRows, countCustomRequestTerms } from "./access/policySources";
+import { useAccountRequestTerms } from "./access/RequestsCard";
 import type { UserDetailTab } from "./userDetailTabs";
 
 function Count({ children }: { children: ReactNode }) {
@@ -85,7 +86,9 @@ export function UserDetailTabs({ user, active }: { user: AdminUser; active: User
   const live = useAdminUserLiveSessions(user.id);
   const downloads = useAdminUserDownloadSummary(user.id, accountDownloads);
   const settingCounts = useAdminUserSettingCounts(user.id);
-  const custom = countCustomPolicyRows(user);
+  // The group name only labels sources, which a count doesn't need.
+  const { terms: requestTerms } = useAccountRequestTerms(user, undefined);
+  const custom = countCustomPolicyRows(user) + countCustomRequestTerms(requestTerms);
   const watching = (live.data?.length ?? 0) > 0;
   const preferencesLoaded = !settingCounts.isLoading && !settingCounts.isError;
   const preferences = settingCounts.account + settingCounts.device;

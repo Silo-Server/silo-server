@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   live: [] as unknown[],
   profiles: [] as unknown[],
   plays: [] as unknown[],
+  requestLimit: {} as Record<string, unknown>,
 }));
 
 vi.mock("@/hooks/queries/admin/users", () => ({
@@ -85,10 +86,7 @@ vi.mock("@/hooks/queries/admin/requests", () => ({
     },
     isError: false,
   }),
-  useRequestUserLimit: () => ({
-    data: { user_id: 7, limit_mode: "inherit", approval_mode: "inherit" },
-    isError: false,
-  }),
+  useRequestUserLimit: () => ({ data: mocks.requestLimit, isError: false }),
   useRequestGroupLimit: () => ({ data: undefined, isError: false }),
 }));
 
@@ -165,6 +163,7 @@ function tile(label: string | RegExp) {
 
 beforeEach(() => {
   mocks.capabilities = { request_usage: true, watch_summary: true, account_downloads: true };
+  mocks.requestLimit = { user_id: 7, limit_mode: "inherit", approval_mode: "inherit" };
   mocks.live = [SESSION];
   mocks.profiles = [
     { id: "p1", name: "Main", last_seen_at: "2026-09-29T10:00:00Z" },
@@ -284,6 +283,22 @@ describe("cards", () => {
     mocks.plays = [];
     mount();
     expect(screen.getByText("Nothing watched in the last 30 days.")).toBeInTheDocument();
+  });
+
+  it("counts and marks a request limit set on the account", () => {
+    mocks.requestLimit = {
+      user_id: 7,
+      limit_mode: "custom",
+      max_requests: 5,
+      window_days: 7,
+      approval_mode: "inherit",
+    };
+    mount();
+    const access = screen.getByRole("region", { name: "Access" });
+    expect(access).toHaveTextContent("Server default, with 3 limits set for this account");
+    expect(access).toHaveTextContent("5 requests per 7 daysCUSTOM");
+    expect(access).toHaveTextContent("Approved automatically");
+    expect(access).not.toHaveTextContent("Approved automaticallyCUSTOM");
   });
 
   it("summarizes access and marks the account's own limits", () => {

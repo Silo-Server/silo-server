@@ -19,6 +19,7 @@ import { formatStreamBitrateLimit } from "@/lib/streamBitrateLimit";
 import { useAccountRequestTerms } from "../access/RequestsCard";
 import {
   countCustomPolicyRows,
+  countCustomRequestTerms,
   formatQuality,
   inheritContextFor,
   libraryListText,
@@ -74,14 +75,28 @@ function videoTranscodingText(video: VideoTranscoding): string {
 function requestsSummary(
   canRequest: boolean,
   terms: ResolvedRequestTerms | undefined,
-): { title: string; detail?: string } {
+): { title: ReactNode; detail?: ReactNode } {
   if (!canRequest) return { title: "Can't request media" };
   if (!terms) return { title: "Requests" };
-  const detail = terms.autoApprove ? "Approved automatically" : "Needs approval";
-  const { quota } = terms;
-  if (quota.unlimited) return { title: "Unlimited requests", detail };
+  const detail = (
+    <>
+      {terms.autoApprove ? "Approved automatically" : "Needs approval"}
+      {terms.approvalSource.kind === "account" ? CUSTOM : null}
+    </>
+  );
+  const title = (
+    <>
+      {formatQuota(terms.quota)}
+      {terms.quotaSource.kind === "account" ? CUSTOM : null}
+    </>
+  );
+  return { title, detail };
+}
+
+function formatQuota(quota: ResolvedRequestTerms["quota"]): string {
+  if (quota.unlimited) return "Unlimited requests";
   const window = quota.days === 1 ? "day" : `${quota.days} days`;
-  return { title: `${plural(quota.max, "request", "requests")} per ${window}`, detail };
+  return `${plural(quota.max, "request", "requests")} per ${window}`;
 }
 
 const CUSTOM = (
@@ -101,7 +116,7 @@ export function AccessSummaryCard({ user }: { user: AdminUser }) {
   const { terms, server } = useAccountRequestTerms(user, groupName);
   const effective = user.effective_policy;
   const ctx = inheritContextFor(user, groups);
-  const custom = countCustomPolicyRows(user);
+  const custom = countCustomPolicyRows(user) + countCustomRequestTerms(terms);
   const source = ctx.kind === "group" ? `${ctx.name} group` : "Server default";
 
   const marker = hasAssignedPermission(effective.permissions, PERMISSION_MARKER_EDIT);

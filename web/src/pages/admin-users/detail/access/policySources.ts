@@ -1,6 +1,7 @@
 import type { AccessGroup, AdminUser, Library } from "@/api/types";
 import type { PolicyInheritHints } from "@/components/UserPolicyFields";
 import { playbackQualityPresetFromValue } from "@/lib/playback-quality";
+import type { ResolvedRequestTerms } from "@/lib/requestAccess";
 import { formatStreamBitrateLimit } from "@/lib/streamBitrateLimit";
 
 /**
@@ -177,6 +178,17 @@ const POLICY_ROWS: PolicyRowKey[] = [
 /** Rows this account sets itself; video transcoding counts once for its two fields. */
 export function countCustomPolicyRows(user: AdminUser): number {
   return countCustomRows(user, POLICY_ROWS);
+}
+
+/**
+ * Request approval and limit set on the account itself. They live in the
+ * account's request-limit record, not on AdminUser, so countCustomPolicyRows
+ * can't see them.
+ */
+export function countCustomRequestTerms(terms: ResolvedRequestTerms | undefined): number {
+  if (!terms) return 0;
+  return [terms.quotaSource, terms.approvalSource].filter((source) => source.kind === "account")
+    .length;
 }
 
 export function countCustomRows(user: AdminUser, rows: readonly PolicyRowKey[]): number {
