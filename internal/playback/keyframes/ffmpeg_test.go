@@ -175,3 +175,50 @@ func playlistDurations(t *testing.T, path string) []float64 {
 	}
 	return durations
 }
+
+// VerifyMatroska's video end is where ffprobe's last video frame ends, and
+// a longer audio track doesn't move it.
+func TestVerifyMatroskaVideoEndMatchesFFprobe(t *testing.T) {
+	ffmpeg, ffprobe := requireFFmpeg(t)
+	path := filepath.Join(t.TempDir(), "longer-audio.mkv")
+	out, err := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+		"-f", "lavfi", "-i", "testsrc2=size=160x90:rate=30000/1001:duration=9.5",
+		"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=15",
+		"-c:v", "libx264", "-preset", "ultrafast", "-g", "60", "-bf", "2",
+		"-c:a", "aac", path).CombinedOutput()
+	if err != nil {
+		t.Skipf("ffmpeg can't make the test file (%v): %s", err, out)
+	}
+	out, err = exec.Command(ffprobe, "-v", "error", "-select_streams", "v:0",
+		"-show_entries", "packet=pts_time,duration_time", "-of", "csv=p=0", path).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want float64
+	for line := range strings.FieldsSeq(string(out)) {
+		pts, duration, _ := strings.Cut(strings.TrimSuffix(line, ","), ",")
+		p, err1 := strconv.ParseFloat(pts, 64)
+		d, err2 := strconv.ParseFloat(duration, 64)
+		if err1 != nil || err2 != nil {
+			t.Fatalf("ffprobe packet %q", line)
+		}
+		want = max(want, p+d)
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx, err := VerifyMatroska(f, info.Size())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(idx.VideoEnd-want) > 0.001 || idx.Duration < 14 {
+		t.Fatalf("video end %.3fs (container %.3fs), ffprobe's last frame ends at %.3fs", idx.VideoEnd, idx.Duration, want)
+	}
+}

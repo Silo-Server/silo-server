@@ -66,15 +66,14 @@ func planCopySegments(opts TranscodeOpts) *copySegmentPlan {
 	for i, k := range firstKey {
 		starts[i] = idx.Keyframes[k]
 	}
-	// The probed duration counts from the file's start, which is the first
-	// keyframe or just before it; the keyframe times are the container's,
-	// which can start later than zero.
-	durations := keyframes.SegmentDurations(starts, idx.Keyframes[0]+opts.TotalDuration)
-	if durations[len(durations)-1] <= 0 {
-		// The index runs past the probed duration; the plan can't describe
-		// the end of the stream.
+	// FFmpeg's last segment ends with the copied video, even when an audio
+	// or subtitle track runs on: the container's duration can be longer.
+	if idx.VideoEnd <= idx.Keyframes[len(idx.Keyframes)-1] {
+		// The video's end is unknown, so the plan can't describe the last
+		// segment.
 		return nil
 	}
+	durations := keyframes.SegmentDurations(starts, idx.VideoEnd)
 	return &copySegmentPlan{durations: durations, keyframes: idx.Keyframes, firstKey: firstKey}
 }
 

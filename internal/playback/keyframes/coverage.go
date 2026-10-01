@@ -68,7 +68,7 @@ func checkCueCoverage(r io.ReaderAt, segStart, segEnd int64, video uint64, point
 		// The sampled cluster, then the one after it, which a muxer that
 		// cues only some clusters leaves without any cue.
 		for range 2 {
-			keys, next, err := clusterKeyframes(r, at, segEnd, video)
+			keys, next, err := clusterKeyframes(r, at, segEnd, video, nil)
 			if err != nil {
 				return fmt.Errorf("keyframes: check cluster at %d: %w", at, err)
 			}
@@ -89,7 +89,7 @@ func checkCueCoverage(r io.ReaderAt, segStart, segEnd int64, video uint64, point
 // clusterKeyframes returns the timestamps, in ticks, of the video track's
 // keyframes in the cluster at off, and where the next element starts. It
 // reads element headers and the first bytes of each block, never the frames.
-func clusterKeyframes(r io.ReaderAt, off, segEnd int64, video uint64) ([]uint64, int64, error) {
+func clusterKeyframes(r io.ReaderAt, off, segEnd int64, video uint64, last *videoEnd) ([]uint64, int64, error) {
 	id, size, headerLen, err := readElementHeader(r, off)
 	if err != nil {
 		return nil, 0, err
@@ -106,6 +106,7 @@ func clusterKeyframes(r io.ReaderAt, off, segEnd int64, video uint64) ([]uint64,
 		clusterTicks uint64
 		haveTicks    bool
 		keys         []int64
+		latest       videoEnd // relative to the cluster
 	)
 	at := off + headerLen
 	n := 0
@@ -136,16 +137,22 @@ func clusterKeyframes(r io.ReaderAt, off, segEnd int64, video uint64) ([]uint64,
 			if err != nil {
 				return nil, 0, err
 			}
-			if track == video && flags&0x80 != 0 {
-				keys = append(keys, rel)
+			if track == video {
+				latest.add(rel)
+				if flags&0x80 != 0 {
+					keys = append(keys, rel)
+				}
 			}
 		case idBlockGroup:
 			track, rel, key, err := readBlockGroup(r, data, size)
 			if err != nil {
 				return nil, 0, err
 			}
-			if track == video && key {
-				keys = append(keys, rel)
+			if track == video {
+				latest.add(rel)
+				if key {
+					keys = append(keys, rel)
+				}
 			}
 		}
 		at = data + size
@@ -156,6 +163,14 @@ func clusterKeyframes(r io.ReaderAt, off, segEnd int64, video uint64) ([]uint64,
 	}
 	if !haveTicks {
 		return nil, 0, fmt.Errorf("cluster at %d has no timestamp", off)
+	}
+	if last != nil {
+		if latest.n > 0 {
+			last.add(int64(clusterTicks) + latest.last)
+		}
+		if latest.n > 1 {
+			last.add(int64(clusterTicks) + latest.prev)
+		}
 	}
 	ticks := make([]uint64, 0, len(keys))
 	for _, rel := range keys {
@@ -225,13 +240,53 @@ func VerifyMatroska(r io.ReaderAt, size int64) (Index, error) {
 	if err != nil {
 		return Index{}, err
 	}
-	if err := verifyAllClusters(r, m); err != nil {
+	end, err := verifyAllClusters(r, m)
+	if err != nil {
 		return Index{}, err
 	}
+	m.VideoEnd = end.seconds(m.timescale, m.frameSeconds)
 	return m.Index, nil
 }
 
-func verifyAllClusters(r io.ReaderAt, m matroskaIndex) error {
+// videoEnd keeps the two latest distinct timestamps of a track's frames.
+type videoEnd struct {
+	last, prev int64
+	n          int // how many of last and prev are set
+}
+
+func (v *videoEnd) add(t int64) {
+	switch {
+	case v.n > 0 && t == v.last, v.n > 1 && t == v.prev:
+		return
+	case v.n == 0 || t > v.last:
+		v.prev, v.last = v.last, t
+	case v.n == 1 || t > v.prev:
+		v.prev = t
+	default:
+		return
+	}
+	v.n = min(v.n+1, 2)
+}
+
+// seconds returns when the last frame ends: its timestamp plus the track's
+// frame duration, or the gap to the frame before when the track doesn't say.
+// It returns 0 when that can't be worked out.
+func (v videoEnd) seconds(timescale int64, frame float64) float64 {
+	if v.n == 0 {
+		return 0
+	}
+	scale := float64(timescale) / 1e9
+	if frame <= 0 {
+		if v.n < 2 {
+			return 0
+		}
+		frame = float64(v.last-v.prev) * scale
+	}
+	return float64(v.last)*scale + frame
+}
+
+func verifyAllClusters(r io.ReaderAt, m matroskaIndex) (videoEnd, error) {
+	var end videoEnd
 	cued := make(map[uint64]struct{}, len(m.points))
 	for _, p := range m.points {
 		cued[p.ticks] = struct{}{}
@@ -243,21 +298,21 @@ func verifyAllClusters(r io.ReaderAt, m matroskaIndex) error {
 			if isShortRead(err) {
 				break
 			}
-			return err
+			return end, err
 		}
 		if id == idCluster {
-			keys, next, err := clusterKeyframes(r, at, m.segEnd, m.video)
+			keys, next, err := clusterKeyframes(r, at, m.segEnd, m.video, &end)
 			if err != nil {
-				return err
+				return end, err
 			}
 			for _, k := range keys {
 				if _, ok := cued[k]; !ok {
-					return ErrIncompleteIndex
+					return end, ErrIncompleteIndex
 				}
 				found[k] = struct{}{}
 			}
 			if next <= at {
-				return ErrIncompleteIndex
+				return end, ErrIncompleteIndex
 			}
 			at = next
 			continue
@@ -265,14 +320,14 @@ func verifyAllClusters(r io.ReaderAt, m matroskaIndex) error {
 		if size == unknownSize {
 			// An unknown-size element other than a cluster can't be
 			// skipped, so the rest of the file can't be checked.
-			return ErrIncompleteIndex
+			return end, ErrIncompleteIndex
 		}
 		at += headerLen + size
 	}
 	if len(found) != len(cued) {
 		// A cue on a frame that isn't a keyframe would put a planned
 		// boundary where FFmpeg can't cut.
-		return ErrIncompleteIndex
+		return end, ErrIncompleteIndex
 	}
-	return nil
+	return end, nil
 }
