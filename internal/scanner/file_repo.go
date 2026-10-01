@@ -4106,7 +4106,9 @@ func (r *FileRepository) ListChapterThumbnailsAtOtherWidths(ctx context.Context,
 	if err != nil {
 		return nil, time.Time{}, err
 	}
-	if len(files) == limit {
+	if len(files) > 0 {
+		// The page already proves work is eligible now. Do not expand the
+		// catalog again to compute cooldowns while these requests are pending.
 		return files, time.Now(), nil
 	}
 	// File and chapter cooldowns both apply, so each stale image becomes
