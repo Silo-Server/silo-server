@@ -92,6 +92,7 @@ func (a *copyGroupAssembler) startRun(startSegment int, audioKey string) string 
 			}
 		}
 	}
+	startSegment = min(max(startSegment, 0), len(a.assembled)-1)
 	a.runs++
 	a.run = &copyGroupRun{
 		prefix:       fmt.Sprintf("gop%d_", a.runs),

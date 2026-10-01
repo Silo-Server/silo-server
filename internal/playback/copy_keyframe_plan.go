@@ -2,10 +2,13 @@ package playback
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"math"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -75,6 +78,74 @@ func planCopySegments(opts TranscodeOpts) *copySegmentPlan {
 	return &copySegmentPlan{durations: durations, keyframes: idx.Keyframes, firstKey: firstKey}
 }
 
+// copyPlanRecordFile keeps a session's planning decision in its output
+// directory, which a session rebuilt from its recipe reuses.
+const copyPlanRecordFile = "keyframe-plan.json"
+
+type copyPlanRecord struct {
+	Planned   bool      `json:"planned"`
+	Durations []float64 `json:"durations,omitempty"`
+	Keyframes []float64 `json:"keyframes,omitempty"`
+	FirstKey  []int     `json:"first_key,omitempty"`
+}
+
+// resolveCopyPlan returns the plan a session serves. The first start decides
+// and records the decision; a rebuilt session follows the record, so it
+// serves the playlist its player already has. Deciding afresh could differ:
+// a file's index that was still being checked may be verified by then.
+func resolveCopyPlan(opts TranscodeOpts) *copySegmentPlan {
+	if !opts.KeyframePlaylist || opts.OutputDir == "" {
+		return planCopySegments(opts)
+	}
+	path := filepath.Join(opts.OutputDir, copyPlanRecordFile)
+	if data, err := os.ReadFile(path); err == nil {
+		var rec copyPlanRecord
+		if err := json.Unmarshal(data, &rec); err == nil {
+			if !rec.Planned {
+				return nil
+			}
+			if plan := rec.plan(); plan != nil {
+				return plan
+			}
+		}
+		log.Printf("playback: session %s has an unreadable keyframe plan record; using FFmpeg's playlist", opts.SessionID)
+		return nil
+	}
+
+	plan := planCopySegments(opts)
+	rec := copyPlanRecord{Planned: plan != nil}
+	if plan != nil {
+		rec.Durations, rec.Keyframes, rec.FirstKey = plan.durations, plan.keyframes, plan.firstKey
+	}
+	data, err := json.Marshal(rec)
+	if err == nil {
+		tmp := path + ".tmp"
+		if err = os.WriteFile(tmp, data, 0o644); err == nil {
+			err = os.Rename(tmp, path)
+		}
+	}
+	if err != nil {
+		// Without a record a rebuilt session can't promise the same
+		// playlist, so don't serve a planned one.
+		log.Printf("playback: record keyframe plan for %s: %v; using FFmpeg's playlist", opts.SessionID, err)
+		return nil
+	}
+	return plan
+}
+
+// plan rebuilds a recorded plan, or nil if the record is inconsistent.
+func (r copyPlanRecord) plan() *copySegmentPlan {
+	if len(r.Durations) == 0 || len(r.FirstKey) != len(r.Durations) || len(r.Keyframes) == 0 {
+		return nil
+	}
+	for i, k := range r.FirstKey {
+		if k < 0 || k >= len(r.Keyframes) || (i > 0 && k <= r.FirstKey[i-1]) {
+			return nil
+		}
+	}
+	return &copySegmentPlan{durations: r.Durations, keyframes: r.Keyframes, firstKey: r.FirstKey}
+}
+
 // keyframeRange returns segment n's keyframes as [first, end) indices.
 func (p *copySegmentPlan) keyframeRange(n int) (first, end int) {
 	first = p.firstKey[n]
@@ -116,6 +187,11 @@ const plannedWaitSegments = 10
 func (s *TranscodeSession) plannedSegmentRecoveryDecision(segNum int, decision SegmentRecoveryDecision) SegmentRecoveryDecision {
 	progress := decision.Progress
 	switch {
+	case segNum < 0 || segNum >= len(s.copyPlan.durations):
+		// Not a segment of the playlist.
+		decision.Wait = false
+		decision.RestartOnTimeout = false
+		decision.Reason = "planned_segment_out_of_range"
 	case progress.Restarting:
 		decision.Wait = true
 		decision.WaitTimeout = activeSegmentWait
@@ -169,6 +245,9 @@ func (s *TranscodeSession) plannedSegmentProgress() SegmentProgress {
 		progress.SegmentDuration = defaultSegmentDuration
 	}
 	progress.StartSegmentNumber, progress.ProducedHead, progress.ProducedCount, progress.LastProducedAt = s.copyGroups.progress()
+	// The throttler reads output older than the current FFmpeg as left over
+	// from an earlier one. The current run's last group is its output.
+	progress.ManifestModTime = progress.LastProducedAt
 	return progress
 }
 

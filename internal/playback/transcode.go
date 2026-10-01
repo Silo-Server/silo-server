@@ -422,7 +422,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		releaseHWDevice()
 		return nil, err
 	}
-	copyPlan := planCopySegments(opts)
+	copyPlan := resolveCopyPlan(opts)
 	var copyGroups *copyGroupAssembler
 	if copyPlan != nil {
 		log.Printf("playback: session %s serves a %d-segment keyframe playlist", opts.SessionID, len(copyPlan.durations))
@@ -3241,6 +3241,7 @@ func (s *TranscodeSession) restart(
 	// first keyframe, so the run covers all of it whatever caller asked.
 	requestedSegment := startSegment
 	if s.copyPlan != nil {
+		startSegment = min(max(startSegment, 0), len(s.copyPlan.durations)-1)
 		seekSeconds = s.copyPlan.restartSeekSeconds(startSegment)
 		streamOriginSeconds, copySeekAnchorResolved = 0, true
 	}
@@ -3742,6 +3743,9 @@ type SegmentRecoveryTarget struct {
 // URI-to-source-time mapping across a missing-segment restart.
 func (s *TranscodeSession) ResolveSegmentRecoveryTarget(ctx context.Context, segNum int) (SegmentRecoveryTarget, bool, error) {
 	if s.copyPlan != nil {
+		if segNum < 0 || segNum >= len(s.copyPlan.durations) {
+			return SegmentRecoveryTarget{}, false, nil
+		}
 		// A planned stream restarts at the segment itself; see restart.
 		return SegmentRecoveryTarget{
 			SeekSeconds:            s.copyPlan.restartSeekSeconds(segNum),

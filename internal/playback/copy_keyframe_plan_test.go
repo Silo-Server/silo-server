@@ -140,7 +140,7 @@ func TestPlannedSessionServesPlanForEveryManifest(t *testing.T) {
 }
 
 func TestPlannedSegmentRecoveryDecision(t *testing.T) {
-	s := &TranscodeSession{opts: plannedOpts(), copyPlan: &copySegmentPlan{durations: []float64{2}}, lastRequestedSegment: 3}
+	s := &TranscodeSession{opts: plannedOpts(), copyPlan: &copySegmentPlan{durations: make([]float64, 500)}, lastRequestedSegment: 3}
 	decide := func(segNum int, progress SegmentProgress) SegmentRecoveryDecision {
 		return s.plannedSegmentRecoveryDecision(segNum, SegmentRecoveryDecision{RestartOnTimeout: true, Progress: progress})
 	}
@@ -171,6 +171,66 @@ func TestPlannedSegmentRecoveryDecision(t *testing.T) {
 	restarting := decide(10, SegmentProgress{Restarting: true})
 	if !restarting.Wait || restarting.RestartOnTimeout {
 		t.Fatalf("restarting: %+v, want a wait", restarting)
+	}
+
+	// A segment number outside the playlist neither waits nor restarts.
+	for _, seg := range []int{-1, 500} {
+		if got := decide(seg, SegmentProgress{Running: true}); got.Wait || got.RestartOnTimeout {
+			t.Fatalf("segment %d: %+v, want neither a wait nor a restart", seg, got)
+		}
+	}
+}
+
+func TestPlannedRecoveryTargetRejectsSegmentsOutsideThePlaylist(t *testing.T) {
+	s := &TranscodeSession{opts: plannedOpts(), copyPlan: evenPlan()}
+	for _, seg := range []int{-1, 5} {
+		if _, ok, err := s.ResolveSegmentRecoveryTarget(context.Background(), seg); ok || err != nil {
+			t.Fatalf("segment %d: ok=%v err=%v, want no target", seg, ok, err)
+		}
+	}
+}
+
+// The throttler reads the current run's last group as its output time, so
+// it can pause FFmpeg once the player is far enough behind.
+func TestPlannedProgressDatesOutputForTheThrottler(t *testing.T) {
+	plan := evenPlan()
+	a := newCopyGroupAssembler(t.TempDir(), plan)
+	a.startRun(0, "audio")
+	produced := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	a.run.lastProducedAt = produced
+	s := &TranscodeSession{opts: plannedOpts(), copyPlan: plan, copyGroups: a, generationStartedAt: produced.Add(-time.Minute)}
+	progress := s.plannedSegmentProgress()
+	if !progress.ManifestModTime.Equal(produced) || progressPredatesGeneration(progress) {
+		t.Fatalf("progress = %+v, want output dated after the generation started", progress)
+	}
+}
+
+// A session rebuilt from its recipe serves the playlist its player has, even
+// if the file's index became available since it started.
+func TestResolveCopyPlanFollowsTheRecordedDecision(t *testing.T) {
+	opts := plannedOpts()
+	opts.OutputDir = t.TempDir()
+
+	stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrUnverified)
+	if plan := resolveCopyPlan(opts); plan != nil {
+		t.Fatal("planned while the index is being checked")
+	}
+	stubKeyframeIndex(t, keyframes.Index{Keyframes: []float64{0, 1, 2.6, 7.0, 7.4, 9.0}}, nil)
+	if plan := resolveCopyPlan(opts); plan != nil {
+		t.Fatal("a rebuilt session switched to a keyframe playlist")
+	}
+
+	planned := plannedOpts()
+	planned.OutputDir = t.TempDir()
+	first := resolveCopyPlan(planned)
+	if first == nil {
+		t.Fatal("no plan with a verified index")
+	}
+	// The record stands in for the index, which may not be loaded again.
+	stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrUnverified)
+	again := resolveCopyPlan(planned)
+	if again == nil || !slices.Equal(again.durations, first.durations) || !slices.Equal(again.firstKey, first.firstKey) {
+		t.Fatalf("rebuilt plan = %+v, want the recorded %+v", again, first)
 	}
 }
 
