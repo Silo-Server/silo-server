@@ -125,10 +125,12 @@ a rating removal counts as a failure and the removal is retried on the next run.
 complete plugin snapshot with an unreadable rating row covers no kind, because the
 row's kind is unknown, and the run records a warning.
 
-A provider that records a rated title as watched implements `RatingExportWatchGate`.
-Silo then sends a new rating of that kind only once the profile has a completed play of
-the title; until then the rating stays pending and each run records a warning. A title
-the provider already holds a rating for is not held back, and neither are removals.
+A provider that records a rated title as watched implements `RatingExportWatchGate`;
+Simkl does for movies. A plugin declares the same rule by listing the media types
+(`MOVIE`, `SERIES`) in `rating_export_requires_watched`. Silo then sends a new rating of
+that kind only once the profile has a completed play of the title; until then the rating
+stays pending and each run records a warning. A title the provider already holds a
+rating for is not held back, and neither are removals.
 
 ## Identity changes
 

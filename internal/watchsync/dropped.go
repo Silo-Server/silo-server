@@ -205,7 +205,11 @@ func (s *Service) syncDroppedLocked(ctx context.Context, conn Connection, cfg Se
 		return result, err
 	}
 	result.Warnings = append(result.Warnings, batch.Warnings...)
-	result.RemoteFound = len(batch.Rows)
+	for _, row := range batch.Rows {
+		if !row.Removed {
+			result.RemoteFound++
+		}
+	}
 	warnings, err = s.resolveRemoteDropped(ctx, conn, items, batch)
 	if err != nil {
 		return result, err
@@ -296,10 +300,13 @@ func (s *Service) loadDroppedItems(ctx context.Context, conn Connection, onlyIDs
 }
 
 // resolveRemoteDropped sets each series' remote value from a provider read.
-// A series missing from the read counts as undropped only when the read is
-// complete, no row shares one of its ids (a row the matcher could not place
-// may be this series), and a previous read confirmed the provider held the
-// agreed drop. Every other absent series is unknown and keeps its agreed value.
+// An explicit tombstone (an incremental read's undrop) undrops the series
+// whose agreed row carries the same provider key; one that names no agreed
+// drop changes nothing. A series missing from the read counts as undropped
+// only when the read is complete, no row shares one of its ids (a row the
+// matcher could not place may be this series), and a previous read confirmed
+// the provider held the agreed drop. Every other absent series is unknown and
+// keeps its agreed value.
 //
 // A drop Silo sent that no read has confirmed stays agreed rather than being
 // sent again: Trakt's read omits drops that apps make, so such a drop is never
@@ -310,6 +317,12 @@ func (s *Service) resolveRemoteDropped(ctx context.Context, conn Connection, ite
 	complete := batch.Complete
 	seenTokens := make(map[string]bool)
 	usable := 0
+	byKey := make(map[string][]*droppedItem)
+	for _, item := range items {
+		if item.stored != nil && item.stored.ProviderItemKey != "" {
+			byKey[item.stored.ProviderItemKey] = append(byKey[item.stored.ProviderItemKey], item)
+		}
+	}
 	type remoteMatch struct {
 		row RemoteDropped
 		id  string
@@ -317,6 +330,19 @@ func (s *Service) resolveRemoteDropped(ctx context.Context, conn Connection, ite
 	var matches []remoteMatch
 	var unresolved []string
 	for _, row := range batch.Rows {
+		if row.Removed {
+			switch candidates := byKey[strings.TrimSpace(row.ProviderItemKey)]; len(candidates) {
+			case 0:
+				// Silo forgets an undropped series' agreement once no read
+				// had confirmed the drop, so the provider's echo of that
+				// undrop names nothing and is not worth a warning.
+			case 1:
+				candidates[0].remote, candidates[0].remoteAt, candidates[0].observed = false, time.Time{}, true
+			default:
+				warnings = append(warnings, "watch sync provider returned an undrop that matches more than one series")
+			}
+			continue
+		}
 		if row.Kind != historyimport.KindSeries {
 			continue
 		}

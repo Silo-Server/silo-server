@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -178,6 +179,7 @@ func (p *PluginProvider) Capabilities() Capabilities {
 		ScrobblePlayback:       p.descriptor.GetScrobblePlayback(),
 		ImportRatings:          p.descriptor.GetImportRatings(),
 		ExportRatings:          p.descriptor.GetExportRatings(),
+		SyncDropped:            p.descriptor.GetSyncDropped(),
 	}
 }
 
@@ -1162,6 +1164,18 @@ func mediaFromIdentity(mediaItemID, kind, title string, year int, imdbID, tmdbID
 // every series rating on each sync and log the rejection.
 func (p *PluginProvider) SyncsRatingKind(kind string) bool {
 	return p.supportsMedia(watchSyncMediaType(kind))
+}
+
+// RatingExportRequiresWatched reports whether the plugin lists the media type
+// of kind in rating_export_requires_watched, meaning its SET_RATING also marks
+// the title watched upstream. Only movie and series ratings are synced.
+func (p *PluginProvider) RatingExportRequiresWatched(kind string) bool {
+	mediaType := watchSyncMediaType(kind)
+	if mediaType != pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE &&
+		mediaType != pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_SERIES {
+		return false
+	}
+	return slices.Contains(p.descriptor.GetRatingExportRequiresWatched(), mediaType)
 }
 
 // mediaFromLocalFavorite builds list and rating media. A series item carries
