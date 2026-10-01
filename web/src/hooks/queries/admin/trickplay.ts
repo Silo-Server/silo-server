@@ -45,8 +45,14 @@ export function useAdminItemTrickplay(itemId: string, { enabled = true } = {}) {
 export function useRegenerateItemTrickplay() {
   const queryClient = useQueryClient();
   return useMutation({
+    retry: false,
+    // Regeneration is non-retryable: replaying it after a 401 could make
+    // the previews again once the first request's work finishes.
     mutationFn: (itemId: string) =>
-      v2("POST /api/v2/admin/items/{id}/trickplay/regenerate", { path: { id: itemId } }),
+      v2("POST /api/v2/admin/items/{id}/trickplay/regenerate", {
+        path: { id: itemId },
+        retryAuthentication: false,
+      }),
     onSuccess: ({ requeued }, itemId) => {
       toast.success(
         requeued === 0
