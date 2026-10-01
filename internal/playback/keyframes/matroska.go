@@ -32,32 +32,38 @@ type Index struct {
 	Keyframes []float64
 	// Duration is the container's duration in seconds, or 0 when unknown.
 	Duration float64
+	// VideoEnd is when the video track's last frame ends, in seconds on the
+	// same timeline as Keyframes, or 0 when unknown. Only VerifyMatroska,
+	// which reads every block, sets it. Other tracks can run longer, so it
+	// can be earlier than Duration.
+	VideoEnd float64
 }
 
 // Matroska element IDs, from the Matroska specification.
 const (
-	idEBML                 = 0x1A45DFA3
-	idSegment              = 0x18538067
-	idSeekHead             = 0x114D9B74
-	idSeek                 = 0x4DBB
-	idSeekID               = 0x53AB
-	idSeekPosition         = 0x53AC
-	idInfo                 = 0x1549A966
-	idTimestampScale       = 0x2AD7B1
-	idDuration             = 0x4489
-	idTracks               = 0x1654AE6B
-	idTrackEntry           = 0xAE
-	idTrackNumber          = 0xD7
-	idTrackType            = 0x83
-	idCues                 = 0x1C53BB6B
-	idCuePoint             = 0xBB
-	idCueTime              = 0xB3
-	idCueTrackPos          = 0xB7
-	idCueTrack             = 0xF7
-	idCluster              = 0x1F43B675
-	trackTypeVideo         = 1
-	defaultTimescale       = 1_000_000 // nanoseconds per timestamp tick
-	unknownSize      int64 = -1
+	idEBML                  = 0x1A45DFA3
+	idSegment               = 0x18538067
+	idSeekHead              = 0x114D9B74
+	idSeek                  = 0x4DBB
+	idSeekID                = 0x53AB
+	idSeekPosition          = 0x53AC
+	idInfo                  = 0x1549A966
+	idTimestampScale        = 0x2AD7B1
+	idDuration              = 0x4489
+	idTracks                = 0x1654AE6B
+	idTrackEntry            = 0xAE
+	idTrackNumber           = 0xD7
+	idTrackType             = 0x83
+	idDefaultDuration       = 0x23E383
+	idCues                  = 0x1C53BB6B
+	idCuePoint              = 0xBB
+	idCueTime               = 0xB3
+	idCueTrackPos           = 0xB7
+	idCueTrack              = 0xF7
+	idCluster               = 0x1F43B675
+	trackTypeVideo          = 1
+	defaultTimescale        = 1_000_000 // nanoseconds per timestamp tick
+	unknownSize       int64 = -1
 )
 
 // Upper bounds on what the reader loads into memory. Cues for a long film
@@ -85,6 +91,9 @@ type matroskaIndex struct {
 	segStart, segEnd int64
 	video            uint64
 	points           []cuePoint
+	timescale        int64
+	// frameSeconds is the video track's default frame duration, or 0.
+	frameSeconds float64
 }
 
 func readMatroska(r io.ReaderAt, size int64) (matroskaIndex, error) {
@@ -121,6 +130,7 @@ func readMatroska(r io.ReaderAt, size int64) (matroskaIndex, error) {
 		timescale int64 = defaultTimescale
 		duration  float64
 		video     uint64
+		frameNS   uint64
 		cuesAt    int64 = -1
 		cues      []byte
 		haveInfo  bool
@@ -156,7 +166,7 @@ func readMatroska(r io.ReaderAt, size int64) (matroskaIndex, error) {
 			if err != nil {
 				return matroskaIndex{}, err
 			}
-			video, haveTrack = firstVideoTrack(data)
+			video, frameNS, haveTrack = firstVideoTrack(data)
 		case idCues:
 			cues, err = readElementData(r, dataAt, dataSize, maxCuesSize)
 			if err != nil {
@@ -213,7 +223,10 @@ func readMatroska(r io.ReaderAt, size int64) (matroskaIndex, error) {
 	if duration > 0 {
 		idx.Duration = duration * float64(timescale) / 1e9
 	}
-	return matroskaIndex{Index: idx, segStart: segStart, segEnd: segEnd, video: video, points: points}, nil
+	return matroskaIndex{
+		Index: idx, segStart: segStart, segEnd: segEnd, video: video, points: points,
+		timescale: timescale, frameSeconds: float64(frameNS) / 1e9,
+	}, nil
 }
 
 // readElementHeader reads an element's ID and data size at off, returning the
@@ -359,29 +372,27 @@ func parseInfo(info []byte) (timescale int64, duration float64) {
 	return timescale, duration
 }
 
-func firstVideoTrack(tracks []byte) (uint64, bool) {
-	var (
-		number uint64
-		found  bool
-	)
+func firstVideoTrack(tracks []byte) (number, frameNS uint64, found bool) {
 	children(tracks, func(id uint64, entry []byte) {
 		if id != idTrackEntry || found {
 			return
 		}
-		var n, kind uint64
+		var n, kind, frame uint64
 		children(entry, func(id uint64, v []byte) {
 			switch id {
 			case idTrackNumber:
 				n = readUint(v)
 			case idTrackType:
 				kind = readUint(v)
+			case idDefaultDuration:
+				frame = readUint(v)
 			}
 		})
 		if kind == trackTypeVideo && n > 0 {
-			number, found = n, true
+			number, frameNS, found = n, frame, true
 		}
 	})
-	return number, found
+	return number, frameNS, found
 }
 
 // cuePoints returns every cue point that indexes the video track, with the

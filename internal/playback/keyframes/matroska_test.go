@@ -314,3 +314,24 @@ func TestVerifyMatroskaChecksEveryCluster(t *testing.T) {
 		t.Fatalf("cue on a non-keyframe err = %v, want ErrIncompleteIndex", err)
 	}
 }
+
+func TestVideoEndSeconds(t *testing.T) {
+	var end videoEnd
+	if got := end.seconds(defaultTimescale, 0.04); got != 0 {
+		t.Fatalf("no frames: %v, want 0", got)
+	}
+	end.add(0)
+	if got := end.seconds(defaultTimescale, 0); got != 0 {
+		t.Fatalf("one frame without a frame duration: %v, want 0", got)
+	}
+	// Presentation order differs from storage order with B-frames.
+	for _, ms := range []int64{120, 80, 40, 100, 120} {
+		end.add(ms)
+	}
+	if got := end.seconds(defaultTimescale, 0); math.Abs(got-0.14) > 1e-9 {
+		t.Fatalf("from the last gap: %v, want 0.14", got)
+	}
+	if got := end.seconds(defaultTimescale, 0.033); math.Abs(got-0.153) > 1e-9 {
+		t.Fatalf("from the frame duration: %v, want 0.153", got)
+	}
+}
