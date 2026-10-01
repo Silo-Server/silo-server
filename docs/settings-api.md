@@ -987,10 +987,10 @@ It is server-wide, applies without a restart, and never affects playback; see
 
 `catalog.extra_rating_sources` (default empty) lists, comma-separated, the
 external rating sources clients show in addition to IMDb and TMDB, which always
-show: `rt_critic`, `rt_audience`, `metacritic`, `letterboxd`, and the other
-source names in "Rating sources" in [catalog-api.md](catalog-api.md). A name
-must match `^[a-z][a-z0-9_]{0,31}$`. A well-formed name that is not in that
-list is kept but shows nothing. It is
+show. The sources are the ones metadata plugins declare (see "Rating sources"
+in [catalog-api.md](catalog-api.md)); `GET /api/v2/admin/rating-sources` lists
+them. A name must match `^[a-z][a-z0-9_]{0,31}$`; a name no enabled plugin
+declares is kept but shows nothing. It is
 server-wide and applies within seconds, without a restart; see "Ratings on
 title pages" in [catalog-api.md](catalog-api.md).
 

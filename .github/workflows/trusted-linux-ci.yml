@@ -64,6 +64,7 @@ jobs:
       # Without the second cache both lint steps below analyzed all of ./...
       # from scratch on every run, which was most of the old job's time.
       - name: Restore the golangci-lint binary
+        if: runner.environment == 'github-hosted'
         id: golangci-lint-binary
         uses: actions/cache@v4
         with:
@@ -72,9 +73,23 @@ jobs:
 
       - name: Install golangci-lint
         if: steps.golangci-lint-binary.outputs.cache-hit != 'true'
-        run: go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
+        run: |
+          binary="$(go env GOPATH)/bin/golangci-lint"
+          if [ -x "$binary" ] && go version -m "$binary" | awk \
+            -v version="$GOLANGCI_LINT_VERSION" -v toolchain="$(go env GOVERSION)" '
+              NR == 1 { built_with = ($NF == toolchain) }
+              $1 == "mod" && $2 == "github.com/golangci/golangci-lint/v2" {
+                correct_module = ($3 == version)
+              }
+              END { exit !(built_with && correct_module) }
+            '; then
+            echo "Using golangci-lint ${GOLANGCI_LINT_VERSION} built with $(go env GOVERSION)"
+          else
+            go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
+          fi
 
       - name: Restore the golangci-lint analysis cache
+        if: runner.environment == 'github-hosted'
         uses: actions/cache@v4
         with:
           path: ~/.cache/golangci-lint
@@ -327,17 +342,40 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: pnpm
+          cache: ${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}
+          package-manager-cache: ${{ runner.environment == 'github-hosted' }}
           cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Use the persistent pnpm store
+        if: runner.environment == 'self-hosted'
+        run: pnpm config set store-dir "${XDG_DATA_HOME:-$RUNNER_TEMP}/pnpm/store"
 
       - name: Install
         run: pnpm install --frozen-lockfile
 
       - name: Lint
-        run: pnpm run lint
+        env:
+          CACHE_ID: ${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*') }}
+        run: |
+          if [ "$RUNNER_ENVIRONMENT" = self-hosted ]; then
+            cache_dir="${XDG_CACHE_HOME:-$RUNNER_TEMP}/silo-web"
+            mkdir -p "$cache_dir"
+            pnpm run lint --cache --cache-strategy content --cache-location "$cache_dir/eslint-${CACHE_ID}"
+          else
+            pnpm run lint
+          fi
 
       - name: Format check
-        run: pnpm run format:check
+        env:
+          CACHE_ID: ${{ hashFiles('web/pnpm-lock.yaml', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}
+        run: |
+          if [ "$RUNNER_ENVIRONMENT" = self-hosted ]; then
+            cache_dir="${XDG_CACHE_HOME:-$RUNNER_TEMP}/silo-web"
+            mkdir -p "$cache_dir"
+            pnpm run format:check --cache --cache-strategy content --cache-location "$cache_dir/prettier-${CACHE_ID}"
+          else
+            pnpm run format:check
+          fi
 
       - name: Typecheck and build
         run: pnpm run build
@@ -362,7 +400,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache: true
+          cache: ${{ runner.environment == 'github-hosted' }}
 
       - name: Verify the generated web settings binding is current
         working-directory: .
@@ -402,8 +440,14 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: pnpm
+          cache: ${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}
+          package-manager-cache: ${{ runner.environment == 'github-hosted' }}
           cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Use the persistent pnpm store
+        if: runner.environment == 'self-hosted'
+        working-directory: web
+        run: pnpm config set store-dir "${XDG_DATA_HOME:-$RUNNER_TEMP}/pnpm/store"
 
       - name: Install
         working-directory: web

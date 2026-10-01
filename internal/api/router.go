@@ -4967,7 +4967,13 @@ func v2Dependencies(
 	if settings != nil {
 		out.DemoSettings = settings
 		out.CatalogSettings = settings
-		out.RatingSources = ratingsources.NewPolicy(settings)
+		var declared ratingsources.DeclaredFunc
+		if deps.DB != nil {
+			declared = func(ctx context.Context) ([]ratingsources.DeclaredSource, error) {
+				return metadata.DeclaredRatingSources(ctx, deps.DB)
+			}
+		}
+		out.RatingSources = ratingsources.NewPolicy(settings, declared)
 	}
 	if deps.RateLimitMW != nil {
 		out.RateLimit = deps.RateLimitMW.Handler

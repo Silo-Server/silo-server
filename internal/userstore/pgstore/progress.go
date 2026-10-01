@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -908,6 +909,39 @@ func buildProgressCatalogFilter(types []string, libraryID *int, args []any) (str
 	return " AND (" + strings.Join(branches, " OR ") + ")", args
 }
 
+// visibleProgressSQL hides a progress row written at or before the profile's
+// history-hide marker for that item.
+func visibleProgressSQL(alias string) string {
+	return fmt.Sprintf(`NOT EXISTS (
+			SELECT 1
+			FROM user_history_hidden_items hhi
+			WHERE hhi.user_id = %[1]s.user_id
+			  AND hhi.profile_id = %[1]s.profile_id
+			  AND hhi.media_item_id = %[1]s.media_item_id
+			  AND %[1]s.updated_at <= hhi.hidden_before
+		  )`, alias)
+}
+
+// CatalogProgressRelation returns a profile's visible progress as a SQL
+// relation for catalog queries, numbering its parameters from firstArg. It
+// applies only when catalog shares this account's database; separate databases
+// and other progress backends keep using ListProgressByMediaItems. updated_at
+// has the second precision ListProgressByMediaItems reports, so ordering ties
+// match the backend-neutral path.
+func (s *PostgresUserStore) CatalogProgressRelation(pool *pgxpool.Pool, userID int, profileID string, firstArg int) (string, []any, bool) {
+	if s == nil || pool == nil || s.pool != pool || s.userID != userID {
+		return "", nil, false
+	}
+	return fmt.Sprintf(`(
+		SELECT user_watch_progress.media_item_id, user_watch_progress.position_seconds,
+		       user_watch_progress.completed,
+		       date_trunc('second', user_watch_progress.updated_at) AS updated_at
+		FROM user_watch_progress
+		WHERE user_watch_progress.user_id = $%d AND user_watch_progress.profile_id = $%d
+		  AND %s
+	)`, firstArg, firstArg+1, visibleProgressSQL("user_watch_progress")), []any{s.userID, profileID}, true
+}
+
 func (s *PostgresUserStore) ListProgressByMediaItems(ctx context.Context, profileID string, mediaItemIDs []string) (map[string]userstore.WatchProgress, error) {
 	result := make(map[string]userstore.WatchProgress, len(mediaItemIDs))
 	if len(mediaItemIDs) == 0 {
@@ -922,14 +956,7 @@ func (s *PostgresUserStore) ListProgressByMediaItems(ctx context.Context, profil
 		       last_file_id, last_resolution, last_hdr, last_codec_video, last_edition_key
 		FROM user_watch_progress
 		WHERE user_id = $1 AND profile_id = $2 AND media_item_id = ANY($3::text[])
-		  AND NOT EXISTS (
-			SELECT 1
-			FROM user_history_hidden_items hhi
-			WHERE hhi.user_id = user_watch_progress.user_id
-			  AND hhi.profile_id = user_watch_progress.profile_id
-			  AND hhi.media_item_id = user_watch_progress.media_item_id
-			  AND user_watch_progress.updated_at <= hhi.hidden_before
-		  )`,
+		  AND `+visibleProgressSQL("user_watch_progress"),
 		s.userID, profileID, mediaItemIDs,
 	)
 	if err != nil {

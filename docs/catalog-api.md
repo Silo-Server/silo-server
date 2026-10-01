@@ -205,11 +205,15 @@ follows the same rule. The one exception is recently added TV, which also
 matches an episode's own title so episode cards can be found by name.
 
 Both operations return shared catalog cards, `page.next_cursor`, `page.has_more`,
-`total`, `total_exact`, and `window_cursor`. Send `next_cursor` unchanged for the
-next page. A virtualized client can retain `window_cursor` and send it with
-`seek`, a zero-based result position, to request a distant window or return to
-position zero. A seek locates one SQL ordering boundary; it can scan the sorted
-prefix and does not have constant cost. The complete browse request has a
+`total`, `total_exact`, and `window_cursor`. Send `next_cursor` unchanged as
+`cursor`, without `seek`, for an adjacent page. This reuses the ordering boundary
+already returned by the previous page. A virtualized client can retain
+`window_cursor` and send it with `seek`, a zero-based result position, to request
+a distant window or return to position zero. Use this path when the preceding
+page's continuation is unavailable; independent distant windows can load in
+parallel without fetching intermediate pages. A seek locates an additional SQL
+ordering boundary; it can scan the sorted prefix and does not have constant cost.
+The complete browse request has a
 10-second deadline and honors client cancellation. Keep only visible and
 overscan pages active, and cancel requests when the query changes.
 
@@ -386,10 +390,10 @@ carries `ratings`, the list to render, already chosen and formatted by the
 server. It is present on every v2 item detail, as an empty array when there is
 nothing to show. Each entry has:
 
-- `source`: `imdb`, `tmdb`, `rt_critic`, `rt_audience`, or another source name
-  from the list below.
-- `name`: the source's plain-text mark (`IMDb`, `TMDB`, `RT`, `RT Audience`,
-  `Metacritic`, ...).
+- `source`: `imdb`, `tmdb`, or a name a metadata plugin declared (see "Rating
+  sources" below).
+- `name`: the source's plain-text mark: `IMDb`, `TMDB`, or the name the plugin
+  declared, such as `RT`.
 - `score`: the rating on a 0-100 scale.
 - `display`: the score on the source's own scale, formatted: `8.5`, `93%`,
   `4.2`.
@@ -402,15 +406,17 @@ approved logo may stand in for the `TMDB` mark, as TMDB's terms allow. Clients
 do not recompute the list from the `rating_*` members.
 
 IMDb and TMDB are always in the list when the title has them. Every other
-source appears only after an administrator turns it on in the
-`catalog.extra_rating_sources` server setting, a comma-separated list of
-source names that is empty by default, because the owners of those scores
-restrict how others may display them. IMDb, TMDB and Rotten Tomatoes come from
-the `rating_*` members, the same numbers poster badges and browse sorting use;
-the other sources come from `rating_sources`.
+source is one an enabled metadata plugin declares, and appears only after an
+administrator turns it on in the `catalog.extra_rating_sources` server
+setting, a comma-separated list of source names that is empty by default,
+because the owners of those scores restrict how others may display them.
+IMDb, TMDB and Rotten Tomatoes come from the `rating_*` members, the same
+numbers poster badges and browse sorting use; the other sources come from
+`rating_sources`.
 
 Cards follow the same choice: every v2 card leaves out `rating_rt_critic` and
-`rating_rt_audience` unless the administrator turned that source on, so poster
+`rating_rt_audience` unless a plugin declares that source and the
+administrator turned it on, so poster
 badges show a Rotten Tomatoes score only where title pages do. Item detail
 does the same, and its `rating_sources` lists only the sources clients show.
 The exception is a viewer who may curate the item's metadata (an admin, or an
@@ -438,21 +444,22 @@ server's `display` does: a stored IMDb 7.35 reads `7.4`.
 ## Rating sources
 
 The v2 item detail of a movie or series may carry `rating_sources`, a list of
-per-source ratings a metadata provider reported, such as the MDBList plugin's
-IMDb, Metacritic, Letterboxd and Roger Ebert scores. Each entry has:
+per-source ratings metadata providers reported, limited to the sources title
+pages show. Each entry has:
 
-- `source`: one of `imdb`, `tmdb`, `rt_critic`, `rt_audience`, `metacritic`,
-  `metacritic_user`, `letterboxd`, `trakt`, `rogerebert`, `myanimelist` or
-  `mdblist` (MDBList's own aggregate). The list of sources can grow; ignore a
-  name you do not recognize.
+- `source`: `imdb`, `tmdb`, or a name a metadata plugin declared (below).
+  Ignore a name you do not recognize.
 - `score`: the rating on a 0-100 scale, whatever scale the source uses itself.
 - `votes`: how many votes produced the score, omitted when the source does not
   report it.
 
-Entries come in that fixed source order, at most one per source. The member is
-absent when no source has a score the viewer is shown (see "Ratings on title
-pages"). It is detail-only: list and section cards do not carry it. A title
-page renders `ratings`, not this list.
+Entries follow the order of `ratings`, at most one per source. A stored score
+of a source no enabled plugin declares, or one the administrator has not
+turned on, is left out, so a score a plugin reported before it stopped
+declaring its source is never served; a viewer who curates the item's
+metadata still gets every stored source (see "Ratings on title pages"). The
+member is absent when no entry is left. It is detail-only: list and section
+cards do not carry it. A title page renders `ratings`, not this list.
 
 The four `rating_imdb`, `rating_tmdb`, `rating_rt_critic` and
 `rating_rt_audience` members are unchanged, keep their own scales, and remain
@@ -467,9 +474,48 @@ new match reports replace the stored set, and a source it does not report is
 removed.
 
 Plugins send them under `ratings.sources` in a metadata item, as
-`{"<source>": {"score": 0-100, "votes": n}}`. The server drops an unknown
-source name or a score outside 0-100, and drops a vote count that is not a
-whole, non-negative number while keeping its score.
+`{"<source>": {"score": 0-100, "votes": n}}`. The server keeps `imdb`, `tmdb`
+and the sources the sending plugin declared, and drops any other name, a score
+outside 0-100, and a vote count that is not a whole, non-negative number while
+keeping its score.
+
+Silo itself names only IMDb and TMDB. Every other rating comes from a metadata
+provider that declares it. The built-in NFO provider declares `rt_critic` and
+`rt_audience`, the Rotten Tomatoes scores it reads from local `.nfo` files. A
+plugin declares its ratings in its capability's manifest metadata, at the top
+level or inside the SDK's `metadata` envelope:
+
+```json
+"rating_sources": [
+  {"id": "rt_critic", "name": "RT", "label": "Rotten Tomatoes critics", "scale": 100, "percent": true},
+  {"id": "kinopoisk", "name": "Kinopoisk", "scale": 10}
+]
+```
+
+- `id`: the source name, matching `^[a-z][a-z0-9_]{0,31}$`, other than `imdb`
+  and `tmdb`. `rt_critic` and `rt_audience` name the Rotten Tomatoes scores the
+  plugin sends as the flat `rt_critic` and `rt_audience` ratings, which fill the
+  `rating_rt_*` members. The server keeps those flat scores only from a plugin
+  that declares them, and declaring them lets title pages and poster badges
+  show them. They are always percentages: `scale` and `percent` are ignored.
+- `name`: the plain-text mark clients show next to the score, at most 24
+  characters.
+- `label`: optional; the source's full name in the administrator's list, at
+  most 60 characters. `name` stands in when it is absent.
+- `scale`: the top of the source's own scale, above 0 and at most 100. The
+  plugin still sends a 0-100 `score`; a `scale` of 10 shows 72 as `7.2`.
+- `percent`: optional; `true` shows the 0-100 score as a percentage, and the
+  scale is 100 whatever `scale` says, so `scale` may be left out.
+
+An entry that breaks a rule is dropped on its own, a repeated `id` keeps the
+first, and a capability keeps at most eight. When two enabled plugins declare
+the same `id`, the first by installation order names and scales it. A declared
+source is stored like the others and is shown only after an administrator adds
+its `id` to `catalog.extra_rating_sources`; title pages list it after Silo's
+own sources. `GET /api/v2/admin/rating-sources` lists every source an
+administrator can show, with the plugin that declared it;
+`GET /api/v2/admin/rating-sources/capabilities` reports
+`plugin_declared_sources: true` on a server that has that list.
 
 Frozen v1 responses do not expose this member.
 

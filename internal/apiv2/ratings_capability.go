@@ -9,7 +9,7 @@ import (
 // ratings list a title page renders, and which sources clients show.
 type RatingsCapability struct {
 	Capability
-	Sources []RatingsCapabilitySource `json:"sources" doc:"The rating sources title pages and cards show, in display order: imdb and tmdb, then each source an administrator turned on. A card or detail carries rating_rt_critic or rating_rt_audience only when its source is listed. Empty, never null"`
+	Sources []RatingsCapabilitySource `json:"sources" doc:"The rating sources title pages and cards show, in display order: imdb and tmdb, then each source a metadata plugin declares and an administrator turned on. A card or detail carries rating_rt_critic or rating_rt_audience only when its source is listed. Empty, never null"`
 }
 
 // RatingsCapabilitySource is one rating source clients show.

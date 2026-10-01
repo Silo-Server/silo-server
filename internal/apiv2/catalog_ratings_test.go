@@ -12,12 +12,19 @@ import (
 	"github.com/Silo-Server/silo-server/internal/ratingsources"
 )
 
+// mdblistSources are the sources the MDBList plugin declares.
+var mdblistSources = []models.RatingSourceDefinition{
+	{Source: "rt_critic", Name: "RT", Label: "Rotten Tomatoes critics", Scale: 100, Percent: true},
+	{Source: "rt_audience", Name: "RT Audience", Label: "Rotten Tomatoes audience", Scale: 100, Percent: true},
+	{Source: "metacritic", Name: "Metacritic", Label: "Metacritic", Scale: 100},
+}
+
 func ratedDetail() *catalogpkg.ItemDetail {
 	imdb, tmdb, critic, audience := 8.5, 8.25, 93, 95
 	return &catalogpkg.ItemDetail{
 		ContentID: "movie:back-to-the-future", Type: "movie", Title: "Back to the Future",
 		RatingIMDB: &imdb, RatingTMDB: &tmdb, RatingRTCritic: &critic, RatingRTAudience: &audience,
-		RatingSources: []catalogpkg.ItemRatingSourceInfo{{Source: models.RatingSourceMetacritic, Score: 87}},
+		RatingSources: []catalogpkg.ItemRatingSourceInfo{{Source: "metacritic", Score: 87}},
 	}
 }
 
@@ -42,7 +49,7 @@ func TestCatalogItemDetailHidesSourcesAnAdministratorHasNotTurnedOn(t *testing.T
 		t.Fatalf("imdb=%v rt=%v audience=%v sources=%+v; want IMDb and TMDB only", out.RatingIMDB, out.RatingRTCritic, out.RatingRTAudience, out.RatingSources)
 	}
 
-	out = catalogItemDetailOf(ratedDetail(), ratingsources.NewSelection("metacritic"))
+	out = catalogItemDetailOf(ratedDetail(), ratingsources.NewSelection("metacritic").WithDeclared(mdblistSources))
 	if len(out.RatingSources) != 1 || out.RatingSources[0].Source != "metacritic" || out.RatingRTCritic != nil {
 		t.Fatalf("with Metacritic on: rt=%v sources=%+v; want the Metacritic row only", out.RatingRTCritic, out.RatingSources)
 	}
@@ -62,7 +69,7 @@ func TestCatalogItemDetailKeepsStoredRatingsForCurators(t *testing.T) {
 }
 
 func TestCatalogItemDetailAddsTurnedOnSources(t *testing.T) {
-	out := catalogItemDetailOf(ratedDetail(), ratingsources.NewSelection("rt_critic", "metacritic"))
+	out := catalogItemDetailOf(ratedDetail(), ratingsources.NewSelection("rt_critic", "metacritic").WithDeclared(mdblistSources))
 
 	var got []string
 	for _, r := range out.Ratings {
@@ -97,10 +104,33 @@ func TestCardsDropRatingsAnAdministratorHasNotTurnedOn(t *testing.T) {
 		}
 	}
 
-	shown := ratingsources.NewSelection("rt_critic")
+	shown := ratingsources.NewSelection("rt_critic").WithDeclared(mdblistSources)
 	card := catalogItemOfSection(section, shown)
 	if card.RatingRTCritic == nil || card.RatingRTAudience != nil {
 		t.Errorf("with RT critics on: rt=%v audience=%v; want the critic score only", card.RatingRTCritic, card.RatingRTAudience)
+	}
+}
+
+// A stored row of a source no plugin declares any more, or one the
+// administrator has not turned on, stays out of rating_sources, and the rest
+// follow the order of ratings.
+func TestCatalogItemDetailRatingSourcesFollowTheSelection(t *testing.T) {
+	d := ratedDetail()
+	d.RatingSources = []catalogpkg.ItemRatingSourceInfo{
+		{Source: "letterboxd", Score: 84},
+		{Source: "metacritic", Score: 87},
+		{Source: "rt_critic", Score: 93},
+		{Source: "tmdb", Score: 82.5},
+	}
+	var got []string
+	for _, source := range catalogItemDetailOf(d, ratingsources.NewSelection("metacritic", "rt_critic", "letterboxd").WithDeclared(mdblistSources)).RatingSources {
+		got = append(got, source.Source)
+	}
+	if want := []string{"tmdb", "rt_critic", "metacritic"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("rating_sources = %q, want %q", got, want)
+	}
+	if out := catalogItemDetailOf(d, ratingsources.Selection{}); len(out.RatingSources) != 1 {
+		t.Fatalf("rating_sources = %+v, want TMDB only by default", out.RatingSources)
 	}
 }
 
@@ -109,11 +139,20 @@ type ratingSettings string
 
 func (s ratingSettings) Get(context.Context, string) (string, error) { return string(s), nil }
 
+// declaringMDBList lists mdblistSources as the MDBList plugin's declarations.
+func declaringMDBList(context.Context) ([]ratingsources.DeclaredSource, error) {
+	out := make([]ratingsources.DeclaredSource, 0, len(mdblistSources))
+	for _, definition := range mdblistSources {
+		out = append(out, ratingsources.DeclaredSource{RatingSourceDefinition: definition, Provider: "MDBList"})
+	}
+	return out, nil
+}
+
 // A browse sorted by a Rotten Tomatoes score the cards leave out would rank
 // titles by a hidden number, so it orders as if no sort was asked for.
 func TestListCatalogItemsIgnoresASortByAHiddenRating(t *testing.T) {
 	deps, fake := catalogDeps(t)
-	deps.RatingSources = ratingsources.NewPolicy(ratingSettings("rt_audience"))
+	deps.RatingSources = ratingsources.NewPolicy(ratingSettings("rt_audience"), declaringMDBList)
 	h := newTestHandler(t, deps)
 
 	if rec := do(t, h, http.MethodGet, "/api/v2/catalog?sort=-rating_rt_critic", "", viewerHeaders()); rec.Code != http.StatusOK {
@@ -133,7 +172,7 @@ func TestListCatalogItemsIgnoresASortByAHiddenRating(t *testing.T) {
 
 func TestRatingsCapabilityListsTheShownSources(t *testing.T) {
 	deps, _ := catalogDeps(t)
-	deps.RatingSources = ratingsources.NewPolicy(ratingSettings("rt_critic"))
+	deps.RatingSources = ratingsources.NewPolicy(ratingSettings("rt_critic"), declaringMDBList)
 	rec := do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/capabilities/ratings", "", viewerHeaders())
 	if rec.Code != http.StatusOK {
 		t.Fatal(rec.Body.String())

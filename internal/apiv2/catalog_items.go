@@ -369,7 +369,7 @@ type CatalogItemDetail struct {
 	Versions                        []FileVersion                        `json:"versions" doc:"Empty, never null"`
 	PlaybackVariants                []PlaybackVariant                    `json:"playback_variants,omitempty"`
 	Videos                          []catalogpkg.ItemVideoInfo           `json:"videos,omitempty" doc:"Trailers and clips"`
-	RatingSources                   []CatalogRatingSource                `json:"rating_sources,omitempty" doc:"Per-source ratings on a 0-100 scale for movies and series, in display order; absent when there are none. Only the sources clients show, except for a viewer who curates the item's metadata, who gets every stored source. Title pages render ratings, not this list."`
+	RatingSources                   []CatalogRatingSource                `json:"rating_sources,omitempty" doc:"Per-source ratings on a 0-100 scale for movies and series; absent when there are none. Only the sources clients show, in the same order as ratings, except for a viewer who curates the item's metadata, who gets every stored source. Title pages render ratings, not this list."`
 	Ratings                         []CatalogRating                      `json:"ratings" doc:"The external ratings a title page shows, in display order: IMDb and TMDB, plus the sources an administrator turned on. Render every entry as its name and display text. Empty, never null"`
 	Extras                          []catalogpkg.ItemExtraInfo           `json:"extras,omitempty"`
 	FolderPaths                     []string                             `json:"folder_paths,omitempty" doc:"Absent for viewers without file-path visibility"`
@@ -393,14 +393,14 @@ type CatalogItemDetail struct {
 
 // CatalogRatingSource is one source's rating of an item.
 type CatalogRatingSource struct {
-	Source string  `json:"source" doc:"Rating source: imdb, tmdb, rt_critic, rt_audience, metacritic, metacritic_user, letterboxd, trakt, rogerebert, myanimelist, or mdblist. Clients should ignore names they do not recognize."`
+	Source string  `json:"source" doc:"Rating source: imdb, tmdb, or a name a metadata plugin declared, such as rt_critic. Clients should ignore names they do not recognize."`
 	Score  float64 `json:"score" minimum:"0" maximum:"100" doc:"Score on a 0-100 scale"`
 	Votes  *int64  `json:"votes,omitempty" minimum:"0" doc:"Number of votes behind the score, when the source reports it"`
 }
 
 // CatalogRating is one external rating as a title page shows it.
 type CatalogRating struct {
-	Source  string  `json:"source" doc:"Rating source, such as imdb, tmdb, rt_critic or rt_audience. Clients may use it to pick a source's mark and should fall back to name for one they do not recognize." example:"imdb"`
+	Source  string  `json:"source" doc:"Rating source: imdb, tmdb, or a name a metadata plugin declared, such as rt_critic. Clients may use it to pick a source's mark and should fall back to name for one they do not recognize." example:"imdb"`
 	Name    string  `json:"name" doc:"The source's name as a plain-text mark, shown next to the score" example:"IMDb"`
 	Score   float64 `json:"score" minimum:"0" maximum:"100" doc:"Score on a 0-100 scale"`
 	Display string  `json:"display" doc:"The score on the source's own scale, formatted for display" example:"8.5"`
@@ -424,13 +424,19 @@ func catalogRatingsOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) []C
 	return out
 }
 
-// shownRatingSources keeps the per-source rows of the sources sel shows.
+// shownRatingSources keeps the per-source rows of the sources sel shows, in
+// the order of ratings. A stored row of any other source, such as one a plugin
+// reported before it stopped declaring the source, is left out.
 func shownRatingSources(sources []catalogpkg.ItemRatingSourceInfo, sel ratingsources.Selection) []catalogpkg.ItemRatingSourceInfo {
-	var out []catalogpkg.ItemRatingSourceInfo
+	byName := make(map[string]catalogpkg.ItemRatingSourceInfo, len(sources))
+	names := make([]string, 0, len(sources))
 	for _, source := range sources {
-		if sel.Shows(source.Source) {
-			out = append(out, source)
-		}
+		byName[source.Source] = source
+		names = append(names, source.Source)
+	}
+	var out []catalogpkg.ItemRatingSourceInfo
+	for _, name := range sel.Sources(names) {
+		out = append(out, byName[name])
 	}
 	return out
 }

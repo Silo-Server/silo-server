@@ -973,7 +973,8 @@ func itemVideosFromRemote(contentID string, videos []RemoteVideo) []models.ItemV
 }
 
 // itemRatingSourcesFromResult converts pipeline rating sources into
-// media_item_rating_sources rows, in display order.
+// media_item_rating_sources rows, in display order, the source name breaking
+// ties so the rows are written in the same order every time.
 func itemRatingSourcesFromResult(contentID string, sources map[string]RatingSource) []models.ItemRatingSource {
 	rows := make([]models.ItemRatingSource, 0, len(sources))
 	for name, source := range sources {
@@ -990,7 +991,10 @@ func itemRatingSourcesFromResult(contentID string, sources map[string]RatingSour
 		rows = append(rows, row)
 	}
 	slices.SortFunc(rows, func(a, b models.ItemRatingSource) int {
-		return models.RatingSourceRank(a.Source) - models.RatingSourceRank(b.Source)
+		if rank := models.RatingSourceRank(a.Source) - models.RatingSourceRank(b.Source); rank != 0 {
+			return rank
+		}
+		return strings.Compare(a.Source, b.Source)
 	})
 	return rows
 }

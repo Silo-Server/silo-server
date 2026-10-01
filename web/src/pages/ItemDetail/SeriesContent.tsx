@@ -32,6 +32,7 @@ import MediaUserActionBar from "./components/MediaUserActionBar";
 import { SeasonCarouselSkeleton, RecommendationGridSkeleton } from "./components/SectionSkeletons";
 import { getSeasonDisplayTitle, resolveSeriesPrimaryAction } from "./itemDetailLayout";
 import { canCurateMetadata as canCurateMetadataForUser } from "@/lib/permissions";
+import { cn } from "@/lib/utils";
 
 export default function SeriesContent({
   item,
@@ -181,7 +182,10 @@ export default function SeriesContent({
 
           {(seasonsLoading || seasons.length > 0) && (
             <div
-              className="page-shell series-detail-navigation"
+              className={cn(
+                "page-shell series-detail-navigation",
+                !singleSeason && "series-detail-rail",
+              )}
               role="region"
               aria-label="Seasons and episodes"
             >

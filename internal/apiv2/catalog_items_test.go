@@ -116,7 +116,7 @@ func (f *fakeCatalog) ItemDetail(_ context.Context, v handlers.ItemViewer, id st
 	return &catalogpkg.ItemDetail{ContentID: id, Type: "movie", Title: "Heat", Year: 1995, Genres: []string{"Crime"}, Tagline: "A Los Angeles crime saga",
 		RatingSources: []catalogpkg.ItemRatingSourceInfo{
 			{Source: models.RatingSourceIMDB, Score: 83, Votes: &imdbVotes},
-			{Source: models.RatingSourceMDBList, Score: 86},
+			{Source: "mdblist", Score: 86},
 		},
 		Cast:           []catalogpkg.CastCredit{{Name: "Al Pacino", Character: "Vincent Hanna", PersonID: "7"}},
 		SeasonUserData: &catalogpkg.SeasonUserData{Played: true, WatchedCount: 1, LastFileID: &fileID},

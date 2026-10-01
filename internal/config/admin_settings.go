@@ -7,10 +7,10 @@ import (
 	"net/mail"
 	"net/url"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/models"
 	redisv9 "github.com/redis/go-redis/v9"
 	"github.com/robfig/cron/v3"
 )
@@ -59,14 +59,10 @@ const (
 
 // CatalogExtraRatingSourcesSettingKey lists, comma-separated, the rating
 // sources clients show in addition to IMDb and TMDB, which are always shown:
-// rt_critic, rt_audience, metacritic, letterboxd, and the like. Empty, the
+// sources metadata plugins declare, such as rt_critic. Empty, the
 // default, shows only IMDb and TMDB, because the owners of the other scores
 // restrict how others may display them. See internal/ratingsources.
 const CatalogExtraRatingSourcesSettingKey = "catalog.extra_rating_sources"
-
-// ratingSourceIDPattern is the shape of a rating source name: the built-in
-// names and any a metadata plugin declares.
-var ratingSourceIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
 
 // ParseRatingSourceList splits a CatalogExtraRatingSourcesSettingKey value
 // into source names, dropping blanks, duplicates, and malformed names.
@@ -85,7 +81,7 @@ func splitRatingSourceList(raw string) (sources []string, malformed string) {
 		if source == "" {
 			continue
 		}
-		if !ratingSourceIDPattern.MatchString(source) {
+		if !models.ValidRatingSourceID(source) {
 			if malformed == "" {
 				malformed = source
 			}
@@ -842,7 +838,7 @@ func ValidateArtworkStorageSettings(effective map[string]string) error {
 // normalizeRatingSourceList canonicalizes a comma-separated list of rating
 // source names: trimmed, lowercased, and deduplicated. A name that is not a
 // well-formed source name is an error rather than silently dropped. A
-// well-formed name without a source definition is kept but shows nothing (see
+// well-formed name no enabled plugin declares is kept but shows nothing (see
 // ratingsources.Build).
 func normalizeRatingSourceList(key, value string) (string, error) {
 	sources, malformed := splitRatingSourceList(value)
