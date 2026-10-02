@@ -5813,12 +5813,16 @@ const (
 // bitrate_policy_unavailable belongs here for the same reason: it replaces the
 // 4K and HDR refusals of a version that exceeds the stream's bitrate limit, and
 // a lower-bitrate version may fit that limit.
+//
+// source_unreadable belongs here because the refusal is about one damaged
+// file, not the item: a readable version of the same item still plays.
 func terminalAllowsAlternateFileV3(terminal *playback.TerminalV3) bool {
 	if terminal == nil {
 		return false
 	}
 	switch terminal.Reason {
-	case terminalNoAlternateVersionV3, terminalHDRTranscodeUnsupportedV3, terminalSubtitleConversionUnsupportedV3, terminalBitratePolicyUnavailableV3:
+	case terminalNoAlternateVersionV3, terminalHDRTranscodeUnsupportedV3, terminalSubtitleConversionUnsupportedV3, terminalBitratePolicyUnavailableV3,
+		playback.TerminalSourceUnreadableV3:
 		return true
 	default:
 		return false

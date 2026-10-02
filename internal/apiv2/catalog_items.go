@@ -489,6 +489,7 @@ type EpisodeFile struct {
 	AudioChannels int    `json:"audio_channels,omitempty"`
 	Container     string `json:"container,omitempty"`
 	FileSize      int64  `json:"file_size"`
+	Unreadable    bool   `json:"unreadable,omitempty" doc:"Present and true when the server could not read the file (empty, corrupt, or truncated). Playback of it answers the terminal reason source_unreadable until the file is replaced and rescanned."`
 }
 
 // Episode is one episode row of a season listing.
@@ -1371,7 +1372,7 @@ func episodesOf(views []handlers.EpisodeView) []Episode {
 			UserData: watchRollupOf(e.UserData), OverlaySummary: catalogOverlayOf(e.OverlaySummary)}
 		for _, f := range e.Files {
 			ep.Files = append(ep.Files, EpisodeFile{FileID: IDFromInt(int64(f.FileID)), Resolution: f.Resolution, CodecVideo: f.CodecVideo, HDR: f.HDR,
-				AudioChannels: f.AudioChannels, Container: f.Container, FileSize: f.FileSize})
+				AudioChannels: f.AudioChannels, Container: f.Container, FileSize: f.FileSize, Unreadable: f.Unreadable})
 		}
 		out = append(out, ep)
 	}

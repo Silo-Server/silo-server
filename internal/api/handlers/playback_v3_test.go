@@ -4219,6 +4219,47 @@ func v3HandlerStartRequest() playback.StartRequestV3 {
 	return playback.StartRequestV3{ProtocolVersion: playback.ProtocolV3, ClientFeatures: []string{playback.FeaturePlaybackPlanV3}, FileID: 42, ProfileID: "profile-1", PlaybackAttemptID: "attempt-handler-0001", QualityPreference: "original", SubtitleFidelityPreference: playback.SubtitleFidelityCompatibleV3, Capabilities: playback.ClientCodecCapabilitiesV3{VideoEvidence: playback.EvidenceExactV3, AudioEvidence: playback.EvidenceExactV3, CodecsVideo: []string{"h264"}, CodecsVideoHardware: []string{"h264"}, CodecsAudio: []string{"aac"}, Containers: []string{"mp4"}, MaxResolution: "1080p", VideoDecode: []playback.VideoDecodeCapabilityV3{{Codec: "h264", Profiles: []string{"high"}, Levels: []int{41}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 20_000, Hardware: true}}}, ClientPlaybackContext: playback.ClientPlaybackContextV3{ProtocolVersion: playback.ProtocolV3, FormFactor: "tv", AppVersion: "test", Device: playback.DeviceContextV3{Platform: "android"}, Output: playback.OutputContextV3{OutputContextID: "route-1"}, Deliveries: map[string]playback.DeliveryCapabilityV3{playback.DeliveryClassOriginalHTTPV3: {Enabled: true, SupportedOnDevice: true, Subtitles: playback.DeliverySubtitleCapabilitiesV3{EmbeddedText: true, SidecarText: true}}}}}
 }
 
+// A file ffprobe rejected is refused with a non-retryable reason that names the
+// file, and a readable version of the same item plays in its place.
+func TestHandleStartPlaybackV3RefusesUnreadableFileAndFallsBackToReadableVersion(t *testing.T) {
+	failedAt := time.Now().UTC()
+	broken := &models.MediaFile{ID: 42, ContentID: "movie-1", FilePath: writePlaybackTestMediaFile(t, "broken.mkv"), ProbeFailedAt: &failedAt}
+	start := func(t *testing.T, files ...*models.MediaFile) playback.DecisionResponseV3 {
+		t.Helper()
+		byID := make(map[int]*models.MediaFile, len(files))
+		for _, file := range files {
+			byID[file.ID] = file
+		}
+		handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{files: byID})
+		handler.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{"movie-1": files}}
+		handler.ItemAccess = allowAllPlaybackItemAccess{}
+		request := v3HandlerStartRequest()
+		request.QualityPreference = "auto"
+		rr := httptest.NewRecorder()
+		handler.HandleStartPlayback(rr, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, request))).WithContext(newAuthorizedPlaybackContext()))
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("start status = %d, body = %s", rr.Code, rr.Body.String())
+		}
+		var response playback.DecisionResponseV3
+		if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+
+	response := start(t, broken)
+	if response.Terminal == nil || response.Terminal.Reason != playback.TerminalSourceUnreadableV3 || response.Terminal.Retryable {
+		t.Fatalf("terminal = %#v, plan = %#v", response.Terminal, response.PlaybackPlan)
+	}
+
+	readable := v3HandlerFixtureFile(t)
+	readable.ID = 84
+	response = start(t, broken, readable)
+	if response.Terminal != nil || response.PlaybackPlan == nil || response.PlaybackPlan.EffectiveMediaFileID != readable.ID {
+		t.Fatalf("fallback terminal = %#v, plan = %#v", response.Terminal, response.PlaybackPlan)
+	}
+}
+
 func TestHandleReplanPlaybackV3PreservesOmittedSubtitleAndReportsUnavailableInFallbackVersion(t *testing.T) {
 	source := v3HandlerFixtureFile(t)
 	source.Resolution = "2160p"
@@ -6267,6 +6308,8 @@ func TestTerminalAllowsAlternateFileV3CoversSubtitleForcedRefusals(t *testing.T)
 		terminalNoAlternateVersionV3,
 		terminalHDRTranscodeUnsupportedV3,
 		terminalSubtitleConversionUnsupportedV3,
+		// A damaged file says nothing about the item's other versions.
+		playback.TerminalSourceUnreadableV3,
 	} {
 		if !terminalAllowsAlternateFileV3(&playback.TerminalV3{Reason: reason}) {
 			t.Fatalf("terminal %q must allow an alternate-version retry", reason)

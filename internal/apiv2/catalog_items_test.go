@@ -650,3 +650,29 @@ func TestGetCatalogItemScopesVersionsToLibraryWhenEnabled(t *testing.T) {
 		t.Fatalf("viewer = %+v", fake.lastViewer.Access)
 	}
 }
+
+// An unreadable episode file is flagged on the v2 wire and the flag is
+// omitted for every readable file.
+func TestEpisodesOfFlagsUnreadableFiles(t *testing.T) {
+	episodes := episodesOf([]handlers.EpisodeView{{
+		ContentID: "episode:1",
+		Files: []handlers.EpisodeFileView{
+			{FileID: 1, Unreadable: true},
+			{FileID: 2, Resolution: "1080p"},
+		},
+	}})
+	body, err := json.Marshal(episodes[0].Files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var files []map[string]any
+	if err := json.Unmarshal(body, &files); err != nil {
+		t.Fatal(err)
+	}
+	if files[0]["unreadable"] != true {
+		t.Fatalf("unreadable file = %s", body)
+	}
+	if _, ok := files[1]["unreadable"]; ok {
+		t.Fatalf("readable file carries unreadable: %s", body)
+	}
+}

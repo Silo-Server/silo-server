@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -95,6 +96,20 @@ func ProbeFile(ctx context.Context, ffprobePath string, filePath string) (*Probe
 	}
 
 	return probe, nil
+}
+
+// IsProbeRejection reports whether err, returned by ProbeFile under ctx, means
+// ffprobe ran to completion and refused the file: a non-zero exit status while
+// the caller's context was still live. Zero-byte, corrupt, and truncated media
+// end this way. A canceled or timed-out probe, a process killed by a signal,
+// a missing binary, or unparseable output is not a rejection; those say
+// nothing about the file and stay retryable.
+func IsProbeRejection(ctx context.Context, err error) bool {
+	if err == nil || ctx.Err() != nil {
+		return false
+	}
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr) && exitErr.ExitCode() > 0
 }
 
 // ProbePrimaryVideoTrack runs a bounded metadata-only FFprobe and returns the

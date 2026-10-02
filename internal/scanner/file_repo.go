@@ -74,7 +74,7 @@ const fileColumns = `id, content_id, episode_id, extra_id, season_number, episod
 	presentation_kind, presentation_group_key, presentation_part_index, presentation_part_total,
 	multi_episode_start, multi_episode_end,
 	multiple_pps, multiple_pps_scan_size, multiple_pps_scan_mtime,
-	probe_source, probe_updated_at, match_attempted_at, missing_since,
+	probe_source, probe_updated_at, probe_failed_at, match_attempted_at, missing_since,
 	first_seen_scan_run_id, created_at, updated_at`
 
 const overlayFileColumns = `content_id, episode_id, media_folder_id, file_path,
@@ -99,7 +99,7 @@ const mfFileColumns = `mf.id, mf.content_id, mf.episode_id, mf.extra_id, mf.seas
 	mf.presentation_kind, mf.presentation_group_key, mf.presentation_part_index, mf.presentation_part_total,
 	mf.multi_episode_start, mf.multi_episode_end,
 	mf.multiple_pps, mf.multiple_pps_scan_size, mf.multiple_pps_scan_mtime,
-	mf.probe_source, mf.probe_updated_at, mf.match_attempted_at, mf.missing_since,
+	mf.probe_source, mf.probe_updated_at, mf.probe_failed_at, mf.match_attempted_at, mf.missing_since,
 	mf.first_seen_scan_run_id, mf.created_at, mf.updated_at`
 
 // scanMediaFile scans a single row into a *models.MediaFile.
@@ -221,6 +221,7 @@ func scanMediaFile(row pgx.Row) (*models.MediaFile, error) {
 		&f.MultiplePPSScanMtime,
 		&probeSource,
 		&f.ProbeUpdatedAt,
+		&f.ProbeFailedAt,
 		&f.MatchAttemptedAt,
 		&f.MissingSince,
 		&firstSeenScanRunID,
@@ -540,6 +541,7 @@ func scanMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 			&f.MultiplePPSScanMtime,
 			&probeSource,
 			&f.ProbeUpdatedAt,
+			&f.ProbeFailedAt,
 			&f.MatchAttemptedAt,
 			&f.MissingSince,
 			&firstSeenScanRunID,
@@ -955,7 +957,7 @@ func (r *FileRepository) upsertWithQueryer(ctx context.Context, queryer fileQuer
 		edition_raw, edition_key, edition_confidence, edition_source,
 		presentation_kind, presentation_group_key, presentation_part_index, presentation_part_total,
 		multi_episode_start, multi_episode_end,
-		probe_source, probe_updated_at, missing_since, first_seen_scan_run_id
+		probe_source, probe_updated_at, missing_since, first_seen_scan_run_id, probe_failed_at
 	) VALUES (
 		$1, $2, $3, $4, $5,
 		$6, $7, $8, $9, $10,
@@ -967,7 +969,7 @@ func (r *FileRepository) upsertWithQueryer(ctx context.Context, queryer fileQuer
 		$39, $40, $41, $42,
 		$43, $44, $45, $46,
 		$47, $48,
-		$49, $50, $51, $52
+		$49, $50, $51, $52, $53
 	)
 	ON CONFLICT (file_path) DO UPDATE SET
 		content_id = CASE
@@ -1025,6 +1027,7 @@ func (r *FileRepository) upsertWithQueryer(ctx context.Context, queryer fileQuer
 		multi_episode_end = EXCLUDED.multi_episode_end,
 		probe_source = EXCLUDED.probe_source,
 		probe_updated_at = EXCLUDED.probe_updated_at,
+		probe_failed_at = EXCLUDED.probe_failed_at,
 		match_suppressed_at = NULL,
 		missing_since = NULL,
 		updated_at = NOW()
@@ -1083,6 +1086,7 @@ func (r *FileRepository) upsertWithQueryer(ctx context.Context, queryer fileQuer
 		mf.ProbeUpdatedAt,
 		mf.MissingSince,
 		nilIfEmpty(scanbatch.RunID(ctx)),
+		mf.ProbeFailedAt,
 	)
 	if _, ok := queryer.(*fileUpsertCapture); ok {
 		return nil, nil
@@ -1290,6 +1294,26 @@ func (r *FileRepository) SetChapterThumbnailFailure(
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrFileNotFound
+	}
+	return nil
+}
+
+// MarkProbeFailed records that ffprobe rejected a file whose row is otherwise
+// left untouched. Only rows with no successful probe are marked, so a probe
+// that succeeded concurrently, or valid metadata from an earlier probe, is never
+// overridden, and a row already marked is not rewritten. The next successful
+// probe clears the mark through Upsert.
+func (r *FileRepository) MarkProbeFailed(ctx context.Context, fileID int) error {
+	if _, err := r.pool.Exec(ctx, `
+		UPDATE media_files
+		SET probe_failed_at = NOW(),
+		    updated_at = NOW()
+		WHERE id = $1
+		  AND probe_updated_at IS NULL
+		  AND probe_failed_at IS NULL`,
+		fileID,
+	); err != nil {
+		return fmt.Errorf("recording probe failure: %w", err)
 	}
 	return nil
 }

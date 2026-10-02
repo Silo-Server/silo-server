@@ -20964,6 +20964,8 @@ export interface components {
       file_size: number;
       hdr: boolean;
       resolution?: string;
+      /** @description Present and true when the server could not read the file (empty, corrupt, or truncated). Playback of it answers the terminal reason source_unreadable until the file is replaced and rescanned. */
+      unreadable?: boolean;
     };
     EventsCapabilities: {
       /** @description Whether the current principal may use the capability */

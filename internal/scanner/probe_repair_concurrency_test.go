@@ -50,6 +50,7 @@ type probeRepairTestRepository struct {
 	mu          sync.Mutex
 	files       map[int]*models.MediaFile
 	upsertCalls int
+	markCalls   int
 }
 
 func (r *probeRepairTestRepository) GetByID(_ context.Context, id int) (*models.MediaFile, error) {
@@ -74,6 +75,19 @@ func (r *probeRepairTestRepository) Upsert(_ context.Context, file models.MediaF
 	r.files[copy.ID] = &copy
 	result := copy
 	return &result, nil
+}
+
+func (r *probeRepairTestRepository) MarkProbeFailed(_ context.Context, id int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.markCalls++
+	file, ok := r.files[id]
+	if !ok || file.ProbeUpdatedAt != nil || file.ProbeFailedAt != nil {
+		return nil
+	}
+	now := time.Now().UTC()
+	file.ProbeFailedAt = &now
+	return nil
 }
 
 func (r *probeRepairTestRepository) upserts() int {

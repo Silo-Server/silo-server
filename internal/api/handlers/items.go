@@ -415,6 +415,9 @@ type episodeFileResponse struct {
 	AudioChannels int    `json:"audio_channels,omitempty"`
 	Container     string `json:"container,omitempty"`
 	FileSize      int64  `json:"file_size"`
+	// Unreadable feeds the v2 episode file; /api/v1 is frozen, so it stays off
+	// that wire.
+	Unreadable bool `json:"-"`
 }
 
 // episodeResponse is the shape of an episode in API responses.
@@ -1264,6 +1267,7 @@ func episodeFileResponses(files []*models.MediaFile, filter catalog.AccessFilter
 			AudioChannels: f.AudioChannels,
 			Container:     f.Container,
 			FileSize:      f.FileSize,
+			Unreadable:    f.ProbeRejected(),
 		})
 	}
 	return resp

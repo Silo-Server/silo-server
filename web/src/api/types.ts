@@ -1282,6 +1282,8 @@ export interface EpisodeFile {
   audio_channels: number;
   container: string;
   file_size: number;
+  /** True when the server could not read the file (empty, corrupt, or truncated). */
+  unreadable?: boolean;
 }
 
 export interface EpisodeListItem {
