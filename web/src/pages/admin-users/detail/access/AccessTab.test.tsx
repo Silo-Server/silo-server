@@ -92,6 +92,7 @@ const GROUPS: AccessGroup[] = [
     max_transcodes: 0,
     max_remote_stream_bitrate_kbps: 0,
     max_local_stream_bitrate_kbps: 0,
+    max_profiles: 5,
     allowed_permissions: null,
     requests_allowed: true,
     is_default: false,
@@ -113,6 +114,7 @@ const GROUPS: AccessGroup[] = [
     max_transcodes: 0,
     max_remote_stream_bitrate_kbps: 8000,
     max_local_stream_bitrate_kbps: 0,
+    max_profiles: 2,
     allowed_permissions: [PERMISSION_MARKER_EDIT],
     requests_allowed: false,
     is_default: false,
@@ -148,7 +150,7 @@ const USER: AdminUser = {
   max_local_stream_bitrate_kbps: null,
   transcode_allowed: null,
   audio_transcode_allowed: null,
-  max_profiles: 4,
+  max_profiles: null,
   download_allowed: null,
   download_transcode_allowed: null,
   requests_allowed: null,
@@ -163,6 +165,7 @@ const USER: AdminUser = {
     max_transcodes: 0,
     max_remote_stream_bitrate_kbps: 0,
     max_local_stream_bitrate_kbps: 0,
+    max_profiles: 4,
     transcode_allowed: true,
     audio_transcode_allowed: true,
     download_allowed: true,
@@ -185,6 +188,7 @@ const GUEST: AdminUser = {
     max_streams: 1,
     transcode_allowed: false,
     max_remote_stream_bitrate_kbps: 8000,
+    max_profiles: 2,
     download_allowed: false,
     requests_allowed: false,
   },
@@ -309,6 +313,17 @@ describe("card editing", () => {
     for (const title of ["Library access", "Downloads", "Playback & streaming", "Requests"]) {
       expect(within(card(title)).getByText("View only")).toBeInTheDocument();
     }
+  });
+
+  it("keeps an admin's profile limit to the owner while the rest of sign-in stays editable", async () => {
+    const ui = userEvent.setup();
+    mount({ ...USER, role: "admin" }, { policyManageable: false });
+    await ui.click(screen.getByRole("button", { name: "Edit Sign-in & role" }));
+    const limit = within(card("Sign-in & role")).getByRole("group", { name: "Profiles allowed" });
+    for (const option of within(limit).getAllByRole("button")) {
+      expect(option).toBeDisabled();
+    }
+    expect(within(card("Sign-in & role")).getByLabelText("Email")).toBeEnabled();
   });
 
   it("saves one PUT with only the changed fields and the captured validator", async () => {
@@ -444,6 +459,55 @@ describe("Sign-in & role", () => {
     await ui.click(within(signIn).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(mocks.update).toHaveBeenCalled());
     expect(lastBody()).toEqual({ role: "admin", access_group_id: null });
+  });
+
+  it("overrides the group's profile limit, seeded from it", async () => {
+    const ui = userEvent.setup();
+    mount(GUEST);
+    expect(row(card("Sign-in & role"), "Profiles allowed")).toBe("2 · 1 usedGROUP");
+    const signIn = await edit(ui, "Sign-in & role");
+    await customize(ui, signIn, "Profiles allowed");
+    const limit = within(signIn).getByRole("spinbutton", { name: "Profiles allowed" });
+    expect(limit).toHaveValue(2);
+    await ui.clear(limit);
+    await ui.type(limit, "3");
+    await ui.click(within(signIn).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mocks.update).toHaveBeenCalled());
+    expect(lastBody()).toEqual({ max_profiles: 3 });
+  });
+
+  it("returns a profile limit override to the group's with null", async () => {
+    const ui = userEvent.setup();
+    mount({
+      ...GUEST,
+      max_profiles: 6,
+      effective_policy: { ...GUEST.effective_policy, max_profiles: 6 },
+    });
+    expect(row(card("Sign-in & role"), "Profiles allowed")).toBe("6 · 1 usedGroup: 2CUSTOM");
+    const signIn = await edit(ui, "Sign-in & role");
+    await ui.click(
+      within(segment(signIn, "Profiles allowed")).getByRole("button", { name: "Default · 2" }),
+    );
+    await ui.click(within(signIn).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mocks.update).toHaveBeenCalled());
+    expect(lastBody()).toEqual({ max_profiles: null });
+  });
+
+  it("won't save a custom profile limit below 1 in place of an override", async () => {
+    const ui = userEvent.setup();
+    mount({
+      ...GUEST,
+      max_profiles: 6,
+      effective_policy: { ...GUEST.effective_policy, max_profiles: 6 },
+    });
+    const signIn = await edit(ui, "Sign-in & role");
+    const limit = within(signIn).getByRole("spinbutton", { name: "Profiles allowed" });
+    await ui.clear(limit);
+    await ui.type(limit, "0");
+    expect(
+      within(signIn).getByText("Enter a whole number of at least 1, or switch back to Default."),
+    ).toBeInTheDocument();
+    expect(within(signIn).getByRole("button", { name: "Save" })).toBeDisabled();
   });
 });
 

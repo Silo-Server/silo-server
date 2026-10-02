@@ -88,8 +88,10 @@ export function StatsRow({
       key="profiles"
       label="Profiles"
       value={profiles.isError ? FAILED : profileCount === undefined ? LOADING : profileCount}
-      total={profileCount === undefined ? undefined : user.max_profiles}
-      progress={profileCount === undefined ? undefined : ratio(profileCount, user.max_profiles)}
+      total={profileCount === undefined ? undefined : effective.max_profiles}
+      progress={
+        profileCount === undefined ? undefined : ratio(profileCount, effective.max_profiles)
+      }
     />,
   );
 

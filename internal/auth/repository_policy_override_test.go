@@ -23,11 +23,9 @@ func TestUserRepositoryPolicyOverridesDB(t *testing.T) {
 	}
 	if created.LibraryIDs != nil || created.MaxPlaybackQuality != nil || created.MaxStreams != nil ||
 		created.MaxTranscodes != nil || created.TranscodeAllowed != nil || created.AudioTranscodeAllowed != nil ||
-		created.DownloadAllowed != nil || created.DownloadTranscodeAllowed != nil || created.RequestsAllowed != nil {
+		created.DownloadAllowed != nil || created.DownloadTranscodeAllowed != nil || created.RequestsAllowed != nil ||
+		created.MaxProfiles != nil {
 		t.Fatalf("new user should inherit every policy field, got %+v", created)
-	}
-	if created.MaxProfiles < 1 {
-		t.Fatalf("MaxProfiles = %d, want the DB default", created.MaxProfiles)
 	}
 
 	input := createAuthAccessGroupUserInput(suffix, "policy-override", nil)
@@ -40,6 +38,7 @@ func TestUserRepositoryPolicyOverridesDB(t *testing.T) {
 	input.DownloadAllowed = ptrOf(true)
 	input.DownloadTranscodeAllowed = ptrOf(false)
 	input.RequestsAllowed = ptrOf(false)
+	input.MaxProfiles = ptrOf(2)
 	overridden, err := users.Create(ctx, input)
 	if err != nil {
 		t.Fatalf("Create(overrides) error: %v", err)
@@ -62,6 +61,9 @@ func TestUserRepositoryPolicyOverridesDB(t *testing.T) {
 	if overridden.RequestsAllowed == nil || *overridden.RequestsAllowed {
 		t.Fatalf("RequestsAllowed = %v, want explicit false", overridden.RequestsAllowed)
 	}
+	if overridden.MaxProfiles == nil || *overridden.MaxProfiles != 2 {
+		t.Fatalf("MaxProfiles = %v, want 2", overridden.MaxProfiles)
+	}
 
 	// Update: set overrides on the inheriting user, bumping the policy
 	// revision only for the quality ceiling.
@@ -71,6 +73,7 @@ func TestUserRepositoryPolicyOverridesDB(t *testing.T) {
 		MaxPlaybackQuality: models.SetValue("1080p"),
 		MaxStreams:         models.SetValue(5),
 		DownloadAllowed:    models.SetValue(false),
+		MaxProfiles:        models.SetValue(3),
 	}); err != nil {
 		t.Fatalf("Update(set overrides) error: %v", err)
 	}
@@ -90,6 +93,9 @@ func TestUserRepositoryPolicyOverridesDB(t *testing.T) {
 	if updated.DownloadAllowed == nil || *updated.DownloadAllowed {
 		t.Fatalf("DownloadAllowed = %v, want explicit false", updated.DownloadAllowed)
 	}
+	if updated.MaxProfiles == nil || *updated.MaxProfiles != 3 {
+		t.Fatalf("MaxProfiles = %v, want 3", updated.MaxProfiles)
+	}
 	if updated.MaxTranscodes != nil || updated.TranscodeAllowed != nil {
 		t.Fatalf("untouched fields should still inherit, got transcodes=%v transcode_allowed=%v", updated.MaxTranscodes, updated.TranscodeAllowed)
 	}
@@ -103,6 +109,7 @@ func TestUserRepositoryPolicyOverridesDB(t *testing.T) {
 		MaxPlaybackQuality: models.ClearValue[string](),
 		MaxStreams:         models.ClearValue[int](),
 		DownloadAllowed:    models.ClearValue[bool](),
+		MaxProfiles:        models.ClearValue[int](),
 	}); err != nil {
 		t.Fatalf("Update(clear overrides) error: %v", err)
 	}
@@ -110,7 +117,8 @@ func TestUserRepositoryPolicyOverridesDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID() after clear error: %v", err)
 	}
-	if cleared.LibraryIDs != nil || cleared.MaxPlaybackQuality != nil || cleared.MaxStreams != nil || cleared.DownloadAllowed != nil {
+	if cleared.LibraryIDs != nil || cleared.MaxPlaybackQuality != nil || cleared.MaxStreams != nil || cleared.DownloadAllowed != nil ||
+		cleared.MaxProfiles != nil {
 		t.Fatalf("cleared fields should inherit, got %+v", cleared)
 	}
 	if cleared.AccessPolicyRevision != updated.AccessPolicyRevision+1 {
