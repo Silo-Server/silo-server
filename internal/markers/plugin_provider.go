@@ -553,7 +553,7 @@ func PluginDefaultFetchPriorityFromMetadata(metadata map[string]any) (int, bool)
 
 // PluginSupportsContributionFromMetadata reports whether a marker capability
 // accepts submissions. Existing manifests omit the key and keep the historical
-// submitter behaviour; only an explicit false makes the provider fetch-only.
+// submitter behavior; only an explicit false makes the provider fetch-only.
 func PluginSupportsContributionFromMetadata(metadata map[string]any) bool {
 	switch value := metadata["supports_contribution"].(type) {
 	case bool:
