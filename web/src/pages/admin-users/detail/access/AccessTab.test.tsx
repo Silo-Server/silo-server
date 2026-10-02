@@ -187,7 +187,13 @@ const GUEST: AdminUser = {
   },
 };
 
-function mount(user: AdminUser = USER, { manageable = true } = {}) {
+function mount(
+  user: AdminUser = USER,
+  {
+    manageable = true,
+    policyManageable,
+  }: { manageable?: boolean; policyManageable?: boolean } = {},
+) {
   mocks.user = user;
   const editor: AdminUserEditor = { user, etag: '"cached"', profileContext: CONTEXT };
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -195,7 +201,13 @@ function mount(user: AdminUser = USER, { manageable = true } = {}) {
     <QueryClientProvider client={client}>
       <MemoryRouter>
         <CardEditingProvider>
-          <AccessTab user={user} editor={editor} manageable={manageable} available />
+          <AccessTab
+            user={user}
+            editor={editor}
+            manageable={manageable}
+            policyManageable={policyManageable ?? manageable}
+            available
+          />
         </CardEditingProvider>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -283,6 +295,17 @@ describe("card editing", () => {
     mount(USER, { manageable: false });
     expect(screen.queryByRole("button", { name: /^Edit / })).toBeNull();
     expect(within(card("Playback & streaming")).getByText("View only")).toBeInTheDocument();
+  });
+
+  it("keeps an admin's access and limits to the owner", () => {
+    mount({ ...USER, role: "admin" }, { policyManageable: false });
+    expect(
+      screen.getByText("Only the server owner can change an admin's access and limits."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit Sign-in & role" })).toBeInTheDocument();
+    for (const title of ["Library access", "Downloads", "Playback & streaming", "Requests"]) {
+      expect(within(card(title)).getByText("View only")).toBeInTheDocument();
+    }
   });
 
   it("saves one PUT with only the changed fields and the captured validator", async () => {

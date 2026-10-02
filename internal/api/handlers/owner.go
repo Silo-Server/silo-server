@@ -58,6 +58,8 @@ func ownerError(err error) error {
 		return &APIError{Status: http.StatusForbidden, Code: codeOwnerProtected, Message: "The server owner cannot be demoted, disabled or deleted", cause: err}
 	case errors.Is(err, auth.ErrAdminProtected):
 		return &APIError{Status: http.StatusForbidden, Code: codeOwnerProtected, Message: "Only the server owner can grant the admin role or change another admin account", cause: err}
+	case errors.Is(err, auth.ErrAdminPolicyProtected):
+		return &APIError{Status: http.StatusForbidden, Code: codeOwnerProtected, Message: "Only the server owner can change an admin account's access policy", cause: err}
 	case errors.Is(err, auth.ErrSelfStanding):
 		return &APIError{Status: http.StatusForbidden, Code: codeOwnerProtected, Message: "You cannot change your own role, disable your account, or delete it", cause: err}
 	case errors.Is(err, auth.ErrNotOwner):

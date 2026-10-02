@@ -9,7 +9,12 @@ import {
   useAdminUserCapabilities,
   useViewerIsOwner,
 } from "@/hooks/queries/admin/users";
-import { accountRoleLabel, canManageAccount, canViewAsAccount } from "@/lib/accountOwner";
+import {
+  accountRoleLabel,
+  canChangeAccessPolicy,
+  canManageAccount,
+  canViewAsAccount,
+} from "@/lib/accountOwner";
 import { useAdminServerSettings } from "@/hooks/queries/admin/settings";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import { useAccessGroups } from "@/hooks/queries/admin/accessGroups";
@@ -87,6 +92,7 @@ import {
 import { formatDateTime as formatDateTimePreferred } from "@/lib/datetime";
 import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
 
+const POLICY_LOCKED = "Only the server owner can change an admin's access and limits.";
 const PAGE_SIZE_OPTIONS = ["25", "50", "100"] as const;
 type UserSortField = "username" | "email" | "role" | "enabled" | "created_at" | "last_active_at";
 type SortDirection = "asc" | "desc";
@@ -744,6 +750,9 @@ function UserForm({
   // No account changes its own role or disables itself; the server refuses
   // both. The Owner's standing fixes the same fields.
   const ownAccount = user?.id !== undefined && user?.id === viewerId;
+  // Only the Owner changes an admin's access policy, its own included; the
+  // server refuses anyone else.
+  const policyLocked = user !== undefined && !canChangeAccessPolicy(user, viewerId, viewerIsOwner);
   const [createDefaultProfile, setCreateDefaultProfile] = useState(true);
   async function reload() {
     if (!editor || busy.current) return;
@@ -856,7 +865,7 @@ function UserForm({
           permissions,
           enabled,
           max_profiles: maxProfiles,
-          ...policyUpdateFields(policy),
+          ...(policyLocked ? {} : policyUpdateFields(policy)),
         };
         if (groupToSend !== undefined) {
           body.access_group_id = groupToSend;
@@ -1114,22 +1123,30 @@ function UserForm({
                 }
               />
             </div>
-            <PolicyAccessFields
-              state={policy}
-              onChange={setPolicy}
-              source={hintSource}
-              effective={inheritHints}
-              libraries={libraries}
-            />
+            <fieldset disabled={policyLocked} className="m-0 min-w-0 space-y-4 border-0 p-0">
+              {policyLocked && <p className="text-muted-foreground text-xs">{POLICY_LOCKED}</p>}
+              <PolicyAccessFields
+                disabled={policyLocked}
+                state={policy}
+                onChange={setPolicy}
+                source={hintSource}
+                effective={inheritHints}
+                libraries={libraries}
+              />
+            </fieldset>
           </TabsContent>
 
           <TabsContent value="limits" className="mt-0 space-y-4">
-            <PolicyLimitFields
-              state={policy}
-              onChange={setPolicy}
-              source={hintSource}
-              effective={inheritHints}
-            />
+            <fieldset disabled={policyLocked} className="m-0 min-w-0 space-y-4 border-0 p-0">
+              {policyLocked && <p className="text-muted-foreground text-xs">{POLICY_LOCKED}</p>}
+              <PolicyLimitFields
+                disabled={policyLocked}
+                state={policy}
+                onChange={setPolicy}
+                source={hintSource}
+                effective={inheritHints}
+              />
+            </fieldset>
             <div className="space-y-1">
               <Label htmlFor={maxProfilesId}>Max Profiles</Label>
               <Input

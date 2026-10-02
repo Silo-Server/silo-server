@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -28,6 +29,10 @@ var (
 	// itself, or deleting itself: an admin that does any of these locks
 	// itself out, and only the Owner changes or removes admins.
 	ErrSelfStanding = errors.New("an account cannot change its own role, disable itself, or delete itself")
+	// ErrAdminPolicyProtected refuses an admin other than the Owner changing
+	// its own access policy: an admin's limits are the Owner's to set, so a
+	// restricted shared admin cannot lift them.
+	ErrAdminPolicyProtected = errors.New("only the server owner can change an admin account's access policy")
 	// ErrNotOwner refuses a caller other than the Owner transferring ownership.
 	ErrNotOwner = errors.New("only the server owner can transfer ownership")
 	// ErrOwnershipTarget refuses transferring ownership to an account that
@@ -69,8 +74,8 @@ func CheckGrantAdmin(actor OwnerActor, role string) error {
 
 // CheckOwnerUpdate is CheckOwnerTarget plus promotion and standing: only the
 // Owner may make an account an admin, the update may not remove the Owner's
-// admin role or disable it, and no account may change its own role or
-// disable itself.
+// admin role or disable it, no account may change its own role or disable
+// itself, and only the Owner may change an admin's access policy.
 func CheckOwnerUpdate(actor OwnerActor, target *models.User, input models.UpdateUserInput) error {
 	if err := CheckOwnerTarget(actor, target); err != nil {
 		return err
@@ -91,7 +96,54 @@ func CheckOwnerUpdate(actor OwnerActor, target *models.User, input models.Update
 		((input.Role != nil && *input.Role != target.Role) || (input.Enabled != nil && !*input.Enabled)) {
 		return ErrSelfStanding
 	}
+	// CheckOwnerTarget already keeps other admins' accounts to the Owner, so
+	// this reaches an admin editing its own account.
+	if target.Role == models.RoleAdmin && !actor.IsOwner && changesAccessPolicy(target, input) {
+		return ErrAdminPolicyProtected
+	}
 	return nil
+}
+
+// changesAccessPolicy reports whether input sets an access-policy override to
+// a value other than target's current one. A form that re-sends unchanged
+// values is not a change.
+func changesAccessPolicy(target *models.User, input models.UpdateUserInput) bool {
+	return changesLibraryIDs(input.LibraryIDs, target.LibraryIDs) ||
+		changesOverride(input.MaxPlaybackQuality, target.MaxPlaybackQuality) ||
+		changesOverride(input.MaxStreams, target.MaxStreams) ||
+		changesOverride(input.MaxTranscodes, target.MaxTranscodes) ||
+		changesOverride(input.MaxRemoteStreamBitrateKbps, target.MaxRemoteStreamBitrateKbps) ||
+		changesOverride(input.MaxLocalStreamBitrateKbps, target.MaxLocalStreamBitrateKbps) ||
+		changesOverride(input.TranscodeAllowed, target.TranscodeAllowed) ||
+		changesOverride(input.AudioTranscodeAllowed, target.AudioTranscodeAllowed) ||
+		changesOverride(input.DownloadAllowed, target.DownloadAllowed) ||
+		changesOverride(input.DownloadTranscodeAllowed, target.DownloadTranscodeAllowed) ||
+		changesOverride(input.RequestsAllowed, target.RequestsAllowed)
+}
+
+func changesOverride[T comparable](input models.Optional[T], current *T) bool {
+	if !input.Set {
+		return false
+	}
+	if input.Value == nil || current == nil {
+		return input.Value != nil || current != nil
+	}
+	return *input.Value != *current
+}
+
+// changesLibraryIDs compares library lists as sets; nil means inherit and an
+// empty list means no libraries.
+func changesLibraryIDs(input models.Optional[[]int], current []int) bool {
+	if !input.Set {
+		return false
+	}
+	if input.Value == nil || current == nil {
+		return input.Value != nil || current != nil
+	}
+	next, saved := slices.Clone(*input.Value), slices.Clone(current)
+	slices.Sort(next)
+	slices.Sort(saved)
+	return !slices.Equal(slices.Compact(next), slices.Compact(saved))
 }
 
 // CheckOwnerDelete is CheckOwnerTarget, and refuses deleting the Owner by

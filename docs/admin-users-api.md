@@ -150,6 +150,10 @@ they:
 - create an administrator, promote an account to administrator, or invite one;
 - update, delete, or issue a password reset for another administrator or the
   Owner;
+- change an access-policy override on their own account (libraries, playback
+  quality, stream, transcode and bitrate limits, the transcode, download and
+  request switches). An update that re-sends the stored values is not a change;
+  other fields of their own account stay editable;
 - create an API key for another administrator or the Owner, or change or revoke
   one of their keys.
 

@@ -22,6 +22,15 @@ func TestOwnerChecks(t *testing.T) {
 	promote := models.UpdateUserInput{Role: new(models.RoleAdmin)}
 	disable := models.UpdateUserInput{Enabled: new(false)}
 	rename := models.UpdateUserInput{Username: new("renamed")}
+	// A non-Owner admin the Owner restricted.
+	limited := &models.User{ID: 5, Role: models.RoleAdmin, Enabled: true, MaxStreams: new(2), LibraryIDs: []int{2, 1}, DownloadTranscodeAllowed: new(false)}
+	resend := models.UpdateUserInput{
+		MaxStreams:               models.SetValue(2),
+		LibraryIDs:               models.SetValue([]int{1, 2}),
+		DownloadTranscodeAllowed: models.SetValue(false),
+		MaxTranscodes:            models.ClearValue[int](),
+		RequestsAllowed:          models.ClearValue[bool](),
+	}
 
 	cases := []struct {
 		name string
@@ -55,6 +64,17 @@ func TestOwnerChecks(t *testing.T) {
 		{"admin deletes user", CheckOwnerDelete(asAdmin, user), nil},
 		{"admin grants admin", CheckGrantAdmin(asAdmin, models.RoleAdmin), ErrAdminProtected},
 		{"admin grants user", CheckGrantAdmin(asAdmin, models.RoleUser), nil},
+		{"admin lifts own stream limit", CheckOwnerUpdate(OwnerActor{ID: limited.ID}, limited, models.UpdateUserInput{MaxStreams: models.ClearValue[int]()}), ErrAdminPolicyProtected},
+		{"admin changes own stream limit", CheckOwnerUpdate(OwnerActor{ID: limited.ID}, limited, models.UpdateUserInput{MaxStreams: models.SetValue(4)}), ErrAdminPolicyProtected},
+		{"admin sets own override", CheckOwnerUpdate(OwnerActor{ID: admin.ID}, admin, models.UpdateUserInput{DownloadTranscodeAllowed: models.SetValue(false)}), ErrAdminPolicyProtected},
+		{"admin widens own libraries", CheckOwnerUpdate(OwnerActor{ID: limited.ID}, limited, models.UpdateUserInput{LibraryIDs: models.SetValue([]int{1, 2, 3})}), ErrAdminPolicyProtected},
+		{"admin clears own libraries", CheckOwnerUpdate(OwnerActor{ID: limited.ID}, limited, models.UpdateUserInput{LibraryIDs: models.ClearValue[[]int]()}), ErrAdminPolicyProtected},
+		{"admin resends own policy", CheckOwnerUpdate(OwnerActor{ID: limited.ID}, limited, resend), nil},
+		{"admin edits own email beside policy", CheckOwnerUpdate(OwnerActor{ID: limited.ID}, limited, models.UpdateUserInput{Email: new("new@example.test"), MaxStreams: models.SetValue(2)}), nil},
+		{"owner limits admin", CheckOwnerUpdate(asOwner, admin, models.UpdateUserInput{MaxStreams: models.SetValue(2)}), nil},
+		{"owner lifts admin limit", CheckOwnerUpdate(asOwner, limited, models.UpdateUserInput{MaxStreams: models.ClearValue[int]()}), nil},
+		{"owner changes own policy", CheckOwnerUpdate(asOwner, owner, models.UpdateUserInput{MaxStreams: models.SetValue(2)}), nil},
+		{"admin limits user", CheckOwnerUpdate(asAdmin, user, models.UpdateUserInput{MaxStreams: models.SetValue(2)}), nil},
 	}
 	for _, tc := range cases {
 		if !errors.Is(tc.err, tc.want) || (tc.want == nil && tc.err != nil) {

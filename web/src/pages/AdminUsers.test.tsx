@@ -645,6 +645,38 @@ describe("AdminUsers user dialog policy hints", () => {
     expect(within(dialog).getByText("Admin accounts can't join groups.")).toBeInTheDocument();
   });
 
+  it("keeps an admin other than the owner from changing its own access and limits", async () => {
+    // The viewer (id 1) is an admin, not the Owner.
+    mocks.users = [{ ...adminUser, id: 1, username: "me", role: "admin", max_streams: 2 }];
+    mocks.update.mockReset().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    renderPage();
+    const dialog = await openLimits(user, "Edit me");
+
+    expect(
+      within(dialog).getByText("Only the server owner can change an admin's access and limits."),
+    ).toBeInTheDocument();
+    for (const control of within(dialog).getAllByRole("switch")) {
+      expect(control).toBeDisabled();
+    }
+    // Radix Select ignores a disabled fieldset and opens on pointerdown, so
+    // each menu must carry its own disabled state.
+    for (const menu of within(dialog).getAllByRole("combobox")) {
+      expect(menu).toHaveAttribute("data-disabled");
+    }
+    // Max Profiles is not access policy and stays editable.
+    expect(within(dialog).getByLabelText("Max Profiles")).toBeEnabled();
+
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    await user.clear(within(dialog).getByLabelText("Email"));
+    await user.type(within(dialog).getByLabelText("Email"), "me@example.test");
+    await user.click(within(dialog).getByRole("button", { name: /save/i }));
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1));
+    const body = mocks.update.mock.calls[0]![0].body;
+    expect(body.email).toBe("me@example.test");
+    expect(body).not.toHaveProperty("max_streams");
+  });
+
   it("previews the default group for an admin demoted from the list", async () => {
     // Only the server Owner may demote another admin.
     mocks.users = [{ ...adminUser, username: "root", role: "admin" }, ownerViewer];

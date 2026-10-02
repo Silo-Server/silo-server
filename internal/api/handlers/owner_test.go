@@ -81,6 +81,9 @@ func TestAdminAccountServiceProtectsOwner(t *testing.T) {
 		{"owner demotes admin", adminAccount(), testOwnerID, update(models.UpdateUserInput{Role: &demote}), true},
 		{"owner deletes admin", adminAccount(), testOwnerID, remove, true},
 		{"owner promotes user", userAccount(), testOwnerID, update(models.UpdateUserInput{Role: &promote}), true},
+		{"admin limits self", adminAccount(), testAdminID, update(models.UpdateUserInput{MaxStreams: models.SetValue(2)}), false},
+		{"admin resends own policy", adminAccount(), testAdminID, update(models.UpdateUserInput{Username: &rename, MaxStreams: models.ClearValue[int]()}), true},
+		{"owner limits admin", adminAccount(), testOwnerID, update(models.UpdateUserInput{MaxStreams: models.SetValue(2)}), true},
 	}
 	for _, tc := range cases {
 		repo := &mutatingUserRepo{current: tc.stored}
@@ -137,6 +140,9 @@ func TestV1AdminUserHandlersProtectAdmins(t *testing.T) {
 		{"admin disables self", http.MethodPut, `{"enabled":false}`, adminAccount(), testAdminID, http.StatusForbidden},
 		{"admin deletes self", http.MethodDelete, "", adminAccount(), testAdminID, http.StatusForbidden},
 		{"admin saves self with its role unchanged", http.MethodPut, `{"role":"admin","email":"new@example.test"}`, adminAccount(), testAdminID, http.StatusOK},
+		{"admin changes own policy", http.MethodPut, `{"download_transcode_allowed":false}`, adminAccount(), testAdminID, http.StatusForbidden},
+		{"admin saves self with its policy unchanged", http.MethodPut, `{"email":"new@example.test","max_streams":null}`, adminAccount(), testAdminID, http.StatusOK},
+		{"owner limits admin", http.MethodPut, `{"max_streams":2}`, adminAccount(), scopedKeyTestOwnerID, http.StatusOK},
 		{"owner demotes admin", http.MethodPut, `{"role":"user"}`, adminAccount(), scopedKeyTestOwnerID, http.StatusOK},
 		{"owner deletes admin", http.MethodDelete, "", adminAccount(), scopedKeyTestOwnerID, http.StatusNoContent},
 	} {

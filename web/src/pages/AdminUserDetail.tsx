@@ -27,7 +27,12 @@ import {
   useViewerIsOwner,
 } from "@/hooks/queries/admin/users";
 import { useAuth } from "@/hooks/useAuth";
-import { canManageAccount, canTransferOwnership, canViewAsAccount } from "@/lib/accountOwner";
+import {
+  canChangeAccessPolicy,
+  canManageAccount,
+  canTransferOwnership,
+  canViewAsAccount,
+} from "@/lib/accountOwner";
 import { guardRedirectTarget } from "@/lib/authRedirect";
 
 import { AccessTab } from "./admin-users/detail/access/AccessTab";
@@ -121,6 +126,7 @@ function AdminUserDetailPage() {
   const tab = parseUserDetailTab(searchParams.get("tab"));
   const viewAsDisabled = !canViewAsAccount(account, viewerId, viewerIsOwner);
   const manageable = canManageAccount(account, viewerId, viewerIsOwner);
+  const policyManageable = canChangeAccessPolicy(account, viewerId, viewerIsOwner);
   const transferable =
     capabilities.data?.ownership_transfer === true &&
     canTransferOwnership(account, viewerId, viewerIsOwner);
@@ -215,6 +221,7 @@ function AdminUserDetailPage() {
               user={account}
               editor={editor}
               manageable={manageable}
+              policyManageable={policyManageable}
               available={available}
             />
           </TabsContent>
