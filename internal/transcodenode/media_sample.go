@@ -1,6 +1,7 @@
 package transcodenode
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -42,11 +43,14 @@ func (s *Server) handleMediaSample(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// API servers each reserve nodes on their own, so the node enforces the
-	// capacity itself; a request over it waits for a slot.
+	// capacity itself. A request over it waits for a slot, separately from
+	// its run's timeouts, and is refused as unavailable when none frees up.
 	limiter := s.mediaSampleLimiter(cfg.Playback.SubtitleSyncNodeCapacity)
-	release, err := limiter.Acquire(r.Context())
+	admitCtx, cancelAdmit := context.WithTimeout(r.Context(), mediasample.MaxRemoteAdmissionWait)
+	release, err := limiter.Acquire(admitCtx)
+	cancelAdmit()
 	if err != nil {
-		writeMediaSampleError(w, http.StatusServiceUnavailable, mediasample.ReasonNodeUnavailable, "request canceled while waiting for capacity")
+		writeMediaSampleError(w, http.StatusServiceUnavailable, mediasample.ReasonNodeUnavailable, "node is at sampling capacity")
 		return
 	}
 	defer release()

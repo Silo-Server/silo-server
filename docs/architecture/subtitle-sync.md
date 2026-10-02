@@ -96,8 +96,9 @@ stale-job reaping. A job reaped after a crash ends `failed`; it is not resumed.
   manual job is started through the API.
 - **Bounds.** Cues past the audio's reach or longer than a minute are left out
   of alignment, so a corrupt timestamp cannot size the cue map. A node request
-  is bounded by its decode timeout plus a minute, and a node that cannot read
-  the file hands the work back to this server under `prefer_transcode_nodes`.
+  is bounded by the node's slot wait, its decode timeout, and a minute. A node
+  that cannot read the file hands the work back to this server under
+  `prefer_transcode_nodes`.
 - **Guarded apply.** A job records the subtitle revision it aligned. It
   applies its result and finishes in one transaction only while the row still
   has that revision. If the subtitle changed meanwhile (a manual timing edit,
@@ -120,7 +121,9 @@ stale-job reaping. A job reaped after a crash ends `failed`; it is not resumed.
 A file's windows run on one node. Each API server picks the least loaded
 node through `nodepool.Reservations`, and the node itself admits at most
 `subtitles.sync_node_capacity` sampling runs at once, whichever API servers
-send them; a request over the limit waits for a slot.
+send them. A request over the limit waits up to two minutes for a slot,
+then is refused as unavailable, which `prefer_transcode_nodes` answers by
+decoding on this server.
 The node runs each window through `POST /media-samples/run` (see
 [media sampling](media-sampling.md#remote-runs)). The input path must be one
 the node is allowed to read, which requires the same media paths on the node

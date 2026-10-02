@@ -71,8 +71,9 @@ func newSampler(settings SettingsReader, nodes NodeSource, ffmpegPath func() str
 	}
 }
 
-// remoteRequestTimeout is a window's decode timeout plus a minute.
-const remoteRequestTimeout = (windowTimeoutSeconds + 60) * time.Second
+// remoteRequestTimeout covers a node's wait for a free slot, a window's decode
+// timeout, and a minute to transfer the result.
+const remoteRequestTimeout = mediasample.MaxRemoteAdmissionWait + (windowTimeoutSeconds+60)*time.Second
 
 // errNoNode reports that transcode_nodes_only found no node to run on.
 var errNoNode = errors.New("no transcode node available for subtitle sync")
@@ -118,8 +119,8 @@ func (s *sampler) run(ctx context.Context, reqs []mediasample.Request) ([]medias
 	return results, nodeLabel(node), nil
 }
 
-// runRemote bounds one node request: the node's own attempt timeout plus
-// time to transfer the result. A node that accepts a request and then hangs
+// runRemote bounds one node request: the node's admission wait and attempt
+// timeout plus time to transfer the result. A node that accepts a request and then hangs
 // would otherwise hold the job, its slot, and the node reservation forever.
 func (s *sampler) runRemote(ctx context.Context, endpoint, secret string, req mediasample.Request) (mediasample.Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, remoteRequestTimeout)

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 )
@@ -20,6 +21,11 @@ const RemotePath = "/media-samples/run"
 // MaxRemoteRequestBytes bounds a remote request body. A Samples list of the
 // largest allowed size fits with room to spare.
 const MaxRemoteRequestBytes = 1 << 20
+
+// MaxRemoteAdmissionWait is how long a node holds a request waiting for a
+// free sampling slot before refusing it as unavailable. A caller's request
+// deadline covers this wait on top of the run's own attempt timeouts.
+const MaxRemoteAdmissionWait = 2 * time.Minute
 
 // maxRemoteResultBytes bounds a remote result: speech levels for a whole
 // feature film are about 1 MB, base64 in JSON.

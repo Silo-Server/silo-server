@@ -153,8 +153,9 @@ whether running the request elsewhere may succeed: an unreachable node, a 5xx,
 or a node lacking a capability, but not a file that has no stream or cannot be
 decoded. Callers choose and reserve nodes themselves
 (`nodepool.Reservations`); the node also admits at most
-`subtitles.sync_node_capacity` runs at once across every caller, and a
-request over the limit waits for a slot.
+`subtitles.sync_node_capacity` runs at once across every caller; a request
+over the limit waits up to two minutes for a slot (`MaxRemoteAdmissionWait`)
+and is then refused with `503` and `node_unavailable`.
 
 ## Hardware decode
 
