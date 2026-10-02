@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -109,6 +110,50 @@ func TestPlanCopySegmentsKeepsFFmpegPlaylist(t *testing.T) {
 			t.Fatalf("plan = %v, want none", plan.durations)
 		}
 	})
+}
+
+// A session rebuilt from its recipe serves the playlist its player has, even
+// if the file's index became available since it started.
+func TestResolveCopyPlanFollowsTheRecordedDecision(t *testing.T) {
+	opts := plannedOpts()
+	opts.OutputDir = t.TempDir()
+
+	stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrUnverified)
+	if plan := resolveCopyPlan(t.Context(), opts); plan != nil {
+		t.Fatal("planned while the index is being checked")
+	}
+	verified := keyframes.Index{Keyframes: []float64{0, 1, 2.6, 7.0, 7.4, 9.0}, VideoEnd: 10}
+	stubKeyframeIndex(t, verified, nil)
+	if plan := resolveCopyPlan(t.Context(), opts); plan != nil {
+		t.Fatal("a rebuilt session switched to a keyframe playlist")
+	}
+
+	// A start abandoned while planning records nothing, so the next start
+	// decides afresh.
+	retried := plannedOpts()
+	retried.OutputDir = t.TempDir()
+	abandoned, cancel := context.WithCancel(t.Context())
+	cancel()
+	if plan := resolveCopyPlan(abandoned, retried); plan != nil {
+		t.Fatal("planned for an abandoned start")
+	}
+	if plan := resolveCopyPlan(t.Context(), retried); plan == nil {
+		t.Fatal("the start after an abandoned one didn't plan")
+	}
+
+	planned := plannedOpts()
+	planned.OutputDir = t.TempDir()
+	first := resolveCopyPlan(t.Context(), planned)
+	if first == nil {
+		t.Fatal("no plan with a verified index")
+	}
+	// The record stands in for the index, which a cold process may not have
+	// verified yet.
+	stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrUnverified)
+	again := resolveCopyPlan(t.Context(), planned)
+	if again == nil || !slices.Equal(again.durations, first.durations) {
+		t.Fatalf("rebuilt plan = %+v, want the recorded %+v", again, first)
+	}
 }
 
 func TestCopySegmentPlanManifest(t *testing.T) {

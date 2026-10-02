@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"sort"
 )
 
@@ -20,6 +21,7 @@ const (
 	idBlockGroup         = 0xA0
 	idBlock              = 0xA1
 	idReferenceBlock     = 0xFB
+	idBlockDuration      = 0x9B
 
 	// coverageSamples is how many cued clusters, spread through the file, have
 	// their keyframes checked against the Cues, each with the cluster after
@@ -138,18 +140,18 @@ func clusterKeyframes(r io.ReaderAt, off, segEnd int64, video uint64, last *vide
 				return nil, 0, err
 			}
 			if track == video {
-				latest.add(rel)
+				latest.add(rel, 0)
 				if flags&0x80 != 0 {
 					keys = append(keys, rel)
 				}
 			}
 		case idBlockGroup:
-			track, rel, key, err := readBlockGroup(r, data, size)
+			track, rel, key, duration, err := readBlockGroup(r, data, size)
 			if err != nil {
 				return nil, 0, err
 			}
 			if track == video {
-				latest.add(rel)
+				latest.add(rel, duration)
 				if key {
 					keys = append(keys, rel)
 				}
@@ -166,10 +168,10 @@ func clusterKeyframes(r io.ReaderAt, off, segEnd int64, video uint64, last *vide
 	}
 	if last != nil {
 		if latest.n > 0 {
-			last.add(int64(clusterTicks) + latest.last)
+			last.add(int64(clusterTicks)+latest.last, latest.lastDuration)
 		}
 		if latest.n > 1 {
-			last.add(int64(clusterTicks) + latest.prev)
+			last.add(int64(clusterTicks)+latest.prev, 0)
 		}
 	}
 	ticks := make([]uint64, 0, len(keys))
@@ -197,36 +199,45 @@ func readBlockHeader(r io.ReaderAt, off, size int64) (track uint64, rel int64, f
 	return track, rel, buf[trackLen+2], nil
 }
 
-// readBlockGroup reads a BlockGroup's block header and whether it is a
-// keyframe: a block without a ReferenceBlock references no other frame.
-func readBlockGroup(r io.ReaderAt, off, size int64) (track uint64, rel int64, key bool, err error) {
+// readBlockGroup reads a BlockGroup's block header, whether it is a keyframe
+// (a block without a ReferenceBlock references no other frame), and its
+// BlockDuration in ticks, or 0 when it has none.
+func readBlockGroup(r io.ReaderAt, off, size int64) (track uint64, rel int64, key bool, duration int64, err error) {
 	end := off + size
 	key = true
 	haveBlock := false
 	for at := off; at < end; {
 		id, childSize, headerLen, err := readElementHeader(r, at)
 		if err != nil {
-			return 0, 0, false, err
+			return 0, 0, false, 0, err
 		}
 		if childSize == unknownSize {
-			return 0, 0, false, fmt.Errorf("unknown-size element in block group at %d", at)
+			return 0, 0, false, 0, fmt.Errorf("unknown-size element in block group at %d", at)
 		}
 		switch id {
 		case idBlock:
 			track, rel, _, err = readBlockHeader(r, at+headerLen, childSize)
 			if err != nil {
-				return 0, 0, false, err
+				return 0, 0, false, 0, err
 			}
 			haveBlock = true
 		case idReferenceBlock:
 			key = false
+		case idBlockDuration:
+			b, err := readElementData(r, at+headerLen, childSize, 8)
+			if err != nil {
+				return 0, 0, false, 0, err
+			}
+			if d := readUint(b); d <= math.MaxInt64 {
+				duration = int64(d)
+			}
 		}
 		at += headerLen + childSize
 	}
 	if !haveBlock {
-		return 0, 0, false, nil
+		return 0, 0, false, 0, nil
 	}
-	return track, rel, key, nil
+	return track, rel, key, duration, nil
 }
 
 // VerifyMatroska reads a Matroska file's index like ReadMatroska and then
@@ -248,18 +259,26 @@ func VerifyMatroska(r io.ReaderAt, size int64) (Index, error) {
 	return m.Index, nil
 }
 
-// videoEnd keeps the two latest distinct timestamps of a track's frames.
+// videoEnd keeps the two latest distinct timestamps of a track's frames, and
+// the latest frame's own duration when its block gives one.
 type videoEnd struct {
-	last, prev int64
-	n          int // how many of last and prev are set
+	last, prev   int64
+	lastDuration int64 // in ticks; 0 when the block doesn't say
+	n            int   // how many of last and prev are set
 }
 
-func (v *videoEnd) add(t int64) {
+// add records a frame at t ticks; duration is its BlockDuration, or 0.
+func (v *videoEnd) add(t, duration int64) {
 	switch {
-	case v.n > 0 && t == v.last, v.n > 1 && t == v.prev:
+	case v.n > 0 && t == v.last:
+		if duration > 0 {
+			v.lastDuration = duration
+		}
+		return
+	case v.n > 1 && t == v.prev:
 		return
 	case v.n == 0 || t > v.last:
-		v.prev, v.last = v.last, t
+		v.prev, v.last, v.lastDuration = v.last, t, duration
 	case v.n == 1 || t > v.prev:
 		v.prev = t
 	default:
@@ -268,14 +287,17 @@ func (v *videoEnd) add(t int64) {
 	v.n = min(v.n+1, 2)
 }
 
-// seconds returns when the last frame ends: its timestamp plus the track's
-// frame duration, or the gap to the frame before when the track doesn't say.
-// It returns 0 when that can't be worked out.
+// seconds returns when the last frame ends: its timestamp plus its block's
+// duration, else the track's default frame duration, else the gap to the
+// frame before. It returns 0 when that can't be worked out.
 func (v videoEnd) seconds(timescale int64, frame float64) float64 {
 	if v.n == 0 {
 		return 0
 	}
 	scale := float64(timescale) / 1e9
+	if v.lastDuration > 0 {
+		frame = float64(v.lastDuration) * scale
+	}
 	if frame <= 0 {
 		if v.n < 2 {
 			return 0

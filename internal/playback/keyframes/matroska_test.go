@@ -320,18 +320,56 @@ func TestVideoEndSeconds(t *testing.T) {
 	if got := end.seconds(defaultTimescale, 0.04); got != 0 {
 		t.Fatalf("no frames: %v, want 0", got)
 	}
-	end.add(0)
+	end.add(0, 0)
 	if got := end.seconds(defaultTimescale, 0); got != 0 {
 		t.Fatalf("one frame without a frame duration: %v, want 0", got)
 	}
 	// Presentation order differs from storage order with B-frames.
 	for _, ms := range []int64{120, 80, 40, 100, 120} {
-		end.add(ms)
+		end.add(ms, 0)
 	}
 	if got := end.seconds(defaultTimescale, 0); math.Abs(got-0.14) > 1e-9 {
 		t.Fatalf("from the last gap: %v, want 0.14", got)
 	}
 	if got := end.seconds(defaultTimescale, 0.033); math.Abs(got-0.153) > 1e-9 {
 		t.Fatalf("from the frame duration: %v, want 0.153", got)
+	}
+	// The last frame's own BlockDuration wins over both.
+	end.add(120, 70)
+	if got := end.seconds(defaultTimescale, 0.033); math.Abs(got-0.19) > 1e-9 {
+		t.Fatalf("from the block duration: %v, want 0.19", got)
+	}
+	// A later frame without one goes back to the track's duration.
+	end.add(160, 0)
+	if got := end.seconds(defaultTimescale, 0.033); math.Abs(got-0.193) > 1e-9 {
+		t.Fatalf("after a later frame: %v, want 0.193", got)
+	}
+}
+
+func TestReadBlockGroupDuration(t *testing.T) {
+	var ts [2]byte
+	binary.BigEndian.PutUint16(ts[:], 40)
+	group := el(idBlockGroup,
+		el(idBlock, []byte{0x80 | byte(videoTrack)}, ts[:], []byte{0}, bytes.Repeat([]byte{0xBB}, 16)),
+		uintEl(idBlockDuration, 70))
+	r := bytes.NewReader(group)
+	_, size, headerLen, err := readElementHeader(r, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	track, rel, key, duration, err := readBlockGroup(r, headerLen, size)
+	if err != nil || track != videoTrack || rel != 40 || !key || duration != 70 {
+		t.Fatalf("readBlockGroup = %d, %d, %v, %d, %v; want video at 40, a keyframe of 70 ticks", track, rel, key, duration, err)
+	}
+}
+
+// The fixture's last video frame is at 4.258s, 40ms after the one before.
+func TestVerifyMatroskaVideoEnd(t *testing.T) {
+	idx, err := verify(file(layout{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(idx.VideoEnd-4.298) > 1e-9 {
+		t.Fatalf("VideoEnd = %v, want 4.298", idx.VideoEnd)
 	}
 }

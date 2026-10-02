@@ -2,10 +2,14 @@ package playback
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -64,6 +68,76 @@ func planCopySegments(opts TranscodeOpts) *copySegmentPlan {
 	}
 	durations := keyframes.SegmentDurations(starts, idx.VideoEnd)
 	return &copySegmentPlan{durations: durations}
+}
+
+// copyPlanRecordFile keeps a session's planning decision in its output
+// directory, which a session rebuilt from its recipe reuses.
+const copyPlanRecordFile = "keyframe-plan.json"
+
+type copyPlanRecord struct {
+	Planned   bool      `json:"planned"`
+	Durations []float64 `json:"durations,omitempty"`
+}
+
+// resolveCopyPlan returns the plan a session serves. The first start decides
+// and records the decision; a rebuilt session follows the record, so it
+// serves the playlist its player already has. Deciding afresh could differ:
+// a file's index that was still being checked may be verified by then.
+func resolveCopyPlan(ctx context.Context, opts TranscodeOpts) *copySegmentPlan {
+	if !opts.KeyframePlaylist || opts.OutputDir == "" {
+		return planCopySegments(opts)
+	}
+	path := filepath.Join(opts.OutputDir, copyPlanRecordFile)
+	if data, err := os.ReadFile(path); err == nil {
+		var rec copyPlanRecord
+		if err := json.Unmarshal(data, &rec); err == nil {
+			if !rec.Planned {
+				return nil
+			}
+			if plan := rec.plan(); plan != nil {
+				return plan
+			}
+		}
+		log.Printf("playback: session %s has an unreadable keyframe plan record; using FFmpeg's playlist", opts.SessionID)
+		return nil
+	}
+
+	plan := planCopySegments(opts)
+	if ctx.Err() != nil {
+		// The start was abandoned; don't record a decision for it.
+		return nil
+	}
+	rec := copyPlanRecord{Planned: plan != nil}
+	if plan != nil {
+		rec.Durations = plan.durations
+	}
+	data, err := json.Marshal(rec)
+	if err == nil {
+		tmp := path + ".tmp"
+		if err = os.WriteFile(tmp, data, 0o644); err == nil {
+			err = os.Rename(tmp, path)
+		}
+	}
+	if err != nil {
+		// Without a record a rebuilt session can't promise the same
+		// playlist, so don't serve a planned one.
+		log.Printf("playback: record keyframe plan for %s: %v; using FFmpeg's playlist", opts.SessionID, err)
+		return nil
+	}
+	return plan
+}
+
+// plan rebuilds a recorded plan, or nil if the record is inconsistent.
+func (r copyPlanRecord) plan() *copySegmentPlan {
+	if len(r.Durations) == 0 {
+		return nil
+	}
+	for _, d := range r.Durations {
+		if !(d > 0) || math.IsInf(d, 0) {
+			return nil
+		}
+	}
+	return &copySegmentPlan{durations: r.Durations}
 }
 
 // plannedSegmentWait is how long a request for a segment FFmpeg hasn't
