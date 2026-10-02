@@ -1,12 +1,14 @@
 package mediasample
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
 	"image"
 	"image/jpeg"
 	"math"
+	"os"
 	"regexp"
 	"slices"
 	"strconv"
@@ -95,6 +97,11 @@ type sheetAssembler struct {
 	// Window placement: the next sample to assign and the last frame seen.
 	nextSample int
 	prev       []byte
+	// The stream-copy timing file reports how far the input was actually
+	// read, including non-keyframes after the last decoded keyframe.
+	packetTimeBase float64
+	packetEnd      float64
+	hasPacketTime  bool
 
 	open      map[int]*sheetCanvas
 	furthest  int
@@ -208,6 +215,60 @@ func (a *sheetAssembler) line(line string) {
 	a.current = nil
 	a.logged++
 	a.drain()
+}
+
+// readPacketTiming reads the stream-copy timing file after ffmpeg exits, so
+// packet writes cannot interleave with the frame log on stderr.
+func (a *sheetAssembler) readPacketTiming(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64<<10), maxStderrLine)
+	for scanner.Scan() {
+		a.packetLine(scanner.Text())
+		if a.err != nil {
+			return a.err
+		}
+	}
+	return scanner.Err()
+}
+
+// packetLine reads the framecrc stream-copy output: "#tb 0: 1/1000",
+// followed by "0, DTS, PTS, duration, size, checksum[, flags]". PTS and
+// duration count in that time base and are relative to the window start.
+func (a *sheetAssembler) packetLine(line string) {
+	if raw, ok := strings.CutPrefix(line, "#tb 0: "); ok {
+		numerator, denominator, ok := strings.Cut(raw, "/")
+		n, errN := strconv.ParseFloat(strings.TrimSpace(numerator), 64)
+		d, errD := strconv.ParseFloat(strings.TrimSpace(denominator), 64)
+		if !ok || errN != nil || errD != nil || !(n > 0) || !(d > 0) || !finite(n) || !finite(d) {
+			a.err = errors.New("ffmpeg reported an invalid packet time base")
+		} else {
+			a.packetTimeBase = n / d
+		}
+		return
+	}
+	if !strings.HasPrefix(line, "0,") {
+		return
+	}
+	fields := strings.SplitN(line, ",", 6)
+	if len(fields) != 6 || a.packetTimeBase <= 0 {
+		a.err = errors.New("ffmpeg reported packet timing without a time base")
+		return
+	}
+	pts, errPTS := strconv.ParseInt(strings.TrimSpace(fields[2]), 10, 64)
+	duration, errDuration := strconv.ParseInt(strings.TrimSpace(fields[3]), 10, 64)
+	// framecrc prints AV_NOPTS_VALUE as the minimum int64, rather than NOPTS.
+	if errPTS == nil && pts != math.MinInt64 && errDuration == nil && duration >= 0 {
+		end := a.offset + (float64(pts)+float64(duration))*a.packetTimeBase
+		if finite(end) {
+			a.packetEnd = max(a.packetEnd, end)
+			a.hasPacketTime = true
+		}
+	}
 }
 
 // drain places every frame whose log lines are in.
@@ -343,7 +404,10 @@ func (a *sheetAssembler) finish() ([]Sheet, SheetFrames, *AttemptError) {
 		return fail(ReasonOutput, fmt.Errorf("ffmpeg wrote %d frames but logged %d", a.logged-int64(len(a.metas))+int64(len(a.queued)), a.logged))
 	}
 	if !a.sampled {
-		a.assignWindow(math.Inf(1))
+		if !a.hasPacketTime {
+			return fail(ReasonOutput, errors.New("ffmpeg reported no usable packet timing for the sampled window"))
+		}
+		a.assignWindow(a.packetEnd + sampleMatchSeconds)
 	}
 	if a.decoded == 0 {
 		return fail(ReasonEmpty, errors.New("ffmpeg decoded no frame for any sample"))

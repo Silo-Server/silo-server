@@ -301,6 +301,12 @@ must use the returned height and reject chunks whose geometry differs.
   half a second recovered all of them at no measurable cost. Stats keep the
   40 ms span their cached analyses were computed with. A window gives each
   sample the last frame at or before its time.
+- A window also copies the same input's video packets to a `framecrc`
+  timing file in a private temporary directory, separate from stderr and
+  removed when the attempt ends. Their presentation times and durations
+  bound the final keyframe's coverage without decoding extra frames or
+  reading the file again. Samples beyond that observed extent remain missing, so
+  premature EOF cannot turn every trailing cell into a decoded preview.
 - A cell without a frame shows the previous cell's frame, and cells before
   the first frame show the first, so the grid never shifts. A run that had
   to fill more than 10 % of its cells (and more than one) fails as `empty`,

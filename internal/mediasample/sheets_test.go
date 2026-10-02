@@ -9,6 +9,9 @@ import (
 	"image"
 	"image/jpeg"
 	"io"
+	"math"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -130,7 +133,7 @@ func TestBuildSheetsArgs(t *testing.T) {
 	req.Threads = 2
 	output := []string{"-map", "0:V:0", "-an", "-sn", "-dn", "-vf", "GRAPH", "-fps_mode", "passthrough", "-pix_fmt", "yuv420p", "-f", "rawvideo", "pipe:1"}
 
-	args, list, err := buildSheetsArgs(req, Attempt{Hardware: true}, hardwareDecode{Accel: "vaapi", Device: "/dev/dri/renderD128"}, 11.4, "GRAPH")
+	args, list, err := buildSheetsArgs(req, Attempt{Hardware: true}, hardwareDecode{Accel: "vaapi", Device: "/dev/dri/renderD128"}, 11.4, "GRAPH", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,12 +154,13 @@ func TestBuildSheetsArgs(t *testing.T) {
 	window := req
 	window.Samples = nil
 	window.Window = &Window{StartSeconds: 0, DurationSeconds: 15.04, KeyframesOnly: true}
-	args, list, err = buildSheetsArgs(window, Attempt{}, hardwareDecode{}, 0, "GRAPH")
+	args, list, err = buildSheetsArgs(window, Attempt{}, hardwareDecode{}, 0, "GRAPH", "packets.framecrc")
 	if err != nil {
 		t.Fatal(err)
 	}
 	want = []string{"-hide_banner", "-nostdin", "-loglevel", "repeat+info", "-threads", "2", "-filter_threads", "2",
 		"-skip_frame:v", "nokey", "-ss", "0", "-t", "15.04", "-i", "/media/a.mkv"}
+	want = append(want, "-map", "0:V:0", "-c:v", "copy", "-f", "framecrc", "packets.framecrc")
 	want = append(want, output...)
 	if !slices.Equal(args, want) || list != nil {
 		t.Errorf("window args:\n got %q\nwant %q (list %q)", args, want, list)
@@ -194,11 +198,12 @@ type fakeSheets struct {
 	extraStdout []byte
 	editLog     func([]string) []string
 	calls       [][]string
+	packetEnd   float64
 }
 
 func (f *fakeSheets) exec(_ context.Context, _ string, args []string, _ io.Reader, stdout, stderr io.Writer) error {
 	f.calls = append(f.calls, args)
-	if slices.Contains(args, "copy") {
+	if slices.Contains(args, "copy") && !slices.Contains(args, "framecrc") {
 		_, _ = fmt.Fprintf(stderr, "Input #0, %s, from '/media/a.mkv':\n  Duration: 00:02:00.00, start: 0.000000, bitrate: 900 kb/s\n", f.format)
 		return nil
 	}
@@ -210,6 +215,16 @@ func (f *fakeSheets) exec(_ context.Context, _ string, args []string, _ io.Reade
 			sample = formatSampleSeconds(*frame.sample)
 		}
 		log = append(log, "[metadata@sheets @ 0x55d0] sample="+sample)
+	}
+	if i := slices.Index(args, "framecrc"); i >= 0 {
+		var timing string
+		if f.packetEnd > 0 {
+			end := int64(math.Round(f.packetEnd * 1000))
+			timing = fmt.Sprintf("#tb 0: 1/1000\n0, %d, %d, 1, 1, 0x00000000\n", end-1, end-1)
+		}
+		if err := os.WriteFile(args[i+1], []byte(timing), 0o600); err != nil {
+			return err
+		}
 	}
 	if f.editLog != nil {
 		log = f.editLog(log)
@@ -358,7 +373,7 @@ func TestRunSheetsReadsWindowsByTime(t *testing.T) {
 	frames := []fakeSheetFrame{timed(10, "0"), timed(50, "4"), timed(60, "4.9995"), timed(70, "6"), timed(90, "NOPTS")}
 	for _, name := range []string{"read through", "mpegts"} {
 		req := sheetsRequest(seconds, 2, 2)
-		fake := &fakeSheets{format: "mpegts", frames: frames}
+		fake := &fakeSheets{format: "mpegts", frames: frames, packetEnd: 8}
 		if name == "read through" {
 			req.Samples.ReadThrough = true
 		}
@@ -373,6 +388,114 @@ func TestRunSheetsReadsWindowsByTime(t *testing.T) {
 		if (name == "read through") != (runs == 1) || slices.Contains(fake.calls[runs-1], "concat") {
 			t.Fatalf("%s: runs %q", name, fake.calls)
 		}
+	}
+}
+
+func TestRunSheetsRejectsPrematureWindowEOF(t *testing.T) {
+	for _, readThrough := range []bool{false, true} {
+		req := sheetsRequest([]float64{1, 3, 5, 7}, 2, 2)
+		req.Samples.ReadThrough = readThrough
+		fake := &fakeSheets{format: "mpegts", frames: []fakeSheetFrame{timed(10, "0")}, packetEnd: 2}
+		_, err := (Runner{Exec: fake.exec}).Run(t.Context(), req)
+		failure, ok := errors.AsType[*Error](err)
+		if !ok || failure.Reason != ReasonEmpty {
+			t.Errorf("readThrough=%t: error %v, want sparse output rejected", readThrough, err)
+		}
+	}
+}
+
+func TestRunSheetsKeepsFinalGOPSamples(t *testing.T) {
+	for _, readThrough := range []bool{false, true} {
+		req := sheetsRequest([]float64{1, 3, 5, 7}, 2, 2)
+		req.Samples.ReadThrough = readThrough
+		fake := &fakeSheets{format: "mpegts", frames: []fakeSheetFrame{timed(10, "0")}, packetEnd: 8}
+		result, err := (Runner{Exec: fake.exec}).Run(t.Context(), req)
+		if err != nil || result.SheetFrames != (SheetFrames{Decoded: 4}) {
+			t.Fatalf("readThrough=%t: frames %+v error %v", readThrough, result.SheetFrames, err)
+		}
+		if got := sheetLumas(t, result, 2, 2); !near(got[0], []int{10, 10, 10, 10}) {
+			t.Fatalf("readThrough=%t: cells %v", readThrough, got)
+		}
+	}
+}
+
+func TestSheetPacketTimingKeepsPresentationExtent(t *testing.T) {
+	tests := []struct {
+		name    string
+		lines   []string
+		end     float64
+		hasTime bool
+		wantErr bool
+	}{
+		{"reordered PTS", []string{"#tb 0: 1/90000", "0, 0, 180000, 45000, 1, 0x0", "0, 45000, 45000, 45000, 1, 0x0"}, 14.5, true, false},
+		{"missing numeric PTS", []string{"#tb 0: 1/1000", "0, 0, -9223372036854775808, 1000, 1, 0x0"}, 0, false, false},
+		{"missing text PTS", []string{"#tb 0: 1/1000", "0, 0, NOPTS, 1000, 1, 0x0"}, 0, false, false},
+		{"negative duration", []string{"#tb 0: 1/1000", "0, 0, 1000, -1, 1, 0x0"}, 0, false, false},
+		{"invalid time base", []string{"#tb 0: 1/0"}, 0, false, true},
+		{"packet before time base", []string{"0, 0, 1000, 1000, 1, 0x0"}, 0, false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := &sheetAssembler{offset: 12}
+			for _, line := range tt.lines {
+				a.packetLine(line)
+			}
+			if a.packetEnd != tt.end || a.hasPacketTime != tt.hasTime || (a.err != nil) != tt.wantErr {
+				t.Fatalf("extent %g, has time %t, error %v; want %g, %t, error=%t", a.packetEnd, a.hasPacketTime, a.err, tt.end, tt.hasTime, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestRunSheetsRemovesPacketTimingAfterAttempt(t *testing.T) {
+	for _, name := range []string{"success", "exit", "canceled"} {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			req := sheetsRequest([]float64{1, 3, 5, 7}, 2, 2)
+			req.Samples.ReadThrough = true
+			fake := &fakeSheets{frames: []fakeSheetFrame{timed(10, "0")}, packetEnd: 8}
+			var path string
+			runner := Runner{Exec: func(ctx context.Context, binary string, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+				path = args[slices.Index(args, "framecrc")+1]
+				dir, err := os.Stat(filepath.Dir(path))
+				if err != nil || dir.Mode().Perm() != 0o700 {
+					t.Fatalf("packet timing directory is not private: %v, error %v", dir, err)
+				}
+				if err := fake.exec(ctx, binary, args, stdin, stdout, stderr); err != nil {
+					return err
+				}
+				switch name {
+				case "exit":
+					return errors.New("ffmpeg exited")
+				case "canceled":
+					cancel()
+					return ctx.Err()
+				}
+				return nil
+			}}
+			_, err := runner.Run(ctx, req)
+			if name == "success" {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				want := ReasonExit
+				if name == "canceled" {
+					want = ReasonCanceled
+				}
+				failure, ok := errors.AsType[*Error](err)
+				if !ok || failure.Reason != want {
+					t.Fatalf("error %v, want %s", err, want)
+				}
+			}
+			if path == "" {
+				t.Fatal("ffmpeg did not receive a packet timing path")
+			}
+			if _, err := os.Stat(filepath.Dir(path)); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("packet timing directory survived the attempt: %v", err)
+			}
+		})
 	}
 }
 

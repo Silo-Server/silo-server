@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -304,7 +305,16 @@ func (a attemptRun) decode(req Request, inputStart float64) (Result, *AttemptErr
 // sheets runs a Sheets request for the sample times, reading req's list
 // (with inpoints offset by inputStart) or window, and tiles the frames.
 func (a attemptRun) sheets(req Request, times []float64, inputStart float64) (Result, *AttemptError) {
-	args, stdinBytes, err := buildSheetsArgs(req, a.attempt, a.hw, inputStart, a.sheetsGraph)
+	var packetTimingPath string
+	if req.Window != nil {
+		dir, err := os.MkdirTemp("", "silo-sheets-*")
+		if err != nil {
+			return Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonOutput, Err: fmt.Errorf("create packet timing directory: %w", err)}
+		}
+		defer os.RemoveAll(dir)
+		packetTimingPath = filepath.Join(dir, "packets.framecrc")
+	}
+	args, stdinBytes, err := buildSheetsArgs(req, a.attempt, a.hw, inputStart, a.sheetsGraph, packetTimingPath)
 	if err != nil {
 		return Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonArgs, Err: err}
 	}
@@ -315,6 +325,11 @@ func (a attemptRun) sheets(req Request, times []float64, inputStart float64) (Re
 	assembler := newSheetAssembler(*req.Sheets, times, req.Samples != nil, offset)
 	if failure := a.execTo(req, args, stdinBytes, assembler, assembler.line); failure != nil {
 		return Result{}, failure
+	}
+	if packetTimingPath != "" {
+		if err := assembler.readPacketTiming(packetTimingPath); err != nil {
+			return Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonOutput, Err: fmt.Errorf("read packet timing: %w", err)}
+		}
 	}
 	sheets, frames, failure := assembler.finish()
 	if failure != nil {

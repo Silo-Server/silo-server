@@ -146,7 +146,7 @@ func buildSamplesArgs(req Request, attempt Attempt, hw hardwareDecode, args []st
 // which a Samples request becomes for inputs the list cannot seek in, decodes
 // the window's keyframes. Either way the frames go to stdout raw, and hardware
 // attempts leave VideoToolbox frames in system memory, as images do.
-func buildSheetsArgs(req Request, attempt Attempt, hw hardwareDecode, inputStart float64, graph string) ([]string, []byte, error) {
+func buildSheetsArgs(req Request, attempt Attempt, hw hardwareDecode, inputStart float64, graph, packetTimingPath string) ([]string, []byte, error) {
 	if (req.Window == nil) == (req.Samples == nil) || req.Sheets == nil {
 		return nil, nil, errors.New("sheets need exactly one sampling mode")
 	}
@@ -182,6 +182,11 @@ func buildSheetsArgs(req Request, attempt Attempt, hw hardwareDecode, inputStart
 		"-t", formatSeconds(req.Window.DurationSeconds),
 		"-i", req.Input,
 	)
+	// Copy the same input's packets to a timing log without decoding them.
+	// Their extent distinguishes a valid final GOP from premature EOF;
+	// keyframe timestamps alone cannot. A separate file keeps packet metadata
+	// from interleaving with frame log lines on stderr.
+	args = append(args, "-map", "0:V:0", "-c:v", "copy", "-f", "framecrc", packetTimingPath)
 	return append(args, sheetsOutputArgs(graph)...), nil, nil
 }
 
