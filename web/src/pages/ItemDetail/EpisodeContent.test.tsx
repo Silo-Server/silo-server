@@ -52,6 +52,7 @@ const mocks = vi.hoisted(() => {
     useRedetectItemMarkers: vi.fn(),
     useRedetectEpisodeIntro: vi.fn(),
     useAdminMarkerCapabilities: vi.fn(),
+    useLibraryCapabilities: vi.fn(),
     useRefreshItemMetadata: vi.fn(),
     useWatchedStateMutation: vi.fn(),
     useRating: vi.fn(),
@@ -100,6 +101,10 @@ vi.mock("@/playback/watchPlaybackContext", () => ({
 vi.mock("@/hooks/queries/admin/markers", () => ({
   useAdminMarkerCapabilities: mocks.useAdminMarkerCapabilities,
   useMarkerDetectionKinds: () => undefined,
+}));
+
+vi.mock("@/hooks/queries/admin/libraries", () => ({
+  useLibraryCapabilities: mocks.useLibraryCapabilities,
 }));
 
 vi.mock("@/hooks/queries/items", () => ({
@@ -237,6 +242,7 @@ function makeEpisodeItem(
     rating_tmdb: null,
     rating_rt_critic: null,
     rating_rt_audience: null,
+    ratings: [],
     imdb_id: "",
     tmdb_id: "",
     tvdb_id: "",
@@ -288,6 +294,22 @@ function countOccurrences(markup: string, fragment: string): number {
 }
 
 describe("EpisodeContent", () => {
+  it.each([
+    [{ trickplay: true, trickplay_supported: true }, true],
+    [{ trickplay: true, trickplay_supported: false }, false],
+    [{ trickplay: true }, false],
+    [undefined, false],
+  ])("offers episode seek-preview administration with capability %o: %s", (data, offered) => {
+    mocks.useAuth.mockReturnValue({ user: { role: "admin" } });
+    mocks.useLibraryCapabilities.mockReturnValue({ data });
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <EpisodeContent item={makeEpisodeItem()} />
+      </MemoryRouter>,
+    );
+    expect(mocks.capturedActionBarProps.value?.canManageTrickplay).toBe(offered);
+  });
+
   beforeEach(() => {
     mocks.capturedActionBarProps.value = null;
     mocks.capturedDetailHeroProps.value = null;
@@ -309,6 +331,7 @@ describe("EpisodeContent", () => {
       isPending: false,
     });
     mocks.useAdminMarkerCapabilities.mockReturnValue({ data: undefined });
+    mocks.useLibraryCapabilities.mockReturnValue({ data: undefined });
     mocks.useWatchedStateMutation.mockReturnValue({
       mutate: vi.fn(),
       isPending: false,

@@ -18,6 +18,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/watchlist"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
 
@@ -43,6 +44,7 @@ type PersonalDataHandler struct {
 	profileStaler           ProfileStaler
 	profileRefreshRequester ProfileRefreshRequester
 	ebookProgressStore      EbookReaderProgressLister
+	watchlistTitles         *watchlist.Titles
 }
 
 // NewPersonalDataHandler creates a new PersonalDataHandler.
@@ -374,6 +376,11 @@ func (h *PersonalDataHandler) HandleListWatchlist(w http.ResponseWriter, r *http
 // entries the viewer may not see have no card, so the raw entries, not the
 // cards, decide whether another page follows.
 func (h *PersonalDataHandler) ListWatchlist(ctx context.Context, viewer PersonalListViewer, limit, offset int) ([]userstore.WatchlistEntry, []CollectionItemView, error) {
+	// Promotion scans the whole profile, so a paged read runs it once, on the
+	// first page, rather than once per page.
+	if offset == 0 {
+		h.promoteWatchlist(ctx, viewer)
+	}
 	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
 	if err != nil {
 		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
@@ -398,6 +405,10 @@ func (h *PersonalDataHandler) ListWatchlist(ctx context.Context, viewer Personal
 // strictly after the key (nil = from the newest row), and the cards of the
 // entries the viewer may see (fully-watched series hidden) in the same order.
 func (h *PersonalDataHandler) ListWatchlistPage(ctx context.Context, viewer PersonalListViewer, after *userstore.ListKey, limit int) ([]userstore.WatchlistEntry, []CollectionItemView, error) {
+	// Once per traversal, on the first page; see ListWatchlist.
+	if after == nil {
+		h.promoteWatchlist(ctx, viewer)
+	}
 	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
 	if err != nil {
 		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
@@ -456,6 +467,7 @@ func (h *PersonalDataHandler) GetWatchlistEntry(ctx context.Context, viewer Pers
 	if err := h.ensureAccessibleItem(ctx, itemID, viewer.Access); err != nil {
 		return userstore.WatchlistEntry{}, false, apiError(http.StatusNotFound, "not_found", "Item not found")
 	}
+	h.promoteWatchlistItem(ctx, viewer, itemID)
 	e, err := store.GetWatchlistEntry(ctx, viewer.ProfileID, itemID)
 	if err != nil {
 		return userstore.WatchlistEntry{}, false, apiError(http.StatusInternalServerError, "internal_error", "Failed to check watchlist")

@@ -50,14 +50,27 @@ import { sortSubtitleProviders } from "@/lib/subtitleProviders";
 
 import { FieldGroup } from "./FieldGroup";
 import { MarkerProviderTiles } from "./MarkerProviderTiles";
-import { SettingField } from "./SettingField";
+import { SettingField, SettingFieldStatus } from "./SettingField";
+import { SaveBar } from "./SaveBar";
+import { useAdminNodes } from "@/hooks/queries/admin/nodes";
+import {
+  SUBTITLE_SYNC_EXECUTION_DEFAULT,
+  hasUsableTranscodeNode,
+  isNodeBackedExecution,
+  subtitleSyncExecutionOptions,
+} from "./playbackSettings.utils";
 
 /**
  * MDBList is the only provider on this page whose credential is a server
- * setting; the subtitle providers have their own endpoints. The form is still
- * mounted so the page reads one sensitive-status list for every tile.
+ * setting; the subtitle providers have their own endpoints. The form also
+ * stages the subtitle sync settings, which save through the page's SaveBar.
  */
-const KEYS = ["mdblist.api_key"];
+const SUBTITLE_SYNC_KEYS = [
+  "subtitles.auto_sync",
+  "subtitles.sync_execution",
+  "subtitles.sync_node_capacity",
+];
+const KEYS = ["mdblist.api_key", ...SUBTITLE_SYNC_KEYS];
 
 // ---------------------------------------------------------------------------
 // Shared tile plumbing
@@ -600,6 +613,13 @@ export default function ProvidersSettings() {
 
   const providers = sortSubtitleProviders(data?.providers ?? []);
 
+  const nodes = useAdminNodes();
+  // Gate node-backed modes only on a node list we actually have, as the
+  // chapter thumbnail setting does.
+  const transcodeNodeAvailable = !nodes.isSuccess || hasUsableTranscodeNode(nodes.data);
+  const syncExecution =
+    form.getValue("subtitles.sync_execution") || SUBTITLE_SYNC_EXECUTION_DEFAULT;
+
   if (form.isLoading || isLoading) {
     return (
       <div className="max-w-5xl space-y-6" role="status" aria-label="Loading providers">
@@ -637,6 +657,44 @@ export default function ProvidersSettings() {
             </ProviderTileGrid>
           )}
         </div>
+      </FieldGroup>
+
+      <FieldGroup label="Subtitle sync" dirty={SUBTITLE_SYNC_KEYS.some((key) => form.isDirty(key))}>
+        <SettingField
+          label="Sync new subtitles automatically"
+          type="toggle"
+          description="Aligns downloaded and uploaded subtitles to the video's audio. Fixes subtitles cut for a different release."
+          dirty={form.isDirty("subtitles.auto_sync")}
+          value={form.getValue("subtitles.auto_sync") || "true"}
+          onChange={(v) => form.setValue("subtitles.auto_sync", v)}
+          restartRequired={restartKeys.has("subtitles.auto_sync")}
+        />
+        <SettingField
+          label="Where to analyze audio"
+          type="select"
+          description="Sync decodes a few minutes of the file's audio."
+          options={subtitleSyncExecutionOptions(syncExecution, transcodeNodeAvailable)}
+          status={
+            !transcodeNodeAvailable && isNodeBackedExecution(syncExecution) ? (
+              <SettingFieldStatus tone="warn">No transcode nodes are connected</SettingFieldStatus>
+            ) : undefined
+          }
+          dirty={form.isDirty("subtitles.sync_execution")}
+          value={syncExecution}
+          onChange={(v) => form.setValue("subtitles.sync_execution", v)}
+          restartRequired={restartKeys.has("subtitles.sync_execution")}
+        />
+        {isNodeBackedExecution(syncExecution) && (
+          <SettingField
+            label="Concurrent syncs per transcode node"
+            type="number"
+            description="How many subtitles one transcode node syncs at once."
+            dirty={form.isDirty("subtitles.sync_node_capacity")}
+            value={form.getValue("subtitles.sync_node_capacity") || "1"}
+            onChange={(v) => form.setValue("subtitles.sync_node_capacity", v)}
+            restartRequired={restartKeys.has("subtitles.sync_node_capacity")}
+          />
+        )}
       </FieldGroup>
 
       <FieldGroup label="Metadata providers">
@@ -688,6 +746,13 @@ export default function ProvidersSettings() {
           </p>
         </div>
       </FieldGroup>
+
+      <SaveBar
+        dirtyCount={form.dirtyCount}
+        onSave={form.save}
+        onDiscard={form.discard}
+        isSaving={form.isSaving}
+      />
     </div>
   );
 }

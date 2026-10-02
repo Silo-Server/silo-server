@@ -86,6 +86,13 @@ resolver: clients may cache effective values but must not reimplement a
 different precedence. `unset` is an operation, not a value, and is distinct
 from `false`, `0`, `""`, and JSON `null`.
 
+Most keys resolve their most specific scope first. A key can instead resolve
+`profile` ahead of `profile_device` to model an "apply to all devices" switch:
+a profile value is the choice for every device, and clearing it lets each
+device follow its own value again. The switch's state is whether the effective
+source is `profile`, so clients still read one server-resolved value.
+`ui.title_art` works this way; its manifest notes define the writes.
+
 ## Preferences versus restrictions
 
 `internal/policy` is a second resolver over some of the same subject matter,

@@ -7,12 +7,14 @@ import (
 	"os"
 	"reflect"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -155,7 +157,26 @@ func TestPlayableTargetResolverProfileStateAvailabilityAndAccess(t *testing.T) {
 		t.Fatalf("create postgres progress store: %v", err)
 	}
 	progressStore := &recordingProgressStore{delegate: postgresProgressStore}
-	targetsA, err := resolver.Resolve(ctx, PlayableTargetQuery{
+	// Exercise the backend-neutral reader and the SQL winner path against
+	// the same committed rows for every PostgreSQL fixture and access case.
+	resolve := func(ctx context.Context, query PlayableTargetQuery) (map[string]string, error) {
+		got, err := resolver.Resolve(ctx, query)
+		if err != nil {
+			return got, err
+		}
+		if store, ok := query.ProgressStore.(*recordingProgressStore); ok && store.delegate == postgresProgressStore {
+			query.ProgressStore = postgresProgressStore
+			fast, err := resolver.Resolve(ctx, query)
+			if err != nil {
+				return nil, err
+			}
+			if !reflect.DeepEqual(fast, got) {
+				t.Fatalf("SQL winners = %#v, generic targets = %#v for %+v", fast, got, query.Items)
+			}
+		}
+		return got, nil
+	}
+	targetsA, err := resolve(ctx, PlayableTargetQuery{
 		UserID: userID, ProfileID: profileA, Items: inputs,
 		Access: AccessFilter{AllowedLibraryIDs: []int{allowedFolderID}}, ProgressStore: progressStore,
 	})
@@ -180,7 +201,7 @@ func TestPlayableTargetResolverProfileStateAvailabilityAndAccess(t *testing.T) {
 
 	t.Run("leaf cards do not query progress", func(t *testing.T) {
 		store := &recordingProgressStore{delegate: postgresProgressStore}
-		_, err := resolver.Resolve(t.Context(), PlayableTargetQuery{
+		_, err := resolve(t.Context(), PlayableTargetQuery{
 			UserID: userID, ProfileID: profileA,
 			Items:  []PlayableTargetInput{{ContentID: movie, Type: "movie"}, {ContentID: episode1, Type: "episode"}},
 			Access: AccessFilter{AllowedLibraryIDs: []int{allowedFolderID}}, ProgressStore: store,
@@ -194,7 +215,7 @@ func TestPlayableTargetResolverProfileStateAvailabilityAndAccess(t *testing.T) {
 	})
 
 	cappedInput := PlayableTargetInput{ContentID: movie, Type: "movie"}
-	qualityCapped, err := resolver.Resolve(ctx, PlayableTargetQuery{
+	qualityCapped, err := resolve(ctx, PlayableTargetQuery{
 		UserID: userID, ProfileID: profileA,
 		Items:         []PlayableTargetInput{cappedInput},
 		Access:        AccessFilter{AllowedLibraryIDs: []int{allowedFolderID}, MaxPlaybackQuality: "1080p"},
@@ -233,7 +254,7 @@ func TestPlayableTargetResolverProfileStateAvailabilityAndAccess(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			progressStore.batchSizes = nil
 			input := PlayableTargetInput{ContentID: series, Type: "series", PreferredContentID: tc.hint}
-			targets, err := resolver.Resolve(ctx, PlayableTargetQuery{
+			targets, err := resolve(ctx, PlayableTargetQuery{
 				UserID: userID, ProfileID: profileA,
 				Items:         []PlayableTargetInput{input},
 				Access:        tc.access,
@@ -254,7 +275,7 @@ func TestPlayableTargetResolverProfileStateAvailabilityAndAccess(t *testing.T) {
 	t.Run("repeated cards for one series keep separate hints", func(t *testing.T) {
 		first := PlayableTargetInput{ContentID: series, Type: "series", PreferredContentID: episode1}
 		second := PlayableTargetInput{ContentID: series, Type: "series", PreferredContentID: episode2}
-		targets, err := resolver.Resolve(ctx, PlayableTargetQuery{
+		targets, err := resolve(ctx, PlayableTargetQuery{
 			UserID: userID, ProfileID: profileA,
 			Items:         []PlayableTargetInput{first, second},
 			Access:        AccessFilter{AllowedLibraryIDs: []int{allowedFolderID}},
@@ -269,7 +290,7 @@ func TestPlayableTargetResolverProfileStateAvailabilityAndAccess(t *testing.T) {
 	})
 
 	libraryScopedInput := PlayableTargetInput{ContentID: series, Type: "series"}
-	libraryScoped, err := resolver.Resolve(ctx, PlayableTargetQuery{
+	libraryScoped, err := resolve(ctx, PlayableTargetQuery{
 		UserID: userID, ProfileID: profileA,
 		Items:         []PlayableTargetInput{libraryScopedInput},
 		LibraryIDs:    []int{allowedFolderID},
@@ -280,7 +301,7 @@ func TestPlayableTargetResolverProfileStateAvailabilityAndAccess(t *testing.T) {
 	}
 
 	seriesInput := PlayableTargetInput{ContentID: series, Type: "series"}
-	targetsB, err := resolver.Resolve(ctx, PlayableTargetQuery{
+	targetsB, err := resolve(ctx, PlayableTargetQuery{
 		UserID: userID, ProfileID: profileB,
 		Items:  []PlayableTargetInput{seriesInput},
 		Access: AccessFilter{AllowedLibraryIDs: []int{allowedFolderID}}, ProgressStore: progressStore,
@@ -289,7 +310,7 @@ func TestPlayableTargetResolverProfileStateAvailabilityAndAccess(t *testing.T) {
 		t.Fatalf("profile B target = %#v, err %v; want resumable %s", targetsB, err, episode1)
 	}
 
-	untouched, err := resolver.Resolve(ctx, PlayableTargetQuery{
+	untouched, err := resolve(ctx, PlayableTargetQuery{
 		UserID: userID, ProfileID: id("no-progress"),
 		Items:  []PlayableTargetInput{seriesInput},
 		Access: AccessFilter{AllowedLibraryIDs: []int{allowedFolderID}}, ProgressStore: progressStore,
@@ -303,7 +324,7 @@ func TestPlayableTargetResolverProfileStateAvailabilityAndAccess(t *testing.T) {
 		"stale explicit hints":     {ContentID: season, Type: "season", SeriesID: "wrong-series", SeasonNumber: intPtr(99)},
 	} {
 		t.Run(name, func(t *testing.T) {
-			targets, err := resolver.Resolve(ctx, PlayableTargetQuery{
+			targets, err := resolve(ctx, PlayableTargetQuery{
 				UserID: userID, ProfileID: profileA, Items: []PlayableTargetInput{input},
 				Access: AccessFilter{AllowedLibraryIDs: []int{allowedFolderID}}, ProgressStore: progressStore,
 			})
@@ -312,6 +333,58 @@ func TestPlayableTargetResolverProfileStateAvailabilityAndAccess(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("conflicting valid season identities keep global episode tie order", func(t *testing.T) {
+		input := PlayableTargetInput{ContentID: season, Type: "season", SeriesID: completedSeries, SeasonNumber: new(1)}
+		got, err := resolve(t.Context(), PlayableTargetQuery{
+			UserID: userID, ProfileID: id("no-progress"), Items: []PlayableTargetInput{input},
+			Access: AccessFilter{AllowedLibraryIDs: []int{allowedFolderID}}, ProgressStore: progressStore,
+		})
+		if err != nil || got[input.Key()] != completed1 {
+			t.Fatalf("conflicting season target = %#v, err %v; want global first episode %s", got, err, completed1)
+		}
+	})
+
+	t.Run("progress timestamp precision and hidden rows", func(t *testing.T) {
+		stamp := time.Now().UTC().Truncate(time.Second)
+		if _, err := pool.Exec(t.Context(), `UPDATE user_watch_progress
+			SET completed = FALSE, position_seconds = 300,
+			updated_at = CASE WHEN media_item_id = $3 THEN $5::timestamptz ELSE $6::timestamptz END
+			WHERE user_id = $1 AND profile_id = $2 AND media_item_id = ANY($4::text[])`,
+			userID, profileA, episode1, []string{episode1, episode2}, stamp.Add(100*time.Millisecond), stamp.Add(900*time.Millisecond)); err != nil {
+			t.Fatal(err)
+		}
+		query := PlayableTargetQuery{UserID: userID, ProfileID: profileA,
+			Items:  []PlayableTargetInput{seriesInput},
+			Access: AccessFilter{AllowedLibraryIDs: []int{allowedFolderID}}, ProgressStore: progressStore}
+		check := func(want string) {
+			t.Helper()
+			got, err := resolve(t.Context(), query)
+			if err != nil || got[seriesInput.Key()] != want {
+				t.Fatalf("target = %#v, err %v; want %s", got, err, want)
+			}
+		}
+		check(episode1) // Both serialized timestamps tie at the same second.
+		for _, hidden := range []struct{ id, want string }{{episode1, episode2}, {episode2, episode1}} {
+			if _, err := pool.Exec(t.Context(), `INSERT INTO user_history_hidden_items
+				(user_id, profile_id, media_item_id, hidden_before, updated_at)
+				VALUES ($1, $2, $3, $4, $4)`, userID, profileA, hidden.id, stamp.Add(time.Second)); err != nil {
+				t.Fatal(err)
+			}
+			check(hidden.want)
+		}
+		if _, err := pool.Exec(t.Context(), `INSERT INTO user_history_hidden_items
+			(user_id, profile_id, media_item_id, hidden_before, updated_at)
+			VALUES ($1, $2, $3, $4, $4)`, userID, profileA, completed2, stamp.Add(time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		completedInput := PlayableTargetInput{ContentID: completedSeries, Type: "series"}
+		query.Items = []PlayableTargetInput{completedInput}
+		got, err := resolve(t.Context(), query)
+		if err != nil || got[completedInput.Key()] != completed2 {
+			t.Fatalf("hidden completed target = %#v, err %v; want %s", got, err, completed2)
+		}
+	})
 
 	t.Run("sqlite progress backend", func(t *testing.T) {
 		db, err := sql.Open("sqlite3", ":memory:")
@@ -334,7 +407,7 @@ func TestPlayableTargetResolverProfileStateAvailabilityAndAccess(t *testing.T) {
 			t.Fatalf("seed sqlite progress: %v", err)
 		}
 
-		targets, err := resolver.Resolve(ctx, PlayableTargetQuery{
+		targets, err := resolve(ctx, PlayableTargetQuery{
 			UserID: userID, ProfileID: profileA,
 			Items:         []PlayableTargetInput{seriesInput},
 			Access:        AccessFilter{AllowedLibraryIDs: []int{allowedFolderID}},
@@ -346,21 +419,24 @@ func TestPlayableTargetResolverProfileStateAvailabilityAndAccess(t *testing.T) {
 	})
 }
 
-// Long-running series are the case this project exists for. Candidates must
-// stay uncapped: bounding them in season/episode order would hide an
-// in-progress episode deep in the run and silently degrade the card to "play
-// the first episode". The bind-parameter ceiling is handled by batching the
-// progress lookup instead, which costs nothing behaviorally.
+// A winner deep into a long series must remain reachable while PostgreSQL
+// returns one row per card. Compare against the uncapped generic fallback.
 func TestPlayableTargetResolverResumesDeepInsideLongSeries(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
 	}
-	const episodeCount = 420
-	const inProgressEpisode = 400
+	const episodeCount = 4200
+	const inProgressEpisode = 4000
 
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
+	ctx := t.Context()
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trace := &playableTargetQueryTrace{}
+	cfg.ConnConfig.Tracer = trace
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		t.Fatalf("connect test database: %v", err)
 	}
@@ -383,6 +459,7 @@ func TestPlayableTargetResolverResumesDeepInsideLongSeries(t *testing.T) {
 		t.Fatalf("seed folder: %v", err)
 	}
 	t.Cleanup(func() {
+		ctx := context.Background()
 		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
 		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = $1`, series)
 		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, folderID)
@@ -422,18 +499,36 @@ func TestPlayableTargetResolverResumesDeepInsideLongSeries(t *testing.T) {
 		t.Fatalf("create progress store: %v", err)
 	}
 	input := PlayableTargetInput{ContentID: series, Type: "series"}
-	targets, err := NewPlayableTargetResolver(pool).Resolve(ctx, PlayableTargetQuery{
+	resolver := NewPlayableTargetResolver(pool)
+	query := PlayableTargetQuery{
 		UserID: userID, ProfileID: profileID,
 		Items:         []PlayableTargetInput{input},
 		Access:        AccessFilter{AllowedLibraryIDs: []int{folderID}},
 		ProgressStore: progressStore,
-	})
+	}
+	trace.rows.Store(0)
+	trace.queries.Store(0)
+	targets, err := resolver.Resolve(ctx, query)
 	if err != nil {
 		t.Fatalf("resolve long series: %v", err)
 	}
 	if got := targets[input.Key()]; got != episodeID(inProgressEpisode) {
 		t.Fatalf("long-series target = %q, want the in-progress episode %q", got, episodeID(inProgressEpisode))
 	}
+	if rows, queries := trace.rows.Load(), trace.queries.Load(); rows != 1 || queries != 1 {
+		t.Fatalf("SQL winner read %d rows in %d queries, want one row in one query", rows, queries)
+	}
+	trace.rows.Store(0)
+	trace.queries.Store(0)
+	query.ProgressStore = &recordingProgressStore{delegate: progressStore}
+	generic, err := resolver.Resolve(ctx, query)
+	if err != nil || !reflect.DeepEqual(targets, generic) {
+		t.Fatalf("generic targets = %#v, err %v; SQL winners = %#v", generic, err, targets)
+	}
+	if rows := trace.rows.Load(); rows < episodeCount {
+		t.Fatalf("generic comparison read %d rows, want at least %d uncapped candidates", rows, episodeCount)
+	}
+	t.Logf("generic read %d rows in %d queries; SQL winner read one row in one query", trace.rows.Load(), trace.queries.Load())
 }
 
 func nilIfBlank(value string) any {
@@ -441,4 +536,21 @@ func nilIfBlank(value string) any {
 		return nil
 	}
 	return value
+}
+
+// Counts rows crossing the database boundary, including generic progress batches.
+type playableTargetQueryTrace struct {
+	rows    atomic.Int64
+	queries atomic.Int64
+}
+
+func (q *playableTargetQueryTrace) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryStartData) context.Context {
+	return ctx
+}
+
+func (q *playableTargetQueryTrace) TraceQueryEnd(_ context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
+	if data.CommandTag.Select() {
+		q.rows.Add(data.CommandTag.RowsAffected())
+		q.queries.Add(1)
+	}
 }

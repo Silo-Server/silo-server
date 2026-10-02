@@ -173,8 +173,18 @@ describe("ItemCard SortMeta", () => {
       },
     });
 
-    expect(tmdbMarkup).toContain("8.2 / 10");
-    expect(criticMarkup).toContain("96%");
+    expect(tmdbMarkup).toContain('<span class="not-uppercase">TMDB</span> 8.2');
+    expect(criticMarkup).toContain('<span class="not-uppercase">RT</span> 96%');
+  });
+
+  it("rounds a rating sort label the way the title page does", () => {
+    // toFixed(1) reads 7.35 as "7.3"; the server's display reads "7.4".
+    const markup = renderCard({
+      sortField: "rating_imdb",
+      item: { ...baseItem, rating_imdb: 7.35 },
+    });
+
+    expect(markup).toContain('<span class="not-uppercase">IMDb</span> 7.4');
   });
 
   it("renders resolution when sorted by resolution", () => {

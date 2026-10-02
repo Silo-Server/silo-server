@@ -445,9 +445,12 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
 export function AdvancedFields({
   form,
   chapterThumbnailsSupported,
+  trickplaySupported,
 }: {
   form: LibraryFormController;
   chapterThumbnailsSupported: boolean;
+  /** Undefined when the server does not offer seek previews. */
+  trickplaySupported?: boolean;
 }) {
   return (
     <div className="space-y-3">
@@ -469,6 +472,27 @@ export function AdvancedFields({
             checked={form.chapterThumbnailsEnabled}
             disabled={!chapterThumbnailsSupported}
             onCheckedChange={form.setChapterThumbnailsEnabled}
+          />
+        </SettingCard>
+      )}
+      {form.settingSupport.trickplay && trickplaySupported !== undefined && (
+        <SettingCard
+          htmlFor="trickplay-switch"
+          title="Generate seek previews"
+          description="Makes the thumbnails players show while seeking, in the configured public asset storage. Files are processed in the background at low priority. Turning this off deletes the library's previews."
+          footer={
+            !trickplaySupported ? (
+              <p className="text-warning text-xs">
+                Public asset storage is required before this can be enabled.
+              </p>
+            ) : null
+          }
+        >
+          <Switch
+            id="trickplay-switch"
+            checked={form.trickplayEnabled}
+            disabled={!trickplaySupported && !form.trickplayEnabled}
+            onCheckedChange={form.setTrickplayEnabled}
           />
         </SettingCard>
       )}

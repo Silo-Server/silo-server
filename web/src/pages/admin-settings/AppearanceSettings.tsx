@@ -24,6 +24,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { useBranding } from "@/hooks/useBranding";
 import { useRestartKeys } from "@/hooks/useRestartKeys";
+import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { ACCENT_TOKENS, accentColorToTokens } from "@/lib/accentMapping";
 import { sanitizeCss } from "@/lib/cssSanitizer";
@@ -33,6 +34,7 @@ import {
   OVERLAY_CATEGORIES,
   OVERLAY_PRESETS,
   OVERLAY_REGISTRY,
+  isOverlayOffered,
   POSITION_OPTIONS,
   PRESET_IDS,
   parseOverlayPrefs,
@@ -97,6 +99,7 @@ export default function AppearanceSettings() {
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
   const branding = useBranding();
   const restartKeys = useRestartKeys();
+  const shownRatingSources = useShownRatingSources();
 
   // The CSS box shows exactly what was typed while the staged value is the
   // sanitized copy that will be saved, so stripping an external @import never
@@ -463,7 +466,9 @@ export default function AppearanceSettings() {
               forceOpen={overlayItemsTouched}
             >
               {OVERLAY_CATEGORIES.map((category) => {
-                const overlays = OVERLAY_REGISTRY.filter((d) => d.category === category);
+                const overlays = OVERLAY_REGISTRY.filter(
+                  (d) => d.category === category && isOverlayOffered(d, shownRatingSources),
+                );
                 if (overlays.length === 0) return null;
                 return (
                   <div key={category} className="min-w-0">

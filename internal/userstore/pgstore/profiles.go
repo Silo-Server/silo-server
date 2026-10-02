@@ -341,6 +341,9 @@ func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error 
 		"user_library_playback_preferences",
 		"user_setting_values",
 		"user_dropped_series",
+		// Leaves titles no profile watchlists any more; the profile
+		// handler's watchlist-title purge sweeps those under the title lock.
+		"user_watchlist_titles",
 	}
 	for _, table := range cascadeTables {
 		if _, err := tx.Exec(ctx, fmt.Sprintf("DELETE FROM %s WHERE user_id = $1 AND profile_id = $2", table), s.userID, id); err != nil {

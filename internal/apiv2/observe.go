@@ -123,16 +123,6 @@ func observationFrom(ctx context.Context) *observation {
 	return o
 }
 
-// observedClientName is the clamped X-Silo-Client name the observe middleware
-// read for this request, the name behind the `client` metric label, or ""
-// when the request did not pass through it.
-func observedClientName(ctx context.Context) string {
-	if o := observationFrom(ctx); o != nil {
-		return o.clientName
-	}
-	return ""
-}
-
 // observe is the outermost v2 chi middleware after requestID: it records the
 // request once, whatever answered it (an operation, a gate, the 404/405
 // fallbacks, or the panic recovery inside bufferResponse).

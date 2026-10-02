@@ -12,7 +12,6 @@ import (
 	"math"
 	"net/http"
 	"net/url"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -154,6 +153,12 @@ type AdminHandler struct {
 	OnServerSettingUpdated       func(ctx context.Context, key, value string)
 	RestartStatus                *ServerRestartStatusTracker
 	CatalogSearchStatus          catalog.CatalogSearchStatusProvider
+	// WatchlistTitlesSweeper deletes watchlist titles no entry references.
+	// Deleting an account drops its entries through the users foreign key,
+	// which can leave such titles behind. Nil skips the sweep.
+	WatchlistTitlesSweeper interface {
+		SweepOrphanTitles(ctx context.Context) error
+	}
 	// logLevelCounts caches the 24h error/warning tallies served on
 	// /admin/server/status. The dashboard polls that route every 15s, and the
 	// counts are only ever read as a rough signal, so re-counting per request
@@ -1096,9 +1101,24 @@ func (h *AdminHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) 
 	if h.OnUserSessionsRevoked != nil {
 		h.OnUserSessionsRevoked(r.Context(), id)
 	}
+	h.sweepWatchlistTitles(r.Context(), id)
 	h.invalidateStats(r.Context(), cache.ChannelAdmin, cache.EventAdminStatsInvalidated, strconv.Itoa(id))
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// sweepWatchlistTitles removes the watchlist titles a deleted account's
+// entries were the last to reference. The account is already gone, so a
+// failure is logged and the next delete's sweep picks the titles up.
+func (h *AdminHandler) sweepWatchlistTitles(ctx context.Context, userID int) {
+	if h.WatchlistTitlesSweeper == nil {
+		return
+	}
+	sweepCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if err := h.WatchlistTitlesSweeper.SweepOrphanTitles(sweepCtx); err != nil {
+		slog.WarnContext(ctx, "watchlist title sweep failed after account delete", "component", "api", "user_id", userID, "error", err)
+	}
 }
 
 // HandleImpersonateUser handles POST /admin/users/{id}/impersonate.
@@ -1330,15 +1350,24 @@ func (h *AdminHandler) HandleListUserProfiles(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// updateMayRequireSessionRevocation is updateRequiresSessionRevocation without
+// the current account to compare against: any credential or enabled change
+// might sign the user out.
 func updateMayRequireSessionRevocation(input models.UpdateUserInput) bool {
 	return input.Password != nil ||
-		input.Role != nil ||
-		input.Enabled != nil ||
-		input.Permissions != nil ||
-		input.MaxPlaybackQuality.Set ||
-		input.AccessGroupID.Set
+		input.Enabled != nil
 }
 
+// updateRequiresSessionRevocation reports whether an account update signs the
+// user out everywhere: a new password or an enabled change.
+//
+// Policy changes (permissions, playback-quality override, access group) do
+// not; they bump access_policy_revision, every request resolves the current
+// policy, and connected realtime sockets tell their clients to refresh. A role
+// change does not either: RequireAuth refuses access tokens minted under the
+// old role with token_refresh_required, and a refresh issues the new role.
+// The impersonation sessions a demoted admin started end in the same
+// transaction (auth.UserRepository.MutateAdminAccount).
 func updateRequiresSessionRevocation(current *models.User, input models.UpdateUserInput) bool {
 	if input.Password != nil {
 		return true
@@ -1346,53 +1375,10 @@ func updateRequiresSessionRevocation(current *models.User, input models.UpdateUs
 	if current == nil {
 		return updateMayRequireSessionRevocation(input)
 	}
-	if input.Role != nil && *input.Role != current.Role {
-		return true
-	}
 	if input.Enabled != nil && *input.Enabled != current.Enabled {
 		return true
 	}
-	if input.Permissions != nil && !slices.Equal(*input.Permissions, current.Permissions) {
-		return true
-	}
-	if input.MaxPlaybackQuality.Set && !qualityOverrideEqual(input.MaxPlaybackQuality.Value, current.MaxPlaybackQuality) {
-		return true
-	}
-	if input.AccessGroupID.Set && !accessGroupIDEqual(input.AccessGroupID.Value, current.AccessGroupID) {
-		return true
-	}
 	return false
-}
-
-func qualityOverrideEqual(a, b *string) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return access.NormalizePlaybackQuality(*a) == access.NormalizePlaybackQuality(*b)
-}
-
-func accessGroupIDEqual(a, b *int64) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return *a == *b
-}
-
-func (h *AdminHandler) revokeUserSessions(ctx context.Context, userID int) error {
-	if h.pool == nil {
-		return nil
-	}
-	sessionRepo := auth.NewSessionRepository(h.pool)
-	if err := sessionRepo.RevokeAllByUser(ctx, userID); err != nil {
-		return err
-	}
-	if err := sessionRepo.RevokeAllByImpersonator(ctx, userID); err != nil {
-		return err
-	}
-	if h.OnUserSessionsRevoked != nil {
-		h.OnUserSessionsRevoked(ctx, userID)
-	}
-	return nil
 }
 
 // HandleListUnmatched handles GET /admin/unmatched.
@@ -1660,6 +1646,8 @@ var sensitiveSettingKeys = catalog.SensitiveSettingKeys
 var machineManagedSettingKeys = map[string]bool{
 	config.ArtworkStorageReconcileCheckpointKey: true,
 	config.ArtworkStorageSweepCheckpointKey:     true,
+	config.MediaImageSweepCheckpointKey:         true,
+	config.ChapterThumbnailOriginalsCleanupKey:  true,
 	blobstore.IdentitySettingKey:                true,
 	blobstore.OperationalIdentitySettingKey:     true,
 	config.StorageTransitionTargetKey:           true,

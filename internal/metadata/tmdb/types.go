@@ -156,6 +156,13 @@ type mediaTVResponse struct {
 	VoteAverage  float64 `json:"vote_average"`
 }
 
+// findResponse is TMDB's /find/{external_id} payload. Only the movie and TV
+// result lists matter here; people, episodes and seasons are ignored.
+type findResponse struct {
+	MovieResults []mediaMovieResponse `json:"movie_results"`
+	TVResults    []mediaTVResponse    `json:"tv_results"`
+}
+
 type mediaMultiSearchResponse struct {
 	ID           int     `json:"id"`
 	MediaType    string  `json:"media_type"`

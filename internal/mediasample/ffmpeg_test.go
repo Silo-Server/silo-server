@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"image"
 	"image/jpeg"
 	"math"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -237,5 +240,190 @@ func TestRunImageWithRealFFmpeg(t *testing.T) {
 	var runErr *Error
 	if !errors.As(err, &runErr) || (runErr.Reason != ReasonEmpty && runErr.Reason != ReasonExit) {
 		t.Fatalf("frame past the end: error %v, want no image", err)
+	}
+}
+
+// TestRunSheetsWithRealFFmpeg tiles a generated 2.4:1 clip of six ten-second
+// gray scenes, keyframes every two seconds, sampled at each scene's middle,
+// into two 2x2 sheets: in Matroska and in MP4 with timestamps shifted to
+// start at 11.4 s (read through a list), in MPEG-TS (read as a window), and
+// read through as one window. Each cell must show its scene's gray at full
+// range, and the cells after the last sample black.
+func TestRunSheetsWithRealFFmpeg(t *testing.T) {
+	ffmpeg, caps := realFFmpeg(t)
+	grays := []int{20, 60, 100, 140, 180, 220}
+	var sources []string
+	var inputs []string
+	for i, gray := range grays {
+		sources = append(sources, "-f", "lavfi", "-i", fmt.Sprintf("color=c=0x%02x%02x%02x:s=640x266:r=24:d=10", gray, gray, gray))
+		inputs = append(inputs, fmt.Sprintf("[%d:v]", i))
+	}
+	dir := t.TempDir()
+	clip := filepath.Join(dir, "clip.mkv")
+	args := append([]string{"-hide_banner", "-loglevel", "error"}, sources...)
+	args = append(args, "-filter_complex", strings.Join(inputs, "")+"concat=n=6:v=1:a=0,format=yuv420p[v]", "-map", "[v]",
+		"-g", "48", "-keyint_min", "48", clip)
+	if output, err := exec.Command(ffmpeg, args...).CombinedOutput(); err != nil {
+		t.Skipf("cannot generate the clip: %v: %s", err, output)
+	}
+	remux := func(name string, options ...string) string {
+		path := filepath.Join(dir, name)
+		args := append([]string{"-hide_banner", "-loglevel", "error", "-i", clip, "-c", "copy"}, options...)
+		if output, err := exec.Command(ffmpeg, append(args, path)...).CombinedOutput(); err != nil {
+			t.Skipf("cannot remux the clip to %s: %v: %s", name, err, output)
+		}
+		return path
+	}
+	base := Request{
+		Samples: &Samples{Seconds: []float64{5, 15, 25, 35, 45, 55}},
+		Sheets:  &SheetsOutput{TileWidth: 64, TileHeight: 26, Columns: 2, Rows: 2, Quality: 90},
+		Threads: 1,
+	}
+	if err := caps.Require(base); err != nil {
+		t.Skipf("ffmpeg cannot sample sheets: %v", err)
+	}
+	cases := map[string]Request{}
+	for name, input := range map[string]string{
+		"matroska":    clip,
+		"mp4 shifted": remux("shifted.mp4", "-output_ts_offset", "11.4"),
+		"mpegts":      remux("clip.ts"),
+	} {
+		req := base
+		req.Input = input
+		cases[name] = req
+	}
+	readThrough := base
+	readThrough.Input = clip
+	readThrough.Samples = &Samples{Seconds: base.Samples.Seconds, ReadThrough: true}
+	cases["read through"] = readThrough
+
+	want := [][]int{{20, 60, 100, 140}, {180, 220, 0, 0}}
+	for name, req := range cases {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+			defer cancel()
+			result, err := Runner{FFmpegPath: ffmpeg, Workload: processmetrics.Thumbnail}.Run(ctx, req)
+			if err != nil {
+				t.Fatalf("run: %v", err)
+			}
+			if len(result.Sheets) != 2 || result.SheetFrames != (SheetFrames{Decoded: 6}) {
+				t.Fatalf("got %d sheets, frames %+v; want 2 sheets of 6 decoded samples", len(result.Sheets), result.SheetFrames)
+			}
+			for i, sheet := range result.Sheets {
+				img, err := jpeg.Decode(bytes.NewReader(sheet.JPEG))
+				if err != nil {
+					t.Fatalf("sheet %d: %v", i, err)
+				}
+				if size := img.Bounds().Size(); size.X != 128 || size.Y != 52 {
+					t.Fatalf("sheet %d is %v, want 128x52", i, size)
+				}
+				ycc := img.(*image.YCbCr)
+				for cell, gray := range want[i] {
+					x, y := (cell%2)*64+32, (cell/2)*26+13
+					if got := int(ycc.Y[ycc.YOffset(x, y)]); got < gray-4 || got > gray+4 {
+						t.Fatalf("sheet %d cell %d luma %d, want %d", i, cell, got, gray)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestRunSheetsRejectsPrematureEOFWithRealFFmpeg requests an eight-second
+// timeline from a two-second MPEG-TS source. A complete source's final
+// eight-second GOP must still provide every preview, including when the
+// sample window and the container timestamps start after zero.
+func TestRunSheetsRejectsPrematureEOFWithRealFFmpeg(t *testing.T) {
+	ffmpeg, _ := realFFmpeg(t)
+	for _, shift := range []int{0, 10} {
+		for _, offset := range []float64{0, 11.4} {
+			for _, duration := range []int{2, 8} {
+				t.Run(fmt.Sprintf("sample-shift-%d/container-offset-%g/duration-%d", shift, offset, shift+duration), func(t *testing.T) {
+					clip := filepath.Join(t.TempDir(), "clip.ts")
+					args := []string{"-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+						fmt.Sprintf("color=c=gray:s=64x36:r=24:d=%d", shift+duration), "-c:v", "libx264",
+						"-threads", "1", "-g", "240", "-keyint_min", "240", "-sc_threshold", "0", "-bf", "2",
+						"-output_ts_offset", formatSeconds(offset), clip}
+					if output, err := exec.Command(ffmpeg, args...).CombinedOutput(); err != nil {
+						t.Skipf("cannot generate the clip: %v: %s", err, output)
+					}
+					if offset > 0 {
+						output, err := exec.Command(ffmpeg, probeArgs(clip)...).CombinedOutput()
+						if err != nil {
+							t.Fatalf("probe shifted clip: %v: %s", err, output)
+						}
+						header := &inputHeaderParser{}
+						for line := range strings.SplitSeq(string(output), "\n") {
+							header.line(line)
+						}
+						if header.info.StartSeconds < offset {
+							t.Fatalf("container starts at %g, want at least %g", header.info.StartSeconds, offset)
+						}
+					}
+					for _, readThrough := range []bool{false, true} {
+						t.Run(fmt.Sprintf("read-through-%t", readThrough), func(t *testing.T) {
+							req := Request{Input: clip, Samples: &Samples{Seconds: secondsFrom(float64(shift+1), 2, 4), ReadThrough: readThrough},
+								Sheets: &SheetsOutput{TileWidth: 24, TileHeight: 16, Columns: 2, Rows: 2, Quality: 80}, Threads: 1}
+							ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+							defer cancel()
+							result, err := (Runner{FFmpegPath: ffmpeg}).Run(ctx, req)
+							if duration == 2 {
+								failure, ok := errors.AsType[*Error](err)
+								if !ok || failure.Reason != ReasonEmpty {
+									t.Fatalf("frames %+v error %v, want sparse output rejected", result.SheetFrames, err)
+								}
+							} else if err != nil || result.SheetFrames != (SheetFrames{Decoded: 4}) {
+								t.Fatalf("valid final GOP: frames %+v error %v", result.SheetFrames, err)
+							}
+						})
+					}
+				})
+			}
+		}
+	}
+}
+
+// TestRunSheetsToneMapsHDRWithRealFFmpeg tiles a generated 10-bit PQ clip
+// with software tone mapping; the sheet must come out, not black.
+func TestRunSheetsToneMapsHDRWithRealFFmpeg(t *testing.T) {
+	ffmpeg, caps := realFFmpeg(t)
+	if !caps.HasFilter("zscale") {
+		t.Skip("ffmpeg lacks zscale")
+	}
+	clip := filepath.Join(t.TempDir(), "hdr.mkv")
+	generate := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error",
+		"-f", "lavfi", "-i", "testsrc2=s=1280x720:r=24:d=6",
+		"-pix_fmt", "yuv420p10le", "-c:v", "libx265", "-preset", "ultrafast",
+		"-x265-params", "log-level=error:keyint=24:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc",
+		clip)
+	if output, err := generate.CombinedOutput(); err != nil {
+		t.Skipf("cannot generate an HDR clip: %v: %s", err, output)
+	}
+	req := Request{
+		Input:   clip,
+		Samples: &Samples{Seconds: []float64{1, 3, 5}},
+		Sheets:  &SheetsOutput{TileWidth: 160, TileHeight: 90, Columns: 3, Rows: 1, Quality: 80, ToneMap: &ToneMap{AllowSoftware: true}},
+		Threads: 1,
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	result, err := Runner{FFmpegPath: ffmpeg, Workload: processmetrics.Thumbnail}.Run(ctx, req)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(result.Sheets) != 1 || result.SheetFrames.Decoded != 3 {
+		t.Fatalf("got %d sheets, frames %+v", len(result.Sheets), result.SheetFrames)
+	}
+	img, err := jpeg.Decode(bytes.NewReader(result.Sheets[0].JPEG))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ycc := img.(*image.YCbCr)
+	var sum int
+	for _, y := range ycc.Y {
+		sum += int(y)
+	}
+	if mean := sum / len(ycc.Y); mean < 30 {
+		t.Fatalf("tone-mapped sheet has mean luma %d, want a visible picture", mean)
 	}
 }

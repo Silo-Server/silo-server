@@ -137,7 +137,7 @@ Errors are RFC 9457 problem documents. The trailing segment of `type` is the sta
 | Status | Problem code             | Cause |
 | ------ | ------------------------ | ----- |
 | 400    | `malformed_request`      | Malformed JSON body, or a target the resolver rejects: neither `library_id` nor `path` supplied, a path outside the library's roots, a missing or uninspectable path, a path that is neither file nor directory, a permission-denied path, an ambiguous path matching several libraries, or an unsupported media extension. |
-| 401    | `authentication_required` / `invalid_token` / `session_expired` | Missing, unreadable, or expired credential. |
+| 401    | `authentication_required` / `invalid_token` / `session_expired` / `token_refresh_required` | Missing, unreadable, or expired credential, or an access token to refresh after a role change. |
 | 403    | `permission_denied`      | The caller is not an acting administrator. The demo-mode guard also answers here; it exempts acting administrators. |
 | 403    | `profile_verification_required` | A PIN-protected profile without `X-Profile-Token`. |
 | 404    | `not_found`              | The library ID does not exist. |

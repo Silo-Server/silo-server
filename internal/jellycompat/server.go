@@ -131,12 +131,18 @@ type Dependencies struct {
 	Recommender            recommendations.Recommender
 	RecWorker              *recommendations.Worker
 
+	// CollectionPosters picks each viewer's BoxSet poster; without it BoxSets
+	// show only uploaded and template posters.
+	CollectionPosters CollectionPosterResolver
+
 	// Settings (optional; reads server_settings for watched threshold, etc.)
 	SettingsRepo SettingsReader
 
 	// Subtitle support (optional)
 	SubtitleRepo  subtitles.Repository // optional; downloaded subtitle support
 	SubtitleBlobs subtitles.BlobStore  // optional; backs downloaded subtitle reads
+	// Trickplay serves seek-bar preview sheets; nil answers 404.
+	Trickplay TrickplaySheets
 }
 
 // CurrentConfig returns the live config when hot reload is wired, falling

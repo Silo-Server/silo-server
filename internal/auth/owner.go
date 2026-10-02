@@ -278,8 +278,8 @@ func (r *UserRepository) SetOwner(ctx context.Context, username string) (*models
 	}
 	if previous != id {
 		if target.Role != models.RoleAdmin || !target.Enabled {
-			// A role or status change signs the account out, as it does
-			// when an admin makes it.
+			// Recovery also signs the account out everywhere, so every
+			// session starts again under its new authority.
 			if err := updateUser(ctx, tx, id, models.UpdateUserInput{Role: new(models.RoleAdmin), Enabled: new(true)}); err != nil {
 				return nil, 0, fmt.Errorf("promoting account: %w", err)
 			}

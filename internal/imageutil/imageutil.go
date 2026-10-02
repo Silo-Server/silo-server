@@ -110,6 +110,30 @@ func GenerateVariants(data []byte, widths []int) (*VariantResult, error) {
 	return &VariantResult{Variants: variants, Ext: ".webp"}, nil
 }
 
+// EncodeWebPWidth re-encodes the source image as a single WebP no wider than
+// width, with metadata stripped. It is the "w<width>" rung of GenerateVariants
+// for callers that store that one variant and no original. Narrower sources
+// keep their width.
+func EncodeWebPWidth(data []byte, width int) ([]byte, error) {
+	size, err := bimg.NewImage(data).Size()
+	if err != nil {
+		return nil, fmt.Errorf("imageutil: invalid image: %w", err)
+	}
+	opts := bimg.Options{
+		Type:          bimg.WEBP,
+		Quality:       webpQuality,
+		StripMetadata: true,
+	}
+	if size.Width > width {
+		opts.Width = width
+	}
+	out, err := bimg.NewImage(data).Process(opts)
+	if err != nil {
+		return nil, fmt.Errorf("imageutil: resize to w%d: %w", width, err)
+	}
+	return out, nil
+}
+
 // GenerateSquareVariants center-crops the source image to a square and returns
 // a square original plus resized square variants, all encoded as WebP.
 func GenerateSquareVariants(data []byte, sizes []int) (*VariantResult, error) {

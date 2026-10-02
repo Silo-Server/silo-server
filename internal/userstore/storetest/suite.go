@@ -4,6 +4,7 @@ package storetest
 
 import (
 	"context"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -2575,6 +2576,68 @@ func RunProgressPage(t *testing.T, newStore func(t *testing.T) userstore.UserSto
 	t.Run("KeysetPage", func(t *testing.T) {
 		testProgressPage(t, newStore)
 	})
+	t.Run("CompletedSince", func(t *testing.T) {
+		testCompletedProgressSince(t, newStore)
+	})
+}
+
+func testCompletedProgressSince(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
+	ctx := context.Background()
+	store := newStore(t)
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p1", Name: "Test"}); err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+	since := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	writes := []struct {
+		id        string
+		position  float64
+		completed bool
+		at        time.Time
+	}{
+		{"old", 0, true, since.Add(-time.Minute)},
+		{"at-cutoff", 0, true, since},
+		// Whole-second precision puts this row at the cutoff, not after it.
+		{"same-second", 0, true, since.Add(500 * time.Millisecond)},
+		{"next-second", 0, true, since.Add(time.Second)},
+		{"newer", 0, true, since.Add(2 * time.Minute)},
+		{"newest", 0, true, since.Add(3 * time.Minute)},
+		{"in-progress", 10, false, since.Add(4 * time.Minute)},
+	}
+	for _, w := range writes {
+		if err := store.SetProgressAt(ctx, "p1", w.id, w.position, 1000, w.completed, w.at); err != nil {
+			t.Fatalf("write %s: %v", w.id, err)
+		}
+	}
+
+	ids := func(rows []userstore.WatchProgress) []string {
+		out := make([]string, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, r.MediaItemID)
+		}
+		return out
+	}
+	rows, err := store.ListCompletedProgressSince(ctx, "p1", since, time.Time{}, 10)
+	if err != nil {
+		t.Fatalf("ListCompletedProgressSince: %v", err)
+	}
+	if got, want := ids(rows), []string{writes[5].id, writes[4].id, writes[3].id}; !slices.Equal(got, want) {
+		t.Fatalf("rows = %v, want %v", got, want)
+	}
+	rows, err = store.ListCompletedProgressSince(ctx, "p1", since, time.Time{}, 2)
+	if err != nil {
+		t.Fatalf("ListCompletedProgressSince(limit 2): %v", err)
+	}
+	if got, want := ids(rows), []string{writes[5].id, writes[4].id}; !slices.Equal(got, want) {
+		t.Fatalf("limited rows = %v, want %v", got, want)
+	}
+	// An upper bound keeps rows at its whole second and drops newer ones.
+	rows, err = store.ListCompletedProgressSince(ctx, "p1", since, writes[4].at.Add(500*time.Millisecond), 10)
+	if err != nil {
+		t.Fatalf("ListCompletedProgressSince(until): %v", err)
+	}
+	if got, want := ids(rows), []string{writes[4].id, writes[3].id}; !slices.Equal(got, want) {
+		t.Fatalf("bounded rows = %v, want %v", got, want)
+	}
 }
 
 func testProgressPage(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {

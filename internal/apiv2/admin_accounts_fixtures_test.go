@@ -34,11 +34,24 @@ func (f *fakeAdminAccountSettings) DeleteAdminAccountSetting(_ context.Context, 
 	return nil
 }
 
-type fakeAdminAccountActivity struct{ positions []activitylog.IPPagePosition }
+type fakeAdminAccountActivity struct {
+	positions []activitylog.IPPagePosition
+	// ips overrides the synthetic addresses UserIPsPage returns.
+	ips []string
+}
 
 func (f *fakeAdminAccountActivity) UserIPsPage(_ context.Context, _ int, _ int, _ int, pos activitylog.IPPagePosition) ([]activitylog.UserIPEntry, bool, error) {
 	f.positions = append(f.positions, pos)
-	return []activitylog.UserIPEntry{{ClientIP: "127.0.0.1", FirstSeen: fixedTime(), LastSeen: fixedTime(), RequestCount: 3}}, false, nil
+	ips := f.ips
+	if ips == nil {
+		// Committed fixtures may carry loopback addresses only.
+		ips = []string{"127.0.0.1"}
+	}
+	rows := make([]activitylog.UserIPEntry, 0, len(ips))
+	for _, ip := range ips {
+		rows = append(rows, activitylog.UserIPEntry{ClientIP: ip, FirstSeen: fixedTime(), LastSeen: fixedTime(), RequestCount: 3})
+	}
+	return rows, false, nil
 }
 func (f *fakeAdminAccountActivity) IPUsersPage(_ context.Context, _ string, _ int, _ int, pos activitylog.IPPagePosition) ([]activitylog.IPUserEntry, bool, error) {
 	f.positions = append(f.positions, pos)

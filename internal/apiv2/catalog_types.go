@@ -5,6 +5,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 )
 
 // The catalog card. CatalogItem is the one summary of a media item every
@@ -36,8 +37,8 @@ type CatalogItem struct {
 	ShowStatus        string                    `json:"show_status,omitempty" doc:"Airing state of a series"`
 	RatingIMDB        *float64                  `json:"rating_imdb,omitempty"`
 	RatingTMDB        *float64                  `json:"rating_tmdb,omitempty"`
-	RatingRTCritic    *int                      `json:"rating_rt_critic,omitempty"`
-	RatingRTAudience  *int                      `json:"rating_rt_audience,omitempty"`
+	RatingRTCritic    *int                      `json:"rating_rt_critic,omitempty" doc:"Rotten Tomatoes critic score, 0-100. Absent unless an administrator shows rt_critic (see getRatingsCapability); a viewer who curates the item's metadata gets it on item detail regardless"`
+	RatingRTAudience  *int                      `json:"rating_rt_audience,omitempty" doc:"Rotten Tomatoes audience score, 0-100. Absent unless an administrator shows rt_audience (see getRatingsCapability); a viewer who curates the item's metadata gets it on item detail regardless"`
 	OriginalLanguage  string                    `json:"original_language,omitempty" example:"en"`
 	Overview          string                    `json:"overview,omitempty"`
 	ReleaseDate       *string                   `json:"release_date,omitempty" doc:"Calendar date, YYYY-MM-DD" example:"1995-12-15"`
@@ -148,7 +149,7 @@ func instantOfRFC3339(s *string) *Instant {
 }
 
 // catalogItemOfSection renders a section card.
-func catalogItemOfSection(v handlers.SectionItemView) CatalogItem {
+func catalogItemOfSection(v handlers.SectionItemView, sel ratingsources.Selection) CatalogItem {
 	item := CatalogItem{
 		ContentID: v.ContentID, PlayContentID: v.PlayContentID, Type: v.Type, Title: v.Title,
 		SeriesID: v.SeriesID, SeriesTitle: v.SeriesTitle, SeasonNumber: v.SeasonNumber, EpisodeNumber: v.EpisodeNumber,
@@ -165,11 +166,11 @@ func catalogItemOfSection(v handlers.SectionItemView) CatalogItem {
 		item.UpcomingEvent = &CatalogItemUpcomingEvent{Type: e.Type, AirDate: e.AirDate, AirTime: e.AirTime, EpisodeTitle: e.EpisodeTitle,
 			SeasonNumber: e.SeasonNumber, EpisodeNumber: e.EpisodeNumber, Badges: NonNil(e.Badges)}
 	}
-	return item
+	return withShownRatings(item, sel)
 }
 
 // catalogItemOfListing renders a listing (collection, browse) card.
-func catalogItemOfListing(v handlers.CollectionItemView) CatalogItem {
+func catalogItemOfListing(v handlers.CollectionItemView, sel ratingsources.Selection) CatalogItem {
 	item := CatalogItem{
 		ContentID: v.ContentID, PlayContentID: v.PlayContentID, Type: v.Type, Title: v.Title,
 		SeriesID: v.SeriesID, SeriesTitle: v.SeriesTitle, SeasonNumber: v.SeasonNumber, EpisodeNumber: v.EpisodeNumber,
@@ -193,6 +194,21 @@ func catalogItemOfListing(v handlers.CollectionItemView) CatalogItem {
 			wf.LibraryID = IDFromInt(int64(f.LibraryID))
 		}
 		item.WorkFormats = append(item.WorkFormats, wf)
+	}
+	return withShownRatings(item, sel)
+}
+
+// withShownRatings drops the card ratings an administrator has not turned on,
+// so poster badges and every other card surface follow the same choice as
+// title pages. IMDb and TMDB are always shown. Item detail applies it too,
+// except for a viewer who curates the item's metadata (see
+// catalogItemDetailOf).
+func withShownRatings(item CatalogItem, sel ratingsources.Selection) CatalogItem {
+	if !sel.Shows(models.RatingSourceRTCritic) {
+		item.RatingRTCritic = nil
+	}
+	if !sel.Shows(models.RatingSourceRTAudience) {
+		item.RatingRTAudience = nil
 	}
 	return item
 }

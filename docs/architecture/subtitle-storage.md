@@ -34,6 +34,13 @@ writers, so an intervening change invalidates a captured guard. Language changes
 can conflict with an existing full content identity; a conflict leaves both rows
 and objects intact.
 
+A stored subtitle may carry a timing correction (`timing_offset_ms`,
+`timing_scale`) set by [subtitle sync](subtitle-sync.md) or a manual
+adjustment. It lives on the row, never in the bytes: client delivery paths
+apply it when they serve the subtitle, while the administrator download,
+content identity, and deduplication use the stored bytes. Changing it bumps
+the revision like any other metadata update.
+
 Deletion removes the row before attempting object cleanup. A delayed cleanup
 cannot remove a new publication because its object key differs. Successful
 deletion means metadata is absent, not that physical cleanup is durable. Failed

@@ -26,6 +26,10 @@ vi.mock("@/hooks/useCanRequest", () => ({
 }));
 vi.mock("@/hooks/queries/useRequests", () => ({
   useRequestSearch: () => ({ data: undefined, isLoading: false }),
+  useRequestFeatureStatus: () => ({ data: undefined }),
+}));
+vi.mock("@/hooks/queries/watchlistTitles", () => ({
+  useWatchlistTitles: () => ({ data: undefined, isLoading: false, isError: false }),
 }));
 vi.mock("@/components/ItemGrid", () => ({ default: () => <div data-testid="item-grid" /> }));
 vi.mock("@/components/catalog/CatalogFiltersPanel", () => ({ default: () => null }));

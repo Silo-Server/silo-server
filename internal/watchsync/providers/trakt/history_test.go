@@ -100,70 +100,124 @@ func TestFetchHistoryDoesNotReturnPartialHistoryOnLaterPageFailure(t *testing.T)
 }
 
 // TestExportWatchedDoesNotResendPlayFromLaterHistoryPage runs the real export
-// reconciliation against a Trakt history that spans two pages. A play Trakt
-// lists only on page 2 must count as present remotely, not be sent again.
+// reconciliation against paged Trakt history, including a read that changes
+// before settling. Only a play absent from a stable history may be exported.
 func TestExportWatchedDoesNotResendPlayFromLaterHistoryPage(t *testing.T) {
-	var sent traktHistoryPayload
-	posts := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/sync/history":
-			page := r.URL.Query().Get("page")
-			if page == "" {
-				page = "1" // Trakt serves only the first page when page is omitted.
-			}
-			w.Header().Set("X-Pagination-Page", page)
-			w.Header().Set("X-Pagination-Page-Count", "2")
-			switch page {
-			case "1":
-				writeTraktFixture(t, w, `[{"type":"movie","watched_at":"2026-05-01T12:00:00.000Z","movie":{"ids":{"tmdb":101}}}]`)
-			case "2":
-				writeTraktFixture(t, w, `[{"type":"movie","watched_at":"2026-05-02T12:00:00.000Z","movie":{"ids":{"tmdb":102}}}]`)
-			default:
-				t.Errorf("unexpected history page %q", page)
-				http.Error(w, "unexpected page", http.StatusInternalServerError)
-			}
-		case r.Method == http.MethodPost && r.URL.Path == "/sync/history":
-			posts++
-			if err := json.NewDecoder(r.Body).Decode(&sent); err != nil {
-				t.Errorf("decode export body: %v", err)
-			}
-			w.WriteHeader(http.StatusCreated)
-			writeTraktFixture(t, w, `{}`)
-		default:
-			t.Errorf("unexpected request %s %s", r.Method, r.URL)
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
+	for _, tc := range []struct {
+		name      string
+		change    string
+		wantError bool
+	}{
+		{name: "stable history"},
+		{name: "count changes during first pass", change: "first pass"},
+		{name: "count changes during verification pass", change: "verification pass"},
+		{name: "rows change between passes", change: "between passes"},
+		{name: "retry still requires matching passes", change: "retried rows"},
+		{name: "history never settles", change: "every pass", wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var sent traktHistoryPayload
+			posts := 0
+			pass := 0
+			gets := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/sync/history":
+					page := r.URL.Query().Get("page")
+					if page == "" {
+						page = "1" // Trakt serves only the first page when page is omitted.
+					}
+					gets++
+					if page == "1" {
+						pass++
+					}
+					if gets > 12 || (tc.wantError && gets > 6) {
+						t.Error("history kept retrying instead of returning an error")
+						http.Error(w, "too many reads", http.StatusServiceUnavailable)
+						return
+					}
+					countChanged := false
+					switch tc.change {
+					case "every pass":
+						countChanged = true
+					case "first pass", "retried rows":
+						countChanged = pass == 1
+					case "verification pass":
+						countChanged = pass == 2
+					}
+					count := "2"
+					if page == "1" && countChanged {
+						count = "3"
+					}
+					w.Header().Set("X-Pagination-Item-Count", count)
+					w.Header().Set("X-Pagination-Page", page)
+					w.Header().Set("X-Pagination-Page-Count", count)
+					w.Header().Set("X-Pagination-Limit", "1")
+					switch page {
+					case "1":
+						// An equal-count replacement must discard the first complete pass.
+						tmdb := 101
+						if (tc.change == "between passes" && pass == 1) || (tc.change == "retried rows" && pass == 2) {
+							tmdb = 999
+						}
+						writeTraktFixture(t, w, `[{"type":"movie","watched_at":"2026-05-01T12:00:00.000Z","movie":{"ids":{"tmdb":%d}}}]`, tmdb)
+					case "2":
+						writeTraktFixture(t, w, `[{"type":"movie","watched_at":"2026-05-02T12:00:00.000Z","movie":{"ids":{"tmdb":102}}}]`)
+					default:
+						t.Errorf("unexpected history page %q", page)
+						http.Error(w, "unexpected page", http.StatusInternalServerError)
+					}
+				case r.Method == http.MethodPost && r.URL.Path == "/sync/history":
+					posts++
+					if err := json.NewDecoder(r.Body).Decode(&sent); err != nil {
+						t.Errorf("decode export body: %v", err)
+					}
+					w.WriteHeader(http.StatusCreated)
+					writeTraktFixture(t, w, `{}`)
+				default:
+					t.Errorf("unexpected request %s %s", r.Method, r.URL)
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
 
-	store := completedHistoryStore{rows: []userstore.WatchHistoryEntry{
-		localMoviePlay("history-1", "101", "2026-05-01T12:00:00Z"), // remote page 1
-		localMoviePlay("history-2", "102", "2026-05-02T12:00:00Z"), // remote page 2
-		localMoviePlay("history-3", "103", "2026-05-03T12:00:00Z"), // not on Trakt
-	}}
-	repo := &historyExportRepo{}
-	service := watchsync.NewService(repo, watchsync.NewRegistry()).WithUserStoreProvider(staticUserStores{store: store})
-	conn := watchsync.Connection{ID: "conn-1", Provider: "trakt", UserID: 7, ProfileID: "profile-1", AccessToken: "test-token"}
+			store := completedHistoryStore{rows: []userstore.WatchHistoryEntry{
+				localMoviePlay("history-1", "101", "2026-05-01T12:00:00Z"), // remote page 1
+				localMoviePlay("history-2", "102", "2026-05-02T12:00:00Z"), // remote page 2
+				localMoviePlay("history-3", "103", "2026-05-03T12:00:00Z"), // not on Trakt
+			}}
+			repo := &historyExportRepo{}
+			service := watchsync.NewService(repo, watchsync.NewRegistry()).WithUserStoreProvider(staticUserStores{store: store})
+			conn := watchsync.Connection{ID: "conn-1", Provider: "trakt", UserID: 7, ProfileID: "profile-1", AccessToken: "test-token"}
 
-	result, err := service.ExportWatched(context.Background(), conn, watchsync.ServerConfig{}, NewProvider(server.Client(), server.URL))
-	if err != nil {
-		t.Fatalf("ExportWatched: %v", err)
-	}
-	if result.RemoteFound != 2 || result.RemotePresent != 2 || result.Queued != 1 || result.Sent != 1 {
-		t.Fatalf("result = %+v, want 2 remote plays found and present, 1 queued and sent", result)
-	}
-	if posts != 1 || len(sent.Movies) != 1 || sent.Movies[0].IDs.TMDB != 103 || len(sent.Episodes) != 0 || len(sent.Shows) != 0 {
-		t.Fatalf("posts = %d, sent = %+v; want one export of tmdb 103 only", posts, sent)
-	}
-	wantStatus := map[string]string{"history-1": "remote_present", "history-2": "remote_present", "history-3": "sent"}
-	gotStatus := map[string]string{}
-	for _, export := range repo.exports {
-		gotStatus[export.HistoryID] = export.Status
-	}
-	if !reflect.DeepEqual(gotStatus, wantStatus) {
-		t.Fatalf("export statuses = %v, want %v", gotStatus, wantStatus)
+			provider := NewProvider(server.Client(), server.URL)
+			recordSleeps(provider)
+			result, err := service.ExportWatched(context.Background(), conn, watchsync.ServerConfig{}, provider)
+			if tc.wantError {
+				if err == nil || posts != 0 || len(repo.exports) != 0 {
+					t.Fatalf("err=%v posts=%d exports=%v; want an error without any export", err, posts, repo.exports)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ExportWatched: %v", err)
+			}
+			if result.RemoteFound != 2 || result.RemotePresent != 2 || result.Queued != 1 || result.Sent != 1 {
+				t.Fatalf("result = %+v, want 2 remote plays found and present, 1 queued and sent", result)
+			}
+			if posts != 1 || len(sent.Movies) != 1 || sent.Movies[0].IDs.TMDB != 103 || len(sent.Episodes) != 0 || len(sent.Shows) != 0 {
+				t.Fatalf("posts = %d, sent = %+v; want one export of tmdb 103 only", posts, sent)
+			}
+			wantStatus := map[string]string{"history-1": "remote_present", "history-2": "remote_present", "history-3": "sent"}
+			gotStatus := map[string]string{}
+			for _, export := range repo.exports {
+				gotStatus[export.HistoryID] = export.Status
+			}
+			if !reflect.DeepEqual(gotStatus, wantStatus) {
+				t.Fatalf("export statuses = %v, want %v", gotStatus, wantStatus)
+			}
+		})
 	}
 }
 

@@ -154,7 +154,9 @@ function resolveBadge(
   return {
     def,
     label,
-    accentColor: itemAccent ?? def.defaultAccent,
+    // The viewer's own accent wins; a data-driven accent (amber for a title
+    // that needs attention) comes before the badge's default.
+    accentColor: itemAccent ?? def.getAccent?.(data) ?? def.defaultAccent,
     iconId: showIcon ? candidateIcon : null,
   };
 }

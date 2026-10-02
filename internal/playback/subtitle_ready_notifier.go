@@ -2,10 +2,14 @@ package playback
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
+	"sync"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/google/uuid"
 )
 
 type subtitleReadySessionLookup interface {
@@ -37,6 +41,24 @@ type SubtitleReadyNotifier struct {
 	hub                *RealtimeHub
 	inventory          SubtitleInventoryResolver
 	translationSession *Session
+
+	// Timing changes reach sessions on other API servers through the event
+	// bus (UseEventBus); sourceID drops this server's own messages. The bus is
+	// shared by the copies BindTranslation makes.
+	sourceID string
+	bus      *timingBus
+}
+
+type timingBus struct {
+	mu      sync.RWMutex
+	publish func(context.Context, string) error
+}
+
+// subtitleTimingMessage is a timing change sent to the other API servers.
+type subtitleTimingMessage struct {
+	SourceID   string `json:"source_id"`
+	FileID     int    `json:"file_id"`
+	SubtitleID int    `json:"subtitle_id"`
 }
 
 // NewSubtitleReadyNotifier returns a notifier, or nil if its dependencies are
@@ -47,7 +69,39 @@ func NewSubtitleReadyNotifier(sessions subtitleReadySessionLookup, hub *Realtime
 	if sessions == nil || hub == nil {
 		return nil
 	}
-	return &SubtitleReadyNotifier{sessions: sessions, hub: hub, inventory: inventory}
+	return &SubtitleReadyNotifier{sessions: sessions, hub: hub, inventory: inventory, sourceID: uuid.NewString(), bus: &timingBus{}}
+}
+
+// UseEventBus delivers timing changes to sessions on every API server. Call
+// it once during startup with the server lifetime context; repeated calls do
+// not add subscriptions.
+func (n *SubtitleReadyNotifier) UseEventBus(
+	ctx context.Context,
+	publish func(context.Context, string) error,
+	subscribe func(context.Context, func(string)) error,
+) error {
+	if n == nil || n.bus == nil || publish == nil || subscribe == nil {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	n.bus.mu.Lock()
+	defer n.bus.mu.Unlock()
+	if n.bus.publish != nil {
+		return nil
+	}
+	if err := subscribe(ctx, func(payload string) {
+		var msg subtitleTimingMessage
+		if ctx.Err() != nil || json.Unmarshal([]byte(payload), &msg) != nil || msg.SourceID == "" || msg.SourceID == n.sourceID {
+			return
+		}
+		n.dispatchTimingChanged(ctx, msg.FileID, msg.SubtitleID)
+	}); err != nil {
+		return err
+	}
+	n.bus.publish = publish
+	return nil
 }
 
 // SubtitleReady notifies active sessions for the file that a new subtitle track
@@ -70,6 +124,58 @@ func (n *SubtitleReadyNotifier) SubtitleReady(ctx context.Context, mediaFileID, 
 		}
 		if err := n.hub.Send(session.ID, event); err != nil && !errors.Is(err, ErrRealtimeConnectionNotFound) {
 			slog.WarnContext(ctx, "failed to deliver subtitle ready realtime event", "component", "playback",
+				"session_id", session.ID, "file_id", mediaFileID, "subtitle_id", subtitleID, "error", err)
+		}
+	}
+}
+
+// SubtitleTimingChanged tells active sessions for the file, on every API
+// server, that a stored subtitle was retimed, so a player showing it fetches
+// it again.
+func (n *SubtitleReadyNotifier) SubtitleTimingChanged(ctx context.Context, mediaFileID, subtitleID int) {
+	if n == nil || mediaFileID <= 0 || subtitleID <= 0 {
+		return
+	}
+	n.dispatchTimingChanged(ctx, mediaFileID, subtitleID)
+	if n.bus == nil {
+		return
+	}
+	n.bus.mu.RLock()
+	publish := n.bus.publish
+	n.bus.mu.RUnlock()
+	if publish == nil {
+		return
+	}
+	payload, err := json.Marshal(subtitleTimingMessage{SourceID: n.sourceID, FileID: mediaFileID, SubtitleID: subtitleID})
+	if err == nil {
+		publishCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		err = publish(publishCtx, string(payload))
+		cancel()
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "failed to publish subtitle timing change", "component", "playback",
+			"file_id", mediaFileID, "subtitle_id", subtitleID, "error", err)
+	}
+}
+
+// dispatchTimingChanged sends the event to this server's sessions of the file.
+func (n *SubtitleReadyNotifier) dispatchTimingChanged(ctx context.Context, mediaFileID, subtitleID int) {
+	if mediaFileID <= 0 || subtitleID <= 0 {
+		return
+	}
+	for _, session := range n.sessions.GetSessionsByMediaFileID(mediaFileID) {
+		if session == nil || session.ID == "" || !session.HasRealtimeConnection {
+			continue
+		}
+		track := n.resolveTrack(ctx, session.ID, mediaFileID, subtitleID)
+		event, err := NewSubtitleTimingChangedEvent(session.ID, mediaFileID, subtitleID, track)
+		if err != nil {
+			slog.WarnContext(ctx, "failed to encode subtitle timing realtime event", "component", "playback",
+				"session_id", session.ID, "file_id", mediaFileID, "subtitle_id", subtitleID, "error", err)
+			continue
+		}
+		if err := n.hub.Send(session.ID, event); err != nil && !errors.Is(err, ErrRealtimeConnectionNotFound) {
+			slog.WarnContext(ctx, "failed to deliver subtitle timing realtime event", "component", "playback",
 				"session_id", session.ID, "file_id", mediaFileID, "subtitle_id", subtitleID, "error", err)
 		}
 	}

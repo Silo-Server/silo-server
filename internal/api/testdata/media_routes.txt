@@ -149,6 +149,8 @@ POST /api/v2/admin/items/{id}/redetect-markers	non-media
 POST /api/v2/admin/items/{id}/refresh-markers	non-media
 POST /api/v2/admin/items/{id}/refresh-metadata	non-media
 POST /api/v2/admin/items/{id}/split	non-media
+GET /api/v2/admin/items/{id}/trickplay	non-media
+POST /api/v2/admin/items/{id}/trickplay/regenerate	non-media
 PATCH /api/v2/admin/jellyfin-compat/settings	non-media
 GET /api/v2/admin/jellyfin-compat/status	non-media
 POST /api/v2/admin/jellyfin-compat/web/install	non-media
@@ -246,6 +248,8 @@ GET /api/v2/admin/policy/vendor	non-media
 GET /api/v2/admin/rate-limits/config	non-media
 PATCH /api/v2/admin/rate-limits/config	non-media
 GET /api/v2/admin/rate-limits/status	non-media
+GET /api/v2/admin/rating-sources	non-media
+GET /api/v2/admin/rating-sources/capabilities	non-media
 GET /api/v2/admin/recommendations/status	non-media
 POST /api/v2/admin/recommendations/trigger/cowatch	non-media
 POST /api/v2/admin/recommendations/trigger/embeddings	non-media
@@ -273,6 +277,7 @@ GET /api/v2/admin/request-settings	non-media
 PUT /api/v2/admin/request-settings	non-media
 GET /api/v2/admin/request-users/{user_id}/limit	non-media
 PUT /api/v2/admin/request-users/{user_id}/limit	non-media
+GET /api/v2/admin/request-users/{user_id}/usage	non-media
 GET /api/v2/admin/requests	non-media
 GET /api/v2/admin/requests/capabilities	non-media
 GET /api/v2/admin/requests/counts	non-media
@@ -343,6 +348,7 @@ GET /api/v2/admin/tasks/{key}/metrics	non-media
 POST /api/v2/admin/tasks/{key}/run	non-media
 GET /api/v2/admin/tasks/{key}/triggers	non-media
 PUT /api/v2/admin/tasks/{key}/triggers	non-media
+GET /api/v2/admin/trickplay/libraries	non-media
 GET /api/v2/admin/unmatched	non-media
 GET /api/v2/admin/users	non-media
 POST /api/v2/admin/users	non-media
@@ -351,6 +357,10 @@ DELETE /api/v2/admin/users/{id}	non-media
 GET /api/v2/admin/users/{id}	non-media
 PUT /api/v2/admin/users/{id}	non-media
 GET /api/v2/admin/users/{id}/api-keys	non-media
+GET /api/v2/admin/users/{id}/devices	non-media
+GET /api/v2/admin/users/{id}/download-subscriptions	non-media
+GET /api/v2/admin/users/{id}/downloads	non-media
+GET /api/v2/admin/users/{id}/downloads/summary	non-media
 POST /api/v2/admin/users/{id}/impersonate	non-media
 GET /api/v2/admin/users/{id}/ips	non-media
 POST /api/v2/admin/users/{id}/password-reset	non-media
@@ -359,6 +369,7 @@ GET /api/v2/admin/users/{id}/settings/values	non-media
 DELETE /api/v2/admin/users/{id}/settings/values/{key}	non-media
 PUT /api/v2/admin/users/{id}/settings/values/{key}	non-media
 POST /api/v2/admin/users/{id}/transfer-ownership	non-media
+GET /api/v2/admin/users/{id}/watch-summary	non-media
 GET /api/v2/api-keys	non-media
 POST /api/v2/api-keys	non-media
 GET /api/v2/api-keys/scopes	non-media
@@ -399,6 +410,7 @@ GET /api/v2/capabilities/downloads	non-media
 GET /api/v2/capabilities/ebooks	non-media
 GET /api/v2/capabilities/metadata-ai	non-media
 GET /api/v2/capabilities/password-reset	non-media
+GET /api/v2/capabilities/ratings	non-media
 GET /api/v2/capabilities/trailers	non-media
 GET /api/v2/catalog	non-media
 GET /api/v2/catalog/audiobook-groups	non-media
@@ -745,6 +757,10 @@ GET /api/v2/subtitles/providers/status	non-media
 POST /api/v2/subtitles/search	non-media
 DELETE /api/v2/subtitles/stored/{id}	non-media
 GET /api/v2/subtitles/stored/{id}/metadata	non-media
+GET /api/v2/subtitles/stored/{id}/sync	non-media
+POST /api/v2/subtitles/stored/{id}/sync	non-media
+PUT /api/v2/subtitles/stored/{id}/timing	non-media
+GET /api/v2/subtitles/sync/status	non-media
 POST /api/v2/subtitles/upload	non-media
 GET /api/v2/subtitles/{media_file_id}	non-media
 POST /api/v2/sync/progress	non-media
@@ -793,9 +809,13 @@ POST /api/v2/watch-together/rooms/{room_id}/suggestions/{suggestion_id}/vote	non
 GET /api/v2/watch-together/rooms/{room_id}/ws	non-media
 POST /api/v2/watch-together/rooms/{room_id}/ws-ticket	non-media
 GET /api/v2/watch/{id}	non-media
+GET /api/v2/watch/{id}/trickplay	non-media
 DELETE /api/v2/watched/{id}	non-media
 POST /api/v2/watched/{id}	non-media
 GET /api/v2/watchlist	non-media
+GET /api/v2/watchlist/titles	non-media
+DELETE /api/v2/watchlist/titles/{media_type}/{tmdb_id}	non-media
+PUT /api/v2/watchlist/titles/{media_type}/{tmdb_id}	non-media
 DELETE /api/v2/watchlist/{item_id}	non-media
 GET /api/v2/watchlist/{item_id}	non-media
 PUT /api/v2/watchlist/{item_id}	non-media
@@ -1331,6 +1351,8 @@ POST /api/v2/admin/items/{id}/redetect-markers	non-media
 POST /api/v2/admin/items/{id}/refresh-markers	non-media
 POST /api/v2/admin/items/{id}/refresh-metadata	non-media
 POST /api/v2/admin/items/{id}/split	non-media
+GET /api/v2/admin/items/{id}/trickplay	non-media
+POST /api/v2/admin/items/{id}/trickplay/regenerate	non-media
 PATCH /api/v2/admin/jellyfin-compat/settings	non-media
 GET /api/v2/admin/jellyfin-compat/status	non-media
 POST /api/v2/admin/jellyfin-compat/web/install	non-media
@@ -1428,6 +1450,8 @@ GET /api/v2/admin/policy/vendor	non-media
 GET /api/v2/admin/rate-limits/config	non-media
 PATCH /api/v2/admin/rate-limits/config	non-media
 GET /api/v2/admin/rate-limits/status	non-media
+GET /api/v2/admin/rating-sources	non-media
+GET /api/v2/admin/rating-sources/capabilities	non-media
 GET /api/v2/admin/recommendations/status	non-media
 POST /api/v2/admin/recommendations/trigger/cowatch	non-media
 POST /api/v2/admin/recommendations/trigger/embeddings	non-media
@@ -1455,6 +1479,7 @@ GET /api/v2/admin/request-settings	non-media
 PUT /api/v2/admin/request-settings	non-media
 GET /api/v2/admin/request-users/{user_id}/limit	non-media
 PUT /api/v2/admin/request-users/{user_id}/limit	non-media
+GET /api/v2/admin/request-users/{user_id}/usage	non-media
 GET /api/v2/admin/requests	non-media
 GET /api/v2/admin/requests/capabilities	non-media
 GET /api/v2/admin/requests/counts	non-media
@@ -1525,6 +1550,7 @@ GET /api/v2/admin/tasks/{key}/metrics	non-media
 POST /api/v2/admin/tasks/{key}/run	non-media
 GET /api/v2/admin/tasks/{key}/triggers	non-media
 PUT /api/v2/admin/tasks/{key}/triggers	non-media
+GET /api/v2/admin/trickplay/libraries	non-media
 GET /api/v2/admin/unmatched	non-media
 GET /api/v2/admin/users	non-media
 POST /api/v2/admin/users	non-media
@@ -1533,6 +1559,10 @@ DELETE /api/v2/admin/users/{id}	non-media
 GET /api/v2/admin/users/{id}	non-media
 PUT /api/v2/admin/users/{id}	non-media
 GET /api/v2/admin/users/{id}/api-keys	non-media
+GET /api/v2/admin/users/{id}/devices	non-media
+GET /api/v2/admin/users/{id}/download-subscriptions	non-media
+GET /api/v2/admin/users/{id}/downloads	non-media
+GET /api/v2/admin/users/{id}/downloads/summary	non-media
 POST /api/v2/admin/users/{id}/impersonate	non-media
 GET /api/v2/admin/users/{id}/ips	non-media
 POST /api/v2/admin/users/{id}/password-reset	non-media
@@ -1541,6 +1571,7 @@ GET /api/v2/admin/users/{id}/settings/values	non-media
 DELETE /api/v2/admin/users/{id}/settings/values/{key}	non-media
 PUT /api/v2/admin/users/{id}/settings/values/{key}	non-media
 POST /api/v2/admin/users/{id}/transfer-ownership	non-media
+GET /api/v2/admin/users/{id}/watch-summary	non-media
 GET /api/v2/api-keys	non-media
 POST /api/v2/api-keys	non-media
 GET /api/v2/api-keys/scopes	non-media
@@ -1581,6 +1612,7 @@ GET /api/v2/capabilities/downloads	non-media
 GET /api/v2/capabilities/ebooks	non-media
 GET /api/v2/capabilities/metadata-ai	non-media
 GET /api/v2/capabilities/password-reset	non-media
+GET /api/v2/capabilities/ratings	non-media
 GET /api/v2/capabilities/trailers	non-media
 GET /api/v2/catalog	non-media
 GET /api/v2/catalog/audiobook-groups	non-media
@@ -1927,6 +1959,10 @@ GET /api/v2/subtitles/providers/status	non-media
 POST /api/v2/subtitles/search	non-media
 DELETE /api/v2/subtitles/stored/{id}	non-media
 GET /api/v2/subtitles/stored/{id}/metadata	non-media
+GET /api/v2/subtitles/stored/{id}/sync	non-media
+POST /api/v2/subtitles/stored/{id}/sync	non-media
+PUT /api/v2/subtitles/stored/{id}/timing	non-media
+GET /api/v2/subtitles/sync/status	non-media
 POST /api/v2/subtitles/upload	non-media
 GET /api/v2/subtitles/{media_file_id}	non-media
 POST /api/v2/sync/progress	non-media
@@ -1975,9 +2011,13 @@ POST /api/v2/watch-together/rooms/{room_id}/suggestions/{suggestion_id}/vote	non
 GET /api/v2/watch-together/rooms/{room_id}/ws	non-media
 POST /api/v2/watch-together/rooms/{room_id}/ws-ticket	non-media
 GET /api/v2/watch/{id}	non-media
+GET /api/v2/watch/{id}/trickplay	non-media
 DELETE /api/v2/watched/{id}	non-media
 POST /api/v2/watched/{id}	non-media
 GET /api/v2/watchlist	non-media
+GET /api/v2/watchlist/titles	non-media
+DELETE /api/v2/watchlist/titles/{media_type}/{tmdb_id}	non-media
+PUT /api/v2/watchlist/titles/{media_type}/{tmdb_id}	non-media
 DELETE /api/v2/watchlist/{item_id}	non-media
 GET /api/v2/watchlist/{item_id}	non-media
 PUT /api/v2/watchlist/{item_id}	non-media

@@ -237,6 +237,49 @@ describe("RequestPosterCard (discover variant)", () => {
   });
 });
 
+describe("RequestPosterCard watchlist action", () => {
+  it("adds or removes the title from the hover corner action", () => {
+    const onToggleWatchlist = vi.fn();
+    const { unmount } = render(
+      <MemoryRouter>
+        <RequestPosterCard
+          variant="discover"
+          item={requestable}
+          onToggleWatchlist={onToggleWatchlist}
+        />
+      </MemoryRouter>,
+    );
+    const add = screen.getByRole("button", { name: "Add Test Movie to your watchlist" });
+    expect(add).toHaveAttribute("aria-pressed", "false");
+    expect(add).toHaveAttribute("title", "Add to Watchlist");
+    fireEvent.click(add);
+    expect(onToggleWatchlist).toHaveBeenCalledTimes(1);
+    unmount();
+
+    render(
+      <MemoryRouter>
+        <RequestPosterCard
+          variant="discover"
+          item={{ ...requestable, in_watchlist: true }}
+          onToggleWatchlist={onToggleWatchlist}
+        />
+      </MemoryRouter>,
+    );
+    const remove = screen.getByRole("button", { name: "Remove Test Movie from your watchlist" });
+    expect(remove).toHaveAttribute("aria-pressed", "true");
+    expect(remove).toHaveAttribute("title", "On Watchlist");
+  });
+
+  it("offers no watchlist action without a handler", () => {
+    render(
+      <MemoryRouter>
+        <RequestPosterCard variant="discover" item={requestable} />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByRole("button", { name: /your watchlist/ })).toBeNull();
+  });
+});
+
 describe("RequestPosterCard (mine variant)", () => {
   const request: MediaRequest = {
     id: "req-1",

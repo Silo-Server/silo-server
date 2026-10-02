@@ -25,6 +25,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/librarymonitor"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/Silo-Server/silo-server/internal/routeinventory"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -1723,7 +1724,16 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, serverIdentityFixtureCases()...)
 	cases = append(cases, themeSongsFixtureCases()...)
 	cases = append(cases, passwordResetFixtureCases()...)
-	return append(cases, libraryMonitoringFixtureCases()...)
+	cases = append(cases, adminRatingSourcesFixtureCases()...)
+	cases = append(cases, libraryMonitoringFixtureCases()...)
+	cases = append(cases, adminAccountInsightsFixtureCases()...)
+	cases = append(cases, ratingsCapabilityFixtureCases()...)
+	cases = append(cases, fixtureCase{name: "token_refresh_required", operationID: "getCurrentUser",
+		scenario: "An access token minted before an administrator changed the account's role. The session is still valid: the client refreshes it, retries once with the new token, and does not sign out.",
+		method:   http.MethodGet, path: "/api/v2/account/me", headers: bearer(demotedToken),
+		status: http.StatusUnauthorized, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/Problem"})
+	cases = append(cases, watchTrickplayFixtureCases()...)
+	return append(cases, adminTrickplayFixtureCases()...)
 }
 
 // fixtureMultipartType is the multipart Content-Type of the avatar fixtures,
@@ -1797,6 +1807,9 @@ func fixtureDeps() Dependencies {
 	deps.AdminCatalogSearch = &fakeAdminCatalogTransfer{}
 	deps.AdminLiteraryWorks = &fakeAdminLiterary{}
 	deps.AdminRecommendations = &fakeAdminRecommendations{}
+	deps.RatingSources = ratingsources.NewPolicy(fixtureRatingSettings{}, func(context.Context) ([]ratingsources.DeclaredSource, error) {
+		return []ratingsources.DeclaredSource{{RatingSourceDefinition: models.RatingSourceDefinition{Source: "kinopoisk", Name: "Kinopoisk", Label: "Kinopoisk", Scale: 10}, Provider: "Kinopoisk"}}, nil
+	})
 	deps.AdminPeople = &fakeAdminPeople{}
 	deps.AdminMetadataTranslation = &fakeAdminTranslation{}
 	deps.AdminItemMetadata = &fakeAdminItemMetadata{}
@@ -1821,6 +1834,8 @@ func fixtureDeps() Dependencies {
 	deps.Ratings = &fakeRatings{ratings: ratingRows(), hidden: map[string]bool{"movie:hidden": true}}
 	deps.History = newFakeHistory()
 	deps.Watch = &fakeWatch{}
+	deps.Trickplay = &fakeTrickplay{}
+	deps.AdminTrickplay = &fakeAdminTrickplay{}
 	deps.Recommendations = &fakeRecommendations{seedCandidates: 1, cardsHasMore: true}
 	deps.Requests = fixtureRequests()
 	deps.AdminRequests = fixtureAdminRequests()
@@ -1851,6 +1866,7 @@ func fixtureDeps() Dependencies {
 	deps.AdminAccessGroups = fixtureAdminAccessGroups()
 	deps.AdminAccountSettings = &fakeAdminAccountSettings{}
 	deps.AdminAccountActivity = &fakeAdminAccountActivity{}
+	deps = withAdminAccountInsights(deps)
 	deps.HistoryImports = fixtureHistoryImports()
 	deps.WebhookSync = &fakeWebhookManagement{}
 	deps.Markers = &fakeMarkers{}

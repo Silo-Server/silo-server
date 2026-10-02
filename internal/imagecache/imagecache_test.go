@@ -22,6 +22,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/metadata"
+	"github.com/Silo-Server/silo-server/internal/netguard"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 )
 
@@ -313,6 +314,68 @@ func startImageServer(t *testing.T, data []byte, statusCode int) *httptest.Serve
 	}))
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+func TestCacheRefusesLocalNetworkSourceWithoutPrivateAccess(t *testing.T) {
+	srv := startImageServer(t, makeTestJPEG(t), http.StatusOK)
+	s3 := &mockS3{bucket: "media"}
+	c := New(s3)
+
+	_, err := c.Cache(context.Background(), CacheRequest{
+		SourceURL:   srv.URL + "/poster.jpg",
+		ProviderID:  "tmdb",
+		ContentType: "movies",
+		ContentID:   "550",
+		ImageType:   metadata.ImagePoster,
+	})
+	if err == nil || !strings.Contains(err.Error(), "private image host") {
+		t.Fatalf("Cache error = %v, want private image host refusal", err)
+	}
+	if got := s3.keys(); len(got) != 0 {
+		t.Fatalf("uploaded keys = %v, want none", got)
+	}
+}
+
+func TestCacheFetchesLocalNetworkSourceWithPrivateAccess(t *testing.T) {
+	srv := startImageServer(t, makeTestJPEG(t), http.StatusOK)
+	s3 := &mockS3{bucket: "media"}
+	c := New(s3)
+
+	result, err := c.Cache(netguard.WithPrivateAccess(context.Background()), CacheRequest{
+		SourceURL:   srv.URL + "/poster.jpg",
+		ProviderID:  "tmdb",
+		ContentType: "movies",
+		ContentID:   "550",
+		ImageType:   metadata.ImagePoster,
+	})
+	if err != nil {
+		t.Fatalf("Cache with private access: %v", err)
+	}
+	if result.BasePath != "tmdb/movies/550/poster" {
+		t.Fatalf("BasePath = %q, want tmdb/movies/550/poster", result.BasePath)
+	}
+	if got := s3.keys(); len(got) != 4 {
+		t.Fatalf("uploaded keys = %v, want 4 variants", got)
+	}
+}
+
+func TestCacheRefusesBlockedSourceWithPrivateAccess(t *testing.T) {
+	s3 := &mockS3{bucket: "media"}
+	c := New(s3)
+
+	_, err := c.Cache(netguard.WithPrivateAccess(context.Background()), CacheRequest{
+		SourceURL:   "http://169.254.169.254/latest/poster.jpg",
+		ProviderID:  "tmdb",
+		ContentType: "movies",
+		ContentID:   "550",
+		ImageType:   metadata.ImagePoster,
+	})
+	if !errors.Is(err, netguard.ErrBlockedDestination) {
+		t.Fatalf("Cache error = %v, want netguard.ErrBlockedDestination", err)
+	}
+	if got := s3.keys(); len(got) != 0 {
+		t.Fatalf("uploaded keys = %v, want none", got)
+	}
 }
 
 func TestCache_Poster(t *testing.T) {

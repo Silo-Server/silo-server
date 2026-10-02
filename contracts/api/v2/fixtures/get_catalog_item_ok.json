@@ -71,10 +71,14 @@
       "source": "imdb",
       "score": 83,
       "votes": 673852
-    },
+    }
+  ],
+  "ratings": [
     {
-      "source": "mdblist",
-      "score": 86
+      "source": "imdb",
+      "name": "IMDb",
+      "score": 83,
+      "display": "8.3"
     }
   ],
   "subtitles": []
