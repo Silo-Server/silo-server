@@ -26,7 +26,8 @@ func TestOverlayWinnerIndexesRetryAllowsWritesPostgres(t *testing.T) {
 	}
 	config, err := pgx.ParseConfig(dsn)
 	if err != nil {
-		t.Fatal(err)
+		// The parse error can quote the DSN, credentials included.
+		t.Fatal("invalid SILO_TEST_DATABASE_URL configuration")
 	}
 	db := stdlib.OpenDB(*config)
 	t.Cleanup(func() { _ = db.Close() })
