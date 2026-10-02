@@ -139,15 +139,32 @@ func TestPlanSegmentsMatchesFFmpegHLS(t *testing.T) {
 	}
 	written := playlistDurations(t, filepath.Join(dir, "stream.m3u8"))
 
-	idx := readIndex(t, path)
-	planned := SegmentDurations(PlanSegments(idx.Keyframes, 2), idx.Duration)
+	// Plan as a session does: from the verified index, to the video's end.
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx, err := VerifyMatroska(f, info.Size())
+	if err != nil {
+		t.Fatal(err)
+	}
+	planned := SegmentDurations(PlanSegments(idx.Keyframes, 2), idx.VideoEnd)
 	if len(planned) != len(written) {
 		t.Fatalf("planned %d segments %v, FFmpeg wrote %d %v", len(planned), planned, len(written), written)
 	}
-	// FFmpeg measures the last segment to its last packet's end, which can
-	// differ from the container duration by a frame.
-	for i := range written[:len(written)-1] {
-		if math.Abs(planned[i]-written[i]) > 0.002 {
+	for i := range written {
+		tolerance := 0.002
+		if i == len(written)-1 {
+			// FFmpeg measures the last segment to a late packet, within a
+			// frame of the video's end.
+			tolerance = 0.041
+		}
+		if math.Abs(planned[i]-written[i]) > tolerance {
 			t.Fatalf("segment %d: planned %.3fs, FFmpeg wrote %.3fs (planned %v, written %v)",
 				i, planned[i], written[i], planned, written)
 		}

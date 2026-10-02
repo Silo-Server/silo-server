@@ -184,6 +184,9 @@ func (r copyPlanRecord) plan() *copySegmentPlan {
 		if k < 0 || k >= len(r.Keyframes) || (i > 0 && k <= r.FirstKey[i-1]) {
 			return nil
 		}
+		if d := r.Durations[i]; !(d > 0) || math.IsInf(d, 0) {
+			return nil
+		}
 	}
 	return &copySegmentPlan{durations: r.Durations, keyframes: r.Keyframes, firstKey: r.FirstKey, inputStart: *r.InputStart}
 }
