@@ -685,20 +685,22 @@ out of band, after which a client can retry or reload that URL with the new
 header.
 
 The signed playback token is what carries a reconstruction recipe across an
-API restart. Opting it out therefore also opts out of transparent session
+API restart. A tokenless attempt therefore also opts out of transparent session
 reconstruction: a missing in-memory session returns the normal expired/missing
-response and the client starts a fresh attempt. Once selected, this mode is
+response and the client starts a fresh attempt. The Apple build 31 session
+capability is the exception: it carries the recipe, so its stream, HLS and
+sidecar requests reconstruct from it while its login session stays active. Once selected, this mode is
 sticky for the lifetime of the attempt; a client that can no longer honor it
 must stop and start a new attempt rather than downgrade a replan to a
 credential-bearing URL.
 
-**Replica affinity.** Because there is no reconstruction recipe, a
+**Replica affinity.** Because there is no reconstruction recipe, a tokenless
 header-authenticated attempt's session exists only in the memory of the API
 process that started it. A media request routed to any other replica finds no
 session and returns the expired/missing response, so a deployment serving
 tokenless attempts currently needs either a single API replica or session
-affinity on the media routes; legacy token-bearing attempts are unaffected,
-since they reconstruct anywhere. Proxy-origin URLs
+affinity on the media routes. Legacy token-bearing attempts and build 31
+session-capability attempts are unaffected, since they reconstruct anywhere. Proxy-origin URLs
 (`authorized_media_origins_v1`) are also unaffected: the proxy serves from the
 shared grant store rather than from an API process's memory. Moving session
 state into shared storage is the fix, and until it lands this constraint is
