@@ -43,12 +43,12 @@ jobs:
       web: ${{ steps.plan.outputs.web }}
     steps:
       # The plan compares trees, so it needs the full history but not the
-      # file contents.
+      # file contents. A sparse checkout also fetches with blob:none, so only
+      # the sparse paths' contents are downloaded.
       - name: Checkout
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          filter: blob:none
           sparse-checkout: .github/actions
           persist-credentials: false
       - name: Check out the CI tools from main
@@ -58,7 +58,6 @@ jobs:
           ref: ${{ job.workflow_sha || 'refs/heads/main' }}
           path: .ci-tools
           fetch-depth: 1
-          filter: blob:none
           sparse-checkout: |
             /.github/actions/ci-tools/
             /scripts/lint-changed.sh
@@ -117,7 +116,6 @@ jobs:
           ref: ${{ job.workflow_sha || 'refs/heads/main' }}
           path: .ci-tools
           fetch-depth: 1
-          filter: blob:none
           sparse-checkout: |
             /.github/actions/ci-tools/
             /scripts/lint-changed.sh
@@ -566,7 +564,6 @@ jobs:
           ref: ${{ job.workflow_sha || 'refs/heads/main' }}
           path: .ci-tools
           fetch-depth: 1
-          filter: blob:none
           sparse-checkout: |
             /.github/actions/ci-tools/
             /scripts/lint-changed.sh
