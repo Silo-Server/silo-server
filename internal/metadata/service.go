@@ -71,6 +71,7 @@ type metadataItemRepo interface {
 	GetByExternalID(ctx context.Context, tmdbID, imdbID, tvdbID, itemType string) (*models.MediaItem, error)
 	GetByTitleYearType(ctx context.Context, title string, year int, itemType string) (*models.MediaItem, error)
 	Upsert(ctx context.Context, item *models.MediaItem) error
+	SetStatusUnlessMatched(ctx context.Context, contentID, status string) (bool, error)
 	IncrementRefreshFailure(ctx context.Context, contentID string) error
 	ReplacePeople(ctx context.Context, contentID string, people []models.ItemPerson) error
 	ListUnmatchedByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string, limit int) ([]string, error)
@@ -6904,7 +6905,12 @@ func (s *MetadataService) claimGroupAndRelink(
 	return s.groupClaimRepo.ClaimAndRelinkFiles(ctx, folderID, groupKeyVersion, contentGroupKey, contentID)
 }
 
-// updateItemStatus sets the status field on a media_items row.
+// updateItemStatus sets the status field on a media_items row that is not
+// matched. Neither a failed enrichment retry nor an override settled a moment
+// too late invalidates an accepted catalog match: a matched item keeps its
+// status, metadata, and ownership while the queue records the retry failure.
+// The repository checks that inside the UPDATE, so a match stored while this
+// runs is kept too.
 func (s *MetadataService) updateItemStatus(ctx context.Context, contentID, status string) error {
 	if s != nil && s.hooks.updateItemStatus != nil {
 		return s.hooks.updateItemStatus(ctx, contentID, status)
@@ -6916,19 +6922,8 @@ func (s *MetadataService) updateItemStatus(ctx context.Context, contentID, statu
 		return fmt.Errorf("content id is required to update item status")
 	}
 
-	existing, err := s.itemRepo.GetByID(ctx, contentID)
-	if err != nil {
-		return fmt.Errorf("loading item %s before status update: %w", contentID, err)
-	}
-	// Neither a failed enrichment retry nor an override settled a moment too
-	// late invalidates an accepted catalog match. Keep its metadata and
-	// ownership while the queue records the retry failure.
-	if isProvisionalOwnershipStatus(status) && isConfirmedOwnershipStatus(existing.Status) {
-		return nil
-	}
-	existing.Status = status
-	if err := s.itemRepo.Upsert(ctx, existing); err != nil {
-		return fmt.Errorf("upserting item %s with status %s: %w", contentID, status, err)
+	if _, err := s.itemRepo.SetStatusUnlessMatched(ctx, contentID, status); err != nil {
+		return fmt.Errorf("setting item %s to status %s: %w", contentID, status, err)
 	}
 	return nil
 }

@@ -115,6 +115,19 @@ func (r *fakeItemRepo) Upsert(_ context.Context, item *models.MediaItem) error {
 	return nil
 }
 
+func (r *fakeItemRepo) SetStatusUnlessMatched(_ context.Context, contentID, status string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	item, ok := r.items[contentID]
+	if !ok || strings.EqualFold(strings.TrimSpace(item.Status), "matched") {
+		return false, nil
+	}
+	cp := *item
+	cp.Status = status
+	r.items[contentID] = &cp
+	return true, nil
+}
+
 func (r *fakeItemRepo) InsertIfAbsent(_ context.Context, item *models.MediaItem) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

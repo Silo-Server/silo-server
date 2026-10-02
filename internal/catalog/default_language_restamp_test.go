@@ -130,6 +130,63 @@ func TestItemInsertIfAbsentKeepsExistingRow(t *testing.T) {
 	}
 }
 
+// TestItemSetStatusUnlessMatched verifies that the status write changes only
+// the status of an unmatched row and leaves a matched or missing row alone.
+func TestItemSetStatusUnlessMatched(t *testing.T) {
+	ctx := context.Background()
+	pool := newRestampTestPool(t)
+	repo := NewItemRepository(pool)
+
+	contentID := fmt.Sprintf("set-status-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = $1`, contentID)
+	})
+	check := func(step string, wantChanged bool, status, wantTitle, wantStatus string) {
+		t.Helper()
+		changed, err := repo.SetStatusUnlessMatched(ctx, contentID, status)
+		if err != nil || changed != wantChanged {
+			t.Fatalf("%s: changed = %v, %v; want %v", step, changed, err, wantChanged)
+		}
+		if !wantChanged && wantStatus == "" {
+			return
+		}
+		got, err := repo.GetByID(ctx, contentID)
+		if err != nil {
+			t.Fatalf("%s: get item: %v", step, err)
+		}
+		if got.Title != wantTitle || got.Status != wantStatus {
+			t.Fatalf("%s: title=%q status=%q, want %q and %q", step, got.Title, got.Status, wantTitle, wantStatus)
+		}
+	}
+
+	check("missing item", false, "unmatched", "", "")
+
+	item := &models.MediaItem{
+		ContentID: contentID,
+		Type:      "series",
+		Title:     "Season",
+		Status:    "ambiguous",
+		Studios:   []string{},
+		Networks:  []string{},
+		Countries: []string{},
+		Genres:    []string{},
+	}
+	if err := repo.Upsert(ctx, item); err != nil {
+		t.Fatalf("insert item: %v", err)
+	}
+	check("ambiguous item", true, "pending", "Season", "pending")
+
+	matched := *item
+	matched.Title = "Matched Show"
+	matched.Status = "matched"
+	if err := repo.Upsert(ctx, &matched); err != nil {
+		t.Fatalf("match upsert: %v", err)
+	}
+	for _, status := range []string{"unmatched", "pending", "ambiguous"} {
+		check(status+" over a matched item", false, status, "Matched Show", "matched")
+	}
+}
+
 // TestItemDeleteIfUnreferencedKeepsLinkedItem verifies that the guarded delete
 // leaves an item a media file still links to and removes it once unlinked.
 func TestItemDeleteIfUnreferencedKeepsLinkedItem(t *testing.T) {
