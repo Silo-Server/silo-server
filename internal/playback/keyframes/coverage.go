@@ -271,9 +271,8 @@ type videoEnd struct {
 func (v *videoEnd) add(t, duration int64) {
 	switch {
 	case v.n > 0 && t == v.last:
-		if duration > 0 {
-			v.lastDuration = duration
-		}
+		// Blocks sharing the last timestamp end with the longest.
+		v.lastDuration = max(v.lastDuration, duration)
 		return
 	case v.n > 1 && t == v.prev:
 		return
