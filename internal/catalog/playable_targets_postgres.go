@@ -4,16 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 )
-
-// catalogProgressRelationStore is implemented by progress stores whose rows
-// share the catalog database. The store owns progress visibility (hidden
-// history, timestamp precision); catalog only joins the returned relation.
-type catalogProgressRelationStore interface {
-	CatalogProgressRelation(pool *pgxpool.Pool, userID int, profileID string, firstArg int) (string, []any, bool)
-}
 
 // resolvePostgresTargets checks an anchor directly, then tries the latest
 // resumable episode, first unwatched episode, and first available episode.

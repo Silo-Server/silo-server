@@ -27,7 +27,7 @@ func (s *playableTargetBenchmarkProgressStore) ListProgressByMediaItems(ctx cont
 }
 
 func (s *playableTargetBenchmarkProgressStore) CatalogProgressRelation(pool *pgxpool.Pool, userID int, profileID string, firstArg int) (string, []any, bool) {
-	store, ok := s.delegate.(catalogProgressRelationStore)
+	store, ok := s.delegate.(userstore.CatalogProgressRelationStore)
 	if !s.sqlWinners || !ok {
 		return "", nil, false
 	}

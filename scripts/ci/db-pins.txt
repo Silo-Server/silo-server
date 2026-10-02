@@ -51,11 +51,13 @@
 ./internal/catalog TestSearchYearSuffixedTitleIsExactPostgres
 
 # Card play targets: leaf cards and a validated anchor hint resolve without a
-# watch-progress query.
+# watch-progress query, and the PostgreSQL path picks what the general path
+# picks.
 ./internal/catalog TestPlayableTargetResolverProfileStateAvailabilityAndAccess
 ./internal/catalog TestPlayableTargetResolverResumesDeepInsideLongSeries
 ./internal/catalog TestPlayableTargetResolverStaleCompletedProgressPlan
 ./internal/catalog TestCatalogOverlaySummariesPreserveLegacyWinners
+./internal/catalog TestPlayableTargetsPostgresMatchesGeneral
 
 # Continue Watching: only an in-progress episode sets how far back the
 # superseded walk reads the profile's completed rows.

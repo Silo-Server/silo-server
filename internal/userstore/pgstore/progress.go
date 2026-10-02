@@ -944,6 +944,10 @@ func visibleProgressSQL(alias string) string {
 		  )`, alias)
 }
 
+// Compile-time capability check: catalog play-target resolution joins this
+// store's progress relation directly (see userstore.CatalogProgressRelationStore).
+var _ userstore.CatalogProgressRelationStore = (*PostgresUserStore)(nil)
+
 // CatalogProgressRelation returns a profile's visible progress as a SQL
 // relation for catalog queries, numbering its parameters from firstArg. It
 // applies only when catalog shares this account's database; separate databases
