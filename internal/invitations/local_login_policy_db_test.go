@@ -20,14 +20,14 @@ type pausedPolicyInvitationRepo struct {
 	resume  chan struct{}
 }
 
-func (r *pausedPolicyInvitationRepo) Accept(ctx context.Context, hash string, provision func(*models.Invitation, pgx.Tx) (*models.User, error)) (*models.User, error) {
+func (r *pausedPolicyInvitationRepo) AcceptAs(ctx context.Context, hash string, linkAddress func() (string, error), provision func(*models.Invitation, pgx.Tx) (*models.User, error)) (*models.User, error) {
 	close(r.checked)
 	select {
 	case <-r.resume:
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	return r.Repository.Accept(ctx, hash, provision)
+	return r.Repository.AcceptAs(ctx, hash, linkAddress, provision)
 }
 
 func TestAcceptRechecksLocalPolicyBeforeClaimDB(t *testing.T) {
@@ -55,7 +55,7 @@ func TestAcceptRechecksLocalPolicyBeforeClaimDB(t *testing.T) {
 	}
 	result := make(chan acceptResult, 1)
 	go func() {
-		pair, user, err := svc.Accept(ctx, "policy-change", "correct horse battery", "test", "")
+		pair, user, err := svc.Accept(ctx, "policy-change", "", "correct horse battery", "test", "")
 		result <- acceptResult{pair: pair, user: user, err: err}
 	}()
 	select {
