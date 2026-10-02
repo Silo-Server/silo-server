@@ -414,16 +414,17 @@ jobs:
       # policy, the OAuth flow store across nodes (a completion code opens its
       # session only when redeemed), the provider re-check (and
       # the provider chain a device approval inherits), the one-provider
-      # binding rule, compatibility sign-in routing, the Owner rules on admin
+      # binding rule (and the network provider beside it), network identity
+      # sign-in and linking, compatibility sign-in routing, the Owner rules on admin
       # identity link and unlink, and the admin guards that keep a break-glass
       # account while local sign-in is off. The break-glass guards run first:
       # they skip on a database that already holds a break-glass account.
       - name: Test external sign-in against Postgres
         run: |
           go test -race -count=1 -run '^(TestLocalLoginSettingRequiresBreakGlassDB|TestV1AdminUserChangesKeepBreakGlassDB|TestDeviceApprovalInheritsSessionProviderChainDB|TestExternalSignInAdminIdentityGuardsDB)$' ./internal/api/handlers/
-          go test -race -count=1 -run '^(TestExternalSignIn|TestProviderRecheck|TestPGOAuthStore|TestOAuthNativeFlowAcrossNodes|TestOAuthNativeStartOrigin|TestOAuthWebFlowBrowserBinding|TestOAuthUnredeemedCode|TestOAuthLinkFlow|TestOAuthForcedLink|TestLinkCredentialsIdentity|TestLocalPasswordPolicy|TestPasswordLoginRouting|TestIdentityService|TestConcurrentFirstSignInCreatesOneAccount|TestEnableAccountLocalLogin|TestSignupRefusedWhileLocalLoginIsOff).*DB$' ./internal/auth/
+          go test -race -count=1 -run '^(TestExternalSignIn|TestProviderRecheck|TestPGOAuthStore|TestOAuthNativeFlowAcrossNodes|TestOAuthNativeStartOrigin|TestOAuthWebFlowBrowserBinding|TestOAuthUnredeemedCode|TestOAuthLinkFlow|TestOAuthForcedLink|TestLinkCredentialsIdentity|TestNetworkSignIn|TestLinkNetworkIdentity|TestLocalPasswordPolicy|TestPasswordLoginRouting|TestIdentityService|TestConcurrentFirstSignInCreatesOneAccount|TestEnableAccountLocalLogin|TestSignupRefusedWhileLocalLoginIsOff).*DB$' ./internal/auth/
           go test -race -count=1 -run '^TestLoginPINConventionStaysLocalDB$' ./internal/jellycompat/
-          go test -race -count=1 -run '^TestUpsertAuthBindingAllowsOneEnabledProvider$' ./internal/plugins/
+          go test -race -count=1 -run '^TestUpsertAuthBindingAllows(OneEnabledProvider|NetworkProviderBesidePrimary)$' ./internal/plugins/
 
   web:
     name: Web

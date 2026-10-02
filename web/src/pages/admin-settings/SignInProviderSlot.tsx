@@ -24,7 +24,7 @@ import {
   adminSignInErrorText,
   authBindingOf,
   authCapabilityOf,
-  authPluginInstallations,
+  primarySignInInstallations,
   authProviderLabel,
   authProviderName,
 } from "@/lib/externalSignInAdmin";
@@ -912,7 +912,7 @@ export function SignInProviderSlot({
     );
   }
 
-  const candidates = authPluginInstallations(installations);
+  const candidates = primarySignInInstallations(installations);
   if (candidates.length === 0) {
     return (
       <p className="text-muted-foreground py-3.5 text-sm">

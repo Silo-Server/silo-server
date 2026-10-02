@@ -73,13 +73,18 @@ plugin's loopback source is indistinguishable from any other local proxy.
   plugin restart is rejected until the plugin re-reads `GetHostInfo`.
 - The plugin stamps `X-Silo-Ingress-Token` on every request it proxies, keeps
   `Host`, overwrites `X-Forwarded-Proto` with `https`, and sets
-  `X-Forwarded-For` to the overlay peer.
-- `netaccess.Middleware` runs on all three listeners (API, Jellyfin, ABS)
-  before logging or any handler. It validates the token in constant time,
-  strips the header, and records `netaccess.Path{Provider}` on the request
-  context. An unknown token is `403`; a request without the header is on the
-  default path. The route inventory classifies it as infrastructure
-  middleware: it never grants or changes authorization.
+  `X-Forwarded-For` to the overlay peer. It also replaces any client value of
+  `X-Silo-Ingress-Peer` with the overlay peer's IP when it can identify that
+  peer on its overlay.
+- `netaccess.Middleware` runs on all four listeners (API, Jellyfin, ABS and
+  the proxy node's) before logging or any handler. It validates the token in
+  constant time, strips both ingress headers, and records `netaccess.Path`
+  (the provider, its installation, and the peer when the provider named
+  exactly one valid IP) on the request context. A peer header without a
+  valid token is dropped unread, so a LAN or public client cannot name one.
+  An unknown token is `403`; a request without the header is on the default
+  path. The route inventory classifies it as infrastructure middleware: it
+  never grants or changes authorization.
 - `clientip` already trusts loopback, so the forwarded headers are honoured.
   Operators who narrow `clientip.trusted_proxies` must keep loopback.
 - `socketOriginAllowed` accepts the overlay origins of providers currently
@@ -220,6 +225,8 @@ one already running. Proxy nodes scale freely because each has its own scope.
 
 ## Out of scope for phase one
 
-Funnel or any public exposure, login via overlay identity, multiple API
-replicas, NetBird. The non-goals in [docs/non-goals.md](../non-goals.md)
+Funnel or any public exposure, multiple API replicas, NetBird. Login via
+overlay identity is the network identity sign-in in
+[external-sign-in.md](external-sign-in.md#network-identity): the middleware
+only records the peer, and the provider's plugin decides who it is. The non-goals in [docs/non-goals.md](../non-goals.md)
 apply unchanged: a provider proxies Silo's own listeners and nothing else.

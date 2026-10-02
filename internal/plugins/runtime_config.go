@@ -375,16 +375,28 @@ func backfillEncryptedConfigs(
 }
 
 // ErrAuthProviderAlreadyEnabled refuses enabling an auth binding while
-// another one is enabled: a server has at most one external sign-in provider
-// (plus the built-in local accounts).
+// another one of the same kind is enabled: a server has at most one primary
+// external sign-in provider (OIDC, LDAP) and at most one network identity
+// provider, plus the built-in local accounts.
 var ErrAuthProviderAlreadyEnabled = errors.New("another external sign-in provider is already enabled")
 
 // authBindingsLock serializes auth binding writes so two concurrent enables
 // cannot both pass the one-provider check.
 const authBindingsLock = "silo:plugin_auth_bindings"
 
+// authBindingIsNetwork is the SQL test that the auth binding named by the
+// installation and capability expressions declares the "network" auth mode.
+// It reads the capability's stored manifest metadata, so a binding's kind
+// never drifts from what the plugin declares.
+func authBindingIsNetwork(installation, capability string) string {
+	return `COALESCE((SELECT c.metadata->'auth_modes' ? 'network' FROM plugin_capabilities c
+		WHERE c.plugin_installation_id = ` + installation + ` AND c.capability_type = 'auth_provider.v1'
+			AND c.capability_id = ` + capability + `), false)`
+}
+
 // UpsertAuthBinding writes one binding row. Enabling it is refused with
-// ErrAuthProviderAlreadyEnabled while a different binding is enabled.
+// ErrAuthProviderAlreadyEnabled while a different binding of the same kind
+// (network identity or not) is enabled.
 func (s *RuntimeConfigStore) UpsertAuthBinding(ctx context.Context, binding AuthBinding) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, authBindingsLock); err != nil {
@@ -393,8 +405,10 @@ func (s *RuntimeConfigStore) UpsertAuthBinding(ctx context.Context, binding Auth
 		if binding.Enabled {
 			var other bool
 			if err := tx.QueryRow(ctx, `SELECT EXISTS (
-				SELECT 1 FROM plugin_auth_bindings
-				WHERE enabled AND NOT (plugin_installation_id = $1 AND capability_id = $2))`,
+				SELECT 1 FROM plugin_auth_bindings b
+				WHERE b.enabled AND NOT (b.plugin_installation_id = $1 AND b.capability_id = $2)
+					AND `+authBindingIsNetwork("b.plugin_installation_id", "b.capability_id")+` =
+						`+authBindingIsNetwork("$1::bigint", "$2::text")+`)`,
 				binding.InstallationID, binding.CapabilityID).Scan(&other); err != nil {
 				return fmt.Errorf("checking enabled plugin auth bindings: %w", err)
 			}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -27,6 +28,21 @@ type LoginInput struct {
 // LoginOutput is the login response.
 type LoginOutput struct {
 	Body TokenPair
+}
+
+// NetworkSignInInput signs in the overlay peer of the request. The body is
+// an empty JSON object: requiring it makes a cross-site form post fail the
+// media-type check, so a page the person visits cannot sign their device in.
+type NetworkSignInInput struct {
+	ID      ID `path:"id" pattern:"^[1-9][0-9]*$" doc:"The network provider's plugin installation, as listAuthProviders shows it" example:"5"`
+	RawBody []byte
+	Body    struct{}
+}
+
+// networkSignInPath is the signInWithNetworkIdentity path of an
+// installation, below the server base.
+func networkSignInPath(installationID int) string {
+	return Prefix + "/auth/network/" + strconv.Itoa(installationID) + "/sign-in"
 }
 
 // CompleteOAuthLoginInput redeems the one-time code the OAuth callback
@@ -87,6 +103,15 @@ func registerAuth(reg *Registry) {
 	// that does not fit the code is 400 invalid_grant.
 	complete.Errors = []int{http.StatusBadRequest, http.StatusUnauthorized}
 	Register(reg, Operation{Operation: complete, RetrySafety: RetrySafetyNonRetryable, Class: ClassPublic, ServiceBacked: true}, reg.completeOAuthLogin)
+	network := humaOp(http.MethodPost, Prefix+"/auth/network/{id}/sign-in", "signInWithNetworkIdentity", "auth",
+		"Sign in the owner of this device through a network identity provider and open a login session.")
+	network.Description = "For a network provider (mode network in listAuthProviders), such as the Tailscale network access plugin: the provider's network already knows who owns the device a request came from, so there is no password and no browser. Only a request that arrived through that provider's own network address can sign in; listAuthProviders lists the provider, with the owner's name, only to such a request. The provider's plugin is asked who the device belongs to, and the answer goes through the same account resolution as other providers: a linked account signs in, an unknown person gets a new account while the binding's account creation is on, and the provider may set the account's role. The session is re-checked with the provider like other provider sessions. Send an empty JSON object as the body. Refusals, by problem type: 403 network_identity_required (the request did not come through that provider's network); 403 not_permitted (the provider refuses this device, for example a tagged device or one its policy leaves out); 403 account_required; 403 permission_denied (the account is disabled); 409 email_in_use or identity_linked_elsewhere; 404 not_found (not an enabled network provider); 503 provider_unavailable. Spends the login rate-limit budget."
+	network.Errors = []int{http.StatusForbidden, http.StatusNotFound, http.StatusConflict, http.StatusServiceUnavailable}
+	Register(reg, Operation{
+		Operation:   network,
+		RetrySafety: RetrySafetyNonRetryable,
+		Class:       ClassPublic, ServiceBacked: true, RateLimitBucket: loginDomain,
+	}, reg.signInWithNetworkIdentity)
 	logout := humaOp(http.MethodPost, Prefix+"/auth/logout", "logout", "auth",
 		"Revoke the caller's login session.")
 	// An API key passes the gate but owns no login session: 403 (v1: 401,
@@ -113,6 +138,28 @@ func (reg *Registry) login(ctx context.Context, in *LoginInput) (*LoginOutput, e
 		input.DeviceName = r.UserAgent()
 	}
 	view, err := reg.deps.Sessions.Login(ctx, input)
+	if err != nil {
+		return nil, loginProblem(err)
+	}
+	return &LoginOutput{Body: tokenPairFromView(view)}, nil
+}
+
+func (reg *Registry) signInWithNetworkIdentity(ctx context.Context, in *NetworkSignInInput) (*LoginOutput, error) {
+	if p := rejectNonNullableNulls(in.RawBody, nil); p != nil {
+		return nil, p
+	}
+	if reg.deps.Sessions == nil {
+		return nil, unavailable(loginDomain)
+	}
+	installationID, p := in.ID.positive("path.id")
+	if p != nil {
+		return nil, p
+	}
+	input := handlers.NetworkSignInInput{InstallationID: installationID, IP: clientip.FromContext(ctx)}
+	if r := requestFrom(ctx); r != nil {
+		input.DeviceName = r.UserAgent()
+	}
+	view, err := reg.deps.Sessions.NetworkSignIn(ctx, input)
 	if err != nil {
 		return nil, loginProblem(err)
 	}

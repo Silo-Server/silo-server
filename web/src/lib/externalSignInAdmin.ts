@@ -10,7 +10,7 @@ export const BREAK_GLASS_REQUIRED_TEXT =
 
 const PROBLEM_TEXT: Record<string, string> = {
   provider_already_enabled:
-    "Another sign-in provider is already on. A server has one sign-in provider at a time: turn the other one off first.",
+    "Another sign-in provider is already on. A server has one sign-in provider at a time, plus one network sign-in such as Tailscale: turn the other one off first.",
   break_glass_required: BREAK_GLASS_REQUIRED_TEXT,
   identity_linked_elsewhere:
     "That provider account is already connected to another Silo account. Unlink it there first.",
@@ -55,6 +55,31 @@ export function authPluginInstallations(
   installations: readonly PluginInstallation[] | undefined,
 ): PluginInstallation[] {
   return (installations ?? []).filter((installation) => authCapabilityOf(installation));
+}
+
+/**
+ * Whether an installation signs people in from its network (such as the
+ * Tailscale plugin) rather than as the server's one OIDC or LDAP provider.
+ * One network sign-in can be on beside that provider.
+ */
+export function isNetworkSignIn(installation: PluginInstallation): boolean {
+  return authCapabilityOf(installation)?.sign_in_mode === "network";
+}
+
+/** Installed OIDC and LDAP sign-in plugins: the one-at-a-time provider slot. */
+export function primarySignInInstallations(
+  installations: readonly PluginInstallation[] | undefined,
+): PluginInstallation[] {
+  return authPluginInstallations(installations).filter(
+    (installation) => !isNetworkSignIn(installation),
+  );
+}
+
+/** Installed network sign-in plugins (such as Tailscale). */
+export function networkSignInInstallations(
+  installations: readonly PluginInstallation[] | undefined,
+): PluginInstallation[] {
+  return authPluginInstallations(installations).filter(isNetworkSignIn);
 }
 
 /** The binding row of an installation's sign-in capability; none on a fresh install. */

@@ -23,13 +23,17 @@ const (
 // so both transports render the same decision.
 
 // ListProviders lists the login providers a client may offer, omitting OAuth
-// providers when the OAuth routes are not served. v1 GET /auth/providers and
-// v2 listAuthProviders both call it.
+// providers when the OAuth routes are not served and network identity
+// providers, which only the v2 discovery offers (DiscoverProviders). v1 GET
+// /auth/providers calls it.
 func (h *AuthHandler) ListProviders() []auth.LoginProviderInfo {
 	providers := h.service.ListProviders()
 	out := make([]auth.LoginProviderInfo, 0, len(providers))
 	for _, provider := range providers {
 		if provider.Mode == auth.ProviderModeOAuth && !h.oauthRoutesAvailable {
+			continue
+		}
+		if provider.Mode == auth.ProviderModeNetwork {
 			continue
 		}
 		out = append(out, provider)

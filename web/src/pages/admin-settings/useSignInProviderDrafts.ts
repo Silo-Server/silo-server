@@ -10,7 +10,7 @@ import {
   adminSignInErrorText,
   authBindingOf,
   authCapabilityOf,
-  authPluginInstallations,
+  primarySignInInstallations,
   authProviderName,
 } from "@/lib/externalSignInAdmin";
 
@@ -57,7 +57,7 @@ export function useSignInProviderDrafts(installations: PluginInstallation[] | un
   const saveConfig = useSaveSignInPluginConfig();
   const updateBinding = useUpdateSignInBinding();
 
-  const candidates = useMemo(() => authPluginInstallations(installations), [installations]);
+  const candidates = useMemo(() => primarySignInInstallations(installations), [installations]);
   const layouts = useMemo(
     () =>
       new Map(candidates.map((installation) => [installation.id, signInSetupLayout(installation)])),

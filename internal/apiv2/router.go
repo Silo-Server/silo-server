@@ -1162,6 +1162,7 @@ var externalSignInProblemTypes = map[string]ProblemType{
 	TypeLastSignInMethod.ID:        TypeLastSignInMethod,
 	TypeProviderUnavailable.ID:     TypeProviderUnavailable,
 	TypeAlreadyLinked.ID:           TypeAlreadyLinked,
+	TypeNetworkIdentityRequired.ID: TypeNetworkIdentityRequired,
 }
 
 // OAuthService is the slice of *auth.OAuthHandler the OAuth operations use:
@@ -1201,6 +1202,9 @@ type SessionService interface {
 	SetupInitialUser(ctx context.Context, in handlers.RegistrationInput) (handlers.TokenPairView, error)
 	SignupEnabled(ctx context.Context) (bool, error)
 	Signup(ctx context.Context, in handlers.RegistrationInput) (handlers.TokenPairView, error)
+	// NetworkSignIn signs in the overlay peer of the request through a
+	// network identity provider.
+	NetworkSignIn(ctx context.Context, in handlers.NetworkSignInInput) (handlers.TokenPairView, error)
 }
 
 // DeviceLoginService is the slice of *handlers.AuthHandler the device-pairing

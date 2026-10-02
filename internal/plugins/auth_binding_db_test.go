@@ -78,3 +78,45 @@ func TestUpsertAuthBindingAllowsOneEnabledProvider(t *testing.T) {
 		t.Fatalf("auto_provision default = %v, %v", autoProvision, err)
 	}
 }
+
+// TestUpsertAuthBindingAllowsNetworkProviderBesidePrimary: a network identity
+// binding (auth_modes ["network"]) is enabled next to the one primary
+// provider, and is itself limited to one.
+func TestUpsertAuthBindingAllowsNetworkProviderBesidePrimary(t *testing.T) {
+	pool := builtinGuardTestPool(t)
+	ctx := context.Background()
+	var others int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM plugin_auth_bindings WHERE enabled`).Scan(&others); err != nil {
+		t.Fatal(err)
+	}
+	if others > 0 {
+		t.Skipf("%d enabled auth bindings already in the database", others)
+	}
+	configs := NewRuntimeConfigStore(pool, instanceStateTestCipher(t))
+	seed := func(modes string) int {
+		time.Sleep(time.Millisecond) // distinct plugin ids
+		id := seedResidentQueryInstallation(t, pool, true)
+		if _, err := pool.Exec(ctx, `INSERT INTO plugin_capabilities (plugin_installation_id, capability_type, capability_id, metadata)
+			VALUES ($1, 'auth_provider.v1', 'main', jsonb_build_object('auth_modes', $2::jsonb))`, id, modes); err != nil {
+			t.Fatalf("seed capability: %v", err)
+		}
+		return id
+	}
+	oidc := seed(`["oauth2"]`)
+	tailscale := seed(`["network"]`)
+	otherNetwork := seed(`["network"]`)
+	ldap := seed(`["password"]`)
+
+	if err := configs.UpsertAuthBinding(ctx, AuthBinding{InstallationID: oidc, CapabilityID: "main", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := configs.UpsertAuthBinding(ctx, AuthBinding{InstallationID: tailscale, CapabilityID: "main", Enabled: true}); err != nil {
+		t.Fatalf("network enable beside a primary provider = %v, want nil", err)
+	}
+	if err := configs.UpsertAuthBinding(ctx, AuthBinding{InstallationID: otherNetwork, CapabilityID: "main", Enabled: true}); !errors.Is(err, ErrAuthProviderAlreadyEnabled) {
+		t.Fatalf("second network enable = %v, want ErrAuthProviderAlreadyEnabled", err)
+	}
+	if err := configs.UpsertAuthBinding(ctx, AuthBinding{InstallationID: ldap, CapabilityID: "main", Enabled: true}); !errors.Is(err, ErrAuthProviderAlreadyEnabled) {
+		t.Fatalf("second primary enable beside a network provider = %v, want ErrAuthProviderAlreadyEnabled", err)
+	}
+}

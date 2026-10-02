@@ -3801,7 +3801,7 @@ export interface PluginCapability {
   config_schema?: PluginConfigSchema[];
   metadata?: Record<string, unknown>;
   /** How an auth_provider.v1 capability signs people in; absent for other types. */
-  sign_in_mode?: "oauth" | "credentials";
+  sign_in_mode?: "oauth" | "credentials" | "network";
   /** An installation's OAuth sign-in capability: the redirect URI to register at the provider. */
   callback_url?: string;
   /** An installation's OAuth sign-in capability: the post-logout redirect URI to register. */

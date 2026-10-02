@@ -638,6 +638,65 @@ describe("SignInSettings turning a provider on and off", () => {
   });
 });
 
+function tailscaleInstallation(overrides: Partial<PluginInstallation> = {}): PluginInstallation {
+  return {
+    ...oidcInstallation(),
+    id: 9,
+    plugin_id: "community.network-access.tailscale",
+    capabilities: [
+      { type: "network_access_provider.v1", id: "tailscale", display_name: "Tailscale" },
+      {
+        type: "auth_provider.v1",
+        id: "tailscale",
+        display_name: "Tailscale",
+        metadata: { display_name: "Tailscale" },
+        sign_in_mode: "network",
+      },
+    ],
+    presentation: { display_name: "Tailscale" },
+    global_config_schema: [],
+    global_configs: [],
+    auth_bindings: [],
+    ...overrides,
+  } as unknown as PluginInstallation;
+}
+
+describe("SignInSettings network sign-in", () => {
+  it("shows a network plugin in its own section, beside the provider slot", async () => {
+    state.installations = [oidcInstallation(), tailscaleInstallation()];
+    mount();
+    expect(screen.getByText("Network sign-in")).toBeTruthy();
+    expect(screen.getByRole("switch", { name: "Sign in with Tailscale" })).not.toBeChecked();
+    // The one-at-a-time provider choice never offers it.
+    expect(screen.queryByRole("radio", { name: /Tailscale/ })).toBeNull();
+  });
+
+  it("turns it on at once, keeping account creation on by default", async () => {
+    const user = userEvent.setup();
+    state.installations = [tailscaleInstallation()];
+    mount();
+    await user.click(screen.getByRole("switch", { name: "Sign in with Tailscale" }));
+    await waitFor(() =>
+      expect(opCalls("PUT /api/v2/admin/plugins/installations/{id}/auth-binding")).toHaveLength(1),
+    );
+    const call = opCalls("PUT /api/v2/admin/plugins/installations/{id}/auth-binding")[0]!;
+    expect(call.options?.path).toEqual({ id: "9" });
+    expect(call.options?.body).toEqual({
+      capability_id: "tailscale",
+      enabled: true,
+      display_order: 1,
+      auto_provision: true,
+      default_login: false,
+    });
+  });
+
+  it("stays hidden without a network plugin", () => {
+    state.installations = [oidcInstallation()];
+    mount();
+    expect(screen.queryByText("Network sign-in")).toBeNull();
+  });
+});
+
 describe("SignInSettings guided setup", () => {
   it("lays the plugin's sections out as steps, with collapsible ones under Advanced", async () => {
     const user = userEvent.setup();
