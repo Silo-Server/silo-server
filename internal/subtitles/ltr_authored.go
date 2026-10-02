@@ -67,8 +67,9 @@ func MarkLTRAuthoredLines(data []byte) []byte {
 	return []byte(strings.Join(lines, ""))
 }
 
-// splitLinesKeepingEnds splits at LF, CRLF and lone CR, keeping each line's
-// ending so joining the result restores the input exactly.
+// splitLinesKeepingEnds splits at LF, CRLF, CRCRLF and lone CR, keeping each
+// line's ending so joining the result restores the input exactly. CRCRLF is
+// one ending, as the SRT to WebVTT conversion reads it.
 func splitLinesKeepingEnds(text string) []string {
 	var lines []string
 	start := 0
@@ -78,7 +79,7 @@ func splitLinesKeepingEnds(text string) []string {
 			lines = append(lines, text[start:i+1])
 			start = i + 1
 		case '\r':
-			if i+1 < len(text) && text[i+1] == '\n' {
+			if strings.HasPrefix(text[i+1:], "\n") || strings.HasPrefix(text[i+1:], "\r\n") {
 				continue
 			}
 			lines = append(lines, text[start:i+1])

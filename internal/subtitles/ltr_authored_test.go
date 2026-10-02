@@ -99,3 +99,13 @@ func TestMarkLTRAuthoredLinesCountsASentenceEndAfterASpace(t *testing.T) {
 		t.Fatalf("logical file changed:\n got %q", got)
 	}
 }
+
+func TestMarkLTRAuthoredLinesReadsCRCRLFAsOneLineEnding(t *testing.T) {
+	input := "1\r\r\n00:00:01,000 --> 00:00:02,000\r\r\nماذا حدث للتو؟ -\r\r\n\r\r\n" +
+		"2\r\r\n00:00:03,000 --> 00:00:04,000\r\r\n...لأنه بالنسبة إليهم\r\r\n\r\r\n" +
+		"3\r\r\n00:00:05,000 --> 00:00:06,000\r\r\nلقد انفجر -\r\r\n"
+	want := strings.NewReplacer("ماذا", "\u200eماذا", "...لأنه", "\u200e...لأنه", "لقد", "\u200eلقد").Replace(input)
+	if got := string(MarkLTRAuthoredLines([]byte(input))); got != want {
+		t.Fatalf("marked SRT\n got %q\nwant %q", got, want)
+	}
+}
