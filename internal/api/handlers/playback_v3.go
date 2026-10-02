@@ -4783,55 +4783,26 @@ func sameLegacyOutputRouteReplanV3(record *playback.AttemptRecordV3, next playba
 	return equivalentPersistedValueV3(currentContext, nextContext)
 }
 
-// equivalentPersistedValueV3 compares two request values the way they survive
-// the plan store. The Postgres store keeps the normalized request as JSON, so
-// an empty list tagged omitempty is reloaded as nil while the next request
-// still carries it. Both sides are reduced to their JSON form, with null, empty
-// lists and empty objects removed, before they are compared.
-func equivalentPersistedValueV3(a, b any) bool {
-	canonicalA, okA := canonicalPersistedValueV3(a)
-	canonicalB, okB := canonicalPersistedValueV3(b)
-	return okA && okB && reflect.DeepEqual(canonicalA, canonicalB)
-}
-
-func canonicalPersistedValueV3(value any) (any, bool) {
+// persistedFormV3 returns value as the Postgres plan store reloads it: the
+// store keeps the normalized request as JSON, so an empty list tagged
+// omitempty comes back as nil. Comparing both sides in this form keeps a
+// stored request equal to an identical incoming one.
+func persistedFormV3[T any](value T) (T, bool) {
+	var reloaded T
 	encoded, err := json.Marshal(value)
 	if err != nil {
-		return nil, false
+		return reloaded, false
 	}
-	var decoded any
-	if err := json.Unmarshal(encoded, &decoded); err != nil {
-		return nil, false
+	if err := json.Unmarshal(encoded, &reloaded); err != nil {
+		return reloaded, false
 	}
-	return pruneEmptyJSONV3(decoded), true
+	return reloaded, true
 }
 
-func pruneEmptyJSONV3(value any) any {
-	switch typed := value.(type) {
-	case map[string]any:
-		for key, child := range typed {
-			child = pruneEmptyJSONV3(child)
-			if child == nil {
-				delete(typed, key)
-				continue
-			}
-			typed[key] = child
-		}
-		if len(typed) == 0 {
-			return nil
-		}
-		return typed
-	case []any:
-		if len(typed) == 0 {
-			return nil
-		}
-		for i, child := range typed {
-			typed[i] = pruneEmptyJSONV3(child)
-		}
-		return typed
-	default:
-		return value
-	}
+func equivalentPersistedValueV3[T any](a, b T) bool {
+	persistedA, okA := persistedFormV3(a)
+	persistedB, okB := persistedFormV3(b)
+	return okA && okB && reflect.DeepEqual(persistedA, persistedB)
 }
 
 func withoutSpatializerV3(value *playback.AudioPassthroughV3) *playback.AudioPassthroughV3 {
