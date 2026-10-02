@@ -620,6 +620,18 @@ or force reload deletes it. This durable authority prevents a signed URL whose
 token remains valid after a node replacement from resurrecting stopped FFmpeg
 work. When the store is unavailable, route selection excludes only this shape.
 
+**Resume leading-picture drop.** A seeked progressive copy starts at the
+keyframe before the requested position. For HEVC that keyframe can be an
+open-GOP CRA whose leading (RASL) pictures reference frames the copy never
+sent, and macOS Firefox rejects the stream there instead of skipping them. For
+that client and an HEVC source the planner freezes a best-effort request into
+the session, the remux recipe card and the stream token (`rlpd`). The executor
+applies `noise=drop=lt(pts\,startpts)*not(key)` only when the response starts
+past zero and its FFmpeg's `noise` filter takes the `drop` expression (probed
+once per binary). It is not a plan transformation or a required capability: an
+executor without the filter, or one that predates the claim, serves the plain
+copy, so it never narrows where the route may run.
+
 **Theme audio.** Detail-page theme songs use the same routing policy without
 becoming playback sessions (`internal/themedelivery`). Original theme audio
 resolves as `direct_play`/`direct`; an AAC conversion resolves as
