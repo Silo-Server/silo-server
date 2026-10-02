@@ -12314,6 +12314,11 @@ export interface components {
       max_playback_quality: string;
       /**
        * Format: int64
+       * @description Household profiles each member account may have, unless the account overrides it
+       */
+      max_profiles: number;
+      /**
+       * Format: int64
        * @description Remote per-stream bitrate ceiling in kbps; 0 means unlimited
        */
       max_remote_stream_bitrate_kbps: number;
@@ -12341,6 +12346,11 @@ export interface components {
       /** Format: int64 */
       max_local_stream_bitrate_kbps?: number;
       max_playback_quality?: string;
+      /**
+       * Format: int64
+       * @description Household profiles each member account may have; 5 when a new group omits it
+       */
+      max_profiles?: number;
       /** Format: int64 */
       max_remote_stream_bitrate_kbps?: number;
       /** Format: int64 */
@@ -12375,6 +12385,11 @@ export interface components {
        */
       max_local_stream_bitrate_kbps: number;
       max_playback_quality: string;
+      /**
+       * Format: int64
+       * @description Household profiles each member account may have, unless the account overrides it
+       */
+      max_profiles: number;
       /**
        * Format: int64
        * @description Remote per-stream bitrate ceiling in kbps; 0 means unlimited
@@ -12447,8 +12462,11 @@ export interface components {
       /** Format: int64 */
       max_local_stream_bitrate_kbps?: number | null;
       max_playback_quality?: string | null;
-      /** Format: int64 */
-      max_profiles?: number;
+      /**
+       * Format: int64
+       * @description Household profile limit override; null inherits the access group's limit
+       */
+      max_profiles?: number | null;
       /** Format: int64 */
       max_remote_stream_bitrate_kbps?: number | null;
       /** Format: int64 */
@@ -12510,8 +12528,11 @@ export interface components {
       /** Format: int64 */
       max_local_stream_bitrate_kbps?: number | null;
       max_playback_quality?: string | null;
-      /** Format: int64 */
-      max_profiles?: number;
+      /**
+       * Format: int64
+       * @description Household profile limit override; null inherits the access group's limit
+       */
+      max_profiles?: number | null;
       /** Format: int64 */
       max_remote_stream_bitrate_kbps?: number | null;
       /** Format: int64 */
@@ -19076,10 +19097,10 @@ export interface components {
       max_playback_quality: string | null;
       /**
        * Format: int64
-       * @description Household profile limit
+       * @description Household profile limit override; null inherits the access group's limit
        * @example 5
        */
-      max_profiles: number;
+      max_profiles: number | null;
       /**
        * Format: int64
        * @description Remote per-stream bitrate override in kbps; null inherits, 0 means unlimited
@@ -22614,6 +22635,12 @@ export interface components {
        * @example 1080p
        */
       max_playback_quality: string;
+      /**
+       * Format: int64
+       * @description Household profile limit
+       * @example 5
+       */
+      max_profiles: number;
       /**
        * Format: int64
        * @description Remote per-stream bitrate limit in kbps; 0 means unlimited
@@ -27315,6 +27342,12 @@ export interface components {
        * @example
        */
       max_playback_quality: string;
+      /**
+       * Format: int64
+       * @description Household profile limit
+       * @example 5
+       */
+      max_profiles: number;
       /**
        * Format: int64
        * @description Remote per-stream bitrate limit in kbps; 0 means unlimited

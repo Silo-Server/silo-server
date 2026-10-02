@@ -864,6 +864,12 @@
           "max_playback_quality": {
             "type": "string"
           },
+          "max_profiles": {
+            "description": "Household profiles each member account may have, unless the account overrides it",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
           "max_remote_stream_bitrate_kbps": {
             "description": "Remote per-stream bitrate ceiling in kbps; 0 means unlimited",
             "format": "int64",
@@ -909,6 +915,7 @@
           "max_transcodes",
           "max_remote_stream_bitrate_kbps",
           "max_local_stream_bitrate_kbps",
+          "max_profiles",
           "allowed_permissions",
           "requests_allowed",
           "is_default",
@@ -965,6 +972,12 @@
           },
           "max_playback_quality": {
             "type": "string"
+          },
+          "max_profiles": {
+            "description": "Household profiles each member account may have; 5 when a new group omits it",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
           },
           "max_remote_stream_bitrate_kbps": {
             "format": "int64",
@@ -1059,6 +1072,12 @@
           "max_playback_quality": {
             "type": "string"
           },
+          "max_profiles": {
+            "description": "Household profiles each member account may have, unless the account overrides it",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
           "max_remote_stream_bitrate_kbps": {
             "description": "Remote per-stream bitrate ceiling in kbps; 0 means unlimited",
             "format": "int64",
@@ -1109,6 +1128,7 @@
           "max_transcodes",
           "max_remote_stream_bitrate_kbps",
           "max_local_stream_bitrate_kbps",
+          "max_profiles",
           "allowed_permissions",
           "requests_allowed",
           "is_default",
@@ -1289,9 +1309,13 @@
             ]
           },
           "max_profiles": {
+            "description": "Household profile limit override; null inherits the access group's limit",
             "format": "int64",
             "minimum": 1,
-            "type": "integer"
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "max_remote_stream_bitrate_kbps": {
             "format": "int64",
@@ -1517,9 +1541,13 @@
             ]
           },
           "max_profiles": {
+            "description": "Household profile limit override; null inherits the access group's limit",
             "format": "int64",
             "minimum": 1,
-            "type": "integer"
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "max_remote_stream_bitrate_kbps": {
             "format": "int64",
@@ -19189,12 +19217,16 @@
             ]
           },
           "max_profiles": {
-            "description": "Household profile limit",
+            "description": "Household profile limit override; null inherits the access group's limit",
             "examples": [
               5
             ],
             "format": "int64",
-            "type": "integer"
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "max_remote_stream_bitrate_kbps": {
             "description": "Remote per-stream bitrate override in kbps; null inherits, 0 means unlimited",
@@ -28425,6 +28457,15 @@
             ],
             "type": "string"
           },
+          "max_profiles": {
+            "description": "Household profile limit",
+            "examples": [
+              5
+            ],
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
           "max_remote_stream_bitrate_kbps": {
             "description": "Remote per-stream bitrate limit in kbps; 0 means unlimited",
             "examples": [
@@ -28486,6 +28527,7 @@
           "max_transcodes",
           "max_remote_stream_bitrate_kbps",
           "max_local_stream_bitrate_kbps",
+          "max_profiles",
           "transcode_allowed",
           "audio_transcode_allowed",
           "download_allowed",
@@ -39618,6 +39660,15 @@
             ],
             "type": "string"
           },
+          "max_profiles": {
+            "description": "Household profile limit",
+            "examples": [
+              5
+            ],
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
           "max_remote_stream_bitrate_kbps": {
             "description": "Remote per-stream bitrate limit in kbps; 0 means unlimited",
             "examples": [
@@ -39663,6 +39714,7 @@
           "max_transcodes",
           "max_remote_stream_bitrate_kbps",
           "max_local_stream_bitrate_kbps",
+          "max_profiles",
           "transcode_allowed",
           "audio_transcode_allowed",
           "download_allowed",

@@ -2510,6 +2510,8 @@ export interface AccessGroup {
   max_transcodes: number;
   max_remote_stream_bitrate_kbps: number;
   max_local_stream_bitrate_kbps: number;
+  /** Household profiles each member account may have, unless it overrides it. */
+  max_profiles: number;
   allowed_permissions: string[] | null;
   requests_allowed: boolean;
   is_default: boolean;
@@ -2531,6 +2533,7 @@ export interface AccessGroupInput {
   max_transcodes?: number;
   max_remote_stream_bitrate_kbps?: number;
   max_local_stream_bitrate_kbps?: number;
+  max_profiles?: number;
   allowed_permissions?: string[] | null;
   requests_allowed?: boolean;
   is_default?: boolean;
@@ -2546,6 +2549,7 @@ export interface AdminUserEffectivePolicy {
   max_transcodes: number;
   max_remote_stream_bitrate_kbps: number;
   max_local_stream_bitrate_kbps: number;
+  max_profiles: number;
   transcode_allowed: boolean;
   audio_transcode_allowed: boolean;
   download_allowed: boolean;
@@ -2578,7 +2582,7 @@ export interface AdminUser {
   max_local_stream_bitrate_kbps: number | null;
   transcode_allowed: boolean | null;
   audio_transcode_allowed: boolean | null;
-  max_profiles: number;
+  max_profiles: number | null;
   download_allowed: boolean | null;
   download_transcode_allowed: boolean | null;
   requests_allowed: boolean | null;
@@ -2649,7 +2653,7 @@ export interface UpdateUserRequest {
   max_local_stream_bitrate_kbps?: number | null;
   transcode_allowed?: boolean | null;
   audio_transcode_allowed?: boolean | null;
-  max_profiles?: number;
+  max_profiles?: number | null;
   download_allowed?: boolean | null;
   download_transcode_allowed?: boolean | null;
   requests_allowed?: boolean | null;

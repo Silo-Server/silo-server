@@ -23,15 +23,15 @@ const (
 )
 
 func ownerAccount() models.User {
-	return models.User{ID: testOwnerID, Username: "owner", Email: "owner@example.test", Role: models.RoleAdmin, Enabled: true, IsOwner: true, LocalPasswordLoginEnabled: true, MaxProfiles: 5}
+	return models.User{ID: testOwnerID, Username: "owner", Email: "owner@example.test", Role: models.RoleAdmin, Enabled: true, IsOwner: true, LocalPasswordLoginEnabled: true, MaxProfiles: new(5)}
 }
 
 func adminAccount() models.User {
-	return models.User{ID: testAdminID, Username: "admin", Email: "admin@example.test", Role: models.RoleAdmin, Enabled: true, LocalPasswordLoginEnabled: true, MaxProfiles: 5}
+	return models.User{ID: testAdminID, Username: "admin", Email: "admin@example.test", Role: models.RoleAdmin, Enabled: true, LocalPasswordLoginEnabled: true, MaxProfiles: new(5)}
 }
 
 func userAccount() models.User {
-	return models.User{ID: testAdminID, Username: "user", Email: "user@example.test", Role: models.RoleUser, Enabled: true, LocalPasswordLoginEnabled: true, MaxProfiles: 5}
+	return models.User{ID: testAdminID, Username: "user", Email: "user@example.test", Role: models.RoleUser, Enabled: true, LocalPasswordLoginEnabled: true, MaxProfiles: new(5)}
 }
 
 // providerAdminAccount is an admin that signs in only through a provider:

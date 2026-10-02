@@ -23,7 +23,7 @@ type fakeAdminAccessGroups struct {
 }
 
 func fixtureAdminAccessGroups() *fakeAdminAccessGroups {
-	return &fakeAdminAccessGroups{g: access.Group{ID: 7, Revision: 11, Name: "Group", MaxPlaybackQuality: "original", MemberCount: 3, CreatedAt: fixedTime(), UpdatedAt: fixedTime()}}
+	return &fakeAdminAccessGroups{g: access.Group{ID: 7, Revision: 11, Name: "Group", MaxPlaybackQuality: "original", MaxProfiles: 5, MemberCount: 3, CreatedAt: fixedTime(), UpdatedAt: fixedTime()}}
 }
 func (f *fakeAdminAccessGroups) GetAdminAccessGroup(context.Context, int64) (*access.Group, error) {
 	g := f.g
@@ -102,6 +102,30 @@ func TestAdminAccessGroupTransport(t *testing.T) {
 		t.Fatal(created.Code, created.Body.String(), f.created)
 	}
 }
+func TestAdminAccessGroupProfileLimit(t *testing.T) {
+	f := fixtureAdminAccessGroups()
+	deps := requestDeps(fixtureRequests())
+	deps.AdminAccessGroups = f
+	h := NewHandler(deps)
+	create := Prefix + "/admin/access-groups"
+	created := do(t, h, http.MethodPost, create, `{"name":"Guests","max_profiles":2}`, actingRequestAdmin)
+	if created.Code != 201 || f.created.MaxProfiles != 2 {
+		t.Fatal(created.Code, created.Body.String(), f.created)
+	}
+	// A limit below 1 is refused before any write, so 0 never reaches the
+	// store, where it would mean "use the default".
+	writes := f.writes
+	requireProblem(t, do(t, h, http.MethodPost, create, `{"name":"None","max_profiles":0}`, actingRequestAdmin), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodPut, create+"/7", `{"max_profiles":0}`, with(actingRequestAdmin, "If-Match", "*")), TypeValidationFailed)
+	if f.writes != writes {
+		t.Fatalf("writes = %d, want %d after refused limits", f.writes, writes)
+	}
+	updated := do(t, h, http.MethodPut, create+"/7", `{"max_profiles":4}`, with(actingRequestAdmin, "If-Match", "*"))
+	if updated.Code != 200 || f.last.MaxProfiles == nil || *f.last.MaxProfiles != 4 {
+		t.Fatal(updated.Code, updated.Body.String(), f.last)
+	}
+}
+
 func TestAdminAccessGroupPaginationAuthority(t *testing.T) {
 	f := fixtureAdminAccessGroups()
 	deps := requestDeps(fixtureRequests())
