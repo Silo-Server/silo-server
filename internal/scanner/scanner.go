@@ -4172,7 +4172,7 @@ func (s *Scanner) probeFile(ctx context.Context, filePath string) (probe *ProbeD
 	probe, err := ProbeFile(ctx, s.ffprobePath, filePath)
 	if err != nil {
 		slog.WarnContext(ctx, "scanner: ffprobe failed", "component", "scanner", "path", filePath, "error", err)
-		return nil, probeSource, IsProbeRejection(ctx, err)
+		return nil, probeSource, IsProbeRejection(ctx, filePath, err)
 	}
 	return probe, probeSource, false
 }

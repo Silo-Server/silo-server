@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
+	"os"
 	"os/exec"
 	"slices"
 	"strconv"
@@ -98,18 +100,61 @@ func ProbeFile(ctx context.Context, ffprobePath string, filePath string) (*Probe
 	return probe, nil
 }
 
-// IsProbeRejection reports whether err, returned by ProbeFile under ctx, means
-// ffprobe ran to completion and refused the file: a non-zero exit status while
-// the caller's context was still live. Zero-byte, corrupt, and truncated media
-// end this way. A canceled or timed-out probe, a process killed by a signal,
-// a missing binary, or unparseable output is not a rejection; those say
-// nothing about the file and stay retryable.
-func IsProbeRejection(ctx context.Context, err error) bool {
+// IsProbeRejection reports whether err, returned by ProbeFile for filePath
+// under ctx, means ffprobe ran to completion and refused the file's content:
+// a non-zero exit status while the caller's context was still live, for a file
+// this process can open and read. Zero-byte, corrupt, and truncated media end
+// this way.
+//
+// ffprobe exits the same way when it cannot read the file at all (permission
+// denied, an I/O error on a network mount, a stale handle, a file that
+// vanished). Those say nothing about the content, so the file is read here
+// before the failure is blamed on it; an access failure is logged and is not a
+// rejection. A canceled or timed-out probe, a process killed by a signal, a
+// missing binary, or unparseable output is not a rejection either. Everything
+// that is not a rejection stays retryable.
+func IsProbeRejection(ctx context.Context, filePath string, err error) bool {
 	if err == nil || ctx.Err() != nil {
 		return false
 	}
 	var exitErr *exec.ExitError
-	return errors.As(err, &exitErr) && exitErr.ExitCode() > 0
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() <= 0 {
+		return false
+	}
+	if accessErr := probeInputReadable(filePath); accessErr != nil {
+		slog.WarnContext(ctx, "scanner: ffprobe failed because the file could not be read; check its permissions and the storage it lives on",
+			"component", "scanner",
+			"path", filePath,
+			"error", accessErr,
+		)
+		return false
+	}
+	return true
+}
+
+// probeInputReadableBytes is how much of the file probeInputReadable reads:
+// enough to touch real storage, small enough to cost nothing next to ffprobe.
+const probeInputReadableBytes = 4096
+
+// probeInputReadable reports why this process cannot read filePath, or nil
+// when it can. An empty file is readable: its emptiness is a content problem.
+func probeInputReadable(filePath string) error {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a regular file", filePath)
+	}
+	if _, err := f.Read(make([]byte, probeInputReadableBytes)); err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	return nil
 }
 
 // ProbePrimaryVideoTrack runs a bounded metadata-only FFprobe and returns the

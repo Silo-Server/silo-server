@@ -27,19 +27,19 @@ func TestIsProbeRejectionSeparatesRefusedFilesFromProbeTrouble(t *testing.T) {
 	}
 
 	_, err := ProbeFile(ctx, writeRejectingFFprobe(t), media)
-	if err == nil || !IsProbeRejection(ctx, err) {
+	if err == nil || !IsProbeRejection(ctx, media, err) {
 		t.Fatalf("non-zero ffprobe exit = %v, want a rejection", err)
 	}
 
 	_, err = ProbeFile(ctx, filepath.Join(t.TempDir(), "missing-ffprobe"), media)
-	if err == nil || IsProbeRejection(ctx, err) {
+	if err == nil || IsProbeRejection(ctx, media, err) {
 		t.Fatalf("missing binary = %v, want a non-rejection error", err)
 	}
 
 	garbage := filepath.Join(t.TempDir(), "ffprobe")
 	writeFakeTool(t, garbage, "#!/bin/sh\nprintf 'not json'\n")
 	_, err = ProbeFile(ctx, garbage, media)
-	if err == nil || IsProbeRejection(ctx, err) {
+	if err == nil || IsProbeRejection(ctx, media, err) {
 		t.Fatalf("unparseable output = %v, want a non-rejection error", err)
 	}
 
@@ -48,17 +48,17 @@ func TestIsProbeRejectionSeparatesRefusedFilesFromProbeTrouble(t *testing.T) {
 	timeoutCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 	defer cancel()
 	_, err = ProbeFile(timeoutCtx, slow, media)
-	if err == nil || IsProbeRejection(timeoutCtx, err) {
+	if err == nil || IsProbeRejection(timeoutCtx, media, err) {
 		t.Fatalf("timed-out probe = %v, want a non-rejection error", err)
 	}
 
-	if IsProbeRejection(ctx, nil) {
+	if IsProbeRejection(ctx, media, nil) {
 		t.Fatal("nil error reported as a rejection")
 	}
 }
 
-// The files from issue #1791: real ffprobe refuses zero-byte and random-byte
-// media with a non-zero exit, which must classify as a rejection.
+// The files from issue #1791: real ffprobe refuses zero-byte, random-byte and
+// truncated media with a non-zero exit, which must classify as a rejection.
 func TestIsProbeRejectionWithRealFFprobe(t *testing.T) {
 	ffprobe, err := exec.LookPath("ffprobe")
 	if err != nil {
@@ -77,11 +77,80 @@ func TestIsProbeRejectionWithRealFFprobe(t *testing.T) {
 	if err := os.WriteFile(corrupt, random, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{empty, corrupt} {
+	cases := []string{empty, corrupt}
+	if truncated, ok := writeTruncatedMP4(t, dir); ok {
+		cases = append(cases, truncated)
+	}
+	for _, path := range cases {
 		_, err := ProbeFile(t.Context(), ffprobe, path)
-		if err == nil || !IsProbeRejection(t.Context(), err) {
+		if err == nil || !IsProbeRejection(t.Context(), path, err) {
 			t.Fatalf("%s: probe error = %v, want a rejection", filepath.Base(path), err)
 		}
+	}
+}
+
+// writeTruncatedMP4 encodes a short MP4 whose moov atom is written at the end,
+// as ffmpeg does by default, and keeps only its first part, so the index is
+// missing. It reports false when ffmpeg is unavailable.
+func writeTruncatedMP4(t *testing.T, dir string) (string, bool) {
+	t.Helper()
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return "", false
+	}
+	whole := filepath.Join(dir, "whole.mp4")
+	if out, err := exec.Command(ffmpeg, "-v", "error", "-f", "lavfi", "-i", "testsrc=duration=2:size=320x240:rate=24",
+		"-c:v", "mpeg4", "-y", whole).CombinedOutput(); err != nil {
+		t.Fatalf("encode test mp4: %v: %s", err, out)
+	}
+	data, err := os.ReadFile(whole)
+	if err != nil {
+		t.Fatal(err)
+	}
+	truncated := filepath.Join(dir, "truncated.mp4")
+	if err := os.WriteFile(truncated, data[:len(data)/2], 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return truncated, true
+}
+
+// ffprobe also exits non-zero when it cannot read the file at all. That is a
+// permissions or storage problem, not a damaged file, so it is not a
+// rejection and playback keeps the retryable answer.
+func TestIsProbeRejectionIgnoresFilesTheServerCannotRead(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads files regardless of their mode")
+	}
+	ctx := t.Context()
+	locked := filepath.Join(t.TempDir(), "S01E06.mkv")
+	if err := os.WriteFile(locked, []byte("valid bytes the server may not read"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o600) })
+
+	_, err := ProbeFile(ctx, writeRejectingFFprobe(t), locked)
+	if err == nil || IsProbeRejection(ctx, locked, err) {
+		t.Fatalf("unreadable file = %v, want a non-rejection", err)
+	}
+	if ffprobe, lookErr := exec.LookPath("ffprobe"); lookErr == nil {
+		_, err := ProbeFile(ctx, ffprobe, locked)
+		if err == nil || IsProbeRejection(ctx, locked, err) {
+			t.Fatalf("real ffprobe on an unreadable file = %v, want a non-rejection", err)
+		}
+	}
+
+	missing := filepath.Join(t.TempDir(), "gone.mkv")
+	_, err = ProbeFile(ctx, writeRejectingFFprobe(t), missing)
+	if err == nil || IsProbeRejection(ctx, missing, err) {
+		t.Fatalf("vanished file = %v, want a non-rejection", err)
+	}
+
+	s := &Scanner{ffprobePath: writeRejectingFFprobe(t)}
+	if _, _, rejected := s.probeFile(ctx, locked); rejected {
+		t.Fatal("scanner reported an unreadable file as rejected")
 	}
 }
 
@@ -120,7 +189,11 @@ func TestApplyProbeDataClearsProbeFailure(t *testing.T) {
 }
 
 func TestPlaybackProbeEnsurerRecordsAndClearsProbeRejection(t *testing.T) {
-	file := &models.MediaFile{ID: 7, FilePath: "/library/show/S01E03.mkv"}
+	media := filepath.Join(t.TempDir(), "S01E03.mkv")
+	if err := os.WriteFile(media, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file := &models.MediaFile{ID: 7, FilePath: media}
 	repo := &probeRepairTestRepository{files: map[int]*models.MediaFile{file.ID: file}}
 	ensurer := &PlaybackProbeEnsurer{
 		fileRepo:    repo,
@@ -232,6 +305,30 @@ func TestScanRecordsAndClearsProbeRejectionPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// A valid file the server is not allowed to read is a permissions
+	// problem, not a damaged file, and stays unmarked.
+	if os.Geteuid() != 0 {
+		lockedPath := filepath.Join(root, "Locked Movie (2021).mp4")
+		if err := os.WriteFile(lockedPath, video, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(lockedPath, 0); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(lockedPath, 0o600) })
+		if _, err := s.ScanFolder(ctx, folder); err != nil {
+			t.Fatalf("scan with a locked file: %v", err)
+		}
+		var lockedFailedAt *time.Time
+		if err := pool.QueryRow(ctx, `SELECT probe_failed_at FROM media_files WHERE file_path = $1`, lockedPath).Scan(&lockedFailedAt); err != nil {
+			t.Fatalf("read locked file state: %v", err)
+		}
+		if lockedFailedAt != nil {
+			t.Fatalf("permission-denied file marked damaged at %v", lockedFailedAt)
+		}
+	}
+
 	if err := os.WriteFile(moviePath, video, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -267,5 +364,22 @@ func TestMarkProbeFailedSkipsProbedRowsPostgres(t *testing.T) {
 	}
 	if got.ProbeFailedAt != nil {
 		t.Fatalf("probed row marked failed at %v", got.ProbeFailedAt)
+	}
+}
+
+// The playback-time repair leaves a file it cannot read unmarked, so the start
+// answer stays the retryable source_metadata_incomplete.
+func TestPlaybackProbeEnsurerDoesNotMarkUnreadableAccess(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "S01E07.mkv")
+	file := &models.MediaFile{ID: 9, FilePath: missing}
+	repo := &probeRepairTestRepository{files: map[int]*models.MediaFile{file.ID: file}}
+	ensurer := &PlaybackProbeEnsurer{fileRepo: repo, ffprobePath: writeRejectingFFprobe(t), timeout: 5 * time.Second}
+
+	got, err := ensurer.EnsureProbeOnly(t.Context(), file)
+	if err == nil {
+		t.Fatal("a probe that could not read the file should report its error")
+	}
+	if got.ProbeRejected() || repo.markCalls != 0 {
+		t.Fatalf("unreadable access was marked as a damaged file (mark calls %d)", repo.markCalls)
 	}
 }

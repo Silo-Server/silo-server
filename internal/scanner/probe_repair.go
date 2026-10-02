@@ -434,7 +434,7 @@ func (e *PlaybackProbeEnsurer) ensureCriticalProbe(ctx context.Context, file *mo
 			probeFile = ProbeFile
 		}
 		probe, err := probeFile(probeCtx, ffprobePath, current.FilePath)
-		if err != nil && IsProbeRejection(probeCtx, err) {
+		if err != nil && IsProbeRejection(probeCtx, current.FilePath, err) {
 			return e.recordProbeRejection(sharedCtx, current, err)
 		}
 		if err != nil || probe == nil {

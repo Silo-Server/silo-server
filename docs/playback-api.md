@@ -105,7 +105,9 @@ Two terminal reasons describe a source without stream metadata.
 probed yet, or its probe lacks a field a route needs; trying again after the
 scan can help. `source_unreadable` (`retryable: false`) means ffprobe ran and
 rejected the file: it is empty, corrupt, or truncated, and no version of it was
-ever probed successfully. Retrying cannot help until the file is replaced and
+ever probed successfully. A file the server cannot open or read (permissions,
+storage I/O errors) is not reported this way and keeps
+`source_metadata_incomplete`. Retrying cannot help until the file is replaced and
 rescanned. The server records the rejection on the media file during a scan or
 a playback-time probe repair, and a later successful probe clears it. The
 rejection only refers to that file: with alternate versions allowed, the server
