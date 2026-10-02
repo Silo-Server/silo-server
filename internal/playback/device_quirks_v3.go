@@ -101,7 +101,7 @@ func firefoxMatroskaAACTimingQuirkV3(source SourceDescriptorV3, request StartReq
 // presentation order reference frames the copy never sent. macOS Firefox
 // rejects the stream at that boundary instead of skipping them.
 func firefoxMacOSHEVCResumeLeadingPictureDropV3(source SourceDescriptorV3, request StartRequestV3) bool {
-	if !isFirefoxWebV3(request) || normalizeCodecV3(source.VideoCodec) != "hevc" {
+	if !isFirefoxWebV3(request) || normalizeCodecV3(source.VideoCodec) != transcodeCodecHEVC {
 		return false
 	}
 	userAgent := strings.ToLower(request.ClientPlaybackContext.Device.PlatformDetails["user_agent"])
