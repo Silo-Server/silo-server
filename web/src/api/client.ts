@@ -466,7 +466,11 @@ async function attemptRefresh(): Promise<RefreshOutcome> {
     ) {
       return "superseded";
     }
-    lastRefreshTransient = !data && transient;
+    // A refusal is only a verdict once its answer arrived whole. If the
+    // deadline cut the exchange short (headers in, problem body stalled),
+    // whatever was read of it decides nothing about the session.
+    const noVerdict = transient || deadline.expired;
+    lastRefreshTransient = !data && noVerdict;
     lastRefreshProviderOutage = !data && providerOutage;
     if (!data) {
       // Only a mid-session refusal ends the session here. The boot restore
@@ -477,7 +481,7 @@ async function attemptRefresh(): Promise<RefreshOutcome> {
       if (hadAccessToken && sessionRejected && getRefreshToken() === rt) {
         sessionRejectedListener?.();
       }
-      return transient ? "unavailable" : "rejected";
+      return noVerdict ? "unavailable" : "rejected";
     }
     if (accessToken === null) {
       // Nothing to rotate: this exchange establishes the session (the boot
