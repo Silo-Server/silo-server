@@ -22,7 +22,7 @@ type ProgressLister interface {
 // cutoff in one bounded query. userstore.UserStore satisfies it; a lister
 // without it falls back to paging ListProgress.
 type CompletedProgressSinceLister interface {
-	ListCompletedProgressSince(ctx context.Context, profileID string, since time.Time, limit int) ([]userstore.WatchProgress, error)
+	ListCompletedProgressSince(ctx context.Context, profileID string, since, until time.Time, limit int) ([]userstore.WatchProgress, error)
 }
 
 // ProgressSnapshot pairs a media item with the time its progress row last changed.
@@ -198,8 +198,8 @@ type CompletedProgressCache struct {
 	// either way there is nothing further to read.
 	done   bool
 	capped bool
-	// readSinceAt is the cutoff of the one-query form's last read: snaps then
-	// holds every completed row after it (up to the row cap).
+	// readSinceAt is the oldest cutoff the one-query form has read down to:
+	// snaps then holds every completed row after it (up to the row cap).
 	readSinceAt time.Time
 	sinceValid  bool
 }
@@ -269,26 +269,34 @@ func (c *CompletedProgressCache) snapshots(ctx context.Context, store ProgressLi
 }
 
 // readSince loads the completed rows after notBefore in one query unless an
-// earlier read already covers that cutoff. A later, older cutoff re-reads the
-// newer rows too; that happens only when Continue Watching needs a second
-// in-progress page, and one bounded query still beats paging by offset.
+// earlier read already covers that cutoff. A later, older cutoff reads only the
+// rows between it and the previous one, so the request reads each row once and
+// the row cap bounds the whole request, as it does for the offset walk. A zero
+// cutoff already covers the whole history.
 func (c *CompletedProgressCache) readSince(ctx context.Context, lister CompletedProgressSinceLister, profileID string, notBefore time.Time) error {
-	if c.capped || (c.sinceValid && !notBefore.Before(c.readSinceAt)) {
+	if c.capped || (c.sinceValid && (c.readSinceAt.IsZero() || !notBefore.Before(c.readSinceAt))) {
 		return nil
 	}
-	entries, err := lister.ListCompletedProgressSince(ctx, profileID, notBefore, supersededProgressMaxRows+1)
+	var until time.Time
+	if c.sinceValid {
+		until = c.readSinceAt
+	}
+	remaining := supersededProgressMaxRows - len(c.snaps)
+	entries, err := lister.ListCompletedProgressSince(ctx, profileID, notBefore, until, remaining+1)
 	if err != nil {
 		return fmt.Errorf("listing completed progress for superseded episodes: %w", err)
 	}
-	if len(entries) > supersededProgressMaxRows {
-		entries = entries[:supersededProgressMaxRows]
+	if len(entries) > remaining {
+		entries = entries[:remaining]
 		c.capped = true
 		slog.WarnContext(ctx, "continue-watching: superseded-episode walk hit page cap; completed-history tail left unscanned",
 			"profile_id", profileID,
 			"pages_scanned", supersededProgressMaxPages,
-			"rows_scanned", len(entries))
+			"rows_scanned", len(c.snaps)+len(entries))
 	}
-	c.snaps = ProgressSnapshots(entries)
+	// The new rows are all older than the cached ones, so snaps stays
+	// updated_at DESC.
+	c.snaps = append(c.snaps, ProgressSnapshots(entries)...)
 	c.readSinceAt = notBefore
 	c.sinceValid = true
 	return nil

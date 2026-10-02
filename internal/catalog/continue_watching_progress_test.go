@@ -391,14 +391,18 @@ type stubSinceLister struct {
 	stubProgressLister
 	sinceCalls []int
 	sinceAt    []time.Time
+	rowsRead   int
 }
 
-func (s *stubSinceLister) ListCompletedProgressSince(_ context.Context, _ string, since time.Time, limit int) ([]userstore.WatchProgress, error) {
+func (s *stubSinceLister) ListCompletedProgressSince(_ context.Context, _ string, since, until time.Time, limit int) ([]userstore.WatchProgress, error) {
 	s.sinceCalls = append(s.sinceCalls, limit)
 	s.sinceAt = append(s.sinceAt, since)
 	var out []userstore.WatchProgress
 	for _, entry := range s.entries {
 		updatedAt, _ := time.Parse(time.RFC3339, entry.UpdatedAt)
+		if !until.IsZero() && updatedAt.After(until) {
+			continue
+		}
 		if !updatedAt.After(since) {
 			break
 		}
@@ -407,6 +411,7 @@ func (s *stubSinceLister) ListCompletedProgressSince(_ context.Context, _ string
 		}
 		out = append(out, entry)
 	}
+	s.rowsRead += len(out)
 	return out, nil
 }
 
@@ -457,5 +462,30 @@ func TestCompletedProgressCacheSinceFormHonoursRowCap(t *testing.T) {
 	}
 	if len(since.sinceCalls) != 1 {
 		t.Fatalf("capped cache re-queried: %v", since.sinceCalls)
+	}
+}
+
+// Continue Watching asks once per in-progress page, each with an older cutoff.
+// Every completed row must be read once per request, as the offset walk does.
+func TestCompletedProgressCacheSinceFormReadsEachRowOnce(t *testing.T) {
+	entries := completedWalkFixture(2400)
+	since := &stubSinceLister{stubProgressLister: stubProgressLister{entries: entries}}
+	cache := NewCompletedProgressCache()
+	for _, idx := range []int{200, 500, 800, 1100, 1400, 1700, 2000, 2300, 2399} {
+		notBefore, _ := time.Parse(time.RFC3339, entries[idx].UpdatedAt)
+		want, err := CompletedProgressSnapshots(t.Context(), &stubProgressLister{entries: entries}, "p1", notBefore)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := cache.snapshots(t.Context(), since, "p1", notBefore)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("cutoff %d: since form returned %d rows, offset walk %d", idx, len(got), len(want))
+		}
+	}
+	if since.rowsRead != 2399 {
+		t.Fatalf("rows read = %d, want 2399 (each row once)", since.rowsRead)
 	}
 }

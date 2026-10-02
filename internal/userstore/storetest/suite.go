@@ -2616,19 +2616,27 @@ func testCompletedProgressSince(t *testing.T, newStore func(t *testing.T) userst
 		}
 		return out
 	}
-	rows, err := store.ListCompletedProgressSince(ctx, "p1", since, 10)
+	rows, err := store.ListCompletedProgressSince(ctx, "p1", since, time.Time{}, 10)
 	if err != nil {
 		t.Fatalf("ListCompletedProgressSince: %v", err)
 	}
 	if got, want := ids(rows), []string{writes[5].id, writes[4].id, writes[3].id}; !slices.Equal(got, want) {
 		t.Fatalf("rows = %v, want %v", got, want)
 	}
-	rows, err = store.ListCompletedProgressSince(ctx, "p1", since, 2)
+	rows, err = store.ListCompletedProgressSince(ctx, "p1", since, time.Time{}, 2)
 	if err != nil {
 		t.Fatalf("ListCompletedProgressSince(limit 2): %v", err)
 	}
 	if got, want := ids(rows), []string{writes[5].id, writes[4].id}; !slices.Equal(got, want) {
 		t.Fatalf("limited rows = %v, want %v", got, want)
+	}
+	// An upper bound keeps rows at its whole second and drops newer ones.
+	rows, err = store.ListCompletedProgressSince(ctx, "p1", since, writes[4].at.Add(500*time.Millisecond), 10)
+	if err != nil {
+		t.Fatalf("ListCompletedProgressSince(until): %v", err)
+	}
+	if got, want := ids(rows), []string{writes[4].id, writes[3].id}; !slices.Equal(got, want) {
+		t.Fatalf("bounded rows = %v, want %v", got, want)
 	}
 }
 
