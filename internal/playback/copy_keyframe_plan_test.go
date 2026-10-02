@@ -225,20 +225,35 @@ func TestPlannedRecoveryTargetRejectsSegmentsOutsideThePlaylist(t *testing.T) {
 
 // The throttler reads the current run's last group as its output time, so
 // it can pause FFmpeg once the player is far enough behind.
-// A segment the pruner removed doesn't count toward the produced head, so
-// the throttler doesn't hold back FFmpeg from rebuilding it.
-func TestPlannedProgressSkipsPrunedSegments(t *testing.T) {
+// The produced head is how far the current run has got: the pruner removing
+// segments behind the player doesn't pull it back, so the throttler keeps
+// pausing FFmpeg ahead of the player. A run restarted at a removed segment
+// starts its head again, so the throttler lets FFmpeg rebuild it.
+func TestPlannedProgressHeadAcrossPruning(t *testing.T) {
 	a := newCopyGroupAssembler(t.TempDir(), evenPlan())
 	a.startRun(0, "audio")
+	if _, head, _, _ := a.progress(); head != -1 {
+		t.Fatalf("new run: head %d, want -1", head)
+	}
 	for n := range 4 {
 		a.assembled[n] = true
 	}
 	if _, head, count, _ := a.progress(); head != 3 || count != 4 {
 		t.Fatalf("head %d of %d segments, want 3 of 4", head, count)
 	}
+	a.forget(0)
 	a.forget(1)
-	if _, head, count, _ := a.progress(); head != 0 || count != 3 {
-		t.Fatalf("after pruning segment 1: head %d of %d segments, want 0 of 3", head, count)
+	if _, head, count, _ := a.progress(); head != 3 || count != 2 {
+		t.Fatalf("after pruning segments 0 and 1: head %d of %d segments, want 3 of 2", head, count)
+	}
+
+	a.startRun(1, "audio")
+	if _, head, _, _ := a.progress(); head != 0 {
+		t.Fatalf("restart at removed segment 1: head %d, want 0", head)
+	}
+	a.assembled[1] = true
+	if _, head, _, _ := a.progress(); head != 3 {
+		t.Fatalf("after rebuilding segment 1: head %d, want 3", head)
 	}
 }
 

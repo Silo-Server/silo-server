@@ -55,9 +55,13 @@ type copyGroupRun struct {
 	prefix string
 	// startSegment is the segment the run was started for.
 	startSegment int
-	trackID      uint32
-	timescale    uint32
-	anchored     bool
+	// head is the highest segment present contiguously from startSegment
+	// when progress last looked. The pruner removing segments behind the
+	// player doesn't lower it; only a new run starts it again.
+	head      int
+	trackID   uint32
+	timescale uint32
+	anchored  bool
 	// offset is the run's constant shift between a group's presentation time
 	// and its source keyframe time, in seconds.
 	offset float64
@@ -97,6 +101,7 @@ func (a *copyGroupAssembler) startRun(startSegment int, audioKey string) string 
 	a.run = &copyGroupRun{
 		prefix:       fmt.Sprintf("gop%d_", a.runs),
 		startSegment: startSegment,
+		head:         startSegment - 1,
 		groups:       map[int]string{},
 	}
 	return a.run.prefix
@@ -322,10 +327,11 @@ func (a *copyGroupAssembler) progress() (start, head int, count int, last time.T
 		return 0, -1, 0, time.Time{}
 	}
 	start = a.run.startSegment
-	head = start - 1
-	for n := start; n < len(a.assembled) && a.assembled[n]; n++ {
+	head = a.run.head
+	for n := head + 1; n < len(a.assembled) && a.assembled[n]; n++ {
 		head = n
 	}
+	a.run.head = head
 	for _, done := range a.assembled {
 		if done {
 			count++
