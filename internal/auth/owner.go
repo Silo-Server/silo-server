@@ -214,7 +214,11 @@ func (r *UserRepository) TransferOwnership(ctx context.Context, fromID, toID int
 }
 
 // moveOwnership clears the current Owner before marking the next: the
-// single-Owner index is checked row by row. It also ends every session in
+// single-Owner index is checked row by row. The new Owner becomes a
+// break-glass account, so the one account that must never be locked out
+// keeps password sign-in by default; it may clear the flag itself. The
+// previous Owner keeps whatever flag it had, which never leaves the server
+// with fewer break-glass accounts. It also ends every session in
 // which someone views the server as the new Owner, and the previous Owner's
 // sessions viewing as other admins, and deletes the new Owner's API keys and
 // reset link, and revokes pending admin invitations: nobody may act as the
@@ -226,7 +230,7 @@ func moveOwnership(ctx context.Context, tx pgx.Tx, fromID, toID int) error {
 			return err
 		}
 	}
-	if _, err := tx.Exec(ctx, `UPDATE users SET is_owner = true WHERE id = $1`, toID); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE users SET is_owner = true, break_glass = true WHERE id = $1`, toID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `

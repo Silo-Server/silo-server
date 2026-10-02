@@ -158,7 +158,7 @@ export default function SignInSettings() {
             settingKey={LOCAL_LOGIN_KEY}
             dirty={form.isDirty(LOCAL_LOGIN_KEY)}
             type="toggle"
-            description="Off: only break-glass admins sign in with a Silo password, and everyone else signs in with the provider. Needs at least one break-glass admin."
+            description="Off: only break-glass admins sign in with a Silo password, and everyone else signs in with the provider. Needs at least one break-glass admin; the server owner is one by default."
             value={localLoginOn ? "true" : "false"}
             onChange={changeLocalLogin}
             status={

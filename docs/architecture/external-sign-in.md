@@ -110,6 +110,12 @@ and the last enabled admin are never demoted; the skip is logged.
   `local_login_disabled`, after checking the password. The check is in
   `LocalProvider.Authenticate`, so it covers v1, v2, Jellyfin and
   Audiobookshelf compatibility.
+- The server Owner is break-glass by default: first-run setup and every
+  ownership move (transfer or `silo owner set`) set the flag on the new Owner,
+  and a migration set it on the existing one. The previous Owner keeps its own
+  flag. The Owner may clear it on its own account, subject to the
+  last-usable-account rule below. An Owner whose local password sign-in was
+  already off stays off until a password is set.
 - `users.break_glass` is admin-only (`users_break_glass_admin`) and only the
   server Owner may set or clear it (403 `permission_denied`), so an admin cannot
   make its own role immune to provider demotion. A role change away from admin

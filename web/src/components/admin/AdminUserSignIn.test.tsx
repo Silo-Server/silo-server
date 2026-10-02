@@ -498,6 +498,18 @@ describe("AdminUserSignIn password and break-glass", () => {
     expect(screen.getByText(/can't act as break-glass/)).toBeInTheDocument();
   });
 
+  it("explains that the server owner is break-glass by default", async () => {
+    mount({ ...USER, role: "admin", is_owner: true, password_login: true, break_glass: true });
+    expect(await screen.findByRole("switch", { name: "Break-glass account" })).toBeChecked();
+    expect(screen.getByText(/server owner is break-glass by default/)).toBeInTheDocument();
+  });
+
+  it("leaves the owner note off other admins", async () => {
+    mount({ ...USER, role: "admin", password_login: true, break_glass: true });
+    await screen.findByRole("switch", { name: "Break-glass account" });
+    expect(screen.queryByText(/server owner is break-glass by default/)).toBeNull();
+  });
+
   it("hides break-glass on a server that doesn't support it", async () => {
     capabilities = { ...capabilities, break_glass: false };
     mount({ ...USER, role: "admin" });

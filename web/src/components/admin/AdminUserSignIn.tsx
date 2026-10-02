@@ -509,6 +509,12 @@ export function AdminUserSignIn({
                 onCheckedChange={changeBreakGlass}
               />
             </div>
+            {user.is_owner ? (
+              <p className="text-muted-foreground text-xs">
+                The server owner is break-glass by default. Turn this off only if your sign-in
+                provider can recover the account.
+              </p>
+            ) : null}
             {!viewerIsOwner ? (
               <p className="text-muted-foreground text-xs">
                 Only the server owner can change this.

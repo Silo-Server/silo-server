@@ -116,6 +116,13 @@ func TestTransferOwnershipPostgres(t *testing.T) {
 	if previous.IsOwner || previous.Role != models.RoleAdmin || !previous.Enabled {
 		t.Fatalf("previous owner: owner %v role %s enabled %v", previous.IsOwner, previous.Role, previous.Enabled)
 	}
+	// The new Owner becomes break-glass; the previous one keeps its own flag.
+	if next, err := r.GetByID(t.Context(), admin.ID); err != nil || !next.BreakGlass {
+		t.Fatalf("new owner break-glass: %+v, %v", next, err)
+	}
+	if previous.BreakGlass {
+		t.Fatal("transfer made the previous owner break-glass")
+	}
 	if actor, err := r.OwnerActor(t.Context(), admin.ID); err != nil || !actor.IsOwner {
 		t.Fatalf("new owner actor: %+v, %v", actor, err)
 	}
@@ -138,7 +145,7 @@ func TestSetOwnerPostgres(t *testing.T) {
 	if err != nil || previous != 0 {
 		t.Fatalf("first owner: previous %d, err %v", previous, err)
 	}
-	if !got.IsOwner || got.Role != models.RoleAdmin || !got.Enabled || got.AccessGroupID != nil {
+	if !got.IsOwner || got.Role != models.RoleAdmin || !got.Enabled || got.AccessGroupID != nil || !got.BreakGlass {
 		t.Fatalf("first owner: %+v", got)
 	}
 	requireOwner(t, r, first.ID)
@@ -316,6 +323,9 @@ func TestInitialSetupClaimsOwnerPostgres(t *testing.T) {
 	if !created.IsOwner || !stored.IsOwner {
 		t.Fatalf("initial account is not the owner: returned %v, stored %v", created.IsOwner, stored.IsOwner)
 	}
+	if !created.BreakGlass || !stored.BreakGlass {
+		t.Fatalf("initial owner is not break-glass: returned %v, stored %v", created.BreakGlass, stored.BreakGlass)
+	}
 	other := testAdminAccount(t, r)
 	if other.IsOwner {
 		t.Fatal("a later account became the owner")
@@ -431,6 +441,31 @@ func TestServerOwnerMigrationPostgres(t *testing.T) {
 	} {
 		if _, err := r.pool.Exec(t.Context(), statement); err == nil {
 			t.Errorf("%s: the database accepted it", name)
+		}
+	}
+}
+
+func TestOwnerBreakGlassDefaultMigrationPostgres(t *testing.T) {
+	r := adminAccountsDB(t)
+	owner := testRoleAccount(t, r, models.RoleAdmin)
+	admin := testRoleAccount(t, r, models.RoleAdmin)
+	if _, err := r.pool.Exec(t.Context(), `UPDATE users SET is_owner = true, break_glass = false WHERE id = $1`, owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	migration, err := os.ReadFile("../../migrations/sql/20261002175237_owner_break_glass_default.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = r.pool.Exec(t.Context(), strings.Split(string(migration), "-- +goose Down")[0]); err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[int]bool{owner.ID: true, admin.ID: false} {
+		u, err := r.GetByID(t.Context(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if u.BreakGlass != want {
+			t.Errorf("account %d (owner %v): break-glass %v, want %v", id, u.IsOwner, u.BreakGlass, want)
 		}
 	}
 }
