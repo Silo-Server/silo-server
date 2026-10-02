@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { V2ProblemError } from "@/api/v2/request";
-import { useWatchTrickplay } from "./items";
+import { useWatchTrickplay } from "./trickplay";
 const request = vi.hoisted(() => vi.fn());
 vi.mock("@/api/v2/request", async (original) => ({
   ...(await original<typeof import("@/api/v2/request")>()),

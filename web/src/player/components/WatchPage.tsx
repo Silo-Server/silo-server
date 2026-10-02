@@ -15,11 +15,8 @@ import {
   sendSubtitleChoiceRequest,
 } from "../utils/subtitleChoicePersistence";
 import { VideoPlayer } from "./VideoPlayer";
-import {
-  fetchWatchDetail,
-  transientTrickplayError,
-  useWatchTrickplay,
-} from "@/hooks/queries/items";
+import { fetchWatchDetail } from "@/hooks/queries/items";
+import { transientTrickplayError, useWatchTrickplay } from "@/hooks/queries/trickplay";
 import { itemKeys } from "@/hooks/queries/keys";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { useWatchTogetherRoomConnection } from "../hooks/useWatchTogetherRoomConnection";

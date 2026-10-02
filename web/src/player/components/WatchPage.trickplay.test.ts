@@ -20,8 +20,8 @@ const playbackCapabilitiesMock = vi.hoisted(() => vi.fn());
 const startPlaybackMock = vi.hoisted(() => vi.fn());
 const trickplayOverride = vi.hoisted(() => vi.fn());
 const showSeekBar = vi.hoisted(() => ({ value: false }));
-vi.mock("@/hooks/queries/items", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@/hooks/queries/items")>();
+vi.mock("@/hooks/queries/trickplay", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/hooks/queries/trickplay")>();
   return {
     ...original,
     useWatchTrickplay: (...args: Parameters<typeof original.useWatchTrickplay>) =>
