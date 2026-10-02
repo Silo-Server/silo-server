@@ -276,6 +276,10 @@ type sessionExpirationHookAdder interface {
 	AddExpirationHook(func(*playback.Session))
 }
 
+type sessionFinisher interface {
+	FinishSession(ctx context.Context, sessionID string) error
+}
+
 // PlaybackSessionSyncer flushes the in-memory native-session snapshot into the
 // shared admin live-session table (playback_sessions_sync). Without it, compat
 // session starts and stops only become visible on the periodic reconciler

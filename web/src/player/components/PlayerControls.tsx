@@ -34,6 +34,7 @@ import type {
 } from "../types";
 import type { PlayerTrickplay } from "../trickplay";
 import type { VersionInfo } from "./QualityMenu";
+import type { EffectiveRecipeV3 } from "../protocol-v3";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 import { useCoarsePointer } from "../hooks/useCoarsePointer";
 import { PlayerMenuSurface } from "./PlayerMenuSurface";
@@ -89,6 +90,7 @@ interface PlayerControlsProps {
   // Quality
   qualityOptions: QualityOption[];
   activeQualityId: string;
+  deliveredRecipe?: EffectiveRecipeV3;
   isTranscoding: boolean;
   qualityError: string | null;
   onQualitySelect: (id: string) => void;
@@ -160,6 +162,7 @@ export function PlayerControls({
   onAudioSelect,
   qualityOptions,
   activeQualityId,
+  deliveredRecipe,
   isTranscoding,
   qualityError,
   onQualitySelect,
@@ -352,6 +355,7 @@ export function PlayerControls({
             <QualityMenu
               options={qualityOptions}
               activeId={activeQualityId}
+              deliveredRecipe={deliveredRecipe}
               isTranscoding={isTranscoding}
               error={qualityError}
               onSelect={onQualitySelect}
@@ -528,6 +532,7 @@ export function PlayerControls({
               <QualityMenu
                 options={qualityOptions}
                 activeId={activeQualityId}
+                deliveredRecipe={deliveredRecipe}
                 isTranscoding={isTranscoding}
                 error={qualityError}
                 onSelect={onQualitySelect}

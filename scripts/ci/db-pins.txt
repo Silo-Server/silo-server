@@ -90,6 +90,7 @@
 ./internal/catalog TestEpisodeSearchOverviewVectorRefreshesOnOverviewUpdate
 ./internal/catalog TestEpisodeSearchRefreshWorkPostgres
 ./internal/catalog TestEpisodeExactTierCursorAndPlanPostgres
+./internal/catalog TestSearchYearSuffixedTitleIsExactPostgres
 
 # Card play targets: leaf cards and a validated anchor hint resolve without a
 # watch-progress query.

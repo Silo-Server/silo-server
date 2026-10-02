@@ -118,6 +118,21 @@ go test -count=1 -run '^TestCommittedArtifactMatchesRouter$' ./internal/apiv2/
 make verify-local-paths
 ```
 
+PR CI selects Go or Web jobs from a complete diff. Shared contracts, generated
+bindings, workflow changes, unknown inputs, and unavailable diffs run both
+groups. Ordinary Markdown documentation runs the documentation checks. Pushes
+and manual runs keep the full gate. The `CI result` job rejects failed, canceled,
+missing, or unexpectedly skipped work; only jobs excluded by the selection may
+skip. Selection tools come from the trusted reusable workflow's main branch.
+
+The full Go suite owns the ledger, scenario, offline-route, spec, and fixture
+assertions. The contract job retains generator freshness checks and the semantic
+API comparison. Its `CONTRACT_GO_TESTS=0` flag avoids repeating assertions; local
+verify targets remain complete by default. `Go integration` runs the existing
+PostgreSQL 17 race tests separately from the unit suite and the pgvector database
+used by `Go DB pins`. Its database is also separate from the truncating scenario
+executor's database.
+
 Touching `internal/apiv2` registrations? Run `make apiv2-openapi` and
 `make apiv2-fixtures` and commit what they write; the gates above fail on a
 stale artifact or fixture tree.

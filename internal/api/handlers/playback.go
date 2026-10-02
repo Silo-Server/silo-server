@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -316,6 +317,10 @@ type sessionExpirationHookAdder interface {
 	AddExpirationHook(func(*playback.Session))
 }
 
+type sessionFinishHookAdder interface {
+	AddFinishHook(func(context.Context, *playback.Session))
+}
+
 // NewPlaybackHandler creates a new PlaybackHandler backed by the given
 // session manager. Pass optional FilePathResolver to enable stream_url
 // and subtitle_urls in start playback responses.
@@ -388,6 +393,9 @@ func NewPlaybackHandler(sessionMgr SessionManagerInterface, opts ...FilePathReso
 	}
 	if adder, ok := sessionMgr.(sessionExpirationHookAdder); ok {
 		adder.AddExpirationHook(h.handleExpiredSession)
+	}
+	if adder, ok := sessionMgr.(sessionFinishHookAdder); ok {
+		adder.AddFinishHook(h.handleFinishedSession)
 	}
 	return h
 }
@@ -1037,16 +1045,25 @@ func (h *PlaybackHandler) persistStopAndHistory(ctx context.Context, session *pl
 		WithStableIdentityResolver(h.StableIdentityResolver).
 		WithCompletionObserver(h.CompletionObserver)
 	stoppedAt := time.Now().UTC()
-	result, err := watchSvc.RecordPlaybackStop(ctx, session.UserID, session.ProfileID, targetID, duration, session.Position, stoppedAt, userstore.VersionHints{
+	hints := userstore.VersionHints{
 		FileID:     file.ID,
 		Resolution: file.Resolution,
 		HDR:        file.HDR,
 		CodecVideo: file.CodecVideo,
 		EditionKey: file.EditionKey,
-	}, thresholds)
+	}
+	var result watchstate.PlaybackStopResult
+	if session.IsJellyfinCompat {
+		result, err = watchSvc.RecordPlaybackStopOnce(ctx, session.UserID, session.ProfileID, targetID, duration, session.Position, stoppedAt, hints, thresholds, compatPlayHistoryID(session.ID))
+	} else {
+		result, err = watchSvc.RecordPlaybackStop(ctx, session.UserID, session.ProfileID, targetID, duration, session.Position, stoppedAt, hints, thresholds)
+	}
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to persist playback stop", "component", "api", "session", session.ID, "error", err)
-	} else {
+	}
+	// A history row this stop wrote still counts when a later write failed:
+	// no later stop of a once-recorded play refreshes the profile for it.
+	if (err == nil && !result.AlreadyRecorded) || result.HistoryID != "" {
 		triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, session.UserID, session.ProfileID)
 	}
 	return result
@@ -1199,7 +1216,7 @@ func (h *PlaybackHandler) finalizeSessionStopWithResult(ctx context.Context, ses
 	}
 	h.cancelPlaybackStartSideEffectsV3(ctx, session.ID)
 
-	stopResult := h.persistStopAndHistory(ctx, session)
+	stopResult := h.recordStopHistory(ctx, session)
 	if h.WatchScrobbler != nil {
 		if event, ok := h.scrobbleEventForStoppedSession(ctx, session, stopResult); ok && (userInitiated || stopResult.Completed) {
 			if err := h.WatchScrobbler.ScrobbleStop(ctx, event); err != nil {
@@ -1211,14 +1228,6 @@ func (h *PlaybackHandler) finalizeSessionStopWithResult(ctx context.Context, ses
 			}
 		}
 	}
-	if entry, buildErr := h.buildAdminHistoryEntry(ctx, session); buildErr != nil {
-		slog.ErrorContext(ctx, "failed to build admin history", "component", "api", "session", session.ID, "error", buildErr)
-	} else if entry != nil && h.AdminStore != nil {
-		if err := h.AdminStore.RecordHistory(ctx, *entry); err != nil {
-			slog.ErrorContext(ctx, "failed to record admin history", "component", "api", "session", session.ID, "error", err)
-		}
-	}
-
 	if h.AdminStore != nil {
 		if err := h.AdminStore.DeleteSession(ctx, session.ID); err != nil {
 			slog.ErrorContext(ctx, "failed to delete synced session", "component", "api", "session", session.ID, "error", err)
@@ -1239,6 +1248,40 @@ func (h *PlaybackHandler) finalizeSessionStopWithResult(ctx context.Context, ses
 		h.syncSessionsNow(ctx, syncReason)
 	}
 	return stopResult
+}
+
+// recordStopHistory writes a stopped session to watch history and the admin
+// playback log. The admin log keeps one row per session.
+func (h *PlaybackHandler) recordStopHistory(ctx context.Context, session *playback.Session) watchstate.PlaybackStopResult {
+	// A Jellyfin session copy without a position never saw the play's
+	// progress: a start that failed to route, or a replica that only served
+	// media while another replica took the reports. It must not record the
+	// play in place of a copy that did.
+	if session.IsJellyfinCompat && session.Position <= 0 {
+		return watchstate.PlaybackStopResult{}
+	}
+	result := h.persistStopAndHistory(ctx, session)
+	if entry, err := h.buildAdminHistoryEntry(ctx, session); err != nil {
+		slog.ErrorContext(ctx, "failed to build admin history", "component", "api", "session", session.ID, "error", err)
+	} else if entry != nil && h.AdminStore != nil {
+		if err := h.AdminStore.RecordHistory(ctx, *entry); err != nil {
+			slog.ErrorContext(ctx, "failed to record admin history", "component", "api", "session", session.ID, "error", err)
+		}
+	}
+	return result
+}
+
+// compatPlayHistoryNamespace derives a Jellyfin play's watch-history row ID
+// from its native session ID.
+var compatPlayHistoryNamespace = uuid.MustParse("5d0f2b8e-3c4a-4f61-9e7b-2a8c1d6e4b90")
+
+// compatPlayHistoryID names the watch-history row of a Jellyfin session. The
+// replica that receives the client's stop finishes its copy, and any replica
+// holding another copy of the session expires that copy once the play is
+// over; with one row ID per session, the first copy that can record the play
+// does and the rest change nothing.
+func compatPlayHistoryID(sessionID string) string {
+	return uuid.NewSHA1(compatPlayHistoryNamespace, []byte(sessionID)).String()
 }
 
 func (h *PlaybackHandler) finalizeSessionAbort(ctx context.Context, session *playback.Session, syncNow bool, syncReason string) {
@@ -1314,6 +1357,20 @@ func (h *PlaybackHandler) handleExpiredSession(session *playback.Session) {
 		// deny its tokens so no replica serves it again.
 		h.markAttemptStoppedServerSide(ctx, sessionCopy.ID)
 	}()
+}
+
+// handleFinishedSession records a play that another playback frontend ended
+// through FinishSession. That frontend owns the rest of its stop: transcode
+// and transport teardown, watch-provider scrobbles, and the live-session sync.
+func (h *PlaybackHandler) handleFinishedSession(ctx context.Context, session *playback.Session) {
+	if h == nil || session == nil || session.ID == "" {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	// Clients often drop the connection right after reporting a stop.
+	h.recordStopHistory(context.WithoutCancel(ctx), session)
 }
 
 func playbackProgressTarget(file *models.MediaFile) string {

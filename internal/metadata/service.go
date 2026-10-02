@@ -7746,7 +7746,7 @@ func applyBestImages(item *models.MediaItem, images []RemoteImage, mode MergeMod
 
 	selectBest := func(imageType ImageType, filters []func(RemoteImage) bool) *best {
 		for _, img := range images {
-			if img.Type == imageType && img.URL != "" && isLocalImageSourcePath(img.URL) {
+			if img.Type == imageType && img.URL != "" && isLocalImageSourcePath(img.URL) && isWordmarkLogoCandidate(img) {
 				return &best{url: img.URL, rating: img.Rating, providerID: img.ProviderID}
 			}
 		}
@@ -7754,7 +7754,7 @@ func applyBestImages(item *models.MediaItem, images []RemoteImage, mode MergeMod
 		for _, accept := range filters {
 			candidate := &best{}
 			for _, img := range images {
-				if img.Type != imageType || img.URL == "" || !accept(img) {
+				if img.Type != imageType || img.URL == "" || !isWordmarkLogoCandidate(img) || !accept(img) {
 					continue
 				}
 				if candidate.url == "" {
@@ -7852,7 +7852,39 @@ func applyBestImages(item *models.MediaItem, images []RemoteImage, mode MergeMod
 	}
 	applyIfBetter(&item.PosterPath, bestByType[ImagePoster])
 	applyIfBetter(&item.BackdropPath, bestByType[ImageBackdrop])
-	applyIfBetter(&item.LogoPath, bestByType[ImageLogo])
+	if bestByType[ImageLogo].url == "" && mode == MergeReplaceUnlocked && !imagesLocked && itemHasClearArtLogo(item) {
+		// A user-triggered refresh must not preserve clear art stored as the
+		// logo when no wordmark replacement exists. A logo kept under the
+		// Images lock was chosen by an admin and stays.
+		item.LogoPath = ""
+		item.LogoSourcePath = ""
+	} else {
+		applyIfBetter(&item.LogoPath, bestByType[ImageLogo])
+	}
+}
+
+// isWordmarkLogoCandidate rejects clear art offered as a logo. Clear art is an
+// illustrated composite of the title with characters or props, not the title
+// wordmark a logo slot expects. TVDB plugins before v1.4.0 reported series
+// ClearArt as ImageLogo; TVDB serves ClearArt under a /clearart/ path and
+// ClearLogo under /clearlogo/, so the path identifies it for every plugin
+// version. Local sidecars stay authoritative.
+func isWordmarkLogoCandidate(img RemoteImage) bool {
+	if img.Type != ImageLogo || isLocalImageSourcePath(img.URL) {
+		return true
+	}
+	return !isClearArtPath(img.URL)
+}
+
+func itemHasClearArtLogo(item *models.MediaItem) bool {
+	if item == nil {
+		return false
+	}
+	return isClearArtPath(item.LogoSourcePath) || isClearArtPath(item.LogoPath)
+}
+
+func isClearArtPath(path string) bool {
+	return strings.Contains(strings.ToLower(path), "/clearart/")
 }
 
 type itemArtworkField struct {
@@ -7888,6 +7920,13 @@ func keepStoredArtwork(item, existing *models.MediaItem) {
 
 func prepareItemImagesForQueue(item, existing *models.MediaItem) {
 	for _, field := range itemArtworkFields(item) {
+		// applyBestImages intentionally clears a clear-art logo on a manual
+		// refresh when no wordmark replacement exists. Do not let the
+		// generic cached-art preservation path restore that rejected logo.
+		if field.imageType == ImageLogo && *field.path == "" && !artworkLocked(existing) && itemHasClearArtLogo(existing) {
+			*field.source = ""
+			continue
+		}
 		existingPath := existingImagePath(existing, field.imageType)
 		existingThumbhash := existingImageThumbhash(existing, field.imageType)
 		existingSource := existingImageSourcePath(existing, field.imageType)
@@ -8188,7 +8227,11 @@ func (s *MetadataService) FetchItemImages(ctx context.Context, providerIDs map[s
 			providerErrors[p.Slug()] = err.Error()
 			continue
 		}
-		allImages = append(allImages, images...)
+		for _, image := range images {
+			if isWordmarkLogoCandidate(image) {
+				allImages = append(allImages, image)
+			}
+		}
 	}
 
 	// Sort by rating descending (popularity).
@@ -8197,6 +8240,138 @@ func (s *MetadataService) FetchItemImages(ctx context.Context, providerIDs map[s
 	})
 
 	return allImages, providerErrors, nil
+}
+
+// FetchSeasonImages queries the configured season provider chain for the full
+// artwork gallery of one exact season. Providers must echo SeasonNumber on
+// scoped results, preventing an older plugin that ignores the request field
+// from leaking show artwork into a numbered season. If a provider has not yet
+// adopted the gallery contract, its exact primary poster from GetSeasons is a
+// compatibility fallback. Specials additionally include ordinary show posters
+// after every exact Specials result, giving users a useful fallback when no
+// dedicated Specials artwork exists.
+func (s *MetadataService) FetchSeasonImages(ctx context.Context, providerIDs map[string]string, language string, folderID int, seasonNumber int) ([]RemoteImage, map[string]string, error) {
+	chain, err := s.resolveChainCached(ctx, folderID, "season")
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolving provider chain: %w", err)
+	}
+
+	var exactImages []RemoteImage
+	var specialsFallback []RemoteImage
+	providerErrors := make(map[string]string)
+	// Exact and fallback results are deduplicated separately so a show poster
+	// from an earlier provider cannot shadow the same URL confirmed as exact
+	// season art by a later provider. Fallbacks that duplicate an exact result
+	// are dropped once every provider has answered.
+	exactSeen := make(map[string]struct{})
+	fallbackSeen := make(map[string]struct{})
+	appendPoster := func(target *[]RemoteImage, seen map[string]struct{}, image RemoteImage) bool {
+		if image.Type != ImagePoster || strings.TrimSpace(image.URL) == "" {
+			return false
+		}
+		if _, duplicate := seen[image.URL]; duplicate {
+			return false
+		}
+		seen[image.URL] = struct{}{}
+		*target = append(*target, image)
+		return true
+	}
+
+	for _, p := range chain {
+		exactFound := false
+		ip, imageCapable := p.(ImageProvider)
+		if imageCapable {
+			requestedSeason := seasonNumber
+			images, imageErr := ip.GetImages(ctx, ImageRequest{
+				ProviderIDs:  providerIDs,
+				ContentType:  "series",
+				Language:     language,
+				SeasonNumber: &requestedSeason,
+			})
+			if imageErr != nil {
+				slog.WarnContext(ctx, "fetch season images: provider gallery error", "component", "metadata",
+					"provider", p.Slug(), "season", seasonNumber, "error", imageErr)
+				providerErrors[p.Slug()] = imageErr.Error()
+			} else {
+				for _, image := range images {
+					if image.SeasonNumber == nil || *image.SeasonNumber != seasonNumber {
+						continue
+					}
+					if strings.TrimSpace(image.ProviderID) == "" {
+						image.ProviderID = p.Slug()
+					}
+					if appendPoster(&exactImages, exactSeen, image) {
+						exactFound = true
+					}
+				}
+			}
+		}
+
+		// Backward-compatible exact primary for providers that do not yet emit
+		// season-scoped gallery records.
+		if !exactFound {
+			if ep, ok := p.(EpisodeProvider); ok {
+				seasons, seasonErr := ep.GetSeasons(ctx, SeasonsRequest{
+					ProviderIDs: providerIDs,
+					ContentType: "series",
+					Language:    language,
+				})
+				if seasonErr != nil {
+					slog.WarnContext(ctx, "fetch season images: provider season error", "component", "metadata",
+						"provider", p.Slug(), "season", seasonNumber, "error", seasonErr)
+					providerErrors[p.Slug()] = seasonErr.Error()
+				} else {
+					for _, season := range seasons {
+						if season.SeasonNumber != seasonNumber || strings.TrimSpace(season.PosterPath) == "" {
+							continue
+						}
+						n := seasonNumber
+						appendPoster(&exactImages, exactSeen, RemoteImage{
+							ProviderID:   p.Slug(),
+							URL:          season.PosterPath,
+							Type:         ImagePoster,
+							SeasonNumber: &n,
+						})
+						break
+					}
+				}
+			}
+		}
+
+		if seasonNumber == 0 && imageCapable {
+			images, imageErr := ip.GetImages(ctx, ImageRequest{
+				ProviderIDs: providerIDs,
+				ContentType: "series",
+				Language:    language,
+			})
+			if imageErr != nil {
+				slog.WarnContext(ctx, "fetch season images: Specials show fallback error", "component", "metadata",
+					"provider", p.Slug(), "error", imageErr)
+				providerErrors[p.Slug()] = imageErr.Error()
+				continue
+			}
+			for _, image := range images {
+				if image.SeasonNumber != nil {
+					continue
+				}
+				if strings.TrimSpace(image.ProviderID) == "" {
+					image.ProviderID = p.Slug()
+				}
+				appendPoster(&specialsFallback, fallbackSeen, image)
+			}
+		}
+	}
+
+	fallbacks := specialsFallback[:0]
+	for _, image := range specialsFallback {
+		if _, exact := exactSeen[image.URL]; !exact {
+			fallbacks = append(fallbacks, image)
+		}
+	}
+
+	sort.SliceStable(exactImages, func(i, j int) bool { return exactImages[i].Rating > exactImages[j].Rating })
+	sort.SliceStable(fallbacks, func(i, j int) bool { return fallbacks[i].Rating > fallbacks[j].Rating })
+	return append(exactImages, fallbacks...), providerErrors, nil
 }
 
 // ApplyItemImage downloads a single image, caches it to S3, and returns

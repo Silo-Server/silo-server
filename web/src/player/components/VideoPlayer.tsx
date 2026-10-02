@@ -3218,18 +3218,18 @@ export function VideoPlayer({
   }, [activeQualityId, sessionId, watchTogetherRoomId]);
 
   const lowerQualityChoiceRef = useRef(() =>
-    lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe?.bitrate_kbps),
+    lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe),
   );
   useEffect(() => {
     lowerQualityChoiceRef.current = () =>
-      lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe?.bitrate_kbps);
+      lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe);
     // A replan can leave no lower rung; an offer that cannot act is withdrawn.
     if (!lowerQualityChoiceRef.current()) {
       setNotice((current) =>
         current?.actionLabel === LOWER_QUALITY_ACTION_LABEL ? null : current,
       );
     }
-  }, [activeQualityId, plan.effective_recipe?.bitrate_kbps, qualityOptions]);
+  }, [activeQualityId, plan.effective_recipe, qualityOptions]);
 
   // A viewer who keeps stalling in a room cannot keep up at this quality.
   // Offer one step down, once per quality; the room's shared source is kept.
@@ -3239,7 +3239,7 @@ export function VideoPlayer({
     const recent = roomStallTimesRef.current.filter((at) => now - at < ROOM_STALL_WINDOW_MS);
     roomStallTimesRef.current = recent;
     if (recent.length < ROOM_STALLS_BEFORE_LOWER_QUALITY) return;
-    if (!lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe?.bitrate_kbps)) {
+    if (!lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe)) {
       return;
     }
     lowerQualityOfferedRef.current = true;
@@ -3256,7 +3256,7 @@ export function VideoPlayer({
     );
   }, [
     activeQualityId,
-    plan.effective_recipe?.bitrate_kbps,
+    plan.effective_recipe,
     qualityOptions,
     roomStallSignal,
     showWatchTogetherNotice,
@@ -3900,6 +3900,7 @@ export function VideoPlayer({
           onAudioSelect={onAudioSelect}
           qualityOptions={qualityOptions}
           activeQualityId={activeQualityId}
+          deliveredRecipe={plan.effective_recipe}
           isTranscoding={replanning}
           qualityError={replanError}
           onQualitySelect={handleQualitySelect}
