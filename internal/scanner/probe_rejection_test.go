@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand/v2"
 	"os"
 	"os/exec"
@@ -622,5 +623,66 @@ func TestBoundedProbeInputReadablePassesThroughTheCheck(t *testing.T) {
 	}
 	if err := boundedProbeInputReadable(t.Context(), filepath.Join(dir, "missing.mkv")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("missing file = %v, want os.ErrNotExist", err)
+	}
+}
+
+// Upsert keeps a stored rejection through writes that carry no probe result
+// for the same bytes (a probe that was skipped, timed out, or could not read
+// the file), and drops it on a successful probe or when the bytes change.
+func TestUpsertKeepsProbeRejectionUntilProbedOrReplacedPostgres(t *testing.T) {
+	pool := newDeadRootTestPool(t)
+	ctx := t.Context()
+	folderID := seedDeadRootTestFolder(t, pool, "series", "Probe rejection upsert")
+	repo := NewFileRepository(pool)
+	modified := time.Date(2026, time.October, 2, 12, 0, 0, 123456000, time.UTC)
+	base := func(size int64, mtime time.Time) models.MediaFile {
+		return models.MediaFile{
+			MediaFolderID: folderID, FilePath: filepath.Join("/tmp", fmt.Sprintf("probe-upsert-%d", folderID), "S01E03.mkv"),
+			FileSize: size, FileModifiedAt: &mtime,
+			SubtitleTracks: []models.SubtitleTrack{}, ExternalSubtitles: []models.ExternalSubtitle{},
+		}
+	}
+	upsert := func(mf models.MediaFile) *models.MediaFile {
+		t.Helper()
+		row, err := repo.Upsert(ctx, mf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return row
+	}
+
+	rejected := base(0, modified)
+	markProbeRejected(&rejected)
+	row := upsert(rejected)
+	if !row.ProbeRejected() {
+		t.Fatalf("rejection not stored: %+v", row.ProbeFailedAt)
+	}
+
+	// Same bytes, no probe result: the rejection stays.
+	row = upsert(base(0, modified))
+	if !row.ProbeRejected() {
+		t.Fatal("a write without a probe result cleared the stored rejection")
+	}
+
+	// A new rejection replaces the old one.
+	again := base(0, modified)
+	markProbeRejected(&again)
+	if row = upsert(again); !row.ProbeRejected() {
+		t.Fatal("a new rejection was not stored")
+	}
+
+	// Replaced bytes with no probe result: the old verdict no longer applies.
+	if row = upsert(base(5, modified.Add(time.Minute))); row.ProbeFailedAt != nil {
+		t.Fatalf("a changed file kept the old rejection from %v", row.ProbeFailedAt)
+	}
+
+	// A successful probe clears a rejection even for the same bytes.
+	rejected = base(5, modified.Add(time.Minute))
+	markProbeRejected(&rejected)
+	upsert(rejected)
+	probed := base(5, modified.Add(time.Minute))
+	applyProbeData(&probed, completeProbeRepairTestData(), "local")
+	if row = upsert(probed); row.ProbeFailedAt != nil || row.ProbeUpdatedAt == nil {
+		t.Fatalf("successful probe left ProbeFailedAt=%v ProbeUpdatedAt=%v", row.ProbeFailedAt, row.ProbeUpdatedAt)
 	}
 }

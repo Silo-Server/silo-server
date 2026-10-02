@@ -1027,7 +1027,20 @@ func (r *FileRepository) upsertWithQueryer(ctx context.Context, queryer fileQuer
 		multi_episode_end = EXCLUDED.multi_episode_end,
 		probe_source = EXCLUDED.probe_source,
 		probe_updated_at = EXCLUDED.probe_updated_at,
-		probe_failed_at = EXCLUDED.probe_failed_at,
+		-- A successful probe clears the rejection and a new rejection
+		-- replaces it. A write that carries neither (the probe was skipped,
+		-- timed out, or could not read the file) keeps the stored rejection
+		-- while the bytes it describes are unchanged; changed bytes drop it.
+		-- media_files.* here are the row's values before this update.
+		probe_failed_at = CASE
+			WHEN EXCLUDED.probe_updated_at IS NOT NULL THEN NULL
+			WHEN EXCLUDED.probe_failed_at IS NOT NULL THEN EXCLUDED.probe_failed_at
+			WHEN media_files.file_size IS NOT DISTINCT FROM EXCLUDED.file_size
+				AND date_trunc('microseconds', media_files.file_modified_at)
+					IS NOT DISTINCT FROM date_trunc('microseconds', EXCLUDED.file_modified_at)
+				THEN media_files.probe_failed_at
+			ELSE NULL
+		END,
 		match_suppressed_at = NULL,
 		missing_since = NULL,
 		updated_at = NOW()
