@@ -56,6 +56,7 @@ import { CollectionLibraryPicker } from "@/pages/adminCollectionsShared";
 
 import { isCollectionReadOnly } from "./userCollectionsShared";
 import { formatDate as formatPreferredDate } from "@/lib/datetime";
+import { parseTMDBListID, TMDB_LIST_URL_PLACEHOLDER } from "@/lib/tmdbList";
 
 type ImportedType = Extract<UserCollectionType, "mdblist" | "tmdb" | "trakt">;
 
@@ -99,10 +100,15 @@ const SOURCE_THEMES: Record<ImportedType, SourceTheme> = {
 
 interface ImportedCollectionEditorProps {
   collection: Collection;
+  etag: string;
   onClose: () => void;
 }
 
-export function ImportedCollectionEditor({ collection, onClose }: ImportedCollectionEditorProps) {
+export function ImportedCollectionEditor({
+  collection,
+  etag,
+  onClose,
+}: ImportedCollectionEditorProps) {
   const importedType = collection.collection_type as ImportedType;
   const theme = SOURCE_THEMES[importedType];
 
@@ -149,6 +155,8 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const isMDBList = importedType === "mdblist";
+  const isTMDBList = importedType === "tmdb" && isTMDBListSource(collection);
+  const hasEditableSourceURL = isMDBList || isTMDBList;
   const parsedMaxItems = parseMaxItemsInput(maxItemsInput);
 
   const builderLibraries = useMemo(
@@ -181,7 +189,7 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
   const trimmedPosterSource = posterSourceUrl.trim();
   const posterDirty = posterFile !== null || trimmedPosterSource !== "";
   const trimmedSourceUrl = sourceUrlInput.trim();
-  const sourceUrlDirty = isMDBList && trimmedSourceUrl !== initialSourceUrl;
+  const sourceUrlDirty = hasEditableSourceURL && trimmedSourceUrl !== initialSourceUrl;
   const maxItemsDirty = parsedMaxItems !== initialMaxItems;
   const descriptionDirty = description !== initialDescription;
   const dirtyParts = [
@@ -201,7 +209,9 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
   const dirtyCount = dirtyParts.filter(Boolean).length;
   const dirty = dirtyCount > 0;
   const maxItemsInvalid = maxItemsInput.trim() !== "" && parsedMaxItems == null;
-  const sourceUrlInvalid = sourceUrlDirty && trimmedSourceUrl === "";
+  const sourceUrlInvalid =
+    sourceUrlDirty &&
+    (trimmedSourceUrl === "" || (isTMDBList && parseTMDBListID(trimmedSourceUrl) === null));
   const saveBlocked = maxItemsInvalid || sourceUrlInvalid;
 
   function handleSave() {
@@ -229,7 +239,7 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
       body.max_items = parsedMaxItems ?? 0;
     }
     updateMutation.mutate(
-      { id: collection.id, body, poster: posterFile },
+      { id: collection.id, etag, body, poster: posterFile },
       {
         onSuccess: () => {
           setPosterFile(null);
@@ -261,11 +271,14 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
   }
 
   function handleDelete() {
-    deleteMutation.mutate(collection.id, {
-      onSuccess: () => {
-        onClose();
+    deleteMutation.mutate(
+      { id: collection.id, etag },
+      {
+        onSuccess: () => {
+          onClose();
+        },
       },
-    });
+    );
   }
 
   const sourceUrl = readableSourceURL(collection);
@@ -296,6 +309,7 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
         sourceUrl={sourceUrl}
         isSyncing={isSyncing}
         onSyncNow={handleSyncNow}
+        syncSupported={collectionCapabilities?.imports === true}
         readOnly={readOnly}
       />
 
@@ -411,7 +425,7 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
           >
             <div className="space-y-2">
               <FieldLabel htmlFor="imported-collection-source-url">
-                {isMDBList ? "Source URL" : `${theme.label} preset`}
+                {hasEditableSourceURL ? "Source URL" : `${theme.label} preset`}
               </FieldLabel>
               {isMDBList ? (
                 <>
@@ -430,6 +444,26 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
                       The MDBList JSON URL the next sync will pull from. Trailing
                       <code className="bg-muted/40 mx-1 rounded px-1 py-px text-[10px]">/json</code>
                       is added automatically.
+                    </p>
+                  )}
+                </>
+              ) : isTMDBList ? (
+                <>
+                  <Input
+                    id="imported-collection-source-url"
+                    value={sourceUrlInput}
+                    onChange={(event) => setSourceUrlInput(event.target.value)}
+                    placeholder={TMDB_LIST_URL_PLACEHOLDER}
+                    disabled={readOnly}
+                    className="h-11 font-mono text-[0.85rem]"
+                  />
+                  {sourceUrlInvalid ? (
+                    <p className="text-destructive text-xs">
+                      Enter a TMDB list URL such as https://www.themoviedb.org/list/310.
+                    </p>
+                  ) : (
+                    <p className="text-muted-foreground text-xs leading-relaxed">
+                      The public TMDB list the next sync will pull from.
                     </p>
                   )}
                 </>
@@ -503,7 +537,7 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
             />
           </FormSection>
 
-          {!readOnly ? (
+          {!readOnly && collectionCapabilities?.artwork ? (
             <FormSection
               number="05"
               title="Poster"
@@ -569,6 +603,7 @@ function SourceBanner({
   sourceUrl,
   isSyncing,
   onSyncNow,
+  syncSupported,
   readOnly,
 }: {
   theme: SourceTheme;
@@ -577,6 +612,7 @@ function SourceBanner({
   sourceUrl: string | null;
   isSyncing: boolean;
   onSyncNow: () => void;
+  syncSupported: boolean;
   readOnly: boolean;
 }) {
   const last = formatLastSync(collection);
@@ -652,7 +688,7 @@ function SourceBanner({
               type="button"
               size="sm"
               onClick={onSyncNow}
-              disabled={isSyncing || readOnly}
+              disabled={isSyncing || readOnly || !syncSupported}
               className="gap-1.5 font-semibold"
               style={{
                 backgroundColor: theme.accent,
@@ -839,7 +875,11 @@ function SourceSpecSheet({
         </p>
 
         <div className="mt-4 divide-y divide-[color-mix(in_srgb,var(--border)_45%,transparent)]">
-          <SpecRow icon={Hash} label={`${theme.label} preset`} value={sourcePresetLabel} />
+          <SpecRow
+            icon={Hash}
+            label={isTMDBListSource(collection) ? "TMDB list" : `${theme.label} preset`}
+            value={sourcePresetLabel}
+          />
           {sourceUrl ? (
             <SpecRow
               icon={Link2}
@@ -1125,7 +1165,12 @@ function readableSourceURL(collection: Collection): string | null {
   return null;
 }
 
+function isTMDBListSource(collection: Collection): boolean {
+  return collection.source_config?.mode === "tmdb_list";
+}
+
 function sourcePresetSummary(collection: Collection, fallback: string): string {
+  if (isTMDBListSource(collection)) return "Public list";
   const cfg = collection.source_config;
   if (cfg && typeof cfg === "object") {
     const preset = (cfg as Record<string, unknown>).preset;

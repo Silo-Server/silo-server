@@ -12,6 +12,21 @@ export interface CanRequestState {
   submitDisabledReason: string | null;
 }
 
+/**
+ * Whether the viewer can request the seasons a series in the library is
+ * missing. The server allows it only while no download server takes series,
+ * since router plugins cannot receive seasons yet.
+ */
+export function useMissingSeasonsRequestable(enabled: boolean): boolean {
+  // The shell's sidebar keeps the status fresh; opening a series page reads
+  // what it has rather than fetching again.
+  const status = useRequestFeatureStatus({ enabled, refetchOnMount: false });
+  const data = status.data;
+  return (
+    enabled && Boolean(data?.requests_enabled && data.allowed && data.missing_seasons_requestable)
+  );
+}
+
 export function useCanRequest(): CanRequestState {
   const status = useRequestFeatureStatus();
   const { profile } = useCurrentProfile();

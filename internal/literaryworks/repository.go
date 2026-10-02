@@ -10,6 +10,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -94,6 +95,45 @@ func (r *Repository) CreateWork(ctx context.Context, p CreateWorkParams) (*Work,
 	return scanWork(row)
 }
 
+// createAutomaticWork preserves existing work metadata and uses a separate ID
+// only when either anchor cannot join the normal title/author-derived work.
+func (r *Repository) createAutomaticWork(ctx context.Context, p CreateWorkParams, anchors []string) (string, error) {
+	if r == nil || r.pool == nil {
+		return "", fmt.Errorf("literary works repository requires a database pool")
+	}
+	var ignored bool
+	if err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM literary_work_items member
+			JOIN literary_work_match_decisions d ON d.decision='ignored' AND (
+				(d.source_content_id=ANY($2) AND d.target_content_id=member.content_id)
+				OR (d.target_content_id=ANY($2) AND d.source_content_id=member.content_id)
+			)
+			WHERE member.work_id=$1
+		)
+	`, p.WorkID, anchors).Scan(&ignored); err != nil {
+		return "", err
+	}
+	if ignored {
+		// A deterministic fallback could itself contain an ignored edition
+		// from an earlier link. The guarded linking transaction still owns
+		// membership assignment if another event links either anchor first.
+		p.WorkID = "work-" + uuid.NewString()
+	}
+	if p.Genres == nil {
+		p.Genres = []string{}
+	}
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO literary_works (
+			work_id, canonical_title, sort_title, normalized_title,
+			primary_author_key, description, publisher, genres
+		)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		ON CONFLICT (work_id) DO NOTHING
+	`, p.WorkID, p.CanonicalTitle, p.SortTitle, p.NormalizedTitle, p.PrimaryAuthorKey, p.Description, p.Publisher, p.Genres)
+	return p.WorkID, err
+}
+
 func (r *Repository) GetWork(ctx context.Context, workID string) (*Work, error) {
 	if r == nil || r.pool == nil {
 		return nil, fmt.Errorf("literary works repository requires a database pool")
@@ -157,36 +197,46 @@ func (r *Repository) GetMatchItem(ctx context.Context, contentID string) (MatchI
 }
 
 func (r *Repository) ListMatchCandidates(ctx context.Context, source MatchItem, limit int) ([]MatchItemWithWork, error) {
+	items, _, err := r.listMatchCandidatesPage(ctx, source, limit, nil, nil)
+	return items, err
+}
+
+type matchCandidateCursor struct {
+	title     string
+	contentID string
+}
+
+func (r *Repository) listMatchCandidatesPage(ctx context.Context, source MatchItem, limit int, after *matchCandidateCursor, autoWorkID *string) ([]MatchItemWithWork, *matchCandidateCursor, error) {
 	if limit <= 0 {
 		limit = 20
 	}
 	// Two phases: pick candidate IDs with indexable base-table predicates, then
 	// hydrate only those rows. This keeps the per-row lateral aggregates in
 	// queryMatchItems off every opposite-format book and on the LIMIT rows we keep.
-	contentIDs, err := r.listMatchCandidateIDs(ctx, source, limit)
+	contentIDs, next, err := r.listMatchCandidateIDs(ctx, source, limit, after, autoWorkID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(contentIDs) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	rows, err := r.queryMatchItems(ctx, `
 		WHERE mi.content_id = ANY($1)
 		ORDER BY mi.title ASC, mi.content_id ASC
 	`, contentIDs)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
 	var items []MatchItemWithWork
 	for rows.Next() {
 		item, err := scanMatchItem(rows)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	return items, next, rows.Err()
 }
 
 // listMatchCandidateIDs selects opposite-format candidate content IDs using only
@@ -194,10 +244,44 @@ func (r *Repository) ListMatchCandidates(ctx context.Context, source MatchItem, 
 // on media_item_provider_ids, series on the format-specific series table) instead
 // of filtering on lateral aggregate output. The opposite format is fixed by the
 // source type, so the series lookup targets a single concrete table.
-func (r *Repository) listMatchCandidateIDs(ctx context.Context, source MatchItem, limit int) ([]string, error) {
+func (r *Repository) listMatchCandidateIDs(ctx context.Context, source MatchItem, limit int, after *matchCandidateCursor, autoWorkID *string) ([]string, *matchCandidateCursor, error) {
 	if r == nil || r.pool == nil {
-		return nil, fmt.Errorf("literary works repository requires a database pool")
+		return nil, nil, fmt.Errorf("literary works repository requires a database pool")
 	}
+	query, args := buildMatchCandidateQuery(source, limit, after, autoWorkID)
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	var last matchCandidateCursor
+	for rows.Next() {
+		if err := rows.Scan(&last.contentID, &last.title); err != nil {
+			return nil, nil, err
+		}
+		ids = append(ids, last.contentID)
+	}
+	if len(ids) == limit {
+		return ids, &last, rows.Err()
+	}
+	return ids, nil, rows.Err()
+}
+
+// buildMatchCandidateQuery assembles the candidate-selection SQL and its args.
+//
+// Each match predicate (title, provider id, series) is emitted as its own
+// UNION branch so that every branch can ride a base-table index. Joining the
+// predicates with OR instead forces the planner to scan the whole ebook/
+// audiobook partition and filter row by row, which on a large library is
+// ~1000x slower and defeats idx_media_items_books_title_lower.
+//
+// The expensive, low-selectivity predicates that must apply to every candidate
+// (the ignored-decision NOT EXISTS on the source, the optional autoWorkID
+// exclusions, and the keyset pagination bound) are applied once in the outer
+// wrapper over the small UNION-ed id set, together with ORDER BY / LIMIT, so
+// they cannot silently drop from a branch and resurrect ignored pairs.
+func buildMatchCandidateQuery(source MatchItem, limit int, after *matchCandidateCursor, autoWorkID *string) (string, []any) {
 	// Candidates are the opposite format of the source; match their own series table.
 	seriesTable := "ebook_series"
 	if source.Type == "ebook" {
@@ -229,41 +313,75 @@ func (r *Repository) listMatchCandidateIDs(ctx context.Context, source MatchItem
 			len(args),
 		))
 	}
-	matchWhere := ""
-	if len(matchFilters) > 0 {
-		matchWhere = " AND (" + strings.Join(matchFilters, " OR ") + ")"
-	}
-	args = append(args, limit)
-	rows, err := r.pool.Query(ctx, `
-		SELECT mi.content_id
+
+	// Cheap predicates that can ride the index in every branch.
+	const branchBase = `		SELECT mi.content_id, mi.title
 		FROM media_items mi
 		WHERE mi.content_id <> $1
 		  AND mi.type IN ('ebook', 'audiobook')
-		  AND mi.type <> $2
-		  AND NOT EXISTS (
+		  AND mi.type <> $2`
+	branches := make([]string, 0, len(matchFilters))
+	if len(matchFilters) == 0 {
+		// No match predicates: every opposite-format item is a candidate, same
+		// as the pre-UNION query with an empty disjunction.
+		branches = append(branches, branchBase)
+	} else {
+		for _, filter := range matchFilters {
+			branches = append(branches, branchBase+"\n\t\t  AND "+filter)
+		}
+	}
+	candidates := strings.Join(branches, "\n\t\tUNION\n")
+
+	// Outer predicates applied once to the UNION-ed candidate ids. The
+	// ignored-decision NOT EXISTS is always present.
+	outerWhere := `NOT EXISTS (
 			SELECT 1 FROM literary_work_match_decisions d
 			WHERE d.decision = 'ignored'
 			  AND (
 				(d.source_content_id = $1 AND d.target_content_id = mi.content_id)
 				OR (d.source_content_id = mi.content_id AND d.target_content_id = $1)
 			  )
-		  )`+matchWhere+`
-		ORDER BY mi.title ASC, mi.content_id ASC
-		LIMIT $`+fmt.Sprint(len(args))+`
-	`, args...)
-	if err != nil {
-		return nil, err
+		)`
+	if autoWorkID != nil {
+		// Reject ineligible anchors before scoring, so an ignored relationship
+		// with a work member cannot hide another valid match on this page.
+		// A nil work filter keeps public candidate suggestions pairwise.
+		args = append(args, *autoWorkID)
+		outerWhere += fmt.Sprintf(`
+		AND NOT EXISTS (
+			SELECT 1 FROM literary_work_items member
+			JOIN literary_work_match_decisions d ON d.decision='ignored' AND (
+				(d.source_content_id=mi.content_id AND d.target_content_id=member.content_id)
+				OR (d.target_content_id=mi.content_id AND d.source_content_id=member.content_id)
+			)
+			WHERE member.work_id=$%d
+		)
+		AND NOT EXISTS (
+			SELECT 1 FROM literary_work_items candidate
+			JOIN literary_work_items member ON member.work_id=candidate.work_id
+			JOIN literary_work_match_decisions d ON d.decision='ignored' AND (
+				(d.source_content_id=$1 AND d.target_content_id=member.content_id)
+				OR (d.target_content_id=$1 AND d.source_content_id=member.content_id)
+			)
+			WHERE candidate.content_id=mi.content_id
+		)`, len(args))
 	}
-	defer rows.Close()
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
+	if after != nil {
+		args = append(args, after.title, after.contentID)
+		outerWhere += fmt.Sprintf("\n\t\tAND (mi.title, mi.content_id) > ($%d, $%d)", len(args)-1, len(args))
 	}
-	return ids, rows.Err()
+	args = append(args, limit)
+	query := `
+	WITH candidates AS (
+` + candidates + `
+	)
+	SELECT mi.content_id, mi.title
+	FROM candidates mi
+	WHERE ` + outerWhere + `
+	ORDER BY mi.title ASC, mi.content_id ASC
+	LIMIT $` + fmt.Sprint(len(args)) + `
+	`
+	return query, args
 }
 
 func (r *Repository) queryMatchItems(ctx context.Context, suffix string, args ...any) (pgx.Rows, error) {
@@ -408,7 +526,7 @@ func appendWorkItemsAccessFilters(conditions *[]string, args *[]any, argIdx *int
 		*args = append(*args, filter.DisabledLibraryIDs)
 		*argIdx = *argIdx + 1
 	}
-	catalog.ApplySectionAccessFilter("mi", catalog.AccessFilter{MaxContentRating: filter.MaxContentRating}, conditions, args, argIdx)
+	catalog.ApplySectionAccessFilter("mi", catalog.AccessFilter{MaturityLimits: filter.MaturityLimits}, conditions, args, argIdx)
 }
 
 func (r *Repository) ListFiles(ctx context.Context, contentID string, filter catalog.AccessFilter) ([]WorkFile, error) {
@@ -544,6 +662,56 @@ func (r *Repository) UnlinkItem(ctx context.Context, workID, contentID string) e
 		WHERE work_id = $1 AND content_id = $2
 	`, workID, contentID)
 	return err
+}
+
+// autoLinkItems adds editions without overriding manual links or ignored pairs.
+// The first two items are the source and chosen match; both must belong to the
+// selected work before adding the remaining candidates.
+func (r *Repository) autoLinkItems(ctx context.Context, workID string, items []LinkItemParams) (bool, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	// Serialize automatic additions to this work so each ignored-pair check
+	// sees the editions accepted by earlier events and earlier loop iterations.
+	if _, err := tx.Exec(ctx, `SELECT work_id FROM literary_works WHERE work_id=$1 FOR UPDATE`, workID); err != nil {
+		return false, err
+	}
+	linked := false
+	for i, item := range items {
+		tag, err := tx.Exec(ctx, `
+			INSERT INTO literary_work_items (work_id, content_id, format_type, link_source, confidence)
+			SELECT $1, $2, $3, $4, $5
+			WHERE NOT EXISTS (
+				SELECT 1 FROM literary_work_match_decisions d
+				JOIN literary_work_items wi ON wi.work_id=$1
+				WHERE d.decision='ignored' AND (
+					(d.source_content_id=$2 AND d.target_content_id=wi.content_id)
+					OR (d.target_content_id=$2 AND d.source_content_id=wi.content_id)
+				)
+			)
+			ON CONFLICT (content_id) DO NOTHING
+		`, workID, item.ContentID, item.FormatType, item.LinkSource, item.Confidence)
+		if err != nil {
+			return false, fmt.Errorf("auto-linking %s to work %s: %w", item.ContentID, workID, err)
+		}
+		if tag.RowsAffected() > 0 {
+			linked = true
+		} else if i < 2 {
+			var belongs bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM literary_work_items WHERE work_id=$1 AND content_id=$2)`, workID, item.ContentID).Scan(&belongs); err != nil {
+				return false, err
+			}
+			if !belongs {
+				return false, nil
+			}
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, err
+	}
+	return linked, nil
 }
 
 func (r *Repository) RecordDecision(ctx context.Context, sourceContentID, targetContentID, decision string, userID int) error {

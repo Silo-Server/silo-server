@@ -1,6 +1,8 @@
 import { useLayoutEffect, useRef, type CSSProperties } from "react";
 
+import { useLanguageNamesLoaded } from "@/lib/languageNamesLoader";
 import { OverlayIcon, WORDMARK_TEXT, getPreset, orderedOverlaysForPosition } from "@/lib/overlays";
+import { cn } from "@/lib/utils";
 import type {
   CardOverlayPrefs,
   OverlayData,
@@ -121,6 +123,13 @@ interface CardOverlaysProps {
   data: OverlayData;
   prefs: CardOverlayPrefs;
   variant?: "poster" | "wide";
+  /**
+   * Set by hosts that draw a watch-progress bar along the bottom of the
+   * artwork (ContinueWatchingCard, EpisodeRow, SeasonEpisodeGrid). The bar
+   * occupies the same edge strip as the bottom badge row, so the row rises
+   * just clear of it; with no bar the badges stay flush in the corners.
+   */
+  hasProgressBar?: boolean;
 }
 
 interface ResolvedBadge {
@@ -145,7 +154,9 @@ function resolveBadge(
   return {
     def,
     label,
-    accentColor: itemAccent ?? def.defaultAccent,
+    // The viewer's own accent wins; a data-driven accent (amber for a title
+    // that needs attention) comes before the badge's default.
+    accentColor: itemAccent ?? def.getAccent?.(data) ?? def.defaultAccent,
     iconId: showIcon ? candidateIcon : null,
   };
 }
@@ -163,13 +174,11 @@ function BadgeStack({
   align,
   preset,
   scalingMode,
-  extraClass = "",
 }: {
   badges: ResolvedBadge[];
   align: "start" | "end";
   preset: OverlayPreset;
   scalingMode: ScalingMode;
-  extraClass?: string;
 }) {
   const length = (pixels: number, legacyVariable: string) =>
     overlayLength(pixels, scalingMode, legacyVariable);
@@ -177,7 +186,7 @@ function BadgeStack({
 
   return (
     <div
-      className={`flex min-w-0 flex-col ${align === "start" ? "items-start" : "items-end"} ${preset.gapClass} ${extraClass}`}
+      className={`flex min-w-0 flex-col ${align === "start" ? "items-start" : "items-end"} ${preset.gapClass}`}
       style={{ gap: length(preset.stackGap, POSTER_VARS.stackGap) }}
     >
       {badges.map((badge) => {
@@ -241,7 +250,26 @@ function BadgeStack({
 // Each card edge renders as ONE flex row holding the left and right corner
 // stacks. Sharing a row lets flexbox divide the card width between opposing
 // corners (min-w-0 + truncate), so wide badges shrink instead of overlapping.
-export default function CardOverlays({ data, prefs, variant = "poster" }: CardOverlaysProps) {
+//
+// Stacking contract with the card quick actions (watched/favorite bottom-left,
+// more-menu bottom-right; web/src/components/MediaItemMenu.tsx): this whole
+// layer paints at z-10 inside the artwork box, the action wrappers paint at
+// z-20 as siblings of the artwork link in the same stacking context, so the
+// actions always cover overlay badges. That is by design — badges sit flush in
+// all four corners and the actions (hover-revealed on fine pointers,
+// persistent on coarse ones) render on top of them. The layer is
+// pointer-events-none end to end, so a badge can never swallow a click aimed
+// at an action underneath it.
+export default function CardOverlays({
+  data,
+  prefs,
+  variant = "poster",
+  hasProgressBar = false,
+}: CardOverlaysProps) {
+  // The language badge resolves names from lazily loaded data and stays empty
+  // until it arrives; this re-renders the card when it does. Cards without the
+  // badge skip the re-render.
+  useLanguageNamesLoaded(prefs.items.original_language?.enabled === true);
   const preset = getPreset(prefs.preset);
   const resolve = (pos: OverlayPosition): ResolvedBadge[] =>
     orderedOverlaysForPosition(prefs, pos)
@@ -322,27 +350,21 @@ export default function CardOverlays({ data, prefs, variant = "poster" }: CardOv
         </div>
       )}
       {(bottomLeft.length > 0 || bottomRight.length > 0) && (
+        /* Bottom badges anchor flush in the corners with the same inset as the
+           top row; card actions cover them by design (see above). The single
+           exception is a watch-progress bar, which lives in this same edge
+           strip and would be cut in half by a flush badge, so hosts that draw
+           one lift the row by one edge step. */
         <div
           data-overlay-edge="bottom"
-          className="pointer-events-none absolute inset-x-2 bottom-2 z-10 flex items-end justify-between gap-2"
+          className={cn(
+            "pointer-events-none absolute inset-x-2 bottom-2 z-10 flex items-end justify-between gap-2",
+            hasProgressBar && "mb-2",
+          )}
           style={{ right: edgeInset, bottom: edgeInset, left: edgeInset, gap: edgeGap }}
         >
-          {/* Bottom badges reserve corner clearance because card actions stay
-              visible on touch and other devices without a fine hover pointer. */}
-          <BadgeStack
-            badges={bottomLeft}
-            align="start"
-            preset={preset}
-            scalingMode={scalingMode}
-            extraClass={wide ? "mb-12" : "mb-10"}
-          />
-          <BadgeStack
-            badges={bottomRight}
-            align="end"
-            preset={preset}
-            scalingMode={scalingMode}
-            extraClass={wide ? "mb-12" : "mb-10"}
-          />
+          <BadgeStack badges={bottomLeft} align="start" preset={preset} scalingMode={scalingMode} />
+          <BadgeStack badges={bottomRight} align="end" preset={preset} scalingMode={scalingMode} />
         </div>
       )}
     </div>

@@ -3,12 +3,14 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -22,9 +24,21 @@ type scopedKeyUserRepo struct {
 	getErr  error
 	created *models.CreateUserInput
 	updated *models.UpdateUserInput
+	deleted bool
+	// promoteBeforeMutate makes the account an admin between the handler's
+	// pre-checks and the locked write, as a concurrent promotion would.
+	promoteBeforeMutate bool
+	// updateErr, when set, is what Update returns.
+	updateErr error
+	// revoked records whether the last mutation asked to sign the account out.
+	revoked bool
 }
 
 func (r *scopedKeyUserRepo) List(context.Context) ([]*models.User, error) {
+	return []*models.User{r.user}, nil
+}
+
+func (r *scopedKeyUserRepo) ListPage(context.Context, int, int, string) ([]*models.User, error) {
 	return []*models.User{r.user}, nil
 }
 
@@ -34,18 +48,58 @@ func (r *scopedKeyUserRepo) Create(_ context.Context, input models.CreateUserInp
 }
 
 func (r *scopedKeyUserRepo) Update(_ context.Context, _ int, input models.UpdateUserInput) error {
+	if r.updateErr != nil {
+		return r.updateErr
+	}
 	r.updated = &input
 	return nil
 }
 
 func (r *scopedKeyUserRepo) Delete(context.Context, int) error { return nil }
 
-func (r *scopedKeyUserRepo) GetByID(context.Context, int) (*models.User, error) {
+// MutateAdminAccount runs the handler's checks against the stored account the
+// way the transactional repository does, without a transaction.
+func (r *scopedKeyUserRepo) MutateAdminAccount(ctx context.Context, id int, _ int64, input *models.UpdateUserInput, validate func(*models.User, pgx.Tx) (bool, error)) (auth.AdminUserSnapshot, error) {
+	current, err := r.GetByID(ctx, id)
+	if err != nil {
+		return auth.AdminUserSnapshot{}, err
+	}
+	if r.promoteBeforeMutate {
+		current.Role = models.RoleAdmin
+	}
+	revoke, err := validate(current, nil)
+	if err != nil {
+		return auth.AdminUserSnapshot{User: current}, err
+	}
+	r.revoked = revoke
+	if input == nil {
+		r.deleted = true
+		return auth.AdminUserSnapshot{User: current}, nil
+	}
+	return auth.AdminUserSnapshot{User: current}, r.Update(ctx, id, *input)
+}
+
+func (r *scopedKeyUserRepo) GetAdminSnapshot(ctx context.Context, id int) (auth.AdminUserSnapshot, error) {
+	current, err := r.GetByID(ctx, id)
+	return auth.AdminUserSnapshot{User: current}, err
+}
+
+func (r *scopedKeyUserRepo) GetByID(_ context.Context, id int) (*models.User, error) {
 	if r.getErr != nil {
 		return nil, r.getErr
 	}
-	return r.user, nil
+	if r.user != nil && id == r.user.ID {
+		return r.user, nil
+	}
+	// Caller 1 is the server Owner, so the tests that use it exercise the
+	// scoped-key rules rather than the Owner rules.
+	if id == scopedKeyTestOwnerID {
+		return &models.User{ID: id, Role: models.RoleAdmin, Enabled: true, IsOwner: true}, nil
+	}
+	return nil, auth.ErrNotFound
 }
+
+const scopedKeyTestOwnerID = 1
 
 // newScopedKeyAdminHandler builds an AdminHandler whose target account has the
 // given role, so the "target is already an admin" rule can be exercised.
@@ -348,6 +402,22 @@ func TestHandleUpdateUserScopedAPIKeyMissingTarget(t *testing.T) {
 	}
 }
 
+// A username or email another account already uses is a conflict, the same
+// answer v1 account creation gives, not a server error.
+func TestHandleUpdateUserDuplicateIdentifierIsConflict(t *testing.T) {
+	h, repo := newScopedKeyAdminHandler("user")
+	repo.updateErr = fmt.Errorf("%w: user_login_identifiers_holder_key", auth.ErrDuplicate)
+
+	rec := updateUserRequestFor(t, h, jwtAdminClaims(), `{"username":"grace@example.com"}`)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (body %s)", rec.Code, rec.Body.String())
+	}
+	if code := decodeErrorCode(t, rec); code != "duplicate" {
+		t.Fatalf("error code = %q, want duplicate", code)
+	}
+}
+
 func updateUserRequestFor(t *testing.T, h *AdminHandler, claims *auth.Claims, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/users/42", strings.NewReader(body))
@@ -358,4 +428,18 @@ func updateUserRequestFor(t *testing.T, h *AdminHandler, claims *auth.Claims, bo
 	rec := httptest.NewRecorder()
 	h.HandleUpdateUser(rec, req)
 	return rec
+}
+
+func TestHandleUpdateUserRechecksScopedKeyAgainstLockedAccount(t *testing.T) {
+	h, repo := newScopedKeyAdminHandler(models.RoleUser)
+	repo.promoteBeforeMutate = true
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/users/42", strings.NewReader(`{"password":"new-password"}`))
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "42")
+	req = req.WithContext(apimw.SetClaims(context.WithValue(req.Context(), chi.RouteCtxKey, rctx), scopedKeyClaims()))
+	rec := httptest.NewRecorder()
+	h.HandleUpdateUser(rec, req)
+	if rec.Code != http.StatusForbidden || decodeErrorCode(t, rec) != "insufficient_scope" || repo.updated != nil {
+		t.Fatalf("status %d body %s, updated %v", rec.Code, rec.Body.String(), repo.updated != nil)
+	}
 }

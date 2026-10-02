@@ -253,7 +253,7 @@ export default function AudiobookContent({
       />
 
       <div
-        className="page-shell space-y-12 py-10 sm:space-y-14"
+        className="page-shell detail-supporting-content space-y-12 py-10 sm:space-y-14"
         style={isPlayerOpen ? { paddingBottom: "8rem" } : undefined}
       >
         {narrator && <NarratorCard narrator={narrator} />}

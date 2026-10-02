@@ -1,3 +1,5 @@
+import type { PersonalizedSorts } from "@/lib/querySortOptions";
+import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -35,7 +37,7 @@ interface FilterRuleEditorProps {
   value: FilterConfig;
   onChange: (config: FilterConfig) => void;
   allowPersonalizedFilters?: boolean;
-  allowPersonalizedSorts?: boolean;
+  allowPersonalizedSorts?: PersonalizedSorts;
   sortRelevanceScope?: QuerySortRelevanceScope;
   mediaScope?: FilterRuleMediaScope;
 }
@@ -69,10 +71,21 @@ export default function FilterRuleEditor({
   mediaScope = "all",
 }: FilterRuleEditorProps) {
   const config = value || { match: "all", groups: [] };
-  const sortOptions = getCollectionSortOptions(allowPersonalizedSorts, sortRelevanceScope);
+  const shownRatingSources = useShownRatingSources();
+  const sortOptions = getCollectionSortOptions(
+    allowPersonalizedSorts,
+    sortRelevanceScope,
+    shownRatingSources,
+    config.sort,
+  );
   const selectedSort = normalizeQuerySortForScope(
     { field: config.sort, order: config.order },
-    { includePersonalized: allowPersonalizedSorts, relevanceScope: sortRelevanceScope },
+    {
+      includePersonalized: allowPersonalizedSorts,
+      relevanceScope: sortRelevanceScope,
+      shownRatingSources,
+      keepSortField: config.sort,
+    },
   );
   const fieldOptions = getFilterRuleFieldOptions(allowPersonalizedFilters, mediaScope);
 

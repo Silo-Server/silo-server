@@ -175,6 +175,48 @@ func TestRateLimitHandlerWithoutRunningLimiter(t *testing.T) {
 	}
 }
 
+func TestRateLimitHandlerReportsRedisAvailability(t *testing.T) {
+	// GET must answer with the same rule the save path enforces, so the UI can
+	// disable the Redis option instead of failing the admin at save time.
+	tests := []struct {
+		name             string
+		values           map[string]string
+		bootstrapAvail   bool
+		wantRedisEnabled bool
+	}{
+		{name: "nothing configured"},
+		{
+			name:   "malformed persisted url",
+			values: map[string]string{"redis.url": "not-a-url"},
+		},
+		{
+			name:             "canonical persisted url",
+			values:           map[string]string{"redis.url": "redis://cache.example.invalid:6379"},
+			wantRedisEnabled: true,
+		},
+		{
+			name:             "bootstrap redis despite stale persisted url",
+			values:           map[string]string{"redis.url": " redis://cache.example.invalid:6379 "},
+			bootstrapAvail:   true,
+			wantRedisEnabled: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newFakeRateLimitStore()
+			for key, value := range tc.values {
+				store.values[key] = value
+			}
+			h := NewRateLimitHandler(store, nil, nil, NewServerRestartStatusTracker(), tc.bootstrapAvail)
+
+			if got := getRateLimitConfig(t, h).RedisAvailable; got != tc.wantRedisEnabled {
+				t.Errorf("GET redis_available = %v, want %v", got, tc.wantRedisEnabled)
+			}
+		})
+	}
+}
+
 func TestRateLimitHandlerUsesLatestCommittedSettingsAfterAtomicWrite(t *testing.T) {
 	baseStore := newFakeRateLimitStore()
 	baseStore.values["ratelimit.enabled"] = "false"

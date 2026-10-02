@@ -153,6 +153,36 @@ func (r *SessionRepository) ListByUser(ctx context.Context, userID int) ([]*mode
 	return scanSessions(rows)
 }
 
+// SessionKey is the keyset position of one session in the
+// (created_at DESC, id DESC) order ListByUserPage serves.
+type SessionKey struct {
+	CreatedAt time.Time
+	ID        string
+}
+
+// ListByUserPage returns up to limit of the user's live sessions (not
+// expired, not revoked), newest first by (created_at DESC, id DESC), and
+// strictly after the key when one is given. v2 listSessions pages with it;
+// v1's ListByUser is unchanged. Callers that need has_more ask for limit+1.
+func (r *SessionRepository) ListByUserPage(ctx context.Context, userID int, after *SessionKey, limit int) ([]*models.AuthSession, error) {
+	args := []any{userID}
+	query := `SELECT ` + sessionColumns + ` FROM auth_sessions
+		WHERE user_id = $1 AND expires_at > NOW() AND revoked_at IS NULL`
+	if after != nil {
+		args = append(args, after.CreatedAt, after.ID)
+		query += fmt.Sprintf(` AND (created_at, id) < ($%d::timestamptz, $%d)`, len(args)-1, len(args))
+	}
+	args = append(args, limit)
+	query += fmt.Sprintf(` ORDER BY created_at DESC, id DESC LIMIT $%d`, len(args))
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("listing session page for user %d: %w", userID, err)
+	}
+	defer rows.Close()
+
+	return scanSessions(rows)
+}
+
 // Revoke sets revoked_at to NOW() for the given session.
 func (r *SessionRepository) Revoke(ctx context.Context, id string) error {
 	query := `UPDATE auth_sessions SET revoked_at = NOW() WHERE id = $1`
@@ -198,6 +228,26 @@ func (r *SessionRepository) IsValid(ctx context.Context, id string) (bool, error
 		return false, fmt.Errorf("checking session validity: %w", err)
 	}
 	return valid, nil
+}
+
+// ActiveSessionRole reports whether a session is active, as IsValid does, and
+// returns the current role of the account it belongs to. Both come from one
+// indexed lookup, so the per-request authentication check costs no extra
+// round trip. For an impersonation session the account is the one being
+// viewed as. active is false, with no error, for a missing, revoked or
+// expired session.
+func (r *SessionRepository) ActiveSessionRole(ctx context.Context, id string) (role string, active bool, err error) {
+	query := `SELECT u.role FROM auth_sessions s
+		JOIN users u ON u.id = s.user_id
+		WHERE s.id = $1 AND s.revoked_at IS NULL AND s.expires_at > NOW()`
+	err = r.pool.QueryRow(ctx, query, id).Scan(&role)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("checking session validity: %w", err)
+	}
+	return role, true, nil
 }
 
 // ExtendExpiresAt pushes expires_at forward for an active session. The update

@@ -30,7 +30,7 @@ export function mediaItemMenuTriggerClassName(
   density: PosterActionDensity = "standard",
 ) {
   return cn(
-    "media-card-action-trigger inline-flex items-center justify-center rounded-md border border-border/20 bg-background/60 text-foreground shadow-sm backdrop-blur-sm transition-[opacity,background-color,color] duration-150 hover:bg-background/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
+    "media-card-action-trigger inline-flex items-center justify-center rounded-md border border-border/20 bg-background/80 text-foreground shadow-sm transition-[opacity,background-color,color] duration-150 hover:bg-background/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
     posterActionSizeClasses(variant, density).trigger,
   );
 }

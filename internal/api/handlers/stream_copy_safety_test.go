@@ -248,18 +248,13 @@ func TestHandleStream_RefusesARevivalTheRowDoesNotKnowIsUnsafe(t *testing.T) {
 // stream copy — the remux_hls recipe. nodeURL pins it to a transcode node,
 // which is what makes the serve handlers proxy rather than rebuild locally.
 func copySafetyHLSCard(sessionID string, fileID int, nodeURL string) playback.RecipeCard {
-	return playback.RecipeCard{
+	return playback.NewRecipeCard(1, "profile-1", fileID, nodeURL, playback.TranscodeOpts{
 		SessionID:            sessionID,
-		UserID:               1,
-		ProfileID:            "profile-1",
-		MediaFileID:          fileID,
-		PlayMethod:           playback.PlayTranscode,
+		TranscodeTransportID: sessionID + "-transport",
 		TargetCodecVideo:     "copy",
 		TargetCodecAudio:     "copy",
 		SegmentDuration:      2,
-		TranscodeNodeURL:     nodeURL,
-		TranscodeTransportID: sessionID + "-transport",
-	}
+	})
 }
 
 // copySafetyHLSRequest builds one signed manifest or segment request for a
@@ -403,8 +398,13 @@ func TestHandleTranscodeServe_RevivesARealTranscodeForACopyUnsafeSource(t *testi
 	handler := NewPlaybackHandler(sessionMgr, testPlaybackFileResolver{file: file})
 	handler.JWTSecret = secret
 
-	card := copySafetyHLSCard(sessionID, file.ID, "")
-	card.TargetCodecVideo = "h264"
+	card := playback.NewRecipeCard(1, "profile-1", file.ID, "", playback.TranscodeOpts{
+		SessionID:            sessionID,
+		TranscodeTransportID: sessionID + "-transport",
+		TargetCodecVideo:     "h264",
+		TargetCodecAudio:     "copy",
+		SegmentDuration:      2,
+	})
 
 	rr := httptest.NewRecorder()
 	handler.HandleGetTranscodeManifest(rr, copySafetyHLSRequest(t, secret, "", card))

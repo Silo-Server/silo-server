@@ -441,8 +441,11 @@ func TestRunTranscribeTranslateStreamingInterleavesTranslationPerChunk(t *testin
 		strings.Join(translated[1].Lines, " ") != "es:second" {
 		t.Fatalf("stored translation not sorted/complete: %#v", translated)
 	}
-	if got := fmt.Sprint(repo.completed); got != "[2]" {
-		t.Fatalf("completed subtitle IDs = %s, want [2]", got)
+	if store.stored[0].Publication == nil || store.stored[0].Publication.Complete || store.stored[1].Publication == nil || !store.stored[1].Publication.Complete {
+		t.Fatal("transcript must be fenced as intermediate output and translation as final output")
+	}
+	if len(repo.completed) != 0 {
+		t.Fatal("job completion must occur inside storage publication")
 	}
 }
 
@@ -652,4 +655,46 @@ func countNotifierKind(events []notifierEvent, kind string) int {
 		}
 	}
 	return count
+}
+
+type timedSourceStore struct {
+	recordingSubtitleStore
+	sub  subtitles.DownloadedSubtitle
+	data []byte
+}
+
+func (s *timedSourceStore) GetSubtitleContent(context.Context, int) (*subtitles.DownloadedSubtitle, []byte, error) {
+	sub := s.sub
+	return &sub, append([]byte(nil), s.data...), nil
+}
+
+type timedSourceLister []subtitles.DownloadedSubtitle
+
+func (l timedSourceLister) ListDownloadedSubtitles(context.Context, int) ([]subtitles.DownloadedSubtitle, error) {
+	return l, nil
+}
+
+type singleFileResolver struct{ file *models.MediaFile }
+
+func (r singleFileResolver) GetByID(context.Context, int) (*models.MediaFile, error) {
+	return r.file, nil
+}
+
+// A downloaded source subtitle is translated with its stored timing
+// correction, so the translation inherits the corrected timing.
+func TestLoadSourceAppliesDownloadedSubtitleTiming(t *testing.T) {
+	row := subtitles.DownloadedSubtitle{ID: 5, MediaFileID: 1, Language: "en", Format: subtitles.FormatSRT,
+		Timing: subtitles.Timing{OffsetMS: 1500, Scale: 1}}
+	svc := &Service{
+		files:  singleFileResolver{file: &models.MediaFile{ID: 1}},
+		lister: timedSourceLister{{ID: 5, MediaFileID: 1, Language: "en", Format: subtitles.FormatSRT}},
+		store:  &timedSourceStore{sub: row, data: []byte("1\n00:00:01,000 --> 00:00:02,000\nHello\n")},
+	}
+	cues, language, err := svc.loadSource(context.Background(), &Job{MediaFileID: 1, SourceIndex: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if language != "en" || len(cues) != 1 || cues[0].Start != 2500*time.Millisecond || cues[0].End != 3500*time.Millisecond {
+		t.Fatalf("cues = %+v language = %q", cues, language)
+	}
 }

@@ -10,6 +10,7 @@ import (
 	"image/color"
 	_ "image/jpeg"
 	_ "image/png"
+	"slices"
 	"sort"
 
 	"github.com/h2non/bimg"
@@ -20,6 +21,13 @@ const (
 	webpQuality              = 90
 	thumbhashSourceDimension = 100
 )
+
+// libvips threading: bimg's package init pins libvips to a single thread per
+// operation (vips_concurrency_set(1)) unless VIPS_CONCURRENCY is set in the
+// environment. Every caller in Silo runs encodes from its own worker pool, so
+// that pool is the only source of parallelism and the pools are sized per
+// CPU core; see tasks.imageCacheWorkerCount. Do not raise VIPS_CONCURRENCY
+// in deployments without lowering those pools, or the host oversubscribes.
 
 // MaxCachedOriginalDimension caps the longest edge of a cached "original"
 // variant. Provider artwork wider than this is downscaled on ingest, so a
@@ -69,12 +77,13 @@ func GenerateVariants(data []byte, widths []int) (*VariantResult, error) {
 	variants = append(variants, Variant{Key: "original", Data: original})
 
 	// Sort widths descending (largest first).
-	sorted := make([]int, len(widths))
-	copy(sorted, widths)
-	sort.Sort(sort.Reverse(sort.IntSlice(sorted)))
+	sorted := slices.Clone(widths)
+	slices.Sort(sorted)
+	slices.Reverse(sorted)
 
+	previousWidth, previousHeight := originalOptions.Width, originalOptions.Height
+	previousOutput := original
 	for _, w := range sorted {
-		size, _ := bimg.NewImage(data).Size()
 		opts := bimg.Options{
 			Type:          bimg.WEBP,
 			Quality:       webpQuality,
@@ -83,14 +92,46 @@ func GenerateVariants(data []byte, widths []int) (*VariantResult, error) {
 		if size.Width > w {
 			opts.Width = w
 		}
-		out, err := bimg.NewImage(data).Process(opts)
-		if err != nil {
-			return nil, fmt.Errorf("imageutil: resize to w%d: %w", w, err)
+		var out []byte
+		if opts.Width == previousWidth && opts.Height == previousHeight {
+			// Equivalent encodes share the work, while each variant retains its
+			// own buffer. Compare both dimensions: tall originals may be capped.
+			out = bytes.Clone(previousOutput)
+		} else {
+			out, err = bimg.NewImage(data).Process(opts)
+			if err != nil {
+				return nil, fmt.Errorf("imageutil: resize to w%d: %w", w, err)
+			}
 		}
+		previousWidth, previousHeight, previousOutput = opts.Width, opts.Height, out
 		variants = append(variants, Variant{Key: fmt.Sprintf("w%d", w), Data: out})
 	}
 
 	return &VariantResult{Variants: variants, Ext: ".webp"}, nil
+}
+
+// EncodeWebPWidth re-encodes the source image as a single WebP no wider than
+// width, with metadata stripped. It is the "w<width>" rung of GenerateVariants
+// for callers that store that one variant and no original. Narrower sources
+// keep their width.
+func EncodeWebPWidth(data []byte, width int) ([]byte, error) {
+	size, err := bimg.NewImage(data).Size()
+	if err != nil {
+		return nil, fmt.Errorf("imageutil: invalid image: %w", err)
+	}
+	opts := bimg.Options{
+		Type:          bimg.WEBP,
+		Quality:       webpQuality,
+		StripMetadata: true,
+	}
+	if size.Width > width {
+		opts.Width = width
+	}
+	out, err := bimg.NewImage(data).Process(opts)
+	if err != nil {
+		return nil, fmt.Errorf("imageutil: resize to w%d: %w", width, err)
+	}
+	return out, nil
 }
 
 // GenerateSquareVariants center-crops the source image to a square and returns
@@ -157,22 +198,40 @@ func GenerateSquareVariants(data []byte, sizes []int) (*VariantResult, error) {
 
 // Thumbhash computes a base64-encoded thumbhash from raw image bytes.
 // The image is scaled to max 100x100 before hashing.
+//
+// The downscale happens in libvips before the Go-side decode, not after:
+// decoding a full provider original in Go materializes the whole raster on
+// the heap — well over a hundred MiB for a large poster — per concurrent
+// caller, while vips shrinks it to thumbhashSourceDimension with
+// shrink-on-load and hands Go a raster of a few KiB. The pure-Go decode of
+// the raw bytes remains as the fallback for anything vips cannot parse.
+//
+// Changing this pipeline changes the emitted hash bytes for a given image.
+// Stored thumbhashes remain valid placeholders, and the one site that
+// compares hashes for equality (ebook scan cover change detection) stores
+// the freshly computed hash whenever it re-caches, so a pipeline change
+// costs one re-cache per scan-covered ebook and then converges.
 func Thumbhash(data []byte) (string, error) {
-	img, _, err := image.Decode(bytes.NewReader(data))
+	img, err := decodeThumbhashSource(data)
 	if err != nil {
-		normalized, normalizeErr := normalizeThumbhashSource(data)
-		if normalizeErr != nil {
-			return "", fmt.Errorf("imageutil: decode for thumbhash: %w", err)
-		}
-		img, _, err = image.Decode(bytes.NewReader(normalized))
-		if err != nil {
-			return "", fmt.Errorf("imageutil: decode normalized thumbhash source: %w", err)
-		}
+		return "", err
 	}
-
-	scaled := scaleImage(img, 100)
+	scaled := scaleImage(img, thumbhashSourceDimension)
 	hashBytes := thumbhash.EncodeImage(scaled)
 	return base64.StdEncoding.EncodeToString(hashBytes), nil
+}
+
+func decodeThumbhashSource(data []byte) (image.Image, error) {
+	if normalized, err := normalizeThumbhashSource(data); err == nil {
+		if img, _, err := image.Decode(bytes.NewReader(normalized)); err == nil {
+			return img, nil
+		}
+	}
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("imageutil: decode for thumbhash: %w", err)
+	}
+	return img, nil
 }
 
 func normalizeThumbhashSource(data []byte) ([]byte, error) {

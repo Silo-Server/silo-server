@@ -18,6 +18,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
@@ -32,6 +33,61 @@ func (p compatToneMapInventoryPlanner) PlanSession(string, string, bool, int) no
 
 func (p compatToneMapInventoryPlanner) TranscodeNodeURLs() []string {
 	return p.urls
+}
+
+func TestCompatToneMapCapabilityInventoryUsesRoutingSnapshot(t *testing.T) {
+	var localProbes atomic.Int32
+	handler := &PlaybackHandler{
+		compatToneMapProbe: func(context.Context, string, string, string) (tonemap.Capabilities, error) {
+			localProbes.Add(1)
+			return tonemap.Capabilities{{
+				Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware,
+				Filter: tonemap.SoftwareFilterBT2390, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
+			}}, nil
+		},
+	}
+	policy := config.DefaultPlaybackRoutingPolicy()
+	policy.VideoTranscodeExecution = config.PlaybackExecutionWorkerOnly
+
+	capabilities, _, err := handler.compatToneMapCapabilityInventoryWithPolicy(t.Context(), time.Second, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(capabilities) != 0 || localProbes.Load() != 0 {
+		t.Fatalf("capabilities = %#v, local probes = %d; worker-only snapshot must exclude local execution", capabilities, localProbes.Load())
+	}
+}
+
+func TestCompatToneMapCapabilityInventoryExcludesWorkersForAPIOnlyExecution(t *testing.T) {
+	var remoteProbes atomic.Int32
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		remoteProbes.Add(1)
+		_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{ToneMapCapabilities: tonemap.Capabilities{{
+			Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware,
+			Filter: tonemap.SoftwareFilterBT2390, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
+		}}})
+	}))
+	t.Cleanup(remote.Close)
+
+	handler := &PlaybackHandler{
+		NodePlanner: compatToneMapInventoryPlanner{urls: []string{remote.URL}},
+		compatToneMapProbe: func(context.Context, string, string, string) (tonemap.Capabilities, error) {
+			return nil, nil
+		},
+	}
+	policy := config.DefaultPlaybackRoutingPolicy()
+	policy.VideoTranscodeExecution = config.PlaybackExecutionAPIOnly
+
+	capabilities, byNode, err := handler.compatToneMapCapabilityInventoryWithPolicy(t.Context(), time.Second, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(capabilities) != 0 || len(byNode) != 0 {
+		t.Fatalf("capabilities = %#v, by node = %#v; API-only snapshot must exclude workers", capabilities, byNode)
+	}
+	if got := remoteProbes.Load(); got != 0 {
+		t.Fatalf("remote capability probes = %d, want 0 under API-only execution", got)
+	}
 }
 
 func TestCompatToneMapCapabilityInventoryFetchesNodesConcurrently(t *testing.T) {
@@ -56,10 +112,8 @@ func TestCompatToneMapCapabilityInventoryFetchesNodesConcurrently(t *testing.T) 
 
 	handler := &PlaybackHandler{
 		NodePlanner: compatToneMapInventoryPlanner{urls: []string{first.URL, second.URL}},
-		SettingsRepo: stubSettingsReader{values: map[string]string{
-			config.PlaybackLocalTranscodeFallbackSettingKey: "false",
-		}},
 	}
+	requireCompatWorkerRouting(handler)
 	result := make(chan tonemap.Capabilities, 1)
 	go func() {
 		capabilities, _, _ := handler.compatToneMapCapabilityInventory(context.Background(), time.Second)
@@ -92,10 +146,8 @@ func TestCompatToneMapCapabilityInventoryHonorsSharedDeadline(t *testing.T) {
 
 	handler := &PlaybackHandler{
 		NodePlanner: compatToneMapInventoryPlanner{urls: []string{slow.URL, fast.URL}},
-		SettingsRepo: stubSettingsReader{values: map[string]string{
-			config.PlaybackLocalTranscodeFallbackSettingKey: "false",
-		}},
 	}
+	requireCompatWorkerRouting(handler)
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	started := time.Now()
@@ -117,7 +169,7 @@ func TestCompatToneMapCapabilityInventoryHonorsSharedDeadline(t *testing.T) {
 	}
 }
 
-func TestPlanCompatTranscodeSessionRequiresAudioToAACV2ForSurroundDownmix(t *testing.T) {
+func TestResolveCompatHLSRouteRequiresAudioToAACV2ForSurroundDownmix(t *testing.T) {
 	capabilityNode := func(recipeVersion string) *httptest.Server {
 		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{Transformations: []playback.TransformationV3{{
@@ -139,19 +191,26 @@ func TestPlanCompatTranscodeSessionRequiresAudioToAACV2ForSurroundDownmix(t *tes
 		JWTSecret:   "secret",
 		NodePlanner: nodepool.NewPlanner(nodepool.NewProxyPool(), pool),
 	}
-	plan, err := handler.planCompatTranscodeSession(
+	policy := config.DefaultPlaybackRoutingPolicy()
+	policy.RemuxExecution = config.PlaybackExecutionWorkerOnly
+	policy.RemuxEgress = config.PlaybackEgressAPIOnly
+	decision, err := handler.resolveCompatHLSRouteWithPolicy(
 		context.Background(), &playback.Session{ID: "compat-audio-v2"},
-		&models.MediaFile{ID: 42, Bitrate: 8_000}, 8_000, false, 6,
+		&models.MediaFile{ID: 42, Bitrate: 8_000}, PlaybackMediaSource{
+			HLSRemux: true, TranscodeAudio: true,
+			Version: catalog.FileVersion{Bitrate: 8_000, AudioTracks: []models.AudioTrack{{Channels: 6}}},
+		}, "", nil, nil, policy,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != current.URL {
-		t.Fatalf("selected node = %#v, want audio_to_aac v2 node %s", plan.TranscodeNode, current.URL)
+	if !decision.Selected() || decision.Shape.Egress != noderouting.EgressAPI ||
+		decision.Plan.TranscodeNode == nil || decision.Plan.TranscodeNode.URL != current.URL {
+		t.Fatalf("decision = %#v, want audio_to_aac v2 worker with API egress", decision)
 	}
 }
 
-func TestPlanCompatProxySessionRequiresAudioToAACV2ForSurroundDownmix(t *testing.T) {
+func TestResolveCompatIdentityRouteRequiresAudioToAACV2ForSurroundDownmix(t *testing.T) {
 	capabilityProxy := func(recipeVersion string) *httptest.Server {
 		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{Transformations: []playback.TransformationV3{{
@@ -173,17 +232,25 @@ func TestPlanCompatProxySessionRequiresAudioToAACV2ForSurroundDownmix(t *testing
 		JWTSecret:   "secret",
 		NodePlanner: nodepool.NewPlanner(proxies, nodepool.NewTranscodePool()),
 	}
-	plan := handler.planCompatProxySession(context.Background(), "compat-remux-v2", 8_000, true)
-	if plan.ProxyNode == nil || plan.ProxyNode.URL != current.URL {
-		t.Fatalf("selected proxy = %#v, want audio_to_aac v2 proxy %s", plan.ProxyNode, current.URL)
+	policy := config.DefaultPlaybackRoutingPolicy()
+	policy.RemuxExecution = config.PlaybackExecutionWorkerOnly
+	policy.RemuxEgress = config.PlaybackEgressProxyOnly
+	decision := handler.resolveCompatIdentityRouteWithPolicy(
+		context.Background(), "compat-remux-v2", string(playback.PlayRemux), 8_000, true, policy,
+	)
+	if !decision.Selected() || decision.Plan.ProxyNode == nil || decision.Plan.ProxyNode.URL != current.URL {
+		t.Fatalf("decision = %#v, want audio_to_aac v2 proxy %s", decision, current.URL)
 	}
 	proxies.SetNodes([]*nodepool.Node{{ID: 1, URL: legacy.URL, Enabled: true, Healthy: true}})
-	if legacyOnly := handler.planCompatProxySession(context.Background(), "compat-remux-local", 8_000, true); legacyOnly.ProxyNode != nil {
-		t.Fatalf("legacy-only proxy plan = %#v, want integrated fallback", legacyOnly.ProxyNode)
+	legacyOnly := handler.resolveCompatIdentityRouteWithPolicy(
+		context.Background(), "compat-remux-local", string(playback.PlayRemux), 8_000, true, policy,
+	)
+	if legacyOnly.Selected() {
+		t.Fatalf("legacy-only decision = %#v, want no hard-policy route", legacyOnly)
 	}
 }
 
-func TestPlanCompatTranscodeSessionFallsBackToSoftwareCapacity(t *testing.T) {
+func TestResolveCompatHLSRouteFallsBackToSoftwareCapacity(t *testing.T) {
 	newToneMapNode := func(capability tonemap.Capability) *httptest.Server {
 		t.Helper()
 		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -212,9 +279,9 @@ func TestPlanCompatTranscodeSessionFallsBackToSoftwareCapacity(t *testing.T) {
 		SettingsRepo: stubSettingsReader{values: map[string]string{
 			config.PlaybackTranscodeHardwareToneMapSettingKey: "true",
 			config.PlaybackTranscodeSoftwareToneMapSettingKey: "true",
-			config.PlaybackLocalTranscodeFallbackSettingKey:   "false",
 		}},
 	}
+	requireCompatWorkerRouting(handler)
 	file := &models.MediaFile{
 		ID: 42, FilePath: "/media/movie.mkv", Bitrate: 32_000, HDR: true,
 		VideoTracks: []models.VideoTrack{{
@@ -222,12 +289,15 @@ func TestPlanCompatTranscodeSessionFallsBackToSoftwareCapacity(t *testing.T) {
 			ColorPrimaries: "bt2020", ColorSpace: "bt2020nc", BitDepth: 10,
 		}},
 	}
-	plan, err := handler.planCompatTranscodeSession(
+	policy := config.DefaultPlaybackRoutingPolicy()
+	policy.VideoTranscodeExecution = config.PlaybackExecutionWorkerOnly
+	policy.VideoTranscodeEgress = config.PlaybackEgressAPIOnly
+	decision, err := handler.resolveCompatHLSRouteWithPolicy(
 		context.Background(), &playback.Session{ID: "compat-capacity"}, file,
-		file.Bitrate, true, 0,
+		PlaybackMediaSource{Version: catalog.FileVersion{Bitrate: file.Bitrate}}, "", nil, nil, policy,
 	)
-	if err != nil || plan.TranscodeNode == nil || plan.TranscodeNode.URL != software.URL {
-		t.Fatalf("plan = %+v error = %v, want software node fallback", plan, err)
+	if err != nil || !decision.Selected() || decision.Plan.TranscodeNode == nil || decision.Plan.TranscodeNode.URL != software.URL {
+		t.Fatalf("decision = %+v error = %v, want software worker fallback", decision, err)
 	}
 }
 

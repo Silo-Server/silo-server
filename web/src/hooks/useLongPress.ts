@@ -37,10 +37,27 @@ export function useLongPress(
   useEffect(() => {
     const target = targetRef?.current;
     if (!target || !enabled) return;
+    // Aliased so the null check above narrows inside the hoisted handlers below.
+    const targetElement = target;
 
     let timer: number | null = null;
+    let suppressionCleanupTimer: number | null = null;
     let press: { pointerId: number; clientX: number; clientY: number } | null = null;
     let suppressUntil = 0;
+
+    function removeSuppressionListeners() {
+      if (suppressionCleanupTimer !== null) {
+        window.clearTimeout(suppressionCleanupTimer);
+        suppressionCleanupTimer = null;
+      }
+      targetElement.removeEventListener("click", handleClickCapture, true);
+      targetElement.removeEventListener("contextmenu", handleContextMenu);
+    }
+
+    function installSuppressionListeners() {
+      targetElement.addEventListener("click", handleClickCapture, true);
+      targetElement.addEventListener("contextmenu", handleContextMenu);
+    }
 
     function stopTracking() {
       if (timer !== null) {
@@ -60,20 +77,29 @@ export function useLongPress(
         Math.abs(event.clientY - press.clientY) > LONG_PRESS_MOVE_TOLERANCE_PX
       ) {
         stopTracking();
+        removeSuppressionListeners();
       }
     }
 
     function handlePointerUp(event: PointerEvent) {
       if (press && event.pointerId !== press.pointerId) return;
+      const longPressFired = Date.now() <= suppressUntil;
       stopTracking();
+      if (!longPressFired) removeSuppressionListeners();
     }
 
     function handlePointerDown(event: PointerEvent) {
       suppressUntil = 0;
       stopTracking();
+      removeSuppressionListeners();
       if (event.pointerType !== "touch" && event.pointerType !== "pen") return;
 
       press = { pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY };
+      // These listeners are only needed while a touch/pen gesture is active
+      // and for the short suppression window after a successful hold. Keeping
+      // them off every idle card avoids hundreds of redundant listeners on
+      // large home screens, which is especially noticeable in mobile Firefox.
+      installSuppressionListeners();
       // Movement can leave the card (a swipe), so the follow-up listeners live
       // on the window rather than the element.
       window.addEventListener("pointermove", handlePointerMove);
@@ -85,6 +111,10 @@ export function useLongPress(
         press = null;
         suppressUntil = Date.now() + LONG_PRESS_SUPPRESS_MS;
         onLongPressRef.current();
+        suppressionCleanupTimer = window.setTimeout(() => {
+          suppressUntil = 0;
+          removeSuppressionListeners();
+        }, LONG_PRESS_SUPPRESS_MS);
       }, LONG_PRESS_DELAY_MS);
     }
 
@@ -93,6 +123,7 @@ export function useLongPress(
       suppressUntil = 0;
       event.preventDefault();
       event.stopPropagation();
+      removeSuppressionListeners();
     }
 
     function handleContextMenu(event: Event) {
@@ -100,14 +131,11 @@ export function useLongPress(
       event.preventDefault();
     }
 
-    target.addEventListener("pointerdown", handlePointerDown);
-    target.addEventListener("click", handleClickCapture, true);
-    target.addEventListener("contextmenu", handleContextMenu);
+    targetElement.addEventListener("pointerdown", handlePointerDown);
     return () => {
       stopTracking();
-      target.removeEventListener("pointerdown", handlePointerDown);
-      target.removeEventListener("click", handleClickCapture, true);
-      target.removeEventListener("contextmenu", handleContextMenu);
+      removeSuppressionListeners();
+      targetElement.removeEventListener("pointerdown", handlePointerDown);
     };
   }, [enabled, targetRef]);
 }

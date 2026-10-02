@@ -1,16 +1,12 @@
 import { ArrowLeft, Plus } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useSearchParams } from "react-router";
 
-import type { PolicyDocument } from "@/api/types";
+import type { PolicyDocument } from "@/api/adminPolicy";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
-import {
-  useCreatePolicyDocument,
-  usePolicyDocuments,
-  useSetPolicyDocumentEnabled,
-} from "@/hooks/queries/admin/policy";
+import { PolicyEnabledControl } from "./PolicyRevisionReview";
+import { useCreatePolicyDocument, usePolicyDocuments } from "@/hooks/queries/admin/policy";
 
 import { PolicyEditorPanel } from "./PolicyEditorPanel";
 import { formatPolicyDate, messageFromError } from "./policyPageUtils";
@@ -22,8 +18,7 @@ interface PolicyDocumentListProps {
 
 function parseDocumentID(value: string | null) {
   if (!value) return undefined;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+  return value;
 }
 
 export function PolicyDocumentList({ domains }: PolicyDocumentListProps) {
@@ -31,12 +26,7 @@ export function PolicyDocumentList({ domains }: PolicyDocumentListProps) {
   const documents = usePolicyDocuments();
   const selectedDocumentId = parseDocumentID(searchParams.get("document"));
 
-  const selectedExists = useMemo(
-    () => documents.data?.some((document) => document.id === selectedDocumentId) ?? false,
-    [documents.data, selectedDocumentId],
-  );
-
-  function selectDocument(id: number | undefined) {
+  function selectDocument(id: string | undefined) {
     const next = new URLSearchParams(searchParams);
     if (id === undefined) {
       next.delete("document");
@@ -46,7 +36,7 @@ export function PolicyDocumentList({ domains }: PolicyDocumentListProps) {
     setSearchParams(next, { replace: true });
   }
 
-  if (selectedExists && selectedDocumentId) {
+  if (selectedDocumentId) {
     return (
       <div className="space-y-5">
         <Button
@@ -66,6 +56,12 @@ export function PolicyDocumentList({ domains }: PolicyDocumentListProps) {
 
   return (
     <div className="space-y-5">
+      {documents.error && (
+        <div role="alert">
+          <p>{messageFromError(documents.error, "Unable to load overrides.")}</p>
+          <Button onClick={() => void documents.restart()}>Restart overrides</Button>
+        </div>
+      )}
       {documents.isLoading && (
         <p className="text-muted-foreground text-sm">Loading policy documents...</p>
       )}
@@ -78,6 +74,14 @@ export function PolicyDocumentList({ domains }: PolicyDocumentListProps) {
             onSelect={selectDocument}
           />
         ))}
+      {documents.hasNextPage && (
+        <Button
+          onClick={() => void documents.fetchNextPage()}
+          disabled={documents.isFetchingNextPage}
+        >
+          Load more overrides
+        </Button>
+      )}
     </div>
   );
 }
@@ -85,7 +89,7 @@ export function PolicyDocumentList({ domains }: PolicyDocumentListProps) {
 interface PolicyDomainCardProps {
   domain: string;
   documents: PolicyDocument[];
-  onSelect: (id: number) => void;
+  onSelect: (id: string) => void;
 }
 
 function PolicyDomainCard({ domain, documents, onSelect }: PolicyDomainCardProps) {
@@ -94,7 +98,6 @@ function PolicyDomainCard({ domain, documents, onSelect }: PolicyDomainCardProps
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const createDocument = useCreatePolicyDocument();
-  const setEnabled = useSetPolicyDocumentEnabled();
 
   async function create() {
     setError("");
@@ -110,15 +113,6 @@ function PolicyDomainCard({ domain, documents, onSelect }: PolicyDomainCardProps
       onSelect(document.id);
     } catch (err) {
       setError(messageFromError(err, "Failed to create policy document."));
-    }
-  }
-
-  async function toggleDocument(documentId: number, enabled: boolean) {
-    setError("");
-    try {
-      await setEnabled.mutateAsync({ documentId, enabled });
-    } catch (err) {
-      setError(messageFromError(err, "Failed to update policy document."));
     }
   }
 
@@ -199,14 +193,7 @@ function PolicyDomainCard({ domain, documents, onSelect }: PolicyDomainCardProps
                   onClick={(event) => event.stopPropagation()}
                   onKeyDown={(event) => event.stopPropagation()}
                 >
-                  <Switch
-                    checked={document.enabled}
-                    onCheckedChange={(checked) => {
-                      void toggleDocument(document.id, checked);
-                    }}
-                    disabled={setEnabled.isPending}
-                    aria-label={`Set ${document.name} enabled`}
-                  />
+                  <PolicyEnabledControl document={document} />
                 </span>
               </div>
             </li>
@@ -215,7 +202,7 @@ function PolicyDomainCard({ domain, documents, onSelect }: PolicyDomainCardProps
       ) : (
         !creating && (
           <p className="text-muted-foreground border-border mt-4 border-t pt-4 text-sm">
-            The Silo baseline applies unchanged.
+            No overrides for this domain are shown on the loaded pages.
             {meta.example && (
               <span className="text-muted-foreground/80">
                 {" "}

@@ -14,7 +14,7 @@ import { ALL_DEVICE_SETTING_KEYS } from "@/lib/settingsDisplay";
  * one group — so a key added to the manifest cannot silently disappear from
  * this screen.
  */
-export type DeviceSettingGroupId = "picture" | "sound" | "subtitles" | "episodes";
+export type DeviceSettingGroupId = "picture" | "sound" | "subtitles" | "episodes" | "appearance";
 
 export interface DeviceSettingGroup {
   id: DeviceSettingGroupId;
@@ -29,12 +29,21 @@ const GROUP_META: Record<DeviceSettingGroupId, { title: string; description: str
   sound: { title: "Sound", description: "Audio on this device" },
   subtitles: { title: "Subtitles", description: "On this device" },
   episodes: { title: "Episodes", description: "What happens between episodes" },
+  appearance: { title: "Appearance", description: "How titles look on this device" },
 };
 
-const GROUP_ORDER: DeviceSettingGroupId[] = ["picture", "sound", "subtitles", "episodes"];
+const GROUP_ORDER: DeviceSettingGroupId[] = [
+  "picture",
+  "sound",
+  "subtitles",
+  "episodes",
+  "appearance",
+];
 
 /** Keys whose group is not implied by their manifest category. */
 const EXPLICIT_GROUPS: Partial<Record<string, DeviceSettingGroupId>> = {
+  "ui.theme_music_enabled": "sound",
+  "ui.theme_music_loop": "sound",
   "playback.audio_language": "sound",
   "playback.subtitle_language": "subtitles",
   "playback.subtitle_mode": "subtitles",
@@ -60,13 +69,14 @@ const EXPLICIT_GROUPS: Partial<Record<string, DeviceSettingGroupId>> = {
   "player.playback_speed": "sound",
   "player.subtitle_sync_ms": "subtitles",
   "player.sleep_timer_default_minutes": "episodes",
+  "ui.title_art": "appearance",
 };
 
 /**
  * Keys deliberately kept off this screen.
  *
- * `ui.*` device overrides exist in the contract but belong to the Appearance
- * screen, which already edits them at profile scope; showing them here would
+ * `ui.*` device overrides exist in the contract but belong to the Accessibility
+ * and Navigation & Cards screens, which already edit them at profile scope; showing them here would
  * give one setting two homes. `ui.library_page_state` is remembered browse
  * state rather than a preference — it has no control in the manifest at all.
  */

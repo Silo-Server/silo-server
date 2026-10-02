@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,16 +24,19 @@ type SearchIndexProgressReporter interface {
 }
 
 type CatalogSearchIndexSyncStats struct {
-	Configured      bool   `json:"configured"`
-	Skipped         bool   `json:"skipped"`
-	Reason          string `json:"reason,omitempty"`
-	Events          int    `json:"events"`
-	Upserted        int    `json:"upserted"`
-	Deleted         int    `json:"deleted"`
-	ActiveIndexUID  string `json:"active_index_uid,omitempty"`
-	DocumentCount   int    `json:"document_count"`
-	VectorDocCount  int    `json:"vector_document_count"`
-	LastProcessedID int64  `json:"last_processed_event_id,omitempty"`
+	Configured       bool   `json:"configured"`
+	Skipped          bool   `json:"skipped"`
+	Reason           string `json:"reason,omitempty"`
+	RebuildAttempted bool   `json:"rebuild_attempted"`
+	Rebuilt          bool   `json:"rebuilt"`
+	Events           int    `json:"events"`
+	Upserted         int    `json:"upserted"`
+	Deleted          int    `json:"deleted"`
+	ActiveIndexUID   string `json:"active_index_uid,omitempty"`
+	DocumentCount    int    `json:"document_count"`
+	VectorDocCount   int    `json:"vector_document_count"`
+	RemovedIndexes   int    `json:"removed_indexes"`
+	LastProcessedID  int64  `json:"last_processed_event_id,omitempty"`
 }
 
 type CatalogSearchIndexRebuildStats struct {
@@ -70,6 +75,7 @@ const catalogSearchExcludeMangaChaptersSQL = `NOT EXISTS (SELECT 1 FROM manga_ch
 type CatalogSearchIndexer struct {
 	pool          *pgxpool.Pool
 	settingsStore SettingsStore
+	runtime       *CatalogSearchSettings
 	events        *SearchIndexEventRepository
 }
 
@@ -81,17 +87,53 @@ func NewCatalogSearchIndexer(pool *pgxpool.Pool, settingsStore SettingsStore) *C
 	}
 }
 
+// NewCatalogSearchIndexerFromSettings binds scheduled and manual maintenance
+// to the same process-lifetime settings snapshot as the serving search
+// provider. Catalog search settings are restart-bound; rereading saved values
+// on the minute interval could otherwise publish an index the live provider
+// does not understand before the server restarts.
+func NewCatalogSearchIndexerFromSettings(pool *pgxpool.Pool, settingsStore SettingsStore, settings CatalogSearchSettings) *CatalogSearchIndexer {
+	settings.IndexTypes = slices.Clone(settings.IndexTypes)
+	return &CatalogSearchIndexer{
+		pool:          pool,
+		settingsStore: settingsStore,
+		runtime:       new(settings),
+		events:        NewSearchIndexEventRepository(pool),
+	}
+}
+
 func (i *CatalogSearchIndexer) ShouldSyncRun(ctx context.Context) (bool, error) {
 	settings, ok, err := i.loadMeilisearchRuntime(ctx)
 	if err != nil || !ok || settings.Provider != SearchProviderMeilisearch {
+		return false, err
+	}
+	client, err := newMeilisearchClient(settings.MeilisearchURL, settings.MeilisearchAPIKey, settings.Timeout)
+	if err != nil {
 		return false, err
 	}
 	state, err := i.events.GetState(ctx, SearchProviderMeilisearch)
 	if err != nil {
 		return false, err
 	}
-	if state.ActiveIndexUID == "" || state.SchemaVersion != catalogSearchMeilisearchSchemaVersion(settings.Embedder, settings.IndexTypes, settings.SemanticEnabled, settings.BinaryQuantized) {
-		return false, nil
+	rebuildRequired, err := catalogSearchIndexRequiresRebuildOnTarget(
+		ctx,
+		client,
+		state,
+		catalogSearchMeilisearchSchemaVersion(settings.Embedder, settings.IndexTypes, settings.SemanticEnabled, settings.BinaryQuantized),
+		settings.MeilisearchIndex,
+	)
+	if err != nil {
+		return false, err
+	}
+	if rebuildRequired {
+		if catalogSearchIndexHasNewerSchema(state) {
+			return false, nil
+		}
+		matches, err := i.runtimeMatchesDesiredSettings(ctx, settings)
+		if err != nil || !matches {
+			return false, err
+		}
+		return true, nil
 	}
 	pending, err := i.events.PendingCount(ctx, SearchProviderMeilisearch)
 	if err != nil {
@@ -137,12 +179,46 @@ func (i *CatalogSearchIndexer) SyncOutbox(ctx context.Context, progress SearchIn
 	if err != nil {
 		return stats, err
 	}
-	if state.ActiveIndexUID == "" || state.SchemaVersion != catalogSearchMeilisearchSchemaVersion(settings.Embedder, settings.IndexTypes, settings.SemanticEnabled, settings.BinaryQuantized) {
-		stats.Skipped = true
-		stats.Reason = "active search index is missing or stale; run rebuild_catalog_search_index"
+	rebuildRequired, err := catalogSearchIndexRequiresRebuildOnTarget(
+		ctx,
+		client,
+		state,
+		catalogSearchMeilisearchSchemaVersion(settings.Embedder, settings.IndexTypes, settings.SemanticEnabled, settings.BinaryQuantized),
+		settings.MeilisearchIndex,
+	)
+	if err != nil {
+		return stats, err
+	}
+	if rebuildRequired {
+		if catalogSearchIndexHasNewerSchema(state) {
+			stats.Skipped = true
+			stats.Reason = "active search index was built by a newer server version"
+			setSearchIndexTaskResult(progress, stats)
+			reportSearchIndexProgress(progress, 100, "A newer server version owns the active search index")
+			return stats, nil
+		}
+		matches, matchErr := i.runtimeMatchesDesiredSettings(ctx, settings)
+		if matchErr != nil {
+			return stats, matchErr
+		}
+		if !matches {
+			stats.Skipped = true
+			stats.Reason = "saved search settings are waiting for a server restart"
+			setSearchIndexTaskResult(progress, stats)
+			reportSearchIndexProgress(progress, 100, "Restart Silo before rebuilding the catalog search index")
+			return stats, nil
+		}
+		stats.RebuildAttempted = true
+		rebuildStats, rebuildErr := i.rebuildLocked(ctx, progress, settings, client)
+		stats.Rebuilt = !rebuildStats.Skipped && rebuildErr == nil
+		stats.Skipped = rebuildStats.Skipped
+		stats.Reason = rebuildStats.Reason
+		stats.ActiveIndexUID = rebuildStats.ActiveIndexUID
+		stats.DocumentCount = rebuildStats.DocumentCount
+		stats.VectorDocCount = rebuildStats.VectorDocCount
+		stats.RemovedIndexes = rebuildStats.RemovedIndexes
 		setSearchIndexTaskResult(progress, stats)
-		reportSearchIndexProgress(progress, 100, "Catalog search index needs a rebuild")
-		return stats, nil
+		return stats, rebuildErr
 	}
 	stats.ActiveIndexUID = state.ActiveIndexUID
 
@@ -238,6 +314,55 @@ func (i *CatalogSearchIndexer) SyncOutbox(ctx context.Context, progress SearchIn
 	return stats, nil
 }
 
+func catalogSearchIndexRequiresRebuildOnTarget(
+	ctx context.Context,
+	client *meilisearchClient,
+	state SearchIndexState,
+	expectedSchemaVersion int,
+	indexPrefix string,
+) (bool, error) {
+	if catalogSearchIndexStateRequiresRebuild(state, expectedSchemaVersion, indexPrefix) {
+		return true, nil
+	}
+	if client == nil {
+		return false, fmt.Errorf("checking active Meilisearch index %q: client is not configured", state.ActiveIndexUID)
+	}
+	if _, err := client.Stats(ctx, state.ActiveIndexUID); err != nil {
+		if isMeilisearchIndexNotFound(err) {
+			return true, nil
+		}
+		return false, fmt.Errorf("checking active Meilisearch index %q: %w", state.ActiveIndexUID, err)
+	}
+	return false, nil
+}
+
+func catalogSearchIndexStateRequiresRebuild(state SearchIndexState, expectedSchemaVersion int, indexPrefix string) bool {
+	return state.ActiveIndexUID == "" ||
+		state.SchemaVersion != expectedSchemaVersion ||
+		!catalogSearchIndexUIDBelongsToPrefix(state.ActiveIndexUID, indexPrefix)
+}
+
+func catalogSearchIndexUIDBelongsToPrefix(uid, indexPrefix string) bool {
+	uid = strings.TrimSpace(uid)
+	indexPrefix = strings.TrimSpace(indexPrefix)
+	if uid == "" || indexPrefix == "" {
+		return false
+	}
+	if uid == indexPrefix {
+		return true
+	}
+	suffix, ok := strings.CutPrefix(uid, indexPrefix+"_rebuild_")
+	if !ok || suffix == "" {
+		return false
+	}
+	timestamp, err := strconv.ParseInt(suffix, 10, 64)
+	return err == nil && timestamp > 0
+}
+
+func catalogSearchIndexHasNewerSchema(state SearchIndexState) bool {
+	return state.ActiveIndexUID != "" && state.SchemaVersion/1_000_000 > SearchMeilisearchSchemaVersion
+}
+
 func (i *CatalogSearchIndexer) Rebuild(ctx context.Context, progress SearchIndexProgressReporter) (CatalogSearchIndexRebuildStats, error) {
 	stats := CatalogSearchIndexRebuildStats{}
 	settings, client, ok, err := i.loadClient(ctx)
@@ -252,6 +377,17 @@ func (i *CatalogSearchIndexer) Rebuild(ctx context.Context, progress SearchIndex
 		return stats, nil
 	}
 	stats.Configured = true
+	matches, err := i.runtimeMatchesDesiredSettings(ctx, settings)
+	if err != nil {
+		return stats, err
+	}
+	if !matches {
+		stats.Skipped = true
+		stats.Reason = "saved search settings are waiting for a server restart"
+		setSearchIndexTaskResult(progress, stats)
+		reportSearchIndexProgress(progress, 100, "Restart Silo before rebuilding the catalog search index")
+		return stats, nil
+	}
 
 	lock, locked, err := pglock.TryAcquire(ctx, i.pool, searchIndexMaintenanceLockID)
 	if err != nil {
@@ -270,6 +406,31 @@ func (i *CatalogSearchIndexer) Rebuild(ctx context.Context, progress SearchIndex
 				"component", "catalog", "error", err)
 		}
 	}()
+	state, err := i.events.GetState(ctx, SearchProviderMeilisearch)
+	if err != nil {
+		return stats, err
+	}
+	if catalogSearchIndexHasNewerSchema(state) {
+		stats.Skipped = true
+		stats.Reason = "active search index was built by a newer server version"
+		setSearchIndexTaskResult(progress, stats)
+		reportSearchIndexProgress(progress, 100, "A newer server version owns the active search index")
+		return stats, nil
+	}
+
+	return i.rebuildLocked(ctx, progress, settings, client)
+}
+
+// rebuildLocked builds and atomically publishes a replacement index. The
+// caller must hold searchIndexMaintenanceLockID so the scheduled sync path and
+// manual forced rebuilds cannot race across server nodes.
+func (i *CatalogSearchIndexer) rebuildLocked(
+	ctx context.Context,
+	progress SearchIndexProgressReporter,
+	settings CatalogSearchSettings,
+	client *meilisearchClient,
+) (CatalogSearchIndexRebuildStats, error) {
+	stats := CatalogSearchIndexRebuildStats{Configured: true}
 
 	rebuildEventHighWater, err := i.events.MaxEventID(ctx, SearchProviderMeilisearch)
 	if err != nil {
@@ -522,6 +683,21 @@ func (i *CatalogSearchIndexer) loadClient(ctx context.Context) (CatalogSearchSet
 }
 
 func (i *CatalogSearchIndexer) loadMeilisearchRuntime(ctx context.Context) (CatalogSearchSettings, bool, error) {
+	if i != nil && i.runtime != nil {
+		settings := *i.runtime
+		if i.settingsStore != nil {
+			var err error
+			settings, err = LoadCatalogSearchSettings(ctx, i.settingsStore)
+			if err != nil {
+				return settings, false, err
+			}
+		}
+		applyCatalogSearchStartupSettings(&settings, *i.runtime)
+		if settings.Provider != SearchProviderMeilisearch || strings.TrimSpace(settings.MeilisearchURL) == "" {
+			return settings, false, nil
+		}
+		return settings, true, nil
+	}
 	settings, err := LoadCatalogSearchSettings(ctx, i.settingsStore)
 	if err != nil {
 		return settings, false, err
@@ -530,6 +706,39 @@ func (i *CatalogSearchIndexer) loadMeilisearchRuntime(ctx context.Context) (Cata
 		return settings, false, nil
 	}
 	return settings, true, nil
+}
+
+func (i *CatalogSearchIndexer) runtimeMatchesDesiredSettings(ctx context.Context, runtime CatalogSearchSettings) (bool, error) {
+	if i == nil || i.runtime == nil || i.settingsStore == nil {
+		return true, nil
+	}
+	desired, err := LoadCatalogSearchSettings(ctx, i.settingsStore)
+	if err != nil {
+		return false, err
+	}
+	return catalogSearchMaintenanceTargetEqual(runtime, desired), nil
+}
+
+func applyCatalogSearchStartupSettings(settings *CatalogSearchSettings, startup CatalogSearchSettings) {
+	settings.Provider = startup.Provider
+	settings.MeilisearchURL = startup.MeilisearchURL
+	settings.MeilisearchAPIKey = startup.MeilisearchAPIKey
+	settings.MeilisearchIndex = startup.MeilisearchIndex
+	settings.IndexTypes = slices.Clone(startup.IndexTypes)
+	settings.SemanticEnabled = startup.SemanticEnabled
+	settings.Embedder = startup.Embedder
+	settings.BinaryQuantized = startup.BinaryQuantized
+}
+
+func catalogSearchMaintenanceTargetEqual(left, right CatalogSearchSettings) bool {
+	return left.Provider == right.Provider &&
+		left.MeilisearchURL == right.MeilisearchURL &&
+		left.MeilisearchAPIKey == right.MeilisearchAPIKey &&
+		left.MeilisearchIndex == right.MeilisearchIndex &&
+		slices.Equal(left.IndexTypes, right.IndexTypes) &&
+		left.SemanticEnabled == right.SemanticEnabled &&
+		left.Embedder == right.Embedder &&
+		left.BinaryQuantized == right.BinaryQuantized
 }
 
 func (i *CatalogSearchIndexer) CheckConnection(ctx context.Context, settings CatalogSearchSettings) error {

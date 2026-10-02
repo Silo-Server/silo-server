@@ -1,4 +1,5 @@
 import type { SubtitleInventoryItemV3 } from "./protocol-v3";
+import type { PlayerMarkerSegment } from "./types";
 
 export type PlaybackRealtimeMessageType = "command" | "event" | "hello" | "ack" | "result";
 
@@ -24,6 +25,7 @@ export type PlaybackRealtimeEventName =
   | "chapter_thumbnail_ready"
   | "markers_updated"
   | "subtitle_ready"
+  | "subtitle_timing_changed"
   | "subtitle_translation_started"
   | "subtitle_translation_cues"
   | "subtitle_translation_completed"
@@ -86,6 +88,7 @@ export interface PlaybackMarkersUpdatedPayload {
   credits?: PlaybackTimeRangePayload | null;
   recap?: PlaybackTimeRangePayload | null;
   preview?: PlaybackTimeRangePayload | null;
+  marker_segments?: PlayerMarkerSegment[];
 }
 
 /**
@@ -105,6 +108,19 @@ export interface PlaybackSubtitleReadyPayload {
    * when the server could not resolve the file's inventory, in which case the
    * client refetches its plan instead.
    */
+  track?: SubtitleInventoryItemV3;
+}
+
+/**
+ * Sent to every session of a file after a stored subtitle is retimed (an
+ * automatic sync was applied or its timing was reset). The track's stream URL
+ * already serves the new timing, so a player showing it fetches the cues again.
+ */
+export interface PlaybackSubtitleTimingChangedPayload {
+  session_id: string;
+  file_id: number;
+  subtitle_id: number;
+  /** See {@link PlaybackSubtitleReadyPayload.track}. */
   track?: SubtitleInventoryItemV3;
 }
 
@@ -172,6 +188,10 @@ export type PlaybackRealtimeEventEnvelope =
   | (PlaybackRealtimeEventEnvelopeBase & {
       name: "subtitle_ready";
       payload: PlaybackSubtitleReadyPayload;
+    })
+  | (PlaybackRealtimeEventEnvelopeBase & {
+      name: "subtitle_timing_changed";
+      payload: PlaybackSubtitleTimingChangedPayload;
     })
   | (PlaybackRealtimeEventEnvelopeBase & {
       name: "subtitle_translation_started";
@@ -288,6 +308,20 @@ function isTimeRangePayload(value: unknown): value is PlaybackTimeRangePayload {
   return isRecord(value) && typeof value.start === "number" && typeof value.end === "number";
 }
 
+function isMarkerSegment(value: unknown): value is PlayerMarkerSegment {
+  return (
+    isRecord(value) &&
+    typeof value.kind === "string" &&
+    ["intro", "credits", "recap", "preview"].includes(value.kind) &&
+    typeof value.start_seconds === "number" &&
+    Number.isFinite(value.start_seconds) &&
+    value.start_seconds >= 0 &&
+    typeof value.end_seconds === "number" &&
+    Number.isFinite(value.end_seconds) &&
+    value.end_seconds > value.start_seconds
+  );
+}
+
 function isMarkersUpdatedPayload(value: unknown): value is PlaybackMarkersUpdatedPayload {
   const isOptionalRange = (range: unknown) =>
     range === undefined || range === null || isTimeRangePayload(range);
@@ -298,7 +332,9 @@ function isMarkersUpdatedPayload(value: unknown): value is PlaybackMarkersUpdate
     isOptionalRange(value.intro) &&
     isOptionalRange(value.credits) &&
     isOptionalRange(value.recap) &&
-    isOptionalRange(value.preview)
+    isOptionalRange(value.preview) &&
+    (value.marker_segments === undefined ||
+      (Array.isArray(value.marker_segments) && value.marker_segments.every(isMarkerSegment)))
   );
 }
 
@@ -346,6 +382,18 @@ function isSubtitleReadyPayload(value: unknown): value is PlaybackSubtitleReadyP
     typeof value.subtitle_id === "number" &&
     typeof value.language === "string" &&
     isOptionalString(value.label) &&
+    isOptionalSubtitleInventoryItem(value.track)
+  );
+}
+
+function isSubtitleTimingChangedPayload(
+  value: unknown,
+): value is PlaybackSubtitleTimingChangedPayload {
+  return (
+    isRecord(value) &&
+    typeof value.session_id === "string" &&
+    typeof value.file_id === "number" &&
+    typeof value.subtitle_id === "number" &&
     isOptionalSubtitleInventoryItem(value.track)
   );
 }
@@ -460,6 +508,17 @@ export function parsePlaybackRealtimeMessage(
         };
       }
       if (value.name === "subtitle_ready" && isSubtitleReadyPayload(value.payload)) {
+        return {
+          type: "event",
+          session_id: value.session_id,
+          name: value.name,
+          payload: value.payload,
+        };
+      }
+      if (
+        value.name === "subtitle_timing_changed" &&
+        isSubtitleTimingChangedPayload(value.payload)
+      ) {
         return {
           type: "event",
           session_id: value.session_id,

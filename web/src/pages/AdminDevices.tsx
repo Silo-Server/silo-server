@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import {
   Activity,
@@ -39,6 +39,7 @@ import {
 } from "@/components/admin/deviceOverrides";
 import { ALL_DEVICE_SETTING_KEYS } from "@/lib/settingsDisplay";
 import { SETTING_KEYS } from "@/lib/settingsContract";
+import { SEARCH_SHORTCUT_LABEL } from "@/lib/keyboardShortcut";
 import { AdminSubtitleAppearanceDialog } from "@/components/admin/AdminSubtitleAppearanceDialog";
 import { cn } from "@/lib/utils";
 
@@ -216,20 +217,6 @@ export default function AdminDevices() {
   const [groupBy, setGroupBy] = useState<GroupBy>("user");
   const [overridesOnly, setOverridesOnly] = useState(false);
 
-  // ⌘K focuses the global search input
-  const searchRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        searchRef.current?.focus();
-        searchRef.current?.select();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
   // anomaly detection
   const anomalies = useMemo(() => detectAnomalies(devices), [devices]);
   const scopedDevices = useMemo(
@@ -371,17 +358,16 @@ export default function AdminDevices() {
             Inspect, tune, and reset per-profile playback overrides across the fleet. Filter by
             user, platform, or override pattern. Press{" "}
             <kbd className="bg-surface/70 border-border/70 text-foreground/80 inline-flex items-center rounded border px-1.5 py-0.5 font-mono text-[10.5px]">
-              ⌘K
+              {SEARCH_SHORTCUT_LABEL}
             </kbd>{" "}
-            to jump.
+            to jump to another admin page.
           </p>
         </div>
 
         <div className="relative w-full sm:w-[340px]">
           <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
           <Input
-            ref={searchRef}
-            className="bg-background/60 h-9 pr-14 pl-9 text-[13px]"
+            className="bg-background/60 h-9 pr-9 pl-9 text-[13px]"
             placeholder="Search devices, users, IDs, profiles…"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
@@ -395,11 +381,7 @@ export default function AdminDevices() {
             >
               <X className="h-3.5 w-3.5" />
             </button>
-          ) : (
-            <kbd className="border-border/70 text-muted-foreground absolute top-1/2 right-2.5 -translate-y-1/2 rounded border px-1.5 py-0.5 font-mono text-[10px]">
-              ⌘K
-            </kbd>
-          )}
+          ) : null}
         </div>
       </div>
 

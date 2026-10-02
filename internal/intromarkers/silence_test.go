@@ -7,33 +7,6 @@ import (
 	"testing"
 )
 
-func TestParseSilenceDetectOutput(t *testing.T) {
-	output := []byte(`
-[silencedetect @ 0x1] silence_start: 19.351
-[silencedetect @ 0x1] silence_end: 29.319 | silence_duration: 9.968
-malformed silence_start: nope
-[silencedetect @ 0x1] silence_start: 31
-[silencedetect @ 0x1] silence_end: 31.5 | silence_duration: 0.5
-`)
-	intervals := parseSilenceDetectOutput(output, 165)
-	if len(intervals) != 2 {
-		t.Fatalf("expected two intervals, got %d", len(intervals))
-	}
-	if intervals[0].Start != 184.351 || intervals[0].End != 194.319 {
-		t.Fatalf("unexpected first interval: %+v", intervals[0])
-	}
-	if intervals[1].Start != 196 || intervals[1].End != 196.5 {
-		t.Fatalf("unexpected second interval: %+v", intervals[1])
-	}
-}
-
-func TestParseSilenceDetectOutputEmpty(t *testing.T) {
-	intervals := parseSilenceDetectOutput([]byte("no silence here"), 100)
-	if len(intervals) != 0 {
-		t.Fatalf("expected no intervals, got %d", len(intervals))
-	}
-}
-
 func TestSilenceBoundaryRefinerAppliesFirstUsableSilence(t *testing.T) {
 	ffmpeg := writeFakeFFmpeg(t, `
 echo "[silencedetect @ 0x1] silence_start: 1" >&2

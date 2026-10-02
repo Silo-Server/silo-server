@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -52,7 +53,7 @@ func warmHardwareEncoderCached(
 	ctx context.Context,
 	ffmpegPath, configuredHWAccel, configuredHWDevice string,
 	state *hardwareEncoderWarmupState,
-	resolve func(context.Context, string, string) string,
+	resolve func(ctx context.Context, hwAccel, ffmpegPath, hwDevice string) string,
 	run hardwareEncoderWarmupRunner,
 ) error {
 	if ctx == nil {
@@ -62,12 +63,12 @@ func warmHardwareEncoderCached(
 		return nil
 	}
 	ffmpegPath = ResolveFFmpegPath(ffmpegPath)
-	backend := resolve(ctx, configuredHWAccel, ffmpegPath)
+	backend := resolve(ctx, configuredHWAccel, ffmpegPath, configuredHWDevice)
 	if backend == "" || backend == HWAccelNone {
 		return nil
 	}
 	devices := hardwareEncoderWarmupDevices(backend, configuredHWDevice)
-	cacheKey := nvencProbeCacheKey(ffmpegPath) + "\x00" + backend + "\x00" + strings.Join(devices, ",")
+	cacheKey := ffmpegIdentityKey(ffmpegPath) + "\x00" + backend + "\x00" + strings.Join(devices, ",")
 	now := time.Now()
 	state.Lock()
 	entry, ok := state.entries[cacheKey]
@@ -109,7 +110,7 @@ func warmHardwareEncoderWithRunner(ctx context.Context, timeout time.Duration, f
 	}
 	var result error
 	for _, device := range devices {
-		args := hardwareEncoderWarmupArgs(backend, device)
+		args := hardwareSmokeEncodeArgs(backend, device)
 		if len(args) == 0 {
 			continue
 		}
@@ -155,23 +156,25 @@ func hardwareEncoderWarmupDevices(backend, configured string) []string {
 	return []string{defaultRenderDevicePath}
 }
 
-func hardwareEncoderWarmupArgs(backend, device string) []string {
+// hardwareSmokeEncodeArgs builds the one-frame synthetic encode shared by
+// encoder warmup and the auto-detection capability probes: the same
+// initialization chain a real transcode uses, driven by testsrc2 so no media
+// file is required.
+func hardwareSmokeEncodeArgs(backend, device string) []string {
 	base := []string{ffmpegHideBannerArg, ffmpegLogLevelArg, ffmpegErrorLogLevel}
 	switch backend {
 	case transcodeHWQSV:
 		if strings.TrimSpace(device) == "" {
 			device = defaultRenderDevicePath
 		}
-		base = append(base,
-			"-init_hw_device", qsvVAAPIInitDevice(device),
-			"-init_hw_device", "qsv=qs@va",
-			"-filter_hw_device", "qs",
-		)
+		base = append(base, tonemap.QSVInitDeviceArgs(device)...)
+		base = append(base, "-filter_hw_device", "qs")
 	case transcodeHWVAAPI:
 		if strings.TrimSpace(device) == "" {
 			device = defaultRenderDevicePath
 		}
-		base = append(base, "-init_hw_device", "vaapi=va:"+device, "-filter_hw_device", "va")
+		base = append(base, tonemap.VAAPIInitDeviceArgs(vaapiHWDeviceAlias, device)...)
+		base = append(base, "-filter_hw_device", vaapiHWDeviceAlias)
 	case transcodeHWNVENC:
 		if strings.TrimSpace(device) != "" {
 			base = append(base, "-init_hw_device", "cuda=cu:"+device, "-filter_hw_device", "cu")
@@ -179,7 +182,7 @@ func hardwareEncoderWarmupArgs(backend, device string) []string {
 	default:
 		return nil
 	}
-	base = append(base, "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=1")
+	base = append(base, "-f", "lavfi", "-i", smokeEncodeSource)
 	switch backend {
 	case transcodeHWQSV:
 		base = append(base, "-vf", "format=nv12,hwupload=extra_hw_frames=64", "-frames:v", "1", "-an", "-c:v", "h264_qsv")

@@ -18,7 +18,7 @@ vi.mock("@/hooks/queries/catalog", () => ({
   }),
 }));
 
-vi.mock("@/hooks/queries/people", () => ({
+vi.mock("@/hooks/queries/personSearch", () => ({
   usePersonSearch: () => ({
     data: [],
     isLoading: false,
@@ -31,6 +31,10 @@ import {
   type GuidedFormState,
 } from "./CollectionGuidedRulesEditor";
 import CollectionGuidedRulesEditor from "./CollectionGuidedRulesEditor";
+
+vi.mock("@/hooks/queries/ratingsCapability", () => ({
+  useShownRatingSources: () => new Set(["imdb", "tmdb"]),
+}));
 
 function emptyState(): GuidedFormState {
   return {

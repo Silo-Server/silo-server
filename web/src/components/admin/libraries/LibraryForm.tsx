@@ -59,9 +59,11 @@ export function LibraryForm({
       <FormSection title="Metadata">
         <MetadataFields form={form} />
       </FormSection>
-      <FormSection title="Advanced">
-        <AdvancedFields form={form} chapterThumbnailsSupported={chapterThumbnailsSupported} />
-      </FormSection>
+      {(form.settingSupport.chapterThumbnails || form.settingSupport.introDetection) && (
+        <FormSection title="Advanced">
+          <AdvancedFields form={form} chapterThumbnailsSupported={chapterThumbnailsSupported} />
+        </FormSection>
+      )}
       <Button type="submit" className="w-full" disabled={form.isPending}>
         {form.isPending ? savingLabel : submitLabel}
       </Button>

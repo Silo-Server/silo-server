@@ -2,17 +2,16 @@ package playback
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 )
 
 type chapterThumbnailTestPresigner struct{}
 
-func (chapterThumbnailTestPresigner) PresignGetURL(_ context.Context, _ string, key string, _ time.Duration) (string, error) {
+func (chapterThumbnailTestPresigner) DirectURL(_ context.Context, key string, _ time.Duration) (string, error) {
 	return "https://example.com/" + key, nil
 }
-
-func (chapterThumbnailTestPresigner) Bucket() string { return "test-bucket" }
 
 func TestChapterThumbnailNotifierTargetsMatchingSessions(t *testing.T) {
 	sessions := NewSessionManager(0, 0)
@@ -35,12 +34,12 @@ func TestChapterThumbnailNotifierTargetsMatchingSessions(t *testing.T) {
 	defer hub.Unregister(regB)
 	defer hub.Unregister(regOther)
 
-	notifier := NewChapterThumbnailNotifier(sessions, hub, chapterThumbnailTestPresigner{}, 0)
+	notifier := NewChapterThumbnailNotifier(sessions, hub, chapterThumbnailTestPresigner{}.DirectURL, 0)
 	notifier.ChapterThumbnailReady(
 		context.Background(),
 		100,
 		7,
-		"chapter-images/100/7/original.webp",
+		"chapter-images/100/7/w300.webp",
 		"thumbhash",
 	)
 
@@ -60,5 +59,13 @@ func TestChapterThumbnailNotifierTargetsMatchingSessions(t *testing.T) {
 	}
 	if event.Type != RealtimeMessageTypeEvent || event.Name != RealtimeEventChapterThumbnailReady {
 		t.Fatalf("event = %#v, want chapter thumbnail event", event)
+	}
+	var payload ChapterThumbnailReadyPayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	// thumbnail_path names the served object; the notifier signs it as is.
+	if want := "https://example.com/chapter-images/100/7/w300.webp"; payload.ThumbnailURL != want {
+		t.Fatalf("thumbnail_url = %q, want %q", payload.ThumbnailURL, want)
 	}
 }

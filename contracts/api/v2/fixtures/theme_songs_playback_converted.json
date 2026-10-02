@@ -1,0 +1,6 @@
+{
+  "url": "/api/v2/catalog/items/movie:heat-1995/themes/7/audio?token=fixture-theme-grant",
+  "expires_at": "2026-01-02T03:09:05Z",
+  "delivery": "converted",
+  "content_type": "audio/mp4"
+}

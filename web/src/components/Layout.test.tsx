@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   location: { pathname: "/", search: "", key: "home" },
   navigate: vi.fn(),
   prefetchQuery: vi.fn(),
+  getQueryData: vi.fn(),
   renderSurface: true,
   beginResult: undefined as boolean | undefined,
   profile: {
@@ -16,6 +17,9 @@ const mocks = vi.hoisted(() => ({
     avatar_url: "https://example.com/admin-avatar.webp",
   } as { name: string; avatar_url?: string },
 }));
+
+let browserUserAgent =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36";
 
 vi.mock("react-router", async () => {
   const actual = await vi.importActual<typeof import("react-router")>("react-router");
@@ -29,7 +33,13 @@ vi.mock("react-router", async () => {
 vi.mock("@tanstack/react-query", async () => {
   const actual =
     await vi.importActual<typeof import("@tanstack/react-query")>("@tanstack/react-query");
-  return { ...actual, useQueryClient: () => ({ prefetchQuery: mocks.prefetchQuery }) };
+  return {
+    ...actual,
+    useQueryClient: () => ({
+      prefetchQuery: mocks.prefetchQuery,
+      getQueryData: mocks.getQueryData,
+    }),
+  };
 });
 
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ user: { username: "Admin" } }) }));
@@ -78,15 +88,18 @@ vi.mock("@/components/AppSidebar", () => ({
 import Layout from "./Layout";
 import {
   useSidebarItemDetailsReady,
+  useSidebarItemEnteredFromHome,
   useSidebarItemNavigation,
 } from "./sidebarItemNavigationContext";
 
 function Harness() {
   const begin = useSidebarItemNavigation();
   const ready = useSidebarItemDetailsReady();
+  const enteredFromHome = useSidebarItemEnteredFromHome();
   return (
     <>
       <output aria-label="details-ready">{String(ready)}</output>
+      <output aria-label="entered-from-home">{String(enteredFromHome)}</output>
       <button
         onClick={() => {
           mocks.beginResult = begin?.({
@@ -119,21 +132,39 @@ function renderLayout() {
   );
 }
 
-function setRoute(pathname: string, key: string) {
-  mocks.location = { pathname, search: "", key };
+function setRoute(pathname: string, key: string, search = "") {
+  mocks.location = { pathname, search, key };
 }
 
+let onHeaderResize: ResizeObserverCallback;
+const disconnectHeaderObserver = vi.fn();
+
 beforeEach(() => {
+  disconnectHeaderObserver.mockReset();
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(callback: ResizeObserverCallback) {
+        onHeaderResize = callback;
+      }
+      observe = vi.fn();
+      disconnect = disconnectHeaderObserver;
+    },
+  );
   vi.useFakeTimers();
   mocks.location = { pathname: "/", search: "", key: "home" };
   mocks.navigate.mockReset();
   mocks.prefetchQuery.mockReset();
+  mocks.getQueryData.mockReset();
   mocks.renderSurface = true;
   mocks.beginResult = undefined;
   mocks.profile = {
     name: "Admin",
     avatar_url: "https://example.com/admin-avatar.webp",
   };
+  browserUserAgent =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36";
+  vi.spyOn(window.navigator, "userAgent", "get").mockImplementation(() => browserUserAgent);
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: query === "(min-width: 64rem)",
     media: query,
@@ -154,6 +185,23 @@ afterEach(() => {
 });
 
 describe("Layout mobile profile", () => {
+  it("updates the viewport offset when the mobile header resizes or disappears", () => {
+    const view = renderLayout();
+    const header = view.container.querySelector<HTMLElement>(".mobile-header")!;
+    const shell = header.parentElement!;
+    header.style.marginTop = "15px";
+    const bounds = vi.spyOn(header, "getBoundingClientRect");
+    bounds.mockReturnValue({ height: 82 } as DOMRect);
+    act(() => onHeaderResize([], {} as ResizeObserver));
+    expect(shell.style.getPropertyValue("--detail-header-height")).toBe("97px");
+
+    bounds.mockReturnValue({ height: 0 } as DOMRect);
+    act(() => onHeaderResize([], {} as ResizeObserver));
+    expect(shell.style.getPropertyValue("--detail-header-height")).toBe("0px");
+    view.unmount();
+    expect(disconnectHeaderObserver).toHaveBeenCalledOnce();
+  });
+
   it("renders the current profile avatar in the settings link", () => {
     renderLayout();
 
@@ -162,6 +210,86 @@ describe("Layout mobile profile", () => {
 
     expect(settingsLink).toContainElement(avatar);
     expect(avatar).toHaveAttribute("src", "https://example.com/admin-avatar.webp");
+  });
+
+  it("marks only Home as the balanced sidebar return destination", () => {
+    const view = renderLayout();
+    expect(document.documentElement).toHaveAttribute("data-home-route", "true");
+
+    setRoute("/library/1", "library");
+    view.rerender(
+      <MemoryRouter>
+        <Layout>
+          <Harness />
+        </Layout>
+      </MemoryRouter>,
+    );
+
+    expect(document.documentElement).not.toHaveAttribute("data-home-route");
+  });
+});
+
+describe("Layout sidebar collapse", () => {
+  it("stays collapsed from item to person and back, then expands on Home", () => {
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) =>
+      window.setTimeout(() => callback(performance.now()), 16),
+    );
+    setRoute("/item/movie-1", "item");
+    const view = renderLayout();
+
+    for (const [pathname, key, collapsed] of [
+      ["/person/1", "person", true],
+      ["/item/movie-1", "item-back", true],
+      ["/", "home-back", false],
+    ] as const) {
+      setRoute(pathname, key);
+      view.rerender(
+        <MemoryRouter>
+          <Layout>
+            <Harness />
+          </Layout>
+        </MemoryRouter>,
+      );
+      act(() => vi.advanceTimersByTime(16));
+
+      expect(document.documentElement.hasAttribute("data-sidebar-collapsed")).toBe(collapsed);
+      expect(screen.getByTestId("sidebar-surface").hasAttribute("data-collapsed")).toBe(collapsed);
+      expect(screen.getByRole("main")).toHaveClass(collapsed ? "lg:ml-16" : "lg:ml-[260px]");
+    }
+  });
+
+  it("starts collapsed when opening a person page directly", () => {
+    setRoute("/person/1", "person");
+    renderLayout();
+
+    expect(screen.getByTestId("sidebar-surface")).toHaveAttribute("data-collapsed", "true");
+    expect(screen.getByRole("main")).toHaveClass("lg:ml-16");
+    expect(screen.getByRole("status", { name: "details-ready" })).toHaveTextContent("true");
+  });
+});
+
+describe("Layout request routes", () => {
+  // The padded shell wraps the page in one gutter div; unpadded pages render
+  // straight into <main>.
+  const isShellPadded = () =>
+    screen.getByRole("main").firstElementChild?.classList.contains("lg:px-10") ?? false;
+
+  it.each([
+    ["/requests", false, false],
+    ["/requests/browse/studio/a24", false, false],
+    ["/requests/browse/genre/drama", false, false],
+    ["/requests/movie/603", false, true],
+    ["/requests/series/1399", false, true],
+    ["/title/movie/603", false, true],
+    ["/title/series/1399", false, true],
+    ["/collections", true, false],
+  ])("renders %s with shell padding %s and a collapsed sidebar %s", (path, padded, collapsed) => {
+    setRoute(path, "requests");
+    renderLayout();
+
+    expect(isShellPadded()).toBe(padded);
+    expect(screen.getByTestId("sidebar-surface").hasAttribute("data-collapsed")).toBe(collapsed);
+    expect(screen.getByRole("main")).toHaveClass(collapsed ? "lg:ml-16" : "lg:ml-[260px]");
   });
 });
 
@@ -225,10 +353,16 @@ describe("Layout item navigation", () => {
     expect(mocks.prefetchQuery).toHaveBeenCalledWith(
       expect.objectContaining({ queryKey: catalogKeys.itemDetail("movie-1", 2) }),
     );
+    expect(mocks.getQueryData.mock.invocationCallOrder[0]!).toBeLessThan(
+      mocks.prefetchQuery.mock.invocationCallOrder[0]!,
+    );
+    expect(mocks.prefetchQuery.mock.invocationCallOrder[0]!).toBeLessThan(
+      mocks.navigate.mock.invocationCallOrder[0]!,
+    );
     expect(mocks.navigate).toHaveBeenCalledWith("/item/movie-1?libraryId=2", {
       replace: true,
       state: { source: "home" },
-      viewTransition: true,
+      viewTransition: false,
     });
   });
 });
@@ -250,6 +384,110 @@ describe("Layout detail reveal", () => {
     );
 
     expect(screen.getByRole("status", { name: "details-ready" })).toHaveTextContent("true");
+  });
+
+  it("reveals cached details immediately when the item entry is not from Home", () => {
+    mocks.getQueryData.mockImplementation((queryKey: unknown) =>
+      JSON.stringify(queryKey) === JSON.stringify(catalogKeys.itemDetail("movie-1", undefined))
+        ? { content_id: "movie-1" }
+        : undefined,
+    );
+    const view = renderLayout();
+
+    setRoute("/library/1", "library");
+    act(() =>
+      view.rerender(
+        <MemoryRouter>
+          <Layout>
+            <Harness />
+          </Layout>
+        </MemoryRouter>,
+      ),
+    );
+
+    setRoute("/item/movie-1", "item");
+    act(() =>
+      view.rerender(
+        <MemoryRouter>
+          <Layout>
+            <Harness />
+          </Layout>
+        </MemoryRouter>,
+      ),
+    );
+
+    expect(screen.getByRole("status", { name: "details-ready" })).toHaveTextContent("true");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("renders cached Home item entries immediately without replaying their reveal animation", () => {
+    mocks.getQueryData.mockImplementation((queryKey: unknown) =>
+      JSON.stringify(queryKey) === JSON.stringify(catalogKeys.itemDetail("movie-1", 2))
+        ? { content_id: "movie-1" }
+        : undefined,
+    );
+    const view = renderLayout();
+
+    const enterCachedItem = (key: string) => {
+      fireEvent.click(screen.getByRole("button", { name: "begin item" }));
+      setRoute("/item/movie-1", key, "?libraryId=2");
+      act(() =>
+        view.rerender(
+          <MemoryRouter>
+            <Layout>
+              <Harness />
+            </Layout>
+          </MemoryRouter>,
+        ),
+      );
+    };
+
+    enterCachedItem("item-first");
+    expect(screen.getByRole("status", { name: "details-ready" })).toHaveTextContent("true");
+    expect(screen.getByRole("status", { name: "entered-from-home" })).toHaveTextContent("true");
+    expect(document.documentElement).not.toHaveAttribute("data-home-item-entry");
+    expect(vi.getTimerCount()).toBe(0);
+
+    setRoute("/", "home-again");
+    act(() =>
+      view.rerender(
+        <MemoryRouter>
+          <Layout>
+            <Harness />
+          </Layout>
+        </MemoryRouter>,
+      ),
+    );
+    expect(document.documentElement).toHaveAttribute("data-home-item-return", "true");
+
+    enterCachedItem("item-repeat");
+    expect(document.documentElement).not.toHaveAttribute("data-home-item-return");
+    expect(screen.getByRole("status", { name: "details-ready" })).toHaveTextContent("true");
+    expect(document.documentElement).not.toHaveAttribute("data-home-item-entry");
+  });
+
+  it("does not mistake a prefetch that completes before route commit for a cache hit", () => {
+    mocks.getQueryData.mockReturnValueOnce(undefined);
+    mocks.prefetchQuery.mockImplementation(() => {
+      mocks.getQueryData.mockReturnValue({ content_id: "movie-1" });
+      return Promise.resolve();
+    });
+    const view = renderLayout();
+
+    fireEvent.click(screen.getByRole("button", { name: "begin item" }));
+    setRoute("/item/movie-1", "item", "?libraryId=2");
+    act(() =>
+      view.rerender(
+        <MemoryRouter>
+          <Layout>
+            <Harness />
+          </Layout>
+        </MemoryRouter>,
+      ),
+    );
+
+    expect(screen.getByRole("status", { name: "details-ready" })).toHaveTextContent("false");
+    expect(document.documentElement).toHaveAttribute("data-home-item-entry", "true");
   });
 
   it("reveals as soon as the surface settles", () => {

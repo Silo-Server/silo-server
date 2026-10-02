@@ -20,16 +20,23 @@ import (
 type SubtitleInventoryResolver struct {
 	files     FilePathResolver
 	subtitles subtitles.Repository
+	attempts  subtitleAttemptLookupV3
+}
+
+// subtitleAttemptLookupV3 reads the durable attempt for a playback session.
+type subtitleAttemptLookupV3 interface {
+	GetAttempt(ctx context.Context, sessionID string) (*playback.AttemptRecordV3, error)
 }
 
 // NewSubtitleInventoryResolver returns a resolver, or nil when no file lookup
 // is available. A nil subtitle repository is fine: the inventory then covers
-// only the file's external and embedded tracks.
-func NewSubtitleInventoryResolver(files FilePathResolver, repo subtitles.Repository) *SubtitleInventoryResolver {
+// only the file's external and embedded tracks. A nil attempt lookup is fine
+// too: every session then gets the default sidecar representations.
+func NewSubtitleInventoryResolver(files FilePathResolver, repo subtitles.Repository, attempts subtitleAttemptLookupV3) *SubtitleInventoryResolver {
 	if files == nil {
 		return nil
 	}
-	return &SubtitleInventoryResolver{files: files, subtitles: repo}
+	return &SubtitleInventoryResolver{files: files, subtitles: repo, attempts: attempts}
 }
 
 // MediaFile loads the file whose subtitle inventory is being resolved.
@@ -51,4 +58,22 @@ func (r *SubtitleInventoryResolver) AdditionalSubtitles(ctx context.Context, fil
 		return nil, err
 	}
 	return downloadedSubtitleEntriesV3(file, downloaded), nil
+}
+
+// SessionClientFeatures returns the features that decide the session's sidecar
+// representations, the same ones its replans use. A session with no v3
+// attempt uses the defaults; a failed lookup is returned so the caller does
+// not publish a representation the attempt may not have negotiated.
+func (r *SubtitleInventoryResolver) SessionClientFeatures(ctx context.Context, sessionID string) ([]string, error) {
+	if r == nil || r.attempts == nil || sessionID == "" {
+		return nil, nil
+	}
+	record, err := r.attempts.GetAttempt(ctx, sessionID)
+	if errors.Is(err, playback.ErrSessionNotFound) || (err == nil && record == nil) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return replanSubtitleFeaturesV3(record, record.NormalizedRequest.ClientFeatures), nil
 }

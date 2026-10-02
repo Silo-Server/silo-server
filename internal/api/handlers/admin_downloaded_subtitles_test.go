@@ -52,10 +52,10 @@ func TestHandlePatchDownloadedSubtitleUpdatesMetadata(t *testing.T) {
 	}
 	repo.byKey["subtitles/42/en_upload_abcd1234.srt"] = repo.subtitles[7]
 
-	s3 := &trackingHandlerS3Client{objects: map[string][]byte{
+	s3 := &trackingHandlerBlobStore{objects: map[string][]byte{
 		"subtitles/42/en_upload_abcd1234.srt": []byte("1\n00:00:01,000 --> 00:00:02,000\nHello\n"),
 	}}
-	manager := subtitles.NewManager(repo, s3, "test-bucket")
+	manager := subtitles.NewManager(repo, s3)
 	handler := NewAdminSubtitleHandler(repo)
 	handler.SetDownloadedSubtitleDeps(nil, manager)
 
@@ -87,20 +87,20 @@ func TestHandlePatchDownloadedSubtitleUpdatesMetadata(t *testing.T) {
 	if !updated.HearingImpaired {
 		t.Fatal("expected hearing_impaired=true")
 	}
-	if updated.S3Key == "subtitles/42/en_upload_abcd1234.srt" {
-		t.Fatalf("expected migrated s3 key, got %q", updated.S3Key)
+	if updated.S3Key != "subtitles/42/en_upload_abcd1234.srt" {
+		t.Fatalf("immutable s3 key changed: %q", updated.S3Key)
 	}
-	if len(s3.putKeys) != 1 {
-		t.Fatalf("putKeys = %d, want 1", len(s3.putKeys))
+	if len(s3.putKeys) != 0 {
+		t.Fatalf("metadata edit uploaded content: %v", s3.putKeys)
 	}
-	if len(s3.deletedKeys) != 1 {
-		t.Fatalf("deletedKeys = %d, want 1", len(s3.deletedKeys))
+	if len(s3.deletedKeys) != 0 {
+		t.Fatalf("metadata edit deleted content: %v", s3.deletedKeys)
 	}
 }
 
 func TestHandlePatchDownloadedSubtitleNotFound(t *testing.T) {
 	repo := newMockSubtitleRepoForHandler()
-	manager := subtitles.NewManager(repo, newMockS3ClientForHandler(), "test-bucket")
+	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
 	handler := NewAdminSubtitleHandler(repo)
 	handler.SetDownloadedSubtitleDeps(nil, manager)
 
@@ -128,10 +128,10 @@ func TestHandleDownloadDownloadedSubtitle(t *testing.T) {
 		S3Key:       "subtitles/10/en_upload_deadbeef.vtt",
 		CreatedAt:   time.Now(),
 	}
-	s3 := &trackingHandlerS3Client{objects: map[string][]byte{
+	s3 := &trackingHandlerBlobStore{objects: map[string][]byte{
 		"subtitles/10/en_upload_deadbeef.vtt": content,
 	}}
-	manager := subtitles.NewManager(repo, s3, "test-bucket")
+	manager := subtitles.NewManager(repo, s3)
 	handler := NewAdminSubtitleHandler(repo)
 	handler.SetDownloadedSubtitleDeps(nil, manager)
 
@@ -165,10 +165,10 @@ func TestHandleDeleteDownloadedSubtitle(t *testing.T) {
 		S3Key:       "subtitles/11/en_opensubtitles_abcd1234.srt",
 	}
 	repo.byKey[repo.subtitles[5].S3Key] = repo.subtitles[5]
-	s3 := &trackingHandlerS3Client{objects: map[string][]byte{
+	s3 := &trackingHandlerBlobStore{objects: map[string][]byte{
 		repo.subtitles[5].S3Key: []byte("subtitle"),
 	}}
-	manager := subtitles.NewManager(repo, s3, "test-bucket")
+	manager := subtitles.NewManager(repo, s3)
 	handler := NewAdminSubtitleHandler(repo)
 	handler.SetDownloadedSubtitleDeps(nil, manager)
 
@@ -188,13 +188,13 @@ func TestHandleDeleteDownloadedSubtitle(t *testing.T) {
 	}
 }
 
-type trackingHandlerS3Client struct {
+type trackingHandlerBlobStore struct {
 	objects     map[string][]byte
 	putKeys     []string
 	deletedKeys []string
 }
 
-func (c *trackingHandlerS3Client) PutObject(_ context.Context, _, key string, data []byte) error {
+func (c *trackingHandlerBlobStore) Put(_ context.Context, key string, data []byte) error {
 	if c.objects == nil {
 		c.objects = make(map[string][]byte)
 	}
@@ -203,14 +203,14 @@ func (c *trackingHandlerS3Client) PutObject(_ context.Context, _, key string, da
 	return nil
 }
 
-func (c *trackingHandlerS3Client) GetObject(_ context.Context, _, key string) ([]byte, error) {
+func (c *trackingHandlerBlobStore) Get(_ context.Context, key string) ([]byte, error) {
 	if data, ok := c.objects[key]; ok {
 		return append([]byte(nil), data...), nil
 	}
 	return nil, context.Canceled
 }
 
-func (c *trackingHandlerS3Client) DeleteObject(_ context.Context, _, key string) error {
+func (c *trackingHandlerBlobStore) Delete(_ context.Context, key string) error {
 	delete(c.objects, key)
 	c.deletedKeys = append(c.deletedKeys, key)
 	return nil
@@ -228,5 +228,20 @@ func TestSubtitleDownloadFilename(t *testing.T) {
 	}
 	if strconv.Itoa(sub.ID) == "" {
 		t.Fatal("unexpected")
+	}
+}
+
+// The frozen v1 admin list serializes AdminDownloadedSubtitle; the stored
+// timing correction must stay out of it.
+func TestAdminDownloadedSubtitleV1JSONOmitsTiming(t *testing.T) {
+	row := AdminDownloadedSubtitle{ID: 1, MediaFileID: 2, Provider: "upload", Language: "en", Format: "srt",
+		CreatedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), Timing: subtitles.Timing{OffsetMS: 1200, Scale: 1.001}}
+	encoded, err := json.Marshal(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"id":1,"media_file_id":2,"provider":"upload","language":"en","format":"srt","release_name":"","score":0,"hearing_impaired":false,"created_at":"2026-01-02T03:04:05Z","uploader_username":"","media_title":"","media_type":"","file_path":""}`
+	if string(encoded) != want {
+		t.Fatalf("v1 JSON changed:\n%s\nwant\n%s", encoded, want)
 	}
 }

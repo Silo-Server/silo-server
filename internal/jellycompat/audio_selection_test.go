@@ -74,6 +74,17 @@ func (m *testCompatSessionManager) StartSession(userID int, profileID string, fi
 	return session, nil
 }
 
+func (m *testCompatSessionManager) MarkStopReported(sessionID string) error {
+	if m.sessions != nil {
+		session, ok := m.sessions[sessionID]
+		if !ok {
+			return playback.ErrSessionNotFound
+		}
+		session.StopReported = true
+	}
+	return nil
+}
+
 func (m *testCompatSessionManager) UpdateProgress(sessionID string, position float64, isPaused bool) error {
 	m.progressCalls++
 	m.progressUpdates = append(m.progressUpdates, compatProgressCall{
@@ -88,6 +99,7 @@ func (m *testCompatSessionManager) UpdateProgress(sessionID string, position flo
 		}
 		session.Position = position
 		session.IsPaused = isPaused
+		session.StopReported = false
 	}
 	return nil
 }
@@ -375,6 +387,112 @@ func TestHandlePlaybackReportRetriesRejectedLocalSurroundSelectionWithoutMutatio
 	}
 	if opts := transcodeSession.Opts(); opts.AudioTrackIndex != 0 || opts.SourceAudioChannels != 0 {
 		t.Fatalf("live opts = track %d channels %d, want original stereo", opts.AudioTrackIndex, opts.SourceAudioChannels)
+	}
+}
+
+func TestApplyCompatAudioSelectionRejectsUnsupportedLocalHLSRemuxAudioCopy(t *testing.T) {
+	version := testCompatVersion()
+	version.VideoTracks[0].Codec = "hevc"
+	version.VideoTracks[0].DVProfile = 8
+	version.AudioTracks[0].Codec = "eac3"
+	version.AudioTracks[1].Codec = "dts"
+	defaultStreamIndex := len(version.VideoTracks)
+	unsupportedStreamIndex := defaultStreamIndex + 1
+	source := testCompatSource(NewResourceIDCodec(), version)
+	source.HLSRemux = true
+	source.HLSRemuxAudioStreamIndexes = []int{defaultStreamIndex}
+	source.TranscodeAudio = false
+	source.SelectedAudioStreamIndex = intPtr(defaultStreamIndex)
+	inputPath := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(inputPath, []byte("video"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := NewPlaybackSessionStore(time.Hour, nil)
+	store.Put(PlaybackSession{
+		ID: "play-1", CompatToken: "token-1", UpstreamSessionID: "upstream-1", UpstreamPlayMethod: "transcode",
+		MediaSources: []PlaybackMediaSource{source},
+	})
+	manager := &testCompatSessionManager{sessions: map[string]*playback.Session{
+		"upstream-1": {ID: "upstream-1", UserID: 7, ProfileID: "profile-1", MediaFileID: version.FileID, PlayMethod: playback.PlayTranscode, BasePlayMethod: playback.PlayTranscode},
+	}}
+	handler := &PlaybackHandler{
+		playbackStore: store,
+		sessionMgr:    manager,
+		fileResolver: testCompatFileResolver{file: &models.MediaFile{
+			ID: version.FileID, FilePath: inputPath,
+			VideoTracks: []models.VideoTrack{{Codec: "hevc", DVProfile: 8}},
+		}},
+		TranscodeDir: t.TempDir(),
+		FFmpegPath:   writeCompatTestFFmpeg(t),
+		HWAccel:      playback.HWAccelNone,
+		tm:           playback.NewTranscodeManager(),
+	}
+	live, err := handler.ensureTranscodeSession(t.Context(), "play-1", "upstream-1", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = live.Close() })
+
+	playSession, _ := store.Get("play-1")
+	_, _, restarted, err := handler.applyCompatAudioSelection(t.Context(), playSession, source.ID, unsupportedStreamIndex, 12)
+	if !errors.Is(err, errCompatHLSRemuxAudioUnsupported) || restarted {
+		t.Fatalf("selection = restarted %t error %v, want unsupported remux audio", restarted, err)
+	}
+	persisted, _ := store.Get("play-1")
+	if got := *persisted.MediaSources[0].SelectedAudioStreamIndex; got != defaultStreamIndex {
+		t.Fatalf("persisted stream index = %d, want %d", got, defaultStreamIndex)
+	}
+	if opts := live.Opts(); opts.AudioTrackIndex != 0 || opts.TargetCodecVideo != compatCopyCodec ||
+		opts.TargetCodecAudio != compatCopyCodec || opts.VideoSampleEntry != playback.VideoSampleEntryDVH1 {
+		t.Fatalf("live recipe = track %d video %q audio %q sample entry %q, want original copy/copy/dvh1 recipe",
+			opts.AudioTrackIndex, opts.TargetCodecVideo, opts.TargetCodecAudio, opts.VideoSampleEntry)
+	}
+	if len(manager.audioTrackCalls) != 0 {
+		t.Fatalf("upstream selection calls = %#v, want none", manager.audioTrackCalls)
+	}
+}
+
+func TestApplyCompatAudioSelectionRejectsUnsupportedRemoteHLSRemuxAudioCopy(t *testing.T) {
+	version := testCompatVersion()
+	version.VideoTracks[0].Codec = "hevc"
+	version.AudioTracks[0].Codec = "eac3"
+	version.AudioTracks[1].Codec = "truehd"
+	defaultStreamIndex := len(version.VideoTracks)
+	unsupportedStreamIndex := defaultStreamIndex + 1
+	source := testCompatSource(NewResourceIDCodec(), version)
+	source.HLSRemux = true
+	source.HLSRemuxAudioStreamIndexes = []int{defaultStreamIndex}
+	source.TranscodeAudio = false
+	source.SelectedAudioStreamIndex = intPtr(defaultStreamIndex)
+	store := NewPlaybackSessionStore(time.Hour, nil)
+	store.Put(PlaybackSession{
+		ID: "play-1", CompatToken: "token-1", UpstreamSessionID: "upstream-1", UpstreamPlayMethod: "transcode",
+		MediaSources: []PlaybackMediaSource{source},
+	})
+	manager := &testCompatSessionManager{sessions: map[string]*playback.Session{
+		"upstream-1": {
+			ID: "upstream-1", UserID: 7, ProfileID: "profile-1", MediaFileID: version.FileID,
+			PlayMethod: playback.PlayTranscode, BasePlayMethod: playback.PlayTranscode, TranscodeNodeURL: "http://remote-node.invalid",
+		},
+	}}
+	handler := &PlaybackHandler{
+		playbackStore: store,
+		sessionMgr:    manager,
+		fileResolver:  testCompatFileResolver{file: &models.MediaFile{ID: version.FileID, FilePath: "/media/movie.mkv"}},
+		tm:            playback.NewTranscodeManager(),
+	}
+
+	playSession, _ := store.Get("play-1")
+	_, _, restarted, err := handler.applyCompatAudioSelection(t.Context(), playSession, source.ID, unsupportedStreamIndex, 12)
+	if !errors.Is(err, errCompatHLSRemuxAudioUnsupported) || restarted {
+		t.Fatalf("selection = restarted %t error %v, want unsupported remux audio", restarted, err)
+	}
+	persisted, _ := store.Get("play-1")
+	if got := *persisted.MediaSources[0].SelectedAudioStreamIndex; got != defaultStreamIndex {
+		t.Fatalf("persisted stream index = %d, want %d", got, defaultStreamIndex)
+	}
+	if len(manager.audioTrackCalls) != 0 {
+		t.Fatalf("upstream selection calls = %#v, want none", manager.audioTrackCalls)
 	}
 }
 
@@ -889,5 +1007,73 @@ func TestStartRemoteTranscodeRejectsOldNodeAfterStaleAudioCapabilityProbe(t *tes
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("unattested remote job was not stopped")
+	}
+}
+
+func TestMonoAACStartupDoesNotRequireStereoBoost(t *testing.T) {
+	for _, remote := range []bool{false, true} {
+		name := "local"
+		if remote {
+			name = "remote"
+		}
+		t.Run(name, func(t *testing.T) {
+			version := testCompatVersion()
+			version.AudioTracks[1].Channels = 6
+			source := testCompatSource(NewResourceIDCodec(), version)
+			source.TargetAudioChannels = 1
+			file := &models.MediaFile{ID: version.FileID, FilePath: filepath.Join(t.TempDir(), "movie.mkv")}
+			if err := os.WriteFile(file.FilePath, []byte("video"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			store := NewPlaybackSessionStore(time.Hour, nil)
+			store.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1", MediaSources: []PlaybackMediaSource{source}})
+			ffmpeg, _, _ := writeCompatAudioRecipeFFmpeg(t, false, "")
+			handler := &PlaybackHandler{
+				JWTSecret: "secret", playbackStore: store,
+				sessionMgr: &testCompatSessionManager{sessions: map[string]*playback.Session{
+					"upstream-1": {ID: "upstream-1", UserID: 7, ProfileID: "profile-1", MediaFileID: version.FileID, PlayMethod: playback.PlayTranscode},
+				}},
+				fileResolver: testCompatFileResolver{file: file},
+				TranscodeDir: t.TempDir(), FFmpegPath: ffmpeg, tm: playback.NewTranscodeManager(),
+			}
+			if remote {
+				var request transcodenode.TranscodeStartRequest
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Method == http.MethodGet {
+						// An older node can encode ordinary mono AAC without the optional
+						// surround-to-stereo boost transformation.
+						writeJSON(w, http.StatusOK, playback.HWAccelInfo{})
+						return
+					}
+					if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+						t.Errorf("decode start request: %v", err)
+						w.WriteHeader(http.StatusBadRequest)
+						return
+					}
+					writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{})
+				}))
+				defer server.Close()
+				if err := handler.startRemoteTranscode(t.Context(), "play-1", "upstream-1", source, file, 0, server.URL); err != nil {
+					t.Fatal(err)
+				}
+				if request.SourceAudioChannels != 0 || request.TargetAudioChannels != 1 || request.AudioRecipeVersion != "" || request.RequireReady {
+					t.Fatalf("mono incorrectly requires stereo recipe: %+v", request)
+				}
+			} else {
+				live, err := handler.ensureTranscodeSession(t.Context(), "play-1", "upstream-1", source)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = live.Close() })
+				opts := live.Opts()
+				if opts.SourceAudioChannels != 0 || opts.TargetAudioChannels != 1 {
+					t.Fatalf("mono startup channel recipe: source=%d target=%d", opts.SourceAudioChannels, opts.TargetAudioChannels)
+				}
+			}
+			persisted, ok := store.Get("play-1")
+			if !ok || persisted.Recipe == nil || persisted.Recipe.SourceAudioChannels != 0 || persisted.Recipe.TargetAudioChannels != 1 {
+				t.Fatalf("mono recipe not persisted: %+v", persisted.Recipe)
+			}
+		})
 	}
 }

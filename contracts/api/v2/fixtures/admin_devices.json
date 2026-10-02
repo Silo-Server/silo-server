@@ -1,0 +1,31 @@
+{
+  "items": [
+    {
+      "user_id": "1",
+      "username": "same",
+      "email": "",
+      "device_id": "shared",
+      "device_name": "Screen",
+      "device_platform": "",
+      "override_count": 0,
+      "profile_count": 0,
+      "profiles": [],
+      "last_updated": "2026-09-01T01:02:03.123Z"
+    },
+    {
+      "user_id": "2",
+      "username": "same",
+      "email": "",
+      "device_id": "shared",
+      "device_name": "Screen",
+      "device_platform": "",
+      "override_count": 0,
+      "profile_count": 0,
+      "profiles": [],
+      "last_updated": "2026-09-01T01:02:03.123Z"
+    }
+  ],
+  "page": {
+    "has_more": false
+  }
+}

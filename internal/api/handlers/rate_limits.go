@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -30,7 +31,9 @@ func NewRateLimitHandler(store ratelimit.SettingsStore, mw *ratelimit.Middleware
 	}
 }
 
-type rateLimitConfigResponse struct {
+type rateLimitConfigResponse = AdminRateLimitConfigView
+
+type AdminRateLimitConfigView struct {
 	Enabled            bool                                  `json:"enabled"`
 	Backend            string                                `json:"backend"`
 	GlobalReqPerSecond float64                               `json:"global_requests_per_second"`
@@ -46,6 +49,11 @@ type rateLimitConfigResponse struct {
 	// ActiveBackend is the backend the running limiter actually uses, which
 	// can differ from Backend until the server restarts.
 	ActiveBackend string `json:"active_backend,omitempty"`
+	// RedisAvailable reports whether the Redis backend can be selected at all,
+	// using the same rule the save path enforces. Sentinel and REDIS_URL
+	// deployments have no persisted redis.url row, so admins cannot derive
+	// this client-side.
+	RedisAvailable bool `json:"redis_available"`
 }
 
 type tierConfigResponse struct {
@@ -59,37 +67,60 @@ type authEndpointConfigResponse struct {
 	Burst             int     `json:"burst"`
 }
 
-type rateLimitConfigRequest struct {
-	Enabled            *bool                                `json:"enabled"`
-	Backend            string                               `json:"backend"`
-	GlobalReqPerSecond *float64                             `json:"global_requests_per_second"`
-	Tiers              map[string]tierConfigRequest         `json:"tiers"`
-	IPReqPerSecond     *float64                             `json:"ip_requests_per_second"`
-	IPReqPerMinute     *float64                             `json:"ip_requests_per_minute"`
-	IPBurst            *int                                 `json:"ip_burst"`
-	AuthEndpoints      map[string]authEndpointConfigRequest `json:"auth_endpoints"`
+type rateLimitConfigRequest = AdminRateLimitUpdate
+
+type AdminRateLimitUpdate struct {
+	Enabled            *bool                                `json:"enabled,omitempty"`
+	Backend            string                               `json:"backend,omitempty"`
+	GlobalReqPerSecond *float64                             `json:"global_requests_per_second,omitempty"`
+	Tiers              map[string]tierConfigRequest         `json:"tiers,omitempty"`
+	IPReqPerSecond     *float64                             `json:"ip_requests_per_second,omitempty"`
+	IPReqPerMinute     *float64                             `json:"ip_requests_per_minute,omitempty"`
+	IPBurst            *int                                 `json:"ip_burst,omitempty"`
+	AuthEndpoints      map[string]authEndpointConfigRequest `json:"auth_endpoints,omitempty"`
 }
 
-type tierConfigRequest struct {
-	RequestsPerSecond *float64 `json:"requests_per_second"`
-	RequestsPerMinute *float64 `json:"requests_per_minute"`
-	Burst             *int     `json:"burst"`
+type tierConfigRequest = AdminRateLimitTierUpdate
+
+type AdminRateLimitTierUpdate struct {
+	RequestsPerSecond *float64 `json:"requests_per_second,omitempty"`
+	RequestsPerMinute *float64 `json:"requests_per_minute,omitempty"`
+	Burst             *int     `json:"burst,omitempty"`
 }
 
-type authEndpointConfigRequest struct {
-	RequestsPerMinute *float64 `json:"requests_per_minute"`
-	Burst             *int     `json:"burst"`
+type authEndpointConfigRequest = AdminRateLimitAuthEndpointUpdate
+
+type AdminRateLimitAuthEndpointUpdate struct {
+	RequestsPerMinute *float64 `json:"requests_per_minute,omitempty"`
+	Burst             *int     `json:"burst,omitempty"`
 }
 
 // HandleGetConfig handles GET /admin/rate-limits/config.
 func (h *RateLimitHandler) HandleGetConfig(w http.ResponseWriter, r *http.Request) {
-	cfg, err := ratelimit.LoadConfig(r.Context(), h.store)
+	resp, err := h.ReadAdminRateLimitConfig(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load rate limit config")
+		writeAPIError(w, err)
 		return
 	}
+	writeJSON(w, http.StatusOK, resp)
+}
 
-	backend, _ := h.store.Get(r.Context(), "ratelimit.backend")
+// ReadAdminRateLimitConfig reads desired settings once and adds process observations.
+func (h *RateLimitHandler) ReadAdminRateLimitConfig(ctx context.Context) (AdminRateLimitConfigView, error) {
+	// One read serves the rate values, the stored backend, and the
+	// Redis-availability bit, so no field of the response can straddle two
+	// snapshots of the settings table.
+	values, err := h.store.GetAll(ctx)
+	if err != nil {
+		return rateLimitConfigResponse{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load rate limit config")
+	}
+	return h.adminRateLimitConfigView(values), nil
+}
+
+func (h *RateLimitHandler) adminRateLimitConfigView(values map[string]string) AdminRateLimitConfigView {
+	cfg := ratelimit.ConfigFromSettings(values)
+
+	backend := values["ratelimit.backend"]
 	if backend == "" {
 		backend = "memory"
 	}
@@ -104,6 +135,7 @@ func (h *RateLimitHandler) HandleGetConfig(w http.ResponseWriter, r *http.Reques
 		IPBurst:            cfg.IPBurst,
 		AuthEndpoints:      make(map[string]authEndpointConfigResponse),
 		Active:             h.mw != nil,
+		RedisAvailable:     redisConfiguredSettings(values, h.redisBootstrapAvailable),
 	}
 	if h.mw != nil {
 		resp.ActiveBackend = h.mw.ActiveBackend()
@@ -122,8 +154,7 @@ func (h *RateLimitHandler) HandleGetConfig(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	return resp
 }
 
 // HandleUpdateConfig handles PUT /admin/rate-limits/config.
@@ -134,18 +165,40 @@ func (h *RateLimitHandler) HandleUpdateConfig(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	updater, ok := h.store.(serverSettingsAtomicUpdater)
-	if !ok {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Settings store does not support atomic updates")
+	result, err := h.UpdateAdminRateLimitConfig(r.Context(), req, nil)
+	if err != nil {
+		writeAPIError(w, err)
 		return
 	}
+	writeJSON(w, http.StatusOK, result)
+}
 
+type AdminRateLimitUpdateResult struct {
+	Status          string `json:"status"`
+	RestartRequired bool   `json:"restart_required"`
+}
+
+// UpdateAdminRateLimitConfig checks the guard against the locked durable state.
+// Post-commit reload and event publication retain their existing best-effort scope.
+func (h *RateLimitHandler) UpdateAdminRateLimitConfig(ctx context.Context, req AdminRateLimitUpdate, guard func(AdminRateLimitConfigView) error) (AdminRateLimitUpdateResult, error) {
+	updater, ok := h.store.(serverSettingsAtomicUpdater)
+	if !ok {
+		return AdminRateLimitUpdateResult{}, apiError(http.StatusInternalServerError, "internal_error", "Settings store does not support atomic updates")
+	}
+
+	var guardErr error
 	var (
 		changed      bool
 		requestErr   error
 		requestError = "invalid_rate_limit_config"
 	)
-	err := updater.UpdateAtomic(r.Context(), func(current map[string]string) (map[string]string, error) {
+	err := updater.UpdateAtomic(ctx, func(current map[string]string) (map[string]string, error) {
+		if guard != nil {
+			guardErr = guard(h.adminRateLimitConfigView(current))
+			if guardErr != nil {
+				return nil, guardErr
+			}
+		}
 		existing := ratelimit.ConfigFromSettings(current)
 		merged, err := mergeRateLimitConfig(existing, req)
 		if err != nil {
@@ -181,26 +234,25 @@ func (h *RateLimitHandler) HandleUpdateConfig(w http.ResponseWriter, r *http.Req
 		}
 		return values, nil
 	})
+	if guardErr != nil {
+		return AdminRateLimitUpdateResult{}, guardErr
+	}
 	if requestErr != nil {
-		writeError(w, http.StatusBadRequest, requestError, requestErr.Error())
-		return
+		return AdminRateLimitUpdateResult{}, apiError(http.StatusBadRequest, requestError, requestErr.Error())
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save rate limit config")
-		return
+		return AdminRateLimitUpdateResult{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to save rate limit config")
 	}
 	if !changed {
-		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "restart_required": false})
-		return
+		return AdminRateLimitUpdateResult{Status: "ok"}, nil
 	}
 
 	// Another process may have committed a newer settings mutation after this
 	// request released the mutation lock. Base post-commit behavior on a fresh
 	// snapshot so reordered requests converge on the latest durable state.
-	latest, err := h.store.GetAll(r.Context())
+	latest, err := h.store.GetAll(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Config saved but latest settings could not be loaded")
-		return
+		return AdminRateLimitUpdateResult{}, apiError(http.StatusInternalServerError, "internal_error", "Config saved but latest settings could not be loaded")
 	}
 	latestConfig := ratelimit.ConfigFromSettings(latest)
 	latestBackend := strings.TrimSpace(strings.ToLower(latest["ratelimit.backend"]))
@@ -220,9 +272,8 @@ func (h *RateLimitHandler) HandleUpdateConfig(w http.ResponseWriter, r *http.Req
 		}
 		// Reload reads the store again rather than applying the request-local
 		// merge, ensuring the middleware receives the latest committed config.
-		if err := h.mw.Reload(r.Context()); err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Config saved but reload failed")
-			return
+		if err := h.mw.Reload(ctx); err != nil {
+			return AdminRateLimitUpdateResult{}, apiError(http.StatusInternalServerError, "internal_error", "Config saved but reload failed")
 		}
 	}
 	if restartRequired {
@@ -231,13 +282,12 @@ func (h *RateLimitHandler) HandleUpdateConfig(w http.ResponseWriter, r *http.Req
 
 	// Publish for multi-instance reload (if EventBus is available/backed by Redis)
 	if h.eventBus != nil {
-		_ = h.eventBus.Publish(r.Context(), cache.ChannelAdmin, cache.Event{
+		_ = h.eventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{
 			Type: cache.EventSettingsChanged,
 		})
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"status": "ok", "restart_required": restartRequired})
+	return AdminRateLimitUpdateResult{Status: "ok", RestartRequired: restartRequired}, nil
 }
 
 func mergeRateLimitConfig(existing ratelimit.Config, req rateLimitConfigRequest) (ratelimit.Config, error) {

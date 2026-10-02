@@ -39,7 +39,7 @@ interface SideNavItemProps {
   href?: string;
   /**
    * With href, render a plain <a> (full page navigation) instead of a
-   * react-router <Link>. Used for plugin routes mounted at /api/v1/plugins/...
+   * react-router <Link>. Used for plugin routes mounted at /api/v2/plugin-content/plugins/...
    */
   external?: boolean;
   /** Without href, the item renders as a <button>. */

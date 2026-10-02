@@ -55,7 +55,7 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
   );
   const files = useMemo(() => filesData?.files ?? [], [filesData]);
 
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [title, setTitle] = useState("");
   const [year, setYear] = useState("");
   const [imdbId, setImdbId] = useState("");
@@ -84,7 +84,7 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
     return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
   }, [files]);
 
-  const toggleFile = useCallback((id: number) => {
+  const toggleFile = useCallback((id: string) => {
     setSelectedIds((current) => {
       const next = new Set(current);
       if (next.has(id)) {

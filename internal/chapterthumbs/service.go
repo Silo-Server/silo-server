@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -37,6 +37,14 @@ const (
 	chapterThumbnailHDRPolicyDisabled      = "disabled"
 	chapterThumbnailHDRPolicyBestEffort    = "best_effort"
 	chapterThumbnailSoftwareToneMapSetting = "playback.chapter_thumbnail_software_tone_map_enabled"
+
+	// Hardware acceleration is read per extraction from these keys, not frozen
+	// at startup, so an admin change applies to the next chapter thumbnail.
+	// playbackHWAccelDefault mirrors the config loader's default for an unset
+	// row (internal/config/admin_settings.go).
+	playbackHWAccelSetting  = "playback.hw_accel"
+	playbackHWDeviceSetting = "playback.hw_device"
+	playbackHWAccelDefault  = "auto"
 )
 
 var chapterThumbnailRetrySchedule = []time.Duration{
@@ -79,10 +87,7 @@ type SettingsReader interface {
 	Get(ctx context.Context, key string) (string, error)
 }
 
-type ObjectStore interface {
-	PutObject(ctx context.Context, bucket, key string, data []byte) error
-	Bucket() string
-}
+type ObjectStore = blobstore.Store
 
 type ThumbnailNotifier interface {
 	ChapterThumbnailReady(ctx context.Context, fileID int, chapterIndex int, thumbnailPath string, thumbnailThumbhash string)
@@ -94,17 +99,35 @@ type ChapterThumbnailRequest struct {
 }
 
 type Service struct {
-	fileRepo        FileRepository
-	folderRepo      FolderRepository
-	probeEnsurer    ProbeEnsurer
-	settings        SettingsReader
-	store           ObjectStore
-	notifier        ThumbnailNotifier
-	ffmpegPath      string
-	hwAccel         string
-	hwDevice        string
-	hwResolveOnce   sync.Once
-	resolvedHWAccel string
+	fileRepo     FileRepository
+	folderRepo   FolderRepository
+	probeEnsurer ProbeEnsurer
+	settings     SettingsReader
+	store        ObjectStore
+	notifier     ThumbnailNotifier
+	ffmpegPath   string
+	// hwAccel and hwDevice hold the playback.hw_accel / playback.hw_device
+	// values captured when the service was built. They are only the fallback:
+	// resolveHWConfig re-reads both settings per extraction so an admin who
+	// changes hardware acceleration does not have to restart the server for
+	// chapter-thumbnail extraction to follow.
+	hwAccel  string
+	hwDevice string
+
+	// hwMu guards the resolved-accelerator memo below. Resolving "auto" execs
+	// an FFmpeg capability probe and logs the verdict, so the result is cached
+	// against the configured values that produced it and recomputed only when
+	// they actually change.
+	//
+	// Both values, not just the backend: the walk is over the configured device
+	// set, so a device edit changes which backends have candidates to verify and
+	// therefore what "auto" resolves to. Keying on the backend alone would hold
+	// a verdict taken against the old device list.
+	hwMu             sync.Mutex
+	hwResolved       bool
+	hwResolvedFrom   string
+	hwResolvedDevice string
+	resolvedHWAccel  string
 
 	notifyNormal        chan struct{}
 	notifyPriority      chan struct{}
@@ -121,8 +144,7 @@ type Service struct {
 	inProgress     map[int]struct{}
 
 	transcodePool      *nodepool.TranscodePool
-	remoteMu           sync.Mutex
-	remoteReservations map[string]int
+	remoteReservations *nodepool.Reservations
 	remoteExtractor    remoteFrameExtractor
 
 	extractFrameFunc           func(ctx context.Context, file *models.MediaFile, seekSeconds float64, hdrPolicy string) ([]byte, string, error)
@@ -196,7 +218,7 @@ func NewService(
 		queuedNormal:        make(map[int]ChapterThumbnailRequest),
 		inProgress:          make(map[int]struct{}),
 		transcodePool:       transcodePool,
-		remoteReservations:  make(map[string]int),
+		remoteReservations:  &nodepool.Reservations{},
 		remoteExtractor:     &httpRemoteFrameExtractor{},
 		clock:               time.Now,
 	}
@@ -207,7 +229,9 @@ func (s *Service) Start(ctx context.Context) {
 		return
 	}
 
-	resolvedAccel, resolvedDevice := s.resolveHWConfig()
+	// Logged for the boot record only: both values are re-read per extraction,
+	// so a later settings change is honored without a restart.
+	resolvedAccel, resolvedDevice := s.resolveHWConfig(ctx)
 	slog.InfoContext(ctx,
 		"chapter thumbnail service started", "component", "chapterthumbs",
 		"workers",
@@ -650,7 +674,7 @@ func (s *Service) extractFrameLocal(
 	toneMap bool,
 	allowSoftwareToneMap bool,
 ) ([]byte, string, error) {
-	resolvedAccel, resolvedDevice := s.resolveHWConfig()
+	resolvedAccel, resolvedDevice := s.resolveHWConfig(ctx)
 	return ExtractFrame(ctx, FrameExtractOptions{
 		InputPath:            inputPath,
 		SeekSeconds:          seekSeconds,
@@ -663,13 +687,65 @@ func (s *Service) extractFrameLocal(
 	})
 }
 
-func (s *Service) resolveHWConfig() (string, string) {
-	s.hwResolveOnce.Do(func() {
-		s.resolvedHWAccel = playback.ResolveHWAccelWithFFmpeg(s.hwAccel, s.ffmpegPath)
-	})
+// resolveHWConfig returns the accelerator and device this extraction should
+// use. Both come from the live settings repo rather than from a value frozen at
+// startup, which is what lets playback.hw_accel / playback.hw_device take
+// effect without a server restart.
+func (s *Service) resolveHWConfig(ctx context.Context) (string, string) {
+	configuredAccel, configuredDevice := s.configuredHWConfig(ctx)
+
+	s.hwMu.Lock()
+	defer s.hwMu.Unlock()
+	if !s.hwResolved || s.hwResolvedFrom != configuredAccel || s.hwResolvedDevice != configuredDevice {
+		// The device set is an input to the walk, not just to execution: it is
+		// what decides which backends have candidates to probe.
+		s.resolvedHWAccel = playback.ResolveHWAccelWithFFmpeg(configuredAccel, s.ffmpegPath, configuredDevice)
+		s.hwResolvedFrom = configuredAccel
+		s.hwResolvedDevice = configuredDevice
+		s.hwResolved = true
+	}
 	// The configured device value passes through raw: ExtractFrame resolves it
 	// (multi-device balancing, empty-value auto-detection) per extraction.
-	return s.resolvedHWAccel, s.hwDevice
+	return s.resolvedHWAccel, configuredDevice
+}
+
+// configuredHWConfig reads playback.hw_accel / playback.hw_device from the
+// settings repo, mirroring how the config loader defaults them. A settings repo
+// that is absent (test doubles) or failing falls back to the values captured at
+// construction, so a database blip keeps the boot configuration instead of
+// silently dropping extraction to software.
+func (s *Service) configuredHWConfig(ctx context.Context) (string, string) {
+	if s == nil {
+		return "", ""
+	}
+	accel := s.hwAccel
+	if value, ok := s.readSetting(ctx, playbackHWAccelSetting); ok {
+		accel = value
+		if accel == "" {
+			accel = playbackHWAccelDefault
+		}
+	}
+	device := s.hwDevice
+	if value, ok := s.readSetting(ctx, playbackHWDeviceSetting); ok {
+		// An empty device is a meaningful value ("auto-detect one"), so unlike
+		// the accelerator it is not replaced by a default.
+		device = value
+	}
+	return accel, device
+}
+
+// readSetting reports the trimmed setting value and whether the settings repo
+// answered at all. The second result is what lets callers tell "configured
+// empty" apart from "could not read".
+func (s *Service) readSetting(ctx context.Context, key string) (string, bool) {
+	if s == nil || s.settings == nil {
+		return "", false
+	}
+	value, err := s.settings.Get(ctx, key)
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(value), true
 }
 
 func (s *Service) chapterThumbnailExecutionMode(ctx context.Context) string {
@@ -724,48 +800,15 @@ func (s *Service) reserveRemoteNode(ctx context.Context) (*nodepool.Node, func()
 		return nil, func() {}, chapterThumbnailNodeUnavailableReason
 	}
 
-	nodes := s.transcodePool.Nodes()
-	capacity := s.chapterThumbnailNodeCapacity(ctx)
-
-	s.remoteMu.Lock()
-	defer s.remoteMu.Unlock()
-
-	var best *nodepool.Node
-	bestLoad := 0
-	hadHealthyNode := false
-	for _, node := range nodes {
-		if node == nil || !node.Enabled || !node.Healthy {
-			continue
-		}
-		hadHealthyNode = true
-		reserved := s.remoteReservations[node.URL]
-		if reserved >= capacity {
-			continue
-		}
-		effectiveLoad := node.ActiveJobs + reserved
-		if best == nil || effectiveLoad < bestLoad {
-			best = node
-			bestLoad = effectiveLoad
-		}
+	node, release, outcome := s.remoteReservations.Reserve(s.transcodePool.Nodes(), s.chapterThumbnailNodeCapacity(ctx))
+	switch outcome {
+	case nodepool.Reserved:
+		return node, release, ""
+	case nodepool.CapacityExhausted:
+		return nil, release, chapterThumbnailNodeCapacityExhaustedReason
+	default:
+		return nil, release, chapterThumbnailNodeUnavailableReason
 	}
-	if best == nil {
-		if hadHealthyNode {
-			return nil, func() {}, chapterThumbnailNodeCapacityExhaustedReason
-		}
-		return nil, func() {}, chapterThumbnailNodeUnavailableReason
-	}
-
-	s.remoteReservations[best.URL]++
-	return best, func() {
-		s.remoteMu.Lock()
-		defer s.remoteMu.Unlock()
-		current := s.remoteReservations[best.URL]
-		if current <= 1 {
-			delete(s.remoteReservations, best.URL)
-			return
-		}
-		s.remoteReservations[best.URL] = current - 1
-	}, ""
 }
 
 func (s *Service) uploadChapterThumbnail(ctx context.Context, fileID, chapterIndex int, frame []byte) (string, string, error) {
@@ -773,36 +816,31 @@ func (s *Service) uploadChapterThumbnail(ctx context.Context, fileID, chapterInd
 		return s.uploadChapterThumbnailFunc(ctx, fileID, chapterIndex, frame)
 	}
 
-	result, err := imageutil.GenerateVariants(frame, []int{300})
+	data, err := imageutil.EncodeWebPWidth(frame, chapterThumbnailWidth)
 	if err != nil {
-		return "", "", fmt.Errorf("generate variants: %w", err)
+		return "", "", fmt.Errorf("encode thumbnail: %w", err)
 	}
-
-	bucket := s.store.Bucket()
-	var originalKey string
-	var w300Data []byte
-	for _, variant := range result.Variants {
-		key := filepath.ToSlash(fmt.Sprintf("chapter-images/%d/%d/%s%s", fileID, chapterIndex, variant.Key, result.Ext))
-		if err := s.store.PutObject(ctx, bucket, key, variant.Data); err != nil {
-			return "", "", fmt.Errorf("upload %s: %w", key, err)
-		}
-		if variant.Key == "original" {
-			originalKey = key
-		}
-		if variant.Key == "w300" {
-			w300Data = variant.Data
-		}
+	key := chapterThumbnailKey(fileID, chapterIndex)
+	if err := s.store.Put(ctx, key, data); err != nil {
+		return "", "", fmt.Errorf("upload %s: %w", key, err)
 	}
-
-	thumbhashSource := w300Data
-	if len(thumbhashSource) == 0 && len(result.Variants) > 0 {
-		thumbhashSource = result.Variants[0].Data
-	}
-	thumbhash, err := imageutil.Thumbhash(thumbhashSource)
+	thumbhash, err := imageutil.Thumbhash(data)
 	if err != nil {
 		return "", "", fmt.Errorf("thumbhash: %w", err)
 	}
-	return originalKey, thumbhash, nil
+	return key, thumbhash, nil
+}
+
+// chapterThumbnailWidth is the width of the one image stored per chapter. It
+// is the size every client is served: the web seek-bar preview and chapters
+// menu, and the thumbnail_url the native apps decode. No full-size original is
+// kept; a client that needs larger previews needs the chapters regenerated.
+const chapterThumbnailWidth = 300
+
+// chapterThumbnailKey is the object key a chapter's thumbnail is stored under,
+// and the value its thumbnail_path holds.
+func chapterThumbnailKey(fileID, chapterIndex int) string {
+	return fmt.Sprintf("%s%d/%d/w%d.webp", chapterImagesPrefix, fileID, chapterIndex, chapterThumbnailWidth)
 }
 
 func (s *Service) enqueue(req ChapterThumbnailRequest, priority bool) bool {

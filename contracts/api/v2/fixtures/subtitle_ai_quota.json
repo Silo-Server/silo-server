@@ -1,0 +1,7 @@
+{
+  "limited": true,
+  "limit": 5,
+  "used": 2,
+  "remaining": 3,
+  "period": "daily"
+}

@@ -1,4 +1,13 @@
-import { useState, useMemo, useCallback } from "react";
+import {
+  adminImportScope,
+  importRunActive,
+  type AdminImportRun,
+  getAdminImportSource,
+  getAdminImportMapping,
+  isAdminImportConflict,
+} from "@/api/v2/adminHistoryImports";
+import { useOptionalAuth } from "@/hooks/useAuth";
+import { useState, useMemo, useCallback, useId } from "react";
 import { useSearchParams } from "react-router";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import {
@@ -40,7 +49,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { ConfirmDialog } from "@/components/ConfirmDialog";
+
 import {
   Table,
   TableBody,
@@ -58,6 +67,7 @@ import {
   useSetAdminSourceToken,
   useUpdateAdminHistoryImportSource,
   useAdminHistoryImportSources,
+  useAdminHistoryImportCapabilities,
 } from "@/hooks/queries/admin/history-import-sources";
 import {
   useAdminHistoryImportRuns,
@@ -73,13 +83,11 @@ import { useAdminUserProfiles } from "@/hooks/queries/admin/history";
 import type {
   CreateHistoryImportSourceRequest,
   HistoryImportExternalUser,
-  HistoryImportRun,
   HistoryImportSource,
   HistoryImportUserMapping,
   UpdateHistoryImportSourceRequest,
 } from "@/api/types";
 import { cn } from "@/lib/utils";
-import { formatRelativeTime } from "@/lib/date";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
 
 // ---------------------------------------------------------------------------
@@ -93,6 +101,13 @@ const STATUS_CONFIG = {
     color: "text-warning",
     bg: "bg-warning/10 border-warning/20",
     label: "Running",
+    spin: true,
+  },
+  canceling: {
+    icon: Loader2,
+    color: "text-warning",
+    bg: "bg-warning/10 border-warning/20",
+    label: "Canceling",
     spin: true,
   },
   completed: {
@@ -115,7 +130,7 @@ const STATUS_CONFIG = {
   },
 } as const;
 
-function StatusBadge({ status }: { status: HistoryImportRun["status"] }) {
+function StatusBadge({ status }: { status: AdminImportRun["status"] }) {
   const c = STATUS_CONFIG[status];
   const Icon = c.icon;
   return (
@@ -130,10 +145,6 @@ function StatusBadge({ status }: { status: HistoryImportRun["status"] }) {
       {c.label}
     </span>
   );
-}
-
-function timeAgo(dateStr: string | undefined) {
-  return formatRelativeTime(dateStr, { rounding: "floor", absoluteAfterDays: 1 }) ?? "Never";
 }
 
 function formatDate(dateStr: string | undefined) {
@@ -163,7 +174,9 @@ function SourceDialog({
   onClose: () => void;
 }) {
   const isEdit = mode.kind === "edit";
-  const existing = isEdit ? mode.source : null;
+  const [existing, setExisting] = useState(isEdit ? mode.source : null);
+  const [conflict, setConflict] = useState(false);
+  const [clearCredential, setClearCredential] = useState(false);
   const [name, setName] = useState(existing?.name ?? "");
   const [sourceType, setSourceType] = useState<"emby" | "jellyfin" | "plex">(
     (existing?.source_type as "emby" | "jellyfin" | "plex") ?? "jellyfin",
@@ -180,8 +193,18 @@ function SourceDialog({
   const create = useCreateAdminHistoryImportSource();
   const update = useUpdateAdminHistoryImportSource();
   const plexLogin = usePlexLogin();
-  const setTokenMut = useSetAdminSourceToken();
   const isPending = create.isPending || update.isPending || plexLogin.isPending;
+  const reload = async () => {
+    if (!existing) return;
+    const fresh = await getAdminImportSource(existing.id);
+    setExisting(fresh);
+    setName(fresh.name);
+    setBaseURL(fresh.base_url ?? "");
+    setEnabled(fresh.enabled);
+    setAdminToken("");
+    setClearCredential(false);
+    setConflict(false);
+  };
 
   const hints = SOURCE_HINTS[sourceType] || SOURCE_HINTS.jellyfin;
   const isPlex = sourceType === "plex";
@@ -193,41 +216,31 @@ function SourceDialog({
         name: name.trim(),
         base_url: baseURL.trim(),
         enabled,
+        admin_token: clearCredential ? "" : adminToken.trim() || undefined,
       };
-      update.mutate({ id: existing.id, body }, { onSuccess: onClose });
+      update.mutate(
+        { id: existing.id, body, etag: existing.etag },
+        { onSuccess: onClose, onError: (error) => setConflict(isAdminImportConflict(error)) },
+      );
     } else if (isPlex && tokenMode === "login" && plexUser.trim() && plexPass) {
-      // Create source first, then authenticate with Plex and set the token.
-      const body: CreateHistoryImportSourceRequest = {
-        name: name.trim(),
-        source_type: sourceType,
-        base_url: baseURL.trim(),
-        enabled,
-        sort_order: 0,
-      };
-      create.mutate(body, {
-        onSuccess: (source) => {
-          if (!source?.id) {
-            onClose();
-            return;
-          }
-          plexLogin.mutate(
-            { username: plexUser.trim(), password: plexPass },
-            {
-              onSuccess: (data) => {
-                if (data?.token) {
-                  setTokenMut.mutate(
-                    { id: source.id, body: { token: data.token } },
-                    { onSuccess: onClose },
-                  );
-                } else {
-                  onClose();
-                }
+      plexLogin.mutate(
+        { username: plexUser.trim(), password: plexPass },
+        {
+          onSuccess: (data) => {
+            create.mutate(
+              {
+                name: name.trim(),
+                source_type: sourceType,
+                base_url: baseURL.trim(),
+                enabled,
+                sort_order: 0,
+                admin_token: data.token,
               },
-              onError: () => onClose(), // source created but login failed — user can set token later
-            },
-          );
+              { onSuccess: onClose },
+            );
+          },
         },
-      });
+      );
     } else {
       const body: CreateHistoryImportSourceRequest = {
         name: name.trim(),
@@ -295,7 +308,36 @@ function SourceDialog({
               onChange={(e) => setBaseURL(e.target.value)}
             />
           </div>
+          {isPlex ? <PlexAdminImportLimits /> : null}
 
+          {existing?.needs_reconfiguration ? (
+            <p role="alert" className="text-warning text-sm">
+              This saved address contains unsupported credential or query settings. Review the
+              address and replace or clear its credential before using the source.
+            </p>
+          ) : null}
+          {isEdit ? (
+            <div className="space-y-2">
+              <Label htmlFor="src-replacement-token">Replacement admin credential</Label>
+              <Input
+                id="src-replacement-token"
+                type="password"
+                value={adminToken}
+                disabled={clearCredential}
+                onChange={(e) => setAdminToken(e.target.value)}
+                placeholder="Leave blank to keep the saved credential"
+              />
+              <label className="flex items-center gap-2 text-sm">
+                <Switch checked={clearCredential} onCheckedChange={setClearCredential} />
+                Clear the saved credential
+              </label>
+              <p className="text-muted-foreground text-xs">
+                Changing the server address requires a replacement credential or clearing the saved
+                one.
+              </p>
+            </div>
+          ) : null}
+          {conflict ? <ImportEditorConflict onReload={reload} /> : null}
           {/* Token / login section (create mode only) */}
           {!isEdit && (
             <>
@@ -347,6 +389,10 @@ function SourceDialog({
                       value={plexPass}
                       onChange={(e) => setPlexPass(e.target.value)}
                     />
+                    <p className="text-muted-foreground text-xs">
+                      If your Plex account uses two-step verification, type the 6-digit code
+                      straight after your password.
+                    </p>
                   </div>
                 </div>
               ) : (
@@ -386,7 +432,16 @@ function SourceDialog({
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={!name.trim() || !baseURL.trim() || isPending}>
+          <Button
+            onClick={handleSave}
+            disabled={
+              !name.trim() ||
+              !baseURL.trim() ||
+              isPending ||
+              conflict ||
+              (isEdit && !existing?.etag)
+            }
+          >
             {isPending ? "Saving…" : isEdit ? "Save" : "Add server"}
           </Button>
         </DialogFooter>
@@ -396,7 +451,7 @@ function SourceDialog({
 }
 
 function TokenDialog({
-  source,
+  source: initialSource,
   open,
   onClose,
 }: {
@@ -404,6 +459,15 @@ function TokenDialog({
   open: boolean;
   onClose: () => void;
 }) {
+  const [source, setSource] = useState(initialSource);
+  const [conflict, setConflict] = useState(false);
+  const reload = async () => {
+    setSource(await getAdminImportSource(source.id));
+    setToken("");
+    setPlexPass("");
+    setConflict(false);
+  };
+  const onError = (error: unknown) => setConflict(isAdminImportConflict(error));
   const isPlex = source.source_type === "plex";
   const [mode, setMode] = useState<"token" | "login">(isPlex ? "login" : "token");
   const [token, setToken] = useState("");
@@ -416,7 +480,10 @@ function TokenDialog({
 
   function handleSaveToken() {
     if (!token.trim()) return;
-    setToken_.mutate({ id: source.id, body: { token: token.trim() } }, { onSuccess: onClose });
+    setToken_.mutate(
+      { id: source.id, body: { token: token.trim() }, etag: source.etag },
+      { onSuccess: onClose, onError },
+    );
   }
 
   function handlePlexLogin() {
@@ -427,8 +494,8 @@ function TokenDialog({
         onSuccess: (data) => {
           if (data?.token) {
             setToken_.mutate(
-              { id: source.id, body: { token: data.token } },
-              { onSuccess: onClose },
+              { id: source.id, body: { token: data.token }, etag: source.etag },
+              { onSuccess: onClose, onError },
             );
           }
         },
@@ -436,7 +503,7 @@ function TokenDialog({
     );
   }
 
-  const isSaving = setToken_.isPending || plexLogin.isPending;
+  const isSaving = setToken_.isPending || plexLogin.isPending || clearToken.isPending;
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -497,6 +564,10 @@ function TokenDialog({
                   value={plexPass}
                   onChange={(e) => setPlexPass(e.target.value)}
                 />
+                <p className="text-muted-foreground text-xs">
+                  If your Plex account uses two-step verification, type the 6-digit code straight
+                  after your password.
+                </p>
               </div>
             </div>
           ) : (
@@ -535,12 +606,18 @@ function TokenDialog({
             </p>
           )}
         </div>
+        {conflict ? <ImportEditorConflict onReload={reload} /> : null}
         <DialogFooter className="gap-2">
           {source.has_admin_token && (
             <Button
               variant="destructive"
-              onClick={() => clearToken.mutate(source.id, { onSuccess: onClose })}
-              disabled={clearToken.isPending}
+              onClick={() =>
+                clearToken.mutate(
+                  { id: source.id, etag: source.etag },
+                  { onSuccess: onClose, onError },
+                )
+              }
+              disabled={isSaving || conflict || !source.etag}
             >
               Remove
             </Button>
@@ -549,11 +626,17 @@ function TokenDialog({
             Cancel
           </Button>
           {mode === "login" && isPlex ? (
-            <Button onClick={handlePlexLogin} disabled={!plexUser.trim() || !plexPass || isSaving}>
+            <Button
+              onClick={handlePlexLogin}
+              disabled={!plexUser.trim() || !plexPass || isSaving || conflict || !source.etag}
+            >
               {isSaving ? "Signing in…" : "Sign in & save"}
             </Button>
           ) : (
-            <Button onClick={handleSaveToken} disabled={!token.trim() || isSaving}>
+            <Button
+              onClick={handleSaveToken}
+              disabled={!token.trim() || isSaving || conflict || !source.etag}
+            >
               {isSaving ? "Saving…" : "Save"}
             </Button>
           )}
@@ -959,8 +1042,10 @@ function MappingsSection({
   const createRun = useCreateAdminRunForMapping();
   const bulkRun = useAdminBulkRun();
   const [deleteTarget, setDeleteTarget] = useState<HistoryImportUserMapping | null>(null);
+  const [deleteConflict, setDeleteConflict] = useState(false);
+  const { data: users = [] } = useAdminUsers();
 
-  if (!source.has_admin_token) return null;
+  if (!source.has_admin_token || source.needs_reconfiguration) return null;
 
   return (
     <div className="space-y-3">
@@ -972,7 +1057,7 @@ function MappingsSection({
               size="sm"
               variant="outline"
               onClick={() => bulkRun.mutate(source.id)}
-              disabled={bulkRun.isPending}
+              disabled={bulkRun.isPending || mappings.length > 200}
             >
               {bulkRun.isPending ? (
                 <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
@@ -989,6 +1074,25 @@ function MappingsSection({
         </div>
       </div>
 
+      {bulkRun.data ? (
+        <div role="status" className="space-y-1 text-sm">
+          <p>
+            {bulkRun.data.accepted} queued, {bulkRun.data.active} already active,{" "}
+            {bulkRun.data.failed} failed.
+          </p>
+          {bulkRun.data.outcomes.map((outcome) => (
+            <p key={outcome.mapping_id}>
+              Mapping {outcome.mapping_id}: {outcome.status}
+              {outcome.error ? ` — ${outcome.error}` : ""}
+            </p>
+          ))}
+        </div>
+      ) : null}
+      {mappings.length > 200 ? (
+        <p className="text-sm">
+          Bulk imports support up to 200 mappings. Start individual imports for this source.
+        </p>
+      ) : null}
       {mappings.length === 0 ? (
         <div className="surface-panel-subtle flex flex-col items-center gap-3 rounded-xl border-0 py-10 text-center">
           <p className="text-muted-foreground text-sm">
@@ -1009,7 +1113,7 @@ function MappingsSection({
                   <ArrowRight className="h-3.5 w-3.5" />
                 </TableHead>
                 <TableHead>Silo user</TableHead>
-                <TableHead>Last imported</TableHead>
+
                 <TableHead className="w-24 text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -1025,14 +1129,15 @@ function MappingsSection({
                     <ArrowRight className="h-3.5 w-3.5" />
                   </TableCell>
                   <TableCell>
-                    <p className="text-sm">{m.silo_username || `User ${m.silo_user_id}`}</p>
+                    <p className="text-sm">
+                      {users.find((user) => user.id === m.silo_user_id)?.username ||
+                        `User ${m.silo_user_id}`}
+                    </p>
                     {m.silo_profile_name && (
                       <p className="text-muted-foreground text-xs">{m.silo_profile_name}</p>
                     )}
                   </TableCell>
-                  <TableCell className="text-muted-foreground text-sm">
-                    {timeAgo(m.last_imported_at)}
-                  </TableCell>
+
                   <TableCell>
                     <div className="flex items-center justify-end gap-1">
                       <Button
@@ -1047,7 +1152,10 @@ function MappingsSection({
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() => setDeleteTarget(m)}
+                        onClick={() => {
+                          setDeleteTarget(m);
+                          setDeleteConflict(false);
+                        }}
                         title="Remove mapping"
                       >
                         <Trash2 className="text-destructive h-3.5 w-3.5" />
@@ -1070,18 +1178,32 @@ function MappingsSection({
         />
       )}
 
-      <ConfirmDialog
+      <ImportConfirmDialog
         open={deleteTarget !== null}
         onOpenChange={(open) => {
           if (!open) setDeleteTarget(null);
+        }}
+        isPending={deleteMapping.isPending || deleteConflict || !deleteTarget?.etag}
+        conflict={deleteConflict}
+        onReload={async () => {
+          if (deleteTarget) {
+            setDeleteTarget(await getAdminImportMapping(deleteTarget.id));
+            setDeleteConflict(false);
+          }
         }}
         title="Remove mapping"
         description={`Remove the mapping for "${deleteTarget?.external_user_name || deleteTarget?.external_user_id}"? This won't delete any imported history.`}
         confirmLabel="Remove"
         variant="destructive"
         onConfirm={() => {
-          if (deleteTarget) deleteMapping.mutate(deleteTarget.id);
-          setDeleteTarget(null);
+          if (deleteTarget)
+            deleteMapping.mutate(
+              { id: deleteTarget.id, etag: deleteTarget.etag },
+              {
+                onSuccess: () => setDeleteTarget(null),
+                onError: (error) => setDeleteConflict(isAdminImportConflict(error)),
+              },
+            );
         }}
       />
     </div>
@@ -1095,7 +1217,13 @@ function MappingsSection({
 type RunFilter = "all" | "admin" | "user";
 
 function RunsSection({ sourceId }: { sourceId: number }) {
-  const { data: allRuns = [] } = useAdminHistoryImportRuns(sourceId);
+  const {
+    data: allRuns = [],
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+    error,
+  } = useAdminHistoryImportRuns(sourceId);
   const { data: users = [] } = useAdminUsers();
   const cancelRun = useCancelAdminRun();
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -1113,7 +1241,7 @@ function RunsSection({ sourceId }: { sourceId: number }) {
     return allRuns.filter((r) => r.connection_mode !== "admin_token");
   }, [allRuns, filter]);
 
-  if (allRuns.length === 0) return null;
+  if (allRuns.length === 0 && !error) return null;
 
   return (
     <div className="space-y-3">
@@ -1145,7 +1273,6 @@ function RunsSection({ sourceId }: { sourceId: number }) {
         ) : (
           <div className="divide-y">
             {runs.map((run) => {
-              const isActive = run.status === "queued" || run.status === "running";
               const expanded = expandedId === run.id;
               return (
                 <div key={run.id}>
@@ -1189,7 +1316,7 @@ function RunsSection({ sourceId }: { sourceId: number }) {
                         <span className="text-warning">{run.unmatched} unmatched</span>
                       )}
                     </div>
-                    {isActive && (
+                    {run.cancelable && (
                       <Button
                         size="sm"
                         variant="ghost"
@@ -1286,6 +1413,20 @@ function RunsSection({ sourceId }: { sourceId: number }) {
           </div>
         )}
       </div>
+      {error ? (
+        <p role="alert" className="text-destructive text-sm">
+          Import statuses could not be refreshed. Reload to try again.
+        </p>
+      ) : null}
+      {hasNextPage ? (
+        <Button
+          variant="outline"
+          disabled={isFetchingNextPage}
+          onClick={() => void fetchNextPage()}
+        >
+          Load more imports
+        </Button>
+      ) : null}
     </div>
   );
 }
@@ -1295,13 +1436,24 @@ function RunsSection({ sourceId }: { sourceId: number }) {
 // ---------------------------------------------------------------------------
 
 export default function AdminHistoryImport() {
+  useOptionalAuth();
+  return <AdminHistoryImportPage key={adminImportScope()} />;
+}
+
+function AdminHistoryImportPage() {
   useEventChannel("history_import");
-  const { data: sources = [] } = useAdminHistoryImportSources();
+  const capabilities = useAdminHistoryImportCapabilities();
+  const {
+    data: sources = [],
+    isLoading: sourcesLoading,
+    error: sourcesError,
+  } = useAdminHistoryImportSources();
   const [searchParams, setSearchParams] = useSearchParams();
   const [sourceMode, setSourceMode] = useState<SourceMode | null>(null);
   const [tokenSource, setTokenSource] = useState<HistoryImportSource | null>(null);
   const [deleteSource, setDeleteSource] = useState<HistoryImportSource | null>(null);
   const deleteMutation = useDeleteAdminHistoryImportSource();
+  const [deleteConflict, setDeleteConflict] = useState(false);
 
   // Persist selected source in URL so it survives page refresh.
   const selectedId = searchParams.get("source") ? Number(searchParams.get("source")) : null;
@@ -1316,14 +1468,27 @@ export default function AdminHistoryImport() {
   const selected = sources.find((s) => s.id === effectiveId);
 
   // Query runs at page level so we can pass hasActiveRuns to mappings for auto-refresh.
-  const { data: runs = [] } = useAdminHistoryImportRuns(effectiveId ?? undefined);
-  const hasActiveRuns = runs.some((r) => r.status === "queued" || r.status === "running");
+  const { data: runs = [] } = useAdminHistoryImportRuns(
+    effectiveId ?? undefined,
+    effectiveId != null,
+  );
+  const hasActiveRuns = runs.some(importRunActive);
 
-  const { data: mappings = [] } = useAdminHistoryImportMappings(
+  const mappingsQuery = useAdminHistoryImportMappings(
     selected?.has_admin_token ? (effectiveId ?? undefined) : undefined,
     hasActiveRuns,
   );
 
+  if (capabilities.isLoading || sourcesLoading)
+    return <p>Loading history import administration…</p>;
+  if (
+    !capabilities.data?.available ||
+    !capabilities.data.guarded_configuration ||
+    !capabilities.data.durable_runs
+  )
+    return <p role="alert">History import administration is unavailable on this server.</p>;
+  if (sourcesError && sources.length === 0)
+    return <p role="alert">Saved servers could not be loaded.</p>;
   return (
     <div className="page-shell space-y-8 py-4 sm:py-6">
       <div className="page-header">
@@ -1342,35 +1507,188 @@ export default function AdminHistoryImport() {
         onSelect={setSelectedId}
         onAdd={() => setSourceMode({ kind: "create" })}
         onEdit={(s) => setSourceMode({ kind: "edit", source: s })}
-        onDelete={setDeleteSource}
+        onDelete={(source) => {
+          setDeleteSource(source);
+          setDeleteConflict(false);
+        }}
         onSetToken={setTokenSource}
       />
 
+      {selected?.source_type === "plex" ? <PlexAdminImportLimits /> : null}
+      {selected?.needs_reconfiguration ? (
+        <p role="alert" className="text-warning text-sm">
+          This source needs reconfiguration. Edit the server address and credential before
+          discovering users or starting imports.
+        </p>
+      ) : null}
       {/* Mappings */}
-      {selected && <MappingsSection source={selected} mappings={mappings} />}
+      {selected &&
+        (mappingsQuery.isError ? (
+          <div role="alert" className="space-y-2">
+            <p>User mappings could not be loaded.</p>
+            <Button
+              variant="outline"
+              disabled={mappingsQuery.isFetching}
+              onClick={() => void mappingsQuery.refetch()}
+            >
+              Retry user mappings
+            </Button>
+          </div>
+        ) : selected.has_admin_token && mappingsQuery.isPending ? (
+          <p role="status">Loading user mappings…</p>
+        ) : (
+          <MappingsSection
+            key={`mappings:${selected.id}`}
+            source={selected}
+            mappings={mappingsQuery.data ?? []}
+          />
+        ))}
 
       {/* Recent runs */}
-      {selected && effectiveId && <RunsSection sourceId={effectiveId} />}
+      {selected && effectiveId && (
+        <RunsSection key={`runs:${effectiveId}`} sourceId={effectiveId} />
+      )}
 
       {/* Dialogs */}
       {sourceMode && <SourceDialog mode={sourceMode} open onClose={() => setSourceMode(null)} />}
       {tokenSource && (
         <TokenDialog source={tokenSource} open onClose={() => setTokenSource(null)} />
       )}
-      <ConfirmDialog
+      <ImportConfirmDialog
         open={deleteSource !== null}
         onOpenChange={(open) => {
           if (!open) setDeleteSource(null);
         }}
+        isPending={deleteMutation.isPending || deleteConflict || !deleteSource?.etag}
+        conflict={deleteConflict}
+        onReload={async () => {
+          if (deleteSource) {
+            setDeleteSource(await getAdminImportSource(deleteSource.id));
+            setDeleteConflict(false);
+          }
+        }}
         title="Delete server"
-        description={`Delete "${deleteSource?.name}"? All user mappings for this server will also be removed.`}
+        description={`Delete "${deleteSource?.name}"? Remove its user mappings first.`}
         confirmLabel="Delete"
         variant="destructive"
         onConfirm={() => {
-          if (deleteSource) deleteMutation.mutate(deleteSource.id);
-          setDeleteSource(null);
+          if (deleteSource)
+            deleteMutation.mutate(
+              { id: deleteSource.id, etag: deleteSource.etag },
+              {
+                onSuccess: () => setDeleteSource(null),
+                onError: (error) => setDeleteConflict(isAdminImportConflict(error)),
+              },
+            );
         }}
       />
     </div>
+  );
+}
+
+// PlexAdminImportLimits states what an admin-token Plex import cannot read. Plex
+// session history only records finished plays; resume points, titles marked
+// watched, and watchlists are per-user state that only the user's own sign-in reaches.
+function PlexAdminImportLimits() {
+  const headingId = useId();
+  return (
+    <div
+      role="note"
+      aria-labelledby={headingId}
+      className="border-warning/40 bg-warning/10 flex max-w-3xl gap-3 rounded-xl border p-4 text-sm"
+    >
+      <AlertTriangle className="text-warning mt-0.5 h-4 w-4 shrink-0" />
+      <div className="space-y-2">
+        <p id={headingId} className="font-medium">
+          Plex admin imports only bring over finished plays
+        </p>
+        <p>
+          Silo reads this server&apos;s play history, which records each title a person played
+          through, and when. It can&apos;t see anything else, so these are not imported:
+        </p>
+        <ul className="list-disc space-y-0.5 pl-5">
+          <li>Resume points for titles still in progress</li>
+          <li>Titles, seasons, or shows marked as watched without playing them</li>
+          <li>Watchlists</li>
+        </ul>
+        <p>
+          To bring those over, each person imports from their own Plex account in Settings &rarr;
+          History Import.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function ImportEditorConflict({ onReload }: { onReload: () => Promise<void> }) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string>();
+  return (
+    <div role="alert" className="space-y-2 text-sm">
+      <p>
+        This configuration changed. Your draft or confirmation is kept. Reload the latest version
+        before trying again.
+      </p>
+      {error ? <p>{error}</p> : null}
+      <Button
+        type="button"
+        variant="outline"
+        disabled={loading}
+        onClick={async () => {
+          setLoading(true);
+          try {
+            await onReload();
+          } catch (error) {
+            setError(error instanceof Error ? error.message : "Reload failed");
+          } finally {
+            setLoading(false);
+          }
+        }}
+      >
+        Reload latest version
+      </Button>
+    </div>
+  );
+}
+function ImportConfirmDialog({
+  open,
+  onOpenChange,
+  title,
+  description,
+  confirmLabel,
+  onConfirm,
+  isPending,
+  conflict,
+  onReload,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  description: string;
+  confirmLabel: string;
+  variant?: string;
+  onConfirm: () => void;
+  isPending?: boolean;
+  conflict: boolean;
+  onReload: () => Promise<void>;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm">{description}</p>
+        {conflict ? <ImportEditorConflict onReload={onReload} /> : null}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button variant="destructive" disabled={isPending} onClick={onConfirm}>
+            {confirmLabel}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

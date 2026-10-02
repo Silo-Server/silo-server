@@ -1,4 +1,4 @@
-import { Link } from "react-router";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
 import type { CrewMember } from "@/api/types";
 import { buildPersonCatalogHref } from "@/pages/catalogSearchParams";
 
@@ -20,12 +20,12 @@ function CrewNames({ people }: { people: CrewPerson[] }) {
         <span key={p.name}>
           {i > 0 && ", "}
           {p.personId ? (
-            <Link
+            <ViewTransitionLink
               to={buildPersonCatalogHref(p.personId)}
               className="text-foreground/70 hover:text-foreground/90 font-medium transition-colors"
             >
               {p.name}
-            </Link>
+            </ViewTransitionLink>
           ) : (
             <span className="text-foreground/70 font-medium">{p.name}</span>
           )}
@@ -97,8 +97,13 @@ export default function HeroCrewLine({
         genres.map((g, i) => (
           <span key={g}>
             <span className="text-foreground/60">{g}</span>
+            {/* <wbr /> gives the line a break point between genres; the
+                separator spans alone leave the whole list one unbreakable word. */}
             {i < genres.length - 1 && (
-              <span className="text-muted-foreground/40 mx-1.5">&middot;</span>
+              <>
+                <span className="text-muted-foreground/40 mx-1.5">&middot;</span>
+                <wbr />
+              </>
             )}
           </span>
         ))}

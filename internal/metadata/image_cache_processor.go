@@ -34,11 +34,21 @@ const (
 	imageCacheDiscoveryBatchSize = 1000
 	// Waiting for a background worker to release a job polls with backoff and
 	// gives up after immediateImageCacheIdleTimeout without progress. The
-	// worker's own lease runs for imageCacheLeaseDuration, and its pod can die
+	// worker's own lease runs for ImageCacheLeaseDuration, and its pod can die
 	// while holding it, so an interactive refresh must not wait that long.
 	immediateImageCacheMinPoll     = 100 * time.Millisecond
 	immediateImageCacheMaxPoll     = 2 * time.Second
 	immediateImageCacheIdleTimeout = 30 * time.Second
+
+	// ImageCacheJobTimeout bounds one job end to end: source check, download
+	// (which also has its own 30-second cap in imagecache), variant encode, and
+	// uploads. Only the download had a deadline before; a hung upload or encode
+	// could hold a job past its claim lease, letting another worker reclaim and
+	// duplicate it. Two minutes is generous for the slowest realistic job, and
+	// worker/claim-page sizing (internal/taskmanager/tasks) relies on it to
+	// prove a claimed page always drains inside ImageCacheLeaseDuration. A job
+	// that hits it is marked failed and retried on the normal backoff.
+	ImageCacheJobTimeout = 2 * time.Minute
 )
 
 // ErrTargetArtworkPending reports that some of a refreshed target's artwork was
@@ -57,8 +67,26 @@ type ImageCacheJobClaimer interface {
 	MarkFailed(ctx context.Context, id int64, attemptCount int, lockedBy string, errText string) error
 	RequeueClaimed(ctx context.Context, ids []int64, workerID string) error
 	CurrentTargetSourcePath(ctx context.Context, job *models.MetadataImageCacheJob) (string, error)
-	EnqueueExistingProviderArtwork(ctx context.Context, limit int) (int, error)
+	EnqueueExistingProviderArtwork(ctx context.Context, cursor imageCacheDiscoveryCursor, limit int) (imageCacheDiscoveryPage, error)
 	DeleteSucceededBefore(ctx context.Context, before time.Time, limit int) (int, error)
+}
+
+// imageCacheDiscoveryCursor is deliberately scoped to one explicit backfill
+// run. Queue rows and cached target paths are the durable resume markers; a
+// persisted catalog cursor would add state that can drift away from them.
+type imageCacheDiscoveryCursor struct {
+	Surface    int
+	Key        string
+	Subkey     string
+	NumericKey int64
+}
+
+type imageCacheDiscoveryPage struct {
+	Enqueued   int
+	Scanned    int
+	Discovered int
+	Next       imageCacheDiscoveryCursor
+	Complete   bool
 }
 
 // imageCacheLadderBackfiller is optional so lightweight stores that only serve
@@ -101,8 +129,7 @@ type LibraryRootResolver interface {
 // ImagePrefixDeleter deletes cached image objects under a key prefix; used to
 // sweep the previous hashed local/ prefix after a successful re-cache.
 type ImagePrefixDeleter interface {
-	DeletePrefix(ctx context.Context, bucket, prefix string) (int, error)
-	Bucket() string
+	DeletePrefix(context.Context, string) (int, error)
 }
 
 type SeasonArtworkUpdater interface {
@@ -434,7 +461,9 @@ loop:
 		go func(job *models.MetadataImageCacheJob) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			result := p.processOne(ctx, job)
+			jobCtx, cancelJob := context.WithTimeout(ctx, ImageCacheJobTimeout)
+			result := p.processOne(jobCtx, job)
+			cancelJob()
 			mu.Lock()
 			switch result.outcome {
 			case "succeeded":
@@ -608,6 +637,10 @@ func (p *ImageCacheProcessor) runUntilIdle(ctx context.Context, workerID string,
 	if limited {
 		deadline = time.Now().Add(maxRuntime)
 	}
+	var discoveryCursor imageCacheDiscoveryCursor
+	discoveredThisSweep := false
+	enqueuedThisSweep := false
+	confirmationSweep := false
 	for {
 		if err := ctx.Err(); err != nil {
 			return total, err
@@ -646,14 +679,52 @@ func (p *ImageCacheProcessor) runUntilIdle(ctx context.Context, workerID string,
 		if !discover {
 			return total, nil
 		}
-		enqueued, err := p.jobs.EnqueueExistingProviderArtwork(ctx, imageCacheDiscoveryBatchSize)
-		if err != nil {
-			return total, err
-		}
-		total.EnqueuedExisting += enqueued
-		reportImageCacheRunProgress(reportProgress, total)
-		if enqueued == 0 {
-			return total, nil
+		// Keep walking source-keyed discovery pages until one queues work. When a
+		// sweep reaches the end after seeing candidates, wrap once and confirm
+		// that no work appeared behind the in-memory cursor during the sweep.
+		for {
+			if err := ctx.Err(); err != nil {
+				return total, err
+			}
+			if !p.enabled.Load() {
+				return total, ErrImageCachingDisabled
+			}
+			if limited && !time.Now().Before(deadline) {
+				total.RuntimeLimited = true
+				return total, nil
+			}
+			page, err := p.jobs.EnqueueExistingProviderArtwork(ctx, discoveryCursor, imageCacheDiscoveryBatchSize)
+			if err != nil {
+				return total, err
+			}
+			discoveryCursor = page.Next
+			discoveredThisSweep = discoveredThisSweep || page.Discovered > 0
+			total.EnqueuedExisting += page.Enqueued
+			reportImageCacheRunProgress(reportProgress, total)
+			if page.Enqueued > 0 {
+				enqueuedThisSweep = true
+				break
+			}
+			if !page.Complete {
+				continue
+			}
+			if !discoveredThisSweep {
+				return total, nil
+			}
+			if confirmationSweep && !enqueuedThisSweep {
+				// A second complete sweep reported candidates but could not enqueue
+				// any of them. Repeating the same non-actionable catalog state cannot
+				// make progress; a later explicit backfill starts fresh from durable
+				// queue and catalog state.
+				return total, nil
+			}
+			// Queue rows and cached paths now reflect the completed sweep. Resetting
+			// catches concurrent changes that sorted behind the cursor. A retry or
+			// process restart also starts here and safely reuses those durable rows.
+			discoveryCursor = imageCacheDiscoveryCursor{}
+			discoveredThisSweep = false
+			enqueuedThisSweep = false
+			confirmationSweep = true
 		}
 	}
 }
@@ -963,7 +1034,7 @@ func (p *ImageCacheProcessor) deleteStaleLocalPrefix(ctx context.Context, previo
 	if strings.HasPrefix(cachedPath, prefix) {
 		return
 	}
-	if _, err := p.prefixDeleter.DeletePrefix(ctx, p.prefixDeleter.Bucket(), prefix); err != nil {
+	if _, err := p.prefixDeleter.DeletePrefix(ctx, prefix); err != nil {
 		p.logger.WarnContext(ctx, "metadata image cache: failed to delete stale local image prefix", "prefix", prefix, "error", err)
 	}
 }

@@ -12,11 +12,13 @@ package httpstream
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -73,8 +75,10 @@ type RollingDeadlineWriter struct {
 	rc       *http.ResponseController
 	window   time.Duration
 	step     time.Duration
+	deadline sync.Mutex
 	lastBump time.Time
 	disabled bool
+	aborted  bool
 
 	statusCode    int
 	bytesWritten  int64
@@ -98,13 +102,15 @@ func newRollingDeadlineWriter(w http.ResponseWriter, window, step time.Duration)
 }
 
 func (s *RollingDeadlineWriter) bump() {
-	if s.disabled {
+	s.deadline.Lock()
+	defer s.deadline.Unlock()
+	if s.disabled || s.aborted {
 		return
 	}
 	if !s.lastBump.IsZero() && time.Since(s.lastBump) < s.step {
 		return
 	}
-	s.forceBump()
+	s.forceBumpLocked()
 }
 
 // forceBump sets the deadline unconditionally, ignoring the step throttle.
@@ -117,7 +123,13 @@ func (s *RollingDeadlineWriter) bump() {
 // reaps healthy slow clients. Every slice therefore gets a full window, which is
 // what the pre-CopyChunked loop did.
 func (s *RollingDeadlineWriter) forceBump() {
-	if s.disabled {
+	s.deadline.Lock()
+	defer s.deadline.Unlock()
+	s.forceBumpLocked()
+}
+
+func (s *RollingDeadlineWriter) forceBumpLocked() {
+	if s.disabled || s.aborted {
 		return
 	}
 	now := time.Now()
@@ -126,6 +138,16 @@ func (s *RollingDeadlineWriter) forceBump() {
 		return
 	}
 	s.lastBump = now
+}
+
+// Abort interrupts an in-flight response write and prevents a later rolling
+// deadline bump from reviving it. Session stops use this to withdraw a
+// progressive response even when its client has stopped reading.
+func (s *RollingDeadlineWriter) Abort() error {
+	s.deadline.Lock()
+	defer s.deadline.Unlock()
+	s.aborted = true
+	return s.rc.SetWriteDeadline(time.Now())
 }
 
 func (s *RollingDeadlineWriter) Header() http.Header { return s.w.Header() }
@@ -179,6 +201,26 @@ func (s *RollingDeadlineWriter) StatusCode() int {
 // underlying writer.
 func (s *RollingDeadlineWriter) BytesWritten() int64 {
 	return s.bytesWritten
+}
+
+// CompletedFullResponse reports whether the complete representation was
+// accepted by the transport without a write error. The request context is not
+// consulted because net/http may cancel it after the response reaches the
+// client but before the handler performs post-response accounting. ServeContent
+// returns 206 for a whole-file Range request such as "bytes=0-", so byte count
+// alone is not enough to distinguish that transfer from a partial range.
+func (s *RollingDeadlineWriter) CompletedFullResponse(fullSize int64) bool {
+	if fullSize <= 0 || s.bytesWritten != fullSize || s.firstWriteErr != nil {
+		return false
+	}
+	switch s.statusCode {
+	case http.StatusOK:
+		return true
+	case http.StatusPartialContent:
+		return s.Header().Get("Content-Range") == fmt.Sprintf("bytes 0-%d/%d", fullSize-1, fullSize)
+	default:
+		return false
+	}
 }
 
 // Outcome classifies the first write failure, or a canceled request when no

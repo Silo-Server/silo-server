@@ -95,6 +95,7 @@ export const catalogKeys = {
 export const favoriteKeys = {
   all: ["favorites"] as const,
   list: () => ["favorites", "list"] as const,
+  exists: () => ["favorites", "exists"] as const,
   check: (itemId: string) => ["favorites", "check", itemId] as const,
 };
 
@@ -102,6 +103,8 @@ export const watchlistKeys = {
   all: ["watchlist"] as const,
   list: () => ["watchlist", "list"] as const,
   check: (itemId: string) => ["watchlist", "check", itemId] as const,
+  /** Watchlist entries for titles the library doesn't have yet. */
+  titles: () => ["watchlist", "titles"] as const,
 };
 
 export const historyKeys = {
@@ -125,8 +128,7 @@ export const requestKeys = {
   all: ["requests"] as const,
   status: () => ["requests", "status"] as const,
   discovery: () => ["requests", "discovery"] as const,
-  discoverySection: (section: string, page: number) =>
-    ["requests", "discovery", section, page] as const,
+  discoverySection: (section: string) => ["requests", "discovery", section] as const,
   discoverStudios: () => ["requests", "discover", "studios"] as const,
   discoverNetworks: () => ["requests", "discover", "networks"] as const,
   discoverGenres: () => ["requests", "discover", "genres"] as const,
@@ -135,12 +137,17 @@ export const requestKeys = {
     slug: string,
     mediaType: string | undefined,
     sort: string,
-    page: number,
-  ) => ["requests", "discover", "browse", kind, slug, mediaType ?? "", sort, page] as const,
+  ) => ["requests", "discover", "browse", kind, slug, mediaType ?? "", sort] as const,
   search: (mediaType: string, query: string, page: number, viewerKey: string) =>
     ["requests", "search", viewerKey, mediaType, query, page] as const,
   detail: (mediaType: string, tmdbID: number) => ["requests", "detail", mediaType, tmdbID] as const,
   mine: (params: Record<string, unknown>) => ["requests", "mine", params] as const,
+  one: (id: string) => ["requests", "one", id] as const,
+  // Prefixes for refreshing every params variant at once.
+  discoverBrowseAll: () => ["requests", "discover", "browse"] as const,
+  detailAll: () => ["requests", "detail"] as const,
+  mineAll: () => ["requests", "mine"] as const,
+  searchAll: () => ["requests", "search"] as const,
 };
 
 export const libraryCollectionKeys = {
@@ -165,7 +172,9 @@ export const compatKeys = {
 
 export const personKeys = {
   all: ["people"] as const,
-  search: (query: string, limit = 20) => ["people", "search", query, limit] as const,
+  searchCapabilities: () => ["people", "search-capabilities"] as const,
+  search: (query: string, limit = 20, mediaScope?: string) =>
+    ["people", "search", query, limit, mediaScope ?? "all"] as const,
   detail: (id: string) => ["people", "detail", id] as const,
   catalog: (
     id: string,
@@ -297,6 +306,7 @@ export const ratingKeys = {
 export const subtitleKeys = {
   all: ["subtitles"] as const,
   downloaded: (mediaFileId: number) => ["subtitles", "downloaded", mediaFileId] as const,
+  providerStatus: () => ["subtitles", "provider-status"] as const,
 };
 
 export const recKeys = {
@@ -330,7 +340,6 @@ export const downloadKeys = {
 export const themeKeys = {
   all: ["theme"] as const,
   adminCss: () => ["theme", "admin-css"] as const,
-  catalogIndex: () => ["theme", "catalog"] as const,
   branding: () => ["theme", "branding"] as const,
 };
 
@@ -353,8 +362,10 @@ export const adminKeys = {
   deviceDetail: (userId: number, deviceId: string) =>
     ["admin", "devices", userId, deviceId] as const,
   libraries: () => ["admin", "libraries"] as const,
-  libraryRoots: (libraryId?: number, state?: string) =>
-    ["admin", "libraries", "roots", libraryId ?? "all", state ?? "all"] as const,
+  libraryRealtimeMonitoring: () => ["admin", "libraries", "realtimeMonitoring"] as const,
+  libraryCapabilities: () => ["admin", "libraries", "capabilities"] as const,
+  libraryRoots: (libraryId?: number, state?: string, search?: string) =>
+    ["admin", "libraries", "roots", libraryId ?? "all", state ?? "all", search ?? ""] as const,
   libraryMatchQueueStatuses: () => ["admin", "libraries", "metadataMatchQueue"] as const,
   libraryMatchQueueDetail: (libraryId: number) =>
     ["admin", "libraries", "metadataMatchQueue", libraryId] as const,
@@ -376,13 +387,59 @@ export const adminKeys = {
   sessions: () => ["admin", "sessions"] as const,
   serverSettings: () => ["admin", "serverSettings"] as const,
   serverStatus: () => ["admin", "serverStatus"] as const,
+  dashboardLayout: () => ["admin", "dashboard", "layout"] as const,
+  // Dashboard insight endpoints are keyed by their window so a 1h tile and a
+  // 24h chart cache separately; the matching `*Root` key is the prefix the
+  // dashboard's Refresh invalidates, which covers every window at once.
+  dashboardTimeseriesRoot: () => ["admin", "dashboard", "timeseries"] as const,
+  dashboardTimeseries: (hours: number) => ["admin", "dashboard", "timeseries", hours] as const,
+  playbackActivityRoot: () => ["admin", "dashboard", "playback-activity"] as const,
+  playbackActivity: (hours: number) => ["admin", "dashboard", "playback-activity", hours] as const,
+  topActivityRoot: () => ["admin", "dashboard", "top-activity"] as const,
+  topActivity: (days: number) => ["admin", "dashboard", "top-activity", days] as const,
+  downloadsStatsRoot: () => ["admin", "dashboard", "downloads-stats"] as const,
+  downloadsStats: (limit: number) => ["admin", "dashboard", "downloads-stats", limit] as const,
+  restartKeys: () => ["admin", "restartKeys"] as const,
   catalogSearchStatus: () => ["admin", "catalogSearchStatus"] as const,
   jellyfinCompatStatus: () => ["admin", "jellyfinCompatStatus"] as const,
+  networkAccessCapabilities: () => ["admin", "networkAccess", "capabilities"] as const,
+  networkAccessStatusRoot: () => ["admin", "networkAccess", "status"] as const,
+  networkAccessStatus: (provider: string) =>
+    ["admin", "networkAccess", "status", provider] as const,
   requestsRoot: () => ["admin", "requests"] as const,
-  requests: (params: Record<string, unknown>) => ["admin", "requests", params] as const,
+  // The queue, its view counts, and a request's history sit under
+  // requestsRoot, so every request action refreshes them.
+  requestQueueRoot: () => ["admin", "requests", "queue"] as const,
+  requestQueue: (params: Record<string, unknown>) =>
+    ["admin", "requests", "queue", params] as const,
+  requestCounts: () => ["admin", "requests", "counts"] as const,
+  requestEvents: (id: string) => ["admin", "requests", "events", id] as const,
   requestSettings: () => ["admin", "requests", "settings"] as const,
   requestIntegrations: () => ["admin", "requests", "integrations"] as const,
+  // The route and option keys sit outside requestsRoot on purpose: every request, server,
+  // and settings write invalidates that root. Only adding or deleting a server
+  // changes a route (it can set or clear Everything else), and those writes
+  // refresh the routes themselves; reading the routes is one GET per route; the
+  // options each call out to the server's Sonarr or Radarr.
+  requestRoutes: () => ["admin", "requestRoutes"] as const,
+  // Under requestRoutes: switching it changes the routes (Everything else can
+  // be filled in) and what a preview answers.
+  requestRouting: () => ["admin", "requestRoutes", "mode"] as const,
+  // Under requestRoutes, so saving a rule refreshes an open preview.
+  requestRoutePreviewRoot: () => ["admin", "requestRoutes", "preview"] as const,
+  requestRoutePreview: (mediaType: string, tmdbId: number, requesterUserId?: number) =>
+    ["admin", "requestRoutes", "preview", mediaType, tmdbId, requesterUserId ?? null] as const,
+  // Outside requestRoutes: a rule save changes nothing TMDB answers.
+  requestRouteTitles: (mediaType: string, q: string) =>
+    ["admin", "requestRouteTitles", mediaType, q] as const,
+  requestIntegrationOptionsRoot: () => ["admin", "requestIntegrationOptions"] as const,
+  requestIntegrationOptions: (integrationId: string) =>
+    ["admin", "requestIntegrationOptions", integrationId] as const,
   requestUserLimit: (userId: number) => ["admin", "requests", "users", userId, "limit"] as const,
+  // Scoped to the admin authority: the limit's validator names the profile
+  // that read it, so another profile's cached copy would fail its save.
+  requestGroupLimit: (groupId: number, scope: string) =>
+    ["admin", "requests", "groups", groupId, "limit", scope] as const,
   recommendationsStatus: () => ["admin", "recommendationsStatus"] as const,
   inviteCodes: () => ["admin", "inviteCodes"] as const,
   invitations: () => ["admin", "invitations"] as const,
@@ -397,6 +454,7 @@ export const adminKeys = {
   }) => ["admin", "playbackHistory", params] as const,
   userIPs: (userId: number, days?: number) => ["admin", "users", userId, "ips", days] as const,
   ipUsers: (ip: string, days?: number) => ["admin", "ips", ip, days] as const,
+  operationalLogsRoot: () => ["admin", "logs", "app"] as const,
   operationalLogs: (params: Record<string, unknown>) => ["admin", "logs", "app", params] as const,
   auditLogs: (params: Record<string, unknown>) => ["admin", "logs", "audit", params] as const,
   diagnosticStatus: () => ["diagnostics", "status"] as const,
@@ -406,14 +464,14 @@ export const adminKeys = {
   policyCapability: () => ["policy", "capability"] as const,
   policyVendor: () => ["admin", "policy", "vendor"] as const,
   policyDocuments: () => ["admin", "policy", "documents"] as const,
-  policyDocument: (id?: number) => ["admin", "policy", "documents", id ?? "none"] as const,
-  policyVersions: (id?: number) =>
+  policyDocument: (id?: string) => ["admin", "policy", "documents", id ?? "none"] as const,
+  policyVersions: (id?: string) =>
     ["admin", "policy", "documents", id ?? "none", "versions"] as const,
-  policyVersion: (id?: number, version?: number) =>
+  policyVersion: (id?: string, version?: string) =>
     ["admin", "policy", "documents", id ?? "none", "versions", version ?? "none"] as const,
   policyDecisions: (params: Record<string, unknown>) =>
     ["admin", "policy", "decisions", params] as const,
-  policyDecision: (id?: number) => ["admin", "policy", "decisions", id ?? "none"] as const,
+  policyDecision: (id?: string) => ["admin", "policy", "decisions", id ?? "none"] as const,
   subtitleProviders: () => ["admin", "subtitleProviders"] as const,
   downloadedSubtitles: (params: {
     provider?: string;
@@ -435,9 +493,14 @@ export const adminKeys = {
     ["admin", "historyImportAdminRuns", "detail", id] as const,
   activeScans: () => ["admin", "activeScans"] as const,
   tasks: () => ["admin", "tasks"] as const,
+  // Under tasks() so every task-list invalidation also refreshes it.
+  tasksIncludingHidden: () => ["admin", "tasks", { includeHidden: true }] as const,
   task: (key: string) => ["admin", "tasks", key] as const,
   taskHistory: (key: string) => ["admin", "tasks", key, "history"] as const,
   taskMetrics: (key: string) => ["admin", "tasks", key, "metrics"] as const,
+  markerCapabilities: () => ["admin", "markerCapabilities"] as const,
+  ratingSources: () => ["admin", "ratingSources"] as const,
+  ratingSourceCapabilities: () => ["admin", "ratingSourceCapabilities"] as const,
   markerProviders: () => ["admin", "markerProviders"] as const,
   markerProvider: (provider: string) => ["admin", "markerProviders", provider] as const,
   markerProviderValidation: (provider: string) =>
@@ -450,18 +513,20 @@ export const adminKeys = {
   pluginCatalog: () => ["admin", "plugins", "catalog"] as const,
   pluginCatalogSettings: () => ["admin", "plugins", "catalogSettings"] as const,
   pluginInstallations: () => ["admin", "plugins", "installations"] as const,
-  unmatchedItems: (page?: number, search?: string) =>
-    page != null
-      ? (["admin", "libraries", "unmatchedItems", page, search ?? ""] as const)
+  unmatchedItems: (search?: string) =>
+    search !== undefined
+      ? (["admin", "libraries", "unmatchedItems", search] as const)
       : (["admin", "libraries", "unmatchedItems"] as const),
   itemImages: (id: string) => ["admin", "items", id, "images"] as const,
   buildInfo: () => ["admin", "system", "buildInfo"] as const,
   hwAccel: () => ["admin", "system", "hwAccel"] as const,
+  systemResources: () => ["admin", "system", "resources"] as const,
   autoscanSettings: () => ["admin", "autoscan", "settings"] as const,
   autoscanConnections: () => ["admin", "autoscan", "connections"] as const,
   autoscanSources: () => ["admin", "autoscan", "sources"] as const,
   autoscanScanSourcePlugins: () => ["admin", "autoscan", "scan-source-plugins"] as const,
   autoscanStatus: () => ["admin", "autoscan", "status"] as const,
+  autoscanScansRoot: () => ["admin", "autoscan", "scans"] as const,
   autoscanScans: (params?: Record<string, unknown>) =>
     ["admin", "autoscan", "scans", params ?? {}] as const,
   autoscanEvents: (params?: Record<string, unknown>) =>

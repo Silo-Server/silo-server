@@ -246,3 +246,20 @@ func (r *ScannedRootRepository) DeleteMissingInScope(ctx context.Context, folder
 	}
 	return nil
 }
+
+// DeleteMissingByFolder removes scanned roots for a folder that were not seen
+// anywhere in the library during an authoritative full scan.
+func (r *ScannedRootRepository) DeleteMissingByFolder(ctx context.Context, folderID int, seenRoots []string) error {
+	if seenRoots == nil {
+		seenRoots = []string{}
+	}
+	_, err := r.pool.Exec(ctx, `
+		DELETE FROM scanned_media_roots
+		WHERE media_folder_id = $1
+		  AND NOT (root_path = ANY($2))
+	`, folderID, seenRoots)
+	if err != nil {
+		return fmt.Errorf("deleting missing scanned roots by folder: %w", err)
+	}
+	return nil
+}

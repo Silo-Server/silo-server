@@ -47,6 +47,28 @@ func TestAllow4KVideoTranscode(t *testing.T) {
 	}
 }
 
+func TestAllowHEVCVideoEncoding(t *testing.T) {
+	tests := []struct {
+		name string
+		repo SettingsReader
+		want bool
+	}{
+		{name: "nil repo defaults to deny", repo: nil},
+		{name: "unset defaults to deny", repo: stubSettingsReader{}},
+		{name: "read error defaults to deny", repo: stubSettingsReader{err: errors.New("read failed")}},
+		{name: "explicit false denies", repo: stubSettingsReader{values: map[string]string{config.PlaybackAllowHEVCEncodingSettingKey: "false"}}},
+		{name: "case-insensitive true allows", repo: stubSettingsReader{values: map[string]string{config.PlaybackAllowHEVCEncodingSettingKey: " TRUE "}}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := &PlaybackHandler{SettingsRepo: tt.repo}
+			if got := h.allowHEVCVideoEncoding(context.Background()); got != tt.want {
+				t.Errorf("allowHEVCVideoEncoding() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestToneMapPolicyResultPreservesStoreFailure(t *testing.T) {
 	handler := &PlaybackHandler{SettingsRepo: stubSettingsReader{err: context.DeadlineExceeded}}
 	_, err := handler.toneMapPolicyResult(context.Background())
@@ -66,6 +88,63 @@ func TestIs4KResolution(t *testing.T) {
 		if got := is4KResolution(res); got != want {
 			t.Errorf("is4KResolution(%q) = %v, want %v", res, got, want)
 		}
+	}
+}
+
+func TestCompatVideoToolboxToneMapBitrateKbps(t *testing.T) {
+	videoToolbox := compatToneMapRecipe{mode: tonemap.ModeHardware, hwAccel: tonemap.BackendVideoToolbox}
+	tests := []struct {
+		name    string
+		version catalog.FileVersion
+		recipe  compatToneMapRecipe
+		want    int
+	}{
+		{name: "4K track", version: catalog.FileVersion{VideoTracks: []models.VideoTrack{{Height: 2160}}}, recipe: videoToolbox, want: 20_000},
+		{name: "4K label", version: catalog.FileVersion{Resolution: "4K"}, recipe: videoToolbox, want: 20_000},
+		{name: "1080p", version: catalog.FileVersion{VideoTracks: []models.VideoTrack{{Height: 1080}}}, recipe: videoToolbox, want: 6_000},
+		{name: "720p", version: catalog.FileVersion{Resolution: "720p"}, recipe: videoToolbox, want: 2_000},
+		{name: "SD", version: catalog.FileVersion{VideoTracks: []models.VideoTrack{{Height: 576}}}, recipe: videoToolbox, want: 1_500},
+		{name: "source bitrate fallback", version: catalog.FileVersion{Bitrate: 9_000}, recipe: videoToolbox, want: 9_000},
+		{name: "unknown source", recipe: videoToolbox},
+		{name: "software mode", version: catalog.FileVersion{Resolution: "2160p"}, recipe: compatToneMapRecipe{mode: tonemap.ModeSoftware, hwAccel: tonemap.BackendSoftware}},
+		{name: "other hardware", version: catalog.FileVersion{Resolution: "2160p"}, recipe: compatToneMapRecipe{mode: tonemap.ModeHardware, hwAccel: tonemap.BackendQSV}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := compatVideoToolboxToneMapBitrateKbps(test.version, test.recipe, 0); got != test.want {
+				t.Fatalf("compatVideoToolboxToneMapBitrateKbps() = %d, want %d", got, test.want)
+			}
+		})
+	}
+}
+
+func TestDowngradeCompatLocalToneMapClearsOnlyAutomaticVideoToolboxBitrate(t *testing.T) {
+	capabilities := tonemap.Capabilities{{
+		Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware,
+		Filter: tonemap.SoftwareFilterHable, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
+	}}
+	newOpts := func() playback.TranscodeOpts {
+		return playback.TranscodeOpts{
+			ToneMapPolicy: tonemap.PolicyHardwareThenSoftware, ToneMapMode: tonemap.ModeHardware,
+			ToneMapSourceKind: tonemap.SourcePQ, ToneMapFilter: tonemap.HardwareFilterVideoToolbox,
+			HWAccel: tonemap.BackendVideoToolbox, TargetBitrateKbps: 20_000,
+		}
+	}
+
+	automatic := newOpts()
+	if !downgradeCompatLocalToneMap(&automatic, capabilities, 20_000) {
+		t.Fatal("automatic VideoToolbox recipe did not downgrade")
+	}
+	if automatic.TargetBitrateKbps != 0 || automatic.ToneMapMode != tonemap.ModeSoftware || automatic.HWAccel != playback.HWAccelNone {
+		t.Fatalf("automatic fallback = bitrate %d mode %q hw %q", automatic.TargetBitrateKbps, automatic.ToneMapMode, automatic.HWAccel)
+	}
+
+	explicit := newOpts()
+	if !downgradeCompatLocalToneMap(&explicit, capabilities, 0) {
+		t.Fatal("explicitly constrained recipe did not downgrade")
+	}
+	if explicit.TargetBitrateKbps != 20_000 {
+		t.Fatalf("explicit fallback bitrate = %d, want 20000", explicit.TargetBitrateKbps)
 	}
 }
 
@@ -92,6 +171,8 @@ func TestBuildPlaybackSource4KVideoTranscodeGate(t *testing.T) {
 			{Type: "Video", Container: "mp4", VideoCodec: "h264,hevc", AudioCodec: "aac"},
 		},
 	}
+	hevcTSOnly := hevcNoEac3
+	hevcTSOnly.TranscodingProfiles = []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: "ts", VideoCodec: "h264", AudioCodec: "aac"}}
 
 	tests := []struct {
 		name               string
@@ -122,6 +203,12 @@ func TestBuildPlaybackSource4KVideoTranscodeGate(t *testing.T) {
 			allow4K:            false,
 			wantTranscoding:    true,
 			wantTranscodeAudio: true,
+		},
+		{
+			name:    "4K explicit TS-only profile cannot authorize fMP4 copy",
+			version: version4K,
+			profile: hevcTSOnly,
+			allow4K: false,
 		},
 		{
 			name:            "non-4K video transcode unaffected",
@@ -274,5 +361,16 @@ func TestStartRemoteTranscode4KGuard(t *testing.T) {
 	}
 	if err := h.startRemoteTranscode(context.Background(), "play", "session", source, nil, 0, "http://node"); !errors.Is(err, errTranscode4KDisallowed) {
 		t.Errorf("startRemoteTranscode() error = %v, want errTranscode4KDisallowed", err)
+	}
+}
+
+func TestVideoToolboxAutomaticBitratePreservesClientCeiling(t *testing.T) {
+	version := catalog.FileVersion{Resolution: "1080p"}
+	recipe := compatToneMapRecipe{mode: tonemap.ModeHardware, hwAccel: tonemap.BackendVideoToolbox}
+	if got := compatVideoToolboxToneMapBitrateKbps(version, recipe, 0); got <= 0 {
+		t.Fatal("fixture did not select automatic VideoToolbox bitrate")
+	}
+	if got := compatVideoToolboxToneMapBitrateKbps(version, recipe, 1708); got != 0 {
+		t.Fatalf("automatic bitrate %d overrides explicit client ceiling", got)
 	}
 }

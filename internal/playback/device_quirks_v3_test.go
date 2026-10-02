@@ -124,6 +124,44 @@ func TestDeviceQuirkProtocolRequiresTopLevelFeature(t *testing.T) {
 	}
 }
 
+func TestFirefoxMatroskaAACTimingQuirkIsExact(t *testing.T) {
+	request := validStartRequestV3()
+	request.ClientPlaybackContext.Device = DeviceContextV3{
+		Platform: "web",
+		PlatformDetails: map[string]string{
+			"user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0",
+		},
+	}
+	source := SourceDescriptorV3{Container: "mkv", AudioCodec: "aac"}
+	quirk, ok := firefoxMatroskaAACTimingQuirkV3(source, request)
+	if !ok || quirk == nil || quirk.ID != QuirkFirefoxMatroskaAACTimingV3 || quirk.Action != "audio_only_transcode" {
+		t.Fatalf("Firefox Matroska AAC quirk = %#v, ok=%v", quirk, ok)
+	}
+
+	for _, test := range []struct {
+		name      string
+		platform  string
+		userAgent string
+		container string
+		codec     string
+	}{
+		{name: "MP4 AAC", platform: "web", userAgent: "Mozilla/5.0 Firefox/154.0", container: "mp4", codec: "aac"},
+		{name: "Matroska Opus", platform: "web", userAgent: "Mozilla/5.0 Firefox/154.0", container: "mkv", codec: "opus"},
+		{name: "Chrome", platform: "web", userAgent: "Mozilla/5.0 Chrome/140.0", container: "mkv", codec: "aac"},
+		{name: "SeaMonkey", platform: "web", userAgent: "Mozilla/5.0 Firefox/128.0 SeaMonkey/2.53", container: "mkv", codec: "aac"},
+		{name: "non-web", platform: "android", userAgent: "Mozilla/5.0 Firefox/154.0", container: "mkv", codec: "aac"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			candidate := request
+			candidate.ClientPlaybackContext.Device.Platform = test.platform
+			candidate.ClientPlaybackContext.Device.PlatformDetails = map[string]string{"user_agent": test.userAgent}
+			if got, eligible := firefoxMatroskaAACTimingQuirkV3(SourceDescriptorV3{Container: test.container, AudioCodec: test.codec}, candidate); eligible || got != nil {
+				t.Fatalf("unexpected quirk = %#v, eligible=%v", got, eligible)
+			}
+		})
+	}
+}
+
 func TestPlanAttemptKeyV3DeviceQuirkIsStable(t *testing.T) {
 	width, height, bitrate := 3840, 2160, 60_000
 	plan := PlanV3{

@@ -6,15 +6,20 @@ import (
 	"math"
 	"net/mail"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/models"
 	redisv9 "github.com/redis/go-redis/v9"
 	"github.com/robfig/cron/v3"
 )
 
-const cloudflareURLMode = "cloudflare_token"
-const chapterThumbnailSoftwareToneMapKey = "playback.chapter_thumbnail_software_tone_map_enabled"
+const (
+	cloudflareURLMode                  = "cloudflare_token"
+	playbackSegmentRetentionSettingKey = "playback.segment_retention_seconds"
+	chapterThumbnailSoftwareToneMapKey = "playback.chapter_thumbnail_software_tone_map_enabled"
+)
 
 // PlaybackTranscodeHardwareToneMapSettingKey and
 // PlaybackTranscodeSoftwareToneMapSettingKey are server-wide execution policy
@@ -26,11 +31,77 @@ const (
 	PlaybackTranscodeSoftwareToneMapSettingKey = "playback.transcode_software_tone_map_enabled"
 )
 
+// SetupCompletedSettingKey records that the first-run setup wizard reached its
+// final screen. The public setup-status endpoint reports it so the web client
+// can refuse to reopen the wizard once an install has been through it; it says
+// nothing about whether any optional step was configured.
+const SetupCompletedSettingKey = "setup.completed"
+
+// CatalogScopeVersionsToLibrarySettingKey makes a library-scoped catalog read
+// (library_id on the v2 item, versions, and episode operations) return only
+// the files stored in that library. Off, the default, keeps every accessible
+// version of an item visible no matter which library it was opened from.
+const CatalogScopeVersionsToLibrarySettingKey = "catalog.scope_versions_to_library"
+
+// AccessUnratedContentSettingKey decides what a profile with a content-rating
+// ceiling sees for a title with no rating: an empty rating, or an explicit
+// "not rated" marker. "hide", the default, keeps such a title out of every
+// ceilinged viewer's catalog; "allow" shows it. A rating the server cannot
+// read is hidden from ceilinged profiles either way (see
+// access.UnrecognizedRatingAge). Profiles without a ceiling are unaffected.
+const AccessUnratedContentSettingKey = "access.unrated_content"
+
+// Values for AccessUnratedContentSettingKey.
+const (
+	AccessUnratedContentHide  = "hide"
+	AccessUnratedContentAllow = "allow"
+)
+
+// CatalogExtraRatingSourcesSettingKey lists, comma-separated, the rating
+// sources clients show in addition to IMDb and TMDB, which are always shown:
+// sources metadata plugins declare, such as rt_critic. Empty, the
+// default, shows only IMDb and TMDB, because the owners of the other scores
+// restrict how others may display them. See internal/ratingsources.
+const CatalogExtraRatingSourcesSettingKey = "catalog.extra_rating_sources"
+
+// ParseRatingSourceList splits a CatalogExtraRatingSourcesSettingKey value
+// into source names, dropping blanks, duplicates, and malformed names.
+func ParseRatingSourceList(raw string) []string {
+	sources, _ := splitRatingSourceList(raw)
+	return sources
+}
+
+// splitRatingSourceList splits a comma-separated list of rating source names
+// into trimmed, lowercased, deduplicated names, skipping blanks. Malformed
+// names are left out; the first one is returned so a save can refuse it.
+func splitRatingSourceList(raw string) (sources []string, malformed string) {
+	seen := map[string]struct{}{}
+	for _, entry := range strings.Split(raw, ",") {
+		source := strings.ToLower(strings.TrimSpace(entry))
+		if source == "" {
+			continue
+		}
+		if !models.ValidRatingSourceID(source) {
+			if malformed == "" {
+				malformed = source
+			}
+			continue
+		}
+		if _, dup := seen[source]; dup {
+			continue
+		}
+		seen[source] = struct{}{}
+		sources = append(sources, source)
+	}
+	return sources, malformed
+}
+
 // Shared server-setting keys used by playback and prepared-download policy
 // readers. Keep them here with the effective admin-setting defaults.
 const (
-	PlaybackLocalTranscodeFallbackSettingKey = "playback.local_transcode_fallback"
 	Allow4KTranscodeSettingKey               = "allow_4k_transcode"
+	PlaybackAllowHEVCEncodingSettingKey      = "playback.allow_hevc_encoding"
+	DownloadLocalTranscodeFallbackSettingKey = "download.local_transcode_fallback"
 )
 
 // ArtworkStorageReconcileCheckpointKey is machine-managed task state. It is
@@ -38,56 +109,107 @@ const (
 // edited through the administrator settings API.
 const ArtworkStorageReconcileCheckpointKey = "s3.public_storage_reconcile_checkpoint"
 
+// StorageTransitionTargetKey holds the machine-managed staged transition and
+// its post-restart recovery status.
+const StorageTransitionTargetKey = "storage.transition.target"
+
+// ArtworkStorageSweepCheckpointKey is the machine-managed cursor for the
+// artwork storage sweep, kept out of the administrator settings API for the
+// same reason as the reconcile checkpoint.
+const ArtworkStorageSweepCheckpointKey = "artwork.storage_sweep_checkpoint"
+
+// ChapterThumbnailOriginalsCleanupKey is the machine-managed checkpoint for the
+// one-time cleanup of full-size chapter thumbnail originals, kept out of the
+// administrator settings API like the other storage checkpoints.
+const ChapterThumbnailOriginalsCleanupKey = "chapter_thumbnails.originals_cleanup_checkpoint"
+
+// MetadataImageWorkersSettingKey sizes the artwork encode pool. 0 means one
+// worker per CPU core, resolved when the task runs.
+const MetadataImageWorkersSettingKey = "metadata.image_workers"
+
+// MarkersDetectionWorkersSettingKey sizes local intro detection: how many
+// seasons are analyzed at once and how many ffmpeg processes read audio.
+const MarkersDetectionWorkersSettingKey = "markers.detection_workers"
+
 // adminSettingDefaults is the effective value shown by the Admin UI when no
 // row exists in server_settings. Keep these values aligned with the runtime
 // readers that own each setting. The UI must never invent a second set of
 // defaults: an untouched form should describe the behavior the server is
 // actually running.
+// Setting keys and default values are a data table; naming each repeated
+// literal would bury what the table says.
+//
+//nolint:goconst
 var adminSettingDefaults = map[string]string{
 	"auth.access_token_expiry":  "8h",
 	"auth.refresh_token_expiry": "30d",
 	"server.log_level":          "info",
 	"server.log_quiet":          "",
+	"server.public_url":         "",
 	"branding.server_name":      "Silo",
 	"branding.login_subtitle":   "Sign in with an existing account.",
 	"clientip.trusted_proxies":  "10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, ::1/128",
 	"theme.catalog_url":         DefaultThemeCatalogURL,
 
-	"database.max_connections": "20",
-	"s3.public_path_style":     "true",
-	"s3.public_url_auth":       "presigned",
-	"s3.public_token_param":    "verify",
-	"s3.public_token_ttl":      "10800",
-	"s3.private_path_style":    "true",
-	"s3.user_db_path_style":    "true",
-	"userdb.backend":           "postgres",
-	"userdb.pool_max_open":     "500",
-	"userdb.idle_timeout":      "12h",
+	"database.max_connections":   "20",
+	"s3.public_path_style":       "true",
+	"s3.public_url_auth":         "presigned",
+	"s3.public_token_param":      "verify",
+	"s3.public_token_ttl":        "10800",
+	"s3.private_path_style":      "true",
+	"s3.metadata_presign_expiry": "4h",
+	"s3.user_db_path_style":      "true",
+	"userdb.backend":             "postgres",
+	"userdb.pool_max_open":       "500",
+	"userdb.idle_timeout":        "12h",
 
-	"scanner.workers":       "8",
-	"matcher.workers":       "8",
-	"matcher.batch_size":    "500",
-	"metadata.cache_images": "false",
-	"markers.mode":          "local",
-	"markers.lazy_playback": "false",
+	"scanner.workers":                      "8",
+	MetadataImageWorkersSettingKey:         "0",
+	"scanner.max_concurrent_libraries":     "1",
+	"scanner.max_concurrent_scoped":        "2",
+	"scanner.file_removal_grace":           "24h",
+	"scanner.empty_trash_after_scan":       "true",
+	"scanner.realtime_monitoring":          "true",
+	"matcher.workers":                      "8",
+	"matcher.batch_size":                   "500",
+	"matcher.enable_tv_series_root_queue":  "true",
+	"matcher.enable_tv_series_group_queue": "false",
+	"metadata.cache_images":                "true",
+	"artwork.storage_backend":              "auto",
+	"artwork.local_path":                   "/var/lib/silo/artwork",
+	"markers.mode":                         "both",
+	"markers.lazy_playback":                "true",
+	MarkersDetectionWorkersSettingKey:      "1",
+	"markers.online_storage":               "stored",
+	"markers.detect_intros":                "true",
+	"markers.detect_credits":               "true",
 
-	"playback.ffmpeg_path":                     "/usr/lib/jellyfin-ffmpeg/ffmpeg",
-	playbackTranscodeDirSettingKey:             DefaultTranscodeDir,
-	"playback.hw_accel":                        "auto",
-	"playback.transcode_enabled":               "true",
-	PlaybackLocalTranscodeFallbackSettingKey:   "true",
-	"playback.chapter_thumbnail_workers":       "1",
-	"playback.chapter_thumbnail_execution":     "local",
-	"playback.chapter_thumbnail_node_capacity": "1",
-	"playback.chapter_thumbnail_hdr_policy":    "best_effort",
-	chapterThumbnailSoftwareToneMapKey:         "false",
-	PlaybackTranscodeHardwareToneMapSettingKey: "false",
-	PlaybackTranscodeSoftwareToneMapSettingKey: "false",
-	"playback.watched_threshold":               "90",
-	"playback.min_resume_threshold":            "5",
-	Allow4KTranscodeSettingKey:                 "false",
-	"enable_transcode_throttle":                "false",
-	"transcode_throttle_seconds":               "300",
+	"playback.ffmpeg_path":                           "",
+	playbackTranscodeDirSettingKey:                   DefaultTranscodeDir,
+	playbackSegmentRetentionSettingKey:               "600",
+	"playback.hw_accel":                              "auto",
+	"playback.transcode_enabled":                     "true",
+	PlaybackAllowHEVCEncodingSettingKey:              "false",
+	PlaybackRoutingDirectPlayEgressSettingKey:        string(PlaybackEgressPreferProxy),
+	PlaybackRoutingRemuxExecutionSettingKey:          string(PlaybackExecutionPreferTranscode),
+	PlaybackRoutingRemuxEgressSettingKey:             string(PlaybackEgressPreferProxy),
+	PlaybackRoutingVideoTranscodeExecutionSettingKey: string(PlaybackExecutionPreferTranscode),
+	PlaybackRoutingVideoTranscodeEgressSettingKey:    string(PlaybackEgressPreferProxy),
+	"playback.chapter_thumbnail_workers":             "1",
+	"playback.chapter_thumbnail_execution":           "local",
+	"playback.chapter_thumbnail_node_capacity":       "1",
+	"playback.chapter_thumbnail_hdr_policy":          "best_effort",
+	chapterThumbnailSoftwareToneMapKey:               "false",
+	PlaybackTranscodeHardwareToneMapSettingKey:       "false",
+	PlaybackTranscodeSoftwareToneMapSettingKey:       "false",
+	CatalogScopeVersionsToLibrarySettingKey:          "false",
+	AccessUnratedContentSettingKey:                   AccessUnratedContentHide,
+	CatalogExtraRatingSourcesSettingKey:              "",
+	"playback.watched_threshold":                     "90",
+	"playback.min_resume_threshold":                  "5",
+	Allow4KTranscodeSettingKey:                       "false",
+	"enable_transcode_throttle":                      "false",
+	"transcode_throttle_seconds":                     "300",
 
 	"audiobookshelf_compat.enabled":           "true",
 	"jellyfin_compat.enabled":                 "true",
@@ -101,6 +223,8 @@ var adminSettingDefaults = map[string]string{
 	"jellyfin_compat.playback_session_ttl":    "6h",
 
 	"recommendations.enabled":                    "false",
+	"recommendations.embedding_provider":         "ollama",
+	"recommendations.embeddings_job_timeout":     "24h",
 	"recommendations.embedding_base_url":         "http://ollama:11434",
 	"recommendations.embedding_model":            "all-minilm",
 	"recommendations.embeddings_cron":            "0 3 * * *",
@@ -119,21 +243,28 @@ var adminSettingDefaults = map[string]string{
 	"subtitle_ai.batch_size":              "40",
 	"subtitle_ai.context_neighbors":       "2",
 	"subtitle_ai.asr_chunk_seconds":       "600",
+	"subtitle_ai.live_asr_chunk_seconds":  "30",
 	"subtitle_ai.transcribe_quota_jobs":   "0",
 	"subtitle_ai.transcribe_quota_period": "day",
+	"subtitles.auto_sync":                 "true",
+	"subtitles.sync_execution":            "prefer_transcode_nodes",
+	"subtitles.sync_node_capacity":        "1",
 	"metadata_ai.enabled":                 "false",
 	"metadata_ai.on_view":                 "off",
 
-	"download.enabled":                 "false",
-	"download.server_bandwidth_mbps":   "0",
-	"download.user_bandwidth_mbps":     "0",
-	"download.max_concurrent_per_user": "3",
-	"download.max_per_period":          "0",
-	"download.period_duration":         "24h",
-	"download.transcode_enabled":       "false",
-	"download.max_concurrent_prepares": "2",
-	"download.artifact_max_bytes":      "0",
+	"download.enabled":                       "false",
+	"download.server_bandwidth_mbps":         "0",
+	"download.user_bandwidth_mbps":           "0",
+	"download.max_concurrent_per_user":       "3",
+	"download.max_per_period":                "0",
+	"download.period_duration":               "24h",
+	"download.transcode_enabled":             "false",
+	DownloadLocalTranscodeFallbackSettingKey: "true",
+	"download.max_concurrent_prepares":       "2",
+	"download.artifact_max_bytes":            "0",
 
+	"policy.editor_enabled":                 "false",
+	"policy.eval_timeout_ms":                "100",
 	"policy.decision_log_verbosity":         "digest",
 	"policy.decision_log_scope_sample_rate": "50",
 	"policy.decision_log_retention_days":    "14",
@@ -167,18 +298,28 @@ var adminSettingDefaults = map[string]string{
 	"notifications.server_channels.batch_seconds":              "300",
 	"notifications.server_channels.mention_requesters":         "false",
 	"notifications.web_push_enabled":                           "true",
-	"notifications.apple_push_delivery_enabled":                "false",
-	"notifications.android_push_delivery_enabled":              "false",
+	"notifications.apple_push_delivery_enabled":                "true",
+	"notifications.android_push_delivery_enabled":              "true",
 
 	"taskmanager.history_retention_days": "30",
 	"taskmanager.history_keep_per_task":  "1000",
 
+	// Off: server addresses non-admin users supply for history import and
+	// webhook sync must be on the public internet (historyimport).
+	"media_servers.allow_private_destinations": "false",
+
+	"opslog.capture_level":            "info",
 	"opslog.retention_days":           "7",
 	"opslog.cleanup_interval_minutes": "15",
 	"opslog.max_rows":                 "1000000",
 	"opslog.max_size_mb":              "1024",
 	"overlays.enabled":                "true",
 	"signup.enabled":                  "false",
+	SetupCompletedSettingKey:          "false",
+
+	// Self-service password reset from the sign-in page; an administrator
+	// opts in.
+	"password_reset.self_service_enabled": "false",
 
 	"catalog.search.provider":                             "postgres",
 	"catalog.search.meilisearch.index":                    "silo_media_items",
@@ -295,16 +436,20 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 	value := strings.TrimSpace(raw)
 
 	switch key {
-	case "metadata.cache_images", "playback.transcode_enabled", PlaybackLocalTranscodeFallbackSettingKey,
+	case "metadata.cache_images", "playback.transcode_enabled", PlaybackAllowHEVCEncodingSettingKey,
 		chapterThumbnailSoftwareToneMapKey, PlaybackTranscodeHardwareToneMapSettingKey,
-		PlaybackTranscodeSoftwareToneMapSettingKey,
+		PlaybackTranscodeSoftwareToneMapSettingKey, CatalogScopeVersionsToLibrarySettingKey,
 		Allow4KTranscodeSettingKey, "enable_transcode_throttle", "audiobookshelf_compat.enabled",
 		"jellyfin_compat.enabled", "jellyfin_compat.web_enabled", "recommendations.enabled",
-		"subtitle_ai.enabled", "subtitle_ai.transcribe_enabled", "metadata_ai.enabled",
-		"download.enabled", "download.transcode_enabled", "email.enabled", "signup.enabled",
+		"subtitle_ai.enabled", "subtitle_ai.transcribe_enabled", "metadata_ai.enabled", "subtitles.auto_sync",
+		"download.enabled", "download.transcode_enabled", DownloadLocalTranscodeFallbackSettingKey,
+		"email.enabled", "signup.enabled", "password_reset.self_service_enabled", SetupCompletedSettingKey,
+		"scanner.empty_trash_after_scan", "scanner.realtime_monitoring", "matcher.enable_tv_series_root_queue",
+		"matcher.enable_tv_series_group_queue", "policy.editor_enabled",
 		"overlays.enabled", "notifications.release_events_enabled", "notifications.fanout_enabled",
 		"notifications.ui_enabled", "notifications.webhooks_enabled",
-		"notifications.webhooks.allow_private_destinations", "notifications.email_enabled",
+		"notifications.webhooks.allow_private_destinations", "media_servers.allow_private_destinations",
+		"notifications.email_enabled",
 		"notifications.email.allow_per_episode", "notifications.discord_enabled",
 		"notifications.discord.allow_per_episode", "notifications.server_channels_enabled",
 		"notifications.server_channels.mention_requesters", "notifications.web_push_enabled",
@@ -313,15 +458,34 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		"s3.public_path_style", "s3.private_path_style", "s3.user_db_path_style":
 		return normalizeAdminBool(key, value)
 
+	case AccessUnratedContentSettingKey:
+		return normalizeAdminEnum(key, value, AccessUnratedContentHide, AccessUnratedContentAllow)
+
+	case CatalogExtraRatingSourcesSettingKey:
+		return normalizeRatingSourceList(key, value)
+
+	case "artwork.storage_backend":
+		return normalizeAdminEnum(key, value, "auto", "local", "s3")
+	case "artwork.local_path":
+		if value == "" || !filepath.IsAbs(value) {
+			return "", fmt.Errorf("%s must be an absolute path", key)
+		}
+		return filepath.Clean(value), nil
+
 	case "database.max_connections":
 		return normalizeAdminInt(key, value, 1, 10000)
 	case "userdb.pool_max_open":
 		return normalizeAdminInt(key, value, 1, 100000)
-	case "scanner.workers", "matcher.workers":
+	case "scanner.workers", "matcher.workers",
+		"scanner.max_concurrent_libraries", "scanner.max_concurrent_scoped":
 		return normalizeAdminInt(key, value, 1, 1024)
 	case "matcher.batch_size":
 		return normalizeAdminInt(key, value, 1, 100000)
-	case "playback.chapter_thumbnail_workers", "playback.chapter_thumbnail_node_capacity":
+	case MetadataImageWorkersSettingKey:
+		return normalizeAdminInt(key, value, 0, 256)
+	case MarkersDetectionWorkersSettingKey:
+		return normalizeAdminInt(key, value, 1, 64)
+	case "playback.chapter_thumbnail_workers", "playback.chapter_thumbnail_node_capacity", "subtitles.sync_node_capacity":
 		return normalizeAdminInt(key, value, 1, 1024)
 	case "playback.watched_threshold":
 		return normalizeAdminInt(key, value, 1, 100)
@@ -329,6 +493,16 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt(key, value, 1, 99)
 	case "transcode_throttle_seconds":
 		return normalizeAdminInt(key, value, 60, 86400)
+	case playbackSegmentRetentionSettingKey:
+		normalized, err := normalizeAdminInt(key, value, 0, 86400)
+		if err != nil {
+			return "", err
+		}
+		seconds, _ := strconv.Atoi(normalized)
+		if seconds != 0 && seconds < 120 {
+			return "", fmt.Errorf("%s must be 0 or between 120 and 86400", key)
+		}
+		return normalized, nil
 	case "ai.max_concurrent_jobs", "subtitle_ai.max_concurrent_jobs":
 		return normalizeAdminInt(key, value, 1, 1024)
 	case "subtitle_ai.batch_size":
@@ -337,6 +511,10 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt(key, value, 0, 100)
 	case "subtitle_ai.asr_chunk_seconds":
 		return normalizeAdminInt(key, value, 60, 600)
+	case "subtitle_ai.live_asr_chunk_seconds":
+		// 15s is the transcriber's hard floor (clampASRChunkSeconds); accepting
+		// less would store a value the runtime silently raises.
+		return normalizeAdminInt(key, value, 15, 600)
 	case "subtitle_ai.transcribe_quota_jobs":
 		return normalizeAdminInt(key, value, 0, math.MaxInt32)
 	case "download.server_bandwidth_mbps", "download.user_bandwidth_mbps":
@@ -346,6 +524,8 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt64(key, value, 0, math.MaxInt64)
 	case "policy.decision_log_scope_sample_rate", "policy.decision_log_retention_days":
 		return normalizeAdminInt(key, value, 1, math.MaxInt32)
+	case "policy.eval_timeout_ms":
+		return normalizeAdminInt(key, value, 1, 60000)
 	case "email.smtp_port":
 		return normalizeAdminInt(key, value, 1, 65535)
 	case "notifications.fanout.settle_seconds":
@@ -391,16 +571,39 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 
 	case "auth.access_token_expiry", "auth.refresh_token_expiry", "userdb.idle_timeout",
 		"download.period_duration", "jellyfin_compat.session_ttl",
-		"jellyfin_compat.playback_session_ttl":
+		"jellyfin_compat.playback_session_ttl", "s3.metadata_presign_expiry",
+		"recommendations.embeddings_job_timeout":
 		return normalizeAdminDuration(key, value)
+	case "scanner.file_removal_grace":
+		// The scanner deliberately tolerates a zero or negative grace as
+		// "remove missing files immediately" (LoadFromDB warns and clamps to
+		// zero), so only require a parseable duration here.
+		if _, err := parseDuration(value); err != nil {
+			return "", fmt.Errorf("%s must be a duration", key)
+		}
+		return value, nil
 
 	case "server.log_level":
 		return normalizeAdminEnum(key, value, "debug", "info", "warn", "error")
+	case "opslog.capture_level":
+		// "warning" is accepted because the startup reader in cmd/silo treats
+		// it as an alias for "warn".
+		return normalizeAdminEnum(key, value, "debug", "info", "warn", "warning", "error")
 	case "userdb.backend":
 		return normalizeAdminEnum(key, value, "postgres", "sqlite")
 	case "playback.hw_accel":
-		return normalizeAdminEnum(key, value, "auto", "qsv", "vaapi", "nvenc", "none")
-	case "playback.chapter_thumbnail_execution":
+		return normalizeAdminEnum(key, value, "auto", "qsv", "vaapi", "nvenc", "videotoolbox", "none")
+	case PlaybackRoutingRemuxExecutionSettingKey, PlaybackRoutingVideoTranscodeExecutionSettingKey:
+		return normalizeAdminEnum(key, value,
+			string(PlaybackExecutionPreferWorker), string(PlaybackExecutionPreferTranscode),
+			string(PlaybackExecutionWorkerOnly),
+			string(PlaybackExecutionPreferAPI), string(PlaybackExecutionAPIOnly))
+	case PlaybackRoutingDirectPlayEgressSettingKey, PlaybackRoutingRemuxEgressSettingKey,
+		PlaybackRoutingVideoTranscodeEgressSettingKey:
+		return normalizeAdminEnum(key, value,
+			string(PlaybackEgressPreferProxy), string(PlaybackEgressProxyOnly),
+			string(PlaybackEgressPreferAPI), string(PlaybackEgressAPIOnly))
+	case "playback.chapter_thumbnail_execution", "subtitles.sync_execution":
 		return normalizeAdminEnum(key, value, "local", "prefer_transcode_nodes", "transcode_nodes_only")
 	case "playback.chapter_thumbnail_hdr_policy":
 		return normalizeAdminEnum(key, value, "disabled", "best_effort")
@@ -429,7 +632,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return value, nil
 
 	case "ai.base_url", "ai.asr_base_url", "recommendations.embedding_base_url",
-		"jellyfin_compat.public_url", "notifications.email.external_url",
+		"server.public_url", "jellyfin_compat.public_url",
 		"s3.public_endpoint", "s3.public_read_endpoint", "s3.private_endpoint",
 		"s3.user_db_endpoint", "catalog.search.meilisearch.url":
 		return normalizeAdminURL(key, value)
@@ -513,6 +716,10 @@ func ValidateAdminSettingsWithCapabilities(values map[string]string, capabilitie
 		if (accessKey == "") != (secretKey == "") {
 			return fmt.Errorf("%s access key and secret key must be configured together", strings.ReplaceAll(prefix, ".", " "))
 		}
+	}
+
+	if err := ValidateArtworkStorageSettings(effective); err != nil {
+		return err
 	}
 
 	switch effective["s3.public_url_auth"] {
@@ -616,6 +823,32 @@ func normalizeAdminDuration(key, value string) (string, error) {
 		return "", fmt.Errorf("%s must be a positive duration", key)
 	}
 	return value, nil
+}
+
+// ValidateArtworkStorageSettings rejects an explicit S3 artwork backend with
+// no public bucket to back it. blobstore.Open fails on that combination, so
+// accepting it here would only surface as a fatal restart.
+func ValidateArtworkStorageSettings(effective map[string]string) error {
+	if strings.ToLower(strings.TrimSpace(effective["artwork.storage_backend"])) != "s3" {
+		return nil
+	}
+	if strings.TrimSpace(effective["s3.public_bucket"]) == "" {
+		return fmt.Errorf("artwork.storage_backend s3 requires s3.public_bucket")
+	}
+	return nil
+}
+
+// normalizeRatingSourceList canonicalizes a comma-separated list of rating
+// source names: trimmed, lowercased, and deduplicated. A name that is not a
+// well-formed source name is an error rather than silently dropped. A
+// well-formed name no enabled plugin declares is kept but shows nothing (see
+// ratingsources.Build).
+func normalizeRatingSourceList(key, value string) (string, error) {
+	sources, malformed := splitRatingSourceList(value)
+	if malformed != "" {
+		return "", fmt.Errorf("%s: %q is not a rating source name", key, malformed)
+	}
+	return strings.Join(sources, ","), nil
 }
 
 func normalizeAdminEnum(key, value string, allowed ...string) (string, error) {

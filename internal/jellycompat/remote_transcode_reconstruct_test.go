@@ -19,6 +19,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 )
@@ -68,6 +69,69 @@ func TestStartRemoteTranscodeRequiresDurableNodeRecipe(t *testing.T) {
 	}
 	if stored.TranscodeStarted || stored.Recipe != nil {
 		t.Fatalf("failed durable commit published transcode state: %+v", stored)
+	}
+}
+
+func TestStartRemoteTranscodeCarriesThrottlePolicyIntoReconstructionRecipe(t *testing.T) {
+	var received transcodenode.TranscodeStartRequest
+	recipeStore := &stubRecipeNodeStore{}
+	node := fakeTranscodeNode(t, &received)
+	handler, _, playbackStore := newRemoteTranscodeHandler(t, node.URL, recipeStore)
+	handler.SettingsRepo = stubSettingsReader{values: map[string]string{
+		"enable_transcode_throttle":  "true",
+		"transcode_throttle_seconds": "180",
+	}}
+	playbackStore.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1"})
+
+	if err := handler.startRemoteTranscode(context.Background(), "play-1", "upstream-1", testRemoteTranscodeSource(), &models.MediaFile{ID: 42, FilePath: "/media/movie.mkv"}, 0, node.URL); err != nil {
+		t.Fatalf("startRemoteTranscode: %v", err)
+	}
+	if received.ThrottleSeconds != 180 {
+		t.Fatalf("remote throttle seconds = %d, want 180", received.ThrottleSeconds)
+	}
+	card, ok := recipeStore.Get("upstream-1")
+	if !ok {
+		t.Fatal("remote reconstruction recipe was not stored")
+	}
+	if card.ThrottleSeconds != 180 {
+		t.Fatalf("stored throttle seconds = %d, want 180", card.ThrottleSeconds)
+	}
+}
+
+func TestStartRemoteCopyTranscodeDoesNotAdoptUnversionedRecipe(t *testing.T) {
+	var received transcodenode.TranscodeStartRequest
+	node := fakeTranscodeNode(t, &received)
+	recipeStore := &stubRecipeNodeStore{}
+	handler, _, playbackStore := newRemoteTranscodeHandler(t, node.URL, recipeStore)
+	source := testRemoteTranscodeSource()
+	source.HLSRemux = true
+	legacy := &playback.RecipeCard{
+		SessionID: "upstream-1", UserID: 7, ProfileID: "profile-1", MediaFileID: source.FileID,
+		TranscodeNodeURL: node.URL, PlayMethod: playback.PlayTranscode,
+		InputPath: "/media/movie.mkv", TargetCodecVideo: "copy", TargetCodecAudio: "copy",
+		SegmentDuration: compatSegmentDuration,
+		AudioTrackIndex: compatAudioTrackIndexOrDefault(source),
+	}
+	playbackStore.Put(PlaybackSession{
+		ID: "play-1", UpstreamSessionID: "upstream-1", TranscodeStarted: true, Recipe: legacy,
+	})
+
+	err := handler.startRemoteTranscode(
+		context.Background(), "play-1", "upstream-1", source,
+		&models.MediaFile{ID: 42, FilePath: "/media/movie.mkv", CodecVideo: "h264"}, 0, node.URL,
+	)
+	if err != nil {
+		t.Fatalf("startRemoteTranscode: %v", err)
+	}
+	if received.CopyFMP4RecipeVersion != playback.CopyFMP4RecipeVersion {
+		t.Fatalf("replacement request version = %q, want %q", received.CopyFMP4RecipeVersion, playback.CopyFMP4RecipeVersion)
+	}
+	stored, ok := playbackStore.Get("play-1")
+	if !ok || stored.Recipe == nil {
+		t.Fatal("replacement recipe was not stored")
+	}
+	if err := playback.ValidateCopyFMP4RecipeCard(*stored.Recipe); err != nil {
+		t.Fatalf("replacement stored an invalid copy recipe: %v", err)
 	}
 }
 
@@ -349,7 +413,7 @@ func TestStartRemoteToneMapDelayedSuccessCannotOverwriteLocalSoftwareWinner(t *t
 	// before httptest waits for that handler to exit.
 	t.Cleanup(func() { releaseOnce.Do(func() { close(releaseRemoteStart) }) })
 
-	handler, _, _, _, source := newManifestToneMapFailoverHandler(t, remoteNode.URL, true)
+	handler, planner, _, _, source := newManifestToneMapFailoverHandler(t, remoteNode.URL, true)
 	handler.compatToneMapProbe = func(context.Context, string, string, string) (tonemap.Capabilities, error) {
 		return tonemap.Capabilities{software}, nil
 	}
@@ -412,6 +476,9 @@ func TestStartRemoteToneMapDelayedSuccessCannotOverwriteLocalSoftwareWinner(t *t
 	}
 	if live := handler.tm.GetTranscodeSession("upstream-1"); live != localWinner || !localWinner.IsRunning() {
 		t.Fatalf("live runtime = %#v running=%v, want local software winner %#v", live, localWinner.IsRunning(), localWinner)
+	}
+	if probe := planner.PlanSession("reservation-probe", "", true, source.Version.Bitrate); probe.TranscodeNode == nil {
+		t.Fatal("remote reservation was not released after adopting the local winner")
 	}
 	stored, ok := handler.playbackStore.Get("play-1")
 	if !ok || stored.Recipe == nil || stored.Recipe.ToneMapMode != tonemap.ModeSoftware || stored.Recipe.TranscodeNodeURL != "" {
@@ -547,6 +614,7 @@ func TestMasterManifestGatesUnhealthyRemoteAdoption(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			handler, _, playbackStore := newRemoteTranscodeHandler(t, adoptedURL, &stubRecipeNodeStore{})
 			handler.NodePlanner = newPool(tt.adoptedHealthy)
+			requireCompatWorkerRouting(handler)
 			source := testRemoteTranscodeSource()
 			playbackStore.Put(PlaybackSession{
 				ID: "play-1", CompatToken: "compat-token", RouteItemID: "item",
@@ -576,6 +644,147 @@ func TestMasterManifestGatesUnhealthyRemoteAdoption(t *testing.T) {
 				t.Fatal("rejected adoption left the published session in place")
 			}
 		})
+	}
+}
+
+func TestMasterManifestReplansRouteAroundDifferentAdoptedRemote(t *testing.T) {
+	const (
+		plannedURL      = "http://planned.invalid"
+		adoptedURL      = "http://adopted.invalid"
+		plannedProxyURL = "https://proxy-a.example"
+		adoptedProxyURL = "https://proxy-b.example"
+	)
+	groupA, groupB := "group-a", "group-b"
+	plannedLimit, adoptedLimit := 1, 3
+	proxyLimit := 1
+	transcodes := nodepool.NewTranscodePool()
+	transcodes.SetNodes([]*nodepool.Node{
+		{ID: 1, URL: plannedURL, Group: &groupA, Enabled: true, Healthy: true, MaxJobs: &plannedLimit},
+		{ID: 2, URL: adoptedURL, Group: &groupB, Enabled: true, Healthy: true, ActiveJobs: 2, MaxJobs: &adoptedLimit},
+	})
+	proxies := nodepool.NewProxyPool()
+	proxies.SetNodes([]*nodepool.Node{
+		{ID: 11, URL: plannedProxyURL, Group: &groupA, Enabled: true, Healthy: true, MaxJobs: &proxyLimit},
+		{ID: 12, URL: adoptedProxyURL, Group: &groupB, Enabled: true, Healthy: true, MaxJobs: &proxyLimit},
+	})
+	planner := nodepool.NewPlanner(proxies, transcodes)
+
+	handler, _, playbackStore := newRemoteTranscodeHandler(t, adoptedURL, &stubRecipeNodeStore{})
+	handler.NodePlanner = planner
+	handler.PlaybackConfig = func() config.PlaybackConfig {
+		cfg := config.PlaybackConfig{Routing: config.DefaultPlaybackRoutingPolicy()}
+		cfg.Routing.VideoTranscodeExecution = config.PlaybackExecutionWorkerOnly
+		cfg.Routing.VideoTranscodeEgress = config.PlaybackEgressProxyOnly
+		return cfg
+	}
+	source := testRemoteTranscodeSource()
+	playbackStore.Put(PlaybackSession{
+		ID: "play-1", CompatToken: "compat-token", RouteItemID: "item",
+		MediaSources:      []PlaybackMediaSource{source},
+		UpstreamSessionID: "upstream-1", UpstreamPlayMethod: "transcode",
+		TranscodeStarted: true,
+		Recipe: &playback.RecipeCard{
+			TranscodeNodeURL:    adoptedURL + "/",
+			MediaFileID:         source.FileID,
+			AudioTrackIndex:     compatAudioTrackIndexOrDefault(source),
+			SourceAudioChannels: compatSourceAudioChannels(source),
+		},
+	})
+	request := httptest.NewRequest(http.MethodGet, "/Videos/item/master.m3u8?PlaySessionId=play-1&MediaSourceId="+source.ID, nil)
+	request = request.WithContext(context.WithValue(request.Context(), compatSessionKey, &Session{
+		Token: "compat-token", StreamAppUserID: 7, ProfileID: "profile-1",
+	}))
+	recorder := httptest.NewRecorder()
+
+	handler.HandleMasterManifest(recorder, request)
+
+	if recorder.Code != http.StatusTemporaryRedirect {
+		t.Fatalf("status = %d, want 307; body = %s", recorder.Code, recorder.Body.String())
+	}
+	location := recorder.Header().Get("Location")
+	if !strings.HasPrefix(location, adoptedProxyURL+"/stream/transcode/") {
+		t.Fatalf("redirect = %q, want adopted node's proxy %q", location, adoptedProxyURL)
+	}
+	claims, err := streamtoken.Verify(proxyTokenFromRedirect(t, location, string(playback.PlayTranscode)), handler.JWTSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.TranscodeNode != adoptedURL {
+		t.Fatalf("redirect transcode node = %q, want canonical adopted URL %q", claims.TranscodeNode, adoptedURL)
+	}
+	stored, ok := playbackStore.Get("play-1")
+	if !ok || stored.RoutingAssignment == nil {
+		t.Fatalf("stored session = %+v, found=%v, want routing assignment", stored, ok)
+	}
+	assignment := stored.RoutingAssignment
+	if assignment.ExecutionNodeURL != adoptedURL || assignment.ExecutionNodeID != 2 ||
+		assignment.EgressNodeURL != adoptedProxyURL || assignment.EgressNodeID != 12 {
+		t.Fatalf("routing assignment = %+v, want adopted executor and same-group proxy", assignment)
+	}
+
+	availablePlanned := planner.PlanRoute(nodepool.RouteRequest{
+		SessionID: "planned-probe", NeedsTranscode: true,
+		TranscodeEligible: func(node *nodepool.Node) bool { return node != nil && node.URL == plannedURL },
+	})
+	if availablePlanned.TranscodeNode == nil {
+		t.Fatal("planned executor retained the adopted session reservation")
+	}
+	fullAdopted := planner.PlanRoute(nodepool.RouteRequest{
+		SessionID: "adopted-probe", NeedsTranscode: true,
+		TranscodeEligible: func(node *nodepool.Node) bool { return node != nil && node.URL == adoptedURL },
+	})
+	if fullAdopted.TranscodeNode != nil {
+		t.Fatalf("adopted executor bypassed its restored reservation: %+v", fullAdopted)
+	}
+	fullAdoptedProxy := planner.PlanRoute(nodepool.RouteRequest{
+		SessionID: "adopted-proxy-probe", NeedsProxy: true,
+		ProxyEligible: func(node *nodepool.Node) bool { return node != nil && node.URL == adoptedProxyURL },
+	})
+	if fullAdoptedProxy.ProxyNode != nil {
+		t.Fatalf("adopted proxy bypassed its restored reservation: %+v", fullAdoptedProxy)
+	}
+}
+
+func TestMasterManifestWrapsRemoteCopyMediaPlaylistAsVariant(t *testing.T) {
+	const adoptedURL = "http://adopted.invalid"
+	handler, _, playbackStore := newRemoteTranscodeHandler(t, adoptedURL, &stubRecipeNodeStore{})
+	transcodes := nodepool.NewTranscodePool()
+	transcodes.SetNodes([]*nodepool.Node{{URL: adoptedURL, Enabled: true, Healthy: true}})
+	proxies := nodepool.NewProxyPool()
+	proxies.SetNodes([]*nodepool.Node{{URL: "https://proxy.example", Enabled: true, Healthy: true}})
+	handler.NodePlanner = nodepool.NewPlanner(proxies, transcodes)
+
+	source := testRemoteTranscodeSource()
+	source.HLSRemux = true
+	card := playback.NewRecipeCard(7, "profile-1", source.FileID, adoptedURL, playback.TranscodeOpts{
+		SessionID: "upstream-1", InputPath: "/media/movie.mkv",
+		TargetCodecVideo: "copy", TargetCodecAudio: "copy",
+		SegmentDuration: compatSegmentDuration,
+		AudioTrackIndex: compatAudioTrackIndexOrDefault(source),
+	})
+	playbackStore.Put(PlaybackSession{
+		ID: "play-1", CompatToken: "compat-token", RouteItemID: "item",
+		MediaSources: []PlaybackMediaSource{source}, UpstreamSessionID: "upstream-1",
+		UpstreamPlayMethod: "transcode", TranscodeStarted: true, Recipe: &card,
+	})
+	request := httptest.NewRequest(http.MethodGet, "/Videos/item/remux-v1/master.m3u8?PlaySessionId=play-1&MediaSourceId="+source.ID, nil)
+	request = withCompatRemuxV1Route(request)
+	request = request.WithContext(context.WithValue(request.Context(), compatSessionKey, &Session{
+		Token: "compat-token", StreamAppUserID: 7, ProfileID: "profile-1",
+	}))
+	recorder := httptest.NewRecorder()
+
+	handler.HandleMasterManifest(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", recorder.Code, recorder.Body.String())
+	}
+	if location := recorder.Header().Get("Location"); location != "" {
+		t.Fatalf("copy master unexpectedly redirected to %q", location)
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, "#EXT-X-STREAM-INF:") || !strings.Contains(body, "https://proxy.example/stream/transcode/") {
+		t.Fatalf("copy master does not wrap the signed remote media playlist:\n%s", body)
 	}
 }
 
@@ -650,11 +859,18 @@ func fakeTranscodeNode(t *testing.T, received *transcodenode.TranscodeStartReque
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
+		var request transcodenode.TranscodeStartRequest
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &request)
 		if received != nil {
-			body, _ := io.ReadAll(r.Body)
-			_ = json.Unmarshal(body, received)
+			*received = request
 		}
-		w.WriteHeader(http.StatusAccepted)
+		writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{
+			SessionID: request.SessionID, Status: "started",
+			AudioRecipeVersion:    request.AudioRecipeVersion,
+			CopyFMP4RecipeVersion: request.CopyFMP4RecipeVersion,
+			ThrottleSeconds:       request.ThrottleSeconds,
+		})
 	}))
 	t.Cleanup(srv.Close)
 	return srv
@@ -808,6 +1024,69 @@ func TestStartRemoteToneMapReportsConfirmedExecutorAndFallback(t *testing.T) {
 				t.Fatalf("persisted execution facts = hw %q tone_map %q, found=%v", card.HWAccel, card.ToneMapMode, ok)
 			}
 		})
+	}
+}
+
+func TestStartRemoteVideoToolboxToneMapUsesResolutionAwareBitrate(t *testing.T) {
+	var requests []transcodenode.TranscodeStartRequest
+	capabilities := tonemap.Capabilities{
+		{Mode: tonemap.ModeHardware, Backend: tonemap.BackendVideoToolbox, Filter: tonemap.HardwareFilterVideoToolbox, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ}},
+		{Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterHable, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ}},
+	}
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/hw-capabilities":
+			writeJSON(w, http.StatusOK, playback.HWAccelInfo{ToneMapCapabilities: capabilities})
+		case "/transcode/start":
+			var request transcodenode.TranscodeStartRequest
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Errorf("decode start request: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			requests = append(requests, request)
+			if request.ToneMapMode == tonemap.ModeHardware {
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				return
+			}
+			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{HWAccel: request.HWAccel, ToneMapMode: request.ToneMapMode})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(node.Close)
+
+	recipeStore := &stubRecipeNodeStore{}
+	handler, _, playbackStore := newRemoteTranscodeHandler(t, node.URL, recipeStore)
+	handler.SettingsRepo = stubSettingsReader{values: map[string]string{
+		config.Allow4KTranscodeSettingKey:                 "true",
+		config.PlaybackTranscodeHardwareToneMapSettingKey: "true",
+		config.PlaybackTranscodeSoftwareToneMapSettingKey: "true",
+	}}
+	playbackStore.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1"})
+	source := testRemoteTranscodeSource()
+	source.Version.Resolution = "2160p"
+	source.Version.VideoTracks[0].Height = 2160
+	file := &models.MediaFile{ID: 42, FilePath: "/media/movie.mkv", HDR: true, VideoTracks: []models.VideoTrack{{Codec: "hevc", VideoRangeType: "HDR10", ColorTransfer: "smpte2084", ColorPrimaries: "bt2020", ColorSpace: "bt2020nc", BitDepth: 10}}}
+
+	if err := handler.startRemoteTranscode(t.Context(), "play-1", "upstream-1", source, file, 0, node.URL); err != nil {
+		t.Fatalf("startRemoteTranscode: %v", err)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("start requests = %d, want hardware attempt plus software fallback", len(requests))
+	}
+	if got := requests[0].TargetBitrateKbps; got != 20_000 {
+		t.Fatalf("hardware target bitrate = %d, want 20000", got)
+	}
+	if requests[0].TargetResolution != "" {
+		t.Fatalf("hardware target resolution = %q, want source dimensions preserved", requests[0].TargetResolution)
+	}
+	if got := requests[1].TargetBitrateKbps; got != 0 {
+		t.Fatalf("software fallback target bitrate = %d, want unconstrained CRF", got)
+	}
+	card, ok := recipeStore.Get("upstream-1")
+	if !ok || card.TargetBitrateKbps != 0 || card.ToneMapMode != tonemap.ModeSoftware {
+		t.Fatalf("persisted fallback recipe = found %t bitrate %d mode %q", ok, card.TargetBitrateKbps, card.ToneMapMode)
 	}
 }
 
@@ -997,11 +1276,17 @@ func TestRemoteTranscodeStartTimeoutCoversColdProbePreflightAndReadiness(t *test
 	if got := handler.remoteTranscodeStartTimeout(request, (137 * time.Second).Milliseconds()); got != want {
 		t.Fatalf("remote transcode start timeout = %v, want %v", got, want)
 	}
-	maxWant := 5*time.Minute + playback.ManifestStartupTimeout + tonemap.SourcePreflightTimeout(100) + transcodenode.TranscodeStartReadinessTimeout
-	if got := handler.remoteTranscodeStartTimeout(request, (10 * time.Minute).Milliseconds()); got != maxWant {
+	// Still bounded — the advertisement comes off the wire from a worker — but
+	// at the ceiling the probe formula produces, not a round number a real
+	// nine-device node already exceeds.
+	maxWant := playback.MaxCapabilityRequestTimeout() + playback.ManifestStartupTimeout + tonemap.SourcePreflightTimeout(100) + transcodenode.TranscodeStartReadinessTimeout
+	if got := handler.remoteTranscodeStartTimeout(request, (24 * time.Hour).Milliseconds()); got != maxWant {
 		t.Fatalf("bounded remote transcode start timeout = %v, want %v", got, maxWant)
 	}
-	fallbackWant := compatRemoteNodeProbeFallbackTimeout + playback.ManifestStartupTimeout + tonemap.SourcePreflightTimeout(100) + transcodenode.TranscodeStartReadinessTimeout
+	// Without an advertisement, the local hardware policy can price a cold
+	// probe above the fixed fallback, which is a floor rather than a ceiling.
+	coldProbeBudget := playback.ColdCapabilityRequestTimeout(nil, handler.HWAccel, "", compatRemoteNodeProbeFallbackTimeout)
+	fallbackWant := coldProbeBudget + playback.ManifestStartupTimeout + tonemap.SourcePreflightTimeout(100) + transcodenode.TranscodeStartReadinessTimeout
 	if got := handler.remoteTranscodeStartTimeout(request, 0); got != fallbackWant {
 		t.Fatalf("missing-budget remote transcode start timeout = %v, want %v", got, fallbackWant)
 	}

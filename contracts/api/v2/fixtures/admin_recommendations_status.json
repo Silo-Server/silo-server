@@ -1,0 +1,19 @@
+{
+  "embeddings": {
+    "running": true,
+    "count": 3,
+    "total": 10
+  },
+  "taste_profiles": {
+    "running": false,
+    "count": 4
+  },
+  "cowatch": {
+    "running": false,
+    "count": 6
+  },
+  "recommendations": {
+    "running": false,
+    "count": 5
+  }
+}

@@ -2,13 +2,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "@testing-library/react";
 
 import CardOverlays from "./CardOverlays";
+import { formatLanguageWhenLoaded } from "@/lib/languageNamesLoader";
 import {
+  ATTENTION_ACCENT,
+  OVERLAY_POSITIONS,
   OVERLAY_PRESETS,
   OVERLAY_REGISTRY,
   PRESET_IDS,
   SAMPLE_MOVIE_DATA,
+  SAMPLE_REQUEST_DATA,
   SAMPLE_SHOW_DATA,
   buildDefaultPrefs,
+  type OverlayData,
   type CardOverlayPrefs,
   type OverlayId,
   type PresetId,
@@ -29,6 +34,11 @@ function badgeTexts(container: HTMLElement): (string | null)[] {
   return Array.from(container.querySelectorAll("span.inline-flex")).map((n) => n.textContent);
 }
 
+/** Whole-token match so a mangled class ("gap-2mb-2") can never pass as flush. */
+function bottomMarginClasses(node: HTMLElement | null): string[] {
+  return Array.from(node?.classList ?? []).filter((name) => /^mb-/.test(name));
+}
+
 describe("CardOverlays", () => {
   beforeEach(() => vi.stubGlobal("CSS", { supports: () => true }));
   afterEach(() => {
@@ -36,10 +46,16 @@ describe("CardOverlays", () => {
     vi.unstubAllGlobals();
   });
 
-  it("renders a badge for every registered overlay given sample data", () => {
+  it("renders a badge for every registered overlay given sample data", async () => {
+    // The language badge reads name data that loads on first use.
+    await vi.waitFor(() => expect(formatLanguageWhenLoaded("en")).toBe("English"));
     for (const def of OVERLAY_REGISTRY) {
       const data =
-        def.id === "network" || def.id === "show_status" ? SAMPLE_SHOW_DATA : SAMPLE_MOVIE_DATA;
+        def.id === "network" || def.id === "show_status"
+          ? SAMPLE_SHOW_DATA
+          : def.id === "request_status"
+            ? SAMPLE_REQUEST_DATA
+            : SAMPLE_MOVIE_DATA;
       const expected = def.getValue(data);
       expect(expected, `sample data should exercise overlay ${def.id}`).toBeTruthy();
       const { container, unmount } = render(
@@ -335,27 +351,166 @@ describe("CardOverlays", () => {
     expect(vibrant?.style.boxShadow).toBe("0px 1px 2px 0px rgb(0 0 0 / 0.25)");
   });
 
-  it("lifts bottom-corner badges above persistent card actions", () => {
+  it("anchors bottom-corner badges flush in the corners like the top row", () => {
+    // Card quick actions cover bottom badges by design, so the bottom row
+    // reserves no clearance for them and insets exactly like the top row.
+    const prefs = prefsWithOnly("content_rating");
+    const bottomEdge = (variant?: "wide") => {
+      prefs.items.content_rating = { ...prefs.items.content_rating, position: "bottom-left" };
+      const left = render(
+        <CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} variant={variant} />,
+      ).container;
+      prefs.items.content_rating = { ...prefs.items.content_rating, position: "bottom-right" };
+      const right = render(
+        <CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} variant={variant} />,
+      ).container;
+      return {
+        leftStack: left.querySelector<HTMLElement>(
+          '[data-overlay-edge="bottom"] > div.items-start',
+        ),
+        rightStack: right.querySelector<HTMLElement>(
+          '[data-overlay-edge="bottom"] > div.items-end',
+        ),
+        row: left.querySelector<HTMLElement>('[data-overlay-edge="bottom"]'),
+      };
+    };
+
+    for (const variant of [undefined, "wide" as const]) {
+      const { leftStack, rightStack, row } = bottomEdge(variant);
+      expect(leftStack).toBeTruthy();
+      expect(rightStack).toBeTruthy();
+      for (const node of [leftStack, rightStack, row]) {
+        expect(bottomMarginClasses(node), `${variant ?? "poster"} bottom edge`).toEqual([]);
+      }
+    }
+
+    prefs.items.content_rating = { ...prefs.items.content_rating, position: "top-left" };
+    const top = render(
+      <CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} />,
+    ).container.querySelector<HTMLElement>('[data-overlay-edge="top"]');
+    prefs.items.content_rating = { ...prefs.items.content_rating, position: "bottom-left" };
+    const bottom = render(
+      <CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} />,
+    ).container.querySelector<HTMLElement>('[data-overlay-edge="bottom"]');
+    expect(top?.style.top).toBe(posterLength(8));
+    expect(bottom?.style.bottom).toBe(top?.style.top);
+  });
+
+  it("lifts the bottom row only when the host draws a watch-progress bar", () => {
+    // The bar occupies the same edge strip, so a flush badge would cut it.
     const prefs = prefsWithOnly("content_rating");
     prefs.items.content_rating = { ...prefs.items.content_rating, position: "bottom-left" };
-    const left = render(<CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} />).container;
-    expect(left.querySelector("div.bottom-2 > div.items-start.mb-10")).toBeTruthy();
-    expect(left.querySelector("div.bottom-2")?.className).toContain("z-10");
+    const flush = render(
+      <CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} />,
+    ).container.querySelector<HTMLElement>('[data-overlay-edge="bottom"]');
+    expect(bottomMarginClasses(flush)).toEqual([]);
 
-    prefs.items.content_rating = { ...prefs.items.content_rating, position: "bottom-right" };
-    const poster = render(<CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} />).container;
-    expect(poster.querySelector("div.bottom-2 > div.items-end.mb-10")).toBeTruthy();
+    const lifted = render(
+      <CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} hasProgressBar />,
+    ).container.querySelector<HTMLElement>('[data-overlay-edge="bottom"]');
+    expect(bottomMarginClasses(lifted)).toEqual(["mb-2"]);
+  });
 
-    const wide = render(
-      <CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} variant="wide" />,
-    ).container;
-    expect(wide.querySelector("div.bottom-2 > div.items-end.mb-12")).toBeTruthy();
-
+  it("keeps the badge layer beneath card actions and non-interactive", () => {
+    // MediaItemMenu renders its quick actions at z-20 in the card wrapper's
+    // stacking context (see MediaItemMenu.test.tsx), so this z-10 layer paints
+    // beneath them; pointer-events-none keeps a covered badge from swallowing
+    // a click aimed at the action on top of it.
+    const prefs = prefsWithOnly("content_rating");
     prefs.items.content_rating = { ...prefs.items.content_rating, position: "bottom-left" };
-    const wideLeft = render(
-      <CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} variant="wide" />,
-    ).container;
-    expect(wideLeft.querySelector("div.bottom-2 > div.items-start.mb-12")).toBeTruthy();
+    const { container } = render(<CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} />);
+
+    for (const selector of ['[data-card-overlays="poster"]', '[data-overlay-edge="bottom"]']) {
+      const node = container.querySelector<HTMLElement>(selector);
+      expect(node, selector).toBeTruthy();
+      expect(node?.classList.contains("z-10"), selector).toBe(true);
+      expect(node?.classList.contains("pointer-events-none"), selector).toBe(true);
+    }
+    // Nothing inside the layer may re-enable hit testing.
+    expect(container.querySelectorAll(".pointer-events-auto").length).toBe(0);
+    expect(container.querySelector<HTMLElement>("span.inline-flex")?.style.pointerEvents).toBe("");
+  });
+
+  describe("request status", () => {
+    const attention: OverlayData = {
+      request_status: "Not found yet",
+      request_status_icon: "alert",
+      request_status_attention: true,
+    };
+
+    function badgeStyle(data: OverlayData, prefs: CardOverlayPrefs): string | null {
+      return (
+        render(<CardOverlays data={data} prefs={prefs} />)
+          .container.querySelector<HTMLElement>("[data-overlay-badge]")
+          ?.getAttribute("style") ?? null
+      );
+    }
+
+    it.each(PRESET_IDS)("renders the status in the %s preset, with its icon on request", (id) => {
+      const plain = render(
+        <CardOverlays data={SAMPLE_REQUEST_DATA} prefs={prefsWithOnly("request_status", id)} />,
+      ).container;
+      expect(badgeTexts(plain)).toEqual(["Downloading 43%"]);
+      expect(plain.querySelector("[data-overlay-badge] svg") !== null).toBe(
+        OVERLAY_PRESETS[id].preferIcon,
+      );
+
+      const prefs = prefsWithOnly("request_status", id);
+      prefs.items.request_status = { ...prefs.items.request_status, showIcon: true };
+      const withIcon = render(<CardOverlays data={SAMPLE_REQUEST_DATA} prefs={prefs} />).container;
+      expect(badgeTexts(withIcon)).toEqual(["Downloading 43%"]);
+      expect(withIcon.querySelector("[data-overlay-badge] svg")).not.toBeNull();
+    });
+
+    it.each(OVERLAY_POSITIONS)("renders in the %s corner", (position) => {
+      const prefs = prefsWithOnly("request_status");
+      prefs.items.request_status = { ...prefs.items.request_status, position };
+      const [edge, side] = position.split("-");
+      const { container } = render(<CardOverlays data={SAMPLE_REQUEST_DATA} prefs={prefs} />);
+      const stack = container.querySelector(
+        `[data-overlay-edge="${edge}"] > div.${side === "left" ? "items-start" : "items-end"}`,
+      );
+      expect(stack?.textContent).toBe("Downloading 43%");
+    });
+
+    it("renders nothing when the badge is off", () => {
+      const prefs = prefsWithOnly("request_status");
+      prefs.items.request_status = { ...prefs.items.request_status, enabled: false };
+      const { container } = render(<CardOverlays data={SAMPLE_REQUEST_DATA} prefs={prefs} />);
+      expect(badgeTexts(container)).toEqual([]);
+    });
+
+    it.each(PRESET_IDS)("colors a status that needs attention amber in the %s preset", (id) => {
+      const accented = prefsWithOnly("request_status", id);
+      accented.items.request_status = {
+        ...accented.items.request_status,
+        accentColor: ATTENTION_ACCENT,
+      };
+      const calm = { ...attention, request_status_attention: false };
+      expect(badgeStyle(attention, prefsWithOnly("request_status", id))).toBe(
+        badgeStyle(calm, accented),
+      );
+      expect(badgeStyle(calm, prefsWithOnly("request_status", id))).not.toBe(
+        badgeStyle(calm, accented),
+      );
+    });
+
+    it("lets the viewer's own accent win over the attention accent", () => {
+      const custom = prefsWithOnly("request_status", "square");
+      custom.items.request_status = { ...custom.items.request_status, accentColor: "#3b82f6" };
+      expect(badgeStyle(attention, custom)).toBe(
+        badgeStyle({ ...attention, request_status_attention: false }, custom),
+      );
+    });
+
+    it("lifts a bottom-row status above the download bar", () => {
+      const prefs = prefsWithOnly("request_status");
+      prefs.items.request_status = { ...prefs.items.request_status, position: "bottom-left" };
+      const lifted = render(
+        <CardOverlays data={SAMPLE_REQUEST_DATA} prefs={prefs} hasProgressBar />,
+      ).container.querySelector<HTMLElement>('[data-overlay-edge="bottom"]');
+      expect(bottomMarginClasses(lifted)).toEqual(["mb-2"]);
+    });
   });
 
   it("renders nothing when no enabled overlay has data", () => {

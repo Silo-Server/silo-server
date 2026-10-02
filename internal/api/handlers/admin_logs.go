@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -58,7 +59,10 @@ func (h *AdminLogsHandler) HandleListAuditLogs(w http.ResponseWriter, r *http.Re
 
 func parseOperationalLogOptionsFromRequest(r *http.Request) (opslog.ListOptions, error) {
 	opts := opslog.ListOptions{
-		Level:             strings.TrimSpace(r.URL.Query().Get("level")),
+		// `level` accepts a comma-separated list so a single request can ask
+		// for, say, errors and warnings together — what the dashboard's
+		// recent-errors widget needs.
+		Levels:            opslog.NormalizeLevels(strings.Split(r.URL.Query().Get("level"), ",")),
 		Component:         strings.TrimSpace(r.URL.Query().Get("component")),
 		NodeID:            strings.TrimSpace(r.URL.Query().Get("node_id")),
 		RequestID:         strings.TrimSpace(r.URL.Query().Get("request_id")),
@@ -152,6 +156,32 @@ func parseOptionalIntQuery(r *http.Request, key string) (*int, error) {
 	return &value, nil
 }
 
+// parseClampedIntQuery reads an optional integer query parameter and clamps it
+// into [minValue, maxValue]. An absent or empty parameter yields the clamped
+// fallback; a non-numeric one is a bad request rather than a silent default,
+// so a client typo surfaces instead of quietly returning the wrong window.
+func parseClampedIntQuery(r *http.Request, key string, fallback, minValue, maxValue int) (int, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get(key))
+	if raw == "" {
+		return clampQueryInt(fallback, minValue, maxValue), nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, invalidQueryError(key)
+	}
+	return clampQueryInt(value, minValue, maxValue), nil
+}
+
+func clampQueryInt(value, minValue, maxValue int) int {
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
+}
+
 func invalidQueryError(key string) error {
 	return &requestParseError{message: "Invalid " + key}
 }
@@ -179,18 +209,10 @@ func parseLimit(r *http.Request, fallback int) int {
 	return limit
 }
 
-func (h *AdminLogsHandler) HandleLogStreamWebSocket(w http.ResponseWriter, r *http.Request) {
-	if h.streamHub == nil {
-		http.Error(w, "log stream unavailable", http.StatusServiceUnavailable)
-		return
-	}
-
+// parseStreamRequest validates the stream selection and filters shared by the
+// bridge and v2 handshakes without touching the connection.
+func (h *AdminLogsHandler) parseStreamRequest(r *http.Request) (logstream.Stream, opslog.ListOptions, activitylog.ListOptions, error) {
 	stream := logstream.Stream(strings.TrimSpace(r.URL.Query().Get("stream")))
-	if stream != logstream.StreamApp && stream != logstream.StreamAudit {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid stream")
-		return
-	}
-
 	var (
 		appOpts   opslog.ListOptions
 		auditOpts activitylog.ListOptions
@@ -201,17 +223,46 @@ func (h *AdminLogsHandler) HandleLogStreamWebSocket(w http.ResponseWriter, r *ht
 		appOpts, err = parseOperationalLogOptionsFromRequest(r)
 	case logstream.StreamAudit:
 		auditOpts, err = parseAuditLogOptionsFromRequest(r)
+	default:
+		return stream, appOpts, auditOpts, invalidQueryError("stream")
 	}
+	return stream, appOpts, auditOpts, err
+}
+
+func (h *AdminLogsHandler) HandleLogStreamWebSocket(w http.ResponseWriter, r *http.Request) {
+	if h.streamHub == nil {
+		http.Error(w, "log stream unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	stream, _, _, err := h.parseStreamRequest(r)
 	if err != nil {
+		if stream != logstream.StreamApp && stream != logstream.StreamAudit {
+			writeError(w, http.StatusBadRequest, "bad_request", "Invalid stream")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	h.serveLogStream(w, r, wsUpgrader)
+}
 
-	conn, err := wsUpgrader.Upgrade(w, r, nil)
+// serveLogStream upgrades with the given upgrader and runs the shared stream
+// loop: snapshot, buffered appends newer than the snapshot, then live appends
+// filtered like the list routes and deduplicated by id, with ping/pong
+// keepalive. The request context ending closes the connection.
+func (h *AdminLogsHandler) serveLogStream(w http.ResponseWriter, r *http.Request, upgrader websocket.Upgrader) {
+	stream, appOpts, auditOpts, err := h.parseStreamRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid stream")
+		return
+	}
+	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
 	defer conn.Close()
+	stopClose := context.AfterFunc(r.Context(), func() { _ = conn.Close() })
+	defer stopClose()
 
 	events, unsubscribe := h.streamHub.Subscribe(func(msg logstream.Message) bool {
 		return msg.Type == logstream.MessageTypeAppend && msg.Stream == stream
@@ -428,7 +479,11 @@ func matchesOperationalLog(opts opslog.ListOptions, entry opslog.EntryRow) bool 
 	if opts.To != nil && entry.Timestamp.After(*opts.To) {
 		return false
 	}
-	if opts.Level != "" && entry.Level != strings.ToLower(opts.Level) {
+	if levels := opslog.NormalizeLevels(opts.Levels); len(levels) > 0 {
+		if !slices.Contains(levels, strings.ToLower(entry.Level)) {
+			return false
+		}
+	} else if opts.Level != "" && entry.Level != strings.ToLower(opts.Level) {
 		return false
 	}
 	if opts.Component != "" && entry.Component != opts.Component {

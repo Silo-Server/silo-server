@@ -1,9 +1,12 @@
 import { useRef } from "react";
-import { useImageLoaded } from "@/hooks/useImageLoaded";
 import { Check, Layers } from "lucide-react";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
+import MediaCardArtwork, {
+  MEDIA_CARD_CAPTION_CLASS,
+  MEDIA_CARD_META_CLASS,
+  MEDIA_CARD_TITLE_CLASS,
+} from "@/components/MediaCardArtwork";
 import type { BrowseItem } from "@/api/types";
-import { decodeThumbhash } from "@/lib/thumbhash";
 import { timeAgo } from "@/lib/timeAgo";
 import MediaItemMenu from "@/components/MediaItemMenu";
 import CardOverlays from "@/components/overlays/CardOverlays";
@@ -11,7 +14,11 @@ import { overlayDataFromBrowseItem, type CardOverlayPrefs } from "@/lib/overlays
 import { buildEpisodeCardLabels } from "@/lib/episodeCardLabels";
 import { formatDate as formatPreferredDate } from "@/lib/datetime";
 import { formatBitrate } from "@/lib/mediaFormat";
+import { formatOutOfTen, formatPercent } from "@/components/ratings/ratings";
 import { useUICustomization } from "@/hooks/useUICustomization";
+import { buildItemHref } from "@/lib/mediaNavigation";
+import CardPlayOverlay from "@/components/CardPlayOverlay";
+import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -35,12 +42,22 @@ function formatRuntime(minutes?: number | null) {
   return remainingMinutes === 0 ? `${hours}h` : `${hours}h ${remainingMinutes}m`;
 }
 
-function formatRating(value?: number | null, max = 10) {
-  return value != null ? `${value.toFixed(1)} / ${max}` : null;
+// A rating reads the same as on the title page: its source's mark, then the
+// score on the source's own scale ("IMDb 8.1", "RT 93%").
+function ratingLabel(mark: string, score: string | null) {
+  return score != null ? (
+    <>
+      <span className="not-uppercase">{mark}</span> {score}
+    </>
+  ) : null;
 }
 
-function formatPercent(value?: number | null) {
-  return value != null ? `${value}%` : null;
+function outOfTen(value?: number | null) {
+  return value != null ? formatOutOfTen(value) : null;
+}
+
+function percent(value?: number | null) {
+  return value != null ? formatPercent(value) : null;
 }
 
 function formatProgress(ratio?: number | null) {
@@ -121,19 +138,13 @@ function SortMeta({ item, sortField }: { item: BrowseItem; sortField?: string })
         <>{formatRuntime(item.sort_metrics?.runtime_minutes ?? item.runtime) ?? defaultLabel}</>
       );
     case "rating_imdb":
-      return item.rating_imdb != null ? (
-        <>
-          <span className="not-uppercase">★</span> {item.rating_imdb.toFixed(1)} / 10
-        </>
-      ) : (
-        <>{defaultLabel}</>
-      );
+      return ratingLabel("IMDb", outOfTen(item.rating_imdb)) ?? <>{defaultLabel}</>;
     case "rating_tmdb":
-      return <>{formatRating(item.rating_tmdb) ?? defaultLabel}</>;
+      return ratingLabel("TMDB", outOfTen(item.rating_tmdb)) ?? <>{defaultLabel}</>;
     case "rating_rt_critic":
-      return <>{formatPercent(item.rating_rt_critic) ?? defaultLabel}</>;
+      return ratingLabel("RT", percent(item.rating_rt_critic)) ?? <>{defaultLabel}</>;
     case "rating_rt_audience":
-      return <>{formatPercent(item.rating_rt_audience) ?? defaultLabel}</>;
+      return ratingLabel("RT Audience", percent(item.rating_rt_audience)) ?? <>{defaultLabel}</>;
     case "release_date":
       return (
         <>{formatDate(item.sort_metrics?.release_date ?? item.release_date) ?? defaultLabel}</>
@@ -171,6 +182,7 @@ export default function ItemCard({
   libraryId,
   sortField,
   overlayPrefs,
+  quickActionMode = "none",
   narrowPosterActions = false,
   selectionMode = false,
   selected = false,
@@ -180,18 +192,19 @@ export default function ItemCard({
   libraryId?: number;
   sortField?: string;
   overlayPrefs?: CardOverlayPrefs | null;
+  quickActionMode?: CardQuickActionMode;
   narrowPosterActions?: boolean;
   selectionMode?: boolean;
   selected?: boolean;
   onToggleSelect?: (item: BrowseItem) => void;
 }) {
-  const { loaded, onLoad } = useImageLoaded(item.poster_url);
-  const thumbhashUrl = item.poster_thumbhash ? decodeThumbhash(item.poster_thumbhash) : "";
-  const itemHref = `/item/${encodeURIComponent(item.content_id)}${
-    libraryId ? `?libraryId=${libraryId}` : ""
-  }`;
+  const itemHref = buildItemHref({ contentId: item.content_id, libraryId });
   const episodeLabels = buildEpisodeCardLabels(item);
   const displayTitle = episodeLabels ? episodeLabels.seriesTitle : item.title;
+  const headingHref =
+    item.type === "episode" && item.series_id
+      ? buildItemHref({ contentId: item.series_id, libraryId })
+      : itemHref;
   const mangaCountLabel = mangaCountChipLabel(item);
   const mangaStatus = mangaStatusChip(item);
   const { cardPresentation } = useUICustomization();
@@ -201,39 +214,20 @@ export default function ItemCard({
 
   return (
     <div ref={cardRef} className="media-card media-card-longpress group/card">
-      <div className="relative">
+      <div className="group/media relative">
         <ViewTransitionLink
           to={itemHref}
           aria-label={displayTitle}
           className="block overflow-hidden rounded-xl"
         >
-          <div
-            className={`media-card-image relative ${
-              item.type === "audiobook" ? "aspect-square" : "aspect-[2/3]"
-            }`}
-            style={
-              thumbhashUrl
-                ? {
-                    backgroundImage: `url(${thumbhashUrl})`,
-                    backgroundSize: "cover",
-                    backgroundPosition: "center",
-                  }
-                : undefined
-            }
+          <MediaCardArtwork
+            src={item.poster_url}
+            alt={displayTitle}
+            fallbackLabel={displayTitle}
+            thumbhash={item.poster_thumbhash}
+            square={item.type === "audiobook"}
+            scrim="background"
           >
-            {item.poster_url ? (
-              <img
-                src={item.poster_url}
-                alt={displayTitle}
-                className={`h-full w-full object-cover transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
-                onLoad={onLoad}
-              />
-            ) : (
-              <div className="text-muted-foreground flex h-full w-full flex-col items-center justify-center gap-1 p-3 text-center text-sm">
-                <span className="line-clamp-3 font-medium">{displayTitle || "No Poster"}</span>
-              </div>
-            )}
-            <div className="from-background/70 pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t to-transparent opacity-90" />
             {item.status === "pending" && (
               <span className="glass-subtle text-foreground absolute top-2.5 left-2.5 rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-semibold tracking-[0.14em] uppercase">
                 Scanning
@@ -275,8 +269,16 @@ export default function ItemCard({
                 )}
               </div>
             )}
-          </div>
+          </MediaCardArtwork>
         </ViewTransitionLink>
+        {!selectionMode && item.play_content_id ? (
+          <CardPlayOverlay
+            contentId={item.play_content_id}
+            title={displayTitle}
+            type={item.type === "movie" ? "movie" : "episode"}
+            libraryId={libraryId}
+          />
+        ) : null}
         {selectionMode && onToggleSelect && (
           <button
             type="button"
@@ -309,24 +311,30 @@ export default function ItemCard({
           userState={item.user_state}
           variant="poster"
           narrowPosterActions={narrowPosterActions}
+          quickActionMode={quickActionMode}
           longPressRef={cardRef}
           itemTitle={displayTitle}
         />
       </div>
       {showCaption ? (
-        <ViewTransitionLink to={itemHref} className="block px-1 pt-3">
-          <div className="truncate text-[14px] font-semibold tracking-tight">{displayTitle}</div>
+        <div className={MEDIA_CARD_CAPTION_CLASS}>
+          <ViewTransitionLink to={headingHref} className={MEDIA_CARD_TITLE_CLASS}>
+            {displayTitle}
+          </ViewTransitionLink>
           {showMetadata && episodeLabels?.episodeTitle ? (
-            <div className="text-muted-foreground mt-1 truncate text-[12px] font-medium">
+            <ViewTransitionLink
+              to={itemHref}
+              className="text-muted-foreground mt-1 block truncate text-[12px] font-medium hover:underline"
+            >
               {episodeLabels.episodeTitle}
-            </div>
+            </ViewTransitionLink>
           ) : null}
           {showMetadata ? (
-            <div className="text-muted-foreground mt-1 truncate text-[11px] font-medium tracking-[0.14em] uppercase">
+            <ViewTransitionLink to={itemHref} className={MEDIA_CARD_META_CLASS}>
               <SortMeta item={item} sortField={sortField} />
-            </div>
+            </ViewTransitionLink>
           ) : null}
-        </ViewTransitionLink>
+        </div>
       ) : null}
     </div>
   );

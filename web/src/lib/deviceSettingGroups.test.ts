@@ -72,7 +72,7 @@ describe("deviceSettingGroups", () => {
 
   it("returns groups in reading order and omits empty ones", () => {
     const ids = groupDeviceSettings().map((group) => group.id);
-    expect(ids).toEqual(["picture", "sound", "subtitles", "episodes"]);
+    expect(ids).toEqual(["picture", "sound", "subtitles", "episodes", "appearance"]);
 
     const single = groupDeviceSettings(["player.hdr_enabled"]);
     expect(single.map((group) => group.id)).toEqual(["picture"]);

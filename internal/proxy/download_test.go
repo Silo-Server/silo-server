@@ -322,3 +322,48 @@ func TestProxyDownloadReturnsNotFoundForMissingFile(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
 	}
 }
+
+// countingTransport counts the requests sent through it.
+type countingTransport struct {
+	requests int
+}
+
+func (c *countingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	c.requests++
+	return http.DefaultTransport.RoundTrip(req)
+}
+
+// The shared node client waits for response headers without a deadline, which
+// only a transcode rebuild justifies. An artifact download must keep the
+// artifact client's bounded header wait, so it must not go through that client.
+func TestProxyDownloadArtifactRelayKeepsBoundedHeaderWait(t *testing.T) {
+	const secret = "download-proxy-secret"
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", "4")
+		w.Header().Set("Content-Type", "video/mp4")
+		_, _ = io.WriteString(w, "0123")
+	}))
+	defer origin.Close()
+	token, err := streamtoken.Sign(streamtoken.Claims{
+		SessionID:          "download-remote-bounded",
+		PlayMethod:         streamtoken.PlayMethodDownload,
+		TranscodeNode:      origin.URL,
+		DownloadArtifactID: "artifact-1",
+		UserID:             7,
+	}, secret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	server := newDownloadProxyServer(t, secret)
+	relay := &countingTransport{}
+	server.httpClient = &http.Client{Transport: relay}
+	rr := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/downloads/file/"+token, nil))
+	if rr.Code != http.StatusOK || rr.Body.String() != "0123" {
+		t.Fatalf("status = %d body = %q", rr.Code, rr.Body.String())
+	}
+	if relay.requests != 0 {
+		t.Fatalf("artifact download sent %d request(s) through the unbounded node relay client", relay.requests)
+	}
+}

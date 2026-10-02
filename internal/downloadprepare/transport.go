@@ -98,8 +98,13 @@ type Request struct {
 	AudioRecipeVersion string `json:"audio_recipe_version,omitempty"`
 	// SourceAudioChannels freezes the selected input stream's probed channel
 	// count. Zero is the mixed-version-safe unknown value and never enables gain.
-	SourceAudioChannels int     `json:"source_audio_channels,omitempty"`
-	TotalDuration       float64 `json:"total_duration,omitempty"`
+	SourceAudioChannels int `json:"source_audio_channels,omitempty"`
+	// TrackRecipeVersion and PreparedTracks carry the multi-track stream
+	// layout. Older nodes ignore both, encode the legacy single-audio layout,
+	// and therefore cannot return the matching execution fingerprint.
+	TrackRecipeVersion string                   `json:"track_recipe_version,omitempty"`
+	PreparedTracks     *playback.PreparedTracks `json:"prepared_tracks,omitempty"`
+	TotalDuration      float64                  `json:"total_duration,omitempty"`
 }
 
 // Result identifies a completed artifact without exposing the node's local
@@ -187,18 +192,30 @@ func (r Request) AudioRecipeRequested() bool {
 }
 
 // StereoDownmixBoostRequested reports whether this is the complete,
-// source-sensitive audio_to_aac v2 recipe. Prepared encoded audio uses the
+// source-sensitive audio_to_aac recipe. Prepared encoded audio uses the
 // historical stereo default, so only a known surround source qualifies.
 func (r Request) StereoDownmixBoostRequested() bool {
 	return r.AudioRecipeVersion == playback.TransformationAudioToAACRecipeVersionV3 &&
 		playback.IsAudioToAACStereoDownmixV3(r.SourceAudioChannels, r.TargetCodecAudio, r.TargetAudioChannels)
 }
 
+// PreparedTracksRequested includes incomplete layouts so the node can reject a
+// partial recipe instead of encoding the legacy single-audio layout.
+func (r Request) PreparedTracksRequested() bool {
+	return r.TrackRecipeVersion != "" || r.PreparedTracks != nil
+}
+
+// ValidPreparedTracks reports whether a requested layout is complete and uses
+// the stream-layout version this build executes.
+func (r Request) ValidPreparedTracks() bool {
+	return r.TrackRecipeVersion == playback.PreparedTracksRecipeVersion && r.PreparedTracks != nil
+}
+
 // ExecutionAttestationRequested reports whether accepting bytes requires a
 // receipt from a node that understood all newly transported recipe fields.
 // Explicit audio output settings affect bytes even when the v2 boost does not.
 func (r Request) ExecutionAttestationRequested() bool {
-	return r.ToneMapRequested() || r.AudioRecipeRequested() ||
+	return r.ToneMapRequested() || r.AudioRecipeRequested() || r.PreparedTracksRequested() ||
 		r.TargetAudioChannels != 0 || r.TargetAudioBitrateKbps != 0
 }
 
@@ -252,6 +269,10 @@ func NewRequest(artifactID string, opts playback.TranscodeOpts) Request {
 		AudioTrackIndex:            opts.AudioTrackIndex,
 		TotalDuration:              opts.TotalDuration,
 	}
+	if opts.PreparedTracks != nil {
+		request.TrackRecipeVersion = playback.PreparedTracksRecipeVersion
+		request.PreparedTracks = opts.PreparedTracks
+	}
 	if playback.IsAudioToAACStereoDownmixV3(opts.SourceAudioChannels, request.TargetCodecAudio, request.TargetAudioChannels) {
 		request.SourceAudioChannels = opts.SourceAudioChannels
 		request.AudioRecipeVersion = playback.TransformationAudioToAACRecipeVersionV3
@@ -287,6 +308,7 @@ func (r Request) TranscodeOpts(ffmpegPath, hwAccel, hwDevice string, sink playba
 		AudioTrackIndex:            r.AudioTrackIndex,
 		SourceAudioChannels:        r.SourceAudioChannels,
 		SubtitleTrackIndex:         -1,
+		PreparedTracks:             r.PreparedTracks,
 		FFmpegPath:                 ffmpegPath,
 		HWAccel:                    hwAccel,
 		HWDevice:                   hwDevice,

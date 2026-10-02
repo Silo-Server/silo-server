@@ -1,7 +1,11 @@
 import { type ReactNode } from "react";
-import { Languages } from "lucide-react";
 import { decodeThumbhash } from "@/lib/thumbhash";
-import { useImageLoaded } from "@/hooks/useImageLoaded";
+import { imageIdentity, useImageLoaded } from "@/hooks/useImageLoaded";
+import { useShowTitleArt } from "@/hooks/useTitleArt";
+
+import "./detailLayout.css";
+import DetailOverview from "./components/DetailOverview";
+import DetailTitle from "./DetailTitle";
 
 interface DetailHeroProps {
   title: string;
@@ -33,7 +37,7 @@ interface DetailHeroProps {
   tagline?: string;
   scoreRow?: ReactNode;
   crewLine?: ReactNode;
-  variant?: "full" | "compact";
+  variant?: "full" | "compact" | "episode" | "series" | "season";
   topNav?: ReactNode;
 }
 
@@ -63,11 +67,28 @@ export default function DetailHero({
   variant = "full",
   topNav,
 }: DetailHeroProps) {
-  const { loaded: backdropLoaded, onLoad: onBackdropLoad } = useImageLoaded(backdropUrl);
-  const { loaded: posterLoaded, onLoad: onPosterLoad } = useImageLoaded(posterUrl);
+  const {
+    loaded: backdropLoaded,
+    onLoad: onBackdropLoad,
+    onError: onBackdropError,
+  } = useImageLoaded(backdropUrl);
+  const {
+    loaded: posterLoaded,
+    onLoad: onPosterLoad,
+    onError: onPosterError,
+  } = useImageLoaded(posterUrl);
+  const showTitleArt = useShowTitleArt();
+  const titleLogoUrl = showTitleArt ? logoUrl : undefined;
+  // Until the profile's choice is known, a title with a logo reserves the logo
+  // box without fetching the art or drawing the text.
+  const holdTitle = showTitleArt === undefined && Boolean(logoUrl);
+  // A plain-text context is the title's type; it shares one eyebrow line with
+  // the studio or network. Richer context (an episode breadcrumb) keeps its own row.
+  const eyebrowType = typeof context === "string" ? context : undefined;
   const backdropPlaceholder = backdropThumbhash ? decodeThumbhash(backdropThumbhash) : "";
   const posterPlaceholder = posterThumbhash ? decodeThumbhash(posterThumbhash) : "";
   const isCompact = variant === "compact";
+  const isViewportBounded = variant === "episode" || variant === "series" || variant === "season";
 
   const posterSizeClass = (() => {
     switch (posterOrientation) {
@@ -97,14 +118,17 @@ export default function DetailHero({
   })();
 
   return (
-    <section className="item-detail-hero border-border/10 relative isolate overflow-hidden border-b">
+    <section
+      className="item-detail-hero border-border/10 relative isolate overflow-hidden border-b"
+      data-variant={variant}
+      data-viewport-bounded={isViewportBounded || undefined}
+    >
       {topNav}
       {(backdropUrl || backdropPlaceholder) && (
         <div
-          className="absolute inset-0 h-full w-full"
+          className="hero-backdrop-artwork absolute inset-0 h-full w-full"
           style={{
-            filter: `brightness(var(--hero-backdrop-brightness, 0.4)) saturate(var(--hero-backdrop-saturate, 1.15))`,
-            ...(backdropPlaceholder && !backdropLoaded
+            ...(backdropPlaceholder
               ? {
                   backgroundImage: `url(${backdropPlaceholder})`,
                   backgroundSize: "cover",
@@ -115,34 +139,33 @@ export default function DetailHero({
         >
           {backdropUrl && (
             <img
-              key={backdropUrl}
+              key={imageIdentity(backdropUrl)}
               src={backdropUrl}
               alt=""
-              className={`h-full w-full object-cover object-[center_20%] transition-opacity duration-300 will-change-transform ${backdropLoaded ? "opacity-100" : "opacity-0"}`}
-              style={{ animation: "var(--animate-ken-burns-a)" }}
+              decoding="async"
+              className={`h-full w-full object-cover object-[center_20%] transition-opacity duration-300 ${backdropLoaded ? "opacity-100" : "opacity-0"}`}
               onLoad={onBackdropLoad}
+              onError={onBackdropError}
             />
           )}
         </div>
       )}
 
-      {/* Left-to-right gradient */}
-      <div className="hero-gradient-left" />
-
-      {/* Ambient glow from artwork */}
-      <div className="ambient-glow" />
-
-      {/* Bottom-to-top gradient */}
-      <div className="hero-gradient" />
-      <div className="hero-vignette" />
+      {/* Keep the detail treatment on three contained paint surfaces while
+          preserving its original stacking: tint/left fade, ambient artwork
+          glow, then the bottom fades and vignette. Previously five full-hero
+          elements were independently invalidated during browser-chrome resize. */}
+      <div className="detail-hero-scrim detail-hero-scrim-under" />
+      <div className="ambient-glow detail-hero-ambient" />
+      <div className="detail-hero-scrim detail-hero-scrim-over" />
 
       <div
-        className={`page-shell-wide relative flex flex-col justify-end pb-8 ${
+        className={`detail-hero-layout page-shell-wide relative flex flex-col justify-end pb-8 ${
           isCompact
             ? // min-height (not fixed height) below lg: bottom-justified content
               // taller than the hero would otherwise overflow out the top, under
               // the floating back button.
-              "min-h-[max(35vh,300px)] pt-20 lg:h-[42vh]"
+              "min-h-[max(35vh,300px)] pt-20 lg:min-h-[42vh]"
             : "min-h-[60dvh] pt-28 lg:min-h-[72dvh]"
         }`}
       >
@@ -151,7 +174,9 @@ export default function DetailHero({
             !isCompact && aside ? "lg:grid-cols-[minmax(0,1fr)_280px] lg:items-end" : ""
           }`}
         >
-          <div className={`flex flex-col gap-6 ${!hidePoster ? "lg:flex-row lg:items-end" : ""}`}>
+          <div
+            className={`detail-hero-primary-content flex flex-col gap-6 ${!hidePoster ? "lg:flex-row lg:items-end" : ""}`}
+          >
             {/* Poster */}
             {!hidePoster && (
               <div
@@ -160,14 +185,16 @@ export default function DetailHero({
                 {posterUrl ? (
                   <>
                     <img
-                      key={posterUrl}
+                      key={imageIdentity(posterUrl)}
                       src={posterUrl}
                       alt={title}
+                      decoding="async"
                       className={`w-full object-cover ${posterAspect} ${posterLoaded ? "opacity-100" : "opacity-0"}`}
                       onLoad={onPosterLoad}
+                      onError={onPosterError}
                     />
                     <span
-                      key={`placeholder-${posterUrl}`}
+                      key={`placeholder-${imageIdentity(posterUrl)}`}
                       aria-hidden="true"
                       data-testid="detail-hero-poster-placeholder"
                       className={`bg-surface pointer-events-none absolute inset-0 bg-cover bg-center transition-opacity duration-300 ${
@@ -192,110 +219,117 @@ export default function DetailHero({
 
             {/* Info column */}
             <div
-              className="max-w-3xl"
+              key={isViewportBounded ? title : undefined}
+              className="detail-hero-copy max-w-3xl"
               style={{ textShadow: "var(--hero-text-shadow, 0 1px 3px rgb(0 0 0 / 40%))" }}
             >
-              {context && (
-                <div className="text-muted-foreground mb-4 text-sm font-medium">{context}</div>
-              )}
+              <div
+                className={isViewportBounded ? "detail-hero-information" : "contents"}
+                tabIndex={isViewportBounded ? 0 : undefined}
+                role={isViewportBounded ? "region" : undefined}
+                aria-label={isViewportBounded ? "Media details" : undefined}
+              >
+                {context && !eyebrowType && (
+                  <div className="detail-hero-context text-muted-foreground mb-4 text-sm font-medium">
+                    {context}
+                  </div>
+                )}
 
-              {studioLabel && (
-                <div className="text-muted-foreground mb-2 text-xs font-semibold tracking-[0.16em] uppercase">
-                  {studioLabel}
-                </div>
-              )}
-
-              {logoUrl ? (
-                <>
-                  <h1 className="sr-only">{title}</h1>
-                  <img
-                    src={logoUrl}
-                    alt=""
-                    className="mb-4 max-h-20 max-w-[420px] object-contain object-left lg:max-h-28 lg:max-w-[480px]"
-                  />
-                </>
-              ) : (
-                <h1
-                  className={`text-foreground mb-3 font-extrabold tracking-tight ${
-                    isCompact
-                      ? "font-display text-3xl leading-[1.1] sm:text-4xl"
-                      : "font-display text-4xl leading-[0.98] tracking-[-0.05em] sm:text-5xl lg:text-7xl"
-                  }`}
-                >
-                  {title}
-                </h1>
-              )}
-
-              {/* Tagline (italic) — falls back to subtitle */}
-              {(tagline || subtitle) && (
-                <div
-                  className={`text-muted-foreground mb-4 text-[13px] ${
-                    tagline
-                      ? "text-foreground/72 italic"
-                      : "text-muted-foreground text-base font-medium not-italic"
-                  }`}
-                >
-                  {tagline || subtitle}
-                </div>
-              )}
-
-              {metadata && <div className="mb-4">{metadata}</div>}
-
-              {scoreRow && <div className="mb-4">{scoreRow}</div>}
-
-              {overview && (
-                <div className="max-w-2xl">
-                  <p
-                    className={`text-muted-foreground leading-7 ${
-                      isCompact ? "text-sm" : "text-foreground/72 text-sm sm:text-[15px]"
-                    } ${overviewTranslating ? "animate-pulse opacity-50" : ""}`}
-                  >
-                    {overview}
+                {(eyebrowType || studioLabel) && (
+                  <p className="detail-hero-context text-muted-foreground mb-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs font-semibold tracking-[0.16em] uppercase">
+                    {eyebrowType && <span>{eyebrowType}</span>}
+                    {eyebrowType && studioLabel && (
+                      <span aria-hidden="true" className="size-[3px] rounded-full bg-current" />
+                    )}
+                    {studioLabel && <span className="text-foreground/85">{studioLabel}</span>}
                   </p>
-                  {overviewTranslating && (
-                    <span className="text-muted-foreground/70 mt-1 inline-flex items-center gap-1.5 text-xs">
-                      <Languages className="h-3 w-3 animate-pulse" />
-                      Translating…
-                    </span>
-                  )}
-                  {!overviewTranslating && onTranslateOverview && (
-                    <button
-                      type="button"
-                      onClick={onTranslateOverview}
-                      className="text-muted-foreground hover:text-foreground border-border/60 mt-1.5 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs transition-colors"
-                    >
-                      <Languages className="h-3 w-3" />
-                      Translate
-                    </button>
-                  )}
-                </div>
-              )}
+                )}
 
-              {/* Crew line and genre chips render independently: pages that
-                  fold genres into their crew line simply omit the genres prop. */}
-              {crewLine && <div className="mt-3">{crewLine}</div>}
-              {genres && genres.length > 0 && (
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {genres.map((genre) =>
-                    genreHref ? (
-                      <a
-                        key={genre}
-                        href={genreHref(genre)}
-                        className="metadata-badge hover:bg-foreground/10 transition-colors"
-                      >
-                        {genre}
-                      </a>
-                    ) : (
-                      <span key={genre} className="metadata-badge">
-                        {genre}
-                      </span>
-                    ),
-                  )}
+                {titleLogoUrl ? (
+                  <>
+                    <h1 className="sr-only">{title}</h1>
+                    <img
+                      src={titleLogoUrl}
+                      alt=""
+                      decoding="async"
+                      className="mb-4 h-20 w-full max-w-[420px] object-contain object-left lg:h-28 lg:max-w-[480px]"
+                    />
+                  </>
+                ) : holdTitle ? (
+                  <>
+                    <h1 className="sr-only">{title}</h1>
+                    <div
+                      aria-hidden="true"
+                      data-testid="detail-hero-title-pending"
+                      className="mb-4 h-20 w-full max-w-[420px] lg:h-28 lg:max-w-[480px]"
+                    />
+                  </>
+                ) : (
+                  <DetailTitle
+                    title={title}
+                    bounded={isViewportBounded}
+                    className={`text-foreground mb-3 font-extrabold tracking-tight ${
+                      isCompact
+                        ? "font-display text-3xl leading-[1.1] sm:text-4xl"
+                        : "font-display text-4xl leading-[0.98] tracking-[-0.05em] sm:text-5xl lg:text-7xl"
+                    }`}
+                  />
+                )}
+
+                {/* Tagline (italic) — falls back to subtitle */}
+                {(tagline || subtitle) && (
+                  <div
+                    className={`text-muted-foreground mb-4 text-[13px] ${
+                      tagline
+                        ? "text-foreground/72 italic"
+                        : "text-muted-foreground text-base font-medium not-italic"
+                    }`}
+                  >
+                    {tagline || subtitle}
+                  </div>
+                )}
+
+                <div className="detail-hero-facts">
+                  {metadata && <div className="mb-4">{metadata}</div>}
+                  {scoreRow && <div className="mb-4">{scoreRow}</div>}
                 </div>
-              )}
+
+                {overview && (
+                  <DetailOverview
+                    overview={overview}
+                    compact={isCompact}
+                    clamp={isViewportBounded}
+                    translating={overviewTranslating}
+                    onTranslate={onTranslateOverview}
+                  />
+                )}
+
+                {/* Crew line and genre chips render independently: pages that
+                  fold genres into their crew line simply omit the genres prop. */}
+                {crewLine && <div className="mt-3">{crewLine}</div>}
+                {genres && genres.length > 0 && (
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {genres.map((genre) =>
+                      genreHref ? (
+                        <a
+                          key={genre}
+                          href={genreHref(genre)}
+                          className="metadata-badge hover:bg-foreground/10 transition-colors"
+                        >
+                          {genre}
+                        </a>
+                      ) : (
+                        <span key={genre} className="metadata-badge">
+                          {genre}
+                        </span>
+                      ),
+                    )}
+                  </div>
+                )}
+              </div>
 
               {actions && (
-                <div className="mt-6" style={{ textShadow: "none" }}>
+                <div className="detail-action-bar mt-6" style={{ textShadow: "none" }}>
                   {actions}
                 </div>
               )}

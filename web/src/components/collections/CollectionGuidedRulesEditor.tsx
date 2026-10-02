@@ -1,3 +1,5 @@
+import type { PersonalizedSorts } from "@/lib/querySortOptions";
+import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
 import { useMemo } from "react";
 
 import {
@@ -380,7 +382,7 @@ interface CollectionGuidedRulesEditorProps {
   allowLibrarySelection?: boolean;
   showMediaScopeSelector?: boolean;
   allowPersonalizedFilters?: boolean;
-  allowPersonalizedSorts?: boolean;
+  allowPersonalizedSorts?: PersonalizedSorts;
   sortRelevanceScope?: QuerySortRelevanceScope;
   readOnly?: boolean;
   showSortControls?: boolean;
@@ -393,7 +395,7 @@ interface CollectionGuidedRulesEditorProps {
   libraryType?: string;
   // When set, the book-native facet sections (Author / Series, and
   // audiobook-only Narrator) switch to typeahead-backed FacetSearchSelect, querying
-  // /api/v1/catalog/filters/search scoped to this state. Without it
+  // /api/v2/catalog/filters/search scoped to this state. Without it
   // they fall back to the bulk filters payload (top 1000 alphabetical).
   catalogState?: CatalogSearchState;
 }
@@ -445,10 +447,21 @@ export default function CollectionGuidedRulesEditor({
     : isAudiobookLibrary
       ? "Unlistened"
       : "Unwatched";
-  const sortOptions = getCollectionSortOptions(allowPersonalizedSorts, sortRelevanceScope);
+  const shownRatingSources = useShownRatingSources();
+  const sortOptions = getCollectionSortOptions(
+    allowPersonalizedSorts,
+    sortRelevanceScope,
+    shownRatingSources,
+    state.sortField,
+  );
   const selectedSort = normalizeQuerySortForScope(
     { field: state.sortField, order: state.sortOrder },
-    { includePersonalized: allowPersonalizedSorts, relevanceScope: sortRelevanceScope },
+    {
+      includePersonalized: allowPersonalizedSorts,
+      relevanceScope: sortRelevanceScope,
+      shownRatingSources,
+      keepSortField: state.sortField,
+    },
   );
 
   function update(patch: Partial<GuidedFormState>) {

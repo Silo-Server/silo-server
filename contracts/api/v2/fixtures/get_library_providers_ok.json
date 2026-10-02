@@ -1,0 +1,16 @@
+{
+  "levels": [
+    {
+      "content_level": "movie",
+      "entries": [
+        {
+          "plugin_installation_id": "3",
+          "capability_id": "tmdb",
+          "provider_slug": "tmdb",
+          "priority": 0,
+          "enabled": true
+        }
+      ]
+    }
+  ]
+}

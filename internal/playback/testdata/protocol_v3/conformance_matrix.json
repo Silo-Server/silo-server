@@ -175,8 +175,8 @@
         "outcome": "playable",
         "delivery": "server_transcode_hls",
         "decision_reason": "quality_original",
-        "plan_id": "plan:1496ada4f9ff74754e2f14031f86fb21",
-        "plan_attempt_key": "v3:4db9d7afc07c1655",
+        "plan_id": "plan:176744988a004fd5f2230c221961c41a",
+        "plan_attempt_key": "v3:d1ecc0d9511b83b8",
         "selected_tracks": {
           "audio": {
             "id": "file:42:audio:0",
@@ -218,7 +218,7 @@
           {
             "name": "audio_to_aac",
             "executor": "server",
-            "recipe_version": "2",
+            "recipe_version": "4",
             "validated_claims": [
               "audio_decode"
             ]
@@ -767,6 +767,221 @@
             "height": 480,
             "bitrate_kbps": 1500,
             "preserves_source": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "h264_constrained_baseline_direct",
+      "category": "profile_compatibility",
+      "request": {
+        "protocol_version": 3,
+        "client_features": [
+          "playback_plan_v3"
+        ],
+        "file_id": 42,
+        "profile_id": "profile-1",
+        "playback_attempt_id": "attempt-h264-constrained-baseline",
+        "quality_preference": "auto",
+        "subtitle_fidelity_preference": "compatible",
+        "start_position": 12.5,
+        "progress_persistence": "client",
+        "audio_track_id": "file:42:audio:0",
+        "audio_track_index": 0,
+        "metered": false,
+        "client_capabilities": {
+          "video_evidence": "exact",
+          "audio_evidence": "exact",
+          "codecs_video": [
+            "h264"
+          ],
+          "codecs_video_hardware": [
+            "h264"
+          ],
+          "codecs_audio": [
+            "aac"
+          ],
+          "containers": [
+            "mkv"
+          ],
+          "max_resolution": "1080p",
+          "hdr": false,
+          "video_decode": [
+            {
+              "codec": "h264",
+              "profiles": [
+                "baseline"
+              ],
+              "levels": [
+                52
+              ],
+              "bit_depths": [
+                8
+              ],
+              "max_width": 3840,
+              "max_height": 2160,
+              "max_frame_rate": 60,
+              "max_bitrate_kbps": 20000,
+              "hardware": true
+            }
+          ]
+        },
+        "client_playback_context": {
+          "protocol_version": 3,
+          "form_factor": "tv",
+          "app_version": "3.0-test",
+          "device": {
+            "platform": "fixture"
+          },
+          "output": {
+            "output_context_id": "output-a"
+          },
+          "deliveries": {
+            "hls": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "hls"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": [],
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": [],
+              "auth_header_refresh": false,
+              "validated_claims": [],
+              "transformations": []
+            },
+            "original_http": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mkv",
+                "mp4"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": [],
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": [],
+              "auth_header_refresh": false,
+              "validated_claims": [],
+              "transformations": []
+            },
+            "progressive": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mp4"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": [],
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": [],
+              "auth_header_refresh": false,
+              "validated_claims": [],
+              "transformations": []
+            }
+          }
+        }
+      },
+      "source": {
+        "media_file_id": 42,
+        "duration_seconds": 7200,
+        "container": "mkv",
+        "video_codec": "h264",
+        "video_profile": "constrained baseline",
+        "video_level": 41,
+        "bit_depth": 8,
+        "width": 1920,
+        "height": 1080,
+        "frame_rate": 23.976023976023978,
+        "bitrate_kbps": 8000,
+        "dynamic_range": "sdr",
+        "hdr10_plus": false,
+        "dv_enhancement_layer": "none",
+        "audio_codec": "aac",
+        "audio_channels": 2,
+        "audio_layout": "stereo"
+      },
+      "expected": {
+        "outcome": "playable",
+        "delivery": "original_http",
+        "decision_reason": "validated_original_playback",
+        "plan_id": "plan:ea7ae9cecded71f3a86ec20a152c8778",
+        "plan_attempt_key": "v3:706f66227a5cae0b",
+        "selected_tracks": {
+          "audio": {
+            "id": "file:42:audio:0",
+            "index": 0
+          }
+        },
+        "subtitle": {
+          "mode": "off",
+          "inventory": []
+        },
+        "claims": {
+          "video": {
+            "hdr10": false,
+            "hdr10_plus": false,
+            "hlg": false,
+            "dolby_vision": false
+          },
+          "audio": {
+            "codec": "aac",
+            "passthrough": false,
+            "atmos_preserved": false,
+            "reason": "client_decode_supported"
+          },
+          "subtitles": {
+            "ass_styling_preserved": false,
+            "bitmap_overlay": false,
+            "bitmap_sidecar": false
+          }
+        },
+        "available_qualities": [
+          {
+            "label": "original",
+            "height": 1080,
+            "bitrate_kbps": 8000,
+            "preserves_source": true
           }
         ]
       }
@@ -1647,8 +1862,8 @@
         "outcome": "playable",
         "delivery": "server_transcode_hls",
         "decision_reason": "quality_fixed_rung",
-        "plan_id": "plan:e8ddb06ffa481d3561b07cef06a91ec5",
-        "plan_attempt_key": "v3:4830f767fa704f38",
+        "plan_id": "plan:f12311eb7ac696c8bbeeab6c135b4225",
+        "plan_attempt_key": "v3:315d40199ceb0333",
         "selected_tracks": {
           "audio": {
             "id": "file:42:audio:0",
@@ -1690,7 +1905,7 @@
           {
             "name": "audio_to_aac",
             "executor": "server",
-            "recipe_version": "2",
+            "recipe_version": "4",
             "validated_claims": [
               "audio_decode"
             ]
@@ -1763,7 +1978,7 @@
         "subtitle_fidelity_preference": "compatible",
         "start_position": 12.5,
         "progress_persistence": "client",
-        "audio_track_id": "file:42:audio:0",
+        "audio_track_id": "file:77:audio:0",
         "audio_track_index": 0,
         "metered": false,
         "client_capabilities": {
@@ -2358,8 +2573,8 @@
         "outcome": "playable",
         "delivery": "server_transcode_hls",
         "decision_reason": "quality_fixed_rung",
-        "plan_id": "plan:23105e95d0363c4627ab0f60ed0bfa96",
-        "plan_attempt_key": "v3:8a4c0deb6795be69",
+        "plan_id": "plan:1aae8ad82720984fbc14c38de3a5485b",
+        "plan_attempt_key": "v3:78825f13a334a7ed",
         "selected_tracks": {
           "audio": {
             "id": "file:42:audio:0",
@@ -2401,7 +2616,7 @@
           {
             "name": "audio_to_aac",
             "executor": "server",
-            "recipe_version": "2",
+            "recipe_version": "4",
             "validated_claims": [
               "audio_decode"
             ]
@@ -3378,6 +3593,7 @@
         "hdr10_plus": false,
         "dolby_vision_profile": 7,
         "dv_bl_compat_id": 6,
+        "dv_base_layer_proven": true,
         "dv_enhancement_layer": "unknown",
         "audio_codec": "aac",
         "audio_channels": 2,
@@ -3387,8 +3603,8 @@
         "outcome": "playable",
         "delivery": "server_transcode_hls",
         "decision_reason": "quality_fixed_rung",
-        "plan_id": "plan:48fee96902632f7f3b70e8e5dd0669f3",
-        "plan_attempt_key": "v3:f7602afa81a3eee0",
+        "plan_id": "plan:e302dcdd4f94f3c3027c7603de66c0a5",
+        "plan_attempt_key": "v3:b1ff9bc2e47e341e",
         "selected_tracks": {
           "audio": {
             "id": "file:42:audio:0",
@@ -3430,7 +3646,7 @@
           {
             "name": "audio_to_aac",
             "executor": "server",
-            "recipe_version": "2",
+            "recipe_version": "4",
             "validated_claims": [
               "audio_decode"
             ]
@@ -3712,8 +3928,8 @@
         "outcome": "playable",
         "delivery": "server_remux_progressive",
         "decision_reason": "audio_adaptation",
-        "plan_id": "plan:7ae72046390c9f41614fc8a0e7465089",
-        "plan_attempt_key": "v3:8e3e32c8e2e5b895",
+        "plan_id": "plan:4f78d95e9fdd6e085ec79506894da894",
+        "plan_attempt_key": "v3:4979cff59d1f3068",
         "selected_tracks": {
           "audio": {
             "id": "file:42:audio:0",
@@ -3747,7 +3963,7 @@
           {
             "name": "audio_to_aac",
             "executor": "server",
-            "recipe_version": "2",
+            "recipe_version": "4",
             "validated_claims": [
               "audio_decode"
             ]
@@ -4357,7 +4573,7 @@
               "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": true,
-                "sidecar_text": false,
+                "sidecar_text": true,
                 "ass_styling": true,
                 "embedded_bitmap": false,
                 "sidecar_bitmap": false,
@@ -4385,7 +4601,7 @@
               "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": true,
-                "sidecar_text": false,
+                "sidecar_text": true,
                 "ass_styling": true,
                 "embedded_bitmap": false,
                 "sidecar_bitmap": false,
@@ -4412,7 +4628,7 @@
               "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": true,
-                "sidecar_text": false,
+                "sidecar_text": true,
                 "ass_styling": true,
                 "embedded_bitmap": false,
                 "sidecar_bitmap": false,
@@ -4686,8 +4902,8 @@
         "outcome": "playable",
         "delivery": "server_transcode_hls",
         "decision_reason": "subtitle_burn_in_required",
-        "plan_id": "plan:3fbb45a597dbfeb7ec62888782109a50",
-        "plan_attempt_key": "v3:09c05142189931a3",
+        "plan_id": "plan:c42d17216c7049e49c5453bc2f21cfe5",
+        "plan_attempt_key": "v3:7ec0846b12cc97a6",
         "selected_tracks": {
           "audio": {
             "id": "file:42:audio:0",
@@ -4748,7 +4964,7 @@
           {
             "name": "audio_to_aac",
             "executor": "server",
-            "recipe_version": "2",
+            "recipe_version": "4",
             "validated_claims": [
               "audio_decode"
             ]
@@ -6536,12 +6752,16 @@
           "protocol_version": 3,
           "server_features": [
             "playback_plan_v3",
+            "server_remote_stream_bitrate_policy_v1",
+            "server_local_stream_bitrate_policy_v1",
             "neutral_playback_v3_contract_v1",
+            "embedded_subtitles_v1",
             "layout_aware_passthrough",
             "playback_route_diagnostics",
             "device_quirks_v1",
             "seek_reanchor_v1",
             "output_change_v1",
+            "output_display_evidence_v1",
             "direct_stream_resume_v1",
             "header_authenticated_media_v1",
             "authorized_media_origins_v1",

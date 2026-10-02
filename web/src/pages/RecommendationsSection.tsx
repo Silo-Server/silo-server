@@ -6,6 +6,7 @@ import SectionItemCard from "@/components/SectionItemCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useRecommendationSection } from "@/hooks/queries/recommendations";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { cardGridClasses } from "@/lib/uiCustomization";
 
@@ -75,13 +76,14 @@ export default function RecommendationsSection() {
 
   const { data, isLoading, isError, refetch } = useRecommendationSection(kind, key);
   const title = data?.label || fallbackTitle(kind, key);
+  const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
   const { cardPresentation } = useUICustomization();
 
   useDocumentTitle(title);
 
   return (
     <div className="relative space-y-6 px-4 pt-6 pb-12 sm:px-6 lg:px-10 xl:px-12">
-      <PageBack to="/recommendations" preferHistory={false} />
+      <PageBack to="/recommendations" up />
       <div className="mt-10 flex flex-col gap-1.5 sm:mt-12">
         <h1 className="text-foreground text-2xl font-bold tracking-tight sm:text-3xl">{title}</h1>
         {data && data.items.length > 0 && (
@@ -100,7 +102,12 @@ export default function RecommendationsSection() {
       ) : (
         <div className={cardGridClasses(cardPresentation.poster_size)}>
           {data.items.map((item) => (
-            <SectionItemCard key={item.content_id} item={item} />
+            <SectionItemCard
+              key={item.content_id}
+              item={item}
+              overlayPrefs={overlayPrefs}
+              quickActionMode={quickActionMode}
+            />
           ))}
         </div>
       )}

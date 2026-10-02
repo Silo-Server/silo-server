@@ -5,10 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -97,7 +101,7 @@ func TestManifestBuilderAssembles(t *testing.T) {
 		{Path: "/media/sub.en.srt", Language: "en", Format: "srt", Forced: true},
 	}}
 	subs := fakeSubtitleSource{downloaded: []subtitles.DownloadedSubtitle{
-		{ID: 7, MediaFileID: 99, Language: "fr", Format: subtitles.SubtitleFormat("vtt")},
+		{ID: 7, MediaFileID: 99, Language: "fr", Format: subtitles.SubtitleFormat("vtt"), Revision: 4},
 	}}
 	b := NewManifestBuilder(fakeManifestSource{detail: detail}, subs, fakeFileResolver{file: file}, nil)
 
@@ -113,10 +117,10 @@ func TestManifestBuilderAssembles(t *testing.T) {
 	if m.PosterThumbhash != "PHASH" || m.BackdropThumbhash != "BHASH" {
 		t.Fatalf("thumbhashes not inlined: %+v", m)
 	}
-	if m.ArtworkURLs.Poster != "/api/v1/downloads/dl1/artwork/poster" {
+	if m.ArtworkURLs.Poster != "/api/v2/downloads/dl1/artwork/poster" {
 		t.Fatalf("poster url = %q, want proxy path", m.ArtworkURLs.Poster)
 	}
-	if m.ArtworkURLs.Backdrop != "/api/v1/downloads/dl1/artwork/backdrop" {
+	if m.ArtworkURLs.Backdrop != "/api/v2/downloads/dl1/artwork/backdrop" {
 		t.Fatalf("backdrop url = %q, want proxy path", m.ArtworkURLs.Backdrop)
 	}
 	if m.ArtworkURLs.Logo != "" {
@@ -134,11 +138,15 @@ func TestManifestBuilderAssembles(t *testing.T) {
 	if len(m.Subtitles) != 2 {
 		t.Fatalf("subtitles = %+v, want 2", m.Subtitles)
 	}
-	if m.Subtitles[0].FetchURL != "/api/v1/downloads/dl1/subtitles/external:0" || !m.Subtitles[0].External {
+	if m.Subtitles[0].FetchURL != "/api/v2/downloads/dl1/subtitles/external:0" || !m.Subtitles[0].External {
 		t.Fatalf("external subtitle = %+v", m.Subtitles[0])
 	}
-	if m.Subtitles[1].FetchURL != "/api/v1/downloads/dl1/subtitles/downloaded:7" || m.Subtitles[1].External {
+	if m.Subtitles[1].FetchURL != "/api/v2/downloads/dl1/subtitles/downloaded:7" || m.Subtitles[1].External {
 		t.Fatalf("downloaded subtitle = %+v", m.Subtitles[1])
+	}
+	// Only downloaded subtitles carry a revision; their bytes change with timing.
+	if m.Subtitles[0].Revision != "" || m.Subtitles[1].Revision != "4" {
+		t.Fatalf("subtitle revisions = %q, %q", m.Subtitles[0].Revision, m.Subtitles[1].Revision)
 	}
 	if m.StableIdentity.ProviderIDs["imdb"] != "tt123" || m.StableIdentity.ProviderIDs["tmdb"] != "456" {
 		t.Fatalf("stable identity = %+v", m.StableIdentity)
@@ -160,6 +168,126 @@ func TestManifestBuilderAssembles(t *testing.T) {
 	}
 }
 
+func preparedManifestFixture(artifact *Artifact) (*ManifestBuilder, *Download) {
+	audio := []models.AudioTrack{
+		{Codec: "truehd", Channels: 8, Language: "en", Layout: "7.1", Title: "TrueHD 7.1", Default: true},
+		{Codec: "ac3", Channels: 2, Language: "ja", EmbeddedTitle: "Commentary", Title: "Commentary"},
+	}
+	selected := 1
+	detail := &catalog.ItemDetail{Type: "movie", Title: "The Movie", Versions: []catalog.FileVersion{{
+		FileID: 99, Container: "mkv", CodecVideo: "hevc", CodecAudio: "truehd", Resolution: "2160p",
+		AudioTracks: audio, EffectiveAudioTrackIndex: &selected,
+	}}}
+	file := &models.MediaFile{
+		ID: 99, CodecAudio: "truehd", AudioTracks: audio,
+		ExternalSubtitles: []models.ExternalSubtitle{{Path: "/media/sub.en.srt", Language: "en", Format: "srt"}},
+		SubtitleTracks: []models.SubtitleTrack{
+			{Codec: "subrip", Language: "en"},
+			{Codec: "hdmv_pgs_subtitle", Language: "fr", Forced: true},
+			{Codec: "ass", Language: "ja", EmbeddedTitle: "Signs & Songs", HearingImpaired: true},
+		},
+	}
+	lookup := func(context.Context, string) (*Artifact, error) { return artifact, nil }
+	b := NewManifestBuilder(fakeManifestSource{detail: detail}, nil, fakeFileResolver{file: file}, lookup)
+	return b, &Download{ID: "dl1", ContentID: "c1", MediaFileID: 99, Format: FormatTranscode, ArtifactID: artifact.ID}
+}
+
+// TestManifestDescribesMultiTrackArtifact verifies a multi-track prepared file
+// is described by output position, with encoded tracks reporting their AAC
+// layout and PGS offered as a .sup sidecar the MP4 cannot store.
+func TestManifestDescribesMultiTrackArtifact(t *testing.T) {
+	b, dl := preparedManifestFixture(&Artifact{
+		ID: "a1", Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", Resolution: "1080p",
+		AudioTrackIndex: -1, TrackRecipeVersion: playback.PreparedTracksRecipeVersion,
+	})
+	m, err := b.Build(context.Background(), dl, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	// The viewer's catalog selection (the commentary track) survives because
+	// every source track is present at its source position.
+	if len(m.AudioTracks) != 2 || m.SelectedAudioTrackIndex == nil || *m.SelectedAudioTrackIndex != 1 {
+		t.Fatalf("audio tracks = %+v selected %v, want both tracks with output 1 selected", m.AudioTracks, m.SelectedAudioTrackIndex)
+	}
+	if !m.AudioTracks[0].Default {
+		t.Fatal("source default track lost its default flag")
+	}
+	for i, track := range m.AudioTracks {
+		if track.Index != i || track.Codec != "aac" || track.Channels != 2 || track.Layout != "stereo" {
+			t.Fatalf("audio track %d = %+v, want AAC stereo at output %d", i, track, i)
+		}
+	}
+	if m.AudioTracks[1].Language != "ja" || m.AudioTracks[1].Title != "Commentary" || m.AudioTracks[1].Default {
+		t.Fatalf("commentary track = %+v", m.AudioTracks[1])
+	}
+	if len(m.Subtitles) != 3 {
+		t.Fatalf("subtitles = %+v, want external sidecar plus PGS and ASS sidecars", m.Subtitles)
+	}
+	pgs := m.Subtitles[1]
+	if pgs.FetchURL != "/api/v2/downloads/dl1/subtitles/embedded:1" || pgs.Format != "sup" || pgs.Language != "fr" || !pgs.Forced || pgs.External {
+		t.Fatalf("PGS sidecar = %+v", pgs)
+	}
+	ass := m.Subtitles[2]
+	if ass.FetchURL != "/api/v2/downloads/dl1/subtitles/embedded:2" || ass.Format != "ass" || ass.Language != "ja" || ass.Title != "Signs & Songs" || !ass.HearingImpaired {
+		t.Fatalf("ASS sidecar = %+v", ass)
+	}
+}
+
+// TestManifestDescribesFrozenAudioAfterSourceReprobe verifies a ready
+// multi-track file keeps the audio inventory it was prepared with after the
+// source is replaced at the same path and re-probed.
+func TestManifestDescribesFrozenAudioAfterSourceReprobe(t *testing.T) {
+	prepared := []OfflineAudioTrack{
+		{Index: 0, Language: "en", Codec: "aac", Channels: 2, Layout: "stereo", Bitrate: 192, Default: true},
+		{Index: 1, Language: "ja", Codec: "aac", Channels: 2, Layout: "stereo", Bitrate: 192},
+	}
+	b, dl := preparedManifestFixture(&Artifact{
+		ID: "a1", Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", Resolution: "1080p",
+		AudioTrackIndex: -1, TrackRecipeVersion: playback.PreparedTracksRecipeVersion,
+		PreparedAudioTracks: prepared,
+	})
+	reprobed := []models.AudioTrack{
+		{Codec: "ac3", Channels: 6, Language: "ja", Default: true},
+		{Codec: "truehd", Channels: 8, Language: "en"},
+		{Codec: "dts", Channels: 6, Language: "fr"},
+	}
+	for _, selected := range []int{2, 0} {
+		b.detail.(fakeManifestSource).detail.Versions[0].AudioTracks = reprobed
+		b.detail.(fakeManifestSource).detail.Versions[0].EffectiveAudioTrackIndex = &selected
+		b.fileRepo.(fakeFileResolver).file.AudioTracks = reprobed
+		m, err := b.Build(context.Background(), dl, catalog.AccessFilter{})
+		if err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		if !reflect.DeepEqual(m.AudioTracks, prepared) {
+			t.Fatalf("audio tracks = %+v, want the frozen inventory %+v", m.AudioTracks, prepared)
+		}
+		// Neither the out-of-range position nor the position now holding a
+		// different language describes a delivered track the viewer chose.
+		if m.SelectedAudioTrackIndex == nil || *m.SelectedAudioTrackIndex != 0 {
+			t.Fatalf("selection %d: selected = %v, want the delivered default 0", selected, m.SelectedAudioTrackIndex)
+		}
+	}
+}
+
+// TestManifestDescribesLegacySingleTrackArtifact keeps already-prepared files
+// described as the one audio stream they contain, without PGS sidecars.
+func TestManifestDescribesLegacySingleTrackArtifact(t *testing.T) {
+	b, dl := preparedManifestFixture(&Artifact{
+		ID: "a1", Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", Resolution: "1080p", AudioTrackIndex: -1,
+	})
+	m, err := b.Build(context.Background(), dl, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(m.AudioTracks) != 1 || m.AudioTracks[0].Codec != "aac" || *m.SelectedAudioTrackIndex != 0 {
+		t.Fatalf("legacy audio tracks = %+v", m.AudioTracks)
+	}
+	if len(m.Subtitles) != 1 || m.Subtitles[0].FetchURL != "/api/v2/downloads/dl1/subtitles/external:0" {
+		t.Fatalf("legacy subtitles = %+v, want only the external sidecar", m.Subtitles)
+	}
+}
+
 func TestParseSubtitleRef(t *testing.T) {
 	cases := []struct {
 		ref       string
@@ -170,6 +298,7 @@ func TestParseSubtitleRef(t *testing.T) {
 		{"external:0", "external", 0, false},
 		{"external:12", "external", 12, false},
 		{"downloaded:7", "downloaded", 7, false},
+		{"embedded:3", "embedded", 3, false},
 		{"bogus", "", 0, true},
 		{"external:x", "", 0, true},
 		{"weird:1", "", 0, true},
@@ -188,5 +317,76 @@ func TestParseSubtitleRef(t *testing.T) {
 				t.Fatalf("parseSubtitleRef(%q) = (%q, %d, %v)", tc.ref, kind, value, err)
 			}
 		})
+	}
+}
+
+func TestServeEmbeddedSubtitleOnlyServesSidecarTracks(t *testing.T) {
+	file := &models.MediaFile{
+		ID: 99, FilePath: t.TempDir() + "/missing.mkv",
+		SubtitleTracks: []models.SubtitleTrack{
+			{Codec: "subrip"},
+			{Codec: "hdmv_pgs_subtitle"},
+		},
+	}
+	s := &Service{fileRepo: fakeFileResolver{file: file}}
+	dl := &Download{ID: "dl1", MediaFileID: 99}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	for _, ordinal := range []int{-1, 0, 2} {
+		if err := s.serveEmbeddedSubtitle(httptest.NewRecorder(), req, dl, ordinal); !errors.Is(err, ErrAssetNotFound) {
+			t.Fatalf("ordinal %d err = %v, want ErrAssetNotFound", ordinal, err)
+		}
+	}
+	// A failed PGS extract after the shared cache committed its 200 must abort
+	// the response rather than end it as a complete track.
+	defer func() {
+		if rec := recover(); rec != http.ErrAbortHandler { //nolint:errorlint // sentinel compared by identity, as net/http does
+			t.Fatalf("failed committed extract recovered %v, want http.ErrAbortHandler", rec)
+		}
+	}()
+	_ = s.serveEmbeddedSubtitle(httptest.NewRecorder(), req, dl, 1)
+}
+
+// A downloaded subtitle is served with its timing correction, revalidated on
+// every use, and answers a matching If-None-Match with 304.
+func TestServeDownloadedSubtitleTimingAndRevalidation(t *testing.T) {
+	const stored = "1\n00:00:01,000 --> 00:00:02,000\nHello\n"
+	sub := &subtitles.DownloadedSubtitle{ID: 7, MediaFileID: 99, Format: subtitles.FormatSRT, Revision: 3,
+		Timing: subtitles.Timing{OffsetMS: 500}}
+
+	rr := httptest.NewRecorder()
+	if err := serveDownloadedSubtitle(rr, httptest.NewRequest(http.MethodGet, "/", nil), sub, []byte(stored)); err != nil {
+		t.Fatal(err)
+	}
+	etag := rr.Header().Get("ETag")
+	if rr.Code != http.StatusOK || rr.Body.String() != "1\n00:00:01,500 --> 00:00:02,500\nHello\n" {
+		t.Fatalf("GET = %d %q", rr.Code, rr.Body.String())
+	}
+	if etag != `"downloaded-7-3"` || rr.Header().Get("Cache-Control") != "private, no-cache" {
+		t.Fatalf("headers = %v", rr.Header())
+	}
+
+	for _, header := range []string{etag, "W/" + etag, `"other", ` + etag, "*"} {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("If-None-Match", header)
+		rr = httptest.NewRecorder()
+		if err := serveDownloadedSubtitle(rr, req, sub, []byte(stored)); err != nil {
+			t.Fatal(err)
+		}
+		if rr.Code != http.StatusNotModified || rr.Body.Len() != 0 || rr.Header().Get("ETag") != etag {
+			t.Fatalf("If-None-Match %s = %d %q", header, rr.Code, rr.Body.String())
+		}
+	}
+
+	// A timing change bumps the revision, so the old validator no longer matches.
+	changed := *sub
+	changed.Revision, changed.Timing = 4, subtitles.Timing{}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("If-None-Match", etag)
+	rr = httptest.NewRecorder()
+	if err := serveDownloadedSubtitle(rr, req, &changed, []byte(stored)); err != nil {
+		t.Fatal(err)
+	}
+	if rr.Code != http.StatusOK || rr.Body.String() != stored || rr.Header().Get("ETag") != `"downloaded-7-4"` {
+		t.Fatalf("stale validator = %d %q %q", rr.Code, rr.Header().Get("ETag"), rr.Body.String())
 	}
 }

@@ -51,7 +51,7 @@ type profileSettingSync struct {
 // planCreateProfileSettingsSync plans the canonical writes for POST
 // /profiles. Create requests carry plain strings, so an absent field arrives
 // as "" and plans a no-op delete against the freshly created profile.
-func planCreateProfileSettingsSync(req createProfileRequest) ([]profileSettingSync, error) {
+func planCreateProfileSettingsSync(req ProfileCreateRequest) ([]profileSettingSync, error) {
 	return planProfileSettingsSync(
 		&req.Language, &req.SubtitleLanguage, &req.PreferredMetadataLanguage,
 		&req.SubtitleMode, req.ShowForcedSubtitles,
@@ -66,7 +66,7 @@ func planCreateProfileSettingsSync(req createProfileRequest) ([]profileSettingSy
 // planUpdateProfileSettingsSync plans the canonical writes for PUT
 // /profiles/{id}. A nil field was not part of the request and must not touch
 // the canonical row; the shipped clients send single-field deltas.
-func planUpdateProfileSettingsSync(req updateProfileRequest) ([]profileSettingSync, error) {
+func planUpdateProfileSettingsSync(req ProfileUpdateRequest) ([]profileSettingSync, error) {
 	return planProfileSettingsSync(
 		req.Language, req.SubtitleLanguage, req.PreferredMetadataLanguage,
 		req.SubtitleMode, req.ShowForcedSubtitles,
@@ -254,16 +254,40 @@ func applyLegacyPreferenceSettingsSync(
 	writes []profileSettingSync,
 	legacyMutation func(userstore.PreferenceSettingsWriter) error,
 ) error {
+	return applyPlannedLegacyPreferenceSettingsSync(ctx, store, events, userID, base,
+		func(tx userstore.PreferenceSettingsWriter) ([]profileSettingSync, error) {
+			if err := legacyMutation(tx); err != nil {
+				return nil, err
+			}
+			return writes, nil
+		})
+}
+
+// applyPlannedLegacyPreferenceSettingsSync is applyLegacyPreferenceSettingsSync
+// for a mutation that has to look at the store before it knows what to
+// write: plan runs inside the transaction — after the Postgres store has
+// taken the per-user advisory lock — performs the legacy mutation and returns
+// the canonical writes, so a read-merge-write is one serialized unit across
+// every replica. An error plan returns comes back unwrapped, so a caller can
+// tell a rejected value from a failed write.
+func applyPlannedLegacyPreferenceSettingsSync(
+	ctx context.Context,
+	store userstore.UserStore,
+	events *evt.Hub,
+	userID int,
+	base userstore.SettingIdentity,
+	plan func(userstore.PreferenceSettingsWriter) ([]profileSettingSync, error),
+) error {
 	var changedKeys []string
 	transactioner, ok := store.(userstore.PreferenceSettingsTransactioner)
 	if !ok {
 		return fmt.Errorf("user store does not support atomic preference settings synchronization")
 	}
 	err := transactioner.WithPreferenceSettingsTransaction(ctx, func(tx userstore.PreferenceSettingsWriter) error {
-		if err := legacyMutation(tx); err != nil {
+		writes, err := plan(tx)
+		if err != nil {
 			return err
 		}
-		var err error
 		changedKeys, err = writeCanonicalSettingsSync(ctx, tx, base, writes)
 		return err
 	})

@@ -22,7 +22,7 @@ export default function SearchScopeChips({ activeScope, onScopeChange }: SearchS
     <div
       role="radiogroup"
       aria-label="Search scope"
-      className="surface-panel inline-flex items-center gap-1 rounded-full p-1"
+      className="search-paint-surface inline-flex items-center gap-1 rounded-full border p-1"
     >
       {SCOPE_OPTIONS.map((option) => {
         const isActive = option.value === activeScope;

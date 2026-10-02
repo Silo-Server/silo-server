@@ -3,13 +3,43 @@ package requests
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 )
 
 type fakeNotifier struct {
 	requestIDs []string
 	contentIDs []string
+	followers  [][]Follower
+	announced  []string
 	err        error
+}
+
+type recordedApproval struct {
+	requestID string
+	origin    ApprovalOrigin
+}
+
+type recordingLifecycleNotifier struct {
+	submitted []string
+	approved  []recordedApproval
+	declined  []string
+}
+
+func (n *recordingLifecycleNotifier) RequestSubmitted(_ context.Context, req Request) {
+	n.submitted = append(n.submitted, req.ID)
+}
+
+func (n *recordingLifecycleNotifier) RequestApproved(_ context.Context, req Request, origin ApprovalOrigin) {
+	n.approved = append(n.approved, recordedApproval{requestID: req.ID, origin: origin})
+}
+
+func (n *recordingLifecycleNotifier) RequestDeclined(_ context.Context, req Request) {
+	n.declined = append(n.declined, req.ID)
+}
+
+func (f *fakeNotifier) AnnounceFulfilled(_ context.Context, req Request) {
+	f.announced = append(f.announced, req.ID)
 }
 
 func (f *fakeNotifier) NotifyFulfilled(_ context.Context, req Request, contentID string) error {
@@ -18,7 +48,63 @@ func (f *fakeNotifier) NotifyFulfilled(_ context.Context, req Request, contentID
 	}
 	f.requestIDs = append(f.requestIDs, req.ID)
 	f.contentIDs = append(f.contentIDs, contentID)
+	f.followers = append(f.followers, req.Followers)
 	return nil
+}
+
+func TestCreateRequestAutoApprovalReportsPolicyOrigin(t *testing.T) {
+	store := newFakeStore()
+	store.settings.RequestsEnabled = true
+	store.settings.GlobalAutoApprovalEnabled = true
+	store.integrations = []Integration{autoApproveRouterInst("router-1", "radarr-key")}
+	service := newTestService(store)
+	service.SetRouterProvider(&fakeRouterProvider{})
+	recorder := &recordingLifecycleNotifier{}
+	service.SetLifecycleNotifier(recorder)
+
+	req, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
+		MediaType: MediaTypeMovie,
+		TMDBID:    550,
+		Title:     "Fight Club",
+	})
+	if err != nil {
+		t.Fatalf("CreateRequest returned error: %v", err)
+	}
+	if len(recorder.submitted) != 1 || recorder.submitted[0] != req.ID {
+		t.Fatalf("submitted notifications = %v, want [%s]", recorder.submitted, req.ID)
+	}
+	want := []recordedApproval{{requestID: req.ID, origin: ApprovalOriginPolicy}}
+	if !reflect.DeepEqual(recorder.approved, want) {
+		t.Fatalf("approved notifications = %+v, want %+v", recorder.approved, want)
+	}
+}
+
+func TestApproveReportsAdminOrigin(t *testing.T) {
+	store := newFakeStore()
+	store.integrations = []Integration{routerInst("router-1")}
+	store.requests["req-1"] = &Request{
+		ID:                   "req-1",
+		MediaType:            MediaTypeMovie,
+		TMDBID:               550,
+		Title:                "Fight Club",
+		Status:               StatusPending,
+		Outcome:              OutcomeActive,
+		RequestedByUserID:    7,
+		RequestedByProfileID: "profile-7",
+	}
+	service := newTestService(store)
+	service.SetRouterProvider(&fakeRouterProvider{})
+	recorder := &recordingLifecycleNotifier{}
+	service.SetLifecycleNotifier(recorder)
+
+	_, err := service.Approve(context.Background(), Viewer{UserID: 99, IsAdmin: true}, "req-1")
+	if err != nil {
+		t.Fatalf("Approve returned error: %v", err)
+	}
+	want := []recordedApproval{{requestID: "req-1", origin: ApprovalOriginAdmin}}
+	if !reflect.DeepEqual(recorder.approved, want) {
+		t.Fatalf("approved notifications = %+v, want %+v", recorder.approved, want)
+	}
 }
 
 func completedRequestFixture(id string, tmdbID int) *Request {

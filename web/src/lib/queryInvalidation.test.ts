@@ -20,8 +20,21 @@ describe("activeSectionQueryMatchesLibrary", () => {
     expect(activeSectionQueryMatchesLibrary(["sections", "library", 1, "items"], 3)).toBe(false);
   });
 
-  it("matches non-library and same-library section queries", () => {
-    expect(activeSectionQueryMatchesLibrary(["sections", "home", "items"], 3)).toBe(true);
+  it("matches same-library and non-library-scoped section queries", () => {
     expect(activeSectionQueryMatchesLibrary(["sections", "library", 3, "layout"], 3)).toBe(true);
+    expect(activeSectionQueryMatchesLibrary(["sections", "admin", "home", undefined], 3)).toBe(
+      true,
+    );
+  });
+
+  it("does not match home section queries for a library-scoped event", () => {
+    expect(activeSectionQueryMatchesLibrary(["sections", "home", "layout"], 3)).toBe(false);
+    expect(activeSectionQueryMatchesLibrary(["sections", "home", "items", "recent"], 3)).toBe(
+      false,
+    );
+  });
+
+  it("matches home section queries when the event is not library-scoped", () => {
+    expect(activeSectionQueryMatchesLibrary(["sections", "home", "items", "recent"])).toBe(true);
   });
 });

@@ -27,7 +27,6 @@ const mocks = vi.hoisted(() => {
     useWatchedStateMutation: vi.fn(),
     useSeasons: vi.fn(),
     useItemEpisodes: vi.fn(),
-    useContinueWatching: vi.fn(),
     useSimilarItems: vi.fn(),
     useSetRating: vi.fn(),
     useDeleteRating: vi.fn(),
@@ -36,6 +35,9 @@ const mocks = vi.hoisted(() => {
   };
 });
 
+vi.mock("@/pages/watchtogether/DetailWatchTogether", () => ({
+  useDetailWatchTogether: () => ({ menu: undefined, sheet: null }),
+}));
 vi.mock("@/hooks/useOnViewTranslation", () => ({
   useOnViewTranslation: () => ({ translating: false, onTranslate: undefined }),
 }));
@@ -63,10 +65,6 @@ vi.mock("@/hooks/queries/items", () => ({
 vi.mock("@/hooks/queries/episodes", () => ({
   useSeasons: mocks.useSeasons,
   useItemEpisodes: mocks.useItemEpisodes,
-}));
-
-vi.mock("@/hooks/queries/progress", () => ({
-  useContinueWatching: mocks.useContinueWatching,
 }));
 
 vi.mock("@/hooks/queries/recommendations", () => ({
@@ -148,6 +146,7 @@ function makeSeriesItem(
     rating_tmdb: null,
     rating_rt_critic: null,
     rating_rt_audience: null,
+    ratings: [],
     imdb_id: "",
     tmdb_id: "",
     tvdb_id: "",
@@ -195,10 +194,44 @@ describe("SeriesContent", () => {
     mocks.useItemEpisodes.mockReturnValue({
       data: { episodes: [{ content_id: "episode-1" }] },
     });
-    mocks.useContinueWatching.mockReturnValue({ items: [] });
     mocks.useSimilarItems.mockReturnValue({ data: undefined, isLoading: false });
     mocks.useSetRating.mockReturnValue({ mutate: mocks.setRatingMutate });
     mocks.useDeleteRating.mockReturnValue({ mutate: mocks.deleteRatingMutate });
+  });
+
+  it.each([false, true])(
+    "only reserves empty season navigation while loading (%s)",
+    (isLoading) => {
+      mocks.useSeasons.mockReturnValue({ data: { seasons: [] }, isLoading });
+      const markup = renderToStaticMarkup(
+        <QueryClientProvider client={new QueryClient()}>
+          <MemoryRouter>
+            <SeriesContent item={makeSeriesItem()} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      expect(markup.includes("series-detail-navigation")).toBe(isLoading);
+      expect(markup.includes('role="region" aria-label="Seasons and episodes"')).toBe(isLoading);
+    },
+  );
+
+  it.each([
+    ["season rail", [makeSeason(), makeSeason({ content_id: "season-2", season_number: 2 })], true],
+    ["single-season episode grid", [makeSeason()], false],
+  ])("marks only the season rail as content-sized navigation (%s)", (_, seasons, isRail) => {
+    mocks.useSeasons.mockReturnValue({ data: { seasons } });
+    const markup = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter>
+          <SeriesContent item={makeSeriesItem()} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(markup).toContain(
+      isRail
+        ? 'class="page-shell series-detail-navigation series-detail-rail"'
+        : 'class="page-shell series-detail-navigation"',
+    );
   });
 
   it("passes rating state and change handler to ActionBar", () => {

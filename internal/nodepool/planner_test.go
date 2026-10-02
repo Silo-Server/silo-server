@@ -1,7 +1,10 @@
 package nodepool
 
 import (
+	"encoding/json"
+	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -556,7 +559,7 @@ func TestBandwidthReservationsCountDuringBridge(t *testing.T) {
 	// Unlike job reservations, bandwidth bridges ignore health freshness —
 	// a report right after admission would not reflect the streams yet.
 	newer := f.now.Add(5 * time.Second)
-	f.proxies.ApplyHealth(1, true, 0, 0, newer)
+	f.proxies.ApplyHealth(1, f.proxies.Nodes()[0].URL, true, 0, 0, "", nil, nil, newer)
 	f.now = f.now.Add(10 * time.Second)
 	if got := f.planner.PlanSession("s4", "", false, 4_000).ProxyNode; got != nil {
 		t.Fatalf("stream should still be rejected during bridge window, got %+v", got)
@@ -566,7 +569,7 @@ func TestBandwidthReservationsCountDuringBridge(t *testing.T) {
 	// meter now reports 8 Mbps, so one more 4 Mbps stream still won't fit,
 	// but a 2 Mbps one will.
 	f.now = f.now.Add(bandwidthBridgeAge)
-	f.proxies.ApplyHealth(1, true, 0, 8_000, f.now)
+	f.proxies.ApplyHealth(1, f.proxies.Nodes()[0].URL, true, 0, 8_000, "", nil, nil, f.now)
 	if got := f.planner.PlanSession("s5", "", false, 4_000).ProxyNode; got != nil {
 		t.Fatalf("4 Mbps stream should not fit at 8/10 Mbps, got %+v", got)
 	}
@@ -618,7 +621,7 @@ func TestUnknownBitrateAdmittedBelowCap(t *testing.T) {
 		t.Fatal("unknown-bitrate stream should be admitted below cap")
 	}
 
-	f.proxies.ApplyHealth(1, true, 0, 10_000, f.now)
+	f.proxies.ApplyHealth(1, f.proxies.Nodes()[0].URL, true, 0, 10_000, "", nil, nil, f.now)
 	if got := f.planner.PlanSession("s2", "", false, 0).ProxyNode; got != nil {
 		t.Fatalf("unknown-bitrate stream should be rejected at cap, got %+v", got)
 	}
@@ -768,6 +771,86 @@ func TestPlanSessionWithReturnsNoProxyWhenNoneAreCapable(t *testing.T) {
 	}
 }
 
+func TestPlanRouteReservesExactlyRequestedTopology(t *testing.T) {
+	group := "rack-a"
+	proxies := NewProxyPool()
+	proxies.SetNodes([]*Node{{ID: 1, URL: "http://proxy", Group: &group, Enabled: true, Healthy: true}})
+	transcodes := NewTranscodePool()
+	transcodes.SetNodes([]*Node{{ID: 2, URL: "http://transcode", Group: &group, Enabled: true, Healthy: true}})
+	planner := NewPlanner(proxies, transcodes)
+
+	tests := []struct {
+		name          string
+		request       RouteRequest
+		wantTranscode bool
+		wantProxy     bool
+	}{
+		{"neither", RouteRequest{SessionID: "none"}, false, false},
+		{"proxy", RouteRequest{SessionID: "proxy", NeedsProxy: true}, false, true},
+		{"transcode", RouteRequest{SessionID: "transcode", NeedsTranscode: true}, true, false},
+		{"both", RouteRequest{SessionID: "both", NeedsTranscode: true, NeedsProxy: true}, true, true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			plan := planner.PlanRoute(test.request)
+			if (plan.TranscodeNode != nil) != test.wantTranscode || (plan.ProxyNode != nil) != test.wantProxy {
+				t.Fatalf("plan = %#v, want transcode=%t proxy=%t", plan, test.wantTranscode, test.wantProxy)
+			}
+			reservation, reserved := planner.reserved[test.request.SessionID]
+			if !test.wantTranscode && !test.wantProxy {
+				if reserved {
+					t.Fatalf("neither route left reservation %#v", reservation)
+				}
+				return
+			}
+			if !reserved || (reservation.transcodeURL != "") != test.wantTranscode || (reservation.proxyURL != "") != test.wantProxy {
+				t.Fatalf("reservation = %#v, want exact route halves", reservation)
+			}
+		})
+	}
+}
+
+func TestPlanRouteTranscodeAPIIgnoresUnhealthyProxyGroupMember(t *testing.T) {
+	group := "rack-a"
+	proxies := NewProxyPool()
+	proxies.SetNodes([]*Node{{ID: 1, URL: "http://proxy", Group: &group, Enabled: true, Healthy: false}})
+	transcodes := NewTranscodePool()
+	transcodes.SetNodes([]*Node{{ID: 2, URL: "http://transcode", Group: &group, Enabled: true, Healthy: true}})
+	planner := NewPlanner(proxies, transcodes)
+
+	localEgress := planner.PlanRoute(RouteRequest{SessionID: "api-egress", NeedsTranscode: true})
+	if localEgress.TranscodeNode == nil || localEgress.ProxyNode != nil {
+		t.Fatalf("transcode+API plan = %#v, want healthy worker without proxy", localEgress)
+	}
+	proxyEgress := planner.PlanRoute(RouteRequest{SessionID: "proxy-egress", NeedsTranscode: true, NeedsProxy: true})
+	if proxyEgress.TranscodeNode != nil || proxyEgress.ProxyNode != nil {
+		t.Fatalf("transcode+proxy plan = %#v, want unavailable grouped route", proxyEgress)
+	}
+}
+
+func TestPlanRouteUsesIndependentCapabilityPredicates(t *testing.T) {
+	proxies := NewProxyPool()
+	proxies.SetNodes([]*Node{
+		{ID: 1, URL: "http://proxy-old", Enabled: true, Healthy: true},
+		{ID: 2, URL: "http://proxy-new", Enabled: true, Healthy: true},
+	})
+	transcodes := NewTranscodePool()
+	transcodes.SetNodes([]*Node{
+		{ID: 3, URL: "http://transcode-old", Enabled: true, Healthy: true},
+		{ID: 4, URL: "http://transcode-new", Enabled: true, Healthy: true},
+	})
+	planner := NewPlanner(proxies, transcodes)
+	plan := planner.PlanRoute(RouteRequest{
+		SessionID: "capable", NeedsTranscode: true, NeedsProxy: true,
+		TranscodeEligible: func(node *Node) bool { return node.URL == "http://transcode-new" },
+		ProxyEligible:     func(node *Node) bool { return node.URL == "http://proxy-new" },
+	})
+	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://transcode-new" ||
+		plan.ProxyNode == nil || plan.ProxyNode.URL != "http://proxy-new" {
+		t.Fatalf("plan = %#v, want independently capable nodes", plan)
+	}
+}
+
 func TestProxyNodeURLsListsEnabledProxies(t *testing.T) {
 	proxies := NewProxyPool()
 	proxies.SetNodes([]*Node{
@@ -782,5 +865,241 @@ func TestProxyNodeURLsListsEnabledProxies(t *testing.T) {
 	urls := planner.ProxyNodeURLs()
 	if len(urls) != 2 {
 		t.Fatalf("proxy urls = %v, want both pooled proxies", urls)
+	}
+}
+
+// gpuCapabilities is a capability report naming one render device per uuid, so
+// pool loading derives exactly those identities. Written as a payload rather
+// than by setting the derived field directly: the pool re-derives it on load,
+// which is the behavior these tests depend on.
+func gpuCapabilities(uuids ...string) json.RawMessage {
+	devices := make([]string, 0, len(uuids))
+	for i, uuid := range uuids {
+		devices = append(devices, fmt.Sprintf(`{"path":"/dev/dri/renderD%d","gpu_uuid":%q}`, 128+i, uuid))
+	}
+	return json.RawMessage(`{"boot_id":"boot-1","render_device_details":[` + strings.Join(devices, ",") + `]}`)
+}
+
+// gpuTranscodeNode is transcodeNode carrying a capability report for the named
+// GPUs.
+func gpuTranscodeNode(id int, url string, activeJobs int, uuids ...string) *Node {
+	n := transcodeNode(id, url, nil, activeJobs)
+	n.Capabilities = gpuCapabilities(uuids...)
+	return n
+}
+
+// Two pooled nodes can be two containers on one card. Spreading jobs evenly
+// across node records that share silicon does not spread the work, so equal job
+// counts are broken toward the node whose physical GPU is doing less.
+func TestEqualJobsPrefersTheIdlePhysicalGPU(t *testing.T) {
+	f := newFixture(
+		[]*Node{proxyNode(1, "http://proxy-1", nil)},
+		[]*Node{
+			gpuTranscodeNode(2, "http://tc-a", 2, "GPU-shared"),
+			gpuTranscodeNode(3, "http://tc-b", 0, "GPU-shared"),
+			gpuTranscodeNode(4, "http://tc-c", 0, "GPU-own"),
+		},
+	)
+
+	// tc-b and tc-c are level on jobs and tc-b comes first in pool order, so
+	// only the shared-GPU tie-break can select tc-c.
+	plan := f.planner.PlanSession("s1", "", true, 0)
+	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://tc-c" {
+		t.Fatalf("expected tc-c on the idle GPU, got %+v", plan.TranscodeNode)
+	}
+
+	// The same rule applies to the API-relayed route, which shares pickNode.
+	// s1's reservation is released first so the second pick starts from the
+	// same job counts rather than from tc-c already charged for s1.
+	f.planner.ReleaseSession("s1")
+	local := f.planner.PlanTranscodeSessionWithLocalEgress("s2", "", nil)
+	if local.TranscodeNode == nil || local.TranscodeNode.URL != "http://tc-c" {
+		t.Fatalf("local-egress expected tc-c, got %+v", local.TranscodeNode)
+	}
+}
+
+// Jobs occupy a card whether or not the node running them may take another, so
+// an unhealthy sharer — which stays pooled, only ineligible — still counts
+// against its group.
+func TestSharedGPULoadCountsUnusableSharers(t *testing.T) {
+	busy := gpuTranscodeNode(2, "http://tc-a", 3, "GPU-shared")
+	busy.Healthy = false
+	f := newFixture(
+		[]*Node{proxyNode(1, "http://proxy-1", nil)},
+		[]*Node{
+			busy,
+			gpuTranscodeNode(3, "http://tc-b", 0, "GPU-shared"),
+			gpuTranscodeNode(4, "http://tc-c", 0, "GPU-own"),
+		},
+	)
+
+	plan := f.planner.PlanSession("s1", "", true, 0)
+	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://tc-c" {
+		t.Fatalf("expected tc-c, got %+v", plan.TranscodeNode)
+	}
+}
+
+// Boot id detection is best-effort, so two unrelated hosts can each report an
+// iGPU at the near-universal slot 0000:00:02.0 with no boot id to scope it.
+// Those are two cards, and planning them as one would steer work away from a
+// genuinely idle GPU.
+func TestUnscopedSlotsDoNotShareAGroup(t *testing.T) {
+	iGPU := json.RawMessage(`{"render_device_details":[` +
+		`{"path":"/dev/dri/renderD128","pci_address":"0000:00:02.0"}]}`)
+	busy := transcodeNode(2, "http://tc-a", nil, 2)
+	busy.Capabilities = iGPU
+	idle := transcodeNode(3, "http://tc-b", nil, 0)
+	idle.Capabilities = iGPU
+	f := newFixture([]*Node{proxyNode(1, "http://proxy-1", nil)}, []*Node{busy, idle})
+
+	if got := f.transcodes.Nodes()[0].PhysicalGPUKeys; got != nil {
+		t.Fatalf("an unscoped slot derived %v, want no key", got)
+	}
+	loads := f.planner.physicalGPULoadScore(f.transcodes.Nodes(), f.now)
+	if got := loads(f.transcodes.Nodes()[1]); got != 0 {
+		t.Fatalf("idle host's shared-GPU load = %d, want 0 (its own jobs only)", got)
+	}
+}
+
+// A node sharing several keys with the same peer must not have that peer's jobs
+// counted once per key; the group is a set of nodes, not of keys.
+func TestSharedGPULoadCountsEachSharerOnce(t *testing.T) {
+	f := newFixture(
+		[]*Node{proxyNode(1, "http://proxy-1", nil)},
+		[]*Node{
+			gpuTranscodeNode(2, "http://tc-a", 1, "GPU-x", "GPU-y"),
+			gpuTranscodeNode(3, "http://tc-b", 0, "GPU-x", "GPU-y"),
+			gpuTranscodeNode(4, "http://tc-c", 0, "GPU-p", "GPU-q"),
+		},
+	)
+	// tc-b's group load is 1 (its own 0 plus tc-a's single job counted once),
+	// tc-c's is 0, so tc-c wins — but only by one job, which double counting
+	// would inflate without changing the winner. The assertion that matters is
+	// the score itself.
+	loads := f.planner.physicalGPULoadScore(f.transcodes.Nodes(), f.now)
+	if got := loads(f.transcodes.Nodes()[1]); got != 1 {
+		t.Fatalf("tc-b shared-GPU load = %d, want 1", got)
+	}
+	if got := loads(f.transcodes.Nodes()[0]); got != 1 {
+		t.Fatalf("tc-a shared-GPU load = %d, want 1", got)
+	}
+	if got := loads(f.transcodes.Nodes()[2]); got != 0 {
+		t.Fatalf("tc-c shared-GPU load = %d, want 0", got)
+	}
+}
+
+// The tie-break only ranks candidates that are already level; a node with fewer
+// jobs still wins outright, even when its GPU is the busier one.
+func TestFewerJobsBeatsAnIdlePhysicalGPU(t *testing.T) {
+	f := newFixture(
+		[]*Node{proxyNode(1, "http://proxy-1", nil)},
+		[]*Node{
+			gpuTranscodeNode(2, "http://tc-a", 5, "GPU-shared"),
+			gpuTranscodeNode(3, "http://tc-b", 0, "GPU-shared"),
+			gpuTranscodeNode(4, "http://tc-c", 1, "GPU-own"),
+		},
+	)
+
+	plan := f.planner.PlanSession("s1", "", true, 0)
+	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://tc-b" {
+		t.Fatalf("expected the least-loaded tc-b, got %+v", plan.TranscodeNode)
+	}
+}
+
+// Soft affinity outranks the tie-break: moving a running session to another
+// node costs a restart, which a shared GPU is not on its own reason enough for.
+func TestSharedGPUTieBreakDoesNotBreakSoftAffinity(t *testing.T) {
+	f := newFixture(
+		[]*Node{proxyNode(1, "http://proxy-1", nil)},
+		[]*Node{
+			gpuTranscodeNode(2, "http://tc-a", 2, "GPU-shared"),
+			gpuTranscodeNode(3, "http://tc-b", 0, "GPU-shared"),
+			gpuTranscodeNode(4, "http://tc-c", 0, "GPU-own"),
+		},
+	)
+
+	plan := f.planner.PlanSession("s1", "http://tc-b", true, 0)
+	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://tc-b" {
+		t.Fatalf("expected affinity to keep tc-b, got %+v", plan.TranscodeNode)
+	}
+}
+
+// A node with no identifiable GPU is a group of itself, so a pool that reports
+// none selects exactly as it did before this rule existed: least jobs, then
+// pool order.
+func TestNodesWithoutGPUKeysKeepPoolOrderOnTies(t *testing.T) {
+	f := newFixture(
+		[]*Node{proxyNode(1, "http://proxy-1", nil)},
+		[]*Node{
+			transcodeNode(2, "http://tc-a", nil, 0),
+			transcodeNode(3, "http://tc-b", nil, 0),
+		},
+	)
+
+	plan := f.planner.PlanSession("s1", "", true, 0)
+	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://tc-a" {
+		t.Fatalf("expected the first pooled node, got %+v", plan.TranscodeNode)
+	}
+}
+
+// Proxies are picked round-robin, and egress is not GPU work: a shared card
+// must not perturb that rotation.
+func TestSharedGPUDoesNotAffectProxySelection(t *testing.T) {
+	busyPeer := proxyNode(1, "http://proxy-a", nil)
+	busyPeer.Capabilities = gpuCapabilities("GPU-shared")
+	busyPeer.ActiveJobs = 9
+	quiet := proxyNode(2, "http://proxy-b", nil)
+	quiet.Capabilities = gpuCapabilities("GPU-shared")
+	f := newFixture([]*Node{busyPeer, quiet}, nil)
+
+	first := f.planner.PlanSession("s1", "", false, 0).ProxyNode
+	second := f.planner.PlanSession("s2", "", false, 0).ProxyNode
+	if first == nil || second == nil || first.URL == second.URL {
+		t.Fatalf("expected round-robin across both proxies, got %+v then %+v", first, second)
+	}
+}
+
+// A proxy URL stored with a trailing slash must still resolve: URLs are
+// normalized where they enter the pool, so the normalized lookup key
+// ProxyNodeByURL builds compares equal. Without the SetNodes normalization the
+// lookup always missed and capability pricing fell back to the cluster policy
+// for exactly the proxies an operator had configured by hand.
+func TestProxyNodeByURLNormalizesStoredAndLookupURLs(t *testing.T) {
+	proxies := NewProxyPool()
+	proxies.SetNodes([]*Node{{ID: 1, Name: "p1", URL: "https://proxy.example.com/", Enabled: true, Healthy: true}})
+	planner := NewPlanner(proxies, NewTranscodePool())
+
+	for _, lookup := range []string{"https://proxy.example.com", "https://proxy.example.com/"} {
+		node, ok := planner.ProxyNodeByURL(lookup)
+		if !ok || node == nil {
+			t.Fatalf("ProxyNodeByURL(%q) = %v, %v; want the pooled node", lookup, node, ok)
+		}
+		if node.ID != 1 {
+			t.Fatalf("ProxyNodeByURL(%q) resolved node %d, want 1", lookup, node.ID)
+		}
+	}
+}
+
+// ClientURL is what every client-facing URL builder joins paths onto: the
+// public URL when set, the backend URL otherwise. The fallback is what keeps
+// every deployment registered before the split — and every flat network —
+// byte-identical.
+func TestClientURLPrefersThePublicURL(t *testing.T) {
+	public := "https://cdn.example.com/"
+	blank := "   "
+	cases := []struct {
+		name string
+		node *Node
+		want string
+	}{
+		{"nil node", nil, ""},
+		{"no public url", &Node{URL: "http://10.0.0.5:8083/"}, "http://10.0.0.5:8083"},
+		{"public url set", &Node{URL: "http://10.0.0.5:8083", PublicURL: &public}, "https://cdn.example.com"},
+		{"blank public url falls back", &Node{URL: "http://10.0.0.5:8083", PublicURL: &blank}, "http://10.0.0.5:8083"},
+	}
+	for _, tc := range cases {
+		if got := tc.node.ClientURL(); got != tc.want {
+			t.Fatalf("%s: ClientURL() = %q, want %q", tc.name, got, tc.want)
+		}
 	}
 }

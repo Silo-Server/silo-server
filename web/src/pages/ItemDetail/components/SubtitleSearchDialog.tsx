@@ -24,6 +24,7 @@ import {
   detectSubtitleLanguage,
   useDownloadSubtitle,
   useDownloadedSubtitles,
+  useSubtitleProviderStatus,
   useUploadSubtitle,
 } from "@/hooks/queries/subtitles";
 import { cn } from "@/lib/utils";
@@ -83,6 +84,9 @@ export default function SubtitleSearchDialog({
   const downloadSubtitleMutation = useDownloadSubtitle();
   const uploadSubtitleMutation = useUploadSubtitle();
   const downloadedQuery = useDownloadedSubtitles(open ? version?.file_id : undefined);
+  const providerStatusQuery = useSubtitleProviderStatus();
+  // Fail open: only an explicit `enabled: false` hides online search.
+  const onlineSearchEnabled = providerStatusQuery.data?.enabled !== false;
   const searchAbortRef = useRef<AbortController | null>(null);
 
   const [selectedLanguage, setSelectedLanguage] = useState("en");
@@ -227,7 +231,7 @@ export default function SubtitleSearchDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl overflow-hidden sm:max-w-3xl">
+      <DialogContent className="flex max-w-3xl flex-col overflow-hidden sm:max-w-3xl">
         <DialogHeader className="min-w-0">
           <DialogTitle>Add Subtitles</DialogTitle>
           <DialogDescription className="truncate">
@@ -237,7 +241,7 @@ export default function SubtitleSearchDialog({
         </DialogHeader>
 
         <TooltipProvider delayDuration={250}>
-          <div className="min-w-0 space-y-4">
+          <div className="overlay-scroll min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto overscroll-contain pr-1">
             {version && (
               <SubtitleUploadForm
                 mediaFileId={version.file_id}
@@ -249,32 +253,34 @@ export default function SubtitleSearchDialog({
               />
             )}
 
-            <div className="space-y-2">
-              <p className="text-sm font-medium">Search online</p>
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <Select value={selectedLanguage} onValueChange={setSelectedLanguage}>
-                  <SelectTrigger className="w-full sm:w-[220px]">
-                    <SelectValue placeholder="Language" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {LANGUAGES.map((language) => (
-                      <SelectItem key={language.code} value={language.code}>
-                        {language.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+            {onlineSearchEnabled && (
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Search online</p>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Select value={selectedLanguage} onValueChange={setSelectedLanguage}>
+                    <SelectTrigger className="w-full sm:w-[220px]">
+                      <SelectValue placeholder="Language" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {LANGUAGES.map((language) => (
+                        <SelectItem key={language.code} value={language.code}>
+                          {language.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
 
-                <Button onClick={handleSearch} disabled={!version || searching}>
-                  {searching ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <Search className="size-4" />
-                  )}
-                  Search
-                </Button>
+                  <Button onClick={handleSearch} disabled={!version || searching}>
+                    {searching ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Search className="size-4" />
+                    )}
+                    Search
+                  </Button>
+                </div>
               </div>
-            </div>
+            )}
 
             {searchError && (
               <div className="rounded-lg bg-rose-500/10 px-3 py-2 text-sm text-rose-700 dark:text-rose-300">
@@ -295,8 +301,8 @@ export default function SubtitleSearchDialog({
               </div>
             )}
 
-            {parsedResults.length > 0 ? (
-              <div className="-mr-1 max-h-[28rem] min-w-0 space-y-2 overflow-x-hidden overflow-y-auto pr-1">
+            {!onlineSearchEnabled ? null : parsedResults.length > 0 ? (
+              <div className="min-w-0 space-y-2">
                 {parsedResults.map(({ result, key, names }) => {
                   const provider = providerInfo[result.provider] ?? {
                     abbr: result.provider.slice(0, 2).toUpperCase(),

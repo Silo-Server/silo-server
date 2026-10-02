@@ -22,6 +22,40 @@ func ListSectionOverrides(db *sql.DB, profileID, scope, libraryID string) ([]use
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = rows.Close() }()
+
+	var overrides []userstore.SectionOverride
+	for rows.Next() {
+		var o userstore.SectionOverride
+		if err := rows.Scan(
+			&o.ID, &o.ProfileID, &o.Scope, &o.LibraryID, &o.SectionID,
+			&o.Position, &o.Hidden, &o.Removed, &o.SectionType, &o.Title,
+			&o.Featured, &o.ItemLimit, &o.Config,
+			&o.IsUserAdded, &o.UserSectionType, &o.UserConfig, &o.UserTitle,
+			&o.CreatedAt, &o.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		overrides = append(overrides, o)
+	}
+	return overrides, rows.Err()
+}
+
+// ListAllSectionOverrides returns all overrides in one account database.
+func ListAllSectionOverrides(db *sql.DB) ([]userstore.SectionOverride, error) {
+	query := `SELECT id, profile_id, scope, COALESCE(library_id,''), COALESCE(section_id,''),
+		position, hidden, removed, COALESCE(section_type,''), COALESCE(title,''),
+		featured, item_limit, COALESCE(config,''),
+		COALESCE(is_user_added, 0), COALESCE(user_section_type,''),
+		COALESCE(user_config,''), COALESCE(user_title,''),
+		created_at, updated_at
+		FROM profile_section_overrides
+		ORDER BY profile_id, scope, COALESCE(library_id,''), COALESCE(position, 999999)`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
 
 	var overrides []userstore.SectionOverride

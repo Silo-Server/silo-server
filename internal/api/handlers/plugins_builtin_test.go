@@ -38,6 +38,8 @@ func builtinTestHandler(pool *pgxpool.Pool) *PluginHandler {
 		repositories:  plugins.NewRepositoryStore(pool),
 		installations: plugins.NewInstallationStore(pool),
 		configs:       plugins.NewRuntimeConfigStore(pool),
+		// Production wires a service; builtin refusals must happen before using it.
+		service: &plugins.Service{},
 	}
 }
 
@@ -162,8 +164,22 @@ func TestBuiltinInstallationMutationsRejected(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			tc.call(rec)
-			if rec.Code < 400 || rec.Code >= 500 {
-				t.Fatalf("status = %d, want 4xx; body=%s", rec.Code, rec.Body.String())
+			if rec.Code != http.StatusConflict {
+				t.Fatalf("status = %d, want 409; body=%s", rec.Code, rec.Body.String())
+			}
+			var response errorResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+				t.Fatalf("decode refusal: %v", err)
+			}
+			if response.Error != "builtin_installation" {
+				t.Fatalf("error = %q, want builtin_installation", response.Error)
+			}
+			installation, err := h.installations.GetByID(t.Context(), builtinID)
+			if err != nil {
+				t.Fatalf("builtin installation must remain: %v", err)
+			}
+			if !installation.IsBuiltin() || !installation.Enabled || installation.UpdatePolicy != "manual" {
+				t.Fatalf("builtin installation changed: %+v", installation)
 			}
 		})
 	}

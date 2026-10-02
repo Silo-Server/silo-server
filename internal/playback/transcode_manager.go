@@ -3,6 +3,7 @@ package playback
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -22,10 +23,11 @@ import (
 // internal/playback does not import internal/config (avoiding an import cycle);
 // each embedding handler adapts its own config snapshot into this shape.
 type TranscodeRuntimeConfig struct {
-	TranscodeDir string
-	FFmpegPath   string
-	HWAccel      string
-	HWDevice     string
+	TranscodeDir            string
+	FFmpegPath              string
+	HWAccel                 string
+	HWDevice                string
+	SegmentRetentionSeconds int
 }
 
 // sessionReconstructor is the SessionManager capability used to re-register a
@@ -40,7 +42,8 @@ type sessionReconstructor interface {
 
 type atomicSessionReconstructor interface {
 	RollbackReconstructedToneMap(expected *Session) bool
-	ConfirmReconstructedToneMap(expected *Session, mode tonemap.Mode) *Session
+	CaptureReconstructedExecution(sessionID string) (*Session, uint64)
+	ConfirmReconstructedExecution(expected *Session, revision uint64, mode tonemap.Mode, encoderHWAccel string) *Session
 }
 
 // TranscodeManager owns the transcode-session lifecycle shared by every playback
@@ -79,9 +82,14 @@ type TranscodeManager struct {
 	// falls through to ResolveToneMapExecutor and StartTranscode.
 	resolveToneMapExecutor func(context.Context, TranscodeOpts) (TranscodeOpts, error)
 	startTranscode         func(context.Context, TranscodeOpts) (*TranscodeSession, error)
+	autoTranscodePipeline  func(context.Context, TranscodeOpts) *AutoTranscodePipeline
 
 	transcodeMu sync.RWMutex
 	transcodes  map[string]*TranscodeSession
+	// shuttingDown is set under transcodeMu before the shutdown drain takes the
+	// live map. Every publication path checks it under the same lock so a late
+	// FFmpeg process cannot escape the drain and leave its cache behind.
+	shuttingDown bool
 
 	// inFlightMu guards reconstructInFlight, the set of session ids whose ffmpeg
 	// is mid-reconstruct. Cleanup unions it with the live map so a dir being
@@ -191,24 +199,40 @@ func (m *TranscodeManager) GetTranscodeSession(sessionID string) *TranscodeSessi
 }
 
 // RegisterTranscodeSession inserts a freshly started transcode session into the
-// live map. Used by the normal (non-reconstruct) start paths.
-func (m *TranscodeManager) RegisterTranscodeSession(sessionID string, ts *TranscodeSession) {
+// live map. It returns false and closes the session when shutdown has begun.
+func (m *TranscodeManager) RegisterTranscodeSession(sessionID string, ts *TranscodeSession) bool {
 	m.transcodeMu.Lock()
+	if m.shuttingDown {
+		m.transcodeMu.Unlock()
+		if ts != nil {
+			_ = ts.Close()
+		}
+		return false
+	}
 	m.transcodes[sessionID] = ts
 	m.transcodeMu.Unlock()
+	return true
 }
 
 // SwapTranscodeSession atomically publishes a prepared successor and returns
-// the predecessor without closing it. Protocol-v3 replans use plan-scoped
+// the predecessor without closing it. The boolean is false when shutdown has
+// begun; in that case the successor is closed. Protocol-v3 replans use plan-scoped
 // output directories, so the caller can commit state first, publish the new
 // process, and only then reap the old process without either process writing to
 // the other's directory.
-func (m *TranscodeManager) SwapTranscodeSession(sessionID string, successor *TranscodeSession) *TranscodeSession {
+func (m *TranscodeManager) SwapTranscodeSession(sessionID string, successor *TranscodeSession) (*TranscodeSession, bool) {
 	m.transcodeMu.Lock()
+	if m.shuttingDown {
+		m.transcodeMu.Unlock()
+		if successor != nil {
+			_ = successor.Close()
+		}
+		return nil, false
+	}
 	predecessor := m.transcodes[sessionID]
 	m.transcodes[sessionID] = successor
 	m.transcodeMu.Unlock()
-	return predecessor
+	return predecessor, true
 }
 
 // SwapTranscodeSessionIf publishes successor only while the live map still
@@ -220,6 +244,13 @@ func (m *TranscodeManager) SwapTranscodeSessionIf(
 	successor *TranscodeSession,
 ) bool {
 	m.transcodeMu.Lock()
+	if m.shuttingDown {
+		m.transcodeMu.Unlock()
+		if successor != nil {
+			_ = successor.Close()
+		}
+		return false
+	}
 	defer m.transcodeMu.Unlock()
 	if m.transcodes[sessionID] != expected {
 		return false
@@ -232,7 +263,16 @@ func (m *TranscodeManager) SwapTranscodeSessionIf(
 // leaves the local live-map entry untouched for an atomic remote-to-local v3
 // replacement.
 func (m *TranscodeManager) StopRemoteTranscode(sessionID, transcodeNodeURL string) {
-	m.deleteRemoteTranscode(sessionID, transcodeNodeURL)
+	if err := m.deleteRemoteTranscode(context.Background(), sessionID, transcodeNodeURL); err != nil {
+		slog.Warn("remote transcode delete failed", "error", err, "session", sessionID, "node", transcodeNodeURL, "playback_session_id", sessionID)
+	}
+}
+
+// CancelRemoteTranscode synchronously confirms that a remote process no longer
+// exists. User-visible stop paths use this before removing the playback session
+// so a node partition leaves a live session the caller can retry stopping.
+func (m *TranscodeManager) CancelRemoteTranscode(ctx context.Context, sessionID, transcodeNodeURL string) error {
+	return m.deleteRemoteTranscode(ctx, sessionID, transcodeNodeURL)
 }
 
 // LockSessionLifecycle acquires the per-session lifecycle mutex and returns a
@@ -279,6 +319,26 @@ func (m *TranscodeManager) RestartSessionLocked(ctx context.Context, sessionID s
 	return m.restartSessionLocked(sessionID, ts, func() error {
 		return ts.Restart(ctx, seekSeconds, startSegment)
 	})
+}
+
+// RestartSegmentLocked resolves and restarts one missing HLS segment under the
+// per-session lifecycle lock. Copy-video resolution reads the current manifest,
+// so keeping resolution and restart inside the same lock preserves the mapping
+// it observed.
+func (m *TranscodeManager) RestartSegmentLocked(
+	ctx context.Context,
+	sessionID string,
+	ts *TranscodeSession,
+	segNum int,
+) (SegmentRecoveryTarget, bool, error) {
+	var target SegmentRecoveryTarget
+	var ok bool
+	err := m.restartSessionLocked(sessionID, ts, func() error {
+		var restartErr error
+		target, ok, restartErr = ts.RestartSegment(ctx, segNum)
+		return restartErr
+	})
+	return target, ok, err
 }
 
 func (m *TranscodeManager) restartSessionLocked(sessionID string, ts *TranscodeSession, restart func() error) error {
@@ -487,6 +547,9 @@ func (m *TranscodeManager) doLoadOrReconstructTranscode(
 	if !ok {
 		return transcodeLoadResult{status: SessionLoadFailed}
 	}
+	// Capture before reading the snapshot so a concurrent replacement cannot
+	// authorize this reconstruction to publish stale facts onto its successor.
+	expected, revision := atomicSessions.CaptureReconstructedExecution(sessionID)
 	session, err := getSession(sessionID)
 	var inserted *Session
 	if err != nil {
@@ -501,12 +564,15 @@ func (m *TranscodeManager) doLoadOrReconstructTranscode(
 		if !ok || session == nil {
 			return transcodeLoadResult{status: SessionMissing}
 		}
+		if inserted != nil {
+			expected, revision = inserted, 0
+		}
 	}
 	if requestUserID != 0 && session.UserID != requestUserID {
 		return transcodeLoadResult{status: SessionForbidden}
 	}
 	if runtime := m.GetTranscodeSession(sessionID); runtime != nil {
-		return m.completeTranscodeLoad(atomicSessions, getSession, session, inserted, runtime)
+		return m.completeTranscodeLoad(atomicSessions, getSession, session, expected, revision, runtime)
 	}
 	// Remote transcodes keep running on their owning node; only the playback
 	// Session needs reconstructing on this API process. A reconstructed session
@@ -514,7 +580,7 @@ func (m *TranscodeManager) doLoadOrReconstructTranscode(
 	// defers it so the live executor's confirmation wins when a runtime exists.
 	if session.TranscodeNodeURL != "" {
 		if inserted != nil {
-			current := atomicSessions.ConfirmReconstructedToneMap(inserted, card.ToneMapMode)
+			current := atomicSessions.ConfirmReconstructedExecution(inserted, 0, card.ToneMapMode, card.EffectiveEncoderHWAccel())
 			if current == nil {
 				return transcodeLoadResult{status: SessionMissing}
 			}
@@ -524,7 +590,7 @@ func (m *TranscodeManager) doLoadOrReconstructTranscode(
 	}
 	if session.PlayMethod != PlayTranscode {
 		if inserted != nil {
-			atomicSessions.ConfirmReconstructedToneMap(inserted, card.ToneMapMode)
+			atomicSessions.ConfirmReconstructedExecution(inserted, 0, card.ToneMapMode, card.EffectiveEncoderHWAccel())
 		}
 		return transcodeLoadResult{session: session, status: SessionLoaded}
 	}
@@ -539,17 +605,19 @@ func (m *TranscodeManager) doLoadOrReconstructTranscode(
 		}
 		return transcodeLoadResult{status: SessionUnavailable, err: reconstructErr}
 	}
-	return m.completeTranscodeLoad(atomicSessions, getSession, session, inserted, runtime)
+	return m.completeTranscodeLoad(atomicSessions, getSession, session, expected, revision, runtime)
 }
 
 func (m *TranscodeManager) completeTranscodeLoad(
 	atomicSessions atomicSessionReconstructor,
 	getSession func(string) (*Session, error),
-	session, inserted *Session,
+	session, expected *Session,
+	revision uint64,
 	runtime *TranscodeSession,
 ) transcodeLoadResult {
-	if inserted != nil {
-		current := atomicSessions.ConfirmReconstructedToneMap(inserted, runtime.Opts().ToneMapMode)
+	if expected != nil {
+		opts := runtime.Opts()
+		current := atomicSessions.ConfirmReconstructedExecution(expected, revision, opts.ToneMapMode, opts.EffectiveEncoderHWAccel())
 		if current == nil {
 			m.CloseTranscodeSessionIf(session.ID, runtime, "")
 			return transcodeLoadResult{status: SessionMissing}
@@ -583,6 +651,11 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 		// a forged or stale request.
 		return nil, nil, false
 	}
+	if err := ValidateCopyFMP4RecipeCard(card); err != nil {
+		slog.WarnContext(ctx, "transcode reconstruct copy recipe rejected", "component", "playback",
+			"session", sessionID, "playback_session_id", sessionID, "error", err)
+		return nil, nil, false
+	}
 	// Re-bind ownership to the card owner. A zero caller is allowed (the authless
 	// transcode delivery routes — HLS master.m3u8 / segment — treat the session
 	// UUID as the bearer credential when auth is optional); a non-zero caller that
@@ -598,7 +671,7 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 	// An empty PlayMethod is a card written before direct/remux were
 	// reconstructable; treat it as a transcode (the only kind then persisted).
 	method := card.PlayMethod
-	if method == "" {
+	if method == "" || method == playMethodCopyFMP4V1 {
 		method = PlayTranscode
 	}
 
@@ -616,6 +689,13 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 		BasePlayMethod:         method,
 		TranscodeNodeURL:       card.TranscodeNodeURL,
 		TranscodeTransportID:   card.TranscodeTransportID,
+		RoutingNetworkProvider: card.RoutingNetworkProvider,
+		StreamLocation:         card.StreamLocation,
+		RoutingWorkload:        card.RoutingWorkload,
+		RoutingExecution:       card.RoutingExecution,
+		RoutingExecutionNodeID: card.RoutingExecutionNodeID,
+		RoutingEgress:          card.RoutingEgress,
+		RoutingEgressNodeID:    card.RoutingEgressNodeID,
 		AudioTrackIndex:        card.AudioTrackIndex,
 		TranscodeAudio:         card.TranscodeAudio,
 		RemuxDVMode:            card.RemuxDVMode,
@@ -626,7 +706,7 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 		TargetAudioChannels:    card.TargetAudioChannels,
 		TargetAudioBitrateKbps: card.TargetAudioBitrateKbps,
 		TargetBitrateKbps:      card.TargetBitrateKbps,
-		TranscodeHWAccel:       card.HWAccel,
+		TranscodeHWAccel:       card.EffectiveEncoderHWAccel(),
 		ToneMapMode:            toneMapMode,
 		// Client metadata survives the restart so the admin views keep the
 		// client label and Jellyfin identification for the session's lifetime.
@@ -641,6 +721,12 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 		SubtitleTrackIndex: card.SubtitleTrackIndex,
 		SubtitleBurnIn:     card.SubtitleBurnIn,
 		SegmentDuration:    card.SegmentDuration,
+	}
+	if card.IsTranscodeRecipe() {
+		s.OutputContainer = HLSOutputContainer(card.TranscodeOpts("", "", nil))
+		s.OutputProtocol = OutputProtocolHLS
+	} else if method == PlayRemux {
+		s.OutputContainer, s.OutputProtocol = OutputContainerFMP4, OutputProtocolHTTP
 	}
 	// Enforce the same per-user concurrency caps a fresh StartSession would, so a
 	// replayed token cannot reconstruct past the user's limit. Reconstructing the
@@ -780,8 +866,11 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 	// direct/remux card ID cannot accidentally spawn an encode. An empty
 	// PlayMethod is back-compat for a token minted before the discriminator
 	// (transcode).
-	if card.PlayMethod != "" && card.PlayMethod != PlayTranscode {
+	if !card.IsTranscodeRecipe() {
 		return nil, nil
+	}
+	if err := ValidateCopyFMP4RecipeCard(card); err != nil {
+		return nil, err
 	}
 
 	// Mark in-flight for the whole rebuild so a concurrent cleanup never reaps the
@@ -800,6 +889,7 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 	// operator config change applies to reconstructed sessions too.
 	opts.HWAccel = cfg.HWAccel
 	opts.HWDevice = cfg.HWDevice
+	opts.SegmentRetentionSeconds = cfg.SegmentRetentionSeconds
 
 	// Serialize before taking a global pacing slot. A reconstruct stalled behind
 	// another start for this session must not consume capacity needed by unrelated
@@ -845,7 +935,15 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 	if startTranscode == nil {
 		startTranscode = StartTranscode
 	}
-	transcodeSession, err := startTranscode(ctx, opts)
+	newPipeline := m.autoTranscodePipeline
+	if newPipeline == nil {
+		newPipeline = NewAutoTranscodePipeline
+	}
+	// Under hw_accel=auto a reconstruct walks the same safer paths as a fresh
+	// start, keeping a slow process rather than duplicating it. Every other
+	// recipe starts once without waiting, as segment requests already wait for
+	// a reconstructed process.
+	transcodeSession, err := StartReconstructTranscode(ctx, newPipeline(ctx, opts), TranscodeStartup{Start: startTranscode})
 	if err != nil {
 		slog.ErrorContext(ctx, "reconstruct transcode start failed", "component", "playback", "error", err, "session", sessionID, "playback_session_id", sessionID)
 		return nil, err
@@ -856,6 +954,11 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 	// belt-and-braces, closing only the duplicate ffmpeg process (never the shared
 	// output dir the winner serves) on the should-be-impossible race.
 	m.transcodeMu.Lock()
+	if m.shuttingDown {
+		m.transcodeMu.Unlock()
+		_ = transcodeSession.Close()
+		return nil, context.Canceled
+	}
 	if existing := m.transcodes[sessionID]; existing != nil {
 		m.transcodeMu.Unlock()
 		_ = transcodeSession.CloseProcess()
@@ -961,7 +1064,33 @@ func (m *TranscodeManager) CloseTranscodeSession(sessionID, transcodeNodeURL str
 		_ = session.Close()
 	}
 
-	m.deleteRemoteTranscode(sessionID, transcodeNodeURL)
+	m.StopRemoteTranscode(sessionID, transcodeNodeURL)
+}
+
+// StartShutdownCleanup closes every local transcode when ctx is canceled and
+// returns a channel closed after cleanup finishes.
+func (m *TranscodeManager) StartShutdownCleanup(ctx context.Context) <-chan struct{} {
+	done := make(chan struct{})
+	if m == nil || ctx == nil {
+		close(done)
+		return done
+	}
+	go func() {
+		defer close(done)
+		<-ctx.Done()
+
+		m.transcodeMu.Lock()
+		m.shuttingDown = true
+		transcodes := m.transcodes
+		m.transcodes = make(map[string]*TranscodeSession)
+		m.transcodeMu.Unlock()
+		for _, session := range transcodes {
+			if session != nil {
+				_ = session.Close()
+			}
+		}
+	}()
+	return done
 }
 
 // CloseTranscodeSessionIf tears down a transcode session only when the live map
@@ -994,36 +1123,39 @@ func (m *TranscodeManager) CloseTranscodeSessionIf(sessionID string, expected *T
 		_ = expected.Close()
 	}
 
-	m.deleteRemoteTranscode(sessionID, transcodeNodeURL)
+	m.StopRemoteTranscode(sessionID, transcodeNodeURL)
 	return true
 }
 
-// deleteRemoteTranscode sends DELETE to the assigned transcode node if any
-// (synchronous with timeout). A no-op for local/integrated sessions.
-func (m *TranscodeManager) deleteRemoteTranscode(sessionID, transcodeNodeURL string) {
-	if transcodeNodeURL != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		deleteURL := transcodeNodeURL + "/transcode/" + sessionID
-		req, err := http.NewRequestWithContext(ctx, http.MethodDelete, deleteURL, nil)
-		if err != nil {
-			slog.Error("remote transcode delete: build request", "error", err, "session", sessionID, "playback_session_id", sessionID)
-			return
-		}
-		req.Header.Set("Authorization", "Bearer "+m.jwtSecret())
-
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			slog.Warn("remote transcode delete failed", "error", err, "session", sessionID, "node", transcodeNodeURL, "playback_session_id", sessionID)
-			return
-		}
-		_ = resp.Body.Close()
-		if resp.StatusCode >= http.StatusMultipleChoices {
-			slog.Warn("remote transcode delete returned non-success status",
-				"status", resp.StatusCode, "session", sessionID, "node", transcodeNodeURL, "playback_session_id", sessionID)
-		}
+// deleteRemoteTranscode sends DELETE to the assigned transcode node with a
+// bounded timeout. A missing process is already canceled and therefore
+// succeeds; other transport and HTTP failures remain retryable by the caller.
+func (m *TranscodeManager) deleteRemoteTranscode(ctx context.Context, sessionID, transcodeNodeURL string) error {
+	if transcodeNodeURL == "" {
+		return nil
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+
+	deleteURL := transcodeNodeURL + "/transcode/" + sessionID
+	req, err := http.NewRequestWithContext(deleteCtx, http.MethodDelete, deleteURL, nil)
+	if err != nil {
+		return fmt.Errorf("build remote transcode delete request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+m.jwtSecret())
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("send remote transcode delete: %w", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode >= http.StatusMultipleChoices && resp.StatusCode != http.StatusNotFound {
+		return fmt.Errorf("remote transcode delete returned status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // CleanupOrphanedTranscodes removes stale per-session temp directories for

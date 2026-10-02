@@ -736,11 +736,59 @@ func TestMeilisearchProviderInvalidatesStateCacheOnSearchFailure(t *testing.T) {
 			t.Fatalf("Search %d should surface the fallback error in this setup", i)
 		}
 	}
-	if store.getStateCalls != 2 {
-		t.Fatalf("getStateCalls = %d, want 2 (cache invalidated after failed search)", store.getStateCalls)
+	if store.getStateCalls != 3 {
+		t.Fatalf("getStateCalls = %d, want 3 (each missing-index failure refreshes state immediately)", store.getStateCalls)
 	}
 	if reason, blocked := provider.circuitBlocked(time.Now()); blocked {
 		t.Fatalf("HTTP 404 must not trip the circuit, got open circuit: %s", reason)
+	}
+}
+
+func TestMeilisearchProviderRetriesNewActiveIndexAfterSwap(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/indexes/old-index/search" {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"Index old-index not found.","code":"index_not_found"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"hits":[],"estimatedTotalHits":0}`))
+	}))
+	defer server.Close()
+
+	client, err := newMeilisearchClient(server.URL, "", time.Second)
+	if err != nil {
+		t.Fatalf("newMeilisearchClient: %v", err)
+	}
+	schemaVersion := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, false, false)
+	store := &countingMeilisearchIndexStateStore{state: SearchIndexState{
+		ActiveIndexUID: "new-index",
+		SchemaVersion:  schemaVersion,
+	}}
+	provider := &MeilisearchSearchProvider{
+		stateRepo:     store,
+		fallback:      &PostgresSearchProvider{},
+		client:        client,
+		config:        MeilisearchProviderConfig{MatchingStrategy: DefaultMeilisearchMatchingStrategy, Embedder: DefaultMeilisearchEmbedder},
+		cachedState:   SearchIndexState{ActiveIndexUID: "old-index", SchemaVersion: schemaVersion},
+		stateCachedAt: time.Now(),
+	}
+
+	result, err := provider.Search(t.Context(), CatalogSearchRequest{Query: "space opera", Limit: 10})
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	wantPaths := []string{"/indexes/old-index/search", "/indexes/new-index/search"}
+	if !reflect.DeepEqual(paths, wantPaths) {
+		t.Fatalf("Meilisearch paths = %#v, want %#v", paths, wantPaths)
+	}
+	if store.getStateCalls != 1 {
+		t.Fatalf("state refresh calls = %d, want 1", store.getStateCalls)
+	}
+	if result.Provider != SearchProviderMeilisearch {
+		t.Fatalf("provider = %q, want Meilisearch", result.Provider)
 	}
 }
 
@@ -798,6 +846,59 @@ func TestMeilisearchProviderUsesActiveIndexWhenPendingUpdatesExist(t *testing.T)
 	}
 	if result.IndexPendingEvents != 7 {
 		t.Fatalf("IndexPendingEvents = %d, want 7", result.IndexPendingEvents)
+	}
+}
+
+func TestMeilisearchProviderUsesStaleVectorlessIndexForKeywordSearch(t *testing.T) {
+	var searchRequest meilisearchSearchRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/indexes/search-index/search" {
+			t.Fatalf("unexpected Meilisearch request %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&searchRequest); err != nil {
+			t.Fatalf("decode search request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"hits":[],"estimatedTotalHits":0}`))
+	}))
+	defer server.Close()
+
+	client, err := newMeilisearchClient(server.URL, "", time.Second)
+	if err != nil {
+		t.Fatalf("newMeilisearchClient: %v", err)
+	}
+	vectorizer := &fakeCatalogSearchVectorizer{vector: []float32{0.1, 0.2}}
+	provider := &MeilisearchSearchProvider{
+		stateRepo: fakeMeilisearchIndexStateStore{state: SearchIndexState{
+			ActiveIndexUID: "search-index",
+			SchemaVersion:  catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, false, false),
+		}},
+		fallback: &PostgresSearchProvider{},
+		client:   client,
+		config: MeilisearchProviderConfig{
+			MatchingStrategy: DefaultMeilisearchMatchingStrategy,
+			Embedder:         DefaultMeilisearchEmbedder,
+			SemanticEnabled:  true,
+			SemanticRatio:    0.5,
+			Vectorizer:       vectorizer,
+		},
+	}
+
+	result, err := provider.Search(t.Context(), CatalogSearchRequest{Query: "space opera", Limit: 10})
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	if vectorizer.calls != 0 {
+		t.Fatalf("vectorizer calls = %d, want 0 while the semantic index rebuilds", vectorizer.calls)
+	}
+	if searchRequest.Hybrid != nil || len(searchRequest.Vector) != 0 {
+		t.Fatalf("stale index request used semantic search: hybrid=%#v vector=%v", searchRequest.Hybrid, searchRequest.Vector)
+	}
+	if result.Provider != SearchProviderMeilisearch || result.Mode != "keyword" || result.SemanticUsed {
+		t.Fatalf("result diagnostics = provider %q, mode %q, semantic %t", result.Provider, result.Mode, result.SemanticUsed)
+	}
+	if !strings.Contains(result.FallbackReason, "rebuild required") {
+		t.Fatalf("fallback reason = %q, want rebuild diagnostic", result.FallbackReason)
 	}
 }
 
@@ -869,6 +970,37 @@ func TestMeilisearchSchemaVersionChangesWithSemanticEnabled(t *testing.T) {
 	enabledVersion := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, true, false)
 	if disabledVersion == enabledVersion {
 		t.Fatal("schema version should change when semantic search is toggled")
+	}
+}
+
+func TestMeilisearchIndexCompatibility(t *testing.T) {
+	itemTypes := []string{"movie", "series"}
+	semanticOff := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, itemTypes, false, false)
+	semanticOn := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, itemTypes, true, false)
+	tests := []struct {
+		name          string
+		activeVersion int
+		embedder      string
+		itemTypes     []string
+		semantic      bool
+		binary        bool
+		want          catalogSearchIndexCompatibility
+	}{
+		{name: "current", activeVersion: semanticOn, embedder: DefaultMeilisearchEmbedder, itemTypes: itemTypes, semantic: true, want: catalogSearchIndexCurrent},
+		{name: "semantic enablement", activeVersion: semanticOff, embedder: DefaultMeilisearchEmbedder, itemTypes: itemTypes, semantic: true, want: catalogSearchIndexKeywordOnly},
+		{name: "semantic disablement", activeVersion: semanticOn, embedder: DefaultMeilisearchEmbedder, itemTypes: itemTypes, want: catalogSearchIndexKeywordOnly},
+		{name: "binary setting change", activeVersion: semanticOn, embedder: DefaultMeilisearchEmbedder, itemTypes: itemTypes, semantic: true, binary: true, want: catalogSearchIndexKeywordOnly},
+		{name: "different embedder", activeVersion: semanticOff, embedder: "other_embedder", itemTypes: itemTypes, semantic: true, want: catalogSearchIndexIncompatible},
+		{name: "different media scope", activeVersion: semanticOff, embedder: DefaultMeilisearchEmbedder, itemTypes: []string{"movie"}, semantic: true, want: catalogSearchIndexIncompatible},
+		{name: "unknown schema", activeVersion: 0, embedder: DefaultMeilisearchEmbedder, itemTypes: itemTypes, semantic: true, want: catalogSearchIndexIncompatible},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := catalogSearchMeilisearchIndexCompatibility(tc.activeVersion, tc.embedder, tc.itemTypes, tc.semantic, tc.binary)
+			if got != tc.want {
+				t.Fatalf("compatibility = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

@@ -1,10 +1,12 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 import type { PlayerAudioTrack, PlayerSubtitleInfo } from "../types";
-import { playerFetch, PlayerFetchError } from "../player-fetch";
-import { LANGUAGES, getLanguageName } from "../utils/languageNames";
+import { playerV2 } from "../player-v2";
+import { PlayerFetchError } from "../player-fetch";
+import { LANGUAGES, getLanguageName, normalizeLanguageCode } from "../utils/languageNames";
+import { isSubtitleFormatLabel } from "../utils/subtitleCodecs";
 import {
   buildSubtitleTranslateRequest,
   isTranslatableSource,
@@ -13,6 +15,7 @@ import {
 import { QUOTA_PERIOD_WINDOW_LABELS } from "@/lib/quotaPeriods";
 
 interface SubtitleTranslateModalProps {
+  preferredSubtitleLanguage?: string | null;
   mediaFileId: number;
   playerConfig: PlayerConfig;
   tracks: PlayerSubtitleInfo[];
@@ -20,15 +23,64 @@ interface SubtitleTranslateModalProps {
   translateEnabled?: boolean;
   transcribeEnabled?: boolean;
   isOpen: boolean;
+  onSubtitleJobAccepted?: (jobId: string) => void;
   sessionId?: string;
   getStartPosition?: () => number;
   onClose: () => void;
 }
 
-function sourceLabel(track: PlayerSubtitleInfo): string {
+// titleNames reports whether a track title already states a flag, so the flag
+// is not repeated. A negated mention ("Non-forced", "Not SDH") does not count.
+function titleNames(title: string, words: string): boolean {
+  return (
+    new RegExp(`\\b(?:${words})\\b`, "i").test(title) &&
+    !new RegExp(`\\b(?:non|not)[\\s-]*(?:${words})\\b`, "i").test(title)
+  );
+}
+
+// sourceLabel names a translation source so full, SDH and forced tracks in one
+// language can be told apart: the track title when it says more than the
+// language or format (as the subtitle menu shows it), then Forced and SDH when
+// the title does not already say so, then where the track comes from.
+export function sourceLabel(track: PlayerSubtitleInfo): string {
   const lang = getLanguageName(track.language) || track.language || "Unknown";
-  const origin = track.source ? ` · ${track.source}` : "";
-  return `${lang}${origin}`;
+  const title = track.label?.trim() ?? "";
+  const hasDetail =
+    title !== "" &&
+    title !== track.language &&
+    title !== lang &&
+    !isSubtitleFormatLabel(title, track.codec);
+  const parts = [lang];
+  if (hasDetail) parts.push(title);
+  if (track.forced && !titleNames(title, "forced")) parts.push("Forced");
+  if (track.hearing_impaired && !titleNames(title, "sdh|cc|hearing")) parts.push("SDH");
+  if (track.source) parts.push(track.source);
+  return parts.join(" · ");
+}
+
+// sourceLabels labels every source track so each option in the picker is
+// distinct. Tracks whose labels would read the same get their track number,
+// and a numbered label that still matches another option gets a counter.
+export function sourceLabels(tracks: PlayerSubtitleInfo[]): Map<number, string> {
+  const base = tracks.map((track) => ({ index: track.index, label: sourceLabel(track) }));
+  const counts = new Map<string, number>();
+  for (const { label } of base) counts.set(label, (counts.get(label) ?? 0) + 1);
+  const used = new Set(
+    base.filter(({ label }) => counts.get(label) === 1).map(({ label }) => label),
+  );
+  const labels = new Map<number, string>();
+  for (const { index, label } of base) {
+    if (counts.get(label) === 1) {
+      labels.set(index, label);
+      continue;
+    }
+    const numbered = `${label} · track ${index + 1}`;
+    let candidate = numbered;
+    for (let n = 2; used.has(candidate); n++) candidate = `${numbered} (${n})`;
+    used.add(candidate);
+    labels.set(index, candidate);
+  }
+  return labels;
 }
 
 function audioLabel(track: PlayerAudioTrack, i: number): string {
@@ -48,6 +100,7 @@ interface TranscribeQuota {
 }
 
 export function SubtitleTranslateModal({
+  preferredSubtitleLanguage,
   mediaFileId,
   playerConfig,
   tracks,
@@ -55,6 +108,7 @@ export function SubtitleTranslateModal({
   translateEnabled = true,
   transcribeEnabled = false,
   isOpen,
+  onSubtitleJobAccepted,
   sessionId,
   getStartPosition,
   onClose,
@@ -62,6 +116,7 @@ export function SubtitleTranslateModal({
   // Only offer sources the server can actually translate (excludes live tracks,
   // bitmap embedded tracks, and ASS/non-text external/downloaded tracks).
   const sourceTracks = useMemo(() => tracks.filter(isTranslatableSource), [tracks]);
+  const sourceOptionLabels = useMemo(() => sourceLabels(sourceTracks), [sourceTracks]);
   const canTranslate = translateEnabled && sourceTracks.length > 0;
   const canTranscribe = transcribeEnabled && (audioTracks?.length ?? 0) > 0;
   // Subtitle translation is the default; generating from audio takes over when
@@ -69,7 +124,10 @@ export function SubtitleTranslateModal({
   const [mode, setMode] = useState<SubtitleTranslateMode>(canTranslate ? "subtitles" : "audio");
   const [sourceIndex, setSourceIndex] = useState<number | null>(null);
   const [audioIndex, setAudioIndex] = useState(0);
-  const [targetLang, setTargetLang] = useState("en");
+  const [targetLang, setTargetLang] = useState(() => {
+    const preferred = normalizeLanguageCode(preferredSubtitleLanguage);
+    return LANGUAGES.some((language) => language.code === preferred) ? preferred : "en";
+  });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [quota, setQuota] = useState<TranscribeQuota | null>(null);
@@ -78,13 +136,52 @@ export function SubtitleTranslateModal({
   const quotaExhausted = quota !== null && quota.remaining <= 0;
   const quotaPeriodLabel = quota ? (QUOTA_PERIOD_WINDOW_LABELS[quota.period] ?? quota.period) : "";
 
-  // Best-effort: a failed lookup just hides the counter — the server still
-  // enforces the quota.
+  const generation = useRef(0);
+  const inFlight = useRef(false);
+  const currentProps = useRef({ mediaFileId, sessionId, playerConfig, isOpen });
+  currentProps.current = { mediaFileId, sessionId, playerConfig, isOpen };
+  useEffect(() => {
+    generation.current++;
+    inFlight.current = false;
+    setSubmitting(false);
+    setError(null);
+    setQuota(null);
+    return () => {
+      generation.current++;
+    };
+  }, [mediaFileId, sessionId, playerConfig, isOpen]);
+
+  const captureCurrent = useCallback(() => {
+    const capturedGeneration = generation.current;
+    const token = playerConfig.getAccessToken();
+    const profile = playerConfig.getProfileId();
+    const pin = playerConfig.getProfileToken?.();
+    return () =>
+      capturedGeneration === generation.current &&
+      currentProps.current.isOpen &&
+      currentProps.current.mediaFileId === mediaFileId &&
+      currentProps.current.sessionId === sessionId &&
+      currentProps.current.playerConfig === playerConfig &&
+      token === playerConfig.getAccessToken() &&
+      profile === playerConfig.getProfileId() &&
+      pin === playerConfig.getProfileToken?.();
+  }, [playerConfig, mediaFileId, sessionId]);
+  const handleClose = useCallback(() => {
+    generation.current++;
+    onClose();
+  }, [onClose]);
+
+  // A failed or stale lookup cannot overwrite another viewer's quota display.
   const refreshQuota = useCallback(() => {
-    playerFetch<TranscribeQuota>(playerConfig, "/subtitles/ai/quota")
-      .then((q) => setQuota(q?.limited ? q : null))
-      .catch(() => setQuota(null));
-  }, [playerConfig]);
+    const current = captureCurrent();
+    playerV2(playerConfig, "GET /api/v2/subtitles/ai/quota", {})
+      .then((q) => {
+        if (current()) setQuota(q?.limited ? q : null);
+      })
+      .catch(() => {
+        if (current()) setQuota(null);
+      });
+  }, [playerConfig, captureCurrent]);
 
   // Refresh the transcription quota each time the modal opens, so the user
   // sees how many jobs they have left before starting one.
@@ -96,15 +193,18 @@ export function SubtitleTranslateModal({
   useEffect(() => {
     if (!isOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") handleClose();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [isOpen, onClose]);
+  }, [isOpen, handleClose]);
 
   const handleTranslate = useCallback(async () => {
+    if (inFlight.current || !isOpen) return;
     const fromAudio = mode === "audio";
     if (!fromAudio && effectiveSourceIndex === null) return;
+    inFlight.current = true;
+    const current = captureCurrent();
     setSubmitting(true);
     setError(null);
     try {
@@ -119,25 +219,30 @@ export function SubtitleTranslateModal({
         sessionId,
         startPosition: getStartPosition?.() ?? 0,
       });
-      const res = await playerFetch<{ job?: { status?: string } }>(
-        playerConfig,
-        "/subtitles/ai/translate",
-        { method: "POST", body: JSON.stringify(body) },
-      );
-      // A request that collapses onto an already-running job (e.g. after a
-      // reload, or a second viewer) won't get its own live stream — tell the
-      // user it's underway; it'll appear via the subtitle-ready refresh.
-      if (res?.job?.status === "running") {
-        toast.info("A job for this track is already in progress — it'll appear when it's ready.");
+      const res = await playerV2(playerConfig, "POST /api/v2/subtitles/ai/translate", {
+        body: { ...body, media_file_id: String(mediaFileId), kind: body.kind ?? "translate" },
+      });
+      if (!current()) return;
+      if (
+        !res ||
+        !/^[1-9][0-9]*$/.test(res.job.id) ||
+        res.job.media_file_id !== String(mediaFileId) ||
+        res.job.kind !== (body.kind ?? "translate") ||
+        res.job.source_index !== body.source_index
+      ) {
+        throw new Error("Subtitle processing returned an invalid job.");
       }
-      // Otherwise the player takes over: it pauses, streams cues in as they're
-      // generated, then resumes once your position is covered.
-      onClose();
+      onSubtitleJobAccepted?.(res.job.id);
+      if (!res.live_delivery_attached) {
+        toast.info("Your subtitle job is underway. The track will appear when it's ready.");
+      }
+      handleClose();
     } catch (err) {
+      if (!current()) return;
       // A quota rejection means the cached counter was stale (e.g. another
       // device used the last slot) — refresh it so the banner and the
       // disabled Generate button match the error we're about to show.
-      if (err instanceof PlayerFetchError && err.code === "quota_exceeded") {
+      if (err instanceof PlayerFetchError && err.code === "rate_limited") {
         refreshQuota();
       }
       setError(
@@ -148,7 +253,10 @@ export function SubtitleTranslateModal({
             : "Couldn't start translation.",
       );
     } finally {
-      setSubmitting(false);
+      if (current()) {
+        inFlight.current = false;
+        setSubmitting(false);
+      }
     }
   }, [
     mode,
@@ -161,8 +269,11 @@ export function SubtitleTranslateModal({
     sessionId,
     getStartPosition,
     playerConfig,
-    onClose,
+    handleClose,
+    captureCurrent,
+    isOpen,
     refreshQuota,
+    onSubtitleJobAccepted,
   ]);
 
   if (!isOpen) return null;
@@ -170,7 +281,7 @@ export function SubtitleTranslateModal({
   const modal = (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
-      onClick={onClose}
+      onClick={handleClose}
       role="dialog"
       aria-modal="true"
       aria-label="Translate subtitles with AI"
@@ -186,7 +297,7 @@ export function SubtitleTranslateModal({
           <button
             type="button"
             className="rounded text-white/60 hover:text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
-            onClick={onClose}
+            onClick={handleClose}
             aria-label="Close"
           >
             ✕
@@ -238,7 +349,7 @@ export function SubtitleTranslateModal({
                   >
                     {sourceTracks.map((track) => (
                       <option key={track.index} value={track.index}>
-                        {sourceLabel(track)}
+                        {sourceOptionLabels.get(track.index)}
                       </option>
                     ))}
                   </select>
@@ -301,7 +412,7 @@ export function SubtitleTranslateModal({
                 <button
                   type="button"
                   className="rounded px-3 py-1.5 text-sm text-white/60 hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
-                  onClick={onClose}
+                  onClick={handleClose}
                 >
                   Cancel
                 </button>

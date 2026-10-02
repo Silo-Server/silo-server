@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -124,18 +123,13 @@ func (h *EbookReaderHandler) HandleReadFile(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	file, err := h.FileAuthorizer.Authorize(r, fileID)
+	file, err := h.ResolveReaderFile(r.Context(), contentID, fileID, requestAccessFilter(r))
 	if err != nil {
 		h.writeReadError(w, err)
 		return
 	}
-	if file == nil || file.ContentID != contentID || !isEbookFile(file) {
-		writeError(w, http.StatusNotFound, "not_found", "Ebook file not found")
-		return
-	}
-	attachTransfer(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), fileID)
 
-	if err := h.serveEbook(w, r, file); err != nil {
+	if err := h.ServeReaderFile(w, r, file); err != nil {
 		if errors.Is(err, catalog.ErrItemNotFound) {
 			writeError(w, http.StatusNotFound, "not_found", "Ebook file not found")
 			return
@@ -220,14 +214,9 @@ func (h *EbookReaderHandler) HandleGetProgress(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusBadRequest, "bad_request", "content_id is required")
 		return
 	}
-	if err := h.FileAuthorizer.ItemAccess.EnsureAccessible(r.Context(), contentID, requestAccessFilter(r)); err != nil {
-		h.writeReadError(w, err)
-		return
-	}
-
-	progress, err := h.ProgressStore.Get(r.Context(), userID, profileID, contentID)
+	progress, err := h.ReaderProgress(r.Context(), userID, profileID, contentID, requestAccessFilter(r))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load ebook progress")
+		h.writeReadError(w, err)
 		return
 	}
 	if progress == nil {
@@ -265,27 +254,12 @@ func (h *EbookReaderHandler) HandleSaveProgress(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	file, err := h.FileAuthorizer.Authorize(r, req.FileID)
+	progress, err := h.SaveReaderProgress(r.Context(), EbookReaderProgress{
+		UserID: userID, ProfileID: profileID, ContentID: contentID,
+		FileID: req.FileID, Location: req.Location, Progress: req.Progress,
+	}, requestAccessFilter(r))
 	if err != nil {
 		h.writeReadError(w, err)
-		return
-	}
-	if file == nil || file.ContentID != contentID || !isEbookFile(file) {
-		writeError(w, http.StatusNotFound, "not_found", "Ebook file not found")
-		return
-	}
-
-	progress := EbookReaderProgress{
-		UserID:    userID,
-		ProfileID: profileID,
-		ContentID: contentID,
-		FileID:    req.FileID,
-		Location:  req.Location,
-		Progress:  req.Progress,
-		UpdatedAt: time.Now().UTC(),
-	}
-	if err := h.ProgressStore.Upsert(r.Context(), progress); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save ebook progress")
 		return
 	}
 	writeJSON(w, http.StatusOK, progress)
@@ -308,14 +282,9 @@ func (h *EbookReaderHandler) HandleGetConfig(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "bad_request", "content_id is required")
 		return
 	}
-	if err := h.FileAuthorizer.ItemAccess.EnsureAccessible(r.Context(), contentID, requestAccessFilter(r)); err != nil {
-		h.writeReadError(w, err)
-		return
-	}
-
-	config, err := h.ConfigStore.Get(r.Context(), userID, profileID, contentID)
+	config, err := h.ReaderConfig(r.Context(), userID, profileID, contentID, requestAccessFilter(r))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load ebook reader config")
+		h.writeReadError(w, err)
 		return
 	}
 	if config == nil {
@@ -351,20 +320,11 @@ func (h *EbookReaderHandler) HandleSaveConfig(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusBadRequest, "bad_request", "config must be a JSON object")
 		return
 	}
-	if err := h.FileAuthorizer.ItemAccess.EnsureAccessible(r.Context(), contentID, requestAccessFilter(r)); err != nil {
+	config, err := h.SaveReaderConfig(r.Context(), EbookReaderConfig{
+		UserID: userID, ProfileID: profileID, ContentID: contentID, Config: req.Config,
+	}, requestAccessFilter(r), nil)
+	if err != nil {
 		h.writeReadError(w, err)
-		return
-	}
-
-	config := EbookReaderConfig{
-		UserID:    userID,
-		ProfileID: profileID,
-		ContentID: contentID,
-		Config:    req.Config,
-		UpdatedAt: time.Now().UTC(),
-	}
-	if err := h.ConfigStore.Upsert(r.Context(), config); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save ebook reader config")
 		return
 	}
 	writeJSON(w, http.StatusOK, config)
@@ -400,20 +360,9 @@ func (h *EbookReaderHandler) HandleCreateAnnotation(w http.ResponseWriter, r *ht
 	if !decodeEbookReaderBody(w, r, ebookReaderAnnotationMaxBodySize, &req) {
 		return
 	}
-	annotation, err := buildEbookReaderAnnotation(req)
+	annotation, _, err := h.createReaderAnnotation(r.Context(), userID, profileID, contentID, "", req)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-	now := time.Now().UTC()
-	annotation.ID = uuid.NewString()
-	annotation.UserID = userID
-	annotation.ProfileID = profileID
-	annotation.ContentID = contentID
-	annotation.CreatedAt = now
-	annotation.UpdatedAt = now
-	if err := h.AnnotationStore.Create(r.Context(), annotation); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create ebook annotation")
+		h.writeReadError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, annotation)
@@ -433,31 +382,13 @@ func (h *EbookReaderHandler) HandleUpdateAnnotation(w http.ResponseWriter, r *ht
 	if !decodeEbookReaderBody(w, r, ebookReaderAnnotationMaxBodySize, &req) {
 		return
 	}
-	// The merge runs inside the store transaction between the locked read and
-	// the write, so concurrent PATCHes serialize instead of losing updates.
-	var validationErr error
-	updated, err := h.AnnotationStore.Update(
-		r.Context(), userID, profileID, contentID, annotationID,
-		func(existing EbookReaderAnnotation) (EbookReaderAnnotation, error) {
-			merged, mergeErr := mergeEbookReaderAnnotationPatch(existing, req)
-			if mergeErr != nil {
-				validationErr = mergeErr
-				return EbookReaderAnnotation{}, mergeErr
-			}
-			merged.UpdatedAt = time.Now().UTC()
-			return merged, nil
-		},
-	)
-	if validationErr != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", validationErr.Error())
+	updated, err := h.patchReaderAnnotation(r.Context(), userID, profileID, contentID, annotationID, req, nil)
+	if errors.Is(err, ErrEbookAnnotationNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "Ebook annotation not found")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update ebook annotation")
-		return
-	}
-	if updated == nil {
-		writeError(w, http.StatusNotFound, "not_found", "Ebook annotation not found")
+		h.writeReadError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, updated)
@@ -596,6 +527,10 @@ func mergeEbookReaderAnnotationPatch(
 }
 
 func (h *EbookReaderHandler) writeReadError(w http.ResponseWriter, err error) {
+	if apiErr, ok := errors.AsType[*APIError](err); ok {
+		writeError(w, apiErr.Status, apiErr.Code, apiErr.Message)
+		return
+	}
 	switch {
 	case errors.Is(err, catalog.ErrItemNotFound), errors.Is(err, catalog.ErrEpisodeNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "Ebook file not found")
@@ -812,27 +747,7 @@ func (s *PGEbookReaderAnnotationStore) Create(ctx context.Context, annotation Eb
 	if s == nil || s.pool == nil {
 		return fmt.Errorf("ebook reader annotation store is not configured")
 	}
-	_, err := s.pool.Exec(ctx, `
-		INSERT INTO ebook_reader_annotations
-			(id, user_id, profile_id, content_id, kind, cfi_range, location,
-			 selected_text, note, style, color, metadata, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''),
-		        $8, $9, $10, $11, $12::jsonb, $13, $14)`,
-		annotation.ID,
-		annotation.UserID,
-		annotation.ProfileID,
-		annotation.ContentID,
-		annotation.Kind,
-		annotation.CFIRange,
-		annotation.Location,
-		annotation.SelectedText,
-		annotation.Note,
-		annotation.Style,
-		annotation.Color,
-		annotation.Metadata,
-		annotation.CreatedAt,
-		annotation.UpdatedAt,
-	)
+	_, err := insertReaderAnnotation(ctx, s.pool.Exec, annotation, false)
 	if err != nil {
 		return fmt.Errorf("create ebook reader annotation: %w", err)
 	}
@@ -1048,6 +963,15 @@ func (s *PGEbookReaderProgressStore) Delete(ctx context.Context, userID int, pro
 }
 
 func (s *PGEbookReaderProgressStore) Upsert(ctx context.Context, progress EbookReaderProgress) error {
+	return s.upsertProgress(ctx, progress, false)
+}
+
+// UpsertNewer atomically refuses stale and duplicate reader events.
+func (s *PGEbookReaderProgressStore) UpsertNewer(ctx context.Context, progress EbookReaderProgress) error {
+	return s.upsertProgress(ctx, progress, true)
+}
+
+func (s *PGEbookReaderProgressStore) upsertProgress(ctx context.Context, progress EbookReaderProgress, newerOnly bool) error {
 	if s == nil || s.pool == nil {
 		return fmt.Errorf("ebook reader progress store is not configured")
 	}
@@ -1069,6 +993,9 @@ func (s *PGEbookReaderProgressStore) Upsert(ctx context.Context, progress EbookR
 				ELSE EXCLUDED.progress
 			END,
 			updated_at = EXCLUDED.updated_at`, models.EbookFinishedProgressThreshold)
+	if newerOnly {
+		query += " WHERE ebook_reader_progress.updated_at < EXCLUDED.updated_at"
+	}
 	if _, err := s.pool.Exec(ctx, query,
 		progress.UserID,
 		progress.ProfileID,

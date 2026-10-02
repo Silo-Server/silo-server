@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func TestHardwareEncoderWarmupArgs(t *testing.T) {
+func TestHardwareSmokeEncodeArgs(t *testing.T) {
 	tests := []struct {
 		name     string
 		backend  string
@@ -31,7 +31,7 @@ func TestHardwareEncoderWarmupArgs(t *testing.T) {
 			backend: transcodeHWVAAPI,
 			device:  "/dev/dri/renderD130",
 			contains: []string{
-				"vaapi=va:/dev/dri/renderD130", "format=nv12,hwupload", "h264_vaapi",
+				"vaapi=hw:/dev/dri/renderD130", "format=nv12,hwupload", "h264_vaapi",
 			},
 		},
 		{
@@ -43,18 +43,18 @@ func TestHardwareEncoderWarmupArgs(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			args := hardwareEncoderWarmupArgs(test.backend, test.device)
+			args := hardwareSmokeEncodeArgs(test.backend, test.device)
 			for _, want := range test.contains {
 				if !slices.Contains(args, want) {
-					t.Fatalf("hardwareEncoderWarmupArgs(%q, %q) = %v, missing %q", test.backend, test.device, args, want)
+					t.Fatalf("hardwareSmokeEncodeArgs(%q, %q) = %v, missing %q", test.backend, test.device, args, want)
 				}
 			}
 			framesIndex := slices.Index(args, "-frames:v")
 			if framesIndex < 0 || framesIndex+1 >= len(args) || args[framesIndex+1] != "1" {
-				t.Fatalf("hardwareEncoderWarmupArgs(%q, %q) = %v, want one output frame", test.backend, test.device, args)
+				t.Fatalf("hardwareSmokeEncodeArgs(%q, %q) = %v, want one output frame", test.backend, test.device, args)
 			}
 			if got := args[len(args)-3:]; !slices.Equal(got, []string{"-f", "null", "-"}) {
-				t.Fatalf("hardwareEncoderWarmupArgs(%q, %q) tail = %v, want null sink", test.backend, test.device, got)
+				t.Fatalf("hardwareSmokeEncodeArgs(%q, %q) tail = %v, want null sink", test.backend, test.device, got)
 			}
 		})
 	}
@@ -134,7 +134,7 @@ func TestWarmHardwareEncoderCachedSharesSuccessfulWarmupPastCallerCancellation(t
 			return nil, ctx.Err()
 		}
 	}
-	resolve := func(context.Context, string, string) string { return transcodeHWNVENC }
+	resolve := func(context.Context, string, string, string) string { return transcodeHWNVENC }
 
 	callerCtx, cancel := context.WithCancel(context.Background())
 	result := make(chan error, 1)

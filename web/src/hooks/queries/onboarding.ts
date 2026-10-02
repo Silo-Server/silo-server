@@ -1,49 +1,68 @@
+import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/api/client";
-import type { OnboardingFlow, OnboardingState } from "@/api/types";
+import { captureProfileRequestContext, StaleApiRequestContextError } from "@/api/client";
+import {
+  createOnboardingWriter,
+  readOnboardingFlow,
+  readOnboardingState,
+  requireOnboardingAuthority,
+  type OnboardingProgressInput,
+} from "@/api/v2/onboarding";
 
-const onboardingKeys = {
-  flow: () => ["onboarding", "flow"] as const,
-  state: () => ["onboarding", "state"] as const,
-};
-
+function useOnboardingContext() {
+  const context = captureProfileRequestContext();
+  const scope = [
+    "onboarding",
+    context?.serverOrigin,
+    context?.authContextVersion,
+    context?.profileId,
+    context?.profileToken,
+  ] as const;
+  return { context, scope };
+}
 export function useOnboardingState(options?: { enabled?: boolean }) {
+  const { context, scope } = useOnboardingContext();
   return useQuery({
-    queryKey: onboardingKeys.state(),
-    queryFn: () => api<OnboardingState>("/onboarding/state"),
-    enabled: options?.enabled ?? true,
+    queryKey: [...scope, "state"],
+    queryFn: async () => {
+      if (!context) throw new StaleApiRequestContextError();
+      return (await readOnboardingState(context)).state;
+    },
+    enabled: !!context && (options?.enabled ?? true),
     staleTime: 5 * 60 * 1000,
   });
 }
-
 export function useOnboardingFlow(options?: { enabled?: boolean }) {
+  const { context, scope } = useOnboardingContext();
   return useQuery({
-    queryKey: onboardingKeys.flow(),
-    queryFn: () => api<OnboardingFlow>("/onboarding/flow?surface=web"),
-    enabled: options?.enabled ?? true,
+    queryKey: [...scope, "flow"],
+    queryFn: () => {
+      if (!context) throw new StaleApiRequestContextError();
+      return readOnboardingFlow(context);
+    },
+    enabled: !!context && (options?.enabled ?? true),
     staleTime: 5 * 60 * 1000,
   });
 }
-
-interface ProgressInput {
-  tour_id: string;
-  last_step?: string;
-  completed?: boolean;
-  skipped?: boolean;
-}
-
 export function useOnboardingProgress() {
   const queryClient = useQueryClient();
+  const { context, scope } = useOnboardingContext();
+  const writer = useMemo(
+    () => (context ? createOnboardingWriter(context) : null),
+    // Token refresh preserves authority; account/profile changes start a new sequence.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [context?.serverOrigin, context?.authContextVersion, context?.profileId, context?.profileToken],
+  );
   return useMutation({
-    mutationFn: (body: ProgressInput) =>
-      api("/onboarding/progress", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
-    onSuccess: (_data, variables) => {
-      if (variables.completed || variables.skipped) {
-        queryClient.invalidateQueries({ queryKey: onboardingKeys.state() });
-      }
+    retry: false,
+    mutationFn: (body: OnboardingProgressInput) => {
+      if (!writer) throw new StaleApiRequestContextError();
+      return writer(body);
+    },
+    onSuccess: (state) => {
+      if (!context) return;
+      requireOnboardingAuthority(context);
+      queryClient.setQueryData([...scope, "state"], state);
     },
   });
 }

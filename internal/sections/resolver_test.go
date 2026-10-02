@@ -117,6 +117,19 @@ func TestResolve_RemovedCustomSection(t *testing.T) {
 	}
 }
 
+func TestResolve_HiddenCustomSection(t *testing.T) {
+	overrides := []ProfileSectionOverride{{
+		ID: "custom-1", SectionType: "trending_discover", Hidden: true,
+	}}
+	if result := Resolve(nil, overrides); len(result) != 0 {
+		t.Fatalf("hidden custom section resolved at runtime: %#v", result)
+	}
+	settings := ResolveForSettings(nil, overrides)
+	if len(settings) != 1 || !settings[0].Hidden {
+		t.Fatalf("settings result = %#v, want one hidden custom section", settings)
+	}
+}
+
 func TestResolveForSettings_IncludesHidden(t *testing.T) {
 	admin := []*PageSection{
 		{ID: "1", Position: 0, SectionType: SectionRecentlyAdded, Title: "Recently Added", ItemLimit: 20, Config: json.RawMessage(`{}`)},
@@ -204,6 +217,24 @@ func TestResolveIncludesUserAddedRecipeFromOverride(t *testing.T) {
 	}
 	if !resolved[0].IsCustom {
 		t.Error("expected IsCustom true")
+	}
+}
+
+func TestResolveEmptySectionIDPrefersExplicitUserFields(t *testing.T) {
+	overrides := []ProfileSectionOverride{{
+		ID:              "conflicting",
+		SectionType:     SectionTrendingDiscover,
+		Config:          json.RawMessage(`{"source":"trakt","window":"week"}`),
+		IsUserAdded:     false,
+		UserSectionType: SectionTrendingDiscover,
+		UserConfig:      json.RawMessage(`{"source":"tmdb","window":"day"}`),
+	}}
+	resolved := Resolve(nil, overrides)
+	if len(resolved) != 1 {
+		t.Fatalf("resolved = %+v", resolved)
+	}
+	if resolved[0].SectionType != SectionTrendingDiscover || string(resolved[0].Config) != `{"source":"tmdb","window":"day"}` {
+		t.Fatalf("resolved = %+v, want explicit TMDB user fields", resolved[0])
 	}
 }
 

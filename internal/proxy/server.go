@@ -13,25 +13,42 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/buildinfo"
+	"github.com/Silo-Server/silo-server/internal/telemetry"
+
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/downloads"
+	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
+	"github.com/Silo-Server/silo-server/internal/nodemetrics"
+	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
+	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
 )
+
+// proxyRangeHeader is the HTTP Range header the media routes accept.
+const proxyRangeHeader = "Range"
 
 // Server is the HTTP handler for proxy mode.
 type Server struct {
-	watcher              *nodeconfig.Watcher
-	tracker              *nodesessions.Tracker
+	watcher *nodeconfig.Watcher
+	tracker *nodesessions.Tracker
+	// nodeRowID resolves this proxy's stable stream_nodes identity. Production
+	// uses the config watcher; tests replace it to model sibling proxies.
+	nodeRowID            func() (int, bool)
 	httpClient           *http.Client
 	artifactMissReporter remoteArtifactMissReporter
 	// grants and loginSessions back the credential-free /stream/v3 routes: the
@@ -40,10 +57,14 @@ type Server struct {
 	// mode, which is why those routes answer 503 rather than assuming either.
 	grants        proxyGrantLookup
 	loginSessions loginSessionValidator
-	egress        *egressMeter
-	clientIP      *clientip.Resolver
-	telemetry     *streamtelemetry.Registry
-	// subCache stores full-track PGS (.sup) extracts under the transcode dir
+	// streamDeny revokes a session's still-valid stream tokens once central
+	// stopped, expired, or terminated it. Nil disables the check, which is the
+	// pre-marker behavior for a proxy without Redis.
+	streamDeny *playback.StreamDeny
+	egress     *egressMeter
+	clientIP   *clientip.Resolver
+	telemetry  *streamtelemetry.Registry
+	// subCache stores complete embedded subtitle extracts under the transcode dir
 	// so repeat selections skip the whole-file ffmpeg demux.
 	subCache *playback.SubtitleCache
 	// Download limits are node-local once egress is delegated. Rebuild the
@@ -53,6 +74,56 @@ type Server struct {
 	downloadBandwidth   *downloads.BandwidthManager
 	downloadServerBPS   int64
 	downloadUserBPS     int64
+
+	// capabilityHash is the last computed capability snapshot's hash, published
+	// by /health without probing. Nil until the first snapshot or capability
+	// request completes.
+	capabilityHash atomic.Pointer[string]
+
+	// metrics samples host and GPU resources in the background. Nil until
+	// StartMetricsSampler runs, which leaves health exactly as it was before.
+	metrics *nodemetrics.Sampler
+
+	// capabilityBuildMu serializes capability assemblies with each other, so an
+	// operator re-probe cannot run its ffmpeg probes beside the scheduled
+	// snapshot's. The probe caches no longer coalesce the two — bumping the
+	// invalidation generation is what makes the re-probe honest — so without
+	// this they would genuinely run at once.
+	capabilityBuildMu sync.Mutex
+	// countProbesInFlight overrides the detached-probe count the re-probe route
+	// refuses on. Tests set it; production leaves it nil.
+	countProbesInFlight func() int
+
+	// networkAccess reports the network access provider plugins running beside
+	// this proxy, for the API's health pull. Nil until a plugin host is wired
+	// (SetNetworkAccessStatus), which leaves the health field absent — the same
+	// as a build that predates it.
+	networkAccess NetworkAccessStatusSource
+	// networkAccessHost drives the provider instances for the bearer
+	// network-access routes; nil answers 503 there. See network_access.go.
+	networkAccessHost NetworkAccessProviderHost
+	// ingressTokens validates the X-Silo-Ingress-Token a provider plugin
+	// stamps on requests it proxies to this listener, so the access path is
+	// known here too. Nil accepts no tokens (the header is still stripped).
+	ingressTokens *netaccess.Registry
+}
+
+// SetIngressTokens wires the ingress-token registry the listener validates
+// provider-stamped requests against. Call it during construction.
+func (s *Server) SetIngressTokens(registry *netaccess.Registry) {
+	s.ingressTokens = registry
+}
+
+// NetworkAccessStatusSource answers what a proxy reports about its network
+// access providers. *netaccess.StatusCache satisfies it.
+type NetworkAccessStatusSource interface {
+	NodeNetworkAccess() netaccess.NodeNetworkAccess
+}
+
+// SetNetworkAccessStatus wires the provider status source /health reports
+// from. Call it during construction; nil leaves the field absent.
+func (s *Server) SetNetworkAccessStatus(source NetworkAccessStatusSource) {
+	s.networkAccess = source
 }
 
 type remoteArtifactMissReporter interface {
@@ -62,22 +133,19 @@ type remoteArtifactMissReporter interface {
 // NewServer creates a new proxy server backed by a config watcher and session
 // tracker.
 func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Server {
-	return &Server{
-		watcher: watcher,
-		tracker: tracker,
-		// No overall timeout — stream bodies are long-lived. Hung nodes are
-		// bounded by the transport's response-header timeout instead.
-		httpClient: &http.Client{
-			Transport: newStreamTransport(),
-			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		},
-		egress: newEgressMeter(),
+	server := &Server{
+		watcher:    watcher,
+		tracker:    tracker,
+		httpClient: transcodeproxy.NodeClient(),
+		egress:     newEgressMeter(),
 		subCache: playback.NewSubtitleCache(func() string {
 			return watcher.Config().Playback.TranscodeDir
 		}),
 	}
+	if watcher != nil {
+		server.nodeRowID = watcher.NodeRowID
+	}
+	return server
 }
 
 // SetMediaGrantAuthority wires the two dependencies the credential-free
@@ -110,26 +178,69 @@ func (s *Server) SetStreamTelemetry(registry *streamtelemetry.Registry) {
 	s.telemetry = registry
 }
 
-// newStreamTransport tunes the proxy→transcode-node connection pool. Many
-// concurrent viewers fan their segment fetches through one proxy→node pair,
-// and Go's default of 2 idle connections per host causes constant connection
-// churn (and TLS re-handshakes) under load. The response-header timeout
-// bounds requests to a hung node; the longest legitimate server-side wait is
-// the 30s manifest-readiness poll on the transcode node.
-func newStreamTransport() *http.Transport {
-	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.MaxIdleConns = 128
-	t.MaxIdleConnsPerHost = 32
-	t.ResponseHeaderTimeout = 60 * time.Second
-	return t
+// SetStreamDeny installs the session-deny marker store this proxy consults
+// before serving media for a session. It must be called during construction,
+// before the server begins handling requests. A nil store disables the check.
+func (s *Server) SetStreamDeny(deny *playback.StreamDeny) {
+	s.streamDeny = deny
 }
 
-// Handler returns the chi.Router with all proxy routes mounted.
+// sessionDenied reports whether the deny marker revokes the session a request
+// serves. Stream tokens are self-contained and live for MaxTokenTTL, so a
+// session central stopped, expired, or terminated would otherwise keep serving
+// from here until its tokens expire. Both identities are checked: the playback
+// session is what central denies, and the transcode transport can carry a
+// different id on a compat session.
+func (s *Server) sessionDenied(ctx context.Context, claims *streamtoken.Claims) bool {
+	if s.streamDeny == nil || claims == nil {
+		return false
+	}
+	if claims.SessionID != "" && s.streamDeny.Denied(ctx, claims.SessionID) {
+		return true
+	}
+	transport := transcodeTransportIDFromClaims(claims)
+	return transport != "" && transport != claims.SessionID && s.streamDeny.Denied(ctx, transport)
+}
+
+// writeStreamDenied answers a denied session: 410 with no media bytes. The
+// session is over; a client that retries keeps hitting this wall until its
+// tokens expire.
+func writeStreamDenied(w http.ResponseWriter) {
+	http.Error(w, "playback session ended", http.StatusGone)
+}
+
+// sealedHandler is what Handler hands out: the finished router behind an
+// unexported field and a ServeHTTP method, nothing else, so no assertion or
+// type switch recovers a registration surface from it, and the route
+// inventory refuses the reflect calls that could (MethodByName, Method,
+// NumMethod, NewAt, UnsafePointer, UnsafeAddr, Pointer) and any import of
+// unsafe in this package: short of unsafe, nothing gets the router back (see
+// docs/architecture/api-contract.md). Do not embed http.Handler here:
+// embedding exports the field and promotes its methods.
+type sealedHandler struct {
+	h http.Handler
+}
+
+func (h sealedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) { h.h.ServeHTTP(w, r) }
+
+// Handler returns the proxy listener as a sealed http.Handler. The route
+// inventory generator requires exactly this shape: seal the unexported
+// constructor and nothing else. A test that needs to walk the tree calls
+// router directly.
 func (s *Server) Handler() http.Handler {
+	return sealedHandler{h: s.router()}
+}
+
+// router is the proxy listener's registration surface. The route inventory
+// generator walks this method; every registration must be reachable from it.
+func (s *Server) router() chi.Router {
 	declareProxyMediaRoutes()
 	r := chi.NewRouter()
 	if s.clientIP != nil {
 		r.Use(clientip.Middleware(s.clientIP))
+	}
+	if s.ingressTokens != nil {
+		r.Use(netaccess.Middleware(s.ingressTokens))
 	}
 	// hls.js uses XHR for manifest/segment fetches which are subject to
 	// CORS when the proxy runs on a different origin than the web app.
@@ -137,7 +248,7 @@ func (s *Server) Handler() http.Handler {
 		AllowedOrigins: []string{"*"},
 		AllowedMethods: []string{"GET", "HEAD", "OPTIONS"},
 		AllowedHeaders: []string{
-			"Accept", "Authorization", "Content-Type", "Range",
+			"Accept", "Authorization", "Content-Type", proxyRangeHeader,
 			"If-Match", "If-Modified-Since", "If-None-Match", "If-Range", "If-Unmodified-Since",
 		},
 		// direct_stream_resume_v1 has the client re-request a byte range with
@@ -154,6 +265,10 @@ func (s *Server) Handler() http.Handler {
 		MaxAge: 86400,
 	}))
 	r.Get("/api/v1/health", s.handleHealth)
+	// Unauthenticated, matching the API listener's own /metrics posture: a
+	// scrape target that needs a credential is a scrape target that goes
+	// unmonitored, and the exposure is host resource counters, not media.
+	r.Method(http.MethodGet, "/metrics", promhttp.Handler())
 	r.Group(func(r chi.Router) {
 		// Streaming and download bytes count toward the node's measured egress.
 		r.Use(s.meterEgress)
@@ -176,6 +291,8 @@ func (s *Server) Handler() http.Handler {
 		r.Get("/stream/v3/{session_id}/segment/{name}", observeProxy(s.telemetry, http.MethodGet, "/stream/v3/{session_id}/segment/{name}", s.handleGrantTranscodeSegment))
 		r.Get("/stream/subtitles/{token}/{track}/fonts", observeProxy(s.telemetry, http.MethodGet, "/stream/subtitles/{token}/{track}/fonts", s.handleSubtitleFonts))
 		r.Get("/stream/subtitles/{token}/{track}", observeProxy(s.telemetry, http.MethodGet, "/stream/subtitles/{token}/{track}", s.handleSubtitle))
+		r.Head("/stream/theme/{token}", observeProxy(s.telemetry, http.MethodHead, "/stream/theme/{token}", s.handleThemeAudio))
+		r.Get("/stream/theme/{token}", observeProxy(s.telemetry, http.MethodGet, "/stream/theme/{token}", s.handleThemeAudio))
 		r.Head("/downloads/file/{token}", observeProxy(s.telemetry, http.MethodHead, "/downloads/file/{token}", s.handleDownloadFile))
 		r.Get("/downloads/file/{token}", observeProxy(s.telemetry, http.MethodGet, "/downloads/file/{token}", s.handleDownloadFile))
 	})
@@ -185,7 +302,15 @@ func (s *Server) Handler() http.Handler {
 		r.Use(s.requireBearer)
 		r.Get("/hw-capabilities", s.handleHWCapabilities)
 		r.Post("/admin/force-reload", s.handleForceReload)
+		r.Post("/admin/reload-config", s.handleReloadConfig)
+		r.Post("/admin/reprobe-capabilities", s.handleReprobeCapabilities)
 		r.Get("/status", s.handleStatus)
+		// Network access providers running beside this proxy; the API fans its
+		// admin status/connect/disconnect out to these with the node bearer.
+		r.Get("/network-access/status", s.handleNetworkAccessStatus)
+		r.Get("/network-access/{provider}/status", s.handleNetworkAccessProviderStatus)
+		r.Post("/network-access/{provider}/connect", s.handleNetworkAccessConnect)
+		r.Post("/network-access/{provider}/disconnect", s.handleNetworkAccessDisconnect)
 	})
 	return r
 }
@@ -198,23 +323,185 @@ func (s *Server) Handler() http.Handler {
 // whether the proxy it just picked can run the transformations a plan froze, so
 // a pool whose proxies carry a different ffmpeg build (a rolling upgrade, a
 // custom image) would fail at stream time rather than at selection time.
+//
+// The report is deliberately hardware-free. A proxy relays bytes and runs
+// identity/remux recipes; it never executes a hardware transcode, and nothing
+// on the API side reads a proxy's acceleration fields. Probing them anyway cost
+// every proxy a full GPU smoke-encode matrix every 15 minutes to produce an
+// answer no planner consults.
 func (s *Server) handleHWCapabilities(w http.ResponseWriter, r *http.Request) {
-	ffmpegPath := ""
-	if cfg := s.watcher.Config(); cfg != nil {
-		ffmpegPath = cfg.Playback.FFmpegPath
+	info, err := s.buildCapabilitySnapshot(r.Context())
+	if err != nil {
+		// An incomplete probe would hash differently from the same ffmpeg probed
+		// successfully, so serving it would announce a capability change that did
+		// not happen.
+		slog.WarnContext(r.Context(), "proxy capability probe incomplete", "component", "proxy", "error", err)
+		http.Error(w, "capability probe unavailable", http.StatusServiceUnavailable)
+		return
 	}
-	info := playback.DetectHWAccelWithFFmpeg(ffmpegPath)
-	info.Transformations = playback.ProbeTransformationRegistryV3(r.Context(), ffmpegPath).Advertised()
+	// A served report is as authoritative as a scheduled snapshot, so health
+	// starts advertising this hash immediately rather than at the next tick.
+	s.storeCapabilityHash(info.CapabilityHash)
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(info); err != nil {
 		slog.WarnContext(r.Context(), "encode proxy capabilities", "component", "proxy", "error", err)
 	}
 }
 
+// buildCapabilitySnapshot assembles this proxy's capability report and its
+// identity hash. It is the single assembly used by both the capability endpoint
+// and the background snapshot, so the hash a health response advertises always
+// describes the payload the endpoint would serve.
+//
+// An error means the probe did not finish — a caller that gave up, or an ffmpeg
+// slower than the probe deadline — not that the proxy lost a capability. The
+// caller must keep the previous hash rather than publish the partial report,
+// exactly as a transcode node does.
+func (s *Server) buildCapabilitySnapshot(ctx context.Context) (playback.HWAccelInfo, error) {
+	s.capabilityBuildMu.Lock()
+	defer s.capabilityBuildMu.Unlock()
+	return s.buildCapabilitySnapshotLocked(ctx)
+}
+
+// buildCapabilitySnapshotLocked is buildCapabilitySnapshot's body. Callers must
+// hold capabilityBuildMu; the re-probe takes it itself so its cache
+// invalidation and its rebuild are one step no other builder can interleave
+// with.
+func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HWAccelInfo, error) {
+	ffmpegPath := ""
+	if cfg := s.watcher.Config(); cfg != nil {
+		ffmpegPath = cfg.Playback.FFmpegPath
+	}
+	// Hardware acceleration is not probed here, and the report says so rather
+	// than leaving the fields unset by accident. A proxy relays streams and runs
+	// identity/remux recipes on ffmpeg; it never executes a hardware transcode,
+	// and the only fields planning reads off this report are Transformations and
+	// TransportFeatures. So there is no hardware inventory to report and nothing
+	// a GPU smoke-encode matrix could tell the planner.
+	//
+	// The consequence worth stating: the hash now tracks only what this proxy
+	// can *do*. A reboot, a renumbered render node, or a card appearing on the
+	// host no longer moves it, so the API refetches a proxy's report exactly
+	// when its ffmpeg's abilities changed. Nothing derived from the host may
+	// enter this report, the advertised budget below included — see
+	// playback.RegistryCapabilityEndpointTimeout.
+	info := playback.HWAccelInfo{
+		Resolved: playback.HWAccelNone,
+		Source:   "local",
+	}
+	// One deadline over the registry probe, matching the transcode node: it has
+	// its own internal per-command bounds, but only a shared budget keeps the
+	// whole rebuild inside the window a caller was told to allow, and only a
+	// deadline the builder owns bounds the background snapshot, whose context
+	// lives as long as the process. It is the registry-only budget — the same
+	// formula the transcode node uses, with no hardware in it — and the same one
+	// advertised below, so a caller's allowance and this deadline cannot drift.
+	ctx, cancel := context.WithTimeout(ctx, playback.RegistryCapabilityEndpointTimeout())
+	defer cancel()
+	// A registry probe that ran out of budget is refused rather than published:
+	// it marks transformations unavailable, which is byte-identical to an ffmpeg
+	// that genuinely cannot run them, so hashing it would announce a change that
+	// did not happen and drop this proxy out of remux eligibility.
+	registry, err := playback.ProbeTransformationRegistryWithToneMapV3Result(ctx, ffmpegPath, nil)
+	if err != nil {
+		return playback.HWAccelInfo{}, err
+	}
+	info.Transformations = registry.Advertised()
+	info.TransportFeatures = []string{playback.TransportFeatureProgressiveRemuxRelayV1, playback.TransportFeatureThemeAudioEgressV1}
+	// Advertised before the hash is taken, because it is part of what the hash
+	// covers: a build that needs longer reaches the sweep rather than sitting
+	// behind an unchanged identity.
+	info.ProbeRequestTimeoutMillis = playback.RegistryCapabilityRequestTimeout().Milliseconds()
+	info.CapabilityHash = playback.ComputeCapabilityHash(info)
+	return info, nil
+}
+
+// capabilitySnapshotInterval is how often the proxy recomputes its capability
+// snapshot. It exists to notice the ffmpeg underneath a long-running proxy
+// changing — a swapped binary, a rolling image upgrade — without waiting for a
+// restart. The transformation registry re-execs ffmpeg every time, which is the
+// other reason a snapshot that did not finish must not be published.
+const capabilitySnapshotInterval = 15 * time.Minute
+
+// StartCapabilitySnapshots keeps the capability hash published by /health
+// current, in the background, until ctx is canceled.
+func (s *Server) StartCapabilitySnapshots(ctx context.Context) {
+	if s == nil || ctx == nil {
+		return
+	}
+	go func() {
+		s.refreshCapabilitySnapshot(ctx)
+		ticker := time.NewTicker(capabilitySnapshotInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.refreshCapabilitySnapshot(ctx)
+			}
+		}
+	}()
+}
+
+func (s *Server) refreshCapabilitySnapshot(ctx context.Context) {
+	info, err := s.buildCapabilitySnapshot(ctx)
+	if err != nil {
+		// Keep the previous hash: a failed probe is not evidence this proxy's
+		// ffmpeg changed, and republishing a degraded one would make the API
+		// refetch a report that lost nothing.
+		slog.WarnContext(ctx, "proxy capability snapshot incomplete", "component", "proxy", "error", err)
+		return
+	}
+	if previous := s.storedCapabilityHash(); previous != "" && previous != info.CapabilityHash {
+		slog.InfoContext(ctx, "proxy capabilities changed", "component", "proxy",
+			"previous_hash", previous, "hash", info.CapabilityHash, "resolved", info.Resolved)
+	}
+	s.storeCapabilityHash(info.CapabilityHash)
+}
+
+// storedCapabilityHash returns the last published capability hash, or empty
+// when none has been computed yet.
+func (s *Server) storedCapabilityHash() string {
+	if hash := s.capabilityHash.Load(); hash != nil {
+		return *hash
+	}
+	return ""
+}
+
+func (s *Server) storeCapabilityHash(hash string) {
+	s.capabilityHash.Store(&hash)
+}
+
 type healthResponse struct {
 	Status     string `json:"status"`
 	ActiveJobs int    `json:"active_jobs"`
 	EgressKbps int    `json:"egress_kbps"`
+	// CapabilitiesHash identifies this proxy's last computed capability
+	// snapshot. It is read from the stored snapshot only — health must stay a
+	// cheap liveness answer, so it never triggers a probe — and is empty until
+	// the first background snapshot completes.
+	CapabilitiesHash string `json:"capabilities_hash,omitempty"`
+	// System and GPU are this proxy's last resource sample, read from the
+	// published snapshot for the same reason as the hash above. A proxy runs
+	// ffmpeg too (remux, Dolby Vision RPU strip), so it reports GPU usage on the
+	// same code path a transcode node does.
+	//
+	// This route takes no credential, so the sample is path-free: disk entries
+	// carry their role and their fill, never where they are mounted. See
+	// nodemetrics.Snapshot.RedactPaths.
+	System      *nodemetrics.SystemStats         `json:"system,omitempty"`
+	GPU         []nodemetrics.GPUStats           `json:"gpu,omitempty"`
+	Attribution *nodemetrics.ResourceAttribution `json:"attribution,omitempty"`
+	SampledAt   time.Time                        `json:"sampled_at,omitzero"`
+	// Build identifies the binary this proxy runs; see transcodenode.HealthResponse.
+	Build buildinfo.Info `json:"build"`
+	// NetworkAccess is the last status of each network access provider plugin
+	// running beside this proxy, keyed by provider slug. The API stores it on
+	// the node row and hands overlay clients the matching origin. Absent when no
+	// provider runs here; carries no auth URL or error text, since this route
+	// takes no credential.
+	NetworkAccess netaccess.NodeNetworkAccess `json:"network_access,omitempty"`
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -222,16 +509,60 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	if s.tracker != nil {
 		activeJobs = s.tracker.ActiveCount()
 	}
+	snapshot := s.metrics.Snapshot().RedactPaths()
+	var networkAccess netaccess.NodeNetworkAccess
+	if s.networkAccess != nil {
+		networkAccess = s.networkAccess.NodeNetworkAccess()
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(healthResponse{
-		Status:     "ok",
-		ActiveJobs: activeJobs,
-		EgressKbps: s.egress.RateKbps(),
+		Status:           "ok",
+		ActiveJobs:       activeJobs,
+		EgressKbps:       s.egress.RateKbps(),
+		CapabilitiesHash: s.storedCapabilityHash(),
+		System:           snapshot.System,
+		GPU:              snapshot.GPU,
+		Attribution:      snapshot.Attribution,
+		SampledAt:        snapshot.SampledAt,
+		Build:            buildinfo.Current(),
+		NetworkAccess:    networkAccess,
 	})
+}
+
+// StartMetricsSampler begins background resource sampling until ctx is
+// canceled, and publishes the readings on /health, /status and /metrics.
+//
+// A proxy's only working directory is the subtitle/remux scratch under the
+// configured transcode dir, so that is the mount it samples; media roots belong
+// to the API host, which is the process that knows what the library is.
+func (s *Server) StartMetricsSampler(ctx context.Context) {
+	if s == nil || ctx == nil {
+		return
+	}
+	// Read per sample, not captured here: playback.transcode_dir is
+	// hot-reloadable, and a proxy that snapshotted it at startup would go on
+	// measuring a volume nothing writes to.
+	scratchDir := func() string {
+		if s.watcher == nil {
+			return ""
+		}
+		cfg := s.watcher.Config()
+		if cfg == nil {
+			return ""
+		}
+		return cfg.Playback.TranscodeDir
+	}
+	s.metrics = nodemetrics.NewSampler(nodemetrics.Options{
+		ScratchDir:       scratchDir,
+		DeviceSessions:   playback.HWDeviceLoadSnapshot,
+		DeviceIdentities: playback.SamplerDeviceIdentities,
+	})
+	s.metrics.Start(ctx)
 }
 
 // requireBearer checks Authorization: Bearer {secret} for admin endpoints.
 func (s *Server) requireBearer(next http.Handler) http.Handler {
+	next = telemetry.TrustedHTTPHandler("worker", next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cfg := s.watcher.Config()
 		auth := r.Header.Get("Authorization")
@@ -255,9 +586,160 @@ func (s *Server) verifyToken(w http.ResponseWriter, r *http.Request) *streamtoke
 	return claims
 }
 
-func (s *Server) handleDirectPlay(w http.ResponseWriter, r *http.Request) {
+func (s *Server) verifyPlaybackToken(w http.ResponseWriter, r *http.Request) *streamtoken.Claims {
 	claims := s.verifyToken(w, r)
 	if claims == nil {
+		return nil
+	}
+	nodeID, nodeIDKnown := s.currentNodeRowID()
+	if status := proxyEgressStatusV3(
+		claims.RoutingWorkload, claims.RoutingExecution, claims.RoutingEgress,
+		claims.RoutingEgressNodeID, nodeID, nodeIDKnown,
+	); status != 0 {
+		writeProxyRouteStatusV3(w, status)
+		return nil
+	}
+	if s.sessionDenied(r.Context(), claims) {
+		writeStreamDenied(w)
+		return nil
+	}
+	return claims
+}
+
+// proxyEgressStatusV3 enforces the media origin frozen into a routed playback
+// artifact. An entirely empty tuple predates node routing and remains usable
+// until its bounded token/grant lifetime expires; a partial tuple is an
+// uncommitted route and must not fail open on any proxy media endpoint.
+func proxyEgressStatusV3(
+	workload, execution, egress string,
+	egressNodeID, currentNodeID int,
+	currentNodeIDKnown bool,
+) int {
+	workload = strings.TrimSpace(workload)
+	execution = strings.TrimSpace(execution)
+	egress = strings.TrimSpace(egress)
+	if workload == "" && execution == "" && egress == "" && egressNodeID == 0 {
+		return 0
+	}
+	if workload == "" || execution == "" || egress == "" || egressNodeID < 0 {
+		return http.StatusConflict
+	}
+	if egress != string(noderouting.EgressProxy) {
+		return http.StatusServiceUnavailable
+	}
+	if egressNodeID == 0 {
+		return http.StatusConflict
+	}
+	if !currentNodeIDKnown || currentNodeID <= 0 || egressNodeID != currentNodeID {
+		return http.StatusServiceUnavailable
+	}
+	return 0
+}
+
+func (s *Server) currentNodeRowID() (int, bool) {
+	if s == nil || s.nodeRowID == nil {
+		return 0, false
+	}
+	return s.nodeRowID()
+}
+
+type proxyPlaybackEndpointV3 uint8
+
+const (
+	proxyPlaybackEndpointDirectV3 proxyPlaybackEndpointV3 = iota
+	proxyPlaybackEndpointRemuxV3
+	proxyPlaybackEndpointTranscodeV3
+	proxyPlaybackEndpointIdentityV3
+	proxyPlaybackEndpointAuxiliaryV3
+)
+
+// proxyPlaybackEndpointStatusV3 binds a valid proxy artifact to the serving
+// recipe family. A signed direct-play token is not authority to start remux or
+// transcode work merely because every endpoint shares the same signing key.
+func proxyPlaybackEndpointStatusV3(claims *streamtoken.Claims, endpoint proxyPlaybackEndpointV3) int {
+	if claims == nil {
+		return http.StatusServiceUnavailable
+	}
+	direct := claims.RoutingWorkload == string(noderouting.WorkloadDirectPlay) &&
+		claims.RoutingExecution == string(noderouting.ExecutionNone) &&
+		claims.RoutingEgress == string(noderouting.EgressProxy) &&
+		claims.PlayMethod == string(playback.PlayDirect)
+	remuxExecution := claims.RoutingExecution == string(noderouting.ExecutionProxy) ||
+		claims.RoutingExecution == string(noderouting.ExecutionTranscode)
+	remux := claims.RoutingWorkload == string(noderouting.WorkloadRemux) &&
+		remuxExecution &&
+		claims.RoutingEgress == string(noderouting.EgressProxy) &&
+		proxyRemuxPlayMethodV3(claims.PlayMethod)
+	transcode := (claims.RoutingWorkload == string(noderouting.WorkloadRemux) ||
+		claims.RoutingWorkload == string(noderouting.WorkloadVideoTranscode)) &&
+		claims.RoutingExecution == string(noderouting.ExecutionTranscode) &&
+		claims.RoutingEgress == string(noderouting.EgressProxy) &&
+		proxyTranscodePlayMethodV3(claims.PlayMethod)
+
+	// Tokens from the released pre-routing server have no tuple. They retain
+	// only their original method authority during the bounded token lifetime.
+	legacy := claims.RoutingWorkload == "" && claims.RoutingExecution == "" &&
+		claims.RoutingEgress == "" && claims.RoutingEgressNodeID == 0
+	if legacy {
+		direct = claims.PlayMethod == string(playback.PlayDirect)
+		remux = proxyRemuxPlayMethodV3(claims.PlayMethod)
+		transcode = proxyTranscodePlayMethodV3(claims.PlayMethod)
+	}
+
+	allowed := false
+	switch endpoint {
+	case proxyPlaybackEndpointDirectV3:
+		allowed = direct
+	case proxyPlaybackEndpointRemuxV3:
+		allowed = remux
+	case proxyPlaybackEndpointTranscodeV3:
+		allowed = transcode
+	case proxyPlaybackEndpointIdentityV3:
+		allowed = direct || remux
+	case proxyPlaybackEndpointAuxiliaryV3:
+		allowed = direct || remux || transcode
+	}
+	if !allowed {
+		return http.StatusServiceUnavailable
+	}
+	return 0
+}
+
+func proxyRemuxPlayMethodV3(method string) bool {
+	return method == string(playback.PlayRemux) || method == streamtoken.PlayMethodAudioDownmixRemux
+}
+
+func proxyTranscodePlayMethodV3(method string) bool {
+	switch method {
+	case "", string(playback.PlayTranscode), streamtoken.PlayMethodToneMapTranscode,
+		streamtoken.PlayMethodAudioDownmixTranscode, streamtoken.PlayMethodCopyFMP4Transcode:
+		return true
+	default:
+		return false
+	}
+}
+
+func requireProxyPlaybackEndpointV3(w http.ResponseWriter, claims *streamtoken.Claims, endpoint proxyPlaybackEndpointV3) bool {
+	status := proxyPlaybackEndpointStatusV3(claims, endpoint)
+	if status != 0 {
+		writeProxyRouteStatusV3(w, status)
+		return false
+	}
+	return true
+}
+
+func writeProxyRouteStatusV3(w http.ResponseWriter, status int) {
+	switch status {
+	case http.StatusConflict:
+		http.Error(w, "playback route unbound", status)
+	default:
+		http.Error(w, "routing policy unsatisfied", status)
+	}
+}
+
+func (s *Server) handleDirectPlay(w http.ResponseWriter, r *http.Request) {
+	claims := s.verifyPlaybackToken(w, r)
+	if claims == nil || !requireProxyPlaybackEndpointV3(w, claims, proxyPlaybackEndpointDirectV3) {
 		return
 	}
 	s.serveDirectPlayClaims(w, r, claims)
@@ -348,7 +830,10 @@ func (s *Server) relayDownloadArtifact(w http.ResponseWriter, r *http.Request, c
 		http.Error(w, "download unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	client := downloadprepare.HTTPPreparer{Client: s.httpClient}
+	// The zero preparer uses the artifact client with a bounded response-header
+	// wait, as the API relay does. s.httpClient waits on headers without a
+	// deadline for transcode rebuilds, which an artifact read never needs.
+	client := downloadprepare.HTTPPreparer{}
 	resp, err := client.Open(r.Context(), claims.TranscodeNode, cfg.Auth.JWTSecret, claims.DownloadArtifactID, r.Method, r.Header)
 	if err != nil {
 		slog.WarnContext(r.Context(), "download artifact relay failed", "component", "proxy", "artifact_id", claims.DownloadArtifactID, "node", claims.TranscodeNode, "error", err)
@@ -423,8 +908,8 @@ func (s *Server) downloadBandwidthManager() *downloads.BandwidthManager {
 }
 
 func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
-	claims := s.verifyToken(w, r)
-	if claims == nil {
+	claims := s.verifyPlaybackToken(w, r)
+	if claims == nil || !requireProxyPlaybackEndpointV3(w, claims, proxyPlaybackEndpointRemuxV3) {
 		return
 	}
 	// A boosted recipe must use the versioned route below. Keeping it off the
@@ -435,12 +920,16 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if remuxRunsOnTranscodeNodeV3(claims) {
+		s.relayProgressiveRemux(w, r, claims, chi.URLParam(r, "token"))
+		return
+	}
 	s.serveRemuxClaims(w, r, claims)
 }
 
 func (s *Server) handleAudioV2Remux(w http.ResponseWriter, r *http.Request) {
-	claims := s.verifyToken(w, r)
-	if claims == nil {
+	claims := s.verifyPlaybackToken(w, r)
+	if claims == nil || !requireProxyPlaybackEndpointV3(w, claims, proxyPlaybackEndpointRemuxV3) {
 		return
 	}
 	// The endpoint attests the audio_to_aac v2 execution contract, not merely a
@@ -450,7 +939,23 @@ func (s *Server) handleAudioV2Remux(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if remuxRunsOnTranscodeNodeV3(claims) {
+		s.relayProgressiveRemux(w, r, claims, chi.URLParam(r, "token"))
+		return
+	}
 	s.serveRemuxClaims(w, r, claims)
+}
+
+func remuxRunsOnTranscodeNodeV3(claims *streamtoken.Claims) bool {
+	return claims != nil && claims.RoutingExecution == string(noderouting.ExecutionTranscode)
+}
+
+func (s *Server) relayProgressiveRemux(w http.ResponseWriter, r *http.Request, claims *streamtoken.Claims, forwardToken string) {
+	attachStream(r.Context(), claims)
+	info := sessionInfo(s.tracker, claims, "remux")
+	s.tracker.Track(r.Context(), info)
+	defer s.tracker.Remove(r.Context(), claims.SessionID)
+	s.proxyToTranscodeNode(w, r, claims, "/remux/"+transcodeTransportIDFromClaims(claims), forwardToken)
 }
 
 // validAudioV2RemuxClaims proves the complete shape consumed by the proxy's
@@ -494,8 +999,8 @@ func (s *Server) serveRemuxClaims(w http.ResponseWriter, r *http.Request, claims
 }
 
 func (s *Server) handleTranscodeManifest(w http.ResponseWriter, r *http.Request) {
-	claims := s.verifyToken(w, r)
-	if claims == nil {
+	claims := s.verifyPlaybackToken(w, r)
+	if claims == nil || !requireProxyPlaybackEndpointV3(w, claims, proxyPlaybackEndpointTranscodeV3) {
 		return
 	}
 	attachStream(r.Context(), claims)
@@ -504,8 +1009,8 @@ func (s *Server) handleTranscodeManifest(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleTranscodeSegment(w http.ResponseWriter, r *http.Request) {
-	claims := s.verifyToken(w, r)
-	if claims == nil {
+	claims := s.verifyPlaybackToken(w, r)
+	if claims == nil || !requireProxyPlaybackEndpointV3(w, claims, proxyPlaybackEndpointTranscodeV3) {
 		return
 	}
 	attachStream(r.Context(), claims)
@@ -554,8 +1059,8 @@ func sessionInfo(tr *nodesessions.Tracker, claims *streamtoken.Claims, kind stri
 }
 
 func (s *Server) handleSubtitle(w http.ResponseWriter, r *http.Request) {
-	claims := s.verifyToken(w, r)
-	if claims == nil {
+	claims := s.verifyPlaybackToken(w, r)
+	if claims == nil || !requireProxyPlaybackEndpointV3(w, claims, proxyPlaybackEndpointAuxiliaryV3) {
 		return
 	}
 	attachStream(r.Context(), claims)
@@ -567,69 +1072,38 @@ func (s *Server) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// When the URL requests SUP format (e.g. /subtitles/{token}/2.sup),
-	// serve the PGS track as a raw .sup elementary stream for client-side
-	// bitmap rendering (libpgs). Unlike the buffered text paths below, this
-	// serves the cached full-track extract when present, and otherwise
-	// streams ffmpeg output directly (the client renders progressively as
-	// data arrives) while teeing it into the cache for the next request.
-	// Clients that manage their own sliding window opt in with ?windowed=1
-	// (+ ?position=/?duration=), mirroring the API stream handler; windowed
-	// requests extract only the requested slice — from the cached full
-	// track when one exists (warming it in the background when not).
-	if requestedFormat == "sup" {
-		allowWindow, seek, duration := playback.PGSWindowRequest(r.URL.Query())
-		err := s.subCache.ServeSUPExtract(w, r, playback.StreamExtractOpts{
-			InputPath:       claims.MediaPath,
-			TrackIndex:      trackIndex,
-			SourceCodec:     "hdmv_pgs_subtitle", // .sup URLs are only generated for PGS tracks
-			SeekSeconds:     seek,
-			DurationSeconds: duration,
-			AllowWindow:     allowWindow,
-			FFmpegPath:      cfg.Playback.FFmpegPath,
-		}, playback.StreamExtractSubtitle)
-		if err != nil && r.Context().Err() == nil {
-			// Headers already committed — log and let the client see a
-			// truncated response.
-			slog.ErrorContext(r.Context(), "stream subtitle (sup)", "component", "proxy", "error", err, "track", trackIndex,
-				"path", claims.MediaPath, "playback_session_id", claims.SessionID)
-		}
-		return
+	opts := playback.StreamExtractOpts{
+		InputPath:   claims.MediaPath,
+		TrackIndex:  trackIndex,
+		SourceCodec: "subrip",
+		FFmpegPath:  cfg.Playback.FFmpegPath,
 	}
-
-	// When the URL requests ASS format (e.g. /subtitles/{token}/2.ass),
-	// extract as raw ASS to preserve styling for client-side rendering.
-	if requestedFormat == "ass" {
-		data, err := playback.ExtractSubtitleWithFormat(r.Context(), claims.MediaPath, trackIndex, "ass", cfg.Playback.FFmpegPath)
-		if err != nil {
-			slog.ErrorContext(r.Context(), "extract subtitle (ass)", "component", "proxy", "error", err, "track", trackIndex, "path", claims.MediaPath, "playback_session_id", claims.SessionID)
+	switch requestedFormat {
+	case "sup":
+		opts.SourceCodec = "hdmv_pgs_subtitle"
+		opts.AllowWindow, opts.SeekSeconds, opts.DurationSeconds = playback.PGSWindowRequest(r.URL.Query())
+	case "ass":
+		opts.SourceCodec = "ass"
+	}
+	// Preserve whole-track proxy text semantics while streaming the first cues
+	// immediately and reusing complete extracts on subsequent requests.
+	response := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+	if err := s.subCache.ServeExtract(response, r, opts, playback.StreamExtractSubtitle); err != nil {
+		playback.LogSubtitleStreamError(r.Context(), err, claims.MediaFileID, trackIndex)
+		if r.Context().Err() != nil {
+			return
+		}
+		if response.Status() == 0 {
 			http.Error(w, "subtitle extraction failed", http.StatusInternalServerError)
 			return
 		}
-		playback.ServeSubtitle(w, data, "ass")
-		return
+		panic(http.ErrAbortHandler)
 	}
-
-	data, format, err := playback.ExtractSubtitle(r.Context(), claims.MediaPath, trackIndex, cfg.Playback.FFmpegPath)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "extract subtitle", "component", "proxy", "error", err, "track", trackIndex, "path", claims.MediaPath, "playback_session_id", claims.SessionID)
-		http.Error(w, "subtitle extraction failed", http.StatusInternalServerError)
-		return
-	}
-
-	vtt, err := playback.ConvertToVTT(data, format)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "convert to vtt", "component", "proxy", "error", err, "playback_session_id", claims.SessionID)
-		http.Error(w, "subtitle conversion failed", http.StatusInternalServerError)
-		return
-	}
-
-	playback.ServeSubtitle(w, vtt, "vtt")
 }
 
 func (s *Server) handleSubtitleFonts(w http.ResponseWriter, r *http.Request) {
-	claims := s.verifyToken(w, r)
-	if claims == nil {
+	claims := s.verifyPlaybackToken(w, r)
+	if claims == nil || !requireProxyPlaybackEndpointV3(w, claims, proxyPlaybackEndpointAuxiliaryV3) {
 		return
 	}
 	attachStream(r.Context(), claims)
@@ -667,6 +1141,9 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 	}
 
 	targetURL := claims.TranscodeNode + path
+	isSegmentRoute := strings.Contains(path, "/segment/")
+	_, segmentParseErr := playback.ParseSegmentNumber(filepath.Base(path))
+	isMediaSegment := segmentParseErr == nil
 	if rawQuery := r.URL.RawQuery; rawQuery != "" {
 		targetURL = fmt.Sprintf("%s?%s", targetURL, rawQuery)
 	}
@@ -677,6 +1154,9 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+cfg.Auth.JWTSecret)
+	if isSegmentRoute {
+		transcodeproxy.PrepareRequest(req, r)
+	}
 	// Forward the verified stream token so the transcode node can self-reconstruct
 	// a lost session after its OWN restart: the token carries the full byte-affecting
 	// recipe, so the node can re-spawn ffmpeg seeked to the requested segment instead
@@ -686,22 +1166,35 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 		req.Header.Set("X-Silo-Stream-Token", forwardToken)
 	}
 
-	resp, err := s.httpClient.Do(req)
+	resp, err := telemetry.DoTrustedNode(s.httpClient, req, "stream")
 	if err != nil {
 		slog.ErrorContext(r.Context(), "proxy to transcode node", "component", "proxy", "error", err, "url", targetURL, "playback_session_id", claims.SessionID)
 		http.Error(w, "transcode node unavailable", http.StatusBadGateway)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
-	// Copy response headers
-	for k, vv := range resp.Header {
-		for _, v := range vv {
-			w.Header().Add(k, v)
+	generation := resp.Header.Get(transcodeproxy.GenerationHeader)
+	transcodeproxy.CopyResponseHeaders(w.Header(), resp.Header)
+	sw := httpstream.NewRollingDeadlineWriter(w)
+	sw.WriteHeader(resp.StatusCode)
+	if _, copyErr := io.Copy(sw, resp.Body); copyErr != nil {
+		return
+	}
+	if isMediaSegment && generation != "" && r.Method == http.MethodGet &&
+		sw.CompletedFullResponse(transcodeproxy.FullRepresentationSize(resp)) {
+		if ackErr := transcodeproxy.Acknowledge(r.Context(), s.httpClient, claims.TranscodeNode+path, cfg.Auth.JWTSecret, generation); ackErr != nil {
+			slog.WarnContext(r.Context(), "acknowledge transcode segment completion", "component", "proxy", "error", ackErr, "playback_session_id", claims.SessionID)
 		}
 	}
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+}
+
+// handleReloadConfig re-reads this proxy's configuration. A proxy's force
+// reload is already config-only — it holds no transcode sessions to tear down —
+// so this is the same work under the name the control plane uses on both node
+// types, which saves the API branching on node type for its own housekeeping.
+func (s *Server) handleReloadConfig(w http.ResponseWriter, r *http.Request) {
+	s.handleForceReload(w, r)
 }
 
 func (s *Server) handleForceReload(w http.ResponseWriter, r *http.Request) {
@@ -714,12 +1207,27 @@ func (s *Server) handleForceReload(w http.ResponseWriter, r *http.Request) {
 }
 
 type statusResponse struct {
-	ActiveSessions int `json:"active_sessions"`
+	ActiveSessions int                              `json:"active_sessions"`
+	System         *nodemetrics.SystemStats         `json:"system,omitempty"`
+	GPU            []nodemetrics.GPUStats           `json:"gpu,omitempty"`
+	Attribution    *nodemetrics.ResourceAttribution `json:"attribution,omitempty"`
+	SampledAt      time.Time                        `json:"sampled_at,omitzero"`
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	// NewServer accepts a nil tracker and handleHealth already tolerates one;
+	// this must too, or the same construction that answers /health panics here.
+	activeSessions := 0
+	if s.tracker != nil {
+		activeSessions = s.tracker.ActiveCount()
+	}
+	snapshot := s.metrics.Snapshot()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(statusResponse{
-		ActiveSessions: s.tracker.ActiveCount(),
+		ActiveSessions: activeSessions,
+		System:         snapshot.System,
+		GPU:            snapshot.GPU,
+		Attribution:    snapshot.Attribution,
+		SampledAt:      snapshot.SampledAt,
 	})
 }

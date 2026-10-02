@@ -10,9 +10,12 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/time/rate"
+
+	"github.com/Silo-Server/silo-server/internal/buildinfo"
 )
 
 const (
@@ -23,27 +26,52 @@ const (
 	defaultCollectionPageLimit = 20
 	defaultCollectionRateLimit = 5
 	traktAPIVersion            = "2"
+	// Trakt's recommendation endpoints take a limit but no page, and cap the
+	// limit at 100.
+	maxRecommendationResults = 100
 )
 
 // Client is an HTTP client for Trakt collection/discovery feeds.
 type Client struct {
 	httpClient *http.Client
-	clientID   string
-	baseURL    string
-	limiter    *rate.Limiter
+	// clientID is swapped atomically so a saved credential change reaches a
+	// long-lived client without rebuilding it — and therefore without a
+	// server restart. See SetClientID.
+	clientID atomic.Pointer[string]
+	baseURL  string
+	limiter  *rate.Limiter
 }
 
-// NewClient creates a Trakt client. clientID is required by Trakt for API calls.
+// NewClient creates a Trakt client. clientID is required by Trakt for API
+// calls, but may be empty here when the caller keeps it current through
+// SetClientID.
 func NewClient(clientID string, rateLimit int) *Client {
 	if rateLimit <= 0 {
 		rateLimit = defaultCollectionRateLimit
 	}
-	return &Client{
+	c := &Client{
 		httpClient: &http.Client{Timeout: 20 * time.Second},
-		clientID:   strings.TrimSpace(clientID),
 		baseURL:    defaultBaseURL,
 		limiter:    rate.NewLimiter(rate.Limit(rateLimit), rateLimit),
 	}
+	c.SetClientID(clientID)
+	return c
+}
+
+// SetClientID replaces the app client ID sent on subsequent requests. Safe to
+// call while requests are in flight, which is what lets a new
+// watchsync.trakt.client_id apply without restarting the server.
+func (c *Client) SetClientID(clientID string) {
+	trimmed := strings.TrimSpace(clientID)
+	c.clientID.Store(&trimmed)
+}
+
+// ClientID returns the app client ID currently in use.
+func (c *Client) ClientID() string {
+	if current := c.clientID.Load(); current != nil {
+		return *current
+	}
+	return ""
 }
 
 // SetBaseURL overrides the API base URL. Used by tests.
@@ -66,6 +94,9 @@ func (c *Client) GetCollectionPreset(ctx context.Context, preset, mediaType stri
 	if limit > maxCollectionPresetResults {
 		limit = maxCollectionPresetResults
 	}
+	if preset == "recommended" {
+		return c.getRecommendations(ctx, path, mediaType, min(limit, maxRecommendationResults), accessToken)
+	}
 
 	results := make([]CollectionEntry, 0, limit)
 	for page := 1; len(results) < limit; page++ {
@@ -79,7 +110,7 @@ func (c *Client) GetCollectionPreset(ctx context.Context, preset, mediaType stri
 		switch preset {
 		case "trending":
 			pageEntries, err = c.getTrending(ctx, reqPath, mediaType, accessToken)
-		case "popular", "recommended":
+		case "popular":
 			pageEntries, err = c.getMediaList(ctx, reqPath, mediaType, accessToken)
 		default:
 			err = fmt.Errorf("trakt: invalid preset %q", preset)
@@ -210,6 +241,19 @@ func (c *Client) getTrending(ctx context.Context, path, mediaType, accessToken s
 	return entries, nil
 }
 
+// getRecommendations fetches the ranked list in one request, because the
+// endpoint has no page parameter to walk.
+func (c *Client) getRecommendations(ctx context.Context, path, mediaType string, limit int, accessToken string) ([]CollectionEntry, error) {
+	entries, err := c.getMediaList(ctx, fmt.Sprintf("%s?limit=%d", path, limit), mediaType, accessToken)
+	if err != nil {
+		return nil, err
+	}
+	for i := range entries {
+		entries[i].Rank = i + 1
+	}
+	return entries, nil
+}
+
 func (c *Client) getMediaList(ctx context.Context, path, mediaType, accessToken string) ([]CollectionEntry, error) {
 	var resp []traktMedia
 	if err := c.doGet(ctx, path, accessToken, &resp); err != nil {
@@ -223,7 +267,10 @@ func (c *Client) getMediaList(ctx context.Context, path, mediaType, accessToken 
 }
 
 func (c *Client) doGet(ctx context.Context, path string, accessToken string, dest any) error {
-	if strings.TrimSpace(c.clientID) == "" {
+	// Read once so every retry of this request uses one client ID even if a
+	// credential change lands mid-flight.
+	clientID := c.ClientID()
+	if clientID == "" {
 		return errors.New("trakt: client id is required")
 	}
 	if err := c.limiter.Wait(ctx); err != nil {
@@ -239,7 +286,8 @@ func (c *Client) doGet(ctx context.Context, path string, accessToken string, des
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json")
 		req.Header.Set("trakt-api-version", traktAPIVersion)
-		req.Header.Set("trakt-api-key", c.clientID)
+		req.Header.Set("trakt-api-key", clientID)
+		req.Header.Set("User-Agent", buildinfo.UserAgent())
 		if strings.TrimSpace(accessToken) != "" {
 			req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(accessToken))
 		}
