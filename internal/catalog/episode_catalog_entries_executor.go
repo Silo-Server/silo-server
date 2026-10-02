@@ -1042,7 +1042,7 @@ func buildEpisodeCatalogBitrateClause(rule QueryRule, argIdx int) (string, []any
 }
 
 func episodeCatalogEntrySortJoin(field string) string {
-	if field == "release_date" || field == querySortLastAirDate {
+	if field == querySortReleaseDate || field == querySortLastAirDate {
 		return " JOIN episodes sort_episode ON sort_episode.content_id = ece.episode_id"
 	}
 	return ""
