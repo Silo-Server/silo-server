@@ -64,3 +64,15 @@ func TestMarkLTRAuthoredLinesHandlesWebVTT(t *testing.T) {
 		t.Fatalf("marked WebVTT\n got %q\nwant %q", got, want)
 	}
 }
+
+func TestMarkLTRAuthoredLinesCountsAMovedArabicComma(t *testing.T) {
+	input := "1\n00:00:01,000 --> 00:00:02,000\n،ثم ذهبنا إلى البيت\n\n" +
+		"2\n00:00:03,000 --> 00:00:04,000\n،وبعد ذلك\n\n" +
+		"3\n00:00:05,000 --> 00:00:06,000\n،لكنه لم يأت\n"
+	want := "1\n00:00:01,000 --> 00:00:02,000\n\u200e،ثم ذهبنا إلى البيت\n\n" +
+		"2\n00:00:03,000 --> 00:00:04,000\n\u200e،وبعد ذلك\n\n" +
+		"3\n00:00:05,000 --> 00:00:06,000\n\u200e،لكنه لم يأت\n"
+	if got := string(MarkLTRAuthoredLines([]byte(input))); got != want {
+		t.Fatalf("marked SRT\n got %q\nwant %q", got, want)
+	}
+}

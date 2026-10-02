@@ -135,8 +135,12 @@ func firstStrongIsRightToLeft(text string) bool {
 	return false
 }
 
+// isSentencePunctuation reports the weak or neutral punctuation an LTR author
+// moves. The Arabic comma is weak like the ASCII one; the Arabic question mark
+// and full stop are strong right-to-left characters, already land on the
+// correct side in either layout, and so are never moved.
 func isSentencePunctuation(r rune) bool {
-	return r == '.' || r == '…' || r == '!' || r == '?' || r == ','
+	return r == '.' || r == '…' || r == '!' || r == '?' || r == ',' || r == '،'
 }
 
 // hasLTRAuthoredPunctuation reports a sentence end moved to the logical start
