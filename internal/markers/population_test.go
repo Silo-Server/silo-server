@@ -62,8 +62,8 @@ func (s *populationRecorder) Cooldown(_ context.Context, provider, _ string, unt
 func (s *populationRecorder) Cached(context.Context, int, string) (map[string]Result, error) {
 	return s.cached, nil
 }
-func (s *populationRecorder) Candidates(context.Context, map[string]string, int, int, bool) ([]int, error) {
-	return nil, nil
+func (s *populationRecorder) Candidates(context.Context, map[string]string, *SyncCursor, int) ([]int, *SyncCursor, error) {
+	return nil, nil, nil
 }
 
 func populationFixture(t *testing.T, storage OnlineStorage, provider *populationProvider) (*PopulationService, *populationRecorder) {

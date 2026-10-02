@@ -22,8 +22,10 @@ const (
 	markerFetchLimited  = "limited"
 	markerFetchOnDemand = "on_demand"
 
-	markerPositiveTTL  = 7 * 24 * time.Hour
-	markerMissTTL      = 24 * time.Hour
+	// TheIntroDB asks clients to keep found markers for a month and retry
+	// missing ones after two weeks, so a daily quota can fill a library.
+	markerPositiveTTL  = 30 * 24 * time.Hour
+	markerMissTTL      = 14 * 24 * time.Hour
 	markerMemoryTTL    = 15 * time.Minute
 	markerFetchTimeout = 45 * time.Second
 	markerMemoryLimit  = 512
@@ -541,40 +543,38 @@ func (s *PopulationService) Sync(ctx context.Context, progress func(float64, str
 		}
 		return summary, nil
 	}
-	for _, unqueried := range []bool{true, false} {
-		afterID := 0
-		for {
+	var cursor *SyncCursor
+	for {
+		if err := ctx.Err(); err != nil {
+			return summary, err
+		}
+		ids, next, err := s.opts.Store.Candidates(ctx, providers, cursor, 100)
+		if err != nil {
+			return summary, err
+		}
+		if len(ids) == 0 {
+			break
+		}
+		cursor = next
+		for _, id := range ids {
 			if err := ctx.Err(); err != nil {
 				return summary, err
 			}
-			ids, err := s.opts.Store.Candidates(ctx, providers, afterID, 100, unqueried)
+			summary.Considered++
+			file, err := s.opts.LoadFile(ctx, id)
 			if err != nil {
-				return summary, err
+				summary.Failed++
+				continue
 			}
-			if len(ids) == 0 {
-				break
+			_, changed, err := s.populate(ctx, file, false, false)
+			if err != nil {
+				summary.Failed++
 			}
-			for _, id := range ids {
-				if err := ctx.Err(); err != nil {
-					return summary, err
-				}
-				afterID = id
-				summary.Considered++
-				file, err := s.opts.LoadFile(ctx, id)
-				if err != nil {
-					summary.Failed++
-					continue
-				}
-				_, changed, err := s.populate(ctx, file, false, false)
-				if err != nil {
-					summary.Failed++
-				}
-				if changed {
-					summary.Updated++
-				}
-				if progress != nil {
-					progress(0, fmt.Sprintf("Checked %d files; updated %d", summary.Considered, summary.Updated))
-				}
+			if changed {
+				summary.Updated++
+			}
+			if progress != nil {
+				progress(0, fmt.Sprintf("Checked %d files; updated %d", summary.Considered, summary.Updated))
 			}
 		}
 	}

@@ -22,8 +22,10 @@ Existing installations retain their configured marker mode, which accepts `off`,
 
 - `stored` persists markers and enables the **Sync online markers** task,
   scheduled daily at 03:00 in server-local time by default.
-  Sync checks unqueried files before refreshing previous results. Successful
-  responses are fresh for seven days; empty results are retried after one day.
+  Sync checks unqueried files first, then refreshes the least recently fetched
+  results, so a run stopped by a provider quota resumes where it left off.
+  Successful responses are fresh for 30 days; empty results are retried after
+  14 days, following TheIntroDB's guidance for clients that sync a library.
   `markers.lazy_playback` also allows reads and playback to fill missing markers.
 - `on_demand` looks up markers for the selected file and keeps a bounded,
   fifteen-minute memory cache. It does not persist provider responses or run
