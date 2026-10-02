@@ -2303,6 +2303,40 @@ func TestPluginProviderKeepsBoundedSanitizedPageWarnings(t *testing.T) {
 	}
 }
 
+// A warning that echoes any secret the read carried, not only the tokens, is
+// redacted before it reaches the sync run.
+func TestPluginProviderRedactsEverySecretFromPageWarnings(t *testing.T) {
+	client := &fakeWatchSyncPluginClient{listResponses: []*pluginv1.WatchSyncListRemoteStateResponse{{
+		Warnings:   []string{"client app-secret-value and attribute attribute-secret-value"},
+		NextCursor: "cursor-1",
+	}}}
+	provider, err := NewPluginProvider(PluginProviderOptions{
+		InstallationID: 4,
+		ProviderKey:    testPluginProviderKey,
+		CapabilityID:   testPluginCapabilityID,
+		Descriptor:     droppedTestDescriptor(),
+		ResolveClient: func(context.Context, int, string) (WatchSyncPluginClient, error) {
+			return client, nil
+		},
+		ResolveConfig: func(context.Context, int) (*pluginv1.WatchSyncProviderConfig, error) {
+			return &pluginv1.WatchSyncProviderConfig{SecretValues: map[string]string{"app.client_secret": "app-secret-value"}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := provider.FetchDropped(context.Background(), ServerConfig{}, Connection{
+		AccessToken:      testSecretValue,
+		SecretAttributes: map[string]string{"session": "attribute-secret-value"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(batch.Warnings, []string{"client [REDACTED] and attribute [REDACTED]"}) {
+		t.Fatalf("warnings = %q, want both secrets redacted", batch.Warnings)
+	}
+}
+
 func TestPluginProviderEveryRemoteStateBatchCarriesPageWarnings(t *testing.T) {
 	ctx := context.Background()
 	for name, fetch := range map[string]func(*PluginProvider) ([]string, error){

@@ -385,7 +385,8 @@ func (p *PluginProvider) listRemoteState(
 			return pluginRemoteTraversal{}, errors.New("watch sync plugin exceeded the remote-state item limit")
 		}
 		result.items = append(result.items, items...)
-		result.addWarnings(response.GetWarnings(), conn.AccessToken, conn.RefreshToken)
+		result.addWarnings(response.GetWarnings(),
+			append(authenticatedContextSecrets(authContext), conn.AccessToken, conn.RefreshToken)...)
 
 		nextPage := strings.TrimSpace(response.GetNextPageToken())
 		if nextPage == "" {

@@ -588,6 +588,22 @@ func (p *PluginProvider) authenticatedContext(ctx context.Context, conn Connecti
 	}, nil
 }
 
+// authenticatedContextSecrets lists every secret an RPC carried to the
+// plugin: its tokens, secret credential attributes, and secret config values,
+// such as a provider app's client secret. Text the plugin returns is scrubbed
+// of all of them.
+func authenticatedContextSecrets(authContext *pluginv1.WatchSyncAuthenticatedContext) []string {
+	credentials := authContext.GetCredentials()
+	secrets := []string{credentials.GetAccessToken(), credentials.GetRefreshToken()}
+	for _, value := range credentials.GetSecretAttributes() {
+		secrets = append(secrets, value)
+	}
+	for _, value := range authContext.GetProviderConfig().GetSecretValues() {
+		secrets = append(secrets, value)
+	}
+	return secrets
+}
+
 func (p *PluginProvider) providerConfig(ctx context.Context) (*pluginv1.WatchSyncProviderConfig, error) {
 	if p.resolveConfig == nil {
 		return &pluginv1.WatchSyncProviderConfig{}, nil
@@ -1364,10 +1380,17 @@ func safeApplyMessage(result *pluginv1.WatchSyncApplyResult, secrets ...string) 
 
 func sanitizeWatchSyncMessage(message string, fallback string, secrets ...string) string {
 	message = normalizeWatchSyncText(message)
+	// Longest first, so a secret that contains a shorter one is still
+	// redacted whole.
+	ordered := make([]string, 0, len(secrets))
 	for _, secret := range secrets {
 		if secret = normalizeWatchSyncText(secret); secret != "" {
-			message = strings.ReplaceAll(message, secret, "[REDACTED]")
+			ordered = append(ordered, secret)
 		}
+	}
+	slices.SortFunc(ordered, func(a, b string) int { return len(b) - len(a) })
+	for _, secret := range ordered {
+		message = strings.ReplaceAll(message, secret, "[REDACTED]")
 	}
 	if message == "" {
 		return fallback
