@@ -32,6 +32,7 @@ export interface UserPolicyState {
   maxTranscodes: number | null;
   maxRemoteStreamBitrateKbps: number | null;
   maxLocalStreamBitrateKbps: number | null;
+  maxProfiles: number | null;
   transcodeAllowed: boolean | null;
   audioTranscodeAllowed: boolean | null;
   downloadAllowed: boolean | null;
@@ -48,6 +49,7 @@ const POLICY_FIELDS = {
   maxTranscodes: "max_transcodes",
   maxRemoteStreamBitrateKbps: "max_remote_stream_bitrate_kbps",
   maxLocalStreamBitrateKbps: "max_local_stream_bitrate_kbps",
+  maxProfiles: "max_profiles",
   transcodeAllowed: "transcode_allowed",
   audioTranscodeAllowed: "audio_transcode_allowed",
   downloadAllowed: "download_allowed",
@@ -100,6 +102,7 @@ const NO_GROUP_POLICY = {
   max_transcodes: 0,
   max_remote_stream_bitrate_kbps: 0,
   max_local_stream_bitrate_kbps: 0,
+  max_profiles: 5,
   transcode_allowed: true,
   audio_transcode_allowed: true,
   download_allowed: true,
@@ -125,6 +128,7 @@ export function policyInheritHints(
     max_transcodes: group.max_transcodes,
     max_remote_stream_bitrate_kbps: group.max_remote_stream_bitrate_kbps,
     max_local_stream_bitrate_kbps: group.max_local_stream_bitrate_kbps,
+    max_profiles: group.max_profiles,
     transcode_allowed: group.transcode_allowed,
     audio_transcode_allowed: group.audio_transcode_allowed,
     download_allowed: group.download_allowed,
@@ -257,10 +261,10 @@ function BooleanPolicyRow({
   );
 }
 
-function limitDraftValue(draft: string): number | null {
+function limitDraftValue(draft: string, min: number): number | null {
   if (draft.trim() === "") return null;
   const parsed = Number(draft);
-  if (!Number.isInteger(parsed) || parsed < 0) return null;
+  if (!Number.isInteger(parsed) || parsed < min) return null;
   return parsed;
 }
 
@@ -312,12 +316,15 @@ function LimitPolicyField({
   onValueChange,
   source,
   effectiveValue,
+  min = 0,
 }: {
   label: string;
   value: number | null;
   onValueChange: (value: number | null) => void;
   source: PolicyDefaultSource;
   effectiveValue?: number;
+  /** The lowest value; with 0 allowed it means unlimited. */
+  min?: number;
 }) {
   const id = useId();
   // Override is tracked locally because "overriding, but nothing typed yet" has
@@ -327,7 +334,13 @@ function LimitPolicyField({
   // The raw string stays local so a cleared or half-typed box is an unsaved
   // edit instead of collapsing to 0 or NaN.
   const [draft, setDraft] = useState(() => (value === null ? "" : String(value)));
-  const draftValue = limitDraftValue(draft);
+  const draftValue = limitDraftValue(draft, min);
+  const help =
+    draftValue === null
+      ? `Enter a whole number${min > 0 ? ` of at least ${min}` : ""}, or turn Override off to ${DEFAULT_SOURCE_TEXT[source].revert}.`
+      : min === 0
+        ? "0 = unlimited"
+        : undefined;
 
   function handleOverrideChange(checked: boolean) {
     setOverridden(checked);
@@ -345,7 +358,7 @@ function LimitPolicyField({
 
   function handleDraftChange(raw: string) {
     setDraft(raw);
-    const parsed = limitDraftValue(raw);
+    const parsed = limitDraftValue(raw, min);
     if (parsed === null) return;
     onValueChange(parsed);
   }
@@ -368,17 +381,13 @@ function LimitPolicyField({
       <Input
         id={id}
         type="number"
-        min={0}
+        min={min}
         step={1}
         required
         value={draft}
         onChange={(event) => handleDraftChange(event.target.value)}
       />
-      <p className="text-muted-foreground text-xs">
-        {draftValue === null
-          ? `Enter a whole number, or turn Override off to ${DEFAULT_SOURCE_TEXT[source].revert}.`
-          : "0 = unlimited"}
-      </p>
+      {help && <p className="text-muted-foreground text-xs">{help}</p>}
     </PolicyOverrideField>
   );
 }
@@ -585,6 +594,14 @@ export function PolicyLimitFields({ state, onChange, source, effective }: Policy
             : PLAYBACK_QUALITY_OPTIONS.find((option) => option.value === qualityValue)?.description}
         </p>
       </div>
+      <LimitPolicyField
+        label="Max Profiles"
+        min={1}
+        value={state.maxProfiles}
+        onValueChange={(maxProfiles) => onChange({ ...state, maxProfiles })}
+        source={source}
+        effectiveValue={effective?.max_profiles}
+      />
     </>
   );
 }

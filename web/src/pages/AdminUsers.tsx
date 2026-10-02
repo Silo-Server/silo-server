@@ -777,7 +777,6 @@ function UserForm({
   );
   // Policy fields inherit from the access group unless explicitly overridden.
   const [policy, setPolicy] = useState(() => policyStateFromUser(user ?? null));
-  const [maxProfiles, setMaxProfiles] = useState<number>(user?.max_profiles ?? 5);
   const usernameId = useId();
   const emailId = useId();
   const passwordId = useId();
@@ -786,7 +785,6 @@ function UserForm({
   const enabledId = useId();
   const markerEditId = useId();
   const metadataCurationId = useId();
-  const maxProfilesId = useId();
   const accessGroupSelectId = useId();
   const createMutation = useCreateUser();
   const updateMutation = useUpdateUser();
@@ -855,7 +853,6 @@ function UserForm({
           role,
           permissions,
           enabled,
-          max_profiles: maxProfiles,
           ...policyUpdateFields(policy),
         };
         if (groupToSend !== undefined) {
@@ -878,7 +875,6 @@ function UserForm({
           role,
           permissions,
           create_default_profile: createDefaultProfile,
-          max_profiles: maxProfiles,
           ...policyCreateFields(policy),
           ...(typeof groupToSend === "number" ? { access_group_id: groupToSend } : {}),
         };
@@ -1130,16 +1126,6 @@ function UserForm({
               source={hintSource}
               effective={inheritHints}
             />
-            <div className="space-y-1">
-              <Label htmlFor={maxProfilesId}>Max Profiles</Label>
-              <Input
-                id={maxProfilesId}
-                type="number"
-                min={1}
-                value={maxProfiles}
-                onChange={(e) => setMaxProfiles(Number(e.target.value))}
-              />
-            </div>
           </TabsContent>
         </div>
       </Tabs>

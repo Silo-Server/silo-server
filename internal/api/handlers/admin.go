@@ -325,7 +325,9 @@ func (r *updateUserRequest) libraryIDsOptional() models.Optional[[]int] {
 // The policy fields carry the account's stored overrides: null means the
 // field is inherited from the access group. EffectivePolicy is the resolved
 // value the server enforces (override when set, otherwise the group's value,
-// otherwise the permissive no-group default).
+// otherwise the permissive no-group default). MaxProfiles is the exception:
+// the frozen v1 body has no inherit state for it, so it carries the limit that
+// applies, and the v2-only MaxProfilesOverride carries the stored override.
 type AdminUserView struct {
 	ID                         int                 `json:"id"`
 	Username                   string              `json:"username"`
@@ -342,6 +344,7 @@ type AdminUserView struct {
 	TranscodeAllowed           *bool               `json:"transcode_allowed"`
 	AudioTranscodeAllowed      *bool               `json:"audio_transcode_allowed"`
 	MaxProfiles                int                 `json:"max_profiles"`
+	MaxProfilesOverride        *int                `json:"-"`
 	DownloadAllowed            *bool               `json:"download_allowed"`
 	DownloadTranscodeAllowed   *bool               `json:"download_transcode_allowed"`
 	RequestsAllowed            *bool               `json:"requests_allowed"`
@@ -368,6 +371,7 @@ type EffectivePolicyView struct {
 	MaxTranscodes              int      `json:"max_transcodes"`
 	MaxRemoteStreamBitrateKbps int      `json:"-"`
 	MaxLocalStreamBitrateKbps  int      `json:"-"`
+	MaxProfiles                int      `json:"-"`
 	TranscodeAllowed           bool     `json:"transcode_allowed"`
 	AudioTranscodeAllowed      bool     `json:"audio_transcode_allowed"`
 	DownloadAllowed            bool     `json:"download_allowed"`
@@ -438,7 +442,8 @@ func toAdminUserResponse(u *models.User, group *access.GroupPolicy) AdminUserVie
 		MaxLocalStreamBitrateKbps:  clonePtr(u.MaxLocalStreamBitrateKbps),
 		TranscodeAllowed:           clonePtr(u.TranscodeAllowed),
 		AudioTranscodeAllowed:      clonePtr(u.AudioTranscodeAllowed),
-		MaxProfiles:                u.MaxProfiles,
+		MaxProfiles:                effective.MaxProfiles,
+		MaxProfilesOverride:        clonePtr(u.MaxProfiles),
 		DownloadAllowed:            clonePtr(u.DownloadAllowed),
 		DownloadTranscodeAllowed:   clonePtr(u.DownloadTranscodeAllowed),
 		RequestsAllowed:            clonePtr(u.RequestsAllowed),
@@ -454,6 +459,7 @@ func toAdminUserResponse(u *models.User, group *access.GroupPolicy) AdminUserVie
 			MaxTranscodes:              effective.MaxTranscodes,
 			MaxRemoteStreamBitrateKbps: effective.MaxRemoteStreamBitrateKbps,
 			MaxLocalStreamBitrateKbps:  effective.MaxLocalStreamBitrateKbps,
+			MaxProfiles:                effective.MaxProfiles,
 			TranscodeAllowed:           effective.TranscodeAllowed,
 			AudioTranscodeAllowed:      effective.AudioTranscodeAllowed,
 			DownloadAllowed:            effective.DownloadAllowed,
@@ -1017,7 +1023,7 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		MaxTranscodes:            req.MaxTranscodes.Optional(),
 		TranscodeAllowed:         req.TranscodeAllowed.Optional(),
 		AudioTranscodeAllowed:    req.AudioTranscodeAllowed.Optional(),
-		MaxProfiles:              req.MaxProfiles,
+		MaxProfiles:              models.Optional[int]{Set: req.MaxProfiles != nil, Value: req.MaxProfiles},
 		DownloadAllowed:          req.DownloadAllowed.Optional(),
 		DownloadTranscodeAllowed: req.DownloadTranscodeAllowed.Optional(),
 		RequestsAllowed:          req.RequestsAllowed.Optional(),

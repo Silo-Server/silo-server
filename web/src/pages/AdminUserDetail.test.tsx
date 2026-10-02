@@ -56,7 +56,7 @@ const adminUser: AdminUser = {
   max_local_stream_bitrate_kbps: null,
   transcode_allowed: null,
   audio_transcode_allowed: null,
-  max_profiles: 4,
+  max_profiles: null,
   download_allowed: null,
   download_transcode_allowed: null,
   requests_allowed: null,
@@ -71,6 +71,7 @@ const adminUser: AdminUser = {
     max_transcodes: 0,
     max_remote_stream_bitrate_kbps: 0,
     max_local_stream_bitrate_kbps: 0,
+    max_profiles: 4,
     transcode_allowed: true,
     audio_transcode_allowed: true,
     download_allowed: true,
@@ -146,6 +147,7 @@ vi.mock("@/hooks/queries/admin/accessGroups", () => ({
         max_transcodes: 0,
         max_remote_stream_bitrate_kbps: 8000,
         max_local_stream_bitrate_kbps: 0,
+        max_profiles: 5,
         allowed_permissions: [PERMISSION_MARKER_EDIT],
         requests_allowed: false,
         is_default: false,
@@ -793,6 +795,33 @@ describe("unsaved changes", () => {
     ).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(search()).toBe("?tab=access");
+  });
+
+  it("stays when a card's draft can't be saved, with the reason in the card", async () => {
+    const ui = userEvent.setup();
+    mocks.user = { ...adminUser, max_profiles: 6 };
+    renderUserDetail("/admin/users/7?tab=access");
+    await ui.click(screen.getByRole("button", { name: "Edit Sign-in & role" }));
+    const signIn = screen.getByRole("region", { name: "Sign-in & role" });
+    const username = within(signIn).getByRole("textbox", { name: "Username" });
+    await ui.clear(username);
+    await ui.type(username, "jordan");
+    const limit = within(signIn).getByRole("spinbutton", { name: "Profiles allowed" });
+    await ui.clear(limit);
+    await ui.type(limit, "0");
+    await ui.click(screen.getByRole("tab", { name: "Overview" }));
+    await ui.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Save and continue",
+      }),
+    );
+    expect(
+      await within(signIn).findByText("Allow at least 1 profile, or choose Default."),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(search()).toBe("?tab=access");
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(limit).toHaveValue(0);
   });
 
   it("asks before leaving the page too", async () => {

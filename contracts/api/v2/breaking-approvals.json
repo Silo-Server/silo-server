@@ -1,18 +1,18 @@
 {
   "approvals": [
     {
-      "operation_id": "getDeviceLogin",
-      "change_id": "response-property-enum-value-added",
-      "fingerprint": "7a081b939280908637a756d506ea3c9064defa1209d8dd538d662dc6e639fe69",
-      "reason": "Pre-lock addition for TV sign-in: a device can now withdraw its own request, which then reads as canceled to the approver. The approvers are the web /activate page, which this change teaches to show canceled, and the silo-apple and silo-android phone approval screens. Whatever a phone makes of the unknown value, approving or denying a canceled request answers 409, so it can't lead to a sign-in; the phone apps get the canceled wording with the TV sign-in client work. The frozen v1 routes report it as denied.",
-      "approved_in": "#1799"
+      "operation_id": "listAdminUsers",
+      "change_id": "response-property-became-nullable",
+      "fingerprint": "5ea325c6e0cd4853fee0c248dd139bd6346e273ca0e10f2c4a2f6bd6a25c54f0",
+      "reason": "Pre-lock change from #1399: an account's profile limit now inherits its access group's limit unless the account overrides it, like the other policy fields, so a null max_profiles means the account inherits and effective_policy.max_profiles carries the limit that applies. The bundled web admin pages read both in the same change. The Apple and Android apps don't read max_profiles. The frozen v1 admin user body keeps reporting the limit that applies.",
+      "approved_in": "#1399"
     },
     {
-      "operation_id": "pollDeviceLogin",
-      "change_id": "response-property-enum-value-added",
-      "fingerprint": "dfc4bc49621dd69efae54e3bd262f3f46823c9cd92bce9a81c420ce44eb0e5b3",
-      "reason": "Pre-lock addition for TV sign-in: a device can now withdraw its own request, which then reads as canceled. Only the device that canceled polls it, and it stops polling when it cancels. Existing silo-apple and silo-android device polls treat an unknown status as a failed attempt, which fails closed; the TV sign-in client work shows it properly. The frozen v1 routes report it as denied.",
-      "approved_in": "#1799"
+      "operation_id": "getAdminUser",
+      "change_id": "response-property-became-nullable",
+      "fingerprint": "a8d908f1ed47cb86f549d3375898bc45ea000241df9fd8179d7dc5da63e62ba5",
+      "reason": "Pre-lock change from #1399: an account's profile limit now inherits its access group's limit unless the account overrides it, like the other policy fields, so a null max_profiles means the account inherits and effective_policy.max_profiles carries the limit that applies. The bundled web admin pages read both in the same change. The Apple and Android apps don't read max_profiles. The frozen v1 admin user body keeps reporting the limit that applies.",
+      "approved_in": "#1399"
     }
   ]
 }

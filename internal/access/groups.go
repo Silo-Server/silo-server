@@ -28,6 +28,7 @@ type GroupPolicy struct {
 	MaxTranscodes              int
 	MaxRemoteStreamBitrateKbps int      // 0 = unlimited
 	MaxLocalStreamBitrateKbps  int      // 0 = unlimited
+	MaxProfiles                int      // household profiles per account; at least 1
 	AllowedPermissions         []string // nil = all assignable
 	RequestsAllowed            bool
 }
@@ -46,16 +47,24 @@ type EffectiveUserPolicy struct {
 	MaxTranscodes              int
 	MaxRemoteStreamBitrateKbps int
 	MaxLocalStreamBitrateKbps  int
+	MaxProfiles                int
 	Permissions                []string
 	RequestsAllowed            bool
 }
+
+// DefaultMaxProfiles is the household profile limit of an account outside
+// every access group, and of a new group that does not set one. It was the
+// stored default on every account before groups set the limit.
+const DefaultMaxProfiles = 5
 
 // NoGroupPolicy is the policy applied to an account with no access group
 // (admins are ungrouped). It is permissive so that an unset field on such an
 // account keeps today's unrestricted behavior. DownloadTranscodeAllowed is
 // the exception: it defaults to false because that was the old column default
 // on users (and is the seeded Default Group's value), so an account that never
-// had the gate turned on does not silently gain it.
+// had the gate turned on does not silently gain it. MaxProfiles is
+// DefaultMaxProfiles, the limit such an account always had: profiles were
+// never unlimited.
 func NoGroupPolicy() GroupPolicy {
 	return GroupPolicy{
 		LibraryIDs:                 nil,
@@ -68,6 +77,7 @@ func NoGroupPolicy() GroupPolicy {
 		MaxTranscodes:              0,
 		MaxRemoteStreamBitrateKbps: 0,
 		MaxLocalStreamBitrateKbps:  0,
+		MaxProfiles:                DefaultMaxProfiles,
 		AllowedPermissions:         nil,
 		RequestsAllowed:            true,
 	}
@@ -121,6 +131,7 @@ func ApplyGroupPolicy(user *models.User, group *GroupPolicy) EffectiveUserPolicy
 		MaxTranscodes:              inheritInt(user.MaxTranscodes, base.MaxTranscodes),
 		MaxRemoteStreamBitrateKbps: inheritInt(user.MaxRemoteStreamBitrateKbps, base.MaxRemoteStreamBitrateKbps),
 		MaxLocalStreamBitrateKbps:  inheritInt(user.MaxLocalStreamBitrateKbps, base.MaxLocalStreamBitrateKbps),
+		MaxProfiles:                inheritInt(user.MaxProfiles, base.MaxProfiles),
 		Permissions:                cloneStrings(user.Permissions),
 		RequestsAllowed:            inheritBool(user.RequestsAllowed, base.RequestsAllowed),
 	}

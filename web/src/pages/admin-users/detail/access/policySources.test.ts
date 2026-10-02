@@ -35,7 +35,7 @@ const USER: AdminUser = {
   max_local_stream_bitrate_kbps: null,
   transcode_allowed: null,
   audio_transcode_allowed: null,
-  max_profiles: 5,
+  max_profiles: null,
   download_allowed: null,
   download_transcode_allowed: null,
   requests_allowed: null,
@@ -50,6 +50,7 @@ const USER: AdminUser = {
     max_transcodes: 0,
     max_remote_stream_bitrate_kbps: 0,
     max_local_stream_bitrate_kbps: 0,
+    max_profiles: 5,
     transcode_allowed: true,
     audio_transcode_allowed: true,
     download_allowed: true,
@@ -75,6 +76,7 @@ const FAMILY: AccessGroup = {
   max_transcodes: 1,
   max_remote_stream_bitrate_kbps: 8000,
   max_local_stream_bitrate_kbps: 0,
+  max_profiles: 5,
   allowed_permissions: ["marker_edit"],
   requests_allowed: true,
   is_default: false,
@@ -126,6 +128,7 @@ describe("inheritedValueText", () => {
       "Default: allowed, unlimited",
     );
     expect(inheritedValueText("remoteBitrate", hints, ctx, LIBRARIES)).toBe("Default: no cap");
+    expect(inheritedValueText("maxProfiles", hints, ctx, LIBRARIES)).toBe("Default: 5");
     expect(inheritedValueText("libraries", hints, ctx, LIBRARIES)).toBe("Default: all libraries");
   });
 
@@ -198,6 +201,10 @@ describe("countCustomPolicyRows", () => {
         requests_allowed: false,
       }),
     ).toBe(4);
+  });
+
+  it("counts a profile limit set on the account", () => {
+    expect(countCustomPolicyRows({ ...USER, max_profiles: 3 })).toBe(1);
   });
 });
 

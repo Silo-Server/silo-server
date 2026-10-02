@@ -22,7 +22,8 @@ export type PolicyRowKey =
   | "localBitrate"
   | "downloads"
   | "serverPrepared"
-  | "requests";
+  | "requests"
+  | "maxProfiles";
 
 /** "Owner", "Admin" or "User". */
 export function roleLabel(user: Pick<AdminUser, "is_owner" | "role">): string {
@@ -66,6 +67,8 @@ function rowOverridden(user: AdminUser, row: PolicyRowKey): boolean {
       return user.download_transcode_allowed !== null;
     case "requests":
       return user.requests_allowed !== null;
+    case "maxProfiles":
+      return user.max_profiles !== null;
   }
 }
 
@@ -159,6 +162,8 @@ function inheritedValue(
       return lowered(hints.download_transcode_allowed, formatAllowed);
     case "requests":
       return lowered(hints.requests_allowed, (allowed) => (allowed ? "yes" : "no"));
+    case "maxProfiles":
+      return lowered(hints.max_profiles, String);
   }
 }
 
@@ -173,6 +178,7 @@ const POLICY_ROWS: PolicyRowKey[] = [
   "downloads",
   "serverPrepared",
   "requests",
+  "maxProfiles",
 ];
 
 /** Rows this account sets itself; video transcoding counts once for its two fields. */

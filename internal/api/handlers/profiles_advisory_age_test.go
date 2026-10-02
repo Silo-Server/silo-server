@@ -86,7 +86,7 @@ func TestUpdateProfile_AdvisoryAgeLimit(t *testing.T) {
 func TestCreateProfile_AdvisoryAgeLimitNeedsAManager(t *testing.T) {
 	store := newEmptyProfileTestStore(t)
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
-	handler.UserRepo = testProfileUserRepo{user: &models.User{ID: 1, MaxProfiles: 5}}
+	handler.UserRepo = testProfileUserRepo{user: &models.User{ID: 1, MaxProfiles: new(5)}}
 
 	_, err := handler.CreateProfile(profileServiceContext(""), ProfileCreateCommand{
 		UserID:        1,
@@ -189,7 +189,7 @@ func TestUpdateProfile_RequireAdvisoryAge(t *testing.T) {
 func TestCreateProfile_RequireAdvisoryAgeNeedsAManager(t *testing.T) {
 	store := newEmptyProfileTestStore(t)
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
-	handler.UserRepo = testProfileUserRepo{user: &models.User{ID: 1, MaxProfiles: 5}}
+	handler.UserRepo = testProfileUserRepo{user: &models.User{ID: 1, MaxProfiles: new(5)}}
 
 	_, err := handler.CreateProfile(profileServiceContext(""), ProfileCreateCommand{
 		UserID:        1,

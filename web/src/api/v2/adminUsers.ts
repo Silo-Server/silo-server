@@ -65,6 +65,7 @@ export function adminUserFromV2(user: AdminUserV2): AdminUser {
       max_transcodes: user.effective_policy.max_transcodes,
       max_remote_stream_bitrate_kbps: user.effective_policy.max_remote_stream_bitrate_kbps,
       max_local_stream_bitrate_kbps: user.effective_policy.max_local_stream_bitrate_kbps,
+      max_profiles: user.effective_policy.max_profiles,
       transcode_allowed: user.effective_policy.transcode_allowed,
       audio_transcode_allowed: user.effective_policy.audio_transcode_allowed,
       download_allowed: user.effective_policy.download_allowed,

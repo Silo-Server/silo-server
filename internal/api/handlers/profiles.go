@@ -28,6 +28,9 @@ type ProfileHandler struct {
 	UserRepo       interface {
 		GetByID(ctx context.Context, id int) (*models.User, error)
 	}
+	// AccessGroups resolves the profile limit an account inherits from its
+	// access group. Nil resolves every account as ungrouped.
+	AccessGroups   access.GroupPolicyProvider
 	ProfileTokens  *access.ProfileTokenService
 	AvatarStore    profileAvatarStore
 	AvatarResolver artworkurl.Resolver
@@ -401,9 +404,15 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 		if err != nil {
 			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load user")
 		}
-		if user != nil && user.MaxProfiles >= 1 && len(existingProfiles) >= user.MaxProfiles {
-			return none, apiError(http.StatusConflict, "profile_limit_reached",
-				fmt.Sprintf("This account has reached its profile limit (%d)", user.MaxProfiles))
+		if user != nil {
+			effective, err := access.EffectivePolicyForUser(ctx, user, h.AccessGroups)
+			if err != nil {
+				return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load the account's profile limit")
+			}
+			if limit := effective.MaxProfiles; limit >= 1 && len(existingProfiles) >= limit {
+				return none, apiError(http.StatusConflict, "profile_limit_reached",
+					fmt.Sprintf("This account has reached its profile limit (%d)", limit))
+			}
 		}
 	}
 

@@ -50,6 +50,28 @@ func TestLocalStreamBitratePolicyInheritanceAndOverride(t *testing.T) {
 	}
 }
 
+func TestMaxProfilesInheritanceAndOverride(t *testing.T) {
+	group := &GroupPolicy{MaxProfiles: 2}
+	user := &models.User{}
+	if got := ApplyGroupPolicy(user, group).MaxProfiles; got != 2 {
+		t.Fatalf("inherited profile limit = %d, want 2", got)
+	}
+	user.MaxProfiles = ptr(8)
+	if got := ApplyGroupPolicy(user, group).MaxProfiles; got != 8 {
+		t.Fatalf("profile limit override = %d, want 8", got)
+	}
+	user.MaxProfiles = nil
+	if got := ApplyGroupPolicy(user, nil).MaxProfiles; got != DefaultMaxProfiles {
+		t.Fatalf("no-group profile limit = %d, want %d", got, DefaultMaxProfiles)
+	}
+	// An admin row that still carries a group resolves as ungrouped.
+	admin := &models.User{Role: models.RoleAdmin, AccessGroupID: ptr(int64(4))}
+	got, err := EffectivePolicyForUser(t.Context(), admin, failingGroupProvider{t: t})
+	if err != nil || got.MaxProfiles != DefaultMaxProfiles {
+		t.Fatalf("admin profile limit = %d, %v; want %d", got.MaxProfiles, err, DefaultMaxProfiles)
+	}
+}
+
 func TestApplyGroupPolicyNoGroupUsesOverridesOverPermissiveDefault(t *testing.T) {
 	user := &models.User{
 		ID:                       7,
@@ -71,6 +93,7 @@ func TestApplyGroupPolicyNoGroupUsesOverridesOverPermissiveDefault(t *testing.T)
 		AudioTranscodeAllowed:    true,
 		MaxStreams:               6,
 		MaxTranscodes:            2,
+		MaxProfiles:              DefaultMaxProfiles,
 		Permissions:              []string{"metadata_curation", "marker_edit", "marker_edit"},
 		RequestsAllowed:          true,
 	}
@@ -92,6 +115,7 @@ func TestApplyGroupPolicyUnsetUserInheritsNoGroupDefaults(t *testing.T) {
 		AudioTranscodeAllowed:    true,
 		MaxStreams:               0,
 		MaxTranscodes:            0,
+		MaxProfiles:              DefaultMaxProfiles,
 		Permissions:              nil,
 		RequestsAllowed:          true,
 	}

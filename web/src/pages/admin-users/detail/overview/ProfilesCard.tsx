@@ -21,7 +21,11 @@ export function ProfilesCard({
   return (
     <DetailCard
       title="Profiles"
-      description={count === undefined ? undefined : `${count} of ${user.max_profiles} allowed`}
+      description={
+        count === undefined
+          ? undefined
+          : `${count} of ${user.effective_policy.max_profiles} allowed`
+      }
     >
       {profiles.isError ? (
         <div role="alert" className="flex flex-wrap items-center gap-2 px-4 py-4 text-sm sm:px-5">
