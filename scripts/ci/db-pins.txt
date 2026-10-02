@@ -95,3 +95,18 @@
 # Artwork storage sweep: the GC-schedule lookup its anomaly guard consults must
 # count armed candidates only, never parked (live) ones.
 ./internal/metadata TestArtworkSweepScheduledOriginalsPostgres
+
+# Personal collections hold stored seasons: grid, paging, access, filters,
+# counts, plan shape and the editor list stay consistent with each other.
+./internal/catalog TestPersonalCollectionListsSeasonMembersDB
+./internal/catalog TestPersonalCollectionSeasonTitleOrderAndPagingDB
+./internal/catalog TestPersonalCollectionSeasonsFollowSeriesAccessDB
+./internal/catalog TestPersonalCollectionTypeFilterIncludesSeasonsDB
+./internal/catalog TestCountVisiblePersonalCollectionMembersIncludesSeasonsDB
+./internal/catalog TestPersonalCollectionSourcePlanDB
+./internal/api/handlers TestPersonalCollectionPagingListsSeasonMembersDB
+./internal/api/handlers TestPersonalCollectionOrderEditorIncludesSeasonMembersDB
+./internal/catalog TestPersonalCollectionTitleSortKeepsSeasonsWithSeriesDB
+./internal/catalog TestPersonalCollectionSeriesScopeIncludesSeasonsDB
+./internal/catalog TestPersonalCollectionAddedSortPlacesSeasonsWithSeriesDB
+./internal/catalog TestPersonalCollectionFileFiltersMatchSeasonEpisodesDB

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -40,6 +41,22 @@ type QueryExecutor struct {
 	// BaseRelationSQL, when set, replaces the default "media_items mi" source.
 	// The relation must already be aliased as "mi".
 	BaseRelationSQL string
+	// BaseRelationArgs binds the parameters BaseRelationSQL numbers from $1.
+	// They precede every other argument; filter, source and access
+	// placeholders are shifted past them. Ignored in the episode scope,
+	// whose relation binds its own library arguments.
+	BaseRelationArgs []any
+	// LibraryContentExpr, when set, replaces mi.content_id as the key that
+	// library allow/deny predicates look up in media_item_libraries. A
+	// relation whose rows borrow another item's library membership (a
+	// season borrowing its series') projects that key and names it here.
+	LibraryContentExpr string
+	// SeasonsMatchSeriesType is passed to the query builder; see
+	// QueryBuilder.WithSeasonsMatchSeriesType.
+	SeasonsMatchSeriesType bool
+	// SeasonOrderKeyExpr is passed to the query builder; see
+	// QueryBuilder.WithSeasonOrderKey.
+	SeasonOrderKeyExpr string
 	// SnapshotAt, when set, restricts results to items created at or before
 	// this timestamp.  This prevents offset-based pagination drift when new
 	// items are inserted between page fetches (e.g. during a scan).
@@ -342,6 +359,9 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		)
 		libraryScopeHandledInBaseRelation = handled
 	}
+	if !isEpisodeCatalogScope(effectiveScope) && len(e.BaseRelationArgs) > 0 {
+		baseArgs = append([]any(nil), e.BaseRelationArgs...)
+	}
 	if strings.TrimSpace(baseRelation) == "" {
 		baseRelation = "media_items mi"
 	}
@@ -350,7 +370,10 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		WithArgIdx(len(baseArgs)+1).
 		WithUserScope(access.UserID, access.ProfileID).
 		WithMediaScope(effectiveScope).
-		WithLibraryScope(libraryIDs)
+		WithLibraryScope(libraryIDs).
+		WithSeasonsMatchSeriesType(e.SeasonsMatchSeriesType).
+		WithSeasonOrderKey(e.SeasonOrderKeyExpr).
+		WithLibraryContentExpr(e.LibraryContentExpr)
 	filterWhere, filterArgs, err := builder.Build(def)
 	if err != nil {
 		return previewPagePlan{}, err
@@ -385,6 +408,9 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 	}
 	if def.MediaScope != "" && !isEpisodeCatalogScope(def.MediaScope) {
 		scopeTypes := MediaScopeItemTypes(def.MediaScope)
+		if e.SeasonsMatchSeriesType && slices.Contains(scopeTypes, "series") {
+			scopeTypes = append(slices.Clone(scopeTypes), "season")
+		}
 		if len(scopeTypes) == 1 {
 			conditions = append(conditions, fmt.Sprintf("mi.type = $%d", argIdx))
 			args = append(args, scopeTypes[0])
@@ -395,13 +421,17 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		argIdx++
 	}
 	libScopeWhere, libScopeArgs, hasLibraryScope := "", []any(nil), false
+	libraryContentExpr := catalogLibraryContentExprForScope(def.MediaScope, "mi")
+	if e.LibraryContentExpr != "" && !isEpisodeCatalogScope(effectiveScope) {
+		libraryContentExpr = e.LibraryContentExpr
+	}
 	if !libraryScopeHandledInBaseRelation {
 		libScopeWhere, libScopeArgs, hasLibraryScope = buildLibraryScopeJoin(
 			libraryIDs,
 			access.DisabledLibraryIDs,
 			argIdx,
 			def.MediaScope,
-			catalogLibraryContentExprForScope(def.MediaScope, "mi"),
+			libraryContentExpr,
 		)
 	}
 	if hasLibraryScope {

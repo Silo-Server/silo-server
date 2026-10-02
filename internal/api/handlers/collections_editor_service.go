@@ -198,11 +198,35 @@ func (h *CollectionHandler) PersonalCollectionItemsOrderEditor(ctx context.Conte
 		for _, item := range page.Items {
 			ids = append(ids, item.MediaItemID)
 		}
-		visible, err := reader.GetByIDsWithAccess(ctx, ids, AccessFilterFromContext(ctx, ""))
+		filter := AccessFilterFromContext(ctx, "")
+		visible, err := reader.GetByIDsWithAccess(ctx, ids, filter)
 		if err != nil {
 			return out, apiError(500, "internal_error", "Failed to validate collection items")
 		}
-		if len(visible) != len(ids) {
+		accessible := make(map[string]struct{}, len(ids))
+		for _, item := range visible {
+			if item != nil {
+				accessible[item.ContentID] = struct{}{}
+			}
+		}
+		// Season members are not catalog items; they count as accessible when
+		// their series is.
+		missing := make([]string, 0)
+		for _, id := range ids {
+			if _, ok := accessible[id]; !ok {
+				missing = append(missing, id)
+			}
+		}
+		if len(missing) > 0 {
+			seasons, err := reader.GetVisibleSeasonsWithAccess(ctx, missing, filter)
+			if err != nil {
+				return out, apiError(500, "internal_error", "Failed to validate collection items")
+			}
+			for _, season := range seasons {
+				accessible[season.SeasonID] = struct{}{}
+			}
+		}
+		if len(accessible) != len(ids) {
 			return out, apiError(404, "not_found", "The complete collection order is not accessible")
 		}
 	}

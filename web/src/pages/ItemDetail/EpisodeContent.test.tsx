@@ -556,6 +556,16 @@ describe("EpisodeContent", () => {
     expect(mocks.capturedActionBarProps.value).not.toHaveProperty("onRatingChange");
   });
 
+  it("does not offer Add to Collection, since episodes are not collection members", () => {
+    renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/item/episode-1"]}>
+        <EpisodeContent item={makeEpisodeItem()} />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.capturedActionBarProps.value?.collectionItemId).toBeUndefined();
+  });
+
   it("passes marker re-detection only for admins", () => {
     const redetect = vi.fn();
     mocks.useAuth.mockReturnValue({ user: { role: "admin" } });

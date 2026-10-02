@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"net/http"
 	"reflect"
 	"testing"
 
@@ -13,9 +14,15 @@ import (
 )
 
 type collectionGuardReader struct {
-	items  []*models.MediaItem
-	filter catalog.AccessFilter
-	err    error
+	items   []*models.MediaItem
+	seasons []catalog.VisibleSeasonMember
+	filter  catalog.AccessFilter
+	err     error
+}
+
+func (r *collectionGuardReader) GetVisibleSeasonsWithAccess(_ context.Context, _ []string, filter catalog.AccessFilter) ([]catalog.VisibleSeasonMember, error) {
+	r.filter = filter
+	return r.seasons, r.err
 }
 
 func (r *collectionGuardReader) GetByIDsWithAccess(_ context.Context, _ []string, filter catalog.AccessFilter) ([]*models.MediaItem, error) {
@@ -63,5 +70,49 @@ func TestPersonalCollectionManualMutationGuards(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func seasonGuardStore(sqlState bool) *lifecycleStore {
+	return &lifecycleStore{sqlState: sqlState, collection: userstore.Collection{ID: "c", CreatorProfileID: "owner", AllowedProfileIDs: []string{"owner"}, CollectionType: "manual"}}
+}
+
+func TestPersonalCollectionAddAcceptsVisibleSeasonOnPostgres(t *testing.T) {
+	store := seasonGuardStore(true)
+	h := NewCollectionHandler(lifecycleProvider{store: store})
+	h.ItemReader = &collectionGuardReader{seasons: []catalog.VisibleSeasonMember{{SeasonID: "season-2", SeriesID: "series-1", SeriesTitle: "Alpha", SeasonNumber: 2}}}
+	if err := h.AddPersonalCollectionItem(t.Context(), 1, "owner", "c", "season-2", 0); err != nil {
+		t.Fatalf("add season: %v", err)
+	}
+	if store.mutations != 1 {
+		t.Fatalf("mutations = %d, want 1", store.mutations)
+	}
+}
+
+func TestPersonalCollectionAddRefusesSeasonOnSQLite(t *testing.T) {
+	store := seasonGuardStore(false)
+	h := NewCollectionHandler(lifecycleProvider{store: store})
+	h.ItemReader = &collectionGuardReader{seasons: []catalog.VisibleSeasonMember{{SeasonID: "season-2", SeriesID: "series-1"}}}
+	err := h.AddPersonalCollectionItem(t.Context(), 1, "owner", "c", "season-2", 0)
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok || apiErr.Status != http.StatusNotImplemented || apiErr.Code != "capability_unsupported" {
+		t.Fatalf("err = %v, want 501 capability_unsupported", err)
+	}
+	if store.mutations != 0 {
+		t.Fatal("refused season add mutated membership")
+	}
+}
+
+func TestPersonalCollectionAddRefusesHiddenOrUnknownSeason(t *testing.T) {
+	store := seasonGuardStore(true)
+	h := NewCollectionHandler(lifecycleProvider{store: store})
+	h.ItemReader = &collectionGuardReader{}
+	err := h.AddPersonalCollectionItem(t.Context(), 1, "owner", "c", "series-1-S2", 0)
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok || apiErr.Status != http.StatusNotFound {
+		t.Fatalf("err = %v, want 404", err)
+	}
+	if store.mutations != 0 {
+		t.Fatal("refused add mutated membership")
 	}
 }

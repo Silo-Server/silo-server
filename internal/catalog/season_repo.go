@@ -287,6 +287,19 @@ func (r *SeasonRepository) GetByID(ctx context.Context, contentID string) (*mode
 	return scanSeason(r.pool.QueryRow(ctx, query, contentID))
 }
 
+// GetByIDs returns the stored seasons among contentIDs, in no particular order.
+func (r *SeasonRepository) GetByIDs(ctx context.Context, contentIDs []string) ([]*models.Season, error) {
+	if len(contentIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := r.pool.Query(ctx, `SELECT `+seasonColumns+` FROM seasons WHERE content_id = ANY($1)`, contentIDs)
+	if err != nil {
+		return nil, fmt.Errorf("getting seasons by IDs: %w", err)
+	}
+	defer rows.Close()
+	return scanSeasons(rows)
+}
+
 // ListBySeries returns all seasons for a given series, ordered by season number.
 func (r *SeasonRepository) ListBySeries(ctx context.Context, seriesID string) ([]*models.Season, error) {
 	query := `SELECT ` + seasonColumns + `

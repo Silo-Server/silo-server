@@ -34,3 +34,14 @@ export function buildEpisodeCardLabels(item: EpisodeCardLabelItem): EpisodeCardL
     episodeCode: formatEpisodeCode(item.season_number, item.episode_number),
   };
 }
+
+/** The label a season card shows under its series title. */
+export function buildSeasonCardLabel(item: {
+  type?: string;
+  season_number?: number | null;
+}): string | null {
+  if (item.type !== "season") return null;
+  if (item.season_number === 0) return "Specials";
+  if (item.season_number == null) return "Season";
+  return `Season ${item.season_number}`;
+}

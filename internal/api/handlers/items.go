@@ -1069,7 +1069,74 @@ type episodeBrowseMetadata struct {
 	EpisodeNumber *int
 }
 
+// listEpisodeBrowseMetadata fills the series and numbering fields that
+// listing cards show for episode and season rows.
 func (h *ItemsHandler) listEpisodeBrowseMetadata(
+	ctx context.Context,
+	items []*models.MediaItem,
+) map[string]episodeBrowseMetadata {
+	result := h.listEpisodeRowBrowseMetadata(ctx, items)
+	for id, meta := range h.listSeasonRowBrowseMetadata(ctx, items) {
+		result[id] = meta
+	}
+	return result
+}
+
+func (h *ItemsHandler) listSeasonRowBrowseMetadata(
+	ctx context.Context,
+	items []*models.MediaItem,
+) map[string]episodeBrowseMetadata {
+	result := map[string]episodeBrowseMetadata{}
+	if h == nil || h.seasonRepo == nil || h.itemRepo == nil {
+		return result
+	}
+	seasonIDs := make([]string, 0)
+	for _, item := range items {
+		if item != nil && item.Type == "season" && strings.TrimSpace(item.ContentID) != "" {
+			seasonIDs = append(seasonIDs, item.ContentID)
+		}
+	}
+	if len(seasonIDs) == 0 {
+		return result
+	}
+	seasons, err := h.seasonRepo.GetByIDs(ctx, seasonIDs)
+	if err != nil || len(seasons) == 0 {
+		return result
+	}
+	seriesIDs := make([]string, 0, len(seasons))
+	seen := make(map[string]struct{}, len(seasons))
+	for _, season := range seasons {
+		if season == nil || season.SeriesID == "" {
+			continue
+		}
+		if _, ok := seen[season.SeriesID]; !ok {
+			seen[season.SeriesID] = struct{}{}
+			seriesIDs = append(seriesIDs, season.SeriesID)
+		}
+	}
+	seriesTitles := make(map[string]string, len(seriesIDs))
+	if seriesItems, err := h.itemRepo.GetByIDs(ctx, seriesIDs); err == nil {
+		for _, seriesItem := range seriesItems {
+			if seriesItem != nil {
+				seriesTitles[seriesItem.ContentID] = seriesItem.Title
+			}
+		}
+	}
+	for _, season := range seasons {
+		if season == nil {
+			continue
+		}
+		seasonNumber := season.SeasonNumber
+		result[season.ContentID] = episodeBrowseMetadata{
+			SeriesID:     season.SeriesID,
+			SeriesTitle:  seriesTitles[season.SeriesID],
+			SeasonNumber: &seasonNumber,
+		}
+	}
+	return result
+}
+
+func (h *ItemsHandler) listEpisodeRowBrowseMetadata(
 	ctx context.Context,
 	items []*models.MediaItem,
 ) map[string]episodeBrowseMetadata {

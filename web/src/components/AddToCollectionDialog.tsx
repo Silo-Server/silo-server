@@ -24,6 +24,12 @@ interface AddToCollectionDialogProps {
   mediaItemId: string;
   /** Optional label shown so the user knows what they're adding. */
   itemTitle?: string;
+  /**
+   * The item's whole series, offered alongside mediaItemId when that is a
+   * season. Library collections hold catalog items only, so they can take
+   * the series but not the season.
+   */
+  seriesOption?: { id: string; title: string };
 }
 
 interface CollectionPick {
@@ -31,6 +37,7 @@ interface CollectionPick {
   title: string;
   source: "user" | "library";
   group: string;
+  disabled?: boolean;
 }
 
 /**
@@ -45,12 +52,18 @@ export default function AddToCollectionDialog({
   onOpenChange,
   mediaItemId,
   itemTitle,
+  seriesOption,
 }: AddToCollectionDialogProps) {
   const isAdmin = useIsActingAdmin();
   const { data: userCollections, isLoading: userLoading } = useCollections();
   const { data: libraries } = useUserLibraries();
   const addItem = useAddItemToCollection();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [target, setTarget] = useState<"item" | "series">("item");
+  const addingSeries = Boolean(seriesOption) && target === "series";
+  const addingSeason = Boolean(seriesOption) && !addingSeries;
+  const targetId = addingSeries && seriesOption ? seriesOption.id : mediaItemId;
+  const targetTitle = addingSeries && seriesOption ? seriesOption.title : itemTitle;
 
   // Admins fetch each library's collections so we can offer adding to admin
   // manual collections too. Non-admins skip these queries entirely.
@@ -76,13 +89,19 @@ export default function AddToCollectionDialog({
         const collections = Array.isArray(res?.data) ? res.data : [];
         for (const c of collections) {
           if (c.collection_type === "manual") {
-            out.push({ id: c.id, title: c.title, source: "library", group: lib.name });
+            out.push({
+              id: c.id,
+              title: c.title,
+              source: "library",
+              group: lib.name,
+              disabled: addingSeason,
+            });
           }
         }
       }
     }
     return out;
-  }, [userCollections, libraries, libraryQueries, isAdmin]);
+  }, [userCollections, libraries, libraryQueries, isAdmin, addingSeason]);
 
   const groups = useMemo(() => {
     const m = new Map<string, CollectionPick[]>();
@@ -95,12 +114,19 @@ export default function AddToCollectionDialog({
 
   const isLoading = userLoading || libraryLoading;
 
+  function chooseTarget(next: "item" | "series") {
+    setTarget(next);
+    if (next === "item" && picks.find((p) => p.id === selectedId)?.source === "library") {
+      setSelectedId(null);
+    }
+  }
+
   function handleConfirm() {
     if (!selectedId) return;
     const pick = picks.find((p) => p.id === selectedId);
-    if (!pick) return;
+    if (!pick || pick.disabled) return;
     addItem.mutate(
-      { collectionId: pick.id, mediaItemId, source: pick.source },
+      { collectionId: pick.id, mediaItemId: targetId, source: pick.source },
       {
         onSuccess: () => {
           setSelectedId(null);
@@ -116,11 +142,42 @@ export default function AddToCollectionDialog({
         <DialogHeader>
           <DialogTitle>Add to Collection</DialogTitle>
           <DialogDescription>
-            {itemTitle
-              ? `Pick a manual collection to add "${itemTitle}" to.`
+            {targetTitle
+              ? `Pick a manual collection to add "${targetTitle}" to.`
               : "Pick a manual collection."}
           </DialogDescription>
         </DialogHeader>
+
+        {seriesOption && (
+          <div role="group" aria-label="What to add" className="grid grid-cols-2 gap-2">
+            <Button
+              type="button"
+              variant={addingSeries ? "outline" : "secondary"}
+              aria-pressed={!addingSeries}
+              className="h-auto flex-col items-start gap-0.5 py-2"
+              onClick={() => chooseTarget("item")}
+            >
+              <span>This season</span>
+              {itemTitle && (
+                <span className="text-muted-foreground max-w-full truncate text-xs">
+                  {itemTitle}
+                </span>
+              )}
+            </Button>
+            <Button
+              type="button"
+              variant={addingSeries ? "secondary" : "outline"}
+              aria-pressed={addingSeries}
+              className="h-auto flex-col items-start gap-0.5 py-2"
+              onClick={() => chooseTarget("series")}
+            >
+              <span>Whole series</span>
+              <span className="text-muted-foreground max-w-full truncate text-xs">
+                {seriesOption.title}
+              </span>
+            </Button>
+          </div>
+        )}
 
         <div className="max-h-80 overflow-y-auto rounded-md border">
           {isLoading ? (
@@ -140,6 +197,11 @@ export default function AddToCollectionDialog({
                   <div className="bg-muted/50 text-muted-foreground px-3 py-1.5 text-[11px] font-semibold tracking-[0.12em] uppercase">
                     {group}
                   </div>
+                  {addingSeason && list.some((p) => p.source === "library") && (
+                    <p className="text-muted-foreground px-3 py-1 text-xs">
+                      Library collections hold whole series
+                    </p>
+                  )}
                   {list.map((p) => {
                     const isSelected = p.id === selectedId;
                     return (
@@ -147,8 +209,9 @@ export default function AddToCollectionDialog({
                         key={p.id}
                         type="button"
                         onClick={() => setSelectedId(p.id)}
+                        disabled={p.disabled}
                         data-selected={isSelected ? "true" : undefined}
-                        className={`hover:bg-muted/50 flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm transition-colors ${
+                        className={`hover:bg-muted/50 flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                           isSelected ? "bg-muted/60" : ""
                         }`}
                       >

@@ -30,6 +30,16 @@ type QueryBuilder struct {
 	// executor reads this flag to inject the user_last_watched CTE and
 	// the LEFT JOIN aliased as uhist before running the query.
 	requireUserHistoryCTE bool
+	// seasonsMatchSeriesType widens a "type is/is_not series" rule to season
+	// rows, for relations (personal collections) that hold seasons as members.
+	seasonsMatchSeriesType bool
+	// seasonOrderKeyExpr, when set, breaks title ties between a series and
+	// its season rows, which share the series' title.
+	seasonOrderKeyExpr string
+	// libraryContentOverride, when set outside the episode scope, is the key
+	// library joins use instead of the row's content_id; see
+	// QueryExecutor.LibraryContentExpr.
+	libraryContentOverride string
 }
 
 type QuerySortPlan struct {
@@ -63,6 +73,27 @@ func (qb *QueryBuilder) WithArgIdx(argIdx int) *QueryBuilder {
 	if argIdx > 0 {
 		qb.argIdx = argIdx
 	}
+	return qb
+}
+
+// WithSeasonsMatchSeriesType makes a "type is series" rule match season rows
+// too, and "type is_not series" exclude them.
+func (qb *QueryBuilder) WithSeasonsMatchSeriesType(enabled bool) *QueryBuilder {
+	qb.seasonsMatchSeriesType = enabled
+	return qb
+}
+
+// WithSeasonOrderKey sets a text expression that orders rows sharing a title:
+// empty for catalog items, the zero-padded season number for season rows.
+func (qb *QueryBuilder) WithSeasonOrderKey(expr string) *QueryBuilder {
+	qb.seasonOrderKeyExpr = expr
+	return qb
+}
+
+// WithLibraryContentExpr sets the key library joins use for rows that borrow
+// another item's library membership.
+func (qb *QueryBuilder) WithLibraryContentExpr(expr string) *QueryBuilder {
+	qb.libraryContentOverride = expr
 	return qb
 }
 
@@ -251,6 +282,11 @@ func (qb *QueryBuilder) BuildSortPlan(sortConfig QuerySort) (result QuerySortPla
 
 	switch sortConfig.Field {
 	case "title":
+		if qb.seasonOrderKeyExpr != "" {
+			qb.cursorTerms = []queryCursorTerm{{expression: titleExpr, descending: dir == "DESC"}, {expression: qb.seasonOrderKeyExpr}, {expression: qb.alias + ".content_id"}}
+			plan.OrderBy = fmt.Sprintf("ORDER BY %s %s, %s ASC, %s.content_id ASC", titleExpr, dir, qb.seasonOrderKeyExpr, qb.alias)
+			return plan, nil
+		}
 		qb.cursorTerms = []queryCursorTerm{{expression: titleExpr, descending: dir == "DESC"}, {expression: qb.alias + ".content_id"}}
 		plan.OrderBy = fmt.Sprintf("ORDER BY %s %s, %s.content_id ASC", titleExpr, dir, qb.alias)
 		return plan, nil
@@ -438,6 +474,17 @@ func (qb *QueryBuilder) buildRule(rule QueryRule) (string, error) {
 		return qb.buildAudioLanguageClause(rule)
 	case "subtitle_language":
 		return qb.buildSubtitleLanguageClause(rule)
+	}
+
+	// The type field only accepts is and is_not, checked above.
+	if qb.seasonsMatchSeriesType && rule.Field == displayFilterFieldType {
+		if value, ok := rule.Value.(string); ok && strings.EqualFold(strings.TrimSpace(value), "series") {
+			operator := "IN"
+			if rule.Op != "is" {
+				operator = "NOT IN"
+			}
+			return fmt.Sprintf("%s.type %s ('series', 'season')", qb.alias, operator), nil
+		}
 	}
 
 	column := queryColumnSQL(qb.alias, def.columnSQL)
@@ -876,6 +923,14 @@ func (qb *QueryBuilder) mediaFileLibraryScopeClause(alias string) string {
 }
 
 func (qb *QueryBuilder) mediaFileJoinCondition(mediaFileAlias string) string {
+	if qb.libraryContentOverride != "" && !isEpisodeCatalogScope(qb.mediaScope) {
+		// Season rows borrow their series' key; episode files carry the
+		// series ID, so a season matches only its own episodes' files.
+		return fmt.Sprintf(
+			`%[1]s.content_id = %[2]s AND (%[3]s.type <> 'season' OR %[1]s.episode_id IN (SELECT season_episode.content_id FROM episodes season_episode WHERE season_episode.season_id = %[3]s.content_id))`,
+			mediaFileAlias, qb.libraryContentOverride, qb.alias,
+		)
+	}
 	return catalogMediaFileJoinConditionForScope(qb.mediaScope, mediaFileAlias, qb.alias)
 }
 
@@ -884,6 +939,9 @@ func (qb *QueryBuilder) mediaFileGroupExpr(mediaFileAlias string) string {
 }
 
 func (qb *QueryBuilder) libraryContentExpr() string {
+	if qb.libraryContentOverride != "" && !isEpisodeCatalogScope(qb.mediaScope) {
+		return qb.libraryContentOverride
+	}
 	return catalogLibraryContentExprForScope(qb.mediaScope, qb.alias)
 }
 
@@ -1159,7 +1217,11 @@ func (qb *QueryBuilder) userStateCompletionClause() string {
 	case "ebook":
 		return qb.ebookLeafCompletionSQL(rowID, base)
 	case "series":
-		return qb.episodeRollupCompletionSQL("series_id", qb.alias, base)
+		if !qb.seasonsMatchSeriesType {
+			return qb.episodeRollupCompletionSQL("series_id", qb.alias, base)
+		}
+		// Season rows share this scope here; roll each row up by its own type.
+		return qb.typedRollupCompletionSQL(rowID, base)
 	// No "season" case: season is not a valid media_scope, so a season-scoped
 	// query never reaches here. Season rows are encountered only under unscoped
 	// queries and are rolled up by the mi.type = 'season' branch below.
@@ -1170,19 +1232,25 @@ func (qb *QueryBuilder) userStateCompletionClause() string {
 		// collection-only interpretation.
 		return qb.videoLeafCompletionSQL(rowID, base)
 	default:
-		return fmt.Sprintf(`(CASE
+		return qb.typedRollupCompletionSQL(rowID, base)
+	}
+}
+
+// typedRollupCompletionSQL decides completion per row type: series and
+// seasons roll up their episodes, ebooks and other leaves check themselves.
+func (qb *QueryBuilder) typedRollupCompletionSQL(rowID string, base int) string {
+	return fmt.Sprintf(`(CASE
 		WHEN %[1]s.type = 'series' THEN %[2]s
 		WHEN %[1]s.type = 'season' THEN %[3]s
 		WHEN %[1]s.type = 'ebook' THEN %[4]s
 		ELSE %[5]s
 	END)`,
-			qb.alias,
-			qb.episodeRollupCompletionSQL("series_id", qb.alias, base),
-			qb.episodeRollupCompletionSQL("season_id", qb.alias, base),
-			qb.ebookLeafCompletionSQL(rowID, base),
-			qb.videoLeafCompletionSQL(rowID, base),
-		)
-	}
+		qb.alias,
+		qb.episodeRollupCompletionSQL("series_id", qb.alias, base),
+		qb.episodeRollupCompletionSQL("season_id", qb.alias, base),
+		qb.ebookLeafCompletionSQL(rowID, base),
+		qb.videoLeafCompletionSQL(rowID, base),
+	)
 }
 
 // videoLeafCompletionSQL returns the completed-progress-or-history predicate for
@@ -1464,6 +1532,12 @@ func (qb *QueryBuilder) mediaFileSortJoin(columnAlias, aggregateExpr string) (st
 		args = append(args, scopeArgs...)
 	}
 	groupExpr := qb.mediaFileGroupExpr("mf")
+	// A season row sorts by its series' files: the aggregate is per catalog
+	// item, and season rows join it through the series key.
+	joinKey := qb.alias + ".content_id"
+	if qb.libraryContentOverride != "" && !isEpisodeCatalogScope(qb.mediaScope) {
+		joinKey = qb.libraryContentOverride
+	}
 
 	joinSQL := fmt.Sprintf(
 		`LEFT JOIN (
@@ -1471,13 +1545,13 @@ func (qb *QueryBuilder) mediaFileSortJoin(columnAlias, aggregateExpr string) (st
 			FROM media_files mf
 			WHERE %s
 			GROUP BY %s
-		) sort_files ON sort_files.content_id = %s.content_id`,
+		) sort_files ON sort_files.content_id = %s`,
 		groupExpr,
 		aggregateExpr,
 		columnAlias,
 		strings.Join(whereParts, " AND "),
 		groupExpr,
-		qb.alias,
+		joinKey,
 	)
 	return joinSQL, args
 }

@@ -39,8 +39,7 @@ func personalCollectionCountQuery(userID int, c PersonalCollectionDefinition, ac
 	}
 	executor := &QueryExecutor{BaseRelationSQL: catalogBaseRelationForScope("")}
 	if !IsLiveQueryType(c.CollectionType) {
-		executor.SourceWhere = personalMembershipSourceWhere
-		executor.SourceArgs = []any{userID, c.ID}
+		usePersonalCollectionSource(executor, userID, c.ID)
 		return executor.buildCountQuery(display, access)
 	}
 	def, err := parseCatalogCollectionQueryDefinition([]byte(c.QueryDefinition))

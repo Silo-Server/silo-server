@@ -243,6 +243,26 @@ describe("ItemCard SortMeta", () => {
     expect(markup).not.toContain("S01E03");
   });
 
+  it("shows a season card as its series with a season label", () => {
+    const markup = renderCard({
+      item: {
+        ...baseItem,
+        content_id: "season-2",
+        play_content_id: "episode-5",
+        type: "season",
+        title: "Alpha",
+        series_id: "series-1",
+        series_title: "Alpha",
+        season_number: 2,
+        year: 2022,
+      },
+    });
+    expect(markup).toContain("Alpha");
+    expect(markup).toContain("Season 2");
+    expect(markup).toContain('href="/item/season-2"');
+    expect(markup).toContain('href="/watch/episode-5"');
+  });
+
   it("keeps episode code when sorted by title", () => {
     const markup = renderCard({
       sortField: "title",

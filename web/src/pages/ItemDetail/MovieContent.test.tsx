@@ -409,6 +409,16 @@ describe("MovieContent", () => {
     });
   });
 
+  it("adds the movie itself to collections", () => {
+    renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/item/movie-1"]}>
+        <MovieContent item={makeMovieItem()} />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.capturedActionBarProps.value).toMatchObject({ collectionItemId: "movie-1" });
+  });
+
   it("passes credits re-detection only for admins", () => {
     const redetect = vi.fn();
     mocks.useAuth.mockReturnValue({ user: { role: "admin" } });

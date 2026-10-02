@@ -115,6 +115,21 @@ func (h *CollectionHandler) PersonalCollectionItemsPage(ctx context.Context, use
 	for _, i := range visible {
 		allowed[i.ContentID] = i.Title
 	}
+	missing := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := allowed[id]; !ok {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) > 0 {
+		seasons, err := catalog.NewItemRepository(h.Executor.Pool).GetVisibleSeasonsWithAccess(ctx, missing, access)
+		if err != nil {
+			return out, collectionPageError(err)
+		}
+		for _, s := range seasons {
+			allowed[s.SeasonID] = s.DisplayTitle()
+		}
+	}
 	for _, i := range page.Items {
 		if title, ok := allowed[i.MediaItemID]; ok {
 			out.Items = append(out.Items, PersonalCollectionItemView{CollectionID: i.CollectionID, MediaItemID: i.MediaItemID, Title: title, Position: i.Position, AddedAt: i.AddedAt})

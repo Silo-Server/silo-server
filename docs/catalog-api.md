@@ -318,6 +318,7 @@ fall back to the ID when the title is absent. Personal membership pages hydrate
 titles through the existing viewer access filter; admin pages require acting
 administrator access. Membership identity, ordering and cursor revision checks
 are unchanged. Frozen v1 membership responses do not expose this field.
+For a season member, `title` is "{series title} — Season N" ("— Specials" for season 0).
 
 ## Advisory age
 

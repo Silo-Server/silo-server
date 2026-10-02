@@ -8,8 +8,19 @@ vi.mock("@/playback/watchPlaybackContext", () => ({
   useWatchPlaybackController: () => ({ startPlayback: vi.fn() }),
 }));
 
+const collectionDialogMocks = vi.hoisted(() => ({
+  props: null as {
+    open: boolean;
+    mediaItemId: string;
+    itemTitle?: string;
+    seriesOption?: { id: string; title: string };
+  } | null,
+}));
 vi.mock("@/components/AddToCollectionDialog", () => ({
-  default: () => null,
+  default: (props: { open: boolean; mediaItemId: string; itemTitle?: string }) => {
+    collectionDialogMocks.props = props;
+    return null;
+  },
 }));
 
 const markerMocks = vi.hoisted(() => ({
@@ -245,5 +256,45 @@ describe("ActionBar watch together group", () => {
     await userEvent.click(screen.getByTitle("More"));
     await userEvent.click(screen.getByRole("menuitem", { name: "Request Seasons" }));
     expect(onRequestSeasons).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ActionBar add to collection", () => {
+  afterEach(() => {
+    collectionDialogMocks.props = null;
+  });
+
+  it("passes the collection item and its series option to the dialog", async () => {
+    render(
+      <MemoryRouter>
+        <ActionBar
+          contentId="season-1"
+          collectionItemId="season-1"
+          collectionItemTitle="Example Series — Season 1"
+          collectionSeriesOption={{ id: "series-1", title: "Example Series" }}
+        />
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByTitle("More"));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Add to Collection" }));
+
+    expect(collectionDialogMocks.props).toMatchObject({
+      open: true,
+      mediaItemId: "season-1",
+      itemTitle: "Example Series — Season 1",
+      seriesOption: { id: "series-1", title: "Example Series" },
+    });
+  });
+
+  it("hides Add to Collection without a collection item", async () => {
+    render(
+      <MemoryRouter>
+        <ActionBar contentId="episode-1" onToggleWatchlist={() => {}} />
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByTitle("More"));
+
+    expect(screen.queryByRole("menuitem", { name: "Add to Collection" })).toBeNull();
+    expect(collectionDialogMocks.props).toBeNull();
   });
 });

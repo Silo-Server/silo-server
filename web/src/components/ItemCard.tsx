@@ -11,7 +11,7 @@ import { timeAgo } from "@/lib/timeAgo";
 import MediaItemMenu from "@/components/MediaItemMenu";
 import CardOverlays from "@/components/overlays/CardOverlays";
 import { overlayDataFromBrowseItem, type CardOverlayPrefs } from "@/lib/overlays";
-import { buildEpisodeCardLabels } from "@/lib/episodeCardLabels";
+import { buildEpisodeCardLabels, buildSeasonCardLabel } from "@/lib/episodeCardLabels";
 import { formatDate as formatPreferredDate } from "@/lib/datetime";
 import { formatBitrate } from "@/lib/mediaFormat";
 import { formatOutOfTen, formatPercent } from "@/components/ratings/ratings";
@@ -114,7 +114,11 @@ function mangaStatusChip(item: BrowseItem): { label: string; tone: string } | nu
 
 function SortMeta({ item, sortField }: { item: BrowseItem; sortField?: string }) {
   const episodeLabels = buildEpisodeCardLabels(item);
-  const defaultLabel = [item.year || "", item.type === "series" ? "Series" : ""]
+  const defaultLabel = [
+    item.year || "",
+    item.type === "series" ? "Series" : "",
+    buildSeasonCardLabel(item) ?? "",
+  ]
     .filter(Boolean)
     .join(" · ");
 
@@ -200,7 +204,11 @@ export default function ItemCard({
 }) {
   const itemHref = buildItemHref({ contentId: item.content_id, libraryId });
   const episodeLabels = buildEpisodeCardLabels(item);
-  const displayTitle = episodeLabels ? episodeLabels.seriesTitle : item.title;
+  const displayTitle = episodeLabels
+    ? episodeLabels.seriesTitle
+    : item.type === "season"
+      ? item.series_title || item.title
+      : item.title;
   const headingHref =
     item.type === "episode" && item.series_id
       ? buildItemHref({ contentId: item.series_id, libraryId })

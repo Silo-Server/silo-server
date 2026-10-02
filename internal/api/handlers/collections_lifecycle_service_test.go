@@ -15,7 +15,11 @@ type lifecycleStore struct {
 	collection userstore.Collection
 	mutations  int
 	update     userstore.UpdateCollectionInput
+	// sqlState reports the PostgreSQL user store; false stands in for SQLite.
+	sqlState bool
 }
+
+func (s *lifecycleStore) CatalogStateInPostgres() bool { return s.sqlState }
 
 func (s *lifecycleStore) GetCollection(context.Context, string) (*userstore.Collection, error) {
 	return &s.collection, nil

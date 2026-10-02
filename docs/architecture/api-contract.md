@@ -2052,6 +2052,15 @@ require catalog visibility. Adding an existing native member preserves its posit
 use the explicit ordering operation. Shared viewers can read permitted collections but cannot mutate them.
 Native membership operations preserve audiobook chapter entries in the same storage table.
 
+A manual personal collection may also hold stored seasons (`seasons.content_id`). Adding a
+season requires its parent series to be visible to the caller under the same library, rating
+and advisory rules; synthetic `{series}-S{n}` IDs are not found. In catalog listings a season
+member is a `CatalogItem` with `type: "season"`, `series_id`, `series_title`, `season_number`
+and a `play_content_id`. Its visibility, sorting, display filters (`type: series` includes
+seasons) and counts follow its parent series. Home and section rails built from a personal
+collection, the offset-paged catalog path and collection filter facets do not include season
+members yet.
+
 Collection capabilities describe the acting account's selected user store:
 
 | Behavior | PostgreSQL | SQLite |
@@ -2062,6 +2071,7 @@ Collection capabilities describe the acting account's selected user store:
 | Groups and collection/item ordering | Supported | Pre-existing unsupported behavior |
 | Imported collections and sync | Supported | Pre-existing unsupported behavior |
 | Collection artwork | Supported | Pre-existing unsupported behavior |
+| Season members | Supported | Adding a season answers 501 `capability_unsupported` |
 
 The `groups`, `imports`, `artwork`, and `item_reorder` flags let the bundled web hide unsupported
 actions. Unsupported store features answer the structured 501 `capability_unsupported` problem;

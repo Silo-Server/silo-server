@@ -416,7 +416,9 @@ func (r *CatalogResolver) applyCollectionDisplayPredicate(ctx context.Context, e
 				return err
 			}
 			fragment.MediaScope = executor.Scope
-			predicate, displayArgs, err := collectionDefinitionPredicate(r.queryExecutorForScope(fragment.MediaScope, nil), fragment, access)
+			displayExecutor := r.queryExecutorForScope(fragment.MediaScope, nil)
+			inheritPersonalCollectionSource(displayExecutor, executor)
+			predicate, displayArgs, err := collectionDefinitionPredicate(displayExecutor, fragment, access)
 			if err != nil {
 				return err
 			}
@@ -429,8 +431,7 @@ func (r *CatalogResolver) applyCollectionDisplayPredicate(ctx context.Context, e
 
 func (r *CatalogResolver) resolvePersonalMembershipQueryCursor(ctx context.Context, req CatalogRequest, access AccessFilter, display string) (*CatalogResult, error) {
 	executor := r.queryExecutorForScope(req.Query.MediaScope, req.SnapshotAt)
-	executor.SourceWhere = personalMembershipSourceWhere
-	executor.SourceArgs = []any{access.UserID, req.CollectionID}
+	usePersonalCollectionSource(executor, access.UserID, req.CollectionID)
 	if req.Query.Sort.Field == "" {
 		executor.SourceOrder = []queryCursorTerm{
 			{expression: "COALESCE((SELECT position FROM user_personal_collection_items cursor_position WHERE cursor_position.user_id=$1 AND cursor_position.collection_id=$2 AND cursor_position.sub_item_id='' AND cursor_position.media_item_id=mi.content_id),0)", kind: cursorKindNumber, nullsLast: true},

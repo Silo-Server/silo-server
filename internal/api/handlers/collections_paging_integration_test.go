@@ -276,3 +276,80 @@ func TestSmartLibraryCollectionPagingAdapterDB(t *testing.T) {
 	_, err = h.LibraryCollectionItemsPage(ctx, f.library, c.ID, filter, userstore.CollectionItemsPageOptions{Limit: 2, Revision: first.Revision}, first.Query)
 	assertPagingAPIStatus(t, err, 409)
 }
+
+func TestPersonalCollectionPagingListsSeasonMembersDB(t *testing.T) {
+	f := newPagingIntegrationFixture(t)
+	ctx := t.Context()
+	series := f.ids[1] + "-series"
+	season := series + "-season-3"
+	f.exec(t, `INSERT INTO media_items(content_id,type,title) VALUES($1,'series','Paging Show')`, series)
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, series)
+	})
+	f.exec(t, `INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, series, f.library)
+	f.exec(t, `INSERT INTO seasons(content_id,series_id,season_number) VALUES($1,$2,3)`, season, series)
+	provider := pgstore.NewPostgresProvider(f.pool)
+	store, err := provider.ForUser(ctx, f.account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{CreatorProfileID: "owner", Name: "With season", CollectionType: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddCollectionItem(ctx, c.ID, season, 0); err != nil {
+		t.Fatal(err)
+	}
+	h := NewCollectionHandler(provider)
+	h.Executor = &catalog.QueryExecutor{Pool: f.pool}
+	page, err := h.PersonalCollectionItemsPage(ctx, f.account, "owner", c.ID, catalog.AccessFilter{AllowedLibraryIDs: []int{f.library}}, userstore.CollectionItemsPageOptions{Limit: 10}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].MediaItemID != season || page.Items[0].Title != "Paging Show — Season 3" {
+		t.Fatalf("items = %+v", page.Items)
+	}
+	hidden, err := h.PersonalCollectionItemsPage(ctx, f.account, "owner", c.ID, catalog.AccessFilter{AllowedLibraryIDs: []int{f.hidden}}, userstore.CollectionItemsPageOptions{Limit: 10}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hidden.Items) != 0 {
+		t.Fatalf("hidden library sees %+v", hidden.Items)
+	}
+}
+
+func TestPersonalCollectionOrderEditorIncludesSeasonMembersDB(t *testing.T) {
+	f := newPagingIntegrationFixture(t)
+	series := f.ids[1] + "-order-series"
+	season := series + "-season-1"
+	f.exec(t, `INSERT INTO media_items(content_id,type,title) VALUES($1,'series','Order Show')`, series)
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, series)
+	})
+	f.exec(t, `INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, series, f.library)
+	f.exec(t, `INSERT INTO seasons(content_id,series_id,season_number) VALUES($1,$2,1)`, season, series)
+	provider := pgstore.NewPostgresProvider(f.pool)
+	store, err := provider.ForUser(t.Context(), f.account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := store.CreateCollection(t.Context(), userstore.CreateCollectionInput{CreatorProfileID: "owner", Name: "Order", CollectionType: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, id := range []string{f.ids[1], season} {
+		if err := store.AddCollectionItem(t.Context(), c.ID, id, i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := NewCollectionHandler(provider)
+	h.Executor = &catalog.QueryExecutor{Pool: f.pool}
+	ctx := access.SetScope(t.Context(), access.Scope{AllowedLibraryIDs: []int{f.library}, LibrariesRestricted: true})
+	order, err := h.PersonalCollectionItemsOrderEditor(ctx, f.account, "owner", c.ID)
+	if err != nil {
+		t.Fatalf("order editor: %v", err)
+	}
+	if !reflect.DeepEqual(order.OrderedIDs, []string{f.ids[1], season}) {
+		t.Fatalf("ordered IDs = %v", order.OrderedIDs)
+	}
+}

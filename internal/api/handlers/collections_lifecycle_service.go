@@ -274,7 +274,7 @@ func (h *CollectionHandler) AddPersonalCollectionItem(ctx context.Context, userI
 	if collection.CollectionType != collectionManagementModeManual {
 		return apiError(http.StatusConflict, "collection_not_manual", "Only manual collection membership can be edited")
 	}
-	if err := h.requireVisibleCollectionItem(ctx, itemID); err != nil {
+	if err := h.requireVisibleCollectionItem(ctx, store, itemID); err != nil {
 		return err
 	}
 

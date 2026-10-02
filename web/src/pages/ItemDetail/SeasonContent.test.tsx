@@ -249,6 +249,21 @@ describe("SeasonContent", () => {
     expect(mocks.capturedActionBarProps.value).not.toHaveProperty("onRatingChange");
   });
 
+  it("offers the season, with the whole series as an alternative, to collections", () => {
+    renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/item/season-1"]}>
+        <SeasonContent item={makeSeasonItem()} />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.capturedActionBarProps.value).toMatchObject({
+      contentId: "season-1",
+      collectionItemId: "season-1",
+      collectionItemTitle: "Example Series — Season 1",
+      collectionSeriesOption: { id: "series-1", title: "Example Series" },
+    });
+  });
+
   it("passes partial-progress restart eligibility to episode menus", () => {
     mocks.useItemEpisodes.mockReturnValue({
       data: {

@@ -249,6 +249,18 @@ describe("SeriesContent", () => {
     expect(mocks.capturedActionBarProps.value?.onRatingChange).toBeTypeOf("function");
   });
 
+  it("adds the series itself to collections", () => {
+    renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/item/series-1"]}>
+          <SeriesContent item={makeSeriesItem()} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(mocks.capturedActionBarProps.value).toMatchObject({ collectionItemId: "series-1" });
+  });
+
   it("sets and clears ratings through the existing mutations", () => {
     renderToStaticMarkup(
       <QueryClientProvider client={new QueryClient()}>

@@ -147,6 +147,7 @@ export default function SeriesContent({
                 compactMobile
                 item={item}
                 contentId={item.content_id}
+                collectionItemId={item.content_id}
                 watchTogether={watchTogether.menu}
                 playHref={primaryAction.href}
                 playLabel={primaryAction.label}
