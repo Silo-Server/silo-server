@@ -301,12 +301,16 @@ func (s *Service) registeredProviders() ([]RegisteredProvider, string) {
 	return all, defaultID
 }
 
-func (s *Service) providerByID(id string) AuthProvider {
+// passwordProviderByID returns the provider a password sign-in that names
+// id goes to: a built-in provider or a credentials (directory) plugin. An
+// OAuth plugin takes no password, so naming one finds nothing and the
+// password never reaches it.
+func (s *Service) passwordProviderByID(id string) AuthProvider {
 	if provider := s.providers[id]; provider != nil {
 		return provider
 	}
 	for _, registered := range s.pluginProviders() {
-		if registered.Info.ID == id {
+		if registered.Info.ID == id && registered.Info.Mode == ProviderModeCredentials {
 			return registered.Provider
 		}
 	}
@@ -550,7 +554,7 @@ func (s *Service) loginWithProvider(
 	ip string,
 	refusePasswordChange bool,
 ) (*TokenPair, *models.User, error) {
-	provider := s.providerByID(providerID)
+	provider := s.passwordProviderByID(providerID)
 	if provider == nil {
 		return nil, nil, ErrInvalidCredentials
 	}

@@ -172,7 +172,7 @@ func TestProviderListMergesPluginSourceAndPicksDefault(t *testing.T) {
 	if got[0].ID != "plugin:3:ldap" || !got[0].Default {
 		t.Fatalf("plugin default = %+v", got)
 	}
-	if svc.providerByID("plugin:3:ldap") == nil || svc.providerByID("plugin:9:none") != nil {
+	if svc.passwordProviderByID("plugin:3:ldap") == nil || svc.passwordProviderByID("plugin:9:none") != nil {
 		t.Fatal("provider lookup")
 	}
 	// Without a users repository, routing cannot look the name up and keeps
@@ -208,4 +208,21 @@ func mustStruct(t *testing.T, values map[string]any) *structpb.Struct {
 		t.Fatal(err)
 	}
 	return s
+}
+
+// TestPasswordSignInNeverReachesAnOAuthProvider: naming an OAuth provider in
+// a password sign-in is refused before the plugin is asked, so the password
+// never reaches it.
+func TestPasswordSignInNeverReachesAnOAuthProvider(t *testing.T) {
+	svc := NewService(&LocalProvider{}, nil, nil, nil, nil, nil, nil)
+	oauth := &credentialsDirectory{}
+	svc.SetPluginProviderSource(staticProviderSource{
+		{Info: LoginProviderInfo{ID: "plugin:4:oidc", DisplayName: "SSO", Mode: ProviderModeOAuth, InstallationID: 4}, Provider: oauth},
+	})
+	if _, _, err := svc.LoginWithProvider(context.Background(), "plugin:4:oidc", "alice", "secret", "test", ""); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("err = %v, want ErrInvalidCredentials", err)
+	}
+	if len(oauth.asked) != 0 {
+		t.Fatalf("the OAuth provider was asked for %v", oauth.asked)
+	}
 }

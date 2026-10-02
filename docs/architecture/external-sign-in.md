@@ -156,7 +156,9 @@ clients) is routed by account:
 - without a credentials plugin, local.
 
 With an OIDC provider, a password sign-in without a provider only reaches the
-local provider.
+local provider. A password sign-in that names an OAuth provider fails as wrong
+credentials before the plugin is asked, so a password never reaches an OAuth
+plugin.
 
 A local password sign-in rechecks the account, password hash and local sign-in
 policy while holding the account row lock in the transaction that creates its
