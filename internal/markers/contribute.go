@@ -16,12 +16,18 @@ import (
 const (
 	OutcomeStatusConflict    = "conflict"
 	OutcomeStatusError       = "error"
+	OutcomeStatusInvalid     = "invalid"
 	OutcomeStatusRateLimited = "rate_limited"
 	OutcomeStatusSkipped     = "skipped"
 	contributionStatusClaim  = "submitting"
 	contributionSubmitLimit  = 2 * time.Minute
 	contributionClaimLease   = 15 * time.Minute
 	contributionRecordLimit  = 5 * time.Second
+	// contributionInvalidRecheck is how long a target the provider refused as
+	// invalid stays claimed before one more attempt. The refusal usually
+	// reflects the provider's catalog (a season TMDB does not list yet), which
+	// can change without any local edit.
+	contributionInvalidRecheck = 30 * 24 * time.Hour
 )
 
 // ContributeOptions scopes a contribution run.
@@ -40,7 +46,7 @@ type ContributeOptions struct {
 type ContributionOutcome struct {
 	Provider     string
 	Segment      MarkerKind
-	Status       string // pending | accepted | rejected | conflict | error | rate_limited | skipped
+	Status       string // pending | accepted | rejected | conflict | invalid | error | rate_limited | skipped
 	SubmissionID string
 	Reason       string // skip reason or error message
 	RetryAfter   time.Duration
@@ -201,6 +207,16 @@ func (s *ContributionService) contributeSegment(
 			Reason:   strings.Join(missing, ",") + " id required",
 		}, true
 	}
+	// Providers key episodes by show plus season and episode number; specials
+	// numbered season 0 and unnumbered episodes have no submittable target.
+	if ids.Kind == ItemKindEpisode && (ids.SeasonNumber <= 0 || ids.EpisodeNumber <= 0) {
+		return ContributionOutcome{
+			Provider: providerID,
+			Segment:  seg.kind,
+			Status:   OutcomeStatusSkipped,
+			Reason:   "season and episode numbers required",
+		}, true
+	}
 
 	startMs := int64(*seg.start * 1000)
 	endMs := int64(*seg.end * 1000)
@@ -216,6 +232,7 @@ func (s *ContributionService) contributeSegment(
 		SubmittedEndMs:   &endMs,
 		VideoDurationMs:  &durMs,
 		ContentHash:      hash,
+		TargetKey:        contributionTargetKey(ids, submissionKeyIDs(sub)),
 		Status:           contributionStatusClaim,
 	}
 	claim, claimed, err := s.store.Claim(ctx, row, contributionClaimLease)
@@ -223,7 +240,7 @@ func (s *ContributionService) contributeSegment(
 		return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusError, Reason: err.Error()}, true
 	}
 	if !claimed {
-		return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusSkipped, Reason: "already submitted"}, true
+		return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusSkipped, Reason: "already submitted for this item"}, true
 	}
 	row.ID = claim.ID
 	row.ClaimToken = claim.Token
@@ -248,18 +265,26 @@ func (s *ContributionService) contributeSegment(
 		msg := err.Error()
 		row.Error = &msg
 		var conflict *SubmissionConflictError
-		if errors.As(err, &conflict) && conflict != nil {
+		var invalid *SubmissionInvalidError
+		switch {
+		case errors.As(err, &conflict) && conflict != nil:
 			row.Status = OutcomeStatusConflict
 			if conflict.HTTPStatus > 0 {
 				status := conflict.HTTPStatus
 				row.HTTPStatus = &status
 			}
-		} else {
+		case errors.As(err, &invalid) && invalid != nil:
+			row.Status = OutcomeStatusInvalid
+			if invalid.HTTPStatus > 0 {
+				status := invalid.HTTPStatus
+				row.HTTPStatus = &status
+			}
+		default:
 			row.Status = OutcomeStatusError
 		}
 		s.recordContribution(ctx, row)
-		if row.Status == OutcomeStatusConflict {
-			return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusConflict, Reason: msg}, true
+		if row.Status == OutcomeStatusConflict || row.Status == OutcomeStatusInvalid {
+			return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: row.Status, Reason: msg}, true
 		}
 		if after, ok := RetryAfter(err); ok {
 			return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusRateLimited, Reason: msg, RetryAfter: after}, true
@@ -296,6 +321,37 @@ func contributionTargetParts(ids ExternalIDs) []string {
 		intPart(ids.SeasonNumber),
 		intPart(ids.EpisodeNumber),
 	}
+}
+
+// contributionTargetKey names the provider-side item a segment is submitted
+// against, independent of the submitted times. Providers accept one submission
+// per account for each item and segment and offer no way to amend it, so an
+// active claim on this key blocks every later payload for the same item.
+//
+// The item is identified by the first external ID the provider keys
+// submissions by, or else by TMDB, TVDB, then IMDb. The migration that
+// introduced the column, and the candidate query, derive the preference form
+// in SQL; the providers in use key by TMDB, where the two agree.
+func contributionTargetKey(ids ExternalIDs, keyedBy []string) string {
+	id := ""
+	values := ids.AsRequestMap()
+	for _, key := range append(append([]string(nil), keyedBy...), ExternalIDKeyTMDB, ExternalIDKeyTVDB, ExternalIDKeyIMDB) {
+		if value := strings.TrimSpace(values[key]); value != "" {
+			id = key + ":" + value
+			break
+		}
+	}
+	return strings.Join([]string{itemTypeName(ids.Kind), id, strconv.Itoa(ids.SeasonNumber), strconv.Itoa(ids.EpisodeNumber)}, "|")
+}
+
+// submissionKeyIDs returns the external IDs a provider requires, which are the
+// ones it keys submissions by.
+func submissionKeyIDs(sub Submitter) []string {
+	provider, ok := sub.(SubmissionRequirementProvider)
+	if !ok {
+		return nil
+	}
+	return provider.SubmissionRequirements().RequiredExternalIDs
 }
 
 func intPart(v int) string {

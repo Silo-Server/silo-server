@@ -3,10 +3,12 @@ package tmdb
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,9 +31,14 @@ const (
 	// never changes. The stale-window failure mode is safe — a title that
 	// gains a cert stays hidden (fail-closed) for at most the TTL.
 	certificationCacheTTL = 7 * 24 * time.Hour
-	// certificationFetchTimeout bounds the shared (caller-detached)
-	// singleflight fetch; see GetCertification.
-	certificationFetchTimeout = 30 * time.Second
+	// sharedFetchTimeout bounds a shared (caller-detached) singleflight
+	// fetch; see cachedCertification and GetMediaDetail.
+	sharedFetchTimeout = 30 * time.Second
+	// mediaDetailCacheTTL is deliberately short: a detail is large, so the
+	// cache holds only the titles being looked at right now. It is long enough
+	// that a title page polling a download's progress every 30 seconds, and
+	// everyone else viewing the title, share one fetch.
+	mediaDetailCacheTTL = 2 * time.Minute
 )
 
 // Client is an HTTP client for the TMDB collection preset API surface.
@@ -44,6 +51,7 @@ type Client struct {
 	discoverPageCache    *cache.TTLCache[*MediaPage]
 	externalIDCache      *cache.TTLCache[*ExternalIDs]
 	certificationCache   *cache.TTLCache[string]
+	mediaDetailCache     *cache.TTLCache[*MediaDetail]
 	cacheGroup           singleflight.Group
 	responseCacheTTL     time.Duration
 }
@@ -51,6 +59,10 @@ type Client struct {
 // NewClient creates a TMDB API client with the given API key and rate limit
 // (requests per second). If apiKey is empty, Silo's public project API key is
 // used.
+
+// ErrNotFound is wrapped by errors for titles TMDB does not have (HTTP 404).
+var ErrNotFound = errors.New("tmdb: not found")
+
 func NewClient(apiKey string, rateLimit int) *Client {
 	apiKey = strings.TrimSpace(apiKey)
 	if apiKey == "" {
@@ -65,6 +77,7 @@ func NewClient(apiKey string, rateLimit int) *Client {
 		discoverPageCache:    cache.NewTTLCache[*MediaPage](),
 		externalIDCache:      cache.NewTTLCache[*ExternalIDs](),
 		certificationCache:   cache.NewTTLCache[string](),
+		mediaDetailCache:     cache.NewTTLCache[*MediaDetail](),
 		responseCacheTTL:     defaultResponseCacheTTL,
 	}
 }
@@ -90,6 +103,9 @@ func (c *Client) Close() {
 	}
 	if c.certificationCache != nil {
 		c.certificationCache.Close()
+	}
+	if c.mediaDetailCache != nil {
+		c.mediaDetailCache.Close()
 	}
 }
 
@@ -149,11 +165,17 @@ func (c *Client) doGet(ctx context.Context, path string, dest any) error {
 		if resp.StatusCode >= 400 {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 			resp.Body.Close()
+			// A 404 wraps ErrNotFound so callers can tell a missing title
+			// from TMDB being unreachable.
+			var notFound error
+			if resp.StatusCode == http.StatusNotFound {
+				notFound = ErrNotFound
+			}
 			var apiErr apiError
 			if err := json.Unmarshal(body, &apiErr); err == nil && apiErr.StatusMessage != "" {
-				return fmt.Errorf("tmdb: HTTP %d: %s", resp.StatusCode, apiErr.StatusMessage)
+				return errors.Join(notFound, fmt.Errorf("tmdb: HTTP %d: %s", resp.StatusCode, apiErr.StatusMessage))
 			}
-			return fmt.Errorf("tmdb: HTTP %d", resp.StatusCode)
+			return errors.Join(notFound, fmt.Errorf("tmdb: HTTP %d", resp.StatusCode))
 		}
 
 		decodeErr := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBody)).Decode(dest)
@@ -827,35 +849,155 @@ func (c *Client) GetCollection(ctx context.Context, id int) (*Collection, error)
 	}, nil
 }
 
+// GetList fetches the entries of a public, user-authored TMDB list in list
+// order. Lists mix movies and TV shows; entries of any other media type are
+// skipped. The endpoint pages 20 entries at a time, so reading stops at the
+// list's last page or once limit entries are collected. A limit <= 0 reads
+// the whole list, capped like the presets at maxCollectionPresetResults.
+func (c *Client) GetList(ctx context.Context, id, limit int) ([]CollectionResult, error) {
+	if id <= 0 {
+		return nil, fmt.Errorf("tmdb: list id must be > 0 (got %d)", id)
+	}
+	if limit <= 0 || limit > maxCollectionPresetResults {
+		limit = maxCollectionPresetResults
+	}
+
+	results := make([]CollectionResult, 0, min(limit, 100))
+	for page := 1; len(results) < limit; page++ {
+		var resp listResponse
+		if err := c.doGet(ctx, fmt.Sprintf("/list/%d?page=%d", id, page), &resp); err != nil {
+			return nil, err
+		}
+		for _, item := range resp.Items {
+			if item.MediaType != "movie" && item.MediaType != "tv" {
+				continue
+			}
+			title := item.Title
+			if title == "" {
+				title = item.Name
+			}
+			results = append(results, CollectionResult{
+				ID:        item.ID,
+				MediaType: item.MediaType,
+				Title:     title,
+			})
+		}
+		if page >= resp.TotalPages || len(resp.Items) == 0 {
+			break
+		}
+	}
+
+	if len(results) > limit {
+		results = results[:limit]
+	}
+	return results, nil
+}
+
 // GetMediaDetail fetches a single TMDB movie or series with credits, external
 // IDs, recommendations, and the appropriate certification feed, returning a
 // normalized MediaDetail. mediaType accepts Silo-facing "movie" or "series".
 //
 // Cast is sorted by TMDB billing order and capped at 24 entries to keep the
 // payload bounded.
+//
+// A detail is cached for mediaDetailCacheTTL, and concurrent callers for one
+// title share a fetch. Each caller gets its own copy.
 func (c *Client) GetMediaDetail(ctx context.Context, mediaType string, id int) (*MediaDetail, error) {
 	if id <= 0 {
 		return nil, fmt.Errorf("tmdb: media id must be > 0 (got %d)", id)
 	}
-
+	var fetch func(context.Context) (*MediaDetail, error)
 	switch mediaType {
 	case "movie":
-		path := fmt.Sprintf("/movie/%d?append_to_response=credits,external_ids,recommendations,release_dates,keywords", id)
-		var resp movieDetailResponse
-		if err := c.doGet(ctx, path, &resp); err != nil {
-			return nil, err
+		fetch = func(fetchCtx context.Context) (*MediaDetail, error) {
+			path := fmt.Sprintf("/movie/%d?append_to_response=credits,external_ids,recommendations,release_dates,keywords", id)
+			var resp movieDetailResponse
+			if err := c.doGet(fetchCtx, path, &resp); err != nil {
+				return nil, err
+			}
+			return normalizeMovieDetail(&resp), nil
 		}
-		return normalizeMovieDetail(&resp), nil
 	case "series", "tv":
-		path := fmt.Sprintf("/tv/%d?append_to_response=credits,external_ids,recommendations,content_ratings,keywords", id)
-		var resp tvDetailResponse
-		if err := c.doGet(ctx, path, &resp); err != nil {
-			return nil, err
+		mediaType = "tv"
+		fetch = func(fetchCtx context.Context) (*MediaDetail, error) {
+			path := fmt.Sprintf("/tv/%d?append_to_response=credits,external_ids,recommendations,content_ratings,keywords", id)
+			var resp tvDetailResponse
+			if err := c.doGet(fetchCtx, path, &resp); err != nil {
+				return nil, err
+			}
+			return normalizeTVDetail(&resp), nil
 		}
-		return normalizeTVDetail(&resp), nil
 	default:
 		return nil, fmt.Errorf("tmdb: invalid media type for detail: %q", mediaType)
 	}
+
+	cacheKey := "media_detail:" + mediaType + ":" + strconv.Itoa(id)
+	if c.mediaDetailCache != nil {
+		if cached, ok := c.mediaDetailCache.Get(cacheKey); ok {
+			return cloneMediaDetail(cached), nil
+		}
+	}
+	// DoChan + select for the same reason as cachedCertification: the shared
+	// fetch survives any one caller's disconnect, and each caller stops
+	// waiting on its own cancellation.
+	resultCh := c.cacheGroup.DoChan(cacheKey, func() (any, error) {
+		if c.mediaDetailCache != nil {
+			if cached, ok := c.mediaDetailCache.Get(cacheKey); ok {
+				return cached, nil
+			}
+		}
+		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sharedFetchTimeout)
+		defer cancel()
+		detail, err := fetch(fetchCtx)
+		if err != nil {
+			return nil, err
+		}
+		if c.mediaDetailCache != nil {
+			c.mediaDetailCache.Set(cacheKey, detail, mediaDetailCacheTTL)
+		}
+		return detail, nil
+	})
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case result := <-resultCh:
+		if result.Err != nil {
+			return nil, result.Err
+		}
+		detail, ok := result.Val.(*MediaDetail)
+		if !ok {
+			return nil, fmt.Errorf("tmdb: invalid cached media detail response")
+		}
+		return cloneMediaDetail(detail), nil
+	}
+}
+
+// cloneMediaDetail copies a detail deeply enough that a caller changing its
+// copy cannot change the cached one.
+func cloneMediaDetail(detail *MediaDetail) *MediaDetail {
+	if detail == nil {
+		return nil
+	}
+	cloned := *detail
+	cloned.Genres = slices.Clone(detail.Genres)
+	if detail.Certifications != nil {
+		cloned.Certifications = make(map[string][]string, len(detail.Certifications))
+		for country, certs := range detail.Certifications {
+			cloned.Certifications[country] = slices.Clone(certs)
+		}
+	}
+	cloned.ProductionCompanies = slices.Clone(detail.ProductionCompanies)
+	cloned.KeywordIDs = slices.Clone(detail.KeywordIDs)
+	cloned.GenreIDs = slices.Clone(detail.GenreIDs)
+	cloned.CompanyIDs = slices.Clone(detail.CompanyIDs)
+	cloned.NetworkIDs = slices.Clone(detail.NetworkIDs)
+	cloned.OriginCountries = slices.Clone(detail.OriginCountries)
+	cloned.Networks = slices.Clone(detail.Networks)
+	cloned.Seasons = slices.Clone(detail.Seasons)
+	cloned.Cast = slices.Clone(detail.Cast)
+	cloned.Creators = slices.Clone(detail.Creators)
+	cloned.Recommendations = slices.Clone(detail.Recommendations)
+	return &cloned
 }
 
 func normalizeMovieDetail(resp *movieDetailResponse) *MediaDetail {
@@ -878,12 +1020,19 @@ func normalizeMovieDetail(resp *movieDetailResponse) *MediaDetail {
 		Status:           resp.Status,
 		Homepage:         resp.Homepage,
 		ContentRating:    pickMovieCertification(resp.ReleaseDates),
+		USCertification:  pickUSMovieCertification(resp.ReleaseDates),
+		Certifications:   movieCertifications(resp.ReleaseDates),
 		OriginalLanguage: resp.OriginalLanguage,
 		KeywordIDs:       keywordIDs(resp.Keywords.Keywords, resp.Keywords.Results),
+		GenreIDs:         idsFromGenres(resp.Genres),
+		OriginCountries:  resp.OriginCountry,
 	}
 	for _, company := range resp.ProductionCompanies {
 		if name := strings.TrimSpace(company.Name); name != "" {
 			detail.ProductionCompanies = append(detail.ProductionCompanies, name)
+		}
+		if company.ID > 0 {
+			detail.CompanyIDs = append(detail.CompanyIDs, company.ID)
 		}
 	}
 	if resp.ExternalIDs != nil {
@@ -938,8 +1087,12 @@ func normalizeTVDetail(resp *tvDetailResponse) *MediaDetail {
 		NumberOfSeasons:  resp.NumberOfSeasons,
 		NumberOfEpisodes: resp.NumberOfEpisodes,
 		ContentRating:    pickTVRating(resp.ContentRatings),
+		USCertification:  pickUSTVRating(resp.ContentRatings),
+		Certifications:   tvCertifications(resp.ContentRatings),
 		OriginalLanguage: resp.OriginalLanguage,
 		KeywordIDs:       keywordIDs(resp.Keywords.Keywords, resp.Keywords.Results),
+		GenreIDs:         idsFromGenres(resp.Genres),
+		OriginCountries:  resp.OriginCountry,
 	}
 	if len(resp.EpisodeRunTime) > 0 {
 		detail.Runtime = resp.EpisodeRunTime[0]
@@ -948,6 +1101,21 @@ func normalizeTVDetail(resp *tvDetailResponse) *MediaDetail {
 		if name := strings.TrimSpace(network.Name); name != "" {
 			detail.Networks = append(detail.Networks, name)
 		}
+		if network.ID > 0 {
+			detail.NetworkIDs = append(detail.NetworkIDs, network.ID)
+		}
+	}
+	for _, season := range resp.Seasons {
+		if season.SeasonNumber < 0 {
+			continue
+		}
+		detail.Seasons = append(detail.Seasons, SeasonSummary{
+			Number:       season.SeasonNumber,
+			Name:         strings.TrimSpace(season.Name),
+			EpisodeCount: season.EpisodeCount,
+			AirDate:      season.AirDate,
+			PosterPath:   season.PosterPath,
+		})
 	}
 	if resp.ExternalIDs != nil {
 		detail.IMDbID = resp.ExternalIDs.IMDbID
@@ -979,6 +1147,16 @@ func normalizeTVDetail(resp *tvDetailResponse) *MediaDetail {
 		}
 	}
 	return detail
+}
+
+func idsFromGenres(genres []genreEntry) []int {
+	var out []int
+	for _, g := range genres {
+		if g.ID > 0 {
+			out = append(out, g.ID)
+		}
+	}
+	return out
 }
 
 func namesFromGenres(genres []genreEntry) []string {
@@ -1104,14 +1282,9 @@ func pickTVRating(cr *contentRatingsResponse) string {
 // the full detail, which would return a 100+ KB payload to extract a handful
 // of identifiers.
 func (c *Client) GetExternalIDs(ctx context.Context, mediaType string, id int) (*ExternalIDs, error) {
-	var path string
-	switch mediaType {
-	case "movie":
-		path = fmt.Sprintf("/movie/%d/external_ids", id)
-	case "tv":
-		path = fmt.Sprintf("/tv/%d/external_ids", id)
-	default:
-		return nil, fmt.Errorf("tmdb: invalid media type: %q", mediaType)
+	path, err := externalIDsPath(mediaType, id)
+	if err != nil {
+		return nil, err
 	}
 
 	cacheKey := "external_ids:" + path
@@ -1147,6 +1320,36 @@ func (c *Client) GetExternalIDs(ctx context.Context, mediaType string, id int) (
 	return cloneExternalIDs(ids), nil
 }
 
+// RefreshExternalIDs fetches an entry's external IDs from TMDB, skipping both
+// the cache and any in-flight cached fetch, and caches the result. It serves
+// callers acting on an ID that may have just been added on TMDB (for example an
+// admin retrying a request after fixing it upstream).
+func (c *Client) RefreshExternalIDs(ctx context.Context, mediaType string, id int) (*ExternalIDs, error) {
+	path, err := externalIDsPath(mediaType, id)
+	if err != nil {
+		return nil, err
+	}
+	ids, err := c.fetchExternalIDs(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	if c.externalIDCache != nil && c.responseCacheTTL > 0 {
+		c.externalIDCache.Set("external_ids:"+path, cloneExternalIDs(ids), c.responseCacheTTL)
+	}
+	return cloneExternalIDs(ids), nil
+}
+
+func externalIDsPath(mediaType string, id int) (string, error) {
+	switch mediaType {
+	case "movie":
+		return fmt.Sprintf("/movie/%d/external_ids", id), nil
+	case "tv":
+		return fmt.Sprintf("/tv/%d/external_ids", id), nil
+	default:
+		return "", fmt.Errorf("tmdb: invalid media type: %q", mediaType)
+	}
+}
+
 func cloneExternalIDs(ids *ExternalIDs) *ExternalIDs {
 	if ids == nil {
 		return nil
@@ -1159,7 +1362,8 @@ func cloneExternalIDs(ids *ExternalIDs) *ExternalIDs {
 // "TV-MA", ...), or "" when the title has no US certification. It uses the
 // dedicated release_dates / content_ratings sub-resources instead of the full
 // detail payload for the same reason GetExternalIDs does: the detail response
-// is 100+ KB and uncached, while these are a country list of a few KB.
+// is 100+ KB and cached only briefly, while these are a country list of a few
+// KB.
 //
 // Unlike GetMediaDetail's display rating, this deliberately does NOT fall
 // back to another country's certification: the value feeds the US-scale
@@ -1168,17 +1372,57 @@ func cloneExternalIDs(ids *ExternalIDs) *ExternalIDs {
 // ladder treats as fail-closed. mediaType accepts Silo-facing
 // "movie"/"series" plus TMDB-facing "tv".
 func (c *Client) GetCertification(ctx context.Context, mediaType string, id int) (string, error) {
-	var path string
+	path, err := certificationPath(mediaType, id)
+	if err != nil {
+		return "", err
+	}
+	return c.cachedCertification(ctx, "certification:"+path, func(fetchCtx context.Context) (string, error) {
+		return c.fetchCertification(fetchCtx, mediaType, path)
+	})
+}
+
+// GetCertifications returns every country's certifications for a title,
+// keyed by ISO 3166-1 code, from the same small sub-resource and cache as
+// GetCertification. Request routing reads a title's own country's rating
+// from it when the title has no US one; the parental-control path keeps to
+// GetCertification.
+func (c *Client) GetCertifications(ctx context.Context, mediaType string, id int) (map[string][]string, error) {
+	path, err := certificationPath(mediaType, id)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := c.cachedCertification(ctx, "certifications:"+path, func(fetchCtx context.Context) (string, error) {
+		certs, err := c.fetchCertifications(fetchCtx, mediaType, path)
+		if err != nil {
+			return "", err
+		}
+		encoded, err := json.Marshal(certs)
+		return string(encoded), err
+	})
+	if err != nil {
+		return nil, err
+	}
+	var certs map[string][]string
+	if err := json.Unmarshal([]byte(raw), &certs); err != nil {
+		return nil, fmt.Errorf("tmdb: invalid cached certifications: %w", err)
+	}
+	return certs, nil
+}
+
+func certificationPath(mediaType string, id int) (string, error) {
 	switch mediaType {
 	case "movie":
-		path = fmt.Sprintf("/movie/%d/release_dates", id)
+		return fmt.Sprintf("/movie/%d/release_dates", id), nil
 	case "series", "tv":
-		path = fmt.Sprintf("/tv/%d/content_ratings", id)
+		return fmt.Sprintf("/tv/%d/content_ratings", id), nil
 	default:
 		return "", fmt.Errorf("tmdb: invalid media type: %q", mediaType)
 	}
+}
 
-	cacheKey := "certification:" + path
+// cachedCertification fetches one certification value once across concurrent
+// callers and caches it.
+func (c *Client) cachedCertification(ctx context.Context, cacheKey string, fetch func(context.Context) (string, error)) (string, error) {
 	if c.certificationCache != nil {
 		if cached, ok := c.certificationCache.Get(cacheKey); ok {
 			return cached, nil
@@ -1195,9 +1439,9 @@ func (c *Client) GetCertification(ctx context.Context, mediaType string, id int)
 				return cached, nil
 			}
 		}
-		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), certificationFetchTimeout)
+		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sharedFetchTimeout)
 		defer cancel()
-		cert, err := c.fetchCertification(fetchCtx, mediaType, path)
+		cert, err := fetch(fetchCtx)
 		if err != nil {
 			return nil, err
 		}
@@ -1222,6 +1466,75 @@ func (c *Client) GetCertification(ctx context.Context, mediaType string, id int)
 		}
 		return cert, nil
 	}
+}
+
+func (c *Client) fetchCertifications(ctx context.Context, mediaType, path string) (map[string][]string, error) {
+	if mediaType == "movie" {
+		var resp releaseDatesResponse
+		if err := c.doGet(ctx, path, &resp); err != nil {
+			return nil, err
+		}
+		return movieCertifications(&resp), nil
+	}
+	var resp contentRatingsResponse
+	if err := c.doGet(ctx, path, &resp); err != nil {
+		return nil, err
+	}
+	return tvCertifications(&resp), nil
+}
+
+// USCertificationFrom picks the US rating out of GetCertifications' answer
+// the way GetCertification does: the strictest recognized movie
+// certification, a series' first rating.
+func USCertificationFrom(mediaType string, certs map[string][]string) string {
+	us := certs["US"]
+	if mediaType != "movie" {
+		if len(us) > 0 {
+			return us[0]
+		}
+		return ""
+	}
+	var picked string
+	pickedRank := -1
+	for _, cert := range us {
+		if rank := usCertificationRank[strings.ToUpper(cert)]; rank > pickedRank || picked == "" {
+			picked, pickedRank = cert, rank
+		}
+	}
+	return picked
+}
+
+// movieCertifications lists each country's non-empty certifications, in
+// TMDB's order, without repeats.
+func movieCertifications(rd *releaseDatesResponse) map[string][]string {
+	out := map[string][]string{}
+	if rd == nil {
+		return out
+	}
+	for _, country := range rd.Results {
+		code := strings.ToUpper(strings.TrimSpace(country.ISO3166))
+		for _, entry := range country.ReleaseDates {
+			if cert := strings.TrimSpace(entry.Certification); code != "" && cert != "" && !slices.Contains(out[code], cert) {
+				out[code] = append(out[code], cert)
+			}
+		}
+	}
+	return out
+}
+
+// tvCertifications lists each country's non-empty rating.
+func tvCertifications(cr *contentRatingsResponse) map[string][]string {
+	out := map[string][]string{}
+	if cr == nil {
+		return out
+	}
+	for _, entry := range cr.Results {
+		code := strings.ToUpper(strings.TrimSpace(entry.ISO3166))
+		if rating := strings.TrimSpace(entry.Rating); code != "" && rating != "" && !slices.Contains(out[code], rating) {
+			out[code] = append(out[code], rating)
+		}
+	}
+	return out
 }
 
 func (c *Client) fetchCertification(ctx context.Context, mediaType, path string) (string, error) {
@@ -1292,6 +1605,66 @@ func pickUSTVRating(cr *contentRatingsResponse) string {
 		}
 	}
 	return ""
+}
+
+// External ID sources accepted by FindByExternalID.
+const (
+	ExternalSourceIMDb = "imdb_id"
+	ExternalSourceTVDB = "tvdb_id"
+)
+
+// FindByExternalID looks a title up by another provider's ID through TMDB's
+// /find/{external_id} endpoint. source is ExternalSourceIMDb or
+// ExternalSourceTVDB. It returns every movie and series TMDB lists for the
+// ID, with Silo-facing media types ("movie", "series"); no result is an empty
+// slice, not an error. Results are not cached: callers use it to recover a
+// title whose TMDB ID stopped resolving, which is rare and wants a fresh
+// answer.
+func (c *Client) FindByExternalID(ctx context.Context, source, externalID string) ([]MediaResult, error) {
+	externalID = strings.TrimSpace(externalID)
+	if externalID == "" {
+		return nil, fmt.Errorf("tmdb: external id must not be empty")
+	}
+	switch source {
+	case ExternalSourceIMDb, ExternalSourceTVDB:
+	default:
+		return nil, fmt.Errorf("tmdb: invalid external source %q", source)
+	}
+	path := "/find/" + url.PathEscape(externalID) + "?external_source=" + url.QueryEscape(source)
+	var resp findResponse
+	if err := c.doGet(ctx, path, &resp); err != nil {
+		return nil, err
+	}
+	out := make([]MediaResult, 0, len(resp.MovieResults)+len(resp.TVResults))
+	for _, item := range resp.MovieResults {
+		out = append(out, MediaResult{
+			ID:           item.ID,
+			MediaType:    "movie",
+			Title:        item.Title,
+			Overview:     item.Overview,
+			PosterPath:   item.PosterPath,
+			BackdropPath: item.BackdropPath,
+			ReleaseDate:  item.ReleaseDate,
+			Year:         releaseYear(item.ReleaseDate),
+			Popularity:   item.Popularity,
+			VoteAverage:  item.VoteAverage,
+		})
+	}
+	for _, item := range resp.TVResults {
+		out = append(out, MediaResult{
+			ID:           item.ID,
+			MediaType:    "series",
+			Title:        item.Name,
+			Overview:     item.Overview,
+			PosterPath:   item.PosterPath,
+			BackdropPath: item.BackdropPath,
+			ReleaseDate:  item.FirstAirDate,
+			Year:         releaseYear(item.FirstAirDate),
+			Popularity:   item.Popularity,
+			VoteAverage:  item.VoteAverage,
+		})
+	}
+	return out, nil
 }
 
 func (c *Client) fetchExternalIDs(ctx context.Context, path string) (*ExternalIDs, error) {

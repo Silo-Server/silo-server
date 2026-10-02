@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -67,6 +68,9 @@ type ItemRefreshResult struct {
 	ScanPath           string              `json:"scan_path"`
 	ScanResult         *scanner.ScanResult `json:"scan_result"`
 	MatchedFiles       int                 `json:"matched_files"`
+	// ArtworkCacheWarning is set when the metadata refresh committed but its
+	// artwork did not finish caching. The refresh itself still succeeded.
+	ArtworkCacheWarning string `json:"artwork_cache_warning,omitempty"`
 }
 
 type itemRefreshItemRepo interface {
@@ -218,8 +222,18 @@ func (r *ItemRefreshResolver) resolveSeries(ctx context.Context, item *models.Me
 	if mode == ItemRefreshModeComplete {
 		return r.buildCompleteRequest(ctx, file, req)
 	}
+	folder, err := r.folderRepo.GetByID(ctx, file.MediaFolderID)
+	if err != nil {
+		return nil, err
+	}
+	var libraryRoots []string
+	if folder != nil {
+		libraryRoots = folder.Paths
+	}
 	scanPath := filepath.Dir(file.FilePath)
-	if root, ok := naming.DetectSeriesRoot(file.FilePath, "series"); ok && root != nil && root.RootPath != "" {
+	// Library roots keep mount directories such as /mnt/s3 from being read as
+	// season folders and widening the refresh scan above the library.
+	if root, ok := naming.DetectSeriesRoot(file.FilePath, "series", libraryRoots...); ok && root != nil && root.RootPath != "" {
 		scanPath = filepath.Clean(root.RootPath)
 	}
 	return r.buildRequest(ctx, file.MediaFolderID, scanPath, req)
@@ -416,6 +430,15 @@ type ItemRefreshIngester interface {
 	IngestSubtree(ctx context.Context, folder *models.MediaFolder, subtreePath string) (*libraryingest.Result, error)
 }
 
+type ItemRefreshArtworkCacher interface {
+	// ArtworkCachingEnabled reports whether caching would actually run. The
+	// cacher is wired whenever object storage is configured, independently of
+	// the metadata.cache_images setting, so the refresh asks before it
+	// advertises an artwork step.
+	ArtworkCachingEnabled() bool
+	CacheTargetArtwork(ctx context.Context, targetContentID string) error
+}
+
 type ItemRefreshExecutor struct {
 	folderRepo      itemRefreshFolderRepo
 	fileRepo        itemRefreshFileRepo
@@ -425,13 +448,15 @@ type ItemRefreshExecutor struct {
 	seasonRepo      itemRefreshSeasonRepo
 	episodeRepo     itemRefreshEpisodeRepo
 	ingester        ItemRefreshIngester
+	scanRuns        directScanRunRepository
 	refresher       interface {
 		RefreshItem(ctx context.Context, contentID string) error
 		RefreshItemForLibrary(ctx context.Context, contentID string, folderID int) error
 		RefreshTargetForLibrary(ctx context.Context, targetType, contentID string, folderID int) error
 	}
-	eventBus    cache.EventBus
-	realtimeHub *notifications.Hub
+	artworkCacher ItemRefreshArtworkCacher
+	eventBus      cache.EventBus
+	realtimeHub   *notifications.Hub
 }
 
 func NewItemRefreshExecutor(
@@ -443,6 +468,7 @@ func NewItemRefreshExecutor(
 	seasonRepo itemRefreshSeasonRepo,
 	episodeRepo itemRefreshEpisodeRepo,
 	ingester ItemRefreshIngester,
+	scanRuns directScanRunRepository,
 	refresher interface {
 		RefreshItem(ctx context.Context, contentID string) error
 		RefreshItemForLibrary(ctx context.Context, contentID string, folderID int) error
@@ -460,14 +486,19 @@ func NewItemRefreshExecutor(
 		seasonRepo:      seasonRepo,
 		episodeRepo:     episodeRepo,
 		ingester:        ingester,
+		scanRuns:        scanRuns,
 		refresher:       refresher,
 		eventBus:        eventBus,
 		realtimeHub:     realtimeHub,
 	}
 }
 
+func (e *ItemRefreshExecutor) SetArtworkCacher(cacher ItemRefreshArtworkCacher) {
+	e.artworkCacher = cacher
+}
+
 func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshRequest, progress func(current, total int, message string)) (*ItemRefreshResult, error) {
-	if e.folderRepo == nil || e.ingester == nil || e.refresher == nil {
+	if e.folderRepo == nil || e.ingester == nil || e.scanRuns == nil || e.refresher == nil {
 		return nil, fmt.Errorf("resolve scan scope: item refresh executor is not fully configured")
 	}
 	req.Mode = normalizeItemRefreshMode(req.Mode)
@@ -477,6 +508,11 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 	}
 	if !folder.Enabled {
 		return nil, fmt.Errorf("resolve scan scope: library is disabled")
+	}
+	cacheArtwork := e.artworkCacher != nil && e.artworkCacher.ArtworkCachingEnabled()
+	progressTotal := 3
+	if cacheArtwork {
+		progressTotal = 4
 	}
 
 	refreshContentID := req.RefreshContentID
@@ -492,16 +528,25 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 	}
 
 	if progress != nil {
-		progress(1, 3, "Scanning scope")
+		progress(1, progressTotal, "Scanning scope")
 	}
-	ingestResult, err := e.ingester.IngestSubtree(ctx, folder, req.ScanPath)
+	scanCtx, scanRun, err := beginDirectSubtreeScan(ctx, e.scanRuns, req.ScanFolderID, req.ScanPath, itemRefreshScanTrigger)
 	if err != nil {
+		return nil, fmt.Errorf("scan scope: %w", err)
+	}
+	stopScanHeartbeat := startDirectScanHeartbeat(e.scanRuns, scanRun, directScanHeartbeatEvery)
+	ingestResult, err := e.ingester.IngestSubtree(scanCtx, folder, req.ScanPath)
+	stopScanHeartbeat()
+	if err != nil {
+		return nil, fmt.Errorf("scan scope: %w", failDirectScan(ctx, e.scanRuns, scanRun, err))
+	}
+	if err := completeDirectScan(ctx, e.scanRuns, scanRun, ingestResult); err != nil {
 		return nil, fmt.Errorf("scan scope: %w", err)
 	}
 	scanResult := ingestResult.ScanResult
 
 	if progress != nil {
-		progress(2, 3, "Matching discovered files")
+		progress(2, progressTotal, "Matching discovered files")
 	}
 	if refreshedFolder, reloadErr := e.folderRepo.GetByID(ctx, req.ScanFolderID); reloadErr == nil && !refreshedFolder.Enabled {
 		return nil, fmt.Errorf("match discovered files: library is disabled")
@@ -520,7 +565,7 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 	}
 
 	if progress != nil {
-		progress(3, 3, "Refreshing metadata")
+		progress(3, progressTotal, "Refreshing metadata")
 	}
 	if refreshedFolder, reloadErr := e.folderRepo.GetByID(ctx, req.ScanFolderID); reloadErr == nil && !refreshedFolder.Enabled {
 		return nil, fmt.Errorf("refresh metadata: library is disabled")
@@ -537,7 +582,28 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 	if err := e.refresher.RefreshTargetForLibrary(ctx, refreshTargetType, refreshContentID, req.ScanFolderID); err != nil {
 		return nil, fmt.Errorf("refresh metadata: %w", err)
 	}
+	artworkWarning := ""
+	if cacheArtwork {
+		if progress != nil {
+			progress(4, progressTotal, "Caching refreshed artwork")
+		}
+		// The metadata refresh is already committed at this point, so artwork
+		// that fails to cache is reported as a warning on the result. Aborting
+		// here would skip the cache invalidation and the rebuilt content IDs
+		// below, leaving clients pointed at an item that no longer exists.
+		if err := e.artworkCacher.CacheTargetArtwork(ctx, refreshContentID); err != nil {
+			artworkWarning = err.Error()
+			slog.WarnContext(ctx, "item refresh: artwork caching did not complete",
+				"component", "adminjob",
+				"content_id", refreshContentID,
+				"error", err,
+			)
+		}
+	}
 
+	// Publish only after the metadata refresh: scan_complete advances the resolved
+	// list-cache generation, so emitting it earlier lets a rail rebuild from
+	// pre-refresh titles/posters and serve them for the whole cache TTL.
 	e.publish(cache.EventScanComplete, strconv.Itoa(req.ScanFolderID))
 	e.publish(cache.EventMetadataUpdated, refreshContentID)
 	if e.realtimeHub != nil {
@@ -559,12 +625,13 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 	}
 
 	return &ItemRefreshResult{
-		RequestedContentID: req.RequestedContentID,
-		RefreshContentID:   refreshContentID,
-		DetailContentID:    detailContentID,
-		ScanPath:           req.ScanPath,
-		ScanResult:         scanResult,
-		MatchedFiles:       matched,
+		RequestedContentID:  req.RequestedContentID,
+		RefreshContentID:    refreshContentID,
+		DetailContentID:     detailContentID,
+		ScanPath:            req.ScanPath,
+		ScanResult:          scanResult,
+		MatchedFiles:        matched,
+		ArtworkCacheWarning: artworkWarning,
 	}, nil
 }
 

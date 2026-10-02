@@ -11,7 +11,6 @@
  * Related files:
  *   docs/design-system.md — Design philosophy and usage guidance
  *   src/app.css          — CSS tokens (colors, radii, shadows, motion)
- *   src/lib/themes.ts    — Theme definitions and metadata
  *
  * ─── HOW TO USE ───
  *
@@ -27,7 +26,7 @@
  *      uses --font-display; everything else uses --font-body.
  *
  * 4. MOTION: Use duration/easing CSS variables for transitions.
- *      className="transition-all duration-[--duration-normal]"
+ *      className="transition-all duration-(--duration-normal)"
  *
  * 5. PATTERNS: Use the utility classes defined in app.css.
  *      .hero-gradient, .glass, .glass-subtle, .media-card, etc.
@@ -339,7 +338,7 @@ export const LAYOUT = {
 export const MOTION = {
   /**
    * Interaction duration tokens — exposed as CSS custom properties.
-   * Use via: transition-all duration-[--duration-normal]
+   * Use via: transition-all duration-(--duration-normal)
    */
   duration: {
     instant: "0ms",
@@ -362,7 +361,7 @@ export const MOTION = {
 
   /**
    * Easing curves — exposed as CSS custom properties.
-   * Use via: ease-[--ease-smooth]
+   * Use via: ease-(--ease-smooth)
    */
   easing: {
     default: "cubic-bezier(0.4, 0, 0.2, 1)", // General purpose
@@ -592,7 +591,7 @@ export const PAGE_CONTAINER = "px-4 py-4 sm:px-6 lg:px-12 lg:py-6";
 /**
  * Hero banner container sizing — shared between HeroBanner and Home skeletons.
  */
-export const HERO_BANNER_SIZE = "h-[50vh] min-h-[350px] max-h-[700px] lg:h-[60vh]";
+export const HERO_BANNER_SIZE = "h-[54vh] min-h-[380px] max-h-[760px] lg:h-[66vh]";
 
 /**
  * Taller cinematic hero sizing used by the Library page Recommended tab.

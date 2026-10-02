@@ -16,9 +16,16 @@ func GlobalConfigFieldSets(
 	manifest *pluginv1.PluginManifest,
 	configKey string,
 ) (publicFields, secretFields []string) {
+	return ConfigSchemaFieldSets(globalConfigSchema(manifest, configKey))
+}
+
+// ConfigSchemaFieldSets returns the top-level public and secret fields for one
+// configuration schema. JSON Schema annotations and Admin form controls are
+// both authoritative; undeclared fields are intentionally absent from both
+// sets so callers can keep them on the protected path.
+func ConfigSchemaFieldSets(schema *pluginv1.ConfigSchema) (publicFields, secretFields []string) {
 	declared := make(map[string]struct{})
 	secrets := make(map[string]struct{})
-	schema := globalConfigSchema(manifest, configKey)
 	if schema != nil {
 		if form := schema.GetAdminForm(); form != nil {
 			for _, field := range form.GetFields() {

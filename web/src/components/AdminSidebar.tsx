@@ -3,6 +3,7 @@ import { ArrowLeft } from "lucide-react";
 import type { ReactNode } from "react";
 import { SideNavItem, SideNavSection } from "@/components/SideNav";
 import { SiloBrand } from "@/components/SiloBrand";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
 import {
   buildAdminNavSections,
   buildAdminPluginNavItems,
@@ -14,6 +15,7 @@ import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
 import { usePolicyCapability } from "@/hooks/queries/admin/policy";
 import { useAdminSessions } from "@/hooks/queries/admin/stats";
 import { useBuildInfo } from "@/hooks/queries/admin/system";
+import { useAdminRequestCounts } from "@/hooks/queries/admin/requests";
 import { cn } from "@/lib/utils";
 
 interface SidebarItem extends AdminNavItem {
@@ -49,17 +51,31 @@ export default function AdminSidebar({ onNavigate, embedded = false }: AdminSide
   } else if (buildInfo.isError) {
     buildDisplay = "load failed";
   } else if (buildInfo.data?.available) {
-    buildDisplay = buildInfo.data.display;
+    const buildNumber = buildInfo.data.build_number ?? 0;
+    buildDisplay =
+      buildNumber > 0 ? `${buildNumber} · ${buildInfo.data.display}` : buildInfo.data.display;
   }
 
   const activityBadge =
     sessionCount > 0 ? <span className="live-badge">{sessionCount} live</span> : undefined;
+  const pendingRequests = useAdminRequestCounts().data?.needs_approval ?? 0;
+  const requestsBadge =
+    pendingRequests > 0 ? (
+      <span className="bg-primary text-primary-foreground rounded-full px-1.5 py-px text-[10px] font-semibold tabular-nums">
+        <span aria-hidden="true">{pendingRequests}</span>
+        <span className="sr-only">, {pendingRequests} need approval</span>
+      </span>
+    ) : undefined;
+  const badges: Record<string, ReactNode> = {
+    "/admin/activity": activityBadge,
+    "/admin/requests": requestsBadge,
+  };
   const sections: SidebarSection[] = buildAdminNavSections({
     policyEditorAvailable: policyCapability.data?.editor_available === true,
   }).map((section) => ({
     ...section,
     items: section.items.map((item) =>
-      item.href === "/admin/activity" ? { ...item, badge: activityBadge } : item,
+      badges[item.href] ? { ...item, badge: badges[item.href] } : item,
     ),
   }));
 
@@ -145,19 +161,24 @@ export default function AdminSidebar({ onNavigate, embedded = false }: AdminSide
           <div className="text-muted-foreground text-[10px] font-semibold tracking-[0.18em] uppercase">
             Build
           </div>
-          <div className="text-sidebar-foreground mt-1 font-mono text-[12px] leading-5">
+          <div
+            className="text-sidebar-foreground mt-1 font-mono text-[12px] leading-5"
+            title={buildInfo.data?.built_at ? `Built ${buildInfo.data.built_at}` : undefined}
+          >
             {buildDisplay}
           </div>
         </div>
-        {/* Back to app */}
-        <Link
+        {/* Back to app — admin was almost always entered from the app, so this
+            plays the motion backwards rather than as a descent. */}
+        <ViewTransitionLink
           to="/"
+          up
           onClick={onNavigate}
           className="text-muted-foreground hover:text-foreground hover:bg-accent/70 flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-[13px] font-medium transition-colors duration-150"
         >
           <ArrowLeft className="h-[18px] w-[18px]" />
           <span>Back to App</span>
-        </Link>
+        </ViewTransitionLink>
       </div>
     </aside>
   );

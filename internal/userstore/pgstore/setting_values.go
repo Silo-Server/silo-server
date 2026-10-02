@@ -95,12 +95,15 @@ func (s *PostgresUserStore) ListSettingValuesForResolution(
 	ctx context.Context,
 	query userstore.SettingResolutionQuery,
 ) ([]userstore.SettingValue, error) {
+	return listSettingValuesForResolution(ctx, s.pool, s.userID, query)
+}
+func listSettingValuesForResolution(ctx context.Context, db preferenceSettingsExecutor, userID int, query userstore.SettingResolutionQuery) ([]userstore.SettingValue, error) {
 	q := query.Normalized()
 	if len(q.Keys) == 0 {
 		return nil, nil
 	}
 
-	rows, err := s.pool.Query(ctx, `
+	rows, err := db.Query(ctx, `
 		SELECT `+settingValueColumns+`
 		FROM user_setting_values
 		WHERE user_id = $1
@@ -113,14 +116,14 @@ func (s *PostgresUserStore) ListSettingValuesForResolution(
 			                scope = 'profile'
 			             OR (scope = 'profile_client' AND client_family = $4)
 			             OR (scope = 'profile_device' AND device_id = $5)
-			             OR (scope = 'profile_library' AND library_id = ANY($6::int[]))
+			             OR (scope = 'profile_library' AND library_id = ANY($6::bigint[]))
 			             OR (scope = 'profile_series' AND series_id = ANY($7::text[]))
 			          )
 			        )
 			      )
 		ORDER BY key, scope, COALESCE(profile_id, ''), COALESCE(client_family, ''), COALESCE(device_id, ''),
 		         COALESCE(library_id, 0), COALESCE(series_id, '')`,
-		s.userID, q.Keys, q.ProfileIDs, string(q.ClientFamily), q.DeviceID, q.LibraryIDs, q.SeriesIDs,
+		userID, q.Keys, q.ProfileIDs, string(q.ClientFamily), q.DeviceID, q.LibraryIDs, q.SeriesIDs,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing setting values for resolution: %w", err)
@@ -153,6 +156,47 @@ func (s *PostgresUserStore) ListAllSettingValues(ctx context.Context) ([]usersto
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing all setting values: %w", err)
+	}
+	defer rows.Close()
+
+	var values []userstore.SettingValue
+	for rows.Next() {
+		value, err := scanSettingValue(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scanning setting value: %w", err)
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
+// ListSettingValuesByScope returns every explicit value one profile has
+// stored at one profile-anchored scope for the given keys, in the same order
+// as ListAllSettingValues. The predicate is a prefix of
+// user_setting_values_resolution_idx (user_id, profile_id, key, scope), so
+// the read touches only the matching rows.
+func (s *PostgresUserStore) ListSettingValuesByScope(
+	ctx context.Context,
+	profileID string,
+	scope settingscontract.Scope,
+	keys []string,
+) ([]userstore.SettingValue, error) {
+	if err := userstore.ValidateScopeListing(profileID, scope); err != nil {
+		return nil, err
+	}
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+settingValueColumns+`
+		FROM user_setting_values
+		WHERE user_id = $1 AND profile_id = $2 AND scope = $3 AND key = ANY($4::text[])
+		ORDER BY key, scope, COALESCE(profile_id, ''), COALESCE(client_family, ''), COALESCE(device_id, ''),
+		         COALESCE(library_id, 0), COALESCE(series_id, '')`,
+		s.userID, profileID, string(scope), keys,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("listing setting values by scope: %w", err)
 	}
 	defer rows.Close()
 
@@ -517,4 +561,29 @@ func nullableInt(value int) *int {
 		return nil
 	}
 	return &value
+}
+
+func (s *PostgresUserStore) ListAdminSettingValuesPage(ctx context.Context, after userstore.SettingIdentity, limit int) ([]userstore.SettingValue, bool, error) {
+	limit = max(1, min(limit, 200))
+	rows, err := s.pool.Query(ctx, `SELECT `+settingValueColumns+` FROM user_setting_values WHERE user_id=$1 AND (key,scope,COALESCE(profile_id,''),COALESCE(client_family,''),COALESCE(device_id,''),COALESCE(library_id,0),COALESCE(series_id,''))>($2,$3,$4,$5,$6,$7,$8) ORDER BY key,scope,COALESCE(profile_id,''),COALESCE(client_family,''),COALESCE(device_id,''),COALESCE(library_id,0),COALESCE(series_id,'') LIMIT $9`, s.userID, after.Key, string(after.Scope), after.ProfileID, string(after.ClientFamily), after.DeviceID, after.LibraryID, after.SeriesID, limit+1)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+	values := make([]userstore.SettingValue, 0, limit+1)
+	for rows.Next() {
+		value, err := scanSettingValue(rows)
+		if err != nil {
+			return nil, false, err
+		}
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	more := len(values) > limit
+	if more {
+		values = values[:limit]
+	}
+	return values, more, nil
 }

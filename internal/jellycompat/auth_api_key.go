@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -138,6 +139,10 @@ func (a *AdminAPIKeyAuthenticator) authenticate(r *http.Request) adminAPIKeyAuth
 	if !res.ok {
 		return res
 	}
+	if lc := activitylog.GetLogContext(r.Context()); lc != nil {
+		uid := apiKey.UserID
+		lc.UserID = &uid
+	}
 	a.apiKeyLastUsed.Touch(apiKey.ID)
 	return adminAPIKeyAuthResult{
 		ctx:    context.WithValue(r.Context(), adminAPIKeyKey, true),
@@ -171,6 +176,16 @@ func (a *AdminAPIKeyAuthenticator) validate(ctx context.Context, token string) (
 	user, err := a.users.GetByID(ctx, apiKey.UserID)
 	if err != nil || user == nil || !user.Enabled {
 		return nil, nil, unauthorized
+	}
+	// Scoped keys are allowlist credentials for the versioned API only; no
+	// compat route is in any scope's allowlist, so they are refused here
+	// outright rather than inheriting the owning admin's compat access.
+	if len(apiKey.Scopes) > 0 {
+		return nil, nil, adminAPIKeyAuthResult{
+			status:  http.StatusForbidden,
+			code:    "Forbidden",
+			message: "API key scopes do not permit this route",
+		}
 	}
 	if user.Role != "admin" {
 		return nil, nil, adminAPIKeyAuthResult{

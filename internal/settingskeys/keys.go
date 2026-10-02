@@ -9,7 +9,7 @@
 package settingskeys
 
 // Revision is the manifest revision these bindings were generated from.
-const Revision = 6
+const Revision = 16
 
 // Setting keys, one constant per definition.
 const (
@@ -17,12 +17,16 @@ const (
 	CatalogMetadataLanguage = "catalog.metadata_language"
 	// Metadata language exceptions
 	CatalogMetadataLanguageOverrides = "catalog.metadata_language_overrides"
+	// Show advisory age
+	CatalogShowAdvisoryAge = "catalog.show_advisory_age"
 	// Download quality
 	DownloadsDefaultQuality = "downloads.default_quality"
 	// Keep watched downloads
 	DownloadsKeepWatched = "downloads.keep_watched"
 	// Download over Wi-Fi only
 	DownloadsWifiOnly = "downloads.wifi_only"
+	// Hide watched items from Home
+	HomeHideWatchedItems = "home.hide_watched_items"
 	// Primary menu
 	NavPrimaryMenu = "nav.primary_menu"
 	// Navigation shortcuts
@@ -41,6 +45,8 @@ const (
 	PlaybackAutoSkipIntro = "playback.auto_skip_intro"
 	// Auto-skip recaps
 	PlaybackAutoSkipRecap = "playback.auto_skip_recap"
+	// Skip intros
+	PlaybackIntroSkipMode = "playback.intro_skip_mode"
 	// Maximum bitrate
 	PlaybackMaxBitrateKbps = "playback.max_bitrate_kbps"
 	// Next up prompt
@@ -57,6 +63,10 @@ const (
 	PlaybackSubtitleMode = "playback.subtitle_mode"
 	// Audio sync offset
 	PlayerAudioSyncMs = "player.audio_sync_ms"
+	// Audiobook rewind interval
+	PlayerAudiobookSkipBackSeconds = "player.audiobook_skip_back_seconds"
+	// Audiobook fast-forward interval
+	PlayerAudiobookSkipForwardSeconds = "player.audiobook_skip_forward_seconds"
 	// Dolby Vision
 	PlayerDolbyVisionEnabled = "player.dolby_vision_enabled"
 	// Dolby Vision Profile 7 fallback
@@ -83,14 +93,26 @@ const (
 	PlayerSubtitleSyncMs = "player.subtitle_sync_ms"
 	// Video sizing
 	PlayerVideoGravity = "player.video_gravity"
+	// Video rewind interval
+	PlayerVideoSkipBackSeconds = "player.video_skip_back_seconds"
+	// Video fast-forward interval
+	PlayerVideoSkipForwardSeconds = "player.video_skip_forward_seconds"
+	// Request titles I add to my watchlist
+	RequestsWatchlistAutoRequest = "requests.watchlist_auto_request"
 	// Search scope
 	SearchMediaScope = "search.media_scope"
 	// Match device caption settings
 	SubtitleMatchesDevice = "subtitle.matches_device"
 	// Poster badges
 	UiCardOverlays = "ui.card_overlays"
+	// Card overlays enabled
+	UiCardOverlaysEnabled = "ui.card_overlays_enabled"
 	// Media cards
 	UiCardPresentation = "ui.card_presentation"
+	// Card quick actions
+	UiCardQuickActions = "ui.card_quick_actions"
+	// Card quick actions enabled
+	UiCardQuickActionsEnabled = "ui.card_quick_actions_enabled"
 	// Custom CSS
 	UiCustomCss = "ui.custom_css"
 	// Custom theme variables
@@ -117,14 +139,22 @@ const (
 	UiTextWeight = "ui.text_weight"
 	// Theme
 	UiTheme = "ui.theme"
+	// Theme music
+	UiThemeMusicEnabled = "ui.theme_music_enabled"
+	// Loop theme music
+	UiThemeMusicLoop = "ui.theme_music_loop"
 	// Time format
 	UiTimeFormat = "ui.time_format"
+	// Show title art
+	UiTitleArt = "ui.title_art"
 )
 
 // Remote lists every key the server stores.
 var Remote = []string{
 	CatalogMetadataLanguage,
 	CatalogMetadataLanguageOverrides,
+	CatalogShowAdvisoryAge,
+	HomeHideWatchedItems,
 	NavPrimaryMenu,
 	NavShortcuts,
 	PlaybackAudioLanguage,
@@ -133,6 +163,7 @@ var Remote = []string{
 	PlaybackAutoSkipCredits,
 	PlaybackAutoSkipIntro,
 	PlaybackAutoSkipRecap,
+	PlaybackIntroSkipMode,
 	PlaybackMaxBitrateKbps,
 	PlaybackNextUpPromptSeconds,
 	PlaybackPreferredQuality,
@@ -141,6 +172,8 @@ var Remote = []string{
 	PlaybackSubtitleLanguage,
 	PlaybackSubtitleMode,
 	PlayerAudioSyncMs,
+	PlayerAudiobookSkipBackSeconds,
+	PlayerAudiobookSkipForwardSeconds,
 	PlayerDolbyVisionEnabled,
 	PlayerDvProfile7Hdr10Fallback,
 	PlayerHdrEnabled,
@@ -151,9 +184,15 @@ var Remote = []string{
 	PlayerSleepTimerDefaultMinutes,
 	PlayerSubtitleSyncMs,
 	PlayerVideoGravity,
+	PlayerVideoSkipBackSeconds,
+	PlayerVideoSkipForwardSeconds,
+	RequestsWatchlistAutoRequest,
 	SearchMediaScope,
 	UiCardOverlays,
+	UiCardOverlaysEnabled,
 	UiCardPresentation,
+	UiCardQuickActions,
+	UiCardQuickActionsEnabled,
 	UiCustomCss,
 	UiCustomThemeVars,
 	UiDateFormat,
@@ -167,7 +206,10 @@ var Remote = []string{
 	UiTextScale,
 	UiTextWeight,
 	UiTheme,
+	UiThemeMusicEnabled,
+	UiThemeMusicLoop,
 	UiTimeFormat,
+	UiTitleArt,
 }
 
 // ClientLocal lists keys the contract defines but the server never stores.
@@ -180,4 +222,16 @@ var ClientLocal = []string{
 	PlayerPictureInPictureEnabled,
 	PlayerResumeRewindSeconds,
 	SubtitleMatchesDevice,
+}
+
+// Deprecated lists keys another definition has superseded. They still resolve
+// and still have to be readable — shipped clients write them — but a client
+// must not offer one as a second control beside its replacement: the server
+// mirrors the pair at write time, so editing either would silently rewrite the
+// other.
+var Deprecated = []string{
+	PlaybackAutoSkipIntro,
+	UiCustomCss,
+	UiCustomThemeVars,
+	UiTheme,
 }

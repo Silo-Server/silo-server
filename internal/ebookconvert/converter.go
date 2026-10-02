@@ -31,7 +31,7 @@ var mobitoolWasm []byte
 // a hard jail (`..` traversal is possible within the server user's reach), so
 // the WASM sandbox is a *memory-safety* boundary — filesystem isolation relies
 // on running the server as a constrained, non-root user/container. See the
-// design doc's "Filesystem sandboxing" section.
+// sandbox notes in tools/mobitool-wasm/README.md.
 const (
 	guestInDir     = "/in"
 	guestOutDir    = "/out"

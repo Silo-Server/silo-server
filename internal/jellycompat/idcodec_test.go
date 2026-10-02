@@ -61,3 +61,23 @@ func TestGenreNameStillUsesReverseMap(t *testing.T) {
 		t.Fatalf("genre round trip = (%q, %v), want (%q, nil)", got, err, genre)
 	}
 }
+
+// TestPlaySessionIDsAreNotRetained guards the reverse map against unbounded
+// growth: play-session ids are minted from a fresh random UUID per playback
+// and never decoded back, so encoding them must not leave an entry behind.
+// Other hashed kinds (genres, studios) dedupe by value and plateau at catalog
+// size; a retained play-session entry would live until restart.
+func TestPlaySessionIDsAreNotRetained(t *testing.T) {
+	c := NewResourceIDCodec()
+	for i := 0; i < 3; i++ {
+		if u := c.EncodeStringID(EncodedIDPlaySession, uuidNewString()); u == "" {
+			t.Fatal("EncodeStringID returned empty play session id")
+		}
+	}
+	c.mu.RLock()
+	n := len(c.reverse)
+	c.mu.RUnlock()
+	if n != 0 {
+		t.Fatalf("reverse map retained %d play session entries, want 0", n)
+	}
+}

@@ -51,8 +51,7 @@ type nfoRatingsBlock struct {
 // encoding/xml flattens the embedded struct so both roots decode it in place.
 //
 // <set><name> (movie collections) is deliberately not mapped: MetadataResult
-// has no collection field yet — see
-// docs/superpowers/plans/2026-07-09-local-nfo-metadata-and-artwork.md §9.
+// has no collection field yet — see docs/architecture/local-nfo-metadata.md.
 type nfoCommon struct {
 	Title         string          `xml:"title"`
 	OriginalTitle string          `xml:"originaltitle"`

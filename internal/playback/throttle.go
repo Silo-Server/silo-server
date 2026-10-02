@@ -2,8 +2,10 @@
 package playback
 
 import (
+	"context"
 	"io"
 	"log"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -15,6 +17,50 @@ const (
 	// minThresholdSeconds is the minimum allowed throttle threshold.
 	minThresholdSeconds = 60
 )
+
+// TranscodeThrottleSettings reads the server settings controlling how far
+// FFmpeg may run ahead of a client.
+type TranscodeThrottleSettings interface {
+	Get(context.Context, string) (string, error)
+}
+
+// TranscodeThrottleStarter is implemented by TranscodeSession and kept small
+// so every playback frontend can share the settings policy.
+type TranscodeThrottleStarter interface {
+	StartThrottler(int)
+}
+
+// ConfiguredTranscodeThrottleSeconds resolves the configured forward-buffer
+// duration. Zero means throttling is disabled. The resolved value can cross a
+// node boundary without giving the executor access to the API server's settings
+// store.
+func ConfiguredTranscodeThrottleSeconds(ctx context.Context, settings TranscodeThrottleSettings) int {
+	if settings == nil {
+		return 0
+	}
+	enabled, _ := settings.Get(ctx, "enable_transcode_throttle")
+	if enabled != "true" {
+		return 0
+	}
+	threshold := 300
+	if raw, _ := settings.Get(ctx, "transcode_throttle_seconds"); raw != "" {
+		if configured, err := strconv.Atoi(raw); err == nil && configured > 0 {
+			threshold = max(configured, minThresholdSeconds)
+		}
+	}
+	return threshold
+}
+
+// StartConfiguredTranscodeThrottler starts throttling when enabled, using the
+// configured forward-buffer duration or the 300-second default.
+func StartConfiguredTranscodeThrottler(ctx context.Context, settings TranscodeThrottleSettings, starter TranscodeThrottleStarter) {
+	if starter == nil {
+		return
+	}
+	if threshold := ConfiguredTranscodeThrottleSeconds(ctx, settings); threshold > 0 {
+		starter.StartThrottler(threshold)
+	}
+}
 
 // TranscodeThrottler pauses and resumes an FFmpeg process by sending
 // interactive commands to its stdin. It monitors the gap
@@ -102,6 +148,22 @@ func (t *TranscodeThrottler) CheckOnce() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	// Never pause on output the current ffmpeg process did not produce. A
+	// manifest left behind by an earlier generation in the same output
+	// directory reports that generation's head, which after a restart at an
+	// earlier position looks like an enormous buffer. Pausing on it stops the
+	// new process before it writes its first segment, so the manifest never
+	// refreshes and the gap never shrinks: the stream deadlocks until the user
+	// seeks. Resume instead if a previous check already paused on stale output.
+	if progressPredatesGeneration(progress) {
+		if t.paused {
+			log.Printf("playback: throttler resuming ffmpeg (produced output predates current generation)")
+			t.sendResume()
+			t.paused = false
+		}
+		return
+	}
+
 	if gap >= t.thresholdSeconds && !t.paused {
 		log.Printf("playback: throttler pausing ffmpeg (gap=%ds, threshold=%ds)", gap, t.thresholdSeconds)
 		t.sendPause()
@@ -111,6 +173,19 @@ func (t *TranscodeThrottler) CheckOnce() {
 		t.sendResume()
 		t.paused = false
 	}
+}
+
+// progressPredatesGeneration reports whether the produced head was read from a
+// manifest written before the current ffmpeg process started, i.e. by an
+// earlier generation of this session or by a previous session that shared the
+// output directory. A session with no generation timestamp (never started a
+// process, as in tests) carries no staleness information and is treated as
+// current.
+func progressPredatesGeneration(progress SegmentProgress) bool {
+	if progress.GenerationStartedAt.IsZero() || !progress.HasManifest {
+		return false
+	}
+	return progress.ManifestModTime.Before(progress.GenerationStartedAt)
 }
 
 func (t *TranscodeThrottler) sendPause() {

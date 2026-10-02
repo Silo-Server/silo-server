@@ -9,14 +9,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/telemetry"
+
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/oklog/ulid/v2"
 )
 
 // webhookRetrySchedule holds the cumulative delay since the first attempt
-// (docs/superpowers/plans/notifications/04, "Retry schedule"). Index N is the
-// delay before attempt N+1; after the last attempt fails, the webhook is
-// auto-disabled.
+// (docs/architecture/notifications.md, "Retry schedule and auto-disable").
+// Index N is the delay before attempt N+1; after the last attempt fails, the
+// webhook is auto-disabled.
 var webhookRetrySchedule = []time.Duration{
 	0,
 	30 * time.Second,
@@ -133,10 +135,16 @@ func (s *webhookSender) buildPayload(hook *Webhook, row DeliveryRow, test bool) 
 }
 
 // send POSTs one payload to the webhook's destination.
-func (s *webhookSender) send(ctx context.Context, hook *Webhook, row DeliveryRow, test bool) webhookSendResult {
+func (s *webhookSender) send(ctx context.Context, hook *Webhook, row DeliveryRow, test bool) (result webhookSendResult) {
+	ctx, finishObservation := telemetry.StartDependency(ctx, "notifications", "worker", "webhook")
+	defer func() { finishObservation(deliveryObservationError(ctx, result.OK)) }()
 	url, err := s.decryptURL(hook)
 	if err != nil {
 		return webhookSendResult{Message: "webhook URL could not be decrypted"}
+	}
+	if row.PosterPath == "" && isRequestLifecycleType(row.Type) {
+		flags := parseRequestFlags(row.ReasonFlags)
+		row.PosterPath = flags.PosterPath
 	}
 	if hook.Type == WebhookTypeDiscord && s.posterURL != nil {
 		row.PosterURL = s.posterURL(ctx, row.PosterPath, row.PosterSourcePath)

@@ -2,7 +2,7 @@
 
 import { act, useEffect, useImperativeHandle, forwardRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { MemoryRouter, Route, Routes, useNavigate } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { FileVersion, ItemDetail } from "@/api/types";
@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   useCatalogItemDetail: vi.fn(),
   readerPrev: vi.fn(),
   readerNext: vi.fn(),
+  readerProgress: 0.421,
   readerGoTo: vi.fn(),
   readerGoToFraction: vi.fn(),
   readerSearch: vi.fn(),
@@ -33,9 +34,15 @@ vi.mock("@/components/PageBack", () => ({
 }));
 
 vi.mock("@/reader/ebookReaderApi", () => ({
+  createEbookAnnotationSession: () => ({ profileContext: null, creates: new Map() }),
   createEbookReaderAnnotation: mocks.createEbookReaderAnnotation,
   deleteEbookReaderAnnotation: mocks.deleteEbookReaderAnnotation,
   fetchEbookReaderAnnotations: mocks.fetchEbookReaderAnnotations,
+  createEbookReaderConfigSession: () => ({
+    etag: "test",
+    profileContext: null,
+    pending: Promise.resolve(),
+  }),
   fetchEbookReaderConfig: mocks.fetchEbookReaderConfig,
   saveEbookReaderConfig: mocks.saveEbookReaderConfig,
   saveEbookReaderConfigKeepalive: mocks.saveEbookReaderConfigKeepalive,
@@ -100,7 +107,7 @@ vi.mock("@/reader/FoliateBookReader", async () => {
       }));
       useEffect(() => {
         onFileLoaded?.({ objectUrl: "blob:ebook", filename: "Reader.epub" });
-        onProgressChange?.(0.421);
+        onProgressChange?.(mocks.readerProgress);
         onSelectionChange?.({
           cfi: "epubcfi(/6/4,/1:0,/1:12)",
           selectedText: "sample text",
@@ -157,6 +164,7 @@ function makeEbookItem(
     rating_tmdb: null,
     rating_rt_critic: null,
     rating_rt_audience: null,
+    ratings: [],
     imdb_id: "",
     tmdb_id: "",
     tvdb_id: "",
@@ -218,6 +226,15 @@ function setInputValue(input: HTMLInputElement, value: string) {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+function HistoryBackProbe() {
+  const navigate = useNavigate();
+  return (
+    <button type="button" aria-label="Browser back" onClick={() => navigate(-1)}>
+      Browser back
+    </button>
+  );
+}
+
 describe("EbookReader", () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -234,6 +251,7 @@ describe("EbookReader", () => {
     mocks.useCatalogItemDetail.mockReset();
     mocks.readerPrev.mockReset();
     mocks.readerNext.mockReset();
+    mocks.readerProgress = 0.421;
     mocks.readerGoTo.mockReset();
     mocks.readerGoToFraction.mockReset();
     mocks.readerSearch.mockReset();
@@ -271,6 +289,7 @@ describe("EbookReader", () => {
 
   afterEach(async () => {
     vi.useRealTimers();
+    window.history.replaceState(null, "");
     await act(async () => {
       root.unmount();
     });
@@ -336,6 +355,154 @@ describe("EbookReader", () => {
     expect(container.innerHTML).toContain('href="/item/manga-series-1?libraryId=7"');
     expect(container.innerHTML).not.toContain('href="/item/ebook-1?libraryId=7"');
   });
+
+  // Regression test for issue #189: exiting the reader must consume the
+  // reader's history entry (history back) rather than pushing the series page
+  // on top of it — otherwise pressing back on the series page re-opens the
+  // reader. With in-app history present, clicking Back returns to the entry
+  // the reader was opened from, not to a fresh push of the backTo target.
+  it("goes back through history on Back instead of pushing the backTo target", async () => {
+    window.history.replaceState({ idx: 1 }, "");
+    const backTo = encodeURIComponent("/item/manga-series-1?libraryId=7");
+    await act(async () => {
+      root.render(
+        <MemoryRouter
+          initialEntries={["/came-from-here", `/reader/ebook/ebook-1?libraryId=7&backTo=${backTo}`]}
+          initialIndex={1}
+        >
+          <Routes>
+            <Route path="/came-from-here" element={<div data-testid="origin-page" />} />
+            <Route path="/item/:contentId" element={<div data-testid="pushed-series-page" />} />
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const back = container.querySelector('a[aria-label="Back"], [aria-label="Back"]');
+    expect(back).not.toBeNull();
+    await act(async () => {
+      back!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    });
+
+    expect(container.querySelector('[data-testid="origin-page"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="pushed-series-page"]')).toBeNull();
+  });
+
+  it("replaces a direct reader entry when falling back to the backTo target", async () => {
+    window.history.replaceState({ idx: 0 }, "");
+    const backTo = encodeURIComponent("/item/manga-series-1?libraryId=7");
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={[`/reader/ebook/ebook-1?libraryId=7&backTo=${backTo}`]}>
+          <Routes>
+            <Route
+              path="/item/:contentId"
+              element={
+                <div data-testid="series-page">
+                  <HistoryBackProbe />
+                </div>
+              }
+            />
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const back = container.querySelector<HTMLAnchorElement>('a[aria-label="Back"]');
+    expect(back).not.toBeNull();
+    await act(async () => {
+      back?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    });
+    expect(container.querySelector('[data-testid="series-page"]')).not.toBeNull();
+
+    const browserBack = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Browser back"]',
+    );
+    await act(async () => {
+      browserBack?.click();
+    });
+
+    expect(container.querySelector('[data-testid="series-page"]')).not.toBeNull();
+    expect(container.textContent).not.toContain("reader surface");
+  });
+
+  it.each([
+    ["header", 0.421, 0, 1],
+    ["end-of-book", 1, 1, 2],
+  ] as const)(
+    "replaces reader history when advancing with the %s Next control",
+    async (_control, progress, linkIndex, expectedLinkCount) => {
+      mocks.readerProgress = progress;
+      mocks.useCatalogItemDetail.mockImplementation((requestedContentID?: string) => {
+        if (requestedContentID === "manga-series-1") {
+          return {
+            data: {
+              ...makeEbookItem(),
+              content_id: "manga-series-1",
+              type: "manga",
+              title: "Manga Series",
+              manga: {
+                chapters: [
+                  { content_id: "chapter-1", title: "Chapter 1", chapter_index: 1 },
+                  { content_id: "chapter-2", title: "Chapter 2", chapter_index: 2 },
+                ],
+              },
+            } as ItemDetail,
+            isLoading: false,
+            error: null,
+          };
+        }
+        return {
+          data: makeEbookItem({
+            content_id: requestedContentID ?? "chapter-1",
+            series_id: "manga-series-1",
+          }),
+          isLoading: false,
+          error: null,
+        };
+      });
+      window.history.replaceState({ idx: 1 }, "");
+      const backTo = encodeURIComponent("/item/manga-series-1?libraryId=7");
+
+      await act(async () => {
+        root.render(
+          <MemoryRouter
+            initialEntries={[
+              "/item/manga-series-1?libraryId=7",
+              `/reader/ebook/chapter-1?libraryId=7&backTo=${backTo}`,
+            ]}
+            initialIndex={1}
+          >
+            <Routes>
+              <Route path="/item/:contentId" element={<div data-testid="series-page" />} />
+              <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+            </Routes>
+          </MemoryRouter>,
+        );
+      });
+
+      const nextLinks = container.querySelectorAll<HTMLAnchorElement>(
+        'a[href^="/reader/ebook/chapter-2"]',
+      );
+      expect(nextLinks).toHaveLength(expectedLinkCount);
+      await act(async () => {
+        nextLinks[linkIndex]?.dispatchEvent(
+          new MouseEvent("click", { bubbles: true, cancelable: true }),
+        );
+      });
+
+      const back = container.querySelector<HTMLAnchorElement>('a[aria-label="Back"]');
+      expect(back).not.toBeNull();
+      await act(async () => {
+        back?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      });
+
+      expect(container.querySelector('[data-testid="series-page"]')).not.toBeNull();
+      expect(container.textContent).not.toContain("reader surface");
+    },
+  );
 
   it("switches between multiple ebook files from the reader header", async () => {
     mocks.useCatalogItemDetail.mockReturnValue({
@@ -514,7 +681,7 @@ describe("EbookReader", () => {
       await Promise.resolve();
     });
 
-    expect(mocks.fetchEbookReaderConfig).toHaveBeenCalledWith("ebook-1");
+    expect(mocks.fetchEbookReaderConfig).toHaveBeenCalledWith("ebook-1", expect.any(Object));
     expect(mocks.captureReaderSettings).toHaveBeenLastCalledWith(
       expect.objectContaining({ theme: "sepia", fontSize: 130 }),
     );
@@ -560,6 +727,7 @@ describe("EbookReader", () => {
       expect.objectContaining({
         settings: expect.objectContaining({ theme: "dark" }),
       }),
+      expect.any(Object),
     );
 
     vi.useRealTimers();
@@ -603,6 +771,7 @@ describe("EbookReader", () => {
       expect.objectContaining({
         settings: expect.objectContaining({ theme: "dark" }),
       }),
+      expect.any(Object),
     );
 
     vi.useRealTimers();
@@ -645,6 +814,7 @@ describe("EbookReader", () => {
       expect.objectContaining({
         settings: expect.objectContaining({ theme: "sepia" }),
       }),
+      expect.any(Object),
     );
 
     // The pending save was consumed: neither the debounce timer firing nor the
@@ -704,6 +874,7 @@ describe("EbookReader", () => {
       expect.objectContaining({
         settings: expect.objectContaining({ theme: "light", fontSize: 112, flow: "paginated" }),
       }),
+      expect.any(Object),
     );
     expect(localStorage.getItem("silo.ebook.reader.settings")).toContain('"theme":"light"');
 
@@ -873,7 +1044,11 @@ describe("EbookReader", () => {
       deleteButton?.click();
     });
 
-    expect(mocks.deleteEbookReaderAnnotation).toHaveBeenCalledWith("ebook-1", "ann-1");
+    expect(mocks.deleteEbookReaderAnnotation).toHaveBeenCalledWith(
+      "ebook-1",
+      expect.objectContaining({ id: "ann-1" }),
+      expect.any(Object),
+    );
 
     const highlight = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Highlight selection"]',
@@ -889,6 +1064,7 @@ describe("EbookReader", () => {
         cfi_range: "epubcfi(/6/4,/1:0,/1:12)",
         selected_text: "sample text",
       }),
+      expect.any(Object),
     );
   });
 
@@ -998,6 +1174,7 @@ describe("EbookReader", () => {
       expect.objectContaining({
         settings: expect.objectContaining({ theme: "dark" }),
       }),
+      expect.any(Object),
     );
   });
 

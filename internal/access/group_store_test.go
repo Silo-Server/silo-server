@@ -91,6 +91,23 @@ func TestGroupStoreGetPolicyForUserDB(t *testing.T) {
 	if policy == nil || policy.ID != group.ID || !reflect.DeepEqual(policy.LibraryIDs, []int{1, 3}) {
 		t.Fatalf("policy = %#v, want group policy", policy)
 	}
+	if policy.TranscodeAllowed || !policy.AudioTranscodeAllowed {
+		t.Fatalf("policy transcode gates = %t/%t, want false/true", policy.TranscodeAllowed, policy.AudioTranscodeAllowed)
+	}
+	if !reflect.DeepEqual(group.Policy(), *policy) {
+		t.Fatalf("Group.Policy() = %#v, want GetPolicyForUser %#v", group.Policy(), *policy)
+	}
+	transcodeAllowed := true
+	if _, err := store.Update(ctx, group.ID, UpdateGroupInput{TranscodeAllowed: &transcodeAllowed}); err != nil {
+		t.Fatalf("Update(transcode_allowed) error: %v", err)
+	}
+	policy, err = store.GetPolicyForUser(ctx, memberID)
+	if err != nil {
+		t.Fatalf("GetPolicyForUser(after update) error: %v", err)
+	}
+	if policy == nil || !policy.TranscodeAllowed {
+		t.Fatalf("policy after update = %#v, want transcode_allowed true", policy)
+	}
 	policy, err = store.GetPolicyForUser(ctx, noGroupID)
 	if err != nil {
 		t.Fatalf("GetPolicyForUser(no group) error: %v", err)
@@ -232,8 +249,15 @@ func newGroupStoreDBTest(t *testing.T) (context.Context, *pgxpool.Pool, *GroupSt
 	if tableName == nil || *tableName == "" {
 		t.Skip("test database has not applied access groups migration")
 	}
-	if !accessGroupDefaultColumnExists(t, ctx, pool) {
+	if !accessGroupColumnExists(t, ctx, pool, "is_default") {
 		t.Skip("test database has not applied default access group migration")
+	}
+	// The store reads and writes the group transcode gates on every path,
+	// so a database without them cannot run any of these tests.
+	for _, column := range []string{"transcode_allowed", "audio_transcode_allowed"} {
+		if !accessGroupColumnExists(t, ctx, pool, column) {
+			t.Skipf("test database has not applied the user policy inherit/override migration (access_groups.%s missing)", column)
+		}
 	}
 
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
@@ -244,7 +268,7 @@ func newGroupStoreDBTest(t *testing.T) (context.Context, *pgxpool.Pool, *GroupSt
 	return ctx, pool, NewGroupStore(pool), suffix
 }
 
-func accessGroupDefaultColumnExists(t *testing.T, ctx context.Context, pool *pgxpool.Pool) bool {
+func accessGroupColumnExists(t *testing.T, ctx context.Context, pool *pgxpool.Pool, column string) bool {
 	t.Helper()
 	var exists bool
 	if err := pool.QueryRow(ctx, `
@@ -253,9 +277,9 @@ func accessGroupDefaultColumnExists(t *testing.T, ctx context.Context, pool *pgx
 			FROM information_schema.columns
 			WHERE table_schema = 'public'
 			  AND table_name = 'access_groups'
-			  AND column_name = 'is_default'
-		)`).Scan(&exists); err != nil {
-		t.Fatalf("check access_groups.is_default column: %v", err)
+			  AND column_name = $1
+		)`, column).Scan(&exists); err != nil {
+		t.Fatalf("check access_groups.%s column: %v", column, err)
 	}
 	return exists
 }
@@ -361,6 +385,8 @@ func createTestGroup(t *testing.T, ctx context.Context, store *GroupStore, suffi
 		MaxPlaybackQuality:       PlaybackQuality4K,
 		DownloadAllowed:          true,
 		DownloadTranscodeAllowed: true,
+		TranscodeAllowed:         false,
+		AudioTranscodeAllowed:    true,
 		MaxStreams:               3,
 		MaxTranscodes:            2,
 		AllowedPermissions:       []string{"marker_edit"},
@@ -406,4 +432,61 @@ func accessPolicyRevisionForUser(t *testing.T, ctx context.Context, pool *pgxpoo
 		t.Fatalf("load access_policy_revision for user %d: %v", userID, err)
 	}
 	return revision
+}
+
+func TestGroupStoreDeleteMovingMembersDB(t *testing.T) {
+	ctx, pool, store, suffix := newGroupStoreDBTest(t)
+	seedID := defaultAccessGroupSeedID(t, ctx, pool)
+	t.Cleanup(func() {
+		restoreDefaultAccessGroup(t, ctx, pool, seedID)
+	})
+
+	group := createTestGroup(t, ctx, store, suffix, "delete-moving")
+	first := insertAccessGroupTestUser(t, ctx, pool, suffix, &group.ID, 1)
+	second := insertAccessGroupTestUser(t, ctx, pool, suffix, &group.ID, 2)
+	revisions := map[int]int64{}
+	for _, id := range []int{first, second} {
+		var revision int64
+		if err := pool.QueryRow(ctx, `SELECT access_policy_revision FROM users WHERE id = $1`, id).Scan(&revision); err != nil {
+			t.Fatalf("load revision: %v", err)
+		}
+		revisions[id] = revision
+	}
+
+	// Moved members keep their sign-ins; the revision bump alone carries the
+	// policy change.
+	sessionID := "delete-moving-" + suffix
+	if _, err := pool.Exec(ctx, `INSERT INTO auth_sessions (id, user_id, device_name, expires_at) VALUES ($1, $2, 'test', now() + interval '1 day')`, sessionID, first); err != nil {
+		t.Fatalf("insert member session: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM auth_sessions WHERE id = $1`, sessionID) })
+
+	if err := store.DeleteMovingMembers(ctx, group.ID, GroupPrecondition{Any: true}); err != nil {
+		t.Fatalf("DeleteMovingMembers() error: %v", err)
+	}
+	var revokedAt *time.Time
+	if err := pool.QueryRow(ctx, `SELECT revoked_at FROM auth_sessions WHERE id = $1`, sessionID).Scan(&revokedAt); err != nil {
+		t.Fatalf("load member session: %v", err)
+	}
+	if revokedAt != nil {
+		t.Fatalf("moved member's session revoked at %v, want it kept", revokedAt)
+	}
+	for _, id := range []int{first, second} {
+		var (
+			groupID  *int64
+			revision int64
+		)
+		if err := pool.QueryRow(ctx, `SELECT access_group_id, access_policy_revision FROM users WHERE id = $1`, id).Scan(&groupID, &revision); err != nil {
+			t.Fatalf("load moved member: %v", err)
+		}
+		if groupID == nil || *groupID != seedID {
+			t.Fatalf("member %d group = %v, want the default group %d", id, groupID, seedID)
+		}
+		if revision != revisions[id]+1 {
+			t.Fatalf("member %d access_policy_revision = %d, want %d", id, revision, revisions[id]+1)
+		}
+	}
+	if _, err := store.Get(ctx, group.ID); !errors.Is(err, ErrGroupNotFound) {
+		t.Fatalf("Get(deleted group) error = %v, want ErrGroupNotFound", err)
+	}
 }

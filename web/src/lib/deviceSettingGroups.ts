@@ -14,7 +14,7 @@ import { ALL_DEVICE_SETTING_KEYS } from "@/lib/settingsDisplay";
  * one group — so a key added to the manifest cannot silently disappear from
  * this screen.
  */
-export type DeviceSettingGroupId = "picture" | "sound" | "subtitles" | "episodes";
+export type DeviceSettingGroupId = "picture" | "sound" | "subtitles" | "episodes" | "appearance";
 
 export interface DeviceSettingGroup {
   id: DeviceSettingGroupId;
@@ -29,12 +29,21 @@ const GROUP_META: Record<DeviceSettingGroupId, { title: string; description: str
   sound: { title: "Sound", description: "Audio on this device" },
   subtitles: { title: "Subtitles", description: "On this device" },
   episodes: { title: "Episodes", description: "What happens between episodes" },
+  appearance: { title: "Appearance", description: "How titles look on this device" },
 };
 
-const GROUP_ORDER: DeviceSettingGroupId[] = ["picture", "sound", "subtitles", "episodes"];
+const GROUP_ORDER: DeviceSettingGroupId[] = [
+  "picture",
+  "sound",
+  "subtitles",
+  "episodes",
+  "appearance",
+];
 
 /** Keys whose group is not implied by their manifest category. */
 const EXPLICIT_GROUPS: Partial<Record<string, DeviceSettingGroupId>> = {
+  "ui.theme_music_enabled": "sound",
+  "ui.theme_music_loop": "sound",
   "playback.audio_language": "sound",
   "playback.subtitle_language": "subtitles",
   "playback.subtitle_mode": "subtitles",
@@ -43,6 +52,7 @@ const EXPLICIT_GROUPS: Partial<Record<string, DeviceSettingGroupId>> = {
   "playback.preferred_quality": "picture",
   "playback.max_bitrate_kbps": "picture",
   "playback.auto_skip_intro": "episodes",
+  "playback.intro_skip_mode": "episodes",
   "playback.auto_skip_credits": "episodes",
   "playback.auto_skip_recap": "episodes",
   "playback.auto_play_next": "episodes",
@@ -59,13 +69,14 @@ const EXPLICIT_GROUPS: Partial<Record<string, DeviceSettingGroupId>> = {
   "player.playback_speed": "sound",
   "player.subtitle_sync_ms": "subtitles",
   "player.sleep_timer_default_minutes": "episodes",
+  "ui.title_art": "appearance",
 };
 
 /**
  * Keys deliberately kept off this screen.
  *
- * `ui.*` device overrides exist in the contract but belong to the Appearance
- * screen, which already edits them at profile scope; showing them here would
+ * `ui.*` device overrides exist in the contract but belong to the Accessibility
+ * and Navigation & Cards screens, which already edit them at profile scope; showing them here would
  * give one setting two homes. `ui.library_page_state` is remembered browse
  * state rather than a preference — it has no control in the manifest at all.
  */
@@ -79,6 +90,33 @@ const HIDDEN_KEYS = new Set<string>([
   "nav.primary_menu",
   "ui.card_presentation",
 ]);
+
+/**
+ * Deprecated keys and the key that takes over from them.
+ *
+ * A deprecated control is hidden only where its replacement is actually on
+ * offer. Against a server that predates the replacement's revision the old
+ * control is the only way to express the preference at all, and hiding it
+ * unconditionally would additionally strand an existing per-device override
+ * with nothing on screen to see or clear it with. Where both exist, only the
+ * replacement is shown: the server keeps the pair in step, so two controls
+ * would let one visible choice silently rewrite the other.
+ */
+const SUPERSEDED_BY: Partial<Record<SettingKey, SettingKey>> = {
+  "playback.auto_skip_intro": "playback.intro_skip_mode",
+};
+
+/**
+ * Whether [key] is deprecated *and* the server offers what replaces it.
+ *
+ * Gated on the manifest's own `deprecated` flag so the rule is contract-driven:
+ * a key that stops being deprecated stops being hidden without an edit here.
+ */
+function isSupersededOnServer(key: SettingKey, supportedKeys: readonly SettingKey[]): boolean {
+  if (!SETTING_DEFINITIONS[key]?.deprecated) return false;
+  const replacement = SUPERSEDED_BY[key];
+  return replacement !== undefined && supportedKeys.includes(replacement);
+}
 
 /**
  * The manifest's platform identifiers, as `platforms` uses them.
@@ -125,8 +163,17 @@ export function settingAppliesToPlatform(
   return platforms.includes(platform);
 }
 
-export function groupForDeviceSetting(key: SettingKey): DeviceSettingGroupId | null {
-  if (HIDDEN_KEYS.has(key)) return null;
+/**
+ * [supportedKeys] is what the connected server can store, which decides whether
+ * a deprecated key still earns a control. It defaults to this client's own
+ * contract — the newest server this build knows about — so callers that are
+ * not editing a specific server's settings keep the current-contract answer.
+ */
+export function groupForDeviceSetting(
+  key: SettingKey,
+  supportedKeys: readonly SettingKey[] = ALL_DEVICE_SETTING_KEYS,
+): DeviceSettingGroupId | null {
+  if (HIDDEN_KEYS.has(key) || isSupersededOnServer(key, supportedKeys)) return null;
   const explicit = EXPLICIT_GROUPS[key];
   if (explicit) return explicit;
 
@@ -165,7 +212,9 @@ export function groupDeviceSettings(
     ) {
       continue;
     }
-    const group = groupForDeviceSetting(key);
+    // The key list this screen was given is exactly the set the connected
+    // server supports, so it is also the answer to "is the replacement here".
+    const group = groupForDeviceSetting(key, keys);
     if (!group) continue;
     const existing = byGroup.get(group);
     if (existing) {
@@ -183,7 +232,15 @@ export function groupDeviceSettings(
   }));
 }
 
-/** Every device-scoped key this screen deliberately does not show. */
-export function hiddenDeviceSettingKeys(): SettingKey[] {
-  return ALL_DEVICE_SETTING_KEYS.filter((key) => HIDDEN_KEYS.has(key));
+/**
+ * Every device-scoped key this screen deliberately does not show against a
+ * server supporting [supportedKeys]. A deprecated key is only among them while
+ * its replacement is available, which is the same rule the grouping applies.
+ */
+export function hiddenDeviceSettingKeys(
+  supportedKeys: readonly SettingKey[] = ALL_DEVICE_SETTING_KEYS,
+): SettingKey[] {
+  return ALL_DEVICE_SETTING_KEYS.filter(
+    (key) => HIDDEN_KEYS.has(key) || isSupersededOnServer(key, supportedKeys),
+  );
 }

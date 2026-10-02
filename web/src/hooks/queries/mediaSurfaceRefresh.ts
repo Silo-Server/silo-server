@@ -6,6 +6,7 @@ import {
   favoriteKeys,
   historyKeys,
   itemKeys,
+  libraryCollectionKeys,
   personKeys,
   progressKeys,
   recKeys,
@@ -16,12 +17,41 @@ import {
   activeCatalogQueryMatchesLibrary,
   activeSectionQueryMatchesLibrary,
 } from "@/lib/queryInvalidation";
+import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 
 interface InvalidateMediaSurfaceOptions {
   itemId?: string;
   libraryId?: number;
   watchedKeys?: Array<readonly unknown[]>;
+  skipItemDetail?: boolean;
+  skipSimilarItems?: boolean;
 }
+
+const MEDIA_SURFACE_REFRESH_DELAY_MS = 600;
+// Upper bound on how long coalescing may postpone a refresh. Without it a
+// sustained event stream (a history import, a watch-provider sync) re-arms the
+// timer indefinitely and the surfaces never refresh at all.
+const MEDIA_SURFACE_REFRESH_MAX_WAIT_MS = 3000;
+const MEDIA_SURFACE_PREFIXES = [
+  itemKeys.all,
+  progressKeys.all,
+  historyKeys.all,
+  favoriteKeys.all,
+  watchlistKeys.all,
+  personKeys.all,
+  adminKeys.playbackHistory({}).slice(0, 2),
+];
+const scheduledInvalidations = new WeakMap<
+  QueryClient,
+  Map<
+    string,
+    {
+      timer: ReturnType<typeof setTimeout>;
+      deadline: number;
+      options: InvalidateMediaSurfaceOptions;
+    }
+  >
+>();
 
 export function updateCatalogItemDetail(
   queryClient: QueryClient,
@@ -34,6 +64,16 @@ export function updateCatalogItemDetail(
     },
     (current) => (current ? updater(current) : current),
   );
+}
+
+// Callers must await this before writing optimistic state. The default
+// `revert: true` restores the pre-fetch snapshot and leaves the query idle;
+// `revert: false` would instead put an in-flight query into an error state
+// carrying a CancelledError, which surfaces as a bogus "CancelledError" toast.
+export function cancelItemDetailQueries(queryClient: QueryClient, itemId: string) {
+  return queryClient.cancelQueries({
+    predicate: (query) => isItemDetailQueryKey(query.queryKey, itemId),
+  });
 }
 
 export function setCachedItemDetail(queryClient: QueryClient, itemId: string, detail: ItemDetail) {
@@ -84,8 +124,6 @@ export function removeItemFromHomeSectionCaches(
   );
 }
 
-/** Matches both item-detail cache key shapes for one item, so optimistic
- * updates and their rollback snapshot cover exactly the same queries. */
 export function isItemDetailQueryKey(queryKey: unknown, itemId: string) {
   return (
     Array.isArray(queryKey) &&
@@ -97,47 +135,108 @@ export function isItemDetailQueryKey(queryKey: unknown, itemId: string) {
   );
 }
 
+function queryKeyStartsWith(queryKey: readonly unknown[], prefix: readonly unknown[]) {
+  return (
+    prefix.length <= queryKey.length &&
+    prefix.every((part, index) => {
+      const candidate = queryKey[index];
+      if (Object.is(part, candidate)) return true;
+      if (
+        typeof part !== "object" ||
+        part === null ||
+        typeof candidate !== "object" ||
+        candidate === null
+      ) {
+        return false;
+      }
+      return JSON.stringify(part) === JSON.stringify(candidate);
+    })
+  );
+}
+
+function shouldInvalidateMediaSurfaceQuery(
+  queryKey: readonly unknown[],
+  options: InvalidateMediaSurfaceOptions,
+) {
+  if (options.skipItemDetail && options.itemId && isItemDetailQueryKey(queryKey, options.itemId)) {
+    return false;
+  }
+
+  if (queryKeyStartsWith(queryKey, catalogKeys.all)) {
+    return activeCatalogQueryMatchesLibrary(queryKey, options.libraryId);
+  }
+  if (queryKeyStartsWith(queryKey, sectionKeys.all)) {
+    return activeSectionQueryMatchesLibrary(queryKey, options.libraryId);
+  }
+  if (queryKeyStartsWith(queryKey, recKeys.all)) {
+    return !(options.skipSimilarItems && queryKey[1] === "similar");
+  }
+  if (queryKeyStartsWith(queryKey, libraryCollectionKeys.all)) {
+    return options.libraryId === undefined || queryKey[2] === options.libraryId;
+  }
+
+  if (MEDIA_SURFACE_PREFIXES.some((prefix) => queryKeyStartsWith(queryKey, prefix))) {
+    return true;
+  }
+
+  return (options.watchedKeys ?? []).some((key) => queryKeyStartsWith(queryKey, key));
+}
+
 export async function invalidateMediaSurfaceQueries(
   queryClient: QueryClient,
   options: InvalidateMediaSurfaceOptions = {},
 ) {
-  const invalidations: Array<Promise<void>> = [
-    queryClient.invalidateQueries({ queryKey: itemKeys.all }),
-    queryClient.invalidateQueries({
-      queryKey: catalogKeys.all,
-      predicate: (query) => activeCatalogQueryMatchesLibrary(query.queryKey, options.libraryId),
-    }),
-    queryClient.invalidateQueries({
-      queryKey: sectionKeys.all,
-      predicate: (query) => activeSectionQueryMatchesLibrary(query.queryKey, options.libraryId),
-    }),
-    queryClient.invalidateQueries({ queryKey: progressKeys.all }),
-    queryClient.invalidateQueries({ queryKey: historyKeys.all }),
-    queryClient.invalidateQueries({ queryKey: favoriteKeys.all }),
-    queryClient.invalidateQueries({ queryKey: watchlistKeys.all }),
-    queryClient.invalidateQueries({ queryKey: recKeys.all }),
-    queryClient.invalidateQueries({ queryKey: personKeys.all }),
-    queryClient.invalidateQueries({
-      predicate: (query) =>
-        Array.isArray(query.queryKey) &&
-        query.queryKey[0] === adminKeys.playbackHistory({})[0] &&
-        query.queryKey[1] === adminKeys.playbackHistory({})[1],
-    }),
-  ];
+  // Duplicate refetches are held down by the coalescing scheduler below, not by
+  // `cancelRefetch: false` — reusing an in-flight request would let a response
+  // that predates the mutation satisfy the invalidation and land in the cache
+  // as fresh.
+  await queryClient.invalidateQueries({
+    predicate: (query) => shouldInvalidateMediaSurfaceQuery(query.queryKey, options),
+  });
+}
 
-  if (options.itemId) {
-    invalidations.push(
-      queryClient.invalidateQueries({ queryKey: ["catalog", "items", options.itemId, "detail"] }),
-      queryClient.invalidateQueries({ queryKey: ["items", "detail", options.itemId] }),
-      queryClient.invalidateQueries({ queryKey: ["items", "watchDetail", options.itemId] }),
-      queryClient.invalidateQueries({ queryKey: favoriteKeys.check(options.itemId) }),
-      queryClient.invalidateQueries({ queryKey: watchlistKeys.check(options.itemId) }),
-    );
+export function scheduleMediaSurfaceInvalidation(
+  queryClient: QueryClient,
+  options: InvalidateMediaSurfaceOptions = {},
+) {
+  let clientInvalidations = scheduledInvalidations.get(queryClient);
+  if (!clientInvalidations) {
+    clientInvalidations = new Map();
+    scheduledInvalidations.set(queryClient, clientInvalidations);
   }
 
-  for (const key of options.watchedKeys ?? []) {
-    invalidations.push(queryClient.invalidateQueries({ queryKey: key }));
-  }
+  const key = `${options.itemId ?? "all"}:${options.libraryId ?? "all"}`;
+  const existing = clientInvalidations.get(key);
+  if (existing) clearTimeout(existing.timer);
 
-  await Promise.all(invalidations);
+  const mergedOptions: InvalidateMediaSurfaceOptions = {
+    ...existing?.options,
+    ...options,
+    // Skipping is safe only when every coalesced caller has already supplied
+    // the canonical detail state. A single full-refresh request must win.
+    skipItemDetail: existing
+      ? Boolean(existing.options.skipItemDetail && options.skipItemDetail)
+      : options.skipItemDetail,
+    skipSimilarItems: existing
+      ? Boolean(existing.options.skipSimilarItems && options.skipSimilarItems)
+      : options.skipSimilarItems,
+    watchedKeys: [...(existing?.options.watchedKeys ?? []), ...(options.watchedKeys ?? [])],
+  };
+  const now = Date.now();
+  const deadline = existing?.deadline ?? now + MEDIA_SURFACE_REFRESH_MAX_WAIT_MS;
+  const timer = setTimeout(
+    () => {
+      clientInvalidations?.delete(key);
+      // Home reads its sections through one-shot `fetchQuery` calls with no
+      // observers, so the signal has to be bumped after the invalidation lands
+      // or Home re-reads a cache that is still marked fresh.
+      void invalidateMediaSurfaceQueries(queryClient, mergedOptions).then(
+        () => bumpHomeRefreshSignal(queryClient),
+        () => bumpHomeRefreshSignal(queryClient),
+      );
+    },
+    Math.max(0, Math.min(MEDIA_SURFACE_REFRESH_DELAY_MS, deadline - now)),
+  );
+
+  clientInvalidations.set(key, { timer, deadline, options: mergedOptions });
 }

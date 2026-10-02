@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, type MouseEvent } from "react";
+import { memo, useState, useEffect, useCallback, useMemo, type MouseEvent } from "react";
 import { Link } from "react-router";
 import { Info, ChevronLeft, ChevronRight, Play, Pause, BookOpen } from "lucide-react";
 import { decodeThumbhash } from "@/lib/thumbhash";
@@ -8,7 +8,11 @@ import { cn } from "@/lib/utils";
 import type { SectionItem } from "@/api/types";
 import { buildItemHref, buildMediaPlayHref } from "@/lib/mediaNavigation";
 import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiobookPlaybackContext";
+import { parseWatchHref } from "@/pages/watchRouteHelpers";
+import { markPlaybackIntent } from "@/player/first-frame";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
+import { RatingEntry } from "@/components/ratings/RatingEntry";
+import { formatHeroMetadata } from "./heroMetadata";
 
 interface HeroBannerProps {
   items: SectionItem[];
@@ -36,14 +40,79 @@ interface HeroBannerProps {
   libraryId?: number;
 }
 
-function formatRuntime(seconds: number | undefined | null): string | null {
-  if (!seconds || seconds <= 0) return null;
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  const remaining = minutes % 60;
-  return remaining === 0 ? `${hours}h` : `${hours}h ${remaining}m`;
+/**
+ * Alternating slow pan/zoom for consecutive hero slides.
+ *
+ * These must be written out literally. Tailwind only keeps a theme variable
+ * whose name it can find in the scanned source, and assembling the name from a
+ * template literal hid both from it — so the real values were tree-shaken out
+ * of the bundle and `var(--animate-ken-burns-a)` resolved to nothing at
+ * runtime. app.css still overrides both to `none` under
+ * `prefers-reduced-motion`, which is what keeps this accessible.
+ */
+const KEN_BURNS_ANIMATIONS = ["var(--animate-ken-burns-a)", "var(--animate-ken-burns-b)"] as const;
+const HERO_BACKDROP_FADE_MS = 1000;
+
+function shouldKeepOutgoingBackdropMotion(): boolean {
+  return !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
+
+const HeroBackdropSlide = memo(function HeroBackdropSlide({
+  slide,
+  index,
+  isActive,
+  keepsMotion,
+  shouldLoad,
+}: {
+  slide: SectionItem;
+  index: number;
+  isActive: boolean;
+  keepsMotion: boolean;
+  shouldLoad: boolean;
+}) {
+  const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
+  // Keep the browser's loaded image visible while a refreshed URL is pending.
+  // Distant slides retain their loaded source until they become a neighbor.
+  const imageUrl = shouldLoad ? slide.backdrop_url : loadedUrl;
+  const thumbhash = slide.backdrop_thumbhash ? decodeThumbhash(slide.backdrop_thumbhash) : "";
+
+  return (
+    <div
+      aria-roledescription="slide"
+      className={`bg-muted absolute inset-0 transition-opacity duration-1000 ease-in-out ${isActive ? "opacity-100" : "opacity-0"}`}
+      style={
+        thumbhash
+          ? {
+              backgroundImage: `url(${thumbhash})`,
+              backgroundSize: "cover",
+              backgroundPosition: "center 20%",
+            }
+          : undefined
+      }
+    >
+      {slide.backdrop_url && imageUrl && (
+        <img
+          src={imageUrl}
+          alt=""
+          fetchPriority={isActive ? "high" : "low"}
+          className={cn(
+            "h-full w-full object-cover object-[center_20%] transition-opacity duration-(--duration-slow)",
+            isActive && "will-change-transform",
+            loadedUrl ? "opacity-100" : "opacity-0",
+          )}
+          style={{
+            animation: keepsMotion
+              ? KEN_BURNS_ANIMATIONS[index % KEN_BURNS_ANIMATIONS.length]
+              : "none",
+            filter:
+              "brightness(var(--hero-backdrop-brightness, 0.78)) saturate(var(--hero-backdrop-saturate, 0.95))",
+          }}
+          onLoad={() => setLoadedUrl(imageUrl)}
+        />
+      )}
+    </div>
+  );
+});
 
 function heroPlayLabel(item: SectionItem, activeAudiobookPlaying?: boolean | null): string {
   if (item.type === "ebook") {
@@ -78,8 +147,10 @@ export default function HeroBanner({
   libraryId,
 }: HeroBannerProps) {
   const slides = useMemo(() => items.slice(0, maxSlides), [items, maxSlides]);
-  const [activeIndex, setActiveIndex] = useState(0);
-  const [loaded, setLoaded] = useState<Record<number, boolean>>({});
+  const [{ activeIndex, outgoingIndex }, setBackdropState] = useState({
+    activeIndex: 0,
+    outgoingIndex: null as number | null,
+  });
   const [paused, setPaused] = useState(false);
   const audiobookPlayback = useAudiobookPlaybackController();
   // Bumped whenever auto-advance restarts a fresh 8s cycle — after the slide
@@ -91,12 +162,28 @@ export default function HeroBanner({
   const [playCycle, setPlayCycle] = useState(0);
 
   const next = useCallback(() => {
-    setActiveIndex((i) => (i + 1) % slides.length);
+    setBackdropState(({ activeIndex: current }) => ({
+      activeIndex: (current + 1) % slides.length,
+      outgoingIndex: shouldKeepOutgoingBackdropMotion() ? current : null,
+    }));
   }, [slides.length]);
 
   const prev = useCallback(() => {
-    setActiveIndex((i) => (i - 1 + slides.length) % slides.length);
+    setBackdropState(({ activeIndex: current }) => ({
+      activeIndex: (current - 1 + slides.length) % slides.length,
+      outgoingIndex: shouldKeepOutgoingBackdropMotion() ? current : null,
+    }));
   }, [slides.length]);
+
+  useEffect(() => {
+    if (outgoingIndex === null) return;
+    const timer = window.setTimeout(() => {
+      setBackdropState((current) =>
+        current.outgoingIndex === outgoingIndex ? { ...current, outgoingIndex: null } : current,
+      );
+    }, HERO_BACKDROP_FADE_MS);
+    return () => window.clearTimeout(timer);
+  }, [outgoingIndex]);
 
   // Pause/play helpers. Unpausing bumps playCycle so the rail animation
   // restarts at scaleX(0) in sync with the fresh 8s interval started below.
@@ -131,12 +218,7 @@ export default function HeroBanner({
   if (slides.length === 0) return null;
   if (!current) return null;
 
-  const metaParts: string[] = [];
-  if (current.year > 0) metaParts.push(String(current.year));
-  if (current.rating_imdb != null) metaParts.push(`IMDb ${current.rating_imdb.toFixed(1)}`);
-  (current.genres ?? []).slice(0, 3).forEach((g) => metaParts.push(g));
-  const runtime = formatRuntime(current.duration_seconds);
-  if (runtime) metaParts.push(runtime);
+  const metadata = formatHeroMetadata(current);
 
   const slideCount = slides.length;
   const padded = (n: number) => String(n).padStart(2, "0");
@@ -153,6 +235,13 @@ export default function HeroBanner({
 
   const handlePlayClick = (event: MouseEvent<HTMLAnchorElement>) => {
     if (activeAudiobookPlaying == null) {
+      // This Play link navigates without the playback controller, so it
+      // starts the first-frame clock itself. A modified or non-primary click
+      // opens another tab, which this tab's clock cannot time.
+      const opensHere =
+        event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+      const request = opensHere ? parseWatchHref(playHref) : null;
+      if (request) markPlaybackIntent(request.requestKey);
       return;
     }
     event.preventDefault();
@@ -175,40 +264,22 @@ export default function HeroBanner({
         if (!e.currentTarget.contains(e.relatedTarget)) resume();
       }}
     >
-      {/* Backdrop layers – all stacked, crossfade via opacity */}
-      {slides.map((slide, i) => {
-        const thumbhash = slide.backdrop_thumbhash ? decodeThumbhash(slide.backdrop_thumbhash) : "";
-        const isActive = i === activeIndex;
-        return (
-          <div
-            key={slide.content_id ?? i}
-            aria-roledescription="slide"
-            className={`bg-muted absolute inset-0 transition-opacity duration-1000 ease-in-out ${isActive ? "opacity-100" : "opacity-0"}`}
-            style={
-              thumbhash
-                ? {
-                    backgroundImage: `url(${thumbhash})`,
-                    backgroundSize: "cover",
-                    backgroundPosition: "center 20%",
-                  }
-                : undefined
-            }
-          >
-            {slide.backdrop_url && (
-              <img
-                src={slide.backdrop_url}
-                alt=""
-                className={`h-full w-full object-cover object-[center_20%] transition-opacity duration-[--duration-slow] will-change-transform ${loaded[i] ? "opacity-100" : "opacity-0"}`}
-                style={{
-                  animation: `var(--animate-ken-burns-${i % 2 === 0 ? "a" : "b"})`,
-                  filter: `brightness(var(--hero-backdrop-brightness, 0.78)) saturate(var(--hero-backdrop-saturate, 0.95))`,
-                }}
-                onLoad={() => setLoaded((prev) => ({ ...prev, [i]: true }))}
-              />
-            )}
-          </div>
-        );
-      })}
+      {/* Preload neighbors in both directions; retain loaded backdrops for crossfades. */}
+      {slides.map((slide, i) => (
+        <HeroBackdropSlide
+          key={slide.content_id ?? i}
+          slide={slide}
+          index={i}
+          isActive={i === activeIndex}
+          keepsMotion={i === activeIndex || i === outgoingIndex}
+          shouldLoad={
+            i === activeIndex ||
+            i === outgoingIndex ||
+            i === (activeIndex + 1) % slideCount ||
+            i === (activeIndex - 1 + slideCount) % slideCount
+          }
+        />
+      ))}
 
       {/* Gradient overlays */}
       {bleed && <div className="hero-top-scrim" />}
@@ -238,11 +309,15 @@ export default function HeroBanner({
             >
               {current.title}
             </h1>
-            {metaParts.length > 0 && (
+            {metadata.length > 0 && (
               <div className="hero-meta-track mb-5 text-white/85">
-                {metaParts.map((part) => (
-                  <span key={part}>{part}</span>
-                ))}
+                {metadata.map((entry) =>
+                  entry.rating ? (
+                    <RatingEntry key={entry.key} rating={entry.rating} size="sm" />
+                  ) : (
+                    <span key={entry.key}>{entry.label}</span>
+                  ),
+                )}
               </div>
             )}
             {current.overview && (
@@ -254,7 +329,7 @@ export default function HeroBanner({
               <Link
                 to={playHref}
                 onClick={handlePlayClick}
-                className="pill pill-primary transition-colors duration-[--duration-fast]"
+                className="pill pill-primary transition-colors duration-(--duration-fast)"
               >
                 {current.type === "ebook" ? (
                   <BookOpen className="h-4 w-4" />
@@ -267,7 +342,7 @@ export default function HeroBanner({
               </Link>
               <ViewTransitionLink
                 to={buildItemHref({ contentId: current.content_id, libraryId })}
-                className="pill pill-glass transition-colors duration-[--duration-fast]"
+                className="pill pill-glass transition-colors duration-(--duration-fast)"
               >
                 <Info className="h-4 w-4" />
                 More Info
@@ -292,7 +367,7 @@ export default function HeroBanner({
           <button
             type="button"
             onClick={prev}
-            className="glass-subtle absolute top-1/2 left-3 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-[--duration-fast] hover:opacity-100 sm:left-5 sm:p-2 sm:opacity-80 lg:opacity-0 lg:group-hover:opacity-90"
+            className="glass-subtle absolute top-1/2 left-3 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-(--duration-fast) hover:opacity-100 sm:left-5 sm:p-2 sm:opacity-80 lg:opacity-0 lg:group-hover:opacity-90"
             aria-label="Previous slide"
           >
             <ChevronLeft className="size-4 sm:size-5" />
@@ -300,7 +375,7 @@ export default function HeroBanner({
           <button
             type="button"
             onClick={next}
-            className="glass-subtle absolute top-1/2 right-3 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-[--duration-fast] hover:opacity-100 sm:right-5 sm:p-2 sm:opacity-80 lg:opacity-0 lg:group-hover:opacity-90"
+            className="glass-subtle absolute top-1/2 right-3 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-(--duration-fast) hover:opacity-100 sm:right-5 sm:p-2 sm:opacity-80 lg:opacity-0 lg:group-hover:opacity-90"
             aria-label="Next slide"
           >
             <ChevronRight className="size-4 sm:size-5" />

@@ -14,7 +14,7 @@ import (
 // settingMutationConnExecutor pins every statement to one database/sql
 // connection. SQLite cannot request BEGIN IMMEDIATE through sql.Tx without a
 // DSN-wide policy, so this adapter lets the mutation transaction acquire its
-// write reservation before it reads the receipt.
+// write reservation before it reads a receipt or preference merge inputs.
 type settingMutationConnExecutor struct {
 	ctx  context.Context
 	conn *sql.Conn
@@ -52,16 +52,28 @@ var _ userstore.SettingMutationTransactioner = (*SQLiteUserStore)(nil)
 var _ userstore.SettingMutationWriter = (*sqliteSettingMutationWriter)(nil)
 
 // WithSettingMutationTransaction uses BEGIN IMMEDIATE so same-database
-// contenders serialize before checking mutation_id. The setting row and its
-// receipt then commit together; rollback covers callback errors and crashes.
+// contenders serialize before checking mutation_id. Everything the callback
+// writes then commits together; rollback covers callback errors and crashes.
+//
+// An empty mutationID is a mutation with no idempotency receipt. This backend
+// needs no special case for it: BEGIN IMMEDIATE already serializes every writer
+// against this user's database, so the atomicity guarantee is the same one and
+// the only thing missing is a receipt to record.
 func (s *SQLiteUserStore) WithSettingMutationTransaction(
 	ctx context.Context,
 	mutationID string,
 	fn func(userstore.SettingMutationWriter) error,
-) (err error) {
-	if mutationID == "" {
-		return fmt.Errorf("setting mutation transaction requires a mutation id")
-	}
+) error {
+	_ = mutationID // serialization is per-database, not per-mutation id
+	return s.withImmediateSettingsTransaction(ctx, func(exec preferenceSettingsExecutor) error {
+		return fn(&sqliteSettingMutationWriter{exec: exec})
+	})
+}
+
+// Reserve the SQLite writer before either canonical or preference callbacks
+// read their merge inputs; a deferred read transaction cannot safely upgrade
+// while another writer has changed the snapshot.
+func (s *SQLiteUserStore) withImmediateSettingsTransaction(ctx context.Context, fn func(preferenceSettingsExecutor) error) error {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("opening setting mutation connection: %w", err)
@@ -87,7 +99,7 @@ func (s *SQLiteUserStore) WithSettingMutationTransaction(
 		}
 	}()
 
-	if err := fn(&sqliteSettingMutationWriter{exec: exec}); err != nil {
+	if err := fn(exec); err != nil {
 		return err
 	}
 	if _, err := exec.ExecContext(ctx, "COMMIT"); err != nil {
@@ -110,6 +122,21 @@ func (w *sqliteSettingMutationWriter) UpsertSettingValue(
 	value json.RawMessage,
 ) (*userstore.SettingValue, error) {
 	return upsertSettingValue(w.exec, id, value)
+}
+
+func (w *sqliteSettingMutationWriter) DeleteSettingValue(
+	_ context.Context,
+	id userstore.SettingIdentity,
+) (bool, error) {
+	return deleteSettingValue(w.exec, id)
+}
+
+func (w *sqliteSettingMutationWriter) UpdateProfile(
+	_ context.Context,
+	id string,
+	u userstore.UpdateProfileInput,
+) error {
+	return updateProfile(w.exec, id, u)
 }
 
 func (w *sqliteSettingMutationWriter) CompareAndSetSettingValue(

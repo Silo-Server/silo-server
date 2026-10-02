@@ -34,6 +34,10 @@ func (r testAdminUserRepo) List(context.Context) ([]*models.User, error) {
 	return out, nil
 }
 
+func (r testAdminUserRepo) ListPage(context.Context, int, int, string) ([]*models.User, error) {
+	return nil, nil
+}
+
 func (r testAdminUserRepo) Create(context.Context, models.CreateUserInput) (*models.User, error) {
 	panic("unexpected Create call")
 }
@@ -52,7 +56,7 @@ func (r testAdminUserRepo) GetByID(_ context.Context, id int) (*models.User, err
 
 func TestRegisterRequestDeviceNilStore(t *testing.T) {
 	h := NewSettingsHandler(nil)
-	h.registerRequestDevice(context.Background(), nil, "profile-1", requestDeviceMetadata{
+	h.registerRequestDevice(context.Background(), nil, "profile-1", DeviceMetadata{
 		DeviceID:       "device-1",
 		DeviceName:     "Living Room",
 		DevicePlatform: "web",
@@ -140,7 +144,7 @@ func TestEffectiveSubtitleAppearancePrefersDeviceOverride(t *testing.T) {
 		DeviceID:       "device-1",
 		DeviceName:     "Living Room",
 		DevicePlatform: "tvOS",
-		Key:            subtitleAppearanceSettingKey,
+		Key:            SubtitleAppearanceSettingKey,
 		Value:          `{"fontSize":"small"}`,
 	}); err != nil {
 		t.Fatalf("SetDeviceSetting: %v", err)
@@ -157,7 +161,7 @@ func TestEffectiveSubtitleAppearancePrefersDeviceOverride(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	var resp effectiveSubtitleAppearanceResponse
+	var resp EffectiveSubtitleAppearanceView
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -182,7 +186,7 @@ func TestSubtitleAppearanceDeviceOverrideRoundTrip(t *testing.T) {
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("set status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	entry, err := store.GetDeviceSetting(context.Background(), "profile-1", "iphone", subtitleAppearanceSettingKey)
+	entry, err := store.GetDeviceSetting(context.Background(), "profile-1", "iphone", SubtitleAppearanceSettingKey)
 	if err != nil {
 		t.Fatalf("GetDeviceSetting: %v", err)
 	}
@@ -198,7 +202,7 @@ func TestSubtitleAppearanceDeviceOverrideRoundTrip(t *testing.T) {
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("delete status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	entry, err = store.GetDeviceSetting(context.Background(), "profile-1", "iphone", subtitleAppearanceSettingKey)
+	entry, err = store.GetDeviceSetting(context.Background(), "profile-1", "iphone", SubtitleAppearanceSettingKey)
 	if err != nil {
 		t.Fatalf("GetDeviceSetting after delete: %v", err)
 	}
@@ -308,7 +312,7 @@ func TestAndroidNextUpSettingAliasUsesCanonicalStoredValue(t *testing.T) {
 		context.Background(),
 		store,
 		"profile-1",
-		requestDeviceMetadata{DeviceID: "android-tv"},
+		DeviceMetadata{DeviceID: "android-tv"},
 		legacyAndroidNextUpPromptSettingKey,
 	)
 	if err != nil {
@@ -428,7 +432,7 @@ func TestAndroidNextUpSettingAliasPrefersCanonicalDeviceRow(t *testing.T) {
 		context.Background(),
 		store,
 		"profile-1",
-		requestDeviceMetadata{DeviceID: "android-tv"},
+		DeviceMetadata{DeviceID: "android-tv"},
 		legacyAndroidNextUpPromptSettingKey,
 	)
 	if err != nil {
@@ -492,7 +496,7 @@ func TestAndroidNextUpSettingAliasDoesNotUseOrDeleteUserRow(t *testing.T) {
 		context.Background(),
 		store,
 		"profile-1",
-		requestDeviceMetadata{DeviceID: "android-tv"},
+		DeviceMetadata{DeviceID: "android-tv"},
 		legacyAndroidNextUpPromptSettingKey,
 	)
 	if err != nil {
@@ -673,7 +677,7 @@ func TestLegacyDeviceSettingsMirrorCanonicalRows(t *testing.T) {
 
 	appearance := `{"fontSize":"large"}`
 	body, _ := json.Marshal(setSettingRequest{Value: appearance})
-	if rec := send(http.MethodPut, subtitleAppearanceSettingKey, body); rec.Code != http.StatusNoContent {
+	if rec := send(http.MethodPut, SubtitleAppearanceSettingKey, body); rec.Code != http.StatusNoContent {
 		t.Fatalf("appearance PUT = %d: %s", rec.Code, rec.Body.String())
 	}
 	if value := canonical("playback.subtitle_appearance"); value == nil || string(value.Value) != appearance {
@@ -1039,7 +1043,7 @@ func TestAdminCanListAndInspectDevicesAcrossUsers(t *testing.T) {
 
 func TestAdminDeviceSummaryDeduplicatesMirroredLegacyAlias(t *testing.T) {
 	for name, keys := range map[string][2]string{
-		"subtitle appearance": {subtitleAppearanceSettingKey, settingskeys.PlaybackSubtitleAppearance},
+		"subtitle appearance": {SubtitleAppearanceSettingKey, settingskeys.PlaybackSubtitleAppearance},
 		"theme":               {"ui_theme", "ui.theme"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -1063,10 +1067,110 @@ func TestAdminDeviceSummaryDeduplicatesMirroredLegacyAlias(t *testing.T) {
 	}
 }
 
+// TestAdminDeviceSummaryCountsAMirroredPairOnce. The mirrored pair is one
+// preference stored twice for the length of the overlap window, and every fleet
+// number built on this — override totals, the count filters, the anomaly
+// thresholds that flag a device as unusually customized — is describing
+// preferences. A device whose only override is the intro prompt must not look
+// twice as configured as one whose only override is HDR.
+func TestAdminDeviceSummaryCountsAMirroredPairOnce(t *testing.T) {
+	summaries := buildAdminDeviceSummaries(7, "user", "user@example.com", nil,
+		[]userstore.SettingValue{
+			{
+				SettingIdentity: userstore.SettingIdentity{
+					Key: settingskeys.PlaybackIntroSkipMode, Scope: settingscontract.ScopeProfileDevice,
+					ProfileID: "profile-1", DeviceID: "living-room",
+				},
+				UpdatedAt: "2026-08-16T01:00:00Z",
+			},
+			{
+				SettingIdentity: userstore.SettingIdentity{
+					Key: settingskeys.PlaybackAutoSkipIntro, Scope: settingscontract.ScopeProfileDevice,
+					ProfileID: "profile-1", DeviceID: "living-room",
+				},
+				UpdatedAt: "2026-08-16T01:00:00Z",
+			},
+		}, nil, map[string]string{"profile-1": "Main"})
+
+	if len(summaries) != 1 {
+		t.Fatalf("summaries = %#v, want one device", summaries)
+	}
+	if summaries[0].OverrideCount != 1 {
+		t.Errorf("override_count = %d, want 1: the mirrored intro pair is one preference",
+			summaries[0].OverrideCount)
+	}
+	if len(summaries[0].Profiles) != 1 || summaries[0].Profiles[0].OverrideCount != 1 {
+		t.Errorf("per-profile summary = %#v, want one override", summaries[0].Profiles)
+	}
+}
+
 func withRouteParams(req *http.Request, params map[string]string) *http.Request {
 	routeCtx := chi.NewRouteContext()
 	for key, value := range params {
 		routeCtx.URLParams.Add(key, value)
 	}
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+}
+
+// TestLegacyDeviceSettingCarriesIntroSkipMode closes the third write path onto
+// the intro-skip pair. The shipped apps save this switch through the legacy
+// generic route, not through /settings/values, so without the mirror in the
+// runtime plan an updated client would resolve the contract default while the
+// household's own device said otherwise.
+func TestLegacyDeviceSettingCarriesIntroSkipMode(t *testing.T) {
+	store := newProfileTestStore(t)
+	handler := NewSettingsHandler(testUserStoreProvider{store: store})
+
+	send := func(method string, body []byte) *httptest.ResponseRecorder {
+		key := "playback.auto_skip_intro"
+		req := httptest.NewRequest(method, "/settings/device/"+key, bytes.NewReader(body))
+		req = withRouteParams(req, map[string]string{"key": key})
+		req.Header.Set(deviceIDHeader, "living-room")
+		req = req.WithContext(apimw.SetProfileID(
+			apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}), "profile-1"))
+		rec := httptest.NewRecorder()
+		if method == http.MethodPut {
+			handler.HandleSetDeviceSetting(rec, req)
+		} else {
+			handler.HandleDeleteDeviceSetting(rec, req)
+		}
+		return rec
+	}
+	canonical := func(key string) *userstore.SettingValue {
+		t.Helper()
+		value, err := store.GetSettingValue(context.Background(), userstore.SettingIdentity{
+			Key: key, Scope: settingscontract.ScopeProfileDevice,
+			ProfileID: "profile-1", DeviceID: "living-room",
+		})
+		if err != nil {
+			t.Fatalf("GetSettingValue(%s): %v", key, err)
+		}
+		return value
+	}
+
+	for _, tc := range []struct{ body, wantBool, wantMode string }{
+		{`{"value":"true"}`, `true`, `"always"`},
+		{`{"value":"false"}`, `false`, `"ask"`},
+	} {
+		if rec := send(http.MethodPut, []byte(tc.body)); rec.Code != http.StatusNoContent {
+			t.Fatalf("PUT %s = %d: %s", tc.body, rec.Code, rec.Body.String())
+		}
+		if value := canonical("playback.auto_skip_intro"); value == nil || string(value.Value) != tc.wantBool {
+			t.Fatalf("canonical auto_skip_intro after %s = %+v, want %s", tc.body, value, tc.wantBool)
+		}
+		if value := canonical("playback.intro_skip_mode"); value == nil || string(value.Value) != tc.wantMode {
+			t.Fatalf("canonical intro_skip_mode after %s = %+v, want %s", tc.body, value, tc.wantMode)
+		}
+	}
+
+	// Clearing through the same route has to reach both rows, or the companion
+	// would go on overriding at a scope the device just gave up.
+	if rec := send(http.MethodDelete, nil); rec.Code != http.StatusNoContent {
+		t.Fatalf("DELETE = %d: %s", rec.Code, rec.Body.String())
+	}
+	for _, key := range []string{"playback.auto_skip_intro", "playback.intro_skip_mode"} {
+		if value := canonical(key); value != nil {
+			t.Errorf("%s survived the legacy delete: %+v", key, value)
+		}
+	}
 }

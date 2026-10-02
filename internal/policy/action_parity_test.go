@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/downloads"
-	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/policy"
 )
@@ -25,17 +25,19 @@ func TestActionParityDownloads(t *testing.T) {
 							Enabled:          downloadsEnabled,
 							TranscodeEnabled: transcodeEnabled,
 						}
-						user := &models.User{
-							ID:                       42,
-							DownloadAllowed:          downloadAllowed,
-							DownloadTranscodeAllowed: downloadTranscodeAllowed,
+						user := &downloads.PolicyUser{
+							ID: 42,
+							Policy: access.EffectiveUserPolicy{
+								DownloadAllowed:          downloadAllowed,
+								DownloadTranscodeAllowed: downloadTranscodeAllowed,
+							},
 						}
 						presets := resolver.PresetsFor(user, cfg, artifactsAvailable)
 						input := policy.ActionInput{
 							SchemaVersion:            1,
 							UserID:                   user.ID,
-							DownloadAllowed:          user.DownloadAllowed,
-							DownloadTranscodeAllowed: user.DownloadTranscodeAllowed,
+							DownloadAllowed:          user.Policy.DownloadAllowed,
+							DownloadTranscodeAllowed: user.Policy.DownloadTranscodeAllowed,
 							DownloadsEnabled:         cfg.Enabled,
 							TranscodeEnabled:         cfg.TranscodeEnabled,
 							ArtifactsAvailable:       artifactsAvailable,

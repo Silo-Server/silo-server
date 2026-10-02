@@ -8,16 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"log/slog"
 	"net/http"
-	"net/url"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -132,7 +127,7 @@ const navigationShortcutAtomicUpdateMessage = "Use PUT /settings/values/nav.shor
 var (
 	errMutationIDConflict           = errors.New("setting mutation id conflict")
 	errMutationReplayRollback       = errors.New("setting mutation replay requires rollback")
-	errMutationTransactionRequired  = errors.New("settings store does not support atomic idempotent mutations")
+	errMutationTransactionRequired  = errors.New("settings store does not support atomic canonical mutations")
 	errShortcutMutationContention   = errors.New("navigation shortcuts changed too quickly")
 	errShortcutMutationInvalidValue = errors.New("invalid navigation shortcut value")
 )
@@ -271,7 +266,7 @@ func (h *SettingValuesHandler) HandleGetContract(w http.ResponseWriter, r *http.
 	w.Header().Set("ETag", etag)
 	w.Header().Set("Cache-Control", "no-cache")
 
-	if match := r.Header.Get("If-None-Match"); match != "" && etagMatches(match, etag) {
+	if match := r.Header.Get("If-None-Match"); match != "" && ETagMatches(match, etag) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
@@ -286,20 +281,35 @@ func (h *SettingValuesHandler) HandleGetContract(w http.ResponseWriter, r *http.
 	_, _ = w.Write(body)
 }
 
-// HandleGetCapabilities reports what this server supports, for feature
-// detection rather than version sniffing.
-func (h *SettingValuesHandler) HandleGetCapabilities(w http.ResponseWriter, r *http.Request) {
+// SettingsCapabilitiesView is the settings capability document. Field order
+// is alphabetical on purpose: v1 encoded a map, whose keys sort, and the v1
+// bytes must not change.
+type SettingsCapabilitiesView struct {
+	APIVersion               int      `json:"api_version"`
+	ClientFamilies           []string `json:"client_families"`
+	ContractETag             string   `json:"contract_etag"`
+	DefinitionCount          int      `json:"definition_count"`
+	Revision                 int      `json:"revision"`
+	Scopes                   []string `json:"scopes"`
+	SupportsAtomicShortcuts  bool     `json:"supports_atomic_shortcuts"`
+	SupportsBatchedEffective bool     `json:"supports_batched_effective"`
+	SupportsIdempotentWrites bool     `json:"supports_idempotent_writes"`
+}
+
+// SettingsCapabilities builds the capability document for a manifest. v1
+// GET /settings/contract/capabilities and v2 getSettingsContractCapabilities
+// both answer from it.
+func SettingsCapabilities(contract *settingscontract.Manifest) (SettingsCapabilitiesView, error) {
 	etag, err := settingscontract.PublicETag()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to read the settings contract")
-		return
+		return SettingsCapabilitiesView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to read the settings contract")
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"api_version":      h.contract.APIVersion,
-		fieldRevision:      h.contract.Revision,
-		"contract_etag":    etag,
-		"definition_count": len(h.contract.Definitions),
-		"scopes": []string{
+	return SettingsCapabilitiesView{
+		APIVersion:      contract.APIVersion,
+		Revision:        contract.Revision,
+		ContractETag:    etag,
+		DefinitionCount: len(contract.Definitions),
+		Scopes: []string{
 			string(settingscontract.ScopeAccount),
 			string(settingscontract.ScopeProfile),
 			string(settingscontract.ScopeProfileClient),
@@ -307,264 +317,28 @@ func (h *SettingValuesHandler) HandleGetCapabilities(w http.ResponseWriter, r *h
 			string(settingscontract.ScopeProfileLibrary),
 			string(settingscontract.ScopeProfileSeries),
 		},
-		"client_families": []string{
+		ClientFamilies: []string{
 			string(settingscontract.ClientFamilyTV),
 			string(settingscontract.ClientFamilyMobile),
 			string(settingscontract.ClientFamilyTablet),
 			string(settingscontract.ClientFamilyDesktop),
 			string(settingscontract.ClientFamilyWeb),
 		},
-		"supports_batched_effective": true,
-		"supports_idempotent_writes": true,
-		"supports_atomic_shortcuts":  true,
-	})
+		SupportsBatchedEffective: true,
+		SupportsIdempotentWrites: true,
+		SupportsAtomicShortcuts:  true,
+	}, nil
 }
 
-// HandleGetValue returns the explicit value at one scope, or 404 when the user
-// has none there.
-//
-// Deliberately not a resolution: this answers "did I set this here", which is
-// what a reset affordance needs. Use the effective endpoint for "what applies".
-func (h *SettingValuesHandler) HandleGetValue(w http.ResponseWriter, r *http.Request) {
-	store, ok := h.storeFor(w, r)
-	if !ok {
-		return
-	}
-	identity, ok := h.identityFromRequest(w, r)
-	if !ok {
-		return
-	}
-
-	value, err := store.GetSettingValue(r.Context(), identity)
+// HandleGetCapabilities reports what this server supports, for feature
+// detection rather than version sniffing.
+func (h *SettingValuesHandler) HandleGetCapabilities(w http.ResponseWriter, r *http.Request) {
+	view, err := SettingsCapabilities(h.contract)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to read the setting")
+		writeAPIError(w, err)
 		return
 	}
-	if value == nil {
-		writeError(w, http.StatusNotFound, "not_found", "No value is set at this scope")
-		return
-	}
-	writeJSON(w, http.StatusOK, settingValueToResponse(*value))
-}
-
-// HandleGetValues returns the explicit values for several keys at exactly one
-// scope. Missing rows remain in the response with is_set false; this is the
-// contract's read shape for independently presenting profile defaults and
-// device/content overrides.
-func (h *SettingValuesHandler) HandleGetValues(w http.ResponseWriter, r *http.Request) {
-	store, ok := h.storeFor(w, r)
-	if !ok {
-		return
-	}
-
-	keys := parseSettingKeys(r.URL.Query().Get("keys"))
-	if len(keys) == 0 {
-		writeError(w, http.StatusBadRequest, "bad_request", "Query parameter keys is required")
-		return
-	}
-	identity, ok := h.identityForSessionKey(w, r, keys[0])
-	if !ok {
-		return
-	}
-	for _, key := range keys[1:] {
-		def, exists := h.definitionFor(w, key)
-		if !exists {
-			return
-		}
-		if !def.AllowsScope(identity.Scope) {
-			writeError(w, http.StatusBadRequest, "scope_not_allowed",
-				key+" cannot be set at "+string(identity.Scope))
-			return
-		}
-	}
-
-	query := userstore.SettingResolutionQuery{Keys: keys}
-	switch identity.Scope {
-	case settingscontract.ScopeProfile:
-		query.ProfileIDs = []string{identity.ProfileID}
-	case settingscontract.ScopeProfileClient:
-		query.ProfileIDs = []string{identity.ProfileID}
-		query.ClientFamily = identity.ClientFamily
-	case settingscontract.ScopeProfileDevice:
-		query.ProfileIDs = []string{identity.ProfileID}
-		query.DeviceID = identity.DeviceID
-	case settingscontract.ScopeProfileLibrary:
-		query.ProfileIDs = []string{identity.ProfileID}
-		query.LibraryIDs = []int{identity.LibraryID}
-	case settingscontract.ScopeProfileSeries:
-		query.ProfileIDs = []string{identity.ProfileID}
-		query.SeriesIDs = []string{identity.SeriesID}
-	}
-	stored, err := store.ListSettingValuesForResolution(r.Context(), query)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to read settings")
-		return
-	}
-	byKey := make(map[string]userstore.SettingValue, len(stored))
-	for _, value := range stored {
-		if sameSettingContext(value.SettingIdentity, identity) {
-			byKey[value.Key] = value
-		}
-	}
-
-	out := make([]explicitSettingValueResponse, 0, len(keys))
-	for _, key := range keys {
-		entry := explicitSettingValueResponse{
-			Key: key, Scope: string(identity.Scope), ProfileID: identity.ProfileID,
-			ClientFamily: string(identity.ClientFamily), DeviceID: identity.DeviceID,
-			LibraryID: identity.LibraryID, SeriesID: identity.SeriesID,
-		}
-		if value, exists := byKey[key]; exists {
-			entry.IsSet = true
-			entry.Value = value.Value
-			entry.Revision = value.Revision
-			entry.UpdatedAt = value.UpdatedAt
-		}
-		out = append(out, entry)
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		fieldValues:   out,
-		fieldRevision: h.contract.Revision,
-	})
-}
-
-// HandleSetValue writes an explicit value at one scope.
-//
-// A value that exceeds a policy restriction is stored, not rejected: the
-// restriction filters what a preference does at resolution time, and destroying
-// the preference would mean a capped 4K choice never takes effect when the cap
-// lifts.
-func (h *SettingValuesHandler) HandleSetValue(w http.ResponseWriter, r *http.Request) {
-	store, ok := h.storeFor(w, r)
-	if !ok {
-		return
-	}
-	identity, ok := h.identityFromRequest(w, r)
-	if !ok {
-		return
-	}
-	if identity.Key == settingskeys.NavShortcuts {
-		writeError(w, http.StatusBadRequest, "atomic_update_required",
-			navigationShortcutAtomicUpdateMessage)
-		return
-	}
-	h.setValueAt(w, r, store, apimw.GetUserID(r.Context()), identity)
-}
-
-// HandleSetNavigationShortcut applies one desired-state edit to the shared
-// profile shortcut catalog. Unlike the generic whole-document PUT, two clients
-// adding different destinations cannot overwrite one another: the handler
-// rebases after an internal compare-and-set conflict until its semantic edit
-// lands on the newest document.
-func (h *SettingValuesHandler) HandleSetNavigationShortcut(w http.ResponseWriter, r *http.Request) {
-	store, ok := h.storeFor(w, r)
-	if !ok {
-		return
-	}
-	shortcutStore, ok := store.(shortcutMutationStore)
-	if !ok {
-		writeError(w, http.StatusInternalServerError, "internal_error",
-			"This settings store does not support atomic shortcut updates")
-		return
-	}
-
-	profileID := strings.TrimSpace(apimw.GetProfileID(r.Context()))
-	identity := userstore.SettingIdentity{
-		Key: settingskeys.NavShortcuts, Scope: settingscontract.ScopeProfile, ProfileID: profileID,
-	}
-	if err := identity.Validate(); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "X-Profile-Id header is required")
-		return
-	}
-	def, ok := h.definitionFor(w, identity.Key)
-	if !ok {
-		return
-	}
-
-	var body navigationShortcutMutationRequest
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request",
-			"Body must be {\"item\": {…}, \"present\": true|false}")
-		return
-	}
-	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
-		writeError(w, http.StatusBadRequest, "bad_request", "Body must be a single JSON document")
-		return
-	}
-	if body.Present == nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "present is required")
-		return
-	}
-
-	item, err := normalizeNavigationShortcutItem(def, body.Item)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_value", err.Error())
-		return
-	}
-	requestHash := hashNavigationShortcutMutation(identity, item, *body.Present)
-	mutationID := strings.TrimSpace(r.Header.Get(mutationIDHeader))
-
-	var stored *userstore.SettingValue
-	var idempotentResult json.RawMessage
-	var changed bool
-	if mutationID == "" {
-		stored, changed, err = mutateNavigationShortcut(
-			r.Context(), shortcutStore, def, identity, item, *body.Present)
-	} else {
-		var outcome idempotentSettingMutationOutcome
-		outcome, err = runIdempotentSettingMutation(
-			r.Context(), store, mutationID, requestHash,
-			func(writer userstore.SettingMutationWriter) (*userstore.SettingValue, bool, error) {
-				return mutateNavigationShortcut(r.Context(), writer, def, identity, item, *body.Present)
-			},
-		)
-		if err == nil && outcome.replay {
-			w.Header().Set("X-Silo-Idempotent-Replay", "true")
-			writeRawJSON(w, http.StatusOK, outcome.result)
-			return
-		}
-		stored, changed = outcome.stored, outcome.changed
-		idempotentResult = outcome.result
-	}
-	if err != nil {
-		switch {
-		case errors.Is(err, errMutationIDConflict):
-			writeError(w, http.StatusConflict, "mutation_id_conflict",
-				"This mutation id was used for a different write")
-		case errors.Is(err, errShortcutMutationContention):
-			writeError(w, http.StatusConflict, "setting_update_conflict",
-				"Navigation shortcuts changed too quickly; retry this mutation")
-		case errors.Is(err, errShortcutMutationInvalidValue):
-			writeError(w, http.StatusBadRequest, "invalid_value", err.Error())
-		case errors.Is(err, userstore.ErrInvalidSettingIdentity),
-			errors.Is(err, userstore.ErrInvalidSettingValue):
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		default:
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store navigation shortcuts")
-		}
-		return
-	}
-
-	response := settingValueToResponse(*stored)
-	if changed {
-		publishUserSettingsEvent(r.Context(), h.EventsHub,
-			apimw.GetUserID(r.Context()), identity.ProfileID, identity.Key, string(identity.Scope))
-		auditSettingsForOther(r.Context(), settingsAuditRecord{
-			Action:          settingsAuditActionSet,
-			ActorProfileID:  actingProfileID(r.Context()),
-			TargetProfileID: identity.ProfileID,
-			TargetUserID:    apimw.GetUserID(r.Context()),
-			Key:             identity.Key,
-			Scope:           string(identity.Scope),
-		})
-	}
-	if idempotentResult != nil {
-		writeRawJSON(w, http.StatusOK, idempotentResult)
-	} else {
-		writeJSON(w, http.StatusOK, response)
-	}
+	writeJSON(w, http.StatusOK, view)
 }
 
 func normalizeNavigationShortcutItem(
@@ -702,7 +476,18 @@ func mutateNavigationShortcut(
 	return nil, false, errShortcutMutationContention
 }
 
-func runIdempotentSettingMutation(
+// runSettingMutation applies one canonical mutation inside a store
+// transaction, and records its idempotency receipt in that same transaction
+// when the caller supplied a mutation id.
+//
+// Every canonical write goes through here, keyed or not. A mutation is rarely
+// one row any more — a mirrored pair writes two, and a profile-scope intro-skip
+// choice also moves the legacy column GET /profiles serves — and a caller
+// without an idempotency key has exactly the same claim to those landing
+// together as one with. Worse, it has less recourse: a keyed write that half
+// fails is repaired by the retry, while two unkeyed writes to one preference
+// can interleave and leave the pair permanently disagreeing.
+func runSettingMutation(
 	ctx context.Context,
 	store userstore.UserStore,
 	mutationID string,
@@ -717,6 +502,16 @@ func runIdempotentSettingMutation(
 	var outcome idempotentSettingMutationOutcome
 	err := transactioner.WithSettingMutationTransaction(ctx, mutationID,
 		func(writer userstore.SettingMutationWriter) error {
+			if mutationID == "" {
+				stored, changed, err := mutate(writer)
+				if err != nil {
+					return err
+				}
+				outcome.stored = stored
+				outcome.changed = changed
+				return nil
+			}
+
 			prior, err := writer.GetSettingMutation(ctx, mutationID)
 			if err != nil {
 				return fmt.Errorf("checking setting mutation: %w", err)
@@ -770,449 +565,138 @@ func runIdempotentSettingMutation(
 	return outcome, err
 }
 
-// setValueAt is the write path shared by the session route and the admin
-// route: validation, normalization, idempotency and the change event are one
-// implementation regardless of who addresses the store. eventUserID names the
-// account whose settings changed — the session owner on the self-service
-// route, the target user on the admin route — so change events always reach
-// the clients whose settings moved.
-func (h *SettingValuesHandler) setValueAt(
-	w http.ResponseWriter,
-	r *http.Request,
-	store userstore.UserStore,
-	eventUserID int,
-	identity userstore.SettingIdentity,
-) {
-	def, ok := h.definitionFor(w, identity.Key)
-	if !ok {
-		return
-	}
-
-	var body struct {
-		Value json.RawMessage `json:"value"`
-	}
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
-	if err := decoder.Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Body must be {\"value\": …}")
-		return
-	}
-	// The body must be exactly one JSON document: content after the envelope
-	// would mean different parsers could disagree about which mutation this is.
-	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
-		writeError(w, http.StatusBadRequest, "bad_request", "Body must be a single JSON document")
-		return
-	}
-	if len(body.Value) == 0 {
-		writeError(w, http.StatusBadRequest, "bad_request", "value is required")
-		return
-	}
-
-	normalized, err := def.ValueSchema.NormalizeValue(body.Value, settingscontract.ObjectSchemas())
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_value", err.Error())
-		return
-	}
-
-	// Idempotency: a client that retries a write after a dropped response must
-	// not double-apply it, and must be able to tell "already done" from "that
-	// id means something else".
-	mutationID := strings.TrimSpace(r.Header.Get(mutationIDHeader))
-	var stored *userstore.SettingValue
-	var idempotentResult json.RawMessage
-	if mutationID == "" {
-		stored, err = store.UpsertSettingValue(r.Context(), identity, normalized)
-	} else {
-		outcome, mutationErr := runIdempotentSettingMutation(
-			r.Context(), store, mutationID, hashMutationRequest(identity, normalized),
-			func(writer userstore.SettingMutationWriter) (*userstore.SettingValue, bool, error) {
-				value, err := writer.UpsertSettingValue(r.Context(), identity, normalized)
-				return value, true, err
-			},
-		)
-		if errors.Is(mutationErr, errMutationIDConflict) {
-			writeError(w, http.StatusConflict, "mutation_id_conflict",
-				"This mutation id was used for a different write")
-			return
-		}
-		if mutationErr != nil {
-			err = mutationErr
-		} else if outcome.replay {
-			w.Header().Set("X-Silo-Idempotent-Replay", "true")
-			writeRawJSON(w, http.StatusOK, outcome.result)
-			return
-		} else {
-			stored = outcome.stored
-			idempotentResult = outcome.result
-		}
-	}
-	if err != nil {
-		if errors.Is(err, userstore.ErrInvalidSettingIdentity) ||
-			errors.Is(err, userstore.ErrInvalidSettingValue) {
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store the setting")
-		return
-	}
-
-	response := settingValueToResponse(*stored)
-	acting := actingProfileID(r.Context())
-	if identity.Scope == settingscontract.ScopeProfileDevice {
-		// A device that only ever writes canonically must still appear in
-		// ListDevices and the device-management surfaces, or it can never be
-		// discovered and forgotten. The legacy device route registers on every
-		// touch; the canonical route matches it on device writes.
-		//
-		// Only when the caller is writing its own device for its own profile,
-		// though. Registration asserts "this device is in use by this profile",
-		// which a write aimed at another device — or made on another profile's
-		// behalf — is not. Registering here would invent a device nobody holds:
-		// the parent's browser filed under the child's profile.
-		if identity.DeviceID == deviceMetadataFromRequest(r).DeviceID && identity.ProfileID == acting {
-			h.registerWritingDevice(r, store, identity.ProfileID)
-		}
-	}
-	publishUserSettingsEvent(r.Context(), h.EventsHub,
-		eventUserID, identity.ProfileID, identity.Key, string(identity.Scope))
-	auditSettingsForOther(r.Context(), settingsAuditRecord{
-		Action:          settingsAuditActionSet,
-		ActorProfileID:  acting,
-		TargetProfileID: identity.ProfileID,
-		TargetUserID:    eventUserID,
-		ClientFamily:    string(identity.ClientFamily),
-		DeviceID:        identity.DeviceID,
-		Key:             identity.Key,
-		Scope:           string(identity.Scope),
-	})
-	if idempotentResult != nil {
-		writeRawJSON(w, http.StatusOK, idempotentResult)
-	} else {
-		writeJSON(w, http.StatusOK, response)
-	}
-}
-
-// registerWritingDevice refreshes the device registry from the request's
-// device headers after a successful profile_device write. Best effort and
-// throttled: the value write already succeeded, and the registry entry is
-// discoverability metadata, not the setting itself.
-func (h *SettingValuesHandler) registerWritingDevice(
-	r *http.Request, store userstore.UserStore, profileID string,
-) {
-	device := deviceMetadataFromRequest(r)
-	if profileID == "" || device.DeviceID == "" {
-		return
-	}
-	if h.deviceSeen != nil {
-		key := profileID + "\x00" + device.DeviceID
-		if _, seen := h.deviceSeen.Get(key); seen {
-			return
-		}
-		h.deviceSeen.Set(key, struct{}{}, deviceSeenThrottle)
-	}
-	registry, ok := store.(userstore.DeviceRegistry)
-	if !ok {
-		return
-	}
-	if err := registry.RegisterDevice(r.Context(), userstore.DeviceEntry{
-		ProfileID:      profileID,
-		DeviceID:       device.DeviceID,
-		DeviceName:     device.DeviceName,
-		DevicePlatform: device.DevicePlatform,
-	}); err != nil {
-		slog.WarnContext(r.Context(), "failed to register device after canonical write",
-			"component", "api",
-			"profile_id", profileID,
-			"device_id", device.DeviceID,
-			"error", err,
-		)
-	}
-}
-
-// HandleDeleteValue removes the explicit value at one scope, which is how a
-// client says "stop overriding here and inherit again".
-func (h *SettingValuesHandler) HandleDeleteValue(w http.ResponseWriter, r *http.Request) {
-	store, ok := h.storeFor(w, r)
-	if !ok {
-		return
-	}
-	identity, ok := h.identityFromRequest(w, r)
-	if !ok {
-		return
-	}
-	if identity.Key == settingskeys.NavShortcuts {
-		writeError(w, http.StatusBadRequest, "atomic_update_required",
-			navigationShortcutAtomicUpdateMessage)
-		return
-	}
-	h.deleteValueAt(w, r, store, apimw.GetUserID(r.Context()), identity)
-}
-
-// deleteValueAt is the unset path shared by the session and admin routes. See
-// setValueAt for what eventUserID means.
-func (h *SettingValuesHandler) deleteValueAt(
-	w http.ResponseWriter,
-	r *http.Request,
-	store userstore.UserStore,
-	eventUserID int,
-	identity userstore.SettingIdentity,
-) {
-	removed, err := store.DeleteSettingValue(r.Context(), identity)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to clear the setting")
-		return
-	}
-	if !removed {
-		writeError(w, http.StatusNotFound, "not_found", "No value is set at this scope")
-		return
-	}
-	auditSettingsForOther(r.Context(), settingsAuditRecord{
-		Action:          "clear",
-		ActorProfileID:  actingProfileID(r.Context()),
-		TargetProfileID: identity.ProfileID,
-		TargetUserID:    eventUserID,
-		ClientFamily:    string(identity.ClientFamily),
-		DeviceID:        identity.DeviceID,
-		Key:             identity.Key,
-		Scope:           string(identity.Scope),
-	})
-	publishUserSettingsEvent(r.Context(), h.EventsHub,
-		eventUserID, identity.ProfileID, identity.Key, string(identity.Scope))
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleGetEffective resolves any number of keys in one request.
+// upsertMirroredPair writes the addressed row and, when the key has one, its
+// companion, returning the row the caller addressed.
 //
-// Batched deliberately: a client opening a settings screen needs every key at
-// once, and a season view needs several keys across many series. One store read
-// serves all of it.
-func (h *SettingValuesHandler) HandleGetEffective(w http.ResponseWriter, r *http.Request) {
-	store, ok := h.storeFor(w, r)
-	if !ok {
-		return
+// The two rows are written in key order rather than caller order, and that is
+// the whole point of the function. Two requests naming opposite halves of the
+// pair would otherwise take each other's row locks in opposite orders and
+// deadlock; in one order the second transaction simply waits for the first and
+// then overwrites both rows with its own answer, which is the last-write-wins
+// the contract promises rather than a pair left holding one value from each.
+func upsertMirroredPair(
+	ctx context.Context,
+	writer userstore.SettingMutationWriter,
+	identity userstore.SettingIdentity,
+	value json.RawMessage,
+	mirrorIdentity userstore.SettingIdentity,
+	mirror settingscontract.MirroredWrite,
+	hasMirror bool,
+) (*userstore.SettingValue, error) {
+	if !hasMirror {
+		return writer.UpsertSettingValue(ctx, identity, value)
 	}
 
-	keys := splitCSV(r.URL.Query().Get("keys"))
-	if len(keys) == 0 {
-		// No keys named means every remote definition, which is what a settings
-		// screen wants and saves clients enumerating the manifest themselves.
-		for i := range h.contract.Definitions {
-			def := &h.contract.Definitions[i]
-			if def.IsRemote() {
-				keys = append(keys, def.Key)
-			}
-		}
-	} else {
-		// A key this server's contract does not define is an error, not an
-		// omission. Dropping it silently lets a client fill the gap with its
-		// own vendored default and present a value this server would refuse to
-		// store — the same drift the contract exists to remove. The capability
-		// endpoint's revision is how a newer client learns to stop asking.
-		for _, key := range keys {
-			if _, ok := h.contract.Lookup(key); !ok {
-				writeError(w, http.StatusNotFound, "unknown_setting",
-					"No setting named "+key+" exists in this server's contract")
-				return
-			}
-		}
+	first, firstValue := identity, value
+	second, secondValue := mirrorIdentity, mirror.Value
+	if second.Key < first.Key {
+		first, firstValue, second, secondValue = second, secondValue, first, firstValue
 	}
-
-	rc := settingsresolve.Context{
-		ProfileID:  strings.TrimSpace(apimw.GetProfileID(r.Context())),
-		DeviceID:   deviceMetadataFromRequest(r).DeviceID,
-		LibraryIDs: parseIntCSV(r.URL.Query().Get("library_ids")),
-		SeriesIDs:  splitCSV(r.URL.Query().Get("series_ids")),
-	}
-	if family, needed, ok := h.clientFamilyForKeys(w, r, keys); !ok {
-		return
-	} else if needed {
-		rc.ClientFamily = family
-	}
-
-	// A device-settings screen resolves what some *other* device sees, so this
-	// read accepts the same explicit identity the write path does, under the
-	// same guards: the device must belong to the profile, and naming another
-	// profile requires the household parent.
-	if named := strings.TrimSpace(r.URL.Query().Get("profile_id")); named != "" && named != rc.ProfileID {
-		if !h.mayActForProfile(w, r, named) {
-			return
-		}
-		rc.ProfileID = named
-	}
-	if named := strings.TrimSpace(r.URL.Query().Get("device_id")); named != "" {
-		if !h.deviceBelongsToProfile(w, r, rc.ProfileID, named) {
-			return
-		}
-		rc.DeviceID = named
-	}
-
-	// The SQLite backend expands these into IN lists, whose host-parameter
-	// budget is finite; an unbounded request could fail the whole resolution.
-	// The bound is far above any real batch — a season view resolves a
-	// handful of series, not hundreds.
-	if len(rc.LibraryIDs)+len(rc.SeriesIDs) > maxEffectiveContentIDs {
-		writeError(w, http.StatusBadRequest, "bad_request",
-			"Too many library_ids/series_ids in one request; resolve in smaller batches")
-		return
-	}
-
-	// A device-aware key resolved without a device identity would silently
-	// skip every stored device override and pass the profile fallback off as
-	// the effective value — a plausible wrong answer. Fail closed instead:
-	// the write path already requires the header for device overrides.
-	if rc.DeviceID == "" {
-		for _, key := range keys {
-			if def, ok := h.contract.Lookup(key); ok &&
-				def.AllowsScope(settingscontract.ScopeProfileDevice) {
-				writeError(w, http.StatusBadRequest, "bad_request",
-					"X-Silo-Device-Id header is required to resolve "+key)
-				return
-			}
-		}
-	}
-
-	resolved, err := h.resolver.Resolve(r.Context(), store, rc, keys, h.constraintsFor(r))
+	firstStored, err := writer.UpsertSettingValue(ctx, first, firstValue)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve settings")
-		return
+		return nil, err
 	}
-
-	out := h.effectiveResponses(r, resolved)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"settings":    out,
-		fieldRevision: h.contract.Revision,
-	})
+	secondStored, err := writer.UpsertSettingValue(ctx, second, secondValue)
+	if err != nil {
+		return nil, err
+	}
+	if first.Key == identity.Key {
+		return firstStored, nil
+	}
+	return secondStored, nil
 }
 
-type effectiveContextRequest struct {
-	ContextID string          `json:"context_id"`
-	LibraryID json.RawMessage `json:"library_id,omitempty"`
-	SeriesID  string          `json:"series_id,omitempty"`
+// legacyIntroSkipColumnWrite is the playback.auto_skip_intro value a canonical
+// write implies, or nil when the write is not part of the intro-skip pair.
+//
+// Either half answers, because the mirror has already made them one preference:
+// the boolean is its own answer, and the enum's is the companion just computed
+// for it. Both have to answer, or the column would be movable in one direction
+// only — an enum write could set it and the boolean write that followed could
+// not correct it.
+func legacyIntroSkipColumnWrite(
+	key string,
+	normalized json.RawMessage,
+	mirror settingscontract.MirroredWrite,
+	hasMirror bool,
+) json.RawMessage {
+	if !hasMirror {
+		return nil
+	}
+	switch key {
+	case settingskeys.PlaybackAutoSkipIntro:
+		return normalized
+	case settingskeys.PlaybackIntroSkipMode:
+		return mirror.Value
+	default:
+		return nil
+	}
 }
 
-// HandlePostEffective resolves several content contexts in one prepared
-// candidate read. Each response entry preserves the caller's context_id so a
-// client can join results back to an ordered or virtualized content list.
-func (h *SettingValuesHandler) HandlePostEffective(w http.ResponseWriter, r *http.Request) {
-	store, ok := h.storeFor(w, r)
-	if !ok {
-		return
+// legacyIntroSkipColumnCleared is the playback.auto_skip_intro value a cleared
+// profile-scope row leaves behind, or nil when the cleared key is not part of
+// the intro-skip pair.
+//
+// Clearing the profile-scope row is how a household says "inherit again", so
+// what the column must now hold is what the key resolves to with no explicit
+// value: the contract default. It is read from the manifest rather than spelled
+// here so a changed default cannot leave the column behind.
+func (h *SettingValuesHandler) legacyIntroSkipColumnCleared(key string) json.RawMessage {
+	switch key {
+	case settingskeys.PlaybackAutoSkipIntro, settingskeys.PlaybackIntroSkipMode:
+	default:
+		return nil
+	}
+	def, ok := h.contract.Lookup(settingskeys.PlaybackAutoSkipIntro)
+	if !ok || len(def.DefaultValue) == 0 {
+		return nil
+	}
+	return def.DefaultValue
+}
+
+// writeLegacyIntroSkipColumn writes the intro-skip preference through to
+// user_profiles.auto_skip_intro inside the caller's transaction. A nil value
+// means this request has nothing to say about the column.
+//
+// GET /profiles still serves auto_skip_intro from its column — the profile
+// DTO's shape is pinned by shipped clients — so the column is a third copy of
+// one preference and has to track every canonical profile-scope change to
+// either half of the pair, set or clear alike. A column that only the enum
+// write could move would end up contradicting the very row the caller stored:
+// an enum write sets it true, and a later boolean write, or a DELETE that goes
+// back to inheriting, leaves the DTO reporting a choice nobody holds.
+//
+// Device scope is none of its business: the column is profile-wide, and one
+// television's override is not the household's choice. The canonical write path
+// touches no other legacy preference column — the cutover direction is that the
+// profile DTO stops reading them, which it already has for the language and
+// subtitle fields — so this stays the narrow repair for the one field still
+// served from its column.
+//
+// It runs inside the mutation's transaction, not after it. Outside, a failure
+// here would leave the rows committed and the column stale — and on the
+// idempotent path unrepairable, because the receipt is already recorded and a
+// retry replays it instead of trying the column again.
+func writeLegacyIntroSkipColumn(
+	ctx context.Context,
+	writer userstore.SettingMutationWriter,
+	identity userstore.SettingIdentity,
+	value json.RawMessage,
+) error {
+	if value == nil || identity.Scope != settingscontract.ScopeProfile {
+		return nil
 	}
 
-	var body struct {
-		Keys     []string                  `json:"keys"`
-		Contexts []effectiveContextRequest `json:"contexts"`
+	var enabled bool
+	if err := json.Unmarshal(value, &enabled); err != nil {
+		return fmt.Errorf("%s produced a non-boolean auto_skip_intro (%s): %w",
+			identity.Key, value, err)
 	}
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
-	if err := decoder.Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
+	if err := writer.UpdateProfile(ctx, identity.ProfileID,
+		userstore.UpdateProfileInput{AutoSkipIntro: &enabled}); err != nil {
+		return fmt.Errorf("updating auto_skip_intro on profile %s: %w", identity.ProfileID, err)
 	}
-	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
-		writeError(w, http.StatusBadRequest, "bad_request", "Body must be a single JSON document")
-		return
-	}
-
-	keys := uniqueTrimmed(body.Keys)
-	if len(keys) == 0 {
-		writeError(w, http.StatusBadRequest, "bad_request", "keys must contain at least one setting")
-		return
-	}
-	for _, key := range keys {
-		if _, ok := h.definitionFor(w, key); !ok {
-			return
-		}
-	}
-	if len(body.Contexts) == 0 {
-		writeError(w, http.StatusBadRequest, "bad_request", "contexts must contain at least one content context")
-		return
-	}
-	if len(body.Contexts) > maxEffectiveContentIDs {
-		writeError(w, http.StatusBadRequest, "bad_request", "Too many contexts in one request; resolve in smaller batches")
-		return
-	}
-
-	profileID := strings.TrimSpace(apimw.GetProfileID(r.Context()))
-	deviceID := deviceMetadataFromRequest(r).DeviceID
-	clientFamily, familyNeeded, ok := h.clientFamilyForKeys(w, r, keys)
-	if !ok {
-		return
-	}
-	if deviceID == "" {
-		for _, key := range keys {
-			if def, exists := h.contract.Lookup(key); exists && def.AllowsScope(settingscontract.ScopeProfileDevice) {
-				writeError(w, http.StatusBadRequest, "bad_request", "X-Silo-Device-Id header is required to resolve "+key)
-				return
-			}
-		}
-	}
-
-	seen := make(map[string]struct{}, len(body.Contexts))
-	contexts := make([]settingsresolve.Context, 0, len(body.Contexts))
-	contentIDs := 0
-	for _, requested := range body.Contexts {
-		contextID := strings.TrimSpace(requested.ContextID)
-		if contextID == "" {
-			writeError(w, http.StatusBadRequest, "bad_request", "Every context requires a non-empty context_id")
-			return
-		}
-		if _, exists := seen[contextID]; exists {
-			writeError(w, http.StatusBadRequest, "bad_request", "context_id values must be unique")
-			return
-		}
-		seen[contextID] = struct{}{}
-
-		libraryID, err := parseOptionalPositiveJSONInt(requested.LibraryID)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", "library_id must be a positive integer or numeric string")
-			return
-		}
-		seriesID := strings.TrimSpace(requested.SeriesID)
-		if libraryID == 0 && seriesID == "" {
-			writeError(w, http.StatusBadRequest, "bad_request", "Every context requires library_id or series_id")
-			return
-		}
-		rc := settingsresolve.Context{ProfileID: profileID, DeviceID: deviceID}
-		if familyNeeded {
-			rc.ClientFamily = clientFamily
-		}
-		if libraryID > 0 {
-			rc.LibraryIDs = []int{libraryID}
-			contentIDs++
-		}
-		if seriesID != "" {
-			rc.SeriesIDs = []string{seriesID}
-			contentIDs++
-		}
-		if contentIDs > maxEffectiveContentIDs {
-			writeError(w, http.StatusBadRequest, "bad_request", "Too many content ids in one request; resolve in smaller batches")
-			return
-		}
-		contexts = append(contexts, rc)
-	}
-
-	resolved, err := h.resolver.ResolveContexts(r.Context(), store, contexts, keys, h.constraintsFor(r))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve settings")
-		return
-	}
-	type contextResponse struct {
-		ContextID string                          `json:"context_id"`
-		Settings  []effectiveSettingValueResponse `json:"settings"`
-	}
-	allResolved := make([]settingsresolve.Effective, 0)
-	for _, values := range resolved {
-		allResolved = append(allResolved, values...)
-	}
-	observed := h.observedLanguageSuggestions(r, allResolved)
-	out := make([]contextResponse, len(resolved))
-	for i, values := range resolved {
-		out[i].ContextID = strings.TrimSpace(body.Contexts[i].ContextID)
-		out[i].Settings = h.effectiveResponsesWithObserved(values, observed)
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"contexts":    out,
-		fieldRevision: h.contract.Revision,
-	})
+	return nil
 }
 
 func uniqueTrimmed(values []string) []string {
@@ -1260,34 +744,6 @@ func parseOptionalPositiveJSONInt(raw json.RawMessage) (int, error) {
 // constrained_by.policy_input, which is how the resolver looks the limit up.
 const policyInputMaxPlaybackQuality = "max_playback_quality"
 
-// constraintsFor gathers the policy inputs that narrow this viewer's settings.
-//
-// The routes are mounted inside RequireViewerAccess, so the resolved access
-// scope is already on the context. Scope.MaxPlaybackQuality holds a literal
-// member of the contract's quality enum ("1080p", "2160p"), so it feeds the
-// ceiling on playback.preferred_quality directly — no translation table. An
-// empty value means the policy does not cap this viewer, expressed by omitting
-// the key so the resolver leaves the preference alone.
-//
-// catalog.metadata_language deliberately gets no constraint: the manifest notes
-// record that the allowlist draft was circular, because the policy input it
-// would bind to is populated from the very preference it would narrow.
-func (h *SettingValuesHandler) constraintsFor(r *http.Request) settingsresolve.Constraints {
-	scope, ok := access.GetScope(r.Context())
-	if !ok {
-		return nil
-	}
-	quality := strings.TrimSpace(scope.MaxPlaybackQuality)
-	if quality == "" {
-		return nil
-	}
-	limit, err := json.Marshal(quality)
-	if err != nil {
-		return nil
-	}
-	return settingsresolve.Constraints{policyInputMaxPlaybackQuality: limit}
-}
-
 func (h *SettingValuesHandler) storeFor(w http.ResponseWriter, r *http.Request) (userstore.UserStore, bool) {
 	store, err := h.storeProvider.ForUser(r.Context(), apimw.GetUserID(r.Context()))
 	if err != nil {
@@ -1295,284 +751,6 @@ func (h *SettingValuesHandler) storeFor(w http.ResponseWriter, r *http.Request) 
 		return nil, false
 	}
 	return store, true
-}
-
-func (h *SettingValuesHandler) definitionFor(w http.ResponseWriter, key string) (*settingscontract.Definition, bool) {
-	def, ok := h.contract.Lookup(key)
-	if !ok {
-		writeError(w, http.StatusNotFound, "unknown_setting",
-			"No setting named "+key+" exists in this server's contract")
-		return nil, false
-	}
-	if !def.IsRemote() {
-		writeError(w, http.StatusBadRequest, "client_local_setting",
-			key+" is a device-local setting and is never stored by the server")
-		return nil, false
-	}
-	return def, true
-}
-
-// clientFamilyForKeys validates an optional family header for effective reads.
-// An absent header deliberately drops the profile_client layer so pre-revision
-// 5 callers keep resolving broader fallbacks; explicit profile_client reads and
-// writes still require the header in identityForSessionKey. The server never
-// guesses this identity from X-Silo-Device-Platform: that header is free-form
-// display metadata, while client_family is a closed storage key shared by like
-// clients.
-func (h *SettingValuesHandler) clientFamilyForKeys(
-	w http.ResponseWriter, r *http.Request, keys []string,
-) (settingscontract.ClientFamily, bool, bool) {
-	eligible := false
-	for _, key := range keys {
-		if def, ok := h.contract.Lookup(key); ok && def.AllowsScope(settingscontract.ScopeProfileClient) {
-			eligible = true
-			break
-		}
-	}
-
-	value := strings.TrimSpace(r.Header.Get(clientFamilyHeader))
-	if value == "" {
-		return "", false, true
-	}
-	family := settingscontract.ClientFamily(value)
-	if !family.Valid() {
-		writeError(w, http.StatusBadRequest, "bad_request",
-			"X-Silo-Client-Family header must be one of tv, mobile, tablet, desktop or web")
-		return "", false, false
-	}
-	return family, eligible, true
-}
-
-// identityFromRequest builds and validates the scope identity a request names.
-//
-// Scope comes from the query string rather than the path so one route serves
-// every scope; the store's own Validate then enforces that the identity fields
-// match the scope, which is the same check the database CHECK constraint makes.
-func (h *SettingValuesHandler) identityFromRequest(
-	w http.ResponseWriter, r *http.Request,
-) (userstore.SettingIdentity, bool) {
-	return h.identityForSessionKey(w, r, chi.URLParam(r, "key"))
-}
-
-func (h *SettingValuesHandler) identityForSessionKey(
-	w http.ResponseWriter, r *http.Request, requestedKey string,
-) (userstore.SettingIdentity, bool) {
-	key, scope, ok := h.keyedScope(w, requestedKey, r.URL.Query())
-	if !ok {
-		return userstore.SettingIdentity{}, false
-	}
-
-	identity := userstore.SettingIdentity{Key: key, Scope: scope}
-
-	// The profile defaults to the session header, so an ordinary caller cannot
-	// write another's settings by naming it. A household parent may name a
-	// different profile on their own account — authorized below.
-	if scope != settingscontract.ScopeAccount {
-		identity.ProfileID = strings.TrimSpace(apimw.GetProfileID(r.Context()))
-		if identity.ProfileID == "" {
-			writeError(w, http.StatusBadRequest, "bad_request",
-				"X-Profile-Id header is required for this scope")
-			return userstore.SettingIdentity{}, false
-		}
-		if named := strings.TrimSpace(r.URL.Query().Get("profile_id")); named != "" &&
-			named != identity.ProfileID {
-			if !h.mayActForProfile(w, r, named) {
-				return userstore.SettingIdentity{}, false
-			}
-			identity.ProfileID = named
-		}
-	}
-	if scope == settingscontract.ScopeProfileClient {
-		family := settingscontract.ClientFamily(strings.TrimSpace(r.Header.Get(clientFamilyHeader)))
-		if !family.Valid() {
-			writeError(w, http.StatusBadRequest, "bad_request",
-				"X-Silo-Client-Family header must be one of tv, mobile, tablet, desktop or web")
-			return userstore.SettingIdentity{}, false
-		}
-		identity.ClientFamily = family
-	}
-	if scope == settingscontract.ScopeProfileDevice {
-		// A device may be named explicitly so one device can manage another's
-		// settings — the screen that lists your devices edits them in place.
-		// Unlike the profile above, that is safe to accept from the query only
-		// because the device is then checked against this profile's registry.
-		named := strings.TrimSpace(r.URL.Query().Get("device_id"))
-		identity.DeviceID = named
-		if identity.DeviceID == "" {
-			identity.DeviceID = deviceMetadataFromRequest(r).DeviceID
-		}
-		if identity.DeviceID == "" {
-			writeError(w, http.StatusBadRequest, "bad_request",
-				"X-Silo-Device-Id header is required for a device override")
-			return userstore.SettingIdentity{}, false
-		}
-		if named != "" && !h.deviceBelongsToProfile(w, r, identity.ProfileID, named) {
-			return userstore.SettingIdentity{}, false
-		}
-	}
-
-	return h.completeIdentity(w, r.Context(), r.URL.Query(), identity)
-}
-
-// mayActForProfile authorizes acting for a profile other than the caller's own.
-//
-// Two checks, in this order and for different reasons. First the household
-// guard: only the primary profile (or a server admin) manages the household, so
-// an ordinary member naming a sibling is 403 — the profile plainly exists, and
-// pretending otherwise would be a lie the caller can already disprove through
-// GET /profiles. Then existence, resolved through the caller's *own* user
-// store, which is what confines this to one account: a profile id from another
-// account is simply absent there, so it is 404 and the caller learns nothing.
-func (h *SettingValuesHandler) mayActForProfile(
-	w http.ResponseWriter, r *http.Request, profileID string,
-) bool {
-	store, ok := h.storeFor(w, r)
-	if !ok {
-		return false
-	}
-
-	allowed, err := canManageHousehold(r, store, h.UserRepo, h.ProfileTokens)
-	if err != nil {
-		writeProfileManagementPermissionError(w, err)
-		return false
-	}
-	if !allowed {
-		writeError(w, http.StatusForbidden, "forbidden",
-			"Managing another profile's settings requires the primary profile or admin access")
-		return false
-	}
-
-	profile, err := store.GetProfile(r.Context(), profileID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load profile")
-		return false
-	}
-	if profile == nil {
-		writeError(w, http.StatusNotFound, "not_found", "Profile not found")
-		return false
-	}
-	return true
-}
-
-// deviceBelongsToProfile authorizes a device id that came from the query rather
-// than from this request's own header. It answers 404 rather than 403 for an
-// unknown device: a 403 would confirm the id exists somewhere.
-//
-// The caller's own header device is deliberately not checked. Registration is
-// lazy — a device's first write is what registers it — so requiring a row there
-// would reject every new device's first setting.
-func (h *SettingValuesHandler) deviceBelongsToProfile(
-	w http.ResponseWriter, r *http.Request, profileID, deviceID string,
-) bool {
-	store, ok := h.storeFor(w, r)
-	if !ok {
-		return false
-	}
-	registry, ok := store.(userstore.DeviceRegistry)
-	if !ok {
-		writeError(w, http.StatusNotFound, "not_found", "Device not found")
-		return false
-	}
-	exists, err := registry.DeviceExists(r.Context(), profileID, deviceID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to look up device")
-		return false
-	}
-	if !exists {
-		writeError(w, http.StatusNotFound, "not_found", "Device not found")
-		return false
-	}
-	return true
-}
-
-// keyedScopeFromRequest parses the parts every scoped request names: a key
-// that exists in the contract and is remote, plus an explicit scope.
-func (h *SettingValuesHandler) keyedScopeFromRequest(
-	w http.ResponseWriter, r *http.Request,
-) (string, settingscontract.Scope, bool) {
-	return h.keyedScope(w, chi.URLParam(r, "key"), r.URL.Query())
-}
-
-func (h *SettingValuesHandler) keyedScope(
-	w http.ResponseWriter, requestedKey string, query url.Values,
-) (string, settingscontract.Scope, bool) {
-	key := strings.TrimSpace(requestedKey)
-	if strings.TrimSpace(key) == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "A setting key is required")
-		return "", "", false
-	}
-	if _, ok := h.definitionFor(w, key); !ok {
-		return "", "", false
-	}
-
-	scope := settingscontract.Scope(strings.TrimSpace(query.Get("scope")))
-	if scope == "" {
-		writeError(w, http.StatusBadRequest, "bad_request",
-			"A scope is required: account, profile, profile_client, profile_device, profile_library or profile_series")
-		return "", "", false
-	}
-	return key, scope, true
-}
-
-// completeIdentity fills the content-scope ids from the query, then runs the
-// checks the session and admin routes share: the identity matches its scope's
-// columns and the contract allows the key at that scope.
-func (h *SettingValuesHandler) completeIdentity(
-	w http.ResponseWriter, ctx context.Context, query url.Values, identity userstore.SettingIdentity,
-) (userstore.SettingIdentity, bool) {
-	if identity.Scope == settingscontract.ScopeProfileLibrary {
-		libraryID, err := strconv.Atoi(strings.TrimSpace(query.Get("library_id")))
-		if err != nil || libraryID <= 0 {
-			writeError(w, http.StatusBadRequest, "bad_request",
-				"library_id is required for a library override")
-			return userstore.SettingIdentity{}, false
-		}
-		identity.LibraryID = libraryID
-		if !h.libraryContextExists(w, ctx, libraryID) {
-			return userstore.SettingIdentity{}, false
-		}
-	}
-	if identity.Scope == settingscontract.ScopeProfileSeries {
-		identity.SeriesID = strings.TrimSpace(query.Get("series_id"))
-		if identity.SeriesID == "" {
-			writeError(w, http.StatusBadRequest, "bad_request",
-				"series_id is required for a series override")
-			return userstore.SettingIdentity{}, false
-		}
-	}
-
-	if err := identity.Validate(); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return userstore.SettingIdentity{}, false
-	}
-
-	// The contract decides where a setting may be written, independently of
-	// whether the identity is well formed.
-	def, _ := h.contract.Lookup(identity.Key)
-	if !def.AllowsScope(identity.Scope) {
-		writeError(w, http.StatusBadRequest, "scope_not_allowed",
-			identity.Key+" cannot be set at "+string(identity.Scope))
-		return userstore.SettingIdentity{}, false
-	}
-
-	return identity, true
-}
-
-func (h *SettingValuesHandler) libraryContextExists(
-	w http.ResponseWriter, ctx context.Context, libraryID int,
-) bool {
-	if h.libraryLookup == nil {
-		return true
-	}
-	if _, err := h.libraryLookup.GetByID(ctx, libraryID); err != nil {
-		if errors.Is(err, catalog.ErrFolderNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Library not found")
-			return false
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to look up library")
-		return false
-	}
-	return true
 }
 
 func sameSettingContext(a, b userstore.SettingIdentity) bool {
@@ -1630,14 +808,6 @@ func effectiveToResponse(eff settingsresolve.Effective) effectiveSettingValueRes
 	return out
 }
 
-func (h *SettingValuesHandler) effectiveResponses(
-	r *http.Request,
-	resolved []settingsresolve.Effective,
-) []effectiveSettingValueResponse {
-	observed := h.observedLanguageSuggestions(r, resolved)
-	return h.effectiveResponsesWithObserved(resolved, observed)
-}
-
 func (h *SettingValuesHandler) effectiveResponsesWithObserved(
 	resolved []settingsresolve.Effective,
 	observed map[string][]string,
@@ -1659,36 +829,6 @@ func (h *SettingValuesHandler) effectiveResponsesWithObserved(
 		out = append(out, response)
 	}
 	return out
-}
-
-func (h *SettingValuesHandler) observedLanguageSuggestions(
-	r *http.Request,
-	resolved []settingsresolve.Effective,
-) map[string][]string {
-	result := make(map[string][]string)
-	if h.languageSource == nil {
-		return result
-	}
-	if !slices.ContainsFunc(resolved, func(eff settingsresolve.Effective) bool {
-		return eff.Key == settingskeys.CatalogMetadataLanguage
-	}) {
-		return result
-	}
-
-	filters := catalog.BrowseFilters{}
-	if scope, ok := access.GetScope(r.Context()); ok {
-		filters.LibraryIDs = scope.AllowedLibraryIDs
-		filters.DisabledLibraryIDs = scope.DisabledLibraryIDs
-		filters.MaxContentRating = scope.MaxContentRating
-	}
-	values, err := h.languageSource.ListOriginalLanguages(r.Context(), filters)
-	if err != nil {
-		slog.WarnContext(r.Context(), "settings: listing metadata language suggestions",
-			"component", "settings", "error", err)
-		return result
-	}
-	result[settingskeys.CatalogMetadataLanguage] = values
-	return result
 }
 
 // mergeLanguageSuggestions keeps the contract's stable authored order, then
@@ -1791,8 +931,8 @@ func writeRawJSON(w http.ResponseWriter, status int, body []byte) {
 	_, _ = w.Write(body)
 }
 
-// etagMatches handles the comma-separated If-None-Match list, including "*".
-func etagMatches(header, etag string) bool {
+// ETagMatches handles the comma-separated If-None-Match list, including "*".
+func ETagMatches(header, etag string) bool {
 	header = strings.TrimSpace(header)
 	if header == "*" {
 		return true
@@ -1828,4 +968,10 @@ func parseIntCSV(raw string) []int {
 		}
 	}
 	return out
+}
+
+// Capabilities is the settings capability document for this server's
+// manifest; v2 getSettingsContractCapabilities calls it.
+func (h *SettingValuesHandler) Capabilities(context.Context) (SettingsCapabilitiesView, error) {
+	return SettingsCapabilities(h.contract)
 }

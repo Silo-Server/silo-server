@@ -1,19 +1,18 @@
+import { getAdminItemImages, applyAdminItemImage } from "@/api/v2/adminImages";
+import { getAdminItemFiles, splitAdminItem } from "@/api/v2/adminSplit";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/api/client";
 import { useRealtimeEvents } from "@/components/realtimeEventsContext";
 import type {
-  AdminJob,
   ApplyItemImageRequest,
-  ApplyItemImageResponse,
   ItemDetail,
-  ItemFilesResponse,
-  ItemImagesResponse,
   ItemMatchSearchRequest,
-  ItemMatchSearchResponse,
   ItemSplitRequest,
-  ItemSplitResponse,
   WatchDetail,
 } from "@/api/types";
+import { V2ProblemError, V2TransportError, v2, type V2Result } from "@/api/v2/request";
+import { adminTaskJobFromV2 } from "@/api/v2/adminTasks";
+import { catalogItemDetailFromV2 } from "@/api/v2/catalog";
+import { watchDetailFromV2 } from "@/api/v2/watch";
 import { adminKeys, catalogKeys, episodeKeys, itemKeys, sectionKeys } from "./keys";
 import { toast } from "sonner";
 import {
@@ -21,15 +20,12 @@ import {
   getWatchedToastMessage,
 } from "@/pages/ItemDetail/watchedState";
 import {
+  cancelItemDetailQueries,
   invalidateMediaSurfaceQueries,
-  isItemDetailQueryKey,
+  scheduleMediaSurfaceInvalidation,
   updateCatalogItemDetail,
 } from "./mediaSurfaceRefresh";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
-
-function itemPathID(id: string): string {
-  return encodeURIComponent(id);
-}
 
 export async function fetchWatchDetail(
   id: string,
@@ -37,11 +33,15 @@ export async function fetchWatchDetail(
   libraryId?: number,
   options?: RequestInit,
 ): Promise<WatchDetail> {
-  const searchParams = new URLSearchParams();
-  if (fileId != null) searchParams.set("fileId", String(fileId));
-  if (libraryId != null) searchParams.set("library_id", String(libraryId));
-  const query = searchParams.toString();
-  return api<WatchDetail>(`/watch/${itemPathID(id)}${query ? `?${query}` : ""}`, options);
+  const detail = await v2("GET /api/v2/watch/{id}", {
+    path: { id },
+    query: {
+      file_id: fileId != null ? String(fileId) : undefined,
+      library_id: libraryId != null ? String(libraryId) : undefined,
+    },
+    signal: options?.signal ?? undefined,
+  });
+  return watchDetailFromV2(detail);
 }
 
 export function useWatchDetail(id: string | undefined, fileId?: number, libraryId?: number) {
@@ -68,40 +68,62 @@ interface ItemRefreshJobResult {
   detail_content_id?: string;
   scan_path?: string;
   matched_files?: number;
+  // Set when the metadata refresh committed but its artwork did not finish
+  // caching. The refresh itself succeeded, so this is a warning, not an error.
+  artwork_cache_warning?: string;
   scan_result?: {
     new?: number;
   };
+}
+
+interface RefreshItemMetadataContext {
+  toastID: string | number;
 }
 
 export function useRefreshItemMetadata() {
   const queryClient = useQueryClient();
   const { awaitAdminJob } = useRealtimeEvents();
   return useMutation({
+    retry: false,
+    onMutate: ({ mode }: RefreshItemMetadataVariables): RefreshItemMetadataContext => ({
+      toastID: toast.loading(
+        mode === "complete"
+          ? "Complete metadata refresh running…"
+          : "Quick metadata refresh running…",
+      ),
+    }),
     mutationFn: async ({ item, mode }: RefreshItemMetadataVariables) => {
-      const job = await api<AdminJob>(
-        `/admin/items/${itemPathID(item.content_id)}/refresh-metadata`,
-        {
-          method: "POST",
-          body: JSON.stringify({ mode }),
-        },
+      const job = adminTaskJobFromV2(
+        await v2("POST /api/v2/admin/items/{id}/refresh-metadata", {
+          path: { id: item.content_id },
+          body: { mode },
+          retryAuthentication: false,
+        }),
       );
       const completed = await awaitAdminJob(job.id);
       return { job: completed };
     },
-    onSuccess: async ({ job }, { item, mode, onReplaced }) => {
+    onSuccess: async ({ job }, { item, mode, onReplaced }, context) => {
       const result = (job.result_payload ?? {}) as ItemRefreshJobResult;
       const refreshContentID = result.refresh_content_id;
       const detailContentID = result.detail_content_id;
       const newFiles = result.scan_result?.new ?? 0;
+      const artworkWarning = result.artwork_cache_warning;
 
-      if (mode === "complete") {
-        toast.success("Complete refresh finished");
+      if (artworkWarning) {
+        toast.warning("Metadata refreshed, but artwork caching did not finish", {
+          id: context?.toastID,
+          description: artworkWarning,
+        });
+      } else if (mode === "complete") {
+        toast.success("Complete refresh finished", { id: context?.toastID });
       } else if (newFiles > 0) {
         toast.success(
           `Metadata refreshed. Found ${newFiles} new file version${newFiles === 1 ? "" : "s"}`,
+          { id: context?.toastID },
         );
       } else {
-        toast.success("Metadata refreshed");
+        toast.success("Metadata refreshed", { id: context?.toastID });
       }
 
       await Promise.all([
@@ -173,37 +195,92 @@ export function useRefreshItemMetadata() {
         await onReplaced(detailContentID);
       }
     },
-    onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Refresh failed");
+    onError: (err, _variables, context) => {
+      toast.error(err instanceof Error ? err.message : "Refresh failed", {
+        id: context?.toastID,
+      });
     },
   });
 }
 
-export interface RedetectEpisodeIntroResponse {
-  status: string;
+/** The marker kinds an admin re-detection runs; a movie has credits only. */
+export type RedetectMarkersKind = "intro" | "credits" | "all";
+export type RedetectItemMarkersResponse =
+  V2Result<"POST /api/v2/admin/items/{id}/redetect-markers">;
+export async function redetectItemMarkers(
+  itemId: string,
+  kind: RedetectMarkersKind,
+): Promise<RedetectItemMarkersResponse> {
+  return v2("POST /api/v2/admin/items/{id}/redetect-markers", {
+    path: { id: itemId },
+    body: { kind },
+    retryAuthentication: false,
+  });
 }
 
+export type RedetectEpisodeIntroResponse = V2Result<"POST /api/v2/admin/items/{id}/redetect-intro">;
+/**
+ * Re-detects an episode's intro through the older episode-only operation,
+ * for API nodes that do not advertise the redetect_markers capability.
+ */
 export async function redetectEpisodeIntro(
   episodeId: string,
 ): Promise<RedetectEpisodeIntroResponse> {
-  return api<RedetectEpisodeIntroResponse>(`/admin/items/${itemPathID(episodeId)}/redetect-intro`, {
-    method: "POST",
+  return v2("POST /api/v2/admin/items/{id}/redetect-intro", {
+    path: { id: episodeId },
+    retryAuthentication: false,
+  });
+}
+
+const redetectionToasts = {
+  onSuccess: (response: { status: string }) => {
+    toast.success(
+      response.status === "already_running"
+        ? "Re-detection already running"
+        : "Re-detection started",
+    );
+  },
+  onError: (error: unknown) => {
+    toast.error(error instanceof Error ? error.message : "Failed to start re-detection");
+  },
+};
+
+function isMissingOperation(error: unknown): boolean {
+  return (
+    (error instanceof V2ProblemError || error instanceof V2TransportError) && error.status === 404
+  );
+}
+
+/**
+ * Re-detects an item's markers. The capability read and this call can reach
+ * different API nodes during a rolling deploy or rollback, so a 404 drops the
+ * cached capability; with `introFallback` (episodes) an intro-only request
+ * retries once through the older episode-only operation. Other kinds surface
+ * the error, since that operation cannot re-detect credits.
+ */
+export function useRedetectItemMarkers({ introFallback = false } = {}) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    retry: false,
+    mutationFn: async ({ itemId, kind }: { itemId: string; kind: RedetectMarkersKind }) => {
+      try {
+        return await redetectItemMarkers(itemId, kind);
+      } catch (error) {
+        if (!isMissingOperation(error)) throw error;
+        void queryClient.invalidateQueries({ queryKey: adminKeys.markerCapabilities() });
+        if (!introFallback || kind !== "intro") throw error;
+        return redetectEpisodeIntro(itemId);
+      }
+    },
+    ...redetectionToasts,
   });
 }
 
 export function useRedetectEpisodeIntro() {
   return useMutation({
+    retry: false,
     mutationFn: redetectEpisodeIntro,
-    onSuccess: (response) => {
-      toast.success(
-        response.status === "already_running"
-          ? "Re-detection already running"
-          : "Re-detection started",
-      );
-    },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Failed to start re-detection");
-    },
+    ...redetectionToasts,
   });
 }
 
@@ -242,11 +319,15 @@ export interface UpdateItemMetadataRequest {
 export function useUpdateItemMetadata(contentId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (data: UpdateItemMetadataRequest) =>
-      api<ItemDetail>(`/admin/items/${itemPathID(contentId)}/metadata`, {
-        method: "PATCH",
-        body: JSON.stringify(data),
-      }),
+    retry: false,
+    mutationFn: async (data: UpdateItemMetadataRequest) =>
+      catalogItemDetailFromV2(
+        await v2("PATCH /api/v2/admin/items/{id}/metadata", {
+          path: { id: contentId },
+          body: data,
+          retryAuthentication: false,
+        }),
+      ),
     onSuccess: () => {
       void invalidateMediaSurfaceQueries(queryClient, { itemId: contentId }).then(() => {
         bumpHomeRefreshSignal(queryClient);
@@ -269,51 +350,52 @@ export function useWatchedStateMutation(item: WatchedMutationItem) {
 
   return useMutation({
     mutationFn: (nextPlayed: boolean) =>
-      api(`/watched/${itemPathID(item.content_id)}`, {
-        method: nextPlayed ? "POST" : "DELETE",
-        // Marking a series expands to every episode server-side. keepalive
-        // lets the browser finish the request after a navigation or tab close,
-        // so a large series no longer depends on the user staying on the page.
-        // The server applies the mark in one transaction, so a request that
-        // never arrives leaves nothing marked rather than a partial subset.
-        keepalive: true,
-      }),
+      // Marking a series expands to every episode server-side. keepalive
+      // lets the browser finish the request after a navigation or tab close,
+      // so a large series no longer depends on the user staying on the page.
+      // The server applies the mark in one transaction, so a request that
+      // never arrives leaves nothing marked rather than a partial subset.
+      nextPlayed
+        ? v2("POST /api/v2/watched/{id}", { path: { id: item.content_id }, keepalive: true })
+        : v2("DELETE /api/v2/watched/{id}", { path: { id: item.content_id }, keepalive: true }),
     onMutate: async (nextPlayed: boolean) => {
-      // Cancel and snapshot over the same predicate: an in-flight detail query
-      // on either key shape would otherwise land after the optimistic write
-      // and revert the button.
-      const itemDetailQueries = {
-        predicate: (query: { queryKey: unknown }) =>
-          isItemDetailQueryKey(query.queryKey, item.content_id),
-      };
-      await queryClient.cancelQueries(itemDetailQueries);
-      const previous = queryClient.getQueriesData(itemDetailQueries);
+      await cancelItemDetailQueries(queryClient, item.content_id);
       updateCatalogItemDetail(queryClient, item.content_id, (detail) => ({
         ...detail,
-        ...(detail.user_data ? { user_data: { ...detail.user_data, played: nextPlayed } } : {}),
+        user_data: { ...detail.user_data, played: nextPlayed },
         user_state: {
           played: nextPlayed,
           is_favorite: detail.user_state?.is_favorite ?? false,
           in_watchlist: detail.user_state?.in_watchlist ?? false,
         },
       }));
-      return { previous };
     },
-    onError: (err, _nextPlayed, context) => {
-      for (const [queryKey, value] of context?.previous ?? []) {
-        queryClient.setQueryData(queryKey, value);
-      }
+    // Revert only this mutation's own field. Restoring a whole snapshot would
+    // discard a concurrent favorite/watchlist toggle's optimistic state.
+    onError: (err, nextPlayed) => {
+      updateCatalogItemDetail(queryClient, item.content_id, (detail) => ({
+        ...detail,
+        user_data: { ...detail.user_data, played: !nextPlayed },
+        user_state: {
+          played: !nextPlayed,
+          is_favorite: detail.user_state?.is_favorite ?? false,
+          in_watchlist: detail.user_state?.in_watchlist ?? false,
+        },
+      }));
       toast.error(err instanceof Error ? err.message : "Failed to update watched state");
     },
     onSuccess: (_data, nextPlayed) => {
       toast.success(getWatchedToastMessage(item, nextPlayed));
     },
-    onSettled: async () => {
-      await invalidateMediaSurfaceQueries(queryClient, {
+    onSettled: () => {
+      // The detail query has to be refreshed: marking watched also zeroes
+      // `position_seconds` and moves season/series counts server-side, and the
+      // optimistic patch above only carries `played`.
+      scheduleMediaSurfaceInvalidation(queryClient, {
         itemId: item.content_id,
         watchedKeys: getCachedWatchedInvalidationKeys(queryClient, item),
+        skipSimilarItems: true,
       });
-      bumpHomeRefreshSignal(queryClient);
     },
   });
 }
@@ -323,10 +405,23 @@ export function useSearchItemMatchCandidates(contentId: string) {
 
   return useMutation({
     mutationFn: (params: ItemMatchSearchRequest) =>
-      api<ItemMatchSearchResponse>(`/admin/items/${itemPathID(contentId)}/match/search`, {
-        method: "POST",
-        body: JSON.stringify(params),
-      }),
+      v2("POST /api/v2/admin/items/{id}/match/search", {
+        path: { id: contentId },
+        body: {
+          ...params,
+          library_id: params.library_id == null ? undefined : String(params.library_id),
+          limit: 500,
+        },
+        retryAuthentication: false,
+      }).then((result) => ({
+        ...result,
+        candidates: result.candidates.map((candidate) => ({
+          ...candidate,
+          image_url: candidate.image_url ?? "",
+          overview: candidate.overview ?? "",
+        })),
+      })),
+    retry: false,
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Match search failed");
     },
@@ -350,14 +445,16 @@ export function useApplyItemMatch() {
       item: ApplyMatchItem;
       providerIds: Record<string, string>;
     }) => {
-      return api(`/admin/items/${itemPathID(item.content_id)}/match/apply`, {
-        method: "POST",
-        body: JSON.stringify({
+      return v2("POST /api/v2/admin/items/{id}/match/apply", {
+        path: { id: item.content_id },
+        body: {
           provider_ids: providerIds,
-          library_id: item.library_id,
-        }),
+          library_id: item.library_id == null ? undefined : String(item.library_id),
+        },
+        retryAuthentication: false,
       });
     },
+    retry: false,
     onSuccess: async (_, { item }) => {
       toast.success("Match applied successfully");
 
@@ -418,7 +515,7 @@ export function useApplyItemMatch() {
 export function useItemFiles(contentId: string | undefined) {
   return useQuery({
     queryKey: ["items", "files", contentId],
-    queryFn: () => api<ItemFilesResponse>(`/admin/items/${itemPathID(contentId ?? "")}/files`),
+    queryFn: ({ signal }) => getAdminItemFiles(contentId ?? "", signal),
     enabled: Boolean(contentId),
     staleTime: 30_000,
   });
@@ -428,11 +525,9 @@ export function useSplitItem() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    retry: false,
     mutationFn: ({ contentId, request }: { contentId: string; request: ItemSplitRequest }) =>
-      api<ItemSplitResponse>(`/admin/items/${itemPathID(contentId)}/split`, {
-        method: "POST",
-        body: JSON.stringify(request),
-      }),
+      splitAdminItem(contentId, request),
     onSuccess: async (result, { contentId }) => {
       if (result.dry_run) return;
       toast.success(
@@ -457,7 +552,7 @@ export function useSplitItem() {
 export function useItemImages(contentId: string | undefined, enabled = true) {
   return useQuery({
     queryKey: adminKeys.itemImages(contentId!),
-    queryFn: () => api<ItemImagesResponse>(`/admin/items/${itemPathID(contentId!)}/images`),
+    queryFn: ({ signal }) => getAdminItemImages(contentId!, signal),
     enabled: !!contentId && enabled,
     staleTime: 5 * 60_000,
   });
@@ -475,11 +570,8 @@ export function useApplyItemImage() {
     }: {
       item: ApplyImageItem;
       request: ApplyItemImageRequest;
-    }) =>
-      api<ApplyItemImageResponse>(`/admin/items/${itemPathID(item.content_id)}/images/apply`, {
-        method: "POST",
-        body: JSON.stringify(request),
-      }),
+    }) => applyAdminItemImage(item.content_id, request),
+    retry: false,
     onSuccess: async (_, { item }) => {
       toast.success("Image applied successfully");
 
@@ -518,35 +610,8 @@ export function useApplyItemImage() {
 // Metadata AI translation (descriptions into the localization tables)
 // ---------------------------------------------------------------------------
 
-export interface MetadataTranslationJob {
-  id: number;
-  target_kind: string;
-  content_id: string;
-  include_children: boolean;
-  source_language: string;
-  target_language: string;
-  status: "pending" | "running" | "completed" | "failed" | "cancelled";
-  progress: number;
-  progress_message: string;
-  fields_done: number;
-  fields_total: number;
-  force: boolean;
-  error_message?: string;
-  created_at: string;
-  updated_at: string;
-}
-
-/** Whether the server has metadata AI translation configured, and the
- * viewer-facing on-view mode. */
-export function useMetadataAIStatus(enabled = true) {
-  return useQuery({
-    queryKey: ["metadata-ai", "status"],
-    queryFn: () =>
-      api<{ enabled: boolean; on_view?: "off" | "button" | "auto" }>("/metadata/ai/status"),
-    staleTime: 5 * 60 * 1000,
-    enabled,
-  });
-}
+export type MetadataTranslationJob =
+  V2Result<"GET /api/v2/admin/items/{id}/metadata-translation/jobs">["jobs"][number];
 
 export interface TranslateItemMetadataRequest {
   target_language: string;
@@ -557,11 +622,14 @@ export interface TranslateItemMetadataRequest {
 export function useTranslateItemMetadata(contentId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: TranslateItemMetadataRequest) =>
-      api<{ job: MetadataTranslationJob }>(
-        `/admin/items/${itemPathID(contentId)}/metadata-translation`,
-        { method: "POST", body: JSON.stringify(body) },
-      ),
+    retry: false,
+    mutationFn: async (body: TranslateItemMetadataRequest) => ({
+      job: await v2("POST /api/v2/admin/items/{id}/metadata-translation", {
+        path: { id: contentId },
+        body,
+        retryAuthentication: false,
+      }),
+    }),
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: ["metadata-translation-jobs", contentId],
@@ -581,9 +649,7 @@ export function useMetadataTranslationJobs(contentId: string, enabled: boolean) 
   return useQuery({
     queryKey: ["metadata-translation-jobs", contentId],
     queryFn: () =>
-      api<{ jobs: MetadataTranslationJob[] }>(
-        `/admin/items/${itemPathID(contentId)}/metadata-translation/jobs`,
-      ),
+      v2("GET /api/v2/admin/items/{id}/metadata-translation/jobs", { path: { id: contentId } }),
     enabled,
     refetchInterval: (query) => {
       const jobs = query.state.data?.jobs ?? [];

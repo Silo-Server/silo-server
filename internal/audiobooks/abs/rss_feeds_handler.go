@@ -235,5 +235,9 @@ func (h *Handler) handlePublicFeedFile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "file not found", http.StatusNotFound)
 		return
 	}
+	// §4.2b: "the RSS feed route must resolve the feed owner". The slug is the
+	// capability and there is no authenticated caller, so the subject is the
+	// feed's owner rather than whoever fetched it.
+	attachABSTransfer(r.Context(), f.UserID, f.ProfileID, mf.ID)
 	http.ServeFile(w, r, mf.FilePath)
 }

@@ -1,8 +1,17 @@
 package catalog
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // TestEpisodeRepo_ListBySeriesGroupedBySeason_BuildsSingleQuery asserts the
@@ -107,5 +116,144 @@ func TestEpisodeRepo_Upsert_TouchesSeriesLastAirDate(t *testing.T) {
 	}
 	if !strings.Contains(sqlText, "IS DISTINCT FROM") {
 		t.Fatalf("expected guard against unchanged-value writes; got %s", sqlText)
+	}
+}
+
+func TestEpisodeRepository_BulkUpsertRejectsMixedSeries(t *testing.T) {
+	repo := &EpisodeRepository{}
+	err := repo.BulkUpsert(context.Background(), "series-a", []*models.Episode{{SeriesID: "series-b"}})
+	if err == nil || !strings.Contains(err.Error(), "belongs to series") {
+		t.Fatalf("BulkUpsert error = %v, want mixed-series validation error", err)
+	}
+}
+
+func TestBulkUpsertsRejectPostgresIntegerOverflow(t *testing.T) {
+	overflow64 := int64(1) << 31
+	overflow := int(overflow64)
+	if int64(overflow) != overflow64 {
+		t.Skip("int cannot represent a value outside PostgreSQL integer range")
+	}
+
+	seasonRepo := &SeasonRepository{}
+	if err := seasonRepo.BulkUpsert(context.Background(), []*models.Season{{SeasonNumber: overflow}}); err == nil ||
+		!strings.Contains(err.Error(), "outside PostgreSQL integer range") {
+		t.Fatalf("season BulkUpsert error = %v, want PostgreSQL integer range validation error", err)
+	}
+
+	for _, testCase := range []struct {
+		name    string
+		episode models.Episode
+	}{
+		{name: "season number", episode: models.Episode{SeriesID: "series-a", SeasonNumber: overflow}},
+		{name: "episode number", episode: models.Episode{SeriesID: "series-a", EpisodeNumber: overflow}},
+		{name: "runtime", episode: models.Episode{SeriesID: "series-a", Runtime: overflow}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			repo := &EpisodeRepository{}
+			err := repo.BulkUpsert(context.Background(), "series-a", []*models.Episode{&testCase.episode})
+			if err == nil || !strings.Contains(err.Error(), "outside PostgreSQL integer range") {
+				t.Fatalf("Episode BulkUpsert error = %v, want PostgreSQL integer range validation error", err)
+			}
+		})
+	}
+}
+
+func TestEpisodeRepository_BulkUpsertRollsBackStaleIDClear(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	var tableName *string
+	if err := pool.QueryRow(ctx, `SELECT to_regclass('public.episodes')::text`).Scan(&tableName); err != nil {
+		t.Fatalf("check episodes table: %v", err)
+	}
+	if tableName == nil || *tableName == "" {
+		t.Skip("test database has not applied the base schema")
+	}
+
+	seriesID := fmt.Sprintf("bulk-rollback-series-%d", time.Now().UnixNano())
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO media_items (content_id, type, title) VALUES ($1, 'series', 'Bulk Rollback Series')`,
+		seriesID,
+	); err != nil {
+		t.Fatalf("seed series: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, seriesID)
+	})
+
+	season := &models.Season{
+		ContentID:      seriesID + "-season-1",
+		SeriesID:       seriesID,
+		SeasonNumber:   1,
+		Title:          "Season 1",
+		MetadataSource: "provider",
+	}
+	if err := NewSeasonRepository(pool).Upsert(ctx, season); err != nil {
+		t.Fatalf("seed season: %v", err)
+	}
+
+	repo := NewEpisodeRepository(pool)
+	sharedTMDBID := "bulk-rollback-shared-" + seriesID
+	owner := &models.Episode{
+		ContentID:      seriesID + "-episode-1",
+		SeriesID:       seriesID,
+		SeasonID:       season.ContentID,
+		SeasonNumber:   1,
+		EpisodeNumber:  1,
+		Title:          "Existing owner",
+		TmdbID:         sharedTMDBID,
+		MetadataSource: "provider",
+	}
+	if err := repo.Upsert(ctx, owner); err != nil {
+		t.Fatalf("seed existing episode: %v", err)
+	}
+
+	err = repo.BulkUpsert(ctx, seriesID, []*models.Episode{
+		{
+			ContentID:      seriesID + "-episode-2",
+			SeriesID:       seriesID,
+			SeasonID:       season.ContentID,
+			SeasonNumber:   1,
+			EpisodeNumber:  2,
+			Title:          "Conflicting owner 1",
+			TmdbID:         sharedTMDBID,
+			MetadataSource: "provider",
+		},
+		{
+			ContentID:      seriesID + "-episode-3",
+			SeriesID:       seriesID,
+			SeasonID:       season.ContentID,
+			SeasonNumber:   1,
+			EpisodeNumber:  3,
+			Title:          "Conflicting owner 2",
+			TmdbID:         sharedTMDBID,
+			MetadataSource: "provider",
+		},
+	})
+	if err == nil {
+		t.Fatal("BulkUpsert succeeded with duplicate external IDs")
+	}
+
+	storedOwner, err := repo.GetBySeriesAndNumber(ctx, seriesID, 1, 1)
+	if err != nil {
+		t.Fatalf("reload existing owner: %v", err)
+	}
+	if got := storedOwner.TmdbID; got != sharedTMDBID {
+		t.Fatalf("existing TMDB ID after rolled-back batch = %q, want %q", got, sharedTMDBID)
+	}
+	for _, episodeNumber := range []int{2, 3} {
+		_, err := repo.GetBySeriesAndNumber(ctx, seriesID, 1, episodeNumber)
+		if !errors.Is(err, ErrEpisodeNotFound) {
+			t.Fatalf("episode %d lookup error = %v, want ErrEpisodeNotFound", episodeNumber, err)
+		}
 	}
 }

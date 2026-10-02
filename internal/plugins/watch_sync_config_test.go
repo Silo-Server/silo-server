@@ -23,6 +23,11 @@ func TestWatchSyncProviderConfigClassifiesManifestFields(t *testing.T) {
 			"   ":           "ignored-empty-field",
 		},
 	}, {
+		Key: "legacy",
+		Value: map[string]any{
+			"base_url": "https://legacy-floppy.example",
+		},
+	}, {
 		Key: "   ",
 		Value: map[string]any{
 			"base_url": "ignored-empty-key",
@@ -33,7 +38,8 @@ func TestWatchSyncProviderConfigClassifiesManifestFields(t *testing.T) {
 	}
 	if config.GetValues()["provider.base_url"] != "https://floppy.example" ||
 		config.GetSecretValues()["provider.client_secret"] != "secret" ||
-		config.GetSecretValues()["provider.undeclared"] != `{"token":"also-secret"}` {
+		config.GetSecretValues()["provider.undeclared"] != `{"token":"also-secret"}` ||
+		config.GetSecretValues()["legacy.base_url"] != "https://legacy-floppy.example" {
 		t.Fatalf("config = %#v", config)
 	}
 	if _, exposed := config.GetValues()["provider.undeclared"]; exposed {

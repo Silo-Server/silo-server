@@ -4,6 +4,7 @@ import type { ItemVideo } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
 import { extraKindLabel } from "@/lib/extraKinds";
+import { THEME_MUSIC_INTERRUPT_EVENT } from "@/lib/themeMusic";
 import TrailerModal from "./TrailerModal";
 
 interface TrailersSectionProps {
@@ -38,11 +39,17 @@ export default function TrailersSection({ videos }: TrailersSectionProps) {
           </button>
         )}
 
-        <div ref={emblaRef} className="embla__viewport overflow-hidden">
+        <div ref={emblaRef} className="embla__viewport -mt-1 overflow-hidden pt-1">
           <ul role="list" className="embla__container flex cursor-grab list-none gap-3">
             {playable.map((video) => (
               <li key={`${video.site}-${video.site_key}`} className="embla__slide shrink-0">
-                <TrailerCard video={video} onPlay={() => setActiveVideo(video)} />
+                <TrailerCard
+                  video={video}
+                  onPlay={() => {
+                    document.dispatchEvent(new Event(THEME_MUSIC_INTERRUPT_EVENT));
+                    setActiveVideo(video);
+                  }}
+                />
               </li>
             ))}
           </ul>
@@ -80,6 +87,7 @@ function TrailerCard({ video, onPlay }: { video: ItemVideo; onPlay: () => void }
           alt={label}
           className="h-full w-full object-cover transition-transform duration-300 group-hover/trailer:scale-105"
           loading="lazy"
+          decoding="async"
         />
         <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors duration-200 group-hover/trailer:bg-black/30">
           <span className="flex h-11 w-11 items-center justify-center rounded-full bg-black/60 opacity-0 backdrop-blur-sm transition-opacity duration-200 group-hover/trailer:opacity-100 group-focus-visible/trailer:opacity-100">

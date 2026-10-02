@@ -11,6 +11,7 @@ import (
 const (
 	DefaultHealthCheckInterval   = 30 * time.Second
 	DefaultHealthFailureLimit    = 3
+	DefaultExitCheckInterval     = time.Second
 	DefaultMetadataTimeout       = 30 * time.Second
 	DefaultMarkerProviderTimeout = 30 * time.Second
 	DefaultAnalyzerTimeout       = 5 * time.Minute
@@ -23,10 +24,17 @@ const (
 	DefaultEventTimeout      = 10 * time.Second
 	DefaultAuthTimeout       = 10 * time.Second
 	DefaultRouteTimeout      = 10 * time.Second
-	DefaultWatchSyncTimeout  = 60 * time.Second
+	// Watch-sync providers may resolve cold external metadata before applying
+	// an event. Bound that work without cutting off valid slow provider calls.
+	DefaultWatchSyncTimeout = 2 * time.Minute
 	// DefaultRequestRouterTimeout bounds a single request_router RPC.
 	// Fulfillment hits remote arr instances, so allow generous headroom.
 	DefaultRequestRouterTimeout = 60 * time.Second
+	// DefaultNetworkAccessTimeout bounds one network access provider RPC.
+	// Connect returns the state reached so far and continues enrollment in
+	// the background, so an admin request never waits longer than this per
+	// host, matching the node force-reload acknowledgement window.
+	DefaultNetworkAccessTimeout = 10 * time.Second
 )
 
 func HandshakeConfig() plugin.HandshakeConfig {

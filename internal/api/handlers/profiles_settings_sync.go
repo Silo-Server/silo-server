@@ -51,7 +51,7 @@ type profileSettingSync struct {
 // planCreateProfileSettingsSync plans the canonical writes for POST
 // /profiles. Create requests carry plain strings, so an absent field arrives
 // as "" and plans a no-op delete against the freshly created profile.
-func planCreateProfileSettingsSync(req createProfileRequest) ([]profileSettingSync, error) {
+func planCreateProfileSettingsSync(req ProfileCreateRequest) ([]profileSettingSync, error) {
 	return planProfileSettingsSync(
 		&req.Language, &req.SubtitleLanguage, &req.PreferredMetadataLanguage,
 		&req.SubtitleMode, req.ShowForcedSubtitles,
@@ -66,7 +66,7 @@ func planCreateProfileSettingsSync(req createProfileRequest) ([]profileSettingSy
 // planUpdateProfileSettingsSync plans the canonical writes for PUT
 // /profiles/{id}. A nil field was not part of the request and must not touch
 // the canonical row; the shipped clients send single-field deltas.
-func planUpdateProfileSettingsSync(req updateProfileRequest) ([]profileSettingSync, error) {
+func planUpdateProfileSettingsSync(req ProfileUpdateRequest) ([]profileSettingSync, error) {
 	return planProfileSettingsSync(
 		req.Language, req.SubtitleLanguage, req.PreferredMetadataLanguage,
 		req.SubtitleMode, req.ShowForcedSubtitles,
@@ -124,10 +124,21 @@ func planProfileSettingsSync(
 		if field.raw == nil {
 			continue
 		}
-		out = append(out, profileSettingSync{
-			key:   field.key,
-			value: json.RawMessage(strconv.FormatBool(*field.raw)),
-		})
+		value := json.RawMessage(strconv.FormatBool(*field.raw))
+		out = append(out, profileSettingSync{key: field.key, value: value})
+
+		// A key that has a replacement carries it along, so the legacy profile
+		// route lands the same pair of rows the canonical route does. Without
+		// this, a client that still sets auto_skip_intro through PUT /profiles
+		// would leave intro_skip_mode resolving to the contract default and a
+		// new client would read a preference nobody chose.
+		mirror, ok, err := settingscontract.MirrorWrite(field.key, value)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", field.key, err)
+		}
+		if ok {
+			out = append(out, profileSettingSync{key: mirror.Key, value: mirror.Value})
+		}
 	}
 	return out, nil
 }
@@ -243,16 +254,40 @@ func applyLegacyPreferenceSettingsSync(
 	writes []profileSettingSync,
 	legacyMutation func(userstore.PreferenceSettingsWriter) error,
 ) error {
+	return applyPlannedLegacyPreferenceSettingsSync(ctx, store, events, userID, base,
+		func(tx userstore.PreferenceSettingsWriter) ([]profileSettingSync, error) {
+			if err := legacyMutation(tx); err != nil {
+				return nil, err
+			}
+			return writes, nil
+		})
+}
+
+// applyPlannedLegacyPreferenceSettingsSync is applyLegacyPreferenceSettingsSync
+// for a mutation that has to look at the store before it knows what to
+// write: plan runs inside the transaction — after the Postgres store has
+// taken the per-user advisory lock — performs the legacy mutation and returns
+// the canonical writes, so a read-merge-write is one serialized unit across
+// every replica. An error plan returns comes back unwrapped, so a caller can
+// tell a rejected value from a failed write.
+func applyPlannedLegacyPreferenceSettingsSync(
+	ctx context.Context,
+	store userstore.UserStore,
+	events *evt.Hub,
+	userID int,
+	base userstore.SettingIdentity,
+	plan func(userstore.PreferenceSettingsWriter) ([]profileSettingSync, error),
+) error {
 	var changedKeys []string
 	transactioner, ok := store.(userstore.PreferenceSettingsTransactioner)
 	if !ok {
 		return fmt.Errorf("user store does not support atomic preference settings synchronization")
 	}
 	err := transactioner.WithPreferenceSettingsTransaction(ctx, func(tx userstore.PreferenceSettingsWriter) error {
-		if err := legacyMutation(tx); err != nil {
+		writes, err := plan(tx)
+		if err != nil {
 			return err
 		}
-		var err error
 		changedKeys, err = writeCanonicalSettingsSync(ctx, tx, base, writes)
 		return err
 	})

@@ -312,3 +312,60 @@ func TestSyncBuiltinProviderChains_LegacyMaterializationFixture(t *testing.T) {
 		t.Errorf("sync is not idempotent:\nfirst=%+v\nsecond=%+v", after, again)
 	}
 }
+
+// Both chain paths must carry a capability's lookup_provider_ids into the
+// provider they build, or an enrichment-only plugin is never called: the
+// explicit chain reads it per entry, the chain-less fallback from the enabled
+// capability listing.
+func TestResolveChainWithChecker_CarriesLookupProviderIDs(t *testing.T) {
+	pool := chainBuiltinTestPool(t)
+	ctx := context.Background()
+
+	installationID := insertTestInstallation(t, pool, "plugin", true)
+	capID := fmt.Sprintf("test-lookup-%d", time.Now().UnixNano())
+	insertTestCapability(t, pool, installationID, capID,
+		`{"display_name":"Lookup Plugin","metadata":{"lookup_provider_ids":["imdb","TMDB"],"default_priority":{"movie":8}}}`)
+	chainRepo := NewChainRepository(pool)
+	resolver := stubMetadataResolver{}
+
+	assertLookup := func(folderID int, scenario string) {
+		t.Helper()
+		providers, err := ResolveChainWithChecker(ctx, folderID, "movie", chainRepo, resolver, nil)
+		if err != nil {
+			t.Fatalf("%s: resolve chain: %v", scenario, err)
+		}
+		for _, p := range providers {
+			if p.Slug() != capID {
+				continue
+			}
+			pp, ok := p.(*PluginProvider)
+			if !ok {
+				t.Fatalf("%s: provider type = %T, want *PluginProvider", scenario, p)
+			}
+			if want := []string{"imdb", "tmdb"}; !reflect.DeepEqual(pp.lookupProviderIDs, want) {
+				t.Fatalf("%s: lookupProviderIDs = %q, want %q", scenario, pp.lookupProviderIDs, want)
+			}
+			if pp.Name() != "Lookup Plugin" {
+				t.Fatalf("%s: display name = %q, want \"Lookup Plugin\"", scenario, pp.Name())
+			}
+			return
+		}
+		t.Fatalf("%s: capability %s not resolved", scenario, capID)
+	}
+
+	assertLookup(insertTestFolder(t, pool, "movies"), "chain-less fallback")
+
+	folderID := insertTestFolder(t, pool, "movies")
+	if err := chainRepo.SetChain(ctx, folderID, []ChainEntry{
+		{PluginInstallationID: installationID, CapabilityID: capID, ContentLevel: "movie", Priority: 0, Enabled: true},
+	}); err != nil {
+		t.Fatalf("set chain: %v", err)
+	}
+	assertLookup(folderID, "explicit chain")
+}
+
+type stubMetadataResolver struct{}
+
+func (stubMetadataResolver) MetadataProviderClient(context.Context, int, string) (pluginMetadataClient, error) {
+	return nil, fmt.Errorf("stub resolver: no client")
+}

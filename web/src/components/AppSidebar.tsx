@@ -23,6 +23,7 @@ import { usePluginSettingsList } from "@/hooks/queries/pluginSettings";
 import { useRequestFeatureStatus } from "@/hooks/queries/useRequests";
 import { useSidebarPins, useToggleSidebarPin } from "@/hooks/queries/sidebarPins";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
+import { SEARCH_SHORTCUT_LABEL } from "@/lib/keyboardShortcut";
 import { pluginRouteHref } from "@/lib/pluginRouteHref";
 import {
   buildLibraryCollectionCatalogHref,
@@ -68,9 +69,6 @@ import {
   Send,
   Bell,
 } from "lucide-react";
-import { useTheme } from "@/hooks/useTheme";
-import { CURATED_THEME_IDS, THEMES } from "@/lib/themes";
-import { cn } from "@/lib/utils";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { menuItemKey } from "@/lib/uiCustomization";
 
@@ -193,7 +191,6 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
   const params = useParams<{ libraryId: string }>();
   const { user, logout, clearProfile } = useAuth();
   const { profile } = useCurrentProfile();
-  const { theme, setTheme, previewTheme, resetPreviewTheme } = useTheme();
   const showAdminNav = useIsActingAdmin();
   const { data: libraries } = useUserLibraries();
   const { pins } = useSidebarPins();
@@ -741,7 +738,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                       showLabels ? "opacity-100" : "opacity-0"
                     }`}
                   >
-                    {"\u2318"}K
+                    {SEARCH_SHORTCUT_LABEL}
                   </kbd>
                 </ViewTransitionLink>
               </li>
@@ -760,7 +757,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                       />
                     )}
                     <Sparkles className="h-[18px] w-[18px] shrink-0" />
-                    <SidebarLabel show={showLabels}>Recommendations</SidebarLabel>
+                    <SidebarLabel show={showLabels}>For You</SidebarLabel>
                   </ViewTransitionLink>
                 </li>
               ) : null}
@@ -885,12 +882,12 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
               </li>
               <li>
                 <ViewTransitionLink
-                  to="/rooms/join"
+                  to="/rooms"
                   onClick={onNavigate}
-                  className={navLinkClass("/rooms/join")}
-                  aria-current={isActive("/rooms/join") ? "page" : undefined}
+                  className={navLinkClass("/rooms")}
+                  aria-current={isActive("/rooms") ? "page" : undefined}
                 >
-                  {isActive("/rooms/join") && (
+                  {isActive("/rooms") && (
                     <span
                       className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
                       style={{ background: "var(--primary)" }}
@@ -1045,50 +1042,6 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                   )}
                 </div>
               </DropdownMenuLabel>
-
-              <div
-                className="flex items-center justify-between gap-2 px-2.5 pt-1 pb-1.5"
-                role="group"
-                aria-label="Theme"
-              >
-                <span className="text-muted-foreground text-[10px] font-medium tracking-[0.14em] uppercase">
-                  Theme
-                </span>
-                <div className="flex items-center gap-1.5">
-                  {CURATED_THEME_IDS.map((id) => {
-                    const def = THEMES[id];
-                    const isActive = theme === id;
-                    return (
-                      <DropdownMenuItem
-                        key={id}
-                        onSelect={(event) => {
-                          event.preventDefault();
-                          setTheme(id);
-                        }}
-                        onMouseEnter={() => previewTheme(id)}
-                        onMouseLeave={resetPreviewTheme}
-                        onFocus={() => previewTheme(id)}
-                        onBlur={resetPreviewTheme}
-                        aria-label={def.label}
-                        title={def.label}
-                        className={cn(
-                          "relative h-6 w-6 flex-none cursor-pointer rounded-full border p-0 transition-transform hover:scale-110 focus:scale-110",
-                          isActive
-                            ? "ring-primary ring-offset-popover border-transparent ring-2 ring-offset-2"
-                            : "border-border/60",
-                        )}
-                        style={{ backgroundColor: def.previewBg }}
-                      >
-                        <span
-                          aria-hidden="true"
-                          className="absolute top-1/2 left-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full"
-                          style={{ backgroundColor: def.previewAccent }}
-                        />
-                      </DropdownMenuItem>
-                    );
-                  })}
-                </div>
-              </div>
 
               <DropdownMenuSeparator />
 

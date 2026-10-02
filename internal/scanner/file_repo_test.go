@@ -239,3 +239,27 @@ func TestRecomputeSharedMarkerAttributionClearsWhenNoSegmentsRemain(t *testing.T
 }
 
 func floatPtr(v float64) *float64 { return &v }
+
+// Multipart ordering must survive rows written before the part-index column:
+// SQL orders those legacy rows by file path, which puts part10 before part2.
+func TestSortPresentationFilesOrdersLegacyRowsNaturally(t *testing.T) {
+	files := []*models.MediaFile{
+		{ID: 1, FilePath: "/book/part10.m4b"},
+		{ID: 2, FilePath: "/book/part2.m4b", PresentationPartIndex: 2, PresentationPartTotal: 3},
+		{ID: 3, FilePath: "/book/part1.m4b"},
+		{ID: 4, FilePath: "/book/part1.m4b", PresentationPartIndex: 1, PresentationPartTotal: 3},
+		{ID: 5, FilePath: "/book/part3.m4b", PresentationPartIndex: 3, PresentationPartTotal: 3},
+	}
+	sortPresentationFiles(files)
+
+	got := make([]int, 0, len(files))
+	for _, f := range files {
+		got = append(got, f.ID)
+	}
+	want := []int{4, 2, 5, 3, 1}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("presentation order = %v, want %v", got, want)
+		}
+	}
+}

@@ -223,6 +223,7 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	// Client IP resolution ("" = clientip package defaults). Kept in the
 	// config snapshot so the nodeconfig watcher hot-reloads the resolver.
 	cfg.ClientIP.TrustedProxies = stringOr(m, "clientip.trusted_proxies", "")
+	cfg.Server.PublicURL = stringOr(m, "server.public_url", "")
 
 	// TMDB collection presets (independent of metadata providers)
 	cfg.TMDBAPIKey = stringOr(m, "tmdb.api_key", "")
@@ -285,6 +286,11 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		fileRemovalGrace = 0
 	}
 	cfg.Scanner.FileRemovalGrace = fileRemovalGrace
+	realtimeMonitoring, err := boolOr(m, "scanner.realtime_monitoring", true)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Scanner.RealtimeMonitoring = realtimeMonitoring
 
 	// Matcher
 	matcherWorkers, err := intOr(m, "matcher.workers", 8)
@@ -309,16 +315,38 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	}
 	cfg.Matcher.EnableTVSeriesRootQueue = enableTVSeriesRootQueue
 
+	// Artwork
+	cfg.Artwork.StorageBackend = stringOr(m, "artwork.storage_backend", "auto")
+	cfg.Artwork.LocalPath = stringOr(m, "artwork.local_path", "/var/lib/silo/artwork")
+
 	// Metadata
-	cacheImages, err := boolOr(m, "metadata.cache_images", false)
+	cacheImages, err := boolOr(m, "metadata.cache_images", true)
 	if err != nil {
 		return nil, err
 	}
 	cfg.Metadata.CacheImages = cacheImages
+	imageWorkers, err := intOr(m, MetadataImageWorkersSettingKey, 0)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Metadata.ImageWorkers = imageWorkers
+	detectionWorkers, err := intOr(m, MarkersDetectionWorkersSettingKey, 1)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Markers.DetectionWorkers = detectionWorkers
 
 	// Playback
-	cfg.Playback.FFmpegPath = stringOr(m, "playback.ffmpeg_path", "/usr/lib/jellyfin-ffmpeg/ffmpeg")
+	cfg.Playback.FFmpegPath = stringOr(m, "playback.ffmpeg_path", "")
 	cfg.Playback.TranscodeDir = stringOr(m, playbackTranscodeDirSettingKey, DefaultTranscodeDir)
+	segmentRetentionSeconds, err := intOr(m, playbackSegmentRetentionSettingKey, 600)
+	if err != nil {
+		return nil, err
+	}
+	if segmentRetentionSeconds != 0 && (segmentRetentionSeconds < 120 || segmentRetentionSeconds > 86400) {
+		return nil, fmt.Errorf("%s must be 0 or between 120 and 86400", playbackSegmentRetentionSettingKey)
+	}
+	cfg.Playback.SegmentRetentionSeconds = segmentRetentionSeconds
 	cfg.Playback.HWAccel = stringOr(m, "playback.hw_accel", "auto")
 	cfg.Playback.HWDevice = stringOr(m, "playback.hw_device", "")
 	chapterThumbnailWorkers, err := intOr(m, "playback.chapter_thumbnail_workers", 1)
@@ -332,11 +360,20 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, err
 	}
 	cfg.Playback.ChapterThumbnailNodeCapacity = chapterThumbnailNodeCapacity
+	subtitleSyncNodeCapacity, err := intOr(m, "subtitles.sync_node_capacity", 1)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Playback.SubtitleSyncNodeCapacity = subtitleSyncNodeCapacity
 	transcodeEnabled, err := boolOr(m, "playback.transcode_enabled", true)
 	if err != nil {
 		return nil, err
 	}
 	cfg.Playback.TranscodeEnabled = transcodeEnabled
+	cfg.Playback.Routing = playbackRoutingPolicyFromSettings(m)
+	if err := validatePlaybackRoutingPolicy(cfg.Playback.Routing); err != nil {
+		return nil, err
+	}
 
 	// Redis
 	cfg.Redis.URL = stringOr(m, "redis.url", "")
@@ -613,9 +650,13 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	cfg.Download.ArtifactDir = artifactDir
 	cfg.Download.MaxConcurrentPrepares = maxConcurrentPrepares
 	cfg.Download.ArtifactMaxBytes = artifactMaxBytes
+	// Playback owns these keys and reads them as exact "true"; parse them the
+	// same way so one malformed value cannot stall the whole download config.
+	cfg.Download.Allow4KTranscode = strings.EqualFold(strings.TrimSpace(m[Allow4KTranscodeSettingKey]), "true")
+	cfg.Download.AllowHEVCEncoding = strings.EqualFold(strings.TrimSpace(m[PlaybackAllowHEVCEncodingSettingKey]), "true")
 
 	// Policy
-	policyEvalTimeoutMS, err := intOr(m, "policy.eval_timeout_ms", 25)
+	policyEvalTimeoutMS, err := intOr(m, "policy.eval_timeout_ms", 100)
 	if err != nil {
 		return nil, err
 	}

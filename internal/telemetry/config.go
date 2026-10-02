@@ -3,7 +3,7 @@
 // deliberately does NOT build or register a MeterProvider — metrics stay on the
 // existing Prometheus rail. Leaving the global MeterProvider as the built-in
 // no-op is what prevents the trace instrumentation libraries from double-emitting
-// metrics. See docs/superpowers/plans/2026-07-02-opentelemetry-observability.md.
+// metrics. See docs/architecture/observability.md.
 package telemetry
 
 import (
@@ -11,6 +11,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/envutil"
 )
 
 // Protocol identifies the OTLP exporter wire protocol.
@@ -47,7 +49,7 @@ const defaultServiceName = "silo-server"
 
 // defaultSamplerRatio is the parent-based trace-id ratio applied when
 // OTEL_TRACES_SAMPLER_ARG is unset or unparseable.
-const defaultSamplerRatio = 1.0
+const defaultSamplerRatio = 0.01
 
 // Config is the fully-defaulted telemetry configuration parsed from the
 // environment. It is cheap to construct and safe to build even when telemetry
@@ -93,7 +95,7 @@ type Config struct {
 // attribute.
 func LoadConfig(nodeID string) Config {
 	endpoint := strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
-	enabled := truthy(os.Getenv("SILO_OTEL_ENABLED")) || endpoint != ""
+	enabled := envutil.Bool("SILO_OTEL_ENABLED") || endpoint != ""
 
 	serviceName := strings.TrimSpace(os.Getenv("OTEL_SERVICE_NAME"))
 	if serviceName == "" {
@@ -110,7 +112,7 @@ func LoadConfig(nodeID string) Config {
 	ratio := defaultSamplerRatio
 	if raw := strings.TrimSpace(os.Getenv("OTEL_TRACES_SAMPLER_ARG")); raw != "" {
 		// Accept only finite, non-negative values; clamp above 1 to 1.0 so a
-		// typo'd or +Inf arg means "sample everything" rather than silently
+		// typo above one means "sample everything" rather than silently
 		// falling through. NaN and -Inf fail the v >= 0 / IsInf checks.
 		if v, err := strconv.ParseFloat(raw, 64); err == nil && v >= 0 && !math.IsInf(v, 1) {
 			ratio = math.Min(v, 1.0)
@@ -154,15 +156,5 @@ func parseProtocol(raw string, fallback Protocol) Protocol {
 		return ProtocolGRPC
 	default:
 		return fallback
-	}
-}
-
-// truthy reports whether an env value should be treated as a boolean true.
-func truthy(v string) bool {
-	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
 	}
 }

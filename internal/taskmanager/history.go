@@ -18,6 +18,14 @@ type ExecutionResult struct {
 	DurationMs   int64           `json:"duration_ms"`
 }
 
+// HistoryPruneResult describes one bounded task history cleanup run. It is
+// persisted verbatim as the cleanup task's result_data.
+type HistoryPruneResult struct {
+	Deleted      int64 `json:"deleted"`
+	LimitReached bool  `json:"limit_reached"`
+	Skipped      bool  `json:"skipped"`
+}
+
 // ExecutionRepository persists task execution history.
 type ExecutionRepository interface {
 	Insert(ctx context.Context, result ExecutionResult) error

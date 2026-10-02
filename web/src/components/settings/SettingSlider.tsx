@@ -1,6 +1,8 @@
 import { useState } from "react";
 
 import { Slider } from "@/components/ui/slider";
+import { SETTINGS_CONTROL_WIDTH } from "@/pages/admin-settings/SettingField";
+import { cn } from "@/lib/utils";
 
 interface SettingSliderProps {
   /** The persisted value. The thumb returns here if a save is rejected. */
@@ -42,7 +44,9 @@ export function SettingSlider({
   const shown = draft ?? value;
 
   return (
-    <div className={className ?? "flex w-full items-center gap-3 sm:max-w-[260px]"}>
+    // Defaults to the shared settings control width so a slider row ends on the
+    // same edge as the inputs and selects it is stacked against.
+    <div className={className ?? cn("flex items-center gap-3", SETTINGS_CONTROL_WIDTH)}>
       <Slider
         value={[shown]}
         min={min}

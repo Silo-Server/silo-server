@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,10 +14,29 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
+// ParseSyntheticSeasonID recognizes the season IDs derived from episode groups
+// when a series has no stored season metadata. Callers must verify existence.
+func ParseSyntheticSeasonID(contentID string) (string, int, bool) {
+	seriesID, seasonPart, ok := strings.Cut(contentID, "-S")
+	if !ok || seriesID == "" || seasonPart == "" {
+		return "", 0, false
+	}
+	seasonNum, err := strconv.Atoi(seasonPart)
+	if err != nil || !FitsPostgresInteger(seasonNum) {
+		return "", 0, false
+	}
+	return seriesID, seasonNum, true
+}
+
 // Sentinel errors for season repository operations.
 var (
 	ErrSeasonNotFound = errors.New("season not found")
 )
+
+// FitsPostgresInteger reports whether value fits a PostgreSQL integer (int4) column.
+func FitsPostgresInteger(value int) bool {
+	return value >= -1<<31 && value <= 1<<31-1
+}
 
 // SeasonRepository provides CRUD operations for the seasons table.
 type SeasonRepository struct {
@@ -154,6 +174,14 @@ func (r *SeasonRepository) BulkUpsert(ctx context.Context, seasons []*models.Sea
 	if len(seasons) == 0 {
 		return nil
 	}
+	for i, season := range seasons {
+		if season == nil {
+			return fmt.Errorf("bulk upserting seasons: season %d is nil", i)
+		}
+		if !FitsPostgresInteger(season.SeasonNumber) {
+			return fmt.Errorf("bulk upserting seasons: season %d number %d is outside PostgreSQL integer range", i, season.SeasonNumber)
+		}
+	}
 
 	contentIDs := make([]string, len(seasons))
 	seriesIDs := make([]string, len(seasons))
@@ -269,6 +297,26 @@ func (r *SeasonRepository) ListBySeries(ctx context.Context, seriesID string) ([
 	rows, err := r.pool.Query(ctx, query, seriesID)
 	if err != nil {
 		return nil, fmt.Errorf("listing seasons by series: %w", err)
+	}
+	defer rows.Close()
+
+	return scanSeasons(rows)
+}
+
+// ListBySeriesAndNumbers returns the requested season rows for one series in a
+// single query. Missing season numbers are omitted.
+func (r *SeasonRepository) ListBySeriesAndNumbers(ctx context.Context, seriesID string, seasonNumbers []int32) ([]*models.Season, error) {
+	if len(seasonNumbers) == 0 {
+		return nil, nil
+	}
+	query := `SELECT ` + seasonColumns + `
+		FROM seasons
+		WHERE series_id = $1 AND season_number = ANY($2::int[])
+		ORDER BY season_number ASC`
+
+	rows, err := r.pool.Query(ctx, query, seriesID, seasonNumbers)
+	if err != nil {
+		return nil, fmt.Errorf("listing seasons by series and numbers: %w", err)
 	}
 	defer rows.Close()
 

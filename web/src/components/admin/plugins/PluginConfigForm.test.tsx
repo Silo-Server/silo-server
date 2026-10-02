@@ -36,6 +36,48 @@ const schema: PluginConfigSchema = {
 };
 
 describe("PluginConfigForm secrets", () => {
+  it("leaves the title and border to the page panel when bare", () => {
+    const schema = {
+      key: "account",
+      title: "Account title",
+      description: "Account description",
+      json_schema: JSON.stringify({ type: "object", properties: { token: { type: "string" } } }),
+      required: false,
+    };
+    const { container, rerender } = render(<PluginConfigForm schema={schema} onSave={vi.fn()} />);
+    expect(screen.getByText("Account title")).toBeInTheDocument();
+    expect(container.querySelector("fieldset")).toHaveClass("border");
+
+    rerender(<PluginConfigForm bare schema={schema} onSave={vi.fn()} />);
+    expect(screen.queryByText("Account title")).not.toBeInTheDocument();
+    expect(screen.queryByText("Account description")).not.toBeInTheDocument();
+    expect(container.querySelector("fieldset")).not.toHaveClass("border");
+  });
+
+  it("derives a form when a plugin only supplies JSON Schema", () => {
+    render(
+      <PluginConfigForm
+        schema={{
+          key: "server",
+          title: "Server",
+          json_schema: JSON.stringify({
+            type: "object",
+            properties: {
+              base_url: { type: "string", title: "Base URL" },
+              api_key: { type: "string", format: "password" },
+            },
+            required: ["base_url", "api_key"],
+          }),
+          required: true,
+        }}
+        onSave={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText("Base URL")).toBeInTheDocument();
+    expect(screen.getByLabelText("Api Key")).toHaveAttribute("type", "password");
+  });
+
   it("shows redacted saved state and only clears through an explicit action", async () => {
     const onSave = vi.fn();
     render(

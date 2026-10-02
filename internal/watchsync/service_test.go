@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -46,7 +47,12 @@ type serviceFakeRepo struct {
 	settings               map[string]string
 	syncRuns               []SyncRun
 	historyExports         []HistoryExport
+	historyLookupIDs       []string
+	historyLookupLimit     int
 	listItemStates         []ListItemState
+	ratingStates           []RatingSyncState
+	droppedStates          []DroppedSyncState
+	listMedia              map[string]LocalFavorite
 	scrobbleConnections    []Connection
 	scrobbleSessions       []ScrobbleSession
 	pendingReconciliations []ScrobbleSession
@@ -59,6 +65,19 @@ type serviceFakeRepo struct {
 	markHistoryStatusErr   error
 	syncRunMu              sync.Mutex
 	scrobbleMu             sync.Mutex
+	// ratingLockBusy simulates another node holding a connection's rating
+	// sync lock; ratingLocks records each lock taken, with whether it waited.
+	ratingLockBusy map[string]bool
+	ratingLocks    []string
+	// tokenRefreshMu gives the token refresh lock its one-holder-at-a-time
+	// behavior. onTokenRefreshWait runs as a caller starts waiting for the
+	// lock; beforeTokenRefresh stands in for another holder that finishes just
+	// before this caller acquires it.
+	tokenRefreshMu     sync.Mutex
+	onTokenRefreshWait func()
+	beforeTokenRefresh func()
+	// upsertRatingErr fails UpsertRatingSyncStates when set.
+	upsertRatingErr error
 }
 
 type scrobbleUpdate struct {
@@ -130,6 +149,22 @@ func (r *serviceFakeRepo) GetConnection(
 ) (Connection, bool, error) {
 	conn, ok := r.connections[connectionKey(provider, userID, profileID)]
 	return cloneConnectionForTest(conn), ok, nil
+}
+
+func (r *serviceFakeRepo) UpdateConnectionTokens(ctx context.Context, expected, updated Connection) (Connection, error) {
+	current, ok, err := r.GetConnectionByID(ctx, expected.ID)
+	if err != nil {
+		return Connection{}, err
+	}
+	if !ok {
+		return Connection{}, ErrConnectionNotFound
+	}
+	if !connectionCredentialsMatch(current, expected) {
+		return Connection{}, ErrStaleConnection
+	}
+	current = connectionWithTokens(current, storedTokens(updated))
+	current.LastError = updated.LastError
+	return r.UpsertConnection(ctx, current)
 }
 
 func (r *serviceFakeRepo) DeferConnectionsForAccount(
@@ -347,6 +382,27 @@ func (r *serviceFakeRepo) ListPendingHistoryExports(_ context.Context, connectio
 	return exports, nil
 }
 
+func (r *serviceFakeRepo) ListPendingHistoryExportsByHistoryIDs(_ context.Context, connectionID string, historyIDs []string, limit int) ([]HistoryExport, error) {
+	r.historyLookupIDs = append([]string(nil), historyIDs...)
+	r.historyLookupLimit = limit
+	wanted := make(map[string]struct{}, len(historyIDs))
+	for _, historyID := range historyIDs {
+		wanted[historyID] = struct{}{}
+	}
+	var exports []HistoryExport
+	for _, export := range r.historyExports {
+		_, matches := wanted[export.HistoryID]
+		if export.ConnectionID == connectionID && matches &&
+			(export.Status == historyExportStatusPending || export.Status == historyExportStatusFailed) && export.AttemptCount < 5 {
+			exports = append(exports, export)
+			if limit > 0 && len(exports) >= limit {
+				break
+			}
+		}
+	}
+	return exports, nil
+}
+
 func (r *serviceFakeRepo) MarkHistoryExportStatus(_ context.Context, id string, status string, lastError string) error {
 	if r.markHistoryStatusErr != nil {
 		return r.markHistoryStatusErr
@@ -487,6 +543,204 @@ func (r *serviceFakeRepo) MarkListItemError(_ context.Context, connectionID stri
 		s.LastError = lastError
 	})
 	return nil
+}
+
+func (r *serviceFakeRepo) ListRatingEventConnections(_ context.Context, userID int, profileID string) ([]Connection, error) {
+	var conns []Connection
+	for _, conn := range r.connections {
+		if conn.UserID == userID && conn.ProfileID == profileID && conn.ExportRatingsEnabled {
+			conns = append(conns, cloneConnectionForTest(conn))
+		}
+	}
+	return conns, nil
+}
+
+func (r *serviceFakeRepo) ListRatingSyncStates(_ context.Context, connectionID, providerAccountID string, mediaItemIDs []string) ([]RatingSyncState, error) {
+	var states []RatingSyncState
+	for _, state := range r.ratingStates {
+		if state.ConnectionID != connectionID || state.ProviderAccountID != providerAccountID {
+			continue
+		}
+		if mediaItemIDs != nil && !containsString(mediaItemIDs, state.MediaItemID) {
+			continue
+		}
+		states = append(states, state)
+	}
+	return states, nil
+}
+
+func (r *serviceFakeRepo) UpsertRatingSyncStates(_ context.Context, states []RatingSyncState) error {
+	if r.upsertRatingErr != nil && len(states) > 0 {
+		return r.upsertRatingErr
+	}
+	for _, state := range states {
+		replaced := false
+		for i := range r.ratingStates {
+			existing := &r.ratingStates[i]
+			if existing.ConnectionID == state.ConnectionID && existing.MediaItemID == state.MediaItemID {
+				if state.Kind == "" {
+					state.Kind = existing.Kind
+				}
+				if state.ProviderItemKey == "" {
+					state.ProviderItemKey = existing.ProviderItemKey
+				}
+				*existing = state
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			r.ratingStates = append(r.ratingStates, state)
+		}
+	}
+	return nil
+}
+
+func (r *serviceFakeRepo) WithRatingSyncLock(ctx context.Context, connectionID string, wait bool, fn func(context.Context) error) (bool, error) {
+	if r.ratingLockBusy[connectionID] {
+		if wait {
+			return false, context.DeadlineExceeded
+		}
+		return false, nil
+	}
+	mode := "try"
+	if wait {
+		mode = "wait"
+	}
+	r.ratingLocks = append(r.ratingLocks, mode+":"+connectionID)
+	return true, fn(ctx)
+}
+
+func (r *serviceFakeRepo) WithTokenRefreshLock(ctx context.Context, _ string, fn func(context.Context) error) error {
+	if r.onTokenRefreshWait != nil {
+		r.onTokenRefreshWait()
+	}
+	r.tokenRefreshMu.Lock()
+	defer r.tokenRefreshMu.Unlock()
+	if r.beforeTokenRefresh != nil {
+		r.beforeTokenRefresh()
+	}
+	return fn(ctx)
+}
+
+func (r *serviceFakeRepo) DeleteRatingSyncStates(_ context.Context, connectionID, providerAccountID string, mediaItemIDs []string) error {
+	kept := r.ratingStates[:0]
+	for _, state := range r.ratingStates {
+		if state.ConnectionID == connectionID && state.ProviderAccountID == providerAccountID && containsString(mediaItemIDs, state.MediaItemID) {
+			continue
+		}
+		kept = append(kept, state)
+	}
+	r.ratingStates = kept
+	return nil
+}
+
+func (r *serviceFakeRepo) ClearRatingSyncStates(_ context.Context, connectionID, keepAccountID string) error {
+	kept := r.ratingStates[:0]
+	for _, state := range r.ratingStates {
+		if state.ConnectionID != connectionID || state.ProviderAccountID == keepAccountID {
+			kept = append(kept, state)
+		}
+	}
+	r.ratingStates = kept
+	return nil
+}
+
+func (r *serviceFakeRepo) ListDroppedEventConnections(_ context.Context, userID int, profileID string) ([]Connection, error) {
+	var conns []Connection
+	for _, conn := range r.connections {
+		if conn.UserID == userID && conn.ProfileID == profileID && conn.SyncDroppedEnabled {
+			conns = append(conns, cloneConnectionForTest(conn))
+		}
+	}
+	return conns, nil
+}
+
+func (r *serviceFakeRepo) ListDroppedSyncStates(_ context.Context, connectionID, providerAccountID string, seriesIDs []string) ([]DroppedSyncState, error) {
+	var states []DroppedSyncState
+	for _, state := range r.droppedStates {
+		if state.ConnectionID != connectionID || state.ProviderAccountID != providerAccountID {
+			continue
+		}
+		if seriesIDs != nil && !containsString(seriesIDs, state.SeriesID) {
+			continue
+		}
+		states = append(states, state)
+	}
+	return states, nil
+}
+
+func (r *serviceFakeRepo) UpsertDroppedSyncStates(_ context.Context, states []DroppedSyncState) error {
+	for _, state := range states {
+		state.UpdatedAt = time.Now()
+		replaced := false
+		for i := range r.droppedStates {
+			existing := &r.droppedStates[i]
+			if existing.ConnectionID == state.ConnectionID && existing.SeriesID == state.SeriesID {
+				if state.ProviderItemKey == "" {
+					state.ProviderItemKey = existing.ProviderItemKey
+				}
+				*existing = state
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			r.droppedStates = append(r.droppedStates, state)
+		}
+	}
+	return nil
+}
+
+func (r *serviceFakeRepo) DeleteDroppedSyncStates(_ context.Context, connectionID, providerAccountID string, seriesIDs []string) error {
+	kept := r.droppedStates[:0]
+	for _, state := range r.droppedStates {
+		if state.ConnectionID == connectionID && state.ProviderAccountID == providerAccountID && containsString(seriesIDs, state.SeriesID) {
+			continue
+		}
+		kept = append(kept, state)
+	}
+	r.droppedStates = kept
+	return nil
+}
+
+func (r *serviceFakeRepo) ClearDroppedSyncStates(_ context.Context, connectionID, keepAccountID string) error {
+	kept := r.droppedStates[:0]
+	for _, state := range r.droppedStates {
+		if state.ConnectionID != connectionID || state.ProviderAccountID == keepAccountID {
+			kept = append(kept, state)
+		}
+	}
+	r.droppedStates = kept
+	return nil
+}
+
+func (r *serviceFakeRepo) UpdateRatingCursors(_ context.Context, connectionID, providerAccountID string, remove []string, set map[string]string) error {
+	for key, conn := range r.connections {
+		if conn.ID != connectionID || conn.ProviderAccountID != providerAccountID {
+			continue
+		}
+		cursors := cloneStringMapForTest(conn.SyncCursors)
+		for _, k := range remove {
+			delete(cursors, k)
+		}
+		for k, v := range set {
+			cursors[k] = v
+		}
+		conn.SyncCursors = cursors
+		r.connections[key] = conn
+	}
+	return nil
+}
+
+func (r *serviceFakeRepo) GetListMediaItems(_ context.Context, mediaItemIDs []string) (map[string]LocalFavorite, error) {
+	result := make(map[string]LocalFavorite, len(mediaItemIDs))
+	for _, id := range mediaItemIDs {
+		if item, ok := r.listMedia[id]; ok {
+			result[id] = item
+		}
+	}
+	return result, nil
 }
 
 func (r *serviceFakeRepo) ListScrobbleConnections(_ context.Context, _ int, _ string) ([]Connection, error) {
@@ -657,6 +911,11 @@ type authProviderStub struct {
 	refreshed     bool
 	refreshTokens TokenSet
 	refreshErr    error
+	beforeRefresh func(context.Context, Connection) error
+	// refreshEntered, when set, receives once RefreshToken is called, which
+	// then waits for refreshRelease: a refresh in flight at the provider.
+	refreshEntered chan<- struct{}
+	refreshRelease <-chan struct{}
 }
 
 func (p *authProviderStub) Key() string {
@@ -699,8 +958,17 @@ func (p *authProviderStub) PollDeviceAuth(
 	return TokenSet{AccessToken: testAccessToken, RefreshToken: testRefreshToken, TokenExpiresAt: &expires}, nil
 }
 
-func (p *authProviderStub) RefreshToken(context.Context, ServerConfig, Connection) (TokenSet, error) {
+func (p *authProviderStub) RefreshToken(ctx context.Context, _ ServerConfig, conn Connection) (TokenSet, error) {
+	if p.refreshEntered != nil {
+		p.refreshEntered <- struct{}{}
+		<-p.refreshRelease
+	}
 	p.refreshed = true
+	if p.beforeRefresh != nil {
+		if err := p.beforeRefresh(ctx, conn); err != nil {
+			return TokenSet{}, err
+		}
+	}
 	if p.refreshErr != nil {
 		return TokenSet{}, p.refreshErr
 	}
@@ -790,8 +1058,20 @@ func (p progressBatchImporterStub) FetchProgressBatch(context.Context, ServerCon
 type watchedExporterStub struct {
 	exportErr    error
 	exportResult ExportResult
+	exported     *[]LocalPlay
+	remote       []RemotePlay
+	precision    time.Duration
 	key          string
 	source       userstore.WatchHistorySource
+}
+
+type singleBatchWatchedExporterStub struct {
+	watchedExporterStub
+	batchSize int
+}
+
+func (p singleBatchWatchedExporterStub) ExportBatchSize() int {
+	return p.batchSize
 }
 
 func (p watchedExporterStub) Key() string {
@@ -810,10 +1090,17 @@ func (p watchedExporterStub) Capabilities() Capabilities {
 }
 
 func (p watchedExporterStub) FetchHistory(context.Context, ServerConfig, Connection) ([]RemotePlay, error) {
-	return nil, nil
+	return p.remote, nil
 }
 
-func (p watchedExporterStub) ExportHistory(context.Context, ServerConfig, Connection, []LocalPlay) (ExportResult, error) {
+func (p watchedExporterStub) HistoryTimePrecision() time.Duration {
+	return p.precision
+}
+
+func (p watchedExporterStub) ExportHistory(_ context.Context, _ ServerConfig, _ Connection, plays []LocalPlay) (ExportResult, error) {
+	if p.exported != nil {
+		*p.exported = append(*p.exported, plays...)
+	}
 	return p.exportResult, p.exportErr
 }
 
@@ -1523,23 +1810,10 @@ func TestServiceSyncConnectionRejectsBlankAccessToken(t *testing.T) {
 }
 
 func TestServiceSyncConnectionRefreshesExpiredToken(t *testing.T) {
-	repo := newServiceFakeRepo()
 	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
 	expiresAt := now.Add(-time.Minute)
 	refreshedExpiresAt := now.Add(time.Hour)
-	provider := &authProviderStub{
-		refreshTokens: TokenSet{
-			AccessToken:    "new-access",
-			RefreshToken:   "new-refresh",
-			TokenExpiresAt: &refreshedExpiresAt,
-		},
-	}
-	reg := NewRegistry()
-	if err := reg.Register(provider); err != nil {
-		t.Fatalf("Register: %v", err)
-	}
-	service := NewService(repo, reg)
-	service.now = func() time.Time { return now }
+	key := connectionKey("trakt", 7, "profile-1")
 	conn := Connection{
 		ID:             "conn-1",
 		Provider:       "trakt",
@@ -1549,20 +1823,219 @@ func TestServiceSyncConnectionRefreshesExpiredToken(t *testing.T) {
 		RefreshToken:   testOldRefreshToken,
 		TokenExpiresAt: &expiresAt,
 	}
-	repo.connections[connectionKey("trakt", 7, "profile-1")] = conn
+	tests := []struct {
+		name string
+		// otherRefresher stores rotated tokens while the sync waits for the
+		// refresh lock. Trakt refresh tokens are single-use, so spending the
+		// old one again would be refused.
+		otherRefresher bool
+		wantRefresh    bool
+	}{
+		{name: "refreshes the expired token", wantRefresh: true},
+		{name: "uses tokens another refresher stored", otherRefresher: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newServiceFakeRepo()
+			provider := &authProviderStub{
+				refreshTokens: TokenSet{
+					AccessToken:    "new-access",
+					RefreshToken:   "new-refresh",
+					TokenExpiresAt: &refreshedExpiresAt,
+				},
+			}
+			if tt.otherRefresher {
+				provider.refreshErr = errors.New("refresh token already spent")
+				repo.beforeTokenRefresh = func() {
+					stored := repo.connections[key]
+					stored.AccessToken, stored.RefreshToken, stored.TokenExpiresAt = "new-access", "new-refresh", &refreshedExpiresAt
+					repo.connections[key] = stored
+				}
+			}
+			reg := NewRegistry()
+			if err := reg.Register(provider); err != nil {
+				t.Fatalf("Register: %v", err)
+			}
+			service := NewService(repo, reg)
+			service.now = func() time.Time { return now }
+			repo.connections[key] = conn
 
-	if err := service.SyncConnection(context.Background(), conn, "scheduled"); err != nil {
-		t.Fatalf("SyncConnection: %v", err)
+			if err := service.SyncConnection(context.Background(), conn, "scheduled"); err != nil {
+				t.Fatalf("SyncConnection: %v", err)
+			}
+			if provider.refreshed != tt.wantRefresh {
+				t.Fatalf("provider refreshed = %v, want %v", provider.refreshed, tt.wantRefresh)
+			}
+			updated := repo.connections[key]
+			if updated.AccessToken != "new-access" || updated.RefreshToken != "new-refresh" {
+				t.Fatalf("connection tokens = %q/%q, want refreshed tokens", updated.AccessToken, updated.RefreshToken)
+			}
+			if updated.TokenExpiresAt == nil || !updated.TokenExpiresAt.Equal(refreshedExpiresAt) {
+				t.Fatalf("token expiry = %v, want %v", updated.TokenExpiresAt, refreshedExpiresAt)
+			}
+		})
 	}
-	if !provider.refreshed {
-		t.Fatal("provider was not asked to refresh the expired token")
+}
+
+func TestServiceTokenRefreshPreservesConcurrentConnectionChanges(t *testing.T) {
+	for _, change := range []string{"disconnect", "reconnect", "account switch", "sync state"} {
+		t.Run(change, func(t *testing.T) {
+			repo := newServiceFakeRepo()
+			now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+			conn := Connection{
+				ID: "conn-1", Provider: "trakt", UserID: 7, ProfileID: "profile-1",
+				ProviderAccountID: "old-account", AccessToken: testOldAccessToken,
+				RefreshToken: testOldRefreshToken, TokenExpiresAt: new(now.Add(-time.Minute)),
+				ExportWatchedEnabled: true, ScrobbleEnabled: true,
+			}
+			key := connectionKey(conn.Provider, conn.UserID, conn.ProfileID)
+			repo.connections[key] = conn
+			provider := &authProviderStub{refreshTokens: TokenSet{
+				AccessToken: "new-access", RefreshToken: "new-refresh", TokenExpiresAt: new(now.Add(time.Hour)),
+			}}
+			registry := NewRegistry()
+			if err := registry.Register(provider); err != nil {
+				t.Fatal(err)
+			}
+			service := NewService(repo, registry)
+			service.now = func() time.Time { return now }
+			provider.beforeRefresh = func(ctx context.Context, _ Connection) error {
+				if change == "disconnect" {
+					return repo.DeleteConnection(ctx, conn.Provider, conn.UserID, conn.ProfileID)
+				}
+				current := repo.connections[key]
+				switch change {
+				case "reconnect", "account switch":
+					current.AccessToken, current.RefreshToken = "reconnected-access", "reconnected-refresh"
+					if change == "account switch" {
+						current.ProviderAccountID = "new-account"
+					}
+				case "sync state":
+					current.SyncCursors = map[string]string{"trakt.watched": "new-cursor"}
+					current.LastOutboundSyncAt = new(now)
+					current.ScrobbleEnabled = false
+				}
+				repo.connections[key] = current
+				return nil
+			}
+			_, err := service.AccessToken(t.Context(), conn.ID)
+			current, exists := repo.connections[key]
+			switch change {
+			case "disconnect":
+				if exists || !errors.Is(err, ErrConnectionNotFound) {
+					t.Fatalf("disconnected connection restored: exists=%v err=%v", exists, err)
+				}
+			case "reconnect", "account switch":
+				if !errors.Is(err, ErrStaleConnection) || current.AccessToken != "reconnected-access" {
+					t.Fatalf("reconnected credentials overwritten: access=%q err=%v", current.AccessToken, err)
+				}
+				if change == "account switch" && current.ProviderAccountID != "new-account" {
+					t.Fatal("account switch overwritten")
+				}
+			case "sync state":
+				if err != nil || current.AccessToken != "new-access" || current.SyncCursors["trakt.watched"] != "new-cursor" || current.LastOutboundSyncAt == nil || current.ScrobbleEnabled {
+					t.Fatalf("sync state lost during refresh: connection=%+v err=%v", current, err)
+				}
+			}
+		})
 	}
-	updated := repo.connections[connectionKey("trakt", 7, "profile-1")]
-	if updated.AccessToken != "new-access" || updated.RefreshToken != "new-refresh" {
-		t.Fatalf("connection tokens = %q/%q, want refreshed tokens", updated.AccessToken, updated.RefreshToken)
+}
+
+func TestServiceTokenRefreshReloadsAccountBinding(t *testing.T) {
+	repo := newServiceFakeRepo()
+	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	conn := Connection{
+		ID: "conn-1", Provider: "trakt", UserID: 7, ProfileID: "profile-1",
+		ProviderAccountID: "old-account", AccessToken: testOldAccessToken,
+		RefreshToken: testOldRefreshToken, TokenExpiresAt: new(now.Add(-time.Minute)),
 	}
-	if updated.TokenExpiresAt == nil || !updated.TokenExpiresAt.Equal(refreshedExpiresAt) {
-		t.Fatalf("token expiry = %v, want %v", updated.TokenExpiresAt, refreshedExpiresAt)
+	key := connectionKey(conn.Provider, conn.UserID, conn.ProfileID)
+	repo.connections[key] = conn
+	repo.beforeTokenRefresh = func() {
+		current := repo.connections[key]
+		current.ProviderAccountID = "new-account"
+		repo.connections[key] = current
+	}
+	provider := &authProviderStub{
+		refreshTokens: TokenSet{AccessToken: "new-access", RefreshToken: "new-refresh", TokenExpiresAt: new(now.Add(time.Hour))},
+		beforeRefresh: func(_ context.Context, current Connection) error {
+			if current.ProviderAccountID != "new-account" {
+				t.Fatalf("refresh received old account binding: %q", current.ProviderAccountID)
+			}
+			return nil
+		},
+	}
+	registry := NewRegistry()
+	if err := registry.Register(provider); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(repo, registry)
+	service.now = func() time.Time { return now }
+	if _, err := service.AccessToken(t.Context(), conn.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A disconnect waits for the refresh to finish before deleting its connection.
+func TestServiceDisconnectWaitsForAnInFlightTokenRefresh(t *testing.T) {
+	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
+	expiresAt := now.Add(-time.Minute)
+	refreshedExpiresAt := now.Add(time.Hour)
+	entered, release := make(chan struct{}), make(chan struct{})
+	provider := &authProviderStub{
+		refreshTokens:  TokenSet{AccessToken: "new-access", RefreshToken: "new-refresh", TokenExpiresAt: &refreshedExpiresAt},
+		refreshEntered: entered,
+		refreshRelease: release,
+	}
+	reg := NewRegistry()
+	if err := reg.Register(provider); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	repo := newServiceFakeRepo()
+	service := NewService(repo, reg)
+	service.now = func() time.Time { return now }
+	key := connectionKey("trakt", 7, "profile-1")
+	repo.connections[key] = Connection{
+		ID:             "conn-1",
+		Provider:       "trakt",
+		UserID:         7,
+		ProfileID:      "profile-1",
+		AccessToken:    testOldAccessToken,
+		RefreshToken:   testOldRefreshToken,
+		TokenExpiresAt: &expiresAt,
+	}
+	ctx := context.Background()
+
+	refreshDone := make(chan error, 1)
+	go func() {
+		_, err := service.AccessToken(ctx, "conn-1")
+		refreshDone <- err
+	}()
+	<-entered
+
+	deleteWaiting := make(chan struct{}, 1)
+	repo.onTokenRefreshWait = func() { deleteWaiting <- struct{}{} }
+	deleteDone := make(chan error, 1)
+	go func() { deleteDone <- service.DeleteConnection(ctx, 7, "profile-1", "trakt") }()
+	var deleteErr error
+	deleted := false
+	select {
+	case <-deleteWaiting:
+	case deleteErr = <-deleteDone:
+		deleted = true
+	}
+	close(release)
+	if err := <-refreshDone; err != nil {
+		t.Fatalf("AccessToken: %v", err)
+	}
+	if !deleted {
+		deleteErr = <-deleteDone
+	}
+	if deleteErr != nil {
+		t.Fatalf("DeleteConnection: %v", deleteErr)
+	}
+	if _, ok := repo.connections[key]; ok {
+		t.Fatal("the refresh recreated the disconnected connection")
 	}
 }
 
@@ -2019,6 +2492,74 @@ func TestServiceExportWatchedDrainsPendingBatches(t *testing.T) {
 		if export.Status != historyExportStatusSent {
 			t.Fatalf("history exports = %+v, want all sent", repo.historyExports)
 		}
+	}
+}
+
+// A provider that stores watch times to the minute (Trakt) returns :00 for a
+// local play that kept its seconds; one that keeps seconds must not match a
+// different time in the same minute.
+func TestServiceExportWatchedMatchesRemotePlaysAtProviderPrecision(t *testing.T) {
+	tests := []struct {
+		name         string
+		precision    time.Duration
+		wantMatched  bool
+		wantExported int
+	}{
+		{name: "provider stores minutes", precision: time.Minute, wantMatched: true},
+		{name: "provider stores seconds", wantExported: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, err := sql.Open("sqlite3", ":memory:")
+			if err != nil {
+				t.Fatalf("open sqlite: %v", err)
+			}
+			defer func() { _ = db.Close() }()
+			if err := userdb.InitSchema(db); err != nil {
+				t.Fatalf("InitSchema: %v", err)
+			}
+			if err := userdb.AddHistory(db, userstore.WatchHistoryEntry{
+				ID:              "history-1",
+				ProfileID:       "profile-1",
+				MediaItemID:     testMovieMediaID,
+				WatchedAt:       "2026-05-04T12:00:37Z",
+				DurationSeconds: 7200,
+				Completed:       true,
+				Source:          userstore.WatchHistorySourcePlayback,
+				Identity: userstore.WatchIdentity{
+					StableType:  "movie",
+					ProviderIDs: map[string]string{"tmdb": "603"},
+				},
+			}); err != nil {
+				t.Fatalf("AddHistory: %v", err)
+			}
+
+			var exported []LocalPlay
+			provider := watchedExporterStub{
+				exported:  &exported,
+				precision: tt.precision,
+				remote: []RemotePlay{{
+					ProviderItemKey: "tmdb:603",
+					WatchedAt:       time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
+				}},
+			}
+			repo := newServiceFakeRepo()
+			service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{
+				store: userdb.NewSQLiteUserStore(db),
+			})
+			result, err := service.ExportWatched(context.Background(), Connection{
+				ID:        "conn-1",
+				Provider:  "trakt",
+				UserID:    7,
+				ProfileID: "profile-1",
+			}, ServerConfig{}, provider)
+			if err != nil {
+				t.Fatalf("ExportWatched: %v", err)
+			}
+			if matched := result.RemotePresent == 1; matched != tt.wantMatched || len(exported) != tt.wantExported {
+				t.Fatalf("result = %+v, exported %d plays; want matched=%v and %d exported", result, len(exported), tt.wantMatched, tt.wantExported)
+			}
+		})
 	}
 }
 
@@ -2672,6 +3213,12 @@ func TestServiceConfirmedStopSerializesConcurrentConfirmation(t *testing.T) {
 	}
 }
 
+func TestConfirmedStopLeaseExceedsDispatchTimeout(t *testing.T) {
+	if confirmedStopLease <= confirmedStopDispatchTimeout {
+		t.Fatalf("confirmed stop lease %s must exceed dispatch timeout %s", confirmedStopLease, confirmedStopDispatchTimeout)
+	}
+}
+
 func TestServiceConfirmedStopCannotCompleteReclaimedLease(t *testing.T) {
 	repo := newServiceFakeRepo()
 	repo.scrobbleConnections = []Connection{{
@@ -3215,6 +3762,74 @@ func TestServicePluginTransportFailureLeavesExportPending(t *testing.T) {
 	}
 }
 
+func TestServiceLocalWatchEventBypassesHistoricalExportBacklog(t *testing.T) {
+	repo := newServiceFakeRepo()
+	for i := 0; i < 100; i++ {
+		repo.historyExports = append(repo.historyExports, HistoryExport{
+			ID:           fmt.Sprintf("old-export-%d", i),
+			ConnectionID: "conn-1",
+			HistoryID:    fmt.Sprintf("old-history-%d", i),
+			Status:       historyExportStatusPending,
+			WatchedAt:    time.Date(2025, time.January, 1, 0, i, 0, 0, time.UTC),
+		})
+	}
+	var exported []LocalPlay
+	service := NewService(repo, NewRegistry())
+	play := LocalPlay{
+		HistoryID:       "new-history",
+		MediaItemID:     testMovieMediaID,
+		ProviderItemKey: testMovieProviderItemKey,
+		WatchedAt:       time.Date(2026, time.August, 6, 12, 0, 0, 0, time.UTC),
+	}
+	err := service.exportLocalPlays(context.Background(), Connection{ID: "conn-1"}, ServerConfig{}, watchedExporterStub{
+		exported:     &exported,
+		exportResult: ExportResult{Sent: []string{play.HistoryID}},
+	}, []LocalPlay{play})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(exported) != 1 || exported[0].HistoryID != play.HistoryID {
+		t.Fatalf("exported = %#v, want only the live event", exported)
+	}
+	if got := repo.historyExports[len(repo.historyExports)-1].Status; got != historyExportStatusSent {
+		t.Fatalf("new export status = %q, want %q", got, historyExportStatusSent)
+	}
+}
+
+func TestServiceLocalWatchEventBoundsHistoryLookupToProviderBatch(t *testing.T) {
+	repo := newServiceFakeRepo()
+	var exported []LocalPlay
+	plays := make([]LocalPlay, 0, 25)
+	for i := 0; i < 25; i++ {
+		plays = append(plays, LocalPlay{
+			HistoryID:       fmt.Sprintf("history-%d", i),
+			MediaItemID:     testMovieMediaID,
+			ProviderItemKey: testMovieProviderItemKey,
+			WatchedAt:       time.Date(2026, time.August, 6, 12, i, 0, 0, time.UTC),
+		})
+	}
+	service := NewService(repo, NewRegistry())
+	err := service.exportLocalPlays(
+		context.Background(),
+		Connection{ID: "conn-1"},
+		ServerConfig{},
+		singleBatchWatchedExporterStub{
+			watchedExporterStub: watchedExporterStub{exported: &exported},
+			batchSize:           1,
+		},
+		plays,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repo.historyLookupLimit != 1 {
+		t.Fatalf("history lookup limit = %d, want 1", repo.historyLookupLimit)
+	}
+	if len(exported) != 1 {
+		t.Fatalf("exported %d plays, want 1", len(exported))
+	}
+}
+
 func TestServicePluginInvalidCredentialLeavesExportPendingAndRecordsConnectionError(t *testing.T) {
 	repo := newServiceFakeRepo()
 	client := &fakeWatchSyncPluginClient{applyResponse: &pluginv1.WatchSyncApplyEventsResponse{
@@ -3606,5 +4221,82 @@ func TestServiceIncrementalFavoriteAbsenceIsNotRemoval(t *testing.T) {
 	}
 	if result.Removed != 0 || len(favorites) != 1 || !repo.listItemStates[0].RemotePresent || !repo.listItemStates[0].LocalPresent {
 		t.Fatalf("result=%#v favorites=%#v state=%#v", result, favorites, repo.listItemStates[0])
+	}
+}
+
+func (r *serviceFakeRepo) UpdateConnectionSettings(ctx context.Context, provider string, userID int, profileID string, expected *ConnectionVersion, update ConnectionUpdate, before func(Connection) error) (Connection, error) {
+	current, ok, err := r.GetConnection(ctx, provider, userID, profileID)
+	if err != nil {
+		return Connection{}, err
+	}
+	if !ok {
+		return Connection{}, ErrConnectionNotFound
+	}
+	if expected != nil && (current.ID != expected.ID || !current.UpdatedAt.Equal(expected.UpdatedAt)) {
+		return Connection{}, ErrStaleConnection
+	}
+	if before != nil {
+		if err := before(current); err != nil {
+			return Connection{}, err
+		}
+	}
+	if update.ImportWatchedEnabled != nil {
+		current.ImportWatchedEnabled = *update.ImportWatchedEnabled
+	}
+	if update.ImportProgressEnabled != nil {
+		current.ImportProgressEnabled = *update.ImportProgressEnabled
+	}
+	if update.ExportWatchedEnabled != nil {
+		current.ExportWatchedEnabled = *update.ExportWatchedEnabled
+	}
+	if update.ExportUnwatchedEnabled != nil {
+		current.ExportUnwatchedEnabled = *update.ExportUnwatchedEnabled
+	}
+	if update.ImportFavoritesEnabled != nil {
+		current.ImportFavoritesEnabled = *update.ImportFavoritesEnabled
+	}
+	if update.ExportFavoritesEnabled != nil {
+		current.ExportFavoritesEnabled = *update.ExportFavoritesEnabled
+	}
+	if update.SyncFavoriteRemovalsEnabled != nil {
+		current.SyncFavoriteRemovalsEnabled = *update.SyncFavoriteRemovalsEnabled
+	}
+	if update.ImportWatchlistEnabled != nil {
+		current.ImportWatchlistEnabled = *update.ImportWatchlistEnabled
+	}
+	if update.ExportWatchlistEnabled != nil {
+		current.ExportWatchlistEnabled = *update.ExportWatchlistEnabled
+	}
+	if update.SyncWatchlistRemovalsEnabled != nil {
+		current.SyncWatchlistRemovalsEnabled = *update.SyncWatchlistRemovalsEnabled
+	}
+	if update.SyncWatchlistOrderEnabled != nil {
+		current.SyncWatchlistOrderEnabled = *update.SyncWatchlistOrderEnabled
+	}
+	if update.ScrobbleEnabled != nil {
+		current.ScrobbleEnabled = *update.ScrobbleEnabled
+	}
+	return r.UpsertConnection(ctx, current)
+}
+
+func TestExportItemOutcomeDecidesByMediaItemIDBeforeKey(t *testing.T) {
+	// A movie and a show share the key tmdb:550; the provider reports the
+	// movie missing and the show sent.
+	result := ExportResult{
+		Sent:     []string{"show-1", "tmdb:550"},
+		NotFound: []string{"movie-1", "tmdb:550"},
+	}
+	if sent, notFound := exportItemOutcome(result, "movie-1", "tmdb:550"); sent || !notFound {
+		t.Fatalf("movie outcome = sent %v notFound %v, want not found", sent, notFound)
+	}
+	if sent, notFound := exportItemOutcome(result, "show-1", "tmdb:550"); !sent || notFound {
+		t.Fatalf("show outcome = sent %v notFound %v, want sent", sent, notFound)
+	}
+	// A result that names items only by key still works.
+	if sent, _ := exportItemOutcome(ExportResult{Sent: []string{"imdb:tt1"}}, "movie-2", "imdb:tt1"); !sent {
+		t.Fatal("a key-only result must still confirm the item")
+	}
+	if sent, _ := exportItemOutcome(ExportResult{Failed: map[string]string{"movie-3": "x"}, Sent: []string{"imdb:tt3"}}, "movie-3", "imdb:tt3"); sent {
+		t.Fatal("a failed media item must not be confirmed through its key")
 	}
 }

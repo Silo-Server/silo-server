@@ -48,6 +48,20 @@ type SettingIdentity struct {
 	SeriesID     string
 }
 
+// ValidateScopeListing reports whether (profileID, scope) names a
+// profile-anchored set of rows ListSettingValuesByScope can list: a canonical
+// (trimmed, non-empty) profile id at a remote scope other than account, the
+// one scope no profile anchors.
+func ValidateScopeListing(profileID string, scope settingscontract.Scope) error {
+	if !scope.IsRemote() || scope == settingscontract.ScopeAccount {
+		return fmt.Errorf("%w: %q is not a profile-anchored scope", ErrInvalidSettingIdentity, scope)
+	}
+	if profileID == "" || profileID != strings.TrimSpace(profileID) {
+		return fmt.Errorf("%w: profile id %q is required in canonical form", ErrInvalidSettingIdentity, profileID)
+	}
+	return nil
+}
+
 // Validate reports whether the identity is addressable. It mirrors the scope
 // CHECK constraint on user_setting_values so an invalid identity is rejected
 // before it reaches either backend rather than surfacing as a driver error whose
@@ -153,30 +167,51 @@ type SettingValueCompareAndSetter interface {
 	) (*SettingValue, error)
 }
 
-// SettingMutationWriter is the transaction-scoped settings surface used by an
-// idempotent mutation. Implementations must keep every call made by one
+// SettingMutationWriter is the transaction-scoped settings surface used by one
+// canonical mutation. Implementations must keep every call made by one
 // WithSettingMutationTransaction callback on the same database transaction.
-// That makes the setting write and its replay receipt one durable unit.
+// That makes everything the mutation touches one durable unit: the addressed
+// row, the companion row of a mirrored pair, the legacy profile column a
+// shipped DTO still serves, and the idempotency receipt.
+//
+// DeleteSettingValue and UpdateProfile are here for that reason and no other.
+// A mutation that lands one of those and not the others is not a slower write,
+// it is a preference that means two different things depending on which client
+// reads it — and the retry a 500 provokes cannot repair it, because a recorded
+// receipt replays instead of reapplying.
 type SettingMutationWriter interface {
 	GetSettingValue(ctx context.Context, id SettingIdentity) (*SettingValue, error)
 	UpsertSettingValue(ctx context.Context, id SettingIdentity, value json.RawMessage) (*SettingValue, error)
+	// DeleteSettingValue removes one explicit value and reports whether it existed.
+	DeleteSettingValue(ctx context.Context, id SettingIdentity) (bool, error)
 	CompareAndSetSettingValue(
 		ctx context.Context,
 		id SettingIdentity,
 		value json.RawMessage,
 		expectedRevision int64,
 	) (*SettingValue, error)
+	// UpdateProfile writes the legacy profile preference columns that shipped
+	// clients still read through GET /profiles, so a canonical write and the
+	// column it has to keep truthful commit together.
+	UpdateProfile(ctx context.Context, id string, u UpdateProfileInput) error
 	GetSettingMutation(ctx context.Context, mutationID string) (*SettingMutationRecord, error)
 	PutSettingMutation(ctx context.Context, record SettingMutationRecord) (SettingMutationRecord, bool, error)
 }
 
-// SettingMutationTransactioner atomically serializes one mutation id, applies
-// its setting write, and records its receipt. The callback commits only when it
-// returns nil. A crash or callback error therefore leaves neither half applied.
-// Concurrent callbacks for the same mutationID must execute one at a time.
+// SettingMutationTransactioner applies one canonical settings mutation and
+// everything that has to move with it as a single transaction. The callback
+// commits only when it returns nil, so a crash or callback error leaves none of
+// it applied.
+//
+// A non-empty mutationID additionally serializes concurrent callbacks for that
+// id, so the receipt read and the write it guards cannot interleave. The empty
+// string means the caller supplied no idempotency key: there is no receipt to
+// serialize on, and the callback gets a plain transaction. Both spellings are
+// the same guarantee about atomicity and differ only in what they serialize.
 //
 // This is optional rather than embedded in UserStore because only production
-// stores serving idempotent mutation routes need to expose transaction state.
+// stores serving the canonical mutation routes need to expose transaction
+// state.
 type SettingMutationTransactioner interface {
 	WithSettingMutationTransaction(
 		ctx context.Context,

@@ -122,6 +122,13 @@ type EventsEventMessage struct {
 	Data      json.RawMessage `json:"data"`
 }
 
+// EventsAccessChangedMessage tells an events-socket client that the access its
+// connection was opened under has changed. The server closes the connection
+// right after it; see docs/realtime-api.md.
+type EventsAccessChangedMessage struct {
+	Type string `json:"type"`
+}
+
 type EventsErrorMessage struct {
 	Type    string `json:"type"`
 	Code    string `json:"code"`

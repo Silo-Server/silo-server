@@ -20,6 +20,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/scanner"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // FileResolver looks up media files by various keys.
@@ -57,6 +59,11 @@ type SettingsReader interface {
 	GetAll(ctx context.Context) (map[string]string, error)
 }
 
+// ProgressStores resolves the per-user store holding watch progress.
+type ProgressStores interface {
+	ForUser(ctx context.Context, userID int) (userstore.UserStore, error)
+}
+
 const configCacheTTL = 30 * time.Second
 
 // Capability describes what download functionality is available to a user,
@@ -65,6 +72,7 @@ type Capability struct {
 	Enabled              bool
 	DownloadAllowed      bool
 	QualityPresets       []string
+	QualityOptions       []QualityOption
 	TranscodeEnabled     bool
 	TranscodeUserAllowed bool
 	// SeasonDownload reports whether per-season series downloads are available;
@@ -80,14 +88,16 @@ type Capability struct {
 // from the request-scoped resolver methods below; a path alone is never an
 // authorization grant.
 type FileTarget struct {
-	Path             string
-	DownloadID       string
-	MediaFileID      int
-	ArtifactID       string
-	OriginNodeID     int
-	OriginNodeURL    string
-	OriginNodeGroup  string
-	OriginArtifactID string
+	Path                         string
+	DownloadID                   string
+	MediaFileID                  int
+	ArtifactID                   string
+	OriginNodeID                 int
+	OriginNodeURL                string
+	OriginNodeGroup              string
+	OriginArtifactID             string
+	ExpectedArtifactSize         int64
+	ExpectedExecutionFingerprint string
 	// ProxyEligible is true when a proxy can read the path directly or relay the
 	// opaque artifact from its owning transcode node.
 	ProxyEligible bool
@@ -111,10 +121,12 @@ type Service struct {
 	settings      SettingsReader
 
 	// Offline-manifest dependencies (Phase 2); nil until SetOfflineDeps wires them.
-	manifest       *ManifestBuilder
-	subtitleSource SubtitleSource
-	artworkSource  ManifestSource
-	httpClient     *http.Client
+	manifest         *ManifestBuilder
+	markerPopulation MarkerPopulationService
+	subtitleSource   SubtitleSource
+	artworkSource    ManifestSource
+	httpClient       *http.Client
+	subtitleCache    *playback.SubtitleCache
 
 	// Prepare-to-file pipeline (Phase 3); nil until SetArtifactManager wires it.
 	artifacts *ArtifactManager
@@ -122,11 +134,18 @@ type Service struct {
 	// Series-monitoring subscriptions (auto-download); nil until SetSubscriptions
 	// wires the repo, in which case the subscription endpoints report unavailable.
 	subRepo *SubscriptionRepository
+	// progressStores lets delete_watched monitors skip finished episodes; nil
+	// until SetProgressStores wires it, in which case no episode is skipped.
+	progressStores ProgressStores
 
 	cfgMu       sync.RWMutex
 	cfg         config.DownloadConfig
 	cfgLoadedAt time.Time
 }
+
+// SetSubtitleCache shares the streaming subtitle cache with embedded subtitle
+// sidecars. Nil disables caching.
+func (s *Service) SetSubtitleCache(cache *playback.SubtitleCache) { s.subtitleCache = cache }
 
 // SetOfflineDeps wires the offline-manifest dependencies (catalog detail for
 // manifest + artwork, subtitle assets, and an HTTP client for streaming
@@ -143,10 +162,16 @@ func (s *Service) SetOfflineDeps(detail ManifestSource, subs SubtitleSource, cli
 		}
 		return s.artifacts.repo.GetByID(ctx, id)
 	})
-	if client == nil {
-		client = http.DefaultClient
-	}
+	s.manifest.MarkerPopulation = s.markerPopulation
+	// A nil client leaves artwork fetches on artworkClient and its timeout.
 	s.httpClient = client
+}
+
+func (s *Service) SetMarkerPopulation(population MarkerPopulationService) {
+	s.markerPopulation = population
+	if s.manifest != nil {
+		s.manifest.MarkerPopulation = population
+	}
 }
 
 // SetArtifactManager wires the prepare-to-file pipeline. When unset, remux/
@@ -159,6 +184,12 @@ func (s *Service) SetArtifactManager(m *ArtifactManager) {
 // When unset, the subscription endpoints report unavailable.
 func (s *Service) SetSubscriptions(subRepo *SubscriptionRepository) {
 	s.subRepo = subRepo
+}
+
+// SetProgressStores wires the per-user watch-progress stores that
+// delete_watched monitors read to skip episodes the profile has finished.
+func (s *Service) SetProgressStores(stores ProgressStores) {
+	s.progressStores = stores
 }
 
 // SetGroupPolicyProvider wires access-group policy composition into download
@@ -274,22 +305,24 @@ func (s *Service) Capability(ctx context.Context, userID int) (Capability, error
 	if err != nil {
 		return Capability{}, fmt.Errorf("loading user: %w", err)
 	}
-	user, err = s.effectiveDownloadUser(ctx, user)
+	policyUser, err := s.effectiveDownloadUser(ctx, user)
 	if err != nil {
 		return Capability{}, fmt.Errorf("loading access group policy: %w", err)
 	}
 	c := Capability{
 		Enabled:              cfg.Enabled,
-		DownloadAllowed:      user.DownloadAllowed,
+		DownloadAllowed:      policyUser.Policy.DownloadAllowed,
 		QualityPresets:       []string{},
 		TranscodeEnabled:     cfg.TranscodeEnabled,
-		TranscodeUserAllowed: user.DownloadTranscodeAllowed,
+		TranscodeUserAllowed: policyUser.Policy.DownloadTranscodeAllowed,
 	}
+	policyCeiling := ""
 	if s.actionDecider != nil {
-		c.QualityPresets = s.policyPresetsFor(ctx, user, cfg, s.artifacts != nil)
+		c.QualityPresets, policyCeiling = s.policyPresetsFor(ctx, policyUser, cfg, s.artifacts != nil)
 	} else {
-		c.QualityPresets = s.policy.PresetsFor(user, cfg, s.artifacts != nil)
+		c.QualityPresets = s.policy.PresetsFor(policyUser, cfg, s.artifacts != nil)
 	}
+	c.QualityOptions = qualityOptionsFor(c.QualityPresets, cfg, policyUser, policyCeiling)
 	if len(c.QualityPresets) > 0 {
 		// Per-season download is always available when downloads are enabled;
 		// auto-download monitoring additionally requires the subscription repo.
@@ -302,7 +335,7 @@ func (s *Service) Capability(ctx context.Context, userID int) (Capability, error
 	return c, nil
 }
 
-func (s *Service) effectiveDownloadUser(ctx context.Context, user *models.User) (*models.User, error) {
+func (s *Service) effectiveDownloadUser(ctx context.Context, user *models.User) (*PolicyUser, error) {
 	if user == nil {
 		return nil, nil
 	}
@@ -310,45 +343,56 @@ func (s *Service) effectiveDownloadUser(ctx context.Context, user *models.User) 
 	if err != nil {
 		return nil, err
 	}
-	out := *user
-	out.LibraryIDs = effective.LibraryIDs
-	out.MaxPlaybackQuality = effective.MaxPlaybackQuality
-	out.MaxStreams = effective.MaxStreams
-	out.MaxTranscodes = effective.MaxTranscodes
-	out.Permissions = effective.Permissions
-	out.DownloadAllowed = effective.DownloadAllowed
-	out.DownloadTranscodeAllowed = effective.DownloadTranscodeAllowed
-	return &out, nil
+	return &PolicyUser{ID: user.ID, Policy: effective}, nil
 }
 
 // CreateRequest holds the parameters for creating a download. A non-empty
 // DeviceID makes it a managed device-library entry; empty is ephemeral/web.
 type CreateRequest struct {
-	ContentID      string
-	EpisodeID      string
-	FileID         int
-	Quality        string // "" defaults to original
-	ProfileID      string // managed identity (X-Profile-Id via viewer access)
-	DeviceID       string // "" => ephemeral; set => managed device entry
-	DeviceName     string
-	DevicePlatform string
+	// VersionFromHistory picks the default version from the profile's watch
+	// history (see versionPreference) when no FileID is named. Native
+	// requests set it; the frozen v1 bridge keeps the highest-resolution
+	// default, so a repeated v1 series request never swaps downloaded files.
+	VersionFromHistory bool
+	// ExpectedRevision is native optimistic creation/replacement authority: zero
+	// requires an absent managed entry; positive values identify the chosen row.
+	// Nil preserves the frozen bridge behavior.
+	StrictIdentity     bool
+	ExpectedRevision   *int
+	ExpectedDownloadID string
+	// Native batch pages retain a client batch identity. Existing managed rows
+	// are preserved unless a revision is explicitly supplied for that episode.
+	BatchID         string
+	ExpectedEntries map[string]ManagedCreateExpectation
+	ContentID       string
+	EpisodeID       string
+	FileID          int
+	Quality         string // "" defaults to original
+	ProfileID       string // managed identity (X-Profile-Id via viewer access)
+	DeviceID        string // "" => ephemeral; set => managed device entry
+	DeviceName      string
+	DevicePlatform  string
 	// Caps describes the requesting device's decode capability; used to decide
 	// whether original can be delivered directly or needs a compatibility artifact.
 	Caps playback.ClientCapabilities
 }
 
-// Create creates a download for a single item (movie or episode). For
-// public `original` it registers an idempotent managed entry or queues an
-// ephemeral row unless compatibility requires a prepared artifact. Bitrate
-// qualities always prepare a transcode artifact before the row becomes ready.
+// Create creates a download for a single item (movie or episode). When the
+// source is served as-is — `original`, or a bitrate preset the source already
+// fits — it registers an idempotent managed entry or queues an ephemeral row;
+// otherwise it prepares a remux or transcode artifact before the row becomes
+// ready.
 func (s *Service) Create(ctx context.Context, userID int, req CreateRequest, filter catalog.AccessFilter) (*Download, error) {
 	cfg, user, err := s.downloadConfigForUser(ctx, userID, req.DeviceID)
 	if err != nil {
 		return nil, err
 	}
-	file, err := s.resolveFile(ctx, req)
+	file, err := s.resolveFile(ctx, userID, req, filter)
 	if err != nil {
 		return nil, err
+	}
+	if req.StrictIdentity && (file.ContentID != req.ContentID || (req.EpisodeID != "" && file.EpisodeID != req.EpisodeID)) {
+		return nil, catalog.ErrItemNotFound
 	}
 	if err := s.itemAccess.EnsureAccessible(ctx, file.ContentID, filter); err != nil {
 		return nil, err
@@ -359,7 +403,12 @@ func (s *Service) Create(ctx context.Context, userID int, req CreateRequest, fil
 		return nil, err
 	}
 	if decision.RequiresArtifact {
-		return s.createArtifactDownload(ctx, userID, req, file, decision)
+		d, err := s.createArtifactDownload(ctx, userID, req, file, decision)
+		if err != nil {
+			return nil, err
+		}
+		s.forgetMonitorDeletes(ctx, userID, req, file.ContentID, file.EpisodeID)
+		return d, nil
 	}
 
 	if req.DeviceID != "" {
@@ -367,6 +416,7 @@ func (s *Service) Create(ctx context.Context, userID int, req CreateRequest, fil
 		if err != nil {
 			return nil, err
 		}
+		s.forgetMonitorDeletes(ctx, userID, req, file.ContentID, file.EpisodeID)
 		return rows[0], nil
 	}
 
@@ -389,8 +439,8 @@ func (s *Service) Create(ctx context.Context, userID int, req CreateRequest, fil
 			Kind:             KindQueued,
 			Status:           StatusQueued,
 			Format:           FormatOriginal,
-			Quality:          QualityOriginal,
-			EffectiveQuality: QualityOriginal,
+			Quality:          decision.RequestedQuality,
+			EffectiveQuality: decision.EffectiveQuality,
 			Revision:         1,
 			FileSize:         file.FileSize,
 			CreatedAt:        now,
@@ -426,6 +476,11 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 			return nil, err
 		}
 	}
+	if managed {
+		if err := checkManagedCreateRevision(existing, req.ExpectedRevision, req.ExpectedDownloadID); err != nil {
+			return nil, err
+		}
+	}
 	if existing != nil {
 		artifact, err := s.artifacts.Ensure(ctx, file, decision.DeliveryFormat, decision.PrepareTarget)
 		if err != nil {
@@ -433,20 +488,45 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 		}
 		status, size := artifactRowStatus(artifact, file)
 		replacement := buildManagedDownload(userID, req.ProfileID, req.DeviceID, managedItem{file: file, contentID: file.ContentID, episodeID: file.EpisodeID}, decision, "", status, size, artifact.ID)
-		return s.reuseOrReplaceManaged(ctx, existing, replacement)
+		d, err := s.reuseOrReplaceManaged(ctx, existing, replacement, req.ExpectedRevision, req.ExpectedDownloadID)
+		if err != nil {
+			return nil, err
+		}
+		return s.confirmArtifactLink(ctx, d), nil
+	}
+
+	resolvedTarget := decision.PrepareTarget
+	toneMapPreResolved := preparedTargetRequiresToneMap(file, resolvedTarget)
+	if toneMapPreResolved {
+		// A quick, non-authoritative quota check avoids expensive capability work
+		// for requests that are already over quota. The check is repeated under the
+		// advisory lock below to retain the concurrency guarantee.
+		if err := s.limiter.Check(ctx, userID, 1); err != nil {
+			return nil, err
+		}
+		var err error
+		resolvedTarget, err = s.artifacts.resolveToneMapTarget(ctx, file, resolvedTarget)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// New row: the quota lock serializes check + insert across concurrent
-	// creates so they cannot all observe free quota before any row exists. The
-	// limiter must still pass BEFORE artifacts.Ensure — a rejected request must
-	// not leave an encode job behind (the worker would run it even though the
-	// caller saw 429) — so the lock spans Ensure too.
+	// creates so they cannot all observe free quota before any row exists.
+	// Capability discovery is complete, but the lock still spans artifact row
+	// creation so a rejected request cannot leave an encode job behind.
 	var d *Download
 	err := s.repo.WithUserQuotaLock(ctx, userID, func(ctx context.Context) error {
 		if err := s.limiter.Check(ctx, userID, 1); err != nil {
 			return err
 		}
-		artifact, err := s.artifacts.Ensure(ctx, file, decision.DeliveryFormat, decision.PrepareTarget)
+		var artifact *Artifact
+		var err error
+		if toneMapPreResolved {
+			artifact, err = s.artifacts.ensureResolved(ctx, file, decision.DeliveryFormat, resolvedTarget)
+		} else {
+			artifact, err = s.artifacts.Ensure(ctx, file, decision.DeliveryFormat, resolvedTarget)
+		}
 		if err != nil {
 			return err
 		}
@@ -489,7 +569,7 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 			if managed {
 				if existing, gerr := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, file.ContentID, file.EpisodeID); gerr == nil {
 					replacement := buildManagedDownload(userID, req.ProfileID, req.DeviceID, managedItem{file: file, contentID: file.ContentID, episodeID: file.EpisodeID}, decision, "", status, size, artifact.ID)
-					row, rerr := s.reuseOrReplaceManaged(ctx, existing, replacement)
+					row, rerr := s.reuseOrReplaceManaged(ctx, existing, replacement, req.ExpectedRevision, req.ExpectedDownloadID)
 					if rerr != nil {
 						return rerr
 					}
@@ -504,13 +584,28 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 	if err != nil {
 		return nil, err
 	}
-	return d, nil
+	// Ensure read the artifact before this row existed. Recovery may have
+	// requeued it since; return the reconciled row.
+	return s.confirmArtifactLink(ctx, d), nil
+}
+
+// confirmArtifactLink reconciles a committed create with missing-output
+// recovery. The create has already succeeded, so a failed check is logged
+// and the caller's row returned: reporting an error would invite a retry
+// that duplicates the download or conflicts on its revision.
+func (s *Service) confirmArtifactLink(ctx context.Context, d *Download) *Download {
+	confirmed, err := s.repo.ConfirmArtifactLink(ctx, d)
+	if err != nil {
+		slog.WarnContext(ctx, "confirming download artifact link failed", "component", "downloads", "download_id", d.ID, "artifact_id", d.ArtifactID, "error", err)
+		return d
+	}
+	return confirmed
 }
 
 // artifactRowStatus maps an ensured artifact to the download row status and
 // recorded size: ready artifacts serve immediately, anything else is preparing.
 func artifactRowStatus(artifact *Artifact, file *models.MediaFile) (string, int64) {
-	if artifact.Status == ArtifactReady {
+	if artifactReady(artifact) {
 		return StatusReady, artifact.FileSize
 	}
 	return StatusPreparing, file.FileSize
@@ -566,17 +661,23 @@ func (s *Service) createSeriesScoped(ctx context.Context, userID int, req Create
 		return nil, "", nil, fmt.Errorf("listing episodes: %w", err)
 	}
 
-	items, skipped, err := s.episodeItemsWithSkipped(ctx, req.ContentID, episodes)
+	items, skipped, err := s.episodeItemsWithSkipped(ctx, userID, req.historyProfile(), req.ContentID, episodes, filter)
 	if err != nil {
 		return nil, "", nil, err
 	}
 	if len(items) == 0 {
+		if req.BatchID != "" {
+			return []*Download{}, req.BatchID, skipped, nil
+		}
 		return nil, "", skipped, ErrNoDownloadableEpisodes
 	}
 
-	batchID, err := idgen.NextID()
-	if err != nil {
-		return nil, "", nil, fmt.Errorf("generating batch ID: %w", err)
+	batchID := req.BatchID
+	if batchID == "" {
+		batchID, err = idgen.NextID()
+		if err != nil {
+			return nil, "", nil, fmt.Errorf("generating batch ID: %w", err)
+		}
 	}
 
 	if req.DeviceID != "" {
@@ -584,6 +685,11 @@ func (s *Service) createSeriesScoped(ctx context.Context, userID int, req Create
 		if err != nil {
 			return nil, "", nil, err
 		}
+		episodeIDs := make([]string, len(items))
+		for i, it := range items {
+			episodeIDs[i] = it.episodeID
+		}
+		s.forgetMonitorDeletes(ctx, userID, req, req.ContentID, episodeIDs...)
 		return rows, batchID, skipped, nil
 	}
 
@@ -623,16 +729,17 @@ func (s *Service) createSeriesScoped(ctx context.Context, userID int, req Create
 	return dls, batchID, skipped, nil
 }
 
-// episodeItems resolves the best downloadable file per episode into managedItems,
-// skipping episodes that have no file. It batches the file lookup into one query
-// (not one per episode) and preserves episode order. Shared by series/season
-// downloads and subscription backfill so file selection stays identical.
-func (s *Service) episodeItems(ctx context.Context, seriesID string, episodes []*models.Episode) ([]managedItem, error) {
-	items, _, err := s.episodeItemsWithSkipped(ctx, seriesID, episodes)
+// episodeItems resolves the profile's preferred downloadable file per episode
+// (see versionPreference) into managedItems, skipping episodes that have no
+// file. It batches the file lookup into one query (not one per episode) and
+// preserves episode order. Shared by series/season downloads and subscription
+// backfill so file selection stays identical.
+func (s *Service) episodeItems(ctx context.Context, userID int, profileID, seriesID string, episodes []*models.Episode, filter catalog.AccessFilter) ([]managedItem, error) {
+	items, _, err := s.episodeItemsWithSkipped(ctx, userID, profileID, seriesID, episodes, filter)
 	return items, err
 }
 
-func (s *Service) episodeItemsWithSkipped(ctx context.Context, seriesID string, episodes []*models.Episode) ([]managedItem, []SkippedDownload, error) {
+func (s *Service) episodeItemsWithSkipped(ctx context.Context, userID int, profileID, seriesID string, episodes []*models.Episode, filter catalog.AccessFilter) ([]managedItem, []SkippedDownload, error) {
 	if len(episodes) == 0 {
 		return nil, nil, nil
 	}
@@ -644,6 +751,13 @@ func (s *Service) episodeItemsWithSkipped(ctx context.Context, seriesID string, 
 	if err != nil {
 		return nil, nil, fmt.Errorf("resolving files for %d episodes: %w", len(episodes), err)
 	}
+	var pref versionPreference
+	for _, files := range filesByEpisode {
+		if len(files) > 1 {
+			pref = s.loadVersionPreference(ctx, userID, profileID, seriesID, episodeIDs)
+			break
+		}
+	}
 	items := make([]managedItem, 0, len(episodes))
 	skipped := make([]SkippedDownload, 0)
 	for _, ep := range episodes {
@@ -652,7 +766,7 @@ func (s *Service) episodeItemsWithSkipped(ctx context.Context, seriesID string, 
 			skipped = append(skipped, SkippedDownload{EpisodeID: ep.ContentID, Reason: "no_file"})
 			continue
 		}
-		items = append(items, managedItem{file: pickBestFile(files), contentID: seriesID, episodeID: ep.ContentID})
+		items = append(items, managedItem{file: pref.pick(ep.ContentID, allowedCandidates(files, filter)), contentID: seriesID, episodeID: ep.ContentID})
 	}
 	return items, skipped, nil
 }
@@ -663,6 +777,20 @@ type managedItem struct {
 	file      *models.MediaFile
 	contentID string
 	episodeID string
+}
+
+// forgetMonitorDeletes clears the device's monitor exclusions for episodes of
+// seriesID it just downloaded explicitly (see Repository.DeleteManaged). It is
+// best-effort: the download already exists, and a leftover exclusion matters
+// only if the row later disappears without a delete, for example when a file
+// upgrade removes it by cascade.
+func (s *Service) forgetMonitorDeletes(ctx context.Context, userID int, req CreateRequest, seriesID string, episodeIDs ...string) {
+	if req.DeviceID == "" || len(episodeIDs) == 0 || episodeIDs[0] == "" {
+		return // ephemeral rows and movies have no monitor
+	}
+	if err := s.repo.ClearMonitorExclusions(ctx, userID, req.ProfileID, req.DeviceID, seriesID, episodeIDs); err != nil {
+		slog.WarnContext(ctx, "download monitor exclusions not cleared", "component", "downloads", "series_id", seriesID, "error", err)
+	}
 }
 
 // ensureManaged idempotently registers managed entries for the given items,
@@ -690,13 +818,33 @@ func (s *Service) ensureManaged(ctx context.Context, userID int, req CreateReque
 	var newIdx []int
 	for i, it := range items {
 		if ex, ok := existing[keys[i]]; ok {
+			expected := req.ExpectedRevision
+			expectedID := req.ExpectedDownloadID
+			if req.ExpectedEntries != nil {
+				entry, provided := req.ExpectedEntries[it.episodeID]
+				if !provided {
+					results[i] = ex
+					continue
+				}
+				expected = new(entry.Revision)
+				expectedID = entry.ID
+			}
 			replacement := buildManagedDownload(userID, req.ProfileID, req.DeviceID, it, decision, batchID, StatusReady, it.file.FileSize, "")
-			row, err := s.reuseOrReplaceManaged(ctx, ex, replacement)
+			row, err := s.reuseOrReplaceManaged(ctx, ex, replacement, expected, expectedID)
 			if err != nil {
 				return nil, err
 			}
 			results[i] = row
 			continue
+		}
+		expected := req.ExpectedRevision
+		expectedID := req.ExpectedDownloadID
+		if entry, ok := req.ExpectedEntries[it.episodeID]; ok {
+			expected = new(entry.Revision)
+			expectedID = entry.ID
+		}
+		if err := checkManagedCreateRevision(nil, expected, expectedID); err != nil {
+			return nil, err
 		}
 		newIdx = append(newIdx, i)
 	}
@@ -739,6 +887,10 @@ func (s *Service) ensureManaged(ctx context.Context, userID int, req CreateReque
 		row, err := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, items[i].contentID, items[i].episodeID)
 		if err != nil {
 			return nil, err
+		}
+		_, explicitEpisodeRevision := req.ExpectedEntries[items[i].episodeID]
+		if req.ExpectedRevision != nil || explicitEpisodeRevision {
+			return nil, ErrStatusConflict
 		}
 		results[i] = row
 	}
@@ -785,17 +937,43 @@ func buildManagedDownload(userID int, profileID, deviceID string, it managedItem
 	}
 }
 
-func (s *Service) reuseOrReplaceManaged(ctx context.Context, existing, replacement *Download) (*Download, error) {
-	if sameManagedTarget(existing, replacement) {
-		if !reusableManagedStatus(existing.Status) {
-			return s.repo.ReplaceManagedEntry(ctx, existing, replacement)
+func checkManagedCreateRevision(existing *Download, expected *int, expectedID string) error {
+	if expected == nil {
+		return nil
+	}
+	if existing == nil {
+		if *expected == 0 {
+			return nil
 		}
+		return ErrStatusConflict
+	}
+	if existing.Revision != *expected || existing.ID != expectedID {
+		return ErrStatusConflict
+	}
+	return nil
+}
+
+func (s *Service) reuseOrReplaceManaged(ctx context.Context, existing, replacement *Download, expected *int, expectedID string) (*Download, error) {
+	if err := checkManagedCreateRevision(existing, expected, expectedID); err != nil {
+		return nil, err
+	}
+	if sameManagedTarget(existing, replacement) && reusableManagedStatus(existing.Status) {
 		if replacement.BatchID != "" && existing.BatchID != replacement.BatchID {
-			return s.repo.UpdateManagedBatch(ctx, existing, replacement.BatchID)
+			row, err := s.repo.UpdateManagedBatch(ctx, existing, replacement.BatchID)
+			if err == nil && expected != nil && (row.ID != existing.ID || row.Revision != existing.Revision || !sameManagedTarget(row, replacement)) {
+				return nil, ErrStatusConflict
+			}
+			return row, err
 		}
 		return existing, nil
 	}
-	return s.repo.ReplaceManagedEntry(ctx, existing, replacement)
+	row, err := s.repo.ReplaceManagedEntry(ctx, existing, replacement)
+	// The shared CAS returns a concurrent winner after losing the update. Native
+	// creation must not report that winner as successful replacement of our target.
+	if err == nil && expected != nil && (row.ID != existing.ID || row.Revision != existing.Revision+1 || !sameManagedTarget(row, replacement)) {
+		return nil, ErrStatusConflict
+	}
+	return row, err
 }
 
 func reusableManagedStatus(status string) bool {
@@ -817,40 +995,6 @@ func sameManagedTarget(a, b *Download) bool {
 		a.FileSize == b.FileSize
 }
 
-// registerManagedItems idempotently registers each item as a ready original
-// managed entry for (userID, profileID, deviceID) with one batched fetch and
-// one batched insert, skipping items that already exist. The device row must
-// already exist (composite FK). Unlike the interactive ensureManaged path it
-// does NOT consume the QuantityLimiter — the subscription is the
-// authorization. Returns only the NEWLY registered rows: the sync response's
-// "registered" count is documented as new episodes, so a steady-state sync
-// must report 0, not the full in-scope set.
-func registerManagedItems(ctx context.Context, repo *Repository, userID int, profileID, deviceID string, items []managedItem, batchID string) ([]*Download, error) {
-	if len(items) == 0 {
-		return nil, nil
-	}
-	keys := make([]ManagedEntryKey, len(items))
-	for i, it := range items {
-		keys[i] = ManagedEntryKey{ContentID: it.contentID, EpisodeID: it.episodeID}
-	}
-	existing, err := repo.GetManagedEntriesByKeys(ctx, userID, profileID, deviceID, keys)
-	if err != nil {
-		return nil, err
-	}
-	toInsert := make([]*Download, 0, len(items))
-	for i, it := range items {
-		if _, ok := existing[keys[i]]; ok {
-			continue
-		}
-		d, err := buildManagedOriginal(userID, profileID, deviceID, it, originalDecision(), batchID)
-		if err != nil {
-			return nil, err
-		}
-		toInsert = append(toInsert, d)
-	}
-	return repo.CreateManagedEntriesBatch(ctx, toInsert)
-}
-
 // List returns the calling device's managed entries, or the user's
 // ephemeral/account-level rows when no device header is present.
 func (s *Service) List(ctx context.Context, userID int, profileID, deviceID string) ([]*Download, error) {
@@ -870,6 +1014,7 @@ func (s *Service) ServeDirect(ctx context.Context, w http.ResponseWriter, r *htt
 	if err != nil {
 		return err
 	}
+	notifyServeAuthorized(ctx, *target)
 	return s.serveLocalFile(ctx, w, r, target.Path, userID)
 }
 
@@ -885,7 +1030,7 @@ func (s *Service) ResolveDirectFile(ctx context.Context, userID, fileID int, for
 	}
 	file, err := s.fileRepo.GetByID(ctx, fileID)
 	if err != nil {
-		return nil, fmt.Errorf("loading media file: %w", err)
+		return nil, translateFileLookupError(err)
 	}
 	if file == nil || file.MissingSince != nil {
 		return nil, catalog.ErrItemNotFound
@@ -909,6 +1054,7 @@ func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.
 		if err != nil {
 			return err
 		}
+		notifyServeAuthorized(ctx, *target)
 		return s.serveFileTarget(ctx, w, r, target, userID)
 	}
 
@@ -931,7 +1077,6 @@ func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.
 	if dl.Status == StatusPreparing {
 		return fmt.Errorf("download is preparing: %w", ErrDownloadNotActive)
 	}
-
 	// Atomically transition queued → downloading for original rows. Artifact
 	// (remux/transcode) rows are already ready by the time bytes are served.
 	if dl.Format == FormatOriginal && dl.Status == StatusQueued {
@@ -1031,7 +1176,7 @@ func (s *Service) Delete(ctx context.Context, userID int, profileID, deviceID, d
 	}
 }
 
-func (s *Service) resolveBulkQuality(requested string, _ *models.User, _ config.DownloadConfig) (QualityDecision, error) {
+func (s *Service) resolveBulkQuality(requested string, _ *PolicyUser, _ config.DownloadConfig) (QualityDecision, error) {
 	quality := normalizeQuality(requested)
 	if !ValidQuality(quality) {
 		return QualityDecision{}, ErrInvalidQuality
@@ -1050,11 +1195,24 @@ func originalDecision() QualityDecision {
 	}
 }
 
-func (s *Service) resolveFile(ctx context.Context, req CreateRequest) (*models.MediaFile, error) {
+// translateFileLookupError maps a media-file lookup failure onto the catalog
+// not-found sentinel the API problem mappers understand. The file repository
+// reports a missing row as scanner.ErrFileNotFound; wrapping it opaquely made
+// every request for an unknown file_id answer 500 instead of 404.
+func translateFileLookupError(err error) error {
+	if errors.Is(err, scanner.ErrFileNotFound) {
+		return catalog.ErrItemNotFound
+	}
+	return fmt.Errorf("loading media file: %w", err)
+}
+
+// resolveFile returns the requested file, or the profile's preferred version
+// of the movie or episode when the request names none (see versionPreference).
+func (s *Service) resolveFile(ctx context.Context, userID int, req CreateRequest, filter catalog.AccessFilter) (*models.MediaFile, error) {
 	if req.FileID > 0 {
 		file, err := s.fileRepo.GetByID(ctx, req.FileID)
 		if err != nil {
-			return nil, fmt.Errorf("loading media file: %w", err)
+			return nil, translateFileLookupError(err)
 		}
 		if file == nil || file.MissingSince != nil {
 			return nil, catalog.ErrItemNotFound
@@ -1064,7 +1222,9 @@ func (s *Service) resolveFile(ctx context.Context, req CreateRequest) (*models.M
 
 	var files []*models.MediaFile
 	var err error
+	itemID, seriesID := req.ContentID, ""
 	if req.EpisodeID != "" {
+		itemID, seriesID = req.EpisodeID, req.ContentID
 		files, err = s.fileRepo.GetByEpisodeID(ctx, req.EpisodeID)
 	} else {
 		files, err = s.fileRepo.GetByContentID(ctx, req.ContentID)
@@ -1075,8 +1235,20 @@ func (s *Service) resolveFile(ctx context.Context, req CreateRequest) (*models.M
 	if len(files) == 0 {
 		return nil, catalog.ErrItemNotFound
 	}
+	files = allowedCandidates(files, filter)
+	if len(files) == 1 {
+		return files[0], nil
+	}
+	return s.loadVersionPreference(ctx, userID, req.historyProfile(), seriesID, []string{itemID}).pick(itemID, files), nil
+}
 
-	return pickBestFile(files), nil
+// historyProfile is the profile whose watch history picks a default version,
+// or "" for the highest-resolution default.
+func (r CreateRequest) historyProfile() string {
+	if !r.VersionFromHistory {
+		return ""
+	}
+	return r.ProfileID
 }
 
 // serveDownloadBytes serves the bytes for a download row: the prepared artifact
@@ -1089,13 +1261,14 @@ func (s *Service) serveDownloadBytes(ctx context.Context, w http.ResponseWriter,
 	if err != nil {
 		return err
 	}
+	notifyServeAuthorized(ctx, *target)
 	return s.serveFileTarget(ctx, w, r, target, userID)
 }
 
 func (s *Service) resolveDownloadBytesTarget(ctx context.Context, dl *Download, filter catalog.AccessFilter, sourceProxyEligible, preparedProxyEligible bool) (*FileTarget, error) {
 	file, err := s.fileRepo.GetByID(ctx, dl.MediaFileID)
 	if err != nil {
-		return nil, fmt.Errorf("loading media file: %w", err)
+		return nil, translateFileLookupError(err)
 	}
 	if file == nil {
 		return nil, catalog.ErrItemNotFound
@@ -1118,16 +1291,22 @@ func (s *Service) resolveDownloadBytesTarget(ctx context.Context, dl *Download, 
 		if !catalog.FileAllowedByAccess(&served, filter) {
 			return nil, catalog.ErrItemNotFound
 		}
+		expectedFingerprint := ""
+		if artifactUsesExecutionFingerprint(artifact) {
+			expectedFingerprint = artifact.ParamsHash
+		}
 		return &FileTarget{
-			Path:             artifact.OutputPath,
-			DownloadID:       dl.ID,
-			MediaFileID:      file.ID,
-			ArtifactID:       artifact.ID,
-			OriginNodeID:     artifact.OriginNodeID,
-			OriginNodeURL:    artifact.OriginNodeURL,
-			OriginNodeGroup:  artifact.OriginNodeGroup,
-			OriginArtifactID: artifact.OriginArtifactID,
-			ProxyEligible:    preparedProxyEligible,
+			Path:                         artifact.OutputPath,
+			DownloadID:                   dl.ID,
+			MediaFileID:                  file.ID,
+			ArtifactID:                   artifact.ID,
+			OriginNodeID:                 artifact.OriginNodeID,
+			OriginNodeURL:                artifact.OriginNodeURL,
+			OriginNodeGroup:              artifact.OriginNodeGroup,
+			OriginArtifactID:             artifact.OriginArtifactID,
+			ExpectedArtifactSize:         artifact.FileSize,
+			ExpectedExecutionFingerprint: expectedFingerprint,
+			ProxyEligible:                preparedProxyEligible,
 		}, nil
 	}
 	if file.MissingSince != nil {
@@ -1216,6 +1395,16 @@ func (s *Service) serveFileTarget(ctx context.Context, w http.ResponseWriter, r 
 	if !downloadprepare.RelayStatusAllowed(resp.StatusCode) {
 		return fmt.Errorf("remote artifact node returned %d", resp.StatusCode)
 	}
+	if target.ExpectedExecutionFingerprint != "" {
+		attestation, attestationErr := downloadprepare.ResultFromHeaders(resp.Header)
+		if attestationErr != nil || attestation.ExecutionFingerprint != target.ExpectedExecutionFingerprint || attestation.FileSize != target.ExpectedArtifactSize {
+			artifact := &Artifact{ID: target.ArtifactID, OriginNodeID: target.OriginNodeID, OriginNodeURL: target.OriginNodeURL, OriginNodeGroup: target.OriginNodeGroup, OriginArtifactID: target.OriginArtifactID}
+			if _, err := s.artifacts.requeueRemoteArtifactExactNow(ctx, artifact, "remote output attestation mismatch"); err != nil {
+				return err
+			}
+			return fmt.Errorf("remote artifact attestation mismatch: %w", ErrDownloadNotActive)
+		}
+	}
 	// Preserve an origin-provided disposition, but supply the same sanitized
 	// attachment filename as local delivery when the node omits one.
 	if strings.TrimSpace(target.Path) != "" {
@@ -1241,22 +1430,6 @@ func (s *Service) serveFileTarget(ctx context.Context, w http.ResponseWriter, r 
 		return fmt.Errorf("%w: relaying remote artifact: %w", ErrResponseCommitted, err)
 	}
 	return nil
-}
-
-// pickBestFile selects the highest-resolution file from a list.
-func pickBestFile(files []*models.MediaFile) *models.MediaFile {
-	if len(files) == 1 {
-		return files[0]
-	}
-	best := files[0]
-	for _, f := range files[1:] {
-		// access.CompareQuality is the codebase's one resolution ordering
-		// (includes 4320p); download file selection must agree with playback.
-		if access.CompareQuality(f.Resolution, best.Resolution) > 0 {
-			best = f
-		}
-	}
-	return best
 }
 
 func sanitizeFilename(name string) string {

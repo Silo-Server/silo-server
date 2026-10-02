@@ -16,7 +16,7 @@ type WatchProviderService interface {
 	ListProviders() []watchsync.ProviderSummary
 	StartDeviceAuth(ctx context.Context, userID int, profileID string, providerKey string) (watchsync.DeviceAuthSession, error)
 	PollDeviceAuth(ctx context.Context, userID int, profileID string, providerKey string, sessionID string) (watchsync.Connection, error)
-	ConnectAPIKey(ctx context.Context, userID int, profileID string, providerKey string, apiKey string) (watchsync.Connection, error)
+	ConnectAPIKeyWithConfig(ctx context.Context, userID int, profileID string, providerKey string, apiKey string, connectionConfig watchsync.ConnectionConfigValues) (watchsync.Connection, error)
 	GetConnectionStatus(ctx context.Context, userID int, profileID string, provider string) (watchsync.ConnectionStatus, error)
 	UpdateConnection(ctx context.Context, userID int, profileID string, provider string, update watchsync.ConnectionUpdate) (watchsync.ConnectionStatus, error)
 	DeleteConnection(ctx context.Context, userID int, profileID string, provider string) error
@@ -77,6 +77,11 @@ func (h *WatchProviderHandler) HandleUpdateConnection(w http.ResponseWriter, r *
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
+	// Rating and dropped-show sync settings exist only on /api/v2; the frozen
+	// v1 contract keeps its original settings.
+	update.ImportRatingsEnabled = nil
+	update.ExportRatingsEnabled = nil
+	update.SyncDroppedEnabled = nil
 	status, err := h.service.UpdateConnection(r.Context(), userID, profileID, provider, update)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "watch_provider_error", err.Error())
@@ -147,13 +152,14 @@ func (h *WatchProviderHandler) HandleConnectAPIKey(w http.ResponseWriter, r *htt
 		return
 	}
 	var req struct {
-		APIKey string `json:"api_key"`
+		APIKey           string                           `json:"api_key"`
+		ConnectionConfig watchsync.ConnectionConfigValues `json:"connection_config"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	if _, err := h.service.ConnectAPIKey(r.Context(), userID, profileID, provider, req.APIKey); err != nil {
+	if _, err := h.service.ConnectAPIKeyWithConfig(r.Context(), userID, profileID, provider, req.APIKey, req.ConnectionConfig); err != nil {
 		writeError(w, http.StatusBadRequest, "watch_provider_error", err.Error())
 		return
 	}

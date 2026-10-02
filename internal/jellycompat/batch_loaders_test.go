@@ -4,11 +4,57 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
+
+func TestApplyCompatLibraryAccessUsesItemLevelDisabledExclusion(t *testing.T) {
+	access := catalog.AccessFilter{DisabledLibraryIDs: []int{9}}
+	var conditions []string
+	var args []any
+	argIdx := 2
+	if !applyCompatLibraryAccess(&access, nil, "mi.content_id", &conditions, &args, &argIdx) {
+		t.Fatal("disabled-only scope must remain queryable")
+	}
+
+	sql := strings.Join(conditions, " AND ")
+	if !strings.Contains(sql, "EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id)") {
+		t.Fatalf("disabled-only scope must require positive membership, got %s", sql)
+	}
+	if !strings.Contains(sql, "NOT EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id AND mil.media_folder_id = ANY($2))") {
+		t.Fatalf("dual-membership items must be rejected with NOT EXISTS, got %s", sql)
+	}
+	if len(args) != 1 || argIdx != 3 {
+		t.Fatalf("args = %v, argIdx = %d; want one disabled-list arg and 3", args, argIdx)
+	}
+}
+
+func TestApplyCompatLibraryAccessNarrowsRequestedLibraryBeforeDeny(t *testing.T) {
+	libraryID := 7
+	access := catalog.AccessFilter{
+		AllowedLibraryIDs:  []int{7, 8},
+		DisabledLibraryIDs: []int{9},
+	}
+	var conditions []string
+	var args []any
+	argIdx := 1
+	if !applyCompatLibraryAccess(&access, &libraryID, "si.content_id", &conditions, &args, &argIdx) {
+		t.Fatal("requested allowed library must remain queryable")
+	}
+
+	if !reflect.DeepEqual(access.AllowedLibraryIDs, []int{7}) {
+		t.Fatalf("allowed libraries = %v, want requested library only", access.AllowedLibraryIDs)
+	}
+	sql := strings.Join(conditions, " AND ")
+	if !strings.Contains(sql, "mil.media_folder_id = ANY($1)") ||
+		!strings.Contains(sql, "NOT EXISTS") ||
+		!strings.Contains(sql, "mil.media_folder_id = ANY($2)") {
+		t.Fatalf("requested library and global deny must be independent predicates, got %s", sql)
+	}
+}
 
 type stubLibraryMembershipChecker struct {
 	membership map[string]bool
@@ -111,6 +157,10 @@ func (r *countingEpisodeRepo) ListBySeries(context.Context, string) ([]*models.E
 	return nil, errors.New("ListBySeries not used in fallback test")
 }
 
+func (r *countingEpisodeRepo) ListBySeriesIDs(context.Context, []string) (map[string][]*models.Episode, error) {
+	return nil, errors.New("ListBySeriesIDs not used in fallback test")
+}
+
 func (r *countingEpisodeRepo) ListAdjacentInSeries(context.Context, string, int, int) ([]*models.Episode, error) {
 	return nil, errors.New("ListAdjacentInSeries not used in fallback test")
 }
@@ -166,14 +216,14 @@ func TestFetchCompatItemsByContentIDsFallback_UsesBatchedAccessQuery(t *testing.
 		// No accessFilter resolver: resolveAccessFilter returns a zero filter.
 	}
 
-	got, err := h.fetchCompatItemsByContentIDsFallback(
+	got, err := h.fetchCompatItemsByContentIDs(
 		context.Background(),
 		&Session{},
 		[]string{"a", "b"},
 		nil,
 	)
 	if err != nil {
-		t.Fatalf("fetchCompatItemsByContentIDsFallback returned error: %v", err)
+		t.Fatalf("fetchCompatItemsByContentIDs returned error: %v", err)
 	}
 	if len(got) != 2 {
 		t.Fatalf("expected 2 items in result; got %d (%v)", len(got), got)
@@ -202,13 +252,13 @@ func TestFetchCompatItemsByContentIDsFallback_NarrowsAccessToLibraryArg(t *testi
 	h := &ItemsHandler{itemRepo: repo}
 	libraryID := 7
 
-	if _, err := h.fetchCompatItemsByContentIDsFallback(
+	if _, err := h.fetchCompatItemsByContentIDs(
 		context.Background(),
 		&Session{},
 		[]string{"a"},
 		&libraryID,
 	); err != nil {
-		t.Fatalf("fetchCompatItemsByContentIDsFallback returned error: %v", err)
+		t.Fatalf("fetchCompatItemsByContentIDs returned error: %v", err)
 	}
 	if repo.getByIDsWithAccessCalls != 1 {
 		t.Fatalf("expected exactly 1 GetByIDsWithAccess call; got %d", repo.getByIDsWithAccessCalls)
@@ -232,14 +282,14 @@ func TestFetchCompatItemsByContentIDsFallback_LibraryOutsideAllowlistShortCircui
 	}
 	disallowed := 99
 
-	got, err := h.fetchCompatItemsByContentIDsFallback(
+	got, err := h.fetchCompatItemsByContentIDs(
 		context.Background(),
 		&Session{},
 		[]string{"a"},
 		&disallowed,
 	)
 	if err != nil {
-		t.Fatalf("fetchCompatItemsByContentIDsFallback returned error: %v", err)
+		t.Fatalf("fetchCompatItemsByContentIDs returned error: %v", err)
 	}
 	if len(got) != 0 {
 		t.Errorf("expected empty result when libraryID is outside the access allowlist; got %v", got)
@@ -266,14 +316,14 @@ func TestFetchCompatItemsByContentIDsFallback_BatchesPresign(t *testing.T) {
 	}
 	h := &ItemsHandler{itemRepo: repo, detailSvc: detailSvc}
 
-	got, err := h.fetchCompatItemsByContentIDsFallback(
+	got, err := h.fetchCompatItemsByContentIDs(
 		context.Background(),
 		&Session{},
 		[]string{"a", "b", "c"},
 		nil,
 	)
 	if err != nil {
-		t.Fatalf("fetchCompatItemsByContentIDsFallback returned error: %v", err)
+		t.Fatalf("fetchCompatItemsByContentIDs returned error: %v", err)
 	}
 	if len(got) != 3 {
 		t.Fatalf("expected 3 items in result; got %d", len(got))

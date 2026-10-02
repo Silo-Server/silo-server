@@ -100,10 +100,14 @@ func (r *ScanRegistry) ListActiveLimit(limit int) []ScanRun {
 	return runs
 }
 
+// MarkTerminal drops the run from the registry. Terminal runs reach clients
+// through the event published alongside this call and are never read back,
+// so retaining them would only grow the map for the life of the process and
+// slow every ListActive snapshot.
 func (r *ScanRegistry) MarkTerminal(run ScanRun) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.entries[run.ID] = run
+	delete(r.entries, run.ID)
 }
 
 func (r *ScanRegistry) CancelLibrary(libraryID int, completedAt time.Time) []ScanRun {

@@ -1,8 +1,134 @@
 {
   "fixture_version": 1,
-  "manifest_revision": 6,
+  "manifest_revision": 16,
   "description": "Cross-platform conformance cases for settings resolution. Every case runs against the shipped manifest in this directory: definitions are referenced by key, never restated, so an expectation can only be satisfied by resolving the real contract. Each platform's resolver (Go in internal/settingsresolve, TypeScript in web/src/lib/settingsResolve.ts, Kotlin and Swift in the client repos) runs every case through a hand-written runner; a runner must fail on any fixture field it does not know, because schema drift in the fixture itself is drift. A case's constraint_bindings attach a constraint to a copy of a real definition so constraint semantics stay testable even while no shipped definition carries that constraint kind. In expected entries, constrained:true requires stored_value and constraint_kind to be present, and stored_value may be null to mean the authored value was JSON null.",
   "cases": [
+    {
+      "name": "seek_intervals_p1",
+      "description": "Video and audiobook intervals are independent profile values and follow the profile across devices. Other profiles receive defaults.",
+      "keys": [
+        "player.video_skip_back_seconds",
+        "player.video_skip_forward_seconds",
+        "player.audiobook_skip_back_seconds",
+        "player.audiobook_skip_forward_seconds"
+      ],
+      "context": {
+        "profile_id": "p1",
+        "device_id": "another-device",
+        "client_family": "mobile"
+      },
+      "stored": [
+        {
+          "key": "player.video_skip_back_seconds",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": 5
+        },
+        {
+          "key": "player.video_skip_forward_seconds",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": 90
+        },
+        {
+          "key": "player.audiobook_skip_back_seconds",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": 15
+        },
+        {
+          "key": "player.audiobook_skip_forward_seconds",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": 45
+        }
+      ],
+      "expected": [
+        {
+          "key": "player.video_skip_back_seconds",
+          "value": 5,
+          "source": "profile"
+        },
+        {
+          "key": "player.video_skip_forward_seconds",
+          "value": 90,
+          "source": "profile"
+        },
+        {
+          "key": "player.audiobook_skip_back_seconds",
+          "value": 15,
+          "source": "profile"
+        },
+        {
+          "key": "player.audiobook_skip_forward_seconds",
+          "value": 45,
+          "source": "profile"
+        }
+      ]
+    },
+    {
+      "name": "seek_intervals_p2",
+      "description": "Video and audiobook intervals are independent profile values and follow the profile across devices. Other profiles receive defaults.",
+      "keys": [
+        "player.video_skip_back_seconds",
+        "player.video_skip_forward_seconds",
+        "player.audiobook_skip_back_seconds",
+        "player.audiobook_skip_forward_seconds"
+      ],
+      "context": {
+        "profile_id": "p2",
+        "device_id": "another-device",
+        "client_family": "mobile"
+      },
+      "stored": [
+        {
+          "key": "player.video_skip_back_seconds",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": 5
+        },
+        {
+          "key": "player.video_skip_forward_seconds",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": 90
+        },
+        {
+          "key": "player.audiobook_skip_back_seconds",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": 15
+        },
+        {
+          "key": "player.audiobook_skip_forward_seconds",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": 45
+        }
+      ],
+      "expected": [
+        {
+          "key": "player.video_skip_back_seconds",
+          "value": 10,
+          "source": "default"
+        },
+        {
+          "key": "player.video_skip_forward_seconds",
+          "value": 30,
+          "source": "default"
+        },
+        {
+          "key": "player.audiobook_skip_back_seconds",
+          "value": 10,
+          "source": "default"
+        },
+        {
+          "key": "player.audiobook_skip_forward_seconds",
+          "value": 30,
+          "source": "default"
+        }
+      ]
+    },
     {
       "name": "profile_client_sits_between_device_and_profile",
       "description": "Presentation values roam across like clients, while an exact-device override remains more specific and a profile value remains the cross-family fallback.",
@@ -669,6 +795,48 @@
       ]
     },
     {
+      "name": "intro_skip_mode_defaults_to_ask",
+      "description": "A profile that has never chosen an intro behaviour gets the contract default, which is the same prompt the old auto_skip_intro=false produced.",
+      "keys": ["playback.intro_skip_mode"],
+      "context": { "profile_id": "p1", "device_id": "d1" },
+      "stored": [],
+      "expected": [
+        {
+          "key": "playback.intro_skip_mode",
+          "value": "ask",
+          "source": "default"
+        }
+      ]
+    },
+    {
+      "name": "intro_skip_mode_device_override_beats_profile",
+      "description": "A living-room television set to skip intros automatically does not change the profile-wide choice to leave them alone.",
+      "keys": ["playback.intro_skip_mode"],
+      "context": { "profile_id": "p1", "device_id": "d1" },
+      "stored": [
+        {
+          "key": "playback.intro_skip_mode",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": "never"
+        },
+        {
+          "key": "playback.intro_skip_mode",
+          "scope": "profile_device",
+          "profile_id": "p1",
+          "device_id": "d1",
+          "value": "always"
+        }
+      ],
+      "expected": [
+        {
+          "key": "playback.intro_skip_mode",
+          "value": "always",
+          "source": "profile_device"
+        }
+      ]
+    },
+    {
       "name": "subtitle_appearance_uses_shared_default",
       "description": "With no stored profile or device value, every client receives the contract's shared Box 75% subtitle appearance.",
       "keys": ["playback.subtitle_appearance"],
@@ -681,6 +849,7 @@
             "fontSize": "large",
             "fontFamily": "sans-serif",
             "fontColor": "#ffffff",
+            "textOpacity": 100,
             "backgroundColor": "#000000",
             "backgroundStyle": "box",
             "backgroundOpacity": 75,
@@ -691,6 +860,233 @@
           "source": "default"
         }
       ]
+    },
+    {
+      "name": "card_overlays_enabled_profile_opt_out",
+      "description": "A profile that turned its own overlay badges off resolves false at profile scope; the server-wide default is not part of settings resolution.",
+      "keys": ["ui.card_overlays_enabled"],
+      "context": { "profile_id": "p1" },
+      "stored": [
+        {
+          "key": "ui.card_overlays_enabled",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": false
+        }
+      ],
+      "expected": [
+        {
+          "key": "ui.card_overlays_enabled",
+          "value": false,
+          "source": "profile"
+        }
+      ]
+    },
+    {
+      "name": "card_overlays_enabled_profile_opt_in",
+      "description": "A profile that turned its own overlay badges on resolves true at profile scope, which is what lets it override a server-wide default of off.",
+      "keys": ["ui.card_overlays_enabled"],
+      "context": { "profile_id": "p1" },
+      "stored": [
+        {
+          "key": "ui.card_overlays_enabled",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": true
+        }
+      ],
+      "expected": [
+        {
+          "key": "ui.card_overlays_enabled",
+          "value": true,
+          "source": "profile"
+        }
+      ]
+    },
+    {
+      "name": "card_overlays_absent_express_no_preference",
+      "description": "Nothing stored resolves both card-overlay keys to null with source \"default\", which is what lets the server-wide admin defaults apply.",
+      "keys": ["ui.card_overlays", "ui.card_overlays_enabled"],
+      "context": { "profile_id": "p1" },
+      "stored": [],
+      "expected": [
+        {
+          "key": "ui.card_overlays",
+          "value": null,
+          "source": "default"
+        },
+        {
+          "key": "ui.card_overlays_enabled",
+          "value": null,
+          "source": "default"
+        }
+      ]
+    },
+    {
+      "name": "card_quick_actions_profile_choice_wins",
+      "description": "A profile that picked favorites-only shortcuts resolves at profile scope instead of falling through to the server-wide default.",
+      "keys": ["ui.card_quick_actions"],
+      "context": { "profile_id": "p1" },
+      "stored": [
+        {
+          "key": "ui.card_quick_actions",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": "favorites"
+        }
+      ],
+      "expected": [
+        {
+          "key": "ui.card_quick_actions",
+          "value": "favorites",
+          "source": "profile"
+        }
+      ]
+    },
+    {
+      "name": "card_quick_actions_enabled_profile_opt_out",
+      "description": "A profile that turned its own quick actions off resolves false at profile scope; the server-wide default is not part of settings resolution.",
+      "keys": ["ui.card_quick_actions_enabled"],
+      "context": { "profile_id": "p1" },
+      "stored": [
+        {
+          "key": "ui.card_quick_actions_enabled",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": false
+        }
+      ],
+      "expected": [
+        {
+          "key": "ui.card_quick_actions_enabled",
+          "value": false,
+          "source": "profile"
+        }
+      ]
+    },
+    {
+      "name": "card_quick_actions_enabled_profile_opt_in",
+      "description": "A profile that turned its own quick actions on resolves true at profile scope, which is what lets it override a server-wide default of off.",
+      "keys": ["ui.card_quick_actions_enabled"],
+      "context": { "profile_id": "p1" },
+      "stored": [
+        {
+          "key": "ui.card_quick_actions_enabled",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": true
+        }
+      ],
+      "expected": [
+        {
+          "key": "ui.card_quick_actions_enabled",
+          "value": true,
+          "source": "profile"
+        }
+      ]
+    },
+    {
+      "name": "card_quick_actions_absent_express_no_preference",
+      "description": "Nothing stored resolves both quick-action keys to null with source \"default\", which is what lets the server-wide admin defaults apply.",
+      "keys": ["ui.card_quick_actions", "ui.card_quick_actions_enabled"],
+      "context": { "profile_id": "p1" },
+      "stored": [],
+      "expected": [
+        {
+          "key": "ui.card_quick_actions",
+          "value": null,
+          "source": "default"
+        },
+        {
+          "key": "ui.card_quick_actions_enabled",
+          "value": null,
+          "source": "default"
+        }
+      ]
+    },
+    {
+      "name": "advisory_age_badge_is_off_until_a_profile_asks",
+      "description": "The advisory-age badge is per profile and off unless that profile turned it on. p1 opted in, so it resolves true from the profile; p2 stored nothing and falls to the contract default false. A profile row must never leak across profiles here, because the setting decides what a household parent sees about a child's viewing.",
+      "keys": ["catalog.show_advisory_age"],
+      "context": { "profile_id": "p2", "device_id": "d1" },
+      "stored": [
+        {
+          "key": "catalog.show_advisory_age",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": true
+        }
+      ],
+      "expected": [
+        {
+          "key": "catalog.show_advisory_age",
+          "value": false,
+          "source": "default"
+        }
+      ]
+    },
+    {
+      "name": "advisory_age_badge_resolves_from_the_opted_in_profile",
+      "description": "The same stored row resolves true for the profile that owns it, with source \"profile\" rather than the default.",
+      "keys": ["catalog.show_advisory_age"],
+      "context": { "profile_id": "p1", "device_id": "d1" },
+      "stored": [
+        {
+          "key": "catalog.show_advisory_age",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": true
+        }
+      ],
+      "expected": [
+        {
+          "key": "catalog.show_advisory_age",
+          "value": true,
+          "source": "profile"
+        }
+      ]
+    },
+    {
+      "name": "theme_music_is_opt_in",
+      "keys": ["ui.theme_music_enabled", "ui.theme_music_loop"],
+      "context": {"profile_id": "p1", "device_id": "browser"},
+      "stored": [],
+      "expected": [
+        {"key": "ui.theme_music_enabled", "value": false, "source": "default"},
+        {"key": "ui.theme_music_loop", "value": false, "source": "default"}
+      ]
+    },
+    {
+      "name": "theme_music_device_overrides_profile",
+      "keys": ["ui.theme_music_enabled"],
+      "context": {"profile_id": "p1", "device_id": "browser"},
+      "stored": [
+        {"key": "ui.theme_music_enabled", "scope": "profile", "profile_id": "p1", "value": true},
+        {"key": "ui.theme_music_enabled", "scope": "profile_device", "profile_id": "p1", "device_id": "browser", "value": false}
+      ],
+      "expected": [{"key": "ui.theme_music_enabled", "value": false, "source": "profile_device"}]
+    },
+    {
+      "name": "title_art_follows_each_device",
+      "description": "With no profile value, every device follows its own choice; a device that never chose shows title art.",
+      "keys": ["ui.title_art"],
+      "context": {"profile_id": "p1", "device_id": "phone"},
+      "stored": [
+        {"key": "ui.title_art", "scope": "profile_device", "profile_id": "p1", "device_id": "phone", "value": false},
+        {"key": "ui.title_art", "scope": "profile_device", "profile_id": "p1", "device_id": "living-room", "value": true}
+      ],
+      "expected": [{"key": "ui.title_art", "value": false, "source": "profile_device"}]
+    },
+    {
+      "name": "title_art_profile_value_applies_to_all_devices",
+      "description": "A profile value is the apply-to-all-devices choice, so it wins over the device's own value instead of being the fallback.",
+      "keys": ["ui.title_art"],
+      "context": {"profile_id": "p1", "device_id": "phone"},
+      "stored": [
+        {"key": "ui.title_art", "scope": "profile", "profile_id": "p1", "value": true},
+        {"key": "ui.title_art", "scope": "profile_device", "profile_id": "p1", "device_id": "phone", "value": false}
+      ],
+      "expected": [{"key": "ui.title_art", "value": true, "source": "profile"}]
     }
   ]
 }

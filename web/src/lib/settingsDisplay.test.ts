@@ -30,7 +30,8 @@ describe("settingsDisplay", () => {
         SETTING_DEFINITIONS[key].scopes.includes("profile_device") &&
         !ALL_DEVICE_SETTING_KEYS.includes(key),
     );
-    expect(missed).toEqual([]);
+    // The single-theme web client retired ui.theme; an override on it does nothing.
+    expect(missed).toEqual(["ui.theme"]);
   });
 
   it("offers a device override for the skip preferences the player now resolves", () => {
@@ -99,6 +100,12 @@ describe("settingsDisplay", () => {
   it("renders booleans and enum members with their contract labels", () => {
     expect(formatSettingValue(SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO, "true")).toBe("Enabled");
     expect(formatSettingValue(SETTING_KEYS.PLAYBACK_SUBTITLE_MODE, "always")).toBe("Always on");
+  });
+
+  it("reads a bandwidth cap in Mbps and an empty one as no limit", () => {
+    expect(formatSettingValue(SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS, "20000")).toBe("20 Mbps");
+    expect(formatSettingValue(SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS, "")).toBe("No limit");
+    expect(formatSettingValue(SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS, undefined)).toBe("No limit");
   });
 
   it("passes an unknown key's value through rather than inventing a label", () => {

@@ -83,3 +83,89 @@ export function serializeBucketPolicies(policies: LogRetentionBucketPolicy[]): s
 
   return JSON.stringify(normalized);
 }
+
+/** A bucket policy plus the stable row id the editor keys React on. */
+export type LogRetentionBucketRow = LogRetentionBucketPolicy & { id: string };
+
+export function createBucketRow(
+  policy?: Partial<LogRetentionBucketPolicy>,
+  id = "0",
+): LogRetentionBucketRow {
+  return {
+    id,
+    component: policy?.component ?? "",
+    level: policy?.level ?? "info",
+    retention_days: policy?.retention_days ?? 1,
+    max_rows: policy?.max_rows ?? 100000,
+    max_size_mb: policy?.max_size_mb ?? 128,
+  };
+}
+
+export function recommendedBucketRows(): LogRetentionBucketRow[] {
+  return DEFAULT_BUCKET_POLICIES.map((policy, index) => createBucketRow(policy, String(index + 1)));
+}
+
+export interface LogRetentionBucketRowsState {
+  rows: LogRetentionBucketRow[];
+  /** Empty unless the stored JSON was unreadable and the rows fell back. */
+  error: string;
+}
+
+/**
+ * Turns the stored `opslog.bucket_policies` JSON into editor rows. Unreadable
+ * JSON falls back to the recommended rules with an error the caller shows, so
+ * an admin can always recover without hand-editing the database.
+ */
+export function bucketRowsFromRaw(raw: string): LogRetentionBucketRowsState {
+  try {
+    const parsed = parseBucketPolicies(raw);
+    return {
+      rows: parsed.map((policy, index) => createBucketRow(policy, String(index + 1))),
+      error: "",
+    };
+  } catch (error) {
+    return {
+      rows: recommendedBucketRows(),
+      error: error instanceof Error ? error.message : "Failed to parse bucket rules",
+    };
+  }
+}
+
+function nextBucketRowID(rows: LogRetentionBucketRow[]): string {
+  const highest = rows.reduce((max, row) => Math.max(max, Number.parseInt(row.id, 10) || 0), 0);
+  return String(highest + 1);
+}
+
+export function appendBucketRow(rows: LogRetentionBucketRow[]): LogRetentionBucketRow[] {
+  return [...rows, createBucketRow(undefined, nextBucketRowID(rows))];
+}
+
+export function removeBucketRow(
+  rows: LogRetentionBucketRow[],
+  id: string,
+): LogRetentionBucketRow[] {
+  return rows.filter((row) => row.id !== id);
+}
+
+export function updateBucketRow(
+  rows: LogRetentionBucketRow[],
+  id: string,
+  field: keyof LogRetentionBucketPolicy,
+  value: string,
+): LogRetentionBucketRow[] {
+  return rows.map((row) =>
+    row.id === id
+      ? {
+          ...row,
+          [field]:
+            field === "component" || field === "level"
+              ? value
+              : Math.max(0, Number.parseInt(value, 10) || 0),
+        }
+      : row,
+  );
+}
+
+export function serializeBucketRows(rows: LogRetentionBucketRow[]): string {
+  return serializeBucketPolicies(rows);
+}

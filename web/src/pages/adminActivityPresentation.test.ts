@@ -1,20 +1,27 @@
 import { describe, expect, it } from "vitest";
 import type { AdminSession } from "@/api/types";
 import {
+  activityMethodMeta,
   classifyActivityMethod,
   compareActivityMethods,
+  decisionBadgeClass,
   isJellyfinSession,
+  formatAudioDetail,
+  formatAudioSummary,
   formatContainerDetail,
   formatDeliveredAudioSummary,
   formatDeliveredContainerSummary,
   formatDeliveredVideoSummary,
+  formatDecisionLabel,
   formatPlaybackDecisionSummary,
   formatSourceContainerSummary,
+  formatToneMapSummary,
   formatTranscodeModeSummary,
   formatVideoDetail,
   formatVideoSummary,
   getSessionClientLabel,
   getSessionClientLabelFull,
+  getSessionRouteNodes,
   normalizeContainerDecision,
   normalizeStreamDecision,
 } from "./adminActivityPresentation";
@@ -31,6 +38,7 @@ function makeSession(overrides: Partial<AdminSession> = {}): AdminSession {
     media_type: overrides.media_type ?? "movie",
     play_method: overrides.play_method ?? "transcode",
     reporting_node: overrides.reporting_node ?? "local",
+    node_display_name: overrides.node_display_name,
     file_duration: overrides.file_duration ?? 3600,
     started_at: overrides.started_at ?? new Date().toISOString(),
     updated_at: overrides.updated_at ?? new Date().toISOString(),
@@ -45,12 +53,22 @@ function makeSession(overrides: Partial<AdminSession> = {}): AdminSession {
     client_user_agent: overrides.client_user_agent,
     effective_play_method: overrides.effective_play_method,
     is_jellyfin_client: overrides.is_jellyfin_client,
+    routing_workload: overrides.routing_workload,
+    routing_execution: overrides.routing_execution,
+    routing_execution_node_id: overrides.routing_execution_node_id,
+    routing_execution_node_name: overrides.routing_execution_node_name,
+    routing_egress: overrides.routing_egress,
+    routing_egress_node_id: overrides.routing_egress_node_id,
+    routing_egress_node_name: overrides.routing_egress_node_name,
     audio_track_index: overrides.audio_track_index ?? 0,
     transcode_audio: overrides.transcode_audio ?? true,
     stream_bitrate_kbps: overrides.stream_bitrate_kbps ?? 8000,
     target_bitrate_kbps: overrides.target_bitrate_kbps ?? 8000,
     transcode_hw_accel: overrides.transcode_hw_accel,
+    tone_map_mode: overrides.tone_map_mode,
     source_container: overrides.source_container ?? "mkv",
+    output_container: overrides.output_container,
+    output_protocol: overrides.output_protocol,
     source_bitrate_kbps: overrides.source_bitrate_kbps ?? 9000,
     source_video_codec: overrides.source_video_codec ?? "h264",
     source_video_resolution: overrides.source_video_resolution ?? "1080p",
@@ -61,12 +79,101 @@ function makeSession(overrides: Partial<AdminSession> = {}): AdminSession {
     source_audio_channels: overrides.source_audio_channels ?? 2,
     audio_decision: overrides.audio_decision,
     target_audio_codec: overrides.target_audio_codec,
+    target_audio_channels: overrides.target_audio_channels,
     requested_video_codec: overrides.requested_video_codec ?? "hevc",
     requested_video_resolution: overrides.requested_video_resolution ?? "2160p",
   };
 }
 
 describe("adminActivityPresentation", () => {
+  it.each([
+    ["fmp4", "hls", "fMP4 (HLS)"],
+    ["mpegts", "hls", "MPEG-TS (HLS)"],
+    ["fmp4", "http", "fMP4"],
+  ])("uses the reported %s container over %s", (container, protocol, label) => {
+    const session = makeSession({
+      play_method: "remux",
+      output_container: container,
+      output_protocol: protocol,
+    });
+    expect(formatDeliveredContainerSummary(session)).toBe(label);
+    expect(formatContainerDetail(session)).toBe(`MKV → ${label}`);
+    expect(classifyActivityMethod(session)).toBe("direct_stream");
+  });
+
+  it("does not carry a previous output container into direct play", () => {
+    const session = makeSession({
+      play_method: "direct",
+      output_container: "fmp4",
+      output_protocol: "hls",
+    });
+    expect(formatDeliveredContainerSummary(session)).toBe("MKV");
+    expect(formatContainerDetail(session)).toBe("Original container");
+  });
+
+  it("presents the four Jellyfin-style session scopes distinctly", () => {
+    expect(
+      ["direct", "remux", "direct_stream", "transcode"].map(
+        (method) => activityMethodMeta(method).label,
+      ),
+    ).toEqual(["Direct Play", "Remux", "Direct Stream", "Transcode"]);
+    expect(activityMethodMeta("direct_stream").badgeClass).not.toBe(
+      activityMethodMeta("transcode").badgeClass,
+    );
+  });
+
+  it("keeps bit-for-bit stream copy explicit without changing remux aggregation", () => {
+    expect(formatDecisionLabel("copy")).toBe("Copy");
+    expect(decisionBadgeClass("copy")).toBe(activityMethodMeta("remux").badgeClass);
+    expect(normalizeStreamDecision("copy")).toBe("copy");
+    expect(normalizeStreamDecision("remux")).toBe("copy");
+    expect(
+      classifyActivityMethod(
+        makeSession({
+          play_method: "remux",
+          video_decision: "copy",
+          audio_decision: "copy",
+          transcode_audio: false,
+        }),
+      ),
+    ).toBe("remux");
+    expect(formatDecisionLabel("remux")).toBe("Remux");
+    expect(decisionBadgeClass("remux")).toBe(activityMethodMeta("remux").badgeClass);
+  });
+
+  it("does not present a remux operation as the name of the delivered container", () => {
+    const session = makeSession({ play_method: "remux", source_container: "mkv" });
+
+    expect(formatDecisionLabel(normalizeContainerDecision(session.play_method))).toBe("Remux");
+    expect(formatDeliveredContainerSummary(session)).toBe("Unknown output container");
+    expect(formatContainerDetail(session)).toBe(
+      "Repackaged for streaming; output container not reported",
+    );
+  });
+
+  it("keeps copied streams explicit in component summaries", () => {
+    expect(
+      formatPlaybackDecisionSummary(
+        makeSession({
+          play_method: "remux",
+          video_decision: "copy",
+          audio_decision: "copy",
+          transcode_audio: false,
+        }),
+      ),
+    ).toBe("copy");
+    expect(
+      formatPlaybackDecisionSummary(
+        makeSession({
+          play_method: "remux",
+          video_decision: "remux",
+          audio_decision: "remux",
+          transcode_audio: false,
+        }),
+      ),
+    ).toBe("copy");
+  });
+
   it("uses the effective source as the primary video summary", () => {
     expect(formatVideoSummary(makeSession())).toBe("H.264 · 1080p");
   });
@@ -91,6 +198,7 @@ describe("adminActivityPresentation", () => {
       source_audio_codec: "eac3",
       source_audio_channels: 6,
       target_audio_codec: "aac",
+      target_audio_channels: 6,
     });
 
     expect(formatPlaybackDecisionSummary(session)).toBe("transcode");
@@ -104,11 +212,23 @@ describe("adminActivityPresentation", () => {
       ),
     ).toBe("transcode");
     expect(formatSourceContainerSummary(session)).toBe("MKV");
-    expect(formatDeliveredContainerSummary(session)).toBe("HLS");
-    expect(formatContainerDetail(session)).toBe("MKV → HLS");
+    expect(formatDeliveredContainerSummary(session)).toBe("Unknown output container");
+    expect(formatContainerDetail(session)).toBe(
+      "Repackaged for streaming; output container not reported",
+    );
     expect(formatDeliveredVideoSummary(session)).toBe("H.264 · 1080p");
     expect(formatDeliveredAudioSummary(session)).toBe("AAC 5.1");
     expect(formatTranscodeModeSummary(session)).toBe("HW/SW unknown");
+  });
+
+  it("does not infer an output container from HLS or an unknown route", () => {
+    for (const play_method of ["transcode", "remux", "", "future-route"]) {
+      const session = makeSession({ play_method, output_container: undefined });
+      expect(formatDeliveredContainerSummary(session)).toBe("Unknown output container");
+      expect(formatDeliveredContainerSummary({ ...session, output_protocol: "hls" })).toBe(
+        "Unknown output container (HLS)",
+      );
+    }
   });
 
   it("keeps direct playback summaries on the effective source", () => {
@@ -139,6 +259,15 @@ describe("adminActivityPresentation", () => {
 
   it("labels hardware and software transcode modes", () => {
     expect(formatTranscodeModeSummary(makeSession({ transcode_hw_accel: "qsv" }))).toBe("HW QSV");
+    expect(formatTranscodeModeSummary(makeSession({ transcode_hw_accel: "vaapi" }))).toBe(
+      "HW VAAPI",
+    );
+    expect(formatTranscodeModeSummary(makeSession({ transcode_hw_accel: "nvenc" }))).toBe(
+      "HW NVENC",
+    );
+    expect(formatTranscodeModeSummary(makeSession({ transcode_hw_accel: "videotoolbox" }))).toBe(
+      "HW VideoToolbox",
+    );
     expect(formatTranscodeModeSummary(makeSession({ transcode_hw_accel: "none" }))).toBe("SW");
     expect(
       formatTranscodeModeSummary(
@@ -150,11 +279,64 @@ describe("adminActivityPresentation", () => {
           transcode_hw_accel: "qsv",
         }),
       ),
-    ).toBe("Audio SW");
+      // Audio-only re-encodes have no video encoder, so they get named for the
+      // work rather than for an acceleration mode they never used.
+    ).toBe("Audio Transcode");
+  });
+
+  it("labels a transcode's audio with the target channel count, never the source's", () => {
+    // TrueHD 7.1 downmixed to AAC 5.1 must not claim 7.1 output.
+    const downmixed = makeSession({
+      audio_decision: "transcode",
+      source_audio_codec: "truehd",
+      source_audio_channels: 8,
+      target_audio_codec: "aac",
+      target_audio_channels: 6,
+    });
+    expect(formatDeliveredAudioSummary(downmixed)).toBe("AAC 5.1");
+    expect(formatAudioDetail(downmixed)).toBe("→ AAC 5.1");
+
+    // Server did not report a target count → codec alone, not the source's.
+    const unknownTarget = makeSession({
+      audio_decision: "transcode",
+      source_audio_codec: "truehd",
+      source_audio_channels: 8,
+      target_audio_codec: "aac",
+    });
+    expect(formatDeliveredAudioSummary(unknownTarget)).toBe("AAC");
+    expect(formatAudioDetail(unknownTarget)).toBe("→ AAC");
+
+    // The source summary still describes the source in full.
+    expect(formatAudioSummary(unknownTarget)).toBe("TrueHD 7.1");
+  });
+
+  it("reports only confirmed tone-map executors", () => {
+    expect(formatToneMapSummary(makeSession({ tone_map_mode: "hardware" }))).toEqual({
+      badge: "HW Tone map",
+      detail: "Hardware",
+      mode: "hardware",
+    });
+    expect(formatToneMapSummary(makeSession({ tone_map_mode: "software" }))).toEqual({
+      badge: "SW Tone map",
+      detail: "Software",
+      mode: "software",
+    });
+    expect(formatToneMapSummary(makeSession())).toBeNull();
+    expect(formatToneMapSummary(makeSession({ tone_map_mode: "future-mode" }))).toBeNull();
+    expect(
+      formatToneMapSummary(
+        makeSession({
+          play_method: "remux",
+          video_decision: "remux",
+          audio_decision: "transcode",
+          tone_map_mode: "hardware",
+        }),
+      ),
+    ).toBeNull();
   });
 
   it("buckets activity sessions by the backend's per-stream decisions", () => {
-    // Only the audio stream re-encoded (video copied) → "audio".
+    // Only the audio stream re-encoded (video copied) → "direct_stream".
     expect(
       classifyActivityMethod(
         makeSession({
@@ -164,7 +346,7 @@ describe("adminActivityPresentation", () => {
           transcode_audio: true,
         }),
       ),
-    ).toBe("audio");
+    ).toBe("direct_stream");
     // Same audio-only shape reported via the HLS path (play_method "transcode",
     // video copied) still counts as an audio transcode, not video.
     expect(
@@ -176,7 +358,7 @@ describe("adminActivityPresentation", () => {
           transcode_audio: true,
         }),
       ),
-    ).toBe("audio");
+    ).toBe("direct_stream");
 
     // Full video transcode (with or without audio) stays in the "transcode" bucket.
     expect(
@@ -266,11 +448,11 @@ describe("adminActivityPresentation", () => {
     ).toBe("unknown");
   });
 
-  it("orders activity buckets with audio after video transcode", () => {
-    const sorted = ["audio", "unknown", "transcode", "direct", "remux"].sort(
+  it("orders Jellyfin-style activity buckets from lowest to highest server work", () => {
+    const sorted = ["direct_stream", "unknown", "transcode", "direct", "remux"].sort(
       compareActivityMethods,
     );
-    expect(sorted).toEqual(["direct", "remux", "transcode", "audio", "unknown"]);
+    expect(sorted).toEqual(["direct", "remux", "direct_stream", "transcode", "unknown"]);
   });
 
   it("tags Jellyfin-ecosystem clients for the JF pill", () => {
@@ -282,6 +464,143 @@ describe("adminActivityPresentation", () => {
     // even when the client name looks like a Jellyfin client.
     expect(isJellyfinSession(makeSession({ client_name: "Jellyfin Web" }))).toBe(false);
     expect(isJellyfinSession(makeSession())).toBe(false);
+  });
+
+  it("shows both transcode and proxy nodes in playback route order", () => {
+    expect(
+      getSessionRouteNodes(
+        makeSession({
+          reporting_node: "transcode-legacy",
+          routing_workload: "video_transcode",
+          routing_execution: "transcode",
+          routing_execution_node_id: 21,
+          routing_execution_node_name: "silo-transcode-01",
+          routing_egress: "proxy",
+          routing_egress_node_id: 34,
+          routing_egress_node_name: "silo-proxy-02",
+        }),
+      ),
+    ).toEqual([
+      {
+        key: "transcode:21",
+        kind: "transcode",
+        label: "Transcode",
+        name: "silo-transcode-01",
+      },
+      { key: "proxy:34", kind: "proxy", label: "Proxy", name: "silo-proxy-02" },
+    ]);
+  });
+
+  it("shows a proxy once when it both executes and serves a remux", () => {
+    expect(
+      getSessionRouteNodes(
+        makeSession({
+          routing_workload: "remux",
+          routing_execution: "proxy",
+          routing_execution_node_id: 34,
+          routing_execution_node_name: "silo-proxy-02",
+          routing_egress: "proxy",
+          routing_egress_node_id: 34,
+          routing_egress_node_name: "silo-proxy-02",
+        }),
+      ),
+    ).toEqual([{ key: "proxy:34", kind: "proxy", label: "Proxy", name: "silo-proxy-02" }]);
+  });
+
+  it("preserves distinct proxy execution and egress nodes", () => {
+    expect(
+      getSessionRouteNodes(
+        makeSession({
+          routing_workload: "remux",
+          routing_execution: "proxy",
+          routing_execution_node_id: 34,
+          routing_execution_node_name: "silo-proxy-executor",
+          routing_egress: "proxy",
+          routing_egress_node_id: 35,
+          routing_egress_node_name: "silo-proxy-egress",
+        }),
+      ),
+    ).toEqual([
+      { key: "proxy:34", kind: "proxy", label: "Proxy", name: "silo-proxy-executor" },
+      { key: "proxy:35", kind: "proxy", label: "Proxy", name: "silo-proxy-egress" },
+    ]);
+  });
+
+  it("keeps the reporting server identity for API-local routes", () => {
+    expect(
+      getSessionRouteNodes(
+        makeSession({
+          reporting_node: "api-a",
+          routing_workload: "direct_play",
+          routing_execution: "none",
+          routing_egress: "api",
+        }),
+      ),
+    ).toEqual([{ key: "server:api-a", kind: "server", label: "Server", name: "api-a" }]);
+  });
+
+  it("keeps local and legacy activity rows readable", () => {
+    expect(
+      getSessionRouteNodes(
+        makeSession({
+          reporting_node: "local",
+          routing_workload: "direct_play",
+          routing_execution: "none",
+          routing_egress: "api",
+        }),
+      ),
+    ).toEqual([{ key: "server:local", kind: "server", label: "Server", name: "Local server" }]);
+
+    expect(
+      getSessionRouteNodes(
+        makeSession({ reporting_node: "worker-legacy", node_display_name: "Basement worker" }),
+      ),
+    ).toEqual([
+      {
+        key: "legacy:Basement worker",
+        kind: "legacy",
+        label: "Node",
+        name: "Basement worker",
+      },
+    ]);
+  });
+
+  it("uses the resolved display name for a reconstructed remote transcode", () => {
+    expect(
+      getSessionRouteNodes(
+        makeSession({
+          node_display_name: "silo-transcode-recovered",
+          routing_workload: "video_transcode",
+          routing_execution: "transcode",
+          routing_egress: "api",
+        }),
+      ),
+    ).toEqual([
+      {
+        key: "transcode:silo-transcode-recovered",
+        kind: "transcode",
+        label: "Transcode",
+        name: "silo-transcode-recovered",
+      },
+      { key: "server:local", kind: "server", label: "Server", name: "Local server" },
+    ]);
+  });
+
+  it("falls back to routing node IDs when a registered node name is unavailable", () => {
+    expect(
+      getSessionRouteNodes(
+        makeSession({
+          routing_workload: "video_transcode",
+          routing_execution: "transcode",
+          routing_execution_node_id: 21,
+          routing_egress: "proxy",
+          routing_egress_node_id: 34,
+        }),
+      ),
+    ).toEqual([
+      { key: "transcode:21", kind: "transcode", label: "Transcode", name: "Node #21" },
+      { key: "proxy:34", kind: "proxy", label: "Proxy", name: "Node #34" },
+    ]);
   });
 
   it("labels HLS copy-original sessions as container HLS with copied video", () => {
@@ -297,20 +616,36 @@ describe("adminActivityPresentation", () => {
     expect(normalizeContainerDecision(session.play_method)).toBe("hls");
     expect(normalizeStreamDecision(session.video_decision)).toBe("copy");
     expect(normalizeStreamDecision(session.audio_decision)).toBe("transcode");
-    expect(formatDeliveredContainerSummary(session)).toBe("HLS");
-    expect(formatVideoDetail(session)).toBe("Video stream copied");
+    expect(formatDeliveredContainerSummary(session)).toBe("Unknown output container");
+    expect(formatDecisionLabel(normalizeStreamDecision(session.video_decision))).toBe("Copy");
+    expect(formatVideoDetail(session)).toBe("Copied without re-encoding");
   });
 
-  it("prefers the server's exact client label in the full label", () => {
+  it("keeps copied audio explicit in the stream details", () => {
+    const copied = makeSession({
+      play_method: "remux",
+      video_decision: "remux",
+      audio_decision: "remux",
+      transcode_audio: false,
+    });
+
+    expect(formatDecisionLabel(normalizeStreamDecision(copied.audio_decision))).toBe("Copy");
+    expect(formatAudioDetail(copied)).toBe("Copied without re-encoding");
+  });
+
+  it("keeps exact client build/channel and tone-map mode in expanded activity details", () => {
     const session = makeSession({
       client_name: "Silo Android TV",
       client_version: "1.0.0",
       client_build: "5",
+      client_channel: "beta",
       client_label: "Silo Android TV 1.0.0",
-      client_label_full: "Silo Android TV 1.0.0 (build 5)",
+      client_label_full: "Silo Android TV 1.0.0 (build 5, beta)",
+      tone_map_mode: "hardware",
     });
 
-    expect(getSessionClientLabelFull(session)).toBe("Silo Android TV 1.0.0 (build 5)");
+    expect(getSessionClientLabelFull(session)).toBe("Silo Android TV 1.0.0 (build 5, beta)");
+    expect(formatToneMapSummary(session)?.detail).toBe("Hardware");
     // The compact row label keeps its unchanged width.
     expect(getSessionClientLabel(session)).toBe("Silo Android TV 1.0.0");
   });

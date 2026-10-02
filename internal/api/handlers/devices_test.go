@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -142,6 +143,32 @@ func TestListDevices_CountsChangedSettings(t *testing.T) {
 	}
 	if counts["device-1"] != 0 {
 		t.Errorf("device-1 changed_count = %d, want 0", counts["device-1"])
+	}
+}
+
+// TestListDevices_CountsAMirroredPairOnce. The intro-skip preference is stored
+// under two keys while old clients are in the field, and the badge on the
+// device list is meant to tell a household how much this device does
+// differently — not how many rows the compatibility mirror needed to say it.
+// Counting rows would also make the badge drop by one on every affected device
+// the day the mirror is retired, which reads as a change nobody made.
+func TestListDevices_CountsAMirroredPairOnce(t *testing.T) {
+	handler, store := newDevicesTestHandler(t)
+	seedDevice(t, store, "profile-1", "device-1", "Laptop")
+	seedDeviceValue(t, store, "profile-1", "device-1",
+		settingskeys.PlaybackIntroSkipMode, `"never"`)
+	seedDeviceValue(t, store, "profile-1", "device-1",
+		settingskeys.PlaybackAutoSkipIntro, `false`)
+	seedDeviceValue(t, store, "profile-1", "device-1", "player.hdr_enabled", `false`)
+
+	body := listDevices(t, handler, "", "profile-1")
+
+	if len(body.Devices) != 1 {
+		t.Fatalf("returned %d devices, want 1: %+v", len(body.Devices), body.Devices)
+	}
+	if body.Devices[0].ChangedCount != 2 {
+		t.Errorf("changed_count = %d, want 2: the mirrored intro pair is one preference",
+			body.Devices[0].ChangedCount)
 	}
 }
 

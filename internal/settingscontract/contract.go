@@ -7,7 +7,7 @@
 // vendor a pinned copy and generate bindings from it, and no production setting
 // may exist without an entry here.
 //
-// See docs/superpowers/specs/2026-07-10-cross-platform-user-settings-contract-design.md.
+// See docs/architecture/settings-contract.md.
 package settingscontract
 
 import (

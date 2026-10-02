@@ -21,6 +21,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 	"github.com/Silo-Server/silo-server/internal/metadata"
+	"github.com/Silo-Server/silo-server/internal/netguard"
 )
 
 const (
@@ -28,18 +29,20 @@ const (
 	downloadTimeout  = 30 * time.Second
 )
 
-// ObjectPutter is the S3 interface required by Cacher.
+// ObjectPutter is the artwork storage interface required by Cacher.
 type ObjectPutter interface {
-	PutObject(ctx context.Context, bucket, key string, data []byte) error
-	Bucket() string
+	Put(context.Context, string, []byte) error
 }
 
-type objectMatcher interface {
-	ObjectMatches(ctx context.Context, bucket, key string, data []byte) (bool, error)
+// ContentMatcher avoids rewriting immutable objects with matching bytes.
+type ContentMatcher interface {
+	Matches(context.Context, string, []byte) (bool, error)
 }
 
-// ArtworkRevisionTracker persists the exact object manifest for an immutable
-// revision before any object is uploaded.
+// ArtworkRevisionTracker persists the object manifest for an immutable
+// revision. The cacher first records an empty, image-type-backed manifest so
+// partial uploads remain collectible, then replaces it with the exact keys
+// only after every upload succeeds.
 type ArtworkRevisionTracker interface {
 	TrackArtworkRevision(ctx context.Context, originalPath, imageType string, objectKeys []string) error
 }
@@ -83,15 +86,19 @@ type CacheResult struct {
 
 // Cacher downloads and stores image variants to S3.
 type Cacher struct {
-	s3                ObjectPutter
-	revisionTracker   ArtworkRevisionTracker
-	httpClient        *http.Client
+	s3              ObjectPutter
+	revisionTracker ArtworkRevisionTracker
+	httpClient      *http.Client
+	// trustedClient fetches for requests whose context carries
+	// netguard.WithPrivateAccess. Its netguard transport may reach the
+	// server's local network but still refuses blocked addresses.
+	trustedClient     *http.Client
 	enforcePublicURLs bool
 }
 
 // New creates a new Cacher backed by the given ObjectPutter.
 func New(s3 ObjectPutter) *Cacher {
-	return &Cacher{s3: s3, httpClient: newSecureHTTPClient(), enforcePublicURLs: true}
+	return &Cacher{s3: s3, httpClient: newSecureHTTPClient(), trustedClient: newTrustedHTTPClient(), enforcePublicURLs: true}
 }
 
 // SetArtworkRevisionTracker wires durable revision lifecycle tracking. The
@@ -235,15 +242,18 @@ func (c *Cacher) CacheBytes(ctx context.Context, data []byte, req CacheRequest) 
 		return nil, fmt.Errorf("imagecache: generate variants: %w", err)
 	}
 	basePath := buildBasePath(req)
-	bucket := c.s3.Bucket()
 	revision := variantRevision(result)
 	variantPaths := buildVariantPaths(basePath, revision, result)
-	if err := c.trackRevision(ctx, req.ImageType, variantPaths); err != nil {
+	originalPath := variantPaths[artworkkey.OriginalVariant]
+	if err := c.trackRevision(ctx, req.ImageType, originalPath, nil); err != nil {
 		return nil, err
 	}
 
-	uploadStats, err := c.uploadVariants(ctx, bucket, result, variantPaths)
+	uploadStats, err := c.uploadVariants(ctx, result, variantPaths)
 	if err != nil {
+		return nil, err
+	}
+	if err := c.trackRevision(ctx, req.ImageType, originalPath, variantPaths); err != nil {
 		return nil, err
 	}
 	return &CacheResult{
@@ -298,7 +308,7 @@ type uploadVariantStats struct {
 	existing int
 }
 
-func (c *Cacher) uploadVariants(ctx context.Context, bucket string, result *imageutil.VariantResult, variantPaths map[string]string) (uploadVariantStats, error) {
+func (c *Cacher) uploadVariants(ctx context.Context, result *imageutil.VariantResult, variantPaths map[string]string) (uploadVariantStats, error) {
 	var wg sync.WaitGroup
 	uploadErrs := make([]error, len(result.Variants))
 	stats := make([]uploadVariantStats, len(result.Variants))
@@ -307,14 +317,18 @@ func (c *Cacher) uploadVariants(ctx context.Context, bucket string, result *imag
 		go func(idx int, variant imageutil.Variant) {
 			defer wg.Done()
 			key := variantPaths[variant.Key]
-			if exists, err := objectMatches(ctx, c.s3, bucket, key, variant.Data); err != nil {
-				uploadErrs[idx] = fmt.Errorf("imagecache: check existing %s: %w", key, err)
-				return
-			} else if exists {
-				stats[idx].existing = 1
-				return
+			if matcher, ok := c.s3.(ContentMatcher); ok {
+				matches, err := matcher.Matches(ctx, key, variant.Data)
+				if err != nil {
+					uploadErrs[idx] = fmt.Errorf("imagecache: compare %s: %w", key, err)
+					return
+				}
+				if matches {
+					stats[idx].existing = 1
+					return
+				}
 			}
-			if err := putObjectWithRetry(ctx, c.s3, bucket, key, variant.Data); err != nil {
+			if err := putObjectWithRetry(ctx, c.s3, key, variant.Data); err != nil {
 				uploadErrs[idx] = fmt.Errorf("imagecache: upload %s: %w", key, err)
 				return
 			}
@@ -361,11 +375,10 @@ func buildVariantPaths(basePath, revision string, result *imageutil.VariantResul
 	return paths
 }
 
-func (c *Cacher) trackRevision(ctx context.Context, imageType metadata.ImageType, variantPaths map[string]string) error {
+func (c *Cacher) trackRevision(ctx context.Context, imageType metadata.ImageType, originalPath string, variantPaths map[string]string) error {
 	if c == nil || c.revisionTracker == nil {
 		return nil
 	}
-	originalPath := variantPaths[artworkkey.OriginalVariant]
 	keys := make([]string, 0, len(variantPaths))
 	for _, key := range variantPaths {
 		keys = append(keys, key)
@@ -377,37 +390,26 @@ func (c *Cacher) trackRevision(ctx context.Context, imageType metadata.ImageType
 	return nil
 }
 
-// objectMatches reports whether the object at key already holds exactly data.
-// Backends that cannot verify content report false so the immutable object is
-// rewritten; bare existence must never be accepted as a content match.
-func objectMatches(ctx context.Context, putter ObjectPutter, bucket, key string, data []byte) (bool, error) {
-	matcher, ok := putter.(objectMatcher)
-	if !ok {
-		return false, nil
-	}
-	return matcher.ObjectMatches(ctx, bucket, key, data)
-}
-
-func putObjectWithRetry(ctx context.Context, putter ObjectPutter, bucket, key string, data []byte) error {
+func putObjectWithRetry(ctx context.Context, putter ObjectPutter, key string, data []byte) error {
 	const maxAttempts = 3
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		if err := putter.PutObject(ctx, bucket, key, data); err != nil {
+		err := putter.Put(ctx, key, data)
+		if err != nil {
 			lastErr = err
 			if attempt == maxAttempts-1 {
-				// Final attempt failed; return immediately without a pointless backoff.
 				break
 			}
 			timer := time.NewTimer(time.Duration(attempt+1) * 500 * time.Millisecond)
 			select {
 			case <-timer.C:
-				continue
 			case <-ctx.Done():
 				timer.Stop()
 				return ctx.Err()
 			}
+		} else {
+			return nil
 		}
-		return nil
 	}
 	return lastErr
 }
@@ -483,14 +485,21 @@ func normalizeImageLanguage(language string) string {
 }
 
 // downloadImage fetches the image at the given URL, enforcing size, timeout,
-// and public-network limits.
+// and network limits: public addresses only, or the local network too when
+// ctx carries netguard.WithPrivateAccess.
 func (c *Cacher) downloadImage(ctx context.Context, rawURL string) ([]byte, error) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse URL: %w", err)
 	}
+	client := c.httpClient
 	if c.enforcePublicURLs {
-		if err := validatePublicImageURL(parsed); err != nil {
+		if netguard.PrivateAccess(ctx) {
+			if err := validateImageURL(parsed); err != nil {
+				return nil, err
+			}
+			client = c.trustedClient
+		} else if err := validatePublicImageURL(parsed); err != nil {
 			return nil, err
 		}
 	}
@@ -502,7 +511,6 @@ func (c *Cacher) downloadImage(ctx context.Context, rawURL string) ([]byte, erro
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 
-	client := c.httpClient
 	if client == nil {
 		client = newSecureHTTPClient()
 	}
@@ -545,17 +553,40 @@ func newSecureHTTPClient() *http.Client {
 	}
 }
 
-func validatePublicImageURL(u *url.URL) error {
+// newTrustedHTTPClient returns the client for trusted requests. The
+// netguard transport checks every address it dials, redirect hops included,
+// and uses its trusted pool because those requests carry
+// netguard.WithPrivateAccess.
+func newTrustedHTTPClient() *http.Client {
+	return &http.Client{
+		Transport: netguard.NewTransport(),
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return http.ErrUseLastResponse
+			}
+			return validateImageURL(req.URL)
+		},
+	}
+}
+
+func validateImageURL(u *url.URL) error {
 	if u == nil {
 		return fmt.Errorf("empty URL")
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return fmt.Errorf("unsupported URL scheme %q", u.Scheme)
 	}
-	host := u.Hostname()
-	if host == "" {
+	if u.Hostname() == "" {
 		return fmt.Errorf("URL host is required")
 	}
+	return nil
+}
+
+func validatePublicImageURL(u *url.URL) error {
+	if err := validateImageURL(u); err != nil {
+		return err
+	}
+	host := u.Hostname()
 	if addr, err := netip.ParseAddr(host); err == nil && !isPublicAddr(addr) {
 		return fmt.Errorf("private image host %q is not allowed", host)
 	}

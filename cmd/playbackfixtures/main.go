@@ -29,6 +29,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 // goldenSessionID is a fixed UUID: fixtures must be byte-stable across runs,
@@ -73,6 +74,7 @@ func main() {
 	write(*out, "start_request.json", goldenStartRequest())
 	write(*out, "replan_request.json", goldenReplanRequest())
 	write(*out, "decision_response.json", goldenDecisionResponse())
+	write(*out, "native-decision_response.json", goldenNativeDecisionResponse())
 	write(*out, "capability_response.json", goldenCapabilityResponse())
 	write(*out, "error_response.json", goldenErrorResponse())
 	write(*out, "route_event.json", goldenRouteEvent())
@@ -285,19 +287,41 @@ func goldenDecisionResponse() playback.DecisionResponseV3 {
 	subtitleSource := goldenMediaFile()
 	file.ExternalSubtitles = subtitleSource.ExternalSubtitles
 	file.SubtitleTracks = subtitleSource.SubtitleTracks
+	return goldenDecisionForSource(file, goldenStartRequest(), goldenSubtitleAdditional())
+}
+
+func goldenNativeDecisionResponse() playback.DecisionResponseV3 {
+	file := conformanceFallbackFile()
+	file.ExternalSubtitles = goldenMediaFile().ExternalSubtitles
+	file.SubtitleTracks = []models.SubtitleTrack{
+		{Index: 3, ContainerTrackID: "4", Language: languageEnglish, Codec: "mov_text", Title: "English (embedded)"},
+	}
+	request := goldenStartRequest()
+	request.ClientFeatures = append(request.ClientFeatures, playback.FeatureEmbeddedSubtitlesV3)
+	request.SubtitleTrackIndex = new(len(file.ExternalSubtitles))
+	request.SubtitleTrackID = playback.TrackIDV3(file.ID, "subtitle", *request.SubtitleTrackIndex)
+	delivery := request.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3]
+	delivery.Subtitles.NativeEmbedded = []playback.NativeEmbeddedSubtitleCapabilityV3{{
+		Container: containerMP4, Codecs: []string{"mov_text"}, TrackIdentity: "container_track_id",
+	}}
+	request.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3] = delivery
+	return goldenDecisionForSource(file, request, nil)
+}
+
+func goldenDecisionForSource(file *models.MediaFile, request playback.StartRequestV3, additional []playback.SubtitleInventoryEntryV3) playback.DecisionResponseV3 {
 	now, err := time.Parse(time.RFC3339, "2029-12-31T23:55:00Z")
 	if err != nil {
 		fail("parse golden planner time: %v", err)
 	}
 	result := playback.PlanPlaybackV3(playback.PlannerInputV3{
-		Request:             goldenStartRequest(),
+		Request:             request,
 		RequestedFile:       file,
 		EffectiveFile:       file,
 		AudioTrackIndex:     0,
 		Settings:            playback.PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
 		Registry:            conformanceRegistry(),
 		Now:                 now,
-		AdditionalSubtitles: goldenSubtitleAdditional(),
+		AdditionalSubtitles: additional,
 	})
 	if result.Plan == nil {
 		fail("golden planner returned terminal: %#v", result.Terminal)
@@ -309,7 +333,7 @@ func goldenDecisionResponse() playback.DecisionResponseV3 {
 	plan.SessionID = goldenSessionID
 	plan.ExpiresAt = goldenExpiresAt
 	plan.Stream.URL = "/stream/" + goldenSessionID
-	plan.Subtitle.Inventory = playback.ScopeSubtitleInventoryV3(goldenSessionID, file, plan.Subtitle.Inventory)
+	plan.Subtitle.Inventory = playback.ScopeSubtitleInventoryV3(goldenSessionID, file, plan.Subtitle.Inventory, request.ClientFeatures)
 
 	return playback.DecisionResponseV3{
 		ProtocolVersion: playback.ProtocolV3,
@@ -320,6 +344,7 @@ func goldenDecisionResponse() playback.DecisionResponseV3 {
 	}
 }
 
+// goldenCapabilityResponse returns the stable protocol capability fixture.
 func goldenCapabilityResponse() playback.CapabilityResponseV3 {
 	return playback.CapabilityResponseV3{
 		Enabled:          true,
@@ -334,9 +359,9 @@ func goldenCapabilityResponse() playback.CapabilityResponseV3 {
 		// A real server advertises only what its installed FFmpeg probed; the
 		// fixture pins the full set so a client sees every shape it must parse.
 		Transformations: []playback.TransformationV3{
-			{Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: "1", ValidatedClaims: []string{playback.ClaimAudioDecodeV3}},
+			{Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, ValidatedClaims: []string{playback.ClaimAudioDecodeV3}},
+			{Name: playback.TransformationHDRToSDRToneMapV3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationHDRToSDRToneMapRecipeVersionV3, ValidatedClaims: []string{playback.ClaimHDRMetadataRemovedV3, playback.ClaimSDRBT709OutputV3}},
 			{Name: playback.TransformationServerDV7HDR10V3, Executor: playback.ExecutorServerV3, RecipeVersion: "1", ValidatedClaims: playback.DV7ToHDR10ClaimsV3()},
-			{Name: playback.TransformationServerHEVCResumeLeadingPictureDropV3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationServerHEVCResumeLeadingPictureDropVersionV3, ValidatedClaims: []string{playback.ClaimResumeLeadingPicturesRemovedV3}},
 			{Name: playback.TransformationVideoToH264V3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationVideoToH264RecipeVersionV3, ValidatedClaims: []string{playback.ClaimH264DecodeV3}},
 		},
 	}
@@ -438,7 +463,7 @@ func goldenAttemptKeys() []opaqueAttemptKeyFixture {
 			// retired name proves both properties stay true.
 			Transformations: []playback.TransformationV3{
 				{Name: "hdr_to_sdr_tonemap", Executor: playback.ExecutorServerV3, RecipeVersion: "1", ValidatedClaims: []string{}},
-				{Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: "1", ValidatedClaims: []string{}},
+				{Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, ValidatedClaims: []string{}},
 			},
 			OutputContextID: "7",
 			LocalMutations:  []string{"transport_reopen", "pcm:truehd:8"},
@@ -502,6 +527,7 @@ func goldenAttemptKeys() []opaqueAttemptKeyFixture {
 	return fixtures
 }
 
+// goldenConformanceMatrix returns the deterministic planner conformance matrix.
 func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 	videoFile := conformanceVideoFile()
 	base := conformanceStartRequest()
@@ -524,6 +550,25 @@ func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 			"evidence_"+string(tier), "evidence_tier_gating", request, videoFile, nil, settings, registry,
 		))
 	}
+
+	constrainedBaselineFile := conformanceFallbackFile()
+	constrainedBaselineFile.Container = containerMKV
+	constrainedBaselineFile.FilePath = "/media/constrained-baseline.mkv"
+	constrainedBaselineFile.VideoTracks[0].Profile = "Constrained Baseline"
+	constrainedBaselineRequest := conformanceStartRequest()
+	constrainedBaselineRequest.PlaybackAttemptID = "attempt-h264-constrained-baseline"
+	constrainedBaselineRequest.QualityPreference = "auto"
+	constrainedBaselineRequest.Capabilities.CodecsVideo = []string{codecH264}
+	constrainedBaselineRequest.Capabilities.CodecsVideoHardware = []string{codecH264}
+	constrainedBaselineRequest.Capabilities.Containers = []string{containerMKV}
+	constrainedBaselineRequest.Capabilities.VideoDecode = []playback.VideoDecodeCapabilityV3{{
+		Codec: codecH264, Profiles: []string{"baseline"}, Levels: []int{52}, BitDepths: []int{8},
+		MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 20_000, Hardware: true,
+	}}
+	planner = append(planner, makePlannerScenario(
+		"h264_constrained_baseline_direct", "profile_compatibility", constrainedBaselineRequest,
+		constrainedBaselineFile, nil, playback.PlannerSettingsV3{TranscodeEnabled: false}, registry,
+	))
 
 	fallbackRequest := conformanceStartRequest()
 	fallbackRequest.Capabilities.VideoEvidence = playback.EvidenceDeclaredV3
@@ -548,6 +593,7 @@ func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 	audioFile := &models.MediaFile{ID: 77, BaseType: "audiobook", FilePath: "/media/audiobook.m4b", Container: containerMP4, CodecAudio: codecAAC, Bitrate: 128, AudioChannels: 2, Duration: 39_600, AudioTracks: []models.AudioTrack{{Codec: codecAAC, Channels: 2, Layout: audioLayoutStereo}}}
 	audioRequest := conformanceStartRequest()
 	audioRequest.FileID = audioFile.ID
+	audioRequest.AudioTrackID = playback.TrackIDV3(audioFile.ID, "audio", *audioRequest.AudioTrackIndex)
 	audioRequest.PlaybackAttemptID = "attempt-audio-only"
 	audioRequest.Capabilities.Containers = []string{containerMP4}
 	planner = append(planner, makePlannerScenario("audio_only_original", "audio_only_planning", audioRequest, audioFile, nil, settings, registry))
@@ -555,6 +601,38 @@ func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 	hdr10Request := conformanceHDRRequest()
 	hdr10Request.PlaybackAttemptID = "attempt-hdr10-direct"
 	planner = append(planner, makePlannerScenario("hdr10_exact_direct", "hdr_dv_matrix", hdr10Request, conformanceHDRFile(), nil, settings, registry))
+
+	toneMapRequest := conformanceStartRequest()
+	toneMapRequest.PlaybackAttemptID = "attempt-hdr10-tone-map"
+	toneMapRequest.QualityPreference = resolutionFHD
+	toneMapSettings := settings
+	toneMapSettings.SoftwareToneMapEnabled = true
+	toneMapRegistry := playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
+		{Name: playback.TransformationVideoToH264V3, RecipeVersion: playback.TransformationVideoToH264RecipeVersionV3, Available: true},
+		{Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, Available: true},
+		{Name: playback.TransformationHDRToSDRToneMapV3, RecipeVersion: playback.TransformationHDRToSDRToneMapRecipeVersionV3, Available: true},
+	})
+	softwarePQ := tonemap.Capabilities{{Mode: tonemap.ModeSoftware, Backend: "software", Filter: tonemap.SoftwareFilterBT2390, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ}}}
+	planner = append(planner, makePlannerScenario("hdr10_to_sdr_tone_map", "hdr_dv_matrix", toneMapRequest, conformanceHDRFile(), nil, toneMapSettings, toneMapRegistry, softwarePQ))
+
+	clientManagedFile := conformanceHDRFile()
+	clientManagedFile.AudioTracks = append(clientManagedFile.AudioTracks, models.AudioTrack{Codec: codecAAC, Channels: 2, Layout: audioLayoutStereo})
+	clientManagedRequest := conformanceHDRRequest()
+	clientManagedRequest.PlaybackAttemptID = "attempt-client-managed-original"
+	clientManagedRequest.Capabilities.HDR = false
+	clientManagedRequest.Capabilities.HDRDetails = &playback.HDRCapabilitiesV3{DolbyVisionProfiles: []int{}}
+	clientManagedRequest.ClientPlaybackContext.Output.HDRDetails = &playback.HDRCapabilitiesV3{DolbyVisionProfiles: []int{}}
+	clientManagedAudioIndex := 1
+	clientManagedRequest.AudioTrackIndex = &clientManagedAudioIndex
+	clientManagedRequest.AudioTrackID = playback.TrackIDV3(clientManagedFile.ID, "audio", clientManagedAudioIndex)
+	clientManagedDelivery := clientManagedRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3]
+	clientManagedDelivery.HDRDetails = &playback.HDRCapabilitiesV3{DolbyVisionProfiles: []int{}}
+	clientManagedDelivery.ValidatedClaims = []string{playback.ClaimClientManagedDynamicRangeV3, playback.ClaimClientSelectedAudioTrackV3}
+	clientManagedRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3] = clientManagedDelivery
+	planner = append(planner, makePlannerScenarioWithAudioIndex(
+		"client_managed_hdr_selected_audio", "hdr_dv_matrix", clientManagedRequest, clientManagedFile,
+		clientManagedAudioIndex, nil, settings, registry,
+	))
 
 	dv8File := conformanceHDRFile()
 	dv8File.VideoTracks[0].DVProfile = 8
@@ -576,6 +654,21 @@ func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 	dv7Request.PlaybackAttemptID = "attempt-dv7-hdr10"
 	dv7Registry := playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{{Name: playback.TransformationServerDV7HDR10V3, RecipeVersion: "1", Available: true}})
 	planner = append(planner, makePlannerScenario("dolby_vision_7_hdr10_fallback", "hdr_dv_matrix", dv7Request, dv7File, nil, settings, dv7Registry))
+
+	dv7ToneMapFile := *dv7File
+	dv7ToneMapFile.VideoTracks = append([]models.VideoTrack(nil), dv7File.VideoTracks...)
+	dv7ToneMapFile.VideoTracks[0].DVConfigPresent = true
+	dv7ToneMapFile.VideoTracks[0].DVBLCompatIDPresent = true
+	dv7ToneMapFile.VideoTracks[0].DVBLPresent = true
+	dv7ToneMapFile.VideoTracks[0].DVRPUPresent = true
+	dv7ToneMapFile.VideoTracks[0].ColorRange = "tv"
+	dv7ToneMapFile.VideoTracks[0].ColorPrimaries = "bt2020"
+	dv7ToneMapFile.VideoTracks[0].ColorTransfer = "smpte2084"
+	dv7ToneMapFile.VideoTracks[0].ColorSpace = "bt2020nc"
+	dv7ToneMapRequest := conformanceStartRequest()
+	dv7ToneMapRequest.PlaybackAttemptID = "attempt-dv7-id6-tone-map"
+	dv7ToneMapRequest.QualityPreference = resolutionFHD
+	planner = append(planner, makePlannerScenario("dolby_vision_7_id6_to_sdr_tone_map", "hdr_dv_matrix", dv7ToneMapRequest, &dv7ToneMapFile, nil, toneMapSettings, toneMapRegistry, softwarePQ))
 
 	audioAdaptFile := conformanceHDRFile()
 	audioAdaptFile.CodecAudio = codecTrueHD
@@ -627,6 +720,7 @@ func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 	for _, deliveryClass := range []string{playback.DeliveryClassOriginalHTTPV3, playback.DeliveryClassProgressiveV3, playback.DeliveryClassHLSV3} {
 		delivery := assRequest.ClientPlaybackContext.Deliveries[deliveryClass]
 		delivery.Subtitles.EmbeddedText = true
+		delivery.Subtitles.SidecarText = true
 		delivery.Subtitles.ASSStyling = true
 		delivery.Subtitles.FontAttachments = true
 		assRequest.ClientPlaybackContext.Deliveries[deliveryClass] = delivery
@@ -745,10 +839,19 @@ func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 	return playback.ConformanceMatrixV3{SchemaVersion: 1, Planner: planner, Replans: replans, Protocol: protocol}
 }
 
-func makePlannerScenario(name, category string, request playback.StartRequestV3, file *models.MediaFile, attempted []string, settings playback.PlannerSettingsV3, registry *playback.TransformationRegistryV3) playback.PlannerScenarioV3 {
+// makePlannerScenario builds one deterministic protocol-v3 planner fixture.
+func makePlannerScenario(name, category string, request playback.StartRequestV3, file *models.MediaFile, attempted []string, settings playback.PlannerSettingsV3, registry *playback.TransformationRegistryV3, toneMapCapabilities ...tonemap.Capabilities) playback.PlannerScenarioV3 {
+	return makePlannerScenarioWithAudioIndex(name, category, request, file, 0, attempted, settings, registry, toneMapCapabilities...)
+}
+
+func makePlannerScenarioWithAudioIndex(name, category string, request playback.StartRequestV3, file *models.MediaFile, audioTrackIndex int, attempted []string, settings playback.PlannerSettingsV3, registry *playback.TransformationRegistryV3, toneMapCapabilities ...tonemap.Capabilities) playback.PlannerScenarioV3 {
+	var capabilities tonemap.Capabilities
+	if len(toneMapCapabilities) > 0 {
+		capabilities = toneMapCapabilities[0]
+	}
 	result := playback.PlanPlaybackV3(playback.PlannerInputV3{
-		Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
-		Settings: settings, Registry: registry, AttemptedKeys: attempted,
+		Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: audioTrackIndex,
+		Settings: settings, Registry: registry, AttemptedKeys: attempted, ToneMapCapabilities: capabilities,
 	})
 	expected := playback.PlannerExpectationV3{Outcome: playback.OutcomeAdaptationUnavailableV3}
 	if result.Plan != nil {
@@ -772,7 +875,7 @@ func makePlannerScenario(name, category string, request playback.StartRequestV3,
 	}
 	return playback.PlannerScenarioV3{
 		Name: name, Category: category, Request: request,
-		Source:        playback.SourceDescriptorFromFileV3(file, 0),
+		Source:        playback.SourceDescriptorFromFileV3(file, audioTrackIndex),
 		AttemptedKeys: append([]string(nil), attempted...), Expected: expected,
 	}
 }
@@ -857,7 +960,7 @@ func conformanceFallbackFile() *models.MediaFile {
 
 func conformanceRegistry() *playback.TransformationRegistryV3 {
 	return playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
-		{Name: playback.TransformationAudioToAACV3, RecipeVersion: "1", Available: true},
+		{Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, Available: true},
 		{Name: playback.TransformationVideoToH264V3, RecipeVersion: "1", Available: true},
 		{Name: playback.TransformationServerDV7HDR10V3, RecipeVersion: "1", Available: true},
 	})

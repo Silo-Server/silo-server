@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/telemetry"
 
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
@@ -32,7 +35,13 @@ const (
 	pushRelayMaxRetryAfter  = 23 * time.Hour
 	relayAppleSendPath      = "/v1/apple/send"
 	relayFcmSendPath        = "/v1/fcm/send"
+
+	// relayReplacementCooldown bounds automatic re-registration after the
+	// relay rejects a capability.
+	relayReplacementCooldown = 15 * time.Minute
 )
+
+var errRelayReplacementCoolingDown = errors.New("push relay credential was rejected; replacement is cooling down")
 
 func pushRetryDelay(completedAttempt int) (time.Duration, bool) {
 	if completedAttempt < 1 || completedAttempt >= pushMaxAttempts {
@@ -136,9 +145,13 @@ type pushSender struct {
 	settings            *Settings
 	client              *http.Client
 	logger              *slog.Logger
-	renewMu             sync.Mutex
 	developmentRelayURL string
 	now                 func() time.Time
+
+	// renewMu serializes credential renewal and replacement in this process;
+	// lastRelayReplacement is guarded by it.
+	renewMu              sync.Mutex
+	lastRelayReplacement time.Time
 }
 
 func newPushSender(devices *PushDeviceRepository, deliveries *DeliveryRepository, cipher *secret.Cipher, settings *Settings) *pushSender {
@@ -242,28 +255,25 @@ func (s *pushSender) finalize(ctx context.Context, attempt PushDeliveryAttempt, 
 	return updated
 }
 
-func (s *pushSender) send(ctx context.Context, attempt PushDeliveryAttempt, device *PushDevice, token string) pushSendResult {
+func (s *pushSender) send(ctx context.Context, attempt PushDeliveryAttempt, device *PushDevice, token string) (result pushSendResult) {
+	ctx, finishObservation := telemetry.StartDependency(ctx, "notifications", "worker", "push")
+	defer func() { finishObservation(deliveryObservationError(ctx, result.OK)) }()
 	credential, err := s.prepareRelayCredential(ctx)
 	if err != nil {
 		return pushSendResult{HTTPStatus: http.StatusServiceUnavailable, Message: err.Error(), UpstreamReason: "relay_credential_unavailable"}
 	}
-	result := s.sendWithCapability(ctx, attempt, device, token, credential.RelayURL, credential.APIKey)
-	if result.HTTPStatus != http.StatusUnauthorized || result.UpstreamReason != "token_expired" {
-		if result.HTTPStatus == http.StatusUnauthorized {
-			_ = s.markReregistrationRequired(ctx, credential)
-		}
+	result = s.sendWithCapability(ctx, attempt, device, token, credential.RelayURL, credential.APIKey)
+	if result.HTTPStatus != http.StatusUnauthorized {
 		return result
 	}
-
-	renewed, err := s.renewRelayCapability(ctx, credential.APIKey)
+	recovered, err := s.recoverRelayCredential(ctx, credential, result.UpstreamReason)
 	if err != nil {
-		return pushSendResult{
-			HTTPStatus:     http.StatusServiceUnavailable,
-			UpstreamReason: "relay_renewal_failed",
-			Message:        "push relay capability renewal failed",
+		if result.UpstreamReason == relayCodeDeploymentDisabled {
+			return result
 		}
+		return pushSendResult{HTTPStatus: http.StatusServiceUnavailable, Message: err.Error(), UpstreamReason: "relay_credential_unavailable"}
 	}
-	return s.sendWithCapability(ctx, attempt, device, token, renewed.RelayURL, renewed.APIKey)
+	return s.sendWithCapability(ctx, attempt, device, token, recovered.RelayURL, recovered.APIKey)
 }
 
 func (s *pushSender) prepareRelayCredential(ctx context.Context) (PushRelayCredential, error) {
@@ -275,27 +285,168 @@ func (s *pushSender) prepareRelayCredential(ctx context.Context) (PushRelayCrede
 		return PushRelayCredential{}, err
 	}
 	current.RelayURL = relayURL
-	if current.APIKey == "" {
-		return PushRelayCredential{}, fmt.Errorf("push relay API key not configured")
+	// An administrator's clear, or a relay that disabled this deployment,
+	// parks the credential behind an explicit re-register; first-use
+	// registration must not undo that decision.
+	if current.Parked() {
+		return PushRelayCredential{}, ErrRelayReregistrationRequired
 	}
-	if IsLegacyPushRelayKey(current.APIKey) {
-		result, err := RegisterRelayCredential(ctx, s.settings, s.client, relayURL)
-		return result.Credential, err
-	}
+	// Older servers parked a capability the relay rejected while keeping it
+	// stored. Heal that state instead of waiting for an administrator.
 	if current.ReregistrationRequired {
-		return PushRelayCredential{}, fmt.Errorf("push relay re-registration required")
+		return s.replaceRejectedRelayCredentialLocked(ctx, current, "parked_by_older_server")
+	}
+	// Delivery is on by default, so the first send on a server that has never
+	// registered self-registers with the relay instead of failing. Legacy
+	// pre-capability keys take the same path.
+	if current.APIKey == "" || IsLegacyPushRelayKey(current.APIKey) {
+		return s.registerRelayCredential(ctx, relayURL)
 	}
 	if RelayCredentialNeedsRenewal(s.now(), current.ExpiresAt, current.DeploymentID) {
 		result, err := RenewRelayCredential(ctx, s.settings, s.client, current)
+		if err == nil {
+			return result.Credential, nil
+		}
+		if code, rejected := relayCredentialRejection(err); rejected {
+			return s.handleRelayRejectionLocked(ctx, current, code)
+		}
 		// A proactive refresh must not suppress delivery while the current
 		// capability is still valid. Reactive token_expired handling remains the
 		// final safety net once its actual expiry is reached.
-		if err != nil && s.now().Before(current.ExpiresAt) {
+		if s.now().Before(current.ExpiresAt) {
 			return current, nil
 		}
-		return result.Credential, err
+		return PushRelayCredential{}, err
 	}
 	return current, nil
+}
+
+// registerRelayCredential provisions the relay credential on first use. If
+// another replica or the admin endpoint won the race, the stored credential
+// is returned instead and its own relay origin is kept: a capability only
+// works against the relay that issued it.
+func (s *pushSender) registerRelayCredential(ctx context.Context, relayURL string) (PushRelayCredential, error) {
+	result, registered, err := RegisterRelayCredentialIfAbsent(ctx, s.settings, s.client, relayURL, false)
+	if err != nil {
+		return PushRelayCredential{}, err
+	}
+	credential := result.Credential
+	if !registered {
+		if credential.ReregistrationRequired || credential.APIKey == "" {
+			// An administrator cleared the relay while this registration was
+			// in flight; the clear wins.
+			return PushRelayCredential{}, ErrRelayReregistrationRequired
+		}
+		storedURL, err := NormalizePushRelayURL(credential.RelayURL, s.developmentRelayURL)
+		if err != nil {
+			return PushRelayCredential{}, err
+		}
+		credential.RelayURL = storedURL
+	}
+	return credential, nil
+}
+
+// recoverRelayCredential answers a relay 401 for the capability that was just
+// sent: an expired capability is renewed, and any other rejection is healed
+// by registering a fresh deployment.
+func (s *pushSender) recoverRelayCredential(ctx context.Context, failed PushRelayCredential, code string) (PushRelayCredential, error) {
+	s.renewMu.Lock()
+	defer s.renewMu.Unlock()
+
+	current := LoadPushRelayCredential(ctx, s.settings)
+	if current.Parked() {
+		return PushRelayCredential{}, ErrRelayReregistrationRequired
+	}
+	relayURL, err := NormalizePushRelayURL(current.RelayURL, s.developmentRelayURL)
+	if err != nil {
+		return PushRelayCredential{}, err
+	}
+	current.RelayURL = relayURL
+	// Another sender may have renewed or replaced the capability while this
+	// goroutine waited for the lock.
+	if current.APIKey != "" && current.APIKey != failed.APIKey && !current.ReregistrationRequired {
+		return current, nil
+	}
+	if code != relayCodeTokenExpired {
+		return s.handleRelayRejectionLocked(ctx, current, code)
+	}
+	result, err := RenewRelayCredential(ctx, s.settings, s.client, current)
+	if err == nil {
+		return result.Credential, nil
+	}
+	if rejectionCode, rejected := relayCredentialRejection(err); rejected {
+		// Past the renewal grace, or no longer the relay's current
+		// generation: the old identity cannot be renewed.
+		return s.handleRelayRejectionLocked(ctx, current, rejectionCode)
+	}
+	return PushRelayCredential{}, err
+}
+
+// handleRelayRejectionLocked parks a deployment the relay disabled and
+// replaces any other rejected capability. Callers hold renewMu.
+func (s *pushSender) handleRelayRejectionLocked(ctx context.Context, current PushRelayCredential, code string) (PushRelayCredential, error) {
+	if code == relayCodeDeploymentDisabled {
+		stored, parked, err := parkRelayCredential(ctx, s.settings, current)
+		if err != nil {
+			return PushRelayCredential{}, err
+		}
+		if !parked {
+			return s.adoptStoredRelayCredential(stored)
+		}
+		s.logger.ErrorContext(ctx, "push relay disabled this deployment; register again from the admin settings to resume push delivery",
+			"deployment_id", current.DeploymentID)
+		return PushRelayCredential{}, ErrRelayReregistrationRequired
+	}
+	return s.replaceRejectedRelayCredentialLocked(ctx, current, code)
+}
+
+// adoptStoredRelayCredential returns the credential another writer stored
+// while this one was deciding, keeping its own relay origin: a capability only
+// works against the relay that issued it. A clear wins.
+func (s *pushSender) adoptStoredRelayCredential(stored PushRelayCredential) (PushRelayCredential, error) {
+	if stored.Parked() || stored.APIKey == "" {
+		return PushRelayCredential{}, ErrRelayReregistrationRequired
+	}
+	storedURL, err := NormalizePushRelayURL(stored.RelayURL, s.developmentRelayURL)
+	if err != nil {
+		return PushRelayCredential{}, err
+	}
+	stored.RelayURL = storedURL
+	return stored, nil
+}
+
+// replaceRejectedRelayCredentialLocked registers a new deployment in place of
+// a rejected capability, at most once per cooldown per process so a relay
+// that rejects fresh credentials too is not hammered. Callers hold renewMu.
+func (s *pushSender) replaceRejectedRelayCredentialLocked(ctx context.Context, current PushRelayCredential, code string) (PushRelayCredential, error) {
+	now := s.now()
+	if !s.lastRelayReplacement.IsZero() && now.Sub(s.lastRelayReplacement) < relayReplacementCooldown {
+		return PushRelayCredential{}, errRelayReplacementCoolingDown
+	}
+	s.lastRelayReplacement = now
+	result, replaced, err := replaceRejectedRelayCredential(ctx, s.settings, s.client, current.RelayURL, current.APIKey)
+	if err != nil {
+		s.logger.WarnContext(ctx, "push relay rejected the stored capability and registering a replacement failed",
+			"deployment_id", current.DeploymentID, "relay_code", code, "error", err)
+		return PushRelayCredential{}, err
+	}
+	credential := result.Credential
+	if !replaced {
+		return s.adoptStoredRelayCredential(credential)
+	}
+	s.logger.WarnContext(ctx, "push relay rejected the stored capability; registered a new deployment",
+		"previous_deployment_id", current.DeploymentID, "deployment_id", credential.DeploymentID, "relay_code", code)
+	return credential, nil
+}
+
+// relayCredentialRejection reports the relay's code when it refused a
+// credential request with 401.
+func relayCredentialRejection(err error) (string, bool) {
+	relayErr, ok := errors.AsType[RelayCredentialError](err)
+	if !ok || relayErr.Status != http.StatusUnauthorized {
+		return "", false
+	}
+	return relayErr.Code, true
 }
 
 func (s *pushSender) sendWithCapability(ctx context.Context, attempt PushDeliveryAttempt, device *PushDevice, token, relayURL, apiKey string) pushSendResult {
@@ -386,34 +537,6 @@ func (s *pushSender) sendWithCapability(ctx context.Context, attempt PushDeliver
 	}
 }
 
-func (s *pushSender) renewRelayCapability(ctx context.Context, expiredKey string) (PushRelayCredential, error) {
-	s.renewMu.Lock()
-	defer s.renewMu.Unlock()
-
-	// Another sender may have renewed while this goroutine waited for the lock.
-	current := LoadPushRelayCredential(ctx, s.settings)
-	if current.APIKey != "" && current.APIKey != expiredKey {
-		return current, nil
-	}
-	relayURL, err := NormalizePushRelayURL(current.RelayURL, s.developmentRelayURL)
-	if err != nil {
-		return PushRelayCredential{}, err
-	}
-	current.RelayURL = relayURL
-	result, err := RenewRelayCredential(ctx, s.settings, s.client, current)
-	return result.Credential, err
-}
-
-func (s *pushSender) markReregistrationRequired(ctx context.Context, failed PushRelayCredential) error {
-	s.renewMu.Lock()
-	defer s.renewMu.Unlock()
-	current := LoadPushRelayCredential(ctx, s.settings)
-	if current.APIKey != failed.APIKey {
-		return nil
-	}
-	return MarkRelayReregistrationRequired(ctx, s.settings, current)
-}
-
 // PushDispatcher implements the channel Dispatcher interface for Apple push
 // on top of the shared channelDispatcher core, with the retry/recovery sweep
 // integrated.
@@ -483,9 +606,8 @@ func (s *System) sendPushTest(ctx context.Context, platform, profileID, serverDe
 	if !deliveryEnabled {
 		return nil, ErrPushDeliveryUnavailable
 	}
-	if s.Settings.PushRelayAPIKey(ctx) == "" {
-		return nil, ErrPushDeliveryUnavailable
-	}
+	// No relay-credential gate here: a test push on a fresh install goes
+	// through the same first-use registration as an ordinary delivery.
 	attempt, device, err := s.pushDeviceRepo.EnqueueTestAttempt(ctx, platform, profileID, serverDeviceID)
 	if err != nil {
 		return nil, err

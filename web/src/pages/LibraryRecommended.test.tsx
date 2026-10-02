@@ -4,9 +4,12 @@ import { act } from "react";
 import type { ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import LibraryRecommended from "./LibraryRecommended";
+import { bumpHomeRefreshSignal } from "./homeSurfaceRefresh";
+import { invalidateMediaSurfaceQueries } from "@/hooks/queries/mediaSurfaceRefresh";
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -29,6 +32,10 @@ vi.mock("@/hooks/queries/sidebarPins", () => ({
 vi.mock("@/hooks/queries/libraryCollections", () => ({
   useLibraryCollectionItems: (...args: unknown[]) => mockUseLibraryCollectionItems(...args),
 }));
+
+function collectionItemsResult(items: Array<{ content_id: string; title: string }>) {
+  return { data: { items, total: items.length, has_more: false }, isLoading: false };
+}
 
 vi.mock("@/components/MediaCarousel", () => ({
   default: ({
@@ -54,8 +61,20 @@ vi.mock("@/components/HeroBanner", () => ({
 }));
 
 vi.mock("@/components/SectionRow", () => ({
-  default: ({ section }: { section: { title: string; section_type: string } }) => (
-    <div data-kind="section-row" data-section-type={section.section_type}>
+  default: ({
+    section,
+  }: {
+    section: {
+      title: string;
+      section_type: string;
+      items: Array<{ user_state?: { is_favorite: boolean } }>;
+    };
+  }) => (
+    <div
+      data-kind="section-row"
+      data-section-type={section.section_type}
+      data-favorite={section.items[0]?.user_state?.is_favorite ? "true" : "false"}
+    >
       {section.title}
     </div>
   ),
@@ -90,6 +109,7 @@ function makeSection(
     section_type: string;
     title: string;
     featured: boolean;
+    isFavorite: boolean;
   }> = {},
 ) {
   return {
@@ -116,6 +136,11 @@ function makeSection(
         backdrop_url: "",
         backdrop_thumbhash: "",
         logo_url: "",
+        user_state: {
+          played: false,
+          is_favorite: overrides.isFavorite ?? false,
+          in_watchlist: false,
+        },
       },
     ],
   };
@@ -162,7 +187,7 @@ describe("LibraryRecommended", () => {
       }),
     );
     mockUseSidebarPins.mockReturnValue({ pins: {} });
-    mockUseLibraryCollectionItems.mockReturnValue({ data: [], isLoading: false });
+    mockUseLibraryCollectionItems.mockReturnValue(collectionItemsResult([]));
   });
 
   afterEach(async () => {
@@ -179,6 +204,7 @@ describe("LibraryRecommended", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
+    return queryClient;
   }
 
   it("renders sections from the layout and item APIs", async () => {
@@ -197,6 +223,107 @@ describe("LibraryRecommended", () => {
 
     expect(invalidateQueries).not.toHaveBeenCalled();
     invalidateQueries.mockRestore();
+  });
+
+  it("reloads locally held library rows after consecutive media surface refreshes", async () => {
+    let isFavorite = false;
+    mockFetchLibrarySectionItems.mockImplementation((_libraryId: number, sectionId: string) =>
+      Promise.resolve({
+        section: makeSection({
+          id: sectionId,
+          title: sectionId === "cw" ? "Continue Watching" : "Recently Added",
+          section_type: sectionId === "cw" ? "continue_watching" : "recently_added",
+          isFavorite,
+        }),
+      }),
+    );
+    const queryClient = await render(<LibraryRecommended libraryId={42} />);
+
+    expect(
+      container
+        .querySelector('[data-section-type="recently_added"]')
+        ?.getAttribute("data-favorite"),
+    ).toBe("false");
+
+    isFavorite = true;
+    await act(async () => {
+      await invalidateMediaSurfaceQueries(queryClient);
+      bumpHomeRefreshSignal(queryClient);
+    });
+
+    await waitFor(() => {
+      expect(
+        container
+          .querySelector('[data-section-type="recently_added"]')
+          ?.getAttribute("data-favorite"),
+      ).toBe("true");
+    });
+
+    isFavorite = false;
+    await act(async () => {
+      await invalidateMediaSurfaceQueries(queryClient);
+      bumpHomeRefreshSignal(queryClient);
+    });
+
+    await waitFor(() => {
+      expect(
+        container
+          .querySelector('[data-section-type="recently_added"]')
+          ?.getAttribute("data-favorite"),
+      ).toBe("false");
+    });
+  });
+
+  it("keeps rows out of the error state when a refresh bump lands mid-load", async () => {
+    const requests: Array<{
+      sectionId: string;
+      signal: AbortSignal;
+      resolve: (isFavorite: boolean) => void;
+    }> = [];
+    mockFetchLibrarySectionItems.mockImplementation(
+      (_libraryId: number, sectionId: string, options: { signal: AbortSignal }) =>
+        new Promise((resolve) => {
+          requests.push({
+            sectionId,
+            signal: options.signal,
+            resolve: (isFavorite) =>
+              resolve({
+                section: makeSection({
+                  id: sectionId,
+                  title: sectionId === "cw" ? "Continue Watching" : "Recently Added",
+                  section_type: sectionId === "cw" ? "continue_watching" : "recently_added",
+                  isFavorite,
+                }),
+              }),
+          });
+        }),
+    );
+    const queryClient = await render(<LibraryRecommended libraryId={42} />);
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests.map((request) => request.sectionId)).toEqual(["cw", "recent"]);
+
+    // The bump reaches the page through a query observer that TanStack
+    // notifies on its own schedule; the next generation's requests show the
+    // page has reset and re-requested its rows.
+    bumpHomeRefreshSignal(queryClient);
+    await waitFor(() => expect(requests).toHaveLength(4));
+
+    expect(container.textContent).not.toContain("could not be loaded");
+    const [firstGeneration, secondGeneration] = [requests.slice(0, 2), requests.slice(2)];
+    expect(firstGeneration.every((request) => request.signal.aborted)).toBe(true);
+    expect(secondGeneration.map((request) => request.sectionId)).toEqual(["cw", "recent"]);
+
+    // The cancelled generation answers after the new one, so a stale result
+    // that got through would overwrite the new data.
+    secondGeneration.forEach((request) => request.resolve(true));
+    firstGeneration.forEach((request) => request.resolve(false));
+    await waitFor(() => {
+      const rows = Array.from(container.querySelectorAll('[data-kind="section-row"]'));
+      expect(rows.map((row) => row.getAttribute("data-favorite"))).toEqual(["true", "true"]);
+    });
+
+    expect(container.textContent).not.toContain("could not be loaded");
+    expect(requests).toHaveLength(4);
   });
 
   it("renders hero banner for featured sections", async () => {
@@ -246,18 +373,10 @@ describe("LibraryRecommended", () => {
     });
     mockUseLibraryCollectionItems.mockImplementation((libraryId: number, collectionId: string) => {
       if (libraryId === 42 && collectionId === "col-1") {
-        return {
-          data: [
-            {
-              content_id: "item-1",
-              title: "Scream",
-            },
-          ],
-          isLoading: false,
-        };
+        return collectionItemsResult([{ content_id: "item-1", title: "Scream" }]);
       }
 
-      return { data: [], isLoading: false };
+      return collectionItemsResult([]);
     });
 
     await render(<LibraryRecommended libraryId={42} />);
@@ -265,6 +384,18 @@ describe("LibraryRecommended", () => {
     expect(container.textContent).toContain("Pinned Horror");
     expect(container.textContent).toContain("Scream");
     expect(container.textContent).not.toContain("Other Library Collection");
+    expect(container.querySelector('[data-testid="pinned-collection-load-more"]')).toBeNull();
     expect(mockUseLibraryCollectionItems).toHaveBeenCalledWith(42, "col-1");
+  });
+
+  it("renders nothing for a pinned collection with no visible items", async () => {
+    mockUseSidebarPins.mockReturnValue({
+      pins: { "42": [{ type: "collection", id: "col-1", label: "Pinned Horror" }] },
+    });
+    mockUseLibraryCollectionItems.mockReturnValue(collectionItemsResult([]));
+
+    await render(<LibraryRecommended libraryId={42} />);
+
+    expect(container.textContent).not.toContain("Pinned Horror");
   });
 });

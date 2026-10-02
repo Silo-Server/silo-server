@@ -17,8 +17,10 @@ export type {
   PlayerPictureInPictureChange,
   PlayerPlaybackStateChange,
   PlayerPlaybackTransport,
+  PlaybackStartTrigger,
   SeriesContext,
   EpisodeRef,
+  IntroSkipMode,
   SubtitleMode,
   ResumeHints,
 } from "./types";

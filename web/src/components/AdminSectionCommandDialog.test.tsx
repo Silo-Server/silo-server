@@ -56,6 +56,16 @@ describe("AdminSectionCommandDialog", () => {
     expect(screen.getByRole("option", { name: /Dashboard/ })).toBeInTheDocument();
   });
 
+  it("opens and focuses admin search with Ctrl+K", async () => {
+    renderDialog();
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    const searchBox = await screen.findByRole("searchbox", { name: "Search admin sections" });
+
+    await waitFor(() => expect(searchBox).toHaveFocus());
+    expect(screen.getByRole("option", { name: /Dashboard/ })).toBeInTheDocument();
+  });
+
   it("searches all admin section groups", async () => {
     renderDialog();
 
@@ -66,18 +76,20 @@ describe("AdminSectionCommandDialog", () => {
     expect(screen.queryByRole("option", { name: /Settings/ })).not.toBeInTheDocument();
   });
 
-  it("searches individual admin setting labels from the dashboard dialog", async () => {
+  it("searches individual admin setting labels from the admin dialog", async () => {
     renderDialog();
 
     const searchBox = await openDialog();
-    await userEvent.type(searchBox, "pool max open");
+    await userEvent.type(searchBox, "maximum postgres connections");
 
-    expect(screen.getByRole("option", { name: /Database/ })).toBeInTheDocument();
-    expect(screen.getByText("Pool Max Open")).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /Storage & Database/ })).toBeInTheDocument();
+    expect(screen.getByText("Maximum Postgres connections")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("option", { name: /Database/ }));
+    await userEvent.click(screen.getByRole("option", { name: /Storage & Database/ }));
 
-    expect(screen.getByLabelText("Current path")).toHaveTextContent("/admin/settings?tab=database");
+    expect(screen.getByLabelText("Current path")).toHaveTextContent(
+      "/admin/settings/infrastructure",
+    );
   });
 
   it("includes admin plugin app destinations", async () => {
@@ -106,7 +118,7 @@ describe("AdminSectionCommandDialog", () => {
     await userEvent.type(searchBox, "arrproxy");
     await userEvent.click(screen.getByRole("option", { name: /ArrProxy/ }));
 
-    expect(mocks.navigateToPluginRoute).toHaveBeenCalledWith("/api/v1/plugins/7/");
+    expect(mocks.navigateToPluginRoute).toHaveBeenCalledWith("/api/v2/plugin-content/plugins/7/");
     expect(screen.queryByRole("searchbox", { name: "Search admin sections" })).toBeNull();
   });
 
@@ -115,7 +127,7 @@ describe("AdminSectionCommandDialog", () => {
 
     const searchBox = await openDialog();
     await userEvent.type(searchBox, "logs");
-    await userEvent.click(screen.getByRole("option", { name: /Logs/ }));
+    await userEvent.click(screen.getByRole("option", { name: /^LogsServer log stream/ }));
 
     expect(screen.getByLabelText("Current path")).toHaveTextContent("/admin/logs");
     expect(screen.queryByRole("searchbox", { name: "Search admin sections" })).toBeNull();

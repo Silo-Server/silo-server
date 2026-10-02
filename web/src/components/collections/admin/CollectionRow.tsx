@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useSelection, type SelectionKind } from "./GroupsBoard";
+import { BulkSelectionCheckbox } from "@/components/BulkSelectionCheckbox";
 
 export interface CollectionRowProps {
   collection: LibraryCollection;
@@ -60,6 +61,14 @@ export function CollectionRow({
     }
   }
 
+  function onSelectionChange(checked: boolean, extendRange: boolean) {
+    if (extendRange) {
+      selectRange(collection.id, kind, parentGroupID, parentCollectionIDs, checked);
+    } else {
+      toggleOne(collection.id, kind, parentGroupID);
+    }
+  }
+
   return (
     <div
       ref={setNodeRef}
@@ -70,6 +79,11 @@ export function CollectionRow({
         selected && "bg-primary/10 border-l-primary border-l-2",
       )}
     >
+      <BulkSelectionCheckbox
+        label={`Select ${collection.title}`}
+        selected={selected}
+        onSelectionChange={onSelectionChange}
+      />
       <button
         type="button"
         {...attributes}

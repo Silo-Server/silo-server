@@ -13,6 +13,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 )
 
 func TestHandleSessionWebSocket_RequiresHelloBeforeRealtimeReady(t *testing.T) {
@@ -24,6 +25,15 @@ func TestHandleSessionWebSocket_RequiresHelloBeforeRealtimeReady(t *testing.T) {
 
 	handler := NewPlaybackHandler(sessionMgr)
 	handler.RealtimeHub = playback.NewRealtimeHub()
+	telemetryConfig := streamtelemetry.DefaultConfig("websocket-test")
+	telemetryConfig.Enabled = true
+	handler.StreamTelemetry = streamtelemetry.NewRegistry(telemetryConfig, streamtelemetry.NewLocalStore(), nil)
+	seedRoute := streamtelemetry.MediaRoute{Family: streamtelemetry.FamilyNative, Method: http.MethodGet,
+		Pattern: "/stream/{session_id}", Class: streamtelemetry.ClassPlayback,
+		Role: streamtelemetry.RoleViewerEgress, CapRelevant: true, Enrolled: true}
+	handler.StreamTelemetry.Observe(seedRoute)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		attachPlaybackSession(r.Context(), session, nil)
+	})).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/stream/"+session.ID, nil))
 
 	router := chi.NewRouter()
 	router.Get("/playback/ws/{session_id}", func(w http.ResponseWriter, r *http.Request) {
@@ -72,12 +82,28 @@ func TestHandleSessionWebSocket_RequiresHelloBeforeRealtimeReady(t *testing.T) {
 	}
 
 	waitForPlaybackRealtimeState(t, sessionMgr, session.ID, true)
+	waitForTelemetryRealtimeState(t, handler.StreamTelemetry, session.ID, true)
 
 	if err := conn.Close(); err != nil {
 		t.Fatalf("Close websocket: %v", err)
 	}
 
 	waitForPlaybackRealtimeState(t, sessionMgr, session.ID, false)
+	waitForTelemetryRealtimeState(t, handler.StreamTelemetry, session.ID, false)
+}
+
+func waitForTelemetryRealtimeState(t *testing.T, registry *streamtelemetry.Registry, sessionID string, want bool) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		for _, session := range registry.Snapshot().Sessions {
+			if session.SessionID == sessionID && session.RealtimeConnectionAlive == want {
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("telemetry realtime state for %s did not become %t", sessionID, want)
 }
 
 func waitForPlaybackRealtimeState(t *testing.T, sessionMgr *playback.SessionManager, sessionID string, want bool) {

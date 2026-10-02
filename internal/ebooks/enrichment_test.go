@@ -662,15 +662,18 @@ func TestCollectEbookMetadataAccumulatesProviderErrors(t *testing.T) {
 		&fakeEbookMetadataProvider{slug: "broken", searchErr: searchErr, getErr: getErr},
 		&fakeEbookMetadataProvider{
 			slug:    "working",
-			results: []metadata.SearchResult{{ProviderIDs: map[string]string{"openlibrary": "OL1M"}}},
+			results: []metadata.SearchResult{{Name: "t", ProviderIDs: map[string]string{"openlibrary": "OL1M"}}},
 			result:  &metadata.MetadataResult{HasMetadata: true, Overview: "found"},
 		},
 	}
 
-	accumulator, ids, errs := collectEbookMetadata(context.Background(), enrichmentItemRow{ContentID: "c1", Title: "t"}, providers, nil)
+	accumulator, ids, errs, authorMismatch := collectEbookMetadata(context.Background(), enrichmentItemRow{ContentID: "c1", Title: "t"}, providers, nil)
 
 	if len(errs) != 2 || !errors.Is(errs[0], searchErr) || !errors.Is(errs[1], getErr) {
 		t.Fatalf("provider errors = %v, want both broken-provider errors", errs)
+	}
+	if authorMismatch {
+		t.Fatal("metadata without a positive author contradiction was rejected")
 	}
 	if accumulator.Overview != "found" {
 		t.Fatalf("accumulator overview = %q, want metadata from the working provider", accumulator.Overview)
@@ -680,6 +683,68 @@ func TestCollectEbookMetadataAccumulatesProviderErrors(t *testing.T) {
 	}
 	if ids["openlibrary"] != "OL1M" {
 		t.Fatalf("accumulated IDs = %v, want search-result openlibrary ID", ids)
+	}
+}
+
+func TestCollectEbookMetadataRejectsEachProviderAuthorBeforeMerging(t *testing.T) {
+	providers := []metadata.Provider{
+		&fakeEbookMetadataProvider{
+			slug:    "wrong",
+			results: []metadata.SearchResult{{Name: "Shared Title", ProviderIDs: map[string]string{"wrong": "1"}}},
+			result: &metadata.MetadataResult{
+				HasMetadata: true,
+				Overview:    "wrong provider overview",
+				People: []models.ItemPerson{{
+					Person: models.Person{Name: "Wrong Author"}, Kind: models.PersonKindAuthor,
+				}},
+			},
+		},
+		&fakeEbookMetadataProvider{
+			slug:    "right",
+			results: []metadata.SearchResult{{Name: "Shared Title", ProviderIDs: map[string]string{"right": "2"}}},
+			result: &metadata.MetadataResult{
+				HasMetadata: true,
+				People: []models.ItemPerson{{
+					Person: models.Person{Name: "Right Author"}, Kind: models.PersonKindAuthor,
+				}},
+			},
+		},
+	}
+
+	accumulator, _, _, authorMismatch := collectEbookMetadata(context.Background(), enrichmentItemRow{
+		ContentID: "shared", Title: "Shared Title", Author: "Right Author",
+	}, providers, nil)
+
+	if !authorMismatch {
+		t.Fatal("a provider with a contradictory author did not fail the item closed")
+	}
+	if accumulator.Overview != "" || accumulator.HasMetadata {
+		t.Fatalf("contradictory provider metadata was merged before validation: %+v", accumulator)
+	}
+}
+
+func TestEnrichWithProvidersRetriesProviderErrorBeforeAuthorMismatch(t *testing.T) {
+	providerErr := errors.New("provider unavailable")
+	providers := []metadata.Provider{
+		&fakeEbookMetadataProvider{slug: "broken", searchErr: providerErr, getErr: providerErr},
+		&fakeEbookMetadataProvider{
+			slug:    "wrong-author",
+			results: []metadata.SearchResult{{Name: "Shared Title", ProviderIDs: map[string]string{"wrong": "1"}}},
+			result: &metadata.MetadataResult{
+				HasMetadata: true,
+				People: []models.ItemPerson{{
+					Person: models.Person{Name: "Wrong Author"}, Kind: models.PersonKindAuthor,
+				}},
+			},
+		},
+	}
+
+	e := &Enricher{}
+	_, err := e.enrichWithProvidersOutcome(context.Background(), enrichmentItemRow{
+		ContentID: "shared", FolderID: 7, Title: "Shared Title", Author: "Right Author",
+	}, providers)
+	if !errors.Is(err, providerErr) {
+		t.Fatalf("enrichment error = %v, want provider failure to remain retryable", err)
 	}
 }
 
@@ -704,13 +769,13 @@ func TestCollectEbookMetadataSkipsProviderIDOwnedByAnotherItem(t *testing.T) {
 	providers := []metadata.Provider{
 		&fakeEbookMetadataProvider{
 			slug:    "bookinfo",
-			results: []metadata.SearchResult{{ProviderIDs: map[string]string{"bookinfo": "40817436"}}},
+			results: []metadata.SearchResult{{Name: "t", ProviderIDs: map[string]string{"bookinfo": "40817436"}}},
 			result:  &metadata.MetadataResult{HasMetadata: true, Overview: "book one"},
 		},
 	}
 	owner := &fakeProviderIDOwner{ownerByID: map[string]string{"40817436": "other-book"}}
 
-	_, ids, errs := collectEbookMetadata(context.Background(), enrichmentItemRow{ContentID: "c2", Title: "t"}, providers, owner)
+	_, ids, errs, _ := collectEbookMetadata(context.Background(), enrichmentItemRow{ContentID: "c2", Title: "t"}, providers, owner)
 
 	if len(errs) != 0 {
 		t.Fatalf("unexpected provider errors: %v", errs)
@@ -725,18 +790,59 @@ func TestCollectEbookMetadataSurfacesOwnershipCheckError(t *testing.T) {
 	providers := []metadata.Provider{
 		&fakeEbookMetadataProvider{
 			slug:    "bookinfo",
-			results: []metadata.SearchResult{{ProviderIDs: map[string]string{"bookinfo": "40817436"}}},
+			results: []metadata.SearchResult{{Name: "t", ProviderIDs: map[string]string{"bookinfo": "40817436"}}},
 		},
 	}
 	owner := &fakeProviderIDOwner{err: checkErr}
 
-	_, ids, errs := collectEbookMetadata(context.Background(), enrichmentItemRow{ContentID: "c2", Title: "t"}, providers, owner)
+	_, ids, errs, _ := collectEbookMetadata(context.Background(), enrichmentItemRow{ContentID: "c2", Title: "t"}, providers, owner)
 
 	if len(errs) != 1 || !errors.Is(errs[0], checkErr) {
 		t.Fatalf("provider errors = %v, want the ownership-check error", errs)
 	}
 	if _, ok := ids["bookinfo"]; ok {
 		t.Fatalf("provider id claimed despite failed ownership check: %v", ids)
+	}
+}
+
+func TestCollectEbookMetadataDoesNotReintroduceOwnedCrossID(t *testing.T) {
+	providers := []metadata.Provider{
+		&fakeEbookMetadataProvider{
+			slug: "bookinfo",
+			results: []metadata.SearchResult{{
+				Name: "t",
+				ProviderIDs: map[string]string{
+					"bookinfo":    "owned-id",
+					"openlibrary": "free-id",
+				},
+			}},
+			result: &metadata.MetadataResult{
+				HasMetadata: true,
+				Overview:    "usable metadata",
+				ProviderIDs: map[string]string{
+					"bookinfo":    "owned-id",
+					"openlibrary": "free-id",
+				},
+			},
+		},
+	}
+	owner := &fakeProviderIDOwner{ownerByID: map[string]string{"owned-id": "other-book"}}
+
+	accumulator, ids, errs, authorMismatch := collectEbookMetadata(
+		context.Background(),
+		enrichmentItemRow{ContentID: "this-book", Title: "t"},
+		providers,
+		owner,
+	)
+
+	if len(errs) != 0 || authorMismatch {
+		t.Fatalf("collect errors = %v, authorMismatch = %v", errs, authorMismatch)
+	}
+	if accumulator.Overview != "usable metadata" || ids["openlibrary"] != "free-id" {
+		t.Fatalf("usable metadata/identity was lost: accumulator=%+v ids=%v", accumulator, ids)
+	}
+	if _, exists := ids["bookinfo"]; exists {
+		t.Fatalf("metadata response reintroduced an owned cross-ID: %v", ids)
 	}
 }
 
@@ -992,9 +1098,10 @@ func TestBuildEbookMetadataRequestCarriesAccumulatedISBN(t *testing.T) {
 }
 
 type fakeEbookProviderIDRepository struct {
-	rows  map[string][]*models.MediaItemProviderID
-	err   error
-	calls [][]string
+	rows       map[string][]*models.MediaItemProviderID
+	err        error
+	replaceErr error
+	calls      [][]string
 }
 
 func (f *fakeEbookProviderIDRepository) GetByContentIDs(
@@ -1006,7 +1113,7 @@ func (f *fakeEbookProviderIDRepository) GetByContentIDs(
 }
 
 func (f *fakeEbookProviderIDRepository) ReplaceByContentID(context.Context, string, map[string]string) error {
-	return nil
+	return f.replaceErr
 }
 
 func (f *fakeEbookProviderIDRepository) FindContentIDByProviderIDs(
@@ -1016,6 +1123,21 @@ func (f *fakeEbookProviderIDRepository) FindContentIDByProviderIDs(
 	string,
 ) (string, error) {
 	return "", nil
+}
+
+func TestPersistReturnsProviderIDFailure(t *testing.T) {
+	replaceErr := errors.New("provider identity already belongs to another item")
+	e := &Enricher{providerIDs: &fakeEbookProviderIDRepository{replaceErr: replaceErr}}
+	ctx := withEnrichmentClaimCheck(context.Background(), func(context.Context) error { return nil })
+
+	err := e.persist(ctx, "ebook-1", map[string]string{"isbn": "9780306406157"}, &metadata.MetadataResult{
+		HasMetadata: true,
+		Overview:    "remote overview",
+	})
+
+	if !errors.Is(err, replaceErr) {
+		t.Fatalf("persist error = %v, want provider-ID failure %v", err, replaceErr)
+	}
 }
 
 func TestEnricherLoadsProviderIDsInOneBatchAndSurfacesErrors(t *testing.T) {
@@ -1356,6 +1478,79 @@ func TestEnricherRunLimitedEnforcesClaimLimitBelowWorkerCount(t *testing.T) {
 	}
 }
 
+// A locally complete ebook is the one terminal outcome that consults no
+// provider, so it is also the one path that used to skip the status
+// promotion entirely. Without it the item keeps media_items.status =
+// 'pending' forever and the library page reports a fully described book as
+// unmatched.
+func TestEnrichClaimedItemPromotesLocallyCompleteItem(t *testing.T) {
+	var promoted []string
+	e := &Enricher{
+		markMatchedLocallyFn: func(_ context.Context, contentID string) error {
+			promoted = append(promoted, contentID)
+			return nil
+		},
+	}
+
+	outcome, err := e.enrichClaimedItem(context.Background(), locallyCompleteEbookRow())
+	if err != nil {
+		t.Fatalf("enrichClaimedItem() error = %v", err)
+	}
+	if outcome != EnrichmentOutcomeSuccess {
+		t.Fatalf("outcome = %q, want %q", outcome, EnrichmentOutcomeSuccess)
+	}
+	if len(promoted) != 1 || promoted[0] != "ebook-local-1" {
+		t.Fatalf("promoted content ids = %v, want [ebook-local-1]", promoted)
+	}
+}
+
+// A failed promotion must not be reported as a clean success: the queue would
+// park the row with a refresh horizon and the item would stay 'pending'.
+func TestEnrichClaimedItemSurfacesPromotionFailure(t *testing.T) {
+	e := &Enricher{
+		markMatchedLocallyFn: func(context.Context, string) error {
+			return errors.New("promotion failed")
+		},
+	}
+
+	outcome, err := e.enrichClaimedItem(context.Background(), locallyCompleteEbookRow())
+	if err == nil {
+		t.Fatalf("promotion failure was swallowed, outcome = %q", outcome)
+	}
+	if outcome == EnrichmentOutcomeSuccess {
+		t.Fatal("failed promotion reported as success")
+	}
+}
+
+// The promotion deliberately leaves last_refreshed untouched: it gates the
+// admin quick-refresh sweep, and no provider was consulted here, so these
+// items must stay eligible for a later refresh.
+func TestMarkEbookMatchedLocallyQueryLeavesLastRefreshedAlone(t *testing.T) {
+	for _, want := range []string{
+		"status = CASE WHEN status = 'pending' THEN 'matched' ELSE status END",
+		"matched_at = COALESCE(matched_at, $1)",
+	} {
+		if !strings.Contains(markEbookMatchedLocallyQuery, want) {
+			t.Fatalf("query missing %q:\n%s", want, markEbookMatchedLocallyQuery)
+		}
+	}
+	if strings.Contains(markEbookMatchedLocallyQuery, "last_refreshed") {
+		t.Fatalf("promotion must not stamp last_refreshed:\n%s", markEbookMatchedLocallyQuery)
+	}
+}
+
+func locallyCompleteEbookRow() enrichmentItemRow {
+	return enrichmentItemRow{
+		ContentID:  "ebook-local-1",
+		FolderID:   7,
+		Title:      "A Book",
+		Author:     "An Author",
+		Overview:   "A useful description.",
+		PosterPath: "/library/A Book/cover.jpg",
+		Status:     "pending",
+	}
+}
+
 func TestEbookHasCompleteLocalMetadata(t *testing.T) {
 	complete := enrichmentItemRow{
 		Title:      "A Book",
@@ -1412,15 +1607,36 @@ func TestCleanEbookSearchTitle(t *testing.T) {
 		{"Alice - Bob and Carol", "Bob", "Alice - Bob and Carol"},
 		{"Plain Title", "Some Author", "Plain Title"},
 		{"  spaced   out  ", "", "spaced out"},
-		// Series/volume markers are kept (unwrapped) so distinct volumes search
-		// distinctly instead of collapsing onto one provider work.
-		{"Just One Night (The Raven Brothers Book 4)", "", "Just One Night The Raven Brothers Book 4"},
-		{"Mistborn (The Mistborn Saga #1)", "", "Mistborn The Mistborn Saga #1"},
-		{"The Wheel of Time (Book 1)", "", "The Wheel of Time Book 1"},
-		{"The Wheel of Time (Book 2)", "", "The Wheel of Time Book 2"},
+		// Series/volume markers are dropped: they are retail furniture that no
+		// provider catalog indexes, so carrying them into the query matched
+		// nothing. Volumes are told apart after the search instead, by
+		// metadata.BestMatch scoring against the raw title.
+		{"Just One Night (The Raven Brothers Book 4)", "", "Just One Night"},
+		{"Mistborn (The Mistborn Saga #1)", "", "Mistborn"},
+		// Two volumes of one series now issue the same query. That is the point:
+		// the query finds the work, and the volume check rejects the wrong book.
+		{"The Wheel of Time (Book 1)", "", "The Wheel of Time"},
+		{"The Wheel of Time (Book 2)", "", "The Wheel of Time"},
+		// Stacked markers peel rather than leaving a stray group behind.
+		{"Just One Night (The Raven Brothers Book 4) (2019)", "", "Just One Night"},
+		// A marker word without volume syntax is a title, not furniture: "book"
+		// alone must not condemn the parenthetical.
+		{"Markus Zusak Reader (The Book Thief)", "", "Markus Zusak Reader (The Book Thief)"},
+		{"Anthology (Complete Series)", "", "Anthology (Complete Series)"},
 		{"White Out [Badlands Thriller]", "", "White Out [Badlands Thriller]"},
 		{"Salem's Lot (2019)", "", "Salem's Lot"},
+		{"Title (A Story of 1969)", "", "Title (A Story of 1969)"},
 		{"The Hobbit (Illustrated)", "", "The Hobbit (Illustrated)"},
+		// Retail edition suffixes are furniture too: providers index the work,
+		// not the storefront's packaging of it.
+		{"White Fang (AmazonClassics Edition)", "", "White Fang"},
+		{"Treasure Island (AmazonClassics Edition)", "", "Treasure Island"},
+		{"Frankenstein (Penguin Classics)", "", "Frankenstein"},
+		{"The Shell Game (Kindle Single)", "", "The Shell Game"},
+		{"Ordinary Grace (A Novel)", "", "Ordinary Grace"},
+		// ...but only as a suffix category, not a keyword hunt: an edition
+		// word mid-parenthetical is a title.
+		{"Rules (First Edition Club)", "", "Rules (First Edition Club)"},
 		{"Exit Strategy_ Murderbot Di - Martha Wells (Book 4)", "Martha Wells", "Exit Strategy Murderbot Di"},
 	}
 	for _, tc := range cases {

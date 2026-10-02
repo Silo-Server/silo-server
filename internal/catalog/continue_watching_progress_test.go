@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -244,4 +245,247 @@ func (s *stubProgressLister) ListProgress(_ context.Context, profileID, status s
 		end = len(s.entries)
 	}
 	return s.entries[offset:end], nil
+}
+
+// completedWalkFixture builds n completed rows ordered updated_at DESC, the
+// order ListProgress("completed") returns them in.
+func completedWalkFixture(n int) []userstore.WatchProgress {
+	entries := make([]userstore.WatchProgress, n)
+	for i := range entries {
+		entries[i] = userstore.WatchProgress{
+			MediaItemID: "done-" + strconv.Itoa(i),
+			UpdatedAt:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(n-i) * time.Minute).Format(time.RFC3339),
+		}
+	}
+	return entries
+}
+
+func TestCompletedProgressCacheMatchesFreshWalkForNestedCutoffs(t *testing.T) {
+	t.Parallel()
+
+	entries := completedWalkFixture(supersededProgressPageSize*2 + 40)
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	// Continue Watching pages in-progress rows updated_at DESC, so each page
+	// asks for an older cutoff than the last. Walk from newest to oldest.
+	cutoffs := []time.Time{
+		base.Add(1000 * time.Minute),
+		base.Add(600 * time.Minute),
+		base.Add(200 * time.Minute),
+		base.Add(30 * time.Minute),
+		{},
+	}
+
+	cached := NewCompletedProgressCache()
+	cachedStore := &stubProgressLister{entries: entries}
+
+	for _, cutoff := range cutoffs {
+		freshStore := &stubProgressLister{entries: entries}
+		want, err := CompletedProgressSnapshots(context.Background(), freshStore, "p1", cutoff)
+		if err != nil {
+			t.Fatalf("fresh walk at %v: %v", cutoff, err)
+		}
+		got, err := cached.snapshots(context.Background(), cachedStore, "p1", cutoff)
+		if err != nil {
+			t.Fatalf("cached walk at %v: %v", cutoff, err)
+		}
+		if len(got) != len(want) {
+			t.Fatalf("cutoff %v: cached returned %d snapshots, fresh returned %d", cutoff, len(got), len(want))
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("cutoff %v: snapshot %d = %+v, want %+v", cutoff, i, got[i], want[i])
+			}
+		}
+	}
+
+	// The whole fixture is three pages. A fresh walk per cutoff would have read
+	// far more; the cache must never read a page twice.
+	wantPages := 3
+	if len(cachedStore.calls) != wantPages {
+		t.Fatalf("cached ListProgress calls = %d (%+v), want %d — each page read exactly once", len(cachedStore.calls), cachedStore.calls, wantPages)
+	}
+	for i, call := range cachedStore.calls {
+		if call.offset != i*supersededProgressPageSize {
+			t.Fatalf("call %d offset = %d, want %d — the walk must read strictly forward", i, call.offset, i*supersededProgressPageSize)
+		}
+	}
+}
+
+func TestCompletedProgressCacheStopsEarlyWhenCutoffIsSatisfied(t *testing.T) {
+	t.Parallel()
+
+	entries := completedWalkFixture(supersededProgressPageSize * 3)
+	store := &stubProgressLister{entries: entries}
+	cache := NewCompletedProgressCache()
+
+	// A cutoff inside the first page must not drag in later pages.
+	cutoff, err := time.Parse(time.RFC3339, entries[10].UpdatedAt)
+	if err != nil {
+		t.Fatalf("parsing fixture cutoff: %v", err)
+	}
+	cutoff = cutoff.UTC()
+	got, err := cache.snapshots(context.Background(), store, "p1", cutoff)
+	if err != nil {
+		t.Fatalf("cached walk: %v", err)
+	}
+	if len(got) != 10 {
+		t.Fatalf("snapshots = %d, want 10 rows newer than the cutoff", len(got))
+	}
+	if len(store.calls) != 1 {
+		t.Fatalf("ListProgress calls = %d, want 1 — a satisfied cutoff must not page further", len(store.calls))
+	}
+}
+
+func TestCompletedProgressCacheHonoursPageCap(t *testing.T) {
+	t.Parallel()
+
+	entries := completedWalkFixture(supersededProgressPageSize * (supersededProgressMaxPages + 3))
+	store := &stubProgressLister{entries: entries}
+	cache := NewCompletedProgressCache()
+
+	got, err := cache.snapshots(context.Background(), store, "p1", time.Time{})
+	if err != nil {
+		t.Fatalf("cached walk: %v", err)
+	}
+	if len(store.calls) != supersededProgressMaxPages {
+		t.Fatalf("ListProgress calls = %d, want the %d-page cap", len(store.calls), supersededProgressMaxPages)
+	}
+	if len(got) != supersededProgressPageSize*supersededProgressMaxPages {
+		t.Fatalf("snapshots = %d, want the capped window", len(got))
+	}
+	// Once capped the cache is done: a further ask must not resume paging.
+	if _, err := cache.snapshots(context.Background(), store, "p1", time.Time{}); err != nil {
+		t.Fatalf("second cached walk: %v", err)
+	}
+	if len(store.calls) != supersededProgressMaxPages {
+		t.Fatalf("ListProgress calls after second ask = %d, want no further paging", len(store.calls))
+	}
+}
+
+func TestCompletedProgressCacheFallsBackForADifferentProfile(t *testing.T) {
+	t.Parallel()
+
+	entries := completedWalkFixture(10)
+	store := &stubProgressLister{entries: entries}
+	cache := NewCompletedProgressCache()
+
+	if _, err := cache.snapshots(context.Background(), store, "p1", time.Time{}); err != nil {
+		t.Fatalf("first profile: %v", err)
+	}
+	got, err := cache.snapshots(context.Background(), store, "p2", time.Time{})
+	if err != nil {
+		t.Fatalf("second profile: %v", err)
+	}
+	if len(got) != len(entries) {
+		t.Fatalf("snapshots for p2 = %d, want %d from an uncached walk", len(got), len(entries))
+	}
+	last := store.calls[len(store.calls)-1]
+	if last.profileID != "p2" || last.offset != 0 {
+		t.Fatalf("last call = %+v, want a fresh offset-0 read for p2", last)
+	}
+}
+
+// stubSinceLister serves ListCompletedProgressSince from the same fixture as
+// the offset walk, so the two forms can be compared.
+type stubSinceLister struct {
+	stubProgressLister
+	sinceCalls []int
+	sinceAt    []time.Time
+	rowsRead   int
+}
+
+func (s *stubSinceLister) ListCompletedProgressSince(_ context.Context, _ string, since, until time.Time, limit int) ([]userstore.WatchProgress, error) {
+	s.sinceCalls = append(s.sinceCalls, limit)
+	s.sinceAt = append(s.sinceAt, since)
+	var out []userstore.WatchProgress
+	for _, entry := range s.entries {
+		updatedAt, _ := time.Parse(time.RFC3339, entry.UpdatedAt)
+		if !until.IsZero() && updatedAt.After(until) {
+			continue
+		}
+		if !updatedAt.After(since) {
+			break
+		}
+		if len(out) == limit {
+			break
+		}
+		out = append(out, entry)
+	}
+	s.rowsRead += len(out)
+	return out, nil
+}
+
+func TestCompletedProgressCacheSinceFormMatchesOffsetWalk(t *testing.T) {
+	entries := completedWalkFixture(1200)
+	cutoffs := []int{900, 400, 1100, 50}
+	since := &stubSinceLister{stubProgressLister: stubProgressLister{entries: entries}}
+	cache := NewCompletedProgressCache()
+	for _, idx := range cutoffs {
+		notBefore, _ := time.Parse(time.RFC3339, entries[idx].UpdatedAt)
+		want, err := CompletedProgressSnapshots(t.Context(), &stubProgressLister{entries: entries}, "p1", notBefore)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := cache.snapshots(t.Context(), since, "p1", notBefore)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("cutoff %d: since form returned %d rows, offset walk %d", idx, len(got), len(want))
+		}
+	}
+	if len(since.calls) != 0 {
+		t.Fatalf("offset ListProgress used %d times, want 0", len(since.calls))
+	}
+	// 900 reads once; 400 is newer and 1100 older than the last read, 50 newer.
+	if len(since.sinceCalls) != 2 {
+		t.Fatalf("since queries = %d, want 2 (only older cutoffs re-read)", len(since.sinceCalls))
+	}
+}
+
+func TestCompletedProgressCacheSinceFormHonoursRowCap(t *testing.T) {
+	entries := completedWalkFixture(supersededProgressMaxRows + 300)
+	since := &stubSinceLister{stubProgressLister: stubProgressLister{entries: entries}}
+	cache := NewCompletedProgressCache()
+	got, err := cache.snapshots(t.Context(), since, "p1", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != supersededProgressMaxRows || !cache.capped {
+		t.Fatalf("rows = %d capped = %v, want %d capped", len(got), cache.capped, supersededProgressMaxRows)
+	}
+	if !reflect.DeepEqual(since.sinceCalls, []int{supersededProgressMaxRows + 1}) {
+		t.Fatalf("since limits = %v, want one query asking for cap+1", since.sinceCalls)
+	}
+	if _, err := cache.snapshots(t.Context(), since, "p1", time.Time{}.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if len(since.sinceCalls) != 1 {
+		t.Fatalf("capped cache re-queried: %v", since.sinceCalls)
+	}
+}
+
+// Continue Watching asks once per in-progress page, each with an older cutoff.
+// Every completed row must be read once per request, as the offset walk does.
+func TestCompletedProgressCacheSinceFormReadsEachRowOnce(t *testing.T) {
+	entries := completedWalkFixture(2400)
+	since := &stubSinceLister{stubProgressLister: stubProgressLister{entries: entries}}
+	cache := NewCompletedProgressCache()
+	for _, idx := range []int{200, 500, 800, 1100, 1400, 1700, 2000, 2300, 2399} {
+		notBefore, _ := time.Parse(time.RFC3339, entries[idx].UpdatedAt)
+		want, err := CompletedProgressSnapshots(t.Context(), &stubProgressLister{entries: entries}, "p1", notBefore)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := cache.snapshots(t.Context(), since, "p1", notBefore)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("cutoff %d: since form returned %d rows, offset walk %d", idx, len(got), len(want))
+		}
+	}
+	if since.rowsRead != 2399 {
+		t.Fatalf("rows read = %d, want 2399 (each row once)", since.rowsRead)
+	}
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/subtitles"
@@ -33,6 +34,8 @@ type AdminDownloadedSubtitle struct {
 	MediaTitle       string    `json:"media_title"`
 	MediaType        string    `json:"media_type"`
 	FilePath         string    `json:"file_path"`
+	// Timing is the stored timing correction; it stays out of the frozen v1 JSON.
+	Timing subtitles.Timing `json:"-"`
 }
 
 type adminDownloadedSubtitlesResponse struct {
@@ -133,28 +136,7 @@ func (h *AdminSubtitleHandler) HandleListDownloadedSubtitles(w http.ResponseWrit
 		return
 	}
 
-	listQuery := `
-		SELECT
-			ds.id,
-			ds.media_file_id,
-			COALESCE(mf.content_id, ''),
-			ds.provider,
-			ds.language,
-			ds.format,
-			ds.release_name,
-			ds.score,
-			ds.hearing_impaired,
-			ds.created_at,
-			ds.downloaded_by,
-			COALESCE(u.username, ''),
-			COALESCE(ep.title, mi.title, ''),
-			COALESCE(CASE WHEN ep.content_id IS NOT NULL THEN 'episode' ELSE mi.type END, ''),
-			COALESCE(mf.file_path, '')
-		FROM downloaded_subtitles ds
-		LEFT JOIN users u ON u.id = ds.downloaded_by
-		LEFT JOIN media_files mf ON mf.id = ds.media_file_id
-		LEFT JOIN media_items mi ON mi.content_id = mf.content_id
-		LEFT JOIN episodes ep ON ep.content_id = mf.content_id` + whereClause + `
+	listQuery := adminDownloadedSubtitleSelect + whereClause + `
 		ORDER BY ds.created_at DESC
 		LIMIT $` + strconv.Itoa(argIndex) + ` OFFSET $` + strconv.Itoa(argIndex+1)
 
@@ -168,24 +150,8 @@ func (h *AdminSubtitleHandler) HandleListDownloadedSubtitles(w http.ResponseWrit
 
 	subtitlesList := make([]AdminDownloadedSubtitle, 0)
 	for rows.Next() {
-		var row AdminDownloadedSubtitle
-		if err := rows.Scan(
-			&row.ID,
-			&row.MediaFileID,
-			&row.MediaContentID,
-			&row.Provider,
-			&row.Language,
-			&row.Format,
-			&row.ReleaseName,
-			&row.Score,
-			&row.HearingImpaired,
-			&row.CreatedAt,
-			&row.DownloadedBy,
-			&row.UploaderUsername,
-			&row.MediaTitle,
-			&row.MediaType,
-			&row.FilePath,
-		); err != nil {
+		row, err := scanAdminDownloadedSubtitle(rows)
+		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to scan subtitle row")
 			return
 		}
@@ -324,3 +290,38 @@ func subtitleDownloadFilename(sub *subtitles.DownloadedSubtitle) string {
 	}
 	return fmt.Sprintf("%s.%s", base, sub.Format)
 }
+
+// scanAdminDownloadedSubtitle scans one row selected with adminDownloadedSubtitleSelect.
+func scanAdminDownloadedSubtitle(row pgx.Row) (AdminDownloadedSubtitle, error) {
+	var out AdminDownloadedSubtitle
+	err := row.Scan(&out.ID, &out.MediaFileID, &out.MediaContentID, &out.Provider, &out.Language,
+		&out.Format, &out.ReleaseName, &out.Score, &out.HearingImpaired, &out.CreatedAt,
+		&out.DownloadedBy, &out.UploaderUsername, &out.MediaTitle, &out.MediaType, &out.FilePath,
+		&out.Timing.OffsetMS, &out.Timing.Scale)
+	return out, err
+}
+
+const adminDownloadedSubtitleSelect = `
+		SELECT
+			ds.id,
+			ds.media_file_id,
+			COALESCE(mf.content_id, ''),
+			ds.provider,
+			ds.language,
+			ds.format,
+			ds.release_name,
+			ds.score,
+			ds.hearing_impaired,
+			ds.created_at,
+			ds.downloaded_by,
+			COALESCE(u.username, ''),
+			COALESCE(ep.title, mi.title, ''),
+			COALESCE(CASE WHEN ep.content_id IS NOT NULL THEN 'episode' ELSE mi.type END, ''),
+			COALESCE(mf.file_path, ''),
+			ds.timing_offset_ms,
+			ds.timing_scale
+		FROM downloaded_subtitles ds
+		LEFT JOIN users u ON u.id = ds.downloaded_by
+		LEFT JOIN media_files mf ON mf.id = ds.media_file_id
+		LEFT JOIN media_items mi ON mi.content_id = mf.content_id
+		LEFT JOIN episodes ep ON ep.content_id = mf.content_id`

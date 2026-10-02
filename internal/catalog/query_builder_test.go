@@ -236,8 +236,11 @@ func TestBuildSortClause_ContentRatingUsesRankedOrdering(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSortClause returned error: %v", err)
 	}
-	if !strings.Contains(clause, "WHEN UPPER(NULLIF(BTRIM(mi.content_rating), '')) = 'TV-14' THEN 2") {
-		t.Fatalf("expected maturity rank CASE expression, got %q", clause)
+	// The sort reads the stored minimum age, so ratings from different national
+	// systems interleave instead of only the eleven US strings ordering at all.
+	// An unknown age still sorts last.
+	if !strings.Contains(clause, "COALESCE(mi.content_rating_age, 2147483647)") {
+		t.Fatalf("expected stored-age ordering, got %q", clause)
 	}
 	if !strings.Contains(clause, "LOWER(COALESCE(NULLIF(BTRIM(mi.content_rating), ''), '~~~~')) ASC") {
 		t.Fatalf("expected normalized label ordering, got %q", clause)

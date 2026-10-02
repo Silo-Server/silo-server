@@ -1,8 +1,9 @@
-import type { QueryClient } from "@tanstack/react-query";
+import { jellyfinCompatStatusKey } from "@/api/v2/jellyfinStatusCache";
+import { fetchAdminTaskJob } from "@/api/v2/adminTasks";
+import type { QueryClient, QueryFilters } from "@tanstack/react-query";
 import { useQueryClient } from "@tanstack/react-query";
 import type {
   AdminJob,
-  AdminSession,
   AppNotification,
   EventChannel,
   EventsEventMessage,
@@ -15,7 +16,12 @@ import type {
   ScanRun,
   TaskInfo,
 } from "@/api/types";
-import { api, getAccessToken } from "@/api/client";
+import { isCapturedProfileAuthorityActive, type ProfileRequestContextSnapshot } from "@/api/client";
+import {
+  mintEventsSocketTicket,
+  captureEventsAuthority,
+  isEventsAuthorityActive,
+} from "@/api/v2/eventsSocket";
 import {
   applyNotificationCreated,
   applyNotificationRead,
@@ -29,16 +35,31 @@ import {
   type RealtimeConnectionState,
   type RealtimeEventsContextValue,
 } from "@/components/realtimeEventsContext";
-import { invalidateCatalogState } from "@/components/realtimeCatalogInvalidation";
+import {
+  createCatalogInvalidationScheduler,
+  invalidateAccessDependentState,
+  invalidateCatalogState,
+  scheduleProgressHomeRefresh,
+  userStateChangeAffectsSectionMembership,
+} from "@/components/realtimeCatalogInvalidation";
+import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
+import { createRealtimeQueryRefreshScheduler } from "@/components/realtimeQueryRefresh";
+import { adminSessionsKey } from "@/api/v2/adminSessionsCache";
+import { adminStatsKey } from "@/hooks/queries/admin/stats";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { usePageActivity } from "@/hooks/usePageActivity";
-import { adminKeys, historyImportKeys, libraryKeys } from "@/hooks/queries/keys";
 import {
-  invalidateMediaSurfaceQueries,
+  adminKeys,
+  historyImportKeys,
+  libraryKeys,
+  requestKeys,
+  sectionKeys,
+} from "@/hooks/queries/keys";
+import {
+  scheduleMediaSurfaceInvalidation,
   updateCatalogItemDetail,
 } from "@/hooks/queries/mediaSurfaceRefresh";
-import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router";
@@ -64,53 +85,31 @@ const CATALOG_ITEM_CHANGED_EVENTS = new Set([
   "library.item_added",
   "metadata.updated",
 ]);
-const SCOPED_CATALOG_LIBRARY_EVENTS = new Set(["catalog.library.changed", "library.changed"]);
-const DASHBOARD_QUERY_KEYS = [
-  adminKeys.stats(),
-  adminKeys.sessions(),
-  adminKeys.libraries(),
-  adminKeys.users(),
-] as const;
 
-function buildEventsUrl(
-  token: string | null,
-  location: Pick<Location, "protocol" | "host">,
-  ticket?: string | null,
-) {
-  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  const search = new URLSearchParams();
-  if (token) {
-    search.set("token", token);
-  }
-  if (ticket) {
-    search.set("ticket", ticket);
-  }
-  return `${protocol}//${location.host}/api/v1/events/ws${search.toString() ? `?${search.toString()}` : ""}`;
+// Everything that shows a title's request state: the request list, title
+// pages, Discover, and request search results. The feature status and brand
+// lists don't depend on it.
+const REQUEST_STATE_QUERIES: QueryFilters[] = [
+  { queryKey: requestKeys.mineAll() },
+  { queryKey: requestKeys.detailAll() },
+  { queryKey: requestKeys.discovery() },
+  { queryKey: requestKeys.discoverBrowseAll() },
+  { queryKey: requestKeys.searchAll() },
+];
+
+function isRequestNotification(notification: Pick<AppNotification, "type">) {
+  return notification.type?.startsWith("request.") ?? false;
 }
 
 /**
- * Mints a short-lived single-use websocket ticket binding the connection to
- * the active profile (required for the notifications channel). Returns null
- * when no profile is active or the mint fails — the connection then proceeds
- * unbound, and the subscribed-message handler retries the binding with
- * backoff when the notifications subscription is rejected.
+ * Close code the server ends the events socket with after an access_changed
+ * frame. The client refetches access-dependent data and reconnects at once.
  */
-async function mintEventsTicket(hasProfile: boolean): Promise<string | null> {
-  if (!hasProfile) {
-    return null;
-  }
-  try {
-    const response = await api<{ ticket: string }>("/events/ws-ticket", {
-      method: "POST",
-      // A hung mint must settle: connect() awaits this before any socket
-      // exists, so without a timeout no onclose fires and no reconnect is
-      // ever scheduled — realtime would stay "connecting" forever.
-      signal: AbortSignal.timeout(10_000),
-    });
-    return response.ticket || null;
-  } catch {
-    return null;
-  }
+export const EVENTS_ACCESS_CHANGED_CLOSE_CODE = 4001;
+
+function buildEventsUrl(location: Pick<Location, "protocol" | "host">) {
+  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${location.host}/api/v2/events/ws`;
 }
 
 function parseEventsMessage(value: unknown): EventsStreamMessage | null {
@@ -135,7 +134,7 @@ function isTerminalJob(job: AdminJob) {
 
 async function pollAdminJobUntilTerminal(jobId: string): Promise<AdminJob> {
   for (;;) {
-    const job = await api<AdminJob>(`/admin/jobs/${jobId}`);
+    const job = await fetchAdminTaskJob(jobId);
     if (job.status === "completed") {
       return job;
     }
@@ -176,16 +175,19 @@ function upsertJob(existing: AdminJob[] | undefined, nextJob: AdminJob, limit = 
   return sortJobs(jobs).slice(0, limit);
 }
 
-function applyJellyfinCompatOperationUpdate(
+export function applyJellyfinCompatOperationUpdate(
   queryClient: QueryClient,
   operation: JellyfinCompatOperationStatus,
+  authority: ProfileRequestContextSnapshot | null,
 ) {
+  if (!authority || !isCapturedProfileAuthorityActive(authority)) return;
+  const key = jellyfinCompatStatusKey(authority);
   if (!operation?.id) {
-    void queryClient.invalidateQueries({ queryKey: adminKeys.jellyfinCompatStatus() });
+    void queryClient.invalidateQueries({ queryKey: key, exact: true });
     return;
   }
 
-  queryClient.setQueryData<JellyfinCompatStatus>(adminKeys.jellyfinCompatStatus(), (existing) => {
+  queryClient.setQueryData<JellyfinCompatStatus>(key, (existing) => {
     if (!existing) {
       return existing;
     }
@@ -197,7 +199,7 @@ function applyJellyfinCompatOperationUpdate(
   });
 
   if (operation.state !== "running") {
-    void queryClient.invalidateQueries({ queryKey: adminKeys.jellyfinCompatStatus() });
+    void queryClient.invalidateQueries({ queryKey: key, exact: true });
   }
 }
 
@@ -217,6 +219,7 @@ function jellyfinCompatOperationWebState(
 }
 
 function hydrateAdminJobSnapshot(queryClient: QueryClient, jobs: AdminJob[]) {
+  void queryClient.invalidateQueries({ queryKey: adminKeys.jobs("__all") });
   const sorted = sortJobs(jobs);
   queryClient.setQueryData<AdminJob[]>(adminKeys.jobs("__all"), sorted);
 
@@ -227,11 +230,14 @@ function hydrateAdminJobSnapshot(queryClient: QueryClient, jobs: AdminJob[]) {
     jobsByType.set(job.job_type, list);
   }
   for (const [jobType, entries] of jobsByType) {
+    void queryClient.invalidateQueries({ queryKey: adminKeys.jobs(jobType) });
     queryClient.setQueryData<AdminJob[]>(adminKeys.jobs(jobType), entries);
   }
 }
 
 function applyAdminJobUpdate(queryClient: QueryClient, job: AdminJob) {
+  void queryClient.invalidateQueries({ queryKey: adminKeys.jobs(job.job_type) });
+  void queryClient.invalidateQueries({ queryKey: adminKeys.jobs("__all") });
   queryClient.setQueryData<AdminJob[]>(adminKeys.jobs(job.job_type), (existing) =>
     upsertJob(existing, job, 50),
   );
@@ -250,6 +256,7 @@ function findCachedAdminJob(queryClient: QueryClient, jobId: string) {
 
   for (const query of matches) {
     const jobs = query.state.data as AdminJob[] | undefined;
+    if (!Array.isArray(jobs)) continue;
     const job = jobs?.find((entry) => entry.id === jobId);
     if (job) {
       return job;
@@ -259,21 +266,20 @@ function findCachedAdminJob(queryClient: QueryClient, jobId: string) {
   return null;
 }
 
-function invalidateDashboardQueries(queryClient: QueryClient, allowRefetch: boolean) {
-  for (const queryKey of DASHBOARD_QUERY_KEYS) {
-    void queryClient.invalidateQueries({
-      queryKey,
-      refetchType: allowRefetch ? "active" : "none",
-    });
-  }
-}
-
 function catalogEventLibraryID(data: unknown) {
   if (!data || typeof data !== "object" || !("library_id" in data)) {
     return undefined;
   }
   const value = (data as { library_id?: unknown }).library_id;
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function catalogEventContentID(data: unknown) {
+  if (!data || typeof data !== "object" || !("content_id" in data)) {
+    return undefined;
+  }
+  const value = (data as { content_id?: unknown }).content_id;
+  return typeof value === "string" && value ? value : undefined;
 }
 
 function handleJobSideEffects(
@@ -296,50 +302,6 @@ function handleJobSideEffects(
 
   if (eventName === "job.completed" && job.job_type === "delete_library") {
     invalidateCatalogState(queryClient, { allowDashboardRefetch });
-  }
-}
-
-function hydrateSessions(
-  queryClient: QueryClient,
-  sessions: AdminSession[],
-  allowDashboardUpdates: boolean,
-) {
-  if (!allowDashboardUpdates) {
-    invalidateDashboardQueries(queryClient, false);
-    return;
-  }
-  queryClient.setQueryData(adminKeys.sessions(), sessions);
-  void queryClient.invalidateQueries({ queryKey: adminKeys.stats() });
-}
-
-function hydrateTasks(queryClient: QueryClient, tasks: TaskInfo[]) {
-  queryClient.setQueryData(adminKeys.tasks(), tasks);
-  for (const task of tasks) {
-    queryClient.setQueryData(adminKeys.task(task.key), task);
-  }
-}
-
-function applyTaskUpdate(queryClient: QueryClient, task: TaskInfo) {
-  const previousTask = queryClient.getQueryData<TaskInfo>(adminKeys.task(task.key));
-  queryClient.setQueryData<TaskInfo[]>(adminKeys.tasks(), (existing) => {
-    const tasks = existing ? [...existing] : [];
-    const index = tasks.findIndex((entry) => entry.key === task.key);
-    if (index >= 0) {
-      tasks[index] = task;
-    } else {
-      tasks.push(task);
-    }
-    return tasks.sort((left, right) => left.key.localeCompare(right.key));
-  });
-  queryClient.setQueryData(adminKeys.task(task.key), task);
-
-  if (
-    task.state === "idle" &&
-    task.last_execution?.completed_at &&
-    previousTask?.last_execution?.completed_at !== task.last_execution.completed_at
-  ) {
-    void queryClient.invalidateQueries({ queryKey: adminKeys.taskHistory(task.key) });
-    void queryClient.invalidateQueries({ queryKey: adminKeys.taskMetrics(task.key) });
   }
 }
 
@@ -409,22 +371,58 @@ function handleUserStateEvent(
   }
 
   if (payload.content_id) {
-    updateCatalogItemDetail(queryClient, payload.content_id, (detail) => ({
-      ...detail,
-      user_state: {
-        played: payload.played ?? detail.user_state?.played ?? false,
-        is_favorite: payload.is_favorite ?? detail.user_state?.is_favorite ?? false,
-        in_watchlist: payload.in_watchlist ?? detail.user_state?.in_watchlist ?? false,
-      },
-    }));
+    updateCatalogItemDetail(queryClient, payload.content_id, (detail) => {
+      const played =
+        payload.played ?? detail.user_state?.played ?? detail.user_data?.played ?? false;
+      const isFavorite = payload.is_favorite ?? detail.user_state?.is_favorite ?? false;
+      const inWatchlist = payload.in_watchlist ?? detail.user_state?.in_watchlist ?? false;
+      if (
+        played === (detail.user_data?.played ?? false) &&
+        played === (detail.user_state?.played ?? false) &&
+        isFavorite === (detail.user_state?.is_favorite ?? false) &&
+        inWatchlist === (detail.user_state?.in_watchlist ?? false)
+      ) {
+        return detail;
+      }
+      return {
+        ...detail,
+        user_data:
+          payload.played == null
+            ? detail.user_data
+            : { ...detail.user_data, played: payload.played },
+        user_state: { played, is_favorite: isFavorite, in_watchlist: inWatchlist },
+      };
+    });
   }
 
-  void invalidateMediaSurfaceQueries(
+  // The patch above only carries played/favourite/watchlist, which is the whole
+  // of what a favorite or watchlist event changes. Every other change — progress
+  // above all, which arrives with no state at all — also moves fields the patch
+  // cannot reconstruct (position_seconds, is_in_progress, season counts), so the
+  // detail query still has to be refreshed for those.
+  const detailFullyPatched = payload.change === "favorite" || payload.change === "watchlist";
+  scheduleMediaSurfaceInvalidation(
     queryClient,
-    payload.content_id ? { itemId: payload.content_id } : {},
-  ).then(() => {
-    bumpHomeRefreshSignal(queryClient);
-  });
+    payload.content_id
+      ? {
+          itemId: payload.content_id,
+          skipItemDetail: detailFullyPatched,
+          skipSimilarItems: true,
+        }
+      : { skipSimilarItems: true },
+  );
+  // Resetting home's load queue re-runs every section fetch. Membership
+  // changes do it immediately; progress ticks coalesce into one trailing
+  // refresh per window so an open home still catches another client's
+  // playback without a per-tick storm. Mark the home sections stale before
+  // an immediate reset because the surface invalidation above is debounced.
+  if (userStateChangeAffectsSectionMembership(payload.change)) {
+    void queryClient
+      .invalidateQueries({ queryKey: sectionKeys.home(), refetchType: "none" })
+      .then(() => bumpHomeRefreshSignal(queryClient));
+  } else {
+    scheduleProgressHomeRefresh(queryClient);
+  }
   void queryClient.invalidateQueries({
     queryKey: adminKeys.stats(),
     refetchType: allowDashboardRefetch ? "active" : "none",
@@ -433,14 +431,20 @@ function handleUserStateEvent(
 
 export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
-  const { user, profile } = useAuth();
+  const { user, profile, refreshAccount } = useAuth();
   const actingAdmin = useIsActingAdmin();
   const pageActivity = usePageActivity();
   const location = useLocation();
   const authenticatedUserID = user?.id ?? null;
+  const renderedAuthority = captureEventsAuthority();
+  const isForegroundPlaybackRoute = location.pathname.startsWith("/watch/");
   const isDashboardRoute = location.pathname === "/admin" || location.pathname === "/admin/";
   const allowDashboardRealtimeUpdates = !isDashboardRoute || pageActivity.canPollDashboard;
   const [connectionState, setConnectionState] = useState<RealtimeConnectionState>("connecting");
+  const catalogInvalidation = useMemo(
+    () => createCatalogInvalidationScheduler(queryClient),
+    [queryClient],
+  );
   const reconnectTimerRef = useRef<number | undefined>(undefined);
   const profileRebindAttemptsRef = useRef(0);
   const nextReconnectDelayRef = useRef<number | null>(null);
@@ -459,6 +463,8 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   activeProfileIDRef.current = profile?.id;
   canApplyRealtimeUpdatesRef.current = pageActivity.canApplyRealtimeUpdates;
   allowDashboardRealtimeUpdatesRef.current = allowDashboardRealtimeUpdates;
+
+  useEffect(() => () => catalogInvalidation.cancel(), [catalogInvalidation]);
 
   const settleWaiterRef = useRef<(job: AdminJob) => void>(() => {});
   settleWaiterRef.current = (job: AdminJob) => {
@@ -555,7 +561,11 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  function handleSnapshot(message: EventsSnapshotMessage) {
+  function handleSnapshot(
+    message: EventsSnapshotMessage,
+    refreshSessions: () => void,
+    refreshQueries: (...filters: QueryFilters[]) => void,
+  ) {
     switch (message.channel) {
       case "jobs":
         if (Array.isArray(message.data)) {
@@ -566,14 +576,12 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         }
         break;
       case "sessions":
-        hydrateSessions(
-          queryClient,
-          (message.data as AdminSession[]) ?? [],
-          allowDashboardRealtimeUpdatesRef.current,
-        );
+        refreshSessions();
         break;
       case "tasks":
-        hydrateTasks(queryClient, (message.data as TaskInfo[]) ?? []);
+        // Reconnect must also catch up history/metrics for tasks that finished
+        // while disconnected. One sweep avoids refetching each detail twice.
+        refreshQueries({ queryKey: adminKeys.tasks() });
         break;
       case "scans":
         hydrateScans(queryClient, (message.data as ScanRun[]) ?? []);
@@ -583,7 +591,13 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         break;
       case "notifications":
         if (Array.isArray(message.data)) {
-          applyNotificationsSnapshot(queryClient, message.data as AppNotification[]);
+          const rows = message.data as AppNotification[];
+          applyNotificationsSnapshot(queryClient, rows);
+          // A reconnect sends request changes made while the socket was down
+          // as unread rows here, not as notification.created events.
+          if (rows.some(isRequestNotification)) {
+            refreshQueries(...REQUEST_STATE_QUERIES);
+          }
         }
         break;
       default:
@@ -592,9 +606,17 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     dispatchChannelMessage(message.channel, "snapshot", message);
   }
 
-  function handleNotificationEvent(message: EventsEventMessage) {
+  function handleNotificationEvent(
+    message: EventsEventMessage,
+    refreshQueries: (...filters: QueryFilters[]) => void,
+  ) {
     if (message.event === "notification.created") {
       const notification = message.data as AppNotification;
+      // A request changed state (approved, declined, arrived). The scheduler
+      // batches a burst (a scan fulfilling many requests) into one refetch.
+      if (isRequestNotification(notification)) {
+        refreshQueries(...REQUEST_STATE_QUERIES);
+      }
       if (
         notification.profile_id &&
         activeProfileIDRef.current &&
@@ -609,11 +631,18 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
           description: [episodeCode, notification.episode_title].filter(Boolean).join(" — "),
         });
       } else if (notification.type === "request.fulfilled") {
+        const follower = notification.reason_flags?.follower === true;
         toast(
           notification.series_title
             ? `${notification.series_title} is now available`
-            : "Your request is now available",
-          { description: "Your media request has arrived in the library." },
+            : follower
+              ? "A title you followed is now available"
+              : "Your request is now available",
+          {
+            description: follower
+              ? "A title you asked to hear about has arrived in the library."
+              : "Your media request has arrived in the library.",
+          },
         );
       } else if (
         notification.type === "request.approved" ||
@@ -635,32 +664,24 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  function handleEvent(message: EventsEventMessage) {
+  function handleEvent(
+    message: EventsEventMessage,
+    realtimeAuthority: ProfileRequestContextSnapshot | null,
+    refreshSessions: () => void,
+    refreshQueries: (...filters: QueryFilters[]) => void,
+  ) {
     switch (message.channel) {
       case "catalog":
         {
-          const eventLibraryID = catalogEventLibraryID(message.data);
-          if (CATALOG_ITEM_CHANGED_EVENTS.has(message.event)) {
-            invalidateCatalogState(queryClient, {
-              itemId:
-                typeof message.data === "object" && message.data && "content_id" in message.data
-                  ? (message.data as { content_id?: string }).content_id
-                  : undefined,
-              libraryId: eventLibraryID,
-              allowDashboardRefetch: allowDashboardRealtimeUpdatesRef.current,
-              includeLibraryLists: false,
-            });
-          } else if (SCOPED_CATALOG_LIBRARY_EVENTS.has(message.event) && eventLibraryID) {
-            invalidateCatalogState(queryClient, {
-              libraryId: eventLibraryID,
-              allowDashboardRefetch: allowDashboardRealtimeUpdatesRef.current,
-            });
-          } else {
-            invalidateCatalogState(queryClient, {
-              libraryId: eventLibraryID,
-              allowDashboardRefetch: allowDashboardRealtimeUpdatesRef.current,
-            });
-          }
+          const isItemChange = CATALOG_ITEM_CHANGED_EVENTS.has(message.event);
+          catalogInvalidation.schedule({
+            itemId: isItemChange ? catalogEventContentID(message.data) : undefined,
+            libraryId: catalogEventLibraryID(message.data),
+            allowDashboardRefetch: allowDashboardRealtimeUpdatesRef.current,
+            // An item changing inside a library does not change the set of
+            // libraries, so the admin library lists stay untouched.
+            includeLibraryLists: !isItemChange,
+          });
         }
         break;
       case "jobs":
@@ -675,16 +696,26 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         break;
       case "sessions":
         if (message.event === "sessions.replaced") {
-          hydrateSessions(
-            queryClient,
-            (message.data as AdminSession[]) ?? [],
-            allowDashboardRealtimeUpdatesRef.current,
-          );
+          refreshSessions();
         }
         break;
       case "tasks":
         if (message.event === "task.updated") {
-          applyTaskUpdate(queryClient, message.data as TaskInfo);
+          // Task frames fan out across nodes without source identity, while HTTP
+          // task execution state belongs to the serving process.
+          const task = message.data as Pick<TaskInfo, "key" | "state">;
+          const filters: QueryFilters[] = [
+            { queryKey: adminKeys.tasks(), exact: true },
+            { queryKey: adminKeys.tasksIncludingHidden(), exact: true },
+            { queryKey: adminKeys.task(task.key), exact: true },
+          ];
+          if (task.state === "idle") {
+            filters.push(
+              { queryKey: adminKeys.taskHistory(task.key) },
+              { queryKey: adminKeys.taskMetrics(task.key) },
+            );
+          }
+          refreshQueries(...filters);
         }
         break;
       case "scans":
@@ -698,6 +729,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
           applyJellyfinCompatOperationUpdate(
             queryClient,
             message.data as JellyfinCompatOperationStatus,
+            realtimeAuthority,
           );
         }
         break;
@@ -710,7 +742,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         );
         break;
       case "notifications":
-        handleNotificationEvent(message);
+        handleNotificationEvent(message, refreshQueries);
         break;
       default:
         break;
@@ -729,13 +761,32 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     if (!shouldCatchUpOnFocusRef.current) {
       return;
     }
+    // The foreground player covers the routed app and owns everything it
+    // needs for uninterrupted playback. Refetching every active query here
+    // used to reload profiles, capabilities, theme/settings, branding, and
+    // watch detail together whenever a hidden playback tab became visible.
+    // Keep the catch-up pending until the watch route exits; the underlying
+    // screen will then refresh before it becomes useful again.
+    if (isForegroundPlaybackRoute) {
+      return;
+    }
 
     shouldCatchUpOnFocusRef.current = false;
     void queryClient.refetchQueries({
       type: "active",
       predicate: (query) => !isDashboardQueryKey(query.queryKey),
     });
-  }, [authenticatedUserID, pageActivity.canApplyRealtimeUpdates, queryClient]);
+    // The account record is not a query. An access change made while the
+    // socket was down never sends access_changed: the reconnect's ticket
+    // already carries the new access.
+    void refreshAccount().catch(() => {});
+  }, [
+    authenticatedUserID,
+    isForegroundPlaybackRoute,
+    pageActivity.canApplyRealtimeUpdates,
+    queryClient,
+    refreshAccount,
+  ]);
 
   useEffect(() => {
     if (!authenticatedUserID || !pageActivity.canApplyRealtimeUpdates) {
@@ -743,6 +794,24 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    const authority = captureEventsAuthority();
+    if (!authority) {
+      setConnectionState("disconnected");
+      return;
+    }
+    const authorityActive = () => isEventsAuthorityActive(authority);
+    const adminRefresh = createRealtimeQueryRefreshScheduler(
+      queryClient,
+      authorityActive,
+      (queryKey) => !isDashboardQueryKey(queryKey) || allowDashboardRealtimeUpdatesRef.current,
+    );
+    const refreshSessions = () => {
+      if (!authority.profileId) return;
+      adminRefresh.schedule(
+        { queryKey: adminSessionsKey(authority), exact: true },
+        { queryKey: adminStatsKey(authority), exact: true },
+      );
+    };
     let closedByEffect = false;
     let activeSocket: WebSocket | null = null;
 
@@ -777,25 +846,26 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       setConnectionState("connecting");
       helloReceivedRef.current = false;
 
-      // The ticket binds the connection to the active profile so the server
-      // can authorize the notifications channel. Failure degrades gracefully
-      // to an unbound connection; without a profile we connect synchronously.
-      if (!activeProfileIDRef.current) {
-        openSocket(null);
-        return;
-      }
-      void mintEventsTicket(true).then((ticket) => {
-        if (closedByEffect) {
-          return;
-        }
-        openSocket(ticket);
-      });
+      void mintEventsSocketTicket(authority)
+        .then((ticket) => {
+          if (closedByEffect || !authorityActive()) return;
+          openSocket(ticket.ticket);
+        })
+        .catch(() => {
+          if (closedByEffect || !authorityActive()) return;
+          setConnectionState("disconnected");
+          scheduleReconnect();
+        });
     };
 
-    const openSocket = (ticket: string | null) => {
+    const openSocket = (ticket: string) => {
       let socket: WebSocket;
       try {
-        socket = new WebSocket(buildEventsUrl(getAccessToken(), window.location, ticket));
+        if (!authorityActive()) return;
+        socket = new WebSocket(buildEventsUrl(window.location), [
+          "silo.events.v2",
+          `silo.ticket.${ticket}`,
+        ]);
       } catch {
         setConnectionState("disconnected");
         scheduleReconnect();
@@ -804,16 +874,29 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
 
       activeSocket = socket;
       socketRef.current = socket;
+      // The server sends access_changed and then closes with
+      // EVENTS_ACCESS_CHANGED_CLOSE_CODE; whichever arrives first refreshes.
+      let accessChangeHandled = false;
+      const handleAccessChanged = () => {
+        if (accessChangeHandled) return;
+        accessChangeHandled = true;
+        invalidateAccessDependentState(queryClient, {
+          allowDashboardRefetch: allowDashboardRealtimeUpdatesRef.current,
+        });
+        void refreshAccount().catch(() => {});
+        // The new access applies to the next ticket, so reconnect at once.
+        nextReconnectDelayRef.current = 0;
+      };
 
       socket.onopen = () => {
-        if (closedByEffect || socketRef.current !== socket) {
+        if (closedByEffect || socketRef.current !== socket || !authorityActive()) {
           return;
         }
         setConnectionState("live");
       };
 
       socket.onmessage = (event) => {
-        if (closedByEffect || socketRef.current !== socket) {
+        if (closedByEffect || socketRef.current !== socket || !authorityActive()) {
           return;
         }
         if (!canApplyRealtimeUpdatesRef.current) {
@@ -855,10 +938,13 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
             return;
           }
           case "snapshot":
-            handleSnapshot(message);
+            handleSnapshot(message, refreshSessions, adminRefresh.schedule);
             return;
           case "event":
-            handleEvent(message);
+            handleEvent(message, authority, refreshSessions, adminRefresh.schedule);
+            return;
+          case "access_changed":
+            handleAccessChanged();
             return;
           case "error":
             return;
@@ -866,15 +952,22 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       };
 
       socket.onerror = () => {
-        if (closedByEffect || socketRef.current !== socket) {
+        if (closedByEffect || socketRef.current !== socket || !authorityActive()) {
           return;
         }
         setConnectionState("disconnected");
       };
 
-      socket.onclose = () => {
+      socket.onclose = (event: CloseEvent) => {
         if (socketRef.current !== socket) {
           return;
+        }
+        if (
+          event.code === EVENTS_ACCESS_CHANGED_CLOSE_CODE &&
+          !closedByEffect &&
+          authorityActive()
+        ) {
+          handleAccessChanged();
         }
         socketRef.current = null;
         activeSocket = null;
@@ -890,6 +983,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
 
     return () => {
       closedByEffect = true;
+      adminRefresh.cancel();
       clearReconnect();
       for (const [jobId, waiter] of waitersRef.current) {
         window.clearTimeout(waiter.timeoutId);
@@ -908,14 +1002,18 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         socket.close();
       }
     };
-    // profile?.id is a dependency on purpose: the websocket binds to the
-    // active profile via the handshake ticket, so a profile switch must
-    // reconnect (and resubscribe) under the new identity.
+    // Rebind on authority changes, including a replacement PIN proof for the
+    // same profile. Ordinary access-token refresh preserves this authority.
   }, [
     authenticatedUserID,
     profile?.id,
+    renderedAuthority?.authContextVersion,
+    renderedAuthority?.serverOrigin,
+    renderedAuthority?.profileId,
+    renderedAuthority?.profileToken,
     pageActivity.canApplyRealtimeUpdates,
     queryClient,
+    refreshAccount,
     sendSubscribe,
   ]);
 

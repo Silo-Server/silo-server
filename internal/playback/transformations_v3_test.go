@@ -2,11 +2,40 @@ package playback
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestProbeTransformationRegistryWithToneMapV3ResultPreservesDeadline(t *testing.T) {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+
+	_, err := ProbeTransformationRegistryWithToneMapV3Result(ctx, "ffmpeg", nil)
+
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("probe error = %v, want context deadline", err)
+	}
+}
+
+func TestProbeTransformationRegistryWithToneMapV3ResultRejectsFailedInventoryCommand(t *testing.T) {
+	ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
+	script := "#!/bin/sh\ncase \"$2\" in\n-bsfs) echo dovi_rpu; exit 1 ;;\n-encoders) echo ' V....D libx264 H.264'; echo ' A....D aac AAC' ;;\n-filters) echo ' ... aresample A->A'; echo ' T.C alimiter A->A' ;;\nesac\n"
+	if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	registry, err := ProbeTransformationRegistryWithToneMapV3Result(context.Background(), ffmpeg, nil)
+	if err == nil {
+		t.Fatal("failed -bsfs command returned a cacheable registry")
+	}
+	if !registry.Available(TransformationAudioToAACV3) || !registry.Available(TransformationVideoToH264V3) {
+		t.Fatal("successful encoder inventory was not retained in the diagnostic registry")
+	}
+}
 
 func TestH264EncoderAvailabilityAcceptsAnyPipelineEncoder(t *testing.T) {
 	cases := []struct {
@@ -33,7 +62,7 @@ func TestH264EncoderAvailabilityAcceptsAnyPipelineEncoder(t *testing.T) {
 
 func TestProbeTransformationRegistryV3AdvertisesVideoToH264RecipeVersion2(t *testing.T) {
 	ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
-	script := "#!/bin/sh\ncase \"$2\" in\n-bsfs) echo dovi_rpu ;;\n-encoders) echo ' V....D libx264 H.264'; echo ' A....D aac AAC' ;;\nesac\n"
+	script := "#!/bin/sh\ncase \"$2\" in\n-bsfs) echo dovi_rpu ;;\n-encoders) echo ' V....D libx264 H.264'; echo ' A....D aac AAC' ;;\n-filters) echo ' ... aresample A->A'; echo ' T.C alimiter A->A' ;;\nesac\n"
 	if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -50,61 +79,44 @@ func TestProbeTransformationRegistryV3AdvertisesVideoToH264RecipeVersion2(t *tes
 	t.Fatal("video_to_h264 was not advertised")
 }
 
-func TestProbeTransformationRegistryV3AdvertisesExactNoiseBitstreamFilter(t *testing.T) {
-	cases := []struct {
-		name      string
-		listing   string
-		help      string
-		bsfsExit  string
-		helpExit  string
-		available bool
+func TestProbeTransformationRegistryV3RequiresBothVersion4AudioFilterGraphs(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		rejectFilter string
 	}{
-		{name: "exact recipe", listing: "noise", help: "-drop <string>", bsfsExit: "0", helpExit: "0", available: true},
-		{name: "among filters", listing: "dovi_rpu noise filter_units", help: "-amount <string> -drop <string> -dropamount <int>", bsfsExit: "0", helpExit: "0", available: true},
-		{name: "legacy integer option", listing: "noise", help: "-dropamount <int>", bsfsExit: "0", helpExit: "0", available: false},
-		{name: "substring only", listing: "noise_reduction", help: "-drop <string>", bsfsExit: "0", helpExit: "0", available: false},
-		{name: "missing", listing: "dovi_rpu", help: "-drop <string>", bsfsExit: "0", helpExit: "0", available: false},
-		{name: "partial BSF output on failure", listing: "noise", help: "-drop <string>", bsfsExit: "1", helpExit: "0", available: false},
-		{name: "partial help output on failure", listing: "noise", help: "-drop <string>", bsfsExit: "0", helpExit: "1", available: false},
-	}
-	for _, test := range cases {
+		{name: "timestamp normalization", rejectFilter: aacTimestampNormalizeFilterV3},
+		{name: "surround downmix", rejectFilter: stereoDownmixBoostFilterV3},
+	} {
 		t.Run(test.name, func(t *testing.T) {
 			ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
-			script := "#!/bin/sh\ncase \"$2\" in\n-bsfs) printf '%s\\n' '" + test.listing + "'; exit " + test.bsfsExit + " ;;\n-h) printf '%s\\n' '" + test.help + "'; exit " + test.helpExit + " ;;\n-encoders) : ;;\nesac\n"
+			script := fmt.Sprintf("#!/bin/sh\ncase \"$2\" in\n-bsfs) : ;;\n-encoders) echo ' A....D aac AAC' ;;\nesac\ncase \" $* \" in\n*\" -af %s \"*) exit 1 ;;\nesac\n", test.rejectFilter)
 			if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
 				t.Fatal(err)
 			}
 
-			registry := ProbeTransformationRegistryV3(context.Background(), ffmpeg)
-			if got := registry.Available(TransformationServerHEVCResumeLeadingPictureDropV3); got != test.available {
-				t.Fatalf("resume transformation available = %v, want %v", got, test.available)
+			registry, err := ProbeTransformationRegistryWithToneMapV3Result(context.Background(), ffmpeg, nil)
+			if err != nil {
+				t.Fatalf("unsupported graph should be a cacheable capability result: %v", err)
 			}
-			advertised := false
-			for _, transformation := range registry.Advertised() {
-				if transformation.Name == TransformationServerHEVCResumeLeadingPictureDropV3 &&
-					(transformation.RecipeVersion != TransformationServerHEVCResumeLeadingPictureDropVersionV3 || len(transformation.ValidatedClaims) != 1 || transformation.ValidatedClaims[0] != ClaimResumeLeadingPicturesRemovedV3) {
-					t.Fatalf("resume transformation = %#v", transformation)
-				}
-				if transformation.Name == TransformationServerHEVCResumeLeadingPictureDropV3 {
-					advertised = true
-				}
-			}
-			if advertised != test.available {
-				t.Fatalf("resume transformation advertised = %v, want %v", advertised, test.available)
+			if registry.Available(TransformationAudioToAACV3) {
+				t.Fatalf("audio_to_aac advertised when %s was rejected", test.name)
 			}
 		})
 	}
-}
 
-func TestSupportsHEVCResumeLeadingPictureRecipeRejectsPartialHelpOnTimeout(t *testing.T) {
 	ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
-	script := "#!/bin/sh\nprintf '%s\\n' '-drop <string>'\nexec sleep 1\n"
+	script := "#!/bin/sh\ncase \"$2\" in\n-bsfs) : ;;\n-encoders) echo ' A....D aac AAC' ;;\nesac\n"
 	if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	if supportsHEVCResumeLeadingPictureRecipeV3(ctx, ffmpeg) {
-		t.Fatal("timed-out help probe accepted partial output")
+	registry := ProbeTransformationRegistryV3(context.Background(), ffmpeg)
+	for _, transformation := range registry.Advertised() {
+		if transformation.Name == TransformationAudioToAACV3 {
+			if transformation.RecipeVersion != TransformationAudioToAACRecipeVersionV3 {
+				t.Fatalf("audio_to_aac recipe version = %q, want %q", transformation.RecipeVersion, TransformationAudioToAACRecipeVersionV3)
+			}
+			return
+		}
 	}
+	t.Fatal("audio_to_aac was not advertised with the complete version 4 toolchain")
 }

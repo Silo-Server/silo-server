@@ -48,9 +48,10 @@ type discordEmbedMedia struct {
 // imdb.com, thetvdb.com and their image CDNs) by default, plus presigned
 // server-storage URLs only under the explicit "server" opt-in — Discord
 // fetches thumbnail URLs and the raw payload is visible to channel members,
-// so a self-hosted URL reveals the server's address (docs/superpowers/plans/
-// notifications/04, "Server URL leakage"). Builders never derive artwork
-// URLs themselves; they render the PosterURL the sender layer resolved.
+// so a self-hosted URL reveals the server's address
+// (docs/architecture/notifications.md, "Server URL leakage"). Builders never
+// derive artwork URLs themselves; they render the PosterURL the sender layer
+// resolved.
 type discordEmbed struct {
 	Title       string              `json:"title"`
 	URL         string              `json:"url,omitempty"`
@@ -122,11 +123,14 @@ func BuildDiscordDMPayload(rows []DeliveryRow) ([]byte, error) {
 
 // discordEmbedAuthorLine renders the small "what happened" line above the
 // embed title.
-func discordEmbedAuthorLine(deliveryType string) string {
-	switch deliveryType {
+func discordEmbedAuthorLine(row DeliveryRow) string {
+	switch row.Type {
 	case DeliveryTypeEpisodeAvailable:
 		return "New episode on Silo"
 	case DeliveryTypeRequestFulfilled:
+		if parseRequestFlags(row.ReasonFlags).Follower {
+			return "Now available on Silo"
+		}
 		return "Your request is now available on Silo"
 	case DeliveryTypeRequestApproved:
 		return "Your request was approved on Silo"
@@ -217,7 +221,7 @@ func buildDiscordEmbed(row DeliveryRow, test bool) discordEmbed {
 		URL:         ids.titleURL(),
 		Description: embedDescription(overview, ids),
 		Color:       color,
-		Author:      &discordEmbedAuthor{Name: discordEmbedAuthorLine(row.Type)},
+		Author:      &discordEmbedAuthor{Name: discordEmbedAuthorLine(row)},
 		Footer:      &discordEmbedFooter{Text: discordEmbedFooterText(row.ContentRating, test)},
 		Fields:      fields,
 	}

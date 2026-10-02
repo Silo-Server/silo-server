@@ -45,7 +45,7 @@ export function validateSchemaValues(
 ): Record<string, string> {
   const errors: Record<string, string> = {};
   for (const field of descriptor.fields) {
-    if (!evaluateShowWhen(field.show_when, values, descriptor.fields)) continue;
+    if (!fieldIsVisible(descriptor, field, values)) continue;
     const raw = effectiveValue(field, values);
     if (field.required && isEmpty(raw)) {
       errors[field.key] = `${field.label || field.key} is required`;
@@ -120,6 +120,7 @@ export type FieldType =
   | "number"
   | "boolean"
   | "array"
+  | "array:bool"
   | "array:int"
   | "array:num";
 
@@ -150,6 +151,7 @@ export function parseFieldTypes(jsonSchema: string | undefined | null): Record<s
         items && typeof items === "object" ? (items as { type?: unknown }).type : undefined;
       if (itemType === "integer") out[key] = "array:int";
       else if (itemType === "number") out[key] = "array:num";
+      else if (itemType === "boolean") out[key] = "array:bool";
       else out[key] = "array";
     } else if (type === "string" || type === "integer" || type === "number" || type === "boolean") {
       out[key] = type;
@@ -191,10 +193,12 @@ export function coerceFieldValue(
         return raw;
       }
       case "array":
+      case "array:bool":
       case "array:int":
       case "array:num": {
         const arr = Array.isArray(raw) ? raw : [];
         if (fieldType === "array") return arr;
+        if (fieldType === "array:bool") return arr.map((v) => coerceBoolean(v));
         if (fieldType === "array:int") return arr.map((v) => coerceNumericString(v));
         return arr.map((v) => coerceNumberString(v));
       }
@@ -237,6 +241,23 @@ export function effectiveValue(
   return values[field.key] !== undefined ? values[field.key] : field.default_value;
 }
 
+export function fieldIsVisible(
+  descriptor: PluginAdminForm,
+  field: PluginAdminFormField,
+  values: Record<string, unknown>,
+): boolean {
+  if (!evaluateShowWhen(field.show_when, values, descriptor.fields)) return false;
+  const containingSections = (descriptor.sections ?? []).filter((section) =>
+    section.field_keys.includes(field.key),
+  );
+  return (
+    containingSections.length === 0 ||
+    containingSections.some((section) =>
+      evaluateShowWhen(section.show_when, values, descriptor.fields),
+    )
+  );
+}
+
 export function buildSchemaValues(
   descriptor: PluginAdminForm,
   draft: Record<string, unknown>,
@@ -244,7 +265,7 @@ export function buildSchemaValues(
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const field of descriptor.fields) {
-    if (!evaluateShowWhen(field.show_when, draft, descriptor.fields)) continue; // don't persist hidden fields' stale values
+    if (!fieldIsVisible(descriptor, field, draft)) continue; // don't persist hidden fields' stale values
     // Fall back to the declared default for untouched fields so an unmodified
     // default persists exactly as it is displayed.
     const rawSource = draft[field.key] !== undefined ? draft[field.key] : field.default_value;

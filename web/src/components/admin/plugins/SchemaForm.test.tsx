@@ -98,6 +98,32 @@ describe("SchemaForm", () => {
       "true",
     );
   });
+  it("uses a controlling field default when rendering a conditional field", () => {
+    const d: PluginAdminForm = {
+      fields: [
+        {
+          key: "advanced_enabled",
+          label: "Advanced",
+          control: "SWITCH",
+          required: false,
+          secret: false,
+          multiline: false,
+          default_value: true,
+        },
+        {
+          key: "endpoint",
+          label: "Endpoint",
+          control: "TEXT",
+          required: false,
+          secret: false,
+          multiline: false,
+          show_when: [{ field: "advanced_enabled", equals: ["true"] }],
+        },
+      ],
+    };
+    render(<SchemaForm descriptor={d} values={{}} onChange={vi.fn()} />);
+    expect(screen.getByText("Endpoint")).toBeTruthy();
+  });
   it("reports validity through onValidityChange (#14)", () => {
     const onValidityChange = vi.fn();
     const d: PluginAdminForm = {
@@ -193,6 +219,43 @@ describe("SchemaForm collapsible sections", () => {
     fireEvent.click(screen.getByText("Show"));
     expect(screen.getByText("Verbose")).toBeTruthy();
   });
+
+  it("uses a controlling field default when rendering a conditional section", () => {
+    const d: PluginAdminForm = {
+      fields: [
+        {
+          key: "advanced_enabled",
+          label: "Advanced",
+          control: "SWITCH",
+          required: false,
+          secret: false,
+          multiline: false,
+          default_value: true,
+        },
+        {
+          key: "endpoint",
+          label: "Endpoint",
+          control: "TEXT",
+          required: false,
+          secret: false,
+          multiline: false,
+        },
+      ],
+      sections: [
+        {
+          key: "advanced",
+          title: "Advanced options",
+          collapsible: false,
+          collapsed_default: false,
+          field_keys: ["endpoint"],
+          show_when: [{ field: "advanced_enabled", equals: ["true"] }],
+        },
+      ],
+    };
+    render(<SchemaForm descriptor={d} values={{}} onChange={vi.fn()} />);
+    expect(screen.getByText("Advanced options")).toBeTruthy();
+    expect(screen.getByText("Endpoint")).toBeTruthy();
+  });
 });
 
 it("marks a show_when-gated field as nested when it is revealed", () => {
@@ -223,4 +286,131 @@ it("marks a show_when-gated field as nested when it is revealed", () => {
     <SchemaForm descriptor={d} values={{ service_kind: "sonarr" }} onChange={vi.fn()} />,
   );
   expect(container.querySelector('[data-nested="true"]')).not.toBeNull();
+});
+
+describe("SchemaForm host-owned fields", () => {
+  const hostDescriptor: PluginAdminForm = {
+    fields: [
+      {
+        key: "quality_profile_id",
+        label: "Quality profile",
+        control: "SELECT",
+        required: true,
+        secret: false,
+        multiline: false,
+        options: [{ value: "1", label: "HD-1080p" }],
+      },
+      {
+        key: "is_default",
+        label: "Default (HD/1080p)",
+        control: "SWITCH",
+        required: false,
+        secret: false,
+        multiline: false,
+      },
+      {
+        key: "anime_enabled",
+        label: "Enable anime overrides",
+        control: "SWITCH",
+        required: false,
+        secret: false,
+        multiline: false,
+      },
+      {
+        key: "anime_root_folder",
+        label: "Anime root folder",
+        control: "TEXT",
+        required: true,
+        secret: false,
+        multiline: false,
+      },
+    ],
+    sections: [
+      {
+        key: "library",
+        title: "Library",
+        collapsible: true,
+        collapsed_default: true,
+        field_keys: ["quality_profile_id", "is_default"],
+      },
+      {
+        key: "anime",
+        title: "Anime overrides",
+        collapsible: false,
+        collapsed_default: false,
+        field_keys: ["anime_enabled", "anime_root_folder"],
+      },
+    ],
+  };
+  const hidden = ["is_default", "anime_enabled", "anime_root_folder"];
+
+  it("hides host-owned keys and drops a section they leave empty", () => {
+    render(
+      <SchemaForm
+        descriptor={hostDescriptor}
+        values={{ quality_profile_id: "1", is_default: true }}
+        onChange={vi.fn()}
+        hiddenKeys={hidden}
+        expandSections
+      />,
+    );
+    expect(screen.queryByText("Default (HD/1080p)")).toBeNull();
+    expect(screen.queryByText("Anime overrides")).toBeNull();
+    expect(screen.queryByText("Anime root folder")).toBeNull();
+    expect(screen.getByText("Quality profile")).toBeTruthy();
+  });
+
+  it("keeps hidden values when a visible field changes", () => {
+    const onChange = vi.fn();
+    render(
+      <SchemaForm
+        descriptor={{
+          fields: [
+            {
+              key: "name",
+              label: "Name",
+              control: "TEXT",
+              required: false,
+              secret: false,
+              multiline: false,
+            },
+            hostDescriptor.fields[1]!,
+          ],
+        }}
+        values={{ name: "a", is_default: true }}
+        onChange={onChange}
+        hiddenKeys={hidden}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "b" } });
+    expect(onChange).toHaveBeenCalledWith({ name: "b", is_default: true });
+  });
+
+  it("leaves hidden required fields out of validation", () => {
+    const onValidityChange = vi.fn();
+    render(
+      <SchemaForm
+        descriptor={hostDescriptor}
+        values={{ quality_profile_id: "1", anime_enabled: true }}
+        onChange={vi.fn()}
+        onValidityChange={onValidityChange}
+        hiddenKeys={hidden}
+      />,
+    );
+    expect(onValidityChange).toHaveBeenLastCalledWith(true);
+  });
+
+  it("renders collapsible sections open and without a toggle when expanded", () => {
+    render(
+      <SchemaForm
+        descriptor={hostDescriptor}
+        values={{ quality_profile_id: "1" }}
+        onChange={vi.fn()}
+        hiddenKeys={hidden}
+        expandSections
+      />,
+    );
+    expect(screen.queryByText("Show")).toBeNull();
+    expect(screen.getByText("Quality profile")).toBeTruthy();
+  });
 });

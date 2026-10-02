@@ -6,6 +6,12 @@
 /** Subtitle display mode. */
 export type SubtitleMode = "off" | "auto" | "always";
 
+/** How the video frame is sized within the player viewport. */
+export type VideoFitMode = "contain" | "cover";
+
+/** What the player does when it enters a detected intro. */
+export type IntroSkipMode = "never" | "ask" | "always";
+
 /** A file version available for playback. */
 export interface PlayerFileVersion {
   file_id: number;
@@ -32,6 +38,7 @@ export interface PlayerFileVersion {
   credits?: PlayerTimeRange | null;
   recap?: PlayerTimeRange | null;
   preview?: PlayerTimeRange | null;
+  marker_segments?: PlayerMarkerSegment[];
 }
 
 export interface PlayerPlaybackVariantPart {
@@ -171,6 +178,13 @@ export interface PlayerTimeRange {
  */
 export type MarkerKind = "intro" | "recap" | "credits" | "preview";
 
+/** Every occurrence in the v2 marker inventory. An empty array means no markers. */
+export interface PlayerMarkerSegment {
+  kind: MarkerKind;
+  start_seconds: number;
+  end_seconds: number;
+}
+
 /** A full set of editable marker ranges for one file (null = no marker). */
 export interface MarkerDraft {
   intro: PlayerTimeRange | null;
@@ -223,9 +237,20 @@ export interface PlayerPlaybackStateChange {
 export interface PlayerPlaybackTransport {
   playPause: () => void | Promise<void>;
   seekBy: (secondsDelta: number) => void;
+  skipBack: () => void;
+  skipForward: () => void;
   seekTo: (seconds: number) => void;
   togglePictureInPicture: () => void | Promise<void>;
 }
+
+/**
+ * What started a playback. `viewer`: the viewer asked for it here, with a Play
+ * button, a card, an episode pick or the next-episode prompt's Play Now.
+ * `automatic`: the app started it on its own, for a Watch Party selection, an
+ * autoplay countdown or the next part of a multi-part file. Only a viewer's
+ * start times `first_frame_ms`; an automatic one still reports `first_frame`.
+ */
+export type PlaybackStartTrigger = "viewer" | "automatic";
 
 /** Props for the top-level WatchPage component. */
 export interface WatchPageProps {
@@ -243,13 +268,22 @@ export interface WatchPageProps {
   /** Bandwidth cap in kbps from playback.max_bitrate_kbps; null/undefined is uncapped. */
   maxBitrateKbps?: number | null;
   explicitAudioTrackIndex?: number | null;
+  /** Initial server subtitle ordinal keyed by file ID. Missing entries mean subtitles start off. */
+  initialSubtitleTrackIndexByFileId?: Record<number, number>;
+  /**
+   * The subset of initial subtitle ordinals that require bitmap burn-in. A
+   * refused initial start is retried without these tracks so playback remains
+   * available when the server cannot perform the required video conversion.
+   */
+  initialBitmapSubtitleTrackIndexByFileId?: Record<number, number>;
   preferredSubtitleLanguage?: string | null;
   preferredSubtitleTrackSignature?: PlayerSubtitleTrackSignature | null;
   subtitleMode?: SubtitleMode;
   showForcedSubtitles?: boolean;
   profileLanguage?: string | null;
   intro: PlayerTimeRange | null;
-  autoSkipIntro?: boolean;
+  /** null while the connected server's answer is still unknown; see VideoPlayer. */
+  introSkipMode?: IntroSkipMode | null;
   credits: PlayerTimeRange | null;
   recap?: PlayerTimeRange | null;
   preview?: PlayerTimeRange | null;
@@ -257,7 +291,7 @@ export interface WatchPageProps {
   autoPlayNextPreview?: boolean;
   canEditMarkers?: boolean;
   seriesContext?: SeriesContext;
-  onNavigateEpisode?: (contentId: string) => void;
+  onNavigateEpisode?: (contentId: string, trigger: PlaybackStartTrigger) => void;
   onEnded?: (state?: PlaybackExitState) => void | Promise<void>;
   onExit: (state?: PlaybackExitState) => void | Promise<void>;
   onMinimize?: (state?: PlaybackExitState) => void | Promise<void>;
@@ -265,6 +299,8 @@ export interface WatchPageProps {
   playbackRequestKey?: string;
   watchTogetherRoomId?: string | null;
   watchTogetherRoomToken?: string | null;
+  /** Resolved profile intervals; the contract defaults on servers without shared seek settings. */
+  seekIntervals: { back: number; forward: number };
   displayMode?: PlayerDisplayMode;
   onPictureInPictureChange?: (change: PlayerPictureInPictureChange) => void;
   autoEnterPictureInPicture?: boolean;

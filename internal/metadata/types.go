@@ -72,6 +72,16 @@ type ProcessRequest struct {
 	// metadata language actually re-fetches titles/overviews.
 	AdoptLanguage            bool
 	recordedStaleProviderIDs providerIDValueSet
+	// callerProviderIDs is ProviderIDs as the caller sent it, before
+	// prepareProcessRequest merges in the item's durable IDs.
+	callerProviderIDs map[string]string
+	// durableProviderIDs is the item's stored provider-ID rows as loaded,
+	// before any request IDs are merged with them.
+	durableProviderIDs map[string]string
+	// enrichmentOnly marks a bulk enrichment write: one enrichment provider's
+	// fields merged into an item that is already matched. See
+	// persistEnrichment for how it differs from a scheduled refresh.
+	enrichmentOnly bool
 }
 
 // ProcessResult is the output of MetadataService.Process().
@@ -80,6 +90,9 @@ type ProcessResult struct {
 	IsNew     bool // True if this was an initial match (new item created)
 	Updated   bool // True if any fields were changed
 	Decision  *MatchDecision
+	// Pinned reports that automatic matching skipped an item an admin split
+	// left unmatched on purpose. It is a completed outcome, not a failure.
+	Pinned bool
 }
 
 // MatchDecision is a bounded, persistence-safe explanation of an automatic
@@ -142,6 +155,7 @@ type MatchHints struct {
 	ObservedRootPath          string
 	AllGroupFilePaths         []string
 	PrimarySidecarSearchPaths []string
+	LibraryRoots              []string // Internal naming context; configured containers do not identify series or seasons.
 	// AlternateIdentities are independently parsed title/year hypotheses from
 	// the filename and surrounding directories. They are tried only after the
 	// primary scanner identity fails, keeping provider traffic bounded while
@@ -266,6 +280,10 @@ type MetadataResult struct {
 	// replacedProviderIDKeys forces an owning-provider consensus replacement to
 	// overwrite the corresponding stored provider-ID column during merge.
 	replacedProviderIDKeys map[string]struct{}
+	// rejectedIdentityProviderIDs holds the stored identity values an Identify
+	// or corrected NFO rejected. They are suppressed by value, so a re-anchor
+	// that merges into another item keeps that item's own IDs.
+	rejectedIdentityProviderIDs providerIDValueSet
 	// recordedStaleProviderIDs contains provider values known dead before this
 	// refresh and suppresses them when durable state is merged.
 	recordedStaleProviderIDs providerIDValueSet
@@ -273,8 +291,17 @@ type MetadataResult struct {
 	// refresh and prevents them from being persisted by the same operation.
 	sameRunStaleProviderIDs providerIDValueSet
 	ContentRating           string
-	Ratings                 Ratings
-	People                  []models.ItemPerson
+	// AdvisoryAge is a recommended minimum viewer age from an advisory service,
+	// 0 when none was reported. It never feeds a content-rating ceiling.
+	AdvisoryAge int
+	// AdvisorySource attributes AdvisoryAge; empty when AdvisoryAge is 0.
+	AdvisorySource string
+	Ratings        Ratings
+	// RatingSources holds per-source ratings on a 0-100 scale, keyed by the
+	// canonical source name (models.RatingSourceIMDB, ...). They merge one
+	// source at a time under FieldRating, like Ratings.
+	RatingSources map[string]RatingSource
+	People        []models.ItemPerson
 	// Images (S3 paths or URLs).
 	PosterPath        string
 	PosterThumbhash   string
@@ -321,11 +348,24 @@ type Ratings struct {
 	RTAudience float64
 }
 
+// RatingSource is one source's rating of an item on a common 0-100 scale. It
+// persists as a media_item_rating_sources row.
+type RatingSource struct {
+	Score float64
+	// Votes is the number of votes behind Score, 0 when unknown.
+	Votes int64
+	// Provider is the slug of the metadata provider that reported the rating.
+	Provider string
+}
+
 // ImageRequest is passed to ImageProvider.GetImages().
 type ImageRequest struct {
 	ProviderIDs map[string]string
 	ContentType string
 	Language    string
+	// SeasonNumber is present only for an exact season artwork gallery. A
+	// pointer distinguishes Specials (0) from an item-level request.
+	SeasonNumber *int
 	// Local sidecar context (additive; empty for purely remote providers).
 	// RepresentativeFilePath is the group's representative media file,
 	// AllGroupFilePaths are every file in the content group, and
@@ -338,13 +378,15 @@ type ImageRequest struct {
 
 // RemoteImage describes an available image from a provider.
 type RemoteImage struct {
-	ProviderID string // Slug of the provider that returned this image
-	URL        string
-	Type       ImageType
-	Language   string
-	Width      int
-	Height     int
-	Rating     float64 // Vote average for ordering
+	ProviderID   string // Slug of the provider that returned this image
+	URL          string
+	Type         ImageType
+	Language     string
+	Width        int
+	Height       int
+	Rating       float64 // Vote average for ordering
+	IncludesText *bool   // nil when the provider does not report text presence
+	SeasonNumber *int    // present only when the provider confirms exact season scope
 }
 
 // ImageType classifies image purpose.

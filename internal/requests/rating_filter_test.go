@@ -15,6 +15,7 @@ func newRatedService(store *fakeStore, client *certTMDBClient, presence *fakePre
 	}
 	service := NewService(store, client, presence)
 	service.SetEntitlementResolver(ratedCeiling{rating: ceiling})
+	service.SetUserRepository(requestUserRepo{})
 	return service
 }
 

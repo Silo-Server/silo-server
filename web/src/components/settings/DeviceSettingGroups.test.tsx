@@ -45,12 +45,68 @@ function effective(overrides: Partial<EffectiveSetting> = {}): EffectiveSetting 
 }
 
 describe("DeviceSettingGroups", () => {
+  it("shows a profile-wide title art choice without offering a device edit", () => {
+    renderGroups({
+      "ui.title_art": effective({
+        key: "ui.title_art",
+        value: false,
+        source: "profile",
+        scope: "profile",
+      }),
+    });
+
+    expect(screen.getByRole("switch", { name: "Show title art" })).toBeDisabled();
+    expect(screen.getByText(/Set for all devices on this profile/)).toBeInTheDocument();
+  });
+
+  it("keeps a device's own title art choice resettable while the profile value wins", async () => {
+    const onReset = vi.fn();
+    render(
+      <DeviceSettingGroups
+        settings={{
+          "ui.title_art": effective({
+            key: "ui.title_art",
+            value: true,
+            source: "profile",
+            scope: "profile",
+          }),
+        }}
+        storedOnDevice={{ "ui.title_art": false }}
+        ownerLabel="your"
+        onChange={vi.fn()}
+        onReset={onReset}
+      />,
+    );
+
+    expect(screen.getByRole("switch", { name: "Show title art" })).toBeDisabled();
+    expect(screen.getByText("Changed here")).toBeInTheDocument();
+    expect(
+      screen.getByText(/this device's own choice \(Disabled\) isn't used/),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Use your setting/ }));
+    expect(onReset).toHaveBeenCalledWith("ui.title_art");
+  });
+
+  it("lets a device keep its own title art choice", () => {
+    renderGroups({
+      "ui.title_art": effective({
+        key: "ui.title_art",
+        value: false,
+        source: "profile_device",
+        scope: "profile_device",
+      }),
+    });
+
+    expect(screen.getByRole("switch", { name: "Show title art" })).toBeEnabled();
+    expect(screen.getByText("Changed here")).toBeInTheDocument();
+  });
+
   it("groups settings under headings a viewer would look under", () => {
     renderGroups({});
 
     // Scoped to headings: "Subtitles" is also a setting label inside the group.
     const headings = screen.getAllByRole("heading").map((node) => node.textContent);
-    expect(headings).toEqual(["Picture", "Sound", "Subtitles", "Episodes"]);
+    expect(headings).toEqual(["Picture", "Sound", "Subtitles", "Episodes", "Appearance"]);
   });
 
   // The screen is for people who do not know what a manifest key is. Matching
@@ -106,6 +162,63 @@ describe("DeviceSettingGroups", () => {
     expect(onChange).toHaveBeenCalled();
     const [firstCall] = onChange.mock.calls;
     expect(typeof firstCall![1]).toBe("boolean");
+  });
+
+  it("offers the three intro modes and writes the selected device override", async () => {
+    const { onChange } = renderGroups({
+      "playback.intro_skip_mode": effective({
+        key: "playback.intro_skip_mode",
+        value: "ask",
+        source: "profile",
+      }),
+    });
+
+    await userEvent.click(screen.getByRole("combobox", { name: "Skip intros" }));
+    await userEvent.click(screen.getByRole("option", { name: "Never" }));
+
+    expect(onChange).toHaveBeenCalledWith("playback.intro_skip_mode", "never");
+    expect(screen.queryByText("Auto-skip intros")).not.toBeInTheDocument();
+  });
+
+  // Against a server that predates the enum the deprecated switch is the only
+  // intro control there is; hiding it unconditionally removed the setting from
+  // this screen and stranded any override already stored on the device.
+  it("falls back to the legacy intro switch on a server without the three-way key", () => {
+    render(
+      <DeviceSettingGroups
+        settings={{
+          "playback.auto_skip_intro": effective({
+            key: "playback.auto_skip_intro",
+            value: true,
+            source: "profile_device",
+            scope: "profile_device",
+          }),
+        }}
+        keys={["playback.auto_skip_intro", "playback.auto_play_next"]}
+        ownerLabel="your"
+        onChange={vi.fn()}
+        onReset={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Auto-skip intros")).toBeInTheDocument();
+    expect(screen.getByText("Changed here")).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Skip intros" })).not.toBeInTheDocument();
+  });
+
+  it("shows only the three-way control on a revision-7 server", () => {
+    render(
+      <DeviceSettingGroups
+        settings={{}}
+        keys={["playback.auto_skip_intro", "playback.intro_skip_mode"]}
+        ownerLabel="your"
+        onChange={vi.fn()}
+        onReset={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("combobox", { name: "Skip intros" })).toBeInTheDocument();
+    expect(screen.queryByText("Auto-skip intros")).not.toBeInTheDocument();
   });
 
   // A capped setting explains the cap. A disabled control with no reason is

@@ -52,6 +52,21 @@ func TestBuildWebPushPayload(t *testing.T) {
 		}
 	})
 
+	t.Run("request approved carries poster icon", func(t *testing.T) {
+		row := DeliveryRow{Delivery: Delivery{ID: "01APPROVED", Type: DeliveryTypeRequestApproved}}
+		raw, err := buildWebPushPayload(row, "https://cdn.example.com/approved-poster.jpg")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload webPushPayload
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Icon != "https://cdn.example.com/approved-poster.jpg" {
+			t.Fatalf("unexpected icon %q, want https://cdn.example.com/approved-poster.jpg", payload.Icon)
+		}
+	})
+
 	t.Run("webhook auto-disable routes to settings", func(t *testing.T) {
 		row := DeliveryRow{Delivery: Delivery{ID: "01X", Type: DeliveryTypeWebhookAutoDisabled}}
 		raw, err := buildWebPushPayload(row, "")

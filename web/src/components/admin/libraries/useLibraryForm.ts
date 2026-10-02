@@ -10,6 +10,8 @@ import {
 } from "@/hooks/queries/admin/libraries";
 import { PROVIDER_TRAILER_KINDS } from "@/lib/extraKinds";
 
+import { librarySettingSupport } from "./libraryTypes";
+
 export type LevelChainItem = {
   plugin_installation_id: number;
   capability_id: string;
@@ -130,6 +132,7 @@ export function useLibraryForm({
   const [name, setName] = useState(library?.name ?? "");
   const [paths, setPaths] = useState<string[]>(library?.paths?.length ? library.paths : [""]);
   const [type, setType] = useState(library?.type ?? "movies");
+  const settingSupport = librarySettingSupport(type);
   const [enabled, setEnabled] = useState(library?.enabled ?? true);
   const [metadataLanguage, setMetadataLanguage] = useState(library?.metadata_language ?? "en");
   const [autoTranslateMetadata, setAutoTranslateMetadata] = useState(
@@ -138,11 +141,17 @@ export function useLibraryForm({
   const [chapterThumbnailsEnabled, setChapterThumbnailsEnabled] = useState(
     library?.chapter_thumbnails_enabled ?? false,
   );
-  const [introDetectionEnabled, setIntroDetectionEnabled] = useState(
-    library?.intro_detection_enabled ?? false,
+  // A new library follows its type's default until the switch is set:
+  // detection is on for series and mixed libraries and off for movies.
+  const [introDetectionChoice, setIntroDetectionEnabled] = useState<boolean | null>(
+    library ? (library.intro_detection_enabled ?? true) : null,
   );
+  const introDetectionEnabled = introDetectionChoice ?? !settingSupport.creditsOnlyDetection;
   const [trailerKinds, setTrailerKinds] = useState<string[]>(
     library?.trailer_kinds ?? [...PROVIDER_TRAILER_KINDS],
+  );
+  const [realtimeMonitoring, setRealtimeMonitoring] = useState(
+    library?.realtime_monitoring ?? true,
   );
   const [levelChains, setLevelChains] = useState<Record<string, LevelChainItem[]>>({});
   const [chainDirty, setChainDirty] = useState(false);
@@ -265,9 +274,10 @@ export function useLibraryForm({
       enabled,
       metadata_language: metadataLanguage,
       auto_translate_metadata: autoTranslateMetadata,
-      chapter_thumbnails_enabled: chapterThumbnailsEnabled,
-      intro_detection_enabled: introDetectionEnabled,
-      trailer_kinds: trailerKinds,
+      chapter_thumbnails_enabled: settingSupport.chapterThumbnails && chapterThumbnailsEnabled,
+      intro_detection_enabled: settingSupport.introDetection && introDetectionEnabled,
+      trailer_kinds: settingSupport.trailers ? trailerKinds : [],
+      realtime_monitoring: realtimeMonitoring,
     };
 
     if (library) {
@@ -312,6 +322,7 @@ export function useLibraryForm({
 
   return {
     library,
+    settingSupport,
     name,
     setName,
     paths,
@@ -333,6 +344,8 @@ export function useLibraryForm({
     setIntroDetectionEnabled,
     trailerKinds,
     toggleTrailerKind,
+    realtimeMonitoring,
+    setRealtimeMonitoring,
     contentLevels: contentLevelsForType(type),
     activeLevelChains,
     chainLoading,

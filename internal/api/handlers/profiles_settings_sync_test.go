@@ -170,6 +170,10 @@ func TestUpdateProfileSyncsSkipPreferences(t *testing.T) {
 		settingskeys.PlaybackAutoSkipCredits:     `true`,
 		settingskeys.PlaybackAutoSkipRecap:       `true`,
 		settingskeys.PlaybackAutoPlayNextPreview: `false`,
+		// auto_skip_intro carries its revision-7 replacement with it, so a
+		// client still using the legacy route does not leave a current client
+		// resolving the contract default.
+		settingskeys.PlaybackIntroSkipMode: `"always"`,
 	} {
 		value := storedProfileSetting(t, store, key, "profile-1")
 		if value == nil {
@@ -194,6 +198,40 @@ func TestUpdateProfileSyncsSkipPreferences(t *testing.T) {
 			t.Errorf("an omitted field wrote %s", value.Value)
 		}
 	})
+}
+
+// TestUpdateProfileSyncsIntroSkipMode covers both directions of the legacy
+// switch, including the one an untouched-looking false has to produce: "ask" is
+// the mode that reproduces what auto_skip_intro=false always did, and a profile
+// route that wrote only the boolean would leave the enum saying something else.
+func TestUpdateProfileSyncsIntroSkipMode(t *testing.T) {
+	for _, tc := range []struct{ body, wantMode, wantBool string }{
+		{`{"auto_skip_intro":true}`, `"always"`, `true`},
+		{`{"auto_skip_intro":false}`, `"ask"`, `false`},
+	} {
+		t.Run(tc.body, func(t *testing.T) {
+			store := newProfileTestStore(t)
+			handler := NewProfileHandler(testUserStoreProvider{store: store})
+
+			if rr := updateProfileVia(t, handler, "profile-1", tc.body); rr.Code != http.StatusOK {
+				t.Fatalf("PUT = %d: %s", rr.Code, rr.Body.String())
+			}
+
+			for key, want := range map[string]string{
+				settingskeys.PlaybackIntroSkipMode: tc.wantMode,
+				settingskeys.PlaybackAutoSkipIntro: tc.wantBool,
+			} {
+				value := storedProfileSetting(t, store, key, "profile-1")
+				if value == nil {
+					t.Errorf("no canonical %s row after the profile update", key)
+					continue
+				}
+				if string(value.Value) != want {
+					t.Errorf("canonical %s = %s, want %s", key, value.Value, want)
+				}
+			}
+		})
+	}
 }
 
 // TestUpdateProfileRejectsInvalidLanguageBeforeWriting: a value the canonical
@@ -234,7 +272,7 @@ func TestCreateProfileSyncsCanonicalLanguages(t *testing.T) {
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("POST = %d: %s", rr.Code, rr.Body.String())
 	}
-	var created profileResponse
+	var created ProfileView
 	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decoding create response: %v", err)
 	}
@@ -261,7 +299,7 @@ func TestCreateProfileInheritsSurvivingLegacyAccountSettings(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("POST = %d: %s", rec.Code, rec.Body.String())
 	}
-	var created profileResponse
+	var created ProfileView
 	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decoding create response: %v", err)
 	}
@@ -402,7 +440,7 @@ func TestUpdateProfilePublishesUserSettingsEvents(t *testing.T) {
 // visible to every profile-DTO reader on every platform.
 
 // listProfilesVia sends GET /profiles as profile-1's own session.
-func listProfilesVia(t *testing.T, handler *ProfileHandler) profileListResponse {
+func listProfilesVia(t *testing.T, handler *ProfileHandler) ProfileListView {
 	t.Helper()
 	req := newAuthorizedProfileRequestWithRole(http.MethodGet, "/profiles", "", "user", "profile-1")
 	rr := httptest.NewRecorder()
@@ -410,14 +448,14 @@ func listProfilesVia(t *testing.T, handler *ProfileHandler) profileListResponse 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("GET /profiles = %d: %s", rr.Code, rr.Body.String())
 	}
-	var resp profileListResponse
+	var resp ProfileListView
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decoding profile list: %v", err)
 	}
 	return resp
 }
 
-func profileFromList(t *testing.T, resp profileListResponse, profileID string) profileResponse {
+func profileFromList(t *testing.T, resp ProfileListView, profileID string) ProfileView {
 	t.Helper()
 	for _, p := range resp.Profiles {
 		if p.ID == profileID {
@@ -425,7 +463,7 @@ func profileFromList(t *testing.T, resp profileListResponse, profileID string) p
 		}
 	}
 	t.Fatalf("profile %s missing from the list response", profileID)
-	return profileResponse{}
+	return ProfileView{}
 }
 
 // TestListProfilesServesCanonicalWrite is the cross-client coherence gap this
@@ -531,7 +569,7 @@ func TestListProfilesRoundTripsLegacyWrite(t *testing.T) {
 	}
 
 	// The update response and the next list must agree; both serve resolution.
-	var updated profileResponse
+	var updated ProfileView
 	if err := json.Unmarshal(rr.Body.Bytes(), &updated); err != nil {
 		t.Fatalf("decoding update response: %v", err)
 	}

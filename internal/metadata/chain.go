@@ -5,8 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
+	"slices"
 	"sort"
+	"strings"
+	"unicode/utf8"
 
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -331,6 +337,17 @@ type CapabilityInfo struct {
 	PluginInstallationID int
 	CapabilityID         string
 	DisplayName          string
+	// LookupProviderIDs are the provider-ID keys (e.g. "imdb", "tmdb") the
+	// capability declares it can look an item up by, from its manifest's
+	// lookup_provider_ids. See extractLookupProviderIDs.
+	LookupProviderIDs []string
+	// BulkLookupLimit is how many concurrent lookups the capability can combine
+	// into one upstream request (bulk_lookup_limit), or 0 when it did not opt
+	// into the bulk enrichment pass. See extractBulkLookupLimit.
+	BulkLookupLimit int
+	// RatingSources are the rating sources of its own the capability declares
+	// (rating_sources), beyond Silo's built-in ones. See extractRatingSources.
+	RatingSources []models.RatingSourceDefinition
 }
 
 // resolveEnabledProviders returns all enabled providers in installation ID order.
@@ -487,19 +504,7 @@ func extractDefaultPriority(metadataJSON []byte, contentLevel string) int {
 // leaving it one click away for users who want it. The flag lives in the same
 // "metadata" envelope as default_priority.
 func extractDefaultEnabled(metadataJSON []byte) bool {
-	var meta map[string]json.RawMessage
-	if err := json.Unmarshal(metadataJSON, &meta); err != nil {
-		return true
-	}
-	raw, ok := meta["default_enabled"]
-	if !ok {
-		if innerRaw, innerOK := meta["metadata"]; innerOK {
-			var inner map[string]json.RawMessage
-			if err := json.Unmarshal(innerRaw, &inner); err == nil {
-				raw, ok = inner["default_enabled"]
-			}
-		}
-	}
+	raw, ok := capabilityMetadataField(metadataJSON, "default_enabled")
 	if !ok {
 		return true
 	}
@@ -508,6 +513,179 @@ func extractDefaultEnabled(metadataJSON []byte) bool {
 		return true
 	}
 	return enabled
+}
+
+// extractLookupProviderIDs parses a capability's lookup_provider_ids: the
+// provider-ID keys an enrichment-only provider can look an item up by when it
+// never assigns an ID of its own. The MDBList plugin, for one, declares
+// ["imdb", "tmdb"] and is called whenever the item carries either.
+//
+// The list means "any one of these", unlike the markers capability's
+// required_external_ids, which means "all of these". Keys are trimmed,
+// lowercased (provider-ID keys are lowercase throughout the host) and
+// deduplicated. Anything other than a JSON array of strings yields nil, which
+// leaves the provider gated on its own ID as before.
+func extractLookupProviderIDs(metadataJSON []byte) []string {
+	raw, ok := capabilityMetadataField(metadataJSON, "lookup_provider_ids")
+	if !ok {
+		return nil
+	}
+	var keys []string
+	if err := json.Unmarshal(raw, &keys); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(keys))
+	seen := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		key = strings.ToLower(strings.TrimSpace(key))
+		if key == "" {
+			continue
+		}
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, key)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// maxBulkLookupLimit caps a declared bulk_lookup_limit, so a plugin cannot ask
+// the host for unbounded concurrency.
+const maxBulkLookupLimit = 200
+
+// extractBulkLookupLimit parses a capability's bulk_lookup_limit: the number of
+// concurrent GetMetadata calls the provider combines into one upstream request.
+// Declaring it opts an enrichment-only provider (one with lookup_provider_ids)
+// into the bulk enrichment pass, which keeps that many lookups in flight. It
+// also promises that the provider reports a spent quota, an outage or a
+// missing credential as an error status rather than an empty item, because the
+// pass records an empty item as "nothing to find".
+//
+// Anything other than a positive JSON integer yields 0 (not opted in); larger
+// values are capped at maxBulkLookupLimit.
+func extractBulkLookupLimit(metadataJSON []byte) int {
+	raw, ok := capabilityMetadataField(metadataJSON, "bulk_lookup_limit")
+	if !ok {
+		return 0
+	}
+	var limit int
+	if err := json.Unmarshal(raw, &limit); err != nil || limit <= 0 {
+		return 0
+	}
+	return min(limit, maxBulkLookupLimit)
+}
+
+// maxDeclaredRatingSources caps how many rating sources one capability may
+// declare, so a plugin cannot crowd a title page.
+const maxDeclaredRatingSources = 8
+
+// maxRatingSourceNameRunes caps a declared source's name, the mark clients
+// show next to its score.
+const maxRatingSourceNameRunes = 24
+
+// maxRatingSourceLabelRunes caps a declared source's label, its full name in
+// the administrator's list; a longer one falls back to the name.
+const maxRatingSourceLabelRunes = 60
+
+// extractRatingSources parses a capability's rating_sources: the ratings it
+// reports under ratings.sources beyond Silo's own IMDb and TMDB. Each entry is
+// {"id", "name", "label", "scale", "percent"}:
+//
+//	"rating_sources": [{"id": "kinopoisk", "name": "Kinopoisk", "scale": 10}]
+//
+// id is a source name (see models.ValidRatingSourceID, compared lowercased)
+// other than imdb or tmdb; rt_critic and rt_audience name the Rotten Tomatoes
+// scores stored in their own columns. name is the plain-text mark clients show
+// next to the score, label an optional longer name for the administrator's
+// list (name when absent), scale the top of the source's own scale (10 shows
+// a stored 72 as 7.2), and percent shows the score as a percentage, which
+// makes the scale 100 whatever the entry says. rt_critic and rt_audience are
+// always percentages. An entry
+// that breaks any of these is dropped on its own; duplicates keep the first;
+// at most maxDeclaredRatingSources are kept. Declared sources stay hidden until
+// an administrator turns them on.
+func extractRatingSources(metadataJSON []byte) []models.RatingSourceDefinition {
+	raw, ok := capabilityMetadataField(metadataJSON, "rating_sources")
+	if !ok {
+		return nil
+	}
+	var entries []json.RawMessage
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil
+	}
+	var out []models.RatingSourceDefinition
+	seen := make(map[string]struct{}, len(entries))
+	for _, rawEntry := range entries {
+		var entry struct {
+			ID      string  `json:"id"`
+			Name    string  `json:"name"`
+			Label   string  `json:"label"`
+			Scale   float64 `json:"scale"`
+			Percent bool    `json:"percent"`
+		}
+		if err := json.Unmarshal(rawEntry, &entry); err != nil {
+			continue
+		}
+		id := strings.ToLower(strings.TrimSpace(entry.ID))
+		name := strings.TrimSpace(entry.Name)
+		if !models.ValidRatingSourceID(id) || models.IsBuiltinRatingSource(id) {
+			continue
+		}
+		if name == "" || utf8.RuneCountInString(name) > maxRatingSourceNameRunes {
+			continue
+		}
+		// Rotten Tomatoes scores fill the rating_rt_* columns, which hold a
+		// percentage that poster badges show as is.
+		if id == models.RatingSourceRTCritic || id == models.RatingSourceRTAudience {
+			entry.Percent = true
+		}
+		if entry.Percent {
+			entry.Scale = 100
+		}
+		if math.IsNaN(entry.Scale) || entry.Scale <= 0 || entry.Scale > 100 {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		label := strings.TrimSpace(entry.Label)
+		if label == "" || utf8.RuneCountInString(label) > maxRatingSourceLabelRunes {
+			label = name
+		}
+		out = append(out, models.RatingSourceDefinition{Source: id, Name: name, Label: label, Scale: entry.Scale, Percent: entry.Percent})
+		if len(out) == maxDeclaredRatingSources {
+			break
+		}
+	}
+	return out
+}
+
+// capabilityMetadataField reads one plugin-declared field from capability
+// metadata JSON. The field may sit at the top level or inside the "metadata"
+// envelope the SDK wraps plugin-declared fields in; the top level wins.
+func capabilityMetadataField(metadataJSON []byte, key string) (json.RawMessage, bool) {
+	var meta map[string]json.RawMessage
+	if err := json.Unmarshal(metadataJSON, &meta); err != nil {
+		return nil, false
+	}
+	if raw, ok := meta[key]; ok {
+		return raw, true
+	}
+	innerRaw, ok := meta["metadata"]
+	if !ok {
+		return nil, false
+	}
+	var inner map[string]json.RawMessage
+	if err := json.Unmarshal(innerRaw, &inner); err != nil {
+		return nil, false
+	}
+	raw, ok := inner[key]
+	return raw, ok
 }
 
 // SeedPlacement captures how a provider's manifest wants it placed when a chain
@@ -539,19 +717,7 @@ func LookupSeedPlacement(ctx context.Context, pool *pgxpool.Pool, pluginInstalla
 // return value is true only when a non-empty map was found, i.e. the provider
 // explicitly enumerates the content levels it supports.
 func declaredPriorityLevels(metadataJSON []byte) (map[string]float64, bool) {
-	var meta map[string]json.RawMessage
-	if err := json.Unmarshal(metadataJSON, &meta); err != nil {
-		return nil, false
-	}
-	dpRaw, ok := meta["default_priority"]
-	if !ok {
-		if innerRaw, innerOK := meta["metadata"]; innerOK {
-			var inner map[string]json.RawMessage
-			if err := json.Unmarshal(innerRaw, &inner); err == nil {
-				dpRaw, ok = inner["default_priority"]
-			}
-		}
-	}
+	dpRaw, ok := capabilityMetadataField(metadataJSON, "default_priority")
 	if !ok {
 		return nil, false
 	}
@@ -567,12 +733,13 @@ func declaredPriorityLevels(metadataJSON []byte) (map[string]float64, bool) {
 func ListEnabledMetadataCapabilities(ctx context.Context, pool *pgxpool.Pool) ([]CapabilityInfo, error) {
 	rows, err := pool.Query(ctx,
 		`SELECT pc.plugin_installation_id, pc.capability_id,
-		        COALESCE(pc.metadata->>'display_name', pc.capability_id)
+		        COALESCE(NULLIF(pc.metadata->>'display_name', ''), pc.capability_id),
+		        pc.metadata, pi.kind = 'builtin'
 		 FROM plugin_capabilities pc
 		 JOIN plugin_installations pi ON pi.id = pc.plugin_installation_id
 		 WHERE pc.capability_type = 'metadata_provider.v1'
 		   AND pi.enabled = true
-		 ORDER BY pc.plugin_installation_id`)
+		 ORDER BY pc.plugin_installation_id, pc.capability_id`)
 	if err != nil {
 		return nil, fmt.Errorf("listing enabled metadata capabilities: %w", err)
 	}
@@ -581,12 +748,55 @@ func ListEnabledMetadataCapabilities(ctx context.Context, pool *pgxpool.Pool) ([
 	var caps []CapabilityInfo
 	for rows.Next() {
 		var c CapabilityInfo
-		if err := rows.Scan(&c.PluginInstallationID, &c.CapabilityID, &c.DisplayName); err != nil {
+		var metadataJSON []byte
+		var builtin bool
+		if err := rows.Scan(&c.PluginInstallationID, &c.CapabilityID, &c.DisplayName, &metadataJSON, &builtin); err != nil {
 			return nil, fmt.Errorf("scanning capability: %w", err)
+		}
+		c.LookupProviderIDs = extractLookupProviderIDs(metadataJSON)
+		c.BulkLookupLimit = extractBulkLookupLimit(metadataJSON)
+		c.RatingSources = extractRatingSources(metadataJSON)
+		if builtin && len(c.RatingSources) == 0 {
+			c.RatingSources = builtinRatingSources(c.CapabilityID)
 		}
 		caps = append(caps, c)
 	}
 	return caps, rows.Err()
+}
+
+// DeclaredRatingSources lists the rating sources the enabled metadata plugins
+// declare (rating_sources), in installation order and then by capability ID.
+// When two capabilities declare the same source, the first names and scales it,
+// and Provider credits every provider that declares it.
+func DeclaredRatingSources(ctx context.Context, pool *pgxpool.Pool) ([]ratingsources.DeclaredSource, error) {
+	caps, err := ListEnabledMetadataCapabilities(ctx, pool)
+	if err != nil {
+		return nil, err
+	}
+	var out []ratingsources.DeclaredSource
+	providers := map[string][]string{}
+	for _, c := range caps {
+		for _, definition := range c.RatingSources {
+			if _, dup := providers[definition.Source]; !dup {
+				out = append(out, ratingsources.DeclaredSource{RatingSourceDefinition: definition})
+			}
+			if !slices.Contains(providers[definition.Source], c.DisplayName) {
+				providers[definition.Source] = append(providers[definition.Source], c.DisplayName)
+			}
+		}
+	}
+	for i := range out {
+		out[i].Provider = joinNames(providers[out[i].Source])
+	}
+	return out, nil
+}
+
+// joinNames lists provider names for people: "A", "A and B", "A, B and C".
+func joinNames(names []string) string {
+	if len(names) < 2 {
+		return strings.Join(names, "")
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
 // resolveChainEntries builds Provider instances from explicit chain entries,
@@ -600,12 +810,7 @@ func resolveChainEntries(
 ) []Provider {
 	caps := make([]CapabilityInfo, 0, len(entries))
 	for _, e := range entries {
-		displayName := lookupCapabilityDisplayName(ctx, pool, e.PluginInstallationID, e.CapabilityID)
-		caps = append(caps, CapabilityInfo{
-			PluginInstallationID: e.PluginInstallationID,
-			CapabilityID:         e.CapabilityID,
-			DisplayName:          displayName,
-		})
+		caps = append(caps, lookupCapabilityInfo(ctx, pool, e.PluginInstallationID, e.CapabilityID))
 	}
 	return buildProviders(ctx, caps, resolver, pool, checker)
 }
@@ -646,7 +851,7 @@ func buildProviders(
 			continue
 		}
 
-		provider, err := NewPluginProviderFromCapability(c.PluginInstallationID, c.CapabilityID, c.DisplayName, resolver)
+		provider, err := NewPluginProviderFromCapability(c.PluginInstallationID, c.CapabilityID, c.DisplayName, c.LookupProviderIDs, c.RatingSources, resolver)
 		if err != nil {
 			slog.WarnContext(ctx, "skipping metadata provider during chain resolution", "component", "metadata",
 				"installation_id", c.PluginInstallationID,
@@ -696,17 +901,28 @@ func installationIsBuiltin(ctx context.Context, checker InstallationEnabledCheck
 	return kind == "builtin"
 }
 
-// lookupCapabilityDisplayName retrieves the display name from plugin capability metadata.
-func lookupCapabilityDisplayName(ctx context.Context, pool *pgxpool.Pool, installationID int, capabilityID string) string {
-	var displayName string
+// lookupCapabilityInfo reads the construction fields for one chain entry's
+// metadata_provider.v1 capability in a single query. A missing row falls back
+// to the capability ID as display name and no lookup keys.
+func lookupCapabilityInfo(ctx context.Context, pool *pgxpool.Pool, installationID int, capabilityID string) CapabilityInfo {
+	info := CapabilityInfo{
+		PluginInstallationID: installationID,
+		CapabilityID:         capabilityID,
+		DisplayName:          capabilityID,
+	}
+	var metadataJSON []byte
 	err := pool.QueryRow(ctx,
-		`SELECT COALESCE(metadata->>'display_name', $2)
+		`SELECT COALESCE(NULLIF(metadata->>'display_name', ''), $2), metadata
 		 FROM plugin_capabilities
 		 WHERE plugin_installation_id = $1 AND capability_id = $2 AND capability_type = 'metadata_provider.v1'`,
 		installationID, capabilityID,
-	).Scan(&displayName)
+	).Scan(&info.DisplayName, &metadataJSON)
 	if err != nil {
-		return capabilityID
+		info.DisplayName = capabilityID
+		return info
 	}
-	return displayName
+	info.LookupProviderIDs = extractLookupProviderIDs(metadataJSON)
+	info.BulkLookupLimit = extractBulkLookupLimit(metadataJSON)
+	info.RatingSources = extractRatingSources(metadataJSON)
+	return info
 }

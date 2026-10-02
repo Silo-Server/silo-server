@@ -13,37 +13,80 @@ type GroupPolicyProvider interface {
 	GetPolicyForUser(ctx context.Context, userID int) (*GroupPolicy, error)
 }
 
-// GroupPolicy is the restriction layer contributed by a user's access group.
+// GroupPolicy is the access group's policy layer. Every user-level policy
+// field has a group counterpart here; the group value applies to each member
+// whose own field is unset (inherits).
 type GroupPolicy struct {
-	ID                       int64
-	LibraryIDs               []int // nil = unrestricted
-	MaxPlaybackQuality       string
-	DownloadAllowed          bool
-	DownloadTranscodeAllowed bool
-	MaxStreams               int // 0 = no group cap
-	MaxTranscodes            int
-	AllowedPermissions       []string // nil = all assignable
-	RequestsAllowed          bool
+	ID                         int64
+	LibraryIDs                 []int // nil = unrestricted
+	MaxPlaybackQuality         string
+	DownloadAllowed            bool
+	DownloadTranscodeAllowed   bool
+	TranscodeAllowed           bool
+	AudioTranscodeAllowed      bool
+	MaxStreams                 int // 0 = no cap
+	MaxTranscodes              int
+	MaxRemoteStreamBitrateKbps int      // 0 = unlimited
+	MaxLocalStreamBitrateKbps  int      // 0 = unlimited
+	AllowedPermissions         []string // nil = all assignable
+	RequestsAllowed            bool
 }
 
-// EffectiveUserPolicy is the account layer after the group restriction is applied.
+// EffectiveUserPolicy is the fully resolved policy for an account: every field
+// carries a concrete value (user override when set, otherwise the group value,
+// otherwise the permissive no-group default).
 type EffectiveUserPolicy struct {
-	LibraryIDs               []int // nil = unrestricted
-	MaxPlaybackQuality       string
-	DownloadAllowed          bool
-	DownloadTranscodeAllowed bool
-	TranscodeAllowed         bool
-	AudioTranscodeAllowed    bool
-	MaxStreams               int
-	MaxTranscodes            int
-	Permissions              []string
-	RequestsAllowed          bool
+	LibraryIDs                 []int // nil = unrestricted
+	MaxPlaybackQuality         string
+	DownloadAllowed            bool
+	DownloadTranscodeAllowed   bool
+	TranscodeAllowed           bool
+	AudioTranscodeAllowed      bool
+	MaxStreams                 int
+	MaxTranscodes              int
+	MaxRemoteStreamBitrateKbps int
+	MaxLocalStreamBitrateKbps  int
+	Permissions                []string
+	RequestsAllowed            bool
 }
 
-// EffectivePolicyForUser loads a user's group policy and returns the merged
-// restriction layer. Nil providers are treated as "no group".
+// NoGroupPolicy is the policy applied to an account with no access group
+// (admins are ungrouped). It is permissive so that an unset field on such an
+// account keeps today's unrestricted behavior. DownloadTranscodeAllowed is
+// the exception: it defaults to false because that was the old column default
+// on users (and is the seeded Default Group's value), so an account that never
+// had the gate turned on does not silently gain it.
+func NoGroupPolicy() GroupPolicy {
+	return GroupPolicy{
+		LibraryIDs:                 nil,
+		MaxPlaybackQuality:         "",
+		DownloadAllowed:            true,
+		DownloadTranscodeAllowed:   false,
+		TranscodeAllowed:           true,
+		AudioTranscodeAllowed:      true,
+		MaxStreams:                 0,
+		MaxTranscodes:              0,
+		MaxRemoteStreamBitrateKbps: 0,
+		MaxLocalStreamBitrateKbps:  0,
+		AllowedPermissions:         nil,
+		RequestsAllowed:            true,
+	}
+}
+
+// GroupApplies reports whether an access group contributes to the user's
+// effective policy. Admin accounts are never capped by a group: the repository
+// keeps them ungrouped, and a row that still carries a group (written before
+// that rule existed) is resolved as if it did not.
+func GroupApplies(user *models.User) bool {
+	return user != nil && user.AccessGroupID != nil && user.Role != models.RoleAdmin
+}
+
+// EffectivePolicyForUser loads a user's group policy and returns the resolved
+// policy. Nil providers are treated as "no group". An account whose group does
+// not apply (see GroupApplies) resolves against NoGroupPolicy without querying
+// the provider.
 func EffectivePolicyForUser(ctx context.Context, user *models.User, provider GroupPolicyProvider) (EffectiveUserPolicy, error) {
-	if provider == nil || user == nil {
+	if provider == nil || !GroupApplies(user) {
 		return ApplyGroupPolicy(user, nil), nil
 	}
 	group, err := provider.GetPolicyForUser(ctx, user.ID)
@@ -53,65 +96,72 @@ func EffectivePolicyForUser(ctx context.Context, user *models.User, provider Gro
 	return ApplyGroupPolicy(user, group), nil
 }
 
-// ApplyGroupPolicy restricts user account policy by the optional access group.
+// ApplyGroupPolicy resolves the user's account policy against the optional
+// access group: each field takes the user's explicit override when set and
+// the group's value otherwise. A nil group means the permissive
+// NoGroupPolicy. Permissions are the one mask-style field: the group's
+// allowed_permissions (when set) intersects the user's permissions.
 func ApplyGroupPolicy(user *models.User, group *GroupPolicy) EffectiveUserPolicy {
 	if user == nil {
 		return EffectiveUserPolicy{RequestsAllowed: true}
 	}
+	base := NoGroupPolicy()
+	if group != nil {
+		base = *group
+	}
 
 	effective := EffectiveUserPolicy{
-		LibraryIDs:               cloneInts(user.LibraryIDs),
-		MaxPlaybackQuality:       user.MaxPlaybackQuality,
-		DownloadAllowed:          user.DownloadAllowed,
-		DownloadTranscodeAllowed: user.DownloadTranscodeAllowed,
-		TranscodeAllowed:         user.TranscodeAllowed,
-		AudioTranscodeAllowed:    user.AudioTranscodeAllowed,
-		MaxStreams:               user.MaxStreams,
-		MaxTranscodes:            user.MaxTranscodes,
-		Permissions:              cloneStrings(user.Permissions),
-		RequestsAllowed:          true,
+		LibraryIDs:                 inheritLibraryIDs(user.LibraryIDs, base.LibraryIDs),
+		MaxPlaybackQuality:         NormalizePlaybackQuality(inheritString(user.MaxPlaybackQuality, base.MaxPlaybackQuality)),
+		DownloadAllowed:            inheritBool(user.DownloadAllowed, base.DownloadAllowed),
+		DownloadTranscodeAllowed:   inheritBool(user.DownloadTranscodeAllowed, base.DownloadTranscodeAllowed),
+		TranscodeAllowed:           inheritBool(user.TranscodeAllowed, base.TranscodeAllowed),
+		AudioTranscodeAllowed:      inheritBool(user.AudioTranscodeAllowed, base.AudioTranscodeAllowed),
+		MaxStreams:                 inheritInt(user.MaxStreams, base.MaxStreams),
+		MaxTranscodes:              inheritInt(user.MaxTranscodes, base.MaxTranscodes),
+		MaxRemoteStreamBitrateKbps: inheritInt(user.MaxRemoteStreamBitrateKbps, base.MaxRemoteStreamBitrateKbps),
+		MaxLocalStreamBitrateKbps:  inheritInt(user.MaxLocalStreamBitrateKbps, base.MaxLocalStreamBitrateKbps),
+		Permissions:                cloneStrings(user.Permissions),
+		RequestsAllowed:            inheritBool(user.RequestsAllowed, base.RequestsAllowed),
 	}
-	if group == nil {
-		return effective
-	}
-
-	effective.LibraryIDs = restrictLibraryIDs(user.LibraryIDs, group.LibraryIDs)
-	effective.MaxPlaybackQuality = MinQuality(user.MaxPlaybackQuality, group.MaxPlaybackQuality)
-	effective.DownloadAllowed = user.DownloadAllowed && group.DownloadAllowed
-	effective.DownloadTranscodeAllowed = user.DownloadTranscodeAllowed && group.DownloadTranscodeAllowed
-	effective.MaxStreams = strictestPositive(user.MaxStreams, group.MaxStreams)
-	effective.MaxTranscodes = strictestPositive(user.MaxTranscodes, group.MaxTranscodes)
-	if group.AllowedPermissions != nil {
+	if group != nil && group.AllowedPermissions != nil {
 		effective.Permissions = intersectStrings(user.Permissions, group.AllowedPermissions)
 	}
-	effective.RequestsAllowed = group.RequestsAllowed
 	return effective
 }
 
-func restrictLibraryIDs(userLibraryIDs, groupLibraryIDs []int) []int {
-	switch {
-	case userLibraryIDs != nil && groupLibraryIDs != nil:
-		return intersectInts(userLibraryIDs, groupLibraryIDs)
-	case userLibraryIDs != nil:
-		return cloneInts(userLibraryIDs)
-	case groupLibraryIDs != nil:
-		return sortedUniqueInts(groupLibraryIDs)
-	default:
-		return nil
+func inheritLibraryIDs(userLibraryIDs, groupLibraryIDs []int) []int {
+	if userLibraryIDs != nil {
+		return sortedUniqueInts(userLibraryIDs)
 	}
+	if groupLibraryIDs != nil {
+		return sortedUniqueInts(groupLibraryIDs)
+	}
+	return nil
 }
 
-func strictestPositive(userValue, groupValue int) int {
-	switch {
-	case userValue <= 0:
-		return groupValue
-	case groupValue <= 0:
-		return userValue
-	case userValue <= groupValue:
-		return userValue
-	default:
-		return groupValue
+func inheritInt(override *int, inherited int) int {
+	if override != nil {
+		if *override < 0 {
+			return 0
+		}
+		return *override
 	}
+	return inherited
+}
+
+func inheritBool(override *bool, inherited bool) bool {
+	if override != nil {
+		return *override
+	}
+	return inherited
+}
+
+func inheritString(override *string, inherited string) string {
+	if override != nil {
+		return *override
+	}
+	return inherited
 }
 
 func intersectStrings(left, right []string) []string {

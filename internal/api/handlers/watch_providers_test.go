@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,6 +25,25 @@ type stubWatchProviderService struct {
 	runs      []watchsync.SyncRun
 }
 
+type capturingWatchProviderService struct {
+	stubWatchProviderService
+	apiKey string
+	config watchsync.ConnectionConfigValues
+}
+
+func (s *capturingWatchProviderService) ConnectAPIKeyWithConfig(
+	_ context.Context,
+	_ int,
+	_ string,
+	_ string,
+	apiKey string,
+	config watchsync.ConnectionConfigValues,
+) (watchsync.Connection, error) {
+	s.apiKey = apiKey
+	s.config = config
+	return watchsync.Connection{}, nil
+}
+
 func (s stubWatchProviderService) ListProviders() []watchsync.ProviderSummary {
 	return s.providers
 }
@@ -32,7 +53,7 @@ func (s stubWatchProviderService) StartDeviceAuth(context.Context, int, string, 
 func (s stubWatchProviderService) PollDeviceAuth(context.Context, int, string, string, string) (watchsync.Connection, error) {
 	return watchsync.Connection{}, nil
 }
-func (s stubWatchProviderService) ConnectAPIKey(context.Context, int, string, string, string) (watchsync.Connection, error) {
+func (s stubWatchProviderService) ConnectAPIKeyWithConfig(context.Context, int, string, string, string, watchsync.ConnectionConfigValues) (watchsync.Connection, error) {
 	return watchsync.Connection{}, nil
 }
 func (s stubWatchProviderService) GetConnectionStatus(context.Context, int, string, string) (watchsync.ConnectionStatus, error) {
@@ -89,8 +110,25 @@ func TestWatchProviderHandlerListsProviders(t *testing.T) {
 	if len(resp.Providers) != 1 {
 		t.Fatalf("providers length = %d, want 1", len(resp.Providers))
 	}
-	if resp.Providers[0] != service.providers[0] {
+	if !reflect.DeepEqual(resp.Providers[0], service.providers[0]) {
 		t.Fatalf("provider = %#v, want %#v", resp.Providers[0], service.providers[0])
+	}
+}
+
+// The frozen v1 contract keeps its original capability fields; rating sync is
+// served only by /api/v2.
+func TestWatchProviderHandlerOmitsRatingCapabilitiesFromV1(t *testing.T) {
+	service := stubWatchProviderService{providers: []watchsync.ProviderSummary{{
+		Key: "trakt", DisplayName: "Trakt",
+		Capabilities: watchsync.Capabilities{ImportWatched: true, ImportRatings: true, ExportRatings: true},
+	}}}
+	rec := httptest.NewRecorder()
+	NewWatchProviderHandler(service).HandleListProviders(rec, httptest.NewRequest(http.MethodGet, "/watch-providers/", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	if body := rec.Body.String(); strings.Contains(body, "ratings") {
+		t.Fatalf("v1 provider list exposes rating fields: %s", body)
 	}
 }
 
@@ -172,6 +210,31 @@ func TestWatchProviderHandlerStartsDeviceAuthWithFrontendJSONShape(t *testing.T)
 	}
 	if resp["verification_url"] != "https://trakt.tv/activate" {
 		t.Fatalf("verification_url = %#v, want https://trakt.tv/activate", resp["verification_url"])
+	}
+}
+
+func TestWatchProviderHandlerPassesConnectionConfigWithAPIKey(t *testing.T) {
+	service := &capturingWatchProviderService{}
+	handler := NewWatchProviderHandler(service)
+	req := httptest.NewRequest(http.MethodPost, "/watch-providers/plugin:4:floppy/auth/api-key", strings.NewReader(`{
+		"api_key":"token",
+		"connection_config":{"floppy":{"base_url":"https://floppy.example.com"}}
+	}`))
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("provider", "plugin:4:floppy")
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+	ctx = middleware.SetClaims(ctx, &auth.Claims{UserID: 7})
+	ctx = middleware.SetProfileID(ctx, "profile-1")
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	handler.HandleConnectAPIKey(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if service.apiKey != "token" || service.config["floppy"]["base_url"] != "https://floppy.example.com" {
+		t.Fatalf("api key = %q, config = %#v", service.apiKey, service.config)
 	}
 }
 

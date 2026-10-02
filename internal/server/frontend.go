@@ -5,7 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io/fs"
+	"mime"
 	"net/http"
+	pathpkg "path"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -37,22 +40,21 @@ var Branding *branding.Service
 //   - script-src 'wasm-unsafe-eval': JASSUB (libass) subtitle rendering and
 //     node-unrar-js CBR extraction compile WebAssembly.
 //   - style-src blob: and 'unsafe-inline': foliate-js loads EPUB stylesheets
-//     via blob: URLs; the app uses inline style attributes. Google Fonts CSS
-//     is linked from index.html.
+//     via blob: URLs; the app uses inline style attributes.
 //   - img-src/media-src http(s): artwork can come from TMDB/TVDB/S3 public
 //     URLs, and stream URLs may point at standalone proxy/transcode workers
 //     on another origin (proxy public_url, plain http on LANs).
 //   - connect-src http(s)/ws(s): realtime session hub WebSockets, browser-side
 //     Plex auth (plex.tv), and HLS fetches against standalone worker origins.
-//   - font-src blob: data: plus fonts.gstatic.com for Google Fonts; reader
-//     book fonts load from blob: URLs.
+//   - font-src blob: data: for reader book fonts, which load from blob: URLs.
+//     The UI fonts are self-hosted under /assets/, so no font CDN is listed.
 //   - frame-src youtube-nocookie.com: the item-detail trailer modal embeds
 //     remote trailers via YouTube's privacy-enhanced iframe host.
 const frontendContentSecurityPolicy = "default-src 'self'; " +
 	"script-src 'self' 'wasm-unsafe-eval'; " +
-	"style-src 'self' 'unsafe-inline' blob: https://fonts.googleapis.com; " +
+	"style-src 'self' 'unsafe-inline' blob:; " +
 	"img-src 'self' blob: data: http: https:; " +
-	"font-src 'self' blob: data: https://fonts.gstatic.com; " +
+	"font-src 'self' blob: data:; " +
 	"media-src 'self' blob: http: https:; " +
 	"connect-src 'self' ws: wss: http: https:; " +
 	"worker-src 'self' blob:; " +
@@ -113,6 +115,13 @@ type renderedShell struct {
 func (h *frontendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	path := r.URL.Path
+	if strings.HasPrefix(path, "/assets/") && isPrecompressedAssetPath(path) {
+		// Sidecars are implementation details selected through content
+		// negotiation. Serving them directly exposes the compressed bytes without
+		// Content-Encoding and creates a second public URL for the same asset.
+		http.NotFound(w, r)
+		return
+	}
 
 	// Dynamic branding endpoints must be handled before the static file
 	// server, which would otherwise serve the bundled defaults shadowing
@@ -139,6 +148,10 @@ func (h *frontendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				// immutable: a new build produces new URLs, which is what
 				// lets browsers cache them for a year yet pick up deploys.
 				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				w.Header().Set("Vary", "Accept-Encoding")
+				if h.servePrecompressedAsset(w, r, path) {
+					return
+				}
 			} else {
 				// Every other bundled file (service worker, icons, vendor
 				// bundles) keeps its URL across builds, so it must be
@@ -183,6 +196,157 @@ func (h *frontendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("ETag", shell.etag)
 	w.Header().Set("Cache-Control", "no-cache")
 	http.ServeContent(w, r, "index.html", time.Time{}, bytes.NewReader(shell.body))
+}
+
+// isPrecompressedAssetPath matches the sidecars the Vite build writes next to
+// /assets/ files (precompressStaticAssets in web/vite.config.ts).
+func isPrecompressedAssetPath(path string) bool {
+	return strings.HasSuffix(path, ".js.br") ||
+		strings.HasSuffix(path, ".js.gz") ||
+		strings.HasSuffix(path, ".css.br") ||
+		strings.HasSuffix(path, ".css.gz") ||
+		strings.HasSuffix(path, ".wasm.br") ||
+		strings.HasSuffix(path, ".wasm.gz")
+}
+
+const (
+	brotliContentEncoding = "br"
+	gzipContentEncoding   = "gzip"
+)
+
+func (h *frontendHandler) servePrecompressedAsset(
+	w http.ResponseWriter,
+	r *http.Request,
+	assetPath string,
+) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+
+	acceptEncoding := strings.Join(r.Header.Values("Accept-Encoding"), ",")
+	encodings, identityAcceptable := precompressedEncodingPreferences(acceptEncoding)
+	useIdentityRange := r.Method == http.MethodGet && r.Header.Get("Range") != "" && identityAcceptable
+	if !useIdentityRange {
+		for _, encoding := range encodings {
+			suffix := "." + encoding
+			if encoding == gzipContentEncoding {
+				suffix = ".gz"
+			}
+			sidecarPath := assetPath + suffix
+			f, err := WebDistFS.Open(strings.TrimPrefix(sidecarPath, "/"))
+			if err != nil {
+				continue
+			}
+			info, statErr := f.Stat()
+			_ = f.Close()
+			if statErr != nil || info.IsDir() {
+				continue
+			}
+
+			if contentType := mime.TypeByExtension(pathpkg.Ext(assetPath)); contentType != "" {
+				w.Header().Set("Content-Type", contentType)
+			}
+			w.Header().Set("Content-Encoding", encoding)
+			w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
+
+			encodedRequest := r.Clone(r.Context())
+			encodedURL := *r.URL
+			encodedURL.Path = sidecarPath
+			encodedRequest.URL = &encodedURL
+			if encodedRequest.Header.Get("Range") != "" {
+				// Range is ignored on HEAD and when GET cannot use identity.
+				encodedRequest.Header.Del("Range")
+			}
+			h.fileServer.ServeHTTP(w, encodedRequest)
+			return true
+		}
+	}
+	if !identityAcceptable {
+		w.WriteHeader(http.StatusNotAcceptable)
+		return true
+	}
+	return false
+}
+
+func precompressedEncodingPreferences(header string) ([]string, bool) {
+	qualities := make(map[string]float64)
+	wildcardQuality := -1.0
+
+	for value := range strings.SplitSeq(header, ",") {
+		parts := strings.Split(value, ";")
+		coding := strings.ToLower(strings.TrimSpace(parts[0]))
+		if coding == "" {
+			continue
+		}
+
+		quality := 1.0
+		valid := true
+		for _, parameter := range parts[1:] {
+			key, rawValue, found := strings.Cut(strings.TrimSpace(parameter), "=")
+			if !strings.EqualFold(strings.TrimSpace(key), "q") {
+				continue
+			}
+			if !found {
+				valid = false
+				break
+			}
+			parsed, err := strconv.ParseFloat(strings.TrimSpace(rawValue), 64)
+			if err != nil || parsed < 0 || parsed > 1 {
+				valid = false
+				break
+			}
+			quality = parsed
+		}
+		if !valid {
+			continue
+		}
+
+		if coding == "*" {
+			wildcardQuality = quality
+			continue
+		}
+		qualities[coding] = quality
+	}
+
+	qualityFor := func(coding string) float64 {
+		if quality, ok := qualities[coding]; ok {
+			return quality
+		}
+		if wildcardQuality >= 0 {
+			return wildcardQuality
+		}
+		return 0
+	}
+
+	brotliQuality := qualityFor(brotliContentEncoding)
+	gzipQuality := qualityFor(gzipContentEncoding)
+	identityAcceptable := true
+	if identityQuality, ok := qualities["identity"]; ok {
+		identityAcceptable = identityQuality > 0
+	} else if wildcardQuality == 0 {
+		identityAcceptable = false
+	}
+	if brotliQuality <= 0 && gzipQuality <= 0 {
+		return nil, identityAcceptable
+	}
+
+	encodings := make([]string, 0, 2)
+	if brotliQuality >= gzipQuality {
+		if brotliQuality > 0 {
+			encodings = append(encodings, brotliContentEncoding)
+		}
+		if gzipQuality > 0 {
+			encodings = append(encodings, gzipContentEncoding)
+		}
+		return encodings, identityAcceptable
+	}
+	if gzipQuality > 0 {
+		encodings = append(encodings, gzipContentEncoding)
+	}
+	if brotliQuality > 0 {
+		encodings = append(encodings, brotliContentEncoding)
+	}
+	return encodings, identityAcceptable
 }
 
 // brandedShell returns the branding-rendered index.html and its ETag, reusing

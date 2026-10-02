@@ -1,0 +1,11 @@
+{
+  "items": [
+    {
+      "id": "12",
+      "name": "Movies",
+      "type": "movies",
+      "sort_order": 2,
+      "poster_url": "https://images.example/poster"
+    }
+  ]
+}

@@ -1,10 +1,13 @@
 .git
+.claude
+.superpowers
 .env
 .env.*
 docs/
 node_modules
 web/node_modules
 web/dist
+web/assets-source
 silo
 streamapp
 *.md

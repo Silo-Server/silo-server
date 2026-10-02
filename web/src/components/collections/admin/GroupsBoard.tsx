@@ -1,4 +1,10 @@
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { useAdminCollectionCapabilities } from "@/hooks/queries/admin/collections";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { fetchAdminBoardOrderSnapshot } from "@/api/adminCollections";
+import { invalidateAdminCollectionQueries } from "@/hooks/queries/collectionSurfaceRefresh";
+import { createContext, useContext, useRef, useState } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -17,6 +23,7 @@ import {
 } from "@/hooks/queries/admin/collectionGroups";
 import { GroupCard } from "./GroupCard";
 import { UngroupedSection } from "./UngroupedSection";
+import { updateCheckboxSelection } from "@/lib/checkboxSelection";
 
 // ---------------------------------------------------------------------------
 // Selection context
@@ -30,8 +37,6 @@ interface AnchorRef {
 }
 
 export interface SelectionContextValue {
-  selectedIds: Set<string>;
-  selectionKind: SelectionKind | null;
   isSelected: (id: string) => boolean;
   selectOnly: (id: string, kind: SelectionKind, groupID: string) => void;
   toggleOne: (id: string, kind: SelectionKind, groupID: string) => void;
@@ -40,8 +45,8 @@ export interface SelectionContextValue {
     kind: SelectionKind,
     groupID: string,
     groupCollectionIDs: string[],
+    checked?: boolean,
   ) => void;
-  clear: () => void;
 }
 
 export const SelectionContext = createContext<SelectionContextValue | null>(null);
@@ -71,6 +76,8 @@ export interface GroupsBoardProps {
   onEditCollection: (collection: LibraryCollection) => void;
   onDeleteCollection: (collection: LibraryCollection) => void;
   onSyncCollection: (collection: LibraryCollection) => void;
+  selectedIds: Set<string>;
+  setSelectedIds: Dispatch<SetStateAction<Set<string>>>;
   syncingCollectionID?: string | null;
 }
 
@@ -87,27 +94,35 @@ export function GroupsBoard({
   onEditCollection,
   onDeleteCollection,
   onSyncCollection,
+  selectedIds,
+  setSelectedIds,
   syncingCollectionID = null,
 }: GroupsBoardProps) {
   // --- selection state ---
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [selectionKind, setSelectionKind] = useState<SelectionKind | null>(null);
+  const selectionKindRef = useRef<SelectionKind | null>(null);
   const anchorRef = useRef<AnchorRef | null>(null);
 
   const isSelected = (id: string) => selectedIds.has(id);
 
-  const selectOnly = (id: string, kind: SelectionKind, groupID: string) => {
-    setSelectedIds(new Set([id]));
-    setSelectionKind(kind);
+  const setSelectionAnchor = (id: string, kind: SelectionKind, groupID: string) => {
+    selectionKindRef.current = kind;
     anchorRef.current = { id, groupID };
   };
 
+  const selectOnly = (id: string, kind: SelectionKind, groupID: string) => {
+    setSelectedIds(new Set([id]));
+    setSelectionAnchor(id, kind, groupID);
+  };
+
   const toggleOne = (id: string, kind: SelectionKind, groupID: string) => {
-    if (selectionKind !== null && kind !== selectionKind) {
+    if (
+      selectedIds.size > 0 &&
+      selectionKindRef.current !== null &&
+      kind !== selectionKindRef.current
+    ) {
       // cross-kind: replace with just this item
       setSelectedIds(new Set([id]));
-      setSelectionKind(kind);
-      anchorRef.current = { id, groupID };
+      setSelectionAnchor(id, kind, groupID);
       return;
     }
     setSelectedIds((prev) => {
@@ -119,8 +134,7 @@ export function GroupsBoard({
       }
       return next;
     });
-    setSelectionKind(kind);
-    anchorRef.current = { id, groupID };
+    setSelectionAnchor(id, kind, groupID);
   };
 
   const selectRange = (
@@ -128,59 +142,49 @@ export function GroupsBoard({
     kind: SelectionKind,
     groupID: string,
     groupCollectionIDs: string[],
+    checked = true,
   ) => {
     const anchor = anchorRef.current;
     if (
+      selectedIds.size === 0 ||
       !anchor ||
       anchor.groupID !== groupID ||
-      (selectionKind !== null && kind !== selectionKind)
+      !groupCollectionIDs.includes(anchor.id) ||
+      !groupCollectionIDs.includes(id) ||
+      (selectionKindRef.current !== null && kind !== selectionKindRef.current)
     ) {
-      // No valid anchor in this group — fall back to selectOnly
-      selectOnly(id, kind, groupID);
+      // Start a new range from this row.
+      if (checked) {
+        setSelectedIds(new Set([id]));
+      } else {
+        setSelectedIds((previous) => {
+          const next = new Set(previous);
+          next.delete(id);
+          return next;
+        });
+      }
+      setSelectionAnchor(id, kind, groupID);
       return;
     }
-    const anchorIdx = groupCollectionIDs.indexOf(anchor.id);
-    const currentIdx = groupCollectionIDs.indexOf(id);
-    if (anchorIdx === -1 || currentIdx === -1) {
-      selectOnly(id, kind, groupID);
-      return;
-    }
-    const lo = Math.min(anchorIdx, currentIdx);
-    const hi = Math.max(anchorIdx, currentIdx);
-    const rangeIds = groupCollectionIDs.slice(lo, hi + 1);
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      for (const rid of rangeIds) next.add(rid);
-      return next;
-    });
-    setSelectionKind(kind);
+    setSelectedIds((previous) =>
+      updateCheckboxSelection(previous, groupCollectionIDs, anchor.id, id, checked, true),
+    );
+    selectionKindRef.current = kind;
     // anchor stays unchanged on range extends
   };
 
-  const clear = () => {
+  const clearSelection = () => {
     setSelectedIds(new Set());
-    setSelectionKind(null);
+    selectionKindRef.current = null;
     anchorRef.current = null;
   };
 
   const selection: SelectionContextValue = {
-    selectedIds,
-    selectionKind,
     isSelected,
     selectOnly,
     toggleOne,
     selectRange,
-    clear,
   };
-
-  // --- Escape key to clear selection ---
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") clear();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
 
   // --- dnd state ---
   const sensors = useSensors(
@@ -199,7 +203,66 @@ export function GroupsBoard({
     item.kind === "ungrouped" ? "ungrouped" : `group:${item.group.id}`,
   );
 
+  const queryClient = useQueryClient();
+  const { data: capabilities } = useAdminCollectionCapabilities();
+  const orderReads = useQuery({
+    queryKey: [
+      "admin",
+      "collections",
+      "order-snapshots",
+      libraryID,
+      groups.map((group) => [group.id, group.collections.map((item) => item.id)]),
+      ungrouped.map((item) => item.id),
+      sortableIds,
+    ],
+    enabled: capabilities?.groups === true,
+    queryFn: () =>
+      fetchAdminBoardOrderSnapshot(
+        libraryID,
+        groups.map((group) => group.id),
+      ),
+  });
+  const dragSnapshot = useRef<{
+    reads: NonNullable<typeof orderReads.data>;
+    groups: BoardGroup[];
+    ungrouped: LibraryCollection[];
+    sortableIds: string[];
+  } | null>(null);
+
   const onDragStart = (e: DragStartEvent) => {
+    if (!capabilities?.groups) return;
+    const reads = orderReads.data;
+    const matches = (actual: string[], expected: string[]) =>
+      actual.length === expected.length && actual.every((id, index) => id === expected[index]);
+    const currentGroups = sortableIds.map((id) =>
+      id === "ungrouped" ? id : id.replace(/^group:/, ""),
+    );
+    if (
+      !reads ||
+      reads.groupOrder.has_more ||
+      !matches(reads.groupOrder.ordered_ids, currentGroups) ||
+      [
+        ...groups.map((group) => ({ id: group.id, items: group.collections })),
+        { id: "ungrouped", items: ungrouped },
+      ].some((group) => {
+        const order = reads.collectionOrders.get(group.id);
+        return (
+          !order ||
+          order.has_more ||
+          !matches(
+            order.ordered_ids,
+            group.items.map((item) => item.id),
+          )
+        );
+      })
+    ) {
+      dragSnapshot.current = null;
+      toast.error("Collection order is not ready or changed. Reload before reordering.");
+      void invalidateAdminCollectionQueries(queryClient);
+      void orderReads.refetch();
+      return;
+    }
+    dragSnapshot.current = { reads, groups, ungrouped, sortableIds };
     const id = String(e.active.id);
     setActiveId(id);
 
@@ -210,7 +273,7 @@ export function GroupsBoard({
         setDraggedIds(flattenedSelectionInVisualOrder(groups, ungrouped, selectedIds));
       } else {
         // Dragging an unselected row — clear selection, drag just this one
-        clear();
+        clearSelection();
         setDraggedIds([aData.id]);
       }
     } else {
@@ -219,6 +282,7 @@ export function GroupsBoard({
   };
 
   const onDragCancel = () => {
+    dragSnapshot.current = null;
     setActiveId(null);
     setDraggedIds([]);
   };
@@ -232,6 +296,13 @@ export function GroupsBoard({
 
   const onDragEnd = (e: DragEndEvent) => {
     setActiveId(null);
+    const captured = dragSnapshot.current;
+    dragSnapshot.current = null;
+    if (!captured) {
+      setDraggedIds([]);
+      return;
+    }
+    const { groups, ungrouped, sortableIds, reads } = captured;
     const { active, over } = e;
     if (!over || active.id === over.id) {
       setDraggedIds([]);
@@ -267,7 +338,10 @@ export function GroupsBoard({
       const oldIdx = currentIds.indexOf(activeItemId);
       const newIdx = currentIds.indexOf(overSectionId);
       if (oldIdx !== -1 && newIdx !== -1 && oldIdx !== newIdx) {
-        reorderGroups.mutate(arrayMove(currentIds, oldIdx, newIdx));
+        reorderGroups.mutate({
+          orderedIDs: arrayMove(currentIds, oldIdx, newIdx),
+          etag: reads.groupOrder.etag,
+        });
       }
       setDraggedIds([]);
       return;
@@ -304,14 +378,15 @@ export function GroupsBoard({
         effectiveDraggedIds,
         oData,
       );
-      reorderCollections.mutate({
-        groupID: targetGroupId,
-        orderedIDs: newOrder,
-        ...(targetGroupId === "ungrouped" ? { libraryId: libraryID } : {}),
-      });
-
-      // Clear selection after successful drop
-      clear();
+      reorderCollections.mutate(
+        {
+          groupID: targetGroupId,
+          etag: reads.collectionOrders.get(targetGroupId)!.etag,
+          orderedIDs: newOrder,
+          ...(targetGroupId === "ungrouped" ? { libraryId: libraryID } : {}),
+        },
+        { onSuccess: clearSelection },
+      );
     }
 
     setDraggedIds([]);
@@ -333,6 +408,13 @@ export function GroupsBoard({
                 <UngroupedSection
                   key="ungrouped"
                   collections={ungrouped}
+                  dragDisabled={
+                    !capabilities?.groups ||
+                    !orderReads.data ||
+                    orderReads.isError ||
+                    orderReads.data.groupOrder.has_more ||
+                    [...orderReads.data.collectionOrders.values()].some((order) => order.has_more)
+                  }
                   collapsed={isSectionDrag}
                   onEditCollection={onEditCollection}
                   onDeleteCollection={onDeleteCollection}
@@ -343,6 +425,13 @@ export function GroupsBoard({
                 <GroupCard
                   key={item.group.id}
                   group={item.group}
+                  dragDisabled={
+                    !capabilities?.groups ||
+                    !orderReads.data ||
+                    orderReads.isError ||
+                    orderReads.data.groupOrder.has_more ||
+                    [...orderReads.data.collectionOrders.values()].some((order) => order.has_more)
+                  }
                   collections={item.group.collections}
                   onEdit={onEditGroup}
                   onEditCollection={onEditCollection}
@@ -375,8 +464,7 @@ export function GroupsBoard({
 /**
  * Build a unified array of groups + the ungrouped sentinel, ordered by each
  * item's effective sort position. Groups use their sort_order; ungrouped uses
- * ungroupedSortOrder. Ties are broken by name for groups (ungrouped always
- * sorts last within ties since it has no name).
+ * ungroupedSortOrder. Ties use the raw ID, including the ungrouped sentinel, matching the canonical API order.
  */
 function buildUnifiedItems(groups: BoardGroup[], ungroupedSortOrder: number): UnifiedItem[] {
   type Slot = { order: number; item: UnifiedItem };
@@ -387,10 +475,9 @@ function buildUnifiedItems(groups: BoardGroup[], ungroupedSortOrder: number): Un
   slots.push({ order: ungroupedSortOrder, item: { kind: "ungrouped" as const } });
   slots.sort((a, b) => {
     if (a.order !== b.order) return a.order - b.order;
-    // Equal sort_order: put named groups before ungrouped; stable between groups by name
-    const aName = a.item.kind === "group" ? a.item.group.name : "￿";
-    const bName = b.item.kind === "group" ? b.item.group.name : "￿";
-    return aName.localeCompare(bName);
+    const aID = a.item.kind === "group" ? a.item.group.id : "ungrouped";
+    const bID = b.item.kind === "group" ? b.item.group.id : "ungrouped";
+    return aID < bID ? -1 : aID > bID ? 1 : 0;
   });
   return slots.map((s) => s.item);
 }

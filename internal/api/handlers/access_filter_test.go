@@ -12,7 +12,11 @@ func TestCatalogAccessFiltersCarryExplicitDeviceIdentity(t *testing.T) {
 	if got := requestAccessFilter(req).DeviceID; got != "apple-tv" {
 		t.Fatalf("requestAccessFilter().DeviceID = %q, want apple-tv", got)
 	}
-	if got := (&ItemsHandler{}).accessFilter(req).DeviceID; got != "apple-tv" {
+	filter, err := (&ItemsHandler{}).accessFilter(req)
+	if err != nil {
+		t.Fatalf("ItemsHandler.accessFilter() error = %v", err)
+	}
+	if got := filter.DeviceID; got != "apple-tv" {
 		t.Fatalf("ItemsHandler.accessFilter().DeviceID = %q, want apple-tv", got)
 	}
 }

@@ -23,7 +23,7 @@ import {
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { cn } from "@/lib/utils";
 import type { AdminDeviceSetting } from "@/hooks/queries/admin/users";
-import { formatDate } from "@/lib/datetime";
+import { formatRelativeTime } from "@/lib/date";
 
 export const UNKNOWN_PROFILE_ID = "unknown-profile";
 
@@ -90,18 +90,7 @@ export function platformLabel(raw: string | undefined): string {
 }
 
 export function formatRelative(iso: string | undefined): string {
-  if (!iso) return "—";
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return "—";
-  const diff = Date.now() - then;
-  const m = Math.round(diff / 60000);
-  if (m < 1) return "just now";
-  if (m < 60) return `${m}m ago`;
-  const h = Math.round(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const d = Math.round(h / 24);
-  if (d < 30) return `${d}d ago`;
-  return formatDate(iso);
+  return formatRelativeTime(iso, { absoluteAfterDays: 30 }) ?? "—";
 }
 
 export function shortenId(id: string, visible = 8): string {

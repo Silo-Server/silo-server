@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"net/url"
-	"strings"
 	"testing"
 	"time"
 
@@ -719,34 +718,74 @@ func TestHandleUpcoming_Unauthorized(t *testing.T) {
 	}
 }
 
-// TestHandleUpcoming_MissingSeriesId_ReturnsEmptyNot404 pins the central
-// contract of this endpoint: when no SeriesId/ParentId is supplied we must
-// return 200 with an empty result. Returning 404 here re-triggers the
-// Android TV fallback to global /Shows/NextUp that this handler exists to
-// suppress (see error-report-2026-05-08.md §11).
-func TestHandleUpcoming_MissingSeriesId_ReturnsEmptyNot404(t *testing.T) {
+// TestHandleEpisodes_AuthoritativeSeasonID verifies that Swiftfin's call shape
+// GET /Shows/{seasonID}/Episodes?seasonId={seasonID} (where the path {id} segment
+// holds an EncodedIDSeason ID) treats seasonId as authoritative, resolves the owning
+// series, and returns the season's episodes without a 404 series-decode failure.
+func TestHandleEpisodes_AuthoritativeSeasonID(t *testing.T) {
 	codec := NewResourceIDCodec()
-	h := &ItemsHandler{codec: codec, mapper: newMapper(codec, &config.Config{})}
+	seriesContentID := "series-1"
+	seasonContentID := "season-1"
+	encodedSeasonID := codec.EncodeStringID(EncodedIDSeason, seasonContentID)
 
-	req := httptest.NewRequest("GET", "/Shows/Upcoming", nil)
-	ctx := context.WithValue(req.Context(), compatSessionKey, &Session{StreamAppUserID: 1, ProfileID: "profile-1"})
-	rec := httptest.NewRecorder()
-	h.HandleUpcoming(rec, req.WithContext(ctx))
+	contentSvc := &countingContentService{
+		seasons: []upstreamSeason{
+			{ContentID: seasonContentID, SeasonNumber: 1, Title: "Season 1", EpisodeCount: 2},
+		},
+	}
+	episodeRepo := &fakeSeasonEpisodeRepo{bySeason: map[string][]*models.Episode{
+		episodeBySeasonKey(seriesContentID, 1): {
+			{ContentID: "ep-1", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 1, Title: "E1"},
+			{ContentID: "ep-2", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 2, Title: "E2"},
+		},
+	}}
+	h := &ItemsHandler{
+		content:     contentSvc,
+		userData:    &mockUserDataService{},
+		codec:       codec,
+		mapper:      newMapper(codec, &config.Config{}),
+		images:      NewImageCache(time.Hour, time.Now),
+		episodeRepo: episodeRepo,
+		seasonRepo: &fakeSeasonByIDRepo{seasons: map[string]*models.Season{
+			seasonContentID: {ContentID: seasonContentID, SeriesID: seriesContentID, SeasonNumber: 1},
+		}},
+	}
 
-	if rec.Code != 200 {
-		t.Fatalf("expected 200 (not 404) when SeriesId missing; got %d, body=%s", rec.Code, rec.Body.String())
+	result := performEpisodesRequest(t, h, "/Shows/"+encodedSeasonID+"/Episodes?SeasonId="+encodedSeasonID, encodedSeasonID)
+	if result.TotalRecordCount != 2 || len(result.Items) != 2 {
+		t.Fatalf("expected 2 episodes for Swiftfin seasonId query, got total=%d items=%+v", result.TotalRecordCount, result.Items)
 	}
-	if !strings.Contains(rec.Body.String(), `"Items":[]`) {
-		t.Fatalf("expected empty Items array; got body=%s", rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"TotalRecordCount":0`) {
-		t.Fatalf("expected TotalRecordCount 0; got body=%s", rec.Body.String())
+	if result.Items[0].Name != "E1" || result.Items[1].Name != "E2" {
+		t.Fatalf("unexpected episode names: %+v", result.Items)
 	}
 }
 
-// TestHandleUpcoming_InvalidSeriesId_ReturnsEmptyNot404 — same contract for
-// undecodable IDs. Decode failure must NOT 404 for the same reason.
-func TestHandleUpcoming_InvalidSeriesId_ReturnsEmptyNot404(t *testing.T) {
+// TestHandleEpisodes_UnknownSeasonIDReturnsNotFound verifies that an unresolvable
+// seasonId query parameter returns 404 NotFound.
+func TestHandleEpisodes_UnknownSeasonIDReturnsNotFound(t *testing.T) {
+	codec := NewResourceIDCodec()
+	unknownSeasonID := codec.EncodeStringID(EncodedIDSeason, "missing-season")
+	h := &ItemsHandler{
+		codec:      codec,
+		seasonRepo: &fakeSeasonByIDRepo{seasons: map[string]*models.Season{}},
+	}
+
+	req := httptest.NewRequest("GET", "/Shows/anything/Episodes?SeasonId="+unknownSeasonID, nil)
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("id", unknownSeasonID)
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+	ctx = context.WithValue(ctx, compatSessionKey, &Session{StreamAppUserID: 1, ProfileID: "profile-1"})
+
+	rec := httptest.NewRecorder()
+	h.HandleEpisodes(rec, req.WithContext(ctx))
+
+	if rec.Code != 404 {
+		t.Fatalf("expected status 404 for unknown SeasonId; got %d, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// Missing catalog infrastructure must not masquerade as an empty upcoming feed.
+func TestHandleUpcoming_UnavailableCatalogReturnsError(t *testing.T) {
 	codec := NewResourceIDCodec()
 	h := &ItemsHandler{codec: codec, mapper: newMapper(codec, &config.Config{})}
 
@@ -755,10 +794,8 @@ func TestHandleUpcoming_InvalidSeriesId_ReturnsEmptyNot404(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.HandleUpcoming(rec, req.WithContext(ctx))
 
-	if rec.Code != 200 {
-		t.Fatalf("expected 200 (not 404) for undecodable SeriesId; got %d, body=%s", rec.Code, rec.Body.String())
+	if rec.Code != 503 {
+		t.Fatalf("expected 503 for unavailable episode catalog; got %d, body=%s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), `"Items":[]`) {
-		t.Fatalf("expected empty Items array; got body=%s", rec.Body.String())
-	}
+
 }

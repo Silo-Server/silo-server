@@ -42,6 +42,8 @@ import { Button } from "@/components/ui/button";
 import { useScreenWakeLock } from "@/hooks/useScreenWakeLock";
 import { useTTS } from "@/hooks/useTTS";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
+import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
+import { hasEarlierEntry } from "@/lib/navigationHistory";
 import { buildItemHref, buildMediaPlayHref } from "@/lib/mediaNavigation";
 import { buildMangaList, flattenMangaList } from "@/lib/mangaChapters";
 import { cn } from "@/lib/utils";
@@ -62,6 +64,10 @@ import FoliateBookReader, {
 } from "@/reader/FoliateBookReader";
 import {
   createEbookReaderAnnotation,
+  createEbookAnnotationSession,
+  type EbookAnnotationSession,
+  createEbookReaderConfigSession,
+  type EbookReaderConfigSession,
   deleteEbookReaderAnnotation,
   fetchEbookReaderAnnotations,
   fetchEbookReaderConfig,
@@ -195,7 +201,10 @@ function isEditableTarget(target: EventTarget | null): boolean {
 
 export default function EbookReader() {
   const { contentId = "" } = useParams<{ contentId: string }>();
+  // Swapping the open file re-renders the reader in place, so it stays on the
+  // plain navigate; only leaving the reader is a page transition.
   const navigate = useNavigate();
+  const exitReader = useViewTransitionNavigate();
   const [searchParams] = useSearchParams();
   const requestedFileID = Number(searchParams.get("file_id") || "");
   const libraryIdParam = searchParams.get("libraryId");
@@ -256,6 +265,8 @@ export default function EbookReader() {
     loadStoredReaderSettings(),
   );
   const [annotations, setAnnotations] = useState<EbookReaderAnnotation[]>([]);
+  const annotationSessionRef = useRef<EbookAnnotationSession | null>(null);
+  const [annotationError, setAnnotationError] = useState(false);
   const [selection, setSelection] = useState<ReaderSelection | null>(null);
   const [wakeLockEnabled, setWakeLockEnabled] = useState(false);
   const [ttsRate, setTtsRate] = useState(1);
@@ -266,6 +277,8 @@ export default function EbookReader() {
   const tts = useTTS();
   useScreenWakeLock(wakeLockEnabled);
   const configLoadedRef = useRef(false);
+  const configSessionRef = useRef<EbookReaderConfigSession | null>(null);
+  const [configSaveError, setConfigSaveError] = useState(false);
   // Tracks settings the user changed in this session so a slow server config
   // fetch cannot clobber them after the fact.
   const settingsDirtyRef = useRef(false);
@@ -287,10 +300,6 @@ export default function EbookReader() {
   const handleReaderReady = useCallback(({ toc: readyToc }: { toc: TOCItem[] }) => {
     setToc(readyToc);
   }, []);
-  const reloadAnnotations = useCallback(async () => {
-    if (!contentId) return;
-    setAnnotations(await fetchEbookReaderAnnotations(contentId));
-  }, [contentId]);
   const handleFileChange = useCallback(
     (fileID: string) => {
       if (!contentId) return;
@@ -312,13 +321,16 @@ export default function EbookReader() {
       settingsDirtyRef.current = true;
       setReaderSettings(merged);
       saveReaderSettings(merged);
-      if (contentId && configLoadedRef.current) {
+      const session = configSessionRef.current;
+      if (contentId && configLoadedRef.current && session) {
         if (saveConfigTimerRef.current !== null) {
           window.clearTimeout(saveConfigTimerRef.current);
         }
         saveConfigTimerRef.current = window.setTimeout(() => {
           saveConfigTimerRef.current = null;
-          void saveEbookReaderConfig(contentId, { settings: merged });
+          void saveEbookReaderConfig(contentId, { settings: merged }, session).catch(() =>
+            setConfigSaveError(true),
+          );
         }, 400);
       }
     },
@@ -334,8 +346,11 @@ export default function EbookReader() {
     settingsDirtyRef.current = true;
     saveReaderSettings(defaults);
     setReaderSettings(defaults);
-    if (contentId) {
-      void saveEbookReaderConfig(contentId, { settings: defaults });
+    const session = configSessionRef.current;
+    if (contentId && session) {
+      void saveEbookReaderConfig(contentId, { settings: defaults }, session).catch(() =>
+        setConfigSaveError(true),
+      );
     }
   }, [contentId]);
   const handleSearchSubmit = useCallback(async () => {
@@ -359,28 +374,50 @@ export default function EbookReader() {
     void readerRef.current?.goToFraction(next);
   }, []);
   const handleCreateHighlight = useCallback(async () => {
-    if (!contentId || !selection) return;
-    const created = await createEbookReaderAnnotation(contentId, {
-      kind: "highlight",
-      cfi_range: selection.cfi,
-      selected_text: selection.selectedText,
-      style: "highlight",
-      color: "#facc15",
-    });
-    setAnnotations((current) => [created, ...current]);
-    readerRef.current?.clearSelection();
-    setSelection(null);
+    const session = annotationSessionRef.current;
+    if (!contentId || !selection || !session) return;
+    try {
+      const created = await createEbookReaderAnnotation(
+        contentId,
+        {
+          kind: "highlight",
+          cfi_range: selection.cfi,
+          selected_text: selection.selectedText,
+          style: "highlight",
+          color: "#facc15",
+        },
+        session,
+      );
+      if (annotationSessionRef.current !== session) return;
+      setAnnotations((current) => [created, ...current.filter((row) => row.id !== created.id)]);
+      setAnnotationError(false);
+      readerRef.current?.clearSelection();
+      setSelection(null);
+    } catch {
+      if (annotationSessionRef.current === session) setAnnotationError(true);
+    }
   }, [contentId, selection]);
   const handleCreateBookmark = useCallback(async () => {
-    if (!contentId) return;
+    const session = annotationSessionRef.current;
+    if (!contentId || !session) return;
     const location = selection?.cfi || `fraction:${(readerProgress ?? 0).toFixed(6)}`;
-    const created = await createEbookReaderAnnotation(contentId, {
-      kind: "bookmark",
-      location,
-      note: item?.title || "Bookmark",
-    });
-    setAnnotations((current) => [created, ...current]);
-    setPanel("notes");
+    try {
+      const created = await createEbookReaderAnnotation(
+        contentId,
+        {
+          kind: "bookmark",
+          location,
+          note: item?.title || "Bookmark",
+        },
+        session,
+      );
+      if (annotationSessionRef.current !== session) return;
+      setAnnotations((current) => [created, ...current.filter((row) => row.id !== created.id)]);
+      setAnnotationError(false);
+      setPanel("notes");
+    } catch {
+      if (annotationSessionRef.current === session) setAnnotationError(true);
+    }
   }, [contentId, item?.title, readerProgress, selection]);
   const handleAnnotationNavigate = useCallback((annotation: EbookReaderAnnotation) => {
     // Toolbar bookmarks store synthetic "fraction:<n>" locations that foliate's
@@ -394,10 +431,17 @@ export default function EbookReader() {
     }
   }, []);
   const handleDeleteAnnotation = useCallback(
-    async (annotationID: string) => {
-      if (!contentId) return;
-      await deleteEbookReaderAnnotation(contentId, annotationID);
-      setAnnotations((current) => current.filter((annotation) => annotation.id !== annotationID));
+    async (annotation: EbookReaderAnnotation) => {
+      const session = annotationSessionRef.current;
+      if (!contentId || !session) return;
+      try {
+        await deleteEbookReaderAnnotation(contentId, annotation, session);
+        if (annotationSessionRef.current !== session) return;
+        setAnnotations((current) => current.filter((row) => row.id !== annotation.id));
+        setAnnotationError(false);
+      } catch {
+        if (annotationSessionRef.current === session) setAnnotationError(true);
+      }
     },
     [contentId],
   );
@@ -477,14 +521,23 @@ export default function EbookReader() {
     let cancelled = false;
     configLoadedRef.current = false;
     settingsDirtyRef.current = false;
-    void fetchEbookReaderConfig(contentId)
+    setConfigSaveError(false);
+    const session = createEbookReaderConfigSession();
+    configSessionRef.current = session;
+    void fetchEbookReaderConfig(contentId, session)
       .then((config) => {
         if (cancelled) return;
         configLoadedRef.current = true;
         if (settingsDirtyRef.current) {
           // The user already changed settings while the fetch was in flight;
           // persist their choices instead of clobbering them with stale config.
-          void saveEbookReaderConfig(contentId, { settings: readerSettingsRef.current });
+          void saveEbookReaderConfig(
+            contentId,
+            { settings: readerSettingsRef.current },
+            session,
+          ).catch(() => {
+            if (!cancelled) setConfigSaveError(true);
+          });
           return;
         }
         const settings =
@@ -496,9 +549,7 @@ export default function EbookReader() {
         setReaderSettings(settings);
       })
       .catch(() => {
-        if (!cancelled) {
-          configLoadedRef.current = true;
-        }
+        if (!cancelled) setConfigSaveError(true);
       });
     // A scheduled timer means updateReaderSettings has unsaved settings;
     // consume it exactly once so unmount and pagehide cannot double-send.
@@ -507,9 +558,15 @@ export default function EbookReader() {
       window.clearTimeout(saveConfigTimerRef.current);
       saveConfigTimerRef.current = null;
       if (options?.keepalive) {
-        saveEbookReaderConfigKeepalive(contentId, { settings: readerSettingsRef.current });
+        saveEbookReaderConfigKeepalive(contentId, { settings: readerSettingsRef.current }, session);
       } else {
-        void saveEbookReaderConfig(contentId, { settings: readerSettingsRef.current });
+        void saveEbookReaderConfig(
+          contentId,
+          { settings: readerSettingsRef.current },
+          session,
+        ).catch(() => {
+          if (!cancelled) setConfigSaveError(true);
+        });
       }
     };
     // At tab close a normal request can be torn down with the page; keepalive
@@ -528,8 +585,22 @@ export default function EbookReader() {
   }, [contentId]);
 
   useEffect(() => {
-    void reloadAnnotations();
-  }, [reloadAnnotations]);
+    if (!contentId) return;
+    const session = createEbookAnnotationSession();
+    annotationSessionRef.current = session;
+    setAnnotations([]);
+    setAnnotationError(false);
+    void fetchEbookReaderAnnotations(contentId, session)
+      .then((rows) => {
+        if (annotationSessionRef.current === session) setAnnotations(rows);
+      })
+      .catch(() => {
+        if (annotationSessionRef.current === session) setAnnotationError(true);
+      });
+    return () => {
+      if (annotationSessionRef.current === session) annotationSessionRef.current = null;
+    };
+  }, [contentId]);
   if (isLoading) {
     return (
       <div className="flex min-h-[70vh] items-center justify-center">
@@ -596,7 +667,33 @@ export default function EbookReader() {
       <header className="border-border/70 bg-background/95 sticky top-0 z-20 border-b backdrop-blur">
         <div className="flex h-14 items-center gap-3 px-4">
           <Button asChild variant="ghost" size="icon" aria-label="Back">
-            <Link to={backHref}>
+            <Link
+              to={backHref}
+              onClick={(event) => {
+                // Exiting the reader must consume the reader's history entry,
+                // not push the target on top of it — otherwise pressing back
+                // on the destination re-opens the reader (issue #189). The
+                // href stays for modified clicks (new tab). A directly opened
+                // reader replaces itself with that target so browser Back
+                // cannot reopen the reader.
+                if (
+                  event.defaultPrevented ||
+                  event.button !== 0 ||
+                  event.metaKey ||
+                  event.ctrlKey ||
+                  event.shiftKey ||
+                  event.altKey
+                ) {
+                  return;
+                }
+                event.preventDefault();
+                if (hasEarlierEntry()) {
+                  exitReader(-1);
+                  return;
+                }
+                exitReader(backHref, { up: true, replace: true });
+              }}
+            >
               <ArrowLeft className="size-5" />
             </Link>
           </Button>
@@ -612,7 +709,7 @@ export default function EbookReader() {
               className="hidden gap-1 sm:inline-flex"
               title={`Next: ${nextChapter.label}`}
             >
-              <Link to={nextChapterHref}>
+              <Link to={nextChapterHref} replace>
                 <span className="text-muted-foreground max-w-36 truncate text-xs">
                   {nextChapter.label}
                 </span>
@@ -792,6 +889,18 @@ export default function EbookReader() {
             </div>
           </div>
         )}
+        {annotationError && (
+          <p role="alert" className="px-4 py-2 text-sm text-amber-300">
+            Annotations could not sync. Your selection and saved notes are retained. Retry a new
+            note, or reload before changing an existing note.
+          </p>
+        )}
+        {configSaveError && (
+          <p role="status" className="text-muted-foreground px-4 py-2 text-sm">
+            Reader settings are saved on this device, but could not sync. Reopen the book to reload
+            server settings.
+          </p>
+        )}
         {panelOpen && isReaderSupportedFile(selectedFile) && (
           <aside className="border-border bg-background min-h-0 min-w-0 overflow-hidden border-t lg:border-t-0 lg:border-l">
             <div className="border-border/70 grid grid-cols-4 gap-1 border-b px-2 py-1.5">
@@ -947,7 +1056,7 @@ export default function EbookReader() {
                             size="icon-xs"
                             aria-label="Delete annotation"
                             title="Delete annotation"
-                            onClick={() => void handleDeleteAnnotation(annotation.id)}
+                            onClick={() => void handleDeleteAnnotation(annotation)}
                           >
                             <Trash2 className="size-3" />
                           </Button>
@@ -1280,7 +1389,7 @@ export default function EbookReader() {
             size="lg"
             className="h-11 gap-2 rounded-full px-6 text-[15px] font-bold shadow-lg"
           >
-            <Link to={nextChapterHref}>
+            <Link to={nextChapterHref} replace>
               Next: {nextChapter.label}
               <ChevronRight className="size-[18px]" />
             </Link>

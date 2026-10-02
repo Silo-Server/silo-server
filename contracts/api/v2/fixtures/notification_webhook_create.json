@@ -1,0 +1,7 @@
+{
+  "id": "created",
+  "name": "fixture",
+  "type": "generic",
+  "url_host": "example.test",
+  "signing_secret": "one-time-secret"
+}

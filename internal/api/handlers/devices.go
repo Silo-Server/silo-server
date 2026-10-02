@@ -271,20 +271,35 @@ type deviceKey struct {
 	deviceID  string
 }
 
-// deviceOverrideCounts counts stored profile_device rows per (profile, device).
-// ListAllSettingValues spans the whole account, so the caller filters the
-// result to the profile it is answering for.
+// deviceOverrideCounts counts the preferences a (profile, device) pair
+// overrides. ListAllSettingValues spans the whole account, so the caller filters
+// the result to the profile it is answering for.
+//
+// Preferences, not rows: a key the contract mirrors onto its replacement is
+// stored twice for the length of the overlap window, and a badge that read
+// "2 settings changed" because the viewer picked one intro-skip mode would be
+// counting the compatibility copy as a second choice.
 func deviceOverrideCounts(r *http.Request, store userstore.UserStore) (map[deviceKey]int, error) {
 	values, err := store.ListAllSettingValues(r.Context())
 	if err != nil {
 		return nil, err
 	}
-	counts := make(map[deviceKey]int)
+	logical := make(map[deviceKey]map[string]struct{})
 	for _, value := range values {
 		if value.Scope != settingscontract.ScopeProfileDevice {
 			continue
 		}
-		counts[deviceKey{profileID: value.ProfileID, deviceID: value.DeviceID}]++
+		id := deviceKey{profileID: value.ProfileID, deviceID: value.DeviceID}
+		keys, ok := logical[id]
+		if !ok {
+			keys = make(map[string]struct{})
+			logical[id] = keys
+		}
+		keys[settingscontract.LogicalKey(value.Key)] = struct{}{}
+	}
+	counts := make(map[deviceKey]int, len(logical))
+	for id, keys := range logical {
+		counts[id] = len(keys)
 	}
 	return counts, nil
 }

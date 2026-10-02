@@ -1,99 +1,267 @@
 # Contributing to Silo
 
-Hey, thanks for wanting to contribute!
+Contributions are welcome from any workflow, including AI-assisted ones. Most of
+Silo was written with AI assistance. Whoever submits the work is responsible for
+understanding it, testing it, and explaining it; that applies to maintainers and
+external contributors alike.
 
-Let's be real: this project is built almost entirely with AI assistance. Claude, Codex, whatever you've got — we're not pretending otherwise. But there's a big difference between *using AI well* and *submitting AI slop*. We care a lot about the first one, and we'll push back hard on the second.
+## Before you start
 
-- AI-generated code is fine. AI slop is not.
-- You are responsible for everything you submit, even if an AI wrote it.
-- Actually read the code. Actually run the tests. Actually understand what it does.
-- Don't send big changes without talking about them first.
+> [!IMPORTANT]
+> An open issue is not required before a pull request. State the problem in the
+> pull request itself: what breaks or is missing, who it affects, and why this
+> change is the right answer. Link an issue when one already covers the work.
 
-## Things Are Moving Fast
+Silo is pre-1.0 and moves quickly. For features, API or behavior changes, schema
+migrations, large refactors, or anything else that changes product scope, opening
+an issue or discussion first is still the cheapest way to learn that the work is
+already in flight or outside scope. That is a judgment call, not a gate; the risk
+of a rejected pull request is yours. Read [Project non-goals](docs/non-goals.md)
+and the relevant `docs/architecture/` material before proposing a capability.
 
-Silo is in heavy active development. Features get rewritten, APIs shift, whole sections get reworked — sometimes day to day. **If you want to work on something, reach out first.** Open an issue or drop a message so:
+An open issue is not an unclaimed one. Before implementing someone else's issue,
+read its comments and linked pull requests to see whether the author is already
+working on it, and say you are picking it up.
 
-- You don't build on something that's already been rewritten locally but not pushed yet.
-- I can avoid breaking something you're actively working on.
-- We can check the area is stable enough to be worth building on right now.
+Durable architecture and contracts live under `docs/architecture/`.
+Implementation plans and working notes belong in the issue or pull request, not
+in the repository.
 
-## Before You Start
+Documentation in this repository is for people and coding agents changing the
+code: architecture, invariants, API contracts, and development setup. Guides
+for installing, configuring, operating, or troubleshooting Silo belong in the
+[user manual](https://siloserver.org/docs), which lives in
+[Silo-Server/siloserver.org](https://github.com/Silo-Server/siloserver.org).
+This repository does not accept operator or user guides; open those pull
+requests against the website repository instead.
 
-Small stuff (typo fixes, minor bugs) — just open a merge request. No ceremony.
+Choose the repository that owns the behavior before implementation begins.
+This repository owns the backend, web app, native API, Jellyfin compatibility,
+and plugin host. Client-only work belongs in `silo-apple` or `silo-android`;
+plugin contracts belong in `silo-plugin-sdk`; provider behavior belongs in the
+individual plugin repository. Cross-repository changes should identify all
+affected repositories in the issue and pull request.
 
-For anything bigger, start with an issue first. New features, API changes, schema migrations, large refactors, behavior changes — talk about it before writing code. Design docs live under `docs/superpowers/specs/` and `docs/superpowers/plans/` if you need examples.
+## Reporting a problem
 
-## Don't Submit AI Slop
+Use the [GitHub issue forms](https://github.com/Silo-Server/silo-server/issues/new/choose);
+they ask for everything a maintainer needs. Two rules: describe what you observed
+before any root-cause theory, and paste raw logs rather than a summary. Redact
+credentials, tokens, personal data, and private media details, mark each
+redaction, and leave the rest untouched.
 
-AI writes most of the code here. That's fine. What's not fine is copy-pasting output without understanding it.
+## Prepare a focused change
 
-1. **Read every line of your diff.** If you can't explain it, don't submit it.
-2. **Run the tests** — but don't blindly trust them. The tests were also AI-written and they have blind spots.
-3. **Test the app yourself locally.** Spin it up, click around, try the thing you changed. There is no substitute for this.
-4. **Run code-review** on your own work before submitting. `superpowers:requesting-code-review` or whatever tooling you have.
-5. **Watch for AI-introduced bugs.** Silent behavior changes, dead code, subtle regressions — look for them.
-6. **Understand the bigger picture.** A change that looks fine in isolation can break something three layers away.
+1. Read the existing implementation and tests in the area you are changing.
+2. One concern per pull request. No unrelated cleanup or refactors.
+3. Follow existing patterns; comment only where behavior is not obvious from the
+   code.
+4. Add tests that fail before the fix and pass after it.
+5. Exercise user-facing behavior in a running application when you can.
+6. Review the whole diff for unintended behavior, generated-file drift, local
+   paths, credentials, and stray edits.
+7. For non-trivial changes, get an independent or adversarial review and
+   resolve its findings before submitting.
 
-"The AI suggested it" is not an acceptable answer in review. You should be able to explain the reasoning and tradeoffs.
+Tests are evidence, not proof. Think about effects beyond the files you touched,
+and be ready to explain the implementation, alternatives, and tradeoffs in
+review.
 
-## AI Disclosure (Required)
+## Development setup
 
-Every PR and every issue needs to say what AI was involved: the tool, the exact model ID, and the involvement level. "No AI" is a perfectly fine answer. Just say so.
+[DEVELOPMENT.md](DEVELOPMENT.md) covers prerequisites, local services, builds,
+migrations, and repository layout, including how to iterate against
+`silo-plugin-sdk`.
 
-```md
-### AI Disclosure
-- Tool(s): e.g. Claude Code, Codex CLI, Cursor — or "none"
-- Model(s): exact model ID(s), e.g. claude-fable-5, gpt-5.4 — or "n/a"
-- Involvement: fully AI-generated | AI-assisted | human-written, AI-reviewed | none
-- Adversarial review: what your own AI review of the diff found, and how you resolved it
-```
+## Validate your change
 
-The exact model matters. This project is developed with frontier models. If a PR was generated by an older or weaker model, the fastest honest response may be for me to re-implement the idea with a current model instead of reviewing the diff line by line. Disclosing the model lets that call happen quickly. "Thanks, the idea is accepted, but the implementation will be redone" is a possible outcome; see [Be Realistic](#be-realistic).
-
-Before submitting, run an adversarial review of your own diff with whatever AI tooling you have, and summarize what it found and what you did about it. "It found nothing" is only credible for tiny diffs.
-
-Undisclosed AI use that is discovered later gets the PR closed on the spot. Repeat offenses get you blocked. The offense is the non-disclosure, not the AI use.
-
-Fabricated content is an immediate block, first offense. Invented APIs, repro steps that never happened, AI-imagined vulnerabilities, and "bugs" nobody actually observed all count. This is the curl-style rule for hallucinated reports.
-
-For issues, logs must be raw copy-paste, never AI-paraphrased. You must have actually reproduced the problem yourself on a real deployment before filing.
-
-## Merge Requests
-
-A good MR answers: what problem does this solve, why this approach, how was it tested, anything to watch out for. For non-trivial changes, link the issue and note any migration/compatibility concerns. Screenshots for UI changes.
-
-Small, well-explained MRs get reviewed fast. Big unexplained ones sit.
-
-AI disclosure is mandatory for every MR; use the required block in [AI Disclosure (Required)](#ai-disclosure-required).
-
-## Development Setup
-
-See the README for full setup. Common checks:
+While iterating, run the focused tests for what you touched:
 
 ```sh
-go test ./...                        # Go tests
-golangci-lint run                    # Go lint
-cd web && bun test                   # Frontend tests
-cd web && bun run lint               # Frontend lint
-cd web && bun run format:check       # Frontend formatting
+go test ./internal/<package>/...
+cd web && pnpm exec vitest run path/to/changed.test.tsx
 ```
 
-If your change spans `Silo` and `silo-plugin-sdk`, local iteration through [`go.work`](go.work) is expected. Do not rely on that workspace in repo-tracked config or release pipelines. CI validates this repo with `GOWORK=off`, and any new SDK package or symbol must come from a pushed, tagged `github.com/Silo-Server/silo-plugin-sdk` release before the change is ready to merge.
+Before opening a pull request, run the full gate. This is the one list; the
+[CI workflow](.github/workflows/ci.yml) is authoritative if they ever disagree.
 
-## Style
+```sh
+# Go
+make embed-stub
+go build ./...
+gofmt -l .                      # must print nothing
+go vet ./...
+make lint-changed                   # BASE_REF=origin/<pr-base> when not main
+make test-go
 
-- One thing per MR. Don't mix unrelated changes.
-- Follow existing patterns.
-- Comments for non-obvious things only.
+# Web
+cd web
+pnpm install --frozen-lockfile
+pnpm run lint
+pnpm run format:check
+pnpm run build
+pnpm run budget:check           # launch bundle size against perf-budget.json
+cd ..
+make test-web
 
-## For AI Agents
+# Generated contracts, fixtures, and docs hygiene
+make verify-settings-bindings-all
+make verify-playback-fixtures
+make verify-route-inventory
+make verify-migration-ledger
+make verify-scenario-catalogs
+make verify-offline-routes
+make verify-apiv2-openapi
+make verify-apiv2-contract          # BASE_REF=origin/<pr-base> when not main
+make verify-apiv2-fixtures
+go test -count=1 -run '^TestCommittedArtifactMatchesRouter$' ./internal/apiv2/
+make verify-local-paths
+```
 
-If you're an LLM working on this codebase: read `CLAUDE.md` (or `AGENTS.md` when available) for project-specific instructions, architecture reference, and verification requirements. The rules in this file apply to you too — especially the parts about not submitting slop and running verification before declaring work complete.
+PR CI selects Go or Web jobs from a complete diff. Shared contracts, generated
+bindings, workflow changes, unknown inputs, and unavailable diffs run both
+groups. Ordinary Markdown documentation runs the documentation checks. Pushes
+and manual runs keep the full gate. The `CI result` job rejects failed, canceled,
+missing, or unexpectedly skipped work; only jobs excluded by the selection may
+skip. Selection tools come from the trusted reusable workflow's main branch.
 
-## Be Realistic
+The full Go suite owns the ledger, scenario, offline-route, spec, and fixture
+assertions. The contract job retains generator freshness checks and the semantic
+API comparison. Its `CONTRACT_GO_TESTS=0` flag avoids repeating assertions; local
+verify targets remain complete by default. `Go integration` runs the existing
+PostgreSQL 17 race tests separately from the unit suite and the pgvector database
+used by `Go DB pins`. Its database is also separate from the truncating scenario
+executor's database.
 
-Opening a merge request doesn't create an obligation on my side. I might close it, ignore it, ask you to shrink it, or reimplement the idea myself later. The codebase is moving fast and sometimes the best response to a good PR is "thanks, but I already went a different direction."
+Touching `internal/apiv2` registrations? Run `make apiv2-openapi` and
+`make apiv2-fixtures` and commit what they write; the gates above fail on a
+stale artifact or fixture tree.
 
-If you're fine with that, welcome aboard.
+`make test-go` has no database, so every DB-backed test in it skips. The
+`Go DB pins` CI job covers the query-budget pins listed in
+[scripts/ci/db-pins.txt](scripts/ci/db-pins.txt): it migrates a fresh database
+and runs `make test-db-pins`, which fails when a listed test is missing,
+skipped or failing. A test that pins a statement count or query plan belongs in
+that list, added in the same change. Run it yourself when you change database
+or query code or add a pin. It needs a disposable, migrated database; with the
+PostgreSQL service from [DEVELOPMENT.md](DEVELOPMENT.md#local-development)
+running under the Compose defaults:
 
-If you're not sure whether something is in scope, open an issue and ask. Always better than building something that needs to be reshaped.
+```sh
+docker compose exec postgres createdb -U silo silo_pins
+export SILO_TEST_DATABASE_URL='postgres://silo:silo@localhost:5432/silo_pins?sslmode=disable'
+DATABASE_URL="$SILO_TEST_DATABASE_URL" SECRET_KEY="$(openssl rand -base64 48)" \
+  go run ./cmd/silo/ --migrate-only
+make test-db-pins
+```
+
+`make lint` runs `golangci-lint` over the whole tree and reports inherited
+findings the repository does not pass yet; CI only gates the lines your branch
+changed. `make lint-changed` checks exactly those lines, and it analyzes only
+the packages your branch touched, so it takes seconds where a cold run over
+`./...` takes minutes of every core. Do not add to the inherited findings.
+Never pass `--allow-parallel-runners`: concurrent runs queue behind one
+another on purpose.
+
+Summarize the relevant commands and results in the pull request. Name required
+checks that were skipped or failed, and include short output excerpts only when
+they help explain a failure. Describe the test environment without identifying
+private infrastructure. Never claim a check passed or ran on a target it did not.
+
+## Update the user manual
+
+The user manual and feature pages on [siloserver.org](https://siloserver.org)
+live in a separate repository,
+[Silo-Server/siloserver.org](https://github.com/Silo-Server/siloserver.org),
+and nothing updates them automatically. To write or fix a guide, open a pull
+request there. When a code change here leaves the site wrong or incomplete,
+open an issue there.
+
+A change needs a docs issue when it:
+
+- adds, renames, or removes a setting, menu item, or screen, or changes a
+  default;
+- changes what a feature does or supports, or how to set it up, including
+  installation, Docker, environment variables, storage, and plugins;
+- makes anything else on the site inaccurate, such as a feature description.
+
+Fixes that make Silo behave the way the manual already says, internal
+refactors, and changes users cannot see do not need one. If you are unsure,
+search the site for the feature.
+
+Open the issue when the pull request is ready for review, or as soon as you
+notice that an already merged change needs one. Reference the pull request as
+`Silo-Server/silo-server#NNN` so GitHub links the two, and say that the site
+update waits for it to merge. In the issue:
+
+- say what changed for users;
+- list the pages to update and what each now gets wrong, with labels and
+  defaults copied from the app source;
+- note what is out of scope, such as apps that need no change.
+
+[#29](https://github.com/Silo-Server/siloserver.org/issues/29) and
+[#30](https://github.com/Silo-Server/siloserver.org/issues/30) are examples.
+If an open issue already covers the same pages, comment on it instead. Update
+the issue when review changes the behavior, and close it if the pull request
+closes without merging.
+
+## AI-assisted contributions
+
+Disclose AI use in every issue and pull request, or state "No AI used" when true.
+The [AI-assisted contribution policy](docs/ai-contributions.md) covers contributor
+responsibility, evidence, and enforcement. Use the disclosure fields in the PR
+template or issue form.
+
+## Open the pull request
+
+Use a [Conventional Commit](https://www.conventionalcommits.org/) title and fill
+in the pull request template. For each issue the change fully resolves, add a
+`Closes #NNN` line (`Closes Silo-Server/<repo>#NNN` for another repository) so
+GitHub closes the issue when the pull request merges into `main`; the
+`Related issue:` line alone does not close anything. Name an epic, scope item,
+or partly addressed issue on `Related issue:`, and write `Related issue: N/A`
+when none applies. Either way, the Problem section has to stand on its own. Keep the commit history intentional and the diff
+limited to the stated problem. Keep the description proportional to the change;
+omit session history, full logs, and private report links other than a
+maintainer's `Evidence:` line. Follow the
+[public-content and media rules](AGENTS.md#pull-requests). Screenshots and recordings
+are not routine PR requirements; attach them only when explicitly requested.
+
+### Write the description
+
+Write for a maintainer who knows Silo but has not seen your working session or
+the diff. The first paragraph should tell them what is broken and what this
+change does; the rest should help them decide how closely to review.
+
+- Open the Problem section with a short plain-language summary: what goes
+  wrong, who it affects, and what this change does about it. Identifiers,
+  numbers, and mechanism come after that.
+- Use the names the codebase already uses, or plain words. Do not carry over
+  terms you coined while working. If a new name is unavoidable, define it once
+  and keep using it.
+- Do not restate the diff. Skip per-test lists, walkthroughs of each function,
+  and paraphrases of code comments. Say what the tests cover and what they do
+  not.
+- Leave out how you got here: earlier designs, dead ends, and how an
+  investigation or replay was run. Mention a rejected alternative only when a
+  reviewer would otherwise ask about it, in one sentence.
+- Let the change set the length. A small fix needs a few lines; a risky or
+  subtle change can take more. There is no word limit, so do not count words
+  or trim to a target. Long supporting evidence, such as tables or
+  measurements, can go in a `<details>` block after the summary.
+
+## Review expectations
+
+Maintainers may ask for a smaller change, a different implementation, decline
+work that no longer fits, or take the idea and implement it separately. Opening
+a pull request does not guarantee a merge. If scope is uncertain, ask before
+building.
+
+## Instructions for coding agents
+
+Coding agents must read [AGENTS.md](AGENTS.md) before changing the repository
+(`CLAUDE.md` points to the same file). This guide and the
+[AI-assisted contribution policy](docs/ai-contributions.md) apply to agent and
+human authors equally. Before creating or updating an issue or pull request,
+agents must apply the checked-in [unslop skill](.agents/skills/unslop/SKILL.md) to
+the title and body, as required by the [Writing policy](AGENTS.md#writing).

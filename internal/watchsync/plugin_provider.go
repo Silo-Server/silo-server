@@ -3,15 +3,21 @@ package watchsync
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	publicconfig "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/config"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
+	hostplugins "github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -34,33 +40,39 @@ type PluginCredentialRepository interface {
 }
 
 type PluginProviderOptions struct {
-	InstallationID int
-	ProviderKey    string
-	CapabilityID   string
-	DisplayName    string
-	Descriptor     *pluginv1.WatchSyncProviderDescriptor
-	ResolveClient  WatchSyncPluginClientResolver
-	ResolveConfig  WatchSyncPluginConfigResolver
-	Repository     PluginCredentialRepository
+	InstallationID         int
+	ProviderKey            string
+	CapabilityID           string
+	DisplayName            string
+	Descriptor             *pluginv1.WatchSyncProviderDescriptor
+	ConnectionConfigSchema []*pluginv1.ConfigSchema
+	ResolveClient          WatchSyncPluginClientResolver
+	ResolveConfig          WatchSyncPluginConfigResolver
+	Repository             PluginCredentialRepository
 }
 
 type PluginProvider struct {
-	installationID int
-	providerKey    string
-	capabilityID   string
-	displayName    string
-	descriptor     *pluginv1.WatchSyncProviderDescriptor
-	authMethod     string
-	supportedMedia map[pluginv1.WatchSyncMediaType]struct{}
-	resolveClient  WatchSyncPluginClientResolver
-	resolveConfig  WatchSyncPluginConfigResolver
-	repository     PluginCredentialRepository
+	installationID         int
+	providerKey            string
+	capabilityID           string
+	displayName            string
+	descriptor             *pluginv1.WatchSyncProviderDescriptor
+	connectionConfigSchema []*pluginv1.ConfigSchema
+	authMethod             string
+	supportedMedia         map[pluginv1.WatchSyncMediaType]struct{}
+	resolveClient          WatchSyncPluginClientResolver
+	resolveConfig          WatchSyncPluginConfigResolver
+	repository             PluginCredentialRepository
+	now                    func() time.Time
 }
 
 const (
 	watchSyncUnsupportedMovieMediaMessage   = "watch sync plugin does not support movie media"
 	watchSyncUnsupportedEpisodeMediaMessage = "watch sync plugin does not support episode media"
+	watchSyncUnsupportedSeriesMediaMessage  = "watch sync plugin does not support series media"
 	watchSyncUnsupportedMediaMessage        = "watch sync plugin does not support this media type"
+	watchSyncJSONSchemaNumberType           = "number"
+	watchSyncJSONSchemaBooleanType          = "boolean"
 )
 
 func NewPluginProvider(options PluginProviderOptions) (*PluginProvider, error) {
@@ -81,21 +93,38 @@ func NewPluginProvider(options PluginProviderOptions) (*PluginProvider, error) {
 	if err != nil {
 		return nil, fmt.Errorf("watch sync plugin %q %w", options.ProviderKey, err)
 	}
+	if err := validateWatchSyncConnectionConfigSchemas(options.ConnectionConfigSchema); err != nil {
+		return nil, fmt.Errorf("watch sync plugin %q %w", options.ProviderKey, err)
+	}
+	if authMethod != AuthMethodAPIKey && hasWatchSyncConnectionConfigSchema(options.ConnectionConfigSchema) {
+		return nil, fmt.Errorf("watch sync plugin %q connection config requires API-key authentication", options.ProviderKey)
+	}
 	if options.ResolveClient == nil {
 		return nil, fmt.Errorf("watch sync plugin client resolver is required")
 	}
 	return &PluginProvider{
-		installationID: options.InstallationID,
-		providerKey:    options.ProviderKey,
-		capabilityID:   options.CapabilityID,
-		displayName:    options.DisplayName,
-		descriptor:     options.Descriptor,
-		authMethod:     authMethod,
-		supportedMedia: supportedMedia,
-		resolveClient:  options.ResolveClient,
-		resolveConfig:  options.ResolveConfig,
-		repository:     options.Repository,
+		installationID:         options.InstallationID,
+		providerKey:            options.ProviderKey,
+		capabilityID:           options.CapabilityID,
+		displayName:            options.DisplayName,
+		descriptor:             options.Descriptor,
+		connectionConfigSchema: append([]*pluginv1.ConfigSchema(nil), options.ConnectionConfigSchema...),
+		authMethod:             authMethod,
+		supportedMedia:         supportedMedia,
+		resolveClient:          options.ResolveClient,
+		resolveConfig:          options.ResolveConfig,
+		repository:             options.Repository,
+		now:                    time.Now,
 	}, nil
+}
+
+func hasWatchSyncConnectionConfigSchema(schemas []*pluginv1.ConfigSchema) bool {
+	for _, schema := range schemas {
+		if schema != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *PluginProvider) Key() string { return p.providerKey }
@@ -117,6 +146,10 @@ func (p *PluginProvider) HistorySource() userstore.WatchHistorySource {
 }
 
 func (p *PluginProvider) AuthMethod() string { return p.authMethod }
+
+func (p *PluginProvider) ConnectionConfigSchema() []hostplugins.ConfigSchemaView {
+	return hostplugins.ConfigSchemaViews(p.connectionConfigSchema)
+}
 
 func (p *PluginProvider) usesHostPluginConfig() {}
 
@@ -143,10 +176,20 @@ func (p *PluginProvider) Capabilities() Capabilities {
 		RemoveWatchlist:        p.descriptor.GetRemoveWatchlist(),
 		ProvidesWatchlistOrder: p.descriptor.GetProvidesWatchlistOrder(),
 		ScrobblePlayback:       p.descriptor.GetScrobblePlayback(),
+		ImportRatings:          p.descriptor.GetImportRatings(),
+		ExportRatings:          p.descriptor.GetExportRatings(),
 	}
 }
 
 func (p *PluginProvider) ConnectWithAPIKey(ctx context.Context, apiKey string) (TokenSet, ProviderAccount, error) {
+	return p.ConnectWithAPIKeyConfig(ctx, apiKey, nil)
+}
+
+func (p *PluginProvider) ConnectWithAPIKeyConfig(
+	ctx context.Context,
+	apiKey string,
+	connectionConfig ConnectionConfigValues,
+) (TokenSet, ProviderAccount, error) {
 	if p.authMethod != AuthMethodAPIKey {
 		return TokenSet{}, ProviderAccount{}, errors.New("watch sync plugin does not support API-key authentication")
 	}
@@ -154,6 +197,11 @@ func (p *PluginProvider) ConnectWithAPIKey(ctx context.Context, apiKey string) (
 	if err != nil {
 		return TokenSet{}, ProviderAccount{}, err
 	}
+	connectionValues, connectionSecrets, err := p.connectionConfig(connectionConfig)
+	if err != nil {
+		return TokenSet{}, ProviderAccount{}, err
+	}
+	config = mergeWatchSyncProviderConfig(config, connectionValues)
 	client, err := p.resolveClient(ctx, p.installationID, p.capabilityID)
 	if err != nil {
 		return TokenSet{}, ProviderAccount{}, watchSyncUnavailableError()
@@ -166,7 +214,8 @@ func (p *PluginProvider) ConnectWithAPIKey(ctx context.Context, apiKey string) (
 	if err != nil {
 		return TokenSet{}, ProviderAccount{}, watchSyncRPCError()
 	}
-	if err := watchSyncFaultError(p.Key(), response.GetFault(), apiKey); err != nil {
+	faultSecrets := append([]string{apiKey}, connectionSecrets...)
+	if err := watchSyncFaultError(p.Key(), response.GetFault(), faultSecrets...); err != nil {
 		return TokenSet{}, ProviderAccount{}, err
 	}
 	tokens, err := tokenSetFromProto(response.GetCredentials())
@@ -533,6 +582,504 @@ func (p *PluginProvider) providerConfig(ctx context.Context) (*pluginv1.WatchSyn
 	return config, nil
 }
 
+func (p *PluginProvider) connectionConfig(values ConnectionConfigValues) (*pluginv1.WatchSyncProviderConfig, []string, error) {
+	declared := make(map[string]*pluginv1.ConfigSchema, len(p.connectionConfigSchema))
+	for _, schema := range p.connectionConfigSchema {
+		if schema != nil && strings.TrimSpace(schema.GetKey()) != "" {
+			declared[schema.GetKey()] = schema
+		}
+	}
+	secrets := connectionConfigSecrets(p.connectionConfigSchema, values)
+	for key := range values {
+		if _, ok := declared[key]; !ok {
+			return nil, nil, sanitizedConnectionConfigError(
+				fmt.Errorf("watch sync connection config key %q is not declared", key),
+				secrets,
+			)
+		}
+	}
+
+	result := &pluginv1.WatchSyncProviderConfig{
+		Values:       make(map[string]string),
+		SecretValues: make(map[string]string),
+	}
+	flattenedFields := make(map[string]string)
+	for _, schema := range p.connectionConfigSchema {
+		if schema == nil || strings.TrimSpace(schema.GetKey()) == "" {
+			continue
+		}
+		value, exists := values[schema.GetKey()]
+		if !exists {
+			if schema.GetRequired() {
+				return nil, nil, fmt.Errorf("watch sync connection config %q is required", schema.GetKey())
+			}
+			continue
+		}
+		if err := publicconfig.ValidateValue(schema, "watch sync connection config", schema.GetKey(), value); err != nil {
+			return nil, nil, sanitizedConnectionConfigError(err, secrets)
+		}
+		if err := validateConnectionAdminFormValue(schema, value); err != nil {
+			return nil, nil, sanitizedConnectionConfigError(err, secrets)
+		}
+		publicFieldNames, _ := hostplugins.ConfigSchemaFieldSets(schema)
+		publicFields := make(map[string]struct{}, len(publicFieldNames))
+		for _, field := range publicFieldNames {
+			publicFields[field] = struct{}{}
+		}
+		for field, raw := range value {
+			rawField := field
+			field = strings.TrimSpace(field)
+			if field == "" {
+				continue
+			}
+			encoded, err := connectionConfigString(raw)
+			if err != nil {
+				return nil, nil, sanitizedConnectionConfigError(
+					fmt.Errorf("encode watch sync connection config %q.%s: %w", schema.GetKey(), field, err),
+					secrets,
+				)
+			}
+			key := schema.GetKey() + "." + field
+			source := fmt.Sprintf("config %q field %q", schema.GetKey(), rawField)
+			if previous, exists := flattenedFields[key]; exists {
+				return nil, nil, sanitizedConnectionConfigError(
+					fmt.Errorf("watch sync connection %s conflicts with %s after flattening to %q", source, previous, key),
+					secrets,
+				)
+			}
+			flattenedFields[key] = source
+			if _, public := publicFields[field]; public {
+				result.Values[key] = encoded
+			} else {
+				result.SecretValues[key] = encoded
+			}
+		}
+	}
+	// Fields the schema never declared are classified as secret above, so redact
+	// every flattened secret rather than only the declared ones.
+	for _, encoded := range result.SecretValues {
+		if strings.TrimSpace(encoded) != "" {
+			secrets = append(secrets, encoded)
+		}
+	}
+	return result, secrets, nil
+}
+
+func connectionConfigSecrets(schemas []*pluginv1.ConfigSchema, values ConnectionConfigValues) []string {
+	var secrets []string
+	for _, schema := range schemas {
+		if schema == nil {
+			continue
+		}
+		value, exists := values[schema.GetKey()]
+		if !exists {
+			continue
+		}
+		_, secretFields := hostplugins.ConfigSchemaFieldSets(schema)
+		for _, field := range secretFields {
+			raw, exists := value[field]
+			if !exists {
+				continue
+			}
+			if encoded, err := connectionConfigString(raw); err == nil && strings.TrimSpace(encoded) != "" {
+				secrets = append(secrets, encoded)
+			}
+			secrets = append(secrets, connectionConfigSecretStrings(raw)...)
+		}
+	}
+	return secrets
+}
+
+func sanitizedConnectionConfigError(err error, secrets []string) error {
+	return errors.New(sanitizeWatchSyncMessage(
+		err.Error(),
+		"watch sync connection config is invalid",
+		secrets...,
+	))
+}
+
+func connectionConfigSecretStrings(value any) []string {
+	switch typed := value.(type) {
+	case map[string]any:
+		var values []string
+		for _, child := range typed {
+			values = append(values, connectionConfigSecretStrings(child)...)
+		}
+		return values
+	case []any:
+		var values []string
+		for _, child := range typed {
+			values = append(values, connectionConfigSecretStrings(child)...)
+		}
+		return values
+	default:
+		encoded, err := connectionConfigString(typed)
+		if err != nil || strings.TrimSpace(encoded) == "" {
+			return nil
+		}
+		return []string{encoded}
+	}
+}
+
+func validateWatchSyncConnectionConfigSchemas(schemas []*pluginv1.ConfigSchema) error {
+	seen := make(map[string]struct{}, len(schemas))
+	for _, schema := range schemas {
+		if schema == nil {
+			continue
+		}
+		key := strings.TrimSpace(schema.GetKey())
+		if key == "" {
+			return fmt.Errorf("connection config key is required")
+		}
+		if _, exists := seen[key]; exists {
+			return fmt.Errorf("connection config key %q is duplicated", key)
+		}
+		seen[key] = struct{}{}
+		for _, field := range schema.GetAdminForm().GetFields() {
+			if field == nil {
+				continue
+			}
+			if strings.TrimSpace(field.GetExclusiveGroupField()) != "" {
+				return fmt.Errorf(
+					"connection config %q field %q uses exclusive_group_field, which watch provider setup does not support",
+					schema.GetKey(),
+					field.GetKey(),
+				)
+			}
+			if field.GetDynamicOptions() && len(field.GetOptions()) == 0 {
+				return fmt.Errorf(
+					"connection config %q field %q requires dynamic options, which watch provider setup does not support",
+					schema.GetKey(),
+					field.GetKey(),
+				)
+			}
+			if field.GetControl() == pluginv1.AdminFormControl_ADMIN_FORM_CONTROL_SELECT {
+				for _, option := range field.GetOptions() {
+					if option != nil && strings.TrimSpace(option.GetValue()) == "" {
+						return fmt.Errorf(
+							"connection config %q field %q has a blank select option value",
+							schema.GetKey(),
+							field.GetKey(),
+						)
+					}
+				}
+			}
+			if pattern := field.GetValidation().GetPattern(); pattern != "" {
+				if _, err := regexp.Compile(pattern); err != nil {
+					return fmt.Errorf(
+						"connection config %q field %q has invalid validation pattern: %w",
+						schema.GetKey(),
+						field.GetKey(),
+						err,
+					)
+				}
+			}
+		}
+		if err := validateConnectionSchemaIsRenderable(schema); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateConnectionSchemaIsRenderable(schema *pluginv1.ConfigSchema) error {
+	if strings.TrimSpace(schema.GetJsonSchema()) == "" && !schema.GetRequired() {
+		return nil
+	}
+	var document struct {
+		Type       string `json:"type"`
+		Properties map[string]struct {
+			Type  string `json:"type"`
+			Items *struct {
+				Type string `json:"type"`
+			} `json:"items"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal([]byte(schema.GetJsonSchema()), &document); err != nil {
+		return fmt.Errorf("connection config %q has invalid json_schema: %w", schema.GetKey(), err)
+	}
+	if document.Type != "object" || document.Properties == nil {
+		return fmt.Errorf("connection config %q must have a renderable object json_schema", schema.GetKey())
+	}
+	explicit := make(map[string]*pluginv1.AdminFormField)
+	if form := schema.GetAdminForm(); form != nil {
+		for _, field := range form.GetFields() {
+			if field != nil {
+				explicit[field.GetKey()] = field
+			}
+		}
+	}
+	for key, property := range document.Properties {
+		field := explicit[key]
+		switch property.Type {
+		case "string", watchSyncJSONSchemaNumberType, "integer", watchSyncJSONSchemaBooleanType:
+			if field != nil && !connectionAdminFieldSupportsScalarType(field, property.Type) {
+				return fmt.Errorf(
+					"connection config %q field %q control %q cannot emit json_schema type %q",
+					schema.GetKey(),
+					key,
+					field.GetControl().String(),
+					property.Type,
+				)
+			}
+			continue
+		case "array":
+			if field != nil && field.GetControl() == pluginv1.AdminFormControl_ADMIN_FORM_CONTROL_MULTI_SELECT &&
+				(property.Items == nil || property.Items.Type == "string" || property.Items.Type == watchSyncJSONSchemaNumberType ||
+					property.Items.Type == "integer" || property.Items.Type == watchSyncJSONSchemaBooleanType) {
+				continue
+			}
+		default:
+			// A property whose shape comes from enum/const/$ref cannot be
+			// inferred from type alone, but an explicit scalar form control is
+			// still a complete input mechanism. Direct object properties remain
+			// unsupported because none of these controls produces an object.
+			if property.Type != "object" && connectionAdminFieldRendersValue(field) {
+				continue
+			}
+		}
+		return fmt.Errorf(
+			"connection config %q property %q needs a renderable admin_form field because type %q cannot be inferred",
+			schema.GetKey(),
+			key,
+			property.Type,
+		)
+	}
+	return nil
+}
+
+func connectionAdminFieldSupportsScalarType(field *pluginv1.AdminFormField, propertyType string) bool {
+	switch field.GetControl() {
+	case pluginv1.AdminFormControl_ADMIN_FORM_CONTROL_SWITCH:
+		return propertyType == watchSyncJSONSchemaBooleanType
+	case pluginv1.AdminFormControl_ADMIN_FORM_CONTROL_MULTI_SELECT:
+		return false
+	default:
+		return true
+	}
+}
+
+func connectionAdminFieldRendersValue(field *pluginv1.AdminFormField) bool {
+	if field == nil {
+		return false
+	}
+	switch field.GetControl() {
+	case pluginv1.AdminFormControl_ADMIN_FORM_CONTROL_TEXT,
+		pluginv1.AdminFormControl_ADMIN_FORM_CONTROL_TEXTAREA,
+		pluginv1.AdminFormControl_ADMIN_FORM_CONTROL_PASSWORD,
+		pluginv1.AdminFormControl_ADMIN_FORM_CONTROL_NUMBER,
+		pluginv1.AdminFormControl_ADMIN_FORM_CONTROL_SWITCH,
+		pluginv1.AdminFormControl_ADMIN_FORM_CONTROL_SELECT,
+		pluginv1.AdminFormControl_ADMIN_FORM_CONTROL_MULTI_SELECT:
+		return true
+	default:
+		return false
+	}
+}
+
+func validateConnectionAdminFormValue(schema *pluginv1.ConfigSchema, value map[string]any) error {
+	if schema == nil || schema.GetAdminForm() == nil {
+		return nil
+	}
+	for _, field := range schema.GetAdminForm().GetFields() {
+		if field == nil || !connectionAdminFieldIsVisible(schema.GetAdminForm(), field, value) {
+			continue
+		}
+		raw, exists := value[field.GetKey()]
+		if !exists || connectionConfigValueIsEmpty(raw) {
+			if field.GetRequired() {
+				return fmt.Errorf("connection config %q field %q is required", schema.GetKey(), field.GetKey())
+			}
+			continue
+		}
+		if field.GetValidation() == nil {
+			continue
+		}
+		validation := field.GetValidation()
+		if text, ok := raw.(string); ok {
+			if pattern := validation.GetPattern(); pattern != "" {
+				matched, err := regexp.MatchString(pattern, text)
+				if err != nil {
+					return fmt.Errorf("connection config %q field %q has an invalid validation pattern", schema.GetKey(), field.GetKey())
+				}
+				if !matched {
+					return fmt.Errorf("connection config %q field %q is invalid", schema.GetKey(), field.GetKey())
+				}
+			}
+			length := utf8.RuneCountInString(text)
+			if minimum := int(validation.GetMinLength()); minimum > 0 && length < minimum {
+				return fmt.Errorf("connection config %q field %q must be at least %d characters", schema.GetKey(), field.GetKey(), minimum)
+			}
+			if maximum := int(validation.GetMaxLength()); maximum > 0 && length > maximum {
+				return fmt.Errorf("connection config %q field %q must be at most %d characters", schema.GetKey(), field.GetKey(), maximum)
+			}
+		}
+		if number, ok := connectionConfigNumber(raw); ok {
+			if validation.GetHasMin() && number < validation.GetMin() {
+				return fmt.Errorf("connection config %q field %q must be at least %g", schema.GetKey(), field.GetKey(), validation.GetMin())
+			}
+			if validation.GetHasMax() && number > validation.GetMax() {
+				return fmt.Errorf("connection config %q field %q must be at most %g", schema.GetKey(), field.GetKey(), validation.GetMax())
+			}
+		}
+	}
+	return nil
+}
+
+func connectionConfigValueIsEmpty(value any) bool {
+	switch typed := value.(type) {
+	case nil:
+		return true
+	case string:
+		return strings.TrimSpace(typed) == ""
+	case []any:
+		return len(typed) == 0
+	default:
+		return false
+	}
+}
+
+func connectionAdminFieldIsVisible(
+	form *pluginv1.AdminFormDescriptor,
+	field *pluginv1.AdminFormField,
+	values map[string]any,
+) bool {
+	if !connectionAdminConditionsMatch(field.GetShowWhen(), values, form.GetFields()) {
+		return false
+	}
+	contained := false
+	for _, section := range form.GetSections() {
+		if section == nil || !stringSliceContains(section.GetFieldKeys(), field.GetKey()) {
+			continue
+		}
+		contained = true
+		if connectionAdminConditionsMatch(section.GetShowWhen(), values, form.GetFields()) {
+			return true
+		}
+	}
+	return !contained
+}
+
+func connectionAdminConditionsMatch(
+	conditions []*pluginv1.AdminFormCondition,
+	values map[string]any,
+	fields []*pluginv1.AdminFormField,
+) bool {
+	for _, condition := range conditions {
+		if condition == nil {
+			continue
+		}
+		value, exists := values[condition.GetField()]
+		if !exists {
+			for _, field := range fields {
+				if field != nil && field.GetKey() == condition.GetField() && field.GetDefaultValue() != nil {
+					value = field.GetDefaultValue().AsInterface()
+					break
+				}
+			}
+		}
+		if !stringSliceContains(condition.GetEquals(), connectionAdminConditionString(value)) {
+			return false
+		}
+	}
+	return true
+}
+
+func connectionAdminConditionString(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case bool:
+		return strconv.FormatBool(typed)
+	case float64:
+		return strconv.FormatFloat(typed, 'f', -1, 64)
+	case string:
+		return typed
+	default:
+		return fmt.Sprint(typed)
+	}
+}
+
+func stringSliceContains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func connectionConfigNumber(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case float64:
+		return typed, true
+	case float32:
+		return float64(typed), true
+	case int:
+		return float64(typed), true
+	case int8:
+		return float64(typed), true
+	case int16:
+		return float64(typed), true
+	case int32:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case uint:
+		return float64(typed), true
+	case uint8:
+		return float64(typed), true
+	case uint16:
+		return float64(typed), true
+	case uint32:
+		return float64(typed), true
+	case uint64:
+		return float64(typed), true
+	case json.Number:
+		number, err := typed.Float64()
+		return number, err == nil
+	case string:
+		number, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
+		return number, err == nil
+	default:
+		return 0, false
+	}
+}
+
+func connectionConfigString(value any) (string, error) {
+	if text, ok := value.(string); ok {
+		return text, nil
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
+}
+
+func mergeWatchSyncProviderConfig(base, connection *pluginv1.WatchSyncProviderConfig) *pluginv1.WatchSyncProviderConfig {
+	merged := &pluginv1.WatchSyncProviderConfig{Values: map[string]string{}, SecretValues: map[string]string{}}
+	if base != nil {
+		for key, value := range base.GetValues() {
+			merged.Values[key] = value
+		}
+		for key, value := range base.GetSecretValues() {
+			merged.SecretValues[key] = value
+		}
+	}
+	if connection != nil {
+		for key, value := range connection.GetValues() {
+			delete(merged.SecretValues, key)
+			merged.Values[key] = value
+		}
+		for key, value := range connection.GetSecretValues() {
+			delete(merged.Values, key)
+			merged.SecretValues[key] = value
+		}
+	}
+	return merged
+}
+
 func (p *PluginProvider) persistUpdatedCredentials(
 	ctx context.Context,
 	conn Connection,
@@ -587,6 +1134,7 @@ func watchEventFromScrobble(event ScrobbleEvent, operation pluginv1.WatchSyncOpe
 		PositionSeconds:   event.PositionSeconds,
 		DurationSeconds:   event.DurationSeconds,
 		CompletionPercent: completion,
+		Completed:         event.Completed,
 		ProviderItemKey:   event.ProviderItemKey,
 		Media: mediaFromIdentity(event.MediaItemID, event.Kind, "", 0,
 			event.IMDbID, event.TMDBID, event.TVDBID, "", 0,
@@ -609,12 +1157,29 @@ func mediaFromIdentity(mediaItemID, kind, title string, year int, imdbID, tmdbID
 	}
 }
 
+// SyncsRatingKind reports whether the plugin rates items of kind, from the
+// media types it supports. Without it, the host would send a movie-only plugin
+// every series rating on each sync and log the rejection.
+func (p *PluginProvider) SyncsRatingKind(kind string) bool {
+	return p.supportsMedia(watchSyncMediaType(kind))
+}
+
+// mediaFromLocalFavorite builds list and rating media. A series item carries
+// its own ids, so its SERIES media has them in external_ids and no series_*.
+func mediaFromLocalFavorite(item LocalFavorite) *pluginv1.WatchSyncMedia {
+	return mediaFromIdentity(item.MediaItemID, item.Kind, item.Title, item.Year,
+		item.IMDbID, item.TMDBID, item.TVDBID, "", 0,
+		item.SeriesIMDbID, item.SeriesTMDBID, item.SeriesTVDBID, 0, 0)
+}
+
 func watchSyncMediaType(kind string) pluginv1.WatchSyncMediaType {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case historyimport.KindMovie:
 		return pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE
 	case historyimport.KindEpisode:
 		return pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_EPISODE
+	case historyimport.KindSeries:
+		return pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_SERIES
 	default:
 		return pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_UNSPECIFIED
 	}
@@ -720,11 +1285,19 @@ func supportedWatchSyncMediaTypes(descriptor *pluginv1.WatchSyncProviderDescript
 	for _, mediaType := range media {
 		switch mediaType {
 		case pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE,
-			pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_EPISODE:
+			pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_EPISODE,
+			pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_SERIES:
 			supported[mediaType] = struct{}{}
-		default:
+		case pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_UNSPECIFIED:
 			return nil, fmt.Errorf("advertises unsupported media type %q", mediaType.String())
+		default:
+			// A media type added by a newer SDK is ignored rather than
+			// rejecting the plugin, so a plugin release that opts into a new
+			// type keeps its existing sync on servers that predate the type.
 		}
+	}
+	if len(supported) == 0 {
+		return nil, errors.New("advertises no media type this server supports")
 	}
 	return supported, nil
 }
@@ -743,6 +1316,8 @@ func unsupportedWatchSyncMediaMessage(mediaType pluginv1.WatchSyncMediaType) str
 		return watchSyncUnsupportedMovieMediaMessage
 	case pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_EPISODE:
 		return watchSyncUnsupportedEpisodeMediaMessage
+	case pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_SERIES:
+		return watchSyncUnsupportedSeriesMediaMessage
 	default:
 		return watchSyncUnsupportedMediaMessage
 	}
@@ -799,6 +1374,9 @@ type watchSyncProviderFaultError struct {
 func (e watchSyncProviderFaultError) Error() string { return e.message }
 
 func isWatchSyncInvalidCredentialError(err error) bool {
+	if errors.Is(err, ErrInvalidCredential) {
+		return true
+	}
 	var fault watchSyncProviderFaultError
 	return errors.As(err, &fault) && fault.code == pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_INVALID_CREDENTIAL
 }

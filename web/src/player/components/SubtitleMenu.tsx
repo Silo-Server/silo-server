@@ -6,11 +6,19 @@ import type { PlayerConfig } from "../context/PlayerConfigContext";
 import { SubtitleSearchModal } from "./SubtitleSearchModal";
 import { SubtitleTranslateModal } from "./SubtitleTranslateModal";
 import { SubtitleAppearancePanel } from "./SubtitleAppearancePanel";
-import { playerFetch } from "../player-fetch";
+import { playerV2 } from "../player-v2";
 import { getLanguageName } from "../utils/languageNames";
 import { sortSubtitlesBySource } from "../utils/subtitleSort";
 import { getSubtitleFormatLabel, isSubtitleFormatLabel } from "../utils/subtitleCodecs";
 import { isTranslatableSource } from "./subtitleTranslateRequest";
+import { PlayerMenuSurface } from "./PlayerMenuSurface";
+import type { StoredSubtitleSync } from "../hooks/useStoredSubtitleSync";
+import {
+  isIdentityTiming,
+  isSyncInProgress,
+  storedSubtitleIdOf,
+  syncStatusLabel,
+} from "../utils/storedSubtitleSync";
 
 interface SubtitleMenuProps {
   tracks: PlayerSubtitleInfo[];
@@ -18,12 +26,16 @@ interface SubtitleMenuProps {
   onSelect: (index: number | null) => void;
   delayMs: number;
   onDelayChange: (ms: number) => void;
+  preferredSubtitleLanguage?: string | null;
   mediaFileId?: number;
   playerConfig?: PlayerConfig;
   onRefreshSubtitles?: () => void;
+  onSubtitleJobAccepted?: (jobId: string) => void;
   sessionId?: string;
   getSubtitleStartPosition?: () => number;
   audioTracks?: PlayerAudioTrack[];
+  /** Timing and sync state of the file's stored (downloaded/uploaded) tracks. */
+  storedSubtitleSync?: StoredSubtitleSync;
 }
 
 const DELAY_STEP_MS = 100;
@@ -47,18 +59,22 @@ export function SubtitleMenu({
   onSelect,
   delayMs,
   onDelayChange,
+  preferredSubtitleLanguage,
   mediaFileId,
   playerConfig,
   onRefreshSubtitles,
+  onSubtitleJobAccepted,
   sessionId,
   getSubtitleStartPosition,
   audioTracks,
+  storedSubtitleSync,
 }: SubtitleMenuProps) {
   const [open, setOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [translateOpen, setTranslateOpen] = useState(false);
   const [aiEnabled, setAiEnabled] = useState(false);
   const [aiTranscribeEnabled, setAiTranscribeEnabled] = useState(false);
+  const [onlineSearchEnabled, setOnlineSearchEnabled] = useState(true);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -71,10 +87,7 @@ export function SubtitleMenu({
   useEffect(() => {
     if (!playerConfig) return;
     let cancelled = false;
-    playerFetch<{ enabled: boolean; transcribe_enabled?: boolean }>(
-      playerConfig,
-      "/subtitles/ai/status",
-    )
+    playerV2(playerConfig, "GET /api/v2/subtitles/ai/status", {})
       .then((res) => {
         if (cancelled) return;
         setAiEnabled(Boolean(res?.enabled));
@@ -84,6 +97,28 @@ export function SubtitleMenu({
         if (cancelled) return;
         setAiEnabled(false);
         setAiTranscribeEnabled(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [playerConfig]);
+
+  // Online subtitle search is likewise a server-wide capability. Unlike AI this
+  // fails open: only an explicit enabled:false hides it, so older servers and
+  // probe failures keep today's behavior. Manual upload never depends on it.
+  useEffect(() => {
+    if (!playerConfig) return;
+    // A previous server's answer must not hide search on this one.
+    setOnlineSearchEnabled(true);
+    let cancelled = false;
+    playerV2(playerConfig, "GET /api/v2/subtitles/providers/status", {})
+      .then((res) => {
+        if (cancelled) return;
+        setOnlineSearchEnabled(res?.enabled !== false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setOnlineSearchEnabled(true);
       });
     return () => {
       cancelled = true;
@@ -101,6 +136,14 @@ export function SubtitleMenu({
   const resetDelay = useCallback(() => onDelayChange(0), [onDelayChange]);
 
   const delayDisabled = activeIndex === null;
+
+  const storedEntryOf = (track: PlayerSubtitleInfo | null | undefined) => {
+    const id = storedSubtitleIdOf(track);
+    return id ? storedSubtitleSync?.entries[id] : undefined;
+  };
+  const activeStoredEntry = storedEntryOf(
+    activeIndex !== null ? tracks.find((track) => track.index === activeIndex) : null,
+  );
 
   const handleSelect = useCallback(
     (index: number | null) => {
@@ -169,7 +212,11 @@ export function SubtitleMenu({
         type="button"
         className="player-utility-btn"
         data-active={activeIndex !== null ? "true" : "false"}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          // Opening re-reads sync state so a job that finished meanwhile shows.
+          if (!open) storedSubtitleSync?.reload();
+          setOpen((v) => !v);
+        }}
         aria-label={activeIndex !== null ? "Disable captions" : "Enable captions"}
         aria-expanded={open}
         aria-haspopup="menu"
@@ -182,9 +229,10 @@ export function SubtitleMenu({
       </button>
 
       {open && (
-        <div
-          role="menu"
-          className="absolute right-0 bottom-full mb-2 flex w-max max-w-[min(420px,calc(100vw-1rem))] min-w-[220px] flex-col rounded-lg bg-black/90 shadow-lg backdrop-blur"
+        <PlayerMenuSurface
+          anchorRef={menuRef}
+          className="absolute right-0 bottom-full z-30 mb-2 flex w-max max-w-[min(420px,calc(100vw-1rem))] min-w-[220px] flex-col rounded-lg bg-black/90 shadow-lg backdrop-blur"
+          onClose={() => setOpen(false)}
           onKeyDown={handleMenuKeyDown}
         >
           <div className="shrink-0 py-1">
@@ -217,6 +265,8 @@ export function SubtitleMenu({
                 track.label !== languageName &&
                 !isSubtitleFormatLabel(track.label, track.codec);
               const itemIdx = ++menuItemIndex;
+              const storedEntry = storedEntryOf(track);
+              const syncLabel = storedEntry ? syncStatusLabel(storedEntry.subtitle) : null;
 
               return (
                 <button
@@ -254,6 +304,14 @@ export function SubtitleMenu({
                         title={track.label}
                       >
                         {track.label}
+                      </span>
+                    )}
+                    {syncLabel && (
+                      <span
+                        className="mt-0.5 block w-full truncate text-xs text-white/50"
+                        data-testid="subtitle-sync-status"
+                      >
+                        {syncLabel}
                       </span>
                     )}
                   </span>
@@ -298,6 +356,9 @@ export function SubtitleMenu({
               </div>
             </div>
           </div>
+          {storedSubtitleSync && activeStoredEntry && (
+            <StoredTimingControls sync={storedSubtitleSync} entry={activeStoredEntry} />
+          )}
           <div className="shrink-0 border-t border-white/10 py-1">
             {mediaFileId && playerConfig && (
               <button
@@ -312,7 +373,7 @@ export function SubtitleMenu({
                   setOpen(false);
                 }}
               >
-                Search Online…
+                Add Subtitles…
               </button>
             )}
             {mediaFileId &&
@@ -351,7 +412,7 @@ export function SubtitleMenu({
               Appearance…
             </button>
           </div>
-        </div>
+        </PlayerMenuSurface>
       )}
 
       <SubtitleAppearancePanel open={appearanceOpen} onClose={() => setAppearanceOpen(false)} />
@@ -364,9 +425,11 @@ export function SubtitleMenu({
             mediaFileId={mediaFileId}
             playerConfig={playerConfig}
             isOpen={searchOpen}
+            onlineSearchEnabled={onlineSearchEnabled}
             onClose={() => setSearchOpen(false)}
-            onSubtitleDownloaded={() => {
+            onSubtitleDownloaded={(subtitle) => {
               setSearchOpen(false);
+              if (subtitle) storedSubtitleSync?.remember(subtitle);
               onRefreshSubtitles?.();
             }}
           />,
@@ -378,14 +441,81 @@ export function SubtitleMenu({
           mediaFileId={mediaFileId}
           playerConfig={playerConfig}
           tracks={tracks}
+          preferredSubtitleLanguage={preferredSubtitleLanguage}
           audioTracks={audioTracks}
           translateEnabled={aiEnabled}
           transcribeEnabled={aiTranscribeEnabled}
           isOpen={translateOpen}
           sessionId={sessionId}
           getStartPosition={getSubtitleStartPosition}
+          onSubtitleJobAccepted={onSubtitleJobAccepted}
           onClose={() => setTranslateOpen(false)}
         />
+      )}
+    </div>
+  );
+}
+
+const TIMING_BUTTON_CLASS =
+  "rounded px-2 py-1 text-xs text-white/70 hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40";
+
+/**
+ * "Sync subtitle" and "Reset timing" for the selected stored track. Retiming
+ * changes the subtitle for everyone watching the file, so the server allows it
+ * only for the account that added it or an admin; a refusal replaces the
+ * actions with a short explanation.
+ */
+function StoredTimingControls({
+  sync,
+  entry,
+}: {
+  sync: StoredSubtitleSync;
+  entry: NonNullable<StoredSubtitleSync["entries"][string]>;
+}) {
+  const id = entry.subtitle.id;
+  const inProgress = isSyncInProgress(entry.subtitle.sync?.status);
+  const canSync = sync.syncAvailable && !entry.unsupported;
+  const canReset = !isIdentityTiming(entry.subtitle.timing);
+  if (!entry.forbidden && !canSync && !canReset && !entry.error) return null;
+
+  return (
+    <div className="shrink-0 border-t border-white/10 px-3 py-2">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs tracking-wide text-white/50 uppercase">Timing</span>
+        {!entry.forbidden && (
+          <div className="flex items-center gap-1">
+            {canSync && (
+              <button
+                type="button"
+                className={TIMING_BUTTON_CLASS}
+                disabled={entry.busy || inProgress}
+                onClick={() => void sync.requestSync(id)}
+              >
+                {inProgress ? "Syncing…" : "Sync subtitle"}
+              </button>
+            )}
+            {canReset && (
+              <button
+                type="button"
+                className={TIMING_BUTTON_CLASS}
+                disabled={entry.busy || inProgress}
+                onClick={() => void sync.resetTiming(id)}
+              >
+                Reset timing
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+      {entry.forbidden && (
+        <p className="mt-1 text-xs text-white/50">
+          Only the person who added this subtitle or an admin can change its timing.
+        </p>
+      )}
+      {entry.error && (
+        <p role="alert" className="mt-1 text-xs text-red-300">
+          {entry.error}
+        </p>
       )}
     </div>
   );

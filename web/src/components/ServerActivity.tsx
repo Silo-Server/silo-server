@@ -3,7 +3,7 @@ import { Link, useLocation } from "react-router";
 import { Popover as PopoverPrimitive } from "radix-ui";
 import { Activity, ChevronRight, Loader, ScanLine } from "lucide-react";
 import { useAdminSessions } from "@/hooks/queries/admin/stats";
-import { useTasks } from "@/hooks/queries/admin/tasks";
+import { useTasksIncludingHidden } from "@/hooks/queries/admin/tasks";
 import { useActiveScans } from "@/hooks/queries/admin/scans";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import {
@@ -17,6 +17,7 @@ import {
   compareActivityMethods,
 } from "@/pages/adminActivityPresentation";
 import { cn } from "@/lib/utils";
+import { clampTaskProgress, formatTaskProgress } from "@/lib/taskProgress";
 
 const CONNECTION_PROBLEM_INDICATOR_DELAY_MS = 4_000;
 const MAX_ACTIVITY_SCAN_ROWS = 25;
@@ -34,7 +35,7 @@ interface ServerActivityProps {
 // (AdminLayoutEventChannels / AdminEventChannels), not here.
 function useServerActivityData() {
   const { data: sessions = [] } = useAdminSessions();
-  const { data: tasks = [] } = useTasks();
+  const { data: tasks = [] } = useTasksIncludingHidden();
   const { data: scans } = useActiveScans();
   const { data: libraries = [] } = useAdminLibraries();
   const { connectionState } = useRealtimeEvents();
@@ -212,7 +213,7 @@ export default function ServerActivity({ hideWhenEmpty = false, className }: Ser
                   {runningTasks.length > 0 ? (
                     <div className="space-y-2">
                       {runningTasks.map((task) => (
-                        <TaskRow key={task.key} task={task} />
+                        <TaskRow key={task.key} task={task} onNavigate={() => setOpen(false)} />
                       ))}
                     </div>
                   ) : (
@@ -330,23 +331,38 @@ function StreamCountRow({ method, count }: { method: string; count: number }) {
   );
 }
 
-function TaskRow({ task }: { task: TaskInfo }) {
+function TaskRow({ task, onNavigate }: { task: TaskInfo; onNavigate: () => void }) {
+  const hasDeterminateProgress = task.progress > 0;
+
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between">
-        <span className="truncate text-[12px] font-medium">{task.name}</span>
-        <span className="text-muted-foreground ml-2 shrink-0 text-[10px] font-semibold tabular-nums">
-          {Math.round(task.progress)}%
-        </span>
+        {/* Hidden workers are absent from the task list, so link each row to its own page. */}
+        <Link
+          to={`/admin/tasks/${task.key}`}
+          onClick={onNavigate}
+          className="hover:text-primary truncate text-[12px] font-medium transition-colors"
+        >
+          {task.name}
+        </Link>
+        {hasDeterminateProgress ? (
+          <span className="text-muted-foreground ml-2 shrink-0 text-[10px] font-semibold tabular-nums">
+            {formatTaskProgress(task.progress)}
+          </span>
+        ) : (
+          <span className="text-primary ml-2 flex shrink-0 items-center gap-1 text-[10px] font-semibold">
+            <Loader className="h-3 w-3 animate-spin" aria-hidden="true" />
+            Running
+          </span>
+        )}
       </div>
-      <div className="bg-muted h-1.5 overflow-hidden rounded-full">
-        <div
-          className="bg-primary h-full rounded-full transition-[width] duration-300 ease-out"
-          style={{ width: `${Math.min(100, Math.max(0, task.progress))}%` }}
-        />
-      </div>
-      {task.progress_message && (
-        <div className="text-muted-foreground truncate text-[10px]">{task.progress_message}</div>
+      {hasDeterminateProgress && (
+        <div className="bg-muted h-1.5 overflow-hidden rounded-full">
+          <div
+            className="bg-primary h-full rounded-full transition-[width] duration-300 ease-out"
+            style={{ width: `${clampTaskProgress(task.progress)}%` }}
+          />
+        </div>
       )}
     </div>
   );

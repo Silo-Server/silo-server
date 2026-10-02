@@ -11,26 +11,115 @@ import (
 )
 
 const (
-	ProtocolV3                    = 3
-	FeaturePlaybackPlanV3         = "playback_plan_v3"
-	FeatureNeutralContractV3      = "neutral_playback_v3_contract_v1"
-	FeatureLayoutPassthrough      = "layout_aware_passthrough"
-	FeatureClientVideoTransforms  = "client_video_transformations_v1"
-	FeatureRouteDiagnostics       = "playback_route_diagnostics"
-	FeatureDeviceQuirksV3         = "device_quirks_v1"
-	FeatureSeekReanchorV3         = "seek_reanchor_v1"
-	FeatureOutputChangeV3         = "output_change_v1"
-	FeatureDirectStreamResumeV3   = "direct_stream_resume_v1"
-	FeaturePlanSourceDurationV3   = "plan_source_duration_v1"
-	PlanRecipeVersionV3           = "v3.4"
-	ClientDV7ToDV81V3             = "client_dv7_to_dv81"
-	ClientDV7ToHDR10V3            = "client_dv7_to_hdr10"
-	ClientDVTransformVersionV3    = "1"
-	ClientDV8HDR10PlusSanitizerV3 = "client_dv8_hdr10plus_sanitizer_v1"
-	ClientPostResumeRecoveryV3    = "client_post_resume_video_recovery_v1"
-	ClientSurfaceRecoveryV3       = "client_surface_recovery_v1"
-	DeviceQuirkRegistryRevisionV3 = "2026-07-13.1"
+	ProtocolV3                               = 3
+	FeaturePlaybackPlanV3                    = "playback_plan_v3"
+	FeatureServerRemoteStreamBitratePolicyV3 = "server_remote_stream_bitrate_policy_v1"
+	FeatureServerLocalStreamBitratePolicyV3  = "server_local_stream_bitrate_policy_v1"
+	FeatureEmbeddedSubtitlesV3               = "embedded_subtitles_v1"
+	FeatureNeutralContractV3                 = "neutral_playback_v3_contract_v1"
+	FeatureLayoutPassthrough                 = "layout_aware_passthrough"
+	FeatureClientVideoTransforms             = "client_video_transformations_v1"
+	FeatureRouteDiagnostics                  = "playback_route_diagnostics"
+	FeatureDeviceQuirksV3                    = "device_quirks_v1"
+	FeatureSeekReanchorV3                    = "seek_reanchor_v1"
+	FeatureOutputChangeV3                    = "output_change_v1"
+	// FeatureOutputDisplayEvidenceV3 tells a client this server understands
+	// output.display and its hdr_evidence tier. A pre-feature server ignores
+	// the field and falls back from a missing output.hdr_details to the
+	// device-level HDR facts, so a client that sends output.display must
+	// always send output.hdr_details (decoder ∩ display) as well; it may
+	// rely on the evidence tier being honored only when this token is
+	// advertised.
+	FeatureOutputDisplayEvidenceV3 = "output_display_evidence_v1"
+	FeatureDirectStreamResumeV3    = "direct_stream_resume_v1"
+	FeaturePlanSourceDurationV3    = "plan_source_duration_v1"
+	// FeatureSoftwareVideoDecodeV3 lets a strict evidence-tier client opt into
+	// bounded hardware:false video_decode entries. Without the feature, exact
+	// and platform_attested retain their historical hardware-only direct-play
+	// policy, so older clients cannot become software-decoding candidates by
+	// accident.
+	FeatureSoftwareVideoDecodeV3 = "software_video_decode_v1"
+	// FeatureHeaderAuthenticatedMediaV3 advertises an opt-in transport mode
+	// whose client-visible stream and subtitle URLs carry no signed playback
+	// credential. A client that sends this token promises to attach its normal
+	// access-token Authorization header to every media request, including HLS
+	// manifests/segments and sidecar subtitle/font requests.
+	FeatureHeaderAuthenticatedMediaV3 = "header_authenticated_media_v1"
+	// FeatureAuthorizedMediaOriginsV3 is the client's promise to fetch media
+	// from the absolute URLs a plan returns on server-designated origins (proxy
+	// nodes), attaching its normal access-token Authorization header to those
+	// requests exactly as it does to the API origin. It is meaningful only
+	// together with header_authenticated_media_v1: on its own there is nothing
+	// to designate, because a legacy attempt already receives signed proxy URLs
+	// that authenticate themselves.
+	//
+	// Without it a header-authenticated attempt stays entirely on the API
+	// origin, so every byte egresses from the API server; with it the plan may
+	// hand out credential-free proxy origins and distributed egress is restored.
+	FeatureAuthorizedMediaOriginsV3 = "authorized_media_origins_v1"
+	// FeaturePlanInvalidatedV3 is the client's promise to handle the realtime
+	// plan_invalidated command: ack it, replan off the named plan with operation
+	// failure_recovery and the invalidated plan's attempt key in
+	// attempted_plan_keys, then report the result.
+	//
+	// It exists because the server may only learn a route is wrong after the
+	// plan is already playing — the H.264 copy-safety scan now runs
+	// asynchronously so playback never waits on it. A session that did not
+	// negotiate the token, or has no realtime connection, is stopped instead;
+	// the client's ordinary recovery then mints a fresh attempt that plans
+	// against the now-persisted verdict.
+	FeaturePlanInvalidatedV3 = "plan_invalidated_v1"
+	// FeatureSubripSidecarV3 is the client's statement that it parses SubRip
+	// itself, including {\anN} placement. An opted-in client receives
+	// external and downloaded SRT tracks as the original .srt bytes instead
+	// of the WebVTT conversion, which cannot carry every SRT feature. Embedded
+	// SRT tracks keep their existing delivery. It exists only on /api/v2 (see
+	// NativeServerFeaturesV3).
+	FeatureSubripSidecarV3     = "subrip_sidecar_v1"
+	PlanRecipeVersionV3        = "v3.4"
+	ClientDV7ToDV81V3          = "client_dv7_to_dv81"
+	ClientDV7ToHDR10V3         = "client_dv7_to_hdr10"
+	ClientDVTransformVersionV3 = "1"
+	// ClaimClientManagedDynamicRangeV3 is scoped to the original_http
+	// delivery. A client that advertises it accepts responsibility for mapping
+	// any source dynamic range it declares decodable onto the active output;
+	// the server must not require native sink-HDR support before delivering the
+	// original bytes. Packaged server deliveries remain output-gated.
+	ClaimClientManagedDynamicRangeV3 = "client_managed_dynamic_range_v1"
+	ClaimClientSelectedAudioTrackV3  = "client_selected_audio_track_v1"
+	// ClaimClientDV8BaseLayerFallbackV3 is scoped to the original_http
+	// delivery. The executor decodes a single-layer Dolby Vision Profile 8
+	// stream through an ordinary HEVC decoder and presents its
+	// standards-compatible base layer when the active output lacks native
+	// Dolby Vision. It is deliberately narrower than
+	// ClaimClientManagedDynamicRangeV3: the server still decides which base
+	// range the plan promises (from dv_bl_compat_id), still requires the
+	// active output to carry that range, and never claims Dolby Vision output.
+	ClaimClientDV8BaseLayerFallbackV3 = "client_dv8_base_layer_fallback_v1"
+	ClientDV8HDR10PlusSanitizerV3     = "client_dv8_hdr10plus_sanitizer_v1"
+	ClientNativeHLSPlaybackV3         = "native_hls_playback_v1"
+	ClientPostResumeRecoveryV3        = "client_post_resume_video_recovery_v1"
+	ClientSurfaceRecoveryV3           = "client_surface_recovery_v1"
+	DeviceQuirkRegistryRevisionV3     = "2026-07-13.1"
 )
+
+// Worker transport features are protocol capabilities rather than media
+// transformations. They let route planning exclude an older worker before a
+// client is handed a URL that worker cannot serve.
+const (
+	TransportFeatureProgressiveRemuxExecutionV1 = "progressive_remux_execution_v1"
+	TransportFeatureProgressiveRemuxRelayV1     = "progressive_remux_relay_v1"
+	// Theme audio markers: a proxy that serves /stream/theme, and a transcode
+	// node that approves theme files as progressive AAC inputs.
+	TransportFeatureThemeAudioEgressV1    = "theme_audio_egress_v1"
+	TransportFeatureThemeAudioExecutionV1 = "theme_audio_execution_v1"
+	// A transcode node that executes the multi-track prepared-download layout
+	// (PreparedTracksRecipeVersion).
+	TransportFeaturePreparedTracksV1 = "prepared_tracks_v1"
+)
+
+// Degradation warning codes reported by playback plans.
+const DegradationWarningHDRToneMappedV3 = "hdr_tone_mapped"
 
 // ServerFeaturesV3 returns the complete feature set advertised by protocol-v3
 // capability and decision responses. A fresh slice prevents callers from
@@ -38,13 +127,21 @@ const (
 func ServerFeaturesV3() []string {
 	return []string{
 		FeaturePlaybackPlanV3,
+		FeatureServerRemoteStreamBitratePolicyV3,
+		FeatureServerLocalStreamBitratePolicyV3,
 		FeatureNeutralContractV3,
+		FeatureEmbeddedSubtitlesV3,
 		FeatureLayoutPassthrough,
 		FeatureRouteDiagnostics,
 		FeatureDeviceQuirksV3,
 		FeatureSeekReanchorV3,
 		FeatureOutputChangeV3,
+		FeatureOutputDisplayEvidenceV3,
 		FeatureDirectStreamResumeV3,
+		FeatureHeaderAuthenticatedMediaV3,
+		FeatureAuthorizedMediaOriginsV3,
+		FeatureSoftwareVideoDecodeV3,
+		FeaturePlanInvalidatedV3,
 		// Advertised so a client can tell "this server does not populate
 		// source.duration_seconds" apart from "this server knows the runtime
 		// is genuinely unknown". Without the distinction both look like an
@@ -52,6 +149,20 @@ func ServerFeaturesV3() []string {
 		// fallback is still required.
 		FeaturePlanSourceDurationV3,
 	}
+}
+
+// NativeServerFeaturesV3 is ServerFeaturesV3 plus the features the server
+// advertises and honors only on /api/v2. They postdate the /api/v1 freeze, so
+// the frozen surface neither advertises nor negotiates them.
+func NativeServerFeaturesV3() []string {
+	return append(ServerFeaturesV3(), FeatureSubripSidecarV3)
+}
+
+// WithoutFeatureV3 returns features with every spelling of feature removed.
+func WithoutFeatureV3(features []string, feature string) []string {
+	return slices.DeleteFunc(slices.Clone(features), func(candidate string) bool {
+		return strings.EqualFold(strings.TrimSpace(candidate), feature)
+	})
 }
 
 type DecisionOutcomeV3 string
@@ -124,24 +235,23 @@ const (
 	DynamicRangeHDR10PlusV3   = "hdr10_plus"
 	DynamicRangeHLGV3         = "hlg"
 	DynamicRangeDolbyVisionV3 = "dolby_vision"
+	DynamicRangeHDRUnknownV3  = "hdr_unknown"
 )
 
 // Server transformation names. A plan names the transformations its serving
 // executor must run; the registry keys availability by the same names.
 const (
-	TransformationAudioToAACV3                         = "audio_to_aac"
-	TransformationVideoToH264V3                        = "video_to_h264"
-	TransformationServerDV7HDR10V3                     = "server_dv7_to_hdr10"
-	TransformationServerHEVCResumeLeadingPictureDropV3 = "server_hevc_resume_leading_picture_drop"
+	TransformationAudioToAACV3      = "audio_to_aac"
+	TransformationVideoToH264V3     = "video_to_h264"
+	TransformationVideoToHEVCV3     = "video_to_hevc"
+	TransformationServerDV7HDR10V3  = "server_dv7_to_hdr10"
+	TransformationHDRToSDRToneMapV3 = "hdr_to_sdr_tonemap"
 
-	TransformationVideoToH264RecipeVersionV3                  = "2"
-	TransformationServerHEVCResumeLeadingPictureDropVersionV3 = "1"
+	TransformationVideoToH264RecipeVersionV3     = "2"
+	TransformationVideoToHEVCRecipeVersionV3     = "1"
+	TransformationAudioToAACRecipeVersionV3      = "4"
+	TransformationHDRToSDRToneMapRecipeVersionV3 = "1"
 )
-
-// RemuxRecipeStreamPathV3 fences remuxes with versioned server recipes from
-// binaries that predate those recipes. Old API and proxy routers do not mount
-// this path, so a rolling deployment fails closed instead of omitting a filter.
-const RemuxRecipeStreamPathV3 = "/stream/remux-v3/"
 
 // Transformation executors: who runs the transformation. A "server"
 // transformation is performed by the serving executor before the bytes leave
@@ -154,12 +264,14 @@ const (
 // Validated claims a server transformation asserts about its output: neutral
 // statements about the bytes, not client-framework decoder names.
 const (
-	ClaimAudioDecodeV3                  = "audio_decode"
-	ClaimH264DecodeV3                   = "h264_decode"
-	ClaimDolbyVisionMetadataRemovedV3   = "dolby_vision_metadata_removed"
-	ClaimHDR10BaseLayerPreservedV3      = "hdr10_base_layer_preserved"
-	ClaimEnhancementLayerDiscardedV3    = "enhancement_layer_discarded"
-	ClaimResumeLeadingPicturesRemovedV3 = "resume_leading_pictures_removed"
+	ClaimAudioDecodeV3                = "audio_decode"
+	ClaimH264DecodeV3                 = "h264_decode"
+	ClaimHEVCDecodeV3                 = "hevc_decode"
+	ClaimDolbyVisionMetadataRemovedV3 = "dolby_vision_metadata_removed"
+	ClaimHDR10BaseLayerPreservedV3    = "hdr10_base_layer_preserved"
+	ClaimEnhancementLayerDiscardedV3  = "enhancement_layer_discarded"
+	ClaimHDRMetadataRemovedV3         = "hdr_metadata_removed"
+	ClaimSDRBT709OutputV3             = "sdr_bt709_output"
 )
 
 // DV7ToHDR10ClaimsV3 returns the claims the server DV7→HDR10 transformation
@@ -172,8 +284,13 @@ func DV7ToHDR10ClaimsV3() []string {
 const (
 	TerminalAudioConversionUnsupportedV3 = "audio_conversion_unsupported"
 	TerminalVideoConversionUnsupportedV3 = "video_conversion_unsupported"
+	TerminalHDRTranscodeUnsupportedV3    = "hdr_transcode_unsupported"
 	TerminalDVConversionUnsupportedV3    = "dv_conversion_unsupported"
 )
+
+// TerminalBitratePolicyUnavailableV3 reports that no route fits the
+// administrator's local or remote per-stream bitrate limit for this version.
+const TerminalBitratePolicyUnavailableV3 = "bitrate_policy_unavailable"
 
 type SubtitleModeV3 string
 
@@ -249,10 +366,11 @@ type VideoDecodeCapabilityV3 struct {
 //
 //   - exact: per-codec profiles/levels/bit-depths/bounds from a real platform
 //     probe (Android MediaCodecList). Full strict validation.
-//   - platform_attested: platform-level decoder attestation without
-//     profile/level enumeration (Apple VideoToolbox). Codec, resolution, bit
-//     depth, frame rate, and dynamic range are validated; profile/level
-//     matching is skipped instead of failing conservative.
+//   - platform_attested: platform-level decoder-stack attestation without
+//     profile/level enumeration (for example Apple's VideoToolbox plus a
+//     pinned software stack). Codec, resolution, bit depth, frame rate, and
+//     dynamic range are validated; profile/level matching is skipped instead
+//     of failing conservative. Software entries require an explicit feature.
 //   - declared: boolean support statements (web MediaSource.isTypeSupported).
 //     Copy routes are granted on codec+container+range match from the flat
 //     codec lists; no strict direct claims are made.
@@ -266,6 +384,44 @@ const (
 
 func validCapabilityEvidenceV3(v CapabilityEvidenceV3) bool {
 	return v == EvidenceExactV3 || v == EvidencePlatformAttestedV3 || v == EvidenceDeclaredV3
+}
+
+func normalizeAndValidateVideoCapabilitiesV3(c *ClientCodecCapabilitiesV3, features []string) error {
+	if !validCapabilityEvidenceV3(c.VideoEvidence) {
+		return errors.New("video_evidence is required and must be exact, platform_attested, or declared")
+	}
+	if len(features) > 64 || len(c.CodecsVideo) > 64 || len(c.CodecsVideoHardware) > 64 || len(c.VideoDecode) > 64 {
+		return errors.New("video capability list exceeds supported size")
+	}
+	for _, feature := range features {
+		if len(feature) > 128 {
+			return errors.New("client feature exceeds supported size")
+		}
+	}
+	for _, values := range [][]string{c.CodecsVideo, c.CodecsVideoHardware} {
+		for i := range values {
+			values[i] = strings.ToLower(strings.TrimSpace(values[i]))
+			if len(values[i]) > 128 {
+				return errors.New("capability value exceeds supported size")
+			}
+		}
+	}
+	for i := range c.VideoDecode {
+		entry := &c.VideoDecode[i]
+		entry.Codec = strings.ToLower(strings.TrimSpace(entry.Codec))
+		if entry.Codec == "" || len(entry.DecoderName) > 128 || entry.MaxWidth < 0 || entry.MaxHeight < 0 || entry.MaxFrameRate < 0 || entry.MaxBitrateKbps < 0 {
+			return errors.New("invalid detailed video capability")
+		}
+		if len(entry.Profiles) > 64 || len(entry.Levels) > 64 || len(entry.BitDepths) > 64 {
+			return errors.New("detailed video capability exceeds supported size")
+		}
+		for _, profile := range entry.Profiles {
+			if len(profile) > 64 {
+				return errors.New("detailed video capability value exceeds supported size")
+			}
+		}
+	}
+	return nil
 }
 
 type ClientCodecCapabilitiesV3 struct {
@@ -301,6 +457,13 @@ type OutputContextV3 struct {
 	AudioPassthrough *AudioPassthroughV3 `json:"audio_passthrough,omitempty"`
 	CurrentSink      string              `json:"current_sink,omitempty"`
 	SinkType         string              `json:"sink_type,omitempty"`
+	// Display carries the raw active-display HDR facts and how they were
+	// obtained. It is additive: HDRDetails above remains the native-output
+	// authority (decoder ∩ display) that older servers already read. When a
+	// client sends Display at all, the server never falls back from a missing
+	// output HDRDetails to the device-level capability, and an unknown
+	// evidence tier disables native HDR/DV output claims.
+	Display *OutputDisplayV3 `json:"display,omitempty"`
 	// OutputContextID is an optional opaque token identifying the current
 	// output route. The server only ever compares it for equality — in attempt
 	// keys and plan invalidation — so any stable platform-native identity
@@ -309,13 +472,44 @@ type OutputContextV3 struct {
 	OutputContextID string `json:"output_context_id,omitempty"`
 }
 
+// OutputDisplayV3 is the raw display probe with its evidence tier.
+type OutputDisplayV3 struct {
+	// HDREvidence is OutputHDREvidenceExactV3 for a successful probe (an
+	// empty HDRTypes then means a confirmed SDR panel) or
+	// OutputHDREvidenceUnknownV3 when the platform could not answer.
+	HDREvidence string             `json:"hdr_evidence"`
+	HDRTypes    *HDRCapabilitiesV3 `json:"hdr_types,omitempty"`
+	DisplayID   string             `json:"display_id,omitempty"`
+}
+
+const (
+	OutputHDREvidenceExactV3   = "exact"
+	OutputHDREvidenceUnknownV3 = "unknown"
+)
+
+const (
+	subtitleIdentityFFmpegV3    = "ffmpeg_stream_index"
+	subtitleIdentityContainerV3 = "container_track_id"
+)
+
+// NativeEmbeddedSubtitleCapabilityV3 attests native selection for one container
+// and codec set. Stream indexes and container track IDs are distinct namespaces.
+type NativeEmbeddedSubtitleCapabilityV3 struct {
+	Container       string   `json:"container"`
+	Codecs          []string `json:"codecs"`
+	TrackIdentity   string   `json:"track_identity"`
+	ASSStyling      bool     `json:"ass_styling"`
+	FontAttachments bool     `json:"font_attachments"`
+}
+
 type DeliverySubtitleCapabilitiesV3 struct {
-	EmbeddedText    bool `json:"embedded_text"`
-	SidecarText     bool `json:"sidecar_text"`
-	ASSStyling      bool `json:"ass_styling"`
-	EmbeddedBitmap  bool `json:"embedded_bitmap"`
-	SidecarBitmap   bool `json:"sidecar_bitmap"`
-	FontAttachments bool `json:"font_attachments"`
+	NativeEmbedded  []NativeEmbeddedSubtitleCapabilityV3 `json:"native_embedded,omitempty"`
+	EmbeddedText    bool                                 `json:"embedded_text"`
+	SidecarText     bool                                 `json:"sidecar_text"`
+	ASSStyling      bool                                 `json:"ass_styling"`
+	EmbeddedBitmap  bool                                 `json:"embedded_bitmap"`
+	SidecarBitmap   bool                                 `json:"sidecar_bitmap"`
+	FontAttachments bool                                 `json:"font_attachments"`
 }
 
 type DeliveryCapabilityV3 struct {
@@ -353,12 +547,15 @@ type ClientPlaybackContextV3 struct {
 }
 
 type StartRequestV3 struct {
-	ProtocolVersion            int                       `json:"protocol_version"`
-	ClientFeatures             []string                  `json:"client_features"`
-	FileID                     int                       `json:"file_id"`
-	ProfileID                  string                    `json:"profile_id"`
-	PlaybackAttemptID          string                    `json:"playback_attempt_id"`
-	QualityPreference          string                    `json:"quality_preference"`
+	ProtocolVersion   int      `json:"protocol_version"`
+	ClientFeatures    []string `json:"client_features"`
+	FileID            int      `json:"file_id"`
+	ProfileID         string   `json:"profile_id"`
+	PlaybackAttemptID string   `json:"playback_attempt_id"`
+	QualityPreference string   `json:"quality_preference"`
+	// False pins the source file through start and every replan. Encoding and
+	// delivery can still adapt to the viewer without changing the timeline.
+	AllowAlternateVersions     *bool                     `json:"allow_alternate_versions,omitempty"`
 	SubtitleFidelityPreference SubtitleFidelityV3        `json:"subtitle_fidelity_preference"`
 	StartPosition              *float64                  `json:"start_position,omitempty"`
 	ProgressPersistence        ProgressPersistenceV3     `json:"progress_persistence,omitempty"`
@@ -371,6 +568,10 @@ type StartRequestV3 struct {
 	BandwidthCapKbps           *int                      `json:"bandwidth_cap_kbps,omitempty"`
 	Capabilities               ClientCodecCapabilitiesV3 `json:"client_capabilities"`
 	ClientPlaybackContext      ClientPlaybackContextV3   `json:"client_playback_context"`
+}
+
+func (r StartRequestV3) AllowsAlternateVersions() bool {
+	return r.AllowAlternateVersions == nil || *r.AllowAlternateVersions
 }
 
 // ProgressPersistenceV3 declares which side owns durable item resume/history.
@@ -535,15 +736,16 @@ type TimelineV3 struct {
 }
 
 type EffectiveRecipeV3 struct {
-	VideoCodec    string   `json:"video_codec,omitempty"`
-	AudioCodec    string   `json:"audio_codec,omitempty"`
-	Width         *int     `json:"width,omitempty"`
-	Height        *int     `json:"height,omitempty"`
-	FrameRate     *float64 `json:"frame_rate,omitempty"`
-	BitrateKbps   *int     `json:"bitrate_kbps,omitempty"`
-	DynamicRange  string   `json:"dynamic_range,omitempty"`
-	AudioChannels *int     `json:"audio_channels,omitempty"`
-	AudioLayout   string   `json:"audio_layout,omitempty"`
+	VideoCodec       string   `json:"video_codec,omitempty"`
+	VideoSampleEntry string   `json:"video_sample_entry,omitempty"`
+	AudioCodec       string   `json:"audio_codec,omitempty"`
+	Width            *int     `json:"width,omitempty"`
+	Height           *int     `json:"height,omitempty"`
+	FrameRate        *float64 `json:"frame_rate,omitempty"`
+	BitrateKbps      *int     `json:"bitrate_kbps,omitempty"`
+	DynamicRange     string   `json:"dynamic_range,omitempty"`
+	AudioChannels    *int     `json:"audio_channels,omitempty"`
+	AudioLayout      string   `json:"audio_layout,omitempty"`
 }
 
 type SourceDescriptorV3 struct {
@@ -558,22 +760,27 @@ type SourceDescriptorV3 struct {
 	// inventing. A client must not substitute the playback engine's reported
 	// duration for it — on an HLS copy remux the engine reports the length
 	// produced so far, not the runtime.
-	DurationSeconds    *float64           `json:"duration_seconds,omitempty"`
-	Container          string             `json:"container,omitempty"`
-	VideoCodec         string             `json:"video_codec,omitempty"`
-	VideoProfile       string             `json:"video_profile,omitempty"`
-	VideoLevel         int                `json:"video_level,omitempty"`
-	BitDepth           int                `json:"bit_depth,omitempty"`
-	ColorRange         string             `json:"color_range,omitempty"`
-	Width              int                `json:"width,omitempty"`
-	Height             int                `json:"height,omitempty"`
-	FrameRate          float64            `json:"frame_rate,omitempty"`
-	BitrateKbps        int                `json:"bitrate_kbps,omitempty"`
-	DynamicRange       string             `json:"dynamic_range,omitempty"`
-	HDR10Plus          bool               `json:"hdr10_plus"`
-	DVProfile          int                `json:"dolby_vision_profile,omitempty"`
-	DVLevel            int                `json:"dolby_vision_level,omitempty"`
-	DVBLCompatID       int                `json:"dv_bl_compat_id,omitempty"`
+	DurationSeconds *float64 `json:"duration_seconds,omitempty"`
+	Container       string   `json:"container,omitempty"`
+	VideoCodec      string   `json:"video_codec,omitempty"`
+	VideoProfile    string   `json:"video_profile,omitempty"`
+	VideoLevel      int      `json:"video_level,omitempty"`
+	BitDepth        int      `json:"bit_depth,omitempty"`
+	ColorRange      string   `json:"color_range,omitempty"`
+	Width           int      `json:"width,omitempty"`
+	Height          int      `json:"height,omitempty"`
+	FrameRate       float64  `json:"frame_rate,omitempty"`
+	BitrateKbps     int      `json:"bitrate_kbps,omitempty"`
+	DynamicRange    string   `json:"dynamic_range,omitempty"`
+	HDR10Plus       bool     `json:"hdr10_plus"`
+	DVProfile       int      `json:"dolby_vision_profile,omitempty"`
+	DVLevel         int      `json:"dolby_vision_level,omitempty"`
+	DVBLCompatID    int      `json:"dv_bl_compat_id,omitempty"`
+	// DVBaseLayerProven is true only when the scan recorded a Dolby Vision
+	// configuration record, an explicit compatibility id, and a present base
+	// layer. A legacy or contradictory row keeps the numeric id but cannot
+	// prove a decodable compatible base signal.
+	DVBaseLayerProven  bool               `json:"dv_base_layer_proven,omitempty"`
 	DVEnhancementLayer EnhancementLayerV3 `json:"dv_enhancement_layer"`
 	AudioCodec         string             `json:"audio_codec,omitempty"`
 	AudioChannels      int                `json:"audio_channels,omitempty"`
@@ -620,9 +827,23 @@ type SubtitleArtifactV3 struct {
 	TimingOriginSeconds float64 `json:"timing_origin_seconds"`
 }
 
+// EmbeddedSubtitleV3 selects a track in the unmodified media source. The
+// container identifier is canonical decimal when the probe supplies one.
+type EmbeddedSubtitleV3 struct {
+	StreamIndex      int    `json:"stream_index"`
+	ContainerTrackID string `json:"container_track_id,omitempty"`
+}
+
 type SubtitleDecisionV3 struct {
+	Embedded *EmbeddedSubtitleV3 `json:"embedded,omitempty"`
 	Mode     SubtitleModeV3      `json:"mode"`
 	TrackID  string              `json:"track_id,omitempty"`
+	// Artifact is the selected sidecar, mutually exclusive with Embedded. It exists only under
+	// SubtitleRenderV3 and SubtitleConvertV3; SubtitleOffV3 and
+	// SubtitleBurnInV3 have no client-fetchable artifact and must publish none,
+	// including on a plan derived from an earlier plan of the same session.
+	// SubtitleOffV3 carries no TrackID either. Inventory URLs are independent
+	// of the selection and stay published in every mode.
 	Artifact *SubtitleArtifactV3 `json:"artifact,omitempty"`
 	// Inventory is the complete, gap-free combined-ordinal subtitle track list
 	// for the effective source. It is authoritative: a client selects a track
@@ -656,11 +877,29 @@ type DegradationWarningV3 struct {
 // a track's original language.
 const QualityOriginalV3 = "original"
 
+// Compound ladder rung labels pin a bitrate as well as a resolution class.
+// The plain resolution labels remain valid for stored/default preferences;
+// menu selections use these explicit variants so every visible entry has
+// unambiguous quality semantics, including at the source's own resolution.
+const (
+	QualityRung2160pHighV3   = "2160p-high"
+	QualityRung2160pMediumV3 = "2160p-medium"
+	QualityRung2160pLowV3    = "2160p-low"
+	QualityRung1080pHighV3   = "1080p-high"
+	QualityRung1080pMediumV3 = "1080p-medium"
+	QualityRung1080pLowV3    = "1080p-low"
+	QualityRung720pHighV3    = "720p-high"
+	QualityRung720pMediumV3  = "720p-medium"
+	QualityRung720pLowV3     = "720p-low"
+)
+
 // AvailableQualityV3 is one server-ladder rung valid for this source and
 // client, published on the plan so clients can render a quality menu without
-// owning a bitrate table. The QualityOriginalV3 entry preserves the source.
+// owning a bitrate table. The QualityOriginalV3 entry preserves the source;
+// DisplayName gives compound rungs their human-facing High/Medium/Low label.
 type AvailableQualityV3 struct {
 	Label           string `json:"label"`
+	DisplayName     string `json:"display_name,omitempty"`
 	Height          int    `json:"height,omitempty"`
 	BitrateKbps     int    `json:"bitrate_kbps,omitempty"`
 	PreservesSource bool   `json:"preserves_source"`
@@ -794,11 +1033,17 @@ func NormalizeQualityV3(value string) (string, bool) {
 	case "480p", "sd":
 		return "480p", false
 	default:
+		if rung, ok := ladderRungForLabelV3(value); ok {
+			return rung.Label, false
+		}
 		return "auto", true
 	}
 }
 
-func (r ReplanRequestV3) Validate() error {
+func (r *ReplanRequestV3) Validate() error {
+	if r == nil {
+		return errors.New("replan request is required")
+	}
 	if r.ProtocolVersion != ProtocolV3 || !boundedIdentifierV3.MatchString(r.PlaybackAttemptID) || !boundedIdentifierV3.MatchString(r.ReplanRequestID) {
 		return errors.New("invalid replan identity")
 	}
@@ -894,20 +1139,21 @@ func validateSelectedTrackIdentityV3(kind string, track *TrackIdentityV3) error 
 // payload. features carries the request's top-level client_features — the
 // only feature-advertisement location in the contract.
 func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackContextV3, features []string) error {
-	if !validCapabilityEvidenceV3(c.VideoEvidence) {
-		return errors.New("video_evidence is required and must be exact, platform_attested, or declared")
+	if err := normalizeAndValidateVideoCapabilitiesV3(c, features); err != nil {
+		return err
 	}
 	if !validCapabilityEvidenceV3(c.AudioEvidence) {
 		return errors.New("audio_evidence is required and must be exact, platform_attested, or declared")
 	}
-	if len(c.CodecsVideo) > 64 || len(c.CodecsVideoHardware) > 64 || len(c.CodecsAudio) > 64 || len(c.Containers) > 64 || len(c.VideoDecode) > 64 || len(ctx.Deliveries) > 16 || len(ctx.Device.Platform) > 32 || len(ctx.FormFactor) > 32 || len(ctx.AppVersion) > 64 {
+	if len(c.CodecsVideo) > 64 || len(c.CodecsVideoHardware) > 64 || len(c.CodecsAudio) > 64 || len(c.Containers) > 64 || len(c.VideoDecode) > 64 || len(ctx.Deliveries) > 16 || len(ctx.Device.Platform) > 32 || len(ctx.FormFactor) > 32 {
 		return errors.New("capability list exceeds supported size")
 	}
-	// Build and channel are opaque diagnostic labels, so an over-long value is
+	// Version, build, and channel are diagnostic labels, so an over-long value is
 	// worth clamping and never worth refusing playback over. The header route
-	// (X-Silo-Client-Build / -Channel) clamps with the same helper; rejecting
+	// (X-Silo-Client-Version / -Build / -Channel) clamps with the same helper; rejecting
 	// here would mean the same string plays from a header and 400s from the
 	// body.
+	ctx.AppVersion = normalizeClientMetadataValue(ctx.AppVersion, 64)
 	ctx.AppBuild = normalizeClientMetadataValue(ctx.AppBuild, 64)
 	ctx.AppChannel = normalizeClientMetadataValue(ctx.AppChannel, 32)
 	deviceValues := []string{
@@ -927,7 +1173,7 @@ func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackCon
 			return errors.New("platform_details entry exceeds supported size")
 		}
 	}
-	for _, values := range [][]string{c.CodecsVideo, c.CodecsVideoHardware, c.CodecsAudio, c.Containers} {
+	for _, values := range [][]string{c.CodecsAudio, c.Containers} {
 		for i := range values {
 			values[i] = strings.ToLower(strings.TrimSpace(values[i]))
 			if len(values[i]) > 128 {
@@ -935,23 +1181,55 @@ func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackCon
 			}
 		}
 	}
-	for i := range c.VideoDecode {
-		c.VideoDecode[i].Codec = strings.ToLower(strings.TrimSpace(c.VideoDecode[i].Codec))
-		if c.VideoDecode[i].Codec == "" || len(c.VideoDecode[i].DecoderName) > 128 || c.VideoDecode[i].MaxWidth < 0 || c.VideoDecode[i].MaxHeight < 0 || c.VideoDecode[i].MaxFrameRate < 0 || c.VideoDecode[i].MaxBitrateKbps < 0 {
-			return errors.New("invalid detailed video capability")
-		}
-		if len(c.VideoDecode[i].Profiles) > 64 || len(c.VideoDecode[i].Levels) > 64 || len(c.VideoDecode[i].BitDepths) > 64 {
-			return errors.New("detailed video capability exceeds supported size")
-		}
-		for _, profile := range c.VideoDecode[i].Profiles {
-			if len(profile) > 64 {
-				return errors.New("detailed video capability value exceeds supported size")
-			}
-		}
-	}
 	for _, hdr := range []*HDRCapabilitiesV3{c.HDRDetails, ctx.Output.HDRDetails} {
 		if err := validateHDRCapabilitiesV3(hdr); err != nil {
 			return err
+		}
+	}
+	if display := ctx.Output.Display; display != nil {
+		display.HDREvidence = strings.ToLower(strings.TrimSpace(display.HDREvidence))
+		switch display.HDREvidence {
+		case OutputHDREvidenceExactV3, OutputHDREvidenceUnknownV3:
+		default:
+			return errors.New("output display hdr_evidence must be exact or unknown")
+		}
+		if len(display.DisplayID) > 64 {
+			return errors.New("output display id exceeds supported size")
+		}
+		if err := validateHDRCapabilitiesV3(display.HDRTypes); err != nil {
+			return err
+		}
+		// An exact display record is the raw panel fact; output.hdr_details
+		// is supposed to be its intersection with the decoder. Reject a
+		// contradiction where hdr_details claims a range the panel does not
+		// carry rather than let planning pick whichever one it reads first.
+		if display.HDREvidence == OutputHDREvidenceExactV3 && ctx.Output.HDRDetails != nil {
+			panel := display.HDRTypes
+			if panel == nil {
+				panel = &HDRCapabilitiesV3{}
+			}
+			out := ctx.Output.HDRDetails
+			if out.HDR10 && !panel.HDR10 || out.HDR10Plus && !panel.HDR10Plus || out.HLG && !panel.HLG {
+				return errors.New("output hdr_details claims a range the exact display record does not carry")
+			}
+			for _, profile := range out.DolbyVisionProfiles {
+				if !containsIntV3(panel.DolbyVisionProfiles, profile) {
+					return errors.New("output hdr_details claims a dolby vision profile the exact display record does not carry")
+				}
+			}
+			// Numeric bounds are ceilings: hdr_details may be tighter than
+			// the panel (the decoder narrows it) but never looser.
+			if boundExceedsV3(out.HDR10MaxWidth, panel.HDR10MaxWidth) || boundExceedsV3(out.HDR10MaxHeight, panel.HDR10MaxHeight) ||
+				boundExceedsFloatV3(out.HDR10MaxFrameRate, panel.HDR10MaxFrameRate) || boundExceedsV3(out.HDR10MaxBitrateKbps, panel.HDR10MaxBitrateKbps) {
+				return errors.New("output hdr_details hdr10 limits exceed the exact display record")
+			}
+			for _, capability := range out.DolbyVisionProfileLevels {
+				for _, panelCapability := range panel.DolbyVisionProfileLevels {
+					if panelCapability.Profile == capability.Profile && capability.MaxLevel > panelCapability.MaxLevel {
+						return errors.New("output hdr_details dolby vision level exceeds the exact display record")
+					}
+				}
+			}
 		}
 	}
 	for name, delivery := range ctx.Deliveries {
@@ -966,6 +1244,25 @@ func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackCon
 				if len(value) > 64 {
 					return errors.New("delivery capability value exceeds supported size")
 				}
+			}
+		}
+		if len(delivery.Subtitles.NativeEmbedded) > 16 {
+			return errors.New("native subtitle capability list exceeds supported size")
+		}
+		for i := range delivery.Subtitles.NativeEmbedded {
+			native := &delivery.Subtitles.NativeEmbedded[i]
+			native.Container = strings.ToLower(strings.TrimSpace(native.Container))
+			if native.Container == "" || len(native.Container) > 32 || len(native.Codecs) == 0 || len(native.Codecs) > 32 {
+				return errors.New("invalid native subtitle capability")
+			}
+			if native.TrackIdentity != subtitleIdentityFFmpegV3 && native.TrackIdentity != subtitleIdentityContainerV3 {
+				return errors.New("invalid native subtitle track identity")
+			}
+			for j, codec := range native.Codecs {
+				if strings.TrimSpace(codec) == "" || len(codec) > 64 {
+					return errors.New("invalid native subtitle codec")
+				}
+				native.Codecs[j] = normalizeNativeSubtitleCodecV3(codec)
 			}
 		}
 		seenTransformations := make(map[string]struct{}, len(delivery.Transformations))
@@ -1083,6 +1380,53 @@ func HasFeatureV3(features []string, wanted string) bool {
 	return slices.ContainsFunc(features, func(v string) bool { return strings.EqualFold(strings.TrimSpace(v), wanted) })
 }
 
+// AttemptStickyFeaturesV3 lists the client features that are negotiated once,
+// at start, and are fixed for the lifetime of the playback attempt. Each of
+// them selects a contract the durable plan and its live transport are built
+// around rather than a per-plan preference:
+//
+//   - header_authenticated_media_v1 picks the media security contract. A legacy
+//     signed URL from an earlier plan can outlive the plan that minted it, so
+//     switching mid-attempt would leave two contracts alive for one session.
+//   - authorized_media_origins_v1 selects which origins may serve the attempt's
+//     media. The trust set a client honors must not change mid-attempt: a plan
+//     that already handed out a proxy origin outlives the replan that would
+//     revoke it, so the client would be left holding a URL it no longer trusts.
+//   - software_video_decode_v1 widens the direct-play evidence tiers. Dropping
+//     it on a replan silently converts a direct route into a transcode and
+//     persists that downgrade into the durable normalized request.
+//   - subrip_sidecar_v1 picks the representation of every SRT sidecar URL.
+//     Switching it mid-attempt would publish one track under two URLs, and a
+//     seek reanchor must reproduce the frozen plan's artifact exactly.
+//
+// Stop/start is the explicit boundary for changing any of them.
+func AttemptStickyFeaturesV3() []string {
+	return []string{FeatureHeaderAuthenticatedMediaV3, FeatureAuthorizedMediaOriginsV3, FeatureSoftwareVideoDecodeV3, FeatureSubripSidecarV3}
+}
+
+// PinAttemptStickyFeaturesV3 returns requested with every attempt-sticky
+// feature forced back to the state the start negotiation established: a replan
+// can neither add nor remove one, whatever its own client_features list says.
+// Non-sticky features are passed through untouched and in order.
+func PinAttemptStickyFeaturesV3(requested, negotiated []string) []string {
+	sticky := AttemptStickyFeaturesV3()
+	pinned := make([]string, 0, len(requested)+len(sticky))
+	for _, feature := range requested {
+		if slices.ContainsFunc(sticky, func(candidate string) bool {
+			return strings.EqualFold(strings.TrimSpace(feature), candidate)
+		}) {
+			continue
+		}
+		pinned = append(pinned, feature)
+	}
+	for _, feature := range sticky {
+		if HasFeatureV3(negotiated, feature) {
+			pinned = append(pinned, feature)
+		}
+	}
+	return pinned
+}
+
 func NewTerminalResponseV3(reason, message string, retryable bool) DecisionResponseV3 {
 	return DecisionResponseV3{
 		ProtocolVersion: ProtocolV3,
@@ -1093,3 +1437,13 @@ func NewTerminalResponseV3(reason, message string, retryable bool) DecisionRespo
 }
 
 func NewPlanExpiryV3(now time.Time) string { return now.Add(MaxTokenTTL).UTC().Format(time.RFC3339) }
+
+// boundExceedsV3 reports whether an output ceiling is looser than the panel's.
+// Zero means "no ceiling declared" on either side.
+func boundExceedsV3(output, panel int) bool {
+	return panel > 0 && (output == 0 || output > panel)
+}
+
+func boundExceedsFloatV3(output, panel float64) bool {
+	return panel > 0 && (output == 0 || output > panel)
+}

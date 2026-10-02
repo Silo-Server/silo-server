@@ -3,6 +3,8 @@ package metadata
 import (
 	"context"
 	"errors"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,6 +19,43 @@ type fakeImageCacheJobs struct {
 	deletedCount  int
 	requeuedIDs   []int64
 	currentSource *string // when set, overrides CurrentTargetSourcePath
+}
+
+type targetImageCacheJobs struct {
+	fakeImageCacheJobs
+	retriedTarget  string
+	retryCalls     int
+	claimedTarget  string
+	targetClaims   [][]*models.MetadataImageCacheJob
+	targetCalls    int
+	runningResults []bool
+	runningCalls   int
+	alwaysRunning  bool
+}
+
+func (f *targetImageCacheJobs) retryTargetNow(_ context.Context, targetContentID string) error {
+	f.retriedTarget = targetContentID
+	f.retryCalls++
+	return nil
+}
+
+func (f *targetImageCacheJobs) claimDueForTarget(_ context.Context, _ string, targetContentID string, _ int) ([]*models.MetadataImageCacheJob, error) {
+	f.claimedTarget = targetContentID
+	var jobs []*models.MetadataImageCacheJob
+	if f.targetCalls < len(f.targetClaims) {
+		jobs = f.targetClaims[f.targetCalls]
+	}
+	f.targetCalls++
+	return jobs, nil
+}
+
+func (f *targetImageCacheJobs) targetHasRunningJobs(_ context.Context, _ string) (bool, error) {
+	running := f.alwaysRunning
+	if f.runningCalls < len(f.runningResults) {
+		running = f.runningResults[f.runningCalls]
+	}
+	f.runningCalls++
+	return running, nil
 }
 
 func (f *fakeImageCacheJobs) ClaimDue(context.Context, string, int) ([]*models.MetadataImageCacheJob, error) {
@@ -46,8 +85,8 @@ func (f *fakeImageCacheJobs) CurrentTargetSourcePath(_ context.Context, job *mod
 	return job.SourcePath, nil
 }
 
-func (f *fakeImageCacheJobs) EnqueueExistingProviderArtwork(context.Context, int) (int, error) {
-	return 0, nil
+func (f *fakeImageCacheJobs) EnqueueExistingProviderArtwork(context.Context, imageCacheDiscoveryCursor, int) (imageCacheDiscoveryPage, error) {
+	return imageCacheDiscoveryPage{Complete: true}, nil
 }
 
 func (f *fakeImageCacheJobs) DeleteSucceededBefore(context.Context, time.Time, int) (int, error) {
@@ -56,19 +95,70 @@ func (f *fakeImageCacheJobs) DeleteSucceededBefore(context.Context, time.Time, i
 
 type loopingImageCacheJobs struct {
 	enqueueResults []int
+	enqueuePages   []imageCacheDiscoveryPage
+	enqueueErrors  []error
 	claimedResults [][]*models.MetadataImageCacheJob
 	succeededIDs   []int64
 	enqueueCalls   int
+	enqueueLimits  []int
+	enqueueCursors []imageCacheDiscoveryCursor
 	claimCalls     int
+	backlog        ImageCacheBacklog
+	backlogCalls   int
 }
 
-func (f *loopingImageCacheJobs) EnqueueExistingProviderArtwork(context.Context, int) (int, error) {
-	result := 0
-	if f.enqueueCalls < len(f.enqueueResults) {
-		result = f.enqueueResults[f.enqueueCalls]
+type serializingImageCacheJobs struct {
+	fakeImageCacheJobs
+	mu            sync.Mutex
+	claimCalls    int
+	firstEntered  chan struct{}
+	secondEntered chan struct{}
+	releaseFirst  chan struct{}
+}
+
+func (f *serializingImageCacheJobs) ClaimDue(context.Context, string, int) ([]*models.MetadataImageCacheJob, error) {
+	f.mu.Lock()
+	f.claimCalls++
+	call := f.claimCalls
+	f.mu.Unlock()
+	switch call {
+	case 1:
+		close(f.firstEntered)
+		<-f.releaseFirst
+	case 2:
+		close(f.secondEntered)
 	}
+	return nil, nil
+}
+
+func (f *loopingImageCacheJobs) GetBacklog(context.Context) (ImageCacheBacklog, error) {
+	f.backlogCalls++
+	return f.backlog, nil
+}
+
+func (f *loopingImageCacheJobs) EnqueueExistingProviderArtwork(_ context.Context, cursor imageCacheDiscoveryCursor, limit int) (imageCacheDiscoveryPage, error) {
+	call := f.enqueueCalls
+	page := imageCacheDiscoveryPage{Next: cursor, Complete: true}
+	if call < len(f.enqueuePages) {
+		page = f.enqueuePages[call]
+	} else if call < len(f.enqueueResults) {
+		result := f.enqueueResults[call]
+		page = imageCacheDiscoveryPage{
+			Enqueued:   result,
+			Discovered: result,
+			Scanned:    result,
+			Next:       imageCacheDiscoveryCursor{Surface: cursor.Surface + 1},
+			Complete:   result == 0,
+		}
+	}
+	var err error
+	if call < len(f.enqueueErrors) {
+		err = f.enqueueErrors[call]
+	}
+	f.enqueueLimits = append(f.enqueueLimits, limit)
+	f.enqueueCursors = append(f.enqueueCursors, cursor)
 	f.enqueueCalls++
-	return result, nil
+	return page, err
 }
 
 func (f *loopingImageCacheJobs) ClaimDue(context.Context, string, int) ([]*models.MetadataImageCacheJob, error) {
@@ -105,10 +195,14 @@ type fakeImageCacher struct {
 	result *CacheImageResult
 	err    error
 	reqs   []CacheImageRequest
+	after  func()
 }
 
 func (f *fakeImageCacher) CacheImage(_ context.Context, req CacheImageRequest) (*CacheImageResult, error) {
 	f.reqs = append(f.reqs, req)
+	if f.after != nil {
+		f.after()
+	}
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -267,6 +361,141 @@ func TestImageCacheProcessorUpdatesItemArtworkOnSuccess(t *testing.T) {
 	}
 	if items.cachedPath != "tmdb/series/1396/backdrop/original.webp" {
 		t.Fatalf("cachedPath = %q", items.cachedPath)
+	}
+}
+
+func TestImageCacheProcessorCachesOnlyManuallyRefreshedTargetImmediately(t *testing.T) {
+	job := &models.MetadataImageCacheJob{
+		ID:                23,
+		TargetType:        ImageCacheTargetItem,
+		TargetContentID:   "series-1",
+		SourcePath:        "tmdb://poster/series.jpg",
+		ProviderID:        "tmdb",
+		ProviderContentID: "1396",
+		ContentType:       "series",
+		ImageType:         ImageCacheImagePoster,
+	}
+	jobs := &targetImageCacheJobs{
+		targetClaims: [][]*models.MetadataImageCacheJob{{job}, nil},
+	}
+	cacher := &fakeImageCacher{result: &CacheImageResult{
+		BasePath:  "tmdb/series/1396/poster",
+		Ext:       ".webp",
+		Thumbhash: "thumb",
+	}}
+	resolver := &fakeImageResolver{url: "https://image.tmdb.org/t/p/original/poster.jpg"}
+	items := &fakeItemArtworkUpdater{updated: true}
+
+	processor := NewImageCacheProcessorWithTargets(jobs, cacher, resolver, ImageCacheProcessorTargets{
+		Items: items,
+	})
+	if err := processor.CacheTargetArtwork(context.Background(), "series-1"); err != nil {
+		t.Fatalf("CacheTargetArtwork() error = %v", err)
+	}
+	if jobs.retriedTarget != "series-1" || jobs.claimedTarget != "series-1" {
+		t.Fatalf("target retry/claim = %q/%q, want series-1", jobs.retriedTarget, jobs.claimedTarget)
+	}
+	if jobs.targetCalls != 2 {
+		t.Fatalf("target claim calls = %d, want 2", jobs.targetCalls)
+	}
+	// The retry-now reset runs once per refresh, not once per poll.
+	if jobs.retryCalls != 1 {
+		t.Fatalf("target retry calls = %d, want 1", jobs.retryCalls)
+	}
+	if jobs.succeededID != 23 {
+		t.Fatalf("succeededID = %d, want 23", jobs.succeededID)
+	}
+	if items.cachedPath != "tmdb/series/1396/poster/original.webp" {
+		t.Fatalf("cachedPath = %q", items.cachedPath)
+	}
+}
+
+func TestImageCacheProcessorReportsImmediateTargetFailure(t *testing.T) {
+	job := &models.MetadataImageCacheJob{
+		ID:                24,
+		TargetType:        ImageCacheTargetItem,
+		TargetContentID:   "series-1",
+		SourcePath:        "tmdb://poster/series.jpg",
+		ProviderID:        "tmdb",
+		ProviderContentID: "1396",
+		ContentType:       "series",
+		ImageType:         ImageCacheImagePoster,
+	}
+	jobs := &targetImageCacheJobs{
+		targetClaims: [][]*models.MetadataImageCacheJob{{job}, nil},
+	}
+	processor := NewImageCacheProcessorWithTargets(
+		jobs,
+		&fakeImageCacher{err: errors.New("cache failed")},
+		&fakeImageResolver{url: "https://image.tmdb.org/t/p/original/poster.jpg"},
+		ImageCacheProcessorTargets{Items: &fakeItemArtworkUpdater{updated: true}},
+	)
+
+	err := processor.CacheTargetArtwork(context.Background(), "series-1")
+	if err == nil || !strings.Contains(err.Error(), "failed to cache") {
+		t.Fatalf("CacheTargetArtwork() error = %v, want cache failure", err)
+	}
+	if jobs.failedID != 24 {
+		t.Fatalf("failedID = %d, want 24", jobs.failedID)
+	}
+}
+
+func TestImageCacheProcessorRetriesTargetAfterConcurrentWorkerFinishes(t *testing.T) {
+	job := &models.MetadataImageCacheJob{
+		ID:                25,
+		TargetType:        ImageCacheTargetItem,
+		TargetContentID:   "series-1",
+		SourcePath:        "tmdb://poster/series.jpg",
+		ProviderID:        "tmdb",
+		ProviderContentID: "1396",
+		ContentType:       "series",
+		ImageType:         ImageCacheImagePoster,
+	}
+	jobs := &targetImageCacheJobs{
+		targetClaims:   [][]*models.MetadataImageCacheJob{nil, {job}, nil},
+		runningResults: []bool{true, false},
+	}
+	processor := NewImageCacheProcessorWithTargets(
+		jobs,
+		&fakeImageCacher{result: &CacheImageResult{BasePath: "tmdb/series/1396/poster", Ext: ".webp"}},
+		&fakeImageResolver{url: "https://image.tmdb.org/t/p/original/poster.jpg"},
+		ImageCacheProcessorTargets{Items: &fakeItemArtworkUpdater{updated: true}},
+	)
+
+	if err := processor.CacheTargetArtwork(context.Background(), "series-1"); err != nil {
+		t.Fatalf("CacheTargetArtwork() error = %v", err)
+	}
+	if jobs.retryCalls != 1 {
+		t.Fatalf("target retry calls = %d, want 1", jobs.retryCalls)
+	}
+	if jobs.succeededID != 25 {
+		t.Fatalf("succeededID = %d, want 25", jobs.succeededID)
+	}
+}
+
+func TestImageCacheProcessorStopsWaitingOnStuckBackgroundWorker(t *testing.T) {
+	// A worker that claimed the job and died holds its lease for
+	// ImageCacheLeaseDuration. The interactive refresh must not block that
+	// long: it gives up and reports the artwork as still pending.
+	jobs := &targetImageCacheJobs{alwaysRunning: true}
+	processor := NewImageCacheProcessorWithTargets(
+		jobs,
+		&fakeImageCacher{},
+		&fakeImageResolver{},
+		ImageCacheProcessorTargets{Items: &fakeItemArtworkUpdater{}},
+	)
+	processor.idleWaitTimeout = 20 * time.Millisecond
+
+	err := processor.CacheTargetArtwork(context.Background(), "series-1")
+	if !errors.Is(err, ErrTargetArtworkPending) {
+		t.Fatalf("CacheTargetArtwork() error = %v, want ErrTargetArtworkPending", err)
+	}
+	if jobs.retryCalls != 1 {
+		t.Fatalf("target retry calls = %d, want 1", jobs.retryCalls)
+	}
+	// A hot 10 Hz poll would issue far more probes than this in 20ms.
+	if jobs.runningCalls > 4 {
+		t.Fatalf("running probes = %d, want a backed-off poll", jobs.runningCalls)
 	}
 }
 
@@ -453,6 +682,47 @@ func TestImageCacheProcessorDeletesOldSucceededJobsWithoutClaimedJobs(t *testing
 	}
 }
 
+func TestImageCacheProcessorDrainUntilIdleNeverDiscoversCatalog(t *testing.T) {
+	job := &models.MetadataImageCacheJob{
+		ID:                9,
+		TargetType:        ImageCacheTargetEpisode,
+		TargetContentID:   "episode-tvdb-1-1-1",
+		SourcePath:        "tvdb://banners/episode-1.jpg",
+		ProviderID:        "tvdb",
+		ProviderContentID: "1",
+		ContentType:       "series",
+		ImageType:         ImageCacheImageStill,
+		SeasonNumber:      intPointer(1),
+		EpisodeNumber:     intPointer(1),
+	}
+	jobs := &loopingImageCacheJobs{
+		// A discovery call would enqueue more work; drain mode must never ask.
+		enqueueResults: []int{1000},
+		claimedResults: [][]*models.MetadataImageCacheJob{
+			{job},
+			{},
+		},
+		backlog: ImageCacheBacklog{Known: true, Queued: 1},
+	}
+	cacher := &fakeImageCacher{result: &CacheImageResult{
+		BasePath: "tvdb/series/1/seasons/1/episodes/1/still",
+		Ext:      ".webp",
+	}}
+	resolver := &fakeImageResolver{url: "https://artworks.thetvdb.com/banners/episode.jpg"}
+	processor := NewImageCacheProcessor(jobs, cacher, resolver, nil, &fakeEpisodeStillUpdater{updated: true})
+
+	stats, err := processor.DrainUntilIdle(context.Background(), "test-worker", 1000, 2, time.Minute, nil)
+	if err != nil {
+		t.Fatalf("DrainUntilIdle() error = %v", err)
+	}
+	if stats.Claimed != 1 || stats.Succeeded != 1 || stats.EnqueuedExisting != 0 {
+		t.Fatalf("stats = %+v, want one queued job drained and no discovery", stats)
+	}
+	if jobs.enqueueCalls != 0 || jobs.claimCalls != 2 {
+		t.Fatalf("calls enqueue=%d claim=%d, want 0/2", jobs.enqueueCalls, jobs.claimCalls)
+	}
+}
+
 func TestImageCacheProcessorRunUntilIdleDrainsNewWorkAddedDuringRun(t *testing.T) {
 	job1 := &models.MetadataImageCacheJob{
 		ID:                10,
@@ -479,10 +749,11 @@ func TestImageCacheProcessorRunUntilIdleDrainsNewWorkAddedDuringRun(t *testing.T
 		EpisodeNumber:     intPointer(2),
 	}
 	// Discovery now runs only when the queue drains, not on every batch: drain
-	// job1, find the queue empty and sweep (enqueues 1 more), drain job2, find
-	// the queue empty and sweep again (enqueues 0 -> idle).
+	// job1, find the queue empty and sweep (enqueues 1 more), drain job2, finish
+	// the sweep, then confirm from the beginning that the catalog is idle.
 	jobs := &loopingImageCacheJobs{
-		enqueueResults: []int{1, 0},
+		enqueueResults: []int{1, 0, 0},
+		backlog:        ImageCacheBacklog{Known: true, Queued: 2, Running: 1},
 		claimedResults: [][]*models.MetadataImageCacheJob{
 			{job1},
 			{},
@@ -498,21 +769,318 @@ func TestImageCacheProcessorRunUntilIdleDrainsNewWorkAddedDuringRun(t *testing.T
 	episodes := &fakeEpisodeStillUpdater{updated: true}
 
 	processor := NewImageCacheProcessor(jobs, cacher, resolver, nil, episodes)
-	stats, err := processor.RunUntilIdle(context.Background(), "test-worker", 1000, 2, time.Minute)
+	var progressUpdates []ImageCacheRunStats
+	stats, err := processor.RunUntilIdle(
+		context.Background(),
+		"test-worker",
+		1000,
+		2,
+		0,
+		func(update ImageCacheRunStats) {
+			progressUpdates = append(progressUpdates, update)
+		},
+	)
 	if err != nil {
 		t.Fatalf("RunUntilIdle() error = %v", err)
 	}
 	if stats.Batches != 4 {
 		t.Fatalf("Batches = %d, want 4", stats.Batches)
 	}
+	if stats.RuntimeLimited {
+		t.Fatal("manual backfill without a deadline reported RuntimeLimited")
+	}
 	if stats.EnqueuedExisting != 1 || stats.Claimed != 2 || stats.Succeeded != 2 {
 		t.Fatalf("stats = %+v, want enqueued=1 claimed=2 succeeded=2", stats)
 	}
-	if jobs.enqueueCalls != 2 || jobs.claimCalls != 4 {
-		t.Fatalf("calls enqueue=%d claim=%d, want enqueue=2 claim=4", jobs.enqueueCalls, jobs.claimCalls)
+	if jobs.enqueueCalls != 3 || jobs.claimCalls != 4 {
+		t.Fatalf("calls enqueue=%d claim=%d, want enqueue=3 claim=4", jobs.enqueueCalls, jobs.claimCalls)
+	}
+	for _, limit := range jobs.enqueueLimits {
+		if limit != imageCacheDiscoveryBatchSize {
+			t.Fatalf("discovery limit = %d, want %d", limit, imageCacheDiscoveryBatchSize)
+		}
 	}
 	if len(jobs.succeededIDs) != 2 || jobs.succeededIDs[0] != 10 || jobs.succeededIDs[1] != 11 {
 		t.Fatalf("succeededIDs = %#v, want [10 11]", jobs.succeededIDs)
+	}
+	if len(progressUpdates) == 0 {
+		t.Fatal("RunUntilIdle() did not report progress")
+	}
+	if got := progressUpdates[0].Backlog; got != jobs.backlog {
+		t.Fatalf("initial backlog = %+v, want %+v", got, jobs.backlog)
+	}
+	if progressUpdates[0].Processed() != 0 {
+		t.Fatalf("initial processed = %d, want 0", progressUpdates[0].Processed())
+	}
+	if jobs.backlogCalls != 1 {
+		t.Fatalf("GetBacklog calls = %d, want exactly 1 per run", jobs.backlogCalls)
+	}
+	if got := progressUpdates[len(progressUpdates)-1]; got != stats {
+		t.Fatalf("last progress update = %+v, want final stats %+v", got, stats)
+	}
+}
+
+func TestImageCacheProcessorManualBackfillAlwaysDiscovers(t *testing.T) {
+	jobs := &loopingImageCacheJobs{
+		enqueueResults: []int{0, 0},
+		claimedResults: [][]*models.MetadataImageCacheJob{
+			{},
+			{},
+		},
+	}
+	processor := NewImageCacheProcessor(jobs, &fakeImageCacher{}, &fakeImageResolver{}, nil, nil)
+	for i := 0; i < 2; i++ {
+		if _, err := processor.RunUntilIdle(context.Background(), "test-worker", 1000, 2, 0, nil); err != nil {
+			t.Fatalf("RunUntilIdle() call %d error = %v", i+1, err)
+		}
+	}
+	if jobs.enqueueCalls != 2 {
+		t.Fatalf("discovery calls = %d, want one for each explicit backfill", jobs.enqueueCalls)
+	}
+	for call, cursor := range jobs.enqueueCursors {
+		if cursor != (imageCacheDiscoveryCursor{}) {
+			t.Fatalf("discovery call %d cursor = %+v, want reset cursor", call+1, cursor)
+		}
+	}
+}
+
+func TestImageCacheProcessorDiscoveryWrapsForConcurrentUpdates(t *testing.T) {
+	job := &models.MetadataImageCacheJob{
+		ID:                42,
+		TargetType:        ImageCacheTargetEpisode,
+		TargetContentID:   "episode-tvdb-1-1-2",
+		SourcePath:        "tvdb://banners/episode-2.jpg",
+		ProviderID:        "tvdb",
+		ProviderContentID: "1",
+		ContentType:       "series",
+		ImageType:         ImageCacheImageStill,
+	}
+	jobs := &loopingImageCacheJobs{
+		enqueuePages: []imageCacheDiscoveryPage{
+			// A candidate races with enqueue while the first sweep is in progress.
+			{Scanned: 1000, Discovered: 1, Next: imageCacheDiscoveryCursor{Surface: 8, Key: "episode-z"}},
+			{Next: imageCacheDiscoveryCursor{Surface: imageCacheDiscoverySurfaceCount}, Complete: true},
+			// The wrap sees the concurrent update behind the old cursor.
+			{Enqueued: 1, Scanned: 1, Discovered: 1, Next: imageCacheDiscoveryCursor{Surface: 1}},
+			{Next: imageCacheDiscoveryCursor{Surface: imageCacheDiscoverySurfaceCount}, Complete: true},
+			// A second wrap confirms there are no more candidates.
+			{Next: imageCacheDiscoveryCursor{Surface: imageCacheDiscoverySurfaceCount}, Complete: true},
+		},
+		claimedResults: [][]*models.MetadataImageCacheJob{{}, {job}, {}},
+	}
+	processor := NewImageCacheProcessor(
+		jobs,
+		&fakeImageCacher{result: &CacheImageResult{BasePath: "tvdb/series/1/seasons/1/episodes/2/still", Ext: ".webp"}},
+		&fakeImageResolver{url: "https://artworks.thetvdb.com/episode-2.jpg"},
+		nil,
+		&fakeEpisodeStillUpdater{updated: true},
+	)
+
+	stats, err := processor.RunUntilIdle(context.Background(), "test-worker", 1000, 2, 0, nil)
+	if err != nil {
+		t.Fatalf("RunUntilIdle() error = %v", err)
+	}
+	if stats.EnqueuedExisting != 1 || stats.Succeeded != 1 {
+		t.Fatalf("stats = %+v, want one wrapped discovery processed", stats)
+	}
+	wantCursors := []imageCacheDiscoveryCursor{
+		{},
+		{Surface: 8, Key: "episode-z"},
+		{},
+		{Surface: 1},
+		{},
+	}
+	if len(jobs.enqueueCursors) != len(wantCursors) {
+		t.Fatalf("discovery cursors = %+v, want %+v", jobs.enqueueCursors, wantCursors)
+	}
+	for i := range wantCursors {
+		if jobs.enqueueCursors[i] != wantCursors[i] {
+			t.Fatalf("discovery cursor %d = %+v, want %+v", i+1, jobs.enqueueCursors[i], wantCursors[i])
+		}
+	}
+}
+
+func TestImageCacheProcessorDiscoveryStopsAfterRepeatedNonEnqueueableCandidates(t *testing.T) {
+	unexpectedSweep := errors.New("unexpected third discovery sweep")
+	jobs := &loopingImageCacheJobs{
+		enqueuePages: []imageCacheDiscoveryPage{
+			{Scanned: 1, Discovered: 1, Next: imageCacheDiscoveryCursor{Surface: imageCacheDiscoverySurfaceCount}, Complete: true},
+			{Scanned: 1, Discovered: 1, Next: imageCacheDiscoveryCursor{Surface: imageCacheDiscoverySurfaceCount}, Complete: true},
+			{},
+		},
+		enqueueErrors:  []error{nil, nil, unexpectedSweep},
+		claimedResults: [][]*models.MetadataImageCacheJob{{}},
+	}
+	processor := NewImageCacheProcessor(jobs, &fakeImageCacher{}, &fakeImageResolver{}, nil, nil)
+
+	stats, err := processor.RunUntilIdle(context.Background(), "test-worker", 1000, 2, 0, nil)
+	if err != nil {
+		t.Fatalf("RunUntilIdle() error = %v", err)
+	}
+	if stats.EnqueuedExisting != 0 || jobs.enqueueCalls != 2 {
+		t.Fatalf("stats = %+v, discovery calls = %d; want no enqueues and one confirmation sweep", stats, jobs.enqueueCalls)
+	}
+	for call, cursor := range jobs.enqueueCursors {
+		if cursor != (imageCacheDiscoveryCursor{}) {
+			t.Fatalf("discovery call %d cursor = %+v, want reset cursor", call+1, cursor)
+		}
+	}
+}
+
+func TestImageCacheProcessorDiscoveryRetryStartsFromDurableState(t *testing.T) {
+	discoveryErr := errors.New("temporary discovery failure")
+	jobs := &loopingImageCacheJobs{
+		enqueuePages:  []imageCacheDiscoveryPage{{}, {Complete: true}},
+		enqueueErrors: []error{discoveryErr, nil},
+		claimedResults: [][]*models.MetadataImageCacheJob{
+			{},
+			{},
+		},
+	}
+	processor := NewImageCacheProcessor(jobs, &fakeImageCacher{}, &fakeImageResolver{}, nil, nil)
+
+	if _, err := processor.RunUntilIdle(context.Background(), "test-worker", 1000, 2, 0, nil); !errors.Is(err, discoveryErr) {
+		t.Fatalf("first RunUntilIdle() error = %v, want %v", err, discoveryErr)
+	}
+	if _, err := processor.RunUntilIdle(context.Background(), "test-worker", 1000, 2, 0, nil); err != nil {
+		t.Fatalf("retry RunUntilIdle() error = %v", err)
+	}
+	if len(jobs.enqueueCursors) != 2 || jobs.enqueueCursors[0] != (imageCacheDiscoveryCursor{}) || jobs.enqueueCursors[1] != (imageCacheDiscoveryCursor{}) {
+		t.Fatalf("retry cursors = %+v, want both runs to resume from durable queue/catalog state", jobs.enqueueCursors)
+	}
+}
+
+func TestImageCacheProcessorManualBackfillFailsClosedWhenDisabled(t *testing.T) {
+	jobs := &loopingImageCacheJobs{}
+	processor := NewImageCacheProcessor(jobs, &fakeImageCacher{}, &fakeImageResolver{}, nil, nil)
+	processor.SetEnabled(false)
+	_, err := processor.RunUntilIdle(context.Background(), "test-worker", 2, 2, 0, nil)
+	if !errors.Is(err, ErrImageCachingDisabled) {
+		t.Fatalf("RunUntilIdle() error = %v, want ErrImageCachingDisabled", err)
+	}
+	if jobs.claimCalls != 0 || jobs.enqueueCalls != 0 {
+		t.Fatalf("disabled backfill calls claim=%d discovery=%d, want 0/0", jobs.claimCalls, jobs.enqueueCalls)
+	}
+}
+
+func TestImageCacheProcessorManualBackfillStopsDiscoveryWhenDisabledMidRun(t *testing.T) {
+	job := &models.MetadataImageCacheJob{
+		ID:                91,
+		TargetType:        ImageCacheTargetEpisode,
+		TargetContentID:   "episode-tvdb-1-1-1",
+		SourcePath:        "tvdb://banners/episode-1.jpg",
+		ProviderID:        "tvdb",
+		ProviderContentID: "1",
+		ContentType:       "series",
+		ImageType:         ImageCacheImageStill,
+	}
+	jobs := &loopingImageCacheJobs{claimedResults: [][]*models.MetadataImageCacheJob{{job}}}
+	cacher := &fakeImageCacher{result: &CacheImageResult{BasePath: "tvdb/series/1/seasons/1/episodes/1/still", Ext: ".webp"}}
+	processor := NewImageCacheProcessor(jobs, cacher, &fakeImageResolver{url: "https://artworks.thetvdb.com/episode.jpg"}, nil, &fakeEpisodeStillUpdater{updated: true})
+	cacher.after = func() { processor.SetEnabled(false) }
+	_, err := processor.RunUntilIdle(context.Background(), "test-worker", 2, 2, 0, nil)
+	if !errors.Is(err, ErrImageCachingDisabled) {
+		t.Fatalf("RunUntilIdle() error = %v, want ErrImageCachingDisabled", err)
+	}
+	if jobs.enqueueCalls != 0 {
+		t.Fatalf("discovery calls after disabling cache = %d, want 0", jobs.enqueueCalls)
+	}
+}
+
+func TestImageCacheProcessorRequeuesClaimedTailWhenDisabled(t *testing.T) {
+	jobs := &fakeImageCacheJobs{}
+	for i := int64(1); i <= 4; i++ {
+		jobs.claimed = append(jobs.claimed, &models.MetadataImageCacheJob{
+			ID:                i,
+			TargetType:        ImageCacheTargetEpisode,
+			TargetContentID:   "episode-tvdb-1-1-1",
+			SourcePath:        "tvdb://banners/episode-1.jpg",
+			ProviderID:        "tvdb",
+			ProviderContentID: "1",
+			ContentType:       "series",
+			ImageType:         ImageCacheImageStill,
+		})
+	}
+	cacher := &fakeImageCacher{result: &CacheImageResult{BasePath: "tvdb/series/1/seasons/1/episodes/1/still", Ext: ".webp"}}
+	processor := NewImageCacheProcessor(jobs, cacher, &fakeImageResolver{url: "https://artworks.thetvdb.com/episode.jpg"}, nil, &fakeEpisodeStillUpdater{updated: true})
+	cacher.after = func() { processor.SetEnabled(false) }
+	stats, err := processor.RunOnce(context.Background(), "test-worker", 4, 1)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if stats.Succeeded != 1 || len(cacher.reqs) != 1 {
+		t.Fatalf("stats=%+v requests=%d, want one in-flight job to finish", stats, len(cacher.reqs))
+	}
+	if got := jobs.requeuedIDs; len(got) != 3 || got[0] != 2 || got[1] != 3 || got[2] != 4 {
+		t.Fatalf("requeued IDs = %#v, want [2 3 4]", got)
+	}
+}
+
+func TestImageCacheProcessorSerializesDrainAndBackfill(t *testing.T) {
+	jobs := &serializingImageCacheJobs{
+		firstEntered:  make(chan struct{}),
+		secondEntered: make(chan struct{}),
+		releaseFirst:  make(chan struct{}),
+	}
+	processor := NewImageCacheProcessor(jobs, &fakeImageCacher{}, &fakeImageResolver{}, nil, nil)
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := processor.DrainUntilIdle(context.Background(), "drain-worker", 1000, 2, time.Minute, nil)
+		firstDone <- err
+	}()
+	<-jobs.firstEntered
+
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := processor.RunUntilIdle(context.Background(), "backfill-worker", 1000, 2, 0, nil)
+		secondDone <- err
+	}()
+
+	enteredBeforeRelease := false
+	select {
+	case <-jobs.secondEntered:
+		enteredBeforeRelease = true
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(jobs.releaseFirst)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("DrainUntilIdle() error = %v", err)
+	}
+	if err := <-secondDone; err != nil {
+		t.Fatalf("RunUntilIdle() error = %v", err)
+	}
+	if enteredBeforeRelease {
+		t.Fatal("manual backfill entered the queue while scheduled drain still held the processor run lock")
+	}
+}
+
+func TestImageCacheProcessorCancelsWhileWaitingForRunGate(t *testing.T) {
+	jobs := &serializingImageCacheJobs{
+		firstEntered:  make(chan struct{}),
+		secondEntered: make(chan struct{}),
+		releaseFirst:  make(chan struct{}),
+	}
+	processor := NewImageCacheProcessor(jobs, &fakeImageCacher{}, &fakeImageResolver{}, nil, nil)
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := processor.DrainUntilIdle(context.Background(), "drain-worker", 2, 2, time.Minute, nil)
+		firstDone <- err
+	}()
+	<-jobs.firstEntered
+
+	ctx, cancel := context.WithCancel(context.Background())
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := processor.RunUntilIdle(ctx, "backfill-worker", 2, 2, 0, nil)
+		secondDone <- err
+	}()
+	cancel()
+	if err := <-secondDone; !errors.Is(err, context.Canceled) {
+		t.Fatalf("RunUntilIdle() waiting error = %v, want context.Canceled", err)
+	}
+	close(jobs.releaseFirst)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("DrainUntilIdle() error = %v", err)
 	}
 }
 

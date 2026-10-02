@@ -1,4 +1,5 @@
 import type { SubtitleInventoryItemV3 } from "./protocol-v3";
+import type { PlayerMarkerSegment } from "./types";
 
 export type PlaybackRealtimeMessageType = "command" | "event" | "hello" | "ack" | "result";
 
@@ -15,7 +16,8 @@ export type PlaybackCommandName =
   | "server_shutting_down"
   | "play_media"
   | "set_audio_track"
-  | "set_subtitle_track";
+  | "set_subtitle_track"
+  | "plan_invalidated";
 
 export type PlaybackRealtimeAckStatus = "accepted";
 export type PlaybackRealtimeResultStatus = "completed" | "rejected";
@@ -23,6 +25,7 @@ export type PlaybackRealtimeEventName =
   | "chapter_thumbnail_ready"
   | "markers_updated"
   | "subtitle_ready"
+  | "subtitle_timing_changed"
   | "subtitle_translation_started"
   | "subtitle_translation_cues"
   | "subtitle_translation_completed"
@@ -39,6 +42,18 @@ export interface PlaybackRealtimeCommandEnvelope {
   };
   deadline_ms?: number;
   payload?: Record<string, unknown>;
+}
+
+/**
+ * Payload of the `plan_invalidated` command: the server decided, after the plan
+ * was already playing, that the route it names cannot serve this source.
+ *
+ * `plan_id` is the invalidated plan, not necessarily the one on screen — a
+ * client that has already replanned past it has nothing left to do.
+ */
+export interface PlaybackPlanInvalidatedPayload {
+  reason: string;
+  plan_id: string;
 }
 
 export interface PlaybackRealtimeHelloEnvelope {
@@ -73,6 +88,7 @@ export interface PlaybackMarkersUpdatedPayload {
   credits?: PlaybackTimeRangePayload | null;
   recap?: PlaybackTimeRangePayload | null;
   preview?: PlaybackTimeRangePayload | null;
+  marker_segments?: PlayerMarkerSegment[];
 }
 
 /**
@@ -92,6 +108,19 @@ export interface PlaybackSubtitleReadyPayload {
    * when the server could not resolve the file's inventory, in which case the
    * client refetches its plan instead.
    */
+  track?: SubtitleInventoryItemV3;
+}
+
+/**
+ * Sent to every session of a file after a stored subtitle is retimed (an
+ * automatic sync was applied or its timing was reset). The track's stream URL
+ * already serves the new timing, so a player showing it fetches the cues again.
+ */
+export interface PlaybackSubtitleTimingChangedPayload {
+  session_id: string;
+  file_id: number;
+  subtitle_id: number;
+  /** See {@link PlaybackSubtitleReadyPayload.track}. */
   track?: SubtitleInventoryItemV3;
 }
 
@@ -161,6 +190,10 @@ export type PlaybackRealtimeEventEnvelope =
       payload: PlaybackSubtitleReadyPayload;
     })
   | (PlaybackRealtimeEventEnvelopeBase & {
+      name: "subtitle_timing_changed";
+      payload: PlaybackSubtitleTimingChangedPayload;
+    })
+  | (PlaybackRealtimeEventEnvelopeBase & {
       name: "subtitle_translation_started";
       payload: PlaybackSubtitleTranslationStartedPayload;
     })
@@ -206,8 +239,10 @@ export const ALL_PLAYBACK_COMMANDS: PlaybackCommandName[] = [
   "play_media",
   "set_audio_track",
   "set_subtitle_track",
+  "plan_invalidated",
 ];
 
+/** The commands every realtime surface in this app executes. */
 export const SUPPORTED_PLAYBACK_COMMANDS: PlaybackCommandName[] = [
   "pause",
   "unpause",
@@ -221,12 +256,39 @@ export const SUPPORTED_PLAYBACK_COMMANDS: PlaybackCommandName[] = [
   "server_shutting_down",
 ];
 
+/**
+ * What the video player executes on top of the shared set. `plan_invalidated`
+ * needs a replan the audiobook surface has no route ladder for, so the hello is
+ * per-surface rather than one list both over-claim.
+ */
+export const VIDEO_PLAYBACK_COMMANDS: PlaybackCommandName[] = [
+  ...SUPPORTED_PLAYBACK_COMMANDS,
+  "plan_invalidated",
+];
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
 function isCommandName(value: unknown): value is PlaybackCommandName {
   return typeof value === "string" && ALL_PLAYBACK_COMMANDS.includes(value as PlaybackCommandName);
+}
+
+/**
+ * Reads a `plan_invalidated` payload, or null when it is not well formed.
+ *
+ * Both fields are required: without `plan_id` the client cannot tell whether
+ * the invalidated plan is still the one playing, and acting anyway would evict
+ * a route the server never complained about.
+ */
+export function readPlanInvalidatedPayload(
+  payload: Record<string, unknown> | undefined,
+): PlaybackPlanInvalidatedPayload | null {
+  if (!isRecord(payload)) return null;
+  const { reason, plan_id: planId } = payload;
+  if (typeof reason !== "string" || reason.trim() === "") return null;
+  if (typeof planId !== "string" || planId.trim() === "") return null;
+  return { reason, plan_id: planId };
 }
 
 function isChapterThumbnailReadyPayload(
@@ -246,6 +308,20 @@ function isTimeRangePayload(value: unknown): value is PlaybackTimeRangePayload {
   return isRecord(value) && typeof value.start === "number" && typeof value.end === "number";
 }
 
+function isMarkerSegment(value: unknown): value is PlayerMarkerSegment {
+  return (
+    isRecord(value) &&
+    typeof value.kind === "string" &&
+    ["intro", "credits", "recap", "preview"].includes(value.kind) &&
+    typeof value.start_seconds === "number" &&
+    Number.isFinite(value.start_seconds) &&
+    value.start_seconds >= 0 &&
+    typeof value.end_seconds === "number" &&
+    Number.isFinite(value.end_seconds) &&
+    value.end_seconds > value.start_seconds
+  );
+}
+
 function isMarkersUpdatedPayload(value: unknown): value is PlaybackMarkersUpdatedPayload {
   const isOptionalRange = (range: unknown) =>
     range === undefined || range === null || isTimeRangePayload(range);
@@ -256,7 +332,9 @@ function isMarkersUpdatedPayload(value: unknown): value is PlaybackMarkersUpdate
     isOptionalRange(value.intro) &&
     isOptionalRange(value.credits) &&
     isOptionalRange(value.recap) &&
-    isOptionalRange(value.preview)
+    isOptionalRange(value.preview) &&
+    (value.marker_segments === undefined ||
+      (Array.isArray(value.marker_segments) && value.marker_segments.every(isMarkerSegment)))
   );
 }
 
@@ -304,6 +382,18 @@ function isSubtitleReadyPayload(value: unknown): value is PlaybackSubtitleReadyP
     typeof value.subtitle_id === "number" &&
     typeof value.language === "string" &&
     isOptionalString(value.label) &&
+    isOptionalSubtitleInventoryItem(value.track)
+  );
+}
+
+function isSubtitleTimingChangedPayload(
+  value: unknown,
+): value is PlaybackSubtitleTimingChangedPayload {
+  return (
+    isRecord(value) &&
+    typeof value.session_id === "string" &&
+    typeof value.file_id === "number" &&
+    typeof value.subtitle_id === "number" &&
     isOptionalSubtitleInventoryItem(value.track)
   );
 }
@@ -425,6 +515,17 @@ export function parsePlaybackRealtimeMessage(
           payload: value.payload,
         };
       }
+      if (
+        value.name === "subtitle_timing_changed" &&
+        isSubtitleTimingChangedPayload(value.payload)
+      ) {
+        return {
+          type: "event",
+          session_id: value.session_id,
+          name: value.name,
+          payload: value.payload,
+        };
+      }
       if (value.name === "markers_updated" && isMarkersUpdatedPayload(value.payload)) {
         return {
           type: "event",
@@ -486,7 +587,10 @@ export function parsePlaybackRealtimeCommand(data: string): PlaybackRealtimeComm
   return message?.type === "command" ? message : null;
 }
 
-export function buildPlaybackRealtimeHello(sessionId: string): PlaybackRealtimeHelloEnvelope {
+export function buildPlaybackRealtimeHello(
+  sessionId: string,
+  commands: PlaybackCommandName[] = SUPPORTED_PLAYBACK_COMMANDS,
+): PlaybackRealtimeHelloEnvelope {
   return {
     type: "hello",
     session_id: sessionId,
@@ -495,7 +599,7 @@ export function buildPlaybackRealtimeHello(sessionId: string): PlaybackRealtimeH
       version: "1",
     },
     capabilities: {
-      commands: [...SUPPORTED_PLAYBACK_COMMANDS],
+      commands: [...commands],
     },
   };
 }

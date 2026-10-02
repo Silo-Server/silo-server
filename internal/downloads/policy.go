@@ -3,6 +3,8 @@ package downloads
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -10,6 +12,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	policyengine "github.com/Silo-Server/silo-server/internal/policy"
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 // ActionDecider is the narrow policy decision interface used by downloads.
@@ -29,6 +32,14 @@ type QualityDecision struct {
 	RequiresArtifact  bool
 }
 
+// PolicyUser is the resolved (access-group-merged) download policy for an
+// account. Download checks never read raw models.User policy fields: those
+// are inherit/override pointers and only make sense after resolution.
+type PolicyUser struct {
+	ID     int
+	Policy access.EffectiveUserPolicy
+}
+
 // DownloadQualityResolver validates a client-facing quality request and maps it
 // to the concrete delivery format and encode target the server should record.
 type DownloadQualityResolver struct {
@@ -37,10 +48,16 @@ type DownloadQualityResolver struct {
 
 // Resolve returns a concrete delivery decision for file. Empty quality defaults
 // to "original"; legacy user-facing delivery formats are intentionally rejected.
+//
+// A bitrate preset transcodes onto the shared resolution ladder (see
+// playback.ResolveDownloadTranscodeTarget). When that ladder would leave the
+// source untouched — it already fits the preset's resolution and bitrate and
+// the device plays it — the source is served instead of a re-encode that could
+// only lose quality; the row still records the requested preset.
 func (r DownloadQualityResolver) Resolve(
 	ctx context.Context,
 	requested string,
-	user *models.User,
+	user *PolicyUser,
 	cfg config.DownloadConfig,
 	file *models.MediaFile,
 	caps playback.ClientCapabilities,
@@ -57,42 +74,65 @@ func (r DownloadQualityResolver) Resolve(
 		if err != nil {
 			return QualityDecision{}, err
 		}
-		bitrate := QualityBitrateKbps(quality)
-		target := playback.ResolvePrepareTarget(file, FormatTranscode, caps, playback.AdminSettings{
-			TranscodeEnabled: true,
-			Allow4KTranscode: true,
-		})
-		target.TargetBitrateKbps = bitrate
-		applyQualityCeiling(&target, file, ceiling)
-		return QualityDecision{
-			RequestedQuality:  quality,
-			EffectiveQuality:  quality,
-			DeliveryFormat:    FormatTranscode,
-			TargetBitrateKbps: bitrate,
-			PrepareTarget:     target,
-			RequiresArtifact:  true,
-		}, nil
+		presetKbps := QualityBitrateKbps(quality)
+		target, ok := downloadTranscodeTarget(file, caps, cfg, user, presetKbps, ceiling)
+		if !ok {
+			return QualityDecision{}, ErrQualityUnavailable
+		}
+		if sourceFitsPreset(file, caps, target, presetKbps) {
+			method := playback.Resolve(file, caps, playback.AdminSettings{TranscodeEnabled: true}).Method
+			// A source the ladder would not change is still re-encoded when
+			// the device cannot play it or policy refuses its resolution.
+			if decision, err := r.sourceDecision(ctx, quality, method, user, cfg, file, caps, artifactsAvailable, deviceID); err == nil {
+				return decision, nil
+			}
+		}
+		return transcodeDecision(quality, quality, target), nil
 	}
 
-	decision := playback.PlayDirect
+	method := playback.PlayDirect
 	if hasCapabilities(caps) {
-		playDecision := playback.Resolve(file, caps, playback.AdminSettings{
-			TranscodeEnabled: cfg.TranscodeEnabled && user.DownloadTranscodeAllowed,
-			Allow4KTranscode: true,
-		})
-		decision = playDecision.Method
+		method = playback.Resolve(file, caps, playback.AdminSettings{
+			TranscodeEnabled: cfg.TranscodeEnabled && user.Policy.DownloadTranscodeAllowed,
+		}).Method
 	}
+	if method != playback.PlayTranscode {
+		return r.sourceDecision(ctx, QualityOriginal, method, user, cfg, file, caps, artifactsAvailable, deviceID)
+	}
+	ceiling, err := r.ensureTranscodeAvailable(ctx, user, cfg, artifactsAvailable, quality, deviceID)
+	if err != nil {
+		return QualityDecision{}, err
+	}
+	target, ok := downloadTranscodeTarget(file, caps, cfg, user, QualityBitrateKbps(Quality20Mbps), ceiling)
+	if !ok {
+		return QualityDecision{}, ErrQualityUnavailable
+	}
+	return transcodeDecision(QualityOriginal, Quality20Mbps, target), nil
+}
 
-	switch decision {
+// sourceDecision serves the source file as-is (PlayDirect) or remuxed
+// (PlayRemux) for a download that requested quality. Either keeps the source
+// resolution, so the policy's quality gate is asserted against it here at
+// create time: otherwise an over-ceiling original registers a row that
+// serveDownloadBytes can never satisfy (review finding C6).
+func (r DownloadQualityResolver) sourceDecision(
+	ctx context.Context,
+	requested string,
+	method playback.PlayMethod,
+	user *PolicyUser,
+	cfg config.DownloadConfig,
+	file *models.MediaFile,
+	caps playback.ClientCapabilities,
+	artifactsAvailable bool,
+	deviceID string,
+) (QualityDecision, error) {
+	switch method {
 	case playback.PlayDirect:
-		// Original bytes are served at the source resolution, so assert it at
-		// create time: otherwise an over-ceiling original registers a row that
-		// serveDownloadBytes can never satisfy (review finding C6).
 		if err := r.ensureServedQualityAllowed(ctx, user, cfg, artifactsAvailable, file, deviceID); err != nil {
 			return QualityDecision{}, err
 		}
 		return QualityDecision{
-			RequestedQuality: QualityOriginal,
+			RequestedQuality: requested,
 			EffectiveQuality: QualityOriginal,
 			DeliveryFormat:   FormatOriginal,
 		}, nil
@@ -100,53 +140,150 @@ func (r DownloadQualityResolver) Resolve(
 		if !artifactsAvailable {
 			return QualityDecision{}, ErrQualityUnavailable
 		}
-		// A remux artifact keeps the source resolution, so it is served — and
-		// must be asserted — like an original (unlike capped transcodes).
 		if err := r.ensureServedQualityAllowed(ctx, user, cfg, artifactsAvailable, file, deviceID); err != nil {
 			return QualityDecision{}, err
 		}
-		target := playback.ResolvePrepareTarget(file, FormatRemux, caps, playback.AdminSettings{
-			TranscodeEnabled: cfg.TranscodeEnabled && user.DownloadTranscodeAllowed,
-			Allow4KTranscode: true,
-		})
 		return QualityDecision{
-			RequestedQuality: QualityOriginal,
+			RequestedQuality: requested,
 			EffectiveQuality: QualityOriginal,
 			DeliveryFormat:   FormatRemux,
-			PrepareTarget:    target,
+			PrepareTarget: playback.ResolveRemuxTarget(file, caps, playback.AdminSettings{
+				TranscodeEnabled: cfg.TranscodeEnabled && user.Policy.DownloadTranscodeAllowed,
+			}),
 			RequiresArtifact: true,
 		}, nil
 	default:
-		ceiling, err := r.ensureTranscodeAvailable(ctx, user, cfg, artifactsAvailable, quality, deviceID)
-		if err != nil {
-			return QualityDecision{}, err
-		}
-		target := playback.ResolvePrepareTarget(file, FormatTranscode, caps, playback.AdminSettings{
-			TranscodeEnabled: true,
-			Allow4KTranscode: true,
-		})
-		target.TargetBitrateKbps = QualityBitrateKbps(Quality20Mbps)
-		applyQualityCeiling(&target, file, ceiling)
-		return QualityDecision{
-			RequestedQuality:  QualityOriginal,
-			EffectiveQuality:  Quality20Mbps,
-			DeliveryFormat:    FormatTranscode,
-			TargetBitrateKbps: QualityBitrateKbps(Quality20Mbps),
-			PrepareTarget:     target,
-			RequiresArtifact:  true,
-		}, nil
+		return QualityDecision{}, ErrQualityUnavailable
 	}
+}
+
+func transcodeDecision(requested, effective string, target playback.PrepareTarget) QualityDecision {
+	return QualityDecision{
+		RequestedQuality:  requested,
+		EffectiveQuality:  effective,
+		DeliveryFormat:    FormatTranscode,
+		TargetBitrateKbps: target.TargetBitrateKbps,
+		PrepareTarget:     target,
+		RequiresArtifact:  true,
+	}
+}
+
+// downloadTranscodeTarget resolves a bitrate-capped encode for file. The
+// user's max playback quality and the policy ceiling (non-empty only when a
+// custom override narrows it) cap the ladder class: they apply to what is
+// served, so a capped transcode of an over-ceiling source stays downloadable —
+// mirroring the serve-time rule in serveDownloadBytes. Without 4K transcoding
+// the class stops at 1080p, as quality_options advertises, so a 4K source is
+// never served or kept at 4K under a preset. ok is false when the device's
+// caps attest no decoder the output can fit.
+func downloadTranscodeTarget(file *models.MediaFile, caps playback.ClientCapabilities, cfg config.DownloadConfig, user *PolicyUser, kbps int, ceiling string) (playback.PrepareTarget, bool) {
+	maxHeight := qualityHeight(ceiling)
+	if user != nil {
+		if height := qualityHeight(user.Policy.MaxPlaybackQuality); height > 0 && (maxHeight == 0 || height < maxHeight) {
+			maxHeight = height
+		}
+	}
+	if !cfg.Allow4KTranscode && (maxHeight == 0 || maxHeight > nonUHDMaxHeight) {
+		maxHeight = nonUHDMaxHeight
+	}
+	return playback.ResolveDownloadTranscodeTarget(file, caps, kbps, playback.DownloadTranscodeSettings{
+		AllowHEVCEncoding: cfg.AllowHEVCEncoding,
+		MaxHeight:         maxHeight,
+	})
+}
+
+// nonUHDMaxHeight is the tallest preset output while 4K transcoding is off.
+const nonUHDMaxHeight = 1080
+
+// sourceFitsPreset reports whether a preset transcode would keep the source's
+// frame size and bitrate, so a re-encode could only lose quality. It needs the
+// device's caps to prove playback and complete SDR probe facts: an HDR source
+// is still converted, because the preset promises an SDR file every screen
+// shows correctly.
+func sourceFitsPreset(file *models.MediaFile, caps playback.ClientCapabilities, target playback.PrepareTarget, presetKbps int) bool {
+	if !hasCapabilities(caps) || target.Resolution != "" || file.Bitrate <= 0 || len(file.VideoTracks) == 0 {
+		return false
+	}
+	totalKbps := file.Bitrate
+	if totalKbps > 10_000_000 {
+		totalKbps /= 1000
+	}
+	if totalKbps > presetKbps {
+		return false
+	}
+	dynamicRange := tonemap.MetadataForFile(file).DynamicRange
+	return dynamicRange == "" || dynamicRange == playback.DynamicRangeSDRV3
+}
+
+// qualityHeight converts a policy quality ceiling ("1080p", "2160p") to its
+// height; an empty or unrecognized ceiling is 0, meaning none.
+func qualityHeight(quality string) int {
+	height, _ := strconv.Atoi(strings.TrimSuffix(access.NormalizePlaybackQuality(quality), "p"))
+	return height
+}
+
+// Output video codecs a converted download can use.
+const (
+	outputCodecH264 = "h264"
+	outputCodecHEVC = "hevc"
+)
+
+// QualityOption describes one quality preset for client labels: the video
+// bitrate cap and the tallest output the preset can produce on this server
+// ("10 Mbps, up to 1080p"). Both are zero for original, which keeps the source.
+type QualityOption struct {
+	Preset      string
+	BitrateKbps int
+	MaxHeight   int
+}
+
+// qualityOptionsFor describes presets in order. MaxHeight is the ladder class
+// the bitrate earns at <=30 fps in the most efficient codec the server may
+// encode, so it is an honest "up to": a 60 fps source, a smaller source, or a
+// device that decodes less all land at or below it. 4K sources convert only
+// when 4K transcoding is allowed, and the user's quality ceiling and a policy
+// override's transcode ceiling (policyCeiling) cap it too.
+func qualityOptionsFor(presets []string, cfg config.DownloadConfig, user *PolicyUser, policyCeiling string) []QualityOption {
+	codec := outputCodecH264
+	if cfg.AllowHEVCEncoding {
+		codec = outputCodecHEVC
+	}
+	ceiling := 0
+	if !cfg.Allow4KTranscode {
+		ceiling = nonUHDMaxHeight
+	}
+	limits := []string{policyCeiling}
+	if user != nil {
+		limits = append(limits, user.Policy.MaxPlaybackQuality)
+	}
+	for _, limit := range limits {
+		if height := qualityHeight(limit); height > 0 && (ceiling == 0 || height < ceiling) {
+			ceiling = height
+		}
+	}
+	options := make([]QualityOption, 0, len(presets))
+	for _, preset := range presets {
+		option := QualityOption{Preset: preset, BitrateKbps: QualityBitrateKbps(preset)}
+		if option.BitrateKbps > 0 {
+			option.MaxHeight = playback.LadderClassForBitrate(option.BitrateKbps, 0, codec)
+			if ceiling > 0 {
+				option.MaxHeight = min(option.MaxHeight, ceiling)
+			}
+		}
+		options = append(options, option)
+	}
+	return options
 }
 
 // PresetsFor returns the ordered quality list currently fulfillable for a
 // user. Always non-nil: the capability contract documents quality_presets as
 // an array, and a nil slice would serialize as JSON null.
-func (DownloadQualityResolver) PresetsFor(user *models.User, cfg config.DownloadConfig, artifactsAvailable bool) []string {
-	if !cfg.Enabled || user == nil || !user.DownloadAllowed {
+func (DownloadQualityResolver) PresetsFor(user *PolicyUser, cfg config.DownloadConfig, artifactsAvailable bool) []string {
+	if !cfg.Enabled || user == nil || !user.Policy.DownloadAllowed {
 		return []string{}
 	}
 	presets := []string{QualityOriginal}
-	if artifactsAvailable && cfg.TranscodeEnabled && user.DownloadTranscodeAllowed {
+	if artifactsAvailable && cfg.TranscodeEnabled && user.Policy.DownloadTranscodeAllowed {
 		presets = append(presets, Quality20Mbps, Quality10Mbps, Quality5Mbps, Quality2Mbps, Quality1Mbps)
 	}
 	return presets
@@ -159,27 +296,31 @@ func (s *Service) SetActionDecider(decider ActionDecider) {
 	s.policy.actionDecider = decider
 }
 
+// policyPresetsFor returns the presets the policy engine allows and the
+// quality ceiling it puts on converted downloads, so the capability labels
+// what Resolve will produce.
 func (s *Service) policyPresetsFor(
 	ctx context.Context,
-	user *models.User,
+	user *PolicyUser,
 	cfg config.DownloadConfig,
 	artifactsAvailable bool,
-) []string {
+) ([]string, string) {
 	if err := s.checkDownloadAction(ctx, policyengine.ActionDownload, userIDForPolicy(user), user, cfg, artifactsAvailable, ""); err != nil {
-		return []string{}
+		return []string{}, ""
 	}
 	presets := []string{QualityOriginal}
-	if err := s.checkDownloadAction(ctx, policyengine.ActionDownloadTranscode, userIDForPolicy(user), user, cfg, artifactsAvailable, ""); err == nil {
+	ceiling, err := s.policy.ensureTranscodeAvailable(ctx, user, cfg, artifactsAvailable, "", "")
+	if err == nil {
 		presets = append(presets, Quality20Mbps, Quality10Mbps, Quality5Mbps, Quality2Mbps, Quality1Mbps)
 	}
-	return presets
+	return presets, ceiling
 }
 
 func (s *Service) downloadConfigForUser(
 	ctx context.Context,
 	userID int,
 	deviceID string,
-) (config.DownloadConfig, *models.User, error) {
+) (config.DownloadConfig, *PolicyUser, error) {
 	cfg, err := s.downloadConfigForFeature(ctx, userID, deviceID)
 	if err != nil {
 		return cfg, nil, err
@@ -204,12 +345,12 @@ func (s *Service) downloadUserForConfig(
 	userID int,
 	cfg config.DownloadConfig,
 	deviceID string,
-) (*models.User, error) {
-	user, err := s.userRepo.GetByID(ctx, userID)
+) (*PolicyUser, error) {
+	account, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("loading user: %w", err)
 	}
-	user, err = s.effectiveDownloadUser(ctx, user)
+	user, err := s.effectiveDownloadUser(ctx, account)
 	if err != nil {
 		return nil, ErrDownloadNotAllowed
 	}
@@ -223,7 +364,7 @@ func (s *Service) checkDownloadAction(
 	ctx context.Context,
 	action string,
 	userID int,
-	user *models.User,
+	user *PolicyUser,
 	cfg config.DownloadConfig,
 	artifactsAvailable bool,
 	deviceID string,
@@ -232,7 +373,7 @@ func (s *Service) checkDownloadAction(
 		if !cfg.Enabled {
 			return ErrFeatureDisabled
 		}
-		if user == nil || !user.DownloadAllowed {
+		if user == nil || !user.Policy.DownloadAllowed {
 			return ErrDownloadNotAllowed
 		}
 		return nil
@@ -295,7 +436,7 @@ func normalizeQuality(q string) string {
 // user's max playback quality) so the caller can cap the prepared artifact.
 func (r DownloadQualityResolver) ensureTranscodeAvailable(
 	ctx context.Context,
-	user *models.User,
+	user *PolicyUser,
 	cfg config.DownloadConfig,
 	artifactsAvailable bool,
 	requestedQuality string,
@@ -336,14 +477,14 @@ func (r DownloadQualityResolver) ensureTranscodeAvailable(
 // ceiling applies to the prepared artifact (see downloadActionInput).
 func (r DownloadQualityResolver) ensureServedQualityAllowed(
 	ctx context.Context,
-	user *models.User,
+	user *PolicyUser,
 	cfg config.DownloadConfig,
 	artifactsAvailable bool,
 	file *models.MediaFile,
 	deviceID string,
 ) error {
 	if r.actionDecider == nil {
-		if user != nil && !access.QualityAllowed(file.Resolution, user.MaxPlaybackQuality) {
+		if user != nil && !access.QualityAllowed(file.Resolution, user.Policy.MaxPlaybackQuality) {
 			return ErrQualityUnavailable
 		}
 		return nil
@@ -373,29 +514,11 @@ func (r DownloadQualityResolver) ensureServedQualityAllowed(
 	return nil
 }
 
-// applyQualityCeiling downscales a transcode target so the prepared artifact
-// stays within a policy quality ceiling. The ceiling applies to what is served
-// (the artifact), so a capped transcode of an over-ceiling source stays
-// downloadable — mirroring the serve-time rule in serveDownloadBytes.
-func applyQualityCeiling(target *playback.PrepareTarget, file *models.MediaFile, ceiling string) {
-	ceiling = access.NormalizePlaybackQuality(ceiling)
-	if ceiling == "" {
-		return
-	}
-	served := target.Resolution
-	if served == "" {
-		served = file.Resolution
-	}
-	if !access.QualityAllowed(served, ceiling) {
-		target.Resolution = ceiling
-	}
-}
-
-func ensureTranscodeAllowed(user *models.User, cfg config.DownloadConfig) error {
+func ensureTranscodeAllowed(user *PolicyUser, cfg config.DownloadConfig) error {
 	if !cfg.TranscodeEnabled {
 		return ErrTranscodeDisabled
 	}
-	if user == nil || !user.DownloadTranscodeAllowed {
+	if user == nil || !user.Policy.DownloadTranscodeAllowed {
 		return ErrDownloadNotAllowed
 	}
 	return nil
@@ -412,7 +535,7 @@ func ensureTranscodeAllowed(user *models.User, cfg config.DownloadConfig) error 
 func downloadActionInput(
 	action string,
 	userID int,
-	user *models.User,
+	user *PolicyUser,
 	cfg config.DownloadConfig,
 	artifactsAvailable bool,
 	deviceID string,
@@ -429,14 +552,14 @@ func downloadActionInput(
 	}
 	if user != nil {
 		input.UserID = user.ID
-		input.DownloadAllowed = user.DownloadAllowed
-		input.DownloadTranscodeAllowed = user.DownloadTranscodeAllowed
-		input.MaxPlaybackQuality = user.MaxPlaybackQuality
+		input.DownloadAllowed = user.Policy.DownloadAllowed
+		input.DownloadTranscodeAllowed = user.Policy.DownloadTranscodeAllowed
+		input.MaxPlaybackQuality = user.Policy.MaxPlaybackQuality
 	}
 	return input
 }
 
-func userIDForPolicy(user *models.User) int {
+func userIDForPolicy(user *PolicyUser) int {
 	if user == nil {
 		return 0
 	}
@@ -461,7 +584,8 @@ func downloadActionDenyError(reasonCode string) error {
 }
 
 func hasCapabilities(caps playback.ClientCapabilities) bool {
-	return len(caps.CodecsVideo) > 0 || len(caps.CodecsAudio) > 0 ||
+	return caps.VideoEvidence != "" || len(caps.VideoDecode) > 0 ||
+		len(caps.CodecsVideo) > 0 || len(caps.CodecsAudio) > 0 ||
 		len(caps.AudioPassthroughCodecs) > 0 || len(caps.Containers) > 0 ||
 		caps.MaxResolution != "" || caps.HDR
 }

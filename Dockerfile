@@ -1,3 +1,9 @@
+# Node.js for the runtime Jellyfin Web installer, which builds upstream
+# jellyfin-web in the container. Jellyfin Web 12.x requires Node.js >=24,
+# independent of the Silo frontend toolchain. The installer runs the npm
+# release each Jellyfin Web version declares in engines.npm.
+FROM node:24-slim AS jellyfin_web_node
+
 # Stage 1: Build frontend
 FROM node:22-slim AS frontend
 RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
@@ -7,6 +13,9 @@ COPY web/vendor/foliate-js ./vendor/foliate-js
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
 COPY web/ .
+# The v2 contract fixtures are imported by web tests, which `tsc -b` type-checks
+# as part of the build; they live outside web/ so copy them explicitly.
+COPY contracts/api/v2/fixtures/ /app/contracts/api/v2/fixtures/
 RUN pnpm run build
 
 # Allow CI to inject prebuilt frontend assets via a named `frontend_dist`
@@ -38,28 +47,51 @@ COPY migrations/ migrations/
 COPY contracts/ contracts/
 ARG BUILD_REVISION
 ARG BUILD_DIRTY=false
+ARG BUILD_NUMBER
+ARG BUILD_DATE
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     go build \
-    -ldflags "-X github.com/Silo-Server/silo-server/internal/buildinfo.revisionOverride=${BUILD_REVISION} -X github.com/Silo-Server/silo-server/internal/buildinfo.dirtyOverride=${BUILD_DIRTY}" \
+    -ldflags "-X github.com/Silo-Server/silo-server/internal/buildinfo.revisionOverride=${BUILD_REVISION} -X github.com/Silo-Server/silo-server/internal/buildinfo.dirtyOverride=${BUILD_DIRTY} -X github.com/Silo-Server/silo-server/internal/buildinfo.buildNumberOverride=${BUILD_NUMBER} -X github.com/Silo-Server/silo-server/internal/buildinfo.builtAtOverride=${BUILD_DATE}" \
     -o /silo ./cmd/silo/
 
 # Stage 3: Runtime
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 ARG TARGETARCH
+ARG INTEL_GMMLIB_VERSION=22.10.0
+ARG INTEL_IGC_VERSION=2.34.4
+ARG INTEL_IGC_BUILD=21428
+ARG INTEL_NEO_VERSION=26.18.38308.1
+ARG JELLYFIN_FFMPEG_VERSION=8.1.3-1
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates curl gnupg && \
     curl -fsSL https://repo.jellyfin.org/jellyfin_team.gpg.key \
       | gpg --dearmor -o /usr/share/keyrings/jellyfin.gpg && \
-    echo "deb [signed-by=/usr/share/keyrings/jellyfin.gpg arch=${TARGETARCH}] https://repo.jellyfin.org/debian bookworm main" \
+    echo "deb [signed-by=/usr/share/keyrings/jellyfin.gpg arch=${TARGETARCH}] https://repo.jellyfin.org/debian trixie main" \
       > /etc/apt/sources.list.d/jellyfin.list && \
     apt-get update && \
-    apt-get install -y --no-install-recommends jellyfin-ffmpeg7 git libvips42 fonts-noto-core fonts-noto-cjk && \
+    apt-get install -y --no-install-recommends "jellyfin-ffmpeg8=${JELLYFIN_FFMPEG_VERSION}-trixie" git libvips42 fonts-noto-core fonts-noto-cjk && \
     apt-get purge -y gnupg && apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
-RUN mkdir -p /tmp/silo-transcode /var/lib/silo/compat/jellyfin-web
-COPY --from=frontend /usr/local/bin/node /usr/local/bin/node
-COPY --from=frontend /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+# Debian's Intel OpenCL runtime lags the media hardware supported by the
+# Jellyfin FFmpeg build. Match Jellyfin's container packaging on amd64 so QSV
+# tone mapping can use the quality-preserving OpenCL path. Other architectures
+# retain software tone mapping unless their own hardware executor probes clean.
+RUN if [ "${TARGETARCH}" = "amd64" ]; then \
+      runtime_dir="$(mktemp -d)" && \
+      cd "${runtime_dir}" && \
+      curl -fsSLO "https://github.com/intel/compute-runtime/releases/download/${INTEL_NEO_VERSION}/libigdgmm12_${INTEL_GMMLIB_VERSION}_amd64.deb" && \
+      curl -fsSLO "https://github.com/intel/intel-graphics-compiler/releases/download/v${INTEL_IGC_VERSION}/intel-igc-core-2_${INTEL_IGC_VERSION}+${INTEL_IGC_BUILD}_amd64.deb" && \
+      curl -fsSLO "https://github.com/intel/intel-graphics-compiler/releases/download/v${INTEL_IGC_VERSION}/intel-igc-opencl-2_${INTEL_IGC_VERSION}+${INTEL_IGC_BUILD}_amd64.deb" && \
+      curl -fsSLO "https://github.com/intel/compute-runtime/releases/download/${INTEL_NEO_VERSION}/intel-opencl-icd_${INTEL_NEO_VERSION}-0_amd64.deb" && \
+      apt-get update && \
+      apt-get install -y --no-install-recommends ./*.deb && \
+      cd / && \
+      rm -rf "${runtime_dir}" /var/lib/apt/lists/*; \
+    fi
+RUN mkdir -p /tmp/silo-transcode /var/lib/silo/artwork /var/lib/silo/compat/jellyfin-web
+COPY --from=jellyfin_web_node /usr/local/bin/node /usr/local/bin/node
+COPY --from=jellyfin_web_node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
 RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
     ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 COPY --from=build /silo /usr/local/bin/silo

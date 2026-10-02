@@ -38,7 +38,7 @@ type FileContentUpdater interface {
 	FindContentIDByGroupKey(ctx context.Context, folderID int, groupKeyVersion int, contentGroupKey, preferredType string) (string, error)
 	ListByGroupKey(ctx context.Context, folderID int, groupKeyVersion int, contentGroupKey string) ([]*models.MediaFile, error)
 	ListByObservedRootPath(ctx context.Context, folderID int, observedRootPath string) ([]*models.MediaFile, error)
-	UpdateContentIDByObservedRootPath(ctx context.Context, folderID int, observedRootPath, contentID string) (int, error)
+	UpdateContentIDByObservedRootPath(ctx context.Context, folderID int, observedRootPath, contentID string) (int, []string, error)
 }
 
 // EpisodeLinker extends FileContentUpdater with episode linking.
@@ -80,6 +80,16 @@ type metadataItemDeleteRepo interface {
 	Delete(ctx context.Context, contentID string) ([]string, error)
 }
 
+// metadataItemGuardedDeleteRepo deletes an item only while nothing references it.
+type metadataItemGuardedDeleteRepo interface {
+	DeleteIfUnreferenced(ctx context.Context, contentID string) (bool, error)
+}
+
+// metadataItemInsertRepo creates an item only when its content_id is free.
+type metadataItemInsertRepo interface {
+	InsertIfAbsent(ctx context.Context, item *models.MediaItem) (bool, error)
+}
+
 // metadataTrailerRefreshRepo is the cooldown gate behind
 // RequestTrailersRefresh. It is a separate optional interface (asserted on
 // itemRepo) because only the viewer-facing trailer action needs it; the
@@ -114,6 +124,8 @@ type metadataRefreshDebtRepo interface {
 	MarkTargetSuccess(ctx context.Context, targetType, contentID string, priority int, reasonMask int64, nextRefreshAt time.Time) error
 	DeleteDebt(ctx context.Context, contentID string) error
 	DeleteTargetDebt(ctx context.Context, targetType, contentID string) error
+	SnapshotEpisodeDebts(ctx context.Context, seriesID string) (map[string]string, error)
+	DeleteEpisodeDebts(ctx context.Context, contentIDs []string, versions map[string]string) error
 }
 
 // metadataLibraryRepo defines library membership methods used by
@@ -169,6 +181,7 @@ type metadataEpisodeRepo interface {
 	GetByID(ctx context.Context, contentID string) (*models.Episode, error)
 	GetBySeriesAndNumber(ctx context.Context, seriesID string, season, episode int) (*models.Episode, error)
 	ListBySeriesAndAirDates(ctx context.Context, seriesID string, airDates []string) (map[string][]*models.Episode, error)
+	ListBySeriesAndNumbers(ctx context.Context, seriesID string, seasonNumbers, episodeNumbers []int32) ([]*models.Episode, error)
 	ListBySeries(ctx context.Context, seriesID string) ([]*models.Episode, error)
 	ListBySeasonID(ctx context.Context, seasonID string) ([]*models.Episode, error)
 	Upsert(ctx context.Context, ep *models.Episode) error
@@ -180,8 +193,23 @@ type metadataEpisodeRepo interface {
 type metadataSeasonRepo interface {
 	GetByID(ctx context.Context, contentID string) (*models.Season, error)
 	GetBySeriesAndNumber(ctx context.Context, seriesID string, seasonNum int) (*models.Season, error)
+	ListBySeriesAndNumbers(ctx context.Context, seriesID string, seasonNumbers []int32) ([]*models.Season, error)
 	Upsert(ctx context.Context, s *models.Season) error
 	BulkUpsert(ctx context.Context, seasons []*models.Season) error
+}
+
+type metadataSeasonLocalizationRepo interface {
+	Get(ctx context.Context, seasonContentID, language string) (*models.SeasonLocalization, error)
+	GetBySeasonIDs(ctx context.Context, seasonIDs []string, language string) (map[string]*models.SeasonLocalization, error)
+	Upsert(ctx context.Context, loc *models.SeasonLocalization) error
+	BulkUpsert(ctx context.Context, localizations []*models.SeasonLocalization) error
+}
+
+type metadataEpisodeLocalizationRepo interface {
+	Get(ctx context.Context, episodeContentID, language string) (*models.EpisodeLocalization, error)
+	GetByEpisodeIDs(ctx context.Context, episodeIDs []string, language string) (map[string]*models.EpisodeLocalization, error)
+	Upsert(ctx context.Context, loc *models.EpisodeLocalization) error
+	BulkUpsert(ctx context.Context, localizations []*models.EpisodeLocalization) error
 }
 
 // metadataFolderRepo defines folder repository methods used by MetadataService
@@ -194,6 +222,13 @@ type metadataFolderRepo interface {
 // *catalog.VideoRepository satisfies this.
 type metadataVideoRepo interface {
 	ReplaceByContentID(ctx context.Context, contentID string, videos []models.ItemVideo) error
+}
+
+// metadataRatingSourceRepo persists per-source ratings. The concrete
+// *catalog.RatingSourceRepository satisfies this.
+type metadataRatingSourceRepo interface {
+	Upsert(ctx context.Context, contentID string, sources []models.ItemRatingSource, replace bool) error
+	Replace(ctx context.Context, contentID string, sources []models.ItemRatingSource) error
 }
 
 // AutoTranslator is the seam to the metadata AI translation service: after a
@@ -214,6 +249,7 @@ type metadataServiceHooks struct {
 	updateItemStatus          func(ctx context.Context, contentID, status string) error
 	linkSeriesFilesToEpisodes func(ctx context.Context, seriesID string)
 	ensureSeriesEpisodeLinks  func(ctx context.Context, seriesID string) error
+	bulkEnrichmentTargets     func(ctx context.Context) ([]bulkEnrichmentTarget, error)
 }
 
 var trustedSearchIDKeys = []string{"tmdb", "tvdb", "imdb"}
@@ -393,11 +429,13 @@ type MetadataService struct {
 	folderRepo              metadataFolderRepo
 	itemLocalizationRepo    *catalog.MediaItemLocalizationRepository
 	itemAliasRepo           *catalog.ItemAliasRepository
-	seasonLocalizationRepo  *catalog.SeasonLocalizationRepository
-	episodeLocalizationRepo *catalog.EpisodeLocalizationRepository
+	seasonLocalizationRepo  metadataSeasonLocalizationRepo
+	episodeLocalizationRepo metadataEpisodeLocalizationRepo
 	autoTranslator          AutoTranslator // optional; set via SetAutoTranslator
 	personRepo              *catalog.PersonRepository
 	videoRepo               metadataVideoRepo
+	enrichmentState         enrichmentStateStore
+	ratingSourceRepo        metadataRatingSourceRepo
 	fileRepo                FileContentUpdater
 	skippedRootRepo         metadataSkippedRootRepo
 	staleIDRepo             metadataStaleIDRepo
@@ -484,19 +522,23 @@ func NewMetadataService(
 ) *MetadataService {
 	var itemLocalizationRepo *catalog.MediaItemLocalizationRepository
 	var itemAliasRepo *catalog.ItemAliasRepository
-	var seasonLocalizationRepo *catalog.SeasonLocalizationRepository
-	var episodeLocalizationRepo *catalog.EpisodeLocalizationRepository
+	var seasonLocalizationRepo metadataSeasonLocalizationRepo
+	var episodeLocalizationRepo metadataEpisodeLocalizationRepo
 	var scannedRootRepo metadataScannedRootRepo
 	var scannedGroupRepo metadataScannedGroupRepo
 	var groupClaimRepo metadataGroupClaimRepo
 	var groupOverrideRepo metadataGroupOverrideRepo
 	var observedLocationRepo metadataObservedLocationRepo
 	var videoRepo metadataVideoRepo
+	var enrichmentState enrichmentStateStore
+	var ratingSourceRepo metadataRatingSourceRepo
 	var dbPool *pgxpool.Pool
 	if folderRepo != nil {
 		pool := folderRepo.Pool()
 		dbPool = pool
 		videoRepo = catalog.NewVideoRepository(pool)
+		enrichmentState = newEnrichmentStateRepository(pool)
+		ratingSourceRepo = catalog.NewRatingSourceRepository(pool)
 		itemLocalizationRepo = catalog.NewMediaItemLocalizationRepository(pool)
 		itemAliasRepo = catalog.NewItemAliasRepository(pool)
 		seasonLocalizationRepo = catalog.NewSeasonLocalizationRepository(pool)
@@ -523,6 +565,7 @@ func NewMetadataService(
 		episodeLocalizationRepo: episodeLocalizationRepo,
 		personRepo:              personRepo,
 		videoRepo:               videoRepo,
+		ratingSourceRepo:        ratingSourceRepo,
 		fileRepo:                fileRepo,
 		skippedRootRepo:         skippedRootRepo,
 		staleIDRepo:             staleIDRepo,
@@ -533,6 +576,7 @@ func NewMetadataService(
 		scannedGroupRepo:        scannedGroupRepo,
 		groupOverrideRepo:       groupOverrideRepo,
 		observedLocationRepo:    observedLocationRepo,
+		enrichmentState:         enrichmentState,
 		dbPool:                  dbPool,
 		chainCache:              make(map[string]chainCacheEntry),
 		chainCacheTTL:           60 * time.Second,
@@ -609,6 +653,16 @@ func (s *MetadataService) InvalidateChainCache() {
 func (s *MetadataService) Process(ctx context.Context, req ProcessRequest) (*ProcessResult, error) {
 	if s != nil && s.hooks.process != nil {
 		return s.hooks.process(ctx, req)
+	}
+
+	if req.Mode != ModeIdentify {
+		pinned, err := s.pinnedUnmatchedBySplit(ctx, req.ContentID)
+		if err != nil {
+			return nil, err
+		}
+		if pinned {
+			return &ProcessResult{ContentID: req.ContentID, Pinned: true}, nil
+		}
 	}
 
 	var err error
@@ -918,6 +972,33 @@ func itemVideosFromRemote(contentID string, videos []RemoteVideo) []models.ItemV
 	return rows
 }
 
+// itemRatingSourcesFromResult converts pipeline rating sources into
+// media_item_rating_sources rows, in display order, the source name breaking
+// ties so the rows are written in the same order every time.
+func itemRatingSourcesFromResult(contentID string, sources map[string]RatingSource) []models.ItemRatingSource {
+	rows := make([]models.ItemRatingSource, 0, len(sources))
+	for name, source := range sources {
+		row := models.ItemRatingSource{
+			ContentID: contentID,
+			Source:    name,
+			Score:     source.Score,
+			Provider:  source.Provider,
+		}
+		if source.Votes > 0 {
+			votes := source.Votes
+			row.Votes = &votes
+		}
+		rows = append(rows, row)
+	}
+	slices.SortFunc(rows, func(a, b models.ItemRatingSource) int {
+		if rank := models.RatingSourceRank(a.Source) - models.RatingSourceRank(b.Source); rank != 0 {
+			return rank
+		}
+		return strings.Compare(a.Source, b.Source)
+	})
+	return rows
+}
+
 func prependUniqueString(values []string, value string) []string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -1025,15 +1106,15 @@ type seriesChildLocalContext struct {
 // from the series' media file paths. Files without a filename-parseable
 // episode number contribute nothing — exactly the set fallback synthesis
 // also skips.
-func buildSeriesChildLocalContext(seriesRootPaths []string, filePaths []string) seriesChildLocalContext {
+func buildSeriesChildLocalContext(seriesRootPaths []string, filePaths []string, libraryRoots ...string) seriesChildLocalContext {
 	childCtx := seriesChildLocalContext{
 		seriesRootPaths:      compactUniqueFilePaths(seriesRootPaths),
 		seasonDirectoryPaths: make(map[int][]string),
 		episodeFilePaths:     make(map[int]map[int][]string),
 	}
 	for _, path := range compactUniqueFilePaths(filePaths) {
-		hints := naming.ParseFilename(path, "series")
-		if hints == nil || hints.EpisodeNum == 0 {
+		hints := naming.ParseFilename(path, "series", libraryRoots...)
+		if hints == nil || hints.EpisodeNum == 0 || !hints.SeasonKnown {
 			continue
 		}
 		seasonNum, episodeNum := hints.SeasonNum, hints.EpisodeNum
@@ -1052,9 +1133,13 @@ func buildSeriesChildLocalContext(seriesRootPaths []string, filePaths []string) 
 // seriesChildLocalContextForContent builds the season/episode sidecar context
 // from a series' persisted media files (refresh paths, where no scan hints
 // are available).
-func (s *MetadataService) seriesChildLocalContextForContent(ctx context.Context, contentID string, folderID int) seriesChildLocalContext {
+func (s *MetadataService) seriesChildLocalContextForContent(ctx context.Context, contentID string, folderID int) (seriesChildLocalContext, error) {
 	localCtx := s.localProviderContextForContent(ctx, contentID, folderID)
-	return buildSeriesChildLocalContext(localCtx.primarySidecarSearchPaths, localCtx.allGroupFilePaths)
+	roots, err := s.configuredNamingRootsForContent(ctx, contentID, folderID)
+	if err != nil {
+		return seriesChildLocalContext{}, err
+	}
+	return buildSeriesChildLocalContext(localCtx.primarySidecarSearchPaths, localCtx.allGroupFilePaths, roots...), nil
 }
 
 func (s *MetadataService) directorySidecarSearchPathsForFiles(ctx context.Context, files []*models.MediaFile) []string {
@@ -1223,10 +1308,12 @@ func (s *MetadataService) ProcessWithProviders(ctx context.Context, req ProcessR
 }
 
 func (s *MetadataService) prepareProcessRequest(ctx context.Context, req ProcessRequest) (ProcessRequest, error) {
+	req.callerProviderIDs = maps.Clone(req.ProviderIDs)
 	durableIDs, err := s.loadDurableProviderIDs(ctx, req.ContentID)
 	if err != nil {
 		return req, err
 	}
+	req.durableProviderIDs = maps.Clone(durableIDs)
 	req.recordedStaleProviderIDs, err = s.loadRecordedStaleProviderIDs(ctx, req.ContentID)
 	if err != nil {
 		return req, err
@@ -1266,6 +1353,24 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 	if req.Hints != nil {
 		contentType = req.Hints.Type
 	}
+	var libraryRoots []string
+	if contentType == matchContentTypeSeries {
+		if req.Hints != nil {
+			libraryRoots = req.Hints.LibraryRoots
+		}
+		if libraryRoots == nil {
+			var err error
+			libraryRoots, err = s.configuredNamingRootsForContent(ctx, req.ContentID, scopeFolderID)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if req.Hints != nil {
+			hints := *req.Hints
+			hints.LibraryRoots = libraryRoots
+			req.Hints = &hints
+		}
+	}
 
 	// Determine the item-level content level for phases 1-3.
 	itemLevel := providerChainContentLevel(contentType)
@@ -1288,6 +1393,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 	var providerMatchErrors []error
 	quarantinedProviderIDKeys := make(map[string]struct{})
 	replacedProviderIDKeys := make(map[string]struct{})
+	rejectedIdentityIDs := make(providerIDValueSet)
 
 	switch req.Mode {
 	case ModeInitialMatch:
@@ -1421,6 +1527,11 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		// against the identity that produced its provider query.
 		if !matched && !trustedHintIDsPresent(selectionHints) {
 			for _, alternate := range compactAlternateMatchIdentities(selectionHints) {
+				// A bare year may belong to the series title. Keep any primary
+				// candidates for review rather than replacing them with that guess.
+				if alternate.Source == seriesReleaseYearHintSource && len(candidates) != 0 {
+					continue
+				}
 				alternateHints := *selectionHints
 				alternateHints.Title = alternate.Title
 				alternateHints.Year = alternate.Year
@@ -1470,14 +1581,40 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		// Use user-provided IDs directly.
 		maps.Copy(accumulatedIDs, req.ProviderIDs)
 		sanitizeCanonicalProviderIDsInPlace(accumulatedIDs)
-		if contentType == "" && req.ContentID != "" {
-			if existing, err := s.itemRepo.GetByID(ctx, req.ContentID); err == nil {
-				contentType = existing.Type
-				itemLevel = providerChainContentLevel(contentType)
-				itemChain, err = resolveChain(itemLevel)
-				if err != nil {
-					return nil, err
+		var existing *models.MediaItem
+		if req.ContentID != "" {
+			var err error
+			existing, err = s.itemRepo.GetByID(ctx, req.ContentID)
+			switch {
+			case errors.Is(err, catalog.ErrItemNotFound):
+				existing = nil
+			case err != nil:
+				// The correction below compares the choice with the stored
+				// columns; guessing them missing would restore the wrong match.
+				return nil, fmt.Errorf("loading item to identify: %w", err)
+			}
+		}
+		// An admin whose choice corrects the item's match (see
+		// identityChoiceCorrects) sets its identity: the stored identity IDs
+		// they didn't name came from the previous match, so they're dropped
+		// rather than fetched and kept, and the providers re-supply the right
+		// ones. A choice that confirms or extends the match keeps them.
+		chosen := canonicalIdentityProviderIDs(req.callerProviderIDs)
+		if stored := storedItemIdentity(existing, req.durableProviderIDs); identityChoiceCorrects(chosen, stored) {
+			for _, key := range trustedSearchIDKeys {
+				if chosen[key] == "" {
+					delete(accumulatedIDs, key)
 				}
+			}
+			rejectIdentityProviderIDs(rejectedIdentityIDs, chosen, storedIdentityProviderIDs(existing), req.durableProviderIDs)
+		}
+		if existing != nil && contentType == "" {
+			contentType = existing.Type
+			itemLevel = providerChainContentLevel(contentType)
+			var err error
+			itemChain, err = resolveChain(itemLevel)
+			if err != nil {
+				return nil, err
 			}
 		}
 
@@ -1536,6 +1673,18 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			}
 		}
 		wonHints := applyBuiltinIdentityHints(ctx, itemChain, searchQuery, accumulatedIDs, protectedKeys)
+		stored, hinted := storedItemIdentity(existing, req.durableProviderIDs), canonicalIdentityProviderIDs(wonHints)
+		if req.Mode == ModeManualRefresh && identityChoiceCorrects(hinted, stored) {
+			// The stored IDs came from the match the corrected NFO overrides,
+			// so any the NFO doesn't restate are dropped, not re-fetched.
+			for _, key := range trustedSearchIDKeys {
+				if wonHints[key] == "" {
+					delete(accumulatedIDs, key)
+				}
+			}
+			searchQuery.ProviderIDs = accumulatedIDs
+			rejectIdentityProviderIDs(rejectedIdentityIDs, hinted, storedIdentityProviderIDs(existing), req.durableProviderIDs)
+		}
 		searchQuery = suppressTitleYearFallbackForTrustedIDs(searchQuery)
 		allResults := make([]SearchResult, 0)
 		for _, p := range itemChain {
@@ -1612,6 +1761,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		primarySidecarSearchPaths = localCtx.primarySidecarSearchPaths
 	}
 
+	// enrichedBy lists the enrichment-only providers that answered, so the bulk
+	// enrichment pass does not look the item up with them again.
+	var enrichedBy []string
 	for _, p := range itemChain {
 		mp, ok := p.(MetadataProvider)
 		if !ok {
@@ -1645,8 +1797,13 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				}
 				continue
 			}
-			slog.WarnContext(ctx, "metadata: provider error", "component", "metadata",
-				"provider", p.Slug(), "error", err)
+			if isRoutineEnrichmentError(p, err) {
+				slog.DebugContext(ctx, "metadata: enrichment provider cannot answer now", "component", "metadata",
+					"provider", p.Slug(), "error", err)
+			} else {
+				slog.WarnContext(ctx, "metadata: provider error", "component", "metadata",
+					"provider", p.Slug(), "error", err)
+			}
 			if req.Mode == ModeInitialMatch {
 				providerMatchErrors = append(providerMatchErrors, err)
 			}
@@ -1655,23 +1812,12 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		if result == nil || !result.HasMetadata {
 			continue
 		}
-		result.ProviderIDs = sanitizeCandidateProviderIDs(result.ProviderIDs)
-		// Identity-hint providers contribute IDs exclusively through the
-		// trusted-hint phase: their Phase-2 results merge metadata fields but
-		// never inject provider-id keys that conflict with or extend the
-		// established identity (kills chimeric ID sets).
-		if isIdentityHinter {
-			result.ProviderIDs = nil
+		if isEnrichmentProvider(p) {
+			enrichedBy = append(enrichedBy, p.Slug())
 		}
-		for key := range quarantinedProviderIDKeys {
-			delete(result.ProviderIDs, key)
-		}
-		mergePreferredTitleMetadata(accumulator, result, req.Language, p.Slug(), !isIdentityHinter)
+		foldProviderResult(accumulator, result, req.Language, p.Slug(), isIdentityHinter, quarantinedProviderIDKeys)
 		// Bootstrap: feed new IDs to subsequent providers.
-		mergeProviderIDs(accumulator, result)
 		accumulatedIDs = accumulator.ProviderIDs
-		// Merge fields into accumulator (FillEmpty — first provider wins).
-		MergeMetadata(result, accumulator, nil, MergeFillEmpty)
 	}
 	if len(quarantinedProviderIDKeys) > 0 {
 		accumulator.quarantinedProviderIDKeys = maps.Clone(quarantinedProviderIDKeys)
@@ -1686,6 +1832,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 	accumulatedIDs = accumulator.ProviderIDs
 	if len(replacedProviderIDKeys) > 0 {
 		accumulator.replacedProviderIDKeys = maps.Clone(replacedProviderIDKeys)
+	}
+	if len(rejectedIdentityIDs) > 0 {
+		accumulator.rejectedIdentityProviderIDs = rejectedIdentityIDs
 	}
 	// Phase 3: Images — all ImageProviders run, collect all available images.
 	var allImages []RemoteImage
@@ -1725,9 +1874,16 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 	var allSeasons []SeasonResult
 	var allEpisodes []EpisodeResult
 	if contentType == "series" {
+		if libraryRoots == nil {
+			libraryRoots, err = s.configuredNamingRootsForContent(ctx, req.ContentID, scopeFolderID)
+			if err != nil {
+				return nil, err
+			}
+		}
 		childCtx := buildSeriesChildLocalContext(
 			primarySidecarSearchPaths,
 			append(append([]string(nil), representativeFilePath), allGroupFilePaths...),
+			libraryRoots...,
 		)
 		seasonChain, err := resolveChain("season")
 		if err != nil {
@@ -1853,6 +2009,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		if err := s.persistItemAliases(ctx, result.ContentID, req.Language, accumulator); err != nil {
 			return nil, err
 		}
+		s.recordEnrichedBy(ctx, result.ContentID, enrichedBy)
 	}
 
 	// Refresh stale ID records on successful refresh: clear anything explicitly
@@ -1974,6 +2131,25 @@ func hasTransientMatchError(errs []error) bool {
 		}
 	}
 	return false
+}
+
+// foldProviderResult merges one provider's GetMetadata result into the
+// accumulator of a pipeline run, fill-empty, so the first provider in the chain
+// wins each field. Identity-hint providers contribute IDs exclusively through
+// the trusted-hint phase: their results merge metadata fields but never inject
+// provider-id keys that conflict with or extend the established identity
+// (kills chimeric ID sets).
+func foldProviderResult(accumulator, result *MetadataResult, language, providerSlug string, isIdentityHinter bool, quarantined map[string]struct{}) {
+	result.ProviderIDs = sanitizeCandidateProviderIDs(result.ProviderIDs)
+	if isIdentityHinter {
+		result.ProviderIDs = nil
+	}
+	for key := range quarantined {
+		delete(result.ProviderIDs, key)
+	}
+	mergePreferredTitleMetadata(accumulator, result, language, providerSlug, !isIdentityHinter)
+	mergeProviderIDs(accumulator, result)
+	MergeMetadata(result, accumulator, nil, MergeFillEmpty)
 }
 
 func mergePreferredTitleMetadata(accumulator, result *MetadataResult, language, provider string, attributeAliases bool) {
@@ -2176,7 +2352,14 @@ func (s *MetadataService) mergeAndPersist(
 			return nil, err
 		}
 	}
-	if !isNew && contentID != "" && existingItem != nil && (isProvisionalOwnershipStatus(existingItem.Status) || len(durableIDs) == 0) {
+	// An enrichment write only merges into an item that exists. It must not
+	// recreate one deleted since the pass selected it.
+	if req.enrichmentOnly && existingItem == nil {
+		return nil, fmt.Errorf("enrichment target %q no longer exists", contentID)
+	}
+	// Identity repairs (rebinding, local-ID promotion) belong to matching and
+	// refreshes, never to an enrichment write.
+	if !req.enrichmentOnly && !isNew && contentID != "" && existingItem != nil && (isProvisionalOwnershipStatus(existingItem.Status) || len(durableIDs) == 0) {
 		reboundTo, err := s.rebindItemByProviderIDsLocked(ctx, contentID, accumulator.ProviderIDs, contentType, len(durableIDs) == 0)
 		if err != nil {
 			return nil, err
@@ -2201,7 +2384,7 @@ func (s *MetadataService) mergeAndPersist(
 	// be claimed underneath us; movies and first-match series move a handful of
 	// rows. Placed before the durableIDs merge below so the canonical row's
 	// provider IDs are folded into the accumulator. See canonicalizeLocalContentID.
-	if !isNew && contentid.IsLocal(contentID) {
+	if !req.enrichmentOnly && !isNew && contentid.IsLocal(contentID) {
 		canonical, err := s.canonicalizeLocalContentID(
 			ctx, contentID, providerIDsStruct(accumulator.ProviderIDs), contentType)
 		if err != nil {
@@ -2249,6 +2432,7 @@ func (s *MetadataService) mergeAndPersist(
 
 	suppressProviderIDValues(durableIDs, accumulator.recordedStaleProviderIDs)
 	suppressProviderIDValues(durableIDs, accumulator.sameRunStaleProviderIDs)
+	suppressProviderIDValues(durableIDs, accumulator.rejectedIdentityProviderIDs)
 	if len(durableIDs) > 0 {
 		if accumulator.ProviderIDs == nil {
 			accumulator.ProviderIDs = make(map[string]string, len(durableIDs))
@@ -2289,6 +2473,7 @@ func (s *MetadataService) mergeAndPersist(
 		existingResult := itemToMetadataResult(existingItem)
 		suppressProviderIDValues(existingResult.ProviderIDs, accumulator.recordedStaleProviderIDs)
 		suppressProviderIDValues(existingResult.ProviderIDs, accumulator.sameRunStaleProviderIDs)
+		suppressProviderIDValues(existingResult.ProviderIDs, accumulator.rejectedIdentityProviderIDs)
 		for key := range accumulator.replacedProviderIDKeys {
 			delete(existingResult.ProviderIDs, key)
 		}
@@ -2309,6 +2494,7 @@ func (s *MetadataService) mergeAndPersist(
 		existingResult.replacedProviderIDKeys = accumulator.replacedProviderIDKeys
 		existingResult.recordedStaleProviderIDs = accumulator.recordedStaleProviderIDs
 		existingResult.sameRunStaleProviderIDs = accumulator.sameRunStaleProviderIDs
+		existingResult.rejectedIdentityProviderIDs = accumulator.rejectedIdentityProviderIDs
 		accumulator = existingResult
 	}
 
@@ -2322,9 +2508,36 @@ func (s *MetadataService) mergeAndPersist(
 	item.LastRefreshed = &now
 	item.RefreshFailures = 0
 	item.Status = "matched"
+	if req.enrichmentOnly {
+		// An enrichment write is not a refresh: the refresh bookkeeping stays as
+		// the last match or refresh left it. So does what no metadata result
+		// carries: the series episode state, which only a refresh that
+		// rewrites episodes recomputes, and the stored metadata object.
+		item.MatchedAt = existingItem.MatchedAt
+		item.LastRefreshed = existingItem.LastRefreshed
+		item.RefreshFailures = existingItem.RefreshFailures
+		item.Status = existingItem.Status
+		item.EpisodeMetadataIncomplete = existingItem.EpisodeMetadataIncomplete
+		item.EpisodeMetadataLastCheckedAt = existingItem.EpisodeMetadataLastCheckedAt
+		item.MetadataS3Path = existingItem.MetadataS3Path
+		item.MetadataEtag = existingItem.MetadataEtag
+	}
+	// The stored locks decide whether artwork below, and the season and
+	// episode artwork of a series, may be replaced.
+	if existingItem != nil {
+		item.LockedFields = existingItem.LockedFields
+	}
+
+	// An enrichment write carries no artwork, and the image handling below
+	// would read the missing images as "no artwork": it would drop artwork
+	// still waiting to be cached. The item keeps exactly what is stored.
+	handleArtwork := isCanonicalWrite && !req.enrichmentOnly
+	if req.enrichmentOnly {
+		keepStoredArtwork(item, existingItem)
+	}
 
 	// Apply best images.
-	if isCanonicalWrite {
+	if handleArtwork {
 		applyBestImages(item, images, mergeMode, req.Language)
 		item.PosterThumbhash = mergedImageThumbhash(
 			existingImagePath(existingItem, ImagePoster),
@@ -2340,7 +2553,7 @@ func (s *MetadataService) mergeAndPersist(
 		)
 	}
 
-	if isCanonicalWrite {
+	if handleArtwork {
 		prepareItemImagesForQueue(item, existingItem)
 	}
 
@@ -2375,7 +2588,7 @@ func (s *MetadataService) mergeAndPersist(
 	item.ContentID = contentID
 	unlockProviderDedup()
 	providerDedupReleased = true
-	if isCanonicalWrite {
+	if handleArtwork {
 		s.enqueueItemImages(ctx, item, accumulator.ProviderIDs, images)
 	}
 
@@ -2394,8 +2607,10 @@ func (s *MetadataService) mergeAndPersist(
 		s.enqueueItemLocalizationImages(ctx, item, loc, accumulator.ProviderIDs, images)
 	}
 
-	// Persist people to the unified people table.
-	if len(item.People) > 0 && s.personRepo != nil {
+	// Persist people to the unified people table. The set is replaced
+	// wholesale from providers' people, and the stored cast is not merged in,
+	// so an enrichment write, which hears from one provider, leaves it alone.
+	if !req.enrichmentOnly && len(item.People) > 0 && s.personRepo != nil {
 		persons := make([]models.Person, len(item.People))
 		for i := range item.People {
 			persons[i] = item.People[i].Person
@@ -2425,7 +2640,8 @@ func (s *MetadataService) mergeAndPersist(
 	// set — including clearing it — so narrowing the allow-list converges on
 	// the next refresh; fill-empty refreshes only write when providers
 	// returned something, so a transient provider failure cannot wipe data.
-	if isCanonicalWrite && s.videoRepo != nil && !isFieldLocked(locked, FieldVideos) {
+	// An enrichment write skips them for the same reason as people.
+	if !req.enrichmentOnly && isCanonicalWrite && s.videoRepo != nil && !isFieldLocked(locked, FieldVideos) {
 		allowed := s.resolveAllowedVideoKinds(ctx, contentID, parseProcessFolderID(req.FolderID))
 		filtered := filterVideosByKinds(accumulator.Videos, allowed)
 		if len(filtered) > 0 || mergeMode == MergeReplaceUnlocked {
@@ -2437,6 +2653,29 @@ func (s *MetadataService) mergeAndPersist(
 				// not charge a cooldown for trailers it did not store.
 				reportVideoPersistFailure(ctx, err)
 			}
+		}
+	}
+
+	// Persist per-source ratings. The item row does not carry them, so the
+	// merge above saw no stored sources and passed every reported one through
+	// (or none, under a FieldRating lock). The stored rows are merged by the
+	// write instead: fill-empty keeps each source already stored, and
+	// replace-unlocked overwrites the sources this refresh reported. Identify
+	// replaces the whole set, even with an empty one, because it keeps the
+	// content_id while changing the title: a source only the previous match
+	// reported would otherwise stay on the item for good. Like the rating
+	// columns, they are provider-invariant and written for every language.
+	if s.ratingSourceRepo != nil && !isFieldLocked(locked, FieldRating) {
+		sources := itemRatingSourcesFromResult(contentID, accumulator.RatingSources)
+		var err error
+		switch {
+		case req.Mode == ModeIdentify:
+			err = s.ratingSourceRepo.Replace(ctx, contentID, sources)
+		case len(sources) > 0:
+			err = s.ratingSourceRepo.Upsert(ctx, contentID, sources, mergeMode == MergeReplaceUnlocked)
+		}
+		if err != nil {
+			slog.WarnContext(ctx, "metadata: failed to store rating sources", "component", "metadata", "content_id", contentID, "error", err)
 		}
 	}
 
@@ -2455,8 +2694,9 @@ func (s *MetadataService) mergeAndPersist(
 	// local episode NFOs without a season.nfo) persist too — the persist
 	// path creates their implicit "Season N" rows. Fallback synthesis then
 	// covers any files the providers left unlinked (episodes with no NFO
-	// and no remote row); it is a no-op when every file is linked.
-	if contentType == "series" {
+	// and no remote row); it is a no-op when every file is linked. An
+	// enrichment write carries no seasons or episodes and leaves them alone.
+	if contentType == "series" && !req.enrichmentOnly {
 		if len(seasons) > 0 || len(episodes) > 0 {
 			s.persistSeasonsAndEpisodes(ctx, item, accumulator.ProviderIDs, canonicalLanguage, req.Language, seasons, episodes, mergeMode)
 		}
@@ -3109,6 +3349,14 @@ func (s *MetadataService) trailerVideosLocked(ctx context.Context, contentID str
 	return isFieldLocked(intSliceToFields(item.LockedFields), FieldVideos)
 }
 
+// artworkLocked reports that the item holds manually selected artwork. An
+// admin image selection locks FieldImages on the item, or on the parent series
+// for a season poster or episode still, so a refresh keeps existing artwork
+// under that lock and only fills empty slots.
+func artworkLocked(item *models.MediaItem) bool {
+	return item != nil && isFieldLocked(intSliceToFields(item.LockedFields), FieldImages)
+}
+
 // releaseTrailersRefreshClaim clears the cooldown slot this request consumed.
 // The repository's equality guard means a slot already re-claimed by a newer
 // request is left alone, so this is safe to run long after the fact.
@@ -3649,7 +3897,10 @@ func (s *MetadataService) refreshSeriesChildTarget(
 	}
 
 	updated := false
-	childCtx := s.seriesChildLocalContextForContent(ctx, seriesID, folderID)
+	childCtx, err := s.seriesChildLocalContextForContent(ctx, seriesID, folderID)
+	if err != nil {
+		return err
+	}
 	for _, language := range languages {
 		canonicalLanguage := strings.TrimSpace(series.DefaultMetadataLanguage)
 		if canonicalLanguage == "" {
@@ -4345,6 +4596,72 @@ func (s *MetadataService) SearchProviders(ctx context.Context, query SearchQuery
 	return allResults, nil
 }
 
+// ResolveSeriesTVDBID asks the enabled series providers for the TVDB ID of a
+// series known by its IMDb or TMDB ID (the TVDB provider resolves these through
+// TVDB's remote-ID search). IMDb goes first because its IDs are unambiguous. A
+// result counts only when it echoes the ID it was looked up by and does not
+// name a different TMDB series, so neither a bare TMDB number that matches some
+// other source's ID on TVDB nor an IMDb ID for another series can resolve to the
+// wrong series. Returns 0 and a nil error when every provider answered and none
+// knows a match; returns 0 and the provider errors when nothing matched and at
+// least one provider failed, so callers can tell an outage from a miss.
+func (s *MetadataService) ResolveSeriesTVDBID(ctx context.Context, tmdbID int, imdbID string) (int, error) {
+	var lookups []map[string]string
+	if imdb := strings.TrimSpace(imdbID); imdb != "" {
+		lookups = append(lookups, map[string]string{"imdb": imdb})
+	}
+	if tmdbID > 0 {
+		lookups = append(lookups, map[string]string{"tmdb": strconv.Itoa(tmdbID)})
+	}
+	if len(lookups) == 0 {
+		return 0, nil
+	}
+	chain, err := s.resolveChainCached(ctx, 0, "series")
+	if err != nil {
+		return 0, fmt.Errorf("resolving provider chain: %w", err)
+	}
+	var searchErrs []error
+	for _, ids := range lookups {
+		for _, p := range chain {
+			sp, ok := p.(SearchProvider)
+			if !ok {
+				continue
+			}
+			results, err := sp.Search(ctx, SearchQuery{ContentType: "series", ProviderIDs: ids})
+			if err != nil {
+				searchErrs = append(searchErrs, fmt.Errorf("%s: %w", p.Slug(), err))
+				continue
+			}
+			for _, result := range results {
+				if !providerIDsConfirm(result.ProviderIDs, ids) || conflictsWithTMDBID(result.ProviderIDs, tmdbID) {
+					continue
+				}
+				if tvdbID, err := strconv.Atoi(strings.TrimSpace(result.ProviderIDs["tvdb"])); err == nil && tvdbID > 0 {
+					return tvdbID, nil
+				}
+			}
+		}
+	}
+	return 0, errors.Join(searchErrs...)
+}
+
+// conflictsWithTMDBID reports whether a result names a TMDB series other than
+// the one being resolved.
+func conflictsWithTMDBID(ids map[string]string, tmdbID int) bool {
+	got := strings.TrimSpace(ids["tmdb"])
+	return tmdbID > 0 && got != "" && got != strconv.Itoa(tmdbID)
+}
+
+// providerIDsConfirm reports whether got carries every ID in want.
+func providerIDsConfirm(got, want map[string]string) bool {
+	for key, value := range want {
+		if !strings.EqualFold(strings.TrimSpace(got[key]), value) {
+			return false
+		}
+	}
+	return true
+}
+
 func providerChainContentLevel(contentType string) string {
 	switch normalized := strings.ToLower(strings.TrimSpace(contentType)); normalized {
 	case "movie", "movies":
@@ -4356,6 +4673,30 @@ func providerChainContentLevel(contentType string) string {
 	default:
 		return normalized
 	}
+}
+
+func bulkUpsertWithFallback[T any](
+	items []T,
+	bulk func([]T) error,
+	onBulkErr func(error),
+	single func(T) error,
+	onRowErr func(T, error),
+) []T {
+	if err := bulk(items); err == nil {
+		return items
+	} else {
+		onBulkErr(err)
+	}
+
+	succeeded := make([]T, 0, len(items))
+	for _, item := range items {
+		if err := single(item); err != nil {
+			onRowErr(item, err)
+			continue
+		}
+		succeeded = append(succeeded, item)
+	}
+	return succeeded
 }
 
 // persistSeasonsAndEpisodes creates/updates seasons and episodes in the DB.
@@ -4375,6 +4716,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 	seriesID := series.ContentID
 	seasonIDs := make(map[int]string, len(seasons))
 	isCanonicalWrite := strings.EqualFold(canonicalLanguage, language)
+	imagesLocked := artworkLocked(series)
 	imageJobs := make([]EnqueueImageCacheJobInput, 0, len(seasons)+len(episodes))
 	fallbackProvider := primaryProviderID(providerIDs)
 	keyAttribution := func(sourcePath string) (string, string) {
@@ -4447,119 +4789,316 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 		})
 	}
 
-	// Phase 1: Upsert explicit seasons.
-	if len(seasons) > 0 {
+	type preparedSeasonWrite struct {
+		model    *models.Season
+		provider SeasonResult
+	}
+	type preparedEpisodeWrite struct {
+		model    *models.Episode
+		provider EpisodeResult
+	}
+
+	// One targeted read replaces the per-season point lookups without loading
+	// unrelated seasons during a scoped refresh. If it fails, each phase falls
+	// back to the original point-read behavior so a transient prefetch failure
+	// cannot turn existing rows into new identities.
+	existingSeasons := make(map[int]*models.Season)
+	seasonsPrefetched := false
+	if len(seasons) > 0 || len(episodes) > 0 {
+		seasonNumberSet := make(map[int]struct{}, len(seasons)+len(episodes))
+		seasonNumbers := make([]int32, 0, len(seasons)+len(episodes))
+		seasonNumbersValid := true
+		addSeasonNumber := func(seasonNumber int) {
+			if _, ok := seasonNumberSet[seasonNumber]; ok {
+				return
+			}
+			seasonNumberSet[seasonNumber] = struct{}{}
+			if !catalog.FitsPostgresInteger(seasonNumber) {
+				seasonNumbersValid = false
+				return
+			}
+			seasonNumbers = append(seasonNumbers, int32(seasonNumber))
+		}
 		for _, season := range seasons {
-			existingSeason, err := s.seasonRepo.GetBySeriesAndNumber(ctx, seriesID, season.SeasonNumber)
-			if err != nil && !errors.Is(err, catalog.ErrSeasonNotFound) {
-				slog.WarnContext(ctx, "metadata: failed to load season before upsert", "component", "metadata",
-					"series_id", seriesID, "season", season.SeasonNumber, "error", err)
-				continue
-			}
-			providerSeason := season
-			providerSeason.PosterPath, providerSeason.PosterSourcePath = splitProviderImagePath(season.PosterPath)
-			if existingSeason != nil && isCanonicalWrite {
-				mergedSeason := seasonResultFromModel(existingSeason)
-				MergeSeasonResult(&providerSeason, &mergedSeason, mergeMode)
-				// preserveCachedArtwork sees the raw provider path so a local
-				// file:// source still routes into *_source_path here.
-				nextPath, nextThumbhash, nextSourcePath := preserveCachedArtwork(
-					season.PosterPath,
-					season.PosterThumbhash,
-					existingSeason.PosterPath,
-					existingSeason.PosterSourcePath,
-					existingSeason.PosterThumbhash,
-				)
-				mergedSeason.PosterPath = nextPath
-				mergedSeason.PosterThumbhash = nextThumbhash
-				mergedSeason.PosterSourcePath = nextSourcePath
-				providerSeason = mergedSeason
-			}
-			dbSeason := &models.Season{
-				SeriesID:                seriesID,
-				SeasonNumber:            providerSeason.SeasonNumber,
-				Title:                   providerSeason.Title,
-				DefaultMetadataLanguage: canonicalLanguage,
-				Overview:                providerSeason.Overview,
-				PosterPath:              providerSeason.PosterPath,
-				PosterSourcePath:        providerSeason.PosterSourcePath,
-				PosterThumbhash:         providerSeason.PosterThumbhash,
-				MetadataSource:          "provider",
-			}
-			if existingSeason != nil {
-				dbSeason.ContentID = existingSeason.ContentID
-				if !isCanonicalWrite {
-					dbSeason.Title = existingSeason.Title
-					dbSeason.Overview = existingSeason.Overview
-					dbSeason.PosterPath = existingSeason.PosterPath
-					dbSeason.PosterSourcePath = existingSeason.PosterSourcePath
-					dbSeason.PosterThumbhash = existingSeason.PosterThumbhash
-					dbSeason.DefaultMetadataLanguage = existingSeason.DefaultMetadataLanguage
-				}
+			addSeasonNumber(season.SeasonNumber)
+		}
+		for _, episode := range episodes {
+			addSeasonNumber(episode.SeasonNumber)
+		}
+
+		if seasonNumbersValid {
+			storedSeasons, err := s.seasonRepo.ListBySeriesAndNumbers(ctx, seriesID, seasonNumbers)
+			if err != nil {
+				slog.WarnContext(ctx, "metadata: failed to prefetch seasons before bulk upsert", "component", "metadata",
+					"series_id", seriesID, "error", err)
 			} else {
-				sid, genErr := deriveSeasonContentID(seriesID, providerSeason.SeasonNumber)
-				if genErr != nil {
-					slog.WarnContext(ctx, "metadata: failed to generate season id", "component", "metadata",
-						"series_id", seriesID, "season", season.SeasonNumber, "error", genErr)
-					continue
-				}
-				dbSeason.ContentID = sid
-			}
-			if providerSeason.AirDate != "" {
-				if t, parseErr := time.Parse("2006-01-02", providerSeason.AirDate); parseErr == nil {
-					dbSeason.AirDate = &t
-				}
-			}
-			// An artwork-only season (poster but no season.nfo) would otherwise
-			// persist a blank title and then be skipped by fallback synthesis
-			// (which only fills not-yet-existing rows), so default it to the same
-			// "Season N"/"Specials" label synthesis uses. Graceful degradation.
-			if dbSeason.Title == "" {
-				dbSeason.Title = fallbackSeasonTitle(dbSeason.SeasonNumber)
-			}
-			if err := s.seasonRepo.Upsert(ctx, dbSeason); err != nil {
-				slog.WarnContext(ctx, "metadata: failed to upsert season", "component", "metadata",
-					"series_id", seriesID, "season", season.SeasonNumber, "error", err)
-				continue
-			}
-			seasonIDs[dbSeason.SeasonNumber] = dbSeason.ContentID
-			addSeasonImageJob(dbSeason)
-			if !isCanonicalWrite && s.seasonLocalizationRepo != nil {
-				existingLoc, locErr := s.seasonLocalizationRepo.Get(ctx, dbSeason.ContentID, language)
-				if locErr != nil {
-					slog.WarnContext(ctx, "metadata: failed to load season localization", "component", "metadata",
-						"series_id", seriesID, "season", season.SeasonNumber, "error", locErr)
-				}
-				loc := buildSeasonLocalizationRecord(
-					existingLoc,
-					dbSeason.ContentID,
-					language,
-					providerSeason,
-					mergeMode,
-				)
-				if err := s.seasonLocalizationRepo.Upsert(ctx, loc); err != nil {
-					slog.WarnContext(ctx, "metadata: failed to upsert season localization", "component", "metadata",
-						"series_id", seriesID, "season", season.SeasonNumber, "error", err)
-				} else {
-					addSeasonLocalizationImageJob(dbSeason, loc)
+				seasonsPrefetched = true
+				for _, storedSeason := range storedSeasons {
+					if storedSeason != nil {
+						existingSeasons[storedSeason.SeasonNumber] = storedSeason
+					}
 				}
 			}
 		}
 	}
+	loadSeason := func(seasonNumber int, forcePointRead bool) (*models.Season, error) {
+		if seasonsPrefetched && !forcePointRead {
+			if storedSeason := existingSeasons[seasonNumber]; storedSeason != nil {
+				return storedSeason, nil
+			}
+			return nil, catalog.ErrSeasonNotFound
+		}
+		return s.seasonRepo.GetBySeriesAndNumber(ctx, seriesID, seasonNumber)
+	}
 
-	// Phase 2: Identify implicit seasons referenced by episodes but not returned
-	// explicitly by the provider.
+	prepareExplicitSeason := func(season SeasonResult, forcePointRead bool) (preparedSeasonWrite, bool) {
+		existingSeason, err := loadSeason(season.SeasonNumber, forcePointRead)
+		if err != nil && !errors.Is(err, catalog.ErrSeasonNotFound) {
+			slog.WarnContext(ctx, "metadata: failed to load season before upsert", "component", "metadata",
+				"series_id", seriesID, "season", season.SeasonNumber, "error", err)
+			return preparedSeasonWrite{}, false
+		}
+		providerSeason := season
+		providerSeason.PosterPath, providerSeason.PosterSourcePath = splitProviderImagePath(season.PosterPath)
+		if existingSeason != nil && isCanonicalWrite {
+			mergedSeason := seasonResultFromModel(existingSeason)
+			MergeSeasonResult(&providerSeason, &mergedSeason, mergeMode)
+			// preserveCachedArtwork sees the raw provider path so a local
+			// file:// source still routes into *_source_path here.
+			nextPath, nextThumbhash, nextSourcePath := preserveCachedArtwork(
+				season.PosterPath,
+				season.PosterThumbhash,
+				existingSeason.PosterPath,
+				existingSeason.PosterSourcePath,
+				existingSeason.PosterThumbhash,
+			)
+			if imagesLocked && existingSeason.PosterPath != "" {
+				nextPath = existingSeason.PosterPath
+				nextThumbhash = existingSeason.PosterThumbhash
+				nextSourcePath = existingSeason.PosterSourcePath
+			}
+			mergedSeason.PosterPath = nextPath
+			mergedSeason.PosterThumbhash = nextThumbhash
+			mergedSeason.PosterSourcePath = nextSourcePath
+			providerSeason = mergedSeason
+		}
+		dbSeason := &models.Season{
+			SeriesID:                seriesID,
+			SeasonNumber:            providerSeason.SeasonNumber,
+			Title:                   providerSeason.Title,
+			DefaultMetadataLanguage: canonicalLanguage,
+			Overview:                providerSeason.Overview,
+			PosterPath:              providerSeason.PosterPath,
+			PosterSourcePath:        providerSeason.PosterSourcePath,
+			PosterThumbhash:         providerSeason.PosterThumbhash,
+			MetadataSource:          "provider",
+		}
+		if existingSeason != nil {
+			dbSeason.ContentID = existingSeason.ContentID
+			if !isCanonicalWrite {
+				dbSeason.Title = existingSeason.Title
+				dbSeason.Overview = existingSeason.Overview
+				dbSeason.PosterPath = existingSeason.PosterPath
+				dbSeason.PosterSourcePath = existingSeason.PosterSourcePath
+				dbSeason.PosterThumbhash = existingSeason.PosterThumbhash
+				dbSeason.DefaultMetadataLanguage = existingSeason.DefaultMetadataLanguage
+			}
+		} else {
+			sid, genErr := deriveSeasonContentID(seriesID, providerSeason.SeasonNumber)
+			if genErr != nil {
+				slog.WarnContext(ctx, "metadata: failed to generate season id", "component", "metadata",
+					"series_id", seriesID, "season", season.SeasonNumber, "error", genErr)
+				return preparedSeasonWrite{}, false
+			}
+			dbSeason.ContentID = sid
+		}
+		if providerSeason.AirDate != "" {
+			if t, parseErr := time.Parse("2006-01-02", providerSeason.AirDate); parseErr == nil {
+				dbSeason.AirDate = &t
+			}
+		}
+		// An artwork-only season (poster but no season.nfo) would otherwise
+		// persist a blank title and then be skipped by fallback synthesis.
+		if dbSeason.Title == "" {
+			dbSeason.Title = fallbackSeasonTitle(dbSeason.SeasonNumber)
+		}
+		return preparedSeasonWrite{model: dbSeason, provider: providerSeason}, true
+	}
+
+	finishExplicitSeasonSequential := func(write preparedSeasonWrite) {
+		dbSeason := write.model
+		seasonIDs[dbSeason.SeasonNumber] = dbSeason.ContentID
+		addSeasonImageJob(dbSeason)
+		if !isCanonicalWrite && s.seasonLocalizationRepo != nil {
+			existingLoc, locErr := s.seasonLocalizationRepo.Get(ctx, dbSeason.ContentID, language)
+			if locErr != nil {
+				slog.WarnContext(ctx, "metadata: failed to load season localization", "component", "metadata",
+					"series_id", seriesID, "season", dbSeason.SeasonNumber, "error", locErr)
+			}
+			loc := buildSeasonLocalizationRecord(
+				existingLoc,
+				dbSeason.ContentID,
+				language,
+				write.provider,
+				mergeMode,
+			)
+			if err := s.seasonLocalizationRepo.Upsert(ctx, loc); err != nil {
+				slog.WarnContext(ctx, "metadata: failed to upsert season localization", "component", "metadata",
+					"series_id", seriesID, "season", dbSeason.SeasonNumber, "error", err)
+			} else {
+				addSeasonLocalizationImageJob(dbSeason, loc)
+			}
+		}
+	}
+
+	upsertExplicitModel := func(write preparedSeasonWrite) bool {
+		if err := s.seasonRepo.Upsert(ctx, write.model); err != nil {
+			slog.WarnContext(ctx, "metadata: failed to upsert season", "component", "metadata",
+				"series_id", seriesID, "season", write.model.SeasonNumber, "error", err)
+			return false
+		}
+		return true
+	}
+
+	finishExplicitSeasons := func(writes []preparedSeasonWrite) {
+		for _, write := range writes {
+			seasonIDs[write.model.SeasonNumber] = write.model.ContentID
+		}
+
+		var localizations []*models.SeasonLocalization
+		localizationPersisted := make([]bool, len(writes))
+		if !isCanonicalWrite && s.seasonLocalizationRepo != nil && len(writes) > 0 {
+			seasonContentIDs := make([]string, len(writes))
+			for i, write := range writes {
+				seasonContentIDs[i] = write.model.ContentID
+			}
+			existingLocalizations, err := s.seasonLocalizationRepo.GetBySeasonIDs(ctx, seasonContentIDs, language)
+			if err != nil {
+				slog.WarnContext(ctx, "metadata: failed to batch load season localizations; falling back to point reads",
+					"component", "metadata", "series_id", seriesID, "count", len(writes), "error", err)
+				existingLocalizations = make(map[string]*models.SeasonLocalization, len(writes))
+				for _, write := range writes {
+					existingLoc, locErr := s.seasonLocalizationRepo.Get(ctx, write.model.ContentID, language)
+					if locErr != nil {
+						slog.WarnContext(ctx, "metadata: failed to load season localization", "component", "metadata",
+							"series_id", seriesID, "season", write.model.SeasonNumber, "error", locErr)
+						continue
+					}
+					existingLocalizations[write.model.ContentID] = existingLoc
+				}
+			}
+
+			localizations = make([]*models.SeasonLocalization, len(writes))
+			for i, write := range writes {
+				localizations[i] = buildSeasonLocalizationRecord(
+					existingLocalizations[write.model.ContentID],
+					write.model.ContentID,
+					language,
+					write.provider,
+					mergeMode,
+				)
+			}
+			localizationIndexes := make(map[*models.SeasonLocalization]int, len(localizations))
+			for i, loc := range localizations {
+				localizationIndexes[loc] = i
+			}
+			persistedLocalizations := bulkUpsertWithFallback(localizations,
+				func(items []*models.SeasonLocalization) error {
+					return s.seasonLocalizationRepo.BulkUpsert(ctx, items)
+				},
+				func(err error) {
+					slog.WarnContext(ctx, "metadata: failed to bulk upsert season localizations; falling back to single-row writes",
+						"component", "metadata", "series_id", seriesID, "count", len(localizations), "error", err)
+				},
+				func(loc *models.SeasonLocalization) error {
+					return s.seasonLocalizationRepo.Upsert(ctx, loc)
+				},
+				func(loc *models.SeasonLocalization, err error) {
+					i := localizationIndexes[loc]
+					slog.WarnContext(ctx, "metadata: failed to upsert season localization", "component", "metadata",
+						"series_id", seriesID, "season", writes[i].model.SeasonNumber, "error", err)
+				},
+			)
+			for _, loc := range persistedLocalizations {
+				localizationPersisted[localizationIndexes[loc]] = true
+			}
+		}
+
+		for i, write := range writes {
+			addSeasonImageJob(write.model)
+			if localizationPersisted[i] {
+				addSeasonLocalizationImageJob(write.model, localizations[i])
+			}
+		}
+	}
+
+	// Phase 1: Upsert explicit seasons. Duplicate natural keys are processed
+	// sequentially because PostgreSQL cannot affect one conflict row twice in a
+	// single INSERT, and the original path allowed last-writer behavior.
+	if len(seasons) > 0 {
+		seenSeasonNumbers := make(map[int]struct{}, len(seasons))
+		hasDuplicateSeason := false
+		for _, season := range seasons {
+			if _, ok := seenSeasonNumbers[season.SeasonNumber]; ok {
+				hasDuplicateSeason = true
+				break
+			}
+			seenSeasonNumbers[season.SeasonNumber] = struct{}{}
+		}
+
+		if hasDuplicateSeason {
+			for _, season := range seasons {
+				if write, ok := prepareExplicitSeason(season, true); ok {
+					if upsertExplicitModel(write) {
+						finishExplicitSeasonSequential(write)
+					}
+				}
+			}
+		} else {
+			writes := make([]preparedSeasonWrite, 0, len(seasons))
+			modelsToPersist := make([]*models.Season, 0, len(seasons))
+			for _, season := range seasons {
+				if write, ok := prepareExplicitSeason(season, false); ok {
+					writes = append(writes, write)
+					modelsToPersist = append(modelsToPersist, write.model)
+				}
+			}
+			if len(modelsToPersist) > 0 {
+				successfulWrites := bulkUpsertWithFallback(writes,
+					func([]preparedSeasonWrite) error {
+						return s.seasonRepo.BulkUpsert(ctx, modelsToPersist)
+					},
+					func(err error) {
+						slog.WarnContext(ctx, "metadata: failed to bulk upsert seasons; falling back to single-row writes",
+							"component", "metadata", "series_id", seriesID, "count", len(modelsToPersist), "error", err)
+					},
+					func(write preparedSeasonWrite) error {
+						if upsertExplicitModel(write) {
+							return nil
+						}
+						return errors.New("explicit season upsert failed")
+					},
+					func(preparedSeasonWrite, error) {},
+				)
+				finishExplicitSeasons(successfulWrites)
+			}
+		}
+	}
+
+	// Phase 2: Persist implicit seasons referenced by episodes but absent from
+	// the successfully persisted explicit-season map. Keeping this as a second
+	// batch preserves the existing retry opportunity when an explicit write
+	// fails but an episode still references that season.
 	if len(episodes) > 0 {
 		implicitSeen := make(map[int]bool)
+		writes := make([]preparedSeasonWrite, 0)
+		modelsToPersist := make([]*models.Season, 0)
 		for _, ep := range episodes {
 			if _, ok := seasonIDs[ep.SeasonNumber]; ok || implicitSeen[ep.SeasonNumber] {
 				continue
 			}
 			implicitSeen[ep.SeasonNumber] = true
-			title := fmt.Sprintf("Season %d", ep.SeasonNumber)
-			if ep.SeasonNumber == 0 {
-				title = "Specials"
-			}
+			title := fallbackSeasonTitle(ep.SeasonNumber)
 			seasonModel := &models.Season{
 				SeriesID:                seriesID,
 				SeasonNumber:            ep.SeasonNumber,
@@ -4567,7 +5106,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 				DefaultMetadataLanguage: canonicalLanguage,
 				MetadataSource:          "provider",
 			}
-			if existingSeason, err := s.seasonRepo.GetBySeriesAndNumber(ctx, seriesID, ep.SeasonNumber); err == nil {
+			if existingSeason, err := loadSeason(ep.SeasonNumber, false); err == nil && existingSeason != nil {
 				seasonModel.ContentID = existingSeason.ContentID
 				seasonModel.DefaultMetadataLanguage = existingSeason.DefaultMetadataLanguage
 				if isCanonicalWrite {
@@ -4603,24 +5142,116 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 				}
 				seasonModel.ContentID = sid
 			}
-			if err := s.seasonRepo.Upsert(ctx, seasonModel); err != nil {
-				slog.WarnContext(ctx, "metadata: failed to upsert implicit season", "component", "metadata",
-					"series_id", seriesID, "season", ep.SeasonNumber, "error", err)
-				continue
+			write := preparedSeasonWrite{model: seasonModel}
+			writes = append(writes, write)
+			modelsToPersist = append(modelsToPersist, seasonModel)
+		}
+
+		finishImplicitSeason := func(write preparedSeasonWrite) {
+			seasonIDs[write.model.SeasonNumber] = write.model.ContentID
+			addSeasonImageJob(write.model)
+		}
+		upsertImplicitOne := func(write preparedSeasonWrite) error {
+			if err := s.seasonRepo.Upsert(ctx, write.model); err != nil {
+				return err
 			}
-			seasonIDs[seasonModel.SeasonNumber] = seasonModel.ContentID
-			addSeasonImageJob(seasonModel)
+			return nil
+		}
+
+		if len(modelsToPersist) > 0 {
+			bulkFailed := false
+			successfulWrites := bulkUpsertWithFallback(writes,
+				func([]preparedSeasonWrite) error {
+					return s.seasonRepo.BulkUpsert(ctx, modelsToPersist)
+				},
+				func(err error) {
+					bulkFailed = true
+					slog.WarnContext(ctx, "metadata: failed to bulk upsert implicit seasons; falling back to single-row writes",
+						"component", "metadata", "series_id", seriesID, "count", len(modelsToPersist), "error", err)
+				},
+				func(write preparedSeasonWrite) error {
+					if err := upsertImplicitOne(write); err != nil {
+						return err
+					}
+					finishImplicitSeason(write)
+					return nil
+				},
+				func(write preparedSeasonWrite, err error) {
+					slog.WarnContext(ctx, "metadata: failed to upsert implicit season", "component", "metadata",
+						"series_id", seriesID, "season", write.model.SeasonNumber, "error", err)
+				},
+			)
+			if !bulkFailed {
+				for _, write := range successfulWrites {
+					finishImplicitSeason(write)
+				}
+			}
 		}
 	}
 
-	// Phase 3: Upsert episodes.
+	// Phase 3: Prefetch the requested episode rows, including provider-only rows
+	// without episode_libraries membership, then persist the prepared models as
+	// one transaction-backed batch.
 	if len(episodes) > 0 {
+		seenEpisodeKeys := make(map[episodeResultKey]struct{}, len(episodes))
+		seasonNumbers := make([]int32, 0, len(episodes))
+		episodeNumbers := make([]int32, 0, len(episodes))
+		hasDuplicateEpisode := false
+		episodeNumbersValid := true
 		for _, ep := range episodes {
-			existingEpisode, err := s.episodeRepo.GetBySeriesAndNumber(ctx, seriesID, ep.SeasonNumber, ep.EpisodeNumber)
+			key := episodeResultKey{seasonNumber: ep.SeasonNumber, episodeNumber: ep.EpisodeNumber}
+			if _, ok := seenEpisodeKeys[key]; ok {
+				hasDuplicateEpisode = true
+				continue
+			}
+			seenEpisodeKeys[key] = struct{}{}
+			if !catalog.FitsPostgresInteger(ep.SeasonNumber) || !catalog.FitsPostgresInteger(ep.EpisodeNumber) {
+				episodeNumbersValid = false
+				continue
+			}
+			seasonNumbers = append(seasonNumbers, int32(ep.SeasonNumber))
+			episodeNumbers = append(episodeNumbers, int32(ep.EpisodeNumber))
+		}
+
+		existingEpisodes := make(map[episodeResultKey]*models.Episode)
+		episodesPrefetched := false
+		if !hasDuplicateEpisode && episodeNumbersValid {
+			storedEpisodes, err := s.episodeRepo.ListBySeriesAndNumbers(ctx, seriesID, seasonNumbers, episodeNumbers)
+			if err != nil {
+				slog.WarnContext(ctx, "metadata: failed to prefetch episodes before bulk upsert", "component", "metadata",
+					"series_id", seriesID, "error", err)
+			} else {
+				episodesPrefetched = true
+				for _, storedEpisode := range storedEpisodes {
+					if storedEpisode != nil {
+						existingEpisodes[episodeResultKey{
+							seasonNumber:  storedEpisode.SeasonNumber,
+							episodeNumber: storedEpisode.EpisodeNumber,
+						}] = storedEpisode
+					}
+				}
+			}
+		}
+		loadEpisode := func(ep EpisodeResult, forcePointRead bool) (*models.Episode, error) {
+			if episodesPrefetched && !forcePointRead {
+				storedEpisode := existingEpisodes[episodeResultKey{
+					seasonNumber:  ep.SeasonNumber,
+					episodeNumber: ep.EpisodeNumber,
+				}]
+				if storedEpisode != nil {
+					return storedEpisode, nil
+				}
+				return nil, catalog.ErrEpisodeNotFound
+			}
+			return s.episodeRepo.GetBySeriesAndNumber(ctx, seriesID, ep.SeasonNumber, ep.EpisodeNumber)
+		}
+
+		prepareEpisode := func(ep EpisodeResult, forcePointRead bool) (preparedEpisodeWrite, bool) {
+			existingEpisode, err := loadEpisode(ep, forcePointRead)
 			if err != nil && !errors.Is(err, catalog.ErrEpisodeNotFound) {
 				slog.WarnContext(ctx, "metadata: failed to load episode before upsert", "component", "metadata",
 					"series_id", seriesID, "season", ep.SeasonNumber, "episode", ep.EpisodeNumber, "error", err)
-				continue
+				return preparedEpisodeWrite{}, false
 			}
 			providerEpisode := ep
 			providerEpisode.StillPath, providerEpisode.StillSourcePath = splitProviderImagePath(ep.StillPath)
@@ -4636,6 +5267,11 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 					existingEpisode.StillSourcePath,
 					existingEpisode.StillThumbhash,
 				)
+				if imagesLocked && existingEpisode.StillPath != "" {
+					nextPath = existingEpisode.StillPath
+					nextThumbhash = existingEpisode.StillThumbhash
+					nextSourcePath = existingEpisode.StillSourcePath
+				}
 				mergedEpisode.StillPath = nextPath
 				mergedEpisode.StillThumbhash = nextThumbhash
 				mergedEpisode.StillSourcePath = nextSourcePath
@@ -4674,7 +5310,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 					slog.WarnContext(ctx, "metadata: failed to generate episode id", "component", "metadata",
 						"series_id", seriesID, "season", ep.SeasonNumber,
 						"episode", ep.EpisodeNumber, "error", genErr)
-					continue
+					return preparedEpisodeWrite{}, false
 				}
 				dbEp.ContentID = eid
 			}
@@ -4691,41 +5327,141 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 				v := providerEpisode.Ratings.IMDB
 				dbEp.RatingIMDB = &v
 			}
-			// An artwork-only episode (a -thumb.jpg but no episode .nfo) would
-			// otherwise persist a blank title and then be skipped by fallback
-			// synthesis, so default it to the same "Episode N" label synthesis
-			// uses. Graceful degradation for partially curated libraries.
 			if dbEp.Title == "" {
 				dbEp.Title = fallbackEpisodeTitle(dbEp.EpisodeNumber)
 			}
-			if err := s.episodeRepo.Upsert(ctx, dbEp); err != nil {
-				slog.WarnContext(ctx, "metadata: failed to upsert episode", "component", "metadata",
-					"series_id", seriesID, "season", ep.SeasonNumber,
-					"episode", ep.EpisodeNumber, "error", err)
-				continue
-			}
-			addEpisodeImageJob(dbEp)
+			return preparedEpisodeWrite{model: dbEp, provider: providerEpisode}, true
+		}
+
+		finishEpisodeSequential := func(write preparedEpisodeWrite) {
+			addEpisodeImageJob(write.model)
 			if !isCanonicalWrite && s.episodeLocalizationRepo != nil {
-				existingLoc, locErr := s.episodeLocalizationRepo.Get(ctx, dbEp.ContentID, language)
+				existingLoc, locErr := s.episodeLocalizationRepo.Get(ctx, write.model.ContentID, language)
 				if locErr != nil {
 					slog.WarnContext(ctx, "metadata: failed to load episode localization", "component", "metadata",
-						"series_id", seriesID, "season", ep.SeasonNumber,
-						"episode", ep.EpisodeNumber, "error", locErr)
+						"series_id", seriesID, "season", write.model.SeasonNumber,
+						"episode", write.model.EpisodeNumber, "error", locErr)
 				}
 				if err := s.episodeLocalizationRepo.Upsert(ctx, buildEpisodeLocalizationRecord(
 					existingLoc,
-					dbEp.ContentID,
+					write.model.ContentID,
 					language,
-					providerEpisode,
+					write.provider,
 					mergeMode,
 				)); err != nil {
 					slog.WarnContext(ctx, "metadata: failed to upsert episode localization", "component", "metadata",
-						"series_id", seriesID, "season", ep.SeasonNumber,
-						"episode", ep.EpisodeNumber, "error", err)
+						"series_id", seriesID, "season", write.model.SeasonNumber,
+						"episode", write.model.EpisodeNumber, "error", err)
 				}
 			}
 		}
+		upsertEpisodeModel := func(write preparedEpisodeWrite) bool {
+			if err := s.episodeRepo.Upsert(ctx, write.model); err != nil {
+				slog.WarnContext(ctx, "metadata: failed to upsert episode", "component", "metadata",
+					"series_id", seriesID, "season", write.model.SeasonNumber,
+					"episode", write.model.EpisodeNumber, "error", err)
+				return false
+			}
+			return true
+		}
+		finishEpisodes := func(writes []preparedEpisodeWrite) {
+			if !isCanonicalWrite && s.episodeLocalizationRepo != nil && len(writes) > 0 {
+				episodeContentIDs := make([]string, len(writes))
+				for i, write := range writes {
+					episodeContentIDs[i] = write.model.ContentID
+				}
+				existingLocalizations, err := s.episodeLocalizationRepo.GetByEpisodeIDs(ctx, episodeContentIDs, language)
+				if err != nil {
+					slog.WarnContext(ctx, "metadata: failed to batch load episode localizations; falling back to point reads",
+						"component", "metadata", "series_id", seriesID, "count", len(writes), "error", err)
+					existingLocalizations = make(map[string]*models.EpisodeLocalization, len(writes))
+					for _, write := range writes {
+						existingLoc, locErr := s.episodeLocalizationRepo.Get(ctx, write.model.ContentID, language)
+						if locErr != nil {
+							slog.WarnContext(ctx, "metadata: failed to load episode localization", "component", "metadata",
+								"series_id", seriesID, "season", write.model.SeasonNumber,
+								"episode", write.model.EpisodeNumber, "error", locErr)
+							continue
+						}
+						existingLocalizations[write.model.ContentID] = existingLoc
+					}
+				}
 
+				localizations := make([]*models.EpisodeLocalization, len(writes))
+				for i, write := range writes {
+					localizations[i] = buildEpisodeLocalizationRecord(
+						existingLocalizations[write.model.ContentID],
+						write.model.ContentID,
+						language,
+						write.provider,
+						mergeMode,
+					)
+				}
+				localizationIndexes := make(map[*models.EpisodeLocalization]int, len(localizations))
+				for i, loc := range localizations {
+					localizationIndexes[loc] = i
+				}
+				_ = bulkUpsertWithFallback(localizations,
+					func(items []*models.EpisodeLocalization) error {
+						return s.episodeLocalizationRepo.BulkUpsert(ctx, items)
+					},
+					func(err error) {
+						slog.WarnContext(ctx, "metadata: failed to bulk upsert episode localizations; falling back to single-row writes",
+							"component", "metadata", "series_id", seriesID, "count", len(localizations), "error", err)
+					},
+					func(loc *models.EpisodeLocalization) error {
+						return s.episodeLocalizationRepo.Upsert(ctx, loc)
+					},
+					func(loc *models.EpisodeLocalization, err error) {
+						i := localizationIndexes[loc]
+						slog.WarnContext(ctx, "metadata: failed to upsert episode localization", "component", "metadata",
+							"series_id", seriesID, "season", writes[i].model.SeasonNumber,
+							"episode", writes[i].model.EpisodeNumber, "error", err)
+					},
+				)
+			}
+			for _, write := range writes {
+				addEpisodeImageJob(write.model)
+			}
+		}
+
+		if hasDuplicateEpisode {
+			for _, ep := range episodes {
+				if write, ok := prepareEpisode(ep, true); ok {
+					if upsertEpisodeModel(write) {
+						finishEpisodeSequential(write)
+					}
+				}
+			}
+		} else {
+			writes := make([]preparedEpisodeWrite, 0, len(episodes))
+			modelsToPersist := make([]*models.Episode, 0, len(episodes))
+			for _, ep := range episodes {
+				if write, ok := prepareEpisode(ep, false); ok {
+					writes = append(writes, write)
+					modelsToPersist = append(modelsToPersist, write.model)
+				}
+			}
+			if len(modelsToPersist) > 0 {
+				successfulWrites := bulkUpsertWithFallback(writes,
+					func([]preparedEpisodeWrite) error {
+						return s.episodeRepo.BulkUpsert(ctx, seriesID, modelsToPersist)
+					},
+					func(err error) {
+						slog.WarnContext(ctx, "metadata: failed to bulk upsert episodes; falling back to single-row writes",
+							"component", "metadata", "series_id", seriesID, "count", len(modelsToPersist), "error", err)
+					},
+					func(write preparedEpisodeWrite) error {
+						if upsertEpisodeModel(write) {
+							return nil
+						}
+						return errors.New("episode upsert failed")
+					},
+					func(preparedEpisodeWrite, error) {},
+				)
+				finishEpisodes(successfulWrites)
+			}
+		}
 	}
 
 	s.enqueueSeriesChildImages(ctx, seriesID, imageJobs)
@@ -4767,10 +5503,17 @@ func (s *MetadataService) synthesizeFallbackSeriesStructure(ctx context.Context,
 	if err != nil {
 		return fmt.Errorf("listing unlinked series files: %w", err)
 	}
+	rootsByFolder, err := s.configuredNamingRootsForFiles(ctx, files)
+	if err != nil {
+		return err
+	}
 
 	seasonIDs := make(map[int]string)
 	for _, file := range files {
-		seasonNum, episodeNum, ok := fallbackEpisodeNumbers(file)
+		if file == nil {
+			continue
+		}
+		seasonNum, episodeNum, ok := fallbackEpisodeNumbers(file, rootsByFolder[file.MediaFolderID]...)
 		if !ok {
 			continue
 		}
@@ -4884,10 +5627,17 @@ func (s *MetadataService) ensureSeriesEpisodeLinksCore(ctx context.Context, seri
 	if len(files) == 0 {
 		return nil
 	}
+	rootsByFolder, err := s.configuredNamingRootsForFiles(ctx, files)
+	if err != nil {
+		return err
+	}
 
 	needsSynthesis := false
 	for _, file := range files {
-		seasonNum, episodeNum, ok := fallbackEpisodeNumbers(file)
+		if file == nil {
+			continue
+		}
+		seasonNum, episodeNum, ok := fallbackEpisodeNumbers(file, rootsByFolder[file.MediaFolderID]...)
 		if !ok {
 			continue
 		}
@@ -4966,18 +5716,37 @@ func (s *MetadataService) linkSeriesFilesToEpisodesWithOptions(ctx context.Conte
 	if err != nil {
 		return fmt.Errorf("loading unlinked series files: %w", err)
 	}
+	rootsByFolder, err := s.configuredNamingRootsForFiles(ctx, files)
+	if err != nil {
+		return err
+	}
 
 	hints := make(map[int]episodeLinkHint, len(files))
 	airDateSet := make(map[string]struct{})
+	needsUnseasonedLookup := false
 	for _, file := range files {
-		hint := parseEpisodeLinkHint(file)
+		if file == nil {
+			continue
+		}
+		hint := parseEpisodeLinkHint(file, rootsByFolder[file.MediaFolderID]...)
 		if !hint.ok {
 			continue
 		}
 		hints[file.ID] = hint
 		if hint.airDate != "" {
 			airDateSet[hint.airDate] = struct{}{}
+		} else if !hint.seasonKnown {
+			needsUnseasonedLookup = true
 		}
+	}
+
+	var unseasonedEpisodes unseasonedEpisodeIndex
+	if needsUnseasonedLookup {
+		seriesEpisodes, err := s.episodeRepo.ListBySeries(ctx, seriesID)
+		if err != nil {
+			return fmt.Errorf("loading episodes for unseasoned file matching: %w", err)
+		}
+		unseasonedEpisodes = newUnseasonedEpisodeIndex(seriesEpisodes)
 	}
 
 	episodesByAirDate := map[string][]*models.Episode{}
@@ -5025,6 +5794,14 @@ func (s *MetadataService) linkSeriesFilesToEpisodesWithOptions(ctx context.Conte
 						"air_date", hint.airDate,
 						"matches", len(candidates))
 				}
+				continue
+			}
+			episode = selected
+			seasonNum = episode.SeasonNumber
+			episodeNum = episode.EpisodeNumber
+		} else if !hint.seasonKnown {
+			selected, ok := unseasonedEpisodes.resolve(hint.episodeNum, extractEpisodeMatchTitle(file.FilePath, rootsByFolder[file.MediaFolderID]...))
+			if !ok {
 				continue
 			}
 			episode = selected
@@ -5121,10 +5898,11 @@ func filterEpisodesByProviderID(candidates []*models.Episode, provider string) [
 }
 
 type episodeLinkHint struct {
-	seasonNum  int
-	episodeNum int
-	airDate    string
-	ok         bool
+	seasonNum   int
+	seasonKnown bool
+	episodeNum  int
+	airDate     string
+	ok          bool
 }
 
 func (s *MetadataService) updateEpisodeMetadataState(ctx context.Context, seriesID string, incomplete bool, lastCheckedAt *time.Time) {
@@ -5148,6 +5926,19 @@ func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context,
 		return
 	}
 
+	// Observe debt versions before reading completeness so a concurrent refresh's
+	// new or updated debt cannot be cleared using a stale episode snapshot.
+	var debtVersions map[string]string
+	if s.refreshDebtRepo != nil {
+		var err error
+		debtVersions, err = s.refreshDebtRepo.SnapshotEpisodeDebts(ctx, seriesID)
+		if err != nil {
+			slog.WarnContext(ctx, "metadata: failed to snapshot episode refresh debt", "component", "metadata",
+				"series_id", seriesID, "error", err)
+			return
+		}
+	}
+
 	episodes, err := s.episodeRepo.ListBySeries(ctx, seriesID)
 	if err != nil {
 		slog.WarnContext(ctx, "metadata: failed to list series episodes for completeness check", "component", "metadata",
@@ -5155,11 +5946,27 @@ func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context,
 		return
 	}
 
-	incomplete := false
+	var completeEpisodeIDs []string
+	var actionableEpisodes []*models.Episode
 	for _, episode := range episodes {
-		if EpisodeHasActionableMetadataDebt(episode, now) {
-			incomplete = true
+		if !EpisodeHasActionableMetadataDebt(episode, now) {
+			if s.refreshDebtRepo != nil && episode != nil {
+				if id := strings.TrimSpace(episode.ContentID); id != "" {
+					completeEpisodeIDs = append(completeEpisodeIDs, id)
+				}
+			}
+			continue
 		}
+		actionableEpisodes = append(actionableEpisodes, episode)
+	}
+	if len(completeEpisodeIDs) > 0 {
+		if err := s.refreshDebtRepo.DeleteEpisodeDebts(ctx, completeEpisodeIDs, debtVersions); err != nil {
+			slog.WarnContext(ctx, "metadata: failed to clear complete episode refresh debt", "component", "metadata",
+				"series_id", seriesID, "episode_count", len(completeEpisodeIDs), "error", err)
+		}
+	}
+
+	for _, episode := range actionableEpisodes {
 		if err := s.syncVisibleEpisodeRefreshDebt(ctx, episode, now); err != nil {
 			slog.WarnContext(ctx, "metadata: failed to sync episode refresh debt", "component", "metadata",
 				"series_id", seriesID,
@@ -5168,8 +5975,7 @@ func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context,
 		}
 	}
 
-	lastCheckedAt := now
-	s.updateEpisodeMetadataState(ctx, seriesID, incomplete, &lastCheckedAt)
+	s.updateEpisodeMetadataState(ctx, seriesID, len(actionableEpisodes) > 0, new(now))
 }
 
 func (s *MetadataService) syncVisibleEpisodeRefreshDebt(ctx context.Context, episode *models.Episode, now time.Time) error {
@@ -5195,28 +6001,28 @@ func (s *MetadataService) syncVisibleEpisodeRefreshDebt(ctx context.Context, epi
 	)
 }
 
-func fallbackEpisodeNumbers(file *models.MediaFile) (seasonNum int, episodeNum int, ok bool) {
-	hint := parseEpisodeLinkHint(file)
-	if !hint.ok || hint.airDate != "" {
+func fallbackEpisodeNumbers(file *models.MediaFile, libraryRoots ...string) (seasonNum int, episodeNum int, ok bool) {
+	hint := parseEpisodeLinkHint(file, libraryRoots...)
+	if !hint.ok || hint.airDate != "" || !hint.seasonKnown {
 		return 0, 0, false
 	}
 	return hint.seasonNum, hint.episodeNum, true
 }
 
-func parseEpisodeLinkHint(file *models.MediaFile) episodeLinkHint {
+func parseEpisodeLinkHint(file *models.MediaFile, libraryRoots ...string) episodeLinkHint {
 	if file == nil {
 		return episodeLinkHint{}
 	}
 	if file.SeasonNumber != 0 && file.EpisodeNumber != 0 {
-		return episodeLinkHint{seasonNum: file.SeasonNumber, episodeNum: file.EpisodeNumber, ok: true}
+		return episodeLinkHint{seasonNum: file.SeasonNumber, seasonKnown: true, episodeNum: file.EpisodeNumber, ok: true}
 	}
 
-	fnh := naming.ParseFilename(file.FilePath, "series")
+	fnh := naming.ParseFilename(file.FilePath, "series", libraryRoots...)
 	if fnh == nil {
 		return episodeLinkHint{}
 	}
 	if fnh.EpisodeNum != 0 {
-		return episodeLinkHint{seasonNum: fnh.SeasonNum, episodeNum: fnh.EpisodeNum, ok: true}
+		return episodeLinkHint{seasonNum: fnh.SeasonNum, seasonKnown: fnh.SeasonKnown, episodeNum: fnh.EpisodeNum, ok: true}
 	}
 	if fnh.AirDate != "" {
 		return episodeLinkHint{airDate: fnh.AirDate, ok: true}
@@ -5359,13 +6165,101 @@ func providerIDsFromSkeletonResult(res *skeletonResult) map[string]string {
 	return providerIDs
 }
 
-func trustedStructuredIDsForSkeleton(filePath, observedRootPath, contentRootPath string) *naming.FolderIDHints {
-	folderIDs := naming.ParseStructuredFolderIDs(filepath.Base(observedRootPath))
+func trustedStructuredIDsForSkeleton(filePath, observedRootPath, contentRootPath string, libraryRoots ...string) *naming.FolderIDHints {
+	folderIDs := naming.ParseStructuredFolderIDs(skeletonFolderAnchorName(observedRootPath, libraryRoots))
 	if folderIDs == nil && contentRootPath != "" && contentRootPath != observedRootPath {
-		folderIDs = naming.ParseStructuredFolderIDs(filepath.Base(contentRootPath))
+		folderIDs = naming.ParseStructuredFolderIDs(skeletonFolderAnchorName(contentRootPath, libraryRoots))
 	}
 	fileIDs := naming.ParseStructuredFolderIDs(strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath)))
 	return mergeFolderIDHints(folderIDs, fileIDs)
+}
+
+// seriesContentIDForGroup returns the series item already linked to another
+// file of the scanned group, preferring a confirmed match.
+func (s *MetadataService) seriesContentIDForGroup(ctx context.Context, folderID, groupKeyVersion int, contentGroupKey string, excludeFileID int) (string, error) {
+	files, err := s.fileRepo.ListByGroupKey(ctx, folderID, groupKeyVersion, contentGroupKey)
+	if err != nil {
+		return "", fmt.Errorf("loading series group files: %w", err)
+	}
+	provisional := ""
+	checked := map[string]bool{}
+	for _, member := range files {
+		if member == nil || member.ID == excludeFileID || member.ContentID == "" || checked[member.ContentID] {
+			continue
+		}
+		checked[member.ContentID] = true
+		item, err := s.itemRepo.GetByID(ctx, member.ContentID)
+		if err != nil {
+			return "", fmt.Errorf("loading series group item: %w", err)
+		}
+		if item == nil || item.Type != matchContentTypeSeries {
+			continue
+		}
+		if isConfirmedOwnershipStatus(item.Status) {
+			return item.ContentID, nil
+		}
+		if provisional == "" {
+			provisional = item.ContentID
+		}
+	}
+	return provisional, nil
+}
+
+// A configured library folder contains many titles. Its own name cannot anchor
+// a media item's provider identity, even when an older scan stored it as the
+// file's observed or canonical content root.
+func skeletonFolderAnchorName(rootPath string, libraryRoots []string) string {
+	for _, libraryRoot := range libraryRoots {
+		if strings.TrimSpace(libraryRoot) != "" && filepath.Clean(rootPath) == filepath.Clean(libraryRoot) {
+			return ""
+		}
+	}
+	return filepath.Base(rootPath)
+}
+
+const manualIdentityOverrideSource = "manual"
+
+// scannedGroupStateResolved marks a scanner group whose members agree on identity.
+const scannedGroupStateResolved = "resolved"
+
+func scannedGroupIdentityChanged(group *models.ScannedMediaGroup, file *models.MediaFile, currentIDs *naming.FolderIDHints, libraryRoots ...string) bool {
+	if group == nil || file == nil || strings.EqualFold(strings.TrimSpace(group.OverrideSource), manualIdentityOverrideSource) {
+		return false
+	}
+	if file.BaseType != "" && group.InferredType != "" && !strings.EqualFold(file.BaseType, group.InferredType) {
+		return true
+	}
+	if currentIDs != nil {
+		_, conflicts := providerIDMergeEvidence(
+			map[string]string{"tmdb": group.TmdbID, "imdb": group.ImdbID, "tvdb": group.TvdbID},
+			map[string]string{"tmdb": currentIDs.TmdbID, "imdb": currentIDs.ImdbID, "tvdb": currentIDs.TvdbID},
+		)
+		return len(conflicts) > 0
+	}
+	// Some callers rely entirely on the scanned group and supply no parsed
+	// identity. Punctuation differences are not identity changes.
+	if strings.TrimSpace(file.BaseTitle) == "" || strings.TrimSpace(group.BaseTitle) == "" {
+		return false
+	}
+	matches := func(title string, year int, itemType string) bool {
+		return normalizeTitleForScoring(title) == normalizeTitleForScoring(group.BaseTitle) && year == group.BaseYear &&
+			(itemType == "" || group.InferredType == "" || strings.EqualFold(itemType, group.InferredType))
+	}
+	if matches(file.BaseTitle, file.BaseYear, file.BaseType) {
+		return false
+	}
+	// Per-file names can contain edition/alias text below a shared movie root.
+	// Apply the scanner's existing group rules to that root before declaring its
+	// identity stale; a rescan would preserve those valid presentation variants.
+	root := firstNonEmpty(file.CanonicalRootPath, file.ObservedRootPath, group.SampleObservedRootPath)
+	pathContext := naming.ResolvePathContext(file.FilePath, file.BaseType, libraryRoots...)
+	current := naming.InferGroupIdentity(file.FilePath, file.BaseType, naming.RootAssignment{
+		RootPath: root, InferredType: file.BaseType, Title: file.BaseTitle, Year: file.BaseYear, LibraryRootPath: pathContext.LibraryRootPath,
+	})
+	if current.ContentGroupKey == group.ContentGroupKey {
+		return false
+	}
+	return !matches(current.BaseTitle, current.BaseYear, current.BaseType)
 }
 
 // createOrFindSkeleton creates a skeleton media_items row or finds an existing
@@ -5379,7 +6273,7 @@ func trustedStructuredIDsForSkeleton(filePath, observedRootPath, contentRootPath
 // are still recorded in skipped_media_roots for admin diagnostics, but they
 // are no longer skipped — a skeleton item is created and entered the match
 // queue with status "pending".
-func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models.MediaFile, folderID int) (*skeletonResult, error) {
+func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models.MediaFile, folderID int, libraryRoots ...string) (*skeletonResult, error) {
 	if s != nil && s.hooks.createOrFindSkeleton != nil {
 		return s.hooks.createOrFindSkeleton(ctx, file, folderID)
 	}
@@ -5414,6 +6308,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 		Year:             file.BaseYear,
 		Type:             file.BaseType,
 	}
+	var scannedIdentity *models.ScannedMediaGroup
 	if s.scannedGroupRepo != nil && contentGroupKey != "" {
 		scannedGroup, err := s.scannedGroupRepo.Get(ctx, folderID, groupKeyVersion, contentGroupKey)
 		if err != nil {
@@ -5424,6 +6319,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 				"error", err,
 			)
 		} else if scannedGroup != nil {
+			scannedIdentity = scannedGroup
 			if scannedGroup.BaseTitle != "" {
 				res.Title = scannedGroup.BaseTitle
 			}
@@ -5450,6 +6346,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 			}
 		}
 	}
+	hasGroupOverride := false
 	if s.groupOverrideRepo != nil && contentGroupKey != "" {
 		override, err := s.groupOverrideRepo.Get(ctx, folderID, groupKeyVersion, contentGroupKey)
 		if err != nil {
@@ -5460,6 +6357,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 				"error", err,
 			)
 		} else if override != nil {
+			hasGroupOverride = true
 			if override.ForcedType != "" {
 				res.Type = override.ForcedType
 			}
@@ -5501,7 +6399,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	// When present, they override scanner ambiguity and become the authoritative
 	// external IDs used for dedup/link/create. Filename tags take precedence
 	// over folder tags because the file is generally the freshest artifact.
-	trustedIDs := trustedStructuredIDsForSkeleton(file.FilePath, observedRootPath, contentRootPath)
+	trustedIDs := trustedStructuredIDsForSkeleton(file.FilePath, observedRootPath, contentRootPath, libraryRoots...)
 	if trustedIDs != nil {
 		applyFolderIDHints(res, trustedIDs)
 		res.ItemStatus = "pending"
@@ -5510,14 +6408,33 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	// Parse observed location names for external IDs before falling back to the
 	// legacy canonical root path. This preserves existing heuristic behavior for
 	// roots without explicit structured tags.
-	folderIDs := naming.ParseFolderIDs(filepath.Base(observedRootPath))
+	folderIDs := naming.ParseFolderIDs(skeletonFolderAnchorName(observedRootPath, libraryRoots))
 	if folderIDs == nil && contentRootPath != "" && contentRootPath != observedRootPath {
-		folderIDs = naming.ParseFolderIDs(filepath.Base(contentRootPath))
+		folderIDs = naming.ParseFolderIDs(skeletonFolderAnchorName(contentRootPath, libraryRoots))
 	}
 
 	effectiveExternalIDs := folderIDs
 	if trustedIDs != nil {
 		effectiveExternalIDs = trustedIDs
+	}
+	// An admin split this root into an unmatched item. Its folder still carries
+	// the source's provider tag and the source may still hold the root or group
+	// claim, so resolve it only through the item its files already link to.
+	splitPinned, splitPinnedRoot, err := s.splitPinForFile(ctx, folderID, observedRootPath, file.FilePath)
+	if err != nil {
+		return nil, err
+	}
+	if splitPinned {
+		trustedIDs, folderIDs, effectiveExternalIDs = nil, nil, nil
+		res.TmdbID, res.ImdbID, res.TvdbID = "", "", ""
+	}
+	// A queued file can outlive the parser that assigned its group. Matching
+	// refreshed title/year hints under the old automatic group key would let a
+	// subsequent claim relink unrelated files. Let a scan rebuild that grouping
+	// before any catalog writes; operator overrides and explicit IDs establish
+	// identity independently of how the filename currently parses.
+	if !hasGroupOverride && scannedGroupIdentityChanged(scannedIdentity, file, effectiveExternalIDs, libraryRoots...) {
+		return nil, errors.New("filename identity changed since the last scan; rescan the library to update file grouping")
 	}
 	if effectiveExternalIDs != nil {
 		if trustedIDs == nil {
@@ -5548,12 +6465,23 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	// id (the season number, e.g. tmdb="01"), so effectiveExternalIDs must NOT
 	// gate the skip.
 	if (libraryTypeNorm == "movie" || libraryTypeNorm == "movies") &&
-		naming.IsMisplacedSeriesFile(file.FilePath) {
+		naming.IsMisplacedSeriesFile(file.FilePath, libraryRoots...) {
 		s.recordSkippedRoot(ctx, folderID, observedRootPath, skippedReasonSeriesInMovieLibrary, file.FilePath)
 		res.ItemStatus = "skipped"
 		return res, nil
 	}
-	if effectiveExternalIDs == nil {
+	if res.ItemStatus == "ambiguous" && !splitPinned {
+		confirmedIDs, err := s.resolveMovieTitleAmbiguity(ctx, file, res, libraryRoots...)
+		if err != nil {
+			return nil, err
+		}
+		if confirmedIDs != nil {
+			applyFolderIDHints(res, confirmedIDs)
+			effectiveExternalIDs = confirmedIDs
+			res.ItemStatus = "pending"
+		}
+	}
+	if effectiveExternalIDs == nil && !splitPinned {
 		// Record for admin diagnostics only — no longer bail out.
 		s.recordSkippedRoot(ctx, folderID, observedRootPath, skippedReasonMissingFolderIDs, file.FilePath)
 	}
@@ -5573,7 +6501,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 
 	// Dedup 1: confirmed content-group ownership always wins, including for
 	// movies. Provisional claims are intentionally ignored.
-	if contentGroupKey != "" && s.groupClaimRepo != nil {
+	if contentGroupKey != "" && s.groupClaimRepo != nil && !splitPinned {
 		claimedGroup, err := s.groupClaimRepo.Get(ctx, folderID, groupKeyVersion, contentGroupKey)
 		if err != nil {
 			return nil, fmt.Errorf("loading claimed content group: %w", err)
@@ -5596,7 +6524,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	}
 
 	// Dedup 2: confirmed root ownership also wins for both movies and series.
-	if contentRootPath != "" && s.rootClaimRepo != nil {
+	if contentRootPath != "" && s.rootClaimRepo != nil && !splitPinned {
 		claimedRoot, err := s.rootClaimRepo.Get(ctx, folderID, contentRootPath)
 		if err != nil {
 			return nil, fmt.Errorf("loading claimed root path: %w", err)
@@ -5617,9 +6545,10 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	}
 
 	// Dedup 3: same observed TV root reuses the already-linked root-scoped item.
-	if res.Type == "series" {
-		res.Type = "series"
-		existingContentID, err := s.fileRepo.FindContentIDByObservedRootPath(ctx, folderID, observedRootPath, "series")
+	// A root pinned whole by a split does the same for movies: its files all
+	// link to the split target, and a new version there belongs with them.
+	if res.Type == "series" || splitPinnedRoot {
+		existingContentID, err := s.fileRepo.FindContentIDByObservedRootPath(ctx, folderID, observedRootPath, res.Type)
 		if err != nil {
 			return nil, fmt.Errorf("finding existing item by observed root path: %w", err)
 		}
@@ -5629,6 +6558,29 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 			}
 			if err := s.upsertLibraryMembership(ctx, existingContentID, folderID); err != nil {
 				s.logLibraryMembershipError("upserting existing root item membership", existingContentID, folderID, err)
+			}
+			res.ContentID = existingContentID
+			return res, nil
+		}
+	}
+
+	// Dedup 3b: a file directly in a series library root is its own observed
+	// root, so matching one show cannot relink its neighbors. Its episodes
+	// still form one resolved scanner group; reuse the series item another
+	// episode created instead of adding a provisional item per episode.
+	flatSeriesGroup := res.Type == "series" && contentGroupKey != "" && filepath.Clean(observedRootPath) == filepath.Clean(file.FilePath) &&
+		(hasGroupOverride || (scannedIdentity != nil && scannedIdentity.State == scannedGroupStateResolved))
+	if flatSeriesGroup {
+		existingContentID, err := s.seriesContentIDForGroup(ctx, folderID, groupKeyVersion, contentGroupKey, file.ID)
+		if err != nil {
+			return nil, err
+		}
+		if existingContentID != "" {
+			if linkErr := s.fileRepo.UpdateContentID(ctx, file.ID, existingContentID); linkErr != nil {
+				return nil, fmt.Errorf("linking file to existing group item: %w", linkErr)
+			}
+			if err := s.upsertLibraryMembership(ctx, existingContentID, folderID); err != nil {
+				s.logLibraryMembershipError("upserting existing group item membership", existingContentID, folderID, err)
 			}
 			res.ContentID = existingContentID
 			return res, nil
@@ -5680,6 +6632,12 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	// machinery confirms a real shared identity — matching the pre-existing
 	// one-skeleton-per-file behavior while staying stable across rescans.
 	localAnchorPath := firstNonEmpty(file.FilePath, contentRootPath, observedRootPath)
+	if flatSeriesGroup {
+		// The dedup lock is per process. Anchoring a flat show's provisional
+		// item on its group lets episodes matched concurrently on other nodes
+		// converge on one item instead of each minting its own.
+		localAnchorPath = fmt.Sprintf("group:%d:%d:%s", folderID, groupKeyVersion, contentGroupKey)
+	}
 	contentID, err := deriveLogicalContentID(
 		res.Type,
 		contentid.ProviderIDs{Tmdb: res.TmdbID, Imdb: res.ImdbID, Tvdb: res.TvdbID},
@@ -5704,7 +6662,25 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	item.ImdbID = res.ImdbID
 	item.TvdbID = res.TvdbID
 
-	if err := s.itemRepo.Upsert(ctx, item); err != nil {
+	if inserter, ok := s.itemRepo.(metadataItemInsertRepo); ok && flatSeriesGroup {
+		// Another node may have created, and even matched, this group's item
+		// after the group check above. Upsert would reset it to a skeleton, so
+		// only the first creator writes it and later ones link to it.
+		inserted, err := inserter.InsertIfAbsent(ctx, item)
+		if err != nil {
+			return nil, fmt.Errorf("creating skeleton item: %w", err)
+		}
+		if !inserted {
+			if linkErr := s.fileRepo.UpdateContentID(ctx, file.ID, contentID); linkErr != nil {
+				return nil, fmt.Errorf("linking file to existing group item: %w", linkErr)
+			}
+			if err := s.upsertLibraryMembership(ctx, contentID, folderID); err != nil {
+				s.logLibraryMembershipError("upserting existing group item membership", contentID, folderID, err)
+			}
+			res.ContentID = contentID
+			return res, nil
+		}
+	} else if err := s.itemRepo.Upsert(ctx, item); err != nil {
 		return nil, fmt.Errorf("creating skeleton item: %w", err)
 	}
 
@@ -5801,6 +6777,13 @@ func (s *MetadataService) recordSkippedRoot(ctx context.Context, folderID int, r
 func (s *MetadataService) deleteCreatedSkeleton(ctx context.Context, contentID string) error {
 	if s == nil || strings.TrimSpace(contentID) == "" {
 		return nil
+	}
+	// A skeleton's content_id can be deterministic, so another node may have
+	// linked the same item since this call created it. Delete it only while
+	// nothing references it.
+	if repo, ok := s.itemRepo.(metadataItemGuardedDeleteRepo); ok {
+		_, err := repo.DeleteIfUnreferenced(ctx, contentID)
+		return err
 	}
 	if repo, ok := s.itemRepo.(metadataItemDeleteRepo); ok {
 		if _, err := repo.Delete(ctx, contentID); err != nil && !errors.Is(err, catalog.ErrItemNotFound) {
@@ -5924,6 +6907,11 @@ func (s *MetadataService) updateItemStatus(ctx context.Context, contentID, statu
 	existing, err := s.itemRepo.GetByID(ctx, contentID)
 	if err != nil {
 		return fmt.Errorf("loading item %s before status update: %w", contentID, err)
+	}
+	// A failed enrichment retry does not invalidate an accepted catalog match.
+	// Keep its metadata and ownership while the queue records the retry failure.
+	if status == "unmatched" && existing.Status == "matched" { //nolint:goconst // unmatchedStatus is a test-local constant.
+		return nil
 	}
 	existing.Status = status
 	if err := s.itemRepo.Upsert(ctx, existing); err != nil {
@@ -6571,6 +7559,25 @@ func intSliceToFields(ints []int) []MetadataField {
 	return fields
 }
 
+// advisoryAgeValue flattens a stored advisory age for merging. The stored
+// column is nullable and MetadataResult uses 0 for "none", so a missing
+// advisory and a zero both mean the same thing to the merge.
+func advisoryAgeValue(age *int) int {
+	if age == nil || *age <= 0 {
+		return 0
+	}
+	return *age
+}
+
+// advisoryAgePointer is the inverse: a non-positive age stores NULL rather
+// than a zero row, so "no advisory" is one state in the column, not two.
+func advisoryAgePointer(age int) *int {
+	if age <= 0 {
+		return nil
+	}
+	return &age
+}
+
 func itemToMetadataResult(item *models.MediaItem) *MetadataResult {
 	result := &MetadataResult{
 		HasMetadata:       true,
@@ -6582,6 +7589,8 @@ func itemToMetadataResult(item *models.MediaItem) *MetadataResult {
 		Year:              item.Year,
 		Runtime:           item.Runtime,
 		ContentRating:     item.ContentRating,
+		AdvisoryAge:       advisoryAgeValue(item.AdvisoryAge),
+		AdvisorySource:    item.AdvisorySource,
 		Genres:            item.Genres,
 		Studios:           item.Studios,
 		Networks:          item.Networks,
@@ -6654,6 +7663,8 @@ func metadataResultToItem(r *MetadataResult, contentType string) *models.MediaIt
 		Year:              r.Year,
 		Runtime:           r.Runtime,
 		ContentRating:     r.ContentRating,
+		AdvisoryAge:       advisoryAgePointer(r.AdvisoryAge),
+		AdvisorySource:    r.AdvisorySource,
 		Genres:            r.Genres,
 		Studios:           r.Studios,
 		Networks:          r.Networks,
@@ -6725,11 +7736,7 @@ func metadataResultToItem(r *MetadataResult, contentType string) *models.MediaIt
 
 func applyBestImages(item *models.MediaItem, images []RemoteImage, mode MergeMode, preferredLang string) {
 	// Images arrive in provider-chain order (highest priority first).
-	// For each image type, pick the best image using a fallback chain:
-	//   1. Preferred language or language-neutral
-	//   2. English or language-neutral (if preferred != "en")
-	//   3. Any language
-	// Within each pass, the first provider with a match wins; within
+	// Within each language tier, the first provider with a match wins; within
 	// that provider, pick the highest-rated image.
 	type best struct {
 		url        string
@@ -6737,53 +7744,102 @@ func applyBestImages(item *models.MediaItem, images []RemoteImage, mode MergeMod
 		providerID string
 	}
 
-	filters := []func(string) bool{
-		func(l string) bool { return l == "" || l == preferredLang },
+	selectBest := func(imageType ImageType, filters []func(RemoteImage) bool) *best {
+		for _, img := range images {
+			if img.Type == imageType && img.URL != "" && isLocalImageSourcePath(img.URL) && isWordmarkLogoCandidate(img) {
+				return &best{url: img.URL, rating: img.Rating, providerID: img.ProviderID}
+			}
+		}
+
+		for _, accept := range filters {
+			candidate := &best{}
+			for _, img := range images {
+				if img.Type != imageType || img.URL == "" || !isWordmarkLogoCandidate(img) || !accept(img) {
+					continue
+				}
+				if candidate.url == "" {
+					candidate.url = img.URL
+					candidate.rating = img.Rating
+					candidate.providerID = img.ProviderID
+				} else if img.ProviderID == candidate.providerID && img.Rating > candidate.rating {
+					candidate.url = img.URL
+					candidate.rating = img.Rating
+				}
+			}
+			if candidate.url != "" {
+				return candidate
+			}
+		}
+		return &best{}
 	}
-	if preferredLang != "en" {
-		filters = append(filters, func(l string) bool { return l == "" || l == "en" })
+
+	preferredLang = strings.TrimSpace(preferredLang)
+	languageIs := func(want string) func(RemoteImage) bool {
+		return func(img RemoteImage) bool {
+			return strings.EqualFold(strings.TrimSpace(img.Language), want)
+		}
 	}
-	filters = append(filters, func(string) bool { return true })
+	hasLanguage := func(img RemoteImage) bool {
+		return strings.TrimSpace(img.Language) != ""
+	}
+	languageNeutral := func(img RemoteImage) bool {
+		return strings.TrimSpace(img.Language) == ""
+	}
+	posterHasText := func(img RemoteImage) bool {
+		if img.IncludesText != nil {
+			return *img.IncludesText
+		}
+		return hasLanguage(img)
+	}
+	posterLanguageIs := func(want string) func(RemoteImage) bool {
+		return func(img RemoteImage) bool {
+			return posterHasText(img) && strings.EqualFold(strings.TrimSpace(img.Language), want)
+		}
+	}
+	posterTextless := func(img RemoteImage) bool {
+		return !posterHasText(img)
+	}
+
+	// Posters should carry a title in the library's metadata language. English
+	// is the cross-language fallback, followed by another text-bearing poster;
+	// textless artwork is used only when no poster with text is available.
+	posterFilters := make([]func(RemoteImage) bool, 0, 4)
+	if preferredLang != "" {
+		posterFilters = append(posterFilters, posterLanguageIs(preferredLang))
+	}
+	if !strings.EqualFold(preferredLang, "en") {
+		posterFilters = append(posterFilters, posterLanguageIs("en"))
+	}
+	posterFilters = append(posterFilters, posterHasText, posterTextless)
+
+	// Logos also follow the library language. A language-neutral logo is a safer
+	// fallback than a logo explicitly tagged with an unrelated language.
+	logoFilters := make([]func(RemoteImage) bool, 0, 4)
+	if preferredLang != "" {
+		logoFilters = append(logoFilters, languageIs(preferredLang))
+	}
+	if !strings.EqualFold(preferredLang, "en") {
+		logoFilters = append(logoFilters, languageIs("en"))
+	}
+	logoFilters = append(logoFilters, languageNeutral, hasLanguage)
 
 	bestByType := map[ImageType]*best{
-		ImagePoster:   {},
-		ImageBackdrop: {},
-		ImageLogo:     {},
+		ImagePoster: selectBest(ImagePoster, posterFilters),
+		// Provider backdrops tagged with a language may contain text, so
+		// language-neutral backgrounds win. A tagged backdrop is still better
+		// than none, so it stays as the terminal tier: items whose backdrops
+		// are all language-tagged must not end up with no backdrop at all.
+		ImageBackdrop: selectBest(ImageBackdrop, []func(RemoteImage) bool{languageNeutral, hasLanguage}),
+		ImageLogo:     selectBest(ImageLogo, logoFilters),
 	}
 
-	for _, accept := range filters {
-		for _, img := range images {
-			if img.URL == "" || !accept(img.Language) {
-				continue
-			}
-			b := bestByType[img.Type]
-			if b == nil {
-				continue
-			}
-			if b.url == "" {
-				b.url = img.URL
-				b.rating = img.Rating
-				b.providerID = img.ProviderID
-			} else if img.ProviderID == b.providerID && img.Rating > b.rating {
-				b.url = img.URL
-				b.rating = img.Rating
-			}
-		}
-		// Stop if every type has a candidate.
-		allFilled := true
-		for _, b := range bestByType {
-			if b.url == "" {
-				allFilled = false
-				break
-			}
-		}
-		if allFilled {
-			break
-		}
-	}
-
+	imagesLocked := artworkLocked(item)
 	applyIfBetter := func(current *string, b *best) {
 		if b.url == "" {
+			return
+		}
+		// Locked artwork keeps what the item has; only an empty slot fills.
+		if imagesLocked && *current != "" {
 			return
 		}
 		// Local sidecar candidates always apply: they carry rating 0, so an
@@ -6796,7 +7852,39 @@ func applyBestImages(item *models.MediaItem, images []RemoteImage, mode MergeMod
 	}
 	applyIfBetter(&item.PosterPath, bestByType[ImagePoster])
 	applyIfBetter(&item.BackdropPath, bestByType[ImageBackdrop])
-	applyIfBetter(&item.LogoPath, bestByType[ImageLogo])
+	if bestByType[ImageLogo].url == "" && mode == MergeReplaceUnlocked && !imagesLocked && itemHasClearArtLogo(item) {
+		// A user-triggered refresh must not preserve clear art stored as the
+		// logo when no wordmark replacement exists. A logo kept under the
+		// Images lock was chosen by an admin and stays.
+		item.LogoPath = ""
+		item.LogoSourcePath = ""
+	} else {
+		applyIfBetter(&item.LogoPath, bestByType[ImageLogo])
+	}
+}
+
+// isWordmarkLogoCandidate rejects clear art offered as a logo. Clear art is an
+// illustrated composite of the title with characters or props, not the title
+// wordmark a logo slot expects. TVDB plugins before v1.4.0 reported series
+// ClearArt as ImageLogo; TVDB serves ClearArt under a /clearart/ path and
+// ClearLogo under /clearlogo/, so the path identifies it for every plugin
+// version. Local sidecars stay authoritative.
+func isWordmarkLogoCandidate(img RemoteImage) bool {
+	if img.Type != ImageLogo || isLocalImageSourcePath(img.URL) {
+		return true
+	}
+	return !isClearArtPath(img.URL)
+}
+
+func itemHasClearArtLogo(item *models.MediaItem) bool {
+	if item == nil {
+		return false
+	}
+	return isClearArtPath(item.LogoSourcePath) || isClearArtPath(item.LogoPath)
+}
+
+func isClearArtPath(path string) bool {
+	return strings.Contains(strings.ToLower(path), "/clearart/")
 }
 
 type itemArtworkField struct {
@@ -6817,8 +7905,28 @@ func itemArtworkFields(item *models.MediaItem) []itemArtworkField {
 	}
 }
 
+// keepStoredArtwork copies every artwork path, source path and thumbhash from
+// the stored item, so a write that fetched no artwork leaves it untouched.
+func keepStoredArtwork(item, existing *models.MediaItem) {
+	stored := itemArtworkFields(existing)
+	for i, field := range itemArtworkFields(item) {
+		*field.path = *stored[i].path
+		*field.source = *stored[i].source
+		if field.thumbhash != nil {
+			*field.thumbhash = *stored[i].thumbhash
+		}
+	}
+}
+
 func prepareItemImagesForQueue(item, existing *models.MediaItem) {
 	for _, field := range itemArtworkFields(item) {
+		// applyBestImages intentionally clears a clear-art logo on a manual
+		// refresh when no wordmark replacement exists. Do not let the
+		// generic cached-art preservation path restore that rejected logo.
+		if field.imageType == ImageLogo && *field.path == "" && !artworkLocked(existing) && itemHasClearArtLogo(existing) {
+			*field.source = ""
+			continue
+		}
 		existingPath := existingImagePath(existing, field.imageType)
 		existingThumbhash := existingImageThumbhash(existing, field.imageType)
 		existingSource := existingImageSourcePath(existing, field.imageType)
@@ -7119,7 +8227,11 @@ func (s *MetadataService) FetchItemImages(ctx context.Context, providerIDs map[s
 			providerErrors[p.Slug()] = err.Error()
 			continue
 		}
-		allImages = append(allImages, images...)
+		for _, image := range images {
+			if isWordmarkLogoCandidate(image) {
+				allImages = append(allImages, image)
+			}
+		}
 	}
 
 	// Sort by rating descending (popularity).
@@ -7128,6 +8240,138 @@ func (s *MetadataService) FetchItemImages(ctx context.Context, providerIDs map[s
 	})
 
 	return allImages, providerErrors, nil
+}
+
+// FetchSeasonImages queries the configured season provider chain for the full
+// artwork gallery of one exact season. Providers must echo SeasonNumber on
+// scoped results, preventing an older plugin that ignores the request field
+// from leaking show artwork into a numbered season. If a provider has not yet
+// adopted the gallery contract, its exact primary poster from GetSeasons is a
+// compatibility fallback. Specials additionally include ordinary show posters
+// after every exact Specials result, giving users a useful fallback when no
+// dedicated Specials artwork exists.
+func (s *MetadataService) FetchSeasonImages(ctx context.Context, providerIDs map[string]string, language string, folderID int, seasonNumber int) ([]RemoteImage, map[string]string, error) {
+	chain, err := s.resolveChainCached(ctx, folderID, "season")
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolving provider chain: %w", err)
+	}
+
+	var exactImages []RemoteImage
+	var specialsFallback []RemoteImage
+	providerErrors := make(map[string]string)
+	// Exact and fallback results are deduplicated separately so a show poster
+	// from an earlier provider cannot shadow the same URL confirmed as exact
+	// season art by a later provider. Fallbacks that duplicate an exact result
+	// are dropped once every provider has answered.
+	exactSeen := make(map[string]struct{})
+	fallbackSeen := make(map[string]struct{})
+	appendPoster := func(target *[]RemoteImage, seen map[string]struct{}, image RemoteImage) bool {
+		if image.Type != ImagePoster || strings.TrimSpace(image.URL) == "" {
+			return false
+		}
+		if _, duplicate := seen[image.URL]; duplicate {
+			return false
+		}
+		seen[image.URL] = struct{}{}
+		*target = append(*target, image)
+		return true
+	}
+
+	for _, p := range chain {
+		exactFound := false
+		ip, imageCapable := p.(ImageProvider)
+		if imageCapable {
+			requestedSeason := seasonNumber
+			images, imageErr := ip.GetImages(ctx, ImageRequest{
+				ProviderIDs:  providerIDs,
+				ContentType:  "series",
+				Language:     language,
+				SeasonNumber: &requestedSeason,
+			})
+			if imageErr != nil {
+				slog.WarnContext(ctx, "fetch season images: provider gallery error", "component", "metadata",
+					"provider", p.Slug(), "season", seasonNumber, "error", imageErr)
+				providerErrors[p.Slug()] = imageErr.Error()
+			} else {
+				for _, image := range images {
+					if image.SeasonNumber == nil || *image.SeasonNumber != seasonNumber {
+						continue
+					}
+					if strings.TrimSpace(image.ProviderID) == "" {
+						image.ProviderID = p.Slug()
+					}
+					if appendPoster(&exactImages, exactSeen, image) {
+						exactFound = true
+					}
+				}
+			}
+		}
+
+		// Backward-compatible exact primary for providers that do not yet emit
+		// season-scoped gallery records.
+		if !exactFound {
+			if ep, ok := p.(EpisodeProvider); ok {
+				seasons, seasonErr := ep.GetSeasons(ctx, SeasonsRequest{
+					ProviderIDs: providerIDs,
+					ContentType: "series",
+					Language:    language,
+				})
+				if seasonErr != nil {
+					slog.WarnContext(ctx, "fetch season images: provider season error", "component", "metadata",
+						"provider", p.Slug(), "season", seasonNumber, "error", seasonErr)
+					providerErrors[p.Slug()] = seasonErr.Error()
+				} else {
+					for _, season := range seasons {
+						if season.SeasonNumber != seasonNumber || strings.TrimSpace(season.PosterPath) == "" {
+							continue
+						}
+						n := seasonNumber
+						appendPoster(&exactImages, exactSeen, RemoteImage{
+							ProviderID:   p.Slug(),
+							URL:          season.PosterPath,
+							Type:         ImagePoster,
+							SeasonNumber: &n,
+						})
+						break
+					}
+				}
+			}
+		}
+
+		if seasonNumber == 0 && imageCapable {
+			images, imageErr := ip.GetImages(ctx, ImageRequest{
+				ProviderIDs: providerIDs,
+				ContentType: "series",
+				Language:    language,
+			})
+			if imageErr != nil {
+				slog.WarnContext(ctx, "fetch season images: Specials show fallback error", "component", "metadata",
+					"provider", p.Slug(), "error", imageErr)
+				providerErrors[p.Slug()] = imageErr.Error()
+				continue
+			}
+			for _, image := range images {
+				if image.SeasonNumber != nil {
+					continue
+				}
+				if strings.TrimSpace(image.ProviderID) == "" {
+					image.ProviderID = p.Slug()
+				}
+				appendPoster(&specialsFallback, fallbackSeen, image)
+			}
+		}
+	}
+
+	fallbacks := specialsFallback[:0]
+	for _, image := range specialsFallback {
+		if _, exact := exactSeen[image.URL]; !exact {
+			fallbacks = append(fallbacks, image)
+		}
+	}
+
+	sort.SliceStable(exactImages, func(i, j int) bool { return exactImages[i].Rating > exactImages[j].Rating })
+	sort.SliceStable(fallbacks, func(i, j int) bool { return fallbacks[i].Rating > fallbacks[j].Rating })
+	return append(exactImages, fallbacks...), providerErrors, nil
 }
 
 // ApplyItemImage downloads a single image, caches it to S3, and returns
@@ -7355,6 +8599,91 @@ func applyCandidateProviderIDConsensus(accumulatedIDs map[string]string, winner 
 		accumulatedIDs[key] = value
 	}
 	return replaced
+}
+
+// storedIdentityProviderIDs returns an item's stored TMDB, TVDB and IMDb IDs.
+func storedIdentityProviderIDs(item *models.MediaItem) map[string]string {
+	if item == nil {
+		return nil
+	}
+	return map[string]string{"tmdb": item.TmdbID, "tvdb": item.TvdbID, "imdb": item.ImdbID}
+}
+
+// canonicalIdentityProviderIDs returns the valid TMDB, TVDB and IMDb IDs in ids.
+func canonicalIdentityProviderIDs(ids map[string]string) map[string]string {
+	chosen := make(map[string]string, len(trustedSearchIDKeys))
+	for key, value := range ids {
+		key = strings.ToLower(strings.TrimSpace(key))
+		if !slices.Contains(trustedSearchIDKeys, key) {
+			continue
+		}
+		if value, valid := sanitizeProviderIDValue(key, value); valid {
+			chosen[key] = value
+		}
+	}
+	return chosen
+}
+
+// storedItemIdentity returns the TMDB, TVDB and IMDb IDs an item
+// already has: its columns, then its durable provider-ID rows for any key the
+// columns leave empty.
+func storedItemIdentity(item *models.MediaItem, durable map[string]string) map[string]string {
+	stored := storedIdentityProviderIDs(item)
+	if stored == nil {
+		stored = map[string]string{}
+	}
+	for key, value := range canonicalIdentityProviderIDs(durable) {
+		if strings.TrimSpace(stored[key]) == "" {
+			stored[key] = value
+		}
+	}
+	return stored
+}
+
+// identityChoiceCorrects reports whether chosen identity IDs (an Identify's,
+// or an NFO's on a manual refresh) correct the item's stored match: a chosen
+// ID differs from the stored value for its key, or the item stores identity
+// IDs and none of the chosen ones agrees with them. Restating a stored ID,
+// with or without adding one the item lacks, confirms or extends the match.
+func identityChoiceCorrects(chosen, stored map[string]string) bool {
+	agrees, hasStored := false, false
+	for _, key := range trustedSearchIDKeys {
+		old := strings.TrimSpace(stored[key])
+		hasStored = hasStored || old != ""
+		next := chosen[key]
+		if old == "" || next == "" {
+			continue
+		}
+		if old != next {
+			return true
+		}
+		agrees = true
+	}
+	return hasStored && !agrees && len(chosen) > 0
+}
+
+// rejectIdentityProviderIDs records the stored identity values a correction
+// rejects: each TMDB, TVDB or IMDb ID in any of the item's stored sources (its
+// columns and its durable rows, which can disagree) that the chosen IDs don't
+// restate. They came from the wrong match. Recording values rather than keys
+// leaves a different value for the same key alone, such as the IDs of an
+// existing item that a re-anchor merges into.
+//
+// Stored values are taken as they are, not validated: a malformed legacy ID
+// from the wrong match must be rejected too, or the merge would restore it.
+func rejectIdentityProviderIDs(rejected providerIDValueSet, chosen map[string]string, sources ...map[string]string) {
+	for _, source := range sources {
+		for rawKey, rawValue := range source {
+			key := strings.ToLower(strings.TrimSpace(rawKey))
+			value := strings.TrimSpace(rawValue)
+			if value == "" || !slices.Contains(trustedSearchIDKeys, key) {
+				continue
+			}
+			if normalizeProviderIDComparisonValue(key, value) != normalizeProviderIDComparisonValue(key, chosen[key]) {
+				rejected.add(key, value)
+			}
+		}
+	}
 }
 
 func mediaItemWithProviderIDs(item *models.MediaItem, providerIDs map[string]string) *models.MediaItem {

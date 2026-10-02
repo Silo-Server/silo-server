@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -85,9 +86,71 @@ func (r *PersonRepository) FindOrCreate(ctx context.Context, p models.Person) (i
 	return id, nil
 }
 
-// enrichExisting updates empty fields on an existing person with non-empty values from p.
+// personPhotoReplacePredicate builds the SQL condition under which item-credit
+// data may write a person's photo columns.
+//
+// A cached artwork key is immutable and is never replaced from a credit.
+// Credits carry the provider URL, so overwriting the key would both re-arm the
+// download loop (EnqueueExistingProviderArtwork treats a URL in photo_path as
+// "not cached yet") and hand the displaced key to the artwork GC trigger.
+// Anything that is not a cached key is still replaceable by a real image: an
+// empty column, the "-" no-photo sentinel, and a provider URL that never made
+// it through the cache. Keeping URLs replaceable is what stops a person with
+// no external id — FindRefreshCandidates skips them, so no refresh will ever
+// revisit the row — from being stuck with a dead URL forever. The
+// LIKE '%://%' test for "not a cached key" is the same one the artwork GC
+// trigger and the image cache sweep use.
+func personPhotoReplacePredicate(existingPath, incomingPath string) string {
+	return fmt.Sprintf(
+		"((COALESCE(%[1]s, '') = '' AND %[2]s <> '') OR "+
+			"((%[1]s = '-' OR %[1]s LIKE '%%://%%') AND %[2]s NOT IN ('', '-') "+
+			"AND %[2]s IS DISTINCT FROM %[1]s))",
+		existingPath, incomingPath,
+	)
+}
+
+// batchPersonEnrichmentSQL is built once: the text is constant, and the batch
+// enricher runs per scan batch.
+var batchPersonEnrichmentSQL = sync.OnceValue(buildBatchPersonEnrichmentQuery)
+
+func buildBatchPersonEnrichmentQuery() string {
+	photoReplace := personPhotoReplacePredicate("people.photo_path", "t.photo_path")
+	return fmt.Sprintf(`
+		UPDATE people SET
+			tmdb_id = CASE WHEN COALESCE(people.tmdb_id, '') = '' AND t.tmdb_id <> '' THEN t.tmdb_id ELSE people.tmdb_id END,
+			imdb_id = CASE WHEN COALESCE(people.imdb_id, '') = '' AND t.imdb_id <> '' THEN t.imdb_id ELSE people.imdb_id END,
+			tvdb_id = CASE WHEN COALESCE(people.tvdb_id, '') = '' AND t.tvdb_id <> '' THEN t.tvdb_id ELSE people.tvdb_id END,
+			plex_guid = CASE WHEN COALESCE(people.plex_guid, '') = '' AND t.plex_guid <> '' THEN t.plex_guid ELSE people.plex_guid END,
+			photo_path = CASE WHEN %[1]s THEN t.photo_path ELSE people.photo_path END,
+			photo_source_path = CASE WHEN %[1]s THEN t.photo_source_path ELSE people.photo_source_path END,
+			photo_thumbhash = CASE WHEN %[1]s THEN t.photo_thumbhash ELSE people.photo_thumbhash END,
+			bio = CASE WHEN COALESCE(people.bio, '') = '' AND t.bio <> '' THEN t.bio ELSE people.bio END,
+			birthplace = CASE WHEN COALESCE(people.birthplace, '') = '' AND t.birthplace <> '' THEN t.birthplace ELSE people.birthplace END,
+			homepage = CASE WHEN COALESCE(people.homepage, '') = '' AND t.homepage <> '' THEN t.homepage ELSE people.homepage END,
+			updated_at = NOW()
+		FROM UNNEST($1::bigint[], $2::text[], $3::text[], $4::text[], $5::text[],
+		            $6::text[], $7::text[], $8::text[], $9::text[], $10::text[], $11::text[])
+			AS t(id, tmdb_id, imdb_id, tvdb_id, plex_guid,
+			     photo_path, photo_source_path, photo_thumbhash, bio, birthplace, homepage)
+		WHERE people.id = t.id
+		  AND (
+			(COALESCE(people.tmdb_id, '') = '' AND t.tmdb_id <> '') OR
+			(COALESCE(people.imdb_id, '') = '' AND t.imdb_id <> '') OR
+			(COALESCE(people.tvdb_id, '') = '' AND t.tvdb_id <> '') OR
+			(COALESCE(people.plex_guid, '') = '' AND t.plex_guid <> '') OR
+			%[1]s OR
+			(COALESCE(people.bio, '') = '' AND t.bio <> '') OR
+			(COALESCE(people.birthplace, '') = '' AND t.birthplace <> '') OR
+			(COALESCE(people.homepage, '') = '' AND t.homepage <> '')
+		  )`, photoReplace)
+}
+
+// enrichExisting fills gaps on an existing person from p. It never rewrites a
+// field the catalog already holds, and it leaves the row — including
+// updated_at — untouched when there is nothing to fill.
 func (r *PersonRepository) enrichExisting(ctx context.Context, id int64, p models.Person) (int64, error) {
 	var setClauses []string
+	var changePredicates []string
 	var args []interface{}
 	argIdx := 1
 
@@ -96,33 +159,38 @@ func (r *PersonRepository) enrichExisting(ctx context.Context, id int64, p model
 		if value == "" {
 			return
 		}
-		setClauses = append(setClauses, fmt.Sprintf("%s = CASE WHEN %s = '' THEN $%d ELSE %s END", column, column, argIdx, column))
+		setClauses = append(setClauses, fmt.Sprintf("%s = CASE WHEN COALESCE(%s, '') = '' THEN $%d ELSE %s END", column, column, argIdx, column))
+		changePredicates = append(changePredicates, fmt.Sprintf("COALESCE(%s, '') = ''", column))
 		args = append(args, value)
 		argIdx++
 	}
-	// overwriteIfReal sets the column when the new value is real. The "-"
-	// sentinel ("no photo, but we tried") is only written when the existing
-	// column is empty, so it cannot clobber a real provider path.
-	overwriteIfReal := func(column, value string) {
-		if value == "" {
+	// fillPhoto writes the photo triple as a unit under one decision taken on
+	// photo_path. The path, its source URL, and its thumbhash describe a single
+	// image: moving the path alone binds the new photo to the previous source,
+	// which is what UpdatePhotoIfSourceMatches keys the cache handshake on, so
+	// the finished download would land the *old* image on the row — and leave
+	// the old image's thumbhash behind it.
+	fillPhoto := func(person models.Person) {
+		if person.PhotoPath == "" {
 			return
 		}
-		if value == "-" {
-			setClauses = append(setClauses, fmt.Sprintf("%s = CASE WHEN %s = '' THEN $%d ELSE %s END", column, column, argIdx, column))
-		} else {
-			setClauses = append(setClauses, fmt.Sprintf("%s = $%d", column, argIdx))
-		}
-		args = append(args, value)
-		argIdx++
+		incoming := fmt.Sprintf("$%d", argIdx)
+		predicate := personPhotoReplacePredicate("photo_path", incoming)
+		setClauses = append(setClauses,
+			fmt.Sprintf("photo_path = CASE WHEN %s THEN %s ELSE photo_path END", predicate, incoming),
+			fmt.Sprintf("photo_source_path = CASE WHEN %s THEN $%d ELSE photo_source_path END", predicate, argIdx+1),
+			fmt.Sprintf("photo_thumbhash = CASE WHEN %s THEN $%d ELSE photo_thumbhash END", predicate, argIdx+2),
+		)
+		changePredicates = append(changePredicates, predicate)
+		args = append(args, person.PhotoPath, person.PhotoSourcePath, person.PhotoThumbhash)
+		argIdx += 3
 	}
 
 	fillEmpty("tmdb_id", p.TmdbID)
 	fillEmpty("imdb_id", p.ImdbID)
 	fillEmpty("tvdb_id", p.TvdbID)
 	fillEmpty("plex_guid", p.PlexGUID)
-	overwriteIfReal("photo_path", p.PhotoPath)
-	overwriteIfReal("photo_source_path", p.PhotoSourcePath)
-	overwriteIfReal("photo_thumbhash", p.PhotoThumbhash)
+	fillPhoto(p)
 	fillEmpty("bio", p.Bio)
 	fillEmpty("birthplace", p.Birthplace)
 	fillEmpty("homepage", p.Homepage)
@@ -132,7 +200,10 @@ func (r *PersonRepository) enrichExisting(ctx context.Context, id int64, p model
 	}
 
 	setClauses = append(setClauses, "updated_at = now()")
-	query := fmt.Sprintf("UPDATE people SET %s WHERE id = $%d", strings.Join(setClauses, ", "), argIdx)
+	query := fmt.Sprintf(
+		"UPDATE people SET %s WHERE id = $%d AND (%s)",
+		strings.Join(setClauses, ", "), argIdx, strings.Join(changePredicates, " OR "),
+	)
 	args = append(args, id)
 
 	if _, err := r.pool.Exec(ctx, query, args...); err != nil {
@@ -283,7 +354,9 @@ func (r *PersonRepository) BatchFindOrCreate(ctx context.Context, people []model
 		rows.Close()
 	}
 
-	// Phase 4: Batch enrich found people (same fillEmpty/overwrite semantics).
+	// Phase 4: Batch enrich found people. Item-credit data fills gaps and may
+	// replace a photo that was never cached; a cached artwork key is immutable
+	// here. See personPhotoReplacePredicate.
 	if len(toEnrich) > 0 {
 		enrichIDs := make([]int64, len(toEnrich))
 		eTmdbIDs := make([]string, len(toEnrich))
@@ -309,36 +382,7 @@ func (r *PersonRepository) BatchFindOrCreate(ctx context.Context, people []model
 			eBirthplaces[i] = e.person.Birthplace
 			eHomepages[i] = e.person.Homepage
 		}
-		_, err := r.pool.Exec(ctx, `
-			UPDATE people SET
-				tmdb_id = CASE WHEN people.tmdb_id = '' AND t.tmdb_id <> '' THEN t.tmdb_id ELSE people.tmdb_id END,
-				imdb_id = CASE WHEN people.imdb_id = '' AND t.imdb_id <> '' THEN t.imdb_id ELSE people.imdb_id END,
-				tvdb_id = CASE WHEN people.tvdb_id = '' AND t.tvdb_id <> '' THEN t.tvdb_id ELSE people.tvdb_id END,
-				plex_guid = CASE WHEN people.plex_guid = '' AND t.plex_guid <> '' THEN t.plex_guid ELSE people.plex_guid END,
-				photo_path = CASE
-					WHEN t.photo_path NOT IN ('', '-') THEN t.photo_path
-					WHEN people.photo_path = ''        THEN t.photo_path
-					ELSE people.photo_path
-				END,
-				photo_source_path = CASE
-					WHEN t.photo_source_path NOT IN ('', '-') THEN t.photo_source_path
-					WHEN people.photo_source_path = ''        THEN t.photo_source_path
-					ELSE people.photo_source_path
-				END,
-				photo_thumbhash = CASE
-					WHEN t.photo_thumbhash NOT IN ('', '-') THEN t.photo_thumbhash
-					WHEN people.photo_thumbhash = ''        THEN t.photo_thumbhash
-					ELSE people.photo_thumbhash
-				END,
-				bio = CASE WHEN people.bio = '' AND t.bio <> '' THEN t.bio ELSE people.bio END,
-				birthplace = CASE WHEN people.birthplace = '' AND t.birthplace <> '' THEN t.birthplace ELSE people.birthplace END,
-				homepage = CASE WHEN people.homepage = '' AND t.homepage <> '' THEN t.homepage ELSE people.homepage END,
-				updated_at = NOW()
-			FROM UNNEST($1::bigint[], $2::text[], $3::text[], $4::text[], $5::text[],
-			            $6::text[], $7::text[], $8::text[], $9::text[], $10::text[], $11::text[])
-				AS t(id, tmdb_id, imdb_id, tvdb_id, plex_guid,
-				     photo_path, photo_source_path, photo_thumbhash, bio, birthplace, homepage)
-			WHERE people.id = t.id`,
+		_, err := r.pool.Exec(ctx, batchPersonEnrichmentSQL(),
 			enrichIDs, eTmdbIDs, eImdbIDs, eTvdbIDs, ePlexGUIDs,
 			ePhotoPaths, ePhotoSourcePaths, ePhotoThumbs, eBios, eBirthplaces, eHomepages,
 		)
@@ -467,10 +511,12 @@ func (r *PersonRepository) Get(ctx context.Context, id int64) (*models.Person, e
 	var p models.Person
 	err := r.pool.QueryRow(ctx, `
 		SELECT id, name, sort_name, bio, birth_date, death_date, birthplace, homepage,
-			photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at
+			photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at,
+			metadata_refresh_attempted_at
 		FROM people WHERE id = $1`, id,
 	).Scan(&p.ID, &p.Name, &p.SortName, &p.Bio, &p.BirthDate, &p.DeathDate, &p.Birthplace, &p.Homepage,
 		&p.PhotoPath, &p.PhotoSourcePath, &p.PhotoThumbhash, &p.TmdbID, &p.ImdbID, &p.TvdbID, &p.PlexGUID, &p.CreatedAt, &p.UpdatedAt,
+		&p.MetadataRefreshAttemptedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get person %d: %w", id, err)
@@ -483,10 +529,12 @@ func (r *PersonRepository) GetByName(ctx context.Context, name string) (*models.
 	var p models.Person
 	err := r.pool.QueryRow(ctx, `
 		SELECT id, name, sort_name, bio, birth_date, death_date, birthplace, homepage,
-			photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at
+			photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at,
+			metadata_refresh_attempted_at
 		FROM people WHERE LOWER(name) = LOWER($1)`, name,
 	).Scan(&p.ID, &p.Name, &p.SortName, &p.Bio, &p.BirthDate, &p.DeathDate, &p.Birthplace, &p.Homepage,
 		&p.PhotoPath, &p.PhotoSourcePath, &p.PhotoThumbhash, &p.TmdbID, &p.ImdbID, &p.TvdbID, &p.PlexGUID, &p.CreatedAt, &p.UpdatedAt,
+		&p.MetadataRefreshAttemptedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get person by name %q: %w", name, err)
@@ -503,14 +551,55 @@ func (r *PersonRepository) GetByName(ctx context.Context, name string) (*models.
 // LOWER(name) comparison (including its existing treatment of % and _ in the
 // term as LIKE wildcards).
 func (r *PersonRepository) Search(ctx context.Context, query string, limit int) ([]models.Person, error) {
+	return r.search(ctx, query, limit, "", nil)
+}
+
+// SearchScoped ranks exact names first and restricts people to credits in the
+// selected media scope and viewer access before applying the limit. Empty scope
+// includes accessible credits across all media types.
+func (r *PersonRepository) SearchScoped(ctx context.Context, query string, limit int, mediaScope string, filter AccessFilter) ([]models.Person, error) {
+	return r.search(ctx, strings.TrimSpace(query), limit, mediaScope, &filter)
+}
+
+func (r *PersonRepository) search(ctx context.Context, query string, limit int, mediaScope string, filter *AccessFilter) ([]models.Person, error) {
 	if limit <= 0 {
 		limit = 20
 	}
+	args := []any{query, limit}
+	where := "name ILIKE '%' || $1 || '%'"
+	if filter != nil {
+		conditions := []string{"ip.person_id = people.id"}
+		argIdx := 3
+		if types := MediaScopeItemTypes(mediaScope); len(types) > 0 {
+			conditions = append(conditions, "mi.type = ANY($3::text[])")
+			args = append(args, types)
+			argIdx++
+		}
+		// Episode access follows the parent series, while scope and excluded
+		// media types describe the credited item itself.
+		appendLibraryAccessConditions("access_item.content_id", *filter, &conditions, &args, &argIdx)
+		applyAccessFilter("access_item", AccessFilter{MaturityLimits: filter.MaturityLimits}, &conditions, &args, &argIdx)
+		applyAccessFilter("mi", AccessFilter{ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, &args, &argIdx)
+		where += ` AND EXISTS (
+			SELECT 1 FROM item_people ip
+			JOIN media_items mi ON mi.content_id = ip.content_id
+			JOIN media_items access_item ON access_item.content_id = CASE
+				WHEN mi.type = 'episode' THEN ` + episodeParentSeriesIDExpr("mi.content_id") + `
+				ELSE mi.content_id END
+			WHERE ` + strings.Join(conditions, " AND ") + ")"
+	}
+	order := "name ASC"
+	if filter != nil {
+		order = "name ASC, id ASC"
+		if query != "" {
+			order = "(LOWER(name) = LOWER($1)) DESC, " + order
+		}
+	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, name, sort_name, bio, birth_date, death_date, birthplace, homepage,
-			photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at
-		FROM people WHERE name ILIKE '%' || $1 || '%'
-		ORDER BY name LIMIT $2`, query, limit,
+			photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at,
+			metadata_refresh_attempted_at
+		FROM people WHERE `+where+` ORDER BY `+order+` LIMIT $2`, args...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("search people: %w", err)
@@ -522,6 +611,7 @@ func (r *PersonRepository) Search(ctx context.Context, query string, limit int) 
 		var p models.Person
 		if err := rows.Scan(&p.ID, &p.Name, &p.SortName, &p.Bio, &p.BirthDate, &p.DeathDate, &p.Birthplace, &p.Homepage,
 			&p.PhotoPath, &p.PhotoSourcePath, &p.PhotoThumbhash, &p.TmdbID, &p.ImdbID, &p.TvdbID, &p.PlexGUID, &p.CreatedAt, &p.UpdatedAt,
+			&p.MetadataRefreshAttemptedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan person: %w", err)
 		}
@@ -794,7 +884,8 @@ func (r *PersonRepository) resolveExternalIDConflict(
 func scanPeopleByIDsForUpdate(ctx context.Context, tx pgx.Tx, ids ...int64) (map[int64]models.Person, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT id, name, sort_name, bio, birth_date, death_date, birthplace, homepage,
-			photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at
+			photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at,
+			metadata_refresh_attempted_at
 		FROM people
 		WHERE id = ANY($1)
 		ORDER BY id
@@ -809,6 +900,7 @@ func scanPeopleByIDsForUpdate(ctx context.Context, tx pgx.Tx, ids ...int64) (map
 		var p models.Person
 		if err := rows.Scan(&p.ID, &p.Name, &p.SortName, &p.Bio, &p.BirthDate, &p.DeathDate, &p.Birthplace, &p.Homepage,
 			&p.PhotoPath, &p.PhotoSourcePath, &p.PhotoThumbhash, &p.TmdbID, &p.ImdbID, &p.TvdbID, &p.PlexGUID, &p.CreatedAt, &p.UpdatedAt,
+			&p.MetadataRefreshAttemptedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan locked person: %w", err)
 		}
@@ -959,36 +1051,94 @@ func (r *PersonRepository) UpdatePhotoIfSourceMatches(ctx context.Context, perso
 	return tag.RowsAffected() > 0, nil
 }
 
-// FindRefreshCandidates returns people with external IDs that are incomplete or stale.
-func (r *PersonRepository) FindRefreshCandidates(
-	ctx context.Context,
-	staleAfter time.Duration,
-	limit int,
-) ([]int64, error) {
+// MarkRefreshAttempt records a provider lookup without changing the person's
+// metadata timestamp. Failed and partial lookups therefore receive the same
+// durable refresh backoff as successful lookups.
+func (r *PersonRepository) MarkRefreshAttempt(ctx context.Context, id int64) error {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE people
+		SET metadata_refresh_attempted_at = NOW()
+		WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("mark person %d refresh attempt: %w", id, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
+// Person metadata refresh policy. FindRefreshCandidates (SQL) and
+// PersonRefreshDue (Go) are two views of the same rule; keep them in sync.
+const (
+	// PersonMetadataStaleAfter is how long complete person metadata is trusted
+	// before another provider lookup is attempted.
+	PersonMetadataStaleAfter = 90 * 24 * time.Hour
+
+	// PersonRefreshRetryAfter bounds how often one person may be sent to a
+	// provider. It applies to every candidate, so a person the providers simply
+	// have no bio or birth date for is retried on this cadence instead of on
+	// every sweep.
+	PersonRefreshRetryAfter = 7 * 24 * time.Hour
+)
+
+// PersonMetadataIncomplete reports whether a provider could still fill in
+// metadata Silo does not have. A photo_path of "-" is the "provider has no
+// photo" sentinel — an answer, not a gap — so it counts as complete, matching
+// the SQL predicate in FindRefreshCandidates.
+func PersonMetadataIncomplete(person models.Person) bool {
+	return person.Bio == "" || person.PhotoPath == "" || person.BirthDate == nil
+}
+
+// PersonRefreshDue reports whether a person is due for a provider lookup: they
+// carry an external id, no lookup has been attempted within
+// PersonRefreshRetryAfter, and their metadata is either incomplete or older
+// than PersonMetadataStaleAfter. Callers that already hold the row use this
+// instead of re-querying; the worker sweep uses FindRefreshCandidates, which
+// encodes the same rule in SQL.
+func PersonRefreshDue(person models.Person, now time.Time) bool {
+	if person.TmdbID == "" && person.ImdbID == "" && person.TvdbID == "" {
+		return false
+	}
+	if person.MetadataRefreshAttemptedAt != nil &&
+		!person.MetadataRefreshAttemptedAt.Before(now.Add(-PersonRefreshRetryAfter)) {
+		return false
+	}
+	return PersonMetadataIncomplete(person) ||
+		person.UpdatedAt.Before(now.Add(-PersonMetadataStaleAfter))
+}
+
+// FindRefreshCandidates returns people who are due for a provider metadata
+// lookup, least recently touched first. See PersonRefreshDue for the rule.
+//
+// Gating on metadata_refresh_attempted_at rather than on updated_at is what
+// keeps this from becoming a hot loop: a person the providers cannot complete
+// is retried once per PersonRefreshRetryAfter instead of on every sweep, while
+// a person nobody has ever looked up is eligible immediately, so freshly
+// ingested credits are backfilled without waiting out a staleness window.
+func (r *PersonRepository) FindRefreshCandidates(ctx context.Context, limit int) ([]int64, error) {
 	if limit <= 0 {
 		return []int64{}, nil
 	}
 
-	args := []any{limit}
-	stalePredicate := ""
-	if staleAfter > 0 {
-		args = append(args, time.Now().Add(-staleAfter))
-		stalePredicate = " OR updated_at < $2"
-	}
-
+	now := time.Now()
 	rows, err := r.pool.Query(ctx, `
 		SELECT id
 		FROM people
 		WHERE
 			(tmdb_id <> '' OR imdb_id <> '' OR tvdb_id <> '')
+			AND (metadata_refresh_attempted_at IS NULL OR metadata_refresh_attempted_at < $2)
 			AND (
 				COALESCE(bio, '') = ''
 				OR COALESCE(photo_path, '') = ''
-				OR birth_date IS NULL`+stalePredicate+`
+				OR birth_date IS NULL
+				OR updated_at < $3
 			)
-		ORDER BY updated_at ASC
+		ORDER BY GREATEST(updated_at, COALESCE(metadata_refresh_attempted_at, updated_at)) ASC, id ASC
 		LIMIT $1`,
-		args...,
+		limit,
+		now.Add(-PersonRefreshRetryAfter),
+		now.Add(-PersonMetadataStaleAfter),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query refresh candidates: %w", err)
@@ -1133,4 +1283,116 @@ func scanItemPeople(rows pgx.Rows) ([]models.ItemPerson, error) {
 		people = append(people, ip)
 	}
 	return people, rows.Err()
+}
+
+// SearchVisible restricts both the page and total to people credited on visible
+// video items. A hidden library's credits never enter the result set.
+func (r *PersonRepository) SearchVisible(ctx context.Context, term string, exact bool, limit, offset int, filter AccessFilter, includeTotal bool) ([]models.Person, int, error) {
+	return r.SearchVisibleWithOptions(ctx, PersonSearchOptions{Term: term, Exact: exact, Limit: limit, Offset: offset, Filter: filter, IncludeTotal: includeTotal})
+}
+
+// PersonSearchOptions narrows SearchVisibleWithOptions. Name bounds compare
+// lowercased names, as Jellyfin's people query does; LibraryID and
+// ContentID keep only people credited on items in that library or on that
+// item.
+type PersonSearchOptions struct {
+	Term                    string
+	Exact                   bool
+	NameStartsWith          string
+	NameLessThan            string
+	NameStartsWithOrGreater string
+	LibraryID               int
+	ContentID               string
+	Limit                   int
+	Offset                  int
+	Filter                  AccessFilter
+	IncludeTotal            bool
+}
+
+// SearchVisibleWithOptions lists people credited on at least one movie or
+// series the filter allows, ordered by name.
+func (r *PersonRepository) SearchVisibleWithOptions(ctx context.Context, opts PersonSearchOptions) ([]models.Person, int, error) {
+	filter := opts.Filter
+	conditions := []string{"ip.person_id = p.id", "mi.type IN ('movie', 'series')"}
+	args := []any{}
+	argIdx := 1
+	appendLibraryAccessConditions("mi.content_id", filter, &conditions, &args, &argIdx)
+	applyAccessFilter("mi", filter, &conditions, &args, &argIdx)
+	if opts.LibraryID > 0 {
+		conditions = append(conditions, fmt.Sprintf("EXISTS (SELECT 1 FROM media_item_libraries scope_mil WHERE scope_mil.content_id = mi.content_id AND scope_mil.media_folder_id = $%d)", argIdx))
+		args = append(args, opts.LibraryID)
+		argIdx++
+	}
+	if opts.ContentID != "" {
+		conditions = append(conditions, fmt.Sprintf("mi.content_id = $%d", argIdx))
+		args = append(args, opts.ContentID)
+		argIdx++
+	}
+	personConditions := []string{}
+	addName := func(clause, value string) {
+		personConditions = append(personConditions, fmt.Sprintf(clause, argIdx))
+		args = append(args, value)
+		argIdx++
+	}
+	switch {
+	case opts.Exact:
+		addName("LOWER(p.name) = LOWER($%d)", opts.Term)
+	case opts.Term != "":
+		addName("p.name ILIKE '%%' || $%d || '%%'", opts.Term)
+	}
+	if opts.NameStartsWith != "" {
+		addName("LOWER(p.name) LIKE $%d ESCAPE '\\'", likePrefixPattern(opts.NameStartsWith))
+	}
+	if opts.NameLessThan != "" {
+		addName("LOWER(p.name) < LOWER($%d)", opts.NameLessThan)
+	}
+	if opts.NameStartsWithOrGreater != "" {
+		addName("LOWER(p.name) >= LOWER($%d)", opts.NameStartsWithOrGreater)
+	}
+	personConditions = append(personConditions, "EXISTS (SELECT 1 FROM item_people ip JOIN media_items mi ON mi.content_id = ip.content_id WHERE "+strings.Join(conditions, " AND ")+")")
+	where := strings.Join(personConditions, " AND ")
+	limit, offset, includeTotal := opts.Limit, opts.Offset, opts.IncludeTotal
+	var total int
+	if includeTotal {
+		if err := r.pool.QueryRow(ctx, "SELECT COUNT(*) FROM people p WHERE "+where, args...).Scan(&total); err != nil {
+			return nil, 0, err
+		}
+	}
+	args = append(args, max(limit, 0), max(offset, 0))
+	query := `SELECT p.id, p.name, p.sort_name, p.bio, p.birth_date, p.death_date, p.birthplace, p.homepage,
+	p.photo_path, p.photo_source_path, p.photo_thumbhash, p.tmdb_id, p.imdb_id, p.tvdb_id, p.plex_guid, p.created_at, p.updated_at, p.metadata_refresh_attempted_at
+	FROM people p WHERE ` + where + fmt.Sprintf(" ORDER BY p.name, p.id LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	people := []models.Person{}
+	for rows.Next() {
+		var p models.Person
+		if err := rows.Scan(&p.ID, &p.Name, &p.SortName, &p.Bio, &p.BirthDate, &p.DeathDate, &p.Birthplace, &p.Homepage, &p.PhotoPath, &p.PhotoSourcePath, &p.PhotoThumbhash, &p.TmdbID, &p.ImdbID, &p.TvdbID, &p.PlexGUID, &p.CreatedAt, &p.UpdatedAt, &p.MetadataRefreshAttemptedAt); err != nil {
+			return nil, 0, err
+		}
+		people = append(people, p)
+	}
+	return people, total, rows.Err()
+}
+
+// EnsureAccessible requires a credit on a visible video item before serving
+// person metadata or image bytes, including already cached derivatives.
+func (r *PersonRepository) EnsureAccessible(ctx context.Context, id int64, filter AccessFilter) error {
+	conditions := []string{"ip.person_id = $1", "mi.type IN ('movie','series')"}
+	args := []any{id}
+	index := 2
+	appendLibraryAccessConditions("mi.content_id", filter, &conditions, &args, &index)
+	applyAccessFilter("mi", filter, &conditions, &args, &index)
+	var exists bool
+	err := r.pool.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM item_people ip JOIN media_items mi ON mi.content_id=ip.content_id WHERE "+strings.Join(conditions, " AND ")+")", args...).Scan(&exists)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return pgx.ErrNoRows
+	}
+	return nil
 }

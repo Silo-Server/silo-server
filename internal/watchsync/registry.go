@@ -91,11 +91,15 @@ func (r *Registry) List() []ProviderSummary {
 
 	summaries := make([]ProviderSummary, 0, len(r.providers))
 	for key, provider := range r.providers {
-		summaries = append(summaries, ProviderSummary{
+		summary := ProviderSummary{
 			Key:          key,
 			DisplayName:  provider.DisplayName(),
 			Capabilities: provider.Capabilities(),
-		})
+		}
+		if configurable, ok := provider.(connectionConfigProvider); ok {
+			summary.ConnectionConfigSchema = configurable.ConnectionConfigSchema()
+		}
+		summaries = append(summaries, summary)
 	}
 	sort.Slice(summaries, func(i, j int) bool {
 		return summaries[i].Key < summaries[j].Key

@@ -102,7 +102,7 @@ function CoverStack({ group, large }: { group: AudiobookGroup; large?: boolean }
               src={url}
               alt=""
               loading="lazy"
-              className="absolute inset-0 h-full w-full rounded-xl object-cover shadow-lg transition-transform duration-[--duration-fast]"
+              className="absolute inset-0 h-full w-full rounded-xl object-cover shadow-lg transition-transform duration-(--duration-fast)"
               style={{
                 transform:
                   depth === 0 ? undefined : `rotate(${depth * 3}deg) translateX(${depth * 4}px)`,
@@ -216,7 +216,7 @@ export default function AudiobookGroupsView({
                 onClick={() => onSelectGroup(group.name)}
                 className="group/series text-left"
               >
-                <div className="transition-transform duration-[--duration-fast] group-hover/series:scale-[1.02]">
+                <div className="transition-transform duration-(--duration-fast) group-hover/series:scale-[1.02]">
                   <CoverStack group={group} large />
                 </div>
                 <div className="mt-2.5 truncate px-0.5 text-[14px] font-semibold tracking-tight">
@@ -240,7 +240,7 @@ export default function AudiobookGroupsView({
                 key={group.name}
                 type="button"
                 onClick={() => onSelectGroup(group.name)}
-                className="surface-panel hover:bg-muted/40 flex items-center gap-4 rounded-xl border-0 px-4 py-3 text-left transition-colors duration-[--duration-fast]"
+                className="surface-panel hover:bg-muted/40 flex items-center gap-4 rounded-xl border-0 px-4 py-3 text-left transition-colors duration-(--duration-fast)"
               >
                 <CoverStack group={group} />
                 <div className="min-w-0 flex-1">

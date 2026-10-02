@@ -22,7 +22,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
+import { formatRelativeTime } from "@/lib/date";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
+
+import { formatDecisionLabel } from "./adminActivityPresentation";
 
 const ALL_USERS = "all";
 const ALL_PROFILES = "all";
@@ -305,7 +308,9 @@ export default function AdminPlaybackHistory() {
                             </div>
                           </TableCell>
                           <TableCell>
-                            <Badge variant="secondary">{row.play_method}</Badge>
+                            <Badge variant="secondary">
+                              {formatDecisionLabel(row.play_method)}
+                            </Badge>
                           </TableCell>
                           <TableCell>
                             <div className="space-y-1">
@@ -432,16 +437,7 @@ function formatDateTime(value: string) {
 }
 
 function formatRelative(value: string) {
-  const date = new Date(value);
-  const diff = Date.now() - date.getTime();
-  if (Number.isNaN(date.getTime())) return value;
-  const minutes = Math.max(0, Math.floor(diff / 60_000));
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+  return formatRelativeTime(value, { rounding: "floor" }) ?? value;
 }
 
 function delay(ms: number) {

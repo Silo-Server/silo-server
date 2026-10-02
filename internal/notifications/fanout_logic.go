@@ -8,7 +8,7 @@ import (
 // of one release event. Returns the matched reason flags and whether a
 // delivery should be created.
 //
-// Rules (docs/superpowers/plans/notifications/01, "Eligibility Rules"):
+// Rules (docs/architecture/notifications.md, "Eligibility rules"):
 //   - favorite / watchlist / continue_watching notify on any newly available
 //     episode of the series
 //   - next_up notifies only when the episode is at or beyond the profile's

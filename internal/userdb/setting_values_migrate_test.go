@@ -420,3 +420,79 @@ func TestMigrateToV16IsIdempotentUnderReRun(t *testing.T) {
 		t.Error("a second migration run was accepted; values would be duplicated")
 	}
 }
+
+// TestInitSchemaCarriesAutoSkipIntroOntoIntroSkipMode covers this backend's half
+// of the revision-7 cutover: rows that were already canonical when the release
+// landed, which the legacy backfill will never look at again because it has
+// already run.
+//
+// The PostgreSQL side of the same copy is a Goose migration; both have to reach
+// the same rows or a household's intro behavior would depend on which backend
+// its account happens to live in.
+func TestInitSchemaCarriesAutoSkipIntroOntoIntroSkipMode(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := InitSchema(db); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+
+	// Three identities a real store can hold the boolean at, plus an enum a
+	// client already chose for itself.
+	for _, row := range []struct{ scope, profile, device, key, value string }{
+		{"profile", "p1", "", "playback.auto_skip_intro", "true"},
+		{"profile", "p2", "", "playback.auto_skip_intro", "false"},
+		{"profile_device", "p1", "d1", "playback.auto_skip_intro", "true"},
+		{"profile_device", "p1", "d2", "playback.auto_skip_intro", "true"},
+		{"profile_device", "p1", "d2", "playback.intro_skip_mode", `"never"`},
+	} {
+		if _, err := db.Exec(`
+INSERT INTO user_setting_values
+    (key, scope, profile_id, device_id, value, revision, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+			row.key, row.scope, nullableText(row.profile), nullableText(row.device),
+			row.value); err != nil {
+			t.Fatalf("seeding %s at %s: %v", row.key, row.scope, err)
+		}
+	}
+
+	// The copy runs on open, so re-running InitSchema is how a deployment
+	// upgrading into this release reaches it.
+	if err := InitSchema(db); err != nil {
+		t.Fatalf("second InitSchema: %v", err)
+	}
+
+	for _, want := range []struct {
+		scope, where, value string
+		args                []any
+	}{
+		{"profile", "profile_id = ?", `"always"`, []any{"p1"}},
+		{"profile", "profile_id = ?", `"ask"`, []any{"p2"}},
+		{"profile_device", "profile_id = ? AND device_id = ?", `"always"`, []any{"p1", "d1"}},
+		// The client's own choice survives; the boolean beside it does not
+		// overwrite the mode that cannot be spelled as a boolean.
+		{"profile_device", "profile_id = ? AND device_id = ?", `"never"`, []any{"p1", "d2"}},
+	} {
+		got, ok := canonicalValue(t, db, "playback.intro_skip_mode", want.scope, want.where, want.args...)
+		if !ok || got != want.value {
+			t.Errorf("intro_skip_mode at %s %v = %q (found=%v), want %s",
+				want.scope, want.args, got, ok, want.value)
+		}
+	}
+
+	// Idempotent: opening the store again must not duplicate or disturb a row.
+	if err := InitSchema(db); err != nil {
+		t.Fatalf("third InitSchema: %v", err)
+	}
+	var count int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM user_setting_values WHERE key = 'playback.intro_skip_mode'`,
+	).Scan(&count); err != nil {
+		t.Fatalf("counting intro_skip_mode rows: %v", err)
+	}
+	if count != 4 {
+		t.Errorf("intro_skip_mode rows = %d, want 4 after repeated opens", count)
+	}
+}

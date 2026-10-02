@@ -28,7 +28,7 @@ func (t *ReconcileWatchHistoryTask) Description() string {
 func (t *ReconcileWatchHistoryTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategorySystem
 }
-func (t *ReconcileWatchHistoryTask) IsHidden() bool { return false }
+func (t *ReconcileWatchHistoryTask) IsHidden() bool { return true }
 
 func (t *ReconcileWatchHistoryTask) DefaultTriggers() []taskmanager.TriggerConfig {
 	return []taskmanager.TriggerConfig{

@@ -6,9 +6,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        Raw logs only. Never AI-summarize logs. You must have reproduced this yourself on a real deployment before filing.
+        Report behavior you reproduced on a real deployment. Include raw logs rather than AI summaries, and keep observations separate from suspected root cause. Redact credentials, tokens, personal data, and private media details, and mark each redaction.
 
-        Fabricated or AI-hallucinated reports are an instant block. Read [CONTRIBUTING.md](https://github.com/Silo-Server/silo-server/blob/main/CONTRIBUTING.md) first.
+        Fabricated or AI-hallucinated reports are an immediate block. Read [CONTRIBUTING.md](https://github.com/Silo-Server/silo-server/blob/main/CONTRIBUTING.md) and the [AI-assisted contribution policy](https://github.com/Silo-Server/silo-server/blob/main/docs/ai-contributions.md) first.
   - type: textarea
     id: what-happened
     attributes:
@@ -65,21 +65,48 @@ body:
       render: shell
     validations:
       required: true
-  - type: dropdown
-    id: ai-involvement
+  - type: textarea
+    id: technical-notes
     attributes:
-      label: AI involvement in this report
-      options:
-        - None — written by a human
-        - AI-assisted, human verified the repro
-        - AI-generated, human verified the repro
+      label: Technical notes
+      description: Optional suspected root cause, relevant files, SQL output, or stack traces. Keep this separate from the observed reproduction above.
+  - type: input
+    id: ai-harness
+    attributes:
+      label: AI harness
+      description: Enter the exact agent harness or application, or "none".
     validations:
       required: true
   - type: input
-    id: ai-tool-model
+    id: ai-tools
     attributes:
-      label: AI tool + model
-      placeholder: e.g. Claude Code / claude-fable-5 — or n/a
+      label: AI tool(s)
+      description: Enter the exact tool name(s), or "none".
+    validations:
+      required: true
+  - type: input
+    id: ai-models
+    attributes:
+      label: AI model(s)
+      description: Enter the exact model identifier(s) reported by each tool, or "n/a".
+    validations:
+      required: true
+  - type: dropdown
+    id: ai-involvement
+    attributes:
+      label: AI involvement
+      options:
+        - No AI used
+        - Human-written, AI-reviewed
+        - AI-assisted
+        - Fully AI-generated, human verified
+    validations:
+      required: true
+  - type: textarea
+    id: ai-review
+    attributes:
+      label: Independent or adversarial review
+      description: Summarize the scope, method, findings, and resolutions, or enter "n/a" when this issue does not require independent or adversarial review.
     validations:
       required: true
   - type: checkboxes
@@ -89,5 +116,5 @@ body:
       options:
         - label: I reproduced this myself on a real deployment
           required: true
-        - label: Logs above are raw copy-paste, not AI-summarized
+        - label: Any logs provided are raw apart from marked redactions and are not AI-summarized; if none were available, I said so above
           required: true

@@ -176,6 +176,10 @@ func (h *Handler) handleSetEpisodeProgress(w http.ResponseWriter, r *http.Reques
 // 404. The shape was intentionally chosen over 501 because the ABS web
 // reader treats 404 as "no ebook available for this item" and degrades
 // cleanly; 501 surfaces an alarming error banner.
+// The route is enrolled in stream telemetry but attaches nothing: this handler
+// unconditionally 404s, and a rejected request creates no logical activity. When
+// it grows a real body, attach an abs transfer here — the wiring is already in
+// place, only the Attach call and the *http.Request parameter are missing.
 func (h *Handler) handleEbookFile(w http.ResponseWriter, _ *http.Request) {
 	http.Error(w, "ebook not available", http.StatusNotFound)
 }

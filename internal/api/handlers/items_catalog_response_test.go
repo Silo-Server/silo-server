@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -79,7 +80,7 @@ func TestItemListCardImageURLsUsesBatchResolver(t *testing.T) {
 		},
 	}
 
-	urls := handler.itemListCardImageURLs(context.Background(), items)
+	urls := handler.itemListCardImageURLs(context.Background(), items, imagesize.Unset)
 
 	if resolver.singleCalls != 0 {
 		t.Fatalf("single resolver calls = %d, want 0", resolver.singleCalls)
@@ -181,5 +182,23 @@ func TestListOverlaySummariesUsesOverlayFileProjection(t *testing.T) {
 	}
 	if got := summaries["episode-1"].VideoCodec; got != "H.264" {
 		t.Fatalf("episode overlay video codec = %q, want H.264", got)
+	}
+}
+
+// An item repository without a database must not hide badges that the file
+// projection can still compute.
+func TestListOverlaySummariesFallsBackWithoutItemDatabase(t *testing.T) {
+	repo := &overlayFastPathFileRepo{}
+	handler := &ItemsHandler{itemRepo: catalog.NewItemRepository(nil), fileRepo: repo}
+
+	summaries := handler.listOverlaySummaries(context.Background(), []*models.MediaItem{
+		{ContentID: "movie-1", Type: "movie"},
+	}, catalog.AccessFilter{})
+
+	if repo.overlayContentCalls != 1 {
+		t.Fatalf("overlay content calls = %d, want 1", repo.overlayContentCalls)
+	}
+	if got := summaries["movie-1"]; got == nil || got.Resolution != "2160p" {
+		t.Fatalf("movie overlay = %+v, want the file projection's 2160p badge", got)
 	}
 }

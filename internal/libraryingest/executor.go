@@ -42,6 +42,7 @@ type FolderRepository interface {
 type SkippedRootRepository interface {
 	Upsert(ctx context.Context, root models.SkippedMediaRoot) error
 	Delete(ctx context.Context, folderID int, rootPath string) error
+	DeleteMissingByFolder(ctx context.Context, folderID int, seenRoots []string) error
 	DeleteMissingInScope(ctx context.Context, folderID int, scopePath string, seenRoots []string) error
 }
 
@@ -300,7 +301,7 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 		return nil, drainerErr
 	default:
 	}
-	if err := e.reconcileSkippedRoots(scanCtx, folder.ID, folder.Type, mode, claim.path, matchScopes, scanResult); err != nil {
+	if err := e.reconcileSkippedRoots(scanCtx, folder.ID, folder.Type, mode, claim.path, matchScopes, scanResult, folder.Paths...); err != nil {
 		return nil, err
 	}
 
@@ -515,6 +516,7 @@ func (e *Executor) reconcileSkippedRoots(
 	scopePath string,
 	matchScopes []string,
 	scanResult *scanner.ScanResult,
+	libraryRoots ...string,
 ) error {
 	if e == nil || e.skippedRootRepo == nil {
 		return nil
@@ -525,7 +527,7 @@ func (e *Executor) reconcileSkippedRoots(
 	case scanResult != nil:
 		observations = append(observations, scanResult.RootObservations...)
 	case mode == scopeModeFile:
-		observation, ok := scanner.ObserveRoot(scopePath, folderType)
+		observation, ok := scanner.ObserveRoot(scopePath, folderType, libraryRoots...)
 		if ok {
 			observations = append(observations, observation)
 		}
@@ -535,6 +537,7 @@ func (e *Executor) reconcileSkippedRoots(
 	for _, scope := range matchScopes {
 		seenRootsByScope[scope] = []string{}
 	}
+	seenSkippedRoots := make([]string, 0, len(observations))
 
 	for _, observation := range observations {
 		if observation.HasFolderIDs {
@@ -551,6 +554,7 @@ func (e *Executor) reconcileSkippedRoots(
 			}); err != nil {
 				return fmt.Errorf("upsert skipped root %q: %w", observation.RootPath, err)
 			}
+			seenSkippedRoots = append(seenSkippedRoots, observation.RootPath)
 		}
 
 		for _, scope := range matchScopes {
@@ -558,6 +562,13 @@ func (e *Executor) reconcileSkippedRoots(
 				seenRootsByScope[scope] = append(seenRootsByScope[scope], observation.RootPath)
 			}
 		}
+	}
+
+	if mode == scopeModeLibrary {
+		if err := e.skippedRootRepo.DeleteMissingByFolder(ctx, folderID, seenSkippedRoots); err != nil {
+			return fmt.Errorf("delete stale skipped roots for folder %d: %w", folderID, err)
+		}
+		return nil
 	}
 
 	for _, scope := range matchScopes {

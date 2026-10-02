@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // Realtime message types exchanged over /playback/ws/{session_id}.
@@ -28,6 +30,7 @@ const (
 	RealtimeEventSubtitleTranslationCues  RealtimeEventName = "subtitle_translation_cues"
 	RealtimeEventSubtitleTranslationDone  RealtimeEventName = "subtitle_translation_completed"
 	RealtimeEventSubtitleTranslationFail  RealtimeEventName = "subtitle_translation_failed"
+	RealtimeEventSubtitleTimingChanged    RealtimeEventName = "subtitle_timing_changed"
 )
 
 var supportedRealtimeEventNameSet = map[RealtimeEventName]struct{}{
@@ -38,6 +41,7 @@ var supportedRealtimeEventNameSet = map[RealtimeEventName]struct{}{
 	RealtimeEventSubtitleTranslationCues:  {},
 	RealtimeEventSubtitleTranslationDone:  {},
 	RealtimeEventSubtitleTranslationFail:  {},
+	RealtimeEventSubtitleTimingChanged:    {},
 }
 
 // CommandName identifies a supported realtime command.
@@ -57,6 +61,13 @@ const (
 	CommandPlayMedia          CommandName = "play_media"
 	CommandSetAudioTrack      CommandName = "set_audio_track"
 	CommandSetSubtitleTrack   CommandName = "set_subtitle_track"
+	// CommandPlanInvalidated tells a playing client that the plan it is running
+	// can no longer serve this source, so it must replan off that plan. It is
+	// the first server-initiated control push in the v3 protocol, and it is only
+	// sent to a session whose attempt negotiated FeaturePlanInvalidatedV3 and
+	// which has a live realtime connection; every other session is stopped
+	// instead. See CopySafetyNotifier.
+	CommandPlanInvalidated CommandName = "plan_invalidated"
 )
 
 var supportedCommandNames = []CommandName{
@@ -73,6 +84,7 @@ var supportedCommandNames = []CommandName{
 	CommandPlayMedia,
 	CommandSetAudioTrack,
 	CommandSetSubtitleTrack,
+	CommandPlanInvalidated,
 }
 
 var supportedCommandNameSet = func() map[CommandName]struct{} {
@@ -127,12 +139,13 @@ type TimeRangePayload struct {
 }
 
 type MarkersUpdatedPayload struct {
-	SessionID string            `json:"session_id"`
-	FileID    int               `json:"file_id"`
-	Intro     *TimeRangePayload `json:"intro"`
-	Credits   *TimeRangePayload `json:"credits"`
-	Recap     *TimeRangePayload `json:"recap"`
-	Preview   *TimeRangePayload `json:"preview"`
+	SessionID      string                 `json:"session_id"`
+	FileID         int                    `json:"file_id"`
+	Intro          *TimeRangePayload      `json:"intro"`
+	Credits        *TimeRangePayload      `json:"credits"`
+	Recap          *TimeRangePayload      `json:"recap"`
+	Preview        *TimeRangePayload      `json:"preview"`
+	MarkerSegments []models.MarkerSegment `json:"marker_segments"`
 }
 
 // SubtitleReadyPayload announces that a newly generated subtitle track (AI
@@ -258,14 +271,19 @@ func NewMarkersUpdatedEvent(
 	credits *TimeRangePayload,
 	recap *TimeRangePayload,
 	preview *TimeRangePayload,
+	segments ...models.MarkerSegment,
 ) (EventEnvelope, error) {
+	if segments == nil {
+		segments = []models.MarkerSegment{}
+	}
 	payload, err := json.Marshal(MarkersUpdatedPayload{
-		SessionID: sessionID,
-		FileID:    fileID,
-		Intro:     intro,
-		Credits:   credits,
-		Recap:     recap,
-		Preview:   preview,
+		SessionID:      sessionID,
+		FileID:         fileID,
+		Intro:          intro,
+		Credits:        credits,
+		Recap:          recap,
+		Preview:        preview,
+		MarkerSegments: segments,
 	})
 	if err != nil {
 		return EventEnvelope{}, err
@@ -294,6 +312,29 @@ func NewSubtitleReadyEvent(
 		return EventEnvelope{}, err
 	}
 	return NewEventEnvelope(sessionID, RealtimeEventSubtitleReady, payload)
+}
+
+// SubtitleTimingChangedPayload tells a player that a stored subtitle of its
+// file was retimed (automatic sync or a manual adjustment). A player showing
+// that track fetches it again; its stream URL already serves the new timing.
+type SubtitleTimingChangedPayload struct {
+	SessionID  string `json:"session_id"`
+	FileID     int    `json:"file_id"`
+	SubtitleID int    `json:"subtitle_id"`
+	// Track identifies the retimed track in the session's inventory, as in
+	// SubtitleReadyPayload. Absent when the inventory could not be resolved.
+	Track *SubtitleInventoryItemV3 `json:"track,omitempty"`
+}
+
+// NewSubtitleTimingChangedEvent creates a validated subtitle-timing event.
+func NewSubtitleTimingChangedEvent(sessionID string, fileID, subtitleID int, track *SubtitleInventoryItemV3) (EventEnvelope, error) {
+	payload, err := json.Marshal(SubtitleTimingChangedPayload{
+		SessionID: sessionID, FileID: fileID, SubtitleID: subtitleID, Track: track,
+	})
+	if err != nil {
+		return EventEnvelope{}, err
+	}
+	return NewEventEnvelope(sessionID, RealtimeEventSubtitleTimingChanged, payload)
 }
 
 // NewSubtitleTranslationStartedEvent creates a validated translation-started event.
@@ -397,6 +438,36 @@ type CommandEnvelope struct {
 // CommandIssuedBy identifies the source of a command.
 type CommandIssuedBy struct {
 	Kind string `json:"kind"`
+}
+
+// PlanInvalidationReason values a plan_invalidated command can carry.
+const (
+	// PlanInvalidatedVideoCopyUnsafe means the asynchronous H.264 copy-safety
+	// scan came back multi-PPS after the plan was already playing, so the video
+	// stream-copy route it named cannot serve this source.
+	PlanInvalidatedVideoCopyUnsafe = "video_copy_unsafe"
+)
+
+// PlanInvalidatedPayload names the plan the server withdrew and why.
+//
+// PlanID is required: the client compares it against the plan it is running and
+// does nothing when it has already replanned past it, so a late command can
+// never evict a route the server never complained about.
+type PlanInvalidatedPayload struct {
+	Reason string `json:"reason"`
+	PlanID string `json:"plan_id"`
+}
+
+// NewPlanInvalidatedCommand builds a validated plan_invalidated command.
+func NewPlanInvalidatedCommand(sessionID, commandID, planID, reason string) (CommandEnvelope, error) {
+	if planID == "" || reason == "" {
+		return CommandEnvelope{}, ErrInvalidRealtimePayload
+	}
+	payload, err := json.Marshal(PlanInvalidatedPayload{Reason: reason, PlanID: planID})
+	if err != nil {
+		return CommandEnvelope{}, err
+	}
+	return NewCommandEnvelope(sessionID, commandID, CommandPlanInvalidated, payload)
 }
 
 // NewCommandEnvelope creates a validated command envelope.

@@ -13,6 +13,8 @@ func TestSupportsAudioFile(t *testing.T) {
 		{"sample.flac", true},
 		{"podcast.opus", true},
 		{"track.ogg", true},
+		{"track.wav", true},
+		{"track.AAC", true},
 		{"poster.jpg", false},
 		{"movie.mkv", false},
 		{"", false},

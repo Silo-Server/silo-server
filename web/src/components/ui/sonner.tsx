@@ -1,16 +1,10 @@
 import type { CSSProperties } from "react";
 import { Toaster as SonnerToaster, type ToasterProps } from "sonner";
-import { useTheme } from "@/hooks/useTheme";
-
-const LIGHT_THEMES = new Set(["cinema-light"]);
 
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme } = useTheme();
-  const sonnerTheme = LIGHT_THEMES.has(theme) ? "light" : "dark";
-
   return (
     <SonnerToaster
-      theme={sonnerTheme}
+      theme="dark"
       className="toaster group"
       toastOptions={{
         classNames: {
