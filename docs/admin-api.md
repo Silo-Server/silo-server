@@ -1038,8 +1038,8 @@ provider. Cached in-process for 15s and bypassed with `?refresh=1`.
 | `watch_providers` | object[] | One entry per watch provider, ordered by `provider`. Always an array, never null. |
 
 `watch_providers` covers the union of the providers registered in the watchsync
-registry — built-in and plugin-contributed alike, so a provider installed by a
-plugin appears as soon as it registers, with zeros — and any provider that has
+registry — every provider is a plugin, so one appears as soon as its plugin
+registers, with zeros — and any provider that has
 rows in the watch-provider tables. The second half of that union keeps history
 visible after a provider's plugin is uninstalled; such an entry carries
 `"registered": false` and falls back to its key as the display name.
@@ -1048,7 +1048,7 @@ Each entry:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `provider` | string | Provider key (`trakt`, `simkl`, `mdblist`, a plugin's key). |
+| `provider` | string | Provider key: `trakt`, `simkl`, or `mdblist` for the first-party plugins, otherwise `plugin:<installation id>:<capability id>`. |
 | `display_name` | string | Human name from the registry, or the key when the provider is not registered. |
 | `registered` | bool | False when the provider only exists in stored rows. |
 | `scrobbling` | bool | The provider declares the scrobble-playback capability. |

@@ -1904,10 +1904,14 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if libraryCollectionService.TraktCollections == nil {
 			// The client ID is resolved per call rather than captured here, so
 			// saving new Trakt credentials applies without a server restart.
-			libraryCollectionService.TraktCollections = &traktCollectionAdapter{
+			adapter := &traktCollectionAdapter{
 				client:   metatrakt.NewClient("", 5),
 				settings: settingsRepo,
 			}
+			if clientIDs, ok := deps.WatchProviderService.(watchProviderAppClientIDs); ok {
+				adapter.watchProviders = clientIDs
+			}
+			libraryCollectionService.TraktCollections = adapter
 		}
 		if tokens, ok := deps.WatchProviderService.(watchProviderAccessTokens); ok && libraryCollectionService.TraktTokenResolver == nil && deps.DB != nil {
 			libraryCollectionService.TraktTokenResolver = &traktCollectionTokenResolver{
@@ -4862,10 +4866,18 @@ func (a *tmdbListAdapter) GetList(ctx context.Context, id, limit int) ([]catalog
 	return entries, nil
 }
 
-// traktClientIDSettingKey holds the Trakt app client ID. It is deliberately
-// not in config.restartRequiredKeys: the adapter re-reads it before every
-// upstream call, so a saved change converges without a restart.
+// traktClientIDSettingKey holds the Trakt app client ID that the built-in Trakt
+// watch provider used. The adapter falls back to it when no Trakt watch-sync
+// plugin is configured, so a server that uses Trakt only for collections keeps
+// working. It is deliberately not in config.restartRequiredKeys: the adapter
+// re-reads it before every upstream call.
 const traktClientIDSettingKey = "watchsync.trakt.client_id"
+
+// watchProviderAppClientIDs reads the app client ID a watch-sync plugin is
+// configured with.
+type watchProviderAppClientIDs interface {
+	AppClientID(ctx context.Context, providerKey string) (string, error)
+}
 
 // adminJobArtifactURLTTL matches the presigned lifetime an S3 deployment hands
 // out, so the two backends expire a download link on the same schedule.
@@ -4886,16 +4898,31 @@ func newAdminJobArtifactSigner(deps *Dependencies) *artworkurl.Signer {
 
 type traktCollectionAdapter struct {
 	client *metatrakt.Client
-	// settings is the live source of the app client ID. Nil only where no
+	// watchProviders supplies the Trakt watch-sync plugin's app client ID,
+	// the app that issued the profile tokens these calls send. Nil when watch
+	// sync is unavailable.
+	watchProviders watchProviderAppClientIDs
+	// settings is the fallback source of the app client ID. Nil only where no
 	// settings store exists (tests), where the client ID stays empty and the
 	// upstream call fails the same way it always did.
 	settings catalog.SettingsStore
 }
 
-// refreshClientID pushes the currently saved app client ID onto the shared
-// client. A read failure leaves the last known value in place: failing the
-// request at Trakt is more useful than failing it here on a transient DB blip.
+// refreshClientID pushes the current app client ID onto the shared client:
+// the Trakt watch-sync plugin's, else the legacy setting. A read failure
+// leaves the last known value in place: failing the request at Trakt is more
+// useful than failing it here on a transient DB blip.
 func (a *traktCollectionAdapter) refreshClientID(ctx context.Context) {
+	if a.watchProviders != nil {
+		clientID, err := a.watchProviders.AppClientID(ctx, "trakt")
+		if err != nil {
+			return
+		}
+		if clientID != "" {
+			a.client.SetClientID(clientID)
+			return
+		}
+	}
 	if a.settings == nil {
 		return
 	}

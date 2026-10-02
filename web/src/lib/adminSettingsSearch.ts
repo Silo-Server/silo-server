@@ -501,20 +501,19 @@ export const ADMIN_SETTINGS_GROUPS: AdminSettingsSearchGroup[] = [
         id: "watch-sync",
         label: "Watch Providers",
         description:
-          "Trakt, Simkl, and watch-provider plugins that profiles connect their own accounts to.",
+          "Watch-provider plugins such as Trakt, Simkl, and MDBList that profiles connect their own accounts to.",
         groups: ["Watch providers"],
         keywords: [
           "trakt",
           "simkl",
+          "mdblist",
           "scrobble",
           "watch providers",
-          "client id",
-          "client secret",
           "sync",
           "integrations",
           "plugin",
         ],
-        settings: settingIndex("Watch providers", "Trakt", "Simkl", "Client ID", "Client secret"),
+        settings: settingIndex("Watch providers"),
         icon: RefreshCw,
       },
       {
