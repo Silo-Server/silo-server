@@ -595,6 +595,18 @@ execute that recipe while the API remains the media origin. A progressive-only
 client receives a non-retryable `local_transcode_disabled` terminal because
 retrying cannot create a legal route.
 
+**Session capability for Apple build 31.** That build cannot refresh the bearer
+its media engine captured, so a v1 start or replan from it also receives an
+`X-Silo-Stream-Token` header in `stream.headers`. The token is scoped to the
+playback session in the path and bound to the login session that requested it.
+`RequireTransportAuth` accepts it before the Authorization fallback only while
+that login session is still active, checked on every request like an access
+token, so revoking the login stops the capability on its next request. A token
+without that binding, including the `st` reconstruction token in older URLs, is
+never a credential on its own: those requests still need account
+authentication. Callers without a login session, such as API keys, receive no
+capability. `/api/v2` never mints one.
+
 In routing policy, **worker** means either a proxy node or a transcode node.
 Progressive remux has proxy-worker, API, and transcode-node-to-proxy execution
 shapes; HLS remux has transcode-worker and API execution shapes. Consequently,

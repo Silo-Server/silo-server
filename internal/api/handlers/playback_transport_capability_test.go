@@ -22,16 +22,19 @@ func (transportCapabilityBearerValidator) ValidateToken(string) (*auth.Claims, e
 	return nil, errors.New("expired access token")
 }
 
+// transportCapabilitySessionValidator treats only the capability's login
+// session as active, so the expired bearer on the same request cannot pass.
 type transportCapabilitySessionValidator struct{}
 
-func (transportCapabilitySessionValidator) ActiveSessionRole(context.Context, string) (string, bool, error) {
-	return "", false, nil
+func (transportCapabilitySessionValidator) ActiveSessionRole(_ context.Context, sessionID string) (string, bool, error) {
+	return "", sessionID == "capability-login-1", nil
 }
 
 func TestVerifiedStreamCardFromRequestUsesHeaderCapabilityForReconstruction(t *testing.T) {
 	const secret = "transport-capability-reconstruction-secret"
 	token, err := streamtoken.Sign(streamtoken.Claims{
 		SessionID:       "playback-1",
+		AuthSessionID:   "capability-login-1",
 		MediaPath:       "/media/movie.mkv",
 		PlayMethod:      "transcode",
 		TargetCodec:     "h264",
@@ -170,5 +173,41 @@ func TestSessionCapabilityIsNotMintedForNativeAPIV2(t *testing.T) {
 	replan := mediaAuthModeForReplanV3(v2, req, currentPlan)
 	if !replan.headerAuth || replan.proxyEgress || replan.sessionHeaderCapability {
 		t.Fatalf("v2 replan mode = %#v, want header auth pinned without a new capability", replan)
+	}
+}
+
+// The capability is bound to the requester's login session so revoking that
+// session stops it. A caller without one never receives a capability.
+func TestSessionCapabilityHeadersBindTheLoginSession(t *testing.T) {
+	const secret = "transport-capability-binding-secret"
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.JWTSecret = secret
+	mode := mediaAuthModeV3{headerAuth: true, sessionHeaderCapability: true}
+	card := playback.NewRemuxRecipeCard("playback-1", 7, "profile-1", 42, false, 0)
+	request := func(claims *auth.Claims) *http.Request {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", nil)
+		if claims != nil {
+			req = req.WithContext(apimw.SetClaims(req.Context(), claims))
+		}
+		return req
+	}
+
+	headers := handler.sessionCapabilityHeadersV3(request(&auth.Claims{UserID: 7, SessionID: "login-session-9", TokenType: auth.TokenTypeAccess}), mode, card)
+	claims, err := streamtoken.Verify(headers[streamtoken.Header], secret)
+	if err != nil {
+		t.Fatalf("minted capability: %v (headers %v)", err, headers)
+	}
+	if claims.AuthSessionID != "login-session-9" || claims.SessionID != "playback-1" {
+		t.Fatalf("capability claims = %#v, want the requester's login session", claims)
+	}
+
+	for name, caller := range map[string]*auth.Claims{
+		"api key":            {UserID: 7, TokenType: auth.TokenTypeAPIKey, APIKeyID: 3},
+		"no caller":          nil,
+		"access without sid": {UserID: 7, TokenType: auth.TokenTypeAccess},
+	} {
+		if headers := handler.sessionCapabilityHeadersV3(request(caller), mode, card); headers != nil {
+			t.Fatalf("%s: minted %v, want no capability", name, headers)
+		}
 	}
 }

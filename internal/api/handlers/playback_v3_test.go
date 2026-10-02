@@ -1090,6 +1090,12 @@ func TestHandleStartPlaybackV3NegotiatesHeaderAuthenticatedDirectAndSubtitleURLs
 			if (capability != "") != test.wantCapabilityHeader {
 				t.Fatalf("session capability header present = %v, want %v", capability != "", test.wantCapabilityHeader)
 			}
+			if capability != "" {
+				claims, err := streamtoken.Verify(capability, handler.JWTSecret)
+				if err != nil || claims.AuthSessionID != testPlaybackLoginSessionID {
+					t.Fatalf("session capability claims = %#v (err %v), want bound to login session %q", claims, err, testPlaybackLoginSessionID)
+				}
+			}
 			if _, ok := response.PlaybackPlan.Stream.Headers["Authorization"]; ok {
 				t.Fatalf("plan persisted bearer material in headers: %#v", response.PlaybackPlan.Stream.Headers)
 			}

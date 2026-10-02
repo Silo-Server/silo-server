@@ -27,8 +27,14 @@ func (v *transportAuthTokenValidator) ValidateToken(string) (*auth.Claims, error
 	return v.claims, v.err
 }
 
+// transportCapabilityLoginSession is the login session the test capabilities
+// are bound to. The fake treats it as active unless the test revokes it.
+const transportCapabilityLoginSession = "capability-login-1"
+
 type transportAuthSessionValidator struct {
-	valid bool
+	valid   bool
+	revoked map[string]bool
+	checked *[]string
 }
 
 type transportAuthViewerResolver struct {
@@ -45,7 +51,13 @@ func (r *transportAuthViewerResolver) Resolve(context.Context, access.ResolveInp
 	return access.Scope{}, r.err
 }
 
-func (v transportAuthSessionValidator) ActiveSessionRole(context.Context, string) (string, bool, error) {
+func (v transportAuthSessionValidator) ActiveSessionRole(_ context.Context, sessionID string) (string, bool, error) {
+	if v.checked != nil {
+		*v.checked = append(*v.checked, sessionID)
+	}
+	if sessionID == transportCapabilityLoginSession {
+		return "", !v.revoked[sessionID], nil
+	}
 	return "", v.valid, nil
 }
 
@@ -257,15 +269,105 @@ func TestRequireTransportAuthRejectsInvalidCapabilityAndFallsBack(t *testing.T) 
 
 func signTransportAuthToken(t *testing.T, secret, sessionID string, userID, mediaFileID int, playMethod string, ttl time.Duration) string {
 	t.Helper()
+	return signTransportAuthTokenForLogin(t, secret, sessionID, transportCapabilityLoginSession, userID, mediaFileID, playMethod, ttl)
+}
+
+func signTransportAuthTokenForLogin(t *testing.T, secret, sessionID, authSessionID string, userID, mediaFileID int, playMethod string, ttl time.Duration) string {
+	t.Helper()
 	token, err := streamtoken.Sign(streamtoken.Claims{
-		SessionID:   sessionID,
-		UserID:      userID,
-		ProfileID:   "profile-1",
-		MediaFileID: mediaFileID,
-		PlayMethod:  playMethod,
+		SessionID:     sessionID,
+		AuthSessionID: authSessionID,
+		UserID:        userID,
+		ProfileID:     "profile-1",
+		MediaFileID:   mediaFileID,
+		PlayMethod:    playMethod,
 	}, secret, ttl)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return token
+}
+
+// Revoking the login session a capability was issued under must stop the
+// capability on its next request, the same as it stops the access token.
+func TestRequireTransportAuthStopsCapabilityWhenLoginSessionIsRevoked(t *testing.T) {
+	const secret = "transport-auth-test-secret"
+	tokenValidator := &transportAuthTokenValidator{err: errors.New("expired access token")}
+	sessions := transportAuthSessionValidator{revoked: map[string]bool{}, checked: &[]string{}}
+	middleware := NewAuthMiddleware(tokenValidator, sessions, nil, nil)
+	router := chi.NewRouter()
+	router.With(middleware.RequireTransportAuth(secret)).Get("/stream/{session_id}", func(w http.ResponseWriter, r *http.Request) {
+		if claims := GetClaims(r.Context()); claims == nil || claims.SessionID != transportCapabilityLoginSession {
+			t.Fatalf("auth claims = %#v, want the bound login session", claims)
+		}
+		w.WriteHeader(http.StatusPartialContent)
+	})
+	token := signTransportAuthToken(t, secret, "playback-1", 7, 42, "direct", time.Hour)
+	fetch := func() int {
+		req := httptest.NewRequest(http.MethodGet, "/stream/playback-1", nil)
+		req.Header.Set(streamtoken.Header, token)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	if code := fetch(); code != http.StatusPartialContent {
+		t.Fatalf("active login session status = %d, want 206", code)
+	}
+	sessions.revoked[transportCapabilityLoginSession] = true
+	if code := fetch(); code != http.StatusUnauthorized {
+		t.Fatalf("revoked login session status = %d, want 401", code)
+	}
+	if got := *sessions.checked; len(got) != 2 || got[0] != transportCapabilityLoginSession || got[1] != transportCapabilityLoginSession {
+		t.Fatalf("login session checks = %v, want one per request", got)
+	}
+}
+
+// A token that isn't bound to a login session, such as the legacy st query
+// reconstruction token ordinary v1 clients send, is never a credential by
+// itself: those requests keep needing account authentication.
+func TestRequireTransportAuthRequiresAccountAuthForUnboundTokens(t *testing.T) {
+	const secret = "transport-auth-test-secret"
+	unbound := signTransportAuthTokenForLogin(t, secret, "playback-1", "", 7, 42, "direct", time.Hour)
+	for _, carrier := range []struct {
+		name  string
+		apply func(*http.Request)
+	}{
+		{name: "query", apply: func(req *http.Request) {
+			req.URL.RawQuery = streamtoken.QueryParameter + "=" + url.QueryEscape(unbound)
+		}},
+		{name: "header", apply: func(req *http.Request) { req.Header.Set(streamtoken.Header, unbound) }},
+	} {
+		t.Run(carrier.name+" without account auth", func(t *testing.T) {
+			tokenValidator := &transportAuthTokenValidator{err: errors.New("no access token")}
+			middleware := NewAuthMiddleware(tokenValidator, transportAuthSessionValidator{}, nil, nil)
+			router := chi.NewRouter()
+			router.With(middleware.RequireTransportAuth(secret)).Get("/stream/{session_id}", func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusPartialContent)
+			})
+			req := httptest.NewRequest(http.MethodGet, "/stream/playback-1", nil)
+			carrier.apply(req)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401 without account auth", rec.Code)
+			}
+		})
+		t.Run(carrier.name+" with a revoked login", func(t *testing.T) {
+			tokenValidator := &transportAuthTokenValidator{claims: &auth.Claims{UserID: 7, ProfileID: "profile-1", SessionID: "login-session-1", TokenType: auth.TokenTypeAccess}}
+			middleware := NewAuthMiddleware(tokenValidator, transportAuthSessionValidator{valid: false}, nil, nil)
+			router := chi.NewRouter()
+			router.With(middleware.RequireTransportAuth(secret)).Get("/stream/{session_id}", func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusPartialContent)
+			})
+			req := httptest.NewRequest(http.MethodGet, "/stream/playback-1", nil)
+			carrier.apply(req)
+			req.Header.Set("Authorization", "Bearer access-token")
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			if rec.Code != http.StatusUnauthorized || tokenValidator.calls != 1 {
+				t.Fatalf("status = %d validator calls = %d, want account auth to reject the revoked login", rec.Code, tokenValidator.calls)
+			}
+		})
+	}
 }

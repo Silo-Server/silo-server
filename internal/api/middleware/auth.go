@@ -198,15 +198,17 @@ func (am *AuthMiddleware) RequireTransportAuth(secret string) func(http.Handler)
 			sessionID := chi.URLParam(r, "session_id")
 			if secret != "" && token != "" {
 				claims, err := streamtoken.Verify(token, secret)
-				if err == nil && validTransportStreamClaims(claims, sessionID) {
+				if err == nil && validTransportStreamClaims(claims, sessionID) && am.transportLoginSessionActive(r.Context(), claims.AuthSessionID) {
 					authClaims := &auth.Claims{
 						UserID:    claims.UserID,
 						ProfileID: claims.ProfileID,
+						SessionID: claims.AuthSessionID,
 						TokenType: auth.TokenTypeStream,
 					}
 					if lc := activitylog.GetLogContext(r.Context()); lc != nil {
 						uid := claims.UserID
 						lc.UserID = &uid
+						lc.SessionID = claims.AuthSessionID
 					}
 					ctx := context.WithValue(r.Context(), claimsKey, authClaims)
 					ctx = context.WithValue(ctx, transportStreamClaimsKey, claims)
@@ -218,6 +220,20 @@ func (am *AuthMiddleware) RequireTransportAuth(secret string) func(http.Handler)
 			regularAuth.ServeHTTP(w, r)
 		})
 	}
+}
+
+// transportLoginSessionActive reports whether the login session a transport
+// capability was issued under is still active. A capability without one, such
+// as a legacy query reconstruction token, never authenticates on its own: the
+// request falls back to account authentication, as it did before capabilities
+// existed. The check runs on every request, like RequireAuth's, so revoking the
+// login session stops the capability on its next request.
+func (am *AuthMiddleware) transportLoginSessionActive(ctx context.Context, authSessionID string) bool {
+	if authSessionID == "" || am.sessionValidator == nil {
+		return false
+	}
+	_, active, err := am.sessionValidator.ActiveSessionRole(ctx, authSessionID)
+	return err == nil && active
 }
 
 func validTransportStreamClaims(claims *streamtoken.Claims, sessionID string) bool {

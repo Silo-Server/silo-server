@@ -25,6 +25,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -269,11 +270,21 @@ func mediaAuthModeForReplanV3(ctx context.Context, req playback.StartRequestV3, 
 	return mode
 }
 
-func (h *PlaybackHandler) sessionCapabilityHeadersV3(mode mediaAuthModeV3, card playback.RecipeCard) map[string]string {
-	if !mode.sessionHeaderCapability {
+// sessionCapabilityHeadersV3 mints the session-bound transport capability. It
+// is bound to the caller's login session so RequireTransportAuth can stop it as
+// soon as that session is revoked; a caller without one (an API key) gets no
+// capability and keeps authenticating media with its own credential.
+func (h *PlaybackHandler) sessionCapabilityHeadersV3(r *http.Request, mode mediaAuthModeV3, card playback.RecipeCard) map[string]string {
+	if !mode.sessionHeaderCapability || r == nil {
 		return nil
 	}
-	token := h.signStreamClaims(card.ToClaims())
+	caller := apimw.GetClaims(r.Context())
+	if caller == nil || caller.TokenType != auth.TokenTypeAccess || caller.SessionID == "" {
+		return nil
+	}
+	claims := card.ToClaims()
+	claims.AuthSessionID = caller.SessionID
+	token := h.signStreamClaims(claims)
 	if token == "" {
 		return nil
 	}
@@ -2900,7 +2911,7 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 		releaseLifecycle()
 		return nil
 	}
-	capabilityHeaders := h.sessionCapabilityHeadersV3(mode, identityRecipeCard(&routeSession))
+	capabilityHeaders := h.sessionCapabilityHeadersV3(r, mode, identityRecipeCard(&routeSession))
 	return preparedTransportV3{
 		url:                streamURL,
 		headers:            capabilityHeaders,
@@ -3935,7 +3946,7 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 	previousTransportID := remoteTransportID(session)
 	return preparedTransportV3{
 		url:              url,
-		headers:          h.sessionCapabilityHeadersV3(mode, card),
+		headers:          h.sessionCapabilityHeadersV3(r, mode, card),
 		hwAccel:          ts.Opts().EffectiveEncoderHWAccel(),
 		toneMapMode:      ts.Opts().ToneMapMode,
 		routingWorkload:  routingWorkloadV3(result),
@@ -4221,7 +4232,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 	if routingWorkloadV3(result) == noderouting.WorkloadRemux {
 		rollbackRequired = func() error { return rollbackTransport(true) }
 	}
-	return preparedTransportV3{url: url, headers: h.sessionCapabilityHeadersV3(mode, card), nodeURL: node.URL, transportID: transportID, hwAccel: confirmedHWAccel, toneMapMode: confirmedToneMapMode,
+	return preparedTransportV3{url: url, headers: h.sessionCapabilityHeadersV3(r, mode, card), nodeURL: node.URL, transportID: transportID, hwAccel: confirmedHWAccel, toneMapMode: confirmedToneMapMode,
 		routingWorkload: routingWorkloadV3(result), routingExecution: noderouting.ExecutionTranscode, routingExecutorID: node.ID, routingExecutorURL: node.URL,
 		routingEgress: routingEgress, routingEgressID: egressNodeID, routingEgressURL: egressNodeURL, commit: func() *transportErrorV3 {
 			if committed {
