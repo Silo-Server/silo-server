@@ -327,6 +327,16 @@ func TestSamplerExecution(t *testing.T) {
 			t.Fatal("invalid data fell back to local")
 		}
 	})
+	t.Run("transcode only does not fall back from a busy node", func(t *testing.T) {
+		s := &sampler{settings: settingsMap{SettingExecution: ExecutionTranscodeOnly, settingJWTSecret: "secret"},
+			nodes: nodeList{node}, reservations: &nodepool.Reservations{}, local: ok,
+			remote: fakeRemote(func(mediasample.Request) (mediasample.Result, error) {
+				return mediasample.Result{}, &mediasample.RemoteError{Status: http.StatusServiceUnavailable, Reason: mediasample.ReasonNodeUnavailable}
+			})}
+		if _, _, err := s.run(context.Background(), reqs); err == nil {
+			t.Fatal("transcode_nodes_only ran locally")
+		}
+	})
 	t.Run("transcode only without node", func(t *testing.T) {
 		s := &sampler{settings: settingsMap{SettingExecution: ExecutionTranscodeOnly, settingJWTSecret: "secret"},
 			nodes: nodeList{}, reservations: &nodepool.Reservations{}, local: ok}
