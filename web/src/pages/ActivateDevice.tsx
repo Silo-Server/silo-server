@@ -169,7 +169,12 @@ export default function ActivateDevice() {
                 ) : null}
               </div>
 
-              {!user ? (
+              {details.status === "cancelled" ? (
+                <p className="text-sm">
+                  The device canceled this sign-in request. Start again on the device if you still
+                  want to sign in.
+                </p>
+              ) : !user ? (
                 <Button asChild className="w-full">
                   <Link to={loginHref}>Sign in to approve</Link>
                 </Button>
@@ -200,11 +205,6 @@ export default function ActivateDevice() {
                 <p className="text-sm">This device is already signed in.</p>
               ) : details.status === "denied" ? (
                 <p className="text-sm">This sign-in request was denied.</p>
-              ) : details.status === "cancelled" ? (
-                <p className="text-sm">
-                  The device canceled this sign-in request. Start again on the device if you still
-                  want to sign in.
-                </p>
               ) : (
                 <p className="text-sm">This sign-in request has expired.</p>
               )}

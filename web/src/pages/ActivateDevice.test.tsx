@@ -6,8 +6,9 @@ import { V2ProblemError } from "@/api/v2/request";
 import ActivateDevice from "./ActivateDevice";
 
 const request = vi.hoisted(() => vi.fn());
+const auth = vi.hoisted(() => ({ user: { username: "laura" } as { username: string } | null }));
 vi.mock("@/hooks/useAuth", () => ({
-  useAuth: () => ({ user: { username: "laura" }, loading: false, setupLoading: false }),
+  useAuth: () => ({ user: auth.user, loading: false, setupLoading: false }),
 }));
 vi.mock("@/api/v2/request", async () => ({
   ...(await vi.importActual<typeof import("@/api/v2/request")>("@/api/v2/request")),
@@ -29,9 +30,9 @@ const details = (status: string) => ({
   temporary: false,
 });
 
-function mount() {
+function mount(entry = "/activate?code=ABCD-1234") {
   return render(
-    <MemoryRouter initialEntries={["/activate?code=ABCD-1234"]}>
+    <MemoryRouter initialEntries={[entry]}>
       <Routes>
         <Route path="/activate" element={<ActivateDevice />} />
       </Routes>
@@ -39,7 +40,10 @@ function mount() {
   );
 }
 
-beforeEach(() => request.mockReset());
+beforeEach(() => {
+  request.mockReset();
+  auth.user = { username: "laura" };
+});
 afterEach(cleanup);
 
 it("tells the approver the device cancelled the request", async () => {
@@ -48,6 +52,17 @@ it("tells the approver the device cancelled the request", async () => {
   expect(await screen.findByText(/The device canceled this sign-in request/)).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Approve sign-in" })).toBeNull();
 });
+
+it.each(["/activate?code=ABCD-1234", "/activate?token=browser-token"])(
+  "tells a signed-out visitor the device cancelled the request (%s)",
+  async (entry) => {
+    auth.user = null;
+    request.mockResolvedValue(details("cancelled"));
+    mount(entry);
+    expect(await screen.findByText(/The device canceled this sign-in request/)).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Sign in to approve" })).toBeNull();
+  },
+);
 
 it("shows the cancellation when the device cancels while the page is open", async () => {
   let lookups = 0;
