@@ -1,18 +1,3 @@
 {
-  "approvals": [
-    {
-      "operation_id": "getDeviceLogin",
-      "change_id": "response-property-enum-value-added",
-      "fingerprint": "7a081b939280908637a756d506ea3c9064defa1209d8dd538d662dc6e639fe69",
-      "reason": "Pre-lock addition for TV sign-in: a device can now withdraw its own request, which then reads as canceled to the approver. The approvers are the web /activate page, which this change teaches to show canceled, and the silo-apple and silo-android phone approval screens. Whatever a phone makes of the unknown value, approving or denying a canceled request answers 409, so it can't lead to a sign-in; the phone apps get the canceled wording with the TV sign-in client work. The frozen v1 routes report it as denied.",
-      "approved_in": "#1799"
-    },
-    {
-      "operation_id": "pollDeviceLogin",
-      "change_id": "response-property-enum-value-added",
-      "fingerprint": "dfc4bc49621dd69efae54e3bd262f3f46823c9cd92bce9a81c420ce44eb0e5b3",
-      "reason": "Pre-lock addition for TV sign-in: a device can now withdraw its own request, which then reads as canceled. Only the device that canceled polls it, and it stops polling when it cancels. Existing silo-apple and silo-android device polls treat an unknown status as a failed attempt, which fails closed; the TV sign-in client work shows it properly. The frozen v1 routes report it as denied.",
-      "approved_in": "#1799"
-    }
-  ]
+  "approvals": []
 }
