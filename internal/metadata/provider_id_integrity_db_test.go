@@ -32,7 +32,7 @@ func TestSyncMergeStepsAfterPlexTableDropPostgres(t *testing.T) {
  INSERT INTO media_items(content_id,type,title,status) VALUES
  ('drop-test-source','movie','Source','pending'),
  ('drop-test-canonical','movie','Canonical','pending');
- INSERT INTO users(id,username) VALUES(879002,'merge-drop-test');
+ INSERT INTO users(id,username,role) VALUES(879002,'merge-drop-test','user');
  INSERT INTO webhook_sync_connections(id,user_id,provider,webhook_secret)
  VALUES('00000000-0000-0000-0000-000000879002',879002,'plex','merge-drop-test');
  INSERT INTO webhook_sync_item_state(connection_id,external_user_id,external_item_id,media_item_id,last_event_at,last_position_seconds)
