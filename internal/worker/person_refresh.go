@@ -195,6 +195,11 @@ func (w *PersonRefreshWorker) processBatch() bool {
 // in done.
 func (w *PersonRefreshWorker) runManual(done map[int64]struct{}) {
 	for {
+		// A stopping worker finishes the lookup in progress and starts no
+		// more, as each can take up to RefreshTimeout.
+		if w.stopped() {
+			return
+		}
 		w.mu.Lock()
 		if len(w.manualQueue) == 0 {
 			w.mu.Unlock()
