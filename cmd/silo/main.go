@@ -2774,9 +2774,9 @@ func main() {
 			taskMgr.Register(tasks.NewCleanupArtworkRevisionsTask(
 				metadata.NewArtworkRevisionGarbageCollector(deps.DB, deps.Blobs.Assets),
 			))
-			mediaImages := []blobgc.Namespace{chapterthumbs.BlobNamespace(deps.DB), trickplay.BlobNamespace(deps.DB)}
+			mediaImages := []blobgc.Namespace{chapterthumbs.BlobNamespace(), trickplay.BlobNamespace()}
 			// Replaced chapter images are queued by key; the sweep lists by file.
-			collected := append([]blobgc.Namespace{chapterthumbs.ImageBlobNamespace(deps.DB)}, mediaImages...)
+			collected := append([]blobgc.Namespace{chapterthumbs.ImageBlobNamespace()}, mediaImages...)
 			if collector := blobgc.NewCollector(deps.DB, deps.Blobs.Assets, collected...); collector != nil {
 				taskMgr.Register(tasks.NewCleanupRemovedMediaImagesTask(collector))
 			}

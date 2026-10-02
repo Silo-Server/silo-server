@@ -64,6 +64,11 @@ when more than half the prefixes it sees look orphaned, the signature of a
 broken liveness check rather than of real orphans. `media_files` ids are
 never reused, so a file prefix is dead for good once its row is gone.
 
+Cleanup queries use the connection already held for the operation: the
+collector's row-locking transaction or the sweep's advisory-lock session.
+Namespace liveness checks use that same connection, so neither operation
+requires a second connection when the database pool is limited to one.
+
 `playback.preview_image_width` replaces chapter images while their file lives.
 New keys include the encoded WebP's SHA-256:
 `chapter-images/<id>/<chapter>-<sha256>/w<width>.webp`; legacy numeric

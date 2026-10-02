@@ -68,7 +68,7 @@ func TestBlobNamespaceLiveDB(t *testing.T) {
 	})
 	livePrefix := chapterImagesPrefix + strconv.Itoa(fileID) + "/"
 	deadPrefix := chapterImagesPrefix + "2147483648/"
-	live, err := BlobNamespace(pool).Live(t.Context(), []string{livePrefix, deadPrefix})
+	live, err := BlobNamespace().Live(t.Context(), pool, []string{livePrefix, deadPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestBlobNamespaceLiveDB(t *testing.T) {
 		t.Fatalf("live %v, want only %s", live, livePrefix)
 	}
 	deadKey := deadPrefix + "0/w300.webp"
-	live, err = ImageBlobNamespace(pool).Live(t.Context(), []string{deadKey})
+	live, err = ImageBlobNamespace().Live(t.Context(), pool, []string{deadKey})
 	if err != nil || live[deadKey] {
 		t.Fatalf("high-ID image liveness: %v, %v", live, err)
 	}
@@ -136,7 +136,7 @@ func TestReplacedImagesAreCollectedDB(t *testing.T) {
 	if err := queue.Cancel(t.Context(), []string{key(1, 320)}); err != nil {
 		t.Fatal(err)
 	}
-	collector := blobgc.NewCollector(pool, store, BlobNamespace(pool), ImageBlobNamespace(pool))
+	collector := blobgc.NewCollector(pool, store, BlobNamespace(), ImageBlobNamespace())
 	// The database is shared, so this reads only this file's rows and
 	// objects rather than the collector's counts.
 	pattern := chapterImagesPrefix + strconv.Itoa(fileID) + "/%"

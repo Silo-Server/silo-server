@@ -62,7 +62,7 @@ func testNamespace(live map[string]bool) Namespace {
 			}
 			return "chapter-images/" + id + "/", true
 		},
-		Live: func(_ context.Context, prefixes []string) (map[string]bool, error) {
+		Live: func(_ context.Context, _ Querier, prefixes []string) (map[string]bool, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			result := map[string]bool{}

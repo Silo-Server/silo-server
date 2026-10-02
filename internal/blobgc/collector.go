@@ -110,7 +110,7 @@ func (c *Collector) collectOne(ctx context.Context, stats *CollectStats) (bool, 
 		// A build that knows this namespace queued it; leave it to one.
 		return false, c.retry(ctx, tx, prefix, attempts, errors.New("no namespace on this server owns the prefix"), stats)
 	}
-	live, err := ns.Live(ctx, []string{prefix})
+	live, err := ns.Live(ctx, tx, []string{prefix})
 	if err != nil {
 		return false, fmt.Errorf("check whether %s is referenced: %w", prefix, err)
 	}

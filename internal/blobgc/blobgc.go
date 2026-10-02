@@ -19,8 +19,17 @@ import (
 	"context"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 )
+
+// Querier is the query surface of a collector transaction or a sweep's locked
+// connection. Namespace liveness checks must use it without acquiring another
+// connection from the pool.
+type Querier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
 
 // Namespace is a key namespace whose objects blobgc may delete.
 type Namespace struct {
@@ -32,7 +41,7 @@ type Namespace struct {
 	Group func(key string) (string, bool)
 	// Live reports which of prefixes something still references. An error
 	// stops the collector and the sweep: neither deletes on a guess.
-	Live func(ctx context.Context, prefixes []string) (map[string]bool, error)
+	Live func(ctx context.Context, db Querier, prefixes []string) (map[string]bool, error)
 }
 
 // Store is the storage surface blobgc needs.

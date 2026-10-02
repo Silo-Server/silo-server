@@ -97,20 +97,21 @@ func (s *Sweeper) Sweep(ctx context.Context, maxPages int) (SweepStats, error) {
 	}
 	defer func() { _ = lock.Release(context.WithoutCancel(ctx)) }()
 
-	checkpoint, err := s.loadCheckpoint(ctx)
+	conn := lock.Conn()
+	checkpoint, err := s.loadCheckpoint(ctx, conn)
 	if err != nil {
 		return SweepStats{}, err
 	}
 	var stats SweepStats
 	for _, ns := range s.namespaces {
-		result, next, err := s.sweepNamespace(ctx, ns, maxPages, checkpoint.Namespaces[ns.Root])
+		result, next, err := s.sweepNamespace(ctx, conn, ns, maxPages, checkpoint.Namespaces[ns.Root])
 		stats.Namespaces = append(stats.Namespaces, result)
 		if err != nil {
 			return stats, fmt.Errorf("sweep %s: %w", ns.Root, err)
 		}
 		if !result.StoppedOnAnomaly {
 			checkpoint.Namespaces[ns.Root] = next
-			if err := s.saveCheckpoint(ctx, checkpoint); err != nil {
+			if err := s.saveCheckpoint(ctx, conn, checkpoint); err != nil {
 				return stats, err
 			}
 		}
@@ -118,7 +119,7 @@ func (s *Sweeper) Sweep(ctx context.Context, maxPages int) (SweepStats, error) {
 	return stats, nil
 }
 
-func (s *Sweeper) sweepNamespace(ctx context.Context, ns Namespace, maxPages int, saved namespaceCheckpoint) (NamespaceSweep, namespaceCheckpoint, error) {
+func (s *Sweeper) sweepNamespace(ctx context.Context, conn *pgxpool.Conn, ns Namespace, maxPages int, saved namespaceCheckpoint) (NamespaceSweep, namespaceCheckpoint, error) {
 	stats := NamespaceSweep{Root: ns.Root}
 	// The newest object of each prefix: the listing is in key order, so a
 	// prefix's objects are adjacent, but a prefix may span pages.
@@ -167,12 +168,12 @@ func (s *Sweeper) sweepNamespace(ctx context.Context, ns Namespace, maxPages int
 	}
 	live, scheduled := map[string]bool{}, map[string]bool{}
 	for batch := range slices.Chunk(prefixes, sweepBatchSize) {
-		batchLive, err := ns.Live(ctx, batch)
+		batchLive, err := ns.Live(ctx, conn, batch)
 		if err != nil {
 			return stats, namespaceCheckpoint{}, fmt.Errorf("check liveness: %w", err)
 		}
 		maps.Copy(live, batchLive)
-		batchQueued, err := s.queued(ctx, batch)
+		batchQueued, err := s.queued(ctx, conn, batch)
 		if err != nil {
 			return stats, namespaceCheckpoint{}, err
 		}
@@ -199,7 +200,7 @@ func (s *Sweeper) sweepNamespace(ctx context.Context, ns Namespace, maxPages int
 	if len(dead) == 0 {
 		return stats, checkpoint, nil
 	}
-	tag, err := s.pool.Exec(ctx, `
+	tag, err := conn.Exec(ctx, `
 		INSERT INTO public.blob_gc_queue (prefix, not_before)
 		SELECT unnest($1::text[]), now()
 		ON CONFLICT (prefix) DO NOTHING`, dead)
@@ -211,8 +212,8 @@ func (s *Sweeper) sweepNamespace(ctx context.Context, ns Namespace, maxPages int
 }
 
 // queued reports which of prefixes are already in the queue.
-func (s *Sweeper) queued(ctx context.Context, prefixes []string) (map[string]bool, error) {
-	rows, err := s.pool.Query(ctx, `SELECT prefix FROM public.blob_gc_queue WHERE prefix = ANY($1::text[])`, prefixes)
+func (s *Sweeper) queued(ctx context.Context, conn *pgxpool.Conn, prefixes []string) (map[string]bool, error) {
+	rows, err := conn.Query(ctx, `SELECT prefix FROM public.blob_gc_queue WHERE prefix = ANY($1::text[])`, prefixes)
 	if err != nil {
 		return nil, fmt.Errorf("read the queue: %w", err)
 	}

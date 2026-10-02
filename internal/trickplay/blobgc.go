@@ -6,8 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/Silo-Server/silo-server/internal/blobgc"
 )
 
@@ -15,13 +13,11 @@ import (
 // per revision, trickplay/<media_files.id>/<revision>/: a revision is live
 // while its file's row publishes it, or while a running generation uploads
 // under it.
-func BlobNamespace(pool *pgxpool.Pool) blobgc.Namespace {
+func BlobNamespace() blobgc.Namespace {
 	return blobgc.Namespace{
 		Root:  keyRoot,
 		Group: revisionGroup,
-		Live: func(ctx context.Context, prefixes []string) (map[string]bool, error) {
-			return liveRevisions(ctx, pool, prefixes)
-		},
+		Live:  liveRevisions,
 	}
 }
 
@@ -55,14 +51,14 @@ func parseRevisionKey(key string) (int, int64, bool) {
 	return fileID, revision, true
 }
 
-func liveRevisions(ctx context.Context, pool *pgxpool.Pool, prefixes []string) (map[string]bool, error) {
+func liveRevisions(ctx context.Context, db blobgc.Querier, prefixes []string) (map[string]bool, error) {
 	var fileIDs []int
 	for _, prefix := range prefixes {
 		if fileID, _, ok := parseRevisionKey(prefix); ok {
 			fileIDs = append(fileIDs, fileID)
 		}
 	}
-	rows, err := pool.Query(ctx, `
+	rows, err := db.Query(ctx, `
 		SELECT media_file_id, revision, CASE WHEN state = 'running' THEN work_revision END
 		FROM public.media_file_trickplay WHERE media_file_id = ANY($1)`, fileIDs)
 	if err != nil {

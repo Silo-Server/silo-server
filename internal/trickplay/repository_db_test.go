@@ -450,9 +450,9 @@ func TestBlobNamespaceLiveDB(t *testing.T) {
 	}
 	working, _, _ := f.repo.BeginUpload(t.Context(), file, job.LeaseToken)
 	dead := newRevision()
-	ns := BlobNamespace(f.pool)
+	ns := BlobNamespace()
 	prefixes := []string{revisionPrefix(file, published), revisionPrefix(file, working), revisionPrefix(file, dead)}
-	live, err := ns.Live(t.Context(), prefixes)
+	live, err := ns.Live(t.Context(), f.pool, prefixes)
 	if err != nil {
 		t.Fatal(err)
 	}

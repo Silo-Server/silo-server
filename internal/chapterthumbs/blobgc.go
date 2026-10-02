@@ -6,21 +6,17 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/Silo-Server/silo-server/internal/blobgc"
 )
 
 // BlobNamespace describes chapter thumbnail storage to blobgc. A file's
 // prefix is live while its media_files row exists; media_files ids are never
 // reused, so once the row is gone nothing will write there again.
-func BlobNamespace(pool *pgxpool.Pool) blobgc.Namespace {
+func BlobNamespace() blobgc.Namespace {
 	return blobgc.Namespace{
 		Root:  chapterImagesPrefix,
 		Group: imagesGroup,
-		Live: func(ctx context.Context, prefixes []string) (map[string]bool, error) {
-			return liveImagePrefixes(ctx, pool, prefixes)
-		},
+		Live:  liveImagePrefixes,
 	}
 }
 
@@ -30,13 +26,11 @@ func BlobNamespace(pool *pgxpool.Pool) blobgc.Namespace {
 // the Collector only. The sweep lists by file (BlobNamespace): an image
 // replaced moments ago is old by its storage time, so a sweep could not give
 // it the grace its queue entry does.
-func ImageBlobNamespace(pool *pgxpool.Pool) blobgc.Namespace {
+func ImageBlobNamespace() blobgc.Namespace {
 	return blobgc.Namespace{
 		Root:  chapterImagesPrefix,
 		Group: imageKeyGroup,
-		Live: func(ctx context.Context, keys []string) (map[string]bool, error) {
-			return referencedImages(ctx, pool, keys)
-		},
+		Live:  referencedImages,
 	}
 }
 
@@ -92,14 +86,14 @@ func canonicalNumber(s string, allowZero bool) bool {
 
 // referencedImages reports which keys a chapter of their file still points
 // at. A key whose file is gone is not referenced.
-func referencedImages(ctx context.Context, pool *pgxpool.Pool, keys []string) (map[string]bool, error) {
+func referencedImages(ctx context.Context, db blobgc.Querier, keys []string) (map[string]bool, error) {
 	ids := make([]int64, 0, len(keys))
 	for _, key := range keys {
 		if id, ok := imagesFileID(key); ok {
 			ids = append(ids, int64(id))
 		}
 	}
-	rows, err := pool.Query(ctx, `
+	rows, err := db.Query(ctx, `
 		SELECT DISTINCT chapter->>'thumbnail_path'
 		FROM public.media_files mf
 		CROSS JOIN LATERAL jsonb_array_elements(
@@ -148,14 +142,14 @@ func imagesFileID(key string) (int, bool) {
 	return id, true
 }
 
-func liveImagePrefixes(ctx context.Context, pool *pgxpool.Pool, prefixes []string) (map[string]bool, error) {
+func liveImagePrefixes(ctx context.Context, db blobgc.Querier, prefixes []string) (map[string]bool, error) {
 	ids := make([]int64, 0, len(prefixes))
 	for _, prefix := range prefixes {
 		if id, ok := imagesFileID(prefix); ok {
 			ids = append(ids, int64(id))
 		}
 	}
-	rows, err := pool.Query(ctx, `SELECT id FROM public.media_files WHERE id = ANY($1::bigint[])`, ids)
+	rows, err := db.Query(ctx, `SELECT id FROM public.media_files WHERE id = ANY($1::bigint[])`, ids)
 	if err != nil {
 		return nil, fmt.Errorf("look up media files: %w", err)
 	}

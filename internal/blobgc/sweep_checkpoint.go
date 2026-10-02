@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/config"
 )
@@ -29,10 +30,10 @@ type sweepCheckpoint struct {
 	Namespaces map[string]namespaceCheckpoint `json:"namespaces"`
 }
 
-func (s *Sweeper) loadCheckpoint(ctx context.Context) (sweepCheckpoint, error) {
+func (s *Sweeper) loadCheckpoint(ctx context.Context, conn *pgxpool.Conn) (sweepCheckpoint, error) {
 	start := sweepCheckpoint{Identity: s.store.Identity(), Namespaces: map[string]namespaceCheckpoint{}}
 	var raw string
-	err := s.pool.QueryRow(ctx, `SELECT value FROM public.server_settings WHERE key=$1`, config.MediaImageSweepCheckpointKey).Scan(&raw)
+	err := conn.QueryRow(ctx, `SELECT value FROM public.server_settings WHERE key=$1`, config.MediaImageSweepCheckpointKey).Scan(&raw)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return start, nil
 	}
@@ -50,12 +51,12 @@ func (s *Sweeper) loadCheckpoint(ctx context.Context) (sweepCheckpoint, error) {
 }
 
 // The sweep advisory lock covers both listing and checkpoint writes.
-func (s *Sweeper) saveCheckpoint(ctx context.Context, checkpoint sweepCheckpoint) error {
+func (s *Sweeper) saveCheckpoint(ctx context.Context, conn *pgxpool.Conn, checkpoint sweepCheckpoint) error {
 	encoded, err := json.Marshal(checkpoint)
 	if err != nil {
 		return fmt.Errorf("encode media image sweep checkpoint: %w", err)
 	}
-	_, err = s.pool.Exec(ctx, `INSERT INTO public.server_settings(key,value) VALUES($1,$2)
+	_, err = conn.Exec(ctx, `INSERT INTO public.server_settings(key,value) VALUES($1,$2)
 		ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`, config.MediaImageSweepCheckpointKey, string(encoded))
 	if err != nil {
 		return fmt.Errorf("save media image sweep checkpoint: %w", err)

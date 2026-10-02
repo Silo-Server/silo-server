@@ -39,7 +39,7 @@ func TestTrickplayQueuesBigintMediaFileIDsDB(t *testing.T) {
 		t.Fatalf("bigint manifest: %+v %v", manifests, err)
 	}
 	prefix := revisionPrefix(fileID, revision)
-	live, err := BlobNamespace(f.pool).Live(t.Context(), []string{prefix})
+	live, err := BlobNamespace().Live(t.Context(), f.pool, []string{prefix})
 	if err != nil || !live[prefix] {
 		t.Fatalf("bigint revision liveness: %+v %v", live, err)
 	}

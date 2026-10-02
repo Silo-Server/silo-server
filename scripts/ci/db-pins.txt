@@ -27,6 +27,8 @@
 ./internal/trickplay TestDisabledLibraryStopsServingAndRemovesPublishedWorkDB
 
 # Media image sweeps resume bounded listings without losing partial prefixes.
+./internal/blobgc TestCollectorUsesOneConnectionDB
+./internal/blobgc TestSweeperUsesOneConnectionDB
 ./internal/blobgc TestSweeperResumesAfterBoundedRunDB
 ./internal/blobgc TestSweeperDefersPrefixSpanningBoundedRunsDB
 ./internal/blobgc TestSweeperRestartsAfterStorageMoveDB
