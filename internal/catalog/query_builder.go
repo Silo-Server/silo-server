@@ -248,6 +248,17 @@ func (qb *QueryBuilder) BuildSortPlan(sortConfig QuerySort) (result QuerySortPla
 
 	titleExpr := qb.normalizedTitleExpr()
 	plan := QuerySortPlan{}
+	if isEpisodeCatalogScope(qb.mediaScope) && (sortConfig.Field == "release_date" || sortConfig.Field == "last_air_date") {
+		qb.cursorTerms = []queryCursorTerm{
+			{expression: qb.alias + ".episode_air_date", descending: dir == "DESC", nullsLast: true},
+			{expression: qb.alias + ".episode_series_id"},
+			{expression: qb.alias + ".episode_season_number", descending: dir == "DESC"},
+			{expression: qb.alias + ".episode_number", descending: dir == "DESC"},
+			{expression: qb.alias + ".content_id"},
+		}
+		plan.OrderBy = fmt.Sprintf("ORDER BY %s.episode_air_date %s NULLS LAST, %s.episode_series_id ASC, %s.episode_season_number %s, %s.episode_number %s, %s.content_id ASC", qb.alias, dir, qb.alias, qb.alias, dir, qb.alias, dir, qb.alias)
+		return plan, nil
+	}
 
 	switch sortConfig.Field {
 	case "title":

@@ -68,6 +68,9 @@ type queryCursorTerm struct {
 func setCursorTermKinds(terms []queryCursorTerm, field string) {
 	for i := range terms {
 		terms[i].kind = cursorKindText
+		if strings.HasSuffix(terms[i].expression, ".episode_season_number") || strings.HasSuffix(terms[i].expression, ".episode_number") {
+			terms[i].kind = cursorKindNumber
+		}
 		if !terms[i].descending {
 			terms[i].nullsLast = true
 		}

@@ -38,7 +38,7 @@ func TestQueryCursorPostgresEpisodeParity(t *testing.T) {
 	}
 	for i := range 5 {
 		id := fmt.Sprintf("%s-%d", series, i)
-		if _, err := pool.Exec(ctx, `INSERT INTO episodes(content_id,series_id,season_number,episode_number,title,air_date) VALUES($1,$2,1,$3,'Tied title',CASE WHEN $3<4 THEN '2025-01-01'::date ELSE NULL END)`, id, series, i+1); err != nil {
+		if _, err := pool.Exec(ctx, `INSERT INTO episodes(content_id,series_id,season_number,episode_number,title,air_date) VALUES($1,$2,1,$3,$4,CASE WHEN $3<11 THEN '2025-01-01'::date ELSE NULL END)`, id, series, []int{2, 10, 3, 11, 12}[i], []string{"Zulu", "Alpha", "Bravo", "Echo", "Delta"}[i]); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := pool.Exec(ctx, `INSERT INTO episode_libraries(episode_id,media_folder_id,first_seen_at) VALUES($1,$2,'2025-01-01'::timestamptz)`, id, library); err != nil {
@@ -66,7 +66,7 @@ func TestQueryCursorPostgresEpisodeParity(t *testing.T) {
 	}
 	executor := QueryExecutor{Pool: pool, Scope: "episode"}
 	access := AccessFilter{AllowedLibraryIDs: []int{library}, UserID: userID, ProfileID: profile}
-	for _, field := range []string{"title", "added_at", "release_date", "year", "rating_imdb", "runtime", "progress", "date_viewed", "plays"} {
+	for _, field := range []string{"title", "added_at", "release_date", "last_air_date", "year", "rating_imdb", "runtime", "progress", "date_viewed", "plays"} {
 		for _, order := range []string{"asc", "desc"} {
 			t.Run(field+order, func(t *testing.T) {
 				def := QueryDefinition{MediaScope: "episode", LibraryIDs: []int{library}, Sort: QuerySort{Field: field, Order: order}, Groups: []QueryGroup{{Rules: []QueryRule{{Field: "genre", Op: "is", Value: "Comedy"}}}}}
@@ -80,6 +80,19 @@ func TestQueryCursorPostgresEpisodeParity(t *testing.T) {
 				}
 				if len(want) != 5 {
 					t.Fatalf("fixture returned %d episodes", len(want))
+				}
+				if field == "release_date" || field == "last_air_date" {
+					indices := []int{0, 2, 1, 3, 4}
+					if order == "desc" {
+						indices = []int{1, 2, 0, 4, 3}
+					}
+					expected := make([]string, len(indices))
+					for index, episodeIndex := range indices {
+						expected[index] = fmt.Sprintf("%s-%d", series, episodeIndex)
+					}
+					if !reflect.DeepEqual(want, expected) {
+						t.Fatalf("date order = %v, want %v", want, expected)
+					}
 				}
 				got := []string{}
 				var cursor *QueryCursor
