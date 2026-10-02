@@ -190,6 +190,7 @@ class ComposeCredentialsTest(unittest.TestCase):
             ("generated", None),
             *PASSWORDS,
             ("reserved_url_characters", 'a@b#c/d%e?f:g "h\\i ü'),
+            ("inner_backslashes", "a\\b\\\\c"),
         )
         for password_kind, password in passwords:
             with self.subTest(password_kind=password_kind), tempfile.TemporaryDirectory() as tmp:
@@ -220,12 +221,17 @@ class ComposeCredentialsTest(unittest.TestCase):
                 )
 
     def test_bootstrap_rejects_unrepresentable_passwords(self):
-        for password in ("it's", "line\nbreak"):
+        for password, message in (
+            ("it's", "single quote"),
+            ("line\nbreak", "single quote"),
+            ("abc\\", "end with a backslash"),
+            ("abc\\\\", "end with a backslash"),
+        ):
             with self.subTest(password=password), tempfile.TemporaryDirectory() as tmp:
                 env_file = Path(tmp, ".env")
                 result = write_bootstrap_env(env_file, password)
                 self.assertEqual(result.returncode, 1)
-                self.assertIn("single quote", result.stderr)
+                self.assertIn(message, result.stderr)
                 self.assertFalse(env_file.exists())
 
     def test_bootstrap_does_not_overwrite_existing_env(self):

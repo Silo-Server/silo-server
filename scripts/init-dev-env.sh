@@ -23,10 +23,16 @@ password=${POSTGRES_PASSWORD:-}
 if [ -z "$password" ]; then
 	password=$(openssl rand -hex 24)
 fi
+# Single quotes keep every other byte literal, but Compose and godotenv both
+# read a backslash before the closing quote as escaping it.
 case $password in
 *"'"* | *"
 "*)
 	echo "POSTGRES_PASSWORD cannot contain a single quote or a newline" >&2
+	exit 1
+	;;
+*\\)
+	echo "POSTGRES_PASSWORD cannot end with a backslash" >&2
 	exit 1
 	;;
 esac

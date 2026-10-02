@@ -39,7 +39,9 @@ POSTGRES_PASSWORD='current-password' scripts/init-dev-env.sh
 ```
 
 If you keep an existing `.env`, add `POSTGRES_PASSWORD` to it in single quotes
-and make sure `DATABASE_URL` uses the same password, percent-encoded.
+and make sure `DATABASE_URL` uses the same password, percent-encoded. A
+single-quoted value can't contain a single quote or end with a backslash, so
+rotate a password like that before using it here.
 
 ```sh
 # Create the bootstrap configuration for a new local database
