@@ -10,7 +10,11 @@ import { ConnectionCheckAction } from "@/components/admin/ConnectionCheckAction"
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 
-import { adminFormForConfigSchema, humanizeConfigKey } from "./configSchemaAdminForm";
+import {
+  adminFormForConfigSchema,
+  formValuesFromConfig,
+  humanizeConfigKey,
+} from "./configSchemaAdminForm";
 import { SchemaForm } from "./SchemaForm";
 import { buildSchemaValues, type BuildSchemaValuesOptions } from "./schemaFormUtils";
 
@@ -51,41 +55,6 @@ type Props = {
   idPrefix?: string;
 };
 
-function defaultValueForField(field: PluginAdminFormField): string | boolean {
-  if (field.default_value !== undefined) {
-    if (typeof field.default_value === "boolean") {
-      return field.default_value;
-    }
-    if (typeof field.default_value === "number") {
-      return String(field.default_value);
-    }
-    if (typeof field.default_value === "string") {
-      return field.default_value;
-    }
-  }
-  if (field.control === "SWITCH") {
-    return false;
-  }
-  return "";
-}
-
-function valueForField(
-  field: PluginAdminFormField,
-  configValue?: PluginConfigValue,
-): string | boolean {
-  const raw = configValue?.[field.key];
-  if (typeof raw === "boolean") {
-    return raw;
-  }
-  if (typeof raw === "number") {
-    return String(raw);
-  }
-  if (typeof raw === "string") {
-    return raw;
-  }
-  return defaultValueForField(field);
-}
-
 export function PluginConfigForm({
   schema,
   value,
@@ -116,13 +85,13 @@ export function PluginConfigForm({
   }, [configuredSecrets, fields, inferredDescriptor]);
 
   const [values, setValues] = useState<PluginConfigValue>(() =>
-    Object.fromEntries(fields.map((field) => [field.key, valueForField(field, value)])),
+    formValuesFromConfig(fields, value),
   );
   const [testResult, setTestResult] = useState<ConnectionCheckResponse | null>(null);
   const [clearSecrets, setClearSecrets] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    setValues(Object.fromEntries(fields.map((field) => [field.key, valueForField(field, value)])));
+    setValues(formValuesFromConfig(fields, value));
     setClearSecrets(new Set());
   }, [fields, value]);
 

@@ -1,24 +1,20 @@
-import { useId, useRef, useState } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
-import { ArrowUpRight, Check, Copy, Loader2, X } from "lucide-react";
+import { ArrowUpRight, Check, Copy, KeyRound, Loader2, X } from "lucide-react";
 
 import type { PluginInstallation } from "@/api/types";
 import { V2ProblemError } from "@/api/v2/request";
-import { PluginConfigForm } from "@/components/admin/plugins/PluginConfigForm";
-import { humanizeConfigKey } from "@/components/admin/plugins/configSchemaAdminForm";
+import { fieldIsVisible } from "@/components/admin/plugins/schemaFormUtils";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { AdvancedSection } from "@/components/settings/AdvancedSection";
-import { SettingsSubheading } from "@/components/settings/SettingsSubheading";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import {
-  useSaveSignInPluginConfig,
   useTestSignInConnection,
   useUpdateSignInBinding,
   type AuthConnectionTestResult,
-  type AuthConnectionTestStaged,
 } from "@/hooks/queries/admin/externalSignIn";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import {
@@ -34,15 +30,75 @@ import { pluginPagePath } from "@/lib/pluginPresentation";
 import { cn } from "@/lib/utils";
 import { FeedbackLine, type Feedback } from "@/components/admin/FeedbackLine";
 
-import { SettingFieldRow, SettingFieldStatus } from "./SettingField";
+import { SETTINGS_CONTROL_WIDTH, SettingFieldRow, SettingFieldStatus } from "./SettingField";
+import { SignInConfigField } from "./SignInConfigField";
+import {
+  fieldChanged,
+  isFieldMissing,
+  missingSignInSetup,
+  type SignInFieldGroup,
+  type SignInSetupLayout,
+} from "./signInSetup";
+import type { SignInProviderDrafts } from "./useSignInProviderDrafts";
 
 const CATALOG_PATH = "/admin/plugins?tab=catalog";
 
-function missingRequiredConfig(installation: PluginInstallation): string[] {
-  const saved = new Set((installation.global_configs ?? []).map((entry) => entry.key));
-  return (installation.global_config_schema ?? [])
-    .filter((schema) => schema.required && !saved.has(schema.key))
-    .map((schema) => schema.title?.trim() || humanizeConfigKey(schema.key));
+type SignInMode = "oauth" | "credentials" | "other";
+
+function signInModeOf(installation: PluginInstallation): SignInMode {
+  const mode = authCapabilityOf(installation)?.sign_in_mode;
+  return mode === "oauth" ? "oauth" : mode === "credentials" ? "credentials" : "other";
+}
+
+const PROTOCOL_NAME: Record<SignInMode, string | null> = {
+  oauth: "OpenID Connect",
+  credentials: "LDAP",
+  other: null,
+};
+
+const PROTOCOL_EXAMPLES: Record<SignInMode, string> = {
+  oauth: "authentik, Authelia, Keycloak, Pocket ID, Zitadel, Entra ID…",
+  credentials: "Active Directory, lldap, FreeIPA, OpenLDAP…",
+  other: "",
+};
+
+/**
+ * What the page calls a sign-in plugin: its protocol ("OpenID Connect") when
+ * it is the only one installed for that protocol, else the plugin's name.
+ */
+function providerTitle(installation: PluginInstallation, all: PluginInstallation[]): string {
+  const mode = signInModeOf(installation);
+  const protocol = PROTOCOL_NAME[mode];
+  const sameMode = all.filter((candidate) => signInModeOf(candidate) === mode).length;
+  return protocol && sameMode === 1 ? protocol : authProviderName(installation);
+}
+
+type ProviderState = { word: string; tone: "ok" | "warn" | "off" };
+
+function providerState(installation: PluginInstallation, missing: string[]): ProviderState {
+  if (!installation.enabled) return { word: "Plugin turned off", tone: "off" };
+  if (authBindingOf(installation)?.enabled === true) {
+    return missing.length > 0
+      ? { word: "On, needs setup", tone: "warn" }
+      : { word: "On", tone: "ok" };
+  }
+  return missing.length > 0 ? { word: "Needs setup", tone: "warn" } : { word: "Off", tone: "off" };
+}
+
+function StateDot({ tone }: { tone: ProviderState["tone"] }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "size-2 shrink-0 rounded-full",
+        tone === "ok"
+          ? "bg-emerald-500"
+          : tone === "warn"
+            ? "bg-amber-500"
+            : "bg-muted-foreground/40",
+      )}
+    />
+  );
 }
 
 /** A read-only URL an admin registers at the provider, with a copy button. */
@@ -55,7 +111,7 @@ function CopyField({
   value: string;
   description: string;
 }) {
-  const inputId = useId();
+  const valueId = useId();
   const descriptionId = useId();
   const [copied, setCopied] = useState<"ok" | "failed" | null>(null);
 
@@ -71,7 +127,7 @@ function CopyField({
   return (
     <SettingFieldRow
       label={label}
-      htmlFor={inputId}
+      htmlFor={valueId}
       description={description}
       descriptionId={descriptionId}
       status={
@@ -84,13 +140,20 @@ function CopyField({
         ) : null
       }
     >
-      <Input
-        id={inputId}
+      {/* The whole address wraps instead of being cut off, so it can be read
+          and checked against the provider's form. */}
+      <textarea
+        id={valueId}
         readOnly
+        rows={Math.max(1, Math.ceil(value.length / 34))}
         value={value}
         aria-describedby={descriptionId}
         onFocus={(event) => event.currentTarget.select()}
-        className="border-muted-foreground/25 w-full font-mono text-xs sm:w-[var(--settings-control-w)]"
+        className={cn(
+          SETTINGS_CONTROL_WIDTH,
+          "border-muted-foreground/25 bg-background [field-sizing:content] resize-none rounded-md border px-3 py-2 font-mono text-xs break-all outline-none",
+          "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]",
+        )}
       />
       <Button
         type="button"
@@ -121,7 +184,7 @@ function ConnectionTestResult({
 }) {
   const failed = result.steps.filter((step) => !step.ok).length;
   return (
-    <div className="space-y-2 pb-3.5" data-testid="sign-in-test-result">
+    <div className="space-y-2" data-testid="sign-in-test-result">
       <h4
         ref={headingRef}
         tabIndex={-1}
@@ -167,8 +230,120 @@ function ConnectionTestResult({
   );
 }
 
+/** A numbered setup step. */
+function Step({
+  number,
+  title,
+  description,
+  children,
+}: {
+  number: number;
+  title: string;
+  description?: string;
+  children: ReactNode;
+}) {
+  const headingId = useId();
+  return (
+    <section aria-labelledby={headingId} className="pt-5" data-testid="sign-in-step">
+      <div className="flex items-center gap-2.5">
+        <span
+          aria-hidden="true"
+          className="border-border bg-muted/40 text-muted-foreground grid size-[22px] shrink-0 place-items-center rounded-full border text-[11.5px] font-semibold"
+        >
+          {number}
+        </span>
+        <h4 id={headingId} className="text-sm font-semibold">
+          <span className="sr-only">Step {number}: </span>
+          {title}
+        </h4>
+      </div>
+      {description ? (
+        <p className="text-muted-foreground mt-1 ml-[32px] text-xs leading-relaxed">
+          {description}
+        </p>
+      ) : null}
+      <div className="settings-field-list ml-[32px]">{children}</div>
+    </section>
+  );
+}
+
+/**
+ * Turning a provider on or off. Both apply at once on every node, outside
+ * the save bar: they change who can sign in, so turning off asks first.
+ */
+function useBindingSwitch({
+  installation,
+  label,
+  localLoginOn,
+  report,
+}: {
+  installation: PluginInstallation;
+  label: string;
+  localLoginOn: boolean;
+  report: (feedback: Feedback) => void;
+}) {
+  const updateBinding = useUpdateSignInBinding();
+  const [confirmOff, setConfirmOff] = useState(false);
+  const capability = authCapabilityOf(installation)!;
+  const binding = authBindingOf(installation);
+
+  function write(enabled: boolean, success: string) {
+    updateBinding.mutate(
+      {
+        installationId: installation.id,
+        body: {
+          capability_id: capability.id,
+          enabled,
+          display_order: binding?.display_order ?? 1,
+          auto_provision: binding?.auto_provision ?? true,
+          default_login: binding?.default_login ?? false,
+        },
+      },
+      {
+        onSuccess: () => report({ tone: "ok", text: success }),
+        onError: (error) =>
+          report({ tone: "error", text: adminSignInErrorText(error, `Couldn't change ${label}.`) }),
+      },
+    );
+  }
+
+  const dialog = (
+    <ConfirmDialog
+      open={confirmOff}
+      onOpenChange={setConfirmOff}
+      title={`Turn off ${label}?`}
+      description={
+        localLoginOn
+          ? `People who sign in with ${label} can't sign in until it's back on. Their Silo accounts, and the connections to ${label}, stay.`
+          : `Password sign-in is off, so only break-glass admins can sign in until ${label} is back on. Silo accounts, and their connections to ${label}, stay.`
+      }
+      confirmLabel="Turn off"
+      variant="destructive"
+      onConfirm={() =>
+        write(
+          false,
+          localLoginOn
+            ? `${label} is off. Only Silo passwords sign in now.`
+            : `${label} is off. Password sign-in is off too, so only break-glass admins can sign in now.`,
+        )
+      }
+      isPending={updateBinding.isPending}
+    />
+  );
+
+  return {
+    pending: updateBinding.isPending,
+    turnOn: () => write(true, `${label} is on. People can sign in with it now.`),
+    askOff: () => setConfirmOff(true),
+    dialog,
+  };
+}
+
 interface ProviderPanelProps {
   installation: PluginInstallation;
+  title: string;
+  layout: SignInSetupLayout;
+  drafts: SignInProviderDrafts;
   /** Whether Silo passwords sign in (auth.local_password_login). */
   localLoginOn: boolean;
   publicUrlSet: boolean;
@@ -178,12 +353,16 @@ interface ProviderPanelProps {
 }
 
 /**
- * One sign-in plugin: its state, the URLs to register at the provider, its
- * binding switches, its configuration and the connection test. Binding and
- * configuration writes apply at once, like a provider tile.
+ * One sign-in plugin as guided setup: register Silo at the provider (OpenID
+ * Connect), the plugin's own steps, the connection test, and the login
+ * button, with what most servers leave alone under Advanced. Field edits wait
+ * for the page's save bar.
  */
 function ProviderPanel({
   installation,
+  title,
+  layout,
+  drafts,
   localLoginOn,
   publicUrlSet,
   connectionTestServed,
@@ -191,83 +370,59 @@ function ProviderPanel({
 }: ProviderPanelProps) {
   const capability = authCapabilityOf(installation)!;
   const binding = authBindingOf(installation);
-  const name = authProviderName(installation);
   // Turning the binding on or off is about the provider people sign in
   // with, so those say its button label ("Keycloak"), not the plugin's name.
   const label = authProviderLabel(installation);
   const enabled = binding?.enabled === true;
-  const missing = missingRequiredConfig(installation);
-  const updateBinding = useUpdateSignInBinding();
-  const saveConfig = useSaveSignInPluginConfig();
+  const mode = signInModeOf(installation);
+  const missing = missingSignInSetup(layout);
+  const state = providerState(installation, missing);
+  const unsaved = drafts.changeCountOf(installation);
   const testConnection = useTestSignInConnection();
   const [feedback, setFeedback] = useState<Feedback>(null);
-  const [confirmOff, setConfirmOff] = useState(false);
-  const [drafts, setDrafts] = useState<Record<string, AuthConnectionTestStaged>>({});
   const [testResult, setTestResult] = useState<AuthConnectionTestResult | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
+  const [testUsername, setTestUsername] = useState(() => {
+    const ref = layout.testUsername;
+    const saved = ref ? layout.entries.get(ref.schemaKey)?.saved?.[ref.field.key] : undefined;
+    return typeof saved === "string" ? saved : "";
+  });
   const statusRef = useRef<HTMLParagraphElement>(null);
   const testHeadingRef = useRef<HTMLHeadingElement>(null);
   const testErrorRef = useRef<HTMLParagraphElement>(null);
   const autoProvisionId = useId();
   const autoProvisionDescription = useId();
+  const testUsernameId = useId();
   const headingId = useId();
+  const idPrefix = `sign-in-${installation.id}`;
 
-  // The capability says how it signs in, with or without a binding row.
-  const isOAuth = capability.sign_in_mode === "oauth";
-  const isPassword = capability.sign_in_mode === "credentials";
-  const offersTest = connectionTestServed && capability.metadata?.connection_test === true;
-  const busy = updateBinding.isPending || saveConfig.isPending;
-  const stateWord = !installation.enabled
-    ? "Plugin turned off"
-    : enabled
-      ? missing.length > 0
-        ? "On, needs setup"
-        : "On"
-      : "Off";
-
-  function report(next: Feedback, moveFocus = false) {
+  // Turn on and Turn off replace the control the admin used, so focus moves
+  // to the line that says what happened.
+  function report(next: Feedback) {
     setFeedback(next);
-    // Turn on and Turn off replace the control the admin used, so focus
-    // moves to the line that says what happened. Controls that stay put
-    // keep focus; the line is a live region, so the result is still heard.
-    if (moveFocus) requestAnimationFrame(() => statusRef.current?.focus());
+    requestAnimationFrame(() => statusRef.current?.focus());
   }
 
-  function writeBinding(change: { enabled?: boolean; auto_provision?: boolean }, success: string) {
-    const moveFocus = change.enabled !== undefined;
-    updateBinding.mutate(
-      {
-        installationId: installation.id,
-        body: {
-          capability_id: capability.id,
-          enabled: change.enabled ?? enabled,
-          display_order: binding?.display_order ?? 1,
-          auto_provision: change.auto_provision ?? binding?.auto_provision ?? true,
-          default_login: binding?.default_login ?? false,
-        },
-      },
-      {
-        onSuccess: () => report({ tone: "ok", text: success }, moveFocus),
-        onError: (error) =>
-          report(
-            {
-              tone: "error",
-              text: adminSignInErrorText(error, `Couldn't change ${label}.`),
-            },
-            moveFocus,
-          ),
-      },
-    );
-  }
+  const bindingSwitch = useBindingSwitch({ installation, label, localLoginOn, report });
+
+  const offersTest = connectionTestServed && capability.metadata?.connection_test === true;
+  const turnOnBlocked =
+    !installation.enabled || otherActive !== null || missing.length > 0 || unsaved > 0;
 
   function runTest() {
     setTestResult(null);
     setTestError(null);
+    const ref = layout.testUsername;
     testConnection.mutate(
       {
         installationId: installation.id,
         capabilityId: capability.id,
-        config: Object.values(drafts),
+        config: drafts.stagedForTest(
+          installation,
+          ref
+            ? { schemaKey: ref.schemaKey, fieldKey: ref.field.key, value: testUsername }
+            : undefined,
+        ),
       },
       {
         onSuccess: (result) => {
@@ -282,36 +437,262 @@ function ProviderPanel({
     );
   }
 
+  function renderGroupFields(group: SignInFieldGroup) {
+    const entry = layout.entries.get(group.schemaKey)!;
+    const values = drafts.valuesOf(installation, entry);
+    const draft = drafts.draftOf(installation, group.schemaKey);
+    return group.fields
+      .filter((field) => fieldIsVisible(entry.descriptor, field, values))
+      .map((field) => (
+        <SignInConfigField
+          key={`${group.schemaKey}.${field.key}`}
+          field={field}
+          values={values}
+          idPrefix={`${idPrefix}-${group.schemaKey}`}
+          dirty={fieldChanged(entry, draft, field)}
+          secretSaved={entry.configuredSecrets.includes(field.key)}
+          clearing={draft?.clearSecrets.includes(field.key) ?? false}
+          onChange={(value) => drafts.setField(installation, entry, field.key, value)}
+          onToggleClear={() => drafts.toggleClearSecret(installation, entry, field.key)}
+        />
+      ));
+  }
+
+  function groupNeedsAttention(group: SignInFieldGroup): boolean {
+    const entry = layout.entries.get(group.schemaKey)!;
+    const draft = drafts.draftOf(installation, group.schemaKey);
+    return group.fields.some(
+      (field) => fieldChanged(entry, draft, field) || isFieldMissing(entry, field),
+    );
+  }
+
   const callbackUrl =
     capability.callback_url || binding?.callback_url || testResult?.callback_url || "";
   const postLogoutUrl =
     capability.post_logout_redirect_url || binding?.post_logout_redirect_url || "";
-  const stagedCount = Object.keys(drafts).length;
+
+  const autoProvision = drafts.autoProvisionOf(installation);
+  const autoProvisionRow = (
+    <SettingFieldRow
+      key="auto-provision"
+      label="Create accounts on first sign-in"
+      htmlFor={autoProvisionId}
+      dirty={autoProvision !== (binding?.auto_provision ?? true)}
+      description="People the provider lets in get a Silo account the first time they sign in. Off: only people whose Silo account is already connected can sign in."
+      descriptionId={autoProvisionDescription}
+    >
+      <Switch
+        id={autoProvisionId}
+        aria-describedby={autoProvisionDescription}
+        checked={autoProvision}
+        onCheckedChange={(checked) => drafts.setAutoProvision(installation, checked)}
+      />
+    </SettingFieldRow>
+  );
+
+  const steps: { key: string; title: string; description?: string; body: ReactNode }[] = [];
+  if (mode === "oauth") {
+    steps.push({
+      key: "register",
+      title: "Register Silo at your provider",
+      description: "Create a confidential client for Silo and add this redirect URI to it.",
+      body: (
+        <>
+          {!publicUrlSet ? (
+            <div className="py-3.5">
+              <SettingFieldStatus tone="warn">
+                <span>
+                  The redirect URI needs the server's public URL. Set it in{" "}
+                  <Link to="/admin/settings/general" className="underline underline-offset-4">
+                    General settings
+                  </Link>
+                  .
+                </span>
+              </SettingFieldStatus>
+            </div>
+          ) : null}
+          {callbackUrl ? (
+            <CopyField
+              label="Redirect URI"
+              value={callbackUrl}
+              description="Also called the callback URL."
+            />
+          ) : null}
+          {postLogoutUrl ? (
+            <CopyField
+              label="Post-logout redirect URI"
+              value={postLogoutUrl}
+              description="Only needed if you turn on signing out at the provider (under Advanced)."
+            />
+          ) : null}
+        </>
+      ),
+    });
+  }
+  layout.steps.forEach((group, index) => {
+    const last = index === layout.steps.length - 1;
+    steps.push({
+      key: group.id,
+      title: group.title,
+      description: group.description,
+      body: (
+        <>
+          {renderGroupFields(group)}
+          {last ? autoProvisionRow : null}
+        </>
+      ),
+    });
+  });
+  if (layout.steps.length === 0) {
+    steps.push({ key: "accounts", title: "Choose who can sign in", body: autoProvisionRow });
+  }
+  if (offersTest) {
+    steps.push({
+      key: "test",
+      title: "Test the connection",
+      description:
+        unsaved > 0
+          ? "Tests your unsaved changes over the saved configuration. Nothing is saved."
+          : "Tests the saved configuration. Nothing is saved.",
+      body: (
+        <div className="space-y-3 py-3.5">
+          <div className="flex flex-wrap items-end gap-2">
+            {layout.testUsername ? (
+              <div className="min-w-0 space-y-1">
+                <label htmlFor={testUsernameId} className="text-muted-foreground block text-xs">
+                  Look up a user (optional)
+                </label>
+                <Input
+                  id={testUsernameId}
+                  value={testUsername}
+                  onChange={(event) => setTestUsername(event.target.value)}
+                  placeholder="Username"
+                  autoComplete="off"
+                  className="w-56"
+                />
+              </div>
+            ) : null}
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={runTest}
+              disabled={testConnection.isPending || !installation.enabled}
+            >
+              {testConnection.isPending ? (
+                <Loader2 className="animate-spin" aria-hidden="true" />
+              ) : null}
+              {testConnection.isPending ? "Testing..." : "Test connection"}
+            </Button>
+          </div>
+          {layout.testUsername ? (
+            <p className="text-muted-foreground text-xs">
+              With a username, the test also finds that person and shows their groups and the role
+              they would get. No password is used.
+            </p>
+          ) : null}
+          <div aria-live="polite">
+            {testResult ? (
+              <ConnectionTestResult result={testResult} headingRef={testHeadingRef} />
+            ) : null}
+            {testError ? (
+              <p
+                ref={testErrorRef}
+                tabIndex={-1}
+                role="alert"
+                className="text-destructive text-sm focus:outline-none"
+              >
+                {testError}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      ),
+    });
+  }
+  if (layout.loginName) {
+    const ref = layout.loginName;
+    const entry = layout.entries.get(ref.schemaKey)!;
+    const values = drafts.valuesOf(installation, entry);
+    const typed = String(values[ref.field.key] ?? "").trim();
+    const shown = typed || ref.field.placeholder || label;
+    steps.push({
+      key: "login-name",
+      title: "Login button",
+      body: (
+        <>
+          <SignInConfigField
+            field={ref.field}
+            values={values}
+            idPrefix={`${idPrefix}-${ref.schemaKey}`}
+            dirty={fieldChanged(entry, drafts.draftOf(installation, ref.schemaKey), ref.field)}
+            onChange={(value) => drafts.setField(installation, entry, ref.field.key, value)}
+            label={mode === "credentials" ? "Directory name" : "Provider name"}
+            description={
+              mode === "oauth"
+                ? "Shown as “Sign in with …” on the login page and in the apps."
+                : "Shown on the login page and in the apps where people choose how to sign in."
+            }
+          />
+          {mode === "oauth" ? (
+            <SettingFieldRow label="Preview">
+              <span
+                aria-hidden="true"
+                className="border-border bg-muted/30 inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium"
+              >
+                <KeyRound className="size-4" />
+                Sign in with {shown}
+              </span>
+              <span className="sr-only">The login button reads: Sign in with {shown}</span>
+            </SettingFieldRow>
+          ) : null}
+        </>
+      ),
+    });
+  }
+
+  let blockedReason: ReactNode = null;
+  if (!enabled) {
+    if (!installation.enabled) {
+      blockedReason = (
+        <>
+          The plugin is turned off. Turn it on from its{" "}
+          <Link
+            to={pluginPagePath(installation.plugin_id)}
+            className="text-foreground underline underline-offset-4"
+          >
+            plugin page
+          </Link>{" "}
+          first.
+        </>
+      );
+    } else if (otherActive !== null) {
+      blockedReason = `${otherActive} is the sign-in provider now. A server has one at a time: turn it off to use ${title} instead.`;
+    } else if (unsaved > 0) {
+      blockedReason = "Save your changes to turn it on.";
+    }
+  }
 
   return (
-    <section aria-labelledby={headingId} className="space-y-1" data-testid="sign-in-provider">
-      <div className="flex flex-wrap items-start justify-between gap-3 pb-3">
+    <section aria-labelledby={headingId} className="pb-1" data-testid="sign-in-provider">
+      <div className="flex flex-wrap items-start justify-between gap-3 pt-5">
         <div className="min-w-0 space-y-1">
           <h3 id={headingId} className="text-base font-semibold">
-            {name}
+            {title}
           </h3>
           <p className="text-muted-foreground flex items-center gap-1.5 text-sm">
-            <span
-              aria-hidden="true"
-              className={cn(
-                "size-2 rounded-full",
-                enabled && installation.enabled
-                  ? missing.length > 0
-                    ? "bg-amber-500"
-                    : "bg-emerald-500"
-                  : "bg-muted-foreground/40",
-              )}
-            />
-            <span data-testid="sign-in-provider-state">{stateWord}</span>
-            <span aria-hidden="true">·</span>
-            <span>
-              {isOAuth ? "OpenID Connect" : isPassword ? "Directory (LDAP)" : "Sign-in plugin"}
-            </span>
+            <StateDot tone={state.tone} />
+            <span data-testid="sign-in-provider-state">{state.word}</span>
+            {enabled && installation.enabled ? (
+              <>
+                <span aria-hidden="true">·</span>
+                <span>
+                  {mode === "oauth"
+                    ? `the login page shows “Sign in with ${label}”`
+                    : `shown as “${label}” on the login page`}
+                </span>
+              </>
+            ) : null}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -326,8 +707,8 @@ function ProviderPanel({
               type="button"
               size="sm"
               variant="outline"
-              disabled={busy}
-              onClick={() => setConfirmOff(true)}
+              disabled={bindingSwitch.pending}
+              onClick={bindingSwitch.askOff}
             >
               Turn off
             </Button>
@@ -335,12 +716,10 @@ function ProviderPanel({
             <Button
               type="button"
               size="sm"
-              disabled={busy || !installation.enabled || otherActive !== null}
-              onClick={() =>
-                writeBinding({ enabled: true }, `${label} is on. People can sign in with it now.`)
-              }
+              disabled={bindingSwitch.pending || turnOnBlocked}
+              onClick={bindingSwitch.turnOn}
             >
-              {updateBinding.isPending ? (
+              {bindingSwitch.pending ? (
                 <Loader2 className="animate-spin" aria-hidden="true" />
               ) : null}
               Turn on
@@ -350,200 +729,120 @@ function ProviderPanel({
       </div>
 
       <FeedbackLine feedback={feedback} focusRef={statusRef} />
+      {blockedReason ? <p className="text-muted-foreground pt-1 text-sm">{blockedReason}</p> : null}
+      {missing.length > 0 ? (
+        <p className="pt-1 text-sm text-amber-600 dark:text-amber-400">
+          Needs setup: fill in {missing.join(", ")} and save
+          {enabled ? "." : " to turn it on."}
+        </p>
+      ) : null}
 
-      {!installation.enabled ? (
-        <p className="text-muted-foreground text-sm">
-          The plugin is turned off. Turn it on from its{" "}
+      {steps.map((step, index) => (
+        <Step key={step.key} number={index + 1} title={step.title} description={step.description}>
+          {step.body}
+        </Step>
+      ))}
+
+      {layout.advanced.length > 0 ? (
+        <div className="pt-6">
+          <h4 className="text-sm font-semibold">Advanced</h4>
+          <p className="text-muted-foreground text-xs">The defaults work for most providers.</p>
+          <div className="pt-1">
+            {layout.advanced.map((group) => (
+              <AdvancedSection
+                key={group.id}
+                id={`sign-in.${installation.plugin_id}.${group.id}`}
+                title={group.title}
+                count={group.fields.length}
+                forceOpen={groupNeedsAttention(group)}
+              >
+                {group.description ? (
+                  <p className="settings-field-note text-muted-foreground pt-1 pb-1 text-xs leading-relaxed">
+                    {group.description}
+                  </p>
+                ) : null}
+                {renderGroupFields(group)}
+              </AdvancedSection>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {layout.unsupported.length > 0 ? (
+        <p className="text-muted-foreground pt-4 text-sm">
+          Some of this plugin's settings can only be changed on its{" "}
           <Link
             to={pluginPagePath(installation.plugin_id)}
             className="text-foreground underline underline-offset-4"
           >
             plugin page
-          </Link>{" "}
-          first.
-        </p>
-      ) : null}
-      {otherActive !== null && !enabled ? (
-        <p className="text-muted-foreground text-sm">
-          {otherActive} is the sign-in provider now. A server has one at a time: turn it off to use{" "}
-          {name} instead.
-        </p>
-      ) : null}
-      {missing.length > 0 ? (
-        <p className="text-sm text-amber-600 dark:text-amber-400">
-          Needs setup: save {missing.join(", ")} under Configuration below.
+          </Link>
+          .
         </p>
       ) : null}
 
-      {isOAuth && !publicUrlSet ? (
-        <SettingFieldStatus tone="warn">
-          <span>
-            OpenID Connect sign-in needs the server's public URL for the redirect URI. Set it in{" "}
-            <Link to="/admin/settings/general" className="underline underline-offset-4">
-              General settings
-            </Link>
-            .
-          </span>
-        </SettingFieldStatus>
-      ) : null}
-
-      <div className="settings-field-list">
-        {isOAuth && callbackUrl ? (
-          <CopyField
-            label="Redirect URI"
-            value={callbackUrl}
-            description="Register this at the provider as the client's redirect (callback) URI."
-          />
-        ) : null}
-        {isOAuth && postLogoutUrl ? (
-          <CopyField
-            label="Post-logout redirect URI"
-            value={postLogoutUrl}
-            description="Register this at the provider too if you turn on signing out at the provider."
-          />
-        ) : null}
-
-        <SettingFieldRow
-          label="Create accounts on first sign-in"
-          htmlFor={autoProvisionId}
-          description="People the provider lets in get a Silo account the first time they sign in. Off: only people whose account is already connected can sign in."
-          descriptionId={autoProvisionDescription}
-        >
-          <Switch
-            id={autoProvisionId}
-            aria-describedby={autoProvisionDescription}
-            checked={binding?.auto_provision ?? true}
-            disabled={busy || !binding}
-            onCheckedChange={(checked) =>
-              writeBinding(
-                { auto_provision: checked },
-                checked
-                  ? "New people get an account on their first sign-in."
-                  : "Only people with a connected account can sign in now.",
-              )
-            }
-          />
-        </SettingFieldRow>
-
-        {offersTest ? (
-          <div className="border-border/60 border-b py-3.5">
-            <div className="flex flex-wrap items-center gap-3">
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                onClick={runTest}
-                disabled={testConnection.isPending || !installation.enabled}
-              >
-                {testConnection.isPending ? (
-                  <Loader2 className="animate-spin" aria-hidden="true" />
-                ) : null}
-                {testConnection.isPending ? "Testing..." : "Test connection"}
-              </Button>
-              <span className="text-muted-foreground text-xs">
-                {stagedCount > 0
-                  ? "Tests your unsaved changes below over the saved configuration. Nothing is saved."
-                  : "Tests the saved configuration. Nothing is saved."}
-              </span>
-            </div>
-            <div aria-live="polite" className="mt-3">
-              {testResult ? (
-                <ConnectionTestResult result={testResult} headingRef={testHeadingRef} />
-              ) : null}
-              {testError ? (
-                <p
-                  ref={testErrorRef}
-                  tabIndex={-1}
-                  role="alert"
-                  className="text-destructive text-sm focus:outline-none"
-                >
-                  {testError}
-                </p>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
-      </div>
-
-      {(installation.global_config_schema ?? []).length > 0 ? (
-        <AdvancedSection
-          id={`sign-in.config.${installation.plugin_id}`}
-          title="Configuration"
-          count={installation.global_config_schema.length}
-          forceOpen={missing.length > 0 || stagedCount > 0}
-        >
-          {installation.global_config_schema.map((schema) => {
-            const saved = installation.global_configs?.find((entry) => entry.key === schema.key);
-            return (
-              <div key={schema.key} className="pb-3">
-                <SettingsSubheading caption={schema.description || undefined}>
-                  {schema.title?.trim() || humanizeConfigKey(schema.key)}
-                </SettingsSubheading>
-                <PluginConfigForm
-                  bare
-                  idPrefix={`sign-in-${installation.id}-${schema.key}`}
-                  schema={schema}
-                  value={saved?.value}
-                  configuredSecrets={saved?.configured_secrets}
-                  isSaving={saveConfig.isPending}
-                  onDraftChange={(key, value, clearSecrets) =>
-                    setDrafts((current) => ({
-                      ...current,
-                      [key]: { key, value, clear_secrets: clearSecrets },
-                    }))
-                  }
-                  onSave={(key, value, clearSecrets) =>
-                    saveConfig.mutate(
-                      { installationId: installation.id, key, value, clearSecrets },
-                      {
-                        onSuccess: () => {
-                          setDrafts((current) => {
-                            const next = { ...current };
-                            delete next[key];
-                            return next;
-                          });
-                          report({
-                            tone: "ok",
-                            text: `Saved ${schema.title?.trim() || humanizeConfigKey(key)}.`,
-                          });
-                        },
-                        onError: (error) =>
-                          report({
-                            tone: "error",
-                            text: adminSignInErrorText(error, "Couldn't save the configuration."),
-                          }),
-                      },
-                    )
-                  }
-                />
-              </div>
-            );
-          })}
-        </AdvancedSection>
-      ) : null}
-
-      <ConfirmDialog
-        open={confirmOff}
-        onOpenChange={setConfirmOff}
-        title={`Turn off ${label}?`}
-        description={
-          localLoginOn
-            ? `People who sign in with ${label} can't sign in until it's back on. Their Silo accounts, and the connections to ${label}, stay.`
-            : `Password sign-in is off, so only break-glass admins can sign in until ${label} is back on. Silo accounts, and their connections to ${label}, stay.`
-        }
-        confirmLabel="Turn off"
-        variant="destructive"
-        onConfirm={() =>
-          writeBinding(
-            { enabled: false },
-            localLoginOn
-              ? `${label} is off. Only Silo passwords sign in now.`
-              : `${label} is off. Password sign-in is off too, so only break-glass admins can sign in now.`,
-          )
-        }
-        isPending={updateBinding.isPending}
-      />
+      {bindingSwitch.dialog}
     </section>
+  );
+}
+
+/** "None": only Silo passwords sign in, or what to turn off to get there. */
+function NoProviderPanel({
+  active,
+  localLoginOn,
+}: {
+  active: PluginInstallation | undefined;
+  localLoginOn: boolean;
+}) {
+  if (!active) {
+    return (
+      <p className="text-muted-foreground pt-5 text-sm">
+        No sign-in provider is on, so people sign in with Silo passwords. Pick a provider above to
+        set it up.
+      </p>
+    );
+  }
+  return <TurnOffActiveProvider active={active} localLoginOn={localLoginOn} />;
+}
+
+function TurnOffActiveProvider({
+  active,
+  localLoginOn,
+}: {
+  active: PluginInstallation;
+  localLoginOn: boolean;
+}) {
+  const [feedback, setFeedback] = useState<Feedback>(null);
+  const statusRef = useRef<HTMLParagraphElement>(null);
+  const label = authProviderLabel(active);
+  const bindingSwitch = useBindingSwitch({
+    installation: active,
+    label,
+    localLoginOn,
+    report: (next) => {
+      setFeedback(next);
+      requestAnimationFrame(() => statusRef.current?.focus());
+    },
+  });
+  return (
+    <div className="pt-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-muted-foreground text-sm">
+          {label} is on. Turn it off to sign in with Silo passwords only.
+        </p>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={bindingSwitch.pending}
+          onClick={bindingSwitch.askOff}
+        >
+          Turn off {label}
+        </Button>
+      </div>
+      <FeedbackLine feedback={feedback} focusRef={statusRef} />
+      {bindingSwitch.dialog}
+    </div>
   );
 }
 
@@ -551,23 +850,31 @@ interface SignInProviderSlotProps {
   installations: PluginInstallation[] | undefined;
   loading: boolean;
   failed: boolean;
+  drafts: SignInProviderDrafts;
   localLoginOn: boolean;
   publicUrlSet: boolean;
   connectionTestServed: boolean;
 }
 
+type Selection = number | "none";
+
 /**
- * The server's one external sign-in provider: the one that is on, or the
- * installed sign-in plugins to choose from, or where to install one.
+ * The server's one external sign-in provider: a choice between the installed
+ * sign-in plugins (and none), and guided setup for the one chosen. Choosing
+ * only changes what is shown; Turn on is what makes a provider the server's.
  */
 export function SignInProviderSlot({
   installations,
   loading,
   failed,
+  drafts,
   localLoginOn,
   publicUrlSet,
   connectionTestServed,
 }: SignInProviderSlotProps) {
+  const [picked, setPicked] = useState<Selection | null>(null);
+  const groupLabelId = useId();
+
   if (loading) {
     return (
       <div className="space-y-3 py-3.5" aria-busy="true">
@@ -600,21 +907,97 @@ export function SignInProviderSlot({
   }
 
   const active = activeSignInInstallation(candidates);
-  const shown = active ? [active, ...candidates.filter((c) => c.id !== active.id)] : candidates;
+  // Until the admin picks, show the provider that is on, else one with setup
+  // under way, else the first installed. "None" is only ever picked.
+  const fallback: Selection = (
+    active ??
+    candidates.find((candidate) => (candidate.global_configs ?? []).length > 0) ??
+    candidates[0]!
+  ).id;
+  const selection: Selection =
+    picked === "none" || candidates.some((candidate) => candidate.id === picked)
+      ? (picked as Selection)
+      : fallback;
+  const selected = candidates.find((candidate) => candidate.id === selection);
+
+  const choices: { id: Selection; title: string; detail: string; state?: ProviderState }[] = [
+    ...candidates.map((installation) => {
+      const layout = drafts.layoutOf(installation);
+      return {
+        id: installation.id as Selection,
+        title: providerTitle(installation, candidates),
+        detail: PROTOCOL_EXAMPLES[signInModeOf(installation)] || authProviderName(installation),
+        state: providerState(installation, missingSignInSetup(layout)),
+      };
+    }),
+    { id: "none", title: "None", detail: "Only Silo passwords." },
+  ];
 
   return (
-    <div className="divide-border/60 divide-y">
-      {shown.map((installation) => (
-        <div key={installation.id} className="py-4 first:pt-2 last:pb-2">
-          <ProviderPanel
-            installation={installation}
-            localLoginOn={localLoginOn}
-            publicUrlSet={publicUrlSet}
-            connectionTestServed={connectionTestServed}
-            otherActive={active && active.id !== installation.id ? authProviderName(active) : null}
-          />
-        </div>
-      ))}
+    <div className="pb-2">
+      <span id={groupLabelId} className="sr-only">
+        Sign-in provider to show
+      </span>
+      <div
+        role="group"
+        aria-labelledby={groupLabelId}
+        className="grid gap-2.5 pt-3.5 sm:grid-cols-[repeat(auto-fit,minmax(11rem,1fr))]"
+      >
+        {choices.map((choice) => {
+          const on = choice.id === selection;
+          return (
+            <button
+              key={choice.id}
+              type="button"
+              aria-pressed={on}
+              onClick={() => setPicked(choice.id)}
+              className={cn(
+                "bg-muted/20 hover:bg-muted/40 rounded-xl border px-3.5 py-3 text-left transition-colors",
+                on
+                  ? "border-[var(--settings-accent)] ring-1 ring-[var(--settings-accent)]"
+                  : "border-border",
+              )}
+            >
+              <span className="flex items-center justify-between gap-2">
+                <span className="text-sm font-semibold">{choice.title}</span>
+                {choice.state ? (
+                  <span className="text-muted-foreground border-border inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px]">
+                    <StateDot tone={choice.state.tone} />
+                    {choice.state.word}
+                  </span>
+                ) : null}
+              </span>
+              <span className="text-muted-foreground mt-1 block text-xs leading-snug">
+                {choice.detail}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {active && candidates.length > 1 ? (
+        <p className="text-muted-foreground pt-2 text-xs">
+          A server uses one provider at a time. To switch, turn off{" "}
+          {providerTitle(active, candidates)} first.
+        </p>
+      ) : null}
+
+      {selected ? (
+        <ProviderPanel
+          key={selected.id}
+          installation={selected}
+          title={providerTitle(selected, candidates)}
+          layout={drafts.layoutOf(selected)}
+          drafts={drafts}
+          localLoginOn={localLoginOn}
+          publicUrlSet={publicUrlSet}
+          connectionTestServed={connectionTestServed}
+          otherActive={
+            active && active.id !== selected.id ? providerTitle(active, candidates) : null
+          }
+        />
+      ) : (
+        <NoProviderPanel active={active} localLoginOn={localLoginOn} />
+      )}
     </div>
   );
 }

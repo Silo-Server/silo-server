@@ -199,6 +199,35 @@ routed to their provider there.
   while a rebuild is pending collapse into one. Auth binding writes answer
   `X-Silo-Restart-Required: false`.
 
+## Sign-in settings page
+
+The admin Sign-in page shows one sign-in plugin at a time as numbered setup
+steps, built from the plugin's manifest so the host needs no per-plugin code
+(`web/src/pages/admin-settings/signInSetup.ts`):
+
+- **Steps.** Each global config entry's `admin_form` sections become steps in
+  manifest order, titled by the section. Fields outside every section form
+  one step titled by the entry. A section marked `collapsible` goes under
+  Advanced instead. "Create accounts on first sign-in" (the binding's
+  `auto_provision`) closes the last plugin step, so a plugin lists its
+  access rules last.
+- **Host steps.** OAuth plugins get a first step with the callback and
+  post-logout URLs to register. Plugins whose capability sets
+  `metadata.connection_test` get a test step after their own. A
+  `display_name` entry with a single `value` field becomes the last step,
+  Login button, because the server reads it for the login page.
+- **Test look-up user.** Capability metadata
+  `connection_test_username_field: "<config key>.<field key>"` names a field
+  the connection test reads as the person to look up. The page asks for it
+  in the test step, lays it over the staged entry for the test only, and
+  never saves it.
+- **Saving.** Config edits and `auto_provision` save from the page's save
+  bar, provider writes before server settings, each through the operation
+  it would use on its own. Turning a binding on or off applies at once.
+  Turn on stays disabled while a required field (or a required entry
+  without required fields) has nothing saved, or while the plugin has
+  unsaved edits.
+
 ## OAuth flows
 
 The plugin runs the protocol with the provider (PKCE and nonce towards the

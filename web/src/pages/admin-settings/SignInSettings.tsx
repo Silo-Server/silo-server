@@ -2,6 +2,8 @@ import { useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 
 import { V2ProblemError } from "@/api/v2/request";
+import { FeedbackLine, type Feedback } from "@/components/admin/FeedbackLine";
+import { AdvancedSection } from "@/components/settings/AdvancedSection";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
@@ -14,6 +16,7 @@ import { FieldGroup } from "./FieldGroup";
 import { SaveBar } from "./SaveBar";
 import { SettingField, SettingFieldStatus } from "./SettingField";
 import { SignInProviderSlot } from "./SignInProviderSlot";
+import { useSignInProviderDrafts } from "./useSignInProviderDrafts";
 
 export const LOCAL_LOGIN_KEY = "auth.local_password_login";
 export const EMAIL_MATCH_KEY = "auth.email_auto_match";
@@ -24,12 +27,12 @@ const RECHECK_KEYS = [RECHECK_INTERVAL_KEY, OUTAGE_POLICY_KEY];
 const KEYS = [LOCAL_LOGIN_KEY, EMAIL_MATCH_KEY, ...RECHECK_KEYS, "server.public_url"];
 
 const RECHECK_INTERVALS = [
-  { value: "15m", label: "Every 15 minutes" },
-  { value: "1h", label: "Every hour" },
-  { value: "6h", label: "Every 6 hours" },
-  { value: "12h", label: "Every 12 hours (default)" },
-  { value: "1d", label: "Every day" },
-  { value: "7d", label: "Every 7 days" },
+  { value: "15m", label: "15 minutes" },
+  { value: "1h", label: "1 hour" },
+  { value: "6h", label: "6 hours" },
+  { value: "12h", label: "12 hours (default)" },
+  { value: "1d", label: "1 day" },
+  { value: "7d", label: "7 days" },
 ];
 
 const OUTAGE_POLICIES = [
@@ -47,19 +50,23 @@ function intervalOptions(current: string) {
 }
 
 /**
- * Settings → Sign-in: whether Silo passwords still sign in, the server's one
- * external sign-in provider (OIDC or LDAP), how first sign-ins match or create
- * accounts, and how often Silo asks the provider again. Server settings save
- * through the save bar; provider changes apply at once, like a provider tile.
- * The rules are in docs/architecture/external-sign-in.md.
+ * Settings → Sign-in: the server's one external sign-in provider (OIDC or
+ * LDAP) as guided setup, whether Silo passwords still sign in, how first
+ * sign-ins match accounts, and how often Silo asks the provider again. Every
+ * edit, the provider's configuration included, saves through the save bar;
+ * only turning a provider on or off applies at once. The rules are in
+ * docs/architecture/external-sign-in.md.
  */
 export default function SignInSettings() {
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
   const capabilities = useExternalSignInCapabilities();
   const installations = useAdminPluginInstallations();
   const users = useAdminUsers();
+  const drafts = useSignInProviderDrafts(installations.data);
   const [localError, setLocalError] = useState<string | null>(null);
   const localErrorRef = useRef<HTMLParagraphElement>(null);
+  const [providerFeedback, setProviderFeedback] = useState<Feedback>(null);
+  const providerFeedbackRef = useRef<HTMLParagraphElement>(null);
 
   const breakGlass = useMemo(
     () =>
@@ -100,6 +107,15 @@ export default function SignInSettings() {
 
   async function handleSave() {
     setLocalError(null);
+    setProviderFeedback(null);
+    // The provider first: turning password sign-in off may rely on it.
+    const provider = await drafts.save();
+    if (!provider.ok) {
+      setProviderFeedback({ tone: "error", text: provider.text });
+      requestAnimationFrame(() => providerFeedbackRef.current?.focus());
+      return;
+    }
+    if (form.dirtyCount === 0) return;
     try {
       await form.save();
     } catch (error) {
@@ -139,26 +155,31 @@ export default function SignInSettings() {
         ) : null}
 
         <FieldGroup
-          label="Sign-in provider"
-          description="One OpenID Connect or LDAP provider can sign people in alongside Silo passwords."
+          label="Single sign-on"
+          description="Let people sign in with your identity provider. A server uses one provider at a time."
+          dirty={drafts.changeCount > 0}
         >
-          <SignInProviderSlot
-            installations={installations.data}
-            loading={installations.isLoading}
-            failed={installations.isError}
-            localLoginOn={form.getPersistedValue(LOCAL_LOGIN_KEY) !== "false"}
-            publicUrlSet={publicUrlSet}
-            connectionTestServed={caps?.connection_test === true}
-          />
+          <div className="settings-field-note">
+            <FeedbackLine feedback={providerFeedback} focusRef={providerFeedbackRef} />
+            <SignInProviderSlot
+              installations={installations.data}
+              loading={installations.isLoading}
+              failed={installations.isError}
+              drafts={drafts}
+              localLoginOn={form.getPersistedValue(LOCAL_LOGIN_KEY) !== "false"}
+              publicUrlSet={publicUrlSet}
+              connectionTestServed={caps?.connection_test === true}
+            />
+          </div>
         </FieldGroup>
 
-        <FieldGroup label="Password sign-in" dirty={form.isDirty(LOCAL_LOGIN_KEY)}>
+        <FieldGroup label="Silo passwords" dirty={form.isDirty(LOCAL_LOGIN_KEY)}>
           <SettingField
-            label="Sign in with Silo passwords"
+            label="Allow password sign-in"
             settingKey={LOCAL_LOGIN_KEY}
             dirty={form.isDirty(LOCAL_LOGIN_KEY)}
             type="toggle"
-            description="Off: only break-glass admins sign in with a Silo password, and everyone else signs in with the provider. Needs at least one break-glass admin; the server owner is one by default."
+            description="Off: everyone signs in with the provider, except break-glass admins. Needs at least one break-glass admin; the server owner is one by default."
             value={localLoginOn ? "true" : "false"}
             onChange={changeLocalLogin}
             status={
@@ -188,17 +209,23 @@ export default function SignInSettings() {
               {localError}
             </p>
           ) : null}
-          <p className="text-muted-foreground pb-3.5 text-xs leading-relaxed">
-            Locked out? <code className="font-mono">/login?local=1</code> shows the password form
-            for break-glass admins, and{" "}
-            <code className="font-mono">silo auth local-login enable</code> run on the server turns
-            password sign-in back on.
-          </p>
+          <AdvancedSection id="sign-in.locked-out" title="Locked out?">
+            <p className="settings-field-note text-muted-foreground py-2 text-xs leading-relaxed">
+              <code className="font-mono">/login?local=1</code> shows the password form for
+              break-glass admins, and{" "}
+              <code className="font-mono">silo auth local-login enable</code> run on the server
+              turns password sign-in back on.
+            </p>
+          </AdvancedSection>
         </FieldGroup>
 
-        <FieldGroup label="Matching accounts" dirty={form.isDirty(EMAIL_MATCH_KEY)}>
+        <FieldGroup
+          label="Accounts and sessions"
+          description="Applies to whichever provider is on."
+          dirty={[EMAIL_MATCH_KEY, ...RECHECK_KEYS].some((key) => form.isDirty(key))}
+        >
           <SettingField
-            label="Match accounts by email"
+            label="Match existing accounts by email"
             settingKey={EMAIL_MATCH_KEY}
             dirty={form.isDirty(EMAIL_MATCH_KEY)}
             type="toggle"
@@ -215,25 +242,18 @@ export default function SignInSettings() {
               </SettingFieldStatus>
             }
           />
-        </FieldGroup>
-
-        <FieldGroup
-          label="Provider re-check"
-          description="Silo asks the provider again whether each person may still sign in, so removing someone there also signs them out of Silo."
-          dirty={RECHECK_KEYS.some((key) => form.isDirty(key))}
-        >
           <SettingField
-            label="Ask the provider again"
+            label="Re-check access every"
             settingKey={RECHECK_INTERVAL_KEY}
             dirty={form.isDirty(RECHECK_INTERVAL_KEY)}
             type="select"
-            description="How old the provider's last answer may be before a session renewal asks again."
+            description="Silo asks the provider again whether each person may still sign in, so someone removed there is signed out of Silo at the next check."
             value={form.getValue(RECHECK_INTERVAL_KEY) || "12h"}
             onChange={(value) => form.setValue(RECHECK_INTERVAL_KEY, value)}
             options={intervalOptions(form.getValue(RECHECK_INTERVAL_KEY))}
           />
           <SettingField
-            label="When the provider can't be reached"
+            label="If the provider is unreachable"
             settingKey={OUTAGE_POLICY_KEY}
             dirty={form.isDirty(OUTAGE_POLICY_KEY)}
             type="select"
@@ -250,13 +270,15 @@ export default function SignInSettings() {
       </div>
 
       <SaveBar
-        dirtyCount={form.dirtyCount}
+        dirtyCount={form.dirtyCount + drafts.changeCount}
         onSave={() => void handleSave()}
         onDiscard={() => {
           setLocalError(null);
+          setProviderFeedback(null);
+          drafts.discard();
           form.discard();
         }}
-        isSaving={form.isSaving}
+        isSaving={form.isSaving || drafts.saving}
       />
     </div>
   );
