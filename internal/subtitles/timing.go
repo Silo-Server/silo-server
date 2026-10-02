@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -428,8 +429,52 @@ func retimeASSEvent(out *bytes.Buffer, line rawLine, layout assEventLayout, t Ti
 		out.WriteString(formatASSTimestamp(f.ts))
 		pos = f.span[0] + trail
 	}
-	out.Write(body[pos:])
+	rest := body[pos:]
+	if scale := t.Normalized().Scale; scale != 1 {
+		rest = scaleASSOverrides(rest, scale)
+	}
+	out.Write(rest)
 	out.Write(line.eol)
+}
+
+// ASS override tags with times relative to their event, which a scaled event
+// must scale too: karaoke syllables (\k, \kf, \ko, \K, in centiseconds),
+// and the millisecond times of \t, \move, \fad and \fade.
+var (
+	assOverrideBlock = regexp.MustCompile(`\{[^}]*\}`)
+	assKaraoke       = regexp.MustCompile(`(\\(?:kf|ko|k|K))(\d+)`)
+	assTransform     = regexp.MustCompile(`(\\t\(\s*)(-?\d+)(\s*,\s*)(-?\d+)`)
+	assMove          = regexp.MustCompile(`(\\move\((?:[^,()]*,){4}\s*)(-?\d+)(\s*,\s*)(-?\d+)`)
+	assFad           = regexp.MustCompile(`(\\fad\(\s*)(\d+)(\s*,\s*)(\d+)`)
+	assFade          = regexp.MustCompile(`(\\fade\((?:[^,()]*,){3}\s*)(-?\d+)(\s*,\s*)(-?\d+)(\s*,\s*)(-?\d+)(\s*,\s*)(-?\d+)`)
+)
+
+// scaleASSOverrides scales the event-relative times inside the override
+// blocks of an event's remaining fields, leaving every other byte as it is.
+func scaleASSOverrides(rest []byte, scale float64) []byte {
+	return assOverrideBlock.ReplaceAllFunc(rest, func(block []byte) []byte {
+		for _, re := range []*regexp.Regexp{assKaraoke, assTransform, assMove, assFad, assFade} {
+			block = re.ReplaceAllFunc(block, func(match []byte) []byte {
+				groups := re.FindSubmatch(match)
+				var out []byte
+				// Odd groups are kept text, even groups are numbers.
+				for i, g := range groups[1:] {
+					if i%2 == 0 {
+						out = append(out, g...)
+						continue
+					}
+					n, err := strconv.Atoi(string(g))
+					if err != nil {
+						out = append(out, g...)
+						continue
+					}
+					out = strconv.AppendInt(out, int64(math.Round(float64(n)*scale)), 10)
+				}
+				return out
+			})
+		}
+		return block
+	})
 }
 
 // formatASSTimestamp renders H:MM:SS.cc; d must already be centisecond-rounded.

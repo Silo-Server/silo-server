@@ -218,7 +218,9 @@ func (s *Service) execute(ctx context.Context, job *Job) {
 		return
 	}
 	if _, err := s.jobs.Apply(finishCtx, job, found, outcome); err != nil {
-		if errors.Is(err, ErrSubtitleChanged) {
+		// A job that is already terminal (reaped meanwhile) stays as it is;
+		// any other failure ends it so a new sync can start.
+		if !errors.Is(err, jobrunner.ErrJobTerminal) {
 			outcome.Status, outcome.Error = JobFailed, err.Error()
 			_ = s.jobs.Finish(finishCtx, job.ID, outcome)
 		}
@@ -326,12 +328,13 @@ func (s *Service) speech(ctx context.Context, file *models.MediaFile, language s
 		if ctx.Err() != nil || errors.Is(err, errNoNode) {
 			return nil, p, executedOn, err
 		}
-		// A failure the file itself causes rules the plan out, and so does any
-		// other than a timeout or an unreachable node when a downmix plan can
-		// still follow. Anything else backs off and is retried later.
+		// A failure the file itself causes rules the plan out. So does an
+		// unexplained ffmpeg failure of the center-channel decode, which a
+		// stream without that channel produces, while a downmix can follow.
+		// Failures of the host, node, or process (timeouts, missing filters,
+		// kills) back off and are retried, on any server.
 		reason := failureReason(err)
-		unusable := reason.Permanent() ||
-			(!last && reason != mediasample.ReasonTimeout && reason != mediasample.ReasonNodeUnavailable)
+		unusable := reason.Permanent() || (!last && reason == mediasample.ReasonFailed)
 		if unusable {
 			_ = s.artifacts.Upsert(context.WithoutCancel(ctx), mediaartifact.Artifact{
 				MediaFileID: file.ID, Key: key, Identity: identity, Status: mediaartifact.StatusUnusable,

@@ -23,7 +23,9 @@ subtitle row (`timing_scale`, `timing_offset_ms`); the bytes never change.
   (`subtitles.DeliveryBytes`). The administrator download returns the stored
   bytes unchanged, and content identity and deduplication use them too.
 - `Retime` rewrites SRT, WebVTT, and ASS/SSA timestamps and leaves every other
-  byte as stored. Other formats cannot be synced or retimed.
+  byte as stored. Under a scale it also scales the event-relative times in ASS
+  override tags (karaoke `\k` syllables, `\t`, `\move`, `\fad`, `\fade`),
+  so effects keep pace with their stretched event. Other formats cannot be synced or retimed.
 - A timing change bumps the row's revision like any other update, so
   validators captured before it go stale.
 - Players already apply a per-device delay (`player.subtitle_sync_ms`); it

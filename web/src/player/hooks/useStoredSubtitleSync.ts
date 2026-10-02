@@ -180,7 +180,10 @@ export function useStoredSubtitleSync({
     async (id: string) => {
       if (!playerConfig || pollingRef.current.has(id)) return;
       const current = capture();
-      pollingRef.current.add(id);
+      // Release on the set this read locked: a context reset swaps in a new
+      // set, so the release can never unlock a newer context's read.
+      const locks = pollingRef.current;
+      locks.add(id);
       try {
         const res = await playerV2(playerConfig, "GET /api/v2/subtitles/stored/{id}/sync", {
           path: { id },
@@ -190,7 +193,7 @@ export function useStoredSubtitleSync({
         // A lost subtitle or file stops polling; a later reload re-arms it.
         if (current()) patch(id, { pollExpired: true });
       } finally {
-        if (current()) pollingRef.current.delete(id);
+        locks.delete(id);
       }
     },
     [playerConfig, capture, observe, patch],

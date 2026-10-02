@@ -1,6 +1,7 @@
 package subtitles
 
 import (
+	"bytes"
 	"errors"
 	"slices"
 	"testing"
@@ -234,5 +235,26 @@ func TestParseCuesForFormat(t *testing.T) {
 	}
 	if _, err := ParseCuesForFormat(FormatSUB, nil); !errors.Is(err, ErrRetimeUnsupported) {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestRetimeASSScalesOverrideTimes(t *testing.T) {
+	in := "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n" +
+		assDisplayedEventKey + ` 0,0:00:10.00,0:00:12.00,Default,,0,0,0,,{\k20\kf40}La{\K100}la, {\t(0,1000,\fscx120)\move(1,2,3,4,500,1500)\fad(200,300)}hi` + "\n" +
+		assDisplayedEventKey + ` 0,0:00:20.00,0:00:21.00,Default,,0,0,0,,{\fade(255,0,255,0,100,900,1000)\t(\frz10)}no ms in \t here` + "\n"
+	got, err := Retime(FormatASS, []byte(in), Timing{Scale: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n" +
+		assDisplayedEventKey + ` 0,0:00:20.00,0:00:24.00,Default,,0,0,0,,{\k40\kf80}La{\K200}la, {\t(0,2000,\fscx120)\move(1,2,3,4,1000,3000)\fad(400,600)}hi` + "\n" +
+		assDisplayedEventKey + ` 0,0:00:40.00,0:00:42.00,Default,,0,0,0,,{\fade(255,0,255,0,200,1800,2000)\t(\frz10)}no ms in \t here` + "\n"
+	if string(got) != want {
+		t.Fatalf("got\n%s\nwant\n%s", got, want)
+	}
+	// An offset alone leaves relative times untouched.
+	shifted, _ := Retime(FormatASS, []byte(in), Timing{OffsetMS: 1000})
+	if !bytes.Contains(shifted, []byte(`{\k20\kf40}`)) {
+		t.Fatalf("offset changed override times: %s", shifted)
 	}
 }

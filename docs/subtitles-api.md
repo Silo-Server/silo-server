@@ -451,6 +451,8 @@ provider download, upload, viewer metadata) carries `timing`
 job, with `id`, `subtitle_id`, `status`, `trigger` (`auto` or `manual`),
 `created_at`, and, once finished, `finished_at`, `confidence` (0..1, the share
 of sampled audio windows that agree), and `result` (the correction found).
+Viewer metadata (`getViewerSubtitleMetadata`) omits `sync`: its validator
+follows the subtitle's revision, which job progress does not change.
 
 | Status | Meaning |
 |---|---|

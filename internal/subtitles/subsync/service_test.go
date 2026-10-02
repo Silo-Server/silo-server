@@ -244,6 +244,14 @@ func TestExecuteLosesToConcurrentEdit(t *testing.T) {
 	}
 }
 
+func TestExecuteEndsJobWhenApplyFails(t *testing.T) {
+	f := newFixture(t, subtitles.Timing{OffsetMS: 3000}, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
+	f.jobs.applyErr = errors.New("connection reset")
+	if job := f.run(t, TriggerManual); job.Status != JobFailed {
+		t.Fatalf("status %s, want failed so a new sync can start", job.Status)
+	}
+}
+
 func TestRequestAutoSkips(t *testing.T) {
 	f := newFixture(t, subtitles.Timing{}, settingsMap{SettingAutoSync: "false"}, "")
 	if job, err := f.svc.Request(context.Background(), 5, TriggerAuto, nil); job != nil || err != nil {
