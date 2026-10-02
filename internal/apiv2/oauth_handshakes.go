@@ -79,6 +79,10 @@ func oauthHandshakeResponses(statuses ...string) map[string]*huma.Response {
 	return responses
 }
 
+// oauthWebStartPath is the web start route under /auth/oauth/{install_id}/;
+// the form-post init answers 303 there on another origin.
+const oauthWebStartPath = "start"
+
 func registerOAuthHandshakes(reg *Registry) {
 	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/auth/oauth/capabilities", "getOAuthHandshakeCapabilities", oauthTag, "Discover browser and native-app OAuth handshake availability."), Class: ClassPublic, ServiceBacked: true}, func(_ context.Context, _ *CapabilityInput) (*OAuthHandshakeCapabilitiesOutput, error) {
 		out := new(OAuthHandshakeCapabilitiesOutput)
@@ -101,7 +105,7 @@ func registerOAuthHandshakes(reg *Registry) {
 		{http.MethodPost, "init", "initOAuthLogin", "Start a web OAuth sign-in from a form post.",
 			"A browser on another origin than the public URL is sent (303) to startOAuthLogin there, so the flow's browser-binding cookie is set on the origin of the callback. A provider that cannot start the flow, or a missing public URL, sends the browser (302) to /login?error=oauth_failed&reason=provider_unavailable.",
 			false, []string{"302", "303", "400", "409", "500", "502"}},
-		{http.MethodGet, "start", "startOAuthLogin", "Start a web OAuth sign-in.",
+		{http.MethodGet, oauthWebStartPath, "startOAuthLogin", "Start a web OAuth sign-in.",
 			"Sets an HttpOnly, SameSite=Lax browser-binding cookie scoped to the callback path, then redirects to the provider. A browser on another origin than the public URL is first sent (302) to the same start there. A link_ticket is refused with 400: the web links with startAccountIdentityLink. Malformed parameters are plain-text 400s; a provider that cannot start the flow, or a missing public URL, sends the browser (302) to /login?error=oauth_failed&reason=provider_unavailable (login_failed for a server error), where the login page does not redirect to the provider again.",
 			false, []string{"302", "400"}},
 		{http.MethodGet, "native/start", "startNativeOAuthLogin", "Start an OAuth sign-in for a native app in the system browser.",
@@ -201,7 +205,7 @@ func (reg *Registry) serveOAuthStart(w http.ResponseWriter, r *http.Request, pat
 	bounce.Set(auth.OAuthBounceParameter, "1")
 	target, status := path, http.StatusFound
 	if path == "init" {
-		target, status = "start", http.StatusSeeOther
+		target, status = oauthWebStartPath, http.StatusSeeOther
 	}
 	bounceURL := svc.PublicURL(Prefix+"/auth/oauth/"+strconv.Itoa(installID)+"/"+target, bounce)
 	svc.ServeStart(w, r, req, bounceURL, status)
