@@ -49,12 +49,30 @@ encoded_password=$(printf '%s' "$password" | od -An -v -tu1 | awk '{
 	}
 }')
 
+# Generate the key in its own assignment so set -e stops on an openssl failure
+# instead of writing an empty SECRET_KEY.
+secret_key=$(openssl rand -base64 48)
+if [ -z "$secret_key" ] || [ -z "$encoded_password" ]; then
+	echo "failed to generate the bootstrap values" >&2
+	exit 1
+fi
+
+# Write the complete file beside the destination, then hard-link it into place.
+# ln fails if the destination appeared in the meantime, so a concurrent run
+# can never replace generated credentials, and an interrupted run leaves no
+# partial .env behind.
 umask 077
-cp "$root/.env.example" "$env_file"
-chmod 600 "$env_file"
+tmp_file=$(mktemp "$(dirname "$env_file")/.env.init.XXXXXX")
+trap 'rm -f "$tmp_file"' EXIT
+cp "$root/.env.example" "$tmp_file"
+chmod 600 "$tmp_file"
 printf "\nPOSTGRES_PASSWORD='%s'\nSECRET_KEY='%s'\nDATABASE_URL='%s'\nREDIS_URL='%s'\n" \
 	"$password" \
-	"$(openssl rand -base64 48)" \
+	"$secret_key" \
 	"postgres://silo:${encoded_password}@localhost:5432/silo?sslmode=disable" \
-	'redis://localhost:6379' >>"$env_file"
+	'redis://localhost:6379' >>"$tmp_file"
+if ! ln "$tmp_file" "$env_file" 2>/dev/null; then
+	echo "$env_file already exists; add POSTGRES_PASSWORD to it or move it aside" >&2
+	exit 1
+fi
 echo "Created $env_file"

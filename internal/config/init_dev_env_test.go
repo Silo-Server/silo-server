@@ -81,4 +81,60 @@ func TestInitDevEnvOutputLoadsWithGodotenv(t *testing.T) {
 			}
 		})
 	}
+
+	// A failing openssl must stop the script rather than write an empty
+	// SECRET_KEY, and no partial or temporary file may be left behind.
+	t.Run("openssl failure writes nothing", func(t *testing.T) {
+		dir := t.TempDir()
+		bin := filepath.Join(dir, "bin")
+		if err := os.Mkdir(bin, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(bin, "openssl"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		envFile := filepath.Join(dir, "out", ".env")
+		if err := os.Mkdir(filepath.Dir(envFile), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command("sh", script, envFile)
+		cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "POSTGRES_PASSWORD=existing")
+		if output, err := cmd.CombinedOutput(); err == nil {
+			t.Fatalf("init-dev-env.sh succeeded with a failing openssl:\n%s", output)
+		}
+		entries, err := os.ReadDir(filepath.Dir(envFile))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) != 0 {
+			t.Fatalf("failed run left files behind: %v", entries)
+		}
+	})
+
+	t.Run("refuses an existing file and leaves no temporary file", func(t *testing.T) {
+		envFile, output, err := run(t, "existing")
+		if err != nil {
+			t.Fatalf("init-dev-env.sh: %v\n%s", err, output)
+		}
+		before, err := os.ReadFile(envFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command("sh", script, envFile)
+		cmd.Env = append(os.Environ(), "POSTGRES_PASSWORD=other")
+		if output, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(output), "already exists") {
+			t.Fatalf("second run: err %v output %q, want an already-exists refusal", err, output)
+		}
+		after, err := os.ReadFile(envFile)
+		if err != nil || string(after) != string(before) {
+			t.Fatalf("second run changed %s (err %v)", envFile, err)
+		}
+		entries, err := os.ReadDir(filepath.Dir(envFile))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) != 1 {
+			t.Fatalf("directory = %v, want only .env", entries)
+		}
+	})
 }

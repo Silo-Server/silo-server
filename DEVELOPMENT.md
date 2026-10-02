@@ -44,7 +44,8 @@ single-quoted value can't contain a single quote or end with a backslash, so
 rotate a password like that before using it here.
 
 ```sh
-# Create the bootstrap configuration for a new local database
+# Create the bootstrap configuration for a new local database. Skip this if
+# you already ran the existing-database command above.
 scripts/init-dev-env.sh
 
 # Start local PostgreSQL and Redis and wait until they are healthy
