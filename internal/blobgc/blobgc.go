@@ -37,7 +37,8 @@ type Namespace struct {
 	Root string
 	// Group returns the deletable prefix an object key belongs to, such as
 	// "chapter-images/42/", or false for a key the namespace does not
-	// recognize, which is never deleted.
+	// recognize, which is never deleted. Directory groups end in "/";
+	// individual objects return their exact key without a trailing slash.
 	Group func(key string) (string, bool)
 	// Live reports which of prefixes something still references. An error
 	// stops the collector and the sweep: neither deletes on a guess.
@@ -46,6 +47,8 @@ type Namespace struct {
 
 // Store is the storage surface blobgc needs.
 type Store interface {
+	Delete(ctx context.Context, keys []string) (int, error)
+	Stat(ctx context.Context, key string) (blobstore.ObjectInfo, error)
 	DeletePrefix(ctx context.Context, prefix string) (int, error)
 	List(ctx context.Context, prefix, cursor string, limit int) ([]blobstore.ObjectInfo, string, error)
 }

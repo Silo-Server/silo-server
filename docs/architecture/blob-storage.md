@@ -55,9 +55,11 @@ Images generated from a media file (chapter thumbnails, under
 (`internal/blobgc`). A trigger on `media_files` deletes, whichever path
 deletes the row, queues the file's prefix in `blob_gc_queue` a day out; a
 check constraint admits the supported file, image, and trickplay prefixes. The Clean
-Removed Media Images task deletes due prefixes whose namespace reports them
-unreferenced, and dequeues one only after storage lists it empty, since an
-S3 batch delete can fail per key without failing the call. The weekly Sweep
+Removed Media Images task deletes due groups whose namespace reports them
+unreferenced. Directory groups use prefix deletion and listing; individual
+chapter-image keys use exact deletion and `Stat`. The queue entry is removed
+only after storage confirms absence, since an S3 batch delete can fail per
+key without failing the call. The weekly Sweep
 Orphaned Media Images task lists each namespace and queues prefixes whose
 row is gone and whose newest object is over a day old; it queues nothing
 when more than half the prefixes it sees look orphaned, the signature of a

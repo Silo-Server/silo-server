@@ -90,6 +90,33 @@ func newFakeStore() *fakeStore {
 	return &fakeStore{objects: map[string]time.Time{}, deletes: map[string]int{}, deleteErr: map[string]error{}, sticky: map[string]bool{}}
 }
 
+func (s *fakeStore) Delete(_ context.Context, keys []string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	removed := 0
+	for _, key := range keys {
+		s.deletes[key]++
+		if err := s.deleteErr[key]; err != nil {
+			return removed, err
+		}
+		if !s.sticky[key] {
+			delete(s.objects, key)
+			removed++
+		}
+	}
+	return removed, nil
+}
+
+func (s *fakeStore) Stat(_ context.Context, key string) (blobstore.ObjectInfo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	modified, ok := s.objects[key]
+	if !ok {
+		return blobstore.ObjectInfo{}, blobstore.ErrNotFound
+	}
+	return blobstore.ObjectInfo{Key: key, ModTime: modified}, nil
+}
+
 func (s *fakeStore) DeletePrefix(_ context.Context, prefix string) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -261,6 +288,34 @@ func TestCollectorTruncatesMultibyteErrorsDB(t *testing.T) {
 	row := queueRows(t, pool)[prefix]
 	if stats.Retried != 1 || row.attempts != 1 || row.due || row.lastError != strings.Repeat("x", 499) {
 		t.Fatalf("retry = %+v, row = %+v", stats, row)
+	}
+}
+
+func TestCollectorRetriesSingleObjectAfterPartialDeleteDB(t *testing.T) {
+	pool := testPool(t)
+	store := newFakeStore()
+	key := testPrefix(175) + "0/w300.webp"
+	store.objects[key] = time.Now()
+	store.sticky[key] = true
+	queue(t, pool, key, -time.Minute)
+	ns := testNamespace(nil)
+	ns.Group = func(key string) (string, bool) { return key, true }
+	collector := NewCollector(pool, store, ns)
+	stats, err := collector.Collect(t.Context(), 1)
+	if err != nil || stats.Retried != 1 || stats.Deleted != 0 {
+		t.Fatalf("partial deletion: stats=%+v err=%v", stats, err)
+	}
+	if row, ok := queueRows(t, pool)[key]; !ok || row.attempts != 1 || row.due || row.lastError == "" {
+		t.Fatalf("partial deletion lost its retry: row=%+v queued=%t", row, ok)
+	}
+	store.sticky[key] = false
+	queue(t, pool, key, -time.Minute)
+	stats, err = collector.Collect(t.Context(), 1)
+	if err != nil || stats.Deleted != 1 || stats.Objects != 1 {
+		t.Fatalf("deletion retry: stats=%+v err=%v", stats, err)
+	}
+	if _, ok := queueRows(t, pool)[key]; ok {
+		t.Fatal("deleted object is still queued")
 	}
 }
 

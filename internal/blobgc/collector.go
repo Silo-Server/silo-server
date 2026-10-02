@@ -9,6 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 )
 
 // Collector deletes the queued prefixes whose time has come.
@@ -16,8 +18,9 @@ import (
 // It takes one due row at a time with FOR UPDATE SKIP LOCKED, so collectors
 // on every server share the queue without taking the same row, and holds the
 // row's lock while it deletes. A prefix is deleted only when its namespace
-// reports it dead, and its row is removed only after storage lists the
-// prefix as empty: S3 batch deletes can fail per key without failing the
+// reports it dead. Directory groups are listed after deletion; individual
+// images are checked by exact key. A row is removed only after storage
+// confirms absence: S3 batch deletes can fail per key without failing the
 // call. A failure keeps the row and retries it later, backing off.
 type Collector struct {
 	pool       *pgxpool.Pool
@@ -118,16 +121,35 @@ func (c *Collector) collectOne(ctx context.Context, stats *CollectStats) (bool, 
 		stats.Kept++
 		return false, c.dequeue(ctx, tx, prefix)
 	}
-	removed, err := c.store.DeletePrefix(ctx, prefix)
-	if err == nil {
-		err = c.checkEmpty(ctx, prefix)
-	}
+	removed, err := c.deleteGroup(ctx, prefix)
 	if err != nil {
 		return false, c.retry(ctx, tx, prefix, attempts, err, stats)
 	}
 	stats.Deleted++
 	stats.Objects += removed
 	return false, c.dequeue(ctx, tx, prefix)
+}
+
+// deleteGroup verifies exact object deletions separately from directory
+// deletions: S3 prefix operations append a slash and cannot address an image.
+func (c *Collector) deleteGroup(ctx context.Context, group string) (int, error) {
+	if strings.HasSuffix(group, "/") {
+		removed, err := c.store.DeletePrefix(ctx, group)
+		if err == nil {
+			err = c.checkEmpty(ctx, group)
+		}
+		return removed, err
+	}
+	removed, err := c.store.Delete(ctx, []string{group})
+	if err != nil {
+		return removed, err
+	}
+	if _, err := c.store.Stat(ctx, group); errors.Is(err, blobstore.ErrNotFound) {
+		return removed, nil
+	} else if err != nil {
+		return removed, fmt.Errorf("stat after delete: %w", err)
+	}
+	return removed, fmt.Errorf("object %s remains after delete", group)
 }
 
 // checkEmpty confirms storage holds nothing under prefix any more.
