@@ -151,12 +151,15 @@ function NetworkSignInRow({ installation }: { installation: PluginInstallation }
           the tailnet policy can make themselves a Silo admin. Without a grant, a person&apos;s role
           is left as it is, so removing someone&apos;s admin grant doesn&apos;t demote them: grant
           them <code className="font-mono">{`{"role":"user"}`}</code> instead. Policy changes apply
-          at the next sign-in or access re-check.
+          at the next sign-in or access re-check. An account that also signs in through your main
+          sign-in provider takes its role from that provider.
         </p>
         <pre className="bg-muted overflow-x-auto rounded-md p-3 font-mono">{GRANT_EXAMPLE}</pre>
         <p>
-          Everyone using a shared TV signs in as whoever signed that TV in to {label}; profiles keep
-          their watching apart.{" "}
+          Everyone using a shared TV signs in as whoever signed that TV in to {label}, with their
+          role, so sign shared TVs in as someone without an admin grant; profiles keep their
+          watching apart. Tag any device that relays other people&apos;s traffic to this server,
+          such as a reverse proxy, or everyone behind it signs in as its owner.{" "}
           <Link
             to={pluginPagePath(installation.plugin_id)}
             className="text-foreground underline underline-offset-4"

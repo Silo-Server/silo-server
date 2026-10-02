@@ -520,7 +520,9 @@ the SDK's `NetworkIdentityAuth`.
   request from its own overlay whose peer the plugin vouches for, with
   `network_sign_in_path` and the owner's name for a "Continue as" label.
   Answers about a peer (identity or refusal) are cached for 30 seconds per
-  installation and peer; a plugin that cannot answer is not cached. Sign-in
+  provider instance and peer; a binding or plugin configuration change builds
+  a new instance, so a changed rule applies at once. A plugin that cannot
+  answer is not cached. Sign-in
   and linking always ask again. A network provider is never the default
   provider, never counts toward `password_login`, and never receives a
   password: login and Jellyfin routing skip it, a login that names it fails
@@ -536,10 +538,28 @@ the SDK's `NetworkIdentityAuth`.
   required grant). A person removed from the overlay cannot reach its
   listener at all; a server that also has a public URL ends their sessions at
   the next re-check.
+- **The primary provider comes first.** One network binding may be on beside
+  the one OIDC or LDAP binding, and an account can hold an identity at each.
+  When it does, the primary provider is the account's authority
+  (`networkDefersToPrimary`): the network identity's `managed_role` is
+  ignored at sign-in, linking and re-check, and a refusal from the network
+  provider ends only the sessions opened through the network identity
+  (as for a break-glass account), keeping the account's API keys and the
+  sessions the primary provider vouches for. Otherwise the two providers
+  would each apply their own role and sign the account out at every change.
 - **Trust.** Anyone who controls a device signed in to the overlay as a
-  person can sign in to Silo as that person, within what the overlay's
-  policy allows them. Everyone using a shared TV signs in as whoever signed
-  that TV in to the overlay; profiles separate viewers.
+  person can sign in to Silo as that person, with that person's role, within
+  what the overlay's policy allows them, and can link that person's identity
+  to their own account. Everyone using a shared TV signs in as whoever signed
+  that TV in to the overlay; profiles separate viewers. The same holds for
+  anyone whose traffic reaches the node through a person's device: a reverse
+  proxy, Tailscale Serve, or a router that masquerades its LAN into the
+  overlay makes everyone behind it that device's owner. The Tailscale plugin
+  names no peer for a request carrying forwarding headers, but a plain TCP
+  forwarder adds none, so relays must be tagged devices, which never sign in.
+  Subjects are scoped to the control plane, not the tailnet: moving the Silo
+  node to another tailnet gives everyone new user IDs, so re-checks of the
+  old identities answer not found.
 
 `getExternalSignInCapabilities` reports both operations as
 `network_sign_in`.

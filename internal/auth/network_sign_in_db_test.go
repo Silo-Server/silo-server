@@ -153,3 +153,92 @@ func TestLinkNetworkIdentityDB(t *testing.T) {
 		t.Fatalf("sign-in after linking = %+v, %v", pair, err)
 	}
 }
+
+// TestNetworkIdentityDefersToPrimaryProviderDB: an account that also signs in
+// through the primary provider takes its role from that provider alone, and
+// a refusal from the network provider ends only the sessions the network
+// identity opened, not what the primary provider still vouches for.
+func TestNetworkIdentityDefersToPrimaryProviderDB(t *testing.T) {
+	env := newRecheckEnv(t, "both-providers", "")
+	ctx := t.Context()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := env.pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`UPDATE plugin_auth_bindings SET enabled = true WHERE plugin_installation_id = $1`, env.installationID)
+	var network int
+	if err := env.pool.QueryRow(ctx, `INSERT INTO plugin_installations (plugin_id, version, install_path, enabled, update_policy, kind)
+		VALUES ($1, '0', '/nonexistent/network-sign-in-test', true, 'manual', 'plugin') RETURNING id`,
+		"network-sign-in-"+env.suffix).Scan(&network); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = env.pool.Exec(context.WithoutCancel(ctx), `DELETE FROM plugin_installations WHERE id = $1`, network)
+	})
+	exec(`INSERT INTO plugin_capabilities (plugin_installation_id, capability_type, capability_id, metadata)
+		VALUES ($1, 'auth_provider.v1', 'tailscale', '{"auth_modes":["network"]}')`, network)
+	exec(`INSERT INTO plugin_auth_bindings (plugin_installation_id, capability_id, enabled) VALUES ($1, 'tailscale', true)`, network)
+
+	tailnetAdmin := ExternalIdentity{Subject: "controlplane.tailscale.com|" + env.suffix, Username: env.name("tv-owner"),
+		ManagedRole: pluginv1.AuthManagedRole_AUTH_MANAGED_ROLE_ADMIN}
+	resolve := func(linking int) *models.User {
+		t.Helper()
+		user, _, err := env.resolver.Resolve(ctx, ResolveInput{InstallationID: network, Identity: tailnetAdmin, LinkingUserID: linking})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return user
+	}
+	if linked := resolve(env.user.ID); linked.ID != env.user.ID || linked.Role != models.RoleUser {
+		t.Fatalf("linking = %+v, want the account with the primary provider's role", linked)
+	}
+	if signedIn := resolve(0); signedIn.ID != env.user.ID || signedIn.Role != models.RoleUser {
+		t.Fatalf("network sign-in = %+v, want the account with the primary provider's role", signedIn)
+	}
+	networkIdentity, err := identityBySubject(ctx, env.pool, network, tailnetAdmin.Subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ageNetworkIdentity := func() {
+		t.Helper()
+		exec(`UPDATE plugin_auth_identities SET last_checked_at = NOW() - INTERVAL '13 hours' WHERE id = $1`, networkIdentity.ID)
+	}
+
+	// A re-check that answers admin leaves the role alone too.
+	networkSession, networkRefresh := env.sessionWithChain(t, &networkIdentity.ID, time.Now())
+	env.checker.respond = func(context.Context, *pluginv1.CheckAccountRequest) (*pluginv1.CheckAccountResponse, error) {
+		return &pluginv1.CheckAccountResponse{Status: pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_ACTIVE,
+			Account: &pluginv1.AuthenticateResponse{ManagedRole: pluginv1.AuthManagedRole_AUTH_MANAGED_ROLE_ADMIN}}, nil
+	}
+	ageNetworkIdentity()
+	pair, err := env.svc.Refresh(ctx, networkRefresh)
+	if err != nil {
+		t.Fatalf("refresh of the network session = %v", err)
+	}
+	if user, err := NewUserRepository(env.pool).GetByID(ctx, env.user.ID); err != nil || user.Role != models.RoleUser {
+		t.Fatalf("after a network re-check = %+v, %v; want the user role", user, err)
+	}
+
+	// A refusal ends the network session only.
+	primarySession, _ := env.session(t, true)
+	key, err := NewAPIKeyRepository(env.pool).Create(ctx, env.user.ID, "both-providers", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.checker.respond = answer(pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_NOT_FOUND, "")
+	ageNetworkIdentity()
+	if _, err := env.svc.Refresh(ctx, pair.RefreshToken); !errors.Is(err, ErrSessionRevoked) {
+		t.Fatalf("refresh after the refusal = %v, want ErrSessionRevoked", err)
+	}
+	if env.sessionRow(t, networkSession).RevokedAt == nil {
+		t.Fatal("the network session survived the refusal")
+	}
+	if env.sessionRow(t, primarySession).RevokedAt != nil {
+		t.Fatal("the network refusal revoked the primary provider's session")
+	}
+	if _, err := NewAPIKeyRepository(env.pool).GetByKey(ctx, key.Key); err != nil {
+		t.Fatalf("the network refusal deleted the account's API key: %v", err)
+	}
+}

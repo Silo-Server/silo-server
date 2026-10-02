@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/netip"
 	"sync"
 	"time"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/plugins"
 )
 
 // Network identity sign-in (docs/architecture/external-sign-in.md#network-identity):
@@ -168,6 +170,28 @@ func (s *Service) LinkNetworkIdentity(ctx context.Context, in NetworkLinkInput) 
 		return nil, err
 	}
 	return identityByID(ctx, provider.resolver.pool, identityID)
+}
+
+// networkDefersToPrimary reports whether installationID is a network
+// provider and the account also has an identity at an enabled primary
+// (non-network) sign-in provider. That provider is then the account's
+// authority: the network identity neither sets the account's role nor, when
+// its provider refuses it, ends more than the sessions opened through it.
+// Otherwise the two would each apply their own role and sign the account out
+// at every change.
+func networkDefersToPrimary(ctx context.Context, db rowQuerier, userID, installationID int) (bool, error) {
+	isNetwork := plugins.AuthBindingIsNetworkSQL("b.plugin_installation_id", "b.capability_id")
+	var defers bool
+	err := db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM plugin_auth_bindings b WHERE b.plugin_installation_id = $2 AND `+isNetwork+`)
+		AND EXISTS (SELECT 1 FROM plugin_auth_identities i
+			JOIN plugin_installations p ON p.id = i.plugin_installation_id AND p.enabled
+			JOIN plugin_auth_bindings b ON b.plugin_installation_id = p.id AND b.enabled
+			WHERE i.user_id = $1 AND i.plugin_installation_id <> $2 AND NOT `+isNetwork+`)`,
+		userID, installationID).Scan(&defers)
+	if err != nil {
+		return false, fmt.Errorf("checking for a primary sign-in identity: %w", err)
+	}
+	return defers, nil
 }
 
 // networkPreviewTTL bounds how long discovery reuses a plugin's answer about

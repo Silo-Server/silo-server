@@ -624,17 +624,25 @@ func absoluteSessionAge(ctx context.Context, db dbQuerier) (time.Duration, error
 
 // applyAnswer acts on the provider's answer: role sync for an active
 // account, revocation of every login session and API key of a refused one
-// (only the sessions opened through the identity for a break-glass
-// account), and of the API keys and Audiobookshelf sessions of an account
-// whose provider cannot
-// re-check it and has not vouched for it within the absolute age
-// (staleAuth).
+// (only the sessions opened through the identity for a break-glass account,
+// or for a network identity that defers to the account's primary provider),
+// and of the API keys and Audiobookshelf sessions of an account whose
+// provider cannot re-check it and has not vouched for it within the absolute
+// age (staleAuth).
 func (r *ProviderRecheck) applyAnswer(ctx context.Context, tx pgx.Tx, identity *LinkedIdentity, checkStatus string, account *pluginv1.AuthenticateResponse, staleAuth bool, out *recheckOutcome) error {
 	switch {
 	case checkStatus == CheckStatusActive:
 		user, err := lockUser(ctx, tx, identity.UserID)
 		if err != nil {
 			return err
+		}
+		defers, err := networkDefersToPrimary(ctx, tx, identity.UserID, identity.InstallationID)
+		if err != nil {
+			return err
+		}
+		if defers {
+			// The primary provider sets this account's role.
+			return nil
 		}
 		synced, event, err := syncManagedRole(ctx, tx, user, account.GetManagedRole())
 		if err != nil {
@@ -650,11 +658,16 @@ func (r *ProviderRecheck) applyAnswer(ctx context.Context, tx pgx.Tx, identity *
 		if err != nil {
 			return err
 		}
-		if user.BreakGlass {
+		defers, err := networkDefersToPrimary(ctx, tx, identity.UserID, identity.InstallationID)
+		if err != nil {
+			return err
+		}
+		if user.BreakGlass || defers {
 			// A break-glass account keeps its local sessions and API keys
 			// independent of the provider (linkIdentityTx does not attach
-			// them): the refusal ends only the sessions opened through the
-			// identity.
+			// them), and an account whose primary provider still vouches for
+			// it keeps what that provider opened: the refusal ends only the
+			// sessions opened through the identity.
 			if _, err := tx.Exec(ctx, `UPDATE auth_sessions SET revoked_at = NOW()
 				WHERE identity_id = $1 AND user_id = $2 AND revoked_at IS NULL`, identity.ID, identity.UserID); err != nil {
 				return fmt.Errorf("revoking provider sessions: %w", err)
@@ -666,7 +679,8 @@ func (r *ProviderRecheck) applyAnswer(ctx context.Context, tx pgx.Tx, identity *
 			}
 			out.revoked = true
 			out.audit = append(out.audit, auditEvent{"recheck_revoked", []any{
-				auditInstallationID, identity.InstallationID, auditUserID, identity.UserID, auditCheckStatus, checkStatus, "break_glass", true}})
+				auditInstallationID, identity.InstallationID, auditUserID, identity.UserID, auditCheckStatus, checkStatus,
+				"break_glass", user.BreakGlass, "primary_identity", defers}})
 			return nil
 		}
 		if err := RevokeSignInsInTransaction(ctx, tx, identity.UserID); err != nil {
