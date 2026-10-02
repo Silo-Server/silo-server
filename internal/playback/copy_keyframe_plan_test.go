@@ -335,9 +335,19 @@ func TestCopySegmentPlanKeyframes(t *testing.T) {
 	if got := p.restartSeekSeconds(0); got != 0 {
 		t.Fatalf("restartSeekSeconds(0) = %v, want 0", got)
 	}
-	// Downloaded through segment 4, keep 4 seconds: segments 3 and 4.
+	// Downloaded through segment 4, keep 4 seconds behind it: segments 2 and
+	// 3, as well as 4 itself.
 	if got := p.retentionFloor(4, 4); got != 2 {
 		t.Fatalf("retentionFloor(4, 4) = %d, want 2", got)
+	}
+	// The downloaded segment doesn't count toward the window, however long.
+	uneven := &copySegmentPlan{durations: []float64{2, 2, 2, 2, 8}}
+	if got := uneven.retentionFloor(4, 4); got != 2 {
+		t.Fatalf("uneven retentionFloor(4, 4) = %d, want 2", got)
+	}
+	// Too little behind it keeps everything.
+	if got := uneven.retentionFloor(1, 4); got != 0 {
+		t.Fatalf("retentionFloor(1, 4) = %d, want 0", got)
 	}
 }
 

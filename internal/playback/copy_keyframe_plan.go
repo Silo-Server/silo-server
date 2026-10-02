@@ -261,14 +261,20 @@ func (s *TranscodeSession) plannedSegmentRecoveryDecision(segNum int, decision S
 }
 
 // retentionFloor is the first segment the pruner keeps when the player has
-// downloaded through downloadedThrough: enough planned media behind it to
-// cover retentionSeconds.
+// downloaded through downloadedThrough: enough planned media behind that
+// segment, not counting it, to cover retentionSeconds. It counts as
+// copyManifestDurationIndex.retentionFloor does for FFmpeg's playlist.
 func (p *copySegmentPlan) retentionFloor(downloadedThrough, retentionSeconds int) int {
-	n := min(downloadedThrough, len(p.durations)-1)
-	for covered := 0.0; n >= 0 && covered < float64(retentionSeconds); n-- {
-		covered += p.durations[n]
+	floor := min(downloadedThrough, len(p.durations)-1)
+	covered := 0.0
+	for floor > 0 {
+		floor--
+		covered += p.durations[floor]
+		if covered >= float64(retentionSeconds) {
+			break
+		}
 	}
-	return n
+	return max(floor, 0)
 }
 
 // plannedSegmentProgress reports a planned session's progress from its
