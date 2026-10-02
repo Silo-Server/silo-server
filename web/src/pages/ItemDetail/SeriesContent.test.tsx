@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => {
       },
     },
     useAuth: vi.fn(),
+    useIsActingAdmin: vi.fn(),
+    useLibraryCapabilities: vi.fn(),
     useIsFavorite: vi.fn(),
     useToggleFavorite: vi.fn(),
     useIsInWatchlist: vi.fn(),
@@ -47,6 +49,10 @@ vi.mock("@/hooks/useAuth", () => ({
   useOptionalAuth: mocks.useAuth,
 }));
 
+vi.mock("@/hooks/useIsActingAdmin", () => ({
+  useIsActingAdmin: mocks.useIsActingAdmin,
+}));
+
 vi.mock("@/hooks/queries/favorites", () => ({
   useIsFavorite: mocks.useIsFavorite,
   useToggleFavorite: mocks.useToggleFavorite,
@@ -60,6 +66,10 @@ vi.mock("@/hooks/queries/watchlist", () => ({
 vi.mock("@/hooks/queries/items", () => ({
   useRefreshItemMetadata: mocks.useRefreshItemMetadata,
   useWatchedStateMutation: mocks.useWatchedStateMutation,
+}));
+
+vi.mock("@/hooks/queries/admin/libraries", () => ({
+  useLibraryCapabilities: mocks.useLibraryCapabilities,
 }));
 
 vi.mock("@/hooks/queries/episodes", () => ({
@@ -146,6 +156,7 @@ function makeSeriesItem(
     rating_tmdb: null,
     rating_rt_critic: null,
     rating_rt_audience: null,
+    ratings: [],
     imdb_id: "",
     tmdb_id: "",
     tvdb_id: "",
@@ -183,6 +194,9 @@ describe("SeriesContent", () => {
     mocks.setRatingMutate.mockReset();
     mocks.deleteRatingMutate.mockReset();
     mocks.useAuth.mockReturnValue({ user: null });
+    mocks.useIsActingAdmin.mockReturnValue(false);
+    mocks.useLibraryCapabilities.mockReset();
+    mocks.useLibraryCapabilities.mockReturnValue({ data: undefined });
     mocks.useIsFavorite.mockReturnValue({ data: false });
     mocks.useToggleFavorite.mockReturnValue({ mutate: vi.fn() });
     mocks.useIsInWatchlist.mockReturnValue({ data: false });
@@ -214,6 +228,25 @@ describe("SeriesContent", () => {
     },
   );
 
+  it.each([
+    ["season rail", [makeSeason(), makeSeason({ content_id: "season-2", season_number: 2 })], true],
+    ["single-season episode grid", [makeSeason()], false],
+  ])("marks only the season rail as content-sized navigation (%s)", (_, seasons, isRail) => {
+    mocks.useSeasons.mockReturnValue({ data: { seasons } });
+    const markup = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter>
+          <SeriesContent item={makeSeriesItem()} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(markup).toContain(
+      isRail
+        ? 'class="page-shell series-detail-navigation series-detail-rail"'
+        : 'class="page-shell series-detail-navigation"',
+    );
+  });
+
   it("passes rating state and change handler to ActionBar", () => {
     renderToStaticMarkup(
       <QueryClientProvider client={new QueryClient()}>
@@ -227,6 +260,26 @@ describe("SeriesContent", () => {
       rating: 4,
     });
     expect(mocks.capturedActionBarProps.value?.onRatingChange).toBeTypeOf("function");
+  });
+
+  it.each([
+    [{ trickplay: true, trickplay_supported: true }, true],
+    [{ trickplay: true, trickplay_supported: false }, false],
+    [{ trickplay: true }, false],
+    [{ trickplay: false }, false],
+    [undefined, false],
+  ])("offers series seek-preview administration with capability %o: %s", (data, offered) => {
+    mocks.useIsActingAdmin.mockReturnValue(true);
+    mocks.useLibraryCapabilities.mockReturnValue({ data });
+    renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter>
+          <SeriesContent item={makeSeriesItem()} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(mocks.capturedActionBarProps.value?.canManageTrickplay).toBe(offered);
+    expect(mocks.useLibraryCapabilities).toHaveBeenLastCalledWith(true);
   });
 
   it("sets and clears ratings through the existing mutations", () => {

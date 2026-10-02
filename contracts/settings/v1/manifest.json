@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 15,
+  "revision": 16,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -1085,7 +1085,7 @@
       "resolution_order": ["profile", "default"],
       "value_schema": { "type": "boolean", "nullable": true },
       "default_value": null,
-      "platforms": ["web"],
+      "platforms": ["web", "ios", "tvos", "macos", "android", "android_tv"],
       "category": "appearance",
       "label": "Card overlays enabled",
       "description": "Show overlay badges on media cards.",
@@ -1451,6 +1451,21 @@
       "description": "When you add a title that is not in the library to your watchlist, also request it.",
       "recommended_control": "switch",
       "notes": "Profile scope because each household member decides whether their own watchlist adds become requests. It applies only while the server-wide watchlist_requests request setting is on and the profile may request at all; a client shows it only then (GET /api/v2/requests/status reports the effective value as watchlist_requests). Request limits, approval and routing apply exactly as for the Request button. Turning it off never cancels an existing request."
+    },
+    {
+      "key": "ui.title_art",
+      "introduced_in": 16,
+      "persistence": "remote",
+      "allowed_scopes": ["profile", "profile_device"],
+      "resolution_order": ["profile", "profile_device", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": true,
+      "platforms": ["web", "ios", "tvos", "macos", "android", "android_tv"],
+      "category": "appearance",
+      "label": "Show title art",
+      "description": "Use a title's logo artwork as its name on detail pages when one is available. When off, the name is always shown as text.",
+      "recommended_control": "switch",
+      "notes": "The profile scope deliberately resolves before profile_device: a profile value is the profile's \"apply to all devices\" choice and wins on every device, while with no profile value each device follows its own profile_device value. Clients show a second \"Apply to all devices\" switch whose state is the effective source being profile. Turning it on writes the current value at profile scope; while on, the main switch writes profile scope. Turning it off writes the current value at profile_device for the device doing it and then clears the profile value, so that device keeps its look and every other device returns to its own value or the default. Device values written earlier are kept while the profile value is set and apply again once it is cleared. Covers every surface that names a title with its logo (detail heroes, TV marquees); a client that turns it off also has no reason to prefetch logos."
     }
   ]
 }

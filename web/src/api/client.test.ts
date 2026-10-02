@@ -3,6 +3,7 @@ import {
   bootstrapAccessToken,
   getAccessToken,
   getAuthContextVersion,
+  onRoleChanged,
   onSessionRejected,
   refreshAuthentication,
   setAccessToken,
@@ -262,6 +263,65 @@ describe("session rejection", () => {
     finishRefresh(refreshProblem(401, "session_expired"));
     await expect(refresh).resolves.toBe(false);
     expect(rejected).not.toHaveBeenCalled();
+  });
+
+  describe("after a role change", () => {
+    const roleChanged = vi.fn();
+
+    beforeEach(() => {
+      roleChanged.mockReset();
+      onRoleChanged(roleChanged);
+    });
+
+    afterEach(() => onRoleChanged(null));
+
+    // Requests carrying `stale` are refused with token_refresh_required; the
+    // refresh answers with `refresh`.
+    function staleTokenServer(refresh: () => Response) {
+      const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+        if (String(input) === "/api/v2/auth/refresh") return refresh();
+        const authorization = new Headers(init?.headers).get("Authorization");
+        return authorization === "Bearer stale"
+          ? refreshProblem(401, "token_refresh_required")
+          : Response.json({ items: [] });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      return fetchMock;
+    }
+
+    it("refreshes, retries once and keeps the session", async () => {
+      setAccessToken("stale");
+      setRefreshToken("stored");
+      const fetchMock = staleTokenServer(() => refreshedTokens("fresh", "rotated"));
+      await expect(v2("GET /api/v2/profiles")).resolves.toBeDefined();
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(getAccessToken()).toBe("fresh");
+      expect(localStorage.getItem(storage.KEYS.REFRESH_TOKEN)).toBe("rotated");
+      expect(rejected).not.toHaveBeenCalled();
+      expect(roleChanged).toHaveBeenCalledTimes(1);
+    });
+
+    it("reports the change once for concurrent requests", async () => {
+      setAccessToken("stale");
+      setRefreshToken("stored");
+      const fetchMock = staleTokenServer(() => refreshedTokens("fresh", "rotated"));
+      await Promise.all([v2("GET /api/v2/profiles"), v2("GET /api/v2/profiles")]);
+      const refreshes = fetchMock.mock.calls.filter(
+        ([input]) => String(input) === "/api/v2/auth/refresh",
+      );
+      expect(refreshes).toHaveLength(1);
+      expect(roleChanged).toHaveBeenCalledTimes(1);
+      expect(rejected).not.toHaveBeenCalled();
+    });
+
+    it("signs out only when the refresh itself is refused with session_expired", async () => {
+      setAccessToken("stale");
+      setRefreshToken("stored");
+      staleTokenServer(() => refreshProblem(401, "session_expired"));
+      await v2("GET /api/v2/profiles").catch(() => undefined);
+      expect(rejected).toHaveBeenCalledTimes(1);
+      expect(roleChanged).not.toHaveBeenCalled();
+    });
   });
 
   it("ignores a refusal after another tab stored a new session", async () => {

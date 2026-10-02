@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildHWDeviceRows,
-  chapterThumbnailExecutionOptions,
+  imageExecutionOptions,
   describeDetection,
   hasHardwareToneMapCapability,
   hasUsableTranscodeNode,
@@ -178,9 +178,9 @@ describe("hasUsableTranscodeNode", () => {
   });
 });
 
-describe("chapterThumbnailExecutionOptions", () => {
+describe("imageExecutionOptions", () => {
   const disabledValues = (current: string, available: boolean) =>
-    chapterThumbnailExecutionOptions(current, available)
+    imageExecutionOptions(current, available)
       .filter((option) => option.disabled)
       .map((option) => option.value);
 

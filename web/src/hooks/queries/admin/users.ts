@@ -68,12 +68,13 @@ export interface AdminSettingIdentity {
   seriesId?: string;
 }
 
-/** One non-device setting row, string-valued for the admin controls. */
+/** One stored setting row at any scope, string-valued for the admin controls. */
 export interface AdminUserSettingEntry {
   key: string;
   scope: AdminSettingScope;
   profile_id?: string;
   client_family?: AdminSettingClientFamily;
+  device_id?: string;
   library_id?: number;
   series_id?: string;
   value: string;
@@ -250,26 +251,43 @@ export function useDeleteUser() {
 }
 
 /**
- * The target user's non-device settings: everything the settings tab shows.
- * Device overrides live in useAdminUserDeviceSettings, matching the old
- * two-endpoint split the UI is built around.
+ * How many settings the account stores, split into account/profile scopes and
+ * per-device overrides. Reads only this account's values, unlike
+ * useAdminUserDeviceSettings, which also loads every device to name them.
+ */
+export function useAdminUserSettingCounts(userId: number) {
+  const values = useAdminUserSettingValues(userId);
+  return useMemo(() => {
+    const rows = values.data ?? [];
+    const device = rows.filter((row) => row.scope === "profile_device").length;
+    return {
+      account: rows.length - device,
+      device,
+      isLoading: values.isLoading,
+      isError: values.isError,
+    };
+  }, [values.data, values.isLoading, values.isError]);
+}
+
+/**
+ * Every setting the target user stores, at every scope (device rows included),
+ * from this account's own values alone: no device or fleet reads.
  */
 export function useAdminUserSettings(userId: number) {
   const values = useAdminUserSettingValues(userId);
   const data = useMemo<AdminUserSettingEntry[]>(
     () =>
-      (values.data ?? [])
-        .filter((row) => row.scope !== "profile_device")
-        .map((row) => ({
-          key: row.key,
-          scope: row.scope,
-          profile_id: row.profile_id,
-          client_family: row.client_family,
-          library_id: row.library_id,
-          series_id: row.series_id,
-          value: settingValueToString(row.value),
-          updated_at: row.updated_at,
-        })),
+      (values.data ?? []).map((row) => ({
+        key: row.key,
+        scope: row.scope,
+        profile_id: row.profile_id,
+        client_family: row.client_family,
+        device_id: row.device_id,
+        library_id: row.library_id,
+        series_id: row.series_id,
+        value: settingValueToString(row.value),
+        updated_at: row.updated_at,
+      })),
     [values.data],
   );
   return { data, isLoading: values.isLoading, isError: values.isError };

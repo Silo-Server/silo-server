@@ -39,6 +39,7 @@ function makeEpisodeItem(overrides: Partial<ItemDetail> = {}): ItemDetail {
     rating_tmdb: overrides.rating_tmdb ?? null,
     rating_rt_critic: overrides.rating_rt_critic ?? null,
     rating_rt_audience: overrides.rating_rt_audience ?? null,
+    ratings: [],
     imdb_id: overrides.imdb_id ?? "",
     tmdb_id: overrides.tmdb_id ?? "",
     tvdb_id: overrides.tvdb_id ?? "",

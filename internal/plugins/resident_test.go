@@ -90,7 +90,7 @@ func newResidentFixture(t *testing.T, opts ResidentOptions) *residentFixture {
 	service.resident = newResidentSupervisor(service, opts)
 	// Same hook order as NewService and NewNodeService: the row cache is
 	// dropped before the supervisor reads the rows.
-	service.AddLifecycleHook(func(context.Context) { service.invalidateInstallationCache() })
+	service.AddLifecycleHook(func(context.Context) { service.InvalidateInstallationCache() })
 	service.AddLifecycleHook(func(ctx context.Context) { service.resident.Reconcile(ctx) })
 	host.SetExitHandler(service.HandleResidentExit)
 	t.Cleanup(func() {
@@ -346,7 +346,7 @@ func TestResidentRestartOfNonResidentOnlyStops(t *testing.T) {
 	}
 	disabled := false
 	_ = store.Update(context.Background(), 2, UpdateInstallationInput{Enabled: &disabled})
-	service.invalidateInstallationCache()
+	service.InvalidateInstallationCache()
 	if err := service.RestartInstallation(context.Background(), 2); !errors.Is(err, ErrInstallationDisabled) {
 		t.Fatalf("RestartInstallation(disabled) = %v, want ErrInstallationDisabled", err)
 	}

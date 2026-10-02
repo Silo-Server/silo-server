@@ -52,7 +52,8 @@
           "start_seconds": 0,
           "end_seconds": 90
         }
-      ]
+      ],
+      "trickplay_available": false
     }
   ],
   "playback_variants": [

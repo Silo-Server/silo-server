@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -455,6 +457,46 @@ func TestSyncRatingsWatchGateHoldsUnwatchedMovies(t *testing.T) {
 
 	if len(h.provider.exported) != 1 || h.provider.exported[0].MediaItemID != ratingTestMovieB {
 		t.Fatalf("exported = %#v, want only the watched movie", h.provider.exported)
+	}
+	if h.state(ratingTestMovieA) != nil || len(result.Warnings) == 0 {
+		t.Fatalf("a held rating stays pending with a warning: state=%#v warnings=%v", h.state(ratingTestMovieA), result.Warnings)
+	}
+}
+
+// A plugin declares the gate with rating_export_requires_watched, here for
+// movies only, so its series ratings are sent right away.
+func TestSyncRatingsWatchGateHoldsUnwatchedMoviesForAPlugin(t *testing.T) {
+	h := newRatingHarness(t)
+	client := &fakeWatchSyncPluginClient{
+		applyStatus:  pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_APPLIED,
+		listResponse: &pluginv1.WatchSyncListRemoteStateResponse{CompleteSnapshot: true},
+	}
+	descriptor := ratingTestDescriptor(
+		pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE,
+		pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_SERIES,
+	)
+	descriptor.RatingExportRequiresWatched = []pluginv1.WatchSyncMediaType{pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE}
+	provider := testPluginProviderWithDescriptor(t, client, descriptor)
+	h.store.set(ratingTestMovieA, 4)
+	h.store.set(ratingTestMovieB, 5)
+	h.store.set(ratingTestSeries, 3)
+	h.watched[ratingTestMovieB] = true
+
+	result, err := h.service.syncRatings(context.Background(), h.conn, ServerConfig{}, provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var sent []string
+	for _, event := range client.applyRequest.GetEvents() {
+		if event.GetOperation() != pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_SET_RATING {
+			t.Fatalf("event = %#v, want only rating sets", event)
+		}
+		sent = append(sent, event.GetMedia().GetMediaItemId())
+	}
+	slices.Sort(sent)
+	if want := []string{ratingTestMovieB, ratingTestSeries}; !slices.Equal(sent, want) {
+		t.Fatalf("sent = %v, want %v", sent, want)
 	}
 	if h.state(ratingTestMovieA) != nil || len(result.Warnings) == 0 {
 		t.Fatalf("a held rating stays pending with a warning: state=%#v warnings=%v", h.state(ratingTestMovieA), result.Warnings)

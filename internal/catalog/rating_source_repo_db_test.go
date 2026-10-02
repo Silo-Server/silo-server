@@ -34,7 +34,7 @@ func TestRatingSourceRepositoryUpsertPostgres(t *testing.T) {
 
 	// A scheduled refresh stores what it found.
 	if err := repo.Upsert(ctx, movie, []models.ItemRatingSource{
-		row(models.RatingSourceMDBList, 86, nil, "mdblist"),
+		row("mdblist", 86, nil, "mdblist"),
 		row(models.RatingSourceIMDB, 81, votes(1000), "mdblist"),
 	}, false); err != nil {
 		t.Fatalf("Upsert(fill) error = %v", err)
@@ -43,7 +43,7 @@ func TestRatingSourceRepositoryUpsertPostgres(t *testing.T) {
 	// A later fill-empty write keeps stored sources and adds new ones.
 	if err := repo.Upsert(ctx, movie, []models.ItemRatingSource{
 		row(models.RatingSourceIMDB, 50, votes(5), "other"),
-		row(models.RatingSourceLetterboxd, 80, votes(20), "other"),
+		row("letterboxd", 80, votes(20), "other"),
 	}, false); err != nil {
 		t.Fatalf("Upsert(fill again) error = %v", err)
 	}
@@ -53,8 +53,8 @@ func TestRatingSourceRepositoryUpsertPostgres(t *testing.T) {
 	}
 	want := []models.ItemRatingSource{
 		row(models.RatingSourceIMDB, 81, votes(1000), "mdblist"),
-		row(models.RatingSourceLetterboxd, 80, votes(20), "other"),
-		row(models.RatingSourceMDBList, 86, nil, "mdblist"),
+		row("letterboxd", 80, votes(20), "other"),
+		row("mdblist", 86, nil, "mdblist"),
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("after fill-empty = %+v, want %+v", got, want)
@@ -132,7 +132,7 @@ func TestRatingSourceRepositoryReplacePostgres(t *testing.T) {
 	for _, id := range []string{movie, other} {
 		if err := repo.Upsert(ctx, id, []models.ItemRatingSource{
 			row(id, models.RatingSourceIMDB, 81, votes(1000)),
-			row(id, models.RatingSourceMyAnimeList, 88, votes(50)),
+			row(id, "myanimelist", 88, votes(50)),
 		}, false); err != nil {
 			t.Fatalf("Upsert(%s) error = %v", id, err)
 		}
@@ -141,7 +141,7 @@ func TestRatingSourceRepositoryReplacePostgres(t *testing.T) {
 	// The new set overwrites the sources it reports and removes the rest.
 	if err := repo.Replace(ctx, movie, []models.ItemRatingSource{
 		row(movie, models.RatingSourceIMDB, 64, votes(20)),
-		row(movie, models.RatingSourceLetterboxd, 70, nil),
+		row(movie, "letterboxd", 70, nil),
 	}); err != nil {
 		t.Fatalf("Replace() error = %v", err)
 	}
@@ -151,7 +151,7 @@ func TestRatingSourceRepositoryReplacePostgres(t *testing.T) {
 	}
 	want := []models.ItemRatingSource{
 		row(movie, models.RatingSourceIMDB, 64, votes(20)),
-		row(movie, models.RatingSourceLetterboxd, 70, nil),
+		row(movie, "letterboxd", 70, nil),
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("after Replace = %+v, want %+v", got, want)

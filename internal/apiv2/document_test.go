@@ -217,22 +217,26 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 		"refreshAdminEpisodeMarkers": true,
 		"redetectAdminEpisodeIntro":  true,
 		"redetectAdminItemMarkers":   true,
-		"getAdminMarkerCapabilities": true,
-		"createDownloads":            true,
-		"createDownloadSubscription": true,
-		"updateDownloadSubscription": true,
-		"deleteDownloadSubscription": true,
-		"syncDownloadSubscription":   true,
-		"listDownloadSubscriptions":  true,
-		"getDownloadSubscription":    true,
-		"getDownloadManifest":        true,
-		"listDownloadBatchManifests": true,
-		"downloadFile":               true,
-		"headDownloadFile":           true,
-		"downloadFileViaProxy":       true,
-		"headDownloadFileViaProxy":   true,
-		"getDownloadArtwork":         true,
-		"getDownloadSubtitle":        true,
+
+		"getAdminItemTrickplay":        true,
+		"regenerateAdminItemTrickplay": true,
+		"listAdminTrickplayLibraries":  true,
+		"getAdminMarkerCapabilities":   true,
+		"createDownloads":              true,
+		"createDownloadSubscription":   true,
+		"updateDownloadSubscription":   true,
+		"deleteDownloadSubscription":   true,
+		"syncDownloadSubscription":     true,
+		"listDownloadSubscriptions":    true,
+		"getDownloadSubscription":      true,
+		"getDownloadManifest":          true,
+		"listDownloadBatchManifests":   true,
+		"downloadFile":                 true,
+		"headDownloadFile":             true,
+		"downloadFileViaProxy":         true,
+		"headDownloadFileViaProxy":     true,
+		"getDownloadArtwork":           true,
+		"getDownloadSubtitle":          true,
 
 		"listDownloads":                  true,
 		"reportDownloadStatus":           true,
@@ -267,7 +271,7 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 		"getSubtitlePreference": true, "updateSubtitlePreference": true, "deleteSubtitlePreference": true,
 		"listHistory": true, "removeHistoryEntries": true,
 		"syncProgress":  true,
-		"getWatchState": true, "markWatched": true, "unmarkWatched": true,
+		"getWatchState": true, "getWatchTrickplay": true, "markWatched": true, "unmarkWatched": true,
 		"cancelLibraryJob": true,
 		opListDevices:      true, opForgetDevice: true, opClearDeviceSettings: true,
 	}
@@ -351,10 +355,10 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 	profileToken["getAdminStorageTransitionCapabilities"] = true
 	profileToken["getAdminStorageTransitionSourceHealth"] = true
 	profileToken["cancelAdminJob"] = true
-	for _, id := range []string{"listAdminPluginCatalog", "listAdminPluginInstallations", "createAdminPluginInstallation", "updateAdminPluginInstallation", "applyAdminPluginUpdate", "restartAdminPluginInstallation", "deleteAdminPluginInstallation", "uploadAdminPluginInstallation", "createAdminPluginUpload", "putAdminPluginUploadChunk", "completeAdminPluginUpload", "cancelAdminPluginUpload", "updateAdminPluginInstallationConfig", "testAdminPluginInstallationConfig", "updateAdminPluginAuthBinding", "updateAdminPluginTaskBinding", "forceReloadAdminNodes", "forceReloadAdminNode", "checkAdminNode", "reprobeAdminNode", "triggerAdminAutoscan", "createAdminAutoscanSourceWebhook", "rotateAdminAutoscanSourceWebhook", "deleteAdminAutoscanSourceWebhook", "createAdminAutoscanSource", "updateAdminAutoscanSource", "saveAdminDashboardLayout", "deleteAdminAutoscanSource", "resetAdminDashboardLayout", "updateAdminAutoscanSettings", "listAdminAutoscanEvents", "listAdminAutoscanScans", "deleteAdminPluginRepository", "updateAdminPluginRepository", "deleteAdminAutoscanConnection", "updateAdminAutoscanConnection", "createAdminAutoscanConnection", "testAdminAutoscanConnection", "createAdminPluginRepository", "getAdminStreamTelemetryParity", "listAdminPluginRepositories", "getAdminHardwareAcceleration", "getAdminDashboardLayout", "getAdminAutoscanRewriteSuggestions", "listAdminAutoscanAvailableSources", "listAdminAuditLogs", "listAdminOperationalLogs", "getAdminDashboardCapabilities", "updateAdminJellyfinCompatSettings", "getAdminJellyfinCompatStatus", "getAdminSetting", "getAdminSectionSettings", "getAdminPlaybackRoutingCapabilities", "updateAdminRateLimitConfig", "getAdminRateLimitConfig", "getAdminRateLimitStatus", "sendAdminTestEmail", "getAdminServerStatus", "listAdminNodes", "getAdminDashboardTimeseries", "getAdminDashboardPlaybackActivity", "getAdminDashboardTopActivity", "getAdminDashboardDownloadsStats", "deleteAdminDiagnosticReport", "listAdminDiagnosticReports", "getAdminDiagnosticReport", "downloadAdminDiagnosticReport", "getAdminBuildInfo", "getAdminSystemResources", "getAdminResourceCapabilities", "getAdminStoredSettings", "updateAdminSettings", "updateAdminSetting", "getAdminEffectiveSettings", "getAdminRestartKeys", "getAdminSensitiveSettingsStatus", "checkAdminSettingsConnection", "getAdminPluginCatalogSettings", "getAdminPluginCatalogStatus", "updateAdminPluginCatalogSettings", "createAdminNode", "updateAdminNode", "deleteAdminNode", "uploadAdminBrandingAsset", "deleteAdminBrandingAsset", "installAdminJellyfinCompatWeb", "removeAdminJellyfinCompatWeb", "requestAdminServerRestart", "getAdminNetworkAccessStatus", "connectNetworkAccess", "disconnectNetworkAccess"} {
+	for _, id := range []string{"listAdminPluginCatalog", "listAdminPluginInstallations", "createAdminPluginInstallation", "updateAdminPluginInstallation", "applyAdminPluginUpdate", "restartAdminPluginInstallation", "deleteAdminPluginInstallation", "uploadAdminPluginInstallation", "createAdminPluginUpload", "putAdminPluginUploadChunk", "completeAdminPluginUpload", "cancelAdminPluginUpload", "updateAdminPluginInstallationConfig", "testAdminPluginInstallationConfig", "updateAdminPluginAuthBinding", "testAdminPluginAuthBinding", "updateAdminPluginTaskBinding", "forceReloadAdminNodes", "forceReloadAdminNode", "checkAdminNode", "reprobeAdminNode", "triggerAdminAutoscan", "createAdminAutoscanSourceWebhook", "rotateAdminAutoscanSourceWebhook", "deleteAdminAutoscanSourceWebhook", "createAdminAutoscanSource", "updateAdminAutoscanSource", "saveAdminDashboardLayout", "deleteAdminAutoscanSource", "resetAdminDashboardLayout", "updateAdminAutoscanSettings", "listAdminAutoscanEvents", "listAdminAutoscanScans", "deleteAdminPluginRepository", "updateAdminPluginRepository", "deleteAdminAutoscanConnection", "updateAdminAutoscanConnection", "createAdminAutoscanConnection", "testAdminAutoscanConnection", "createAdminPluginRepository", "getAdminStreamTelemetryParity", "listAdminPluginRepositories", "getAdminHardwareAcceleration", "getAdminDashboardLayout", "getAdminAutoscanRewriteSuggestions", "listAdminAutoscanAvailableSources", "listAdminAuditLogs", "listAdminOperationalLogs", "getAdminDashboardCapabilities", "updateAdminJellyfinCompatSettings", "getAdminJellyfinCompatStatus", "getAdminSetting", "getAdminSectionSettings", "getAdminPlaybackRoutingCapabilities", "updateAdminRateLimitConfig", "getAdminRateLimitConfig", "getAdminRateLimitStatus", "sendAdminTestEmail", "getAdminServerStatus", "listAdminNodes", "getAdminDashboardTimeseries", "getAdminDashboardPlaybackActivity", "getAdminDashboardTopActivity", "getAdminDashboardDownloadsStats", "deleteAdminDiagnosticReport", "listAdminDiagnosticReports", "getAdminDiagnosticReport", "downloadAdminDiagnosticReport", "getAdminBuildInfo", "getAdminSystemResources", "getAdminResourceCapabilities", "getAdminStoredSettings", "updateAdminSettings", "updateAdminSetting", "getAdminEffectiveSettings", "getAdminRestartKeys", "getAdminSensitiveSettingsStatus", "checkAdminSettingsConnection", "getAdminPluginCatalogSettings", "getAdminPluginCatalogStatus", "updateAdminPluginCatalogSettings", "createAdminNode", "updateAdminNode", "deleteAdminNode", "uploadAdminBrandingAsset", "deleteAdminBrandingAsset", "installAdminJellyfinCompatWeb", "removeAdminJellyfinCompatWeb", "requestAdminServerRestart", "getAdminNetworkAccessStatus", "connectNetworkAccess", "disconnectNetworkAccess"} {
 		profileToken[id] = true
 	}
-	for _, id := range []string{"listAdminItemImages", "applyAdminItemImage", "listAdminUnmatchedFiles", "searchAdminItemMatches", "applyAdminItemMatch", "listAdminItemFiles", "splitAdminItem", "mergeAdminItem", "refreshAdminItemMetadata", "updateAdminItemMetadata", "translateAdminItemMetadata", "listAdminMetadataTranslationJobs", "cancelAdminMetadataTranslation", "refreshAdminPerson", "updateAdminPerson", "getAdminRecommendationsStatus", "triggerAdminRecommendationEmbeddings", "triggerAdminRecommendationTasteProfiles", "triggerAdminRecommendationCowatch", "triggerAdminRecommendationRefresh", "listAdminLiteraryCandidates", "linkAdminLiteraryItems", "confirmAdminLiteraryMatch", "ignoreAdminLiteraryMatch", "unlinkAdminLiteraryItem", opExportAdminCatalog, "createCatalogExportJob", "createCatalogImportJob", "importAdminCatalog", "publishCatalogExportJob", "getAdminCatalogSearchStatus", "listCatalogImportSources", "listLocalCatalogImportSources", "browseAdminFilesystem", "listAdminTasks", "getAdminTask", "runAdminTask", "cancelAdminTask", "getAdminTaskSchedule", "updateAdminTaskSchedule", "listAdminTaskHistory", "getAdminTaskMetrics", "listAdminJobs", "getAdminJobCapabilities"} {
+	for _, id := range []string{"listAdminItemImages", "applyAdminItemImage", "listAdminUnmatchedFiles", "searchAdminItemMatches", "applyAdminItemMatch", "listAdminItemFiles", "splitAdminItem", "mergeAdminItem", "refreshAdminItemMetadata", "updateAdminItemMetadata", "translateAdminItemMetadata", "listAdminMetadataTranslationJobs", "cancelAdminMetadataTranslation", "refreshAdminPerson", "updateAdminPerson", "getAdminRecommendationsStatus", "triggerAdminRecommendationEmbeddings", "triggerAdminRecommendationTasteProfiles", "triggerAdminRecommendationCowatch", "triggerAdminRecommendationRefresh", "listAdminRatingSources", "getAdminRatingSourceCapabilities", "listAdminLiteraryCandidates", "linkAdminLiteraryItems", "confirmAdminLiteraryMatch", "ignoreAdminLiteraryMatch", "unlinkAdminLiteraryItem", opExportAdminCatalog, "createCatalogExportJob", "createCatalogImportJob", "importAdminCatalog", "publishCatalogExportJob", "getAdminCatalogSearchStatus", "listCatalogImportSources", "listLocalCatalogImportSources", "browseAdminFilesystem", "listAdminTasks", "getAdminTask", "runAdminTask", "cancelAdminTask", "getAdminTaskSchedule", "updateAdminTaskSchedule", "listAdminTaskHistory", "getAdminTaskMetrics", "listAdminJobs", "getAdminJobCapabilities"} {
 		profileToken[id] = true
 	}
 
@@ -362,7 +366,7 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 		profileToken[id] = true
 	}
 
-	for _, id := range []string{"getDirectDownload", "headDirectDownload", "getDirectDownloadProxy", "headDirectDownloadProxy", "getAdminSubtitleProviderConfiguration", "updateAdminSubtitleProviderConfiguration", "deleteAdminStoredSubtitle", "downloadAdminStoredSubtitle", "getAdminSubtitleMetadata", "getViewerSubtitleMetadata", "deleteStoredSubtitle", "updateAdminSubtitleMetadata", "cancelSubtitleAIJob", "createSubtitleAIJob", "listAdminSubtitleProviders", "listAdminStoredSubtitles", "listAdminPlaybackHistory", "testAdminSubtitleProvider", "getPlaybackMedia", "headPlaybackMedia", "getPlaybackManifest", "getPlaybackSegment", "getPlaybackSubtitle", "headPlaybackSubtitle", "getPlaybackSubtitleFonts"} {
+	for _, id := range []string{"getDirectDownload", "headDirectDownload", "getDirectDownloadProxy", "headDirectDownloadProxy", "getAdminSubtitleProviderConfiguration", "updateAdminSubtitleProviderConfiguration", "deleteAdminStoredSubtitle", "downloadAdminStoredSubtitle", "getAdminSubtitleMetadata", "getViewerSubtitleMetadata", "deleteStoredSubtitle", "syncStoredSubtitle", "getStoredSubtitleSync", "setStoredSubtitleTiming", "getSubtitleSyncStatus", "updateAdminSubtitleMetadata", "cancelSubtitleAIJob", "createSubtitleAIJob", "listAdminSubtitleProviders", "listAdminStoredSubtitles", "listAdminPlaybackHistory", "testAdminSubtitleProvider", "getPlaybackMedia", "headPlaybackMedia", "getPlaybackManifest", "getPlaybackSegment", "getPlaybackSubtitle", "headPlaybackSubtitle", "getPlaybackSubtitleFonts"} {
 		profileToken[id] = true
 	}
 	for _, id := range []string{"getAccountPasswordCapability", "changePassword", "approveDeviceHandoff"} {
@@ -381,7 +385,7 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 	expect["revokeAdminInvitation"] = map[int]bool{http.StatusNoContent: true}
 	expect["lookupInvitation"] = map[int]bool{http.StatusNotFound: true, http.StatusTooManyRequests: true, http.StatusInternalServerError: true}
 
-	for _, id := range []string{"listAdminAccessGroups", "createAdminAccessGroup", "deleteAdminAccessGroup", "getAdminAccessGroup", "updateAdminAccessGroup", "listAdminIPUsers", "createAdminUser", "getAdminAccountCapabilities", "deleteAdminUser", "getAdminUser", "updateAdminUser", "listAdminUserAPIKeys", "impersonateAdminUser", "transferAdminUserOwnership", "createAdminUserPasswordReset", "listAdminUserIPs", "listAdminUserProfiles", "listAdminUserSettingValues", "deleteAdminUserSettingValue", "setAdminUserSettingValue"} {
+	for _, id := range []string{"listAdminAccessGroups", "createAdminAccessGroup", "deleteAdminAccessGroup", "getAdminAccessGroup", "updateAdminAccessGroup", "listAdminIPUsers", "createAdminUser", "getAdminAccountCapabilities", "deleteAdminUser", "getAdminUser", "updateAdminUser", "listAdminUserAPIKeys", "impersonateAdminUser", "transferAdminUserOwnership", "createAdminUserPasswordReset", "listAdminUserIPs", "listAdminUserProfiles", "listAdminUserSettingValues", "deleteAdminUserSettingValue", "setAdminUserSettingValue", "listAdminUserIdentities", "createAdminUserIdentity", "deleteAdminUserIdentity", "listAdminUserDevices", "getAdminUserWatchSummary", "listAdminUserDownloads", "getAdminUserDownloadSummary", "listAdminUserDownloadSubscriptions", "getAdminRequestUserUsage"} {
 		profileToken[id] = true
 	}
 	for _, id := range []string{createNotificationWebhookOperation, createNotificationServerChannelOperation, beginNotificationDiscordLinkOperation, testNotificationWebhookOperation, testNotificationServerChannelOperation, testAdminDiscordNotificationOperation, listNotificationWebPushOperation, listNotificationWebhooksOperation, listNotificationServerChannelsOperation, "getNotificationEmailPreferences", "updateNotificationEmailPreferences", "getNotificationDiscordPreferences", "updateNotificationDiscordPreferences", "registerAdminNotificationRelay", "clearAdminNotificationRelay", testAdminApplePushOperation, testAdminAndroidPushOperation, "getNotificationApplePushDisplay", "listNotifications", "getNotificationCapabilities", "getNotificationPreferences", "updateNotificationPreferences", "markNotificationsRead", "syncNotifications", "getNotificationUnreadCount", "getNotification", "markNotificationRead"} {
@@ -509,7 +513,7 @@ var libraryOperationIDs = []string{
 var libraryViewOperationIDs = []string{
 	"getCatalogSearchCapabilities", "listCatalogItems", "listAudiobookGroups", "getCatalogFilters", "searchCatalogFacet", "queryCatalogItems", "getCatalogItem",
 	"listCatalogItemEpisodes", "listCatalogItemMangaFiles", "listCatalogItemVersions", "listSeriesSeasons", "getSeriesSeason", "listSeasonEpisodes",
-	"getTrailersCapability", "refreshCatalogItemTrailers", "getMetadataAICapability", "translateCatalogItemDescription",
+	"getTrailersCapability", "refreshCatalogItemTrailers", "getMetadataAICapability", "translateCatalogItemDescription", "getRatingsCapability",
 	"listPeople", "getPerson", "refreshPerson", "getLiteraryWork",
 	"getLibraryLayout", "listLibrarySections", "getLibrarySectionItems", "getLibraryCollections", "listLibraryUserCollections",
 }

@@ -45,8 +45,8 @@ func (r *transportAuthViewerResolver) Resolve(context.Context, access.ResolveInp
 	return access.Scope{}, r.err
 }
 
-func (v transportAuthSessionValidator) IsValid(context.Context, string) (bool, error) {
-	return v.valid, nil
+func (v transportAuthSessionValidator) ActiveSessionRole(context.Context, string) (string, bool, error) {
+	return "", v.valid, nil
 }
 
 func TestRequireTransportAuthAcceptsSessionCapabilityBeforeExpiredBearer(t *testing.T) {

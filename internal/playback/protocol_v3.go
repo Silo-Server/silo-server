@@ -116,6 +116,8 @@ const (
 	// A transcode node that executes the multi-track prepared-download layout
 	// (PreparedTracksRecipeVersion).
 	TransportFeaturePreparedTracksV1 = "prepared_tracks_v1"
+	// A transcode node that makes trickplay sheets (POST /trickplay/extract).
+	TransportFeatureTrickplayExtractV1 = "trickplay_extract_v1"
 )
 
 // Degradation warning codes reported by playback plans.

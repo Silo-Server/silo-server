@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { getCollectionSortOptions } from "@/components/collections/collectionBuilderFields";
+import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
 import {
   getDefaultQuerySortOrder,
   getQuerySortOptions,
@@ -59,7 +60,12 @@ export default function CatalogFilterBar({
   sourceOrderLabel,
   allowEpisodeMediaScope = true,
 }: CatalogFilterBarProps) {
-  const sortOptions = getCollectionSortOptions(allowPersonalizedSorts, sortRelevanceScope);
+  const shownRatingSources = useShownRatingSources();
+  const sortOptions = getCollectionSortOptions(
+    allowPersonalizedSorts,
+    sortRelevanceScope,
+    shownRatingSources,
+  );
   const mediaScopeOptions = allowEpisodeMediaScope
     ? CATALOG_MEDIA_SCOPE_OPTIONS
     : CATALOG_MEDIA_SCOPE_OPTIONS.filter((option) => option.value !== "episode");
@@ -70,7 +76,11 @@ export default function CatalogFilterBar({
     ? { field: CATALOG_SOURCE_ORDER_SORT_FIELD, order: state.sortOrder }
     : normalizeQuerySortForScope(
         { field: state.sortField, order: state.sortOrder },
-        { includePersonalized: allowPersonalizedSorts, relevanceScope: sortRelevanceScope },
+        {
+          includePersonalized: allowPersonalizedSorts,
+          relevanceScope: sortRelevanceScope,
+          shownRatingSources,
+        },
       );
 
   return (

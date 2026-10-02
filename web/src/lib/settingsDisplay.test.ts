@@ -102,6 +102,12 @@ describe("settingsDisplay", () => {
     expect(formatSettingValue(SETTING_KEYS.PLAYBACK_SUBTITLE_MODE, "always")).toBe("Always on");
   });
 
+  it("reads a bandwidth cap in Mbps and an empty one as no limit", () => {
+    expect(formatSettingValue(SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS, "20000")).toBe("20 Mbps");
+    expect(formatSettingValue(SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS, "")).toBe("No limit");
+    expect(formatSettingValue(SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS, undefined)).toBe("No limit");
+  });
+
   it("passes an unknown key's value through rather than inventing a label", () => {
     expect(formatSettingValue("playback.invented_by_a_client", "17")).toBe("17");
     expect(formatSettingValue("playback.invented_by_a_client", undefined)).toBe("Unset");

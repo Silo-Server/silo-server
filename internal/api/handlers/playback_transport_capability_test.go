@@ -24,8 +24,8 @@ func (transportCapabilityBearerValidator) ValidateToken(string) (*auth.Claims, e
 
 type transportCapabilitySessionValidator struct{}
 
-func (transportCapabilitySessionValidator) IsValid(context.Context, string) (bool, error) {
-	return false, nil
+func (transportCapabilitySessionValidator) ActiveSessionRole(context.Context, string) (string, bool, error) {
+	return "", false, nil
 }
 
 func TestVerifiedStreamCardFromRequestUsesHeaderCapabilityForReconstruction(t *testing.T) {

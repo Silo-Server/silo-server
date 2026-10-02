@@ -45,10 +45,13 @@ type PlaybackSession struct {
 	// when it differs from ours (Static=true direct play skips PlaybackInfo,
 	// so the client never learns the server id). Playback reports carrying
 	// that id resolve to this session directly instead of by ambiguous route.
-	ClientPlaySessionID        string
-	UserID                     string
-	InitialSeekSeconds         float64
-	MediaSources               []PlaybackMediaSource
+	ClientPlaySessionID string
+	UserID              string
+	InitialSeekSeconds  float64
+	MediaSources        []PlaybackMediaSource
+	// UpstreamMediaFileID survives API restarts so previews can follow the
+	// selected source without consulting a process-local native session.
+	UpstreamMediaFileID        int
 	UpstreamSessionID          string
 	UpstreamPlayMethod         string
 	TranscodeStarted           bool

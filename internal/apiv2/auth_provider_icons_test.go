@@ -14,8 +14,8 @@ type iconSessionService struct {
 	icon string
 }
 
-func (s iconSessionService) ListProviders() []auth.LoginProviderInfo {
-	return []auth.LoginProviderInfo{{ID: "provider", IconURL: s.icon, InstallationID: 3}}
+func (s iconSessionService) DiscoverProviders(context.Context) (auth.ProviderDiscovery, error) {
+	return auth.ProviderDiscovery{Providers: []auth.LoginProviderInfo{{ID: "provider", IconURL: s.icon, InstallationID: 3}}}, nil
 }
 func TestAuthProviderIconProjection(t *testing.T) {
 	const icon = "/api/v2/plugin-content/plugins/3/assets/brand%20icon.svg?size=2#logo"
@@ -66,7 +66,7 @@ func TestAuthProviderIconProjection(t *testing.T) {
 			if (calls > 0) != tc.lookup {
 				t.Fatalf("lookup calls=%d", calls)
 			}
-			if service.ListProviders()[0].IconURL != tc.icon {
+			if discovery, _ := service.DiscoverProviders(context.Background()); discovery.Providers[0].IconURL != tc.icon {
 				t.Fatal("shared provider metadata changed")
 			}
 		})

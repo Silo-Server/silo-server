@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
@@ -22,6 +22,8 @@ if (!window.HTMLElement.prototype.scrollIntoView) {
 const useSettingsFormMock = vi.fn();
 const useHWAccelDetectionMock = vi.fn();
 const useAdminNodesMock = vi.fn();
+const useAdminTrickplayLibrariesMock = vi.fn();
+const useLibraryCapabilitiesMock = vi.fn();
 
 vi.mock("@/hooks/useSettingsForm", () => ({
   useSettingsForm: (...args: unknown[]) => useSettingsFormMock(...args),
@@ -39,16 +41,29 @@ vi.mock("@/hooks/queries/admin/nodes", () => ({
   useAdminNodes: () => useAdminNodesMock(),
 }));
 
+vi.mock("@/hooks/queries/admin/libraries", () => ({
+  useLibraryCapabilities: () => useLibraryCapabilitiesMock(),
+}));
+
+vi.mock("@/hooks/queries/admin/trickplay", () => ({
+  useAdminTrickplayLibraries: () => useAdminTrickplayLibrariesMock(),
+}));
+
 /** A transcode node the chapter-thumbnail extractor could reserve. */
 function transcodeNode(overrides: Record<string, unknown> = {}) {
   return { id: 1, name: "node-1", type: "transcode", enabled: true, healthy: true, ...overrides };
 }
 
-function makeForm(values: Record<string, string>, dirty: string[] = []) {
+function makeForm(
+  values: Record<string, string>,
+  dirty: string[] = [],
+  persisted: Record<string, string> = {},
+) {
   const dirtyKeys = new Set(dirty);
   return {
     isLoading: false,
     getValue: (key: string) => values[key] ?? "",
+    getPersistedValue: (key: string) => persisted[key] ?? values[key] ?? "",
     setValue: vi.fn(),
     isDirty: (key: string) => dirtyKeys.has(key),
     dirtyCount: dirtyKeys.size,
@@ -84,11 +99,14 @@ const TONE_MAP_LABEL = "Software HDR tone mapping";
 
 beforeEach(() => {
   localStorage.clear();
+  useLibraryCapabilitiesMock.mockReturnValue({ data: { trickplay: true } });
   useSettingsFormMock.mockReset();
   useHWAccelDetectionMock.mockReset();
   useHWAccelDetectionMock.mockReturnValue({ data: undefined, isLoading: false });
   useAdminNodesMock.mockReset();
   useAdminNodesMock.mockReturnValue({ data: [transcodeNode()], isSuccess: true });
+  useAdminTrickplayLibrariesMock.mockReset();
+  useAdminTrickplayLibrariesMock.mockReturnValue({ data: undefined, isSuccess: false });
 });
 
 describe("PlaybackSettings layout", () => {
@@ -484,6 +502,82 @@ describe("PlaybackSettings chapter thumbnail execution", () => {
   });
 });
 
+describe("PlaybackSettings seek-preview node capability", () => {
+  beforeEach(expandAdvanced);
+
+  it.each([
+    [{ capabilities: undefined }, true],
+    [{ capabilities: { transport_features: ["chapter_extract_v1"] } }, true],
+    [{ capabilities: { transport_features: ["trickplay_extract_v1"] } }, false],
+    [
+      {
+        capabilities: { transport_features: ["trickplay_extract_v1"] },
+        advertised_capabilities_hash: "",
+        capabilities_hash: "snapshot",
+      },
+      true,
+    ],
+    [
+      {
+        capabilities: { transport_features: ["trickplay_extract_v1"] },
+        advertised_capabilities_hash: "new-snapshot",
+        capabilities_hash: "old-snapshot",
+      },
+      true,
+    ],
+    [
+      {
+        capabilities: { transport_features: ["trickplay_extract_v1"] },
+        advertised_capabilities_hash: "snapshot",
+      },
+      true,
+    ],
+    [
+      {
+        capabilities: { transport_features: ["trickplay_extract_v1"] },
+        advertised_capabilities_hash: "snapshot",
+        capabilities_hash: "snapshot",
+      },
+      false,
+    ],
+  ])("gates node execution for node snapshot %o", async (overrides, disabled) => {
+    useAdminNodesMock.mockReturnValue({ data: [transcodeNode(overrides)], isSuccess: true });
+    useSettingsFormMock.mockReturnValue(makeForm({ "playback.trickplay_execution": "local" }));
+    render(<PlaybackSettings />);
+    await userEvent.click(screen.getByRole("combobox", { name: "Generate seek previews on" }));
+    const option = screen.getByRole("option", { name: "Transcode nodes only" });
+    expect(option.getAttribute("aria-disabled") === "true").toBe(disabled);
+  });
+
+  it.each([
+    ["prefer_transcode_nodes", "Transcode nodes when available", "Transcode nodes only"],
+    ["transcode_nodes_only", "Transcode nodes only", "Transcode nodes when available"],
+  ])("keeps saved %s editable while the node snapshot is stale", async (mode, saved, other) => {
+    useAdminNodesMock.mockReturnValue({
+      data: [
+        transcodeNode({
+          capabilities: { transport_features: ["trickplay_extract_v1"] },
+          advertised_capabilities_hash: "new-snapshot",
+          capabilities_hash: "old-snapshot",
+        }),
+      ],
+      isSuccess: true,
+    });
+    useSettingsFormMock.mockReturnValue(makeForm({ "playback.trickplay_execution": mode }));
+    render(<PlaybackSettings />);
+    await userEvent.click(screen.getByRole("combobox", { name: "Generate seek previews on" }));
+    expect(screen.getByRole("option", { name: saved })).not.toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    expect(screen.getByRole("option", { name: other })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("option", { name: "This server" })).not.toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  });
+});
+
 describe("PlaybackSettings divergent node inventories", () => {
   // The device picker lives behind the advanced disclosure this page grew.
   beforeEach(expandAdvanced);
@@ -546,4 +640,171 @@ describe("HEVC encoding policy", () => {
     fireEvent.click(screen.getByRole("switch", { name: "Allow HEVC encoding" }));
     expect(form.setValue).toHaveBeenCalledWith("playback.allow_hevc_encoding", "true");
   });
+});
+
+describe("seek preview settings", () => {
+  const library = (ready: number, running = 0) => ({
+    library_id: "1",
+    name: "Movies",
+    pending: 0,
+    running,
+    ready,
+    unusable: 0,
+    sheet_bytes: 0,
+  });
+
+  it("asks before changing the interval while published previews are pending replacement", async () => {
+    const form = makeForm(
+      { "playback.hw_accel": "none", "playback.trickplay_interval_seconds": "20" },
+      ["playback.trickplay_interval_seconds"],
+      { "playback.trickplay_interval_seconds": "10" },
+    );
+    useSettingsFormMock.mockReturnValue(form);
+    useAdminTrickplayLibrariesMock.mockReturnValue({
+      data: [{ ...library(0), pending: 3, sheet_bytes: 1000 }],
+      isSuccess: true,
+    });
+    render(<PlaybackSettings />);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(form.save).not.toHaveBeenCalled();
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
+    await userEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Save" }),
+    );
+    expect(form.save).toHaveBeenCalledOnce();
+  });
+
+  it("manages the four seek preview keys under advanced", () => {
+    expandAdvanced();
+    useSettingsFormMock.mockReturnValue(
+      makeForm({
+        "playback.hw_accel": "none",
+        "playback.preview_image_width": "300",
+        "playback.trickplay_interval_seconds": "10",
+        "playback.trickplay_workers": "2",
+      }),
+    );
+
+    render(<PlaybackSettings />);
+    const keys: string[] = useSettingsFormMock.mock.calls[0]?.[0]?.keys ?? [];
+
+    for (const key of [
+      "playback.preview_image_width",
+      "playback.trickplay_interval_seconds",
+      "playback.trickplay_workers",
+      "playback.trickplay_execution",
+    ]) {
+      expect(keys).toContain(key);
+    }
+    expect(screen.getByLabelText("Preview image width")).toHaveValue(300);
+    expect(screen.getByLabelText("Seek preview interval")).toHaveValue(10);
+    expect(screen.getByLabelText("Seek preview workers")).toHaveValue(2);
+    expect(screen.getByText("Generate seek previews on")).toBeTruthy();
+  });
+
+  it("asks before a new width remakes chapter thumbnails and published previews", async () => {
+    const form = makeForm(
+      { "playback.hw_accel": "none", "playback.preview_image_width": "320" },
+      ["playback.preview_image_width"],
+      { "playback.preview_image_width": "" },
+    );
+    useSettingsFormMock.mockReturnValue(form);
+    useAdminTrickplayLibrariesMock.mockReturnValue({
+      data: [library(40, 1), library(2)],
+      isSuccess: true,
+    });
+
+    render(<PlaybackSettings />);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(form.save).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(
+        /^Every chapter thumbnail and 43 files' seek previews are made again at the new width\./,
+      ),
+    ).toBeTruthy();
+    await userEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Save" }),
+    );
+    expect(form.save).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks before a new width even with no seek previews, for chapter thumbnails", async () => {
+    const form = makeForm(
+      { "playback.hw_accel": "none", "playback.preview_image_width": "320" },
+      ["playback.preview_image_width"],
+      { "playback.preview_image_width": "300" },
+    );
+    useSettingsFormMock.mockReturnValue(form);
+    useAdminTrickplayLibrariesMock.mockReturnValue({ data: [], isSuccess: true });
+
+    render(<PlaybackSettings />);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(form.save).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(/^Every chapter thumbnail is made again at the new width\./),
+    ).toBeTruthy();
+  });
+
+  it.each([
+    [
+      "the interval returns to the default",
+      { "playback.trickplay_interval_seconds": "10" },
+      ["playback.trickplay_interval_seconds"],
+      [library(5)],
+    ],
+    [
+      "a new interval has no published previews to remake",
+      { "playback.trickplay_interval_seconds": "20" },
+      ["playback.trickplay_interval_seconds"],
+      [],
+    ],
+    [
+      "only the worker count changes",
+      { "playback.trickplay_workers": "4" },
+      ["playback.trickplay_workers"],
+      [library(5)],
+    ],
+  ])("saves without asking when %s", async (_, values, dirty, libraries) => {
+    const form = makeForm({ "playback.hw_accel": "none", ...values }, dirty, {
+      "playback.trickplay_interval_seconds": "",
+      "playback.preview_image_width": "300",
+      "playback.trickplay_workers": "1",
+    });
+    useSettingsFormMock.mockReturnValue(form);
+    useAdminTrickplayLibrariesMock.mockReturnValue({ data: libraries, isSuccess: true });
+
+    render(<PlaybackSettings />);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(form.save).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+});
+
+it("hides unsupported seek preview settings and leaves their keys out", () => {
+  expandAdvanced();
+  useLibraryCapabilitiesMock.mockReturnValue({ data: { trickplay: false } });
+  useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "none" }));
+  render(<PlaybackSettings />);
+  expect(screen.queryByLabelText("Seek preview interval")).toBeNull();
+  expect(screen.queryByLabelText("Preview image width")).toBeNull();
+  expect(useSettingsFormMock.mock.calls[0]?.[0]?.keys).not.toContain("playback.trickplay_workers");
+});
+
+it.each(["loading", "failed"])("asks before changing the interval when status is %s", async () => {
+  useAdminTrickplayLibrariesMock.mockReturnValue({ data: undefined, isSuccess: false });
+  const form = makeForm(
+    { "playback.trickplay_interval_seconds": "20" },
+    ["playback.trickplay_interval_seconds"],
+    { "playback.trickplay_interval_seconds": "10" },
+  );
+  useSettingsFormMock.mockReturnValue(form);
+  render(<PlaybackSettings />);
+  await userEvent.click(screen.getByRole("button", { name: "Save" }));
+  expect(form.save).not.toHaveBeenCalled();
+  expect(screen.getByRole("alertdialog")).toHaveTextContent(
+    "Existing seek previews are made again",
+  );
 });
