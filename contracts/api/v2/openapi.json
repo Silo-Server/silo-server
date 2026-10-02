@@ -752,6 +752,14 @@
           "access_groups": {
             "type": "boolean"
           },
+          "account_devices": {
+            "description": "Whether listAdminUserDevices can list an account's registered devices",
+            "type": "boolean"
+          },
+          "account_downloads": {
+            "description": "Whether listAdminUserDownloads, getAdminUserDownloadSummary and listAdminUserDownloadSubscriptions are available",
+            "type": "boolean"
+          },
           "allowed": {
             "description": "Whether the current principal may use the capability",
             "type": "boolean"
@@ -780,6 +788,10 @@
             "description": "Whether createAdminUserPasswordReset can return a link to share; needs the server's public URL",
             "type": "boolean"
           },
+          "request_usage": {
+            "description": "Whether getAdminRequestUserUsage can report an account's request quota use",
+            "type": "boolean"
+          },
           "revision": {
             "description": "Opaque revision of this document",
             "type": "string"
@@ -793,6 +805,10 @@
               "unsupported"
             ],
             "type": "string"
+          },
+          "watch_summary": {
+            "description": "Whether getAdminUserWatchSummary can total an account's finalized plays",
+            "type": "boolean"
           }
         },
         "required": [
@@ -804,6 +820,10 @@
           "password_reset_link",
           "password_reset_email",
           "ownership_transfer",
+          "account_devices",
+          "watch_summary",
+          "account_downloads",
+          "request_usage",
           "revision",
           "state",
           "allowed"
@@ -992,13 +1012,24 @@
             "minLength": 1,
             "type": "string"
           },
+          "last_seen_at": {
+            "description": "Latest time any device reported this profile; null when no device has",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "name": {
             "type": "string"
           }
         },
         "required": [
           "id",
-          "name"
+          "name",
+          "last_seen_at"
         ],
         "type": "object"
       },
@@ -8570,6 +8601,14 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "episode_number": {
+            "description": "Episode number; null when not an episode",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "media_file_id": {
             "description": "Opaque identifier",
             "examples": [
@@ -8598,6 +8637,18 @@
           },
           "profile_name": {
             "description": "Profile display name at the time of playback; the profile id when none was recorded",
+            "type": "string"
+          },
+          "season_number": {
+            "description": "Episode season; null when not an episode",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "series_title": {
+            "description": "Series title for an episode; empty otherwise",
             "type": "string"
           },
           "session_id": {
@@ -8643,7 +8694,10 @@
           "ended_at",
           "watched_seconds",
           "duration_seconds",
-          "completed"
+          "completed",
+          "series_title",
+          "season_number",
+          "episode_number"
         ],
         "type": "object"
       },
@@ -11219,6 +11273,84 @@
         ],
         "type": "object"
       },
+      "AdminRatingSource": {
+        "additionalProperties": false,
+        "properties": {
+          "always_shown": {
+            "description": "True for IMDb and TMDB, which always show; every other source shows only once catalog.extra_rating_sources lists it",
+            "type": "boolean"
+          },
+          "label": {
+            "description": "The source's name in full",
+            "examples": [
+              "Rotten Tomatoes critics"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "The plain-text mark clients show next to its score",
+            "examples": [
+              "RT"
+            ],
+            "type": "string"
+          },
+          "provider": {
+            "description": "The metadata providers that declare the source, such as \"NFO Files and MDBList\"; absent for Silo's own sources",
+            "examples": [
+              "Kinopoisk"
+            ],
+            "type": "string"
+          },
+          "source": {
+            "description": "Source name, the value catalog.extra_rating_sources lists",
+            "examples": [
+              "rt_critic"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "label",
+          "name",
+          "always_shown"
+        ],
+        "type": "object"
+      },
+      "AdminRatingSourceCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "plugin_declared_sources": {
+            "description": "listAdminRatingSources lists IMDb, TMDB and the sources enabled metadata plugins declare, and title pages show a declared source once catalog.extra_rating_sources names it",
+            "type": "boolean"
+          },
+          "revision": {
+            "description": "Opaque revision of this document",
+            "type": "string"
+          },
+          "state": {
+            "description": "Support and configuration state, not health",
+            "enum": [
+              "available",
+              "disabled",
+              "not_configured",
+              "unsupported"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "plugin_declared_sources",
+          "revision",
+          "state",
+          "allowed"
+        ],
+        "type": "object"
+      },
       "AdminRecommendationJobStatus": {
         "additionalProperties": false,
         "properties": {
@@ -12541,6 +12673,66 @@
           "max_requests",
           "window_days",
           "approval_mode"
+        ],
+        "type": "object"
+      },
+      "AdminRequestUserUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "description": "Whether this account may request now (not blocked by its switch, group, or an old block)",
+            "type": "boolean"
+          },
+          "auto_approve": {
+            "type": "boolean"
+          },
+          "max_requests": {
+            "description": "Quota; meaningless when unlimited",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "remaining": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "requests_enabled": {
+            "description": "Server-wide requests switch",
+            "type": "boolean"
+          },
+          "unlimited": {
+            "type": "boolean"
+          },
+          "used": {
+            "description": "Requests in the window; 0 when unlimited (not counted)",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "window_days": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "window_start": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requests_enabled",
+          "allowed",
+          "unlimited",
+          "used",
+          "max_requests",
+          "window_days",
+          "window_start",
+          "remaining",
+          "auto_approve"
         ],
         "type": "object"
       },
@@ -16396,6 +16588,449 @@
         ],
         "type": "object"
       },
+      "AdminUserDevice": {
+        "additionalProperties": false,
+        "properties": {
+          "device_id": {
+            "type": "string"
+          },
+          "device_name": {
+            "type": "string"
+          },
+          "device_platform": {
+            "type": "string"
+          },
+          "last_seen_at": {
+            "description": "Latest registration by the app; null when the device is known only from saved settings",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_updated": {
+            "description": "Latest of registration and saved-setting writes",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "override_count": {
+            "description": "Saved per-device settings across profiles",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/AdminUserDeviceProfile"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "device_id",
+          "device_name",
+          "device_platform",
+          "last_seen_at",
+          "last_updated",
+          "override_count",
+          "profiles"
+        ],
+        "type": "object"
+      },
+      "AdminUserDeviceProfile": {
+        "additionalProperties": false,
+        "properties": {
+          "last_seen_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision, or null",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "override_count": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "profile_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "profile_name": {
+            "description": "Empty when the profile no longer exists",
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile_id",
+          "profile_name",
+          "override_count",
+          "last_seen_at"
+        ],
+        "type": "object"
+      },
+      "AdminUserDownload": {
+        "additionalProperties": false,
+        "properties": {
+          "batch_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "completed_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision, or null",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "content_id": {
+            "description": "Movie, or the series for an episode",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "delivery_format": {
+            "type": "string"
+          },
+          "device_id": {
+            "type": "string"
+          },
+          "effective_quality": {
+            "type": "string"
+          },
+          "episode": {
+            "additionalProperties": false,
+            "description": "Null unless episode_id resolves to a catalog episode",
+            "properties": {
+              "episode_number": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "season_number": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "title": {
+                "description": "Empty when unknown",
+                "type": "string"
+              }
+            },
+            "required": [
+              "season_number",
+              "episode_number",
+              "title"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "episode_id": {
+            "type": "string"
+          },
+          "file_size": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "media_type": {
+            "description": "Catalog type of content_id (movie, series, …); empty when unknown",
+            "type": "string"
+          },
+          "profile_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "quality": {
+            "type": "string"
+          },
+          "status": {
+            "description": "preparing, ready, downloading, completed, failed or revoked. More values may be added",
+            "type": "string"
+          },
+          "status_event_at": {
+            "description": "Latest accepted client status report; null when the app never reported",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "target_bitrate_kbps": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "title": {
+            "description": "Catalog title of content_id; empty when the item left the catalog",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "profile_id",
+          "device_id",
+          "content_id",
+          "title",
+          "media_type",
+          "episode",
+          "status",
+          "quality",
+          "effective_quality",
+          "delivery_format",
+          "target_bitrate_kbps",
+          "file_size",
+          "created_at",
+          "updated_at",
+          "completed_at",
+          "status_event_at"
+        ],
+        "type": "object"
+      },
+      "AdminUserDownloadEpisode": {
+        "additionalProperties": false,
+        "properties": {
+          "episode_number": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "season_number": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "title": {
+            "description": "Empty when unknown",
+            "type": "string"
+          }
+        },
+        "required": [
+          "season_number",
+          "episode_number",
+          "title"
+        ],
+        "type": "object"
+      },
+      "AdminUserDownloadSubscription": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "delete_watched": {
+            "type": "boolean"
+          },
+          "device_id": {
+            "type": "string"
+          },
+          "id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "in_progress": {
+            "description": "preparing, ready or downloading rows for the series",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_storage_bytes": {
+            "description": "0 means no limit",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "mode": {
+            "description": "all, future, latest_season or specific_seasons. More values may be added",
+            "type": "string"
+          },
+          "on_device": {
+            "description": "This device and profile's completed rows for the series",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "profile_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "removed_episodes": {
+            "description": "Episodes the user deleted from the monitored series (download_subscription_exclusions)",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "season_numbers": {
+            "description": "Monitored seasons for specific_seasons; empty otherwise",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "series_id": {
+            "type": "string"
+          },
+          "series_title": {
+            "description": "Empty when the series left the catalog",
+            "type": "string"
+          },
+          "target_season": {
+            "description": "First kept season for latest_season",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "profile_id",
+          "device_id",
+          "series_id",
+          "series_title",
+          "mode",
+          "season_numbers",
+          "target_season",
+          "delete_watched",
+          "max_storage_bytes",
+          "active",
+          "on_device",
+          "in_progress",
+          "removed_episodes",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "AdminUserDownloadSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "completed": {
+            "description": "Rows the app reported as completed",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "devices": {
+            "description": "Distinct devices with a non-revoked row",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "failed": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "in_progress": {
+            "description": "preparing, ready or downloading",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "monitored_series": {
+            "description": "Active series monitors",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "revoked": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "description": "Managed rows that are not revoked",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total_bytes": {
+            "description": "file_size summed over non-revoked rows",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "completed",
+          "in_progress",
+          "failed",
+          "revoked",
+          "total_bytes",
+          "devices",
+          "monitored_series"
+        ],
+        "type": "object"
+      },
       "AdminUserIP": {
         "additionalProperties": false,
         "properties": {
@@ -16416,6 +17051,14 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "location": {
+            "description": "Address class: private, loopback and link-local addresses are local, everything else remote. Request logs do not record the network-access route, so a provider path from a private address reads as local here.",
+            "enum": [
+              "local",
+              "remote"
+            ],
+            "type": "string"
+          },
           "request_count": {
             "format": "int64",
             "type": "integer"
@@ -16425,7 +17068,66 @@
           "client_ip",
           "first_seen",
           "last_seen",
-          "request_count"
+          "request_count",
+          "location"
+        ],
+        "type": "object"
+      },
+      "AdminUserWatchSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "completed_plays": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "days": {
+            "examples": [
+              30
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "last_played_at": {
+            "description": "Latest ended_at in the window; null when none",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "plays": {
+            "description": "Finalized playback attempts that ended in the window",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "profile_id": {
+            "description": "Echoes the profile filter; absent for the whole account",
+            "type": "string"
+          },
+          "since": {
+            "description": "Start of the window: now minus days",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "watched_seconds": {
+            "format": "double",
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "days",
+          "since",
+          "plays",
+          "completed_plays",
+          "watched_seconds",
+          "last_played_at"
         ],
         "type": "object"
       },
@@ -18035,10 +18737,12 @@
             "type": "number"
           },
           "rating_rt_audience": {
+            "description": "Rotten Tomatoes audience score, 0-100. Absent unless an administrator shows rt_audience (see getRatingsCapability); a viewer who curates the item's metadata gets it on item detail regardless",
             "format": "int64",
             "type": "integer"
           },
           "rating_rt_critic": {
+            "description": "Rotten Tomatoes critic score, 0-100. Absent unless an administrator shows rt_critic (see getRatingsCapability); a viewer who curates the item's metadata gets it on item detail regardless",
             "format": "int64",
             "type": "integer"
           },
@@ -18433,15 +19137,17 @@
             "type": "number"
           },
           "rating_rt_audience": {
+            "description": "Rotten Tomatoes audience score, 0-100. Absent unless an administrator shows rt_audience (see getRatingsCapability); a viewer who curates the item's metadata gets it on item detail regardless",
             "format": "int64",
             "type": "integer"
           },
           "rating_rt_critic": {
+            "description": "Rotten Tomatoes critic score, 0-100. Absent unless an administrator shows rt_critic (see getRatingsCapability); a viewer who curates the item's metadata gets it on item detail regardless",
             "format": "int64",
             "type": "integer"
           },
           "rating_sources": {
-            "description": "Per-source ratings on a 0-100 scale for movies and series, in display order; absent when no provider reported any",
+            "description": "Per-source ratings on a 0-100 scale for movies and series; absent when there are none. Only the sources clients show, in the same order as ratings, except for a viewer who curates the item's metadata, who gets every stored source. Title pages render ratings, not this list.",
             "items": {
               "$ref": "#/components/schemas/CatalogRatingSource"
             },
@@ -18450,6 +19156,13 @@
           "rating_tmdb": {
             "format": "double",
             "type": "number"
+          },
+          "ratings": {
+            "description": "The external ratings a title page shows, in display order: IMDb and TMDB, plus the sources an administrator turned on. Render every entry as its name and display text. Empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/CatalogRating"
+            },
+            "type": "array"
           },
           "recap": {
             "$ref": "#/components/schemas/Marker"
@@ -18594,6 +19307,7 @@
           "cast",
           "crew",
           "versions",
+          "ratings",
           "subtitles",
           "content_id",
           "type",
@@ -18957,6 +19671,46 @@
         ],
         "type": "object"
       },
+      "CatalogRating": {
+        "additionalProperties": false,
+        "properties": {
+          "display": {
+            "description": "The score on the source's own scale, formatted for display",
+            "examples": [
+              "8.5"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "The source's name as a plain-text mark, shown next to the score",
+            "examples": [
+              "IMDb"
+            ],
+            "type": "string"
+          },
+          "score": {
+            "description": "Score on a 0-100 scale",
+            "format": "double",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "number"
+          },
+          "source": {
+            "description": "Rating source: imdb, tmdb, or a name a metadata plugin declared, such as rt_critic. Clients may use it to pick a source's mark and should fall back to name for one they do not recognize.",
+            "examples": [
+              "imdb"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "name",
+          "score",
+          "display"
+        ],
+        "type": "object"
+      },
       "CatalogRatingSource": {
         "additionalProperties": false,
         "properties": {
@@ -18968,7 +19722,7 @@
             "type": "number"
           },
           "source": {
-            "description": "Rating source: imdb, tmdb, rt_critic, rt_audience, metacritic, metacritic_user, letterboxd, trakt, rogerebert, myanimelist, or mdblist. Clients should ignore names they do not recognize.",
+            "description": "Rating source: imdb, tmdb, or a name a metadata plugin declared, such as rt_critic. Clients should ignore names they do not recognize.",
             "type": "string"
           },
           "votes": {
@@ -19946,6 +20700,26 @@
         ],
         "type": "object"
       },
+      "CollectionAdminRatingSource": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/AdminRatingSource"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "CollectionAdminRequestIntegration": {
         "additionalProperties": false,
         "properties": {
@@ -20073,6 +20847,66 @@
             "description": "The page's items; empty, never null",
             "items": {
               "$ref": "#/components/schemas/AdminUnmatchedFile"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "CollectionAdminUserDevice": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/AdminUserDevice"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "CollectionAdminUserDownload": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/AdminUserDownload"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "CollectionAdminUserDownloadSubscription": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/AdminUserDownloadSubscription"
             },
             "type": "array"
           },
@@ -25196,10 +26030,12 @@
             "type": "number"
           },
           "rating_rt_audience": {
+            "description": "Rotten Tomatoes audience score, 0-100. Absent unless an administrator shows rt_audience (see getRatingsCapability); a viewer who curates the item's metadata gets it on item detail regardless",
             "format": "int64",
             "type": "integer"
           },
           "rating_rt_critic": {
+            "description": "Rotten Tomatoes critic score, 0-100. Absent unless an administrator shows rt_critic (see getRatingsCapability); a viewer who curates the item's metadata gets it on item detail regardless",
             "format": "int64",
             "type": "integer"
           },
@@ -35985,6 +36821,67 @@
         ],
         "type": "object"
       },
+      "RatingsCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "revision": {
+            "description": "Opaque revision of this document",
+            "type": "string"
+          },
+          "sources": {
+            "description": "The rating sources title pages and cards show, in display order: imdb and tmdb, then each source a metadata plugin declares and an administrator turned on. A card or detail carries rating_rt_critic or rating_rt_audience only when its source is listed. Empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/RatingsCapabilitySource"
+            },
+            "type": "array"
+          },
+          "state": {
+            "description": "Support and configuration state, not health",
+            "enum": [
+              "available",
+              "disabled",
+              "not_configured",
+              "unsupported"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "sources",
+          "revision",
+          "state",
+          "allowed"
+        ],
+        "type": "object"
+      },
+      "RatingsCapabilitySource": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "description": "The source's plain-text mark",
+            "examples": [
+              "IMDb"
+            ],
+            "type": "string"
+          },
+          "source": {
+            "description": "Rating source name, as in CatalogRating.source",
+            "examples": [
+              "imdb"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "name"
+        ],
+        "type": "object"
+      },
       "RawMatchBacklogEntry": {
         "additionalProperties": false,
         "properties": {
@@ -43947,10 +44844,12 @@
             "type": "number"
           },
           "rating_rt_audience": {
+            "description": "Rotten Tomatoes audience score, 0-100. Absent unless an administrator shows rt_audience (see getRatingsCapability); a viewer who curates the item's metadata gets it on item detail regardless",
             "format": "int64",
             "type": "integer"
           },
           "rating_rt_critic": {
+            "description": "Rotten Tomatoes critic score, 0-100. Absent unless an administrator shows rt_critic (see getRatingsCapability); a viewer who curates the item's metadata gets it on item detail regardless",
             "format": "int64",
             "type": "integer"
           },
@@ -44281,10 +45180,12 @@
             "type": "number"
           },
           "rating_rt_audience": {
+            "description": "Rotten Tomatoes audience score, 0-100. Absent unless an administrator shows rt_audience (see getRatingsCapability); a viewer who curates the item's metadata gets it on item detail regardless",
             "format": "int64",
             "type": "integer"
           },
           "rating_rt_critic": {
+            "description": "Rotten Tomatoes critic score, 0-100. Absent unless an administrator shows rt_critic (see getRatingsCapability); a viewer who curates the item's metadata gets it on item detail regardless",
             "format": "int64",
             "type": "integer"
           },
@@ -81064,6 +81965,17 @@
               ],
               "type": "string"
             }
+          },
+          {
+            "description": "Only attempts that ended at or after this instant",
+            "explode": false,
+            "in": "query",
+            "name": "ended_after",
+            "schema": {
+              "description": "Only attempts that ended at or after this instant",
+              "format": "date-time",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -88845,6 +89757,347 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/admin/rating-sources": {
+      "get": {
+        "operationId": "listAdminRatingSources",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionAdminRatingSource"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the external rating sources an administrator can show on title pages, including sources metadata plugins declare.",
+        "tags": [
+          "admin-settings"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/rating-sources/capabilities": {
+      "get": {
+        "operationId": "getAdminRatingSourceCapabilities",
+        "parameters": [
+          {
+            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRatingSourceCapabilities"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current; no body.",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Discover the rating source support in this build, such as sources metadata plugins declare. Support does not promise that any plugin declares a source.",
+        "tags": [
+          "admin-settings"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-conditional": true
+      }
+    },
     "/api/v2/admin/recommendations/status": {
       "get": {
         "operationId": "getAdminRecommendationsStatus",
@@ -93914,6 +95167,163 @@
         "x-silo-demo-restricted": true,
         "x-silo-guarded": true,
         "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/request-users/{user_id}/usage": {
+      "get": {
+        "operationId": "getAdminRequestUserUsage",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque identifier",
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRequestUserUsage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Report an account's effective request policy and quota use.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
         "x-silo-service-backed": true
       }
     },
@@ -108644,6 +110054,760 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/admin/users/{id}/devices": {
+      "get": {
+        "description": "Every device the account's apps registered and every device holding saved per-device settings, most recently seen first. The collection is bounded by the account's devices and is not paginated.",
+        "operationId": "listAdminUserDevices",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque identifier",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionAdminUserDevice"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List an account's devices.",
+        "tags": [
+          "admin-users"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/users/{id}/download-subscriptions": {
+      "get": {
+        "operationId": "listAdminUserDownloadSubscriptions",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque identifier",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size; default 50, maximum 200",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "description": "Page size; default 50, maximum 200",
+              "examples": [
+                50
+              ],
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque cursor from page.next_cursor",
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "description": "Opaque cursor from page.next_cursor",
+              "maxLength": 8192,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only rows of this household profile",
+            "explode": false,
+            "in": "query",
+            "name": "profile_id",
+            "schema": {
+              "description": "Only rows of this household profile",
+              "maxLength": 1024,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only rows of this device",
+            "explode": false,
+            "in": "query",
+            "name": "device_id",
+            "schema": {
+              "description": "Only rows of this device",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionAdminUserDownloadSubscription"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List an account's series download monitors.",
+        "tags": [
+          "admin-users"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/users/{id}/downloads": {
+      "get": {
+        "description": "Every managed (device) download row of the account in every status, newest first. Ephemeral web downloads are not listed. A row the app never reported on stays ready.",
+        "operationId": "listAdminUserDownloads",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque identifier",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size; default 50, maximum 200",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "description": "Page size; default 50, maximum 200",
+              "examples": [
+                50
+              ],
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque cursor from page.next_cursor",
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "description": "Opaque cursor from page.next_cursor",
+              "maxLength": 8192,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only rows of this household profile",
+            "explode": false,
+            "in": "query",
+            "name": "profile_id",
+            "schema": {
+              "description": "Only rows of this household profile",
+              "maxLength": 1024,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only rows of this device",
+            "explode": false,
+            "in": "query",
+            "name": "device_id",
+            "schema": {
+              "description": "Only rows of this device",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionAdminUserDownload"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List an account's managed device downloads.",
+        "tags": [
+          "admin-users"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/users/{id}/downloads/summary": {
+      "get": {
+        "operationId": "getAdminUserDownloadSummary",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque identifier",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserDownloadSummary"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Total an account's managed device downloads.",
+        "tags": [
+          "admin-users"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/admin/users/{id}/impersonate": {
       "post": {
         "operationId": "impersonateAdminUser",
@@ -110233,6 +112397,187 @@
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
         "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/users/{id}/watch-summary": {
+      "get": {
+        "operationId": "getAdminUserWatchSummary",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque identifier",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Window length in days, ending now",
+            "explode": false,
+            "in": "query",
+            "name": "days",
+            "schema": {
+              "default": 30,
+              "description": "Window length in days, ending now",
+              "format": "int64",
+              "maximum": 365,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Only attempts by this household profile",
+            "explode": false,
+            "in": "query",
+            "name": "profile_id",
+            "schema": {
+              "description": "Only attempts by this household profile",
+              "maxLength": 1024,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserWatchSummary"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Total an account's finalized plays over recent days.",
+        "tags": [
+          "admin-users"
+        ],
+        "x-silo-class": "acting_admin",
         "x-silo-service-backed": true
       }
     },
@@ -115632,6 +117977,207 @@
           "auth"
         ],
         "x-silo-class": "public",
+        "x-silo-conditional": true,
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/capabilities/ratings": {
+      "get": {
+        "operationId": "getRatingsCapability",
+        "parameters": [
+          {
+            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RatingsCapability"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current; no body.",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Whether item detail carries the ratings list, and the rating sources title pages and cards show.",
+        "tags": [
+          "catalog"
+        ],
+        "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
         "x-silo-service-backed": true
       }
@@ -157562,9 +160108,11 @@
             }
           },
           {
+            "description": "App name; when non-blank, the X-Client-* headers supply the whole client identity and X-Silo-Client* is ignored",
             "in": "header",
             "name": "X-Client-Name",
             "schema": {
+              "description": "App name; when non-blank, the X-Client-* headers supply the whole client identity and X-Silo-Client* is ignored",
               "type": "string"
             }
           },
@@ -157607,6 +160155,54 @@
             "in": "header",
             "name": "X-Client-OS-Version",
             "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "App name the first-party clients send on every request; when non-blank and X-Client-Name is absent or blank, the X-Silo-Client* headers supply the client identity",
+            "in": "header",
+            "name": "X-Silo-Client",
+            "schema": {
+              "description": "App name the first-party clients send on every request; when non-blank and X-Client-Name is absent or blank, the X-Silo-Client* headers supply the client identity",
+              "examples": [
+                "Silo Android TV"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Marketing version paired with X-Silo-Client",
+            "in": "header",
+            "name": "X-Silo-Client-Version",
+            "schema": {
+              "description": "Marketing version paired with X-Silo-Client",
+              "examples": [
+                "1.0.0"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque build identifier paired with X-Silo-Client",
+            "in": "header",
+            "name": "X-Silo-Client-Build",
+            "schema": {
+              "description": "Opaque build identifier paired with X-Silo-Client",
+              "examples": [
+                "5"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque distribution channel paired with X-Silo-Client",
+            "in": "header",
+            "name": "X-Silo-Client-Channel",
+            "schema": {
+              "description": "Opaque distribution channel paired with X-Silo-Client",
+              "examples": [
+                "release"
+              ],
               "type": "string"
             }
           }
@@ -158353,9 +160949,11 @@
             }
           },
           {
+            "description": "App name; when non-blank, the X-Client-* headers supply the whole client identity and X-Silo-Client* is ignored",
             "in": "header",
             "name": "X-Client-Name",
             "schema": {
+              "description": "App name; when non-blank, the X-Client-* headers supply the whole client identity and X-Silo-Client* is ignored",
               "type": "string"
             }
           },
@@ -158398,6 +160996,54 @@
             "in": "header",
             "name": "X-Client-OS-Version",
             "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "App name the first-party clients send on every request; when non-blank and X-Client-Name is absent or blank, the X-Silo-Client* headers supply the client identity",
+            "in": "header",
+            "name": "X-Silo-Client",
+            "schema": {
+              "description": "App name the first-party clients send on every request; when non-blank and X-Client-Name is absent or blank, the X-Silo-Client* headers supply the client identity",
+              "examples": [
+                "Silo Android TV"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Marketing version paired with X-Silo-Client",
+            "in": "header",
+            "name": "X-Silo-Client-Version",
+            "schema": {
+              "description": "Marketing version paired with X-Silo-Client",
+              "examples": [
+                "1.0.0"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque build identifier paired with X-Silo-Client",
+            "in": "header",
+            "name": "X-Silo-Client-Build",
+            "schema": {
+              "description": "Opaque build identifier paired with X-Silo-Client",
+              "examples": [
+                "5"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque distribution channel paired with X-Silo-Client",
+            "in": "header",
+            "name": "X-Silo-Client-Channel",
+            "schema": {
+              "description": "Opaque distribution channel paired with X-Silo-Client",
+              "examples": [
+                "release"
+              ],
               "type": "string"
             }
           }
@@ -159153,9 +161799,11 @@
             }
           },
           {
+            "description": "App name; when non-blank, the X-Client-* headers supply the whole client identity and X-Silo-Client* is ignored",
             "in": "header",
             "name": "X-Client-Name",
             "schema": {
+              "description": "App name; when non-blank, the X-Client-* headers supply the whole client identity and X-Silo-Client* is ignored",
               "type": "string"
             }
           },
@@ -159198,6 +161846,54 @@
             "in": "header",
             "name": "X-Client-OS-Version",
             "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "App name the first-party clients send on every request; when non-blank and X-Client-Name is absent or blank, the X-Silo-Client* headers supply the client identity",
+            "in": "header",
+            "name": "X-Silo-Client",
+            "schema": {
+              "description": "App name the first-party clients send on every request; when non-blank and X-Client-Name is absent or blank, the X-Silo-Client* headers supply the client identity",
+              "examples": [
+                "Silo Android TV"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Marketing version paired with X-Silo-Client",
+            "in": "header",
+            "name": "X-Silo-Client-Version",
+            "schema": {
+              "description": "Marketing version paired with X-Silo-Client",
+              "examples": [
+                "1.0.0"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque build identifier paired with X-Silo-Client",
+            "in": "header",
+            "name": "X-Silo-Client-Build",
+            "schema": {
+              "description": "Opaque build identifier paired with X-Silo-Client",
+              "examples": [
+                "5"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque distribution channel paired with X-Silo-Client",
+            "in": "header",
+            "name": "X-Silo-Client-Channel",
+            "schema": {
+              "description": "Opaque distribution channel paired with X-Silo-Client",
+              "examples": [
+                "release"
+              ],
               "type": "string"
             }
           },
@@ -159424,9 +162120,11 @@
             }
           },
           {
+            "description": "App name; when non-blank, the X-Client-* headers supply the whole client identity and X-Silo-Client* is ignored",
             "in": "header",
             "name": "X-Client-Name",
             "schema": {
+              "description": "App name; when non-blank, the X-Client-* headers supply the whole client identity and X-Silo-Client* is ignored",
               "type": "string"
             }
           },
@@ -159469,6 +162167,54 @@
             "in": "header",
             "name": "X-Client-OS-Version",
             "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "App name the first-party clients send on every request; when non-blank and X-Client-Name is absent or blank, the X-Silo-Client* headers supply the client identity",
+            "in": "header",
+            "name": "X-Silo-Client",
+            "schema": {
+              "description": "App name the first-party clients send on every request; when non-blank and X-Client-Name is absent or blank, the X-Silo-Client* headers supply the client identity",
+              "examples": [
+                "Silo Android TV"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Marketing version paired with X-Silo-Client",
+            "in": "header",
+            "name": "X-Silo-Client-Version",
+            "schema": {
+              "description": "Marketing version paired with X-Silo-Client",
+              "examples": [
+                "1.0.0"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque build identifier paired with X-Silo-Client",
+            "in": "header",
+            "name": "X-Silo-Client-Build",
+            "schema": {
+              "description": "Opaque build identifier paired with X-Silo-Client",
+              "examples": [
+                "5"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque distribution channel paired with X-Silo-Client",
+            "in": "header",
+            "name": "X-Silo-Client-Channel",
+            "schema": {
+              "description": "Opaque distribution channel paired with X-Silo-Client",
+              "examples": [
+                "release"
+              ],
               "type": "string"
             }
           },
@@ -159695,9 +162441,11 @@
             }
           },
           {
+            "description": "App name; when non-blank, the X-Client-* headers supply the whole client identity and X-Silo-Client* is ignored",
             "in": "header",
             "name": "X-Client-Name",
             "schema": {
+              "description": "App name; when non-blank, the X-Client-* headers supply the whole client identity and X-Silo-Client* is ignored",
               "type": "string"
             }
           },
@@ -159740,6 +162488,54 @@
             "in": "header",
             "name": "X-Client-OS-Version",
             "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "App name the first-party clients send on every request; when non-blank and X-Client-Name is absent or blank, the X-Silo-Client* headers supply the client identity",
+            "in": "header",
+            "name": "X-Silo-Client",
+            "schema": {
+              "description": "App name the first-party clients send on every request; when non-blank and X-Client-Name is absent or blank, the X-Silo-Client* headers supply the client identity",
+              "examples": [
+                "Silo Android TV"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Marketing version paired with X-Silo-Client",
+            "in": "header",
+            "name": "X-Silo-Client-Version",
+            "schema": {
+              "description": "Marketing version paired with X-Silo-Client",
+              "examples": [
+                "1.0.0"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque build identifier paired with X-Silo-Client",
+            "in": "header",
+            "name": "X-Silo-Client-Build",
+            "schema": {
+              "description": "Opaque build identifier paired with X-Silo-Client",
+              "examples": [
+                "5"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque distribution channel paired with X-Silo-Client",
+            "in": "header",
+            "name": "X-Silo-Client-Channel",
+            "schema": {
+              "description": "Opaque distribution channel paired with X-Silo-Client",
+              "examples": [
+                "release"
+              ],
               "type": "string"
             }
           },

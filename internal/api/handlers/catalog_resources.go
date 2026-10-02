@@ -289,7 +289,8 @@ func (h *CatalogResourceHandler) enrichItemDetail(ctx context.Context, v ItemVie
 		applyEffectiveEditionPreference(detail.SeasonUserData, &detail.EffectiveVersionEditionKey)
 	}
 
-	if !h.items.canViewFilePaths(ctx) {
+	detail.ViewerCurates = h.items.canViewFilePaths(ctx)
+	if !detail.ViewerCurates {
 		for i := range detail.Versions {
 			detail.Versions[i].FilePath = ""
 		}

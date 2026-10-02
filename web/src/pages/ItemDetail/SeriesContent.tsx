@@ -32,6 +32,7 @@ import MediaUserActionBar from "./components/MediaUserActionBar";
 import { SeasonCarouselSkeleton, RecommendationGridSkeleton } from "./components/SectionSkeletons";
 import { getSeasonDisplayTitle, resolveSeriesPrimaryAction } from "./itemDetailLayout";
 import { canCurateMetadata as canCurateMetadataForUser } from "@/lib/permissions";
+import { cn } from "@/lib/utils";
 
 export default function SeriesContent({
   item,
@@ -134,13 +135,7 @@ export default function SeriesContent({
                 episodeCount={episodeCount || undefined}
               />
             }
-            scoreRow={
-              <ScoreRow
-                ratingImdb={item.rating_imdb}
-                ratingRtCritic={item.rating_rt_critic}
-                ratingRtAudience={item.rating_rt_audience}
-              />
-            }
+            scoreRow={<ScoreRow ratings={item.ratings} />}
             overview={item.overview}
             overviewTranslating={overviewTranslating}
             onTranslateOverview={onTranslateOverview}
@@ -187,7 +182,10 @@ export default function SeriesContent({
 
           {(seasonsLoading || seasons.length > 0) && (
             <div
-              className="page-shell series-detail-navigation"
+              className={cn(
+                "page-shell series-detail-navigation",
+                !singleSeason && "series-detail-rail",
+              )}
               role="region"
               aria-label="Seasons and episodes"
             >

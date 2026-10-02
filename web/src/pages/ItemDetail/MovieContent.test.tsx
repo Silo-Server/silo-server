@@ -220,6 +220,7 @@ function makeMovieItem(overrides: Partial<ItemDetail & { type: "movie" }> = {}):
     rating_tmdb: null,
     rating_rt_critic: null,
     rating_rt_audience: null,
+    ratings: [],
     imdb_id: "",
     tmdb_id: "",
     tvdb_id: "",

@@ -84,4 +84,34 @@ describe("ImageSelectorTab", () => {
 
     expect(onApplyPendingChange).toHaveBeenCalledWith(true);
   });
+
+  it("tells season editors to update metadata plugins when galleries are incomplete", () => {
+    mocks.useItemImages.mockReturnValue({
+      data: { images: [], current: {} },
+      isLoading: false,
+      isError: false,
+    });
+    mocks.useApplyItemImage.mockReturnValue({ mutate: vi.fn(), isPending: false });
+
+    render(<ImageSelectorTab item={item("season")} enabled />);
+
+    expect(
+      screen.getByText(/check for plugin updates and update TMDB and TVDB/i),
+    ).toBeInTheDocument();
+  });
+
+  it("does not show the season plugin notice for series images", () => {
+    mocks.useItemImages.mockReturnValue({
+      data: { images: [], current: {} },
+      isLoading: false,
+      isError: false,
+    });
+    mocks.useApplyItemImage.mockReturnValue({ mutate: vi.fn(), isPending: false });
+
+    render(<ImageSelectorTab item={item("series")} enabled />);
+
+    expect(
+      screen.queryByText(/check for plugin updates and update TMDB and TVDB/i),
+    ).not.toBeInTheDocument();
+  });
 });

@@ -404,6 +404,25 @@ of S3) can lag behind a write. That configuration alone runs the
 `verify_artwork_delivery` task and consults the verified-keys manifest when
 choosing which variant to advertise.
 
+A verdict is scoped to the delivery configuration and is current only until
+the revision is published again. Publication records exact keys only after
+every upload succeeded, so it clears the verdict's timestamp and keeps its
+keys. Until the next check, the catalog advertises the published keys and
+demotes a rung that a ladder version added, unless the stale verdict already
+delivered that rung. Catalog reads never probe storage or delivery.
+
+The verifier claims revisions without a verdict since their latest publication
+before routine rechecks, so repaired artwork is not queued behind the catalog.
+A complete verdict is rechecked after a week. An incomplete verdict or a probe
+error retries after 15 minutes, doubling per consecutive failure up to a day.
+A probe error keeps the previous verdict. A run keeps claiming batches for
+about a minute and stops early when every probe in a batch fails. After a
+restart, and hourly after that, the verifier moves verdicts recorded under
+another delivery scope back to the pending lane. The hourly sweep catches
+verdicts that replicas still on the old configuration record during a rolling
+restart. Each run saves its counts, including probe errors,
+the last error, and the overdue backlog, as the task's result data.
+
 Local URLs are root-relative, which is enough for clients of the API listener
 and for the Jellyfin and Audiobookshelf compatibility listeners, which mount
 the same signed artwork route so their cover redirects resolve on their own

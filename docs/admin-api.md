@@ -1451,6 +1451,13 @@ lists with an empty `username`; an item no longer in the catalog lists with an e
 `media_title` and `media_type`. The stored client address is not part of this projection,
 matching v1. A missing database returns 503; storage errors are masked as 500.
 
+Two v2-only additions have no v1 counterpart. `ended_after` (an RFC 3339 instant) keeps
+attempts that ended at or after it; an unparsable value is 422, and the cursor binds it
+like the other filters, so a cursor from one window is refused under another. Each entry
+also carries `series_title`, `season_number` and `episode_number`: for an episode attempt
+they come from the catalog episode and its series (`series_title` is empty when the series
+left the catalog); for anything else they are empty and null.
+
 The administrator history page and the user detail watch-history tab read this route
 under the authority captured when the query was created, keyed by an opaque authority
 generation, and refuse a page whose account, server, profile or PIN authority changed while

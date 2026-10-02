@@ -28,11 +28,15 @@ import type {
 import { uploadAdminPlugin } from "@/api/v2/adminPluginUpload";
 import type { ChunkedUploadProgress } from "@/api/v2/adminPluginUpload";
 import { adminKeys } from "../keys";
+import { refreshRatingChoice } from "../ratingsSurfaceRefresh";
 
 const ADMIN_STALE_TIME = 30_000;
 export const CHECK_PLUGIN_UPDATES_TASK_KEY = "check_plugin_updates";
 
 function invalidatePluginQueries(queryClient: ReturnType<typeof useQueryClient>) {
+  // Installing, updating, enabling, disabling or removing a plugin can change
+  // the ratings metadata plugins declare, so rating surfaces refresh too.
+  refreshRatingChoice(queryClient);
   return Promise.all([
     queryClient.invalidateQueries({ queryKey: adminKeys.pluginRepositories() }),
     queryClient.invalidateQueries({ queryKey: adminKeys.pluginCatalog() }),

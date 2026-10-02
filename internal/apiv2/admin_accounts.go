@@ -60,6 +60,10 @@ type AdminAccountCapabilitiesOutputBody struct {
 	PasswordResetLink    bool `json:"password_reset_link" doc:"Whether createAdminUserPasswordReset can return a link to share; needs the server's public URL"`
 	PasswordResetEmail   bool `json:"password_reset_email" doc:"Whether createAdminUserPasswordReset can email the link; needs the public URL and a configured mail server"`
 	OwnershipTransfer    bool `json:"ownership_transfer" doc:"Whether transferAdminUserOwnership can make another enabled admin the server Owner"`
+	AccountDevices       bool `json:"account_devices" doc:"Whether listAdminUserDevices can list an account's registered devices"`
+	WatchSummary         bool `json:"watch_summary" doc:"Whether getAdminUserWatchSummary can total an account's finalized plays"`
+	AccountDownloads     bool `json:"account_downloads" doc:"Whether listAdminUserDownloads, getAdminUserDownloadSummary and listAdminUserDownloadSubscriptions are available"`
+	RequestUsage         bool `json:"request_usage" doc:"Whether getAdminRequestUserUsage can report an account's request quota use"`
 }
 
 type AdminAccountPolicyInput struct {
@@ -118,8 +122,9 @@ type AdminAccountImpersonateInput struct {
 	UserAgent string `header:"User-Agent"`
 }
 type AdminAccountProfile struct {
-	ID   ID     `json:"id"`
-	Name string `json:"name"`
+	ID         ID              `json:"id"`
+	Name       string          `json:"name"`
+	LastSeenAt NullableInstant `json:"last_seen_at" doc:"Latest time any device reported this profile; null when no device has"`
 }
 type AdminAccountProfilesOutput struct {
 	Body Collection[AdminAccountProfile]
@@ -238,6 +243,10 @@ func registerAdminAccounts(reg *Registry) {
 		}
 		out.Body.AccessGroups = reg.deps.AdminAccessGroups != nil
 		out.Body.ExactIdentityFilter = reg.deps.AdminUsers != nil
+		out.Body.AccountDevices = reg.deps.AdminAccountDevices != nil
+		out.Body.WatchSummary = reg.deps.AdminWatchSummary != nil
+		out.Body.AccountDownloads = reg.deps.AdminAccountDownloads != nil
+		out.Body.RequestUsage = reg.deps.AdminRequestUsage != nil
 		if resets := reg.deps.PasswordResets; resets != nil {
 			caps := resets.PasswordResetCapabilities(ctx)
 			out.Body.PasswordResetLink, out.Body.PasswordResetEmail = caps.Link, caps.Email
@@ -341,7 +350,7 @@ func registerAdminAccounts(reg *Registry) {
 		}
 		items := make([]AdminAccountProfile, 0, len(rows))
 		for _, row := range rows {
-			items = append(items, AdminAccountProfile{ID: ID(row.ID), Name: row.Name})
+			items = append(items, AdminAccountProfile{ID: ID(row.ID), Name: row.Name, LastSeenAt: nullableInstantOf(row.LastSeenAt)})
 		}
 		return &AdminAccountProfilesOutput{Body: Paginated(items, "")}, nil
 	})
