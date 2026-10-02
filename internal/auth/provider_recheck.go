@@ -572,10 +572,10 @@ func (r *ProviderRecheck) applyInSavepoint(ctx context.Context, tx pgx.Tx, ident
 	}
 	if checkStatus == CheckStatusActive {
 		// The role sync did not apply, so a demotion the provider asked
-		// for is still pending: the check stays as due as it was, and the
-		// next refresh asks again.
-		if _, err := tx.Exec(ctx, `UPDATE plugin_auth_identities SET last_checked_at = $2 WHERE id = $1`,
-			identity.ID, identity.LastCheckedAt); err != nil {
+		// for is still pending. Force another check even if the previous
+		// answer was due only under the shorter outage retry interval.
+		if _, err := tx.Exec(ctx, `UPDATE plugin_auth_identities SET last_checked_at = NULL WHERE id = $1`,
+			identity.ID); err != nil {
 			return fmt.Errorf("keeping the provider re-check due: %w", err)
 		}
 	}

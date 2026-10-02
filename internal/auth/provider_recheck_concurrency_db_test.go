@@ -11,6 +11,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 func TestProviderRecheckSingleConnectionDB(t *testing.T) {
@@ -214,5 +217,64 @@ func TestProviderRecheckKeepsRefusalOnUserLockFailureDB(t *testing.T) {
 	}
 	if _, err := NewAPIKeyRepository(env.pool).GetByKey(ctx, key.Key); err == nil {
 		t.Fatal("the refused account kept its API key")
+	}
+}
+
+func TestProviderRecheckActiveRoleFailureAfterUnavailableRetriesDB(t *testing.T) {
+	env := newRecheckEnv(t, "unavailable_role_retry", "rt-1")
+	ctx := t.Context()
+	env.recheck.writeWait = 100 * time.Millisecond
+	env.setSetting(t, config.AuthProviderRecheckIntervalSettingKey, "12h")
+	if _, err := env.pool.Exec(ctx, `UPDATE users SET role = 'admin' WHERE id = $1`, env.user.ID); err != nil {
+		t.Fatal(err)
+	}
+	env.user.Role = models.RoleAdmin
+	env.localAccount(t, "retry_spare", models.RoleAdmin)
+	sessionID, refresh := env.session(t, true)
+	if _, err := env.pool.Exec(ctx, `UPDATE plugin_auth_identities SET last_check_status = 'unavailable',
+		last_checked_at = NOW() - INTERVAL '3 minutes' WHERE id = $1`, env.identityID); err != nil {
+		t.Fatal(err)
+	}
+	env.checker.respond = func(context.Context, *pluginv1.CheckAccountRequest) (*pluginv1.CheckAccountResponse, error) {
+		return &pluginv1.CheckAccountResponse{
+			Status: pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_ACTIVE,
+			Account: &pluginv1.AuthenticateResponse{
+				ManagedRole:  pluginv1.AuthManagedRole_AUTH_MANAGED_ROLE_USER,
+				RefreshState: refreshState("rt-2"),
+			},
+		}, nil
+	}
+	holder, err := env.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback(context.WithoutCancel(ctx)) }()
+	if _, err := holder.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, adminRoleLock); err != nil {
+		t.Fatal(err)
+	}
+	_, refreshErr := env.svc.Refresh(ctx, refresh)
+	if err := holder.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if refreshErr == nil || errors.Is(refreshErr, ErrSessionRevoked) {
+		t.Fatalf("blocked role sync = %v, want a failure", refreshErr)
+	}
+	identity := env.identityState(t)
+	if identity.LastCheckStatus != CheckStatusActive || identity.LastCheckedAt != nil || env.storedToken(t) != "rt-2" {
+		t.Fatal("failed role sync lost the rotated state or did not leave the active answer due")
+	}
+	user, err := NewUserRepository(env.pool).GetByID(ctx, env.user.ID)
+	if err != nil || user.Role != models.RoleAdmin || env.sessionRow(t, sessionID).RevokedAt != nil {
+		t.Fatalf("failed role sync changed the role or revoked the session: user = %+v, err = %v", user, err)
+	}
+	if _, err := env.svc.Refresh(ctx, refresh); !errors.Is(err, ErrSessionRevoked) {
+		t.Fatalf("retried demotion = %v, want ErrSessionRevoked", err)
+	}
+	if env.checker.callCount() != 2 || env.checker.states[1] != "rt-2" {
+		t.Fatalf("calls = %d, states = %v; want a second check with rt-2", env.checker.callCount(), env.checker.states)
+	}
+	user, err = NewUserRepository(env.pool).GetByID(ctx, env.user.ID)
+	if err != nil || user.Role != models.RoleUser || env.sessionRow(t, sessionID).RevokedAt == nil {
+		t.Fatalf("retried role sync did not demote and revoke the session: user = %+v, err = %v", user, err)
 	}
 }

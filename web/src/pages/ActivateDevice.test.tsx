@@ -164,6 +164,55 @@ it("follows an approval whose reload failed", async () => {
   await screen.findByText("Your TV is signed in.");
 });
 
+it.each(["success", "failure"])(
+  "keeps a new code pending when the previous approval returns %s",
+  async (outcome) => {
+    let finishApproval = () => {};
+    const approval = new Promise((resolve, reject) => {
+      finishApproval = () =>
+        outcome === "success"
+          ? resolve({ status: "approved" })
+          : reject(new Error("approval failed"));
+    });
+    let firstLookup = true;
+    const second = { ...pending, user_code: "9153-6204", device_name: "Bedroom TV" };
+    vi.mocked(v2).mockImplementation(((
+      op: string,
+      options?: { body?: unknown; query?: { code?: string } },
+    ) => {
+      if (op === "GET /api/v2/auth/device") {
+        if (options?.query?.code === "91536204") return Promise.resolve(second);
+        if (firstLookup) {
+          firstLookup = false;
+          return Promise.resolve(pending);
+        }
+        return Promise.reject(new Error("reload failed"));
+      }
+      decisions.push({ op, body: options?.body });
+      return approval;
+    }) as never);
+
+    mount("/activate?code=48217730");
+    await screen.findByText("Sign in Living room TV?");
+    fireEvent.click(screen.getByRole("button", { name: "Sign in TV" }));
+    fireEvent.click(screen.getByRole("button", { name: "Enter another code" }));
+    const input = await screen.findByLabelText("Enter the code on your TV");
+    fireEvent.change(input, { target: { value: "91536204" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await screen.findByText("Sign in Bedroom TV?");
+
+    await act(async () => finishApproval());
+    expect(screen.getByText("9153 6204")).toBeTruthy();
+    expect(screen.getByText("Sign in Bedroom TV?")).toBeTruthy();
+    expect(screen.queryByText("Done. Your TV is signing in.")).toBeNull();
+    expect(screen.queryByText("Couldn't sign in the TV. Try again.")).toBeNull();
+    expect(screen.getByRole("button", { name: "Sign in TV" }).hasAttribute("disabled")).toBe(false);
+    expect(decisions).toEqual([
+      { op: "POST /api/v2/auth/device/approve", body: { code: "48217730" } },
+    ]);
+  },
+);
+
 it("keeps watching past the first minutes and through a failed lookup", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   const approved = { ...pending, status: "approved" };

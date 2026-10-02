@@ -40,6 +40,15 @@ function platformLabel(platform: string) {
 }
 
 export default function ActivateDevice() {
+  const [searchParams] = useSearchParams();
+  const token = searchParams.get("token") ?? "";
+  const code = compactDeviceCode(searchParams.get("code") ?? "");
+  // Each request owns its lookups, decisions and watch state. A response
+  // for a previous code cannot update the next request's card.
+  return <ActivateDeviceRequest key={token ? `token:${token}` : `code:${code}`} />;
+}
+
+function ActivateDeviceRequest() {
   const { user, loading, setupLoading, logoutOfSiloOnly, isImpersonating } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
