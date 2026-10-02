@@ -687,7 +687,7 @@ func (s *PlaybackSessionStore) findDeviceClientPlaySessionID(
 		if routeItemID != "" && !mediaSourceIDsEqual(session.RouteItemID, routeItemID) {
 			continue
 		}
-		if mediaSourceID != "" && findMediaSource(&session, mediaSourceID) == nil {
+		if mediaSourceID != "" && !reservationServesMediaSource(&session, findMediaSource(&session, mediaSourceID)) {
 			continue
 		}
 		if session.ClientPlaySessionID == clientPlaySessionID {
@@ -764,12 +764,20 @@ func streamGrantMatches(session *PlaybackSession, routeItemID, mediaSourceID, cl
 		!mediaSourceIDsEqual(session.RouteItemID, routeItemID) {
 		return false
 	}
-	for _, source := range session.MediaSources {
-		if mediaSourceIDsEqual(source.ID, mediaSourceID) {
-			return true
-		}
+	return reservationServesMediaSource(session, findMediaSource(session, mediaSourceID))
+}
+
+// reservationServesMediaSource reports whether a play can account for a report
+// or stream naming source. Every static reservation for an item offers all of
+// its editions, so source membership alone matches each reservation a client
+// made; a reservation that recorded its edition only serves that edition.
+// Negotiated plays keep every offered source, since a client may switch
+// editions within one PlaybackInfo play.
+func reservationServesMediaSource(session *PlaybackSession, source *PlaybackMediaSource) bool {
+	if session == nil || source == nil {
+		return false
 	}
-	return false
+	return session.StaticPlaybackKey == "" || session.SelectedMediaFileID <= 0 || source.FileID == session.SelectedMediaFileID
 }
 
 // FindByRoute resolves a route item/media-source identifier to a compat playback session.
@@ -819,6 +827,9 @@ func (s *PlaybackSessionStore) findByRoute(
 		}
 		for _, source := range session.MediaSources {
 			if mediaSourceIDsEqual(source.ID, routeID) {
+				if !reservationServesMediaSource(&session, &source) {
+					break
+				}
 				if requireUnique && matchedSession != nil {
 					return nil, nil, false
 				}
