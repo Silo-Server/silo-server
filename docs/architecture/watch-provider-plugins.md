@@ -22,14 +22,19 @@ That key is unique and cannot be claimed by a plugin.
 The three first-party plugins keep the keys of the built-ins they replaced:
 `trakt`, `simkl`, and `mdblist`. As a result, every connection, stored token,
 export record, rating and dropped-show agreement, and history source those
-built-ins wrote stays valid, and nothing is re-encrypted or renamed. Two rules
+built-ins wrote stays valid, and nothing is re-encrypted or renamed. Three rules
 protect this:
 
 - **Only a Silo-managed repository can claim a legacy key.** A plugin gets one
   only when its installation came from a repository whose `source_kind` is
   `silo`. Plugin IDs are not reserved, so a third-party plugin that reuses
   `silo.watchprovider.trakt` gets a per-installation key. It never receives
-  the tokens of existing Trakt connections.
+  the tokens of existing Trakt connections. Replacing an installation records
+  the new package's repository, and none for an upload, so a package from
+  elsewhere installed over a Silo one loses the key too.
+- **One installation holds a legacy key.** If two Silo-managed installations of
+  the same plugin exist, for example after two API nodes auto-installed it at
+  once, the older one registers and the other is skipped with a warning.
 - **The plugins must reproduce the built-ins' data formats.** They return the
   same `provider_item_key` formats the built-ins produced. Stored list, rating,
   dropped, and export rows match by that key.
@@ -49,7 +54,14 @@ Provider app credentials, such as the Trakt and Simkl client ID and secret,
 live in the plugin's global config entry `app`. On reload, the host copies the
 legacy `watchsync.<key>.client_id` and `client_secret` server settings into that
 entry when the plugin has none saved. Existing tokens were issued to that app,
-so the plugin must keep using it.
+so the plugin must keep using it. The copy is a create-only write, so it never
+overwrites config an admin or another node saved first, and it runs until it
+succeeds once (`watchsync.plugin_app_seeded.<key>`). Clearing the plugin's app
+config later does not bring the old values back.
+
+A plugin connection reports `credentials_configured` as false until every
+global config entry its manifest marks required has a saved value, as the
+built-ins did for their app credentials.
 
 Trakt collections and trending send profile tokens issued to the Trakt app, so
 they read the client ID from the Trakt plugin. They fall back to the legacy
@@ -57,10 +69,15 @@ setting only when no Trakt plugin is configured.
 
 ## Upgrade path
 
-At startup, plugin auto-update installs a first-party plugin from the Silo
-repository when its key still has connections and the migration has not
-completed. The migration completes when the plugin first registers under its
-key. Every node records that in the `watchsync.plugin_migration.<key>` server
-setting, and the plugin then leaves the install list, so an admin who later
-uninstalls it does not get it back. Until the plugin registers, connections
-under its key stay stored but do not sync.
+Plugin auto-update installs a first-party plugin from the Silo repository when
+its key still has connections and the migration has not completed. It does so
+at startup and on every later update check, so a catalog that was unreachable at
+boot is retried. The migration completes when the plugin first registers under
+its key, which records `watchsync.plugin_migration.<key>`. The plugin then
+leaves the install list, so an admin who later uninstalls it does not get it
+back. Until the plugin registers, connections under its key stay stored but do
+not sync.
+
+Lifecycle hooks fire only on the node that changed a plugin, so every API node
+also rebuilds its watch provider registry every two minutes. A plugin another
+node installed reaches every node's registry within that interval.

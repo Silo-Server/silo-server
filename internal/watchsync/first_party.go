@@ -79,31 +79,49 @@ type pluginConfigSeeder interface {
 // client_secret server settings) into the first-party plugin that now serves
 // that key. Existing connections hold tokens issued to that app, so the plugin
 // must use the same one. A plugin that already has app credentials keeps them.
+// It runs until the plugin holds app credentials (or there were none to carry
+// over), so app credentials an admin later clears from the plugin are not
+// restored from the old settings.
 func SeedFirstPartyAppConfig(
 	ctx context.Context,
 	providerKey string,
 	installationID int,
-	settings ServerSettingReader,
+	store FirstPartyMigrationStore,
 	seeder pluginConfigSeeder,
 ) (bool, error) {
-	if _, firstParty := FirstPartyPluginID(providerKey); !firstParty || settings == nil || seeder == nil {
+	if _, firstParty := FirstPartyPluginID(providerKey); !firstParty || store == nil || seeder == nil {
 		return false, nil
 	}
-	clientID, err := settings.GetServerSetting(ctx, "watchsync."+providerKey+"."+appClientIDField)
+	doneKey := firstPartyAppSeededSettingKey(providerKey)
+	done, err := store.GetServerSetting(ctx, doneKey)
+	if err != nil || done != "" {
+		return false, err
+	}
+	seeded := false
+	clientID, err := store.GetServerSetting(ctx, "watchsync."+providerKey+"."+appClientIDField)
 	if err != nil {
 		return false, err
 	}
-	if strings.TrimSpace(clientID) == "" {
-		return false, nil
+	if strings.TrimSpace(clientID) != "" {
+		clientSecret, err := store.GetServerSetting(ctx, "watchsync."+providerKey+"."+appClientSecretField)
+		if err != nil {
+			return false, err
+		}
+		seeded, err = seeder.SeedGlobalConfig(ctx, installationID, firstPartyAppConfigKey, map[string]any{
+			appClientIDField:     clientID,
+			appClientSecretField: clientSecret,
+		})
+		if err != nil {
+			return false, err
+		}
 	}
-	clientSecret, err := settings.GetServerSetting(ctx, "watchsync."+providerKey+"."+appClientSecretField)
-	if err != nil {
-		return false, err
-	}
-	return seeder.SeedGlobalConfig(ctx, installationID, firstPartyAppConfigKey, map[string]any{
-		appClientIDField:     clientID,
-		appClientSecretField: clientSecret,
-	})
+	return seeded, store.SetServerSetting(ctx, doneKey, "done")
+}
+
+// firstPartyAppSeededSettingKey records that a provider's app credentials
+// were carried over to its first-party plugin, or that there were none.
+func firstPartyAppSeededSettingKey(providerKey string) string {
+	return "watchsync.plugin_app_seeded." + providerKey
 }
 
 // FirstPartyMigrationStore holds what decides whether a former built-in
@@ -152,7 +170,12 @@ func MarkFirstPartyMigrated(ctx context.Context, store FirstPartyMigrationStore,
 	if _, firstParty := FirstPartyPluginID(providerKey); !firstParty || store == nil {
 		return nil
 	}
-	return store.SetServerSetting(ctx, firstPartyMigrationSettingKey(providerKey), "plugin")
+	key := firstPartyMigrationSettingKey(providerKey)
+	marked, err := store.GetServerSetting(ctx, key)
+	if err != nil || marked != "" {
+		return err
+	}
+	return store.SetServerSetting(ctx, key, "plugin")
 }
 
 // AppClientID returns the provider app client ID that the plugin serving

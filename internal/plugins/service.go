@@ -451,7 +451,7 @@ func (s *Service) InstallBinaryUpload(ctx context.Context, binaryData []byte) (*
 
 	oldInstallation := existing[0]
 	result, err = s.replaceStopped(ctx, oldInstallation, func() (*InstallResult, error) {
-		return s.installer.replaceBinary(ctx, oldInstallation, binaryData, actualChecksum, manifest)
+		return s.installer.replaceBinary(ctx, oldInstallation, binaryData, actualChecksum, manifest, nil)
 	})
 	if err != nil {
 		return nil, err

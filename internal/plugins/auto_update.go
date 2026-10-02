@@ -230,9 +230,9 @@ func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (
 		}
 	}
 
-	if opts.AutoInstallDefaults {
+	if toInstall := s.pluginsToAutoInstall(ctx, opts, &summary); len(toInstall) > 0 {
 		latestOfficial := latestCatalogEntriesForSource(entries, RepositorySourceSilo)
-		for _, pluginID := range s.pluginsToAutoInstall(ctx, &summary) {
+		for _, pluginID := range toInstall {
 			if _, installed := installedPluginIDs[pluginID]; installed {
 				continue
 			}
@@ -333,11 +333,16 @@ func (s *AutoUpdateService) ensureManagedRepositoryRows(ctx context.Context) (in
 	return 1, nil
 }
 
-// pluginsToAutoInstall returns the default plugins followed by the required
-// ones. A failure to list the required plugins is recorded and leaves just
-// the defaults.
-func (s *AutoUpdateService) pluginsToAutoInstall(ctx context.Context, summary *AutoUpdateSummary) []string {
-	pluginIDs := slices.Clone(defaultPluginIDs)
+// pluginsToAutoInstall returns the default plugins, when opts asks for them,
+// followed by the required ones. Required plugins are installed on every
+// check, not only at startup, so a catalog that was unreachable at boot does
+// not leave them missing until the next restart. A failure to list the
+// required plugins is recorded and leaves just the defaults.
+func (s *AutoUpdateService) pluginsToAutoInstall(ctx context.Context, opts AutoUpdateOptions, summary *AutoUpdateSummary) []string {
+	var pluginIDs []string
+	if opts.AutoInstallDefaults {
+		pluginIDs = slices.Clone(defaultPluginIDs)
+	}
 	if s.requiredPlugins == nil {
 		return pluginIDs
 	}

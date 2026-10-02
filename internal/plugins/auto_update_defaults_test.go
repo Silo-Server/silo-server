@@ -112,3 +112,28 @@ func TestAutoUpdateKeepsInstallingDefaultsWhenRequiredPluginsFail(t *testing.T) 
 		t.Fatalf("failed operations = %d, want the required-plugin lookup recorded", summary.FailedOperations)
 	}
 }
+
+// The daily update check runs without default installs. Required plugins still
+// install there, so a catalog that was unreachable at startup does not leave
+// them missing until the next restart.
+func TestAutoUpdateInstallsRequiredPluginsOnLaterChecks(t *testing.T) {
+	catalog := &fakeAutoUpdateCatalog{
+		entries: []CatalogEntry{
+			{RepositoryID: 7, SourceKind: RepositorySourceSilo, Manifest: &pluginv1.PluginManifest{PluginId: "silo.theintrodb", Version: "1.0.0"}},
+			{RepositoryID: 7, SourceKind: RepositorySourceSilo, Manifest: &pluginv1.PluginManifest{PluginId: "silo.watchprovider.simkl", Version: "0.2.0"}},
+		},
+		resolved: &ResolvedCatalogInstall{RepositoryID: 7, ArchiveURL: "https://plugins.example.test/simkl", Checksum: "test-checksum"},
+	}
+	service := NewAutoUpdateService(&fakeAutoUpdateRepositories{}, &fakeAutoUpdateInstallations{}, catalog, &fakeAutoUpdateInstaller{}, nil, nil, nil)
+	service.SetRequiredPlugins(func(context.Context) ([]string, error) {
+		return []string{"silo.watchprovider.simkl"}, nil
+	})
+	summary, err := service.Check(t.Context(), AutoUpdateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.DefaultPluginsInstalled != 1 || len(catalog.resolveRequests) != 1 ||
+		catalog.resolveRequests[0].PluginID != "silo.watchprovider.simkl" {
+		t.Fatalf("installs = %d, resolved = %+v, want only the required Simkl plugin", summary.DefaultPluginsInstalled, catalog.resolveRequests)
+	}
+}

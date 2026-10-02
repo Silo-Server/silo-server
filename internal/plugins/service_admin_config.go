@@ -108,7 +108,12 @@ func (s *Service) SetGlobalConfigWithClears(
 	if !saved {
 		return fmt.Errorf("persist plugin config: concurrent updates did not settle")
 	}
+	return s.afterGlobalConfigSaved(ctx, installationID)
+}
 
+// afterGlobalConfigSaved restarts the plugin on its new configuration and
+// notifies lifecycle hooks.
+func (s *Service) afterGlobalConfigSaved(ctx context.Context, installationID int) error {
 	var stopErr error
 	if s.host != nil {
 		if err := s.host.Stop(installationID); err != nil && !errors.Is(err, pluginhost.ErrClientNotFound) {

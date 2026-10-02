@@ -1706,6 +1706,22 @@ func main() {
 			}
 			pluginService.AddLifecycleHook(reloadWatchProviders)
 			reloadWatchProviders(appCtx)
+			// Lifecycle hooks fire only on the node that changed a plugin. Every
+			// API node also reconciles on a timer, so a plugin another node
+			// installed, removed, or reconfigured reaches this node's registry,
+			// and a reload that hit a transient error is retried.
+			go func() {
+				ticker := time.NewTicker(watchSyncPluginReconcileInterval)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-appCtx.Done():
+						return
+					case <-ticker.C:
+						reloadWatchProviders(appCtx)
+					}
+				}
+			}()
 		}
 		if deps.MarkerRegistry != nil && deps.MarkerProviderConfig != nil {
 			markerPluginResolver := markers.NewPluginResolverAdapter(pluginService)
@@ -4125,6 +4141,20 @@ type markerPluginCapabilityStore interface {
 	ListCapabilities(ctx context.Context, installationID int) ([]*plugins.Capability, error)
 }
 
+// watchSyncPluginService is the plugin service surface a watch provider
+// reload uses.
+type watchSyncPluginService interface {
+	InstalledFromSiloRepository(ctx context.Context, installation *plugins.Installation) (bool, error)
+	WatchSyncProviderClient(ctx context.Context, installationID int, capabilityID string) (*pluginhost.WatchSyncProviderClient, error)
+	WatchSyncProviderConfig(ctx context.Context, installationID int) (*pluginv1.WatchSyncProviderConfig, error)
+	SeedGlobalConfig(ctx context.Context, installationID int, key string, value map[string]any) (bool, error)
+	WatchSyncConfigReady(ctx context.Context, installationID int) (bool, error)
+}
+
+// watchSyncPluginReconcileInterval is how often every API node rebuilds its
+// watch provider registry from the installed plugins.
+const watchSyncPluginReconcileInterval = 2 * time.Minute
+
 // firstPartyInstallation is a first-party watch provider plugin found by a
 // reload, whose app credentials may still need carrying over.
 type firstPartyInstallation struct {
@@ -4136,7 +4166,7 @@ func reloadWatchSyncPluginProviders(
 	ctx context.Context,
 	registry *watchsync.Registry,
 	store markerPluginCapabilityStore,
-	service *plugins.Service,
+	service watchSyncPluginService,
 	repository watchsync.PluginCredentialRepository,
 	migration watchsync.FirstPartyMigrationStore,
 ) error {
@@ -4173,7 +4203,7 @@ func replaceWatchSyncPluginProviders(
 	ctx context.Context,
 	registry *watchsync.Registry,
 	store markerPluginCapabilityStore,
-	service *plugins.Service,
+	service watchSyncPluginService,
 	repository watchsync.PluginCredentialRepository,
 	migration watchsync.FirstPartyMigrationStore,
 ) ([]firstPartyInstallation, error) {
@@ -4182,6 +4212,7 @@ func replaceWatchSyncPluginProviders(
 
 	var providers []watchsync.Provider
 	var firstParty []firstPartyInstallation
+	claimedLegacyKeys := make(map[string]bool)
 	if store == nil || service == nil {
 		return nil, registry.ReplacePluginProviders(providers)
 	}
@@ -4238,6 +4269,26 @@ func replaceWatchSyncPluginProviders(
 				continue
 			}
 			providerKey := watchsync.PluginProviderKey(installation.ID, installation.PluginID, capability.ID, siloManaged)
+			if legacyKey := watchsync.PluginProviderKey(installation.ID, installation.PluginID, capability.ID, true); legacyKey != providerKey {
+				slog.WarnContext(ctx, "first-party watch provider plugin was not installed from the Silo repository; connections made with it before stay unsynced",
+					"component", "app",
+					"installation_id", installation.ID,
+					"plugin_id", installation.PluginID,
+					"provider", legacyKey,
+				)
+			}
+			if _, legacy := watchsync.FirstPartyPluginID(providerKey); legacy && claimedLegacyKeys[providerKey] {
+				// Two Silo-managed installations of one first-party plugin, for
+				// example from API nodes that auto-installed it at the same
+				// time. The older one keeps the key; registering both would
+				// fail the whole reload.
+				slog.WarnContext(ctx, "skip duplicate first-party watch provider plugin installation",
+					"component", "app",
+					"installation_id", installation.ID,
+					"provider", providerKey,
+				)
+				continue
+			}
 			provider, err := watchsync.NewPluginProvider(watchsync.PluginProviderOptions{
 				InstallationID:         installation.ID,
 				ProviderKey:            providerKey,
@@ -4250,6 +4301,9 @@ func replaceWatchSyncPluginProviders(
 				},
 				ResolveConfig: func(callCtx context.Context, installationID int) (*pluginv1.WatchSyncProviderConfig, error) {
 					return service.WatchSyncProviderConfig(callCtx, installationID)
+				},
+				ConfigReady: func(callCtx context.Context, installationID int) (bool, error) {
+					return service.WatchSyncConfigReady(callCtx, installationID)
 				},
 				Repository: repository,
 			})
@@ -4264,6 +4318,7 @@ func replaceWatchSyncPluginProviders(
 			}
 			providers = append(providers, provider)
 			if _, ok := watchsync.FirstPartyPluginID(providerKey); ok {
+				claimedLegacyKeys[providerKey] = true
 				firstParty = append(firstParty, firstPartyInstallation{installationID: installation.ID, providerKey: providerKey})
 			}
 		}

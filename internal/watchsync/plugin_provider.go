@@ -36,6 +36,10 @@ type WatchSyncPluginClient interface {
 type WatchSyncPluginClientResolver func(context.Context, int, string) (WatchSyncPluginClient, error)
 type WatchSyncPluginConfigResolver func(context.Context, int) (*pluginv1.WatchSyncProviderConfig, error)
 
+// WatchSyncPluginConfigReady reports whether an installation has the global
+// config its manifest requires.
+type WatchSyncPluginConfigReady func(context.Context, int) (bool, error)
+
 type PluginCredentialRepository interface {
 	UpsertConnection(context.Context, Connection) (Connection, error)
 }
@@ -49,7 +53,9 @@ type PluginProviderOptions struct {
 	ConnectionConfigSchema []*pluginv1.ConfigSchema
 	ResolveClient          WatchSyncPluginClientResolver
 	ResolveConfig          WatchSyncPluginConfigResolver
-	Repository             PluginCredentialRepository
+	// ConfigReady is optional; without it the plugin counts as configured.
+	ConfigReady WatchSyncPluginConfigReady
+	Repository  PluginCredentialRepository
 }
 
 type PluginProvider struct {
@@ -63,6 +69,7 @@ type PluginProvider struct {
 	supportedMedia         map[pluginv1.WatchSyncMediaType]struct{}
 	resolveClient          WatchSyncPluginClientResolver
 	resolveConfig          WatchSyncPluginConfigResolver
+	configReady            WatchSyncPluginConfigReady
 	repository             PluginCredentialRepository
 	now                    func() time.Time
 }
@@ -114,6 +121,7 @@ func NewPluginProvider(options PluginProviderOptions) (*PluginProvider, error) {
 		supportedMedia:         supportedMedia,
 		resolveClient:          options.ResolveClient,
 		resolveConfig:          options.ResolveConfig,
+		configReady:            options.ConfigReady,
 		repository:             options.Repository,
 		now:                    time.Now,
 	}, nil
@@ -153,6 +161,16 @@ func (p *PluginProvider) ConnectionConfigSchema() []hostplugins.ConfigSchemaView
 }
 
 func (p *PluginProvider) usesHostPluginConfig() {}
+
+// CredentialsConfigured reports whether the plugin has the global config its
+// manifest requires, such as a provider app's client ID, so a profile can
+// connect.
+func (p *PluginProvider) CredentialsConfigured(ctx context.Context) (bool, error) {
+	if p.configReady == nil {
+		return true, nil
+	}
+	return p.configReady(ctx, p.installationID)
+}
 
 func (p *PluginProvider) authoritativeRefreshProvider() {}
 

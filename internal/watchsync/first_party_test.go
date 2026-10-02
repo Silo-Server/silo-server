@@ -113,6 +113,13 @@ func TestSeedFirstPartyAppConfig(t *testing.T) {
 		t.Fatalf("seeded %d %q %v", seeder.installationID, seeder.key, seeder.value)
 	}
 
+	// Seeding runs once: app credentials an admin clears from the plugin later
+	// are not restored from the old settings.
+	again := &fakeConfigSeeder{}
+	if seeded, err := SeedFirstPartyAppConfig(t.Context(), "trakt", 5, store, again); err != nil || seeded || again.value != nil {
+		t.Fatalf("second seed = %t, err = %v, value = %v; want nothing", seeded, err, again.value)
+	}
+
 	for _, key := range []string{"simkl", "plugin:4:floppy"} {
 		seeder := &fakeConfigSeeder{}
 		seeded, err := SeedFirstPartyAppConfig(t.Context(), key, 5, store, seeder)
@@ -154,5 +161,50 @@ func TestServiceAppClientID(t *testing.T) {
 	}
 	if got, err := service.AppClientID(t.Context(), "simkl"); err != nil || got != "" {
 		t.Fatalf("AppClientID(simkl) = %q, %v; want empty for an unregistered key", got, err)
+	}
+}
+
+// A plugin that needs provider app credentials reports whether its required
+// config is saved, so clients can hold back Connect until an admin sets it up.
+func TestPluginConnectionStatusReportsAppConfigReadiness(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		ready WatchSyncPluginConfigReady
+		want  bool
+	}{
+		{name: "required config saved", ready: func(context.Context, int) (bool, error) { return true, nil }, want: true},
+		{name: "required config missing", ready: func(context.Context, int) (bool, error) { return false, nil }, want: false},
+		{name: "config check failed", ready: func(context.Context, int) (bool, error) { return false, errors.New("down") }, want: true},
+		{name: "no config check", want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			provider, err := NewPluginProvider(PluginProviderOptions{
+				InstallationID: 4,
+				ProviderKey:    "trakt",
+				CapabilityID:   "trakt",
+				Descriptor: &pluginv1.WatchSyncProviderDescriptor{
+					AuthMethods:   []pluginv1.WatchSyncAuthMethod{pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_DEVICE_CODE},
+					ExportWatched: true,
+				},
+				ResolveClient: func(context.Context, int, string) (WatchSyncPluginClient, error) {
+					return nil, errors.New("not used")
+				},
+				ConfigReady: tc.ready,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			registry := NewRegistry()
+			if err := registry.ReplacePluginProviders([]Provider{provider}); err != nil {
+				t.Fatal(err)
+			}
+			status, err := NewService(newServiceFakeRepo(), registry).GetConnectionStatus(t.Context(), 7, "profile-1", "trakt")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status.CredentialsConfigured != tc.want {
+				t.Fatalf("credentials_configured = %t, want %t", status.CredentialsConfigured, tc.want)
+			}
+		})
 	}
 }

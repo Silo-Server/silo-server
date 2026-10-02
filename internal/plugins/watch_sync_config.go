@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
-	"github.com/jackc/pgx/v5"
 )
 
 // WatchSyncProviderConfig returns the installation's global configuration in
@@ -102,6 +101,67 @@ func watchSyncConfigString(value any) (string, error) {
 	return string(encoded), nil
 }
 
+// WatchSyncConfigReady reports whether every global config entry the
+// installation's manifest marks required has a saved value, so a watch-sync
+// plugin that needs provider app credentials can say whether a profile can
+// connect yet.
+func (s *Service) WatchSyncConfigReady(ctx context.Context, installationID int) (bool, error) {
+	manifest, err := s.manifestForInstallation(ctx, installationID, false)
+	if err != nil {
+		return false, err
+	}
+	var required []string
+	for _, schema := range manifest.GetGlobalConfigSchema() {
+		if schema.GetRequired() {
+			required = append(required, schema.GetKey())
+		}
+	}
+	if len(required) == 0 {
+		return true, nil
+	}
+	if s.configs == nil {
+		return false, nil
+	}
+	configs, err := s.configs.ListGlobalConfigs(ctx, installationID)
+	if err != nil {
+		return false, fmt.Errorf("list watch sync plugin config: %w", err)
+	}
+	saved := savedGlobalConfigKeys(configs)
+	for _, key := range required {
+		if !saved[key] {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// globalConfigHasValue reports whether the installation has a saved, non-empty
+// global config entry for key.
+func (s *Service) globalConfigHasValue(ctx context.Context, installationID int, key string) (bool, error) {
+	configs, err := s.configs.ListGlobalConfigs(ctx, installationID)
+	if err != nil {
+		return false, fmt.Errorf("list plugin config: %w", err)
+	}
+	return savedGlobalConfigKeys(configs)[key], nil
+}
+
+// savedGlobalConfigKeys lists the config keys with at least one non-blank value.
+func savedGlobalConfigKeys(configs []*RuntimeConfig) map[string]bool {
+	saved := make(map[string]bool, len(configs))
+	for _, config := range configs {
+		if config == nil {
+			continue
+		}
+		for _, value := range config.Value {
+			if text, isText := value.(string); !isText || strings.TrimSpace(text) != "" {
+				saved[config.Key] = true
+				break
+			}
+		}
+	}
+	return saved
+}
+
 // InstalledFromSiloRepository reports whether an installation came from a
 // Silo-managed plugin repository, rather than from a repository an admin added
 // or from an uploaded archive.
@@ -110,7 +170,7 @@ func (s *Service) InstalledFromSiloRepository(ctx context.Context, installation 
 		return false, nil
 	}
 	repository, err := s.repositories.GetByID(ctx, *installation.RepositoryID)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, ErrRepositoryNotFound) {
 		return false, nil
 	}
 	if err != nil {
@@ -120,21 +180,15 @@ func (s *Service) InstalledFromSiloRepository(ctx context.Context, installation 
 }
 
 // SeedGlobalConfig saves value under key only when the installation has no
-// saved value for key yet, keeping just the fields the manifest declares for
-// that key. It reports whether it saved anything. Use it to carry settings
-// over from elsewhere without overwriting what an admin entered.
+// saved config for key yet, keeping just the fields the manifest declares for
+// that key. It reports whether it saved the seed; false with no error means
+// the key already holds a value. The write is create-only, so a seed that
+// races an admin's save, or another node's seed, never overwrites what landed
+// first. A seed that ends with no value saved, because the manifest declares
+// none of its fields or the saved entry is empty, is an error.
 func (s *Service) SeedGlobalConfig(ctx context.Context, installationID int, key string, value map[string]any) (bool, error) {
 	if s.configs == nil {
 		return false, nil
-	}
-	configs, err := s.configs.ListGlobalConfigs(ctx, installationID)
-	if err != nil {
-		return false, fmt.Errorf("list plugin config: %w", err)
-	}
-	for _, config := range configs {
-		if config != nil && config.Key == key && len(config.Value) > 0 {
-			return false, nil
-		}
 	}
 	manifest, err := s.manifestForInstallation(ctx, installationID, false)
 	if err != nil {
@@ -153,10 +207,24 @@ func (s *Service) SeedGlobalConfig(ctx context.Context, installationID int, key 
 		seed[field] = fieldValue
 	}
 	if len(seed) == 0 {
+		return false, fmt.Errorf("plugin config %q declares none of the fields to seed", key)
+	}
+	if err := ValidateGlobalConfigValue(manifest, key, seed); err != nil {
+		return false, &ConfigValidationError{Message: err.Error(), Cause: err}
+	}
+	created, err := s.configs.CompareAndSwapGlobalConfig(ctx, installationID, key, seed, nil)
+	if err != nil {
+		return false, fmt.Errorf("persist plugin config: %w", err)
+	}
+	if !created {
+		ready, err := s.globalConfigHasValue(ctx, installationID, key)
+		if err != nil {
+			return false, err
+		}
+		if !ready {
+			return false, fmt.Errorf("plugin config %q was not saved", key)
+		}
 		return false, nil
 	}
-	if err := s.SetGlobalConfig(ctx, installationID, key, seed); err != nil {
-		return false, err
-	}
-	return true, nil
+	return true, s.afterGlobalConfigSaved(ctx, installationID)
 }
