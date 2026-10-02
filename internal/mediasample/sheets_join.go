@@ -224,7 +224,7 @@ func (a *sheetAssembler) readPacketTiming(path string) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 0, 64<<10), maxStderrLine)
 	for scanner.Scan() {

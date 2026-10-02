@@ -22,6 +22,8 @@ const logLevel = "repeat+info"
 // errorLogLevel logs only errors, for runs that read nothing from the log.
 const errorLogLevel = "error"
 
+const disableDataOption = "-dn"
+
 // buildArgs turns a validated request into ffmpeg arguments for one attempt.
 // It also returns bytes for ffmpeg's stdin: the ffconcat list of a Samples
 // request, whose inpoints are offset by inputStart (the input's container
@@ -85,12 +87,12 @@ func buildArgs(req Request, attempt Attempt, hw hardwareDecode, inputStart float
 	if speech := req.speech(); speech != nil {
 		// Raw samples on stdout; see speech.go.
 		return append(args, "-t", duration,
-			"-map", "0:a:"+strconv.Itoa(speech.AudioStream), "-vn", "-sn", "-dn",
+			"-map", "0:a:"+strconv.Itoa(speech.AudioStream), "-vn", "-sn", disableDataOption,
 			"-af", speech.filter(), "-ac", "1",
 			"-f", "s16le", "-acodec", "pcm_s16le", "-"), nil, nil
 	}
 	if audio := req.Audio; req.hasAudioOutput() {
-		args = append(args, "-t", duration, "-vn", "-sn", "-dn")
+		args = append(args, "-t", duration, "-vn", "-sn", disableDataOption)
 		if audio.Silence != nil {
 			args = append(args, "-af", fmt.Sprintf("silencedetect=noise=%ddB:duration=%s",
 				audio.Silence.NoiseDB, formatSeconds(audio.Silence.MinSeconds)))
@@ -104,7 +106,7 @@ func buildArgs(req Request, attempt Attempt, hw hardwareDecode, inputStart float
 	}
 	if req.Stats != nil {
 		args = append(args, "-t", duration,
-			"-map", "0:V:0", "-an", "-sn", "-dn",
+			"-map", "0:V:0", "-an", "-sn", disableDataOption,
 			videoFilterOption, req.statsGraph(attempt, hw.Accel).filter,
 			"-f", "null", "-")
 	}
@@ -141,7 +143,7 @@ func buildSamplesArgs(req Request, attempt Attempt, hw hardwareDecode, args []st
 	}
 	args = append(args, concatInputArgs...)
 	args = append(args, "-i", concatListInput,
-		"-map", "0:V:0", "-an", "-sn", "-dn",
+		"-map", "0:V:0", "-an", "-sn", disableDataOption,
 		videoFilterOption, req.statsGraph(attempt, hw.Accel).filter,
 		"-f", "null", "-")
 	return args, list, nil

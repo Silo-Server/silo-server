@@ -147,7 +147,7 @@ func ProtocolTrickplayExtraction(schemas huma.Registry) workerprotocol.Operation
 		Responses: map[string]*huma.Response{
 			"200": {Description: "The run's sheets", Content: map[string]*huma.MediaType{jsonMedia: {Schema: result}}},
 			"400": {Description: "Invalid request or unapproved input path", Content: map[string]*huma.MediaType{jsonMedia: problem, textMedia: text}},
-			"401": {Description: "Unauthorized", Content: map[string]*huma.MediaType{textMedia: text}},
+			"401": {Description: http.StatusText(http.StatusUnauthorized), Content: map[string]*huma.MediaType{textMedia: text}},
 			"422": {Description: "Sampling failed; permanent names a cause in the file itself", Content: map[string]*huma.MediaType{jsonMedia: problem}},
 			"503": {Description: "Node busy with another trickplay run, re-probing, or unconfigured", Content: map[string]*huma.MediaType{jsonMedia: problem, textMedia: text}},
 		},

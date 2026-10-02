@@ -326,7 +326,7 @@ func (a attemptRun) sheets(req Request, times []float64, inputStart float64) (Re
 		if err != nil {
 			return Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonOutput, Err: fmt.Errorf("create packet timing directory: %w", err)}
 		}
-		defer os.RemoveAll(dir)
+		defer func() { _ = os.RemoveAll(dir) }()
 		packetTimingPath = filepath.Join(dir, "packets.framecrc")
 	}
 	args, stdinBytes, err := buildSheetsArgs(req, a.attempt, a.hw, inputStart, a.sheetsGraph, packetTimingPath)
