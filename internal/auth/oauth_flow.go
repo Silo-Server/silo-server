@@ -261,16 +261,23 @@ func sameOrigin(scheme, host string, base *url.URL) bool {
 	return hostWithPort(host, scheme) == hostWithPort(base.Host, base.Scheme)
 }
 
+// hostWithPort is host with the scheme's default port when it names none.
+// An IP literal is in its canonical form, so two spellings of one IPv6
+// address ([::1] and [0:0:0:0:0:0:0:1]) compare equal.
 func hostWithPort(host, scheme string) string {
 	host = strings.ToLower(strings.TrimSpace(host))
-	if _, _, err := net.SplitHostPort(host); err == nil {
-		return host
+	name, port, err := net.SplitHostPort(host)
+	if err != nil {
+		name = strings.Trim(host, "[]")
+		port = "80"
+		if strings.EqualFold(scheme, schemeHTTPS) {
+			port = "443"
+		}
 	}
-	port := "80"
-	if strings.EqualFold(scheme, schemeHTTPS) {
-		port = "443"
+	if ip := net.ParseIP(name); ip != nil {
+		name = ip.String()
 	}
-	return net.JoinHostPort(strings.Trim(host, "[]"), port)
+	return net.JoinHostPort(name, port)
 }
 
 // providerErrorReason maps an OAuth error the provider redirected back with

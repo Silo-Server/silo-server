@@ -88,7 +88,7 @@ func registerOAuthHandshakes(reg *Registry) {
 		out := new(OAuthHandshakeCapabilitiesOutput)
 		if svc := reg.deps.OAuth; svc != nil {
 			out.Body.Available = true
-			out.Body.Native = true
+			out.Body.Native = svc.NativeSignInAvailable()
 			out.Body.Linking = svc.LinkingAvailable()
 			out.Body.ProviderLogout = svc.ProviderLogoutAvailable()
 			out.Body.SelectAccount = true

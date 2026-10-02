@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -1163,7 +1164,7 @@ func (h *OAuthHandler) IssueLinkTicket(ctx context.Context, userID, installation
 		return OAuthLinkTicket{}, ErrLinkTicketUnavailable
 	}
 	if _, _, err := h.deps.ResolveClient(ctx, installationID); err != nil {
-		return OAuthLinkTicket{}, ErrUnknownAuthInstallation
+		return OAuthLinkTicket{}, linkClientError(err)
 	}
 	if _, err := confirmLocalPassword(ctx, h.deps.Users, userID, password); err != nil {
 		return OAuthLinkTicket{}, err
@@ -1183,6 +1184,17 @@ func (h *OAuthHandler) IssueLinkTicket(ctx context.Context, userID, installation
 	}
 	auditAuthEvent(ctx, "identity_link_started", auditInstallationID, installationID, auditUserID, userID)
 	return ticket, nil
+}
+
+// linkClientError classifies a ResolveClient failure of a linking flow: an
+// installation that is no OAuth provider is ErrUnknownAuthInstallation, and
+// a provider whose plugin cannot be reached is ErrProviderUnavailable, which
+// the client may retry.
+func linkClientError(err error) error {
+	if errors.Is(err, ErrUnknownAuthInstallation) {
+		return ErrUnknownAuthInstallation
+	}
+	return fmt.Errorf("%w: %w", ErrProviderUnavailable, err)
 }
 
 // Link flow errors.
@@ -1216,7 +1228,7 @@ func (h *OAuthHandler) StartLink(ctx context.Context, userID int, prefix, ticket
 		return OAuthStartResult{}, ErrOAuthLinkTicketInvalid
 	}
 	if _, _, err := h.deps.ResolveClient(ctx, ticket.InstallationID); err != nil {
-		return OAuthStartResult{}, ErrUnknownAuthInstallation
+		return OAuthStartResult{}, linkClientError(err)
 	}
 	result, err := h.startFlow(ctx, OAuthStartRequest{InstallID: ticket.InstallationID, Prefix: prefix, Next: next}, userID)
 	if err != nil {

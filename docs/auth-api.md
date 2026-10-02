@@ -294,7 +294,8 @@ same problem type.
 ### OAuth sign-in flows
 
 `getOAuthHandshakeCapabilities` (`GET /auth/oauth/capabilities`) reports
-`available`, `native` (the native-app handoff), `linking` (link tickets and
+`available`, `native` (the native-app handoff, which needs a configured public
+URL), `linking` (link tickets and
 the linking operations), `provider_logout` and `select_account` (the starts
 accept `prompt=select_account`). Directory linking needs no handshake, so
 `getExternalSignInCapabilities` reports it. The flows are raw redirects; the rules behind them are in

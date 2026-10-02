@@ -2206,7 +2206,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			resolveClient := func(ctx context.Context, installationID int) (auth.OAuthClient, string, error) {
 				pp := authService.FindOAuthInstallation(installationID)
 				if pp == nil {
-					return nil, "", errors.New("plugin not found")
+					return nil, "", auth.ErrUnknownAuthInstallation
 				}
 				c, err := pp.OAuthClient(ctx)
 				if err != nil {

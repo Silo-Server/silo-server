@@ -172,14 +172,21 @@ func (s *Service) CompatLogin(ctx context.Context, username, password, deviceNam
 	return s.loginWithProvider(ctx, providerID, username, password, deviceName, ip, true)
 }
 
-// PasswordRoutesLocally reports whether a password sign-in of username
-// without a provider is checked by the local provider (see
-// routePasswordLogin). A compatibility surface that may retry with a
-// different password uses it to keep retries away from a directory, where
-// each failed bind counts toward the account's lockout.
-func (s *Service) PasswordRoutesLocally(ctx context.Context, username string) (bool, error) {
+// CompatLoginLocal is CompatLogin for a retry with a different password: it
+// checks the password only when the name routes to the local provider, and
+// answers ErrInvalidCredentials without contacting a directory otherwise,
+// where each failed bind counts toward the account's lockout. Routing is
+// decided again here, so a name that moved to the directory since the first
+// attempt gets no second bind.
+func (s *Service) CompatLoginLocal(ctx context.Context, username, password, deviceName, ip string) (*TokenPair, *models.User, error) {
 	providerID, err := s.routePasswordLogin(ctx, username)
-	return providerID == LocalProviderID, err
+	if err != nil {
+		return nil, nil, err
+	}
+	if providerID != LocalProviderID {
+		return nil, nil, ErrInvalidCredentials
+	}
+	return s.loginWithProvider(ctx, LocalProviderID, username, password, deviceName, ip, true)
 }
 
 func (s *Service) LoginWithProvider(

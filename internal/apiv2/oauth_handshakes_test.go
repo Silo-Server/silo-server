@@ -288,6 +288,12 @@ func TestOAuthHandshakeCapabilities(t *testing.T) {
 	if strings.Contains(rec.Body.String(), "credentials_linking") {
 		t.Fatal(rec.Body.String())
 	}
+
+	// Native sign-in needs a public URL to finish on.
+	rec = do(t, NewHandler(Dependencies{OAuth: noPublicURLOAuth{}}), "GET", Prefix+"/auth/oauth/capabilities", "", nil)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"available":true`) || !strings.Contains(rec.Body.String(), `"native":false`) {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
 }
 
 func TestAccountIdentityLinkTicket(t *testing.T) {

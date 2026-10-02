@@ -2,6 +2,7 @@ package jellycompat
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -99,5 +100,15 @@ func TestLoginPINConventionStaysLocalDB(t *testing.T) {
 	}
 	if len(directory.passwords) != 0 {
 		t.Fatalf("a local account's password reached the directory: %q", directory.passwords)
+	}
+
+	// The base-password retry decides the route again: a name that signs in
+	// with the directory by then gets no second bind, even with its old
+	// local password.
+	if _, _, err := svc.CompatLoginLocal(ctx, linked.Username, "correct horse battery", "test", ""); !errors.Is(err, auth.ErrInvalidCredentials) {
+		t.Fatalf("local retry of a directory name: %v, want ErrInvalidCredentials", err)
+	}
+	if len(directory.passwords) != 0 {
+		t.Fatalf("the local retry reached the directory: %q", directory.passwords)
 	}
 }

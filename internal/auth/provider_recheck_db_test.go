@@ -2103,3 +2103,41 @@ func TestProviderRecheckUpgradeAttachesPluginSessionsDB(t *testing.T) {
 		t.Fatalf("a session of an account with two identities attached to %d", *got)
 	}
 }
+
+// TestProviderRecheckIgnoresAnswerForUnlinkedIdentityDB: an identity
+// unlinked while the plugin answers takes the answer with it. A refusal of
+// the person the account no longer signs in as revokes nothing.
+func TestProviderRecheckIgnoresAnswerForUnlinkedIdentityDB(t *testing.T) {
+	env := newRecheckEnv(t, "unlinked", "rt-1")
+	ctx := t.Context()
+	if _, err := env.pool.Exec(ctx, `UPDATE plugin_auth_bindings SET enabled = true WHERE plugin_installation_id = $1`, env.installationID); err != nil {
+		t.Fatal(err)
+	}
+	key, err := NewAPIKeyRepository(env.pool).Create(ctx, env.user.ID, "unlinked", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	localSession, _ := env.session(t, false)
+	env.makeDue(t)
+	env.checker.respond = func(callCtx context.Context, _ *pluginv1.CheckAccountRequest) (*pluginv1.CheckAccountResponse, error) {
+		if _, err := env.pool.Exec(callCtx, `DELETE FROM plugin_auth_identities WHERE id = $1`, env.identityID); err != nil {
+			return nil, err
+		}
+		return &pluginv1.CheckAccountResponse{Status: pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_NOT_FOUND}, nil
+	}
+	if _, err := env.recheck.RecheckIdleIdentities(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if env.checker.callCount() != 1 {
+		t.Fatalf("calls = %d, want 1", env.checker.callCount())
+	}
+	if _, err := NewAPIKeyRepository(env.pool).GetByKey(ctx, key.Key); err != nil {
+		t.Fatalf("the unlinked account lost its API key: %v", err)
+	}
+	if env.sessionRow(t, localSession).RevokedAt != nil {
+		t.Fatal("the unlinked account lost its local session")
+	}
+	if len(env.revoked) != 0 {
+		t.Fatalf("revocation hook = %v", env.revoked)
+	}
+}

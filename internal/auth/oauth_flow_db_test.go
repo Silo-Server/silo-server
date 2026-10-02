@@ -357,7 +357,7 @@ func (rig *oauthDBRig) node() *OAuthHandler {
 		ResolveClient: func(ctx context.Context, id int) (OAuthClient, string, error) {
 			pp := svc.FindOAuthInstallation(id)
 			if pp == nil {
-				return nil, "", errors.New("plugin not found")
+				return nil, "", ErrUnknownAuthInstallation
 			}
 			c, err := pp.OAuthClient(ctx)
 			return c, pp.CapabilityID(), err

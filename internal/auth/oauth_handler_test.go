@@ -130,7 +130,7 @@ func newOAuthRig(t *testing.T) *oauthTestRig {
 		StateSecret: []byte("test-secret"),
 		ResolveClient: func(_ context.Context, id int) (OAuthClient, string, error) {
 			if id != 42 {
-				return nil, "", errors.New("plugin not found")
+				return nil, "", ErrUnknownAuthInstallation
 			}
 			return rig.client, "oidc", nil
 		},
@@ -1118,6 +1118,14 @@ func TestOAuthLinkTickets(t *testing.T) {
 	if _, err := rig.h.IssueLinkTicket(ctx, 7, 9, "right password"); !errors.Is(err, ErrUnknownAuthInstallation) {
 		t.Fatalf("unknown installation: %v", err)
 	}
+	resolve := rig.h.deps.ResolveClient
+	rig.h.deps.ResolveClient = func(context.Context, int) (OAuthClient, string, error) {
+		return nil, "", errors.New("plugin is not running")
+	}
+	if _, err := rig.h.IssueLinkTicket(ctx, 7, 42, "right password"); !errors.Is(err, ErrProviderUnavailable) {
+		t.Fatalf("unreachable plugin: %v", err)
+	}
+	rig.h.deps.ResolveClient = resolve
 	ticket, err := rig.h.IssueLinkTicket(ctx, 7, 42, "right password")
 	if err != nil || len(ticket.Ticket) < 32 || ticket.ExpiresAt.Before(time.Now().Add(4*time.Minute)) {
 		t.Fatalf("ticket = %+v, %v", ticket, err)
@@ -1456,7 +1464,7 @@ func TestOAuthRoutesRefuseCredentialsInstallations(t *testing.T) {
 	rig := newOAuthRig(t)
 	rig.h.deps.ResolveClient = func(_ context.Context, id int) (OAuthClient, string, error) {
 		if svc.FindOAuthInstallation(id) == nil {
-			return nil, "", errors.New("plugin not found")
+			return nil, "", ErrUnknownAuthInstallation
 		}
 		return rig.client, "oidc", nil
 	}
@@ -1521,4 +1529,28 @@ func completionCookieValue(t *testing.T, w *httptest.ResponseRecorder) string {
 		t.Fatalf("completion cookies = %v", paths)
 	}
 	return v1
+}
+
+func TestSameOriginComparesCanonicalHosts(t *testing.T) {
+	cases := []struct {
+		scheme, host, base string
+		want               bool
+	}{
+		{"https", "[::1]", "https://[0:0:0:0:0:0:0:1]", true},
+		{"https", "[::1]:443", "https://[0:0:0:0:0:0:0:1]", true},
+		{"http", "[::1]:8096", "http://[::1]:8096", true},
+		{"https", "Silo.Example.test", "https://silo.example.test:443", true},
+		{"https", "[::2]", "https://[::1]", false},
+		{"http", "silo.example.test", "https://silo.example.test", false},
+		{"https", "silo.example.test:8443", "https://silo.example.test", false},
+	}
+	for _, tc := range cases {
+		base, err := url.Parse(tc.base)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := sameOrigin(tc.scheme, tc.host, base); got != tc.want {
+			t.Errorf("sameOrigin(%q, %q, %q) = %v, want %v", tc.scheme, tc.host, tc.base, got, tc.want)
+		}
+	}
 }

@@ -213,3 +213,5 @@ func TestAdminPluginAuthCapabilitySignIn(t *testing.T) {
 type noPublicURLOAuth struct{ fakeOAuth }
 
 func (noPublicURLOAuth) PostLogoutRedirectURL() string { return "" }
+
+func (noPublicURLOAuth) NativeSignInAvailable() bool { return false }

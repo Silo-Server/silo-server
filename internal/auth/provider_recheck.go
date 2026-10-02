@@ -387,6 +387,16 @@ func (r *ProviderRecheck) recheckTx(ctx context.Context, tx pgx.Tx, identity *Li
 	}
 	checkStatus, account := r.ask(ctx, current, checker, state)
 	out.status, out.asked = checkStatus, true
+	// Unlinking takes no subject lock, so the identity may be gone by now;
+	// its account then keeps its credentials. The row lock holds an unlink
+	// back until this answer commits.
+	if err := tx.QueryRow(ctx, `SELECT id FROM plugin_auth_identities WHERE id = $1 FOR UPDATE`, current.ID).Scan(new(int64)); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			out.status = ""
+			return nil
+		}
+		return fmt.Errorf("locking provider identity: %w", err)
+	}
 	if checkStatus == CheckStatusActive || isRefusal(checkStatus) {
 		// The plugin answered for the account with the state it was given,
 		// so that state was current; the answer commits with this
