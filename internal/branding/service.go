@@ -40,13 +40,19 @@ func NewService(settings SettingsStore, store AssetStore) *Service {
 // HasStorage reports whether asset uploads can be served.
 func (s *Service) HasStorage() bool { return s != nil && s.store != nil }
 
+// settingsBatchReader is implemented by settings stores that read many keys
+// in one query.
+type settingsBatchReader interface {
+	GetMany(ctx context.Context, keys ...string) (map[string]string, error)
+}
+
 // Load reads the current branding configuration. Per-key read errors are
-// tolerated and fall back to defaults so the SPA always renders.
+// tolerated and fall back to defaults so the SPA always renders. It runs for
+// every page render and outgoing email, so it reads all keys in one query
+// when the store supports it.
 func (s *Service) Load(ctx context.Context) Snapshot {
-	get := func(key string) string {
-		v, _ := s.settings.Get(ctx, key)
-		return v
-	}
+	values := s.readSettings(ctx)
+	get := func(key string) string { return values[key] }
 	snap := Snapshot{
 		ServerName:    firstNonEmpty(get(KeyServerName), DefaultServerName),
 		LoginSubtitle: firstNonEmpty(get(KeyLoginSubtitle), DefaultLoginSubtitle),
@@ -60,6 +66,26 @@ func (s *Service) Load(ctx context.Context) Snapshot {
 		}
 	}
 	return snap
+}
+
+// readSettings returns every branding setting that has a value.
+func (s *Service) readSettings(ctx context.Context) map[string]string {
+	keys := []string{KeyServerName, KeyLoginSubtitle, KeyAccentColor, KeyDefaultTheme}
+	for _, spec := range assetSpecs {
+		keys = append(keys, spec.settingKey)
+	}
+	if batch, ok := s.settings.(settingsBatchReader); ok {
+		if values, err := batch.GetMany(ctx, keys...); err == nil {
+			return values
+		}
+	}
+	values := make(map[string]string, len(keys))
+	for _, key := range keys {
+		if v, err := s.settings.Get(ctx, key); err == nil && v != "" {
+			values[key] = v
+		}
+	}
+	return values
 }
 
 // UploadAsset validates, processes, and stores an uploaded branding image,

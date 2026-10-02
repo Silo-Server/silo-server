@@ -81,7 +81,9 @@
                     "server_name",
                     "expires_at",
                     "show_tour",
-                    "acceptance_available"
+                    "acceptance_available",
+                    "email_required",
+                    "note"
                   ]
                 },
                 {
@@ -1488,7 +1490,9 @@
                     "server_name",
                     "expires_at",
                     "show_tour",
-                    "acceptance_available"
+                    "acceptance_available",
+                    "email_required",
+                    "note"
                   ]
                 },
                 {

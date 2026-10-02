@@ -16,6 +16,7 @@
 package mail
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -70,6 +71,18 @@ type Message struct {
 	ReplyTo string
 	// Headers sets additional top-level headers (e.g. List-Unsubscribe).
 	Headers map[string]string
+	// Inline holds images the HTML body references as cid:<ContentID>.
+	Inline []InlineImage
+}
+
+// InlineImage is an image embedded in the message rather than linked, so it
+// renders without a remote-content prompt and without the recipient reaching
+// the server.
+type InlineImage struct {
+	ContentID   string // referenced from HTML as cid:<ContentID>
+	Filename    string
+	ContentType string
+	Data        []byte
 }
 
 // Sender is the feature-facing abstraction. Implementations must be safe for
@@ -240,6 +253,14 @@ func buildMessage(cfg *smtpConfig, msg Message) (*gomail.Msg, error) {
 		message.SetBodyString(gomail.TypeTextHTML, msg.HTMLBody)
 	default:
 		message.SetBodyString(gomail.TypeTextPlain, msg.TextBody)
+	}
+	for _, image := range msg.Inline {
+		if err := message.EmbedReader(image.Filename, bytes.NewReader(image.Data),
+			gomail.WithFileContentID("<"+image.ContentID+">"),
+			gomail.WithFileContentType(gomail.ContentType(image.ContentType)),
+		); err != nil {
+			return nil, fmt.Errorf("embed %s: %w", image.Filename, err)
+		}
 	}
 	return message, nil
 }

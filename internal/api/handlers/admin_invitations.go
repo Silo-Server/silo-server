@@ -155,7 +155,7 @@ func (h *AdminInvitationHandler) HandleResendInvitation(w http.ResponseWriter, r
 		return
 	}
 
-	result, err := h.service.Resend(r.Context(), id, int64(claims.UserID))
+	result, err := h.service.Resend(r.Context(), id, int64(claims.UserID), invitations.DeliveryDefault)
 	if err != nil {
 		if errors.Is(err, invitations.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "not_found", "Invitation not found")

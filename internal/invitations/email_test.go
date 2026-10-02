@@ -4,12 +4,14 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/mail"
 )
 
 func TestComposeInvitationEmailEscapesNote(t *testing.T) {
 	now := time.Now()
 	content := composeInvitationEmail(
-		"quick", "Silo", "marco@example.com",
+		mail.Brand{}, "quick", "Silo", "marco@example.com",
 		"https://silo.example.com/invite/tok",
 		`<script>alert("hi")</script>`,
 		now.Add(7*24*time.Hour), now,
@@ -30,7 +32,7 @@ func TestComposeInvitationEmailEscapesNote(t *testing.T) {
 
 func TestComposeInvitationEmailDefaultsInviter(t *testing.T) {
 	now := time.Now()
-	content := composeInvitationEmail("", "", "m@x.io", "https://x/invite/t", "", now.Add(time.Hour), now)
+	content := composeInvitationEmail(mail.Brand{}, "", "", "m@x.io", "https://x/invite/t", "", now.Add(time.Hour), now)
 	if content.Subject != "An admin invited you to Silo" {
 		t.Errorf("subject = %q", content.Subject)
 	}
