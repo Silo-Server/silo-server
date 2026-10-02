@@ -144,8 +144,7 @@ type Service struct {
 	inProgress     map[int]struct{}
 
 	transcodePool      *nodepool.TranscodePool
-	remoteMu           sync.Mutex
-	remoteReservations map[string]int
+	remoteReservations *nodepool.Reservations
 	remoteExtractor    remoteFrameExtractor
 
 	extractFrameFunc           func(ctx context.Context, file *models.MediaFile, seekSeconds float64, hdrPolicy string) ([]byte, string, error)
@@ -219,7 +218,7 @@ func NewService(
 		queuedNormal:        make(map[int]ChapterThumbnailRequest),
 		inProgress:          make(map[int]struct{}),
 		transcodePool:       transcodePool,
-		remoteReservations:  make(map[string]int),
+		remoteReservations:  &nodepool.Reservations{},
 		remoteExtractor:     &httpRemoteFrameExtractor{},
 		clock:               time.Now,
 	}
@@ -801,48 +800,15 @@ func (s *Service) reserveRemoteNode(ctx context.Context) (*nodepool.Node, func()
 		return nil, func() {}, chapterThumbnailNodeUnavailableReason
 	}
 
-	nodes := s.transcodePool.Nodes()
-	capacity := s.chapterThumbnailNodeCapacity(ctx)
-
-	s.remoteMu.Lock()
-	defer s.remoteMu.Unlock()
-
-	var best *nodepool.Node
-	bestLoad := 0
-	hadHealthyNode := false
-	for _, node := range nodes {
-		if node == nil || !node.Enabled || !node.Healthy {
-			continue
-		}
-		hadHealthyNode = true
-		reserved := s.remoteReservations[node.URL]
-		if reserved >= capacity {
-			continue
-		}
-		effectiveLoad := node.ActiveJobs + reserved
-		if best == nil || effectiveLoad < bestLoad {
-			best = node
-			bestLoad = effectiveLoad
-		}
+	node, release, outcome := s.remoteReservations.Reserve(s.transcodePool.Nodes(), s.chapterThumbnailNodeCapacity(ctx))
+	switch outcome {
+	case nodepool.Reserved:
+		return node, release, ""
+	case nodepool.CapacityExhausted:
+		return nil, release, chapterThumbnailNodeCapacityExhaustedReason
+	default:
+		return nil, release, chapterThumbnailNodeUnavailableReason
 	}
-	if best == nil {
-		if hadHealthyNode {
-			return nil, func() {}, chapterThumbnailNodeCapacityExhaustedReason
-		}
-		return nil, func() {}, chapterThumbnailNodeUnavailableReason
-	}
-
-	s.remoteReservations[best.URL]++
-	return best, func() {
-		s.remoteMu.Lock()
-		defer s.remoteMu.Unlock()
-		current := s.remoteReservations[best.URL]
-		if current <= 1 {
-			delete(s.remoteReservations, best.URL)
-			return
-		}
-		s.remoteReservations[best.URL] = current - 1
-	}, ""
 }
 
 func (s *Service) uploadChapterThumbnail(ctx context.Context, fileID, chapterIndex int, frame []byte) (string, string, error) {

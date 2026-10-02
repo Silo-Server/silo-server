@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/database"
+	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/migrations"
 )
@@ -107,7 +108,7 @@ func TestSeasonStateIsKeyedByAnalysisHashPostgres(t *testing.T) {
 
 	repo := NewRepository(pool)
 	introHash := DefaultConfig("ffmpeg").AnalysisConfigHash()
-	otherHash := ArtifactConfigHash("credits_test", "season")
+	otherHash := mediaartifact.ConfigHash("credits_test", "season")
 	if err := repo.UpsertSeasonState(ctx, state, introHash); err != nil {
 		t.Fatal(err)
 	}

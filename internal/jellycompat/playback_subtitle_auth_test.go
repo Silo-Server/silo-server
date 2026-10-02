@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -402,5 +403,60 @@ func TestSubtitleExtractionUsesConfiguredFFmpeg(t *testing.T) {
 				t.Fatalf("configured extraction = %d %q", recorder.Code, recorder.Body.String())
 			}
 		})
+	}
+}
+
+type fakeSubtitleBlobs map[string][]byte
+
+func (fakeSubtitleBlobs) Put(context.Context, string, []byte) error { return nil }
+func (b fakeSubtitleBlobs) Get(_ context.Context, key string) ([]byte, error) {
+	return append([]byte(nil), b[key]...), nil
+}
+func (fakeSubtitleBlobs) Delete(context.Context, string) error { return nil }
+
+// A downloaded subtitle's stored timing correction is applied before the
+// Jellyfin conversion, so every representation carries the corrected cues.
+func TestHandleSubtitleStreamAppliesDownloadedSubtitleTiming(t *testing.T) {
+	file := &models.MediaFile{
+		ID:          42,
+		VideoTracks: []models.VideoTrack{{Codec: "h264"}},
+		AudioTracks: []models.AudioTrack{{Codec: "aac"}},
+	}
+	source := PlaybackMediaSource{ID: "source-42", FileID: file.ID}
+	store := NewPlaybackSessionStore(time.Hour, nil)
+	store.Put(PlaybackSession{
+		ID: "play-1", CompatToken: "token-1", RouteItemID: "item-1",
+		MediaSources: []PlaybackMediaSource{source},
+	})
+	handler := &PlaybackHandler{
+		playbackStore: store,
+		fileResolver:  testCompatFileResolver{file: file},
+		SubtitleRepo: fakeSubtitleRepository{downloaded: map[int][]subtitles.DownloadedSubtitle{42: {{
+			ID: 9, MediaFileID: 42, Format: subtitles.FormatSRT, S3Key: "timed.srt",
+			Timing: subtitles.Timing{OffsetMS: 2500, Scale: 1},
+		}}}},
+		SubtitleBlobs: fakeSubtitleBlobs{"timed.srt": []byte("1\n00:00:01,000 --> 00:00:02,000\nHello\n")},
+	}
+	index := strconv.Itoa(computeDownloadedSubBaseIndex(file))
+	serve := func(format string) *httptest.ResponseRecorder {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet,
+			"/Videos/item-1/source-42/Subtitles/"+index+"/stream."+format+"?PlaySessionId=play-1&api_key=token-1", nil)
+		routeCtx := chi.NewRouteContext()
+		routeCtx.URLParams.Add("routeItemId", "item-1")
+		routeCtx.URLParams.Add("routeMediaSourceId", source.ID)
+		routeCtx.URLParams.Add("routeIndex", index)
+		routeCtx.URLParams.Add("routeFormat", format)
+		ctx := context.WithValue(t.Context(), chi.RouteCtxKey, routeCtx)
+		ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "token-1", StreamAppUserID: 7})
+		recorder := httptest.NewRecorder()
+		handler.HandleSubtitleStream(recorder, request.WithContext(ctx))
+		return recorder
+	}
+	if rr := serve("srt"); rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "00:00:03,500 --> 00:00:04,500") {
+		t.Fatalf("srt = %d %q", rr.Code, rr.Body.String())
+	}
+	if rr := serve("vtt"); rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "00:00:03.500 --> 00:00:04.500") {
+		t.Fatalf("vtt = %d %q", rr.Code, rr.Body.String())
 	}
 }

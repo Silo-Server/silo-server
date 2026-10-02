@@ -194,7 +194,7 @@ func (r *PlayableTargetResolver) Resolve(ctx context.Context, q PlayableTargetQu
 	// PostgreSQL progress lives beside the catalog, so the database can choose
 	// winners without returning every episode or issuing progress batches.
 	// Other stores retain the backend-neutral candidate path below.
-	if store, ok := q.ProgressStore.(catalogProgressRelationStore); ok &&
+	if store, ok := q.ProgressStore.(userstore.CatalogProgressRelationStore); ok &&
 		(slices.Contains(types, playableTypeSeries) || slices.Contains(types, playableTypeSeason)) {
 		if progress, progressArgs, ok := store.CatalogProgressRelation(r.pool, q.UserID, q.ProfileID, len(args)+1); ok {
 			return r.resolvePostgresTargets(ctx, append(args, progressArgs...), fileConditions, keysByOrd, progress)

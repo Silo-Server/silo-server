@@ -883,6 +883,7 @@ var guardedWithoutLegacyRow = map[string]string{
 	"deleteRequestRoute":           "V2-only request routing rule: deletion is guarded by the rule's revision.",
 	"updateAdminRequestGroupLimit": "V2-only access-group request limit: the limit's revision from request_editor_revision_seq is its ETag; a group with none saved is revision zero.",
 	"updateRequestRouting":         "V2-only request routing mode (Standard or Advanced): the mode's revision from request_editor_revision_seq is its ETag.",
+	"setStoredSubtitleTiming":      "V2-only stored subtitle timing correction: guarded by the viewer subtitle validator, whose revision every subtitle row update bumps.",
 }
 
 // TestGuardedOperationsAreMarkedIfMatch reconciles the v2 registry with the
@@ -1212,6 +1213,8 @@ func TestRetrySafetyMismatchesFire(t *testing.T) {
 // mutation that is not listed here, the same rule guardedWithoutLegacyRow
 // applies to concurrency.
 var mutationWithoutLegacyRow = map[string]string{
+	"syncStoredSubtitle":                   "V2-only subtitle sync (v1 is frozen), coalescing on the subtitle's active job; a replay after it finished starts another job that aligns the same bytes and reaches the same timing.",
+	"setStoredSubtitleTiming":              "V2-only stored subtitle timing correction, guarded by If-Match on the subtitle's revision; replaying the same timing after success answers 412 and changes nothing.",
 	"redetectAdminItemMarkers":             "V2-only choice of marker kinds to re-detect: v1 re-detected episode intros only, which redetectAdminEpisodeIntro keeps porting. Work is coalesced per item within the process, so a replay while it runs reports already_running; a later replay analyzes again, so it is non-retryable like the intro action.",
 	"transferAdminUserOwnership":           "V2-only server ownership transfer (issue #1382): v1 had no Owner. Replaying a completed transfer is refused because the caller is no longer the Owner, so it cannot move ownership twice.",
 	"createRequestRoute":                   "V2-only request routing rule (routing replaced the router plugin's per-connection default switches). Creating a rule is non-retryable: a replay adds a second rule.",

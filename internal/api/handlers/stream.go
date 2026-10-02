@@ -519,6 +519,18 @@ func (h *StreamHandler) serveDownloadedSubtitle(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadGateway, "s3_error", "Failed to load subtitle from storage")
 		return
 	}
+	// The stored timing correction can change behind the same URL; a player
+	// refetching after a sync or reset must not get a cached copy.
+	w.Header().Set("Cache-Control", "private, no-cache")
+	// Apply the stored timing correction to the original bytes, before any
+	// conversion; a per-request timestamp_offset still stacks on top.
+	data, err = subtitles.DeliveryBytes(&subtitle, data)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "apply downloaded subtitle timing failed", "component", "api",
+			"downloaded_subtitle_id", subtitle.ID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to prepare subtitle")
+		return
+	}
 
 	// Serve ASS/SSA downloaded subtitles as raw data, and SRT the same way
 	// when the URL asks for .srt.

@@ -47,6 +47,9 @@ type curationImageService struct {
 func (f *curationImageService) FetchItemImages(context.Context, map[string]string, string, string, int) ([]metadata.RemoteImage, map[string]string, error) {
 	return []metadata.RemoteImage{{ProviderID: "tmdb", URL: "source", Type: metadata.ImagePoster}}, nil, nil
 }
+func (f *curationImageService) FetchSeasonImages(context.Context, map[string]string, string, int, int) ([]metadata.RemoteImage, map[string]string, error) {
+	return []metadata.RemoteImage{{ProviderID: "tmdb", URL: "source", Type: metadata.ImagePoster}}, nil, nil
+}
 func (f *curationImageService) ApplyItemImage(ctx context.Context, r metadata.ApplyItemImageRequest) (*metadata.ApplyItemImageResult, error) {
 	f.calls++
 	f.request = r

@@ -91,6 +91,13 @@ func mixedSearchOrder(prefix string) string {
 	LOWER(%[1]stitle) ASC, %[1]scontent_id ASC`, prefix)
 }
 
+// yearSuffixedTitleSQL matches a title that is the query followed by the
+// item's own year. Providers disambiguate remakes and reboots that way, so
+// "Castle (2009)" is the exact title for a "Castle" search.
+func yearSuffixedTitleSQL(normalizedTitle, year string, exactIdx int) string {
+	return fmt.Sprintf("(%[2]s > 0 AND %[1]s = $%[3]d || ' ' || %[2]s::text)", normalizedTitle, year, exactIdx)
+}
+
 // buildMixedSearchSQLFromParsed builds one ranked candidate set from the two
 // physical catalog sources. The scored CTE deliberately carries only ranking
 // fields; the wide MediaItem projection is hydrated after LIMIT/OFFSET so a
@@ -188,12 +195,19 @@ func (r *ItemRepository) buildMixedSearchCursorSQL(parsed parsedSearchQuery, ite
 
 	var mediaTitleConditions, mediaOverviewConditions []string
 	if includeMediaItems {
+		titleMatch := lookup.condition("title_mi.title_normalized", "title_mi.search_title_vector")
+		if lookup.exactShort {
+			// A short word admits only whole titles, so also admit the title
+			// followed by its year. The LIKE prefix keeps that arm on the
+			// title_normalized index.
+			titleMatch = fmt.Sprintf("(%s OR (title_mi.title_normalized LIKE $%d || ' %%' AND %s))",
+				titleMatch, exactIdx, yearSuffixedTitleSQL("title_mi.title_normalized", "title_mi.year", exactIdx))
+		}
 		// Index each source separately and deduplicate identity before policy
 		// and ranking. A runtime alias array inside OR forces generic prepared
 		// plans to recheck that array per row, making broad alias queries quadratic.
 		mediaMatch := "mi.content_id IN (SELECT title_mi.content_id FROM media_items title_mi WHERE " +
-			lookup.condition("title_mi.title_normalized", "title_mi.search_title_vector") +
-			" UNION SELECT alias_scores.content_id FROM alias_scores)"
+			titleMatch + " UNION SELECT alias_scores.content_id FROM alias_scores)"
 		mediaTitleConditions = append([]string{mediaMatch}, mediaConditions...)
 		if !narrowTitleLookup {
 			mediaOverviewConditions = append([]string{searchOverviewMatchCondition(mediaSearchOverviewVector)}, mediaConditions...)
@@ -227,7 +241,7 @@ func (r *ItemRepository) buildMixedSearchCursorSQL(parsed parsedSearchQuery, ite
 		titleBranches = append(titleBranches, buildMixedSearchCandidateBranch(
 			"mi.content_id", "mi.type", "mi.title", "mi.year",
 			mediaSearchTitleVector, mediaSearchOverviewVector,
-			[]string{`mi.title_normalized`, `mi.original_title_normalized`, `mi.sort_title_normalized`},
+			[]string{`mi.title_normalized`, `mi.original_title_normalized`, `mi.sort_title_normalized`}, `mi.title_normalized`,
 			"media_items mi LEFT JOIN alias_scores search_alias ON search_alias.content_id = mi.content_id",
 			mediaTitleConditions, exactIdx, yearIdx, phraseIdx,
 			&mediaAliasArms, false, false,
@@ -236,7 +250,7 @@ func (r *ItemRepository) buildMixedSearchCursorSQL(parsed parsedSearchQuery, ite
 			overviewBranches = append(overviewBranches, buildMixedSearchCandidateBranch(
 				"mi.content_id", "mi.type", "mi.title", "mi.year",
 				mediaSearchTitleVector, mediaSearchOverviewVector,
-				[]string{`mi.title_normalized`, `mi.original_title_normalized`, `mi.sort_title_normalized`},
+				[]string{`mi.title_normalized`, `mi.original_title_normalized`, `mi.sort_title_normalized`}, `mi.title_normalized`,
 				"media_items mi", mediaOverviewConditions, exactIdx, yearIdx, phraseIdx,
 				nil, true, false,
 			))
@@ -481,7 +495,7 @@ func (s *episodeSearchSource) branch(exactIdx, yearIdx, phraseIdx int) string {
 	return buildMixedSearchCandidateBranch(
 		"ece.episode_id", "'episode'::text", episodeSearchTitleExpr, "ece.year",
 		episodeSearchTitleVector, episodeSearchOverviewVector,
-		[]string{"ece.search_title_normalized"},
+		[]string{"ece.search_title_normalized"}, "",
 		s.relation(), s.conditions(), exactIdx, yearIdx, phraseIdx,
 		nil, s.overview, s.distinct,
 	)
@@ -578,6 +592,7 @@ type mixedSearchAliasArms struct {
 func buildMixedSearchCandidateBranch(
 	contentIDExpr, typeExpr, titleExpr, yearExpr, titleVector, overviewVector string,
 	exactTitleExprs []string,
+	yearSuffixedTitle string, // normalized title that may also match as yearSuffixedTitleSQL; "" for none
 	fromClause string,
 	conditions []string,
 	exactIdx, yearIdx, phraseIdx int,
@@ -590,6 +605,9 @@ func buildMixedSearchCandidateBranch(
 	for _, expr := range exactTitleExprs {
 		exactArms = append(exactArms, fmt.Sprintf("%s = $%d", expr, exactIdx))
 		contiguousArms = append(contiguousArms, fmt.Sprintf("%s LIKE '%%' || $%d || '%%'", expr, exactIdx))
+	}
+	if yearSuffixedTitle != "" {
+		exactArms = append(exactArms, yearSuffixedTitleSQL(yearSuffixedTitle, yearExpr, exactIdx))
 	}
 	prefixQuery := `to_tsquery('simple', $2)`
 	prefixRankExpr := fmt.Sprintf("ts_rank_cd(%s, %s)", titleVector, prefixQuery)

@@ -1383,6 +1383,25 @@ func newChiRouter(deps Dependencies) chi.Router {
 			}
 		}
 		subtitleAINotifier = playback.NewSubtitleReadyNotifier(deps.SessionMgr, realtimeHub, subtitleInventoryResolver)
+		if subtitleAINotifier != nil && deps.EventBus != nil {
+			publish := func(ctx context.Context, payload string) error {
+				return deps.EventBus.Publish(ctx, cache.ChannelPlayback, cache.Event{Type: cache.EventSubtitleTimingChanged, Payload: payload})
+			}
+			subscribe := func(ctx context.Context, handler func(string)) error {
+				return deps.EventBus.Subscribe(ctx, cache.ChannelPlayback, func(event cache.Event) {
+					if event.Type == cache.EventSubtitleTimingChanged {
+						handler(event.Payload)
+					}
+				})
+			}
+			busCtx := deps.AppContext
+			if busCtx == nil {
+				busCtx = context.Background()
+			}
+			if err := subtitleAINotifier.UseEventBus(busCtx, publish, subscribe); err != nil {
+				slog.Warn("subscribe subtitle timing changes failed", "component", "api", "error", err)
+			}
+		}
 		adminPlaybackControlHandler = handlers.NewAdminPlaybackControlHandler(playbackHandler)
 
 		if deps.DB != nil && deps.FileRepo != nil && viewerResolver != nil && deps.Config != nil && detailSvc != nil {
@@ -1654,6 +1673,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 
 		mediaResolver := &pgSubtitleMediaResolver{pool: deps.DB}
 		subtitleSearchHandler = handlers.NewSubtitleSearchHandler(subtitleManager, subtitleRepo, mediaResolver)
+		if deps.FileRepo != nil && settingsRepo != nil {
+			subtitleSearchHandler.SetSyncService(newSubtitleSyncService(&deps, subtitleManager, subtitleRepo, settingsRepo, subtitleAINotifier))
+		}
 	}
 
 	if adminSubtitleHandler != nil && deps.DB != nil && subtitleManager != nil {
@@ -2776,6 +2798,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.ViewerSubtitleDelete = subtitleSearchHandler
 		v2deps.SubtitleDownloads = subtitleSearchHandler
 		v2deps.SubtitleUploads = subtitleSearchHandler
+		v2deps.SubtitleSync = subtitleSearchHandler
 	}
 	if subtitleAIHandler != nil {
 		v2deps.SubtitleAIReads = subtitleAIHandler

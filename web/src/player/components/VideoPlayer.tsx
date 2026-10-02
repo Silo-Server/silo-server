@@ -19,6 +19,8 @@ import { useIntroSkipPrompt } from "../hooks/useIntroSkipPrompt";
 import { useRemuxSeeking } from "../hooks/useRemuxSeeking";
 import { useSubtitleTracks } from "../hooks/useSubtitleTracks";
 import { useASSSubtitles } from "../hooks/useASSSubtitles";
+import { useStoredSubtitleSync } from "../hooks/useStoredSubtitleSync";
+import { storedSubtitleIdOf } from "../utils/storedSubtitleSync";
 import { useSubtitleAppearance } from "../hooks/useSubtitleAppearance";
 import { useSubtitleLayout } from "../hooks/useSubtitleLayout";
 import { useCoarsePointer } from "../hooks/useCoarsePointer";
@@ -520,6 +522,34 @@ export function VideoPlayer({
       acceptedSubtitleJobRef.current = null;
     };
   }, [activeFileId, sessionId]);
+
+  // -- Stored subtitle sync --
+  // A sync or timing reset changes what a stored track's unchanged URL serves.
+  // Each observed change bumps that subtitle's cue revision, which makes the
+  // subtitle hooks refetch the track instead of reusing cues already loaded.
+  const storedSubtitleIds = useMemo(
+    () => subtitleUrls.map(storedSubtitleIdOf).filter((id): id is string => id !== null),
+    [subtitleUrls],
+  );
+  const [storedCueRevisions, setStoredCueRevisions] = useState<Record<string, number>>({});
+  const bumpStoredCueRevision = useCallback((id: string) => {
+    setStoredCueRevisions((prev) => ({ ...prev, [id]: (prev[id] ?? 0) + 1 }));
+  }, []);
+  const storedSubtitleSync = useStoredSubtitleSync({
+    playerConfig,
+    mediaFileId: activeFileId ?? undefined,
+    sessionId,
+    storedIds: storedSubtitleIds,
+    onTimingChanged: bumpStoredCueRevision,
+  });
+  const storedSubtitleTimingChanged = storedSubtitleSync.timingChanged;
+  const activeStoredSubtitleId = storedSubtitleIdOf(
+    activeSubtitleIndex !== null
+      ? subtitleUrls.find((track) => track.index === activeSubtitleIndex)
+      : null,
+  );
+  const activeSubtitleCueRevision =
+    activeStoredSubtitleId !== null ? (storedCueRevisions[activeStoredSubtitleId] ?? 0) : 0;
 
   const reportSubtitleFailure = useCallback((jobId: string, message?: string) => {
     if (reportedSubtitleFailureRef.current === jobId) return;
@@ -1403,6 +1433,15 @@ export function VideoPlayer({
           }
           break;
         }
+        case "subtitle_timing_changed": {
+          // A stored subtitle of this file was retimed. Its URL already serves
+          // the new timing; the sync hook reloads the track if it is on screen
+          // and refreshes the status the subtitle menu shows.
+          if (event.payload.file_id === activeFileId) {
+            storedSubtitleTimingChanged(String(event.payload.subtitle_id));
+          }
+          break;
+        }
         case "subtitle_translation_started": {
           const payload = event.payload;
           if (!isForActiveStream(payload) || matchesLiveTranslation(payload)) break;
@@ -1520,6 +1559,7 @@ export function VideoPlayer({
       resumeFromTranslationPause,
       reportSubtitleFailure,
       sessionId,
+      storedSubtitleTimingChanged,
       subtitleUrls,
     ],
   );
@@ -2600,6 +2640,7 @@ export function VideoPlayer({
     liveTranslation?.trackKey ?? null,
     subtitleStreamGeneration,
     setTextSubtitleState,
+    activeSubtitleCueRevision,
   );
 
   // -- ASS/SSA subtitle rendering via JASSUB (client-side libass) --
@@ -2613,6 +2654,7 @@ export function VideoPlayer({
     setASSSubtitleState,
     videoFit,
     coverCrop,
+    activeSubtitleCueRevision,
   );
   const subtitleLoadState = isASSActive ? assSubtitleState : textSubtitleState;
 
@@ -3209,18 +3251,18 @@ export function VideoPlayer({
   }, [activeQualityId, sessionId, watchTogetherRoomId]);
 
   const lowerQualityChoiceRef = useRef(() =>
-    lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe?.bitrate_kbps),
+    lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe),
   );
   useEffect(() => {
     lowerQualityChoiceRef.current = () =>
-      lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe?.bitrate_kbps);
+      lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe);
     // A replan can leave no lower rung; an offer that cannot act is withdrawn.
     if (!lowerQualityChoiceRef.current()) {
       setNotice((current) =>
         current?.actionLabel === LOWER_QUALITY_ACTION_LABEL ? null : current,
       );
     }
-  }, [activeQualityId, plan.effective_recipe?.bitrate_kbps, qualityOptions]);
+  }, [activeQualityId, plan.effective_recipe, qualityOptions]);
 
   // A viewer who keeps stalling in a room cannot keep up at this quality.
   // Offer one step down, once per quality; the room's shared source is kept.
@@ -3230,7 +3272,7 @@ export function VideoPlayer({
     const recent = roomStallTimesRef.current.filter((at) => now - at < ROOM_STALL_WINDOW_MS);
     roomStallTimesRef.current = recent;
     if (recent.length < ROOM_STALLS_BEFORE_LOWER_QUALITY) return;
-    if (!lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe?.bitrate_kbps)) {
+    if (!lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe)) {
       return;
     }
     lowerQualityOfferedRef.current = true;
@@ -3247,7 +3289,7 @@ export function VideoPlayer({
     );
   }, [
     activeQualityId,
-    plan.effective_recipe?.bitrate_kbps,
+    plan.effective_recipe,
     qualityOptions,
     roomStallSignal,
     showWatchTogetherNotice,
@@ -3883,11 +3925,13 @@ export function VideoPlayer({
           sessionId={sessionId}
           getSubtitleStartPosition={getSubtitleStartPosition}
           onSubtitleJobAccepted={handleSubtitleJobAccepted}
+          storedSubtitleSync={storedSubtitleSync}
           audioTracks={audioTracks}
           activeAudioIndex={activeAudioIndex}
           onAudioSelect={onAudioSelect}
           qualityOptions={qualityOptions}
           activeQualityId={activeQualityId}
+          deliveredRecipe={plan.effective_recipe}
           isTranscoding={replanning}
           qualityError={replanError}
           onQualitySelect={handleQualitySelect}

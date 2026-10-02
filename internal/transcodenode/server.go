@@ -26,6 +26,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
@@ -299,7 +300,13 @@ type Server struct {
 	// is older than sessionIdleTTL.
 	lastAccess map[string]time.Time
 	reaperOnce sync.Once
-	mu         sync.RWMutex
+	// mediaSamples admits media sampling runs up to the configured per-node
+	// capacity, whichever API servers send them.
+	mediaSamplesOnce sync.Once
+	mediaSamples     *mediasample.Limiter
+	// mediaSampleWait overrides mediasample.MaxRemoteAdmissionWait in tests.
+	mediaSampleWait time.Duration
+	mu              sync.RWMutex
 	// reloadMu keeps force-reload teardown atomic with session creation and
 	// reconstruction. It is always acquired before lifecycleMu or mu.
 	reloadMu sync.RWMutex
@@ -909,6 +916,7 @@ func (s *Server) router() chi.Router {
 		r.Use(s.requireBearer)
 		r.Get("/hw-capabilities", s.handleHWCapabilities)
 		r.Post("/chapter-thumbnails/extract", s.handleChapterThumbnailExtract)
+		r.Post("/media-samples/run", s.handleMediaSample) // mediasample.RemotePath
 		r.Post("/downloads/prepare", s.handleDownloadPrepare)
 		r.Head("/downloads/artifacts/{artifact_id}", observeNode(s.telemetry, http.MethodHead, "/downloads/artifacts/{artifact_id}", s.handleDownloadArtifact))
 		r.Get("/downloads/artifacts/{artifact_id}", observeNode(s.telemetry, http.MethodGet, "/downloads/artifacts/{artifact_id}", s.handleDownloadArtifact))
