@@ -2,6 +2,7 @@ import { act, renderHook } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
+import { SessionRefreshUnavailableError } from "@/api/client";
 import { V2ProblemError, V2TimeoutError } from "@/api/v2/request";
 import { useWatchTrickplay } from "./trickplay";
 const request = vi.hoisted(() => vi.fn());
@@ -45,6 +46,16 @@ it("recovers a manifest request the server did not answer in time", async () => 
   request
     .mockRejectedValueOnce(new V2TimeoutError("getWatchTrickplay", 30_000))
     .mockResolvedValue(manifest);
+  const view = setup();
+  await act(() => vi.advanceTimersByTimeAsync(3_100));
+  expect(request).toHaveBeenCalledTimes(2);
+  expect(view.result.current.data?.count).toBe(100);
+  view.unmount();
+  view.client.clear();
+});
+it("recovers a manifest whose session refresh got no answer", async () => {
+  vi.useFakeTimers();
+  request.mockRejectedValueOnce(new SessionRefreshUnavailableError()).mockResolvedValue(manifest);
   const view = setup();
   await act(() => vi.advanceTimersByTimeAsync(3_100));
   expect(request).toHaveBeenCalledTimes(2);
