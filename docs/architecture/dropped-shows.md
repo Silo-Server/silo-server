@@ -54,9 +54,10 @@ read guard, and the rule that a series missing from a complete read counts as un
 only when no row shares one of its ids all follow
 [watch-provider-rating-sync.md](watch-provider-rating-sync.md). An incomplete read leaves
 every series it omits unknown, and an explicit undrop tombstone undrops the series whose
-agreed row carries the same provider key. A tombstone whose key names no agreed drop
-changes nothing: that is usually the provider echoing an undrop whose agreement Silo
-already forgot. Local imports are compare-and-set on the row the run read, so a
+agreed row or matched drop in the current read carries the same provider key.
+Changes apply in read order, including when the read first introduces the drop.
+A tombstone whose key names neither changes nothing: that is usually the provider
+echoing an undrop whose agreement Silo already forgot. Local imports are compare-and-set on the row the run read, so a
 concurrent dismissal or undo wins.
 
 Provider reads can lag or omit Silo's writes. Trakt serves its GET responses from a cache

@@ -571,9 +571,14 @@ func (s firstPartyWatchSyncStore) ListCapabilities(context.Context, int) ([]*plu
 // seeding is create-only like the real one, and a seed that saves config runs
 // onSeed, as the lifecycle hook a config save fires does.
 type fakeWatchSyncPluginService struct {
-	onSeed  func(context.Context)
-	seeded  []int
-	created bool
+	cacheInvalidations int
+	onSeed             func(context.Context)
+	seeded             []int
+	created            bool
+}
+
+func (f *fakeWatchSyncPluginService) InvalidateInstallationCache() {
+	f.cacheInvalidations++
 }
 
 func (f *fakeWatchSyncPluginService) InstalledFromSiloRepository(context.Context, *plugins.Installation) (bool, error) {
@@ -661,6 +666,9 @@ func TestReloadWatchSyncPluginProvidersKeepsOneFirstPartyInstallation(t *testing
 	service := &fakeWatchSyncPluginService{}
 	if err := reloadWatchSyncPluginProviders(context.Background(), registry, store, service, nil, migration); err != nil {
 		t.Fatal(err)
+	}
+	if service.cacheInvalidations != 1 {
+		t.Fatalf("cache invalidations = %d, want one before reloading providers", service.cacheInvalidations)
 	}
 	summaries := registry.List()
 	if len(summaries) != 1 || summaries[0].Key != "trakt" {

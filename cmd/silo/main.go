@@ -4144,6 +4144,7 @@ type markerPluginCapabilityStore interface {
 // watchSyncPluginService is the plugin service surface a watch provider
 // reload uses.
 type watchSyncPluginService interface {
+	InvalidateInstallationCache()
 	InstalledFromSiloRepository(ctx context.Context, installation *plugins.Installation) (bool, error)
 	WatchSyncProviderClient(ctx context.Context, installationID int, capabilityID string) (*pluginhost.WatchSyncProviderClient, error)
 	WatchSyncProviderConfig(ctx context.Context, installationID int) (*pluginv1.WatchSyncProviderConfig, error)
@@ -4216,6 +4217,9 @@ func replaceWatchSyncPluginProviders(
 	if store == nil || service == nil {
 		return nil, registry.ReplacePluginProviders(providers)
 	}
+	// The rows below can have changed on another API node. Client and
+	// manifest reads must use those versions too, including on timer reloads.
+	service.InvalidateInstallationCache()
 	installations, err := store.ListEnabled(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list enabled watch sync plugin installations: %w", err)

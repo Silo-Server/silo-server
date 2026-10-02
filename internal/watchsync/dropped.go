@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -301,10 +302,10 @@ func (s *Service) loadDroppedItems(ctx context.Context, conn Connection, onlyIDs
 
 // resolveRemoteDropped sets each series' remote value from a provider read.
 // An explicit tombstone (an incremental read's undrop) undrops the series
-// whose agreed row carries the same provider key; one that names no agreed
-// drop changes nothing. A series missing from the read counts as undropped
-// only when the read is complete, no row shares one of its ids (a row the
-// matcher could not place may be this series), and a previous read confirmed
+// whose agreed row or matched drop in this read carries the same provider
+// key; one that names neither changes nothing. A series missing from the
+// read counts as undropped only when the read is complete, no row shares one
+// of its ids (a row the matcher could not place may be this series), and a previous read confirmed
 // the provider held the agreed drop. Every other absent series is unknown and
 // keeps its agreed value.
 //
@@ -317,34 +318,24 @@ func (s *Service) resolveRemoteDropped(ctx context.Context, conn Connection, ite
 	complete := batch.Complete
 	seenTokens := make(map[string]bool)
 	usable := 0
-	byKey := make(map[string][]*droppedItem)
-	for _, item := range items {
+	byKey := make(map[string][]string)
+	for id, item := range items {
 		if item.stored != nil && item.stored.ProviderItemKey != "" {
-			byKey[item.stored.ProviderItemKey] = append(byKey[item.stored.ProviderItemKey], item)
+			byKey[item.stored.ProviderItemKey] = append(byKey[item.stored.ProviderItemKey], id)
 		}
 	}
 	// remoteChange is a drop matched to a series, or an undrop tombstone
-	// resolved to an agreed row. Changes apply in read order, so a later
-	// undrop of a series wins over an earlier drop and the other way round.
+	// resolved after matching all drops in the read. Changes apply in read
+	// order, so a later undrop wins over an earlier drop and the other way round.
 	type remoteChange struct {
-		row    RemoteDropped
-		id     string
-		undrop *droppedItem
+		row RemoteDropped
+		id  string
 	}
 	var changes []remoteChange
 	var unresolved []string
 	for _, row := range batch.Rows {
 		if row.Removed {
-			switch candidates := byKey[strings.TrimSpace(row.ProviderItemKey)]; len(candidates) {
-			case 0:
-				// Silo forgets an undropped series' agreement once no read
-				// had confirmed the drop, so the provider's echo of that
-				// undrop names nothing and is not worth a warning.
-			case 1:
-				changes = append(changes, remoteChange{row: row, undrop: candidates[0]})
-			default:
-				warnings = append(warnings, "watch sync provider returned an undrop that matches more than one series")
-			}
+			changes = append(changes, remoteChange{row: row})
 			continue
 		}
 		if row.Kind != historyimport.KindSeries {
@@ -372,6 +363,9 @@ func (s *Service) resolveRemoteDropped(ctx context.Context, conn Connection, ite
 			continue
 		}
 		changes = append(changes, remoteChange{row: row, id: match.MediaItemID})
+		if key := strings.TrimSpace(row.ProviderItemKey); key != "" && !slices.Contains(byKey[key], match.MediaItemID) {
+			byKey[key] = append(byKey[key], match.MediaItemID)
+		}
 		if _, ok := items[match.MediaItemID]; !ok {
 			unresolved = append(unresolved, match.MediaItemID)
 		}
@@ -391,8 +385,18 @@ func (s *Service) resolveRemoteDropped(ctx context.Context, conn Connection, ite
 		}
 	}
 	for _, change := range changes {
-		if change.undrop != nil {
-			change.undrop.remote, change.undrop.remoteAt, change.undrop.observed = false, time.Time{}, true
+		if change.row.Removed {
+			switch candidates := byKey[strings.TrimSpace(change.row.ProviderItemKey)]; len(candidates) {
+			case 0:
+				// An echo of an undrop whose agreement Silo already forgot
+				// names nothing and is not worth a warning.
+			case 1:
+				if item := items[candidates[0]]; item != nil {
+					item.remote, item.remoteAt, item.observed = false, time.Time{}, true
+				}
+			default:
+				warnings = append(warnings, "watch sync provider returned an undrop that matches more than one series")
+			}
 			continue
 		}
 		item := items[change.id]

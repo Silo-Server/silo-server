@@ -79,5 +79,6 @@ back. Until the plugin registers, connections under its key stay stored but do
 not sync.
 
 Lifecycle hooks fire only on the node that changed a plugin, so every API node
-also rebuilds its watch provider registry every two minutes. A plugin another
-node installed reaches every node's registry within that interval.
+also invalidates its installation cache and rebuilds its watch provider registry
+every two minutes. A plugin another node installed reaches every node's registry
+within that interval.

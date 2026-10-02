@@ -2,6 +2,7 @@ package watchsync
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -858,22 +859,52 @@ func TestSyncDroppedPluginChangesApplyInReadOrder(t *testing.T) {
 			wantDropped: true,
 		},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			h, provider, client := newPluginDroppedHarness(t)
-			h.store.drop(droppedTestSeriesB, h.at(1))
-			h.agree(droppedTestSeriesB, true)
-			for i := range h.repo.droppedStates {
-				if h.repo.droppedStates[i].SeriesID == droppedTestSeriesB {
-					h.repo.droppedStates[i].ProviderItemKey = "remote-b"
+		for _, agreed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/agreed=%t", tc.name, agreed), func(t *testing.T) {
+				h, provider, client := newPluginDroppedHarness(t)
+				if agreed {
+					h.store.drop(droppedTestSeriesB, h.at(1))
+					h.agree(droppedTestSeriesB, true)
+					for i := range h.repo.droppedStates {
+						if h.repo.droppedStates[i].SeriesID == droppedTestSeriesB {
+							h.repo.droppedStates[i].ProviderItemKey = "remote-b"
+						}
+					}
 				}
-			}
-			client.listResponse = &pluginv1.WatchSyncListRemoteStateResponse{Items: tc.items(h)}
-			if _, err := h.service.syncDropped(context.Background(), h.conn, ServerConfig{}, provider); err != nil {
-				t.Fatal(err)
-			}
-			if h.store.active(droppedTestSeriesB) != tc.wantDropped {
-				t.Fatalf("series B dropped = %t, want %t", h.store.active(droppedTestSeriesB), tc.wantDropped)
-			}
-		})
+				client.listResponse = &pluginv1.WatchSyncListRemoteStateResponse{Items: tc.items(h), NextCursor: testCursorOne}
+				if _, err := h.service.syncDropped(t.Context(), h.conn, ServerConfig{}, provider); err != nil {
+					t.Fatal(err)
+				}
+				if h.store.active(droppedTestSeriesB) != tc.wantDropped {
+					t.Fatalf("series B dropped = %t, want %t", h.store.active(droppedTestSeriesB), tc.wantDropped)
+				}
+				if (h.state(droppedTestSeriesB) != nil) != tc.wantDropped {
+					t.Fatalf("series B agreement = %#v, want present = %t", h.state(droppedTestSeriesB), tc.wantDropped)
+				}
+				key := connectionKey(h.conn.Provider, h.conn.UserID, h.conn.ProfileID)
+				if cursor := h.repo.connections[key].SyncCursors[pluginDroppedCursorKey]; cursor != testCursorOne {
+					t.Fatalf("saved cursor = %q, want %q", cursor, testCursorOne)
+				}
+			})
+		}
+	}
+}
+
+func TestSyncDroppedPluginNewDropsWithAmbiguousTombstone(t *testing.T) {
+	h, provider, client := newPluginDroppedHarness(t)
+	client.listResponse = &pluginv1.WatchSyncListRemoteStateResponse{Items: []*pluginv1.WatchSyncRemoteState{
+		remoteDroppedState("shared", "201", nil),
+		remoteDroppedState("shared", "202", nil),
+		droppedTombstone("shared"),
+	}}
+	result, err := h.service.syncDropped(t.Context(), h.conn, ServerConfig{}, provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !h.store.active(droppedTestSeriesA) || !h.store.active(droppedTestSeriesB) {
+		t.Fatal("an ambiguous tombstone must not undo either newly observed drop")
+	}
+	if !slices.Equal(result.Warnings, []string{"watch sync provider returned an undrop that matches more than one series"}) {
+		t.Fatalf("warnings = %#v, want the ambiguous undrop reported", result.Warnings)
 	}
 }
