@@ -2278,6 +2278,19 @@ func main() {
 		defer policySystem.Stop()
 	}
 
+	// White-label branding: one service shared by the API (public read + admin
+	// upload), the frontend handler (index.html title, favicon, manifest), the
+	// artwork reconcile task, and outgoing email. It is built before the
+	// notification system, which sends email. S3 is optional — pass a nil
+	// AssetStore (not the typed-nil *s3client.Client) when it isn't configured
+	// so text branding still works without it.
+	var brandingStore branding.AssetStore
+	if deps.Blobs.Assets != nil {
+		brandingStore = deps.Blobs.Assets
+	}
+	brandingSvc := branding.NewService(settingsRepo, brandingStore)
+	deps.EmailBrand = mail.NewBrandLoader(brandingSvc)
+
 	// User-facing release notifications. The system reads user state through
 	// the raw store provider; the provider handed to everything downstream is
 	// wrapped so every favorites/watchlist/progress mutation (REST handlers,
@@ -2303,6 +2316,7 @@ func main() {
 			deps.RedisClient,
 			deps.SecretCipher,
 			mail.NewSMTPSender(settingsRepo),
+			deps.EmailBrand,
 		)
 		userStoreProvider = notifications.WrapUserStoreProvider(userStoreProvider, notificationSystem)
 		deps.Notifications = notificationSystem
@@ -2739,17 +2753,6 @@ func main() {
 			})
 		}
 	}
-
-	// White-label branding: one service shared by the API (public read + admin
-	// upload), the frontend handler (index.html title, favicon, manifest), and
-	// the artwork reconcile task. S3 is optional — pass a nil AssetStore (not
-	// the typed-nil *s3client.Client) when it isn't configured so text branding
-	// still works without it.
-	var brandingStore branding.AssetStore
-	if deps.Blobs.Assets != nil {
-		brandingStore = deps.Blobs.Assets
-	}
-	brandingSvc := branding.NewService(settingsRepo, brandingStore)
 
 	// Wire up task manager for admin task API.
 	if needsWorkers && deps.DB != nil {

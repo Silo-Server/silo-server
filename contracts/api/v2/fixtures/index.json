@@ -1230,7 +1230,7 @@
         "Content-Type": "application/json"
       },
       "response_media_type": "application/json",
-      "schema": "#/components/schemas/InvitationCapabilities",
+      "schema": "#/components/schemas/AdminInvitationCapabilities",
       "body_file": "admin_invitation_capabilities.json"
     },
     {

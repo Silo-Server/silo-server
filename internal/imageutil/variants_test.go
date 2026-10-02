@@ -83,3 +83,34 @@ func TestEncodeWebPWidthRejectsGarbage(t *testing.T) {
 		t.Fatal("expected an error for invalid image data")
 	}
 }
+
+func TestEncodePNGWithinFitsBoxWithoutUpscaling(t *testing.T) {
+	for _, tc := range []struct{ w, h, wantW, wantH int }{
+		{640, 128, 480, 96}, // width-bound
+		{640, 320, 192, 96}, // height-bound
+		{120, 40, 120, 40},  // already fits: no upscale
+	} {
+		t.Run(fmt.Sprintf("%dx%d", tc.w, tc.h), func(t *testing.T) {
+			webp, err := EncodeWebPWidth(largeTestJPEG(t, tc.w, tc.h), tc.w)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out, w, h, err := EncodePNGWithin(webp, 480, 96)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if w != tc.wantW || h != tc.wantH {
+				t.Fatalf("size = %dx%d, want %dx%d", w, h, tc.wantW, tc.wantH)
+			}
+			if bimg.DetermineImageType(out) != bimg.PNG {
+				t.Fatal("output is not a PNG")
+			}
+		})
+	}
+}
+
+func TestEncodePNGWithinRejectsGarbage(t *testing.T) {
+	if _, _, _, err := EncodePNGWithin([]byte("not an image"), 480, 96); err == nil {
+		t.Fatal("expected an error for invalid image data")
+	}
+}

@@ -25,20 +25,27 @@ type fakeInvitations struct {
 	writes                            int
 	lookupErr, errorAccept, errorSend error
 	after                             *invitations.PageKey
+	acceptEmail                       string
+	emailDelivery                     bool
+	resendDelivery                    *invitations.Delivery
 }
 
 func fixtureInvitations() *fakeInvitations {
 	return &fakeInvitations{profile: true, row: models.Invitation{ID: 7, Email: "invitee@example.invalid", Role: models.RoleUser, TokenHash: "private-token-hash", CreateProfile: true, ShowTour: true, InvitedBy: 2, InvitedByName: "Admin", CreatedAt: fixedTime(), ExpiresAt: time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)}}
 }
 func (f *fakeInvitations) SupportsDefaultProfile() bool { return f.profile }
+func (f *fakeInvitations) EmailDeliveryAvailable(context.Context) bool {
+	return f.emailDelivery
+}
 func (f *fakeInvitations) Lookup(_ context.Context, token string) (*invitations.LookupResult, error) {
 	if token == "expired" || token == "revoked" || token == "consumed" {
 		return nil, invitations.ErrNotFound
 	}
-	return &invitations.LookupResult{Email: f.row.Email, InviterName: f.row.InvitedByName, ServerName: "Server", ExpiresAt: f.row.ExpiresAt, ShowTour: true, CreateProfile: f.row.CreateProfile}, f.lookupErr
+	return &invitations.LookupResult{Email: f.row.Email, EmailRequired: f.row.Email == "", Note: f.row.Note, InviterName: f.row.InvitedByName, ServerName: "Server", ExpiresAt: f.row.ExpiresAt, ShowTour: true, CreateProfile: f.row.CreateProfile}, f.lookupErr
 }
-func (f *fakeInvitations) AcceptInvitation(_ context.Context, token, _, _, _ string) (handlers.InvitationAcceptanceView, error) {
+func (f *fakeInvitations) AcceptInvitation(_ context.Context, token, email, _, _, _ string) (handlers.InvitationAcceptanceView, error) {
 	f.writes++
+	f.acceptEmail = email
 	v := handlers.InvitationAcceptanceView{Username: f.row.Email, Tokens: &handlers.TokenPairView{AccessToken: "fixture-access", RefreshToken: "fixture-refresh", ExpiresIn: 3600, User: handlers.UserView{ID: 3, Username: f.row.Email, Role: models.RoleUser}}}
 	if token == "sign-in-required" {
 		return v, invitations.ErrSessionStart
@@ -60,21 +67,36 @@ func (f *fakeInvitations) ListPage(_ context.Context, after *invitations.PageKey
 func (f *fakeInvitations) Send(_ context.Context, in invitations.SendInput) (*invitations.SendResult, error) {
 	f.send = &in
 	f.writes++
+	if in.Delivery == invitations.DeliveryEmail && !f.emailDelivery {
+		return nil, invitations.ErrEmailUnavailable
+	}
 	r := f.row
 	r.CreateProfile = in.CreateProfile
 	r.ShowTour = in.ShowTour
 	r.LibraryIDs = in.LibraryIDs
-	result := &invitations.SendResult{Invitation: &r, ClaimURL: "https://server.example.invalid/invite/synthetic-token", EmailSent: true}
+	r.Email = in.Email
+	// Mirror the service: an address is emailed when a sender is configured;
+	// otherwise, or for delivery=link, the link is delivered manually.
+	emailed := in.Email != "" && f.emailDelivery
+	r.Delivery = models.InvitationDeliveryLink
+	if emailed {
+		r.Delivery = models.InvitationDeliveryEmailSent
+	}
+	result := &invitations.SendResult{Invitation: &r, ClaimURL: "https://server.example.invalid/invite/synthetic-token", EmailSent: emailed, Delivery: in.Delivery}
 	if in.Note == "smtp-failed" {
 		return result, errors.New("private SMTP credential")
 	}
 	return result, f.errorSend
 }
-func (f *fakeInvitations) Resend(context.Context, int64, int64) (*invitations.SendResult, error) {
+func (f *fakeInvitations) Resend(_ context.Context, _, _ int64, delivery invitations.Delivery) (*invitations.SendResult, error) {
+	f.resendDelivery = &delivery
+	if f.row.Email == "" && delivery == invitations.DeliveryEmail {
+		return nil, invitations.ErrNoAddress
+	}
 	f.writes++
 	r := f.row
 	r.ID = 8
-	return &invitations.SendResult{Invitation: &r, ClaimURL: "https://server.example.invalid/invite/replacement-token"}, f.errorSend
+	return &invitations.SendResult{Invitation: &r, ClaimURL: "https://server.example.invalid/invite/replacement-token", Delivery: delivery}, f.errorSend
 }
 func (f *fakeInvitations) Revoke(context.Context, int64) error { f.writes++; return nil }
 func invitationTestHandler(f *fakeInvitations) http.Handler {
@@ -258,5 +280,102 @@ func TestInvitationUnconfiguredAndPasswordBounds(t *testing.T) {
 	}
 	if f.writes != 0 {
 		t.Fatal("invalid password reached acceptance")
+	}
+}
+
+func TestLinkInvitationDelivery(t *testing.T) {
+	f := fixtureInvitations()
+	h := invitationTestHandler(f)
+	path := Prefix + "/admin/invitations"
+
+	requireProblem(t, do(t, h, http.MethodPost, path, `{"delivery":"link","email":"a@example.invalid"}`, actingRequestAdmin), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodPost, path, `{"delivery":"email"}`, actingRequestAdmin), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodPost, path, `{"delivery":"carrier-pigeon"}`, actingRequestAdmin), TypeValidationFailed)
+	if f.writes != 0 {
+		t.Fatal("invalid delivery reached service")
+	}
+
+	r := do(t, h, http.MethodPost, path, `{"delivery":"link","note":"For Sam"}`, actingRequestAdmin)
+	if r.Code != 201 || f.send.Delivery != invitations.DeliveryLink || f.send.Email != "" || !strings.Contains(r.Body.String(), `"delivery_status":"not_requested"`) || !strings.Contains(r.Body.String(), `"delivery":"link"`) {
+		t.Fatal(r.Code, r.Body.String(), f.send)
+	}
+	requireProblem(t, do(t, h, http.MethodPost, path, `{"delivery":"email","email":"a@example.invalid"}`, actingRequestAdmin), TypeCapabilityNotConfigured)
+
+	caps := do(t, h, http.MethodGet, path+"/capabilities", "", actingRequestAdmin)
+	if caps.Code != 200 || !strings.Contains(caps.Body.String(), `"email_delivery":false`) {
+		t.Fatal(caps.Code, caps.Body.String())
+	}
+	f.emailDelivery = true
+	caps = do(t, h, http.MethodGet, path+"/capabilities", "", actingRequestAdmin)
+	if caps.Code != 200 || !strings.Contains(caps.Body.String(), `"email_delivery":true`) {
+		t.Fatal(caps.Code, caps.Body.String())
+	}
+	if public := do(t, h, http.MethodGet, Prefix+"/invitations/capabilities", "", nil); strings.Contains(public.Body.String(), "email_delivery") {
+		t.Fatal("public capabilities disclose email configuration:", public.Body.String())
+	}
+
+	f.row.Email, f.row.Note, f.row.Delivery = "", "For Sam", models.InvitationDeliveryLink
+	lookup := do(t, h, http.MethodGet, Prefix+"/invitations/pending", "", nil)
+	if lookup.Code != 200 || !strings.Contains(lookup.Body.String(), `"email_required":true`) || !strings.Contains(lookup.Body.String(), `"note":"For Sam"`) {
+		t.Fatal(lookup.Code, lookup.Body.String())
+	}
+	listed := do(t, h, http.MethodGet, path+"/7", "", actingRequestAdmin)
+	if listed.Code != 200 || !strings.Contains(listed.Body.String(), `"delivery":"link"`) {
+		t.Fatal(listed.Code, listed.Body.String())
+	}
+
+	accepted := do(t, h, http.MethodPost, Prefix+"/invitations/pending/accept", `{"email":"sam@example.invalid","password":"password123"}`, nil)
+	if accepted.Code != 201 || f.acceptEmail != "sam@example.invalid" {
+		t.Fatal(accepted.Code, accepted.Body.String(), f.acceptEmail)
+	}
+	f.errorAccept = invitations.ErrEmailTaken
+	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/invitations/pending/accept", `{"email":"taken@example.invalid","password":"password123"}`, nil), TypeConflict)
+	f.errorAccept = invitations.ErrEmailRequired
+	missing := do(t, h, http.MethodPost, Prefix+"/invitations/pending/accept", `{"password":"password123"}`, nil)
+	requireProblem(t, missing, TypeValidationFailed)
+	if !strings.Contains(missing.Body.String(), `"location":"body.email"`) {
+		t.Fatal(missing.Body.String())
+	}
+
+	f.row.Delivery = ""
+	if legacy := do(t, h, http.MethodGet, path+"/7", "", actingRequestAdmin); !strings.Contains(legacy.Body.String(), `"delivery":"unknown"`) {
+		t.Fatal(legacy.Body.String())
+	}
+}
+
+func TestResendInvitationDeliveryChoice(t *testing.T) {
+	f := fixtureInvitations()
+	h := invitationTestHandler(f)
+	path := Prefix + "/admin/invitations/7/resend"
+
+	requireProblem(t, do(t, h, http.MethodPost, path, `{"delivery":"carrier-pigeon"}`, actingRequestAdmin), TypeValidationFailed)
+	if f.resendDelivery != nil {
+		t.Fatal("invalid delivery reached service")
+	}
+	for _, tc := range []struct {
+		body string
+		want invitations.Delivery
+	}{
+		{body: "", want: invitations.DeliveryDefault},
+		{body: `{}`, want: invitations.DeliveryDefault},
+		{body: `{"delivery":"link"}`, want: invitations.DeliveryLink},
+		{body: `{"delivery":"email"}`, want: invitations.DeliveryEmail},
+	} {
+		r := do(t, h, http.MethodPost, path, tc.body, actingRequestAdmin)
+		if r.Code != 201 || f.resendDelivery == nil || *f.resendDelivery != tc.want {
+			t.Fatalf("body %q: code=%d delivery=%v %s", tc.body, r.Code, f.resendDelivery, r.Body.String())
+		}
+	}
+	// Replacing an emailed invitation's link keeps its address and emails nothing.
+	linked := do(t, h, http.MethodPost, path, `{"delivery":"link"}`, actingRequestAdmin)
+	if !strings.Contains(linked.Body.String(), `"delivery_status":"not_requested"`) || !strings.Contains(linked.Body.String(), `"email":"invitee@example.invalid"`) {
+		t.Fatal(linked.Body.String())
+	}
+
+	f.row.Email = ""
+	noAddress := do(t, h, http.MethodPost, path, `{"delivery":"email"}`, actingRequestAdmin)
+	requireProblem(t, noAddress, TypeValidationFailed)
+	if !strings.Contains(noAddress.Body.String(), `"location":"body.delivery"`) {
+		t.Fatal(noAddress.Body.String())
 	}
 }

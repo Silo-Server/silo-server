@@ -5771,7 +5771,18 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "delivery": {
+            "description": "How the link reached the invitee. email_unconfirmed: the send failed or its outcome is uncertain. unknown: created before delivery was recorded.",
+            "enum": [
+              "link",
+              "email_sent",
+              "email_unconfirmed",
+              "unknown"
+            ],
+            "type": "string"
+          },
           "email": {
+            "description": "The bound address. Empty for a pending invitation created with delivery=link; after its acceptance, the address the account took.",
             "type": "string"
           },
           "expires_at": {
@@ -5841,6 +5852,7 @@
         "required": [
           "id",
           "email",
+          "delivery",
           "role",
           "library_ids",
           "create_profile",
@@ -5851,6 +5863,49 @@
           "status",
           "expires_at",
           "created_at"
+        ],
+        "type": "object"
+      },
+      "AdminInvitationCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "default_profile": {
+            "description": "Whether the selected profile store can atomically provision a requested default profile.",
+            "type": "boolean"
+          },
+          "email_delivery": {
+            "description": "Whether email is configured, so an invitation can be created with delivery=email.",
+            "type": "boolean"
+          },
+          "profileless": {
+            "type": "boolean"
+          },
+          "revision": {
+            "description": "Opaque revision of this document",
+            "type": "string"
+          },
+          "state": {
+            "description": "Support and configuration state, not health",
+            "enum": [
+              "available",
+              "disabled",
+              "not_configured",
+              "unsupported"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "email_delivery",
+          "default_profile",
+          "profileless",
+          "revision",
+          "state",
+          "allowed"
         ],
         "type": "object"
       },
@@ -5870,9 +5925,17 @@
             "default": true,
             "type": "boolean"
           },
+          "delivery": {
+            "description": "link: create a link to share, with no address and no email. email: email the link; fails when email is not configured. Omitted: email when configured, otherwise return the link for manual delivery.",
+            "enum": [
+              "link",
+              "email"
+            ],
+            "type": "string"
+          },
           "email": {
+            "description": "Required unless delivery is link, which forbids it.",
             "maxLength": 254,
-            "minLength": 1,
             "type": "string"
           },
           "library_ids": {
@@ -5904,9 +5967,20 @@
             "type": "boolean"
           }
         },
-        "required": [
-          "email"
-        ],
+        "type": "object"
+      },
+      "AdminInvitationResend": {
+        "additionalProperties": false,
+        "properties": {
+          "delivery": {
+            "description": "link: replace the link and email nothing; the invitation keeps its address. email: email the new link; fails when email is not configured or the invitation has no address. Omitted: email when the invitation has an address and email is configured, otherwise return the link for manual delivery.",
+            "enum": [
+              "link",
+              "email"
+            ],
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "AdminInviteCode": {
@@ -27141,6 +27215,11 @@
       "InvitationAcceptInputBody": {
         "additionalProperties": false,
         "properties": {
+          "email": {
+            "description": "The invitee's address. Required when the lookup reports email_required; ignored otherwise.",
+            "maxLength": 254,
+            "type": "string"
+          },
           "password": {
             "maxLength": 72,
             "minLength": 8,
@@ -27227,10 +27306,12 @@
             "type": "string"
           },
           "delivery_status": {
+            "description": "not_requested: a link invitation; nothing was emailed.",
             "enum": [
               "sent",
               "not_configured",
-              "failed_or_unknown"
+              "failed_or_unknown",
+              "not_requested"
             ],
             "type": "string"
           },
@@ -27252,7 +27333,12 @@
             "type": "boolean"
           },
           "email": {
+            "description": "The address the invitation is bound to; empty when email_required is true.",
             "type": "string"
+          },
+          "email_required": {
+            "description": "True when the invitation is bound to no address, as for one created with delivery=link: the invitee enters their address at accept.",
+            "type": "boolean"
           },
           "expires_at": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
@@ -27264,6 +27350,10 @@
           "inviter_name": {
             "type": "string"
           },
+          "note": {
+            "description": "The inviter's note; empty when none.",
+            "type": "string"
+          },
           "server_name": {
             "type": "string"
           },
@@ -27273,6 +27363,8 @@
         },
         "required": [
           "email",
+          "email_required",
+          "note",
           "inviter_name",
           "server_name",
           "expires_at",
@@ -67928,7 +68020,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InvitationCapabilities"
+                  "$ref": "#/components/schemas/AdminInvitationCapabilities"
                 }
               }
             },
@@ -68460,6 +68552,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminInvitationResend",
+                "description": "Absent resends as delivery is omitted."
+              }
+            }
+          }
+        },
         "responses": {
           "201": {
             "content": {
@@ -68528,6 +68630,16 @@
             },
             "description": "Not Acceptable"
           },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
           "409": {
             "content": {
               "application/problem+json": {
@@ -68537,6 +68649,26 @@
               }
             },
             "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
           },
           "422": {
             "content": {

@@ -1,3 +1,18 @@
 {
-  "approvals": []
+  "approvals": [
+    {
+      "operation_id": "createAdminInvitation",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "48670f767ffb787b9f6980eb29452f9f3c38ac267974b19572357bb9bdf416b9",
+      "reason": "Link invitations report delivery_status not_requested. Only the web admin creates or resends invitations, and it ships with this change; the apps do not call these administrator operations.",
+      "approved_in": "#1390"
+    },
+    {
+      "operation_id": "resendAdminInvitation",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "99e31b0048e3170e6691db0a8acd2beeef2d2779a1799bb7307f4bc33af642c4",
+      "reason": "Link invitations report delivery_status not_requested. Only the web admin creates or resends invitations, and it ships with this change; the apps do not call these administrator operations.",
+      "approved_in": "#1390"
+    }
+  ]
 }
