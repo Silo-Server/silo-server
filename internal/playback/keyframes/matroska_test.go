@@ -339,6 +339,16 @@ func TestVideoEndSeconds(t *testing.T) {
 	if got := end.seconds(defaultTimescale, 0.033); math.Abs(got-0.19) > 1e-9 {
 		t.Fatalf("from the block duration: %v, want 0.19", got)
 	}
+	// Blocks sharing the last timestamp end with the longest, in either order.
+	for _, durations := range [][2]int64{{70, 30}, {30, 70}} {
+		var shared videoEnd
+		shared.add(80, 0)
+		shared.add(120, durations[0])
+		shared.add(120, durations[1])
+		if got := shared.seconds(defaultTimescale, 0.033); math.Abs(got-0.19) > 1e-9 {
+			t.Fatalf("blocks of %v ms at the end: %v, want 0.19", durations, got)
+		}
+	}
 	// A later frame without one goes back to the track's duration.
 	end.add(160, 0)
 	if got := end.seconds(defaultTimescale, 0.033); math.Abs(got-0.193) > 1e-9 {
@@ -371,5 +381,22 @@ func TestVerifyMatroskaVideoEnd(t *testing.T) {
 	}
 	if math.Abs(idx.VideoEnd-4.298) > 1e-9 {
 		t.Fatalf("VideoEnd = %v, want 4.298", idx.VideoEnd)
+	}
+}
+
+// A video track whose timestamps carry a TrackTimestampScale isn't planned
+// from: the reader's times don't apply it.
+func TestFirstVideoTrackReportsATrackTimestampScale(t *testing.T) {
+	entry := func(scale ...[]byte) []byte {
+		return el(idTrackEntry, append([][]byte{uintEl(idTrackNumber, videoTrack), uintEl(idTrackType, trackTypeVideo)}, scale...)...)
+	}
+	if _, _, scaled, found := firstVideoTrack(entry()); !found || scaled {
+		t.Fatalf("unscaled track: scaled=%v found=%v", scaled, found)
+	}
+	if _, _, scaled, found := firstVideoTrack(entry(floatEl(idTrackTimestampScale, 1))); !found || scaled {
+		t.Fatalf("scale 1: scaled=%v found=%v", scaled, found)
+	}
+	if _, _, scaled, found := firstVideoTrack(entry(floatEl(idTrackTimestampScale, 2))); !found || !scaled {
+		t.Fatalf("scale 2: scaled=%v found=%v", scaled, found)
 	}
 }

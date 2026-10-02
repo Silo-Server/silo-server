@@ -39,6 +39,9 @@ type Index struct {
 	VideoEnd float64
 }
 
+// idTrackTimestampScale is a track's deprecated extra timestamp scale.
+const idTrackTimestampScale = 0x23314F
+
 // Matroska element IDs, from the Matroska specification.
 const (
 	idEBML                  = 0x1A45DFA3
@@ -166,7 +169,13 @@ func readMatroska(r io.ReaderAt, size int64) (matroskaIndex, error) {
 			if err != nil {
 				return matroskaIndex{}, err
 			}
-			video, frameNS, haveTrack = firstVideoTrack(data)
+			var scaled bool
+			video, frameNS, scaled, haveTrack = firstVideoTrack(data)
+			if scaled {
+				// The track's timestamps are scaled again, a deprecated
+				// feature the times here don't apply; don't plan from them.
+				return matroskaIndex{}, ErrNoIndex
+			}
 		case idCues:
 			cues, err = readElementData(r, dataAt, dataSize, maxCuesSize)
 			if err != nil {
@@ -372,12 +381,13 @@ func parseInfo(info []byte) (timescale int64, duration float64) {
 	return timescale, duration
 }
 
-func firstVideoTrack(tracks []byte) (number, frameNS uint64, found bool) {
+func firstVideoTrack(tracks []byte) (number, frameNS uint64, scaled, found bool) {
 	children(tracks, func(id uint64, entry []byte) {
 		if id != idTrackEntry || found {
 			return
 		}
 		var n, kind, frame uint64
+		trackScale := 1.0
 		children(entry, func(id uint64, v []byte) {
 			switch id {
 			case idTrackNumber:
@@ -386,13 +396,15 @@ func firstVideoTrack(tracks []byte) (number, frameNS uint64, found bool) {
 				kind = readUint(v)
 			case idDefaultDuration:
 				frame = readUint(v)
+			case idTrackTimestampScale:
+				trackScale = readFloat(v)
 			}
 		})
 		if kind == trackTypeVideo && n > 0 {
-			number, frameNS, found = n, frame, true
+			number, frameNS, scaled, found = n, frame, trackScale != 1, true
 		}
 	})
-	return number, frameNS, found
+	return number, frameNS, scaled, found
 }
 
 // cuePoints returns every cue point that indexes the video track, with the
