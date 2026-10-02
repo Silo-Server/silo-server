@@ -170,7 +170,7 @@ func (r Runner) prepareSheets(ctx context.Context, req Request, attempt Attempt,
 // constant frame rate.
 func sheetsOutputArgs(graph string) []string {
 	return []string{
-		"-map", "0:V:0", "-an", "-sn", disableDataOption,
+		mapStreamOption, firstVideoStream, disableAudioOption, disableSubtitlesOption, disableDataOption,
 		videoFilterOption, graph,
 		"-fps_mode", "passthrough",
 		pixelFormatOption, sheetPixelFormat,
