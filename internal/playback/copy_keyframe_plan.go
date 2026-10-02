@@ -2,7 +2,6 @@ package playback
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -83,7 +82,7 @@ type copyPlanRecord struct {
 // and records the decision; a rebuilt session follows the record, so it
 // serves the playlist its player already has. Deciding afresh could differ:
 // a file's index that was still being checked may be verified by then.
-func resolveCopyPlan(ctx context.Context, opts TranscodeOpts) *copySegmentPlan {
+func resolveCopyPlan(opts TranscodeOpts) *copySegmentPlan {
 	if !opts.KeyframePlaylist || opts.OutputDir == "" {
 		return planCopySegments(opts)
 	}
@@ -102,11 +101,10 @@ func resolveCopyPlan(ctx context.Context, opts TranscodeOpts) *copySegmentPlan {
 		return nil
 	}
 
+	// Record the decision whatever the start's fate: StartTranscode launches
+	// FFmpeg even if its caller has gone, and that session serves this
+	// playlist.
 	plan := planCopySegments(opts)
-	if ctx.Err() != nil {
-		// The start was abandoned; don't record a decision for it.
-		return nil
-	}
 	rec := copyPlanRecord{Planned: plan != nil}
 	if plan != nil {
 		rec.Durations = plan.durations

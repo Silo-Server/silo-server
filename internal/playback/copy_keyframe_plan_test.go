@@ -119,38 +119,25 @@ func TestResolveCopyPlanFollowsTheRecordedDecision(t *testing.T) {
 	opts.OutputDir = t.TempDir()
 
 	stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrUnverified)
-	if plan := resolveCopyPlan(t.Context(), opts); plan != nil {
+	if plan := resolveCopyPlan(opts); plan != nil {
 		t.Fatal("planned while the index is being checked")
 	}
 	verified := keyframes.Index{Keyframes: []float64{0, 1, 2.6, 7.0, 7.4, 9.0}, VideoEnd: 10}
 	stubKeyframeIndex(t, verified, nil)
-	if plan := resolveCopyPlan(t.Context(), opts); plan != nil {
+	if plan := resolveCopyPlan(opts); plan != nil {
 		t.Fatal("a rebuilt session switched to a keyframe playlist")
-	}
-
-	// A start abandoned while planning records nothing, so the next start
-	// decides afresh.
-	retried := plannedOpts()
-	retried.OutputDir = t.TempDir()
-	abandoned, cancel := context.WithCancel(t.Context())
-	cancel()
-	if plan := resolveCopyPlan(abandoned, retried); plan != nil {
-		t.Fatal("planned for an abandoned start")
-	}
-	if plan := resolveCopyPlan(t.Context(), retried); plan == nil {
-		t.Fatal("the start after an abandoned one didn't plan")
 	}
 
 	planned := plannedOpts()
 	planned.OutputDir = t.TempDir()
-	first := resolveCopyPlan(t.Context(), planned)
+	first := resolveCopyPlan(planned)
 	if first == nil {
 		t.Fatal("no plan with a verified index")
 	}
 	// The record stands in for the index, which a cold process may not have
 	// verified yet.
 	stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrUnverified)
-	again := resolveCopyPlan(t.Context(), planned)
+	again := resolveCopyPlan(planned)
 	if again == nil || !slices.Equal(again.durations, first.durations) {
 		t.Fatalf("rebuilt plan = %+v, want the recorded %+v", again, first)
 	}
@@ -319,6 +306,15 @@ func TestPlannedCopySessionMatchesFFmpeg(t *testing.T) {
 			if math.Abs(got[i]-planned[i]) > tolerance {
 				t.Fatalf("%s: segment %d is %.3fs, playlist says %.3fs", label, i, got[i], planned[i])
 			}
+		}
+		// Per-segment tolerances could hide drift that adds up.
+		var wrote, listed float64
+		for i := range got {
+			wrote += got[i]
+			listed += planned[i]
+		}
+		if math.Abs(wrote-listed) > 0.041 {
+			t.Fatalf("%s: FFmpeg wrote %.3fs in all, the playlist lists %.3fs", label, wrote, listed)
 		}
 	}
 	checkWritten("from the start")

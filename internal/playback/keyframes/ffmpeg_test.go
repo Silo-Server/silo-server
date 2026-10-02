@@ -169,6 +169,15 @@ func TestPlanSegmentsMatchesFFmpegHLS(t *testing.T) {
 				i, planned[i], written[i], planned, written)
 		}
 	}
+	// Per-segment tolerances could hide drift that adds up.
+	var plannedTotal, writtenTotal float64
+	for i := range written {
+		plannedTotal += planned[i]
+		writtenTotal += written[i]
+	}
+	if math.Abs(plannedTotal-writtenTotal) > 0.041 {
+		t.Fatalf("planned %.3fs in all, FFmpeg wrote %.3fs", plannedTotal, writtenTotal)
+	}
 }
 
 func playlistDurations(t *testing.T, path string) []float64 {
