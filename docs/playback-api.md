@@ -111,7 +111,8 @@ storage I/O errors) is not reported this way and keeps
 rescanned. The server records the rejection on the media file during a scan or
 a playback-time probe repair, and a later successful probe clears it. The
 rejection only refers to that file: with alternate versions allowed, the server
-tries the item's other versions before answering `source_unreadable`.
+tries the item's other versions the viewer may play (library access and
+playback-quality ceiling) before answering `source_unreadable`.
 Season episode listings mark such files with `unreadable: true` (see
 [Catalog API](catalog-api.md#episode-files)). The v1 start route shares the
 planner, so v1 clients can also receive `source_unreadable`; like any unknown

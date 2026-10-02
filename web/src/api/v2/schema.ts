@@ -20964,7 +20964,7 @@ export interface components {
       file_size: number;
       hdr: boolean;
       resolution?: string;
-      /** @description Present and true when the server could not read the file (empty, corrupt, or truncated). Playback of it answers the terminal reason source_unreadable until the file is replaced and rescanned. */
+      /** @description Present and true when the server could not read the file (empty, corrupt, or truncated). Playback of it falls back to another version of the episode the viewer may play; if no such version is available, playback returns the terminal reason source_unreadable until the file is replaced and a scan reads it successfully. */
       unreadable?: boolean;
     };
     EventsCapabilities: {

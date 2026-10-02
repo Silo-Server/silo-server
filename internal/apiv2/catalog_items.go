@@ -489,7 +489,7 @@ type EpisodeFile struct {
 	AudioChannels int    `json:"audio_channels,omitempty"`
 	Container     string `json:"container,omitempty"`
 	FileSize      int64  `json:"file_size"`
-	Unreadable    bool   `json:"unreadable,omitempty" doc:"Present and true when the server could not read the file (empty, corrupt, or truncated). Playback of it answers the terminal reason source_unreadable until the file is replaced and rescanned."`
+	Unreadable    bool   `json:"unreadable,omitempty" doc:"Present and true when the server could not read the file (empty, corrupt, or truncated). Playback of it falls back to another version of the episode the viewer may play; if no such version is available, playback returns the terminal reason source_unreadable until the file is replaced and a scan reads it successfully."`
 }
 
 // Episode is one episode row of a season listing.
