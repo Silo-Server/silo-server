@@ -2,6 +2,7 @@ import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { Play, Star } from "lucide-react";
 import type { EpisodeListItem } from "@/api/types";
 import CardOverlays from "@/components/overlays/CardOverlays";
+import UnreadableFileBadge, { episodeFilesUnreadable } from "@/components/UnreadableFileBadge";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { overlayDataFromEpisodeListItem } from "@/lib/overlays";
 
@@ -102,6 +103,14 @@ export default function EpisodeRow({ episode, rating, watched, progress }: Episo
           {episode.air_date && <span>{episode.air_date}</span>}
           {episode.air_date && episode.runtime > 0 && <span className="mx-1.5">&middot;</span>}
           {episode.runtime > 0 && <span>{episode.runtime}m</span>}
+          {episodeFilesUnreadable(episode) && (
+            <>
+              {(episode.air_date || episode.runtime > 0) && (
+                <span className="mx-1.5">&middot;</span>
+              )}
+              <UnreadableFileBadge />
+            </>
+          )}
         </div>
       </div>
 

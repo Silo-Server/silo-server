@@ -1049,10 +1049,23 @@ help. Delivered inside a `201` (start) or `200` (replan), never a 4xx.
 *Planner:* `adaptation_exhausted`, `adaptation_unavailable`,
 `client_hls_unsupported`, `conversion_tool_unavailable`,
 `hdr_transcode_unsupported`, `no_alternate_version`,
-`source_metadata_incomplete`, `source_unavailable`,
+`source_metadata_incomplete`, `source_unavailable`, `source_unreadable`,
 `audio_conversion_unsupported`, `video_conversion_unsupported`,
 `dv_conversion_unsupported`, `transcoding_disabled`,
-`subtitle_conversion_unsupported`. When a video adaptation is forced solely by a
+`subtitle_conversion_unsupported`. `source_metadata_incomplete` is retryable:
+the file has not been probed yet or lacks a field a route needs.
+`source_unreadable` is not: ffprobe rejected the effective file (empty,
+corrupt, truncated) and it carries no stream metadata. The scanner and the
+playback-time probe repair record the rejection in `media_files.probe_failed_at`
+only for a non-zero ffprobe exit with the caller's context still live, when
+ffprobe's error output names no operating-system read failure and the server
+can read the start and end of the file. A timeout, cancellation, missing
+binary, or an access failure (permission denied, I/O error or timeout on a
+mount, stale handle, vanished file) never marks a file and keeps the retryable
+`source_metadata_incomplete`; an empty file is readable and is marked. A
+successful probe clears the mark. Like the HDR and 4K refusals,
+`source_unreadable` lets the server try the item's other versions, limited to
+versions the viewer may play (library access and playback-quality ceiling). When a video adaptation is forced solely by a
 subtitle burn-in requirement and cannot execute, the terminal is
 `subtitle_conversion_unsupported` naming the subtitle rather than the underlying
 HDR, 4K, or transcode-policy reason — deselecting the subtitle restores playback.

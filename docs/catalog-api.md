@@ -121,6 +121,20 @@ selection, and the Jellyfin compatibility surface: an item always plays from its
 full accessible version list. No client change is needed: the setting only
 changes what an existing `library_id` request returns.
 
+## Episode files
+
+Each episode in `listSeasonEpisodes` and `listCatalogItemEpisodes` lists its
+accessible files with their quality facts. `unreadable` is present and `true`
+on a file the server could not read: ffprobe rejected it as empty, corrupt, or
+truncated, and no successful probe exists. Starting playback of that file
+falls back to another version of the episode the viewer may play; when there
+is none, it answers the terminal reason `source_unreadable` (see
+[Playback API](playback-api.md#start)). The field is cleared once the file is
+replaced and a scan or playback attempt probes it successfully. The web client
+marks an episode only when every one of its files is unreadable, since any
+readable version still plays. `/api/v1` episode listings do not carry the
+field.
+
 ## Section quality badges
 
 Home and library section cards derive `overlay_summary` from the best accessible,

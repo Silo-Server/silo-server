@@ -34,6 +34,12 @@ export function describePlanTerminal(terminal: TerminalV3): PlaybackPolicyErrorD
         message:
           "The file needed to play it can't be found right now. Go back and try another version if one is available.",
       };
+    case "source_unreadable":
+      return {
+        title: "This file can't be played",
+        message:
+          "Silo couldn't read this file. It appears to be empty or damaged. Replace the file, then rescan the library.",
+      };
     case "source_metadata_incomplete":
       return {
         title: "This file hasn't finished scanning",

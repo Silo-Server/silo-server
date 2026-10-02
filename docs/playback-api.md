@@ -100,6 +100,24 @@ and `terminal.retryable: true`; mint a new attempt. Local direct and HLS media
 URLs in the plan are projected into the `/api/v2` namespace; the signed `st`
 query they carry is unchanged.
 
+Two terminal reasons describe a source without stream metadata.
+`source_metadata_incomplete` (`retryable: true`) means the file has not been
+probed yet, or its probe lacks a field a route needs; trying again after the
+scan can help. `source_unreadable` (`retryable: false`) means ffprobe ran and
+rejected the file: it is empty, corrupt, or truncated, and no version of it was
+ever probed successfully. A file the server cannot open or read (permissions,
+storage I/O errors) is not reported this way and keeps
+`source_metadata_incomplete`. Retrying cannot help until the file is replaced and
+rescanned. The server records the rejection on the media file during a scan or
+a playback-time probe repair, and a later successful probe clears it. The
+rejection only refers to that file: with alternate versions allowed, the server
+tries the item's other versions the viewer may play (library access and
+playback-quality ceiling) before answering `source_unreadable`.
+Season episode listings mark such files with `unreadable: true` (see
+[Catalog API](catalog-api.md#episode-files)). The v1 start route shares the
+planner, so v1 clients can also receive `source_unreadable`; like any unknown
+reason, they show `terminal.message`.
+
 The web player retries an interrupted START with the identical body, including
 when response headers arrived but reading the body failed. Its 60-second retry
 budget includes backoff and response-body reads; each request gets at most
