@@ -13,6 +13,7 @@ TRACE /api/v2/*	non-media
 GET /api/v2/account/identities	non-media
 POST /api/v2/account/identities/link-complete	non-media
 POST /api/v2/account/identities/link-credentials	non-media
+POST /api/v2/account/identities/link-network	non-media
 POST /api/v2/account/identities/link-start	non-media
 POST /api/v2/account/identities/link-ticket	non-media
 DELETE /api/v2/account/identities/{id}	non-media
@@ -401,6 +402,7 @@ GET /api/v2/auth/external-sign-in/capabilities	non-media
 POST /api/v2/auth/impersonation/end	non-media
 POST /api/v2/auth/login	non-media
 POST /api/v2/auth/logout	non-media
+POST /api/v2/auth/network/{id}/sign-in	non-media
 GET /api/v2/auth/oauth/capabilities	non-media
 POST /api/v2/auth/oauth/complete	non-media
 GET /api/v2/auth/oauth/{install_id}/callback	non-media
@@ -1230,6 +1232,7 @@ TRACE /api/v2/*	non-media
 GET /api/v2/account/identities	non-media
 POST /api/v2/account/identities/link-complete	non-media
 POST /api/v2/account/identities/link-credentials	non-media
+POST /api/v2/account/identities/link-network	non-media
 POST /api/v2/account/identities/link-start	non-media
 POST /api/v2/account/identities/link-ticket	non-media
 DELETE /api/v2/account/identities/{id}	non-media
@@ -1618,6 +1621,7 @@ GET /api/v2/auth/external-sign-in/capabilities	non-media
 POST /api/v2/auth/impersonation/end	non-media
 POST /api/v2/auth/login	non-media
 POST /api/v2/auth/logout	non-media
+POST /api/v2/auth/network/{id}/sign-in	non-media
 GET /api/v2/auth/oauth/capabilities	non-media
 POST /api/v2/auth/oauth/complete	non-media
 GET /api/v2/auth/oauth/{install_id}/callback	non-media
