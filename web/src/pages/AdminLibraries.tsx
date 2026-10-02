@@ -13,6 +13,7 @@ import type {
 } from "@/api/types";
 import {
   useAdminLibraries,
+  useLibraryCapabilities,
   useCancelLibraryScans,
   useReorderLibraries,
   useSkippedLibraryRoots,
@@ -34,12 +35,14 @@ import {
   useUnmatchedLibraryItems,
   UNMATCHED_PAGE_SIZE,
 } from "@/hooks/queries/admin/libraries";
+import { useAdminTrickplayLibraries } from "@/hooks/queries/admin/trickplay";
 import { useActiveScans } from "@/hooks/queries/admin/scans";
 import { buildLibraryReorderEntries } from "./adminLibraryOrder";
 import MatchItemDialog from "@/components/MatchItemDialog";
 import { LibraryEditorDialog } from "@/components/admin/libraries/LibraryEditorDialog";
 import { LibraryRefreshDialog } from "@/components/admin/libraries/LibraryRefreshDialog";
 import { RealtimeMonitoringBadge } from "@/components/admin/libraries/RealtimeMonitoringBadge";
+import { TrickplayLibraryBadge } from "@/components/admin/trickplay/TrickplayLibraryBadge";
 import { MetadataMatcherQueuesSection } from "@/components/admin/libraries/MetadataMatcherQueuesSection";
 import { CollapsibleDiagnosticsSection } from "@/components/admin/CollapsibleDiagnosticsSection";
 import { Button } from "@/components/ui/button";
@@ -167,8 +170,14 @@ export default function AdminLibraries() {
   }
 
   const { data: libraries = [], isLoading } = useAdminLibraries();
+  const { data: libraryCapabilities } = useLibraryCapabilities();
   const { data: activeScans = [] } = useActiveScans();
   const { data: realtimeMonitoring } = useLibraryRealtimeMonitoring();
+  const { data: trickplayLibraries } = useAdminTrickplayLibraries();
+  const trickplayByLibraryId = useMemo(
+    () => new Map(trickplayLibraries?.map((entry) => [Number(entry.library_id), entry]) ?? []),
+    [trickplayLibraries],
+  );
   const realtimeMonitoringByLibraryId = useMemo(
     () => new Map(realtimeMonitoring?.libraries.map((entry) => [entry.library_id, entry]) ?? []),
     [realtimeMonitoring],
@@ -414,6 +423,13 @@ export default function AdminLibraries() {
               libraries[0]?.chapter_thumbnails_supported ??
               true
             }
+            trickplaySupported={
+              editingLib?.trickplay_supported ??
+              libraries[0]?.trickplay_supported ??
+              (libraryCapabilities?.trickplay === true
+                ? libraryCapabilities.trickplay_supported
+                : undefined)
+            }
           />
           <LibraryRefreshDialog
             libraryName={refreshLib?.name ?? null}
@@ -534,6 +550,7 @@ export default function AdminLibraries() {
                                 <RealtimeMonitoringBadge
                                   entry={realtimeMonitoringByLibraryId.get(lib.id)}
                                 />
+                                <TrickplayLibraryBadge library={trickplayByLibraryId.get(lib.id)} />
                               </div>
                             </TableCell>
                             <TableCell className="text-muted-foreground text-xs">

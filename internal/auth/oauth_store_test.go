@@ -109,31 +109,23 @@ func TestInMemoryOAuthStore_DuplicateState(t *testing.T) {
 	}
 }
 
-func TestPGOAuthStore_EncryptsCompletionTokens(t *testing.T) {
+func TestPGOAuthStore_SealsBoundToTheCode(t *testing.T) {
 	st := NewPGOAuthStore(nil, []byte("test-secret"))
-	completion := OAuthCompletion{
-		Code:         "completion-code",
-		AccessToken:  "access-token-value",
-		RefreshToken: "refresh-token-value",
-		ExpiresIn:    900,
-		NextURL:      "/me",
-		ExpiresAt:    time.Now().Add(time.Minute),
-	}
-	codeHash := oauthCompletionCodeHash(completion.Code)
+	plaintext := "synthetic-provider-answer"
+	codeHash := oauthCompletionCodeHash("completion-code")
 
-	ciphertext, err := st.encryptCompletionTokens(completion, codeHash)
+	ciphertext, err := st.seal([]byte(plaintext), pendingLinkAAD(codeHash))
 	if err != nil {
-		t.Fatalf("encryptCompletionTokens: %v", err)
+		t.Fatalf("seal: %v", err)
 	}
-	if strings.Contains(ciphertext, completion.AccessToken) || strings.Contains(ciphertext, completion.RefreshToken) {
-		t.Fatalf("ciphertext includes plaintext tokens: %q", ciphertext)
+	if strings.Contains(ciphertext, plaintext) {
+		t.Fatalf("ciphertext includes the plaintext: %q", ciphertext)
 	}
-
-	var out OAuthCompletion
-	if err := st.decryptCompletionTokens(ciphertext, codeHash, &out); err != nil {
-		t.Fatalf("decryptCompletionTokens: %v", err)
+	out, err := st.open(ciphertext, pendingLinkAAD(codeHash))
+	if err != nil || string(out) != plaintext {
+		t.Fatalf("open = %q, %v", out, err)
 	}
-	if out.AccessToken != completion.AccessToken || out.RefreshToken != completion.RefreshToken {
-		t.Fatalf("tokens = %q/%q", out.AccessToken, out.RefreshToken)
+	if _, err := st.open(ciphertext, pendingLinkAAD(oauthCompletionCodeHash("another-code"))); err == nil {
+		t.Fatal("a sealed answer opened under another code")
 	}
 }

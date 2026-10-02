@@ -2306,14 +2306,21 @@ func (f *Fetcher) fetchTVRecentlyAdded(
 		return nil, 0, tvScoped, err
 	}
 
-	targets, total, _, err := catalog.NewRecentTVRepository(f.pool).List(ctx, catalog.RecentTVQuery{
-		LibraryIDs:    effectiveLibraryIDs,
-		Access:        filter,
-		Limit:         s.ItemLimit,
-		UniqueTargets: true,
+	// The home row needs the newest cards, not the size of the whole event
+	// history: ListNewest groups only recently active shows. total_count is a
+	// lower bound (the documented contract): one more than the page when more
+	// cards exist, which is what clients test it for.
+	targets, hasMore, err := catalog.NewRecentTVRepository(f.pool).ListNewest(ctx, catalog.RecentTVQuery{
+		LibraryIDs: effectiveLibraryIDs,
+		Access:     filter,
+		Limit:      s.ItemLimit,
 	})
 	if err != nil {
 		return nil, 0, true, err
+	}
+	total := len(targets)
+	if hasMore {
+		total++
 	}
 
 	seriesIDs := make([]string, 0, len(targets))

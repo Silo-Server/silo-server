@@ -48,7 +48,6 @@ import Login from "@/pages/Login";
 import { useRequestFeatureStatus } from "@/hooks/queries/useRequests";
 import { OnboardingGate } from "@/components/onboarding/OnboardingGate";
 import TasteSeedGate from "@/components/TasteSeedGate";
-import SettingsLayout from "@/pages/SettingsLayout";
 import {
   WatchPlaybackBar,
   WatchPlaybackHost,
@@ -79,6 +78,7 @@ const importCollections = () => import("@/pages/Collections");
 const importRecommendations = () => import("@/pages/Recommendations");
 
 const AdminLayout = lazy(() => import("@/components/AdminLayout"));
+const SettingsLayout = lazy(() => import("@/pages/SettingsLayout"));
 const OAuthComplete = lazy(() => import("@/pages/OAuthComplete"));
 const ActivateDevice = lazy(() => import("@/pages/ActivateDevice"));
 const SetupWizard = lazy(() => import("@/pages/SetupWizard"));

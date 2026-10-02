@@ -36,6 +36,8 @@ func describeWorkerProtocols() workerProtocolRegistry {
 	operations = append(operations, proxy.ProtocolControls(schemas)...)
 	operations = append(operations, transcodenode.ProtocolControls(schemas)...)
 	operations = append(operations, transcodenode.ProtocolChapterExtraction(schemas))
+	operations = append(operations, transcodenode.ProtocolTrickplayExtraction(schemas))
+	operations = append(operations, transcodenode.ProtocolMediaSample(schemas))
 	operations = append(operations, transcodenode.ProtocolArtifacts()...)
 	operations = append(operations, proxy.ProtocolSubtitles(schemas)...)
 	operations = append(operations, transcodenode.ProtocolSegmentAcknowledgement())

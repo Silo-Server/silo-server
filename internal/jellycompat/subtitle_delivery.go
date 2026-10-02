@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
 const (
@@ -51,6 +52,11 @@ func (h *PlaybackHandler) deliverSubtitle(w http.ResponseWriter, r *http.Request
 		writeSubtitleResponse(w, requested, data)
 		return
 	}
+	// Text written for left-to-right players gets its right-to-left lines
+	// marked so the punctuation lands where the author put it.
+	if format == compatSubtitleVTT || format == compatSubtitleSRT {
+		data = subtitles.MarkLTRAuthoredLines(data)
+	}
 	if requested == format && start == 0 && end == 0 && !timeMap {
 		writeSubtitleResponse(w, requested, data)
 		return
@@ -61,6 +67,7 @@ func (h *PlaybackHandler) deliverSubtitle(w http.ResponseWriter, r *http.Request
 			writeError(w, 500, "ServerError", "Failed to convert subtitle")
 			return
 		}
+		data = subtitles.MarkLTRAuthoredLines(data)
 	}
 	windowFormat := requested
 	if requested == "js" {

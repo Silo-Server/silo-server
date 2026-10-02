@@ -1,6 +1,7 @@
 package mediasample
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -39,11 +40,14 @@ type Image struct {
 // The tone-map chains chapter thumbnails have always used, kept byte for
 // byte so existing thumbnails keep their look. They are not the playback
 // chains in tonemap. The software chains need zscale; the VAAPI chain also
-// serves QSV, which decodes through VAAPI, and ends in system memory.
+// serves QSV, which decodes through VAAPI. vaapiToneMap leaves VAAPI
+// surfaces, which sheets scale on the GPU before the download;
+// vaapiToneMapDownload ends in system memory.
 const (
 	softwareToneMapBT2390 = "tonemapx=tonemap=bt2390,zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p"
 	softwareToneMapHable  = "zscale=t=linear:npl=100,format=gbrpf32le,tonemap=hable,zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p"
-	vaapiToneMapDownload  = "setparams=color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc,procamp_vaapi=b=16:c=1,tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709,hwdownload,format=nv12"
+	vaapiToneMap          = "setparams=color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc,procamp_vaapi=b=16:c=1,tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709"
+	vaapiToneMapDownload  = vaapiToneMap + "," + hwDownloadFilter
 )
 
 const maxImageWidth = 7680
@@ -55,10 +59,21 @@ func (o ImageOutput) validate() error {
 	return nil
 }
 
-// softwareToneMaps reports whether attempt tone maps an image in software on
-// the accelerator accel.
+// softwareToneMaps reports whether attempt tone maps an image or sheet in
+// software on the accelerator accel.
 func (r Request) softwareToneMaps(attempt Attempt, accel string) bool {
-	return r.Images != nil && r.Images.ToneMap != nil && (!attempt.Hardware || framesInSystemMemory(accel))
+	return r.imageToneMap() != nil && (!attempt.Hardware || framesInSystemMemory(accel))
+}
+
+// imageToneMap is the tone mapping an Images or Sheets output asks for.
+func (r Request) imageToneMap() *ToneMap {
+	switch {
+	case r.Images != nil:
+		return r.Images.ToneMap
+	case r.Sheets != nil:
+		return r.Sheets.ToneMap
+	}
+	return nil
 }
 
 // toneMapResolver picks the software tone-map chain at most once per run, when
@@ -106,19 +121,24 @@ func (r Runner) selectSoftwareToneMap(ctx context.Context) (string, *AttemptErro
 	return "", &AttemptError{Reason: ReasonUnsupported, Err: errors.New("configured FFmpeg lacks the required tonemapx or tonemap filter")}
 }
 
+// softwareToneMapFilter settles, before ffmpeg starts, the software tone-map
+// chain an image or sheet attempt needs, or "" when it needs none.
+func (r Runner) softwareToneMapFilter(ctx context.Context, req Request, attempt Attempt, toneMap *toneMapResolver) (string, *AttemptError) {
+	if !req.softwareToneMaps(attempt, r.HWAccel) {
+		return "", nil
+	}
+	if !req.imageToneMap().AllowSoftware {
+		return "", &AttemptError{Reason: ReasonUnsupported, Err: errors.New("software HDR tone mapping is disabled")}
+	}
+	return toneMap.resolve(ctx, r)
+}
+
 // prepareImage settles what an image attempt on hw needs before ffmpeg
 // starts: the software tone-map chain, and the arguments.
 func (r Runner) prepareImage(ctx context.Context, req Request, attempt Attempt, hw hardwareDecode, toneMap *toneMapResolver) ([]string, *AttemptError) {
-	softwareToneMap := ""
-	if req.softwareToneMaps(attempt, r.HWAccel) {
-		if !req.Images.ToneMap.AllowSoftware {
-			return nil, &AttemptError{Reason: ReasonUnsupported, Err: errors.New("software HDR tone mapping is disabled")}
-		}
-		filter, failure := toneMap.resolve(ctx, r)
-		if failure != nil {
-			return nil, failure
-		}
-		softwareToneMap = filter
+	softwareToneMap, failure := r.softwareToneMapFilter(ctx, req, attempt, toneMap)
+	if failure != nil {
+		return nil, failure
 	}
 	args, err := buildImageArgs(req, attempt, hw, softwareToneMap)
 	if err != nil {
@@ -173,7 +193,7 @@ func buildImageArgs(req Request, attempt Attempt, hw hardwareDecode, softwareTon
 		"-i", req.Input,
 	)
 	if filter != "" {
-		args = append(args, "-vf", filter)
+		args = append(args, videoFilterOption, filter)
 	}
 	return append(args,
 		"-frames:v", "1",
@@ -186,8 +206,8 @@ func buildImageArgs(req Request, attempt Attempt, hw hardwareDecode, softwareTon
 // image runs an image attempt. The output is a single MJPEG frame, so
 // ffmpeg's whole stdout is the image.
 func (a attemptRun) image(req Request, args []string) (Result, *AttemptError) {
-	stdout, failure := a.exec(req, args, nil, true)
-	if failure != nil {
+	stdout := &bytes.Buffer{}
+	if failure := a.exec(req, args, nil, stdout); failure != nil {
 		return Result{}, failure
 	}
 	if stdout.Len() == 0 {

@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   COLLECTION_FIELD_OPTIONS,
@@ -10,6 +10,10 @@ import {
 
 import FilterRuleEditor from "./FilterRuleEditor";
 import { getFilterRuleFieldOptions } from "./FilterRuleEditor";
+
+vi.mock("@/hooks/queries/ratingsCapability", () => ({
+  useShownRatingSources: () => new Set(["imdb", "tmdb"]),
+}));
 
 describe("FilterRuleEditor", () => {
   it("renders rule-management controls as non-submit buttons", () => {

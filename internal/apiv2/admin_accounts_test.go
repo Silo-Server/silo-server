@@ -46,9 +46,17 @@ func (f *fakeAdminAccounts) UpdateAdminAccount(_ context.Context, _ int, rev, gr
 	f.snapshot.Revision++
 	return f.snapshot.Revision, nil
 }
-func (f *fakeAdminAccounts) DeleteAdminAccount(_ context.Context, _ int, rev, group int64) error {
+
+// fixtureLastBreakGlassID is the account the fakes treat as the last
+// usable break-glass admin while local password sign-in is off.
+const fixtureLastBreakGlassID = 8
+
+func (f *fakeAdminAccounts) DeleteAdminAccount(_ context.Context, id int, rev, group int64) error {
 	if f.race || (rev != -1 && rev != f.snapshot.Revision) || group != f.snapshot.GroupRevision {
 		return auth.ErrAdminUserRevision
+	}
+	if id == fixtureLastBreakGlassID {
+		return &handlers.APIError{Status: http.StatusConflict, Code: "break_glass_required", Message: "Local password sign-in is off, and this is the last break-glass admin that can still sign in with a password"}
 	}
 	f.writes++
 	return nil
@@ -64,7 +72,8 @@ func (f *fakeAdminAccounts) ImpersonateAdminAccount(context.Context, int, string
 	return handlers.TokenPairView{}, auth.ErrImpersonationNotAllowed
 }
 func (*fakeAdminAccounts) ListAdminAccountProfiles(context.Context, int) ([]handlers.AdminProfileView, error) {
-	return []handlers.AdminProfileView{{ID: "profile-1", Name: "Parent"}}, nil
+	seen := fixedTime()
+	return []handlers.AdminProfileView{{ID: "profile-1", Name: "Parent", LastSeenAt: &seen}, {ID: "profile-2", Name: "Guest"}}, nil
 }
 
 func TestAdminAccountEffectiveLibraryAccess(t *testing.T) {
@@ -181,5 +190,43 @@ func TestAdminAccountCreateAndErrors(t *testing.T) {
 	profiles := do(t, h, http.MethodGet, path+"/7/profiles", "", actingRequestAdmin)
 	if profiles.Code != 200 || !strings.Contains(profiles.Body.String(), `"id":"profile-1"`) {
 		t.Fatal(profiles.Code, profiles.Body.String())
+	}
+}
+
+// TestAdminUserIPLocation classifies each address the way stream location
+// does without a provider path: private, loopback and link-local are local.
+func TestAdminUserIPLocation(t *testing.T) {
+	want := map[string]string{
+		"192.168.1.40":     "local",
+		"10.8.0.6":         "local",
+		"fd00::7":          "local",
+		"127.0.0.1":        "local",
+		"81.12.44.190":     "remote",
+		"2a02:c7c:4d1::12": "remote",
+	}
+	activity := &fakeAdminAccountActivity{}
+	for ip := range want {
+		activity.ips = append(activity.ips, ip)
+	}
+	deps := requestDeps(fixtureRequests())
+	deps.AdminAccounts = fixtureAdminAccounts()
+	deps.AdminAccountActivity = activity
+	reply := do(t, NewHandler(deps), http.MethodGet, Prefix+"/admin/users/7/ips", "", actingRequestAdmin)
+	if reply.Code != http.StatusOK {
+		t.Fatalf("%d %s", reply.Code, reply.Body.String())
+	}
+	var body struct {
+		Items []AdminUserIP `json:"items"`
+	}
+	if err := json.Unmarshal(reply.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Items) != len(want) {
+		t.Fatalf("got %d addresses: %s", len(body.Items), reply.Body.String())
+	}
+	for _, item := range body.Items {
+		if item.Location != want[item.ClientIP] {
+			t.Errorf("%s: location %q, want %q", item.ClientIP, item.Location, want[item.ClientIP])
+		}
 	}
 }

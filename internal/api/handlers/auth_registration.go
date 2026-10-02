@@ -12,7 +12,6 @@ import (
 )
 
 const (
-	providerModeOAuth   = "oauth"
 	fieldInviteCode     = "invite_code"
 	fieldPassword       = "password"
 	codePasswordTooLong = "password_too_long"
@@ -30,12 +29,32 @@ func (h *AuthHandler) ListProviders() []auth.LoginProviderInfo {
 	providers := h.service.ListProviders()
 	out := make([]auth.LoginProviderInfo, 0, len(providers))
 	for _, provider := range providers {
-		if provider.Mode == providerModeOAuth && !h.oauthRoutesAvailable {
+		if provider.Mode == auth.ProviderModeOAuth && !h.oauthRoutesAvailable {
 			continue
 		}
 		out = append(out, provider)
 	}
 	return out
+}
+
+// DiscoverProviders is ListProviders for the v2 discovery (see
+// auth.Service.DiscoverProviders): the local provider is left out while the
+// server turns local password sign-in off. Leaving out OAuth providers when
+// the OAuth routes are not served does not change PasswordLogin.
+func (h *AuthHandler) DiscoverProviders(ctx context.Context) (auth.ProviderDiscovery, error) {
+	discovery, err := h.service.DiscoverProviders(ctx)
+	if err != nil {
+		return auth.ProviderDiscovery{}, err
+	}
+	out := make([]auth.LoginProviderInfo, 0, len(discovery.Providers))
+	for _, provider := range discovery.Providers {
+		if provider.Mode == auth.ProviderModeOAuth && !h.oauthRoutesAvailable {
+			continue
+		}
+		out = append(out, provider)
+	}
+	discovery.Providers = out
+	return discovery, nil
 }
 
 // RefreshedTokensView is a refreshed credential: the token pair without the
@@ -48,7 +67,9 @@ type RefreshedTokensView struct {
 
 // Refresh exchanges a refresh token for a new pair. v1 POST /auth/refresh and
 // v2 refreshSession both call it. A revoked session is 401 session_revoked;
-// any other failure is 401 invalid_token, as on v1.
+// any other failure is 401 invalid_token, as on v1. A provider re-check that
+// could not reach the provider under the fail_closed outage policy keeps the
+// v1 answer but carries auth.ErrProviderUnavailable, which v2 answers as 503.
 func (h *AuthHandler) Refresh(ctx context.Context, refreshToken string) (RefreshedTokensView, error) {
 	if refreshToken == "" {
 		return RefreshedTokensView{}, &APIError{Status: http.StatusBadRequest, Code: policyErrorBadRequest, Message: "Refresh token is required", Field: "refresh_token"}
@@ -58,7 +79,11 @@ func (h *AuthHandler) Refresh(ctx context.Context, refreshToken string) (Refresh
 		if errors.Is(err, auth.ErrSessionRevoked) {
 			return RefreshedTokensView{}, apiError(http.StatusUnauthorized, "session_revoked", "Session has been revoked")
 		}
-		return RefreshedTokensView{}, apiError(http.StatusUnauthorized, "invalid_token", "Invalid or expired refresh token")
+		invalid := apiError(http.StatusUnauthorized, "invalid_token", "Invalid or expired refresh token")
+		if errors.Is(err, auth.ErrProviderUnavailable) {
+			invalid.cause = auth.ErrProviderUnavailable
+		}
+		return RefreshedTokensView{}, invalid
 	}
 	return RefreshedTokensView{AccessToken: pair.AccessToken, RefreshToken: pair.RefreshToken, ExpiresIn: pair.ExpiresIn}, nil
 }
@@ -173,6 +198,9 @@ func (h *AuthHandler) Signup(ctx context.Context, in RegistrationInput) (TokenPa
 			return TokenPairView{}, &APIError{Status: http.StatusBadRequest, Code: "code_disabled", Message: "This invite code is no longer active", Field: fieldInviteCode}
 		case auth.IsDuplicate(err):
 			return TokenPairView{}, apiError(http.StatusBadRequest, "duplicate", "Username or email already taken")
+		}
+		if apiErr := externalSignInError(err); apiErr != nil {
+			return TokenPairView{}, apiErr
 		}
 		return TokenPairView{}, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
 	}

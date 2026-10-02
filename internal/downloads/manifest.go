@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -55,7 +56,10 @@ type OfflineChapter struct {
 }
 
 // OfflineSubtitle is one downloadable subtitle asset. FetchURL is an
-// authenticated proxy endpoint, never a presigned URL.
+// authenticated proxy endpoint, never a presigned URL. Revision is set only for
+// downloaded (stored) subtitles: an opaque token that changes whenever the
+// delivered bytes can change, such as a timing correction, so an offline
+// client knows to fetch the asset again.
 type OfflineSubtitle struct {
 	Language        string `json:"language"`
 	Title           string `json:"title,omitempty"`
@@ -65,6 +69,7 @@ type OfflineSubtitle struct {
 	External        bool   `json:"external"`
 	FetchURL        string `json:"fetch_url"`
 	FileSize        int64  `json:"file_size,omitempty"`
+	Revision        string `json:"revision,omitempty"`
 }
 
 // OfflineAudioTrack describes audio streams the client may expose offline.
@@ -440,6 +445,7 @@ func (b *ManifestBuilder) buildSubtitles(ctx context.Context, dl *Download, file
 					HearingImpaired: sub.HearingImpaired,
 					External:        false,
 					FetchURL:        subtitleProxyURL(dl.ID, fmt.Sprintf("downloaded:%d", sub.ID)),
+					Revision:        strconv.FormatInt(sub.Revision, 10),
 				})
 			}
 		}

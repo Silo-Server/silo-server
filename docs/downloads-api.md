@@ -641,6 +641,12 @@ Invalid refs return `422 validation_failed`. Current content access is checked
 before asset delivery, and downloaded-subtitle ownership must match the entry's
 media file.
 
+A `downloaded` subtitle is delivered with its stored timing correction applied,
+so its bytes change when an admin or an automatic sync adjusts the timing. Its
+response carries `Cache-Control: private, no-cache` and a strong `ETag` that
+changes with the subtitle's revision; send it back in `If-None-Match` to get
+`304 Not Modified` while the bytes are unchanged.
+
 ### 4.10 Direct download
 
 ```http
@@ -840,6 +846,11 @@ Notes:
 - `integrity.expected_bytes` should match the local media file size after download.
 - `revision` should match the download row revision. If a row revision increases,
   refresh the media file and manifest.
+- `subtitles[].revision` is present only on downloaded (`downloaded:{id}`)
+  subtitles. It is an opaque string that changes whenever that subtitle's
+  delivered bytes can change, such as a timing correction. When a refreshed
+  manifest shows a different value than the one stored with the cached file,
+  re-fetch that subtitle.
 - Optional fields are omitted when empty; clients should treat absent values as
   "not set."
 
@@ -1491,7 +1502,7 @@ operations use:
 | ---- | ------------------------ | ------------------------------------------------------------------------- |
 | 400  | `malformed_request`      | Malformed JSON body.                                                      |
 | 400  | `invalid_cursor`         | A `cursor` value the operation cannot continue from.                      |
-| 401  | `authentication_required` / `invalid_token` / `session_expired` | Missing, unreadable, or expired credential. |
+| 401  | `authentication_required` / `invalid_token` / `session_expired` / `token_refresh_required` | Missing, unreadable, or expired credential, or an access token to refresh after a role change. |
 | 403  | `permission_denied`      | Downloads disabled, the account may not download, or the requested quality is not permitted. |
 | 403  | `profile_verification_required` | A PIN-protected profile without `X-Profile-Token`.                 |
 | 404  | `not_found`              | Entry, content, or asset missing or outside profile access.               |

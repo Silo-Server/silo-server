@@ -549,31 +549,15 @@ administrator-device metadata consumer was found.
 
 ### Browser OAuth login handshake
 
-`POST /api/v2/auth/oauth/{install_id}/init` accepts a browser form submission
-and redirects with 302 to the authentication plugin's authorization URL.
-Optional `next` is normalized by the existing application service to a local
-path. No request-body fields are consumed. This operation is non-retryable: it
-creates a new provider authorization attempt and persisted state.
-
-`GET /api/v2/auth/oauth/{install_id}/callback?state=...&code=...` completes the
-provider redirect through the same application service. Signed state binds the
-installation and expiry; the stored state is consumed before exchange. Exchange
-uses its stored provider state and exact redirect URI. Success redirects to the
-SPA with a one-time completion code, never bearer/refresh tokens in the URL.
-The already-migrated `POST /api/v2/auth/oauth/complete` redeems that code. Failed
-state, exchange, or login completion redirects to the existing local login-error
-page. Missing code/state or invalid installation IDs return 400 plain text;
-init's plugin/storage failures retain 502/500 plain text. Missing service returns
-a 503 problem. V2 handshakes set `Cache-Control: no-store` and
-`Referrer-Policy: no-referrer` and do not require an ambient login/profile.
-
-`GET /api/v2/auth/oauth/capabilities` exposes `available`. The existing web login
-form uses the v2 init route. **Providers must register the v2 callback URI**
-(`/api/v2/auth/oauth/{install_id}/callback` under the configured host base URL)
-before using that flow. V1 init continues to issue its v1 callback URI, and frozen
-v1 transports are unchanged. This port adds no account-linking, PKCE, or new
-browser-session-binding mechanism. No native in-app handshake or Jellyfin caller
-was found; provider redirects and browser forms follow the emitted URLs.
+The OAuth sign-in and linking flows (web and native starts, the provider
+callback, completion codes, browser binding, PKCE and account linking) are
+specified in [auth-api.md](auth-api.md#oauth-sign-in-flows), with the rules
+behind them in
+[external-sign-in.md](architecture/external-sign-in.md#oauth-flows).
+Providers register the v2 callback URI
+(`/api/v2/auth/oauth/{install_id}/callback` on the public URL). The frozen v1
+init still issues its v1 callback URI (`/api/v1/auth/oauth/{install_id}/callback`),
+so a provider that serves v1 clients must register that one too.
 
 ### External watch-state webhook receiver
 
@@ -718,6 +702,12 @@ schemas, and is applied where the request is read rather than where the session
 is created so the decision logs and `playback_route_events` observe it too.
 Nothing is validated against an enum either, so a client may introduce a new
 channel without a server change.
+
+The `/api/v2` playback operations also declare `X-Client-Name`,
+`X-Client-Version`, `X-Client-Build`, and `X-Client-Channel`. A request with a
+non-blank `X-Client-Name` takes its whole identity from that set; a request
+without one takes it from the `X-Silo-Client*` set above when `X-Silo-Client` is
+non-blank. The two sets are never mixed field by field.
 
 Protocol-v3 `POST /playback/start` accepts `client_playback_context.app_version`,
 `.app_build`, and `.app_channel` as a body-level fallback for clients that cannot
@@ -978,6 +968,15 @@ requires a public S3 bucket because local artwork storage is available.
 catalog read return only the versions stored in the `library_id` it was given.
 It is server-wide, applies without a restart, and never affects playback; see
 "Library-scoped version lists" in [catalog-api.md](catalog-api.md).
+
+`catalog.extra_rating_sources` (default empty) lists, comma-separated, the
+external rating sources clients show in addition to IMDb and TMDB, which always
+show. The sources are the ones metadata plugins declare (see "Rating sources"
+in [catalog-api.md](catalog-api.md)); `GET /api/v2/admin/rating-sources` lists
+them. A name must match `^[a-z][a-z0-9_]{0,31}$`; a name no enabled plugin
+declares is kept but shows nothing. It is
+server-wide and applies within seconds, without a restart; see "Ratings on
+title pages" in [catalog-api.md](catalog-api.md).
 
 `scanner.realtime_monitoring` (default `true`) is the server-wide real-time
 monitoring switch: Silo scans library folders automatically when their files

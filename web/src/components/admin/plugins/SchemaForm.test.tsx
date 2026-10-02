@@ -414,3 +414,49 @@ describe("SchemaForm host-owned fields", () => {
     expect(screen.getByText("Quality profile")).toBeTruthy();
   });
 });
+
+describe("SchemaForm empty-string select options", () => {
+  const promptForm: PluginAdminForm = {
+    fields: [
+      {
+        key: "prompt",
+        label: "Prompt",
+        control: "SELECT",
+        required: false,
+        secret: false,
+        multiline: false,
+        default_value: "",
+        options: [
+          { value: "", label: "Provider default" },
+          { value: "login", label: "Always ask for credentials" },
+        ],
+      },
+    ],
+  };
+
+  it("shows and writes back an option whose value is empty", async () => {
+    Object.defineProperties(Element.prototype, {
+      hasPointerCapture: { configurable: true, value: () => false },
+      setPointerCapture: { configurable: true, value: () => {} },
+      releasePointerCapture: { configurable: true, value: () => {} },
+      scrollIntoView: { configurable: true, value: () => {} },
+    });
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <SchemaForm descriptor={promptForm} values={{ prompt: "" }} onChange={onChange} />,
+    );
+    expect(screen.getByRole("combobox")).toHaveTextContent("Provider default");
+
+    rerender(
+      <SchemaForm descriptor={promptForm} values={{ prompt: "login" }} onChange={onChange} />,
+    );
+    expect(screen.getByRole("combobox")).toHaveTextContent("Always ask for credentials");
+    fireEvent.pointerDown(screen.getByRole("combobox"), {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "Provider default" }));
+    expect(onChange).toHaveBeenLastCalledWith({ prompt: "" });
+  });
+});

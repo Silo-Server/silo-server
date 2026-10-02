@@ -6,6 +6,7 @@ import (
 	"math/rand/v2"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -60,7 +61,7 @@ func TestCreditsKeysAreNamespaced(t *testing.T) {
 	if key.Kind != ArtifactKindCreditsFingerprint || key.ConfigHash == cfg.ConfigHash() {
 		t.Fatalf("credits key %+v must not share the intro fingerprint hash", key)
 	}
-	if key.ConfigHash != ArtifactConfigHash(ArtifactKindCreditsFingerprint, creditsFingerprintParams) {
+	if key.ConfigHash != mediaartifact.ConfigHash(ArtifactKindCreditsFingerprint, creditsFingerprintParams) {
 		t.Fatalf("credits key %+v is not derived from its kind and parameters", key)
 	}
 	if CreditsAnalysisConfigHash(true) == cfg.AnalysisConfigHash() || CreditsAnalysisConfigHash(false) == cfg.AnalysisConfigHash() {

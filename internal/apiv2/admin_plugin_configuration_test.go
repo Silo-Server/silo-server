@@ -127,7 +127,7 @@ func TestAdminPluginBindingWrites(t *testing.T) {
 	h, _ := pluginConfigurationHandler(f)
 	base := Prefix + "/admin/plugins/installations/7/"
 	rec := do(t, h, "PUT", base+"auth-binding", `{"capability_id":"oidc","enabled":true,"display_order":3,"auto_provision":true,"default_login":false}`, actingRequestAdmin)
-	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 || rec.Header().Get("X-Silo-Restart-Required") != "true" || f.lastID != 7 || f.lastAuth != (handlers.PluginAuthBindingInput{CapabilityID: "oidc", Enabled: true, DisplayOrder: 3, AutoProvision: true, DefaultLogin: false}) {
+	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 || rec.Header().Get("X-Silo-Restart-Required") != "false" || f.lastID != 7 || f.lastAuth != (handlers.PluginAuthBindingInput{CapabilityID: "oidc", Enabled: true, DisplayOrder: 3, AutoProvision: true, DefaultLogin: false}) {
 		t.Fatal(rec.Code, rec.Header(), f.lastAuth)
 	}
 	requireProblem(t, do(t, h, "PUT", base+"auth-binding", `{"capability_id":" ","enabled":true,"display_order":0,"auto_provision":false,"default_login":false}`, actingRequestAdmin), TypeValidationFailed)
@@ -138,6 +138,17 @@ func TestAdminPluginBindingWrites(t *testing.T) {
 	if f.lastAuth != before || f.calls != 2 {
 		t.Fatal(f.lastAuth, f.calls)
 	}
+	// Account creation is on unless the operator turns it off.
+	if rec := do(t, h, "PUT", base+"auth-binding", `{"capability_id":"oidc","enabled":true,"display_order":3,"default_login":false}`, actingRequestAdmin); rec.Code != http.StatusNoContent || !f.lastAuth.AutoProvision {
+		t.Fatal(rec.Code, f.lastAuth)
+	}
+	if rec := do(t, h, "PUT", base+"auth-binding", `{"capability_id":"oidc","enabled":true,"display_order":3,"auto_provision":false,"default_login":false}`, actingRequestAdmin); rec.Code != http.StatusNoContent || f.lastAuth.AutoProvision {
+		t.Fatal(rec.Code, f.lastAuth)
+	}
+	// A second enabled sign-in provider is refused.
+	f.err = plugins.ErrAuthProviderAlreadyEnabled
+	requireProblem(t, do(t, h, "PUT", base+"auth-binding", `{"capability_id":"ldap","enabled":true,"display_order":0,"default_login":false}`, actingRequestAdmin), TypeProviderAlreadyEnabled)
+	f.err = nil
 	f.calls = 0
 	rec = do(t, h, "PUT", base+"task-bindings/sync", `{"enabled":false,"trigger":{"type":"cron","expression":"0 * * * *"}}`, actingRequestAdmin)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"restart_required":true`) || f.lastTaskCap != "sync" || f.lastTask.Enabled || f.lastTask.Trigger["expression"] != "0 * * * *" {

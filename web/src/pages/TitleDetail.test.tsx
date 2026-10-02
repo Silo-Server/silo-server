@@ -593,7 +593,8 @@ describe("TitleDetail", () => {
       expect(screen.getByText("8 Seasons")).toBeInTheDocument();
       expect(screen.getByText("Ended")).toBeInTheDocument();
       expect(screen.getByText("8.4")).toBeInTheDocument();
-      expect(screen.getByText(/TMDB/, { selector: "span" })).toHaveTextContent("24.1K votes");
+      expect(screen.getByAltText("TMDB")).toBeInTheDocument();
+      expect(screen.getByText("24.1K votes")).toBeInTheDocument();
       expect(screen.getByText("Created by")).toBeInTheDocument();
       expect(screen.getByText("David Benioff")).toBeInTheDocument();
     });

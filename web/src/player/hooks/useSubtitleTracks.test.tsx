@@ -264,6 +264,42 @@ describe("useSubtitleTracks", () => {
     },
   );
 
+  it("refetches retimed cues behind an unchanged URL when the cue revision changes", async () => {
+    fetchMock
+      .mockResolvedValueOnce(vttResponse("WEBVTT\n\n00:00:10.000 --> 00:00:12.000\nold\n\n"))
+      .mockResolvedValueOnce(vttResponse("WEBVTT\n\n00:00:12.300 --> 00:00:14.300\nnew\n\n"));
+
+    const videoRef = makeVideoRef(1);
+    const anchorRef = { current: 0 };
+    const durationRef = { current: 7200 };
+    const { rerender } = renderHook(
+      ({ revision }) =>
+        useSubtitleTracks(
+          videoRef,
+          [srtTrack],
+          1,
+          0,
+          0,
+          durationRef,
+          anchorRef,
+          undefined,
+          null,
+          0,
+          undefined,
+          revision,
+        ),
+      { initialProps: { revision: 0 } },
+    );
+
+    await waitFor(() => expect(createdTracks[0]?.cues.map((c) => c.text)).toEqual(["old"]));
+    rerender({ revision: 1 });
+
+    await waitFor(() => expect(createdTracks).toHaveLength(2));
+    await waitFor(() => expect(createdTracks[1]!.cues.map((c) => c.text)).toEqual(["new"]));
+    expect(createdTracks[1]!.cues[0]!.startTime).toBeCloseTo(12.3);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("deduplicates restored cues newly visible after the origin moves backward", async () => {
     fetchMock.mockImplementation(async () =>
       vttResponse(

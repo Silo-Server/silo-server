@@ -360,6 +360,11 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, err
 	}
 	cfg.Playback.ChapterThumbnailNodeCapacity = chapterThumbnailNodeCapacity
+	subtitleSyncNodeCapacity, err := intOr(m, "subtitles.sync_node_capacity", 1)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Playback.SubtitleSyncNodeCapacity = subtitleSyncNodeCapacity
 	transcodeEnabled, err := boolOr(m, "playback.transcode_enabled", true)
 	if err != nil {
 		return nil, err

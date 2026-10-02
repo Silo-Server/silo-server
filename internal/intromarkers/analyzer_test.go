@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -27,8 +28,8 @@ type fakeIntroRepository struct {
 	withdrawals        []MarkerWithdrawal
 	silenceAttempts    map[int]SilenceRefinementAttempt
 	upsertedAttempts   []SilenceRefinementAttempt
-	artifacts          map[artifactSlot]Artifact
-	artifactFailures   []ArtifactFailure
+	artifacts          map[artifactSlot]mediaartifact.Artifact
+	artifactFailures   []mediaartifact.Failure
 	groupListCalls     int
 	movieListCalls     int
 	// seasonStateHash, when set, is the only analysis hash seasonState
@@ -197,18 +198,18 @@ type artifactSlot struct {
 }
 
 // artifact returns the stored artifact of kind for a file.
-func (f *fakeIntroRepository) artifact(fileID int, kind string) Artifact {
+func (f *fakeIntroRepository) artifact(fileID int, kind string) mediaartifact.Artifact {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.artifacts[artifactSlot{fileID, kind}]
 }
 
-func (f *fakeIntroRepository) LoadArtifacts(_ context.Context, fileIDs []int, key ArtifactKey) (map[int]Artifact, error) {
+func (f *fakeIntroRepository) LoadArtifacts(_ context.Context, fileIDs []int, key mediaartifact.Key) (map[int]mediaartifact.Artifact, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	artifacts := map[int]Artifact{}
+	artifacts := map[int]mediaartifact.Artifact{}
 	for _, fileID := range fileIDs {
-		if artifact, ok := f.artifacts[artifactSlot{fileID, key.Kind}]; ok && artifact.ArtifactKey == key {
+		if artifact, ok := f.artifacts[artifactSlot{fileID, key.Kind}]; ok && artifact.Key == key {
 			artifact.Payload = append([]byte(nil), artifact.Payload...)
 			artifacts[fileID] = artifact
 		}
@@ -216,38 +217,38 @@ func (f *fakeIntroRepository) LoadArtifacts(_ context.Context, fileIDs []int, ke
 	return artifacts, nil
 }
 
-func (f *fakeIntroRepository) UpsertArtifact(_ context.Context, artifact Artifact) error {
+func (f *fakeIntroRepository) UpsertArtifact(_ context.Context, artifact mediaartifact.Artifact) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.artifacts == nil {
-		f.artifacts = map[artifactSlot]Artifact{}
+		f.artifacts = map[artifactSlot]mediaartifact.Artifact{}
 	}
 	f.artifacts[artifactSlot{artifact.MediaFileID, artifact.Kind}] = artifact
 	return nil
 }
 
-func (f *fakeIntroRepository) RecordArtifactFailure(_ context.Context, failure ArtifactFailure) error {
+func (f *fakeIntroRepository) RecordArtifactFailure(_ context.Context, failure mediaartifact.Failure) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.artifactFailures = append(f.artifactFailures, failure)
 	if f.artifacts == nil {
-		f.artifacts = map[artifactSlot]Artifact{}
+		f.artifacts = map[artifactSlot]mediaartifact.Artifact{}
 	}
 	slot := artifactSlot{failure.MediaFileID, failure.Kind}
-	var previous *Artifact
+	var previous *mediaartifact.Artifact
 	if stored, ok := f.artifacts[slot]; ok {
 		previous = &stored
 	}
-	count, retryAfter := nextArtifactFailure(previous, failure)
-	f.artifacts[slot] = Artifact{
-		MediaFileID:      failure.MediaFileID,
-		ArtifactKey:      failure.ArtifactKey,
-		ArtifactIdentity: failure.ArtifactIdentity,
-		Status:           ArtifactFailed,
-		FailureCount:     count,
-		LastError:        failure.Error,
-		RetryAfter:       &retryAfter,
-		RecordedBy:       failure.RecordedBy,
+	count, retryAfter := mediaartifact.NextFailure(previous, failure)
+	f.artifacts[slot] = mediaartifact.Artifact{
+		MediaFileID:  failure.MediaFileID,
+		Key:          failure.Key,
+		Identity:     failure.Identity,
+		Status:       mediaartifact.StatusFailed,
+		FailureCount: count,
+		LastError:    failure.Error,
+		RetryAfter:   &retryAfter,
+		RecordedBy:   failure.RecordedBy,
 	}
 	return nil
 }
@@ -1077,22 +1078,6 @@ func TestSilenceRefinementCancellationIsNotRecorded(t *testing.T) {
 	}
 	if len(repo.upsertedAttempts) != 0 {
 		t.Fatalf("a canceled refinement must stay eligible, got %+v", repo.upsertedAttempts)
-	}
-}
-
-func TestRetryDelay(t *testing.T) {
-	for failures, want := range map[int]time.Duration{
-		0:  12 * time.Hour,
-		1:  12 * time.Hour,
-		2:  24 * time.Hour,
-		3:  48 * time.Hour,
-		4:  96 * time.Hour,
-		5:  7 * 24 * time.Hour,
-		60: 7 * 24 * time.Hour,
-	} {
-		if got := retryDelay(failures); got != want {
-			t.Errorf("retryDelay(%d) = %v, want %v", failures, got, want)
-		}
 	}
 }
 
