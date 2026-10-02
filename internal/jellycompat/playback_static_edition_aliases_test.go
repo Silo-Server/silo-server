@@ -159,4 +159,46 @@ func TestDurableStaticReservationAliasesResolveToTheReservedEdition(t *testing.T
 			t.Fatalf("durable report for %s resolved %v (err %v), want %s", sourceID, got, err, want)
 		}
 	}
+
+	// ID-less reports are matched from a SQL identity projection, which must
+	// carry each reservation's edition and its sources' files.
+	for _, id := range ids {
+		if err := writer.Update(id, func(session *PlaybackSession) error {
+			session.UpstreamSessionID = "upstream-" + session.ID
+			return nil
+		}); err != nil {
+			t.Fatalf("start %s: %v", id, err)
+		}
+	}
+	fresh := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	for sourceID, want := range ids {
+		got, err := fresh.FindUnidentifiedPlayback(token, "item-1", sourceID, "device-1")
+		if err != nil || got == nil || got.ID != want {
+			t.Fatalf("durable ID-less report for %s = %v (err %v), want %s", sourceID, got, err, want)
+		}
+	}
+}
+
+// Direct players that omit PlaySessionId are matched by route and source. Each
+// reservation offers both editions, so only the recorded edition may decide.
+func TestUnidentifiedPlaybackUsesTheReservedEdition(t *testing.T) {
+	now := time.Date(2026, time.October, 3, 12, 0, 0, 0, time.UTC)
+	store, first, second := staticEditionReservations(t, now)
+	for _, session := range []*PlaybackSession{first, second} {
+		started := *session
+		started.UpstreamSessionID = "upstream-" + session.ID
+		store.Put(started)
+	}
+	for _, test := range []struct {
+		sourceID string
+		want     *PlaybackSession
+	}{{"source-42", first}, {"source-43", second}} {
+		got, err := store.FindUnidentifiedPlayback("token-1", "item-1", test.sourceID, "device-1")
+		if err != nil || got == nil || got.ID != test.want.ID {
+			t.Fatalf("ID-less report for %s = %v (err %v), want %s", test.sourceID, got, err, test.want.ID)
+		}
+	}
+	if _, err := store.FindUnidentifiedPlayback("token-1", "item-1", "", "device-1"); err == nil {
+		t.Fatal("an ID-less report naming no source should stay ambiguous")
+	}
 }

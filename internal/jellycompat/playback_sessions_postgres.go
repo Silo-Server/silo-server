@@ -1747,9 +1747,13 @@ func (d *DurableCompatPlaybackStore) findUnidentifiedPlayback(ctx context.Contex
 	}
 	rows, err := d.pool.Query(ctx, `
  SELECT id, data->>'RouteItemID', COALESCE(data->>'ClientDeviceID', ''),
- ARRAY(SELECT source->>'ID' FROM jsonb_array_elements(
+ COALESCE(data->>'StaticPlaybackKey', ''), COALESCE((data->>'SelectedMediaFileID')::bigint, 0),
+ ARRAY(SELECT source.value->>'ID' FROM jsonb_array_elements(
  CASE WHEN jsonb_typeof(data->'MediaSources') = 'array' THEN data->'MediaSources' ELSE '[]'::jsonb END
- ) source)
+ ) WITH ORDINALITY AS source(value, position) ORDER BY source.position),
+ ARRAY(SELECT COALESCE((source.value->>'FileID')::bigint, 0) FROM jsonb_array_elements(
+ CASE WHEN jsonb_typeof(data->'MediaSources') = 'array' THEN data->'MediaSources' ELSE '[]'::jsonb END
+ ) WITH ORDINALITY AS source(value, position) ORDER BY source.position)
  FROM jellycompat_playback_sessions
  WHERE compat_token = $1 AND expires_at > $2
  AND COALESCE(data->>'UpstreamSessionID', '') <> ''
@@ -1761,12 +1765,22 @@ func (d *DurableCompatPlaybackStore) findUnidentifiedPlayback(ctx context.Contex
 	matchedID := ""
 	for rows.Next() {
 		var candidate PlaybackSession
+		var selectedFileID int64
 		var sourceIDs []string
-		if err := rows.Scan(&candidate.ID, &candidate.RouteItemID, &candidate.ClientDeviceID, &sourceIDs); err != nil {
+		var sourceFileIDs []int64
+		if err := rows.Scan(&candidate.ID, &candidate.RouteItemID, &candidate.ClientDeviceID,
+			&candidate.StaticPlaybackKey, &selectedFileID, &sourceIDs, &sourceFileIDs); err != nil {
 			return nil, err
 		}
-		for _, id := range sourceIDs {
-			candidate.MediaSources = append(candidate.MediaSources, PlaybackMediaSource{ID: id})
+		// The edition a static reservation recorded decides which source it
+		// answers for, so the projection carries it with each source's file.
+		candidate.SelectedMediaFileID = int(selectedFileID)
+		for i, id := range sourceIDs {
+			source := PlaybackMediaSource{ID: id}
+			if i < len(sourceFileIDs) {
+				source.FileID = int(sourceFileIDs[i])
+			}
+			candidate.MediaSources = append(candidate.MediaSources, source)
 		}
 		if !reportMatchesPlaySession(&candidate, report) || !unidentifiedPlaybackDeviceMatches(candidate.ClientDeviceID, deviceID) {
 			continue

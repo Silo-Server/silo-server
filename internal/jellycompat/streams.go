@@ -2551,7 +2551,8 @@ func reportMatchesPlaySession(playSession *PlaybackSession, req sessionReportReq
 	if req.ItemID != "" && !mediaSourceIDsEqual(playSession.RouteItemID, req.ItemID) {
 		return false
 	}
-	if req.MediaSourceID != "" && !mediaSourceIDsEqual(req.MediaSourceID, playSession.RouteItemID) && findMediaSource(playSession, req.MediaSourceID) == nil {
+	if req.MediaSourceID != "" && !mediaSourceIDsEqual(req.MediaSourceID, playSession.RouteItemID) &&
+		!reservationServesMediaSource(playSession, findMediaSource(playSession, req.MediaSourceID)) {
 		return false
 	}
 	return true
@@ -3676,7 +3677,7 @@ func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *S
 	staticRequest := strings.EqualFold(newCaseInsensitiveQuery(r.URL.Query()).Get("Static"), "true")
 	if clientPlaySessionID != "" {
 		if playSession, ok := h.playbackStore.Get(clientPlaySessionID); ok && playSession.CompatToken == compatSession.Token {
-			if !mediaSourceIDsEqual(playSession.RouteItemID, routeID) {
+			if !playbackRouteMatchesSession(playSession, routeID) {
 				return nil, nil, errPlaybackRouteMismatch
 			}
 			source := playbackRouteSource(playSession, mediaSourceID, allowItemAlias, staticRequest)
@@ -3705,7 +3706,7 @@ func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *S
 		} else if !ok {
 			playSession, ok = h.playbackStore.FindByClientPlaySessionID(compatSession.Token, clientPlaySessionID)
 		}
-		if ok && mediaSourceIDsEqual(playSession.RouteItemID, routeID) {
+		if ok && playbackRouteMatchesSession(playSession, routeID) {
 			source := playbackRouteSource(playSession, mediaSourceID, allowItemAlias, staticRequest)
 			if !staticPlaybackRouteMatches(r, compatSession, playSession, source) {
 				return nil, nil, ErrSessionNotFound
@@ -3734,7 +3735,7 @@ func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *S
 	if !ok {
 		return nil, nil, ErrSessionNotFound
 	}
-	if !mediaSourceIDsEqual(playSession.RouteItemID, routeID) {
+	if !playbackRouteMatchesSession(playSession, routeID) {
 		return nil, nil, errPlaybackRouteMismatch
 	}
 	source := playbackRouteSource(playSession, mediaSourceID, allowItemAlias, staticRequest)
@@ -3754,6 +3755,22 @@ func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *S
 		}
 	}
 	return playSession, source, nil
+}
+
+// playbackRouteMatchesSession reports whether a progressive route addresses a
+// play. A static reservation keys on the catalog item and the edition, not on
+// the URL form, so one play may reach its edition through the item route (with
+// MediaSourceId) and through that edition's media-source route. It answers to
+// the source route of its reserved edition only.
+func playbackRouteMatchesSession(session *PlaybackSession, routeID string) bool {
+	if mediaSourceIDsEqual(session.RouteItemID, routeID) {
+		return true
+	}
+	if session.StaticPlaybackKey == "" || session.SelectedMediaFileID <= 0 {
+		return false
+	}
+	source := findMediaSource(session, routeID)
+	return source != nil && source.FileID == session.SelectedMediaFileID
 }
 
 func playbackRouteSource(session *PlaybackSession, mediaSourceID string, allowItemAlias, staticRequest bool) *PlaybackMediaSource {
