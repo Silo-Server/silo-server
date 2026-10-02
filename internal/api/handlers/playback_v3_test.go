@@ -1451,6 +1451,60 @@ func TestSameLegacyOutputRouteReplanV3RequiresEveryOtherInputToMatch(t *testing.
 	}
 }
 
+// The Postgres plan store persists NormalizedRequest as JSON, so an empty
+// omitempty list (Android sends `entries: []` because SiloJson encodes
+// defaults) comes back as nil. That round trip must not make an unchanged
+// route look changed.
+func TestSameLegacyOutputRouteReplanV3IgnoresPersistedEmptyLists(t *testing.T) {
+	start := v3HandlerStartRequest()
+	start.Capabilities.AudioPassthrough = &playback.AudioPassthroughV3{
+		PassthroughCodecs: []string{},
+		MaxChannels:       2,
+		Entries:           []playback.AudioPassthroughEntryV3{},
+	}
+	start.ClientPlaybackContext.Output = playback.OutputContextV3{
+		OutputContextID: "route-1",
+		CurrentSink:     "speaker",
+		AudioPassthrough: &playback.AudioPassthroughV3{
+			PassthroughCodecs: []string{},
+			MaxChannels:       2,
+			Entries:           []playback.AudioPassthroughEntryV3{},
+		},
+	}
+	encoded, err := json.Marshal(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted playback.StartRequestV3
+	if err := json.Unmarshal(encoded, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Capabilities.AudioPassthrough.Entries != nil || persisted.ClientPlaybackContext.Output.AudioPassthrough.Entries != nil {
+		t.Fatal("test precondition: the JSON round trip should drop empty passthrough entries")
+	}
+	record := &playback.AttemptRecordV3{NormalizedRequest: persisted}
+
+	next := playback.ReplanRequestV3{
+		ClientFeatures:        append([]string(nil), start.ClientFeatures...),
+		QualityPreference:     start.QualityPreference,
+		Capabilities:          start.Capabilities,
+		ClientPlaybackContext: start.ClientPlaybackContext,
+	}
+	next.ClientPlaybackContext.Output.OutputContextID = "route-2"
+	if !sameLegacyOutputRouteReplanV3(record, next) {
+		t.Fatal("empty passthrough entries lost in storage should not count as a route change")
+	}
+
+	next.Capabilities.AudioPassthrough = &playback.AudioPassthroughV3{
+		PassthroughCodecs: []string{},
+		MaxChannels:       2,
+		Entries:           []playback.AudioPassthroughEntryV3{{Codec: "eac3"}},
+	}
+	if sameLegacyOutputRouteReplanV3(record, next) {
+		t.Fatal("a new passthrough entry should not be suppressed")
+	}
+}
+
 func TestPreferredAudioTrackIndexV3PropagatesSeriesPreferenceReadFailure(t *testing.T) {
 	wantErr := errors.New("audio preference store unavailable")
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
