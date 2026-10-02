@@ -165,6 +165,69 @@ it("suppresses a cached seek-preview manifest when the active file becomes unava
   client.clear();
 });
 
+it.each([
+  { status: 404, serveCached: false },
+  { status: 503, serveCached: true },
+])(
+  "keeps cached previews=$serveCached after a manifest refetch returns $status",
+  async ({ status, serveCached }) => {
+    const raw = {
+      ...manifest,
+      expires_at: new Date(Date.now() + 3600_000).toISOString(),
+    };
+    const request = vi.fn(
+      async () =>
+        new Response(JSON.stringify(raw), { headers: { "Content-Type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", request);
+    roomConnectionMock.mockReturnValue({ room: null });
+    playbackSessionMock.mockReturnValue(playbackSession());
+    const client = new QueryClient();
+    const key = itemKeys.watchTrickplay(watchPageProps.contentId, version.file_id);
+    const view = render(
+      createElement(
+        QueryClientProvider,
+        { client },
+        createElement(WatchPage, {
+          ...watchPageProps,
+          versions: [{ ...version, trickplay_available: true }],
+        }),
+      ),
+    );
+    try {
+      await waitFor(() =>
+        expect(videoPlayerMock.mock.calls.at(-1)?.[0].trickplay).toEqual(trickplayFromV2(raw)),
+      );
+      const cached = client.getQueryData(key);
+      request.mockImplementation(
+        async () =>
+          new Response(
+            JSON.stringify({
+              type: `https://siloserver.org/docs/api/v2/problems/${status === 404 ? "not_found" : "dependency_unavailable"}`,
+              title: status === 404 ? "Not found" : "Service unavailable",
+              status,
+              detail: "Seek previews are unavailable.",
+              instance: "/api/v2/watch/content-1/trickplay",
+            }),
+            { status, headers: { "Content-Type": "application/problem+json" } },
+          ),
+      );
+      await act(async () => {
+        await client.refetchQueries({ queryKey: key });
+      });
+      expect(client.getQueryState(key)?.status).toBe("error");
+      expect(client.getQueryData(key)).toBe(cached);
+      await waitFor(() =>
+        expect(videoPlayerMock.mock.calls.at(-1)?.[0].trickplay).toBe(serveCached ? cached : null),
+      );
+    } finally {
+      view.unmount();
+      client.clear();
+      vi.unstubAllGlobals();
+    }
+  },
+);
+
 it("defers a throttled sheet failure and cancels recovery when the file changes", async () => {
   vi.useFakeTimers();
   vi.setSystemTime(1000);

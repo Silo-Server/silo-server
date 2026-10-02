@@ -15,7 +15,11 @@ import {
   sendSubtitleChoiceRequest,
 } from "../utils/subtitleChoicePersistence";
 import { VideoPlayer } from "./VideoPlayer";
-import { fetchWatchDetail, useWatchTrickplay } from "@/hooks/queries/items";
+import {
+  fetchWatchDetail,
+  transientTrickplayError,
+  useWatchTrickplay,
+} from "@/hooks/queries/items";
 import { itemKeys } from "@/hooks/queries/keys";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { useWatchTogetherRoomConnection } from "../hooks/useWatchTogetherRoomConnection";
@@ -311,6 +315,12 @@ function WatchPagePlayer({
     session.mediaFileId ?? undefined,
     trickplayAvailable,
   );
+  // A failed refresh retains query data. A terminal response withdraws the
+  // cached previews; transient failures keep them until the query recovers.
+  const trickplay =
+    trickplayAvailable && (!trickplayQuery.isError || transientTrickplayError(trickplayQuery.error))
+      ? (trickplayQuery.data ?? null)
+      : null;
   const refetchTrickplay = trickplayQuery.refetch;
   const lastTrickplayRefresh = useRef<{ fileId: number | null; at: number } | null>(null);
   const trickplayRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -650,7 +660,7 @@ function WatchPagePlayer({
       versions={playbackVersions}
       activeFileId={session.mediaFileId}
       chapters={activeChapters}
-      trickplay={trickplayAvailable ? (trickplayQuery.data ?? null) : null}
+      trickplay={trickplay}
       trickplayUpdatedAt={trickplayQuery.dataUpdatedAt}
       onTrickplayError={handleTrickplayError}
       onSwitchVersion={watchTogetherRoomId ? undefined : handleSwitchVersion}

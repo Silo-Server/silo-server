@@ -58,7 +58,8 @@ export function useWatchDetail(id: string | undefined, fileId?: number, libraryI
 /** Sheet URLs are refetched this long before they expire. */
 const TRICKPLAY_REFRESH_MARGIN_MS = 5 * 60 * 1000;
 
-function transientTrickplayError(error: unknown): boolean {
+/** Transient failures keep cached previews usable while the manifest recovers. */
+export function transientTrickplayError(error: unknown): boolean {
   if (error instanceof V2ProblemError) return error.status === 429 || error.status >= 500;
   if (error instanceof V2TransportError)
     return error.status === 0 || error.status === 429 || error.status >= 500;
