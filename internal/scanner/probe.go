@@ -220,8 +220,11 @@ func boundedProbeInputReadable(ctx context.Context, filePath string) error {
 	}
 	done := make(chan error, 1)
 	go func() {
-		defer func() { <-slots }()
-		done <- check(filePath)
+		err := check(filePath)
+		// Free the slot before publishing: a caller that receives the
+		// answer and immediately checks again must find it available.
+		<-slots
+		done <- err
 	}()
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
