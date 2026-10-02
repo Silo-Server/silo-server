@@ -7,6 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -32,6 +35,7 @@ func TestPersonRefreshRecordsOutcome(t *testing.T) {
 	missing := erroringPersonProvider{slug: "tmdb", err: errors.New("tmdb: HTTP 404: not found")}
 	broken := erroringPersonProvider{slug: "tvdb", err: errors.New("tvdb: context deadline exceeded")}
 	unsupported := erroringPersonProvider{slug: "anidb", err: ErrPersonDetailUnsupported}
+	pluginMissing := erroringPersonProvider{slug: "plugin", err: status.Error(codes.NotFound, "no such person")}
 
 	for _, tc := range []struct {
 		name      string
@@ -44,6 +48,7 @@ func TestPersonRefreshRecordsOutcome(t *testing.T) {
 		{name: "one provider answers, another fails", providers: []Provider{broken, answered}, want: catalog.PersonRefreshAnswered},
 		{name: "provider has nothing", providers: []Provider{stubPersonProvider{slug: "tmdb"}}, want: catalog.PersonRefreshNotFound},
 		{name: "provider reports 404", providers: []Provider{missing}, want: catalog.PersonRefreshNotFound},
+		{name: "plugin reports NotFound", providers: []Provider{pluginMissing}, want: catalog.PersonRefreshNotFound},
 		{name: "provider errors", providers: []Provider{broken}, want: catalog.PersonRefreshFailed},
 		{name: "404 and an error", providers: []Provider{missing, broken}, want: catalog.PersonRefreshFailed},
 		// No person provider enabled says nothing about the person, so they

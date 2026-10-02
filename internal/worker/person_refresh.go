@@ -200,6 +200,11 @@ func (w *PersonRefreshWorker) processBatch() bool {
 
 	done := map[int64]struct{}{}
 	w.runManual(done)
+	if w.stopped() {
+		// Claiming now would lease a batch no one looks up until the lease
+		// runs out.
+		return false
+	}
 	if w.paused() {
 		return false
 	}

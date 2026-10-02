@@ -220,6 +220,26 @@ func TestPersonRefreshWorkerStopsBetweenOnDemandRequests(t *testing.T) {
 	}
 }
 
+// A worker stopped during an on-demand lookup doesn't claim a batch it
+// won't look up: the claim would hold those people until its lease ran out.
+func TestPersonRefreshWorkerStoppedDuringOnDemandClaimsNothing(t *testing.T) {
+	service := &fakePersonRefresher{batches: [][]int64{{1, 2, 3}}}
+	w := newTestPersonRefreshWorker(service)
+	w.Enqueue(99, nil)
+	service.onRefresh = func(id int64) {
+		if id == 99 {
+			w.Stop()
+		}
+	}
+
+	if w.processBatch() {
+		t.Fatal("processBatch reported more work after a stop")
+	}
+	if service.claims != 0 {
+		t.Fatalf("claimed %d batches after the stop, want none", service.claims)
+	}
+}
+
 // A stopped worker finishes the lookup in progress and starts no more.
 func TestPersonRefreshWorkerStopsMidBatch(t *testing.T) {
 	service := &fakePersonRefresher{batches: [][]int64{{1, 2, 3}, {4, 5, 6}}}
