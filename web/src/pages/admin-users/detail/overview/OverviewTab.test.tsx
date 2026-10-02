@@ -113,6 +113,7 @@ const USER: AdminUser = {
   password_login: true,
   password_change_required: false,
   is_owner: false,
+  break_glass: false,
   effective_policy: {
     library_ids: null,
     max_playback_quality: "",

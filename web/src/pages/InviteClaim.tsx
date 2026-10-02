@@ -44,6 +44,9 @@ function ClaimForm({ token }: { token: string }) {
   }>({ pending: true });
   const [reload, setReload] = useState(0);
   const [recovery, setRecovery] = useState(false);
+  // The server refused the acceptance because password sign-in is off; the
+  // invitation stays unspent, and no account was created.
+  const [localLoginDisabled, setLocalLoginDisabled] = useState(false);
   const [createdUsername, setCreatedUsername] = useState<string | null>(null);
   const busy = useRef(false);
   const lifetime = useRef<AbortController | null>(null);
@@ -61,6 +64,7 @@ function ClaimForm({ token }: { token: string }) {
         if (controller.signal.aborted || !isSessionIdentityCurrent(identity)) return;
         setLookup({ data, pending: false });
         setRecovery(false);
+        setLocalLoginDisabled(false);
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted || !isSessionIdentityCurrent(identity)) return;
@@ -136,6 +140,7 @@ function ClaimForm({ token }: { token: string }) {
     if (
       busy.current ||
       recovery ||
+      localLoginDisabled ||
       createdUsername ||
       !invitation.acceptance_available ||
       getAccessToken()
@@ -174,8 +179,12 @@ function ClaimForm({ token }: { token: string }) {
       clearHouseholdSetupDone();
       if (!invitation.show_tour) setTourSuppressed();
       navigate("/household-setup", { replace: true });
-    } catch {
+    } catch (error: unknown) {
       if (controller.signal.aborted || !isSessionIdentityCurrent(identity)) return;
+      if (error instanceof V2ProblemError && error.problemType === "local_login_disabled") {
+        setLocalLoginDisabled(true);
+        return;
+      }
       setRecovery(true);
     } finally {
       busy.current = false;
@@ -237,6 +246,13 @@ function ClaimForm({ token }: { token: string }) {
                   administrator for help.
                 </p>
               )}
+              {localLoginDisabled && (
+                <p role="alert" className="mb-4">
+                  Password sign-in is turned off on this server, so this invitation cannot create an
+                  account. Ask {invitation.inviter_name || "the person who invited you"} to add you
+                  through the server&apos;s sign-in provider instead.
+                </p>
+              )}
               {recovery && (
                 <div role="alert" className="mb-4 space-y-3">
                   <p>
@@ -285,7 +301,9 @@ function ClaimForm({ token }: { token: string }) {
                 <Button
                   type="submit"
                   className="w-full"
-                  disabled={submitting || recovery || !invitation.acceptance_available}
+                  disabled={
+                    submitting || recovery || localLoginDisabled || !invitation.acceptance_available
+                  }
                 >
                   {submitting ? "Creating account..." : "Create account"}
                 </Button>

@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/invitations"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -89,6 +90,8 @@ func (h *InvitationHandler) HandleAcceptInvitation(w http.ResponseWriter, r *htt
 			writeError(w, http.StatusNotFound, "not_found", "This invitation is invalid or has expired")
 		case errors.Is(err, invitations.ErrNotClaimable):
 			writeError(w, http.StatusConflict, "already_used", "This invitation has already been used")
+		case errors.Is(err, auth.ErrLocalLoginDisabled):
+			writeError(w, http.StatusForbidden, "local_login_disabled", "Password sign-in is turned off on this server; sign in with the server's sign-in provider")
 		default:
 			writeError(w, http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
 		}

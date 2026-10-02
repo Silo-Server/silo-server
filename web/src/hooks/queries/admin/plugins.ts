@@ -977,7 +977,8 @@ export function useSavePluginAuthBinding() {
     retry: false,
     onSuccess: (_result, intent) => {
       if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
-      toast.success("Auth binding saved — restart the server to apply it");
+      // Sign-in providers rebuild on every node when a binding changes.
+      toast.success("Sign-in provider saved");
       invalidatePluginQueries(queryClient);
     },
     onError: (error, intent) => {

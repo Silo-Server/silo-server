@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { captureProfileRequestContext } from "@/api/client";
 import { v2, type V2Body, type V2Result } from "@/api/v2/request";
@@ -28,4 +28,79 @@ export function useChangeAccountPassword() {
         : v2("POST /api/v2/account/password", { body });
     },
   });
+}
+
+/** An external sign-in identity linked to the caller's account. */
+export type AccountIdentity = V2Result<"GET /api/v2/account/identities">["items"][number];
+
+export const accountIdentityKeys = {
+  all: () => ["account", "identities"] as const,
+};
+
+export function useAccountIdentities(enabled = true) {
+  return useQuery({
+    queryKey: accountIdentityKeys.all(),
+    queryFn: () => v2("GET /api/v2/account/identities"),
+    enabled,
+  });
+}
+
+function invalidateSignInState(queryClient: ReturnType<typeof useQueryClient>) {
+  // Linking turns local password sign-in off (except for break-glass
+  // accounts), so the password form's capability changes with it.
+  void queryClient.invalidateQueries({ queryKey: accountIdentityKeys.all() });
+  void queryClient.invalidateQueries({ queryKey: accountKeys.passwordCapability() });
+}
+
+export function useUnlinkAccountIdentity() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => v2("DELETE /api/v2/account/identities/{id}", { path: { id } }),
+    onSettled: () => invalidateSignInState(queryClient),
+  });
+}
+
+export function useLinkAccountIdentityWithCredentials() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: V2Body<"POST /api/v2/account/identities/link-credentials">) =>
+      v2("POST /api/v2/account/identities/link-credentials", { body }),
+    onSuccess: () => invalidateSignInState(queryClient),
+  });
+}
+
+/**
+ * Starts linking an OAuth provider in this browser: confirms the local
+ * password for a link ticket, then trades the ticket for the provider URL
+ * (and the flow's browser-binding cookie). The flow comes back to next with
+ * linked=1, or error=oauth_link_failed&reason=<reason>.
+ */
+export function useStartAccountIdentityLink() {
+  return useMutation({
+    mutationFn: async (input: { installationId: string; password: string; next: string }) => {
+      const ticket = await v2("POST /api/v2/account/identities/link-ticket", {
+        body: { installation_id: input.installationId, password: input.password },
+      });
+      try {
+        return await v2("POST /api/v2/account/identities/link-start", {
+          body: { link_ticket: ticket.ticket, next: input.next },
+        });
+      } catch (error) {
+        throw new LinkStartError(error);
+      }
+    },
+  });
+}
+
+/**
+ * A failure of the second step (link-start). Its problems read differently
+ * from the ticket's: there a 409 means the page is not on the public URL.
+ */
+export class LinkStartError extends Error {
+  readonly original: unknown;
+  constructor(original: unknown) {
+    super(original instanceof Error ? original.message : "Couldn't start connecting the provider.");
+    this.name = "LinkStartError";
+    this.original = original;
+  }
 }

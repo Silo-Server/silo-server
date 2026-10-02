@@ -99,6 +99,310 @@
         ],
         "type": "object"
       },
+      "AccountIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "description": "Name at the provider; may be empty",
+            "examples": [
+              "Alice Example"
+            ],
+            "type": "string"
+          },
+          "email": {
+            "description": "Email at the provider, as of the last sign-in; may be empty",
+            "examples": [
+              "alice@example.test"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "description": "Identity id",
+            "examples": [
+              "4"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "installation_id": {
+            "description": "Auth plugin installation the identity belongs to",
+            "examples": [
+              "3"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "last_checked_at": {
+            "description": "Most recent provider answer about the identity: a sign-in through it, or a provider re-check (at session refresh or the scheduled recheck_external_identities pass); null when none",
+            "examples": [
+              "2026-01-02T03:04:05.678Z"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_sign_in_at": {
+            "description": "Most recent sign-in through this identity; null when none",
+            "examples": [
+              "2026-01-02T03:04:05.678Z"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "linked_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "examples": [
+              "2026-01-02T03:04:05.678Z"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "provider_id": {
+            "description": "Sign-in provider id as listAuthProviders shows it; empty while that provider is not enabled",
+            "examples": [
+              "plugin:3:oidc"
+            ],
+            "type": "string"
+          },
+          "provider_name": {
+            "description": "Provider label; empty while that provider is not enabled",
+            "examples": [
+              "Company SSO"
+            ],
+            "type": "string"
+          },
+          "username": {
+            "description": "Username at the provider, as of the last sign-in; may be empty",
+            "examples": [
+              "alice"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "installation_id",
+          "provider_id",
+          "provider_name",
+          "username",
+          "email",
+          "display_name",
+          "linked_at",
+          "last_sign_in_at",
+          "last_checked_at"
+        ],
+        "type": "object"
+      },
+      "AccountIdentityCollection": {
+        "additionalProperties": false,
+        "properties": {
+          "can_unlink": {
+            "description": "Whether deleteAccountIdentity would disconnect an identity now: the account has another identity, or its local password still signs in (the account's password sign-in is on, and local password sign-in is on for the server or the account is break-glass). False with no identity",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/AccountIdentity"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "can_unlink",
+          "items"
+        ],
+        "type": "object"
+      },
+      "AccountIdentityCredentialsLinkInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "directory_password": {
+            "description": "Password at the directory; passed to the directory plugin only",
+            "examples": [
+              "directory password"
+            ],
+            "maxLength": 1024,
+            "minLength": 1,
+            "type": "string"
+          },
+          "installation_id": {
+            "description": "The credentials (LDAP) auth plugin installation, as listAuthProviders shows it",
+            "examples": [
+              "4"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "password": {
+            "description": "The account's current local password",
+            "examples": [
+              "correct horse battery staple"
+            ],
+            "maxLength": 1024,
+            "minLength": 1,
+            "type": "string"
+          },
+          "username": {
+            "description": "Username at the directory",
+            "examples": [
+              "alice"
+            ],
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "installation_id",
+          "password",
+          "username",
+          "directory_password"
+        ],
+        "type": "object"
+      },
+      "AccountIdentityLinkCompleteInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "description": "Code from the app redirect of a linking flow (link=1); single use, 60 seconds",
+            "examples": [
+              "3f2b47eb7b36dd2d"
+            ],
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "code_verifier": {
+            "description": "PKCE code verifier of the challenge the native start sent",
+            "examples": [
+              "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+            ],
+            "maxLength": 128,
+            "minLength": 43,
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "code_verifier"
+        ],
+        "type": "object"
+      },
+      "AccountIdentityLinkStart": {
+        "additionalProperties": false,
+        "properties": {
+          "authorize_url": {
+            "description": "Provider sign-in URL; navigate the same browser there",
+            "examples": [
+              "https://id.example.test/authorize?client_id=silo\u0026state=..."
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "authorize_url"
+        ],
+        "type": "object"
+      },
+      "AccountIdentityLinkStartInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "link_ticket": {
+            "description": "Ticket from createAccountIdentityLinkTicket, issued to the caller's account",
+            "examples": [
+              "9d2c5f0e8b7a41c3a6e5d4c3b2a19087f6e5d4c3b2a1908f7e6d5c4b3a291807"
+            ],
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "next": {
+            "description": "Site-relative path the flow returns to with linked=1, or error=oauth_link_failed\u0026reason=\u003creason\u003e; anything that is not a same-origin path becomes /",
+            "examples": [
+              "/settings/account"
+            ],
+            "maxLength": 2048,
+            "type": "string"
+          }
+        },
+        "required": [
+          "link_ticket"
+        ],
+        "type": "object"
+      },
+      "AccountIdentityLinkTicket": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_at": {
+            "description": "The ticket must start its flow before this instant",
+            "examples": [
+              "2026-01-02T03:09:05.678Z"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "ticket": {
+            "description": "Single-use ticket. The web client passes it to startAccountIdentityLink (POST /api/v2/account/identities/link-start), and the flow finishes in that browser; the GET web start refuses it. An app passes it as link_ticket to startNativeOAuthLogin (native/start) and confirms the result with completeAccountIdentityLink (POST /api/v2/account/identities/link-complete)",
+            "examples": [
+              "9d2c5f0e8b7a41c3a6e5d4c3b2a19087f6e5d4c3b2a1908f7e6d5c4b3a291807"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket",
+          "expires_at"
+        ],
+        "type": "object"
+      },
+      "AccountIdentityLinkTicketInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "installation_id": {
+            "description": "OAuth auth plugin installation to link, as listAuthProviders shows it",
+            "examples": [
+              "3"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "password": {
+            "description": "The account's current local password",
+            "examples": [
+              "correct horse battery staple"
+            ],
+            "maxLength": 1024,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "installation_id",
+          "password"
+        ],
+        "type": "object"
+      },
       "AccountPasswordCapability": {
         "additionalProperties": false,
         "properties": {
@@ -1078,6 +1382,10 @@
               "null"
             ]
           },
+          "break_glass": {
+            "description": "Make the admin account a break-glass account, which keeps local password sign-in while the server turns it off, or clear it. Only admins may hold it, and only the server Owner may set or clear it (403 permission_denied otherwise); clearing the last usable one while local password sign-in is off is 409 break_glass_required",
+            "type": "boolean"
+          },
           "download_allowed": {
             "type": [
               "boolean",
@@ -1156,6 +1464,7 @@
             ]
           },
           "password": {
+            "description": "New local password. Setting one also turns the account's local password sign-in back on (password_login), for example to recover an account whose external sign-in provider is gone. Only the server Owner may set its own account's password while password_login is false for it (403 permission_denied otherwise)",
             "maxLength": 72,
             "minLength": 8,
             "type": "string"
@@ -9406,6 +9715,13 @@
           "auto_provision": {
             "type": "boolean"
           },
+          "callback_url": {
+            "description": "Redirect URI to register at the OAuth (OIDC) provider for this installation: the v2 callback on the public URL (server.public_url). Empty for a password (LDAP) provider and while no public URL is configured",
+            "examples": [
+              "https://silo.example.test/api/v2/auth/oauth/3/callback"
+            ],
+            "type": "string"
+          },
           "capability_id": {
             "type": "string"
           },
@@ -9426,6 +9742,13 @@
           "enabled": {
             "type": "boolean"
           },
+          "post_logout_redirect_url": {
+            "description": "Post-logout redirect URI to register at the OAuth (OIDC) provider when provider logout is on: the login page on the public URL. Empty for a password (LDAP) provider and while no public URL is configured",
+            "examples": [
+              "https://silo.example.test/login"
+            ],
+            "type": "string"
+          },
           "updated_at": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
             "format": "date-time",
@@ -9440,15 +9763,37 @@
           "display_order",
           "auto_provision",
           "default_login",
+          "callback_url",
+          "post_logout_redirect_url",
           "created_at",
           "updated_at"
         ],
+        "type": "object"
+      },
+      "AdminPluginAuthBindingTestInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "capability_id": {
+            "description": "auth_provider.v1 capability to test; empty tests the plugin's first one",
+            "maxLength": 256,
+            "type": "string"
+          },
+          "config": {
+            "description": "Staged global configuration entries, unsaved, merged as updateAdminPluginInstallationConfig would merge them. Entries and fields not named here use the stored values; a declared non-secret field sent as null or a blank string is cleared so the plugin default applies; blank secret fields use the stored secret; clear_secrets drops it from the test",
+            "items": {
+              "$ref": "#/components/schemas/AdminPluginConfigWrite"
+            },
+            "maxItems": 64,
+            "type": "array"
+          }
+        },
         "type": "object"
       },
       "AdminPluginAuthBindingWrite": {
         "additionalProperties": false,
         "properties": {
           "auto_provision": {
+            "description": "Create an account for a person who passes the provider's rules on first sign-in; omitted means true",
             "type": "boolean"
           },
           "capability_id": {
@@ -9473,7 +9818,6 @@
           "capability_id",
           "enabled",
           "display_order",
-          "auto_provision",
           "default_login"
         ],
         "type": "object"
@@ -9481,6 +9825,13 @@
       "AdminPluginCapability": {
         "additionalProperties": false,
         "properties": {
+          "callback_url": {
+            "description": "On an installation's OAuth sign-in capability: the redirect URI to register at the provider, the v2 callback on the public URL (server.public_url). Empty while no public URL is configured; omitted for other capabilities and in the catalog",
+            "examples": [
+              "https://silo.example.test/api/v2/auth/oauth/3/callback"
+            ],
+            "type": "string"
+          },
           "config_schema": {
             "items": {
               "$ref": "#/components/schemas/AdminPluginConfigSchema"
@@ -9500,6 +9851,24 @@
             "additionalProperties": true,
             "type": "object",
             "x-silo-extension-bag": "plugin-json-value"
+          },
+          "post_logout_redirect_url": {
+            "description": "On an installation's OAuth sign-in capability: the post-logout redirect URI to register at the provider for provider logout, the login page on the public URL. Empty while no public URL is configured; omitted for other capabilities and in the catalog",
+            "examples": [
+              "https://silo.example.test/login"
+            ],
+            "type": "string"
+          },
+          "sign_in_mode": {
+            "description": "How an auth_provider.v1 capability signs people in: oauth (a provider button and browser handshake, such as OIDC) or credentials (a username and password form, such as LDAP). Omitted for other capability types",
+            "enum": [
+              "oauth",
+              "credentials"
+            ],
+            "examples": [
+              "oauth"
+            ],
+            "type": "string"
           },
           "subscriptions": {
             "items": {
@@ -9755,7 +10124,7 @@
           },
           "value": {
             "additionalProperties": true,
-            "description": "The entry's fields; blank secret fields preserve the stored secret",
+            "description": "The entry's fields, merged over the stored entry. A declared non-secret top-level field sent as null or a blank string is removed so the plugin default applies; blank secret fields preserve the stored secret",
             "type": "object",
             "x-silo-extension-bag": "plugin-json-value"
           }
@@ -16500,6 +16869,13 @@
               "null"
             ]
           },
+          "break_glass": {
+            "description": "Whether the account is a break-glass admin: it keeps local password sign-in while the server turns local password sign-in off (auth.local_password_login). Only admins can be break-glass accounts",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "created_at": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
             "examples": [
@@ -16668,7 +17044,7 @@
             "type": "boolean"
           },
           "password_login": {
-            "description": "Whether the account signs in with a local password. False when an external authentication provider manages its sign-in; password actions do not apply then",
+            "description": "Whether the account can sign in with a local password: local password sign-in is on for it and it has a password. Linking an external sign-in identity turns it off unless the account is break-glass. Setting a password with updateAdminUser turns it back on (with or without require_password_change); a password reset link needs it",
             "examples": [
               true
             ],
@@ -16760,6 +17136,7 @@
           "password_login",
           "password_change_required",
           "is_owner",
+          "break_glass",
           "effective_policy",
           "created_at",
           "updated_at",
@@ -17269,6 +17646,206 @@
           "last_seen",
           "request_count",
           "location"
+        ],
+        "type": "object"
+      },
+      "AdminUserIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "description": "Name at the provider; may be empty",
+            "examples": [
+              "Alice Example"
+            ],
+            "type": "string"
+          },
+          "email": {
+            "description": "Email at the provider, as of the last sign-in; may be empty",
+            "examples": [
+              "alice@example.test"
+            ],
+            "type": "string"
+          },
+          "external_subject": {
+            "description": "The provider's exact subject (OIDC issuer|sub, LDAP unique id)",
+            "examples": [
+              "https://id.example.test/realms/silo|8f14e45f"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "description": "Identity id",
+            "examples": [
+              "4"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "installation_id": {
+            "description": "Auth plugin installation the identity belongs to",
+            "examples": [
+              "3"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "issuer": {
+            "description": "Who asserted the subject, as the provider last said; may be empty",
+            "examples": [
+              "https://id.example.test"
+            ],
+            "type": "string"
+          },
+          "last_check_status": {
+            "description": "That answer: active; not_found, disabled or not_permitted (the account's sessions were revoked); unsupported (the provider cannot re-check this identity, so its sessions end an absolute age after sign-in, and the account's API keys and Audiobookshelf sessions are revoked once the person has not signed in through the provider for that long); unavailable (the provider could not be reached; retried at the next refresh or scheduled pass); none before the first",
+            "enum": [
+              "none",
+              "active",
+              "not_found",
+              "disabled",
+              "not_permitted",
+              "unsupported",
+              "unavailable"
+            ],
+            "examples": [
+              "active"
+            ],
+            "type": "string"
+          },
+          "last_checked_at": {
+            "description": "Most recent provider answer about the identity: a sign-in through it, or a provider re-check (at session refresh or the scheduled recheck_external_identities pass); null when none",
+            "examples": [
+              "2026-01-02T03:04:05.678Z"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_sign_in_at": {
+            "description": "Most recent sign-in through this identity; null when none",
+            "examples": [
+              "2026-01-02T03:04:05.678Z"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "linked_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "examples": [
+              "2026-01-02T03:04:05.678Z"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "provider_id": {
+            "description": "Sign-in provider id as listAuthProviders shows it; empty while that provider is not enabled",
+            "examples": [
+              "plugin:3:oidc"
+            ],
+            "type": "string"
+          },
+          "provider_name": {
+            "description": "Provider label; empty while that provider is not enabled",
+            "examples": [
+              "Company SSO"
+            ],
+            "type": "string"
+          },
+          "username": {
+            "description": "Username at the provider, as of the last sign-in; may be empty",
+            "examples": [
+              "alice"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "external_subject",
+          "issuer",
+          "last_check_status",
+          "id",
+          "installation_id",
+          "provider_id",
+          "provider_name",
+          "username",
+          "email",
+          "display_name",
+          "linked_at",
+          "last_sign_in_at",
+          "last_checked_at"
+        ],
+        "type": "object"
+      },
+      "AdminUserIdentityCollection": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/AdminUserIdentity"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "AdminUserIdentityCreateInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "description": "Name at the provider, shown until the first sign-in refreshes it",
+            "maxLength": 255,
+            "type": "string"
+          },
+          "email": {
+            "description": "Email at the provider, shown until the first sign-in refreshes it",
+            "maxLength": 320,
+            "type": "string"
+          },
+          "external_subject": {
+            "description": "The provider's exact subject: OIDC issuer|sub (Entra tenant|object id), or the LDAP unique id attribute value",
+            "examples": [
+              "https://id.example.test/realms/silo|8f14e45f"
+            ],
+            "maxLength": 1024,
+            "minLength": 1,
+            "type": "string"
+          },
+          "installation_id": {
+            "description": "Auth plugin installation with a sign-in binding",
+            "examples": [
+              "3"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "username": {
+            "description": "Username at the provider, shown until the first sign-in refreshes it",
+            "maxLength": 255,
+            "type": "string"
+          }
+        },
+        "required": [
+          "installation_id",
+          "external_subject"
         ],
         "type": "object"
       },
@@ -18114,6 +18691,74 @@
         ],
         "type": "object"
       },
+      "AuthConnectionTestResult": {
+        "additionalProperties": false,
+        "properties": {
+          "callback_url": {
+            "description": "Redirect URI to register at an OAuth (OIDC) provider for this installation, on the public URL; empty when no public URL is configured. Password (LDAP) providers do not use it",
+            "examples": [
+              "https://silo.example.test/api/v2/auth/oauth/3/callback"
+            ],
+            "type": "string"
+          },
+          "ok": {
+            "description": "True only when every check passed",
+            "type": "boolean"
+          },
+          "steps": {
+            "description": "Checks in the order they ran",
+            "items": {
+              "$ref": "#/components/schemas/AuthConnectionTestStep"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "ok",
+          "steps",
+          "callback_url"
+        ],
+        "type": "object"
+      },
+      "AuthConnectionTestStep": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "description": "Stable check identifier",
+            "examples": [
+              "discovery"
+            ],
+            "type": "string"
+          },
+          "label": {
+            "description": "Operator-facing check name",
+            "examples": [
+              "Discovery document reachable"
+            ],
+            "type": "string"
+          },
+          "message": {
+            "description": "Result or failure reason from the plugin",
+            "examples": [
+              "Loaded https://id.example.test/.well-known/openid-configuration"
+            ],
+            "type": "string"
+          },
+          "ok": {
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "ok",
+          "message"
+        ],
+        "type": "object"
+      },
       "AuthProvider": {
         "additionalProperties": false,
         "properties": {
@@ -18159,6 +18804,13 @@
               "credentials"
             ],
             "type": "string"
+          },
+          "native_start_path": {
+            "description": "Path of startNativeOAuthLogin below the server base, for an oauth provider while OAuth sign-in is served (a public URL is configured); absent for credentials providers. An app appends it to its saved server base URL, which keeps a reverse proxy's path prefix, adds the PKCE and state parameters, and opens the result in the system browser. An oauth provider without it offers no native sign-in",
+            "examples": [
+              "/api/v2/auth/oauth/3/native/start"
+            ],
+            "type": "string"
           }
         },
         "required": [
@@ -18182,9 +18834,17 @@
           "page": {
             "$ref": "#/components/schemas/PageInfo",
             "description": "Cursor state; absent for bounded unpaginated collections"
+          },
+          "password_login": {
+            "description": "Whether any listed provider takes a username and password. False on a server whose only sign-in is an OAuth provider with local password sign-in turned off: apps and TVs then hide the password form",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           }
         },
         "required": [
+          "password_login",
           "items"
         ],
         "type": "object"
@@ -18533,6 +19193,23 @@
           "local_air_date",
           "watched",
           "badges"
+        ],
+        "type": "object"
+      },
+      "CancelDeviceLoginInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "device_code": {
+            "description": "The device code from startDeviceLogin",
+            "examples": [
+              "d3v1c3c0d3"
+            ],
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "device_code"
         ],
         "type": "object"
       },
@@ -22085,6 +22762,14 @@
             "maxLength": 128,
             "minLength": 1,
             "type": "string"
+          },
+          "code_verifier": {
+            "description": "PKCE code verifier of the challenge a native start sent (RFC 7636: 43 to 128 unreserved characters). Required for a code from startNativeOAuthLogin, refused for a web code; either mismatch is 400 invalid_grant and leaves the code redeemable",
+            "examples": [
+              "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+            ],
+            "maxLength": 128,
+            "type": "string"
           }
         },
         "required": [
@@ -22669,9 +23354,33 @@
             "type": "string"
           },
           "match_code": {
-            "description": "Confirmation code shown on the device",
+            "description": "Legacy confirmation words; not displayed",
             "examples": [
-              "42"
+              "warm pony"
+            ],
+            "type": "string"
+          },
+          "requested_at": {
+            "description": "When the device opened the request",
+            "examples": [
+              "2026-01-02T03:04:05.678Z"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "server_id": {
+            "description": "This deployment's server identity, for app links that must reach the same server; absent when unavailable",
+            "examples": [
+              "3f2a9d5e-6b1c-4c7e-9a0d-2f4b8c1e7a35"
+            ],
+            "type": "string"
+          },
+          "server_name": {
+            "description": "Server display name the approver signs the device in to",
+            "examples": [
+              "Silo"
             ],
             "type": "string"
           },
@@ -22682,6 +23391,7 @@
               "approved",
               "denied",
               "consumed",
+              "canceled",
               "expired"
             ],
             "examples": [
@@ -22699,7 +23409,7 @@
           "user_code": {
             "description": "User code; empty once the request is no longer decidable",
             "examples": [
-              "ABCD-1234"
+              "4821-7730"
             ],
             "type": "string"
           }
@@ -22711,8 +23421,32 @@
           "device_name",
           "device_platform",
           "ip_address_hint",
+          "requested_at",
           "client_purpose",
-          "temporary"
+          "temporary",
+          "server_name"
+        ],
+        "type": "object"
+      },
+      "DeviceLoginCancel": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "description": "canceled when the request was pending or approved but not collected; otherwise its unchanged state",
+            "enum": [
+              "canceled",
+              "denied",
+              "consumed",
+              "expired"
+            ],
+            "examples": [
+              "canceled"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
         ],
         "type": "object"
       },
@@ -22721,6 +23455,20 @@
         "properties": {
           "allowed": {
             "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "cancel": {
+            "description": "Whether a device can withdraw its own request with cancelDeviceLogin",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "opened_signal": {
+            "description": "Whether pollDeviceLogin reports opened once an approver has looked the request up, and lookups hold the code while it is being approved",
+            "examples": [
+              true
+            ],
             "type": "boolean"
           },
           "protocol_versions": {
@@ -22761,6 +23509,8 @@
         "required": [
           "remote_playback_handoff",
           "protocol_versions",
+          "cancel",
+          "opened_signal",
           "revision",
           "state"
         ],
@@ -22789,6 +23539,23 @@
       "DeviceLoginPoll": {
         "additionalProperties": false,
         "properties": {
+          "expires_at": {
+            "description": "The pending request's current expiry, which approver lookups can move past the start answer's; the device moves its local deadline here. Absent on every other status",
+            "examples": [
+              "2026-01-02T03:14:05.678Z"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "opened": {
+            "description": "A pending request an approver has looked up; the device keeps its code and tells the person to continue on their phone",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "poll_after": {
             "description": "Seconds to wait before polling again",
             "examples": [
@@ -22828,6 +23595,7 @@
               "approved",
               "denied",
               "consumed",
+              "canceled",
               "expired"
             ],
             "examples": [
@@ -22850,6 +23618,7 @@
         "required": [
           "status",
           "poll_after",
+          "opened",
           "profile_id",
           "profile_token",
           "temporary"
@@ -22900,7 +23669,7 @@
           "expires_in": {
             "description": "Seconds until the request expires",
             "examples": [
-              600
+              900
             ],
             "format": "int64",
             "type": "integer"
@@ -22914,9 +23683,9 @@
             "type": "integer"
           },
           "match_code": {
-            "description": "Confirmation code shown on both screens so the approver can match them",
+            "description": "Legacy confirmation words; clients compare user_code instead and do not display this",
             "examples": [
-              "42"
+              "warm pony"
             ],
             "type": "string"
           },
@@ -22928,23 +23697,23 @@
             "type": "boolean"
           },
           "user_code": {
-            "description": "Short code a person types into the approving browser",
+            "description": "Short code a person types into the approving browser or app: eight digits, shown grouped 4+4. Lookups ignore spaces and dashes. Unique only on this server",
             "examples": [
-              "ABCD-1234"
+              "4821-7730"
             ],
             "type": "string"
           },
           "verification_uri": {
-            "description": "Page where the approver enters the user code",
+            "description": "Page on this server where the approver enters the user code; server.public_url when configured, otherwise the address the device used",
             "examples": [
-              "https://silo.example.test/link"
+              "https://silo.example.test/activate"
             ],
             "type": "string"
           },
           "verification_uri_complete": {
-            "description": "verification_uri with the user code prefilled",
+            "description": "verification_uri with the user code prefilled, for the QR code",
             "examples": [
-              "https://silo.example.test/link?code=ABCD-1234"
+              "https://silo.example.test/activate?code=48217730"
             ],
             "type": "string"
           }
@@ -25636,6 +26405,74 @@
           "key",
           "scope",
           "is_set"
+        ],
+        "type": "object"
+      },
+      "ExternalSignInCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "admin_identities": {
+            "description": "Whether administrators can list, link and unlink account identities",
+            "type": "boolean"
+          },
+          "allowed": {
+            "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "available": {
+            "description": "Whether identity storage is configured",
+            "type": "boolean"
+          },
+          "break_glass": {
+            "description": "Whether updateAdminUser accepts break_glass and the server honors the auth.local_password_login setting",
+            "type": "boolean"
+          },
+          "connection_test": {
+            "description": "Whether testAdminPluginAuthBinding is served; the plugin must also declare connection_test",
+            "type": "boolean"
+          },
+          "credentials_linking": {
+            "description": "Whether linkAccountIdentityWithCredentials links a directory (LDAP) identity to the caller's account with the directory username and password",
+            "type": "boolean"
+          },
+          "identities": {
+            "description": "Whether listAccountIdentities and deleteAccountIdentity are served",
+            "type": "boolean"
+          },
+          "live_provider_changes": {
+            "description": "Whether auth binding and auth plugin changes apply without a server restart",
+            "type": "boolean"
+          },
+          "provider_recheck": {
+            "description": "Whether refreshSession re-checks sessions opened through the external provider with that provider (auth.provider_recheck_interval, auth.provider_recheck_outage_policy), and admin identities report last_check_status",
+            "type": "boolean"
+          },
+          "revision": {
+            "description": "Opaque revision of this document",
+            "type": "string"
+          },
+          "state": {
+            "description": "Support and configuration state, not health",
+            "enum": [
+              "available",
+              "disabled",
+              "not_configured",
+              "unsupported"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "identities",
+          "admin_identities",
+          "break_glass",
+          "connection_test",
+          "live_provider_changes",
+          "provider_recheck",
+          "credentials_linking",
+          "revision",
+          "state"
         ],
         "type": "object"
       },
@@ -28940,7 +29777,7 @@
             "type": "string"
           },
           "provider": {
-            "description": "Authentication provider id exactly as listAuthProviders advertises it; unbounded because plugin ids are composite. Empty selects the default",
+            "description": "Authentication provider id exactly as listAuthProviders advertises it; unbounded because plugin ids are composite. Empty routes by account: a name that may use its local password signs in locally, any other name goes to the enabled directory (LDAP) provider",
             "examples": [
               ""
             ],
@@ -31971,13 +32808,18 @@
               "eyJhbGciOi..."
             ],
             "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/Account",
+            "description": "The account the tokens authenticate"
           }
         },
         "required": [
           "access_token",
           "refresh_token",
           "expires_in",
-          "next"
+          "next",
+          "user"
         ],
         "type": "object"
       },
@@ -31991,9 +32833,25 @@
           "available": {
             "type": "boolean"
           },
+          "linking": {
+            "description": "Whether createAccountIdentityLinkTicket issues link tickets: the web starts a linking flow with startAccountIdentityLink, an app passes the ticket as link_ticket to startNativeOAuthLogin and confirms the link with completeAccountIdentityLink",
+            "type": "boolean"
+          },
+          "native": {
+            "description": "Whether startNativeOAuthLogin serves the phone and desktop apps: the flow ends on org.siloserver.silo:/auth/callback with a one-time code bound to the app's PKCE S256 challenge, redeemed with completeOAuthLogin and its code_verifier",
+            "type": "boolean"
+          },
+          "provider_logout": {
+            "description": "Whether getProviderLogout answers the provider end-session URL for web sign-out",
+            "type": "boolean"
+          },
           "revision": {
             "description": "Opaque revision of this document",
             "type": "string"
+          },
+          "select_account": {
+            "description": "Whether startOAuthLogin, initOAuthLogin and startNativeOAuthLogin accept prompt=select_account, which asks the provider to let the person choose another provider account (a Switch account sign-in)",
+            "type": "boolean"
           },
           "state": {
             "description": "Support and configuration state, not health",
@@ -32008,6 +32866,10 @@
         },
         "required": [
           "available",
+          "native",
+          "linking",
+          "provider_logout",
+          "select_account",
           "revision",
           "state"
         ],
@@ -36959,6 +37821,22 @@
         "required": [
           "content_level",
           "entries"
+        ],
+        "type": "object"
+      },
+      "ProviderLogout": {
+        "additionalProperties": false,
+        "properties": {
+          "end_session_url": {
+            "description": "Provider end-session URL to navigate to after logout; empty when there is none",
+            "examples": [
+              "https://id.example.test/logout?id_token_hint=eyJhbGciOi..."
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "end_session_url"
         ],
         "type": "object"
       },
@@ -46699,6 +47577,921 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v2/account/identities": {
+      "get": {
+        "operationId": "listAccountIdentities",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountIdentityCollection"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the external sign-in identities linked to the caller's account.",
+        "tags": [
+          "account"
+        ],
+        "x-silo-class": "authenticated",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/account/identities/link-complete": {
+      "post": {
+        "description": "An app's linking flow (startNativeOAuthLogin with link_ticket) ends on the app redirect with link=1 and a code. The app redeems it here within 60 seconds with its code_verifier, signed in as the account the ticket was issued to; nothing is linked before. A verifier that does not fit is 400 invalid_grant and leaves the code redeemable; an unknown, used or expired code, or another account, is 401 invalid_token. An identity linked to another account is 409 identity_linked_elsewhere; an account already linked to the provider is 409 already_linked; a refusal by the provider is 403 not_permitted, or 403 account_disabled when the provider's account is disabled, locked or expired. An API key or impersonation session is 403.",
+        "operationId": "completeAccountIdentityLink",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountIdentityLinkCompleteInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Confirm a native app's linking flow and link the provider identity to the caller's account.",
+        "tags": [
+          "account"
+        ],
+        "x-silo-class": "authenticated",
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/account/identities/link-credentials": {
+      "post": {
+        "description": "The account re-enters its local password; the credentials plugin then checks the directory username and password, and the identity it answers for is linked to this account with the same rules as other linking: linking turns local password sign-in off unless the account is break-glass, and is audited. Answers 201 with the linked identity as listAccountIdentities shows it. Refusals, by problem type: 422 validation_failed at body.password (wrong local password) or at body.directory_password (the directory refused the credentials); 409 local_password_required (the account has no local password sign-in); 403 not_permitted (the directory's group rules); 403 account_disabled (the directory account is disabled, locked or expired); 403 password_expired (the directory password expired); 403 permission_denied (the Silo account is disabled, or the caller is an API key or impersonation session); 409 identity_linked_elsewhere; 409 already_linked (this account already has an identity at the installation); 404 not_found (not an enabled credentials provider, an OAuth one included); 503 provider_unavailable. Spends the login rate-limit budget. getExternalSignInCapabilities reports credentials_linking.",
+        "operationId": "linkAccountIdentityWithCredentials",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountIdentityCredentialsLinkInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountIdentity"
+                }
+              }
+            },
+            "description": "Created",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Link a directory (LDAP) identity to the caller's account with the directory username and password.",
+        "tags": [
+          "account"
+        ],
+        "x-silo-class": "authenticated",
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/account/identities/link-start": {
+      "post": {
+        "description": "Consumes a ticket from createAccountIdentityLinkTicket issued to the caller's account, sets the flow's browser-binding cookie on this response and answers the provider URL for the same browser to open. Only the browser that made this request can finish the flow, so a ticket opened by anyone else links nothing. Call it on the public URL's origin (409 otherwise, or when no public URL is configured). The provider is asked for a fresh sign-in. The flow returns to next with linked=1, or error=oauth_link_failed\u0026reason=\u003creason\u003e. An unknown, used, expired or foreign ticket is 404; an API key or impersonation session is 403; a provider that cannot start the flow is 503 provider_unavailable.",
+        "operationId": "startAccountIdentityLink",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountIdentityLinkStartInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountIdentityLinkStart"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "description": "The flow's browser-binding cookie: HttpOnly, SameSite=Lax, scoped to the callback path, living the flow's ten minutes plus an hour so a late callback still reaches its client, Secure on an https public URL",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Start a web linking flow with a link ticket and get the provider sign-in URL.",
+        "tags": [
+          "account"
+        ],
+        "x-silo-class": "authenticated",
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/account/identities/link-ticket": {
+      "post": {
+        "description": "A signed-in account re-enters its local password here for a single-use ticket (valid 5 minutes) that starts one linking flow: the web passes it to startAccountIdentityLink; an app passes it as link_ticket to startNativeOAuthLogin and confirms the result with completeAccountIdentityLink. The flow links the provider identity to this account instead of signing in; an identity linked to another account ends in identity_linked_elsewhere. An account without local password sign-in is 409 local_password_required; a wrong password is 422 at body.password; an API key or impersonation session is 403; an installation that is not an enabled OAuth provider is 404.",
+        "operationId": "createAccountIdentityLinkTicket",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountIdentityLinkTicketInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountIdentityLinkTicket"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Confirm the account password and get a ticket that starts a provider linking flow.",
+        "tags": [
+          "account"
+        ],
+        "x-silo-class": "authenticated",
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/account/identities/{id}": {
+      "delete": {
+        "description": "Allowed only while the account can still sign in another way: its local password (with local password sign-in on, or as a break-glass account) or another identity; otherwise 409 last_sign_in_method. An API key or an impersonation session is refused with 403.",
+        "operationId": "deleteAccountIdentity",
+        "parameters": [
+          {
+            "description": "Identity id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Identity id",
+              "examples": [
+                "4"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Disconnect an external sign-in identity from the caller's account.",
+        "tags": [
+          "account"
+        ],
+        "x-silo-class": "authenticated",
+        "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/account/me": {
       "get": {
         "operationId": "getCurrentUser",
@@ -84673,7 +86466,7 @@
             "headers": {
               "X-Silo-Restart-Required": {
                 "schema": {
-                  "description": "Always true: bindings load at server start",
+                  "description": "Always false: sign-in providers rebuild on every node when a binding changes",
                   "type": "string"
                 }
               }
@@ -84815,13 +86608,223 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Replace the auth provider binding for one capability and mark a server restart required. The whole row is assigned, so repeating the request converges on one stored binding.",
+        "summary": "Replace the auth provider binding for one capability. Sign-in providers rebuild on every node without a restart. Enabling a binding while another one is enabled is 409 provider_already_enabled. The whole row is assigned, so repeating the request converges on one stored binding.",
         "tags": [
           "admin-plugins"
         ],
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
         "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/plugins/installations/{id}/auth-binding/test": {
+      "post": {
+        "description": "The running plugin tests the staged configuration (merged over the stored entries it does not replace) and persists nothing. A failed check is a 200 result with ok false. A plugin without a connection test, or a disabled installation, is 409. The check reaches the provider and is bounded by a server timeout; never retry an uncertain result automatically.",
+        "operationId": "testAdminPluginAuthBinding",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque identifier",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminPluginAuthBindingTestInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthConnectionTestResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Test an auth plugin's connection with staged, unsaved settings.",
+        "tags": [
+          "admin-plugins"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
     },
@@ -85017,7 +87020,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Replace one global configuration entry after validating it against the plugin manifest, then stop the running plugin so it rebinds. Blank secret fields keep stored secrets; clear_secrets removes them. Repeating the same request converges on one stored entry.",
+        "summary": "Replace one global configuration entry after validating it against the plugin manifest, then stop the running plugin so it rebinds. Omitted fields keep their stored values. A declared non-secret top-level field sent as null or a blank string is removed from the stored entry, so the plugin default applies; undeclared fields are kept. Blank secret fields keep stored secrets; only clear_secrets removes them. Repeating the same request converges on one stored entry.",
         "tags": [
           "admin-plugins"
         ],
@@ -102331,6 +104334,7 @@
         "x-silo-service-backed": true
       },
       "put": {
+        "description": "Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required.",
         "operationId": "updateAdminSettings",
         "parameters": [
           {
@@ -102461,6 +104465,16 @@
               }
             },
             "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "412": {
             "content": {
@@ -103778,6 +105792,7 @@
         "x-silo-service-backed": true
       },
       "put": {
+        "description": "Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required.",
         "operationId": "updateAdminSetting",
         "parameters": [
           {
@@ -103910,6 +105925,16 @@
               }
             },
             "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "412": {
             "content": {
@@ -110223,6 +112248,7 @@
     },
     "/api/v2/admin/users/{id}": {
       "delete": {
+        "description": "Deleting the last usable break-glass admin while local password sign-in is off (auth.local_password_login) is 409 break_glass_required.",
         "operationId": "deleteAdminUser",
         "parameters": [
           {
@@ -110332,6 +112358,16 @@
               }
             },
             "description": "Not Acceptable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "412": {
             "content": {
@@ -111810,6 +113846,542 @@
           "admin-users"
         ],
         "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/users/{id}/identities": {
+      "get": {
+        "operationId": "listAdminUserIdentities",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Account id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Account id",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserIdentityCollection"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the external sign-in identities linked to an account.",
+        "tags": [
+          "admin-users"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      },
+      "post": {
+        "description": "The installation must have a sign-in binding. An identity linked to another account is 409 identity_linked_elsewhere; an account already linked to that installation is 409 already_linked. Linking turns the account's local password sign-in off unless it is a break-glass account. Only the server Owner may change another admin's sign-in.",
+        "operationId": "createAdminUserIdentity",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Account id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Account id",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminUserIdentityCreateInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserIdentity"
+                }
+              }
+            },
+            "description": "Created",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Link an account to an external sign-in identity by the provider's exact subject.",
+        "tags": [
+          "admin-users"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "unique_constraint",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/users/{id}/identities/{identity_id}": {
+      "delete": {
+        "description": "The account may be left without a way to sign in: an account linked to a provider has local password sign-in off. Setting a password with updateAdminUser turns it back on. Only the server Owner may change another admin's sign-in.",
+        "operationId": "deleteAdminUserIdentity",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Account id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Account id",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Identity id",
+            "in": "path",
+            "name": "identity_id",
+            "required": true,
+            "schema": {
+              "description": "Identity id",
+              "examples": [
+                "4"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Unlink an external sign-in identity from an account.",
+        "tags": [
+          "admin-users"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
     },
@@ -114756,12 +117328,12 @@
         "operationId": "getDeviceLogin",
         "parameters": [
           {
-            "description": "Browser code from the verification link",
+            "description": "Browser code from a verification link issued before user codes moved into the link",
             "explode": false,
             "in": "query",
             "name": "token",
             "schema": {
-              "description": "Browser code from the verification link",
+              "description": "Browser code from a verification link issued before user codes moved into the link",
               "examples": [
                 "br0ws3rc0d3"
               ],
@@ -114769,14 +117341,14 @@
             }
           },
           {
-            "description": "User code the person typed",
+            "description": "User code from the verification link or typed by the person",
             "explode": false,
             "in": "query",
             "name": "code",
             "schema": {
-              "description": "User code the person typed",
+              "description": "User code from the verification link or typed by the person",
               "examples": [
-                "ABCD-1234"
+                "48217730"
               ],
               "type": "string"
             }
@@ -114864,6 +117436,7 @@
     },
     "/api/v2/auth/device/approve": {
       "post": {
+        "description": "Only a signed-in login session decides: an API key or an impersonation session is 403 permission_denied, because an approval gives the device a login session of the account.",
         "operationId": "approveDeviceLogin",
         "requestBody": {
           "content": {
@@ -114905,6 +117478,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "404": {
             "content": {
@@ -115033,6 +117616,7 @@
     },
     "/api/v2/auth/device/approve-handoff": {
       "post": {
+        "description": "Only a signed-in login session decides: an API key or an impersonation session is 403 permission_denied, because an approval gives the device a login session of the account.",
         "operationId": "approveDeviceHandoff",
         "parameters": [
           {
@@ -115235,6 +117819,130 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/auth/device/cancel": {
+      "post": {
+        "operationId": "cancelDeviceLogin",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelDeviceLoginInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceLoginCancel"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Withdraw the device's own pairing request so its code can no longer be approved.",
+        "tags": [
+          "device-login"
+        ],
+        "x-silo-class": "public",
+        "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/auth/device/capability": {
       "get": {
         "operationId": "getDeviceLoginCapability",
@@ -115359,6 +118067,7 @@
     },
     "/api/v2/auth/device/deny": {
       "post": {
+        "description": "Only a signed-in login session decides: an API key or an impersonation session is 403 permission_denied, because an approval gives the device a login session of the account.",
         "operationId": "denyDeviceLogin",
         "requestBody": {
           "content": {
@@ -115400,6 +118109,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "404": {
             "content": {
@@ -115764,6 +118483,139 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/auth/external-sign-in/capabilities": {
+      "get": {
+        "operationId": "getExternalSignInCapabilities",
+        "parameters": [
+          {
+            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalSignInCapabilities"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current; no body.",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Discover which external sign-in (OIDC, LDAP) management operations this server serves.",
+        "tags": [
+          "auth"
+        ],
+        "x-silo-class": "public",
+        "x-silo-conditional": true,
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/auth/impersonation/end": {
       "post": {
         "operationId": "endImpersonation",
@@ -115949,6 +118801,16 @@
               }
             },
             "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "413": {
             "content": {
@@ -116236,7 +119098,7 @@
             "description": "Service Unavailable"
           }
         },
-        "summary": "Discover browser OAuth handshake availability.",
+        "summary": "Discover browser and native-app OAuth handshake availability.",
         "tags": [
           "auth"
         ],
@@ -116247,7 +119109,19 @@
     },
     "/api/v2/auth/oauth/complete": {
       "post": {
+        "description": "A code is valid for 60 seconds and redeems once. The login session opens at redemption, so a code that is never redeemed leaves no session. Redeeming a used code again revokes the session its redemption opened. A native code needs the code_verifier of its S256 challenge. A web code takes none and redeems only in the browser the callback answered, which holds the silo_oauth_complete cookie, so a code passed to another browser cannot sign that browser in.",
         "operationId": "completeOAuthLogin",
+        "parameters": [
+          {
+            "description": "Completion cookie the callback set in the browser it sent to the web completion page (HttpOnly, path-scoped to this operation, two minutes). The browser sends it by itself; a web code redeemed without it, or with another browser's, is 400 invalid_grant and stays redeemable. Native codes ignore it",
+            "in": "cookie",
+            "name": "silo_oauth_complete",
+            "schema": {
+              "description": "Completion cookie the callback set in the browser it sent to the web completion page (HttpOnly, path-scoped to this operation, two minutes). The browser sends it by itself; a web code redeemed without it, or with another browser's, is 400 invalid_grant and stays redeemable. Native codes ignore it",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -116371,6 +119245,7 @@
     },
     "/api/v2/auth/oauth/{install_id}/callback": {
       "get": {
+        "description": "Accepts only the browser holding the flow's binding cookie. A web sign-in continues to /login/oauth-complete?code=; a failure to /login?error=oauth_failed\u0026reason=\u003creason\u003e (not_permitted, account_required, email_in_use, identity_linked_elsewhere, account_disabled, provider_unavailable, state_invalid, session_expired, already_linked, login_failed). A web linking flow returns to its next path with linked=1 or error=oauth_link_failed\u0026reason=\u003creason\u003e; a native flow to the app redirect, which carries iss (see startNativeOAuthLogin).",
         "operationId": "finishOAuthCallback",
         "parameters": [
           {
@@ -116383,7 +119258,7 @@
             }
           },
           {
-            "description": "Browser OAuth handshake value; validated by the owning handshake.",
+            "description": "Provider redirect value; validated by the owning handshake.",
             "in": "query",
             "name": "state",
             "schema": {
@@ -116391,9 +119266,17 @@
             }
           },
           {
-            "description": "Browser OAuth handshake value; validated by the owning handshake.",
+            "description": "Provider redirect value; validated by the owning handshake.",
             "in": "query",
             "name": "code",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Provider redirect value; validated by the owning handshake.",
+            "in": "query",
+            "name": "error",
             "schema": {
               "type": "string"
             }
@@ -116401,7 +119284,7 @@
         ],
         "responses": {
           "302": {
-            "description": "Provider authorization or local completion/error redirect.",
+            "description": "Redirect: to the provider, to the same start on the public origin, or to the flow's completion or failure location.",
             "headers": {
               "Location": {
                 "schema": {
@@ -116431,7 +119314,7 @@
             "description": "Service Unavailable"
           }
         },
-        "summary": "Continue the browser OAuth login handshake.",
+        "summary": "Continue the OAuth handshake at the provider's redirect back.",
         "tags": [
           "auth"
         ],
@@ -116443,6 +119326,7 @@
     },
     "/api/v2/auth/oauth/{install_id}/init": {
       "post": {
+        "description": "A browser on another origin than the public URL is sent (303) to startOAuthLogin there, so the flow's browser-binding cookie is set on the origin of the callback. A provider that cannot start the flow, or a missing public URL, sends the browser (302) to /login?error=oauth_failed\u0026reason=provider_unavailable.",
         "operationId": "initOAuthLogin",
         "parameters": [
           {
@@ -116455,17 +119339,49 @@
             }
           },
           {
-            "description": "Browser OAuth handshake value; validated by the owning handshake.",
+            "description": "Site-relative path to return to; anything that is not a same-origin path becomes /.",
             "in": "query",
             "name": "next",
             "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "select_account asks the provider to let the person choose which provider account to sign in with, for a Switch account sign-in; omit it otherwise. Any other value is 400. A linking flow always asks for a fresh sign-in instead.",
+            "in": "query",
+            "name": "prompt",
+            "schema": {
+              "enum": [
+                "select_account"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Set by the server when it redirects a web start to its public origin; clients omit it.",
+            "in": "query",
+            "name": "bounce",
+            "schema": {
+              "enum": [
+                "1"
+              ],
               "type": "string"
             }
           }
         ],
         "responses": {
           "302": {
-            "description": "Provider authorization or local completion/error redirect.",
+            "description": "Redirect: to the provider, to the same start on the public origin, or to the flow's completion or failure location.",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "303": {
+            "description": "Redirect: to the provider, to the same start on the public origin, or to the flow's completion or failure location.",
             "headers": {
               "Location": {
                 "schema": {
@@ -116475,6 +119391,16 @@
             }
           },
           "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Plain-text handshake failure."
+          },
+          "409": {
             "content": {
               "text/plain": {
                 "schema": {
@@ -116515,14 +119441,247 @@
             "description": "Service Unavailable"
           }
         },
-        "summary": "Continue the browser OAuth login handshake.",
+        "summary": "Start a web OAuth sign-in from a form post.",
         "tags": [
           "auth"
         ],
         "x-silo-class": "public",
         "x-silo-raw-protocol": "oauth-redirect",
-        "x-silo-raw-reason": "Browser form submission and provider callback require HTTP redirects, without JSON negotiation.",
+        "x-silo-raw-reason": "Browser form submission and provider redirects require HTTP redirects and cookies, without JSON negotiation.",
         "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/auth/oauth/{install_id}/native/start": {
+      "get": {
+        "description": "The app opens this start on its saved server base in ASWebAuthenticationSession or a Custom Tab: it appends native_start_path from listAuthProviders to its saved server base URL (an oauth provider without native_start_path offers no native sign-in), adds code_challenge, code_challenge_method=S256 and app_state, and never opens another origin. The server records the start origin, the origin the start arrived on (scheme://host[:port], scheme and host in lower case, default port omitted, IPv6 in brackets, no path or trailing slash), derived from the host a trusted proxy names in X-Forwarded-Host or else the Host header, and the scheme of the connection or the one a trusted proxy names. A start that arrives on another origin than the public URL is accepted only on the origin of a connected network access provider or on a local address: an IP literal in the loopback, private, link-local or 100.64.0.0/10 range, or a single-label, .local, .lan, .localdomain, .home.arpa or .internal host name; any other origin is a plain-text 400. An accepted start is kept on the server and the browser is sent (302) to this start on the public origin with only flow, the kept start's random single-use ID, valid two minutes; the flow sets its binding cookie there and goes to the provider. The flow ends on org.siloserver.silo:/auth/callback with code, state (the app_state), server (getServerIdentity's server_id) and iss, the start origin; a failure carries error=\u003creason\u003e instead of code. Every app redirect of a sign-in or linking flow carries iss, success or failure. The app accepts the redirect only when iss equals the origin of its saved server base, and redeems the code only at that saved base; a server that redirects its start to another server gets that server's own origin as iss, which the app refuses. The Host header is chosen by whoever sends the start, so iss does not stop a hostile server on a local address that sends the app's start here itself; that is why other origins are refused. A start with a valid code_challenge and app_state whose provider cannot start the flow goes straight to the app redirect with error=provider_unavailable (login_failed for a server error); an unknown, used, expired or foreign link_ticket goes there with error=session_expired. An unknown, used, expired or foreign flow is a plain-text 400, as is a flow presented on another origin than the public URL, which leaves the kept start for the public origin. Redeem the code within 60 seconds with completeOAuthLogin and the code_verifier; a linking flow's code carries link=1 and is redeemed with completeAccountIdentityLink instead.",
+        "operationId": "startNativeOAuthLogin",
+        "parameters": [
+          {
+            "description": "Positive authentication-plugin installation ID.",
+            "in": "path",
+            "name": "install_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Required from the app. PKCE S256 challenge: unpadded base64url of SHA-256 of the app's code verifier (RFC 7636).",
+            "in": "query",
+            "name": "code_challenge",
+            "schema": {
+              "maxLength": 43,
+              "minLength": 43,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Required from the app. Always S256.",
+            "in": "query",
+            "name": "code_challenge_method",
+            "schema": {
+              "enum": [
+                "S256"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Required from the app. Opaque value of 1 to 512 unreserved characters (A-Z a-z 0-9 - . _ ~); echoed as state on the app redirect.",
+            "in": "query",
+            "name": "app_state",
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Link ticket from createAccountIdentityLinkTicket: the flow ends on the app redirect with link=1 and a code the app confirms with completeAccountIdentityLink, signed in as the ticket's account. No session opens.",
+            "in": "query",
+            "name": "link_ticket",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Set by the server when it moves a start that arrived on another origin to its public origin: the random ID of the start it keeps, single use, valid two minutes. A start with flow takes no other parameters; apps omit it.",
+            "in": "query",
+            "name": "flow",
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "select_account asks the provider to let the person choose which provider account to sign in with, for a Switch account sign-in; omit it otherwise. Any other value is 400. A linking flow always asks for a fresh sign-in instead.",
+            "in": "query",
+            "name": "prompt",
+            "schema": {
+              "enum": [
+                "select_account"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect: to the provider, to the same start on the public origin, or to the flow's completion or failure location.",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Plain-text handshake failure."
+          },
+          "409": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Plain-text handshake failure."
+          },
+          "500": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Plain-text handshake failure."
+          },
+          "502": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Plain-text handshake failure."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Start an OAuth sign-in for a native app in the system browser.",
+        "tags": [
+          "auth"
+        ],
+        "x-silo-class": "public",
+        "x-silo-raw-protocol": "oauth-redirect",
+        "x-silo-raw-reason": "Browser form submission and provider redirects require HTTP redirects and cookies, without JSON negotiation.",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/auth/oauth/{install_id}/start": {
+      "get": {
+        "description": "Sets an HttpOnly, SameSite=Lax browser-binding cookie scoped to the callback path, then redirects to the provider. A browser on another origin than the public URL is first sent (302) to the same start there. A link_ticket is refused with 400: the web links with startAccountIdentityLink. Malformed parameters are plain-text 400s; a provider that cannot start the flow, or a missing public URL, sends the browser (302) to /login?error=oauth_failed\u0026reason=provider_unavailable (login_failed for a server error), where the login page does not redirect to the provider again.",
+        "operationId": "startOAuthLogin",
+        "parameters": [
+          {
+            "description": "Positive authentication-plugin installation ID.",
+            "in": "path",
+            "name": "install_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Site-relative path to return to; anything that is not a same-origin path becomes /.",
+            "in": "query",
+            "name": "next",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "select_account asks the provider to let the person choose which provider account to sign in with, for a Switch account sign-in; omit it otherwise. Any other value is 400. A linking flow always asks for a fresh sign-in instead.",
+            "in": "query",
+            "name": "prompt",
+            "schema": {
+              "enum": [
+                "select_account"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Set by the server when it redirects a web start to its public origin; clients omit it.",
+            "in": "query",
+            "name": "bounce",
+            "schema": {
+              "enum": [
+                "1"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect: to the provider, to the same start on the public origin, or to the flow's completion or failure location.",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Plain-text handshake failure."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Start a web OAuth sign-in.",
+        "tags": [
+          "auth"
+        ],
+        "x-silo-class": "public",
+        "x-silo-raw-protocol": "oauth-redirect",
+        "x-silo-raw-reason": "Browser form submission and provider redirects require HTTP redirects and cookies, without JSON negotiation.",
         "x-silo-service-backed": true
       }
     },
@@ -116674,6 +119833,105 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/auth/provider-logout": {
+      "get": {
+        "description": "Call before logout while the session is still valid, then end the Silo session with logout and send the browser to end_session_url when it is not empty. It is empty unless the caller is the account's own login session (not an API key or an impersonation session), the account is linked to an enabled OAuth provider and the provider plugin offers an end-session URL; the plugin's own configuration turns provider logout on or off. The provider returns the browser to /login on the public origin.",
+        "operationId": "getProviderLogout",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderLogout"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get the OAuth provider sign-out URL for the caller's web logout.",
+        "tags": [
+          "auth"
+        ],
+        "x-silo-class": "authenticated",
         "x-silo-service-backed": true
       }
     },
@@ -146061,6 +149319,16 @@
               }
             },
             "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "404": {
             "content": {

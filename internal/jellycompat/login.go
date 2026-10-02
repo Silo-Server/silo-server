@@ -56,7 +56,10 @@ func NewLoginResolver(authService *auth.Service, storeProvider userstore.UserSto
 // PIN-protected profiles are supported via the password#pin convention:
 // the user appends their profile PIN after a '#' in the password field.
 // The resolver tries the full password first, then falls back to splitting
-// at the last '#' if authentication fails and a '#' is present.
+// at the last '#' if the password was wrong and a '#' is present. The
+// convention applies to local accounts only: a name that signs in with a
+// directory (LDAP) gets exactly one attempt with the password as typed, so
+// a PIN never reaches the directory and a failed bind is never doubled.
 func (r *LoginResolver) Resolve(ctx context.Context, combinedUsername, password, userAgent, remoteIP string) (*Session, error) {
 	accountUsername, requestedProfile, hasExplicitProfile, err := parseProfileLogin(combinedUsername)
 	if err != nil {
@@ -65,10 +68,19 @@ func (r *LoginResolver) Resolve(ctx context.Context, combinedUsername, password,
 
 	// Try auth with full password first, fall back to base#pin split.
 	basePw, pinCandidate := splitPasswordPIN(password)
+	if basePw != "" {
+		local, err := r.authService.PasswordRoutesLocally(ctx, accountUsername)
+		if err != nil {
+			return nil, err
+		}
+		if !local {
+			basePw = ""
+		}
+	}
 	// CompatLogin refuses a temporary password: Jellyfin clients cannot run the
 	// password change it requires.
 	tokenPair, user, err := r.authService.CompatLogin(ctx, accountUsername, password, userAgent, remoteIP)
-	if err != nil && basePw != "" && !errors.Is(err, auth.ErrPasswordChangeRequired) {
+	if err != nil && basePw != "" && errors.Is(err, auth.ErrInvalidCredentials) {
 		// Full password failed and there's a # — try the base portion.
 		tokenPair, user, err = r.authService.CompatLogin(ctx, accountUsername, basePw, userAgent, remoteIP)
 		if err != nil {
@@ -229,15 +241,31 @@ func selectNamedProfile(profileName string, profiles []upstreamProfile) (upstrea
 	}
 }
 
+// Jellyfin's answer to a refused sign-in: the error code, and the message
+// of a plain credentials failure.
+const (
+	loginErrorCode            = "InvalidUsernameOrPassword"
+	invalidCredentialsMessage = "Invalid username or password"
+)
+
 func mapLoginError(err error) (int, string, string) {
 	if httpErr, ok := err.(*HTTPError); ok {
-		if httpErr.StatusCode == http.StatusUnauthorized {
-			return http.StatusUnauthorized, "InvalidUsernameOrPassword", "Invalid username or password"
+		switch httpErr.StatusCode {
+		case http.StatusUnauthorized:
+			// mapAuthError words every 401: a sign-in policy refusal names
+			// its reason, anything else is a plain credentials failure.
+			message := httpErr.Message
+			if message == "" {
+				message = invalidCredentialsMessage
+			}
+			return http.StatusUnauthorized, loginErrorCode, message
+		case http.StatusServiceUnavailable:
+			return http.StatusServiceUnavailable, "ServiceUnavailable", httpErr.Error()
 		}
 		return http.StatusBadGateway, "UpstreamError", httpErr.Error()
 	}
 	if errors.Is(err, ErrProfileRequired) || errors.Is(err, ErrProfileNotFound) || errors.Is(err, ErrProfileAmbiguous) || errors.Is(err, ErrProfileHasPIN) || errors.Is(err, ErrInvalidPIN) || errors.Is(err, auth.ErrPasswordChangeRequired) {
-		return http.StatusUnauthorized, "InvalidUsernameOrPassword", err.Error()
+		return http.StatusUnauthorized, loginErrorCode, err.Error()
 	}
 	return http.StatusInternalServerError, "ServerError", "Unexpected login failure"
 }
@@ -251,10 +279,20 @@ func mapAuthError(err error) error {
 		// Kept as the sentinel, like the PIN errors, so the client sees why.
 		return fmt.Errorf("%w: sign in to Silo to replace your temporary password", err)
 	}
+	switch {
+	case errors.Is(err, auth.ErrProviderUnavailable):
+		return &HTTPError{StatusCode: http.StatusServiceUnavailable, Message: "The sign-in provider is unavailable"}
+	case errors.Is(err, auth.ErrLocalLoginDisabled), errors.Is(err, auth.ErrNotPermitted),
+		errors.Is(err, auth.ErrEmailInUse), errors.Is(err, auth.ErrIdentityLinkedElsewhere),
+		errors.Is(err, auth.ErrProviderPasswordExpired):
+		// Refusals of the server's sign-in policy look like any failed
+		// sign-in to a Jellyfin client; the reason goes in the message.
+		return &HTTPError{StatusCode: http.StatusUnauthorized, Message: err.Error()}
+	}
 	// auth.Service returns plain errors for bad credentials
 	errMsg := err.Error()
 	if strings.Contains(errMsg, "invalid credentials") || strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "disabled") {
-		return &HTTPError{StatusCode: http.StatusUnauthorized, Message: "Invalid username or password"}
+		return &HTTPError{StatusCode: http.StatusUnauthorized, Message: invalidCredentialsMessage}
 	}
 	return err
 }

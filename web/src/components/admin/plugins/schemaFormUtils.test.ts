@@ -505,3 +505,85 @@ describe("section visibility", () => {
     ).toEqual({ advanced_enabled: true, endpoint: "active" });
   });
 });
+
+describe("buildSchemaValues explicit clears", () => {
+  const clearDescriptor: PluginAdminForm = {
+    fields: [
+      {
+        key: "allowed_groups",
+        label: "Allowed",
+        control: "TEXT",
+        required: false,
+        secret: false,
+        multiline: false,
+      },
+      {
+        key: "ca_pem",
+        label: "CA",
+        control: "TEXTAREA",
+        required: false,
+        secret: false,
+        multiline: true,
+      },
+      {
+        key: "max_age",
+        label: "Max age",
+        control: "NUMBER",
+        required: false,
+        secret: false,
+        multiline: false,
+      },
+      {
+        key: "client_secret",
+        label: "Secret",
+        control: "PASSWORD",
+        required: false,
+        secret: true,
+        multiline: false,
+      },
+      {
+        key: "token",
+        label: "Token",
+        control: "TEXT",
+        required: false,
+        secret: true,
+        multiline: false,
+      },
+    ],
+  };
+  const emptied = { allowed_groups: "", ca_pem: "  ", max_age: "", client_secret: "", token: "" };
+
+  it("leaves emptied fields out by default", () => {
+    expect(buildSchemaValues(clearDescriptor, emptied)).toEqual({});
+  });
+
+  it("sends emptied non-secret fields as explicit clears and never clears a secret", () => {
+    expect(
+      buildSchemaValues(clearDescriptor, emptied, undefined, { explicitClears: true }),
+    ).toEqual({
+      allowed_groups: "",
+      ca_pem: "",
+      max_age: null,
+    });
+  });
+
+  it("follows the declared type when one is known", () => {
+    const fieldTypes = parseFieldTypes(
+      JSON.stringify({
+        type: "object",
+        properties: {
+          allowed_groups: { type: "string" },
+          max_age: { type: "integer" },
+          ca_pem: { type: "string" },
+        },
+      }),
+    );
+    expect(
+      buildSchemaValues(clearDescriptor, emptied, fieldTypes, { explicitClears: true }),
+    ).toEqual({
+      allowed_groups: "",
+      ca_pem: "",
+      max_age: null,
+    });
+  });
+});

@@ -374,29 +374,56 @@ func backfillEncryptedConfigs(
 	return updated, nil
 }
 
+// ErrAuthProviderAlreadyEnabled refuses enabling an auth binding while
+// another one is enabled: a server has at most one external sign-in provider
+// (plus the built-in local accounts).
+var ErrAuthProviderAlreadyEnabled = errors.New("another external sign-in provider is already enabled")
+
+// authBindingsLock serializes auth binding writes so two concurrent enables
+// cannot both pass the one-provider check.
+const authBindingsLock = "silo:plugin_auth_bindings"
+
+// UpsertAuthBinding writes one binding row. Enabling it is refused with
+// ErrAuthProviderAlreadyEnabled while a different binding is enabled.
 func (s *RuntimeConfigStore) UpsertAuthBinding(ctx context.Context, binding AuthBinding) error {
-	_, err := s.pool.Exec(ctx, `
-		INSERT INTO plugin_auth_bindings (
-			plugin_installation_id, capability_id, enabled, display_order, auto_provision, default_login
-		) VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (plugin_installation_id, capability_id) DO UPDATE SET
-			enabled = EXCLUDED.enabled,
-			display_order = EXCLUDED.display_order,
-			auto_provision = EXCLUDED.auto_provision,
-			default_login = EXCLUDED.default_login,
-			updated_at = NOW()
-	`,
-		binding.InstallationID,
-		binding.CapabilityID,
-		binding.Enabled,
-		binding.DisplayOrder,
-		binding.AutoProvision,
-		binding.DefaultLogin,
-	)
-	if err != nil {
-		return fmt.Errorf("upserting plugin auth binding: %w", err)
-	}
-	return nil
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, authBindingsLock); err != nil {
+			return fmt.Errorf("locking plugin auth bindings: %w", err)
+		}
+		if binding.Enabled {
+			var other bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (
+				SELECT 1 FROM plugin_auth_bindings
+				WHERE enabled AND NOT (plugin_installation_id = $1 AND capability_id = $2))`,
+				binding.InstallationID, binding.CapabilityID).Scan(&other); err != nil {
+				return fmt.Errorf("checking enabled plugin auth bindings: %w", err)
+			}
+			if other {
+				return ErrAuthProviderAlreadyEnabled
+			}
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO plugin_auth_bindings (
+				plugin_installation_id, capability_id, enabled, display_order, auto_provision, default_login
+			) VALUES ($1, $2, $3, $4, $5, $6)
+			ON CONFLICT (plugin_installation_id, capability_id) DO UPDATE SET
+				enabled = EXCLUDED.enabled,
+				display_order = EXCLUDED.display_order,
+				auto_provision = EXCLUDED.auto_provision,
+				default_login = EXCLUDED.default_login,
+				updated_at = NOW()
+		`,
+			binding.InstallationID,
+			binding.CapabilityID,
+			binding.Enabled,
+			binding.DisplayOrder,
+			binding.AutoProvision,
+			binding.DefaultLogin,
+		); err != nil {
+			return fmt.Errorf("upserting plugin auth binding: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *RuntimeConfigStore) GetAuthBinding(

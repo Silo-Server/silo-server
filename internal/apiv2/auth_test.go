@@ -18,6 +18,9 @@ func TestLogin(t *testing.T) {
 	}
 	// Wrong credentials: 401 invalid_token, never authentication_required.
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/login", `{"username":"laura","password":"nope"}`, nil), TypeInvalidToken)
+	// A directory sign-in with no account while account creation is off is
+	// account_required, not the not_permitted v1 answers.
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/login", `{"username":"newcomer","password":"pw"}`, nil), TypeAccountRequired)
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/login", `{"username":"off","password":"pw"}`, nil), TypePermissionDenied)
 	// A blank password is refused by the schema, naming the member.
 	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/login", `{"username":"laura","password":""}`, nil), TypeValidationFailed)
@@ -105,15 +108,26 @@ func TestEndImpersonation(t *testing.T) {
 
 func TestCompleteOAuthLogin(t *testing.T) {
 	h := newTestHandler(t, pilotDeps(nil, nil))
-	rec := do(t, h, http.MethodPost, "/api/v2/auth/oauth/complete", `{"code":"c0de"}`, nil)
+	// A web code redeems only in the browser holding its completion cookie.
+	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/oauth/complete", `{"code":"c0de"}`, nil), TypeInvalidGrant)
+	if p.Detail != "This web completion code belongs to another browser." {
+		t.Fatalf("detail = %q", p.Detail)
+	}
+	rec := do(t, h, http.MethodPost, "/api/v2/auth/oauth/complete", `{"code":"c0de"}`, completionCookie)
 	if rec.Code != 200 || rec.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
-	if rec.Body.String() != `{"access_token":"acc","refresh_token":"ref","expires_in":3600,"next":"/me"}`+"\n" {
+	if !strings.HasPrefix(rec.Body.String(), `{"access_token":"acc","refresh_token":"ref","expires_in":3600,"next":"/me","user":{"id":"1","username":"laura"`) {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
+	// A native code needs its verifier; a web code refuses one.
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/oauth/complete", `{"code":"n4tive"}`, nil), TypeInvalidGrant)
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/oauth/complete", `{"code":"c0de","code_verifier":"`+fixtureNativeVerifier+`"}`, completionCookie), TypeInvalidGrant)
+	if rec := do(t, h, http.MethodPost, "/api/v2/auth/oauth/complete", `{"code":"n4tive","code_verifier":"`+fixtureNativeVerifier+`"}`, nil); rec.Code != 200 {
+		t.Fatalf("native redemption: %d %s", rec.Code, rec.Body.String())
+	}
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/oauth/complete", `{"code":"nope"}`, nil), TypeInvalidToken)
-	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/oauth/complete", `{"code":""}`, nil), TypeValidationFailed)
+	p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/oauth/complete", `{"code":""}`, nil), TypeValidationFailed)
 	if len(p.Errors) != 1 || p.Errors[0].Location != "body.code" {
 		t.Fatalf("errors = %+v", p.Errors)
 	}

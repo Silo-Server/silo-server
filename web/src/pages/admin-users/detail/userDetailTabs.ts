@@ -1,9 +1,16 @@
 /** The tabs of an account's admin page, in display order. */
-export type UserDetailTab = "overview" | "access" | "activity" | "downloads" | "preferences";
+export type UserDetailTab =
+  | "overview"
+  | "access"
+  | "sign-in"
+  | "activity"
+  | "downloads"
+  | "preferences";
 
 export const USER_DETAIL_TABS: readonly UserDetailTab[] = [
   "overview",
   "access",
+  "sign-in",
   "activity",
   "downloads",
   "preferences",

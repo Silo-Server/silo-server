@@ -30,6 +30,7 @@ var (
 	ErrDeviceLoginPurpose    = errors.New("device login purpose mismatch")
 	ErrDeviceLoginConflict   = errors.New("device login already approved by another identity")
 	ErrDeviceLoginNoProfile  = errors.New("device login profile not found")
+	ErrDeviceLoginCanceled   = errors.New("device login request canceled by the device")
 )
 
 const (
@@ -37,21 +38,35 @@ const (
 	DeviceLoginStatusApproved = "approved"
 	DeviceLoginStatusDenied   = "denied"
 	DeviceLoginStatusConsumed = "consumed"
+	DeviceLoginStatusCanceled = "canceled"
+	DeviceLoginStatusExpired  = "expired"
 	DeviceLoginPurposeLogin   = "device_login"
 	DeviceLoginPurposeRemote  = "remote_playback"
 
-	deviceLoginTTL           = 10 * time.Minute
+	deviceLoginTTL           = 15 * time.Minute
+	legacyDeviceLoginTTL     = 10 * time.Minute
 	deviceLoginPollInterval  = 3 * time.Second
 	remotePlaybackSessionTTL = 24 * time.Hour
 	deviceCodeBytes          = 32
 	browserCodeBytes         = 32
 	userCodeLength           = 8
+	userCodeAttempts         = 5
 	maxDeviceNameLen         = 120
 	maxDevicePlatformLen     = 80
 	maxUserAgentLen          = 256
+
+	// An approver lookup holds a pending code at least this long, so the
+	// device doesn't replace it while someone is approving it...
+	deviceLoginOpenedHold = 5 * time.Minute
+	// ...but never past this age, so repeated lookups can't keep a code
+	// alive indefinitely.
+	deviceLoginMaxLifetime = 30 * time.Minute
 )
 
-var deviceCodeAlphabet = []byte("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
+// User codes are digits: they are typed on phone keypads and read aloud.
+// They are unique only among this server's requests; a code means nothing
+// without the server that issued it.
+var deviceCodeAlphabet = []byte("0123456789")
 
 type DeviceLoginStartInput struct {
 	DeviceName     string
@@ -61,6 +76,10 @@ type DeviceLoginStartInput struct {
 	BaseURL        string
 	ClientPurpose  string
 	Temporary      bool
+	// Legacy keeps the frozen /api/v1 start answer: a 10-minute request
+	// whose link carries the browser code (?token=) rather than the user
+	// code. The user code is digits either way.
+	Legacy bool
 }
 
 type DeviceLoginStartResult struct {
@@ -81,6 +100,10 @@ type DeviceLoginStartResult struct {
 type DeviceLoginLookupInput struct {
 	BrowserCode string
 	UserCode    string
+	// MarkOpened lets a lookup of a pending request record opened_at and
+	// hold its code (v2 getDeviceLogin). The frozen v1 lookup leaves the row
+	// untouched. Only Lookup reads it.
+	MarkOpened bool
 }
 
 type DeviceLoginInfo struct {
@@ -91,13 +114,21 @@ type DeviceLoginInfo struct {
 	DevicePlatform string
 	IPAddressHint  string
 	ExpiresAt      time.Time
-	ClientPurpose  string
-	Temporary      bool
+	// RequestedAt is when the device opened the request.
+	RequestedAt   time.Time
+	ClientPurpose string
+	Temporary     bool
 }
 
 type DeviceLoginPollResult struct {
-	Status           string
-	PollAfter        int
+	Status    string
+	PollAfter int
+	// Opened reports that an approver has looked the pending request up, so
+	// the device can say "continue on your phone" and keep its code.
+	Opened bool
+	// ExpiresAt is the pending request's current expiry, which approver
+	// lookups can move later than the start answer said. Zero otherwise.
+	ExpiresAt        time.Time
 	TokenPair        *TokenPair
 	User             *models.User
 	ProfileID        string
@@ -126,8 +157,15 @@ type deviceLoginRecord struct {
 	ApprovedAt         *time.Time
 	DeniedAt           *time.Time
 	ConsumedAt         *time.Time
+	OpenedAt           *time.Time
+	CanceledAt         *time.Time
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+	// ApprovedIdentityID and ApprovedProviderSince are the provider chain of
+	// the session that approved the request, which the device's session
+	// continues.
+	ApprovedIdentityID    *int64
+	ApprovedProviderSince *time.Time
 }
 
 type DeviceLoginService struct {
@@ -137,14 +175,17 @@ type DeviceLoginService struct {
 	sessions *SessionRepository
 	stores   userstore.UserStoreProvider
 	profiles *access.ProfileTokenService
+	// newUserCode draws a user code; tests replace it to force a collision.
+	newUserCode func() (string, error)
 }
 
 const deviceLoginSelectColumns = `
 	SELECT id, device_code_hash, browser_code_hash, user_code_hash, match_code,
-		device_name, device_platform, host(ip_address) AS ip_address, requested_user_agent,
+		device_name, device_platform, COALESCE(host(ip_address), '') AS ip_address, requested_user_agent,
 		status, approved_by_user_id, approved_profile_id, auth_session_id,
 		client_purpose, temporary, expires_at, approved_at,
-		denied_at, consumed_at, created_at, updated_at
+		denied_at, consumed_at, opened_at, canceled_at, created_at, updated_at,
+		approved_identity_id, approved_provider_since
 	FROM device_login_requests
 `
 
@@ -160,12 +201,13 @@ func NewDeviceLoginService(
 		return nil
 	}
 	return &DeviceLoginService{
-		pool:     pool,
-		users:    users,
-		jwt:      jwt,
-		sessions: sessions,
-		stores:   stores,
-		profiles: profiles,
+		pool:        pool,
+		users:       users,
+		jwt:         jwt,
+		sessions:    sessions,
+		stores:      stores,
+		profiles:    profiles,
+		newUserCode: randomUserCode,
 	}
 }
 
@@ -174,56 +216,78 @@ func (s *DeviceLoginService) Start(ctx context.Context, input DeviceLoginStartIn
 	if err != nil {
 		return nil, err
 	}
-	deviceCode, err := randomToken(deviceCodeBytes)
-	if err != nil {
-		return nil, fmt.Errorf("generate device code: %w", err)
+	// Eight digits leave room for collisions, and user_code_hash is unique
+	// across every stored request, so a clash draws fresh codes.
+	var (
+		deviceCode, userCode, matchCode string
+		record                          deviceLoginRecord
+	)
+	ttl := deviceLoginTTL
+	if input.Legacy {
+		ttl = legacyDeviceLoginTTL
 	}
-	browserCode, err := randomToken(browserCodeBytes)
-	if err != nil {
-		return nil, fmt.Errorf("generate browser code: %w", err)
-	}
-	userCode, err := randomUserCode()
-	if err != nil {
-		return nil, fmt.Errorf("generate user code: %w", err)
-	}
-	matchCode, err := randomMatchCode()
-	if err != nil {
-		return nil, fmt.Errorf("generate match code: %w", err)
+	var browserCode string
+	for attempt := 1; ; attempt++ {
+		deviceCode, err = randomToken(deviceCodeBytes)
+		if err != nil {
+			return nil, fmt.Errorf("generate device code: %w", err)
+		}
+		// Only the frozen v1 link still carries the browser code; lookups by
+		// it keep working for those links and for links issued before user
+		// codes moved into the URL.
+		browserCode, err = randomToken(browserCodeBytes)
+		if err != nil {
+			return nil, fmt.Errorf("generate browser code: %w", err)
+		}
+		userCode, err = s.newUserCode()
+		if err != nil {
+			return nil, fmt.Errorf("generate user code: %w", err)
+		}
+		matchCode, err = randomMatchCode()
+		if err != nil {
+			return nil, fmt.Errorf("generate match code: %w", err)
+		}
+
+		now := time.Now().UTC()
+		record = deviceLoginRecord{
+			ID:                 uuid.New().String(),
+			DeviceCodeHash:     hashDeviceLoginSecret(deviceCode),
+			BrowserCodeHash:    hashDeviceLoginSecret(browserCode),
+			UserCodeHash:       hashDeviceLoginSecret(normalizeUserCode(userCode)),
+			MatchCode:          matchCode,
+			DeviceName:         fallbackDeviceName(input.DeviceName, input.UserAgent),
+			DevicePlatform:     trimDeviceField(input.DevicePlatform, maxDevicePlatformLen),
+			IPAddress:          trimDeviceField(input.IPAddress, 64),
+			RequestedUserAgent: trimDeviceField(input.UserAgent, maxUserAgentLen),
+			Status:             DeviceLoginStatusPending,
+			ClientPurpose:      purpose,
+			Temporary:          temporary,
+			ExpiresAt:          now.Add(ttl),
+			CreatedAt:          now,
+			UpdatedAt:          now,
+		}
+		err = s.create(ctx, record)
+		if err == nil {
+			break
+		}
+		if !isDuplicateKeyError(err) || attempt >= userCodeAttempts {
+			return nil, err
+		}
 	}
 
-	now := time.Now().UTC()
-	record := deviceLoginRecord{
-		ID:                 uuid.New().String(),
-		DeviceCodeHash:     hashDeviceLoginSecret(deviceCode),
-		BrowserCodeHash:    hashDeviceLoginSecret(browserCode),
-		UserCodeHash:       hashDeviceLoginSecret(normalizeUserCode(userCode)),
-		MatchCode:          matchCode,
-		DeviceName:         fallbackDeviceName(input.DeviceName, input.UserAgent),
-		DevicePlatform:     trimDeviceField(input.DevicePlatform, maxDevicePlatformLen),
-		IPAddress:          trimDeviceField(input.IPAddress, 64),
-		RequestedUserAgent: trimDeviceField(input.UserAgent, maxUserAgentLen),
-		Status:             DeviceLoginStatusPending,
-		ClientPurpose:      purpose,
-		Temporary:          temporary,
-		ExpiresAt:          now.Add(deviceLoginTTL),
-		CreatedAt:          now,
-		UpdatedAt:          now,
+	verificationURI := strings.TrimRight(strings.TrimSpace(input.BaseURL), "/") + "/activate"
+	complete := verificationURI + "?code=" + normalizeUserCode(userCode)
+	if input.Legacy {
+		complete = verificationURI + "?token=" + browserCode
 	}
-
-	if err := s.create(ctx, record); err != nil {
-		return nil, err
-	}
-
-	baseURL := strings.TrimRight(strings.TrimSpace(input.BaseURL), "/")
-	verificationURI := baseURL + "/activate"
 	return &DeviceLoginStartResult{
 		DeviceCode:              deviceCode,
 		UserCode:                userCode,
 		MatchCode:               matchCode,
 		VerificationURI:         verificationURI,
-		VerificationURIComplete: verificationURI + "?token=" + browserCode,
+		VerificationURIComplete: complete,
 		ExpiresAt:               record.ExpiresAt,
-		ExpiresIn:               int(deviceLoginTTL.Seconds()),
+		ExpiresIn:               int(ttl.Seconds()),
 		Interval:                int(deviceLoginPollInterval.Seconds()),
 		DeviceName:              record.DeviceName,
 		DevicePlatform:          record.DevicePlatform,
@@ -240,16 +304,23 @@ func (s *DeviceLoginService) Lookup(ctx context.Context, input DeviceLoginLookup
 
 	if isDeviceLoginExpired(record) {
 		return &DeviceLoginInfo{
-			Status:         "expired",
+			Status:         DeviceLoginStatusExpired,
 			UserCode:       userCode,
 			MatchCode:      record.MatchCode,
 			DeviceName:     record.DeviceName,
 			DevicePlatform: record.DevicePlatform,
 			IPAddressHint:  maskDeviceIPAddress(record.IPAddress),
 			ExpiresAt:      record.ExpiresAt,
+			RequestedAt:    record.CreatedAt,
 			ClientPurpose:  record.ClientPurpose,
 			Temporary:      record.Temporary,
 		}, nil
+	}
+
+	if input.MarkOpened && record.Status == DeviceLoginStatusPending {
+		if err := s.markOpened(ctx, record); err != nil {
+			return nil, err
+		}
 	}
 
 	return &DeviceLoginInfo{
@@ -260,6 +331,7 @@ func (s *DeviceLoginService) Lookup(ctx context.Context, input DeviceLoginLookup
 		DevicePlatform: record.DevicePlatform,
 		IPAddressHint:  maskDeviceIPAddress(record.IPAddress),
 		ExpiresAt:      record.ExpiresAt,
+		RequestedAt:    record.CreatedAt,
 		ClientPurpose:  record.ClientPurpose,
 		Temporary:      record.Temporary,
 	}, nil
@@ -288,12 +360,19 @@ func (s *DeviceLoginService) Approve(ctx context.Context, input DeviceLoginLooku
 		return ErrDeviceLoginConflict
 	}
 
+	chain, err := s.approvingProviderChain(ctx, approverUserID)
+	if err != nil {
+		return err
+	}
+
 	now := time.Now().UTC()
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE device_login_requests
 		SET status = $2,
 			approved_by_user_id = $3,
 			approved_at = $4,
+			approved_identity_id = $7,
+			approved_provider_since = $8,
 			denied_at = NULL,
 			updated_at = $4
 		WHERE id = $1
@@ -308,6 +387,8 @@ func (s *DeviceLoginService) Approve(ctx context.Context, input DeviceLoginLooku
 		now,
 		DeviceLoginStatusPending,
 		DeviceLoginPurposeLogin,
+		chain.identityID,
+		chain.providerSince,
 	)
 	if err != nil {
 		return fmt.Errorf("approve device login: %w", err)
@@ -352,6 +433,11 @@ func (s *DeviceLoginService) ApproveRemotePlayback(
 		return ErrDeviceLoginConflict
 	}
 
+	chain, err := s.approvingProviderChain(ctx, approverUserID)
+	if err != nil {
+		return err
+	}
+
 	now := time.Now().UTC()
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE device_login_requests
@@ -359,6 +445,8 @@ func (s *DeviceLoginService) ApproveRemotePlayback(
 			approved_by_user_id = $3,
 			approved_profile_id = $4,
 			approved_at = $5,
+			approved_identity_id = $8,
+			approved_provider_since = $9,
 			denied_at = NULL,
 			updated_at = $5
 		WHERE id = $1
@@ -374,6 +462,8 @@ func (s *DeviceLoginService) ApproveRemotePlayback(
 		now,
 		DeviceLoginStatusPending,
 		DeviceLoginPurposeRemote,
+		chain.identityID,
+		chain.providerSince,
 	)
 	if err != nil {
 		return fmt.Errorf("approve remote playback login: %w", err)
@@ -382,6 +472,92 @@ func (s *DeviceLoginService) ApproveRemotePlayback(
 		return s.reloadApprovalState(ctx, record.ID, approverUserID, profileID)
 	}
 	return nil
+}
+
+// approvingProviderChain returns the provider chain of the approving login
+// session, so a device approved from a session opened through an external
+// provider gets a session the provider re-check covers too.
+func (s *DeviceLoginService) approvingProviderChain(ctx context.Context, approverUserID int) (sessionProviderChain, error) {
+	var approvingSessionID string
+	if claims := ClaimsFromContext(ctx); claims != nil && claims.UserID == approverUserID && claims.TokenType != TokenTypeAPIKey {
+		approvingSessionID = claims.SessionID
+	}
+	return sessionProviderChainOf(ctx, s.pool, approvingSessionID, approverUserID)
+}
+
+// markOpened records the first approver lookup of a pending request and
+// holds its code for at least deviceLoginOpenedHold, capped at
+// deviceLoginMaxLifetime after creation. It updates record in place.
+func (s *DeviceLoginService) markOpened(ctx context.Context, record *deviceLoginRecord) error {
+	var expiresAt time.Time
+	var openedAt *time.Time
+	err := s.pool.QueryRow(ctx, `
+		UPDATE device_login_requests
+		SET opened_at = COALESCE(opened_at, NOW()),
+			expires_at = GREATEST(expires_at, LEAST(NOW() + make_interval(secs => $2), created_at + make_interval(secs => $3))),
+			updated_at = NOW()
+		WHERE id = $1
+			AND status = $4
+			AND expires_at > NOW()
+		RETURNING expires_at, opened_at
+	`,
+		record.ID,
+		deviceLoginOpenedHold.Seconds(),
+		deviceLoginMaxLifetime.Seconds(),
+		DeviceLoginStatusPending,
+	).Scan(&expiresAt, &openedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Decided, canceled or expired since it was read: report it as read.
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("mark device login opened: %w", err)
+	}
+	record.ExpiresAt = expiresAt
+	record.OpenedAt = openedAt
+	return nil
+}
+
+// Cancel withdraws the device's own request, identified by its device code.
+// A live pending or approved (not yet collected) request becomes canceled,
+// so its code can no longer be approved or collected; any other request is
+// left as it is. It returns the request's status afterwards: canceled,
+// denied, consumed or expired.
+func (s *DeviceLoginService) Cancel(ctx context.Context, deviceCode string) (string, error) {
+	hash := hashDeviceLoginSecret(strings.TrimSpace(deviceCode))
+	var status string
+	err := s.pool.QueryRow(ctx, `
+		UPDATE device_login_requests
+		SET status = $2,
+			canceled_at = NOW(),
+			updated_at = NOW()
+		WHERE device_code_hash = $1
+			AND status IN ($3, $4)
+			AND expires_at > NOW()
+		RETURNING status
+	`,
+		hash,
+		DeviceLoginStatusCanceled,
+		DeviceLoginStatusPending,
+		DeviceLoginStatusApproved,
+	).Scan(&status)
+	if err == nil {
+		return status, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return "", fmt.Errorf("cancel device login: %w", err)
+	}
+	row := s.pool.QueryRow(ctx, deviceLoginSelectColumns+`
+		WHERE device_code_hash = $1
+	`, hash)
+	record, err := scanDeviceLogin(row)
+	if err != nil {
+		return "", err
+	}
+	if isDeviceLoginExpired(record) {
+		return DeviceLoginStatusExpired, nil
+	}
+	return record.Status, nil
 }
 
 func (s *DeviceLoginService) Deny(ctx context.Context, input DeviceLoginLookupInput) error {
@@ -395,6 +571,9 @@ func (s *DeviceLoginService) Deny(ctx context.Context, input DeviceLoginLookupIn
 	if record.Status == DeviceLoginStatusConsumed {
 		return ErrDeviceLoginConsumed
 	}
+	if record.Status == DeviceLoginStatusCanceled {
+		return ErrDeviceLoginCanceled
+	}
 	if record.Status == DeviceLoginStatusDenied {
 		return nil
 	}
@@ -405,6 +584,8 @@ func (s *DeviceLoginService) Deny(ctx context.Context, input DeviceLoginLookupIn
 		SET status = $2,
 			approved_by_user_id = NULL,
 			approved_profile_id = NULL,
+			approved_identity_id = NULL,
+			approved_provider_since = NULL,
 			approved_at = NULL,
 			denied_at = $3,
 			updated_at = $3
@@ -441,7 +622,7 @@ func (s *DeviceLoginService) Poll(ctx context.Context, deviceCode string) (*Devi
 
 	if isDeviceLoginExpired(record) {
 		return &DeviceLoginPollResult{
-			Status:    "expired",
+			Status:    DeviceLoginStatusExpired,
 			PollAfter: int(deviceLoginPollInterval.Seconds()),
 		}, nil
 	}
@@ -450,6 +631,13 @@ func (s *DeviceLoginService) Poll(ctx context.Context, deviceCode string) (*Devi
 	case DeviceLoginStatusPending:
 		return &DeviceLoginPollResult{
 			Status:    DeviceLoginStatusPending,
+			PollAfter: int(deviceLoginPollInterval.Seconds()),
+			Opened:    record.OpenedAt != nil,
+			ExpiresAt: record.ExpiresAt,
+		}, nil
+	case DeviceLoginStatusCanceled:
+		return &DeviceLoginPollResult{
+			Status:    DeviceLoginStatusCanceled,
 			PollAfter: int(deviceLoginPollInterval.Seconds()),
 		}, nil
 	case DeviceLoginStatusDenied:
@@ -505,6 +693,11 @@ func (s *DeviceLoginService) Poll(ctx context.Context, deviceCode string) (*Devi
 		DeviceName: record.DeviceName,
 		IPAddress:  record.IPAddress,
 		ExpiresAt:  sessionExpiresAt,
+		// The device continues the approving session's provider chain, so a
+		// provider that cannot re-check it ends the device's session when it
+		// would have ended the approver's.
+		IdentityID:    record.ApprovedIdentityID,
+		ProviderSince: record.ApprovedProviderSince,
 	}
 	if err := s.sessions.createWithQuerier(ctx, tx, session); err != nil {
 		return nil, err
@@ -686,6 +879,8 @@ func (s *DeviceLoginService) reloadApprovalState(
 		return ErrDeviceLoginConsumed
 	case DeviceLoginStatusDenied:
 		return ErrDeviceLoginDenied
+	case DeviceLoginStatusCanceled:
+		return ErrDeviceLoginCanceled
 	case DeviceLoginStatusApproved:
 		if sameApprovedIdentity(record, approverUserID, profileID) {
 			return nil
@@ -709,6 +904,8 @@ func (s *DeviceLoginService) reloadDenyState(ctx context.Context, recordID strin
 		return ErrDeviceLoginConsumed
 	case DeviceLoginStatusDenied:
 		return nil
+	case DeviceLoginStatusCanceled:
+		return ErrDeviceLoginCanceled
 	default:
 		return ErrDeviceLoginConflict
 	}
@@ -759,6 +956,8 @@ func validateDeviceLoginDecision(record *deviceLoginRecord) error {
 		return ErrDeviceLoginConsumed
 	case DeviceLoginStatusDenied:
 		return ErrDeviceLoginDenied
+	case DeviceLoginStatusCanceled:
+		return ErrDeviceLoginCanceled
 	case DeviceLoginStatusPending, DeviceLoginStatusApproved:
 		return nil
 	default:
@@ -819,8 +1018,12 @@ func scanDeviceLogin(row pgx.Row) (*deviceLoginRecord, error) {
 		&record.ApprovedAt,
 		&record.DeniedAt,
 		&record.ConsumedAt,
+		&record.OpenedAt,
+		&record.CanceledAt,
 		&record.CreatedAt,
 		&record.UpdatedAt,
+		&record.ApprovedIdentityID,
+		&record.ApprovedProviderSince,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrDeviceLoginNotFound
@@ -889,13 +1092,24 @@ func randomToken(size int) (string, error) {
 }
 
 func randomUserCode() (string, error) {
+	// Rejection sampling keeps every digit equally likely: bytes at or above
+	// the largest multiple of the alphabet size are drawn again.
+	limit := 256 - 256%len(deviceCodeAlphabet)
+	code := make([]byte, 0, userCodeLength)
 	buf := make([]byte, userCodeLength)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	code := make([]byte, userCodeLength)
-	for i, b := range buf {
-		code[i] = deviceCodeAlphabet[int(b)%len(deviceCodeAlphabet)]
+	for len(code) < userCodeLength {
+		if _, err := rand.Read(buf); err != nil {
+			return "", err
+		}
+		for _, b := range buf {
+			if int(b) >= limit {
+				continue
+			}
+			code = append(code, deviceCodeAlphabet[int(b)%len(deviceCodeAlphabet)])
+			if len(code) == userCodeLength {
+				break
+			}
+		}
 	}
 	return formatUserCode(string(code)), nil
 }
@@ -913,4 +1127,34 @@ func formatUserCode(value string) string {
 		return value
 	}
 	return value[:4] + "-" + value[4:]
+}
+
+// deviceLoginRetention is how long a request is kept after it expires, so a
+// lookup of a recently expired code still says expired rather than unknown.
+const deviceLoginRetention = 24 * time.Hour
+
+// DeviceLoginRetention deletes device sign-in requests long past their
+// expiry. Nothing else removes them, and user codes are unique across every
+// stored request, so without it the eight-digit code space slowly fills.
+type DeviceLoginRetention struct {
+	pool *pgxpool.Pool
+}
+
+// NewDeviceLoginRetention returns the retention step for device sign-in
+// requests.
+func NewDeviceLoginRetention(pool *pgxpool.Pool) *DeviceLoginRetention {
+	return &DeviceLoginRetention{pool: pool}
+}
+
+// DeleteExpired removes requests that expired more than a day ago, whatever
+// their status.
+func (r *DeviceLoginRetention) DeleteExpired(ctx context.Context) (int, error) {
+	tag, err := r.pool.Exec(ctx, `
+		DELETE FROM device_login_requests
+		WHERE expires_at < NOW() - make_interval(secs => $1)
+	`, deviceLoginRetention.Seconds())
+	if err != nil {
+		return 0, fmt.Errorf("deleting expired device sign-in requests: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
 }

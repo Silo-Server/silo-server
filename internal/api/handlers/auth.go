@@ -234,6 +234,9 @@ func (h *AuthHandler) Login(ctx context.Context, in LoginInput) (TokenPairView, 
 		if errors.Is(err, auth.ErrUserDisabled) {
 			return TokenPairView{}, apiError(http.StatusForbidden, "user_disabled", "User account is disabled")
 		}
+		if apiErr := externalSignInError(err); apiErr != nil {
+			return TokenPairView{}, apiErr
+		}
 		return TokenPairView{}, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
 	}
 	return TokenPairView{
@@ -242,6 +245,29 @@ func (h *AuthHandler) Login(ctx context.Context, in LoginInput) (TokenPairView, 
 		ExpiresIn:    pair.ExpiresIn,
 		User:         buildUserResponse(user, effectiveDownloadAllowed(ctx, user, h.accessGroups), nil, nil),
 	}, nil
+}
+
+// externalSignInError maps the refusals of the local-password policy and of
+// external sign-in (docs/architecture/external-sign-in.md) to their codes,
+// or returns nil for any other error.
+func externalSignInError(err error) *APIError {
+	switch {
+	case errors.Is(err, auth.ErrLocalLoginDisabled):
+		return apiError(http.StatusForbidden, "local_login_disabled", "Password sign-in is turned off on this server; sign in with the server's sign-in provider")
+	case errors.Is(err, auth.ErrNotPermitted):
+		// ErrAccountRequired is one too: v1 keeps answering not_permitted,
+		// and the cause lets the v2 login answer account_required.
+		return apiError(http.StatusForbidden, "not_permitted", "This account is not permitted to sign in to this server").WithCause(err)
+	case errors.Is(err, auth.ErrEmailInUse):
+		return apiError(http.StatusConflict, "email_in_use", "An account with this email already exists. Ask an admin to connect it")
+	case errors.Is(err, auth.ErrIdentityLinkedElsewhere):
+		return apiError(http.StatusConflict, "identity_linked_elsewhere", "This sign-in is already connected to another account")
+	case errors.Is(err, auth.ErrProviderPasswordExpired):
+		return apiError(http.StatusForbidden, "password_expired", "The password has expired; change it with the sign-in provider first")
+	case errors.Is(err, auth.ErrProviderUnavailable):
+		return apiError(http.StatusServiceUnavailable, "provider_unavailable", "The sign-in provider is unavailable; try again later")
+	}
+	return nil
 }
 
 // Logout revokes the caller's login session. v1 POST /auth/logout and v2

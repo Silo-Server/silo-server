@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"time"
 	"unicode/utf8"
@@ -44,6 +45,8 @@ type TokenPair struct {
 	AccessToken  string
 	RefreshToken string
 	ExpiresIn    int // seconds until access token expires
+	// SessionID is the login session the pair authenticates.
+	SessionID string
 }
 
 // SettingsGetter retrieves server settings by key.
@@ -74,11 +77,28 @@ type Service struct {
 	users       *UserRepository
 	inviteCodes *InviteCodeRepository
 	settings    SettingsGetter
-	providers   map[string]AuthProvider
-	metadata    map[string]LoginProviderInfo
-	defaultID   string
-	accounts    *AccountProvisioner
+	// providers are registered once at start (the built-in local provider,
+	// test doubles); pluginSource supplies the auth-plugin providers, which
+	// change without a restart.
+	providers    map[string]AuthProvider
+	metadata     map[string]LoginProviderInfo
+	order        []string
+	pluginSource PluginProviderSource
+	accounts     *AccountProvisioner
+	// recheck re-checks sessions opened through an external provider at
+	// refresh; nil skips it.
+	recheck *ProviderRecheck
 }
+
+// PluginProviderSource supplies the current auth-plugin providers. The
+// registry rebuilds its list when bindings, plugin configuration or
+// installations change, on every node.
+type PluginProviderSource interface {
+	Providers() []RegisteredProvider
+}
+
+// LocalProviderID is the id of the built-in username/password provider.
+const LocalProviderID = "local"
 
 type LoginProviderInfo struct {
 	ID          string `json:"id"`
@@ -121,7 +141,7 @@ func NewService(
 	}
 	if provider != nil {
 		service.RegisterProvider(LoginProviderInfo{
-			ID:          "local",
+			ID:          LocalProviderID,
 			DisplayName: "Local",
 			Mode:        "credentials",
 			Default:     true,
@@ -133,15 +153,33 @@ func NewService(
 // Login authenticates the user with the given credentials and creates a new
 // session. Returns a TokenPair containing the access and refresh tokens.
 func (s *Service) Login(ctx context.Context, username, password, deviceName, ip string) (*TokenPair, *models.User, error) {
-	return s.loginWithProvider(ctx, "local", username, password, deviceName, ip, false)
+	return s.loginWithProvider(ctx, LocalProviderID, username, password, deviceName, ip, false)
 }
 
 // CompatLogin is Login for sign-in surfaces that cannot run the forced
 // password change (Jellyfin and Audiobookshelf compatibility). An account
 // holding a temporary password gets ErrPasswordChangeRequired and no session:
 // its holder must sign in to Silo and choose a new password first.
+//
+// Compatibility clients cannot pick a provider, so the name is routed like
+// a login without a provider (see routePasswordLogin): directory users of a
+// credentials plugin sign in with their directory password.
 func (s *Service) CompatLogin(ctx context.Context, username, password, deviceName, ip string) (*TokenPair, *models.User, error) {
-	return s.loginWithProvider(ctx, "local", username, password, deviceName, ip, true)
+	providerID, err := s.routePasswordLogin(ctx, username)
+	if err != nil {
+		return nil, nil, err
+	}
+	return s.loginWithProvider(ctx, providerID, username, password, deviceName, ip, true)
+}
+
+// PasswordRoutesLocally reports whether a password sign-in of username
+// without a provider is checked by the local provider (see
+// routePasswordLogin). A compatibility surface that may retry with a
+// different password uses it to keep retries away from a directory, where
+// each failed bind counts toward the account's lockout.
+func (s *Service) PasswordRoutesLocally(ctx context.Context, username string) (bool, error) {
+	providerID, err := s.routePasswordLogin(ctx, username)
+	return providerID == LocalProviderID, err
 }
 
 func (s *Service) LoginWithProvider(
@@ -153,9 +191,45 @@ func (s *Service) LoginWithProvider(
 	ip string,
 ) (*TokenPair, *models.User, error) {
 	if providerID == "" {
-		providerID = s.defaultID
+		routed, err := s.routePasswordLogin(ctx, username)
+		if err != nil {
+			return nil, nil, err
+		}
+		providerID = routed
 	}
 	return s.loginWithProvider(ctx, providerID, username, password, deviceName, ip, false)
+}
+
+// routePasswordLogin picks the provider for a password sign-in that named
+// none. An account with local password sign-in signs in locally only, even
+// while the server turns local sign-in off, so a local password is never
+// sent to a directory. Any other name goes to the enabled credentials plugin
+// (LDAP), which may link or create the account; without one it is local.
+func (s *Service) routePasswordLogin(ctx context.Context, username string) (string, error) {
+	directory := ""
+	for _, registered := range s.pluginProviders() {
+		if registered.Info.Mode == ProviderModeCredentials {
+			directory = registered.Info.ID
+			break
+		}
+	}
+	if directory == "" || s.users == nil {
+		return LocalProviderID, nil
+	}
+	user, err := LookupLogin(ctx, s.users, username)
+	if err != nil {
+		if IsNotFound(err) {
+			return directory, nil
+		}
+		return "", fmt.Errorf("looking up user: %w", err)
+	}
+	if user.LocalPasswordLoginEnabled {
+		// Whatever the server-wide switch says: with it off the local
+		// provider refuses with local_login_disabled, but the password never
+		// reaches the directory.
+		return LocalProviderID, nil
+	}
+	return directory, nil
 }
 
 func (s *Service) RegisterProvider(info LoginProviderInfo, provider AuthProvider) {
@@ -169,94 +243,248 @@ func (s *Service) RegisterProvider(info LoginProviderInfo, provider AuthProvider
 		info.Mode = "credentials"
 	}
 
+	if _, exists := s.providers[info.ID]; !exists {
+		s.order = append(s.order, info.ID)
+	}
 	s.providers[info.ID] = provider
 	s.metadata[info.ID] = info
-	if s.defaultID == "" || info.Default {
-		s.defaultID = info.ID
+}
+
+// SetProviderRecheck makes Refresh re-check sessions opened through an
+// external sign-in provider with that provider.
+func (s *Service) SetProviderRecheck(r *ProviderRecheck) {
+	s.recheck = r
+}
+
+// SetPluginProviderSource makes the auth-plugin providers of src available
+// to sign-in, discovery and the OAuth handshake.
+func (s *Service) SetPluginProviderSource(src PluginProviderSource) {
+	s.pluginSource = src
+}
+
+func (s *Service) pluginProviders() []RegisteredProvider {
+	if s.pluginSource == nil {
+		return nil
 	}
+	return s.pluginSource.Providers()
+}
+
+// registeredProviders lists the static providers in registration order,
+// then the plugin providers. The default is the last one marked default,
+// else the first.
+func (s *Service) registeredProviders() ([]RegisteredProvider, string) {
+	all := make([]RegisteredProvider, 0, len(s.order))
+	for _, id := range s.order {
+		all = append(all, RegisteredProvider{Info: s.metadata[id], Provider: s.providers[id]})
+	}
+	for _, registered := range s.pluginProviders() {
+		if registered.Provider == nil || registered.Info.ID == "" {
+			continue
+		}
+		if _, static := s.providers[registered.Info.ID]; static {
+			continue
+		}
+		all = append(all, registered)
+	}
+	defaultID := ""
+	for _, registered := range all {
+		if defaultID == "" || registered.Info.Default {
+			defaultID = registered.Info.ID
+		}
+	}
+	return all, defaultID
+}
+
+func (s *Service) providerByID(id string) AuthProvider {
+	if provider := s.providers[id]; provider != nil {
+		return provider
+	}
+	for _, registered := range s.pluginProviders() {
+		if registered.Info.ID == id {
+			return registered.Provider
+		}
+	}
+	return nil
 }
 
 // FindOAuthInstallation returns the PluginProvider registered for the given
-// plugin installation, if it is an OAuth-capable provider. nil if no match.
+// plugin installation when it is an OAuth provider; nil otherwise. Only
+// OAuth providers take part in the /oauth routes and link tickets: a
+// credentials (LDAP) installation is not found there.
 func (s *Service) FindOAuthInstallation(installationID int) *PluginProvider {
 	if installationID <= 0 {
 		return nil
 	}
-	for _, p := range s.providers {
-		pp, ok := p.(*PluginProvider)
-		if !ok || pp == nil {
+	all, _ := s.registeredProviders()
+	for _, registered := range all {
+		pp, ok := registered.Provider.(*PluginProvider)
+		if !ok || pp == nil || pp.InstallationID() != installationID || registered.Info.Mode != ProviderModeOAuth {
 			continue
 		}
-		if pp.InstallationID() != installationID {
-			continue
-		}
-		// Only OAuth-capable installs participate in /oauth/... routes. The
-		// caller (OAuthHandler.ResolveClient) checks Mode metadata; here we
-		// simply scope to PluginProvider instances bound to this install.
 		return pp
 	}
 	return nil
 }
 
-// CompleteOAuthLogin runs the post-ExchangeCode half of login: the handler
+// ResolveOAuthLogin runs the account half of an OAuth sign-in: the handler
 // has already called the plugin's ExchangeCode RPC and is passing the
-// AuthenticateResponse back. Service finds the matching PluginProvider,
-// looks up or auto-provisions the user, creates a session, and mints
-// access/refresh tokens.
-func (s *Service) CompleteOAuthLogin(ctx context.Context, in OAuthLoginInput) (*TokenPair, *models.User, error) {
+// AuthenticateResponse back. Service finds the matching PluginProvider and
+// looks up or auto-provisions the account. It opens no session: the
+// completion code does when it is redeemed (OpenOAuthSession).
+func (s *Service) ResolveOAuthLogin(ctx context.Context, in OAuthLoginInput) (*models.User, int64, error) {
 	provider := s.FindOAuthInstallation(in.InstallationID)
 	if provider == nil {
-		return nil, nil, ErrInvalidCredentials
+		return nil, 0, ErrInvalidCredentials
 	}
-	user, err := provider.CompleteOAuth(ctx, in.Response)
-	if err != nil {
-		return nil, nil, err
-	}
-	// Linking flow (sess.LinkingUserID > 0): we already provisioned/identified
-	// `user` via the plugin identity. If the caller asked to link onto a
-	// different existing user, future work will need to:
-	//   - reject if the identity is already linked elsewhere (409)
-	//   - otherwise upsert plugin_auth_identities to point at LinkingUserID
-	// For v1 the OAuth handler always passes 0; the v1 PR doesn't add the
-	// /me/account "Link account" SPA UI. Leaving as a TODO.
-	_ = in.LinkingUserID
+	// A linking flow (LinkingUserID > 0) links the identity to that account
+	// or refuses one linked elsewhere; see AccountResolver.
+	return provider.CompleteOAuth(ctx, in.Response, in.LinkingUserID)
+}
 
+// OpenOAuthSession opens the login session of a completion code being
+// redeemed, on db (nil: the pool), and mints its token pair. The account is
+// read again, so one disabled since the callback is refused.
+func (s *Service) OpenOAuthSession(ctx context.Context, db OAuthSessionDB, c OAuthCompletion) (*TokenPair, error) {
+	var (
+		user *models.User
+		err  error
+		exec sessionExecQuerier = s.sessions.pool
+	)
+	if db != nil {
+		user, err = userByID(ctx, db, c.UserID)
+		exec = db
+	} else {
+		user, err = s.users.GetByID(ctx, c.UserID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load oauth account: %w", err)
+	}
+	if !user.Enabled {
+		return nil, ErrUserDisabled
+	}
 	sessionID := uuid.New().String()
 	session := models.AuthSession{
 		ID:         sessionID,
 		UserID:     user.ID,
-		DeviceName: in.DeviceName,
-		IPAddress:  in.IP,
+		DeviceName: c.DeviceName,
+		IPAddress:  c.IP,
 		ExpiresAt:  time.Now().Add(s.jwt.RefreshExpiry()),
+		IdentityID: identityRef(c.IdentityID),
 	}
-	if err := s.sessions.Create(ctx, session); err != nil {
-		return nil, nil, fmt.Errorf("creating session: %w", err)
+	if err := s.sessions.createWithQuerier(ctx, exec, session); err != nil {
+		return nil, fmt.Errorf("creating session: %w", err)
 	}
-	pair, err := s.generateTokenPair(Claims{
+	return s.generateTokenPair(Claims{
 		UserID:                 user.ID,
 		Role:                   user.Role,
 		SessionID:              sessionID,
 		PasswordChangeRequired: user.PasswordChangeRequired,
 	})
-	if err != nil {
-		return nil, nil, err
+}
+
+// LinkOAuthIdentity finishes a linking flow: the identity the plugin
+// answered is linked to the signed-in account that requested the link
+// ticket, or refused when another account holds it
+// (ErrIdentityLinkedElsewhere). No session is opened; the account keeps the
+// sessions it has.
+func (s *Service) LinkOAuthIdentity(ctx context.Context, in OAuthLoginInput) (*models.User, error) {
+	if in.LinkingUserID <= 0 {
+		return nil, ErrNotPermitted
 	}
-	return pair, user, nil
+	provider := s.FindOAuthInstallation(in.InstallationID)
+	if provider == nil {
+		return nil, ErrProviderUnavailable
+	}
+	user, _, err := provider.CompleteOAuth(ctx, in.Response, in.LinkingUserID)
+	return user, err
+}
+
+// ProviderLogoutURL is the end-session URL of the OAuth provider an account
+// is linked to, for the web client to visit after the Silo session ends.
+// It is empty unless the account has an identity at an enabled OAuth
+// provider and that plugin answers EndSessionUrl with a URL. The plugin's
+// own configuration is the only switch: a plugin whose operator turned
+// provider logout off answers empty. A plugin failure is logged and answers
+// empty: the Silo sign-out never depends on the provider.
+func (s *Service) ProviderLogoutURL(ctx context.Context, userID int, postLogoutRedirectURI string) (string, error) {
+	for _, registered := range s.pluginProviders() {
+		pp, ok := registered.Provider.(*PluginProvider)
+		if !ok || pp == nil || registered.Info.Mode != ProviderModeOAuth {
+			continue
+		}
+		endURL, err := pp.EndSessionURL(ctx, userID, postLogoutRedirectURI)
+		if err != nil {
+			slog.WarnContext(ctx, "provider logout url unavailable", "component", "auth",
+				"installation_id", pp.InstallationID(), "user_id", userID, "error", err)
+			continue
+		}
+		if endURL != "" {
+			return endURL, nil
+		}
+	}
+	return "", nil
 }
 
 func (s *Service) ListProviders() []LoginProviderInfo {
-	providers := make([]LoginProviderInfo, 0, len(s.metadata))
-	for _, info := range s.metadata {
-		info.Default = info.ID == s.defaultID
+	all, defaultID := s.registeredProviders()
+	providers := make([]LoginProviderInfo, 0, len(all))
+	for _, registered := range all {
+		info := registered.Info
+		info.Default = info.ID == defaultID
 		providers = append(providers, info)
 	}
+	sortProviders(providers)
+	return providers
+}
+
+func sortProviders(providers []LoginProviderInfo) {
 	sort.Slice(providers, func(i, j int) bool {
 		if providers[i].Default != providers[j].Default {
 			return providers[i].Default
 		}
 		return providers[i].DisplayName < providers[j].DisplayName
 	})
-	return providers
+}
+
+// ProviderDiscovery is the sign-in discovery apps read: the providers a
+// client may offer and whether any of them takes a password. While the
+// server turns local password sign-in off, the local provider is left out
+// (break-glass admins sign in on the web's local form); a credentials
+// plugin (LDAP) still takes passwords.
+type ProviderDiscovery struct {
+	Providers     []LoginProviderInfo
+	PasswordLogin bool
+}
+
+// DiscoverProviders answers ProviderDiscovery for the current settings.
+func (s *Service) DiscoverProviders(ctx context.Context) (ProviderDiscovery, error) {
+	localAllowed := true
+	if s.users != nil {
+		allowed, err := s.users.LocalPasswordLoginAllowed(ctx)
+		if err != nil {
+			return ProviderDiscovery{}, err
+		}
+		localAllowed = allowed
+	}
+	all, defaultID := s.registeredProviders()
+	listed := make([]LoginProviderInfo, 0, len(all))
+	defaultListed := false
+	for _, registered := range all {
+		if registered.Info.ID == LocalProviderID && !localAllowed {
+			continue
+		}
+		listed = append(listed, registered.Info)
+		defaultListed = defaultListed || registered.Info.ID == defaultID
+	}
+	discovery := ProviderDiscovery{Providers: listed}
+	for i := range listed {
+		listed[i].Default = listed[i].ID == defaultID || (!defaultListed && i == 0)
+		if listed[i].Mode == ProviderModeCredentials {
+			discovery.PasswordLogin = true
+		}
+	}
+	sortProviders(listed)
+	return discovery, nil
 }
 
 func (s *Service) loginWithProvider(
@@ -268,15 +496,22 @@ func (s *Service) loginWithProvider(
 	ip string,
 	refusePasswordChange bool,
 ) (*TokenPair, *models.User, error) {
-	provider := s.providers[providerID]
+	provider := s.providerByID(providerID)
 	if provider == nil {
 		return nil, nil, ErrInvalidCredentials
 	}
 
-	user, err := provider.Authenticate(ctx, Credentials{
-		Username: username,
-		Password: password,
-	})
+	creds := Credentials{Username: username, Password: password}
+	var (
+		user       *models.User
+		identityID int64
+		err        error
+	)
+	if plugin, ok := provider.(*PluginProvider); ok {
+		user, identityID, err = plugin.authenticateCredentials(ctx, creds, 0)
+	} else {
+		user, err = provider.Authenticate(ctx, creds)
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -293,6 +528,7 @@ func (s *Service) loginWithProvider(
 		DeviceName: deviceName,
 		IPAddress:  ip,
 		ExpiresAt:  time.Now().Add(s.jwt.RefreshExpiry()),
+		IdentityID: identityRef(identityID),
 	}
 
 	if err := s.sessions.Create(ctx, session); err != nil {
@@ -412,6 +648,14 @@ func (s *Service) Signup(
 	} else {
 		return nil, nil, ErrSignupDisabled
 	}
+	// A signup creates a local-password account, which cannot sign in while
+	// the server turns local password sign-in off; refuse before the invite
+	// code is spent.
+	if allowed, err := s.LocalPasswordLoginAllowed(ctx); err != nil {
+		return nil, nil, err
+	} else if !allowed {
+		return nil, nil, ErrLocalLoginDisabled
+	}
 
 	// Create the user with standard role and access to all libraries.
 	if _, err := s.accounts.CreateInvitedAccount(ctx, CreateAccountInput{
@@ -447,7 +691,9 @@ func (s *Service) SetupWizardCompleted(ctx context.Context) (bool, error) {
 	return value == "true", nil
 }
 
-// IsSignupEnabled reports whether public signups are enabled.
+// IsSignupEnabled reports whether public signups are enabled: the
+// signup.enabled setting is on and local password sign-in, which a new
+// account needs, is not turned off.
 func (s *Service) IsSignupEnabled(ctx context.Context) (bool, error) {
 	if s.settings == nil {
 		return false, nil
@@ -456,7 +702,19 @@ func (s *Service) IsSignupEnabled(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("checking signup setting: %w", err)
 	}
-	return enabled == "true", nil
+	if enabled != "true" {
+		return false, nil
+	}
+	return s.LocalPasswordLoginAllowed(ctx)
+}
+
+// LocalPasswordLoginAllowed reports the server-wide local password switch
+// (auth.local_password_login); true without account storage.
+func (s *Service) LocalPasswordLoginAllowed(ctx context.Context) (bool, error) {
+	if s.users == nil {
+		return true, nil
+	}
+	return s.users.LocalPasswordLoginAllowed(ctx)
 }
 
 // Logout revokes the session identified by sessionID.
@@ -589,9 +847,44 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 	// Slide the session window forward so an active client never hits the
 	// hard expires_at set at login. A failure here is non-fatal: the refresh
 	// still returns fresh tokens; the session just keeps its prior expiry.
-	newExpiry := time.Now().Add(s.jwt.RefreshExpiry())
-	if err := s.sessions.ExtendExpiresAt(ctx, session.ID, newExpiry); err != nil && !IsSessionNotFound(err) {
-		return nil, fmt.Errorf("extending session: %w", err)
+	now := time.Now()
+	newExpiry := now.Add(s.jwt.RefreshExpiry())
+
+	// A session opened through an external provider is re-checked with the
+	// provider once its identity's last answer is older than the re-check
+	// interval (docs/architecture/external-sign-in.md). One whose identity is
+	// gone (unlinked, plugin removed) can no longer be re-checked at all.
+	absoluteAge := session.IdentityID == nil && session.ProviderSince != nil && session.ImpersonatorUserID == nil
+	rechecked := session.IdentityID != nil && session.ImpersonatorUserID == nil && s.recheck != nil
+	if rechecked {
+		verdict, err := s.recheck.check(ctx, session)
+		if err != nil {
+			return nil, err
+		}
+		absoluteAge = verdict == verdictAbsoluteAge
+	}
+	if absoluteAge {
+		// The provider cannot vouch for the session any more: it ends an
+		// absolute age (auth.refresh_token_expiry) after the provider last
+		// did, and refresh no longer slides it.
+		limit := providerAnchor(session).Add(s.jwt.RefreshExpiry())
+		if !limit.After(now) {
+			return nil, ErrSessionRevoked
+		}
+		newExpiry = limit
+		if session.ExpiresAt.Before(limit) {
+			newExpiry = session.ExpiresAt
+		}
+	}
+	if err := s.sessions.ExtendExpiresAt(ctx, session.ID, newExpiry); err != nil {
+		switch {
+		case !IsSessionNotFound(err):
+			return nil, fmt.Errorf("extending session: %w", err)
+		case rechecked:
+			// A check on another node (a role change, a refused account)
+			// revoked the session while this refresh waited for it.
+			return nil, ErrSessionRevoked
+		}
 	}
 
 	// An impersonating administrator is not the one who must change the
@@ -741,5 +1034,24 @@ func (s *Service) generateTokenPair(claims Claims) (*TokenPair, error) {
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 		ExpiresIn:    int(s.jwt.AccessExpiry().Seconds()),
+		SessionID:    claims.SessionID,
 	}, nil
+}
+
+// providerAnchor is when the provider last vouched for session's chain: its
+// provider_since, or its creation for a session that predates it.
+func providerAnchor(session *models.AuthSession) time.Time {
+	if session.ProviderSince != nil && session.ProviderSince.Before(session.CreatedAt) {
+		return *session.ProviderSince
+	}
+	return session.CreatedAt
+}
+
+// identityRef is the IdentityID of a session opened through identityID; nil
+// for 0 (no identity).
+func identityRef(identityID int64) *int64 {
+	if identityID == 0 {
+		return nil
+	}
+	return &identityID
 }

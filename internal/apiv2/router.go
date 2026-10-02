@@ -10,6 +10,7 @@ import (
 	"maps"
 	"net/http"
 	"net/textproto"
+	"net/url"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -96,6 +97,7 @@ type Dependencies struct {
 	AdminAutoscanRewrites           AdminAutoscanRewritesService
 	AdminAutoscanAvailableSources   AdminAutoscanAvailableSourcesService
 	AdminAuditLogs                  AdminAuditLogsService
+	ExternalSignIn                  ExternalSignInService
 	AdminOperationalLogs            AdminOperationalLogsService
 	AdminJellyfinCompatSettings     AdminJellyfinCompatSettingsService
 	OrderedAndroidPush              OrderedAndroidPushService
@@ -1133,7 +1135,11 @@ func serviceProblem(err error) *Problem {
 		if apiErr.Status >= 500 && apiErr.Status != http.StatusServiceUnavailable {
 			return NewProblem(TypeInternalError, "An unexpected error occurred.")
 		}
-		p := NewProblem(TypeForStatus(apiErr.Status), apiErr.Message)
+		kind := TypeForStatus(apiErr.Status)
+		if t, ok := externalSignInProblemTypes[apiErr.Code]; ok && t.Status == apiErr.Status {
+			kind = t
+		}
+		p := NewProblem(kind, apiErr.Message)
 		if apiErr.RetryAfter > 0 {
 			p = p.WithRetryAfter(apiErr.RetryAfter)
 		}
@@ -1142,12 +1148,41 @@ func serviceProblem(err error) *Problem {
 	return NewProblem(TypeInternalError, "An unexpected error occurred.")
 }
 
-// OAuthService is the slice of *auth.OAuthHandler completeOAuthLogin uses.
+// externalSignInProblemTypes keeps the external sign-in codes a shared
+// handler reports (handlers.APIError.Code) as their own problem types.
+var externalSignInProblemTypes = map[string]ProblemType{
+	TypeNotPermitted.ID:            TypeNotPermitted,
+	TypeLocalLoginDisabled.ID:      TypeLocalLoginDisabled,
+	TypeProviderPasswordExpired.ID: TypeProviderPasswordExpired,
+	TypeEmailInUse.ID:              TypeEmailInUse,
+	TypeIdentityLinkedElsewhere.ID: TypeIdentityLinkedElsewhere,
+	TypeProviderAlreadyEnabled.ID:  TypeProviderAlreadyEnabled,
+	TypeBreakGlassRequired.ID:      TypeBreakGlassRequired,
+	TypeLastSignInMethod.ID:        TypeLastSignInMethod,
+	TypeProviderUnavailable.ID:     TypeProviderUnavailable,
+	TypeAlreadyLinked.ID:           TypeAlreadyLinked,
+}
+
+// OAuthService is the slice of *auth.OAuthHandler the OAuth operations use:
+// the flow starts and callback (raw redirects), code redemption, link
+// tickets and provider logout.
 type OAuthService interface {
-	Complete(ctx context.Context, code string) (auth.OAuthCompletion, error)
+	Complete(ctx context.Context, code, verifier, browser string) (auth.OAuthCompletion, error)
 	CallbackURL(prefix string, installID int) string
-	Init(ctx context.Context, installID int, next, redirectURI string) (string, error)
-	Callback(ctx context.Context, in auth.OAuthCallbackInput) string
+	PublicURL(path string, query url.Values) string
+	NativeSignInAvailable() bool
+	ServeStart(w http.ResponseWriter, r *http.Request, req auth.OAuthStartRequest, bounceURL string, bounceStatus int)
+	ServeCallback(w http.ResponseWriter, r *http.Request, prefix string, installID int)
+	LinkingAvailable() bool
+	IssueLinkTicket(ctx context.Context, userID, installationID int, password string) (auth.OAuthLinkTicket, error)
+	OnPublicOrigin(r *http.Request) bool
+	StartLink(ctx context.Context, userID int, prefix, ticket, next string) (auth.OAuthStartResult, error)
+	CompleteLink(ctx context.Context, userID int, code, verifier string) error
+	ProviderLogoutAvailable() bool
+	ProviderLogoutURL(ctx context.Context, userID int) (string, error)
+	// PostLogoutRedirectURL is the post-logout redirect URI on the public
+	// URL; empty when none is configured.
+	PostLogoutRedirectURL() string
 }
 
 // SessionService is the slice of *handlers.AuthHandler the login-session
@@ -1156,7 +1191,9 @@ type SessionService interface {
 	Login(ctx context.Context, in handlers.LoginInput) (handlers.TokenPairView, error)
 	Logout(ctx context.Context, claims *auth.Claims) error
 	EndImpersonation(ctx context.Context, claims *auth.Claims) error
-	ListProviders() []auth.LoginProviderInfo
+	// DiscoverProviders lists the providers a client may offer and whether
+	// any of them takes a password.
+	DiscoverProviders(ctx context.Context) (auth.ProviderDiscovery, error)
 	Refresh(ctx context.Context, refreshToken string) (handlers.RefreshedTokensView, error)
 	ListSessionsPage(ctx context.Context, userID int, after *auth.SessionKey, limit int) ([]*models.AuthSession, bool, error)
 	RevokeSession(ctx context.Context, sessionID string, userID int) error
@@ -1175,6 +1212,7 @@ type DeviceLoginService interface {
 	ApproveDeviceLogin(ctx context.Context, input auth.DeviceLoginLookupInput, userID int) (handlers.DeviceLoginDecision, error)
 	ApproveDeviceHandoff(ctx context.Context, input auth.DeviceLoginLookupInput, userID int, profileID string) (handlers.DeviceLoginDecision, error)
 	DenyDeviceLogin(ctx context.Context, input auth.DeviceLoginLookupInput, userID int) (handlers.DeviceLoginDecision, error)
+	CancelDeviceLogin(ctx context.Context, deviceCode string) (string, error)
 }
 
 // Record only after the actual adapter has mounted the handler. The observer

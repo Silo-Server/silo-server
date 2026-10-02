@@ -100,6 +100,7 @@ export function UserDetailTabs({ user, active }: { user: AdminUser; active: User
       label: "Access & limits",
       extra: custom > 0 ? <Count>{custom} custom</Count> : null,
     },
+    { value: "sign-in", label: "Sign-in" },
     {
       value: "activity",
       label: "Activity",

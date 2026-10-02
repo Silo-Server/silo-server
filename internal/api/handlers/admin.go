@@ -338,6 +338,9 @@ type AdminUserView struct {
 	PasswordLogin          bool `json:"-"`
 	PasswordChangeRequired bool `json:"-"`
 	IsOwner                bool `json:"-"`
+	// BreakGlass is v2-only: the account keeps local password sign-in when
+	// the server turns it off.
+	BreakGlass bool `json:"-"`
 }
 
 // EffectivePolicyView is the resolved policy block on admin user responses.
@@ -426,6 +429,7 @@ func toAdminUserResponse(u *models.User, group *access.GroupPolicy) AdminUserVie
 		PasswordLogin:              u.LocalPasswordLoginEnabled && u.PasswordHash != "",
 		PasswordChangeRequired:     u.PasswordChangeRequired,
 		IsOwner:                    u.IsOwner,
+		BreakGlass:                 u.BreakGlass,
 		EffectivePolicy: EffectivePolicyView{
 			LibraryIDs:                 effective.LibraryIDs,
 			MaxPlaybackQuality:         effective.MaxPlaybackQuality,
@@ -1003,6 +1007,8 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		AccessGroupID:            req.AccessGroupID.Optional(),
 	}
 
+	enableLocalLoginWithPassword(&updateInput)
+
 	// As in v2, the Owner rules run against the target account locked in the
 	// transaction that updates it and revokes its sign-ins.
 	repo, ok := h.userRepo.(adminAccountRepository)
@@ -1016,7 +1022,7 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	revoked := false
-	_, err = repo.MutateAdminAccount(r.Context(), id, -1, &updateInput, func(current *models.User, _ pgx.Tx) (bool, error) {
+	_, err = repo.MutateAdminAccount(r.Context(), id, -1, &updateInput, func(current *models.User, tx pgx.Tx) (bool, error) {
 		if err := auth.CheckOwnerUpdate(actor, current, updateInput); err != nil {
 			return false, ownerError(err)
 		}
@@ -1024,6 +1030,12 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		// target may have been promoted since rejectScopedAPIKeyUpdate read it.
 		if actorIsScopedAPIKey(r.Context()) && current.Role == roleAdmin && (updateInput.Password != nil || updateInput.Role != nil) {
 			return false, apiError(http.StatusForbidden, "insufficient_scope", "A scoped API key may not change the password or role of an admin account")
+		}
+		// The frozen v1 route keeps the break-glass invariant v2 enforces:
+		// with local password sign-in off, the last usable break-glass admin
+		// cannot be demoted or disabled.
+		if err := auth.EnsureBreakGlassAfterAdminChange(r.Context(), tx, current, &updateInput); err != nil {
+			return false, breakGlassError(err)
 		}
 		revoked = updateRequiresSessionRevocation(current, updateInput)
 		return revoked, nil
@@ -1080,9 +1092,12 @@ func (h *AdminHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) 
 	}
 	// As for updates, the Owner rules run against the target account locked
 	// in the transaction that deletes it and revokes its sign-ins.
-	_, err = repo.MutateAdminAccount(r.Context(), id, -1, nil, func(current *models.User, _ pgx.Tx) (bool, error) {
+	_, err = repo.MutateAdminAccount(r.Context(), id, -1, nil, func(current *models.User, tx pgx.Tx) (bool, error) {
 		if err := auth.CheckOwnerDelete(actor, current); err != nil {
 			return false, ownerError(err)
+		}
+		if err := auth.EnsureBreakGlassAfterAdminChange(r.Context(), tx, current, nil); err != nil {
+			return false, breakGlassError(err)
 		}
 		return true, nil
 	})
@@ -2445,6 +2460,21 @@ func shouldPersistAdminSetting(stored map[string]string, key, normalized string,
 	return normalized != "" && effectiveChanged
 }
 
+// checkLocalLoginSetting refuses turning local password sign-in off while no
+// break-glass admin could still sign in with a password. It runs inside the
+// settings mutation, which holds the settings lock that break-glass changes
+// also take.
+func (h *AdminHandler) checkLocalLoginSetting(ctx context.Context, before, after map[string]string) error {
+	key := config.AuthLocalPasswordLoginSettingKey
+	if before[key] == after[key] {
+		return nil
+	}
+	if h.pool == nil {
+		return ErrAdminSettingsUnavailable
+	}
+	return breakGlassError(auth.CheckLocalLoginSettingChange(ctx, h.pool, before[key], after[key]))
+}
+
 // HandleUpdateSettings handles PUT /admin/settings. Every requested value is
 // normalized and validated with the prospective values it depends on before
 // SetMany performs one transaction, so a multi-field save is all-or-nothing.
@@ -2546,6 +2576,10 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 			activeProspective := h.activeAdminSettings(prospective)
 			before := h.effectiveAdminSettings(stored)
 			after = h.effectiveAdminSettings(prospective)
+			if err := h.checkLocalLoginSetting(ctx, before, after); err != nil {
+				preconditionErr = err
+				return nil, err
+			}
 			// Cross-field checks run against the complete prospective state, so a
 			// value the batch clears is gone even when the store still has it and
 			// the current process is still running on it.
@@ -2939,6 +2973,10 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 
 			before := h.effectiveAdminSettings(stored)
 			after = h.effectiveAdminSettings(prospective)
+			if err := h.checkLocalLoginSetting(ctx, before, after); err != nil {
+				preconditionErr = err
+				return nil, err
+			}
 			effectiveChanged = before[key] != after[key]
 			if shouldPersistAdminSetting(stored, key, req.Value, effectiveChanged) {
 				return map[string]string{key: req.Value}, nil

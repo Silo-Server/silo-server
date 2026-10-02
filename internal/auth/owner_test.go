@@ -14,7 +14,10 @@ import (
 
 func TestOwnerChecks(t *testing.T) {
 	owner := &models.User{ID: 1, Role: models.RoleAdmin, Enabled: true, IsOwner: true}
-	admin := &models.User{ID: 2, Role: models.RoleAdmin, Enabled: true}
+	admin := &models.User{ID: 2, Role: models.RoleAdmin, Enabled: true, LocalPasswordLoginEnabled: true}
+	// providerAdmin and providerOwner sign in only through a provider.
+	providerAdmin := &models.User{ID: 5, Role: models.RoleAdmin, Enabled: true}
+	providerOwner := &models.User{ID: 1, Role: models.RoleAdmin, Enabled: true, IsOwner: true}
 	user := &models.User{ID: 4, Role: models.RoleUser, Enabled: true}
 	asOwner := OwnerActor{ID: owner.ID, IsOwner: true}
 	asAdmin := OwnerActor{ID: 3}
@@ -52,6 +55,15 @@ func TestOwnerChecks(t *testing.T) {
 		{"admin resends own role", CheckOwnerUpdate(OwnerActor{ID: admin.ID}, admin, promote), nil},
 		{"admin promotes user", CheckOwnerUpdate(asAdmin, user, promote), ErrAdminProtected},
 		{"admin edits user", CheckOwnerUpdate(asAdmin, user, disable), nil},
+		{"admin makes itself break-glass", CheckOwnerUpdate(OwnerActor{ID: admin.ID}, admin, models.UpdateUserInput{BreakGlass: new(true)}), ErrBreakGlassOwnerOnly},
+		{"admin resends its break-glass flag", CheckOwnerUpdate(OwnerActor{ID: admin.ID}, admin, models.UpdateUserInput{BreakGlass: new(false)}), nil},
+		{"owner makes an admin break-glass", CheckOwnerUpdate(asOwner, admin, models.UpdateUserInput{BreakGlass: new(true)}), nil},
+		{"owner makes itself break-glass", CheckOwnerUpdate(asOwner, owner, models.UpdateUserInput{BreakGlass: new(true)}), nil},
+		{"provider-only admin sets own password", CheckOwnerUpdate(OwnerActor{ID: providerAdmin.ID}, providerAdmin, models.UpdateUserInput{Password: new("long-enough")}), ErrSelfPasswordOwnerOnly},
+		{"provider-only admin edits self", CheckOwnerUpdate(OwnerActor{ID: providerAdmin.ID}, providerAdmin, rename), nil},
+		{"local admin sets own password", CheckOwnerUpdate(OwnerActor{ID: admin.ID}, admin, models.UpdateUserInput{Password: new("long-enough")}), nil},
+		{"provider-only owner sets own password", CheckOwnerUpdate(asOwner, providerOwner, models.UpdateUserInput{Password: new("long-enough")}), nil},
+		{"owner sets a provider-only admin's password", CheckOwnerUpdate(asOwner, providerAdmin, models.UpdateUserInput{Password: new("long-enough")}), nil},
 		{"admin deletes user", CheckOwnerDelete(asAdmin, user), nil},
 		{"admin grants admin", CheckGrantAdmin(asAdmin, models.RoleAdmin), ErrAdminProtected},
 		{"admin grants user", CheckGrantAdmin(asAdmin, models.RoleUser), nil},
