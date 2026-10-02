@@ -28,14 +28,28 @@ again before editing further. Deletion returns 204.
 
 An update signs the account out everywhere (its login, impersonation and
 Audiobookshelf-compatible sessions, approved device sign-ins not yet collected,
-and its Jellyfin-compatible sessions) only when it sets a password, changes
-`enabled`, or changes the role. Access-group, permission and playback-quality
-changes keep the account signed in: they advance `access_policy_revision`, each
-request resolves the current policy, connected events sockets receive
-`access_changed` (see [realtime-api.md](realtime-api.md#access-changes)), and
-PIN-protected profiles must enter their PIN again. Library, stream-limit and
-download overrides never signed the account out and still do not. The same
-rules apply to the bridge `PUT /api/v1/admin/users/{id}`.
+and its Jellyfin-compatible sessions) only when it sets a password or changes
+`enabled`. Access-group, permission and playback-quality changes keep the
+account signed in: they advance `access_policy_revision`, each request resolves
+the current policy, connected events sockets receive `access_changed` (see
+[realtime-api.md](realtime-api.md#access-changes)), and PIN-protected profiles
+must enter their PIN again. Library, stream-limit and download overrides never
+signed the account out and still do not.
+
+A role change also keeps the account signed in, but admin checks trust the role
+in the access token, so the token must be replaced. Every request that presents
+an access token minted before the change gets `401 token_refresh_required` (v1:
+`401 unauthorized`). The login session and its refresh token stay valid, and a
+refresh issues a token with the new role, so a demoted administrator loses admin
+access on its next request. Clients refresh and retry once and never sign out on
+this response. The same transaction ends every impersonation session the account
+started or that views as it: a demoted administrator may not view as anyone, and
+only the Owner may view as an administrator. Jellyfin- and
+Audiobookshelf-compatible sessions are kept, because neither carries the role:
+the Jellyfin surface reports every account as a non-administrator and resolves
+access per request.
+
+The same rules apply to the bridge `PUT /api/v1/admin/users/{id}`.
 
 Omitted update fields preserve their values. Nullable policy overrides accept
 `null` to restore inheritance. Explicit empty library and permission arrays,

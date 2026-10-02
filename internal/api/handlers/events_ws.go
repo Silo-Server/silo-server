@@ -81,6 +81,26 @@ type EventsHandler struct {
 	persistedScans activeScanLister
 	historyImports historyImportActiveLister
 	notifications  *notifications.System
+	// sessionRoles and sessionCheckInterval drive the v1 connection's
+	// periodic login-session check; see SetSessionRoles.
+	sessionRoles         sessionRoleChecker
+	sessionCheckInterval time.Duration
+}
+
+// sessionRoleChecker reports whether a login session is still active and the
+// current role of its account; auth.SessionRepository implements it.
+type sessionRoleChecker interface {
+	ActiveSessionRole(ctx context.Context, sessionID string) (role string, active bool, err error)
+}
+
+// SetSessionRoles makes the v1 events socket recheck its login session. The
+// connection picks its channels from the access token's role once, at the
+// handshake, so it closes when the session ends or the account's role
+// changes; the client reconnects with a refreshed token.
+func (h *EventsHandler) SetSessionRoles(sessions sessionRoleChecker) {
+	if h != nil {
+		h.sessionRoles = sessions
+	}
 }
 
 // SetNotificationsSystem wires the user-notification system: websocket
@@ -144,7 +164,39 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	if h.sessionRoles != nil && claims.SessionID != "" {
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		go h.closeOnSessionChange(ctx, cancel, claims)
+		r = r.WithContext(ctx)
+	}
 	h.serveWebSocket(w, r, claims, boundProfileID, wsUpgrader, nil)
+}
+
+// closeOnSessionChange cancels a v1 connection once its login session is no
+// longer active or the account's role differs from the access token's. A
+// failed check is skipped; the next one decides.
+func (h *EventsHandler) closeOnSessionChange(ctx context.Context, cancel context.CancelFunc, claims *auth.Claims) {
+	interval := h.sessionCheckInterval
+	if interval <= 0 {
+		interval = eventsSessionCheckInterval
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			checkCtx, stop := context.WithTimeout(ctx, 2*time.Second)
+			role, active, err := h.sessionRoles.ActiveSessionRole(checkCtx, claims.SessionID)
+			stop()
+			if err == nil && (!active || role != claims.Role) {
+				cancel()
+				return
+			}
+		}
+	}
 }
 
 // serveWebSocket runs one events connection. When accessChanged closes, the

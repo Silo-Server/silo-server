@@ -27,9 +27,10 @@ func (revocationTestGroups) GetPolicyForUser(context.Context, int) (*access.Grou
 }
 
 // Policy changes take effect on the next request and reach connected clients
-// through the realtime socket, so only credential, enabled and role changes
-// sign the account out.
-func TestHandleUpdateUserSignsOutOnlyForCredentialEnabledAndRoleChanges(t *testing.T) {
+// through the realtime socket, and a role change makes the account's clients
+// refresh their access tokens, so only credential and enabled changes sign the
+// account out.
+func TestHandleUpdateUserSignsOutOnlyForCredentialAndEnabledChanges(t *testing.T) {
 	tests := []struct {
 		name       string
 		body       string
@@ -41,7 +42,7 @@ func TestHandleUpdateUserSignsOutOnlyForCredentialEnabledAndRoleChanges(t *testi
 		{name: "playback quality cleared", body: `{"max_playback_quality":null}`},
 		{name: "password", body: `{"password":"a-new-long-password"}`, wantRevoke: true},
 		{name: "disable", body: `{"enabled":false}`, wantRevoke: true},
-		{name: "role", body: `{"role":"admin"}`, wantRevoke: true},
+		{name: "role", body: `{"role":"admin"}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -69,7 +70,7 @@ func TestHandleUpdateUserSignsOutOnlyForCredentialEnabledAndRoleChanges(t *testi
 	}
 }
 
-func TestUpdateAdminAccountSignsOutOnlyForCredentialEnabledAndRoleChanges(t *testing.T) {
+func TestUpdateAdminAccountSignsOutOnlyForCredentialAndEnabledChanges(t *testing.T) {
 	permissions := []string{"marker_edit"}
 	quality := "720p"
 	password := "a-new-long-password"
@@ -87,7 +88,7 @@ func TestUpdateAdminAccountSignsOutOnlyForCredentialEnabledAndRoleChanges(t *tes
 		{name: "playback quality cleared", input: models.UpdateUserInput{MaxPlaybackQuality: models.ClearValue[string]()}},
 		{name: "password", input: models.UpdateUserInput{Password: &password}, wantRevoke: true},
 		{name: "disable", input: models.UpdateUserInput{Enabled: &disabled}, wantRevoke: true},
-		{name: "role", input: models.UpdateUserInput{Role: &admin}, wantRevoke: true},
+		{name: "role", input: models.UpdateUserInput{Role: &admin}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

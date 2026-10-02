@@ -1351,28 +1351,29 @@ func (h *AdminHandler) HandleListUserProfiles(w http.ResponseWriter, r *http.Req
 }
 
 // updateMayRequireSessionRevocation is updateRequiresSessionRevocation without
-// the current account to compare against: any credential, role or enabled
-// change might sign the user out.
+// the current account to compare against: any credential or enabled change
+// might sign the user out.
 func updateMayRequireSessionRevocation(input models.UpdateUserInput) bool {
 	return input.Password != nil ||
-		input.Role != nil ||
 		input.Enabled != nil
 }
 
 // updateRequiresSessionRevocation reports whether an account update signs the
-// user out everywhere: a new password, an enabled change, or a role change.
+// user out everywhere: a new password or an enabled change.
+//
 // Policy changes (permissions, playback-quality override, access group) do
 // not; they bump access_policy_revision, every request resolves the current
-// policy, and connected realtime sockets tell their clients to refresh.
+// policy, and connected realtime sockets tell their clients to refresh. A role
+// change does not either: RequireAuth refuses access tokens minted under the
+// old role with token_refresh_required, and a refresh issues the new role.
+// The impersonation sessions a demoted admin started end in the same
+// transaction (auth.UserRepository.MutateAdminAccount).
 func updateRequiresSessionRevocation(current *models.User, input models.UpdateUserInput) bool {
 	if input.Password != nil {
 		return true
 	}
 	if current == nil {
 		return updateMayRequireSessionRevocation(input)
-	}
-	if input.Role != nil && *input.Role != current.Role {
-		return true
 	}
 	if input.Enabled != nil && *input.Enabled != current.Enabled {
 		return true

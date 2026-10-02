@@ -803,12 +803,16 @@ describe("RealtimeEventsProvider", () => {
     });
 
     expect(refetchQueries).not.toHaveBeenCalled();
+    expect(mockState.refreshAccount).not.toHaveBeenCalled();
 
     await act(async () => {
       mockState.pathname = "/item/movie-1";
       view.rerender(provider());
     });
 
+    // An access change made while the socket was down sends no
+    // access_changed, so the catch-up re-reads the account too.
+    expect(mockState.refreshAccount).toHaveBeenCalledTimes(1);
     expect(refetchQueries).toHaveBeenCalledTimes(1);
     expect(refetchQueries).toHaveBeenCalledWith({
       type: "active",

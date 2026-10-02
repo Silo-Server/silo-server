@@ -47,9 +47,9 @@ func TestUpdateRequiresSessionRevocation(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "role",
+			name: "role change does not revoke session",
 			in:   models.UpdateUserInput{Role: &role},
-			want: true,
+			want: false,
 		},
 		{
 			name: "role unchanged",
@@ -102,9 +102,9 @@ func TestUpdateRequiresSessionRevocation(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "role with policy changes",
+			name: "role with policy changes does not revoke session",
 			in:   models.UpdateUserInput{Role: &role, Permissions: &permissions, AccessGroupID: models.SetValue(groupID)},
-			want: true,
+			want: false,
 		},
 		{
 			name: "access group change does not revoke session",
@@ -167,14 +167,14 @@ func TestUpdateRequiresSessionRevocation(t *testing.T) {
 	})
 
 	// Without the current account the rule cannot compare values, so it signs
-	// the user out for any credential, role or enabled field and nothing else.
+	// the user out for any credential or enabled field and nothing else.
 	withoutCurrent := []struct {
 		name string
 		in   models.UpdateUserInput
 		want bool
 	}{
 		{name: "password", in: models.UpdateUserInput{Password: &password}, want: true},
-		{name: "role", in: models.UpdateUserInput{Role: &sameRole}, want: true},
+		{name: "role", in: models.UpdateUserInput{Role: &sameRole}, want: false},
 		{name: "enabled", in: models.UpdateUserInput{Enabled: &enabled}, want: true},
 		{name: "permissions", in: models.UpdateUserInput{Permissions: &permissions}, want: false},
 		{name: "max playback quality", in: models.UpdateUserInput{MaxPlaybackQuality: models.SetValue(maxPlaybackQuality)}, want: false},

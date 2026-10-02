@@ -3165,6 +3165,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 						historyImportSvc,
 					)
 					eventsHandler.SetNotificationsSystem(deps.Notifications)
+					if sessionRepo != nil {
+						eventsHandler.SetSessionRoles(sessionRepo)
+					}
 					r.Get("/events/ws", eventsHandler.HandleWebSocket)
 					r.Get("/events/capability", eventsHandler.HandleCapability)
 				}
@@ -4649,11 +4652,14 @@ func resolveOptionalPluginAccessUser(
 	if claims.PasswordChangeRequired {
 		return false, false, 0, ""
 	}
-	valid, err := sessionRepo.IsValid(r.Context(), claims.SessionID)
-	if err != nil || !valid {
+	// Plugin launch tokens copy the role of the access token they were minted
+	// from, and a role change keeps the session, so admin access follows the
+	// account's current role rather than the token's.
+	role, active, err := sessionRepo.ActiveSessionRole(r.Context(), claims.SessionID)
+	if err != nil || !active {
 		return false, false, 0, ""
 	}
-	return true, claims.Role == "admin", claims.UserID, claims.ProfileID
+	return true, role == "admin", claims.UserID, claims.ProfileID
 }
 
 // NewTMDBCollectionFetcher creates a TMDBCollectionFetcher from an API key.

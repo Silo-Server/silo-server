@@ -1502,7 +1502,7 @@ operations use:
 | ---- | ------------------------ | ------------------------------------------------------------------------- |
 | 400  | `malformed_request`      | Malformed JSON body.                                                      |
 | 400  | `invalid_cursor`         | A `cursor` value the operation cannot continue from.                      |
-| 401  | `authentication_required` / `invalid_token` / `session_expired` | Missing, unreadable, or expired credential. |
+| 401  | `authentication_required` / `invalid_token` / `session_expired` / `token_refresh_required` | Missing, unreadable, or expired credential, or an access token to refresh after a role change. |
 | 403  | `permission_denied`      | Downloads disabled, the account may not download, or the requested quality is not permitted. |
 | 403  | `profile_verification_required` | A PIN-protected profile without `X-Profile-Token`.                 |
 | 404  | `not_found`              | Entry, content, or asset missing or outside profile access.               |

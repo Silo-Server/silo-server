@@ -12729,6 +12729,26 @@
       "body_file": "theme_songs_playback_unauthorized.json"
     },
     {
+      "name": "token_refresh_required",
+      "operation_id": "getCurrentUser",
+      "scenario": "An access token minted before an administrator changed the account's role. The session is still valid: the client refreshes it, retries once with the new token, and does not sign out.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/account/me",
+        "headers": {
+          "Authorization": "Bearer tok-demoted"
+        }
+      },
+      "expected_status": 401,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "token_refresh_required.json"
+    },
+    {
       "name": "translate_catalog_item_description_authentication_required",
       "operation_id": "translateCatalogItemDescription",
       "scenario": "A translation request without a credential.",

@@ -230,6 +230,26 @@ func (r *SessionRepository) IsValid(ctx context.Context, id string) (bool, error
 	return valid, nil
 }
 
+// ActiveSessionRole reports whether a session is active, as IsValid does, and
+// returns the current role of the account it belongs to. Both come from one
+// indexed lookup, so the per-request authentication check costs no extra
+// round trip. For an impersonation session the account is the one being
+// viewed as. active is false, with no error, for a missing, revoked or
+// expired session.
+func (r *SessionRepository) ActiveSessionRole(ctx context.Context, id string) (role string, active bool, err error) {
+	query := `SELECT u.role FROM auth_sessions s
+		JOIN users u ON u.id = s.user_id
+		WHERE s.id = $1 AND s.revoked_at IS NULL AND s.expires_at > NOW()`
+	err = r.pool.QueryRow(ctx, query, id).Scan(&role)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("checking session validity: %w", err)
+	}
+	return role, true, nil
+}
+
 // ExtendExpiresAt pushes expires_at forward for an active session. The update
 // only applies when the session is not revoked and has not already expired, so
 // a successful call implies the session is still usable at newExpiresAt.

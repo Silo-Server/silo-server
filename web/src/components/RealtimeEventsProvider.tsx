@@ -776,11 +776,16 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       type: "active",
       predicate: (query) => !isDashboardQueryKey(query.queryKey),
     });
+    // The account record is not a query. An access change made while the
+    // socket was down never sends access_changed: the reconnect's ticket
+    // already carries the new access.
+    void refreshAccount().catch(() => {});
   }, [
     authenticatedUserID,
     isForegroundPlaybackRoute,
     pageActivity.canApplyRealtimeUpdates,
     queryClient,
+    refreshAccount,
   ]);
 
   useEffect(() => {
