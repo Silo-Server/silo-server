@@ -217,7 +217,10 @@ export function useSignInProviderDrafts(installations: PluginInstallation[] | un
               value: stagedEntry(entry, entryDraft.values),
               clearSecrets: entryDraft.clearSecrets,
             });
+            // An edit made while this write was in flight is a newer draft;
+            // it stays staged.
             update(installation.id, (current) => {
+              if (current.config[key] !== entryDraft) return current;
               const config = { ...current.config };
               delete config[key];
               return { ...current, config };
@@ -236,7 +239,11 @@ export function useSignInProviderDrafts(installations: PluginInstallation[] | un
                 default_login: binding?.default_login ?? false,
               },
             });
-            update(installation.id, (current) => ({ ...current, autoProvision: undefined }));
+            update(installation.id, (current) =>
+              current.autoProvision === draft.autoProvision
+                ? { ...current, autoProvision: undefined }
+                : current,
+            );
           }
         } catch (error) {
           return {

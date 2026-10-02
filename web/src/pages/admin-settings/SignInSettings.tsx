@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { useIsMutating } from "@tanstack/react-query";
 import { Link } from "react-router";
 
 import { V2ProblemError } from "@/api/v2/request";
@@ -7,7 +8,10 @@ import { AdvancedSection } from "@/components/settings/AdvancedSection";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
-import { useExternalSignInCapabilities } from "@/hooks/queries/admin/externalSignIn";
+import {
+  signInBindingMutationKey,
+  useExternalSignInCapabilities,
+} from "@/hooks/queries/admin/externalSignIn";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { activeSignInInstallation, BREAK_GLASS_REQUIRED_TEXT } from "@/lib/externalSignInAdmin";
@@ -63,6 +67,8 @@ export default function SignInSettings() {
   const installations = useAdminPluginInstallations();
   const users = useAdminUsers();
   const drafts = useSignInProviderDrafts(installations.data);
+  // Turning a provider on or off writes the same binding row a save may write.
+  const bindingWrites = useIsMutating({ mutationKey: signInBindingMutationKey });
   const [localError, setLocalError] = useState<string | null>(null);
   const localErrorRef = useRef<HTMLParagraphElement>(null);
   const [providerFeedback, setProviderFeedback] = useState<Feedback>(null);
@@ -279,6 +285,7 @@ export default function SignInSettings() {
           form.discard();
         }}
         isSaving={form.isSaving || drafts.saving}
+        canSave={bindingWrites === 0}
       />
     </div>
   );

@@ -169,4 +169,20 @@ describe("missingSignInSetup", () => {
       ),
     ).toEqual([]);
   });
+
+  it("counts an entry the page can't render as missing only until it is saved", () => {
+    const base = {
+      global_config_schema: [
+        { key: "custom", title: "Custom", json_schema: '{"type":"array"}', required: true },
+      ] as never,
+    };
+    expect(missingSignInSetup(signInSetupLayout(installation(base)))).toEqual(["Custom"]);
+    expect(
+      missingSignInSetup(
+        signInSetupLayout(
+          installation({ ...base, global_configs: [{ key: "custom", value: {} }] }),
+        ),
+      ),
+    ).toEqual([]);
+  });
 });

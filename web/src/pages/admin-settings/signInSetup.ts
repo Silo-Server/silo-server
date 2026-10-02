@@ -64,7 +64,7 @@ export interface SignInSetupLayout {
   /** The connection test's look-up field, shown in the test step. */
   testUsername?: SignInFieldRef;
   /** Entries whose schema the admin form can't render; edited on the plugin page. */
-  unsupported: PluginConfigSchema[];
+  unsupported: { schema: PluginConfigSchema; saved: boolean }[];
 }
 
 function parseFieldRef(value: unknown): { schemaKey: string; fieldKey: string } | null {
@@ -90,11 +90,11 @@ export function signInSetupLayout(installation: PluginInstallation): SignInSetup
 
   for (const schema of installation.global_config_schema ?? []) {
     const descriptor = adminFormForConfigSchema(schema);
+    const saved = installation.global_configs?.find((entry) => entry.key === schema.key);
     if (!descriptor) {
-      layout.unsupported.push(schema);
+      layout.unsupported.push({ schema, saved: saved !== undefined });
       continue;
     }
-    const saved = installation.global_configs?.find((entry) => entry.key === schema.key);
     layout.entries.set(schema.key, {
       schema,
       descriptor,
@@ -184,8 +184,8 @@ export function isFieldMissing(entry: SignInConfigEntry, field: PluginAdminFormF
  */
 export function missingSignInSetup(layout: SignInSetupLayout): string[] {
   const missing: string[] = [];
-  for (const schema of layout.unsupported) {
-    if (schema.required) missing.push(schemaTitle(schema));
+  for (const { schema, saved } of layout.unsupported) {
+    if (schema.required && !saved) missing.push(schemaTitle(schema));
   }
   for (const entry of layout.entries.values()) {
     const savedValues = formValuesFromConfig(entry.descriptor.fields, entry.saved);

@@ -1,4 +1,5 @@
 import { useId, useRef, useState, type ReactNode } from "react";
+import { useIsMutating } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { ArrowUpRight, Check, Copy, KeyRound, Loader2, X } from "lucide-react";
 
@@ -12,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import {
+  signInBindingMutationKey,
   useTestSignInConnection,
   useUpdateSignInBinding,
   type AuthConnectionTestResult,
@@ -270,19 +272,25 @@ function Step({
 /**
  * Turning a provider on or off. Both apply at once on every node, outside
  * the save bar: they change who can sign in, so turning off asks first.
+ * The binding is written as a whole row, so neither runs while another
+ * binding write or the page's save (which may write the binding) is in
+ * flight; otherwise one write could put back what the other changed.
  */
 function useBindingSwitch({
   installation,
   label,
   localLoginOn,
+  pageSaving,
   report,
 }: {
   installation: PluginInstallation;
   label: string;
   localLoginOn: boolean;
+  pageSaving: boolean;
   report: (feedback: Feedback) => void;
 }) {
   const updateBinding = useUpdateSignInBinding();
+  const bindingWrites = useIsMutating({ mutationKey: signInBindingMutationKey });
   const [confirmOff, setConfirmOff] = useState(false);
   const capability = authCapabilityOf(installation)!;
   const binding = authBindingOf(installation);
@@ -332,7 +340,7 @@ function useBindingSwitch({
   );
 
   return {
-    pending: updateBinding.isPending,
+    pending: bindingWrites > 0 || pageSaving,
     turnOn: () => write(true, `${label} is on. People can sign in with it now.`),
     askOff: () => setConfirmOff(true),
     dialog,
@@ -403,7 +411,13 @@ function ProviderPanel({
     requestAnimationFrame(() => statusRef.current?.focus());
   }
 
-  const bindingSwitch = useBindingSwitch({ installation, label, localLoginOn, report });
+  const bindingSwitch = useBindingSwitch({
+    installation,
+    label,
+    localLoginOn,
+    pageSaving: drafts.saving,
+    report,
+  });
 
   const offersTest = connectionTestServed && capability.metadata?.connection_test === true;
   const turnOnBlocked =
@@ -790,9 +804,11 @@ function ProviderPanel({
 function NoProviderPanel({
   active,
   localLoginOn,
+  pageSaving,
 }: {
   active: PluginInstallation | undefined;
   localLoginOn: boolean;
+  pageSaving: boolean;
 }) {
   if (!active) {
     return (
@@ -802,15 +818,19 @@ function NoProviderPanel({
       </p>
     );
   }
-  return <TurnOffActiveProvider active={active} localLoginOn={localLoginOn} />;
+  return (
+    <TurnOffActiveProvider active={active} localLoginOn={localLoginOn} pageSaving={pageSaving} />
+  );
 }
 
 function TurnOffActiveProvider({
   active,
   localLoginOn,
+  pageSaving,
 }: {
   active: PluginInstallation;
   localLoginOn: boolean;
+  pageSaving: boolean;
 }) {
   const [feedback, setFeedback] = useState<Feedback>(null);
   const statusRef = useRef<HTMLParagraphElement>(null);
@@ -819,6 +839,7 @@ function TurnOffActiveProvider({
     installation: active,
     label,
     localLoginOn,
+    pageSaving,
     report: (next) => {
       setFeedback(next);
       requestAnimationFrame(() => statusRef.current?.focus());
@@ -996,7 +1017,7 @@ export function SignInProviderSlot({
           }
         />
       ) : (
-        <NoProviderPanel active={active} localLoginOn={localLoginOn} />
+        <NoProviderPanel active={active} localLoginOn={localLoginOn} pageSaving={drafts.saving} />
       )}
     </div>
   );

@@ -178,6 +178,8 @@ function admin(overrides: Partial<AdminUser>): AdminUser {
 
 let capabilities: Record<string, unknown>;
 let failures: Record<string, unknown>;
+// Operations that answer only when the test resolves them.
+let held: Record<string, Promise<unknown>>;
 let testResult: unknown;
 const calls: Array<{ op: string; options?: { body?: unknown; path?: unknown } }> = [];
 
@@ -222,6 +224,7 @@ beforeEach(() => {
     state: "available",
   };
   failures = {};
+  held = {};
   testResult = {
     ok: false,
     callback_url: "https://silo.example.test/api/v2/auth/oauth/6/callback",
@@ -234,6 +237,7 @@ beforeEach(() => {
   vi.mocked(v2).mockImplementation(((op: string, options?: { body?: unknown }) => {
     calls.push({ op, options });
     if (failures[op]) return Promise.reject(failures[op]);
+    if (held[op]) return held[op];
     switch (op) {
       case "GET /api/v2/auth/external-sign-in/capabilities":
         return Promise.resolve(capabilities);
@@ -776,6 +780,65 @@ describe("SignInSettings saving provider changes", () => {
     );
     expect(state.save).not.toHaveBeenCalled();
     expect(screen.getByText("2 unsaved changes")).toBeInTheDocument();
+  });
+
+  it("keeps an edit made while its entry was saving", async () => {
+    const user = userEvent.setup();
+    let finish: (value?: unknown) => void = () => {};
+    held["PUT /api/v2/admin/plugins/installations/{id}/config"] = new Promise((resolve) => {
+      finish = resolve;
+    });
+    mount();
+    const oidc = providerPanel("OpenID Connect");
+    const issuer = within(oidc).getByLabelText("Issuer URL");
+    await user.type(issuer, "/a");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(opCalls("PUT /api/v2/admin/plugins/installations/{id}/config")).toHaveLength(1),
+    );
+    await user.type(issuer, "b");
+    finish();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeEnabled());
+    expect(issuer).toHaveValue("https://id.example.test/realms/silo/ab");
+    expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
+  });
+
+  it("holds Turn off while the page is saving", async () => {
+    const user = userEvent.setup();
+    let finish: (value?: unknown) => void = () => {};
+    held["PUT /api/v2/admin/plugins/installations/{id}/config"] = new Promise((resolve) => {
+      finish = resolve;
+    });
+    mount();
+    const oidc = providerPanel("OpenID Connect");
+    await user.type(within(oidc).getByLabelText("Issuer URL"), "/a");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(within(oidc).getByRole("button", { name: "Turn off" })).toBeDisabled(),
+    );
+    finish();
+    await waitFor(() =>
+      expect(within(oidc).getByRole("button", { name: "Turn off" })).toBeEnabled(),
+    );
+  });
+
+  it("holds the save while a provider is being turned off", async () => {
+    const user = userEvent.setup();
+    let finish: (value?: unknown) => void = () => {};
+    held["PUT /api/v2/admin/plugins/installations/{id}/auth-binding"] = new Promise((resolve) => {
+      finish = resolve;
+    });
+    mount();
+    const oidc = providerPanel("OpenID Connect");
+    await user.click(
+      within(oidc).getByRole("switch", { name: "Create accounts on first sign-in" }),
+    );
+    await user.click(within(oidc).getByRole("button", { name: "Turn off" }));
+    const dialog = await screen.findByRole("alertdialog");
+    await user.click(within(dialog).getByRole("button", { name: "Turn off" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeDisabled());
+    finish();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeEnabled());
   });
 
   it("clears a saved secret only when asked", async () => {

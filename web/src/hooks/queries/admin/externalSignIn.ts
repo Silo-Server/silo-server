@@ -71,6 +71,12 @@ function captureAuthority(): ProfileRequestContextSnapshot {
 }
 
 /**
+ * Every sign-in binding write. The binding is written as a whole row, so the
+ * Sign-in page lets only one run at a time.
+ */
+export const signInBindingMutationKey = ["admin", "external-sign-in", "binding"] as const;
+
+/**
  * Writes an installation's sign-in binding (enabled, auto-create accounts).
  * Changes apply at once on every node; the page reports the result itself,
  * so this hook shows no toast.
@@ -78,6 +84,7 @@ function captureAuthority(): ProfileRequestContextSnapshot {
 export function useUpdateSignInBinding() {
   const queryClient = useQueryClient();
   return useMutation({
+    mutationKey: signInBindingMutationKey,
     retry: false,
     mutationFn: async (input: { installationId: number; body: SignInBindingWrite }) => {
       const profileContext = captureAuthority();
