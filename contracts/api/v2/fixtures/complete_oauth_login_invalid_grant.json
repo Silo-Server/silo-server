@@ -1,0 +1,7 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/invalid_grant",
+  "title": "Invalid grant",
+  "status": 400,
+  "detail": "The code_verifier does not fit this completion code.",
+  "instance": "urn:silo:request:0000000000000000000002b9"
+}

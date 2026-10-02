@@ -259,6 +259,9 @@ func (r *Repository) AcceptAs(ctx context.Context, tokenHash string, linkAddress
 	if !eligible {
 		return nil, ErrNotFound
 	}
+	if err := auth.EnsureLocalPasswordLoginAllowedInTransaction(ctx, tx); err != nil {
+		return nil, err
+	}
 	// A link invitation's account takes the entered address. Any other live
 	// invitation for it could no longer be accepted, so revoke it as creating
 	// one would.

@@ -12,6 +12,7 @@ import { isNotFoundProblem, V2ProblemError } from "@/api/v2/request";
 import { AdminUserDeleteDialog } from "@/components/AdminUserDeleteDialog";
 import { AdminUserImpersonationDialog } from "@/components/AdminUserImpersonationDialog";
 import { AdminUserPasswordResetDialog } from "@/components/AdminUserPasswordResetDialog";
+import { AdminUserSignIn } from "@/components/admin/AdminUserSignIn";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import PageUnavailable from "@/components/PageUnavailable";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
@@ -71,6 +72,7 @@ function AdminUserDetailPage() {
   const transferOwnership = useTransferOwnership();
   const [confirmImpersonateOpen, setConfirmImpersonateOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [disableOpen, setDisableOpen] = useState(false);
   const [deleteEditor, setDeleteEditor] = useState<AdminUserEditor | null>(null);
@@ -199,6 +201,10 @@ function AdminUserDetailPage() {
           ownAccount={ownAccount}
           onViewAs={() => setConfirmImpersonateOpen(true)}
           onResetPassword={() => setResetOpen(true)}
+          onSetPassword={() => {
+            selectTab("sign-in");
+            setPasswordOpen(true);
+          }}
           onTransfer={() => setTransferOpen(true)}
           onDisable={() => setDisableOpen(true)}
           onEnable={() => void setEnabled(true)}
@@ -216,6 +222,15 @@ function AdminUserDetailPage() {
               editor={editor}
               manageable={manageable}
               available={available}
+            />
+          </TabsContent>
+          <TabsContent value="sign-in" className="min-w-0">
+            <AdminUserSignIn
+              user={account}
+              manageable={manageable}
+              viewerIsOwner={viewerIsOwner}
+              passwordOpen={passwordOpen}
+              onPasswordOpenChange={setPasswordOpen}
             />
           </TabsContent>
           <TabsContent value="activity" className="min-w-0">

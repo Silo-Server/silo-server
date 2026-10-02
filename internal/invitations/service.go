@@ -87,6 +87,9 @@ type accountCreator interface {
 // sessionStarter logs the newly created user in. Satisfied by *auth.Service.
 type sessionStarter interface {
 	Login(ctx context.Context, username, password, deviceName, ip string) (*auth.TokenPair, *models.User, error)
+	// LocalPasswordLoginAllowed reports whether the local-password account
+	// an invitation creates could sign in at all.
+	LocalPasswordLoginAllowed(ctx context.Context) (bool, error)
 }
 
 // settingReader reads server settings (branding name, external URL).
@@ -195,6 +198,15 @@ func (s *Service) send(ctx context.Context, input SendInput, sourceID *int64) (*
 		email = parsed
 	default:
 		return nil, ErrInvalidEmail
+	}
+
+	// An invitation can only be claimed with a local password, so with local
+	// password sign-in turned off it could never be used. Refuse it up front
+	// rather than send a link that fails after the invitee fills it in.
+	if allowed, err := s.sessions.LocalPasswordLoginAllowed(ctx); err != nil {
+		return nil, err
+	} else if !allowed {
+		return nil, auth.ErrLocalLoginDisabled
 	}
 
 	inviter, err := s.users.GetByID(ctx, int(input.InvitedBy))
@@ -421,6 +433,14 @@ func (s *Service) Lookup(ctx context.Context, token string) (*LookupResult, erro
 func (s *Service) Accept(ctx context.Context, token, email, password, deviceName, ip string) (*auth.TokenPair, *models.User, error) {
 	if strings.TrimSpace(token) == "" {
 		return nil, nil, ErrNotFound
+	}
+	// The invitation creates a local-password account; with local password
+	// sign-in turned off it could not sign in, so the invitation is left
+	// unspent (auth.ErrLocalLoginDisabled).
+	if allowed, err := s.sessions.LocalPasswordLoginAllowed(ctx); err != nil {
+		return nil, nil, err
+	} else if !allowed {
+		return nil, nil, auth.ErrLocalLoginDisabled
 	}
 	linkInvitation := false
 	var entered string

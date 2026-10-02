@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => ({
   userError: null as Error | null,
   refetchUser: vi.fn(),
   live: [] as unknown[],
+  setSignIn: vi.fn(),
 }));
 
 const adminUser: AdminUser = {
@@ -62,6 +63,7 @@ const adminUser: AdminUser = {
   password_login: true,
   password_change_required: false,
   is_owner: false,
+  break_glass: false,
   effective_policy: {
     library_ids: null,
     max_playback_quality: "",
@@ -182,6 +184,21 @@ vi.mock("@/hooks/queries/admin/requests", () => ({
   useRequestGroupLimit: () => ({ data: undefined, isError: false, refetch: vi.fn() }),
   useUpdateRequestUserLimit: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
+vi.mock("@/hooks/queries/admin/externalSignIn", () => ({
+  useUpdateAdminUserSignIn: () => ({ mutate: mocks.setSignIn, isPending: false }),
+  useExternalSignInCapabilities: () => ({
+    data: { available: true, admin_identities: true, break_glass: true, provider_recheck: true },
+  }),
+  useAdminUserIdentities: () => ({ data: [], isLoading: false, isError: false }),
+  useUnlinkAdminUserIdentity: () => ({ mutate: vi.fn(), isPending: false }),
+  useLinkAdminUserIdentity: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+vi.mock("@/hooks/queries/admin/plugins", () => ({
+  useAdminPluginInstallations: () => ({ data: [], isLoading: false }),
+}));
+vi.mock("@/hooks/queries/admin/settings", () => ({
+  useAdminSettingValue: () => ({ data: "true" }),
+}));
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({ beginImpersonation: mocks.beginImpersonation, user: mocks.viewer }),
 }));
@@ -264,6 +281,7 @@ beforeEach(() => {
   mocks.userError = null;
   mocks.refetchUser.mockReset();
   mocks.live = [];
+  mocks.setSignIn.mockReset();
 });
 
 afterEach(() => {
@@ -370,6 +388,30 @@ describe("header", () => {
     expect(screen.queryByRole("button", { name: /reset password/i })).toBeNull();
     expect(screen.getByText("External sign-in")).toBeInTheDocument();
     expect(rowValue("Password")).toBe("Managed by an external sign-in provider");
+  });
+
+  it("sets a password for an account without password sign-in from its Sign-in tab", async () => {
+    const ui = userEvent.setup();
+    mocks.user = { ...adminUser, password_login: false };
+    renderUserDetail();
+    // A reset link needs password sign-in on; a set password turns it back on.
+    expect(screen.queryByRole("button", { name: /reset password/i })).toBeNull();
+    // The header button opens the Sign-in tab with its Set password dialog.
+    await ui.click(screen.getByRole("button", { name: "Set password" }));
+    let dialog = await screen.findByRole("dialog", { name: "Set a password" });
+    expect(search()).toBe("?tab=sign-in");
+    // Canceling closes it on the Sign-in tab, whose own button opens it again.
+    await ui.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByRole("tab", { name: "Sign-in" })).toHaveAttribute("aria-selected", "true");
+    await ui.click(await screen.findByRole("button", { name: "Set a password" }));
+    dialog = await screen.findByRole("dialog", { name: "Set a password" });
+    await ui.type(within(dialog).getByLabelText("New password"), "recovered-pass");
+    await ui.click(within(dialog).getByRole("button", { name: "Set password" }));
+    expect(mocks.setSignIn).toHaveBeenCalledWith(
+      { userId: 7, body: { password: "recovered-pass", require_password_change: true } },
+      expect.anything(),
+    );
   });
 
   it("offers a password reset for an account that signs in with a password", async () => {
@@ -606,6 +648,19 @@ describe("tabs", () => {
       }),
     ).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /Preferences/ })).toHaveTextContent("Preferences0");
+  });
+});
+
+describe("Sign-in tab", () => {
+  it("shows the account's sign-in", async () => {
+    mocks.user = { ...adminUser, role: "admin", break_glass: true };
+    mocks.viewerIsOwner = true;
+    renderUserDetail("/admin/users/7?tab=sign-in");
+    expect(
+      await screen.findByText("On: taylor can sign in with a Silo password."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Break-glass account" })).toBeChecked();
+    expect(screen.getByText("Not connected to a sign-in provider.")).toBeInTheDocument();
   });
 });
 

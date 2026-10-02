@@ -229,6 +229,14 @@ type Dependencies struct {
 	PluginHTTPProxy         *plugins.HTTPProxy
 	PluginUserConfig        *plugins.UserConfigStore
 	AuthProviders           []auth.RegisteredProvider
+	// AuthProviderSource supplies the auth-plugin sign-in providers, rebuilt
+	// without a restart; OnAuthProvidersChanged rebuilds them on every node
+	// after an auth binding write.
+	AuthProviderSource     auth.PluginProviderSource
+	OnAuthProvidersChanged func(context.Context)
+	// AuthProviderRecheck re-checks sessions opened through an external
+	// sign-in provider at refresh (nil skips it).
+	AuthProviderRecheck *auth.ProviderRecheck
 	// PublicURL is the externally-reachable origin (scheme + host) for this
 	// silo instance. Used to build redirect_uri values handed to OAuth
 	// IdPs. Empty disables the /oauth/{install_id}/{init,callback} routes.
@@ -546,6 +554,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 		)
 		for _, registration := range deps.AuthProviders {
 			authService.RegisterProvider(registration.Info, registration.Provider)
+		}
+		if deps.AuthProviderSource != nil {
+			authService.SetPluginProviderSource(deps.AuthProviderSource)
+		}
+		if deps.AuthProviderRecheck != nil {
+			authService.SetProviderRecheck(deps.AuthProviderRecheck)
 		}
 		if settingsRepo != nil {
 			invitationService = invitations.NewService(
@@ -1890,10 +1904,14 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if libraryCollectionService.TraktCollections == nil {
 			// The client ID is resolved per call rather than captured here, so
 			// saving new Trakt credentials applies without a server restart.
-			libraryCollectionService.TraktCollections = &traktCollectionAdapter{
+			adapter := &traktCollectionAdapter{
 				client:   metatrakt.NewClient("", 5),
 				settings: settingsRepo,
 			}
+			if clientIDs, ok := deps.WatchProviderService.(watchProviderAppClientIDs); ok {
+				adapter.watchProviders = clientIDs
+			}
+			libraryCollectionService.TraktCollections = adapter
 		}
 		if tokens, ok := deps.WatchProviderService.(watchProviderAccessTokens); ok && libraryCollectionService.TraktTokenResolver == nil && deps.DB != nil {
 			libraryCollectionService.TraktTokenResolver = &traktCollectionTokenResolver{
@@ -2178,10 +2196,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 			restartStatus,
 		)
 	}
-	// The OAuth handler is optional: it only stands up when PublicURL is
-	// configured (a stable redirect_uri origin for IdPs) and the DB is
-	// available (oauth_sessions storage). It is built before the v2 listener
-	// so completeOAuthLogin shares it with the v1 routes.
+	// The OAuth handler is built whenever the database (oauth_sessions
+	// storage), the auth service and the JWT service are available. Until
+	// server.public_url is set (the stable redirect_uri origin for IdPs), a
+	// v2 start sends the browser or app back with provider_unavailable and
+	// the frozen v1 init answers 409; SetHostBaseURL follows config changes. It is built before the v2 listener so
+	// completeOAuthLogin shares it with the v1 routes.
 	var oauthHandler *auth.OAuthHandler
 	if authHandler != nil {
 		if deps.DB != nil && authService != nil && jwtService != nil {
@@ -2190,7 +2210,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			resolveClient := func(ctx context.Context, installationID int) (auth.OAuthClient, string, error) {
 				pp := authService.FindOAuthInstallation(installationID)
 				if pp == nil {
-					return nil, "", errors.New("plugin not found")
+					return nil, "", auth.ErrUnknownAuthInstallation
 				}
 				c, err := pp.OAuthClient(ctx)
 				if err != nil {
@@ -2198,14 +2218,21 @@ func newChiRouter(deps Dependencies) chi.Router {
 				}
 				return c, pp.CapabilityID(), nil
 			}
+			identity := serveridentity.New(catalog.NewServerSettingsRepo(deps.DB))
 			oauthHandler = auth.NewOAuthHandler(auth.OAuthHandlerDeps{
 				Store:           oauthStore,
 				CompletionStore: oauthStore,
+				LinkTickets:     oauthStore,
 				StateSecret:     stateSecret,
 				ResolveClient:   resolveClient,
 				LoginCompleter:  authService,
 				HostBaseURL:     deps.PublicURL,
 				StateTTL:        10 * time.Minute,
+				ServerID:        identity.ServerID,
+				RevokeSession:   authService.Logout,
+				Users:           userRepo,
+				ProviderLogout:  authService.ProviderLogoutURL,
+				KnownOrigins:    deps.overlayOrigins(),
 			})
 			if deps.OnConfigChange != nil {
 				deps.OnConfigChange(func(_, updated *config.Config) {
@@ -2671,6 +2698,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminPluginRepositoryUpdates = plugins.NewRepositoryStore(deps.DB)
 		v2deps.AdminPluginRepositoryDeletes = plugins.NewRepositoryStore(deps.DB)
 	}
+	var externalSignInPlugins *handlers.PluginHandler
 	if deps.DB != nil && deps.PluginService != nil && deps.PluginUserConfig != nil {
 		v2PluginHandler := handlers.NewPluginHandler(
 			plugins.NewRepositoryStore(deps.DB),
@@ -2683,10 +2711,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 			deps.PluginImageResolver,
 			restartStatus,
 		)
+		v2PluginHandler.SetAuthProvidersChanged(deps.OnAuthProvidersChanged)
 		v2deps.AdminPluginInventory = v2PluginHandler
 		v2deps.AdminPluginConfiguration = v2PluginHandler
 		v2deps.AdminPluginLifecycle = v2PluginHandler
 		v2deps.AdminPluginUploads = v2PluginHandler
+		externalSignInPlugins = v2PluginHandler
+	}
+	if deps.DB != nil && authService != nil && userRepo != nil {
+		v2deps.ExternalSignIn = handlers.NewExternalSignInHandler(auth.NewIdentityService(deps.DB), authService, userRepo, externalSignInPlugins)
 	}
 	if deps.PluginService != nil {
 		v2deps.NetworkAccess = deps.PluginService
@@ -2960,6 +2993,13 @@ func newChiRouter(deps Dependencies) chi.Router {
 					r.Post("/device/poll", authHandler.HandleDevicePoll)
 				}
 
+				// Device sign-in decisions take a user code, so they spend
+				// the lookup's guessing budget as well as authenticating.
+				var deviceDecisionMiddlewares []func(http.Handler) http.Handler
+				if deps.RateLimitMW != nil {
+					deviceDecisionMiddlewares = append(deviceDecisionMiddlewares, deps.RateLimitMW.AuthEndpointHandler("device_lookup"))
+				}
+
 				// Protected auth routes (require valid session).
 				if authMiddleware != nil {
 					r.Group(func(r chi.Router) {
@@ -2982,14 +3022,14 @@ func newChiRouter(deps Dependencies) chi.Router {
 						}
 						r.With(passwordChangeMiddlewares...).
 							Post("/account/password", authHandler.HandleChangePassword)
-						r.Post("/device/approve", authHandler.HandleDeviceApprove)
-						r.Post("/device/deny", authHandler.HandleDeviceDeny)
+						r.With(deviceDecisionMiddlewares...).Post("/device/approve", authHandler.HandleDeviceApprove)
+						r.With(deviceDecisionMiddlewares...).Post("/device/deny", authHandler.HandleDeviceDeny)
 					})
 					if viewerAccessMiddleware != nil {
 						r.With(
 							authMiddleware.RequireAuth,
 							viewerAccessMiddleware.RequireViewerAccess,
-						).Post("/device/approve-handoff", authHandler.HandleDeviceApproveHandoff)
+						).With(deviceDecisionMiddlewares...).Post("/device/approve-handoff", authHandler.HandleDeviceApproveHandoff)
 					}
 				}
 			})
@@ -4120,6 +4160,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 									deps.PluginImageResolver,
 									restartStatus,
 								)
+								pluginHandler.SetAuthProvidersChanged(deps.OnAuthProvidersChanged)
 								r.Route("/plugins", func(r chi.Router) {
 									r.Get("/catalog-settings", pluginHandler.HandleGetCatalogSettings)
 									r.Put("/catalog-settings", pluginHandler.HandlePutCatalogSettings)
@@ -4825,10 +4866,18 @@ func (a *tmdbListAdapter) GetList(ctx context.Context, id, limit int) ([]catalog
 	return entries, nil
 }
 
-// traktClientIDSettingKey holds the Trakt app client ID. It is deliberately
-// not in config.restartRequiredKeys: the adapter re-reads it before every
-// upstream call, so a saved change converges without a restart.
+// traktClientIDSettingKey holds the Trakt app client ID that the built-in Trakt
+// watch provider used. The adapter falls back to it when no Trakt watch-sync
+// plugin is configured, so a server that uses Trakt only for collections keeps
+// working. It is deliberately not in config.restartRequiredKeys: the adapter
+// re-reads it before every upstream call.
 const traktClientIDSettingKey = "watchsync.trakt.client_id"
+
+// watchProviderAppClientIDs reads the app client ID a watch-sync plugin is
+// configured with.
+type watchProviderAppClientIDs interface {
+	AppClientID(ctx context.Context, providerKey string) (string, error)
+}
 
 // adminJobArtifactURLTTL matches the presigned lifetime an S3 deployment hands
 // out, so the two backends expire a download link on the same schedule.
@@ -4849,16 +4898,31 @@ func newAdminJobArtifactSigner(deps *Dependencies) *artworkurl.Signer {
 
 type traktCollectionAdapter struct {
 	client *metatrakt.Client
-	// settings is the live source of the app client ID. Nil only where no
+	// watchProviders supplies the Trakt watch-sync plugin's app client ID,
+	// the app that issued the profile tokens these calls send. Nil when watch
+	// sync is unavailable.
+	watchProviders watchProviderAppClientIDs
+	// settings is the fallback source of the app client ID. Nil only where no
 	// settings store exists (tests), where the client ID stays empty and the
 	// upstream call fails the same way it always did.
 	settings catalog.SettingsStore
 }
 
-// refreshClientID pushes the currently saved app client ID onto the shared
-// client. A read failure leaves the last known value in place: failing the
-// request at Trakt is more useful than failing it here on a transient DB blip.
+// refreshClientID pushes the current app client ID onto the shared client:
+// the Trakt watch-sync plugin's, else the legacy setting. A read failure
+// leaves the last known value in place: failing the request at Trakt is more
+// useful than failing it here on a transient DB blip.
 func (a *traktCollectionAdapter) refreshClientID(ctx context.Context) {
+	if a.watchProviders != nil {
+		clientID, err := a.watchProviders.AppClientID(ctx, "trakt")
+		if err != nil {
+			return
+		}
+		if clientID != "" {
+			a.client.SetClientID(clientID)
+			return
+		}
+	}
 	if a.settings == nil {
 		return
 	}

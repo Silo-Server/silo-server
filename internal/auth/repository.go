@@ -53,7 +53,7 @@ func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
 const allColumns = `id, email, username, password_hash, local_password_login_enabled, password_change_required, role, permissions, enabled,
 	library_ids, max_playback_quality, access_policy_revision,
 	max_streams, max_transcodes, max_remote_stream_bitrate_kbps, max_local_stream_bitrate_kbps, transcode_allowed, audio_transcode_allowed, max_profiles, download_allowed,
-	download_transcode_allowed, requests_allowed, access_group_id, is_owner, created_at, updated_at`
+	download_transcode_allowed, requests_allowed, access_group_id, is_owner, break_glass, created_at, updated_at`
 
 // scanUser scans a single row into a *models.User.
 func scanUser(row pgx.Row) (*models.User, error) {
@@ -83,6 +83,7 @@ func scanUser(row pgx.Row) (*models.User, error) {
 		&u.RequestsAllowed,
 		&u.AccessGroupID,
 		&u.IsOwner,
+		&u.BreakGlass,
 		&u.CreatedAt,
 		&u.UpdatedAt,
 	)
@@ -125,6 +126,7 @@ func scanUsers(rows pgx.Rows) ([]*models.User, error) {
 			&u.RequestsAllowed,
 			&u.AccessGroupID,
 			&u.IsOwner,
+			&u.BreakGlass,
 			&u.CreatedAt,
 			&u.UpdatedAt,
 		)
@@ -420,6 +422,7 @@ func updateUser(ctx context.Context, db interface {
 		{column: "download_allowed", set: input.DownloadAllowed.Set, value: input.DownloadAllowed.Value},
 		{column: "download_transcode_allowed", set: input.DownloadTranscodeAllowed.Set, value: input.DownloadTranscodeAllowed.Value},
 		{column: "requests_allowed", set: input.RequestsAllowed.Set, value: input.RequestsAllowed.Value},
+		breakGlassUpdateColumn(input),
 	}
 
 	setClauses := []string{}
@@ -501,6 +504,22 @@ func updateUser(ctx context.Context, db interface {
 	}
 	return nil
 }
+
+// breakGlassUpdateColumn writes the break-glass flag when the update names
+// it, and clears it when the update moves the account off the admin role,
+// which users_break_glass_admin would otherwise refuse.
+func breakGlassUpdateColumn(input models.UpdateUserInput) userUpdateColumn {
+	demoting := input.Role != nil && *input.Role != models.RoleAdmin
+	switch {
+	case demoting:
+		return userUpdateColumn{column: columnBreakGlass, set: true, value: false}
+	case input.BreakGlass != nil:
+		return userUpdateColumn{column: columnBreakGlass, set: true, value: *input.BreakGlass}
+	}
+	return userUpdateColumn{column: columnBreakGlass}
+}
+
+const columnBreakGlass = "break_glass"
 
 // updateCurrentRole returns account id's role before an update that sets
 // one, and "" for an update that leaves the role alone.
@@ -746,6 +765,9 @@ func (r *UserRepository) CreateInvited(ctx context.Context, input models.CreateU
 		return nil, fmt.Errorf("beginning invited account: %w", err)
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
+	if err := EnsureLocalPasswordLoginAllowedInTransaction(ctx, tx); err != nil {
+		return nil, err
+	}
 	if err := redeemCode(ctx, tx, code); err != nil {
 		return nil, err
 	}

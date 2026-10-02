@@ -1,0 +1,12 @@
+{
+  "revision": "39f58f9b45a058cfae314f94a03b66f3f100a02c7a4d45aac56c1c1a7e7600bb",
+  "state": "available",
+  "available": true,
+  "identities": true,
+  "admin_identities": true,
+  "break_glass": true,
+  "connection_test": true,
+  "live_provider_changes": true,
+  "provider_recheck": true,
+  "credentials_linking": true
+}

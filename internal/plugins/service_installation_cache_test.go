@@ -33,7 +33,7 @@ func newCachedInstallationService(installations ...*Installation) (*Service, *co
 		fakeServiceInstallationStore: newFakeServiceInstallationStore(installations...),
 	}
 	svc := &Service{installations: store}
-	svc.AddLifecycleHook(func(context.Context) { svc.invalidateInstallationCache() })
+	svc.AddLifecycleHook(func(context.Context) { svc.InvalidateInstallationCache() })
 	return svc, store
 }
 
@@ -174,7 +174,7 @@ func TestCachedInstallationSkipsWriteOnRacingInvalidation(t *testing.T) {
 
 	// Simulate the race by invalidating the cache from inside the store read,
 	// i.e. between the generation capture and the write-back.
-	store.onGetByID = func() { svc.invalidateInstallationCache() }
+	store.onGetByID = func() { svc.InvalidateInstallationCache() }
 
 	if _, err := svc.loadInstallation(ctx, 7, false); err != nil {
 		t.Fatalf("racing loadInstallation err = %v", err)
@@ -216,5 +216,43 @@ func TestLoadInstallationRequireEnabledGateAppliesAfterCache(t *testing.T) {
 	}
 	if store.getByIDCalls != 1 {
 		t.Fatalf("GetByID calls = %d, want 1 (gate applied after cache)", store.getByIDCalls)
+	}
+}
+
+// A watch registry reload can read a newer installation from another API node.
+// Refreshing the service cache makes its next RPC replace the old process too.
+func TestWatchProviderReloadUsesUpdatedInstallation(t *testing.T) {
+	oldManifest := testPluginManifest(t, "silo.watchprovider.trakt", "0.1.0")
+	newManifest := testPluginManifest(t, "silo.watchprovider.trakt", "0.2.0")
+	newPath := writeInstalledPluginManifest(t, newManifest)
+	svc, store := newCachedInstallationService(&Installation{
+		ID: 7, PluginID: oldManifest.PluginId, Version: oldManifest.Version,
+		InstallPath: writeInstalledPluginManifest(t, oldManifest), Enabled: true,
+	})
+	host := &fakeServiceHost{
+		clientResult: &fakePluginClient{manifest: oldManifest},
+		startResult:  &fakePluginClient{manifest: newManifest},
+	}
+	svc.host = host
+	if _, err := svc.WatchSyncProviderClient(t.Context(), 7, "trakt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(t.Context(), 7, UpdateInstallationInput{Version: &newManifest.Version, InstallPath: &newPath}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := store.ListEnabled(t.Context())
+	if err != nil || len(rows) != 1 || rows[0].Version != newManifest.Version {
+		t.Fatalf("updated installations = %+v, err = %v", rows, err)
+	}
+	svc.InvalidateInstallationCache()
+	if _, err := svc.WatchSyncProviderClient(t.Context(), 7, "trakt"); err != nil {
+		t.Fatal(err)
+	}
+	if len(host.started) != 1 || len(host.stopped) != 1 || host.started[0].Manifest.Version != newManifest.Version {
+		t.Fatalf("plugin did not restart on the updated installation: starts=%+v stops=%v", host.started, host.stopped)
+	}
+	manifest, err := svc.manifestForInstallation(t.Context(), 7, false)
+	if err != nil || manifest.Version != newManifest.Version {
+		t.Fatalf("manifest = %+v, err = %v, want current version", manifest, err)
 	}
 }

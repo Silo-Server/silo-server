@@ -144,12 +144,13 @@ func TestStalledWalkStopsHoldingOthersBack(t *testing.T) {
 	hung, other := t.TempDir(), t.TempDir()
 	folders := &fakeFolders{}
 	folders.set(library(1, hung), library(2, other))
-	_, b, _, status := fakeMonitor(t, folders, func(cfg *Config) {
-		cfg.WalkStall = 30 * time.Millisecond
-	})
-	b.mu.Lock()
+	// Blocked before the monitor starts, or the walk can finish first.
+	b := newFakeBackend("inotify")
 	b.block[hung] = make(chan struct{}) // never released
-	b.mu.Unlock()
+	_, _, _, status := fakeMonitor(t, folders, func(cfg *Config) {
+		cfg.WalkStall = 30 * time.Millisecond
+		cfg.hooks.primary = func(BackendOptions) (Backend, error) { return b, nil }
+	})
 
 	waitCall(t, b, "add "+other)
 	rows := waitStatus(t, status, "library 2 monitoring", hasState(2, StateMonitoring))
@@ -162,10 +163,11 @@ func TestRemovingARootCancelsItsWalk(t *testing.T) {
 	root := t.TempDir()
 	folders := &fakeFolders{}
 	folders.set(library(1, root))
-	m, b, _, status := fakeMonitor(t, folders, nil)
-	b.mu.Lock()
+	b := newFakeBackend("inotify")
 	b.block[root] = make(chan struct{})
-	b.mu.Unlock()
+	m, _, _, status := fakeMonitor(t, folders, func(cfg *Config) {
+		cfg.hooks.primary = func(BackendOptions) (Backend, error) { return b, nil }
+	})
 	waitCall(t, b, "add "+root)
 
 	folders.set()
@@ -699,7 +701,8 @@ func TestFailedBackendIsReplaced(t *testing.T) {
 		mu      sync.Mutex
 		created []*fakeBackend
 	)
-	_, _, _, status := fakeMonitor(t, folders, func(cfg *Config) {
+	attempts := make(chan State, 16)
+	m, _, _, status := fakeMonitor(t, folders, func(cfg *Config) {
 		cfg.hooks.primary = func(BackendOptions) (Backend, error) {
 			b := newFakeBackend("inotify")
 			mu.Lock()
@@ -707,19 +710,39 @@ func TestFailedBackendIsReplaced(t *testing.T) {
 			mu.Unlock()
 			return b, nil
 		}
+		cfg.hooks.afterAttempt = func(_ string, state State) { attempts <- state }
 	})
 	waitStatus(t, status, "monitoring", onlyMonitoring(1))
+	if state := <-attempts; state != StateMonitoring {
+		t.Fatalf("first attempt ended %q, want monitoring", state)
+	}
 	mu.Lock()
 	first := created[0]
 	mu.Unlock()
 	waitCall(t, first, "add "+root)
 
+	// The status loop reports only rows that changed, and a replacement fast
+	// enough to coalesce "starting" away leaves nothing new to report. Wait
+	// for the attempt that records the root again instead.
 	_ = first.Close() // the reader fails
-	waitStatus(t, status, "monitoring on a new backend", func(rows []LibraryStatus) bool {
-		mu.Lock()
-		defer mu.Unlock()
-		return onlyMonitoring(1)(rows) && len(created) == 2 && created[1].addCount(root) == 1
-	})
+	deadline := time.After(waitTimeout)
+	for state := StateStarting; state != StateMonitoring; {
+		select {
+		case state = <-attempts:
+		case <-deadline:
+			t.Fatal("timed out waiting for the root to be recorded again")
+		}
+	}
+	mu.Lock()
+	backends := len(created)
+	replaced := backends == 2 && created[1].addCount(root) == 1
+	mu.Unlock()
+	m.mu.Lock()
+	rows := m.statusRowsLocked()
+	m.mu.Unlock()
+	if !replaced || !onlyMonitoring(1)(rows) {
+		t.Fatalf("after the backend failed: %d backends, rows %+v; want monitoring on a second backend", backends, rows)
+	}
 }
 
 // A rescan request for a library folder queues one library scan for its

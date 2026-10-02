@@ -407,6 +407,24 @@ jobs:
       - name: Test image cache cleanup resumption against Postgres
         run: go test -race -count=1 -run '^(TestImageCacheCleanup|TestRequeuedImageCacheCleanup|TestJobOutcomeIsRecorded)' ./internal/adminjob/
 
+      - name: Test device sign-in against Postgres
+        run: go test -race -count=1 -run '^TestDeviceLogin.*DB$' ./internal/auth/
+
+      # External sign-in: account resolution and linking, the local-password
+      # policy, the OAuth flow store across nodes (a completion code opens its
+      # session only when redeemed), the provider re-check (and
+      # the provider chain a device approval inherits), the one-provider
+      # binding rule, compatibility sign-in routing, the Owner rules on admin
+      # identity link and unlink, and the admin guards that keep a break-glass
+      # account while local sign-in is off. The break-glass guards run first:
+      # they skip on a database that already holds a break-glass account.
+      - name: Test external sign-in against Postgres
+        run: |
+          go test -race -count=1 -run '^(TestLocalLoginSettingRequiresBreakGlassDB|TestV1AdminUserChangesKeepBreakGlassDB|TestDeviceApprovalInheritsSessionProviderChainDB|TestExternalSignInAdminIdentityGuardsDB)$' ./internal/api/handlers/
+          go test -race -count=1 -run '^(TestExternalSignIn|TestProviderRecheck|TestPGOAuthStore|TestOAuthNativeFlowAcrossNodes|TestOAuthNativeStartOrigin|TestOAuthWebFlowBrowserBinding|TestOAuthUnredeemedCode|TestOAuthLinkFlow|TestOAuthForcedLink|TestLinkCredentialsIdentity|TestLocalPasswordPolicy|TestPasswordLoginRouting|TestIdentityService|TestConcurrentFirstSignInCreatesOneAccount|TestEnableAccountLocalLogin|TestSignupRefusedWhileLocalLoginIsOff).*DB$' ./internal/auth/
+          go test -race -count=1 -run '^TestLoginPINConventionStaysLocalDB$' ./internal/jellycompat/
+          go test -race -count=1 -run '^TestUpsertAuthBindingAllowsOneEnabledProvider$' ./internal/plugins/
+
   web:
     name: Web
     needs: select

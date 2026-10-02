@@ -61,7 +61,7 @@ func NewDatabaseMaintenanceTask(pool *pgxpool.Pool, steps ...taskmanager.Task) *
 func (t *DatabaseMaintenanceTask) Key() string  { return "database_maintenance" }
 func (t *DatabaseMaintenanceTask) Name() string { return "Database Maintenance" }
 func (t *DatabaseMaintenanceTask) Description() string {
-	return "Prunes expired activity and policy logs, task history, login sessions, search index events, and notifications, and prepares upcoming log partitions"
+	return "Prunes expired activity and policy logs, task history, login sessions, device sign-in requests, OAuth sign-in flows, search index events, and notifications, and prepares upcoming log partitions"
 }
 func (t *DatabaseMaintenanceTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategorySystem

@@ -1474,7 +1474,7 @@ func fixtureCases() []fixtureCase {
 			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: "get_device_login_ok", operationID: "getDeviceLogin",
 			scenario: "A browser looks a pairing request up by its user code before deciding.",
-			method:   http.MethodGet, path: "/api/v2/auth/device?code=ABCD-1234",
+			method:   http.MethodGet, path: "/api/v2/auth/device?code=4821-7730",
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/DeviceLogin"},
 		{name: "get_device_login_code_required", operationID: "getDeviceLogin",
 			scenario: "A lookup naming neither code is a validation failure; v1 forwarded it to the store as a 404.",
@@ -1490,11 +1490,11 @@ func fixtureCases() []fixtureCase {
 			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: "approve_device_login_ok", operationID: "approveDeviceLogin",
 			scenario: "A signed-in account approves a pending pairing request by its user code.",
-			method:   http.MethodPost, path: "/api/v2/auth/device/approve", body: `{"code":"ABCD-1234"}`, headers: bearer(memberToken),
+			method:   http.MethodPost, path: "/api/v2/auth/device/approve", body: `{"code":"4821-7730"}`, headers: bearer(memberToken),
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/DeviceLoginDecision"},
 		{name: "approve_device_login_authentication_required", operationID: "approveDeviceLogin",
 			scenario: "A decision without a credential.",
-			method:   http.MethodPost, path: "/api/v2/auth/device/approve", body: `{"code":"ABCD-1234"}`,
+			method:   http.MethodPost, path: "/api/v2/auth/device/approve", body: `{"code":"4821-7730"}`,
 			status: http.StatusUnauthorized, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: "approve_device_login_expired", operationID: "approveDeviceLogin",
 			scenario: "A decision on a request that outlived its window: 410 under the domain's own type.",
@@ -1510,7 +1510,7 @@ func fixtureCases() []fixtureCase {
 			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: "deny_device_login_ok", operationID: "denyDeviceLogin",
 			scenario: "A signed-in account denies a pending pairing request.",
-			method:   http.MethodPost, path: "/api/v2/auth/device/deny", body: `{"code":"ABCD-1234"}`, headers: bearer(memberToken),
+			method:   http.MethodPost, path: "/api/v2/auth/device/deny", body: `{"code":"4821-7730"}`, headers: bearer(memberToken),
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/DeviceLoginDecision"},
 		{name: "deny_device_login_code_required", operationID: "denyDeviceLogin",
 			scenario: "A decision naming neither code is a validation failure.",
@@ -1546,7 +1546,7 @@ func fixtureCases() []fixtureCase {
 			status: http.StatusUnauthorized, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: "complete_oauth_login_ok", operationID: "completeOAuthLogin",
 			scenario: "The SPA redeems the one-time code the OAuth callback redirected it with.",
-			method:   http.MethodPost, path: "/api/v2/auth/oauth/complete", body: `{"code":"c0de"}`,
+			method:   http.MethodPost, path: "/api/v2/auth/oauth/complete", body: `{"code":"c0de"}`, headers: completionCookie,
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/OAuthCompletion"},
 		{name: "complete_oauth_login_code_required", operationID: "completeOAuthLogin",
 			scenario: "A completion without its code is a validation failure naming the member.",
@@ -1733,7 +1733,29 @@ func fixtureCases() []fixtureCase {
 		method:   http.MethodGet, path: "/api/v2/account/me", headers: bearer(demotedToken),
 		status: http.StatusUnauthorized, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/Problem"})
 	cases = append(cases, watchTrickplayFixtureCases()...)
-	return append(cases, adminTrickplayFixtureCases()...)
+	cases = append(cases, adminTrickplayFixtureCases()...)
+	cases = append(cases, deviceSignInFixtureCases()...)
+	return append(cases, externalSignInFixtureCases()...)
+}
+
+// deviceSignInFixtureCases covers the TV sign-in additions: the opened
+// signal and the device withdrawing its own request.
+func deviceSignInFixtureCases() []fixtureCase {
+	problem := "#/components/schemas/Problem"
+	return []fixtureCase{
+		{name: "poll_device_login_opened", operationID: "pollDeviceLogin",
+			scenario: "The device polls a pending request an approver has open: it keeps its code and says to continue on the phone.",
+			method:   http.MethodPost, path: "/api/v2/auth/device/poll", body: `{"device_code":"dev-opened"}`,
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/DeviceLoginPoll"},
+		{name: "cancel_device_login_ok", operationID: "cancelDeviceLogin",
+			scenario: "The device leaves its sign-in screen and withdraws its request, so the code can no longer be approved.",
+			method:   http.MethodPost, path: "/api/v2/auth/device/cancel", body: `{"device_code":"dev-pending"}`,
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/DeviceLoginCancel"},
+		{name: "cancel_device_login_not_found", operationID: "cancelDeviceLogin",
+			scenario: "Canceling with an unknown device code.",
+			method:   http.MethodPost, path: "/api/v2/auth/device/cancel", body: `{"device_code":"nope"}`,
+			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+	}
 }
 
 // fixtureMultipartType is the multipart Content-Type of the avatar fixtures,
@@ -1887,6 +1909,7 @@ func fixtureDeps() Dependencies {
 	deps.CatalogAccess, deps.CatalogBrowse, deps.CatalogItems = catalog, catalog, catalog
 	actions := &fakeCatalogActions{enabled: true, trailerView: handlers.TrailerRefreshView{Status: "queued"}}
 	deps.CatalogTrailers, deps.MetadataAI, deps.People, deps.LiteraryWorks = actions, actions, actions, actions
+	deps.ExternalSignIn = &fakeExternalSignIn{}
 	deps.CursorSecret = []byte("fixture-cursor-key")
 	deps.SettingValues.(*fakeSettingValuesSeam).contendedLabel = "Contended"
 	prefs := preferenceDeps(nil, nil)
