@@ -1,18 +1,60 @@
 {
   "approvals": [
     {
-      "operation_id": "getDeviceLogin",
+      "operation_id": "listAdminPluginCatalog",
       "change_id": "response-property-enum-value-added",
-      "fingerprint": "7a081b939280908637a756d506ea3c9064defa1209d8dd538d662dc6e639fe69",
-      "reason": "Pre-lock addition for TV sign-in: a device can now withdraw its own request, which then reads as canceled to the approver. The approvers are the web /activate page, which this change teaches to show canceled, and the silo-apple and silo-android phone approval screens. Whatever a phone makes of the unknown value, approving or denying a canceled request answers 409, so it can't lead to a sign-in; the phone apps get the canceled wording with the TV sign-in client work. The frozen v1 routes report it as denied.",
-      "approved_in": "#1799"
+      "fingerprint": "2362f203b621b1bb782f9dc9d0e1afc17e7dd5b200e69673befb2374ced6d2ff",
+      "reason": "Pre-lock addition for network identity sign-in: an auth_provider.v1 capability of a network access plugin (such as Tailscale) reports sign_in_mode network. Only the web admin reads sign_in_mode, and this change teaches it the new value; silo-apple and silo-android do not read it.",
+      "approved_in": "#1828"
     },
     {
-      "operation_id": "pollDeviceLogin",
+      "operation_id": "listAdminPluginInstallations",
       "change_id": "response-property-enum-value-added",
-      "fingerprint": "dfc4bc49621dd69efae54e3bd262f3f46823c9cd92bce9a81c420ce44eb0e5b3",
-      "reason": "Pre-lock addition for TV sign-in: a device can now withdraw its own request, which then reads as canceled. Only the device that canceled polls it, and it stops polling when it cancels. Existing silo-apple and silo-android device polls treat an unknown status as a failed attempt, which fails closed; the TV sign-in client work shows it properly. The frozen v1 routes report it as denied.",
-      "approved_in": "#1799"
+      "fingerprint": "ccea90b1358e279640821279e8348214b17864243b4dc78ceed5099bdeba6995",
+      "reason": "Pre-lock addition for network identity sign-in: an auth_provider.v1 capability of a network access plugin (such as Tailscale) reports sign_in_mode network. Only the web admin reads sign_in_mode, and this change teaches it the new value; silo-apple and silo-android do not read it.",
+      "approved_in": "#1828"
+    },
+    {
+      "operation_id": "createAdminPluginInstallation",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "12957239821d287abaedc2a670b7659ee351ee5a5409b22e694c5dcd3e58d76c",
+      "reason": "Pre-lock addition for network identity sign-in: an auth_provider.v1 capability of a network access plugin (such as Tailscale) reports sign_in_mode network. Only the web admin reads sign_in_mode, and this change teaches it the new value; silo-apple and silo-android do not read it.",
+      "approved_in": "#1828"
+    },
+    {
+      "operation_id": "updateAdminPluginInstallation",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "c2fb3554533ca2d6aaa306f2d9e4bfcd3a97dc490e349f381b07ef30dd789960",
+      "reason": "Pre-lock addition for network identity sign-in: an auth_provider.v1 capability of a network access plugin (such as Tailscale) reports sign_in_mode network. Only the web admin reads sign_in_mode, and this change teaches it the new value; silo-apple and silo-android do not read it.",
+      "approved_in": "#1828"
+    },
+    {
+      "operation_id": "restartAdminPluginInstallation",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "323035bf305562435fb9dc59708f3c412ce35bd1fe3d3b721a10e205d84f75a1",
+      "reason": "Pre-lock addition for network identity sign-in: an auth_provider.v1 capability of a network access plugin (such as Tailscale) reports sign_in_mode network. Only the web admin reads sign_in_mode, and this change teaches it the new value; silo-apple and silo-android do not read it.",
+      "approved_in": "#1828"
+    },
+    {
+      "operation_id": "applyAdminPluginUpdate",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "f85ad402fe0cf618aa9974f6f74cb33e228387714afd73c5e290a682ab2f0804",
+      "reason": "Pre-lock addition for network identity sign-in: an auth_provider.v1 capability of a network access plugin (such as Tailscale) reports sign_in_mode network. Only the web admin reads sign_in_mode, and this change teaches it the new value; silo-apple and silo-android do not read it.",
+      "approved_in": "#1828"
+    },
+    {
+      "operation_id": "uploadAdminPluginInstallation",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "34f519abe5c31e98743c8939c378af4d72fb57576be6dee53298078d96c7acbe",
+      "reason": "Pre-lock addition for network identity sign-in: an auth_provider.v1 capability of a network access plugin (such as Tailscale) reports sign_in_mode network. Only the web admin reads sign_in_mode, and this change teaches it the new value; silo-apple and silo-android do not read it.",
+      "approved_in": "#1828"
+    },
+    {
+      "operation_id": "completeAdminPluginUpload",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "a9f1d3a40e8cb62782aad0cf20125b99f883063afdbd0fed02ab43f92d1189e9",
+      "reason": "Pre-lock addition for network identity sign-in: an auth_provider.v1 capability of a network access plugin (such as Tailscale) reports sign_in_mode network. Only the web admin reads sign_in_mode, and this change teaches it the new value; silo-apple and silo-android do not read it.",
+      "approved_in": "#1828"
     }
   ]
 }
