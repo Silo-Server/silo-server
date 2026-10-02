@@ -908,3 +908,91 @@ func TestSyncDroppedPluginNewDropsWithAmbiguousTombstone(t *testing.T) {
 		t.Fatalf("warnings = %#v, want the ambiguous undrop reported", result.Warnings)
 	}
 }
+
+func TestSyncDroppedPluginTombstonePreservesOtherKeys(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		agreed  bool
+		items   func(*droppedHarness) []*pluginv1.WatchSyncRemoteState
+		wantKey string
+	}{
+		{
+			name:   "stored key removed after replacement",
+			agreed: true,
+			items: func(h *droppedHarness) []*pluginv1.WatchSyncRemoteState {
+				return []*pluginv1.WatchSyncRemoteState{
+					remoteDroppedState("new-key", "202", timestamppb.New(h.at(2))),
+					droppedTombstone("old-key"),
+				}
+			},
+			wantKey: "new-key",
+		},
+		{
+			name:   "stored key removed before replacement",
+			agreed: true,
+			items: func(h *droppedHarness) []*pluginv1.WatchSyncRemoteState {
+				return []*pluginv1.WatchSyncRemoteState{
+					droppedTombstone("old-key"),
+					remoteDroppedState("new-key", "202", timestamppb.New(h.at(2))),
+				}
+			},
+			wantKey: "new-key",
+		},
+		{
+			name: "newer drop removed",
+			items: func(h *droppedHarness) []*pluginv1.WatchSyncRemoteState {
+				return []*pluginv1.WatchSyncRemoteState{
+					remoteDroppedState("old-key", "202", timestamppb.New(h.at(1))),
+					remoteDroppedState("new-key", "202", timestamppb.New(h.at(2))),
+					droppedTombstone("new-key"),
+				}
+			},
+			wantKey: "old-key",
+		},
+		{
+			name: "older drop removed",
+			items: func(h *droppedHarness) []*pluginv1.WatchSyncRemoteState {
+				return []*pluginv1.WatchSyncRemoteState{
+					remoteDroppedState("new-key", "202", timestamppb.New(h.at(2))),
+					remoteDroppedState("old-key", "202", timestamppb.New(h.at(1))),
+					droppedTombstone("old-key"),
+				}
+			},
+			wantKey: "new-key",
+		},
+		{
+			name:   "different stored key remains unknown",
+			agreed: true,
+			items: func(h *droppedHarness) []*pluginv1.WatchSyncRemoteState {
+				return []*pluginv1.WatchSyncRemoteState{
+					remoteDroppedState("new-key", "202", timestamppb.New(h.at(2))),
+					droppedTombstone("new-key"),
+				}
+			},
+			wantKey: "old-key",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, provider, client := newPluginDroppedHarness(t)
+			if tc.agreed {
+				h.store.drop(droppedTestSeriesB, h.at(1))
+				h.agree(droppedTestSeriesB, true)
+				h.repo.droppedStates[0].ProviderItemKey = "old-key"
+			}
+			client.listResponse = &pluginv1.WatchSyncListRemoteStateResponse{Items: tc.items(h), NextCursor: testCursorOne}
+			if _, err := h.service.syncDropped(t.Context(), h.conn, ServerConfig{}, provider); err != nil {
+				t.Fatal(err)
+			}
+			if !h.store.active(droppedTestSeriesB) {
+				t.Fatal("removing one provider key must preserve the drop under another key")
+			}
+			if state := h.state(droppedTestSeriesB); state == nil || !state.RemoteSeen || state.ProviderItemKey != tc.wantKey {
+				t.Fatalf("agreement = %#v, want the surviving key %q", state, tc.wantKey)
+			}
+			key := connectionKey(h.conn.Provider, h.conn.UserID, h.conn.ProfileID)
+			if cursor := h.repo.connections[key].SyncCursors[pluginDroppedCursorKey]; cursor != testCursorOne {
+				t.Fatalf("saved cursor = %q, want %q", cursor, testCursorOne)
+			}
+		})
+	}
+}

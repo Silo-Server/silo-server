@@ -303,10 +303,11 @@ func (s *Service) loadDroppedItems(ctx context.Context, conn Connection, onlyIDs
 // resolveRemoteDropped sets each series' remote value from a provider read.
 // An explicit tombstone (an incremental read's undrop) undrops the series
 // whose agreed row or matched drop in this read carries the same provider
-// key; one that names neither changes nothing. A series missing from the
-// read counts as undropped only when the read is complete, no row shares one
-// of its ids (a row the matcher could not place may be this series), and a previous read confirmed
-// the provider held the agreed drop. Every other absent series is unknown and
+// key. Drops under other keys remain active; a tombstone that names neither
+// changes nothing. A series missing from the read counts as undropped only
+// when the read is complete, no row shares one of its ids (a row the matcher
+// could not place may be this series), and a previous read confirmed the
+// provider held the agreed drop. Every other absent series is unknown and
 // keeps its agreed value.
 //
 // A drop Silo sent that no read has confirmed stays agreed rather than being
@@ -326,7 +327,8 @@ func (s *Service) resolveRemoteDropped(ctx context.Context, conn Connection, ite
 	}
 	// remoteChange is a drop matched to a series, or an undrop tombstone
 	// resolved after matching all drops in the read. Changes apply in read
-	// order, so a later undrop wins over an earlier drop and the other way round.
+	// order for each provider key, so a later undrop wins over an earlier drop
+	// and the other way round.
 	type remoteChange struct {
 		row RemoteDropped
 		id  string
@@ -384,33 +386,58 @@ func (s *Service) resolveRemoteDropped(ctx context.Context, conn Connection, ite
 			items[id] = &droppedItem{identity: identity}
 		}
 	}
-	for _, change := range changes {
+	// Resolve each provider record before combining records for a series. A
+	// tombstone for one key must not erase a drop under another key.
+	type recordKey struct{ seriesID, providerKey string }
+	latest := make(map[recordKey]int)
+	for i := range changes {
+		change := &changes[i]
+		key := strings.TrimSpace(change.row.ProviderItemKey)
 		if change.row.Removed {
-			switch candidates := byKey[strings.TrimSpace(change.row.ProviderItemKey)]; len(candidates) {
+			switch candidates := byKey[key]; len(candidates) {
 			case 0:
 				// An echo of an undrop whose agreement Silo already forgot
 				// names nothing and is not worth a warning.
+				continue
 			case 1:
-				if item := items[candidates[0]]; item != nil {
-					item.remote, item.remoteAt, item.observed = false, time.Time{}, true
-				}
+				change.id = candidates[0]
 			default:
 				warnings = append(warnings, "watch sync provider returned an undrop that matches more than one series")
+				continue
 			}
+		}
+		if items[change.id] == nil {
+			continue
+		}
+		record := recordKey{change.id, key}
+		if previous, ok := latest[record]; ok && !change.row.Removed && !changes[previous].row.Removed &&
+			!change.row.DroppedAt.After(changes[previous].row.DroppedAt) {
+			continue
+		}
+		latest[record] = i
+	}
+	for i, change := range changes {
+		key := strings.TrimSpace(change.row.ProviderItemKey)
+		if last, ok := latest[recordKey{change.id, key}]; !ok || last != i {
 			continue
 		}
 		item := items[change.id]
-		if item == nil {
+		if change.row.Removed {
+			// A different saved key remains unknown when this read has no
+			// surviving drop. Let the usual absence safeguards handle it.
+			if item.stored == nil || item.stored.ProviderItemKey == key {
+				item.observed = true
+			}
 			continue
 		}
-		// Of two drop rows for one series, the later drop time wins.
-		if item.observed && item.remote && !change.row.DroppedAt.After(item.remoteAt) {
+		// Of the surviving drop rows for one series, the later drop time wins.
+		if item.remote && !change.row.DroppedAt.After(item.remoteAt) {
 			continue
 		}
 		item.remote = true
 		item.remoteAt = change.row.DroppedAt
 		item.observed = true
-		item.remoteKey = strings.TrimSpace(change.row.ProviderItemKey)
+		item.remoteKey = key
 	}
 
 	// A complete read with no usable rows is more likely a failed read than a
