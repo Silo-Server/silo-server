@@ -207,3 +207,44 @@ func TestMediaSampleAdmitsConfiguredCapacity(t *testing.T) {
 		t.Fatalf("%d runs after release, want 2", n)
 	}
 }
+
+func TestMediaSampleRefusesWhenNoSlotFreesUp(t *testing.T) {
+	server := newTestServer(t)
+	server.watcher.Config().Playback.SubtitleSyncNodeCapacity = 1
+	server.mediaSampleWait = 50 * time.Millisecond
+	dir := t.TempDir()
+	ffmpeg := filepath.Join(dir, "ffmpeg")
+	script := "#!/bin/sh\nmktemp -p " + dir + " start.XXXXXX >/dev/null\nwhile [ ! -f " + dir + "/release ]; do sleep 0.01; done\n"
+	if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server.watcher.Config().Playback.FFmpegPath = ffmpeg
+	first := make(chan int, 1)
+	go func() { first <- postMediaSample(server, speechRequestBody(t, nil), true).Code }()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if matches, _ := filepath.Glob(filepath.Join(dir, "start.*")); len(matches) == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// The slot is held: the next request waits its admission time, then is
+	// refused as unavailable, which callers may run elsewhere.
+	rec := postMediaSample(server, speechRequestBody(t, nil), true)
+	var failure mediasample.RemoteFailure
+	if rec.Code != http.StatusServiceUnavailable || json.Unmarshal(rec.Body.Bytes(), &failure) != nil || failure.Reason != mediasample.ReasonNodeUnavailable {
+		t.Fatalf("over capacity: %d %s", rec.Code, rec.Body)
+	}
+
+	// Neither the refusal nor the finished run keeps a slot.
+	if err := os.WriteFile(filepath.Join(dir, "release"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code := <-first; code != http.StatusOK {
+		t.Fatalf("first run: %d", code)
+	}
+	if code := postMediaSample(server, speechRequestBody(t, nil), true).Code; code != http.StatusOK {
+		t.Fatalf("after release: %d", code)
+	}
+}

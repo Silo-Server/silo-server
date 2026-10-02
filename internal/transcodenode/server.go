@@ -284,7 +284,9 @@ type Server struct {
 	// capacity, whichever API servers send them.
 	mediaSamplesOnce sync.Once
 	mediaSamples     *mediasample.Limiter
-	mu               sync.RWMutex
+	// mediaSampleWait overrides mediasample.MaxRemoteAdmissionWait in tests.
+	mediaSampleWait time.Duration
+	mu              sync.RWMutex
 	// reloadMu keeps force-reload teardown atomic with session creation and
 	// reconstruction. It is always acquired before lifecycleMu or mu.
 	reloadMu sync.RWMutex

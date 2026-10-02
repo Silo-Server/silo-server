@@ -46,7 +46,11 @@ func (s *Server) handleMediaSample(w http.ResponseWriter, r *http.Request) {
 	// capacity itself. A request over it waits for a slot, separately from
 	// its run's timeouts, and is refused as unavailable when none frees up.
 	limiter := s.mediaSampleLimiter(cfg.Playback.SubtitleSyncNodeCapacity)
-	admitCtx, cancelAdmit := context.WithTimeout(r.Context(), mediasample.MaxRemoteAdmissionWait)
+	wait := mediasample.MaxRemoteAdmissionWait
+	if s.mediaSampleWait > 0 {
+		wait = s.mediaSampleWait
+	}
+	admitCtx, cancelAdmit := context.WithTimeout(r.Context(), wait)
 	release, err := limiter.Acquire(admitCtx)
 	cancelAdmit()
 	if err != nil {
