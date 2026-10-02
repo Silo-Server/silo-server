@@ -149,6 +149,16 @@ func TestDiscoverProvidersOffersNetworkProviderToOverlayPeers(t *testing.T) {
 	if plugin.askedCount() != asked {
 		t.Fatal("a refused peer was asked about again within the cache window")
 	}
+	// A registry rebuild (a binding or plugin configuration change) builds a
+	// new provider, whose answers are not taken from the old one's cache.
+	rebuilt := NewPluginProviderWithClientFactory(PluginProviderConfig{InstallationID: 5, CapabilityID: "tailscale"},
+		nil, nil, func(context.Context) (pluginAuthClient, error) { return plugin, nil })
+	svc.SetPluginProviderSource(networkProviderSource(5, rebuilt))
+	discover(overlayContext(ctx, 5, "100.64.0.8"))
+	if plugin.askedCount() != asked+1 {
+		t.Fatal("a rebuilt provider answered from the previous provider's cache")
+	}
+	asked = plugin.askedCount()
 	// A plugin that cannot answer hides the provider and is asked again.
 	plugin.mu.Lock()
 	plugin.err = status.Error(codes.Unavailable, "overlay down")

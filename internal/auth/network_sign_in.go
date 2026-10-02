@@ -178,9 +178,13 @@ const networkPreviewTTL = 30 * time.Second
 // though only overlay peers reach it.
 const networkPreviewLimit = 4096
 
+// networkPreviewKey keys a cached answer by the provider instance, not its
+// installation: the registry builds new instances whenever bindings or the
+// plugin's configuration change, so a changed access rule is never answered
+// from the cache.
 type networkPreviewKey struct {
-	installationID int
-	peer           netip.Addr
+	provider *PluginProvider
+	peer     netip.Addr
 }
 
 type networkPreviewEntry struct {
@@ -204,7 +208,7 @@ func (s *Service) networkPreview(ctx context.Context, provider *PluginProvider) 
 	if err != nil {
 		return nil
 	}
-	key := networkPreviewKey{installationID: provider.InstallationID(), peer: peer}
+	key := networkPreviewKey{provider: provider, peer: peer}
 	now := time.Now()
 	s.previews.mu.Lock()
 	entry, ok := s.previews.entries[key]
