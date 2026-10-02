@@ -180,6 +180,8 @@ func invitationProblem(err error, public bool) *Problem {
 		return NewProblem(TypeValidationFailed, "Invalid invitation configuration.")
 	case errors.Is(err, invitations.ErrRoleNotAllowed):
 		return NewProblem(TypePermissionDenied, "The requested role is not allowed.")
+	case errors.Is(err, auth.ErrLocalLoginDisabled):
+		return NewProblem(TypeLocalLoginDisabled, "Password sign-in is turned off on this server, so invitations can't be sent or claimed. Turn it back on in Settings → Sign-in, or let people sign in with the server's sign-in provider.")
 	case errors.Is(err, auth.ErrTransactionalProfileUnavailable):
 		return NewProblem(TypeCapabilityUnsupported, "The selected store cannot atomically create the required profile.")
 	case errors.Is(err, invitations.ErrNoAddress):
@@ -273,6 +275,10 @@ func registerInvitations(reg *Registry) {
 	})
 	accept := op(http.MethodPost, "/invitations/{token}/accept", "acceptInvitation", true)
 	accept.DefaultStatus = http.StatusCreated
+	// An invitation creates a local-password account: while the server
+	// turns local password sign-in off it is refused, unspent, with 403
+	// local_login_disabled.
+	accept.Errors = append(accept.Errors, http.StatusForbidden)
 	Register(reg, accept, func(ctx context.Context, in *InvitationAcceptInput) (*InvitationAcceptOutput, error) {
 		if len([]byte(in.Body.Password)) > 72 {
 			return nil, NewProblem(TypeValidationFailed, "Password must not exceed 72 bytes.")

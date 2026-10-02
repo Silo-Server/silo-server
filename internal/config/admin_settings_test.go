@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestEffectiveAdminSettingsUsesRuntimeDefaults(t *testing.T) {
@@ -520,5 +521,20 @@ func TestHEVCEncodingSettingDefaultAndValidation(t *testing.T) {
 	}
 	if _, err := NormalizeAdminSetting(PlaybackAllowHEVCEncodingSettingKey, "invalid"); err == nil {
 		t.Fatal("invalid HEVC boolean accepted")
+	}
+}
+
+func TestAuthProviderRecheckInterval(t *testing.T) {
+	for raw, want := range map[string]time.Duration{
+		"":      12 * time.Hour,
+		"bogus": 12 * time.Hour,
+		"-1h":   12 * time.Hour,
+		"30m":   30 * time.Minute,
+		"2d":    48 * time.Hour,
+		" 6h ":  6 * time.Hour,
+	} {
+		if got := AuthProviderRecheckInterval(raw); got != want {
+			t.Errorf("AuthProviderRecheckInterval(%q) = %v, want %v", raw, got, want)
+		}
 	}
 }

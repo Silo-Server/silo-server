@@ -134,6 +134,25 @@ it("does not refresh or replay a 401 accept and requires explicit reload before 
   expect(screen.getByRole("button", { name: "Create account" })).not.toBeDisabled();
   expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/auth/refresh"))).toBe(false);
 });
+it("explains a refusal because password sign-in is off instead of offering recovery", async () => {
+  submit = async () =>
+    new Response(
+      JSON.stringify({
+        type: "https://siloserver.org/docs/api/v2/problems/local_login_disabled",
+        title: "Local password sign-in is turned off",
+        status: 403,
+      }),
+      { status: 403, headers: { "Content-Type": "application/problem+json" } },
+    );
+  mount();
+  await fill();
+  send();
+  await screen.findByText(/Password sign-in is turned off on this server/);
+  expect(screen.getByText(/Ask Admin to add you/)).toBeTruthy();
+  expect(screen.queryByText(/We could not confirm the result/)).toBeNull();
+  expect(screen.getByRole("button", { name: "Create account" })).toBeDisabled();
+  expect(auth.completeLogin).not.toHaveBeenCalled();
+});
 it("does not confuse a storage failure with an unavailable invitation", async () => {
   lookup = async () => problem(500);
   mount();

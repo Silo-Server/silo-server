@@ -233,6 +233,7 @@ func (h *AdminHandler) UpdateAdminAccount(ctx context.Context, id int, revision,
 	if err != nil {
 		return 0, err
 	}
+	enableLocalLoginWithPassword(&input)
 	revoked := false
 	snapshot, err := repo.MutateAdminAccount(ctx, id, revision, &input, func(current *models.User, tx pgx.Tx) (bool, error) {
 		if revision != -1 {
@@ -251,13 +252,14 @@ func (h *AdminHandler) UpdateAdminAccount(ctx context.Context, id int, revision,
 		if input.Role != nil {
 			role = *input.Role
 		}
-		if actorIsScopedAPIKey(ctx) && ((input.Role != nil && role == roleAdmin) || (current.Role == roleAdmin && (input.Password != nil || input.Role != nil))) {
+		if actorIsScopedAPIKey(ctx) && ((input.Role != nil && role == roleAdmin) || (current.Role == roleAdmin && (input.Password != nil || input.Role != nil || input.BreakGlass != nil))) {
 			return false, apiError(403, "insufficient_scope", "A scoped API key may not change admin credentials or grant admin")
 		}
-		// Only local password sign-in can run the change a temporary password
-		// demands; an externally managed account would be locked out.
-		if input.PasswordChangeRequired && !current.LocalPasswordLoginEnabled {
-			return false, apiError(409, "password_login_disabled", "This account does not use local password sign-in, so its password cannot be made temporary")
+		if input.BreakGlass != nil && *input.BreakGlass && role != roleAdmin {
+			return false, fieldError("break_glass", "Only admin accounts can be break-glass accounts")
+		}
+		if err := auth.EnsureBreakGlassAfterAdminChange(ctx, tx, current, &input); err != nil {
+			return false, breakGlassError(err)
 		}
 		if input.AccessGroupID.Set {
 			if err := h.validateAdminGroup(ctx, tx, input.AccessGroupID.Value, role); err != nil {
@@ -297,6 +299,9 @@ func (h *AdminHandler) DeleteAdminAccount(ctx context.Context, id int, revision,
 		if err := auth.CheckOwnerDelete(actor, current); err != nil {
 			return false, ownerError(err)
 		}
+		if err := auth.EnsureBreakGlassAfterAdminChange(ctx, tx, current, nil); err != nil {
+			return false, breakGlassError(err)
+		}
 		return true, nil
 	})
 	if err != nil {
@@ -309,6 +314,25 @@ func (h *AdminHandler) DeleteAdminAccount(ctx context.Context, id int, revision,
 	h.invalidateStats(ctx, cache.ChannelAdmin, cache.EventAdminStatsInvalidated, strconv.Itoa(id))
 	return nil
 }
+
+// enableLocalLoginWithPassword makes an administrator's password write turn
+// the account's local password sign-in back on: the password is only useful
+// with it, and it is how an administrator recovers an account whose external
+// sign-in provider is gone (docs/architecture/external-sign-in.md).
+func enableLocalLoginWithPassword(input *models.UpdateUserInput) {
+	if input.Password != nil && input.LocalPasswordLoginEnabled == nil {
+		input.LocalPasswordLoginEnabled = new(true)
+	}
+}
+
+// breakGlassError renders the break-glass requirement as the conflict it is.
+func breakGlassError(err error) error {
+	if errors.Is(err, auth.ErrBreakGlassRequired) {
+		return apiError(http.StatusConflict, "break_glass_required", "Local password sign-in is off, and this is the last break-glass admin that can still sign in with a password")
+	}
+	return err
+}
+
 func (h *AdminHandler) ImpersonateAdminAccount(ctx context.Context, id int, deviceName, ip string) (TokenPairView, error) {
 	claims := apimw.GetClaims(ctx)
 	if claims == nil || claims.TokenType == auth.TokenTypeAPIKey || claims.SessionID == "" {
@@ -335,7 +359,7 @@ type ownershipTransferrer interface {
 // or an impersonation session may not hand the server over.
 func (h *AdminHandler) TransferAdminOwnership(ctx context.Context, id int) error {
 	claims := apimw.GetClaims(ctx)
-	if claims == nil || claims.TokenType == auth.TokenTypeAPIKey || claims.SessionID == "" || claims.ImpersonatorUserID != nil {
+	if !claims.IsOwnLoginSession() {
 		return ownerError(auth.ErrNotOwner)
 	}
 	repo, ok := h.userRepo.(ownershipTransferrer)

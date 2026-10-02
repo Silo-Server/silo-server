@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	redisv9 "github.com/redis/go-redis/v9"
@@ -162,6 +163,79 @@ func PreviewImageWidth(value string) int {
 // seasons are analyzed at once and how many ffmpeg processes read audio.
 const MarkersDetectionWorkersSettingKey = "markers.detection_workers"
 
+// External sign-in settings (docs/architecture/external-sign-in.md).
+const (
+	// AuthLocalPasswordLoginSettingKey turns local password sign-in on or off
+	// server-wide. Off, only break-glass admin accounts may sign in with a
+	// local password; turning it off requires at least one of them. The
+	// "silo auth local-login enable" command turns it back on.
+	AuthLocalPasswordLoginSettingKey = "auth.local_password_login"
+	// AuthEmailAutoMatchSettingKey links a first external sign-in to the
+	// unlinked account holding the same email, but only when the provider
+	// says the email is verified. Off by default: an email match lets whoever
+	// controls the address at the provider take the account over. Silo does
+	// not verify account emails either, so whoever registers or sets that
+	// address on a Silo account first is the one matched; the match ends the
+	// account's existing sessions, device approvals and API keys.
+	AuthEmailAutoMatchSettingKey = "auth.email_auto_match"
+	// AuthProviderRecheckIntervalSettingKey is how old an identity's last
+	// provider check may be before a session refresh asks the provider again.
+	AuthProviderRecheckIntervalSettingKey = "auth.provider_recheck_interval"
+	// AuthProviderRecheckOutagePolicySettingKey decides what a refresh does
+	// when the provider cannot be reached for a due re-check.
+	AuthProviderRecheckOutagePolicySettingKey = "auth.provider_recheck_outage_policy"
+	// AuthRefreshTokenExpirySettingKey is the login-session lifetime. It is
+	// also the absolute age a provider that cannot re-check an account
+	// allows: such a session ends that long after the provider last vouched
+	// for it, and the account's API keys and Audiobookshelf sessions are
+	// revoked once the person has not signed in through the provider for
+	// that long.
+	AuthRefreshTokenExpirySettingKey = "auth.refresh_token_expiry"
+)
+
+// Values for AuthProviderRecheckOutagePolicySettingKey: keep the session and
+// retry at the next refresh, or refuse the refresh until the provider answers.
+const (
+	AuthRecheckFailOpen   = "fail_open"
+	AuthRecheckFailClosed = "fail_closed"
+)
+
+// DefaultAuthProviderRecheckInterval is AuthProviderRecheckIntervalSettingKey
+// when no valid value is stored.
+const DefaultAuthProviderRecheckInterval = 12 * time.Hour
+
+// AuthProviderRecheckInterval parses a stored
+// AuthProviderRecheckIntervalSettingKey value. An empty or invalid value is
+// the default.
+func AuthProviderRecheckInterval(raw string) time.Duration {
+	parsed, err := parseDuration(strings.TrimSpace(raw))
+	if err != nil || parsed <= 0 {
+		return DefaultAuthProviderRecheckInterval
+	}
+	return parsed
+}
+
+// DefaultAuthRefreshTokenExpiry is AuthRefreshTokenExpirySettingKey when no
+// valid value is stored.
+const DefaultAuthRefreshTokenExpiry = 30 * 24 * time.Hour
+
+// AuthRefreshTokenExpiry parses a stored AuthRefreshTokenExpirySettingKey
+// value. An empty or invalid value is the default.
+func AuthRefreshTokenExpiry(raw string) time.Duration {
+	parsed, err := parseDuration(strings.TrimSpace(raw))
+	if err != nil || parsed <= 0 {
+		return DefaultAuthRefreshTokenExpiry
+	}
+	return parsed
+}
+
+// ServerSettingsMutationLock names the advisory lock every server_settings
+// mutation holds for its transaction. Writers of state that a setting's
+// validation reads (such as the break-glass accounts that
+// AuthLocalPasswordLoginSettingKey requires) take it too, so the check and
+// the write cannot interleave.
+const ServerSettingsMutationLock = "silo:server_settings:mutation"
+
 // adminSettingDefaults is the effective value shown by the Admin UI when no
 // row exists in server_settings. Keep these values aligned with the runtime
 // readers that own each setting. The UI must never invent a second set of
@@ -181,6 +255,11 @@ var adminSettingDefaults = map[string]string{
 	"branding.login_subtitle":   "Sign in with an existing account.",
 	"clientip.trusted_proxies":  "10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, ::1/128",
 	"theme.catalog_url":         DefaultThemeCatalogURL,
+
+	AuthLocalPasswordLoginSettingKey:          "true",
+	AuthEmailAutoMatchSettingKey:              "false",
+	AuthProviderRecheckIntervalSettingKey:     "12h",
+	AuthProviderRecheckOutagePolicySettingKey: AuthRecheckFailOpen,
 
 	"database.max_connections":   "20",
 	"s3.public_path_style":       "true",
@@ -493,8 +572,18 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		"notifications.server_channels.mention_requesters", "notifications.web_push_enabled",
 		"notifications.apple_push_delivery_enabled", "notifications.android_push_delivery_enabled",
 		"catalog.search.meilisearch.semantic_enabled", "catalog.search.meilisearch.binary_quantized",
-		"s3.public_path_style", "s3.private_path_style", "s3.user_db_path_style":
+		"s3.public_path_style", "s3.private_path_style", "s3.user_db_path_style",
+		AuthLocalPasswordLoginSettingKey, AuthEmailAutoMatchSettingKey:
 		return normalizeAdminBool(key, value)
+
+	case AuthProviderRecheckIntervalSettingKey:
+		parsed, err := parseDuration(value)
+		if err != nil || parsed < 5*time.Minute || parsed > 30*24*time.Hour {
+			return "", fmt.Errorf("%s must be a duration between 5m and 30d", key)
+		}
+		return value, nil
+	case AuthProviderRecheckOutagePolicySettingKey:
+		return normalizeAdminEnum(key, value, AuthRecheckFailOpen, AuthRecheckFailClosed)
 
 	case AccessUnratedContentSettingKey:
 		return normalizeAdminEnum(key, value, AccessUnratedContentHide, AccessUnratedContentAllow)

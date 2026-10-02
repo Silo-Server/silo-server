@@ -46,9 +46,17 @@ func (f *fakeAdminAccounts) UpdateAdminAccount(_ context.Context, _ int, rev, gr
 	f.snapshot.Revision++
 	return f.snapshot.Revision, nil
 }
-func (f *fakeAdminAccounts) DeleteAdminAccount(_ context.Context, _ int, rev, group int64) error {
+
+// fixtureLastBreakGlassID is the account the fakes treat as the last
+// usable break-glass admin while local password sign-in is off.
+const fixtureLastBreakGlassID = 8
+
+func (f *fakeAdminAccounts) DeleteAdminAccount(_ context.Context, id int, rev, group int64) error {
 	if f.race || (rev != -1 && rev != f.snapshot.Revision) || group != f.snapshot.GroupRevision {
 		return auth.ErrAdminUserRevision
+	}
+	if id == fixtureLastBreakGlassID {
+		return &handlers.APIError{Status: http.StatusConflict, Code: "break_glass_required", Message: "Local password sign-in is off, and this is the last break-glass admin that can still sign in with a password"}
 	}
 	f.writes++
 	return nil

@@ -174,6 +174,12 @@ func (f *fakeAccounts) CreateAccountInTransaction(_ context.Context, _ pgx.Tx, i
 type fakeSessions struct {
 	logins []string
 	err    error
+	// localLoginOff reports local password sign-in turned off.
+	localLoginOff bool
+}
+
+func (f *fakeSessions) LocalPasswordLoginAllowed(context.Context) (bool, error) {
+	return !f.localLoginOff, nil
 }
 
 func (f *fakeSessions) Login(_ context.Context, username, _, _, _ string) (*auth.TokenPair, *models.User, error) {
@@ -414,6 +420,31 @@ func TestAcceptIsSingleUse(t *testing.T) {
 	}
 }
 
+// With local password sign-in off the account an invitation creates could
+// not sign in, so acceptance is refused and the invitation stays unspent.
+func TestAcceptRefusedWhileLocalLoginIsOff(t *testing.T) {
+	repo := newFakeRepo()
+	accounts := &fakeAccounts{}
+	sessions := &fakeSessions{}
+	svc := newTestService(repo, adminInviter(), accounts, sessions, &fakeMail{configured: true}, fakeSettings{})
+	sent, err := svc.Send(context.Background(), SendInput{Email: testInvitee, InvitedBy: 1})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	sessions.localLoginOff = true
+	token := strings.TrimPrefix(sent.ClaimURL, "https://silo.example.com/invite/")
+	if _, _, err := svc.Accept(context.Background(), token, "", "hunter2hunter2", "d", ""); !errors.Is(err, auth.ErrLocalLoginDisabled) {
+		t.Fatalf("accept = %v, want ErrLocalLoginDisabled", err)
+	}
+	if len(accounts.created) != 0 || len(sessions.logins) != 0 {
+		t.Fatalf("created %d accounts, %d logins", len(accounts.created), len(sessions.logins))
+	}
+	sessions.localLoginOff = false
+	if _, _, err := svc.Accept(context.Background(), token, "", "hunter2hunter2", "d", ""); err != nil {
+		t.Fatalf("accept after local sign-in is back on: %v", err)
+	}
+}
+
 func TestAcceptRefusesExpired(t *testing.T) {
 	repo := newFakeRepo()
 	accounts := &fakeAccounts{}
@@ -553,6 +584,20 @@ func TestResendDeliveryErrorRetainsCommittedReplacement(t *testing.T) {
 
 func (f *fakeRepo) ListPage(context.Context, *PageKey, int) ([]*models.Invitation, bool, error) {
 	return nil, false, nil
+}
+
+// An invitation can only be claimed with a local password, so none is sent
+// while local password sign-in is off.
+func TestSendRefusedWhileLocalLoginIsOff(t *testing.T) {
+	repo := newFakeRepo()
+	sender := &fakeMail{configured: true}
+	svc := newTestService(repo, adminInviter(), &fakeAccounts{}, &fakeSessions{localLoginOff: true}, sender, fakeSettings{})
+	if _, err := svc.Send(context.Background(), SendInput{Email: testInvitee, InvitedBy: 1}); !errors.Is(err, auth.ErrLocalLoginDisabled) {
+		t.Fatalf("Send = %v, want ErrLocalLoginDisabled", err)
+	}
+	if list, _ := svc.List(context.Background()); len(list) != 0 {
+		t.Fatalf("stored %d invitations", len(list))
+	}
 }
 
 func TestSendRecordsDelivery(t *testing.T) {

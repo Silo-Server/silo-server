@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/invitations"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -205,6 +206,9 @@ func writeInvitationSendError(w http.ResponseWriter, err error) {
 	case errors.Is(err, invitations.ErrAdminGrouped):
 		writeError(w, http.StatusUnprocessableEntity, "unprocessable_entity",
 			"Admin accounts cannot belong to an access group")
+	case errors.Is(err, auth.ErrLocalLoginDisabled):
+		writeError(w, http.StatusForbidden, "local_login_disabled",
+			"Password sign-in is turned off on this server, so invitations can't be claimed")
 	case errors.Is(err, invitations.ErrNoLinkBase):
 		writeError(w, http.StatusConflict, "no_link_base",
 			"Configure the Silo public URL so invitation links can be built")

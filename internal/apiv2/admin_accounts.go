@@ -96,12 +96,13 @@ type AdminAccountUpdateBody struct {
 	AdminAccountPolicyInput
 	Username              *string      `json:"username,omitempty" minLength:"1" maxLength:"255"`
 	Email                 *string      `json:"email,omitempty" minLength:"1" maxLength:"320"`
-	Password              *string      `json:"password,omitempty" minLength:"8" maxLength:"72"`
+	Password              *string      `json:"password,omitempty" minLength:"8" maxLength:"72" doc:"New local password. Setting one also turns the account's local password sign-in back on (password_login), for example to recover an account whose external sign-in provider is gone. Only the server Owner may set its own account's password while password_login is false for it (403 permission_denied otherwise)"`
 	RequirePasswordChange *bool        `json:"require_password_change,omitempty" doc:"Only with password: make it temporary, so the account must choose a new one at its next sign-in before it can do anything else. A password sent without it is not temporary"`
 	Role                  *string      `json:"role,omitempty" enum:"admin,user"`
 	Permissions           []Permission `json:"permissions,omitempty"`
 	MaxProfiles           *int         `json:"max_profiles,omitempty" minimum:"1"`
 	Enabled               *bool        `json:"enabled,omitempty"`
+	BreakGlass            *bool        `json:"break_glass,omitempty" doc:"Make the admin account a break-glass account, which keeps local password sign-in while the server turns it off, or clear it. Only admins may hold it, and only the server Owner may set or clear it (403 permission_denied otherwise); clearing the last usable one while local password sign-in is off is 409 break_glass_required"`
 }
 type AdminAccountCreateInput struct {
 	Body    AdminAccountCreateBody
@@ -282,12 +283,15 @@ func registerAdminAccounts(reg *Registry) {
 	Register(reg, create, reg.createAdminAccount)
 	update := adminAccountOperation(http.MethodPut, "/{id}", "updateAdminUser", true)
 	update.DefaultStatus = 204
-	// A taken username or email, or a temporary password for an account
-	// without local password sign-in, is 409 conflict.
+	// A taken username or email is 409 conflict; demoting, disabling or
+	// clearing the last usable break-glass admin while local password
+	// sign-in is off is 409 break_glass_required.
 	update.Errors = append(update.Errors, http.StatusConflict)
 	Register(reg, update, reg.updateAdminAccount)
 	del := adminAccountOperation(http.MethodDelete, "/{id}", "deleteAdminUser", true)
 	del.DefaultStatus = 204
+	del.Description = "Deleting the last usable break-glass admin while local password sign-in is off (auth.local_password_login) is 409 break_glass_required."
+	del.Errors = append(del.Errors, http.StatusConflict)
 	Register(reg, del, func(ctx context.Context, in *AdminAccountInput) (*struct{}, error) {
 		id, rev, groupRev, p := reg.adminAccountGuard(ctx, *in)
 		if p != nil {
@@ -424,6 +428,7 @@ func (reg *Registry) updateAdminAccount(ctx context.Context, in *AdminAccountUpd
 	input.PasswordChangeRequired = b.RequirePasswordChange != nil && *b.RequirePasswordChange
 	input.Role = b.Role
 	input.Enabled = b.Enabled
+	input.BreakGlass = b.BreakGlass
 	input.MaxProfiles = b.MaxProfiles
 	var members map[string]json.RawMessage
 	_ = json.Unmarshal(in.RawBody, &members)

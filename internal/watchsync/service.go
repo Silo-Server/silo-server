@@ -111,10 +111,19 @@ func (s *Service) GetConnectionStatus(ctx context.Context, userID int, profileID
 	}
 	authMethod := authMethodOf(provider)
 	credentialsConfigured := authMethod == AuthMethodAPIKey
-	if _, pluginConfig := provider.(interface{ usesHostPluginConfig() }); pluginConfig {
-		credentialsConfigured = true
-	}
-	if !credentialsConfigured {
+	if plugin, ok := provider.(interface {
+		CredentialsConfigured(context.Context) (bool, error)
+	}); ok {
+		configured, err := plugin.CredentialsConfigured(ctx)
+		if err != nil {
+			// Let the profile try; the plugin reports a missing app config
+			// itself when it is asked to connect.
+			slog.WarnContext(ctx, "watch provider plugin config check failed", "component", "watchsync",
+				"provider", providerKey, "error", err)
+			configured = true
+		}
+		credentialsConfigured = configured
+	} else if !credentialsConfigured {
 		cfg, _ := s.serverConfig(ctx, providerKey)
 		credentialsConfigured = cfg.Configured()
 	}
