@@ -49,6 +49,8 @@ const subtitleTimeline = vi.hoisted(() => ({
   liveCues: [] as Array<{ text: string }>,
   liveKey: null as string | null,
   streamGeneration: 0,
+  cueRevision: 0,
+  assCueRevision: 0,
 }));
 const toastError = vi.hoisted(() => vi.fn());
 const hlsJS = vi.hoisted(() => ({ supported: false, constructed: vi.fn() }));
@@ -74,12 +76,14 @@ vi.mock("../hooks/useSubtitleTracks", () => ({
     subtitleTimeline.liveCues = args[7] as Array<{ text: string }>;
     subtitleTimeline.liveKey = args[8] as string | null;
     subtitleTimeline.streamGeneration = args[9] as number;
+    subtitleTimeline.cueRevision = args[11] as number;
     return [];
   },
 }));
 vi.mock("../hooks/useASSSubtitles", () => ({
   useASSSubtitles: (...args: unknown[]) => {
     subtitleTimeline.assOffsetSeconds = args[4] as number;
+    subtitleTimeline.assCueRevision = args[9] as number;
     return { isActive: false };
   },
 }));
@@ -3107,6 +3111,89 @@ describe("VideoPlayer server-invalidated transport swap", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("VideoPlayer stored subtitle timing", () => {
+  const storedTrack: PlayerSubtitleInfo = {
+    index: 2,
+    language: "en",
+    label: "English",
+    source: "downloaded",
+    codec: "srt",
+    url: "/api/v1/stream/session-1/subtitles/2.vtt?file_id=7&downloaded_subtitle_id=31",
+  };
+  const timingChanged = (fileId: number, subtitleId: number): PlaybackRealtimeEventEnvelope => ({
+    type: "event",
+    session_id: "session-1",
+    name: "subtitle_timing_changed",
+    payload: { session_id: "session-1", file_id: fileId, subtitle_id: subtitleId },
+  });
+
+  beforeEach(() => {
+    realtimeOptions.current = null;
+    controls.current = null;
+    playerV2Mock
+      .mockReset()
+      .mockImplementation(
+        async (_config: unknown, route: string, options: { path?: { id?: string } }) => {
+          const subtitle = { id: "31", media_file_id: "7", timing: { offset_ms: 0, scale: 1 } };
+          if (route === "GET /api/v2/subtitles/{media_file_id}") return { subtitles: [subtitle] };
+          if (route === "GET /api/v2/subtitles/stored/{id}/sync") {
+            return {
+              subtitle: {
+                ...subtitle,
+                id: options.path?.id,
+                timing: { offset_ms: 1200, scale: 1 },
+              },
+            };
+          }
+          return {};
+        },
+      );
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("refetches the active stored track when its timing changes on this file", async () => {
+    renderPlayer({ subtitleUrls: [storedTrack] });
+    act(() =>
+      (controls.current as unknown as { onSubtitleSelect: (i: number) => void }).onSubtitleSelect(
+        2,
+      ),
+    );
+    await act(async () => {});
+    expect(subtitleTimeline.cueRevision).toBe(0);
+
+    // Another file's subtitle and an inactive subtitle leave the cues alone.
+    act(() => realtimeOptions.current?.onEvent?.(timingChanged(8, 31)));
+    act(() => realtimeOptions.current?.onEvent?.(timingChanged(7, 99)));
+    await act(async () => {});
+    expect(subtitleTimeline.cueRevision).toBe(0);
+
+    act(() => realtimeOptions.current?.onEvent?.(timingChanged(7, 31)));
+    await act(async () => {});
+    expect(subtitleTimeline.cueRevision).toBe(1);
+    expect(subtitleTimeline.assCueRevision).toBe(1);
+    // The follow-up read refreshes the menu's status without a second reload.
+    expect(playerV2Mock).toHaveBeenCalledWith(
+      playerConfig,
+      "GET /api/v2/subtitles/stored/{id}/sync",
+      { path: { id: "31" } },
+    );
+    expect(subtitleTimeline.cueRevision).toBe(1);
+    const sync = (
+      controls.current as unknown as {
+        storedSubtitleSync: { entries: Record<string, { subtitle: { timing: unknown } }> };
+      }
+    ).storedSubtitleSync;
+    expect(sync.entries["31"]?.subtitle.timing).toEqual({ offset_ms: 1200, scale: 1 });
   });
 });
 

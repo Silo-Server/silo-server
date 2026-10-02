@@ -47600,6 +47600,58 @@
     },
     {
       "listener": "transcode_node",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/media-samples/run",
+      "registration_index": 0,
+      "handler": "(*internal/transcodenode.Server).handleMediaSample",
+      "handler_kind": "method",
+      "source_file": "internal/transcodenode/server.go",
+      "route_group": "/",
+      "middleware_chain": 27,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": false,
+      "conditions": [],
+      "delegates_to": null,
+      "request_kind": "json",
+      "response_media_kind": "json",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [
+        {
+          "repo": "server",
+          "file": "internal/mediasample/remote.go",
+          "line": 85,
+          "types": [],
+          "match": "manual"
+        }
+      ],
+      "section": "node-transcode",
+      "release_flow": "background_refresh",
+      "tier": 2,
+      "disposition": "ported",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "Node-listener route added with subtitle sync: transcode nodes run media sampling requests (speech levels for subtitle alignment) so large files are read next to the media instead of on the API server. The node listeners have no /api/v2 namespace; the route keeps its version-neutral path and is described through the typed worker protocol extension (`x-silo-worker-protocols`), with no /api/v2 alias.",
+      "owner": null,
+      "review_state": "ratified",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on transcode_node listener with node_bearer; v2 unset by design; description: x-silo-worker-protocols transcode_node POST /media-samples/run. v2 is null by design for node-listener rows: the route keeps its version-neutral path and is described by the worker protocol extension (`x-silo-worker-protocols`), not aliased under /api/v2."
+    },
+    {
+      "listener": "transcode_node",
       "namespace": "operational",
       "method": "GET",
       "path": "/metrics",

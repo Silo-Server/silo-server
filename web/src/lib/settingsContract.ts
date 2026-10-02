@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 15;
+export const SETTINGS_REVISION = 16;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -312,6 +312,8 @@ export const SETTING_KEYS = {
   UI_THEME_MUSIC_LOOP: "ui.theme_music_loop",
   /** Time format */
   UI_TIME_FORMAT: "ui.time_format",
+  /** Show title art */
+  UI_TITLE_ART: "ui.title_art",
 } as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];
@@ -1225,7 +1227,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Show overlay badges on media cards.",
     category: "appearance",
     control: "switch",
-    platforms: ["web"],
+    platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],
   },
   "ui.card_presentation": {
     key: "ui.card_presentation",
@@ -1561,5 +1563,22 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
       { value: "12h", label: "12-hour", introducedIn: 1 },
       { value: "24h", label: "24-hour", introducedIn: 1 },
     ],
+  },
+  "ui.title_art": {
+    key: "ui.title_art",
+    type: "boolean",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 16,
+    scopes: ["profile", "profile_device"],
+    scopeIntroducedIn: [16, 16],
+    resolutionOrder: ["profile", "profile_device", "default"],
+    defaultValue: true,
+    label: "Show title art",
+    description:
+      "Use a title's logo artwork as its name on detail pages when one is available. When off, the name is always shown as text.",
+    category: "appearance",
+    control: "switch",
+    platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],
   },
 };

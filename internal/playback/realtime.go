@@ -30,6 +30,7 @@ const (
 	RealtimeEventSubtitleTranslationCues  RealtimeEventName = "subtitle_translation_cues"
 	RealtimeEventSubtitleTranslationDone  RealtimeEventName = "subtitle_translation_completed"
 	RealtimeEventSubtitleTranslationFail  RealtimeEventName = "subtitle_translation_failed"
+	RealtimeEventSubtitleTimingChanged    RealtimeEventName = "subtitle_timing_changed"
 )
 
 var supportedRealtimeEventNameSet = map[RealtimeEventName]struct{}{
@@ -40,6 +41,7 @@ var supportedRealtimeEventNameSet = map[RealtimeEventName]struct{}{
 	RealtimeEventSubtitleTranslationCues:  {},
 	RealtimeEventSubtitleTranslationDone:  {},
 	RealtimeEventSubtitleTranslationFail:  {},
+	RealtimeEventSubtitleTimingChanged:    {},
 }
 
 // CommandName identifies a supported realtime command.
@@ -310,6 +312,29 @@ func NewSubtitleReadyEvent(
 		return EventEnvelope{}, err
 	}
 	return NewEventEnvelope(sessionID, RealtimeEventSubtitleReady, payload)
+}
+
+// SubtitleTimingChangedPayload tells a player that a stored subtitle of its
+// file was retimed (automatic sync or a manual adjustment). A player showing
+// that track fetches it again; its stream URL already serves the new timing.
+type SubtitleTimingChangedPayload struct {
+	SessionID  string `json:"session_id"`
+	FileID     int    `json:"file_id"`
+	SubtitleID int    `json:"subtitle_id"`
+	// Track identifies the retimed track in the session's inventory, as in
+	// SubtitleReadyPayload. Absent when the inventory could not be resolved.
+	Track *SubtitleInventoryItemV3 `json:"track,omitempty"`
+}
+
+// NewSubtitleTimingChangedEvent creates a validated subtitle-timing event.
+func NewSubtitleTimingChangedEvent(sessionID string, fileID, subtitleID int, track *SubtitleInventoryItemV3) (EventEnvelope, error) {
+	payload, err := json.Marshal(SubtitleTimingChangedPayload{
+		SessionID: sessionID, FileID: fileID, SubtitleID: subtitleID, Track: track,
+	})
+	if err != nil {
+		return EventEnvelope{}, err
+	}
+	return NewEventEnvelope(sessionID, RealtimeEventSubtitleTimingChanged, payload)
 }
 
 // NewSubtitleTranslationStartedEvent creates a validated translation-started event.

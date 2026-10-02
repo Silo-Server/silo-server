@@ -37,9 +37,9 @@ func TestUpdateRequiresSessionRevocation(t *testing.T) {
 		want bool
 	}{
 		{
-			name: "permissions set",
+			name: "permissions change does not revoke session",
 			in:   models.UpdateUserInput{Permissions: &permissions},
-			want: true,
+			want: false,
 		},
 		{
 			name: "permissions unchanged",
@@ -82,9 +82,9 @@ func TestUpdateRequiresSessionRevocation(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "max playback quality",
+			name: "max playback quality change does not revoke session",
 			in:   models.UpdateUserInput{MaxPlaybackQuality: models.SetValue(maxPlaybackQuality)},
-			want: true,
+			want: false,
 		},
 		{
 			name: "max playback quality unchanged",
@@ -92,9 +92,9 @@ func TestUpdateRequiresSessionRevocation(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "max playback quality cleared to inherit",
+			name: "max playback quality cleared to inherit does not revoke session",
 			in:   models.UpdateUserInput{MaxPlaybackQuality: models.ClearValue[string]()},
-			want: true,
+			want: false,
 		},
 		{
 			name: "password",
@@ -102,9 +102,14 @@ func TestUpdateRequiresSessionRevocation(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "access group set",
-			in:   models.UpdateUserInput{AccessGroupID: models.SetValue(groupID)},
+			name: "role with policy changes",
+			in:   models.UpdateUserInput{Role: &role, Permissions: &permissions, AccessGroupID: models.SetValue(groupID)},
 			want: true,
+		},
+		{
+			name: "access group change does not revoke session",
+			in:   models.UpdateUserInput{AccessGroupID: models.SetValue(groupID)},
+			want: false,
 		},
 		{
 			name: "access group unchanged",
@@ -152,4 +157,34 @@ func TestUpdateRequiresSessionRevocation(t *testing.T) {
 			t.Fatalf("updateRequiresSessionRevocation() = %v, want false", got)
 		}
 	})
+
+	enabledCurrent := *current
+	enabledCurrent.Enabled = true
+	t.Run("disable", func(t *testing.T) {
+		if got := updateRequiresSessionRevocation(&enabledCurrent, models.UpdateUserInput{Enabled: &disabled}); !got {
+			t.Fatalf("updateRequiresSessionRevocation() = %v, want true", got)
+		}
+	})
+
+	// Without the current account the rule cannot compare values, so it signs
+	// the user out for any credential, role or enabled field and nothing else.
+	withoutCurrent := []struct {
+		name string
+		in   models.UpdateUserInput
+		want bool
+	}{
+		{name: "password", in: models.UpdateUserInput{Password: &password}, want: true},
+		{name: "role", in: models.UpdateUserInput{Role: &sameRole}, want: true},
+		{name: "enabled", in: models.UpdateUserInput{Enabled: &enabled}, want: true},
+		{name: "permissions", in: models.UpdateUserInput{Permissions: &permissions}, want: false},
+		{name: "max playback quality", in: models.UpdateUserInput{MaxPlaybackQuality: models.SetValue(maxPlaybackQuality)}, want: false},
+		{name: "access group", in: models.UpdateUserInput{AccessGroupID: models.SetValue(groupID)}, want: false},
+	}
+	for _, tt := range withoutCurrent {
+		t.Run("without current "+tt.name, func(t *testing.T) {
+			if got := updateRequiresSessionRevocation(nil, tt.in); got != tt.want {
+				t.Fatalf("updateRequiresSessionRevocation(nil) = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }

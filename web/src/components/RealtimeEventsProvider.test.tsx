@@ -13,13 +13,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   adminKeys,
   catalogKeys,
+  collectionKeys,
   libraryKeys,
   requestKeys,
   sectionKeys,
 } from "@/hooks/queries/keys";
 import type { ItemDetail, TaskInfo } from "@/api/types";
 import { invalidateCatalogState } from "./realtimeCatalogInvalidation";
-import { buildEventsUrl, RealtimeEventsProvider } from "./RealtimeEventsProvider";
+import {
+  buildEventsUrl,
+  EVENTS_ACCESS_CHANGED_CLOSE_CODE,
+  RealtimeEventsProvider,
+} from "./RealtimeEventsProvider";
 
 const mockState = vi.hoisted(() => ({
   user: {
@@ -39,12 +44,14 @@ const mockState = vi.hoisted(() => ({
   },
   profile: null as { id: string; has_pin: boolean } | null,
   pathname: "/",
+  refreshAccount: vi.fn(async () => {}),
 }));
 
 vi.mock("@/hooks/useAuth", () => {
   const useAuth = () => ({
     user: mockState.user,
     profile: mockState.profile,
+    refreshAccount: mockState.refreshAccount,
   });
   return { useAuth, useOptionalAuth: useAuth };
 });
@@ -66,7 +73,7 @@ class FakeWebSocket {
   onopen: (() => void) | null = null;
   onmessage: ((event: MessageEvent) => void) | null = null;
   onerror: (() => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((event: CloseEvent) => void) | null = null;
   readyState = FakeWebSocket.CONNECTING;
 
   constructor(
@@ -82,9 +89,9 @@ class FakeWebSocket {
     this.readyState = FakeWebSocket.CLOSED;
   }
 
-  emitClose() {
+  emitClose(code = 1006) {
     this.readyState = FakeWebSocket.CLOSED;
-    this.onclose?.();
+    this.onclose?.({ code } as CloseEvent);
   }
 
   emitMessage(message: unknown) {
@@ -212,6 +219,7 @@ describe("RealtimeEventsProvider", () => {
       ),
     );
     FakeWebSocket.instances = [];
+    mockState.refreshAccount.mockClear();
     vi.useFakeTimers();
     vi.stubGlobal("WebSocket", FakeWebSocket);
     mockState.pageActivity = {
@@ -957,5 +965,75 @@ describe("RealtimeEventsProvider", () => {
     });
     expect(invalidations(mine)).toBe(1);
     expect(invalidations(search)).toBe(1);
+  });
+
+  describe("access changes", () => {
+    const libraries = libraryKeys.user("none");
+    const detail = catalogKeys.itemDetail("movie-1");
+    const collections = collectionKeys.list();
+    const requests = requestKeys.status();
+
+    function renderWithAccessData() {
+      const queryClient = new QueryClient();
+      for (const key of [libraries, detail, collections, requests]) {
+        queryClient.setQueryData(key, {});
+      }
+      render(
+        <QueryClientProvider client={queryClient}>
+          <RealtimeEventsProvider>
+            <div />
+          </RealtimeEventsProvider>
+        </QueryClientProvider>,
+      );
+      return queryClient;
+    }
+
+    function invalidated(queryClient: QueryClient) {
+      return [libraries, detail, collections, requests].map(
+        (key) => queryClient.getQueryState(key)?.isInvalidated,
+      );
+    }
+
+    it.each([
+      ["the access_changed frame and close code", true],
+      ["the close code alone", false],
+    ])("refetches access-dependent data and reconnects at once on %s", async (_, frame) => {
+      const queryClient = renderWithAccessData();
+      await act(async () => {});
+      const socket = FakeWebSocket.instances[0]!;
+
+      await act(async () => {
+        if (frame) socket.emitMessage({ type: "access_changed" });
+        socket.emitClose(EVENTS_ACCESS_CHANGED_CLOSE_CODE);
+      });
+      expect(invalidated(queryClient)).toEqual([true, true, true, true]);
+      expect(mockState.refreshAccount).toHaveBeenCalledTimes(1);
+
+      // A fresh ticket carries the new access; no backoff before minting it.
+      await act(async () => {
+        vi.advanceTimersByTime(0);
+      });
+      expect(FakeWebSocket.instances).toHaveLength(2);
+    });
+
+    it("keeps cached data and the usual backoff on an ordinary close", async () => {
+      const queryClient = renderWithAccessData();
+      await act(async () => {});
+
+      await act(async () => {
+        FakeWebSocket.instances[0]!.emitClose();
+      });
+      expect(invalidated(queryClient)).toEqual([false, false, false, false]);
+      expect(mockState.refreshAccount).not.toHaveBeenCalled();
+
+      await act(async () => {
+        vi.advanceTimersByTime(999);
+      });
+      expect(FakeWebSocket.instances).toHaveLength(1);
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(FakeWebSocket.instances).toHaveLength(2);
+    });
   });
 });

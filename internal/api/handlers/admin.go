@@ -12,7 +12,6 @@ import (
 	"math"
 	"net/http"
 	"net/url"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1351,15 +1350,20 @@ func (h *AdminHandler) HandleListUserProfiles(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// updateMayRequireSessionRevocation is updateRequiresSessionRevocation without
+// the current account to compare against: any credential, role or enabled
+// change might sign the user out.
 func updateMayRequireSessionRevocation(input models.UpdateUserInput) bool {
 	return input.Password != nil ||
 		input.Role != nil ||
-		input.Enabled != nil ||
-		input.Permissions != nil ||
-		input.MaxPlaybackQuality.Set ||
-		input.AccessGroupID.Set
+		input.Enabled != nil
 }
 
+// updateRequiresSessionRevocation reports whether an account update signs the
+// user out everywhere: a new password, an enabled change, or a role change.
+// Policy changes (permissions, playback-quality override, access group) do
+// not; they bump access_policy_revision, every request resolves the current
+// policy, and connected realtime sockets tell their clients to refresh.
 func updateRequiresSessionRevocation(current *models.User, input models.UpdateUserInput) bool {
 	if input.Password != nil {
 		return true
@@ -1373,47 +1377,7 @@ func updateRequiresSessionRevocation(current *models.User, input models.UpdateUs
 	if input.Enabled != nil && *input.Enabled != current.Enabled {
 		return true
 	}
-	if input.Permissions != nil && !slices.Equal(*input.Permissions, current.Permissions) {
-		return true
-	}
-	if input.MaxPlaybackQuality.Set && !qualityOverrideEqual(input.MaxPlaybackQuality.Value, current.MaxPlaybackQuality) {
-		return true
-	}
-	if input.AccessGroupID.Set && !accessGroupIDEqual(input.AccessGroupID.Value, current.AccessGroupID) {
-		return true
-	}
 	return false
-}
-
-func qualityOverrideEqual(a, b *string) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return access.NormalizePlaybackQuality(*a) == access.NormalizePlaybackQuality(*b)
-}
-
-func accessGroupIDEqual(a, b *int64) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return *a == *b
-}
-
-func (h *AdminHandler) revokeUserSessions(ctx context.Context, userID int) error {
-	if h.pool == nil {
-		return nil
-	}
-	sessionRepo := auth.NewSessionRepository(h.pool)
-	if err := sessionRepo.RevokeAllByUser(ctx, userID); err != nil {
-		return err
-	}
-	if err := sessionRepo.RevokeAllByImpersonator(ctx, userID); err != nil {
-		return err
-	}
-	if h.OnUserSessionsRevoked != nil {
-		h.OnUserSessionsRevoked(ctx, userID)
-	}
-	return nil
 }
 
 // HandleListUnmatched handles GET /admin/unmatched.

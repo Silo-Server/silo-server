@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   toastError: vi.fn(),
   search: "",
   id: "movie-123",
+  showTitleArt: true,
 }));
 
 vi.mock("react-router", async () => {
@@ -36,6 +37,9 @@ vi.mock("@/hooks/queries/libraries", () => ({
 // without a QueryClient, and the badge setting is not what these cases cover.
 vi.mock("@/hooks/useShowAdvisoryAge", () => ({
   useShowAdvisoryAge: () => false,
+}));
+vi.mock("@/hooks/useTitleArt", () => ({
+  useShowTitleArt: () => mocks.showTitleArt,
 }));
 vi.mock("./useThemeMusic", () => ({ useThemeMusic: vi.fn() }));
 
@@ -108,6 +112,7 @@ describe("ItemDetail", () => {
     mocks.toastError.mockReset();
     mocks.search = "";
     mocks.id = "movie-123";
+    mocks.showTitleArt = true;
     mocks.useCatalogItemDetail.mockReturnValue({
       data: { content_id: "movie-123", title: "Catalog Detail", type: "movie" },
       isLoading: false,
@@ -225,6 +230,33 @@ describe("ItemDetail", () => {
 
     expect(screen.getByTestId("home-item-transition-shell")).toBe(initialShell);
     expect(screen.getByTestId("home-item-transition-shell").innerHTML).toBe(initialGeometry);
+  });
+
+  it.each([
+    [true, "h-20"],
+    [false, "h-12"],
+  ])("sizes a warm Home entry's title for title art %s", (showTitleArt, titleHeight) => {
+    mocks.showTitleArt = showTitleArt;
+    mocks.useCatalogItemDetail.mockReturnValue({
+      data: {
+        content_id: "movie-123",
+        title: "Catalog Detail",
+        type: "movie",
+        logo_url: "/api/v1/items/movie-123/logo",
+      },
+      isLoading: false,
+      error: null,
+    });
+
+    render(
+      <SidebarItemEnteredFromHomeContext.Provider value>
+        <SidebarItemDetailsReadyContext.Provider value={false}>
+          <ItemDetail />
+        </SidebarItemDetailsReadyContext.Provider>
+      </SidebarItemEnteredFromHomeContext.Provider>,
+    );
+
+    expect(screen.getByTestId("home-item-transition-title")).toHaveClass(titleHeight);
   });
 
   it("matches the compact hero height for a season Home entry", () => {

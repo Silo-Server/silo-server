@@ -683,7 +683,7 @@ func TestExtractFramePrefersRemoteNodeWhenEnabled(t *testing.T) {
 			authJWTSecretSetting:             "secret",
 		}},
 		transcodePool:      &nodepool.TranscodePool{},
-		remoteReservations: make(map[string]int),
+		remoteReservations: &nodepool.Reservations{},
 		remoteExtractor:    remote,
 	}
 	service.transcodePool.SetNodes([]*nodepool.Node{{
@@ -736,7 +736,7 @@ func TestExtractFramePropagatesSoftwareToneMapSettingToRemoteNode(t *testing.T) 
 			service := &Service{
 				settings:           testSettingsReader{values: settings},
 				transcodePool:      &nodepool.TranscodePool{},
-				remoteReservations: make(map[string]int),
+				remoteReservations: &nodepool.Reservations{},
 				remoteExtractor:    remote,
 			}
 			service.transcodePool.SetNodes([]*nodepool.Node{{
@@ -775,7 +775,7 @@ func TestExtractFrameFallsBackLocalWhenPreferredNodeUnavailable(t *testing.T) {
 			authJWTSecretSetting:             "secret",
 		}},
 		transcodePool:      &nodepool.TranscodePool{},
-		remoteReservations: make(map[string]int),
+		remoteReservations: &nodepool.Reservations{},
 		remoteExtractor: &testRemoteFrameExtractor{
 			reason: chapterThumbnailNodeUnavailableReason,
 			err:    errors.New("node unavailable"),
@@ -816,9 +816,9 @@ func TestExtractFrameRequiresRemoteCapacityWhenConfigured(t *testing.T) {
 			authJWTSecretSetting:                "secret",
 		}},
 		transcodePool: &nodepool.TranscodePool{},
-		remoteReservations: map[string]int{
+		remoteReservations: nodepool.NewReservations(map[string]int{
 			"http://node-1": 1,
-		},
+		}),
 		remoteExtractor: &testRemoteFrameExtractor{},
 		runFFmpegFrameExtractFunc: func(context.Context, string, []string) ([]byte, error) {
 			t.Fatalf("local extractor should not run in transcode_nodes_only mode")
@@ -853,9 +853,9 @@ func TestReserveRemoteNodeAccountsForReservations(t *testing.T) {
 			authJWTSecretSetting:                "secret",
 		}},
 		transcodePool: &nodepool.TranscodePool{},
-		remoteReservations: map[string]int{
+		remoteReservations: nodepool.NewReservations(map[string]int{
 			"http://node-1": 1,
-		},
+		}),
 		remoteExtractor: &testRemoteFrameExtractor{},
 	}
 	service.transcodePool.SetNodes([]*nodepool.Node{

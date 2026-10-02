@@ -26,6 +26,17 @@ transaction. A failed write rolls back all three. Existing account writers also
 advance the revision. After a successful update (204), fetch the canonical editor
 again before editing further. Deletion returns 204.
 
+An update signs the account out everywhere (its login, impersonation and
+Audiobookshelf-compatible sessions, approved device sign-ins not yet collected,
+and its Jellyfin-compatible sessions) only when it sets a password, changes
+`enabled`, or changes the role. Access-group, permission and playback-quality
+changes keep the account signed in: they advance `access_policy_revision`, each
+request resolves the current policy, connected events sockets receive
+`access_changed` (see [realtime-api.md](realtime-api.md#access-changes)), and
+PIN-protected profiles must enter their PIN again. Library, stream-limit and
+download overrides never signed the account out and still do not. The same
+rules apply to the bridge `PUT /api/v1/admin/users/{id}`.
+
 Omitted update fields preserve their values. Nullable policy overrides accept
 `null` to restore inheritance. Explicit empty library and permission arrays,
 `false`, and zero concurrency limits retain their distinct meanings. Account
@@ -168,6 +179,11 @@ administrator.
 `/{id}` resource supports canonical GET, guarded PUT, and guarded DELETE. Create
 returns 201 and Location. Update returns the new canonical representation and
 ETag; delete returns 204. Missing/stale guards return 428/412.
+
+`DELETE /api/v2/admin/access-groups/{id}` moves the group's members into the
+default group in the same transaction and advances their
+`access_policy_revision`. Members stay signed in and get the default group's
+access on their next request, as for a single account moved between groups.
 
 Group configuration changes advance a monotonic revision, including default-group
 changes. Canonical editor responses exclude changing membership counts; list

@@ -49,6 +49,8 @@ interface AuthState {
   login: (username: string, password: string, provider?: string) => Promise<User>;
   /** Swaps a temporary-password session for an unrestricted one after the password was changed. */
   settleTemporaryPassword: () => Promise<void>;
+  /** Re-reads the signed-in account, e.g. after an admin changed its permissions. */
+  refreshAccount: () => Promise<void>;
   completeLogin: (data: LoginResponse) => void;
   setupInitialUser: (username: string, email: string, password: string) => Promise<void>;
   signup: (username: string, email: string, password: string, inviteCode: string) => Promise<void>;
@@ -602,6 +604,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(account);
   }, []);
 
+  // An admin can change an account's permissions or download policy without
+  // signing it out, so the account the app gates features on is re-read when
+  // the server reports an access change. An unchanged account keeps its
+  // identity so nothing keyed on it re-renders.
+  const refreshAccount = useCallback(async () => {
+    const session = captureSessionIdentity();
+    const next = userFromAccount(await v2("GET /api/v2/account/me"));
+    if (!isSessionIdentityCurrent(session)) return;
+    setUser((current) => {
+      if (!current || current.id !== next.id) return current;
+      return JSON.stringify(current) === JSON.stringify(next) ? current : next;
+    });
+  }, []);
+
   const setupInitialUser = useCallback(
     async (username: string, email: string, password: string) => {
       const tokens = await v2("POST /api/v2/auth/setup", {
@@ -646,6 +662,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isImpersonating,
         login,
         settleTemporaryPassword,
+        refreshAccount,
         completeLogin: applyAuthenticatedUser,
         setupInitialUser,
         signup,

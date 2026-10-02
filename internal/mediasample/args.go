@@ -82,6 +82,13 @@ func buildArgs(req Request, attempt Attempt, hw hardwareDecode, inputStart float
 	)
 	duration := formatSeconds(req.Window.DurationSeconds)
 
+	if speech := req.speech(); speech != nil {
+		// Raw samples on stdout; see speech.go.
+		return append(args, "-t", duration,
+			"-map", "0:a:"+strconv.Itoa(speech.AudioStream), "-vn", "-sn", "-dn",
+			"-af", speech.filter(), "-ac", "1",
+			"-f", "s16le", "-acodec", "pcm_s16le", "-"), nil, nil
+	}
 	if audio := req.Audio; req.hasAudioOutput() {
 		args = append(args, "-t", duration, "-vn", "-sn", "-dn")
 		if audio.Silence != nil {

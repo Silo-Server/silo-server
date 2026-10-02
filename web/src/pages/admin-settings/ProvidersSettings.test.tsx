@@ -58,11 +58,17 @@ vi.mock("@/hooks/queries/admin/plugins", () => ({
 
 let sensitiveConfigured: string[] = ["mdblist.api_key"];
 let settingsValues: Record<string, string> = {};
+const setValueMock = vi.fn();
+let adminNodes: { data?: unknown[]; isSuccess: boolean } = { data: [], isSuccess: true };
+
+vi.mock("@/hooks/queries/admin/nodes", () => ({
+  useAdminNodes: () => adminNodes,
+}));
 
 const useSettingsFormMock = vi.fn((_options?: { keys: string[] }) => ({
   isLoading: false,
   getValue: (key: string) => settingsValues[key] ?? "",
-  setValue: vi.fn(),
+  setValue: setValueMock,
   resetValue: vi.fn(),
   dirtyCount: 0,
   dirtyKeys: [],
@@ -165,6 +171,8 @@ describe("ProvidersSettings", () => {
     );
     sensitiveConfigured = ["mdblist.api_key"];
     settingsValues = {};
+    adminNodes = { data: [], isSuccess: true };
+    setValueMock.mockReset();
     markerProviders = [];
     pluginInstallations = [];
     for (const mock of Object.values(mocks)) mock.mockReset();
@@ -183,6 +191,55 @@ describe("ProvidersSettings", () => {
     expect(screen.getByRole("group", { name: "Metadata providers" })).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Marker providers" })).toBeInTheDocument();
     expect(screen.queryByText("Searched in order, top to bottom")).not.toBeInTheDocument();
+  });
+
+  it("stages the subtitle sync settings with their defaults", async () => {
+    adminNodes = {
+      data: [{ id: 1, type: "transcode", enabled: true, healthy: true }],
+      isSuccess: true,
+    };
+    render(<ProvidersSettings />);
+
+    expect(useSettingsFormMock).toHaveBeenLastCalledWith({
+      keys: expect.arrayContaining([
+        "subtitles.auto_sync",
+        "subtitles.sync_execution",
+        "subtitles.sync_node_capacity",
+      ]),
+    });
+    const group = screen.getByRole("group", { name: "Subtitle sync" });
+    const auto = within(group).getByRole("switch", { name: /Sync new subtitles automatically/ });
+    expect(auto).toBeChecked();
+    expect(
+      within(group).getByText(
+        "Aligns downloaded and uploaded subtitles to the video's audio. Fixes subtitles cut for a different release.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(group).getByRole("combobox", { name: /Where to analyze audio/ }),
+    ).toHaveTextContent("Prefer transcode nodes");
+    expect(
+      within(group).getByRole("spinbutton", { name: /Concurrent syncs per transcode node/ }),
+    ).toHaveValue(1);
+    expect(within(group).queryByText("No transcode nodes are connected")).not.toBeInTheDocument();
+
+    await userEvent.click(auto);
+    expect(setValueMock).toHaveBeenCalledWith("subtitles.auto_sync", "false");
+  });
+
+  it("hides node capacity for local sync and warns about node-only sync without nodes", () => {
+    settingsValues = { "subtitles.sync_execution": "local" };
+    const view = render(<ProvidersSettings />);
+    let group = screen.getByRole("group", { name: "Subtitle sync" });
+    expect(
+      within(group).queryByRole("spinbutton", { name: /Concurrent syncs per transcode node/ }),
+    ).not.toBeInTheDocument();
+    view.unmount();
+
+    settingsValues = { "subtitles.sync_execution": "transcode_nodes_only" };
+    render(<ProvidersSettings />);
+    group = screen.getByRole("group", { name: "Subtitle sync" });
+    expect(within(group).getByText("No transcode nodes are connected")).toBeInTheDocument();
   });
 
   it("shows one tile per provider, in search order", () => {

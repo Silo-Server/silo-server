@@ -100,6 +100,8 @@ type Result struct {
 	// SheetTileHeight is the actual cell height, which UseInputAspect may
 	// change from the request after probing the input's display matrix.
 	SheetTileHeight int `json:"sheet_tile_height,omitzero"`
+	// Speech holds the speech levels when the request asked for them.
+	Speech *SpeechLevels `json:"speech,omitempty"`
 	// Decoder names the attempt that produced the result: "software", or
 	// "hardware:<accel>".
 	Decoder string `json:"decoder"`
@@ -224,7 +226,7 @@ type attemptRun struct {
 func (a attemptRun) samples(req Request) (Result, *AttemptError) {
 	if !req.Samples.ReadThrough || (req.Sheets != nil && req.Sheets.UseInputAspect) {
 		header := &inputHeaderParser{}
-		if _, failure := a.exec(req, probeArgs(req.Input), nil, false, header.line); failure != nil {
+		if failure := a.exec(req, probeArgs(req.Input), nil, nil, header.line); failure != nil {
 			return Result{}, failure
 		}
 		if req.Sheets != nil && req.Sheets.UseInputAspect {
@@ -284,14 +286,27 @@ func (a attemptRun) decode(req Request, inputStart float64) (Result, *AttemptErr
 		}
 		handlers = append(handlers, stats.line)
 	}
-	stdout, failure := a.exec(req, args, stdinBytes, req.Audio != nil && req.Audio.Fingerprint, handlers...)
-	if failure != nil {
+	var stdout io.Writer
+	var fingerprint *bytes.Buffer
+	var speech *speechWriter
+	switch {
+	case req.speech() != nil:
+		speech = newSpeechWriter(req.Window.DurationSeconds)
+		stdout = speech
+	case req.Audio != nil && req.Audio.Fingerprint:
+		fingerprint = &bytes.Buffer{}
+		stdout = fingerprint
+	}
+	if failure := a.exec(req, args, stdinBytes, stdout, handlers...); failure != nil {
 		return Result{}, failure
 	}
 
 	result := Result{Decoder: a.decoder}
-	if stdout != nil {
-		result.Fingerprint = DecodeRawFingerprint(stdout.Bytes())
+	if fingerprint != nil {
+		result.Fingerprint = DecodeRawFingerprint(fingerprint.Bytes())
+	}
+	if speech != nil {
+		result.Speech = speech.result(req.Window.StartSeconds)
 	}
 	if silences != nil {
 		result.Silences = silences.result()
@@ -323,7 +338,7 @@ func (a attemptRun) sheets(req Request, times []float64, inputStart float64) (Re
 		offset = req.Window.StartSeconds
 	}
 	assembler := newSheetAssembler(*req.Sheets, times, req.Samples != nil, offset)
-	if failure := a.execTo(req, args, stdinBytes, assembler, assembler.line); failure != nil {
+	if failure := a.exec(req, args, stdinBytes, assembler, assembler.line); failure != nil {
 		return Result{}, failure
 	}
 	if packetTimingPath != "" {
@@ -340,24 +355,9 @@ func (a attemptRun) sheets(req Request, times []float64, inputStart float64) (Re
 }
 
 // exec runs one ffmpeg process of the attempt with args, feeding it stdin
-// when that is not nil and routing its log to handlers. It returns the
-// process's stdout when captureStdout is set.
-func (a attemptRun) exec(req Request, args []string, stdinBytes []byte, captureStdout bool, handlers ...func(string)) (*bytes.Buffer, *AttemptError) {
-	var stdout *bytes.Buffer
-	var stdoutWriter io.Writer
-	if captureStdout {
-		stdout = &bytes.Buffer{}
-		stdoutWriter = stdout
-	}
-	if failure := a.execTo(req, args, stdinBytes, stdoutWriter, handlers...); failure != nil {
-		return nil, failure
-	}
-	return stdout, nil
-}
-
-// execTo runs one ffmpeg process of the attempt as exec does, writing its
-// stdout to stdoutWriter, which may be nil.
-func (a attemptRun) execTo(req Request, args []string, stdinBytes []byte, stdoutWriter io.Writer, handlers ...func(string)) *AttemptError {
+// when that is not nil, writing its stdout to stdout when that is not nil,
+// and routing its log to handlers.
+func (a attemptRun) exec(req Request, args []string, stdinBytes []byte, stdoutWriter io.Writer, handlers ...func(string)) *AttemptError {
 	var stdin io.Reader
 	if stdinBytes != nil {
 		stdin = bytes.NewReader(stdinBytes)

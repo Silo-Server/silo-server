@@ -152,6 +152,19 @@ function TemporaryPasswordProbe() {
   );
 }
 
+function AccountRefreshProbe() {
+  const { user, completeLogin, refreshAccount } = useAuth();
+  return (
+    <div>
+      <div data-testid="account-access">
+        {user ? `${user.download_allowed}:${user.permissions.join(",")}` : "none"}
+      </div>
+      <button onClick={() => completeLogin(makeSession(1, "laura"))}>Sign in as laura</button>
+      <button onClick={() => void refreshAccount()}>Refresh account</button>
+    </div>
+  );
+}
+
 describe("AuthProvider", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -273,6 +286,39 @@ describe("AuthProvider", () => {
     await waitFor(() => expect(screen.getByTestId("signed-in-user")).toHaveTextContent("laura"));
     expect(screen.getByTestId("pending-user")).toHaveTextContent("none");
     expect(refreshAuthenticationMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-reads the signed-in account without signing it out", async () => {
+    renderWithAuthProvider(<AccountRefreshProbe />);
+    await waitFor(() => expect(screen.getByTestId("account-access")).toHaveTextContent("none"));
+    await act(async () => {
+      screen.getByRole("button", { name: "Sign in as laura" }).click();
+    });
+    expect(screen.getByTestId("account-access")).toHaveTextContent("false:");
+
+    v2Mock.mockImplementation((key: string) =>
+      key === "GET /api/v2/account/me"
+        ? Promise.resolve(
+            v2Fixture<"GET /api/v2/account/me">({
+              id: "1",
+              username: "laura",
+              email: "",
+              role: "user",
+              permissions: ["marker_edit"],
+              download_allowed: true,
+              password_change_required: false,
+            }),
+          )
+        : Promise.reject(new Error(`unexpected v2 call: ${key}`)),
+    );
+    await act(async () => {
+      screen.getByRole("button", { name: "Refresh account" }).click();
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("account-access")).toHaveTextContent("true:marker_edit"),
+    );
+    expect(setAccessTokenMock).not.toHaveBeenCalledWith(null);
+    expect(queryClientClearMock).not.toHaveBeenCalled();
   });
 
   it("clears the cache before a different account replaces the signed-in one", async () => {

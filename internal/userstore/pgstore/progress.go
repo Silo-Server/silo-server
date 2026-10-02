@@ -744,6 +744,27 @@ func (s *PostgresUserStore) ListProgress(ctx context.Context, profileID, status 
 	return s.queryProgressRows(ctx, query, s.userID, profileID, limit, offset)
 }
 
+// ListCompletedProgressSince compares on the raw column so
+// idx_uwp_profile_completed serves it as a range scan: a row's whole-second
+// updated_at is after a bound exactly when the column is at least the bound's
+// next whole second.
+func (s *PostgresUserStore) ListCompletedProgressSince(ctx context.Context, profileID string, since, until time.Time, limit int) ([]userstore.WatchProgress, error) {
+	nextSecond := func(t time.Time) time.Time { return t.UTC().Truncate(time.Second).Add(time.Second) }
+	if until.IsZero() {
+		query := progressListSelect + progressStatusPredicate("completed") + `
+		  AND updated_at >= $3
+		ORDER BY updated_at DESC
+		LIMIT $4`
+		return s.queryProgressRows(ctx, query, s.userID, profileID, nextSecond(since), limit)
+	}
+	query := progressListSelect + progressStatusPredicate("completed") + `
+		  AND updated_at >= $3
+		  AND updated_at < $4
+		ORDER BY updated_at DESC
+		LIMIT $5`
+	return s.queryProgressRows(ctx, query, s.userID, profileID, nextSecond(since), nextSecond(until), limit)
+}
+
 // ListProgressPage pages by keyset. The column keeps microseconds but the
 // WatchProgress.UpdatedAt string the key is built from is whole seconds
 // (timeToString), so both the sort and the comparison run on
@@ -922,6 +943,10 @@ func visibleProgressSQL(alias string) string {
 			  AND %[1]s.updated_at <= hhi.hidden_before
 		  )`, alias)
 }
+
+// Compile-time capability check: catalog play-target resolution joins this
+// store's progress relation directly (see userstore.CatalogProgressRelationStore).
+var _ userstore.CatalogProgressRelationStore = (*PostgresUserStore)(nil)
 
 // CatalogProgressRelation returns a profile's visible progress as a SQL
 // relation for catalog queries, numbering its parameters from firstArg. It

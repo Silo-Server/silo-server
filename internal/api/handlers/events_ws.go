@@ -144,10 +144,13 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	h.serveWebSocket(w, r, claims, boundProfileID, wsUpgrader)
+	h.serveWebSocket(w, r, claims, boundProfileID, wsUpgrader, nil)
 }
 
-func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, claims *auth.Claims, boundProfileID string, upgrader websocket.Upgrader) {
+// serveWebSocket runs one events connection. When accessChanged closes, the
+// loop tells the client its access changed and closes the connection with
+// EventsCloseAccessChanged; a nil channel never fires.
+func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, claims *auth.Claims, boundProfileID string, upgrader websocket.Upgrader, accessChanged <-chan struct{}) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		// The Android/KMP client has a long history of silent handshake
@@ -287,6 +290,9 @@ func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, c
 			return
 		case <-readDone:
 			return
+		case <-accessChanged:
+			closeEventsAccessChanged(conn, readDone)
+			return
 		case <-deadlineC:
 			writeWebSocketError(conn, "bad_request", "subscribe is required within "+subscribeGracePeriod.String())
 			_ = writeWebSocketControl(
@@ -322,6 +328,28 @@ func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, c
 				return
 			}
 		}
+	}
+}
+
+// closeEventsAccessChanged sends the access_changed frame and close code, then
+// waits briefly for the client's close reply so both frames arrive before the
+// connection is torn down.
+func closeEventsAccessChanged(conn *websocket.Conn, readDone <-chan struct{}) {
+	if err := writeWebSocketJSON(conn, evt.EventsAccessChangedMessage{Type: eventsAccessChanged}); err != nil {
+		return
+	}
+	if err := writeWebSocketControl(
+		conn,
+		websocket.CloseMessage,
+		websocket.FormatCloseMessage(EventsCloseAccessChanged, eventsAccessChanged),
+	); err != nil {
+		return
+	}
+	reply := time.NewTimer(time.Second)
+	defer reply.Stop()
+	select {
+	case <-readDone:
+	case <-reply.C:
 	}
 }
 

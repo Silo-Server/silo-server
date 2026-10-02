@@ -1,8 +1,18 @@
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { catalogKeys, mediaSurfaceKeys, sectionKeys } from "@/hooks/queries/keys";
+import {
+  calendarKeys,
+  catalogKeys,
+  collectionKeys,
+  downloadKeys,
+  libraryKeys,
+  mediaSurfaceKeys,
+  requestKeys,
+  sectionKeys,
+} from "@/hooks/queries/keys";
 import {
   createCatalogInvalidationScheduler,
+  invalidateAccessDependentState,
   PROGRESS_HOME_REFRESH_WINDOW_MS,
   scheduleProgressHomeRefresh,
   userStateChangeAffectsSectionMembership,
@@ -180,5 +190,27 @@ describe("scheduleProgressHomeRefresh", () => {
     scheduleProgressHomeRefresh(queryClient);
     vi.advanceTimersByTime(PROGRESS_HOME_REFRESH_WINDOW_MS);
     expect(signal()).toBe(2);
+  });
+});
+
+describe("invalidateAccessDependentState", () => {
+  it("marks every access-dependent surface stale", async () => {
+    const queryClient = new QueryClient();
+    const keys = [
+      libraryKeys.user("profile-1"),
+      catalogListKey(1),
+      catalogKeys.itemDetail("movie-1"),
+      sectionKeys.home(),
+      collectionKeys.list(),
+      calendarKeys.week("2026-09-28", "all"),
+      requestKeys.status(),
+      downloadKeys.capability(),
+    ];
+    for (const key of keys) queryClient.setQueryData(key, {});
+
+    invalidateAccessDependentState(queryClient, { allowDashboardRefetch: false });
+    await Promise.resolve();
+
+    expect(keys.filter((key) => !queryClient.getQueryState(key)?.isInvalidated)).toEqual([]);
   });
 });

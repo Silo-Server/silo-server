@@ -441,14 +441,14 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
     ? `the default group, ${defaultGroupName},`
     : "the default group";
   // The count is cached and can be stale (an account may have joined since the
-  // list loaded), so a zero never drops the move and sign-out warning.
+  // list loaded), so a zero never drops the move warning.
   const movers =
     memberCount === undefined
       ? "Its members"
       : memberCount === 0
         ? "Any members (none when this list last loaded)"
         : `${memberCount} ${memberCount === 1 ? "member" : "members"}`;
-  const deleteDescription = `${movers} will move to ${destination} and be signed out so their new access applies. Settings they override on their own account are unchanged. This can't be undone.`;
+  const deleteDescription = `${movers} will move to ${destination} and get its access right away, without being signed out. Settings they override on their own account are unchanged. This can't be undone.`;
 
   // Draft state, keyed by group id via the parent's selection so switching
   // groups remounts this component with fresh initial values.

@@ -3201,12 +3201,22 @@ export interface EventsErrorMessage {
   message: string;
 }
 
+/**
+ * The access the connection was opened under changed (access group,
+ * permissions, playback quality, role, or profile verification). The server
+ * closes the socket right after it with EVENTS_ACCESS_CHANGED_CLOSE_CODE.
+ */
+export interface EventsAccessChangedMessage {
+  type: "access_changed";
+}
+
 export type EventsStreamMessage =
   | EventsHelloMessage
   | EventsSubscribedMessage
   | EventsSnapshotMessage
   | EventsEventMessage
-  | EventsErrorMessage;
+  | EventsErrorMessage
+  | EventsAccessChangedMessage;
 
 export type AdminLogStreamMessage =
   | AdminLogSnapshotMessage

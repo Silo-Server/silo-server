@@ -34,6 +34,7 @@ const FETCH_RETRY_MAX_BACKOFF_MS = 60_000;
  */
 interface SubtitleTrackCarryover {
   url: string | null;
+  cueRevision: number;
   cues: ParsedCue[];
   coverageStart: number;
   windowEnd: number;
@@ -132,6 +133,10 @@ export function useSubtitleTracks(
   // fetched before the first media metadata arrives.
   streamGeneration = 0,
   onLoadState?: (state: "idle" | "loading" | "ready" | "error") => void,
+  // Bumped when the server retimed the active track's content (subtitle sync
+  // or a timing reset) behind an unchanged URL. Changing it refetches the cues
+  // instead of restoring the carried-over ones.
+  cueRevision = 0,
 ): string[] {
   const [activeCueTexts, setActiveCueTexts] = useState<string[]>([]);
   const onLoadStateRef = useRef(onLoadState);
@@ -213,7 +218,10 @@ export function useSubtitleTracks(
     // every restored cue, including cues newly visible after an origin change.
     const carried = carryoverRef.current;
     carryoverRef.current = null;
-    const restored = carried && carried.url === activeUrl && !activeIsLive ? carried : null;
+    const restored =
+      carried && carried.url === activeUrl && carried.cueRevision === cueRevision && !activeIsLive
+        ? carried
+        : null;
     // HLS clears every native TextTrack when it attaches a new stream. Keep
     // source cues independently so that cleanup after that clear can still
     // restore the fetched window, rather than marking an empty track covered.
@@ -478,6 +486,7 @@ export function useSubtitleTracks(
       {
         carryoverRef.current = {
           url: activeUrl,
+          cueRevision,
           cues: Array.from(sourceCues.values()),
           coverageStart,
           windowEnd,
@@ -500,7 +509,16 @@ export function useSubtitleTracks(
     // `streamGeneration` IS included: a stream restart reloads the <video>
     // element and orphans the current track, so it must be rebuilt.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeUrl, activeCodec, activeLang, activeIsLive, liveTrackKey, streamGeneration, videoRef]);
+  }, [
+    activeUrl,
+    activeCodec,
+    activeLang,
+    activeIsLive,
+    liveTrackKey,
+    streamGeneration,
+    cueRevision,
+    videoRef,
+  ]);
 
   // Re-base already-loaded cues when the media timeline remaps — e.g. a
   // copy-mode session restarting at a new position after an out-of-window

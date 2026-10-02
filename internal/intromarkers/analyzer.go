@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/markers"
+	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -93,9 +94,9 @@ type introRepository interface {
 	UpsertSeasonState(ctx context.Context, state SeasonState, analysisHash string) error
 	LoadFingerprint(ctx context.Context, candidate Candidate, cfg Config) (*Fingerprint, error)
 	UpsertFingerprint(ctx context.Context, fp Fingerprint) error
-	LoadArtifacts(ctx context.Context, fileIDs []int, key ArtifactKey) (map[int]Artifact, error)
-	UpsertArtifact(ctx context.Context, a Artifact) error
-	RecordArtifactFailure(ctx context.Context, failure ArtifactFailure) error
+	LoadArtifacts(ctx context.Context, fileIDs []int, key mediaartifact.Key) (map[int]mediaartifact.Artifact, error)
+	UpsertArtifact(ctx context.Context, a mediaartifact.Artifact) error
+	RecordArtifactFailure(ctx context.Context, failure mediaartifact.Failure) error
 }
 
 type fingerprintExtractor interface {
@@ -900,7 +901,7 @@ func (a *Analyzer) recordSilenceAttempt(ctx context.Context, candidate Candidate
 		attempt.Status = silenceAttemptFailed
 		attempt.LastError = refineErr.Error()
 		attempt.FailureCount = 1
-		retryAfter := attempt.AttemptedAt.Add(retryDelay(1))
+		retryAfter := attempt.AttemptedAt.Add(mediaartifact.RetryDelay(1))
 		// Backoff escalates only for this server's own consecutive failures; a
 		// failure recorded elsewhere may come from that server's environment.
 		if previous != nil && previous.Status == silenceAttemptFailed && previous.RecordedBy == attempt.RecordedBy &&
@@ -912,7 +913,7 @@ func (a *Analyzer) recordSilenceAttempt(ctx context.Context, candidate Candidate
 				retryAfter = *previous.RetryAfter
 			} else {
 				attempt.FailureCount = previous.FailureCount + 1
-				retryAfter = attempt.AttemptedAt.Add(retryDelay(attempt.FailureCount))
+				retryAfter = attempt.AttemptedAt.Add(mediaartifact.RetryDelay(attempt.FailureCount))
 			}
 		}
 		attempt.RetryAfter = &retryAfter
