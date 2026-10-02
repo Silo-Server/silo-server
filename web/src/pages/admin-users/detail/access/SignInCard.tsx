@@ -18,16 +18,29 @@ import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
 
 import { KeyValueRow } from "../ui";
 import { EditableCard, type AccessCardProps } from "./EditableCard";
-import { accessGroupName, parseWholeNumber, roleLabel } from "./policySources";
+import { DefaultCustomSegment, PolicyValueRow } from "./PolicyRow";
+import {
+  accessGroupName,
+  inheritedValueText,
+  parseWholeNumber,
+  roleLabel,
+  rowChanged,
+  rowDraft,
+  rowOverride,
+  rowSource,
+  type RowDraft,
+} from "./policySources";
 import { useAccountCardDraft } from "./useAccountCardDraft";
+
+const PROFILES_LABEL = "Profiles allowed";
 
 interface SignInDraft {
   username: string;
   email: string;
   role: string;
   enabled: boolean;
-  /** Kept as typed so a cleared box is an unsaved edit, not 0. */
-  maxProfiles: string;
+  /** The profile limit override; `text` keeps a cleared box an unsaved edit, not 0. */
+  profiles: RowDraft<number>;
 }
 
 function toDraft(user: AdminUser): SignInDraft {
@@ -36,7 +49,10 @@ function toDraft(user: AdminUser): SignInDraft {
     email: user.email,
     role: user.role,
     enabled: user.enabled,
-    maxProfiles: String(user.max_profiles),
+    profiles: rowDraft(
+      user.max_profiles,
+      user.max_profiles === null ? "" : String(user.max_profiles),
+    ),
   };
 }
 
@@ -46,7 +62,7 @@ function changedRows(draft: SignInDraft, base: SignInDraft): string[] {
   if (draft.email !== base.email) rows.push("Email");
   if (draft.role !== base.role) rows.push("Role");
   if (draft.enabled !== base.enabled) rows.push("Can sign in");
-  if (draft.maxProfiles.trim() !== base.maxProfiles) rows.push("Profiles allowed");
+  if (rowChanged(draft.profiles, rowOverride(base.profiles) ?? null)) rows.push(PROFILES_LABEL);
   return rows;
 }
 
@@ -60,19 +76,29 @@ function toBody(draft: SignInDraft, base: AdminUser): UpdateUserRequest {
     if (draft.role === "admin") body.access_group_id = null;
   }
   if (draft.enabled !== base.enabled) body.enabled = draft.enabled;
-  const profiles = parseWholeNumber(draft.maxProfiles, 1);
-  if (profiles !== null && profiles !== base.max_profiles) body.max_profiles = profiles;
+  const profiles = rowOverride(draft.profiles);
+  if (profiles !== undefined && rowChanged(draft.profiles, base.max_profiles)) {
+    body.max_profiles = profiles;
+  }
   return body;
 }
 
 function validate(draft: SignInDraft): string | null {
   if (draft.username.trim() === "") return "Enter a username.";
   if (!isValidEmail(draft.email)) return INVALID_EMAIL_MESSAGE;
-  if (parseWholeNumber(draft.maxProfiles, 1) === null) return "Allow at least 1 profile.";
   return null;
 }
 
-export function SignInCard({ user, editor, manageable, available, groups }: AccessCardProps) {
+export function SignInCard({
+  user,
+  editor,
+  manageable,
+  available,
+  groups,
+  libraries,
+  ctx,
+  hints,
+}: AccessCardProps) {
   const viewerId = useAuth().user?.id;
   const viewerIsOwner = useViewerIsOwner(viewerId);
   const profiles = useAdminUserProfiles(user.id);
@@ -91,6 +117,7 @@ export function SignInCard({ user, editor, manageable, available, groups }: Acce
   const profilesId = useId();
 
   const used = profiles.data?.length;
+  const inheritedProfiles = hints.max_profiles;
   const d = draft.draft;
   const base = draft.base ?? user;
   // Only the server owner may grant the admin role; nobody changes their own
@@ -98,6 +125,12 @@ export function SignInCard({ user, editor, manageable, available, groups }: Acce
   const adminRoleLocked = !viewerIsOwner && base.role !== "admin";
   const ownAccount = base.id === viewerId;
   const changed = new Set(draft.changed);
+  const saved = toDraft(base);
+  // A Custom limit with nothing valid in place of a saved override can't be saved.
+  const profilesIncomplete =
+    d !== undefined &&
+    rowOverride(d.profiles) === undefined &&
+    rowOverride(saved.profiles) !== null;
 
   function roleDescription(): string {
     if (ownAccount) return "You can't change your own role.";
@@ -120,6 +153,7 @@ export function SignInCard({ user, editor, manageable, available, groups }: Acce
       manageable={manageable}
       available={available}
       canEdit={editor !== undefined}
+      invalid={profilesIncomplete}
       state={draft}
     >
       {draft.editing && d ? (
@@ -200,23 +234,62 @@ export function SignInCard({ user, editor, manageable, available, groups }: Acce
             }
           />
           <KeyValueRow
-            label={<Label htmlFor={profilesId}>Profiles allowed</Label>}
+            label={
+              d.profiles.custom ? (
+                <Label htmlFor={profilesId}>{PROFILES_LABEL}</Label>
+              ) : (
+                PROFILES_LABEL
+              )
+            }
             description={used !== undefined ? `${used} used` : undefined}
-            changed={changed.has("Profiles allowed")}
+            changed={changed.has(PROFILES_LABEL)}
             value={
-              <Input
-                id={profilesId}
-                type="number"
-                inputMode="numeric"
-                min={1}
-                step={1}
-                className="w-24"
-                value={d.maxProfiles}
-                aria-invalid={parseWholeNumber(d.maxProfiles, 1) === null ? true : undefined}
-                onChange={(event) =>
-                  draft.setDraft((prev) => ({ ...prev, maxProfiles: event.target.value }))
+              <DefaultCustomSegment
+                label={PROFILES_LABEL}
+                defaultText={
+                  inheritedProfiles === undefined ? undefined : String(inheritedProfiles)
                 }
-              />
+                custom={d.profiles.custom}
+                onCustomChange={(on) =>
+                  // Custom starts from the inherited limit; with that unknown
+                  // the box starts empty.
+                  draft.setDraft((prev) => ({
+                    ...prev,
+                    profiles: on
+                      ? {
+                          custom: true,
+                          value: inheritedProfiles ?? null,
+                          text: inheritedProfiles === undefined ? "" : String(inheritedProfiles),
+                        }
+                      : { custom: false, value: null, text: "" },
+                  }))
+                }
+              >
+                <div className="flex flex-col items-end gap-1">
+                  <Input
+                    id={profilesId}
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    step={1}
+                    className="w-24"
+                    value={d.profiles.text ?? ""}
+                    aria-invalid={d.profiles.value === null ? true : undefined}
+                    onChange={(event) => {
+                      const text = event.target.value;
+                      draft.setDraft((prev) => ({
+                        ...prev,
+                        profiles: { custom: true, text, value: parseWholeNumber(text, 1) },
+                      }));
+                    }}
+                  />
+                  {d.profiles.value === null ? (
+                    <span className="text-muted-foreground text-xs">
+                      Enter a whole number of at least 1, or switch back to Default.
+                    </span>
+                  ) : null}
+                </div>
+              </DefaultCustomSegment>
             }
           />
         </>
@@ -246,16 +319,18 @@ export function SignInCard({ user, editor, manageable, available, groups }: Acce
               </>
             }
           />
-          <KeyValueRow
-            label="Profiles allowed"
+          <PolicyValueRow
+            label={PROFILES_LABEL}
             value={
               <>
-                {user.max_profiles}
+                {user.effective_policy.max_profiles}
                 {used !== undefined ? (
                   <span className="text-muted-foreground text-xs font-normal"> · {used} used</span>
                 ) : null}
               </>
             }
+            source={rowSource(user, "maxProfiles", ctx)}
+            base={inheritedValueText("maxProfiles", hints, ctx, libraries)}
           />
         </>
       )}

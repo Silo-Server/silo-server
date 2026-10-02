@@ -71,6 +71,7 @@ const GROUP = {
   max_transcodes: 0,
   max_remote_stream_bitrate_kbps: 0,
   max_local_stream_bitrate_kbps: 0,
+  max_profiles: 5,
   allowed_permissions: [] as string[],
   requests_allowed: false,
   is_default: true,
@@ -619,6 +620,23 @@ describe("AdminAccessGroups", () => {
       ),
     );
     expect(dialog).not.toHaveTextContent("This group has no members");
+  });
+
+  it("saves the group's profile limit and won't save one below 1", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
+    const limit = await screen.findByRole("spinbutton", { name: "Max profiles" });
+    expect(limit).toHaveValue(5);
+    await user.clear(limit);
+    await user.type(limit, "0");
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    await user.clear(limit);
+    await user.type(limit, "3");
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => {
+      expect(putBody).toMatchObject({ max_profiles: 3 });
+    });
   });
 
   it("saves a custom Mbps bitrate limit as whole kbps", async () => {

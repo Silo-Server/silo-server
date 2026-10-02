@@ -100,7 +100,7 @@ func TestHandleCreateProfile_EnforcesUserProfileLimit(t *testing.T) {
 	store := newProfileTestStore(t)
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
 	handler.UserRepo = testProfileUserRepo{
-		user: &models.User{ID: 1, MaxProfiles: 1},
+		user: &models.User{ID: 1, MaxProfiles: new(1)},
 	}
 
 	req := newAuthorizedProfileRequestWithRole(
@@ -139,7 +139,7 @@ func TestHandleCreateProfile_AllowsNonAdminUpToCap(t *testing.T) {
 	store := newProfileTestStore(t)
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
 	handler.UserRepo = testProfileUserRepo{
-		user: &models.User{ID: 1, MaxProfiles: 5},
+		user: &models.User{ID: 1, MaxProfiles: new(5)},
 	}
 
 	req := newAuthorizedProfileRequestWithRole(
@@ -163,6 +163,47 @@ func TestHandleCreateProfile_AllowsNonAdminUpToCap(t *testing.T) {
 	}
 	if len(profiles) != 2 {
 		t.Fatalf("profile count = %d, want 2", len(profiles))
+	}
+}
+
+// profileLimitGroups serves one access group's policy for every account.
+type profileLimitGroups struct{ policy access.GroupPolicy }
+
+func (g profileLimitGroups) GetPolicyForUser(context.Context, int) (*access.GroupPolicy, error) {
+	policy := g.policy
+	return &policy, nil
+}
+
+func TestHandleCreateProfile_EnforcesInheritedGroupProfileLimit(t *testing.T) {
+	groupID := int64(4)
+	tests := []struct {
+		name     string
+		override *int
+		want     int
+	}{
+		{name: "inherits the group's limit", want: http.StatusConflict},
+		{name: "an override above the group's limit wins", override: new(2), want: http.StatusCreated},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newProfileTestStore(t)
+			handler := NewProfileHandler(testUserStoreProvider{store: store})
+			handler.UserRepo = testProfileUserRepo{
+				user: &models.User{ID: 1, Role: models.RoleUser, AccessGroupID: &groupID, MaxProfiles: tt.override},
+			}
+			handler.AccessGroups = profileLimitGroups{policy: access.GroupPolicy{ID: groupID, MaxProfiles: 1}}
+
+			req := newAuthorizedProfileRequestWithRole(http.MethodPost, "/profiles", `{"name":"Kids"}`, "user", "profile-1")
+			rr := httptest.NewRecorder()
+			handler.HandleCreateProfile(rr, req)
+
+			if rr.Code != tt.want {
+				t.Fatalf("status = %d, want %d, body = %s", rr.Code, tt.want, rr.Body.String())
+			}
+			if tt.want == http.StatusConflict && !strings.Contains(rr.Body.String(), "profile limit (1)") {
+				t.Fatalf("body = %s, want the group's limit in the message", rr.Body.String())
+			}
+		})
 	}
 }
 
@@ -270,7 +311,7 @@ func TestHandleCreateProfile_BlocksNonPrimaryNonAdmin(t *testing.T) {
 	}
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
 	handler.UserRepo = testProfileUserRepo{
-		user: &models.User{ID: 1, MaxProfiles: 5},
+		user: &models.User{ID: 1, MaxProfiles: new(5)},
 	}
 
 	req := newAuthorizedProfileRequestWithRole(
@@ -299,7 +340,7 @@ func TestHandleCreateProfile_RequiresVerifiedPrimaryPINWhenPrimaryHasPIN(t *test
 
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
 	handler.UserRepo = testProfileUserRepo{
-		user: &models.User{ID: 1, MaxProfiles: 5, AccessPolicyRevision: 7},
+		user: &models.User{ID: 1, MaxProfiles: new(5), AccessPolicyRevision: 7},
 	}
 	handler.ProfileTokens = access.NewProfileTokenService("test-secret", time.Minute)
 
@@ -333,7 +374,7 @@ func TestHandleCreateProfile_AllowsVerifiedPrimaryPIN(t *testing.T) {
 
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
 	handler.UserRepo = testProfileUserRepo{
-		user: &models.User{ID: 1, MaxProfiles: 5, AccessPolicyRevision: 7},
+		user: &models.User{ID: 1, MaxProfiles: new(5), AccessPolicyRevision: 7},
 	}
 	handler.ProfileTokens = access.NewProfileTokenService("test-secret", time.Minute)
 
@@ -369,7 +410,7 @@ func TestHandleCreateProfile_BlocksAdminOnlyFieldsForNonAdmin(t *testing.T) {
 	store := newEmptyProfileTestStore(t)
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
 	handler.UserRepo = testProfileUserRepo{
-		user: &models.User{ID: 1, MaxProfiles: 5},
+		user: &models.User{ID: 1, MaxProfiles: new(5)},
 	}
 
 	req := newAuthorizedProfileRequest(`{"name":"Kids","is_child":true}`)

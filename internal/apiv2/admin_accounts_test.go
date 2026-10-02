@@ -26,7 +26,7 @@ type fakeAdminAccounts struct {
 }
 
 func fixtureAdminAccounts() *fakeAdminAccounts {
-	return &fakeAdminAccounts{snapshot: handlers.AdminAccountView{User: handlers.AdminUserView{ID: 7, Username: "sample", Email: "sample@example.test", Role: "user", Enabled: true, MaxProfiles: 5, CreatedAt: fixedTime(), UpdatedAt: fixedTime()}, Revision: 10, GroupRevision: 3}}
+	return &fakeAdminAccounts{snapshot: handlers.AdminAccountView{User: handlers.AdminUserView{ID: 7, Username: "sample", Email: "sample@example.test", Role: "user", Enabled: true, MaxProfiles: 5, EffectivePolicy: handlers.EffectivePolicyView{MaxProfiles: 5}, CreatedAt: fixedTime(), UpdatedAt: fixedTime()}, Revision: 10, GroupRevision: 3}}
 }
 func (*fakeAdminAccounts) AdminAccountCapabilities() (bool, bool) { return true, true }
 func (f *fakeAdminAccounts) GetAdminAccount(context.Context, int) (handlers.AdminAccountView, error) {

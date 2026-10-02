@@ -485,7 +485,7 @@ func TestLocalPasswordPolicyDB(t *testing.T) {
 		"disable":       {Enabled: new(false)},
 		"password off":  {LocalPasswordLoginEnabled: new(false)},
 		"delete (nil)":  nil,
-		"harmless edit": {MaxProfiles: new(3)},
+		"harmless edit": {MaxProfiles: models.SetValue(3)},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if count := env.usableBreakGlass(t); count != 1 {

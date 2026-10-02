@@ -501,10 +501,10 @@ func pilotDeps(progress *fakeProgress, profiles *fakeProfiles) Dependencies {
 	deps.AdminUsers = fakeAdminUsers{users: []handlers.AdminUserView{
 		{ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", Permissions: []string{}, Enabled: true,
 			MaxStreams: &two, DownloadAllowed: &yes, MaxProfiles: 5, AccessGroupID: &groupID,
-			EffectivePolicy: handlers.EffectivePolicyView{LibraryIDs: []int{3}, MaxPlaybackQuality: "1080p", MaxStreams: 2, TranscodeAllowed: true, Permissions: []string{}},
+			EffectivePolicy: handlers.EffectivePolicyView{LibraryIDs: []int{3}, MaxPlaybackQuality: "1080p", MaxStreams: 2, MaxProfiles: 5, TranscodeAllowed: true, Permissions: []string{}},
 			CreatedAt:       fixedTime(), UpdatedAt: fixedTime(), LastActiveAt: &last},
 		{ID: 2, Username: "ada", Role: "admin", Permissions: []string{"marker_edit"}, Enabled: true, LibraryIDs: []int{}, MaxProfiles: 5,
-			EffectivePolicy: handlers.EffectivePolicyView{Permissions: []string{"marker_edit", "metadata_curation"}},
+			EffectivePolicy: handlers.EffectivePolicyView{MaxProfiles: 5, Permissions: []string{"marker_edit", "metadata_curation"}},
 			CreatedAt:       fixedTime(), UpdatedAt: fixedTime()},
 	}}
 	deps.SettingsContract, deps.Settings, deps.PluginSettings, deps.SettingValues = settingsFakes()

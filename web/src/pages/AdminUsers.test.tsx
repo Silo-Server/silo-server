@@ -242,6 +242,7 @@ const adminUser: AdminUser = {
     max_transcodes: 0,
     max_remote_stream_bitrate_kbps: 0,
     max_local_stream_bitrate_kbps: 0,
+    max_profiles: 4,
     transcode_allowed: true,
     audio_transcode_allowed: true,
     download_allowed: true,
@@ -487,6 +488,7 @@ const defaultGroup: AccessGroup = {
   max_transcodes: 3,
   max_remote_stream_bitrate_kbps: 0,
   max_local_stream_bitrate_kbps: 0,
+  max_profiles: 2,
   allowed_permissions: null,
   requests_allowed: true,
   is_default: true,
@@ -568,6 +570,7 @@ describe("AdminUsers user dialog policy hints", () => {
 
     expect(within(dialog).getByText("Inherited: 5")).toBeInTheDocument();
     expect(within(dialog).getByText("Inherited: 3")).toBeInTheDocument();
+    expect(within(dialog).getByText("Inherited: 2")).toBeInTheDocument();
   });
 
   it("uses the server defaults once a loaded list has no default group", async () => {
@@ -578,7 +581,27 @@ describe("AdminUsers user dialog policy hints", () => {
 
     // The server then creates the account without a group.
     expect(within(dialog).getAllByText("Server default: Unlimited")).toHaveLength(4);
+    expect(within(dialog).getByText("Server default: 5")).toBeInTheDocument();
     expect(within(dialog).queryByText(/Inherit/)).not.toBeInTheDocument();
+  });
+
+  it("saves a profile limit typed for the account", async () => {
+    mocks.users = [{ ...adminUser, access_group_id: defaultGroup.id }];
+    mocks.accessGroups = [defaultGroup];
+    mocks.accessGroupsLoaded = true;
+    mocks.update.mockReset().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    renderPage();
+    const dialog = await openLimits(user, "Edit taylor");
+
+    const limit = within(dialog).getByLabelText("Max Profiles");
+    expect(limit).toHaveValue(4);
+    await user.clear(limit);
+    await user.type(limit, "3");
+    await user.click(within(dialog).getByRole("button", { name: /save/i }));
+
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1));
+    expect(mocks.update.mock.calls[0]![0].body.max_profiles).toBe(3);
   });
 
   async function openAccess(user: ReturnType<typeof userEvent.setup>, button: string | RegExp) {
@@ -633,6 +656,8 @@ describe("AdminUsers user dialog policy hints", () => {
 
     await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1));
     expect(mocks.create.mock.calls[0]![0].body.access_group_id).toBe(3);
+    // The profile limit follows the group unless the admin sets one.
+    expect(mocks.create.mock.calls[0]![0].body).not.toHaveProperty("max_profiles");
   });
 
   it("disables the group picker for admins", async () => {

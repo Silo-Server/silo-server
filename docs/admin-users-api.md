@@ -62,6 +62,15 @@ value; `0` explicitly allows unlimited bitrate. Both access-group fields
 default to `0`. Values are nonnegative integers in kbps. A policy edit changes
 new playback sessions, not streams already playing.
 
+`max_profiles` is the household profile limit and is a nullable account override
+as well. `null` inherits the access group's `max_profiles`, and a value of at least
+1 replaces it. An administrator or an account outside every group inherits 5, and
+an access group created without a value gets 5. `effective_policy.max_profiles` is
+the limit that profile creation enforces: an account at its limit gets
+`409 profile_limit_reached`, and profiles it already has above a lowered limit are
+kept. The bridge v1 body has no inherit state for this field, so its
+`max_profiles` reports the limit that applies, and a v1 update stores an override.
+
 `POST /api/v2/admin/users` returns 201 with `{ "id": "..." }` and `Location`.
 Default-profile creation, when requested, uses the existing transactional
 provisioner. Unsupported transactional profile storage fails before account
