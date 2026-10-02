@@ -273,9 +273,11 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 // loadSidecarSession resolves the session a subtitle or font request names.
 // It reconstructs from the signed stream reference after a restart or on a
 // replica that never served the media, and checks account and selected-profile
-// ownership before exposing a sidecar.
+// ownership before exposing a sidecar. A header capability already verified by
+// RequireTransportAuth is the reference for credential-free sidecar URLs; the
+// st query token remains the fallback.
 func (h *StreamHandler) loadSidecarSession(ctx context.Context, reference, sessionID string, userID int) (*playback.Session, *streamtoken.Claims, error) {
-	card, claims := verifiedStreamCardFromToken(reference, sessionID, h.JWTSecret)
+	card, claims := sidecarStreamCard(ctx, reference, sessionID, h.JWTSecret)
 	loadCard := card
 	if _, err := h.sessionMgr.GetSession(sessionID); err == nil {
 		loadCard = nil
@@ -300,6 +302,14 @@ func (h *StreamHandler) loadSidecarSession(ctx context.Context, reference, sessi
 		return nil, nil, apiError(http.StatusForbidden, "forbidden", "Session belongs to another profile")
 	}
 	return session, claims, nil
+}
+
+func sidecarStreamCard(ctx context.Context, reference, sessionID, secret string) (*playback.RecipeCard, *streamtoken.Claims) {
+	if claims := apimw.GetTransportStreamClaims(ctx); claims != nil && claims.SessionID == sessionID {
+		card := playback.RecipeCardFromClaims(claims)
+		return &card, claims
+	}
+	return verifiedStreamCardFromToken(reference, sessionID, secret)
 }
 
 // HandleSubtitle extracts a subtitle track from the media file associated with

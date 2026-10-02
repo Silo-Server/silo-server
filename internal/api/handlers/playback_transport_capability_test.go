@@ -211,3 +211,41 @@ func TestSessionCapabilityHeadersBindTheLoginSession(t *testing.T) {
 		}
 	}
 }
+
+// Subtitle and font URLs negotiated with a header capability carry no st
+// query token, so sidecar reconstruction must use the capability the transport
+// middleware verified, or a restart or another replica answers 404.
+func TestSidecarReconstructionUsesHeaderCapability(t *testing.T) {
+	const secret = "transport-capability-sidecar-secret"
+	token, err := streamtoken.Sign(streamtoken.Claims{
+		SessionID:     "playback-1",
+		AuthSessionID: "capability-login-1",
+		MediaPath:     "/media/movie.mkv",
+		PlayMethod:    "direct",
+		UserID:        7,
+		ProfileID:     "profile-1",
+		MediaFileID:   42,
+	}, secret, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authMiddleware := apimw.NewAuthMiddleware(transportCapabilityBearerValidator{}, transportCapabilitySessionValidator{}, nil, nil)
+	router := chi.NewRouter()
+	router.With(authMiddleware.RequireTransportAuth(secret)).Get("/stream/{session_id}/subtitles/{track}", func(w http.ResponseWriter, r *http.Request) {
+		card, claims := sidecarStreamCard(r.Context(), r.URL.Query().Get(streamTokenParam), "playback-1", secret)
+		if card == nil || claims == nil || card.SessionID != "playback-1" || card.MediaFileID != 42 || card.InputPath != "/media/movie.mkv" {
+			t.Fatalf("sidecar reconstruction card = %#v, claims = %#v", card, claims)
+		}
+		if other, _ := sidecarStreamCard(r.Context(), "", "playback-other", secret); other != nil {
+			t.Fatalf("capability for playback-1 reconstructed another session: %#v", other)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	req := httptest.NewRequest(http.MethodGet, "/stream/playback-1/subtitles/2.vtt", nil)
+	req.Header.Set(streamtoken.Header, token)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
