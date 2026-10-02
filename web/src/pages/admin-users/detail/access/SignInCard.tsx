@@ -100,9 +100,17 @@ function inheritedProfileLimit(
   return groups.find((group) => group.is_default)?.max_profiles;
 }
 
-function validate(draft: SignInDraft): string | null {
+// A Custom limit with nothing valid in place of a saved override can't be
+// saved; one in place of Default leaves the row on Default.
+function profilesIncomplete(draft: SignInDraft, saved: SignInDraft): boolean {
+  return rowOverride(draft.profiles) === undefined && rowOverride(saved.profiles) !== null;
+}
+
+function validate(draft: SignInDraft, base: AdminUser): string | null {
   if (draft.username.trim() === "") return "Enter a username.";
   if (!isValidEmail(draft.email)) return INVALID_EMAIL_MESSAGE;
+  if (profilesIncomplete(draft, toDraft(base)))
+    return "Allow at least 1 profile, or choose Default.";
   return null;
 }
 
@@ -145,11 +153,7 @@ export function SignInCard({
   const ownAccount = base.id === viewerId;
   const changed = new Set(draft.changed);
   const saved = toDraft(base);
-  // A Custom limit with nothing valid in place of a saved override can't be saved.
-  const profilesIncomplete =
-    d !== undefined &&
-    rowOverride(d.profiles) === undefined &&
-    rowOverride(saved.profiles) !== null;
+  const profilesInvalid = d !== undefined && profilesIncomplete(d, saved);
 
   function roleDescription(): string {
     if (ownAccount) return "You can't change your own role.";
@@ -172,7 +176,7 @@ export function SignInCard({
       manageable={manageable}
       available={available}
       canEdit={editor !== undefined}
-      invalid={profilesIncomplete}
+      invalid={profilesInvalid}
       state={draft}
     >
       {draft.editing && d ? (
