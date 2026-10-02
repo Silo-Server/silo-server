@@ -175,16 +175,6 @@ type HomeDismissalItemReader interface {
 	ListHomeDismissalsForItems(ctx context.Context, profileID, surface string, mediaItemIDs []string) ([]HomeItemDismissal, error)
 }
 
-// CatalogProgressStore is implemented by stores whose watch progress lives in
-// the catalog database's user_watch_progress table. Catalog queries use it to
-// rank against progress in SQL instead of reading every candidate's progress
-// back through the store. CatalogProgressUserID reports the owning user_id, or
-// false when this store's progress is kept elsewhere (for example a wrapper
-// around the SQLite backend), in which case callers must use the store methods.
-type CatalogProgressStore interface {
-	CatalogProgressUserID() (int, bool)
-}
-
 // EpisodeParentCompletionStore determines whether every available episode of a
 // series or season is completed. Empty parents are not completed. Implementations
 // must use the same progress and completed-history visibility rules as

@@ -134,17 +134,6 @@ type interestTrackingStore struct {
 	updater *InterestUpdater
 }
 
-// CatalogProgressUserID is forwarded explicitly so every wrapper variant keeps
-// the backing store's answer. It reports false for a backing store without the
-// capability, so advertising the method never sends a caller down a SQL path
-// the backing store cannot serve.
-func (s *interestTrackingStore) CatalogProgressUserID() (int, bool) {
-	if store, ok := s.UserStore.(userstore.CatalogProgressStore); ok {
-		return store.CatalogProgressUserID()
-	}
-	return 0, false
-}
-
 // Onboarding progress is forwarded explicitly: the decorator intercepts no
 // onboarding write, and both backing stores (SQLite and Postgres) implement it.
 func (s *interestTrackingStore) ReadOnboardingProgress(ctx context.Context, profileID, tourID string) (*userstore.OnboardingProgress, error) {
