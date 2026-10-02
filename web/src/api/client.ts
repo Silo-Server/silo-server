@@ -3,6 +3,7 @@ import type { components } from "./v2/schema";
 import { storage } from "../utils/storage";
 import { randomUUID } from "../lib/uuid";
 import { problemId } from "./v2/problemId";
+import { API_READ_TIMEOUT_MS, startRequestDeadline } from "./requestDeadline";
 
 type ProfileUnverifiedListener = () => void;
 let profileUnverifiedListener: ProfileUnverifiedListener | null = null;
@@ -389,10 +390,17 @@ async function attemptRefresh(): Promise<boolean> {
   let sessionRejected = false;
   let transient = false;
   let providerOutage = false;
+  // Every request that meets a 401 joins this one refresh, so a server that
+  // stops answering it must not hold them all forever. Abandoning the
+  // exchange is safe: the server does not spend a refresh token on use.
+  const deadline = startRequestDeadline(
+    API_READ_TIMEOUT_MS,
+    () => new DOMException("The token refresh timed out", "TimeoutError"),
+  );
 
   try {
     const data = await refreshAccessToken(rt, async (input, init) => {
-      const res = await fetch(input, init);
+      const res = await fetch(input, { ...init, signal: deadline.signal });
       if (!res.ok) {
         sessionRejected = await isSessionRejection(res);
         transient = isTransientRefreshFailure(res.status);
@@ -434,6 +442,8 @@ async function attemptRefresh(): Promise<boolean> {
     lastRefreshTransient = true;
     lastRefreshProviderOutage = false;
     return false;
+  } finally {
+    deadline.dispose();
   }
 }
 

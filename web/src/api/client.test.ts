@@ -9,6 +9,7 @@ import {
   setAccessToken,
   setRefreshToken,
 } from "./client";
+import { API_READ_TIMEOUT_MS } from "./requestDeadline";
 import { v2 } from "./v2/request";
 import { storage } from "../utils/storage";
 
@@ -233,6 +234,44 @@ describe("session rejection", () => {
     );
     await v2("GET /api/v2/profiles").catch(() => undefined);
     expect(rejected).not.toHaveBeenCalled();
+  });
+
+  it("gives up on a refresh the server never answers and keeps the session", async () => {
+    vi.useFakeTimers();
+    try {
+      setAccessToken("active");
+      setRefreshToken("stored");
+      const fetchMock = vi.fn<typeof fetch>((input, init) => {
+        if (String(input) !== "/api/v2/auth/refresh") {
+          return Promise.resolve(refreshProblem(401, "authentication_required"));
+        }
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+            once: true,
+          });
+        });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const request = v2("GET /api/v2/profiles").then(
+        () => "resolved",
+        () => "rejected",
+      );
+      await vi.advanceTimersByTimeAsync(API_READ_TIMEOUT_MS);
+      await expect(request).resolves.toBe("rejected");
+      expect(rejected).not.toHaveBeenCalled();
+      expect(getAccessToken()).toBe("active");
+      expect(vi.getTimerCount()).toBe(0);
+
+      // The abandoned exchange no longer holds the refresh single-flight.
+      const refreshCalls = () =>
+        fetchMock.mock.calls.filter(([input]) => String(input) === "/api/v2/auth/refresh").length;
+      expect(refreshCalls()).toBe(1);
+      void refreshAuthentication();
+      expect(refreshCalls()).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("leaves a refused boot restore to the restore path", async () => {

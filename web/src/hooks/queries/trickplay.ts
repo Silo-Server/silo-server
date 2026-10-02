@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { V2ProblemError, V2TransportError, v2 } from "@/api/v2/request";
+import { V2ProblemError, V2TimeoutError, V2TransportError, v2 } from "@/api/v2/request";
 import { trickplayFromV2 } from "@/api/v2/trickplay";
 import type { PlayerTrickplay } from "@/player/trickplay";
 import { itemKeys } from "./keys";
@@ -12,7 +12,7 @@ export function transientTrickplayError(error: unknown): boolean {
   if (error instanceof V2ProblemError) return error.status === 429 || error.status >= 500;
   if (error instanceof V2TransportError)
     return error.status === 0 || error.status === 429 || error.status >= 500;
-  return error instanceof TypeError;
+  return error instanceof TypeError || error instanceof V2TimeoutError;
 }
 
 function trickplayRetryDelay(error: unknown, fallback: number): number {
