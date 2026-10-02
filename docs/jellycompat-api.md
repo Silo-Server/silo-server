@@ -236,7 +236,8 @@ fields, as Jellyfin Web and Findroid request). It is keyed by media source
 id, then by width as a string, with `Interval` in milliseconds; a version
 without previews is absent. `GET /Videos/{itemId}/Trickplay/{width}/{index}.jpg`
 proxies a sheet (Roku does not follow image redirects) with an `ETag` and
-`private, max-age=3600`, and `…/tiles.m3u8` writes Jellyfin's HLS image
+`private, no-cache`, requiring revalidation after a source switch or
+regeneration, and `…/tiles.m3u8` writes Jellyfin's HLS image
 playlist with the caller's token on each sheet URL. Both pick the version
 from `mediaSourceId`, else from a media-source id in the item position, else
 the version this token is playing for the item (Swiftfin and Findroid send

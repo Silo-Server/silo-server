@@ -90,7 +90,7 @@ func TestTrickplaySheetRoute(t *testing.T) {
 	// Without a media source the default (widest) version's sheets serve.
 	rec := getWithToken(router, "/Videos/"+itemID+"/Trickplay/300/1.jpg")
 	if rec.Code != http.StatusOK || rec.Body.String() != "jpeg" || rec.Header().Get("Content-Type") != "image/jpeg" ||
-		rec.Header().Get("ETag") != `"7-1"` || rec.Header().Get("Cache-Control") != "private, max-age=3600" || sheets.opened[0] != 42 {
+		rec.Header().Get("ETag") != `"7-1"` || rec.Header().Get("Cache-Control") != "private, no-cache" || sheets.opened[0] != 42 {
 		t.Fatalf("default sheet: %d %q %v opened %v", rec.Code, rec.Body.String(), rec.Header(), sheets.opened)
 	}
 	// The mediaSourceId query picks the version, in either spelling.

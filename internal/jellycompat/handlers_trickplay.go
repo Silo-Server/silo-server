@@ -63,9 +63,9 @@ func (h *PlaybackHandler) HandleTrickplaySheet(w http.ResponseWriter, r *http.Re
 	defer func() { _ = body.Close() }()
 	header := w.Header()
 	header.Set("ETag", etag)
-	// A sheet's URL names a position, not a revision: regenerating replaces
-	// it, so caches revalidate after an hour instead of keeping it forever.
-	header.Set("Cache-Control", "private, max-age=3600")
+	// A sheet URL can resolve to another file after a version switch, or to
+	// another revision after regeneration. Revalidate before reusing it.
+	header.Set("Cache-Control", "private, no-cache")
 	if r.Header.Get("If-None-Match") == etag {
 		w.WriteHeader(http.StatusNotModified)
 		return

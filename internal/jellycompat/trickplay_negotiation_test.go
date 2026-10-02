@@ -2,6 +2,8 @@ package jellycompat
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -56,6 +58,46 @@ func TestTrickplayUsesNegotiatedSourceBeforeStreaming(t *testing.T) {
 				t.Fatalf("explicit source override status=%d opened=%v", rec.Code, sheets.opened)
 			}
 		})
+	}
+}
+
+type versionedTrickplaySheets struct{}
+
+func (versionedTrickplaySheets) OpenSheet(_ context.Context, fileID, _, index int) (io.ReadCloser, string, bool, error) {
+	return io.NopCloser(strings.NewReader(fmt.Sprint(fileID))), fmt.Sprintf(`"%d-%d"`, fileID, index), true, nil
+}
+
+func TestTrickplaySheetRevalidatesAfterVersionSwitch(t *testing.T) {
+	handler, _ := newTwoVersionPlaybackInfoHandler(t)
+	handler.Trickplay = versionedTrickplaySheets{}
+	now := time.Now()
+	store := NewPlaybackSessionStore(time.Hour, func() time.Time { return now })
+	handler.playbackStore = store
+	router := negotiatedTrickplayRouter(handler)
+	itemID := handler.codec.EncodeStringID(EncodedIDItem, "movie-1")
+	path := "/Videos/" + itemID + "/Trickplay/300/0.jpg"
+	etag := ""
+	for _, fileID := range []int{42, 43} {
+		now = now.Add(time.Minute)
+		store.PutNegotiated(PlaybackSession{
+			ID: fmt.Sprint(fileID), CompatToken: "token-1", ItemID: "movie-1", UpstreamMediaFileID: fileID,
+		})
+		rec := getWithToken(router, path, "If-None-Match", etag)
+		if rec.Code != http.StatusOK || rec.Body.String() != fmt.Sprint(fileID) {
+			t.Fatalf("selected file %d: status=%d body=%s", fileID, rec.Code, rec.Body.String())
+		}
+		if cache := rec.Header().Get("Cache-Control"); cache != "private, no-cache" {
+			t.Fatalf("selected file %d permits stale sheet reuse: %s", fileID, cache)
+		}
+		if next := rec.Header().Get("ETag"); next == "" || next == etag {
+			t.Fatalf("selected file %d did not change the validator: %s", fileID, next)
+		} else {
+			etag = next
+		}
+	}
+	rec := getWithToken(router, path, "If-None-Match", etag)
+	if rec.Code != http.StatusNotModified || rec.Body.Len() != 0 || rec.Header().Get("Cache-Control") != "private, no-cache" {
+		t.Fatalf("unchanged source revalidation: status=%d body=%s headers=%v", rec.Code, rec.Body.String(), rec.Header())
 	}
 }
 
