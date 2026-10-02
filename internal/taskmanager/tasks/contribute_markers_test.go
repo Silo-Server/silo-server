@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -17,6 +18,7 @@ func (p *contribTestProgress) SetResultData(d json.RawMessage) { p.data = d }
 
 type fakeContribRunner struct {
 	calls    []int
+	segments [][]markers.MarkerKind
 	autoSeen bool
 	outcomes []markers.ContributionOutcome
 	// sequence, when set, returns one entry per call before falling back to
@@ -26,6 +28,7 @@ type fakeContribRunner struct {
 
 func (f *fakeContribRunner) ContributeFile(_ context.Context, file *models.MediaFile, opts markers.ContributeOptions) ([]markers.ContributionOutcome, error) {
 	f.calls = append(f.calls, file.ID)
+	f.segments = append(f.segments, opts.Segments)
 	f.autoSeen = opts.Auto
 	if len(f.sequence) > 0 {
 		next := f.sequence[0]
@@ -39,24 +42,37 @@ type fakeAutoConfig []markers.ProviderConfig
 
 func (f fakeAutoConfig) List() []markers.ProviderConfig { return f }
 
+// fakeCandidates returns ids once for the intro pass and credits once for the
+// credits pass.
 type fakeCandidates struct {
 	ids          []int
+	credits      []int
 	gotMin       float64
 	gotProviders []string
-	afters       []*markers.ContributionCandidate
-	delivered    bool
+	kinds        []markers.MarkerKind
+	afters       map[markers.MarkerKind][]*markers.ContributionCandidate
+	delivered    map[markers.MarkerKind]bool
 }
 
-func (f *fakeCandidates) CandidateLocalIntroFiles(_ context.Context, minConfidence float64, providers []string, after *markers.ContributionCandidate, _ int) ([]markers.ContributionCandidate, error) {
+func (f *fakeCandidates) CandidateLocalMarkerFiles(_ context.Context, kind markers.MarkerKind, minConfidence float64, providers []string, after *markers.ContributionCandidate, _ int) ([]markers.ContributionCandidate, error) {
 	f.gotMin = minConfidence
 	f.gotProviders = providers
-	f.afters = append(f.afters, after)
-	if f.delivered {
+	f.kinds = append(f.kinds, kind)
+	if f.afters == nil {
+		f.afters = map[markers.MarkerKind][]*markers.ContributionCandidate{}
+		f.delivered = map[markers.MarkerKind]bool{}
+	}
+	f.afters[kind] = append(f.afters[kind], after)
+	if f.delivered[kind] {
 		return nil, nil
 	}
-	f.delivered = true
-	out := make([]markers.ContributionCandidate, len(f.ids))
-	for i, id := range f.ids {
+	f.delivered[kind] = true
+	ids := f.ids
+	if kind == markers.MarkerKindCredits {
+		ids = f.credits
+	}
+	out := make([]markers.ContributionCandidate, len(ids))
+	for i, id := range ids {
 		out[i] = markers.ContributionCandidate{FileID: id, Confidence: 0.95}
 	}
 	return out, nil
@@ -109,11 +125,39 @@ func TestContributeMarkersTaskSubmitsCandidates(t *testing.T) {
 	if len(cands.gotProviders) != 1 || cands.gotProviders[0] != "introdb" {
 		t.Errorf("providers passed = %v, want [introdb]", cands.gotProviders)
 	}
-	if len(cands.afters) != 2 || cands.afters[0] != nil || cands.afters[1] == nil || cands.afters[1].FileID != 11 {
-		t.Errorf("keyset cursors = %+v, want nil then file 11", cands.afters)
+	if afters := cands.afters[markers.MarkerKindIntro]; len(afters) != 2 || afters[0] != nil || afters[1] == nil || afters[1].FileID != 11 {
+		t.Errorf("intro keyset cursors = %+v, want nil then file 11", afters)
 	}
 	if prog.data == nil {
 		t.Error("expected result summary data")
+	}
+}
+
+// Intros are shared before credits, and each pass asks a file only for its
+// own segment, so a file whose intro was shared reports nothing for it again.
+func TestContributeMarkersTaskSharesIntrosBeforeCredits(t *testing.T) {
+	runner := &fakeContribRunner{outcomes: []markers.ContributionOutcome{{Status: markers.SubmissionStatusPending}}}
+	cands := &fakeCandidates{ids: []int{10}, credits: []int{12, 10}}
+	cfg := fakeAutoConfig{{Provider: "introdb", ContributeEnabled: true, ContributeAutoLocal: true}}
+	task := NewContributeMarkersTask(runner, cfg, cands, fakeFileLoader{})
+
+	prog := &contribTestProgress{}
+	if err := task.Execute(context.Background(), prog); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if fmt.Sprint(runner.calls) != "[10 12 10]" {
+		t.Fatalf("calls = %v, want file 10's intro, then the credits of files 12 and 10", runner.calls)
+	}
+	intro, credits := []markers.MarkerKind{markers.MarkerKindIntro}, []markers.MarkerKind{markers.MarkerKindCredits}
+	if want := [][]markers.MarkerKind{intro, credits, credits}; fmt.Sprint(runner.segments) != fmt.Sprint(want) {
+		t.Fatalf("segments = %v, want %v", runner.segments, want)
+	}
+	var data map[string]int
+	if err := json.Unmarshal(prog.data, &data); err != nil {
+		t.Fatalf("decode result data: %v", err)
+	}
+	if data["submitted"] != 3 || data["skipped"] != 0 {
+		t.Fatalf("result = %v, want three submissions and no skips", data)
 	}
 }
 
@@ -135,6 +179,9 @@ func TestContributeMarkersTaskStopsOnUsageLimit(t *testing.T) {
 	}
 	if len(runner.calls) != 1 {
 		t.Fatalf("expected task to stop after rate limit, calls=%d", len(runner.calls))
+	}
+	if len(cands.kinds) != 1 || cands.kinds[0] != markers.MarkerKindIntro {
+		t.Fatalf("candidate passes = %v, want the run to end in the intro pass", cands.kinds)
 	}
 	var data map[string]int
 	if err := json.Unmarshal(prog.data, &data); err != nil {
