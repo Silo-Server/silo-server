@@ -31,7 +31,7 @@ type Analyzer struct {
 	movieSampler movieTailSampler
 	// hardware is where the tail samplers decode keyframes; SetHardwareDecode
 	// updates it. Nil when the samplers are replaced.
-	hardware *hardwareDecoder
+	hardware *mediasample.HardwareResolver
 	// movieBudget bounds how long a scheduled run starts new movies; zero
 	// means movieCreditsRunBudget. now, when set, replaces time.Now for it.
 	movieBudget time.Duration
@@ -138,7 +138,7 @@ func NewAnalyzer(repo *Repository, config Config, logger *slog.Logger) *Analyzer
 // settings to the next credits tail pass without a restart.
 func (a *Analyzer) SetHardwareDecode(accel, device string) {
 	if a.hardware != nil {
-		a.hardware.set(accel, device)
+		a.hardware.Set(accel, device)
 	}
 }
 

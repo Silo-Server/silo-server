@@ -332,6 +332,7 @@ type PlaybackHandler struct {
 	tm                     *playback.TranscodeManager
 	SubtitleRepo           subtitles.Repository  // optional; enables downloaded subtitles
 	SubtitleBlobs          subtitles.BlobStore   // optional; backs downloaded subtitle reads
+	Trickplay              TrickplaySheets       // optional; serves seek-bar preview sheets
 	SettingsRepo           SettingsReader        // optional; reads watched threshold setting
 	SessionSyncer          PlaybackSessionSyncer // optional; enables immediate session sync to shared admin view
 	WatchScrobbler         PlaybackWatchScrobbler

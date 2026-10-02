@@ -56,11 +56,11 @@
       "id": "transcode_node",
       "entrypoint": "internal/transcodenode.(*Server).Handler",
       "description": "Transcode node listener: transcode/remux session control, artifacts, and probes.",
-      "route_count": 20
+      "route_count": 21
     }
   ],
   "totals": {
-    "routes": 870,
+    "routes": 871,
     "conditional_routes": 691,
     "streaming_routes": 44,
     "websocket_routes": 4
@@ -28353,6 +28353,33 @@
       "conditional": false,
       "request_kind": "unknown",
       "response_media_kind": "unknown",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/transcodenode/server.go"
+    },
+    {
+      "listener": "transcode_node",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/trickplay/extract",
+      "route_group": "/",
+      "handler": "(*internal/transcodenode.Server).handleTrickplayExtract",
+      "handler_expr": "s.handleTrickplayExtract",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 27,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "json",
+      "response_media_kind": "json",
       "delegates_to": "",
       "streams": false,
       "upgrades_websocket": false,

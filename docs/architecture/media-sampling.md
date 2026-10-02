@@ -41,8 +41,8 @@ it. Rules:
   declines to move on; without a `Fallback` every attempt runs. A failed run
   returns an `*mediasample.Error` with a reason for each attempt (`canceled`,
   `timeout`, `start`, `exit`, `args`; for images also `empty`, `unsupported`,
-  and `capabilities`, see [Images](#images)) and a bounded tail of ffmpeg's
-  log.
+  and `capabilities`, see [Images](#images); for sheets also `empty` and
+  `output`, see [Sheets](#sheets)) and a bounded tail of ffmpeg's log.
   The error message quotes only ffmpeg's last log line, cleaned so it can be
   stored in a text column.
 - `Classify` names a failed run's cause from its last attempt
@@ -64,9 +64,9 @@ Supported today:
 
 | Part | Values |
 |---|---|
-| Sampling mode | `Window` (start and duration; `KeyframesOnly` decodes only video keyframes and needs `Stats`), `Samples` (the keyframe at or before each of a list of times; `Stats` only), `At` (the frame at a time; `Images` only) |
-| Outputs | `Audio.Fingerprint` (raw Chromaprint points), `Audio.Silence` (silencedetect intervals), `Audio.Speech` (speech-band level every 10 ms), `Stats` (per-frame picture statistics), `Images` (JPEG images) |
-| Attempts | software; hardware (QSV, VAAPI, VideoToolbox) for requests with a video output (`Images` or `Stats`); see [Hardware decode](#hardware-decode) |
+| Sampling mode | `Window` (start and duration; `KeyframesOnly` decodes only video keyframes and needs `Stats`), `Samples` (the keyframe at or before each of a list of times; `Stats` or `Sheets`), `At` (the frame at a time; `Images` only) |
+| Outputs | `Audio.Fingerprint` (raw Chromaprint points), `Audio.Silence` (silencedetect intervals), `Audio.Speech` (speech-band level every 10 ms), `Stats` (per-frame picture statistics), `Images` (JPEG images), `Sheets` (JPEG sprite sheets of the samples) |
+| Attempts | software; hardware (QSV, VAAPI, VideoToolbox) for requests with a video output (`Images`, `Stats`, or `Sheets`); see [Hardware decode](#hardware-decode) |
 
 Audio and `Stats` may share one run: ffmpeg reads the input once and writes
 the audio output first and the statistics of the first video stream
@@ -100,6 +100,11 @@ statistics. Rules:
   second keyframe, the first is kept.
 - Sample times are finite, non-negative, strictly increasing, and at most
   10,000 per request. `Samples` takes no audio output.
+- `Samples.ReadThrough` reads the sampled span as the one keyframes-only
+  window below, whatever the container, instead of seeking to each sample.
+  Each list entry opens and probes the input again and reads from the
+  keyframe before its inpoint, so when samples lie closer together than the
+  keyframes do, one pass front to back can cost less.
 - The list is read from `pipe:0`, so each entry names the input as an
   explicit `file:` URL, and the input opens with
   `-protocol_whitelist file,pipe`; the concat demuxer otherwise refuses both.
@@ -162,7 +167,11 @@ and is then refused with `503` and `node_unavailable`.
 An attempt with `Hardware` set decodes the request's video on the runner's
 `HWAccel` (`hwdecode.go`). `HWAccel` is a backend the caller resolved with
 `playback.ResolveHWAccelWithFFmpegContext` from `playback.hw_accel` and
-`playback.hw_device`, never `auto`. Only QSV, VAAPI, and VideoToolbox decode
+`playback.hw_device`, never `auto`. A consumer that samples repeatedly keeps a
+`HardwareResolver` (`hwresolver.go`), which caches the resolved backend per
+configured pair until the playback probe cache is invalidated, and asks again
+after `HardwareRetryInterval` when `auto` resolved to no hardware; credits
+detection uses one. Only QSV, VAAPI, and VideoToolbox decode
 here (`SupportsHardwareDecode`); NVENC does not. A hardware attempt needs a
 video output (`Images` or `Stats`). Audio in the same run always decodes in
 software.
@@ -264,6 +273,75 @@ backoff. Its `Runner.Fallback` ends the run only after a hardware attempt
 that found invalid data or whose VideoToolbox software tone mapping was
 refused; every other failure moves on to the next planned attempt.
 
+## Sheets
+
+A `Samples` request with a `Sheets` output tiles the sampled frames into
+JPEG sprite sheets, the images seek-bar previews are cut from. Each sample
+fills one cell of a `Columns` by `Rows` grid, left to right and top to
+bottom; every sheet keeps the full grid size, and the cells after the last
+sample are black, because Jellyfin clients cut cells from an assumed full
+grid.
+
+The chain scales each frame to exactly `TileWidth` by `TileHeight` (the
+caller derives the height from the display aspect ratio), then converts it
+to full-range BT.601 4:2:0, the colors JFIF decoders read, and writes it raw
+to stdout:
+
+```text
+scale=W:H:flags=area:out_range=full:out_color_matrix=bt601,format=yuv420p,
+metadata=mode=add:key=sample:value=-1,metadata@sheets=print
+-fps_mode passthrough -pix_fmt yuv420p -f rawvideo pipe:1
+```
+
+`Sheets.UseInputAspect` derives the height from the input header instead,
+including a 90-degree display matrix, and returns the actual cell height in
+`Result.SheetTileHeight`. This reuses the sampling probe; a `ReadThrough`
+request also probes when this option is set. Callers publishing manifests
+must use the returned height and reject chunks whose geometry differs.
+
+- HDR sources are scaled before they are tone mapped, so the software
+  tone-map chain of [Images](#images) only handles thumbnail-sized frames,
+  followed by `scale=out_range=full:out_color_matrix=bt601`. VAAPI and QSV
+  tone map on the GPU first (`tonemap_vaapi` needs the source's HDR
+  metadata), scale with `scale_vaapi`, and download.
+- `metadata=print` logs a frame only when it carries metadata, so
+  `metadata=mode=add` gives every frame a `sample` entry of -1 unless its
+  packet was tagged. The log then counts every frame on stdout, and the Nth
+  raw frame is the frame logged as `frame:N`. A counter that skips or
+  restarts, frames without log lines, log lines without frames, or bytes
+  after the last whole frame fail the attempt as `output`.
+- `-fps_mode passthrough` is required: a list's timestamps jump back at every
+  entry, and rawvideo would otherwise pick a constant frame rate and drop or
+  duplicate frames. Windows bound their duration with an input `-t`, since an
+  output `-t` drops frames after the filters logged them.
+- ffmpeg logs a frame before it writes it, but stdout and stderr are read by
+  separate goroutines. The assembler places a frame once both halves are in
+  and never makes either reader wait for the other.
+- A sampled list places each frame by its tag; when one sample decodes two
+  frames (a later keyframe within its span, or an all-intra source), the
+  first, which is at or before the sample time, is kept.
+- Sheets list entries last half a second rather than 40 ms. With B-frames,
+  the packet after a keyframe in decode order can carry a later presentation
+  time that ends a 40 ms entry before the decoder releases the keyframe, and
+  the sample decodes nothing: 20 of 656 samples of one MP4 fixture did, and
+  half a second recovered all of them at no measurable cost. Stats keep the
+  40 ms span their cached analyses were computed with. A window gives each
+  sample the last frame at or before its time.
+- A window also copies the same input's video packets to a `framecrc`
+  timing file in a private temporary directory, separate from stderr and
+  removed when the attempt ends. Their presentation times and durations
+  bound the final keyframe's coverage without decoding extra frames or
+  reading the file again. Samples beyond that observed extent remain missing, so
+  premature EOF cannot turn every trailing cell into a decoded preview.
+- A cell without a frame shows the previous cell's frame, and cells before
+  the first frame show the first, so the grid never shifts. A run that had
+  to fill more than 10 % of its cells (and more than one) fails as `empty`,
+  which sends a hardware attempt on to software.
+- A sheet is JPEG-encoded in-process (`image/jpeg`, `Quality`) as soon as
+  frames land two sheets further on, so at most three sheets are held.
+  `Result.Sheets` holds them in order and `Result.SheetFrames` counts the
+  decoded and filled cells.
+
 ## Argument stability
 
 Intro fingerprints are cached per file for as long as the algorithm version
@@ -288,8 +366,8 @@ of new thumbnails.
 that the chromaprint muxer can write raw fingerprints. `Capabilities.Require`
 reports the first thing a request needs that the binary lacks: the
 chromaprint muxer for a fingerprint, `silencedetect` for silence, and
-`blackframe`, `signalstats`, and `metadata` for `Stats`. Images need no
-check up front; the runner reads the tone-map filters itself (see
+`blackframe`, `signalstats`, and `metadata` for `Stats`, and `metadata`
+for `Sheets`. Images need no check up front; the runner reads the tone-map filters itself (see
 [Images](#images)).
 
 - Inventories are cached per binary identity (resolved path, size, and

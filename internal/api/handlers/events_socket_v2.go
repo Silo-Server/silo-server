@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -27,6 +29,23 @@ const eventsAdminRole = "admin"
 const EventsSocketProtocol = "silo.events.v2"
 const eventsTicketProtocolPrefix = "silo.ticket."
 const eventsSessionCheckInterval = 15 * time.Second
+
+// EventsCloseAccessChanged is the close code, and eventsAccessChanged the
+// close reason and frame type, an events socket ends with when the access it
+// was opened under has changed while the login session stays valid.
+const EventsCloseAccessChanged = 4001
+const eventsAccessChanged = "access_changed"
+
+// eventsAccessChangedGrace bounds how long the recheck waits for the
+// connection loop to send the access_changed frame before closing anyway.
+const eventsAccessChangedGrace = 2 * wsWriteTimeout
+
+// errSocketAccessChanged is the validator's answer when the login session
+// still holds but the access a ticket was minted under no longer does: the
+// account role, the effective role, the scope fingerprint, or profile
+// verification changed. It wraps evt.ErrSocketTicket, so callers that only
+// tell a usable credential from an unusable one treat it as unusable.
+var errSocketAccessChanged = fmt.Errorf("%w: access changed", evt.ErrSocketTicket)
 
 type EventsSocketValidator func(context.Context, evt.SocketIdentity) (context.Context, *auth.Claims, error)
 
@@ -50,7 +69,11 @@ func (h *EventsSocketV2) Mint(ctx context.Context, identity evt.SocketIdentity) 
 		return "", err
 	}
 	scope, ok := access.GetScope(validated)
-	if !ok {
+	// A fingerprint of fallback preferences would differ from the profile's
+	// real scope once the read recovers and end the connection as an access
+	// change; refuse the ticket as for any other failed read, and let the
+	// client retry.
+	if !ok || scope.PreferencesDegraded {
 		return "", evt.ErrSocketTicket
 	}
 	identity.AccessFingerprint = eventsScopeFingerprint(scope)
@@ -107,29 +130,53 @@ func (h *EventsSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	// Poll the actual session/account/profile validator without extending the
 	// deadline. Revocation and policy changes close an otherwise healthy socket.
+	accessChanged := make(chan struct{})
 	go func() {
-		interval := h.checkInterval
-		if interval <= 0 {
-			interval = eventsSessionCheckInterval
+		err := h.awaitAuthorityLoss(ctx, identity)
+		if err == nil {
+			return
 		}
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				checkCtx, stop := context.WithTimeout(ctx, 2*time.Second)
-				_, _, err := h.Validate(checkCtx, identity)
-				stop()
-				if err != nil {
-					cancel()
-					return
-				}
-			}
+		if !errors.Is(err, errSocketAccessChanged) {
+			cancel()
+			return
+		}
+		// The connection loop is the only data writer, so it sends the
+		// access_changed frame and close code. Canceling now would close the
+		// connection under it; cancel only if it does not finish in time.
+		close(accessChanged)
+		grace := time.NewTimer(eventsAccessChangedGrace)
+		defer grace.Stop()
+		select {
+		case <-ctx.Done():
+		case <-grace.C:
+			cancel()
 		}
 	}()
-	h.Events.serveWebSocket(w, r.WithContext(ctx), claims, identity.ProfileID, websocket.Upgrader{Subprotocols: []string{EventsSocketProtocol}, CheckOrigin: h.validOrigin})
+	h.Events.serveWebSocket(w, r.WithContext(ctx), claims, identity.ProfileID, websocket.Upgrader{Subprotocols: []string{EventsSocketProtocol}, CheckOrigin: h.validOrigin}, accessChanged)
+}
+
+// awaitAuthorityLoss re-validates the connection's identity every check
+// interval and returns the first validation error, or nil once ctx ends.
+func (h *EventsSocketV2) awaitAuthorityLoss(ctx context.Context, identity evt.SocketIdentity) error {
+	interval := h.checkInterval
+	if interval <= 0 {
+		interval = eventsSessionCheckInterval
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			checkCtx, stop := context.WithTimeout(ctx, 2*time.Second)
+			_, _, err := h.Validate(checkCtx, identity)
+			stop()
+			if err != nil {
+				return err
+			}
+		}
+	}
 }
 
 func (h *EventsSocketV2) validOrigin(r *http.Request) bool {
@@ -228,20 +275,32 @@ func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.U
 		if identity.SessionID == "" || !identity.AccessExpiresAt.After(time.Now()) {
 			return ctx, nil, evt.ErrSocketTicket
 		}
+		// A revoked or expired session and a missing or disabled account end
+		// the credential. A changed role, scope or profile verification under
+		// a valid session is an access change the client can recover from by
+		// refetching and reconnecting.
 		valid, err := sessions.IsValid(checkCtx, identity.SessionID)
 		if err != nil || !valid {
 			return ctx, nil, evt.ErrSocketTicket
 		}
 		user, err := users.GetByID(checkCtx, identity.UserID)
-		if err != nil || user == nil || !user.Enabled || user.Role != identity.Role {
+		if err != nil || user == nil || !user.Enabled {
 			return ctx, nil, evt.ErrSocketTicket
+		}
+		if user.Role != identity.Role {
+			return ctx, nil, errSocketAccessChanged
 		}
 		scope, err := resolver.Resolve(checkCtx, access.ResolveInput{UserID: identity.UserID, SessionID: identity.SessionID, ProfileID: identity.ProfileID, ProfileToken: identity.ProfileToken})
-		if err != nil || !scope.ProfileVerified {
+		if errors.Is(err, access.ErrProfileUnverified) || (err == nil && !scope.ProfileVerified) {
+			return ctx, nil, errSocketAccessChanged
+		}
+		if err != nil {
 			return ctx, nil, evt.ErrSocketTicket
 		}
-		if identity.AccessFingerprint != "" && identity.AccessFingerprint != eventsScopeFingerprint(scope) {
-			return ctx, nil, evt.ErrSocketTicket
+		// Preferences that fell back to their defaults say nothing about
+		// whether access changed, so this round skips the comparison.
+		if identity.AccessFingerprint != "" && !scope.PreferencesDegraded && identity.AccessFingerprint != eventsScopeFingerprint(scope) {
+			return ctx, nil, errSocketAccessChanged
 		}
 		role := user.Role
 		if role == eventsAdminRole && identity.ProfileID != "" {
@@ -254,7 +313,7 @@ func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.U
 			}
 		}
 		if identity.AccessFingerprint != "" && identity.EffectiveRole != role {
-			return ctx, nil, evt.ErrSocketTicket
+			return ctx, nil, errSocketAccessChanged
 		}
 		claims := &auth.Claims{ImpersonatorUserID: identity.ImpersonatorUserID, UserID: identity.UserID, SessionID: identity.SessionID, Role: role, TokenType: auth.TokenTypeAccess}
 		ctx = apimw.SetClaims(ctx, claims)

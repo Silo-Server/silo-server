@@ -12,6 +12,44 @@
 # Add a pin in the same change that sets its budget. It must pass on a freshly
 # migrated database without skipping.
 
+# Seek preview jobs preserve bigint IDs, fence attempts, and protect issued URLs.
+./internal/trickplay TestTrickplayQueuesBigintMediaFileIDsDB
+./internal/trickplay TestExpiredLeaseRejectsCompletionBeforeReconcileDB
+./internal/trickplay TestSameOwnerReclaimRejectsPriorAttemptDB
+./internal/trickplay TestRegenerateFencesOlderWorkersDB
+./internal/trickplay TestRevisionProtectionIsMonotonicAndFollowsTheRevisionDB
+./internal/trickplay TestRevisionProtectionReusesCoveredExpiryDB
+./internal/trickplay TestServiceRecordsFailureWithClaimTokenDB
+./internal/trickplay TestRetiredTrickplayOutlivesIssuedURLsDB
+./internal/trickplay TestReaderProtectsLatestSheetExpiryDB
+./internal/trickplay TestReaderWithholdsRevisionDisplacedWhileSigningDB
+./internal/trickplay TestReaderSuppressesDisabledLibraryAvailabilityDB
+./internal/trickplay TestDisabledLibraryStopsServingAndRemovesPublishedWorkDB
+
+# Media image sweeps resume bounded listings without losing partial prefixes.
+./internal/blobgc TestCollectorDeletesSingleImagesS3DB
+./internal/blobgc TestCollectorRetriesSingleObjectAfterPartialDeleteDB
+./internal/blobgc TestCollectorUsesOneConnectionDB
+./internal/blobgc TestSweeperUsesOneConnectionDB
+./internal/blobgc TestSweeperResumesAfterBoundedRunDB
+./internal/blobgc TestSweeperDefersPrefixSpanningBoundedRunsDB
+./internal/blobgc TestSweeperRestartsAfterStorageMoveDB
+
+# Chapter width replacement has one extraction and upload across API replicas.
+./internal/chapterthumbs TestWidthBackfillSerializesReplicasPostgres
+./internal/chapterthumbs TestWidthChangeDuringFirstChapterExtractionDB
+./internal/chapterthumbs TestChapterLockSessionLossRejectsStaleSaveDB
+./internal/chapterthumbs TestTerminatedChapterWorkerCannotReplaceCurrentBlobDB
+
+# Chapter image URLs retain exact issued expiry in one batched transaction.
+./internal/chapterthumbs TestRetiredChapterImagesOutliveIssuedURLsDB
+./internal/chapterthumbs TestChapterURLWithholdsImageRetiredWhileSigningDB
+./internal/chapterthumbs TestChapterURLProtectionSerializesFileDeletionDB
+./internal/chapterthumbs TestChapterURLProtectionBatchesFilesDB
+./internal/chapterthumbs TestChapterImageReusePreservesIssuedURLProtectionDB
+./internal/chapterthumbs TestChapterImageReuseWaitsForCollectorDB
+./internal/catalog TestGetItemVersionsBatchesChapterImages
+
 # Schema: every content_id-family foreign key cascades on update, so the online
 # re-id can rename an item whatever child rows it has (#933).
 ./migrations TestContentIDFamilyFKsCascadeOnUpdatePostgres
@@ -27,6 +65,12 @@
 # Episode batches: the viewer's preference lookups run once per series, not
 # once per episode, on the Jellyfin season page path.
 ./internal/catalog TestGetEpisodeDetailsForSeriesResolvesPreferencesOncePerSeries
+
+# Seek previews: one availability lookup per item or episode page.
+./internal/catalog TestTrickplayAvailabilityBatchesItemDetails
+./internal/catalog TestTrickplayAvailabilityBatchesEpisodeDetails
+./internal/catalog TestEpisodeDetailsFallBackAfterBatchFileFailureDB
+./internal/jellycompat TestTrickplayNegotiatedSourceSurvivesAPIReplicaDB
 
 # Listings: COUNT queries only when a total is requested and cannot be derived
 # from the page.
@@ -101,3 +145,37 @@
 # Artwork storage sweep: the GC-schedule lookup its anomaly guard consults must
 # count armed candidates only, never parked (live) ones.
 ./internal/metadata TestArtworkSweepScheduledOriginalsPostgres
+
+./internal/trickplay TestStaleReconcileCannotDowngradeConcurrentUpgradeDB
+./internal/api/handlers TestLibraryExplicitTrickplayUpdateAlwaysReconcilesPostgres
+./internal/trickplay TestReaderRevalidatesServingWhileSigningDB
+./internal/trickplay TestAdminClassifiesIneligibleFilesDB
+./internal/trickplay TestAdminReclassifiesTrackedIneligibleFilesDB
+./internal/trickplay TestAdminRejectsUnsupportedLibraryTypesDB
+./internal/trickplay TestAdminRetryKeepsPublishedPreviewsDB
+./internal/trickplay TestAdminResolvesMultiEpisodeFileDB
+./migrations TestChapterReplacementAtomicallyQueuesImagesPostgres
+
+./internal/trickplay TestOptOutReconcilePreservesConcurrentClaimDB
+./internal/trickplay TestReconcileUsesOneConnectionDB
+
+./internal/chapterthumbs TestCompletedWidthScanRechecksLibraryEligibilityDB
+./internal/chapterthumbs TestPriorityChapterRequestSurvivesReplicaContentionDB
+./internal/scanner TestChapterLockSessionsRespectPoolBudgetDB
+./internal/scanner TestChapterLockFailedConnectReleasesBudgetDB
+./internal/scanner TestChapterLockSessionsSerializeDistinctPoolsDB
+./internal/chapterthumbs TestChapterBudgetRetainsQueuedUnprobedFileDB
+
+./internal/chapterthumbs TestWidthBackfillDefersCatalogScansUntilRetryDB
+./internal/scanner TestChapterLockReusesHealthySessionsDB
+# Seek preview workers stop after a library or file becomes ineligible.
+./internal/trickplay TestLibraryTypeChangeFencesWorkerProgressDB
+./internal/trickplay TestLibraryTypeChangeRetiresFinishedAndExpiredWorkDB
+./internal/trickplay TestIneligibleFilesCannotProgressAndCanFinishDB
+./internal/trickplay TestTypeChangeReconcilePreservesConcurrentClaimDB
+
+# Seek preview discovery follows current eligibility and retains issued URLs.
+./internal/trickplay TestLibraryTypeChangeSuppressesAndRetiresTrickplayDB
+./internal/trickplay TestNormalizedVideoLibraryTypesRemainEligibleDB
+./internal/trickplay TestCurrentFileEligibilitySuppressesTrickplayDB
+./internal/scanner TestChapterLockDiscardsUndecodableAcquisitionDB

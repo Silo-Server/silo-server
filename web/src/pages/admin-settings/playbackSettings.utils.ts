@@ -71,14 +71,15 @@ export function nodeInventoriesDiverge(detection: HWAccelInfo | undefined): bool
   return inventories.length > 1 && new Set(inventories).size > 1;
 }
 
-// Helpers for the "Generate chapter thumbnails on" select. Two of its three
-// modes need a transcode node to run on: `transcode_nodes_only` fails every
-// extraction without one, and `prefer_transcode_nodes` silently degrades to
-// local — so both are offered only when the node pool can actually serve them.
+// Helpers for the "Generate chapter thumbnails on" and "Generate seek previews
+// on" selects, which share three modes. Two of them need a transcode node to
+// run on: `transcode_nodes_only` makes nothing without one, and
+// `prefer_transcode_nodes` silently degrades to local — so both are offered
+// only when the node pool can actually serve them.
 
-export const CHAPTER_THUMBNAIL_EXECUTION_DEFAULT = "local";
+export const IMAGE_EXECUTION_DEFAULT = "local";
 
-const NODE_BACKED_CHAPTER_THUMBNAIL_MODES = ["prefer_transcode_nodes", "transcode_nodes_only"];
+const NODE_BACKED_IMAGE_MODES = ["prefer_transcode_nodes", "transcode_nodes_only"];
 
 /**
  * True when at least one transcode node could take an extraction. Mirrors the
@@ -89,7 +90,21 @@ export function hasUsableTranscodeNode(nodes: StreamNode[] | undefined): boolean
   return (nodes ?? []).some((node) => node.type === "transcode" && node.enabled && node.healthy);
 }
 
-export interface ChapterThumbnailExecutionOption {
+/** True when a node can extract seek previews with its current capability snapshot. */
+export function hasUsableTrickplayNode(nodes: StreamNode[] | undefined): boolean {
+  return (nodes ?? []).some(
+    (node) =>
+      node.type === "transcode" &&
+      node.enabled &&
+      node.healthy &&
+      node.capabilities?.transport_features?.includes("trickplay_extract_v1") &&
+      (node.advertised_capabilities_hash === undefined ||
+        (node.advertised_capabilities_hash !== "" &&
+          node.advertised_capabilities_hash === node.capabilities_hash)),
+  );
+}
+
+export interface ImageExecutionOption {
   value: string;
   label: string;
   disabled: boolean;
@@ -101,13 +116,13 @@ export interface ChapterThumbnailExecutionOption {
  * nodes that have not joined yet is legitimate, and a persisted node-only value
  * has to stay visible and editable so the admin can switch back off it.
  */
-export function chapterThumbnailExecutionOptions(
+export function imageExecutionOptions(
   current: string,
   transcodeNodeAvailable: boolean,
-): ChapterThumbnailExecutionOption[] {
+): ImageExecutionOption[] {
   return gateNodeBackedModes(
     [
-      { value: CHAPTER_THUMBNAIL_EXECUTION_DEFAULT, label: "This server" },
+      { value: IMAGE_EXECUTION_DEFAULT, label: "This server" },
       { value: "prefer_transcode_nodes", label: "Transcode nodes when available" },
       { value: "transcode_nodes_only", label: "Transcode nodes only" },
     ],
@@ -126,7 +141,7 @@ export const SUBTITLE_SYNC_EXECUTION_DEFAULT = "prefer_transcode_nodes";
 export function subtitleSyncExecutionOptions(
   current: string,
   transcodeNodeAvailable: boolean,
-): ChapterThumbnailExecutionOption[] {
+): ImageExecutionOption[] {
   return gateNodeBackedModes(
     [
       { value: "local", label: "Local server" },
@@ -139,20 +154,20 @@ export function subtitleSyncExecutionOptions(
 }
 
 export function isNodeBackedExecution(mode: string): boolean {
-  return NODE_BACKED_CHAPTER_THUMBNAIL_MODES.includes(mode);
+  return NODE_BACKED_IMAGE_MODES.includes(mode);
 }
 
 function gateNodeBackedModes(
   options: { value: string; label: string }[],
   current: string,
   transcodeNodeAvailable: boolean,
-): ChapterThumbnailExecutionOption[] {
+): ImageExecutionOption[] {
   return options.map((option) => ({
     ...option,
     disabled:
       !transcodeNodeAvailable &&
       option.value !== current &&
-      NODE_BACKED_CHAPTER_THUMBNAIL_MODES.includes(option.value),
+      NODE_BACKED_IMAGE_MODES.includes(option.value),
   }));
 }
 

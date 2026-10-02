@@ -161,7 +161,7 @@ func TestProgressBootstrapErrorsAndLimits(t *testing.T) {
 func TestBootstrapCurrentCredentialRevalidation(t *testing.T) {
 	claims := &auth.Claims{UserID: 1, SessionID: "session", TokenType: auth.TokenTypeAccess}
 	tokens := fakeTokens{claims: map[string]*auth.Claims{"credential": claims}}
-	sessions := fakeSessions{valid: map[string]bool{"session": true}}
+	sessions := fakeSessions{roles: map[string]string{"session": "user"}}
 	users := fakeUsers{users: map[int]*models.User{1: {ID: 1, Enabled: true}}}
 	keys := fakeAPIKeys{map[string]*models.APIKey{"sa_synthetic": {ID: 7, UserID: 1}}}
 	gate := apimw.NewAuthMiddleware(tokens, sessions, keys, users)
@@ -171,11 +171,11 @@ func TestBootstrapCurrentCredentialRevalidation(t *testing.T) {
 	if err := recheck(); err != nil {
 		t.Fatal(err)
 	}
-	sessions.valid["session"] = false
+	delete(sessions.roles, "session")
 	if err := recheck(); !errors.Is(err, apimw.ErrCurrentCredentialInvalid) {
 		t.Fatalf("revoked session=%v", err)
 	}
-	sessions.valid["session"] = true
+	sessions.roles["session"] = "user"
 	users.users[1].Enabled = false
 	if err := recheck(); !errors.Is(err, apimw.ErrCurrentCredentialInvalid) {
 		t.Fatalf("disabled account=%v", err)

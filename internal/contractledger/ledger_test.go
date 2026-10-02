@@ -1251,6 +1251,7 @@ var mutationWithoutLegacyRow = map[string]string{
 	"startWatchTogetherRoomPlayback":       "V2-only start of a staged lobby item: v1 has no lobby/start split. An already playing room answers with its current snapshot, so a duplicate press cannot restart playback.",
 	"stopWatchTogetherRoomPlayback":        "V2-only stop that keeps the room: v1 only ends a room. A room that is not playing answers with its current snapshot, so repeating the call cannot disturb the lobby it produced.",
 	"updateWatchTogetherRoomSelectionMode": "V2-only lobby mode switch: v1 fixes selection_mode at creation. Repeating the same mode is a no-op; the switch drops the staged item, which is the documented meaning of the value rather than a side effect of retrying.",
+	"regenerateAdminItemTrickplay":         "V2-only seek-bar preview regeneration: v1 had no trickplay. A replay while the files are queued or being made changes nothing, but a later replay makes the previews again, so it is non-retryable like redetectAdminItemMarkers.",
 	"queryWatchTogetherMemberState":        "V2-only POST-shaped read: the content id set (up to 200) exceeds what a query string carries. It changes no state; repeating it returns the current classification.",
 }
 

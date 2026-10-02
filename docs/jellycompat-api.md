@@ -229,6 +229,23 @@ to the route's version, and a route version the item no longer has answers
 `404`. The negotiated session keeps the client's id as its route item id, so the
 stream URLs it hands out and later session reports can carry that id.
 
+Items whose library generates seek-bar previews carry Jellyfin's `Trickplay`
+member on single-item reads and on list reads that request the field and
+already take the detail path (`Chapters` or `MediaSources` among the
+fields, as Jellyfin Web and Findroid request). It is keyed by media source
+id, then by width as a string, with `Interval` in milliseconds; a version
+without previews is absent. `GET /Videos/{itemId}/Trickplay/{width}/{index}.jpg`
+proxies a sheet (Roku does not follow image redirects) with an `ETag` and
+`private, no-cache`, requiring revalidation after a source switch or
+regeneration, and `…/tiles.m3u8` writes Jellyfin's HLS image
+playlist with the caller's token on each sheet URL. Both pick the version
+from `mediaSourceId`, else from a media-source id in the item position, else
+the version this token is playing for the item (Swiftfin and Findroid send
+no `mediaSourceId`), else the default version, and serve only versions the
+account can see. The selected playback file is persisted in compat session
+state, so previews follow that source across API replicas and restarts.
+An index past the last sheet answers `404`.
+
 The managed Jellyfin Web build opts into `SiloSeekReanchor=true` on
 `PlaybackInfo`. For a copied-video HLS source, the response echoes
 `SiloSeekReanchor=true`. The client can seek locally only within the available

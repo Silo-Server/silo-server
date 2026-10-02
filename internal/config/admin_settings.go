@@ -123,6 +123,9 @@ const StorageTransitionTargetKey = "storage.transition.target"
 // same reason as the reconcile checkpoint.
 const ArtworkStorageSweepCheckpointKey = "artwork.storage_sweep_checkpoint"
 
+// MediaImageSweepCheckpointKey stores durable per-namespace listing progress.
+const MediaImageSweepCheckpointKey = "media_images.sweep_checkpoint"
+
 // ChapterThumbnailOriginalsCleanupKey is the machine-managed checkpoint for the
 // one-time cleanup of full-size chapter thumbnail originals, kept out of the
 // administrator settings API like the other storage checkpoints.
@@ -131,6 +134,29 @@ const ChapterThumbnailOriginalsCleanupKey = "chapter_thumbnails.originals_cleanu
 // MetadataImageWorkersSettingKey sizes the artwork encode pool. 0 means one
 // worker per CPU core, resolved when the task runs.
 const MetadataImageWorkersSettingKey = "metadata.image_workers"
+
+// PreviewImageWidthSettingKey is the width of the preview images the server
+// makes from video: chapter thumbnails and the thumbnails of seek-preview
+// sheets. Changing it makes both again.
+const PreviewImageWidthSettingKey = "playback.preview_image_width"
+
+// Bounds of PreviewImageWidthSettingKey, in pixels. Widths are even.
+const (
+	DefaultPreviewImageWidth = 300
+	MinPreviewImageWidth     = 160
+	MaxPreviewImageWidth     = 640
+)
+
+// PreviewImageWidth reads a stored PreviewImageWidthSettingKey value: an
+// unset or unparsable value is the default, and any other is brought within
+// bounds and made even, as validation would have required.
+func PreviewImageWidth(value string) int {
+	width, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return DefaultPreviewImageWidth
+	}
+	return min(max(width, MinPreviewImageWidth), MaxPreviewImageWidth) &^ 1
+}
 
 // MarkersDetectionWorkersSettingKey sizes local intro detection: how many
 // seasons are analyzed at once and how many ffmpeg processes read audio.
@@ -204,6 +230,10 @@ var adminSettingDefaults = map[string]string{
 	"playback.chapter_thumbnail_execution":           "local",
 	"playback.chapter_thumbnail_node_capacity":       "1",
 	"playback.chapter_thumbnail_hdr_policy":          "best_effort",
+	"playback.preview_image_width":                   "300",
+	"playback.trickplay_interval_seconds":            "10",
+	"playback.trickplay_workers":                     "1",
+	"playback.trickplay_execution":                   "local",
 	chapterThumbnailSoftwareToneMapKey:               "false",
 	PlaybackTranscodeHardwareToneMapSettingKey:       "false",
 	PlaybackTranscodeSoftwareToneMapSettingKey:       "false",
@@ -495,6 +525,19 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt(key, value, 1, 64)
 	case "playback.chapter_thumbnail_workers", "playback.chapter_thumbnail_node_capacity", "subtitles.sync_node_capacity":
 		return normalizeAdminInt(key, value, 1, 1024)
+	case PreviewImageWidthSettingKey:
+		normalized, err := normalizeAdminInt(key, value, MinPreviewImageWidth, MaxPreviewImageWidth)
+		if err != nil {
+			return "", err
+		}
+		if width, _ := strconv.Atoi(normalized); width%2 != 0 {
+			return "", fmt.Errorf("%s must be an even number of pixels", key)
+		}
+		return normalized, nil
+	case "playback.trickplay_interval_seconds":
+		return normalizeAdminInt(key, value, 5, 60)
+	case "playback.trickplay_workers":
+		return normalizeAdminInt(key, value, 1, 64)
 	case "playback.watched_threshold":
 		return normalizeAdminInt(key, value, 1, 100)
 	case "playback.min_resume_threshold":
@@ -611,7 +654,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminEnum(key, value,
 			string(PlaybackEgressPreferProxy), string(PlaybackEgressProxyOnly),
 			string(PlaybackEgressPreferAPI), string(PlaybackEgressAPIOnly))
-	case "playback.chapter_thumbnail_execution", "subtitles.sync_execution":
+	case "playback.chapter_thumbnail_execution", "playback.trickplay_execution", "subtitles.sync_execution":
 		return normalizeAdminEnum(key, value, "local", "prefer_transcode_nodes", "transcode_nodes_only")
 	case "playback.chapter_thumbnail_hdr_policy":
 		return normalizeAdminEnum(key, value, "disabled", "best_effort")

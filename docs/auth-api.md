@@ -210,6 +210,21 @@ session-list response shape and query remain unchanged, but expired rows disappe
 listing once cleanup deletes them. Jellyfin-compatible clients continue to use the shared login
 session validity checks; cleanup removes only sessions that have already expired.
 
+### Access tokens after a role change
+
+An access token carries the account's role, and admin checks trust it. When an
+administrator changes the account's role, the login session stays valid, but every
+request that presents an access token minted before the change is refused with
+`401 token_refresh_required`. The v1 surface answers the same request with `401` and
+error code `unauthorized`, which v1 clients already treat as "refresh and retry".
+
+On `token_refresh_required` a client refreshes the session with its refresh token and
+retries the request once with the new access token, which carries the new role. It
+must not sign out: only a refused refresh ends the session (`401 session_expired`). If
+the client caches the account's role, it reads `GET /account/me` again so role-gated
+controls appear or disappear. Long-lived Apple notification display tokens are not
+refused; their requests run with the account's current role.
+
 ## Ordinary v2 authentication
 
 The ordinary v2 auth surface provides login, refresh, logout, provider discovery,
