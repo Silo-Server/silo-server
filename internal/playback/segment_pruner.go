@@ -240,6 +240,9 @@ func (s *TranscodeSession) pruneDownloadedSegments(generation uint64, downloaded
 			}
 			continue
 		}
+		if s.copyGroups != nil {
+			s.copyGroups.forget(candidate.number)
+		}
 		removed++
 		freedBytes += info.Size()
 	}

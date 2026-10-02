@@ -9,9 +9,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/playback/keyframes"
 )
 
@@ -222,6 +225,23 @@ func TestPlannedRecoveryTargetRejectsSegmentsOutsideThePlaylist(t *testing.T) {
 
 // The throttler reads the current run's last group as its output time, so
 // it can pause FFmpeg once the player is far enough behind.
+// A segment the pruner removed doesn't count toward the produced head, so
+// the throttler doesn't hold back FFmpeg from rebuilding it.
+func TestPlannedProgressSkipsPrunedSegments(t *testing.T) {
+	a := newCopyGroupAssembler(t.TempDir(), evenPlan())
+	a.startRun(0, "audio")
+	for n := range 4 {
+		a.assembled[n] = true
+	}
+	if _, head, count, _ := a.progress(); head != 3 || count != 4 {
+		t.Fatalf("head %d of %d segments, want 3 of 4", head, count)
+	}
+	a.forget(1)
+	if _, head, count, _ := a.progress(); head != 0 || count != 3 {
+		t.Fatalf("after pruning segment 1: head %d of %d segments, want 0 of 3", head, count)
+	}
+}
+
 func TestPlannedProgressDatesOutputForTheThrottler(t *testing.T) {
 	plan := evenPlan()
 	a := newCopyGroupAssembler(t.TempDir(), plan)
@@ -250,17 +270,19 @@ func TestResolveCopyPlanFollowsTheRecordedDecision(t *testing.T) {
 		t.Fatal("a rebuilt session switched to a keyframe playlist")
 	}
 
-	// A start abandoned while planning records nothing, so the next start
-	// decides afresh.
-	retried := plannedOpts()
-	retried.OutputDir = t.TempDir()
+	// A start whose caller left mid-probe still launches, with FFmpeg's
+	// playlist, so that is what a rebuilt session must serve too.
+	abandonedOpts := plannedOpts()
+	abandonedOpts.OutputDir = t.TempDir()
 	abandoned, cancel := context.WithCancel(t.Context())
 	cancel()
-	if plan := resolveCopyPlan(abandoned, retried); plan != nil {
-		t.Fatal("planned for an abandoned start")
+	stubInputStart(t, 0, context.Canceled)
+	if plan := resolveCopyPlan(abandoned, abandonedOpts); plan != nil {
+		t.Fatal("planned without the input start")
 	}
-	if plan := resolveCopyPlan(t.Context(), retried); plan == nil {
-		t.Fatal("the start after an abandoned one didn't plan")
+	stubInputStart(t, 0, nil)
+	if plan := resolveCopyPlan(t.Context(), abandonedOpts); plan != nil {
+		t.Fatal("a rebuilt session switched to a keyframe playlist after an abandoned start")
 	}
 
 	planned := plannedOpts()
@@ -466,8 +488,6 @@ func checkPlannedCopySession(t *testing.T, ctx context.Context, ffmpeg, source s
 			}
 		}
 	}
-	first := starts()
-	checkRun("from the start", first, 0, segments)
 	// The playlist ends with the video at 40s, not with the unselected audio
 	// track at 60s.
 	var total float64
@@ -477,6 +497,50 @@ func checkPlannedCopySession(t *testing.T, ctx context.Context, ffmpeg, source s
 	if math.Abs(total-40) > 0.041 {
 		t.Fatalf("playlist runs %.3fs, want the video's 40s", total)
 	}
+	stream := filepath.Join(dir, "assembled.mp4")
+	ffprobe := mediaprobe.FFprobePathFromFFmpeg(ffmpeg)
+	// The assembled output's video, measured by ffprobe, runs as long as the
+	// playlist says, in all and in its last segment, which the spacing of
+	// segment starts doesn't cover.
+	checkOutput := func(label string, got []float64) {
+		t.Helper()
+		joined := slices.Clone(init)
+		for n := range segments {
+			data, err := os.ReadFile(filepath.Join(opts.OutputDir, plannedSegmentName(n)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			joined = append(joined, data...)
+		}
+		if err := os.WriteFile(stream, joined, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		out, err := exec.CommandContext(ctx, ffprobe, "-v", "error", "-select_streams", "v:0",
+			"-show_entries", "packet=pts_time,duration_time", "-of", "csv=p=0", stream).Output()
+		if err != nil {
+			t.Fatalf("%s: ffprobe: %v", label, err)
+		}
+		firstPTS, end := math.Inf(1), math.Inf(-1)
+		for line := range strings.FieldsSeq(string(out)) {
+			pts, duration, _ := strings.Cut(strings.TrimSuffix(line, ","), ",")
+			p, err1 := strconv.ParseFloat(pts, 64)
+			d, err2 := strconv.ParseFloat(duration, 64)
+			if err1 != nil || err2 != nil {
+				t.Fatalf("%s: ffprobe packet %q", label, line)
+			}
+			firstPTS, end = min(firstPTS, p), max(end, p+d)
+		}
+		if measured := end - firstPTS; math.Abs(measured-total) > 0.041 {
+			t.Fatalf("%s: the video runs %.3fs, the playlist %.3fs", label, measured, total)
+		}
+		last := segments - 1
+		if measured := end - firstPTS - (got[last] - got[0]); math.Abs(measured-plan.durations[last]) > 0.041 {
+			t.Fatalf("%s: the last segment runs %.3fs, the playlist says %.3fs", label, measured, plan.durations[last])
+		}
+	}
+	first := starts()
+	checkRun("from the start", first, 0, segments)
+	checkOutput("from the start", first)
 
 	// Drop the second half, as if pruned, and restart mid-stream.
 	const restartAt = 9
@@ -499,6 +563,7 @@ func checkPlannedCopySession(t *testing.T, ctx context.Context, ffmpeg, source s
 		}
 	}
 	checkRun("after a restart", again, restartAt, segments)
+	checkOutput("after a restart", again)
 	// Segments from the two runs line up on one timeline.
 	if seam := (again[restartAt] - again[restartAt-1]) - plan.durations[restartAt-1]; math.Abs(seam) > 0.002 {
 		t.Fatalf("timeline steps %.3fs where the runs meet", seam)
@@ -507,19 +572,8 @@ func checkPlannedCopySession(t *testing.T, ctx context.Context, ffmpeg, source s
 		t.Fatalf("groups left after assembly: %v", leftovers)
 	}
 
-	// The assembled stream decodes cleanly from end to end.
-	stream := filepath.Join(dir, "assembled.mp4")
-	joined := slices.Clone(init)
-	for n := range segments {
-		data, err := os.ReadFile(filepath.Join(opts.OutputDir, plannedSegmentName(n)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		joined = append(joined, data...)
-	}
-	if err := os.WriteFile(stream, joined, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	// The assembled stream, as checkOutput last wrote it, decodes cleanly
+	// from end to end.
 	if out, err := exec.CommandContext(ctx, ffmpeg, "-v", "error", "-xerror", "-i", stream, "-f", "null", "-").CombinedOutput(); err != nil || len(out) > 0 {
 		t.Fatalf("assembled stream doesn't decode cleanly (%v): %s", err, out)
 	}

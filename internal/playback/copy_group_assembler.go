@@ -304,6 +304,17 @@ func (a *copyGroupAssembler) writeSegmentLocked(run *copyGroupRun, n int, paths 
 
 // progress reports the current run: the segment it started for, the highest
 // segment assembled contiguously from there, and when its last group landed.
+// forget marks segment n as no longer assembled: the pruner removed it
+// behind the player. A run that reaches it again rebuilds it, and progress
+// doesn't count it toward the produced head.
+func (a *copyGroupAssembler) forget(n int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if n >= 0 && n < len(a.assembled) {
+		a.assembled[n] = false
+	}
+}
+
 func (a *copyGroupAssembler) progress() (start, head int, count int, last time.Time) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

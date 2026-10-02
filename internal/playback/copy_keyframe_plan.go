@@ -148,12 +148,11 @@ func resolveCopyPlan(ctx context.Context, opts TranscodeOpts) *copySegmentPlan {
 		return nil
 	}
 
+	// Record the decision whatever the start's fate: StartTranscode launches
+	// FFmpeg even if its caller has gone, and that session serves this
+	// playlist. A probe cut short by the caller plans nothing, and that
+	// session serves FFmpeg's playlist.
 	plan := planCopySegments(ctx, opts)
-	if ctx.Err() != nil {
-		// The start was abandoned, possibly mid-probe; don't record a
-		// decision it didn't finish making.
-		return nil
-	}
 	rec := copyPlanRecord{Planned: plan != nil}
 	if plan != nil {
 		rec.Durations, rec.Keyframes, rec.FirstKey = plan.durations, plan.keyframes, plan.firstKey
