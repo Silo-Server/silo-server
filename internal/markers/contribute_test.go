@@ -198,33 +198,46 @@ func TestContributeAutoGatesOnThresholdAndKind(t *testing.T) {
 	}
 }
 
-// Local credits detection writes scanner credits, but automatic contribution
-// stays intro-only: detected credits are submitted only on request.
-func TestContributeAutoSubmitsOnlyScannerIntros(t *testing.T) {
-	cfg := fakeConfig{"introdb": {Provider: "introdb", ContributeEnabled: true, ContributeAutoLocal: true, ContributeMinConfidence: 0.5}}
+// Automatic contribution shares the two kinds the scanner detects, intros and
+// credits, each against the provider's minimum confidence. Other local
+// segments are submitted only on request.
+func TestContributeAutoSubmitsScannerIntrosAndCredits(t *testing.T) {
+	cfg := fakeConfig{"introdb": {Provider: "introdb", ContributeEnabled: true, ContributeAutoLocal: true, ContributeMinConfidence: 0.9}}
 	file := newContribFile()
 	file.IntroStart, file.IntroEnd = floatPtr(0), floatPtr(60)
 	file.IntroMarkersSource = strPtr(models.MarkerSourceScanner)
-	file.IntroMarkersConfidence = floatPtr(0.9)
+	file.IntroMarkersConfidence = floatPtr(0.92)
 	file.CreditsStart, file.CreditsEnd = floatPtr(1500), floatPtr(1800)
 	file.CreditsMarkersSource = strPtr(models.MarkerSourceScanner)
 	file.CreditsMarkersConfidence = floatPtr(0.95)
 	file.CreditsMarkersAlgorithm = strPtr("credits-chapter:v1")
+	file.PreviewStart, file.PreviewEnd = floatPtr(1790), floatPtr(1800)
+	file.PreviewMarkersSource = strPtr(models.MarkerSourceScanner)
+	file.PreviewMarkersConfidence = floatPtr(0.99)
 
 	sub := &fakeSubmitter{id: "introdb"}
 	if _, err := newContribService(sub, cfg, &fakeRecorder{}).ContributeFile(context.Background(), file, ContributeOptions{Auto: true}); err != nil {
 		t.Fatalf("ContributeFile: %v", err)
 	}
-	if len(sub.submitted) != 1 || sub.submitted[0].Segment != MarkerKindIntro {
-		t.Fatalf("automatic contribution submitted %+v, want only the scanner intro", sub.submitted)
+	if len(sub.submitted) != 2 || sub.submitted[0].Segment != MarkerKindIntro || sub.submitted[1].Segment != MarkerKindCredits {
+		t.Fatalf("automatic contribution submitted %+v, want the scanner intro and credits", sub.submitted)
+	}
+
+	file.CreditsMarkersConfidence = floatPtr(0.85)
+	lowCredits := &fakeSubmitter{id: "introdb"}
+	if _, err := newContribService(lowCredits, cfg, &fakeRecorder{}).ContributeFile(context.Background(), file, ContributeOptions{Auto: true}); err != nil {
+		t.Fatalf("ContributeFile: %v", err)
+	}
+	if len(lowCredits.submitted) != 1 || lowCredits.submitted[0].Segment != MarkerKindIntro {
+		t.Fatalf("automatic contribution submitted %+v, want only the intro: the credits are below the minimum confidence", lowCredits.submitted)
 	}
 
 	onRequest := &fakeSubmitter{id: "introdb"}
 	if _, err := newContribService(onRequest, cfg, &fakeRecorder{}).ContributeFile(context.Background(), file, ContributeOptions{}); err != nil {
 		t.Fatalf("ContributeFile: %v", err)
 	}
-	if len(onRequest.submitted) != 2 {
-		t.Fatalf("contribution on request submitted %+v, want the intro and the credits", onRequest.submitted)
+	if len(onRequest.submitted) != 3 {
+		t.Fatalf("contribution on request submitted %+v, want the intro, the credits and the preview", onRequest.submitted)
 	}
 }
 

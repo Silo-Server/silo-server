@@ -731,7 +731,9 @@ describe("ProvidersSettings", () => {
     await user.click(tile.getByRole("button", { name: "Manage" }));
 
     const sharing = tile.getByRole("switch", { name: "Allow sharing with this provider" });
-    const automatic = tile.getByRole("switch", { name: "Automatically share detected intros" });
+    const automatic = tile.getByRole("switch", {
+      name: "Automatically share detected intros and credits",
+    });
     const confidence = tile.getByLabelText("Minimum confidence for automatic sharing");
     expect(automatic).toBeDisabled();
     expect(confidence).toBeEnabled();
@@ -791,7 +793,7 @@ describe("ProvidersSettings", () => {
 
     expect(tile.getByRole("switch", { name: "Allow sharing with this provider" })).toBeDisabled();
     expect(
-      tile.getByRole("switch", { name: "Automatically share detected intros" }),
+      tile.getByRole("switch", { name: "Automatically share detected intros and credits" }),
     ).toBeDisabled();
     expect(tile.getByLabelText("Minimum confidence for automatic sharing")).toBeDisabled();
     expect(tile.queryByRole("button", { name: "Test connection" })).not.toBeInTheDocument();

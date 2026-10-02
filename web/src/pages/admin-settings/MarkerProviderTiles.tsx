@@ -345,12 +345,12 @@ function MarkerProviderTile({
       />
       <div className="border-border ml-3 border-l pl-4">
         <SettingField
-          label="Automatically share detected intros"
+          label="Automatically share detected intros and credits"
           type="toggle"
           value={autoLocal ? "true" : "false"}
           onChange={(value) => setAutoLocal(value === "true")}
           disabled={!provider.is_submitter || !contributeEnabled}
-          description="Share intros detected on this server that meet the minimum confidence below."
+          description="Share intros and credits detected on this server that meet the minimum confidence below."
         />
         <div className="border-border ml-3 border-l pl-4">
           <SettingFieldRow
