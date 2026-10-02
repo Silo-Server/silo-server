@@ -171,4 +171,43 @@ describe("v2 request deadline", () => {
     await expect(v2("GET /api/v2/account/me")).rejects.toBeInstanceOf(V2ProblemError);
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it("ends a read on its own deadline while it waits for a stalled token refresh", async () => {
+    setRefreshToken("stored");
+    let refreshSignal: AbortSignal | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>((input, init) => {
+        if (String(input) === "/api/v2/auth/refresh") {
+          refreshSignal = init?.signal ?? undefined;
+          return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+              once: true,
+            });
+          });
+        }
+        // The read is refused 1 s before its deadline, and the refresh that
+        // should answer the 401 then stalls.
+        return new Promise<Response>((resolve) =>
+          setTimeout(
+            () => resolve(json(authenticationRequired, 401, PROBLEM_HEADERS)),
+            API_READ_TIMEOUT_MS - 1_000,
+          ),
+        );
+      }),
+    );
+
+    const outcome = v2("GET /api/v2/profiles").catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(API_READ_TIMEOUT_MS - 1_000);
+    expect(refreshSignal).toBeDefined();
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await outcome).toBeInstanceOf(V2TimeoutError);
+    // The shared refresh is not cancelled: other requests may still be waiting on it.
+    expect(refreshSignal?.aborted).toBe(false);
+
+    // Let the refresh reach its own deadline so nothing outlives the test.
+    await vi.advanceTimersByTimeAsync(API_READ_TIMEOUT_MS);
+    expect(refreshSignal?.aborted).toBe(true);
+  });
 });
