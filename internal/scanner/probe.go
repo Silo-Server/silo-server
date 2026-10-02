@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -112,7 +113,7 @@ func FFprobePathFromFFmpeg(ffmpegPath string) string {
 // convertProbeData transforms raw ffprobe JSON output into ProbeData.
 func convertProbeData(raw *ffprobeOutput) *ProbeData {
 	pd := &ProbeData{
-		Container: detectContainer(raw.Format.FormatName),
+		Container: containerForFile(raw.Format.FormatName, raw.Format.Filename),
 	}
 
 	if duration, ok := durationFromProbeMetadata(raw); ok {
@@ -753,6 +754,28 @@ func normalizeFormatTags(raw map[string]string) map[string]string {
 	return out
 }
 
+// containerForFile is detectContainer refined by the file's extension where
+// the format name alone is ambiguous. FFprobe names both MPEG-TS (188-byte
+// packets) and Blu-ray/AVCHD BDAV streams (192-byte packets, .m2ts/.mts)
+// "mpegts", but a client that plays .ts progressively cannot be assumed to
+// read BDAV, so those files report "m2ts" and direct play only to clients
+// that claim that container.
+func containerForFile(formatName, filePath string) string {
+	container := detectContainer(formatName)
+	if container == containerMPEGTS {
+		switch strings.ToLower(filepath.Ext(filePath)) {
+		case ".m2ts", ".mts":
+			return containerBDAV
+		}
+	}
+	return container
+}
+
+const (
+	containerMPEGTS = "ts"
+	containerBDAV   = "m2ts"
+)
+
 // detectContainer maps ffprobe format names to common container names.
 func detectContainer(formatName string) string {
 	// ffprobe format_name can contain multiple names separated by commas
@@ -768,7 +791,7 @@ func detectContainer(formatName string) string {
 		case "avi":
 			return "avi"
 		case "mpegts":
-			return "ts"
+			return containerMPEGTS
 		case "flv":
 			return "flv"
 		case "ogg":
