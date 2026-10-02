@@ -1372,7 +1372,7 @@ func TestFindAlternateFile_DoesNotCrossEdition(t *testing.T) {
 		},
 	}
 
-	alternate, err := handler.findAlternateFile(context.Background(), source)
+	alternate, err := handler.findAlternateFile(context.Background(), source, catalog.AccessFilter{})
 	if err != nil {
 		t.Fatalf("findAlternateFile: %v", err)
 	}
@@ -1408,7 +1408,7 @@ func TestFindAlternateFile_PrefersNon4KAcrossLabelsAndDimensions(t *testing.T) {
 		},
 	}
 
-	alternate, err := handler.findAlternateFile(context.Background(), source)
+	alternate, err := handler.findAlternateFile(context.Background(), source, catalog.AccessFilter{})
 	if err != nil {
 		t.Fatalf("findAlternateFile: %v", err)
 	}
@@ -1434,7 +1434,7 @@ func TestFindAlternateFile_Returns4KVersionWhenItIsTheOnlyAlternate(t *testing.T
 		},
 	}
 
-	alternate, err := handler.findAlternateFile(context.Background(), source)
+	alternate, err := handler.findAlternateFile(context.Background(), source, catalog.AccessFilter{})
 	if err != nil {
 		t.Fatalf("findAlternateFile: %v", err)
 	}
