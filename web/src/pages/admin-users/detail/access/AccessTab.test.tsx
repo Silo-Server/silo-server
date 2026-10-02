@@ -425,6 +425,34 @@ describe("Sign-in & role", () => {
     expect(lastBody()).toEqual({ role: "admin", access_group_id: null });
   });
 
+  it("follows the draft role for the inherited profile limit", async () => {
+    const ui = userEvent.setup();
+    mocks.viewerIsOwner = true;
+    mount(GUEST);
+    const signIn = await edit(ui, "Sign-in & role");
+    expect(
+      within(segment(signIn, "Profiles allowed")).getByRole("button", { name: "Default · 2" }),
+    ).toBeInTheDocument();
+    // An admin leaves the group, so it would inherit the admin default, not Guests' 2.
+    await pick(ui, signIn, "Role", "Admin");
+    expect(
+      within(segment(signIn, "Profiles allowed")).getByRole("button", { name: "Default · 5" }),
+    ).toBeInTheDocument();
+    await customize(ui, signIn, "Profiles allowed");
+    expect(within(signIn).getByRole("spinbutton", { name: "Profiles allowed" })).toHaveValue(5);
+  });
+
+  it("says Default without a value for a demoted admin when no group is the default", async () => {
+    const ui = userEvent.setup();
+    mocks.viewerIsOwner = true;
+    mount({ ...USER, role: "admin" });
+    const signIn = await edit(ui, "Sign-in & role");
+    await pick(ui, signIn, "Role", "User");
+    expect(
+      within(segment(signIn, "Profiles allowed")).getByRole("button", { name: "Default" }),
+    ).toBeInTheDocument();
+  });
+
   it("overrides the group's profile limit, seeded from it", async () => {
     const ui = userEvent.setup();
     mount(GUEST);

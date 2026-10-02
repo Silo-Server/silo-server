@@ -1,6 +1,6 @@
 import { useId } from "react";
 
-import type { AdminUser, UpdateUserRequest } from "@/api/types";
+import type { AccessGroup, AdminUser, UpdateUserRequest } from "@/api/types";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -11,6 +11,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { policyInheritHints, type PolicyInheritHints } from "@/components/UserPolicyFields";
 import { useAdminUserProfiles } from "@/hooks/queries/admin/history";
 import { useViewerIsOwner } from "@/hooks/queries/admin/users";
 import { useAuth } from "@/hooks/useAuth";
@@ -83,6 +84,22 @@ function toBody(draft: SignInDraft, base: AdminUser): UpdateUserRequest {
   return body;
 }
 
+/**
+ * The profile limit Default resolves to once the draft saves. A role change
+ * moves the account out of or into a group: an admin is never grouped, and a
+ * demoted admin joins the default group.
+ */
+function inheritedProfileLimit(
+  role: string,
+  base: AdminUser,
+  groups: AccessGroup[],
+  hints: PolicyInheritHints,
+): number | undefined {
+  if (role === base.role) return hints.max_profiles;
+  if (role === "admin") return policyInheritHints(null, groups)?.max_profiles;
+  return groups.find((group) => group.is_default)?.max_profiles;
+}
+
 function validate(draft: SignInDraft): string | null {
   if (draft.username.trim() === "") return "Enter a username.";
   if (!isValidEmail(draft.email)) return INVALID_EMAIL_MESSAGE;
@@ -117,9 +134,11 @@ export function SignInCard({
   const profilesId = useId();
 
   const used = profiles.data?.length;
-  const inheritedProfiles = hints.max_profiles;
   const d = draft.draft;
   const base = draft.base ?? user;
+  const inheritedProfiles = d
+    ? inheritedProfileLimit(d.role, base, groups, hints)
+    : hints.max_profiles;
   // Only the server owner may grant the admin role; nobody changes their own
   // role or disables themselves; the owner stays an enabled admin.
   const adminRoleLocked = !viewerIsOwner && base.role !== "admin";
