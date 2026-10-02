@@ -60,6 +60,10 @@ type AdminAccountCapabilitiesOutputBody struct {
 	PasswordResetLink    bool `json:"password_reset_link" doc:"Whether createAdminUserPasswordReset can return a link to share; needs the server's public URL"`
 	PasswordResetEmail   bool `json:"password_reset_email" doc:"Whether createAdminUserPasswordReset can email the link; needs the public URL and a configured mail server"`
 	OwnershipTransfer    bool `json:"ownership_transfer" doc:"Whether transferAdminUserOwnership can make another enabled admin the server Owner"`
+	AccountDevices       bool `json:"account_devices" doc:"Whether listAdminUserDevices can list an account's registered devices"`
+	WatchSummary         bool `json:"watch_summary" doc:"Whether getAdminUserWatchSummary can total an account's finalized plays"`
+	AccountDownloads     bool `json:"account_downloads" doc:"Whether listAdminUserDownloads, getAdminUserDownloadSummary and listAdminUserDownloadSubscriptions are available"`
+	RequestUsage         bool `json:"request_usage" doc:"Whether getAdminRequestUserUsage can report an account's request quota use"`
 }
 
 type AdminAccountPolicyInput struct {
@@ -92,12 +96,13 @@ type AdminAccountUpdateBody struct {
 	AdminAccountPolicyInput
 	Username              *string      `json:"username,omitempty" minLength:"1" maxLength:"255"`
 	Email                 *string      `json:"email,omitempty" minLength:"1" maxLength:"320"`
-	Password              *string      `json:"password,omitempty" minLength:"8" maxLength:"72"`
+	Password              *string      `json:"password,omitempty" minLength:"8" maxLength:"72" doc:"New local password. Setting one also turns the account's local password sign-in back on (password_login), for example to recover an account whose external sign-in provider is gone. Only the server Owner may set its own account's password while password_login is false for it (403 permission_denied otherwise)"`
 	RequirePasswordChange *bool        `json:"require_password_change,omitempty" doc:"Only with password: make it temporary, so the account must choose a new one at its next sign-in before it can do anything else. A password sent without it is not temporary"`
 	Role                  *string      `json:"role,omitempty" enum:"admin,user"`
 	Permissions           []Permission `json:"permissions,omitempty"`
 	MaxProfiles           *int         `json:"max_profiles,omitempty" minimum:"1"`
 	Enabled               *bool        `json:"enabled,omitempty"`
+	BreakGlass            *bool        `json:"break_glass,omitempty" doc:"Make the admin account a break-glass account, which keeps local password sign-in while the server turns it off, or clear it. Only admins may hold it, and only the server Owner may set or clear it (403 permission_denied otherwise); clearing the last usable one while local password sign-in is off is 409 break_glass_required"`
 }
 type AdminAccountCreateInput struct {
 	Body    AdminAccountCreateBody
@@ -118,8 +123,9 @@ type AdminAccountImpersonateInput struct {
 	UserAgent string `header:"User-Agent"`
 }
 type AdminAccountProfile struct {
-	ID   ID     `json:"id"`
-	Name string `json:"name"`
+	ID         ID              `json:"id"`
+	Name       string          `json:"name"`
+	LastSeenAt NullableInstant `json:"last_seen_at" doc:"Latest time any device reported this profile; null when no device has"`
 }
 type AdminAccountProfilesOutput struct {
 	Body Collection[AdminAccountProfile]
@@ -238,6 +244,10 @@ func registerAdminAccounts(reg *Registry) {
 		}
 		out.Body.AccessGroups = reg.deps.AdminAccessGroups != nil
 		out.Body.ExactIdentityFilter = reg.deps.AdminUsers != nil
+		out.Body.AccountDevices = reg.deps.AdminAccountDevices != nil
+		out.Body.WatchSummary = reg.deps.AdminWatchSummary != nil
+		out.Body.AccountDownloads = reg.deps.AdminAccountDownloads != nil
+		out.Body.RequestUsage = reg.deps.AdminRequestUsage != nil
 		if resets := reg.deps.PasswordResets; resets != nil {
 			caps := resets.PasswordResetCapabilities(ctx)
 			out.Body.PasswordResetLink, out.Body.PasswordResetEmail = caps.Link, caps.Email
@@ -273,12 +283,15 @@ func registerAdminAccounts(reg *Registry) {
 	Register(reg, create, reg.createAdminAccount)
 	update := adminAccountOperation(http.MethodPut, "/{id}", "updateAdminUser", true)
 	update.DefaultStatus = 204
-	// A taken username or email, or a temporary password for an account
-	// without local password sign-in, is 409 conflict.
+	// A taken username or email is 409 conflict; demoting, disabling or
+	// clearing the last usable break-glass admin while local password
+	// sign-in is off is 409 break_glass_required.
 	update.Errors = append(update.Errors, http.StatusConflict)
 	Register(reg, update, reg.updateAdminAccount)
 	del := adminAccountOperation(http.MethodDelete, "/{id}", "deleteAdminUser", true)
 	del.DefaultStatus = 204
+	del.Description = "Deleting the last usable break-glass admin while local password sign-in is off (auth.local_password_login) is 409 break_glass_required."
+	del.Errors = append(del.Errors, http.StatusConflict)
 	Register(reg, del, func(ctx context.Context, in *AdminAccountInput) (*struct{}, error) {
 		id, rev, groupRev, p := reg.adminAccountGuard(ctx, *in)
 		if p != nil {
@@ -341,7 +354,7 @@ func registerAdminAccounts(reg *Registry) {
 		}
 		items := make([]AdminAccountProfile, 0, len(rows))
 		for _, row := range rows {
-			items = append(items, AdminAccountProfile{ID: ID(row.ID), Name: row.Name})
+			items = append(items, AdminAccountProfile{ID: ID(row.ID), Name: row.Name, LastSeenAt: nullableInstantOf(row.LastSeenAt)})
 		}
 		return &AdminAccountProfilesOutput{Body: Paginated(items, "")}, nil
 	})
@@ -415,6 +428,7 @@ func (reg *Registry) updateAdminAccount(ctx context.Context, in *AdminAccountUpd
 	input.PasswordChangeRequired = b.RequirePasswordChange != nil && *b.RequirePasswordChange
 	input.Role = b.Role
 	input.Enabled = b.Enabled
+	input.BreakGlass = b.BreakGlass
 	input.MaxProfiles = b.MaxProfiles
 	var members map[string]json.RawMessage
 	_ = json.Unmarshal(in.RawBody, &members)

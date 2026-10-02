@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -51,8 +52,8 @@ type PlayableTargetInput struct {
 
 // Key identifies this card in the map Resolve returns. It includes the anchor
 // hint because two cards can legitimately display the SAME item and still want
-// different targets — recently-added TV keeps one card per scan-run event, so a
-// series hit by two multi-episode runs appears twice with different anchors.
+// different targets — recently-added TV keeps one card per arrival event, so a
+// series with two multi-episode arrivals appears twice with different anchors.
 // Callers look a response row up with the key built from the same three fields.
 func (in PlayableTargetInput) Key() string {
 	return strings.ToLower(strings.TrimSpace(in.Type)) + "\x00" +
@@ -187,6 +188,16 @@ func (r *PlayableTargetResolver) Resolve(ctx context.Context, q PlayableTargetQu
 		if len(q.Access.DisabledLibraryIDs) > 0 {
 			fileConditions = append(fileConditions, fmt.Sprintf("NOT (mf.media_folder_id = ANY($%d))", argIdx))
 			args = append(args, q.Access.DisabledLibraryIDs)
+		}
+	}
+
+	// PostgreSQL progress lives beside the catalog, so the database can choose
+	// winners without returning every episode or issuing progress batches.
+	// Other stores retain the backend-neutral candidate path below.
+	if store, ok := q.ProgressStore.(userstore.CatalogProgressRelationStore); ok &&
+		(slices.Contains(types, playableTypeSeries) || slices.Contains(types, playableTypeSeason)) {
+		if progress, progressArgs, ok := store.CatalogProgressRelation(r.pool, q.UserID, q.ProfileID, len(args)+1); ok {
+			return r.resolvePostgresTargets(ctx, append(args, progressArgs...), fileConditions, keysByOrd, progress)
 		}
 	}
 

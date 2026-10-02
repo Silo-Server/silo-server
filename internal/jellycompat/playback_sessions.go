@@ -48,11 +48,14 @@ type PlaybackSession struct {
 	ClientPlaySessionID string
 	// StaticPlaybackKey identifies one caller/device/play/item/source tuple.
 	// It is a hash, not a credential or a client-visible session identifier.
-	StaticPlaybackKey          string
-	SelectedMediaFileID        int
-	UserID                     string
-	InitialSeekSeconds         float64
-	MediaSources               []PlaybackMediaSource
+	StaticPlaybackKey   string
+	SelectedMediaFileID int
+	UserID              string
+	InitialSeekSeconds  float64
+	MediaSources        []PlaybackMediaSource
+	// UpstreamMediaFileID survives API restarts so previews can follow the
+	// selected source without consulting a process-local native session.
+	UpstreamMediaFileID        int
 	UpstreamSessionID          string
 	UpstreamPlayMethod         string
 	TranscodeStarted           bool

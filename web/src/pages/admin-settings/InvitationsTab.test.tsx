@@ -11,13 +11,27 @@ const mocks = vi.hoisted(() => ({
   restart: vi.fn(),
   next: vi.fn(),
   profile: true,
+  emailDelivery: true,
   listError: false,
   rows: true,
+  linkRow: false,
   publicURL: "https://media.example.test" as string | undefined,
 }));
+const linkRow = {
+  id: "8",
+  email: "",
+  delivery: "link",
+  note: "For Sam",
+  role: "user",
+  status: "pending",
+  created_at: "2026-01-02T00:00:00Z",
+  expires_at: "2099-01-01T00:00:00Z",
+};
 const row = {
   id: "7",
   email: "invitee@example.invalid",
+  delivery: "email_sent",
+  note: "",
   role: "user",
   status: "pending",
   created_at: "2026-01-01T00:00:00Z",
@@ -26,10 +40,14 @@ const row = {
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({}) }));
 vi.mock("@/hooks/queries/admin/invitations", () => ({
   useInvitationCapabilities: () => ({
-    data: { state: "available", default_profile: mocks.profile },
+    data: {
+      state: "available",
+      default_profile: mocks.profile,
+      email_delivery: mocks.emailDelivery,
+    },
   }),
   useAdminInvitations: () => ({
-    data: { pages: [{ items: mocks.rows ? [row] : [] }] },
+    data: { pages: [{ items: mocks.rows ? (mocks.linkRow ? [linkRow, row] : [row]) : [] }] },
     isError: mocks.listError,
     error: new Error("Cursor expired"),
     restart: mocks.restart,
@@ -60,8 +78,10 @@ beforeEach(() => {
   );
   vi.clearAllMocks();
   mocks.profile = true;
+  mocks.emailDelivery = true;
   mocks.listError = false;
   mocks.rows = true;
+  mocks.linkRow = false;
   mocks.publicURL = "https://media.example.test";
   mocks.restart.mockResolvedValue(undefined);
   localStorage.clear();
@@ -109,7 +129,7 @@ it("keeps a one-time link after clipboard failure, resets mutation state, and di
     value: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
   });
   const view = render(<InvitationsTab />, { wrapper: MemoryRouter });
-  fireEvent.click(screen.getByTitle("Resend with a fresh link"));
+  fireEvent.click(screen.getByTitle("Email a new link"));
   expect(await screen.findByText(/email delivery failed or is uncertain/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
   expect(await screen.findByText(/Could not copy/)).toBeInTheDocument();
@@ -171,7 +191,8 @@ it("asks for the public URL before anyone fills in an invitation", () => {
   mocks.publicURL = "";
   render(<InvitationsTab />, { wrapper: MemoryRouter });
   expect(screen.getByRole("button", { name: "Invite someone" })).toBeDisabled();
-  expect(screen.getByTitle("Resend with a fresh link")).toBeDisabled();
+  expect(screen.getByTitle("Copy a new link without emailing")).toBeDisabled();
+  expect(screen.getByTitle("Email a new link")).toBeDisabled();
   expect(screen.getByTitle("Revoke this link")).not.toBeDisabled();
   expect(
     screen.getByText(/Set the Silo public URL to create invitation links/),
@@ -186,4 +207,112 @@ it("does not block invitations while the settings are unknown", () => {
   render(<InvitationsTab />, { wrapper: MemoryRouter });
   expect(screen.getByRole("button", { name: "Invite someone" })).not.toBeDisabled();
   expect(screen.queryByText(/Set the Silo public URL/)).toBeNull();
+});
+it("creates a link invitation without an address and shows the link to share", async () => {
+  mocks.create.mockResolvedValue({
+    invitation: linkRow,
+    claim_url: "https://example.invalid/invite/link-only",
+    delivery_status: "not_requested",
+  });
+  render(<InvitationsTab />, { wrapper: MemoryRouter });
+  fireEvent.click(screen.getByRole("button", { name: "Invite someone" }));
+  expect(screen.getByLabelText("Send email")).toBeChecked();
+  fireEvent.click(screen.getByLabelText("Create link"));
+  expect(screen.queryByLabelText("Email address")).toBeNull();
+  fireEvent.change(screen.getByLabelText("Note (optional)"), { target: { value: "For Sam" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create link" }));
+  await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1));
+  const body = mocks.create.mock.calls[0]![0].body;
+  expect(body).toMatchObject({ delivery: "link", note: "For Sam" });
+  expect(body.email).toBeUndefined();
+  expect(await screen.findByText(/Invitation link created/)).toBeInTheDocument();
+  expect(screen.getByText("https://example.invalid/invite/link-only")).toBeInTheDocument();
+  expect(screen.getByText(/Anyone with the link can use it/)).toBeInTheDocument();
+});
+it("offers only link creation when email is not configured", () => {
+  mocks.emailDelivery = false;
+  render(<InvitationsTab />, { wrapper: MemoryRouter });
+  fireEvent.click(screen.getByRole("button", { name: "Invite someone" }));
+  expect(screen.getByLabelText("Create link")).toBeChecked();
+  expect(screen.getByLabelText("Send email")).toBeDisabled();
+  expect(screen.getByText("Email isn't set up on this server.")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /Notifications settings/ })).toHaveAttribute(
+    "href",
+    "/admin/settings/notifications",
+  );
+  expect(screen.getByRole("button", { name: "Create link" })).toBeInTheDocument();
+});
+it("shows delivery and identifies link invitations in the history", () => {
+  mocks.linkRow = true;
+  render(<InvitationsTab />, { wrapper: MemoryRouter });
+  expect(screen.getByText("Link invitation")).toBeInTheDocument();
+  expect(screen.getByText(/“For Sam”/)).toBeInTheDocument();
+  expect(screen.getByText("Link created")).toBeInTheDocument();
+  expect(screen.getByText("Email sent")).toBeInTheDocument();
+  expect(screen.getByTitle("Replace with a new link")).toBeInTheDocument();
+  fireEvent.click(screen.getAllByTitle("Revoke this link")[0]!);
+  expect(
+    screen.getByText("Revoke this link invitation? The link will stop working."),
+  ).toBeInTheDocument();
+});
+it("keeps a link invitation's note after it is accepted", () => {
+  mocks.linkRow = true;
+  linkRow.email = "sam@example.invalid";
+  linkRow.status = "accepted";
+  try {
+    render(<InvitationsTab />, { wrapper: MemoryRouter });
+    expect(screen.getByText("sam@example.invalid")).toBeInTheDocument();
+    expect(screen.getByText(/Joined by link · “For Sam”/)).toBeInTheDocument();
+  } finally {
+    linkRow.email = "";
+    linkRow.status = "pending";
+  }
+});
+it("replaces an emailed invitation's link without emailing it", async () => {
+  mocks.resend.mockResolvedValue({
+    invitation: { ...row, delivery: "link" },
+    claim_url: "https://example.invalid/invite/replaced",
+    delivery_status: "not_requested",
+  });
+  render(<InvitationsTab />, { wrapper: MemoryRouter });
+  fireEvent.click(screen.getByTitle("Copy a new link without emailing"));
+  await waitFor(() =>
+    expect(mocks.resend).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "7", delivery: "link" }),
+    ),
+  );
+  expect(
+    await screen.findByText(
+      `New link created for ${row.email}. Nothing was emailed; share this link with them yourself.`,
+    ),
+  ).toBeInTheDocument();
+  expect(screen.getByText("https://example.invalid/invite/replaced")).toBeInTheDocument();
+});
+it("emails a new link only when asked and email is configured", async () => {
+  mocks.resend.mockResolvedValue({
+    invitation: row,
+    claim_url: "https://example.invalid/invite/emailed",
+    delivery_status: "sent",
+  });
+  const view = render(<InvitationsTab />, { wrapper: MemoryRouter });
+  fireEvent.click(screen.getByTitle("Email a new link"));
+  await waitFor(() =>
+    expect(mocks.resend).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "7", delivery: "email" }),
+    ),
+  );
+  view.unmount();
+  mocks.emailDelivery = false;
+  mocks.linkRow = true;
+  render(<InvitationsTab />, { wrapper: MemoryRouter });
+  expect(screen.queryByTitle("Email a new link")).toBeNull();
+  expect(screen.getByTitle("Copy a new link without emailing")).toBeInTheDocument();
+  // A link invitation has no address to email.
+  expect(screen.getAllByTitle(/new link/)).toHaveLength(2);
+  fireEvent.click(screen.getByTitle("Replace with a new link"));
+  await waitFor(() =>
+    expect(mocks.resend).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: "8", delivery: "link" }),
+    ),
+  );
 });

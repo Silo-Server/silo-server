@@ -48,6 +48,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/audiobooks/podcastfeed"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/autoscan"
+	"github.com/Silo-Server/silo-server/internal/blobgc"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/branding"
 	"github.com/Silo-Server/silo-server/internal/cache"
@@ -120,6 +121,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"github.com/Silo-Server/silo-server/internal/themesongs"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
+	"github.com/Silo-Server/silo-server/internal/trickplay"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -127,9 +129,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/watchlist"
 	"github.com/Silo-Server/silo-server/internal/watchstate"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
-	watchmdblist "github.com/Silo-Server/silo-server/internal/watchsync/providers/mdblist"
-	"github.com/Silo-Server/silo-server/internal/watchsync/providers/simkl"
-	"github.com/Silo-Server/silo-server/internal/watchsync/providers/trakt"
 	"github.com/Silo-Server/silo-server/internal/worker"
 	"github.com/Silo-Server/silo-server/internal/workmetrics"
 	"github.com/Silo-Server/silo-server/migrations"
@@ -680,6 +679,13 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "compat-web" {
 		if err := runCompatWebCommand(context.Background(), os.Args[2:]); err != nil {
 			log.Fatalf("compat-web: %v", err)
+		}
+		return
+	}
+
+	if len(os.Args) > 1 && os.Args[1] == "auth" {
+		if err := runAuthCommand(context.Background(), os.Args[2:], os.Stdout); err != nil {
+			log.Fatalf("auth: %v", err)
 		}
 		return
 	}
@@ -1350,16 +1356,9 @@ func main() {
 	var watchProviderRegistry *watchsync.Registry
 	var watchProviderRepo *watchsync.PostgresRepository
 	if deps.DB != nil {
+		// Every watch provider is a plugin; reloadWatchSyncPluginProviders
+		// fills the registry once the plugin service starts.
 		watchProviderRegistry = watchsync.NewRegistry()
-		if err := watchProviderRegistry.Register(trakt.NewProvider(nil, "")); err != nil {
-			log.Fatalf("register watch provider: %v", err)
-		}
-		if err := watchProviderRegistry.Register(simkl.NewProvider(nil, "")); err != nil {
-			log.Fatalf("register watch provider: %v", err)
-		}
-		if err := watchProviderRegistry.Register(watchmdblist.NewProvider(nil, "")); err != nil {
-			log.Fatalf("register watch provider: %v", err)
-		}
 		watchProviderRepo = watchsync.NewPostgresRepository(deps.DB, deps.SecretCipher)
 		watchProviderService = watchsync.NewService(watchProviderRepo, watchProviderRegistry)
 		deps.WatchProviderService = watchProviderService
@@ -1527,6 +1526,9 @@ func main() {
 			cfg.Playback.ChapterThumbnailWorkers,
 		)
 		if chapterThumbService != nil {
+			if queue := blobgc.NewQueue(deps.DB); queue != nil {
+				chapterThumbService.SetBlobQueue(queue)
+			}
 			chapterThumbService.Start(appCtx)
 			deps.ChapterThumbnailQueuer = chapterThumbService
 		}
@@ -1705,12 +1707,28 @@ func main() {
 		pluginHost.SetExitHandler(pluginService.HandleResidentExit)
 		if watchProviderRegistry != nil {
 			reloadWatchProviders := func(ctx context.Context) {
-				if err := reloadWatchSyncPluginProviders(ctx, watchProviderRegistry, installationStore, pluginService, watchProviderRepo); err != nil {
+				if err := reloadWatchSyncPluginProviders(ctx, watchProviderRegistry, installationStore, pluginService, watchProviderRepo, watchProviderRepo); err != nil {
 					slog.WarnContext(ctx, "failed to reload watch sync plugin providers", "component", "app", "error", err)
 				}
 			}
 			pluginService.AddLifecycleHook(reloadWatchProviders)
 			reloadWatchProviders(appCtx)
+			// Lifecycle hooks fire only on the node that changed a plugin. Every
+			// API node also reconciles on a timer, so a plugin another node
+			// installed, removed, or reconfigured reaches this node's registry,
+			// and a reload that hit a transient error is retried.
+			go func() {
+				ticker := time.NewTicker(watchSyncPluginReconcileInterval)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-appCtx.Done():
+						return
+					case <-ticker.C:
+						reloadWatchProviders(appCtx)
+					}
+				}
+			}()
 		}
 		if deps.MarkerRegistry != nil && deps.MarkerProviderConfig != nil {
 			markerPluginResolver := markers.NewPluginResolverAdapter(pluginService)
@@ -1782,6 +1800,13 @@ func main() {
 			// the fresh row instead of a stale one.
 			pluginService.OnLifecycleChange,
 		)
+		if watchProviderRepo != nil {
+			// Install the plugins that replaced the built-in watch providers
+			// on servers with connections to carry over.
+			pluginAutoUpdater.SetRequiredPlugins(func(ctx context.Context) ([]string, error) {
+				return watchsync.FirstPartyPluginsToInstall(ctx, watchProviderRepo)
+			})
+		}
 		go func() {
 			defer close(pluginAutoUpdateDone)
 			if err := pluginAutoUpdater.Run(appCtx); err != nil {
@@ -2273,6 +2298,19 @@ func main() {
 		defer policySystem.Stop()
 	}
 
+	// White-label branding: one service shared by the API (public read + admin
+	// upload), the frontend handler (index.html title, favicon, manifest), the
+	// artwork reconcile task, and outgoing email. It is built before the
+	// notification system, which sends email. S3 is optional — pass a nil
+	// AssetStore (not the typed-nil *s3client.Client) when it isn't configured
+	// so text branding still works without it.
+	var brandingStore branding.AssetStore
+	if deps.Blobs.Assets != nil {
+		brandingStore = deps.Blobs.Assets
+	}
+	brandingSvc := branding.NewService(settingsRepo, brandingStore)
+	deps.EmailBrand = mail.NewBrandLoader(brandingSvc)
+
 	// User-facing release notifications. The system reads user state through
 	// the raw store provider; the provider handed to everything downstream is
 	// wrapped so every favorites/watchlist/progress mutation (REST handlers,
@@ -2298,6 +2336,7 @@ func main() {
 			deps.RedisClient,
 			deps.SecretCipher,
 			mail.NewSMTPSender(settingsRepo),
+			deps.EmailBrand,
 		)
 		userStoreProvider = notifications.WrapUserStoreProvider(userStoreProvider, notificationSystem)
 		deps.Notifications = notificationSystem
@@ -2735,16 +2774,62 @@ func main() {
 		}
 	}
 
-	// White-label branding: one service shared by the API (public read + admin
-	// upload), the frontend handler (index.html title, favicon, manifest), and
-	// the artwork reconcile task. S3 is optional — pass a nil AssetStore (not
-	// the typed-nil *s3client.Client) when it isn't configured so text branding
-	// still works without it.
-	var brandingStore branding.AssetStore
-	if deps.Blobs.Assets != nil {
-		brandingStore = deps.Blobs.Assets
+	// Sign-in providers come from enabled auth_provider.v1 bindings. The
+	// registry rebuilds on this node after a plugin lifecycle change (install,
+	// config save, removal) or an auth binding write, and on every other node
+	// when that change is announced on the admin channel, so no restart is
+	// needed (docs/architecture/external-sign-in.md).
+	var authProviderRegistry *auth.PluginProviderRegistry
+	if deps.DB != nil && pluginInstallationStore != nil && pluginRuntimeConfigStore != nil && deps.PluginService != nil {
+		// The resolver stores the plugins' refresh_state encrypted with the
+		// server secret, for the provider re-check at session refresh.
+		accountResolver := auth.NewAccountResolver(deps.DB,
+			auth.NewAccountProvisioner(auth.NewUserRepository(deps.DB), userStoreProvider),
+			func(ctx context.Context, userID int) {
+				if deps.OnUserSessionsRevoked != nil {
+					deps.OnUserSessionsRevoked(ctx, userID)
+				}
+			}).WithSecretCipher(dataCipher)
+		authProviderRegistry = auth.NewPluginProviderRegistry(auth.PluginProviderRegistryConfig{
+			Bindings:      pluginRuntimeConfigStore,
+			Installations: pluginInstallationStore,
+			GlobalConfigs: pluginRuntimeConfigStore,
+			Manifests:     deps.PluginService,
+			Clients:       deps.PluginService,
+			Sessions:      auth.NewSessionRepository(deps.DB),
+			Resolver:      accountResolver,
+		})
+		deps.AuthProviderRecheck = auth.NewProviderRecheck(accountResolver, authProviderRegistry)
+		if err := authProviderRegistry.Rebuild(appCtx); err != nil {
+			log.Fatalf("build sign-in providers: %v", err)
+		}
+		// A change made on this node applies before its request returns; a
+		// failure there, another node's announcement and the periodic resync
+		// go through RunRebuilds, which coalesces them and retries failures.
+		rebuildAuthProviders := func(ctx context.Context) {
+			if err := authProviderRegistry.Rebuild(ctx); err != nil {
+				slog.WarnContext(ctx, "rebuild sign-in providers failed; keeping the previous set and retrying", "component", "auth", "error", err)
+				authProviderRegistry.RequestRebuild()
+			}
+		}
+		go authProviderRegistry.RunRebuilds(appCtx, auth.ProviderRegistryResyncInterval, auth.ProviderRegistryRetryWait)
+		deps.PluginService.AddLifecycleHook(rebuildAuthProviders)
+		if err := eventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
+			if event.Type == cache.EventAuthProvidersChanged || event.Type == cache.EventPluginsChanged {
+				authProviderRegistry.RequestRebuild()
+			}
+		}); err != nil {
+			slog.Warn("subscribe sign-in provider changes failed; other nodes' binding changes apply at the next periodic resync", "error", err,
+				"resync_interval", auth.ProviderRegistryResyncInterval)
+		}
+		deps.AuthProviderSource = authProviderRegistry
+		deps.OnAuthProvidersChanged = func(ctx context.Context) {
+			rebuildAuthProviders(ctx)
+			if err := eventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{Type: cache.EventAuthProvidersChanged}); err != nil {
+				slog.WarnContext(ctx, "publish sign-in provider change failed", "component", "auth", "error", err)
+			}
+		}
 	}
-	brandingSvc := branding.NewService(settingsRepo, brandingStore)
 
 	// Wire up task manager for admin task API.
 	if needsWorkers && deps.DB != nil {
@@ -2769,6 +2854,23 @@ func main() {
 			taskMgr.Register(tasks.NewCleanupArtworkRevisionsTask(
 				metadata.NewArtworkRevisionGarbageCollector(deps.DB, deps.Blobs.Assets),
 			))
+			mediaImages := []blobgc.Namespace{chapterthumbs.BlobNamespace(), trickplay.BlobNamespace()}
+			// Replaced chapter images are queued by key; the sweep lists by file.
+			collected := append([]blobgc.Namespace{chapterthumbs.ImageBlobNamespace()}, mediaImages...)
+			if collector := blobgc.NewCollector(deps.DB, deps.Blobs.Assets, collected...); collector != nil {
+				taskMgr.Register(tasks.NewCleanupRemovedMediaImagesTask(collector))
+			}
+			if sweeper := blobgc.NewSweeper(deps.DB, deps.Blobs.Assets, mediaImages...); sweeper != nil {
+				taskMgr.Register(tasks.NewSweepOrphanedMediaImagesTask(sweeper))
+			}
+			trickplayExtractor := trickplay.NewNodeExtractor(trickplay.NewLocalExtractor(settingsRepo), deps.NodePlanner, settingsRepo)
+			if trickplayService := trickplay.NewService(deps.DB, deps.Blobs.Assets, settingsRepo, trickplayExtractor, deps.NodeID); trickplayService != nil {
+				trickplayService.Start(appCtx)
+				taskMgr.Register(tasks.NewQueueSeekPreviewsTask(trickplayService))
+				deps.Trickplay = trickplayService
+				deps.TrickplayReader = trickplay.NewReader(deps.DB, deps.Blobs.Assets, trickplayURLResolver(&deps))
+				deps.TrickplayAdmin = trickplay.NewAdmin(deps.DB, deps.Blobs.Assets, trickplayService.Kick)
+			}
 		}
 		catalogSearchIndexer := catalog.NewCatalogSearchIndexerFromSettings(deps.DB, settingsRepo, catalogSearchStartupSettings)
 		taskMgr.Register(tasks.NewSyncCatalogSearchIndexTask(catalogSearchIndexer))
@@ -2793,6 +2895,8 @@ func main() {
 		maintenanceSteps = append(maintenanceSteps,
 			tasks.NewTaskHistoryCleanupTask(historyRepo, settingsRepo),
 			tasks.NewAuthSessionCleanupTask(auth.NewSessionRepository(deps.DB)),
+			tasks.NewDeviceLoginCleanupTask(auth.NewDeviceLoginRetention(deps.DB)),
+			tasks.NewOAuthFlowCleanupTask(auth.NewPGOAuthStore(deps.DB)),
 		)
 		var diagnosticsStore diagnostics.ObjectStore
 		if deps.S3Private != nil {
@@ -3028,6 +3132,11 @@ func main() {
 			taskMgr.Register(tasks.NewSyncMangaMetadataTask(mangaEnricher))
 		}
 		taskMgr.Register(tasks.NewDatabaseMaintenanceTask(deps.DB, maintenanceSteps...))
+		if deps.AuthProviderRecheck != nil {
+			// Accounts that hold API keys or idle sessions never refresh, so
+			// their provider re-check runs on a schedule.
+			taskMgr.Register(tasks.NewRecheckExternalIdentitiesTask(deps.DB, deps.AuthProviderRecheck))
+		}
 		if pluginInstallationStore != nil && pluginRuntimeConfigStore != nil && pluginService != nil {
 			pluginTasks, err := plugins.NewTaskRegistryWithTypedResolver(pluginInstallationStore, pluginRuntimeConfigStore, pluginService).Tasks(appCtx)
 			if err != nil {
@@ -3068,6 +3177,9 @@ func main() {
 			nil, // settings: not needed here
 			nil, // user store: not needed here
 		)
+		// Audiobookshelf compatibility (beta) signs in local accounts only:
+		// its sessions refresh without the provider re-check, so directory
+		// users are not routed to their provider here.
 		absItemRepo := catalog.NewItemRepository(deps.DB)
 		absEpisodeRepo := catalog.NewEpisodeRepository(deps.DB)
 		absSeasonRepo := catalog.NewSeasonRepository(deps.DB)
@@ -3107,108 +3219,6 @@ func main() {
 		deps.ABSHandler = absH
 	}
 	_ = audiobooksService
-
-	if deps.DB != nil && pluginInstallationStore != nil && pluginRuntimeConfigStore != nil && deps.PluginService != nil {
-		userRepo := auth.NewUserRepository(deps.DB)
-		sessionRepo := auth.NewSessionRepository(deps.DB)
-		authBindings, err := pluginRuntimeConfigStore.ListAuthBindings(appCtx)
-		if err != nil {
-			log.Fatalf("list plugin auth bindings: %v", err)
-		}
-		for _, binding := range authBindings {
-			if binding == nil || !binding.Enabled {
-				continue
-			}
-			installation, err := pluginInstallationStore.GetByID(appCtx, binding.InstallationID)
-			if err != nil {
-				log.Fatalf("load plugin auth installation %d: %v", binding.InstallationID, err)
-			}
-			if !installation.Enabled {
-				continue
-			}
-			displayName := binding.CapabilityID
-			mode := "credentials"
-			iconURL := ""
-			capabilities, err := pluginInstallationStore.ListCapabilities(appCtx, binding.InstallationID)
-			if err == nil {
-				for _, capability := range capabilities {
-					if capability != nil && capability.Type == "auth_provider.v1" && capability.ID == binding.CapabilityID {
-						if name, ok := capability.Metadata["display_name"].(string); ok && strings.TrimSpace(name) != "" {
-							displayName = name
-						}
-						// auth_modes ["oauth2"] flips the login button into
-						// an OAuth-style "Sign in with X" path. Mode is "oauth"
-						// when oauth2 is the only declared mode; "credentials"
-						// when password is supported alongside or alone.
-						if rawModes, ok := capability.Metadata["auth_modes"].([]any); ok {
-							hasPassword := false
-							hasOAuth := false
-							for _, m := range rawModes {
-								switch m {
-								case "password":
-									hasPassword = true
-								case "oauth2":
-									hasOAuth = true
-								}
-							}
-							if hasOAuth && !hasPassword {
-								mode = "oauth"
-							}
-						}
-						if url, ok := capability.Metadata["icon_url"].(string); ok {
-							iconURL = url
-						}
-						break
-					}
-				}
-			}
-
-			// Generic OIDC and similar multi-instance plugins ship one binary
-			// but install once per IdP. Their admin SPA writes display_name
-			// + icon_url_path to runtime config so each install renders its
-			// own brand on the login page. Manifest values are the fallback.
-			if runtimeConfigs, err := pluginRuntimeConfigStore.ListGlobalConfigs(appCtx, binding.InstallationID); err == nil {
-				for _, rc := range runtimeConfigs {
-					switch rc.Key {
-					case "display_name":
-						if v, ok := rc.Value["value"].(string); ok && strings.TrimSpace(v) != "" {
-							displayName = v
-						}
-					case "icon_url_path":
-						if v, ok := rc.Value["value"].(string); ok && strings.TrimSpace(v) != "" {
-							// Minted under the versioned plugin-content mount so the
-							// icon keeps resolving after the /api/v1 tombstone; the v2
-							// auth-providers projection validates this shape.
-							iconURL = fmt.Sprintf("%s/plugins/%d/assets/%s", plugins.ContentPrefix, binding.InstallationID, strings.TrimLeft(v, "/"))
-						}
-					}
-				}
-			}
-
-			deps.AuthProviders = append(deps.AuthProviders, auth.RegisteredProvider{
-				Info: auth.LoginProviderInfo{
-					ID:             fmt.Sprintf("plugin:%d:%s", binding.InstallationID, binding.CapabilityID),
-					DisplayName:    displayName,
-					Mode:           mode,
-					Default:        binding.DefaultLogin,
-					IconURL:        iconURL,
-					InstallationID: binding.InstallationID,
-				},
-				Provider: auth.NewPluginProvider(
-					auth.PluginProviderConfig{
-						InstallationID: binding.InstallationID,
-						CapabilityID:   binding.CapabilityID,
-						DisplayName:    displayName,
-						AutoProvision:  binding.AutoProvision,
-					},
-					sessionRepo,
-					userRepo,
-					deps.DB,
-					deps.PluginService,
-				),
-			})
-		}
-	}
 
 	// Step 7: Build HTTP router with all dependencies.
 	// compatServer is populated after the compat server is constructed below;
@@ -3475,6 +3485,9 @@ func main() {
 			if blobs := blobstore.NewByteStore(deps.Blobs.Assets); blobs != nil {
 				compatDeps.SubtitleBlobs = blobs
 			}
+			if deps.TrickplayReader != nil {
+				compatDeps.Trickplay = deps.TrickplayReader
+			}
 			compatDeps.PosterPresigner = jellycompat.NewResolverPosterPresigner(deps.ArtworkResolver)
 
 			if deps.FileRepo != nil {
@@ -3500,6 +3513,12 @@ func main() {
 			})
 			provider := auth.NewLocalProvider(userRepo, sessionRepo)
 			compatDeps.AuthService = auth.NewService(provider, jwtService, sessionRepo, userRepo, nil, nil, nil)
+			if authProviderRegistry != nil {
+				// Directory (LDAP) users sign in with their directory password.
+				compatDeps.AuthService.SetPluginProviderSource(authProviderRegistry)
+				// Compatibility sessions refresh their Silo session too.
+				compatDeps.AuthService.SetProviderRecheck(deps.AuthProviderRecheck)
+			}
 
 			// Access filter resolver for viewer-scoped library access.
 			// Backed by the shared access.Resolver so account-level library
@@ -3807,6 +3826,15 @@ func newS3ClientIfConfigured(cfg s3client.BucketConfig) *s3client.Client {
 	return s3client.NewClient(cfg)
 }
 
+func trickplayURLResolver(deps *api.Dependencies) artworkurl.Resolver {
+	if deps.ArtworkDelivery.External {
+		// An external read endpoint can lag behind the S3 write that published
+		// the manifest. The signed server route reads the storage API directly.
+		return artworkurl.NewServerResolver(deps.ArtworkSigner)
+	}
+	return deps.ArtworkResolver
+}
+
 // configureBlobStorage initializes blob storage only in processes that own the
 // catalog. Workers share settings but do not have storage clients.
 func configureBlobStorage(ctx context.Context, mode string, cfg *config.Config, deps *api.Dependencies, settings blobstore.SettingsStore) error {
@@ -3837,6 +3865,7 @@ func configureBlobStorage(ctx context.Context, mode string, cfg *config.Config, 
 			External: deps.S3Public.UsesExternalDelivery(),
 		}
 	}
+	deps.ArtworkResolver = chapterthumbs.NewURLResolver(deps.DB, deps.ArtworkResolver)
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := store.Probe(probeCtx); err != nil {
@@ -4090,26 +4119,88 @@ type markerPluginCapabilityStore interface {
 	ListCapabilities(ctx context.Context, installationID int) ([]*plugins.Capability, error)
 }
 
+// watchSyncPluginService is the plugin service surface a watch provider
+// reload uses.
+type watchSyncPluginService interface {
+	InvalidateInstallationCache()
+	InstalledFromSiloRepository(ctx context.Context, installation *plugins.Installation) (bool, error)
+	WatchSyncProviderClient(ctx context.Context, installationID int, capabilityID string) (*pluginhost.WatchSyncProviderClient, error)
+	WatchSyncProviderConfig(ctx context.Context, installationID int) (*pluginv1.WatchSyncProviderConfig, error)
+	SeedGlobalConfig(ctx context.Context, installationID int, key string, value map[string]any) (bool, error)
+	WatchSyncConfigReady(ctx context.Context, installationID int) (bool, error)
+}
+
+// watchSyncPluginReconcileInterval is how often every API node rebuilds its
+// watch provider registry from the installed plugins.
+const watchSyncPluginReconcileInterval = 2 * time.Minute
+
+// firstPartyInstallation is a first-party watch provider plugin found by a
+// reload, whose app credentials may still need carrying over.
+type firstPartyInstallation struct {
+	installationID int
+	providerKey    string
+}
+
 func reloadWatchSyncPluginProviders(
 	ctx context.Context,
 	registry *watchsync.Registry,
 	store markerPluginCapabilityStore,
-	service *plugins.Service,
+	service watchSyncPluginService,
 	repository watchsync.PluginCredentialRepository,
+	migration watchsync.FirstPartyMigrationStore,
 ) error {
 	if registry == nil {
 		return nil
 	}
+	firstParty, err := replaceWatchSyncPluginProviders(ctx, registry, store, service, repository, migration)
+	// Seeding saves plugin config, which fires the lifecycle hooks and with
+	// them this reload, so it runs after the reload lock is released. The
+	// nested reload finds the config saved and seeds nothing.
+	for _, installation := range firstParty {
+		seeded, seedErr := watchsync.SeedFirstPartyAppConfig(ctx, installation.providerKey, installation.installationID, migration, service)
+		if seedErr != nil {
+			slog.WarnContext(ctx, "failed to carry watch provider app credentials over to its plugin",
+				"component", "app",
+				"installation_id", installation.installationID,
+				"provider", installation.providerKey,
+				"error", seedErr,
+			)
+		} else if seeded {
+			slog.InfoContext(ctx, "carried watch provider app credentials over to its plugin",
+				"component", "app",
+				"installation_id", installation.installationID,
+				"provider", installation.providerKey,
+			)
+		}
+	}
+	return err
+}
+
+// replaceWatchSyncPluginProviders rebuilds the plugin providers in registry
+// and returns the first-party installations it registered.
+func replaceWatchSyncPluginProviders(
+	ctx context.Context,
+	registry *watchsync.Registry,
+	store markerPluginCapabilityStore,
+	service watchSyncPluginService,
+	repository watchsync.PluginCredentialRepository,
+	migration watchsync.FirstPartyMigrationStore,
+) ([]firstPartyInstallation, error) {
 	watchSyncPluginReloadMu.Lock()
 	defer watchSyncPluginReloadMu.Unlock()
 
 	var providers []watchsync.Provider
+	var firstParty []firstPartyInstallation
+	claimedLegacyKeys := make(map[string]bool)
 	if store == nil || service == nil {
-		return registry.ReplacePluginProviders(providers)
+		return nil, registry.ReplacePluginProviders(providers)
 	}
+	// The rows below can have changed on another API node. Client and
+	// manifest reads must use those versions too, including on timer reloads.
+	service.InvalidateInstallationCache()
 	installations, err := store.ListEnabled(ctx)
 	if err != nil {
-		return fmt.Errorf("list enabled watch sync plugin installations: %w", err)
+		return nil, fmt.Errorf("list enabled watch sync plugin installations: %w", err)
 	}
 	sort.Slice(installations, func(i, j int) bool {
 		if installations[i] == nil {
@@ -4122,6 +4213,18 @@ func reloadWatchSyncPluginProviders(
 	})
 	for _, installation := range installations {
 		if installation == nil || installation.IsBuiltin() {
+			continue
+		}
+		siloManaged, err := service.InstalledFromSiloRepository(ctx, installation)
+		if err != nil {
+			// Registering a first-party plugin under a per-installation key
+			// would hide its existing connections, so skip it until the
+			// repository can be read.
+			slog.WarnContext(ctx, "skip watch sync plugin with unreadable repository",
+				"component", "app",
+				"installation_id", installation.ID,
+				"error", err,
+			)
 			continue
 		}
 		capabilities, err := store.ListCapabilities(ctx, installation.ID)
@@ -4147,9 +4250,30 @@ func reloadWatchSyncPluginProviders(
 				)
 				continue
 			}
+			providerKey := watchsync.PluginProviderKey(installation.ID, installation.PluginID, capability.ID, siloManaged)
+			if legacyKey := watchsync.PluginProviderKey(installation.ID, installation.PluginID, capability.ID, true); legacyKey != providerKey {
+				slog.WarnContext(ctx, "first-party watch provider plugin was not installed from the Silo repository; connections made with it before stay unsynced",
+					"component", "app",
+					"installation_id", installation.ID,
+					"plugin_id", installation.PluginID,
+					"provider", legacyKey,
+				)
+			}
+			if _, legacy := watchsync.FirstPartyPluginID(providerKey); legacy && claimedLegacyKeys[providerKey] {
+				// Two Silo-managed installations of one first-party plugin, for
+				// example from API nodes that auto-installed it at the same
+				// time. The older one keeps the key; registering both would
+				// fail the whole reload.
+				slog.WarnContext(ctx, "skip duplicate first-party watch provider plugin installation",
+					"component", "app",
+					"installation_id", installation.ID,
+					"provider", providerKey,
+				)
+				continue
+			}
 			provider, err := watchsync.NewPluginProvider(watchsync.PluginProviderOptions{
 				InstallationID:         installation.ID,
-				ProviderKey:            fmt.Sprintf("plugin:%d:%s", installation.ID, capability.ID),
+				ProviderKey:            providerKey,
 				CapabilityID:           capability.ID,
 				DisplayName:            descriptor.GetDisplayName(),
 				Descriptor:             descriptor.GetWatchSyncProvider(),
@@ -4159,6 +4283,9 @@ func reloadWatchSyncPluginProviders(
 				},
 				ResolveConfig: func(callCtx context.Context, installationID int) (*pluginv1.WatchSyncProviderConfig, error) {
 					return service.WatchSyncProviderConfig(callCtx, installationID)
+				},
+				ConfigReady: func(callCtx context.Context, installationID int) (bool, error) {
+					return service.WatchSyncConfigReady(callCtx, installationID)
 				},
 				Repository: repository,
 			})
@@ -4172,9 +4299,25 @@ func reloadWatchSyncPluginProviders(
 				continue
 			}
 			providers = append(providers, provider)
+			if _, ok := watchsync.FirstPartyPluginID(providerKey); ok {
+				claimedLegacyKeys[providerKey] = true
+				firstParty = append(firstParty, firstPartyInstallation{installationID: installation.ID, providerKey: providerKey})
+			}
 		}
 	}
-	return registry.ReplacePluginProviders(providers)
+	if err := registry.ReplacePluginProviders(providers); err != nil {
+		return nil, err
+	}
+	for _, installation := range firstParty {
+		if err := watchsync.MarkFirstPartyMigrated(ctx, migration, installation.providerKey); err != nil {
+			slog.WarnContext(ctx, "failed to record watch provider plugin migration",
+				"component", "app",
+				"provider", installation.providerKey,
+				"error", err,
+			)
+		}
+	}
+	return firstParty, nil
 }
 
 type markerPluginRuntimeConfigStore interface {

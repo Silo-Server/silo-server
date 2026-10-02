@@ -28,6 +28,18 @@ var (
 	// itself, or deleting itself: an admin that does any of these locks
 	// itself out, and only the Owner changes or removes admins.
 	ErrSelfStanding = errors.New("an account cannot change its own role, disable itself, or delete itself")
+	// ErrBreakGlassOwnerOnly refuses a caller other than the Owner setting or
+	// clearing an account's break-glass flag: the flag keeps an admin's
+	// password sign-in and its admin role through provider demotion, so an
+	// admin must not grant it to itself.
+	ErrBreakGlassOwnerOnly = errors.New("only the server owner can make or unmake a break-glass account")
+	// ErrSelfPasswordOwnerOnly refuses a caller other than the Owner setting
+	// its own password through account administration while its local
+	// password sign-in is off (it signs in through a provider). An
+	// administrator's password write turns local sign-in back on, and local
+	// sign-ins skip the provider's role sync and re-check, so the admin would
+	// keep its role through provider demotion, as break-glass would.
+	ErrSelfPasswordOwnerOnly = errors.New("only the server owner can turn password sign-in back on for an account of its own")
 	// ErrNotOwner refuses a caller other than the Owner transferring ownership.
 	ErrNotOwner = errors.New("only the server owner can transfer ownership")
 	// ErrOwnershipTarget refuses transferring ownership to an account that
@@ -68,9 +80,10 @@ func CheckGrantAdmin(actor OwnerActor, role string) error {
 }
 
 // CheckOwnerUpdate is CheckOwnerTarget plus promotion and standing: only the
-// Owner may make an account an admin, the update may not remove the Owner's
-// admin role or disable it, and no account may change its own role or
-// disable itself.
+// Owner may make an account an admin or change its break-glass flag, the
+// update may not remove the Owner's admin role or disable it, no account may
+// change its own role or disable itself, and no account but the Owner may set
+// its own password while its local password sign-in is off.
 func CheckOwnerUpdate(actor OwnerActor, target *models.User, input models.UpdateUserInput) error {
 	if err := CheckOwnerTarget(actor, target); err != nil {
 		return err
@@ -90,6 +103,12 @@ func CheckOwnerUpdate(actor OwnerActor, target *models.User, input models.Update
 	if target.ID == actor.ID &&
 		((input.Role != nil && *input.Role != target.Role) || (input.Enabled != nil && !*input.Enabled)) {
 		return ErrSelfStanding
+	}
+	if input.BreakGlass != nil && *input.BreakGlass != target.BreakGlass && !actor.IsOwner {
+		return ErrBreakGlassOwnerOnly
+	}
+	if target.ID == actor.ID && !actor.IsOwner && input.Password != nil && !target.LocalPasswordLoginEnabled {
+		return ErrSelfPasswordOwnerOnly
 	}
 	return nil
 }
@@ -195,7 +214,11 @@ func (r *UserRepository) TransferOwnership(ctx context.Context, fromID, toID int
 }
 
 // moveOwnership clears the current Owner before marking the next: the
-// single-Owner index is checked row by row. It also ends every session in
+// single-Owner index is checked row by row. The new Owner becomes a
+// break-glass account, so the one account that must never be locked out
+// keeps password sign-in by default; it may clear the flag itself. The
+// previous Owner keeps whatever flag it had, which never leaves the server
+// with fewer break-glass accounts. It also ends every session in
 // which someone views the server as the new Owner, and the previous Owner's
 // sessions viewing as other admins, and deletes the new Owner's API keys and
 // reset link, and revokes pending admin invitations: nobody may act as the
@@ -207,7 +230,7 @@ func moveOwnership(ctx context.Context, tx pgx.Tx, fromID, toID int) error {
 			return err
 		}
 	}
-	if _, err := tx.Exec(ctx, `UPDATE users SET is_owner = true WHERE id = $1`, toID); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE users SET is_owner = true, break_glass = true WHERE id = $1`, toID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `
@@ -278,8 +301,8 @@ func (r *UserRepository) SetOwner(ctx context.Context, username string) (*models
 	}
 	if previous != id {
 		if target.Role != models.RoleAdmin || !target.Enabled {
-			// A role or status change signs the account out, as it does
-			// when an admin makes it.
+			// Recovery also signs the account out everywhere, so every
+			// session starts again under its new authority.
 			if err := updateUser(ctx, tx, id, models.UpdateUserInput{Role: new(models.RoleAdmin), Enabled: new(true)}); err != nil {
 				return nil, 0, fmt.Errorf("promoting account: %w", err)
 			}

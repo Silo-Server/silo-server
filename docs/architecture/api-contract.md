@@ -335,9 +335,10 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   then the profile, acting-admin, or permission gate. A gate's denial is re-rendered as the
   matching Problem Details document by switching on the v1 body's machine-readable `error` and
   `reason`; the decision itself is the v1 gate's, and a locked profile keeps its own
-  `profile_verification_required` type so clients still know to ask for the PIN, and a session
+  `profile_verification_required` type so clients still know to ask for the PIN, a session
   holding a temporary password keeps `password_change_required` so clients route to the
-  password change. A gate the
+  password change, and an access token minted before the account's role changed gets
+  `token_refresh_required` so clients refresh instead of signing out. A gate the
   wiring lacks makes its operations fail closed with `503 dependency_unavailable`; it never
   removes them from the route table. Handlers read claims, profile, and viewer scope from the
   request context and never from headers. Every authenticated class guarantees non-nil
@@ -625,7 +626,9 @@ required, invalid token, session expired, permission denied, profile verificatio
 resource not found, method not allowed, resource conflict, idempotency conflict, payload too
 large, unsupported media type, rate limit exceeded, capability disabled, dependency unavailable,
 client upgrade required, and internal error. Domain-specific types are added only when a client
-needs distinct corrective behavior.
+needs distinct corrective behavior. `token_refresh_required` (401) is one: the login
+session is valid but the access token predates a change to the account's role, so the client
+refreshes and retries instead of signing out.
 
 The foundation adapter replaces Huma's default problem output where necessary: every response has
 a Silo type and instance; validation details add stable codes and omit Huma's rejected `value`;

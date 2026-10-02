@@ -16,15 +16,19 @@ import (
 
 const listAdminInvitationsOperation = "listAdminInvitations"
 
+// invitationDeliveryUnknown reports an invitation created before delivery was recorded.
+const invitationDeliveryUnknown = "unknown"
+
 // InvitationService uses the same transactional lifecycle as legacy handlers.
 type InvitationService interface {
 	SupportsDefaultProfile() bool
+	EmailDeliveryAvailable(context.Context) bool
 	Lookup(context.Context, string) (*invitations.LookupResult, error)
-	AcceptInvitation(context.Context, string, string, string, string) (handlers.InvitationAcceptanceView, error)
+	AcceptInvitation(ctx context.Context, token, email, password, device, ip string) (handlers.InvitationAcceptanceView, error)
 	GetByID(context.Context, int64) (*models.Invitation, error)
 	ListPage(context.Context, *invitations.PageKey, int) ([]*models.Invitation, bool, error)
 	Send(context.Context, invitations.SendInput) (*invitations.SendResult, error)
-	Resend(context.Context, int64, int64) (*invitations.SendResult, error)
+	Resend(context.Context, int64, int64, invitations.Delivery) (*invitations.SendResult, error)
 	Revoke(context.Context, int64) error
 }
 
@@ -39,6 +43,16 @@ type InvitationCapabilitiesOutput struct {
 	CacheControl string `header:"Cache-Control"`
 	Body         InvitationCapabilities
 }
+type AdminInvitationCapabilities struct {
+	InvitationCapabilities
+	EmailDelivery bool `json:"email_delivery" doc:"Whether email is configured, so an invitation can be created with delivery=email."`
+}
+type AdminInvitationCapabilitiesOutput struct {
+	Status       int
+	ETag         string `header:"ETag"`
+	CacheControl string `header:"Cache-Control"`
+	Body         AdminInvitationCapabilities
+}
 type InvitationTokenInput struct {
 	Token string `path:"token" minLength:"1" maxLength:"128"`
 }
@@ -46,11 +60,14 @@ type InvitationAcceptInput struct {
 	Token     string `path:"token" minLength:"1" maxLength:"128"`
 	UserAgent string `header:"User-Agent"`
 	Body      struct {
+		Email    string `json:"email,omitempty" maxLength:"254" doc:"The invitee's address. Required when the lookup reports email_required; ignored otherwise."`
 		Password string `json:"password" minLength:"8" maxLength:"72"`
 	}
 }
 type InvitationLookup struct {
-	Email               string  `json:"email"`
+	Email               string  `json:"email" doc:"The address the invitation is bound to; empty when email_required is true."`
+	EmailRequired       bool    `json:"email_required" doc:"True when the invitation is bound to no address, as for one created with delivery=link: the invitee enters their address at accept."`
+	Note                string  `json:"note" doc:"The inviter's note; empty when none."`
 	InviterName         string  `json:"inviter_name"`
 	ServerName          string  `json:"server_name"`
 	ExpiresAt           Instant `json:"expires_at"`
@@ -70,7 +87,8 @@ type InvitationAcceptance struct {
 type InvitationAcceptOutput struct{ Body InvitationAcceptance }
 type AdminInvitation struct {
 	ID             ID       `json:"id"`
-	Email          string   `json:"email"`
+	Email          string   `json:"email" doc:"The bound address. Empty for a pending invitation created with delivery=link; after its acceptance, the address the account took."`
+	Delivery       string   `json:"delivery" enum:"link,email_sent,email_unconfirmed,unknown" doc:"How the link reached the invitee. email_unconfirmed: the send failed or its outcome is uncertain. unknown: created before delivery was recorded."`
 	Role           string   `json:"role" enum:"user,admin"`
 	AccessGroupID  *ID      `json:"access_group_id,omitempty"`
 	LibraryIDs     []ID     `json:"library_ids" nullable:"true" doc:"Null inherits library access; an empty array is an explicit empty override."`
@@ -90,10 +108,18 @@ type AdminInvitationListOutput struct{ Body Collection[AdminInvitation] }
 type AdminInvitationIDInput struct {
 	ID ID `path:"id" pattern:"^[1-9][0-9]*$"`
 }
+type AdminInvitationResend struct {
+	Delivery string `json:"delivery,omitempty" enum:"link,email" doc:"link: replace the link and email nothing; the invitation keeps its address. email: email the new link; fails when email is not configured or the invitation has no address. Omitted: email when the invitation has an address and email is configured, otherwise return the link for manual delivery."`
+}
+type AdminInvitationResendInput struct {
+	ID   ID                     `path:"id" pattern:"^[1-9][0-9]*$"`
+	Body *AdminInvitationResend `required:"false" doc:"Absent resends as delivery is omitted."`
+}
 type AdminInvitationCreateInput struct {
 	RawBody []byte
 	Body    struct {
-		Email         string `json:"email" minLength:"1" maxLength:"254"`
+		Email         string `json:"email,omitempty" maxLength:"254" doc:"Required unless delivery is link, which forbids it."`
+		Delivery      string `json:"delivery,omitempty" enum:"link,email" doc:"link: create a link to share, with no address and no email. email: email the link; fails when email is not configured. Omitted: email when configured, otherwise return the link for manual delivery."`
 		Role          string `json:"role,omitempty" enum:"user,admin" default:"user"`
 		AccessGroupID *ID    `json:"access_group_id,omitempty" pattern:"^[1-9][0-9]*$"`
 		LibraryIDs    []ID   `json:"library_ids,omitempty" doc:"Omit for inherited access; send [] for an explicit empty override."`
@@ -105,7 +131,7 @@ type AdminInvitationCreateInput struct {
 type InvitationDelivery struct {
 	Invitation     AdminInvitation `json:"invitation"`
 	ClaimURL       string          `json:"claim_url" doc:"One-time disclosure; never retained for replay. Contains the bearer claim token."`
-	DeliveryStatus string          `json:"delivery_status" enum:"sent,not_configured,failed_or_unknown"`
+	DeliveryStatus string          `json:"delivery_status" enum:"sent,not_configured,failed_or_unknown,not_requested" doc:"not_requested: a link invitation; nothing was emailed."`
 }
 type InvitationDeliveryOutput struct {
 	Location string `header:"Location"`
@@ -113,7 +139,11 @@ type InvitationDeliveryOutput struct {
 }
 
 func invitationOf(inv *models.Invitation) AdminInvitation {
-	out := AdminInvitation{ID: IDFromInt(inv.ID), Email: inv.Email, Role: roleOf(inv.Role), CreateProfile: inv.CreateProfile, ShowTour: inv.ShowTour, Note: inv.Note, InvitedBy: IDFromInt(inv.InvitedBy), InvitedByName: inv.InvitedByName, Status: inv.Status(time.Now()), ExpiresAt: NewInstant(inv.ExpiresAt), CreatedAt: NewInstant(inv.CreatedAt)}
+	delivery := inv.Delivery
+	if delivery == "" {
+		delivery = invitationDeliveryUnknown
+	}
+	out := AdminInvitation{ID: IDFromInt(inv.ID), Email: inv.Email, Delivery: delivery, Role: roleOf(inv.Role), CreateProfile: inv.CreateProfile, ShowTour: inv.ShowTour, Note: inv.Note, InvitedBy: IDFromInt(inv.InvitedBy), InvitedByName: inv.InvitedByName, Status: inv.Status(time.Now()), ExpiresAt: NewInstant(inv.ExpiresAt), CreatedAt: NewInstant(inv.CreatedAt)}
 	if inv.LibraryIDs != nil {
 		out.LibraryIDs = make([]ID, 0, len(inv.LibraryIDs))
 		for _, id := range inv.LibraryIDs {
@@ -142,12 +172,23 @@ func invitationProblem(err error, public bool) *Problem {
 		return NewProblem(TypeConflict, "The invitation changed; reload before continuing.")
 	case errors.Is(err, invitations.ErrEmailTaken):
 		return NewProblem(TypeConflict, "An account already uses this email or username.")
+	case public && (errors.Is(err, invitations.ErrInvalidEmail) || errors.Is(err, invitations.ErrEmailRequired)):
+		// Only a link invitation's accept takes an address from the caller.
+		return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
+			WithErrors(ProblemError{Location: locationBody + ".email", Code: codeInvalid, Detail: "Enter a valid email address, like name@example.com."})
 	case errors.Is(err, invitations.ErrInvalidEmail), errors.Is(err, invitations.ErrAdminGrouped):
 		return NewProblem(TypeValidationFailed, "Invalid invitation configuration.")
 	case errors.Is(err, invitations.ErrRoleNotAllowed):
 		return NewProblem(TypePermissionDenied, "The requested role is not allowed.")
+	case errors.Is(err, auth.ErrLocalLoginDisabled):
+		return NewProblem(TypeLocalLoginDisabled, "Password sign-in is turned off on this server, so invitations can't be sent or claimed. Turn it back on in Settings → Sign-in, or let people sign in with the server's sign-in provider.")
 	case errors.Is(err, auth.ErrTransactionalProfileUnavailable):
 		return NewProblem(TypeCapabilityUnsupported, "The selected store cannot atomically create the required profile.")
+	case errors.Is(err, invitations.ErrNoAddress):
+		return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
+			WithErrors(ProblemError{Location: locationBody + ".delivery", Code: codeInvalid, Detail: "A link invitation has no email address to send to."})
+	case errors.Is(err, invitations.ErrEmailUnavailable):
+		return NewProblem(TypeCapabilityNotConfigured, "Email is not configured; create a link instead.")
 	case errors.Is(err, invitations.ErrNoLinkBase):
 		return NewProblem(TypeCapabilityNotConfigured, "Invitation links are not configured.")
 	default:
@@ -172,7 +213,9 @@ func invitationDelivery(result *invitations.SendResult, err error) (*InvitationD
 		return nil, invitationProblem(err, false)
 	}
 	status := StateNotConfigured
-	if err != nil {
+	if result.Delivery == invitations.DeliveryLink {
+		status = "not_requested"
+	} else if err != nil {
 		status = "failed_or_unknown"
 	} else if result.EmailSent {
 		status = "sent"
@@ -208,7 +251,17 @@ func registerInvitations(reg *Registry) {
 		return &InvitationCapabilitiesOutput{Body: InvitationCapabilities{Capability: Capability{State: state}, DefaultProfile: profile, Profileless: profileless}}, nil
 	}
 	Register(reg, op(http.MethodGet, "/invitations/capabilities", "getInvitationCapabilities", true), capabilities)
-	Register(reg, op(http.MethodGet, "/admin/invitations/capabilities", "getAdminInvitationCapabilities", false), capabilities)
+	Register(reg, op(http.MethodGet, "/admin/invitations/capabilities", "getAdminInvitationCapabilities", false), func(ctx context.Context, in *CapabilityInput) (*AdminInvitationCapabilitiesOutput, error) {
+		base, err := capabilities(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		out := &AdminInvitationCapabilitiesOutput{Status: base.Status, ETag: base.ETag, CacheControl: base.CacheControl, Body: AdminInvitationCapabilities{InvitationCapabilities: base.Body}}
+		if reg.deps.Invitations != nil {
+			out.Body.EmailDelivery = reg.deps.Invitations.EmailDeliveryAvailable(ctx)
+		}
+		return out, nil
+	})
 	Register(reg, op(http.MethodGet, "/invitations/{token}", "lookupInvitation", true), func(ctx context.Context, in *InvitationTokenInput) (*InvitationLookupOutput, error) {
 		svc, p := reg.invitationService()
 		if p != nil {
@@ -218,10 +271,14 @@ func registerInvitations(reg *Registry) {
 		if err != nil {
 			return nil, invitationProblem(err, true)
 		}
-		return &InvitationLookupOutput{Body: InvitationLookup{Email: view.Email, InviterName: view.InviterName, ServerName: view.ServerName, ExpiresAt: NewInstant(view.ExpiresAt), ShowTour: view.ShowTour, AcceptanceAvailable: !view.CreateProfile || svc.SupportsDefaultProfile()}}, nil
+		return &InvitationLookupOutput{Body: InvitationLookup{Email: view.Email, EmailRequired: view.EmailRequired, Note: view.Note, InviterName: view.InviterName, ServerName: view.ServerName, ExpiresAt: NewInstant(view.ExpiresAt), ShowTour: view.ShowTour, AcceptanceAvailable: !view.CreateProfile || svc.SupportsDefaultProfile()}}, nil
 	})
 	accept := op(http.MethodPost, "/invitations/{token}/accept", "acceptInvitation", true)
 	accept.DefaultStatus = http.StatusCreated
+	// An invitation creates a local-password account: while the server
+	// turns local password sign-in off it is refused, unspent, with 403
+	// local_login_disabled.
+	accept.Errors = append(accept.Errors, http.StatusForbidden)
 	Register(reg, accept, func(ctx context.Context, in *InvitationAcceptInput) (*InvitationAcceptOutput, error) {
 		if len([]byte(in.Body.Password)) > 72 {
 			return nil, NewProblem(TypeValidationFailed, "Password must not exceed 72 bytes.")
@@ -230,7 +287,7 @@ func registerInvitations(reg *Registry) {
 		if p != nil {
 			return nil, p
 		}
-		view, err := svc.AcceptInvitation(ctx, in.Token, in.Body.Password, in.UserAgent, clientip.FromContext(ctx))
+		view, err := svc.AcceptInvitation(ctx, in.Token, in.Body.Email, in.Body.Password, in.UserAgent, clientip.FromContext(ctx))
 		if err != nil && !errors.Is(err, invitations.ErrSessionStart) {
 			return nil, invitationProblem(err, true)
 		}
@@ -309,10 +366,16 @@ func registerInvitations(reg *Registry) {
 		if createProfile && !svc.SupportsDefaultProfile() {
 			return nil, invitationProblem(auth.ErrTransactionalProfileUnavailable, false)
 		}
-		if p := invalidEmailProblem(in.Body.Email); p != nil {
+		delivery := invitations.Delivery(in.Body.Delivery)
+		if delivery == invitations.DeliveryLink {
+			if in.Body.Email != "" {
+				return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
+					WithErrors(ProblemError{Location: locationBody + ".email", Code: codeInvalid, Detail: "A link invitation has no email address; the invitee enters one."})
+			}
+		} else if p := invalidEmailProblem(in.Body.Email); p != nil {
 			return nil, p
 		}
-		input := invitations.SendInput{Email: in.Body.Email, Role: in.Body.Role, CreateProfile: createProfile, ShowTour: showTour, Note: in.Body.Note, InvitedBy: int64(claimsFrom(ctx).UserID)}
+		input := invitations.SendInput{Email: in.Body.Email, Delivery: delivery, Role: in.Body.Role, CreateProfile: createProfile, ShowTour: showTour, Note: in.Body.Note, InvitedBy: int64(claimsFrom(ctx).UserID)}
 		if in.Body.AccessGroupID != nil {
 			id, p := invitationID(*in.Body.AccessGroupID)
 			if p != nil {
@@ -334,7 +397,7 @@ func registerInvitations(reg *Registry) {
 	})
 	resend := op(http.MethodPost, "/admin/invitations/{id}/resend", "resendAdminInvitation", false)
 	resend.DefaultStatus = http.StatusCreated
-	Register(reg, resend, func(ctx context.Context, in *AdminInvitationIDInput) (*InvitationDeliveryOutput, error) {
+	Register(reg, resend, func(ctx context.Context, in *AdminInvitationResendInput) (*InvitationDeliveryOutput, error) {
 		svc, p := reg.invitationService()
 		if p != nil {
 			return nil, p
@@ -350,7 +413,11 @@ func registerInvitations(reg *Registry) {
 		if prior.CreateProfile && !svc.SupportsDefaultProfile() {
 			return nil, invitationProblem(auth.ErrTransactionalProfileUnavailable, false)
 		}
-		return invitationDelivery(svc.Resend(ctx, id, int64(claimsFrom(ctx).UserID)))
+		delivery := invitations.DeliveryDefault
+		if in.Body != nil {
+			delivery = invitations.Delivery(in.Body.Delivery)
+		}
+		return invitationDelivery(svc.Resend(ctx, id, int64(claimsFrom(ctx).UserID), delivery))
 	})
 	revoke := op(http.MethodDelete, "/admin/invitations/{id}", "revokeAdminInvitation", false)
 	revoke.DefaultStatus = http.StatusNoContent

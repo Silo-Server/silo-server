@@ -13,11 +13,19 @@ import (
 func TestListAuthProviders(t *testing.T) {
 	h := newTestHandler(t, pilotDeps(nil, nil))
 	rec := do(t, h, http.MethodGet, "/api/v2/auth/providers", "", nil)
-	want := `{"items":[{"id":"local","display_name":"Silo account","mode":"credentials","default":true},{"id":"plugin-3","display_name":"Example SSO","mode":"oauth","default":false,"icon_url":"https://plugins.example.test/icon.svg","installation_id":"3"}]}` + "\n"
+	want := `{"items":[{"id":"local","display_name":"Silo account","mode":"credentials","default":true},{"id":"plugin-3","display_name":"Example SSO","mode":"oauth","default":false,"icon_url":"https://plugins.example.test/icon.svg","installation_id":"3","native_start_path":"/api/v2/auth/oauth/3/native/start"}],"password_login":true}` + "\n"
 	if rec.Code != 200 || rec.Body.String() != want {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
+	// While the server turns local password sign-in off, the local provider
+	// is left out and no listed provider takes a password.
 	deps := pilotDeps(nil, nil)
+	deps.Sessions = &fakeSessionService{localLoginOff: true}
+	rec = do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/auth/providers", "", nil)
+	if rec.Code != 200 || strings.Contains(rec.Body.String(), `"id":"local"`) || !strings.Contains(rec.Body.String(), `"password_login":false`) {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	deps = pilotDeps(nil, nil)
 	deps.Sessions = nil
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/auth/providers", "", nil), TypeDependencyUnavailable)
 }
@@ -33,6 +41,7 @@ func TestRefreshSession(t *testing.T) {
 	}
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/refresh", `{"refresh_token":"revoked"}`, nil), TypeSessionExpired)
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/refresh", `{"refresh_token":"nope"}`, nil), TypeInvalidToken)
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/refresh", `{"refresh_token":"provider-down"}`, nil), TypeProviderUnavailable)
 	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/refresh", `{}`, nil), TypeValidationFailed)
 	if len(p.Errors) != 1 || p.Errors[0].Location != "body.refresh_token" {
 		t.Fatalf("errors = %+v", p.Errors)

@@ -45,6 +45,7 @@ const (
 	EventAdminStatsInvalidated       = "admin_stats_invalidated"
 	EventPlaybackSessionsChanged     = "playback_sessions_changed"
 	EventMarkersUpdated              = "markers_updated"
+	EventSubtitleTimingChanged       = "subtitle_timing_changed"
 	EventUserDisabled                = "user_disabled"
 	EventUserDeleted                 = "user_deleted"
 	EventSettingsChanged             = "settings_changed"
@@ -61,6 +62,12 @@ const (
 	// every API replica's plugin event dispatcher rebuilds its subscriber index.
 	EventPluginsChanged = "plugins_changed"
 )
+
+// EventAuthProvidersChanged is published on ChannelAdmin after an auth
+// binding write, so every API replica rebuilds its sign-in providers without
+// a restart. Plugin install, config and removal changes arrive as
+// EventPluginsChanged and trigger the same rebuild.
+const EventAuthProvidersChanged = "auth_providers_changed"
 
 // EventUserSessionsRevoked is published on ChannelAdmin with a user ID whose
 // login sessions were revoked, so every API replica drops that account's

@@ -491,6 +491,57 @@ func TestHandleSubtitleServesDownloadedSRTOriginalOnRequest(t *testing.T) {
 	}
 }
 
+// A downloaded SRT row with a stored timing correction is retimed before the
+// WebVTT conversion, on the ID-bound and ordinal URLs, and the original SRT
+// representation carries the same correction.
+func TestHandleSubtitleAppliesDownloadedSubtitleTiming(t *testing.T) {
+	const stored = "1\n00:00:01,000 --> 00:00:02,000\nHello\n"
+	file := &models.MediaFile{ID: 42, ContentID: "movie-1", FilePath: "/tmp/movie.mkv", Duration: 3600}
+	baseMgr := playback.NewSessionManager(0, 0)
+	session, err := baseMgr.StartSession(1, "profile-1", 42, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	repo := newMockSubtitleRepoForHandler()
+	row := subtitles.DownloadedSubtitle{ID: 71, MediaFileID: 42, Format: subtitles.FormatSRT, S3Key: "timed-71.srt",
+		Timing: subtitles.Timing{OffsetMS: 2500, Scale: 1}}
+	repo.subtitles[71] = &row
+	repo.list = []subtitles.DownloadedSubtitle{row}
+	handler := NewStreamHandler(baseMgr, testPlaybackFileResolver{file: file})
+	handler.SubtitleRepo = repo
+	handler.SubtitleBlobs = subtitleContentBlobStore{objects: map[string][]byte{"timed-71.srt": []byte(stored)}}
+
+	serve := func(prefix, track, query string, native bool) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, prefix+session.ID+"/subtitles/"+track+"?"+query, nil)
+		ctx := newAuthorizedPlaybackContext()
+		if native {
+			ctx = WithNativeAPIV2(ctx)
+		}
+		routeCtx := chi.NewRouteContext()
+		routeCtx.URLParams.Add("session_id", session.ID)
+		routeCtx.URLParams.Add("track", track)
+		req = req.WithContext(context.WithValue(ctx, chi.RouteCtxKey, routeCtx))
+		rr := httptest.NewRecorder()
+		handler.HandleSubtitle(rr, req)
+		return rr
+	}
+	for _, query := range []string{"file_id=42&downloaded_subtitle_id=71", "file_id=42"} {
+		rr := serve("/api/v1/stream/", "0.vtt", query, false)
+		body := rr.Body.String()
+		if rr.Code != http.StatusOK || !strings.HasPrefix(body, "WEBVTT") || !strings.Contains(body, "00:00:03.500 --> 00:00:04.500") {
+			t.Fatalf("?%s = %d %q", query, rr.Code, body)
+		}
+		if got := rr.Header().Get("Cache-Control"); got != "private, no-cache" {
+			t.Fatalf("?%s Cache-Control = %q", query, got)
+		}
+	}
+	rr := serve("/api/v2/stream/", "0.srt", "file_id=42&original=1&downloaded_subtitle_id=71", true)
+	if want := "1\n00:00:03,500 --> 00:00:04,500\nHello\n"; rr.Code != http.StatusOK || rr.Body.String() != want {
+		t.Fatalf("original SRT = %d %q, want %q", rr.Code, rr.Body.String(), want)
+	}
+}
+
 type subtitleContentBlobStore struct {
 	objects map[string][]byte
 }

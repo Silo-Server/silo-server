@@ -24,6 +24,7 @@ import {
 } from "@/components/sidebarItemNavigationContext";
 import { parseOptionalLibraryId } from "@/components/sidebarItemNavigation";
 import { useShowAdvisoryAge } from "@/hooks/useShowAdvisoryAge";
+import { useShowTitleArt } from "@/hooks/useTitleArt";
 
 interface HomeItemTransitionShape {
   compact: boolean;
@@ -39,19 +40,24 @@ const NEUTRAL_HOME_ITEM_TRANSITION_SHAPE: HomeItemTransitionShape = {
   hasLogo: false,
 };
 
-function getHomeItemTransitionShape(item?: ItemDetail): HomeItemTransitionShape {
+function getHomeItemTransitionShape(
+  item: ItemDetail | undefined,
+  showTitleArt: boolean | undefined,
+): HomeItemTransitionShape {
   if (!item) return NEUTRAL_HOME_ITEM_TRANSITION_SHAPE;
 
   return {
     compact: item.type === "season",
     hidePoster: item.type === "episode",
     squarePoster: item.type === "audiobook",
-    hasLogo: Boolean(item.logo_url),
+    // An unknown choice reserves the logo box, as the hero itself does.
+    hasLogo: showTitleArt !== false && Boolean(item.logo_url),
   };
 }
 
 function HomeItemTransitionShell({ item }: { item?: ItemDetail }) {
-  const [shape] = useState(() => getHomeItemTransitionShape(item));
+  const showTitleArt = useShowTitleArt();
+  const [shape] = useState(() => getHomeItemTransitionShape(item, showTitleArt));
   const { compact, hidePoster, squarePoster, hasLogo } = shape;
 
   return (

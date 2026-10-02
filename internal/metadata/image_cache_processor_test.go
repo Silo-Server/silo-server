@@ -85,8 +85,8 @@ func (f *fakeImageCacheJobs) CurrentTargetSourcePath(_ context.Context, job *mod
 	return job.SourcePath, nil
 }
 
-func (f *fakeImageCacheJobs) EnqueueExistingProviderArtwork(context.Context, int) (int, error) {
-	return 0, nil
+func (f *fakeImageCacheJobs) EnqueueExistingProviderArtwork(context.Context, imageCacheDiscoveryCursor, int) (imageCacheDiscoveryPage, error) {
+	return imageCacheDiscoveryPage{Complete: true}, nil
 }
 
 func (f *fakeImageCacheJobs) DeleteSucceededBefore(context.Context, time.Time, int) (int, error) {
@@ -95,10 +95,13 @@ func (f *fakeImageCacheJobs) DeleteSucceededBefore(context.Context, time.Time, i
 
 type loopingImageCacheJobs struct {
 	enqueueResults []int
+	enqueuePages   []imageCacheDiscoveryPage
+	enqueueErrors  []error
 	claimedResults [][]*models.MetadataImageCacheJob
 	succeededIDs   []int64
 	enqueueCalls   int
 	enqueueLimits  []int
+	enqueueCursors []imageCacheDiscoveryCursor
 	claimCalls     int
 	backlog        ImageCacheBacklog
 	backlogCalls   int
@@ -133,14 +136,29 @@ func (f *loopingImageCacheJobs) GetBacklog(context.Context) (ImageCacheBacklog, 
 	return f.backlog, nil
 }
 
-func (f *loopingImageCacheJobs) EnqueueExistingProviderArtwork(_ context.Context, limit int) (int, error) {
-	result := 0
-	if f.enqueueCalls < len(f.enqueueResults) {
-		result = f.enqueueResults[f.enqueueCalls]
+func (f *loopingImageCacheJobs) EnqueueExistingProviderArtwork(_ context.Context, cursor imageCacheDiscoveryCursor, limit int) (imageCacheDiscoveryPage, error) {
+	call := f.enqueueCalls
+	page := imageCacheDiscoveryPage{Next: cursor, Complete: true}
+	if call < len(f.enqueuePages) {
+		page = f.enqueuePages[call]
+	} else if call < len(f.enqueueResults) {
+		result := f.enqueueResults[call]
+		page = imageCacheDiscoveryPage{
+			Enqueued:   result,
+			Discovered: result,
+			Scanned:    result,
+			Next:       imageCacheDiscoveryCursor{Surface: cursor.Surface + 1},
+			Complete:   result == 0,
+		}
+	}
+	var err error
+	if call < len(f.enqueueErrors) {
+		err = f.enqueueErrors[call]
 	}
 	f.enqueueLimits = append(f.enqueueLimits, limit)
+	f.enqueueCursors = append(f.enqueueCursors, cursor)
 	f.enqueueCalls++
-	return result, nil
+	return page, err
 }
 
 func (f *loopingImageCacheJobs) ClaimDue(context.Context, string, int) ([]*models.MetadataImageCacheJob, error) {
@@ -731,10 +749,10 @@ func TestImageCacheProcessorRunUntilIdleDrainsNewWorkAddedDuringRun(t *testing.T
 		EpisodeNumber:     intPointer(2),
 	}
 	// Discovery now runs only when the queue drains, not on every batch: drain
-	// job1, find the queue empty and sweep (enqueues 1 more), drain job2, find
-	// the queue empty and sweep again (enqueues 0 -> idle).
+	// job1, find the queue empty and sweep (enqueues 1 more), drain job2, finish
+	// the sweep, then confirm from the beginning that the catalog is idle.
 	jobs := &loopingImageCacheJobs{
-		enqueueResults: []int{1, 0},
+		enqueueResults: []int{1, 0, 0},
 		backlog:        ImageCacheBacklog{Known: true, Queued: 2, Running: 1},
 		claimedResults: [][]*models.MetadataImageCacheJob{
 			{job1},
@@ -774,8 +792,8 @@ func TestImageCacheProcessorRunUntilIdleDrainsNewWorkAddedDuringRun(t *testing.T
 	if stats.EnqueuedExisting != 1 || stats.Claimed != 2 || stats.Succeeded != 2 {
 		t.Fatalf("stats = %+v, want enqueued=1 claimed=2 succeeded=2", stats)
 	}
-	if jobs.enqueueCalls != 2 || jobs.claimCalls != 4 {
-		t.Fatalf("calls enqueue=%d claim=%d, want enqueue=2 claim=4", jobs.enqueueCalls, jobs.claimCalls)
+	if jobs.enqueueCalls != 3 || jobs.claimCalls != 4 {
+		t.Fatalf("calls enqueue=%d claim=%d, want enqueue=3 claim=4", jobs.enqueueCalls, jobs.claimCalls)
 	}
 	for _, limit := range jobs.enqueueLimits {
 		if limit != imageCacheDiscoveryBatchSize {
@@ -818,6 +836,117 @@ func TestImageCacheProcessorManualBackfillAlwaysDiscovers(t *testing.T) {
 	}
 	if jobs.enqueueCalls != 2 {
 		t.Fatalf("discovery calls = %d, want one for each explicit backfill", jobs.enqueueCalls)
+	}
+	for call, cursor := range jobs.enqueueCursors {
+		if cursor != (imageCacheDiscoveryCursor{}) {
+			t.Fatalf("discovery call %d cursor = %+v, want reset cursor", call+1, cursor)
+		}
+	}
+}
+
+func TestImageCacheProcessorDiscoveryWrapsForConcurrentUpdates(t *testing.T) {
+	job := &models.MetadataImageCacheJob{
+		ID:                42,
+		TargetType:        ImageCacheTargetEpisode,
+		TargetContentID:   "episode-tvdb-1-1-2",
+		SourcePath:        "tvdb://banners/episode-2.jpg",
+		ProviderID:        "tvdb",
+		ProviderContentID: "1",
+		ContentType:       "series",
+		ImageType:         ImageCacheImageStill,
+	}
+	jobs := &loopingImageCacheJobs{
+		enqueuePages: []imageCacheDiscoveryPage{
+			// A candidate races with enqueue while the first sweep is in progress.
+			{Scanned: 1000, Discovered: 1, Next: imageCacheDiscoveryCursor{Surface: 8, Key: "episode-z"}},
+			{Next: imageCacheDiscoveryCursor{Surface: imageCacheDiscoverySurfaceCount}, Complete: true},
+			// The wrap sees the concurrent update behind the old cursor.
+			{Enqueued: 1, Scanned: 1, Discovered: 1, Next: imageCacheDiscoveryCursor{Surface: 1}},
+			{Next: imageCacheDiscoveryCursor{Surface: imageCacheDiscoverySurfaceCount}, Complete: true},
+			// A second wrap confirms there are no more candidates.
+			{Next: imageCacheDiscoveryCursor{Surface: imageCacheDiscoverySurfaceCount}, Complete: true},
+		},
+		claimedResults: [][]*models.MetadataImageCacheJob{{}, {job}, {}},
+	}
+	processor := NewImageCacheProcessor(
+		jobs,
+		&fakeImageCacher{result: &CacheImageResult{BasePath: "tvdb/series/1/seasons/1/episodes/2/still", Ext: ".webp"}},
+		&fakeImageResolver{url: "https://artworks.thetvdb.com/episode-2.jpg"},
+		nil,
+		&fakeEpisodeStillUpdater{updated: true},
+	)
+
+	stats, err := processor.RunUntilIdle(context.Background(), "test-worker", 1000, 2, 0, nil)
+	if err != nil {
+		t.Fatalf("RunUntilIdle() error = %v", err)
+	}
+	if stats.EnqueuedExisting != 1 || stats.Succeeded != 1 {
+		t.Fatalf("stats = %+v, want one wrapped discovery processed", stats)
+	}
+	wantCursors := []imageCacheDiscoveryCursor{
+		{},
+		{Surface: 8, Key: "episode-z"},
+		{},
+		{Surface: 1},
+		{},
+	}
+	if len(jobs.enqueueCursors) != len(wantCursors) {
+		t.Fatalf("discovery cursors = %+v, want %+v", jobs.enqueueCursors, wantCursors)
+	}
+	for i := range wantCursors {
+		if jobs.enqueueCursors[i] != wantCursors[i] {
+			t.Fatalf("discovery cursor %d = %+v, want %+v", i+1, jobs.enqueueCursors[i], wantCursors[i])
+		}
+	}
+}
+
+func TestImageCacheProcessorDiscoveryStopsAfterRepeatedNonEnqueueableCandidates(t *testing.T) {
+	unexpectedSweep := errors.New("unexpected third discovery sweep")
+	jobs := &loopingImageCacheJobs{
+		enqueuePages: []imageCacheDiscoveryPage{
+			{Scanned: 1, Discovered: 1, Next: imageCacheDiscoveryCursor{Surface: imageCacheDiscoverySurfaceCount}, Complete: true},
+			{Scanned: 1, Discovered: 1, Next: imageCacheDiscoveryCursor{Surface: imageCacheDiscoverySurfaceCount}, Complete: true},
+			{},
+		},
+		enqueueErrors:  []error{nil, nil, unexpectedSweep},
+		claimedResults: [][]*models.MetadataImageCacheJob{{}},
+	}
+	processor := NewImageCacheProcessor(jobs, &fakeImageCacher{}, &fakeImageResolver{}, nil, nil)
+
+	stats, err := processor.RunUntilIdle(context.Background(), "test-worker", 1000, 2, 0, nil)
+	if err != nil {
+		t.Fatalf("RunUntilIdle() error = %v", err)
+	}
+	if stats.EnqueuedExisting != 0 || jobs.enqueueCalls != 2 {
+		t.Fatalf("stats = %+v, discovery calls = %d; want no enqueues and one confirmation sweep", stats, jobs.enqueueCalls)
+	}
+	for call, cursor := range jobs.enqueueCursors {
+		if cursor != (imageCacheDiscoveryCursor{}) {
+			t.Fatalf("discovery call %d cursor = %+v, want reset cursor", call+1, cursor)
+		}
+	}
+}
+
+func TestImageCacheProcessorDiscoveryRetryStartsFromDurableState(t *testing.T) {
+	discoveryErr := errors.New("temporary discovery failure")
+	jobs := &loopingImageCacheJobs{
+		enqueuePages:  []imageCacheDiscoveryPage{{}, {Complete: true}},
+		enqueueErrors: []error{discoveryErr, nil},
+		claimedResults: [][]*models.MetadataImageCacheJob{
+			{},
+			{},
+		},
+	}
+	processor := NewImageCacheProcessor(jobs, &fakeImageCacher{}, &fakeImageResolver{}, nil, nil)
+
+	if _, err := processor.RunUntilIdle(context.Background(), "test-worker", 1000, 2, 0, nil); !errors.Is(err, discoveryErr) {
+		t.Fatalf("first RunUntilIdle() error = %v, want %v", err, discoveryErr)
+	}
+	if _, err := processor.RunUntilIdle(context.Background(), "test-worker", 1000, 2, 0, nil); err != nil {
+		t.Fatalf("retry RunUntilIdle() error = %v", err)
+	}
+	if len(jobs.enqueueCursors) != 2 || jobs.enqueueCursors[0] != (imageCacheDiscoveryCursor{}) || jobs.enqueueCursors[1] != (imageCacheDiscoveryCursor{}) {
+		t.Fatalf("retry cursors = %+v, want both runs to resume from durable queue/catalog state", jobs.enqueueCursors)
 	}
 }
 

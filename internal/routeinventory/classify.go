@@ -74,6 +74,7 @@ const (
 	markerApplePushDisplayAuth = "RequireApplePushDisplayAuth"
 	markerDisplayMiddlewares   = "displayMiddlewares"
 	markerPasswordChange       = "passwordChangeMiddlewares"
+	markerDeviceDecision       = "deviceDecisionMiddlewares"
 )
 
 // streamObservers are the registration-site wrappers that enroll a route in
@@ -806,6 +807,11 @@ var traitOnlyRules = []authRule{
 	// limiters are recorded as present, matching the RateLimitMW rules above.
 	{marker: markerPasswordChange, trait: traitOptionalView},
 	{marker: markerPasswordChange, trait: traitRateLimited},
+	// router.go builds `deviceDecisionMiddlewares` for the v1 device
+	// sign-in approve, approve-handoff and deny routes: when a limiter is
+	// configured, RateLimitMW.AuthEndpointHandler("device_lookup").
+	// Authentication and viewer access are applied separately.
+	{marker: markerDeviceDecision, trait: traitRateLimited},
 	// The Apple push display gate always ends in RequireAuth-equivalent
 	// authentication, viewer access, and RequireProfile; `displayMiddlewares`
 	// also prepends RateLimitMW.Handler when a limiter is configured. See the

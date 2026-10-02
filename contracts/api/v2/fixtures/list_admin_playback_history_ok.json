@@ -15,11 +15,14 @@
       "ended_at": "2026-01-02T03:04:05.678Z",
       "watched_seconds": 3600,
       "duration_seconds": 5400.5,
-      "completed": true
+      "completed": true,
+      "series_title": "",
+      "season_number": null,
+      "episode_number": null
     }
   ],
   "page": {
-    "next_cursor": "eyJ2IjoxLCJwIjp7ImVuZGVkX2F0IjoiMjAyNi0wMS0wMlQwMzowNDowNS42NzgxMjM0NTZaIiwic2Vzc2lvbl9pZCI6InNlc3MtOTAwNzE5OTI1NDc0MDk5MyJ9fQ.Snmr7MP1iyHGqtH934rD1sASaQj7ZehkS40eOMLtc2Y",
+    "next_cursor": "eyJ2IjoxLCJwIjp7ImVuZGVkX2F0IjoiMjAyNi0wMS0wMlQwMzowNDowNS42NzgxMjM0NTZaIiwic2Vzc2lvbl9pZCI6InNlc3MtOTAwNzE5OTI1NDc0MDk5MyJ9fQ.CxZ1WaQQ5EICVaQygpY0GMy16CcVPoDbjJQSv2mvSl4",
     "has_more": true
   }
 }

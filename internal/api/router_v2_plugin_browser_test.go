@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -66,7 +67,7 @@ func TestV2PluginBrowserLaunchPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _, _ = pool.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE") }()
-	if _, err := pool.Exec(t.Context(), `CREATE TABLE auth_sessions (id text PRIMARY KEY, expires_at timestamptz, revoked_at timestamptz); INSERT INTO auth_sessions(id,expires_at) VALUES ('browser-session',now()+interval '1 hour')`); err != nil {
+	if _, err := pool.Exec(t.Context(), `CREATE TABLE users (id int PRIMARY KEY, role text NOT NULL); INSERT INTO users(id,role) VALUES (1,'user'); CREATE TABLE auth_sessions (id text PRIMARY KEY, user_id int NOT NULL REFERENCES users(id), expires_at timestamptz, revoked_at timestamptz); INSERT INTO auth_sessions(id,user_id,expires_at) VALUES ('browser-session',1,now()+interval '1 hour')`); err != nil {
 		t.Fatal(err)
 	}
 	sessions := auth.NewSessionRepository(pool)
@@ -145,12 +146,29 @@ func TestV2PluginBrowserLaunchPostgres(t *testing.T) {
 			t.Fatal("launch cookie escaped plugin content", path)
 		}
 	}
+	setRole := func(role string) {
+		t.Helper()
+		if _, err := pool.Exec(t.Context(), `UPDATE users SET role=$1 WHERE id=1`, role); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A promotion keeps the session; the member's access token must be
+	// refreshed before it can launch again.
+	setRole("admin")
+	if body := request(http.MethodPost, "/api/v2/auth/plugin-launch", member, http.StatusUnauthorized); !strings.Contains(body, "token_refresh_required") {
+		t.Fatal("stale access token was not told to refresh", body)
+	}
 	admin, err := jwt.GenerateAccessToken(1, "admin", "browser-session")
 	if err != nil {
 		t.Fatal(err)
 	}
 	request(http.MethodPost, "/api/v2/auth/plugin-launch", admin, http.StatusOK)
 	request(http.MethodGet, page+"admin", "", http.StatusOK)
+	// The launch cookie carries the admin role it was minted with, but admin
+	// access follows the account's current role.
+	setRole("user")
+	request(http.MethodGet, page+"admin", "", http.StatusForbidden)
+	request(http.MethodGet, page, "", http.StatusOK)
 	if err := sessions.Revoke(t.Context(), "browser-session"); err != nil {
 		t.Fatal(err)
 	}

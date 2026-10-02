@@ -1,0 +1,7 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/provider_unavailable",
+  "title": "Provider unavailable",
+  "status": 503,
+  "detail": "The sign-in provider could not confirm the account. Try again later; the session stays valid.",
+  "instance": "urn:silo:request:0000000000000000000002c1"
+}

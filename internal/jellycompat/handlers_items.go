@@ -1412,8 +1412,8 @@ func latestFastPathEligible(params url.Values, libraryItemType string) bool {
 
 // loadLatestViaSections serves a per-library /Items/Latest through the native
 // recently-added section fetch. Jellyfin expects a flat list of parent series,
-// so this compatibility path explicitly opts out of the native TV scan-event
-// grouping that may return episode cards or repeat a series across scan runs.
+// so this compatibility path explicitly opts out of the native TV arrival-event
+// grouping that may return episode cards or repeat a series across arrivals.
 // The cached *models.MediaItem values are treated read-only;
 // LocalizeItemModels deep-copies before any presign mutation.
 func (h *ItemsHandler) loadLatestViaSections(ctx context.Context, session *Session, query itemsQuery) ([]baseItemDTO, error) {

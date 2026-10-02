@@ -50,7 +50,7 @@ func libraryFixture(id int, name string) handlers.LibraryView {
 	code := "empty_root"
 	return handlers.LibraryView{
 		ID: id, Paths: []string{"/media/" + strings.ToLower(name)}, Type: "movies", Name: name, Enabled: true,
-		MetadataLanguage: "en", ChapterThumbnailsSupported: true, TrailerKinds: []string{"trailer"}, RealtimeMonitoring: true, SortOrder: id - 1,
+		MetadataLanguage: "en", ChapterThumbnailsSupported: true, TrickplaySupported: true, TrailerKinds: []string{"trailer"}, RealtimeMonitoring: true, SortOrder: id - 1,
 		PosterURL: "https://s3.example.test/poster.jpg", LastScannedAt: ptr(fixedTime()),
 		ScanWarningCode: &code, ScanWarningMessage: ptr("Root is empty"), ScanWarningAt: &warnAt,
 	}

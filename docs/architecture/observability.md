@@ -342,9 +342,9 @@ completion, `silo_subprocess_exits_total` counts bounded workload and outcome
 categories, and `silo_subprocess_peak_rss_bytes` is a distribution of per-child
 maximum RSS, normalized to bytes and omitted on unsupported platforms.
 Instrumented owners are playback transcodes and restarts, progressive remux,
-scanner probes, plugin shutdown and failed startup, and media analysis and
-chapter thumbnail runs through `internal/mediasample` (workloads `analysis` and
-`thumbnail`). Other FFmpeg uses need their own owner instrumentation before
+scanner probes, plugin shutdown and failed startup, and media analysis,
+chapter thumbnail, and trickplay runs through `internal/mediasample`
+(workloads `analysis`, `thumbnail`, and `trickplay`). Other FFmpeg uses need their own owner instrumentation before
 claiming coverage. No second waiter or reaper is installed.
 
 ### Node resource sampling

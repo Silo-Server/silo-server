@@ -192,6 +192,58 @@ describe("realtime protocol", () => {
     expect(event).toBeNull();
   });
 
+  it("parses subtitle timing changed events with and without a track", () => {
+    const track = {
+      track_id: "42:subtitle:3",
+      combined_index: 3,
+      source: "downloaded",
+      codec: "srt",
+      language: "en",
+      forced: false,
+      default: false,
+      hearing_impaired: false,
+      delivery: "sidecar",
+      url: "/stream/session-1/subtitles/3.vtt?file_id=42&downloaded_subtitle_id=7",
+    };
+    for (const payload of [
+      { session_id: "session-1", file_id: 42, subtitle_id: 7 },
+      { session_id: "session-1", file_id: 42, subtitle_id: 7, track },
+    ]) {
+      expect(
+        parsePlaybackRealtimeMessage(
+          JSON.stringify({
+            type: "event",
+            session_id: "session-1",
+            name: "subtitle_timing_changed",
+            payload,
+          }),
+        ),
+      ).toEqual({
+        type: "event",
+        session_id: "session-1",
+        name: "subtitle_timing_changed",
+        payload,
+      });
+    }
+  });
+
+  it.each([
+    { session_id: "session-1", file_id: 42 },
+    { session_id: "session-1", file_id: "42", subtitle_id: 7 },
+    { session_id: "session-1", file_id: 42, subtitle_id: 7, track: { combined_index: 3 } },
+  ])("rejects malformed subtitle timing changed payload %#", (payload) => {
+    expect(
+      parsePlaybackRealtimeMessage(
+        JSON.stringify({
+          type: "event",
+          session_id: "session-1",
+          name: "subtitle_timing_changed",
+          payload,
+        }),
+      ),
+    ).toBeNull();
+  });
+
   it("parses subtitle translation started/completed/failed events", () => {
     const startedPayload = {
       session_id: "s1",

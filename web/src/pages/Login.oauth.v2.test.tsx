@@ -26,7 +26,7 @@ vi.mock("@/api/v2/request", async () => ({
 vi.mock("@/hooks/useDocumentTitle", () => ({ useDocumentTitle: vi.fn() }));
 vi.mock("@/components/auth/AuthBackground", () => ({ AuthBackground: () => null }));
 afterEach(cleanup);
-it("submits provider login as a browser POST to v2 and preserves the encoded local destination", () => {
+it("starts provider login with a top-level GET to v2 and preserves the encoded local destination", () => {
   render(
     <QueryClientProvider client={new QueryClient()}>
       <MemoryRouter initialEntries={["/login?redirect=%2Fme%3Ftab%3Dsettings"]}>
@@ -34,9 +34,36 @@ it("submits provider login as a browser POST to v2 and preserves the encoded loc
       </MemoryRouter>
     </QueryClientProvider>,
   );
-  const form = screen.getByRole("button", { name: "Fixture provider" }).closest("form");
-  expect(form?.getAttribute("method")).toBe("post");
-  expect(form?.getAttribute("action")).toBe(
-    "/api/v2/auth/oauth/3/init?next=%2Fme%3Ftab%3Dsettings",
+  // Not a form post: the CSP's form-action 'self' would block the redirect to the provider.
+  const link = screen.getByRole("link", { name: "Fixture provider" });
+  expect(link.closest("form")).toBeNull();
+  expect(link.getAttribute("href")).toBe("/api/v2/auth/oauth/3/start?next=%2Fme%3Ftab%3Dsettings");
+});
+
+it("explains a provider refusal instead of showing the raw reason code", () => {
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter initialEntries={["/login?error=oauth_failed&reason=not_permitted"]}>
+        <Login />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
+  expect(
+    screen.getByText("Your account at the sign-in provider isn't allowed to use this server."),
+  ).toBeTruthy();
+  expect(screen.queryByText(/not_permitted/)).toBeNull();
+});
+
+it("tells a person without an account to ask an admin, apart from a provider refusal", () => {
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter initialEntries={["/login?error=oauth_failed&reason=account_required"]}>
+        <Login />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  expect(
+    screen.getByText("You don't have an account on this server yet. Ask an admin to add you."),
+  ).toBeTruthy();
+  expect(screen.queryByText(/isn't allowed to use this server/)).toBeNull();
 });

@@ -241,6 +241,50 @@ export function useSettingValue<T = unknown>(
   };
 }
 
+/**
+ * The values stored at exactly one scope, keyed by setting. A key with nothing
+ * stored there is absent from the map.
+ *
+ * The effective read names only the winning scope, so a row the resolver
+ * passes over — a device value kept while the profile's "apply to all
+ * devices" value wins — is invisible to it. A screen that must show or reset
+ * that row reads it here.
+ */
+export function useStoredSettingValues(options: {
+  keys: readonly SettingKey[];
+  identity: SettingIdentity;
+  enabled?: boolean;
+}) {
+  const { keys, identity } = options;
+  return useQuery({
+    queryKey: [
+      ...settingsKeys.all,
+      "values",
+      "stored",
+      identity.profileId ?? activeProfileId(),
+      identity.scope,
+      identity.deviceId ?? "",
+      identity.libraryId ?? "",
+      identity.seriesId ?? "",
+      [...keys].sort().join(","),
+    ] as const,
+    queryFn: async () => {
+      const result = await v2("GET /api/v2/settings/values", {
+        query: { ...identityQuery(identity), keys: [...keys] },
+      });
+      const byKey: Partial<Record<SettingKey, unknown>> = {};
+      for (const item of result.items) {
+        if (item.is_set && KNOWN_SETTING_KEYS.has(item.key)) {
+          byKey[item.key as SettingKey] = item.value;
+        }
+      }
+      return byKey;
+    },
+    enabled: (options.enabled ?? true) && keys.length > 0,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 /** The HTTP status of a documented v2 problem, or null for anything else (transport, network). */
 export function settingMutationStatus(error: unknown): number | null {
   return error instanceof V2ProblemError ? error.status : null;

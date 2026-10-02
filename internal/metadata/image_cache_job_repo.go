@@ -771,256 +771,52 @@ func (r *ImageCacheJobRepository) DeleteSucceededBefore(ctx context.Context, bef
 	return int(tag.RowsAffected()), nil
 }
 
-func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Context, limit int) (int, error) {
-	return r.enqueueProviderArtwork(ctx, limit, []string{})
-}
-
 // EnqueueArtworkRepair regenerates confirmed missing cached revisions without
 // replacing catalog pointers. Surviving variants keep serving during repair.
 func (r *ImageCacheJobRepository) EnqueueArtworkRepair(ctx context.Context, paths []string, limit int) (int, error) {
 	if len(paths) == 0 {
 		return 0, nil
 	}
-	return r.enqueueProviderArtwork(ctx, limit, paths)
+	return r.enqueueArtworkRepair(ctx, limit, paths)
 }
 
-func (r *ImageCacheJobRepository) enqueueProviderArtwork(ctx context.Context, limit int, repairPaths []string) (int, error) {
+const imageCacheDiscoverySurfaceCount = 10
+const imageCachePosterPathColumn = "poster_path"
+const imageCacheBackdropPathColumn = "backdrop_path"
+const imageCacheLogoPathColumn = "logo_path"
+
+func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Context, cursor imageCacheDiscoveryCursor, limit int) (imageCacheDiscoveryPage, error) {
+	page := imageCacheDiscoveryPage{Next: cursor}
 	if r == nil || r.pool == nil || limit <= 0 {
-		return 0, nil
+		page.Complete = true
+		return page, nil
 	}
-	// Each branch is restricted to provider-origin sources (LIKE '%://%' minus
-	// cached/system schemes). Local file:// sidecar sources are deliberately
-	// excluded from this sweep: their recovery is refresh-driven (a metadata
-	// refresh re-discovers the sidecar and enqueues a fresh job), so a stable
-	// local failure cannot be resurrected here every cycle.
-	// Each branch is also restricted to targets whose stored *_path is not already a
-	// cached relative path. The destination check makes the cached row itself the
-	// durable dedup marker, so pruning succeeded job rows does not cause the whole
-	// catalog to be re-downloaded once the rows age out.
-	query := strings.ReplaceAll(`
-		WITH all_candidates AS (
-			SELECT
-				'poster'::text AS image_type,
-				'item'::text AS target_type,
-				mi.content_id AS target_content_id,
-				''::text AS target_language,
-				mi.content_id AS series_id,
-				mi.poster_source_path AS source_path,
-				mi.type AS content_type,
-				NULL::integer AS season_number,
-				NULL::integer AS episode_number,
-				mi.tmdb_id,
-				mi.tvdb_id,
-				mi.imdb_id
-			FROM media_items mi
-			WHERE mi.poster_source_path LIKE '%://%'
-			  AND lower(mi.poster_source_path) NOT LIKE ALL (@nonProviderSchemes)
-			  AND ((cardinality($2::text[]) = 0 AND (mi.poster_path LIKE '%://%' OR coalesce(mi.poster_path, '') = '')) OR mi.poster_path = ANY($2))
-			UNION ALL
-			SELECT
-				'backdrop'::text,
-				'item'::text,
-				mi.content_id,
-				''::text,
-				mi.content_id,
-				mi.backdrop_source_path,
-				mi.type,
-				NULL::integer,
-				NULL::integer,
-				mi.tmdb_id,
-				mi.tvdb_id,
-				mi.imdb_id
-			FROM media_items mi
-			WHERE mi.backdrop_source_path LIKE '%://%'
-			  AND lower(mi.backdrop_source_path) NOT LIKE ALL (@nonProviderSchemes)
-			  AND ((cardinality($2::text[]) = 0 AND (mi.backdrop_path LIKE '%://%' OR coalesce(mi.backdrop_path, '') = '')) OR mi.backdrop_path = ANY($2))
-			UNION ALL
-			SELECT
-				'logo'::text,
-				'item'::text,
-				mi.content_id,
-				''::text,
-				mi.content_id,
-				mi.logo_source_path,
-				mi.type,
-				NULL::integer,
-				NULL::integer,
-				mi.tmdb_id,
-				mi.tvdb_id,
-				mi.imdb_id
-			FROM media_items mi
-			WHERE mi.logo_source_path LIKE '%://%'
-			  AND lower(mi.logo_source_path) NOT LIKE ALL (@nonProviderSchemes)
-			  AND ((cardinality($2::text[]) = 0 AND (mi.logo_path LIKE '%://%' OR coalesce(mi.logo_path, '') = '')) OR mi.logo_path = ANY($2))
-			UNION ALL
-			SELECT
-				'poster'::text,
-				'item_localization'::text,
-				loc.content_id,
-				loc.language,
-				loc.content_id,
-				loc.poster_source_path,
-				mi.type,
-				NULL::integer,
-				NULL::integer,
-				mi.tmdb_id,
-				mi.tvdb_id,
-				mi.imdb_id
-			FROM media_item_localizations loc
-			JOIN media_items mi ON mi.content_id = loc.content_id
-			WHERE loc.poster_source_path LIKE '%://%'
-			  AND lower(loc.poster_source_path) NOT LIKE ALL (@nonProviderSchemes)
-			  AND ((cardinality($2::text[]) = 0 AND (loc.poster_path LIKE '%://%' OR coalesce(loc.poster_path, '') = '')) OR loc.poster_path = ANY($2))
-			UNION ALL
-			SELECT
-				'backdrop'::text,
-				'item_localization'::text,
-				loc.content_id,
-				loc.language,
-				loc.content_id,
-				loc.backdrop_source_path,
-				mi.type,
-				NULL::integer,
-				NULL::integer,
-				mi.tmdb_id,
-				mi.tvdb_id,
-				mi.imdb_id
-			FROM media_item_localizations loc
-			JOIN media_items mi ON mi.content_id = loc.content_id
-			WHERE loc.backdrop_source_path LIKE '%://%'
-			  AND lower(loc.backdrop_source_path) NOT LIKE ALL (@nonProviderSchemes)
-			  AND ((cardinality($2::text[]) = 0 AND (loc.backdrop_path LIKE '%://%' OR coalesce(loc.backdrop_path, '') = '')) OR loc.backdrop_path = ANY($2))
-			UNION ALL
-			SELECT
-				'logo'::text,
-				'item_localization'::text,
-				loc.content_id,
-				loc.language,
-				loc.content_id,
-				loc.logo_source_path,
-				mi.type,
-				NULL::integer,
-				NULL::integer,
-				mi.tmdb_id,
-				mi.tvdb_id,
-				mi.imdb_id
-			FROM media_item_localizations loc
-			JOIN media_items mi ON mi.content_id = loc.content_id
-			WHERE loc.logo_source_path LIKE '%://%'
-			  AND lower(loc.logo_source_path) NOT LIKE ALL (@nonProviderSchemes)
-			  AND ((cardinality($2::text[]) = 0 AND (loc.logo_path LIKE '%://%' OR coalesce(loc.logo_path, '') = '')) OR loc.logo_path = ANY($2))
-			UNION ALL
-			SELECT
-				'poster'::text,
-				'season'::text,
-				s.content_id AS target_content_id,
-				''::text AS target_language,
-				s.series_id,
-				s.poster_source_path AS source_path,
-				'series'::text AS content_type,
-				s.season_number,
-				NULL::integer AS episode_number,
-				mi.tmdb_id,
-				mi.tvdb_id,
-				mi.imdb_id
-			FROM seasons s
-			JOIN media_items mi ON mi.content_id = s.series_id
-			WHERE s.poster_source_path LIKE '%://%'
-			  AND lower(s.poster_source_path) NOT LIKE ALL (@nonProviderSchemes)
-			  AND ((cardinality($2::text[]) = 0 AND (s.poster_path LIKE '%://%' OR coalesce(s.poster_path, '') = '')) OR s.poster_path = ANY($2))
-			UNION ALL
-			SELECT
-				'poster'::text,
-				'season_localization'::text,
-				s.content_id,
-				loc.language,
-				s.series_id,
-				loc.poster_source_path,
-				'series'::text,
-				s.season_number,
-				NULL::integer,
-				mi.tmdb_id,
-				mi.tvdb_id,
-				mi.imdb_id
-			FROM season_localizations loc
-			JOIN seasons s ON s.content_id = loc.season_content_id
-			JOIN media_items mi ON mi.content_id = s.series_id
-			WHERE loc.poster_source_path LIKE '%://%'
-			  AND lower(loc.poster_source_path) NOT LIKE ALL (@nonProviderSchemes)
-			  AND ((cardinality($2::text[]) = 0 AND (loc.poster_path LIKE '%://%' OR coalesce(loc.poster_path, '') = '')) OR loc.poster_path = ANY($2))
-			UNION ALL
-			SELECT
-				'still'::text,
-				'episode'::text,
-				e.content_id,
-				''::text,
-				e.series_id,
-				e.still_source_path,
-				'series'::text,
-				e.season_number,
-				e.episode_number,
-				mi.tmdb_id,
-				mi.tvdb_id,
-				mi.imdb_id
-			FROM episodes e
-			JOIN media_items mi ON mi.content_id = e.series_id
-			WHERE e.still_source_path LIKE '%://%'
-			  AND lower(e.still_source_path) NOT LIKE ALL (@nonProviderSchemes)
-			  AND ((cardinality($2::text[]) = 0 AND (e.still_path LIKE '%://%' OR coalesce(e.still_path, '') = '')) OR e.still_path = ANY($2))
-			UNION ALL
-			SELECT
-				'profile'::text,
-				'person'::text,
-				p.id::text,
-				''::text,
-				''::text,
-				p.photo_source_path,
-				'people'::text,
-				NULL::integer,
-				NULL::integer,
-				p.tmdb_id,
-				p.tvdb_id,
-				p.imdb_id
-			FROM people p
-			WHERE p.photo_source_path LIKE '%://%'
-			  AND lower(p.photo_source_path) NOT LIKE ALL (@nonProviderSchemes)
-			  AND ((cardinality($2::text[]) = 0 AND (p.photo_path LIKE '%://%' OR coalesce(p.photo_path, '') = '')) OR p.photo_path = ANY($2))
-		),
-		candidates AS (
-			SELECT ac.*
-			FROM all_candidates ac
-			LEFT JOIN metadata_image_cache_jobs j
-			  ON j.target_type = ac.target_type
-			 AND j.target_content_id = ac.target_content_id
-			 AND j.image_type = ac.image_type
-			 AND j.target_language = ac.target_language
-			WHERE j.id IS NULL
-			   OR j.source_path IS DISTINCT FROM ac.source_path
-			   OR j.status = 'succeeded'
-			   OR (
-				   j.status = 'failed'
-				   AND j.next_attempt_at <= NOW()
-			   )
-			ORDER BY ac.target_type, ac.target_content_id, ac.target_language, ac.image_type
-			LIMIT $1
-		)
-		SELECT image_type, target_type, target_content_id, target_language, series_id, source_path,
-		       content_type, season_number, episode_number,
-		       COALESCE(tmdb_id, '') AS tmdb_id,
-		       COALESCE(tvdb_id, '') AS tvdb_id,
-		       COALESCE(imdb_id, '') AS imdb_id
-		FROM candidates
-	`, "@nonProviderSchemes", nonProviderImageSchemesSQL)
-	rows, err := r.pool.Query(ctx, query, limit, repairPaths)
+	if cursor.Surface < 0 {
+		cursor = imageCacheDiscoveryCursor{}
+	}
+	if cursor.Surface >= imageCacheDiscoverySurfaceCount {
+		page.Next = cursor
+		page.Complete = true
+		return page, nil
+	}
+
+	// Query one source surface at a time and advance by its native primary key.
+	// This avoids rebuilding and sorting the union of the full catalog for every
+	// page. The explicit collation on the job key is required for PostgreSQL to
+	// use an indexed job lookup when source IDs use C collation.
+	query, args := imageCacheDiscoveryQuery(cursor, limit)
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
-		return 0, fmt.Errorf("enqueueing existing provider artwork: %w", err)
+		return page, fmt.Errorf("discovering existing provider artwork surface %d: %w", cursor.Surface, err)
 	}
 	defer rows.Close()
 
 	inputs := make([]EnqueueImageCacheJobInput, 0, limit)
+	next := cursor
 	for rows.Next() {
 		var in EnqueueImageCacheJobInput
 		var tmdbID, tvdbID, imdbID string
+		var eligible bool
 		if err := rows.Scan(
 			&in.ImageType,
 			&in.TargetType,
@@ -1034,19 +830,231 @@ func (r *ImageCacheJobRepository) enqueueProviderArtwork(ctx context.Context, li
 			&tmdbID,
 			&tvdbID,
 			&imdbID,
+			&next.Key,
+			&next.Subkey,
+			&next.NumericKey,
+			&eligible,
 		); err != nil {
-			return 0, fmt.Errorf("scanning existing provider artwork: %w", err)
+			return page, fmt.Errorf("scanning existing provider artwork surface %d: %w", cursor.Surface, err)
 		}
-		fallbackProvider := imageCachePrimaryProvider(tmdbID, tvdbID, imdbID)
-		in.ProviderID = imageCacheProviderIDFromSource(in.SourcePath, fallbackProvider)
-		in.ProviderContentID = imageCacheProviderContentID(in.ProviderID, tmdbID, tvdbID, imdbID, firstNonEmpty(in.SeriesID, in.TargetContentID))
-		in.ContentType = imageCacheContentType(in.ContentType)
-		inputs = append(inputs, in)
+		page.Scanned++
+		if eligible {
+			fallbackProvider := imageCachePrimaryProvider(tmdbID, tvdbID, imdbID)
+			in.ProviderID = imageCacheProviderIDFromSource(in.SourcePath, fallbackProvider)
+			in.ProviderContentID = imageCacheProviderContentID(in.ProviderID, tmdbID, tvdbID, imdbID, firstNonEmpty(in.SeriesID, in.TargetContentID))
+			in.ContentType = imageCacheContentType(in.ContentType)
+			normalized, ok := normalizeImageCacheJobInput(in)
+			if !ok {
+				continue
+			}
+			inputs = append(inputs, normalized)
+			page.Discovered++
+		}
 	}
 	if err := rows.Err(); err != nil {
-		return 0, fmt.Errorf("iterating existing provider artwork: %w", err)
+		return page, fmt.Errorf("iterating existing provider artwork surface %d: %w", cursor.Surface, err)
 	}
-	return r.enqueueBatch(ctx, inputs, true)
+
+	page.Enqueued, err = r.enqueueBatch(ctx, inputs, true)
+	if err != nil {
+		// Do not return the advanced cursor after a partial enqueue. Rows committed
+		// by an earlier chunk are durable, and retrying from the old key is safe.
+		return imageCacheDiscoveryPage{Next: cursor}, err
+	}
+	page.Next = next
+	if page.Scanned < limit {
+		page.Next = imageCacheDiscoveryCursor{Surface: cursor.Surface + 1}
+		page.Complete = page.Next.Surface >= imageCacheDiscoverySurfaceCount
+	}
+	return page, nil
+}
+
+func imageCacheDiscoveryQuery(cursor imageCacheDiscoveryCursor, limit int) (string, []any) {
+	sourceQuery, args := imageCacheDiscoverySourceQuery(cursor, limit)
+	// Every row in the bounded key page is returned, including rows that are not
+	// candidates, so the caller can advance past them. Only candidates probe the
+	// job table, and only candidates can be eligible.
+	query := strings.ReplaceAll(fmt.Sprintf(`
+		WITH source_page AS (
+			%s
+		), scanned AS (
+			SELECT c.*,
+			       (c.candidate
+			        AND (j.id IS NULL
+			             OR j.source_path IS DISTINCT FROM c.source_path
+			             OR j.status = 'succeeded'
+			             OR (j.status = 'failed' AND j.next_attempt_at <= NOW()))) AS eligible
+			FROM source_page c
+			LEFT JOIN LATERAL (
+				SELECT j.id, j.source_path, j.status, j.next_attempt_at
+				FROM metadata_image_cache_jobs j
+				WHERE c.candidate
+				  AND j.target_type = c.target_type
+				  AND j.target_content_id = c.target_content_id COLLATE "default"
+				  AND j.image_type = c.image_type
+				  AND j.target_language = c.target_language
+				LIMIT 1
+			) j ON true
+		)
+		SELECT image_type, target_type, target_content_id, target_language, series_id, source_path,
+		       content_type, season_number, episode_number,
+		       COALESCE(tmdb_id, ''), COALESCE(tvdb_id, ''), COALESCE(imdb_id, ''),
+		       cursor_key, cursor_subkey, cursor_number, eligible
+		FROM scanned
+		ORDER BY cursor_number, cursor_key, cursor_subkey
+	`, sourceQuery), "@nonProviderSchemes", nonProviderImageSchemesSQL)
+	return query, args
+}
+
+// imageCacheDiscoverySourceQuery bounds each surface to a page of its native
+// primary key before any artwork predicate or enrichment join. The key page is
+// a plain index range scan, so each page reads at most limit source rows no
+// matter how many rows are cached, already queued or parked. Predicates become
+// the candidate flag instead of a filter, and joins are LEFT JOINs, so a page
+// shorter than limit always means the surface is exhausted.
+func imageCacheDiscoverySourceQuery(cursor imageCacheDiscoveryCursor, limit int) (string, []any) {
+	candidate := func(sourceColumn, pathColumn string, joined ...string) string {
+		parts := []string{
+			sourceColumn + ` LIKE '%://%'`,
+			`lower(` + sourceColumn + `) NOT LIKE ALL (@nonProviderSchemes)`,
+			`(` + pathColumn + ` LIKE '%://%' OR coalesce(` + pathColumn + `, '') = '')`,
+		}
+		for _, column := range joined {
+			parts = append(parts, column+` IS NOT NULL`)
+		}
+		return `COALESCE(` + strings.Join(parts, `
+			         AND `) + `, false) AS candidate`
+	}
+	imageTypes := [...]string{ImageCacheImagePoster, ImageCacheImageBackdrop, ImageCacheImageLogo}
+	sourceColumns := [...]string{"poster_source_path", "backdrop_source_path", "logo_source_path"}
+	pathColumns := [...]string{imageCachePosterPathColumn, imageCacheBackdropPathColumn, imageCacheLogoPathColumn}
+	textArgs := []any{limit, cursor.Key}
+	localizedArgs := []any{limit, cursor.Key, cursor.Subkey}
+
+	switch cursor.Surface {
+	case 0, 1, 2:
+		imageType := imageTypes[cursor.Surface]
+		sourceColumn := sourceColumns[cursor.Surface]
+		pathColumn := pathColumns[cursor.Surface]
+		return fmt.Sprintf(`
+			SELECT '%s'::text AS image_type, 'item'::text AS target_type,
+			       mi.content_id AS target_content_id, ''::text AS target_language,
+			       mi.content_id AS series_id, COALESCE(mi.%s, '') AS source_path,
+			       COALESCE(mi.type, '') AS content_type,
+			       NULL::integer AS season_number, NULL::integer AS episode_number,
+			       mi.tmdb_id, mi.tvdb_id, mi.imdb_id,
+			       mi.content_id AS cursor_key, ''::text AS cursor_subkey, 0::bigint AS cursor_number,
+			       %s
+			FROM (
+				SELECT *
+				FROM media_items
+				WHERE content_id > $2
+				ORDER BY content_id
+				LIMIT $1
+			) mi
+		`, imageType, sourceColumn, candidate("mi."+sourceColumn, "mi."+pathColumn)), textArgs
+	case 3, 4, 5:
+		index := cursor.Surface - 3
+		imageType := imageTypes[index]
+		sourceColumn := sourceColumns[index]
+		pathColumn := pathColumns[index]
+		return fmt.Sprintf(`
+			SELECT '%s'::text AS image_type, 'item_localization'::text AS target_type,
+			       loc.content_id AS target_content_id, loc.language AS target_language,
+			       loc.content_id AS series_id, COALESCE(loc.%s, '') AS source_path,
+			       COALESCE(mi.type, '') AS content_type,
+			       NULL::integer AS season_number, NULL::integer AS episode_number,
+			       mi.tmdb_id, mi.tvdb_id, mi.imdb_id,
+			       loc.content_id AS cursor_key, loc.language AS cursor_subkey, 0::bigint AS cursor_number,
+			       %s
+			FROM (
+				SELECT *
+				FROM media_item_localizations
+				WHERE (content_id, language) > ($2, $3)
+				ORDER BY content_id, language
+				LIMIT $1
+			) loc
+			LEFT JOIN media_items mi ON mi.content_id = loc.content_id
+		`, imageType, sourceColumn, candidate("loc."+sourceColumn, "loc."+pathColumn, "mi.content_id")), localizedArgs
+	case 6:
+		return fmt.Sprintf(`
+			SELECT 'poster'::text AS image_type, 'season'::text AS target_type,
+			       s.content_id AS target_content_id, ''::text AS target_language,
+			       COALESCE(s.series_id, '') AS series_id, COALESCE(s.poster_source_path, '') AS source_path,
+			       'series'::text AS content_type,
+			       s.season_number, NULL::integer AS episode_number,
+			       mi.tmdb_id, mi.tvdb_id, mi.imdb_id,
+			       s.content_id AS cursor_key, ''::text AS cursor_subkey, 0::bigint AS cursor_number,
+			       %s
+			FROM (
+				SELECT *
+				FROM seasons
+				WHERE content_id > $2
+				ORDER BY content_id
+				LIMIT $1
+			) s
+			LEFT JOIN media_items mi ON mi.content_id = s.series_id
+		`, candidate("s.poster_source_path", "s.poster_path", "mi.content_id")), textArgs
+	case 7:
+		return fmt.Sprintf(`
+			SELECT 'poster'::text AS image_type, 'season_localization'::text AS target_type,
+			       loc.season_content_id AS target_content_id, loc.language AS target_language,
+			       COALESCE(s.series_id, '') AS series_id, COALESCE(loc.poster_source_path, '') AS source_path,
+			       'series'::text AS content_type,
+			       s.season_number, NULL::integer AS episode_number,
+			       mi.tmdb_id, mi.tvdb_id, mi.imdb_id,
+			       loc.season_content_id AS cursor_key, loc.language AS cursor_subkey, 0::bigint AS cursor_number,
+			       %s
+			FROM (
+				SELECT *
+				FROM season_localizations
+				WHERE (season_content_id, language) > ($2, $3)
+				ORDER BY season_content_id, language
+				LIMIT $1
+			) loc
+			LEFT JOIN seasons s ON s.content_id = loc.season_content_id
+			LEFT JOIN media_items mi ON mi.content_id = s.series_id
+		`, candidate("loc.poster_source_path", "loc.poster_path", "s.content_id", "mi.content_id")), localizedArgs
+	case 8:
+		return fmt.Sprintf(`
+			SELECT 'still'::text AS image_type, 'episode'::text AS target_type,
+			       e.content_id AS target_content_id, ''::text AS target_language,
+			       COALESCE(e.series_id, '') AS series_id, COALESCE(e.still_source_path, '') AS source_path,
+			       'series'::text AS content_type,
+			       e.season_number, e.episode_number,
+			       mi.tmdb_id, mi.tvdb_id, mi.imdb_id,
+			       e.content_id AS cursor_key, ''::text AS cursor_subkey, 0::bigint AS cursor_number,
+			       %s
+			FROM (
+				SELECT *
+				FROM episodes
+				WHERE content_id > $2
+				ORDER BY content_id
+				LIMIT $1
+			) e
+			LEFT JOIN media_items mi ON mi.content_id = e.series_id
+		`, candidate("e.still_source_path", "e.still_path", "mi.content_id")), textArgs
+	case 9:
+		return fmt.Sprintf(`
+			SELECT 'profile'::text AS image_type, 'person'::text AS target_type,
+			       p.id::text AS target_content_id, ''::text AS target_language,
+			       ''::text AS series_id, COALESCE(p.photo_source_path, '') AS source_path,
+			       'people'::text AS content_type,
+			       NULL::integer AS season_number, NULL::integer AS episode_number,
+			       p.tmdb_id, p.tvdb_id, p.imdb_id,
+			       ''::text AS cursor_key, ''::text AS cursor_subkey, p.id::bigint AS cursor_number,
+			       %s
+			FROM (
+				SELECT *
+				FROM people
+				WHERE id > $2
+				ORDER BY id
+				LIMIT $1
+			) p
+		`, candidate("p.photo_source_path", "p.photo_path")), []any{limit, cursor.NumericKey}
+	default:
+		return `SELECT NULL WHERE false`, []any{limit}
+	}
 }
 
 // ladderRecachableSchemesSQL lists the source schemes the ladder backfill
@@ -1360,6 +1368,275 @@ func (r *ImageCacheJobRepository) HasLadderBackfillRemaining(ctx context.Context
 		return false, fmt.Errorf("checking artwork ladder backfill remainder: %w", err)
 	}
 	return remaining, nil
+}
+
+// enqueueArtworkRepair finds the catalog targets whose stored path is one of a
+// small set of confirmed missing cached revisions. Repair looks up specific
+// paths, so it keeps the whole-catalog statement instead of the source-keyed
+// pages that EnqueueExistingProviderArtwork walks for a manual backfill.
+func (r *ImageCacheJobRepository) enqueueArtworkRepair(ctx context.Context, limit int, repairPaths []string) (int, error) {
+	if r == nil || r.pool == nil || limit <= 0 {
+		return 0, nil
+	}
+	// Each branch is restricted to provider-origin sources (LIKE '%://%' minus
+	// cached/system schemes). Local file:// sidecar sources are deliberately
+	// excluded from this sweep: their recovery is refresh-driven (a metadata
+	// refresh re-discovers the sidecar and enqueues a fresh job), so a stable
+	// local failure cannot be resurrected here every cycle.
+	// Each branch is also restricted to targets whose stored *_path is not already a
+	// cached relative path. The destination check makes the cached row itself the
+	// durable dedup marker, so pruning succeeded job rows does not cause the whole
+	// catalog to be re-downloaded once the rows age out.
+	query := strings.ReplaceAll(`
+		WITH all_candidates AS (
+			SELECT
+				'poster'::text AS image_type,
+				'item'::text AS target_type,
+				mi.content_id AS target_content_id,
+				''::text AS target_language,
+				mi.content_id AS series_id,
+				mi.poster_source_path AS source_path,
+				mi.type AS content_type,
+				NULL::integer AS season_number,
+				NULL::integer AS episode_number,
+				mi.tmdb_id,
+				mi.tvdb_id,
+				mi.imdb_id
+			FROM media_items mi
+			WHERE mi.poster_source_path LIKE '%://%'
+			  AND lower(mi.poster_source_path) NOT LIKE ALL (@nonProviderSchemes)
+			  AND ((cardinality($2::text[]) = 0 AND (mi.poster_path LIKE '%://%' OR coalesce(mi.poster_path, '') = '')) OR mi.poster_path = ANY($2))
+			UNION ALL
+			SELECT
+				'backdrop'::text,
+				'item'::text,
+				mi.content_id,
+				''::text,
+				mi.content_id,
+				mi.backdrop_source_path,
+				mi.type,
+				NULL::integer,
+				NULL::integer,
+				mi.tmdb_id,
+				mi.tvdb_id,
+				mi.imdb_id
+			FROM media_items mi
+			WHERE mi.backdrop_source_path LIKE '%://%'
+			  AND lower(mi.backdrop_source_path) NOT LIKE ALL (@nonProviderSchemes)
+			  AND ((cardinality($2::text[]) = 0 AND (mi.backdrop_path LIKE '%://%' OR coalesce(mi.backdrop_path, '') = '')) OR mi.backdrop_path = ANY($2))
+			UNION ALL
+			SELECT
+				'logo'::text,
+				'item'::text,
+				mi.content_id,
+				''::text,
+				mi.content_id,
+				mi.logo_source_path,
+				mi.type,
+				NULL::integer,
+				NULL::integer,
+				mi.tmdb_id,
+				mi.tvdb_id,
+				mi.imdb_id
+			FROM media_items mi
+			WHERE mi.logo_source_path LIKE '%://%'
+			  AND lower(mi.logo_source_path) NOT LIKE ALL (@nonProviderSchemes)
+			  AND ((cardinality($2::text[]) = 0 AND (mi.logo_path LIKE '%://%' OR coalesce(mi.logo_path, '') = '')) OR mi.logo_path = ANY($2))
+			UNION ALL
+			SELECT
+				'poster'::text,
+				'item_localization'::text,
+				loc.content_id,
+				loc.language,
+				loc.content_id,
+				loc.poster_source_path,
+				mi.type,
+				NULL::integer,
+				NULL::integer,
+				mi.tmdb_id,
+				mi.tvdb_id,
+				mi.imdb_id
+			FROM media_item_localizations loc
+			JOIN media_items mi ON mi.content_id = loc.content_id
+			WHERE loc.poster_source_path LIKE '%://%'
+			  AND lower(loc.poster_source_path) NOT LIKE ALL (@nonProviderSchemes)
+			  AND ((cardinality($2::text[]) = 0 AND (loc.poster_path LIKE '%://%' OR coalesce(loc.poster_path, '') = '')) OR loc.poster_path = ANY($2))
+			UNION ALL
+			SELECT
+				'backdrop'::text,
+				'item_localization'::text,
+				loc.content_id,
+				loc.language,
+				loc.content_id,
+				loc.backdrop_source_path,
+				mi.type,
+				NULL::integer,
+				NULL::integer,
+				mi.tmdb_id,
+				mi.tvdb_id,
+				mi.imdb_id
+			FROM media_item_localizations loc
+			JOIN media_items mi ON mi.content_id = loc.content_id
+			WHERE loc.backdrop_source_path LIKE '%://%'
+			  AND lower(loc.backdrop_source_path) NOT LIKE ALL (@nonProviderSchemes)
+			  AND ((cardinality($2::text[]) = 0 AND (loc.backdrop_path LIKE '%://%' OR coalesce(loc.backdrop_path, '') = '')) OR loc.backdrop_path = ANY($2))
+			UNION ALL
+			SELECT
+				'logo'::text,
+				'item_localization'::text,
+				loc.content_id,
+				loc.language,
+				loc.content_id,
+				loc.logo_source_path,
+				mi.type,
+				NULL::integer,
+				NULL::integer,
+				mi.tmdb_id,
+				mi.tvdb_id,
+				mi.imdb_id
+			FROM media_item_localizations loc
+			JOIN media_items mi ON mi.content_id = loc.content_id
+			WHERE loc.logo_source_path LIKE '%://%'
+			  AND lower(loc.logo_source_path) NOT LIKE ALL (@nonProviderSchemes)
+			  AND ((cardinality($2::text[]) = 0 AND (loc.logo_path LIKE '%://%' OR coalesce(loc.logo_path, '') = '')) OR loc.logo_path = ANY($2))
+			UNION ALL
+			SELECT
+				'poster'::text,
+				'season'::text,
+				s.content_id AS target_content_id,
+				''::text AS target_language,
+				s.series_id,
+				s.poster_source_path AS source_path,
+				'series'::text AS content_type,
+				s.season_number,
+				NULL::integer AS episode_number,
+				mi.tmdb_id,
+				mi.tvdb_id,
+				mi.imdb_id
+			FROM seasons s
+			JOIN media_items mi ON mi.content_id = s.series_id
+			WHERE s.poster_source_path LIKE '%://%'
+			  AND lower(s.poster_source_path) NOT LIKE ALL (@nonProviderSchemes)
+			  AND ((cardinality($2::text[]) = 0 AND (s.poster_path LIKE '%://%' OR coalesce(s.poster_path, '') = '')) OR s.poster_path = ANY($2))
+			UNION ALL
+			SELECT
+				'poster'::text,
+				'season_localization'::text,
+				s.content_id,
+				loc.language,
+				s.series_id,
+				loc.poster_source_path,
+				'series'::text,
+				s.season_number,
+				NULL::integer,
+				mi.tmdb_id,
+				mi.tvdb_id,
+				mi.imdb_id
+			FROM season_localizations loc
+			JOIN seasons s ON s.content_id = loc.season_content_id
+			JOIN media_items mi ON mi.content_id = s.series_id
+			WHERE loc.poster_source_path LIKE '%://%'
+			  AND lower(loc.poster_source_path) NOT LIKE ALL (@nonProviderSchemes)
+			  AND ((cardinality($2::text[]) = 0 AND (loc.poster_path LIKE '%://%' OR coalesce(loc.poster_path, '') = '')) OR loc.poster_path = ANY($2))
+			UNION ALL
+			SELECT
+				'still'::text,
+				'episode'::text,
+				e.content_id,
+				''::text,
+				e.series_id,
+				e.still_source_path,
+				'series'::text,
+				e.season_number,
+				e.episode_number,
+				mi.tmdb_id,
+				mi.tvdb_id,
+				mi.imdb_id
+			FROM episodes e
+			JOIN media_items mi ON mi.content_id = e.series_id
+			WHERE e.still_source_path LIKE '%://%'
+			  AND lower(e.still_source_path) NOT LIKE ALL (@nonProviderSchemes)
+			  AND ((cardinality($2::text[]) = 0 AND (e.still_path LIKE '%://%' OR coalesce(e.still_path, '') = '')) OR e.still_path = ANY($2))
+			UNION ALL
+			SELECT
+				'profile'::text,
+				'person'::text,
+				p.id::text,
+				''::text,
+				''::text,
+				p.photo_source_path,
+				'people'::text,
+				NULL::integer,
+				NULL::integer,
+				p.tmdb_id,
+				p.tvdb_id,
+				p.imdb_id
+			FROM people p
+			WHERE p.photo_source_path LIKE '%://%'
+			  AND lower(p.photo_source_path) NOT LIKE ALL (@nonProviderSchemes)
+			  AND ((cardinality($2::text[]) = 0 AND (p.photo_path LIKE '%://%' OR coalesce(p.photo_path, '') = '')) OR p.photo_path = ANY($2))
+		),
+		candidates AS (
+			SELECT ac.*
+			FROM all_candidates ac
+			LEFT JOIN metadata_image_cache_jobs j
+			  ON j.target_type = ac.target_type
+			 AND j.target_content_id = ac.target_content_id
+			 AND j.image_type = ac.image_type
+			 AND j.target_language = ac.target_language
+			WHERE j.id IS NULL
+			   OR j.source_path IS DISTINCT FROM ac.source_path
+			   OR j.status = 'succeeded'
+			   OR (
+				   j.status = 'failed'
+				   AND j.next_attempt_at <= NOW()
+			   )
+			ORDER BY ac.target_type, ac.target_content_id, ac.target_language, ac.image_type
+			LIMIT $1
+		)
+		SELECT image_type, target_type, target_content_id, target_language, series_id, source_path,
+		       content_type, season_number, episode_number,
+		       COALESCE(tmdb_id, '') AS tmdb_id,
+		       COALESCE(tvdb_id, '') AS tvdb_id,
+		       COALESCE(imdb_id, '') AS imdb_id
+		FROM candidates
+	`, "@nonProviderSchemes", nonProviderImageSchemesSQL)
+	rows, err := r.pool.Query(ctx, query, limit, repairPaths)
+	if err != nil {
+		return 0, fmt.Errorf("enqueueing existing provider artwork: %w", err)
+	}
+	defer rows.Close()
+
+	inputs := make([]EnqueueImageCacheJobInput, 0, limit)
+	for rows.Next() {
+		var in EnqueueImageCacheJobInput
+		var tmdbID, tvdbID, imdbID string
+		if err := rows.Scan(
+			&in.ImageType,
+			&in.TargetType,
+			&in.TargetContentID,
+			&in.TargetLanguage,
+			&in.SeriesID,
+			&in.SourcePath,
+			&in.ContentType,
+			&in.SeasonNumber,
+			&in.EpisodeNumber,
+			&tmdbID,
+			&tvdbID,
+			&imdbID,
+		); err != nil {
+			return 0, fmt.Errorf("scanning existing provider artwork: %w", err)
+		}
+		fallbackProvider := imageCachePrimaryProvider(tmdbID, tvdbID, imdbID)
+		in.ProviderID = imageCacheProviderIDFromSource(in.SourcePath, fallbackProvider)
+		in.ProviderContentID = imageCacheProviderContentID(in.ProviderID, tmdbID, tvdbID, imdbID, firstNonEmpty(in.SeriesID, in.TargetContentID))
+		in.ContentType = imageCacheContentType(in.ContentType)
+		inputs = append(inputs, in)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("iterating existing provider artwork: %w", err)
+	}
+	return r.enqueueBatch(ctx, inputs, true)
 }
 
 // imageCacheLocalProviderID is the synthetic provider slug for local sidecar

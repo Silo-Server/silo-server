@@ -23,18 +23,54 @@ export function onSessionRejected(listener: SessionRejectedListener | null) {
   sessionRejectedListener = listener;
 }
 
+type RoleChangedListener = () => void;
+let roleChangedListener: RoleChangedListener | null = null;
+
+/**
+ * Registers the handler for an access token the server refused because the
+ * account's role changed (401 `token_refresh_required`). The request has
+ * already been refreshed and retried by then; the handler re-reads the
+ * account so role-gated UI follows the new role.
+ */
+export function onRoleChanged(listener: RoleChangedListener | null) {
+  roleChangedListener = listener;
+}
+
+/** The problem id of a 401 Problem Details response, or null. */
+async function unauthorizedProblemId(res: Response): Promise<string | null> {
+  if (res.status !== 401) return null;
+  try {
+    const body = (await res.clone().json()) as { type?: unknown };
+    return typeof body.type === "string" ? problemId({ type: body.type }) : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Whether a refused refresh means the server will never accept this session
  * again: 401 `session_expired`, sent for a session that was revoked or expired
  * or whose account was disabled or deleted. The server also answers its own
  * failures (a database error, say) with 401 `invalid_token`, so no other
- * refusal ends a session that is in use.
+ * refusal ends a session that is in use. A request refused with
+ * `token_refresh_required` is refreshed and retried like any other 401; only
+ * the refresh's own answer can end the session.
  */
 async function isSessionRejection(res: Response): Promise<boolean> {
-  if (res.status !== 401) return false;
+  return (await unauthorizedProblemId(res)) === "session_expired";
+}
+
+/** The refresh whose role change was already reported, so concurrent requests report it once. */
+let reportedRoleChangeRefresh: Promise<boolean> | null = null;
+
+/** Whether a failed refresh is the server's 503 `provider_unavailable`. */
+async function isProviderOutage(res: Response): Promise<boolean> {
+  if (res.status !== 503) return false;
   try {
     const body = (await res.clone().json()) as { type?: unknown };
-    return typeof body.type === "string" && problemId({ type: body.type }) === "session_expired";
+    return (
+      typeof body.type === "string" && problemId({ type: body.type }) === "provider_unavailable"
+    );
   } catch {
     return false;
   }
@@ -308,6 +344,38 @@ export function getAuthContextVersion(): number {
   return authContextVersion;
 }
 
+/**
+ * A refresh the server did not refuse: a 5xx (a fail_closed provider outage
+ * answers 503 provider_unavailable and says the session stays valid), a
+ * timeout, a rate limit or no network. The stored session may still work
+ * once it passes, so these must not discard it.
+ */
+function isTransientRefreshFailure(status: number): boolean {
+  return status >= 500 || status === 408 || status === 429;
+}
+
+let lastRefreshTransient = false;
+let lastRefreshProviderOutage = false;
+
+/**
+ * Whether the latest failed refresh failed for a reason that may pass
+ * (isTransientRefreshFailure) instead of the server refusing the session.
+ * The boot restore keeps the stored refresh token then.
+ */
+export function lastRefreshFailureWasTransient(): boolean {
+  return lastRefreshTransient;
+}
+
+/**
+ * Whether the latest failed refresh was the server's 503
+ * `provider_unavailable`: the session's sign-in provider could not be
+ * reached for its re-check. Other transient failures (the server itself, the
+ * network) are not the provider's.
+ */
+export function lastRefreshFailureWasProviderOutage(): boolean {
+  return lastRefreshProviderOutage;
+}
+
 async function attemptRefresh(): Promise<boolean> {
   const rt = getRefreshToken();
   if (!rt) return false;
@@ -319,11 +387,17 @@ async function attemptRefresh(): Promise<boolean> {
   const startingServerOrigin = currentServerOrigin();
   const hadAccessToken = accessToken !== null;
   let sessionRejected = false;
+  let transient = false;
+  let providerOutage = false;
 
   try {
     const data = await refreshAccessToken(rt, async (input, init) => {
       const res = await fetch(input, init);
-      if (!res.ok) sessionRejected = await isSessionRejection(res);
+      if (!res.ok) {
+        sessionRejected = await isSessionRejection(res);
+        transient = isTransientRefreshFailure(res.status);
+        providerOutage = await isProviderOutage(res);
+      }
       return res;
     });
     if (
@@ -332,6 +406,8 @@ async function attemptRefresh(): Promise<boolean> {
     ) {
       return false;
     }
+    lastRefreshTransient = !data && transient;
+    lastRefreshProviderOutage = !data && providerOutage;
     if (!data) {
       // Only a mid-session refusal ends the session here. The boot restore
       // (no access token yet) clears its own tokens, and a server error or
@@ -353,6 +429,10 @@ async function attemptRefresh(): Promise<boolean> {
     setRefreshToken(data.refresh_token);
     return true;
   } catch {
+    // No answer at all (the network, a body that did not parse): the
+    // session was not refused.
+    lastRefreshTransient = true;
+    lastRefreshProviderOutage = false;
     return false;
   }
 }
@@ -381,8 +461,9 @@ export type RefreshedTokens = components["schemas"]["RefreshedTokens"];
  * Rotates a refresh token through the v2 refreshSession operation. This is
  * the one v2 request issued outside the typed boundary: it runs underneath
  * `fetchWithSession`, so it cannot import that boundary without a cycle. A
- * non-2xx answer (a revoked or malformed token) is `null`; the caller clears
- * the session.
+ * non-2xx answer is `null`: the caller tells a refusal (401 session_expired
+ * or invalid_token) from an outage (5xx, such as 503 provider_unavailable)
+ * by the response status, and only a refusal clears the session.
  */
 export async function refreshAccessToken(
   refreshToken: string,
@@ -494,9 +575,18 @@ export async function fetchWithSession(
     if (snapshot && !isProfileRequestContextCurrent(snapshot)) {
       throw new StaleApiRequestContextError();
     }
-    const refreshed = await refreshAuthentication();
+    // Join the shared refresh before reading the body: an await in between
+    // lets a concurrent refresh finish first, and this request would then
+    // start a second one against whatever session replaced it.
+    const refresh = refreshAuthentication();
+    const [problem, refreshed] = await Promise.all([unauthorizedProblemId(res), refresh]);
+    const roleChanged = problem === "token_refresh_required";
     if (snapshot && !isProfileRequestContextCurrent(snapshot)) {
       throw new StaleApiRequestContextError();
+    }
+    if (refreshed && roleChanged && reportedRoleChangeRefresh !== refresh) {
+      reportedRoleChangeRefresh = refresh;
+      roleChangedListener?.();
     }
     if (refreshed) {
       // Keep the profile and device identity captured for the original

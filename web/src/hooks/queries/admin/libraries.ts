@@ -119,12 +119,17 @@ export function useLibraryRealtimeMonitoring() {
   });
 }
 
-/** Library feature detection; `realtime_monitoring` says the server offers the status above. */
-export function useLibraryCapabilities() {
+/**
+ * Library feature detection: `realtime_monitoring` says the server offers the
+ * status above, `trickplay` that it makes seek previews.
+ */
+export function useLibraryCapabilities(enabled = true) {
   return useQuery({
     queryKey: adminKeys.libraryCapabilities(),
     queryFn: ({ signal }) => v2("GET /api/v2/libraries/capabilities", { signal }),
     staleTime: Infinity,
+    retry: false,
+    enabled,
   });
 }
 
@@ -366,9 +371,12 @@ export function useCreateLibrary() {
   return useMutation({
     mutationFn: (body: CreateLibraryRequest): Promise<Library> =>
       v2("POST /api/v2/libraries", { body: libraryCreateToV2(body) }).then(libraryFromV2),
-    onSuccess: () => {
+    onSuccess: (_created, body) => {
       toast.success("Library created");
       queryClient.invalidateQueries({ queryKey: adminKeys.libraries() });
+      if (body.trickplay_enabled !== undefined) {
+        queryClient.invalidateQueries({ queryKey: adminKeys.trickplayLibraries() });
+      }
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to save");
@@ -387,9 +395,12 @@ export function useUpdateLibrary() {
       body: V2Body<"PATCH /api/v2/libraries/{id}">;
     }): Promise<Library> =>
       v2("PATCH /api/v2/libraries/{id}", { path: { id: String(id) }, body }).then(libraryFromV2),
-    onSuccess: () => {
+    onSuccess: (_updated, { body }) => {
       toast.success("Library updated");
       queryClient.invalidateQueries({ queryKey: adminKeys.libraries() });
+      if (body.trickplay_enabled !== undefined || body.enabled !== undefined) {
+        queryClient.invalidateQueries({ queryKey: adminKeys.trickplayLibraries() });
+      }
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to save");

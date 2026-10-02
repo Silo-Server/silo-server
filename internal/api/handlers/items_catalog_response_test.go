@@ -184,3 +184,21 @@ func TestListOverlaySummariesUsesOverlayFileProjection(t *testing.T) {
 		t.Fatalf("episode overlay video codec = %q, want H.264", got)
 	}
 }
+
+// An item repository without a database must not hide badges that the file
+// projection can still compute.
+func TestListOverlaySummariesFallsBackWithoutItemDatabase(t *testing.T) {
+	repo := &overlayFastPathFileRepo{}
+	handler := &ItemsHandler{itemRepo: catalog.NewItemRepository(nil), fileRepo: repo}
+
+	summaries := handler.listOverlaySummaries(context.Background(), []*models.MediaItem{
+		{ContentID: "movie-1", Type: "movie"},
+	}, catalog.AccessFilter{})
+
+	if repo.overlayContentCalls != 1 {
+		t.Fatalf("overlay content calls = %d, want 1", repo.overlayContentCalls)
+	}
+	if got := summaries["movie-1"]; got == nil || got.Resolution != "2160p" {
+		t.Fatalf("movie overlay = %+v, want the file projection's 2160p badge", got)
+	}
+}
