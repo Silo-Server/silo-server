@@ -123,6 +123,17 @@ function isRecoverableImpersonationAuthError(error: unknown): boolean {
   return error.status === 400 && error.code === "not_impersonating";
 }
 
+/**
+ * Whether a failed account read is the server refusing the session (a 4xx
+ * answer) rather than failing to answer at all (a network error, a timeout,
+ * a 5xx, a gateway page). Only a refusal may end a stored session.
+ */
+function isSessionRefusal(error: unknown): boolean {
+  const status =
+    error instanceof V2ProblemError || error instanceof ApiClientError ? error.status : null;
+  return status !== null && status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
+
 export async function initializeAuthSession<TUser>({
   refreshToken,
   hasStoredImpersonationAdminSession,
@@ -194,6 +205,12 @@ export async function initializeAuthSession<TUser>({
     applyCurrentUser(currentUser);
     restoreProfile();
   } catch (error) {
+    if (!isSessionRefusal(error)) {
+      // The session was restored; only reading the account failed (a
+      // timeout, the network, a 5xx). Keep it for a retry.
+      markRestoreUnavailable();
+      return;
+    }
     if (hasStoredImpersonationAdminSession && isRecoverableImpersonationAuthError(error)) {
       try {
         const recovered = await recoverPreservedAdminSession();

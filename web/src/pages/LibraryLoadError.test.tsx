@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router";
@@ -12,6 +12,7 @@ import { V2ProblemError, V2TimeoutError } from "@/api/v2/request";
 const mocks = vi.hoisted(() => ({
   v2: vi.fn(),
   fetchLibrarySectionItems: vi.fn(),
+  visibleEnd: null as number | null,
 }));
 
 // The real query hooks run against a stubbed request boundary, so the pages
@@ -32,16 +33,33 @@ vi.mock("@/hooks/queries/sidebarPins", () => ({
 
 // Stands in for the grid with its empty message, which a failed browse must
 // never reach.
-vi.mock("@/components/ItemGrid", () => ({
-  default: ({ totalItems, loading }: { totalItems: number; loading?: boolean }) =>
-    loading ? (
-      <div>Loading grid</div>
-    ) : totalItems === 0 ? (
-      <div>No items found.</div>
-    ) : (
-      <div>{`Grid of ${totalItems}`}</div>
-    ),
-}));
+vi.mock("@/components/ItemGrid", async () => {
+  const { useEffect } = await import("react");
+  return {
+    default: function ItemGridStandIn({
+      totalItems,
+      loading,
+      onVisibleRangeChange,
+    }: {
+      totalItems: number;
+      loading?: boolean;
+      onVisibleRangeChange?: (start: number, end: number) => void;
+    }) {
+      // Scrolls the grid to the range a test asks for, as the real grid
+      // reports what is on screen.
+      useEffect(() => {
+        if (mocks.visibleEnd !== null) onVisibleRangeChange?.(0, mocks.visibleEnd);
+      }, [onVisibleRangeChange]);
+      return loading ? (
+        <div>Loading grid</div>
+      ) : totalItems === 0 ? (
+        <div>No items found.</div>
+      ) : (
+        <div>{`Grid of ${totalItems}`}</div>
+      );
+    },
+  };
+});
 
 vi.mock("@/components/catalog/CatalogFiltersPanel", () => ({
   default: () => <div>Filters</div>,
@@ -114,6 +132,7 @@ function invalidFilter() {
 afterEach(() => {
   mocks.v2.mockReset();
   mocks.fetchLibrarySectionItems.mockReset();
+  mocks.visibleEnd = null;
 });
 
 describe("Library tab load errors", () => {
@@ -149,6 +168,53 @@ describe("Library tab load errors", () => {
       screen.getByText("Something went wrong while loading it. Try again in a moment."),
     ).toBeInTheDocument();
     expect(screen.queryByText("No items found.")).not.toBeInTheDocument();
+  });
+
+  it("keeps the loaded grid when a background refetch fails", async () => {
+    mocks.v2
+      .mockResolvedValueOnce(queryCatalogItemsOk)
+      .mockRejectedValue(new V2TimeoutError("queryCatalogItems", 30_000));
+    const client = renderBrowse();
+    expect(await screen.findByText("Grid of 3")).toBeInTheDocument();
+
+    // A refresh after playback or a reconnect refetches the browse.
+    await act(() => client.refetchQueries());
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Couldn't refresh this library. The server isn't responding.",
+    );
+    expect(screen.getByText("Grid of 3")).toBeInTheDocument();
+    expect(screen.queryByText("Couldn't load this library")).not.toBeInTheDocument();
+    expect(screen.queryByText("No items found.")).not.toBeInTheDocument();
+  });
+
+  it("keeps the loaded grid when a later visible page fails, and retries that page", async () => {
+    // Two pages of results; the second is on screen and its request fails once.
+    const firstPage = {
+      ...queryCatalogItemsOk,
+      total: 120,
+      page: { has_more: true, next_cursor: "after-page-0" },
+    };
+    let laterPageFailures = 0;
+    mocks.v2.mockImplementation((_key: string, options: { body: { seek?: number } }) => {
+      if (options.body.seek === undefined) return Promise.resolve(firstPage);
+      laterPageFailures += 1;
+      return laterPageFailures === 1
+        ? Promise.reject(new TypeError("Failed to fetch"))
+        : Promise.resolve({ ...firstPage, page: { has_more: false } });
+    });
+    mocks.visibleEnd = 119;
+    renderBrowse();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Some items couldn't be loaded.");
+    expect(screen.getByText("Grid of 120")).toBeInTheDocument();
+    expect(screen.queryByText("Couldn't load this library")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(screen.getByText("Grid of 120")).toBeInTheDocument();
+    expect(laterPageFailures).toBe(2);
   });
 
   it("renders the grid when the browse succeeds", async () => {

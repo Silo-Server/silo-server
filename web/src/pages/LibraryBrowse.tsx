@@ -6,6 +6,8 @@ import CatalogFiltersPanel from "@/components/catalog/CatalogFiltersPanel";
 import ItemGrid from "@/components/ItemGrid";
 import { loadErrorDescription } from "@/components/loadErrorDescription";
 import PageUnavailable from "@/components/PageUnavailable";
+import { Button } from "@/components/ui/button";
+import { V2TimeoutError } from "@/api/v2/request";
 import ScrollToTopButton from "@/components/ScrollToTopButton";
 import { useCatalogWindow } from "@/hooks/queries/catalog";
 import type { AudiobookGroupBy } from "@/hooks/queries/audiobookGroups";
@@ -189,6 +191,12 @@ export default function LibraryBrowse({
     setRetrying(true);
     void catalogQuery.refetch().finally(() => setRetrying(false));
   };
+  // The first page carries the result window, so without it (or with only an
+  // empty one) a failure leaves nothing to show: the browse failed outright
+  // and must not read as an empty library. A failed background refetch or a
+  // failed later page keeps the loaded grid and the viewer's place in it.
+  const browseFailed = catalogQuery.isError && (!pages.has(0) || totalItems === 0);
+  const browsePartlyFailed = catalogQuery.isError && !browseFailed;
 
   if (isGroupedAxis) {
     const groupedAxis = audiobookAxis as Exclude<AudiobookBrowseAxis, "books">;
@@ -257,9 +265,31 @@ export default function LibraryBrowse({
         sortRelevanceScope={sortRelevanceScope}
         libraryType={libraryType}
       />
+      {browsePartlyFailed ? (
+        <div
+          role="alert"
+          className="surface-panel flex flex-wrap items-center justify-between gap-3 rounded-[1.4rem] border-0 px-5 py-4"
+        >
+          <p className="text-muted-foreground text-sm">
+            {catalogQuery.sourceError
+              ? "Couldn't refresh this library."
+              : "Some items couldn't be loaded."}
+            {catalogQuery.error instanceof V2TimeoutError ? " The server isn't responding." : ""}
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={retryBrowse}
+            disabled={retrying}
+          >
+            Try again
+          </Button>
+        </div>
+      ) : null}
       {/* A failed browse is not an empty one: it must never reach the grid's
           empty state. */}
-      {catalogQuery.isError ? (
+      {browseFailed ? (
         <PageUnavailable
           title="Couldn't load this library"
           description={loadErrorDescription(catalogQuery.error)}
