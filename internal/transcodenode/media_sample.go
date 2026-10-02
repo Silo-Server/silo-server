@@ -41,6 +41,15 @@ func (s *Server) handleMediaSample(w http.ResponseWriter, r *http.Request) {
 	if !s.requireApprovedInputPath(w, r, req.Input) {
 		return
 	}
+	// API servers each reserve nodes on their own, so the node enforces the
+	// capacity itself; a request over it waits for a slot.
+	limiter := s.mediaSampleLimiter(cfg.Playback.SubtitleSyncNodeCapacity)
+	release, err := limiter.Acquire(r.Context())
+	if err != nil {
+		writeMediaSampleError(w, http.StatusServiceUnavailable, mediasample.ReasonNodeUnavailable, "request canceled while waiting for capacity")
+		return
+	}
+	defer release()
 	runner := mediasample.Runner{FFmpegPath: cfg.Playback.FFmpegPath, Workload: processmetrics.Analysis}
 	result, err := runner.Run(r.Context(), req)
 	if err != nil {
@@ -54,6 +63,14 @@ func (s *Server) handleMediaSample(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(result)
+}
+
+// mediaSampleLimiter returns the node's sampling limiter, resized to the
+// current configured capacity.
+func (s *Server) mediaSampleLimiter(capacity int) *mediasample.Limiter {
+	s.mediaSamplesOnce.Do(func() { s.mediaSamples = mediasample.NewLimiter(capacity) })
+	s.mediaSamples.Resize(capacity)
+	return s.mediaSamples
 }
 
 func writeMediaSampleError(w http.ResponseWriter, status int, reason mediasample.Reason, message string) {

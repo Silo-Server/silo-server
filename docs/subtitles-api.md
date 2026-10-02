@@ -470,8 +470,9 @@ with `job`: a new job, or the subtitle's active one. The new timing applies to
 everyone watching the file, so it requires file access plus the downloading
 account or effective administrator authority (as viewer deletion does); other
 callers get `403`. Formats other than SRT, WebVTT, ASS, and SSA return `422`.
-Demo mode refuses it. A repeated request returns the active job or aligns the
-same bytes again, so it is naturally idempotent.
+Demo mode refuses it. It coalesces on the subtitle's active job: a repeated
+request returns that job. A request repeated after it finished starts another
+job, which aligns the same stored bytes and reaches the same timing.
 
 `GET /api/v2/subtitles/stored/{id}/sync` (`getStoredSubtitleSync`) returns
 `subtitle` with `timing` and `sync` and needs file access only. Poll it while a
@@ -489,7 +490,10 @@ subtitle stream, offline downloads (see [downloads](downloads-api.md)), and AI
 translation sources. The administrator download returns the stored bytes.
 Playback sessions of the file receive a `subtitle_timing_changed` realtime
 event (`session_id`, `file_id`, `subtitle_id`, optional `track`) and should
-fetch the track again. Delivery of that event is best effort and per server;
-the `sync` state in the stored list is authoritative. Device delays
+fetch the track again. The event reaches sessions on every API server through
+the event bus when one is configured; delivery is best effort, and the `sync`
+state in the stored list is authoritative. Downloaded-subtitle sidecars and
+Jellyfin subtitle streams are served `Cache-Control: private, no-cache`, since
+their bytes change with the correction. Device delays
 (`player.subtitle_sync_ms`) still apply on top. The frozen v1 bridge exposes
 neither timing nor sync but serves corrected bytes.

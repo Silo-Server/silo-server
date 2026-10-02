@@ -100,9 +100,10 @@ stale-job reaping. A job reaped after a crash ends `failed`; it is not resumed.
   applies its result and finishes in one transaction only while the row still
   has that revision. If the subtitle changed meanwhile (a manual timing edit,
   a language change), the newer edit wins and the job ends `failed`.
-- **Notification.** An applied result sends `subtitle_timing_changed` to the
-  file's playback sessions on this server. It is best effort; clients also see
-  the job state in the stored subtitle list.
+- **Notification.** An applied result or a manual timing change sends
+  `subtitle_timing_changed` to the file's playback sessions, on every API
+  server through the event bus (`silo:playback`). It is best effort; clients
+  also see the job state in the stored subtitle list.
 
 ## Where the audio is decoded
 
@@ -114,8 +115,10 @@ stale-job reaping. A job reaped after a crash ends `failed`; it is not resumed.
 | `transcode_nodes_only` | Decode only on a transcode node; fail the job when none is available. |
 | `local` | Decode on this server. |
 
-A file's windows run on one node, which is reserved through
-`nodepool.Reservations` under `subtitles.sync_node_capacity` jobs per node.
+A file's windows run on one node. Each API server picks the least loaded
+node through `nodepool.Reservations`, and the node itself admits at most
+`subtitles.sync_node_capacity` sampling runs at once, whichever API servers
+send them; a request over the limit waits for a slot.
 The node runs each window through `POST /media-samples/run` (see
 [media sampling](media-sampling.md#remote-runs)). The input path must be one
 the node is allowed to read, which requires the same media paths on the node

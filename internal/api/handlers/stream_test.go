@@ -532,6 +532,9 @@ func TestHandleSubtitleAppliesDownloadedSubtitleTiming(t *testing.T) {
 		if rr.Code != http.StatusOK || !strings.HasPrefix(body, "WEBVTT") || !strings.Contains(body, "00:00:03.500 --> 00:00:04.500") {
 			t.Fatalf("?%s = %d %q", query, rr.Code, body)
 		}
+		if got := rr.Header().Get("Cache-Control"); got != "private, no-cache" {
+			t.Fatalf("?%s Cache-Control = %q", query, got)
+		}
 	}
 	rr := serve("/api/v2/stream/", "0.srt", "file_id=42&original=1&downloaded_subtitle_id=71", true)
 	if want := "1\n00:00:03,500 --> 00:00:04,500\nHello\n"; rr.Code != http.StatusOK || rr.Body.String() != want {

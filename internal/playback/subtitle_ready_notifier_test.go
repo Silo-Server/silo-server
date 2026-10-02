@@ -289,3 +289,42 @@ func TestSubtitleReadyNotifierOmitsTrackWhenSessionFeaturesAreUnknown(t *testing
 		t.Fatalf("track = %#v, want it omitted while the representation is unknown", track)
 	}
 }
+
+func TestSubtitleTimingChangedDeliversAcrossReplicasOnce(t *testing.T) {
+	replica := func() (*SubtitleReadyNotifier, *dispatchTestConn) {
+		sessions := NewSessionManager(0, 0)
+		session, _ := sessions.StartSession(1, "profile-a", 100, PlayDirect, false)
+		_ = sessions.SetRealtimeConnection(session.ID, true)
+		hub := NewRealtimeHub()
+		conn := &dispatchTestConn{}
+		reg := hub.Register(session.ID, conn)
+		t.Cleanup(func() { hub.Unregister(reg) })
+		return NewSubtitleReadyNotifier(sessions, hub, nil), conn
+	}
+	bus := &markerUpdateTestBus{}
+	local, localConn := replica()
+	remote, remoteConn := replica()
+	ctx := context.Background()
+	for _, n := range []*SubtitleReadyNotifier{local, remote, local} {
+		if err := n.UseEventBus(ctx, bus.publish, bus.subscribe); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(bus.handlers) != 2 {
+		t.Fatalf("subscriptions = %d, want 2", len(bus.handlers))
+	}
+	local.SubtitleTimingChanged(ctx, 100, 9)
+	if len(bus.events) != 1 {
+		t.Fatalf("published events = %d, want 1 without rebroadcast", len(bus.events))
+	}
+	for name, conn := range map[string]*dispatchTestConn{"local": localConn, "remote": remoteConn} {
+		if len(conn.messages) != 1 {
+			t.Fatalf("%s messages = %d, want 1", name, len(conn.messages))
+		}
+		event := conn.messages[0].(EventEnvelope)
+		var payload SubtitleTimingChangedPayload
+		if err := json.Unmarshal(event.Payload, &payload); err != nil || event.Name != RealtimeEventSubtitleTimingChanged || payload.SubtitleID != 9 {
+			t.Fatalf("%s event %+v payload %+v err %v", name, event, payload, err)
+		}
+	}
+}

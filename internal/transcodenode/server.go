@@ -26,6 +26,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
@@ -279,7 +280,11 @@ type Server struct {
 	// is older than sessionIdleTTL.
 	lastAccess map[string]time.Time
 	reaperOnce sync.Once
-	mu         sync.RWMutex
+	// mediaSamples admits media sampling runs up to the configured per-node
+	// capacity, whichever API servers send them.
+	mediaSamplesOnce sync.Once
+	mediaSamples     *mediasample.Limiter
+	mu               sync.RWMutex
 	// reloadMu keeps force-reload teardown atomic with session creation and
 	// reconstruction. It is always acquired before lifecycleMu or mu.
 	reloadMu sync.RWMutex

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 )
@@ -164,5 +165,45 @@ func TestMediaSampleRefusalsClassifyForFallback(t *testing.T) {
 	bad.Window = nil
 	if refused := run(bad); refused.Status != http.StatusBadRequest || refused.Infrastructure() {
 		t.Fatalf("invalid request: %#v", refused)
+	}
+}
+
+func TestMediaSampleAdmitsConfiguredCapacity(t *testing.T) {
+	server := newTestServer(t)
+	server.watcher.Config().Playback.SubtitleSyncNodeCapacity = 1
+	dir := t.TempDir()
+	ffmpeg := filepath.Join(dir, "ffmpeg")
+	// Each run records its start, then holds until released.
+	script := "#!/bin/sh\nmktemp -p " + dir + " start.XXXXXX >/dev/null\nwhile [ ! -f " + dir + "/release ]; do sleep 0.01; done\n"
+	if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server.watcher.Config().Playback.FFmpegPath = ffmpeg
+	started := func() int {
+		matches, _ := filepath.Glob(filepath.Join(dir, "start.*"))
+		return len(matches)
+	}
+	done := make(chan int, 2)
+	for range 2 {
+		go func() { done <- postMediaSample(server, speechRequestBody(t, nil), true).Code }()
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for started() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(200 * time.Millisecond) // a second admitted run would have started by now
+	if n := started(); n != 1 {
+		t.Fatalf("%d runs started with capacity 1", n)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "release"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if code := <-done; code != http.StatusOK {
+			t.Fatalf("status %d", code)
+		}
+	}
+	if n := started(); n != 2 {
+		t.Fatalf("%d runs after release, want 2", n)
 	}
 }

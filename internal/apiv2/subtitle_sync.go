@@ -140,9 +140,9 @@ func registerSubtitleSync(reg *Registry) {
 		return &SubtitleSyncStatusOutput{Body: SubtitleSyncStatus{Capability: Capability{State: configuredEnabledCapabilityState(available, available)}, AutoSync: auto}}, nil
 	})
 
-	start := Operation{Operation: humaOp(http.MethodPost, Prefix+"/subtitles/stored/{id}/sync", "syncStoredSubtitle", "subtitles", "Align a stored subtitle to its file's audio."), Class: ClassProfileScoped, ProfileOptional: true, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}
+	start := Operation{Operation: humaOp(http.MethodPost, Prefix+"/subtitles/stored/{id}/sync", "syncStoredSubtitle", "subtitles", "Align a stored subtitle to its file's audio."), Class: ClassProfileScoped, ProfileOptional: true, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyCoalescing}
 	start.DefaultStatus = http.StatusAccepted
-	start.Description = "Starts a sync job, or returns the subtitle's active one. Requires file access and downloading-account or effective administrator authority, because the resulting timing applies to everyone watching the file. A synced job stores a timing correction that every delivery path applies; no_match leaves the timing unchanged and means the subtitle most likely belongs to another release. Poll the job through the read operation or the stored subtitle list."
+	start.Description = "Starts a sync job, or returns the subtitle's active one. A request repeated after that job finished starts another job; it aligns the same stored bytes against cached speech, so it reaches the same timing. Requires file access and downloading-account or effective administrator authority, because the resulting timing applies to everyone watching the file. A synced job stores a timing correction that every delivery path applies; no_match leaves the timing unchanged and means the subtitle most likely belongs to another release. Poll the job through the read operation or the stored subtitle list."
 	Register(reg, start, func(ctx context.Context, in *StoredSubtitleIDInput) (*SubtitleSyncRequestOutput, error) {
 		id, access, p := reg.subtitleSyncAccess(ctx, in.ID)
 		if p != nil {
