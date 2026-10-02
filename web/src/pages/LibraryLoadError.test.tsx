@@ -260,6 +260,31 @@ describe("Recommended tab load errors", () => {
     expect(callsTo("GET /api/v2/library/{id}/layout")).toBe(2);
   });
 
+  it("keeps the cached layout when a refetch fails and retries the layout", async () => {
+    mocks.v2
+      .mockResolvedValueOnce(libraryLayoutOk)
+      .mockRejectedValueOnce(new V2TimeoutError("getLibraryLayout", 30_000))
+      .mockResolvedValue(libraryLayoutOk);
+    mocks.fetchLibrarySectionItems.mockResolvedValue(recommendedSection());
+    const client = renderWithClient(<LibraryRecommended libraryId={7} libraryType="movies" />);
+    expect(await screen.findAllByText("Row Recently Added")).not.toHaveLength(0);
+
+    // A refresh after playback or a reconnect refetches the layout.
+    await act(() => client.refetchQueries({ queryKey: ["sections", "library", 7, "layout"] }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Couldn't refresh recommendations. The server isn't responding.",
+    );
+    expect(screen.getAllByText("Row Recently Added")).not.toHaveLength(0);
+    expect(screen.queryByText("Couldn't load recommendations")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(screen.getAllByText("Row Recently Added")).not.toHaveLength(0);
+    expect(callsTo("GET /api/v2/library/{id}/layout")).toBe(3);
+  });
+
   it("renders the sections when the layout loads", async () => {
     mocks.v2.mockResolvedValue(libraryLayoutOk);
     mocks.fetchLibrarySectionItems.mockResolvedValue(recommendedSection());

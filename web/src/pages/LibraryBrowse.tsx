@@ -6,8 +6,7 @@ import CatalogFiltersPanel from "@/components/catalog/CatalogFiltersPanel";
 import ItemGrid from "@/components/ItemGrid";
 import { loadErrorDescription } from "@/components/loadErrorDescription";
 import PageUnavailable from "@/components/PageUnavailable";
-import { Button } from "@/components/ui/button";
-import { V2TimeoutError } from "@/api/v2/request";
+import RefreshFailedNotice from "@/components/RefreshFailedNotice";
 import ScrollToTopButton from "@/components/ScrollToTopButton";
 import { useCatalogWindow } from "@/hooks/queries/catalog";
 import type { AudiobookGroupBy } from "@/hooks/queries/audiobookGroups";
@@ -266,26 +265,16 @@ export default function LibraryBrowse({
         libraryType={libraryType}
       />
       {browsePartlyFailed ? (
-        <div
-          role="alert"
-          className="surface-panel flex flex-wrap items-center justify-between gap-3 rounded-[1.4rem] border-0 px-5 py-4"
-        >
-          <p className="text-muted-foreground text-sm">
-            {catalogQuery.sourceError
+        <RefreshFailedNotice
+          message={
+            catalogQuery.sourceError
               ? "Couldn't refresh this library."
-              : "Some items couldn't be loaded."}
-            {catalogQuery.error instanceof V2TimeoutError ? " The server isn't responding." : ""}
-          </p>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={retryBrowse}
-            disabled={retrying}
-          >
-            Try again
-          </Button>
-        </div>
+              : "Some items couldn't be loaded."
+          }
+          error={catalogQuery.error}
+          onRetry={retryBrowse}
+          retrying={retrying}
+        />
       ) : null}
       {/* A failed browse is not an empty one: it must never reach the grid's
           empty state. */}
