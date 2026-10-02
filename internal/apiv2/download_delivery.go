@@ -72,6 +72,12 @@ func registerDownloadDelivery(reg *Registry) {
 			op.Responses["412"] = &huma.Response{Description: "File precondition failed.", Headers: headers}
 			op.Responses["416"] = &huma.Response{Description: "Range not satisfiable.", Content: map[string]*huma.MediaType{"text/plain": {Schema: &huma.Schema{Type: huma.TypeString}}}, Headers: headers}
 		}
+		if route.kind == "subtitle" {
+			// Downloaded subtitles revalidate: a stored timing correction can
+			// change their bytes (ETag carries the subtitle revision).
+			op.Parameters = append(op.Parameters, &huma.Param{Name: "If-None-Match", In: "header", Schema: &huma.Schema{Type: huma.TypeString}})
+			op.Responses["304"] = &huma.Response{Description: "Representation not modified.", Headers: headers}
+		}
 		if route.proxy {
 			op.Responses["307"] = &huma.Response{Description: "Authorized temporary proxy location; preserve the original method and range headers.", Headers: headers}
 			if route.method == http.MethodGet {

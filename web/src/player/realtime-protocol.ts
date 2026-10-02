@@ -25,6 +25,7 @@ export type PlaybackRealtimeEventName =
   | "chapter_thumbnail_ready"
   | "markers_updated"
   | "subtitle_ready"
+  | "subtitle_timing_changed"
   | "subtitle_translation_started"
   | "subtitle_translation_cues"
   | "subtitle_translation_completed"
@@ -110,6 +111,19 @@ export interface PlaybackSubtitleReadyPayload {
   track?: SubtitleInventoryItemV3;
 }
 
+/**
+ * Sent to every session of a file after a stored subtitle is retimed (an
+ * automatic sync was applied or its timing was reset). The track's stream URL
+ * already serves the new timing, so a player showing it fetches the cues again.
+ */
+export interface PlaybackSubtitleTimingChangedPayload {
+  session_id: string;
+  file_id: number;
+  subtitle_id: number;
+  /** See {@link PlaybackSubtitleReadyPayload.track}. */
+  track?: SubtitleInventoryItemV3;
+}
+
 /** One translated subtitle cue pushed during a live translation (media seconds). */
 export interface PlaybackStreamCue {
   start: number;
@@ -174,6 +188,10 @@ export type PlaybackRealtimeEventEnvelope =
   | (PlaybackRealtimeEventEnvelopeBase & {
       name: "subtitle_ready";
       payload: PlaybackSubtitleReadyPayload;
+    })
+  | (PlaybackRealtimeEventEnvelopeBase & {
+      name: "subtitle_timing_changed";
+      payload: PlaybackSubtitleTimingChangedPayload;
     })
   | (PlaybackRealtimeEventEnvelopeBase & {
       name: "subtitle_translation_started";
@@ -368,6 +386,18 @@ function isSubtitleReadyPayload(value: unknown): value is PlaybackSubtitleReadyP
   );
 }
 
+function isSubtitleTimingChangedPayload(
+  value: unknown,
+): value is PlaybackSubtitleTimingChangedPayload {
+  return (
+    isRecord(value) &&
+    typeof value.session_id === "string" &&
+    typeof value.file_id === "number" &&
+    typeof value.subtitle_id === "number" &&
+    isOptionalSubtitleInventoryItem(value.track)
+  );
+}
+
 function isStreamCue(value: unknown): value is PlaybackStreamCue {
   return (
     isRecord(value) &&
@@ -478,6 +508,17 @@ export function parsePlaybackRealtimeMessage(
         };
       }
       if (value.name === "subtitle_ready" && isSubtitleReadyPayload(value.payload)) {
+        return {
+          type: "event",
+          session_id: value.session_id,
+          name: value.name,
+          payload: value.payload,
+        };
+      }
+      if (
+        value.name === "subtitle_timing_changed" &&
+        isSubtitleTimingChangedPayload(value.payload)
+      ) {
         return {
           type: "event",
           session_id: value.session_id,

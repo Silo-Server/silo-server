@@ -6,13 +6,18 @@ import type { SubtitleLanguageDetection, SubtitleResult } from "@/api/types";
 import { SubtitleUploadForm } from "@/components/subtitles/SubtitleUploadForm";
 import { LANGUAGES } from "../utils/languageNames";
 import { canonicalLanguageWireValue } from "@/lib/languageNames";
+import type { StoredSubtitle } from "../utils/storedSubtitleSync";
 
 interface SubtitleSearchModalProps {
   mediaFileId: number;
   playerConfig: PlayerConfig;
   isOpen: boolean;
   onClose: () => void;
-  onSubtitleDownloaded: () => void;
+  /**
+   * Called with the stored subtitle a download or upload created, so the
+   * player can show its automatic sync while it runs.
+   */
+  onSubtitleDownloaded: (subtitle?: StoredSubtitle) => void;
   /** False hides the online-search section; manual upload stays available. */
   onlineSearchEnabled?: boolean;
 }
@@ -53,6 +58,7 @@ export function SubtitleSearchModal({
   const previousActiveElementRef = useRef<HTMLElement | null>(null);
   const searchInputRef = useRef<HTMLSelectElement>(null);
   const downloadGeneration = useRef(0);
+  const uploadedSubtitle = useRef<StoredSubtitle | undefined>(undefined);
   useEffect(() => {
     downloadGeneration.current++;
     setDownloading(null);
@@ -164,7 +170,8 @@ export function SubtitleSearchModal({
         profile = playerConfig.getProfileId(),
         pin = playerConfig.getProfileToken?.();
       const generation = downloadGeneration.current;
-      await playerV2(playerConfig, "POST /api/v2/subtitles/upload", {
+      uploadedSubtitle.current = undefined;
+      const response = await playerV2(playerConfig, "POST /api/v2/subtitles/upload", {
         form: {
           media_file_id: String(input.mediaFileId),
           file: input.file,
@@ -180,6 +187,7 @@ export function SubtitleSearchModal({
         pin !== playerConfig.getProfileToken?.()
       )
         throw new DOMException("Subtitle upload context changed", "AbortError");
+      uploadedSubtitle.current = response?.subtitle;
     },
     [playerConfig],
   );
@@ -206,7 +214,7 @@ export function SubtitleSearchModal({
   );
 
   const handleUploadSuccess = useCallback(() => {
-    onSubtitleDownloaded();
+    onSubtitleDownloaded(uploadedSubtitle.current);
     handleClose();
   }, [onSubtitleDownloaded, handleClose]);
 
@@ -226,7 +234,7 @@ export function SubtitleSearchModal({
       setError(null);
 
       try {
-        await playerV2(playerConfig, "POST /api/v2/subtitles/download", {
+        const response = await playerV2(playerConfig, "POST /api/v2/subtitles/download", {
           body: {
             media_file_id: String(mediaFileId),
             provider: result.provider,
@@ -238,7 +246,7 @@ export function SubtitleSearchModal({
           },
         });
         if (!current()) return;
-        onSubtitleDownloaded();
+        onSubtitleDownloaded(response?.subtitle);
         handleClose();
       } catch (err) {
         if (current()) setError(err instanceof Error ? err.message : "Download failed");

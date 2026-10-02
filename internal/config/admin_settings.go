@@ -246,6 +246,9 @@ var adminSettingDefaults = map[string]string{
 	"subtitle_ai.live_asr_chunk_seconds":  "30",
 	"subtitle_ai.transcribe_quota_jobs":   "0",
 	"subtitle_ai.transcribe_quota_period": "day",
+	"subtitles.auto_sync":                 "true",
+	"subtitles.sync_execution":            "prefer_transcode_nodes",
+	"subtitles.sync_node_capacity":        "1",
 	"metadata_ai.enabled":                 "false",
 	"metadata_ai.on_view":                 "off",
 
@@ -438,7 +441,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		PlaybackTranscodeSoftwareToneMapSettingKey, CatalogScopeVersionsToLibrarySettingKey,
 		Allow4KTranscodeSettingKey, "enable_transcode_throttle", "audiobookshelf_compat.enabled",
 		"jellyfin_compat.enabled", "jellyfin_compat.web_enabled", "recommendations.enabled",
-		"subtitle_ai.enabled", "subtitle_ai.transcribe_enabled", "metadata_ai.enabled",
+		"subtitle_ai.enabled", "subtitle_ai.transcribe_enabled", "metadata_ai.enabled", "subtitles.auto_sync",
 		"download.enabled", "download.transcode_enabled", DownloadLocalTranscodeFallbackSettingKey,
 		"email.enabled", "signup.enabled", "password_reset.self_service_enabled", SetupCompletedSettingKey,
 		"scanner.empty_trash_after_scan", "scanner.realtime_monitoring", "matcher.enable_tv_series_root_queue",
@@ -482,7 +485,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt(key, value, 0, 256)
 	case MarkersDetectionWorkersSettingKey:
 		return normalizeAdminInt(key, value, 1, 64)
-	case "playback.chapter_thumbnail_workers", "playback.chapter_thumbnail_node_capacity":
+	case "playback.chapter_thumbnail_workers", "playback.chapter_thumbnail_node_capacity", "subtitles.sync_node_capacity":
 		return normalizeAdminInt(key, value, 1, 1024)
 	case "playback.watched_threshold":
 		return normalizeAdminInt(key, value, 1, 100)
@@ -600,7 +603,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminEnum(key, value,
 			string(PlaybackEgressPreferProxy), string(PlaybackEgressProxyOnly),
 			string(PlaybackEgressPreferAPI), string(PlaybackEgressAPIOnly))
-	case "playback.chapter_thumbnail_execution":
+	case "playback.chapter_thumbnail_execution", "subtitles.sync_execution":
 		return normalizeAdminEnum(key, value, "local", "prefer_transcode_nodes", "transcode_nodes_only")
 	case "playback.chapter_thumbnail_hdr_policy":
 		return normalizeAdminEnum(key, value, "disabled", "best_effort")

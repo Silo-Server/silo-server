@@ -1654,6 +1654,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 
 		mediaResolver := &pgSubtitleMediaResolver{pool: deps.DB}
 		subtitleSearchHandler = handlers.NewSubtitleSearchHandler(subtitleManager, subtitleRepo, mediaResolver)
+		if deps.FileRepo != nil && settingsRepo != nil {
+			subtitleSearchHandler.SetSyncService(newSubtitleSyncService(&deps, subtitleManager, subtitleRepo, settingsRepo, subtitleAINotifier))
+		}
 	}
 
 	if adminSubtitleHandler != nil && deps.DB != nil && subtitleManager != nil {
@@ -2776,6 +2779,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.ViewerSubtitleDelete = subtitleSearchHandler
 		v2deps.SubtitleDownloads = subtitleSearchHandler
 		v2deps.SubtitleUploads = subtitleSearchHandler
+		v2deps.SubtitleSync = subtitleSearchHandler
 	}
 	if subtitleAIHandler != nil {
 		v2deps.SubtitleAIReads = subtitleAIHandler

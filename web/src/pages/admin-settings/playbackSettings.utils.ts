@@ -105,11 +105,49 @@ export function chapterThumbnailExecutionOptions(
   current: string,
   transcodeNodeAvailable: boolean,
 ): ChapterThumbnailExecutionOption[] {
-  return [
-    { value: CHAPTER_THUMBNAIL_EXECUTION_DEFAULT, label: "This server" },
-    { value: "prefer_transcode_nodes", label: "Transcode nodes when available" },
-    { value: "transcode_nodes_only", label: "Transcode nodes only" },
-  ].map((option) => ({
+  return gateNodeBackedModes(
+    [
+      { value: CHAPTER_THUMBNAIL_EXECUTION_DEFAULT, label: "This server" },
+      { value: "prefer_transcode_nodes", label: "Transcode nodes when available" },
+      { value: "transcode_nodes_only", label: "Transcode nodes only" },
+    ],
+    current,
+    transcodeNodeAvailable,
+  );
+}
+
+/** Mirrors `subtitles.sync_execution` in `adminSettingDefaults`. */
+export const SUBTITLE_SYNC_EXECUTION_DEFAULT = "prefer_transcode_nodes";
+
+/**
+ * Where subtitle sync analyzes audio. It shares the chapter thumbnail modes
+ * and the same rule for disabling node-backed modes without a node.
+ */
+export function subtitleSyncExecutionOptions(
+  current: string,
+  transcodeNodeAvailable: boolean,
+): ChapterThumbnailExecutionOption[] {
+  return gateNodeBackedModes(
+    [
+      { value: "local", label: "Local server" },
+      { value: "prefer_transcode_nodes", label: "Prefer transcode nodes" },
+      { value: "transcode_nodes_only", label: "Transcode nodes only" },
+    ],
+    current,
+    transcodeNodeAvailable,
+  );
+}
+
+export function isNodeBackedExecution(mode: string): boolean {
+  return NODE_BACKED_CHAPTER_THUMBNAIL_MODES.includes(mode);
+}
+
+function gateNodeBackedModes(
+  options: { value: string; label: string }[],
+  current: string,
+  transcodeNodeAvailable: boolean,
+): ChapterThumbnailExecutionOption[] {
+  return options.map((option) => ({
     ...option,
     disabled:
       !transcodeNodeAvailable &&

@@ -1,6 +1,7 @@
 package mediasample
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -186,8 +187,8 @@ func buildImageArgs(req Request, attempt Attempt, hw hardwareDecode, softwareTon
 // image runs an image attempt. The output is a single MJPEG frame, so
 // ffmpeg's whole stdout is the image.
 func (a attemptRun) image(req Request, args []string) (Result, *AttemptError) {
-	stdout, failure := a.exec(req, args, nil, true)
-	if failure != nil {
+	stdout := &bytes.Buffer{}
+	if failure := a.exec(req, args, nil, stdout); failure != nil {
 		return Result{}, failure
 	}
 	if stdout.Len() == 0 {

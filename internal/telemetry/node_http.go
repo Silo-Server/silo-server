@@ -11,7 +11,7 @@ import (
 
 func nodeOperation(operation string) string {
 	switch operation {
-	case "capabilities", "transcode_start", "stream", "stream_ack", "chapter_extract", "reload", "reprobe", "status":
+	case "capabilities", "transcode_start", "stream", "stream_ack", "chapter_extract", "media_sample", "reload", "reprobe", "status":
 		return operation
 	default:
 		return "other"

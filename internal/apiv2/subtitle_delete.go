@@ -80,7 +80,7 @@ func registerViewerSubtitleDeletion(reg *Registry) {
 			return nil, err
 		}
 		tag := viewerSubtitleTag(ctx, row)
-		out := &ViewerSubtitleMetadataOutput{ETag: tag.String(), Body: storedSubtitleView(*row)}
+		out := &ViewerSubtitleMetadataOutput{ETag: tag.String(), Body: reg.storedSubtitleWithSync(ctx, *row)}
 		if matched, p := EvaluateReadPreconditions(in.IfMatch, in.IfNoneMatch, tag); p != nil {
 			return nil, p
 		} else if matched {

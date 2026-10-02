@@ -75,6 +75,30 @@ func (n *SubtitleReadyNotifier) SubtitleReady(ctx context.Context, mediaFileID, 
 	}
 }
 
+// SubtitleTimingChanged tells active sessions for the file that a stored
+// subtitle was retimed, so a player showing it fetches it again.
+func (n *SubtitleReadyNotifier) SubtitleTimingChanged(ctx context.Context, mediaFileID, subtitleID int) {
+	if n == nil || mediaFileID <= 0 || subtitleID <= 0 {
+		return
+	}
+	for _, session := range n.sessions.GetSessionsByMediaFileID(mediaFileID) {
+		if session == nil || session.ID == "" || !session.HasRealtimeConnection {
+			continue
+		}
+		track := n.resolveTrack(ctx, session.ID, mediaFileID, subtitleID)
+		event, err := NewSubtitleTimingChangedEvent(session.ID, mediaFileID, subtitleID, track)
+		if err != nil {
+			slog.WarnContext(ctx, "failed to encode subtitle timing realtime event", "component", "playback",
+				"session_id", session.ID, "file_id", mediaFileID, "subtitle_id", subtitleID, "error", err)
+			continue
+		}
+		if err := n.hub.Send(session.ID, event); err != nil && !errors.Is(err, ErrRealtimeConnectionNotFound) {
+			slog.WarnContext(ctx, "failed to deliver subtitle timing realtime event", "component", "playback",
+				"session_id", session.ID, "file_id", mediaFileID, "subtitle_id", subtitleID, "error", err)
+		}
+	}
+}
+
 // TranslationStarted tells one session a live translation has begun.
 func (n *SubtitleReadyNotifier) TranslationStarted(ctx context.Context, sessionID string, fileID int, jobID int64, trackKey, language, label string, totalCues int) {
 	n.sendTranslation(sessionID, fileID, func() (EventEnvelope, error) {

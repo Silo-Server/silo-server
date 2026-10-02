@@ -1614,6 +1614,12 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 				writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load subtitle from storage")
 				return
 			}
+			// Apply the stored timing correction before conversion or windowing.
+			data, err = subtitles.DeliveryBytes(&dl, data)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "ServerError", "Failed to prepare subtitle")
+				return
+			}
 
 			// Serve downloaded ASS/SSA as raw data when requested.
 			if requestedFormat == "ass" && playback.IsASS(string(dl.Format)) {

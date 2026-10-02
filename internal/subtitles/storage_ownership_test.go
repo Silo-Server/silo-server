@@ -58,16 +58,18 @@ func subtitleStorageDatabase(t *testing.T) *pgxpool.Pool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	migration, err := os.ReadFile("../../migrations/sql/20260906031359_subtitle_content_identity.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	up, _, ok := strings.Cut(string(migration), "-- +goose Down")
-	if !ok {
-		t.Fatal("missing migration boundary")
-	}
-	if _, err := pool.Exec(t.Context(), up); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"20260906031359_subtitle_content_identity.sql", "20261001230717_subtitle_sync.sql"} {
+		migration, err := os.ReadFile("../../migrations/sql/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		up, _, ok := strings.Cut(string(migration), "-- +goose Down")
+		if !ok {
+			t.Fatalf("%s: missing migration boundary", name)
+		}
+		if _, err := pool.Exec(t.Context(), up); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
 	}
 	return pool
 }
@@ -210,6 +212,31 @@ func TestSubtitleStoragePostgresOwnership(t *testing.T) {
 	duplicate, err := manager.StoreSubtitle(ctx, french)
 	if err != nil || duplicate.ID != changed.ID {
 		t.Fatalf("edited identity not deduplicated: %v", err)
+	}
+
+	// Timing is a guarded metadata write: it bumps the revision, round-trips
+	// through every read, and leaves the stored bytes untouched.
+	current, err := repo.GetDownloadedSubtitle(ctx, changed.ID)
+	if err != nil || current == nil || !current.Timing.IsIdentity() || current.Timing.Scale != 1 {
+		t.Fatalf("default timing: %+v %v", current, err)
+	}
+	timed, err := manager.UpdateDownloadedSubtitleWithRevision(ctx, current.ID, SubtitleMetadataPatch{Timing: &Timing{OffsetMS: -1500, Scale: 1.001}}, new(current.Revision))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if timed.Revision != current.Revision+1 || timed.Timing != (Timing{OffsetMS: -1500, Scale: 1.001}) || timed.S3Key != current.S3Key {
+		t.Fatalf("timing write: %+v", timed)
+	}
+	listed, err := repo.ListDownloadedSubtitles(ctx, timed.MediaFileID)
+	if err != nil || len(listed) != 1 || listed[0].Timing != timed.Timing {
+		t.Fatalf("listed timing: %+v %v", listed, err)
+	}
+	if _, err = manager.UpdateDownloadedSubtitleWithRevision(ctx, current.ID, SubtitleMetadataPatch{Timing: &Timing{}}, new(current.Revision)); !errors.As(err, new(*SubtitleRevisionConflict)) {
+		t.Fatalf("stale timing write: %v", err)
+	}
+	reset, err := manager.UpdateDownloadedSubtitle(ctx, current.ID, SubtitleMetadataPatch{Timing: &Timing{}})
+	if err != nil || reset.Timing != (Timing{Scale: 1}) {
+		t.Fatalf("timing reset: %+v %v", reset, err)
 	}
 
 	// Treat an insert error as uncertain: its transaction may have committed.
