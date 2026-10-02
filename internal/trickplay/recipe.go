@@ -31,6 +31,10 @@ const (
 	maxSheetWidth = 3200
 	// maxGrid is the most tiles a sheet has on a side.
 	maxGrid = 10
+	// maxSheetRows fits the tallest decoded tile (1920 pixels) within
+	// mediasample's 16384-pixel sheet limit, including geometry learned by
+	// the execution probe after the grid has been chosen.
+	maxSheetRows = 8
 )
 
 // Recipe is what a generation is made with: the settings in force when it
@@ -54,11 +58,11 @@ func (r Recipe) String() string {
 	return fmt.Sprintf("v%d/w%d/i%d/q%d", AlgorithmVersion, r.Width, r.IntervalMS, Quality)
 }
 
-// Grid is the sheet's columns and rows for the recipe's width: 10x10 up to
-// 320 pixels, fewer beyond so a sheet stays within maxSheetWidth.
+// Grid is the sheet's columns and rows for the recipe's width: at most ten
+// columns within maxSheetWidth, and at most eight rows for tall tiles.
 func (r Recipe) Grid() (columns, rows int) {
 	side := min(maxGrid, maxSheetWidth/r.Width)
-	return side, side
+	return side, min(side, maxSheetRows)
 }
 
 // TileHeight is the height of a tile for a picture of the given display

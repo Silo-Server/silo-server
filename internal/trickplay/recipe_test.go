@@ -8,6 +8,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/librarykind"
+	"github.com/Silo-Server/silo-server/internal/mediasample"
 )
 
 func TestNewRecipeClampsSettings(t *testing.T) {
@@ -31,10 +32,26 @@ func TestNewRecipeClampsSettings(t *testing.T) {
 }
 
 func TestRecipeGrid(t *testing.T) {
-	for width, want := range map[int]int{160: 10, 300: 10, 320: 10, 400: 8, 480: 6, 640: 5} {
+	for width, want := range map[int][2]int{160: {10, 8}, 300: {10, 8}, 320: {10, 8}, 400: {8, 8}, 480: {6, 6}, 640: {5, 5}} {
 		columns, rows := Recipe{Width: width}.Grid()
-		if columns != want || rows != want || columns*width > maxSheetWidth {
-			t.Errorf("width %d: grid %dx%d, want %dx%d within %d px", width, columns, rows, want, want, maxSheetWidth)
+		if columns != want[0] || rows != want[1] || columns*width > maxSheetWidth {
+			t.Errorf("width %d: grid %dx%d, want %dx%d within %d px", width, columns, rows, want[0], want[1], maxSheetWidth)
+		}
+	}
+}
+
+func TestRecipeGridFitsTallDecodedTiles(t *testing.T) {
+	for _, width := range []int{MinWidth, DefaultWidth, 320, 400, 480, MaxWidth} {
+		r := NewRecipe(width, DefaultIntervalSeconds)
+		columns, rows := r.Grid()
+		req := mediasample.Request{
+			Input:   "/media/portrait.mkv",
+			Samples: &mediasample.Samples{Seconds: []float64{5}},
+			Sheets: &mediasample.SheetsOutput{TileWidth: r.Width, TileHeight: r.TileHeight(0.05),
+				Columns: columns, Rows: rows, Quality: Quality, UseInputAspect: true},
+		}
+		if err := req.Validate(); err != nil {
+			t.Errorf("width %d cannot hold the tallest decoded tiles: %v", width, err)
 		}
 	}
 }
@@ -81,9 +98,9 @@ func TestRecipeSampleTimes(t *testing.T) {
 
 func TestRecipeBandwidth(t *testing.T) {
 	r := Recipe{Width: 300, IntervalMS: 10000}
-	// A 10x10 sheet covers 1000 s: 250 kB is 2000 bits a second.
-	if got := r.Bandwidth([]int{100_000, 250_000, 90_000}); got != 2000 {
-		t.Errorf("bandwidth %d, want 2000", got)
+	// A 10x8 sheet covers 800 s: 250 kB is 2500 bits a second.
+	if got := r.Bandwidth([]int{100_000, 250_000, 90_000}); got != 2500 {
+		t.Errorf("bandwidth %d, want 2500", got)
 	}
 }
 

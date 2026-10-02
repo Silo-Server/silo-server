@@ -45,15 +45,15 @@ func TestReaderSignsWholeManifestsDB(t *testing.T) {
 
 	reader := NewReader(f.pool, identityStore(testStore), fakeURLs{})
 	grids, err := reader.TrickplayGrids(t.Context(), []int{published, pending})
-	if err != nil || len(grids) != 1 || grids[published] != (catalog.TrickplayGrid{Width: 300, Height: 168, TileColumns: 10, TileRows: 10,
-		ThumbnailCount: 360, IntervalMS: 10000, Bandwidth: 1600}) {
+	if err != nil || len(grids) != 1 || grids[published] != (catalog.TrickplayGrid{Width: 300, Height: 168, TileColumns: 10, TileRows: 8,
+		ThumbnailCount: 360, IntervalMS: 10000, Bandwidth: 2000}) {
 		t.Fatalf("grids %+v %v", grids, err)
 	}
 	signed, ok, err := reader.SignedManifest(t.Context(), published)
 	if err != nil || !ok {
 		t.Fatalf("manifest: %t %v", ok, err)
 	}
-	if len(signed.SheetURLs) != 4 || signed.SheetURLs[3] != "https://cdn.example/"+SheetKey(published, revision, 3) ||
+	if len(signed.SheetURLs) != 5 || signed.SheetURLs[4] != "https://cdn.example/"+SheetKey(published, revision, 4) ||
 		!signed.ExpiresAt.Equal(time.Date(2026, 1, 2, 1, 0, 0, 0, time.UTC)) {
 		t.Fatalf("signed %+v", signed)
 	}
@@ -75,7 +75,7 @@ func TestReaderSignsWholeManifestsDB(t *testing.T) {
 	if string(data) != SheetKey(published, revision, 3) || etag == "" {
 		t.Fatalf("sheet %q etag %q", data, etag)
 	}
-	for _, tt := range []struct{ width, index int }{{320, 0}, {300, 4}, {300, -1}} {
+	for _, tt := range []struct{ width, index int }{{320, 0}, {300, 5}, {300, -1}} {
 		if _, _, ok, _ := reader.OpenSheet(t.Context(), published, tt.width, tt.index); ok {
 			t.Errorf("sheet width %d index %d opened", tt.width, tt.index)
 		}

@@ -160,19 +160,19 @@ func TestGenerateChunksUploadsAndPublishes(t *testing.T) {
 	job.HDR = true
 	s.process(t.Context(), job)
 
-	if len(extractor.requests) != 3 || len(extractor.requests[0].Samples.Seconds) != 100 || len(extractor.requests[1].Samples.Seconds) != 1600 || len(extractor.requests[2].Samples.Seconds) != 100 {
+	if len(extractor.requests) != 3 || len(extractor.requests[0].Samples.Seconds) != 80 || len(extractor.requests[1].Samples.Seconds) != 1280 || len(extractor.requests[2].Samples.Seconds) != 440 {
 		t.Fatalf("requests of %d and %d samples", len(extractor.requests[0].Samples.Seconds), len(extractor.requests[len(extractor.requests)-1].Samples.Seconds))
 	}
 	first := extractor.requests[0]
 	if first.Sheets.TileWidth != 300 || first.Sheets.TileHeight != 126 || first.Sheets.Columns != 10 || first.Sheets.ToneMap == nil ||
-		!first.Background || first.VideoBitDepth != 10 || first.Samples.Seconds[0] != 5 || extractor.requests[1].Samples.Seconds[0] != 1005 {
+		!first.Background || first.VideoBitDepth != 10 || first.Samples.Seconds[0] != 5 || extractor.requests[1].Samples.Seconds[0] != 805 {
 		t.Fatalf("request %+v %+v", first.Sheets, first.Samples.Seconds[:2])
 	}
-	if len(store.keys) != 18 || store.keys[0] != "trickplay/42/7001/0.7001.jpg" || store.keys[17] != "trickplay/42/7001/17.7001.jpg" {
+	if len(store.keys) != 23 || store.keys[0] != "trickplay/42/7001/0.7001.jpg" || store.keys[22] != "trickplay/42/7001/22.7001.jpg" {
 		t.Fatalf("keys %v", store.keys)
 	}
 	published, ok := q.published[42]
-	if !ok || published.Count != 1800 || len(published.SheetBytes) != 18 || published.Height != 126 || published.StoreIdentity != "local|/test" ||
+	if !ok || published.Count != 1800 || len(published.SheetBytes) != 23 || published.Height != 126 || published.StoreIdentity != "local|/test" ||
 		published.Recipe != (Recipe{Width: 300, IntervalMS: 10000}) {
 		t.Fatalf("published %+v", published)
 	}

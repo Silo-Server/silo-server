@@ -69,7 +69,7 @@ func TestGenerateEndToEndDB(t *testing.T) {
 		row, _ := f.row(t, file)
 		t.Fatalf("nothing published: %+v", row)
 	}
-	if m.Width != 160 || m.Height != 66 || m.TileColumns != 10 || m.ThumbnailCount != 4 || m.SheetCount != 1 || m.IntervalMS != 10000 {
+	if m.Width != 160 || m.Height != 66 || m.TileColumns != 10 || m.TileRows != 8 || m.ThumbnailCount != 4 || m.SheetCount != 1 || m.IntervalMS != 10000 {
 		t.Fatalf("manifest %+v", m)
 	}
 	reader, _, err := store.Get(t.Context(), m.SheetKey(0))
@@ -82,8 +82,8 @@ func TestGenerateEndToEndDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if size := img.Bounds().Size(); size != image.Pt(1600, 660) {
-		t.Fatalf("sheet is %v, want the full 10x10 grid", size)
+	if size := img.Bounds().Size(); size != image.Pt(1600, 528) {
+		t.Fatalf("sheet is %v, want the full 10x8 grid", size)
 	}
 	ycc := img.(*image.YCbCr)
 	for i, gray := range grays {
