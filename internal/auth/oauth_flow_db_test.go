@@ -111,8 +111,24 @@ func TestPGOAuthStoreFlowsDB(t *testing.T) {
 	if n := env.activeSessions(t, user.ID); n != 0 {
 		t.Fatalf("a failed redemption left %d sessions", n)
 	}
+	for _, account := range []*models.User{nil, {ID: user.ID + 1}} {
+		malformed := func(ctx context.Context, db OAuthSessionDB, c OAuthCompletion) (*TokenPair, error) {
+			pair, err := open(ctx, db, c)
+			if err != nil {
+				return nil, err
+			}
+			pair.User = account
+			return pair, nil
+		}
+		if _, err := store.RedeemCompletion(ctx, native.Code, nativeVerifier, "", malformed); err == nil {
+			t.Fatal("an opener with a missing or foreign account redeemed the code")
+		}
+		if n := env.activeSessions(t, user.ID); n != 0 {
+			t.Fatalf("a malformed account left %d sessions", n)
+		}
+	}
 	got, err := store.RedeemCompletion(ctx, native.Code, nativeVerifier, "", open)
-	if err != nil || got.AccessToken == "" || got.RefreshToken == "" || got.UserID != user.ID || got.SessionID == "" {
+	if err != nil || got.AccessToken == "" || got.RefreshToken == "" || got.UserID != user.ID || got.SessionID == "" || got.User == nil || got.User.ID != user.ID {
 		t.Fatalf("redeem = %+v, %v", got, err)
 	}
 	opened, err := sessions.GetByID(ctx, got.SessionID)
@@ -281,7 +297,7 @@ func dbSessionOpener(sessions *SessionRepository) OAuthSessionOpener {
 			IPAddress: c.IP, ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
 			return nil, err
 		}
-		return &TokenPair{AccessToken: "access-" + id, RefreshToken: "refresh-" + id, ExpiresIn: 60, SessionID: id}, nil
+		return &TokenPair{AccessToken: "access-" + id, RefreshToken: "refresh-" + id, ExpiresIn: 60, SessionID: id, User: &models.User{ID: c.UserID}}, nil
 	}
 }
 

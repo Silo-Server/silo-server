@@ -50,6 +50,10 @@ func (f fakeAccounts) CurrentUser(_ context.Context, claims *auth.Claims) (handl
 	return view, nil
 }
 
+func (f fakeAccounts) OAuthUserView(_ context.Context, user *models.User) handlers.UserView {
+	return f.users[user.ID]
+}
+
 // passwordChangeAllowed mirrors the v1 rule: a plain login session on the
 // primary profile, or an admin with no profile declared. parityDeps' primary
 // checker knows p-primary only for the admin account (user 2).
@@ -1447,6 +1451,7 @@ func (f fakeOAuth) Complete(_ context.Context, code, verifier, browser string) (
 	if (c.Kind == auth.OAuthFlowNative) != (verifier != "") || (verifier != "" && verifier != fixtureNativeVerifier) {
 		return auth.OAuthCompletion{}, auth.ErrOAuthInvalidGrant
 	}
+	c.User = &models.User{ID: c.UserID}
 	return c, nil
 }
 

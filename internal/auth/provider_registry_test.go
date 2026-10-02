@@ -59,7 +59,7 @@ func TestPluginProviderRegistryRebuild(t *testing.T) {
 		installations: map[int]*plugins.Installation{3: {ID: 3, Enabled: true}, 4: {ID: 4, Enabled: true}},
 		capabilities: map[int][]*plugins.Capability{3: {{Type: "auth_provider.v1", ID: "oidc", Metadata: map[string]any{
 			"display_name": "Manifest name", "auth_modes": []any{"oauth2"},
-		}}}},
+		}}}, 4: {{Type: "auth_provider.v1", ID: "ldap"}}},
 		configs: map[int][]*plugins.RuntimeConfig{3: {
 			{Key: "display_name", Value: map[string]any{"value": "Company SSO"}},
 			{Key: "icon_url_path", Value: map[string]any{"value": "/logo.svg"}},
@@ -161,6 +161,27 @@ func TestPluginProviderRegistryRebuildKeepsSetOnReadErrors(t *testing.T) {
 	}
 }
 
+func TestPluginProviderRegistryRejectsMissingCapability(t *testing.T) {
+	stores := &fakeRegistryStores{
+		bindings:      []*plugins.AuthBinding{{InstallationID: 3, CapabilityID: "oidc", Enabled: true}},
+		installations: map[int]*plugins.Installation{3: {ID: 3, Enabled: true}},
+		capabilities: map[int][]*plugins.Capability{3: {{Type: "auth_provider.v1", ID: "oidc", Metadata: map[string]any{
+			"auth_modes": []any{"oauth2"},
+		}}}},
+	}
+	registry := NewPluginProviderRegistry(PluginProviderRegistryConfig{Bindings: stores, Installations: stores})
+	if err := registry.Rebuild(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	stores.capabilities[3] = []*plugins.Capability{{Type: "auth_provider.v1", ID: "renamed"}}
+	if err := registry.Rebuild(t.Context()); err == nil {
+		t.Fatal("binding without its auth capability was registered")
+	}
+	if got := registry.Providers(); len(got) != 1 || got[0].Info.Mode != ProviderModeOAuth {
+		t.Fatalf("failed rebuild replaced the previous OAuth provider: %+v", got)
+	}
+}
+
 func TestServiceSeesRegistryChanges(t *testing.T) {
 	stores := &fakeRegistryStores{
 		bindings:      []*plugins.AuthBinding{{InstallationID: 3, CapabilityID: "oidc", Enabled: true}},
@@ -211,6 +232,7 @@ func TestPluginProviderRegistryIconDefault(t *testing.T) {
 			{InstallationID: 4, CapabilityID: "ldap", Enabled: true},
 		},
 		installations: map[int]*plugins.Installation{3: {ID: 3, Enabled: true}, 4: {ID: 4, Enabled: true}},
+		capabilities:  map[int][]*plugins.Capability{3: {{Type: "auth_provider.v1", ID: "oidc"}}, 4: {{Type: "auth_provider.v1", ID: "ldap"}}},
 	}
 	manifests := fakeManifests{
 		3: {GlobalConfigSchema: []*pluginv1.ConfigSchema{formDefault}},
@@ -316,6 +338,7 @@ func TestPluginProviderRegistryRunRebuilds(t *testing.T) {
 	stores := &lockedRegistryStores{fakeRegistryStores: fakeRegistryStores{
 		bindings:      []*plugins.AuthBinding{{InstallationID: 3, CapabilityID: "oidc"}},
 		installations: map[int]*plugins.Installation{3: {ID: 3, Enabled: true}},
+		capabilities:  map[int][]*plugins.Capability{3: {{Type: "auth_provider.v1", ID: "oidc"}}},
 	}}
 	registry := NewPluginProviderRegistry(PluginProviderRegistryConfig{Bindings: stores, Installations: &stores.fakeRegistryStores, GlobalConfigs: &stores.fakeRegistryStores})
 	ctx, cancel := context.WithCancel(t.Context())
@@ -346,6 +369,7 @@ func TestPluginProviderRegistryRequestRebuild(t *testing.T) {
 	stores := &lockedRegistryStores{fakeRegistryStores: fakeRegistryStores{
 		bindings:      []*plugins.AuthBinding{{InstallationID: 3, CapabilityID: "oidc"}},
 		installations: map[int]*plugins.Installation{3: {ID: 3, Enabled: true}},
+		capabilities:  map[int][]*plugins.Capability{3: {{Type: "auth_provider.v1", ID: "oidc"}}},
 	}}
 	registry := NewPluginProviderRegistry(PluginProviderRegistryConfig{Bindings: stores, Installations: &stores.fakeRegistryStores, GlobalConfigs: &stores.fakeRegistryStores})
 	for range 3 {

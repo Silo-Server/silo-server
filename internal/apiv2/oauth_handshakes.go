@@ -304,6 +304,8 @@ func registerOAuthAccountOperations(reg *Registry) {
 					return nil, NewProblem(TypeNotFound, "No enabled OAuth sign-in provider has this installation.")
 				case errors.Is(err, auth.ErrLinkTicketUnavailable):
 					return nil, unavailable("OAuth linking")
+				case errors.Is(err, auth.ErrProviderUnavailable):
+					return nil, NewProblem(TypeProviderUnavailable, "The sign-in provider could not start the link.")
 				}
 				if p := linkingRefusalProblem(err, "provider"); p != nil {
 					return nil, p

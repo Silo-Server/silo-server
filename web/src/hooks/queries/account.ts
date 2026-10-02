@@ -1,6 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { captureProfileRequestContext } from "@/api/client";
+import {
+  captureProfileRequestContext,
+  captureSessionIdentity,
+  isSessionIdentityCurrent,
+  StaleApiRequestContextError,
+  type SessionIdentitySnapshot,
+} from "@/api/client";
 import { v2, type V2Body, type V2Result } from "@/api/v2/request";
 
 /** Whether and within which limits the caller may replace the account password. */
@@ -52,10 +58,24 @@ function invalidateSignInState(queryClient: ReturnType<typeof useQueryClient>) {
   void queryClient.invalidateQueries({ queryKey: accountKeys.passwordCapability() });
 }
 
+function requireIdentityMutationSession(session: SessionIdentitySnapshot) {
+  if (!isSessionIdentityCurrent(session)) throw new StaleApiRequestContextError();
+}
+
 export function useUnlinkAccountIdentity() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => v2("DELETE /api/v2/account/identities/{id}", { path: { id } }),
+    retry: false,
+    mutationFn: async (id: string) => {
+      const session = captureSessionIdentity();
+      const result = await v2("DELETE /api/v2/account/identities/{id}", {
+        path: { id },
+        profileContext: captureProfileRequestContext() ?? undefined,
+        retryAuthentication: false,
+      });
+      requireIdentityMutationSession(session);
+      return result;
+    },
     onSettled: () => invalidateSignInState(queryClient),
   });
 }
@@ -63,8 +83,17 @@ export function useUnlinkAccountIdentity() {
 export function useLinkAccountIdentityWithCredentials() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: V2Body<"POST /api/v2/account/identities/link-credentials">) =>
-      v2("POST /api/v2/account/identities/link-credentials", { body }),
+    retry: false,
+    mutationFn: async (body: V2Body<"POST /api/v2/account/identities/link-credentials">) => {
+      const session = captureSessionIdentity();
+      const result = await v2("POST /api/v2/account/identities/link-credentials", {
+        body,
+        profileContext: captureProfileRequestContext() ?? undefined,
+        retryAuthentication: false,
+      });
+      requireIdentityMutationSession(session);
+      return result;
+    },
     onSuccess: () => invalidateSignInState(queryClient),
   });
 }
@@ -77,17 +106,29 @@ export function useLinkAccountIdentityWithCredentials() {
  */
 export function useStartAccountIdentityLink() {
   return useMutation({
+    retry: false,
     mutationFn: async (input: { installationId: string; password: string; next: string }) => {
+      const session = captureSessionIdentity();
+      const profileContext = captureProfileRequestContext() ?? undefined;
       const ticket = await v2("POST /api/v2/account/identities/link-ticket", {
         body: { installation_id: input.installationId, password: input.password },
+        profileContext,
+        retryAuthentication: false,
       });
+      requireIdentityMutationSession(session);
+      let result;
       try {
-        return await v2("POST /api/v2/account/identities/link-start", {
+        result = await v2("POST /api/v2/account/identities/link-start", {
           body: { link_ticket: ticket.ticket, next: input.next },
+          profileContext,
+          retryAuthentication: false,
         });
       } catch (error) {
+        requireIdentityMutationSession(session);
         throw new LinkStartError(error);
       }
+      requireIdentityMutationSession(session);
+      return result;
     },
   });
 }

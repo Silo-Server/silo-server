@@ -102,13 +102,13 @@ func TestLoginPINConventionStaysLocalDB(t *testing.T) {
 		t.Fatalf("a local account's password reached the directory: %q", directory.passwords)
 	}
 
-	// The base-password retry decides the route again: a name that signs in
-	// with the directory by then gets no second bind, even with its old
-	// local password.
-	if _, _, err := svc.CompatLoginLocal(ctx, linked.Username, "correct horse battery", "test", ""); !errors.Is(err, auth.ErrInvalidCredentials) {
-		t.Fatalf("local retry of a directory name: %v, want ErrInvalidCredentials", err)
+	// Selecting the directory permits only the original password attempt,
+	// even when the caller supplied the account's old local password as fallback.
+	_, _, usedFallback, err := svc.CompatLoginWithLocalFallback(ctx, linked.Username, "directory-secret#4321", "correct horse battery", "test", "")
+	if !errors.Is(err, auth.ErrInvalidCredentials) || usedFallback {
+		t.Fatalf("directory fallback: used = %v, error = %v", usedFallback, err)
 	}
-	if len(directory.passwords) != 0 {
-		t.Fatalf("the local retry reached the directory: %q", directory.passwords)
+	if len(directory.passwords) != 1 || directory.passwords[0] != "directory-secret#4321" {
+		t.Fatalf("directory received passwords: %q", directory.passwords)
 	}
 }

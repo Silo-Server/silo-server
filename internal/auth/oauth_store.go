@@ -14,6 +14,7 @@ import (
 	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -92,6 +93,9 @@ type OAuthCompletion struct {
 	// Empty for a native code.
 	BrowserHash string
 	UserID      int
+	// User is the account read by the session opener during redemption. It
+	// is answered to the caller only and is never stored with the code.
+	User *models.User
 	// IdentityID is the external sign-in identity the session is opened
 	// through (plugin_auth_identities.id).
 	IdentityID int64
@@ -103,9 +107,9 @@ type OAuthCompletion struct {
 }
 
 // OAuthSessionDB is the database handle a login session is opened on: the
-// redemption's transaction, or nil for the pool (the in-memory store). The
-// account is read on it too, so a redemption holding the code's row lock
-// needs no second connection.
+// redemption's transaction, or nil for an opener-owned transaction (the
+// in-memory store). The account is locked on it too, so a redemption
+// holding the code's row lock needs no second connection.
 type OAuthSessionDB interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
@@ -302,13 +306,18 @@ func (s *PGOAuthStore) InsertCompletion(ctx context.Context, c OAuthCompletion) 
 func (s *PGOAuthStore) RedeemCompletion(ctx context.Context, code, verifier, browser string, open OAuthSessionOpener) (OAuthCompletion, error) {
 	codeHash := oauthCompletionCodeHash(code)
 	var out OAuthCompletion
-	// A refusal returns its error from the transaction, which rolls back a
+	// Lock the account before the completion, matching account deletion's
+	// user lock and cascade to completion rows. A refusal rolls back a
 	// transaction that wrote nothing.
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		lockedUserID, err := lockCompletionAccount(ctx, tx, codeHash, verifier, browser)
+		if err != nil {
+			return err
+		}
 		var userID *int
 		var identityID *int64
 		var redeemedAt *time.Time
-		err := tx.QueryRow(ctx, `
+		err = tx.QueryRow(ctx, `
 			SELECT next_url, flow_kind, code_challenge, browser_hash, user_id, identity_id, device_name, ip_address,
 				session_id, redeemed_at, created_at, expires_at
 			FROM oauth_completions WHERE code_hash = $1 FOR UPDATE
@@ -322,6 +331,9 @@ func (s *PGOAuthStore) RedeemCompletion(ctx context.Context, code, verifier, bro
 		}
 		if userID != nil {
 			out.UserID = *userID
+		}
+		if out.UserID != lockedUserID {
+			return ErrOAuthCompletionNotFound
 		}
 		if identityID != nil {
 			out.IdentityID = *identityID
@@ -366,6 +378,38 @@ func (s *PGOAuthStore) RedeemCompletion(ctx context.Context, code, verifier, bro
 	return OAuthCompletion{}, err
 }
 
+// lockCompletionAccount proves the client from a preliminary read, then
+// locks the immutable account the completion names. The caller re-reads
+// the completion under its row lock before redeeming it.
+func lockCompletionAccount(ctx context.Context, tx pgx.Tx, codeHash, verifier, browser string) (int, error) {
+	var c OAuthCompletion
+	var userID *int
+	err := tx.QueryRow(ctx, `SELECT user_id, flow_kind, code_challenge, browser_hash
+		FROM oauth_completions WHERE code_hash = $1`, codeHash).
+		Scan(&userID, &c.Kind, &c.CodeChallenge, &c.BrowserHash)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, ErrOAuthCompletionNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("read oauth completion account: %w", err)
+	}
+	if err := checkCompletionClient(c, verifier, browser); err != nil {
+		return 0, err
+	}
+	if userID == nil || *userID <= 0 {
+		return 0, ErrOAuthCompletionNotFound
+	}
+	var lockedUserID int
+	err = tx.QueryRow(ctx, `SELECT id FROM users WHERE id = $1 FOR UPDATE`, *userID).Scan(&lockedUserID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, ErrOAuthCompletionNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("lock oauth completion account: %w", err)
+	}
+	return lockedUserID, nil
+}
+
 // redeemWith opens the session of the completion being redeemed and fills
 // in the session and token pair it answers.
 func redeemWith(ctx context.Context, db OAuthSessionDB, open OAuthSessionOpener, c *OAuthCompletion) error {
@@ -379,7 +423,11 @@ func redeemWith(ctx context.Context, db OAuthSessionDB, open OAuthSessionOpener,
 	if pair == nil || pair.SessionID == "" {
 		return errors.New("open oauth session: no session opened")
 	}
+	if pair.User == nil || pair.User.ID != c.UserID {
+		return errors.New("open oauth session: account does not fit the completion")
+	}
 	c.AccessToken, c.RefreshToken, c.ExpiresIn, c.SessionID = pair.AccessToken, pair.RefreshToken, pair.ExpiresIn, pair.SessionID
+	c.User = pair.User
 	return nil
 }
 

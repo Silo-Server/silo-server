@@ -148,7 +148,7 @@ func TestDeviceLoginLookupMarksOpenedAndHoldsCodeDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	poll, err := svc.Poll(ctx, start.DeviceCode)
-	if err != nil || poll.Opened || !poll.ExpiresAt.Equal(start.ExpiresAt) {
+	if err != nil || poll.Opened || !poll.ExpiresAt.Equal(start.ExpiresAt.Truncate(time.Microsecond)) {
 		t.Fatalf("poll before lookup = %+v, %v", poll, err)
 	}
 

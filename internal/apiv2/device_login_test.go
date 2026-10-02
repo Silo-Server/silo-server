@@ -5,7 +5,31 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/auth"
 )
+
+func TestDeviceApprovalsRevokedSession(t *testing.T) {
+	deps := pilotDeps(nil, nil)
+	deps.Devices = fakeDevices{
+		configured: true,
+		err: (&handlers.APIError{
+			Status: http.StatusUnauthorized, Code: "unauthorized", Message: "Login session is no longer valid",
+		}).WithCause(auth.ErrSessionRevoked),
+	}
+	h := newTestHandler(t, deps)
+	for _, route := range []string{"approve", "approve-handoff"} {
+		t.Run(route, func(t *testing.T) {
+			headers := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+			rec := do(t, h, http.MethodPost, "/api/v2/auth/device/"+route, `{"token":"br-pending"}`, headers)
+			problem := requireProblem(t, rec, TypeAuthenticationRequired)
+			if rec.Code != http.StatusUnauthorized || problem.Status != http.StatusUnauthorized {
+				t.Fatalf("response = %d %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
 
 func TestGetDeviceLoginCapability(t *testing.T) {
 	h := newTestHandler(t, pilotDeps(nil, nil))

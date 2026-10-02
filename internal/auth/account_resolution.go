@@ -250,7 +250,7 @@ func (r *AccountResolver) finish(ctx context.Context, tx pgx.Tx, in ResolveInput
 	return nil
 }
 
-func lockUser(ctx context.Context, tx pgx.Tx, id int) (*models.User, error) {
+func lockUser(ctx context.Context, tx rowQuerier, id int) (*models.User, error) {
 	return scanUser(tx.QueryRow(ctx, `SELECT `+allColumns+` FROM users WHERE id = $1 FOR UPDATE`, id))
 }
 

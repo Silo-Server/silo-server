@@ -86,6 +86,14 @@ can approve decide. A device approved from a session opened through an
 external sign-in provider inherits that session's provider chain
 ([external-sign-in.md](external-sign-in.md#provider-re-check)).
 
+Approval locks the account and checks that the submitting login session is
+still active before updating the device request. Collection and credential
+revocation also lock the account before the device request. A request that
+authenticated before its session was revoked cannot approve afterwards.
+Provider refusal withdraws approvals made through that identity, including
+those from a break-glass account; its approvals made through local login stay
+independent of the provider.
+
 ## Rate limits and guessing
 
 Rate limits are per server and keyed on client IP. The lookup and all three

@@ -87,12 +87,23 @@ func (r *ServerSettingsRepo) UpdateAtomic(
 	ctx context.Context,
 	update func(current map[string]string) (map[string]string, error),
 ) error {
+	return r.UpdateAtomicInTransaction(ctx, func(current map[string]string, _ pgx.Tx) (map[string]string, error) {
+		return update(current)
+	})
+}
+
+// UpdateAtomicInTransaction also supplies the held transaction for validation
+// that reads other tables, without requesting another pool connection.
+func (r *ServerSettingsRepo) UpdateAtomicInTransaction(
+	ctx context.Context,
+	update func(current map[string]string, tx pgx.Tx) (map[string]string, error),
+) error {
 	return r.withMutationTransaction(ctx, func(tx pgx.Tx) error {
 		current, err := getAllServerSettings(ctx, tx)
 		if err != nil {
 			return err
 		}
-		writes, err := update(current)
+		writes, err := update(current, tx)
 		if err != nil {
 			return err
 		}

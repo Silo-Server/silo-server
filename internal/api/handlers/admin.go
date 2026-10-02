@@ -85,8 +85,25 @@ func updateServerSettingsAtomically(
 	store ServerSettingsStore,
 	update func(current map[string]string) (map[string]string, error),
 ) error {
+	return updateServerSettingsInTransaction(ctx, store, func(current map[string]string, _ pgx.Tx) (map[string]string, error) {
+		return update(current)
+	})
+}
+
+func updateServerSettingsInTransaction(
+	ctx context.Context,
+	store ServerSettingsStore,
+	update func(current map[string]string, tx pgx.Tx) (map[string]string, error),
+) error {
+	if updater, ok := store.(interface {
+		UpdateAtomicInTransaction(context.Context, func(map[string]string, pgx.Tx) (map[string]string, error)) error
+	}); ok {
+		return updater.UpdateAtomicInTransaction(ctx, update)
+	}
 	if updater, ok := store.(serverSettingsAtomicUpdater); ok {
-		return updater.UpdateAtomic(ctx, update)
+		return updater.UpdateAtomic(ctx, func(current map[string]string) (map[string]string, error) {
+			return update(current, nil)
+		})
 	}
 	return errors.New("settings store does not support atomic updates")
 }
@@ -2464,10 +2481,13 @@ func shouldPersistAdminSetting(stored map[string]string, key, normalized string,
 // break-glass admin could still sign in with a password. It runs inside the
 // settings mutation, which holds the settings lock that break-glass changes
 // also take.
-func (h *AdminHandler) checkLocalLoginSetting(ctx context.Context, before, after map[string]string) error {
+func (h *AdminHandler) checkLocalLoginSetting(ctx context.Context, tx pgx.Tx, before, after map[string]string) error {
 	key := config.AuthLocalPasswordLoginSettingKey
 	if before[key] == after[key] {
 		return nil
+	}
+	if tx != nil {
+		return breakGlassError(auth.CheckLocalLoginSettingChange(ctx, tx, before[key], after[key]))
 	}
 	if h.pool == nil {
 		return ErrAdminSettingsUnavailable
@@ -2554,8 +2574,8 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 	)
 	var preconditionErr error
 	var committedSnapshot *AdminSettingsSnapshot
-	err := updateServerSettingsAtomically(ctx, h.SettingsRepo,
-		func(stored map[string]string) (map[string]string, error) {
+	err := updateServerSettingsInTransaction(ctx, h.SettingsRepo,
+		func(stored map[string]string, tx pgx.Tx) (map[string]string, error) {
 			if guard != nil {
 				if err := guard(h.adminSettingsSnapshot(stored)); err != nil {
 					preconditionErr = err
@@ -2576,7 +2596,7 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 			activeProspective := h.activeAdminSettings(prospective)
 			before := h.effectiveAdminSettings(stored)
 			after = h.effectiveAdminSettings(prospective)
-			if err := h.checkLocalLoginSetting(ctx, before, after); err != nil {
+			if err := h.checkLocalLoginSetting(ctx, tx, before, after); err != nil {
 				preconditionErr = err
 				return nil, err
 			}
@@ -2919,8 +2939,8 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 		validationCode   string
 	)
 	var preconditionErr error
-	err := updateServerSettingsAtomically(ctx, h.SettingsRepo,
-		func(stored map[string]string) (map[string]string, error) {
+	err := updateServerSettingsInTransaction(ctx, h.SettingsRepo,
+		func(stored map[string]string, tx pgx.Tx) (map[string]string, error) {
 			if guard != nil {
 				if err := guard(h.adminSettingsSnapshot(stored)); err != nil {
 					preconditionErr = err
@@ -2973,7 +2993,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 
 			before := h.effectiveAdminSettings(stored)
 			after = h.effectiveAdminSettings(prospective)
-			if err := h.checkLocalLoginSetting(ctx, before, after); err != nil {
+			if err := h.checkLocalLoginSetting(ctx, tx, before, after); err != nil {
 				preconditionErr = err
 				return nil, err
 			}

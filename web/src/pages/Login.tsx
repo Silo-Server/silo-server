@@ -110,6 +110,7 @@ export default function Login() {
   // straight back to the provider (see markSignedOut).
   const [signedOutHere] = useState(wasSignedOut);
   const autoRedirected = useRef(false);
+  const [providersReady, setProvidersReady] = useState(false);
   const {
     login,
     completeLogin,
@@ -120,6 +121,7 @@ export default function Login() {
     setupLoading,
     setupRequired,
     providers = [],
+    refreshSignInProviders,
     sessionRestoreUnavailable = false,
     sessionRestoreProviderUnavailable = false,
     retrySessionRestore,
@@ -142,6 +144,22 @@ export default function Login() {
   useDocumentTitle("Sign In");
 
   const redirectTarget = sanitizeAuthRedirect(searchParams.get("redirect"));
+
+  // Another browser may have changed the server's provider since this tab
+  // started. Read it again before choosing a form or redirecting automatically.
+  useEffect(() => {
+    let canceled = false;
+    if (!refreshSignInProviders) {
+      setProvidersReady(true);
+      return;
+    }
+    void refreshSignInProviders().finally(() => {
+      if (!canceled) setProvidersReady(true);
+    });
+    return () => {
+      canceled = true;
+    };
+  }, [refreshSignInProviders]);
 
   const credentialProviders = useMemo(
     () => providers.filter((entry) => entry.mode === "credentials"),
@@ -200,7 +218,12 @@ export default function Login() {
     ? startHref(autoRedirectProvider.installation_id)
     : null;
   const readyToRedirect =
-    !loading && !setupLoading && !setupRequired && !user && !pendingPasswordChange;
+    providersReady &&
+    !loading &&
+    !setupLoading &&
+    !setupRequired &&
+    !user &&
+    !pendingPasswordChange;
 
   useEffect(() => {
     if (!autoRedirectHref || !readyToRedirect || autoRedirected.current) {
@@ -298,7 +321,7 @@ export default function Login() {
     [],
   );
 
-  if (loading || setupLoading) {
+  if (loading || setupLoading || !providersReady) {
     return (
       <main className="auth-shell">
         <AuthBackground />

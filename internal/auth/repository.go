@@ -765,6 +765,9 @@ func (r *UserRepository) CreateInvited(ctx context.Context, input models.CreateU
 		return nil, fmt.Errorf("beginning invited account: %w", err)
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
+	if err := EnsureLocalPasswordLoginAllowedInTransaction(ctx, tx); err != nil {
+		return nil, err
+	}
 	if err := redeemCode(ctx, tx, code); err != nil {
 		return nil, err
 	}

@@ -176,7 +176,8 @@ func (h *ExternalSignInHandler) LinkAccountIdentityCredentials(ctx context.Conte
 
 // adminIdentityTarget applies the Owner rules to identity changes: only the
 // Owner changes another admin's sign-in, and a scoped API key never changes
-// an admin's.
+// an admin's. The identity service repeats these checks against the locked
+// actor and target when it writes, since their standing may change here.
 func (h *ExternalSignInHandler) adminIdentityTarget(ctx context.Context, userID int) error {
 	target, err := h.users.GetByID(ctx, userID)
 	if err != nil {
@@ -202,6 +203,7 @@ func (h *ExternalSignInHandler) LinkAdminUserIdentity(ctx context.Context, userI
 	}
 	linked, err := h.identities.AdminLink(ctx, auth.AdminLinkInput{
 		UserID: userID, InstallationID: in.InstallationID, ActorID: actorUserID(ctx),
+		ScopedAPIKey: actorIsScopedAPIKey(ctx),
 		Identity: auth.ExternalIdentity{
 			Subject: in.ExternalSubject, Username: strings.TrimSpace(in.Username),
 			Email: strings.TrimSpace(in.Email), DisplayName: strings.TrimSpace(in.DisplayName),
@@ -218,7 +220,7 @@ func (h *ExternalSignInHandler) UnlinkAdminUserIdentity(ctx context.Context, use
 	if err := h.adminIdentityTarget(ctx, userID); err != nil {
 		return err
 	}
-	return identityError(h.identities.AdminUnlink(ctx, userID, identityID, actorUserID(ctx)))
+	return identityError(h.identities.AdminUnlink(ctx, userID, identityID, actorUserID(ctx), actorIsScopedAPIKey(ctx)))
 }
 
 // TestAuthBinding runs the auth plugin's connection test on staged
@@ -247,6 +249,10 @@ func identityError(err error) error {
 		return apiError(http.StatusConflict, "already_linked", "The account is already linked to this provider")
 	case errors.Is(err, auth.ErrUnknownAuthInstallation):
 		return fieldError("installation_id", "The installation has no sign-in provider binding")
+	case errors.Is(err, auth.ErrScopedKeyAdminIdentity):
+		return apiError(http.StatusForbidden, "insufficient_scope", "A scoped API key may not change an admin account's sign-in")
+	case errors.Is(err, auth.ErrNotPermitted):
+		return apiError(http.StatusForbidden, "permission_denied", "The acting account is no longer an enabled administrator")
 	}
-	return err
+	return ownerError(err)
 }

@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { endSessionWithProvider } from "@/api/v2/providerLogout";
 import { clearSignedOut, markSignedOut } from "@/lib/externalSignIn";
 import type { ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   ApiClientError,
   bootstrapAccessToken,
@@ -26,6 +27,7 @@ import { v2, V2ProblemError, type V2Result } from "@/api/v2/request";
 import { listProfiles, verifyProfilePIN, type ProfileVerification } from "@/hooks/queries/profiles";
 import { restoreUserSession, sessionFromTokenPair, userFromAccount } from "@/api/v2/account";
 import { queryClient } from "@/lib/query-client";
+import { authProviderQueryOptions } from "@/hooks/queries/authProviders";
 import {
   clearStoredImpersonationAdminSession,
   loadStoredImpersonationAdminSession,
@@ -49,6 +51,8 @@ interface AuthState {
   /** Re-reads the public setup status, e.g. after the wizard records completion. */
   refreshSetupStatus: () => Promise<void>;
   providers: AuthProviderOption[];
+  /** Re-reads the server's current sign-in providers and local-password policy. */
+  refreshSignInProviders: () => Promise<void>;
   /**
    * The stored session could not be restored because the server or its
    * sign-in provider could not be reached (not because it was refused). The
@@ -261,7 +265,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [setupLoading, setSetupLoading] = useState(true);
   const [setupRequired, setSetupRequired] = useState(false);
   const [setupCompleted, setSetupCompleted] = useState(false);
-  const [providers, setProviders] = useState<AuthProviderOption[]>([]);
+  // Public discovery is fetched explicitly at boot and when a sign-in surface
+  // needs it. Clearing account caches must not start another public read.
+  const providerQuery = useQuery({ ...authProviderQueryOptions(), enabled: false }, queryClient);
+  const providers = providerQuery.data?.items ?? [];
+  const refreshSignInProviders = useCallback(async () => {
+    try {
+      await queryClient.fetchQuery(authProviderQueryOptions());
+    } catch {
+      // Keep the last known discovery until the next visit or provider write.
+    }
+  }, []);
   const [sessionRestoreUnavailable, setSessionRestoreUnavailable] = useState(false);
   const [sessionRestoreProviderUnavailable, setSessionRestoreProviderUnavailable] = useState(false);
   const [restoreAttempt, setRestoreAttempt] = useState(0);
@@ -427,8 +441,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         void endSessionWithProvider(accessToken, undefined, { withProvider });
       }
       clearAuthState();
+      void refreshSignInProviders();
     },
-    [clearAuthState],
+    [clearAuthState, refreshSignInProviders],
   );
   // An administrator viewing as someone leaves the account's provider
   // session alone: the server answers no provider sign-out for it anyway.
@@ -505,9 +520,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Independent reads: a failed provider list must not blank the setup
         // status, or an admin visiting /setup during that outage would see
         // the finished wizard again.
-        const [status, availableProviders] = await Promise.allSettled([
+        const [status] = await Promise.allSettled([
           v2("GET /api/v2/system/setup"),
-          v2("GET /api/v2/auth/providers"),
+          queryClient.fetchQuery(authProviderQueryOptions()),
         ]);
         if (cancelled) {
           return;
@@ -519,9 +534,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setSetupRequired(false);
           setSetupCompleted(false);
         }
-        setProviders(
-          availableProviders.status === "fulfilled" ? (availableProviders.value.items ?? []) : [],
-        );
       } finally {
         if (!cancelled) {
           setSetupLoading(false);
@@ -748,6 +760,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setupCompleted,
         refreshSetupStatus,
         providers,
+        refreshSignInProviders,
         sessionRestoreUnavailable,
         sessionRestoreProviderUnavailable,
         retrySessionRestore,

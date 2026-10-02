@@ -19,6 +19,7 @@ import {
 import { v2, type V2Body, type V2Result } from "@/api/v2/request";
 
 import { adminKeys } from "../keys";
+import { refreshAuthProviders } from "../authProviders";
 
 const ADMIN_STALE_TIME = 30_000;
 
@@ -53,7 +54,10 @@ export function useExternalSignInCapabilities() {
 }
 
 function invalidateSignInProviders(queryClient: ReturnType<typeof useQueryClient>) {
-  return queryClient.invalidateQueries({ queryKey: adminKeys.pluginInstallations() });
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: adminKeys.pluginInstallations() }),
+    refreshAuthProviders(queryClient),
+  ]);
 }
 
 function requireActiveAuthority(profileContext: ProfileRequestContextSnapshot) {

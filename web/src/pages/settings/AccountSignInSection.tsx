@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router";
 import { toast } from "sonner";
 
 import { V2ProblemError } from "@/api/v2/request";
+import { captureSessionIdentity, isSessionIdentityCurrent } from "@/api/client";
 import { PasswordInput } from "@/components/PasswordInput";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import {
@@ -103,12 +104,16 @@ function linkResultBanner(params: URLSearchParams): Banner | null {
  * and disconnecting it while the account can still sign in another way.
  */
 export function AccountSignInSection() {
-  const { providers = [], isImpersonating } = useAuth();
+  const { providers = [], isImpersonating, refreshSignInProviders } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [banner, setBanner] = useState<Banner | null>(() => linkResultBanner(searchParams));
   const [connecting, setConnecting] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState<AccountIdentity | null>(null);
   const identities = useAccountIdentities();
+
+  useEffect(() => {
+    void refreshSignInProviders?.();
+  }, [refreshSignInProviders]);
 
   // Drop the flow's result from the address so a reload doesn't repeat it.
   useEffect(() => {
@@ -295,6 +300,7 @@ function ConnectForm({
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+    const session = captureSessionIdentity();
     try {
       if (directory) {
         await linkCredentials.mutateAsync({
@@ -303,6 +309,7 @@ function ConnectForm({
           username: directoryUsername,
           directory_password: directoryPassword,
         });
+        if (!isSessionIdentityCurrent(session)) return;
         onLinked();
         return;
       }
@@ -311,6 +318,7 @@ function ConnectForm({
         password,
         next: LINK_RETURN_PATH,
       });
+      if (!isSessionIdentityCurrent(session)) return;
       if (!/^https?:\/\//i.test(started.authorize_url)) {
         setError(oauthFailureText("provider_unavailable"));
         return;

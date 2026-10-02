@@ -158,6 +158,11 @@ clients) is routed by account:
 With an OIDC provider, a password sign-in without a provider only reaches the
 local provider.
 
+A local password sign-in rechecks the account, password hash and local sign-in
+policy while holding the account row lock in the transaction that creates its
+login session. Linking or revoking the account cannot leave an in-flight local
+sign-in with a new session after its credentials were retired.
+
 Jellyfin's `password#PIN` convention (a profile PIN after the last `#`)
 applies to local accounts only: a name routed to the directory gets one
 attempt with the password as typed, so a PIN is never sent to the directory
@@ -258,12 +263,14 @@ A successful sign-in callback resolves the account and stores a completion
 code: 256 random bits, only its hash stored, redeemable for 60 seconds. The
 row holds what the login session needs (the account, the identity the sign-in
 came through, the browser's device name and address) and no tokens. The
-session opens only when the code is redeemed: redemption runs under a row
-lock, creates the session in the same transaction, marks the code used with
-that session, and answers the session's token pair. A code that expires
+session opens only when the code is redeemed: redemption locks the account
+before the completion row, rechecks the account and enabled installation,
+then locks the linked identity. It creates the session in the same
+transaction, marks the code used with that session, and answers the session's
+token pair. A code that expires
 unredeemed, or whose redemptions are all refused (wrong verifier, another
-browser, an account disabled since the callback), therefore leaves no session
-behind. The row is kept for 10 more minutes so that a second redemption is
+browser, an account or installation disabled since the callback), therefore
+leaves no session behind. The row is kept for 10 more minutes so that a second redemption is
 recognized as reuse, which revokes the session the first redemption opened. A
 code whose redemption deadline passed is refused without revoking. Linking
 flows open no session: a web link is made at the callback, and a native link
@@ -524,41 +531,48 @@ refreshing. The host therefore asks the provider again.
   calls `AuthProviderChecks.CheckAccount` with the subject
   and the stored `refresh_state`, bounded by 10 seconds, detached from the
   request so a client hanging up cannot lose a refresh token the provider
-  already rotated. The call runs in a transaction holding the identity's
-  advisory lock (the lock sign-in takes), so at most one check per
+  already rotated. One acquired connection holds the identity's session
+  advisory lock (the key sign-in locks), so at most one check per
   (installation, subject) is in flight across nodes; a refresh queued behind
   it waits up to 15 seconds. If that check finishes in time, the queued
   refresh uses its answer; otherwise it counts the provider as unavailable
-  (the outage policy below). The answer and
-  the `refresh_state` it rotates or clears are written before the lock is
-  released, in the same transaction. A rotated `refresh_state` is always
-  written before the savepoint that runs the follow-up work, since the
-  provider may already have spent the stored one. For an answer that revokes
-  credentials (a refusal, or `UNSUPPORTED` past the bound), the answer and a
+  (the outage policy below). A nonempty replacement `refresh_state` commits
+  on the held connection before waiting for account or identity locks,
+  because the provider may already have spent the stored token. Before
+  applying the answer, its transaction locks the account and then the
+  identity and checks that the
+  identity still exists. An unlink that completed during the provider call
+  makes its answer obsolete. For an answer that revokes credentials (a
+  refusal, or `UNSUPPORTED` past the bound), the answer and a
   cleared state are written in the same savepoint as the revocation: if the
   revocation fails, they roll back with it, nothing is revoked and the
-  refresh fails. A refusal whose revocation rolled back is kept as the
-  identity's `pending_refusal`, and the next check (refresh or scheduled)
+  refresh fails. A refusal whose revocation rolled back, or whose account
+  or identity lock failed, is kept as the identity's `pending_refusal`, and
+  the next check (refresh or scheduled)
   applies it without asking the provider again, since a plugin may already
   have spent or dropped the refused token (the OIDC plugin answers a refused
   token with a state that keeps only the ID token and `sub`, which is
-  written before the savepoint), and could then only answer `UNSUPPORTED`.
+  committed before the answer transaction), and could then only answer
+  `UNSUPPORTED`.
   A sign-in through the provider, or any recorded answer, clears it. For
   any other answer, the answer is written before the savepoint too, so a
   failed role sync cannot lose it.
 - **Lost answers.** The rotated state can still be lost after the plugin
   spent the stored token at the provider: the call fails in transport, the
-  node or the plugin dies, or the transaction does not commit. Before each
+  node or the plugin dies, or saving its replacement state fails. Before each
   call the host commits `check_outcome_unknown` on the identity in its own
-  statement. Only the transaction that writes an answer showing the plugin
-  presented its current state clears it: `ACTIVE`, `NOT_FOUND`, `DISABLED` or
-  `NOT_PERMITTED`, or any answer that returns a `refresh_state`. A sign-in
-  that stores a new `refresh_state` clears it too. An `UNAVAILABLE` or
+  statement on that same connection, before opening the answer transaction.
+  Saving replacement state clears it. An answer transaction also clears it
+  when the plugin presented its current state: `ACTIVE`, `NOT_FOUND`,
+  `DISABLED` or `NOT_PERMITTED`. A sign-in that stores a new `refresh_state`
+  clears it too. An `UNAVAILABLE` or
   `UNSUPPORTED` answer without a state, or a check that never reached the
   plugin, leaves it set. While it is set, the next `NOT_FOUND`, `DISABLED`
   or `NOT_PERMITTED` of a call that presented a stored `refresh_state` may
   be the provider refusing a token the lost call already rotated, so it is
-  applied as `UNSUPPORTED`. The OIDC plugin drops a refused token from its
+  applied as `UNSUPPORTED`. When that answer omits replacement state, the
+  uncertainty remains for later checks of the same stored token. The OIDC
+  plugin drops a refused token from its
   state, so that account then answers `UNSUPPORTED` until its next sign-in.
   A call without a stored state (LDAP checks the directory without one)
   presented no token a lost call could have rotated, so its refusal revokes

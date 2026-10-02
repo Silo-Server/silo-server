@@ -791,6 +791,7 @@ type AccountService interface {
 	NeedsSetup(ctx context.Context) (bool, error)
 	SetupWizardCompleted(ctx context.Context) (bool, error)
 	CurrentUser(ctx context.Context, claims *auth.Claims) (handlers.UserView, error)
+	OAuthUserView(ctx context.Context, user *models.User) handlers.UserView
 }
 
 // ProgressService is the slice of *handlers.ProgressHandler the progress

@@ -8,11 +8,17 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // ErrUnknownAuthInstallation refuses linking to an installation that has no
 // auth provider binding.
 var ErrUnknownAuthInstallation = errors.New("installation is not an auth provider")
+
+// ErrScopedKeyAdminIdentity refuses changing an admin's sign-in with a
+// scoped API key, including one owned by the server Owner.
+var ErrScopedKeyAdminIdentity = errors.New("a scoped API key may not change an admin account's sign-in")
 
 // IdentityService manages the external identities linked to accounts: the
 // account's own list and unlink, and the administrator's link and unlink.
@@ -34,7 +40,7 @@ func (s *IdentityService) ListForUser(ctx context.Context, userID int) ([]Linked
 }
 
 // CanUnlinkOwn reports whether UnlinkOwn would let the account disconnect
-// one of its identities now: it has another identity, or its local password
+// any of its identities now: it has another enabled identity, or its local password
 // still signs in (local password sign-in on for the account, and either the
 // server switch on or the account break-glass).
 func (s *IdentityService) CanUnlinkOwn(ctx context.Context, userID int) (bool, error) {
@@ -42,11 +48,11 @@ func (s *IdentityService) CanUnlinkOwn(ctx context.Context, userID int) (bool, e
 	if err != nil {
 		return false, err
 	}
-	identities, err := listIdentitiesForUser(ctx, s.pool, userID)
+	identities, err := usableIdentityCount(ctx, s.pool, userID, 0)
 	if err != nil {
 		return false, err
 	}
-	if len(identities) >= 2 {
+	if identities >= 2 {
 		return true, nil
 	}
 	if !user.LocalPasswordLoginEnabled {
@@ -60,7 +66,7 @@ func (s *IdentityService) CanUnlinkOwn(ctx context.Context, userID int) (bool, e
 
 // UnlinkOwn removes one of the caller's identities, but only while the
 // account can still sign in another way: its local password (when local
-// sign-in is on, or the account is break-glass), or another identity.
+// sign-in is on, or the account is break-glass), or another enabled identity.
 func (s *IdentityService) UnlinkOwn(ctx context.Context, userID int, identityID int64) error {
 	var removed *LinkedIdentity
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -71,7 +77,7 @@ func (s *IdentityService) UnlinkOwn(ctx context.Context, userID int, identityID 
 		if _, err := identityForUser(ctx, tx, userID, identityID); err != nil {
 			return err
 		}
-		identities, err := listIdentitiesForUser(ctx, tx, userID)
+		identities, err := usableIdentityCount(ctx, tx, userID, identityID)
 		if err != nil {
 			return err
 		}
@@ -89,7 +95,7 @@ func (s *IdentityService) UnlinkOwn(ctx context.Context, userID int, identityID 
 				}
 			}
 		}
-		if !canUseLocal && len(identities) < 2 {
+		if !canUseLocal && identities == 0 {
 			return ErrLastSignInMethod
 		}
 		removed, err = deleteIdentity(ctx, tx, userID, identityID)
@@ -109,8 +115,9 @@ type AdminLinkInput struct {
 	InstallationID int
 	// Identity carries the subject and optional display details; the
 	// provider refreshes the details at the next sign-in.
-	Identity ExternalIdentity
-	ActorID  int
+	Identity     ExternalIdentity
+	ActorID      int
+	ScopedAPIKey bool
 }
 
 // AdminLink links an account to an identity. The installation must have an
@@ -135,7 +142,7 @@ func (s *IdentityService) AdminLink(ctx context.Context, in AdminLinkInput) (*Li
 		if err := lockExternalSubject(ctx, tx, in.InstallationID, in.Identity.Subject); err != nil {
 			return err
 		}
-		user, err := lockUser(ctx, tx, in.UserID)
+		user, err := lockAdminIdentityTarget(ctx, tx, in.UserID, in.ActorID, in.ScopedAPIKey)
 		if err != nil {
 			return err
 		}
@@ -153,15 +160,61 @@ func (s *IdentityService) AdminLink(ctx context.Context, in AdminLinkInput) (*Li
 // AdminUnlink removes an identity from an account. The administrator may
 // leave the account without a sign-in method: setting a password for it
 // turns its local password sign-in back on.
-func (s *IdentityService) AdminUnlink(ctx context.Context, userID int, identityID int64, actorID int) error {
-	if _, err := userByID(ctx, s.pool, userID); err != nil {
+func (s *IdentityService) AdminUnlink(ctx context.Context, userID int, identityID int64, actorID int, scopedAPIKey bool) error {
+	var removed *LinkedIdentity
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := lockAdminIdentityTarget(ctx, tx, userID, actorID, scopedAPIKey); err != nil {
+			return err
+		}
+		var err error
+		removed, err = deleteIdentity(ctx, tx, userID, identityID)
 		return err
-	}
-	removed, err := deleteIdentity(ctx, s.pool, userID, identityID)
+	})
 	if err != nil {
 		return err
 	}
 	auditAuthEvent(ctx, "identity_unlinked", auditInstallationID, removed.InstallationID, auditUserID, userID,
 		"method", "admin", "actor_user_id", actorID)
 	return nil
+}
+
+// lockAdminIdentityTarget checks the actor and target in the transaction
+// that changes the identity. Both accounts are locked in ID order, as in
+// ownership transfer, so a promotion or transfer cannot change their
+// standing between authorization and the write.
+func lockAdminIdentityTarget(ctx context.Context, tx pgx.Tx, userID, actorID int, scopedAPIKey bool) (*models.User, error) {
+	rows, err := tx.Query(ctx, `SELECT `+allColumns+` FROM users WHERE id = ANY($1) ORDER BY id FOR UPDATE`, []int{userID, actorID})
+	if err != nil {
+		return nil, fmt.Errorf("locking identity management accounts: %w", err)
+	}
+	users, err := scanUsers(rows)
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	actor := OwnerActor{ID: actorID}
+	actorAllowed := actorID == 0
+	var target *models.User
+	for _, user := range users {
+		if user.ID == userID {
+			target = user
+		}
+		if user.ID == actorID {
+			actor.IsOwner = user.IsOwner
+			actorAllowed = user.Enabled && user.Role == models.RoleAdmin
+		}
+	}
+	if target == nil {
+		return nil, ErrNotFound
+	}
+	if !actorAllowed {
+		return nil, ErrNotPermitted
+	}
+	if scopedAPIKey && target.Role == models.RoleAdmin {
+		return nil, ErrScopedKeyAdminIdentity
+	}
+	if err := CheckOwnerTarget(actor, target); err != nil {
+		return nil, err
+	}
+	return target, nil
 }

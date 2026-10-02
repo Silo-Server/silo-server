@@ -12,6 +12,7 @@ import (
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -91,9 +92,9 @@ type AccountCheckerSource interface {
 // even though refresh keeps sliding them.
 //
 // At most one CheckAccount runs per (installation, subject) across all
-// nodes: the call runs inside a transaction holding the identity's advisory
-// lock (the lock sign-in takes too), and a rotated refresh_state is written
-// in that transaction, so the next call on any node presents it.
+// nodes: one connection holds the identity's advisory lock (the lock sign-in
+// takes too) through the call and the transaction that writes its answer,
+// so the next call on any node presents the rotated refresh_state.
 //
 // That write can be lost after the plugin spent the stored refresh token at
 // the provider: the call fails in transport, the node or plugin dies, or the
@@ -234,6 +235,9 @@ type recheckOutcome struct {
 	audit   []auditEvent
 	// asked reports that the plugin was called.
 	asked bool
+	// stateStored reports that replacement state was committed before the
+	// answer transaction, so a later account lock failure cannot lose it.
+	stateStored bool
 	// loadErr is this node failing to load the plugin (errCheckerLoad).
 	loadErr error
 	// err is a failure inside the savepoint (applyInSavepoint). For a
@@ -273,13 +277,9 @@ func (r *ProviderRecheck) recheck(ctx context.Context, identity *LinkedIdentity,
 	ctx = context.WithoutCancel(ctx)
 	checker, loadErr := r.resolveChecker(ctx, identity.InstallationID)
 	var out recheckOutcome
-	err := pgx.BeginFunc(ctx, r.resolver.pool, func(tx pgx.Tx) error {
-		out = recheckOutcome{}
-		return r.recheckTx(ctx, tx, identity, interval, checker, loadErr, &out)
-	})
+	err := r.recheckConn(ctx, identity, interval, checker, loadErr, &out)
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "55P03" && !out.asked {
+		if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == "55P03" && !out.asked {
 			// Another node's check of this identity is still running.
 			slog.WarnContext(ctx, "provider re-check is busy on another node; counting the provider as unavailable",
 				"component", "auth", auditInstallationID, identity.InstallationID, auditUserID, identity.UserID)
@@ -322,17 +322,42 @@ func (r *ProviderRecheck) resolveChecker(ctx context.Context, installationID int
 	return checker, err
 }
 
-func (r *ProviderRecheck) recheckTx(ctx context.Context, tx pgx.Tx, identity *LinkedIdentity, interval time.Duration, checker AccountChecker, loadErr error, out *recheckOutcome) error {
-	if _, err := tx.Exec(ctx, fmt.Sprintf(`SET LOCAL lock_timeout = '%dms'`, r.lockWait.Milliseconds())); err != nil {
-		return fmt.Errorf("setting lock timeout: %w", err)
-	}
-	if err := lockExternalSubject(ctx, tx, identity.InstallationID, identity.ExternalSubject); err != nil {
+// recheckConn holds a session advisory lock so the independently committed
+// call marker and the answer transaction can use the same connection.
+func (r *ProviderRecheck) recheckConn(ctx context.Context, identity *LinkedIdentity, interval time.Duration, checker AccountChecker, loadErr error, out *recheckOutcome) error {
+	conn, err := r.resolver.pool.Acquire(ctx)
+	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, fmt.Sprintf(`SET LOCAL lock_timeout = '%dms'`, r.writeWait.Milliseconds())); err != nil {
+	lockKey := fmt.Sprintf("silo:auth-identity:%d:%s", identity.InstallationID, identity.ExternalSubject)
+	locked := false
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), min(r.writeWait, 5*time.Second))
+		defer cancel()
+		if locked {
+			var unlocked bool
+			if err := conn.QueryRow(cleanupCtx, `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, lockKey).Scan(&unlocked); err != nil || !unlocked {
+				_ = conn.Hijack().Close(cleanupCtx)
+				return
+			}
+		}
+		if _, err := conn.Exec(cleanupCtx, `RESET lock_timeout`); err != nil {
+			_ = conn.Hijack().Close(cleanupCtx)
+			return
+		}
+		conn.Release()
+	}()
+	if _, err := conn.Exec(ctx, fmt.Sprintf(`SET lock_timeout = '%dms'`, r.lockWait.Milliseconds())); err != nil {
 		return fmt.Errorf("setting lock timeout: %w", err)
 	}
-	current, err := identityByID(ctx, tx, identity.ID)
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock(hashtextextended($1, 0))`, lockKey); err != nil {
+		return fmt.Errorf("locking external identity: %w", err)
+	}
+	locked = true
+	if _, err := conn.Exec(ctx, fmt.Sprintf(`SET lock_timeout = '%dms'`, r.writeWait.Milliseconds())); err != nil {
+		return fmt.Errorf("setting lock timeout: %w", err)
+	}
+	current, err := identityByID(ctx, conn, identity.ID)
 	if err != nil {
 		if errors.Is(err, ErrIdentityNotFound) {
 			return nil
@@ -347,7 +372,7 @@ func (r *ProviderRecheck) recheckTx(ctx context.Context, tx pgx.Tx, identity *Li
 	}
 	var outcomeUnknown bool
 	var pendingRefusal string
-	if err := tx.QueryRow(ctx, `SELECT check_outcome_unknown, pending_refusal FROM plugin_auth_identities WHERE id = $1`,
+	if err := conn.QueryRow(ctx, `SELECT check_outcome_unknown, pending_refusal FROM plugin_auth_identities WHERE id = $1`,
 		current.ID).Scan(&outcomeUnknown, &pendingRefusal); err != nil {
 		return fmt.Errorf("reading provider re-check outcome: %w", err)
 	}
@@ -357,80 +382,116 @@ func (r *ProviderRecheck) recheckTx(ctx context.Context, tx pgx.Tx, identity *Li
 		// with, so asking again could only answer unsupported: apply the
 		// refusal on record instead.
 		out.status = pendingRefusal
-		return r.applyInSavepoint(ctx, tx, current, pendingRefusal, nil, false, out)
+		return r.withRecheckIdentity(ctx, conn, current, out, func(tx pgx.Tx, linked *LinkedIdentity) error {
+			return r.applyInSavepoint(ctx, tx, linked, pendingRefusal, nil, false, out)
+		})
 	}
 	if errors.Is(loadErr, ErrProviderNotLoaded) {
 		// This node cannot ask: the answer is this node's, not the
 		// provider's, so nothing is stored for other nodes to act on.
-		out.status, err = notLoadedStatus(ctx, tx, current.InstallationID)
+		out.status, err = notLoadedStatus(ctx, conn, current.InstallationID)
 		if err != nil || out.status != CheckStatusUnsupported {
 			return err
 		}
 		// The installation is no longer an enabled sign-in provider, so
 		// nobody can re-check the account: its API keys and Audiobookshelf
 		// sessions get the bound of an unsupported answer.
-		staleAuth, err := r.staleProviderAuth(ctx, tx, current.ID)
-		if err != nil || !staleAuth {
-			return err
-		}
-		return r.applyAnswer(ctx, tx, current, CheckStatusUnsupported, nil, true, out)
+		return r.withRecheckIdentity(ctx, conn, current, out, func(tx pgx.Tx, linked *LinkedIdentity) error {
+			staleAuth, err := r.staleProviderAuth(ctx, tx, linked.ID)
+			if err != nil || !staleAuth {
+				return err
+			}
+			return r.applyAnswer(ctx, tx, linked, CheckStatusUnsupported, nil, true, out)
+		})
 	}
 	if loadErr != nil {
 		// Node-local too (errCheckerLoad): nothing is stored, and recheck
-		// reports the failure after the transaction.
+		// reports the failure after the connection is released.
 		out.loadErr = loadErr
-		return nil //nolint:nilerr // the transaction commits nothing; recheck returns out.loadErr.
+		return nil //nolint:nilerr // no answer is stored; recheck returns out.loadErr.
 	}
-	state, err := r.resolver.loadRefreshState(ctx, tx, current.ID)
+	state, err := r.resolver.loadRefreshState(ctx, conn, current.ID)
 	if err != nil {
 		return err
 	}
-	checkStatus, account := r.ask(ctx, current, checker, state)
+	checkStatus, account := r.ask(ctx, conn, current, checker, state)
 	out.status, out.asked = checkStatus, true
-	// Unlinking takes no subject lock, so the identity may be gone by now;
-	// its account then keeps its credentials. The row lock holds an unlink
-	// back until this answer commits.
-	if err := tx.QueryRow(ctx, `SELECT id FROM plugin_auth_identities WHERE id = $1 FOR UPDATE`, current.ID).Scan(new(int64)); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			out.status = ""
-			return nil
-		}
-		return fmt.Errorf("locking provider identity: %w", err)
-	}
-	if checkStatus == CheckStatusActive || isRefusal(checkStatus) {
-		// The plugin answered for the account with the state it was given,
-		// so that state was current; the answer commits with this
-		// transaction or not at all, and check_outcome_unknown stays set
-		// until it does. Any other answer may come from a plugin that never
-		// presented the stored token (a host failure before the call, a
-		// lost call, a plugin that cannot check yet), so it clears the flag
-		// only with a refresh_state it returns (storeRefreshState).
-		if _, err := tx.Exec(ctx, `UPDATE plugin_auth_identities SET check_outcome_unknown = FALSE WHERE id = $1`, current.ID); err != nil {
-			return fmt.Errorf("recording provider re-check outcome: %w", err)
-		}
-	}
-	// An identity whose previous answer was lost applies a refusal as
-	// unsupported when this call presented a stored refresh_state: the
-	// plugin may have presented a refresh token the lost call already
-	// rotated. A plugin that drops a refused token from its refresh_state
-	// (the OIDC plugin does) then answers unsupported until the next sign-in.
-	// A call without a stored state (LDAP checks the directory without one)
-	// presented no token a lost call could have rotated, so its refusal
-	// counts.
+	// A refusal of state whose previous outcome was lost cannot establish
+	// that the stored token is current: the provider may be refusing a token
+	// the lost call already rotated. Keep its uncertainty unless the plugin
+	// returns replacement state below. Without stored state (LDAP), the call
+	// presented no token a lost call could have rotated, so its refusal counts.
 	if outcomeUnknown && isRefusal(checkStatus) && len(state.GetFields()) > 0 {
 		slog.WarnContext(ctx, "provider refused an account whose previous re-check answer was lost; the refusal may be of a refresh token the provider already rotated, so it counts as unsupported",
 			"component", "auth", auditInstallationID, current.InstallationID, auditUserID, current.UserID, auditCheckStatus, checkStatus)
 		checkStatus = CheckStatusUnsupported
 		out.status = checkStatus
 	}
-
-	staleAuth := false
-	if checkStatus == CheckStatusUnsupported {
-		if staleAuth, err = r.staleProviderAuth(ctx, tx, current.ID); err != nil {
+	// A replacement may already be the only token the provider accepts.
+	// Commit it before waiting for account locks, with no identity row lock
+	// retained while an unlink could hold the account. Cleared state stays
+	// in the answer transaction so a refusal clears it with revocation.
+	if replacement := account.GetRefreshState(); len(replacement.GetFields()) > 0 {
+		if err := r.resolver.storeRefreshState(ctx, conn, current.ID, replacement); err != nil {
 			return err
 		}
+		out.stateStored = true
 	}
-	return r.applyInSavepoint(ctx, tx, current, checkStatus, account, staleAuth, out)
+	err = r.withRecheckIdentity(ctx, conn, current, out, func(tx pgx.Tx, linked *LinkedIdentity) error {
+		current = linked
+		if checkStatus == CheckStatusActive || isRefusal(checkStatus) {
+			// The plugin answered for the account with the state it was given,
+			// so that state was current; the answer commits with this
+			// transaction or not at all, and check_outcome_unknown stays set
+			// until it does. Any other answer may come from a plugin that never
+			// presented the stored token (a host failure before the call, a
+			// lost call, a plugin that cannot check yet), so it clears the flag
+			// only with a refresh_state it returns (storeRefreshState).
+			if _, err := tx.Exec(ctx, `UPDATE plugin_auth_identities SET check_outcome_unknown = FALSE WHERE id = $1`, current.ID); err != nil {
+				return fmt.Errorf("recording provider re-check outcome: %w", err)
+			}
+		}
+		staleAuth := false
+		if checkStatus == CheckStatusUnsupported {
+			if staleAuth, err = r.staleProviderAuth(ctx, tx, current.ID); err != nil {
+				return err
+			}
+		}
+		return r.applyInSavepoint(ctx, tx, current, checkStatus, account, staleAuth, out)
+	})
+	if err != nil && isRefusal(checkStatus) {
+		// The account or identity lock can fail before the savepoint runs.
+		// Keep the known refusal after rollback too: the replacement state
+		// may already have discarded the token the provider refused.
+		if recordErr := recordPendingRefusal(ctx, conn, current.ID, checkStatus); recordErr != nil {
+			return errors.Join(err, recordErr)
+		}
+	}
+	return err
+}
+
+// withRecheckIdentity serializes the answer with unlinking. The provider
+// call can outlast an unlink, so lock the user first and read the identity
+// again before writing state or changing the account's credentials.
+func (r *ProviderRecheck) withRecheckIdentity(ctx context.Context, conn *pgxpool.Conn, identity *LinkedIdentity, out *recheckOutcome, apply func(pgx.Tx, *LinkedIdentity) error) error {
+	return pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
+		if _, err := lockUser(ctx, tx, identity.UserID); err != nil {
+			if IsNotFound(err) {
+				out.status = ""
+				return nil
+			}
+			return err
+		}
+		current, err := scanIdentity(tx.QueryRow(ctx, `SELECT `+identityColumns+` FROM plugin_auth_identities WHERE id = $1 FOR UPDATE`, identity.ID))
+		if errors.Is(err, ErrIdentityNotFound) {
+			out.status = ""
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		return apply(tx, current)
+	})
 }
 
 // isRefusal reports whether checkStatus is the provider refusing the
@@ -472,7 +533,7 @@ func (r *ProviderRecheck) applyInSavepoint(ctx context.Context, tx pgx.Tx, ident
 	revoking := revokingAnswer(checkStatus, staleAuth)
 	state := account.GetRefreshState()
 	clearsWithRevocation := revoking && state != nil && len(state.GetFields()) == 0
-	if !clearsWithRevocation {
+	if !clearsWithRevocation && !out.stateStored {
 		if err := r.resolver.storeRefreshState(ctx, tx, identity.ID, state); err != nil {
 			return err
 		}
@@ -505,10 +566,15 @@ func (r *ProviderRecheck) applyInSavepoint(ctx context.Context, tx pgx.Tx, ident
 		return err
 	}
 	if isRefusal(checkStatus) {
-		if _, err := tx.Exec(ctx, `UPDATE plugin_auth_identities SET pending_refusal = $2, updated_at = NOW() WHERE id = $1`,
-			identity.ID, checkStatus); err != nil {
-			return fmt.Errorf("recording the provider refusal: %w", err)
-		}
+		return recordPendingRefusal(ctx, tx, identity.ID, checkStatus)
+	}
+	return nil
+}
+
+func recordPendingRefusal(ctx context.Context, db dbQuerier, identityID int64, checkStatus string) error {
+	if _, err := db.Exec(ctx, `UPDATE plugin_auth_identities SET pending_refusal = $2,
+		check_outcome_unknown = FALSE, updated_at = NOW() WHERE id = $1`, identityID, checkStatus); err != nil {
+		return fmt.Errorf("recording the provider refusal: %w", err)
 	}
 	return nil
 }
@@ -581,6 +647,11 @@ func (r *ProviderRecheck) applyAnswer(ctx context.Context, tx pgx.Tx, identity *
 			if _, err := tx.Exec(ctx, `UPDATE auth_sessions SET revoked_at = NOW()
 				WHERE identity_id = $1 AND user_id = $2 AND revoked_at IS NULL`, identity.ID, identity.UserID); err != nil {
 				return fmt.Errorf("revoking provider sessions: %w", err)
+			}
+			if _, err := tx.Exec(ctx, `UPDATE device_login_requests SET status = $3, updated_at = NOW()
+				WHERE approved_identity_id = $1 AND approved_by_user_id = $2 AND status = $4`,
+				identity.ID, identity.UserID, DeviceLoginStatusDenied, DeviceLoginStatusApproved); err != nil {
+				return fmt.Errorf("withdrawing provider device sign-in approvals: %w", err)
 			}
 			out.revoked = true
 			out.audit = append(out.audit, auditEvent{"recheck_revoked", []any{
@@ -796,11 +867,11 @@ func notLoadedStatus(ctx context.Context, db dbQuerier, installationID int) (str
 // response's external_subject and denial are ignored. A call that fails
 // after it may have reached the plugin has an unknown outcome: the
 // identity's check_outcome_unknown, committed before the call, stays set.
-func (r *ProviderRecheck) ask(ctx context.Context, identity *LinkedIdentity, checker AccountChecker, state *structpb.Struct) (checkStatus string, account *pluginv1.AuthenticateResponse) {
+func (r *ProviderRecheck) ask(ctx context.Context, db dbQuerier, identity *LinkedIdentity, checker AccountChecker, state *structpb.Struct) (checkStatus string, account *pluginv1.AuthenticateResponse) {
 	if checker == nil {
 		return CheckStatusUnsupported, nil
 	}
-	if err := r.markOutcomeUnknown(ctx, identity.ID); err != nil {
+	if err := r.markOutcomeUnknown(ctx, db, identity.ID); err != nil {
 		slog.WarnContext(ctx, "provider re-check could not record the call it was about to make; not calling the plugin", "component", "auth",
 			auditInstallationID, identity.InstallationID, "error", err)
 		return CheckStatusUnavailable, nil
@@ -823,13 +894,13 @@ func (r *ProviderRecheck) ask(ctx context.Context, identity *LinkedIdentity, che
 }
 
 // markOutcomeUnknown commits check_outcome_unknown on the identity before the
-// plugin is called. It runs outside the re-check's transaction, which has
-// not written the row yet, so it neither waits on that transaction nor rolls
-// back with it.
-func (r *ProviderRecheck) markOutcomeUnknown(ctx context.Context, identityID int64) error {
+// plugin is called. The connection holds the identity's session advisory
+// lock, but has not begun the answer transaction, so the marker survives a
+// failed call or answer transaction without needing a second connection.
+func (r *ProviderRecheck) markOutcomeUnknown(ctx context.Context, db dbQuerier, identityID int64) error {
 	markCtx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
-	if _, err := r.resolver.pool.Exec(markCtx, `UPDATE plugin_auth_identities SET check_outcome_unknown = TRUE WHERE id = $1`, identityID); err != nil {
+	if _, err := db.Exec(markCtx, `UPDATE plugin_auth_identities SET check_outcome_unknown = TRUE WHERE id = $1`, identityID); err != nil {
 		return fmt.Errorf("recording provider re-check call: %w", err)
 	}
 	return nil
@@ -975,17 +1046,19 @@ type sessionProviderChain struct {
 }
 
 // sessionProviderChainOf returns the provider chain of the session
-// sessionID, for a device sign-in approved from that session. Empty for a
-// local, impersonation or unknown session.
+// sessionID, for a device sign-in approved from that session. The caller
+// holds the account's row lock, serializing this session lock and the device
+// approval with account-wide revocation. Empty for a local session.
 func sessionProviderChainOf(ctx context.Context, db dbQuerier, sessionID string, userID int) (sessionProviderChain, error) {
 	var chain sessionProviderChain
 	if sessionID == "" {
-		return chain, nil
+		return chain, ErrSessionRevoked
 	}
 	err := db.QueryRow(ctx, `SELECT identity_id, provider_since FROM auth_sessions
-		WHERE id = $1 AND user_id = $2 AND impersonator_user_id IS NULL`, sessionID, userID).Scan(&chain.identityID, &chain.providerSince)
+		WHERE id = $1 AND user_id = $2 AND impersonator_user_id IS NULL
+			AND revoked_at IS NULL AND expires_at > NOW() FOR UPDATE`, sessionID, userID).Scan(&chain.identityID, &chain.providerSince)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return sessionProviderChain{}, nil
+		return sessionProviderChain{}, ErrSessionRevoked
 	}
 	if err != nil {
 		return sessionProviderChain{}, fmt.Errorf("reading session identity: %w", err)

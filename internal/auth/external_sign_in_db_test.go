@@ -683,11 +683,72 @@ func TestIdentityServiceDB(t *testing.T) {
 		t.Fatalf("unlink with password = %v", err)
 	}
 	// The administrator may unlink the provider-created account's identity.
-	if err := svc.AdminUnlink(ctx, created.ID, identities[0].ID, 0); err != nil {
+	if err := svc.AdminUnlink(ctx, created.ID, identities[0].ID, 0, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.AdminUnlink(ctx, created.ID, identities[0].ID, 0); !errors.Is(err, ErrIdentityNotFound) {
+	if err := svc.AdminUnlink(ctx, created.ID, identities[0].ID, 0, false); !errors.Is(err, ErrIdentityNotFound) {
 		t.Fatalf("second unlink = %v", err)
+	}
+}
+
+func TestIdentityServiceRequiresEnabledFallbackDB(t *testing.T) {
+	for _, disabled := range []string{"binding", "installation"} {
+		t.Run(disabled, func(t *testing.T) {
+			env := newExternalSignInEnv(t)
+			ctx := t.Context()
+			user, err := env.resolve(t, env.identity("old-provider"), true, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			old := env.identityRow(t, env.identity("old-provider").Subject)
+			if _, err := env.pool.Exec(ctx, `UPDATE plugin_auth_bindings SET enabled = true WHERE plugin_installation_id = $1`, env.installationID); err != nil {
+				t.Fatal(err)
+			}
+			var currentInstallation int
+			if err := env.pool.QueryRow(ctx, `INSERT INTO plugin_installations (plugin_id, version, install_path, enabled, update_policy, kind)
+				VALUES ($1, '0', '/nonexistent/identity-fallback-test', true, 'manual', 'plugin') RETURNING id`,
+				"identity-fallback-"+env.suffix).Scan(&currentInstallation); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				_, _ = env.pool.Exec(context.WithoutCancel(ctx), `DELETE FROM plugin_installations WHERE id = $1`, currentInstallation)
+			})
+			if _, err := env.pool.Exec(ctx, `INSERT INTO plugin_auth_bindings (plugin_installation_id, capability_id, enabled) VALUES ($1, 'oidc', false)`, currentInstallation); err != nil {
+				t.Fatal(err)
+			}
+			svc := NewIdentityService(env.pool)
+			current, err := svc.AdminLink(ctx, AdminLinkInput{UserID: user.ID, InstallationID: currentInstallation,
+				Identity: ExternalIdentity{Subject: "current-" + env.suffix}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if disabled == "binding" {
+				_, err = env.pool.Exec(ctx, `UPDATE plugin_auth_bindings SET enabled = false WHERE plugin_installation_id = $1`, env.installationID)
+			} else {
+				_, err = env.pool.Exec(ctx, `UPDATE plugin_installations SET enabled = false WHERE id = $1`, env.installationID)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := env.pool.Exec(ctx, `UPDATE plugin_auth_bindings SET enabled = true WHERE plugin_installation_id = $1`, currentInstallation); err != nil {
+				t.Fatal(err)
+			}
+			if can, err := svc.CanUnlinkOwn(ctx, user.ID); err != nil || can {
+				t.Fatalf("can unlink the only enabled identity = %v, %v", can, err)
+			}
+			if err := svc.UnlinkOwn(ctx, user.ID, current.ID); !errors.Is(err, ErrLastSignInMethod) {
+				t.Fatalf("unlink the only enabled identity = %v", err)
+			}
+			// The inactive link may still be removed: the current provider is
+			// a usable fallback, even while the collection flag is conservative.
+			if err := svc.UnlinkOwn(ctx, user.ID, old.ID); err != nil {
+				t.Fatalf("unlink the disabled provider = %v", err)
+			}
+			identities, err := svc.ListForUser(ctx, user.ID)
+			if err != nil || len(identities) != 1 || identities[0].ID != current.ID {
+				t.Fatalf("remaining identities = %+v, %v", identities, err)
+			}
+		})
 	}
 }
 

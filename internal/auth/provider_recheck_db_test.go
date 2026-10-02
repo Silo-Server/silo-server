@@ -664,6 +664,7 @@ func TestProviderRecheckSessionIdentityDB(t *testing.T) {
 
 	// A device approved from a provider session inherits its identity.
 	providerSession, _ := env.session(t, true)
+	localSession, _ := env.session(t, false)
 	devices := NewDeviceLoginService(env.pool, NewUserRepository(env.pool), env.jwt, NewSessionRepository(env.pool), nil, nil)
 	deviceName := "recheck-device-" + env.suffix
 	t.Cleanup(func() {
@@ -675,7 +676,7 @@ func TestProviderRecheckSessionIdentityDB(t *testing.T) {
 		wantNil bool
 	}{
 		{"provider session", &Claims{UserID: env.user.ID, SessionID: providerSession, TokenType: TokenTypeAccess}, false},
-		{"api key", &Claims{UserID: env.user.ID, TokenType: TokenTypeAPIKey}, true},
+		{"local session", &Claims{UserID: env.user.ID, SessionID: localSession, TokenType: TokenTypeAccess}, true},
 	} {
 		start, err := devices.Start(ctx, DeviceLoginStartInput{DeviceName: deviceName, BaseURL: "https://media.example.test/"})
 		if err != nil {

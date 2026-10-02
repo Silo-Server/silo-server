@@ -360,43 +360,45 @@ func (s *DeviceLoginService) Approve(ctx context.Context, input DeviceLoginLooku
 		return ErrDeviceLoginConflict
 	}
 
-	chain, err := s.approvingProviderChain(ctx, approverUserID)
-	if err != nil {
-		return err
-	}
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		chain, err := s.approvingProviderChain(ctx, tx, approverUserID)
+		if err != nil {
+			return err
+		}
 
-	now := time.Now().UTC()
-	tag, err := s.pool.Exec(ctx, `
-		UPDATE device_login_requests
-		SET status = $2,
-			approved_by_user_id = $3,
-			approved_at = $4,
-			approved_identity_id = $7,
-			approved_provider_since = $8,
-			denied_at = NULL,
-			updated_at = $4
-		WHERE id = $1
-			AND status = $5
-			AND client_purpose = $6
-			AND temporary = FALSE
-			AND expires_at > NOW()
-	`,
-		record.ID,
-		DeviceLoginStatusApproved,
-		approverUserID,
-		now,
-		DeviceLoginStatusPending,
-		DeviceLoginPurposeLogin,
-		chain.identityID,
-		chain.providerSince,
-	)
-	if err != nil {
-		return fmt.Errorf("approve device login: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return s.reloadApprovalState(ctx, record.ID, approverUserID, "")
-	}
-	return nil
+		now := time.Now().UTC()
+		tag, err := tx.Exec(ctx, `
+			UPDATE device_login_requests
+			SET status = $2,
+				approved_by_user_id = $3,
+				approved_at = $4,
+				approved_identity_id = $7,
+				approved_provider_since = $8,
+				denied_at = NULL,
+				updated_at = $4
+			WHERE id = $1
+				AND status = $5
+				AND client_purpose = $6
+				AND temporary = FALSE
+				AND expires_at > NOW()
+		`,
+			record.ID,
+			DeviceLoginStatusApproved,
+			approverUserID,
+			now,
+			DeviceLoginStatusPending,
+			DeviceLoginPurposeLogin,
+			chain.identityID,
+			chain.providerSince,
+		)
+		if err != nil {
+			return fmt.Errorf("approve device login: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return s.reloadApprovalState(ctx, tx, record.ID, approverUserID, "")
+		}
+		return nil
+	})
 }
 
 // ApproveRemotePlayback approves a temporary device-login request for the
@@ -433,56 +435,70 @@ func (s *DeviceLoginService) ApproveRemotePlayback(
 		return ErrDeviceLoginConflict
 	}
 
-	chain, err := s.approvingProviderChain(ctx, approverUserID)
-	if err != nil {
-		return err
-	}
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		chain, err := s.approvingProviderChain(ctx, tx, approverUserID)
+		if err != nil {
+			return err
+		}
 
-	now := time.Now().UTC()
-	tag, err := s.pool.Exec(ctx, `
-		UPDATE device_login_requests
-		SET status = $2,
-			approved_by_user_id = $3,
-			approved_profile_id = $4,
-			approved_at = $5,
-			approved_identity_id = $8,
-			approved_provider_since = $9,
-			denied_at = NULL,
-			updated_at = $5
-		WHERE id = $1
-			AND status = $6
-			AND client_purpose = $7
-			AND temporary = TRUE
-			AND expires_at > NOW()
-	`,
-		record.ID,
-		DeviceLoginStatusApproved,
-		approverUserID,
-		profileID,
-		now,
-		DeviceLoginStatusPending,
-		DeviceLoginPurposeRemote,
-		chain.identityID,
-		chain.providerSince,
-	)
-	if err != nil {
-		return fmt.Errorf("approve remote playback login: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return s.reloadApprovalState(ctx, record.ID, approverUserID, profileID)
-	}
-	return nil
+		now := time.Now().UTC()
+		tag, err := tx.Exec(ctx, `
+			UPDATE device_login_requests
+			SET status = $2,
+				approved_by_user_id = $3,
+				approved_profile_id = $4,
+				approved_at = $5,
+				approved_identity_id = $8,
+				approved_provider_since = $9,
+				denied_at = NULL,
+				updated_at = $5
+			WHERE id = $1
+				AND status = $6
+				AND client_purpose = $7
+				AND temporary = TRUE
+				AND expires_at > NOW()
+		`,
+			record.ID,
+			DeviceLoginStatusApproved,
+			approverUserID,
+			profileID,
+			now,
+			DeviceLoginStatusPending,
+			DeviceLoginPurposeRemote,
+			chain.identityID,
+			chain.providerSince,
+		)
+		if err != nil {
+			return fmt.Errorf("approve remote playback login: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return s.reloadApprovalState(ctx, tx, record.ID, approverUserID, profileID)
+		}
+		return nil
+	})
 }
 
-// approvingProviderChain returns the provider chain of the approving login
-// session, so a device approved from a session opened through an external
-// provider gets a session the provider re-check covers too.
-func (s *DeviceLoginService) approvingProviderChain(ctx context.Context, approverUserID int) (sessionProviderChain, error) {
-	var approvingSessionID string
-	if claims := ClaimsFromContext(ctx); claims != nil && claims.UserID == approverUserID && claims.TokenType != TokenTypeAPIKey {
-		approvingSessionID = claims.SessionID
+// approvingProviderChain locks the approving account and its current login
+// session before the device row is changed. Provider re-checks take that
+// account lock before revoking sessions and withdrawing approvals, so a
+// request authenticated before a revocation cannot approve afterwards.
+func (s *DeviceLoginService) approvingProviderChain(ctx context.Context, tx pgx.Tx, approverUserID int) (sessionProviderChain, error) {
+	user, err := lockUser(ctx, tx, approverUserID)
+	if err != nil {
+		return sessionProviderChain{}, err
 	}
-	return sessionProviderChainOf(ctx, s.pool, approvingSessionID, approverUserID)
+	if !user.Enabled {
+		return sessionProviderChain{}, ErrUserDisabled
+	}
+	claims := ClaimsFromContext(ctx)
+	if claims == nil {
+		// Trusted internal callers can approve directly as the account.
+		return sessionProviderChain{}, nil
+	}
+	if claims.UserID != approverUserID || !claims.IsOwnLoginSession() {
+		return sessionProviderChain{}, ErrSessionRevoked
+	}
+	return sessionProviderChainOf(ctx, tx, claims.SessionID, approverUserID)
 }
 
 // markOpened records the first approver lookup of a pending request and
@@ -608,61 +624,66 @@ func (s *DeviceLoginService) Deny(ctx context.Context, input DeviceLoginLookupIn
 	return nil
 }
 
+// deviceLoginPollState answers a request that cannot be collected now.
+// An approved, live request returns nil so Poll can collect under row locks.
+func deviceLoginPollState(record *deviceLoginRecord) (*DeviceLoginPollResult, error) {
+	if isDeviceLoginExpired(record) {
+		return &DeviceLoginPollResult{Status: DeviceLoginStatusExpired, PollAfter: int(deviceLoginPollInterval.Seconds())}, nil
+	}
+	switch record.Status {
+	case DeviceLoginStatusApproved:
+		return nil, nil
+	case DeviceLoginStatusPending, DeviceLoginStatusCanceled, DeviceLoginStatusDenied, DeviceLoginStatusConsumed:
+		result := &DeviceLoginPollResult{Status: record.Status, PollAfter: int(deviceLoginPollInterval.Seconds())}
+		if record.Status == DeviceLoginStatusPending {
+			result.Opened = record.OpenedAt != nil
+			result.ExpiresAt = record.ExpiresAt
+		}
+		return result, nil
+	default:
+		return nil, fmt.Errorf("unexpected device login status %q", record.Status)
+	}
+}
+
 func (s *DeviceLoginService) Poll(ctx context.Context, deviceCode string) (*DeviceLoginPollResult, error) {
+	// The approver is immutable once assigned. Read it before taking the
+	// device lock so collection and revocation both lock user -> device;
+	// inserting a session while holding only the device row would invert
+	// the user foreign-key lock against account-wide revocation.
+	preview, err := scanDeviceLogin(s.pool.QueryRow(ctx, deviceLoginSelectColumns+`
+		WHERE device_code_hash = $1`, hashDeviceLoginSecret(strings.TrimSpace(deviceCode))))
+	if err != nil {
+		return nil, err
+	}
+	if result, err := deviceLoginPollState(preview); result != nil || err != nil {
+		return result, err
+	}
+	if preview.ApprovedByUserID == nil {
+		return nil, ErrDeviceLoginUnapproved
+	}
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin device login poll: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	user, err := lockUser(ctx, tx, *preview.ApprovedByUserID)
+	if err != nil {
+		return nil, fmt.Errorf("load approved user: %w", err)
+	}
 
 	record, err := s.getByDeviceCodeTx(ctx, tx, deviceCode)
 	if err != nil {
 		return nil, err
 	}
 
-	if isDeviceLoginExpired(record) {
-		return &DeviceLoginPollResult{
-			Status:    DeviceLoginStatusExpired,
-			PollAfter: int(deviceLoginPollInterval.Seconds()),
-		}, nil
+	if result, err := deviceLoginPollState(record); result != nil || err != nil {
+		return result, err
 	}
-
-	switch record.Status {
-	case DeviceLoginStatusPending:
-		return &DeviceLoginPollResult{
-			Status:    DeviceLoginStatusPending,
-			PollAfter: int(deviceLoginPollInterval.Seconds()),
-			Opened:    record.OpenedAt != nil,
-			ExpiresAt: record.ExpiresAt,
-		}, nil
-	case DeviceLoginStatusCanceled:
-		return &DeviceLoginPollResult{
-			Status:    DeviceLoginStatusCanceled,
-			PollAfter: int(deviceLoginPollInterval.Seconds()),
-		}, nil
-	case DeviceLoginStatusDenied:
-		return &DeviceLoginPollResult{
-			Status:    DeviceLoginStatusDenied,
-			PollAfter: int(deviceLoginPollInterval.Seconds()),
-		}, nil
-	case DeviceLoginStatusConsumed:
-		return &DeviceLoginPollResult{
-			Status:    DeviceLoginStatusConsumed,
-			PollAfter: int(deviceLoginPollInterval.Seconds()),
-		}, nil
-	case DeviceLoginStatusApproved:
-	default:
-		return nil, fmt.Errorf("unexpected device login status %q", record.Status)
-	}
-
-	if record.ApprovedByUserID == nil {
+	if record.ApprovedByUserID == nil || *record.ApprovedByUserID != user.ID {
 		return nil, ErrDeviceLoginUnapproved
 	}
 
-	user, err := s.users.GetByID(ctx, *record.ApprovedByUserID)
-	if err != nil {
-		return nil, fmt.Errorf("load approved user: %w", err)
-	}
 	if !user.Enabled {
 		return nil, ErrUserDisabled
 	}
@@ -845,8 +866,8 @@ func (s *DeviceLoginService) getByHash(ctx context.Context, column, hash string)
 	return record, nil
 }
 
-func (s *DeviceLoginService) getByID(ctx context.Context, id string) (*deviceLoginRecord, error) {
-	row := s.pool.QueryRow(ctx, deviceLoginSelectColumns+`
+func (s *DeviceLoginService) getByID(ctx context.Context, db dbQuerier, id string) (*deviceLoginRecord, error) {
+	row := db.QueryRow(ctx, deviceLoginSelectColumns+`
 		WHERE id = $1
 	`, id)
 	return scanDeviceLogin(row)
@@ -863,11 +884,12 @@ func (s *DeviceLoginService) getByDeviceCodeTx(ctx context.Context, tx pgx.Tx, d
 
 func (s *DeviceLoginService) reloadApprovalState(
 	ctx context.Context,
+	db dbQuerier,
 	recordID string,
 	approverUserID int,
 	profileID string,
 ) error {
-	record, err := s.getByID(ctx, recordID)
+	record, err := s.getByID(ctx, db, recordID)
 	if err != nil {
 		return err
 	}
@@ -892,7 +914,7 @@ func (s *DeviceLoginService) reloadApprovalState(
 }
 
 func (s *DeviceLoginService) reloadDenyState(ctx context.Context, recordID string) error {
-	record, err := s.getByID(ctx, recordID)
+	record, err := s.getByID(ctx, s.pool, recordID)
 	if err != nil {
 		return err
 	}

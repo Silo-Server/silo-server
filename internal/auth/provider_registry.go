@@ -177,6 +177,7 @@ func (r *PluginProviderRegistry) providerFor(ctx context.Context, binding *plugi
 	displayName := binding.CapabilityID
 	mode := ProviderModeCredentials
 	iconURL := ""
+	matched := false
 	capabilities, err := r.cfg.Installations.ListCapabilities(ctx, binding.InstallationID)
 	if err != nil {
 		return RegisteredProvider{}, fmt.Errorf("list capabilities of plugin installation %d: %w", binding.InstallationID, err)
@@ -185,6 +186,7 @@ func (r *PluginProviderRegistry) providerFor(ctx context.Context, binding *plugi
 		if capability == nil || capability.Type != sdkcapability.AuthProvider || capability.ID != binding.CapabilityID {
 			continue
 		}
+		matched = true
 		if name, ok := capability.Metadata[configKeyDisplayName].(string); ok && strings.TrimSpace(name) != "" {
 			displayName = name
 		}
@@ -193,6 +195,9 @@ func (r *PluginProviderRegistry) providerFor(ctx context.Context, binding *plugi
 			iconURL = url
 		}
 		break
+	}
+	if !matched {
+		return RegisteredProvider{}, fmt.Errorf("auth capability %q not found in plugin installation %d", binding.CapabilityID, binding.InstallationID)
 	}
 	// The operator names the button and its icon in global config
 	// (display_name, icon_url_path); manifest values are the fallback. While

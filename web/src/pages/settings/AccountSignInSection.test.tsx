@@ -166,6 +166,8 @@ it("disconnects while the local password still signs in", async () => {
   await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("Disconnected Company SSO"));
   expect(opCalls("DELETE /api/v2/account/identities/{id}")[0]?.options).toEqual({
     path: { id: "4" },
+    profileContext: undefined,
+    retryAuthentication: false,
   });
   await screen.findByRole("button", { name: "Connect Company SSO" });
 });
@@ -196,9 +198,13 @@ it("connects an OAuth provider after the local password, in this browser", async
   );
   expect(opCalls("POST /api/v2/account/identities/link-ticket")[0]?.options).toEqual({
     body: { installation_id: "5", password: "local pw" },
+    profileContext: undefined,
+    retryAuthentication: false,
   });
   expect(opCalls("POST /api/v2/account/identities/link-start")[0]?.options).toEqual({
     body: { link_ticket: "t-1", next: "/settings/account" },
+    profileContext: undefined,
+    retryAuthentication: false,
   });
 });
 
@@ -250,6 +256,8 @@ it("connects a directory with its username and password", async () => {
       username: "alice",
       directory_password: "dir pw",
     },
+    profileContext: undefined,
+    retryAuthentication: false,
   });
   // The list is read again and shows the new identity.
   await screen.findByText("alice · alice@example.test");

@@ -44,8 +44,8 @@ func (f *handshakeCompleter) ResolveOAuthLogin(_ context.Context, in auth.OAuthL
 	return &models.User{ID: 1}, 0, nil
 }
 
-func (f *handshakeCompleter) OpenOAuthSession(context.Context, auth.OAuthSessionDB, auth.OAuthCompletion) (*auth.TokenPair, error) {
-	return &auth.TokenPair{AccessToken: "synthetic-access", RefreshToken: "synthetic-refresh", ExpiresIn: 60, SessionID: "s1"}, nil
+func (f *handshakeCompleter) OpenOAuthSession(_ context.Context, _ auth.OAuthSessionDB, c auth.OAuthCompletion) (*auth.TokenPair, error) {
+	return &auth.TokenPair{AccessToken: "synthetic-access", RefreshToken: "synthetic-refresh", ExpiresIn: 60, SessionID: "s1", User: &models.User{ID: c.UserID}}, nil
 }
 
 func (f *handshakeCompleter) LinkOAuthIdentity(_ context.Context, in auth.OAuthLoginInput) (*models.User, error) {

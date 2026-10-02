@@ -3,7 +3,6 @@ package apiv2
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
@@ -179,21 +178,10 @@ func (reg *Registry) completeOAuthLogin(ctx context.Context, in *CompleteOAuthLo
 		}
 		return nil, serviceProblem(err)
 	}
-	if c.UserID <= 0 {
+	if c.UserID <= 0 || c.User == nil || c.User.ID != c.UserID {
 		return nil, NewProblem(TypeInvalidToken, "The completion code is invalid, used, or expired.")
 	}
-	view, err := reg.deps.Accounts.CurrentUser(ctx, &auth.Claims{UserID: c.UserID, SessionID: c.SessionID, TokenType: auth.TokenTypeAccess})
-	if err != nil {
-		// The code is spent and its session open, but the client never
-		// receives the tokens: end that session; the client starts the
-		// sign-in again.
-		if reg.deps.Sessions != nil {
-			if revokeErr := reg.deps.Sessions.RevokeSession(ctx, c.SessionID, c.UserID); revokeErr != nil {
-				slog.WarnContext(ctx, "oauth completion session revocation failed", "component", "auth", "error", revokeErr)
-			}
-		}
-		return nil, serviceProblem(err)
-	}
+	view := reg.deps.Accounts.OAuthUserView(ctx, c.User)
 	return &CompleteOAuthLoginOutput{Body: OAuthCompletion{AccessToken: c.AccessToken, RefreshToken: c.RefreshToken, ExpiresIn: c.ExpiresIn, Next: c.NextURL, User: accountFromView(view)}}, nil
 }
 

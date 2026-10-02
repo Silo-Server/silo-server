@@ -138,14 +138,16 @@ func TestCompleteOAuthLogin(t *testing.T) {
 	deps.OAuth = nil
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodPost, "/api/v2/auth/oauth/complete", `{"code":"c0de"}`, nil), TypeDependencyUnavailable)
 
-	// The code is spent once redeemed: an account lookup that fails after
-	// redemption ends the session the client never receives tokens for.
+	// Redemption already supplies the account: a separate account lookup
+	// failure cannot strand the tokens or revoke the new session.
 	deps = pilotDeps(nil, nil)
 	deps.Accounts = fakeAccounts{err: errors.New("database unavailable")}
 	sessions := &fakeSessionService{}
 	deps.Sessions = sessions
-	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodPost, "/api/v2/auth/oauth/complete", `{"code":"c0de"}`, completionCookie), TypeInternalError)
-	if len(sessions.revoked) != 1 || sessions.revoked[0] != "s1" {
-		t.Fatalf("revoked = %v, want the redeemed code's session", sessions.revoked)
+	if rec := do(t, newTestHandler(t, deps), http.MethodPost, "/api/v2/auth/oauth/complete", `{"code":"c0de"}`, completionCookie); rec.Code != http.StatusOK {
+		t.Fatalf("redemption with account snapshot: %d %s", rec.Code, rec.Body.String())
+	}
+	if len(sessions.revoked) != 0 {
+		t.Fatalf("successful redemption revoked sessions: %v", sessions.revoked)
 	}
 }

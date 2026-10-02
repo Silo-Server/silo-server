@@ -473,6 +473,13 @@ func (h *AuthHandler) CurrentUser(ctx context.Context, claims *auth.Claims) (Use
 	return buildUserResponse(user, effectiveDownloadAllowed(ctx, user, h.accessGroups), claims.ImpersonatorUserID, impersonator), nil
 }
 
+// OAuthUserView projects the account read while redemption opened its login
+// session. Reading that account again could lose an already-redeemed login
+// during a temporary database failure.
+func (h *AuthHandler) OAuthUserView(ctx context.Context, user *models.User) UserView {
+	return buildUserResponse(user, effectiveDownloadAllowed(ctx, user, h.accessGroups), nil, nil)
+}
+
 // HandleListSessions handles GET /auth/sessions. Requires authentication.
 func (h *AuthHandler) HandleListSessions(w http.ResponseWriter, r *http.Request) {
 	claims, err := h.extractClaims(r)

@@ -47,6 +47,9 @@ type TokenPair struct {
 	ExpiresIn    int // seconds until access token expires
 	// SessionID is the login session the pair authenticates.
 	SessionID string
+	// User is the account read while an OAuth completion opens its session.
+	// Other token-pair paths return their account separately.
+	User *models.User
 }
 
 // SettingsGetter retrieves server settings by key.
@@ -165,28 +168,24 @@ func (s *Service) Login(ctx context.Context, username, password, deviceName, ip 
 // a login without a provider (see routePasswordLogin): directory users of a
 // credentials plugin sign in with their directory password.
 func (s *Service) CompatLogin(ctx context.Context, username, password, deviceName, ip string) (*TokenPair, *models.User, error) {
-	providerID, err := s.routePasswordLogin(ctx, username)
-	if err != nil {
-		return nil, nil, err
-	}
-	return s.loginWithProvider(ctx, providerID, username, password, deviceName, ip, true)
+	pair, user, _, err := s.CompatLoginWithLocalFallback(ctx, username, password, "", deviceName, ip)
+	return pair, user, err
 }
 
-// CompatLoginLocal is CompatLogin for a retry with a different password: it
-// checks the password only when the name routes to the local provider, and
-// answers ErrInvalidCredentials without contacting a directory otherwise,
-// where each failed bind counts toward the account's lockout. Routing is
-// decided again here, so a name that moved to the directory since the first
-// attempt gets no second bind.
-func (s *Service) CompatLoginLocal(ctx context.Context, username, password, deviceName, ip string) (*TokenPair, *models.User, error) {
+// CompatLoginWithLocalFallback selects a provider once and retries a rejected
+// password only with that local provider. It reports whether fallback succeeded
+// so the caller can verify the PIN it split from the original password.
+func (s *Service) CompatLoginWithLocalFallback(ctx context.Context, username, password, fallback, deviceName, ip string) (*TokenPair, *models.User, bool, error) {
 	providerID, err := s.routePasswordLogin(ctx, username)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
-	if providerID != LocalProviderID {
-		return nil, nil, ErrInvalidCredentials
+	pair, user, err := s.loginWithProvider(ctx, providerID, username, password, deviceName, ip, true)
+	if providerID != LocalProviderID || fallback == "" || !errors.Is(err, ErrInvalidCredentials) {
+		return pair, user, false, err
 	}
-	return s.loginWithProvider(ctx, LocalProviderID, username, password, deviceName, ip, true)
+	pair, user, err = s.loginWithProvider(ctx, LocalProviderID, username, fallback, deviceName, ip, true)
+	return pair, user, err == nil, err
 }
 
 func (s *Service) LoginWithProvider(
@@ -349,25 +348,31 @@ func (s *Service) ResolveOAuthLogin(ctx context.Context, in OAuthLoginInput) (*m
 }
 
 // OpenOAuthSession opens the login session of a completion code being
-// redeemed, on db (nil: the pool), and mints its token pair. The account is
-// read again, so one disabled since the callback is refused.
+// redeemed, on db (nil: a new transaction), and mints its token pair. The
+// account is locked and read again, so one disabled since the callback is
+// refused and account changes serialize with the session's creation.
 func (s *Service) OpenOAuthSession(ctx context.Context, db OAuthSessionDB, c OAuthCompletion) (*TokenPair, error) {
-	var (
-		user *models.User
-		err  error
-		exec sessionExecQuerier = s.sessions.pool
-	)
-	if db != nil {
-		user, err = userByID(ctx, db, c.UserID)
-		exec = db
-	} else {
-		user, err = s.users.GetByID(ctx, c.UserID)
+	if db == nil {
+		var pair *TokenPair
+		err := pgx.BeginFunc(ctx, s.sessions.pool, func(tx pgx.Tx) error {
+			var err error
+			pair, err = s.OpenOAuthSession(ctx, tx, c)
+			return err
+		})
+		if err != nil {
+			return nil, err
+		}
+		return pair, nil
 	}
+	user, err := lockUser(ctx, db, c.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("load oauth account: %w", err)
 	}
 	if !user.Enabled {
 		return nil, ErrUserDisabled
+	}
+	if err := lockOAuthIdentity(ctx, db, user.ID, c.IdentityID); err != nil {
+		return nil, err
 	}
 	sessionID := uuid.New().String()
 	session := models.AuthSession{
@@ -378,15 +383,57 @@ func (s *Service) OpenOAuthSession(ctx context.Context, db OAuthSessionDB, c OAu
 		ExpiresAt:  time.Now().Add(s.jwt.RefreshExpiry()),
 		IdentityID: identityRef(c.IdentityID),
 	}
-	if err := s.sessions.createWithQuerier(ctx, exec, session); err != nil {
+	if err := s.sessions.createWithQuerier(ctx, db, session); err != nil {
 		return nil, fmt.Errorf("creating session: %w", err)
 	}
-	return s.generateTokenPair(Claims{
+	pair, err := s.generateTokenPair(Claims{
 		UserID:                 user.ID,
 		Role:                   user.Role,
 		SessionID:              sessionID,
 		PasswordChangeRequired: user.PasswordChangeRequired,
 	})
+	if err != nil {
+		return nil, err
+	}
+	pair.User = user
+	return pair, nil
+}
+
+// lockOAuthIdentity checks the identity and enabled installation after
+// the account is locked. Lock the installation before the identity so an
+// uninstall, which deletes identities by cascade, cannot deadlock with us.
+func lockOAuthIdentity(ctx context.Context, db OAuthSessionDB, userID int, identityID int64) error {
+	var installationID int
+	err := db.QueryRow(ctx, `SELECT plugin_installation_id FROM plugin_auth_identities
+		WHERE id = $1 AND user_id = $2`, identityID, userID).Scan(&installationID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotPermitted
+	}
+	if err != nil {
+		return fmt.Errorf("read oauth identity: %w", err)
+	}
+	var enabled bool
+	err = db.QueryRow(ctx, `SELECT enabled FROM plugin_installations WHERE id = $1 FOR SHARE`, installationID).Scan(&enabled)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotPermitted
+	}
+	if err != nil {
+		return fmt.Errorf("lock oauth installation: %w", err)
+	}
+	if !enabled {
+		return ErrProviderUnavailable
+	}
+	var lockedIdentityID int64
+	err = db.QueryRow(ctx, `SELECT id FROM plugin_auth_identities
+		WHERE id = $1 AND user_id = $2 AND plugin_installation_id = $3 FOR UPDATE`,
+		identityID, userID, installationID).Scan(&lockedIdentityID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotPermitted
+	}
+	if err != nil {
+		return fmt.Errorf("lock oauth identity: %w", err)
+	}
+	return nil
 }
 
 // LinkOAuthIdentity finishes a linking flow: the identity the plugin
@@ -538,7 +585,49 @@ func (s *Service) loginWithProvider(
 		IdentityID: identityRef(identityID),
 	}
 
-	if err := s.sessions.Create(ctx, session); err != nil {
+	if providerID == LocalProviderID {
+		// Linking and account changes hold this row lock while retiring local
+		// credentials. Recheck the authenticated snapshot before inserting a
+		// session so an in-flight login cannot outlive their revocation.
+		err = pgx.BeginFunc(ctx, s.users.pool, func(tx pgx.Tx) error {
+			current, err := lockUser(ctx, tx, user.ID)
+			if IsNotFound(err) {
+				return ErrInvalidCredentials
+			}
+			if err != nil {
+				return err
+			}
+			if !current.LocalPasswordLoginEnabled || current.PasswordHash != user.PasswordHash {
+				return ErrInvalidCredentials
+			}
+			if !current.Enabled {
+				return ErrUserDisabled
+			}
+			if refusePasswordChange && current.PasswordChangeRequired {
+				return ErrPasswordChangeRequired
+			}
+			if !current.BreakGlass {
+				if err := lockServerSettings(ctx, tx); err != nil {
+					return err
+				}
+				allowed, err := localPasswordLoginAllowed(ctx, tx)
+				if err != nil {
+					return err
+				}
+				if !allowed {
+					return ErrLocalLoginDisabled
+				}
+			}
+			if err := s.sessions.createWithQuerier(ctx, tx, session); err != nil {
+				return err
+			}
+			user = current
+			return nil
+		})
+	} else {
+		err = s.sessions.Create(ctx, session)
+	}
+	if err != nil {
 		return nil, nil, fmt.Errorf("creating session: %w", err)
 	}
 

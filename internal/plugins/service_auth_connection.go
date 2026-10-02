@@ -63,11 +63,16 @@ func (s *Service) TestAuthProviderConnection(ctx context.Context, installationID
 	if err != nil {
 		return AuthConnectionTestResult{}, err
 	}
+	seenKeys := make(map[string]bool, len(staged))
 	for _, entry := range staged {
 		key := strings.TrimSpace(entry.Key)
 		if key == "" {
 			return AuthConnectionTestResult{}, &ConfigValidationError{Message: "config key is required"}
 		}
+		if seenKeys[key] {
+			return AuthConnectionTestResult{}, &ConfigValidationError{Message: "duplicate config key: " + key}
+		}
+		seenKeys[key] = true
 		merged, err := s.prepareStagedGlobalConfig(ctx, installationID, pluginManifest, key, entry.Value, entry.ClearSecrets, func(err error) error {
 			return &ConfigValidationError{Message: err.Error(), Cause: err}
 		})

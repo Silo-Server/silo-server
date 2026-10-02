@@ -217,6 +217,9 @@ func (r *Repository) Accept(ctx context.Context, tokenHash string, provision fun
 	if !eligible {
 		return nil, ErrNotFound
 	}
+	if err := auth.EnsureLocalPasswordLoginAllowedInTransaction(ctx, tx); err != nil {
+		return nil, err
+	}
 	user, err := provision(inv, tx)
 	if err != nil {
 		return nil, err

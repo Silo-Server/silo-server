@@ -72,7 +72,12 @@ func (f *fakeCompleter) OpenOAuthSession(_ context.Context, _ OAuthSessionDB, c 
 		return nil, f.openErr
 	}
 	f.opened = append(f.opened, c)
-	return f.pair, nil
+	if f.pair == nil {
+		return nil, nil
+	}
+	pair := *f.pair
+	pair.User = f.user
+	return &pair, nil
 }
 
 func (f *fakeCompleter) LinkOAuthIdentity(_ context.Context, in OAuthLoginInput) (*models.User, error) {

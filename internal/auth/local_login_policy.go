@@ -58,6 +58,22 @@ func localPasswordLoginAllowed(ctx context.Context, db rowQuerier) (bool, error)
 	return readBoolSetting(ctx, db, config.AuthLocalPasswordLoginSettingKey, true)
 }
 
+// EnsureLocalPasswordLoginAllowedInTransaction serializes local account
+// creation with settings changes, so a refused signup cannot spend an invite.
+func EnsureLocalPasswordLoginAllowedInTransaction(ctx context.Context, tx pgx.Tx) error {
+	if err := lockServerSettings(ctx, tx); err != nil {
+		return err
+	}
+	allowed, err := localPasswordLoginAllowed(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return ErrLocalLoginDisabled
+	}
+	return nil
+}
+
 func emailAutoMatchEnabled(ctx context.Context, db rowQuerier) (bool, error) {
 	return readBoolSetting(ctx, db, config.AuthEmailAutoMatchSettingKey, false)
 }

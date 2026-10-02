@@ -70,18 +70,11 @@ func (r *LoginResolver) Resolve(ctx context.Context, combinedUsername, password,
 	basePw, pinCandidate := splitPasswordPIN(password)
 	// CompatLogin refuses a temporary password: Jellyfin clients cannot run the
 	// password change it requires.
-	tokenPair, user, err := r.authService.CompatLogin(ctx, accountUsername, password, userAgent, remoteIP)
-	if err != nil && basePw != "" && errors.Is(err, auth.ErrInvalidCredentials) {
-		// Full password failed and there's a # — try the base portion, on a
-		// local account only.
-		tokenPair, user, err = r.authService.CompatLoginLocal(ctx, accountUsername, basePw, userAgent, remoteIP)
-		if err != nil {
-			return nil, mapAuthError(err)
-		}
-		// basePw succeeded; pinCandidate holds the extracted PIN.
-	} else if err != nil {
+	tokenPair, user, usedFallback, err := r.authService.CompatLoginWithLocalFallback(ctx, accountUsername, password, basePw, userAgent, remoteIP)
+	if err != nil {
 		return nil, mapAuthError(err)
-	} else {
+	}
+	if !usedFallback {
 		// Full password succeeded — no PIN was split out.
 		pinCandidate = ""
 	}

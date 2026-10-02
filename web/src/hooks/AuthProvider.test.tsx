@@ -6,6 +6,7 @@ import type { LoginResponse, Profile } from "@/api/types";
 import { v2Fixture } from "@/api/v2/testing";
 import listAuthProvidersOk from "../../../contracts/api/v2/fixtures/list_auth_providers_ok.json";
 import { storage } from "@/utils/storage";
+import { queryClient } from "@/lib/query-client";
 import { wasSignedOut } from "@/lib/externalSignIn";
 import { AuthProvider, useAuth } from "./useAuth";
 
@@ -56,11 +57,15 @@ vi.mock("@/api/v2/providerLogout", () => ({
   endSessionWithProvider: endSessionWithProviderMock,
 }));
 
-vi.mock("@/lib/query-client", () => ({
-  queryClient: {
-    clear: queryClientClearMock,
-  },
-}));
+vi.mock("@/lib/query-client", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/query-client")>("@/lib/query-client");
+  const clear = actual.queryClient.clear.bind(actual.queryClient);
+  actual.queryClient.clear = () => {
+    queryClientClearMock();
+    clear();
+  };
+  return actual;
+});
 
 function makeProfile(id: string, name: string): Profile {
   return {
@@ -187,6 +192,8 @@ function AccountRefreshProbe() {
 
 describe("AuthProvider", () => {
   beforeEach(() => {
+    queryClientClearMock.mockReset();
+    queryClient.clear();
     vi.clearAllMocks();
     Object.values(storage.KEYS).forEach((key) => storage.remove(key));
 
