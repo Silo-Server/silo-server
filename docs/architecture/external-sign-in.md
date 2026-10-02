@@ -556,7 +556,8 @@ refreshing. The host therefore asks the provider again.
   `UNSUPPORTED`.
   A sign-in through the provider, or any recorded answer, clears it. For
   any other answer, the answer is written before the savepoint too, so a
-  failed role sync cannot lose it.
+  failed role sync cannot lose it. An `ACTIVE` answer whose role sync fails
+  keeps the check due, so the next refresh asks again and applies the role.
 - **Lost answers.** The rotated state can still be lost after the plugin
   spent the stored token at the provider: the call fails in transport, the
   node or the plugin dies, or saving its replacement state fails. Before each

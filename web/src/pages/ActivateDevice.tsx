@@ -135,6 +135,8 @@ export default function ActivateDevice() {
       const body = token ? { token } : { code };
       if (action === "approve") {
         await v2("POST /api/v2/auth/device/approve", { body });
+        // The reload below may fail; the watch still has to start.
+        setDetails((current) => (current ? { ...current, status: "approved" } : current));
         setApprovedHere(true);
       } else {
         await v2("POST /api/v2/auth/device/deny", { body });

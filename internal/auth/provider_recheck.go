@@ -521,8 +521,10 @@ func revokingAnswer(checkStatus string, staleAuth bool) bool {
 // the savepoint, so they commit only with the revocation: a revocation that
 // fails rolls them back, and the next refresh asks again with the kept token
 // instead of finding a refusal on record with nothing revoked. Any other
-// answer is stored before the savepoint, so a failed role sync keeps it.
-// Either way a failure is reported to the refresh (out.err).
+// answer is stored before the savepoint, so a failed role sync keeps it; an
+// ACTIVE answer whose role sync fails leaves the check due, so the role is
+// synced on the next refresh. Either way a failure is reported to the
+// refresh (out.err).
 //
 // A refusal whose savepoint rolls back is kept as the identity's
 // pending_refusal, outside the savepoint, and the next re-check applies it
@@ -567,6 +569,15 @@ func (r *ProviderRecheck) applyInSavepoint(ctx context.Context, tx pgx.Tx, ident
 	}
 	if isRefusal(checkStatus) {
 		return recordPendingRefusal(ctx, tx, identity.ID, checkStatus)
+	}
+	if checkStatus == CheckStatusActive {
+		// The role sync did not apply, so a demotion the provider asked
+		// for is still pending: the check stays as due as it was, and the
+		// next refresh asks again.
+		if _, err := tx.Exec(ctx, `UPDATE plugin_auth_identities SET last_checked_at = $2 WHERE id = $1`,
+			identity.ID, identity.LastCheckedAt); err != nil {
+			return fmt.Errorf("keeping the provider re-check due: %w", err)
+		}
 	}
 	return nil
 }

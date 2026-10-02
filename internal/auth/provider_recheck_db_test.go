@@ -958,6 +958,15 @@ func TestProviderRecheckKeepsRotatedStateOnLaterFailureDB(t *testing.T) {
 	if got := env.identityState(t).LastCheckStatus; got != CheckStatusActive {
 		t.Fatalf("status = %q", got)
 	}
+	// The role sync did not run, so the check stays due: the next refresh
+	// asks again with the rotated token.
+	env.checker.respond = answer(pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_ACTIVE, "rt-3")
+	if _, err := env.svc.Refresh(t.Context(), refresh); err != nil {
+		t.Fatalf("refresh after the lock = %v", err)
+	}
+	if env.checker.callCount() != 2 || env.checker.states[1] != "rt-2" {
+		t.Fatalf("calls = %d, states = %v; want a second check with rt-2", env.checker.callCount(), env.checker.states)
+	}
 }
 
 // TestProviderRecheckEmptyProfileFieldsKeepStoredDB: an ACTIVE answer's
@@ -1834,12 +1843,18 @@ func TestProviderRecheckPluginLoadFailureDB(t *testing.T) {
 	var lockHeld atomic.Bool
 	env.recheck.source = funcCheckerSource(func(ctx context.Context, _ int) (AccountChecker, error) {
 		loads.Add(1)
+		// A session lock belongs to its connection: probe and release on one.
+		conn, err := env.pool.Acquire(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer conn.Release()
 		var free bool
-		if err := env.pool.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtextextended($1, 0))`, lockKey).Scan(&free); err != nil {
+		if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtextextended($1, 0))`, lockKey).Scan(&free); err != nil {
 			return nil, err
 		}
 		if free {
-			_, _ = env.pool.Exec(ctx, `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, lockKey)
+			_, _ = conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, lockKey)
 		} else {
 			lockHeld.Store(true)
 		}

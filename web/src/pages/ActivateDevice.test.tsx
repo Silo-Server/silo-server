@@ -150,6 +150,20 @@ it("follows an approval until the TV collects it", async () => {
   await screen.findByText("Your TV is signed in.");
 });
 
+it("follows an approval whose reload failed", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  lookups = [pending, new Error("offline") as never, { ...pending, status: "consumed" }];
+  mount("/activate?code=48217730");
+  await screen.findByText("Sign in Living room TV?");
+  fireEvent.click(screen.getByRole("button", { name: "Sign in TV" }));
+  await screen.findByText("Done. Your TV is signing in.");
+  expect(screen.queryByRole("button", { name: "Sign in TV" })).toBeNull();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(3000);
+  });
+  await screen.findByText("Your TV is signed in.");
+});
+
 it("keeps watching past the first minutes and through a failed lookup", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   const approved = { ...pending, status: "approved" };

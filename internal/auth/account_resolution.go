@@ -124,8 +124,12 @@ func (r *AccountResolver) resolve(ctx context.Context, tx pgx.Tx, in ResolveInpu
 
 	// 1. Identity already linked.
 	if linked != nil {
-		if in.LinkingUserID != 0 && linked.UserID != in.LinkingUserID {
-			return ErrIdentityLinkedElsewhere
+		if in.LinkingUserID != 0 {
+			if linked.UserID != in.LinkingUserID {
+				return ErrIdentityLinkedElsewhere
+			}
+			// A linking flow for the identity the account already holds.
+			return ErrAccountAlreadyLinked
 		}
 		user, err := lockUser(ctx, tx, linked.UserID)
 		if err != nil {

@@ -306,6 +306,10 @@ func TestExternalSignInLinkingFlowDB(t *testing.T) {
 	if _, err := env.resolve(t, env.identity("dave-second"), false, local.ID); !errors.Is(err, ErrAccountAlreadyLinked) {
 		t.Fatalf("err = %v, want ErrAccountAlreadyLinked", err)
 	}
+	// Linking the identity the account already holds is refused the same way.
+	if _, err := env.resolve(t, identity, false, local.ID); !errors.Is(err, ErrAccountAlreadyLinked) {
+		t.Fatalf("relink: err = %v, want ErrAccountAlreadyLinked", err)
+	}
 	// A break-glass admin keeps its local password when linked.
 	admin := env.localAccount(t, "glass", models.RoleAdmin)
 	if _, err := env.pool.Exec(t.Context(), `UPDATE users SET break_glass = true WHERE id = $1`, admin.ID); err != nil {

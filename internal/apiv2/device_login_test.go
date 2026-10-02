@@ -69,6 +69,12 @@ func TestStartDeviceLogin(t *testing.T) {
 	if rec.Code != 201 || !contains(rec.Body.String(), `"verification_uri_complete":"https://media.example.test/activate?code=48217730"`) {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
+	// A public URL with a path keeps it.
+	pub.ServerConnections.PublicURL = func() string { return "https://Example.test/silo/" }
+	rec = do(t, newTestHandler(t, pub), http.MethodPost, "/api/v2/auth/device/start", `{}`, nil)
+	if rec.Code != 201 || !contains(rec.Body.String(), `"verification_uri":"https://example.test/silo/activate"`) {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
 	// An unusable public URL falls back to the device's origin.
 	pub.ServerConnections.PublicURL = func() string { return "not a url" }
 	rec = do(t, newTestHandler(t, pub), http.MethodPost, "/api/v2/auth/device/start", `{}`,

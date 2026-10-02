@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -295,12 +297,16 @@ func (reg *Registry) getDeviceLoginCapability(_ context.Context, _ *CapabilityIn
 }
 
 // deviceLoginBaseURL is where the approver's verification page lives: the
-// configured public URL when there is one, since a phone off the TV's
-// network can't open a LAN address, otherwise the origin the device used.
+// configured public URL, with any path it is served under, when there is
+// one, since a phone off the TV's network can't open a LAN address;
+// otherwise the origin the device used.
 func (reg *Registry) deviceLoginBaseURL(r *http.Request) string {
 	if reg.deps.ServerConnections.PublicURL != nil {
-		if origin, ok := netaccess.NormalizeOrigin(reg.deps.ServerConnections.PublicURL()); ok {
-			return origin
+		publicURL := strings.TrimSpace(reg.deps.ServerConnections.PublicURL())
+		if origin, ok := netaccess.NormalizeOrigin(publicURL); ok {
+			if u, err := url.Parse(publicURL); err == nil {
+				return origin + strings.TrimRight(u.EscapedPath(), "/")
+			}
 		}
 	}
 	if r == nil {
