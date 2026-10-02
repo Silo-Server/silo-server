@@ -173,7 +173,47 @@ func TestPersonRefreshReportsRateLimit(t *testing.T) {
 	repo = newFakePersonRefreshRepo(models.Person{ID: 12, Name: "Answered", TmdbID: "12"})
 	service = &PersonRefreshService{repo: repo}
 	answered := stubPersonProvider{slug: "tvdb", detail: &PersonDetailResult{Name: "Answered"}}
-	if _, err := service.refreshPersonWithProviders(context.Background(), 12, []Provider{limited, answered}); err != nil {
-		t.Fatalf("error = %v, want nil when another provider answered", err)
+	person, err := service.refreshPersonWithProviders(context.Background(), 12, []Provider{limited, answered})
+	if person == nil || !slices.Equal(repo.outcomes, []catalog.PersonRefreshOutcome{catalog.PersonRefreshAnswered}) {
+		t.Fatalf("person %v, outcomes %v; want the answer stored", person, repo.outcomes)
+	}
+	// The rate limit still reaches the sweep, which would otherwise ask the
+	// limited provider again for every person in its backlog.
+	var answeredLimited *PersonAnsweredRateLimitedError
+	if !errors.As(err, &answeredLimited) || errors.Is(err, ErrPersonMetadataNotFound) {
+		t.Fatalf("error = %v, want a PersonAnsweredRateLimitedError", err)
+	}
+	// Callers that only want the person don't see it.
+	if got, err := withoutAnsweredRateLimit(person, err); got != person || err != nil {
+		t.Fatalf("withoutAnsweredRateLimit = %v, %v; want the person and no error", got, err)
+	}
+}
+
+// Providers are resolved after the attempt is recorded, so a failure to
+// resolve them backs off as a failed lookup; a skipped lookup resolves none.
+func TestPersonRefreshRecordsFailureWhenProvidersCannotBeResolved(t *testing.T) {
+	repo := newFakePersonRefreshRepo(models.Person{ID: 13, Name: "Unresolved", TmdbID: "13"})
+	service := &PersonRefreshService{repo: repo}
+	broken := func(context.Context) ([]Provider, error) { return nil, errors.New("plugin store unavailable") }
+	if _, err := service.refreshPerson(context.Background(), 13, broken, time.Time{}); err == nil {
+		t.Fatal("refreshed without providers")
+	}
+	if len(repo.refreshAttempts) != 1 || !slices.Equal(repo.outcomes, []catalog.PersonRefreshOutcome{catalog.PersonRefreshFailed}) {
+		t.Fatalf("attempts %v, outcomes %v; want one attempt that failed", repo.refreshAttempts, repo.outcomes)
+	}
+
+	// Another lookup started after the claim.
+	person := repo.persons[13]
+	started := time.Now()
+	person.MetadataRefreshAttemptedAt = &started
+	repo.persons[13] = person
+	resolved := false
+	counting := func(context.Context) ([]Provider, error) { resolved = true; return nil, nil }
+	repo.outcomes = nil
+	if _, err := service.refreshPerson(context.Background(), 13, counting, started.Add(-time.Hour)); err != nil || resolved {
+		t.Fatalf("skipped lookup: err %v, resolved %v; want neither", err, resolved)
+	}
+	if len(repo.outcomes) != 0 {
+		t.Fatalf("skipped lookup recorded %v", repo.outcomes)
 	}
 }

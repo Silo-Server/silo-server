@@ -311,6 +311,11 @@ func (w *PersonRefreshWorker) paused() bool {
 // in done.
 func (w *PersonRefreshWorker) runManual(done map[int64]struct{}) {
 	for {
+		// A stopping worker finishes the lookup in progress and starts no
+		// more, as each can take up to RefreshTimeout.
+		if w.stopped() {
+			return
+		}
 		w.mu.Lock()
 		if len(w.manualQueue) == 0 {
 			w.mu.Unlock()
@@ -350,7 +355,10 @@ func (w *PersonRefreshWorker) refresh(id int64, since time.Time) error {
 	ctx, cancel := context.WithTimeout(context.Background(), w.config.RefreshTimeout)
 	defer cancel()
 	_, err := w.service.RefreshPersonUnlessStartedSince(ctx, id, since)
-	if err != nil {
+	// A rate-limited lookup, answered or not, is logged when the worker
+	// pauses for it.
+	var limited rateLimitedLookup
+	if err != nil && !errors.As(err, &limited) {
 		slog.Warn("person refresh worker: refresh failed", "person_id", id, "error", err)
 	}
 	return err

@@ -199,6 +199,27 @@ func TestPersonRefreshWorkerSkipsClaimedPersonQueuedOnDemand(t *testing.T) {
 	}
 }
 
+// A stopped worker finishes the on-demand lookup in progress and starts no
+// more of them.
+func TestPersonRefreshWorkerStopsBetweenOnDemandRequests(t *testing.T) {
+	service := &fakePersonRefresher{}
+	w := newTestPersonRefreshWorker(service)
+	for _, id := range []int64{1, 2, 3} {
+		w.Enqueue(id, nil)
+	}
+	service.onRefresh = func(id int64) {
+		if id == 1 {
+			w.Stop()
+		}
+	}
+
+	w.runManual(map[int64]struct{}{})
+
+	if want := []int64{1}; !slices.Equal(service.refreshed, want) {
+		t.Fatalf("refreshed %v, want %v", service.refreshed, want)
+	}
+}
+
 // A stopped worker finishes the lookup in progress and starts no more.
 func TestPersonRefreshWorkerStopsMidBatch(t *testing.T) {
 	service := &fakePersonRefresher{batches: [][]int64{{1, 2, 3}, {4, 5, 6}}}
