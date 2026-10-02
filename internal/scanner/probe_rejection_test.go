@@ -446,3 +446,103 @@ func TestProbeInputReadableReadsBothEnds(t *testing.T) {
 		t.Fatal("a directory reported as a readable media file")
 	}
 }
+
+// rejectingProbeFunc runs a fake ffprobe that exits 1, so the error is the
+// real *exec.ExitError IsProbeRejection classifies, after calling before.
+func rejectingProbeFunc(t *testing.T, before func()) func(context.Context, string, string) (*ProbeData, error) {
+	t.Helper()
+	ffprobe := writeRejectingFFprobe(t)
+	return func(ctx context.Context, _ string, path string) (*ProbeData, error) {
+		if before != nil {
+			before()
+		}
+		return ProbeFile(ctx, ffprobe, path)
+	}
+}
+
+// A scan that probes a replacement file while the playback repair's ffprobe
+// is failing on the old bytes wins: the repair answers with the stored,
+// repaired row instead of the stale snapshot it marked locally.
+func TestPlaybackProbeEnsurerPrefersConcurrentRepairOverRejection(t *testing.T) {
+	media := filepath.Join(t.TempDir(), "S01E09.mkv")
+	if err := os.WriteFile(media, []byte("replacement bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file := &models.MediaFile{ID: 10, FilePath: media}
+	repo := &probeRepairTestRepository{files: map[int]*models.MediaFile{file.ID: file}}
+	ensurer := &PlaybackProbeEnsurer{fileRepo: repo, ffprobePath: "ffprobe", timeout: 5 * time.Second}
+	ensurer.probeFile = rejectingProbeFunc(t, func() {
+		repaired := *file
+		applyProbeData(&repaired, completeProbeRepairTestData(), "local")
+		repo.mu.Lock()
+		repo.files[file.ID] = &repaired
+		repo.mu.Unlock()
+	})
+
+	got, err := ensurer.EnsureProbeOnly(t.Context(), file)
+	if err != nil {
+		t.Fatalf("EnsureProbeOnly: %v", err)
+	}
+	if got.ProbeRejected() || got.ProbeUpdatedAt == nil || got.CodecVideo == "" {
+		t.Fatalf("returned %+v, want the concurrently repaired row", got)
+	}
+	if stored := repo.files[file.ID]; stored.ProbeFailedAt != nil {
+		t.Fatalf("repaired row marked failed at %v", stored.ProbeFailedAt)
+	}
+}
+
+// The same race against the real repository: the conditional mark skips a
+// row a concurrent probe repaired, and the repair returns the stored row.
+func TestPlaybackProbeEnsurerRejectionRacePostgres(t *testing.T) {
+	pool := newDeadRootTestPool(t)
+	ctx := t.Context()
+	folderID := seedDeadRootTestFolder(t, pool, "movies", "Probe rejection race")
+	repo := NewFileRepository(pool)
+	dir := t.TempDir()
+	insert := func(name string) *models.MediaFile {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("bytes"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		row, err := repo.Upsert(ctx, models.MediaFile{
+			MediaFolderID: folderID, FilePath: path, FileSize: 5,
+			SubtitleTracks: []models.SubtitleTrack{}, ExternalSubtitles: []models.ExternalSubtitle{},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return row
+	}
+
+	damaged := insert("damaged.mkv")
+	ensurer := NewPlaybackProbeEnsurer(repo, "ffprobe", "", 5*time.Second)
+	ensurer.probeFile = rejectingProbeFunc(t, nil)
+	got, err := ensurer.EnsureProbeOnly(ctx, damaged)
+	if err != nil || got == nil || !got.ProbeRejected() {
+		t.Fatalf("damaged file: got %+v err %v, want the stored rejection", got, err)
+	}
+	if stored, err := repo.GetByID(ctx, damaged.ID); err != nil || stored.ProbeFailedAt == nil {
+		t.Fatalf("damaged file not marked in the database: %+v %v", stored, err)
+	}
+
+	replaced := insert("replaced.mkv")
+	ensurer = NewPlaybackProbeEnsurer(repo, "ffprobe", "", 5*time.Second)
+	ensurer.probeFile = rejectingProbeFunc(t, func() {
+		repaired := *replaced
+		applyProbeData(&repaired, completeProbeRepairTestData(), "local")
+		if _, err := repo.Upsert(ctx, repaired); err != nil {
+			t.Errorf("concurrent repair: %v", err)
+		}
+	})
+	got, err = ensurer.EnsureProbeOnly(ctx, replaced)
+	if err != nil {
+		t.Fatalf("replaced file: %v", err)
+	}
+	if got.ProbeRejected() || got.ProbeUpdatedAt == nil || got.CodecVideo == "" {
+		t.Fatalf("replaced file returned %+v, want the concurrently repaired row", got)
+	}
+	if stored, err := repo.GetByID(ctx, replaced.ID); err != nil || stored.ProbeFailedAt != nil {
+		t.Fatalf("repaired row marked failed: %+v %v", stored, err)
+	}
+}
