@@ -4,6 +4,7 @@ import type { PluginInstallation } from "@/api/types";
 import { ProviderTile, ProviderTileGrid } from "@/components/settings/ProviderTile";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { installationConfigReady } from "@/lib/pluginConfigReady";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
 
@@ -58,7 +59,7 @@ function pluginWatchProviders(installations: PluginInstallation[]): PluginWatchP
 
 export default function WatchSyncSettings() {
   const navigate = useNavigate();
-  const { data: installations, isLoading } = useAdminPluginInstallations();
+  const { data: installations, isLoading, isError, refetch } = useAdminPluginInstallations();
   const providers = pluginWatchProviders(installations ?? []);
 
   if (isLoading) {
@@ -87,7 +88,14 @@ export default function WatchSyncSettings() {
 
       <FieldGroup label="Watch providers">
         <div className="py-3.5">
-          {providers.length > 0 ? (
+          {isError ? (
+            <div role="alert" className="flex flex-wrap items-center gap-3 text-sm">
+              <span>Couldn&apos;t load the installed watch provider plugins.</span>
+              <Button type="button" size="sm" variant="outline" onClick={() => void refetch()}>
+                Retry
+              </Button>
+            </div>
+          ) : providers.length > 0 ? (
             <ProviderTileGrid>
               {providers.map((provider) => (
                 <ProviderTile

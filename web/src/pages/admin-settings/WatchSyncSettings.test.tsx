@@ -1,4 +1,5 @@
 import { render as renderDOM, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -6,13 +7,17 @@ import type { PluginInstallation } from "@/api/types";
 
 import WatchSyncSettings from "./WatchSyncSettings";
 
-let pluginInstallations: Partial<PluginInstallation>[] = [];
+let pluginInstallations: Partial<PluginInstallation>[] | undefined = [];
 let installationsLoading = false;
+let installationsError = false;
+const refetchInstallations = vi.fn();
 
 vi.mock("@/hooks/queries/admin/plugins", () => ({
   useAdminPluginInstallations: () => ({
     data: pluginInstallations,
     isLoading: installationsLoading,
+    isError: installationsError,
+    refetch: refetchInstallations,
   }),
 }));
 
@@ -24,6 +29,21 @@ describe("WatchSyncSettings", () => {
   beforeEach(() => {
     pluginInstallations = [];
     installationsLoading = false;
+    installationsError = false;
+    refetchInstallations.mockReset();
+  });
+
+  it("reports a failed load instead of claiming nothing is installed", async () => {
+    pluginInstallations = undefined;
+    installationsError = true;
+    render(<WatchSyncSettings />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Couldn't load the installed watch provider plugins.",
+    );
+    expect(screen.queryByText("No watch provider plugins are installed.")).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Retry" }));
+    expect(refetchInstallations).toHaveBeenCalled();
   });
 
   it("heads the page and says when no provider is installed", () => {
