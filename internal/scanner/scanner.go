@@ -27,21 +27,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/themesongs"
 )
 
-// videoExtensions is the set of file extensions recognized as media files.
-var videoExtensions = map[string]bool{
-	".mkv": true,
-	".mp4": true,
-	".avi": true,
-	".m4v": true,
-	".ts":  true,
-	".wmv": true,
-}
-
-// SupportsVideoFile reports whether the given path uses a recognized media extension.
-func SupportsVideoFile(filePath string) bool {
-	return videoExtensions[strings.ToLower(filepath.Ext(filePath))]
-}
-
 // ignoredDirNames is the set of directory names skipped during scanning.
 var ignoredDirNames = map[string]bool{
 	".recyclebin":  true,
@@ -453,24 +438,34 @@ func walkModeFor(folderType string) walkMode {
 	}
 }
 
-// acceptsExt reports whether the given lowercased extension belongs to
-// the file types this walk mode is looking for.
-func (m walkMode) acceptsExt(ext string) bool {
+// acceptsPath reports whether the file at path belongs to the file types
+// this walk mode is looking for. Video modes need the full path, not just the
+// name: SupportsVideoFile rejects streams inside disc folder structures.
+func (m walkMode) acceptsPath(path string) bool {
 	switch m {
 	case walkModeAudiobook, walkModePodcast:
-		return audioExtensions[ext]
+		return SupportsAudioFile(path)
 	case walkModeEbook:
-		return ebookExtensions[ext]
+		return SupportsEbookFile(path)
 	default:
-		return videoExtensions[ext]
+		return SupportsVideoFile(path)
 	}
 }
 
-func (m walkMode) acceptsPath(path string) bool {
-	if m == walkModeEbook {
-		return SupportsEbookFile(path)
+// collectWalkFile appends path to filePaths when the walk mode accepts it.
+// Video walks log, at debug level, a video file they deliberately skip, so a
+// title missing from the catalog can be traced to the file.
+func (m walkMode) collectWalkFile(ctx context.Context, path string, filePaths *[]string) {
+	if m.acceptsPath(path) {
+		*filePaths = append(*filePaths, path)
+		return
 	}
-	return m.acceptsExt(strings.ToLower(filepath.Ext(path)))
+	if m != walkModeVideo && m != walkModeMovie {
+		return
+	}
+	if reason := unsupportedVideoFileReason(path); reason != "" {
+		slog.DebugContext(ctx, "scanner: skipped unsupported video file", "component", "scanner", "path", path, "reason", reason)
+	}
 }
 
 func canonicalWalkPath(path string) (string, error) {
@@ -579,9 +574,7 @@ func walkLogicalTree(
 		if mode == walkModeMovie && shouldSkipMovieSupplementalFile(logicalPath) {
 			return nil
 		}
-		if mode.acceptsPath(logicalPath) {
-			*filePaths = append(*filePaths, logicalPath)
-		}
+		mode.collectWalkFile(ctx, logicalPath, filePaths)
 		return nil
 	}
 
@@ -589,9 +582,7 @@ func walkLogicalTree(
 		if mode == walkModeMovie && shouldSkipMovieSupplementalFile(logicalPath) {
 			return nil
 		}
-		if mode.acceptsPath(logicalPath) {
-			*filePaths = append(*filePaths, logicalPath)
-		}
+		mode.collectWalkFile(ctx, logicalPath, filePaths)
 		return nil
 	}
 
@@ -666,9 +657,7 @@ func walkLogicalTree(
 			if mode == walkModeMovie && shouldSkipMovieSupplementalFile(logicalChild) {
 				continue
 			}
-			if mode.acceptsPath(entry.Name()) {
-				*filePaths = append(*filePaths, logicalChild)
-			}
+			mode.collectWalkFile(ctx, logicalChild, filePaths)
 			continue
 		}
 
@@ -682,9 +671,7 @@ func walkLogicalTree(
 		if mode == walkModeMovie && shouldSkipMovieSupplementalFile(logicalChild) {
 			continue
 		}
-		if mode.acceptsPath(entry.Name()) {
-			*filePaths = append(*filePaths, logicalChild)
-		}
+		mode.collectWalkFile(ctx, logicalChild, filePaths)
 	}
 
 	return nil
@@ -2683,9 +2670,11 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		}
 		return s.scanThemeSongs(ctx, folder, dir, true)
 	}
-	ext := strings.ToLower(filepath.Ext(cleanFile))
-	if !videoExtensions[ext] {
-		return fmt.Errorf("unrecognized video extension: %s", ext)
+	if !SupportsVideoFile(cleanFile) {
+		if reason := unsupportedVideoFileReason(cleanFile); reason != "" {
+			return fmt.Errorf("unsupported video file %s: %s", cleanFile, reason)
+		}
+		return fmt.Errorf("unrecognized video extension: %s", strings.ToLower(filepath.Ext(cleanFile)))
 	}
 	if handled, err := s.reconcileVanishedFileIfNeeded(ctx, folder, cleanFile); handled {
 		if err != nil {

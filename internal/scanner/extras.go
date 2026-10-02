@@ -166,7 +166,7 @@ func (c *extrasClassifier) dirHoldsMedia(dir string, depth int) bool {
 			}
 			continue
 		}
-		if mode.acceptsExt(strings.ToLower(filepath.Ext(entry.Name()))) {
+		if mode.acceptsPath(filepath.Join(dir, entry.Name())) {
 			return true
 		}
 	}
