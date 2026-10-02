@@ -323,11 +323,15 @@ func (s *Service) resolveRemoteDropped(ctx context.Context, conn Connection, ite
 			byKey[item.stored.ProviderItemKey] = append(byKey[item.stored.ProviderItemKey], item)
 		}
 	}
-	type remoteMatch struct {
-		row RemoteDropped
-		id  string
+	// remoteChange is a drop matched to a series, or an undrop tombstone
+	// resolved to an agreed row. Changes apply in read order, so a later
+	// undrop of a series wins over an earlier drop and the other way round.
+	type remoteChange struct {
+		row    RemoteDropped
+		id     string
+		undrop *droppedItem
 	}
-	var matches []remoteMatch
+	var changes []remoteChange
 	var unresolved []string
 	for _, row := range batch.Rows {
 		if row.Removed {
@@ -337,7 +341,7 @@ func (s *Service) resolveRemoteDropped(ctx context.Context, conn Connection, ite
 				// had confirmed the drop, so the provider's echo of that
 				// undrop names nothing and is not worth a warning.
 			case 1:
-				candidates[0].remote, candidates[0].remoteAt, candidates[0].observed = false, time.Time{}, true
+				changes = append(changes, remoteChange{row: row, undrop: candidates[0]})
 			default:
 				warnings = append(warnings, "watch sync provider returned an undrop that matches more than one series")
 			}
@@ -367,7 +371,7 @@ func (s *Service) resolveRemoteDropped(ctx context.Context, conn Connection, ite
 			// Dropped shows outside the library are expected and irrelevant.
 			continue
 		}
-		matches = append(matches, remoteMatch{row: row, id: match.MediaItemID})
+		changes = append(changes, remoteChange{row: row, id: match.MediaItemID})
 		if _, ok := items[match.MediaItemID]; !ok {
 			unresolved = append(unresolved, match.MediaItemID)
 		}
@@ -386,18 +390,23 @@ func (s *Service) resolveRemoteDropped(ctx context.Context, conn Connection, ite
 			items[id] = &droppedItem{identity: identity}
 		}
 	}
-	for _, match := range matches {
-		item := items[match.id]
+	for _, change := range changes {
+		if change.undrop != nil {
+			change.undrop.remote, change.undrop.remoteAt, change.undrop.observed = false, time.Time{}, true
+			continue
+		}
+		item := items[change.id]
 		if item == nil {
 			continue
 		}
-		if item.observed && !match.row.DroppedAt.After(item.remoteAt) {
+		// Of two drop rows for one series, the later drop time wins.
+		if item.observed && item.remote && !change.row.DroppedAt.After(item.remoteAt) {
 			continue
 		}
 		item.remote = true
-		item.remoteAt = match.row.DroppedAt
+		item.remoteAt = change.row.DroppedAt
 		item.observed = true
-		item.remoteKey = strings.TrimSpace(match.row.ProviderItemKey)
+		item.remoteKey = strings.TrimSpace(change.row.ProviderItemKey)
 	}
 
 	// A complete read with no usable rows is more likely a failed read than a

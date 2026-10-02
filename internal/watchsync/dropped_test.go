@@ -835,3 +835,45 @@ func TestSyncRunReadsDroppedBeforeARateLimitedHistoryImport(t *testing.T) {
 		t.Fatal("the provider's drop must be imported before the history import hits the rate limit")
 	}
 }
+
+// An incremental read can report a series dropped and then undropped, or the
+// other way round. The change later in the read wins.
+func TestSyncDroppedPluginChangesApplyInReadOrder(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		items       func(h *droppedHarness) []*pluginv1.WatchSyncRemoteState
+		wantDropped bool
+	}{
+		{
+			name: "undrop after drop",
+			items: func(h *droppedHarness) []*pluginv1.WatchSyncRemoteState {
+				return []*pluginv1.WatchSyncRemoteState{remoteDroppedState("remote-b", "202", timestamppb.New(h.at(2))), droppedTombstone("remote-b")}
+			},
+		},
+		{
+			name: "drop after undrop",
+			items: func(h *droppedHarness) []*pluginv1.WatchSyncRemoteState {
+				return []*pluginv1.WatchSyncRemoteState{droppedTombstone("remote-b"), remoteDroppedState("remote-b", "202", timestamppb.New(h.at(2)))}
+			},
+			wantDropped: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, provider, client := newPluginDroppedHarness(t)
+			h.store.drop(droppedTestSeriesB, h.at(1))
+			h.agree(droppedTestSeriesB, true)
+			for i := range h.repo.droppedStates {
+				if h.repo.droppedStates[i].SeriesID == droppedTestSeriesB {
+					h.repo.droppedStates[i].ProviderItemKey = "remote-b"
+				}
+			}
+			client.listResponse = &pluginv1.WatchSyncListRemoteStateResponse{Items: tc.items(h)}
+			if _, err := h.service.syncDropped(context.Background(), h.conn, ServerConfig{}, provider); err != nil {
+				t.Fatal(err)
+			}
+			if h.store.active(droppedTestSeriesB) != tc.wantDropped {
+				t.Fatalf("series B dropped = %t, want %t", h.store.active(droppedTestSeriesB), tc.wantDropped)
+			}
+		})
+	}
+}
