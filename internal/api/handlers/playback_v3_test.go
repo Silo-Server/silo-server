@@ -1329,10 +1329,31 @@ func TestHandleStartPlaybackV3RejectsProfileMismatch(t *testing.T) {
 }
 
 func TestHandleReplanPlaybackV3RejectsUnchangedOutputRoute(t *testing.T) {
+	assertUnchangedOutputRouteReplanRejectedV3(t, nil, nil)
+}
+
+// A sticky feature listed before a non-sticky one is stored in that order, but
+// PinAttemptStickyFeaturesV3 moves sticky features to the end of the replan's
+// list. Feature membership, not order, decides whether the route changed.
+func TestHandleReplanPlaybackV3RejectsUnchangedOutputRouteWithReorderedFeatures(t *testing.T) {
+	startFeatures := []string{playback.FeatureSoftwareVideoDecodeV3, playback.FeaturePlaybackPlanV3}
+	t.Run("replan omits features", func(t *testing.T) {
+		assertUnchangedOutputRouteReplanRejectedV3(t, startFeatures, nil)
+	})
+	t.Run("replan lists features in another order and case", func(t *testing.T) {
+		assertUnchangedOutputRouteReplanRejectedV3(t, startFeatures, []string{" PLAYBACK_PLAN_V3", playback.FeatureSoftwareVideoDecodeV3, playback.FeaturePlaybackPlanV3})
+	})
+}
+
+func assertUnchangedOutputRouteReplanRejectedV3(t *testing.T, startFeatures, replanFeatures []string) {
+	t.Helper()
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: v3HandlerFixtureFile(t)})
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	startRequest := v3HandlerStartRequest()
+	if startFeatures != nil {
+		startRequest.ClientFeatures = startFeatures
+	}
 	startRequest.ClientPlaybackContext.Output = playback.OutputContextV3{
 		OutputContextID: "route-1",
 		CurrentSink:     "bluetooth",
@@ -1376,7 +1397,8 @@ func TestHandleReplanPlaybackV3RejectsUnchangedOutputRoute(t *testing.T) {
 		Failure: playback.FailureV3{
 			Classification: "output_route_changed",
 		},
-		Capabilities: startRequest.Capabilities,
+		ClientFeatures: replanFeatures,
+		Capabilities:   startRequest.Capabilities,
 		ClientPlaybackContext: playback.ClientPlaybackContextV3{
 			ProtocolVersion: startRequest.ClientPlaybackContext.ProtocolVersion,
 			FormFactor:      startRequest.ClientPlaybackContext.FormFactor,
@@ -1444,6 +1466,11 @@ func TestSameLegacyOutputRouteReplanV3RequiresEveryOtherInputToMatch(t *testing.
 		t.Fatal("capability evidence change should not be suppressed")
 	}
 	next.Capabilities = start.Capabilities
+	next.ClientFeatures = append(append([]string(nil), start.ClientFeatures...), playback.FeatureSubripSidecarV3)
+	if sameLegacyOutputRouteReplanV3(record, next) {
+		t.Fatal("an added client feature should not be suppressed")
+	}
+	next.ClientFeatures = append([]string(nil), start.ClientFeatures...)
 	bandwidth := 12_000
 	next.BandwidthEstimateKbps = &bandwidth
 	if sameLegacyOutputRouteReplanV3(record, next) {

@@ -4753,7 +4753,7 @@ func sameLegacyOutputRouteReplanV3(record *playback.AttemptRecordV3, next playba
 	if next.Metered != current.Metered ||
 		!reflect.DeepEqual(next.BandwidthEstimateKbps, current.BandwidthEstimateKbps) ||
 		!reflect.DeepEqual(next.BandwidthCapKbps, current.BandwidthCapKbps) ||
-		!equivalentPersistedValueV3(next.ClientFeatures, current.ClientFeatures) {
+		!sameClientFeatureSetV3(next.ClientFeatures, current.ClientFeatures) {
 		return false
 	}
 	// Legacy failure replans may omit unchanged track identities. Only an
@@ -4803,6 +4803,25 @@ func equivalentPersistedValueV3[T any](a, b T) bool {
 	persistedA, okA := persistedFormV3(a)
 	persistedB, okB := persistedFormV3(b)
 	return okA && okB && reflect.DeepEqual(persistedA, persistedB)
+}
+
+// sameClientFeatureSetV3 compares feature membership the way HasFeatureV3
+// reads it: trimmed and case-insensitive, ignoring order and duplicates.
+// PinAttemptStickyFeaturesV3 moves sticky features to the end of the replan's
+// list, so the stored start order cannot be compared directly.
+func sameClientFeatureSetV3(a, b []string) bool {
+	return slices.Equal(clientFeatureSetV3(a), clientFeatureSetV3(b))
+}
+
+func clientFeatureSetV3(features []string) []string {
+	set := make([]string, 0, len(features))
+	for _, feature := range features {
+		if normalized := strings.ToLower(strings.TrimSpace(feature)); normalized != "" {
+			set = append(set, normalized)
+		}
+	}
+	slices.Sort(set)
+	return slices.Compact(set)
 }
 
 func withoutSpatializerV3(value *playback.AudioPassthroughV3) *playback.AudioPassthroughV3 {
